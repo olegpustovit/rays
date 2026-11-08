@@ -533,7 +533,7 @@ fn no_state(_: &[usize]) -> State {
 /// A `Timeline` leaf in a stack is 24 points; a tree without one has a 25-point strip under it. The
 /// 25-point status strip spans the frame below both. Every point of the frame is covered exactly
 /// once, floats aside.
-pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Panel]>, tree: &Panels, frame: &frame::t) -> Geometry {
+pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Panel]>, tree: &Panels, frame: &frame::Frame) -> Geometry {
     let state: &dyn Fn(&[usize]) -> State = state.unwrap_or(&no_state);
     let default_hidden = [Panel::Timeline];
     let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);

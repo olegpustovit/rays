@@ -54,7 +54,7 @@ fn button_rank(button: &MouseButton) -> i64 {
     }
 }
 
-pub struct t {
+pub struct InputState {
     source: ri::RuntimeInput,
     /// Sorted, distinct (OCaml's `Set`).
     pressed_keys: Vec<Key>,
@@ -63,12 +63,12 @@ pub struct t {
     delta: (f64, f64),
 }
 
-pub fn create() -> Result<t, String> {
+pub fn create() -> Result<InputState, String> {
     let source = ri::create(4096, 1, 1)?;
-    Ok(t { source, pressed_keys: Vec::new(), pressed_buttons: Vec::new(), mouse: (0., 0.), delta: (0., 0.) })
+    Ok(InputState { source, pressed_keys: Vec::new(), pressed_buttons: Vec::new(), mouse: (0., 0.), delta: (0., 0.) })
 }
 
-fn move_to(state: &mut t, x: f64, y: f64) {
+fn move_to(state: &mut InputState, x: f64, y: f64) {
     let (cx, cy) = state.mouse;
     let (dx, dy) = state.delta;
     state.delta = (dx + x - cx, dy + y - cy);
@@ -105,7 +105,7 @@ fn remove_button(buttons: &mut Vec<MouseButton>, button: &MouseButton) {
     }
 }
 
-pub fn apply(state: &mut t, event: &Event) {
+pub fn apply(state: &mut InputState, event: &Event) {
     match event {
         Event::Key_pressed(key) => add_key(&mut state.pressed_keys, *key),
         Event::Key_released(key) => remove_key(&mut state.pressed_keys, key),
@@ -127,19 +127,19 @@ pub fn apply(state: &mut t, event: &Event) {
     }
 }
 
-pub fn configure(state: &t, logical_width: i64, logical_height: i64) -> Result<(), String> {
+pub fn configure(state: &InputState, logical_width: i64, logical_height: i64) -> Result<(), String> {
     ri::set_extent(&state.source, logical_width, logical_height)
 }
 
-pub fn set_relative(state: &mut t, enabled: bool) {
+pub fn set_relative(state: &mut InputState, enabled: bool) {
     ri::set_relative(&mut state.source, enabled)
 }
 
-pub fn set_unit(state: &mut t, unit: f64) {
+pub fn set_unit(state: &mut InputState, unit: f64) {
     ri::set_unit(&mut state.source, unit)
 }
 
-pub fn set_visible(state: &mut t, visible: bool) {
+pub fn set_visible(state: &mut InputState, visible: bool) {
     let _ = ri::push(&mut state.source, Event::Visibility_changed(visible));
 }
 
@@ -149,11 +149,11 @@ pub struct polled {
     pub visible: bool,
 }
 
-pub fn wait(_state: &t, timeout_ms: i32) -> bool {
+pub fn wait(_state: &InputState, timeout_ms: i32) -> bool {
     sdl::wait(timeout_ms).unwrap_or(false)
 }
 
-pub fn poll(state: &mut t) -> Result<polled, String> {
+pub fn poll(state: &mut InputState) -> Result<polled, String> {
     state.delta = (0., 0.);
     ri::begin_frame(&mut state.source);
     let pumped = sdl::pump(&mut state.source);
@@ -173,18 +173,18 @@ pub fn poll(state: &mut t) -> Result<polled, String> {
     pumped.map(|()| polled { events, window_changed, visible: ri::snapshot(&state.source).visible })
 }
 
-pub fn mouse(state: &t) -> (f64, f64) {
+pub fn mouse(state: &InputState) -> (f64, f64) {
     state.mouse
 }
 
-pub fn mouse_delta(state: &t) -> (f64, f64) {
+pub fn mouse_delta(state: &InputState) -> (f64, f64) {
     state.delta
 }
 
-pub fn keys(state: &t) -> Vec<Key> {
+pub fn keys(state: &InputState) -> Vec<Key> {
     state.pressed_keys.clone()
 }
 
-pub fn buttons(state: &t) -> Vec<MouseButton> {
+pub fn buttons(state: &InputState) -> Vec<MouseButton> {
     state.pressed_buttons.clone()
 }

@@ -167,7 +167,7 @@ pub mod camera {
         kind_make("camera", "Camera", &["Object"], &parameters_schema())
     }
 
-    pub fn of_node(node: &g::Node) -> Option<(rcamera::t, bool)> {
+    pub fn of_node(node: &g::Node) -> Option<(rcamera::Camera, bool)> {
         if node.kind != "camera" {
             return None;
         }
@@ -516,7 +516,7 @@ pub fn has_flag(name: &str, node: &g::Node) -> bool {
 }
 
 /// A light object as a renderer light, its positions in world space.
-fn to_light(scene: &[g::Node], id: i64) -> Option<rlight::t> {
+fn to_light(scene: &[g::Node], id: i64) -> Option<rlight::Light> {
     let node = g::find(scene, id)?;
     let p = light(&node)?;
     let space = parent_world(scene, id);
@@ -546,7 +546,7 @@ pub fn ids(kind: &str, scene: &[g::Node]) -> Vec<i64> {
     g::ids(kind, scene)
 }
 
-pub fn lights(render: bool, scene: &[g::Node]) -> Vec<rlight::t> {
+pub fn lights(render: bool, scene: &[g::Node]) -> Vec<rlight::Light> {
     ids("light", scene)
         .into_iter()
         .filter_map(|id| match g::find(scene, id) {
@@ -557,7 +557,7 @@ pub fn lights(render: bool, scene: &[g::Node]) -> Vec<rlight::t> {
 }
 
 /// Parameters a light object gets from a renderer light.
-pub fn light_values(l: &rlight::t) -> Vec<(String, Value)> {
+pub fn light_values(l: &rlight::Light) -> Vec<(String, Value)> {
     let (r, gr, b, _) = color::to_tuple(l.diffuse);
     let (at, target, shape, extra): (vec3::T, vec3::T, &str, Vec<(String, Value)>) = match &l.kind {
         rlight::kind::Directional { direction } => (vec3::scale(*direction, -8.), vec3::zero(), "Directional", vec![]),

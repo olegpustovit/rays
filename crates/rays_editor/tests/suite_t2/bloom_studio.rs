@@ -23,7 +23,7 @@ fn bloom() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}")).replace("(petals : int 12)", "(petals : int 3)").replace(":petals 7 :seed 2", ":petals 2 :seed 2")
 }
 
-fn bframe(buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<Event>, count: i64) -> rays::frame::t {
+fn bframe(buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<Event>, count: i64) -> rays::frame::Frame {
     let mut f = frame_full(buttons, keys, (0., 0.), mouse, events, count);
     f.input.size = (WIDTH, HEIGHT);
     f

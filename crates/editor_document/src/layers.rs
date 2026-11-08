@@ -346,13 +346,13 @@ fn layer(node: &g::Node) -> Option<world::entry> {
 
 /// The World a world object and its layers describe; `time` (seconds) advances the time of day by
 /// the node's day cycle.
-pub fn to_world(time: Option<f64>, node: &g::Node, layers: &[g::Node]) -> Option<world::t> {
+pub fn to_world(time: Option<f64>, node: &g::Node, layers: &[g::Node]) -> Option<world::World> {
     let time = time.unwrap_or(0.);
     let p = rec(&settings::parameters_schema(), node)?;
     let hours = (p.f("time_of_day") + time * p.f("day_cycle")) % 24.;
     let mut stack = g::stack(layers);
     stack.reverse();
-    Some(world::t {
+    Some(world::World {
         layers: stack.iter().filter_map(layer).collect(),
         background: match p.c("background") {
             "Color" => world::background::Color(world::rgb(p.f("background_r"), p.f("background_g"), p.f("background_b"))),
@@ -387,7 +387,7 @@ fn choice(name: &str, value: &str) -> (String, Value) {
 pub type LayerValues = (g::Kind, String, Vec<(String, Value)>);
 
 /// Nodes (bottom first) and world-node values for a `World.t`, e.g. a preset: the inverse of `to_world`.
-pub fn of_world(w: &world::t) -> (Vec<LayerValues>, Vec<(String, Value)>) {
+pub fn of_world(w: &world::World) -> (Vec<LayerValues>, Vec<(String, Value)>) {
     let layer = |entry: &world::entry| -> LayerValues {
         let (kind, mut values): (g::Kind, Vec<(String, Value)>) = match &entry.layer {
             world::layer::Gradient { zenith, horizon, nadir, sharpness } => {
@@ -488,7 +488,7 @@ pub fn of_world(w: &world::t) -> (Vec<LayerValues>, Vec<(String, Value)>) {
 }
 
 /// The layers of `world`, each on the one below it.
-pub fn graph_of_world(w: &world::t) -> Result<g::T, String> {
+pub fn graph_of_world(w: &world::World) -> Result<g::T, String> {
     let (layers, _) = of_world(w);
     let mut graph = g::empty();
     let mut below: Option<i64> = None;

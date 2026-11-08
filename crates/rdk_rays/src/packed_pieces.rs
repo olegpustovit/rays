@@ -23,8 +23,8 @@ use crate::rays_mesh;
 
 #[derive(Clone)]
 pub struct T {
-    base_mesh: mesh::t,
-    base: mesh::View::packed_view,
+    base_mesh: mesh::Mesh,
+    base: mesh::view::packed_view,
     piece_of_vertex: Vec<usize>,
     center_x: Vec<f64>,
     center_y: Vec<f64>,
@@ -77,8 +77,8 @@ fn primitive_pieces(piece_attribute: &str, g: &geometry::T) -> Result<(Vec<usize
     }
 }
 
-fn expand_triangles_preserving_attributes(m: &mesh::t) -> Result<mesh::t, String> {
-    let source = mesh::View::packed_view(m)?;
+fn expand_triangles_preserving_attributes(m: &mesh::Mesh) -> Result<mesh::Mesh, String> {
+    let source = mesh::view::packed_view(m)?;
     if source.mode != mesh::mode::Triangles {
         return Err("Packed_pieces: expected a triangulated render mesh".to_owned());
     }
@@ -89,7 +89,7 @@ fn expand_triangles_preserving_attributes(m: &mesh::t) -> Result<mesh::t, String
     let normals = source.normals.as_ref().map(select3);
     let colors: Option<Vec<color::T>> = source.colors.as_ref().map(|c| source.indices.iter().map(|&i| c[i as usize]).collect());
     let tex_coords: Option<Vec<vec2::T>> = source.tex_coords.as_ref().map(|c| source.indices.iter().map(|&i| c[i as usize]).collect());
-    mesh::View::create_packed_owned(Some(mesh::mode::Triangles), Some((0..count as i64).collect()), normals, colors, tex_coords, vertices)
+    mesh::view::create_packed_owned(Some(mesh::mode::Triangles), Some((0..count as i64).collect()), normals, colors, tex_coords, vertices)
 }
 
 fn text(e: error::T) -> String {
@@ -111,7 +111,7 @@ pub fn of_geometry(piece_attribute: &str, g: &geometry::T) -> Result<T, String> 
     }
     let m = rays_mesh::to_mesh(&g).map_err(text)?;
     let expanded = expand_triangles_preserving_attributes(&m)?;
-    let base = mesh::View::packed_view(&expanded)?;
+    let base = mesh::view::packed_view(&expanded)?;
     let expected = (geometry::primitive_count(&g) * 3) as usize;
     if base.mode != mesh::mode::Triangles || base.vertices.x.len() != expected {
         return Err("Packed_pieces: triangle render ancestry is inconsistent".to_owned());
@@ -151,7 +151,7 @@ struct Noise {
 }
 
 /// The mesh with every piece moved by `amount` times its (scaled) offset from the whole's center.
-fn mesh_with(value: &T, offsets: [&[f64]; 3], amount: f64, n: &Noise) -> Result<mesh::t, String> {
+fn mesh_with(value: &T, offsets: [&[f64]; 3], amount: f64, n: &Noise) -> Result<mesh::Mesh, String> {
     if !(amount.is_finite() && n.amount.is_finite() && n.frequency.is_finite()) {
         return Err("Packed_pieces.mesh: controls must be finite".to_owned());
     }
@@ -187,7 +187,7 @@ fn mesh_with(value: &T, offsets: [&[f64]; 3], amount: f64, n: &Noise) -> Result<
         moved(&value.base.vertices.y, offsets[1]),
         moved(&value.base.vertices.z, offsets[2]),
     );
-    mesh::View::create_packed_shared(
+    mesh::view::create_packed_shared(
         Some(value.base.mode),
         Some(Arc::clone(&value.base.indices)),
         value.base.normals.clone(),
@@ -250,7 +250,7 @@ pub fn explosion(operation: &str, fields: &[FieldView]) -> Option<Explosion> {
     })
 }
 
-pub fn mesh_for_explosion(parameters: Option<&Explosion>, value: &T) -> Result<mesh::t, String> {
+pub fn mesh_for_explosion(parameters: Option<&Explosion>, value: &T) -> Result<mesh::Mesh, String> {
     let Some(p) = parameters else { return Ok(value.base_mesh.clone()) };
     let scaled = |offset: &[f64], by: f64| -> Vec<f64> { offset.iter().map(|v| by * v).collect() };
     let (ox, oy, oz) = (scaled(&value.offset_x, p.scale.x), scaled(&value.offset_y, p.scale.y), scaled(&value.offset_z, p.scale.z));

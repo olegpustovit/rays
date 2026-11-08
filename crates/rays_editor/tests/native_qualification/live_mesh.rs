@@ -174,7 +174,7 @@ fn particles_frames() {
     let mut warm = None;
     let mut pixels = None;
     for tick in 1..=8 {
-        let frame = rays::frame::t { input: input::Frame { dt: 1./60., frame: tick, tick, size: (800,600), pointer: (-100.,-100.), ..input::at_time(tick as f64/6.) }, pixel_scale: (1.,1.), fps: 60., mouse_delta: (0.,0.) };
+        let frame = rays::frame::Frame { input: input::Frame { dt: 1./60., frame: tick, tick, size: (800,600), pointer: (-100.,-100.), ..input::at_time(tick as f64/6.) }, pixel_scale: (1.,1.), fps: 60., mouse_delta: (0.,0.) };
         let allocated = mem_sys::alloc_bytes_total();
         let started = std::time::Instant::now();
         editor = Editor::update(editor, &frame);
@@ -214,7 +214,7 @@ fn sea_initial_close() {
     let doc=Workspace::load(None,Vec::new(),None,include_str!("../../../../sketches/gpu_sea.rays")).unwrap_or_else(|d|panic!("{d:?}"));
     let gpu=wg::create(None);
     let editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(false),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
-    let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:1,tick:1,size:(320,240),pointer:(-100.,-100.),..input::at_time(1./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+    let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:1,tick:1,size:(320,240),pointer:(-100.,-100.),..input::at_time(1./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
     let editor=Editor::update(editor,&frame);
     let started=std::time::Instant::now();
     while matches!(rays_editor::cook::status(&editor.core.cook),sop::async_cook::Status::Cooking {queued:true,..}) && started.elapsed()<std::time::Duration::from_millis(100) {
@@ -240,7 +240,7 @@ fn sea_frames() {
     let mut previous=None;
     for tick in 1..=6 {
         let started=std::time::Instant::now();
-        let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+        let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
         editor=Editor::update(editor,&frame);
         assert!(editor.core.cook.error.is_none(),"{:?}",editor.core.cook.error);
         let geometry=&editor.core.cook.pieces[0].prepared.geometry;
@@ -264,7 +264,7 @@ fn sea_frames() {
         editor=Editor::after_present(editor,&frame);
     }
     Rc::make_mut(&mut Rc::make_mut(&mut editor.core).cook).await_=false;
-    let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:7,tick:7,size:(320,240),pointer:(-100.,-100.),..input::at_time(7./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+    let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:7,tick:7,size:(320,240),pointer:(-100.,-100.),..input::at_time(7./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
     editor=Editor::update(editor,&frame);
     println!("sea closing {:?}",rays_editor::cook::status(&editor.core.cook));
     let started=std::time::Instant::now();
@@ -301,10 +301,10 @@ fn same(a:&p::T,b:&p::T) {
         assert!((x-u).abs()<=1e-6 && (y-v).abs()<=1e-6 && (z-w).abs()<=1e-6,"point {i}: ({x}, {y}, {z}) != ({u}, {v}, {w})");
     }
 }
-fn binding(gpu:&wg::t,geo:&g::T)->Option<rdk_rays::surface::DeviceBinding> {
+fn binding(gpu:&wg::WorkspaceGpu,geo:&g::T)->Option<rdk_rays::surface::DeviceBinding> {
     wg::display(gpu,geo).map(|(key,n,indices,color,keep)|(key,n,indices,color,Rc::from(keep)))
 }
-fn resident(gpu:&wg::t,config:&Gpu::Config,side:i64,times:&[f64],compare:bool,displayed:bool) {
+fn resident(gpu:&wg::WorkspaceGpu,config:&Gpu::Config,side:i64,times:&[f64],compare:bool,displayed:bool) {
     let text=text(side); let mut cpu=Vec::new();
     if compare { cook(&text,None,times,None,false,|_,g|cpu.push((g::positions(g).clone(),vec3(g,"N"),vec3(g,"Cd"),g::primitive_count(g)))); }
     let mut uploads=0;
@@ -317,10 +317,10 @@ fn resident(gpu:&wg::t,config:&Gpu::Config,side:i64,times:&[f64],compare:bool,di
         if compare { let (p,n,cd,count)=&cpu[frame]; assert_eq!(g::primitive_count(g),*count,"side {side} frame {frame}"); same(g::positions(g),p); same(&vec3(g,"N"),n); same(&vec3(g,"Cd"),cd); }
     });
 }
-fn traced(gpu:&wg::t,config:&Gpu::Config) {
+fn traced(gpu:&wg::WorkspaceGpu,config:&Gpu::Config) {
     use rays_pathtracer::rays_pathtracer as pt;
     let camera=rays::camera::perspective(None,None,None,rays_math::vec3::create(20.,18.,22.),rays_math::vec3::create(4.,4.,4.)).unwrap();
-    let picture=|mesh:rays::mesh::t| {
+    let picture=|mesh:rays::mesh::Mesh| {
         let scene=pt::Scene { objects:vec![(mesh,pt::material(None,None,None,None,pt::Linear_color::rgb(1.,1.,1.)))],spheres:Vec::new(),strands:Vec::new(),environment:pt::Environment {sky:pt::Linear_color::rgb(0.5,0.5,0.5),ground:pt::Linear_color::rgb(0.5,0.5,0.5),panels:Vec::new()},lights:Vec::new() };
         let mut tracer=pt::create(&Default::default(),64,64,&scene).unwrap();
         pt::reset(&mut tracer);
@@ -333,8 +333,8 @@ fn traced(gpu:&wg::t,config:&Gpu::Config) {
     cook(&text(8),Some(qualified),&[1./6.],None,false,|_,g|{
         let surface=rdk_rays::surface::of_geometry(None,g).unwrap();
         let scene=rdk_rays::surface::scene3(None,Some(&|g|binding(gpu,g)),&surface).unwrap();
-        let mut mesh=None; rays::scene3::Walk::iter_batches(&mut |d,_|mesh=Some(d.mesh.clone()),&scene);
-        let mesh=mesh.unwrap(); assert!(rays::mesh::View::device(&mesh).is_some(),"{:?}",wg::display_refusal(gpu));
+        let mut mesh=None; rays::scene3::walk::iter_batches(&mut |d,_|mesh=Some(d.mesh.clone()),&scene);
+        let mesh=mesh.unwrap(); assert!(rays::mesh::view::device(&mesh).is_some(),"{:?}",wg::display_refusal(gpu));
         let before=wg::image_stats(gpu).0.payload_readback_bytes; let device=picture(mesh); assert_eq!(wg::image_stats(gpu).0.payload_readback_bytes,before);
         let host=host.as_ref().unwrap(); let mean=|p:&[u8],c:usize|p.chunks_exact(4).map(|p|p[c] as f64).sum::<f64>()/(p.len()/4) as f64;
         for route in [&device,host] { assert!(mean(route,0)-mean(route,2)>=2.); }
@@ -389,7 +389,7 @@ fn holder_frames() {
         let mut editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
         let mut previous:Option<(Arc<Vec<f64>>,Option<[Weak<Gpu::Integers>;3]>)>=None; let mut gone=0; let mut meshes=0;
         for tick in 1..=6 {
-            let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+            let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
             editor=Editor::update(editor,&frame); rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&frame)).unwrap(); editor=Editor::after_present(editor,&frame);
             let now=editor.core.cook.pieces.iter().find_map(|piece|{
                 let g=&piece.prepared.geometry;
@@ -414,7 +414,7 @@ fn orrery_frames() {
     let doc=Workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
     let canvas=rays::canvas::create(320,240).unwrap(); let gpu=wg::create(None);
     let mut editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
-    let frame=|tick|rays::frame::t {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+    let frame=|tick|rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
     let document=editor.core.doc.clone(); let mut first=None;
     for tick in 1..=30 {
         let f=frame(tick); editor=Editor::update(editor,&f);

@@ -4,7 +4,7 @@ use flow_syntax::syntax::{make as make_node, Draft, Node, Syntax};
 use rays::{camera, easy_camera};
 use rays_math::vec3;
 
-pub fn encode(easy: &easy_camera::t, look_through: bool) -> Result<Syntax, String> {
+pub fn encode(easy: &easy_camera::EasyCamera, look_through: bool) -> Result<Syntax, String> {
     let camera = easy_camera::camera(easy)?;
     let vector = |v: vec3::T| form::vec_of_numbers(&[v.x, v.y, v.z]);
     Ok(form::map(vec![
@@ -15,7 +15,7 @@ pub fn encode(easy: &easy_camera::t, look_through: bool) -> Result<Syntax, Strin
     ]))
 }
 
-pub fn decode(easy: easy_camera::t, form_: &Syntax) -> (easy_camera::t, bool) {
+pub fn decode(easy: easy_camera::EasyCamera, form_: &Syntax) -> (easy_camera::EasyCamera, bool) {
     let vector = |name: &str| match form::field(form_, name).as_ref().and_then(form::vec_values) {
         Some(values) if values.len() == 3 => Some(vec3::create(values[0], values[1], values[2])),
         _ => None,

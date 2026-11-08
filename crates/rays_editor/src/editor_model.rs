@@ -656,7 +656,7 @@ pub struct update {
     pub actions: Vec<editor_commands::action>,
     pub panel: Option<Panel_result>,
     /// The frame without leader-consumed events, for the environment's own input handling.
-    pub input: frame::t,
+    pub input: frame::Frame,
 }
 
 // ---- identity of documents (OCaml `==`) ----

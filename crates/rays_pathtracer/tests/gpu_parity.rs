@@ -24,7 +24,7 @@ fn roughness(shininess: f64) -> f64 {
     (2. / (shininess + 2.)).sqrt().min(1.)
 }
 
-fn view_camera() -> camera::t {
+fn view_camera() -> camera::Camera {
     camera::perspective(Some(0.5), None, None, vec3::create(0., 0., 7.), vec3::zero()).unwrap()
 }
 

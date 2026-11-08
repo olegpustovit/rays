@@ -21,7 +21,7 @@ fn env(name: &str, default: i64) -> i64 {
 /// pathtrace.metal, the handwritten kernel this one replaced, was 908 lines
 const HANDWRITTEN_LINES: usize = 908;
 
-fn mesh() -> rays::mesh::t {
+fn mesh() -> rays::mesh::Mesh {
     rays::mesh::recalculate_normals(&rays::mesh::plane(4., 4.).unwrap())
 }
 
@@ -45,7 +45,7 @@ fn dome() -> p::Scene {
     p::Scene { objects: vec![(mesh(), material())], spheres: vec![], strands: vec![], environment: environment(), lights: vec![light()] }
 }
 
-fn camera() -> rays::camera::t {
+fn camera() -> rays::camera::Camera {
     rays::camera::perspective(Some(0.9), None, None, vec3::create(0.3, -3., 2.5), vec3::zero()).unwrap()
 }
 
@@ -67,7 +67,7 @@ fn baked() -> w::baked {
 /// the CPU walker's scene: brute-force Moller-Trumbore over the plane's triangles, as scene/trace reports a
 /// hit
 fn register_walker() {
-    let view = rays::mesh::View::packed_view(&mesh()).unwrap();
+    let view = rays::mesh::view::packed_view(&mesh()).unwrap();
     let triangles: Vec<(f64, f64, f64)> = view.indices.iter().map(|k| (view.vertices.x[*k as usize], view.vertices.y[*k as usize], view.vertices.z[*k as usize])).collect();
     let sub = |a: (f64, f64, f64), b: (f64, f64, f64)| (a.0 - b.0, a.1 - b.1, a.2 - b.2);
     let dot = |a: (f64, f64, f64), b: (f64, f64, f64)| a.0 * b.0 + a.1 * b.1 + a.2 * b.2;

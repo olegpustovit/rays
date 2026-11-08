@@ -21,7 +21,7 @@ fn golden_path(name: &str) -> String {
     format!("{}/../../crates/pxui/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name)
 }
 
-fn frame_at(count: i64, height: i64) -> frame::t {
+fn frame_at(count: i64, height: i64) -> frame::Frame {
     let mut input = input::at_time(count as f64 / 60.0);
     input.dt = 1.0 / 60.0;
     input.frame = count;
@@ -29,7 +29,7 @@ fn frame_at(count: i64, height: i64) -> frame::t {
     input.size = (WIDTH, height);
     input.pointer = (-100.0, -100.0);
     input.events = vec![Event::Pointer_moved((-100.0, -100.0))];
-    frame::t { input, pixel_scale: (SCALE as f64, SCALE as f64), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (SCALE as f64, SCALE as f64), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
 /// The second frame of a fresh UI with the pointer parked away from every widget, rendered

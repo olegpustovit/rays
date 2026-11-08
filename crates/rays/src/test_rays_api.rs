@@ -116,7 +116,7 @@ fn frame_facts_scene_lowering_path_texture() {
     input.keys = vec![Key::Space];
     input.buttons = vec![MouseButton::LeftButton, MouseButton::MouseX2];
     input.events = events;
-    let f = frame::t { input, pixel_scale: (2., 2.), fps: 2., mouse_delta: (3., 6.) };
+    let f = frame::Frame { input, pixel_scale: (2., 2.), fps: 2., mouse_delta: (3., 6.) };
     check(
         frame::mouse_down(MouseButton::LeftButton, &f)
             && frame::mouse_down(MouseButton::MouseX2, &f)

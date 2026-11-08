@@ -208,7 +208,7 @@ pub struct Data {
 }
 
 #[derive(Clone)]
-pub struct t(pub Rc<Data>);
+pub struct WorkspaceGpu(pub Rc<Data>);
 
 thread_local! {
     static SERVICES: RefCell<HashMap<i64, Rc<Data>>> = RefCell::new(HashMap::new());
@@ -219,7 +219,7 @@ fn service(id: i64) -> Option<Rc<Data>> {
     SERVICES.with(|s| s.borrow().get(&id).cloned())
 }
 
-pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> t {
+pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> WorkspaceGpu {
     let id = NEXT.fetch_add(1, Ordering::SeqCst);
     let image_stats = Rc::new(RefCell::new(ImageStats::default()));
     let stats = image_stats.clone();
@@ -253,14 +253,14 @@ pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> t {
         releasing: RefCell::new(Vec::new()),
     });
     SERVICES.with(|s| s.borrow_mut().insert(id, data.clone()));
-    t(data)
+    WorkspaceGpu(data)
 }
 
 fn on_owner(d: &Data) -> bool {
     is_owner(&d.shared)
 }
 
-pub fn qualification(t_: &t) {
+pub fn qualification(t_: &WorkspaceGpu) {
     let d = &*t_.0;
     if d.closed.get() || !on_owner(d) {
         panic!("Workspace_gpu.qualification: open initial-domain owner required");
@@ -439,7 +439,7 @@ impl G::Backend for OwnerBackend {
     }
 }
 
-fn backend(t_: &t) -> Arc<dyn G::Backend> {
+fn backend(t_: &WorkspaceGpu) -> Arc<dyn G::Backend> {
     let d = &*t_.0;
     if let Some(b) = &*d.backend.borrow() {
         return b.clone();
@@ -450,7 +450,7 @@ fn backend(t_: &t) -> Arc<dyn G::Backend> {
 }
 
 /// Replaces the real backend (and drops the proxy built over the old one).
-pub fn install_test_backend(t_: &t, backend_: Arc<dyn G::Backend>) {
+pub fn install_test_backend(t_: &WorkspaceGpu, backend_: Arc<dyn G::Backend>) {
     let d = &*t_.0;
     if !on_owner(d) || d.closed.get() {
         panic!("Workspace_gpu.Private.install_test_backend: open initial-domain owner required");
@@ -469,7 +469,7 @@ pub fn on_owner_for_test(remote: &Remote, waits: bool, f: Box<dyn FnOnce() + Sen
 #[derive(Clone)]
 pub struct Remote(Arc<Shared>);
 
-pub fn remote(t_: &t) -> Remote {
+pub fn remote(t_: &WorkspaceGpu) -> Remote {
     Remote(t_.0.shared.clone())
 }
 
@@ -726,7 +726,7 @@ impl G::Backend for ProxyBackend {
     }
 }
 
-fn proxy(t_: &t) -> Arc<dyn G::Backend> {
+fn proxy(t_: &WorkspaceGpu) -> Arc<dyn G::Backend> {
     let d = &*t_.0;
     if let Some(p) = &*d.proxy.borrow() {
         return p.clone();
@@ -755,7 +755,7 @@ fn take(shared: &Shared, chained: bool) -> Option<Arc<Job>> {
 /// Serve this workspace's queued GPU requests on the initial domain. `follow_up` (default true)
 /// spins 0.5 ms after a request for the worker's next link of the chain; a caller that `wait`s
 /// passes false.
-pub fn pump(t_: &t, follow_up: bool) {
+pub fn pump(t_: &WorkspaceGpu, follow_up: bool) {
     let d = &*t_.0;
     if !on_owner(d) {
         panic!("Workspace_gpu.pump: initial domain required");
@@ -793,7 +793,7 @@ pub fn pump(t_: &t, follow_up: bool) {
 
 /// Sleep on the initial domain until a request is queued or `timeout` seconds pass (the cook
 /// finishing signals nothing here, so a caller waiting on that passes a short timeout).
-pub fn wait(t_: &t, timeout: f64) {
+pub fn wait(t_: &WorkspaceGpu, timeout: f64) {
     let d = &*t_.0;
     if !on_owner(d) {
         panic!("Workspace_gpu.wait: initial domain required");
@@ -837,19 +837,19 @@ fn readback_rate(d: &Data) -> Option<f64> {
 }
 
 /// The frame is the pump: cook workers queue device requests, served here between frames' work.
-pub fn config(t_: &t, fast: bool) -> G::Config {
+pub fn config(t_: &WorkspaceGpu, fast: bool) -> G::Config {
     let d = &*t_.0;
     G::Config { backend: Some(proxy(t_)), fast, policy: d.policy.get(), readback_per_float: readback_rate(d), evidence: d.evidence.clone() }
 }
 
-struct PumpOnDrop<'a>(&'a t);
+struct PumpOnDrop<'a>(&'a WorkspaceGpu);
 impl Drop for PumpOnDrop<'_> {
     fn drop(&mut self) {
         pump(self.0, true);
     }
 }
 
-pub fn with_backend(t_: &t, fast: bool, run: &mut dyn FnMut(&G::Config)) {
+pub fn with_backend(t_: &WorkspaceGpu, fast: bool, run: &mut dyn FnMut(&G::Config)) {
     pump(t_, true);
     // Static lowering can ask for a cost before the render owner is serving frames. Defer the
     // count-sized calibration until the persistent workspace service has entered its pump loop.
@@ -861,7 +861,7 @@ pub fn with_backend(t_: &t, fast: bool, run: &mut dyn FnMut(&G::Config)) {
 
 /// Inside `with_backend(fast = true)`, a resident fold for one drawing on this workspace's host,
 /// and its mark attributes over the arrays it keeps after its loop (`host::show`).
-pub fn resident(gpu: &G::Config, t_: &t) -> Option<drawing::resident> {
+pub fn resident(gpu: &G::Config, t_: &WorkspaceGpu) -> Option<drawing::resident> {
     if !gpu.fast {
         return None;
     }
@@ -871,7 +871,7 @@ pub fn resident(gpu: &G::Config, t_: &t) -> Option<drawing::resident> {
     Some((h::resident(false, gpu.fast, &host), show))
 }
 
-pub fn image(t_: &t, key: &str, width: i64, height: i64, publish: &mut dyn FnMut(&image_sink::Output) -> Result<(), Diagnostic>, value: &G::Value) -> Result<(), Diagnostic> {
+pub fn image(t_: &WorkspaceGpu, key: &str, width: i64, height: i64, publish: &mut dyn FnMut(&image_sink::Output) -> Result<(), Diagnostic>, value: &G::Value) -> Result<(), Diagnostic> {
     let d = &*t_.0;
     let (gpu, host) = owner(d)?;
     let Some(output) = h::output(&host, value)? else {
@@ -908,7 +908,7 @@ pub fn image(t_: &t, key: &str, width: i64, height: i64, publish: &mut dyn FnMut
 
 /// One `Marks`-family source per GPU mark set of a frame, numbered in drawing order (at most 64),
 /// each owning the uploads of its CPU attributes and borrowing its GPU ones.
-pub fn marks(t_: &t) -> Rc<marks_scene::gpu> {
+pub fn marks(t_: &WorkspaceGpu) -> Rc<marks_scene::gpu> {
     let id = t_.0.id;
     Rc::new(move |slot: i64, kind: i64, count: i64, attributes: &[marks_scene::attribute]| {
         let d = service(id).ok_or_else(|| error("Workspace GPU resources require their open initial-domain owner."))?;
@@ -982,7 +982,7 @@ fn drop_display(d: &Data, key: &str) {
 /// ponytail: counted in frames, not the presenting queue's completion, which needs the renderer's
 /// epoch; a window not drawn (hidden) ticks with no settle, so a slower frame could see its
 /// buffers reused, in a picture nobody sees.
-pub fn frame(t_: &t, keep: Option<&[String]>) {
+pub fn frame(t_: &WorkspaceGpu, keep: Option<&[String]>) {
     let d = &*t_.0;
     if d.closed.get() || !on_owner(d) {
         return;
@@ -1009,7 +1009,7 @@ pub fn frame(t_: &t, keep: Option<&[String]>) {
 
 /// The device's allocated bytes, its working set and whether its memory is the host's (one pool),
 /// through OGPU; `None` with no device.
-pub fn device_limits(t_: &t) -> Option<(i64, i64, bool)> {
+pub fn device_limits(t_: &WorkspaceGpu) -> Option<(i64, i64, bool)> {
     let d = &*t_.0;
     let read = |gpu: &x::Gpu| {
         let device = x::gpu_device(gpu);
@@ -1034,7 +1034,7 @@ pub fn device_limits(t_: &t) -> Option<(i64, i64, bool)> {
 
 /// The frame boundary's read: an owner with no host yet holds nothing, and a lease per frame is
 /// not free.
-pub fn device_bytes(t_: &t) -> i64 {
+pub fn device_bytes(t_: &WorkspaceGpu) -> i64 {
     let d = &*t_.0;
     match &*d.owner.borrow() {
         Some((gpu, _)) if !d.closed.get() => ob::allocated_size(&x::gpu_device(gpu)),
@@ -1043,7 +1043,7 @@ pub fn device_bytes(t_: &t) -> i64 {
 }
 
 /// Displays bound or dropped and not yet released.
-pub fn held_displays(t_: &t) -> i64 {
+pub fn held_displays(t_: &WorkspaceGpu) -> i64 {
     (t_.0.bound.borrow().len() + t_.0.releasing.borrow().len()) as i64
 }
 
@@ -1052,7 +1052,7 @@ pub fn held_displays(t_: &t) -> i64 {
 /// while the mesh that keeps the returned closure lives. Initial domain, after the cook settled.
 /// `(key, whether N is bound, device triangle index count if any, colour width, keep-alive)`;
 /// `None` (draw the host copy) otherwise.
-pub fn display(t_: &t, geometry: &rdk_core::geometry::T) -> Option<(String, bool, Option<i64>, i64, Box<dyn Fn()>)> {
+pub fn display(t_: &WorkspaceGpu, geometry: &rdk_core::geometry::T) -> Option<(String, bool, Option<i64>, i64, Box<dyn Fn()>)> {
     let d = &*t_.0;
     if !on_owner(d) {
         return None;
@@ -1217,18 +1217,18 @@ pub fn display(t_: &t, geometry: &rdk_core::geometry::T) -> Option<(String, bool
     }
 }
 
-pub fn displays(t_: &t) -> i64 {
+pub fn displays(t_: &WorkspaceGpu) -> i64 {
     t_.0.displays.get()
 }
 
 /// The last initial-domain display attempt's host-fallback reason, or `None` on success.
-pub fn display_refusal(t_: &t) -> Option<String> {
+pub fn display_refusal(t_: &WorkspaceGpu) -> Option<String> {
     t_.0.display_refusal.borrow().clone()
 }
 
 /// Host totals, sinks created/closed and sink buffer/texture creations, including failed
 /// uncommitted sinks and totals retained after close.
-pub fn image_stats(t_: &t) -> (h::Stats, i64, i64, i64, i64) {
+pub fn image_stats(t_: &WorkspaceGpu) -> (h::Stats, i64, i64, i64, i64) {
     let d = &*t_.0;
     if !on_owner(d) {
         panic!("Workspace_gpu.image_stats: initial domain required");
@@ -1246,7 +1246,7 @@ pub fn image_stats(t_: &t) -> (h::Stats, i64, i64, i64, i64) {
     (host, stats.created, stats.closed, buffers, textures)
 }
 
-pub fn close(t_: &t) {
+pub fn close(t_: &WorkspaceGpu) {
     let d = &*t_.0;
     if !on_owner(d) {
         panic!("Workspace_gpu.close: initial domain required");

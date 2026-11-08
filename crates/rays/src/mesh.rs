@@ -73,13 +73,13 @@ pub struct device {
     pub derived: bool,
     /// Held by the mesh: its producer watches it to release its buffers.
     pub keep: Rc<dyn Fn()>,
-    host: Option<Rc<dyn Fn() -> Result<t, String>>>,
-    host_made: RefCell<Option<t>>,
+    host: Option<Rc<dyn Fn() -> Result<Mesh, String>>>,
+    host_made: RefCell<Option<Mesh>>,
     device_bounds: Option<Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>>>,
 }
 
 #[derive(Clone)]
-pub struct t {
+pub struct Mesh {
     mode: mode,
     vertices: Vec3_buffer,
     indices: Arc<Vec<i64>>,
@@ -107,7 +107,7 @@ fn same_uvs(a: &Option<Arc<Vec<vec2::T>>>, b: &Option<Arc<Vec<vec2::T>>>) -> boo
 
 /// The same mesh by identity: its packed arrays physically, a device mesh by its key. O(1): a
 /// structural compare walks every index of a mesh a live cook replaced.
-pub fn same(a: &t, b: &t) -> bool {
+pub fn same(a: &Mesh, b: &Mesh) -> bool {
     a.mode == b.mode
         && a.vertices.same(&b.vertices)
         && Arc::ptr_eq(&a.indices, &b.indices)
@@ -133,7 +133,7 @@ pub fn same(a: &t, b: &t) -> bool {
 }
 
 /// A device mesh's host copy where a reader needs vertices; any other mesh itself.
-fn readable(mesh: &t) -> Result<t, String> {
+fn readable(mesh: &Mesh) -> Result<Mesh, String> {
     if let Some(d) = &mesh.device {
         if let Some(host) = &d.host {
             if let Some(made) = d.host_made.borrow().as_ref() {
@@ -178,7 +178,7 @@ pub fn create_owned_full(
     colors: Option<Vec<color::T>>,
     tex_coords: Option<Vec<vec2::T>>,
     vertices: &[vec3::T],
-) -> Result<t, String> {
+) -> Result<Mesh, String> {
     let vertex_count = vertices.len() as i64;
     let indices = indices.unwrap_or_else(|| (0..vertex_count).collect());
     if let Some(index) = first_bad_index(&indices, vertex_count) {
@@ -195,7 +195,7 @@ pub fn create_owned_full(
     let normals = normals?;
     let colors = colors?;
     let tex_coords = tex_coords?;
-    Ok(t {
+    Ok(Mesh {
         mode: mode_.unwrap_or(mode::Triangles),
         vertices: Vec3_buffer::of_array(vertices),
         indices: Arc::new(indices),
@@ -213,7 +213,7 @@ pub fn create_packed_owned(
     colors: Option<Vec<color::T>>,
     tex_coords: Option<Vec<vec2::T>>,
     vertices: Vec3_buffer,
-) -> Result<t, String> {
+) -> Result<Mesh, String> {
     let colors = match colors {
         None => None,
         Some(c) => Some(Arc::new(c)),
@@ -234,7 +234,7 @@ pub fn create_packed_arcs(
     colors: Option<Arc<Vec<color::T>>>,
     tex_coords: Option<Arc<Vec<vec2::T>>>,
     vertices: Vec3_buffer,
-) -> Result<t, String> {
+) -> Result<Mesh, String> {
     let vertex_count = vertices.length();
     let indices: Arc<Vec<i64>> = indices.unwrap_or_else(|| Arc::new((0..vertex_count).collect()));
     if let Some(index) = first_bad_index(&indices, vertex_count) {
@@ -256,7 +256,7 @@ pub fn create_packed_arcs(
     let normals = normals?;
     colors_checked?;
     uv_checked?;
-    Ok(t {
+    Ok(Mesh {
         mode: mode_.unwrap_or(mode::Triangles),
         vertices,
         indices,
@@ -267,29 +267,29 @@ pub fn create_packed_arcs(
     })
 }
 
-pub fn mode(mesh: &t) -> mode {
+pub fn mode(mesh: &Mesh) -> mode {
     mesh.mode
 }
 
-pub fn vertices(mesh: &t) -> Result<Vec<vec3::T>, String> {
+pub fn vertices(mesh: &Mesh) -> Result<Vec<vec3::T>, String> {
     Ok(readable(mesh)?.vertices.to_array())
 }
 
-pub fn vertex_count(mesh: &t) -> i64 {
+pub fn vertex_count(mesh: &Mesh) -> i64 {
     match &mesh.device {
         Some(d) => d.count,
         None => mesh.vertices.length(),
     }
 }
 
-pub fn index_count(mesh: &t) -> i64 {
+pub fn index_count(mesh: &Mesh) -> i64 {
     match &mesh.device {
         Some(d) if d.device_index_count.is_some() => d.device_index_count.unwrap_or(0),
         _ => mesh.indices.len() as i64,
     }
 }
 
-pub fn centroid(mesh: &t) -> Result<Option<vec3::T>, String> {
+pub fn centroid(mesh: &Mesh) -> Result<Option<vec3::T>, String> {
     let mesh = readable(mesh)?;
     let count = mesh.vertices.length();
     if count == 0 {
@@ -307,7 +307,7 @@ pub fn centroid(mesh: &t) -> Result<Option<vec3::T>, String> {
 
 /// The vertices' box: a device mesh's `bounds` where it has them (its host copy is not made),
 /// otherwise a scan of the vertices.
-pub fn bounds(mesh: &t) -> Result<Option<(vec3::T, vec3::T)>, String> {
+pub fn bounds(mesh: &Mesh) -> Result<Option<(vec3::T, vec3::T)>, String> {
     if let Some(d) = &mesh.device {
         if let Some(bounds) = &d.device_bounds {
             return Ok(bounds());
@@ -331,20 +331,20 @@ pub fn bounds(mesh: &t) -> Result<Option<(vec3::T, vec3::T)>, String> {
     Ok(Some((vec3::create(lo[0], lo[1], lo[2]), vec3::create(hi[0], hi[1], hi[2]))))
 }
 
-pub fn vertex(index: i64, mesh: &t) -> Result<Option<vec3::T>, String> {
+pub fn vertex(index: i64, mesh: &Mesh) -> Result<Option<vec3::T>, String> {
     let mesh = readable(mesh)?;
     Ok(if index < 0 || index >= mesh.vertices.length() { None } else { Some(mesh.vertices.get(index as usize)) })
 }
 
-pub fn with_mode(mode_: mode, mesh: &t) -> t {
-    t { mode: mode_, ..mesh.clone() }
+pub fn with_mode(mode_: mode, mesh: &Mesh) -> Mesh {
+    Mesh { mode: mode_, ..mesh.clone() }
 }
 
-pub fn recalculate_normals(mesh: &t) -> t {
+pub fn recalculate_normals(mesh: &Mesh) -> Mesh {
     if mesh.device.is_some() { mesh.clone() } else { recalculate_host_normals(mesh) }
 }
 
-fn recalculate_host_normals(mesh: &t) -> t {
+fn recalculate_host_normals(mesh: &Mesh) -> Mesh {
     let vertex_count = mesh.vertices.length() as usize;
     let (mut nx, mut ny, mut nz) = (vec![0.; vertex_count], vec![0.; vertex_count], vec![0.; vertex_count]);
     let v = &mesh.vertices;
@@ -401,7 +401,7 @@ fn recalculate_host_normals(mesh: &t) -> t {
         oy.push(n.y);
         oz.push(n.z);
     }
-    t { normals: Some(Vec3_buffer::of_planes(ox, oy, oz)), ..mesh.clone() }
+    Mesh { normals: Some(Vec3_buffer::of_planes(ox, oy, oz)), ..mesh.clone() }
 }
 
 fn positive(name: &str, value: f64) -> Result<(), String> {
@@ -411,7 +411,7 @@ fn positive(name: &str, value: f64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn plane(width: f64, height: f64) -> Result<t, String> {
+pub fn plane(width: f64, height: f64) -> Result<Mesh, String> {
     positive("plane", width)?;
     positive("plane", height)?;
     let x = width * 0.5;
@@ -430,7 +430,7 @@ pub fn plane(width: f64, height: f64) -> Result<t, String> {
 static DEVICE_IDENTITY: Mutex<Option<Arc<Vec<i64>>>> = Mutex::new(None);
 static DEVICE_CHECKED: Mutex<Option<(Arc<Vec<i64>>, i64)>> = Mutex::new(None);
 
-pub mod View {
+pub mod view {
     use super::*;
 
     pub struct view {
@@ -441,7 +441,7 @@ pub mod View {
         pub tex_coords: Option<Arc<Vec<vec2::T>>>,
     }
 
-    pub fn view(mesh: &t) -> Result<view, String> {
+    pub fn view(mesh: &Mesh) -> Result<view, String> {
         let mesh = readable(mesh)?;
         Ok(view {
             mode: mesh.mode,
@@ -464,7 +464,7 @@ pub mod View {
 
     /// The mesh's own arrays: a device mesh's indices, colours and texture coordinates with no
     /// vertices, its host copy never made.
-    pub fn unread(mesh: &t) -> packed_view {
+    pub fn unread(mesh: &Mesh) -> packed_view {
         packed_view {
             mode: mesh.mode,
             vertices: mesh.vertices.clone(),
@@ -475,12 +475,12 @@ pub mod View {
         }
     }
 
-    pub fn packed_view(mesh: &t) -> Result<packed_view, String> {
+    pub fn packed_view(mesh: &Mesh) -> Result<packed_view, String> {
         Ok(unread(&readable(mesh)?))
     }
 
     /// Ownership-transfer construction for sibling-library generators.
-    pub fn create_owned(mode_: Option<mode>, indices: Option<Vec<i64>>, vertices: &[vec3::T]) -> Result<t, String> {
+    pub fn create_owned(mode_: Option<mode>, indices: Option<Vec<i64>>, vertices: &[vec3::T]) -> Result<Mesh, String> {
         create_owned_full(mode_, indices, None, None, None, vertices)
     }
 
@@ -491,7 +491,7 @@ pub mod View {
         colors: Option<Vec<color::T>>,
         tex_coords: Option<Vec<vec2::T>>,
         vertices: vec3_view,
-    ) -> Result<t, String> {
+    ) -> Result<Mesh, String> {
         super::create_packed_owned(mode_, indices, normals, colors, tex_coords, vertices)
     }
 
@@ -504,7 +504,7 @@ pub mod View {
         colors: Option<Arc<Vec<color::T>>>,
         tex_coords: Option<Arc<Vec<vec2::T>>>,
         vertices: vec3_view,
-    ) -> Result<t, String> {
+    ) -> Result<Mesh, String> {
         super::create_packed_arcs(mode_, indices, normals, colors, tex_coords, vertices)
     }
 
@@ -515,7 +515,7 @@ pub mod View {
         pub indices: Option<Arc<Vec<i64>>>,
         pub colors: Option<Vec<color::T>>,
         pub tex_coords: Option<Vec<vec2::T>>,
-        pub host: Option<Rc<dyn Fn() -> Result<t, String>>>,
+        pub host: Option<Rc<dyn Fn() -> Result<Mesh, String>>>,
         pub bounds: Option<Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>>>,
         pub derived: bool,
         pub device_index_count: Option<i64>,
@@ -528,7 +528,7 @@ pub mod View {
     /// A mesh of `count` vertices whose packed float3 positions (and, with `normals`, normals) a
     /// device holds, registered under `key`; colours, texture coordinates and indices stay host
     /// arrays unless their device metadata is supplied.
-    pub fn create_device(args: device_args, count: i64) -> Result<t, String> {
+    pub fn create_device(args: device_args, count: i64) -> Result<Mesh, String> {
         let device_args {
             mode: mode_,
             indices,
@@ -592,7 +592,7 @@ pub mod View {
         let tex_coords = uv_attribute(count, tex_coords);
         let colors = colors?;
         let tex_coords = tex_coords?;
-        Ok(t {
+        Ok(Mesh {
             mode: mode_,
             vertices: Vec3_buffer::default(),
             indices,
@@ -615,26 +615,26 @@ pub mod View {
     }
 
     /// A device mesh's key and whether it carries normals.
-    pub fn device(mesh: &t) -> Option<(String, bool)> {
+    pub fn device(mesh: &Mesh) -> Option<(String, bool)> {
         mesh.device.as_ref().map(|d| (d.key.clone(), d.device_normals))
     }
 
     /// The borrowed triangle index count, without reading any buffer.
-    pub fn device_index_count(mesh: &t) -> Option<i64> {
+    pub fn device_index_count(mesh: &Mesh) -> Option<i64> {
         mesh.device.as_ref().and_then(|d| d.device_index_count)
     }
 
     /// 3 or 4 for colours the device holds under the mesh's key, otherwise 0.
-    pub fn device_color_width(mesh: &t) -> i64 {
+    pub fn device_color_width(mesh: &Mesh) -> i64 {
         mesh.device.as_ref().map_or(0, |d| d.device_color_width)
     }
 
     /// Whether a device mesh's normals were made from its positions for display.
-    pub fn derived_normals(mesh: &t) -> bool {
+    pub fn derived_normals(mesh: &Mesh) -> bool {
         mesh.device.as_ref().is_some_and(|d| d.derived)
     }
 
-    pub fn triangle_count(mesh: &t) -> i64 {
+    pub fn triangle_count(mesh: &Mesh) -> i64 {
         match mesh.mode {
             mode::Triangles => index_count(mesh) / 3,
             mode::Triangle_strip | mode::Triangle_fan => (mesh.indices.len() as i64 - 2).max(0),

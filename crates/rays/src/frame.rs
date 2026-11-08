@@ -2,7 +2,7 @@
 use input::{Event, MouseButton};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct t {
+pub struct Frame {
     /// Canonical logical input and frame facts.
     pub input: input::Frame,
     /// Backing pixels per logical point on each axis.
@@ -12,10 +12,10 @@ pub struct t {
     pub mouse_delta: (f64, f64),
 }
 
-pub fn mouse_down(button: MouseButton, frame: &t) -> bool {
+pub fn mouse_down(button: MouseButton, frame: &Frame) -> bool {
     frame.input.buttons.contains(&button)
 }
 
-pub fn has_event(predicate: &dyn Fn(&Event) -> bool, frame: &t) -> bool {
+pub fn has_event(predicate: &dyn Fn(&Event) -> bool, frame: &Frame) -> bool {
     frame.input.events.iter().any(|e| predicate(e))
 }

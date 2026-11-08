@@ -10,7 +10,7 @@ fn effects_workspace(effects: &str) -> editor_document::workspace_doc::T {
     Workspace::load(None, vec![], None, &text).unwrap_or_else(|d| panic!("{d:?}"))
 }
 
-fn eframe(keys: Vec<Key>, events: Vec<Event>, count: i64) -> rays::frame::t {
+fn eframe(keys: Vec<Key>, events: Vec<Event>, count: i64) -> rays::frame::Frame {
     let mut f = frame(&Opts { keys, ..Default::default() }, (-100., -100.), events, count);
     f.input.size = (640, 360);
     f
@@ -30,7 +30,7 @@ pub fn host_effects_edge() {
     }
     let doc = effects_workspace("(list (host/quit (key/down \"q\")))");
     with_editor(&doc, |editor| {
-        let up = |ed: &mut Editor::t, f: rays::frame::t| *ed = Editor::update(ed.clone(), &f);
+        let up = |ed: &mut Editor::t, f: rays::frame::Frame| *ed = Editor::update(ed.clone(), &f);
         up(editor, eframe(vec![], vec![], 0));
         assert_eq!(Editor::Private::host_stats(editor), (false, 0, 0, 0));
         for count in 1..=2 {

@@ -15,8 +15,8 @@ pub fn load(text: &str) -> wd::T {
 }
 
 /// A 1000 x 700 frame at time 0 with the given events (the frame the OCaml tests use).
-pub fn frame(events: Vec<Event>) -> frame::t {
-    frame::t { input: input::Frame { dt: 1. / 60., size: (1000, 700), events, ..input::at_time(0.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
+pub fn frame(events: Vec<Event>) -> frame::Frame {
+    frame::Frame { input: input::Frame { dt: 1. / 60., size: (1000, 700), events, ..input::at_time(0.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }
 
 pub fn options() -> Editor::Create {

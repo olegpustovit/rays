@@ -49,10 +49,10 @@ fn geometry_of(o: &sop::session::Output) -> rdk_core::geometry::T {
     ok(sop::payload::geometry(&o.payload))
 }
 
-fn surface_scene(node: &sop::node::T, surface: &rdk_rays::surface::T) -> Vec<rays::scene3::Walk::drawing> {
+fn surface_scene(node: &sop::node::T, surface: &rdk_rays::surface::T) -> Vec<rays::scene3::walk::drawing> {
     let explosion = rdk_rays::packed_pieces::explosion(sop::node::operation(node), &sop::node::parameter_fields(node));
     let scene = ok(rdk_rays::surface::scene3(explosion.as_ref(), None, surface));
-    rays::scene3::Walk::drawings(&scene)
+    rays::scene3::walk::drawings(&scene)
 }
 
 fn attr(name: &str, g: &rdk_core::geometry::T) -> rdk_core::attribute::Storage {
@@ -105,7 +105,7 @@ pub fn face_materials_preserve_explosion() {
     // Centers +-2 move to +-4. Painting just one face must leave every face of each cube at exactly the
     // same rigid displacement.
     for d in &drawings {
-        let v = ok(rays::mesh::View::packed_view(&d.mesh));
+        let v = ok(rays::mesh::view::packed_view(&d.mesh));
         for index in v.indices.iter() {
             let i = *index as usize;
             let x = v.vertices.x[i].abs();

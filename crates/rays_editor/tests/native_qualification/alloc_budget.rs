@@ -28,7 +28,7 @@ fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     let mut tick = 0;
     let mut step = |editor: Editor::t| {
         tick += 1;
-        let f = rays::frame::t {
+        let f = rays::frame::Frame {
             input: input::Frame { dt: 1. / 60., frame: tick, tick, size: (w, h), pointer: (300. + (tick % 2) as f64, 400.), ..input::at_time(tick as f64 / 60.) },
             pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
         // The native loop mutates its stored model; the owned API can reuse the same state.

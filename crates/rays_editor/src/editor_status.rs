@@ -168,7 +168,7 @@ pub fn probe_caption<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
 }
 
 /// The status strip under the view: kit text on the ground, under a hairline.
-pub fn status_box<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, frame: &frame::t, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::GuideContext) {
+pub fn status_box<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, frame: &frame::Frame, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::GuideContext) {
     let value = &value.into();
     let g = geometry(value, &value.workspace, frame);
     // the pane really in use: the focus when a leaf of its kind is open, else the first leaf

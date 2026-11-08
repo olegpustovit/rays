@@ -1,6 +1,6 @@
 //! The editor's command table: one table drives dispatch, which-key, and the command palette.
 //!
-//! Specialisation of `Editor_core.Command`: the commands are `editor_core::command::t` (scope = a
+//! Specialisation of `Editor_core.Command`: the commands are `editor_core::command::Command` (scope = a
 //! kind of panel) and their `action` field is a code into this module's action table.
 //! `action_of(&command)` gives the `action` back.
 #![allow(non_camel_case_types)]

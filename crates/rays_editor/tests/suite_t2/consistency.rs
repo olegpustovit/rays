@@ -68,7 +68,7 @@ fn vals(x: f64, mode: &str) -> Vec<Value> {
 }
 
 /// `with_editor`: a fresh editor, one frame, `f`, close.
-pub fn with_editor(ws: &wd::T, camera: Option<rays::easy_camera::t>, f: impl FnOnce(&mut Ed)) {
+pub fn with_editor(ws: &wd::T, camera: Option<rays::easy_camera::EasyCamera>, f: impl FnOnce(&mut Ed)) {
     if !common::gpu() {
         return;
     }

@@ -44,7 +44,7 @@ fn mode_of(s: &settings::T) -> i64 {
     }
 }
 
-fn still_frame() -> rays::frame::t {
+fn still_frame() -> rays::frame::Frame {
     let mut f = frame_at((0., 0.), vec![], 0);
     f.input.dt = 0.;
     f

@@ -434,7 +434,7 @@ pub fn reset_state(host_state: bool, value: &t) {
     }
 }
 
-pub fn context(value: &t, timeline: &timeline::t, frame: &frame::t) -> Result<context::T, String> {
+pub fn context(value: &t, timeline: &timeline::t, frame: &frame::Frame) -> Result<context::T, String> {
     context::create(context::Options {
         seed: Some(value.seed),
         grain: Some(value.grain),
@@ -490,7 +490,7 @@ pub fn update(
     effects: Effects,
     timeline_changes: &[timeline::Change],
     timeline: &timeline::t,
-    frame: &frame::t,
+    frame: &frame::Frame,
     frame_request: Option<Key2>,
 ) -> update_result {
     let _phase = flow_syntax::phase_timer::measure("cook");
@@ -1042,7 +1042,7 @@ pub fn with_display(device: Display, f: &mut dyn FnMut()) {
     DISPLAY.with(|d| d.replace(previous));
 }
 
-pub fn draw(n: &node::T, p: &prepared) -> Result<rays::scene3::t, surface::ConversionError> {
+pub fn draw(n: &node::T, p: &prepared) -> Result<rays::scene3::Scene3, surface::ConversionError> {
     let explosion = rdk_rays::packed_pieces::explosion(node::operation(n), &node::parameter_fields(n));
     let device = DISPLAY.with(|d| d.borrow().clone());
     match &device {

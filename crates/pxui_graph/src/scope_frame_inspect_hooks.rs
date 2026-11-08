@@ -29,7 +29,7 @@ pub fn selector(t: &Pane, path: &[String]) -> Option<((f64, f64, f64, f64), (f64
     if !visible {
         return None;
     }
-    let (x, y, w, _) = super::Inspect::box_of(t, path)?;
+    let (x, y, w, _) = super::inspect::box_of(t, path)?;
     let z = t.zoom;
     let fs = font_of(z);
     let m = t.measure.clone();

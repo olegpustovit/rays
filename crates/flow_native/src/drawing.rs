@@ -41,7 +41,7 @@ pub struct prepared {
     display: Arc<I::RegionDisplay>,
     readback: Arc<I::RegionReadback>,
     /// the last scene's mark sets bind GPU outputs a later draw replaces
-    kept: RefCell<Option<((i64, i64), scene::t)>>,
+    kept: RefCell<Option<((i64, i64), scene::Scene)>>,
     borrows: Cell<bool>,
 }
 
@@ -146,13 +146,13 @@ impl Drop for PopImages {
 
 /// The draw program runs into a mark table which `Marks_scene` adapts. Retention is whole-program:
 /// a fully static draw graph is kept per size; the fold states still advance.
-fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::t, Diagnostic> {
+fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::Scene, Diagnostic> {
     let (program, root, buffers) = core;
     let (resident, show) = match &o.resident {
         Some((r, s)) => (Some(r.clone()), Some(s.clone())),
         None => (None, None),
     };
-    let mut result: Option<scene::t> = None;
+    let mut result: Option<scene::Scene> = None;
     e::transaction(state, &mut || {
         I::force(&p.states, &I::ForceOptions { state: Some(state.clone()), ..Default::default() }, live)?;
         if let Some((kept, scene)) = &*p.kept.borrow() {
@@ -268,7 +268,7 @@ fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: 
 /// only the positions, sizes, radius, from or to of a mark set stays on the GPU when its backend
 /// places it there, and that mark set is drawn by the `Marks` family with the region's buffer bound
 /// directly. Without a configured GPU, or off the backend, nothing differs from the CPU path.
-pub fn render_prepared(p: &prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::t, Diagnostic> {
+pub fn render_prepared(p: &prepared, live: &Frame, size: (i64, i64), o: &RenderOptions) -> Result<scene::Scene, Diagnostic> {
     let state = o.state.clone().unwrap_or_else(e::create_state);
     match core(p) {
         Ok(core) => render_core(core, &state, p, live, size, o),

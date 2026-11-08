@@ -106,7 +106,7 @@ fn native_clip_projection(projection: &mat4::T) -> mat4::T {
     )
 }
 
-fn view_projection(viewport: viewport_t, cam: &camera::t) -> Result<mat4::T, error> {
+fn view_projection(viewport: viewport_t, cam: &camera::Camera) -> Result<mat4::T, error> {
     camera::view_projection_matrix(viewport, cam).map_err(|_| error::Invalid_viewport)
 }
 
@@ -117,7 +117,7 @@ fn view_projection(viewport: viewport_t, cam: &camera::t) -> Result<mat4::T, err
 /// 2)) (Phong exponent vs GGX alpha^2), metallic 0, f0 = 0.04. A material with black diffuse,
 /// ambient and specular is unlit: its emissive color is written as is, never tone mapped. Ambient
 /// and the scene's ambient color are replaced by the World.
-fn pbr_of_material(m: &material::t) -> (bool, f64, f64) {
+fn pbr_of_material(m: &material::Material) -> (bool, f64, f64) {
     let black = |c: color::T| c.r == 0 && c.g == 0 && c.b == 0;
     (black(m.diffuse) && black(m.ambient) && black(m.specular), fmin(1., (2. / (m.shininess + 2.)).sqrt()), 0.04)
 }
@@ -139,14 +139,14 @@ struct world_maps {
 const WORLD_CAPACITY: i64 = 2;
 
 struct caster {
-    caster_mesh: mesh::t,
+    caster_mesh: mesh::Mesh,
     caster_transform: mat4::T,
     caster_instances: Option<Rc<Vec<mat4::T>>>,
 }
 
 struct packed_mesh {
-    mesh: mesh::t,
-    source: mesh::View::packed_view,
+    mesh: mesh::Mesh,
+    source: mesh::view::packed_view,
     mode: scene3::render_mode,
     primitive: Primitive,
     key: String,
@@ -162,7 +162,7 @@ struct packed_mesh {
 }
 
 struct prepared_cache_entry {
-    scene: scene3::t,
+    scene: scene3::Scene3,
     prepared: prepared,
 }
 
@@ -238,7 +238,7 @@ pub fn create_cache_context() -> cache_context {
         packed_meshes: Rc::new(RefCell::new(idlist::create(
             lru::cache("rays.scene3_packed"),
             PACKED_MESH_CAPACITY,
-            Box::new(|a, b| match (a.downcast_ref::<(mesh::t, scene3::render_mode)>(), b.downcast_ref::<(mesh::t, scene3::render_mode)>()) {
+            Box::new(|a, b| match (a.downcast_ref::<(mesh::Mesh, scene3::render_mode)>(), b.downcast_ref::<(mesh::Mesh, scene3::render_mode)>()) {
                 (Some(x), Some(y)) => mesh::same(&x.0, &y.0) && x.1 == y.1,
                 _ => false,
             }),
@@ -247,7 +247,7 @@ pub fn create_cache_context() -> cache_context {
         prepared_cache: Rc::new(RefCell::new(idlist::create(
             lru::cache("rays.scene3_prepared"),
             PREPARED_CACHE_CAPACITY,
-            Box::new(|a, b| match (a.downcast_ref::<(scene3::t, camera::t, viewport_t)>(), b.downcast_ref::<(scene3::t, camera::t, viewport_t)>()) {
+            Box::new(|a, b| match (a.downcast_ref::<(scene3::Scene3, camera::Camera, viewport_t)>(), b.downcast_ref::<(scene3::Scene3, camera::Camera, viewport_t)>()) {
                 (Some(x), Some(y)) => scene3::same(&x.0, &y.0) && x.1 == y.1 && x.2 == y.2,
                 _ => false,
             }),
@@ -369,9 +369,9 @@ fn maps_of(baked: &world::baked) -> Rc<world_maps> {
     maps
 }
 
-fn casters(scene: &scene3::t) -> Vec<caster> {
+fn casters(scene: &scene3::Scene3) -> Vec<caster> {
     let mut out = Vec::new();
-    scene3::Walk::iter_batches(
+    scene3::walk::iter_batches(
         &mut |d, transforms| {
             let triangles = matches!(mesh::mode(&d.mesh), mesh::mode::Triangles | mesh::mode::Triangle_strip | mesh::mode::Triangle_fan);
             if triangles
@@ -401,7 +401,7 @@ fn same_caster(a: &caster, b: &caster) -> bool {
 /// depth-writing Replace or Alpha triangle drawings (the renderer's casters), keyed by their
 /// meshes, transforms and instances plus the sun direction, so a scene rebuilt each frame from
 /// the same parts re-renders nothing.
-fn sun_fit(scene: &scene3::t, sun: &world::sun) -> Result<Option<(mat4::T, String)>, error> {
+fn sun_fit(scene: &scene3::Scene3, sun: &world::sun) -> Result<Option<(mat4::T, String)>, error> {
     let list = casters(scene);
     let cache = current();
     let key: Item = Rc::new((caster_list_key(list), sun.direction));
@@ -553,7 +553,7 @@ const MAX_LIGHTS: usize = 64;
 /// World words 76..78 and the extracted rects after the scene's own lights. ponytail: past 64
 /// lights the lowest-power World rects are dropped (the scene's own lights always stay); a
 /// clustered light list lifts the cap.
-fn world_uniforms(b: &mut Vec<u8>, w: &world_, material: &material::t) {
+fn world_uniforms(b: &mut Vec<u8>, w: &world_, material: &material::Material) {
     let (unlit, roughness, f0) = pbr_of_material(material);
     put32(b, 76, if unlit { 1. } else { 0. });
     put32(b, 77, roughness);
@@ -568,7 +568,7 @@ fn world_uniforms(b: &mut Vec<u8>, w: &world_, material: &material::t) {
             put32(b, at + 1, v.y);
             put32(b, at + 2, v.z);
         };
-        // The shader scales colors by pi (a `light::t` intensity 1 lights a white matte face to
+        // The shader scales colors by pi (a `light::Light` intensity 1 lights a white matte face to
         // 1); a rect carries radiance x area / pi.
         let k = 4. * vec3::length(l.u) * vec3::length(l.v) / std::f64::consts::PI;
         put32(b, o, 4.);
@@ -619,7 +619,7 @@ fn make_background_attributes() -> (String, bytes) {
     ("world:background:attributes".to_string(), new_bytes(b))
 }
 
-fn background_uniforms(cam: &camera::t, viewport: viewport_t) -> Result<Option<Vec<u8>>, error> {
+fn background_uniforms(cam: &camera::Camera, viewport: viewport_t) -> Result<Option<Vec<u8>>, error> {
     match mat4::inverse(&native_clip_projection(&view_projection(viewport, cam)?)) {
         None => Ok(None),
         Some(inverse) => {
@@ -635,7 +635,7 @@ fn background_uniforms(cam: &camera::t, viewport: viewport_t) -> Result<Option<V
     }
 }
 
-fn uniforms_blinn_phong(cam: &camera::t, viewport: viewport_t, scene: &scene3::t, d: &scene3::Walk::drawing) -> Result<Vec<u8>, error> {
+fn uniforms_blinn_phong(cam: &camera::Camera, viewport: viewport_t, scene: &scene3::Scene3, d: &scene3::walk::drawing) -> Result<Vec<u8>, error> {
     let mut b = vec![0u8; 5456];
     let material = &d.material;
     put32(&mut b, 82, 1.);
@@ -656,13 +656,13 @@ fn uniforms_blinn_phong(cam: &camera::t, viewport: viewport_t, scene: &scene3::t
     put_color(&mut b, 60, material.specular);
     put_color(&mut b, 64, material.emissive);
     put32(&mut b, 68, material.shininess);
-    put_color(&mut b, 69, scene3::Walk::ambient(scene));
-    let lights = scene3::Walk::lights(scene);
+    put_color(&mut b, 69, scene3::walk::ambient(scene));
+    let lights = scene3::walk::lights(scene);
     // The native light ABI reserves linear slots; the zero-filled buffer keeps them zero while
     // preserving the shared twenty-word layout.
     put32(&mut b, 73, lights.len() as f64);
     put32(&mut b, 74, if d.cull == scene3::cull::Cull_none { 1. } else { 0. });
-    put32(&mut b, 75, if scene3::Walk::separate_specular(scene) { 1. } else { 0. });
+    put32(&mut b, 75, if scene3::walk::separate_specular(scene) { 1. } else { 0. });
     for (index, l) in lights.iter().enumerate() {
         let o = 84 + (index * 20);
         let vector = |b: &mut Vec<u8>, p: vec3::T| {
@@ -712,7 +712,7 @@ fn uniforms_blinn_phong(cam: &camera::t, viewport: viewport_t, scene: &scene3::t
     Ok(b)
 }
 
-fn uniforms(w: Option<&world_>, cam: &camera::t, viewport: viewport_t, scene: &scene3::t, d: &scene3::Walk::drawing) -> Result<Vec<u8>, error> {
+fn uniforms(w: Option<&world_>, cam: &camera::Camera, viewport: viewport_t, scene: &scene3::Scene3, d: &scene3::walk::drawing) -> Result<Vec<u8>, error> {
     let mut b = uniforms_blinn_phong(cam, viewport, scene, d)?;
     if let Some(w) = w {
         world_uniforms(&mut b, w, &d.material);
@@ -749,10 +749,10 @@ fn instance_frames(parent: &mat4::T, transforms: &Rc<Vec<mat4::T>>) -> Rc<(Vec<m
 
 fn instance_uniforms(
     w: Option<&world_>,
-    cam: &camera::t,
+    cam: &camera::Camera,
     viewport: viewport_t,
-    scene: &scene3::t,
-    d: &scene3::Walk::drawing,
+    scene: &scene3::Scene3,
+    d: &scene3::walk::drawing,
     all: &Rc<Vec<mat4::T>>,
     first: usize,
     count: usize,
@@ -807,7 +807,7 @@ pub fn borrows_device(p: &se::PreparedScene3) -> bool {
 fn trim_prepared_cache(list: &mut IdList) {
     let mut count = 0;
     let mut bytes_ = 0;
-    let mut newest_device: Option<scene3::t> = None;
+    let mut newest_device: Option<scene3::Scene3> = None;
     idlist::filter(list, &mut |_, value| {
         let Some(cached) = value.downcast_ref::<prepared_cache_entry>() else {
             return false;
@@ -832,7 +832,7 @@ fn trim_prepared_cache(list: &mut IdList) {
     });
 }
 
-fn pack_vertices(allow_missing_normals: bool, view: &mesh::View::packed_view) -> Result<bytes, error> {
+fn pack_vertices(allow_missing_normals: bool, view: &mesh::view::packed_view) -> Result<bytes, error> {
     let count = view.vertices.x.len();
     let normals = match &view.normals {
         Some(values) if values.x.len() == count => Some(Some(values)),
@@ -868,7 +868,7 @@ fn pack_vertices(allow_missing_normals: bool, view: &mesh::View::packed_view) ->
     if finite { Ok(new_bytes(b)) } else { Err(error::Invalid_mesh) }
 }
 
-fn pack_attributes(count: Option<i64>, view: &mesh::View::packed_view) -> Result<bytes, error> {
+fn pack_attributes(count: Option<i64>, view: &mesh::view::packed_view) -> Result<bytes, error> {
     let count = std::cmp::max(count.unwrap_or(0), view.vertices.x.len() as i64) as usize;
     let mut b = vec![0u8; count * 12];
     let mut finite = true;
@@ -971,7 +971,7 @@ fn same_normals(a: &Option<mesh::Vec3_buffer>, b: &Option<mesh::Vec3_buffer>) ->
     }
 }
 
-fn same_geometry(a: &mesh::View::packed_view, b: &mesh::View::packed_view) -> bool {
+fn same_geometry(a: &mesh::view::packed_view, b: &mesh::view::packed_view) -> bool {
     a.mode == b.mode && same_planes(&a.vertices, &b.vertices) && same_normals(&a.normals, &b.normals) && Arc::ptr_eq(&a.indices, &b.indices)
 }
 
@@ -1008,13 +1008,13 @@ fn find_packed(predicate: &dyn Fn(&packed_mesh) -> bool) -> Option<Rc<packed_mes
 /// array frame after frame while the topology is; a cloud's count) and its plain attribute
 /// record its count, so they are packed once, and the renderer keeps the indices under their own
 /// key, not per borrow of the positions (Scene_execution's `Gpu_vertices "borrow\nindices"`).
-fn packed_of_device(mode: scene3::render_mode, m: &mesh::t, device: (String, bool)) -> Result<Rc<packed_mesh>, error> {
+fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, bool)) -> Result<Rc<packed_mesh>, error> {
     let (key, normals) = device;
-    let source = mesh::View::unread(m);
+    let source = mesh::view::unread(m);
     let count = mesh::vertex_count(m);
     let points = mode == scene3::render_mode::Vertices || source.mode == mesh::mode::Points;
     let plain = source.colors.is_none() && source.tex_coords.is_none();
-    let native: Option<(Primitive, bytes, i64, String)> = if let Some(index_count) = mesh::View::device_index_count(m) {
+    let native: Option<(Primitive, bytes, i64, String)> = if let Some(index_count) = mesh::view::device_index_count(m) {
         Some((Primitive::TriangleList, new_bytes(Vec::new()), index_count, key.clone()))
     } else {
         let found = DEVICE_INDICES.with(|list| {
@@ -1064,14 +1064,14 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::t, device: (String, boo
             }
         }
     };
-    let attributes = if plain || mesh::View::device_color_width(m) != 0 { Ok(new_bytes(Vec::new())) } else { pack_attributes(Some(count), &source) };
+    let attributes = if plain || mesh::view::device_color_width(m) != 0 { Ok(new_bytes(Vec::new())) } else { pack_attributes(Some(count), &source) };
     match (native, attributes) {
         (Some((primitive, indices, index_count, indices_key)), Ok(attributes)) if count > 0 && index_count > 0 => Ok(Rc::new(packed_mesh {
             mesh: m.clone(),
             source: source.clone(),
             mode,
             primitive,
-            key: if mesh::View::device_index_count(m).is_some() { key.clone() } else { format!("{key}\n{indices_key}") },
+            key: if mesh::view::device_index_count(m).is_some() { key.clone() } else { format!("{key}\n{indices_key}") },
             vertices: new_bytes(Vec::new()),
             indices,
             vertex_attributes: (
@@ -1080,7 +1080,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::t, device: (String, boo
             ),
             vertex_count: count,
             index_count,
-            opaque: mesh::View::device_color_width(m) != 4
+            opaque: mesh::view::device_color_width(m) != 4
                 && source.colors.as_ref().map_or(true, |colors| colors.iter().all(|c| c.a == 255)),
             gpu: Some((key, normals)),
         })),
@@ -1088,16 +1088,16 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::t, device: (String, boo
     }
 }
 
-fn packed_of_mesh(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_mesh>, error> {
-    match mesh::View::device(m) {
-        Some(_) if mesh::View::device_index_count(m).is_some() && mode != scene3::render_mode::Faces => packed_of_host(mode, m),
+fn packed_of_mesh(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed_mesh>, error> {
+    match mesh::view::device(m) {
+        Some(_) if mesh::view::device_index_count(m).is_some() && mode != scene3::render_mode::Faces => packed_of_host(mode, m),
         Some(device) => packed_of_device(mode, m, device),
         None => packed_of_host(mode, m),
     }
 }
 
-fn packed_of_host(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_mesh>, error> {
-    let source = mesh::View::packed_view(m).map_err(|_| error::Invalid_mesh)?;
+fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed_mesh>, error> {
+    let source = mesh::view::packed_view(m).map_err(|_| error::Invalid_mesh)?;
     let cache = current();
     let exact = cache
         .as_ref()
@@ -1132,7 +1132,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_me
         && view.normals.is_none()
         && reused.is_none()
     {
-        view = mesh::View::packed_view(&mesh::recalculate_normals(m)).map_err(|_| error::Invalid_mesh)?;
+        view = mesh::view::packed_view(&mesh::recalculate_normals(m)).map_err(|_| error::Invalid_mesh)?;
     }
     let native: Option<(Primitive, Vec<i64>)> = match mode {
         scene3::render_mode::Vertices => Some((Primitive::PointList, (0..view.vertices.x.len() as i64).collect())),
@@ -1190,7 +1190,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_me
 }
 
 /// Lower one `Scene3` view into prepared draws.
-pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, scene: &scene3::t) -> Result<prepared, error> {
+pub fn prepare(resources: &resources, cam: &camera::Camera, viewport: viewport_t, scene: &scene3::Scene3) -> Result<prepared, error> {
     let (x, y, width, height) = viewport;
     if width <= 0 || height <= 0 {
         return Err(error::Invalid_viewport);
@@ -1204,10 +1204,10 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
             }
         }
     }
-    if scene3::Walk::lights(scene).len() > MAX_LIGHTS {
+    if scene3::walk::lights(scene).len() > MAX_LIGHTS {
         return Err(error::Too_many_lights);
     }
-    let world = match scene3::Walk::world(scene) {
+    let world = match scene3::walk::world(scene) {
         None => None,
         Some(baked) => {
             let fit = match &baked.sun {
@@ -1230,7 +1230,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                     depth_compare: Comparison::Always,
                     depth_write: false,
                     depth_load: Load::Clear,
-                    depth_clear: scene3::Walk::depth_clear(scene),
+                    depth_clear: scene3::walk::depth_clear(scene),
                     transform_uniforms: Some(new_bytes(uniforms)),
                 };
                 let (mesh_, attributes) = BACKGROUND.with(|b| (b.0.clone(), b.1.clone()));
@@ -1240,13 +1240,13 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                     texture: Some(w.camera_map.clone()),
                     auxiliary: Some(w.auxiliary.clone()),
                     vertex_attributes: Some(attributes),
-                    samples: scene3::Walk::samples(scene),
+                    samples: scene3::walk::samples(scene),
                     draw: GeometryDraw { mesh: mesh_, state },
                 })];
             }
         }
     }
-    scene3::Walk::iter_batches(
+    scene3::walk::iter_batches(
         &mut |d, transforms| {
             if d.texture.is_some() {
                 cacheable = false;
@@ -1258,7 +1258,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
             if failure.is_some() || !nonempty {
                 return;
             }
-            let packed = if d.texture.is_some() && mesh::View::device(&d.mesh).is_some() {
+            let packed = if d.texture.is_some() && mesh::view::device(&d.mesh).is_some() {
                 packed_of_host(d.mode, &d.mesh)
             } else {
                 packed_of_mesh(d.mode, &d.mesh)
@@ -1309,7 +1309,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                         if let Some((_, normals)) = &packed.gpu {
                             put32(&mut transform_uniforms, 79, 1.);
                             put32(&mut transform_uniforms, 80, if *normals { 1. } else { 0. });
-                            let width_ = mesh::View::device_color_width(&packed.mesh);
+                            let width_ = mesh::view::device_color_width(&packed.mesh);
                             put32(
                                 &mut transform_uniforms,
                                 81,
@@ -1323,7 +1323,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                             depth_compare: comparison(d.depth.comparison),
                             depth_write: d.depth.write,
                             depth_load: Load::Clear,
-                            depth_clear: scene3::Walk::depth_clear(scene),
+                            depth_clear: scene3::walk::depth_clear(scene),
                             transform_uniforms: Some(new_bytes(transform_uniforms)),
                         };
                         // The default blend is Alpha. A draw whose every fragment has alpha 1
@@ -1341,7 +1341,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                             texture: texture.clone(),
                             auxiliary: auxiliary.clone(),
                             vertex_attributes: Some(packed.vertex_attributes.clone()),
-                            samples: scene3::Walk::samples(scene),
+                            samples: scene3::walk::samples(scene),
                             draw: GeometryDraw { mesh: mesh_.clone(), state },
                         }));
                     };
@@ -1382,7 +1382,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
     if let Some(e) = failure {
         return Err(e);
     }
-    match se::prepare_scene3((0., 0., 0., 0.), scene3::Walk::depth_clear(scene), &entries) {
+    match se::prepare_scene3((0., 0., 0., 0.), scene3::walk::depth_clear(scene), &entries) {
         Ok(prepared_) => {
             let prepared_ = Rc::new(prepared_);
             if cacheable {

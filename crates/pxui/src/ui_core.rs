@@ -391,7 +391,7 @@ pub struct Atlas {
     shelf_h: i64,
     dirty: bool,
     pub image: Option<image::t>,
-    fonts: Vec<(font::t, i64, i64)>,
+    fonts: Vec<(font::Font, i64, i64)>,
     next_font: i64,
 }
 
@@ -430,8 +430,8 @@ impl Atlas {
         }
     }
 
-    fn font_id(&mut self, font: &font::t) -> i64 {
-        let generation = font::Raster::generation(font);
+    fn font_id(&mut self, font: &font::Font) -> i64 {
+        let generation = font::raster::generation(font);
         let found = self.fonts.iter().position(|(candidate, _, _)| font::same(candidate, font));
         match found {
             Some(at) if self.fonts[at].2 == generation => self.fonts[at].1,
@@ -495,12 +495,12 @@ impl Atlas {
         Some((x, y))
     }
 
-    fn glyph(&mut self, font: &font::t, id: i64, density: i64, code: i64) -> Option<Glyph> {
+    fn glyph(&mut self, font: &font::Font, id: i64, density: i64, code: i64) -> Option<Glyph> {
         let key = (((id * 32) + density) << 21) | code;
         if let Some(found) = self.glyphs.get(&key) {
             return Some(*found);
         }
-        let raster = font::Raster::glyph(Some(density), font, code).ok()?;
+        let raster = font::raster::glyph(Some(density), font, code).ok()?;
         let glyph = if raster.glyph_width == 0 || raster.glyph_height == 0 {
             Some(Glyph { gx: 0, gy: 0, gw: 0, gh: 0, advance: raster.glyph_advance })
         } else {
@@ -550,7 +550,7 @@ impl Atlas {
 /// The kit faces by size, the glyph atlas and the text measure: the part of the UI that painting
 /// shares. `Paint` owns it while a frame paints.
 pub struct Fonts {
-    faces: HashMap<i64, Option<font::t>>,
+    faces: HashMap<i64, Option<font::Font>>,
     font_path: Option<String>,
     kit_font: Option<Option<String>>,
     ascent_ratio: Option<f64>,
@@ -619,7 +619,7 @@ impl Fonts {
         self.kit_font.clone().unwrap()
     }
 
-    pub fn face(&mut self, size: Option<i64>) -> Option<font::t> {
+    pub fn face(&mut self, size: Option<i64>) -> Option<font::Font> {
         let size = size.unwrap_or(self.font_size);
         if let Some(face) = self.faces.get(&size) {
             return face.clone();
@@ -672,11 +672,11 @@ impl Fonts {
         }
     }
 
-    pub fn atlas_font_id(&mut self, font: &font::t) -> i64 {
+    pub fn atlas_font_id(&mut self, font: &font::Font) -> i64 {
         self.atlas.font_id(font)
     }
 
-    pub fn glyph(&mut self, font: &font::t, id: i64, code: i64) -> Option<Glyph> {
+    pub fn glyph(&mut self, font: &font::Font, id: i64, code: i64) -> Option<Glyph> {
         let density = self.density;
         self.atlas.glyph(font, id, density, code)
     }
@@ -785,7 +785,7 @@ pub struct Ui {
     passed_undo: Option<UndoKind>,
     requested_cursor: Option<Cursor>,
     frame_events: Vec<Event>,
-    input_frame: Option<rframe::t>,
+    input_frame: Option<rframe::Frame>,
     routed_events: Vec<(i64, Event, (f64, f64))>,
     cancelled: Vec<MouseButton>,
     modal_key: Option<i64>,
@@ -1190,7 +1190,7 @@ impl Ui {
     }
 
     /// Last root key pressed in `frame`, using PXUI's previous hit tree.
-    pub fn last_press_within(&self, frame: &rframe::t, roots: &[i64]) -> Option<i64> {
+    pub fn last_press_within(&self, frame: &rframe::Frame, roots: &[i64]) -> Option<i64> {
         let mut last = None;
         for event in &frame.input.events {
             if let Event::Pointer_pressed(_, point) = event {
@@ -1305,7 +1305,7 @@ impl Ui {
         self.gesture_key = 0;
     }
 
-    fn route(&mut self, frame: &rframe::t) {
+    fn route(&mut self, frame: &rframe::Frame) {
         self.signals.clear();
         self.requested_cursor = None;
         self.frame_events = frame.input.events.clone();
@@ -1688,7 +1688,7 @@ impl Ui {
         &self.frame_events
     }
 
-    pub(crate) fn input_frame(&self) -> Option<&rframe::t> {
+    pub(crate) fn input_frame(&self) -> Option<&rframe::Frame> {
         self.input_frame.as_ref()
     }
 
@@ -1702,7 +1702,7 @@ impl Ui {
 
     /// Event ownership is recorded before release/cancellation clears capture. A viewport passes
     /// its exact root key: child widgets retain their events.
-    pub fn input(&self, owner: Option<i64>) -> rframe::t {
+    pub fn input(&self, owner: Option<i64>) -> rframe::Frame {
         let owner = owner.unwrap_or(0);
         let frame = match &self.input_frame {
             Some(frame) => frame,
@@ -3097,7 +3097,7 @@ impl Ui {
         }
     }
 
-    fn paint_all(&mut self, frame: &rframe::t) -> Vec<(i64, ui_batch::Table)> {
+    fn paint_all(&mut self, frame: &rframe::Frame) -> Vec<(i64, ui_batch::Table)> {
         let mut builder = self.batch_builder.take().expect("Ui: painting re-entered");
         builder.reset();
         self.regions.clear();
@@ -3188,13 +3188,13 @@ impl Ui {
     /// Route the frame's ordered events, run the builder, lay out, and paint. Tab/Shift-Tab
     /// traverse visible focusable boxes in presentation order, restricted to an open popup.
     /// Enter/Space activate controls.
-    pub fn frame(&mut self, frame: &rframe::t, f: &mut dyn FnMut(&mut Ui)) {
+    pub fn frame(&mut self, frame: &rframe::Frame, f: &mut dyn FnMut(&mut Ui)) {
         self.begin_frame(frame);
         f(self);
         self.end_frame(frame);
     }
 
-    pub fn begin_frame(&mut self, frame: &rframe::t) {
+    pub fn begin_frame(&mut self, frame: &rframe::Frame) {
         if self.destroyed {
             panic!("Ui.frame: the UI was destroyed");
         }
@@ -3241,7 +3241,7 @@ impl Ui {
         self.seeds = vec![ROOT_KEY];
     }
 
-    pub fn end_frame(&mut self, frame: &rframe::t) {
+    pub fn end_frame(&mut self, frame: &rframe::Frame) {
         self.carry_ghost();
         self.building = false;
         self.parents.clear();

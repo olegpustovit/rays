@@ -122,7 +122,7 @@ pub enum sun_mode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct t {
+pub struct World {
     /// Bottom to top. A base layer (Gradient, Sky, Room) replaces everything below it; the others
     /// add radiance. Invisible entries are skipped, and anything below the topmost visible base
     /// layer is dropped (no maps, no lights).
@@ -489,7 +489,7 @@ fn is_base(l: &layer) -> bool {
 }
 
 /// Visible entries from the topmost visible base layer up.
-fn effective(world: &t) -> Vec<layer> {
+fn effective(world: &World) -> Vec<layer> {
     let mut kept: Vec<layer> = Vec::new();
     for e in &world.layers {
         if !e.visible {
@@ -505,7 +505,7 @@ fn effective(world: &t) -> Vec<layer> {
     kept
 }
 
-fn local_sun(world: &t) -> vec3::T {
+fn local_sun(world: &World) -> vec3::T {
     match world.sun {
         sun_mode::Linked => sun_direction(world.latitude, world.day_of_year, world.time_of_day),
         sun_mode::Manual(azimuth, elevation) => direction(azimuth, elevation),
@@ -1058,7 +1058,7 @@ fn specular_chain(box_: &map) -> Vec<map> {
 /// rect lights at distance `light_radius` (default 10.) of angular size preserved
 /// (`2 R tan half-angle`); strips split into segments of at most 60 degrees; room panels stay at
 /// their true position in the box.
-pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height: i64, world: &t) -> Result<baked, String> {
+pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height: i64, world: &World) -> Result<baked, String> {
     let light_radius = light_radius.unwrap_or(10.);
     if width < 1 || height < 1 {
         return Err("World.bake: empty map".to_string());
@@ -1213,7 +1213,7 @@ impl Drop for Restore {
     }
 }
 
-pub mod Private {
+pub mod private {
     pub use super::cache_context;
     pub use super::create_cache_context;
 
@@ -1231,9 +1231,9 @@ fn baked_bytes(b: &baked) -> i64 {
 
 /// `bake` behind a run-owned LRU of capacity 4 keyed structurally; changing only `background` or
 /// `exposure` is a hit.
-pub fn bake_cached(width: i64, height: i64, world: &t) -> Result<baked, String> {
+pub fn bake_cached(width: i64, height: i64, world: &World) -> Result<baked, String> {
     let light_radius = 10.;
-    let plain = t { background: background::Environment, exposure: 0., ..world.clone() };
+    let plain = World { background: background::Environment, exposure: 0., ..world.clone() };
     let key = TableKey::Str(format!("{plain:?}|{width}|{height}|{light_radius:?}"));
     let context = CURRENT_CACHE.with(|c| c.borrow().clone());
     let baked_ = match context {
@@ -1259,8 +1259,8 @@ fn entry_(name: &str, layer: layer) -> entry {
     entry { name: name.to_string(), layer, visible: true }
 }
 
-fn base_world(layers: Vec<entry>) -> t {
-    t {
+fn base_world(layers: Vec<entry>) -> World {
+    World {
         layers,
         background: background::Environment,
         rotation: 0.,
@@ -1273,7 +1273,7 @@ fn base_world(layers: Vec<entry>) -> t {
 }
 
 /// A neutral grey studio gradient.
-pub fn default() -> t {
+pub fn default() -> World {
     base_world(vec![entry_(
         "studio",
         layer::Gradient { zenith: rgb(0.8, 0.8, 0.8), horizon: rgb(0.5, 0.5, 0.5), nadir: rgb(0.2, 0.2, 0.2), sharpness: 1. },
@@ -1298,7 +1298,7 @@ fn strip(name: &str, elevation: f64, color: rgb, emit_: emit) -> entry {
 }
 
 /// "neon corridor", "soft blobs", "white room", "daylight".
-pub fn presets() -> Vec<(String, t)> {
+pub fn presets() -> Vec<(String, World)> {
     vec![
         (
             "neon corridor".to_string(),

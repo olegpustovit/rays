@@ -47,7 +47,7 @@ fn same_picture() {
 
 /// a 3D view is the same picture when its meshes are the same arrays, decided without walking them
 fn same_view3d() {
-    let view = |m: &mesh::t| {
+    let view = |m: &mesh::Mesh| {
         let cam = camera::orthographic(2., vec3::zero(), vec3::unit_z()).expect("camera");
         vec![scene::view3d(None, &cam, d3::create(None, None, None, None, vec![d3::mesh(None, None, None, None, None, m.clone())]).expect("scene3"))]
     };

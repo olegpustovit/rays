@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 // ------------------------------------------------------------------ test_table
 
-fn table_frame(count: i64, events: Vec<Event>) -> frame::t {
+fn table_frame(count: i64, events: Vec<Event>) -> frame::Frame {
     let mut f = frame_at(Vec::new(), 1.0, count as f64 / 60.0, events);
     f.input.size = (360, 240);
     f
@@ -87,7 +87,7 @@ pub fn window_pxui_table() {
 
 // ------------------------------------------------------------------ test_keyboard
 
-fn keyboard_frame(keys: Vec<Key>, events: Vec<Event>) -> frame::t {
+fn keyboard_frame(keys: Vec<Key>, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(1.0);
     input.frame = 0;
     input.tick = 0;
@@ -95,7 +95,7 @@ fn keyboard_frame(keys: Vec<Key>, events: Vec<Event>) -> frame::t {
     input.pointer = (-10.0, -10.0);
     input.keys = keys;
     input.events = events;
-    frame::t { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
 #[derive(Clone)]
@@ -196,7 +196,7 @@ pub fn window_pxui_keyboard() {
 
 // ------------------------------------------------------------------ test_input
 
-fn input_frame(buttons: Vec<MouseButton>, keys: Vec<Key>, events: Vec<Event>) -> frame::t {
+fn input_frame(buttons: Vec<MouseButton>, keys: Vec<Key>, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(0.0);
     input.frame = 0;
     input.tick = 0;
@@ -205,10 +205,10 @@ fn input_frame(buttons: Vec<MouseButton>, keys: Vec<Key>, events: Vec<Event>) ->
     input.keys = keys;
     input.buttons = buttons;
     input.events = events;
-    frame::t { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
-fn plain(events: Vec<Event>) -> frame::t {
+fn plain(events: Vec<Event>) -> frame::Frame {
     input_frame(vec![], vec![], events)
 }
 
@@ -222,7 +222,7 @@ pub fn window_pxui_input() {
         let graph = ui.box_("graph", BoxOpts::default().flags(CLICKABLE + SCROLL).at((160.0, 0.0)).w(Size::Px(160.0)).h(Size::Px(240.0)));
         (key_of_box(&view), ui.signal(&control), ui.signal(&graph))
     };
-    let step = |ui: &mut Ui, popup: bool, f: frame::t| -> (frame::t, Signal, Signal) {
+    let step = |ui: &mut Ui, popup: bool, f: frame::Frame| -> (frame::Frame, Signal, Signal) {
         let mut out = None;
         ui.frame(&f, &mut |ui| {
             if popup {

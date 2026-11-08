@@ -25,14 +25,14 @@ fn geometry() -> rdk_core::geometry::T {
     ok(rdk_core::geometry::with_attribute(pieces, &geometry))
 }
 
-fn positions(mesh: &rays::mesh::t) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let v = ok(rays::mesh::View::packed_view(mesh)).vertices;
+fn positions(mesh: &rays::mesh::Mesh) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let v = ok(rays::mesh::view::packed_view(mesh)).vertices;
     (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
 }
 
 /// The piece offsets of the two-triangle fixture through an Exploded View node with the given
 /// parameters, as the editor's terminal mesh builds them.
-fn exploded(pieces: &rdk_rays::packed_pieces::T, parameters: &str) -> rays::mesh::t {
+fn exploded(pieces: &rdk_rays::packed_pieces::T, parameters: &str) -> rays::mesh::Mesh {
     let node = node(&[("src".to_string(), snapshot(&geometry()))], &format!(r#"(sop/exploded_view (sop/ext_src) :piece_attribute "class" {parameters})"#));
     let explosion = rdk_rays::packed_pieces::explosion(sop::node::operation(&node), &sop::node::parameter_fields(&node));
     if explosion.is_none() {
@@ -55,7 +55,7 @@ pub fn exploded_view() {
     if positions(&ok(rdk_rays::packed_pieces::mesh_for_explosion(None, &pieces))) != base {
         fail("a zero explosion moved the pieces");
     }
-    let n = ok(rays::mesh::View::packed_view(&exploded(&pieces, ":amount 0.0"))).normals.expect("normals");
+    let n = ok(rays::mesh::view::packed_view(&exploded(&pieces, ":amount 0.0"))).normals.expect("normals");
     if !(n.x.iter().all(|v| *v == 0.) && n.y.iter().all(|v| *v == 1.) && n.z.iter().all(|v| *v == 0.)) {
         fail("Packed_pieces replaced authored vertex normals with flat faces");
     }

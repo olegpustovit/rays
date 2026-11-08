@@ -1,7 +1,7 @@
 //! SDL3_mixer-backed audio: a default playback device and decoded samples.
 use runtime_resources::audio as Resource;
 
-pub struct t {
+pub struct Audio {
     audio: Resource::Audio,
 }
 
@@ -10,18 +10,18 @@ fn message(operation: &str, error: &runtime_resources::error) -> String {
 }
 
 /// Opens the default playback device.
-pub fn init() -> Result<t, String> {
+pub fn init() -> Result<Audio, String> {
     match Resource::create_device(32) {
-        Ok(audio) => Ok(t { audio }),
+        Ok(audio) => Ok(Audio { audio }),
         Err(error) => Err(message("Audio.init", &error)),
     }
 }
 
-pub fn shutdown(value: &t) -> Result<(), String> {
+pub fn shutdown(value: &Audio) -> Result<(), String> {
     Resource::destroy(&value.audio).map_err(|e| message("Audio.shutdown", &e))
 }
 
-pub mod Sample {
+pub mod sample {
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,16 +32,16 @@ pub mod Sample {
         Triangle,
     }
 
-    pub struct t {
+    pub struct Sample {
         resource: Resource::sample,
         destroyed: bool,
         volume: f64,
     }
 
-    pub fn load(audio: &super::t, path: &str) -> Result<t, String> {
+    pub fn load(audio: &super::Audio, path: &str) -> Result<Sample, String> {
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         match Resource::load_sample_bytes(&audio.audio, &bytes) {
-            Ok(resource) => Ok(t { resource, destroyed: false, volume: 1. }),
+            Ok(resource) => Ok(Sample { resource, destroyed: false, volume: 1. }),
             Err(error) => Err(message("Audio.Sample.load", &error)),
         }
     }
@@ -97,20 +97,20 @@ pub mod Sample {
         Ok(bytes)
     }
 
-    pub fn synth(audio: &super::t, volume: Option<f64>, waveform: waveform, frequency: f64, duration: f64) -> Result<t, String> {
+    pub fn synth(audio: &super::Audio, volume: Option<f64>, waveform: waveform, frequency: f64, duration: f64) -> Result<Sample, String> {
         let bytes = wav(volume.unwrap_or(1.), waveform, frequency, duration)?;
         match Resource::load_sample_bytes(&audio.audio, &bytes) {
-            Ok(resource) => Ok(t { resource, destroyed: false, volume: 1. }),
+            Ok(resource) => Ok(Sample { resource, destroyed: false, volume: 1. }),
             Err(error) => Err(message("Audio.Sample.synth", &error)),
         }
     }
 
-    pub fn play(audio: &super::t, loops: Option<i64>, volume: Option<f64>, sample: &t) -> Result<i64, String> {
+    pub fn play(audio: &super::Audio, loops: Option<i64>, volume: Option<f64>, sample: &Sample) -> Result<i64, String> {
         Resource::play_sample(&audio.audio, loops, Some(volume.unwrap_or(sample.volume)), &sample.resource)
             .map_err(|e| message("Audio.Sample.play", &e))
     }
 
-    pub fn destroy(sample: &mut t) {
+    pub fn destroy(sample: &mut Sample) {
         if !sample.destroyed {
             let _ = Resource::destroy_sample(&mut sample.resource);
             sample.destroyed = true;

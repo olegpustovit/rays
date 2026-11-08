@@ -705,10 +705,10 @@ fn instance(id: Option<i64>, kind: &kg::Kind, label: &str, values: &[(String, PV
 
 /// The view of the camera object a scene instance's `scene/root` names in its `:camera` slot: the
 /// object is built like any scene object, from the fields its call writes.
-fn instance_camera(value: Option<&E>) -> Option<rcamera::t> {
+fn instance_camera(value: Option<&E>) -> Option<rcamera::Camera> {
     match value {
         Some(v @ E::Struct(g)) if g.name == "scene/camera" => {
-            let built = (|| -> R<Option<rcamera::t>> {
+            let built = (|| -> R<Option<rcamera::Camera>> {
                 let forced = force0(v)?;
                 let values = changes("scene/camera", &forced_args(forced))?;
                 let node = instance(None, &scene_kind("scene/camera"), "camera", &values)?;

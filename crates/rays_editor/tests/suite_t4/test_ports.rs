@@ -20,7 +20,7 @@ fn dimensions(name: &str) -> (i64, i64) {
     }
 }
 
-fn frame_of(synthetic: bool, name: &str, count: i64) -> rays::frame::t {
+fn frame_of(synthetic: bool, name: &str, count: i64) -> rays::frame::Frame {
     let (width, height) = dimensions(name);
     let events = if !synthetic {
         vec![]
@@ -45,7 +45,7 @@ fn frame_of(synthetic: bool, name: &str, count: i64) -> rays::frame::t {
     } else {
         (-100., -100.)
     };
-    rays::frame::t { input: input::Frame { dt: 1. / 60., frame: count, tick: count, size: (width, height), pointer: mouse, events, ..input::at_time(count as f64 / 60.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
+    rays::frame::Frame { input: input::Frame { dt: 1. / 60., frame: count, tick: count, size: (width, height), pointer: mouse, events, ..input::at_time(count as f64 / 60.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }
 
 fn sketch_text(name: &str) -> String {
@@ -81,7 +81,7 @@ fn save_roundtrip(name: &str) {
 }
 
 
-fn serialize(scene: &rays::scene::t) -> Vec<u8> {
+fn serialize(scene: &rays::scene::Scene) -> Vec<u8> {
     let commands = rays::scene::Layer::commands(None, scene).unwrap();
     // ponytail: scene_command is not a dependency of rays_editor; the commands compare by their Debug text
     format!("{commands:?}").into_bytes()
@@ -110,15 +110,15 @@ fn pictures(name: &str, workspace: &Doc::T, domains: i64, count: i64) -> Vec<Vec
 
 /// One text cache for both runs, as Sketch.run_state installs: a fresh cache re-rasterizes text under a new image identity.
 fn parity(name: &str, workspace: &Doc::T) -> Vec<Vec<u8>> {
-    let fonts = rays::font::Raster::create_cache_context();
+    let fonts = rays::font::raster::create_cache_context();
     let mut result = Vec::new();
-    rays::font::Raster::with_cache_context(&fonts, &mut || {
+    rays::font::raster::with_cache_context(&fonts, &mut || {
         let expected = pictures(name, workspace, 1, 4);
         let eight = pictures(name, workspace, 8, 4);
         assert!(eight == expected, "{name}: 1/8-domain command parity");
         result = expected;
     });
-    rays::font::Raster::clear_cache_context(&fonts);
+    rays::font::raster::clear_cache_context(&fonts);
     result
 }
 

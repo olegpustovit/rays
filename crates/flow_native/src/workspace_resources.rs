@@ -1,15 +1,15 @@
 //! Port of lib/flow_native/workspace_resources.ml: the audio samples and images a workspace owns
 //! (at most 64 of each), released together on `close`.
-use rays::audio::{self, Sample};
+use rays::audio::{self, sample};
 use rays::image;
 use rays_diagnostic::Diagnostic;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct data {
-    pub samples: Vec<(String, Rc<RefCell<Sample::t>>)>,
+    pub samples: Vec<(String, Rc<RefCell<sample::Sample>>)>,
     pub images: Vec<(String, image::t)>,
-    pub audio: Option<Rc<audio::t>>,
+    pub audio: Option<Rc<audio::Audio>>,
     pub closed: bool,
     pub samples_created: i64,
     pub samples_destroyed: i64,
@@ -19,10 +19,10 @@ pub struct data {
 
 /// Shared by the host and the image owner (handle semantics, as the OCaml mutable record).
 #[derive(Clone)]
-pub struct t(pub Rc<RefCell<data>>);
+pub struct WorkspaceResources(pub Rc<RefCell<data>>);
 
-pub fn create() -> t {
-    t(Rc::new(RefCell::new(data {
+pub fn create() -> WorkspaceResources {
+    WorkspaceResources(Rc::new(RefCell::new(data {
         samples: Vec::new(),
         images: Vec::new(),
         audio: None,
@@ -38,12 +38,12 @@ fn error(code: &str, message: &str) -> Diagnostic {
     flow_syntax::value::fail(code, message)
 }
 
-pub fn closed(resources: &t) -> bool {
+pub fn closed(resources: &WorkspaceResources) -> bool {
     resources.0.borrow().closed
 }
 
 /// The sample under `key`, made (and the audio device opened) on first use.
-pub fn sample(resources: &t, key: &str, make: &dyn Fn(&audio::t) -> Result<Sample::t, String>) -> Result<Rc<RefCell<Sample::t>>, Diagnostic> {
+pub fn sample(resources: &WorkspaceResources, key: &str, make: &dyn Fn(&audio::Audio) -> Result<sample::Sample, String>) -> Result<Rc<RefCell<sample::Sample>>, Diagnostic> {
     {
         let r = resources.0.borrow();
         if r.closed {
@@ -73,7 +73,7 @@ pub fn sample(resources: &t, key: &str, make: &dyn Fn(&audio::t) -> Result<Sampl
 }
 
 /// The image under `key`, made on first use.
-pub fn image(resources: &t, key: &str, make: &dyn Fn() -> Result<image::t, String>) -> Result<image::t, Diagnostic> {
+pub fn image(resources: &WorkspaceResources, key: &str, make: &dyn Fn() -> Result<image::t, String>) -> Result<image::t, Diagnostic> {
     {
         let r = resources.0.borrow();
         if r.closed {
@@ -93,7 +93,7 @@ pub fn image(resources: &t, key: &str, make: &dyn Fn() -> Result<image::t, Strin
     Ok(image)
 }
 
-pub fn close(resources: &t) {
+pub fn close(resources: &WorkspaceResources) {
     let (samples, images, audio) = {
         let mut r = resources.0.borrow_mut();
         if r.closed {
@@ -102,7 +102,7 @@ pub fn close(resources: &t) {
         (std::mem::take(&mut r.samples), std::mem::take(&mut r.images), r.audio.take())
     };
     for (_, sample) in &samples {
-        Sample::destroy(&mut sample.borrow_mut());
+        sample::destroy(&mut sample.borrow_mut());
         resources.0.borrow_mut().samples_destroyed += 1;
     }
     for (_, image) in &images {

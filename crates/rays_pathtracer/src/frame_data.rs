@@ -138,7 +138,7 @@ pub fn destroy_film(keep: Option<usize>, film: &Film) {
     }
 }
 
-pub fn camera_fov(camera: &rays::camera::t) -> Result<f64, String> {
+pub fn camera_fov(camera: &rays::camera::Camera) -> Result<f64, String> {
     match rays::camera::projection(camera) {
         rays::camera::projection::Perspective { fov_y, .. } => Ok(fov_y),
         rays::camera::projection::Orthographic { .. } => Err("path tracer requires a perspective camera".to_string()),
@@ -155,7 +155,7 @@ fn cross(a: vec3::T, b: vec3::T) -> vec3::T {
 }
 
 /// The camera's forward, right and up axes.
-pub fn axes(camera: &rays::camera::t) -> (vec3::T, vec3::T, vec3::T) {
+pub fn axes(camera: &rays::camera::Camera) -> (vec3::T, vec3::T, vec3::T) {
     let p = rays::camera::position(camera);
     let target = rays::camera::target(camera);
     let forward = normalize(vec3::create(target.x - p.x, target.y - p.y, target.z - p.z));

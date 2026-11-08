@@ -46,8 +46,8 @@ pub fn set_ui_cursor(ui: &Ui, visible: bool) -> Result<(), String> {
 pub struct hidden_scene_cache {
     pub width: i64,
     pub height: i64,
-    pub rendered: Option<d3::t>,
-    pub camera: rcam::t,
+    pub rendered: Option<d3::Scene3>,
+    pub camera: rcam::Camera,
     pub background: color::T,
     pub view_visible: bool,
     pub scene: Nodes,
@@ -67,7 +67,7 @@ pub struct canvas_picture {
 
 /// A World bake for this frame: the preview size while a gesture or the day cycle is live, the
 /// final size when idle.
-pub fn bake_world(view: Option<&View>, previous: Option<&(world::t, Rc<world::baked>)>, core: &Model, live: bool) -> Option<(world::t, Rc<world::baked>)> {
+pub fn bake_world(view: Option<&View>, previous: Option<&(world::World, Rc<world::baked>)>, core: &Model, live: bool) -> Option<(world::World, Rc<world::baked>)> {
     let time = timeline::time(&editor_list::timeline(core));
     editor_host::world(view, core, Some(time)).and_then(|w| {
         let (width, height) = if live { (512, 256) } else { (2048, 1024) };
@@ -88,7 +88,7 @@ pub fn view_keys(core: &Model) -> Vec<String> {
     out
 }
 
-pub fn save_status<R>(save: &dyn Fn(&R) -> Result<(), String>, filename: &dyn Fn(&R) -> String, pending: Option<&R>, rendered: Option<&d3::t>) -> Option<String> {
+pub fn save_status<R>(save: &dyn Fn(&R) -> Result<(), String>, filename: &dyn Fn(&R) -> String, pending: Option<&R>, rendered: Option<&d3::Scene3>) -> Option<String> {
     match (pending, rendered) {
         (Some(request), Some(_)) => Some(match save(request) {
             Ok(()) => format!("Saved {}", filename(request)),
@@ -99,9 +99,9 @@ pub fn save_status<R>(save: &dyn Fn(&R) -> Result<(), String>, filename: &dyn Fn
 }
 
 /// How a viewport is painted: its key, its bounds, the camera and the image.
-pub type PaintView<'a> = dyn Fn(&str, Bounds, &rcam::t, &d3::t) -> Nodes + 'a;
+pub type PaintView<'a> = dyn Fn(&str, Bounds, &rcam::Camera, &d3::Scene3) -> Nodes + 'a;
 
-pub fn world_nodes(paint_view: &PaintView, key: &str, camera: &rcam::t, rendered: Option<&d3::t>, view_visible: bool, viewport: Bounds) -> Nodes {
+pub fn world_nodes(paint_view: &PaintView, key: &str, camera: &rcam::Camera, rendered: Option<&d3::Scene3>, view_visible: bool, viewport: Bounds) -> Nodes {
     match rendered {
         Some(image) if view_visible => paint_view(key, viewport, camera, image),
         _ => Vec::new(),
@@ -109,7 +109,7 @@ pub fn world_nodes(paint_view: &PaintView, key: &str, camera: &rcam::t, rendered
 }
 
 /// Each viewport shows its own scene instance's image, else the primary one.
-pub fn worlds(paint_view: &PaintView, camera: &dyn Fn(&str) -> rcam::t, rendered: Option<&d3::t>, views: &[(String, d3::t)], view_visible: bool, bodies: &[(String, Bounds)]) -> Nodes {
+pub fn worlds(paint_view: &PaintView, camera: &dyn Fn(&str) -> rcam::Camera, rendered: Option<&d3::Scene3>, views: &[(String, d3::Scene3)], view_visible: bool, bodies: &[(String, Bounds)]) -> Nodes {
     bodies
         .iter()
         .flat_map(|(key, bounds)| {
@@ -123,7 +123,7 @@ pub fn hidden_only(ui_visible: bool, core: &Model) -> bool {
     !ui_visible && core.leader == editor_core::router::State::Idle
 }
 
-fn same_rendered(a: &Option<d3::t>, b: &Option<d3::t>) -> bool {
+fn same_rendered(a: &Option<d3::Scene3>, b: &Option<d3::Scene3>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => d3::same(a, b),
         (None, None) => true,
@@ -133,7 +133,7 @@ fn same_rendered(a: &Option<d3::t>, b: &Option<d3::t>) -> bool {
 
 /// The fully hidden scene, reused while its inputs are unchanged so the renderer sees the same
 /// `Scene.t`.
-pub fn hidden_entry(background: color::T, rendered: Option<&d3::t>, camera: &rcam::t, paint_view: &PaintView, cache: Option<&hidden_scene_cache>, core: &Model, frame_: &frame::t) -> hidden_scene_cache {
+pub fn hidden_entry(background: color::T, rendered: Option<&d3::Scene3>, camera: &rcam::Camera, paint_view: &PaintView, cache: Option<&hidden_scene_cache>, core: &Model, frame_: &frame::Frame) -> hidden_scene_cache {
     let view_visible = editor_shell::view_visible(core);
     let rendered_owned = rendered.cloned();
     if let Some(cached) = cache {
@@ -152,16 +152,16 @@ pub fn compose_view(
     canvases: &[(String, canvas_picture)],
     ui_visible: bool,
     background: color::T,
-    rendered: Option<&d3::t>,
-    focused: Option<&d3::t>,
-    views: &[(String, d3::t)],
-    camera: &rcam::t,
-    camera_of: &dyn Fn(&str) -> rcam::t,
+    rendered: Option<&d3::Scene3>,
+    focused: Option<&d3::Scene3>,
+    views: &[(String, d3::Scene3)],
+    camera: &rcam::Camera,
+    camera_of: &dyn Fn(&str) -> rcam::Camera,
     paint_view: &PaintView,
     guides: &dyn Fn(Bounds) -> Nodes,
     cache: Option<&hidden_scene_cache>,
     core: &Model,
-    frame_: &frame::t,
+    frame_: &frame::Frame,
 ) -> Nodes {
     let view_visible = editor_shell::view_visible(core);
     let paint_world = |viewport: Bounds| -> Nodes {

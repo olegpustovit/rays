@@ -32,7 +32,7 @@ pub fn step(
     context_changed: bool,
     force: bool,
     busy: bool,
-    frame: &frame::t,
+    frame: &frame::Frame,
 ) -> (t, bool) {
     let dirty = value.dirty || effects.cook || force;
     let same = graphs.len() == value.graphs.len() && graphs.iter().zip(value.graphs.iter()).all(|(a, b)| node::ptr_eq(a, b));

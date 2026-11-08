@@ -44,11 +44,11 @@ fn snapshot(canvas_: &canvas::t) -> Vec<u8> {
     pixels
 }
 
-fn mesh_node(material_: material::t, cull: d3::cull, m: &mesh::t) -> d3::node {
+fn mesh_node(material_: material::Material, cull: d3::cull, m: &mesh::Mesh) -> d3::node {
     d3::mesh(Some(material_), None, None, Some(cull), None, m.clone())
 }
 
-fn scene_of(nodes: Vec<d3::node>) -> d3::t {
+fn scene_of(nodes: Vec<d3::node>) -> d3::Scene3 {
     d3::create(None, None, None, None, nodes).expect("scene3")
 }
 
@@ -113,9 +113,9 @@ fn near(tolerance: i64, name: &str, expected: i64, c: color::T) {
     }
 }
 
-fn uniform(l: f64) -> world::t {
+fn uniform(l: f64) -> world::World {
     let c = world::rgb(l, l, l);
-    world::t {
+    world::World {
         layers: vec![world::entry {
             name: "furnace".to_string(),
             visible: true,
@@ -129,7 +129,7 @@ fn sphere() -> d3::node {
     d3::mesh(Some(material::matte(color::white())), None, None, None, None, sphere_mesh())
 }
 
-fn sphere_mesh() -> mesh::t {
+fn sphere_mesh() -> mesh::Mesh {
     let (segments, rings) = (24_i64, 16_i64);
     let row = segments + 1;
     let normals: Vec<vec3::T> = (0..row * (rings + 1))
@@ -146,7 +146,7 @@ fn sphere_mesh() -> mesh::t {
         indices[(cell * 6) as usize..(cell * 6 + 6) as usize].copy_from_slice(&[a, b, d + 1, a, d + 1, d]);
     }
     let planes = |v: &[vec3::T]| mesh::Vec3_buffer::of_planes(v.iter().map(|p| p.x).collect(), v.iter().map(|p| p.y).collect(), v.iter().map(|p| p.z).collect());
-    mesh::View::create_packed_owned(None, Some(indices), Some(planes(&normals)), None, None, planes(&normals)).expect("sphere")
+    mesh::view::create_packed_owned(None, Some(indices), Some(planes(&normals)), None, None, planes(&normals)).expect("sphere")
 }
 
 fn gpu_rays_world_furnace() {
@@ -192,7 +192,7 @@ fn gpu_rays_world_furnace() {
     // Degenerate drawings draw nothing instead of failing the frame: an empty mesh (a cook with
     // no triangles), a zero-length line, a zero circle.
     let canvas_ = canvas::create(32, 32).expect("canvas");
-    let empty = mesh::View::create_owned(Some(mesh::mode::Triangles), Some(Vec::new()), &[]).expect("empty mesh");
+    let empty = mesh::view::create_owned(Some(mesh::mode::Triangles), Some(Vec::new()), &[]).expect("empty mesh");
     render(
         &canvas_,
         None,
@@ -262,7 +262,7 @@ fn gpu_rays_world_sun_shadow() {
     assert_eq!(live_handles(), baseline, "World sun shadow native handle delta");
 }
 
-fn box_mesh() -> mesh::t {
+fn box_mesh() -> mesh::Mesh {
     let half = 0.5;
     let faces = [
         (vec3::unit_x(), vec3::unit_y(), vec3::unit_z()),
@@ -283,7 +283,7 @@ fn box_mesh() -> mesh::t {
         indices.extend_from_slice(&[o, o + 1, o + 2, o, o + 2, o + 3]);
     }
     let planes = |v: &[vec3::T]| mesh::Vec3_buffer::of_planes(v.iter().map(|p| p.x).collect(), v.iter().map(|p| p.y).collect(), v.iter().map(|p| p.z).collect());
-    mesh::View::create_packed_owned(None, Some(indices), Some(planes(&normals)), None, None, planes(&positions)).expect("box")
+    mesh::view::create_packed_owned(None, Some(indices), Some(planes(&normals)), None, None, planes(&positions)).expect("box")
 }
 
 /// Camera orbit preserves the uploaded Scene3 geometry.
@@ -297,7 +297,7 @@ fn gpu_rays_lowering_orbit_uploads() {
     let indices: Vec<i64> = (0..(count - 2) * 3).map(|i| if i % 3 == 0 { 0 } else { (i / 3) + (i % 3) }).collect();
     let planes = mesh::Vec3_buffer::of_planes(points.iter().map(|p| p.x).collect(), points.iter().map(|p| p.y).collect(), points.iter().map(|p| p.z).collect());
     let normals = mesh::Vec3_buffer::of_planes(vec![0.; count as usize], vec![0.; count as usize], vec![1.; count as usize]);
-    let heavy = mesh::View::create_packed_owned(None, Some(indices), Some(normals), None, None, planes).expect("heavy");
+    let heavy = mesh::view::create_packed_owned(None, Some(indices), Some(normals), None, None, planes).expect("heavy");
     let world_ = scene_of(vec![d3::mesh(Some(material::unlit(color::red())), None, None, None, None, heavy)]);
     let cam_at = |p: vec3::T| camera::orthographic(2., p, vec3::zero()).expect("camera");
     render(&canvas_, None, &[scene::clear(color::black()), scene::view3d(Some((0, 0, 64, 64)), &cam_at(vec3::create(0., 0., 2.)), world_.clone())]);
@@ -321,9 +321,9 @@ fn gpu_rays_float32_attribute_stream() {
         let normals = mesh::Vec3_buffer::of_planes(vec![0., 0., 0.], vec![0., 0., 0.], vec![1., 1., 1.]);
         let indices = Arc::new(vec![0i64, 1, 2]);
         let make = |colors: Vec<color::T>| {
-            mesh::View::create_packed_shared(None, Some(indices.clone()), Some(normals.clone()), Some(Arc::new(colors)), None, vertices.clone()).expect("mesh")
+            mesh::view::create_packed_shared(None, Some(indices.clone()), Some(normals.clone()), Some(Arc::new(colors)), None, vertices.clone()).expect("mesh")
         };
-        let stage = |m: &mesh::t| {
+        let stage = |m: &mesh::Mesh| {
             let s = scene_of(vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]);
             Layer::stage_native(128, 128, &[scene::view3d(None, &cam, s)]).expect("stage").scene3[0].entries[0].clone()
         };

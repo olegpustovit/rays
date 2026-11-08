@@ -47,19 +47,19 @@ pub(super) fn placed(session: &mut sop::session::T, node: &sop::node::T) -> g::T
     }
     unreachable!()
 }
-pub(super) fn picture(owner: &gpu::t, geometry: &g::T) -> scene3::t {
+pub(super) fn picture(owner: &gpu::WorkspaceGpu, geometry: &g::T) -> scene3::Scene3 {
     let surface = rdk_rays::surface::of_geometry(None, geometry).unwrap();
     let display = |g: &g::T| gpu::display(owner, g).map(|(key, count, indices, color, keep)| (key, count, indices, color, std::rc::Rc::from(keep)));
     rdk_rays::surface::scene3(None, Some(&display), &surface).unwrap()
 }
-pub(super) fn frame(camera: &rays::camera::t, picture: scene3::t) -> scene::t {
+pub(super) fn frame(camera: &rays::camera::Camera, picture: scene3::Scene3) -> scene::Scene {
     vec![scene::clear(color::black()), scene::view3d(None, camera, picture)]
 }
 pub(super) fn draw(canvas: &canvas::t, frame: &[scene::node]) -> Vec<color::T> {
     canvas::render(None, canvas, frame).unwrap();
     canvas::pixels(canvas).unwrap()
 }
-fn run(owner: &gpu::t, config: &Gpu::Config, workspace: &editor_document::workspace_doc::T, recipe: i64) {
+fn run(owner: &gpu::WorkspaceGpu, config: &Gpu::Config, workspace: &editor_document::workspace_doc::T, recipe: i64) {
     let publication = gpu::image_stats(owner).0;
     let (_lowered, node) = recipe_node(workspace, config, recipe);
     let mut session = sop::session::create(0, 1 << 28).unwrap();
@@ -71,10 +71,10 @@ fn run(owner: &gpu::t, config: &Gpu::Config, workspace: &editor_document::worksp
     let display = |g: &g::T| gpu::display(owner, g).map(|(key, count, indices, color, keep)| (key, count, indices, color, std::rc::Rc::from(keep)));
     let picture = rdk_rays::surface::scene3(None, Some(&display), &surface).unwrap();
     assert_eq!(gpu::display_refusal(owner), None);
-    let mesh = scene3::Walk::drawings(&picture)[0].mesh.clone();
-    assert!(rays::mesh::View::device(&mesh).is_some());
-    assert_eq!(rays::mesh::View::device_index_count(&mesh), Some(g::primitive_count(&geometry) * 6));
-    assert_eq!(rays::mesh::View::device_color_width(&mesh), 3);
+    let mesh = scene3::walk::drawings(&picture)[0].mesh.clone();
+    assert!(rays::mesh::view::device(&mesh).is_some());
+    assert_eq!(rays::mesh::view::device_index_count(&mesh), Some(g::primitive_count(&geometry) * 6));
+    assert_eq!(rays::mesh::view::device_color_width(&mesh), 3);
     let bound = gpu::image_stats(owner).0;
     assert_eq!(bound.payload_readback_bytes, before.payload_readback_bytes);
     assert_eq!(bound.input_uploaded_bytes, before.input_uploaded_bytes);
@@ -173,7 +173,7 @@ fn run(owner: &gpu::t, config: &Gpu::Config, workspace: &editor_document::worksp
     assert_eq!(draw(&host_canvas,&frame(&camera,host_scene.clone())),pixels);
     assert!(gpu::image_stats(owner).0.payload_readback_bytes > before.payload_readback_bytes);
     let read_for_trace = gpu::image_stats(owner).0.payload_readback_bytes;
-    let host_mesh = scene3::Walk::drawings(&host_scene)[0].mesh.clone();
+    let host_mesh = scene3::walk::drawings(&host_scene)[0].mesh.clone();
     for mode in [scene3::render_mode::Wireframe,scene3::render_mode::Vertices] {
         let mode_frame = |mesh| frame(&camera,scene3::create(None,None,None,None,vec![scene3::mesh(None,None,Some(mode),Some(scene3::cull::Cull_none),None,mesh)]).unwrap());
         assert_eq!(draw(&canvas,&mode_frame(mesh.clone())),draw(&host_canvas,&mode_frame(host_mesh.clone())));

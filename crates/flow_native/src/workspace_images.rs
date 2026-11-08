@@ -193,8 +193,8 @@ impl CaptureCache {
 
 pub struct Data {
     id: i64,
-    resources: workspace_resources::t,
-    gpu: workspace_gpu::t,
+    resources: workspace_resources::WorkspaceResources,
+    gpu: workspace_gpu::WorkspaceGpu,
     seed: i64,
     grain: i64,
     domains: i64,
@@ -224,7 +224,7 @@ pub struct Data {
 }
 
 #[derive(Clone)]
-pub struct t(pub Rc<Data>);
+pub struct WorkspaceImages(pub Rc<Data>);
 
 thread_local! {
     static OWNERS: RefCell<HashMap<i64, Rc<Data>>> = RefCell::new(HashMap::new());
@@ -236,7 +236,7 @@ fn owner_of(id: i64) -> Option<Rc<Data>> {
     OWNERS.with(|o| o.borrow().get(&id).cloned())
 }
 
-pub fn create(seed: Option<i64>, grain: Option<i64>, domains: Option<i64>, gpu: &workspace_gpu::t, resources: &workspace_resources::t) -> t {
+pub fn create(seed: Option<i64>, grain: Option<i64>, domains: Option<i64>, gpu: &workspace_gpu::WorkspaceGpu, resources: &workspace_resources::WorkspaceResources) -> WorkspaceImages {
     let capture_cache = Rc::new(RefCell::new(CaptureCache { items: Vec::new(), bytes: 0 }));
     let cache = capture_cache.clone();
     let data = Rc::new(Data {
@@ -272,7 +272,7 @@ pub fn create(seed: Option<i64>, grain: Option<i64>, domains: Option<i64>, gpu: 
         readbacks: Cell::new(0),
     });
     OWNERS.with(|o| o.borrow_mut().insert(data.id, data.clone()));
-    t(data)
+    WorkspaceImages(data)
 }
 
 fn error(message: &str) -> Diagnostic {
@@ -368,7 +368,7 @@ fn entry_bytes(entry: &Entry) -> i64 {
     }
 }
 
-pub fn capture_stats(t_: &t) -> (i64, i64, i64, i64, i64) {
+pub fn capture_stats(t_: &WorkspaceImages) -> (i64, i64, i64, i64, i64) {
     let d = &*t_.0;
     let cache = d.capture_cache.borrow();
     (d.source_cache.borrow().length() as i64, cache.items.len() as i64, cache.bytes, d.source_cooks.get(), d.attribute_flattens.get())
@@ -602,7 +602,7 @@ fn destroy_canvas(d: &Data, c: &canvas::t) {
 }
 
 /// (canvases created, destroyed, captures, readbacks)
-pub fn render_stats(t_: &t) -> (i64, i64, i64, i64) {
+pub fn render_stats(t_: &WorkspaceImages) -> (i64, i64, i64, i64) {
     let d = &*t_.0;
     let (mut captures, mut readbacks) = (d.captures.get(), d.readbacks.get());
     for entry in d.entries.borrow().iter() {
@@ -750,7 +750,7 @@ fn current(d: &Data, sources: &[(i64, i64)], state: &e::State, live: &Frame, pid
 }
 
 /// Binds the lowering the next resolutions read their sources from (the plan it was lowered for).
-pub fn bind(t_: &t, lowered: &l::T) {
+pub fn bind(t_: &WorkspaceImages, lowered: &l::T) {
     let d = &*t_.0;
     let pid = plan_id(&lowered.plan);
     let same = matches!(&*d.lowered.borrow(), Some((id, _)) if *id == pid);
@@ -878,7 +878,7 @@ fn prepare(d: &Data, plan: &e::Plan, pid: PlanId) -> Result<(), Diagnostic> {
 }
 
 /// The image the plan's node `id` last resolved to, if this plan is the current one.
-pub fn peek(t_: &t, plan: &e::Plan, id: i64) -> Option<image::t> {
+pub fn peek(t_: &WorkspaceImages, plan: &e::Plan, id: i64) -> Option<image::t> {
     peek_in(&t_.0, plan_id(plan), id)
 }
 
@@ -1425,7 +1425,7 @@ fn compute_entry(
 
 /// The image of `value`, resolved for display (a GPU-resident image) or, with `display` false, with
 /// a host copy uploaded.
-pub fn image(gpu: Option<&G::Config>, display: bool, t_: &t, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<image::t, Diagnostic> {
+pub fn image(gpu: Option<&G::Config>, display: bool, t_: &WorkspaceImages, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<image::t, Diagnostic> {
     let d = &t_.0;
     let ctx = Ctx { gpu: gpu.cloned(), state: state.clone(), live: live.clone(), pid: plan_id(plan) };
     let entry = resolve(d, &ctx, None, display, plan, value)?;
@@ -1452,7 +1452,7 @@ pub fn image(gpu: Option<&G::Config>, display: bool, t_: &t, state: &e::State, l
 }
 
 /// The resolver `Lower` installs for a cook: the CPU payload of an image node, resolved here.
-pub fn payload(t_: &t) -> l::ImageResolver {
+pub fn payload(t_: &WorkspaceImages) -> l::ImageResolver {
     let owner_id = t_.0.id;
     Arc::new(move |gpu, context, plan, state, live, value| {
         let Some(d) = owner_of(owner_id) else { return Err(error("Image resources must resolve on the initial domain.")) };
@@ -1463,14 +1463,14 @@ pub fn payload(t_: &t) -> l::ImageResolver {
     })
 }
 
-pub fn texture(gpu: Option<&G::Config>, t_: &t, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<texture::t, Diagnostic> {
+pub fn texture(gpu: Option<&G::Config>, t_: &WorkspaceImages, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<texture::t, Diagnostic> {
     let ctx = Ctx { gpu: gpu.cloned(), state: state.clone(), live: live.clone(), pid: plan_id(plan) };
     let entry = resolve(&t_.0, &ctx, None, true, plan, value)?;
     let slot = entry.borrow().texture.clone().expect("texture");
     message(force_texture(&slot))
 }
 
-pub fn close(t_: &t) {
+pub fn close(t_: &WorkspaceImages) {
     let d = &*t_.0;
     let entries = std::mem::take(&mut d.entries.borrow_mut().slots);
     for (_, entry, _, _) in entries {

@@ -26,8 +26,8 @@ fn entry_(l: layer) -> entry {
     entry { name: "layer".to_string(), layer: l, visible: true }
 }
 
-fn with_layers(layers: Vec<layer>) -> w::t {
-    w::t { layers: layers.into_iter().map(entry_).collect(), ..w::default() }
+fn with_layers(layers: Vec<layer>) -> w::World {
+    w::World { layers: layers.into_iter().map(entry_).collect(), ..w::default() }
 }
 
 fn dark(v: f64) -> layer {
@@ -49,7 +49,7 @@ fn scatter(mirror: bool, emit_: emit, seed: i64) -> layer {
     }
 }
 
-fn bake(domains: Option<i64>, width: i64, height: i64, world: &w::t) -> w::baked {
+fn bake(domains: Option<i64>, width: i64, height: i64, world: &w::World) -> w::baked {
     w::bake(domains, None, width, height, world).expect("bake")
 }
 
@@ -160,7 +160,7 @@ fn promoted() {
         intensity: 2.,
         emit: emit::Dome,
     };
-    let world = |layers: Vec<layer>| w::t { sun: manual, rotation: 0.3, ..with_layers(layers) };
+    let world = |layers: Vec<layer>| w::World { sun: manual, rotation: 0.3, ..with_layers(layers) };
     let full = bake(None, 128, 64, &world(vec![dark(0.2), rect.clone(), scatter(true, emit::Light, 5), circle, sun.clone()]));
     let only = bake(None, 128, 64, &world(vec![rect, scatter(false, emit::Light, 5), sun]));
     let p = full.camera.pixels.len();
@@ -256,7 +256,7 @@ fn cdf() {
 /// north = -Z), or `None` below the horizon.
 fn linked_sun(latitude: f64, day_of_year: i64, hours: f64) -> Option<vec3::T> {
     let world = with_layers(vec![dark(0.), layer::Sun { angular_radius: 0.05, intensity: 50., tint: w::rgb(1., 1., 0.9) }]);
-    bake(None, 16, 8, &w::t { sun: sun_mode::Linked, rotation: 0., latitude, day_of_year, time_of_day: hours, ..world })
+    bake(None, 16, 8, &w::World { sun: sun_mode::Linked, rotation: 0., latitude, day_of_year, time_of_day: hours, ..world })
         .sun
         .map(|s| s.direction)
 }
@@ -298,10 +298,10 @@ fn round_trip() {
 
 #[test]
 fn cached() {
-    let context = w::Private::create_cache_context();
-    w::Private::with_cache_context(&context, &mut || {
+    let context = w::private::create_cache_context();
+    w::private::with_cache_context(&context, &mut || {
         let a = w::bake_cached(32, 16, &w::default()).expect("bake");
-        let b = w::bake_cached(32, 16, &w::t { exposure: 2., ..w::default() }).expect("bake");
+        let b = w::bake_cached(32, 16, &w::World { exposure: 2., ..w::default() }).expect("bake");
         check("exposure-only change hits the cache", Arc::ptr_eq(&a.camera.pixels, &b.camera.pixels) && b.exposure == 2.);
         let _ = background::Environment;
     });

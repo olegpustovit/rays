@@ -1232,7 +1232,7 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
 }
 
 /// The pointer: pan, a press on a wire or the canvas, the rubber band.
-pub fn pointer_step(t: Pane, ui: &mut Ui, frame: &rframe::t, canvas: &UiBox, canvas_signal: &Signal, tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize]) -> (Pane, Vec<Change>) {
+pub fn pointer_step(t: Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, canvas_signal: &Signal, tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize]) -> (Pane, Vec<Change>) {
     let mut emit: Vec<Change> = Vec::new();
     let mut t = t;
     let non_left = |sg: &Signal| sg.button != Some(MouseButton::LeftButton) && sg.button.is_some();
@@ -1784,7 +1784,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
     (drawn_items, drawn_zones)
 }
 
-pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::t) -> (Pane, Vec<Change>) {
+pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (Pane, Vec<Change>) {
     // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
     let mut t = if t.framed {
         t

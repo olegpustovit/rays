@@ -37,7 +37,7 @@ pub fn mouse_move(point: (i64, i64)) -> Event {
 }
 
 /// `frame ~mouse ~keys ~events ()`: a 1000 x 700 frame.
-pub fn frame(mouse: (i64, i64), keys: Vec<Key>, events: Vec<Event>) -> rframe::t {
+pub fn frame(mouse: (i64, i64), keys: Vec<Key>, events: Vec<Event>) -> rframe::Frame {
     let mut input = input::at_time(0.0);
     input.frame = 0;
     input.tick = 0;
@@ -45,16 +45,16 @@ pub fn frame(mouse: (i64, i64), keys: Vec<Key>, events: Vec<Event>) -> rframe::t
     input.pointer = (mouse.0 as f64, mouse.1 as f64);
     input.keys = keys;
     input.events = events;
-    rframe::t { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    rframe::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
 /// `frame ()`
-pub fn frame0() -> rframe::t {
+pub fn frame0() -> rframe::Frame {
     frame((0, 0), Vec::new(), Vec::new())
 }
 
 /// `frame ~mouse ~events ()`
-pub fn frame_ev(mouse: (i64, i64), events: Vec<Event>) -> rframe::t {
+pub fn frame_ev(mouse: (i64, i64), events: Vec<Event>) -> rframe::Frame {
     frame(mouse, Vec::new(), events)
 }
 
@@ -93,7 +93,7 @@ pub fn load_workspace(name: &str) -> Workspace {
 }
 
 /// Run `f` over the pane inside one `Ui::frame` (the frame's closure returns nothing).
-pub fn in_frame(ui: &mut Ui, fr: &rframe::t, view: Pane) -> (Pane, Vec<Change>) {
+pub fn in_frame(ui: &mut Ui, fr: &rframe::Frame, view: Pane) -> (Pane, Vec<Change>) {
     let mut cell = Some(view);
     let mut out: Option<(Pane, Vec<Change>)> = None;
     ui.frame(fr, &mut |ui: &mut Ui| {
@@ -103,7 +103,7 @@ pub fn in_frame(ui: &mut Ui, fr: &rframe::t, view: Pane) -> (Pane, Vec<Change>) 
 }
 
 /// `scope_step`: the layout settles in a frame without events, then the frame runs.
-pub fn scope_step(ui: &mut Ui, view: Pane, fr: &rframe::t) -> (Pane, Vec<Change>) {
+pub fn scope_step(ui: &mut Ui, view: Pane, fr: &rframe::Frame) -> (Pane, Vec<Change>) {
     let mut settle = fr.clone();
     settle.input.events = Vec::new();
     let (view, _) = in_frame(ui, &settle, view);
@@ -176,17 +176,17 @@ pub mod g {
         Change::Syntax_edit(op)
     }
 
-    pub fn frame(mouse: (i64, i64), keys: Vec<Key>, events: Vec<Event>) -> rframe::t {
+    pub fn frame(mouse: (i64, i64), keys: Vec<Key>, events: Vec<Event>) -> rframe::Frame {
         let mut fr = super::frame(mouse, keys, events);
         fr.input.size = (3000, 2000);
         fr
     }
 
-    pub fn frame0() -> rframe::t {
+    pub fn frame0() -> rframe::Frame {
         frame((0, 0), Vec::new(), Vec::new())
     }
 
-    pub fn frame_ev(mouse: (i64, i64), events: Vec<Event>) -> rframe::t {
+    pub fn frame_ev(mouse: (i64, i64), events: Vec<Event>) -> rframe::Frame {
         frame(mouse, Vec::new(), events)
     }
 

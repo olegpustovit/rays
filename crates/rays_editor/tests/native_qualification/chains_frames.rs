@@ -17,18 +17,18 @@ impl Animation {
     }
 }
 impl Drop for Animation {fn drop(&mut self){sop::session::close(&mut self.session);}}
-fn binding(gpu:&wg::t,g:&g::T)->Option<surface::DeviceBinding> {wg::display(gpu,g).map(|(k,n,i,c,f)|(k,n,i,c,Rc::from(f)))}
-fn scene(g:&g::T,gpu:Option<&wg::t>)->rays::scene3::t {
+fn binding(gpu:&wg::WorkspaceGpu,g:&g::T)->Option<surface::DeviceBinding> {wg::display(gpu,g).map(|(k,n,i,c,f)|(k,n,i,c,Rc::from(f)))}
+fn scene(g:&g::T,gpu:Option<&wg::WorkspaceGpu>)->rays::scene3::Scene3 {
     let surface=surface::of_geometry(None,g).unwrap();
     match gpu {Some(gpu)=>surface::scene3(None,Some(&|g|binding(gpu,g)),&surface).unwrap(),None=>surface::scene3(None,None,&surface).unwrap()}
 }
-fn picture(canvas:&rays::canvas::t,camera:&rays::camera::t,g:&g::T,gpu:Option<&wg::t>,world:Option<&rays::world::baked>)->(Vec<u8>,std::time::Duration) {
+fn picture(canvas:&rays::canvas::t,camera:&rays::camera::Camera,g:&g::T,gpu:Option<&wg::WorkspaceGpu>,world:Option<&rays::world::baked>)->(Vec<u8>,std::time::Duration) {
     let start=std::time::Instant::now();let scene=scene(g,gpu); let scene=world.map(|w|rays::scene3::with_world(w.clone(),&scene)).unwrap_or(scene);
     rays::canvas::render(None,canvas,&[rays::scene::clear(color::black()),rays::scene::view3d(None,camera,scene)]).unwrap();
     let elapsed=start.elapsed();(rays::canvas::pixels(canvas).unwrap().into_iter().flat_map(|c|[c.r as u8,c.g as u8,c.b as u8,c.a as u8]).collect(),elapsed)
 }
-fn mesh(scene:&rays::scene3::t)->rays::mesh::t {let mut m=None;rays::scene3::Walk::iter_batches(&mut |d,_|m=Some(d.mesh.clone()),scene);m.unwrap()}
-fn trace(tracer:&mut Option<pt::PathTracer>,mesh:rays::mesh::t,camera:&rays::camera::t)->(Vec<u8>,std::time::Duration) {
+fn mesh(scene:&rays::scene3::Scene3)->rays::mesh::Mesh {let mut m=None;rays::scene3::walk::iter_batches(&mut |d,_|m=Some(d.mesh.clone()),scene);m.unwrap()}
+fn trace(tracer:&mut Option<pt::PathTracer>,mesh:rays::mesh::Mesh,camera:&rays::camera::Camera)->(Vec<u8>,std::time::Duration) {
     let start=std::time::Instant::now();let material=pt::material(None,None,None,None,pt::Linear_color::rgb(0.8,0.7,0.6));
     if let Some(t)=tracer {pt::replace_mesh(t,&pt::mesh(None,None,&[(mesh,material)]).unwrap()).unwrap();}
     else {*tracer=Some(pt::create(&Default::default(),128,128,&pt::Scene {objects:vec![(mesh,material)],spheres:vec![],strands:vec![],environment:pt::Environment {sky:pt::Linear_color::rgb(0.6,0.7,0.9),ground:pt::Linear_color::rgb(0.3,0.3,0.3),panels:vec![]},lights:vec![]}).unwrap());}
@@ -87,7 +87,7 @@ pub(super) fn run() {
                 let bounds=geometry_view::bounds(&d);let boxed=wg::image_stats(&gpu).0;assert!(boxed.readback_bytes-drawn.readback_bytes<=24576);assert_eq!(boxed.materialisations,drawn.materialisations);assert!(p::resident(g::positions(&d)));
                 let sunlit=world.as_ref().map(|w|{let (pixels,_)=picture(&canvas,&camera,&d,Some(&gpu),Some(w));let stats=wg::image_stats(&gpu).0;assert!(stats.readback_bytes-boxed.readback_bytes<=24576);assert_eq!(stats.materialisations,boxed.materialisations);assert!(p::resident(g::positions(&d)));assert_ne!(pixels,shown);pixels});
                 if triangles {
-                    let mesh=mesh(&scene(&d,Some(&gpu)));assert!(rays::mesh::View::device(&mesh).is_some());let before=wg::image_stats(&gpu).0;
+                    let mesh=mesh(&scene(&d,Some(&gpu)));assert!(rays::mesh::view::device(&mesh).is_some());let before=wg::image_stats(&gpu).0;
                     let (dp,seconds)=trace(&mut device_tracer,mesh.clone(),&camera);if frame>0 {trace_times.push(seconds);}assert_eq!(pt::private::refits(device_tracer.as_ref().unwrap()),frame);assert!(dp.iter().enumerate().filter(|(i,c)|i%4!=3&&**c>8).count()>=dp.len()/8);
                     let after=wg::image_stats(&gpu).0;assert_eq!(after.readback_bytes,before.readback_bytes);assert_eq!(after.materialisations,before.materialisations);assert!(p::resident(g::positions(&d)));
                     if !bare {let host=rays_mesh::to_trace_mesh(&rays_mesh::of_mesh(&mesh).unwrap()).unwrap();let (hp,seconds)=trace(&mut host_tracer,host,&camera);assert_eq!(dp,hp);if frame>0 {host_trace_times.push(seconds);}}

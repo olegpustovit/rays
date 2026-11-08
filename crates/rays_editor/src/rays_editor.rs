@@ -70,7 +70,7 @@ pub mod Editor {
     }
 
     /// The object's 3D scene, pieces exploded as its node says.
-    pub fn draw(node: &sop::node::T, prepared: &cook::prepared) -> Result<rays::scene3::t, rdk_rays::surface::ConversionError> {
+    pub fn draw(node: &sop::node::T, prepared: &cook::prepared) -> Result<rays::scene3::Scene3, rdk_rays::surface::ConversionError> {
         cook::draw(node, prepared)
     }
 
@@ -87,26 +87,26 @@ pub mod Editor {
         loop_model::create(options, workspace, source, prepare, draw)
     }
 
-    pub fn update(mut value: t, frame_: &frame::t) -> t {
+    pub fn update(mut value: t, frame_: &frame::Frame) -> t {
         editor_loop::update(&mut value, frame_);
         value
     }
 
     /// `update`, also building sketch-owned kit widgets below the camera and render sections shown
     /// while no node is selected. The result is `None` on frames where that panel is not built.
-    pub fn update_with(mut value: t, frame_: &frame::t, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (t, Option<Rc<dyn Any>>) {
+    pub fn update_with(mut value: t, frame_: &frame::Frame, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (t, Option<Rc<dyn Any>>) {
         let inspected = editor_loop::update_with(&mut value, frame_, inspector);
         (value, inspected)
     }
 
     /// Call from the sketch's `after_present` when driving the environment manually so PNG requests
     /// save the completed frame.
-    pub fn after_present(mut value: t, frame_: &frame::t) -> t {
+    pub fn after_present(mut value: t, frame_: &frame::Frame) -> t {
         editor_loop::after_present(&mut value, frame_);
         value
     }
 
-    pub fn scene(value: &t, frame_: &frame::t) -> Vec<rays::scene::node> {
+    pub fn scene(value: &t, frame_: &frame::Frame) -> Vec<rays::scene::node> {
         editor_loop::scene_of(value, frame_)
     }
 
@@ -118,11 +118,11 @@ pub mod Editor {
         editor_loop::crash_dump(value, directory)
     }
 
-    pub fn viewport_camera(value: &t, key: &str) -> rays::camera::t {
+    pub fn viewport_camera(value: &t, key: &str) -> rays::camera::Camera {
         loop_model::viewport_camera(value, key)
     }
 
-    pub fn lights(value: &t) -> Vec<rays::light::t> {
+    pub fn lights(value: &t) -> Vec<rays::light::Light> {
         loop_model::lights(value)
     }
 
@@ -271,12 +271,12 @@ pub mod Editor {
     pub type render_settings = objects::root::Render;
 
     /// The ACTIVE camera object's view and lens (the viewport camera when the document has none).
-    pub fn render_camera(value: &t) -> rays::camera::t {
+    pub fn render_camera(value: &t) -> rays::camera::Camera {
         value.extra.document_camera.clone()
     }
 
     /// What the view pane shows this frame, for a sketch's own renderer.
-    pub fn view_camera(value: &t) -> rays::camera::t {
+    pub fn view_camera(value: &t) -> rays::camera::Camera {
         loop_model::view_camera(value)
     }
 
@@ -285,7 +285,7 @@ pub mod Editor {
     }
 
     /// The rect inside the view pane (pane-relative) that the render fills.
-    pub fn film(value: &t, frame_: &frame::t) -> (i64, i64, i64, i64) {
+    pub fn film(value: &t, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
         loop_model::film(value, frame_)
     }
 
@@ -323,7 +323,7 @@ pub mod Editor {
     }
 
     /// Replace the camera orbit from code (the OCaml `{ editor with camera }`).
-    pub fn set_camera(value: t, camera: easy_camera::t) -> t {
+    pub fn set_camera(value: t, camera: easy_camera::EasyCamera) -> t {
         let mut value = value;
         value.camera = camera;
         value.rest = None;
@@ -400,7 +400,7 @@ pub mod Reduce {
     /// Reduces one frame in which no pane was built: the keys are `actions`, the list's selection
     /// is `select` (scene object ids), and `preview` puts a payload in flight whose hot target shows
     /// that edit on a scratch document, as a carry does.
-    pub fn step(editor: Editor::t, select: Option<&[i64]>, preview: Option<&fe::Op>, actions: &[action], frame_: &frame::t) -> Result<Editor::t, String> {
+    pub fn step(editor: Editor::t, select: Option<&[i64]>, preview: Option<&fe::Op>, actions: &[action], frame_: &frame::Frame) -> Result<Editor::t, String> {
         let core = editor_reduce::reduce_idle(select, preview, &editor.core, actions, frame_)?;
         Ok(Editor::with_core(editor, core))
     }
@@ -477,7 +477,7 @@ pub mod Workspace {
         Ok(out)
     }
 
-    pub fn document_camera(document: &Document, base: &easy_camera::t) -> easy_camera::t {
+    pub fn document_camera(document: &Document, base: &easy_camera::EasyCamera) -> easy_camera::EasyCamera {
         let scene = &document.scene;
         let first = editor_document::objects::ids("camera", scene).first().copied();
         match first.and_then(|id| editor_document::kind_graph::find(scene, id)).and_then(|n| editor_document::objects::camera::of_node(&n)) {
@@ -487,7 +487,7 @@ pub mod Workspace {
     }
 
     /// The camera of the scene's first camera node, or the default base camera.
-    pub fn declared_camera(factories: Option<Vec<Factory>>, doc: &workspace_doc::T, base: &easy_camera::t) -> easy_camera::t {
+    pub fn declared_camera(factories: Option<Vec<Factory>>, doc: &workspace_doc::T, base: &easy_camera::EasyCamera) -> easy_camera::EasyCamera {
         let options = lowering::Options { factories: Some(factories.unwrap_or_else(sop::nodes::factories)), ..Default::default() };
         match lowering::of_workspace(&options, doc) {
             Err(_) => base.clone(),
@@ -577,7 +577,7 @@ pub mod Workspace {
         let failure: Rc<std::cell::RefCell<Option<Diagnostic>>> = Rc::new(std::cell::RefCell::new(None));
         let (view_host, view_images, view_failure, view_doc, view_plan, view_state) = (host.clone(), images.clone(), failure.clone(), doc.clone(), evaluated.plan.clone(), state.clone());
         let (width, height) = (window.width, window.height);
-        let view = move |_model: &dyn std::any::Any, frame_: &rays::frame::t| -> Vec<rays::scene::node> {
+        let view = move |_model: &dyn std::any::Any, frame_: &rays::frame::Frame| -> Vec<rays::scene::node> {
             let live = input::Frame { dt: 1. / fps as f64, frame: frame_.input.frame, tick: frame_.input.tick, size: (width, height), ..input::at_time(frame_.input.t) };
             let images = view_images.clone();
             let (state, plan) = (view_state.clone(), view_plan.clone());
@@ -686,8 +686,8 @@ pub mod Measure {
         }
     }
 
-    fn frame_at(width: i64, height: i64, tick: i64) -> frame::t {
-        frame::t {
+    fn frame_at(width: i64, height: i64, tick: i64) -> frame::Frame {
+        frame::Frame {
             input: input::Frame { dt: 1. / 60., frame: tick, tick, size: (width, height), pointer: (-100., -100.), ..input::at_time(tick as f64 / 60.) },
             pixel_scale: (1., 1.),
             fps: 60.,

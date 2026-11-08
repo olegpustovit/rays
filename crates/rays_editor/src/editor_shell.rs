@@ -171,7 +171,7 @@ pub fn shell_hidden<'a>(value: impl Into<ModelView<'a>>, shell: &shell) -> Vec<P
     }
 }
 
-pub fn geometry<'a>(value: impl Into<ModelView<'a>>, shell: &shell, frame: &frame::t) -> layout::Geometry {
+pub fn geometry<'a>(value: impl Into<ModelView<'a>>, shell: &shell, frame: &frame::Frame) -> layout::Geometry {
     let value = &value.into();
     let state = |path: &[usize]| panel_state(value, path);
     let hidden = shell_hidden(value, shell);
@@ -193,7 +193,7 @@ pub fn active_view<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) ->
     }
 }
 
-pub fn panes<'a>(value: impl Into<ModelView<'a>>, frame: &frame::t) -> layout::Panes {
+pub fn panes<'a>(value: impl Into<ModelView<'a>>, frame: &frame::Frame) -> layout::Panes {
     let value = &value.into();
     let g = geometry(value, &value.workspace, frame);
     let panes = layout::panes(&g);
@@ -204,7 +204,7 @@ pub fn panes<'a>(value: impl Into<ModelView<'a>>, frame: &frame::t) -> layout::P
 }
 
 /// The viewports on screen and the bodies they are drawn in.
-pub fn view_bodies<'a>(value: impl Into<ModelView<'a>>, frame: &frame::t) -> Vec<(String, layout::Bounds)> {
+pub fn view_bodies<'a>(value: impl Into<ModelView<'a>>, frame: &frame::Frame) -> Vec<(String, layout::Bounds)> {
     let value = &value.into();
     geometry(value, &value.workspace, frame)
         .leaves

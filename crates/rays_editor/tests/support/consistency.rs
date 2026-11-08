@@ -74,8 +74,8 @@ pub fn contains(text: &str, sub: &str) -> bool {
 }
 
 /// `Test_editor_input.frame`
-pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
-    frame::t {
+pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
+    frame::Frame {
         input: input::Frame {
             dt: 1. / 60.,
             frame: count,
@@ -93,12 +93,12 @@ pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mous
     }
 }
 
-pub fn frame_at(mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
+pub fn frame_at(mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
     frame_full(&[], &[], (0., 0.), mouse, events, count)
 }
 
 /// The consistency suite's `frame n`: the pointer at (450, 300), no events.
-pub fn frame(n: i64) -> frame::t {
+pub fn frame(n: i64) -> frame::Frame {
     frame_at((450., 300.), Vec::new(), n)
 }
 
@@ -106,7 +106,7 @@ pub fn click_events(p: (f64, f64)) -> Vec<Event> {
     vec![Event::Pointer_pressed(MouseButton::LeftButton, p), Event::Pointer_released(MouseButton::LeftButton, p)]
 }
 
-pub fn undo_frame(point: (f64, f64), n: i64) -> frame::t {
+pub fn undo_frame(point: (f64, f64), n: i64) -> frame::Frame {
     frame_full(&[], &[Key::Meta], (0., 0.), point, vec![Event::Key_pressed(Key::KeyChar('z'))], n)
 }
 
@@ -128,7 +128,7 @@ pub fn with_dir<R>(f: impl FnOnce(&str) -> R) -> R {
 
 /// `create` with the OCaml tests' defaults: platform Apple, await, the surface prepare and a
 /// scene3 draw of the prepared surface (`native`: the app's own prepare and draw).
-pub fn create(ws: &workspace_doc::T, presets: Option<&str>, camera: Option<rays::easy_camera::t>, native: bool) -> Ed {
+pub fn create(ws: &workspace_doc::T, presets: Option<&str>, camera: Option<rays::easy_camera::EasyCamera>, native: bool) -> Ed {
     let options = Editor::Create {
         platform: Some(input::Platform::Apple),
         ui_text_size: Some(if native { 13 } else { 11 }),

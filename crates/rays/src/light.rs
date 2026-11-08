@@ -18,7 +18,7 @@ pub enum kind {
 
 /// `diffuse` tints both the diffuse and the specular response.
 #[derive(Clone, Debug, PartialEq)]
-pub struct t {
+pub struct Light {
     pub kind: kind,
     pub diffuse: color::T,
     pub intensity: f64,
@@ -40,12 +40,12 @@ pub fn attenuation(constant: Option<f64>, quadratic: Option<f64>) -> Result<atte
     Ok(attenuation { constant, quadratic })
 }
 
-fn make(diffuse: Option<color::T>, intensity: Option<f64>, kind: kind) -> Result<t, String> {
+fn make(diffuse: Option<color::T>, intensity: Option<f64>, kind: kind) -> Result<Light, String> {
     let intensity = intensity.unwrap_or(1.);
     if !intensity.is_finite() || intensity < 0. {
         return Err("Light: intensity must be finite and non-negative".to_string());
     }
-    Ok(t { kind, diffuse: diffuse.unwrap_or_else(color::white), intensity })
+    Ok(Light { kind, diffuse: diffuse.unwrap_or_else(color::white), intensity })
 }
 
 fn direction(value: vec3::T) -> Result<vec3::T, String> {
@@ -55,11 +55,11 @@ fn direction(value: vec3::T) -> Result<vec3::T, String> {
     Ok(vec3::normalize(value))
 }
 
-pub fn directional(diffuse: Option<color::T>, intensity: Option<f64>, value: vec3::T) -> Result<t, String> {
+pub fn directional(diffuse: Option<color::T>, intensity: Option<f64>, value: vec3::T) -> Result<Light, String> {
     make(diffuse, intensity, kind::Directional { direction: direction(value)? })
 }
 
-pub fn point(diffuse: Option<color::T>, intensity: Option<f64>, attenuation: Option<attenuation>, at: vec3::T) -> Result<t, String> {
+pub fn point(diffuse: Option<color::T>, intensity: Option<f64>, attenuation: Option<attenuation>, at: vec3::T) -> Result<Light, String> {
     make(diffuse, intensity, kind::Point { position: at, attenuation: attenuation.unwrap_or(NO_ATTENUATION) })
 }
 
@@ -72,7 +72,7 @@ pub fn spot(
     value: vec3::T,
     cutoff: f64,
     concentration: f64,
-) -> Result<t, String> {
+) -> Result<Light, String> {
     if !cutoff.is_finite() || cutoff <= 0. || cutoff > std::f64::consts::PI / 2. {
         return Err("Light.spot: cutoff must be in (0, pi/2]".to_string());
     }
@@ -102,7 +102,7 @@ pub fn area(
     value: vec3::T,
     width: f64,
     height: f64,
-) -> Result<t, String> {
+) -> Result<Light, String> {
     let samples = samples.unwrap_or(9);
     if !(width.is_finite() && height.is_finite()) || width <= 0. || height <= 0. {
         return Err("Light.area: dimensions must be finite and positive".to_string());

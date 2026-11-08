@@ -81,6 +81,6 @@ pub fn isogrid_deferred() {
     Editor::close(&ed);
 }
 
-fn frame_n(count: i64) -> rays::frame::t {
-    rays::frame::t { input: input::Frame { frame: count, tick: count, size: (1280, 900), ..input::at_time(0.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
+fn frame_n(count: i64) -> rays::frame::Frame {
+    rays::frame::Frame { input: input::Frame { frame: count, tick: count, size: (1280, 900), ..input::at_time(0.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }

@@ -22,8 +22,8 @@ fn matte() -> p::Material {
 }
 
 struct Lit {
-    sphere: rays::mesh::t,
-    floor: rays::mesh::t,
+    sphere: rays::mesh::Mesh,
+    floor: rays::mesh::Mesh,
     scene: p::Scene,
 }
 
@@ -40,17 +40,17 @@ fn lit_scene() -> Lit {
     Lit { sphere, floor, scene }
 }
 
-fn lit_camera() -> rays::camera::t {
+fn lit_camera() -> rays::camera::Camera {
     rays::camera::perspective(Some(0.9), None, None, vec3::create(0., 2., 6.), vec3::create(0., 0.8, 0.)).unwrap()
 }
 
-fn prepared(mesh: &rays::mesh::t, material: p::Material) -> p::Mesh {
+fn prepared(mesh: &rays::mesh::Mesh, material: p::Material) -> p::Mesh {
     get(p::mesh(None, None, &[(mesh.clone(), material)]))
 }
 
 /// `capture`: settle a camera change before resetting, so its preview cannot change the counted sample
 /// total in a deterministic comparison.
-fn capture(tracer: &mut p::PathTracer, camera: &rays::camera::t, count: i64) -> Vec<u8> {
+fn capture(tracer: &mut p::PathTracer, camera: &rays::camera::Camera, count: i64) -> Vec<u8> {
     frames(tracer, camera, 2);
     p::reset(tracer);
     frames(tracer, camera, count);
@@ -266,7 +266,7 @@ fn cap() {
 /// ACES/2.2 resolve maps to 224. A zero-intensity panel exercises the MIS path (panel sampling plus the
 /// weighted BSDF escape) and must not change the mean. The analytic sphere in the furnace conserves energy
 /// like the floor, which checks sphere hits, normals, and the table binding.
-fn furnace_mean(scene: &p::Scene, camera: &rays::camera::t) -> f64 {
+fn furnace_mean(scene: &p::Scene, camera: &rays::camera::Camera) -> f64 {
     let mut tracer = get(p::create(&pt::options(4), 32, 32, scene));
     frames(&mut tracer, camera, 16);
     get(p::flush(&mut tracer));

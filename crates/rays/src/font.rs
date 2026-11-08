@@ -38,9 +38,9 @@ pub struct font_data {
 
 /// An open font: clones share one font (the OCaml value's identity is `same`).
 #[derive(Clone)]
-pub struct t(Rc<font_data>);
+pub struct Font(Rc<font_data>);
 
-pub fn same(a: &t, b: &t) -> bool {
+pub fn same(a: &Font, b: &Font) -> bool {
     Rc::ptr_eq(&a.0, &b.0)
 }
 
@@ -66,9 +66,9 @@ fn message(operation: &str, error: &runtime_resources::error) -> String {
     format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
-fn make(resource: Result<RFont::Font, runtime_resources::error>) -> Result<t, String> {
+fn make(resource: Result<RFont::Font, runtime_resources::error>) -> Result<Font, String> {
     match resource {
-        Ok(resource) => Ok(t(Rc::new(font_data {
+        Ok(resource) => Ok(Font(Rc::new(font_data {
             resource: RefCell::new(resource),
             generation: Cell::new(1),
             cache: RefCell::new(text_cache()),
@@ -77,11 +77,11 @@ fn make(resource: Result<RFont::Font, runtime_resources::error>) -> Result<t, St
     }
 }
 
-pub fn load(path: &str, size: i64) -> Result<t, String> {
+pub fn load(path: &str, size: i64) -> Result<Font, String> {
     make(RFont::open_file(path, size as f64))
 }
 
-pub fn system(size: Option<i64>) -> Result<t, String> {
+pub fn system(size: Option<i64>) -> Result<Font, String> {
     make(RFont::open_system(size.unwrap_or(16) as f64))
 }
 
@@ -98,7 +98,7 @@ fn resource_align(a: alignment) -> RFont::alignment {
     }
 }
 
-fn paint(density: i64, wrap: Option<i64>, align: alignment, font: &t, text: &str, mode: render_mode) -> Result<image::t, String> {
+fn paint(density: i64, wrap: Option<i64>, align: alignment, font: &Font, text: &str, mode: render_mode) -> Result<image::t, String> {
     let rendered = RFont::render(&mut font.0.resource.borrow_mut(), wrap, Some(resource_align(align)), density, rgba(mode), text.as_bytes());
     match rendered {
         Err(error) => Err(message("Font.render_text", &error)),
@@ -124,7 +124,7 @@ fn key(wrap: Option<i64>, align: alignment, density: i64, size: i64, text: &str,
     TableKey::Str(format!("{density}|{size}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
 }
 
-pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<i64>, font: &t, text: &str, mode: render_mode) -> Result<image::t, String> {
+pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<i64>, font: &Font, text: &str, mode: render_mode) -> Result<image::t, String> {
     let align = align.unwrap_or(alignment::Left);
     let density = density.unwrap_or(1);
     let k = key(wrap, align, density, 0, text, mode);
@@ -138,7 +138,7 @@ pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<
     Ok(img)
 }
 
-fn clear_cache(font: &t) {
+fn clear_cache(font: &Font) {
     side_lru::clear(&mut font.0.cache.borrow_mut());
 }
 
@@ -151,7 +151,7 @@ fn resource_hinting(h: hinting) -> RFont::hinting {
     }
 }
 
-pub fn set_hinting(font: &t, value: hinting) -> Result<(), String> {
+pub fn set_hinting(font: &Font, value: hinting) -> Result<(), String> {
     let result = RFont::set_hinting(&mut font.0.resource.borrow_mut(), resource_hinting(value));
     match result {
         Ok(()) => {
@@ -163,20 +163,20 @@ pub fn set_hinting(font: &t, value: hinting) -> Result<(), String> {
     }
 }
 
-pub fn destroy(font: &t) {
+pub fn destroy(font: &Font) {
     clear_cache(font);
     let _ = RFont::destroy(&mut font.0.resource.borrow_mut());
 }
 
 /// Vertical metrics in logical points; errors on a destroyed font.
-pub fn get_ascent(font: &t) -> Result<i64, String> {
+pub fn get_ascent(font: &Font) -> Result<i64, String> {
     match RFont::metrics(&mut font.0.resource.borrow_mut()) {
         Ok(m) => Ok(m.ascent),
         Err(error) => Err(message("Font.metrics", &error)),
     }
 }
 
-pub mod Raster {
+pub mod raster {
     use super::*;
 
     struct automatic_entry {
@@ -229,7 +229,7 @@ pub mod Raster {
                 true,
                 side_lru::UNBOUNDED_BYTES,
                 Box::new(|_key, item| {
-                    if let Ok(font) = item.downcast::<super::t>() {
+                    if let Ok(font) = item.downcast::<super::Font>() {
                         super::destroy(&font);
                     }
                 }),
@@ -259,10 +259,10 @@ pub mod Raster {
         side_lru::clear(&mut context.0.automatic_fonts.borrow_mut());
     }
 
-    fn font(context: &cache_context, size: i64) -> Result<super::t, String> {
+    fn font(context: &cache_context, size: i64) -> Result<super::Font, String> {
         let k = TableKey::Int(size);
         if let Some(item) = side_lru::find(&mut context.0.automatic_fonts.borrow_mut(), &k) {
-            if let Ok(value) = item.downcast::<super::t>() {
+            if let Ok(value) = item.downcast::<super::Font>() {
                 return Ok((*value).clone());
             }
         }
@@ -371,7 +371,7 @@ pub mod Raster {
         }
     }
 
-    pub fn generation(font: &super::t) -> i64 {
+    pub fn generation(font: &super::Font) -> i64 {
         font.0.generation.get()
     }
 
@@ -385,7 +385,7 @@ pub mod Raster {
     /// Rasterize one code point at `density` exactly as it appears inside a rendered string;
     /// `glyph_advance` is the pen advance in backing pixels and `glyph_alpha` holds one coverage
     /// byte per pixel.
-    pub fn glyph(density: Option<i64>, font: &super::t, code: i64) -> Result<glyph, String> {
+    pub fn glyph(density: Option<i64>, font: &super::Font, code: i64) -> Result<glyph, String> {
         let density = density.unwrap_or(1);
         let Some(ch) = u32::try_from(code).ok().and_then(char::from_u32) else {
             return Err("Font.glyph: invalid code point".to_string());

@@ -13,12 +13,12 @@ fn main() {
     let gpu = flow_native::workspace_gpu::create(None);
     let mut editor = Editor::create(Editor::Create { gpu_owner: Some(gpu.clone()), await_: Some(true), ..Default::default() }, &doc, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap();
     let at = (300., 400.);
-    let frame = |tick: i64, pointer: (f64, f64), events: Vec<input::Event>, drag: bool, delta: (f64, f64)| rays::frame::t {
+    let frame = |tick: i64, pointer: (f64, f64), events: Vec<input::Event>, drag: bool, delta: (f64, f64)| rays::frame::Frame {
         input: input::Frame { dt: 1. / 60., frame: tick, tick, size: (w, h), pointer,
             buttons: if drag { vec![input::MouseButton::LeftButton] } else { vec![] },
             keys: if drag { vec![input::Key::Alt] } else { vec![] }, events, ..input::at_time(tick as f64 / 60.) },
         pixel_scale: (1., 1.), fps: 60., mouse_delta: delta };
-    let mut step = |editor: Editor::t, f: &rays::frame::t| -> (Editor::t, f64, f64) {
+    let mut step = |editor: Editor::t, f: &rays::frame::Frame| -> (Editor::t, f64, f64) {
         let t0 = Instant::now();
         let e = Editor::update(editor, f);
         let t1 = Instant::now();

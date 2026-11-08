@@ -18,7 +18,7 @@ fn v3(x: f64, y: f64, z: f64) -> vec3::T {
     vec3::create(x, y, z)
 }
 
-fn prepared(geometry: &rays::mesh::t, material: &p::Material) -> p::Mesh {
+fn prepared(geometry: &rays::mesh::Mesh, material: &p::Material) -> p::Mesh {
     get(p::mesh(None, None, &[(geometry.clone(), material.clone())]))
 }
 
@@ -37,9 +37,9 @@ fn unresolve(value: f64) -> f64 {
 }
 
 struct Objects {
-    floor: rays::mesh::t,
-    boxm: rays::mesh::t,
-    ball: rays::mesh::t,
+    floor: rays::mesh::Mesh,
+    boxm: rays::mesh::Mesh,
+    ball: rays::mesh::Mesh,
 }
 
 fn objects() -> Objects {
@@ -60,7 +60,7 @@ fn base_scene(o: &Objects) -> p::Scene {
     }
 }
 
-fn camera() -> rays::camera::t {
+fn camera() -> rays::camera::Camera {
     rays::camera::perspective(Some(0.9), None, None, v3(0., 2.5, 6.), v3(0., 0.6, 0.)).unwrap()
 }
 
@@ -320,7 +320,7 @@ fn light_of() {
     let plane = p::Scene { objects: vec![(o.floor.clone(), p::material(Some(1.), None, None, None, rgb(0.8, 0.8, 0.8)))], spheres: vec![], strands: vec![], environment: black(), lights: vec![] };
     let mut tracer = get(p::create(&pt::options(4), 32, 32, &plane));
     let camera = rays::camera::perspective(Some(0.1), None, None, v3(0., 4., 0.001), vec3::zero()).unwrap();
-    let mut check = |name: &str, light: rays::light::t, expected: f64| {
+    let mut check = |name: &str, light: rays::light::Light, expected: f64| {
         get(p::set_lights(&mut tracer, &[p::light_of(&light)]));
         p::reset(&mut tracer);
         frames(&mut tracer, &camera, 32);

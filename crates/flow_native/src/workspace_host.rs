@@ -10,7 +10,7 @@ use flow_ir::flow_ir::Executor as I;
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{self as v, Value};
 use input::{Event, Frame};
-use rays::audio::Sample;
+use rays::audio::sample;
 use rays::sketch;
 use rays_diagnostic::Diagnostic;
 
@@ -23,10 +23,10 @@ pub struct prepared {
     pub edges: Vec<bool>,
 }
 
-pub struct t {
-    pub resources: workspace_resources::t,
-    pub images: workspace_images::t,
-    pub gpu: workspace_gpu::t,
+pub struct WorkspaceHost {
+    pub resources: workspace_resources::WorkspaceResources,
+    pub images: workspace_images::WorkspaceImages,
+    pub gpu: workspace_gpu::WorkspaceGpu,
     pub prepared: Option<prepared>,
     /// newest first
     pub pending_saves: Vec<String>,
@@ -42,16 +42,16 @@ pub struct CreateOptions {
     pub seed: Option<i64>,
     pub grain: Option<i64>,
     pub domains: Option<i64>,
-    pub gpu: Option<workspace_gpu::t>,
+    pub gpu: Option<workspace_gpu::WorkspaceGpu>,
 }
 
-pub fn create(o: CreateOptions) -> t {
+pub fn create(o: CreateOptions) -> WorkspaceHost {
     let resources = workspace_resources::create();
     let gpu = match o.gpu {
         Some(gpu) => gpu,
         None => workspace_gpu::create(None),
     };
-    t {
+    WorkspaceHost {
         images: workspace_images::create(o.seed, o.grain, o.domains, &gpu, &resources),
         resources,
         gpu,
@@ -64,7 +64,7 @@ pub fn create(o: CreateOptions) -> t {
     }
 }
 
-pub fn take_events(host: &mut t) -> Vec<Event> {
+pub fn take_events(host: &mut WorkspaceHost) -> Vec<Event> {
     let mut events = std::mem::take(&mut host.pending_events);
     events.reverse();
     events
@@ -137,7 +137,7 @@ fn collect(plan: &e::Plan, prepared: &prepared, state: &e::State, reference: boo
 }
 
 /// The effects whose `when` rose this frame.
-pub fn requests(host: &mut t, reference: bool, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<Vec<request>, Diagnostic> {
+pub fn requests(host: &mut WorkspaceHost, reference: bool, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<Vec<request>, Diagnostic> {
     let Some(value) = effects(workspace, plan) else { return Ok(Vec::new()) };
     let id = workspace_images::plan_id(plan);
     if !host.prepared.as_ref().is_some_and(|p| p.plan_id == id) {
@@ -169,7 +169,7 @@ fn text(value: &Value) -> Result<String, Diagnostic> {
     }
 }
 
-fn sample(host: &t, state: &e::State, live: &Frame, value: &Value) -> Result<std::rc::Rc<std::cell::RefCell<Sample::t>>, Diagnostic> {
+fn sample(host: &WorkspaceHost, state: &e::State, live: &Frame, value: &Value) -> Result<std::rc::Rc<std::cell::RefCell<sample::Sample>>, Diagnostic> {
     let prepared = host.prepared.as_ref().expect("prepared");
     let audio_error = |message: &str| v::fail("E_AUDIO", message);
     match value {
@@ -187,21 +187,21 @@ fn sample(host: &t, state: &e::State, live: &Frame, value: &Value) -> Result<std
             match prepared.plan.nodes[*id as usize].kind.as_str() {
                 "audio/load" => {
                     let path = text_of("path", "")?;
-                    workspace_resources::sample(&host.resources, &format!("load:{path}"), &|audio| Sample::load(audio, &path))
+                    workspace_resources::sample(&host.resources, &format!("load:{path}"), &|audio| sample::load(audio, &path))
                 }
                 "audio/synth" => {
                     let wave = text_of("waveform", "sine")?;
                     let (frequency, duration, volume) = (number("frequency", 440.)?, number("duration", 0.1)?, number("volume", 1.)?);
                     let waveform = match wave.as_str() {
-                        "sine" => Sample::waveform::Sine,
-                        "square" => Sample::waveform::Square,
-                        "triangle" => Sample::waveform::Triangle,
-                        "sawtooth" => Sample::waveform::Saw,
+                        "sine" => sample::waveform::Sine,
+                        "square" => sample::waveform::Square,
+                        "triangle" => sample::waveform::Triangle,
+                        "sawtooth" => sample::waveform::Saw,
                         _ => return Err(audio_error("Unknown audio waveform.")),
                     };
                     // the OCaml key prints the floats in hex; their bits name them just as well
                     let key = format!("synth:{wave}:{:x}:{:x}:{:x}", frequency.to_bits(), duration.to_bits(), volume.to_bits());
-                    workspace_resources::sample(&host.resources, &key, &|audio| Sample::synth(audio, Some(volume), waveform, frequency, duration))
+                    workspace_resources::sample(&host.resources, &key, &|audio| sample::synth(audio, Some(volume), waveform, frequency, duration))
                 }
                 _ => Err(audio_error("Expected an audio sample node.")),
             }
@@ -210,7 +210,7 @@ fn sample(host: &t, state: &e::State, live: &Frame, value: &Value) -> Result<std
     }
 }
 
-fn perform(host: &mut t, state: &e::State, live: &Frame, requests: &[request]) -> Result<(), Diagnostic> {
+fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &[request]) -> Result<(), Diagnostic> {
     for r in requests {
         host.fired += 1;
         let arg = |name: &str| assoc(&r.args, name).expect("effect argument");
@@ -229,7 +229,7 @@ fn perform(host: &mut t, state: &e::State, live: &Frame, requests: &[request]) -
                 let audio = host.resources.0.borrow().audio.clone().expect("audio");
                 let volume = assoc(&r.args, "volume").map(v::num).transpose()?;
                 let loops = assoc(&r.args, "loops").map(v::int_of).transpose()?;
-                Sample::play(&audio, loops, volume, &sample_.borrow()).map_err(|m| v::fail("E_AUDIO", &m))?;
+                sample::play(&audio, loops, volume, &sample_.borrow()).map_err(|m| v::fail("E_AUDIO", &m))?;
             }
             "host/dialog" => {
                 let kind = match text(arg("kind"))?.as_str() {
@@ -274,12 +274,12 @@ fn perform(host: &mut t, state: &e::State, live: &Frame, requests: &[request]) -
     Ok(())
 }
 
-pub fn update(host: &mut t, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<(), Diagnostic> {
+pub fn update(host: &mut WorkspaceHost, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<(), Diagnostic> {
     let requests = requests(host, false, state, live, workspace, plan)?;
     perform(host, state, live, &requests)
 }
 
-pub fn save_pending(host: &mut t, save: &mut dyn FnMut(&str) -> Result<(), String>) -> Result<(), Diagnostic> {
+pub fn save_pending(host: &mut WorkspaceHost, save: &mut dyn FnMut(&str) -> Result<(), String>) -> Result<(), Diagnostic> {
     let mut paths = std::mem::take(&mut host.pending_saves);
     paths.reverse();
     for path in paths {
@@ -288,7 +288,7 @@ pub fn save_pending(host: &mut t, save: &mut dyn FnMut(&str) -> Result<(), Strin
     Ok(())
 }
 
-pub fn close(host: &mut t) {
+pub fn close(host: &mut WorkspaceHost) {
     workspace_resources::close(&host.resources);
     workspace_images::close(&host.images);
     workspace_gpu::close(&host.gpu);
@@ -313,7 +313,7 @@ pub fn export_check(workspace: &workspace_doc::T, plan: &e::Plan) -> Result<(), 
     }
 }
 
-pub fn export_update(host: &mut t, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<(), Diagnostic> {
+pub fn export_update(host: &mut WorkspaceHost, state: &e::State, live: &Frame, workspace: &workspace_doc::T, plan: &e::Plan) -> Result<(), Diagnostic> {
     let requests = requests(host, false, state, live, workspace, plan)?;
     // Export never initializes audio. Save paths are captured after presentation.
     if requests.iter().any(|r| r.kind == "host/quit" || r.kind == "host/dialog") {

@@ -1,4 +1,4 @@
-//! Immutable facts about one editor routing step (same shape as `rays::frame::t`, without the sketch crate).
+//! Immutable facts about one editor routing step (same shape as `rays::frame::Frame`, without the sketch crate).
 use input::{Event, MouseButton};
 
 #[derive(Clone, Debug, PartialEq)]

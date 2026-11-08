@@ -4,10 +4,10 @@ use crate::layout::{self as L, Axis, Panel, Size, Panels};
 use editor_core::panels;
 use rays::frame;
 
-pub fn frame_of(size: (i64, i64)) -> frame::t {
+pub fn frame_of(size: (i64, i64)) -> frame::Frame {
     let mut input = input::at_time(0.0);
     input.size = size;
-    frame::t { input, pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) }
 }
 
 fn leaf(p: Panel) -> Panels {

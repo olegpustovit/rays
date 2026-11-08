@@ -106,7 +106,7 @@ pub struct ViewWorld {
 #[derive(Clone)]
 pub struct ViewRoot {
     pub params: root::Parameters,
-    pub camera: Option<rcamera::t>,
+    pub camera: Option<rcamera::Camera>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

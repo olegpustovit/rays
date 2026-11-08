@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-fn sphere_mesh() -> rays::mesh::t {
+fn sphere_mesh() -> rays::mesh::Mesh {
     let (segments, rings) = (24_i64, 16_i64);
     let row = segments + 1;
     let normals: Vec<vec3::T> = (0..row * (rings + 1))
@@ -34,7 +34,7 @@ fn sphere_mesh() -> rays::mesh::t {
         indices[(cell * 6) as usize..(cell * 6 + 6) as usize].copy_from_slice(&[a, b, d + 1, a, d + 1, d]);
     }
     let planes = rays::mesh::Vec3_buffer::of_planes(normals.iter().map(|p| p.x).collect(), normals.iter().map(|p| p.y).collect(), normals.iter().map(|p| p.z).collect());
-    rays::mesh::View::create_packed_owned(None, Some(indices), Some(planes.clone()), None, None, planes).expect("sphere")
+    rays::mesh::view::create_packed_owned(None, Some(indices), Some(planes.clone()), None, None, planes).expect("sphere")
 }
 
 fn window_sketch_retained_view() {
@@ -82,7 +82,7 @@ fn window_sketch_retained_view() {
     let program = sketch::program {
         init: Box::new(|_| Box::new(0_i64) as sketch::model),
         update: Box::new(|m: &mut dyn Any, _| Some(Box::new(m.downcast_ref::<i64>().copied().unwrap_or(0) + 1) as sketch::model)),
-        view: Box::new(move |_, f: &frame::t| -> Vec<node> {
+        view: Box::new(move |_, f: &frame::Frame| -> Vec<node> {
             let camera = if f.input.frame > 8 { &near_camera } else { &far_camera };
             // the corner square changes every frame: only the UI layer differs between frames
             vec![
@@ -91,7 +91,7 @@ fn window_sketch_retained_view() {
                 scene::rect((0, 0), 6, 6, Some(color::rgb(((f.input.frame * 20) % 256) as i64, 0, 0)), None).expect("rect"),
             ]
         }),
-        after_present: Some(Box::new(move |_, f: &frame::t| {
+        after_present: Some(Box::new(move |_, f: &frame::Frame| {
             record.borrow_mut().insert(f.input.frame, grid());
             None
         })),

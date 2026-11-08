@@ -128,7 +128,7 @@ pub fn level_target(followed: Option<String>, has_route: bool, value2: &t, level
 }
 
 /// The history key of a gesture still in progress, if the frame's change belongs to one.
-pub fn gesture_key<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t, loaded: bool, world_added: bool, world_label: &Option<String>, result: &frame_result) -> Option<String> {
+pub fn gesture_key<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::Frame, loaded: bool, world_added: bool, world_label: &Option<String>, result: &frame_result) -> Option<String> {
     let value = &value.into();
     let dragging = frame::mouse_down(MouseButton::LeftButton, frame_) || frame::has_event(&|e| matches!(e, Event::Pointer_released(MouseButton::LeftButton, _)), frame_);
     if !dragging || loaded || world_added || world_label.is_some() {
@@ -681,7 +681,7 @@ pub fn carry_report_of(value: &t, carrying: bool, text: &text_pane::State, text_
 }
 
 /// `[y]`: the payload is held by the handle (no pointer capture); a press or Enter puts it.
-pub fn pick_up(value2: &t, actions: &[action], frame_: &frame::t, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
+pub fn pick_up(value2: &t, actions: &[action], frame_: &frame::Frame, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
     match &value2.carry {
         Some(c) => (Some(carry { report, ..c.clone() }), None),
         None if actions.contains(&action::Pick_up) => match carry_payload(value2) {
@@ -711,7 +711,7 @@ pub fn pick_up(value2: &t, actions: &[action], frame_: &frame::t, report: Option
 }
 
 /// What the camera is asked to frame: the object a `F` in a graph names, or every cooked object.
-pub fn framing_step(value2: &t, doc: &Document, cooked: &cook::update_result, frame_request: Option<(i64, i64)>, actions: &[action], frame_: &frame::t, result: &frame_result) -> (Option<i64>, Option<Option<bounds>>) {
+pub fn framing_step(value2: &t, doc: &Document, cooked: &cook::update_result, frame_request: Option<(i64, i64)>, actions: &[action], frame_: &frame::Frame, result: &frame_result) -> (Option<i64>, Option<Option<bounds>>) {
     // Framing: local bounds move into the world with their object; at the scene level [F] frames
     // every cooked object.
     let world_bounds = |id: i64, b: &bounds| cook::transformed(&objects::world(&doc.scene, id), b);
@@ -822,7 +822,7 @@ pub fn undo_step(value: &t, carrying: bool, actions: &[action], notice: Option<(
 }
 
 /// The pointer and keys of the sketch go to the pane in focus, else the first viewer.
-pub fn view_input(value: &t, result: &frame_result) -> frame::t {
+pub fn view_input(value: &t, result: &frame_result) -> frame::Frame {
     let is_view = |p: &Panel| matches!(p, Panel::View(_));
     let owner = match result.pane_keys.iter().find(|(_, (panel, _))| *panel == result.focus && is_view(panel)) {
         Some((key, _)) => Some(*key),
@@ -864,7 +864,7 @@ pub struct Frame_input {
     pub carrying: bool,
     pub held_keys: Vec<input::Key>,
     pub leader: router::State,
-    pub frame: frame::t,
+    pub frame: frame::Frame,
     pub hud: Option<(String, f64)>,
     pub actions: Vec<action>,
     pub guide: bool,
@@ -1436,7 +1436,7 @@ fn network_present<'a>(value: impl Into<ModelView<'a>>) -> bool {
 /// One reduction with no panes built, for tests of the reducer: the keys are `actions`, the list's
 /// selection is `select`, and `preview` puts a payload in flight whose hot target shows that edit
 /// on a scratch document (as `carry_step` leaves the model while a target is hot).
-pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, actions: &[action], frame_: &frame::t) -> Result<t, String> {
+pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, actions: &[action], frame_: &frame::Frame) -> Result<t, String> {
     let mut value = value.clone();
     value.live_frame = flow_native::live_frame::of_frame(frame_);
     if let Some(op) = preview {
@@ -1513,7 +1513,7 @@ pub fn idle_result<'a>(value: impl Into<ModelView<'a>>, selection: selection::t)
 }
 
 /// The reducer's input for a frame without panes.
-pub fn idle_input<'a>(value: impl Into<ModelView<'a>>, actions: &[action], frame_: &frame::t) -> Frame_input {
+pub fn idle_input<'a>(value: impl Into<ModelView<'a>>, actions: &[action], frame_: &frame::Frame) -> Frame_input {
     let value = &value.into();
     Frame_input {
         carry_changed: false,

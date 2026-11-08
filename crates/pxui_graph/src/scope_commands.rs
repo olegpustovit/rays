@@ -757,7 +757,7 @@ pub fn run_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
     }
 }
 
-/// A binding and the scope command it runs (`command::t.action` is the host's code, unused here).
+/// A binding and the scope command it runs (`command::Command.action` is the host's code, unused here).
 pub type Cmd = (command::Command, Command);
 
 fn make(guide: &[Ctx], id: &str, label: &str, action: Command, key: Key, modifiers: &[Key]) -> Cmd {

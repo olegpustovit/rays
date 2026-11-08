@@ -6,12 +6,12 @@ use crate::scene3 as d3;
 use rays_math::color;
 use rays_math::vec3;
 
-fn triangle() -> mesh::t {
-    let m = mesh::View::create_owned(None, None, &[vec3::zero(), vec3::unit_x(), vec3::unit_y()]).expect("triangle");
+fn triangle() -> mesh::Mesh {
+    let m = mesh::view::create_owned(None, None, &[vec3::zero(), vec3::unit_x(), vec3::unit_y()]).expect("triangle");
     mesh::recalculate_normals(&m)
 }
 
-fn lights(samples: i64) -> Vec<light::t> {
+fn lights(samples: i64) -> Vec<light::Light> {
     let attenuation = light::attenuation(Some(2.), Some(3.)).expect("attenuation");
     let diffuse = Some(color::rgb(51, 102, 153));
     let at = vec3::create(1., 2., 3.);
@@ -24,7 +24,7 @@ fn lights(samples: i64) -> Vec<light::t> {
     ]
 }
 
-fn stage(lights: Vec<light::t>) -> Vec<u8> {
+fn stage(lights: Vec<light::Light>) -> Vec<u8> {
     let cam = camera::perspective(Some(1.), Some(0.1), Some(100.), vec3::create(0., 0., 10.), vec3::zero()).expect("camera");
     let scene3 = d3::create(Some(lights), None, None, None, vec![d3::mesh(None, None, None, None, None, triangle())]).expect("scene3");
     let staged = Layer::stage_native(320, 240, &[scene::view3d(None, &cam, scene3)]).expect("stage");

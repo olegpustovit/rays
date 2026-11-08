@@ -47,16 +47,16 @@ pub fn kc(c: char) -> Key {
 }
 
 /// The OCaml test_ui `frame`: a 320x240 frame at `time` with the given scale, keys and events.
-pub fn frame_at(keys: Vec<Key>, scale: f64, time: f64, events: Vec<Event>) -> frame::t {
+pub fn frame_at(keys: Vec<Key>, scale: f64, time: f64, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(time);
     input.dt = 1.0 / 60.0;
     input.size = (320, 240);
     input.pointer = (0.0, 0.0);
     input.keys = keys;
     input.events = events;
-    frame::t { input, pixel_scale: (scale, scale), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (scale, scale), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
-pub fn simple_frame(events: Vec<Event>) -> frame::t {
+pub fn simple_frame(events: Vec<Event>) -> frame::Frame {
     frame_at(Vec::new(), 1.0, 0.0, events)
 }

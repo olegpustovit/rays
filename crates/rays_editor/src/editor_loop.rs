@@ -79,15 +79,15 @@ fn document_memory(value: &Arc<editor_document::document::T>) {
     });
 }
 
-fn host_gpu(value: &t) -> workspace_gpu::t {
+fn host_gpu(value: &t) -> workspace_gpu::WorkspaceGpu {
     value.host.borrow().gpu.clone()
 }
-fn host_images(value: &t) -> workspace_images::t {
+fn host_images(value: &t) -> workspace_images::WorkspaceImages {
     value.host.borrow().images.clone()
 }
 
 /// each canvas panel's picture: reused while its plan, size and preview stand, else rendered
-pub fn canvas_pictures(context_error: Option<String>, value: &t, input: &input::Frame, raw_frame: &frame::t, core: &m::t, control: &V::control) -> (Vec<(String, canvas_picture)>, Option<String>) {
+pub fn canvas_pictures(context_error: Option<String>, value: &t, input: &input::Frame, raw_frame: &frame::Frame, core: &m::t, control: &V::control) -> (Vec<(String, canvas_picture)>, Option<String>) {
     let mut pictures: Vec<(String, canvas_picture)> = Vec::new();
     let mut error = context_error;
     let geometry = editor_shell::geometry(core, &core.workspace, raw_frame);
@@ -200,7 +200,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &t, input: &input::
 }
 
 /// the images the selected nodes show are prepared before the frame; what failed is reported
-pub fn preview_images(value: &t, frame_: &frame::t) -> Vec<String> {
+pub fn preview_images(value: &t, frame_: &frame::Frame) -> Vec<String> {
     let lowered = &value.core.doc.workspace.lowered;
     let images = host_images(value);
     workspace_images::bind(&images, lowered);
@@ -235,7 +235,7 @@ pub fn preview_images(value: &t, frame_: &frame::t) -> Vec<String> {
 /// are reduced before sealing its history. Updates the drag and returns the input
 /// with the drag's pointer events taken out, the held modifiers at the end of the frame, and the
 /// pane's press and release for the camera's pointer grab.
-pub fn world_drag_frame(value: &mut t, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[action], sent: &frame::t, area: Bounds) -> (frame::t, Vec<Key>, (bool, bool)) {
+pub fn world_drag_frame(value: &mut t, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[action], sent: &frame::Frame, area: Bounds) -> (frame::Frame, Vec<Key>, (bool, bool)) {
     let (previous_level, previous_map, held_keys, pane_keys) = before;
     let seal = |core: &mut m::t| { core.history = history::seal(false, core.history.clone()); };
     let world_drag = if loaded
@@ -279,7 +279,7 @@ pub fn world_drag_frame(value: &mut t, before: (Level, bool, &[Key], &[(i64, (Pa
     } else {
         let mut events: Vec<Event> = sent.input.events.iter().filter(|e| !matches!(e, Event::Pointer_pressed(MouseButton::LeftButton, _) | Event::Pointer_moved(_) | Event::Pointer_released(MouseButton::LeftButton, _))).cloned().collect();
         events.push(Event::Pointer_cancelled(MouseButton::LeftButton));
-        frame::t {
+        frame::Frame {
             input: input::Frame { events, buttons: sent.input.buttons.iter().filter(|b| **b != MouseButton::LeftButton).cloned().collect(), ..sent.input.clone() },
             mouse_delta: (0., 0.),
             ..sent.clone()
@@ -332,7 +332,7 @@ pub fn with_view_overlays(value: &mut t, now: f64, extra: &V::extra, viewing: &O
 /// The frame's clicks pick in the view, and a payload carried over a viewport finds its surface.
 /// Updates the core and the press still waiting for its release.
 #[allow(clippy::too_many_arguments)]
-pub fn pick_in_views(value: &mut t, focused: &Focus, camera: &V::camera, extra: &V::extra, area: Bounds, modifiers: &[Key], input: &frame::t, raw_frame: &frame::t) {
+pub fn pick_in_views(value: &mut t, focused: &Focus, camera: &V::camera, extra: &V::extra, area: Bounds, modifiers: &[Key], input: &frame::Frame, raw_frame: &frame::Frame) {
     // A press and release within the drag threshold is a click: the view picks.
     let mut press = value.pick_press;
     let mut clicks: Vec<(f64, f64)> = Vec::new();
@@ -386,7 +386,7 @@ pub fn pick_in_views(value: &mut t, focused: &Focus, camera: &V::camera, extra: 
 thread_local! {
     /// the images the frame's cook may ask the dimensions of; the probe records keep the closure
     /// past the frame, so it reads the images of the latest frame (never the model)
-    static FRAME_IMAGES: RefCell<Option<workspace_images::t>> = const { RefCell::new(None) };
+    static FRAME_IMAGES: RefCell<Option<workspace_images::WorkspaceImages>> = const { RefCell::new(None) };
 }
 
 fn error_status_of(value: &t, image_errors: &[String]) -> Option<String> {
@@ -406,7 +406,7 @@ fn error_status_of(value: &t, image_errors: &[String]) -> Option<String> {
     }
 }
 
-pub fn update_with(value: &mut t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> Option<Rc<dyn Any>> {
+pub fn update_with(value: &mut t, frame_: &frame::Frame, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> Option<Rc<dyn Any>> {
     let drawn_before = value.drawn.clone();
     let followed = follow_focus(&value, &value.core, frame_);
     (value.viewing, value.camera, value.cameras) = (followed.viewing, followed.camera, followed.cameras);
@@ -579,7 +579,7 @@ pub fn update_with(value: &mut t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui)
     let bodies: Vec<(String, Bounds)> = if V::ui_visible(&control) { editor_shell::view_bodies(&value.core, &raw_frame) } else { vec![("@hidden".to_string(), (0, 0, raw_frame.input.size.0, raw_frame.input.size.1))] };
     let pending = value.pending_render.is_some();
     let focused_rendered = focused_image_of(&focused.viewing, &views, &rendered);
-    let render_views: Vec<(String, Bounds, rays::camera::t, rays::scene3::t)> = bodies
+    let render_views: Vec<(String, Bounds, rays::camera::Camera, rays::scene3::Scene3)> = bodies
         .iter()
         .filter_map(|(key, bounds)| {
             let scene3 = if key == "@hidden" { focused_rendered.clone() } else { views.iter().find(|(k, _)| k == key).map(|(_, s)| s.clone()).or_else(|| rendered.clone()) };
@@ -648,8 +648,8 @@ pub fn update_with(value: &mut t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui)
     inspected
 }
 
-pub fn compose_scene(value: &t, frame_: &frame::t) -> Nodes {
-    let pv = |key: &str, vp: Bounds, view_: &rays::camera::t, r: &rays::scene3::t| paint_view(value, key, vp, view_, r);
+pub fn compose_scene(value: &t, frame_: &frame::Frame) -> Nodes {
+    let pv = |key: &str, vp: Bounds, view_: &rays::camera::Camera, r: &rays::scene3::Scene3| paint_view(value, key, vp, view_, r);
     let guides = |bounds: Bounds| -> Nodes {
         if value.core.map_view {
             Vec::new()
@@ -694,7 +694,7 @@ pub fn compose_scene(value: &t, frame_: &frame::t) -> Nodes {
 pub const rest_seconds: f64 = 1.;
 pub const rest_frames: i64 = 2;
 
-pub fn same_input(a: &frame::t, b: &frame::t) -> bool {
+pub fn same_input(a: &frame::Frame, b: &frame::Frame) -> bool {
     a.input.size == b.input.size && a.pixel_scale == b.pixel_scale && a.input.pointer == b.input.pointer && a.input.buttons == b.input.buttons && a.input.keys == b.input.keys
 }
 
@@ -711,7 +711,7 @@ pub fn reads_clock(value: &t) -> bool {
         || lowered.plan.nodes.iter().any(|n| n.args.iter().any(|(_, v)| flow_eval::frame_dependent(v)))
 }
 
-pub fn may_rest(value: &t, frame_: &frame::t) -> bool {
+pub fn may_rest(value: &t, frame_: &frame::Frame) -> bool {
     let core = &value.core;
     frame_.input.events.is_empty()
         && value.world_drag.is_none()
@@ -726,7 +726,7 @@ pub fn may_rest(value: &t, frame_: &frame::t) -> bool {
         && (timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing || !reads_clock(value))
 }
 
-pub fn settle(before_rest: &Option<rest>, value: &mut t, frame_: &frame::t) {
+pub fn settle(before_rest: &Option<rest>, value: &mut t, frame_: &frame::Frame) {
     if !may_rest(&value, frame_) {
         value.rest = None;
         return;
@@ -739,7 +739,7 @@ pub fn settle(before_rest: &Option<rest>, value: &mut t, frame_: &frame::t) {
     value.rest = Some(rest { picture, still, shown: frame_.clone() });
 }
 
-pub fn rests(value: &t, frame_: &frame::t) -> Option<rest> {
+pub fn rests(value: &t, frame_: &frame::Frame) -> Option<rest> {
     match &value.rest {
         Some(rest_) if rest_.still >= rest_frames && frame_.input.events.is_empty() && same_input(&rest_.shown, frame_) && frame_.input.t >= rest_.shown.input.t && frame_.input.t - rest_.shown.input.t < rest_seconds => Some(rest_.clone()),
         _ => None,
@@ -760,7 +760,7 @@ pub fn source_at_rest(value: &mut t, now: f64) -> bool {
     }
 }
 
-pub fn update(value: &mut t, frame_: &frame::t) {
+pub fn update(value: &mut t, frame_: &frame::Frame) {
     if rests(value, frame_).is_none() || !source_at_rest(value, frame_.input.t) {
         let before = value.rest.clone();
         update_with(value, frame_, &|_ui| Rc::new(()));
@@ -840,7 +840,7 @@ pub fn memory_boundary(value: &mut t) {
     }
 }
 
-pub fn after_present(value: &mut t, frame_: &frame::t) {
+pub fn after_present(value: &mut t, frame_: &frame::Frame) {
     observe_presented(value);
     let saved = workspace_host::save_pending(&mut value.host.borrow_mut(), &mut |path| rays::canvas::save_screen_png(path));
     if let Err(diagnostic) = saved {
@@ -857,7 +857,7 @@ pub fn after_present(value: &mut t, frame_: &frame::t) {
     }
 }
 
-pub fn scene_of(value: &t, frame_: &frame::t) -> Nodes {
+pub fn scene_of(value: &t, frame_: &frame::Frame) -> Nodes {
     match &value.rest {
         Some(rest) if same_input(&rest.shown, frame_) => rest.picture.clone(),
         _ => compose_scene(value, frame_),
@@ -962,7 +962,7 @@ pub fn run(
     // the loop: after an edit or a reload only the history decides how long it lives.
     let handed = Rc::new(RefCell::new(opened));
     let deterministic = matches!(config.clock, sketch::clock::Fixed(_));
-    let init: Box<dyn Fn(&frame::t) -> sketch::model> = {
+    let init: Box<dyn Fn(&frame::Frame) -> sketch::model> = {
         let handed = handed.clone();
         let (workspace, source, prepare, draw) = (workspace.clone(), source.clone(), prepare.clone(), draw.clone());
         let slots = RefCell::new(Some((inputs, presets, factories, gpu_owner, settings, lights, camera, background, preferences, platform, ui_font)));

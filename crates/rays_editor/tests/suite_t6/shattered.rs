@@ -79,6 +79,6 @@ pub fn shattered_studio() {
     let geometry = sop::payload::geometry(&colored.payload).unwrap();
     let prepared = rdk_rays::surface::of_geometry(colored.instances.as_ref().map(|i| (**i).clone()), &geometry).unwrap();
     let explosion = rdk_rays::packed_pieces::explosion(sop::node::operation(&graph), &sop::node::parameter_fields(&graph));
-    let drawings = rays::scene3::Walk::drawings(&rdk_rays::surface::scene3(explosion.as_ref(), None, &prepared).unwrap());
+    let drawings = rays::scene3::walk::drawings(&rdk_rays::surface::scene3(explosion.as_ref(), None, &prepared).unwrap());
     assert!(drawings.len() == 4, "{} material batches", drawings.len());
 }

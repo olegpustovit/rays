@@ -16,7 +16,7 @@ pub struct canvas_data {
     execution: RefCell<Option<rr::Renderer>>,
     destroyed: Cell<bool>,
     caches: Layer::cache_context,
-    world_caches: world::Private::cache_context,
+    world_caches: world::private::cache_context,
     native_caches: native_scene_lowering::cache_context,
     epoch: Cell<i64>,
     completed: Cell<bool>,
@@ -41,7 +41,7 @@ pub fn create(width: i64, height: i64) -> Result<t, String> {
             execution: RefCell::new(None),
             destroyed: Cell::new(false),
             caches: Layer::create_cache_context(),
-            world_caches: world::Private::create_cache_context(),
+            world_caches: world::private::create_cache_context(),
             native_caches: native_scene_lowering::create_cache_context(),
             epoch: Cell::new(0),
             completed: Cell::new(false),
@@ -108,7 +108,7 @@ pub fn render(density: Option<i64>, value: &t, scene_: &[scene::node]) -> Result
     let density = density.unwrap_or(1);
     let mut result: Result<(), String> = Ok(());
     Layer::with_cache_context(&value.0.caches, &mut || {
-        world::Private::with_cache_context(&value.0.world_caches, &mut || {
+        world::private::with_cache_context(&value.0.world_caches, &mut || {
             native_scene_lowering::with_cache_context(&value.0.native_caches, &mut || {
                 result = render_uncached(density, value, scene_);
             });

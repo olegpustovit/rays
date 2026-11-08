@@ -41,13 +41,13 @@ fn model() -> t {
     editor_setup::create(opts, &ws, Rc::new(cook::prepare)).expect("model")
 }
 
-fn frame_at(time: f64, buttons: Vec<MouseButton>, events: Vec<Event>) -> frame::t {
+fn frame_at(time: f64, buttons: Vec<MouseButton>, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(time);
     input.size = (800, 600);
     input.dt = 1.0 / 60.0;
     input.buttons = buttons;
     input.events = events;
-    frame::t { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
 /// The debug build's deep recursion wants a big stack (as `test_editor_model` does).
@@ -250,7 +250,7 @@ fn frame_helpers() {
 }
 
 /// `Ui.input` needs a completed PXUI frame: an empty one stands for the panes.
-fn prime(value: &t, frame: &frame::t) {
+fn prime(value: &t, frame: &frame::Frame) {
     value.ui.borrow_mut().frame(frame, &mut |_| {});
 }
 

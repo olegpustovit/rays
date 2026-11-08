@@ -9,11 +9,11 @@ use renderer::scene_execution as se;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub fn camera_() -> camera::t {
+pub fn camera_() -> camera::Camera {
     camera::orthographic(2., vec3::create(0., 0., 2.), vec3::zero()).expect("camera")
 }
 
-pub fn stage(m: &mesh::t) -> Rc<se::SampledDraw> {
+pub fn stage(m: &mesh::Mesh) -> Rc<se::SampledDraw> {
     let scene3 = d3::create(None, None, None, None, vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]).expect("scene3");
     let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]).expect("stage");
     staged.scene3[0].entries[0].clone()
@@ -35,11 +35,11 @@ pub fn make(colors: Vec<color::T>) -> made {
     (vertices, normals, Arc::new(vec![0, 1, 2]), colors)
 }
 
-pub fn mesh_of(m: made) -> mesh::t {
-    mesh::View::create_packed_shared(None, Some(m.2), Some(m.1), Some(Arc::new(m.3)), None, m.0).expect("mesh")
+pub fn mesh_of(m: made) -> mesh::Mesh {
+    mesh::view::create_packed_shared(None, Some(m.2), Some(m.1), Some(Arc::new(m.3)), None, m.0).expect("mesh")
 }
 
-pub fn pair() -> (mesh::t, mesh::t, Rc<se::SampledDraw>, Rc<se::SampledDraw>) {
+pub fn pair() -> (mesh::Mesh, mesh::Mesh, Rc<se::SampledDraw>, Rc<se::SampledDraw>) {
     let colors = vec![color::rgb(255, 0, 0), color::rgb(0, 255, 0), color::rgb(0, 0, 255)];
     let (vertices, normals, indices, _) = make(colors.clone());
     let source = mesh_of((vertices.clone(), normals.clone(), indices.clone(), colors));
@@ -56,7 +56,7 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         let packed = first.draw.mesh.vertices.clone();
         let attrs = attributes(&first);
         assert!(packed.len() == 72 && attrs.len() == 36);
-        let original = mesh::View::view(&source).unwrap();
+        let original = mesh::view::view(&source).unwrap();
         for (i, position) in original.vertices.iter().enumerate() {
             let normal = original.normals.as_ref().expect("normals")[i];
             for (word, expected) in [position.x, position.y, position.z, normal.x, normal.y, normal.z].iter().enumerate() {
@@ -80,10 +80,10 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         assert!(Rc::ptr_eq(&repeated.draw.mesh.vertices, &packed));
         assert!(Rc::ptr_eq(&repeated.vertex_attributes.as_ref().unwrap().1, &first.vertex_attributes.as_ref().unwrap().1));
         assert!(Rc::ptr_eq(&repeated.draw.mesh.indices, &first.draw.mesh.indices));
-        assert_eq!(d3::Walk::depth_clear(&d3::empty()), 1.);
+        assert_eq!(d3::walk::depth_clear(&d3::empty()), 1.);
         for samples in [1, 4, 9, 16] {
             let scene3 = d3::create(None, None, None, Some(samples), vec![d3::mesh(None, None, None, None, None, source.clone())]).expect("scene3");
-            assert_eq!(d3::Walk::depth_clear(&scene3), 1.);
+            assert_eq!(d3::walk::depth_clear(&scene3), 1.);
             let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]).expect("stage");
             for entry in &staged.scene3[0].entries {
                 assert!(entry.samples == samples && entry.draw.state.depth_clear == 1.);
@@ -108,13 +108,13 @@ fn with_cull_sets_every_mesh() {
     let plane = mesh::plane(1., 1.).expect("plane");
     let inner = d3::mesh(None, None, None, None, None, plane.clone());
     let scene3 = d3::create(None, None, None, None, vec![d3::group(vec![inner, d3::mesh(None, None, None, Some(d3::cull::Cull_back), None, plane)])]).expect("scene3");
-    let culls = |s: &d3::t| {
+    let culls = |s: &d3::Scene3| {
         let mut found = Vec::new();
-        d3::Walk::iter_batches(&mut |drawing, _| found.push(drawing.cull), s);
+        d3::walk::iter_batches(&mut |drawing, _| found.push(drawing.cull), s);
         found
     };
     assert!(culls(&scene3).iter().all(|c| *c == d3::cull::Cull_back));
-    let open = d3::Walk::with_cull(d3::cull::Cull_none, &scene3);
+    let open = d3::walk::with_cull(d3::cull::Cull_none, &scene3);
     assert_eq!(culls(&open).len(), 2);
     assert!(culls(&open).iter().all(|c| *c == d3::cull::Cull_none));
 }

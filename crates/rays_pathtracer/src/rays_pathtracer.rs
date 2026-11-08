@@ -69,7 +69,7 @@ pub struct Environment {
     pub panels: Vec<Panel>,
 }
 
-pub type Camera = rays::camera::t;
+pub type Camera = rays::camera::Camera;
 
 /// Rectangle area light of `size` (width, height) centred at `at`, facing `target`, two-sided. Sampled with
 /// shadow rays (next-event estimation); lights are analytic and, without a World (`set_world`), never appear
@@ -91,7 +91,7 @@ pub fn rect_light(intensity: f64, size: (f64, f64), target: vec3::T, at: vec3::T
 /// distance `d` receives irradiance `pi * intensity * color / d^2` (the raster World path's inverse: a rect
 /// of radiance `L` and area `A` is a `Light.t` of color `L * A / pi`). `color` is `diffuse / 255` as linear
 /// RGB; the rect's radiance is `pi * intensity / (width * height)`.
-pub fn light_of(l: &rays::light::t) -> Light {
+pub fn light_of(l: &rays::light::Light) -> Light {
     let c = l.diffuse;
     let color = linear::rgb(c.r as f64 / 255., c.g as f64 / 255., c.b as f64 / 255.);
     let rect = |at: vec3::T, target: vec3::T, distance2: f64, (w, h): (f64, f64)| Light { at, target, size: (w, h), color, intensity: std::f64::consts::PI * l.intensity * distance2 / (w * h) };
@@ -124,7 +124,7 @@ pub struct Strand {
 /// triangulation and normal generation happen before entering the path tracer.
 #[derive(Clone)]
 pub struct Scene {
-    pub objects: Vec<(rays::mesh::t, Material)>,
+    pub objects: Vec<(rays::mesh::Mesh, Material)>,
     pub spheres: Vec<Sphere>,
     pub strands: Vec<Strand>,
     pub environment: Environment,
@@ -309,13 +309,13 @@ pub fn prepare_extras(first_material: i64, spheres: &[Sphere], strands: &[Strand
 /// A lone triangle device mesh with normals (`Rays.Mesh.View.create_device`) is traced from the device: its
 /// corners are gathered there, never read back.
 /// ponytail: float4 colours take the host route; a vec4 gather is the upgrade if a sketch needs them.
-pub fn device_of(m: &rays::mesh::t) -> Option<mesh_data::Device> {
-    match rays::mesh::View::device(m) {
+pub fn device_of(m: &rays::mesh::Mesh) -> Option<mesh_data::Device> {
+    match rays::mesh::view::device(m) {
         Some((key, true)) if rays::mesh::mode(m) == rays::mesh::mode::Triangles => {
             let index_count = rays::mesh::index_count(m);
-            let width = rays::mesh::View::device_color_width(m);
+            let width = rays::mesh::view::device_color_width(m);
             if index_count > 0 && index_count % 3 == 0 && width != 4 {
-                Some(mesh_data::Device { key, vertex_count: rays::mesh::vertex_count(m), index_count, corners: rays::mesh::View::unread(m).indices, colored: width == 3, holder: m.clone() })
+                Some(mesh_data::Device { key, vertex_count: rays::mesh::vertex_count(m), index_count, corners: rays::mesh::view::unread(m).indices, colored: width == 3, holder: m.clone() })
             } else {
                 None
             }
@@ -329,7 +329,7 @@ pub fn device_of(m: &rays::mesh::t) -> Option<mesh_data::Device> {
 /// it: the tracer gathers its corners from the registered positions and normals on the device into a
 /// refittable structure, and a later mesh of the same topology refits that structure in place instead of
 /// rebuilding it. Such a mesh cannot join `mesh_instanced` or `scene_mesh`.
-pub fn mesh(spheres: Option<&[Sphere]>, strands: Option<&[Strand]>, objects: &[(rays::mesh::t, Material)]) -> Result<Mesh, String> {
+pub fn mesh(spheres: Option<&[Sphere]>, strands: Option<&[Strand]>, objects: &[(rays::mesh::Mesh, Material)]) -> Result<Mesh, String> {
     let spheres = spheres.unwrap_or(&[]);
     let strands = strands.unwrap_or(&[]);
     let extras = prepare_extras(objects.len() as i64, spheres, strands)?;

@@ -25,7 +25,7 @@ use crate::rays_mesh;
 /// initial domain.
 pub enum Preview {
     Pieces(packed_pieces::T),
-    Mesh(mesh::t),
+    Mesh(mesh::Mesh),
     Device(geometry::T),
 }
 
@@ -35,13 +35,13 @@ pub struct ConversionError(pub String);
 pub struct T {
     preview: Preview,
     transforms: Option<Vec<mat4::T>>,
-    batches: Vec<(material::t, Vec<i64>)>,
+    batches: Vec<(material::Material, Vec<i64>)>,
     host_reason: Option<String>,
     /// the device mesh last bound, reused while the display names the same registration
-    device_copy: RefCell<Option<(String, mesh::t)>>,
+    device_copy: RefCell<Option<(String, mesh::Mesh)>>,
     /// the host mesh of a device preview the device declined: one per surface, so drawing it again
     /// names the renderer's cached copy rather than converting and uploading anew
-    host_copy: RefCell<Option<mesh::t>>,
+    host_copy: RefCell<Option<mesh::Mesh>>,
 }
 
 /// What a successful device borrow reports: the key, whether N is bound, the device triangle index
@@ -260,7 +260,7 @@ pub fn host_reason(surface: &T) -> Option<String> {
 }
 
 // the host mesh of a device preview, reading P back
-fn host(g: &geometry::T) -> Result<mesh::t, String> {
+fn host(g: &geometry::T) -> Result<mesh::Mesh, String> {
     rays_mesh::to_mesh(g).map_err(text)
 }
 
@@ -273,7 +273,7 @@ pub fn scene3_result(
     explosion: Option<&Explosion>,
     device: Option<&dyn Fn(&geometry::T) -> Option<DeviceBinding>>,
     surface: &T,
-) -> Result<d3::t, String> {
+) -> Result<d3::Scene3, String> {
     let m = match &surface.preview {
         Preview::Mesh(m) => m.clone(),
         Preview::Pieces(pieces) => packed_pieces::mesh_for_explosion(explosion, pieces)?,
@@ -296,8 +296,8 @@ pub fn scene3_result(
                         None => {
                             let host_geometry = g.clone();
                             let bounds_geometry = g.clone();
-                            let m = mesh::View::create_device(
-                                mesh::View::device_args {
+                            let m = mesh::view::create_device(
+                                mesh::view::device_args {
                                     mode: Some(mode),
                                     indices,
                                     device_index_count,
@@ -340,18 +340,18 @@ pub fn scene3_result(
     };
     // back faces are culled: a closed surface draws about half its triangles. An open one (a
     // plane, a grid) is empty from behind; its winding decides which side shows.
-    let draw = |material: material::t, m: mesh::t| match &surface.transforms {
+    let draw = |material: material::Material, m: mesh::Mesh| match &surface.transforms {
         None => d3::mesh(Some(material), None, None, Some(cull::Cull_back), None, m),
         Some(transforms) => d3::instances_array(Some(material), None, Some(cull::Cull_back), None, m, transforms),
     };
     let drawings = if surface.batches.is_empty() {
         vec![draw(material::default(), m)]
     } else {
-        let view = mesh::View::packed_view(&m)?;
+        let view = mesh::view::packed_view(&m)?;
         let mut drawings = Vec::with_capacity(surface.batches.len());
         for (material, offsets) in &surface.batches {
             let indices: Vec<i64> = offsets.iter().map(|&o| view.indices[o as usize]).collect();
-            let batch = mesh::View::create_packed_shared(
+            let batch = mesh::view::create_packed_shared(
                 Some(view.mode),
                 Some(std::sync::Arc::new(indices)),
                 view.normals.clone(),
@@ -372,6 +372,6 @@ pub fn scene3(
     explosion: Option<&Explosion>,
     device: Option<&dyn Fn(&geometry::T) -> Option<DeviceBinding>>,
     surface: &T,
-) -> Result<d3::t, ConversionError> {
+) -> Result<d3::Scene3, ConversionError> {
     scene3_result(explosion, device, surface).map_err(ConversionError)
 }

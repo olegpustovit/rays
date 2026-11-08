@@ -67,7 +67,7 @@ pub fn triangles(g: &T) -> i64 {
 }
 
 /// Every polygon edge once, as a line mesh.
-pub fn wire_mesh(value: &T) -> Result<mesh::t, String> {
+pub fn wire_mesh(value: &T) -> Result<mesh::Mesh, String> {
     let topo = geometry::topology(value);
     let edges = topology_index::create(None, topo).map_err(|e| error::to_string(&e))?;
     let points = geometry::positions(value);
@@ -80,7 +80,7 @@ pub fn wire_mesh(value: &T) -> Result<mesh::t, String> {
         indices[(edge * 2) as usize] = a;
         indices[(edge * 2 + 1) as usize] = b;
     }
-    mesh::View::create_owned(Some(mesh::mode::Lines), Some(indices), &vertices)
+    mesh::view::create_owned(Some(mesh::mode::Lines), Some(indices), &vertices)
 }
 
 // ---- the sheet ----

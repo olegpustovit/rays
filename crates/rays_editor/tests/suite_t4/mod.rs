@@ -24,8 +24,8 @@ pub struct Opts {
 }
 
 /// test_editor_input.ml `frame` (size 900x640).
-pub fn frame(o: &Opts, mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
-    frame::t {
+pub fn frame(o: &Opts, mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
+    frame::Frame {
         input: input::Frame { dt: 1. / 60., frame: count, tick: count, size: (900, 640), pointer: mouse, keys: o.keys.clone(), buttons: o.buttons.clone(), events, ..input::at_time(count as f64 / 60.) },
         pixel_scale: (1., 1.),
         fps: 60.,
@@ -33,7 +33,7 @@ pub fn frame(o: &Opts, mouse: (f64, f64), events: Vec<Event>, count: i64) -> fra
     }
 }
 
-pub fn frame0() -> frame::t {
+pub fn frame0() -> frame::Frame {
     frame(&Opts::default(), (0., 0.), Vec::new(), 0)
 }
 

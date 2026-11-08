@@ -26,8 +26,8 @@ const STUDIO: &str = r##"(workspace studio
   (graph settings :context settings
     (settings/config :title "Studio" :width 1440 :height 900)))"##;
 
-fn frame_at(tick: i64) -> frame::t {
-    frame::t {
+fn frame_at(tick: i64) -> frame::Frame {
+    frame::Frame {
         input: input::Frame { dt: 1. / 60., frame: tick, tick, size: (960, 640), pointer: (-100., -100.), ..input::at_time(tick as f64 / 60.) },
         pixel_scale: (1., 1.),
         fps: 60.,

@@ -9,19 +9,19 @@ fn planes(values: &[vec3::T]) -> mesh::Vec3_buffer {
     mesh::Vec3_buffer::of_planes(values.iter().map(|p| p.x).collect(), values.iter().map(|p| p.y).collect(), values.iter().map(|p| p.z).collect())
 }
 
-pub fn packed(mode: Option<mesh::mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, normals: &[vec3::T], positions: &[vec3::T]) -> mesh::t {
-    mesh::View::create_packed_owned(mode, Some(indices), Some(planes(normals)), colors, None, planes(positions)).expect("packed mesh")
+pub fn packed(mode: Option<mesh::mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, normals: &[vec3::T], positions: &[vec3::T]) -> mesh::Mesh {
+    mesh::view::create_packed_owned(mode, Some(indices), Some(planes(normals)), colors, None, planes(positions)).expect("packed mesh")
 }
 
 /// Every vertex faces +Z.
-pub fn facing_z(mode: Option<mesh::mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, positions: &[vec3::T]) -> mesh::t {
+pub fn facing_z(mode: Option<mesh::mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, positions: &[vec3::T]) -> mesh::Mesh {
     let normals: Vec<vec3::T> = positions.iter().map(|_| vec3::unit_z()).collect();
     packed(mode, colors, indices, &normals, positions)
 }
 
 #[allow(dead_code)]
 /// A latitude/longitude sphere about the origin, wound as the other meshes.
-pub fn sphere(segments: i64, rings: i64, radius: f64) -> mesh::t {
+pub fn sphere(segments: i64, rings: i64, radius: f64) -> mesh::Mesh {
     let row = segments + 1;
     let normals: Vec<vec3::T> = (0..row * (rings + 1))
         .map(|index| {
@@ -44,7 +44,7 @@ pub fn sphere(segments: i64, rings: i64, radius: f64) -> mesh::t {
 
 /// An axis-aligned box about the origin: four vertices a face, outward normals, counter-clockwise
 /// seen from outside.
-pub fn box_(width: f64, height: f64, depth: f64) -> mesh::t {
+pub fn box_(width: f64, height: f64, depth: f64) -> mesh::Mesh {
     let half = vec3::create(width / 2., height / 2., depth / 2.);
     let faces = [
         (vec3::unit_x(), vec3::unit_y(), vec3::unit_z()),

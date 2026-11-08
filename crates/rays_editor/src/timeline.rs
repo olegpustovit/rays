@@ -67,7 +67,7 @@ pub fn seek(value: &t, frame: i64) -> (t, Vec<Change>) {
     )
 }
 
-pub fn update(value: &t, runtime_frame: &frame::t) -> (t, Vec<Change>) {
+pub fn update(value: &t, runtime_frame: &frame::Frame) -> (t, Vec<Change>) {
     let dt = runtime_frame.input.dt;
     if value.mode == Mode::Playing && dt.is_finite() && dt > 0.0 {
         (t { time: value.time + dt, frame: value.frame + 1, ..*value }, vec![Change::Advanced])

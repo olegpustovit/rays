@@ -17,15 +17,15 @@ pub fn new_ui() -> Ui {
 }
 
 /// The OCaml test's `frame`: 400 x 300 unless sized, at `pointer` with `events`.
-pub fn fr(size: (i64, i64), pointer: (f64, f64), events: Vec<Event>) -> frame::t {
+pub fn fr(size: (i64, i64), pointer: (f64, f64), events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(0.0);
     input.size = size;
     input.pointer = pointer;
     input.events = events;
-    frame::t { input, pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) }
 }
 
-pub fn base() -> frame::t {
+pub fn base() -> frame::Frame {
     fr((400, 300), (0.0, 0.0), vec![])
 }
 

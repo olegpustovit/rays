@@ -57,7 +57,7 @@ fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: &st
 }
 
 /// A pane's PXUI hit ancestor; children keep screen-space coordinates.
-pub fn pane_root(ui: &mut Ui, frame: &frame::t, bounds: Bounds, label: &str) -> UiBox {
+pub fn pane_root(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: &str) -> UiBox {
     let (x, y, width, height) = bounds;
     let rect = (x as f64, y as f64, width as f64, height as f64);
     let mut opts = BoxOpts::default()
@@ -332,7 +332,7 @@ pub fn update(
     focus: Option<&Path>,
     tree: &Panels,
     ui: &mut Ui,
-    frame: &frame::t,
+    frame: &frame::Frame,
 ) -> Vec<Intent> {
     let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let default_hidden = [Panel::Timeline];
@@ -786,7 +786,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
 
 /// The draggable gutters, wider than they are drawn. Build them after the panes so they sit on
 /// top of the neighbours' hit rectangles.
-pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Option<&[Panel]>, tree: &Panels, ui: &mut Ui, frame: &frame::t) -> Vec<Intent> {
+pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Option<&[Panel]>, tree: &Panels, ui: &mut Ui, frame: &frame::Frame) -> Vec<Intent> {
     let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let mut intents: Vec<Intent> = Vec::new();
     let geo = geometry(Some(state), hidden, tree, frame);

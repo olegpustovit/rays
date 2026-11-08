@@ -36,8 +36,8 @@ fn animated_device_surfaces_share_unchanged_topology() {
         let surface=surface::of_geometry(None,&geometry).unwrap();
         let device=|_:&geometry::T|Some((format!("animated-{frame}"),false,None,0,Rc::new(||{}) as Rc<dyn Fn()>));
         let scene=surface::scene3_result(None,Some(&device),&surface).unwrap();
-        let drawing=rays::scene3::Walk::drawings(&scene).remove(0);
-        assert!(Arc::ptr_eq(&rays::mesh::View::unread(&drawing.mesh).indices,&corners),"a new position stream copied the topology");
+        let drawing=rays::scene3::walk::drawings(&scene).remove(0);
+        assert!(Arc::ptr_eq(&rays::mesh::view::unread(&drawing.mesh).indices,&corners),"a new position stream copied the topology");
         let prepared=rays::scene::Layer::stage_native(32,32,&[rays::scene::view3d(None,&camera,scene)]).unwrap();
         let indices=prepared.scene3[0].entries[0].draw.mesh.indices.clone();
         if let Some(previous)=previous { assert!(Rc::ptr_eq(&indices,&previous),"unchanged topology was packed again"); }
@@ -139,7 +139,7 @@ fn mesh_round_trip_and_trace_mesh() {
     let back = rays_mesh::of_mesh(&mesh).unwrap();
     assert_eq!((geometry::point_count(&back), geometry::primitive_count(&back)), (4, 2));
     let trace = rays_mesh::to_trace_mesh(&g).unwrap();
-    let view = rays::mesh::View::packed_view(&trace).unwrap();
+    let view = rays::mesh::view::packed_view(&trace).unwrap();
     assert!(view.normals.is_some(), "trace mesh has smoothed normals");
     assert_eq!(view.indices.len(), 6);
     let lines = rays_mesh::of_mesh(&geometry_view::wire_mesh(&g).unwrap());
@@ -194,8 +194,8 @@ fn explosion_of(amount: f64, scale_x: f64, noise: Option<(f64, f64, i64)>) -> Op
     packed_pieces::explosion("exploded_view", &fields)
 }
 
-fn xs(mesh: &rays::mesh::t) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let v = rays::mesh::View::packed_view(mesh).unwrap().vertices;
+fn xs(mesh: &rays::mesh::Mesh) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let v = rays::mesh::view::packed_view(mesh).unwrap().vertices;
     (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
 }
 
@@ -208,7 +208,7 @@ fn packed_pieces_explosion() {
     let base = xs(&exploded(explosion_of(0.0, 1.0, None)));
     let moved = xs(&exploded(explosion_of(1.0, 1.0, None)));
     assert_eq!(xs(&packed_pieces::mesh_for_explosion(None, &pieces).unwrap()), base, "a zero explosion moved the pieces");
-    let normals = rays::mesh::View::packed_view(&exploded(explosion_of(0.0, 1.0, None))).unwrap().normals.unwrap();
+    let normals = rays::mesh::view::packed_view(&exploded(explosion_of(0.0, 1.0, None))).unwrap().normals.unwrap();
     assert!(
         normals.x.iter().all(|v| *v == 0.0) && normals.y.iter().all(|v| *v == 1.0) && normals.z.iter().all(|v| *v == 0.0),
         "replaced authored vertex normals with flat faces"

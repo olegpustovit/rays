@@ -184,7 +184,7 @@ fn first_char(letter: &str) -> char {
 /// The carry's turn of a frame, before the panes build: the keys of the route and the ends of the
 /// gesture, then the preview (the scratch document the panels read), or the put or the restore.
 /// Returns the frame without the keys the carry took, and whether the document shown changed.
-pub fn carry_step(value: &mut t, text_focus: bool, frame_: &frame::t) -> (frame::t, bool) {
+pub fn carry_step(value: &mut t, text_focus: bool, frame_: &frame::Frame) -> (frame::Frame, bool) {
     let c = match &value.carry {
         None => {
             let carrying = value.ui.borrow().carrying();

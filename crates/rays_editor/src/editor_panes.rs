@@ -566,7 +566,7 @@ pub type Root_at<'a> = &'a dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>;
 #[allow(clippy::too_many_arguments)]
 pub fn draw_list_panes<'a>(
     ui: &mut Ui,
-    shortcut_frame: &frame::t,
+    shortcut_frame: &frame::Frame,
     value: impl Into<ModelView<'a>>,
     hosted: &[Host],
     root_at: Root_at,
@@ -625,7 +625,7 @@ pub fn draw_list_panes<'a>(
 #[allow(clippy::too_many_arguments)]
 pub fn draw_text_panes(
     ui: &mut Ui,
-    frame_: &frame::t,
+    frame_: &frame::Frame,
     value: &t,
     root_at: Root_at,
     header_slots: &dyn Fn(&Leaf) -> Vec<Option<f64>>,
@@ -721,14 +721,14 @@ pub fn draw_spreadsheet_panes<'a>(ui: &mut Ui, value: impl Into<ModelView<'a>>, 
 }
 
 /// The keys down this frame that were not down in the last: the edges panes act on.
-pub fn pressed_keys(value: &t, frame_: &frame::t) -> Vec<input::Key> {
+pub fn pressed_keys(value: &t, frame_: &frame::Frame) -> Vec<input::Key> {
     frame_.input.keys.iter().filter(|k| !value.held_keys.contains(k)).cloned().collect()
 }
 
 /// The graph panes that are not the one in use: those showing a graph update their canvas.
 pub fn draw_other_graph_panes<'a>(
     ui: &mut Ui,
-    shortcut_frame: &frame::t,
+    shortcut_frame: &frame::Frame,
     value: impl Into<ModelView<'a>>,
     other_panes: &[(Key, layout::Path)],
     roots: &[(Leaf, UiBox)],
@@ -850,9 +850,9 @@ pub type Graph_pane_result = (layout::Bounds, scope::Pane, Vec<scope::Change>, O
 #[allow(clippy::too_many_arguments)]
 pub fn draw_graph_pane<'a>(
     ui: &mut Ui,
-    frame_: &frame::t,
+    frame_: &frame::Frame,
     value: impl Into<ModelView<'a>>,
-    shortcut_frame: &frame::t,
+    shortcut_frame: &frame::Frame,
     scope_view: scope::Pane,
     scope_active: bool,
     guide: bool,

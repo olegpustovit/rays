@@ -22,15 +22,15 @@ fn word32(bytes: &[u8], word: usize) -> f64 {
     f32::from_bits(u32::from_le_bytes([bytes[word * 4], bytes[word * 4 + 1], bytes[word * 4 + 2], bytes[word * 4 + 3]])) as f64
 }
 
-fn ortho(at: vec3::T) -> camera::t {
+fn ortho(at: vec3::T) -> camera::Camera {
     camera::orthographic(2., at, vec3::zero()).expect("camera")
 }
 
-fn scene_of(nodes: Vec<d3::node>) -> d3::t {
+fn scene_of(nodes: Vec<d3::node>) -> d3::Scene3 {
     d3::create(None, None, None, None, nodes).expect("scene3")
 }
 
-fn plain(m: &mesh::t) -> d3::node {
+fn plain(m: &mesh::Mesh) -> d3::node {
     d3::mesh(None, None, None, None, None, m.clone())
 }
 
@@ -45,7 +45,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
     let context = Layer::create_cache_context();
     Layer::with_cache_context(&context, &mut || {
         let cam = ortho(vec3::create(0., 0., 2.));
-        let prepare = |width: i64, height: i64, scene3: d3::t| -> Rc<se::PreparedScene3> {
+        let prepare = |width: i64, height: i64, scene3: d3::Scene3| -> Rc<se::PreparedScene3> {
             let staged = Layer::stage_native(width, height, &[scene::view3d(None, &cam, scene3)]).expect("native Scene3 staging");
             assert_eq!(staged.scene3.len(), 1, "native Scene3 staging cardinality");
             staged.scene3[0].clone()
@@ -59,7 +59,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
             &[vec3::create(-0.5, -0.5, 0.), vec3::create(0.5, -0.5, 0.), vec3::create(0., 0.5, 0.)],
         );
         let scene3 = scene_of(vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]);
-        let lights = |n: usize| -> Vec<light::t> { (0..n).map(|_| light::directional(None, None, vec3::unit_z()).expect("light")).collect() };
+        let lights = |n: usize| -> Vec<light::Light> { (0..n).map(|_| light::directional(None, None, vec3::unit_z()).expect("light")).collect() };
         prepare(16, 16, d3::create(Some(lights(64)), None, None, None, vec![plain(&m)]).expect("scene3"));
         match Layer::stage_native(16, 16, &[scene::view3d(None, &cam, d3::create(Some(lights(65)), None, None, None, vec![plain(&m)]).expect("scene3"))]) {
             Err(message) if message == "native View3d lowering failed: more than 64 lights" => {}
@@ -82,7 +82,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
             "released reusable View3d changed prepared native data"
         );
         let prepared = prepare(16, 16, scene3.clone());
-        let with_ui = |x: f64, scene3: d3::t| {
+        let with_ui = |x: f64, scene3: d3::Scene3| {
             Layer::stage_native_render(16, 16, &[scene::view3d(None, &cam, scene3), Layer::ui(None, ui_for(x)).expect("ui")]).expect("stage")
         };
         let first_ui = with_ui(0., scene3.clone());
@@ -174,14 +174,14 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
 fn device_host_copy_made_once() {
     let made = Rc::new(Cell::new(0));
     let host_count = made.clone();
-    let host: Rc<dyn Fn() -> Result<mesh::t, String>> = Rc::new(move || {
+    let host: Rc<dyn Fn() -> Result<mesh::Mesh, String>> = Rc::new(move || {
         host_count.set(host_count.get() + 1);
         Ok(test_meshes::box_(1., 1., 1.))
     });
     let box_ = Some((vec3::create(-1., 0., 0.), vec3::create(1., 2., 3.)));
     let bounds: Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>> = Rc::new(move || box_);
-    let m = mesh::View::create_device(
-        mesh::View::device_args {
+    let m = mesh::view::create_device(
+        mesh::view::device_args {
             indices: Some(Arc::new(vec![0, 1, 2])),
             host: Some(host),
             bounds: Some(bounds),
@@ -192,11 +192,11 @@ fn device_host_copy_made_once() {
         3,
     )
     .expect("device mesh");
-    let unread = mesh::View::unread(&m);
+    let unread = mesh::view::unread(&m);
     assert!(made.get() == 0 && unread.vertices.x.is_empty() && *unread.indices == vec![0, 1, 2], "a device mesh's own arrays made its host copy");
     assert!(mesh::bounds(&m) == Ok(box_) && made.get() == 0, "a device mesh's bounds made its host copy");
-    assert!(mesh::View::view(&m).unwrap().vertices.len() == 24 && made.get() == 1, "a device mesh's view is not its host copy");
-    let _ = mesh::View::packed_view(&m);
+    assert!(mesh::view::view(&m).unwrap().vertices.len() == 24 && made.get() == 1, "a device mesh's view is not its host copy");
+    let _ = mesh::view::packed_view(&m);
     let _ = mesh::centroid(&m);
     assert_eq!(made.get(), 1, "a device mesh made its host copy twice");
 }
@@ -207,13 +207,13 @@ fn resident_streams() {
     Layer::with_cache_context(&context, &mut || {
         let made = Rc::new(Cell::new(0));
         let host_count = made.clone();
-        let host: Rc<dyn Fn() -> Result<mesh::t, String>> = Rc::new(move || {
+        let host: Rc<dyn Fn() -> Result<mesh::Mesh, String>> = Rc::new(move || {
             host_count.set(host_count.get() + 1);
             Ok(test_meshes::box_(1., 1., 1.))
         });
         let create = |indices: Option<Vec<i64>>, colors: Option<Vec<color::T>>, tex_coords: Option<Vec<vec2::T>>, mode: mesh::mode, index_count: i64, color_width: i64| {
-            mesh::View::create_device(
-                mesh::View::device_args {
+            mesh::view::create_device(
+                mesh::view::device_args {
                     mode: Some(mode),
                     indices: indices.map(Arc::new),
                     colors,
@@ -230,9 +230,9 @@ fn resident_streams() {
         };
         let default_create = || create(None, None, None, mesh::mode::Triangles, 36, 3);
         let m = default_create().expect("device mesh");
-        assert!(mesh::index_count(&m) == 36 && mesh::View::triangle_count(&m) == 12);
-        assert!(mesh::View::device_index_count(&m) == Some(36) && mesh::View::device_color_width(&m) == 3);
-        assert!(mesh::View::unread(&m).indices.is_empty() && made.get() == 0);
+        assert!(mesh::index_count(&m) == 36 && mesh::view::triangle_count(&m) == 12);
+        assert!(mesh::view::device_index_count(&m) == Some(36) && mesh::view::device_color_width(&m) == 3);
+        assert!(mesh::view::unread(&m).indices.is_empty() && made.get() == 0);
         for result in [
             create(None, None, None, mesh::mode::Triangles, 35, 3),
             create(None, None, None, mesh::mode::Triangles, 0, 3),
@@ -264,11 +264,11 @@ fn resident_streams() {
         let _ = stage(d3::render_mode::Wireframe);
         assert_eq!(made.get(), 1);
         let _ = stage(d3::render_mode::Vertices);
-        let _ = mesh::View::packed_view(&m);
+        let _ = mesh::view::packed_view(&m);
         assert_eq!(made.get(), 1);
-        let indices = mesh::View::packed_view(&m).unwrap().indices;
-        let legacy = mesh::View::create_device(
-            mesh::View::device_args {
+        let indices = mesh::view::packed_view(&m).unwrap().indices;
+        let legacy = mesh::view::create_device(
+            mesh::view::device_args {
                 indices: Some(indices),
                 host: Some(host.clone()),
                 key: "legacy-texture".to_string(),

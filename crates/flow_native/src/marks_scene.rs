@@ -444,7 +444,7 @@ pub fn scene(
     cache_: Option<&cache>,
     device: Option<Device>,
     marks: &[Entry],
-) -> Result<scene::t, Diagnostic> {
+) -> Result<scene::Scene, Diagnostic> {
     if let Err(message) = m::validate(marks) {
         return Err(fail("E_DRAW_RANGE", &message));
     }

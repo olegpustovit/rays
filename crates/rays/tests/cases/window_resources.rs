@@ -74,7 +74,7 @@ fn window_resources_scene_parity() {
                 require(RImage::pixels(&image).is_err(), "released owned staged image");
             }
         }
-        let (_, _, references) = font::Raster::automatic_counts();
+        let (_, _, references) = font::raster::automatic_counts();
         require(references == 0, "released scene kept an automatic text reference");
     });
 }
@@ -110,9 +110,9 @@ fn window_resources_images_canvas() {
         require(image::get_size(&captured) == Ok((3, 2)), "Canvas capture");
         if std::env::var("SDL_AUDIODRIVER").is_ok_and(|v| v == "dummy") {
             let audio_ = audio::init().expect("audio");
-            let mut sample = audio::Sample::synth(&audio_, None, audio::Sample::waveform::Sine, 440., 0.2).expect("synth");
-            require(audio::Sample::play(&audio_, None, None, &sample).is_ok(), "sample playing");
-            audio::Sample::destroy(&mut sample);
+            let mut sample = audio::sample::synth(&audio_, None, audio::sample::waveform::Sine, 440., 0.2).expect("synth");
+            require(audio::sample::play(&audio_, None, None, &sample).is_ok(), "sample playing");
+            audio::sample::destroy(&mut sample);
             audio::shutdown(&audio_).expect("shutdown");
         } else {
             println!("skipped audio: SDL_AUDIODRIVER is not dummy");
@@ -135,8 +135,8 @@ fn automatic_stage(s: &[scene::node]) -> (i64, RImage::t) {
 }
 
 fn window_resources_automatic_text_cache() {
-    let context = font::Raster::create_cache_context();
-    font::Raster::with_cache_context(&context, &mut || {
+    let context = font::raster::create_cache_context();
+    font::raster::with_cache_context(&context, &mut || {
         let mut first_identity = None;
         let mut first_pixels = None;
         for frame in 1..=60 {
@@ -156,7 +156,7 @@ fn window_resources_automatic_text_cache() {
             }
             Layer::release(&s);
         }
-        let (entries, fonts, references) = font::Raster::automatic_counts();
+        let (entries, fonts, references) = font::raster::automatic_counts();
         require(entries == 1 && fonts == 1 && references == 0, "stable automatic cache ownership");
         let retina = vec![scene::text((0, 0), Some(color::rgb(12, 34, 56)), Some(16), "density")];
         let staged = |density: i64| -> (std::rc::Rc<render_ir::RenderIr>, (i64, i64)) {
@@ -184,13 +184,13 @@ fn window_resources_automatic_text_cache() {
             automatic_stage(&s);
             Layer::release(&s);
         }
-        let (entries, fonts, references) = font::Raster::automatic_counts();
+        let (entries, fonts, references) = font::raster::automatic_counts();
         require(entries == 256 && fonts == 1 && references == 0, "automatic LRU capacity");
         // If all 256 cached entries are pinned, the next value is transient rather than
         // invalidating an image still borrowed by an active scene.
         let scenes: Vec<Vec<scene::node>> = (0..257).map(|i| vec![scene::text((0, 0), None, Some(16), &format!("pinned-{i:03}"))]).collect();
         let images: Vec<RImage::t> = scenes.iter().map(|s| automatic_stage(s).1).collect();
-        let (entries, fonts, references) = font::Raster::automatic_counts();
+        let (entries, fonts, references) = font::raster::automatic_counts();
         require(entries == 256 && fonts == 1 && references == 257, "pinned cache overflow policy");
         for image in &images {
             require(RImage::pixels(image).is_ok(), "pinned image invalidated");
@@ -210,7 +210,7 @@ fn window_resources_automatic_text_cache() {
         require(RImage::pixels(&image).is_ok(), "explicit cached text shortened");
         font::destroy(&font_);
         require(RImage::pixels(&image).is_err(), "explicit font cache not destroyed");
-        let (_, _, references) = font::Raster::automatic_counts();
+        let (_, _, references) = font::raster::automatic_counts();
         require(references == 0, "automatic references outlived their scenes");
     });
 }

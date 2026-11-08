@@ -20,7 +20,7 @@ fn draw(body: &str) -> (lower::T, flow_syntax::value::Value) {
     (lowered, value)
 }
 
-fn render(body: &str, size: (i64, i64)) -> scene::t {
+fn render(body: &str, size: (i64, i64)) -> scene::Scene {
     let (lowered, value) = draw(body);
     let prepared = ok(drawing::prepare(&drawing::PrepareOptions::default(), &lowered.evaluated.plan, &value));
     ok(drawing::render_prepared(&prepared, &input::at_time(0.), size, &drawing::RenderOptions::default()))

@@ -34,8 +34,8 @@ fn parameters_schema() -> param::Schema {
     .expect("schema")
 }
 
-fn frame(time: f64, events: Vec<Event>) -> rays::frame::t {
-    rays::frame::t { input: input::Frame { size: (320, 240), events, ..input::at_time(time) }, pixel_scale: (1., 1.), fps: 0., mouse_delta: (0., 0.) }
+fn frame(time: f64, events: Vec<Event>) -> rays::frame::Frame {
+    rays::frame::Frame { input: input::Frame { size: (320, 240), events, ..input::at_time(time) }, pixel_scale: (1., 1.), fps: 0., mouse_delta: (0., 0.) }
 }
 
 fn click(x: i64, y: i64) -> Vec<Event> {

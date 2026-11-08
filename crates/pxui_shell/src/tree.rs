@@ -348,7 +348,7 @@ fn drop_of(offset: f64) -> DropAt {
 /// The row list, its toggle columns, and the filter and rename prompts, built inside `Ui::frame`.
 /// One box takes every pointer gesture; rows are found from the pointer, so only the visible
 /// slice is painted. `title` leads the header, e.g. the level's breadcrumb.
-pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::t, bounds: (i64, i64, i64, i64), title: &str, columns: &[String], rows: &[Row], selected: &[i64]) -> (Tree, Vec<Intent>) {
+pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i64, i64), title: &str, columns: &[String], rows: &[Row], selected: &[i64]) -> (Tree, Vec<Intent>) {
     let mut t = t;
     let theme = ui.theme();
     let height = ui.row_height() as f64;

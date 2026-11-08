@@ -231,7 +231,7 @@ fn expanded_normals(
     }
 }
 
-fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::t, String> {
+fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::Mesh, String> {
     let topo = geometry::topology(g);
     let (normals, colors, tex_coords) = standards(g)?;
     let expand = source_has_vertex(&normals) || source_has_vertex(&colors) || source_has_vertex(&tex_coords);
@@ -243,11 +243,11 @@ fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::t, Strin
     if expand {
         let positions = expanded_vec3(&vertex_points, count, &Source::Point(Planes::F3(geometry::positions(g).clone())))?;
         let normals = expanded_normals(&vertex_points, count, &normals)?;
-        mesh::View::create_packed_owned(Some(mesh::mode::Lines), Some(indices), normals, colors_out, tex_out, positions)
+        mesh::view::create_packed_owned(Some(mesh::mode::Lines), Some(indices), normals, colors_out, tex_out, positions)
     } else {
         let positions = mesh_vec3(&packed::Float3::View::view(geometry::positions(g)).map_err(text)?);
         let normals = shared_normals(normals)?;
-        mesh::View::create_packed_shared(
+        mesh::view::create_packed_shared(
             Some(mesh::mode::Lines),
             Some(Arc::new(indices)),
             normals,
@@ -258,7 +258,7 @@ fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::t, Strin
     }
 }
 
-fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::t, String> {
+fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::Mesh, String> {
     let topo = geometry::topology(g);
     let primitives = topology::primitive_count(topo);
     if primitives != 0 {
@@ -282,7 +282,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::t, String> {
         let colors = colors.as_ref().map(|s| color_array(true, &vertex_points, count, s));
         let tex_coords = tex_coords.as_ref().map(|s| tex_coord_array(true, &vertex_points, count, s));
         let indices: Vec<i64> = (0..count as i64).collect();
-        mesh::View::create_packed_owned(Some(mesh::mode::Triangles), Some(indices), normals, colors, tex_coords, positions)
+        mesh::view::create_packed_owned(Some(mesh::mode::Triangles), Some(indices), normals, colors, tex_coords, positions)
     } else {
         let positions = mesh_vec3(&packed::Float3::View::view(geometry::positions(g)).map_err(text)?);
         let normals = shared_normals(normals)?;
@@ -290,9 +290,9 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::t, String> {
         let colors = colors.as_ref().map(|s| Arc::new(color_array(false, &vertex_points, count, s)));
         let tex_coords = tex_coords.as_ref().map(|s| Arc::new(tex_coord_array(false, &vertex_points, count, s)));
         if !has_primitives {
-            mesh::View::create_packed_shared(Some(mesh::mode::Points), None, normals, colors, tex_coords, positions)
+            mesh::view::create_packed_shared(Some(mesh::mode::Points), None, normals, colors, tex_coords, positions)
         } else {
-            mesh::View::create_packed_shared(
+            mesh::view::create_packed_shared(
                 Some(mesh::mode::Triangles),
                 Some(Arc::new(vertex_points.to_vec())),
                 normals,
@@ -304,7 +304,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::t, String> {
     }
 }
 
-fn protected(operation: &str, work: &dyn Fn() -> Result<mesh::t, String>) -> Result<mesh::t, error::T> {
+fn protected(operation: &str, work: &dyn Fn() -> Result<mesh::Mesh, String>) -> Result<mesh::Mesh, error::T> {
     work().map_err(|message| {
         error::new(operation, Code::MeshConversion, message)
     })
@@ -312,7 +312,7 @@ fn protected(operation: &str, work: &dyn Fn() -> Result<mesh::t, String>) -> Res
 
 /// Triangulate a geometry, compute the path tracer's smoothed vertex normals, and return the packed
 /// triangle mesh it consumes.
-pub fn to_trace_mesh(g: &geometry::T) -> Result<mesh::t, error::T> {
+pub fn to_trace_mesh(g: &geometry::T) -> Result<mesh::Mesh, error::T> {
     protected("to_trace_mesh", &|| {
         let triangles = triangulate::run(&triangulate::Params { cancel: None, grain: None, primitives: None }, g).map_err(text)?;
         let triangles = normal_ops::run(
@@ -354,8 +354,8 @@ fn tex_coord_attribute(tex_coords: &[vec2::T]) -> Result<attribute::T, String> {
     attribute::create_key_owned(&attribute::tex_coord(Owner::Point), Storage::Float2(values)).map_err(text)
 }
 
-fn of_mesh_raw_impl(m: &mesh::t) -> Result<geometry::T, String> {
-    let view = mesh::View::packed_view(m)?;
+fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
+    let view = mesh::view::packed_view(m)?;
     match view.mode {
         mesh::mode::Points | mesh::mode::Triangles => {
             let positions = rdk_float3(&view.vertices)?;
@@ -386,7 +386,7 @@ fn of_mesh_raw_impl(m: &mesh::t) -> Result<geometry::T, String> {
     }
 }
 
-fn to_geometry_mesh(g: &geometry::T) -> Result<mesh::t, String> {
+fn to_geometry_mesh(g: &geometry::T) -> Result<mesh::Mesh, String> {
     // A primitive color belongs to all of its corners, never to a shared point: expanding it
     // preserves material boundaries between faces.
     let expand = geometry::primitive_count(g) != 0
@@ -410,11 +410,11 @@ fn to_geometry_mesh(g: &geometry::T) -> Result<mesh::t, String> {
     to_mesh_raw_impl(&g)
 }
 
-pub fn to_mesh(g: &geometry::T) -> Result<mesh::t, error::T> {
+pub fn to_mesh(g: &geometry::T) -> Result<mesh::Mesh, error::T> {
     protected("to_mesh", &|| to_geometry_mesh(g))
 }
 
-pub fn of_mesh(m: &mesh::t) -> Result<geometry::T, error::T> {
+pub fn of_mesh(m: &mesh::Mesh) -> Result<geometry::T, error::T> {
     of_mesh_raw_impl(m).map_err(|message| {
         error::new("of_mesh", Code::MeshConversion, message)
     })

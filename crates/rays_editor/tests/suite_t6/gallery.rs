@@ -111,7 +111,7 @@ fn bounds(g: &rdk_core::geometry::T) -> [f64; 6] {
     [x.0, y.0, z.0, x.1, y.1, z.1]
 }
 
-fn scene_of(g: &rdk_core::geometry::T) -> scene3::t {
+fn scene_of(g: &rdk_core::geometry::T) -> scene3::Scene3 {
     let m = rays_mesh::to_mesh(g).unwrap();
     scene3::create(None, None, None, None, vec![scene3::mesh(Some(rays::material::unlit(rays_math::color::white())), None, None, Some(scene3::cull::Cull_none), None, m)]).unwrap()
 }
@@ -143,7 +143,7 @@ fn geometry_check(name: &str, actual: &rdk_core::geometry::T, expected: &rdk_cor
     }
 }
 
-fn pixels(canvas: &rays::canvas::t, camera: &rays::camera::t, g: &rdk_core::geometry::T) -> Vec<rays_math::color::T> {
+fn pixels(canvas: &rays::canvas::t, camera: &rays::camera::Camera, g: &rdk_core::geometry::T) -> Vec<rays_math::color::T> {
     rays::canvas::render(None, canvas, &[scene::clear(rays_math::color::black()), scene::view3d(None, camera, scene_of(g))]).unwrap();
     rays::canvas::pixels(canvas).unwrap()
 }

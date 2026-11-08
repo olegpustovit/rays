@@ -60,7 +60,7 @@ fn frame() {
         assert!(read_back || shown.get() > 0, "recursive_signals frame {k}: no mark attributes drawn over resident fold arrays");
         scene.expect("scene")
     };
-    let pixels = |scene: &rays::scene::t| {
+    let pixels = |scene: &rays::scene::Scene| {
         let c = canvas::create(size.0, size.1).expect("canvas");
         let result = canvas::render(None, &c, scene).and_then(|_| canvas::pixels(&c));
         let _ = canvas::destroy(&c);

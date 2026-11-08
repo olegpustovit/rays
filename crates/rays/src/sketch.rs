@@ -68,12 +68,12 @@ pub type model = Box<dyn Any>;
 
 /// The sketch's callbacks. Updates borrow the stored model mutably; readers borrow it immutably.
 pub struct program {
-    pub init: Box<dyn Fn(&frame::t) -> model>,
+    pub init: Box<dyn Fn(&frame::Frame) -> model>,
     /// `None` keeps the model, including any mutations made by the callback.
-    pub update: Box<dyn Fn(&mut dyn Any, &frame::t) -> Option<model>>,
-    pub view: Box<dyn Fn(&dyn Any, &frame::t) -> scene::t>,
+    pub update: Box<dyn Fn(&mut dyn Any, &frame::Frame) -> Option<model>>,
+    pub view: Box<dyn Fn(&dyn Any, &frame::Frame) -> scene::Scene>,
     /// `None` keeps the model.
-    pub after_present: Option<Box<dyn Fn(&mut dyn Any, &frame::t) -> Option<model>>>,
+    pub after_present: Option<Box<dyn Fn(&mut dyn Any, &frame::Frame) -> Option<model>>>,
     /// `crash_dump model directory` adds the sketch's own files to a crash report.
     pub crash_dump: Option<Box<dyn Fn(&dyn Any, &str)>>,
     /// Runs about every millisecond while an unchanged picture waits for the next frame (input,
@@ -94,8 +94,8 @@ type dialog_fn = Rc<dyn Fn(Option<&[(String, Vec<String>)]>, Option<&str>, dialo
 
 struct run_context {
     stopped: Cell<bool>,
-    input: RefCell<input_state::t>,
-    time: RefCell<time::t>,
+    input: RefCell<input_state::InputState>,
+    time: RefCell<time::Time>,
     relative: RefCell<Option<relative_fn>>,
     cursor: RefCell<Option<cursor_fn>>,
     background: RefCell<Option<background_fn>>,
@@ -164,7 +164,7 @@ pub fn show_file_dialog(filters: Option<&[(String, Vec<String>)]>, default_locat
     }
 }
 
-fn make_frame(config_: &config, input_: &input_state::t, count: i64, time_: f64, dt: f64, events: Vec<Event>) -> frame::t {
+fn make_frame(config_: &config, input_: &input_state::InputState, count: i64, time_: f64, dt: f64, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(time_);
     input.dt = dt;
     input.frame = count;
@@ -174,7 +174,7 @@ fn make_frame(config_: &config, input_: &input_state::t, count: i64, time_: f64,
     input.buttons = input_state::buttons(input_);
     input.keys = input_state::keys(input_);
     input.events = events;
-    frame::t { input, pixel_scale: (1., 1.), fps: if dt > 0. { 1. / dt } else { 0. }, mouse_delta: input_state::mouse_delta(input_) }
+    frame::Frame { input, pixel_scale: (1., 1.), fps: if dt > 0. { 1. / dt } else { 0. }, mouse_delta: input_state::mouse_delta(input_) }
 }
 
 // ---- crash reports: every fatal error in a sketch leaves a folder under the platform temporary
@@ -289,7 +289,7 @@ fn utc_now() -> (i64, i64, i64, i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d, rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
-fn write_crash(crash_dir: &Option<String>, title: &str, dump: &dyn Fn(&str), recent: &[frame::t], panic_message: &str, backtrace: &str) {
+fn write_crash(crash_dir: &Option<String>, title: &str, dump: &dyn Fn(&str), recent: &[frame::Frame], panic_message: &str, backtrace: &str) {
     let (year, month, day, hour, minute, second) = utc_now();
     let sanitized: String = title.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
     let name = format!("{sanitized}-{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}-{}", std::process::id());
@@ -378,12 +378,12 @@ fn install_panic_hook() {
 struct crash_state {
     crash_dir: Option<String>,
     title: String,
-    recent: RefCell<VecDeque<frame::t>>,
+    recent: RefCell<VecDeque<frame::Frame>>,
     model: RefCell<Option<model>>,
     program: Rc<program>,
 }
 
-fn update_model(stored: &RefCell<Option<model>>, update: &dyn Fn(&mut dyn Any, &frame::t) -> Option<model>, facts: &frame::t, op: &str) -> Result<(), error> {
+fn update_model(stored: &RefCell<Option<model>>, update: &dyn Fn(&mut dyn Any, &frame::Frame) -> Option<model>, facts: &frame::Frame, op: &str) -> Result<(), error> {
     let next = {
         let mut guard = stored.borrow_mut();
         let model = guard.as_mut().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
@@ -395,7 +395,7 @@ fn update_model(stored: &RefCell<Option<model>>, update: &dyn Fn(&mut dyn Any, &
 
 fn report_crash(state: &crash_state) {
     let (message, backtrace) = LAST_PANIC.with(|p| p.borrow_mut().take()).unwrap_or_else(|| ("(no panic information)".to_string(), String::new()));
-    let frames: Vec<frame::t> = state.recent.borrow().iter().filter(|f| f.input.frame > 0).cloned().collect();
+    let frames: Vec<frame::Frame> = state.recent.borrow().iter().filter(|f| f.input.frame > 0).cloned().collect();
     let model_ref = state.model.try_borrow();
     let dump = |dir: &str| {
         if let (Ok(m), Some(d)) = (&model_ref, &state.program.crash_dump) {
@@ -427,7 +427,7 @@ struct Finish {
     coordinator: rr::Renderer,
     caches: Layer::cache_context,
     model: Rc<crash_state>,
-    last_scene: Rc<RefCell<Option<scene::t>>>,
+    last_scene: Rc<RefCell<Option<scene::Scene>>>,
     done: bool,
 }
 
@@ -507,7 +507,7 @@ fn run_state_internal(
     let input = input_state::create().map_err(|m| startup_error(op, ErrorKind::InvalidState, &format!("input: {m}")))?;
     let time_ = time::create(config_.fps.unwrap_or(0), vsync);
     let caches = Layer::create_cache_context();
-    let world_caches = world::Private::create_cache_context();
+    let world_caches = world::private::create_cache_context();
     let native_caches = native_scene_lowering::create_cache_context();
     let state = Rc::new(run_context {
         stopped: Cell::new(false),
@@ -519,7 +519,7 @@ fn run_state_internal(
         dialog: RefCell::new(None),
     });
     let with_run_caches = |f: &mut dyn FnMut()| {
-        Layer::with_cache_context(&caches, &mut || world::Private::with_cache_context(&world_caches, &mut *f));
+        Layer::with_cache_context(&caches, &mut || world::private::with_cache_context(&world_caches, &mut *f));
     };
     let first = make_frame(config_, &state.input.borrow(), 0, 0., 0., Vec::new());
     let configuration = rr::Configuration {
@@ -616,11 +616,11 @@ fn run_state_internal(
 
     // a render failure inside the Scene.render callback is kept for the loop to return
     let render_failure: Rc<RefCell<Option<error>>> = Rc::new(RefCell::new(None));
-    let render_scene: Rc<dyn Fn(&scene::t)> = {
+    let render_scene: Rc<dyn Fn(&scene::Scene)> = {
         let coordinator = coordinator.clone();
         let native_caches = native_caches.clone();
         let render_failure = render_failure.clone();
-        Rc::new(move |scene_: &scene::t| {
+        Rc::new(move |scene_: &scene::Scene| {
             // ponytail: scan scene metadata each frame; move the focused region into staged scene
             // facts if large retained scenes make this measurable.
             let area = Layer::text_regions(scene_).into_iter().find(|r| r.4).map(|(x, y, w, h, _, cursor_)| ((x, y, w, h), cursor_));
@@ -682,7 +682,7 @@ fn run_state_internal(
     };
     *crash.model.borrow_mut() = Some(initial);
 
-    let last_scene: Rc<RefCell<Option<scene::t>>> = Rc::new(RefCell::new(None));
+    let last_scene: Rc<RefCell<Option<scene::Scene>>> = Rc::new(RefCell::new(None));
     let previous = current_run();
     let mut finish = Finish {
         state: state.clone(),
@@ -740,15 +740,15 @@ fn run_loop(
     program_: &Rc<program>,
     coordinator: &rr::Renderer,
     caches: &Layer::cache_context,
-    world_caches: &world::Private::cache_context,
-    last_scene: &Rc<RefCell<Option<scene::t>>>,
+    world_caches: &world::private::cache_context,
+    last_scene: &Rc<RefCell<Option<scene::Scene>>>,
     render_failure: &Rc<RefCell<Option<error>>>,
     logical_width: &mut i64,
     logical_height: &mut i64,
 ) -> Result<(), error> {
     let op = "Sketch.input";
     let mut count = 0_i64;
-    let mut shown: Option<scene::t> = None;
+    let mut shown: Option<scene::Scene> = None;
     let mut quiet = 0_i64;
     let mut failure: Option<error> = None;
     let stopped_or_done = |count: i64| state.stopped.get() || limit.is_some_and(|l| count >= l);
@@ -758,7 +758,7 @@ fn run_loop(
         }
         let mut step: Result<(), error> = Ok(());
         Layer::with_cache_context(caches, &mut || {
-            world::Private::with_cache_context(world_caches, &mut || {
+            world::private::with_cache_context(world_caches, &mut || {
                 step = one_frame(
                     config_, limit, profile, state, crash, program_, coordinator, last_scene, render_failure, logical_width, logical_height, &mut count, &mut shown, &mut quiet,
                     op,
@@ -798,12 +798,12 @@ fn one_frame(
     crash: &Rc<crash_state>,
     program_: &Rc<program>,
     coordinator: &rr::Renderer,
-    last_scene: &Rc<RefCell<Option<scene::t>>>,
+    last_scene: &Rc<RefCell<Option<scene::Scene>>>,
     render_failure: &Rc<RefCell<Option<error>>>,
     logical_width: &mut i64,
     logical_height: &mut i64,
     count: &mut i64,
-    shown: &mut Option<scene::t>,
+    shown: &mut Option<scene::Scene>,
     quiet: &mut i64,
     op: &str,
 ) -> Result<(), error> {
@@ -859,7 +859,7 @@ fn one_frame(
     let scale_y = presentation.drawable_height as f64 / presentation.logical_height as f64;
     let mut input = base.input.clone();
     input.size = (presentation.logical_width, presentation.logical_height);
-    let facts = frame::t { input, pixel_scale: (scale_x, scale_y), ..base };
+    let facts = frame::Frame { input, pixel_scale: (scale_x, scale_y), ..base };
     {
         let mut recent = crash.recent.borrow_mut();
         if recent.len() == 120 {
@@ -961,7 +961,7 @@ pub fn export_state(config_: Option<config>, fps: Option<i64>, prefix: Option<St
     let after_export = program_.after_present.take();
     let directory = directory.to_string();
     // the exported frame is saved first; the sketch's own after_present then runs
-    program_.after_present = Some(Box::new(move |m: &mut dyn Any, f: &frame::t| {
+    program_.after_present = Some(Box::new(move |m: &mut dyn Any, f: &frame::Frame| {
         let filename = std::path::Path::new(&directory).join(format!("{prefix}-{:06}.png", index.get()));
         match canvas_runtime::save(&filename.to_string_lossy()) {
             Ok(()) => index.set(index.get() + 1),
@@ -989,7 +989,7 @@ pub fn export_state(config_: Option<config>, fps: Option<i64>, prefix: Option<St
 }
 
 /// Renders a deterministic PNG sequence named `prefix-NNNNNN.png`.
-pub fn export(config_: Option<config>, prefix: Option<String>, directory: &str, frames: i64, view: Box<dyn Fn(&frame::t) -> scene::t>) -> Result<(), error> {
+pub fn export(config_: Option<config>, prefix: Option<String>, directory: &str, frames: i64, view: Box<dyn Fn(&frame::Frame) -> scene::Scene>) -> Result<(), error> {
     let program_ = program {
         init: Box::new(|_| Box::new(()) as model),
         update: Box::new(|_, _| None),
@@ -1012,7 +1012,7 @@ mod tests {
         bytes.push(1);
         let identity = bytes.as_ptr();
         let stored = RefCell::new(Some(Box::new(bytes) as model));
-        let facts = frame::t { input: input::at_time(0.), pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+        let facts = frame::Frame { input: input::at_time(0.), pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
         update_model(&stored, &|model, _| { model.downcast_mut::<Vec<u8>>().unwrap().push(2); None }, &facts, "test").unwrap();
         assert_eq!(stored.borrow().as_ref().unwrap().downcast_ref::<Vec<u8>>().unwrap().as_ptr(), identity);
         update_model(&stored, &|_, _| Some(Box::new(vec![3_u8])), &facts, "test").unwrap();

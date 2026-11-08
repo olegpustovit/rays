@@ -3,15 +3,15 @@
 //! twin has no test-support port yet: these produce the same shapes as triangle-ready Rays meshes with
 //! per-vertex normals (a box with flat faces, a UV sphere with smooth normals).
 #![allow(dead_code)]
-use rays::mesh::{self, View};
+use rays::mesh::{self, view};
 use rays_math::{mat4, vec3};
 
-fn build(positions: &[vec3::T], normals: &[vec3::T], indices: Vec<i64>) -> mesh::t {
+fn build(positions: &[vec3::T], normals: &[vec3::T], indices: Vec<i64>) -> mesh::Mesh {
     let planes = |list: &[vec3::T]| mesh::Vec3_buffer::of_planes(list.iter().map(|v| v.x).collect(), list.iter().map(|v| v.y).collect(), list.iter().map(|v| v.z).collect());
-    View::create_packed_owned(None, Some(indices), Some(planes(normals)), None, None, planes(positions)).expect("mesh")
+    view::create_packed_owned(None, Some(indices), Some(planes(normals)), None, None, planes(positions)).expect("mesh")
 }
 
-pub fn box_mesh(center: vec3::T, size: vec3::T) -> mesh::t {
+pub fn box_mesh(center: vec3::T, size: vec3::T) -> mesh::Mesh {
     let (hx, hy, hz) = (size.x / 2., size.y / 2., size.z / 2.);
     // face normal, then the face's u and v axes (counter-clockwise seen from outside)
     let faces = [
@@ -40,7 +40,7 @@ pub fn box_mesh(center: vec3::T, size: vec3::T) -> mesh::t {
     build(&positions, &normals, indices)
 }
 
-pub fn uv_sphere(center: vec3::T, segments: i64, rings: i64, radius: f64) -> mesh::t {
+pub fn uv_sphere(center: vec3::T, segments: i64, rings: i64, radius: f64) -> mesh::Mesh {
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     for r in 0..=rings {
@@ -66,8 +66,8 @@ pub fn uv_sphere(center: vec3::T, segments: i64, rings: i64, radius: f64) -> mes
 }
 
 /// `Transform_ops_front.transform`: positions by the matrix, normals by its inverse transpose.
-pub fn transform(matrix: &mat4::T, source: &mesh::t) -> mesh::t {
-    let view = View::packed_view(source).expect("view");
+pub fn transform(matrix: &mat4::T, source: &mesh::Mesh) -> mesh::Mesh {
+    let view = view::packed_view(source).expect("view");
     let normal_matrix = mat4::transpose(&mat4::inverse(matrix).expect("invertible"));
     let positions: Vec<vec3::T> = (0..view.vertices.length() as usize).map(|i| mat4::transform_point(matrix, view.vertices.get(i))).collect();
     let normals: Vec<vec3::T> = (0..view.vertices.length() as usize).map(|i| vec3::normalize(mat4::transform_direction(&normal_matrix, view.normals.as_ref().expect("normals").get(i)))).collect();

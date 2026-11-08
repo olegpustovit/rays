@@ -159,7 +159,7 @@ pub fn layout_edit_op(value: &mut t, op: &layout_edit::Op) -> Result<(), String>
 }
 
 /// The scene's World at timeline `time` (the day cycle advances with it).
-pub fn world(view: Option<&View>, value: &t, time: Option<f64>) -> Option<world::t> {
+pub fn world(view: Option<&View>, value: &t, time: Option<f64>) -> Option<world::World> {
     let view = view.cloned().unwrap_or(View::Primary);
     let own = match &view {
         View::Only(key) => value.doc.view_worlds.iter().find(|(k, _)| k == key).map(|(_, w)| w.clone()),

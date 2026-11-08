@@ -15,12 +15,12 @@ pub fn pixels(tracer: &p::PathTracer) -> Vec<u8> {
     get(rays::image::pixels(&p::image(tracer)))
 }
 
-pub fn frame(tracer: &mut p::PathTracer, camera: &rays::camera::t) {
+pub fn frame(tracer: &mut p::PathTracer, camera: &rays::camera::Camera) {
     get(p::render(tracer, camera));
     get(p::flush(tracer));
 }
 
-pub fn frames(tracer: &mut p::PathTracer, camera: &rays::camera::t, n: i64) {
+pub fn frames(tracer: &mut p::PathTracer, camera: &rays::camera::Camera, n: i64) {
     for _ in 0..n {
         frame(tracer, camera);
     }

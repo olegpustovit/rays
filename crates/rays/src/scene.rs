@@ -40,15 +40,15 @@ pub struct text_node {
     pub size: i64,
     pub wrap: Option<i64>,
     pub align: font::alignment,
-    pub provided_font: Option<font::t>,
-    automatic: RefCell<Option<font::Raster::automatic>>,
+    pub provided_font: Option<font::Font>,
+    automatic: RefCell<Option<font::raster::automatic>>,
     rendered: RefCell<Option<image::t>>,
 }
 
 pub struct view3d_node {
     pub viewport: Option<(i64, i64, i64, i64)>,
-    pub camera: crate::camera::t,
-    pub scene: scene3::t,
+    pub camera: crate::camera::Camera,
+    pub scene: scene3::Scene3,
     rendered3d: RefCell<Option<image::t>>,
 }
 
@@ -94,13 +94,13 @@ pub enum node {
     Blend(blend, Rc<Vec<node>>),
 }
 
-pub type t = Vec<node>;
+pub type Scene = Vec<node>;
 
-pub fn empty() -> t {
+pub fn empty() -> Scene {
     Vec::new()
 }
 
-pub fn group(x: t) -> node {
+pub fn group(x: Scene) -> node {
     node::Group(Rc::new(x))
 }
 
@@ -126,14 +126,14 @@ struct shape_cache_context {
     path_geometry: RefCell<Table>,
     rounded: RefCell<Table>,
     ellipse: RefCell<Table>,
-    fonts: font::Raster::cache_context,
+    fonts: font::raster::cache_context,
 }
 
 thread_local! {
     static CURRENT_SHAPES: RefCell<Option<Rc<shape_cache_context>>> = const { RefCell::new(None) };
     static CURRENT_LOWER: RefCell<Option<Rc<lower_cache_context>>> = const { RefCell::new(None) };
     static CURRENT_CONTEXT: RefCell<Option<Layer::cache_context>> = const { RefCell::new(None) };
-    static RENDERER: RefCell<Option<Rc<dyn Fn(&t)>>> = const { RefCell::new(None) };
+    static RENDERER: RefCell<Option<Rc<dyn Fn(&Scene)>>> = const { RefCell::new(None) };
     static SEGMENT_IRS: RefCell<Vec<(i64, i64, Rc<render_ir::RenderIr>)>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -142,7 +142,7 @@ fn create_shape_cache_context() -> shape_cache_context {
         path_geometry: RefCell::new(side_lru::create(lru::cache("rays.path_geometry"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), PATH_GEOMETRY_CACHE_CAPACITY)),
         rounded: RefCell::new(side_lru::create(lru::cache("rays.rounded"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), ROUNDED_CACHE_CAPACITY)),
         ellipse: RefCell::new(side_lru::create(lru::cache("rays.ellipse"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), ELLIPSE_CACHE_CAPACITY)),
-        fonts: font::Raster::create_cache_context(),
+        fonts: font::raster::create_cache_context(),
     }
 }
 
@@ -305,7 +305,7 @@ pub fn image(image_: &image::t, at: (i64, i64), scale: Option<f64>, angle: Optio
     Ok(node::Image(image_node { image: image_.clone(), x: at.0, y: at.1, scale, angle }))
 }
 
-pub fn view3d(viewport: Option<(i64, i64, i64, i64)>, camera: &crate::camera::t, scene: scene3::t) -> node {
+pub fn view3d(viewport: Option<(i64, i64, i64, i64)>, camera: &crate::camera::Camera, scene: scene3::Scene3) -> node {
     node::View3d(Rc::new(view3d_node { viewport, camera: camera.clone(), scene, rendered3d: RefCell::new(None) }))
 }
 
@@ -351,19 +351,19 @@ pub fn text_input_region(at: (i64, i64), w: i64, h: i64, focused: Option<bool>, 
     Ok(node::Region(at.0, at.1, w, h, focused.unwrap_or(false), cursor))
 }
 
-pub fn translate(x: i64, y: i64, nodes: t) -> node {
+pub fn translate(x: i64, y: i64, nodes: Scene) -> node {
     node::Translate(x, y, Rc::new(nodes))
 }
 
-pub fn rotate(a: f64, nodes: t) -> node {
+pub fn rotate(a: f64, nodes: Scene) -> node {
     node::Rotate(a, Rc::new(nodes))
 }
 
-pub fn scale(x: f64, y: f64, nodes: t) -> node {
+pub fn scale(x: f64, y: f64, nodes: Scene) -> node {
     node::Scale(x, y, Rc::new(nodes))
 }
 
-pub fn clip(at: (i64, i64), w: i64, h: i64, nodes: t) -> node {
+pub fn clip(at: (i64, i64), w: i64, h: i64, nodes: Scene) -> node {
     node::Clip(at.0, at.1, w, h, Rc::new(nodes))
 }
 
@@ -391,7 +391,7 @@ fn same_ui(a: &ui_batch::Table, b: &ui_batch::Table) -> bool {
     a.count() == b.count() && a.instances() == b.instances() && a.batches() == b.batches() && a.marks() == b.marks()
 }
 
-fn same_font(a: &Option<font::t>, b: &Option<font::t>) -> bool {
+fn same_font(a: &Option<font::Font>, b: &Option<font::Font>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(x), Some(y)) => font::same(x, y),
@@ -454,11 +454,11 @@ pub fn geometry(g: Geometry) -> node {
 }
 
 /// An exact affine view transform: the six coefficients are the command's own.
-pub fn transform(tr: Transform, nodes: t) -> node {
+pub fn transform(tr: Transform, nodes: Scene) -> node {
     node::Affine(tr, Rc::new(nodes))
 }
 
-pub fn render(scene: &t) {
+pub fn render(scene: &Scene) {
     let callback = RENDERER.with(|r| r.borrow().clone());
     if let Some(callback) = callback {
         callback(scene);
@@ -564,12 +564,12 @@ pub mod Layer {
         let previous_shapes = CURRENT_SHAPES.with(|c| c.borrow_mut().replace(context.0.shapes.clone()));
         let _restore = Restore { shapes: previous_shapes, lower: previous_lower, context: previous };
         lowering::with_cache_context(&context.0.scene3, &mut || {
-            font::Raster::with_cache_context(&context.0.shapes.fonts, &mut *f);
+            font::raster::with_cache_context(&context.0.shapes.fonts, &mut *f);
         });
     }
 
     pub fn clear_cache_context(context: &cache_context) {
-        font::Raster::clear_cache_context(&context.0.shapes.fonts);
+        font::raster::clear_cache_context(&context.0.shapes.fonts);
     }
 
     pub fn same(a: &[node], b: &[node]) -> bool {
@@ -649,9 +649,9 @@ pub mod Layer {
         stamp & i64::MAX
     }
 
-    pub fn with_renderer(callback: Rc<dyn Fn(&t)>, f: &mut dyn FnMut()) {
+    pub fn with_renderer(callback: Rc<dyn Fn(&Scene)>, f: &mut dyn FnMut()) {
         let previous = RENDERER.with(|r| r.borrow_mut().replace(callback));
-        struct R(Option<Rc<dyn Fn(&t)>>);
+        struct R(Option<Rc<dyn Fn(&Scene)>>);
         impl Drop for R {
             fn drop(&mut self) {
                 let p = self.0.take();
@@ -669,8 +669,8 @@ pub mod Layer {
         let img = match &n.provided_font {
             Some(f) => font::cached_text(n.wrap, Some(n.align), Some(density), f, &n.value, font::render_mode::Blended(n.color))?,
             None => {
-                let automatic = font::Raster::borrow_automatic(n.wrap, Some(n.align), Some(density), n.size, &n.value, font::render_mode::Blended(n.color))?;
-                let img = font::Raster::automatic_image(&automatic);
+                let automatic = font::raster::borrow_automatic(n.wrap, Some(n.align), Some(density), n.size, &n.value, font::render_mode::Blended(n.color))?;
+                let img = font::raster::automatic_image(&automatic);
                 *n.automatic.borrow_mut() = Some(automatic);
                 img
             }
@@ -1370,7 +1370,7 @@ pub mod Layer {
 
     fn native_scene_cacheable(list: &[node]) -> bool {
         list.iter().all(|n| match n {
-            node::View3d(view) => scene3::Walk::cacheable(&view.scene),
+            node::View3d(view) => scene3::walk::cacheable(&view.scene),
             node::Group(g)
             | node::Translate(_, _, g)
             | node::Rotate(_, g)
@@ -1385,7 +1385,7 @@ pub mod Layer {
     fn stage_native_internal(aggregate: bool, density: Option<i64>, width: i64, height: i64, scene: &[node]) -> Result<Rc<staged_native>, native_error> {
         let density = density.unwrap_or(1);
         let cacheable = match scene {
-            [node::Clear(_), node::View3d(view)] => scene3::Walk::cacheable(&view.scene),
+            [node::Clear(_), node::View3d(view)] => scene3::walk::cacheable(&view.scene),
             _ => native_scene_cacheable(scene),
         };
         let uncached = || stage_native_uncached_with(aggregate, Some(density), width, height, scene);
@@ -1477,7 +1477,7 @@ pub mod Layer {
             match n {
                 node::Text(tn) => {
                     if let Some(a) = tn.automatic.borrow_mut().take() {
-                        font::Raster::release_automatic(&a);
+                        font::raster::release_automatic(&a);
                     }
                     *tn.rendered.borrow_mut() = None;
                 }

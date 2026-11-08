@@ -62,12 +62,12 @@ fn create(bsdf_only: bool, scene: &p::Scene) -> p::PathTracer {
 }
 
 /// Keep all corner rays inside the sphere's projected disc for the furnace.
-fn camera(fov: f64) -> rays::camera::t {
+fn camera(fov: f64) -> rays::camera::Camera {
     rays::camera::perspective(Some(fov), None, None, v3(0., 0., 6.), v3(0., 0., 0.)).unwrap()
 }
 
 /// `samples` samples per pixel of `baked` (after two settling frames).
-fn capture(tracer: &mut p::PathTracer, camera: &rays::camera::t, baked: &w::baked, samples: i64) -> Vec<u8> {
+fn capture(tracer: &mut p::PathTracer, camera: &rays::camera::Camera, baked: &w::baked, samples: i64) -> Vec<u8> {
     let started = std::time::Instant::now();
     get(p::set_world(tracer, Some(baked)));
     pt::frames(tracer, camera, 2);

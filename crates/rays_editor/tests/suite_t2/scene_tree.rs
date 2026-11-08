@@ -38,7 +38,7 @@ const TEXT: &str = r#"(workspace scene_tree
     (world/scatter (world/shape (world/sky :name "sky") :name "softbox")
                    :name "constellation")))"#;
 
-fn tframe(mouse: (i64, i64), events: Vec<Event>, keys: &[Key], buttons: &[MouseButton], count: i64) -> rays::frame::t {
+fn tframe(mouse: (i64, i64), events: Vec<Event>, keys: &[Key], buttons: &[MouseButton], count: i64) -> rays::frame::Frame {
     frame_full(buttons, keys, (0., 0.), (mouse.0 as f64, mouse.1 as f64), events, count)
 }
 

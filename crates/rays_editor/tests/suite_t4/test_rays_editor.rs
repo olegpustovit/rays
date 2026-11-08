@@ -27,22 +27,22 @@ fn mv(p: (i64, i64)) -> Event {
     Event::Pointer_moved(pointer(p))
 }
 
-fn frame_ex(width: i64, height: i64, mouse: Option<(i64, i64)>, events: Vec<Event>, count: i64) -> frame::t {
+fn frame_ex(width: i64, height: i64, mouse: Option<(i64, i64)>, events: Vec<Event>, count: i64) -> frame::Frame {
     let (x, y) = mouse.unwrap_or((width / 2, height / 2));
-    frame::t {
+    frame::Frame {
         input: input::Frame { dt: 1. / 60., frame: count, tick: count, size: (width, height), pointer: (x as f64, y as f64), events, ..input::at_time(count as f64 / 60.) },
         pixel_scale: (1., 1.),
         fps: 60.,
         mouse_delta: (0., 0.),
     }
 }
-fn fr(count: i64) -> frame::t {
+fn fr(count: i64) -> frame::Frame {
     frame_ex(900, 640, None, vec![], count)
 }
-fn fre(count: i64, events: Vec<Event>) -> frame::t {
+fn fre(count: i64, events: Vec<Event>) -> frame::Frame {
     frame_ex(900, 640, None, events, count)
 }
-fn frm(count: i64, mouse: (i64, i64), events: Vec<Event>) -> frame::t {
+fn frm(count: i64, mouse: (i64, i64), events: Vec<Event>) -> frame::Frame {
     frame_ex(900, 640, Some(mouse), events, count)
 }
 fn width(r: Rect) -> i64 {
@@ -113,7 +113,7 @@ fn eye(ed: &Editor::t) -> vec3::T {
 fn viewport_eye(ed: &Editor::t) -> vec3::T {
     rays::camera::position(&rays::easy_camera::camera(&Editor::camera(ed)).unwrap())
 }
-fn up(ed: Editor::t, f: frame::t) -> Editor::t {
+fn up(ed: Editor::t, f: frame::Frame) -> Editor::t {
     if std::env::var("T4_TRACE").is_ok() {
         eprintln!("[up {}]", f.input.frame);
     }
@@ -131,11 +131,11 @@ fn wait(count: i64, mut ed: Editor::t) -> Editor::t {
 fn k(c: char) -> Event {
     key(Key::KeyChar(c))
 }
-fn with_keys(mut f: frame::t, keys: Vec<Key>) -> frame::t {
+fn with_keys(mut f: frame::Frame, keys: Vec<Key>) -> frame::Frame {
     f.input.keys = keys;
     f
 }
-fn with_buttons(mut f: frame::t, buttons: Vec<input::MouseButton>) -> frame::t {
+fn with_buttons(mut f: frame::Frame, buttons: Vec<input::MouseButton>) -> frame::Frame {
     f.input.buttons = buttons;
     f
 }
@@ -186,7 +186,7 @@ pub fn layout_panes() {
     let camera_binding = |key: &str, action: rays_editor::editor_commands::action| rays_editor::editor_commands::keymap().iter().any(|c| c.trigger == Some(editor_core::keymap::Trigger::Leader(key.into())) && *rays_editor::editor_commands::action_of(c) == action);
     assert!(camera_binding("h", rays_editor::editor_commands::action::Hide_ui) && camera_binding("c", rays_editor::editor_commands::action::Open_camera), "camera visibility commands missing from the host keymap");
     let workspace = L::default();
-    let panes = |hidden: Option<&[panels::Panel]>, tree: &L::Panels, f: &frame::t| L::panes(&L::geometry(None, hidden, tree, f));
+    let panes = |hidden: Option<&[panels::Panel]>, tree: &L::Panels, f: &frame::Frame| L::panes(&L::geometry(None, hidden, tree, f));
     let initial = panes(None, &workspace, &frame_ex(1000, 640, None, vec![], 0));
     let header = L::find(&L::geometry(None, None, &workspace, &frame_ex(1000, 640, None, vec![], 0)), &panels::main()).unwrap().header;
     // a header is one 24-point row under a 4-point margin
@@ -194,7 +194,7 @@ pub fn layout_panes() {
     assert!((width(initial.view) - 449).abs() <= 1 && (width(initial.graph) - 349).abs() <= 1 && (width(initial.inspector) - 200).abs() <= 1, "workspace defaults are not 45/35/20 after splitter space");
     let splitter_x = width(initial.view) + 2;
     let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), None);
-    let mut step = |f: &frame::t| {
+    let mut step = |f: &frame::Frame| {
         let mut out = Vec::new();
         ui.frame(f, &mut |ui| {
             out = chrome::update(None, None, None, None, None, None, &workspace, ui, f);
@@ -432,7 +432,7 @@ pub fn workspace_walk() {
         f.fps = fps;
         f
     };
-    let status = |ed: &Editor::t, f: &frame::t| ui_bytes(&Editor::scene(ed, f));
+    let status = |ed: &Editor::t, f: &frame::Frame| ui_bytes(&Editor::scene(ed, f));
     ed = up(ed, at(1_000, 60.));
     let fps_initial = status(&ed, &at(1_000, 60.));
     ed = up(ed, at(1_030, 120.));

@@ -2,16 +2,16 @@
 use crate::timeline::{self as t, Mode};
 use rays::frame;
 
-pub fn frame_with(dt: f64, events: Vec<input::Event>, buttons: Vec<input::MouseButton>) -> frame::t {
+pub fn frame_with(dt: f64, events: Vec<input::Event>, buttons: Vec<input::MouseButton>) -> frame::Frame {
     let mut input = input::at_time(0.0);
     input.size = (100, 100);
     input.dt = dt;
     input.events = events;
     input.buttons = buttons;
-    frame::t { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    frame::Frame { input, pixel_scale: (1.0, 1.0), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
-fn tick() -> frame::t {
+fn tick() -> frame::Frame {
     frame_with(0.25, vec![], vec![])
 }
 

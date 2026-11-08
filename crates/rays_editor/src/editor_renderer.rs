@@ -13,7 +13,7 @@ use rays::camera;
 use rays::material;
 use rays::mesh;
 use rays::scene;
-use rays::scene3::{self as d3, Walk};
+use rays::scene3::{self as d3, walk};
 use rays_math::{color, mat4};
 use rays_pathtracer::rays_pathtracer as p;
 
@@ -61,7 +61,7 @@ pub fn of_label(label: &str) -> Option<Mode> {
 
 #[derive(Clone)]
 pub struct Cached_mesh {
-    pub trace_source: mesh::t,
+    pub trace_source: mesh::Mesh,
     pub traced: p::Mesh,
 }
 
@@ -71,15 +71,15 @@ const MESH_ENTRIES: usize = 64;
 /// material.
 #[derive(Clone)]
 pub struct Mesh_cache {
-    entries: VecDeque<(mesh::t, material::t, Rc<Cached_mesh>)>,
+    entries: VecDeque<(mesh::Mesh, material::Material, Rc<Cached_mesh>)>,
 }
 
 impl Mesh_cache {
-    fn peek(&self, mesh_: &mesh::t, material_: &material::t) -> Option<Rc<Cached_mesh>> {
+    fn peek(&self, mesh_: &mesh::Mesh, material_: &material::Material) -> Option<Rc<Cached_mesh>> {
         self.entries.iter().find(|(m, mat, _)| mesh::same(m, mesh_) && mat == material_).map(|(_, _, c)| c.clone())
     }
 
-    fn add(&mut self, mesh_: mesh::t, material_: material::t, cached: Cached_mesh) {
+    fn add(&mut self, mesh_: mesh::Mesh, material_: material::Material, cached: Cached_mesh) {
         if let Some(at) = self.entries.iter().position(|(m, mat, _)| mesh::same(m, &mesh_) && *mat == material_) {
             self.entries.remove(at);
         }
@@ -89,7 +89,7 @@ impl Mesh_cache {
         }
     }
 
-    fn head(&self) -> Option<(&material::t, &Rc<Cached_mesh>)> {
+    fn head(&self) -> Option<(&material::Material, &Rc<Cached_mesh>)> {
         self.entries.front().map(|(_, mat, c)| (mat, c))
     }
 }
@@ -115,8 +115,8 @@ pub struct View {
     pub key: String,
     pub film: (i64, i64),
     pub step: i64,
-    pub camera: camera::t,
-    pub scene: d3::t,
+    pub camera: camera::Camera,
+    pub scene: d3::Scene3,
     pub setting: Setting,
     pub cap: i64,
 }
@@ -130,9 +130,9 @@ pub struct Slot {
     pub keys: Vec<String>,
     pub film: (i64, i64),
     pub step: i64,
-    pub scene: d3::t,
-    pub camera: Option<camera::t>,
-    pub wire: Option<d3::t>,
+    pub scene: d3::Scene3,
+    pub camera: Option<camera::Camera>,
+    pub wire: Option<d3::Scene3>,
     pub tracer: Option<Tracer>,
     pub setting: Setting,
     pub cap: i64,
@@ -191,15 +191,15 @@ fn linear(c: &color::T) -> p::LinearColor {
     p::Linear_color::rgb(c.r as f64 / 255.0, c.g as f64 / 255.0, c.b as f64 / 255.0)
 }
 
-pub fn traced_material(m: &material::t) -> p::Material {
+pub fn traced_material(m: &material::Material) -> p::Material {
     p::material(Some((2.0 / (m.shininess.max(0.0) + 2.0)).sqrt()), None, Some(linear(&m.emissive)), Some(m.round), linear(&m.diffuse))
 }
 
-pub fn wire_scene(scene: &d3::t) -> d3::t {
+pub fn wire_scene(scene: &d3::Scene3) -> d3::Scene3 {
     let mut nodes = Vec::new();
-    Walk::iter_batches(
+    walk::iter_batches(
         &mut |drawing, transforms| {
-            let material = material::unlit(wire_color(&Walk::ambient(scene)));
+            let material = material::unlit(wire_color(&walk::ambient(scene)));
             let node = match transforms {
                 None => d3::mesh(Some(material), None, Some(d3::render_mode::Wireframe), Some(d3::cull::Cull_none), None, drawing.mesh.clone()),
                 Some(transforms) => d3::instances_array(
@@ -222,14 +222,14 @@ pub fn wire_scene(scene: &d3::t) -> d3::t {
 /// identity transform, normals of its own): the tracer reads it where the device holds it
 /// (`Rays_pathtracer.mesh`), never converted or cached, so a deforming mesh refits its structure
 /// instead of being read back.
-pub fn device_drawing(scene: &d3::t) -> Option<Walk::drawing> {
-    let mut batches: Vec<(Walk::drawing, bool)> = Vec::new();
-    Walk::iter_batches(&mut |drawing, transforms| batches.push((drawing.clone(), transforms.is_some())), scene);
+pub fn device_drawing(scene: &d3::Scene3) -> Option<walk::drawing> {
+    let mut batches: Vec<(walk::drawing, bool)> = Vec::new();
+    walk::iter_batches(&mut |drawing, transforms| batches.push((drawing.clone(), transforms.is_some())), scene);
     match batches.as_slice() {
         [(drawing, false)]
             if drawing.texture.is_none()
-                && mesh::View::device(&drawing.mesh).is_some()
-                && !mesh::View::derived_normals(&drawing.mesh)
+                && mesh::view::device(&drawing.mesh).is_some()
+                && !mesh::view::derived_normals(&drawing.mesh)
                 && mat4::nearly_equal(&drawing.transform, &mat4::identity(), 0.0) =>
         {
             Some(drawing.clone())
@@ -239,12 +239,12 @@ pub fn device_drawing(scene: &d3::t) -> Option<Walk::drawing> {
 }
 
 
-type Traced = (Mesh_cache, p::Mesh, (mesh::t, p::Material));
+type Traced = (Mesh_cache, p::Mesh, (mesh::Mesh, p::Material));
 
 /// The cache keeps at most 64 converted source meshes. Placement remains in the tracer's instance
 /// structure, so an orbit does not convert or upload geometry. The scene's mesh and material a new
 /// tracer starts from come with it.
-pub fn traced_scene(meshes: &Mesh_cache, scene: &d3::t) -> Result<Traced, String> {
+pub fn traced_scene(meshes: &Mesh_cache, scene: &d3::Scene3) -> Result<Traced, String> {
     if let Some(drawing) = device_drawing(scene) {
         let first = (drawing.mesh.clone(), traced_material(&drawing.material));
         let traced = p::mesh(None, None, std::slice::from_ref(&first))?;
@@ -252,7 +252,7 @@ pub fn traced_scene(meshes: &Mesh_cache, scene: &d3::t) -> Result<Traced, String
     }
     let mut cache = meshes.clone();
     let mut result: Result<Vec<(mat4::T, p::Mesh)>, String> = Ok(Vec::new());
-    Walk::iter_batches(
+    walk::iter_batches(
         &mut |drawing, transforms| {
             let Ok(placed) = &mut result else { return };
             let step = (|| -> Result<(mat4::T, p::Mesh), String> {
@@ -323,9 +323,9 @@ pub struct Plan {
     pub focused: bool,
 }
 
-fn no_batches(scene: &d3::t) -> bool {
+fn no_batches(scene: &d3::Scene3) -> bool {
     let mut found = false;
-    Walk::iter_batches(&mut |_, _| found = true, scene);
+    walk::iter_batches(&mut |_, _| found = true, scene);
     !found
 }
 
@@ -509,11 +509,11 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut Mesh_cache) 
                     p::queue_mesh(&mut tracer.borrow_mut(), mesh_)?;
                 }
                 p::resize(&mut tracer.borrow_mut(), width, height)?;
-                if prior.tracer.is_none() || Walk::lights(&prior.scene) != Walk::lights(scene) {
-                    let lights: Vec<p::Light> = Walk::lights(scene).iter().map(p::light_of).collect();
+                if prior.tracer.is_none() || walk::lights(&prior.scene) != walk::lights(scene) {
+                    let lights: Vec<p::Light> = walk::lights(scene).iter().map(p::light_of).collect();
                     p::set_lights(&mut tracer.borrow_mut(), &lights)?;
                 }
-                p::set_world(&mut tracer.borrow_mut(), Walk::world(scene).as_ref())?;
+                p::set_world(&mut tracer.borrow_mut(), walk::world(scene).as_ref())?;
                 p::render(&mut tracer.borrow_mut(), &view.camera)?;
                 Ok(Slot { scene: scene.clone(), camera: Some(view.camera.clone()), tracer: Some(tracer), ..blank.clone() })
             };
@@ -568,7 +568,7 @@ pub fn info(state: &State, key: &str) -> Option<Info> {
     }
 }
 
-pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &camera::t, scene_: &d3::t) -> Vec<scene::node> {
+pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &camera::Camera, scene_: &d3::Scene3) -> Vec<scene::node> {
     let raster = || vec![scene::view3d(Some(bounds), camera, scene_.clone())];
     if state.custom || state.raster_only {
         return raster();

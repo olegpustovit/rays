@@ -93,7 +93,7 @@ pub struct Device {
     pub index_count: i64,
     pub corners: Arc<Vec<i64>>,
     pub colored: bool,
-    pub holder: rays::mesh::t,
+    pub holder: rays::mesh::Mesh,
 }
 
 #[derive(Clone)]
@@ -113,7 +113,7 @@ pub struct MeshData {
 
 type FlatParts = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64);
 
-fn flatten(extras: &Extras, objects: &[(rays::mesh::t, i64)]) -> Result<FlatParts, String> {
+fn flatten(extras: &Extras, objects: &[(rays::mesh::Mesh, i64)]) -> Result<FlatParts, String> {
     let mut positions = Vec::with_capacity(4096);
     let mut normals = Vec::with_capacity(4096);
     let mut colors = Vec::with_capacity(4096);
@@ -121,13 +121,13 @@ fn flatten(extras: &Extras, objects: &[(rays::mesh::t, i64)]) -> Result<FlatPart
     let mut count = 0i64;
     let mut colored = false;
     for (source, _) in objects {
-        if rays::mesh::View::packed_view(source)?.colors.is_some() {
+        if rays::mesh::view::packed_view(source)?.colors.is_some() {
             colored = true;
             break;
         }
     }
     for (source_mesh, material_index) in objects {
-        let view = rays::mesh::View::packed_view(source_mesh)?;
+        let view = rays::mesh::view::packed_view(source_mesh)?;
         if view.mode != rays::mesh::mode::Triangles {
             return Err("path tracer meshes must be triangle-ready".to_string());
         }
@@ -170,8 +170,8 @@ fn flatten(extras: &Extras, objects: &[(rays::mesh::t, i64)]) -> Result<FlatPart
     }
 }
 
-pub fn flat_mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mesh::t]) -> Result<MeshData, String> {
-    let objects: Vec<(rays::mesh::t, i64)> = source_meshes.iter().cloned().enumerate().map(|(i, m)| (m, i as i64)).collect();
+pub fn flat_mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mesh::Mesh]) -> Result<MeshData, String> {
+    let objects: Vec<(rays::mesh::Mesh, i64)> = source_meshes.iter().cloned().enumerate().map(|(i, m)| (m, i as i64)).collect();
     let (mesh_positions, mesh_normals, mesh_colors, mesh_ids, triangles) = flatten(&extras, &objects)?;
     Ok(MeshData { device: None, positions: mesh_positions, normals: mesh_normals, colors: mesh_colors, ids: mesh_ids, triangles, materials, instances: None, extras, scene: None })
 }
@@ -246,7 +246,7 @@ pub fn layout_mesh(objects: Vec<i64>, placed: Vec<mat4::T>, locals: Vec<mat4::T>
 
 /// Spheres and strands are traced beside the triangle structure (scene/trace), which then needs a
 /// triangle: a degenerate one, never hit, stands in when there is none.
-pub fn mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mesh::t]) -> Result<MeshData, String> {
+pub fn mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mesh::Mesh]) -> Result<MeshData, String> {
     let flat = flat_mesh(extras, materials, source_meshes)?;
     if flat.triangles == 0 {
         Ok(MeshData { positions: vec![0; 36], normals: vec![0; 36], colors: vec![], ids: vec![0; 4], ..flat })

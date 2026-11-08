@@ -16,8 +16,8 @@ pub fn ch(c: char) -> Event {
 }
 
 /// `Test_editor_input.frame ?buttons ?keys ?delta mouse events count` (900 x 640 points).
-pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
-    frame::t {
+pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
+    frame::Frame {
         input: input::Frame {
             dt: 1. / 60.,
             frame: count,
@@ -35,11 +35,11 @@ pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mous
     }
 }
 
-pub fn frame_at(mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
+pub fn frame_at(mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
     frame_full(&[], &[], (0., 0.), mouse, events, count)
 }
 
-pub fn frame_with(buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
+pub fn frame_with(buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
     frame_full(buttons, keys, (0., 0.), mouse, events, count)
 }
 

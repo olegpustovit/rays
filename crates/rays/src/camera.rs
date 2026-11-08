@@ -24,7 +24,7 @@ pub fn pinhole() -> lens {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct t {
+pub struct Camera {
     position: vec3::T,
     target: vec3::T,
     up: vec3::T,
@@ -42,13 +42,13 @@ fn validate_view(position: vec3::T, target: vec3::T, up: vec3::T) -> Result<(), 
     Ok(())
 }
 
-fn create(position: vec3::T, target: vec3::T, up: vec3::T, projection: projection) -> Result<t, String> {
+fn create(position: vec3::T, target: vec3::T, up: vec3::T, projection: projection) -> Result<Camera, String> {
     validate_view(position, target, up)?;
-    Ok(t { position, target, up: vec3::normalize(up), projection, lens: pinhole() })
+    Ok(Camera { position, target, up: vec3::normalize(up), projection, lens: pinhole() })
 }
 
 /// `fov_y` is a vertical angle in radians.
-pub fn perspective(fov_y: Option<f64>, near: Option<f64>, far: Option<f64>, at: vec3::T, target: vec3::T) -> Result<t, String> {
+pub fn perspective(fov_y: Option<f64>, near: Option<f64>, far: Option<f64>, at: vec3::T, target: vec3::T) -> Result<Camera, String> {
     let fov_y = fov_y.unwrap_or(std::f64::consts::PI / 3.);
     let near = near.unwrap_or(0.1);
     let far = far.unwrap_or(1000.);
@@ -56,7 +56,7 @@ pub fn perspective(fov_y: Option<f64>, near: Option<f64>, far: Option<f64>, at: 
     create(at, target, vec3::unit_y(), projection::Perspective { fov_y, near, far })
 }
 
-pub fn orthographic(height: f64, at: vec3::T, target: vec3::T) -> Result<t, String> {
+pub fn orthographic(height: f64, at: vec3::T, target: vec3::T) -> Result<Camera, String> {
     let near = 0.1;
     let far = 1000.;
     if !height.is_finite() || height <= 0. {
@@ -65,28 +65,28 @@ pub fn orthographic(height: f64, at: vec3::T, target: vec3::T) -> Result<t, Stri
     create(at, target, vec3::unit_y(), projection::Orthographic { height, near, far })
 }
 
-pub fn position(camera: &t) -> vec3::T {
+pub fn position(camera: &Camera) -> vec3::T {
     camera.position
 }
 
-pub fn target(camera: &t) -> vec3::T {
+pub fn target(camera: &Camera) -> vec3::T {
     camera.target
 }
 
-pub fn up(camera: &t) -> vec3::T {
+pub fn up(camera: &Camera) -> vec3::T {
     camera.up
 }
 
-pub fn projection(camera: &t) -> projection {
+pub fn projection(camera: &Camera) -> projection {
     camera.projection
 }
 
-pub fn lens(camera: &t) -> lens {
+pub fn lens(camera: &Camera) -> lens {
     camera.lens
 }
 
 /// The lens's focus distance, or the distance to `target`.
-pub fn focus_distance(camera: &t) -> f64 {
+pub fn focus_distance(camera: &Camera) -> f64 {
     match camera.lens.focus_distance {
         Some(distance) => distance,
         None => vec3::length(vec3::sub(camera.target, camera.position)),
@@ -94,7 +94,7 @@ pub fn focus_distance(camera: &t) -> f64 {
 }
 
 /// Errors for a negative or non-finite aperture or a non-positive focus distance.
-pub fn with_lens(lens: lens, camera: &t) -> Result<t, String> {
+pub fn with_lens(lens: lens, camera: &Camera) -> Result<Camera, String> {
     if !lens.aperture.is_finite() || lens.aperture < 0. {
         return Err("Camera.with_lens: aperture must be finite and non-negative".to_string());
     }
@@ -103,17 +103,17 @@ pub fn with_lens(lens: lens, camera: &t) -> Result<t, String> {
             return Err("Camera.with_lens: focus distance must be finite and positive".to_string());
         }
     }
-    Ok(t { lens, ..camera.clone() })
+    Ok(Camera { lens, ..camera.clone() })
 }
 
-pub fn with_position(position: vec3::T, camera: &t) -> Result<t, String> {
+pub fn with_position(position: vec3::T, camera: &Camera) -> Result<Camera, String> {
     validate_view(position, camera.target, camera.up)?;
-    Ok(t { position, ..camera.clone() })
+    Ok(Camera { position, ..camera.clone() })
 }
 
-pub fn with_up(up: vec3::T, camera: &t) -> Result<t, String> {
+pub fn with_up(up: vec3::T, camera: &Camera) -> Result<Camera, String> {
     validate_view(camera.position, camera.target, up)?;
-    Ok(t { up: vec3::normalize(up), ..camera.clone() })
+    Ok(Camera { up: vec3::normalize(up), ..camera.clone() })
 }
 
 fn viewport_size(viewport: (i64, i64, i64, i64)) -> Result<(f64, f64), String> {
@@ -124,11 +124,11 @@ fn viewport_size(viewport: (i64, i64, i64, i64)) -> Result<(f64, f64), String> {
     Ok((width as f64, height as f64))
 }
 
-fn view_matrix(camera: &t) -> Result<mat4::T, String> {
+fn view_matrix(camera: &Camera) -> Result<mat4::T, String> {
     mat4::look_at(camera.position, camera.target, camera.up)
 }
 
-fn projection_matrix(viewport: (i64, i64, i64, i64), camera: &t) -> Result<mat4::T, String> {
+fn projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<mat4::T, String> {
     let (width, height) = viewport_size(viewport)?;
     let aspect = width / height;
     match camera.projection {
@@ -141,7 +141,7 @@ fn projection_matrix(viewport: (i64, i64, i64, i64), camera: &t) -> Result<mat4:
     }
 }
 
-pub fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &t) -> Result<mat4::T, String> {
+pub fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<mat4::T, String> {
     // OCaml evaluates the right operand of an application first: the view matrix, then the projection.
     let view = view_matrix(camera)?;
     let projection = projection_matrix(viewport, camera)?;
@@ -149,7 +149,7 @@ pub fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &t) -> Res
 }
 
 /// Logical screen x/y and normalized depth in [0, 1].
-pub fn world_to_screen(viewport: (i64, i64, i64, i64), camera: &t, point: vec3::T) -> Result<Option<vec3::T>, String> {
+pub fn world_to_screen(viewport: (i64, i64, i64, i64), camera: &Camera, point: vec3::T) -> Result<Option<vec3::T>, String> {
     let (vx, vy, _, _) = viewport;
     let (width, height) = viewport_size(viewport)?;
     let matrix = view_projection_matrix(viewport, camera)?;
@@ -167,7 +167,7 @@ pub fn world_to_screen(viewport: (i64, i64, i64, i64), camera: &t, point: vec3::
     )))
 }
 
-fn screen_to_world(viewport: (i64, i64, i64, i64), camera: &t, point: vec3::T) -> Result<Option<vec3::T>, String> {
+fn screen_to_world(viewport: (i64, i64, i64, i64), camera: &Camera, point: vec3::T) -> Result<Option<vec3::T>, String> {
     let (vx, vy, _, _) = viewport;
     let (width, height) = viewport_size(viewport)?;
     match mat4::inverse(&view_projection_matrix(viewport, camera)?) {
@@ -182,12 +182,12 @@ fn screen_to_world(viewport: (i64, i64, i64, i64), camera: &t, point: vec3::T) -
     }
 }
 
-pub fn world_to_camera(camera: &t, point: vec3::T) -> Result<vec3::T, String> {
+pub fn world_to_camera(camera: &Camera, point: vec3::T) -> Result<vec3::T, String> {
     Ok(mat4::transform_point(&view_matrix(camera)?, point))
 }
 
 /// A world-space ray origin and normalized direction.
-pub fn screen_ray(viewport: (i64, i64, i64, i64), camera: &t, at: (f64, f64)) -> Result<Option<(vec3::T, vec3::T)>, String> {
+pub fn screen_ray(viewport: (i64, i64, i64, i64), camera: &Camera, at: (f64, f64)) -> Result<Option<(vec3::T, vec3::T)>, String> {
     let (x, y) = at;
     // Tuple components evaluate right to left in OCaml: the far point first.
     let far = screen_to_world(viewport, camera, vec3::create(x, y, 1.))?;

@@ -17,7 +17,7 @@ fn tri() -> rdk_core::geometry::T {
     rdk_core::geometry::create(positions, topology, Some(vec![normal]), None, None).unwrap()
 }
 
-fn mesh(g: &rdk_core::geometry::T) -> Result<rays::mesh::t, String> {
+fn mesh(g: &rdk_core::geometry::T) -> Result<rays::mesh::Mesh, String> {
     rdk_rays::rays_mesh::to_mesh(g).map_err(|e| format!("{e:?}"))
 }
 
@@ -27,7 +27,7 @@ fn snapshot(domains: i64) -> Snap {
     let out = std::cell::RefCell::new(None);
     parallel::run_unit(Some(domains), &|| {
         let m = mesh(&tri()).unwrap();
-        let view = rays::mesh::View::packed_view(&m).unwrap();
+        let view = rays::mesh::view::packed_view(&m).unwrap();
         let n = view.normals.as_ref().expect("normals");
         assert!(n.x.as_slice() == [0., 0., 0.] && n.y.as_slice() == [0., 0., 0.] && n.z.as_slice() == [-1., -1., -1.], "reversed authored N was overwritten");
         assert!(view.indices.as_slice() == [0, 1, 2], "terminal mesh reordered its one triangle");

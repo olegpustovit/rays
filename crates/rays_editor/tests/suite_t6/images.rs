@@ -397,16 +397,16 @@ fn scene_textures_preserved() {
     let texture = s3::textured(None, rays::texture::init(2, 2, &|_, _| rays_math::color::white()).unwrap());
     let plane = s3::plane(Some(s3::cull::Cull_front), 2., 3.).unwrap();
     let scene = s3::create(None, Some(rays_math::color::red()), None, Some(4), vec![s3::translate(rays_math::vec3::create(2., 3., 4.), vec![s3::with_blend(s3::blend::Add, vec![s3::with_depth(s3::depth_state(Some(false)), vec![plane])])])]).unwrap();
-    let textured = s3::Walk::with_texture(&texture, &scene);
-    let (a, b) = (s3::Walk::drawings(&scene), s3::Walk::drawings(&textured));
+    let textured = s3::walk::with_texture(&texture, &scene);
+    let (a, b) = (s3::walk::drawings(&scene), s3::walk::drawings(&textured));
     assert_eq!(a.len(), b.len());
     for (original, t) in a.iter().zip(b.iter()) {
         assert!(t.texture.is_some());
         assert!(original.texture.is_none());
         assert!(original.cull == t.cull && original.blend == t.blend && original.depth == t.depth && original.transform == t.transform);
     }
-    assert_eq!(s3::Walk::samples(&textured), 4);
-    assert!(s3::Walk::ambient(&textured) == rays_math::color::red());
+    assert_eq!(s3::walk::samples(&textured), 4);
+    assert!(s3::walk::ambient(&textured) == rays_math::color::red());
 }
 
 /// Image noise live stamps: the owner's pixels change with time and are all released at close.
@@ -460,8 +460,8 @@ fn handles() -> i64 {
     ogpu_core::impl_::live_handles().expect("live handles")
 }
 
-fn frame_at(time: f64, size: (i64, i64), count: i64, pointer: (f64, f64)) -> rays::frame::t {
-    rays::frame::t { input: input::Frame { dt: 1., frame: count, tick: count, size, pointer, ..input::at_time(time) }, pixel_scale: (1., 1.), fps: 1., mouse_delta: (0., 0.) }
+fn frame_at(time: f64, size: (i64, i64), count: i64, pointer: (f64, f64)) -> rays::frame::Frame {
+    rays::frame::Frame { input: input::Frame { dt: 1., frame: count, tick: count, size, pointer, ..input::at_time(time) }, pixel_scale: (1., 1.), fps: 1., mouse_delta: (0., 0.) }
 }
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -840,8 +840,8 @@ fn texture_of(bytes: &[u8], width: i64, height: i64) -> rays::texture::t {
     .unwrap()
 }
 
-fn frame_for(time: f64, size: (i64, i64)) -> rays::frame::t {
-    rays::frame::t { input: input::Frame { size, frame: time as i64, tick: time as i64, ..input::at_time(time) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
+fn frame_for(time: f64, size: (i64, i64)) -> rays::frame::Frame {
+    rays::frame::Frame { input: input::Frame { size, frame: time as i64, tick: time as i64, ..input::at_time(time) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }
 
 fn is_destroyed(r: Result<Option<(i64, i64, i64, ogpu_core::backend::Texture)>, ogpu_core::error::Error>) -> bool {

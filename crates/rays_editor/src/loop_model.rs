@@ -33,7 +33,7 @@ use param::Effects;
 use rays::frame;
 use rays::image;
 use rays::light;
-use rays::scene3::{self as d3, Walk};
+use rays::scene3::{self as d3, walk};
 use rays::texture;
 use rays::world;
 use rays_math::{color, mat4};
@@ -58,7 +58,7 @@ use crate::world_map::world_drag;
 pub type layout = pxui_shell::layout::Panels;
 
 /// How the editor draws a prepared object (the sketch's `draw`).
-pub type Draw_fn = Rc<dyn Fn(&node::T, &cook::prepared) -> Result<d3::t, ConversionError>>;
+pub type Draw_fn = Rc<dyn Fn(&node::T, &cook::prepared) -> Result<d3::Scene3, ConversionError>>;
 
 /// The last full frame, once nothing but the clock could change it: its picture, and how many full
 /// frames in a row drew the same one.
@@ -66,11 +66,11 @@ pub type Draw_fn = Rc<dyn Fn(&node::T, &cook::prepared) -> Result<d3::t, Convers
 pub struct rest {
     pub picture: Vec<rays::scene::node>,
     pub still: i64,
-    pub shown: frame::t,
+    pub shown: frame::Frame,
 }
 
 /// A World's bake with the World it came from; shared, compared by identity.
-pub type baked_pair = (world::t, Rc<world::baked>);
+pub type baked_pair = (world::World, Rc<world::baked>);
 
 /// One object's drawing: its graph and prepared value (the cache key), the scene, its texture and
 /// the conversion error.
@@ -78,7 +78,7 @@ pub type baked_pair = (world::t, Rc<world::baked>);
 pub struct drawn_entry {
     pub graph: node::T,
     pub prepared: cook::Prepared_ref,
-    pub rendered: d3::t,
+    pub rendered: d3::Scene3,
     pub texture: Option<texture::t>,
     pub error: Option<String>,
 }
@@ -142,13 +142,13 @@ pub struct t {
     pub saved_view: Syntax,
     pub state_error: Option<String>,
     pub canvases: Vec<(String, canvas_picture)>,
-    pub host: Rc<std::cell::RefCell<workspace_host::t>>,
+    pub host: Rc<std::cell::RefCell<workspace_host::WorkspaceHost>>,
     /// when this frame's update ended, and the meshes it draws for the first time
     pub presenting: Option<(f64, Vec<rdk_core::geometry::T>)>,
 }
 
 /// Scene objects a sketch starts with: its lights as light objects.
-pub fn seed_lights(lights: &[light::t], scene: kg::T) -> kg::T {
+pub fn seed_lights(lights: &[light::Light], scene: kg::T) -> kg::T {
     let mut scene = scene;
     for (index, l) in lights.iter().enumerate() {
         let node = kg::instance(None, &format!("light{}", index + 1), &objects::light::kind());
@@ -166,9 +166,9 @@ pub struct create_options {
     pub name: Option<String>,
     pub presets: Option<String>,
     pub factories: Option<Vec<Factory>>,
-    pub gpu_owner: Option<workspace_gpu::t>,
+    pub gpu_owner: Option<workspace_gpu::WorkspaceGpu>,
     pub settings: Option<editor_document::settings::T>,
-    pub lights: Vec<light::t>,
+    pub lights: Vec<light::Light>,
     pub camera: Option<V::camera>,
     pub background: Option<color::T>,
     pub seed: Option<i64>,
@@ -328,7 +328,7 @@ pub fn selected_node(value: &t) -> Option<picked> {
 pub fn displayed_node(value: &t) -> node::T {
     editor_list::displayed_node(&value.core)
 }
-pub fn panes(value: &t, frame_: &frame::t) -> pxui_shell::layout::Panes {
+pub fn panes(value: &t, frame_: &frame::Frame) -> pxui_shell::layout::Panes {
     editor_shell::panes(&value.core, frame_)
 }
 pub fn can_undo(value: &t) -> bool {
@@ -411,7 +411,7 @@ pub fn resolved_scene(value: &t) -> kg::T {
     }
 }
 
-pub fn lights(value: &t) -> Vec<light::t> {
+pub fn lights(value: &t) -> Vec<light::Light> {
     objects::lights(true, &resolved_scene(value))
 }
 
@@ -453,7 +453,7 @@ pub fn look_key(value: &t, key: &str) -> String {
 
 /// the view of the viewport `key`: its own orbit, the focused one's being `camera`, through the
 /// camera of its own root
-pub fn camera_for(viewing: &Option<String>, camera: &V::camera, cameras: &[(String, V::camera)], extra: &V::extra, pending: bool, key: &str) -> rays::camera::t {
+pub fn camera_for(viewing: &Option<String>, camera: &V::camera, cameras: &[(String, V::camera)], extra: &V::extra, pending: bool, key: &str) -> rays::camera::Camera {
     let key = look_key_of(viewing, key);
     let orbit = if viewing.as_deref() == Some(key.as_str()) {
         camera.clone()
@@ -463,11 +463,11 @@ pub fn camera_for(viewing: &Option<String>, camera: &V::camera, cameras: &[(Stri
     V::view_camera(&orbit, extra, &key, pending)
 }
 
-pub fn camera_of(value: &t, key: &str) -> rays::camera::t {
+pub fn camera_of(value: &t, key: &str) -> rays::camera::Camera {
     camera_for(&value.viewing, &value.camera, &value.cameras, &value.extra, value.pending_render.is_some(), key)
 }
 
-pub fn view_camera(value: &t) -> rays::camera::t {
+pub fn view_camera(value: &t) -> rays::camera::Camera {
     camera_of(value, &focus_key(value))
 }
 
@@ -481,7 +481,7 @@ pub struct Focus {
 /// Focus moves to another viewport: the orbit of the one left is kept, the new one starts from the
 /// orbit it last had, else from a copy of the one in use. `core` is the model whose panels say
 /// which viewport has the focus.
-pub fn follow_focus(value: &t, core: &m::t, frame_: &frame::t) -> Focus {
+pub fn follow_focus(value: &t, core: &m::t, frame_: &frame::Frame) -> Focus {
     let g = editor_shell::geometry(core, &core.workspace, frame_);
     let keys: Vec<String> = g
         .leaves
@@ -528,26 +528,26 @@ pub fn follow_focus(value: &t, core: &m::t, frame_: &frame::t) -> Focus {
     }
 }
 
-pub fn paint_view(value: &t, key: &str, viewport: pxui_shell::layout::Bounds, view_: &rays::camera::t, rendered: &d3::t) -> Vec<rays::scene::node> {
+pub fn paint_view(value: &t, key: &str, viewport: pxui_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::node> {
     V::paint(&value.extra, key, V::film(&value.extra, &look_key(value, key), viewport), view_, rendered)
 }
 
-pub fn viewport_camera(value: &t, key: &str) -> rays::camera::t {
+pub fn viewport_camera(value: &t, key: &str) -> rays::camera::Camera {
     camera_of(value, key)
 }
 
-pub fn focused_image_of(viewing: &Option<String>, views: &[(String, d3::t)], rendered: &Option<d3::t>) -> Option<d3::t> {
+pub fn focused_image_of(viewing: &Option<String>, views: &[(String, d3::Scene3)], rendered: &Option<d3::Scene3>) -> Option<d3::Scene3> {
     match viewing {
         Some(key) => views.iter().find(|(k, _)| k == key).map(|(_, i)| i.clone()).or_else(|| rendered.clone()),
         None => rendered.clone(),
     }
 }
 
-pub fn focused_image(value: &t) -> Option<d3::t> {
+pub fn focused_image(value: &t) -> Option<d3::Scene3> {
     focused_image_of(&value.viewing, &value.views, &value.rendered)
 }
 
-pub fn film(value: &t, frame_: &frame::t) -> (i64, i64, i64, i64) {
+pub fn film(value: &t, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
     let pane = editor_shell::panes(&value.core, frame_).view;
     let (x, y, _, _) = pane;
     let (fx, fy, w, h) = V::film(&value.extra, &focus_key(value), pane);
@@ -555,9 +555,9 @@ pub fn film(value: &t, frame_: &frame::t) -> (i64, i64, i64, i64) {
 }
 
 /// The hidden-scene cache is model state: refreshed here, read by `scene`.
-pub fn refresh_hidden(value: &mut t, frame_: &frame::t) {
+pub fn refresh_hidden(value: &mut t, frame_: &frame::Frame) {
     let cache = if hidden_only(V::ui_visible(&value.control), &value.core) {
-        let pv = |key: &str, vp, view_: &rays::camera::t, r: &d3::t| paint_view(&value, key, vp, view_, r);
+        let pv = |key: &str, vp, view_: &rays::camera::Camera, r: &d3::Scene3| paint_view(&value, key, vp, view_, r);
         Some(hidden_entry(value.background, focused_image(&value).as_ref(), &view_camera(&value), &pv, value.hidden_scene_cache.as_ref(), &value.core, frame_))
     } else {
         None
@@ -569,9 +569,9 @@ pub fn refresh_hidden(value: &mut t, frame_: &frame::t) {
 pub fn display_keys(drawn: &Drawn) -> Vec<String> {
     let mut keys = Vec::new();
     for entry in drawn.values() {
-        Walk::iter_batches(
+        walk::iter_batches(
             &mut |drawing, _| {
-                if let Some((key, _)) = rays::mesh::View::device(&drawing.mesh) {
+                if let Some((key, _)) = rays::mesh::view::device(&drawing.mesh) {
                     keys.push(key);
                 }
             },
@@ -668,14 +668,14 @@ pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::b
                     let d: cook::Display = Rc::new(move |g| workspace_gpu::display(&gpu, g).map(|(k, n, i, w, keep)| (k, n, i, w, Rc::from(keep))));
                     d
                 };
-                let mut produced: Option<Result<d3::t, ConversionError>> = None;
+                let mut produced: Option<Result<d3::Scene3, ConversionError>> = None;
                 cook::with_display(display, &mut || produced = Some((value.draw)(&piece.graph, &piece.prepared)));
                 let (scene3, error) = match produced.expect("draw ran") {
                     Ok(s) => (s, None),
                     Err(ConversionError(message)) => (d3::empty(), Some(message)),
                 };
                 let scene3 = match &texture {
-                    Some(tex) => Walk::with_texture(&d3::textured(None, tex.clone()), &scene3),
+                    Some(tex) => walk::with_texture(&d3::textured(None, tex.clone()), &scene3),
                     None => scene3,
                 };
                 drawn.insert(piece.id, drawn_entry { graph: piece.graph.clone(), prepared: piece.prepared.clone(), rendered: scene3, texture, error });
@@ -689,7 +689,7 @@ pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::b
             Level::Scene => false,
         }
     };
-    let compose_pieces = |world_: &Option<Rc<world::baked>>, view: &View, pieces: Vec<(mat4::T, cook::piece)>| -> d3::t {
+    let compose_pieces = |world_: &Option<Rc<world::baked>>, view: &View, pieces: Vec<(mat4::T, cook::piece)>| -> d3::Scene3 {
         V::compose(
             &editor_host::scene_for_view(Some(scene.clone()), Some(view), core),
             world_.as_deref(),
@@ -698,7 +698,7 @@ pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::b
                 .map(|(matrix, piece)| {
                     let rendered = &drawn.get(&piece.id).expect("drawn piece").rendered;
                     let culled = match kg::find(&scene, piece.id) {
-                        Some(node) => Walk::with_cull(objects::cull(&node), rendered),
+                        Some(node) => walk::with_cull(objects::cull(&node), rendered),
                         None => rendered.clone(),
                     };
                     (matrix, ghost(piece.id), culled)
@@ -712,10 +712,10 @@ pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::b
     let instance_of = |key: &str| -> Option<flow_syntax::value::Value> {
         core.doc.shell.as_ref().and_then(|shell| shell.preview_sources.iter().find(|(k, _)| k == key).map(|(_, s)| s.instance.clone()))
     };
-    let views: Vec<(String, d3::t)> = if waiting {
+    let views: Vec<(String, d3::Scene3)> = if waiting {
         Vec::new()
     } else {
-        let mut composed: Vec<(String, d3::t, Option<flow_syntax::value::Value>, Option<Rc<world::baked>>)> = Vec::new();
+        let mut composed: Vec<(String, d3::Scene3, Option<flow_syntax::value::Value>, Option<Rc<world::baked>>)> = Vec::new();
         for key in view_keys(core) {
             let world_ = baked_views.iter().find(|(k, _)| *k == key).map(|(_, (_, b))| b.clone());
             let instance = instance_of(&key);

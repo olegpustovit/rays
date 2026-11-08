@@ -52,7 +52,7 @@ pub struct DeviceGpu {
     /// false: the producer's index stream
     pub owns_vix: bool,
     pub refit_scratch: Buffer,
-    pub source: rays::mesh::t,
+    pub source: rays::mesh::Mesh,
     pub receipt: Receipt,
 }
 

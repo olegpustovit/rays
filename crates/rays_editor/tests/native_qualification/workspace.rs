@@ -18,7 +18,7 @@ fn node_of<'a>(p: &'a l::T, kind: &str) -> &'a e::Node { p.plan.nodes.iter().fin
 fn bytes(p: &si::T) -> Vec<u8> { si::rgba8(p).expect("RGBA8 payload").to_vec() }
 fn handles() -> i64 { ogpu_core::impl_::live_handles().unwrap() }
 fn result(p: &l::T, name: &str) -> Value { p.evaluated.results.iter().find(|(n, _)| n == name).unwrap().1.clone() }
-struct Owner { images: wi::t, resources: wr::t, gpu: wg::t }
+struct Owner { images: wi::WorkspaceImages, resources: wr::WorkspaceResources, gpu: wg::WorkspaceGpu }
 impl Owner {
     fn new(domains: i64, qualification: bool) -> Self {
         let gpu = wg::create(None);
@@ -369,7 +369,7 @@ fn capture_cycles() {
     assert_eq!(run(1, true), expected); assert_eq!(run(8, false), expected); assert_eq!(run(8, true), expected); assert_eq!(handles(), before);
 }
 
-fn publish(gpu: &wg::t, key: &str, v: &flow_ir::flow_ir::Gpu::Value) -> Result<flow_gpu::image_sink::Output, Diagnostic> {
+fn publish(gpu: &wg::WorkspaceGpu, key: &str, v: &flow_ir::flow_ir::Gpu::Value) -> Result<flow_gpu::image_sink::Output, Diagnostic> {
     let mut output = None;
     wg::image(gpu, key, 65, 17, &mut |o| { output = Some(o.clone()); Ok(()) }, v)?;
     Ok(output.unwrap())

@@ -67,8 +67,8 @@ pub struct texture_ {
 
 #[derive(Clone)]
 pub enum node {
-    Mesh(mesh::t, material::t, Option<texture_>, render_mode, cull, shading),
-    Instances(mesh::t, material::t, Option<texture_>, render_mode, cull, shading, Rc<Vec<mat4::T>>),
+    Mesh(mesh::Mesh, material::Material, Option<texture_>, render_mode, cull, shading),
+    Instances(mesh::Mesh, material::Material, Option<texture_>, render_mode, cull, shading, Rc<Vec<mat4::T>>),
     Group(Rc<Vec<node>>),
     Transform(mat4::T, Rc<Vec<node>>),
     Depth_state(depth_state, Rc<Vec<node>>),
@@ -76,9 +76,9 @@ pub enum node {
 }
 
 #[derive(Clone)]
-pub struct t {
+pub struct Scene3 {
     nodes: Vec<node>,
-    lights: Vec<light::t>,
+    lights: Vec<light::Light>,
     ambient: color::T,
     separate_specular: bool,
     samples: i64,
@@ -89,8 +89,8 @@ pub fn depth_state(write: Option<bool>) -> depth_state {
     depth_state { comparison: comparison::Less, write: write.unwrap_or(true) }
 }
 
-pub fn empty() -> t {
-    t {
+pub fn empty() -> Scene3 {
+    Scene3 {
         nodes: Vec::new(),
         lights: Vec::new(),
         ambient: color::black(),
@@ -104,17 +104,17 @@ pub fn empty() -> t {
 /// lights; rendering a scene with more fails with a typed lowering error instead of dropping
 /// lights.
 pub fn create(
-    lights: Option<Vec<light::t>>,
+    lights: Option<Vec<light::Light>>,
     ambient: Option<color::T>,
     separate_specular: Option<bool>,
     samples: Option<i64>,
     nodes: Vec<node>,
-) -> Result<t, String> {
+) -> Result<Scene3, String> {
     let samples = samples.unwrap_or(1);
     if ![1, 4, 9, 16].contains(&samples) {
         return Err("Scene3.create: samples must be 1, 4, 9, or 16".to_string());
     }
-    Ok(t {
+    Ok(Scene3 {
         nodes,
         lights: lights.unwrap_or_default(),
         ambient: ambient.unwrap_or_else(|| color::rgb(32, 32, 32)),
@@ -129,12 +129,12 @@ pub fn textured(filter: Option<texture::filter>, value: texture::t) -> texture_ 
 }
 
 pub fn mesh(
-    material_: Option<material::t>,
+    material_: Option<material::Material>,
     texture: Option<texture_>,
     mode: Option<render_mode>,
     cull_: Option<cull>,
     shading_: Option<shading>,
-    value: mesh::t,
+    value: mesh::Mesh,
 ) -> node {
     node::Mesh(
         value,
@@ -150,11 +150,11 @@ pub fn mesh(
 /// remain shared and instance transforms stream through rendering without first materializing a
 /// drawing list.
 pub fn instances_array(
-    material_: Option<material::t>,
+    material_: Option<material::Material>,
     mode: Option<render_mode>,
     cull_: Option<cull>,
     shading_: Option<shading>,
-    value: mesh::t,
+    value: mesh::Mesh,
     transforms: &[mat4::T],
 ) -> node {
     node::Instances(
@@ -170,7 +170,7 @@ pub fn instances_array(
 
 /// The scene's drawings without its lights and render settings, e.g. to place a whole scene under
 /// a `transform` inside another.
-pub fn nodes(scene: &t) -> Vec<node> {
+pub fn nodes(scene: &Scene3) -> Vec<node> {
     scene.nodes.clone()
 }
 
@@ -199,15 +199,15 @@ pub fn plane(cull_: Option<cull>, width: f64, height: f64) -> Result<node, Strin
 }
 
 /// Light the scene with a baked `World` instead of Blinn-Phong.
-pub fn with_world(baked: world::baked, scene: &t) -> t {
-    t { world: Some(baked), ..scene.clone() }
+pub fn with_world(baked: world::baked, scene: &Scene3) -> Scene3 {
+    Scene3 { world: Some(baked), ..scene.clone() }
 }
 
 /// Internal renderer boundary.
-pub mod Walk {
+pub mod walk {
     use super::*;
 
-    pub fn with_texture(texture: &texture_, scene: &t) -> t {
+    pub fn with_texture(texture: &texture_, scene: &Scene3) -> Scene3 {
         fn visit(texture: &texture_, n: &node) -> node {
             let many = |children: &Rc<Vec<node>>| Rc::new(children.iter().map(|c| visit(texture, c)).collect::<Vec<node>>());
             match n {
@@ -221,11 +221,11 @@ pub mod Walk {
                 node::Blend_state(state, children) => node::Blend_state(*state, many(children)),
             }
         }
-        t { nodes: scene.nodes.iter().map(|n| visit(texture, n)).collect(), ..scene.clone() }
+        Scene3 { nodes: scene.nodes.iter().map(|n| visit(texture, n)).collect(), ..scene.clone() }
     }
 
     /// `scene` with every mesh drawn under `cull` (a geometry object's face culling)
-    pub fn with_cull(cull_: cull, scene: &t) -> t {
+    pub fn with_cull(cull_: cull, scene: &Scene3) -> Scene3 {
         fn visit(c: cull, n: &node) -> node {
             let many = |children: &Rc<Vec<node>>| Rc::new(children.iter().map(|x| visit(c, x)).collect::<Vec<node>>());
             match n {
@@ -237,13 +237,13 @@ pub mod Walk {
                 node::Blend_state(state, children) => node::Blend_state(*state, many(children)),
             }
         }
-        t { nodes: scene.nodes.iter().map(|n| visit(cull_, n)).collect(), ..scene.clone() }
+        Scene3 { nodes: scene.nodes.iter().map(|n| visit(cull_, n)).collect(), ..scene.clone() }
     }
 
     #[derive(Clone)]
     pub struct drawing {
-        pub mesh: mesh::t,
-        pub material: material::t,
+        pub mesh: mesh::Mesh,
+        pub material: material::Material,
         pub texture: Option<texture_>,
         pub mode: render_mode,
         pub cull: cull,
@@ -252,7 +252,7 @@ pub mod Walk {
         pub transform: mat4::T,
     }
 
-    pub fn cacheable(scene: &t) -> bool {
+    pub fn cacheable(scene: &Scene3) -> bool {
         fn nodes(list: &[node]) -> bool {
             list.iter().all(|n| match n {
                 node::Mesh(_, _, texture, ..) => texture.is_none(),
@@ -267,7 +267,7 @@ pub mod Walk {
         depth_state(None)
     }
 
-    pub fn drawings(scene: &t) -> Vec<drawing> {
+    pub fn drawings(scene: &Scene3) -> Vec<drawing> {
         fn flatten(parent: &mat4::T, depth: depth_state, blend_: blend, acc: &mut Vec<drawing>, list: &[node]) {
             for n in list {
                 match n {
@@ -312,7 +312,7 @@ pub mod Walk {
 
     /// Iterate one descriptor per mesh node. `Some(transforms)` is a borrowed instance batch
     /// composed after the descriptor's parent transform.
-    pub fn iter_batches(operation: &mut dyn FnMut(&drawing, Option<&Rc<Vec<mat4::T>>>), scene: &t) {
+    pub fn iter_batches(operation: &mut dyn FnMut(&drawing, Option<&Rc<Vec<mat4::T>>>), scene: &Scene3) {
         fn visit(operation: &mut dyn FnMut(&drawing, Option<&Rc<Vec<mat4::T>>>), parent: &mat4::T, depth: depth_state, blend_: blend, list: &[node]) {
             for n in list {
                 match n {
@@ -352,27 +352,27 @@ pub mod Walk {
         visit(operation, &mat4::identity(), default_depth(), blend::Alpha, &scene.nodes);
     }
 
-    pub fn lights(scene: &t) -> Vec<light::t> {
+    pub fn lights(scene: &Scene3) -> Vec<light::Light> {
         scene.lights.clone()
     }
 
-    pub fn ambient(scene: &t) -> color::T {
+    pub fn ambient(scene: &Scene3) -> color::T {
         scene.ambient
     }
 
-    pub fn separate_specular(scene: &t) -> bool {
+    pub fn separate_specular(scene: &Scene3) -> bool {
         scene.separate_specular
     }
 
-    pub fn depth_clear(_scene: &t) -> f64 {
+    pub fn depth_clear(_scene: &Scene3) -> f64 {
         1.
     }
 
-    pub fn samples(scene: &t) -> i64 {
+    pub fn samples(scene: &Scene3) -> i64 {
         scene.samples
     }
 
-    pub fn world(scene: &t) -> Option<world::baked> {
+    pub fn world(scene: &Scene3) -> Option<world::baked> {
         scene.world.clone()
     }
 }
@@ -430,7 +430,7 @@ fn same_node(a: &node, b: &node) -> bool {
 }
 
 /// The same scene by identity: meshes in constant time (`mesh::same`), the rest structurally.
-pub fn same(a: &t, b: &t) -> bool {
+pub fn same(a: &Scene3, b: &Scene3) -> bool {
     same_list(&a.nodes, &b.nodes)
         && a.lights == b.lights
         && a.ambient == b.ambient

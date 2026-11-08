@@ -24,7 +24,7 @@ fn compile(body: &str) -> packed::T {
 fn inputs(program: &packed::T, index: bool, time: f64) -> packed::Inputs {
     ok(packed::host::prepare(program,&packed::host::PrepareOptions { fast:true,index,..Default::default() },&input::at_time(time)))
 }
-fn with_owner(run: impl Fn(&gpu::t,&Gpu::Config)) {
+fn with_owner(run: impl Fn(&gpu::WorkspaceGpu,&Gpu::Config)) {
     assert!(crate::common::gpu(),"native qualification requires Vulkan");
     let baseline = ogpu_core::impl_::live_handles().unwrap();
     let owner = gpu::create(None);
@@ -240,8 +240,8 @@ fn retained_generations() {
             let geometry = isogrid::cook(session,node,time);
             assert!(Float3::resident(g::positions(&geometry)),"Measured lifetime fixture chose CPU: {:?}",Profile::placements(&lowered.profile));
             let picture = isogrid::picture(owner,&geometry);
-            let mesh = scene3::Walk::drawings(&picture)[0].mesh.clone();
-            let key = rays::mesh::View::device(&mesh).unwrap().0;
+            let mesh = scene3::walk::drawings(&picture)[0].mesh.clone();
+            let key = rays::mesh::view::device(&mesh).unwrap().0;
             (geometry,key,isogrid::frame(&camera,picture),time)
         };
         for time in [-2.,-1.] {isogrid::cook(&mut session,&node,time);}
@@ -322,7 +322,7 @@ fn isogrid_generations() {
         let before_display=gpu::image_stats(owner).0;
         let picture=isogrid::picture(owner,&a);
         assert_eq!(gpu::display_refusal(owner),None);
-        assert!(rays::mesh::View::device(&scene3::Walk::drawings(&picture)[0].mesh).is_some());
+        assert!(rays::mesh::view::device(&scene3::walk::drawings(&picture)[0].mesh).is_some());
         assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,before_display.payload_readback_bytes);
         assert_eq!(gpu::image_stats(owner).0.input_uploaded_bytes,before_display.input_uploaded_bytes);
         let (_,node_b)=isogrid::recipe_node(&workspace,config,0);

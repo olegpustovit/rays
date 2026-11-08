@@ -41,7 +41,7 @@ const MOVING: &str = "(workspace moving
       b)))
 ";
 
-fn fr(keys: &[Key], events: Vec<Event>, count: i64) -> rays::frame::t {
+fn fr(keys: &[Key], events: Vec<Event>, count: i64) -> rays::frame::Frame {
     frame_full(&[], keys, (0., 0.), (450., 320.), events, count)
 }
 

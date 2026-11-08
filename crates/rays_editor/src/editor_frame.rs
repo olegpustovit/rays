@@ -111,7 +111,7 @@ fn search_prompt(ui: &mut Ui, key: &str, title: &str, label: &str, query: &str, 
 
 /// The open prompt of a frame: draws it and returns (next prompt, intent).
 #[allow(clippy::too_many_arguments)]
-pub fn prompt_panel<'a>(value: impl Into<ModelView<'a>>, focus: &Panel, keymap: &[Command], frame_: &frame::t, workspace: &shell, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, ui: &mut Ui, prompt_: Option<prompt>) -> Result<Prompted, rays_diagnostic::Diagnostic> {
+pub fn prompt_panel<'a>(value: impl Into<ModelView<'a>>, focus: &Panel, keymap: &[Command], frame_: &frame::Frame, workspace: &shell, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, ui: &mut Ui, prompt_: Option<prompt>) -> Result<Prompted, rays_diagnostic::Diagnostic> {
     let value = &value.into();
     let next: Prompted = match prompt_.clone() {
         None => (None, None),
@@ -348,7 +348,7 @@ pub fn prompt_panel<'a>(value: impl Into<ModelView<'a>>, focus: &Panel, keymap: 
 
 /// The gutters, last over every pane's hit area, and the layout the frame asks for through them.
 #[allow(clippy::too_many_arguments)]
-pub fn settle_layout<'a>(value: impl Into<ModelView<'a>>, vw: impl Into<ModelView<'a>>, workspace: shell, frame_: &frame::t, keymap: &[Command], shortcut_frame: &frame::t, g: &layout::Geometry, intents: &[chrome::Intent], strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, UiBox)], platform: input::Platform, ui: &mut Ui) -> (shell, Vec<change>) {
+pub fn settle_layout<'a>(value: impl Into<ModelView<'a>>, vw: impl Into<ModelView<'a>>, workspace: shell, frame_: &frame::Frame, keymap: &[Command], shortcut_frame: &frame::Frame, g: &layout::Geometry, intents: &[chrome::Intent], strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, UiBox)], platform: input::Platform, ui: &mut Ui) -> (shell, Vec<change>) {
     let value = &value.into();
     let vw = &vw.into();
     // The gutters last, on top of every pane's hit area: a drag applies from the next frame.
@@ -397,7 +397,7 @@ pub fn settle_layout<'a>(value: impl Into<ModelView<'a>>, vw: impl Into<ModelVie
 type Target = (Panel, Option<layout::Path>);
 
 /// The pane the last press landed in takes the focus; the panes' PXUI keys name them.
-pub fn follow_press<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::t, roots: &[(Leaf, UiBox)], timeline_root: &Option<(Panel, UiBox)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
+pub fn follow_press<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::Frame, roots: &[(Leaf, UiBox)], timeline_root: &Option<(Panel, UiBox)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
     let value = &value.into();
     let mut pane_roots: Vec<(Target, UiBox)> = roots.iter().map(|(l, b)| ((l.panel.clone(), Some(l.path.clone())), b.clone())).collect();
     if let Some((panel, b)) = timeline_root {
@@ -426,7 +426,7 @@ pub fn follow_press<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, fram
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw_notice<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t, roots: &[(Leaf, UiBox)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::Pane, scope_active: bool, ui: &mut Ui) {
+pub fn draw_notice<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::Frame, roots: &[(Leaf, UiBox)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::Pane, scope_active: bool, ui: &mut Ui) {
     let value = &value.into();
     // echo, the sheet's [08]: messages only (saved, undo and redo results, refusals), never a key
     // press; the last one fades after 3 seconds.  It stands at the bottom-left of the focused pane,
@@ -690,7 +690,7 @@ pub fn list_rows<'a>(value: impl Into<ModelView<'a>>, listing_: bool, list_drawn
 }
 
 /// `/ a`: the node menu of the graph the pane shows.
-pub fn node_menu_step<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::t, actions: &[action], graph_shown: bool) -> (Option<node_menu::Menu>, Vec<change>) {
+pub fn node_menu_step<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::Frame, actions: &[action], graph_shown: bool) -> (Option<node_menu::Menu>, Vec<change>) {
     let value = &value.into();
     if actions.contains(&action::Add_node) && graph_shown {
         let (gx, gy, gw, gh) = match graph_leaf(value, &geometry(value, workspace, frame_)) {
@@ -773,7 +773,7 @@ pub fn set_text_size(value: &t, actions: &[action]) {
 }
 
 /// What the hosted sketch sees of this frame, and the window focus it tracks.
-pub fn gated(value: &mut t, frame_: &frame::t, text_focus: bool, host_events: Vec<Event>) {
+pub fn gated(value: &mut t, frame_: &frame::Frame, text_focus: bool, host_events: Vec<Event>) {
     let mut window_focus = value.window_focus;
     for e in &frame_.input.events {
         match e {
@@ -816,7 +816,7 @@ pub fn gated(value: &mut t, frame_: &frame::t, text_focus: bool, host_events: Ve
 
 /// The header intents the frame's actions stand for: panel toggles, and the focused panel's split,
 /// close and retype.
-pub fn panel_intents<'a>(value: impl Into<ModelView<'a>>, leaves: &[(layout::Path, Panel)], workspace: &shell, frame_: &frame::t, focus: &Panel, focus_path: Option<&[usize]>, actions: &[action]) -> Vec<chrome::Intent> {
+pub fn panel_intents<'a>(value: impl Into<ModelView<'a>>, leaves: &[(layout::Path, Panel)], workspace: &shell, frame_: &frame::Frame, focus: &Panel, focus_path: Option<&[usize]>, actions: &[action]) -> Vec<chrome::Intent> {
     let value = &value.into();
     let panel_paths = |panel: &Panel| -> Vec<layout::Path> { leaves.iter().filter(|(_, p)| p == panel).map(|(path, _)| path.clone()).collect() };
     let toggle = |panel: &Panel| -> Vec<chrome::Intent> { panel_paths(panel).into_iter().map(chrome::Intent::Toggle).collect() };
@@ -860,7 +860,7 @@ pub fn panel_intents<'a>(value: impl Into<ModelView<'a>>, leaves: &[(layout::Pat
 }
 
 /// The status bar's fps, sampled once a second.
-pub fn fps_sample<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t) -> (Option<i64>, f64) {
+pub fn fps_sample<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::Frame) -> (Option<i64>, f64) {
     let value = &value.into();
     let sample = frame_.input.t < value.status_fps_at || frame_.input.t - value.status_fps_at >= 1.0;
     if !sample {
@@ -887,7 +887,7 @@ pub fn undo_passed(value: &t, text_focus: bool, modal: bool) -> Vec<action> {
 }
 
 /// The last command's label, or the leader's pending prefix, for 1.5 seconds.
-pub fn hud_of<'a>(value: impl Into<ModelView<'a>>, leader: &router::State, frame_: &frame::t, commands: &[Command]) -> Option<(String, f64)> {
+pub fn hud_of<'a>(value: impl Into<ModelView<'a>>, leader: &router::State, frame_: &frame::Frame, commands: &[Command]) -> Option<(String, f64)> {
     let value = &value.into();
     match commands.last() {
         Some(command) => {
@@ -925,7 +925,7 @@ pub fn update_frame(
     render_status: Option<String>,
     error_status: Option<String>,
     view_state: Rc<dyn Fn(Option<&Panel_result>) -> Syntax>,
-    frame_: &frame::t,
+    frame_: &frame::Frame,
     gpu: Option<&flow_ir::flow_ir::Gpu::Config>,
     pump: Option<&dyn Fn()>,
     image: &dyn Fn(i64) -> Option<rays::image::t>,
@@ -1474,7 +1474,7 @@ pub fn update(
     render_status: Option<String>,
     error_status: Option<String>,
     view_state: Rc<dyn Fn(Option<&Panel_result>) -> Syntax>,
-    frame_: &frame::t,
+    frame_: &frame::Frame,
     gpu: Option<&flow_ir::flow_ir::Gpu::Config>,
     image: Option<&dyn Fn(i64) -> Option<rays::image::t>>,
     host_events: Vec<Event>,

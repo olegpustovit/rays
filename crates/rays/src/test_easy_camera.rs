@@ -4,7 +4,7 @@ use crate::frame;
 use input::{Event, Key, MouseButton};
 use rays_math::vec3;
 
-fn frame_(keys: Vec<Key>, time: f64, dt: f64, events: Vec<Event>) -> frame::t {
+fn frame_(keys: Vec<Key>, time: f64, dt: f64, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(time);
     input.dt = dt;
     input.size = (320, 240);
@@ -13,16 +13,16 @@ fn frame_(keys: Vec<Key>, time: f64, dt: f64, events: Vec<Event>) -> frame::t {
     input.pointer = (20., 20.);
     input.keys = keys;
     input.events = events;
-    frame::t { input, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
+    frame::Frame { input, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }
 
-fn frame(events: Vec<Event>) -> frame::t {
+fn frame(events: Vec<Event>) -> frame::Frame {
     frame_(Vec::new(), 1., 0., events)
 }
 
 type snap = (vec3::T, vec3::T, vec3::T, camera::projection, f64);
 
-fn snapshot(value: &ec::t) -> snap {
+fn snapshot(value: &ec::EasyCamera) -> snap {
     let c = ec::camera(value).expect("camera");
     (camera::position(&c), camera::target(&c), camera::up(&c), camera::projection(&c), ec::distance(value))
 }
@@ -31,7 +31,7 @@ fn drag(button: MouseButton) -> Vec<Event> {
     vec![Event::Pointer_pressed(button, (20., 20.)), Event::Pointer_moved((35., 27.)), Event::Pointer_released(button, (35., 27.))]
 }
 
-fn update(value: &ec::t, f: &frame::t) -> ec::t {
+fn update(value: &ec::EasyCamera, f: &frame::Frame) -> ec::EasyCamera {
     ec::update(value, f).expect("update")
 }
 
@@ -97,7 +97,7 @@ fn easy_camera_buttons_modifiers_bounds_reset_cancellation_fly() {
     let (walk, _) = ec::fly(2., &initial, &frame_(vec![Key::KeyChar('w')], 1., 1., Vec::new())).expect("fly");
     let (fast, speed) = ec::fly(2., &initial, &frame_(vec![Key::KeyChar('w'), Key::Shift], 1., 1., vec![Event::Scrolled((0., 1.))])).expect("fly");
     let eye = camera::position(&ec::camera(&initial).unwrap());
-    let delta = |value: &ec::t| vec3::sub(camera::position(&ec::camera(value).unwrap()), eye);
+    let delta = |value: &ec::EasyCamera| vec3::sub(camera::position(&ec::camera(value).unwrap()), eye);
     assert!(vec3::nearly_equal(delta(&fast), vec3::scale(delta(&walk), 4.), 1e-12));
     assert!((speed - 2.4).abs() < 1e-12);
 }

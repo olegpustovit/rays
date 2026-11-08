@@ -88,8 +88,8 @@ pub fn expect_error(name: &str, text: &str, needle: &str) {
 
 // ---- Test_editor_input.frame ----
 
-pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
-    frame::t {
+pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
+    frame::Frame {
         input: input::Frame {
             dt: 1. / 60.,
             frame: count,
@@ -106,10 +106,10 @@ pub fn frame_full(buttons: &[MouseButton], keys: &[Key], delta: (f64, f64), mous
         mouse_delta: delta,
     }
 }
-pub fn frame(buttons: &[MouseButton], mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::t {
+pub fn frame(buttons: &[MouseButton], mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
     frame_full(buttons, &[], (0., 0.), mouse, events, count)
 }
-pub fn idle_frame(count: i64) -> frame::t {
+pub fn idle_frame(count: i64) -> frame::Frame {
     frame(&[], (0., 0.), vec![], count)
 }
 
