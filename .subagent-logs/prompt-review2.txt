@@ -1,0 +1,1 @@
+Rays dev read-only. Compare PROGRESS.md + docs/history/port-simplification/index.html vs git HEAD (git log since 6802a325). Count done/partial/pending for all 63 IDs. No edits. Markdown table to stdout only.

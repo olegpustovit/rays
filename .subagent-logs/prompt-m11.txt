@@ -1,0 +1,7 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave M11 ONE slice.
+
+Plan: flow_eval eval.rs walker path string + format! on rare errors (lines ~630,670,699,1451). Smallest fix: lazy error message or reuse buffer for variable refs without changing diagnostics surface.
+
+cargo t -p flow_eval with narrow filter touching change. Commit "M11:". Update PROGRESS M11 only. No artifact.
+
+Return: commit, tests run.
