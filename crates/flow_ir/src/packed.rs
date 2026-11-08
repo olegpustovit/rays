@@ -1445,6 +1445,15 @@ fn typed_total(sh: &TS, instruction: &Instruction) -> bool {
     }
 }
 
+/// One guard list's selected spans over `first..last`, valid in the block stamped `stamp`.
+struct GuardSpans {
+    guards: Vec<(i64, bool)>,
+    first: usize,
+    last: usize,
+    stamp: usize,
+    spans: Vec<usize>,
+}
+
 struct TC {
     integer: Vec<i64>,
     floats: Vec<f64>,
@@ -1457,16 +1466,21 @@ struct TC {
     scratch: rays_math::noise::Fbm3Scratch,
     indices: Vec<usize>,
     start: usize,
-    guard_spans: Option<HashMap<(Vec<(i64, bool)>, usize, usize), Vec<usize>>>,
+    guard_spans: Option<Vec<GuardSpans>>,
+    /// the current block's stamp in `guard_spans` (0: none)
+    stamp: usize,
     /// A float fold's running value, chunk-local: the chunk's last lane hands it back to the launch.
     acc: [f64; 4],
 }
 
 impl TC {
+    // inlined: the guarded span scan calls these per lane (select kernel -5% instructions)
+    #[inline(always)]
     fn numeric(&self, regs: &Region::Registers, bs: usize, r: usize, j: usize) -> f64 {
         let at = r * bs + j;
         if regs.integer_slots[r] { self.integer[at] as f64 } else { self.floats[at] }
     }
+    #[inline(always)]
     fn selected(&self, regs: &Region::Registers, bs: usize, j: usize, guards: &[(i64, bool)]) -> bool {
         guards.iter().all(|(r, yes)| (self.numeric(regs, bs, *r as usize, j) != 0.0) == *yes)
     }
@@ -1689,38 +1703,59 @@ fn texec(
         }
         Instruction::Guarded(guards, body) => {
             // Publish spans after their first execution: scanning ahead of a failing body would
-            // change lazy predicate evaluation.
-            let cached = tc.guard_spans.as_ref().and_then(|c| c.get(&(guards.clone(), first, last)).cloned());
-            match cached {
-                Some(spans) => {
-                    for i in 0..spans.len() / 2 {
-                        texec(sh, regs, tc, fo, slot, body, spans[2 * i], spans[2 * i + 1])?;
+            // change lazy predicate evaluation. Entries and span buffers live for the chunk (a
+            // stamp marks the current block): per-block keys and copies contended in the
+            // allocator at 8 domains.
+            let stamp = tc.stamp;
+            let found = tc.guard_spans.as_ref().and_then(|c| c.iter().position(|e| e.guards == *guards));
+            let hit = found.filter(|&k| matches!(&tc.guard_spans, Some(c) if c[k].stamp == stamp && c[k].first == first && c[k].last == last));
+            if let Some(k) = hit {
+                let entry = &mut tc.guard_spans.as_mut().expect("guard cache")[k];
+                // taken (and unstamped) while its body runs, so a nested equal list cannot see it empty
+                entry.stamp = 0;
+                let spans = std::mem::take(&mut entry.spans);
+                for i in 0..spans.len() / 2 {
+                    texec(sh, regs, tc, fo, slot, body, spans[2 * i], spans[2 * i + 1])?;
+                }
+                if let Some(c) = &mut tc.guard_spans {
+                    // a nested equal list may have reused the entry meanwhile
+                    (c[k].first, c[k].last, c[k].stamp, c[k].spans) = (first, last, stamp, spans);
+                }
+            } else {
+                let remember = match &tc.guard_spans {
+                    Some(c) => found.is_some() || c.len() < t.code.len(),
+                    None => false,
+                };
+                let mut saved = match (found, &mut tc.guard_spans) {
+                    (Some(k), Some(c)) => {
+                        c[k].stamp = 0;
+                        std::mem::take(&mut c[k].spans)
+                    }
+                    _ => Vec::new(),
+                };
+                saved.clear();
+                let mut next = first;
+                while next < last {
+                    while next < last && !tc.selected(regs, bs, next, guards) {
+                        next += 1;
+                    }
+                    let begin = next;
+                    while next < last && tc.selected(regs, bs, next, guards) {
+                        next += 1;
+                    }
+                    if begin < next {
+                        texec(sh, regs, tc, fo, slot, body, begin, next)?;
+                        if remember {
+                            saved.push(begin);
+                            saved.push(next);
+                        }
                     }
                 }
-                None => {
-                    let remember = matches!(&tc.guard_spans, Some(cache) if cache.len() < t.code.len());
-                    let mut saved: Vec<usize> = Vec::new();
-                    let mut next = first;
-                    while next < last {
-                        while next < last && !tc.selected(regs, bs, next, guards) {
-                            next += 1;
-                        }
-                        let begin = next;
-                        while next < last && tc.selected(regs, bs, next, guards) {
-                            next += 1;
-                        }
-                        if begin < next {
-                            texec(sh, regs, tc, fo, slot, body, begin, next)?;
-                            if remember {
-                                saved.push(begin);
-                                saved.push(next);
-                            }
-                        }
-                    }
-                    if let Some(cache) = &mut tc.guard_spans {
-                        if remember && cache.len() < t.code.len() {
-                            cache.insert((guards.clone(), first, last), saved);
-                        }
+                if let (true, Some(c)) = (remember, &mut tc.guard_spans) {
+                    let entry = GuardSpans { guards: Vec::new(), first, last, stamp, spans: saved };
+                    match found {
+                        Some(k) => c[k] = GuardSpans { guards: std::mem::take(&mut c[k].guards), ..entry },
+                        None => c.push(GuardSpans { guards: guards.clone(), ..entry }),
                     }
                 }
             }
@@ -2229,6 +2264,7 @@ fn typed_chunk(
         indices: if sh.contiguous { Vec::new() } else { vec![0; bs] },
         start: 0,
         guard_spans: None,
+        stamp: 0,
         acc: [0.0; 4],
     };
     if Region::clobbered(t) {
@@ -2279,7 +2315,10 @@ fn typed_chunk(
             length
         };
         tc.start = start;
-        tc.guard_spans = if sh.cache_guards { Some(HashMap::new()) } else { None };
+        tc.stamp += 1;
+        if sh.cache_guards && tc.guard_spans.is_none() {
+            tc.guard_spans = Some(Vec::new());
+        }
         if sh.gather && t.result == RegionResult::Collect {
             // Speculate: run the block instruction-major. Without an error the values equal the
             // lane-major ones, because lanes are independent and instructions pure; on any error
