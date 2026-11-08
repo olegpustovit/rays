@@ -12,7 +12,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|--------|---------|
 | A | 8/8 | — | — |
 | B | 5/6 | B1 (partial) | 0 |
-| M | 10/21 | — | 11 |
+| M | 11/21 | — | 10 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -45,7 +45,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M12 | done | `b5be8904` — `record_slot_open` skips `record_packed` / `note` past per-path cap; `cargo t -p flow_eval test_workspace_eval` |
 | M8 | done | `66136b7f` — side_lru `find_*_by`; sampler keys `mix::sampler`; `cargo check -p renderer` |
 | M6 | done | `69d08a8a` — `plan_entry` prepends via `with_capacity`+extend (no `insert(0)`); `cargo check -p renderer` |
-| M1,M3,M5,M13–M19,M21 | pending | |
+| M18 | done (partial) | **this session** — `vertex_primitive` `AtomicI32` scratch in `make_topology`; `cargo t -p rdk_ops m18_vertex_primitive_scratch` 2 pass; **deferred** six remaining per-vertex scratch arrays |
+| M1,M3,M5,M13–M17,M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |
