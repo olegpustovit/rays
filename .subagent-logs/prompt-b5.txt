@@ -1,0 +1,9 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave B5 ONLY.
+
+Split flow_sop catalog/manifest/port/network types into a small crate below flow_sop so editor_document does not depend on all of flow_sop. Evaluate deleting re-export-only `rdk` crate per plan.
+
+Read editor_document/Cargo.toml uses of flow_sop. Smallest slice: extract one module if full split is too large — document remainder in PROGRESS as partial.
+
+cargo check -p editor_document -p flow_sop -p rays_bin. Commit "B5:" or "B5: partial". Update PROGRESS. No artifact.
+
+Return: deps before/after, commit, checks.

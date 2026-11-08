@@ -11,8 +11,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 3/6 | B2 | 2 |
-| M | 1/21 | — | 20 |
+| B | 5/6 | — | 1 |
+| M | 3/21 | — | 18 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -30,11 +30,15 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A7 | done | `992093ce` triangle → `point_grid`; `626a1f70` Filename.concat; `f980cbf9`/`8093ff64` ocaml trim; **this session** `rdk_core::ocaml_trim`, rdk_ops/sop blank-name sweep |
 | A8 | done | op/term_arena/param/renderer trims; `Native::runtime_of` kept (in use) |
 | B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
-| B3 | done | `gpu_editor` harness; 7× `gpu_suite_t*` + qual wrapper → 2 test links |
+| B3 | done | `5fdb5fb3` — `gpu_editor` + `tests/support`; 7× `gpu_suite_t*` + qual → 2 test links; `cargo t -p rays_editor run_lowering` ~2.9s |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1,B2,B5 | pending | |
-| M10 | done | detach alias slots sharing builder before store; `cargo t -p flow_ir store` 3 pass |
-| M1–M9,M11–M21 | pending | |
+| B1 | pending | omp `.subagent-logs/b1.log` (flow_check codegen) |
+| B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
+| B5 | pending | |
+| M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
+| M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
+| M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
+| M1,M3–M9,M11–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |
@@ -52,6 +56,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 | m10 | `.subagent-logs/m10.log` | M10 store alias fix |
 | b0 | `.subagent-logs/b0.log` | B0 incremental notes |
+| b1 | `.subagent-logs/b1.log` | B1 flow_check |
+| b5 | `.subagent-logs/b5.log` | B5 flow_sop split (queued) |
 
 Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p` (pids in shell history).
 
@@ -86,6 +92,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `f6ca915b` M20, `bbe7f6ae` M2, `96fab43d` B2; `cargo check -p rays_bin` ~23s after profile shift.
 - 2026-11-08: B0 — invalidation checklist + script audit in PROGRESS §B0; warm pair flow_check 0.15 s / 0.07 s; log `.subagent-logs/b0.log`.
 - 2026-11-08: **Wave A closed** `3a293e9b` A6; plan audit appended; m10/b0 workers queued.
 - 2026-11-08: omp subagents landed `0cad884b` A5, `7a63b07b`/`30623d6e` A2, `da178e93` A7; Wave A 7/8.
