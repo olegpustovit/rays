@@ -455,7 +455,7 @@ fn type_of(owner: Owner, name: &str, value: &geometry::T) -> Result<Value, Diagn
 fn names(owner: Owner, pattern: &str, value: &geometry::T) -> Result<Value, Diagnostic> {
     let compiled = attribute_pattern::compile(pattern)
         .map_err(|failure| error("E_ATTR_PATTERN", rdk_error::message(&failure)))?;
-    let found: TextArray = geometry::View::attributes(value)
+    let found: TextArray = geometry::view::attributes(value)
         .iter()
         .filter(|a| attribute::owner(a) == owner && attribute_pattern::matches(&compiled, attribute::name(a)))
         .map(|a| attribute::name(a).as_bytes())
@@ -467,7 +467,7 @@ fn names(owner: Owner, pattern: &str, value: &geometry::T) -> Result<Value, Diag
 pub fn entries(owner: Option<Owner>, component: &str, value: &geometry::T) -> Result<Value, Diagnostic> {
     let column: fn(&attribute::T) -> Result<String, Diagnostic> = match component {
         "name" => |a| Ok(attribute::name(a).to_owned()),
-        "type" => |a| match attribute::View::storage(a) {
+        "type" => |a| match attribute::view::storage(a) {
             Ok(storage) => Ok(storage_kind(storage).to_owned()),
             Err(failure) => Err(error("E_ATTR_ENTRIES", &rdk_error::to_string(&failure))),
         },
@@ -475,7 +475,7 @@ pub fn entries(owner: Option<Owner>, component: &str, value: &geometry::T) -> Re
         _ => return Err(error("E_ATTR_ENTRIES", "Attribute entry component is name, type or owner.")),
     };
     let mut out = TextArray::new();
-    for attribute in geometry::View::attributes(value) {
+    for attribute in geometry::view::attributes(value) {
         if owner.is_none() || owner == Some(attribute::owner(attribute)) {
             out.push(column(attribute)?.as_bytes());
         }

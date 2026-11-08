@@ -52,7 +52,6 @@ pub fn facet_right_winding(value: &T, facet: i64) -> i64 {
     value.right_winding[facet as usize]
 }
 
-#[allow(non_snake_case)]
 pub mod view {
     use super::*;
 
@@ -202,7 +201,7 @@ mod tests {
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
         let topo = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }
 

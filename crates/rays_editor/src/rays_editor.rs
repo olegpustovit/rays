@@ -217,7 +217,7 @@ pub mod editor {
             workspace_gpu::image_stats(&value.host.borrow().gpu)
         }
 
-        pub fn image(value: &Editor, image: &flow_syntax::value::Value) -> Result<rays::image::t, rays_diagnostic::Diagnostic> {
+        pub fn image(value: &Editor, image: &flow_syntax::value::Value) -> Result<rays::image::Image, rays_diagnostic::Diagnostic> {
             let core = &value.core;
             let host = value.host.borrow();
             workspace_images::bind(&host.images, &core.doc.workspace.lowered);
@@ -232,7 +232,7 @@ pub mod editor {
             state: Option<&flow_eval::State>,
             live: Option<&input::Frame>,
             plan: Option<&flow_eval::Plan>,
-            run: &mut dyn FnMut(&dyn Fn(&flow_syntax::value::Value) -> Result<rays::image::t, rays_diagnostic::Diagnostic>, &dyn Fn(&flow_syntax::value::Value) -> Result<rays::texture::t, rays_diagnostic::Diagnostic>),
+            run: &mut dyn FnMut(&dyn Fn(&flow_syntax::value::Value) -> Result<rays::image::Image, rays_diagnostic::Diagnostic>, &dyn Fn(&flow_syntax::value::Value) -> Result<rays::texture::Texture, rays_diagnostic::Diagnostic>),
         ) {
             let core = &value.core;
             let state = state.cloned().unwrap_or_else(|| core.cook.state.clone());

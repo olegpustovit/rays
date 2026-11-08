@@ -13,7 +13,7 @@ use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::geometry as geo;
-use rdk_core::packed::{Float2, Float3, Float4, FloatArray, IntArray};
+use rdk_core::packed::{float2, float3, float4, float_array, int_array};
 use rdk_core::{group, topology};
 use sop::context::Options as ContextOptions;
 use sop::{context as sctx, payload, session};
@@ -181,7 +181,7 @@ fn rename_conflicts_canonical_p_and_type_queries() {
 
 #[test]
 fn all_owners_and_storages_rename_without_copying() {
-    let positions = ok(Float3::View::of_owned_exn(vec![0.0, 1.0, 0.0, 2.0], vec![0.0, 0.0, 1.0, 2.0], vec![0.0; 4]));
+    let positions = ok(float3::view::of_owned_exn(vec![0.0, 1.0, 0.0, 2.0], vec![0.0, 0.0, 1.0, 2.0], vec![0.0; 4]));
     let t = ok(topology::polygons_owned(4, vec![0, 1, 2], vec![0, 3]));
     let geometry = ok(geo::create(positions, t, None, None, None));
     let owners = [(Owner::Point, 4usize), (Owner::Vertex, 3), (Owner::Primitive, 1), (Owner::Detail, 1)];
@@ -191,12 +191,12 @@ fn all_owners_and_storages_rename_without_copying() {
         vec![
             ("float", Storage::Float(Arc::new(plane(-0.0)))),
             ("int", Storage::Int(Arc::new(vec![MAX_INT; count]))),
-            ("vec2", Storage::Float2(ok(Float2::of_owned(plane(-0.0), plane(2.0))))),
-            ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(plane(1.0), plane(2.0), plane(3.0))))),
-            ("vec4", Storage::Float4(ok(Float4::of_owned(plane(1.0), plane(2.0), plane(3.0), plane(4.0))))),
+            ("vec2", Storage::Float2(ok(float2::of_owned(plane(-0.0), plane(2.0))))),
+            ("vec3", Storage::Float3(ok(float3::view::of_owned_exn(plane(1.0), plane(2.0), plane(3.0))))),
+            ("vec4", Storage::Float4(ok(float4::of_owned(plane(1.0), plane(2.0), plane(3.0), plane(4.0))))),
             ("text", Storage::Text(Arc::new(vec!["preserved \u{2713}\n".as_bytes().to_vec(); count].into()))),
-            ("float_array", Storage::FloatArray(ok(FloatArray::create_owned(offsets.clone(), vec![0.25; count * 16])))),
-            ("int_array", Storage::IntArray(ok(IntArray::create_owned(offsets, vec![MIN_INT; count * 16])))),
+            ("float_array", Storage::FloatArray(ok(float_array::create_owned(offsets.clone(), vec![0.25; count * 16])))),
+            ("int_array", Storage::IntArray(ok(int_array::create_owned(offsets, vec![MIN_INT; count * 16])))),
         ]
     };
     let mut geometry = geometry;
@@ -240,7 +240,7 @@ fn copy_move_swap_preserve_owner_payloads_and_canonical_p() {
         assert!(value(Owner::Detail, "source", &result) == 11.0, "{method}: crossed attribute owner");
     }
     let copied = swap("point", "P", "rest", "move", &geometry).unwrap();
-    assert!(Float3::data_id(geo::positions(&copied)) == Float3::data_id(geo::positions(&geometry)), "moving canonical P changed positions");
+    assert!(float3::data_id(geo::positions(&copied)) == float3::data_id(geo::positions(&geometry)), "moving canonical P changed positions");
     assert!(geo::find_attribute(Owner::Point, "rest", &copied).is_some(), "moving P must copy it");
     assert!(swap("point", "source", "P", "copy", &geometry).is_err(), "scalar destination P must fail");
     assert!(geometry_bytes(&geometry) == geometry_bytes(&fixture()), "metadata mutated original input");

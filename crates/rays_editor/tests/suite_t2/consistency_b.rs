@@ -306,7 +306,7 @@ fn live_light_determinism() {
                 f.input.dt = *dt;
                 e = editor::update(e, &f);
                 let g = editor::prepared(&e).unwrap();
-                let v = rdk_core::packed::Float3::View::view(rdk_core::geometry::positions(&g)).unwrap();
+                let v = rdk_core::packed::float3::view::view(rdk_core::geometry::positions(&g)).unwrap();
                 samples.push((format!("{:?}{:?}{:?}", v.x, v.y, v.z), format!("{:?}", editor::lights(&e))));
             }
             editor::close(&e);
@@ -385,14 +385,14 @@ fn lisp_apply() {
         run(e, (450., 300.), &[Key::Meta], vec![Event::Key_pressed(Key::KeyChar('a'))]);
         run(e, (450., 300.), &[], vec![Event::Text_input(replace(&wd::to_text(&ws).unwrap(), "(sop/box)", "(sop/box :size [2 2 2])"))]);
         let before = format!("{:?}", editor::prepared(e).map(|g| {
-            let v = rdk_core::packed::Float3::View::view(rdk_core::geometry::positions(&g)).unwrap();
+            let v = rdk_core::packed::float3::view::view(rdk_core::geometry::positions(&g)).unwrap();
             (v.x.clone(), v.y.clone(), v.z.clone())
         }));
         let picture = layers(e);
         click(e, &run, ((x + 32) as f64, (y + h - 40) as f64));
         assert_eq!(editor::undo_label(e).as_deref(), Some("Edit text"), "Lisp apply made no document edit");
         let after = format!("{:?}", editor::prepared(e).map(|g| {
-            let v = rdk_core::packed::Float3::View::view(rdk_core::geometry::positions(&g)).unwrap();
+            let v = rdk_core::packed::float3::view::view(rdk_core::geometry::positions(&g)).unwrap();
             (v.x.clone(), v.y.clone(), v.z.clone())
         }));
         assert!(after != before && layers(e) != picture, "Lisp applied after the frame's cook or composition");

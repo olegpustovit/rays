@@ -2,7 +2,7 @@
 use crate::canvas_runtime;
 use crate::image;
 use crate::native_scene_lowering;
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use crate::world;
 use ogpu_core::backend::Texture;
 use rays_math::color;
@@ -15,7 +15,7 @@ pub struct canvas_data {
     resource: RCanvas::Canvas,
     execution: RefCell<Option<rr::Renderer>>,
     destroyed: Cell<bool>,
-    caches: Layer::cache_context,
+    caches: layer::cache_context,
     world_caches: world::private::cache_context,
     native_caches: native_scene_lowering::cache_context,
     epoch: Cell<i64>,
@@ -24,7 +24,7 @@ pub struct canvas_data {
 
 /// A canvas handle: clones share one canvas.
 #[derive(Clone)]
-pub struct t(Rc<canvas_data>);
+pub struct Canvas(Rc<canvas_data>);
 
 fn message(operation: &str, error: &runtime_resources::error) -> String {
     format!("{operation}: {}", ogpu_core::error::to_string(error))
@@ -34,13 +34,13 @@ fn renderer_message(operation: &str, error: &ogpu_core::error::Error) -> String 
     format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
-pub fn create(width: i64, height: i64) -> Result<t, String> {
+pub fn create(width: i64, height: i64) -> Result<Canvas, String> {
     match RCanvas::create(width, height) {
-        Ok(resource) => Ok(t(Rc::new(canvas_data {
+        Ok(resource) => Ok(Canvas(Rc::new(canvas_data {
             resource,
             execution: RefCell::new(None),
             destroyed: Cell::new(false),
-            caches: Layer::create_cache_context(),
+            caches: layer::create_cache_context(),
             world_caches: world::private::create_cache_context(),
             native_caches: native_scene_lowering::create_cache_context(),
             epoch: Cell::new(0),
@@ -50,19 +50,19 @@ pub fn create(width: i64, height: i64) -> Result<t, String> {
     }
 }
 
-pub fn size(value: &t) -> Result<(i64, i64), String> {
+pub fn size(value: &Canvas) -> Result<(i64, i64), String> {
     RCanvas::size(&value.0.resource).map_err(|e| message("Canvas.size", &e))
 }
 
 /// Forget the completed GPU frame: the next read goes back to CPU storage.
-pub fn invalidate(value: &t) -> Result<(), String> {
+pub fn invalidate(value: &Canvas) -> Result<(), String> {
     size(value)?;
     value.0.epoch.set(value.0.epoch.get() + 1);
     value.0.completed.set(false);
     Ok(())
 }
 
-fn execution(density: i64, value: &t) -> Result<(), String> {
+fn execution(density: i64, value: &Canvas) -> Result<(), String> {
     if value.0.destroyed.get() {
         return Err("Canvas.render: canvas is destroyed".to_string());
     }
@@ -84,7 +84,7 @@ fn execution(density: i64, value: &t) -> Result<(), String> {
     Ok(())
 }
 
-fn render_uncached(density: i64, value: &t, scene_: &[scene::node]) -> Result<(), String> {
+fn render_uncached(density: i64, value: &Canvas, scene_: &[scene::node]) -> Result<(), String> {
     invalidate(value)?;
     if density < 1 {
         return Err("Canvas.render: density must be positive".to_string());
@@ -104,10 +104,10 @@ fn render_uncached(density: i64, value: &t, scene_: &[scene::node]) -> Result<()
 /// `density` (default 1) renders the scene at that many canvas pixels a logical point, as a
 /// Retina window does: the scene is `width / density` by `height / density` points. A canvas
 /// keeps the density of its first render.
-pub fn render(density: Option<i64>, value: &t, scene_: &[scene::node]) -> Result<(), String> {
+pub fn render(density: Option<i64>, value: &Canvas, scene_: &[scene::node]) -> Result<(), String> {
     let density = density.unwrap_or(1);
     let mut result: Result<(), String> = Ok(());
-    Layer::with_cache_context(&value.0.caches, &mut || {
+    layer::with_cache_context(&value.0.caches, &mut || {
         world::private::with_cache_context(&value.0.world_caches, &mut || {
             native_scene_lowering::with_cache_context(&value.0.native_caches, &mut || {
                 result = render_uncached(density, value, scene_);
@@ -117,10 +117,10 @@ pub fn render(density: Option<i64>, value: &t, scene_: &[scene::node]) -> Result
     result
 }
 
-fn snapshot(value: &t) -> Result<Vec<u8>, String> {
+fn snapshot(value: &Canvas) -> Result<Vec<u8>, String> {
     let image = RCanvas::capture(&value.0.resource).map_err(|e| message("Canvas.capture", &e))?;
-    let pixels = runtime_resources::Image::pixels(&image).map_err(|e| message("Canvas.pixels", &e));
-    let _ = runtime_resources::Image::destroy(&image);
+    let pixels = runtime_resources::image::pixels(&image).map_err(|e| message("Canvas.pixels", &e));
+    let _ = runtime_resources::image::destroy(&image);
     pixels
 }
 
@@ -128,7 +128,7 @@ fn color_at(bytes: &[u8], offset: usize) -> color::T {
     color::rgba(bytes[offset] as i64, bytes[offset + 1] as i64, bytes[offset + 2] as i64, bytes[offset + 3] as i64)
 }
 
-pub fn pixel(value: &t, x: i64, y: i64) -> Result<Option<color::T>, String> {
+pub fn pixel(value: &Canvas, x: i64, y: i64) -> Result<Option<color::T>, String> {
     let (w, h) = size(value)?;
     if x < 0 || y < 0 || x >= w || y >= h {
         return Ok(None);
@@ -137,26 +137,26 @@ pub fn pixel(value: &t, x: i64, y: i64) -> Result<Option<color::T>, String> {
     Ok(Some(color_at(&bytes, (((y * w) + x) * 4) as usize)))
 }
 
-pub fn pixels(value: &t) -> Result<Vec<color::T>, String> {
+pub fn pixels(value: &Canvas) -> Result<Vec<color::T>, String> {
     let (w, h) = size(value)?;
     let bytes = snapshot(value)?;
     Ok((0..(w * h) as usize).map(|index| color_at(&bytes, index * 4)).collect())
 }
 
-pub fn to_image(value: &t) -> Result<image::t, String> {
+pub fn to_image(value: &Canvas) -> Result<image::Image, String> {
     match RCanvas::capture(&value.0.resource) {
         Ok(img) => image::of_resource(img),
         Err(error) => Err(message("Canvas.to_image", &error)),
     }
 }
 
-pub fn pixel_stats(value: &t) -> (i64, i64) {
+pub fn pixel_stats(value: &Canvas) -> (i64, i64) {
     RCanvas::pixel_stats(&value.0.resource)
 }
 
 /// Borrow the completed GPU frame until another render attempt, explicit invalidation, CPU
 /// mutation or destruction. Requires the initial thread.
-pub fn gpu_source(value: &t) -> Result<(i64, i64, Box<dyn Fn() -> Option<Texture>>), String> {
+pub fn gpu_source(value: &Canvas) -> Result<(i64, i64, Box<dyn Fn() -> Option<Texture>>), String> {
     RCanvas::size(&value.0.resource).map_err(|e| message("Canvas.gpu_source", &e))?;
     if value.0.destroyed.get() || !value.0.completed.get() {
         return Err("Canvas.gpu_source: no completed GPU frame".to_string());
@@ -185,13 +185,12 @@ pub fn gpu_source(value: &t) -> Result<(i64, i64, Box<dyn Fn() -> Option<Texture
     }
 }
 
-#[allow(non_snake_case)]
-pub mod Private {
+pub mod private {
     use super::*;
 
     pub type native_stats = rr::Stats;
 
-    pub fn native_stats(value: &t) -> Result<rr::Stats, String> {
+    pub fn native_stats(value: &Canvas) -> Result<rr::Stats, String> {
         match value.0.execution.borrow().as_ref() {
             None => Ok(rr::ZERO_STATS),
             Some(execution) => rr::stats(execution).map_err(|e| renderer_message("Canvas.Private.native_stats", &e)),
@@ -202,7 +201,7 @@ pub mod Private {
 /// Releases the texture staging its renderer keeps while frame after frame uploads, which the
 /// next upload makes again: a settled reading of the canvas then does not depend on the last two
 /// frames.
-pub fn release_staging(value: &t) -> Result<(), String> {
+pub fn release_staging(value: &Canvas) -> Result<(), String> {
     match value.0.execution.borrow().as_ref() {
         None => Ok(()),
         Some(execution) => rr::release_staging(execution).map_err(|e| renderer_message("Canvas.release_staging", &e)),
@@ -211,11 +210,11 @@ pub fn release_staging(value: &t) -> Result<(), String> {
 
 /// The device's GPU time so far, summed over completed command buffers: the difference across a
 /// `render` is that frame's GPU time.
-pub fn gpu_seconds(value: &t) -> Result<f64, String> {
-    Private::native_stats(value).map(|s| s.gpu_duration_seconds)
+pub fn gpu_seconds(value: &Canvas) -> Result<f64, String> {
+    private::native_stats(value).map(|s| s.gpu_duration_seconds)
 }
 
-pub fn save_png(value: &t, path: &str) -> Result<(), String> {
+pub fn save_png(value: &Canvas, path: &str) -> Result<(), String> {
     runtime_resources::write_atomic(path, &|temporary| {
         RCanvas::save_png(&value.0.resource, temporary).map_err(|e| message("Canvas.save_png", &e))
     })
@@ -225,7 +224,7 @@ pub fn save_screen_png(path: &str) -> Result<(), String> {
     canvas_runtime::save(path)
 }
 
-pub fn destroy(value: &t) -> Result<(), String> {
+pub fn destroy(value: &Canvas) -> Result<(), String> {
     if value.0.destroyed.get() {
         return Ok(());
     }
@@ -238,7 +237,7 @@ pub fn destroy(value: &t) -> Result<(), String> {
     }
     *value.0.execution.borrow_mut() = None;
     RCanvas::destroy(&value.0.resource).map_err(|e| message("Canvas.destroy", &e))?;
-    Layer::clear_cache_context(&value.0.caches);
+    layer::clear_cache_context(&value.0.caches);
     value.0.destroyed.set(true);
     Ok(())
 }

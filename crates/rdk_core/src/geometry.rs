@@ -6,7 +6,7 @@ use crate::error::Code;
 
 #[derive(Clone)]
 pub struct T {
-    positions: packed::Float3::T,
+    positions: packed::float3::T,
     topology: topology::T,
     attributes: Arc<Vec<attribute::T>>,
     groups: Arc<Vec<group::T>>,
@@ -53,13 +53,13 @@ fn group_owner_tag(owner: group::Owner) -> u8 {
 }
 
 fn validate(
-    positions: &packed::Float3::T,
+    positions: &packed::float3::T,
     topology_value: &topology::T,
     attributes: &[attribute::T],
     groups: &[group::T],
     edge_groups: &[edge_group::T],
 ) -> Result<(), error::T> {
-    if packed::Float3::length(positions) != topology::point_count(topology_value) {
+    if packed::float3::length(positions) != topology::point_count(topology_value) {
         return Err(geometry_error(
             "Geometry.create: position count must match topology point count".to_owned(),
         ));
@@ -128,7 +128,7 @@ fn validate(
 }
 
 fn make(
-    positions: packed::Float3::T,
+    positions: packed::float3::T,
     topology_value: topology::T,
     attributes: Vec<attribute::T>,
     groups: Vec<group::T>,
@@ -145,7 +145,7 @@ fn make(
 }
 
 pub fn create(
-    positions: packed::Float3::T,
+    positions: packed::float3::T,
     topology_value: topology::T,
     attributes: Option<Vec<attribute::T>>,
     groups: Option<Vec<group::T>>,
@@ -167,7 +167,7 @@ pub fn fresh_data_id() -> i64 {
     support::fresh_data_id()
 }
 
-pub fn positions(value: &T) -> &packed::Float3::T {
+pub fn positions(value: &T) -> &packed::float3::T {
     &value.positions
 }
 
@@ -188,7 +188,7 @@ pub fn primitive_count(value: &T) -> i64 {
 }
 
 pub fn payload_bytes(value: &T) -> i64 {
-    packed::Float3::payload_bytes(&value.positions)
+    packed::float3::payload_bytes(&value.positions)
         + topology::payload_bytes(&value.topology)
         + value.attributes.iter().map(attribute::payload_bytes).sum::<i64>()
         + value.groups.iter().map(group::payload_bytes).sum::<i64>()
@@ -200,8 +200,8 @@ pub fn payload_components(value: &T) -> Vec<(i64, i64)> {
         2 + value.attributes.len() + value.groups.len() + value.edge_groups.len(),
     );
     components.push((
-        packed::Float3::data_id(&value.positions),
-        packed::Float3::payload_bytes(&value.positions),
+        packed::float3::data_id(&value.positions),
+        packed::float3::payload_bytes(&value.positions),
     ));
     components.push((
         topology::data_id(&value.topology),
@@ -219,8 +219,8 @@ pub fn payload_components(value: &T) -> Vec<(i64, i64)> {
 
 pub fn releasers(value: &T) -> Vec<(i64, Arc<dyn Fn(bool) + Send + Sync>)> {
     let mut releasers = Vec::new();
-    if let Some(release) = packed::Float3::releaser(&value.positions) {
-        releasers.push((packed::Float3::data_id(&value.positions), release));
+    if let Some(release) = packed::float3::releaser(&value.positions) {
+        releasers.push((packed::float3::data_id(&value.positions), release));
     }
     if let Some(release) = topology::releaser(&value.topology) {
         releasers.push((topology::data_id(&value.topology), release));
@@ -269,8 +269,8 @@ pub fn find_edge_group(name: &str, value: &T) -> Option<edge_group::T> {
         .cloned()
 }
 
-pub fn with_positions(positions_value: packed::Float3::T, value: &T) -> Result<T, error::T> {
-    if packed::Float3::length(&positions_value) != point_count(value) {
+pub fn with_positions(positions_value: packed::float3::T, value: &T) -> Result<T, error::T> {
+    if packed::float3::length(&positions_value) != point_count(value) {
         return Err(geometry_error("Geometry.with_positions: point count changed".to_owned()));
     }
     Ok(make(
@@ -461,8 +461,7 @@ pub fn rename_edge_group(from: &str, into: &str, value: &T) -> Result<T, error::
     with_edge_group(renamed, &without_edge_group(from, value))
 }
 
-#[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn attributes(value: &T) -> &[attribute::T] {
@@ -572,7 +571,7 @@ pub mod View {
     }
 
     pub fn with_merged_owned(
-        positions: Option<packed::Float3::T>,
+        positions: Option<packed::float3::T>,
         attributes: Vec<attribute::T>,
         groups: Vec<group::T>,
         value: &T,
@@ -595,7 +594,7 @@ pub mod View {
     }
 
     pub fn with_positions_and_attributes_owned(
-        positions: packed::Float3::T,
+        positions: packed::float3::T,
         attributes: Vec<attribute::T>,
         value: &T,
     ) -> Result<T, error::T> {
@@ -637,9 +636,9 @@ pub fn generate_point_ranges(
         let last = (first + grain).min(count);
         operation(first as i64, last as i64, &mut x[..], &mut y[..], &mut z[..]);
     }
-    let positions = packed::Float3::View::of_owned_exn(x, y, z)
+    let positions = packed::float3::view::of_owned_exn(x, y, z)
         .map_err(|value| geometry_error(error::message(&value).to_owned()))?;
-    let topology_value = topology::empty(packed::Float3::length(&positions))
+    let topology_value = topology::empty(packed::float3::length(&positions))
         .map_err(|value| geometry_error(error::message(&value).to_owned()))?;
     Ok(make(positions, topology_value, Vec::new(), Vec::new(), Vec::new()))
 }
@@ -663,7 +662,7 @@ mod tests {
             }),
         ).unwrap();
         let position_reads = reads.clone();
-        let positions = packed::Float3::deferred(None, None, None, count, Arc::new(move || {
+        let positions = packed::float3::deferred(None, None, None, count, Arc::new(move || {
             position_reads.fetch_add(1, Ordering::SeqCst);
             Ok((0..3).map(|component| (0..count).map(|i| (component * 10 + i) as f64).collect()).collect())
         })).unwrap();
@@ -671,20 +670,20 @@ mod tests {
         assert_eq!(attribute::length(&noise), count);
         assert_eq!(attribute::kind_name(&noise), "float");
         assert_eq!(attribute::payload_bytes(&noise), count * 8);
-        assert_eq!(packed::Float3::length(super::positions(&geometry)), count);
+        assert_eq!(packed::float3::length(super::positions(&geometry)), count);
         assert!(attribute::resident(&noise));
-        assert!(packed::Float3::resident(super::positions(&geometry)));
+        assert!(packed::float3::resident(super::positions(&geometry)));
         assert_eq!(reads.load(Ordering::SeqCst), 0);
         let positions = super::positions(&geometry);
         parallel::run_unit(Some(4), &|| parallel::for_(1, 0, 63, &|index| {
-            packed::Float3::get(positions, index % count).unwrap();
+            packed::float3::get(positions, index % count).unwrap();
             Ok(())
         })).unwrap();
-        assert_eq!(packed::Float3::get(positions, 1).unwrap(), (1.0, 11.0, 21.0));
-        assert_eq!(packed::Float3::get(positions, 2).unwrap(), (2.0, 12.0, 22.0));
+        assert_eq!(packed::float3::get(positions, 1).unwrap(), (1.0, 11.0, 21.0));
+        assert_eq!(packed::float3::get(positions, 2).unwrap(), (2.0, 12.0, 22.0));
         let raced = reads.load(Ordering::SeqCst);
         assert!(raced >= 1);
-        packed::Float3::get(positions, 0).unwrap();
+        packed::float3::get(positions, 0).unwrap();
         assert_eq!(reads.load(Ordering::SeqCst), raced);
         for _ in 0..2 {
             let attribute::Storage::Float(values) = attribute::storage(&noise).unwrap() else {
@@ -710,7 +709,7 @@ mod tests {
                         z[index] = -value;
                     }
                 }).unwrap();
-                let planes = packed::Float3::View::view(super::positions(&value)).unwrap();
+                let planes = packed::float3::view::view(super::positions(&value)).unwrap();
                 assert_eq!(planes.x.len(), 1_000_000);
                 assert_eq!(planes.y.len(), 1_000_000);
                 assert_eq!(planes.z.len(), 1_000_000);
@@ -725,8 +724,8 @@ mod tests {
         }
     }
 
-    fn positions() -> packed::Float3::T {
-        packed::Float3::View::of_owned_exn(
+    fn positions() -> packed::float3::T {
+        packed::float3::view::of_owned_exn(
             vec![0.0, 1.0],
             vec![0.0, 0.0],
             vec![0.0, 0.0],
@@ -784,7 +783,7 @@ mod tests {
         .unwrap();
         assert_eq!(ranges, 2);
         assert_eq!(point_count(&value), count);
-        let planes = packed::Float3::View::view(super::positions(&value)).unwrap();
+        let planes = packed::float3::view::view(super::positions(&value)).unwrap();
         let last = (count - 1) as usize;
         assert_eq!(planes.x[last], last as f64);
         assert_eq!(planes.y[last], 2.0 * last as f64);

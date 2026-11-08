@@ -24,7 +24,7 @@ fn create_uncached(
     cancel_value: Option<&cancel::T>,
     topology_value: &topology::T,
 ) -> Result<T, error::T> {
-    let source = topology::View::view(topology_value)?;
+    let source = topology::view::view(topology_value)?;
     let point_count = usize::try_from(source.point_count).expect("Topology point count is invalid");
     let vertex_count = source.vertex_points.len();
     let primitive_count = source.primitive_kinds.len();
@@ -117,8 +117,7 @@ pub fn create(
     }
 }
 
-#[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     #[derive(Clone)]
@@ -157,7 +156,7 @@ mod tests {
         let second = create(None, &source).unwrap();
         assert!(Arc::ptr_eq(&first.data, &second.data));
 
-        let view = View::view(&first);
+        let view = view::view(&first);
         assert_eq!(view.primitive_of_vertex.as_ref(), &[0, 0, 0, 1, 1, 1]);
         assert_eq!(view.point_offsets.as_ref(), &[0, 2, 3, 5, 6]);
         assert_eq!(view.point_vertices.as_ref(), &[0, 3, 1, 2, 4, 5]);

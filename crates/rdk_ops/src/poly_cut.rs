@@ -111,9 +111,9 @@ fn validate_point_selection(point_count: i64, selection: Option<&group::T>) -> R
 enum Numeric {
     ScalarFloat(Vec<f64>),
     ScalarInt(Vec<i64>),
-    Tuple2(packed::Float2::View::View),
-    Tuple3(packed::Float3::View::View),
-    Tuple4(packed::Float4::View::View),
+    Tuple2(packed::float2::view::View),
+    Tuple3(packed::float3::view::View),
+    Tuple4(packed::float4::view::View),
 }
 
 // ponytail: scalar attribute payload is copied once per cut; borrow it if a profile shows this matters.
@@ -122,17 +122,17 @@ fn numeric_attribute(name: &str, value: &geometry::T) -> Result<Numeric, error::
         return Err(fail("cut attribute name must not be empty".to_owned()));
     }
     if name == "P" {
-        return Ok(Numeric::Tuple3(packed::Float3::View::view(geometry::positions(value))?));
+        return Ok(Numeric::Tuple3(packed::float3::view::view(geometry::positions(value))?));
     }
     let Some(item) = geometry::find_attribute(attribute::Owner::Point, name, value) else {
         return Err(fail(format!("point cut attribute {} was not found", ocaml_quote(name))));
     };
-    Ok(match attribute::View::storage(&item)? {
+    Ok(match attribute::view::storage(&item)? {
         attribute::Storage::Float(values) => Numeric::ScalarFloat(values.to_vec()),
         attribute::Storage::Int(values) => Numeric::ScalarInt(values.to_vec()),
-        attribute::Storage::Float2(values) => Numeric::Tuple2(packed::Float2::View::view(values)),
-        attribute::Storage::Float3(values) => Numeric::Tuple3(packed::Float3::View::view(values)?),
-        attribute::Storage::Float4(values) => Numeric::Tuple4(packed::Float4::View::view(values)),
+        attribute::Storage::Float2(values) => Numeric::Tuple2(packed::float2::view::view(values)),
+        attribute::Storage::Float3(values) => Numeric::Tuple3(packed::float3::view::view(values)?),
+        attribute::Storage::Float4(values) => Numeric::Tuple4(packed::float4::view::view(values)),
         _ => {
             return Err(fail(format!(
                 "point cut attribute {} must have numeric scalar or tuple storage, not {}",
@@ -255,7 +255,7 @@ fn remap_edge_groups(
         return Ok(Vec::new());
     }
     let target_index = topology_index::create(cancel_value, target_topology)?;
-    let target = topology_index::View::view(&target_index);
+    let target = topology_index::view::view(&target_index);
     let edge_count = topology_index::edge_count(&target_index);
     let mut source_of_target = vec![-1_i64; edge_count as usize];
     let mut conflict: Option<i64> = None;
@@ -318,8 +318,8 @@ fn remap_edge_groups(
 
 /// What a cut needs from the source geometry besides its topology.
 struct Source {
-    view: topology::View::View,
-    index: topology_index::View::View,
+    view: topology::view::View,
+    index: topology_index::view::View,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -692,9 +692,9 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     }
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(value);
-    let view = topology::View::view(topology_value)?;
+    let view = topology::view::view(topology_value)?;
     let source_index = topology_index::create(cancel_value, topology_value)?;
-    let source = Source { view, index: topology_index::View::view(&source_index) };
+    let source = Source { view, index: topology_index::view::view(&source_index) };
     let topology = &source.view;
     let index = &source.index;
     let point_count = geometry::point_count(value);
@@ -1295,7 +1295,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
             output_point_weight[output] = weights[vertex];
         }
     }
-    let source_positions = packed::Float3::View::view(geometry::positions(value))?;
+    let source_positions = packed::float3::view::view(geometry::positions(value))?;
     let (mut x, mut y, mut z) = (vec![0.0; opcount], vec![0.0; opcount], vec![0.0; opcount]);
     if output_point_count > 0 {
         let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));
@@ -1380,7 +1380,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         &geometry::edge_groups(value),
     )?;
     geometry::create(
-        packed::Float3::View::of_owned_exn(x, y, z)?,
+        packed::float3::view::of_owned_exn(x, y, z)?,
         output_topology,
         Some(attributes),
         Some(groups),
@@ -1414,7 +1414,7 @@ mod tests {
     }
 
     fn polyline(points: &[(f64, f64, f64)], closed: bool) -> geometry::T {
-        let positions = packed::Float3::of_owned(
+        let positions = packed::float3::of_owned(
             points.iter().map(|p| p.0).collect(),
             points.iter().map(|p| p.1).collect(),
             points.iter().map(|p| p.2).collect(),
@@ -1436,12 +1436,12 @@ mod tests {
         polyline(&points, false)
     }
 
-    fn view(value: &geometry::T) -> topology::View::View {
-        topology::View::view(geometry::topology(value)).unwrap()
+    fn view(value: &geometry::T) -> topology::view::View {
+        topology::view::view(geometry::topology(value)).unwrap()
     }
 
     fn xs(value: &geometry::T) -> Vec<f64> {
-        packed::Float3::View::view(geometry::positions(value)).unwrap().x.to_vec()
+        packed::float3::view::view(geometry::positions(value)).unwrap().x.to_vec()
     }
 
     fn primitive_points(value: &geometry::T, primitive: usize) -> Vec<i64> {
@@ -1501,7 +1501,7 @@ mod tests {
 
     #[test]
     fn change_subdivision_and_scale_normalised_crossing() {
-        let delta = packed::Float2::of_owned(vec![0.0, 3.0], vec![0.0, 4.0]).unwrap();
+        let delta = packed::float2::of_owned(vec![0.0, 3.0], vec![0.0, 4.0]).unwrap();
         let source = with_attribute(attribute::Owner::Point, "delta", attribute::Storage::Float2(delta), &open_curve(2));
         let cut = cut(
             &edges_cut(Detection::PolyCutChange { attribute: "delta".to_owned(), threshold: 2.0 }),
@@ -1554,7 +1554,7 @@ mod tests {
             attribute::Owner::Point,
             "rows",
             attribute::Storage::FloatArray(
-                packed::FloatArray::create_owned(vec![0, 1, 3, 4], vec![1.0, 2.0, 3.0, 4.0]).unwrap(),
+                packed::float_array::create_owned(vec![0, 1, 3, 4], vec![1.0, 2.0, 3.0, 4.0]).unwrap(),
             ),
         ));
         attributes.push(mk(
@@ -1566,7 +1566,7 @@ mod tests {
             attribute::Owner::Vertex,
             "links",
             attribute::Storage::IntArray(
-                packed::IntArray::create_owned(vec![0, 1, 3, 4], vec![10, 20, 21, 30]).unwrap(),
+                packed::int_array::create_owned(vec![0, 1, 3, 4], vec![10, 20, 21, 30]).unwrap(),
             ),
         ));
         attributes.push(mk(attribute::Owner::Detail, "author", attribute::Storage::Text(std::sync::Arc::new(vec![b"polycut".to_vec()].into()))));
@@ -1586,7 +1586,7 @@ mod tests {
         let output = cut_of(&edges_cut(crossing("signal", 0.0)), &source);
         let text = |owner, name: &str| {
             let item = geometry::find_attribute(owner, name, &output).expect(name);
-            match attribute::View::storage(&item).unwrap() {
+            match attribute::view::storage(&item).unwrap() {
                 attribute::Storage::Text(values) => (**values).clone(),
                 _ => panic!("{name} storage"),
             }
@@ -1597,14 +1597,14 @@ mod tests {
         let rows = geometry::find_attribute(attribute::Owner::Point, "rows", &output).unwrap();
         let links = geometry::find_attribute(attribute::Owner::Vertex, "links", &output).unwrap();
         let (attribute::Storage::FloatArray(rows), attribute::Storage::IntArray(links)) =
-            (attribute::View::storage(&rows).unwrap(), attribute::View::storage(&links).unwrap())
+            (attribute::view::storage(&rows).unwrap(), attribute::view::storage(&links).unwrap())
         else {
             panic!("ragged storage")
         };
-        assert_eq!(packed::FloatArray::get(rows, 3).unwrap(), vec![2.0, 3.0]);
-        assert_eq!(packed::FloatArray::get(rows, 4).unwrap(), vec![2.0, 3.0]);
-        assert_eq!(packed::IntArray::get(links, 1).unwrap(), vec![20, 21]);
-        assert_eq!(packed::IntArray::get(links, 2).unwrap(), vec![20, 21]);
+        assert_eq!(packed::float_array::get(rows, 3).unwrap(), vec![2.0, 3.0]);
+        assert_eq!(packed::float_array::get(rows, 4).unwrap(), vec![2.0, 3.0]);
+        assert_eq!(packed::int_array::get(links, 1).unwrap(), vec![20, 21]);
+        assert_eq!(packed::int_array::get(links, 2).unwrap(), vec![20, 21]);
         let ordered = |owner, name: &str| {
             group::ordered_elements(&geometry::find_group(owner, name, &output).unwrap())
         };
@@ -1658,7 +1658,7 @@ mod tests {
         assert_eq!(geometry::primitive_count(&closed_result), 1);
         assert_eq!(view(&closed_result).primitive_kinds[0], 2);
         // A filled polygon keeps its polygon kind for a closed fragment.
-        let positions = packed::Float3::of_owned(
+        let positions = packed::float3::of_owned(
             square.iter().map(|p| p.0).collect(),
             square.iter().map(|p| p.1).collect(),
             square.iter().map(|p| p.2).collect(),
@@ -1777,7 +1777,7 @@ mod tests {
         assert_eq!(geometry::data_id(&opaque_edges), geometry::data_id(&malformed));
         let bad_base = with_float("signal", vec![-1.0, 1.0], &open_curve(2));
         let bad_positions = geometry::create(
-            packed::Float3::of_owned(vec![f64::NAN, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]).unwrap(),
+            packed::float3::of_owned(vec![f64::NAN, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]).unwrap(),
             geometry::topology(&bad_base).clone(),
             Some(geometry::attributes(&bad_base)),
             None,

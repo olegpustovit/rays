@@ -286,7 +286,7 @@ fn numerical_weld_tolerance(requested: f64, raw: &Raw) -> f64 {
 }
 
 fn cluster_events(cancel_value: Option<&cancel::T>, tolerance: f64, raw: &Raw) -> Result<point_clusters::T, error::T> {
-    let positions = packed::Float3::View::of_shared_exn(Arc::new(raw.x.clone()), Arc::new(raw.y.clone()), Arc::new(raw.z.clone())).map_err(lift)?;
+    let positions = packed::float3::view::of_shared_exn(Arc::new(raw.x.clone()), Arc::new(raw.y.clone()), Arc::new(raw.z.clone())).map_err(lift)?;
     let temporary =
         geometry::create(positions, topology::empty(raw.x.len() as i64).map_err(lift)?, None, None, None)
             .map_err(lift)?;
@@ -443,7 +443,7 @@ fn create_output(params: &Params, data: Provenance) -> Result<geometry::T, error
     let mut attributes = Vec::new();
     let offsets = &data.offsets;
     let int_array = |name: &String, values: &Vec<i64>| -> Result<attribute::T, error::T> {
-        let rows = packed::IntArray::create_owned(offsets.clone(), values.clone()).map_err(lift)?;
+        let rows = packed::int_array::create_owned(offsets.clone(), values.clone()).map_err(lift)?;
         attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::IntArray(rows)).map_err(lift)
     };
     if let Some(name) = &params.input_attribute {
@@ -454,7 +454,7 @@ fn create_output(params: &Params, data: Provenance) -> Result<geometry::T, error
     }
     if let Some(name) = &params.primitive_uvw_attribute {
         let uv_offsets: Vec<i64> = data.offsets.iter().map(|offset| offset * 3).collect();
-        let rows = packed::FloatArray::create_owned(uv_offsets, data.uvw.clone()).map_err(lift)?;
+        let rows = packed::float_array::create_owned(uv_offsets, data.uvw.clone()).map_err(lift)?;
         attributes.push(
             attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::FloatArray(rows))
                 .map_err(lift)?,
@@ -463,7 +463,7 @@ fn create_output(params: &Params, data: Provenance) -> Result<geometry::T, error
     if let Some(name) = &params.point_attribute {
         attributes.push(int_array(name, &data.point_numbers)?);
     }
-    let positions = packed::Float3::View::of_owned_exn(data.x, data.y, data.z).map_err(lift)?;
+    let positions = packed::float3::view::of_owned_exn(data.x, data.y, data.z).map_err(lift)?;
     geometry::create(positions, topology::empty(point_count).map_err(lift)?, Some(attributes), None, None)
         .map_err(lift)
 }
@@ -554,7 +554,7 @@ mod tests {
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
         let topology_value = topology::create_owned(points.len() as i64, vertex_points, offsets, kinds).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 
     fn mesh(points: &[P3], triangles: &[i64]) -> geometry::T {
@@ -603,9 +603,9 @@ mod tests {
 
     fn int_rows(name: &str, value: &geometry::T) -> (Vec<i64>, Vec<i64>) {
         let item = geometry::find_attribute(attribute::Owner::Point, name, value).unwrap_or_else(|| panic!("missing {name}"));
-        match attribute::View::storage(&item).unwrap() {
+        match attribute::view::storage(&item).unwrap() {
             attribute::Storage::IntArray(rows) => {
-                let view = packed::IntArray::View::view(rows);
+                let view = packed::int_array::view::view(rows);
                 (view.offsets.to_vec(), view.values.to_vec())
             }
             _ => panic!("{name} has wrong storage"),
@@ -614,9 +614,9 @@ mod tests {
 
     fn float_rows(name: &str, value: &geometry::T) -> (Vec<i64>, Vec<f64>) {
         let item = geometry::find_attribute(attribute::Owner::Point, name, value).unwrap_or_else(|| panic!("missing {name}"));
-        match attribute::View::storage(&item).unwrap() {
+        match attribute::view::storage(&item).unwrap() {
             attribute::Storage::FloatArray(rows) => {
-                let view = packed::FloatArray::View::view(rows);
+                let view = packed::float_array::view::view(rows);
                 (view.offsets.to_vec(), view.values.to_vec())
             }
             _ => panic!("{name} has wrong storage"),
@@ -624,7 +624,7 @@ mod tests {
     }
 
     fn positions(value: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let view = packed::Float3::View::view(geometry::positions(value)).unwrap();
+        let view = packed::float3::view::view(geometry::positions(value)).unwrap();
         (view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
     }
 

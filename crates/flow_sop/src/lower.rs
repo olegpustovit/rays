@@ -690,13 +690,13 @@ pub mod chain {
 
     pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
         if let (Some(_), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
-            ak::Display_sink::observe(&gpu.evidence, rdk_core::packed::Float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
+            ak::Display_sink::observe(&gpu.evidence, rdk_core::packed::float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
         }
     }
 
     pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
         if let (Some(_), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
-            if !rdk_core::packed::Float3::resident(rdk_core::geometry::positions(geometry)) {
+            if !rdk_core::packed::float3::resident(rdk_core::geometry::positions(geometry)) {
                 ak::Display_sink::observe_draw(&gpu.evidence, floats_of(geometry), seconds);
             }
         }
@@ -5171,8 +5171,8 @@ mod lend_session_tests {
             let output = sop::session::cook(&mut session, None, &context, child).unwrap();
             let geometry = payload::geometry(&output.payload).unwrap();
             assert_eq!(rdk_core::geometry::point_count(&geometry), 1);
-            assert_eq!(rdk_core::packed::Float3::get(rdk_core::geometry::positions(&geometry), 0).unwrap(),
-                rdk_core::packed::Float3::get(rdk_core::geometry::positions(&source), index as i64).unwrap());
+            assert_eq!(rdk_core::packed::float3::get(rdk_core::geometry::positions(&geometry), 0).unwrap(),
+                rdk_core::packed::float3::get(rdk_core::geometry::positions(&source), index as i64).unwrap());
         }
         drop(children);
         sop::session::close(&mut session);

@@ -69,7 +69,7 @@ fn dense_text(values: &TextArray) -> (Vec<usize>, usize) {
 fn primitive_pieces(piece_attribute: &str, g: &geometry::T) -> Result<(Vec<usize>, usize), String> {
     match geometry::find_attribute(Owner::Primitive, piece_attribute, g) {
         None => Err(format!("Packed_pieces: missing primitive piece attribute {piece_attribute:?}")),
-        Some(a) => match attribute::View::storage(&a) {
+        Some(a) => match attribute::view::storage(&a) {
             Ok(Storage::Int(values)) => Ok(dense_int(values)),
             Ok(Storage::Text(values)) => Ok(dense_text(values)),
             _ => Err(format!("Packed_pieces: primitive piece attribute {piece_attribute:?} must be int or text")),

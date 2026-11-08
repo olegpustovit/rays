@@ -24,7 +24,7 @@ fn grid(cells: i64) -> geometry::T {
     }
     let points = x.len();
     let topology = topology::polygons_owned(points as i64, vertex_points, offsets).unwrap();
-    geometry::create(packed::Float3::View::of_owned_exn(x, vec![0.0; points], z).unwrap(), topology, Some(Vec::new()), None, None).unwrap()
+    geometry::create(packed::float3::view::of_owned_exn(x, vec![0.0; points], z).unwrap(), topology, Some(Vec::new()), None, None).unwrap()
 }
 
 /// (d) peak live bytes while subdividing a 128x128 quad grid once, on one thread.
@@ -76,7 +76,7 @@ fn attribute_round_trip_bytes() {
     let mut source = grid(316);
     let n = geometry::point_count(&source) as usize;
     for (name, storage) in [
-        ("Cd", Storage::Float4(packed::Float4::of_owned(vec![0.25; n], vec![0.5; n], vec![0.75; n], vec![1.0; n]).unwrap())),
+        ("Cd", Storage::Float4(packed::float4::of_owned(vec![0.25; n], vec![0.5; n], vec![0.75; n], vec![1.0; n]).unwrap())),
         ("mass", Storage::Float(std::sync::Arc::new((0..n).map(|i| i as f64).collect()))),
         ("id", Storage::Int(std::sync::Arc::new((0..n as i64).collect()))),
         ("tag", Storage::Text(std::sync::Arc::new((0..n).map(|i| format!("t{i}").into_bytes()).collect()))),
@@ -112,7 +112,7 @@ fn text_attribute_million_rows() {
     let n = 1_000_000usize;
     let topology = topology::polygons_owned(n as i64, Vec::new(), vec![0]).unwrap();
     let zeros = || vec![0.0; n];
-    let source = geometry::create(packed::Float3::View::of_owned_exn(zeros(), zeros(), zeros()).unwrap(), topology, Some(Vec::new()), None, None).unwrap();
+    let source = geometry::create(packed::float3::view::of_owned_exn(zeros(), zeros(), zeros()).unwrap(), topology, Some(Vec::new()), None, None).unwrap();
     let tag = Storage::Text(std::sync::Arc::new((0..n).map(|i| format!("t{i}")).collect()));
     let source = geometry::with_attribute(attribute::create_owned("tag", Owner::Point, tag).unwrap(), &source).unwrap();
     let (peak, allocs) = (std::cell::Cell::new(0), std::cell::Cell::new(0));

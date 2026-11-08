@@ -5,7 +5,7 @@ mod common;
 use ogpu_core::backend::{self as b, Driver, DriverDevice, DriverResource, Texture};
 use ogpu_core::error::{self, ErrorKind};
 use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
-use runtime_resources::{canvas, Image as I, error as Error};
+use runtime_resources::{canvas, image as I, error as Error};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -106,7 +106,7 @@ fn gpu_image() {
     assert!(I::cpu_storage_bytes(&image) == 0 && I::readbacks(&image) == 0 && reads.get() == 0);
     let identity = I::identity(&image);
     let generation = I::generation(&image);
-    let snapshot = |image: &I::t| {
+    let snapshot = |image: &I::Image| {
         let (w, h, g, t) = I::gpu_snapshot(image).unwrap().expect("a GPU snapshot");
         let (sw, sh) = I::size(image).unwrap();
         assert_eq!((w, h, g), (sw, sh, I::generation(image)));

@@ -11,7 +11,7 @@ use crate::point_grid::{float_max, float_min, point_triangle_squared};
 const OPERATION: &str = "proximity_index";
 
 pub struct Features {
-    pub positions: packed::Float3::View::View,
+    pub positions: packed::float3::view::View,
     pub entity_count: i64,
     pub offsets: Vec<i64>,
     pub entities: Vec<i64>,
@@ -47,7 +47,7 @@ fn feature_count(features: &Features) -> usize {
     features.a.len()
 }
 
-fn validate_point(positions: &packed::Float3::View::View, point: i64, label: &str) -> Result<(), error::T> {
+fn validate_point(positions: &packed::float3::view::View, point: i64, label: &str) -> Result<(), error::T> {
     let p = point as usize;
     if !(positions.x[p].is_finite() && positions.y[p].is_finite() && positions.z[p].is_finite()) {
         return Err(failure(format!("{label} references non-finite point {point}")));
@@ -74,8 +74,8 @@ pub fn primitive_features(
     if grain <= 0 {
         return Err(failure("Proximity index: grain must be positive".to_owned()));
     }
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let topology_view = topology::View::view(geometry::topology(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
+    let topology_view = topology::view::view(geometry::topology(geometry_value))?;
     let entity_count = geometry::primitive_count(geometry_value);
     let mut offsets = vec![0_i64; entity_count as usize + 1];
     for primitive in 0..entity_count as usize {
@@ -205,9 +205,9 @@ pub fn edge_features(
     if grain.unwrap_or(16_384) <= 0 {
         return Err(failure("Proximity index: grain must be positive".to_owned()));
     }
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let index = topology_index::create(cancel_value, geometry::topology(geometry_value))?;
-    let reverse = topology_index::View::view(&index);
+    let reverse = topology_index::view::view(&index);
     let entity_count = topology_index::edge_count(&index);
     let offsets: Vec<i64> = (0..=entity_count).collect();
     let entities: Vec<i64> = (0..entity_count).collect();
@@ -643,8 +643,8 @@ mod tests {
 
     fn geometry_of(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, vertices: Vec<i64>, offsets: Vec<i64>, kinds: Vec<u8>) -> geometry::T {
         let count = x.len() as i64;
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
-        let topo = topology::View::create_validated_owned(count, vertices, offsets, kinds);
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
+        let topo = topology::view::create_validated_owned(count, vertices, offsets, kinds);
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 

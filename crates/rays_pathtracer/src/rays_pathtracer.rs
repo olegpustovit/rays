@@ -205,8 +205,8 @@ pub struct PathTracer {
     /// GPU seconds of the frame in progress
     pub frame_gpu: f64,
     pub completed: i64,
-    pub resource: runtime_resources::Image::t,
-    pub image: rays::image::t,
+    pub resource: runtime_resources::image::Image,
+    pub image: rays::image::Image,
     pub width: i64,
     pub height: i64,
     pub spp: i64,
@@ -545,7 +545,7 @@ fn create_tracer(o: &CreateOptions, width: i64, height: i64, scene_: &Scene) -> 
         let convert = flow_gpu::image_sink::create(&lease).map_err(|d| rays_diagnostic::to_string(&d))?;
         let film_ = allocate_film(&device, width, height)?;
         let pixels = vec![0u8; (width * height * 4) as usize];
-        let resource = runtime_resources::Image::create(width, height, &pixels).map_err(|e| resources_err(&e))?;
+        let resource = runtime_resources::image::create(width, height, &pixels).map_err(|e| resources_err(&e))?;
         let image = rays::image::of_resource(resource.clone())?;
         Ok(PathTracer {
             lease: lease.clone(),
@@ -678,7 +678,7 @@ pub fn size(t: &PathTracer) -> (i64, i64) {
 }
 
 /// Borrowed; destroyed by `destroy`. In a native Sketch, Scene samples its completed GPU film directly.
-pub fn image(t: &PathTracer) -> rays::image::t {
+pub fn image(t: &PathTracer) -> rays::image::Image {
     t.image.clone()
 }
 
@@ -708,7 +708,7 @@ fn publish(t: &mut PathTracer, p: &Pending) -> Result<(), String> {
     }
     let output = live_film(t).outputs[p.slot].clone();
     if t.shared_film {
-        runtime_resources::Image::replace_gpu(&t.resource, &output).map_err(|e| resources_err(&e))?;
+        runtime_resources::image::replace_gpu(&t.resource, &output).map_err(|e| resources_err(&e))?;
         t.published = Some(p.slot);
         // the image has left a released film's output
         if let Some(shown) = t.shown.take() {
@@ -716,7 +716,7 @@ fn publish(t: &mut PathTracer, p: &Pending) -> Result<(), String> {
         }
     } else {
         let rgba = b::read_texture(&output, t.width * 4).map_err(gpu_err)?;
-        runtime_resources::Image::replace(&t.resource, t.width, t.height, &rgba).map_err(|e| resources_err(&e))?;
+        runtime_resources::image::replace(&t.resource, t.width, t.height, &rgba).map_err(|e| resources_err(&e))?;
     }
     if !p.preview {
         t.completed += 1;
@@ -1111,7 +1111,7 @@ pub fn resize(t: &mut PathTracer, width: i64, height: i64) -> Result<(), String>
         flush(t)?;
         let pixels = vec![0u8; (width * height * 4) as usize];
         // The image stops sampling the old film before that film is destroyed.
-        runtime_resources::Image::replace(&t.resource, width, height, &pixels).map_err(|e| resources_err(&e))?;
+        runtime_resources::image::replace(&t.resource, width, height, &pixels).map_err(|e| resources_err(&e))?;
         if let Some(f) = &t.film {
             destroy_film(None, f);
         }

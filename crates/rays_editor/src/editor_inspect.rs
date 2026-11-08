@@ -1294,7 +1294,7 @@ pub type Inspected = (Vec<change>, Vec<ScopeChange>);
 
 /// The optional arguments of `workspace_inspector`.
 pub struct InspectorOpts<'a> {
-    pub image: &'a dyn Fn(i64) -> Option<rays::image::t>,
+    pub image: &'a dyn Fn(i64) -> Option<rays::image::Image>,
     pub laid: Option<scope_key>,
     pub window: bool,
     pub on_choice: Option<&'a dyn Fn(&str, &UiBox)>,

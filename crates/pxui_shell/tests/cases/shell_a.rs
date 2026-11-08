@@ -9,7 +9,7 @@ use pxui_shell::status_bar::{self, TipKind};
 use pxui_shell::timeline_bar;
 use pxui_shell::which_key;
 use rays::frame;
-use rays::scene::Layer;
+use rays::scene::layer;
 
 pub fn new_ui() -> Ui {
     let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
@@ -52,10 +52,10 @@ fn moved(p: (f64, f64)) -> Event {
 fn instances(f: &mut dyn FnMut(&mut Ui)) -> i64 {
     let mut ui = new_ui();
     ui.frame(&base(), f);
-    let staged = Layer::stage_native(400, 300, &ui.scene(None)).unwrap_or_else(|e| panic!("{e}"));
+    let staged = layer::stage_native(400, 300, &ui.scene(None)).unwrap_or_else(|e| panic!("{e}"));
     let mut total = 0;
     for layer in &staged.layers {
-        if let Layer::native_layer::Ui_layer(batch, _) = layer {
+        if let layer::native_layer::Ui_layer(batch, _) = layer {
             total += batch.count();
         }
     }

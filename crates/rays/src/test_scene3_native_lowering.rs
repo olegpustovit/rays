@@ -3,7 +3,7 @@ use crate::light;
 use crate::material;
 use crate::mesh;
 use crate::native_scene_lowering as native;
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use crate::scene3 as d3;
 use crate::test_meshes;
 use crate::texture;
@@ -42,16 +42,16 @@ fn ui_for(x: f64) -> ui_batch::Table {
 
 #[test]
 fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
-    let context = Layer::create_cache_context();
-    Layer::with_cache_context(&context, &mut || {
+    let context = layer::create_cache_context();
+    layer::with_cache_context(&context, &mut || {
         let cam = ortho(vec3::create(0., 0., 2.));
         let prepare = |width: i64, height: i64, scene3: d3::Scene3| -> Rc<se::PreparedScene3> {
-            let staged = Layer::stage_native(width, height, &[scene::view3d(None, &cam, scene3)]).expect("native Scene3 staging");
+            let staged = layer::stage_native(width, height, &[scene::view3d(None, &cam, scene3)]).expect("native Scene3 staging");
             assert_eq!(staged.scene3.len(), 1, "native Scene3 staging cardinality");
             staged.scene3[0].clone()
         };
         let empty_view = [scene::view3d(None, &cam, d3::empty())];
-        assert!(Layer::stage_native(0, 16, &empty_view).is_err(), "native Scene3 accepted empty viewport");
+        assert!(layer::stage_native(0, 16, &empty_view).is_err(), "native Scene3 accepted empty viewport");
         let m = test_meshes::facing_z(
             None,
             Some(vec![color::red(), color::rgb(0, 255, 0), color::rgb(0, 0, 255)]),
@@ -61,29 +61,29 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         let scene3 = scene_of(vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]);
         let lights = |n: usize| -> Vec<light::Light> { (0..n).map(|_| light::directional(None, None, vec3::unit_z()).expect("light")).collect() };
         prepare(16, 16, d3::create(Some(lights(64)), None, None, None, vec![plain(&m)]).expect("scene3"));
-        match Layer::stage_native(16, 16, &[scene::view3d(None, &cam, d3::create(Some(lights(65)), None, None, None, vec![plain(&m)]).expect("scene3"))]) {
+        match layer::stage_native(16, 16, &[scene::view3d(None, &cam, d3::create(Some(lights(65)), None, None, None, vec![plain(&m)]).expect("scene3"))]) {
             Err(message) if message == "native View3d lowering failed: more than 64 lights" => {}
             _ => panic!("native Scene3 accepted more than 64 lights"),
         }
         let retained_frame = vec![scene::clear(color::black()), scene::view3d(None, &cam, scene3.clone())];
-        let retained_first = Layer::stage_native(16, 16, &retained_frame).expect("stage");
-        let retained_second = Layer::stage_native(16, 16, &retained_frame).expect("stage");
+        let retained_first = layer::stage_native(16, 16, &retained_frame).expect("stage");
+        let retained_second = layer::stage_native(16, 16, &retained_frame).expect("stage");
         assert!(Rc::ptr_eq(&retained_first, &retained_second), "resource-free retained frame did not reuse native staging");
         match &retained_first.retained {
             Some((identity, 1)) if !identity.is_empty() => {}
             _ => panic!("resource-free retained frame has no stable submission identity"),
         }
         let reusable_view = vec![scene::view3d(None, &cam, scene3.clone())];
-        let before_release = Layer::stage_native(16, 16, &reusable_view).expect("stage");
-        Layer::release(&reusable_view);
-        let after_release = Layer::stage_native(16, 16, &reusable_view).expect("stage");
+        let before_release = layer::stage_native(16, 16, &reusable_view).expect("stage");
+        layer::release(&reusable_view);
+        let after_release = layer::stage_native(16, 16, &reusable_view).expect("stage");
         assert!(
             before_release.scene3.len() == after_release.scene3.len() && Rc::ptr_eq(&before_release.scene3[0], &after_release.scene3[0]),
             "released reusable View3d changed prepared native data"
         );
         let prepared = prepare(16, 16, scene3.clone());
         let with_ui = |x: f64, scene3: d3::Scene3| {
-            Layer::stage_native_render(16, 16, &[scene::view3d(None, &cam, scene3), Layer::ui(None, ui_for(x)).expect("ui")]).expect("stage")
+            layer::stage_native_render(16, 16, &[scene::view3d(None, &cam, scene3), layer::ui(None, ui_for(x)).expect("ui")]).expect("stage")
         };
         let first_ui = with_ui(0., scene3.clone());
         let equivalent = scene_of(vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]);
@@ -128,13 +128,13 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         .expect("mipmaps");
         let textured = scene_of(vec![d3::mesh(None, Some(d3::textured(Some(texture::filter::Trilinear), texture_)), None, None, None, m.clone())]);
         let textured_frame = vec![scene::clear(color::black()), scene::view3d(None, &cam, textured.clone())];
-        let textured_first = Layer::stage_native(16, 16, &textured_frame).expect("stage");
-        let textured_second = Layer::stage_native(16, 16, &textured_frame).expect("stage");
+        let textured_first = layer::stage_native(16, 16, &textured_frame).expect("stage");
+        let textured_second = layer::stage_native(16, 16, &textured_frame).expect("stage");
         assert!(
             !Rc::ptr_eq(&textured_first, &textured_second) && textured_first.retained.is_none() && textured_second.retained.is_none(),
             "resource-bearing retained frame reused stale native staging"
         );
-        let textured_stage = Layer::stage_native(16, 16, &[scene::view3d(None, &cam, textured)]).expect("stage");
+        let textured_stage = layer::stage_native(16, 16, &[scene::view3d(None, &cam, textured)]).expect("stage");
         let textured_entry = &textured_stage.scene3[0].entries[0];
         match (&textured_entry.family, &textured_entry.texture) {
             (se::PipelineFamily::Scene3Textured, Some(value)) if value.levels.len() == 2 && value.levels[0].bytes.len() == 16 => {}
@@ -203,8 +203,8 @@ fn device_host_copy_made_once() {
 
 #[test]
 fn resident_streams() {
-    let context = Layer::create_cache_context();
-    Layer::with_cache_context(&context, &mut || {
+    let context = layer::create_cache_context();
+    layer::with_cache_context(&context, &mut || {
         let made = Rc::new(Cell::new(0));
         let host_count = made.clone();
         let host: Rc<dyn Fn() -> Result<mesh::Mesh, String>> = Rc::new(move || {
@@ -248,10 +248,10 @@ fn resident_streams() {
         let cam = ortho(vec3::create(0., 0., 2.));
         let stage = |mode: d3::render_mode| {
             let node = d3::mesh(None, None, Some(mode), None, None, m.clone());
-            Layer::stage_native(16, 16, &[scene::view3d(None, &cam, scene_of(vec![node]))]).expect("stage")
+            layer::stage_native(16, 16, &[scene::view3d(None, &cam, scene_of(vec![node]))]).expect("stage")
         };
         let face_frame = vec![scene::view3d(None, &cam, scene_of(vec![plain(&m)]))];
-        let stage_faces = || Layer::stage_native(16, 16, &face_frame).expect("stage");
+        let stage_faces = || layer::stage_native(16, 16, &face_frame).expect("stage");
         let faces = stage_faces();
         assert!(Rc::ptr_eq(&stage_faces(), &faces));
         let entry = faces.scene3[0].entries[0].clone();
@@ -281,7 +281,7 @@ fn resident_streams() {
         let tex = texture::init(1, 1, &|_, _| color::white()).expect("texture");
         for source in [m.clone(), legacy] {
             let node = d3::mesh(None, Some(d3::textured(None, tex.clone())), None, None, None, source);
-            let staged = Layer::stage_native(16, 16, &[scene::view3d(None, &cam, scene_of(vec![node]))]).expect("stage");
+            let staged = layer::stage_native(16, 16, &[scene::view3d(None, &cam, scene_of(vec![node]))]).expect("stage");
             let entry = &staged.scene3[0].entries[0];
             assert!(matches!(entry.draw.mesh.key, se::MeshKey::Host(_)));
             assert!(!entry.draw.mesh.vertices.is_empty());

@@ -1,7 +1,7 @@
 use crate::camera;
 use crate::material;
 use crate::mesh;
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use crate::scene3 as d3;
 use rays_math::color;
 use rays_math::vec3;
@@ -15,7 +15,7 @@ pub fn camera_() -> camera::Camera {
 
 pub fn stage(m: &mesh::Mesh) -> Rc<se::SampledDraw> {
     let scene3 = d3::create(None, None, None, None, vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]).expect("scene3");
-    let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]).expect("stage");
+    let staged = layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]).expect("stage");
     staged.scene3[0].entries[0].clone()
 }
 
@@ -50,8 +50,8 @@ pub fn pair() -> (mesh::Mesh, mesh::Mesh, Rc<se::SampledDraw>, Rc<se::SampledDra
 
 #[test]
 fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
-    let context = Layer::create_cache_context();
-    Layer::with_cache_context(&context, &mut || {
+    let context = layer::create_cache_context();
+    layer::with_cache_context(&context, &mut || {
         let (source, _, first, second) = pair();
         let packed = first.draw.mesh.vertices.clone();
         let attrs = attributes(&first);
@@ -84,7 +84,7 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         for samples in [1, 4, 9, 16] {
             let scene3 = d3::create(None, None, None, Some(samples), vec![d3::mesh(None, None, None, None, None, source.clone())]).expect("scene3");
             assert_eq!(d3::walk::depth_clear(&scene3), 1.);
-            let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]).expect("stage");
+            let staged = layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]).expect("stage");
             for entry in &staged.scene3[0].entries {
                 assert!(entry.samples == samples && entry.draw.state.depth_clear == 1.);
             }
@@ -95,7 +95,7 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         let vertices = mesh::Vec3_buffer::of_planes(x, (*vertices.y).clone(), (*vertices.z).clone());
         let oversized = mesh_of((vertices, normals, indices, colors));
         let scene3 = d3::create(None, None, None, None, vec![d3::mesh(None, None, None, None, None, oversized)]).expect("scene3");
-        match Layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]) {
+        match layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]) {
             Err(error) => assert_eq!(error, "native View3d lowering failed: mesh"),
             Ok(_) => panic!("non-finite float32 narrowing was accepted"),
         }

@@ -70,7 +70,7 @@ fn union_roots(parent: &mut [i64], rank: &mut [u8], left: i64, right: i64) {
     }
 }
 
-fn selected_seam(value: &group::T, index_view: &topology_index::View::View, edge: i64) -> bool {
+fn selected_seam(value: &group::T, index_view: &topology_index::view::View, edge: i64) -> bool {
     let first = index_view.edge_offsets[edge as usize];
     let last = index_view.edge_offsets[edge as usize + 1];
     let mut selected = false;
@@ -83,8 +83,8 @@ fn selected_seam(value: &group::T, index_view: &topology_index::View::View, edge
 }
 
 fn edge_endpoint_corners(
-    topology_view: &topology::View::View,
-    index_view: &topology_index::View::View,
+    topology_view: &topology::view::View,
+    index_view: &topology_index::view::View,
     edge: i64,
     local: i64,
 ) -> Result<(i64, i64), error::T> {
@@ -106,8 +106,8 @@ fn edge_endpoint_corners(
 }
 
 fn edge_corner_variables(
-    topology_view: &topology::View::View,
-    index_view: &topology_index::View::View,
+    topology_view: &topology::view::View,
+    index_view: &topology_index::view::View,
     corner_to_variable: &[i64],
     edge: i64,
     local: i64,
@@ -301,7 +301,7 @@ fn solve_checked(
     if !topology::all_triangles(topology_value)? {
         return Err(fail("UV parameterization currently requires triangle polygons"));
     }
-    let topology_view = topology::View::view(topology_value)?;
+    let topology_view = topology::view::view(topology_value)?;
     let point_count = topology::point_count(topology_value);
     let vertex_count = topology::vertex_count(topology_value);
     let primitive_count = topology::primitive_count(topology_value);
@@ -314,7 +314,7 @@ fn solve_checked(
         }
     }
     let index = topology_index::create(cancel_value, topology_value)?;
-    let index_view = topology_index::View::view(&index);
+    let index_view = topology_index::view::view(&index);
     if let Some(seams) = params.edge_seams.as_ref() {
         if edge_group::topology_data_id(seams) != topology::data_id(topology_value)
             || edge_group::length(seams) != topology_index::edge_count(&index)
@@ -323,7 +323,7 @@ fn solve_checked(
         }
     }
     cancel::check_opt(cancel_value)?;
-    let positions = packed::Float3::View::view(geometry::positions(value))?;
+    let positions = packed::float3::view::view(geometry::positions(value))?;
     let invalid_position = AtomicBool::new(false);
     support::run_ranges(Some(grain), point_count, &|first, last| {
         for point in first..last {
@@ -509,8 +509,8 @@ fn solve_checked(
                     ocaml_quote(name)
                 )))
             }
-            Some(item) => match attribute::View::storage(&item)? {
-                attribute::Storage::Float2(values) => Some(packed::Float2::View::view(values)),
+            Some(item) => match attribute::view::storage(&item)? {
+                attribute::Storage::Float2(values) => Some(packed::float2::view::view(values)),
                 _ => {
                     return Err(fail(&format!(
                         "UV Relax vertex attribute {} must be float2",
@@ -723,7 +723,7 @@ fn solve_checked(
     }
     let result_u = pmap(grain, vertex_count, &|corner| Ok(solved_u[corner_to_variable[corner as usize] as usize]))?;
     let result_v = pmap(grain, vertex_count, &|corner| Ok(solved_v[corner_to_variable[corner as usize] as usize]))?;
-    let values = packed::Float2::of_owned(result_u, result_v)?;
+    let values = packed::float2::of_owned(result_u, result_v)?;
     let key = attribute::key(name, attribute::Owner::Vertex, attribute::float2());
     let item = attribute::create_key_owned(&key, attribute::Storage::Float2(values))?;
     geometry::with_attribute(item, value)

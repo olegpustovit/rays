@@ -10,7 +10,7 @@ use ogpu_core::error::{self as oerror, Error, ErrorKind};
 use ogpu_core::pipeline::Blend;
 use ogpu_core::types::{AddressMode, BufferDescriptor, BufferUsage, MipFilter, SamplerDescriptor, SamplerFilter};
 use runtime::{frame_facts, presentation_facts};
-use runtime_resources::{assets, canvas, Image, text};
+use runtime_resources::{assets, canvas, image, text};
 use scene_command::render_ir::{self as ir, Command, RenderIr};
 use scene_command::ui_batch::Table as Shapes;
 use scene_command::{marks, ui_batch};
@@ -779,12 +779,12 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
     };
     match source {
         retained_resource::Image(image) => {
-            if Image::destroyed(&image) {
+            if image::destroyed(&image) {
                 return Err(fail_error(operation, ErrorKind::StaleHandle, "image snapshot is destroyed"));
             }
-            let key = format!("image:{}", Image::identity(&image));
-            let generation = Image::generation(&image);
-            match Image::gpu_snapshot(&image) {
+            let key = format!("image:{}", image::identity(&image));
+            let generation = image::generation(&image);
+            match image::gpu_snapshot(&image) {
                 Err(e) => Err(resource_error_value(operation, &e)),
                 Ok(Some((width, height, generation, gpu_))) => {
                     Ok((width, height, gpu_texture(texture_key(&key, density, generation), width, height, gpu_)))
@@ -793,14 +793,14 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                     if let Some(cached) = find(&key, generation) {
                         return Ok(cached);
                     }
-                    match Image::borrow_snapshot(&image) {
+                    match image::borrow_snapshot(&image) {
                         Err(e) => Err(resource_error_value(operation, &e)),
                         Ok((width, height, borrowed_generation, pixels, mut lease)) => {
                             let size = pixels.len() as i64;
                             let cacheable = size <= SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY;
                             let bytes_ = if cacheable {
                                 let copy = Rc::from(&pixels[..]);
-                                Image::release_snapshot(&mut lease);
+                                image::release_snapshot(&mut lease);
                                 copy
                             } else {
                                 match policy_ {
@@ -810,7 +810,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                                     }
                                     lease_policy::CopyImageSnapshots => {
                                         let copy = Rc::from(&pixels[..]);
-                                        Image::release_snapshot(&mut lease);
+                                        image::release_snapshot(&mut lease);
                                         copy
                                     }
                                 }

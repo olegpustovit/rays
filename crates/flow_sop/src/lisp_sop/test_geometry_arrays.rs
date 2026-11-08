@@ -3,7 +3,7 @@ use super::support::*;
 use crate::{attribute_kernel as ak, catalog, lisp_sop, lower, operators, value_lane};
 use flow_ir::flow_ir::Executor;
 use flow_syntax::{ty::{self, Ty}, value::{Value, source_value}};
-use rdk_core::{attribute::{self, Owner, Storage}, geometry as geo, packed::Float3, topology};
+use rdk_core::{attribute::{self, Owner, Storage}, geometry as geo, packed::float3, topology};
 use sop::{context as ctx, edit_graph as edit, node, session};
 use std::sync::Arc;
 
@@ -19,11 +19,11 @@ fn fixture(which: usize) -> geo::T {
         4 => (6, vec![0,1,2,0,1,3,1,0,4,0,1,5], vec![0,3,6,9,12], vec![P,O,C,P]),
         _ => panic!("fixture index"),
     };
-    geo::create(Float3::of_owned((0..n).map(|i|i as f64).collect(),(0..n).map(|i|if i%2==0 {-0.0} else {0.25}).collect(),vec![2.0;n]).unwrap(),topology::create_owned(n as i64,vp,po,kinds).unwrap(),None,None,None).unwrap()
+    geo::create(float3::of_owned((0..n).map(|i|i as f64).collect(),(0..n).map(|i|if i%2==0 {-0.0} else {0.25}).collect(),vec![2.0;n]).unwrap(),topology::create_owned(n as i64,vp,po,kinds).unwrap(),None,None,None).unwrap()
 }
 fn fields(g: &geo::T, planes: bool) -> Vec<(String, Value)> {
-    let t = topology::View::view(geo::topology(g)).unwrap();
-    let p = Float3::View::view(geo::positions(g)).unwrap();
+    let t = topology::view::view(geo::topology(g)).unwrap();
+    let p = float3::view::view(geo::positions(g)).unwrap();
     let points = if planes { Value::Record(vec![("x".into(),floats(p.x.to_vec())),("y".into(),floats(p.y.to_vec())),("z".into(),floats(p.z.to_vec()))]) }
         else { Value::Floats(3, Arc::new((0..p.x.len()).flat_map(|i|[p.x[i],p.y[i],p.z[i]]).collect())) };
     vec![("points".into(),points),("vertex_points".into(),ints(t.vertex_points.to_vec())),("primitive_offsets".into(),ints(t.primitive_offsets.to_vec())),("kinds".into(),ints(t.primitive_kinds.iter().map(|i|*i as i64).collect()))]
@@ -114,7 +114,7 @@ fn force(g:&geo::T,v:&Value) -> Value {let lookup=lookup(g);flow_eval::Host::for
 fn topology_queries_keep_planes_origins_and_immutable_readers() {
     let original=fixture(1);let before=geometry_bytes(&original);let queried=evaluate("(sop/topology geo)");
     let expected=Value::Record(fields(&original,false).into_iter().skip(1).collect());assert_eq!(force(&original,&queried),expected);
-    let native=topology::View::view(geo::topology(&original)).unwrap();
+    let native=topology::view::view(geo::topology(&original)).unwrap();
     let Value::Record(queried_fields)=force(&original,&queried) else {panic!("topology record expected")};
     for (name,plane) in [("vertex_points",&native.vertex_points),("primitive_offsets",&native.primitive_offsets)] {
         let Value::Int_array(values)=&queried_fields.iter().find(|(key,_)|key==name).unwrap().1 else {panic!("topology integer plane expected")};
@@ -217,7 +217,7 @@ fn live_arrays(planes:bool,stateful:bool){
     let op=if planes{"sop/mesh_planes"}else{"sop/mesh"};
     let source=format!("(workspace animated (graph g :context sop (let* [coordinate {coordinate}] ({op} :points {points} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)))))");
     for reference in [false,true] {let (l,_)=lower_text(lower::Options{reference,..Default::default()},&source);let graph=&l.graphs[0];let state=flow_eval::create_state();let lane=value_lane::create(Some(state.clone()));let mut s=new_session(64,64_000_000);
-        for (time,dt) in [(0.,0.25),(1.,0.5),(2.,0.125)] {let live=input::Frame{dt,frame:time as i64,tick:time as i64,..input::at_time(time)};let resolved=value_lane::resolve(None,Some(&live),&lane,time,&graph.network).unwrap();let n=edit::compile_node(&resolved.geometry,graph.root.unwrap()).unwrap();let stamp=flow_eval::state_stamp(&state);let c=ctx::create(ctx::Options{domains:Some(8),time:Some(time),input:Some(live),..Default::default()}).unwrap();let actual=cook(&mut s,&c,&n);assert_eq!(Float3::get(geo::positions(&actual),0).unwrap(),(if stateful{dt}else{time},0.,0.));assert_eq!(flow_eval::state_stamp(&state),stamp,"cook mutated supplied state");}
+        for (time,dt) in [(0.,0.25),(1.,0.5),(2.,0.125)] {let live=input::Frame{dt,frame:time as i64,tick:time as i64,..input::at_time(time)};let resolved=value_lane::resolve(None,Some(&live),&lane,time,&graph.network).unwrap();let n=edit::compile_node(&resolved.geometry,graph.root.unwrap()).unwrap();let stamp=flow_eval::state_stamp(&state);let c=ctx::create(ctx::Options{domains:Some(8),time:Some(time),input:Some(live),..Default::default()}).unwrap();let actual=cook(&mut s,&c,&n);assert_eq!(float3::get(geo::positions(&actual),0).unwrap(),(if stateful{dt}else{time},0.,0.));assert_eq!(flow_eval::state_stamp(&state),stamp,"cook mutated supplied state");}
         session::close(&mut s);
     }
 }
@@ -258,7 +258,7 @@ fn captured_coordinate_planes_share_position_owner_count(){
 #[test]
 fn compact_gather_exclusive_scan_builds_native_mesh(){
     let source=r#"(workspace compact_mesh (defnode sop/compact_mesh [] (let* [points (array/vec3 6 [1 -0. 2]) mask (exact (map (fn [(i : int)] (if (int/eq (int/mod i 2) 0) 1 0)) (array/range 6 :type int))) kept (array/compact mask) selected (exact (map (fn [(i : int)] (array/nth points i)) kept)) counts (array/int 1 3)] (sop/mesh :points selected :vertex_points (array/range 3 :type int) :primitive_offsets (array/scan_sum counts) :kinds (array/int 1 0)))) (graph g :context sop (sop/compact_mesh)))"#;
-    let expected=geo::create(Float3::of_owned(vec![1.;3],vec![-0.;3],vec![2.;3]).unwrap(),topology::create_owned(3,vec![0,1,2],vec![0,3],vec![topology::PrimitiveKind::Polygon]).unwrap(),None,None,None).unwrap();
+    let expected=geo::create(float3::of_owned(vec![1.;3],vec![-0.;3],vec![2.;3]).unwrap(),topology::create_owned(3,vec![0,1,2],vec![0,3],vec![topology::PrimitiveKind::Polygon]).unwrap(),None,None,None).unwrap();
     for reference in [false,true]{let(_,n)=lower_text(lower::Options{reference,..Default::default()},source);for domains in [1,4,8]{for grain in [1,97,4096]{let mut s=new_session(64,64_000_000);assert_eq!(geometry_bytes(&cook(&mut s,&context(domains,grain),&n)),geometry_bytes(&expected));session::close(&mut s);}}}
 }
 fn cards(planes:bool){
@@ -317,7 +317,7 @@ fn deferred_static_mesh_writes_fold_without_frame_or_gpu_probes(){
     assert_eq!(attribute_writes(&n),0);let g=&l.graphs[0];assert!(g.network.frame_nodes.is_empty());
     let(_,moving)=lower_text(lower::Options{defer:true,..Default::default()},&deferred_source(r#"(sop/with_attr colored "heat" (exact (map (fn [(n : vec3)] (+ n.y t)) normals)) :owner "point" :type float)"#));assert_eq!(attribute_writes(&moving),2);
     let resolved=value_lane::resolve(Some(&gpu),None,&value_lane::create(None),0.,&g.network).unwrap();let n=edit::compile_node(&resolved.geometry,g.root.unwrap()).unwrap();let mut first=None;
-    for domains in [1,8]{let actual=cook_once(domains,&n);assert_eq!(geo::point_count(&actual),5001);let p=Float3::View::view(geo::positions(&actual)).unwrap();assert_eq!(p.x[5000],5000.);let Storage::Float3(data)=attribute::storage(&geo::find_attribute(Owner::Point,"N",&actual).unwrap()).unwrap()else{panic!("normal storage")};assert!(Float3::View::view(&data).unwrap().y.iter().all(|y|*y==1.));let bytes=geometry_bytes(&actual);match &first{None=>first=Some(bytes),Some(expected)=>assert_eq!(&bytes,expected)}}
+    for domains in [1,8]{let actual=cook_once(domains,&n);assert_eq!(geo::point_count(&actual),5001);let p=float3::view::view(geo::positions(&actual)).unwrap();assert_eq!(p.x[5000],5000.);let Storage::Float3(data)=attribute::storage(&geo::find_attribute(Owner::Point,"N",&actual).unwrap()).unwrap()else{panic!("normal storage")};assert!(float3::view::view(&data).unwrap().y.iter().all(|y|*y==1.));let bytes=geometry_bytes(&actual);match &first{None=>first=Some(bytes),Some(expected)=>assert_eq!(&bytes,expected)}}
 }
 #[test]
 fn deferred_malformed_mesh_publishes_no_cache_entry(){

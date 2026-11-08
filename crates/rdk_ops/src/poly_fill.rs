@@ -102,9 +102,9 @@ fn plan_boundaries(
     geometry_value: &geometry::T,
 ) -> Result<BoundaryPlan, error::T> {
     let topology_value = geometry::topology(geometry_value);
-    let source = topology::View::view(topology_value)?;
+    let source = topology::view::view(topology_value)?;
     let index = topology_index::create(cancel_ref, topology_value)?;
-    let reverse = topology_index::View::view(&index);
+    let reverse = topology_index::view::view(&index);
     let edge_count = topology_index::edge_count(&index) as usize;
     match boundary {
         Some(item) if edge_group::topology_data_id(item) != topology::data_id(topology_value) => {
@@ -325,7 +325,7 @@ fn analyze_positions(
     cancel_ref: Option<&cancel::T>,
     grain: i64,
     plan: &BoundaryPlan,
-    positions: &packed::Float3::View::View,
+    positions: &packed::float3::view::View,
 ) -> Result<Centers, error::T> {
     let loop_count = plan.loop_offsets.len() - 1;
     let (mut center_x, mut center_y, mut center_z) = (vec![0.0f64; loop_count], vec![0.0f64; loop_count], vec![0.0f64; loop_count]);
@@ -366,7 +366,7 @@ fn triangulate_loops(
     cancel_ref: Option<&cancel::T>,
     grain: i64,
     plan: &BoundaryPlan,
-    positions: &packed::Float3::View::View,
+    positions: &packed::float3::view::View,
 ) -> Result<Vec<usize>, error::T> {
     let loop_count = plan.loop_offsets.len() - 1;
     let boundary_count = plan.loop_points.len();
@@ -592,7 +592,7 @@ fn remap_attribute(
         attribute::Owner::Primitive => (primitive_map, &none, &[]),
         attribute::Owner::Detail => return Ok(source.clone()),
     };
-    let source_storage = attribute::View::storage(source)?;
+    let source_storage = attribute::view::storage(source)?;
     let storage = match attribute::map_float_planes(source_storage, |values| {
         Ok(map_float(loop_offsets, center_sources, mapping, centers, values))
     })? {
@@ -646,7 +646,7 @@ fn remap_group(
     };
     let target = group::init(Some(grain), owner, group::name(source), target_count as i64, &selected)?;
     let ancestry: Vec<i64> = if mapping.is_empty() { (0..target_count as i64).collect() } else { mapping.to_vec() };
-    group::View::remap_order(source, &ancestry, &target)
+    group::view::remap_order(source, &ancestry, &target)
 }
 
 fn merge_patch_group(patch: group::T, groups: Vec<group::T>) -> Result<Vec<group::T>, error::T> {
@@ -761,8 +761,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         return Ok(geometry_value.clone());
     }
     let source_topology = geometry::topology(geometry_value);
-    let source = topology::View::view(source_topology)?;
-    let source_positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let source = topology::view::view(source_topology)?;
+    let source_positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let source_points = source.point_count as usize;
     let source_vertices = source.vertex_points.len();
     let source_primitives = source.primitive_kinds.len();
@@ -824,7 +824,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                 z[output] = center_z[loop_index];
             }
         }
-        packed::Float3::View::of_owned_exn(x, y, z)?
+        packed::float3::view::of_owned_exn(x, y, z)?
     };
     let mut patch_primitive_base = vec![0usize; loop_count + 1];
     let mut patch_vertex_base = vec![0usize; loop_count + 1];
@@ -861,7 +861,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     for primitive in 0..source_primitives {
         primitive_map[primitive] = primitive as i64;
     }
-    let reverse = topology_index::View::view(&plan.source_index);
+    let reverse = topology_index::view::view(&plan.source_index);
     let point_of_local = |loop_index: usize, local: usize| -> i64 {
         if unique_points {
             (source_points + plan.loop_offsets[loop_index] + local) as i64
@@ -973,7 +973,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         None => CenterMap::None,
         Some(first_point) => CenterMap::Vertex { vertex_points: Arc::new(vertex_points.clone()), first_point },
     };
-    let output_topology = topology::View::create_validated_owned(
+    let output_topology = topology::view::create_validated_owned(
         output_points as i64,
         vertex_points,
         primitive_offsets,
@@ -1082,14 +1082,14 @@ mod tests {
         let g = add(
             attribute::Owner::Point,
             "point_uv",
-            attribute::Storage::Float2(packed::Float2::of_owned(floats(8), (0..8).map(|p| -(p as f64)).collect()).unwrap()),
+            attribute::Storage::Float2(packed::float2::of_owned(floats(8), (0..8).map(|p| -(p as f64)).collect()).unwrap()),
             &g,
         );
         let g = add(
             attribute::Owner::Point,
             "point_vector",
             attribute::Storage::Float3(
-                packed::Float3::View::of_owned_exn(
+                packed::float3::view::of_owned_exn(
                     floats(8),
                     (0..8).map(|p| (p + 10) as f64).collect(),
                     (0..8).map(|p| (p + 20) as f64).collect(),
@@ -1101,14 +1101,14 @@ mod tests {
         let g = add(
             attribute::Owner::Point,
             "point_quaternion",
-            attribute::Storage::Float4(packed::Float4::of_owned(floats(8), vec![0.0; 8], vec![0.0; 8], vec![1.0; 8]).unwrap()),
+            attribute::Storage::Float4(packed::float4::of_owned(floats(8), vec![0.0; 8], vec![0.0; 8], vec![1.0; 8]).unwrap()),
             &g,
         );
         let g = add(
             attribute::Owner::Point,
             "point_int_array",
             attribute::Storage::IntArray(
-                packed::IntArray::create_owned((0..9).map(|i| i * 2).collect(), ints(16)).unwrap(),
+                packed::int_array::create_owned((0..9).map(|i| i * 2).collect(), ints(16)).unwrap(),
             ),
             &g,
         );
@@ -1116,7 +1116,7 @@ mod tests {
             attribute::Owner::Point,
             "point_float_array",
             attribute::Storage::FloatArray(
-                packed::FloatArray::create_owned((0..9).map(|i| i * 2).collect(), floats(16)).unwrap(),
+                packed::float_array::create_owned((0..9).map(|i| i * 2).collect(), floats(16)).unwrap(),
             ),
             &g,
         );
@@ -1187,7 +1187,7 @@ mod tests {
         assert_closed(&fan, "triangle fan left a boundary");
         let (fx, fy, fz) = xyz(&fan);
         assert!(near(fx[8], 0.0) && near(fy[8], 0.0) && near(fz[8], 1.0));
-        match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "weight", &fan).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "weight", &fan).unwrap()).unwrap() {
             attribute::Storage::Float(values) => assert!(near(values[8], 5.5)),
             _ => panic!("point weight storage changed"),
         }
@@ -1210,7 +1210,7 @@ mod tests {
         }
         let expected_vertex_mean = boundary_vertices.iter().sum::<i64>() as f64 / boundary_vertices.len() as f64;
         let fan_topology = topo(&fan);
-        match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Vertex, "vertex_weight", &fan).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(attribute::Owner::Vertex, "vertex_weight", &fan).unwrap()).unwrap() {
             attribute::Storage::Float(values) => {
                 for vertex in 20..fan_topology.vertex_points.len() {
                     if fan_topology.vertex_points[vertex] == 8 {
@@ -1265,7 +1265,7 @@ mod tests {
         let point_normal = attribute::create_owned(
             "N",
             attribute::Owner::Point,
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vec![1.0; 8], vec![0.0; 8], vec![0.0; 8]).unwrap()),
+            attribute::Storage::Float3(packed::float3::view::of_owned_exn(vec![1.0; 8], vec![0.0; 8], vec![0.0; 8]).unwrap()),
         )
         .unwrap();
         let with_normal = geometry::with_attribute(point_normal, &source).unwrap();
@@ -1274,9 +1274,9 @@ mod tests {
         let updated = run(&p, &with_normal).unwrap();
         let normal = geometry::find_attribute(attribute::Owner::Point, "N", &updated).unwrap();
         assert_eq!(attribute::length(&normal), 9);
-        match attribute::View::storage(&normal).unwrap() {
+        match attribute::view::storage(&normal).unwrap() {
             attribute::Storage::Float3(values) => {
-                let values = packed::Float3::View::view(values).unwrap();
+                let values = packed::float3::view::view(values).unwrap();
                 assert!(near(values.x[8], 0.0) && near(values.y[8], 0.0) && values.z[8] > 0.999999);
             }
             _ => panic!("point normal storage changed"),
@@ -1343,7 +1343,7 @@ mod tests {
         let nonfinite = open_box(0.0);
         let (mut nx, ny, nz) = xyz(&nonfinite);
         nx[4] = f64::NAN;
-        let nonfinite = geometry::with_positions(packed::Float3::View::of_owned_exn(nx, ny, nz).unwrap(), &nonfinite).unwrap();
+        let nonfinite = geometry::with_positions(packed::float3::view::of_owned_exn(nx, ny, nz).unwrap(), &nonfinite).unwrap();
         expect_code(run(&Params::new(Mode::FillSinglePolygon), &nonfinite), Code::InvalidGeometry);
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.patch_group = Some(String::new());

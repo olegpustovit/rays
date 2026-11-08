@@ -57,10 +57,10 @@ fn card_row((x, y, w, _): Rect) -> (i64, i64) {
 
 /// The packed PXUI instances of a composed scene, for exact comparisons.
 fn ui_bytes(scene: &[rays::scene::node]) -> Vec<u8> {
-    let staged = rays::scene::Layer::stage_native_render(900, 640, scene).unwrap_or_else(|m| panic!("{m}"));
+    let staged = rays::scene::layer::stage_native_render(900, 640, scene).unwrap_or_else(|m| panic!("{m}"));
     let mut out = Vec::new();
     for layer in &staged.layers {
-        if let rays::scene::Layer::native_layer::Ui_layer(batch, _) = layer {
+        if let rays::scene::layer::native_layer::Ui_layer(batch, _) = layer {
             out.extend_from_slice(batch.instances());
         }
     }
@@ -553,10 +553,10 @@ pub fn workspace_walk() {
     assert!(centered(&ed), "display-node cook did not publish the graph's result");
     assert!(!editor::scene(&ed, &current_frame).is_empty(), "sketch environment produced an empty composed scene");
     // The whole workspace paints in batch groups, not one draw per label.
-    let staged = rays::scene::Layer::stage_native_render(900, 640, &editor::scene(&ed, &current_frame)).unwrap_or_else(|m| panic!("{m}"));
+    let staged = rays::scene::layer::stage_native_render(900, 640, &editor::scene(&ed, &current_frame)).unwrap_or_else(|m| panic!("{m}"));
     let mut batches = 0;
     for layer in &staged.layers {
-        if let rays::scene::Layer::native_layer::Ui_layer(batch, _) = layer {
+        if let rays::scene::layer::native_layer::Ui_layer(batch, _) = layer {
             batches += batch.batches().len();
         }
     }

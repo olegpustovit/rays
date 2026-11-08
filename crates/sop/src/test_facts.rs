@@ -26,7 +26,7 @@ fn dependencies() {
     cook(&mut evaluator, 1, &rewire(&n, &with_color(2.0, &geometry_value)));
     check(count(&calls) == 1, "unread color changed a component key");
     let points = geometry::point_count(&geometry_value) as usize;
-    let normals = packed::Float3::of_owned(vec![1.0; points], vec![0.0; points], vec![0.0; points]).unwrap();
+    let normals = packed::float3::of_owned(vec![1.0; points], vec![0.0; points], vec![0.0; points]).unwrap();
     let normal = attribute::create_key_owned(
         &attribute::normal(attribute::Owner::Point),
         attribute::Storage::Float3(normals.clone()),
@@ -87,7 +87,7 @@ fn dependencies() {
     let got = geometry_of(&output);
     check(
         count(&identity_calls) == 1
-            && packed::Float3::data_id(geometry::positions(&got)) == packed::Float3::data_id(geometry::positions(&changed))
+            && packed::float3::data_id(geometry::positions(&got)) == packed::float3::data_id(geometry::positions(&changed))
             && same_geometry(&got, &changed),
         "read-free cache hit did not carry fresh P/attributes",
     );
@@ -185,8 +185,8 @@ fn refusals_uncached() {
 fn payload_budget() {
     let geometry_value = with_color(1.0, &fixture());
     let translate: Transform = Arc::new(|g| {
-        let view = packed::Float3::View::view(geometry::positions(g)).unwrap();
-        let moved = packed::Float3::of_owned(view.x.iter().map(|x| x + 1.0).collect(), view.y.to_vec(), view.z.to_vec()).unwrap();
+        let view = packed::float3::view::view(geometry::positions(g)).unwrap();
+        let moved = packed::float3::of_owned(view.x.iter().map(|x| x + 1.0).collect(), view.y.to_vec(), view.z.to_vec()).unwrap();
         geometry::with_positions(moved, g).unwrap()
     });
     let n = counted(&snapshot(&geometry_value), &calls(), &["P"], &["P"], translate);
@@ -197,8 +197,8 @@ fn payload_budget() {
     let updated = cook(&mut evaluator, 1, &next);
     // the P-writer reads P only: its moved positions are reused for the recoloured input
     check(
-        packed::Float3::data_id(geometry::positions(&geometry_of(&updated)))
-            == packed::Float3::data_id(geometry::positions(&geometry_of(&output))),
+        packed::float3::data_id(geometry::positions(&geometry_of(&updated)))
+            == packed::float3::data_id(geometry::positions(&geometry_of(&output))),
         "budget test missed reuse",
     );
     let mut components = std::collections::HashMap::new();
@@ -239,7 +239,7 @@ fn use_node(kind: InputUse, policy: Option<node::InputPolicy>, inputs: Vec<node:
         Arc::new(move |_, _, inputs| {
             if kind == InputUse::Cpu {
                 for g in inputs {
-                    packed::Float3::View::view(geometry::positions(g)).unwrap();
+                    packed::float3::view::view(geometry::positions(g)).unwrap();
                 }
             }
             Ok(node::GeometryCooked { geometry: inputs[0].clone(), instances: None })

@@ -236,7 +236,7 @@ fn validate_finite_positions(
     operation: &str,
     value: &geometry::T,
 ) -> Result<Positions, error::T> {
-    let view = packed::Float3::View::view(geometry::positions(value))?;
+    let view = packed::float3::view::view(geometry::positions(value))?;
     let count = view.x.len() as i64;
     let first_invalid = AtomicI64::new(i64::MAX);
     if count > 0 {
@@ -310,8 +310,8 @@ fn soft_edge_distances(
         return Ok(vec![0.0; count as usize]);
     }
     let reverse_index = topology_index::create(cancel_value, geometry::topology(value))?;
-    let reverse = topology_index::View::view(&reverse_index);
-    let positions = packed::Float3::View::view(geometry::positions(value))?;
+    let reverse = topology_index::view::view(&reverse_index);
+    let positions = packed::float3::view::view(geometry::positions(value))?;
     let lengths: Vec<f64> = (0..reverse.edge_a.len())
         .map(|edge| {
             let (a, b) = (reverse.edge_a[edge] as usize, reverse.edge_b[edge] as usize);
@@ -363,7 +363,7 @@ fn point_float_output(
 ) -> Result<Vec<f64>, error::T> {
     match geometry::find_attribute(attribute::Owner::Point, name, value) {
         None => Ok(vec![default; geometry::point_count(value) as usize]),
-        Some(item) => match attribute::View::storage(&item)? {
+        Some(item) => match attribute::view::storage(&item)? {
             attribute::Storage::Float(values) => {
                 if values.len() as i64 != geometry::point_count(value) {
                     Err(fail(format!("{operation}: point attribute {} length mismatch", ocaml_quote(name))))
@@ -513,7 +513,7 @@ fn run_distance_from_geometry(
                 &params.reference,
             )
             .map_err(|failure| fail(error::to_string(&failure)))?;
-            surface_index::View::closest_distances_many_into(
+            surface_index::view::closest_distances_many_into(
                 cancel_value,
                 affected_points.as_ref(),
                 grain,
@@ -601,7 +601,7 @@ fn run_distance_from_geometry(
             attribute::Storage::Float(Arc::new(values)),
         )?);
     }
-    geometry::View::with_merged_attributes_owned(attributes, source)
+    geometry::view::with_merged_attributes_owned(attributes, source)
 }
 
 pub fn distance_from_geometry(
@@ -631,7 +631,7 @@ fn soft_attribute_weights(
             ocaml_quote(name)
         )));
     };
-    let attribute::Storage::Float(values) = attribute::View::storage(&item)? else {
+    let attribute::Storage::Float(values) = attribute::view::storage(&item)? else {
         return Err(fail(format!(
             "Rdk.Transform_ops.soft_transform: point distance attribute {} must be float",
             ocaml_quote(name)
@@ -786,7 +786,7 @@ fn run_soft_transform(
     }
     let did_change = changed.load(Ordering::Relaxed);
     let mut output = if did_change {
-        geometry::with_positions(packed::Float3::View::of_owned_exn(x, y, z)?, value)?
+        geometry::with_positions(packed::float3::view::of_owned_exn(x, y, z)?, value)?
     } else {
         value.clone()
     };
@@ -943,7 +943,7 @@ mod tests {
     }
 
     fn points_geometry(points: &[(f64, f64, f64)]) -> geometry::T {
-        let positions = packed::Float3::of_owned(
+        let positions = packed::float3::of_owned(
             points.iter().map(|p| p.0).collect(),
             points.iter().map(|p| p.1).collect(),
             points.iter().map(|p| p.2).collect(),
@@ -953,7 +953,7 @@ mod tests {
     }
 
     fn line_with_free_point() -> geometry::T {
-        let positions = packed::Float3::of_owned(
+        let positions = packed::float3::of_owned(
             vec![0.0, 1.0, 0.1, 3.0, 4.0],
             vec![0.0; 5],
             vec![0.0; 5],
@@ -985,9 +985,9 @@ mod tests {
             }
         }
         let count = x.len();
-        let positions = packed::Float3::of_owned(x, vec![0.0; count], z).unwrap();
+        let positions = packed::float3::of_owned(x, vec![0.0; count], z).unwrap();
         let topo = topology::polygons_owned(count as i64, vertices, offsets).unwrap();
-        let normals = packed::Float3::of_owned(vec![0.0; count], vec![1.0; count], vec![0.0; count]).unwrap();
+        let normals = packed::float3::of_owned(vec![0.0; count], vec![1.0; count], vec![0.0; count]).unwrap();
         let normal = attribute::create_key_owned(
             &attribute::normal(attribute::Owner::Point),
             attribute::Storage::Float3(normals),
@@ -1001,12 +1001,12 @@ mod tests {
     }
 
     fn ys(value: &geometry::T) -> Vec<f64> {
-        packed::Float3::View::view(geometry::positions(value)).unwrap().y.to_vec()
+        packed::float3::view::view(geometry::positions(value)).unwrap().y.to_vec()
     }
 
     fn float_attribute(name: &str, value: &geometry::T) -> Vec<f64> {
         let item = geometry::find_attribute(attribute::Owner::Point, name, value).expect("attribute");
-        match attribute::View::storage(&item).unwrap() {
+        match attribute::view::storage(&item).unwrap() {
             attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
@@ -1152,8 +1152,8 @@ mod tests {
                 output.into_inner().unwrap().unwrap()
             };
             let (one, four) = (run(1), run(4));
-            let one_positions = packed::Float3::View::view(geometry::positions(&one)).unwrap();
-            let four_positions = packed::Float3::View::view(geometry::positions(&four)).unwrap();
+            let one_positions = packed::float3::view::view(geometry::positions(&one)).unwrap();
+            let four_positions = packed::float3::view::view(geometry::positions(&four)).unwrap();
             assert_eq!(one_positions.x, four_positions.x);
             assert_eq!(one_positions.y, four_positions.y);
             assert_eq!(one_positions.z, four_positions.z);

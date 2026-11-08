@@ -105,8 +105,8 @@ enum Data {
     F(Vec<Arc<Vec<f64>>>),
     I(Arc<Vec<i64>>),
     T(Arc<TextArray>),
-    IntArray(packed::IntArray::View::View),
-    FloatArray(packed::FloatArray::View::View),
+    IntArray(packed::int_array::view::View),
+    FloatArray(packed::float_array::view::View),
 }
 
 #[derive(Default)]
@@ -223,14 +223,14 @@ fn create_group_jobs(
             )));
         }
         let existing = geometry::find_group(target_group_owner, group::name(source), target);
-        let existing_bits = existing.as_ref().map(|value| group::View::bits_view(value).to_vec());
+        let existing_bits = existing.as_ref().map(|value| group::view::bits_view(value).to_vec());
         let output_bits = match &existing_bits {
             None => vec![0_u8; ((target_count + 7) / 8) as usize],
             Some(bits) => bits.clone(),
         };
         output.push(GroupJob {
             group_source_owner: spec.group_source_owner,
-            group_source_bits: group::View::bits_view(source).to_vec(),
+            group_source_bits: group::view::bits_view(source).to_vec(),
             group_target_owner: target_group_owner,
             group_target_name: group::name(source).to_owned(),
             group_existing_bits: existing_bits,
@@ -285,21 +285,21 @@ fn data_of(storage: &attribute::Storage) -> Result<Data, error::T> {
     Ok(match storage {
         attribute::Storage::Float(values) => Data::F(vec![values.clone()]),
         attribute::Storage::Float2(values) => {
-            let view = packed::Float2::View::view(values);
+            let view = packed::float2::view::view(values);
             Data::F(vec![view.x, view.y])
         }
         attribute::Storage::Float3(values) => {
-            let view = packed::Float3::View::view(values)?;
+            let view = packed::float3::view::view(values)?;
             Data::F(vec![view.x, view.y, view.z])
         }
         attribute::Storage::Float4(values) => {
-            let view = packed::Float4::View::view(values);
+            let view = packed::float4::view::view(values);
             Data::F(vec![view.x, view.y, view.z, view.w])
         }
         attribute::Storage::Int(values) => Data::I(values.clone()),
         attribute::Storage::Text(values) => Data::T(values.clone()),
-        attribute::Storage::IntArray(values) => Data::IntArray(packed::IntArray::View::view(values)),
-        attribute::Storage::FloatArray(values) => Data::FloatArray(packed::FloatArray::View::view(values)),
+        attribute::Storage::IntArray(values) => Data::IntArray(packed::int_array::view::view(values)),
+        attribute::Storage::FloatArray(values) => Data::FloatArray(packed::float_array::view::view(values)),
     })
 }
 
@@ -328,7 +328,7 @@ fn source_data(
             owner_name(source_owner),
             ocaml_quote(source_name)
         ))),
-        Some(found) => data_of(attribute::View::storage(&found)?),
+        Some(found) => data_of(attribute::view::storage(&found)?),
     }
 }
 
@@ -342,7 +342,7 @@ fn target_data(
     }
     match geometry::find_attribute(target_owner, target_name, target) {
         None => Ok(None),
-        Some(found) => data_of(attribute::View::storage(&found)?).map(Some),
+        Some(found) => data_of(attribute::view::storage(&found)?).map(Some),
     }
 }
 
@@ -693,10 +693,10 @@ fn array_offsets(
 fn materialize_int_array(
     cancel_token: Option<&cancel::T>,
     grain: i64,
-    source: &packed::IntArray::View::View,
-    existing: Option<&packed::IntArray::View::View>,
+    source: &packed::int_array::view::View,
+    existing: Option<&packed::int_array::view::View>,
     choices: &[i64],
-) -> Result<packed::IntArray::T, error::T> {
+) -> Result<packed::int_array::T, error::T> {
     let offsets = array_offsets(
         cancel_token,
         "Attribute Interpolate int array",
@@ -731,16 +731,16 @@ fn materialize_int_array(
             Ok(())
         })?;
     }
-    Ok(packed::IntArray::View::create_validated_owned(offsets, values))
+    Ok(packed::int_array::view::create_validated_owned(offsets, values))
 }
 
 fn materialize_float_array(
     cancel_token: Option<&cancel::T>,
     grain: i64,
-    source: &packed::FloatArray::View::View,
-    existing: Option<&packed::FloatArray::View::View>,
+    source: &packed::float_array::view::View,
+    existing: Option<&packed::float_array::view::View>,
     choices: &[i64],
-) -> Result<packed::FloatArray::T, error::T> {
+) -> Result<packed::float_array::T, error::T> {
     let offsets = array_offsets(
         cancel_token,
         "Attribute Interpolate float array",
@@ -775,7 +775,7 @@ fn materialize_float_array(
             Ok(())
         })?;
     }
-    Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
+    Ok(packed::float_array::view::create_validated_owned(offsets, values))
 }
 
 fn storage_of_job(
@@ -788,16 +788,16 @@ fn storage_of_job(
             let mut planes_out = job.out.f.iter().cloned();
             match planes.len() {
                 1 => attribute::Storage::Float(Arc::new(planes_out.next().unwrap_or_default())),
-                2 => attribute::Storage::Float2(packed::Float2::of_owned(
+                2 => attribute::Storage::Float2(packed::float2::of_owned(
                     planes_out.next().unwrap_or_default(),
                     planes_out.next().unwrap_or_default(),
                 )?),
-                3 => attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
+                3 => attribute::Storage::Float3(packed::float3::view::of_owned_exn(
                     planes_out.next().unwrap_or_default(),
                     planes_out.next().unwrap_or_default(),
                     planes_out.next().unwrap_or_default(),
                 )?),
-                _ => attribute::Storage::Float4(packed::Float4::of_owned(
+                _ => attribute::Storage::Float4(packed::float4::of_owned(
                     planes_out.next().unwrap_or_default(),
                     planes_out.next().unwrap_or_default(),
                     planes_out.next().unwrap_or_default(),
@@ -839,7 +839,7 @@ fn storage_of_job(
 fn groups_of_jobs(jobs: &[GroupJob]) -> Result<Vec<group::T>, error::T> {
     jobs.iter()
         .map(|job| {
-            group::View::of_owned_bits(
+            group::view::of_owned_bits(
                 job.group_target_owner,
                 &job.group_target_name,
                 job.group_target_count,
@@ -934,8 +934,8 @@ fn interpolate_primitive_groups(
     blend: f64,
     pre_scale: f64,
     primitive_numbers: &[i64],
-    uvw: &packed::Float3::View::View,
-    topology_view: &topology::View::View,
+    uvw: &packed::float3::view::View,
+    topology_view: &topology::view::View,
     primitive_count: i64,
     jobs: &mut Vec<GroupJob>,
 ) -> Result<(), error::T> {
@@ -995,7 +995,7 @@ fn compute_primitive_weights(
     target_owner: attribute::Owner,
     computed: &Computed,
     primitive_numbers: &[i64],
-    uvw: &packed::Float3::View::View,
+    uvw: &packed::float3::view::View,
     pre_scale: f64,
     source: &geometry::T,
     target: &geometry::T,
@@ -1016,14 +1016,14 @@ fn compute_primitive_weights(
     }
     let existing_numbers = geometry::find_attribute(target_owner, numbers_name, target);
     let existing_weights = geometry::find_attribute(target_owner, weights_name, target);
-    let existing: Option<(packed::IntArray::View::View, packed::FloatArray::View::View)> =
+    let existing: Option<(packed::int_array::view::View, packed::float_array::view::View)> =
         match (existing_numbers, existing_weights) {
             (None, None) => None,
             (Some(numbers), Some(weights)) => {
-                match (attribute::View::storage(&numbers)?, attribute::View::storage(&weights)?) {
+                match (attribute::view::storage(&numbers)?, attribute::view::storage(&weights)?) {
                     (attribute::Storage::IntArray(numbers), attribute::Storage::FloatArray(weights)) => {
-                        let numbers = packed::IntArray::View::view(numbers);
-                        let weights = packed::FloatArray::View::view(weights);
+                        let numbers = packed::int_array::view::view(numbers);
+                        let weights = packed::float_array::view::view(weights);
                         if *numbers.offsets == *weights.offsets {
                             Some((numbers, weights))
                         } else {
@@ -1043,7 +1043,7 @@ fn compute_primitive_weights(
                 ))
             }
         };
-    let topology_view = topology::View::view(geometry::topology(source))?;
+    let topology_view = topology::view::view(geometry::topology(source))?;
     let primitive_count = geometry::primitive_count(source);
     let target_count = owner_count(target, target_owner);
     let selected = |destination: i64| match selection {
@@ -1125,8 +1125,8 @@ fn compute_primitive_weights(
             Ok(())
         })?;
     }
-    let numbers = packed::IntArray::View::create_validated_owned(offsets.clone(), numbers);
-    let weights = packed::FloatArray::View::create_validated_owned(offsets, weights);
+    let numbers = packed::int_array::view::create_validated_owned(offsets.clone(), numbers);
+    let weights = packed::float_array::view::create_validated_owned(offsets, weights);
     Ok(vec![
         attribute::create_owned(numbers_name, target_owner, attribute::Storage::IntArray(numbers))?,
         attribute::create_owned(weights_name, target_owner, attribute::Storage::FloatArray(weights))?,
@@ -1141,7 +1141,7 @@ fn install(
     jobs: &[Job],
     target: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    let mut position: Option<packed::Float3::T> = None;
+    let mut position: Option<packed::float3::T> = None;
     let mut attributes: Vec<attribute::T> = Vec::new();
     for job in jobs {
         let storage = storage_of_job(cancel_token, grain, job)?;
@@ -1155,7 +1155,7 @@ fn install(
         }
     }
     attributes.extend(extra);
-    geometry::View::with_merged_owned(position, attributes, groups, target)
+    geometry::view::with_merged_owned(position, attributes, groups, target)
 }
 
 fn collect_jobs(
@@ -1223,9 +1223,9 @@ pub fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry::T, er
             ocaml_quote(&uvw_attribute)
         )));
     };
-    let (primitive_numbers, uvw) = match (attribute::View::storage(&primitive_driver)?, attribute::View::storage(&uvw_driver)?) {
+    let (primitive_numbers, uvw) = match (attribute::view::storage(&primitive_driver)?, attribute::view::storage(&uvw_driver)?) {
         (attribute::Storage::Int(numbers), attribute::Storage::Float3(uvw)) => {
-            (numbers.clone(), packed::Float3::View::view(uvw)?)
+            (numbers.clone(), packed::float3::view::view(uvw)?)
         }
         _ => return Err(fail("Attribute Interpolate: primitive driver must be int and UVW driver float3")),
     };
@@ -1256,7 +1256,7 @@ pub fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry::T, er
             return Err(invalid("Attribute Interpolate: UVW contains a non-finite value"));
         }
     }
-    let topology_view = topology::View::view(geometry::topology(source))?;
+    let topology_view = topology::view::view(geometry::topology(source))?;
     let primitive_count = geometry::primitive_count(source);
     let point_numeric = indices_of(&jobs, attribute::Owner::Point, true);
     let vertex_numeric = indices_of(&jobs, attribute::Owner::Vertex, true);
@@ -1390,7 +1390,7 @@ fn weighted_owner_supported(weighted_owner: WeightedSource, source_owner: attrib
 fn weighted_source_index(
     weighted_owner: WeightedSource,
     source_owner: attribute::Owner,
-    topology_view: &topology::View::View,
+    topology_view: &topology::view::View,
     primitive_of_vertex: &[i64],
     source_element: i64,
 ) -> i64 {
@@ -1416,9 +1416,9 @@ fn interpolate_weighted_groups(
     normalize_weights: bool,
     threshold: f64,
     weighted_owner: WeightedSource,
-    numbers: &packed::IntArray::View::View,
-    weights: &packed::FloatArray::View::View,
-    topology_view: &topology::View::View,
+    numbers: &packed::int_array::view::View,
+    weights: &packed::float_array::view::View,
+    topology_view: &topology::view::View,
     primitive_of_vertex: &[i64],
     jobs: &mut Vec<GroupJob>,
 ) -> Result<(), error::T> {
@@ -1505,9 +1505,9 @@ pub fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::T, erro
             ocaml_quote(&weights_attribute)
         )));
     };
-    let (numbers, weights) = match (attribute::View::storage(&numbers_driver)?, attribute::View::storage(&weights_driver)?) {
+    let (numbers, weights) = match (attribute::view::storage(&numbers_driver)?, attribute::view::storage(&weights_driver)?) {
         (attribute::Storage::IntArray(numbers), attribute::Storage::FloatArray(weights)) => {
-            (packed::IntArray::View::view(numbers), packed::FloatArray::View::view(weights))
+            (packed::int_array::view::view(numbers), packed::float_array::view::view(weights))
         }
         _ => return Err(fail("Attribute Interpolate: weighted drivers must be int-array and float-array")),
     };
@@ -1565,7 +1565,7 @@ pub fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::T, erro
             }
         }
     }
-    let topology_view = topology::View::view(geometry::topology(source))?;
+    let topology_view = topology::view::view(geometry::topology(source))?;
     let needs_primitive_map = weighted_owner == WeightedSource::Vertices
         && (jobs.iter().any(|job| job.source_owner == attribute::Owner::Primitive)
             || group_jobs.iter().any(|job| job.group_source_owner == attribute::Owner::Primitive));
@@ -1695,24 +1695,24 @@ mod tests {
         add_float3s(owner, "source_uvw", x, y, z, &add_ints(owner, "source_primitive", primitives, g))
     }
 
-    fn int_rows(rows: &[Vec<i64>]) -> packed::IntArray::T {
+    fn int_rows(rows: &[Vec<i64>]) -> packed::int_array::T {
         let mut offsets = vec![0_i64];
         let mut values = Vec::new();
         for row in rows {
             values.extend(row);
             offsets.push(values.len() as i64);
         }
-        packed::IntArray::create_owned(offsets, values).unwrap()
+        packed::int_array::create_owned(offsets, values).unwrap()
     }
 
-    fn float_rows(rows: &[Vec<f64>]) -> packed::FloatArray::T {
+    fn float_rows(rows: &[Vec<f64>]) -> packed::float_array::T {
         let mut offsets = vec![0_i64];
         let mut values = Vec::new();
         for row in rows {
             values.extend(row);
             offsets.push(values.len() as i64);
         }
-        packed::FloatArray::create_owned(offsets, values).unwrap()
+        packed::float_array::create_owned(offsets, values).unwrap()
     }
 
     fn add_weight_drivers(owner: attribute::Owner, numbers: &[Vec<i64>], weights: &[Vec<f64>], g: &geometry::T) -> geometry::T {
@@ -1771,7 +1771,7 @@ mod tests {
         let g = add_storage(
             Point,
             "uv",
-            attribute::Storage::Float2(packed::Float2::of_owned(vec![0.0, 2.0, 0.0], vec![0.0, 0.0, 2.0]).unwrap()),
+            attribute::Storage::Float2(packed::float2::of_owned(vec![0.0, 2.0, 0.0], vec![0.0, 0.0, 2.0]).unwrap()),
             &g,
         );
         let g = add_float3s(Point, "N", vec![2.0, 0.0, 0.0], vec![0.0, 2.0, 0.0], vec![0.0, 0.0, 2.0], &g);
@@ -1779,7 +1779,7 @@ mod tests {
             Point,
             "tuple4",
             attribute::Storage::Float4(
-                packed::Float4::of_owned(vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 5.0], vec![6.0, 7.0, 8.0], vec![9.0, 10.0, 11.0]).unwrap(),
+                packed::float4::of_owned(vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 5.0], vec![6.0, 7.0, 8.0], vec![9.0, 10.0, 11.0]).unwrap(),
             ),
             &g,
         );
@@ -1821,13 +1821,13 @@ mod tests {
         assert_eq!(ints(Point, "id", &result), vec![10, 10, 20, 0]);
         assert_eq!(texts(Point, "label", &result), vec![b"a".to_vec(), b"a".to_vec(), b"b".to_vec(), Vec::new()]);
         let uv = match attribute::storage(&find(Point, "uv", &result)).unwrap() {
-            attribute::Storage::Float2(values) => packed::Float2::View::view(&values),
+            attribute::Storage::Float2(values) => packed::float2::view::view(&values),
             _ => panic!("uv"),
         };
         assert_eq!(&*uv.x, &[0.0, 0.5, 2.0, 0.0]);
         assert_eq!(&*uv.y, &[0.0, 0.5, 0.0, 0.0]);
         let tuple4 = match attribute::storage(&find(Point, "tuple4", &result)).unwrap() {
-            attribute::Storage::Float4(values) => packed::Float4::View::view(&values),
+            attribute::Storage::Float4(values) => packed::float4::view::view(&values),
             _ => panic!("tuple4"),
         };
         assert_eq!(&*tuple4.x, &[0.0, 0.75, 1.0, 0.0]);
@@ -2025,16 +2025,16 @@ mod tests {
         let attributes = vec![spec(Point, "neighbors"), spec(Point, "samples")];
         let rows = |g: &geometry::T, name: &str| -> Vec<Vec<i64>> {
             match attribute::storage(&find(Point, name, g)).unwrap() {
-                attribute::Storage::IntArray(values) => (0..packed::IntArray::length(&values))
-                    .map(|row| packed::IntArray::get(&values, row).unwrap())
+                attribute::Storage::IntArray(values) => (0..packed::int_array::length(&values))
+                    .map(|row| packed::int_array::get(&values, row).unwrap())
                     .collect(),
                 _ => panic!("int array"),
             }
         };
         let frows = |g: &geometry::T, name: &str| -> Vec<Vec<f64>> {
             match attribute::storage(&find(Point, name, g)).unwrap() {
-                attribute::Storage::FloatArray(values) => (0..packed::FloatArray::length(&values))
-                    .map(|row| packed::FloatArray::get(&values, row).unwrap())
+                attribute::Storage::FloatArray(values) => (0..packed::float_array::length(&values))
+                    .map(|row| packed::float_array::get(&values, row).unwrap())
                     .collect(),
                 _ => panic!("float array"),
             }
@@ -2101,8 +2101,8 @@ mod tests {
         };
         let numbers = |g: &geometry::T| -> Vec<Vec<i64>> {
             match attribute::storage(&find(Point, "computed_points", g)).unwrap() {
-                attribute::Storage::IntArray(values) => (0..packed::IntArray::length(&values))
-                    .map(|row| packed::IntArray::get(&values, row).unwrap())
+                attribute::Storage::IntArray(values) => (0..packed::int_array::length(&values))
+                    .map(|row| packed::int_array::get(&values, row).unwrap())
                     .collect(),
                 _ => panic!("computed_points"),
             }
@@ -2300,7 +2300,7 @@ mod tests {
             Point,
             "tuple4",
             attribute::Storage::Float4(
-                packed::Float4::of_owned(
+                packed::float4::of_owned(
                     vec![0.0, 1.0, 2.0, 3.0],
                     vec![4.0, 5.0, 6.0, 7.0],
                     vec![8.0, 9.0, 10.0, 11.0],

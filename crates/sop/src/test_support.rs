@@ -52,10 +52,10 @@ pub fn fixture() -> geometry::T {
             y.push(f64::from(j));
         }
     }
-    let positions = packed::Float3::of_owned(x, y, vec![0.0; 9]).unwrap();
+    let positions = packed::float3::of_owned(x, y, vec![0.0; 9]).unwrap();
     let vertex_points = vec![0, 1, 4, 3, 1, 2, 5, 4, 3, 4, 7, 6, 4, 5, 8, 7];
     let topology = topology::polygons_owned(9, vertex_points, vec![0, 4, 8, 12, 16]).unwrap();
-    let normals = packed::Float3::of_owned(vec![0.0; 9], vec![0.0; 9], vec![1.0; 9]).unwrap();
+    let normals = packed::float3::of_owned(vec![0.0; 9], vec![0.0; 9], vec![1.0; 9]).unwrap();
     let n = attribute::create_key_owned(&attribute::normal(attribute::Owner::Point), attribute::Storage::Float3(normals)).unwrap();
     geometry::create(positions, topology, Some(vec![n]), None, None).unwrap()
 }
@@ -123,8 +123,8 @@ pub fn count(calls: &Arc<AtomicI64>) -> i64 {
 
 /// Positions and attribute payload identity: two geometries with equal planes and attributes.
 pub fn same_geometry(a: &geometry::T, b: &geometry::T) -> bool {
-    let pa = packed::Float3::View::view(geometry::positions(a)).unwrap();
-    let pb = packed::Float3::View::view(geometry::positions(b)).unwrap();
+    let pa = packed::float3::view::view(geometry::positions(a)).unwrap();
+    let pb = packed::float3::view::view(geometry::positions(b)).unwrap();
     let attrs = |g: &geometry::T| -> Vec<(String, i64, i64)> {
         geometry::attributes(g)
             .iter()

@@ -1,7 +1,7 @@
 //! Packed shapes through `Scene.shapes`: layout, finite bounds and owned commands. (The native
 //! circle/alpha/transform parity is `gpu_rays_primitives` in tests/cases/gpu_rays.rs.)
 use crate::path as path_mod;
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use rays_math::color;
 use scene_command::render_ir::{self, Command};
 use scene_command::ui_batch;
@@ -24,7 +24,7 @@ fn shapes_layout_finite_bounds_owned_commands() {
         let b = batch(count);
         assert_eq!(b.count(), count, "shape count");
         assert_eq!(b.instances().len() as i64, 64 * count, "shape layout");
-        let commands = Layer::commands(None, &[scene::shapes(b.clone())]).expect("commands");
+        let commands = layer::commands(None, &[scene::shapes(b.clone())]).expect("commands");
         assert_eq!(commands.len(), 1, "one packed command");
         assert!(b.valid_shapes(), "packed validation");
     }

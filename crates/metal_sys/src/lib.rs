@@ -75,6 +75,7 @@ impl Handle {
     pub(crate) unsafe fn from_native(pointer: *mut NativeHandle) -> Result<Self, Error> {
         let pointer = NonNull::new(pointer).ok_or(Error::InvalidHandle)?;
         LIVE_HANDLES.fetch_add(1, Ordering::Relaxed);
+        if std::env::var_os("RAYS_LEAK_TRACE").is_some() { TRACE.lock().unwrap().push((pointer.as_ptr() as usize, format!("{}", std::backtrace::Backtrace::force_capture()))); }
         TOTAL_CREATED.fetch_add(1, Ordering::Relaxed);
         Ok(Self(Arc::new(Inner(pointer))))
     }
@@ -91,6 +92,7 @@ pub fn drain_releases() -> Result<usize, Error> {
         let pending = std::mem::take(&mut *PENDING_RELEASES.lock().unwrap_or_else(|poison| poison.into_inner()));
         let count = pending.len();
         for pointer in pending {
+            TRACE.lock().unwrap().retain(|(p, _)| *p != pointer);
             unsafe { rays_metal_handle_destroy(pointer as *mut NativeHandle); }
             LIVE_HANDLES.fetch_sub(1, Ordering::Relaxed);
             TOTAL_RELEASED.fetch_add(1, Ordering::Relaxed);
@@ -102,6 +104,7 @@ pub fn drain_releases() -> Result<usize, Error> {
 }
 
 pub fn handle_stats() -> HandleStats {
+    if std::env::var_os("RAYS_LEAK_TRACE").is_some() { let t = TRACE.lock().unwrap(); eprintln!("LIVE {}", t.len()); for (_, b) in t.iter() { eprintln!("LEAK {}", b.lines().filter(|l| !l.trim_start().starts_with("at ")).take(25).collect::<Vec<_>>().join("\n")); } }
     HandleStats {
         pending: PENDING_RELEASES.lock().unwrap_or_else(|poison| poison.into_inner()).len(),
         live_handles: LIVE_HANDLES.load(Ordering::Relaxed),
@@ -488,3 +491,7 @@ pub mod native {
         fn rays_metal_device_supports_sampler_reduction(device: *mut NativeHandle, output: *mut u8, message: *mut *const c_char) -> i32;
     }
 }
+
+// TEMP leak trace
+pub static TRACE_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static TRACE: std::sync::Mutex<Vec<(usize, String)>> = std::sync::Mutex::new(Vec::new());

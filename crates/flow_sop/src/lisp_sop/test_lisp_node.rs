@@ -220,7 +220,7 @@ fn rdk_ok<A>(r: Result<A, rdk_core::error::T>) -> A {
 }
 
 fn position(g: &geo::T, i: i64) -> (f64, f64, f64) {
-    rdk_core::packed::Float3::get(geo::positions(g), i).unwrap()
+    rdk_core::packed::float3::get(geo::positions(g), i).unwrap()
 }
 
 fn field_names(n: &node::T) -> Vec<String> {
@@ -272,19 +272,19 @@ fn materialized_writes_own_storage_expand_instances_and_report_errors() {
             let storage = |name: &str| rdk_core::attribute::storage(&geo::find_attribute(rdk_core::attribute::Owner::Point, name, &geometry).unwrap()).unwrap();
             match storage("copied") {
                 rdk_core::attribute::Storage::Float3(data) => {
-                    let data_x = rdk_ok(rdk_core::packed::Float3::View::view(&data)).x;
-                    let position_x = rdk_ok(rdk_core::packed::Float3::View::view(geo::positions(&geometry))).x;
+                    let data_x = rdk_ok(rdk_core::packed::float3::view::view(&data)).x;
+                    let position_x = rdk_ok(rdk_core::packed::float3::view::view(geo::positions(&geometry))).x;
                     assert!(!Arc::ptr_eq(&data_x, &position_x), "Computed write borrowed its input storage");
                     for i in 0..geo::point_count(&geometry) {
                         let (x, y, z) = position(&expected, i);
-                        assert!(rdk_core::packed::Float3::get(&data, i).unwrap() == (x + 0.5, y + -0.0, z + 0.0), "Computed write changed numeric values");
+                        assert!(rdk_core::packed::float3::get(&data, i).unwrap() == (x + 0.5, y + -0.0, z + 0.0), "Computed write changed numeric values");
                     }
                 }
                 _ => panic!("Materialized write lost tuple storage"),
             }
             match storage("rows") {
                 rdk_core::attribute::Storage::FloatArray(data) => {
-                    let v = rdk_core::packed::FloatArray::View::view(&data);
+                    let v = rdk_core::packed::float_array::view::view(&data);
                     assert!(*v.offsets == [0i64, 1, 2, 3, 4] && *v.values == [0.25f64; 4], "Materialized CSR write changed row layout");
                 }
                 _ => panic!("Materialized write lost CSR storage"),
@@ -404,13 +404,13 @@ fn parameter_validation_rejects_without_changing_the_node() {
 #[test]
 fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     use rdk_core::attribute::{Owner, Storage};
-    let positions = rdk_ok(rdk_core::packed::Float3::of_owned(vec![-1.0, 0.0, 1.0], vec![-0.0, 0.0, 0.0], vec![2.0, 3.0, 4.0]));
+    let positions = rdk_ok(rdk_core::packed::float3::of_owned(vec![-1.0, 0.0, 1.0], vec![-0.0, 0.0, 0.0], vec![2.0, 3.0, 4.0]));
     let topology = rdk_ok(rdk_core::topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]));
     let attributes: Vec<rdk_core::attribute::T> = vec![
         (Owner::Point, "weight", Storage::Float(Arc::new(vec![0.25, 0.5, 0.75]))),
         (Owner::Point, "id", Storage::Int(Arc::new(vec![2, 1, 0]))),
         (Owner::Point, "tag", Storage::Text(Arc::new(vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()].into()))),
-        (Owner::Point, "weights", Storage::FloatArray(rdk_ok(rdk_core::packed::FloatArray::create_owned(vec![0, 0, 2, 3], vec![0.25, 0.5, 0.75])))),
+        (Owner::Point, "weights", Storage::FloatArray(rdk_ok(rdk_core::packed::float_array::create_owned(vec![0, 0, 2, 3], vec![0.25, 0.5, 0.75])))),
         (Owner::Vertex, "uv", Storage::Float3(positions.clone())),
         (Owner::Primitive, "material", Storage::Int(Arc::new(vec![7]))),
     ]
@@ -422,8 +422,8 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     let edge_groups = vec![rdk_ok(rdk_core::edge_group::init(None, &topology, &index, "selected_edges", &|i| i == 0))];
     let original = rdk_ok(geo::create(positions, topology, Some(attributes), Some(groups), Some(edge_groups)));
     let before = geometry_bytes(&original);
-    let p = rdk_ok(rdk_core::packed::Float3::View::view(geo::positions(&original)));
-    let shifted = rdk_ok(rdk_core::packed::Float3::View::of_owned_exn(p.x.iter().map(|x| x + 2.0).collect(), p.y.iter().map(|y| y + 0.0).collect(), p.z.iter().map(|z| z + 0.0).collect()));
+    let p = rdk_ok(rdk_core::packed::float3::view::view(geo::positions(&original)));
+    let shifted = rdk_ok(rdk_core::packed::float3::view::of_owned_exn(p.x.iter().map(|x| x + 2.0).collect(), p.y.iter().map(|y| y + 0.0).collect(), p.z.iter().map(|z| z + 0.0).collect()));
     let expected = geometry_bytes(&rdk_ok(geo::with_positions(shifted, &original)));
     let n = lisp_sop::workspace_node(&[("src".to_owned(), lisp_sop::snapshot(&original))], SHIFT);
     for domains in [1i64, 4] {

@@ -9,7 +9,7 @@ use crate::subdivide_refine::{
     InterfaceChains, PointWeld, PullPlan, TriangleAppend,
 };
 
-pub fn shared_edge_endpoint(index: &topology_index::View::View, left: i64, right: i64) -> i64 {
+pub fn shared_edge_endpoint(index: &topology_index::view::View, left: i64, right: i64) -> i64 {
     let left_a = gi(&index.edge_a, left);
     let left_b = gi(&index.edge_b, left);
     let right_a = gi(&index.edge_a, right);
@@ -24,8 +24,8 @@ pub fn shared_edge_endpoint(index: &topology_index::View::View, left: i64, right
 }
 
 pub fn project_to_source_edge(
-    source_positions: &packed::Float3::View::View,
-    index: &topology_index::View::View,
+    source_positions: &packed::float3::view::View,
+    index: &topology_index::view::View,
     edge: i64,
     x: f64,
     y: f64,
@@ -67,7 +67,7 @@ pub fn project_to_source_edge(
 
 fn ancestry_of(plan: &PullPlan, geometry_value: &geometry::T) -> Result<Vec<i64>, rdk_core::error::T> {
     match geometry::find_attribute(Owner::Vertex, &plan.ancestry_attribute, geometry_value) {
-        Some(found) => match attribute::View::storage(&found)? {
+        Some(found) => match attribute::view::storage(&found)? {
             Storage::Int(values) => Ok(values.to_vec()),
             _ => Err(failm("internal edge ancestry changed storage")),
         },
@@ -82,11 +82,11 @@ pub fn pull_boundary_no_edge_division(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, rdk_core::error::T> {
     let ancestry = ancestry_of(plan, geometry_value)?;
-    let topology_view = topology::View::view(geometry::topology(geometry_value))?;
+    let topology_view = topology::view::view(geometry::topology(geometry_value))?;
     if ancestry.len() != topology_view.vertex_points.len() {
         return Err(failm("internal edge ancestry cardinality mismatch"));
     }
-    let source_index = topology_index::View::view(&plan.source_index);
+    let source_index = topology_index::view::view(&plan.source_index);
     let mut first_edge = vec![-1_i64; topology_view.point_count as usize];
     let mut common_endpoint = vec![-1_i64; topology_view.point_count as usize];
     let mut add_constraint = |point: i64, edge: i64| -> Result<(), rdk_core::error::T> {
@@ -126,8 +126,8 @@ pub fn pull_boundary_no_edge_division(
             }
         }
     }
-    let source_positions = packed::Float3::View::view(&plan.source_positions)?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let source_positions = packed::float3::view::view(&plan.source_positions)?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let grain = grain.unwrap_or(16_384);
     if grain <= 0 {
         return Err(invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()));
@@ -142,7 +142,7 @@ pub fn pull_boundary_no_edge_division(
                 let edge = gi(&first_edge, point);
                 if edge >= 0 {
                     let (px, py, pz) = if gi(&common_endpoint, point) >= 0 {
-                        packed::Float3::get(&plan.source_positions, gi(&common_endpoint, point))?
+                        packed::float3::get(&plan.source_positions, gi(&common_endpoint, point))?
                     } else {
                         project_to_source_edge(
                             &source_positions,
@@ -163,7 +163,7 @@ pub fn pull_boundary_no_edge_division(
             Ok(())
         })?;
     }
-    let positions = packed::Float3::View::of_owned_exn(x, y, z)?;
+    let positions = packed::float3::view::of_owned_exn(x, y, z)?;
     let moved = geometry::with_positions(positions, geometry_value)?;
     Ok(geometry::without_attribute(Owner::Vertex, &plan.ancestry_attribute, &moved))
 }
@@ -218,11 +218,11 @@ pub fn stitch_boundary_no_edge_division(
     refined: &geometry::T,
 ) -> Result<TriangleAppend, rdk_core::error::T> {
     let ancestry = ancestry_of(plan, refined)?;
-    let refined_topology = topology::View::view(geometry::topology(refined))?;
+    let refined_topology = topology::view::view(geometry::topology(refined))?;
     if ancestry.len() != refined_topology.vertex_points.len() {
         return Err(failm("internal edge ancestry cardinality mismatch"));
     }
-    let source_index = topology_index::View::view(&plan.source_index);
+    let source_index = topology_index::view::view(&plan.source_index);
     let source_edges = source_index.edge_a.len();
     let mut counts = vec![0_i64; source_edges];
     for primitive in 0..refined_topology.primitive_kinds.len() as i64 {
@@ -277,9 +277,9 @@ pub fn stitch_boundary_no_edge_division(
     let refined_point_offset =
         checked_add("stitch refined point offset", geometry::point_count(unselected), free_points)?;
     let refined_vertex_offset = geometry::vertex_count(unselected);
-    let unselected_topology = topology::View::view(geometry::topology(unselected))?;
+    let unselected_topology = topology::view::view(geometry::topology(unselected))?;
     let unselected_index_value = topology_index::create(cancel_token, geometry::topology(unselected))?;
-    let unselected_index = topology_index::View::view(&unselected_index_value);
+    let unselected_index = topology_index::view::view(&unselected_index_value);
     let mut next_point = vec![-1_i64; refined_topology.point_count as usize];
     let mut record_of_start = vec![-1_i64; refined_topology.point_count as usize];
     let mut incoming = vec![0u8; refined_topology.point_count as usize];
@@ -422,8 +422,8 @@ pub fn stitch_boundary_divide_edges(
     refined: &geometry::T,
 ) -> Result<TriangleAppend, rdk_core::error::T> {
     let source_edges = chains.edge_offsets.len() as i64 - 1;
-    let coarse_positions = packed::Float3::View::view(geometry::positions(&divided.geometry))?;
-    let refined_positions = packed::Float3::View::view(geometry::positions(refined))?;
+    let coarse_positions = packed::float3::view::view(geometry::positions(&divided.geometry))?;
+    let refined_positions = packed::float3::view::view(geometry::positions(refined))?;
     let coincident = |at: i64| -> bool {
         if consistent_topology {
             false
@@ -534,8 +534,8 @@ pub fn make_boundary_weld(
     }
     let mut representative: Vec<i64> = (0..total_points).collect();
     let mut removed = vec![0u8; total_points as usize];
-    let coarse_positions = packed::Float3::View::view(geometry::positions(&divided.geometry))?;
-    let refined_positions = packed::Float3::View::view(geometry::positions(refined))?;
+    let coarse_positions = packed::float3::view::view(geometry::positions(&divided.geometry))?;
+    let refined_positions = packed::float3::view::view(geometry::positions(refined))?;
     let coincident = |coarse: i64, refined_point: i64| {
         gf(&coarse_positions.x, coarse) == gf(&refined_positions.x, refined_point)
             && gf(&coarse_positions.y, coarse) == gf(&refined_positions.y, refined_point)

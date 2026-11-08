@@ -34,7 +34,7 @@ fn frame_at(count: i64, height: i64) -> frame::Frame {
 
 /// The second frame of a fresh UI with the pointer parked away from every widget, rendered
 /// `SCALE` pixels a point.
-fn render(height: i64, build: &mut dyn FnMut(&mut Ui)) -> canvas::t {
+fn render(height: i64, build: &mut dyn FnMut(&mut Ui)) -> canvas::Canvas {
     let mut ui = Ui::create(Platform::Apple, None, Some(font_path()));
     for count in 0..2 {
         ui.frame(&frame_at(count, height), build);
@@ -48,7 +48,7 @@ fn render(height: i64, build: &mut dyn FnMut(&mut Ui)) -> canvas::t {
 }
 
 /// Compare `canvas_` with the golden; a drift names the pixels that differ.
-fn check(name: &str, golden: &str, canvas_: canvas::t) {
+fn check(name: &str, golden: &str, canvas_: canvas::Canvas) {
     let actual = canvas::to_image(&canvas_).expect("to_image");
     let golden_image = image::load(&golden_path(golden)).expect("golden");
     let (gd, ad) = (image::dimensions(&golden_image), image::dimensions(&actual));
@@ -197,10 +197,10 @@ fn gpu_parity_commands() {
                 f.pixel_scale = (density, density);
                 ui.frame(&f, &mut |ui| build(ui));
             }
-            let staged = rays::scene::Layer::stage_native(WIDTH, *height, &ui.scene(None)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let staged = rays::scene::layer::stage_native(WIDTH, *height, &ui.scene(None)).unwrap_or_else(|e| panic!("{name}: {e}"));
             let mut packets = 0;
             for layer in &staged.layers {
-                if let rays::scene::Layer::native_layer::Ui_layer(batch, _) = layer {
+                if let rays::scene::layer::native_layer::Ui_layer(batch, _) = layer {
                     assert!(batch.count() > 0, "{name}: empty UI batch");
                     for b in batch.batches() {
                         assert!(b.first >= 0 && b.count > 0, "{name}: malformed batch");

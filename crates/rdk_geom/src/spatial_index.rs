@@ -14,7 +14,7 @@ use crate::point_grid::{float_max, float_min};
 const DEFAULT_GRAIN: i64 = 16_384;
 
 pub struct T {
-    positions: packed::Float3::View::View,
+    positions: packed::float3::view::View,
     order: Vec<i64>,
     axes: Vec<i64>,
 }
@@ -48,14 +48,14 @@ pub fn create(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     points: Option<&group::T>,
-    source: &packed::Float3::T,
+    source: &packed::float3::T,
 ) -> Result<T, error::T> {
     let grain = grain.unwrap_or(DEFAULT_GRAIN);
     if grain <= 0 {
         return Err(fail(Code::InvalidParameter, "grain must be positive"));
     }
-    let positions = packed::Float3::View::view(source)?;
-    let count = packed::Float3::length(source);
+    let positions = packed::float3::view::view(source)?;
+    let count = packed::float3::length(source);
     let mut order: Vec<i64> = match points {
         None => (0..count).collect(),
         Some(selection) => {
@@ -110,7 +110,7 @@ pub fn create(
 /// Median-partitions `order` (a slice of the whole permutation) and recurses on both halves.
 fn partition(
     cancel_value: Option<&cancel::T>,
-    positions: &packed::Float3::View::View,
+    positions: &packed::float3::view::View,
     axes: &[i64],
     grain: i64,
     order: &mut [i64],
@@ -190,7 +190,6 @@ fn check_selection(
 }
 
 /// Query entry points. Each fills disjoint per-query output slices in parallel.
-#[allow(non_snake_case)]
 pub mod view {
     use std::sync::Mutex;
 
@@ -222,7 +221,7 @@ pub mod view {
     #[allow(clippy::too_many_arguments, clippy::neg_cmp_op_on_partial_ord)]
     fn visit(
         tree: &T,
-        queries: &packed::Float3::View::View,
+        queries: &packed::float3::view::View,
         q: &KQuery,
         indices: &mut [i64],
         distances: &mut [f64],
@@ -303,7 +302,7 @@ pub mod view {
         points: Option<&group::T>,
         grain: i64,
         value: &T,
-        queries: &packed::Float3::T,
+        queries: &packed::float3::T,
         max_distance_squared: f64,
         capacity: i64,
         indices: &mut [i64],
@@ -314,7 +313,7 @@ pub mod view {
         if grain <= 0 {
             return Err(invalid(OP, "grain must be positive"));
         }
-        let query_count = packed::Float3::length(queries);
+        let query_count = packed::float3::length(queries);
         check_selection(OP, points, query_count)?;
         let len = |slice_len: usize| i64::try_from(slice_len).unwrap_or(i64::MAX);
         let fits = capacity > 0
@@ -326,7 +325,7 @@ pub mod view {
             return Err(invalid(OP, "invalid output storage"));
         }
         let needed = (query_count * capacity) as usize;
-        let positions = packed::Float3::View::view(queries)?;
+        let positions = packed::float3::view::view(queries)?;
         if query_count > 0 {
             let cap = capacity as usize;
             let stride = (grain as usize).saturating_mul(cap);
@@ -383,7 +382,7 @@ pub mod view {
     /// queries keep their slot.
     fn visit_distance_squared(
         tree: &T,
-        queries: &packed::Float3::View::View,
+        queries: &packed::float3::view::View,
         query: usize,
         maximum_squared: f64,
         best: &mut f64,
@@ -428,7 +427,7 @@ pub mod view {
         points: Option<&group::T>,
         grain: i64,
         value: &T,
-        queries: &packed::Float3::T,
+        queries: &packed::float3::T,
         max_distance_squared: f64,
         distances_squared: &mut [f64],
     ) -> Result<(), error::T> {
@@ -436,12 +435,12 @@ pub mod view {
         if grain <= 0 {
             return Err(invalid(OP, "grain must be positive"));
         }
-        let query_count = packed::Float3::length(queries);
+        let query_count = packed::float3::length(queries);
         check_selection(OP, points, query_count)?;
         if (distances_squared.len() as i64) < query_count {
             return Err(invalid(OP, "output array is too short"));
         }
-        let positions = packed::Float3::View::view(queries)?;
+        let positions = packed::float3::view::view(queries)?;
         if query_count > 0 {
             let chunks: Vec<Mutex<&mut [f64]>> = distances_squared[..query_count as usize]
                 .chunks_mut(grain as usize)
@@ -487,12 +486,12 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    fn points(x: &[f64], y: &[f64], z: &[f64]) -> packed::Float3::T {
-        packed::Float3::of_owned(x.to_vec(), y.to_vec(), z.to_vec()).unwrap()
+    fn points(x: &[f64], y: &[f64], z: &[f64]) -> packed::float3::T {
+        packed::float3::of_owned(x.to_vec(), y.to_vec(), z.to_vec()).unwrap()
     }
 
     /// Builds with `domains` workers, as in the OCaml `Parallel.run ~domains`.
-    fn build(domains: i64, source: &packed::Float3::T, grain: i64) -> T {
+    fn build(domains: i64, source: &packed::float3::T, grain: i64) -> T {
         let slot: Mutex<Option<T>> = Mutex::new(None);
         parallel::run_unit(Some(domains), &|| {
             let built = create(None, Some(grain), None, source).map_err(|e| error::to_string(&e))?;

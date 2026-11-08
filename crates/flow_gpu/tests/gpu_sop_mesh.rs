@@ -8,7 +8,7 @@ use rays_diagnostic::Diagnostic;
 use flow_sop::{lower,value_lane,topology_kernel,topology_kernel_impl};
 use flow_syntax::{syntax,ty::Ty,value::Value};
 use rdk_core::cancel;
-use rdk_core::{geometry as g, packed::Float3, topology};
+use rdk_core::{geometry as g, packed::float3, topology};
 use sop::{context as ctx,edit_graph as edit,node,payload,session};
 use std::sync::{Arc,atomic::{AtomicBool,AtomicUsize,Ordering}};
 fn source(host:bool,case:&str)->String{
@@ -25,10 +25,10 @@ fn source(host:bool,case:&str)->String{
     format!("(workspace resident_mesh (graph g :context sop {body}))")
 }
 fn read(geometry:&g::T,count:i64,case:&str){
-    let t=topology::View::view(g::topology(geometry)).unwrap();let prims=if case=="points"{0}else{count};
+    let t=topology::view::view(g::topology(geometry)).unwrap();let prims=if case=="points"{0}else{count};
     assert_eq!(t.vertex_points.as_slice(),(0..3*prims).map(|i|if case=="cpu"{3*(i/3)+2-i%3}else{i}).collect::<Vec<_>>());
     assert_eq!(t.primitive_offsets.as_slice(),(0..=prims).map(|i|3*i).collect::<Vec<_>>());assert_eq!(t.primitive_kinds.as_ref(),vec![0;prims as usize]);
-    for i in 0..3*count{assert_eq!(Float3::get(g::positions(geometry),i).unwrap(),(i as f64,0.,0.));}
+    for i in 0..3*count{assert_eq!(float3::get(g::positions(geometry),i).unwrap(),(i as f64,0.,0.));}
 }
 /// A residency whose executor is another's; the rest is the base's.
 struct Wrapped{base:Box<dyn Gpu::Residency>,executor:Arc<dyn core_exec::Resident>}
@@ -87,7 +87,7 @@ fn run_case(test:&str,empty_offset:bool){
             let output=result.unwrap_or_else(|d|panic!("{test}/{count}: {}",rays_diagnostic::error_to_string(&d)));let geometry=payload::geometry(&output.payload).unwrap();replays+=(closes.load(Ordering::SeqCst)-closed).saturating_sub(1);let stats=h::stats(&host);
             assert_eq!(stats.payload_readback_bytes-before.payload_readback_bytes,if case=="cpu"{19156}else{0},"{test} publication payload");let validation=stats.validation_readback_bytes-before.validation_readback_bytes;let expected=if count==0{0}else if case=="twice"{72}else{36};assert!(validation==expected||(count==0&&validation==36),"{test}/{count} validation={validation}, expected={expected}");
             assert_eq!((g::point_count(&geometry),g::primitive_count(&geometry)),(3*count,if case=="points"{0}else{count}));
-            if count>0&&case!="cpu"{assert!(topology::resident(g::topology(&geometry)));assert!(Float3::resident(g::positions(&geometry)));let(a,b,c)=topology_kernel::resident(&geometry).expect("resident streams");for stream in[a,b,c]{if stream.count>0{let(_,n,valid,unpin)=run::pin_integers(&stream).unwrap();assert_eq!(n,stream.count);assert!(valid());unpin();assert!(!valid());}}assert_eq!(h::stats(&host).payload_readback_bytes,stats.payload_readback_bytes);}
+            if count>0&&case!="cpu"{assert!(topology::resident(g::topology(&geometry)));assert!(float3::resident(g::positions(&geometry)));let(a,b,c)=topology_kernel::resident(&geometry).expect("resident streams");for stream in[a,b,c]{if stream.count>0{let(_,n,valid,unpin)=run::pin_integers(&stream).unwrap();assert_eq!(n,stream.count);assert!(valid());unpin();assert!(!valid());}}assert_eq!(h::stats(&host).payload_readback_bytes,stats.payload_readback_bytes);}
             held.push((geometry,count));
         }
     }
@@ -114,7 +114,7 @@ fn static_topology_stays_resident() {
         let context = ctx::create(ctx::Options { time: Some(frame as f64), domains: Some(1), ..Default::default() }).unwrap();
         let out = session::cook(&mut session, Some(0), &context, &root).unwrap();
         let geometry = payload::geometry(&out.payload).unwrap();
-        assert!(Float3::resident(g::positions(&geometry)));
+        assert!(float3::resident(g::positions(&geometry)));
         assert!(topology_kernel::resident(&geometry).is_some());
         if let Some(old) = &previous {
             assert_eq!(topology::data_id(g::topology(old)), topology::data_id(g::topology(&geometry)), "animated points rebuilt immutable topology");

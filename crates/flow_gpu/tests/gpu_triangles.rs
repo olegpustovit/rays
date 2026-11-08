@@ -6,7 +6,7 @@ mod common;
 use flow_gpu::{host, pipelines, run};
 use ogpu_core::backend as b;
 use ogpu_core::types::{BufferDescriptor, BufferUsage};
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use rdk_core::{error, geometry, topology};
 use rdk_ops::triangulate;
 use std::cell::Cell;
@@ -103,11 +103,11 @@ fn run_case(lease: &renderer::renderer::Gpu, pipes: &pipelines::T, host_: Option
     if c.accept {
         let count = result.expect("accepted");
         assert_eq!(reads.get(), 4);
-        let positions = Float3::of_owned(xs, ys, zs).expect("positions");
+        let positions = float3::of_owned(xs, ys, zs).expect("positions");
         let top = topology::polygons_owned(point_count as i64, vertices, offsets_i).expect("topology");
         let geo = geometry::create(positions, top, None, None, None).expect("geometry");
         let expected = match triangulate::run(&triangulate::Params { cancel: None, grain: None, primitives: None }, &geo) {
-            Ok(g) => topology::View::view(geometry::topology(&g)).expect("view").vertex_points.to_vec(),
+            Ok(g) => topology::view::view(geometry::topology(&g)).expect("view").vertex_points.to_vec(),
             Err(e) => panic!("{}", error::to_string(&e)),
         };
         let actual = b::read_buffer(&out, 0, count * 4).unwrap();

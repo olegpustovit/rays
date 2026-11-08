@@ -80,7 +80,7 @@ fn device_color(g: &geometry::T) -> bool {
 // kernel; unsupported layouts take the host bridge.
 fn device_refusal(g: &geometry::T) -> Option<String> {
     let topo = geometry::topology(g);
-    if !packed::Float3::resident(geometry::positions(g)) {
+    if !packed::float3::resident(geometry::positions(g)) {
         Some("Positions are on the CPU.".to_owned())
     } else if geometry::point_count(g) == 0 {
         Some("Geometry is empty.".to_owned())
@@ -130,16 +130,16 @@ pub fn of_geometry(instances: Option<Vec<mat4::T>>, g: &geometry::T) -> Result<T
 
 /// A primitive-owned storage the material channels read, or `None` when absent.
 fn primitive_storage(g: &geometry::T, name: &str) -> Option<Storage> {
-    geometry::find_attribute(Owner::Primitive, name, g).map(|a| attribute::View::storage(&a).cloned().expect("attribute storage"))
+    geometry::find_attribute(Owner::Primitive, name, g).map(|a| attribute::view::storage(&a).cloned().expect("attribute storage"))
 }
 
 fn valid(x: f64) -> bool {
     x.is_finite() && (0.0..=1.0).contains(&x)
 }
 
-fn valid_tuple(a: &Option<packed::Float4::T>) -> bool {
+fn valid_tuple(a: &Option<packed::float4::T>) -> bool {
     a.as_ref().is_none_or(|a| {
-        let v = packed::Float4::View::view(a);
+        let v = packed::float4::view::view(a);
         v.x.iter().all(|x| valid(*x)) && v.y.iter().all(|x| valid(*x)) && v.z.iter().all(|x| valid(*x))
     })
 }
@@ -208,14 +208,14 @@ fn of_host(instances: Option<Vec<mat4::T>>, reason: String, g: &geometry::T) -> 
             let (er, eg, eb) = match &emission {
                 None => (0.0, 0.0, 0.0),
                 Some(a) => {
-                    let (r, g, b, _) = packed::Float4::get(a, primitive).map_err(text)?;
+                    let (r, g, b, _) = packed::float4::get(a, primitive).map_err(text)?;
                     (r, g, b)
                 }
             };
             let (r, g, b) = match &color_ {
                 None => (1.0, 1.0, 1.0),
                 Some(a) => {
-                    let (r, g, b, _) = packed::Float4::get(a, primitive).map_err(text)?;
+                    let (r, g, b, _) = packed::float4::get(a, primitive).map_err(text)?;
                     (r, g, b)
                 }
             };
@@ -283,7 +283,7 @@ pub fn scene3_result(
             match device.and_then(|device| device(g)) {
                 Some((key, normals, device_index_count, device_color_width, keep)) => {
                     let indices = if mode == mesh::mode::Triangles && device_index_count.is_none() {
-                        Some(topology::View::view(geometry::topology(g)).map_err(text)?.vertex_points)
+                        Some(topology::view::view(geometry::topology(g)).map_err(text)?.vertex_points)
                     } else {
                         None
                     };

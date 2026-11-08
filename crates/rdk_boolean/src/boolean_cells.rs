@@ -81,7 +81,6 @@ pub fn right_winding(value: &T, shell: i64) -> i64 {
     value.right[shell as usize]
 }
 
-#[allow(non_snake_case)]
 pub mod view {
     use super::*;
 
@@ -856,7 +855,7 @@ mod tests {
         let z = points.iter().map(|p| p.2).collect();
         let offsets: Vec<i64> = (0..=(triangles.len() as i64 / 3)).map(|p| p * 3).collect();
         let topo = topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }
 

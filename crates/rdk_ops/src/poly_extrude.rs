@@ -177,8 +177,8 @@ fn run_default(
         return Err(fail("Rdk_mesh.Poly_extrude.poly_extrude: distance must be finite"));
     }
     let source_topology = geometry::topology(geometry_value);
-    let view = topology::View::view(source_topology)?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let view = topology::view::view(source_topology)?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let source_vertices = geometry::vertex_count(geometry_value) as usize;
     let source_primitives = geometry::primitive_count(geometry_value) as usize;
     for primitive in 0..source_primitives {
@@ -298,8 +298,8 @@ fn run_default(
         })?;
     }
     primitive_offsets[output_primitives] = output_vertices as i64;
-    let output_positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
-    let output_topology = topology::View::create_validated_owned(
+    let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
+    let output_topology = topology::view::create_validated_owned(
         output_points as i64,
         vertex_points,
         primitive_offsets,
@@ -390,7 +390,7 @@ fn run_general(
         }
         _ => {}
     }
-    let topology_view = topology::View::view(source_topology)?;
+    let topology_view = topology::view::view(source_topology)?;
     let source_points = topology_view.point_count as usize;
     let source_primitives = topology_view.primitive_kinds.len();
     let selected: Vec<bool> = (0..source_primitives)
@@ -411,7 +411,7 @@ fn run_general(
         geometry_value,
     )?;
     let index = topology_index::create(cancel_ref, source_topology)?;
-    let index_view = topology_index::View::view(&index);
+    let index_view = topology_index::view::view(&index);
     let mut primitive_component = vec![-1i64; source_primitives];
     let component_count: i64 = match divide {
         Divide::ExtrudeIndividual => {
@@ -635,7 +635,7 @@ fn run_general(
     let output_points = source_points + if need_new_points { association_count * divisions_u } else { 0 };
     let output_primitives = base_primitives + front_primitives + side_primitives;
     let output_vertices = base_vertices + front_vertices + side_vertices;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let (mut px, mut py, mut pz) = (vec![0.0f64; output_points], vec![0.0f64; output_points], vec![0.0f64; output_points]);
     let mut point_map = vec![0i64; output_points];
     for point in 0..source_points {
@@ -811,8 +811,8 @@ fn run_general(
             Ok(())
         })?;
     }
-    let output_positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
-    let output_topology = topology::View::create_validated_owned(
+    let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
+    let output_topology = topology::view::create_validated_owned(
         output_points as i64,
         vertex_points,
         primitive_offsets,
@@ -843,7 +843,7 @@ fn run_general(
     let mut edge_groups: Vec<edge_group::T> = Vec::new();
     if needs_edge_output {
         let target_edges =
-            topology_edge_lookup::create(cancel_ref, &topology::View::view(&output_topology)?)?;
+            topology_edge_lookup::create(cancel_ref, &topology::view::view(&output_topology)?)?;
         let edge_count = topology_edge_lookup::count(&target_edges) as usize;
         let make_bits = || vec![0u8; edge_count.div_ceil(8)];
         let add_edge = |bits: &mut Vec<u8>, a: i64, b: i64| {

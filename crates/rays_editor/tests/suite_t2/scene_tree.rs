@@ -94,7 +94,7 @@ fn domains_agree() {
         let e = editor::update(e, &tframe((450, 320), vec![], &[], &[], 0));
         let g = editor::prepared(&e).expect("the domain-count cook did not finish");
         editor::close(&e);
-        let v = rdk_core::packed::Float3::View::view(rdk_core::geometry::positions(&g)).unwrap();
+        let v = rdk_core::packed::float3::view::view(rdk_core::geometry::positions(&g)).unwrap();
         (0..v.x.len()).map(|i| format!("{:x} {:x} {:x}", v.x[i].to_bits(), v.y[i].to_bits(), v.z[i].to_bits())).collect::<Vec<_>>().join(",")
     };
     assert!(digest(1) == digest(4), "one domain and four domains cooked different geometry");

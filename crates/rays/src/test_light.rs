@@ -1,7 +1,7 @@
 use crate::camera;
 use crate::light;
 use crate::mesh;
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use crate::scene3 as d3;
 use rays_math::color;
 use rays_math::vec3;
@@ -27,7 +27,7 @@ fn lights(samples: i64) -> Vec<light::Light> {
 fn stage(lights: Vec<light::Light>) -> Vec<u8> {
     let cam = camera::perspective(Some(1.), Some(0.1), Some(100.), vec3::create(0., 0., 10.), vec3::zero()).expect("camera");
     let scene3 = d3::create(Some(lights), None, None, None, vec![d3::mesh(None, None, None, None, None, triangle())]).expect("scene3");
-    let staged = Layer::stage_native(320, 240, &[scene::view3d(None, &cam, scene3)]).expect("stage");
+    let staged = layer::stage_native(320, 240, &[scene::view3d(None, &cam, scene3)]).expect("stage");
     let bytes = staged.scene3[0].entries[0].draw.state.transform_uniforms.clone().expect("uniforms");
     let copy = bytes.to_vec();
     copy

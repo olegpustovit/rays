@@ -572,7 +572,7 @@ type Inspected = (Option<Panel_result>, Vec<change>, Vec<(String, Value)>, bool,
 pub fn draw_inspectors<'a>(
     value: impl Into<ModelView<'a>>,
     workspace: &shell,
-    image: &dyn Fn(i64) -> Option<rays::image::t>,
+    image: &dyn Fn(i64) -> Option<rays::image::Image>,
     camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
     inspector_visible: bool,
     unchanged: &editor_document::settings::T,
@@ -928,7 +928,7 @@ pub fn update_frame(
     frame_: &frame::Frame,
     gpu: Option<&flow_ir::flow_ir::Gpu::Config>,
     pump: Option<&dyn Fn()>,
-    image: &dyn Fn(i64) -> Option<rays::image::t>,
+    image: &dyn Fn(i64) -> Option<rays::image::Image>,
     host_events: Vec<Event>,
 ) -> update {
     let carrying = value.carry.is_some();
@@ -1476,7 +1476,7 @@ pub fn update(
     view_state: Rc<dyn Fn(Option<&Panel_result>) -> Syntax>,
     frame_: &frame::Frame,
     gpu: Option<&flow_ir::flow_ir::Gpu::Config>,
-    image: Option<&dyn Fn(i64) -> Option<rays::image::t>>,
+    image: Option<&dyn Fn(i64) -> Option<rays::image::Image>>,
     host_events: Vec<Event>,
     pump: Option<&dyn Fn()>,
 ) -> update {
@@ -1485,7 +1485,7 @@ pub fn update(
     let before = value.doc.clone();
     let (frame_after, carry_changed) = carry_step(value, text_focus, frame_);
     let no_image = |_: i64| None;
-    let image: &dyn Fn(i64) -> Option<rays::image::t> = match image {
+    let image: &dyn Fn(i64) -> Option<rays::image::Image> = match image {
         Some(i) => i,
         None => &no_image,
     };

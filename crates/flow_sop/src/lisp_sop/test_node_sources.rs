@@ -127,7 +127,7 @@ fn a_helper_seed_read_is_a_cache_dependency_only_while_reachable() {
     fn cook_at(s: &mut session::T, n: &sop::node::T, seed: i64) -> (f64, f64, f64) {
         let context = sop::context::create(sop::context::Options { seed: Some(seed), ..Default::default() }).unwrap();
         let g = cook(s, &context, n);
-        rdk_core::packed::Float3::get(rdk_core::geometry::positions(&g), 0).expect("a point")
+        rdk_core::packed::float3::get(rdk_core::geometry::positions(&g), 0).expect("a point")
     }
     let mut s = session::create(16, 1_000_000).unwrap();
     let first = cook_at(&mut s, &node, 3);

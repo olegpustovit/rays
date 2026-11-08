@@ -7,7 +7,7 @@ use crate::frame;
 use crate::light;
 use crate::material;
 use crate::path;
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use crate::sketch;
 use crate::texture;
 use input::{Event, Key, MouseButton};
@@ -131,8 +131,8 @@ fn frame_facts_scene_lowering_path_texture() {
         scene::rect((0, 0), 4, 3, Some(color::red()), None).expect("rect"),
         scene::text_input_region((1, 1), 2, 1, Some(true), Some(1)).expect("region"),
     ];
-    let ir = Layer::to_ir(&s).expect("to_ir");
-    check(render_ir::commands_readonly(&ir).len() == 2 && Layer::text_regions(&s) == vec![(1, 1, 2, 1, true, 1)], "scene lowering");
+    let ir = layer::to_ir(&s).expect("to_ir");
+    check(render_ir::commands_readonly(&ir).len() == 2 && layer::text_regions(&s) == vec![(1, 1, 2, 1, true, 1)], "scene lowering");
     check(scene::text_input_region((0, 0), 1, 1, None, Some(-1)).is_err(), "negative IME cursor accepted");
     let p = |x: f64, y: f64| Point { x, y };
     let open_path = path::of_commands(&[Command::MoveTo(p(0.25, 0.5)), Command::LineTo(p(4.5, 0.5)), Command::LineTo(p(4.5, 4.75)), Command::LineTo(p(0.25, 4.75))]);
@@ -159,7 +159,7 @@ fn frame_facts_scene_lowering_path_texture() {
         .expect("texture"),
     )
     .expect("mipmaps");
-    check(texture::Private::levels(&tex).expect("levels").len() == 2, "Texture mipmaps");
+    check(texture::private::levels(&tex).expect("levels").len() == 2, "Texture mipmaps");
     check(texture::size(&tex) == Ok((2, 2)) && texture::pixels(&tex).expect("pixels")[0] == red, "Texture upper-left texel");
 }
 
@@ -167,26 +167,26 @@ fn frame_facts_scene_lowering_path_texture() {
 /// `tests/window_resources.rs`, which needs a font).
 #[test]
 fn scene_staging_order_and_layer_breaks() {
-    let context = Layer::create_cache_context();
-    Layer::with_cache_context(&context, &mut || {
+    let context = layer::create_cache_context();
+    layer::with_cache_context(&context, &mut || {
         let scene2_only = vec![
             scene::clear(color::black()),
             scene::rect((1, 2), 8, 6, Some(color::red()), None).expect("rect"),
             scene::rect((2, 3), 1, 1, Some(color::white()), None).expect("rect"),
         ];
-        let staged = Layer::stage_native(16, 12, &scene2_only).expect("stage");
+        let staged = layer::stage_native(16, 12, &scene2_only).expect("stage");
         match staged.layers.as_slice() {
-            [Layer::native_layer::Scene2_layer(ir, _)] => check(Rc::ptr_eq(ir, &staged.scene2), "Scene2-only native staging duplicated its render IR"),
+            [layer::native_layer::Scene2_layer(ir, _)] => check(Rc::ptr_eq(ir, &staged.scene2), "Scene2-only native staging duplicated its render IR"),
             _ => panic!("Scene2-only native staging split one ordered layer"),
         }
         let split = vec![
             scene::rect((1, 2), 8, 6, Some(color::red()), None).expect("rect"),
-            Layer::layer_break(),
+            layer::layer_break(),
             scene::rect((2, 3), 1, 1, Some(color::white()), None).expect("rect"),
         ];
-        let staged_split = Layer::stage_native(16, 12, &split).expect("stage");
+        let staged_split = layer::stage_native(16, 12, &split).expect("stage");
         match staged_split.layers.as_slice() {
-            [Layer::native_layer::Scene2_layer(first, _), Layer::native_layer::Scene2_layer(second, _)] => {
+            [layer::native_layer::Scene2_layer(first, _), layer::native_layer::Scene2_layer(second, _)] => {
                 let (a, b) = (render_ir::commands_readonly(first), render_ir::commands_readonly(second));
                 check(a.len() == 1 && b.len() == 1 && matches!(a[0], render_ir::Command::Geometry(_)) && matches!(b[0], render_ir::Command::Geometry(_)), "Scene2 layer break changed command ordering");
             }
@@ -194,7 +194,7 @@ fn scene_staging_order_and_layer_breaks() {
         }
         check(render_ir::commands_readonly(&staged_split.scene2).len() == 2, "Scene2 layer break leaked into compatibility IR");
         let styled = vec![scene::polygon(&[(0, 0), (8, 0), (8, 8)], Some(color::red()), Some(color::white())).expect("polygon")];
-        let (styled_ir, _) = Layer::stage(16, 16, &styled).expect("stage");
+        let (styled_ir, _) = layer::stage(16, 16, &styled).expect("stage");
         let c = render_ir::commands_readonly(&styled_ir);
         check(c.len() == 2 && c.iter().all(|x| matches!(x, render_ir::Command::Geometry(_))), "polygon fill/stroke did not stage two meshes");
     });

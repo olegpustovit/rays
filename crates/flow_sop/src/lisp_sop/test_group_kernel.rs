@@ -12,7 +12,7 @@ use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::geometry as geo;
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use rdk_core::{edge_group, group, topology, topology_index};
 use rdk_core::element_selection as selection;
 use sop::context::Options as ContextOptions;
@@ -64,7 +64,7 @@ fn fixtures() -> Vec<geo::T> {
         .into_iter()
         .map(|t| {
             let n = topology::point_count(&t) as usize;
-            let positions = ok(Float3::View::of_owned_exn((0..n).map(|i| i as f64).collect(), vec![0.0; n], vec![0.0; n]));
+            let positions = ok(float3::view::of_owned_exn((0..n).map(|i| i as f64).collect(), vec![0.0; n], vec![0.0; n]));
             ok(geo::create(positions, t, None, None, None))
         })
         .collect()
@@ -404,7 +404,7 @@ fn captured_geometry_and_group_changes_invalidate_caches() {
 #[test]
 fn live_strict_multi_block_masks_preserve_native_bytes() {
     let n = 5001usize;
-    let geometry = ok(geo::create(ok(Float3::View::of_owned_exn(vec![0.0; n], vec![0.0; n], vec![0.0; n])), ok(topology::empty(n as i64)), None, None, None));
+    let geometry = ok(geo::create(ok(float3::view::of_owned_exn(vec![0.0; n], vec![0.0; n], vec![0.0; n])), ok(topology::empty(n as i64)), None, None, None));
     let node = lisp_sop::workspace_node(
         &[("source".to_owned(), lisp_sop::snapshot(&geometry))],
         r#"(workspace live_groups
@@ -583,7 +583,7 @@ fn ordinary_group_byte_masks_preserve_immutable_storage() {
     for n in [0i64, 1, 7, 8, 9, 63, 64, 65, 32769] {
         let t = ok(topology::create_owned(n, (0..n * 2).map(|i| i / 2).collect(), (0..=n).map(|i| i * 2).collect(), vec![topology::PrimitiveKind::OpenPolyline; n as usize]));
         let nn = n as usize;
-        let geometry = ok(geo::create(ok(Float3::View::of_owned_exn(vec![0.0; nn], vec![0.0; nn], vec![0.0; nn])), t, None, None, None));
+        let geometry = ok(geo::create(ok(float3::view::of_owned_exn(vec![0.0; nn], vec![0.0; nn], vec![0.0; nn])), t, None, None, None));
         for (owner, native_owner) in OWNERS {
             let Some(native_owner) = native_owner else { continue };
             let length = count(&geometry, Some(native_owner));
@@ -600,7 +600,7 @@ fn ordinary_group_byte_masks_preserve_immutable_storage() {
                     ok(group::init(None, native_owner, "bytes", length, &|i| selected(i)))
                 };
                 let geometry = ok(geo::with_group(made.clone(), &geometry));
-                let bits = group::View::bits_view(&made).to_vec();
+                let bits = group::view::bits_view(&made).to_vec();
                 let order = group::ordered_elements(&made);
                 let identity = group::data_id(&made);
                 let expected: Vec<i64> = (0..length).map(|i| i64::from(group::mem(i, &made))).collect();
@@ -622,7 +622,7 @@ fn ordinary_group_byte_masks_preserve_immutable_storage() {
                     .unwrap();
                 }
                 assert!(query(&geometry, owner, "bytes", None) == ints(&expected));
-                assert!(group::View::bits_view(&made) == &bits[..] && group::ordered_elements(&made) == order && group::data_id(&made) == identity);
+                assert!(group::view::bits_view(&made) == &bits[..] && group::ordered_elements(&made) == order && group::data_id(&made) == identity);
             }
         }
     }
@@ -657,7 +657,7 @@ fn promotion_fixture(n: i64) -> geo::T {
         ok(topology::create_owned(n, vec![0, 1, 2, 2, 1, 3, 4, 4, 0], vec![0, 3, 6, 9], vec![topology::PrimitiveKind::Polygon, topology::PrimitiveKind::Polygon, topology::PrimitiveKind::OpenPolyline]))
     };
     let nn = n as usize;
-    ok(geo::create(ok(Float3::View::of_owned_exn((0..nn).map(|i| i as f64).collect(), vec![0.0; nn], vec![0.0; nn])), t, None, None, None))
+    ok(geo::create(ok(float3::view::of_owned_exn((0..nn).map(|i| i as f64).collect(), vec![0.0; nn], vec![0.0; nn])), t, None, None, None))
 }
 
 fn promotion_matches(n: i64, owner: &str, native_owner: Option<group::Owner>, selectors: std::ops::Range<usize>) {

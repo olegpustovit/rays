@@ -173,14 +173,14 @@ pub fn moved(source: &node::T, x: f64) -> node::T {
         vec![source.clone()],
         Arc::new(move |_, inputs| {
             let p = rdk_core::geometry::positions(&inputs[0]);
-            let (xs, ys, zs): (Vec<f64>, Vec<f64>, Vec<f64>) = (0..rdk_core::packed::Float3::length(p)).fold((vec![], vec![], vec![]), |mut a, i| {
-                let (px, py, pz) = rdk_core::packed::Float3::get(p, i).unwrap();
+            let (xs, ys, zs): (Vec<f64>, Vec<f64>, Vec<f64>) = (0..rdk_core::packed::float3::length(p)).fold((vec![], vec![], vec![]), |mut a, i| {
+                let (px, py, pz) = rdk_core::packed::float3::get(p, i).unwrap();
                 a.0.push(px + x);
                 a.1.push(py);
                 a.2.push(pz);
                 a
             });
-            let positions = rdk_core::packed::Float3::of_owned(xs, ys, zs).map_err(|e| format!("{e:?}"))?;
+            let positions = rdk_core::packed::float3::of_owned(xs, ys, zs).map_err(|e| format!("{e:?}"))?;
             rdk_core::geometry::with_positions(positions, &inputs[0]).map_err(|e| format!("{e:?}"))
         }),
     )
@@ -310,7 +310,7 @@ pub fn context_provenance() {
         sop::custom::PlainArgs { dependencies: deps::union(deps::one(deps::Fact::Time), deps::one(deps::Fact::Frame)), ..sop::custom::plain_args("editor_cook_clock") },
         vec![source.clone()],
         Arc::new(|context, inputs| {
-            let positions = rdk_core::packed::Float3::of_owned(vec![sop::context::time(context)], vec![sop::context::frame(context) as f64], vec![0.]).map_err(|e| format!("{e:?}"))?;
+            let positions = rdk_core::packed::float3::of_owned(vec![sop::context::time(context)], vec![sop::context::frame(context) as f64], vec![0.]).map_err(|e| format!("{e:?}"))?;
             rdk_core::geometry::with_positions(positions, &inputs[0]).map_err(|e| format!("{e:?}"))
         }),
     );
@@ -338,7 +338,7 @@ pub fn live_drive() {
     let target = flow_sop::port::Port { node: root, path: "uniform_scale".to_string() };
     let points_of = |p: &cook::prepared| -> Vec<(u64, u64, u64)> {
         let pts = rdk_core::geometry::positions(&p.geometry);
-        (0..rdk_core::packed::Float3::length(pts)).map(|i| rdk_core::packed::Float3::get(pts, i).map(|(x, y, z)| (x.to_bits(), y.to_bits(), z.to_bits())).unwrap()).collect()
+        (0..rdk_core::packed::float3::length(pts)).map(|i| rdk_core::packed::float3::get(pts, i).map(|(x, y, z)| (x.to_bits(), y.to_bits(), z.to_bits())).unwrap()).collect()
     };
     let objects = vec![(1, net.clone(), root)];
     let applied = |rig: &Rig| rig.cook.applied.get(&1).expect("applied").applied.get(&target).cloned();

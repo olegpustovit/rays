@@ -35,7 +35,7 @@ fn clean_length(dx: f64, dy: f64, dz: f64) -> f64 {
     }
 }
 
-fn clean_point_distance(positions: &packed::Float3::View::View, a: usize, b: usize) -> f64 {
+fn clean_point_distance(positions: &packed::float3::view::View, a: usize, b: usize) -> f64 {
     let scale = float_max(
         float_max(positions.x[a].abs(), positions.x[b].abs()),
         float_max(
@@ -58,7 +58,7 @@ fn clean_point_distance(positions: &packed::Float3::View::View, a: usize, b: usi
 
 fn clean_triangle_is_degenerate(
     epsilon: f64,
-    positions: &packed::Float3::View::View,
+    positions: &packed::float3::view::View,
     a: usize,
     b: usize,
     c: usize,
@@ -148,9 +148,9 @@ pub fn delete_degenerate(
         None => true,
         Some(selection) => group::mem(primitive as i64, selection),
     };
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let topology_value = geometry::topology(geometry_value);
-    let view = topology::View::view(topology_value)?;
+    let view = topology::view::view(topology_value)?;
     let mut flags = vec![0u8; primitive_count as usize];
     if topology::all_triangles(topology_value)? {
         support::par_fill(cancel_value, params.grain, &mut flags, &|primitive| {
@@ -268,7 +268,7 @@ fn delete_nan_points(
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let point_count = geometry::point_count(geometry_value);
     if point_count == 0 {
         return Ok(geometry_value.clone());
@@ -284,12 +284,12 @@ fn delete_nan_points(
     delete_flagged(cancel_value, grain, group::Owner::Point, "__clean_nan_points", point_count, &flags, geometry_value)
 }
 
-fn clean_cycle_point(view: &topology::View::View, first: i64, size: i64, start: i64, direction: i64, offset: i64) -> i64 {
+fn clean_cycle_point(view: &topology::view::View, first: i64, size: i64, start: i64, direction: i64, offset: i64) -> i64 {
     let local = (start + direction * offset) % size;
     view.vertex_points[(first + if local < 0 { local + size } else { local }) as usize]
 }
 
-fn clean_minimal_rotation(view: &topology::View::View, first: i64, size: i64, direction: i64) -> i64 {
+fn clean_minimal_rotation(view: &topology::view::View, first: i64, size: i64, direction: i64) -> i64 {
     let mut left = 0i64;
     let mut right = 1i64;
     let mut offset = 0i64;
@@ -330,7 +330,7 @@ fn delete_overlaps_general(
     delete_pairs: bool,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    let view = topology::View::view(geometry::topology(geometry_value))?;
+    let view = topology::view::view(geometry::topology(geometry_value))?;
     let primitive_count = geometry::primitive_count(geometry_value) as usize;
     let (mut sizes, mut starts) = (vec![0i64; primitive_count], vec![0i64; primitive_count]);
     let (mut directions, mut hashes) = (vec![1i64; primitive_count], vec![0i64; primitive_count]);
@@ -443,7 +443,7 @@ fn delete_triangle_overlaps(
     delete_pairs: bool,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    let view = topology::View::view(geometry::topology(geometry_value))?;
+    let view = topology::view::view(geometry::topology(geometry_value))?;
     let primitive_count = geometry::primitive_count(geometry_value);
     if primitive_count == 0 {
         return Ok(geometry_value.clone());

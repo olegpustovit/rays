@@ -105,8 +105,8 @@ fn compute_faces(
 }
 
 fn corner_angle(
-    positions: &packed::Float3::View::View,
-    topology: &topology::View::View,
+    positions: &packed::float3::view::View,
+    topology: &topology::view::View,
     primitive: usize,
     vertex: usize,
 ) -> f64 {
@@ -147,8 +147,8 @@ fn accumulate_points(
     faces: &Faces,
 )-> Result<Planes, error::T> {
     let topology_value = geometry::topology(geometry_value);
-    let topology = topology::View::view(topology_value).map_err(remap_error)?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))
+    let topology = topology::view::view(topology_value).map_err(remap_error)?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))
         .map_err(remap_error)?;
     let count = usize::try_from(topology.point_count)
         .map_err(|_| make_error(Code::InvalidTopology, format!("{OPERATION}: invalid point count")))?;
@@ -227,9 +227,9 @@ fn existing_planes(
     let Some(value) = geometry::find_attribute(owner, name, geometry_value) else {
         return Ok(None);
     };
-    match attribute::View::storage(&value).map_err(remap_error)? {
+    match attribute::view::storage(&value).map_err(remap_error)? {
         attribute::Storage::Float3(values) => {
-            let values = packed::Float3::View::view(values).map_err(remap_error)?;
+            let values = packed::float3::view::view(values).map_err(remap_error)?;
             Ok(Some(Planes {
                 x: values.x.to_vec(),
                 y: values.y.to_vec(),
@@ -334,7 +334,7 @@ fn write_smooth_vertices(
     output: &mut Planes,
     sums: &Planes,
 )-> Result<(), error::T> {
-    let topology = topology::View::view(topology_value).map_err(remap_error)?;
+    let topology = topology::view::view(topology_value).map_err(remap_error)?;
     let count = topology.vertex_points.len();
     let mut errors = vec![-1i64; count.div_ceil(grain)];
     for (range, first) in (0..count).step_by(grain).enumerate() {
@@ -367,11 +367,11 @@ fn write_cusped_vertices(
     faces: &Faces,
     output: &mut Planes,
 )-> Result<(), error::T> {
-    let topology = topology::View::view(geometry::topology(geometry_value))
+    let topology = topology::view::view(geometry::topology(geometry_value))
         .map_err(remap_error)?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))
         .map_err(remap_error)?;
-    let reverse = point_index::View::view(index);
+    let reverse = point_index::view::view(index);
     let count = topology.vertex_points.len();
     let mut angles = if weighting == Weighting::VertexAngle { vec![0.0; count] } else { Vec::new() };
     if weighting == Weighting::VertexAngle {
@@ -449,7 +449,7 @@ fn install(
         .into_iter()
         .filter(|item| attribute::name(item) != name)
         .collect();
-    let packed = packed::Float3::View::of_owned_exn(values.x, values.y, values.z).map_err(remap_error)?;
+    let packed = packed::float3::view::of_owned_exn(values.x, values.y, values.z).map_err(remap_error)?;
     let attribute_value = attribute::create_owned(
         name,
         owner,
@@ -457,7 +457,7 @@ fn install(
     )
     .map_err(remap_error)?;
     attributes.push(attribute_value);
-    geometry::View::with_attributes_owned(attributes, geometry_value).map_err(remap_error)
+    geometry::view::with_attributes_owned(attributes, geometry_value).map_err(remap_error)
 }
 
 fn fast_point_area(
@@ -465,7 +465,7 @@ fn fast_point_area(
     grain: usize,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    let topology = topology::View::view(geometry::topology(geometry_value)).map_err(remap_error)?;
+    let topology = topology::view::view(geometry::topology(geometry_value)).map_err(remap_error)?;
     let ((face_x, face_y, face_z), _) = face_normals::polygon_area_vector(
         cancel_value,
         grain as i64,
@@ -561,7 +561,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
             None => return fast_point_area(cancel_value, grain as usize, geometry_value),
             Some(value) => {
                 if matches!(
-                    attribute::View::storage(&value).map_err(remap_error)?,
+                    attribute::view::storage(&value).map_err(remap_error)?,
                     attribute::Storage::Float3(_)
                 ) {
                     return fast_point_area(cancel_value, grain as usize, geometry_value);
@@ -719,7 +719,7 @@ mod tests {
     fn triangle() -> geometry::T {
         let topology_value =
             topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
-        let positions = packed::Float3::View::of_owned_exn(
+        let positions = packed::float3::view::of_owned_exn(
             vec![0.0, 1.0, 0.0],
             vec![0.0, 0.0, 1.0],
             vec![0.0, 0.0, 0.0],
@@ -730,10 +730,10 @@ mod tests {
 
     fn check_up_normals(owner: attribute::Owner, geometry_value: &geometry::T) {
         let value = geometry::find_attribute(owner, "N", geometry_value).unwrap();
-        let attribute::Storage::Float3(values) = attribute::View::storage(&value).unwrap() else {
+        let attribute::Storage::Float3(values) = attribute::view::storage(&value).unwrap() else {
             panic!("normal output is not float3");
         };
-        let values = packed::Float3::View::view(&values).unwrap();
+        let values = packed::float3::view::view(&values).unwrap();
         for z in values.z.iter() {
             assert_eq!(*z, 1.0);
         }

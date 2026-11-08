@@ -69,7 +69,7 @@ fn primitive_size(offsets: &[i64], primitive: usize) -> i64 {
 }
 
 fn validate(cancel_value: Option<&cancel::T>, value: &geometry::T) -> Result<(), error::T> {
-    let view = topology::View::view(geometry::topology(value))?;
+    let view = topology::view::view(geometry::topology(value))?;
     if view.point_count == 0 || view.primitive_kinds.is_empty() {
         return Err(fail("polygon-curve input must contain at least one primitive"));
     }
@@ -97,7 +97,7 @@ fn validate(cancel_value: Option<&cancel::T>, value: &geometry::T) -> Result<(),
             }
         }
     }
-    let positions = packed::Float3::View::view(geometry::positions(value))?;
+    let positions = packed::float3::view::view(geometry::positions(value))?;
     if positions.x.iter().any(|v| !v.is_finite())
         || positions.y.iter().any(|v| !v.is_finite())
         || positions.z.iter().any(|v| !v.is_finite())
@@ -107,7 +107,7 @@ fn validate(cancel_value: Option<&cancel::T>, value: &geometry::T) -> Result<(),
     Ok(())
 }
 
-fn other_endpoint(index: &topology_index::View::View, point: i64, edge: i64) -> Result<i64, error::T> {
+fn other_endpoint(index: &topology_index::view::View, point: i64, edge: i64) -> Result<i64, error::T> {
     if index.edge_a[edge as usize] == point {
         Ok(index.edge_b[edge as usize])
     } else if index.edge_b[edge as usize] == point {
@@ -122,8 +122,8 @@ fn shared_plan(
     grain: Option<i64>,
     scheme: Scheme,
     value: &geometry::T,
-    view: &topology::View::View,
-    index: &topology_index::View::View,
+    view: &topology::view::View,
+    index: &topology_index::view::View,
 ) -> Result<Plan, error::T> {
     let source_points = view.point_count;
     let source_primitives = view.primitive_kinds.len();
@@ -278,7 +278,7 @@ fn shared_plan(
             Ok(())
         })?;
     }
-    let output_topology = topology::View::create_validated_owned(
+    let output_topology = topology::view::create_validated_owned(
         output_points,
         vertex_points,
         primitive_offsets,
@@ -312,8 +312,8 @@ fn independent_plan(
     grain: Option<i64>,
     scheme: Scheme,
     value: &geometry::T,
-    view: &topology::View::View,
-    index: &topology_index::View::View,
+    view: &topology::view::View,
+    index: &topology_index::view::View,
 ) -> Result<Plan, error::T> {
     let source_primitives = view.primitive_kinds.len();
     let mut output_points = 0_i64;
@@ -429,7 +429,7 @@ fn independent_plan(
             Ok(())
         })?;
     }
-    let output_topology = topology::View::create_validated_owned(
+    let output_topology = topology::view::create_validated_owned(
         output_points,
         vertex_points,
         primitive_offsets,
@@ -466,9 +466,9 @@ fn make_plan(
     value: &geometry::T,
 ) -> Result<Plan, error::T> {
     validate(cancel_value, value)?;
-    let view = topology::View::view(geometry::topology(value))?;
+    let view = topology::view::view(geometry::topology(value))?;
     let index_value = topology_index::create(cancel_value, geometry::topology(value))?;
-    let index = topology_index::View::view(&index_value);
+    let index = topology_index::view::view(&index_value);
     if independent {
         independent_plan(cancel_value, grain, scheme, value, &view, &index)
     } else {
@@ -550,7 +550,7 @@ fn remap_attribute(
 ) -> Result<attribute::T, error::T> {
     let owner = attribute::owner(value);
     let chunk = grain.unwrap_or(16_384);
-    let source = attribute::View::storage(value)?;
+    let source = attribute::view::storage(value)?;
     let storage = match attribute::map_float_planes(source, |plane| numeric(cancel_value, grain, plan, owner, plane))? {
         Some(storage) => storage,
         None => topology_remap::select_storage(cancel_value, chunk, false, &discrete_mapping(plan, owner), source)?,
@@ -611,7 +611,7 @@ fn remap_group(
             .collect(),
         group::Owner::Primitive => plan.primitive_source.clone(),
     };
-    group::View::remap_order(value, &source_of_target, &target)
+    group::view::remap_order(value, &source_of_target, &target)
 }
 
 fn remap_edge_group(
@@ -625,7 +625,7 @@ fn remap_edge_group(
     let Some(output_index) = plan.output_index.as_ref() else {
         return Err(fail("curve edge-group remap is missing its output topology index"));
     };
-    let output_view = topology_index::View::view(output_index);
+    let output_view = topology_index::view::view(output_index);
     let mut builder = edge_group::builder::create(&plan.output_topology, output_index, edge_group::name(value))?;
     for vertex in 0..plan.source_edge_of_output_vertex.len() {
         cancel::poll(cancel_value, vertex as i64, 16_383)?;
@@ -649,8 +649,8 @@ fn once(
     value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     let plan = make_plan(cancel_value, grain, independent, scheme, value)?;
-    let source_positions = packed::Float3::View::view(geometry::positions(value))?;
-    let positions = packed::Float3::View::of_owned_exn(
+    let source_positions = packed::float3::view::view(geometry::positions(value))?;
+    let positions = packed::float3::view::of_owned_exn(
         point_float(cancel_value, grain, &plan, &source_positions.x)?,
         point_float(cancel_value, grain, &plan, &source_positions.y)?,
         point_float(cancel_value, grain, &plan, &source_positions.z)?,
@@ -702,7 +702,7 @@ mod tests {
     use std::sync::Arc;
 
     fn polyline(closed: bool) -> geometry::T {
-        let positions = packed::Float3::of_owned(
+        let positions = packed::float3::of_owned(
             vec![0.0, 1.0, 1.0, 0.0],
             vec![0.0, 0.0, 1.0, 1.0],
             vec![0.0; 4],
@@ -720,7 +720,7 @@ mod tests {
     }
 
     fn xs(value: &geometry::T) -> Vec<f64> {
-        packed::Float3::View::view(geometry::positions(value)).unwrap().x.to_vec()
+        packed::float3::view::view(geometry::positions(value)).unwrap().x.to_vec()
     }
 
     #[test]
@@ -748,7 +748,7 @@ mod tests {
         // point 0 = 1/8 * p3 + 3/4 * p0 + 1/8 * p1
         assert_eq!(xs(&out)[0], 0.125 * 0.0 + 0.75 * 0.0 + 0.125 * 1.0);
         let weights = geometry::find_attribute(attribute::Owner::Point, "w", &out).unwrap();
-        match attribute::View::storage(&weights).unwrap() {
+        match attribute::view::storage(&weights).unwrap() {
             attribute::Storage::Float(values) => assert_eq!(values[4], 2.0),
             _ => panic!("float"),
         }
@@ -770,13 +770,13 @@ mod tests {
         let plane = vec![0.0, 4.0, 8.0, 12.0];
         let storages = [
             Storage::Float(Arc::new(plane.clone())),
-            Storage::Float2(packed::Float2::of_owned(plane.clone(), plane.clone()).unwrap()),
-            Storage::Float3(packed::Float3::of_owned(plane.clone(), plane.clone(), plane.clone()).unwrap()),
-            Storage::Float4(packed::Float4::of_owned(plane.clone(), plane.clone(), plane.clone(), plane).unwrap()),
+            Storage::Float2(packed::float2::of_owned(plane.clone(), plane.clone()).unwrap()),
+            Storage::Float3(packed::float3::of_owned(plane.clone(), plane.clone(), plane.clone()).unwrap()),
+            Storage::Float4(packed::float4::of_owned(plane.clone(), plane.clone(), plane.clone(), plane).unwrap()),
             Storage::Int(Arc::new(vec![10, 20, 30, 40])),
             Storage::Text(Arc::new([&b"a"[..], &b""[..], &b"\xff"[..], &b"d"[..]].into_iter().collect())),
-            Storage::IntArray(packed::IntArray::create_owned(vec![0, 1, 1, 3, 4], vec![10, 30, 31, 40]).unwrap()),
-            Storage::FloatArray(packed::FloatArray::create_owned(vec![0, 1, 1, 3, 4], vec![10.0, 30.0, 31.0, 40.0]).unwrap()),
+            Storage::IntArray(packed::int_array::create_owned(vec![0, 1, 1, 3, 4], vec![10, 30, 31, 40]).unwrap()),
+            Storage::FloatArray(packed::float_array::create_owned(vec![0, 1, 1, 3, 4], vec![10.0, 30.0, 31.0, 40.0]).unwrap()),
         ];
         for grain in [1, 97] {
             for storage in &storages {
@@ -786,19 +786,19 @@ mod tests {
                 let output = geometry::find_attribute(Owner::Point, "values", &output).unwrap();
                 assert_eq!(attribute::kind_name(&output), attribute::kind_name(&source));
                 assert_eq!(attribute::length(&output), 7);
-                let storage = attribute::View::storage(&output).unwrap();
+                let storage = attribute::view::storage(&output).unwrap();
                 match storage {
                     Storage::Int(values) => assert_eq!(**values, [10, 20, 30, 40, 10, 20, 30]),
                     Storage::Text(values) => assert_eq!(values.iter().collect::<Vec<_>>(), [
                         &b"a"[..], &b""[..], &b"\xff"[..], &b"d"[..], &b"a"[..], &b""[..], &b"\xff"[..],
                     ]),
                     Storage::IntArray(values) => {
-                        let view = packed::IntArray::View::view(values);
+                        let view = packed::int_array::view::view(values);
                         assert_eq!(&*view.offsets, &[0, 1, 1, 3, 4, 5, 5, 7]);
                         assert_eq!(&*view.values, &[10, 30, 31, 40, 10, 30, 31]);
                     }
                     Storage::FloatArray(values) => {
-                        let view = packed::FloatArray::View::view(values);
+                        let view = packed::float_array::view::view(values);
                         assert_eq!(&*view.offsets, &[0, 1, 1, 3, 4, 5, 5, 7]);
                         assert_eq!(&*view.values, &[10.0, 30.0, 31.0, 40.0, 10.0, 30.0, 31.0]);
                     }

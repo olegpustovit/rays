@@ -1489,7 +1489,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let ny = scaled_ny / normal_length;
     let nz = scaled_nz / normal_length;
     let point_count = geometry::point_count(geometry_value) as usize;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let clip_attribute = params.clip_attribute.as_str();
     let (clip_x, clip_y, clip_z): (Vec<f64>, Option<Vec<f64>>, Option<Vec<f64>>) = if clip_attribute == "P" {
         (positions.x.to_vec(), Some(positions.y.to_vec()), Some(positions.z.to_vec()))
@@ -1500,19 +1500,19 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                     "Rdk.Plane_clip.clip: point clip attribute \"{clip_attribute}\" does not exist"
                 )));
             }
-            Some(found) => match attribute::View::storage(&found)? {
+            Some(found) => match attribute::view::storage(&found)? {
                 attribute::Storage::Float(values) => (values.to_vec(), None, None),
                 attribute::Storage::Int(values) => (values.iter().map(|&v| v as f64).collect(), None, None),
                 attribute::Storage::Float2(values) => {
-                    let values = packed::Float2::View::view(values);
+                    let values = packed::float2::view::view(values);
                     (values.x.to_vec(), Some(values.y.to_vec()), None)
                 }
                 attribute::Storage::Float3(values) => {
-                    let values = packed::Float3::View::view(values)?;
+                    let values = packed::float3::view::view(values)?;
                     (values.x.to_vec(), Some(values.y.to_vec()), Some(values.z.to_vec()))
                 }
                 attribute::Storage::Float4(values) => {
-                    let values = packed::Float4::View::view(values);
+                    let values = packed::float4::view::view(values);
                     (values.x.to_vec(), Some(values.y.to_vec()), Some(values.z.to_vec()))
                 }
                 attribute::Storage::IntArray(_)
@@ -1557,9 +1557,9 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         })?;
     }
     let source_topology = geometry::topology(geometry_value);
-    let topology_view = topology::View::view(source_topology)?;
+    let topology_view = topology::view::view(source_topology)?;
     let source_index = topology_index::create(cancel_ref, source_topology)?;
-    let index_view = topology_index::View::view(&source_index);
+    let index_view = topology_index::view::view(&source_index);
     let primitive_selection = match &params.selection {
         None => None,
         Some(selection) => Some(element_selection::promote(
@@ -1843,7 +1843,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             }
         }
     }
-    let output_topology = topology::View::create_validated_owned(
+    let output_topology = topology::view::create_validated_owned(
         output_point_count as i64,
         output_vertex_points.clone(),
         builder.offsets.clone(),
@@ -1852,7 +1852,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let primitive_source = &builder.primitive_source;
     let remap_attribute = |source: &attribute::T| -> Result<attribute::T, error::T> {
         let owner = attribute::owner(source);
-        let storage = attribute::View::storage(source)?;
+        let storage = attribute::view::storage(source)?;
         let name = attribute::name(source);
         match owner {
             attribute::Owner::Detail => Ok(source.clone()),
@@ -1886,7 +1886,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 let plane = |values: &[f64]| float_plane(cancel_ref, grain, values, mapping_a, mapping_b, mapping_t);
                 let storage = match storage {
                     attribute::Storage::Float3(values) if is_normal => {
-                        let values = packed::Float3::View::view(values)?;
+                        let values = packed::float3::view::view(values)?;
                         let mut x = plane(&values.x)?;
                         let mut y = plane(&values.y)?;
                         let mut z = plane(&values.z)?;
@@ -1906,7 +1906,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                                 }
                             }
                         }
-                        attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z)?)
+                        attribute::Storage::Float3(packed::float3::view::of_owned_exn(x, y, z)?)
                     }
                     storage => match attribute::map_float_planes(storage, plane)? {
                         Some(blended) => blended,
@@ -1924,18 +1924,18 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let has_polygon = builder.kinds.iter().any(|&kind| kind == 0);
     let has_cap = builder.primitive_cap.iter().any(|&cap| cap);
     let source_vertex_normal = geometry::find_attribute(attribute::Owner::Vertex, "N", geometry_value)
-        .is_some_and(|found| matches!(attribute::View::storage(&found), Ok(attribute::Storage::Float3(_))));
-    let output_point_normal: Option<packed::Float3::T> = attributes
+        .is_some_and(|found| matches!(attribute::view::storage(&found), Ok(attribute::Storage::Float3(_))));
+    let output_point_normal: Option<packed::float3::T> = attributes
         .iter()
         .find(|found| attribute::owner(found) == attribute::Owner::Point && attribute::name(found) == "N")
-        .and_then(|found| match attribute::View::storage(found) {
+        .and_then(|found| match attribute::view::storage(found) {
             Ok(attribute::Storage::Float3(values)) => Some(values.clone()),
             _ => None,
         });
     if !source_vertex_normal && has_polygon {
         match output_point_normal {
             Some(point_normals) if has_cap => {
-                let point_normals = packed::Float3::View::view(&point_normals)?;
+                let point_normals = packed::float3::view::view(&point_normals)?;
                 let mut vx = vec![0.0f64; corner_count];
                 let mut vy = vec![0.0f64; corner_count];
                 let mut vz = vec![0.0f64; corner_count];
@@ -1955,7 +1955,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 }
                 attributes.push(attribute::create_key_owned(
                     &attribute::normal(attribute::Owner::Vertex),
-                    attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vx, vy, vz)?),
+                    attribute::Storage::Float3(packed::float3::view::of_owned_exn(vx, vy, vz)?),
                 )?);
             }
             Some(_) => {}
@@ -2003,7 +2003,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 }
                 attributes.push(attribute::create_key_owned(
                     &attribute::normal(attribute::Owner::Vertex),
-                    attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vx, vy, vz)?),
+                    attribute::Storage::Float3(packed::float3::view::of_owned_exn(vx, vy, vz)?),
                 )?);
             }
         }
@@ -2059,7 +2059,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             ),
         };
         if group::is_ordered(&source) {
-            groups.push(group::View::remap_order(&source, &source_of_target, &target)?);
+            groups.push(group::view::remap_order(&source, &source_of_target, &target)?);
         } else {
             groups.push(target);
         }
@@ -2075,7 +2075,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         let Some(target_index) = &target_index else {
             return Err(fail("Rdk.Plane_clip.clip: missing target edge index"));
         };
-        let target_view = topology_index::View::view(target_index);
+        let target_view = topology_index::view::view(target_index);
         let source_edge_of_output_edge = |edge: usize| -> Option<i64> {
             let a = target_view.edge_a[edge] as usize;
             let c = target_view.edge_b[edge] as usize;
@@ -2109,7 +2109,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         }
     }
     let output = geometry::create(
-        packed::Float3::View::of_owned_exn(px, py, pz)?,
+        packed::float3::view::of_owned_exn(px, py, pz)?,
         output_topology.clone(),
         Some(attributes),
         Some(groups),
@@ -2118,7 +2118,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let output = match (&params.clipped_edge_group, &target_index) {
         (None, _) => output,
         (Some(name), Some(target_index)) => {
-            let target_view = topology_index::View::view(target_index);
+            let target_view = topology_index::view::view(target_index);
             let generated = edge_group::init(Some(grain), &output_topology, target_index, name, &|edge| {
                 let a = target_view.edge_a[edge as usize] as usize;
                 let c = target_view.edge_b[edge as usize] as usize;
@@ -2194,7 +2194,7 @@ pub(crate) mod test_util {
             kinds.push(*kind);
         }
         let topo = topology::create_owned(x.len() as i64, vertex_points, offsets, kinds).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topo, None, None, None).unwrap()
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None).unwrap()
     }
 
     pub fn polygons(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, polys: &[Vec<i64>]) -> geometry::T {
@@ -2222,19 +2222,19 @@ pub(crate) mod test_util {
 
     pub fn int_attribute(owner: attribute::Owner, name: &str, source: &geometry::T) -> Vec<i64> {
         let found = geometry::find_attribute(owner, name, source).expect("missing attribute");
-        match attribute::View::storage(&found).unwrap() {
+        match attribute::view::storage(&found).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} has unexpected storage"),
         }
     }
 
     pub fn xyz(source: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let view = packed::Float3::View::view(geometry::positions(source)).unwrap();
+        let view = packed::float3::view::view(geometry::positions(source)).unwrap();
         (view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
     }
 
-    pub fn topo(source: &geometry::T) -> topology::View::View {
-        topology::View::view(geometry::topology(source)).unwrap()
+    pub fn topo(source: &geometry::T) -> topology::view::View {
+        topology::view::view(geometry::topology(source)).unwrap()
     }
 
     /// Eight-point quad box with outward winding.
@@ -2338,7 +2338,7 @@ pub(crate) mod test_util {
             ny.push(b);
             nz.push(c);
         }
-        geometry::with_positions(packed::Float3::View::of_owned_exn(nx, ny, nz).unwrap(), source).unwrap()
+        geometry::with_positions(packed::float3::view::of_owned_exn(nx, ny, nz).unwrap(), source).unwrap()
     }
 
     pub fn near(a: f64, b: f64) -> bool {
@@ -2433,9 +2433,9 @@ mod tests {
             p.clip_attribute = "field".to_owned();
             clip(&p, &with_attribute("field", storage, &triangle())).unwrap()
         };
-        let f2 = |x: Vec<f64>, y: Vec<f64>| packed::Float2::of_owned(x, y).unwrap();
-        let f3 = |x: Vec<f64>, y: Vec<f64>, z: Vec<f64>| packed::Float3::View::of_owned_exn(x, y, z).unwrap();
-        let f4 = |x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, w: Vec<f64>| packed::Float4::of_owned(x, y, z, w).unwrap();
+        let f2 = |x: Vec<f64>, y: Vec<f64>| packed::float2::of_owned(x, y).unwrap();
+        let f3 = |x: Vec<f64>, y: Vec<f64>, z: Vec<f64>| packed::float3::view::of_owned_exn(x, y, z).unwrap();
+        let f4 = |x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, w: Vec<f64>| packed::float4::of_owned(x, y, z, w).unwrap();
         let outputs = [
             run(attribute::Storage::Float2(f2(vec![-1.0, 1.0, 1.0], vec![0.0; 3]))),
             run(attribute::Storage::Float3(f3(vec![-1.0, 1.0, 1.0], vec![0.0; 3], vec![0.0; 3]))),
@@ -2625,7 +2625,7 @@ mod tests {
     fn degenerate_fallback() {
         let topo1 = topology::create_owned(4, vec![0, 1, 1, 2, 3], vec![0, 5], vec![PrimitiveKind::Polygon]).unwrap();
         let source = geometry::create(
-            packed::Float3::View::of_owned_exn(vec![0.0, 1.0, 1.0, 0.0], vec![0.0, 0.0, 1.0, 1.0], vec![0.0; 4]).unwrap(),
+            packed::float3::view::of_owned_exn(vec![0.0, 1.0, 1.0, 0.0], vec![0.0, 0.0, 1.0, 1.0], vec![0.0; 4]).unwrap(),
             topo1,
             None,
             None,
@@ -2637,7 +2637,7 @@ mod tests {
         assert!(geometry::primitive_count(&output) == 1 && geometry::vertex_count(&output) == 4);
         let topo2 = topology::create_owned(3, vec![0, 1, 0, 2], vec![0, 4], vec![PrimitiveKind::Polygon]).unwrap();
         let source = geometry::create(
-            packed::Float3::View::of_owned_exn(vec![1.0, -1.0, 1.0], vec![0.0, 0.0, 1.0], vec![0.0; 3]).unwrap(),
+            packed::float3::view::of_owned_exn(vec![1.0, -1.0, 1.0], vec![0.0, 0.0, 1.0], vec![0.0; 3]).unwrap(),
             topo2,
             None,
             None,
@@ -2776,12 +2776,12 @@ mod tests {
         assert_eq!(edge_group::cardinality(&cap_edges), 16);
         let view = topo(&one);
         let (_, py, pz) = xyz(&one);
-        let normals = match attribute::View::storage(
+        let normals = match attribute::view::storage(
             &geometry::find_attribute(attribute::Owner::Vertex, "N", &one).expect("no hard vertex N"),
         )
         .unwrap()
         {
-            attribute::Storage::Float3(values) => packed::Float3::View::view(values).unwrap(),
+            attribute::Storage::Float3(values) => packed::float3::view::view(values).unwrap(),
             _ => panic!("unexpected N storage"),
         };
         let area = std::sync::Mutex::new(0.0);

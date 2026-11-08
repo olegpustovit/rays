@@ -5,7 +5,7 @@ use crate::support::*;
 use crate::ui_b::*;
 use input::{Event, Key, MouseButton, Platform};
 use pxui::ui::*;
-use rays::scene::{self, Layer};
+use rays::scene::{self, layer};
 use rays_math::color;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -620,11 +620,11 @@ pub fn window_pxui_modal_4() {
         if k == fk { vec![scene::rect((0, 0), 100, 60, Some(color::black()), None).unwrap()] } else { Vec::new() }
     };
     let nodes = ui.scene(Some(&under));
-    match Layer::stage_native(320, 240, &nodes) {
+    match layer::stage_native(320, 240, &nodes) {
         Ok(staged) => {
             let ok = matches!(
                 &staged.layers[..],
-                [Layer::native_layer::Ui_layer(..), Layer::native_layer::Scene2_layer(..), Layer::native_layer::Ui_layer(..)]
+                [layer::native_layer::Ui_layer(..), layer::native_layer::Scene2_layer(..), layer::native_layer::Ui_layer(..)]
             );
             if !ok {
                 fail("native content was not between the background and floating controls");

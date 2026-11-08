@@ -24,8 +24,8 @@ fn fail(message: String) -> error::T {
 
 // Which corner of a quad with exactly one collapsed edge the single triangle drops, or -1.
 fn collapsed_quad_removed(
-    positions: &packed::Float3::View::View,
-    view: &topology::View::View,
+    positions: &packed::float3::view::View,
+    view: &topology::view::View,
     primitive: usize,
 ) -> i64 {
     let first = view.primitive_offsets[primitive];
@@ -95,8 +95,8 @@ fn triangulate(
             ));
         }
     }
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let view = topology::View::view(topology_value)?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
+    let view = topology::view::view(topology_value)?;
     let selected = |primitive: usize| match primitives {
         None => true,
         Some(selection) => group::mem(primitive as i64, selection),
@@ -280,7 +280,7 @@ fn triangulate(
             Ok(()) => Err(fail(format!("{PREFIX}primitive {primitive} failed triangulation"))),
         };
     }
-    let output_topology = topology::View::create_validated_owned(
+    let output_topology = topology::view::create_validated_owned(
         geometry::point_count(geometry_value),
         output_vertices,
         output_offsets,

@@ -506,11 +506,11 @@ pub mod pack_instances {
         Vec::new()
     }
 
-    fn row(name: &str, instances: &geometry::T) -> Result<packed::Float4::View::View, Diagnostic> {
+    fn row(name: &str, instances: &geometry::T) -> Result<packed::float4::view::View, Diagnostic> {
         let invalid = |message: String| support::diagnostic("invalid_attribute", &message);
         match geometry::find_attribute(attribute::Owner::Point, name, instances) {
             Some(found) => match attribute::storage(&found).map_err(|e| support::structured_rdk_error(&e))? {
-                Storage::Float4(values) => Ok(packed::Float4::View::view(&values)),
+                Storage::Float4(values) => Ok(packed::float4::view::view(&values)),
                 _ => Err(invalid(format!("pack_instances: {name} must be point float4"))),
             },
             None => Err(invalid(format!("pack_instances: missing point attribute {name}"))),

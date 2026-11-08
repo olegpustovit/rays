@@ -65,7 +65,7 @@ fn above(geometry: &rdk_core::geometry::T, tag: i64) -> vec3::T {
         let (first, last) = rdk_core::topology::primitive_vertex_range(topology, primitive as i64).expect("range");
         let mut sum = (0., 0., 0.);
         for v in first..last {
-            let (x, y, z) = rdk_core::packed::Float3::get(points, rdk_core::topology::point_of_vertex(topology, v).expect("point")).expect("position");
+            let (x, y, z) = rdk_core::packed::float3::get(points, rdk_core::topology::point_of_vertex(topology, v).expect("point")).expect("position");
             sum = (sum.0 + x, sum.1 + y, sum.2 + z);
         }
         let n = (last - first) as f64;
@@ -149,7 +149,7 @@ pub fn pick_sunflower() {
             let corner = |p: usize| rdk_core::topology::primitive_vertex_range(topology, p as i64).expect("range").0;
             let seed = primitives_of(&tags, tag)[0];
             let other = primitives_of(&tags, of_iteration(0)[0])[0];
-            let red = |i: i64| rdk_core::packed::Float4::get(&c, i).expect("colour").0;
+            let red = |i: i64| rdk_core::packed::float4::get(&c, i).expect("colour").0;
             check((red(corner(other)) - 0.3).abs() < 1e-9, "the rest is dimmed");
             check(red(corner(seed)) > red(corner(other)), "the probed iteration is tinted");
         }

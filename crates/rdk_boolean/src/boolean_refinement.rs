@@ -121,7 +121,7 @@ mod tests {
         let vertices: Vec<i64> = (0..point_count).collect();
         let offsets: Vec<i64> = (0..=(point_count / 3)).map(|p| p * 3).collect();
         let kinds = vec![PrimitiveKind::Polygon; offsets.len() - 1];
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
         let topology = topology::create_owned(point_count, vertices, offsets, kinds).unwrap();
         geometry::create(positions, topology, None, None, None).unwrap()
     }

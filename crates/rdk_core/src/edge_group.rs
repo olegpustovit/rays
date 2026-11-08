@@ -225,7 +225,6 @@ pub fn iter(operation: &dyn Fn(i64), value: &T) {
     }
 }
 
-#[allow(non_snake_case)]
 pub mod builder {
     use super::{
         byte_count, invalid_edge_group, new, require_index, require_name, topology, topology_index,
@@ -294,7 +293,6 @@ pub mod builder {
     }
 }
 
-#[allow(non_snake_case)]
 pub mod view {
     use super::{byte_count, invalid_edge_group, new, require_name, topology, T};
     use crate::error;
@@ -400,8 +398,8 @@ pub fn replicate_exact_copies(
             "Edge_group.replicate_exact_copies: source topology/index/group mismatch",
         ));
     }
-    let source = topology::View::view(source_topology)?;
-    let target = topology::View::view(target_topology)?;
+    let source = topology::view::view(source_topology)?;
+    let target = topology::view::view(target_topology)?;
     let source_vertices = i64::try_from(source.vertex_points.len()).unwrap_or(i64::MAX);
     let source_primitives = i64::try_from(source.primitive_kinds.len()).unwrap_or(i64::MAX);
     let Some(expected_points) = source.point_count.checked_mul(copies) else {

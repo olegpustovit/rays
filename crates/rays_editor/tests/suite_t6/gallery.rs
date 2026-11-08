@@ -1,9 +1,9 @@
 //! test_gallery_shapes.ml: the gallery's Lisp graphs against independent OCaml-side inputs.
 #![allow(dead_code, unused_imports)]
 use flow_syntax::syntax::{self as S, Node, Syntax};
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use rdk_rays::rays_mesh;
-use rays::scene::{self, Layer};
+use rays::scene::{self, layer};
 use rays::scene3;
 use rays_math::vec3;
 use sop::{context, node, session};
@@ -43,7 +43,7 @@ fn replace(head: &str, replacement: &Syntax, form: &Syntax) -> Syntax {
 
 fn polygon(points: &[(f64, f64, f64)]) -> rdk_core::geometry::T {
     let count = points.len() as i64;
-    let positions = Float3::View::of_owned_exn(points.iter().map(|p| p.0).collect(), points.iter().map(|p| p.1).collect(), points.iter().map(|p| p.2).collect()).unwrap();
+    let positions = float3::view::of_owned_exn(points.iter().map(|p| p.0).collect(), points.iter().map(|p| p.1).collect(), points.iter().map(|p| p.2).collect()).unwrap();
     let topology = rdk_core::topology::polygons_owned(count, (0..count).collect(), vec![0, count]).unwrap();
     rdk_core::geometry::create(positions, topology, None, None, None).unwrap()
 }
@@ -105,7 +105,7 @@ fn cook(s: &mut session::T, n: &node::T) -> rdk_core::geometry::T {
 }
 
 fn bounds(g: &rdk_core::geometry::T) -> [f64; 6] {
-    let p = Float3::View::view(rdk_core::geometry::positions(g)).unwrap();
+    let p = float3::view::view(rdk_core::geometry::positions(g)).unwrap();
     let range = |a: &[f64]| a.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
     let (x, y, z) = (range(&p.x), range(&p.y), range(&p.z));
     [x.0, y.0, z.0, x.1, y.1, z.1]
@@ -118,7 +118,7 @@ fn scene_of(g: &rdk_core::geometry::T) -> scene3::Scene3 {
 
 fn packed(g: &rdk_core::geometry::T) -> std::rc::Rc<renderer::scene_execution::SampledDraw> {
     let camera = rays::camera::orthographic(4., vec3::create(0., 0., 4.), vec3::zero()).unwrap();
-    let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera, scene_of(g))]).unwrap();
+    let staged = layer::stage_native(128, 128, &[scene::view3d(None, &camera, scene_of(g))]).unwrap();
     staged.scene3[0].entries[0].clone()
 }
 
@@ -143,7 +143,7 @@ fn geometry_check(name: &str, actual: &rdk_core::geometry::T, expected: &rdk_cor
     }
 }
 
-fn pixels(canvas: &rays::canvas::t, camera: &rays::camera::Camera, g: &rdk_core::geometry::T) -> Vec<rays_math::color::T> {
+fn pixels(canvas: &rays::canvas::Canvas, camera: &rays::camera::Camera, g: &rdk_core::geometry::T) -> Vec<rays_math::color::T> {
     rays::canvas::render(None, canvas, &[scene::clear(rays_math::color::black()), scene::view3d(None, camera, scene_of(g))]).unwrap();
     rays::canvas::pixels(canvas).unwrap()
 }

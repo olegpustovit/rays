@@ -68,7 +68,7 @@ pub fn same_output(a: &Output, b: &Output) -> bool {
 #[derive(Clone)]
 struct Delta {
     source: i64,
-    positions: Option<rdk_core::packed::Float3::T>,
+    positions: Option<rdk_core::packed::float3::T>,
     attributes: Vec<(rdk_core::attribute::Owner, String, Option<rdk_core::attribute::T>)>,
 }
 
@@ -527,7 +527,7 @@ fn cache_key(n: &node::T, context: &context::T, inputs: &[payload::T]) -> Vec<u8
         add_int(
             &mut buffer,
             if facts.reads.iter().any(|r| r == "P") {
-                rdk_core::packed::Float3::data_id(rdk_core::geometry::positions(&geometry))
+                rdk_core::packed::float3::data_id(rdk_core::geometry::positions(&geometry))
             } else {
                 0
             },
@@ -638,7 +638,7 @@ fn delta(n: &node::T, inputs: &[payload::T], cooked: &node::Cooked) -> Result<Op
             attributes.push((A::owner(&a), key.1, None));
         }
     }
-    let positions = if rdk_core::packed::Float3::data_id(G::positions(&source)) == rdk_core::packed::Float3::data_id(G::positions(&geometry)) {
+    let positions = if rdk_core::packed::float3::data_id(G::positions(&source)) == rdk_core::packed::float3::data_id(G::positions(&geometry)) {
         None
     } else {
         if !declared("P") {

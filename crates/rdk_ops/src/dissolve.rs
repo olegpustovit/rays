@@ -32,7 +32,6 @@ fn recode(failure: error::T) -> error::T {
     if error::is_cancelled(&failure) { failure } else { fail(error::message(&failure)) }
 }
 
-#[allow(non_snake_case)]
 pub mod int_buffer {
     #[derive(Clone, Debug, Default)]
     pub struct T {
@@ -50,7 +49,6 @@ pub mod int_buffer {
     }
 }
 
-#[allow(non_snake_case)]
 pub mod output {
     use super::int_buffer;
     use rdk_core::topology::PrimitiveKind;
@@ -104,8 +102,8 @@ fn simplify(
     tolerance: f64,
     affected: &[u8],
     closed: bool,
-    positions: &packed::Float3::View::View,
-    view: &topology::View::View,
+    positions: &packed::float3::view::View,
+    view: &topology::view::View,
     corners: &[i64],
 ) -> Result<Vec<i64>, error::T> {
     let count = corners.len();
@@ -201,7 +199,7 @@ fn rotate(value: &[i64], at: usize) -> Vec<i64> {
     (0..value.len()).map(|index| value[(at + index) % value.len()]).collect()
 }
 
-fn find_point(view: &topology::View::View, corners: &[i64], point: i64) -> i64 {
+fn find_point(view: &topology::view::View, corners: &[i64], point: i64) -> i64 {
     for (index, &vertex) in corners.iter().enumerate() {
         if view.vertex_points[vertex as usize] == point {
             return index as i64;
@@ -212,8 +210,8 @@ fn find_point(view: &topology::View::View, corners: &[i64], point: i64) -> i64 {
 
 fn bridge_loops(
     cancel_value: Option<&cancel::T>,
-    view: &topology::View::View,
-    index: &topology_index::View::View,
+    view: &topology::view::View,
+    index: &topology_index::view::View,
     selected_edges: &[u8],
     loops: &[Vec<i64>],
 ) -> Result<Vec<i64>, error::T> {
@@ -318,9 +316,9 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
     }
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(geometry_value);
-    let view = topology::View::view(topology_value)?;
+    let view = topology::view::view(topology_value)?;
     let index_value = topology_index::create(cancel_value, topology_value)?;
-    let index = topology_index::View::view(&index_value);
+    let index = topology_index::view::view(&index_value);
     let edge_count = index.edge_a.len();
     let primitive_count = view.primitive_kinds.len();
     let vertex_count = view.vertex_points.len();
@@ -472,7 +470,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
     let mut visited = vec![false; vertex_count];
     let mut output = output::create(initial_vertices, initial_primitives);
     let mut processed = vec![false; primitive_count];
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let trace = |start: i64, visited: &mut Vec<bool>| -> Result<(Vec<i64>, bool), error::T> {
         let mut values: Vec<i64> = Vec::new();
         let mut current = start;
@@ -670,7 +668,7 @@ mod tests {
         let g = with_attr(g, Owner::Point, "weight", Storage::Float(Arc::new((0..points).map(|v| v as f64).collect())));
         let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int(Arc::new((0..vertices).map(|v| 100 + v).collect())));
         let g = with_attr(&g, Owner::Primitive, "face", Storage::Int(Arc::new((0..primitives).map(|v| 10 + v).collect())));
-        let lists = packed::IntArray::create_owned(
+        let lists = packed::int_array::create_owned(
             (0..=vertices).map(|v| v * 2).collect(),
             (0..vertices * 2).map(|v| v % 7).collect(),
         )
@@ -841,8 +839,8 @@ mod tests {
         .unwrap();
         let normal = geometry::find_attribute(Owner::Point, "N", &out).unwrap();
         assert_eq!(attribute::length(&normal), geometry::point_count(&out));
-        let Storage::Float3(values) = attribute::View::storage(&normal).unwrap() else { panic!("storage") };
-        let v = packed::Float3::View::view(values).unwrap();
+        let Storage::Float3(values) = attribute::view::storage(&normal).unwrap() else { panic!("storage") };
+        let v = packed::float3::view::view(values).unwrap();
         for point in 0..v.x.len() {
             let length = (v.x[point] * v.x[point] + v.y[point] * v.y[point] + v.z[point] * v.z[point]).sqrt();
             assert!((length - 1.0).abs() < 1e-12);

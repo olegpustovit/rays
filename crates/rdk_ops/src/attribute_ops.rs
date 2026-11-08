@@ -476,7 +476,7 @@ pub(crate) mod fixtures {
         let y: Vec<f64> = positions.iter().map(|p| p.1).collect();
         let z: Vec<f64> = positions.iter().map(|p| p.2).collect();
         geometry::create(
-            packed::Float3::View::of_owned_exn(x, y, z).unwrap(),
+            packed::float3::view::of_owned_exn(x, y, z).unwrap(),
             topology_value,
             None,
             None,
@@ -570,7 +570,7 @@ pub(crate) mod fixtures {
     pub fn float3(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
             attribute::Storage::Float3(values) => {
-                let view = packed::Float3::View::view(&values).unwrap();
+                let view = packed::float3::view::view(&values).unwrap();
                 (view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
             }
             _ => panic!("wrong float3 storage for {name}"),
@@ -578,7 +578,7 @@ pub(crate) mod fixtures {
     }
 
     pub fn positions(geometry_value: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let view = packed::Float3::View::view(geometry::positions(geometry_value)).unwrap();
+        let view = packed::float3::view::view(geometry::positions(geometry_value)).unwrap();
         (view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
     }
 
@@ -645,7 +645,7 @@ pub(crate) mod fixtures2 {
         super::fixtures::add_storage(
             owner,
             name,
-            attribute::Storage::Float3(packed::Float3::of_owned(x, y, z).unwrap()),
+            attribute::Storage::Float3(packed::float3::of_owned(x, y, z).unwrap()),
             g,
         )
     }

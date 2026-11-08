@@ -23,7 +23,7 @@ fn invalid_table_error(message: &str) -> error::T {
 }
 pub fn create(
     cancel_value: Option<&cancel::T>,
-    source: &topology::View::View,
+    source: &topology::view::View,
 ) -> Result<T, error::T> {
     let primitive_count = source.primitive_kinds.len();
     let mut outgoing_count = 0_usize;
@@ -154,7 +154,7 @@ mod tests {
             vec![PrimitiveKind::Polygon, PrimitiveKind::Polygon],
         )
         .unwrap();
-        let view = topology::View::view(&value).unwrap();
+        let view = topology::view::view(&value).unwrap();
         let lookup = create(None, &view).unwrap();
         let index = topology_index::create(None, &value).unwrap();
         assert_eq!(count(&lookup), topology_index::edge_count(&index));
@@ -182,7 +182,7 @@ mod tests {
             vec![PrimitiveKind::OpenPolyline],
         )
         .unwrap();
-        let lookup = create(None, &topology::View::view(&value).unwrap()).unwrap();
+        let lookup = create(None, &topology::view::view(&value).unwrap()).unwrap();
         assert_eq!(count(&lookup), 2);
         assert_eq!(find(&lookup, 0, 2), -1);
     }
@@ -200,7 +200,7 @@ mod tests {
         cancel::cancel(&token);
         let result = create(
             Some(&token),
-            &topology::View::view(&value).unwrap(),
+            &topology::view::view(&value).unwrap(),
         );
         assert!(matches!(
             &result,

@@ -3376,7 +3376,7 @@ mod tests {
             assert_eq!(counts(&one), expected, "{key}");
             assert!(same_geometry(&one, &many) || counts(&one) == counts(&many), "{key}: domains differ");
             let (a, b) = (geometry::positions(&one), geometry::positions(&many));
-            assert!(rdk_core::packed::Float3::View::view(a).unwrap().x == rdk_core::packed::Float3::View::view(b).unwrap().x, "{key}");
+            assert!(rdk_core::packed::float3::view::view(a).unwrap().x == rdk_core::packed::float3::view::view(b).unwrap().x, "{key}");
             session::close(&mut s);
         }
     }

@@ -91,20 +91,20 @@ struct Snapshot {
 
 enum TextureSlot {
     /// built from the CPU payload on first use
-    Lazy(sop::image::T, OnceCell<Result<texture::t, String>>),
-    Ready(texture::t),
+    Lazy(sop::image::T, OnceCell<Result<texture::Texture, String>>),
+    Ready(texture::Texture),
 }
 
 struct Entry {
     key: String,
     /// the plan that last asked for it: `reserve` prunes the others
     plan_serial: i64,
-    image: Option<image::t>,
+    image: Option<image::Image>,
     cpu: Option<Snapshot>,
     texture: Option<Rc<TextureSlot>>,
-    borrowed: Option<texture::t>,
+    borrowed: Option<texture::Texture>,
     display: Option<Rc<Stamp>>,
-    canvas: Option<canvas::t>,
+    canvas: Option<canvas::Canvas>,
 }
 
 type EntryRef = Rc<RefCell<Entry>>;
@@ -587,13 +587,13 @@ fn resolve_capture(d: &Data, request: &RequestRef, live: &Frame, sources: &[(i64
     Ok(resolved)
 }
 
-fn create_canvas(d: &Data, width: i64, height: i64) -> Result<canvas::t, Diagnostic> {
+fn create_canvas(d: &Data, width: i64, height: i64) -> Result<canvas::Canvas, Diagnostic> {
     let c = message(canvas::create(width, height))?;
     d.canvases_created.set(d.canvases_created.get() + 1);
     Ok(c)
 }
 
-fn destroy_canvas(d: &Data, c: &canvas::t) {
+fn destroy_canvas(d: &Data, c: &canvas::Canvas) {
     let (captures, readbacks) = canvas::pixel_stats(c);
     let _ = canvas::destroy(c);
     d.canvases_destroyed.set(d.canvases_destroyed.get() + 1);
@@ -784,7 +784,7 @@ fn bytes_of_image(image: &sop::image::T) -> Vec<u8> {
     }
 }
 
-fn cpu_of_image(image_: &image::t) -> Result<sop::image::T, Diagnostic> {
+fn cpu_of_image(image_: &image::Image) -> Result<sop::image::T, Diagnostic> {
     let bytes = message(image::pixels(image_))?;
     let (width, height) = image::dimensions(image_);
     let rgba: Vec<f64> = bytes.iter().map(|b| *b as f64 / 255.).collect();
@@ -795,7 +795,7 @@ fn texture_slot(payload: &sop::image::T) -> Rc<TextureSlot> {
     Rc::new(TextureSlot::Lazy(payload.clone(), OnceCell::new()))
 }
 
-fn force_texture(slot: &TextureSlot) -> Result<texture::t, String> {
+fn force_texture(slot: &TextureSlot) -> Result<texture::Texture, String> {
     match slot {
         TextureSlot::Ready(tex) => Ok(tex.clone()),
         TextureSlot::Lazy(payload, cell) => cell
@@ -812,11 +812,11 @@ fn publish(d: &Data, key: &str, entry: &EntryRef, width: i64, height: i64, sourc
     let existing = entry.borrow().image.clone();
     let image_ = match existing {
         None => workspace_resources::image(&d.resources, key, &|| {
-            let resource = runtime_resources::Image::of_gpu(width, height, source.clone()).map_err(|e| pp_error(&e))?;
+            let resource = runtime_resources::image::of_gpu(width, height, source.clone()).map_err(|e| pp_error(&e))?;
             let view = match texture::of_image(&resource) {
                 Ok(view) => view,
                 Err(m) => {
-                    let _ = runtime_resources::Image::destroy(&resource);
+                    let _ = runtime_resources::image::destroy(&resource);
                     return Err(m);
                 }
             };
@@ -826,13 +826,13 @@ fn publish(d: &Data, key: &str, entry: &EntryRef, width: i64, height: i64, sourc
                     Ok(public_image)
                 }
                 Err(m) => {
-                    let _ = runtime_resources::Image::destroy(&resource);
+                    let _ = runtime_resources::image::destroy(&resource);
                     Err(m)
                 }
             }
         })?,
         Some(image_) => {
-            runtime_resources::Image::replace_gpu_source(&image::resource(&image_), width, height, source.clone()).map_err(|e| error(&pp_error(&e)))?;
+            runtime_resources::image::replace_gpu_source(&image::resource(&image_), width, height, source.clone()).map_err(|e| error(&pp_error(&e)))?;
             image_
         }
     };
@@ -878,11 +878,11 @@ fn prepare(d: &Data, plan: &e::Plan, pid: PlanId) -> Result<(), Diagnostic> {
 }
 
 /// The image the plan's node `id` last resolved to, if this plan is the current one.
-pub fn peek(t_: &WorkspaceImages, plan: &e::Plan, id: i64) -> Option<image::t> {
+pub fn peek(t_: &WorkspaceImages, plan: &e::Plan, id: i64) -> Option<image::Image> {
     peek_in(&t_.0, plan_id(plan), id)
 }
 
-fn peek_in(d: &Data, pid: PlanId, id: i64) -> Option<image::t> {
+fn peek_in(d: &Data, pid: PlanId, id: i64) -> Option<image::Image> {
     if workspace_resources::closed(&d.resources) || d.plan_id.get() != Some(pid) || id < 0 || id as usize >= d.resolved.borrow().len() {
         return None;
     }
@@ -1044,8 +1044,8 @@ fn resolve_exact(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, plan: &e::Plan,
     let source = child.borrow().image.clone().expect("child image");
     let (width, height) = image::dimensions(&source);
     let resource = image::resource(&source);
-    runtime_resources::Image::gpu_snapshot(&resource).map_err(|e| error(&pp_error(&e)))?;
-    let key = format!("{}{:?}", authored_key("exact:", node), (d.serial.get(), image::identity(&source), runtime_resources::Image::generation(&resource), width, height));
+    runtime_resources::image::gpu_snapshot(&resource).map_err(|e| error(&pp_error(&e)))?;
+    let key = format!("{}{:?}", authored_key("exact:", node), (d.serial.get(), image::identity(&source), runtime_resources::image::generation(&resource), width, height));
     let found = d.entries.borrow_mut().find_opt(&key);
     let result = match found {
         Some(entry) => entry,
@@ -1172,7 +1172,7 @@ fn compute_entry(
     if display {
         invalidate_display(&entry);
     }
-    let upload = |width: i64, height: i64, payload: &sop::image::T| -> Result<image::t, Diagnostic> {
+    let upload = |width: i64, height: i64, payload: &sop::image::T| -> Result<image::Image, Diagnostic> {
         let existing = entry.borrow().image.clone();
         match existing {
             Some(image_) => message(image::upload_rgba(Some(&image_), width, height, &bytes_of_image(payload))),
@@ -1283,7 +1283,7 @@ fn compute_entry(
                 p
             }
         };
-        let temporary: Rc<RefCell<Vec<image::t>>> = Rc::new(RefCell::new(Vec::new()));
+        let temporary: Rc<RefCell<Vec<image::Image>>> = Rc::new(RefCell::new(Vec::new()));
         let resolver_data = t_.clone();
         let (state2, live2, pid2, _gpu2, temporary2) = (state.clone(), live.clone(), ctx.pid, ctx.gpu.clone(), temporary.clone());
         let plan_rc: Rc<e::Plan> = d.plan.borrow().clone().expect("plan");
@@ -1304,7 +1304,7 @@ fn compute_entry(
                 return Ok(child_image.expect("child image"));
             }
             match child_image {
-                Some(image_) if matches!(runtime_resources::Image::gpu_snapshot(&image::resource(&image_)), Ok(None)) => {
+                Some(image_) if matches!(runtime_resources::image::gpu_snapshot(&image::resource(&image_)), Ok(None)) => {
                     child.borrow_mut().display = None;
                     message(image::upload_rgba(Some(&image_), width, height, &bytes_of_image(&payload)))
                 }
@@ -1425,7 +1425,7 @@ fn compute_entry(
 
 /// The image of `value`, resolved for display (a GPU-resident image) or, with `display` false, with
 /// a host copy uploaded.
-pub fn image(gpu: Option<&G::Config>, display: bool, t_: &WorkspaceImages, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<image::t, Diagnostic> {
+pub fn image(gpu: Option<&G::Config>, display: bool, t_: &WorkspaceImages, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<image::Image, Diagnostic> {
     let d = &t_.0;
     let ctx = Ctx { gpu: gpu.cloned(), state: state.clone(), live: live.clone(), pid: plan_id(plan) };
     let entry = resolve(d, &ctx, None, display, plan, value)?;
@@ -1463,7 +1463,7 @@ pub fn payload(t_: &WorkspaceImages) -> l::ImageResolver {
     })
 }
 
-pub fn texture(gpu: Option<&G::Config>, t_: &WorkspaceImages, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<texture::t, Diagnostic> {
+pub fn texture(gpu: Option<&G::Config>, t_: &WorkspaceImages, state: &e::State, live: &Frame, plan: &e::Plan, value: &Value) -> Result<texture::Texture, Diagnostic> {
     let ctx = Ctx { gpu: gpu.cloned(), state: state.clone(), live: live.clone(), pid: plan_id(plan) };
     let entry = resolve(&t_.0, &ctx, None, true, plan, value)?;
     let slot = entry.borrow().texture.clone().expect("texture");

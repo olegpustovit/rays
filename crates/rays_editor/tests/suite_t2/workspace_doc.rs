@@ -71,7 +71,7 @@ fn undo(e: Ed, c: i64) -> Ed {
 }
 
 fn first_x(g: &rdk_core::geometry::T) -> f64 {
-    rdk_core::packed::Float3::View::view(rdk_core::geometry::positions(g)).unwrap().x[0]
+    rdk_core::packed::float3::view::view(rdk_core::geometry::positions(g)).unwrap().x[0]
 }
 
 fn objects(e: &Ed) -> Vec<(String, String)> {

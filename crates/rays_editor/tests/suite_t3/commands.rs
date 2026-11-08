@@ -13,7 +13,7 @@ use rays_editor::{editor, reduce};
 /// The widths and heights of the images a scene draws (render_ir `Image` destinations), read from
 /// the command's Debug text: this crate does not depend on scene_command.
 pub fn image_sizes(scene: &[rays::scene::node]) -> Vec<(f64, f64)> {
-    let commands = rays::scene::Layer::commands(None, scene).expect("scene commands");
+    let commands = rays::scene::layer::commands(None, scene).expect("scene commands");
     let mut out = Vec::new();
     for c in commands {
         let text = format!("{c:?}");

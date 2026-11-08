@@ -72,7 +72,7 @@ struct Positions {
 }
 
 fn positions_of(geometry_value: &geometry::T) -> Result<Positions, error::T> {
-    let view = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let view = packed::float3::view::view(geometry::positions(geometry_value))?;
     Ok(Positions { x: view.x, y: view.y, z: view.z })
 }
 
@@ -606,7 +606,7 @@ fn remap_output(
     topology_value: topology::T,
 ) -> Result<geometry::T, error::T> {
     let source = positions_of(geometry_value)?;
-    let positions = packed::Float3::View::of_owned_exn(
+    let positions = packed::float3::view::of_owned_exn(
         topology_remap::select_float(cancel_value, grain, None, point_map, &source.x)?,
         topology_remap::select_float(cancel_value, grain, None, point_map, &source.y)?,
         topology_remap::select_float(cancel_value, grain, None, point_map, &source.z)?,
@@ -713,7 +713,7 @@ fn materialize(
                 vertex_points.extend_from_slice(&[a, b, c]);
             }
             primitive_offsets.push((primitive_count * 3) as i64);
-            let topology_value = topology::View::create_validated_owned(
+            let topology_value = topology::view::create_validated_owned(
                 output_points,
                 vertex_points,
                 primitive_offsets,
@@ -809,7 +809,7 @@ mod tests {
         let y = values.iter().map(|v| v.1).collect();
         let z = values.iter().map(|v| v.2).collect();
         geometry::create(
-            packed::Float3::View::of_owned_exn(x, y, z).unwrap(),
+            packed::float3::view::of_owned_exn(x, y, z).unwrap(),
             topology::empty(values.len() as i64).unwrap(),
             None,
             None,
@@ -825,13 +825,13 @@ mod tests {
     }
 
     fn same_storage(left: &attribute::T, right: &attribute::T) -> bool {
-        match (attribute::View::storage(left).unwrap(), attribute::View::storage(right).unwrap()) {
+        match (attribute::view::storage(left).unwrap(), attribute::view::storage(right).unwrap()) {
             (attribute::Storage::Float(a), attribute::Storage::Float(b)) => a == b,
             (attribute::Storage::Int(a), attribute::Storage::Int(b)) => a == b,
             (attribute::Storage::Text(a), attribute::Storage::Text(b)) => a == b,
             (attribute::Storage::Float3(a), attribute::Storage::Float3(b)) => {
-                let a = packed::Float3::View::view(a).unwrap();
-                let b = packed::Float3::View::view(b).unwrap();
+                let a = packed::float3::view::view(a).unwrap();
+                let b = packed::float3::view::view(b).unwrap();
                 a.x == b.x && a.y == b.y && a.z == b.z
             }
             _ => false,
@@ -848,8 +848,8 @@ mod tests {
     fn same_geometry(left: &geometry::T, right: &geometry::T) -> bool {
         let lp = positions_of(left).unwrap();
         let rp = positions_of(right).unwrap();
-        let lt = topology::View::view(geometry::topology(left)).unwrap();
-        let rt = topology::View::view(geometry::topology(right)).unwrap();
+        let lt = topology::view::view(geometry::topology(left)).unwrap();
+        let rt = topology::view::view(geometry::topology(right)).unwrap();
         let (la, ra) = (geometry::attributes(left), geometry::attributes(right));
         let (lg, rg) = (geometry::groups(left), geometry::groups(right));
         lp.x == rp.x
@@ -870,7 +870,7 @@ mod tests {
 
     /// (boundary edges, non-manifold edges, undirected edge count)
     fn edge_stats(geometry_value: &geometry::T) -> (usize, usize, usize) {
-        let view = topology::View::view(geometry::topology(geometry_value)).unwrap();
+        let view = topology::view::view(geometry::topology(geometry_value)).unwrap();
         let mut counts: HashMap<(i64, i64), usize> = HashMap::new();
         for primitive in 0..view.primitive_kinds.len() {
             let first = view.primitive_offsets[primitive] as usize;
@@ -894,7 +894,7 @@ mod tests {
     fn check_contains(source: &geometry::T, hull: &geometry::T, message: &str) {
         let sp = positions_of(source).unwrap();
         let hp = positions_of(hull).unwrap();
-        let topology_value = topology::View::view(geometry::topology(hull)).unwrap();
+        let topology_value = topology::view::view(geometry::topology(hull)).unwrap();
         for primitive in 0..geometry::primitive_count(hull) as usize {
             let first = topology_value.primitive_offsets[primitive] as usize;
             assert_eq!(topology_value.primitive_offsets[primitive + 1] as usize - first, 3, "{message}: non-triangle face");
@@ -989,7 +989,7 @@ mod tests {
         let normal = attribute::create_owned(
             "N",
             attribute::Owner::Point,
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
+            attribute::Storage::Float3(packed::float3::view::of_owned_exn(
                 vec![1.; points],
                 vec![0.; points],
                 vec![0.; points],
@@ -1011,7 +1011,7 @@ mod tests {
     }
 
     fn int_storage(value: Option<attribute::T>) -> Vec<i64> {
-        match attribute::View::storage(&value.unwrap()).unwrap() {
+        match attribute::view::storage(&value.unwrap()).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("int storage"),
         }

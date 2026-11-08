@@ -17,9 +17,9 @@ use rdk_core::error::Code;
 use rdk_ops::triangulate;
 
 enum Planes {
-    F2(packed::Float2::T),
-    F3(packed::Float3::T),
-    F4(packed::Float4::T),
+    F2(packed::float2::T),
+    F3(packed::float3::T),
+    F4(packed::float4::T),
 }
 
 enum Source {
@@ -31,7 +31,7 @@ fn text(e: error::T) -> String {
     error::to_string(&e)
 }
 
-fn mesh_vec3(view: &packed::Float3::View::View) -> Vec3_buffer {
+fn mesh_vec3(view: &packed::float3::view::View) -> Vec3_buffer {
     Vec3_buffer::of_planes(view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
 }
 
@@ -57,7 +57,7 @@ fn standard(
             geometry::find_attribute(owner, name, g)
         };
         let Some(a) = found else { return Ok(None) };
-        let storage = attribute::View::storage(&a).map_err(text)?;
+        let storage = attribute::view::storage(&a).map_err(text)?;
         match expected(storage) {
             Some(value) => Ok(Some(value)),
             None => Err(format!(
@@ -92,8 +92,8 @@ fn float4(s: &Storage) -> Option<Planes> {
     match s {
         Storage::Float4(v) => Some(Planes::F4(v.clone())),
         Storage::Float3(v) => {
-            let view = packed::Float3::View::view(v).ok()?;
-            packed::Float4::of_owned(view.x.to_vec(), view.y.to_vec(), view.z.to_vec(), vec![1.0; view.x.len()]).ok().map(Planes::F4)
+            let view = packed::float3::view::view(v).ok()?;
+            packed::float4::of_owned(view.x.to_vec(), view.y.to_vec(), view.z.to_vec(), vec![1.0; view.x.len()]).ok().map(Planes::F4)
         }
         _ => None,
     }
@@ -112,7 +112,7 @@ fn source_index(source: &Source, vertex_points: &[i64], vertex: usize) -> usize 
 }
 
 fn vertex_points_of(topo: &topology::T) -> Result<Arc<Vec<i64>>, String> {
-    Ok(topology::View::view(topo).map_err(text)?.vertex_points)
+    Ok(topology::view::view(topo).map_err(text)?.vertex_points)
 }
 
 fn expanded_vec3(vertex_points: &[i64], count: usize, source: &Source) -> Result<Vec3_buffer, String> {
@@ -120,7 +120,7 @@ fn expanded_vec3(vertex_points: &[i64], count: usize, source: &Source) -> Result
         Source::Point(Planes::F3(v)) | Source::Vertex(Planes::F3(v)) => v,
         _ => unreachable!("position and normal sources are Float3"),
     };
-    let input = packed::Float3::View::view(values).map_err(text)?;
+    let input = packed::float3::view::view(values).map_err(text)?;
     let (mut x, mut y, mut z) = (vec![0.0; count], vec![0.0; count], vec![0.0; count]);
     for vertex in 0..count {
         let i = source_index(source, vertex_points, vertex);
@@ -136,7 +136,7 @@ fn color_array(expanded: bool, vertex_points: &[i64], count: usize, source: &Sou
         Source::Point(Planes::F4(v)) | Source::Vertex(Planes::F4(v)) => v,
         _ => unreachable!("color sources are Float4"),
     };
-    let input = packed::Float4::View::view(values);
+    let input = packed::float4::view::view(values);
     (0..count)
         .map(|vertex| {
             let i = match source {
@@ -153,7 +153,7 @@ fn tex_coord_array(expanded: bool, vertex_points: &[i64], count: usize, source: 
         Source::Point(Planes::F2(v)) | Source::Vertex(Planes::F2(v)) => v,
         _ => unreachable!("tex-coord sources are Float2"),
     };
-    let input = packed::Float2::View::view(values);
+    let input = packed::float2::view::view(values);
     (0..count)
         .map(|vertex| {
             let i = match source {
@@ -214,7 +214,7 @@ fn standards(g: &geometry::T) -> Result<Standard, String> {
 fn shared_normals(normals: Option<Source>) -> Result<Option<Vec3_buffer>, String> {
     match normals {
         None => Ok(None),
-        Some(Source::Point(Planes::F3(values))) => Ok(Some(mesh_vec3(&packed::Float3::View::view(&values).map_err(text)?))),
+        Some(Source::Point(Planes::F3(values))) => Ok(Some(mesh_vec3(&packed::float3::view::view(&values).map_err(text)?))),
         Some(Source::Vertex(_)) => unreachable!("vertex normals take the expanded path"),
         Some(Source::Point(_)) => unreachable!("normal sources are Float3"),
     }
@@ -245,7 +245,7 @@ fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::Mesh, St
         let normals = expanded_normals(&vertex_points, count, &normals)?;
         mesh::view::create_packed_owned(Some(mesh::mode::Lines), Some(indices), normals, colors_out, tex_out, positions)
     } else {
-        let positions = mesh_vec3(&packed::Float3::View::view(geometry::positions(g)).map_err(text)?);
+        let positions = mesh_vec3(&packed::float3::view::view(geometry::positions(g)).map_err(text)?);
         let normals = shared_normals(normals)?;
         mesh::view::create_packed_shared(
             Some(mesh::mode::Lines),
@@ -284,7 +284,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::Mesh, String> {
         let indices: Vec<i64> = (0..count as i64).collect();
         mesh::view::create_packed_owned(Some(mesh::mode::Triangles), Some(indices), normals, colors, tex_coords, positions)
     } else {
-        let positions = mesh_vec3(&packed::Float3::View::view(geometry::positions(g)).map_err(text)?);
+        let positions = mesh_vec3(&packed::float3::view::view(geometry::positions(g)).map_err(text)?);
         let normals = shared_normals(normals)?;
         let count = geometry::point_count(g) as usize;
         let colors = colors.as_ref().map(|s| Arc::new(color_array(false, &vertex_points, count, s)));
@@ -333,8 +333,8 @@ pub fn to_trace_mesh(g: &geometry::T) -> Result<mesh::Mesh, error::T> {
     })
 }
 
-fn rdk_float3(view: &Vec3_buffer) -> Result<packed::Float3::T, String> {
-    packed::Float3::View::of_shared_exn(Arc::new(view.x.to_vec()), Arc::new(view.y.to_vec()), Arc::new(view.z.to_vec())).map_err(text)
+fn rdk_float3(view: &Vec3_buffer) -> Result<packed::float3::T, String> {
+    packed::float3::view::of_shared_exn(Arc::new(view.x.to_vec()), Arc::new(view.y.to_vec()), Arc::new(view.z.to_vec())).map_err(text)
 }
 
 fn color_attribute(colors: &[color::T]) -> Result<attribute::T, String> {
@@ -343,14 +343,14 @@ fn color_attribute(colors: &[color::T]) -> Result<attribute::T, String> {
     for (i, c) in colors.iter().enumerate() {
         (r[i], g[i], b[i], a[i]) = color::to_floats(*c);
     }
-    let values = packed::Float4::of_owned(r, g, b, a).map_err(text)?;
+    let values = packed::float4::of_owned(r, g, b, a).map_err(text)?;
     attribute::create_key_owned(&attribute::color(Owner::Point), Storage::Float4(values)).map_err(text)
 }
 
 fn tex_coord_attribute(tex_coords: &[vec2::T]) -> Result<attribute::T, String> {
     let u: Vec<f64> = tex_coords.iter().map(|p| p.x).collect();
     let v: Vec<f64> = tex_coords.iter().map(|p| p.y).collect();
-    let values = packed::Float2::of_owned(u, v).map_err(text)?;
+    let values = packed::float2::of_owned(u, v).map_err(text)?;
     attribute::create_key_owned(&attribute::tex_coord(Owner::Point), Storage::Float2(values)).map_err(text)
 }
 
@@ -359,7 +359,7 @@ fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
     match view.mode {
         mesh::mode::Points | mesh::mode::Triangles => {
             let positions = rdk_float3(&view.vertices)?;
-            let point_count = packed::Float3::length(&positions);
+            let point_count = packed::float3::length(&positions);
             let topo = if view.mode == mesh::mode::Points {
                 topology::empty(point_count).map_err(text)
             } else if view.indices.len() % 3 != 0 {
@@ -367,7 +367,7 @@ fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
             } else {
                 let primitive_count = view.indices.len() / 3;
                 let offsets: Vec<i64> = (0..=primitive_count as i64).map(|i| i * 3).collect();
-                topology::View::polygons_shared(point_count, view.indices.to_vec(), offsets).map_err(text)
+                topology::view::polygons_shared(point_count, view.indices.to_vec(), offsets).map_err(text)
             }?;
             let mut attributes = Vec::new();
             if let Some(normals) = &view.normals {
@@ -396,7 +396,7 @@ fn to_geometry_mesh(g: &geometry::T) -> Result<mesh::Mesh, String> {
     if !expand {
         return to_mesh_raw_impl(g);
     }
-    let view = topology::View::view(geometry::topology(g)).map_err(text)?;
+    let view = topology::view::view(geometry::topology(g)).map_err(text)?;
     let mut corner_primitive = vec![0i64; view.vertex_points.len()];
     for primitive in 0..view.primitive_kinds.len() {
         let (from, to) = (view.primitive_offsets[primitive] as usize, view.primitive_offsets[primitive + 1] as usize);

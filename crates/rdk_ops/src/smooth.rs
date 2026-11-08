@@ -51,7 +51,7 @@ fn validate_point_group(
     }
 }
 
-fn point_on_unshared_edge(index: &topology_index::View::View, point: i64) -> bool {
+fn point_on_unshared_edge(index: &topology_index::view::View, point: i64) -> bool {
     let first = index.point_edge_offsets[point as usize];
     let last = index.point_edge_offsets[point as usize + 1];
     let mut boundary = false;
@@ -77,7 +77,7 @@ fn make_update_selection(
     if unrestricted {
         return Ok(None);
     }
-    let index = topology_index::View::view(index);
+    let index = topology_index::view::view(index);
     cancel::check_opt(cancel_token)?;
     Ok(Some(group::init(
         Some(grain),
@@ -135,7 +135,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
             params.constrained_points.as_ref(),
             geometry_value,
         )?;
-        let source_position_id = packed::Float3::data_id(geometry::positions(geometry_value));
+        let source_position_id = packed::float3::data_id(geometry::positions(geometry_value));
         let had_point_normals =
             geometry::find_attribute(attribute::Owner::Point, "N", geometry_value).is_some();
         let had_vertex_normals =
@@ -155,7 +155,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
         )
         .map_err(remap_error)?;
         let positions_changed =
-            packed::Float3::data_id(geometry::positions(&output)) != source_position_id;
+            packed::float3::data_id(geometry::positions(&output)) != source_position_id;
         if params.recompute_normals
             && (had_point_normals || had_vertex_normals)
             && positions_changed
@@ -208,13 +208,13 @@ mod tests {
         run_with(source, configure).unwrap_or_else(|failure| panic!("{}", error::to_string(&failure)))
     }
 
-    fn positions(value: &geometry::T) -> packed::Float3::View::View {
-        packed::Float3::View::view(geometry::positions(value)).unwrap()
+    fn positions(value: &geometry::T) -> packed::float3::view::View {
+        packed::float3::view::view(geometry::positions(value)).unwrap()
     }
 
     fn point_float(name: &str, value: &geometry::T) -> Vec<f64> {
         let found = geometry::find_attribute(Owner::Point, name, value).unwrap();
-        match attribute::View::storage(&found).unwrap() {
+        match attribute::view::storage(&found).unwrap() {
             Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has unexpected storage"),
         }
@@ -229,7 +229,7 @@ mod tests {
         rdk_core::topology::builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
         rdk_core::topology::builder::add_open_polyline(&mut builder, &[3, 4, 5]).unwrap();
         geometry::create(
-            packed::Float3::View::of_owned_exn(
+            packed::float3::view::of_owned_exn(
                 vec![0.0, 1.0, 2.0, 10.0, 11.0, 12.0],
                 vec![0.0, 3.0, 0.0, 0.0, 4.0, 0.0],
                 vec![0.0; 6],
@@ -268,7 +268,7 @@ mod tests {
         }
         let count = x.len();
         geometry::create(
-            packed::Float3::View::of_owned_exn(x, vec![0.0; count], z).unwrap(),
+            packed::float3::view::of_owned_exn(x, vec![0.0; count], z).unwrap(),
             rdk_core::topology::polygons_owned(count as i64, vertex_points, offsets).unwrap(),
             None,
             None,
@@ -280,7 +280,7 @@ mod tests {
     fn with_y(value: &geometry::T, y: Vec<f64>) -> geometry::T {
         let source = positions(value);
         geometry::with_positions(
-            packed::Float3::View::of_owned_exn(source.x.to_vec(), y, source.z.to_vec()).unwrap(),
+            packed::float3::view::of_owned_exn(source.x.to_vec(), y, source.z.to_vec()).unwrap(),
             value,
         )
         .unwrap()
@@ -391,7 +391,7 @@ mod tests {
             "N",
             Owner::Point,
             Storage::Float3(
-                packed::Float3::View::of_owned_exn(
+                packed::float3::view::of_owned_exn(
                     vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0],
                     vec![0.0; 6],
                     vec![0.0; 6],
@@ -405,9 +405,9 @@ mod tests {
             p.attributes = "P N".to_owned();
         });
         let found = geometry::find_attribute(Owner::Point, "N", &smoothed_n).unwrap();
-        match attribute::View::storage(&found).unwrap() {
+        match attribute::view::storage(&found).unwrap() {
             Storage::Float3(values) => {
-                let values = packed::Float3::View::view(values).unwrap();
+                let values = packed::float3::view::view(values).unwrap();
                 assert_eq!(
                     values.x.to_vec(),
                     vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0],

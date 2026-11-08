@@ -7,7 +7,7 @@ use rdk_core::{
 use rdk_core::error::Code;
 use rdk_core::support::Windows;
 use rdk_geom::point_grid::float_max;
-use rdk_geom::surface_index::View::RayDirections;
+use rdk_geom::surface_index::view::RayDirections;
 use rdk_geom::surface_index::{self, RayDirectionMode, RaySurfaceHit};
 
 use crate::attribute_ops;
@@ -133,12 +133,12 @@ fn direction_planes(
     direction: &Direction,
 ) -> Result<RayDirections, error::T> {
     let per_query = |values: deform::Planes| -> Result<RayDirections, error::T> {
-        let shared = packed::Float3::View::of_shared_exn(
+        let shared = packed::float3::view::of_shared_exn(
             Arc::from(values.x),
             Arc::from(values.y),
             Arc::from(values.z),
         )?;
-        Ok(RayDirections::PerQueryDirections(packed::Float3::View::view(&shared)?))
+        Ok(RayDirections::PerQueryDirections(packed::float3::view::view(&shared)?))
     };
     match direction {
         Direction::RayVector(value) => {
@@ -343,7 +343,7 @@ fn raycast_samples_into(
     selection: Option<&group::T>,
     grain: i64,
     value: &surface_index::T,
-    queries: &packed::Float3::T,
+    queries: &packed::float3::T,
     directions: &RayDirections,
     min_distance: f64,
     max_distance: f64,
@@ -374,7 +374,7 @@ fn raycast_samples_into(
     if !(jitter_scale.is_finite() && jitter_scale >= 0.0) {
         return Err(invalid("Surface_index: ray jitter scale must be finite and non-negative"));
     }
-    let query_count = packed::Float3::length(queries) as usize;
+    let query_count = packed::float3::length(queries) as usize;
     if out_primitives.len() < query_count
         || out_triangles.len() < query_count
         || out_barycentric_a.len() < query_count
@@ -401,7 +401,7 @@ fn raycast_samples_into(
             return Err(invalid("Surface_index: sampled ray normal arrays are too short"));
         }
     }
-    let queries = packed::Float3::View::view(queries)?;
+    let queries = packed::float3::view::view(queries)?;
     let samples_u = samples as usize;
     let range_count = query_count.div_ceil(grain as usize);
     let chunk = grain as usize;
@@ -466,8 +466,8 @@ fn raycast_samples_into(
             if !(ox.is_finite() && oy.is_finite() && oz.is_finite()) {
                 return Err(invalid("Surface_index: selected ray origins must be finite"));
             }
-            let (vx, vy, vz) = surface_index::View::direction_at(directions, query as i64);
-            let (dx, dy, dz) = surface_index::View::normalized_direction(vx, vy, vz)?;
+            let (vx, vy, vz) = surface_index::view::direction_at(directions, query as i64);
+            let (dx, dy, dz) = surface_index::view::normalized_direction(vx, vy, vz)?;
             let directions_to_query = match direction_mode {
                 RayDirectionMode::RayForward | RayDirectionMode::RayReverse => 1,
                 RayDirectionMode::RayBidirectionalClosest | RayDirectionMode::RayBidirectionalFarthest => 2,
@@ -484,7 +484,7 @@ fn raycast_samples_into(
                 for sample in 0..samples {
                     cancel::poll(cancel_ref, sample, 63)?;
                     jittered_direction(seed, query as i64, sample, jitter_scale, sign * dx, sign * dy, sign * dz, &mut direction);
-                    surface_index::View::ray_query_once(
+                    surface_index::view::ray_query_once(
                         value,
                         ox,
                         oy,
@@ -549,7 +549,7 @@ fn raycast_samples_into(
                         for sample in 0..samples_u {
                             let result = base + sample;
                             if sample_hit(&integer_results, result) {
-                                surface_index::View::triangle_normal_into(
+                                surface_index::view::triangle_normal_into(
                                     value,
                                     integer_results[result * 2 + 1],
                                     &mut normal,
@@ -564,7 +564,7 @@ fn raycast_samples_into(
                         ny *= inverse;
                         nz *= inverse;
                     } else {
-                        surface_index::View::triangle_normal_into(value, p_triangles[query - first], &mut normal);
+                        surface_index::view::triangle_normal_into(value, p_triangles[query - first], &mut normal);
                         nx = normal[0];
                         ny = normal[1];
                         nz = normal[2];
@@ -585,7 +585,7 @@ fn raycast_average_drivers_into(
     selection: Option<&group::T>,
     grain: i64,
     value: &surface_index::T,
-    queries: &packed::Float3::T,
+    queries: &packed::float3::T,
     directions: &RayDirections,
     min_distance: f64,
     max_distance: f64,
@@ -600,11 +600,11 @@ fn raycast_average_drivers_into(
     vertex_numbers: &mut [i64],
     vertex_weights: &mut [f64],
 ) -> Result<(), error::T> {
-    let query_count = packed::Float3::length(queries) as usize;
+    let query_count = packed::float3::length(queries) as usize;
     if direction_signs.len() < query_count || hit_counts.len() < query_count || offsets.len() != query_count + 1 {
         return Err(fail(Code::InvalidParameter, "Surface_index: average ray driver arrays do not match queries"));
     }
-    let queries = packed::Float3::View::view(queries)?;
+    let queries = packed::float3::view::view(queries)?;
     // Range `r` writes the driver slots of its queries: `offsets[first..last + 1]`.
     let ranges = support::range_count(query_count as i64, grain);
     let bound = |range: i64| offsets[((range * grain.max(1)) as usize).min(query_count)] as usize;
@@ -626,15 +626,15 @@ fn raycast_average_drivers_into(
             };
             if direction_signs[query] != 0 && selected_query {
                 let (ox, oy, oz) = (queries.x[query], queries.y[query], queries.z[query]);
-                let (vx, vy, vz) = surface_index::View::direction_at(directions, query as i64);
-                let (dx, dy, dz) = surface_index::View::normalized_direction(vx, vy, vz)?;
+                let (vx, vy, vz) = surface_index::view::direction_at(directions, query as i64);
+                let (dx, dy, dz) = surface_index::view::normalized_direction(vx, vy, vz)?;
                 let sign = direction_signs[query] as f64;
                 let scale = 1.0 / hit_counts[query] as f64;
                 let mut at = offsets[query] as usize;
                 for sample in 0..samples {
                     cancel::poll(cancel_ref, sample, 63)?;
                     jittered_direction(seed, query as i64, sample, jitter_scale, sign * dx, sign * dy, sign * dz, &mut direction);
-                    surface_index::View::ray_query_once(
+                    surface_index::view::ray_query_once(
                         value,
                         ox,
                         oy,
@@ -656,7 +656,7 @@ fn raycast_average_drivers_into(
                         let triangle = integer_results[1];
                         let slot = at - base;
                         for corner in 0..3 {
-                            numbers[slot + corner] = surface_index::View::triangle_vertex(value, triangle, corner as i64);
+                            numbers[slot + corner] = surface_index::view::triangle_vertex(value, triangle, corner as i64);
                             weights[slot + corner] = float_results[1 + corner] * scale;
                         }
                         at += 3;
@@ -674,7 +674,7 @@ fn raycast_average_drivers_into(
 fn existing_point_float(name: &str, count: usize, source: &geometry::T, default: f64) -> Result<Vec<f64>, error::T> {
     match geometry::find_attribute(attribute::Owner::Point, name, source) {
         None => Ok(vec![default; count]),
-        Some(found) => match attribute::View::storage(&found)? {
+        Some(found) => match attribute::view::storage(&found)? {
             attribute::Storage::Float(values) => Ok(values.to_vec()),
             _ => Err(fail(Code::InvalidOutput, &format!("point output attribute \"{name}\" must have float storage"))),
         },
@@ -684,7 +684,7 @@ fn existing_point_float(name: &str, count: usize, source: &geometry::T, default:
 fn existing_point_int(name: &str, count: usize, source: &geometry::T, default: i64) -> Result<Vec<i64>, error::T> {
     match geometry::find_attribute(attribute::Owner::Point, name, source) {
         None => Ok(vec![default; count]),
-        Some(found) => match attribute::View::storage(&found)? {
+        Some(found) => match attribute::view::storage(&found)? {
             attribute::Storage::Int(values) => Ok(values.to_vec()),
             _ => Err(fail(Code::InvalidOutput, &format!("point output attribute \"{name}\" must have integer storage"))),
         },
@@ -696,9 +696,9 @@ type Planes3 = (Vec<f64>, Vec<f64>, Vec<f64>);
 fn existing_point_float3(name: &str, count: usize, source: &geometry::T) -> Result<Planes3, error::T> {
     match geometry::find_attribute(attribute::Owner::Point, name, source) {
         None => Ok((vec![0.0; count], vec![0.0; count], vec![0.0; count])),
-        Some(found) => match attribute::View::storage(&found)? {
+        Some(found) => match attribute::view::storage(&found)? {
             attribute::Storage::Float3(values) => {
-                let values = packed::Float3::View::view(values)?;
+                let values = packed::float3::view::view(values)?;
                 Ok((values.x.to_vec(), values.y.to_vec(), values.z.to_vec()))
             }
             _ => Err(fail(Code::InvalidOutput, &format!("point output attribute \"{name}\" must have float3 storage"))),
@@ -866,7 +866,7 @@ fn run_inner(
         Method::RayProject => {
             let directions = directions.as_ref().ok_or_else(|| fail(Code::InvalidDirection, "missing ray directions"))?;
             if samples == 1 {
-                surface_index::View::raycast_many_into(
+                surface_index::view::raycast_many_into(
                     cancel_ref,
                     selection.as_ref(),
                     grain,
@@ -918,9 +918,9 @@ fn run_inner(
             }
         }
     }
-    let source_positions = packed::Float3::View::view(geometry::positions(source))?;
-    let collision_positions = packed::Float3::View::view(geometry::positions(collision))?;
-    let collision_topology = topology::View::view(geometry::topology(collision))?;
+    let source_positions = packed::float3::view::view(geometry::positions(source))?;
+    let collision_positions = packed::float3::view::view(geometry::positions(collision))?;
+    let collision_topology = topology::view::view(geometry::topology(collision))?;
     let (mut px, mut py, mut pz) = (source_positions.x.to_vec(), source_positions.y.to_vec(), source_positions.z.to_vec());
     let range_count = support::range_count(point_count as i64, grain);
     let mut errors = vec![-1i64; range_count as usize];
@@ -947,9 +947,9 @@ fn run_inner(
                 if triangle < 0 {
                     continue;
                 }
-                let va = surface_index::View::triangle_vertex(&surface, triangle, 0) as usize;
-                let vb = surface_index::View::triangle_vertex(&surface, triangle, 1) as usize;
-                let vc = surface_index::View::triangle_vertex(&surface, triangle, 2) as usize;
+                let va = surface_index::view::triangle_vertex(&surface, triangle, 0) as usize;
+                let vb = surface_index::view::triangle_vertex(&surface, triangle, 1) as usize;
+                let vc = surface_index::view::triangle_vertex(&surface, triangle, 2) as usize;
                 let a = collision_topology.vertex_points[va] as usize;
                 let b = collision_topology.vertex_points[vb] as usize;
                 let c = collision_topology.vertex_points[vc] as usize;
@@ -1039,7 +1039,7 @@ fn run_inner(
             &format!("ray transform produced a non-finite position at point {point}"),
         ));
     }
-    let positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
+    let positions = packed::float3::view::of_owned_exn(px, py, pz)?;
     let needs_interpolation = params.point_pattern.is_some()
         || params.vertex_pattern.is_some()
         || params.primitive_pattern.is_some()
@@ -1106,7 +1106,7 @@ fn run_inner(
         let item = attribute::create_owned(
             name,
             attribute::Owner::Point,
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x.clone(), y.clone(), z.clone())?),
+            attribute::Storage::Float3(packed::float3::view::of_owned_exn(x.clone(), y.clone(), z.clone())?),
         )?;
         attributes.insert(0, item.clone());
         if !imported_point_attribute(name) {
@@ -1157,9 +1157,9 @@ fn run_inner(
                 let triangle = triangles[point];
                 if triangle >= 0 {
                     let output = offsets[point] as usize;
-                    numbers[output] = surface_index::View::triangle_vertex(&surface, triangle, 0);
-                    numbers[output + 1] = surface_index::View::triangle_vertex(&surface, triangle, 1);
-                    numbers[output + 2] = surface_index::View::triangle_vertex(&surface, triangle, 2);
+                    numbers[output] = surface_index::view::triangle_vertex(&surface, triangle, 0);
+                    numbers[output + 1] = surface_index::view::triangle_vertex(&surface, triangle, 1);
+                    numbers[output + 2] = surface_index::view::triangle_vertex(&surface, triangle, 2);
                     weights[output] = barycentric_a[point];
                     weights[output + 1] = barycentric_b[point];
                     weights[output + 2] = barycentric_c[point];
@@ -1169,12 +1169,12 @@ fn run_inner(
         let numbers_attribute = attribute::create_owned(
             &numbers_name,
             attribute::Owner::Point,
-            attribute::Storage::IntArray(packed::IntArray::View::create_validated_owned(offsets.clone(), numbers)),
+            attribute::Storage::IntArray(packed::int_array::view::create_validated_owned(offsets.clone(), numbers)),
         )?;
         let weights_attribute = attribute::create_owned(
             &weights_name,
             attribute::Owner::Point,
-            attribute::Storage::FloatArray(packed::FloatArray::View::create_validated_owned(offsets, weights)),
+            attribute::Storage::FloatArray(packed::float_array::view::create_validated_owned(offsets, weights)),
         )?;
         attributes.insert(0, weights_attribute.clone());
         attributes.insert(0, numbers_attribute.clone());
@@ -1203,7 +1203,7 @@ fn run_inner(
         source.clone()
     };
     attributes.reverse();
-    let target = geometry::View::with_merged_owned(Some(positions.clone()), attributes, groups, &target)?;
+    let target = geometry::view::with_merged_owned(Some(positions.clone()), attributes, groups, &target)?;
     let output = if !needs_interpolation {
         target
     } else {
@@ -1324,16 +1324,16 @@ mod tests {
     }
 
     fn point_float(source: &geometry::T, name: &str) -> Vec<f64> {
-        match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, name, source).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, name, source).unwrap()).unwrap() {
             attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has unexpected storage"),
         }
     }
 
     fn point_float3(source: &geometry::T, name: &str) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, name, source).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, name, source).unwrap()).unwrap() {
             attribute::Storage::Float3(values) => {
-                let v = packed::Float3::View::view(values).unwrap();
+                let v = packed::float3::view::view(values).unwrap();
                 (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
             }
             _ => panic!("{name} has unexpected storage"),
@@ -1363,11 +1363,11 @@ mod tests {
         let primitives = int_attribute(attribute::Owner::Point, "hit_prim", &projected);
         let normals = point_float3(&projected, "hit_N");
         let (numbers, weights) = match (
-            attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "hit_vertices", &projected).unwrap()).unwrap(),
-            attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "hit_weights", &projected).unwrap()).unwrap(),
+            attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "hit_vertices", &projected).unwrap()).unwrap(),
+            attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "hit_weights", &projected).unwrap()).unwrap(),
         ) {
             (attribute::Storage::IntArray(n), attribute::Storage::FloatArray(w)) => {
-                (packed::IntArray::View::view(n), packed::FloatArray::View::view(w))
+                (packed::int_array::view::view(n), packed::float_array::view::view(w))
             }
             _ => panic!("provenance storage"),
         };
@@ -1489,11 +1489,11 @@ mod tests {
         p.point_pattern = Some("signal".to_owned());
         let drivers = ray(&p, &source, &collision_with_signal).unwrap();
         let (numbers, weights) = match (
-            attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "vertices", &drivers).unwrap()).unwrap(),
-            attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "weights", &drivers).unwrap()).unwrap(),
+            attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "vertices", &drivers).unwrap()).unwrap(),
+            attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "weights", &drivers).unwrap()).unwrap(),
         ) {
             (attribute::Storage::IntArray(n), attribute::Storage::FloatArray(w)) => {
-                (packed::IntArray::View::view(n), packed::FloatArray::View::view(w))
+                (packed::int_array::view::view(n), packed::float_array::view::view(w))
             }
             _ => panic!("provenance storage"),
         };
@@ -1515,9 +1515,9 @@ mod tests {
         p.source_vertex_numbers_attribute = Some("vertices".to_owned());
         p.source_vertex_weights_attribute = Some("weights".to_owned());
         let selected = ray(&p, &source, &collision).unwrap();
-        match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "vertices", &selected).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "vertices", &selected).unwrap()).unwrap() {
             attribute::Storage::IntArray(n) => {
-                assert_eq!(packed::IntArray::View::view(n).offsets.to_vec(), vec![0, 3]);
+                assert_eq!(packed::int_array::view::view(n).offsets.to_vec(), vec![0, 3]);
             }
             _ => panic!("storage"),
         }
@@ -1534,7 +1534,7 @@ mod tests {
         p.selection = Some(element_selection::T::SelectedPoints(selection));
         p.direction = down();
         assert_eq!(xyz(&ray(&p, &source, &plane(4.0, 0.0)).unwrap()).1, vec![2.0, 0.0, 2.0], "point restriction");
-        let directions = packed::Float3::View::of_owned_exn(vec![0.0; 3], vec![-1.0, -2.0, -3.0], vec![0.0; 3]).unwrap();
+        let directions = packed::float3::view::of_owned_exn(vec![0.0; 3], vec![-1.0, -2.0, -3.0], vec![0.0; 3]).unwrap();
         let direction_attribute =
             attribute::create_owned("ray_dir", attribute::Owner::Point, attribute::Storage::Float3(directions)).unwrap();
         let with_direction = geometry::with_attribute(direction_attribute, &source).unwrap();
@@ -1616,14 +1616,14 @@ mod tests {
                 && near(point_float(&output, "corner")[0], 13.0 * 0.375 + 14.0 * 0.5625 + 15.0 * 0.0625),
             "did not interpolate imported numeric fields at the hit"
         );
-        match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "material", &output).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "material", &output).unwrap()).unwrap() {
             attribute::Storage::Text(values) => assert_eq!(&values[0], b"m1"),
             _ => panic!("material output storage"),
         }
         assert_eq!(int_attribute(attribute::Owner::Point, "revision", &output)[0], 7);
         let marked = geometry::find_group(group::Owner::Point, "marked", &output).expect("imported group missing");
         assert!(group::mem(0, &marked));
-        let normals = packed::Float3::View::of_owned_exn(vec![1.0; points as usize], vec![0.0; points as usize], vec![0.0; points as usize]).unwrap();
+        let normals = packed::float3::view::of_owned_exn(vec![1.0; points as usize], vec![0.0; points as usize], vec![0.0; points as usize]).unwrap();
         let collision = add("N", attribute::Owner::Point, attribute::Storage::Float3(normals), &collision);
         let mut p = base();
         p.direction = down();
@@ -1690,7 +1690,7 @@ mod tests {
         check(p, Code::InvalidGroup);
         let curve = geom(vec![-1.0, 1.0], vec![0.0; 2], vec![0.0; 2], &[(PrimitiveKind::OpenPolyline, vec![0, 1])]);
         expect_code(ray(&base(), &source, &curve), Code::InvalidSurface);
-        let bad = packed::Float3::View::of_owned_exn(vec![0.0], vec![f64::NAN], vec![0.0]).unwrap();
+        let bad = packed::float3::view::of_owned_exn(vec![0.0], vec![f64::NAN], vec![0.0]).unwrap();
         let bad_source = geometry::with_attribute(
             attribute::create_owned("bad", attribute::Owner::Point, attribute::Storage::Float3(bad)).unwrap(),
             &source,

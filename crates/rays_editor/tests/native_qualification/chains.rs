@@ -9,7 +9,7 @@ use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
 use flow_native::workspace_gpu as wg;
 use flow_sop::{lower, value_lane};
-use rdk_core::{attribute as a, geometry as g, packed::Float3 as p};
+use rdk_core::{attribute as a, geometry as g, packed::float3 as p};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 pub fn cases() -> Vec<(&'static str, fn())> {

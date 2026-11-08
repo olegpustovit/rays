@@ -19,8 +19,8 @@ const OPERATION: &str = "surface_index";
 
 pub struct T {
     geometry: geometry::T,
-    positions: packed::Float3::View::View,
-    topology: topology::View::View,
+    positions: packed::float3::view::View,
+    topology: topology::view::View,
     primitives: Vec<i64>,
     vertex_a: Vec<i64>,
     vertex_b: Vec<i64>,
@@ -187,8 +187,8 @@ fn create_with(
         return Err(invalid_argument("Surface_index: validated triangle construction cannot select elements"));
     }
     cancel::check_opt(cancel_value)?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let topology_view = topology::View::view(geometry::topology(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
+    let topology_view = topology::view::view(geometry::topology(geometry_value))?;
     let primitive_count = topology_view.primitive_kinds.len() as i64;
     if let Some(vertex_group) = vertices {
         if group::owner(vertex_group) != group::Owner::Vertex {
@@ -217,7 +217,7 @@ fn create_with(
         }
     };
     if let Some(vertex_group) = vertices {
-        let vertex_bits = group::View::bits_view(vertex_group);
+        let vertex_bits = group::view::bits_view(vertex_group);
         selected_primitives = filter_items(cancel_value, grain.max(1), &selected_primitives, &|primitive| {
             let last = topology_view.primitive_offsets[primitive as usize + 1];
             (topology_view.primitive_offsets[primitive as usize]..last).any(|vertex| selected(vertex_bits, vertex))
@@ -316,7 +316,7 @@ fn create_with(
         joined
     };
     if let Some(vertex_group) = vertices {
-        let bits = group::View::bits_view(vertex_group);
+        let bits = group::view::bits_view(vertex_group);
         let count = triangles.primitives.len() as i64;
         let mut keep = vec![false; count as usize];
         {
@@ -819,7 +819,7 @@ fn self_pairs_disjoint_topology(
                 bits[primitive >> 3] |= 1 << (primitive & 7);
             }
         }
-        let selection = group::View::of_owned_bits(
+        let selection = group::view::of_owned_bits(
             group::Owner::Primitive,
             "__rdk_surface_disjoint_partition",
             primitive_count as i64,
@@ -1017,7 +1017,7 @@ pub fn closest_many_into(
     position_indices: Option<&[i64]>,
     grain: i64,
     value: &T,
-    queries: &packed::Float3::T,
+    queries: &packed::float3::T,
     max_distance_squared: f64,
     primitives: &mut [i64],
     triangles: &mut [i64],
@@ -1029,7 +1029,7 @@ pub fn closest_many_into(
     if grain <= 0 {
         return Err(invalid_argument("Surface_index: grain must be positive"));
     }
-    let position_count = packed::Float3::length(queries);
+    let position_count = packed::float3::length(queries);
     let query_count = match position_indices {
         None => position_count,
         Some(values) => values.len() as i64,
@@ -1054,7 +1054,7 @@ pub fn closest_many_into(
     {
         return Err(invalid_argument("Surface_index: output arrays are too short"));
     }
-    let query_view = packed::Float3::View::view(queries)?;
+    let query_view = packed::float3::view::view(queries)?;
     {
         let windows = (
             support::Windows::even(&mut primitives[..n], grain),
@@ -1136,14 +1136,14 @@ pub fn closest_distances_many_into(
     selection: Option<&group::T>,
     grain: i64,
     value: &T,
-    queries: &packed::Float3::T,
+    queries: &packed::float3::T,
     max_distance_squared: f64,
     distances_squared: &mut [f64],
 ) -> Result<(), error::T> {
     if grain <= 0 {
         return Err(invalid_argument("Surface_index: grain must be positive"));
     }
-    let query_count = packed::Float3::length(queries);
+    let query_count = packed::float3::length(queries);
     if let Some(selected_group) = selection {
         if group::owner(selected_group) != group::Owner::Point || group::length(selected_group) != query_count {
             return Err(invalid_argument("Surface_index: query selection must be a matching point group"));
@@ -1152,7 +1152,7 @@ pub fn closest_distances_many_into(
     if (distances_squared.len() as i64) < query_count {
         return Err(invalid_argument("Surface_index: output array is too short"));
     }
-    let query_view = packed::Float3::View::view(queries)?;
+    let query_view = packed::float3::view::view(queries)?;
     {
         let windows = support::Windows::even(&mut distances_squared[..query_count as usize], grain);
         support::run_indexed_ranges(grain, query_count, &|range, first, last| {
@@ -1286,14 +1286,13 @@ fn ray_triangle_into(
     true
 }
 
-#[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     #[derive(Clone)]
     pub enum RayDirections {
         ConstantDirection { x: f64, y: f64, z: f64 },
-        PerQueryDirections(packed::Float3::View::View),
+        PerQueryDirections(packed::float3::view::View),
     }
 
     /// Build directly from geometry already certified finite, nondegenerate, polygon-triangle-only,
@@ -1530,7 +1529,7 @@ pub mod View {
         selection: Option<&group::T>,
         grain: i64,
         value: &T,
-        queries: &packed::Float3::T,
+        queries: &packed::float3::T,
         directions: &RayDirections,
         min_distance: f64,
         max_distance: f64,
@@ -1566,7 +1565,7 @@ pub mod View {
     }
 }
 
-use View::RayDirections;
+use view::RayDirections;
 
 #[allow(clippy::too_many_arguments)]
 fn raycast_many_into(
@@ -1574,7 +1573,7 @@ fn raycast_many_into(
     selection: Option<&group::T>,
     grain: i64,
     value: &T,
-    queries: &packed::Float3::T,
+    queries: &packed::float3::T,
     directions: &RayDirections,
     min_distance: f64,
     max_distance: f64,
@@ -1591,7 +1590,7 @@ fn raycast_many_into(
     if grain <= 0 {
         return Err(invalid_argument("Surface_index: grain must be positive"));
     }
-    let query_count = packed::Float3::length(queries);
+    let query_count = packed::float3::length(queries);
     if let RayDirections::PerQueryDirections(values) = directions {
         let n = query_count as usize;
         if values.x.len() != n || values.y.len() != n || values.z.len() != n {
@@ -1622,7 +1621,7 @@ fn raycast_many_into(
     {
         return Err(invalid_argument("Surface_index: ray output arrays are too short"));
     }
-    let query_view = packed::Float3::View::view(queries)?;
+    let query_view = packed::float3::view::view(queries)?;
     let windows = (
         support::Windows::even(&mut primitives[..n], grain),
         support::Windows::even(&mut triangles[..n], grain),
@@ -1657,13 +1656,13 @@ fn raycast_many_into(
             }
             let q = query as usize;
             let (ox, oy, oz) = (query_view.x[q], query_view.y[q], query_view.z[q]);
-            let (vx, vy, vz) = View::direction_at(directions, query);
+            let (vx, vy, vz) = view::direction_at(directions, query);
             if !(ox.is_finite() && oy.is_finite() && oz.is_finite()) {
                 return Err(invalid_argument("Surface_index: selected ray origins must be finite"));
             }
-            let (dx, dy, dz) = View::normalized_direction(vx, vy, vz)?;
+            let (dx, dy, dz) = view::normalized_direction(vx, vy, vz)?;
             let mut once = |sign: f64, slot: i64| {
-                View::ray_query_once(
+                view::ray_query_once(
                     value,
                     ox,
                     oy,
@@ -1735,7 +1734,7 @@ pub fn raycast(
     origin: rays_math::vec3::T,
     direction: rays_math::vec3::T,
 ) -> Result<Option<Hit>, error::T> {
-    let queries = packed::Float3::View::of_owned_exn(vec![origin.x], vec![origin.y], vec![origin.z])?;
+    let queries = packed::float3::view::of_owned_exn(vec![origin.x], vec![origin.y], vec![origin.z])?;
     let mut primitive = [-1_i64];
     let mut triangle = [-1_i64];
     let mut a = [0.0_f64];
@@ -1776,19 +1775,19 @@ mod tests {
         let x = vec![0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
         let y = vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
         let z = vec![0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0];
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
-        let topo = topology::View::create_validated_owned(7, vec![0, 1, 2, 3, 4, 5, 6], vec![0, 4, 7], vec![0, 0]);
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
+        let topo = topology::view::create_validated_owned(7, vec![0, 1, 2, 3, 4, 5, 6], vec![0, 4, 7], vec![0, 0]);
         geometry::create(positions, topo, None, None, None).unwrap()
     }
     #[test]
     fn distance_only_surface_matches_provenance_and_bounded_misses() {
-        let positions = packed::Float3::View::of_owned_exn(
+        let positions = packed::float3::view::of_owned_exn(
             vec![-5.0, 5.0, 5.0, -5.0], vec![0.0; 4], vec![-5.0, -5.0, 5.0, 5.0],
         ).unwrap();
         let topology = topology::polygons_owned(4, vec![0, 1, 2, 3], vec![0, 4]).unwrap();
         let geometry = geometry::create(positions, topology, None, None, None).unwrap();
         let index = create(None, Some(1), None, None, None, &geometry).unwrap();
-        let queries = packed::Float3::View::of_owned_exn(
+        let queries = packed::float3::view::of_owned_exn(
             vec![0.0, 1.0, 4.0], vec![0.0, 2.0, 0.0], vec![0.0; 3],
         ).unwrap();
         let (mut primitives, mut triangles) = ([-1; 3], [-1; 3]);
@@ -1821,7 +1820,7 @@ mod tests {
     #[test]
     fn closest_queries_fill_stable_slots_and_parallel_equals_sequential() {
         let index = create(None, Some(1), None, None, None, &two_primitives()).unwrap();
-        let queries = packed::Float3::View::of_owned_exn(
+        let queries = packed::float3::view::of_owned_exn(
             vec![0.25, 0.5, 5.0, 0.0],
             vec![0.25, 0.5, 5.0, 0.0],
             vec![1.0, 1.9, 5.0, 3.0],
@@ -1853,25 +1852,25 @@ mod tests {
     #[test]
     fn candidate_pairs_exclude_same_primitive_and_tolerance_widens() {
         let index = create(None, Some(1), None, None, None, &two_primitives()).unwrap();
-        let (left, right) = View::overlapping_self_triangle_pairs(None, 1, 0.0, &index).unwrap();
+        let (left, right) = view::overlapping_self_triangle_pairs(None, 1, 0.0, &index).unwrap();
         // the two quad triangles share a primitive and the far triangle is 2 away
         assert!(left.is_empty() && right.is_empty());
-        let (left, right) = View::overlapping_self_triangle_pairs(None, 1, 2.5, &index).unwrap();
+        let (left, right) = view::overlapping_self_triangle_pairs(None, 1, 2.5, &index).unwrap();
         assert_eq!((left, right), (vec![0, 1], vec![2, 2]));
-        let (first, second) = View::self_pairs_disjoint_topology(None, 1, 2.5, &index).unwrap();
+        let (first, second) = view::self_pairs_disjoint_topology(None, 1, 2.5, &index).unwrap();
         assert_eq!((first.len(), second.len()), (2, 2));
-        assert!(View::overlapping_triangle_pairs(None, 0, 0.0, &index, &index).is_err());
+        assert!(view::overlapping_triangle_pairs(None, 0, 0.0, &index, &index).is_err());
     }
 
     #[test]
     fn vertex_selection_and_degenerate_surfaces() {
         let geom = two_primitives();
         let bits = vec![0b0001_1111_u8, 0];
-        let vertices = group::View::of_owned_bits(group::Owner::Vertex, "v", 7, vec![bits[0] & 0x7f]).unwrap();
+        let vertices = group::view::of_owned_bits(group::Owner::Vertex, "v", 7, vec![bits[0] & 0x7f]).unwrap();
         let index = create(None, None, None, Some(&vertices), Some(VertexSelection::AnyTriangleVertex), &geom).unwrap();
         assert!(triangle_count(&index) >= 2);
-        let flat = packed::Float3::View::of_owned_exn(vec![0.0, 1.0, 2.0], vec![0.0; 3], vec![0.0; 3]).unwrap();
-        let topo = topology::View::create_validated_owned(3, vec![0, 1, 2], vec![0, 3], vec![0]);
+        let flat = packed::float3::view::of_owned_exn(vec![0.0, 1.0, 2.0], vec![0.0; 3], vec![0.0; 3]).unwrap();
+        let topo = topology::view::create_validated_owned(3, vec![0, 1, 2], vec![0, 3], vec![0]);
         let degenerate = geometry::create(flat, topo, None, None, None).unwrap();
         let failure = create(None, None, None, None, None, &degenerate).err().unwrap();
         assert_eq!(error::message(&failure), "primitive 0 is degenerate");
@@ -1913,7 +1912,7 @@ mod ported_tests {
         }
         let offsets: Vec<i64> = (0..=primitive_count as i64).map(|value| value * 3).collect();
         let topology_value = topology::polygons_owned(point_count as i64, vertices, offsets).unwrap();
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
         geometry::create(positions, topology_value, None, None, None).unwrap()
     }
 
@@ -1929,9 +1928,9 @@ mod ported_tests {
         for pair in 0..first.len() {
             let mut shared = false;
             for left in 0..3 {
-                let point = View::triangle_point(surface, first[pair], left);
+                let point = view::triangle_point(surface, first[pair], left);
                 for right in 0..3 {
-                    if point == View::triangle_point(surface, second[pair], right) {
+                    if point == view::triangle_point(surface, second[pair], right) {
                         shared = true;
                     }
                 }
@@ -1964,10 +1963,10 @@ mod ported_tests {
     fn disjoint_topology_candidates_match_raw_filtering_across_grains() {
         let geometry_value = high_valence_surface();
         let surface = create(None, Some(1), None, None, None, &geometry_value).unwrap();
-        let (raw_first, raw_second) = View::overlapping_self_triangle_pairs(None, 1, 0.0, &surface).unwrap();
+        let (raw_first, raw_second) = view::overlapping_self_triangle_pairs(None, 1, 0.0, &surface).unwrap();
         let (reference_first, reference_second) = filtered_reference(&surface, &raw_first, &raw_second);
-        let (one_first, one_second) = View::self_pairs_disjoint_topology(None, 1, 0.0, &surface).unwrap();
-        let (many_first, many_second) = View::self_pairs_disjoint_topology(None, 8, 0.0, &surface).unwrap();
+        let (one_first, one_second) = view::self_pairs_disjoint_topology(None, 1, 0.0, &surface).unwrap();
+        let (many_first, many_second) = view::self_pairs_disjoint_topology(None, 8, 0.0, &surface).unwrap();
         let triangles = triangle_count(&surface);
         let reference = sorted_keys(triangles, &reference_first, &reference_second);
         let one = sorted_keys(triangles, &one_first, &one_second);
@@ -1986,7 +1985,7 @@ mod attribute_suite_tests {
 
     fn single_polygon(x: Vec<f64>, y: Vec<f64>) -> geometry::T {
         let count = x.len() as i64;
-        let positions = packed::Float3::View::of_owned_exn(x, y, vec![0.0; count as usize]).unwrap();
+        let positions = packed::float3::view::of_owned_exn(x, y, vec![0.0; count as usize]).unwrap();
         let topo = topology::polygons_owned(count, (0..count).collect(), vec![0, count]).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }

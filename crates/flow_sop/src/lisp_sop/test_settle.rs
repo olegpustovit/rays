@@ -73,7 +73,7 @@ fn node(gpu: Option<&Gpu::Config>, y: f64) -> sop::node::T {
 
 fn positions(g: &geo::T) -> Vec<(f64, f64, f64)> {
     let p = geo::positions(g);
-    (0..rdk_core::packed::Float3::length(p)).map(|i| rdk_core::packed::Float3::get(p, i).unwrap()).collect()
+    (0..rdk_core::packed::float3::length(p)).map(|i| rdk_core::packed::float3::get(p, i).unwrap()).collect()
 }
 
 #[test]
@@ -87,13 +87,13 @@ fn in_flight_device_writes_settle_at_a_cooks_end() {
     // placed and settled: the device's values
     let mut s = session();
     let placed = cook(&mut s, &ctx, &node(Some(&gpu), 1.0));
-    assert!(c.settles.load(Ordering::SeqCst) == 1 && rdk_core::packed::Float3::resident(geo::positions(&placed)));
+    assert!(c.settles.load(Ordering::SeqCst) == 1 && rdk_core::packed::float3::resident(geo::positions(&placed)));
     // its bounds are the device's, P left where it is; once read, a scan of the same values
     let p = geo::positions(&placed);
-    assert!(rdk_core::packed::Float3::bounds(p).unwrap() == Some(vec![42.0; 6]) && c.bounded.load(Ordering::SeqCst) == 1);
-    assert!(rdk_core::packed::Float3::resident(p));
+    assert!(rdk_core::packed::float3::bounds(p).unwrap() == Some(vec![42.0; 6]) && c.bounded.load(Ordering::SeqCst) == 1);
+    assert!(rdk_core::packed::float3::resident(p));
     assert!(positions(&placed).iter().all(|p| *p == (42.0, 42.0, 42.0)));
-    assert!(rdk_core::packed::Float3::bounds(p).unwrap() == Some(vec![42.0; 6]) && c.bounded.load(Ordering::SeqCst) == 1);
+    assert!(rdk_core::packed::float3::bounds(p).unwrap() == Some(vec![42.0; 6]) && c.bounded.load(Ordering::SeqCst) == 1);
     // a toggled edit evicts the other write: its outputs are released once neither the cook's root
     // nor the previous cook's holds them
     cook(&mut s, &ctx, &node(Some(&gpu), 2.0));
@@ -105,6 +105,6 @@ fn in_flight_device_writes_settle_at_a_cooks_end() {
     c.settles.store(0, Ordering::SeqCst);
     let recooked = cook(&mut session(), &ctx, &node(Some(&gpu), 1.0));
     assert_eq!(c.settles.load(Ordering::SeqCst), 1);
-    assert!(!rdk_core::packed::Float3::resident(geo::positions(&recooked)));
+    assert!(!rdk_core::packed::float3::resident(geo::positions(&recooked)));
     assert!(positions(&recooked) == cpu);
 }

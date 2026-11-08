@@ -17,11 +17,11 @@ pub enum Owner {
 pub enum Storage {
     Float(Arc<Vec<f64>>),
     Int(Arc<Vec<i64>>),
-    IntArray(packed::IntArray::T),
-    FloatArray(packed::FloatArray::T),
-    Float2(packed::Float2::T),
-    Float3(packed::Float3::T),
-    Float4(packed::Float4::T),
+    IntArray(packed::int_array::T),
+    FloatArray(packed::float_array::T),
+    Float2(packed::float2::T),
+    Float3(packed::float3::T),
+    Float4(packed::float4::T),
     /// Opaque byte strings; attribute names and schema identifiers remain UTF-8.
     Text(Arc<TextArray>),
 }
@@ -54,7 +54,7 @@ enum Body {
     Deferred {
         kind: StorageKind,
         length: i64,
-        value: packed::Deferred::T,
+        value: packed::deferred::T,
     },
 }
 
@@ -94,11 +94,11 @@ fn storage_length(storage: &Storage) -> i64 {
     match storage {
         Storage::Float(values) => i64::try_from(values.len()).unwrap_or(i64::MAX),
         Storage::Int(values) => i64::try_from(values.len()).unwrap_or(i64::MAX),
-        Storage::IntArray(values) => packed::IntArray::length(values),
-        Storage::FloatArray(values) => packed::FloatArray::length(values),
-        Storage::Float2(values) => packed::Float2::length(values),
-        Storage::Float3(values) => packed::Float3::length(values),
-        Storage::Float4(values) => packed::Float4::length(values),
+        Storage::IntArray(values) => packed::int_array::length(values),
+        Storage::FloatArray(values) => packed::float_array::length(values),
+        Storage::Float2(values) => packed::float2::length(values),
+        Storage::Float3(values) => packed::float3::length(values),
+        Storage::Float4(values) => packed::float4::length(values),
         Storage::Text(values) => i64::try_from(values.len()).unwrap_or(i64::MAX),
     }
 }
@@ -107,8 +107,8 @@ fn raw(value: &T) -> Result<&Storage, error::T> {
     match value.body.as_ref() {
         Body::Ready(storage) => Ok(storage),
         Body::Deferred { value, .. } => {
-            match packed::Deferred::force_ref(value)? {
-                packed::Deferred::Value::AttributeStorage(storage) => Ok(storage),
+            match packed::deferred::force_ref(value)? {
+                packed::deferred::Value::AttributeStorage(storage) => Ok(storage),
                 _ => Err(invalid_attribute(
                     "Attribute.create_deferred",
                     "materialised storage is not an attribute",
@@ -221,8 +221,8 @@ pub fn create_owned(name: &str, owner: Owner, storage: Storage) -> Result<T, err
 }
 
 pub fn create_deferred(
-    holder: Option<Arc<dyn packed::Deferred::Holder>>,
-    release: Option<packed::Deferred::Release>,
+    holder: Option<Arc<dyn packed::deferred::Holder>>,
+    release: Option<packed::deferred::Release>,
     name: &str,
     owner: Owner,
     like: &Storage,
@@ -251,7 +251,7 @@ pub fn create_deferred(
     let expected_kind = kind;
     let materialiser = Arc::clone(&materialise);
     let make: Arc<
-        dyn Fn() -> Result<packed::Deferred::Value, error::T> + Send + Sync,
+        dyn Fn() -> Result<packed::deferred::Value, error::T> + Send + Sync,
     > = Arc::new(move || {
         let storage = materialiser();
         if storage_kind(&storage) != expected_kind || storage_length(&storage) != length {
@@ -260,9 +260,9 @@ pub fn create_deferred(
                 "materialised storage changed shape",
             ));
         }
-        Ok(packed::Deferred::Value::AttributeStorage(storage))
+        Ok(packed::deferred::Value::AttributeStorage(storage))
     });
-    let value = packed::Deferred::create(make, holder, release);
+    let value = packed::deferred::create(make, holder, release);
     Ok(T {
         name: name.to_owned(),
         owner,
@@ -279,21 +279,21 @@ pub fn create_deferred(
 pub fn resident(value: &T) -> bool {
     match value.body.as_ref() {
         Body::Ready(_) => false,
-        Body::Deferred { value, .. } => !packed::Deferred::forced(value),
+        Body::Deferred { value, .. } => !packed::deferred::forced(value),
     }
 }
 
-pub fn holder(value: &T) -> Option<Arc<dyn packed::Deferred::Holder>> {
+pub fn holder(value: &T) -> Option<Arc<dyn packed::deferred::Holder>> {
     match value.body.as_ref() {
         Body::Ready(_) => None,
-        Body::Deferred { value, .. } => packed::Deferred::holder(value),
+        Body::Deferred { value, .. } => packed::deferred::holder(value),
     }
 }
 
-pub fn releaser(value: &T) -> Option<packed::Deferred::Release> {
+pub fn releaser(value: &T) -> Option<packed::deferred::Release> {
     match value.body.as_ref() {
         Body::Ready(_) => None,
-        Body::Deferred { value, .. } => packed::Deferred::releaser(value),
+        Body::Deferred { value, .. } => packed::deferred::releaser(value),
     }
 }
 
@@ -346,11 +346,11 @@ fn storage_payload_bytes(storage: &Storage) -> i64 {
         Storage::Int(values) => i64::try_from(values.len())
             .unwrap_or(i64::MAX)
             .saturating_mul(std::mem::size_of::<i64>() as i64),
-        Storage::IntArray(values) => packed::IntArray::payload_bytes(values),
-        Storage::FloatArray(values) => packed::FloatArray::payload_bytes(values),
-        Storage::Float2(values) => packed::Float2::payload_bytes(values),
-        Storage::Float3(values) => packed::Float3::payload_bytes(values),
-        Storage::Float4(values) => packed::Float4::payload_bytes(values),
+        Storage::IntArray(values) => packed::int_array::payload_bytes(values),
+        Storage::FloatArray(values) => packed::float_array::payload_bytes(values),
+        Storage::Float2(values) => packed::float2::payload_bytes(values),
+        Storage::Float3(values) => packed::float3::payload_bytes(values),
+        Storage::Float4(values) => packed::float4::payload_bytes(values),
         Storage::Text(values) => i64::try_from(values.payload_bytes()).unwrap_or(i64::MAX),
     }
 }
@@ -390,8 +390,7 @@ pub fn kind_name(value: &T) -> &'static str {
 }
 
 
-#[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::{raw, Storage, T};
     use crate::error;
 
@@ -403,11 +402,11 @@ pub mod View {
 pub fn float_planes(storage: &Storage) -> Result<Option<Vec<&[f64]>>, error::T> {
     match storage {
         Storage::Float(values) => Ok(Some(vec![values.as_slice()])),
-        Storage::Float2(values) => Ok(Some(packed::Float2::View::borrowed(values).to_vec())),
+        Storage::Float2(values) => Ok(Some(packed::float2::view::borrowed(values).to_vec())),
         Storage::Float3(values) => Ok(Some(
-            packed::Float3::View::borrowed(values)?.to_vec(),
+            packed::float3::view::borrowed(values)?.to_vec(),
         )),
-        Storage::Float4(values) => Ok(Some(packed::Float4::View::borrowed(values).to_vec())),
+        Storage::Float4(values) => Ok(Some(packed::float4::view::borrowed(values).to_vec())),
         Storage::Int(_) | Storage::IntArray(_) | Storage::FloatArray(_) | Storage::Text(_) => {
             Ok(None)
         }
@@ -426,9 +425,9 @@ pub fn map_float_planes(
     let mut next = || planes.next().expect("one output plane per source plane");
     Ok(Some(match storage {
         Storage::Float(_) => Storage::Float(next()),
-        Storage::Float2(_) => Storage::Float2(packed::Float2::of_shared(next(), next())?),
-        Storage::Float3(_) => Storage::Float3(packed::Float3::View::of_shared_exn(next(), next(), next())?),
-        _ => Storage::Float4(packed::Float4::of_shared(next(), next(), next(), next())?),
+        Storage::Float2(_) => Storage::Float2(packed::float2::of_shared(next(), next())?),
+        Storage::Float3(_) => Storage::Float3(packed::float3::view::of_shared_exn(next(), next(), next())?),
+        _ => Storage::Float4(packed::float4::of_shared(next(), next(), next(), next())?),
     }))
 }
 
@@ -441,9 +440,9 @@ pub fn of_float_planes(
     let mut next = || planes.next().ok_or_else(|| invalid_attribute("Attribute.of_float_planes", "missing component plane"));
     match like {
         Storage::Float(_) => Ok(Storage::Float(Arc::new(next()?))),
-        Storage::Float2(_) => packed::Float2::of_owned(next()?, next()?).map(Storage::Float2),
-        Storage::Float3(_) => packed::Float3::of_owned(next()?, next()?, next()?).map(Storage::Float3),
-        Storage::Float4(_) => packed::Float4::of_owned(next()?, next()?, next()?, next()?).map(Storage::Float4),
+        Storage::Float2(_) => packed::float2::of_owned(next()?, next()?).map(Storage::Float2),
+        Storage::Float3(_) => packed::float3::of_owned(next()?, next()?, next()?).map(Storage::Float3),
+        Storage::Float4(_) => packed::float4::of_owned(next()?, next()?, next()?, next()?).map(Storage::Float4),
         _ => Err(invalid_attribute("Attribute.of_float_planes", "not a float storage")),
     }.map_err(|error| invalid_attribute("Attribute.of_float_planes", crate::error::message(&error)))
 }
@@ -549,9 +548,9 @@ mod tests {
         use crate::{error, packed};
         let templates = [
             Storage::Float(Arc::new(vec![])),
-            Storage::Float2(packed::Float2::of_owned(vec![], vec![]).unwrap()),
-            Storage::Float3(packed::Float3::of_owned(vec![], vec![], vec![]).unwrap()),
-            Storage::Float4(packed::Float4::of_owned(vec![], vec![], vec![], vec![]).unwrap()),
+            Storage::Float2(packed::float2::of_owned(vec![], vec![]).unwrap()),
+            Storage::Float3(packed::float3::of_owned(vec![], vec![], vec![]).unwrap()),
+            Storage::Float4(packed::float4::of_owned(vec![], vec![], vec![], vec![]).unwrap()),
         ];
         for (index, template) in templates.iter().enumerate() {
             let width = index + 1;
@@ -581,7 +580,7 @@ mod tests {
         let bytes: Vec<u8> = (0..=255).collect();
         let reversed: Vec<u8> = bytes.iter().rev().copied().collect();
         let source = super::create_owned("bytes", Owner::Point, Storage::Text(Arc::new(vec![bytes.clone(), reversed.clone()].into()))).unwrap();
-        assert!(matches!(super::View::storage(&source).unwrap(), Storage::Text(values) if **values == vec![bytes.clone(), reversed.clone()]));
+        assert!(matches!(super::view::storage(&source).unwrap(), Storage::Text(values) if **values == vec![bytes.clone(), reversed.clone()]));
         for grain in [1, 97] {
             let remapped = crate::topology_remap::attribute(None, grain, Some(true), &[1, -1, 0, 1], &source).unwrap();
             assert!(matches!(super::storage(&remapped).unwrap(), Storage::Text(values) if *values == vec![reversed.clone(), Vec::new(), bytes.clone(), reversed.clone()]));

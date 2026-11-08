@@ -6,7 +6,7 @@ use flow_sop::{lower as l, network, value_lane};
 use flow_syntax::{ty, value::Value};
 use rays::{canvas, image};
 use rays_diagnostic::Diagnostic;
-use runtime_resources::Image as Native;
+use runtime_resources::image as Native;
 use sop::{context, edit_graph, image as si, node, payload, session};
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
@@ -30,7 +30,7 @@ impl Owner {
     fn payload(&self, p: &l::T, s: &e::State, live: &input::Frame, v: &Value) -> Result<si::T, Diagnostic> {
         wi::payload(&self.images)(None, None, &p.plan, s, live, v)
     }
-    fn image(&self, p: &l::T, s: &e::State, live: &input::Frame, v: &Value) -> Result<image::t, Diagnostic> {
+    fn image(&self, p: &l::T, s: &e::State, live: &input::Frame, v: &Value) -> Result<image::Image, Diagnostic> {
         wi::image(None, true, &self.images, s, live, &p.plan, v)
     }
     fn close(&self) { wr::close(&self.resources); wi::close(&self.images); wg::close(&self.gpu); }
@@ -277,9 +277,9 @@ fn frozen_capacity_small() { frozen_capacity(7, 3); }
 fn frozen_capacity_large() { frozen_capacity(65, 17); }
 
 fn capture_geometry(count: i64) -> rdk_core::geometry::T {
-    let mut b = rdk_core::packed::Float3::builder::create(count).unwrap();
-    rdk_core::packed::Float3::builder::set(&mut b, 0, 0.03125, 0., 0.).unwrap();
-    rdk_core::geometry::create(rdk_core::packed::Float3::builder::freeze(&mut b).unwrap(), rdk_core::topology::empty(count).unwrap(), None, None, None).unwrap()
+    let mut b = rdk_core::packed::float3::builder::create(count).unwrap();
+    rdk_core::packed::float3::builder::set(&mut b, 0, 0.03125, 0., 0.).unwrap();
+    rdk_core::geometry::create(rdk_core::packed::float3::builder::freeze(&mut b).unwrap(), rdk_core::topology::empty(count).unwrap(), None, None, None).unwrap()
 }
 fn lower_budget(geometry: rdk_core::geometry::T) -> l::T {
     let factory = edit_graph::factory(edit_graph::factory_args("capture_budget", "Capture budget", &["Test"]), 0, Arc::new(move |args| {

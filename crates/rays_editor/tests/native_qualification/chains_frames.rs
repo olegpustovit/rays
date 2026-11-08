@@ -22,7 +22,7 @@ fn scene(g:&g::T,gpu:Option<&wg::WorkspaceGpu>)->rays::scene3::Scene3 {
     let surface=surface::of_geometry(None,g).unwrap();
     match gpu {Some(gpu)=>surface::scene3(None,Some(&|g|binding(gpu,g)),&surface).unwrap(),None=>surface::scene3(None,None,&surface).unwrap()}
 }
-fn picture(canvas:&rays::canvas::t,camera:&rays::camera::Camera,g:&g::T,gpu:Option<&wg::WorkspaceGpu>,world:Option<&rays::world::baked>)->(Vec<u8>,std::time::Duration) {
+fn picture(canvas:&rays::canvas::Canvas,camera:&rays::camera::Camera,g:&g::T,gpu:Option<&wg::WorkspaceGpu>,world:Option<&rays::world::baked>)->(Vec<u8>,std::time::Duration) {
     let start=std::time::Instant::now();let scene=scene(g,gpu); let scene=world.map(|w|rays::scene3::with_world(w.clone(),&scene)).unwrap_or(scene);
     rays::canvas::render(None,canvas,&[rays::scene::clear(color::black()),rays::scene::view3d(None,camera,scene)]).unwrap();
     let elapsed=start.elapsed();(rays::canvas::pixels(canvas).unwrap().into_iter().flat_map(|c|[c.r as u8,c.g as u8,c.b as u8,c.a as u8]).collect(),elapsed)
@@ -35,7 +35,7 @@ fn trace(tracer:&mut Option<pt::PathTracer>,mesh:rays::mesh::Mesh,camera:&rays::
     let t=tracer.as_mut().unwrap();pt::reset(t);pt::render(t,camera).unwrap();pt::flush(t).unwrap();let elapsed=start.elapsed();(rays::image::pixels(&pt::image(t)).unwrap(),elapsed)
 }
 fn normal_check(cpu:&g::T,device:&g::T) {
-    let topo=rdk_core::topology::View::view(g::topology(device)).unwrap();let positions=g::positions(device);let mut sums=vec![[0.;3];g::point_count(device) as usize];
+    let topo=rdk_core::topology::view::view(g::topology(device)).unwrap();let positions=g::positions(device);let mut sums=vec![[0.;3];g::point_count(device) as usize];
     for prim in 0..topo.primitive_kinds.len() {
         let first=topo.primitive_offsets[prim] as usize;let last=topo.primitive_offsets[prim+1] as usize;
         let (ax,ay,az)=p::get(positions,topo.vertex_points[first]).unwrap();let mut sum=[0.;3];

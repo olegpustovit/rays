@@ -73,7 +73,7 @@ fn counters(s: &session::T) -> [i64; 9] {
 
 /// Bit patterns of the positions and every float attribute: byte identity independent of data ids.
 fn geometry_bytes(g: &geometry::T) -> Vec<u64> {
-    let view = packed::Float3::View::view(geometry::positions(g)).unwrap();
+    let view = packed::float3::view::view(geometry::positions(g)).unwrap();
     let mut bits: Vec<u64> = [&view.x, &view.y, &view.z].iter().flat_map(|p| p.iter().map(|v| v.to_bits())).collect();
     for a in geometry::attributes(g) {
         if let Ok(attribute::Storage::Float(values)) = attribute::storage(&a) {
@@ -117,8 +117,8 @@ fn geometry_fixture() -> geometry::T {
 /// A positions-changing transform that allocates a new plane (a stand-in for noise_displace).
 fn shifted(by: f64) -> Transform {
     Arc::new(move |g| {
-        let view = packed::Float3::View::view(geometry::positions(g)).unwrap();
-        let moved = packed::Float3::of_owned(
+        let view = packed::float3::view::view(geometry::positions(g)).unwrap();
+        let moved = packed::float3::of_owned(
             view.x.iter().enumerate().map(|(i, x)| x + by + i as f64 * 0.125).collect(),
             view.y.to_vec(),
             view.z.to_vec(),
@@ -142,11 +142,11 @@ fn join(label: &str, a: &node::T, b: &node::T) -> node::T {
         Arc::new(|_, _, inputs| {
             let (a, b) = (inputs[0].clone(), inputs[1].clone());
             let (pa, pb) = (
-                packed::Float3::View::view(geometry::positions(&a)).unwrap(),
-                packed::Float3::View::view(geometry::positions(&b)).unwrap(),
+                packed::float3::view::view(geometry::positions(&a)).unwrap(),
+                packed::float3::view::view(geometry::positions(&b)).unwrap(),
             );
             let x: Vec<f64> = pa.x.iter().zip(pb.x.iter()).map(|(p, q)| p + q).collect();
-            let merged = packed::Float3::of_owned(x, pa.y.to_vec(), pa.z.to_vec()).unwrap();
+            let merged = packed::float3::of_owned(x, pa.y.to_vec(), pa.z.to_vec()).unwrap();
             Ok(node::GeometryCooked { geometry: geometry::with_positions(merged, &a).unwrap(), instances: None })
         }),
     )

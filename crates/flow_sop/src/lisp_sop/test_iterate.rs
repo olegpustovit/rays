@@ -46,7 +46,7 @@ fn smooth_step(lo_hi: &[(usize, usize)], a: &[f64]) -> Vec<f64> {
 
 fn planes(g: &geo::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let p = geo::positions(g);
-    let pts: Vec<(f64, f64, f64)> = (0..rdk_core::packed::Float3::length(p)).map(|i| rdk_core::packed::Float3::get(p, i).unwrap()).collect();
+    let pts: Vec<(f64, f64, f64)> = (0..rdk_core::packed::float3::length(p)).map(|i| rdk_core::packed::float3::get(p, i).unwrap()).collect();
     (pts.iter().map(|p| p.0).collect(), pts.iter().map(|p| p.1).collect(), pts.iter().map(|p| p.2).collect())
 }
 
@@ -61,7 +61,7 @@ fn iterate_smoothing_matches_direct_computation() {
         for _ in 0..passes {
             (x, y, z) = (smooth_step(&lo_hi, &x), smooth_step(&lo_hi, &y), smooth_step(&lo_hi, &z));
         }
-        geometry_bytes(&geo::with_positions(rdk_core::packed::Float3::of_owned(x, y, z).unwrap(), &base).unwrap())
+        geometry_bytes(&geo::with_positions(rdk_core::packed::float3::of_owned(x, y, z).unwrap(), &base).unwrap())
     };
     for passes in [0usize, 1, 7, 500] {
         let want = expected(passes);

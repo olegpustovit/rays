@@ -5,14 +5,14 @@ use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self, Value};
 use rays_diagnostic::Diagnostic;
 use rdk_core::geometry::{self, T as Geometry};
-use rdk_core::packed::{Deferred, Float3};
+use rdk_core::packed::{deferred, float3};
 use rdk_core::{analysis, attribute, cancel, edge_group, error, group, point_index, topology, topology_index};
 use rdk_core::{polygon_triangulation, topology_remap as remap_core};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 pub type Args = [(String, Value)];
-pub type Positions = Box<dyn Fn() -> Result<Float3::T, Diagnostic> + Send + Sync>;
+pub type Positions = Box<dyn Fn() -> Result<float3::T, Diagnostic> + Send + Sync>;
 
 fn diag(code: &str, message: &str) -> Diagnostic {
     rays_diagnostic::error(code.to_owned(), message.to_owned(), None, None, None, Vec::new(), Vec::new())
@@ -52,8 +52,8 @@ fn index_of(topology: &topology::T) -> Result<topology_index::T, Diagnostic> {
 fn points_of(topology: &topology::T) -> Result<point_index::T, Diagnostic> {
     point_index::create(None, topology).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))
 }
-fn topo_view(topology: &topology::T) -> Result<topology::View::View, Diagnostic> {
-    topology::View::view(topology).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))
+fn topo_view(topology: &topology::T) -> Result<topology::view::View, Diagnostic> {
+    topology::view::view(topology).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))
 }
 
 // A topology's component arrays, remembered by the topology's identity (immutable): a recook over
@@ -107,12 +107,12 @@ pub fn adjacency(geometry: &Geometry, component: &str) -> Result<Value, Diagnost
     let topology = geometry::topology(geometry);
     let array = |a: &[i64]| Ok(ints(a.to_vec()));
     match component {
-        "primitive_of_vertex" => array(&point_index::View::view(&points_of(topology)?).primitive_of_vertex),
-        "point_vertex_offsets" => array(&point_index::View::view(&points_of(topology)?).point_offsets),
-        "point_vertices" => array(&point_index::View::view(&points_of(topology)?).point_vertices),
+        "primitive_of_vertex" => array(&point_index::view::view(&points_of(topology)?).primitive_of_vertex),
+        "point_vertex_offsets" => array(&point_index::view::view(&points_of(topology)?).point_offsets),
+        "point_vertices" => array(&point_index::view::view(&points_of(topology)?).point_vertices),
         "next_vertex" | "previous_vertex" | "edge_of_vertex" | "opposite_vertex" | "edge_a" | "edge_b"
         | "point_edge_offsets" | "point_edges" => {
-            let view = topology_index::View::view(&index_of(topology)?);
+            let view = topology_index::view::view(&index_of(topology)?);
             match component {
                 "next_vertex" => array(&view.next_vertex),
                 "previous_vertex" => array(&view.previous_vertex),
@@ -132,7 +132,7 @@ pub fn adjacency(geometry: &Geometry, component: &str) -> Result<Value, Diagnost
 /// its fan covers (0 unless a polygon of three corners or more).
 pub fn fans(geometry: &Geometry, component: &str) -> Result<Value, Diagnostic> {
     let t = topo_view(geometry::topology(geometry))?;
-    let p = point_index::View::view(&points_of(geometry::topology(geometry))?);
+    let p = point_index::view::view(&points_of(geometry::topology(geometry))?);
     let slots = |pick: &dyn Fn(i64, bool, i64) -> i64| -> Result<Value, Diagnostic> {
         let bytes = p.point_vertices.len() as i64 * 8;
         if bytes >= 1 << 20 {
@@ -161,7 +161,7 @@ pub fn fans(geometry: &Geometry, component: &str) -> Result<Value, Diagnostic> {
 /// offsets into them, and ok 0 where the clipper refused.
 pub fn triangles(geometry: &Geometry, component: &str) -> Result<Value, Diagnostic> {
     let topology = topo_view(geometry::topology(geometry))?;
-    let positions = Float3::View::view(geometry::positions(geometry)).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))?;
+    let positions = float3::view::view(geometry::positions(geometry)).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))?;
     let count = topology.primitive_kinds.len();
     let mut offsets = vec![0i64; count + 1];
     let mut ok = vec![1i64; count];
@@ -268,12 +268,12 @@ pub fn components(geometry: &Geometry, args: &Args) -> Result<Value, Diagnostic>
 
 // A static point array's planes, remembered by its identity: a recook of the same grid builds the
 // same positions. ponytail: 16 entries, oldest dropped; dead keys pruned on access.
-static POINT_PLANES: Mutex<Vec<(Weak<Vec<f64>>, Float3::T)>> = Mutex::new(Vec::new());
+static POINT_PLANES: Mutex<Vec<(Weak<Vec<f64>>, float3::T)>> = Mutex::new(Vec::new());
 struct PlaneCopy {
     x: Weak<Vec<f64>>,
     y: Weak<Vec<f64>>,
     z: Weak<Vec<f64>>,
-    positions: Float3::T,
+    positions: float3::T,
 }
 static PLANE_COPIES: Mutex<Vec<PlaneCopy>> = Mutex::new(Vec::new());
 
@@ -281,7 +281,7 @@ fn alive(weak: &Weak<Vec<f64>>, key: &Arc<Vec<f64>>) -> bool {
     weak.upgrade().is_some_and(|a| Arc::ptr_eq(&a, key))
 }
 
-fn point_planes(points: &Arc<Vec<f64>>, make: &dyn Fn() -> Result<Float3::T, Diagnostic>) -> Result<Float3::T, Diagnostic> {
+fn point_planes(points: &Arc<Vec<f64>>, make: &dyn Fn() -> Result<float3::T, Diagnostic>) -> Result<float3::T, Diagnostic> {
     {
         let mut all = POINT_PLANES.lock().unwrap();
         all.retain(|(key, _)| key.strong_count() > 0);
@@ -304,8 +304,8 @@ fn plane_copies(
     x: &Arc<Vec<f64>>,
     y: &Arc<Vec<f64>>,
     z: &Arc<Vec<f64>>,
-    copy: &dyn Fn() -> Result<Float3::T, Diagnostic>,
-) -> Result<Float3::T, Diagnostic> {
+    copy: &dyn Fn() -> Result<float3::T, Diagnostic>,
+) -> Result<float3::T, Diagnostic> {
     {
         let mut all = PLANE_COPIES.lock().unwrap();
         all.retain(|entry| entry.x.strong_count() > 0);
@@ -322,8 +322,8 @@ fn plane_copies(
     Ok(made)
 }
 
-fn owned_planes(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> Result<Float3::T, Diagnostic> {
-    Float3::View::of_owned_exn(x, y, z).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))
+fn owned_planes(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> Result<float3::T, Diagnostic> {
+    float3::view::of_owned_exn(x, y, z).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))
 }
 
 const MESH_TYPE_MESSAGE: &str = "Mesh requires vec3 points and integer vertex_points, primitive_offsets and kinds arrays.";
@@ -337,7 +337,7 @@ pub fn mesh_points(points: &Value) -> Result<(i64, Positions), Diagnostic> {
             value::validate(points)?;
             let count = array.len() / 3;
             let array = array.clone();
-            let planes = move || -> Result<Float3::T, Diagnostic> {
+            let planes = move || -> Result<float3::T, Diagnostic> {
                 let mut x = Vec::with_capacity(count);
                 let mut y = Vec::with_capacity(count);
                 let mut z = Vec::with_capacity(count);
@@ -418,7 +418,7 @@ pub struct ResidentPoints {
     pub value: Value,
     pub count: i64,
 }
-impl Deferred::Holder for ResidentPoints {}
+impl deferred::Holder for ResidentPoints {}
 
 /// The resident vertex points, primitive offsets and kinds of a device-computed topology.
 pub struct ResidentTopology {
@@ -429,10 +429,10 @@ pub struct ResidentTopology {
     incidence: OnceLock<Result<Option<Gpu::Incidence>, Diagnostic>>,
     build_incidence: Gpu::IncidenceBuilder,
 }
-impl Deferred::Holder for ResidentTopology {}
+impl deferred::Holder for ResidentTopology {}
 
 /// A positions holder made by `mesh_resident`.
-pub fn resident_points_of(holder: &Arc<dyn Deferred::Holder>) -> Option<Arc<ResidentPoints>> {
+pub fn resident_points_of(holder: &Arc<dyn deferred::Holder>) -> Option<Arc<ResidentPoints>> {
     holder.clone().downcast()
 }
 
@@ -549,22 +549,22 @@ fn keep_static(key: &Value, point_count: i64, topology: &topology::T) {
     all.push(StaticTopology { key: stored, point_count, topology: topology::downgrade(topology) });
 }
 
-fn positions_of(planes: Arc<Planes>, count: i64) -> Result<(Float3::T, Option<Arc<ResidentPoints>>), Diagnostic> {
+fn positions_of(planes: Arc<Planes>, count: i64) -> Result<(float3::T, Option<Arc<ResidentPoints>>), Diagnostic> {
     let holder = planes.resident.clone().map(|value| Arc::new(ResidentPoints { value, count }));
-    let dyn_holder: Option<Arc<dyn Deferred::Holder>> = holder.clone().map(|h| h as Arc<dyn Deferred::Holder>);
-    let release: Deferred::Release = {
+    let dyn_holder: Option<Arc<dyn deferred::Holder>> = holder.clone().map(|h| h as Arc<dyn deferred::Holder>);
+    let release: deferred::Release = {
         let planes = planes.clone();
         Arc::new(move |held| planes.release(held))
     };
-    let bounds: Float3::Bounds = {
+    let bounds: float3::Bounds = {
         let planes = planes.clone();
         Arc::new(move || planes.bounds())
     };
-    let materialise: Float3::Materialise = {
+    let materialise: float3::Materialise = {
         let planes = planes.clone();
         Arc::new(move || planes.materialise().map_err(rdk_error))
     };
-    let positions = Float3::deferred(dyn_holder, Some(release), Some(bounds), count, materialise)
+    let positions = float3::deferred(dyn_holder, Some(release), Some(bounds), count, materialise)
         .map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))?;
     Ok((positions, holder))
 }
@@ -712,7 +712,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
         // the session keeps this: the streams' releases, not the streams
         let holder = Arc::new(ResidentTopology { vertices: iv.clone(), offsets: io.clone(), kinds: ik.clone(),
             point_count, incidence: OnceLock::new(), build_incidence: scope.incidence() });
-        let release: Deferred::Release = {
+        let release: deferred::Release = {
             let holder = holder.clone();
             Arc::new(move |held| {
                 holder.vertices.release(held);
@@ -730,7 +730,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
                 topology::create_owned(point_count, holder.vertices.materialise().map_err(rdk_error)?, holder.offsets.materialise().map_err(rdk_error)?, kinds)
             })
         };
-        let topology = topology::deferred(None, Some(holder.clone() as Arc<dyn Deferred::Holder>), Some(release), point_count, vertex_count, primitive_count, materialise)
+        let topology = topology::deferred(None, Some(holder.clone() as Arc<dyn deferred::Holder>), Some(release), point_count, vertex_count, primitive_count, materialise)
             .map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))?;
         remember(&topology, point_count);
         let (positions, _) = positions_of(planes, point_count)?;
@@ -803,7 +803,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Re
             None => fail("E_DATA_SOURCE", "Adjacency source requires a component name."),
         },
         _ => {
-            let index = topology_index::View::view(&index_of(geometry::topology(&geometry))?);
+            let index = topology_index::view::view(&index_of(geometry::topology(&geometry))?);
             match component.as_deref() {
                 Some("a") => Ok(ints(index.edge_a.to_vec())),
                 Some("b") => Ok(ints(index.edge_b.to_vec())),
@@ -997,11 +997,11 @@ pub fn remap(cancel: Option<&cancel::T>, grain: i64, source: &Geometry, target: 
         match &point_carry {
             Carry::Weighted(a, b, t) => remap_core::blend_positions(cancel, grain, a, b, t, geometry::positions(source)).map_err(|e| remap_error(&e))?,
             Carry::Plain(map) => {
-                let p = Float3::View::view(geometry::positions(source)).map_err(|e| remap_error(&e))?;
+                let p = float3::view::view(geometry::positions(source)).map_err(|e| remap_error(&e))?;
                 let x = remap_core::select_float(cancel, grain, Some(0.0), map, &p.x).map_err(|e| remap_error(&e))?;
                 let y = remap_core::select_float(cancel, grain, Some(0.0), map, &p.y).map_err(|e| remap_error(&e))?;
                 let z = remap_core::select_float(cancel, grain, Some(0.0), map, &p.z).map_err(|e| remap_error(&e))?;
-                Float3::View::of_owned_exn(x, y, z).map_err(|e| remap_error(&e))?
+                float3::view::of_owned_exn(x, y, z).map_err(|e| remap_error(&e))?
             }
         }
     };
@@ -1202,7 +1202,7 @@ mod integration {
         all.into_iter()
             .map(|(name, topology)| {
                 let count = topology::point_count(&topology) as usize;
-                let positions = ok(Float3::View::of_owned_exn((0..count).map(|i| i as f64).collect(), vec![0.0; count], vec![0.0; count]));
+                let positions = ok(float3::view::of_owned_exn((0..count).map(|i| i as f64).collect(), vec![0.0; count], vec![0.0; count]));
                 (name, ok(geometry::create(positions, topology, None, None, None)))
             })
             .collect()
@@ -1260,7 +1260,7 @@ mod integration {
     fn counts_and_edges_match_the_native_index() {
         for (name, geometry) in fixtures() {
             let index = flow_ok(index_of(geometry::topology(&geometry)));
-            let view = topology_index::View::view(&index);
+            let view = topology_index::view::view(&index);
             for (element, expected) in [
                 ("points", geometry::point_count(&geometry)),
                 ("vertices", geometry::vertex_count(&geometry)),
@@ -1293,7 +1293,7 @@ mod integration {
     fn adjacency_fans_and_triangles() {
         for (_, geometry) in fixtures() {
             let index = flow_ok(index_of(geometry::topology(&geometry)));
-            let v = topology_index::View::view(&index);
+            let v = topology_index::view::view(&index);
             let expected = Value::Record(vec![
                 ("primitive_of_vertex".into(), ints(&v.primitive_of_vertex)),
                 ("next_vertex".into(), ints(&v.next_vertex)),
@@ -1414,14 +1414,14 @@ mod integration {
             vec![topology::PrimitiveKind::Polygon, topology::PrimitiveKind::OpenPolyline, topology::PrimitiveKind::Polygon],
         ));
         // an L hexagon (concave at point 3), a curve, then a collinear triangle
-        let positions = ok(Float3::View::of_owned_exn(
+        let positions = ok(float3::view::of_owned_exn(
             vec![0., 2., 2., 1., 1., 0., 0., 1., 2.],
             vec![0., 0., 1., 1., 2., 2., 5., 5., 5.],
             vec![0.0; 9],
         ));
         let geometry = ok(geometry::create(positions.clone(), topology.clone(), None, None, None));
-        let view = ok(Float3::View::view(&positions));
-        let top = ok(topology::View::view(&topology));
+        let view = ok(float3::view::view(&positions));
+        let top = ok(topology::view::view(&topology));
         let mut rows: Vec<(i64, i64, i64)> = Vec::new();
         ok(polygon_triangulation::primitive(None, &view, &top, None, 0, &mut |_, a, b, c| rows.push((a, b, c))));
         // a three-corner polygon passes through unclipped, even collinear
@@ -1501,9 +1501,9 @@ mod resident_identity {
     fn resident_vec3_returns_the_placeholder_itself() {
         let placeholder = Arc::new(vec![7.0, 0.0, 0.0, 8.0, 0.0, 0.0]);
         let holder = Arc::new(ResidentPoints { value: Value::Floats(3, placeholder.clone()), count: 2 });
-        let dynamic: Arc<dyn Deferred::Holder> = holder.clone();
-        let materialise: Float3::Materialise = Arc::new(|| Ok(vec![vec![7.0, 8.0], vec![0.0, 0.0], vec![0.0, 0.0]]));
-        let positions = Float3::deferred(Some(dynamic), None, None, 2, materialise).unwrap();
+        let dynamic: Arc<dyn deferred::Holder> = holder.clone();
+        let materialise: float3::Materialise = Arc::new(|| Ok(vec![vec![7.0, 8.0], vec![0.0, 0.0], vec![0.0, 0.0]]));
+        let positions = float3::deferred(Some(dynamic), None, None, 2, materialise).unwrap();
         let topology = topology::create_owned(2, vec![0, 1], vec![0, 2], vec![topology::PrimitiveKind::OpenPolyline]).unwrap();
         let g = geometry::create(positions, topology, None, None, None).unwrap();
         let found = crate::attribute_kernel::resident_vec3(&g, "P").expect("resident positions");

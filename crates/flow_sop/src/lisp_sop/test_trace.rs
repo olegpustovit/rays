@@ -8,7 +8,7 @@ use flow_check::ray_host as host;
 use flow_eval::{self as e, Value};
 use flow_ir::packed;
 use flow_syntax::syntax;
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use rdk_geom::surface_index as surface;
 use rdk_core::{geometry, topology};
 use rays_math::vec3;
@@ -19,7 +19,7 @@ const ID: i64 = 7;
 const COUNT: usize = 256;
 
 fn quad() -> geometry::T {
-    let positions = Float3::of_owned(vec![-1.0, 1.0, 1.0, -1.0], vec![-1.0, -1.0, 1.0, 1.0], vec![0.0; 4]).unwrap();
+    let positions = float3::of_owned(vec![-1.0, 1.0, 1.0, -1.0], vec![-1.0, -1.0, 1.0, 1.0], vec![0.0; 4]).unwrap();
     geometry::create(positions, topology::polygons_owned(4, vec![0, 1, 2, 3], vec![0, 4]).unwrap(), None, None, None).unwrap()
 }
 fn x(i: usize) -> f64 {

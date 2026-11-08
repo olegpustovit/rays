@@ -56,7 +56,7 @@ fn with_images<R>(
     state: Option<&State>,
     live: Option<&input::Frame>,
     plan: Option<&Plan>,
-    mut f: impl FnMut(&dyn Fn(&Value) -> Result<rays::image::t, Diagnostic>, &dyn Fn(&Value) -> Result<rays::texture::t, Diagnostic>) -> R,
+    mut f: impl FnMut(&dyn Fn(&Value) -> Result<rays::image::Image, Diagnostic>, &dyn Fn(&Value) -> Result<rays::texture::Texture, Diagnostic>) -> R,
 ) -> R {
     let out: RefCell<Option<R>> = RefCell::new(None);
     editor::private::with_images(ed, state, live, plan, &mut |image, texture| {
@@ -80,7 +80,7 @@ fn rgba(i: &simage::T) -> Vec<u8> {
     }
 }
 
-fn pixels(i: &rays::image::t) -> Vec<u8> {
+fn pixels(i: &rays::image::Image) -> Vec<u8> {
     rays::image::pixels(i).expect("pixels")
 }
 
@@ -222,10 +222,10 @@ fn is_image_command(c: &String) -> bool {
     c.starts_with("Image(")
 }
 
-fn render_picture(plan: &Plan, picture: &Value, live_: &input::Frame, size: (i64, i64), image: Rc<dyn Fn(&Value) -> Result<rays::image::t, Diagnostic>>) -> Vec<Cmd> {
+fn render_picture(plan: &Plan, picture: &Value, live_: &input::Frame, size: (i64, i64), image: Rc<dyn Fn(&Value) -> Result<rays::image::Image, Diagnostic>>) -> Vec<Cmd> {
     let prepared = ok(flow_native::drawing::prepare(&flow_native::drawing::PrepareOptions::default(), plan, picture));
     let scene = ok(flow_native::drawing::render_prepared(&prepared, live_, size, &flow_native::drawing::RenderOptions { image: Some(image), ..Default::default() }));
-    rays::scene::Layer::commands(None, &scene).expect("commands").iter().map(|c| format!("{c:?}")).collect()
+    rays::scene::layer::commands(None, &scene).expect("commands").iter().map(|c| format!("{c:?}")).collect()
 }
 
 /// image/map: initial-domain drawing, live callable captures, stable image identity and close.
@@ -251,7 +251,7 @@ fn image_map_drawing() {
         assert!(pixels(&first) != px);
         let picture = result_of(&evaluated, "picture");
         let (o2, plan2) = (owner.clone(), evaluated.plan.clone());
-        let image: Rc<dyn Fn(&Value) -> Result<rays::image::t, Diagnostic>> = Rc::new(move |v| with_images(&o2, None, Some(&live(1.)), Some(&plan2), |image, _| image(v)));
+        let image: Rc<dyn Fn(&Value) -> Result<rays::image::Image, Diagnostic>> = Rc::new(move |v| with_images(&o2, None, Some(&live(1.)), Some(&plan2), |image, _| image(v)));
         let commands = render_picture(&evaluated.plan, &picture, &live(1.), (65, 3), image);
         assert!(commands.iter().any(is_image_command));
         assert_eq!(editor::private::image_stats(&owner), (1, 0));
@@ -454,7 +454,7 @@ fn capacity() {
 
 // ---- test_workspace_images_native.ml ----
 
-use runtime_resources::Image as I;
+use runtime_resources::image as I;
 
 fn handles() -> i64 {
     ogpu_core::impl_::live_handles().expect("live handles")
@@ -470,7 +470,7 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
-fn res(i: &rays::image::t) -> runtime_resources::Image::t {
+fn res(i: &rays::image::Image) -> runtime_resources::image::Image {
     rays::image::resource(i)
 }
 
@@ -518,9 +518,9 @@ fn native_geometry_captures() {
     let exact = |owner: &Ed, time: f64, override_: bool, kind: &str, graph: &str| ok(payload_of(owner, &value(owner, override_, kind, graph), Some(&live(time))));
     let resolve = |time: f64, override_: bool, kind: &str, graph: &str| with_images(&display, None, Some(&live(time)), None, |image, _| ok(image(&value(&display, override_, kind, graph))));
     let fixed = resolve(0., false, "image/render", "fixed");
-    let generation = |i: &rays::image::t| I::generation(&res(i));
+    let generation = |i: &rays::image::Image| I::generation(&res(i));
     let fixed_generation = generation(&fixed);
-    let images: Vec<rays::image::t> = (0..2).map(|i| resolve(0., i == 1, "image/map", "mesh")).collect();
+    let images: Vec<rays::image::Image> = (0..2).map(|i| resolve(0., i == 1, "image/map", "mesh")).collect();
     let saved = exact(&cpu1, 0., true, "image/map", "mesh");
     let saved_bytes = rgba(&saved);
     let parent = resolve(0., false, "image/render", "mesh");
@@ -679,7 +679,7 @@ fn resident_dimensions() {
     let fixed = display(&a, "fixed");
     let width = display(&a, "width_only");
     let height = display(&a, "height_only");
-    let generation = |i: &rays::image::t| I::generation(&res(i));
+    let generation = |i: &rays::image::Image| I::generation(&res(i));
     let (parent_before, fixed_before) = (generation(&parent), generation(&fixed));
     assert_eq!(editor::private::image_render_stats(&owner), (5, 0, 0, 0));
     assert!(rays::image::same(&display(&b, "child"), &child) && rays::image::get_size(&child).unwrap() == (35, 33));
@@ -817,22 +817,22 @@ fn export_or_skip(dir: &std::path::Path, doc: &editor_document::workspace_doc::T
 
 // ---- the two reload-driven resident cases ----
 
-fn plane_scene(source_image: &rays::image::t, texture: &rays::texture::t) -> Vec<rays::scene::node> {
+fn plane_scene(source_image: &rays::image::Image, texture: &rays::texture::Texture) -> Vec<rays::scene::node> {
     use rays::scene3 as s3;
     let mesh = rays::mesh::plane(2. * 65. / 17., 2.).unwrap();
     let camera = rays::camera::orthographic(2., rays_math::vec3::create(0., 0., 2.), rays_math::vec3::zero()).unwrap();
     let scene3 = s3::create(None, Some(rays_math::color::white()), None, None, vec![s3::mesh(Some(rays::material::matte(rays_math::color::white())), Some(s3::textured(Some(rays::texture::filter::Nearest), texture.clone())), None, Some(s3::cull::Cull_none), None, mesh)]).unwrap();
-    vec![rays::scene::clear(rays_math::color::black()), rays::scene::image(source_image, (0, 0), None, None).unwrap(), rays::scene::Layer::layer_break(), rays::scene::view3d(Some((33, 0, 32, 17)), &camera, scene3)]
+    vec![rays::scene::clear(rays_math::color::black()), rays::scene::image(source_image, (0, 0), None, None).unwrap(), rays::scene::layer::layer_break(), rays::scene::view3d(Some((33, 0, 32, 17)), &camera, scene3)]
 }
 
-fn snapshot(canvas: &rays::canvas::t) -> Vec<u8> {
+fn snapshot(canvas: &rays::canvas::Canvas) -> Vec<u8> {
     let image = rays::canvas::to_image(canvas).unwrap();
     let px = pixels(&image);
     let _ = rays::image::destroy(&image);
     px
 }
 
-fn texture_of(bytes: &[u8], width: i64, height: i64) -> rays::texture::t {
+fn texture_of(bytes: &[u8], width: i64, height: i64) -> rays::texture::Texture {
     rays::texture::init(width, height, &|x, y| {
         let o = ((y * width + x) * 4) as usize;
         rays_math::color::rgba(bytes[o] as i64, bytes[o + 1] as i64, bytes[o + 2] as i64, bytes[o + 3] as i64)
@@ -873,7 +873,7 @@ fn native_workspace_gpu_images() {
     let saved_bytes = rgba(&saved);
     assert_eq!(editor::private::image_stats(&owner.borrow()), (0, 0));
     let (image, texture) = resolve(0.);
-    let identity = rays::texture::Private::identity(&texture);
+    let identity = rays::texture::private::identity(&texture);
     let resource = res(&image);
     assert!(I::cpu_storage_bytes(&resource) == 0 && I::readbacks(&resource) == 0);
     let generation = I::generation(&resource);
@@ -882,7 +882,7 @@ fn native_workspace_gpu_images() {
     let canvas = rays::canvas::create(65, 17).unwrap();
     let verify = |time: f64| {
         let (actual_image, actual_texture) = resolve(time);
-        assert!(rays::image::same(&actual_image, &image) && rays::texture::Private::identity(&actual_texture) == identity);
+        assert!(rays::image::same(&actual_image, &image) && rays::texture::private::identity(&actual_texture) == identity);
         assert!(I::cpu_storage_bytes(&resource) == 0 && I::readbacks(&resource) == 0);
         let generation = I::generation(&resource);
         let payload = exact(time);
@@ -905,9 +905,9 @@ fn native_workspace_gpu_images() {
         let displayed = plane_scene(&actual_image, &actual_texture);
         rays::canvas::render(None, &canvas, &displayed).unwrap();
         rays::canvas::render(None, &canvas, &displayed).unwrap();
-        let uploaded = rays::canvas::Private::native_stats(&canvas).unwrap().uploaded_bytes;
+        let uploaded = rays::canvas::private::native_stats(&canvas).unwrap().uploaded_bytes;
         rays::canvas::render(None, &canvas, &displayed).unwrap();
-        assert_eq!(rays::canvas::Private::native_stats(&canvas).unwrap().uploaded_bytes, uploaded);
+        assert_eq!(rays::canvas::private::native_stats(&canvas).unwrap().uploaded_bytes, uploaded);
         let actual = snapshot(&canvas);
         let bytes = rgba(&payload);
         let reference = rays::image::upload_rgba(None, width, height, &bytes).unwrap();
@@ -936,7 +936,7 @@ fn native_workspace_gpu_images() {
     // Hypot is deliberately CPU-only; fallback must not depend on an arbitrary size threshold in the placement policy.
     reload(20., &text(65, 3, "[(hypot uv.x 0) uv.y 0.5 1]"));
     let (cpu_image, cpu_texture) = resolve(0.);
-    assert!(rays::image::same(&cpu_image, &image) && rays::texture::Private::image(&cpu_texture).is_none());
+    assert!(rays::image::same(&cpu_image, &image) && rays::texture::private::image(&cpu_texture).is_none());
     assert!(matches!(I::gpu_snapshot(&resource), Ok(None)));
     reload(30., &text(65, 17, "[uv.x uv.y (* t 0.5) 1]"));
     verify(0.5);
@@ -986,20 +986,20 @@ fn native_retained_canvas() {
     assert_eq!(editor::private::image_stats(&owner.borrow()), (0, 0));
     let resolve = |time: f64| with_images(&owner.borrow(), None, Some(&live(time)), None, |image, texture| (ok(image(&value())), ok(texture(&value()))));
     let (image, texture) = resolve(0.);
-    let identity = rays::texture::Private::identity(&texture);
+    let identity = rays::texture::private::identity(&texture);
     let resource = res(&image);
     let initial_generation = I::generation(&resource);
     assert_eq!(editor::private::image_render_stats(&owner.borrow()), (2, 1, 1, 1));
     for frame in 0..20 {
         let (actual, view) = resolve(frame as f64 / 20.);
-        assert!(rays::image::same(&actual, &image) && rays::texture::Private::identity(&view) == identity);
+        assert!(rays::image::same(&actual, &image) && rays::texture::private::identity(&view) == identity);
     }
     assert_eq!(editor::private::image_render_stats(&owner.borrow()), (2, 1, 1, 1));
     assert!(I::generation(&resource) > initial_generation);
     assert!(I::cpu_storage_bytes(&resource) == 0 && I::readbacks(&resource) == 0);
     let verify = |time: f64| {
         let (actual, view) = resolve(time);
-        assert!(rays::image::same(&actual, &image) && rays::texture::Private::identity(&view) == identity);
+        assert!(rays::image::same(&actual, &image) && rays::texture::private::identity(&view) == identity);
         let generation = I::generation(&resource);
         let payload = exact(time);
         assert!(I::generation(&resource) == generation && I::readbacks(&resource) == 0);
@@ -1007,9 +1007,9 @@ fn native_retained_canvas() {
         let displayed = plane_scene(&actual, &view);
         rays::canvas::render(None, &destination, &displayed).unwrap();
         rays::canvas::render(None, &destination, &displayed).unwrap();
-        let uploaded = rays::canvas::Private::native_stats(&destination).unwrap().uploaded_bytes;
+        let uploaded = rays::canvas::private::native_stats(&destination).unwrap().uploaded_bytes;
         rays::canvas::render(None, &destination, &displayed).unwrap();
-        assert_eq!(rays::canvas::Private::native_stats(&destination).unwrap().uploaded_bytes, uploaded);
+        assert_eq!(rays::canvas::private::native_stats(&destination).unwrap().uploaded_bytes, uploaded);
         let shown = snapshot(&destination);
         let (width, height) = (simage::width(&payload), simage::height(&payload));
         let bytes = rgba(&payload);

@@ -155,12 +155,12 @@ pub type Staged = Vec<Vec<(Option<Vec<u8>>, Vec<u8>)>>;
 
 /// The 3D layers of the staged picture: per entry its transform uniforms and vertices.
 pub fn layers(e: &Ed) -> Staged {
-    let staged = rays::scene::Layer::stage_native(900, 640, &editor::scene(e, &frame(1))).unwrap_or_else(|m| panic!("{m}"));
+    let staged = rays::scene::layer::stage_native(900, 640, &editor::scene(e, &frame(1))).unwrap_or_else(|m| panic!("{m}"));
     staged
         .layers
         .iter()
         .filter_map(|l| match l {
-            rays::scene::Layer::native_layer::Scene3_layer(p) => Some(
+            rays::scene::layer::native_layer::Scene3_layer(p) => Some(
                 p.entries
                     .iter()
                     .map(|entry| (entry.draw.state.transform_uniforms.as_ref().map(|b| b.to_vec()), entry.draw.mesh.vertices.to_vec()))

@@ -13,7 +13,7 @@ fn apply_primitives(
     value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     let source_topology = geometry::topology(value);
-    let source = topology::View::view(source_topology)?;
+    let source = topology::view::view(source_topology)?;
     let primitive_count = permutation.len();
     let mut offsets = vec![0_i64; primitive_count + 1];
     for primitive in 0..primitive_count {
@@ -53,7 +53,7 @@ fn apply_primitives(
             kinds[primitive] = source.primitive_kinds[permutation[primitive] as usize];
         }
     }
-    let new_topology = topology::View::create_validated_owned(
+    let new_topology = topology::view::create_validated_owned(
         geometry::point_count(value),
         vertex_points,
         offsets,
@@ -112,7 +112,7 @@ pub fn sort_primitives(
             Some(item) => item,
             None => return Err(fail(format!("missing sort attribute {name}"))),
         };
-        let keys = match attribute::View::storage(&attribute_value)? {
+        let keys = match attribute::view::storage(&attribute_value)? {
             attribute::Storage::Int(keys) => keys.clone(),
             _ => return Err(fail(format!("sort attribute {name} must be integer"))),
         };
@@ -131,7 +131,7 @@ mod tests {
 
     fn triangles() -> geometry::T {
         let positions =
-            packed::Float3::of_owned(vec![0.0, 1.0, 2.0, 3.0], vec![0.0; 4], vec![0.0; 4]).unwrap();
+            packed::float3::of_owned(vec![0.0, 1.0, 2.0, 3.0], vec![0.0; 4], vec![0.0; 4]).unwrap();
         let topo =
             topology::polygons_owned(4, vec![0, 1, 2, 1, 2, 3, 0, 2, 3], vec![0, 3, 6, 9]).unwrap();
         let keys = attribute::create_owned(
@@ -146,10 +146,10 @@ mod tests {
     #[test]
     fn sorts_primitives_stably_and_reports_failures() {
         let sorted = sort_primitives(None, None, "k", &triangles()).unwrap();
-        let view = topology::View::view(geometry::topology(&sorted)).unwrap();
+        let view = topology::view::view(geometry::topology(&sorted)).unwrap();
         assert_eq!(&view.vertex_points[..], &[1, 2, 3, 0, 2, 3, 0, 1, 2]);
         let keys = geometry::find_attribute(attribute::Owner::Primitive, "k", &sorted).unwrap();
-        match attribute::View::storage(&keys).unwrap() {
+        match attribute::view::storage(&keys).unwrap() {
             attribute::Storage::Int(values) => assert_eq!(**values, vec![0, 1, 2]),
             _ => panic!("int"),
         }
@@ -173,6 +173,6 @@ mod tests {
         let mut order: Vec<_> = (0..513).collect();
         order.sort_by_key(|i| (i * 7) % 13);
         let expected_points: Vec<_> = order.into_iter().flat_map(|i| 0..3 + i % 5).collect();
-        assert_eq!(topology::View::view(geometry::topology(&actual)).unwrap().vertex_points.as_slice(), expected_points);
+        assert_eq!(topology::view::view(geometry::topology(&actual)).unwrap().vertex_points.as_slice(), expected_points);
     }
 }

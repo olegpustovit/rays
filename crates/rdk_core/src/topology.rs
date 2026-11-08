@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use crate::{error, packed::Deferred, support};
+use crate::{error, packed::deferred, support};
 use crate::error::Code;
 
 #[repr(u8)]
@@ -41,7 +41,7 @@ struct Inner {
     data_id: i64,
     identity: Arc<support::IdentityToken>,
     payload: Option<Payload>,
-    deferred: Option<Deferred::T>,
+    deferred: Option<deferred::T>,
     shape: Option<(PrimitiveKind, i64)>,
 }
 
@@ -254,7 +254,7 @@ pub fn payload_bytes(value: &T) -> i64 {
 }
 
 pub fn point_of_vertex(value: &T, vertex: i64) -> Result<i64, error::T> {
-    let planes = View::view(value)?;
+    let planes = view::view(value)?;
     let vertex = usize::try_from(vertex)
         .ok()
         .filter(|&vertex| vertex < planes.vertex_points.len())
@@ -269,7 +269,7 @@ pub fn point_of_vertex(value: &T, vertex: i64) -> Result<i64, error::T> {
 }
 
 pub fn primitive_vertex_range(value: &T, primitive: i64) -> Result<(i64, i64), error::T> {
-    let planes = View::view(value)?;
+    let planes = view::view(value)?;
     let primitive = usize::try_from(primitive)
         .ok()
         .filter(|&primitive| primitive < planes.primitive_kinds.len())
@@ -292,7 +292,7 @@ pub fn primitive_size(value: &T, primitive: i64) -> Result<i64, error::T> {
 }
 
 pub fn primitive_kind(value: &T, primitive: i64) -> Result<PrimitiveKind, error::T> {
-    let planes = View::view(value)?;
+    let planes = view::view(value)?;
     let primitive = usize::try_from(primitive)
         .ok()
         .filter(|&primitive| primitive < planes.primitive_kinds.len())
@@ -311,7 +311,7 @@ pub fn all_triangles(value: &T) -> Result<bool, error::T> {
         return Ok(value.inner.primitive_count == 0
             || (kind == PrimitiveKind::Polygon && size == 3));
     }
-    let planes = View::view(value)?;
+    let planes = view::view(value)?;
     Ok((0..value.inner.primitive_count as usize).all(|primitive| {
         planes.primitive_kinds[primitive] == 0
             && planes.primitive_offsets[primitive + 1] - planes.primitive_offsets[primitive] == 3
@@ -322,7 +322,7 @@ fn materialise_ready(value: &T) -> Result<T, error::T> {
     if value.inner.payload.is_some() && value.inner.deferred.is_none() {
         return Ok(value.clone());
     }
-    let planes = View::view(value)?;
+    let planes = view::view(value)?;
     Ok(T {
         inner: Arc::new(Inner {
             point_count: value.inner.point_count,
@@ -343,8 +343,8 @@ fn materialise_ready(value: &T) -> Result<T, error::T> {
 
 pub fn deferred(
     shape: Option<(PrimitiveKind, i64)>,
-    holder: Option<Arc<dyn Deferred::Holder>>,
-    release: Option<Deferred::Release>,
+    holder: Option<Arc<dyn deferred::Holder>>,
+    release: Option<deferred::Release>,
     point_count: i64,
     vertex_count: i64,
     primitive_count: i64,
@@ -379,8 +379,8 @@ pub fn deferred(
     }
     let materialise_shape = shape;
     // Packed::Deferred may race thunk calls; cache both the materialised value and any error here.
-    let payload: OnceLock<Result<Deferred::Value, error::T>> = OnceLock::new();
-    let thunk: Arc<dyn Fn() -> Result<Deferred::Value, error::T> + Send + Sync> =
+    let payload: OnceLock<Result<deferred::Value, error::T>> = OnceLock::new();
+    let thunk: Arc<dyn Fn() -> Result<deferred::Value, error::T> + Send + Sync> =
         Arc::new(move || {
             payload
                 .get_or_init(|| {
@@ -395,7 +395,7 @@ pub fn deferred(
                         ));
                     }
                     if let Some((kind, size)) = materialise_shape {
-                        let planes = View::view(&value)?;
+                        let planes = view::view(&value)?;
                         for primitive in 0..primitive_count as usize {
                             if kind_from_code(planes.primitive_kinds[primitive]) != kind
                                 || planes.primitive_offsets[primitive + 1]
@@ -409,11 +409,11 @@ pub fn deferred(
                             }
                         }
                     }
-                    Ok(Deferred::Value::Topology(value))
+                    Ok(deferred::Value::Topology(value))
                 })
                 .clone()
         });
-    let deferred = Deferred::create(thunk, holder, release);
+    let deferred = deferred::create(thunk, holder, release);
     let data_id = support::fresh_data_id();
     let identity = support::IdentityToken::new(data_id);
     Ok(T {
@@ -435,30 +435,29 @@ pub fn resident(value: &T) -> bool {
         .inner
         .deferred
         .as_ref()
-        .is_some_and(|deferred| !Deferred::forced(deferred))
+        .is_some_and(|deferred| !deferred::forced(deferred))
 }
 
-pub fn holder(value: &T) -> Option<Arc<dyn Deferred::Holder>> {
+pub fn holder(value: &T) -> Option<Arc<dyn deferred::Holder>> {
     value
         .inner
         .deferred
         .as_ref()
-        .and_then(Deferred::holder)
+        .and_then(deferred::holder)
 }
 
-pub fn releaser(value: &T) -> Option<Deferred::Release> {
+pub fn releaser(value: &T) -> Option<deferred::Release> {
     value
         .inner
         .deferred
         .as_ref()
-        .and_then(Deferred::releaser)
+        .and_then(deferred::releaser)
 }
 
 pub(crate) fn identity_token(value: &T) -> Arc<support::IdentityToken> {
     Arc::clone(&value.inner.identity)
 }
 
-#[allow(non_snake_case)]
 pub mod builder {
     use super::*;
 
@@ -644,8 +643,7 @@ pub mod builder {
     }
 }
 
-#[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     #[derive(Clone)]
@@ -672,8 +670,8 @@ pub mod View {
                 "Topology: missing payload".to_owned(),
             ));
         };
-        match Deferred::force(deferred)? {
-            Deferred::Value::Topology(materialised) => view(&materialised),
+        match deferred::force(deferred)? {
+            deferred::Value::Topology(materialised) => view(&materialised),
             _ => Err(error::new(
                 "Topology.View.view",
                 Code::InvalidTopology,
@@ -715,18 +713,18 @@ mod tests {
         let offsets = vec![0, 3];
         let (vertices_ptr, offsets_ptr) = (vertices.as_ptr(), offsets.as_ptr());
         let owned = create_owned(3, vertices, offsets, vec![PrimitiveKind::Polygon]).unwrap();
-        let native = View::view(&owned).unwrap();
+        let native = view::view(&owned).unwrap();
         assert_eq!(native.vertex_points.as_ptr(), vertices_ptr);
         assert_eq!(native.primitive_offsets.as_ptr(), offsets_ptr);
         let snapshot = owned.clone();
         let deferred = deferred(None, None, None, 3, 3, 1, Arc::new(move || Ok(snapshot.clone()))).unwrap();
-        let materialised = View::view(&deferred).unwrap();
+        let materialised = view::view(&deferred).unwrap();
         assert!(Arc::ptr_eq(&native.vertex_points, &materialised.vertex_points));
         assert!(Arc::ptr_eq(&native.primitive_offsets, &materialised.primitive_offsets));
         let mut reader = materialised.vertex_points.clone();
         Arc::make_mut(&mut reader)[0] = 2;
-        assert_eq!(View::view(&owned).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
-        assert_eq!(View::view(&deferred).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
+        assert_eq!(view::view(&owned).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
+        assert_eq!(view::view(&deferred).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
     }
 
     #[test]
@@ -751,7 +749,7 @@ mod tests {
             vec![PrimitiveKind::Polygon],
         )
         .unwrap();
-        let view = View::view(&topology).unwrap();
+        let view = view::view(&topology).unwrap();
         assert_eq!(view.vertex_points.as_ref(), &[0, 1, 2, 3]);
         assert_eq!(view.primitive_offsets.as_ref(), &[0, 4]);
         assert_eq!(primitive_vertex_range(&topology, 0).unwrap(), (0, 4));
@@ -809,7 +807,7 @@ mod deferred_tests {
         let topology_id = data_id(&value);
         let materialised_id = data_id(&owned);
         let barrier = Arc::new(Barrier::new(8));
-        let identities = Arc::new(Mutex::new(None::<(T, View::View)>));
+        let identities = Arc::new(Mutex::new(None::<(T, view::View)>));
         std::thread::scope(|scope| {
             for _ in 0..8 {
                 let value = value.clone();
@@ -817,12 +815,12 @@ mod deferred_tests {
                 let identities = Arc::clone(&identities);
                 scope.spawn(move || {
                     barrier.wait();
-                    let Deferred::Value::Topology(materialised) =
-                        Deferred::force(value.inner.deferred.as_ref().unwrap()).unwrap()
+                    let deferred::Value::Topology(materialised) =
+                        deferred::force(value.inner.deferred.as_ref().unwrap()).unwrap()
                     else {
                         panic!("topology deferred cache returned the wrong value");
                     };
-                    let view = View::view(&value).unwrap();
+                    let view = view::view(&value).unwrap();
                     assert_eq!(data_id(&value), topology_id);
                     assert_eq!(data_id(&materialised), materialised_id);
                     let mut identities = identities
@@ -859,7 +857,7 @@ mod ported_rdk_tests {
     //! validation is sequential. Owned Vec inputs replace mutable aliased OCaml arrays.
     //! Fallible materialisers cache failures, including an unread topology released before use.
     use super::*;
-    use crate::packed::Deferred::Holder;
+    use crate::packed::deferred::Holder;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -889,7 +887,7 @@ mod ported_rdk_tests {
                     }
                 };
                 let built = construct(&[]).unwrap();
-                let view = View::view(&built).unwrap();
+                let view = view::view(&built).unwrap();
                 assert_eq!(view.point_count, count as i64);
                 assert_eq!(view.vertex_points.len(), count);
                 assert!(view.vertex_points.iter().copied().eq(0..count as i64));
@@ -981,7 +979,7 @@ mod ported_rdk_tests {
         reads: &Arc<AtomicUsize>,
         shape: Option<(PrimitiveKind, i64)>,
         holder: Option<Arc<dyn Holder>>,
-        release: Option<Deferred::Release>,
+        release: Option<deferred::Release>,
     ) -> T {
         let (reads, owned_copy) = (Arc::clone(reads), owned.clone());
         deferred(
@@ -1002,7 +1000,7 @@ mod ported_rdk_tests {
     #[test]
     fn deferred_metadata_materialises_once_and_drops_its_holder() {
         let owned = grid_quads();
-        let expected = View::view(&owned).unwrap();
+        let expected = view::view(&owned).unwrap();
         let reads = Arc::new(AtomicUsize::new(0));
         let releases: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&releases);
@@ -1014,7 +1012,7 @@ mod ported_rdk_tests {
             Some(Arc::clone(&holder_value)),
             Some(Arc::new(move |held| log.lock().unwrap().push(held))),
         );
-        let positions = crate::packed::Float3::View::of_owned_exn(
+        let positions = crate::packed::float3::view::of_owned_exn(
             (0..9).map(|point| (point % 3) as f64).collect(),
             (0..9).map(|point| (point / 3) as f64).collect(),
             vec![0.0; 9],
@@ -1037,7 +1035,7 @@ mod ported_rdk_tests {
             for _ in 0..4 {
                 scope.spawn(|| {
                     for _ in 0..16 {
-                        let view = View::view(&topology).unwrap();
+                        let view = view::view(&topology).unwrap();
                         assert_eq!(view.vertex_points, expected.vertex_points, "racing topology readers differ");
                         assert_eq!(view.primitive_offsets, expected.primitive_offsets);
                     }
@@ -1061,18 +1059,18 @@ mod ported_rdk_tests {
     #[test]
     fn deferred_topology_feeds_cpu_consumers_with_one_read() {
         let owned = grid_quads();
-        let point_expected = crate::point_index::View::view(&crate::point_index::create(None, &owned).unwrap());
-        let edge_expected = crate::topology_index::View::view(&crate::topology_index::create(None, &owned).unwrap());
+        let point_expected = crate::point_index::view::view(&crate::point_index::create(None, &owned).unwrap());
+        let edge_expected = crate::topology_index::view::view(&crate::topology_index::create(None, &owned).unwrap());
         for _ in 0..2 {
             let reads = Arc::new(AtomicUsize::new(0));
             let topology = counted(&owned, &reads, None, None, None);
-            let points = crate::point_index::View::view(&crate::point_index::create(None, &topology).unwrap());
+            let points = crate::point_index::view::view(&crate::point_index::create(None, &topology).unwrap());
             assert_eq!(points.point_offsets, point_expected.point_offsets, "deferred point incidence");
             assert_eq!(points.point_vertices, point_expected.point_vertices);
             assert_eq!(reads.load(Ordering::SeqCst), 1);
             let reads = Arc::new(AtomicUsize::new(0));
             let topology = counted(&owned, &reads, None, None, None);
-            let edges = crate::topology_index::View::view(&crate::topology_index::create(None, &topology).unwrap());
+            let edges = crate::topology_index::view::view(&crate::topology_index::create(None, &topology).unwrap());
             assert_eq!(edges.edge_a, edge_expected.edge_a, "deferred edge incidence");
             assert_eq!(edges.edge_b, edge_expected.edge_b);
             assert_eq!(edges.opposite_vertex, edge_expected.opposite_vertex);
@@ -1086,7 +1084,7 @@ mod ported_rdk_tests {
         for domains in [1, 4] {
             parallel::run_unit(Some(domains), &|| {
                 let owned = grid_quads();
-                let positions = packed::Float3::View::of_owned_exn(
+                let positions = packed::float3::view::of_owned_exn(
                     (0..9).map(|point| (point % 3) as f64).collect(),
                     (0..9).map(|point| (point / 3) as f64).collect(),
                     vec![0.0; 9],
@@ -1104,18 +1102,18 @@ mod ported_rdk_tests {
                 let actual = normal_ops::run(&parameters, &deferred).unwrap();
                 let normals = |geometry: &geometry::T| {
                     let normal = geometry::find_attribute(attribute::Owner::Point, "N", geometry).unwrap();
-                    let attribute::Storage::Float3(values) = attribute::View::storage(&normal).unwrap() else {
+                    let attribute::Storage::Float3(values) = attribute::view::storage(&normal).unwrap() else {
                         panic!("normal consumer returned non-Float3 storage");
                     };
-                    packed::Float3::View::view(&values).unwrap()
+                    packed::float3::view::view(&values).unwrap()
                 };
                 let expected_normals = normals(&expected);
                 let actual_normals = normals(&actual);
                 assert_eq!(actual_normals.x, expected_normals.x);
                 assert_eq!(actual_normals.y, expected_normals.y);
                 assert_eq!(actual_normals.z, expected_normals.z);
-                let expected_topology = View::view(geometry::topology(&expected)).unwrap();
-                let actual_topology = View::view(geometry::topology(&actual)).unwrap();
+                let expected_topology = view::view(geometry::topology(&expected)).unwrap();
+                let actual_topology = view::view(geometry::topology(&actual)).unwrap();
                 assert_eq!(actual_topology.vertex_points, expected_topology.vertex_points);
                 assert_eq!(actual_topology.primitive_offsets, expected_topology.primitive_offsets);
                 assert_eq!(actual_topology.primitive_kinds, expected_topology.primitive_kinds);
@@ -1131,7 +1129,7 @@ mod ported_rdk_tests {
         let reads = Arc::new(AtomicUsize::new(0));
         let topology = counted(&triangles, &reads, Some((PrimitiveKind::Polygon, 3)), None, None);
         assert!(all_triangles(&topology).unwrap() && reads.load(Ordering::SeqCst) == 0, "triangle shape forced payload");
-        View::view(&topology).unwrap();
+        view::view(&topology).unwrap();
         assert_eq!(reads.load(Ordering::SeqCst), 1);
         let owned = grid_quads();
         let mismatch = deferred(None, None, None, 0, 0, 0, {
@@ -1139,9 +1137,9 @@ mod ported_rdk_tests {
             Arc::new(move || Ok(owned.clone()))
         })
         .unwrap();
-        assert!(View::view(&mismatch).is_err(), "deferred topology accepted changing counts");
+        assert!(view::view(&mismatch).is_err(), "deferred topology accepted changing counts");
         let bad_shape = counted(&owned, &Arc::new(AtomicUsize::new(0)), Some((PrimitiveKind::OpenPolyline, 4)), None, None);
-        assert!(View::view(&bad_shape).is_err(), "deferred topology accepted changing shape");
+        assert!(view::view(&bad_shape).is_err(), "deferred topology accepted changing shape");
         let empty_reads = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&empty_reads);
         let empty = deferred(
@@ -1160,7 +1158,7 @@ mod ported_rdk_tests {
         assert!(all_triangles(&empty).unwrap());
         assert_eq!(payload_bytes(&empty), 8);
         assert_eq!(empty_reads.load(Ordering::SeqCst), 0, "empty topology metadata forced payload");
-        assert_eq!(&*View::view(&empty).unwrap().primitive_offsets, &[0]);
+        assert_eq!(&*view::view(&empty).unwrap().primitive_offsets, &[0]);
         assert_eq!(empty_reads.load(Ordering::SeqCst), 1);
         let unread_reads = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&unread_reads);
@@ -1187,7 +1185,7 @@ mod ported_rdk_tests {
         releaser(&unread).unwrap()(false);
         assert_eq!(unread_reads.load(Ordering::SeqCst), 0, "release materialised unread topology");
         for _ in 0..2 {
-            let error = View::view(&unread).err().expect("released topology still materialised");
+            let error = view::view(&unread).err().expect("released topology still materialised");
             assert_eq!(error::message(&error), "released topology");
         }
         assert_eq!(unread_reads.load(Ordering::SeqCst), 1, "failed materialisation reran its thunk");

@@ -8,7 +8,7 @@ use rays::camera;
 use rays::canvas;
 use rays::material;
 use rays::mesh;
-use rays::scene::{self, Layer};
+use rays::scene::{self, layer};
 use rays::scene3 as d3;
 use rays::world;
 use rays_math::{color, mat4, vec3};
@@ -25,19 +25,19 @@ fn require(condition: bool, message: &str) {
     assert!(condition, "{message}");
 }
 
-fn render(canvas_: &canvas::t, density: Option<i64>, scene_: &[scene::node]) {
+fn render(canvas_: &canvas::Canvas, density: Option<i64>, scene_: &[scene::node]) {
     canvas::render(density, canvas_, scene_).unwrap_or_else(|e| fail(&format!("Canvas.render: {e}")));
 }
 
-fn stats(canvas_: &canvas::t) -> rr::Stats {
-    canvas::Private::native_stats(canvas_).expect("native stats")
+fn stats(canvas_: &canvas::Canvas) -> rr::Stats {
+    canvas::private::native_stats(canvas_).expect("native stats")
 }
 
-fn rgba(canvas_: &canvas::t, x: i64, y: i64) -> (i64, i64, i64, i64) {
+fn rgba(canvas_: &canvas::Canvas, x: i64, y: i64) -> (i64, i64, i64, i64) {
     color::to_tuple(canvas::pixel(canvas_, x, y).expect("pixel").expect("in bounds"))
 }
 
-fn snapshot(canvas_: &canvas::t) -> Vec<u8> {
+fn snapshot(canvas_: &canvas::Canvas) -> Vec<u8> {
     let image = canvas::to_image(canvas_).expect("to_image");
     let pixels = rays::image::pixels(&image).expect("pixels");
     let _ = rays::image::destroy(&image);
@@ -313,9 +313,9 @@ fn gpu_rays_float32_attribute_stream() {
     if !common::gpu() {
         return;
     }
-    let (cam, scene_context) = (camera::orthographic(2., vec3::create(0., 0., 2.), vec3::zero()).expect("camera"), Layer::create_cache_context());
+    let (cam, scene_context) = (camera::orthographic(2., vec3::create(0., 0., 2.), vec3::zero()).expect("camera"), layer::create_cache_context());
     let mut done = false;
-    Layer::with_cache_context(&scene_context, &mut || {
+    layer::with_cache_context(&scene_context, &mut || {
         let colors = vec![color::rgb(255, 0, 0), color::rgb(0, 255, 0), color::rgb(0, 0, 255)];
         let vertices = mesh::Vec3_buffer::of_planes(vec![-0.70000001, 0.60000001, 0.10000001], vec![-0.60000001, -0.50000001, 0.80000001], vec![0., 0., 0.]);
         let normals = mesh::Vec3_buffer::of_planes(vec![0., 0., 0.], vec![0., 0., 0.], vec![1., 1., 1.]);
@@ -325,7 +325,7 @@ fn gpu_rays_float32_attribute_stream() {
         };
         let stage = |m: &mesh::Mesh| {
             let s = scene_of(vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]);
-            Layer::stage_native(128, 128, &[scene::view3d(None, &cam, s)]).expect("stage").scene3[0].entries[0].clone()
+            layer::stage_native(128, 128, &[scene::view3d(None, &cam, s)]).expect("stage").scene3[0].entries[0].clone()
         };
         let (first, second) = (stage(&make(colors)), stage(&make(vec![color::rgb(255, 255, 0); 3])));
         let configuration = rr::Configuration {
@@ -367,7 +367,7 @@ fn gpu_rays_primitives() {
     let canvas_ = canvas::create(64, 64).expect("canvas");
     let cyan = color::rgb(0, 255, 255);
     let rgba = |c: color::T| ((c.r << 24) | (c.g << 16) | (c.b << 8) | c.a) as u32 as i32;
-    let px = |canvas_: &canvas::t| canvas::pixels(canvas_).expect("pixels");
+    let px = |canvas_: &canvas::Canvas| canvas::pixels(canvas_).expect("pixels");
     let mut b = ui_batch::Builder::create();
     b.circle(32., 32., 12., Some(rgba(cyan)), None, 0.).expect("circle");
     let packed = scene::shapes(b.publish().expect("publish"));

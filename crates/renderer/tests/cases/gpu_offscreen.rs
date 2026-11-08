@@ -6,7 +6,7 @@ use renderer::renderer;
 use ::renderer::renderer::native;
 use ::renderer::renderer_retained_plans::Resource as res;
 use ::renderer::scene_execution::{Draw, GeometryDraw, Mesh, MeshKey, new_bytes, State};
-use runtime_resources::Image;
+use runtime_resources::image;
 use scene_command::render_ir::{self, Command, Rect, RenderIr};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -159,11 +159,11 @@ fn gpu_offscreen_transactions() {
         return;
     }
     let e = renderer::create_offscreen(&config(3, 2)).unwrap();
-    let image = Image::create(1, 1, &[255, 0, 0, 255]).unwrap();
+    let image = image::create(1, 1, &[255, 0, 0, 255]).unwrap();
     let n = Cell::new(0);
     let replace = || {
         n.set(n.get() + 1);
-        Image::replace(&image, 1, 1, &[if n.get() & 1 == 0 { 255 } else { 0 }, 0, 0, 255]).unwrap();
+        image::replace(&image, 1, 1, &[if n.get() & 1 == 0 { 255 } else { 0 }, 0, 0, 255]).unwrap();
     };
     let image_ir = ir(vec![image_cmd(1)]);
     let missing_ir = ir(vec![image_cmd(2)]);
@@ -209,7 +209,7 @@ fn gpu_offscreen_transactions() {
     native::step(None, None, None, &calm, &[]).unwrap();
     let succeeded = native::begin_submission(&e).unwrap();
     let succeeded_batch = lower(&succeeded, &resolve, &image_ir).unwrap();
-    let expected = Image::pixels(&image).unwrap();
+    let expected = image::pixels(&image).unwrap();
     native::step(None, None, None, &succeeded, &[succeeded_batch]).unwrap();
     let submitted = renderer::capture(&e).unwrap();
     assert_eq!(&submitted[0..4], &expected[0..4], "successful transaction changed snapshot pixels");
@@ -218,7 +218,7 @@ fn gpu_offscreen_transactions() {
     replace();
     let replaced = native::begin_submission(&e).unwrap();
     let replaced_batch = lower(&replaced, &resolve, &image_ir).unwrap();
-    let expected = Image::pixels(&image).unwrap();
+    let expected = image::pixels(&image).unwrap();
     native::step(None, None, None, &replaced, &[replaced_batch]).unwrap();
     assert_eq!(&renderer::capture(&e).unwrap()[0..4], &expected[0..4], "replaced image pixels did not reach the presented frame");
     assert!(native::staging_bytes(&e) > 0, "uploads frame after frame lost their staging");
@@ -248,7 +248,7 @@ fn gpu_offscreen_transactions() {
     assert!(native::begin_submission(&e).is_err(), "destroyed coordinator began a submission");
     native::cancel(&destroy_first);
     native::cancel(&destroy_second);
-    Image::destroy(&image).unwrap();
+    image::destroy(&image).unwrap();
 }
 
 fn label_rgba(v: i64) -> Vec<u8> {
@@ -260,7 +260,7 @@ fn gpu_offscreen_labels() {
         return;
     }
     let e = renderer::create_offscreen(&config(3, 2)).unwrap();
-    let labels: Vec<Image::t> = (0..45).map(|i| Image::create(1, 1, &label_rgba(i)).unwrap()).collect();
+    let labels: Vec<image::Image> = (0..45).map(|i| image::create(1, 1, &label_rgba(i)).unwrap()).collect();
     let labels_ir = ir((0..45).map(|i| image_cmd(100 + i)).collect());
     let resolve = |id: i64| if (100..145).contains(&id) { Some(res::Image(labels[(id - 100) as usize].clone())) } else { None };
     let open_submission = || {
@@ -270,8 +270,8 @@ fn gpu_offscreen_labels() {
     };
     let no_lease = open_submission();
     for (i, label) in labels.iter().enumerate() {
-        Image::replace(label, 1, 1, &label_rgba(i as i64 + 1)).unwrap();
-        Image::replace(label, 1, 1, &label_rgba(i as i64 + 2)).unwrap();
+        image::replace(label, 1, 1, &label_rgba(i as i64 + 1)).unwrap();
+        image::replace(label, 1, 1, &label_rgba(i as i64 + 2)).unwrap();
     }
     native::cancel(&no_lease);
     let warm = open_submission();
@@ -281,13 +281,13 @@ fn gpu_offscreen_labels() {
     }
     assert!(native::snapshot_count_for_test(&e) <= 256, "image snapshot cache exceeded entry capacity");
     let blue = [0u8, 0, 255, 255];
-    Image::replace(&labels[44], 1, 1, &blue).unwrap();
+    image::replace(&labels[44], 1, 1, &blue).unwrap();
     let mutation = native::begin_submission(&e).unwrap();
     let batch = native::lower_scene2(&mutation, 1, &resolve, &labels_ir).unwrap();
     native::step(None, None, None, &mutation, &[batch]).unwrap();
     assert_eq!(&renderer::capture(&e).unwrap()[0..4], &blue, "image snapshot cache did not invalidate mutated pixels");
     for l in &labels {
-        Image::destroy(l).unwrap();
+        image::destroy(l).unwrap();
     }
     renderer::destroy(&e).unwrap();
 }
@@ -306,20 +306,20 @@ fn gpu_offscreen_large_image() {
     large_a[3] = 255;
     large_b[2] = 255;
     large_b[3] = 255;
-    let large = Image::create(640, 480, &large_a).unwrap();
+    let large = image::create(640, 480, &large_a).unwrap();
     let image_ir = ir(vec![image_cmd(1)]);
     let resolve = |id: i64| if id == 1 { Some(res::Image(large.clone())) } else { None };
     let cache_before = native::snapshot_count_for_test(&e);
     let rss_before = rss_kib();
     let mut rss_middle = rss_before;
     for frame in 1..=600 {
-        Image::replace(&large, 640, 480, if frame & 1 == 0 { &large_a } else { &large_b }).unwrap();
+        image::replace(&large, 640, 480, if frame & 1 == 0 { &large_a } else { &large_b }).unwrap();
         let s = native::begin_submission(&e).unwrap();
         native::lower_scene2(&s, 1, &resolve, &image_ir).unwrap();
         native::cancel(&s);
         // Two immediate mutations need both resource buffers unleased.
-        Image::replace(&large, 640, 480, &large_b).unwrap();
-        Image::replace(&large, 640, 480, &large_a).unwrap();
+        image::replace(&large, 640, 480, &large_b).unwrap();
+        image::replace(&large, 640, 480, &large_a).unwrap();
         if frame == 300 {
             rss_middle = rss_kib();
         }
@@ -328,15 +328,15 @@ fn gpu_offscreen_large_image() {
     assert!(rss_middle <= rss_before + 32768 && rss_after <= rss_middle + 16384, "changing large-image lowering RSS did not plateau: {rss_before}/{rss_middle}/{rss_after} KiB");
     println!("large transient image: RSS {rss_before}/{rss_middle}/{rss_after} KiB");
     assert_eq!(native::snapshot_count_for_test(&e), cache_before, "large transient image entered the immutable snapshot cache");
-    Image::replace(&large, 640, 480, &large_b).unwrap();
+    image::replace(&large, 640, 480, &large_b).unwrap();
     let s = native::begin_submission(&e).unwrap();
     let batch = native::lower_scene2(&s, 1, &resolve, &image_ir).unwrap();
     native::step(None, None, None, &s, &[batch]).unwrap();
     assert_eq!(&renderer::capture(&e).unwrap()[0..4], &[0, 0, 255, 255], "large transient image changed submitted snapshot pixels");
     // A completed step released both snapshot leases, so two immediate mutations stay legal.
-    Image::replace(&large, 640, 480, &large_a).unwrap();
-    Image::replace(&large, 640, 480, &large_b).unwrap();
-    Image::destroy(&large).unwrap();
+    image::replace(&large, 640, 480, &large_a).unwrap();
+    image::replace(&large, 640, 480, &large_b).unwrap();
+    image::destroy(&large).unwrap();
     renderer::destroy(&e).unwrap();
 }
 
@@ -346,13 +346,13 @@ fn gpu_offscreen_eviction() {
     }
     let e = renderer::create_offscreen(&config(3, 2)).unwrap();
     let image_ir = ir(vec![image_cmd(1)]);
-    let images: Vec<Image::t> = (0..257).map(|i| Image::create(1, 1, &label_rgba(i)).unwrap()).collect();
+    let images: Vec<image::Image> = (0..257).map(|i| image::create(1, 1, &label_rgba(i)).unwrap()).collect();
     for cached in &images {
         renderer::lower_scene2(&e, 1, &|id| if id == 1 { Some(res::Image(cached.clone())) } else { None }, &image_ir).unwrap();
     }
     assert_eq!(native::snapshot_count_for_test(&e), 256, "image snapshot cache did not evict to its exact entry capacity");
     for l in &images {
-        Image::destroy(l).unwrap();
+        image::destroy(l).unwrap();
     }
     renderer::destroy(&e).unwrap();
 }
@@ -873,28 +873,28 @@ fn gpu_execution_blends_samples_resize() {
 fn gpu_execution_lease_rollback() {
     if !common::gpu() { return; }
     use ::renderer::renderer_leases as leases;
-    let image=Image::create(1,1,&[255,0,0,255]).unwrap();
+    let image=image::create(1,1,&[255,0,0,255]).unwrap();
     let held=leases::create();
     let policy=leases::Policy::RetainImageSnapshots(held.clone());
-    let (_,_,_,first,lease)=Image::borrow_snapshot(&image).unwrap();
+    let (_,_,_,first,lease)=image::borrow_snapshot(&image).unwrap();
     leases::retain(&held,lease);
     let checkpoint=leases::checkpoint(&policy);
-    Image::replace(&image,1,1,&[0,0,255,255]).unwrap();
-    let (_,_,_,second,lease)=Image::borrow_snapshot(&image).unwrap();
+    image::replace(&image,1,1,&[0,0,255,255]).unwrap();
+    let (_,_,_,second,lease)=image::borrow_snapshot(&image).unwrap();
     leases::retain(&held,lease);
-    assert!(Image::replace(&image,1,1,&[0,255,0,255]).is_err(),"two leased buffers must bound image storage");
+    assert!(image::replace(&image,1,1,&[0,255,0,255]).is_err(),"two leased buffers must bound image storage");
     leases::rollback(&policy,checkpoint);
-    Image::replace(&image,1,1,&[0,255,0,255]).unwrap();
+    image::replace(&image,1,1,&[0,255,0,255]).unwrap();
     assert_eq!(&*first,&[255,0,0,255],"rollback released the earlier submission lease");
     assert_eq!(&*second,&[0,0,255,255],"a released snapshot stays immutable");
     leases::release(&held);
     leases::release(&held);
-    Image::replace(&image,1,1,&[255,255,255,255]).unwrap();
-    Image::replace(&image,1,1,&[0,0,0,255]).unwrap();
+    image::replace(&image,1,1,&[255,255,255,255]).unwrap();
+    image::replace(&image,1,1,&[0,0,0,255]).unwrap();
     assert_eq!(leases::checkpoint(&policy),Some(0));
     assert_eq!(leases::checkpoint(&leases::Policy::CopyImageSnapshots),None);
     leases::rollback(&leases::Policy::CopyImageSnapshots,None);
-    Image::destroy(&image).unwrap();
+    image::destroy(&image).unwrap();
 }
 
 pub const CASES: &[(&str, fn())] = &[

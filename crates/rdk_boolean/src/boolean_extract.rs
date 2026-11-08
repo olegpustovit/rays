@@ -376,7 +376,7 @@ pub fn validate_closed_topology(topology_value: &topology::T) -> Result<(), erro
 }
 
 fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
-    let view = topology::View::view(topology_value)?;
+    let view = topology::view::view(topology_value)?;
     let primitive_count = view.primitive_kinds.len();
     let mut triangle_only = true;
     for primitive in 0..primitive_count {
@@ -424,7 +424,7 @@ fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
     Ok(())
 }
 
-fn native_edge(view: &topology_index::View::View, primitive: i64, first: i64, second: i64) -> i64 {
+fn native_edge(view: &topology_index::view::View, primitive: i64, first: i64, second: i64) -> i64 {
     let (f, s) = (first as usize, second as usize);
     if view.primitive_of_vertex[f] == primitive && view.next_vertex[f] == second {
         view.edge_of_vertex[f]
@@ -676,10 +676,10 @@ fn build_internal(
     let constraints_value = complex::view::constraints(c);
     let left_geometry = constraints::view::left_geometry(constraints_value).clone();
     let right_geometry = constraints::view::right_geometry(constraints_value).clone();
-    let edge_index = |geometry_value: &geometry::T| -> Result<Option<topology_index::View::View>, Fail> {
+    let edge_index = |geometry_value: &geometry::T| -> Result<Option<topology_index::view::View>, Fail> {
         if internal.with_corner_payload && !geometry::edge_groups(geometry_value).is_empty() {
             let index = topology_index::create(cancel_value, geometry::topology(geometry_value))?;
-            Ok(Some(topology_index::View::view(&index)))
+            Ok(Some(topology_index::view::view(&index)))
         } else {
             Ok(None)
         }
@@ -797,7 +797,7 @@ fn build_internal(
         }
         let source_triangle = complex::member_face(c, member);
         let surface = side_surface(constraints_value, member_side);
-        primitive_faces[output] = surface_index::View::triangle_primitive(surface, source_triangle);
+        primitive_faces[output] = surface_index::view::triangle_primitive(surface, source_triangle);
         primitive_triangles[output] = source_triangle;
         primitive_refined_triangles[output] = complex::member_triangle(c, member);
         let source_a = side_triangle_point(constraints_value, member_side, source_triangle, 0);
@@ -811,9 +811,9 @@ fn build_internal(
         if internal.with_corner_payload {
             for local in 0..3_i64 {
                 primitive_source_points[output * 3 + local as usize] =
-                    surface_index::View::triangle_point(surface, source_triangle, local);
+                    surface_index::view::triangle_point(surface, source_triangle, local);
                 primitive_source_vertices[output * 3 + local as usize] =
-                    surface_index::View::triangle_vertex(surface, source_triangle, local);
+                    surface_index::view::triangle_vertex(surface, source_triangle, local);
             }
             for local in 0..3_i64 {
                 let facet_local = if local == 0 || desired > 0 { local } else { 3 - local };
@@ -864,13 +864,13 @@ fn build_internal(
                         let triangle = complex::member_face(c, candidate);
                         let candidate_surface = side_surface(constraints_value, side);
                         let primitive =
-                            surface_index::View::triangle_primitive(candidate_surface, triangle);
+                            surface_index::view::triangle_primitive(candidate_surface, triangle);
                         let a_id = side_triangle_point(constraints_value, side, triangle, 0);
                         let b_id = side_triangle_point(constraints_value, side, triangle, 1);
                         let c_id = side_triangle_point(constraints_value, side, triangle, 2);
-                        let va = surface_index::View::triangle_vertex(candidate_surface, triangle, 0);
-                        let vb = surface_index::View::triangle_vertex(candidate_surface, triangle, 1);
-                        let vc = surface_index::View::triangle_vertex(candidate_surface, triangle, 2);
+                        let va = surface_index::view::triangle_vertex(candidate_surface, triangle, 0);
+                        let vb = surface_index::view::triangle_vertex(candidate_surface, triangle, 1);
+                        let vc = surface_index::view::triangle_vertex(candidate_surface, triangle, 2);
                         let edge0 = native_edge(index, primitive, vb, vc);
                         let edge1 = native_edge(index, primitive, vc, va);
                         let edge2 = native_edge(index, primitive, va, vb);
@@ -969,7 +969,7 @@ fn build_internal(
     if internal.require_closed {
         validate_closed_topology(&topology_value).map_err(Fail::Rdk)?;
     }
-    let positions = match packed::Float3::View::of_owned_exn(x, y, z) {
+    let positions = match packed::float3::view::of_owned_exn(x, y, z) {
         Ok(value) => value,
         Err(failure) => return Err(Fail::Invalid(error::message(&failure).to_owned())),
     };
@@ -1040,7 +1040,6 @@ pub fn build_selected_with_ancestry(
     build_internal(cancel_value, Some(selection), &internal, &Expression::Left, c, weiler_value, cells_value, barycentric_cache).map_err(|f| finish_fail(f))
 }
 
-#[allow(non_snake_case)]
 pub mod view {
     use super::*;
 
@@ -1154,7 +1153,7 @@ fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<A
     cancel::check_opt(cancel_value)?;
     let primitives = geometry::primitive_count(&value.geometry) as usize;
     let corners = primitives * 3;
-    let source_topology = topology::View::view(geometry::topology(&value.geometry))?;
+    let source_topology = topology::view::view(geometry::topology(&value.geometry))?;
     if source_topology.vertex_points.len() != corners {
         return Err(invalid_fail("Boolean ancestry reversal requires triangular topology"));
     }
@@ -1364,7 +1363,7 @@ fn concatenate_inner(cancel_value: Option<&cancel::T>, values: &[Ancestry]) -> R
         (0..=total_primitives as i64).map(|primitive| primitive * 3).collect();
     let topology_value = topology::polygons_owned(point_count, vertex_points, primitive_offsets)
         .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
-    let positions = packed::Float3::View::of_owned_exn(x, y, z)
+    let positions = packed::float3::view::of_owned_exn(x, y, z)
         .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     let geometry_value = geometry::create(positions, topology_value, None, None, None)
         .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;

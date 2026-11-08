@@ -46,7 +46,7 @@ fn barycentric(
     true
 }
 
-fn load_relative(scratch: &mut [f64], target: usize, positions: &packed::Float3::View::View, point: i64, ox: f64, oy: f64, oz: f64) {
+fn load_relative(scratch: &mut [f64], target: usize, positions: &packed::float3::view::View, point: i64, ox: f64, oy: f64, oz: f64) {
     let p = point as usize;
     scratch[target] = positions.x[p] - ox;
     scratch[target + 1] = positions.y[p] - oy;
@@ -131,12 +131,12 @@ pub fn segment_segment_events_into(
     events: &mut [f64],
     is_self: bool,
     tolerance: f64,
-    left_positions: &packed::Float3::View::View,
+    left_positions: &packed::float3::view::View,
     left_a: i64,
     left_b: i64,
     left_u0: f64,
     left_u1: f64,
-    right_positions: &packed::Float3::View::View,
+    right_positions: &packed::float3::view::View,
     right_a: i64,
     right_b: i64,
     right_u0: f64,
@@ -275,12 +275,12 @@ pub fn segment_triangle_events_into(
     tolerance: f64,
     include_coplanar: bool,
     segment_first: bool,
-    segment_positions: &packed::Float3::View::View,
+    segment_positions: &packed::float3::view::View,
     segment_a: i64,
     segment_b: i64,
     segment_u0: f64,
     segment_u1: f64,
-    triangle_positions: &packed::Float3::View::View,
+    triangle_positions: &packed::float3::view::View,
     triangle_a: i64,
     triangle_b: i64,
     triangle_c: i64,
@@ -438,8 +438,8 @@ pub fn segment_triangle_events_into(
 mod tests {
     use super::*;
 
-    fn view(points: &[[f64; 3]]) -> packed::Float3::View::View {
-        packed::Float3::View::View {
+    fn view(points: &[[f64; 3]]) -> packed::float3::view::View {
+        packed::float3::view::View {
             x: points.iter().map(|p| p[0]).collect::<Vec<_>>().into(),
             y: points.iter().map(|p| p[1]).collect::<Vec<_>>().into(),
             z: points.iter().map(|p| p[2]).collect::<Vec<_>>().into(),

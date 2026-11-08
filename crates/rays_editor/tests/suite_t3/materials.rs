@@ -66,7 +66,7 @@ fn signature(g: &rdk_core::geometry::T) -> Vec<String> {
         .map(|name| match attr(name, g) {
             rdk_core::attribute::Storage::Text(a) => format!("{a:?}"),
             rdk_core::attribute::Storage::Float(a) => format!("{:?}", a.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
-            rdk_core::attribute::Storage::Float4(a) => format!("{:?}", (0..rdk_core::packed::Float4::length(&a)).map(|i| rdk_core::packed::Float4::get(&a, i).map(|(w, x, y, z)| (w.to_bits(), x.to_bits(), y.to_bits(), z.to_bits()))).collect::<Vec<_>>()),
+            rdk_core::attribute::Storage::Float4(a) => format!("{:?}", (0..rdk_core::packed::float4::length(&a)).map(|i| rdk_core::packed::float4::get(&a, i).map(|(w, x, y, z)| (w.to_bits(), x.to_bits(), y.to_bits(), z.to_bits()))).collect::<Vec<_>>()),
             _ => fail("unexpected material attribute"),
         })
         .collect()

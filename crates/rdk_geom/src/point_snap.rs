@@ -58,7 +58,7 @@ fn scalar_attribute(label: &str, name: &str, geometry_value: &geometry::T) -> Re
     let Some(found) = geometry::find_attribute(attribute::Owner::Point, name, geometry_value) else {
         return Err(fail(format!("{label} point attribute {name:?} is missing")));
     };
-    match attribute::View::storage(&found)? {
+    match attribute::view::storage(&found)? {
         attribute::Storage::Float(values) => Ok(Scalar::Float(values.clone())),
         attribute::Storage::Int(values) => Ok(Scalar::Int(values.clone())),
         attribute::Storage::Text(values) => Ok(Scalar::Text(values.clone())),
@@ -138,8 +138,8 @@ fn validate_positions(
     cancel_value: Option<&cancel::T>,
     label: &str,
     geometry_value: &geometry::T,
-) -> Result<packed::Float3::View::View, error::T> {
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+) -> Result<packed::float3::view::View, error::T> {
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     for point in 0..geometry::point_count(geometry_value) as usize {
         cancel::poll(cancel_value, point as i64, 4095)?;
         if !(positions.x[point].is_finite() && positions.y[point].is_finite() && positions.z[point].is_finite()) {
@@ -163,7 +163,7 @@ fn specified(
     validate_positions(cancel_value, "query", source)?;
     validate_positions(cancel_value, "target", target)?;
     let values = match geometry::find_attribute(attribute::Owner::Point, attribute_name, source) {
-        Some(found) => match attribute::View::storage(&found)? {
+        Some(found) => match attribute::view::storage(&found)? {
             attribute::Storage::Int(values) => values.clone(),
             _ => {
                 return Err(fail(format!(
@@ -486,7 +486,7 @@ mod tests {
         let x = points.iter().map(|p| p[0]).collect();
         let y = points.iter().map(|p| p[1]).collect();
         let z = points.iter().map(|p| p[2]).collect();
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
         geometry::create(positions, rdk_core::topology::empty(points.len() as i64).unwrap(), None, None, None).unwrap()
     }
 

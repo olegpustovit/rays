@@ -9,7 +9,7 @@ use crate::canvas_runtime;
 use crate::frame;
 use crate::input_state;
 use crate::native_scene_lowering;
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use crate::time;
 use crate::world;
 use input::{Event, Key, MouseButton};
@@ -425,7 +425,7 @@ struct Finish {
     state: Rc<run_context>,
     previous: Option<Rc<run_context>>,
     coordinator: rr::Renderer,
-    caches: Layer::cache_context,
+    caches: layer::cache_context,
     model: Rc<crash_state>,
     last_scene: Rc<RefCell<Option<scene::Scene>>>,
     done: bool,
@@ -446,9 +446,9 @@ impl Finish {
         *self.state.background.borrow_mut() = None;
         *self.state.dialog.borrow_mut() = None;
         if let Some(scene_) = self.last_scene.borrow_mut().take() {
-            Layer::release(&scene_);
+            layer::release(&scene_);
         }
-        Layer::clear_cache_context(&self.caches);
+        layer::clear_cache_context(&self.caches);
         let _ = rr::destroy(&self.coordinator);
     }
 }
@@ -506,7 +506,7 @@ fn run_state_internal(
     }
     let input = input_state::create().map_err(|m| startup_error(op, ErrorKind::InvalidState, &format!("input: {m}")))?;
     let time_ = time::create(config_.fps.unwrap_or(0), vsync);
-    let caches = Layer::create_cache_context();
+    let caches = layer::create_cache_context();
     let world_caches = world::private::create_cache_context();
     let native_caches = native_scene_lowering::create_cache_context();
     let state = Rc::new(run_context {
@@ -519,7 +519,7 @@ fn run_state_internal(
         dialog: RefCell::new(None),
     });
     let with_run_caches = |f: &mut dyn FnMut()| {
-        Layer::with_cache_context(&caches, &mut || world::private::with_cache_context(&world_caches, &mut *f));
+        layer::with_cache_context(&caches, &mut || world::private::with_cache_context(&world_caches, &mut *f));
     };
     let first = make_frame(config_, &state.input.borrow(), 0, 0., 0., Vec::new());
     let configuration = rr::Configuration {
@@ -623,7 +623,7 @@ fn run_state_internal(
         Rc::new(move |scene_: &scene::Scene| {
             // ponytail: scan scene metadata each frame; move the focused region into staged scene
             // facts if large retained scenes make this measurable.
-            let area = Layer::text_regions(scene_).into_iter().find(|r| r.4).map(|(x, y, w, h, _, cursor_)| ((x, y, w, h), cursor_));
+            let area = layer::text_regions(scene_).into_iter().find(|r| r.4).map(|(x, y, w, h, _, cursor_)| ((x, y, w, h), cursor_));
             let outcome = (|| -> Result<(), error> {
                 run_runtime(&coordinator, &|r| runtime::set_text_input(r, area))?;
                 let facts = with_runtime_facts(&coordinator)?;
@@ -649,13 +649,13 @@ fn run_state_internal(
         model: RefCell::new(None),
         program: program_.clone(),
     });
-    let release_after_failed_init = |caches: &Layer::cache_context, coordinator: &rr::Renderer| {
-        Layer::clear_cache_context(caches);
+    let release_after_failed_init = |caches: &layer::cache_context, coordinator: &rr::Renderer| {
+        layer::clear_cache_context(caches);
         let _ = rr::destroy(coordinator);
     };
     // init: a panic here writes a crash report (no frames yet) and leaves nothing running
     struct InitGuard {
-        caches: Layer::cache_context,
+        caches: layer::cache_context,
         coordinator: rr::Renderer,
         crash: Rc<crash_state>,
         armed: bool,
@@ -666,7 +666,7 @@ fn run_state_internal(
                 if std::thread::panicking() {
                     report_crash(&self.crash);
                 }
-                Layer::clear_cache_context(&self.caches);
+                layer::clear_cache_context(&self.caches);
                 let _ = rr::destroy(&self.coordinator);
             }
         }
@@ -697,7 +697,7 @@ fn run_state_internal(
     let looped: Result<(), error> = {
         let mut result = Ok(());
         let renderer_callback = render_scene.clone();
-        Layer::with_renderer(renderer_callback, &mut || {
+        layer::with_renderer(renderer_callback, &mut || {
             canvas_runtime::with_save(save.clone(), &mut || {
                 result = run_loop(
                     config_,
@@ -739,7 +739,7 @@ fn run_loop(
     crash: &Rc<crash_state>,
     program_: &Rc<program>,
     coordinator: &rr::Renderer,
-    caches: &Layer::cache_context,
+    caches: &layer::cache_context,
     world_caches: &world::private::cache_context,
     last_scene: &Rc<RefCell<Option<scene::Scene>>>,
     render_failure: &Rc<RefCell<Option<error>>>,
@@ -757,7 +757,7 @@ fn run_loop(
             return Err(e);
         }
         let mut step: Result<(), error> = Ok(());
-        Layer::with_cache_context(caches, &mut || {
+        layer::with_cache_context(caches, &mut || {
             world::private::with_cache_context(world_caches, &mut || {
                 step = one_frame(
                     config_, limit, profile, state, crash, program_, coordinator, last_scene, render_failure, logical_width, logical_height, &mut count, &mut shown, &mut quiet,

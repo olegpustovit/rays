@@ -26,7 +26,7 @@ pub fn point_count(value: &T) -> i64 {
 }
 
 pub fn bounds(value: &T) -> Option<(vec3::T, vec3::T)> {
-    let b = packed::Float3::bounds(geometry::positions(value)).expect("Geometry_view.bounds")?;
+    let b = packed::float3::bounds(geometry::positions(value)).expect("Geometry_view.bounds")?;
     Some((vec3::create(b[0], b[1], b[2]), vec3::create(b[3], b[4], b[5])))
 }
 
@@ -43,7 +43,7 @@ pub fn summary(g: &T) -> Summary {
     groups.sort();
     groups.dedup();
     Summary {
-        points: packed::Float3::length(geometry::positions(g)),
+        points: packed::float3::length(geometry::positions(g)),
         prims: geometry::primitive_count(g),
         groups,
         attributes: geometry::attributes(g)
@@ -71,7 +71,7 @@ pub fn wire_mesh(value: &T) -> Result<mesh::Mesh, String> {
     let topo = geometry::topology(value);
     let edges = topology_index::create(None, topo).map_err(|e| error::to_string(&e))?;
     let points = geometry::positions(value);
-    let view = packed::Float3::View::view(points).map_err(|e| error::to_string(&e))?;
+    let view = packed::float3::view::view(points).map_err(|e| error::to_string(&e))?;
     let vertices: Vec<vec3::T> = (0..view.x.len()).map(|i| vec3::create(view.x[i], view.y[i], view.z[i])).collect();
     let n = topology_index::edge_count(&edges);
     let mut indices = vec![0i64; (n * 2) as usize];
@@ -118,7 +118,7 @@ fn floats(values: &[f64]) -> String {
 
 /// One cell of an attribute: `component` picks the axis of a tuple storage.
 fn cell(a: &attribute::T, row: i64, component: usize) -> String {
-    let Ok(storage) = attribute::View::storage(a) else { return String::new() };
+    let Ok(storage) = attribute::view::storage(a) else { return String::new() };
     let at = row as usize;
     match storage {
         Storage::Float(values) => number(values[at]),
@@ -127,14 +127,14 @@ fn cell(a: &attribute::T, row: i64, component: usize) -> String {
             Ok(text) => text.to_owned(),
             Err(_) => rdk_ops::attribute_ops::ocaml_quote(&values[at]),
         },
-        Storage::IntArray(values) => packed::IntArray::get(values, row).map(|v| ints(&v)).unwrap_or_default(),
-        Storage::FloatArray(values) => packed::FloatArray::get(values, row).map(|v| floats(&v)).unwrap_or_default(),
+        Storage::IntArray(values) => packed::int_array::get(values, row).map(|v| ints(&v)).unwrap_or_default(),
+        Storage::FloatArray(values) => packed::float_array::get(values, row).map(|v| floats(&v)).unwrap_or_default(),
         Storage::Float2(values) => {
-            let (x, y) = packed::Float2::get(values, row).unwrap_or_default();
+            let (x, y) = packed::float2::get(values, row).unwrap_or_default();
             number(if component == 0 { x } else { y })
         }
         Storage::Float3(values) => {
-            let (x, y, z) = packed::Float3::get(values, row).unwrap_or_default();
+            let (x, y, z) = packed::float3::get(values, row).unwrap_or_default();
             number(match component {
                 0 => x,
                 1 => y,
@@ -142,7 +142,7 @@ fn cell(a: &attribute::T, row: i64, component: usize) -> String {
             })
         }
         Storage::Float4(values) => {
-            let (x, y, z, w) = packed::Float4::get(values, row).unwrap_or_default();
+            let (x, y, z, w) = packed::float4::get(values, row).unwrap_or_default();
             number(match component {
                 0 => x,
                 1 => y,
@@ -166,7 +166,7 @@ pub fn columns(owner: i64, value: &T) -> Vec<Column> {
             result.push((
                 format!("P.{axis}"),
                 Box::new(move |row| {
-                    let (x, y, z) = packed::Float3::get(&positions, row).unwrap_or_default();
+                    let (x, y, z) = packed::float3::get(&positions, row).unwrap_or_default();
                     number(match i {
                         0 => x,
                         1 => y,
@@ -183,7 +183,7 @@ pub fn columns(owner: i64, value: &T) -> Vec<Column> {
         let name = attribute::name(&a).to_owned();
         let length = attribute::length(&a);
         // the storage kind, read once for the header axes (the cells re-borrow it)
-        let axes: &[&str] = match attribute::View::storage(&a) {
+        let axes: &[&str] = match attribute::view::storage(&a) {
             Ok(Storage::Float2(_)) => &["x", "y"],
             Ok(Storage::Float3(_)) => &["x", "y", "z"],
             Ok(Storage::Float4(_)) => &["x", "y", "z", "w"],
@@ -222,7 +222,7 @@ pub fn columns(owner: i64, value: &T) -> Vec<Column> {
 /// The primitive-owned integer provenance tags named `attribute_name`.
 pub fn tags(attribute_name: &str, value: &T) -> Option<Vec<i64>> {
     let a = geometry::find_attribute(Owner::Primitive, attribute_name, value)?;
-    match attribute::View::storage(&a) {
+    match attribute::view::storage(&a) {
         Ok(Storage::Int(values)) => Some(values.to_vec()),
         _ => None,
     }
@@ -248,7 +248,7 @@ pub fn cast_material(surface: Option<&Surface>, value: &T, origin: vec3::T, dire
     match surface_index::raycast(surface, origin, direction) {
         Ok(Some(hit)) => {
             let path = match geometry::find_attribute(Owner::Primitive, "shop_materialpath", value) {
-                Some(a) => match attribute::View::storage(&a) {
+                Some(a) => match attribute::view::storage(&a) {
                     Ok(Storage::Text(paths)) if !paths[hit.primitive as usize].is_empty() => {
                         Some(std::str::from_utf8(&paths[hit.primitive as usize]).ok()?.to_owned())
                     }
@@ -266,8 +266,8 @@ const DIM: f64 = 0.3;
 const MIX: f64 = 0.6;
 
 enum Base {
-    Vertex(packed::Float4::View::View),
-    Point(packed::Float4::View::View),
+    Vertex(packed::float4::view::View),
+    Point(packed::float4::view::View),
 }
 
 /// The primitives whose tag satisfies `lit` take the accent over their colour, the rest dim: a
@@ -277,8 +277,8 @@ pub fn tint(attribute_name: &str, accent: (f64, f64, f64), lit: &dyn Fn(i64) -> 
     let (ar, ag, ab) = accent;
     let topo: &topology::T = geometry::topology(value);
     let corners = topology::vertex_count(topo) as usize;
-    let float4 = |a: &attribute::T| match attribute::View::storage(a) {
-        Ok(Storage::Float4(c)) => Some(packed::Float4::View::view(c)),
+    let float4 = |a: &attribute::T| match attribute::view::storage(a) {
+        Ok(Storage::Float4(c)) => Some(packed::float4::view::view(c)),
         _ => None,
     };
     let base = match (geometry::find_attribute(Owner::Vertex, "Cd", value), geometry::find_attribute(Owner::Point, "Cd", value)) {
@@ -308,7 +308,7 @@ pub fn tint(attribute_name: &str, accent: (f64, f64, f64), lit: &dyn Fn(i64) -> 
             w[c] = cw;
         }
     }
-    let Ok(colors) = packed::Float4::of_owned(r, g, b, w) else { return value.clone() };
+    let Ok(colors) = packed::float4::of_owned(r, g, b, w) else { return value.clone() };
     attribute::create_key_owned(&attribute::color(Owner::Vertex), Storage::Float4(colors))
         .and_then(|a| geometry::with_attribute(a, value))
         .unwrap_or_else(|_| value.clone())

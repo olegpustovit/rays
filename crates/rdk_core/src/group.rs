@@ -417,7 +417,6 @@ pub fn symmetric_difference(left: &T, right: &T) -> Result<T, error::T> {
     )
 }
 
-#[allow(non_snake_case)]
 pub mod builder {
     use super::{byte_count, error, new, require_name, Owner};
     use crate::error::Code;
@@ -490,8 +489,7 @@ pub mod builder {
     pub type Group = super::T;
 }
 
-#[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use std::sync::Arc;
 
     use super::{byte_count, cardinality, error, invalid_group, mem, new, require_name, Owner, T};
@@ -656,7 +654,7 @@ pub mod View {
 mod tests {
     use crate::{cancel, error};
 
-    use super::{builder, Owner, View};
+    use super::{builder, Owner, view};
     use crate::error::Code;
 
     // The only behavioral assertion in lib/rdk/test_point_jitter.ml; its runner never jitters.
@@ -692,8 +690,8 @@ mod tests {
         builder::set(&mut builder, 2, true).unwrap();
         builder::set(&mut builder, 9, true).unwrap();
         let group = builder::freeze(&mut builder).unwrap();
-        let group = View::with_owned_order(vec![9, 2], &group).unwrap();
-        assert_eq!(View::bits_view(&group), &[4, 2]);
+        let group = view::with_owned_order(vec![9, 2], &group).unwrap();
+        assert_eq!(view::bits_view(&group), &[4, 2]);
         assert_eq!(super::ordered_elements(&group), Some(vec![9, 2]));
     }
 
@@ -716,7 +714,7 @@ mod tests {
         for domains in [1, 4] {
             parallel::run_unit(Some(domains), &|| {
                 let actual = super::union_many(None, Some(257), "combined", &groups).unwrap();
-                assert_eq!(View::bits_view(&actual), View::bits_view(&union));
+                assert_eq!(view::bits_view(&actual), view::bits_view(&union));
                 assert_eq!(super::cardinality(&actual), 73_336);
                 assert!(!super::is_ordered(&actual));
                 Ok(())

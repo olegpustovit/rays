@@ -1,7 +1,7 @@
 //! Renders a staged `Scene` through one `Renderer` execution: replay of a retained frame, or
 //! lowering each layer into a submission and stepping it.
 use crate::idlist::{self, IdList, Item};
-use crate::scene::{self, Layer};
+use crate::scene::{self, layer};
 use renderer::renderer::{self as rr, native};
 use renderer::scene_execution as se;
 use scene_command::display_list;
@@ -110,7 +110,7 @@ fn sweep_retained(owner: &se::GpuVerticesOwner) {
     }
 }
 
-pub fn draws_of_prepared(staged: &Layer::staged_native, prepared: &Rc<se::PreparedScene3>) -> Vec<rr::Draw> {
+pub fn draws_of_prepared(staged: &layer::staged_native, prepared: &Rc<se::PreparedScene3>) -> Vec<rr::Draw> {
     let direct = || prepared.entries.iter().map(draw_of_scene3_entry).collect::<Vec<_>>();
     if staged.retained.is_none() {
         return direct();
@@ -132,25 +132,25 @@ pub fn draws_of_prepared(staged: &Layer::staged_native, prepared: &Rc<se::Prepar
 fn validate_images(resources: &[(i64, rr::Resource)]) -> Result<(), ogpu_core::error::Error> {
     for (_, r) in resources {
         if let rr::Resource::Image(image) = r {
-            runtime_resources::Image::gpu_snapshot(image)?;
+            runtime_resources::image::gpu_snapshot(image)?;
         }
     }
     Ok(())
 }
 
-fn validate_layers(layers: &[Layer::native_layer]) -> Result<(), ogpu_core::error::Error> {
+fn validate_layers(layers: &[layer::native_layer]) -> Result<(), ogpu_core::error::Error> {
     for layer in layers {
         match layer {
-            Layer::native_layer::Scene2_layer(_, r) | Layer::native_layer::Scene2_segment(_, r) | Layer::native_layer::Ui_layer(_, r) => validate_images(r)?,
-            Layer::native_layer::Scene3_layer(_) => {}
+            layer::native_layer::Scene2_layer(_, r) | layer::native_layer::Scene2_segment(_, r) | layer::native_layer::Ui_layer(_, r) => validate_images(r)?,
+            layer::native_layer::Scene3_layer(_) => {}
         }
     }
     Ok(())
 }
 
-fn validate_mesh_images(images: &[runtime_resources::Image::t]) -> Result<(), ogpu_core::error::Error> {
+fn validate_mesh_images(images: &[runtime_resources::image::Image]) -> Result<(), ogpu_core::error::Error> {
     for image in images {
-        runtime_resources::Image::gpu_snapshot(image)?;
+        runtime_resources::image::gpu_snapshot(image)?;
     }
     Ok(())
 }
@@ -159,7 +159,7 @@ struct Release(Vec<scene::node>);
 
 impl Drop for Release {
     fn drop(&mut self) {
-        Layer::release(&self.0);
+        layer::release(&self.0);
     }
 }
 
@@ -181,18 +181,18 @@ enum outcome {
 fn lower_all(
     execution: &rr::Renderer,
     density: i64,
-    staged: &Layer::staged_native,
+    staged: &layer::staged_native,
     submission: &rr::Submission,
 ) -> Result<Vec<rr::Batch>, error> {
     let mut batches = Vec::new();
     for layer in &staged.layers {
         let batch = match layer {
-            Layer::native_layer::Scene2_layer(ir, resources) => {
+            layer::native_layer::Scene2_layer(ir, resources) => {
                 native::lower_scene2(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ir)
             }
-            Layer::native_layer::Scene2_segment(segment, resources) => {
+            layer::native_layer::Scene2_segment(segment, resources) => {
                 let cacheable = resources.iter().all(|(_, r)| matches!(r, rr::Resource::Text(_)));
-                let version = Layer::native_segment_version(segment, resources);
+                let version = layer::native_segment_version(segment, resources);
                 let ir = scene::segment_ir(segment).map_err(error::Stage)?;
                 native::lower_scene2_segment(
                     submission,
@@ -204,10 +204,10 @@ fn lower_all(
                     &ir,
                 )
             }
-            Layer::native_layer::Ui_layer(ui, resources) => {
+            layer::native_layer::Ui_layer(ui, resources) => {
                 native::lower_ui(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ui)
             }
-            Layer::native_layer::Scene3_layer(prepared) => {
+            layer::native_layer::Scene3_layer(prepared) => {
                 sweep_retained(&native::gpu_vertices_owner(execution));
                 let draws = draws_of_prepared(staged, prepared);
                 rr::adopt_retained_view(submission, density, prepared, draws)
@@ -222,9 +222,9 @@ pub fn render(execution: &rr::Renderer, density: i64, width: i64, height: i64, s
     let mut cancel = Cancel(None);
     let prepared: Result<outcome, error> = {
         let _release = Release(scene.to_vec());
-        match Layer::stage_native_render_checked(Some(density), width, height, scene) {
-            Err(Layer::native_error::Message(message)) => Err(error::Stage(message)),
-            Err(Layer::native_error::Resource(e)) => Err(error::Resource(e)),
+        match layer::stage_native_render_checked(Some(density), width, height, scene) {
+            Err(layer::native_error::Message(message)) => Err(error::Stage(message)),
+            Err(layer::native_error::Resource(e)) => Err(error::Resource(e)),
             Ok(staged) => {
                 let replayed: Result<Option<()>, error> = match validate_layers(&staged.layers).and_then(|()| validate_mesh_images(&staged.mesh_images)) {
                     Err(e) => Err(error::Resource(e)),

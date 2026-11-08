@@ -68,7 +68,7 @@ fn missing<R>(name: &str) -> Result<R, Diagnostic> {
 
 fn mask(group: &group::T) -> Value {
     let length = group::length(group) as usize;
-    let bits = group::View::bits_view(group);
+    let bits = group::view::bits_view(group);
     let mut values = vec![0i64; length];
     for (byte, value) in bits.iter().enumerate() {
         let first = byte << 3;

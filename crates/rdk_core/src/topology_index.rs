@@ -64,9 +64,9 @@ fn create_uncached(
     cancel_value: Option<&cancel::T>,
     topology_value: &topology::T,
 ) -> Result<T, error::T> {
-    let source = topology::View::view(topology_value)?;
+    let source = topology::view::view(topology_value)?;
     let point_index = point_index::create(cancel_value, topology_value)?;
-    let point_view = point_index::View::view(&point_index);
+    let point_view = point_index::view::view(&point_index);
     let point_count = source.point_count;
     let vertex_count = source.vertex_points.len();
     let primitive_count = source.primitive_kinds.len();
@@ -425,8 +425,7 @@ pub fn point_edge(value: &T, point: i64, local: i64) -> Result<i64, error::T> {
     Ok(value.data.point_edges[(value.data.point_edge_offsets[point as usize] + local) as usize])
 }
 
-#[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     #[derive(Clone)]
@@ -494,8 +493,8 @@ mod tests {
         assert_eq!(edge_incidence_count(&first, 1).unwrap(), 2);
         assert_eq!(edge_vertex(&first, 1, 0).unwrap(), 1);
         assert_eq!(edge_vertex(&first, 1, 1).unwrap(), 3);
-        assert_eq!(View::view(&first).opposite_vertex[1], 3);
-        assert_eq!(View::view(&first).opposite_vertex[3], 1);
+        assert_eq!(view::view(&first).opposite_vertex[1], 3);
+        assert_eq!(view::view(&first).opposite_vertex[3], 1);
         assert_eq!(find_edge(&first, 2, 1), Some(1));
         assert_eq!(find_edge(&first, 9, 1), None);
         assert!(matches!(
@@ -507,7 +506,7 @@ mod tests {
             Err(error) if error::code(&error) == Code::InvalidTopologyIndex
         ));
 
-        let view = View::view(&first);
+        let view = view::view(&first);
         assert_eq!(view.point_edge_offsets.as_ref(), &[0, 2, 5, 8, 10]);
         assert_eq!(point_edge_count(&first, 1).unwrap(), 3);
         assert_eq!(point_edge(&first, 1, 0).unwrap(), 0);

@@ -15,8 +15,8 @@ pub enum Kind {
 }
 
 pub struct T {
-    positions: packed::Float3::View::View,
-    topology: topology::View::View,
+    positions: packed::float3::view::View,
+    topology: topology::view::View,
     kinds: Vec<u8>,
     primitives: Vec<i64>,
     locals: Vec<i64>,
@@ -107,8 +107,8 @@ fn create_inner(
         return Err(fail(Code::InvalidParameter, "Linear_piece_index: grain must be positive".to_owned()));
     }
     cancel::check_opt(cancel_value)?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let topology_view = topology::View::view(geometry::topology(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
+    let topology_view = topology::view::view(geometry::topology(geometry_value))?;
     let primitive_count = topology_view.primitive_kinds.len() as i64;
     let selected: Vec<i64> = match primitives_group {
         None => (0..primitive_count).collect(),
@@ -522,7 +522,6 @@ fn self_pair_of(
     Ok(None)
 }
 
-#[allow(non_snake_case)]
 pub mod view {
     use super::*;
 
@@ -563,7 +562,7 @@ pub mod view {
         }
     }
 
-    pub fn positions(value: &T) -> &packed::Float3::View::View {
+    pub fn positions(value: &T) -> &packed::float3::view::View {
         &value.positions
     }
 
@@ -610,8 +609,8 @@ mod tests {
         let x = vec![0.0, 4.0, 0.0, 1.0, 1.0, 1.0];
         let y = vec![0.0, 0.0, 4.0, 1.0, 1.0, 1.0];
         let z = vec![0.0, 0.0, 0.0, -1.0, 1.0, 3.0];
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
-        let topo = topology::View::create_validated_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6], vec![0, 1]);
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
+        let topo = topology::view::create_validated_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6], vec![0, 1]);
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 
@@ -639,8 +638,8 @@ mod tests {
 
     #[test]
     fn degenerate_segment_is_reported() {
-        let positions = packed::Float3::View::of_owned_exn(vec![0.0, 0.0], vec![0.0, 0.0], vec![0.0, 0.0]).unwrap();
-        let topo = topology::View::create_validated_owned(2, vec![0, 1], vec![0, 2], vec![1]);
+        let positions = packed::float3::view::of_owned_exn(vec![0.0, 0.0], vec![0.0, 0.0], vec![0.0, 0.0]).unwrap();
+        let topo = topology::view::create_validated_owned(2, vec![0, 1], vec![0, 2], vec![1]);
         let geom = geometry::create(positions, topo, None, None, None).unwrap();
         let failure = create(None, None, None, &geom).err().unwrap();
         assert_eq!(error::code(&failure), Code::InvalidSurface);

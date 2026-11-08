@@ -5,7 +5,7 @@ use flow_ir::{flow_ir::{Gpu, Executor, Profile, Cost, Placement, PlacementReason
 use flow_sop::{lower, value_lane};
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
-use rdk_core::{geometry as g, packed::Float3};
+use rdk_core::{geometry as g, packed::float3};
 use rays::{canvas, scene3};
 use rays_math::vec3;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
@@ -147,7 +147,7 @@ fn chain_counterexamples() {
             let context = sop::context::create(sop::context::Options {domains:Some(1),..Default::default()}).unwrap();
             let output = ok(sop::session::cook(&mut session,readers,&context,node));
             let geometry = ok(sop::payload::geometry(&output.payload));
-            (Float3::resident(g::positions(&geometry)),Profile::placements(&lowered.profile)[0].clone())
+            (float3::resident(g::positions(&geometry)),Profile::placements(&lowered.profile)[0].clone())
         };
         let (resident,p) = cook(65536,None);
         assert!(!resident && p.reason==Reason::Missing_consumer && p.cpu_consumers.is_none());
@@ -205,7 +205,7 @@ fn chain_counterexamples() {
                 let geometry = ok(sop::payload::geometry(&ok(sop::session::cook(&mut session,Some(readers),&context,&node)).payload));
                 let p = Profile::placements(&lowered.profile).into_iter().find(|p| p.owner.0 != vec!["sop/mesh_planes".to_owned()]).unwrap();
                 assert_eq!(p.cpu_consumers,Some(readers));
-                let resident = Float3::resident(g::positions(&geometry));
+                let resident = float3::resident(g::positions(&geometry));
                 if fresh && frame<2 { assert!(p.reason==Reason::No_cost_evidence && p.cpu_seconds.is_none() && resident); }
                 else if frame>=4 { assert!(p.cpu_seconds.is_some() && p.device_seconds.is_some()); assert!(consistent(&p)); assert_eq!(resident,Cost::on_device(p.reason)); }
                 if side==512 && readers==0 && frame==5 {assert_eq!(p.reason,Reason::Device_measured_cheaper);}
@@ -227,7 +227,7 @@ fn retained_generations() {
         let mut small_session = sop::session::create(0,0).unwrap();
         isogrid::cook(&mut small_session,&small_node,0.); isogrid::cook(&mut small_session,&small_node,0.);
         let geometry = isogrid::cook(&mut small_session,&small_node,0.);
-        assert!(!Float3::resident(g::positions(&geometry)));
+        assert!(!float3::resident(g::positions(&geometry)));
         let placements = Profile::placements(&small.profile);
         assert!(placements.iter().any(|p| matches!(p.reason,Reason::Cpu_consumer|Reason::Cpu_measured_cheaper)));
         assert!(!placements.iter().any(|p| Cost::on_device(p.reason)));
@@ -238,7 +238,7 @@ fn retained_generations() {
         let camera = rays::camera::orthographic(2.,vec3::create(0.,0.,3.),vec3::zero()).unwrap();
         let cook = |session: &mut sop::session::T,node: &sop::node::T,time| {
             let geometry = isogrid::cook(session,node,time);
-            assert!(Float3::resident(g::positions(&geometry)),"Measured lifetime fixture chose CPU: {:?}",Profile::placements(&lowered.profile));
+            assert!(float3::resident(g::positions(&geometry)),"Measured lifetime fixture chose CPU: {:?}",Profile::placements(&lowered.profile));
             let picture = isogrid::picture(owner,&geometry);
             let mesh = scene3::walk::drawings(&picture)[0].mesh.clone();
             let key = rays::mesh::view::device(&mesh).unwrap().0;
@@ -281,7 +281,7 @@ fn retained_generations() {
         assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,0);
         let read=|geometry: &g::T,time: f64,scale: f64| {
             let displacement=(0..16).fold(time,|x,_| x.sin())*0.01;
-            let (x,y,z)=Float3::get(g::positions(geometry),0).unwrap();
+            let (x,y,z)=float3::get(g::positions(geometry),0).unwrap();
             assert!((x-(-0.5+time*scale+displacement)).abs()<1e-6 && y== -0.5 && z==0.);
         };
         read(&previous.0,previous.3,0.002);
@@ -309,7 +309,7 @@ fn isogrid_generations() {
         let mut session=sop::session::create(0,1<<28).unwrap();
         let checksum=|geometry: &g::T| {
             let positions=g::positions(geometry);let mut sum=0.;
-            for i in 0..Float3::length(positions) {let (x,y,z)=Float3::get(positions,i).unwrap();sum=sum+x*1.0001+y*1.0002+z*1.0003;}
+            for i in 0..float3::length(positions) {let (x,y,z)=float3::get(positions,i).unwrap();sum=sum+x*1.0001+y*1.0002+z*1.0003;}
             (g::point_count(geometry),sum)
         };
         let mut expected=Vec::new();

@@ -3,8 +3,8 @@ use crate::error::Code;
 
 pub fn signed_volume(geometry_value: &geometry::T) -> Result<f64, error::T> {
     let topology_value = geometry::topology(geometry_value);
-    let topology = topology::View::view(topology_value)?;
-    let positions = crate::packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let topology = topology::view::view(topology_value)?;
+    let positions = crate::packed::float3::view::view(geometry::positions(geometry_value))?;
     let mut volume = 0.0;
     for primitive in 0..topology.primitive_kinds.len() {
         let first = topology.primitive_offsets[primitive] as usize;
@@ -179,11 +179,11 @@ pub fn classify_connectivity(
     }
 
     let topology_view =
-        topology::View::view(topology_value).map_err(connectivity_error)?;
+        topology::view::view(topology_value).map_err(connectivity_error)?;
     match owner {
         attribute::Owner::Point => {
             let index = topology_index::create(None, topology_value).map_err(connectivity_error)?;
-            let reverse = topology_index::View::view(&index);
+            let reverse = topology_index::view::view(&index);
             if seams.is_some_and(|value| edge_group::length(value) != topology_index::edge_count(&index)) {
                 return Err(make_error("Connectivity: seam group length does not match topology".to_owned()));
             }
@@ -231,7 +231,7 @@ pub fn classify_connectivity(
                 }
                 Some(seam_group) => {
                     let index = topology_index::create(None, topology_value).map_err(connectivity_error)?;
-                    let reverse = topology_index::View::view(&index);
+                    let reverse = topology_index::view::view(&index);
                     if edge_group::length(seam_group) != topology_index::edge_count(&index) {
                         return Err(make_error("Connectivity: seam group length does not match topology".to_owned()));
                     }
@@ -272,7 +272,7 @@ mod tests {
             vec![0, 4, 8],
         )
         .unwrap();
-        let positions = crate::packed::Float3::View::of_owned_exn(
+        let positions = crate::packed::float3::view::of_owned_exn(
             vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
             vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             vec![0.0; 6],
@@ -393,7 +393,7 @@ mod tests {
             vec![0, 3, 6, 9, 12],
         )
         .unwrap();
-        let positions = crate::packed::Float3::View::of_owned_exn(
+        let positions = crate::packed::float3::view::of_owned_exn(
             vec![0.0, 1.0, 0.0, 0.0],
             vec![0.0, 0.0, 1.0, 0.0],
             vec![0.0, 0.0, 0.0, 1.0],

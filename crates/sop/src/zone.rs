@@ -95,12 +95,12 @@ impl Digest {
 
 fn digest(geometry_value: &geometry::T) -> String {
     let mut d = Digest::new();
-    if let Ok(view) = rdk_core::topology::View::view(geometry::topology(geometry_value)) {
+    if let Ok(view) = rdk_core::topology::view::view(geometry::topology(geometry_value)) {
         view.vertex_points.iter().for_each(|v| d.int(*v));
         view.primitive_offsets.iter().for_each(|v| d.int(*v));
         view.primitive_kinds.iter().for_each(|v| d.byte(*v));
     }
-    if let Ok(view) = rdk_core::packed::Float3::View::view(geometry::positions(geometry_value)) {
+    if let Ok(view) = rdk_core::packed::float3::view::view(geometry::positions(geometry_value)) {
         for plane in [&view.x, &view.y, &view.z] {
             plane.iter().for_each(|v| d.int(v.to_bits() as i64));
         }
@@ -127,7 +127,7 @@ pub fn elements(kind: Kind, key: Option<&str>, geometry_value: &geometry::T) -> 
             let keys = keys(attribute::Owner::Point, count, key, geometry_value);
             let mut out = Vec::with_capacity(count as usize);
             for (index, source) in order(&keys).into_iter().enumerate() {
-                let position = rdk_core::packed::Float3::get(positions, source as i64)
+                let position = rdk_core::packed::float3::get(positions, source as i64)
                     .map_err(|e| support::structured_rdk_error(&e))?;
                 out.push(Element { index: index as i64, key: keys[source], position, piece: None, digest: String::new() });
             }
@@ -150,7 +150,7 @@ pub fn elements(kind: Kind, key: Option<&str>, geometry_value: &geometry::T) -> 
                 let position = if geometry::point_count(&part) == 0 {
                     (0.0, 0.0, 0.0)
                 } else {
-                    rdk_core::packed::Float3::get(geometry::positions(&part), 0).map_err(|e| support::structured_rdk_error(&e))?
+                    rdk_core::packed::float3::get(geometry::positions(&part), 0).map_err(|e| support::structured_rdk_error(&e))?
                 };
                 let digest = digest(&part);
                 out.push(Element { index: index as i64, key: distinct[index], position, piece: Some(part), digest });

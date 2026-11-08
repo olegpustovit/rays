@@ -45,7 +45,6 @@ pub struct T {
     right_treatment: Treatment,
 }
 
-#[allow(non_snake_case)]
 pub mod view {
     use std::sync::Arc;
 
@@ -404,7 +403,7 @@ mod tests {
         let z: Vec<f64> = points.iter().map(|p| p.2).collect();
         let offsets: Vec<i64> = (0..=(triangles.len() / 3) as i64).map(|primitive| primitive * 3).collect();
         let topology_value = topology::polygons_owned(points.len() as i64, triangles, offsets).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None)
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None)
             .unwrap()
     }
 

@@ -2,8 +2,8 @@
 //! optional procedural spheres, strands, vertex motion) or instances of prototypes with the
 //! `Ray_host` registry that the Flow evaluator and Packed kernels query.
 use flow_check::ray_host::{self as host, Hit};
-use rdk_core::packed::Float3;
-use rdk_geom::surface_index::{self as surface, RayDirectionMode, RaySurfaceHit, View as SurfaceView};
+use rdk_core::packed::float3;
+use rdk_geom::surface_index::{self as surface, RayDirectionMode, RaySurfaceHit, view as SurfaceView};
 use rdk_core::{error as rdk_error, geometry};
 use std::sync::Arc;
 
@@ -26,8 +26,8 @@ fn miss() -> Hit {
     host::MISS
 }
 
-fn planes(positions: &Float3::T) -> Result<(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>), String> {
-    let view = Float3::View::view(positions).map_err(|e| rdk_error::to_string(&e))?;
+fn planes(positions: &float3::T) -> Result<(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>), String> {
+    let view = float3::view::view(positions).map_err(|e| rdk_error::to_string(&e))?;
     Ok((view.x, view.y, view.z))
 }
 
@@ -37,7 +37,7 @@ fn static_prototype(geometry_value: &geometry::T) -> Result<Trace, String> {
     let (px, py, pz) = planes(geometry::positions(geometry_value))?;
     Ok(Arc::new(move |q: &[f64]| {
         let directions = SurfaceView::RayDirections::ConstantDirection { x: q[3], y: q[4], z: q[5] };
-        let origin = Float3::View::of_owned_exn(vec![q[0]], vec![q[1]], vec![q[2]]).expect("one origin");
+        let origin = float3::view::of_owned_exn(vec![q[0]], vec![q[1]], vec![q[2]]).expect("one origin");
         let mut primitives = [-1_i64];
         let mut triangles = [-1_i64];
         let (mut a, mut b, mut c) = ([0.0_f64], [0.0_f64], [0.0_f64]);
@@ -98,7 +98,7 @@ fn static_prototype(geometry_value: &geometry::T) -> Result<Trace, String> {
 fn moving_prototype(geometry_value: &geometry::T, ending: &geometry::T) -> Result<Trace, String> {
     let start = geometry::positions(geometry_value);
     let end = geometry::positions(ending);
-    if Float3::length(start) != Float3::length(end) {
+    if float3::length(start) != float3::length(end) {
         return Err("scene/trace: a moving geometry's end keyframe must have its start's points".to_owned());
     }
     let index = surface::create(None, None, None, None, None, geometry_value).map_err(|e| rdk_error::to_string(&e))?;
@@ -396,7 +396,7 @@ mod tests {
     const COUNT: usize = 256;
 
     fn quad() -> geometry::T {
-        let positions = Float3::of_owned(vec![-1.0, 1.0, 1.0, -1.0], vec![-1.0, -1.0, 1.0, 1.0], vec![0.0; 4]).expect("positions");
+        let positions = float3::of_owned(vec![-1.0, 1.0, 1.0, -1.0], vec![-1.0, -1.0, 1.0, 1.0], vec![0.0; 4]).expect("positions");
         let topology = topology::polygons_owned(4, vec![0, 1, 2, 3], vec![0, 4]).expect("topology");
         geometry::create(positions, topology, None, None, None).expect("quad")
     }
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn a_moving_geometry_needs_matching_points() {
         let two = geometry::create(
-            Float3::of_owned(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]).expect("positions"),
+            float3::of_owned(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]).expect("positions"),
             topology::polygons_owned(2, Vec::new(), vec![0]).expect("empty topology"),
             None,
             None,

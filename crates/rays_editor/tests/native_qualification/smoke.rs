@@ -111,7 +111,7 @@ fn run_scene2() {
         ("open path", scene::path(None, &open).unwrap()),
         ("closed path", scene::path(Some(color::white()), &path::of_commands(&closed)).unwrap()),
     ] {
-        scene::Layer::to_ir(&[node]).unwrap_or_else(|message| panic!("{name} did not lower: {message}"));
+        scene::layer::to_ir(&[node]).unwrap_or_else(|message| panic!("{name} did not lower: {message}"));
     }
 }
 

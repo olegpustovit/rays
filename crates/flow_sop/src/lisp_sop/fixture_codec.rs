@@ -14,14 +14,14 @@ fn owner(o:Owner)->&'static str{match o{Owner::Point=>"point",Owner::Vertex=>"ve
 fn group_owner(o:group::Owner)->Owner{match o{group::Owner::Point=>Owner::Point,group::Owner::Vertex=>Owner::Vertex,group::Owner::Primitive=>Owner::Primitive}}
 fn rk<T>(r:Result<T,rdk_core::error::T>)->R<T>{r.map_err(|e|rdk_core::error::to_string(&e))}
 pub fn encode(g:&geo::T)->String{
-    let p=packed::Float3::View::view(geo::positions(g)).unwrap();let t=topology::View::view(geo::topology(g)).unwrap();
+    let p=packed::float3::view::view(geo::positions(g)).unwrap();let t=topology::view::view(geo::topology(g)).unwrap();
     let attrs=geo::attributes(g).iter().map(|a|{let(kind,planes)=match attribute::storage(a).unwrap(){
         Storage::Float(xs)=>("float",vec![floats(&xs)]),Storage::Int(xs)=>("int",vec![ints(&xs)]),Storage::Text(xs)=>("text",vec![list(xs.iter().map(|x|quote(x)))]),
-        Storage::Float2(xs)=>{let p=packed::Float2::View::view(&xs);("float2",vec![floats(&p.x),floats(&p.y)])},
-        Storage::Float3(xs)=>{let p=packed::Float3::View::view(&xs).unwrap();("float3",vec![floats(&p.x),floats(&p.y),floats(&p.z)])},
-        Storage::Float4(xs)=>{let p=packed::Float4::View::view(&xs);("float4",vec![floats(&p.x),floats(&p.y),floats(&p.z),floats(&p.w)])},
-        Storage::IntArray(xs)=>{let p=packed::IntArray::View::view(&xs);("int_array",vec![ints(&p.offsets),ints(&p.values)])},
-        Storage::FloatArray(xs)=>{let p=packed::FloatArray::View::view(&xs);("float_array",vec![ints(&p.offsets),floats(&p.values)])}};
+        Storage::Float2(xs)=>{let p=packed::float2::view::view(&xs);("float2",vec![floats(&p.x),floats(&p.y)])},
+        Storage::Float3(xs)=>{let p=packed::float3::view::view(&xs).unwrap();("float3",vec![floats(&p.x),floats(&p.y),floats(&p.z)])},
+        Storage::Float4(xs)=>{let p=packed::float4::view::view(&xs);("float4",vec![floats(&p.x),floats(&p.y),floats(&p.z),floats(&p.w)])},
+        Storage::IntArray(xs)=>{let p=packed::int_array::view::view(&xs);("int_array",vec![ints(&p.offsets),ints(&p.values)])},
+        Storage::FloatArray(xs)=>{let p=packed::float_array::view::view(&xs);("float_array",vec![ints(&p.offsets),floats(&p.values)])}};
         tag("attribute",[owner(attribute::owner(a)).into(),quote(attribute::name(a).as_bytes()),kind.into(),list(planes)])}).collect::<Vec<_>>();
     let groups=geo::groups(g).iter().map(|g|{let order=match group::ordered_elements(g){Some(xs)=>tag("ordered",[ints(&xs)]),None=>tag("unordered",[ints(&(0..group::length(g)).filter(|i|group::mem(*i,g)).collect::<Vec<_>>())])};tag("group",[owner(group_owner(group::owner(g))).into(),quote(group::name(g).as_bytes()),order])}).collect::<Vec<_>>();
     let edges=geo::edge_groups(g).iter().map(|g|tag("edge_group",[quote(edge_group::name(g).as_bytes()),ints(&(0..edge_group::length(g)).filter(|i|edge_group::mem(*i,g)).collect::<Vec<_>>())])).collect::<Vec<_>>();
@@ -41,7 +41,7 @@ fn root(source:&str)->R<Syntax>{let mut xs=syntax::parse(source).map_err(|d|bad(
 pub fn decode(source:&str)->R<geo::T>{
     let root=root(source)?;let a=root.arena();let fields=children("geometry",a,root.row_id())?;
     let unique=|name:&str|->R<SyntaxId>{let mut xs=fields.iter().copied().filter(|&id|matches!(a.row(id).node,Node::List(_))&&a.children(id).first().is_some_and(|&h|matches!(a.row(h).node,Node::Sym(s) if a.name(s)==name)));let first=xs.next();if first.is_none()||xs.next().is_some(){Err(bad(&format!("missing or duplicate {name}")))}else{Ok(first.unwrap())}};
-    let p=children("positions",a,unique("positions")?)?;let [x,y,z]=p else{return Err(bad("positions require x/y/z planes"))};let positions=rk(packed::Float3::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?))?;
+    let p=children("positions",a,unique("positions")?)?;let [x,y,z]=p else{return Err(bad("positions require x/y/z planes"))};let positions=rk(packed::float3::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?))?;
     let t=children("topology",a,unique("topology")?)?;let [n,vp,po,ks]=t else{return Err(bad("invalid topology"))};
     let kinds=array(a,*ks)?.iter().map(|&id|match sym(a,id)?{"polygon"=>Ok(topology::PrimitiveKind::Polygon),"open_polyline"=>Ok(topology::PrimitiveKind::OpenPolyline),"closed_polyline"=>Ok(topology::PrimitiveKind::ClosedPolyline),_=>Err(bad("unknown primitive kind"))}).collect::<R<Vec<_>>>()?;
     let topology=rk(topology::create_owned(integer(a,*n)?,int_array(a,*vp)?,int_array(a,*po)?,kinds))?;
@@ -49,11 +49,11 @@ pub fn decode(source:&str)->R<geo::T>{
         let storage=match(sym(a,*k)?,p){
             ("float",[v])=>Storage::Float(Arc::new(float_array(a,*v)?)),("int",[v])=>Storage::Int(Arc::new(int_array(a,*v)?)),
             ("text",[v])=>Storage::Text(Arc::new(array(a,*v)?.iter().map(|&id|text(a,id)).collect::<R<Vec<_>>>()?.into())),
-            ("float2",[x,y])=>Storage::Float2(rk(packed::Float2::of_owned(float_array(a,*x)?,float_array(a,*y)?))?),
-            ("float3",[x,y,z])=>Storage::Float3(rk(packed::Float3::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?))?),
-            ("float4",[x,y,z,w])=>Storage::Float4(rk(packed::Float4::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?,float_array(a,*w)?))?),
-            ("int_array",[o,v])=>Storage::IntArray(rk(packed::IntArray::create_owned(int_array(a,*o)?,int_array(a,*v)?))?),
-            ("float_array",[o,v])=>Storage::FloatArray(rk(packed::FloatArray::create_owned(int_array(a,*o)?,float_array(a,*v)?))?),_=>return Err(bad("invalid attribute storage"))};
+            ("float2",[x,y])=>Storage::Float2(rk(packed::float2::of_owned(float_array(a,*x)?,float_array(a,*y)?))?),
+            ("float3",[x,y,z])=>Storage::Float3(rk(packed::float3::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?))?),
+            ("float4",[x,y,z,w])=>Storage::Float4(rk(packed::float4::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?,float_array(a,*w)?))?),
+            ("int_array",[o,v])=>Storage::IntArray(rk(packed::int_array::create_owned(int_array(a,*o)?,int_array(a,*v)?))?),
+            ("float_array",[o,v])=>Storage::FloatArray(rk(packed::float_array::create_owned(int_array(a,*o)?,float_array(a,*v)?))?),_=>return Err(bad("invalid attribute storage"))};
         let name=std::str::from_utf8(text(a,*n)?).map_err(|_|bad("invalid attribute name"))?;rk(attribute::create_owned(name,parsed_owner(sym(a,*o)?)?,storage))}).collect::<R<Vec<_>>>()?;
     let groups=children("groups",a,unique("groups")?)?.iter().map(|&id|{let [o,n,p]=children("group",a,id)? else{return Err(bad("invalid group"))};let owner=parsed_group(parsed_owner(sym(a,*o)?)?)?;let [kind,members]=array(a,*p)? else{return Err(bad("invalid group members"))};let xs=int_array(a,*members)?;let n=std::str::from_utf8(text(a,*n)?).map_err(|_|bad("invalid group name"))?;let count=match owner{group::Owner::Point=>topology::point_count(&topology),group::Owner::Vertex=>topology::vertex_count(&topology),group::Owner::Primitive=>topology::primitive_count(&topology)};
         match sym(a,*kind)?{"ordered"=>rk(group::ordered(owner,n,count,&xs)),"unordered"=>{let mut bits=vec![false;count as usize];for x in xs{if x<0||x>=count||bits[x as usize]{return Err(bad("invalid group member"))}bits[x as usize]=true;}rk(group::init(Some(4096),owner,n,count,&|i|bits[i as usize]))},_=>Err(bad("unknown group order"))}}).collect::<R<Vec<_>>>()?;

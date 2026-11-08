@@ -1,7 +1,7 @@
 //! Native IsoGrid viewport qualification, ported from test_isogrid_viewport.ml.
 use flow_native::workspace_gpu as gpu;
 use flow_ir::flow_ir::Gpu;
-use rdk_core::{geometry as g, packed::Float3, topology};
+use rdk_core::{geometry as g, packed::float3, topology};
 use rays::{canvas, scene, scene3};
 use rays_math::{color, vec3};
 use flow_sop::lower;
@@ -37,7 +37,7 @@ pub(super) fn cook(session: &mut sop::session::T, node: &sop::node::T, time: f64
 }
 pub(super) fn resident(geometry: &g::T) -> bool {
     let attr = |name| g::find_attribute(rdk_core::attribute::Owner::Point, name, geometry).is_some_and(|a| rdk_core::attribute::resident(&a));
-    Float3::resident(g::positions(geometry)) && topology::resident(g::topology(geometry)) && attr("N") && attr("Cd")
+    float3::resident(g::positions(geometry)) && topology::resident(g::topology(geometry)) && attr("N") && attr("Cd")
 }
 pub(super) fn placed(session: &mut sop::session::T, node: &sop::node::T) -> g::T {
     for attempt in 0..=8 {
@@ -55,7 +55,7 @@ pub(super) fn picture(owner: &gpu::WorkspaceGpu, geometry: &g::T) -> scene3::Sce
 pub(super) fn frame(camera: &rays::camera::Camera, picture: scene3::Scene3) -> scene::Scene {
     vec![scene::clear(color::black()), scene::view3d(None, camera, picture)]
 }
-pub(super) fn draw(canvas: &canvas::t, frame: &[scene::node]) -> Vec<color::T> {
+pub(super) fn draw(canvas: &canvas::Canvas, frame: &[scene::node]) -> Vec<color::T> {
     canvas::render(None, canvas, frame).unwrap();
     canvas::pixels(canvas).unwrap()
 }
@@ -81,7 +81,7 @@ fn run(owner: &gpu::WorkspaceGpu, config: &Gpu::Config, workspace: &editor_docum
     assert_eq!(bound.validation_readback_bytes, before.validation_readback_bytes + 4);
     let camera = rays::camera::perspective(Some(36. * std::f64::consts::PI / 180.), None, None, vec3::create(10.,8.,10.), vec3::zero()).unwrap();
     let original = frame(&camera, picture.clone());
-    let staged = scene::Layer::stage_native(256, 256, &original).unwrap();
+    let staged = scene::layer::stage_native(256, 256, &original).unwrap();
     let entry = &staged.scene3[0].entries[0];
     assert!(entry.draw.mesh.vertices.is_empty() && entry.draw.mesh.indices.is_empty());
     assert!(entry.vertex_attributes.as_ref().is_some_and(|(_, bytes)| bytes.is_empty()));
@@ -89,21 +89,21 @@ fn run(owner: &gpu::WorkspaceGpu, config: &Gpu::Config, workspace: &editor_docum
     let host_canvas = canvas::create(256, 256).unwrap();
     canvas::render(None, &canvas, &original).unwrap();
     let warm = gpu::image_stats(owner).0;
-    let renderer = canvas::Private::native_stats(&canvas).unwrap();
+    let renderer = canvas::private::native_stats(&canvas).unwrap();
     assert!(renderer.uploaded_bytes < 65536);
     let allocated = mem_sys::alloc_bytes_total();
     for _ in 0..3 { canvas::render(None, &canvas, &original).unwrap(); }
     let frame_allocation = (mem_sys::alloc_bytes_total() - allocated) / 3;
     assert!(frame_allocation < 131072, "{frame_allocation} allocated bytes per warm frame");
     let after = gpu::image_stats(owner).0;
-    let rendered = canvas::Private::native_stats(&canvas).unwrap();
+    let rendered = canvas::private::native_stats(&canvas).unwrap();
     assert_eq!(rendered.uploaded_bytes, renderer.uploaded_bytes);
     assert_eq!(rendered.pipeline_cache_entries, renderer.pipeline_cache_entries);
     assert_eq!(after.payload_readback_bytes, before.payload_readback_bytes);
     assert_eq!(after.buffer_creations, warm.buffer_creations);
     assert_eq!(after.pipeline_compilations, warm.pipeline_compilations);
     assert_eq!(after.validation_readback_bytes, warm.validation_readback_bytes);
-    assert!(topology::resident(g::topology(&geometry)) && Float3::resident(g::positions(&geometry)));
+    assert!(topology::resident(g::topology(&geometry)) && float3::resident(g::positions(&geometry)));
     let pixels = canvas::pixels(&canvas).unwrap();
     assert!(pixels.iter().filter(|c| i64::from(c.r) + i64::from(c.g) + i64::from(c.b) > 0).count() > 1024);
     let bounds = rdk_rays::geometry_view::bounds(&geometry);
@@ -120,9 +120,9 @@ fn run(owner: &gpu::WorkspaceGpu, config: &Gpu::Config, workspace: &editor_docum
         let adapted = if shadow { scene3::with_world(world.clone(), &picture) } else { picture.clone() };
         let variant = frame(&camera, adapted);
         canvas::render(None, &canvas, &variant).unwrap();
-        let first = canvas::Private::native_stats(&canvas).unwrap();
+        let first = canvas::private::native_stats(&canvas).unwrap();
         canvas::render(None, &canvas, &variant).unwrap();
-        let next = canvas::Private::native_stats(&canvas).unwrap();
+        let next = canvas::private::native_stats(&canvas).unwrap();
         assert_eq!(first.uploaded_bytes,next.uploaded_bytes);
         assert_eq!(first.sun_shadow_passes,next.sun_shadow_passes);
         variants.push((name,camera,shadow,canvas::pixels(&canvas).unwrap()));
@@ -138,11 +138,11 @@ fn run(owner: &gpu::WorkspaceGpu, config: &Gpu::Config, workspace: &editor_docum
         let index = rdk_rays::geometry_view::surface(&geometry);
         assert!(index.is_some());
         assert!(!topology::resident(g::topology(&geometry)));
-        assert!(!Float3::resident(g::positions(&geometry)));
+        assert!(!float3::resident(g::positions(&geometry)));
         let top = g::topology(&geometry);
         let (first,last) = topology::primitive_vertex_range(top,0).unwrap();
         assert_eq!(last-first,4);
-        let point = |i| { let (x,y,z) = Float3::get(g::positions(&geometry),topology::point_of_vertex(top,first+i).unwrap()).unwrap(); vec3::create(x,y,z) };
+        let point = |i| { let (x,y,z) = float3::get(g::positions(&geometry),topology::point_of_vertex(top,first+i).unwrap()).unwrap(); vec3::create(x,y,z) };
         let center = vec3::scale(vec3::add(vec3::add(point(0),point(1)),vec3::add(point(2),point(3))),0.25);
         let normal = vec3::normalize(vec3::cross(vec3::sub(point(1),point(0)),vec3::sub(point(2),point(0))));
         let cast = || rdk_rays::geometry_view::cast_material(index.as_ref(),&geometry,vec3::add(center,vec3::scale(normal,0.001)),vec3::scale(normal,-1.));
@@ -158,7 +158,7 @@ fn run(owner: &gpu::WorkspaceGpu, config: &Gpu::Config, workspace: &editor_docum
         }).collect::<Vec<_>>();
         let first = cells();
         assert!(first[0].iter().any(|(name,_)| name=="Cd.x"));
-        assert!(!Float3::resident(g::positions(&geometry)));
+        assert!(!float3::resident(g::positions(&geometry)));
         assert!(topology::resident(g::topology(&geometry)));
         let read = gpu::image_stats(owner).0.payload_readback_bytes;
         assert_eq!(cells(),first);

@@ -96,7 +96,7 @@ fn facet_mask(c: &complex::T, facet: i64) -> i64 {
     mask | if last - first > 1 { 4 } else { 0 }
 }
 
-fn native_edge(view: &topology_index::View::View, primitive: i64, first: i64, second: i64) -> i64 {
+fn native_edge(view: &topology_index::view::View, primitive: i64, first: i64, second: i64) -> i64 {
     let (f, s) = (first as usize, second as usize);
     if view.primitive_of_vertex[f] == primitive && view.next_vertex[f] == second {
         view.edge_of_vertex[f]
@@ -123,7 +123,7 @@ fn side_triangle_point(c: &constraints::T, side: Side, triangle: i64, local: i64
 
 fn source_native_edge(
     c: &constraints::T,
-    index: &topology_index::View::View,
+    index: &topology_index::view::View,
     side: Side,
     triangle: i64,
     first: &implicit_point::T,
@@ -135,7 +135,7 @@ fn source_native_edge(
     let second_id = side_triangle_point(c, side, triangle, 1);
     let third_id = side_triangle_point(c, side, triangle, 2);
     let projection = implicit_point::source_triangle_projection(source, first_id, second_id, third_id);
-    let primitive = surface_index::View::triangle_primitive(surface, triangle);
+    let primitive = surface_index::view::triangle_primitive(surface, triangle);
     for local in 0..3_i64 {
         let next = (local + 1) % 3;
         let source_first = side_triangle_point(c, side, triangle, local);
@@ -146,8 +146,8 @@ fn source_native_edge(
             return native_edge(
                 index,
                 primitive,
-                surface_index::View::triangle_vertex(surface, triangle, local),
-                surface_index::View::triangle_vertex(surface, triangle, next),
+                surface_index::view::triangle_vertex(surface, triangle, local),
+                surface_index::view::triangle_vertex(surface, triangle, next),
             );
         }
     }
@@ -157,7 +157,7 @@ fn source_native_edge(
 fn is_self_edge(
     c: &complex::T,
     constraints_value: &constraints::T,
-    index: &topology_index::View::View,
+    index: &topology_index::view::View,
     side: Side,
     edge: i64,
 ) -> bool {
@@ -237,7 +237,7 @@ fn make_geometry(
     z: Vec<f64>,
     topology_value: topology::T,
 ) -> Result<geometry::T, Fail> {
-    let positions = packed::Float3::View::of_owned_exn(x, y, z)
+    let positions = packed::float3::view::of_owned_exn(x, y, z)
         .map_err(|failure| Fail::Invalid(error::message(&failure).to_owned()))?;
     geometry::create(positions, topology_value, None, None, None)
         .map_err(|failure| Fail::Invalid(error::message(&failure).to_owned()))
@@ -597,7 +597,7 @@ fn materialize_curves(
     state.primitive_kinds.truncate(curve_output);
     state.curve_kinds.truncate(curve_output);
     state.curve_edge_offsets.truncate(curve_output + 1);
-    let topology_value = topology::View::create_validated_owned(
+    let topology_value = topology::view::create_validated_owned(
         x.len() as i64,
         state.vertices,
         state.primitive_offsets,
@@ -657,9 +657,9 @@ fn build_inner(
         masks
     };
     let constraints_value = complex::view::constraints(c);
-    let index_of = |geometry_value: &geometry::T| -> Result<topology_index::View::View, Fail> {
+    let index_of = |geometry_value: &geometry::T| -> Result<topology_index::view::View, Fail> {
         let index = topology_index::create(cancel_value, geometry::topology(geometry_value))?;
-        Ok(topology_index::View::view(&index))
+        Ok(topology_index::view::view(&index))
     };
     let left_index = if constraints::view::resolve_left_self_intersections(constraints_value) {
         Some(index_of(constraints::view::left_geometry(constraints_value))?)
@@ -735,7 +735,6 @@ fn build_inner(
     })
 }
 
-#[allow(non_snake_case)]
 pub mod view {
     use super::*;
 
@@ -777,7 +776,7 @@ mod tests {
         let z = points.iter().map(|p| p.2).collect();
         let offsets: Vec<i64> = (0..=(triangles.len() as i64 / 3)).map(|p| p * 3).collect();
         let topo = topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }
 
@@ -797,7 +796,7 @@ mod tests {
         }
         let topo =
             topology::create_owned(points.len() as i64, vertices, offsets, kinds.to_vec()).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }
 
@@ -1074,7 +1073,7 @@ mod tests {
         let signature = |built: &T| -> Vec<u64> {
             let mut bits = Vec::new();
             for part in [curves(built), coincident(built)] {
-                let positions = packed::Float3::View::view(geometry::positions(part)).unwrap();
+                let positions = packed::float3::view::view(geometry::positions(part)).unwrap();
                 bits.extend(positions.x.iter().chain(positions.y.iter()).chain(positions.z.iter()).map(|v| v.to_bits()));
                 bits.push(geometry::primitive_count(part) as u64);
             }

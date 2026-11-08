@@ -59,7 +59,7 @@ pub enum blend {
 
 #[derive(Clone)]
 pub struct texture_ {
-    pub value: texture::t,
+    pub value: texture::Texture,
     pub filter: texture::filter,
     pub wrap_u: texture::wrap,
     pub wrap_v: texture::wrap,
@@ -124,7 +124,7 @@ pub fn create(
     })
 }
 
-pub fn textured(filter: Option<texture::filter>, value: texture::t) -> texture_ {
+pub fn textured(filter: Option<texture::filter>, value: texture::Texture) -> texture_ {
     texture_ { value, filter: filter.unwrap_or(texture::filter::Bilinear), wrap_u: texture::wrap::Clamp, wrap_v: texture::wrap::Clamp }
 }
 
@@ -381,7 +381,7 @@ fn same_texture(a: &Option<texture_>, b: &Option<texture_>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(x), Some(y)) => {
-            texture::Private::identity(&x.value) == texture::Private::identity(&y.value)
+            texture::private::identity(&x.value) == texture::private::identity(&y.value)
                 && x.filter == y.filter
                 && x.wrap_u == y.wrap_u
                 && x.wrap_v == y.wrap_v

@@ -2,7 +2,7 @@
 use super::support::geometry_bytes;
 use crate::topology_kernel;
 use flow_syntax::value::Value;
-use rdk_core::{geometry as geo, packed::Float3, topology};
+use rdk_core::{geometry as geo, packed::float3, topology};
 use std::sync::Arc;
 
 fn floats(xs: Vec<f64>) -> Value { Value::Floats(1, Arc::new(xs)) }
@@ -29,11 +29,11 @@ fn ownership(n: usize) {
         parallel::run_unit(Some(domains), &|| {
             let mut input = fields(n);
             let plane = |i: usize| { let Value::Floats(1, xs) = &input[i].1 else { unreachable!() }; xs.as_ref().clone() };
-            let expected = geo::create(Float3::of_owned(plane(0), plane(1), plane(2)).unwrap(), topology::empty(n as i64).unwrap(), None, None, None).unwrap();
+            let expected = geo::create(float3::of_owned(plane(0), plane(1), plane(2)).unwrap(), topology::empty(n as i64).unwrap(), None, None, None).unwrap();
             let before = geometry_bytes(&expected);
             let actual = topology_kernel::mesh(&args(Value::Record(input.clone()))).unwrap();
             assert_eq!(geometry_bytes(&actual), before);
-            let output = Float3::View::view(geo::positions(&actual)).unwrap();
+            let output = float3::view::view(geo::positions(&actual)).unwrap();
             for ((_, value), output) in input.iter_mut().zip([&output.x, &output.y, &output.z]) {
                 let Value::Floats(1, xs) = value else { unreachable!() };
                 assert!(n == 0 || xs.as_ptr() != output.as_ptr(), "mesh must own coordinate planes");

@@ -50,18 +50,18 @@ fn image_and_canvas() {
     let original = b"\x11\x22\x33\xff\x44\x55\x66\xff\x77\x88\x99\xff\xaa\xbb\xcc\xff".to_vec();
     let kept = original.clone();
     let mut caller = original;
-    let image = Image::create(2, 2, &caller).unwrap();
+    let image = image::create(2, 2, &caller).unwrap();
     caller.fill(0);
-    assert_eq!(Image::pixels(&image).unwrap(), kept, "image kept the caller's storage");
-    assert_eq!(match Image::create(2, 2, &[0; 15]) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "image accepted a short pixel buffer");
-    let identity = Image::identity(&image);
-    let generation = Image::generation(&image);
-    Image::replace(&image, 1, 1, b"\xff\x00\x00\xff").unwrap();
+    assert_eq!(image::pixels(&image).unwrap(), kept, "image kept the caller's storage");
+    assert_eq!(match image::create(2, 2, &[0; 15]) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "image accepted a short pixel buffer");
+    let identity = image::identity(&image);
+    let generation = image::generation(&image);
+    image::replace(&image, 1, 1, b"\xff\x00\x00\xff").unwrap();
     assert!(
-        Image::identity(&image) == identity
-            && Image::generation(&image) == generation + 1
-            && Image::size(&image).unwrap() == (1, 1)
-            && Image::pixels(&image).unwrap() == b"\xff\x00\x00\xff",
+        image::identity(&image) == identity
+            && image::generation(&image) == generation + 1
+            && image::size(&image).unwrap() == (1, 1)
+            && image::pixels(&image).unwrap() == b"\xff\x00\x00\xff",
         "image identity/generation"
     );
     let canvas = canvas::create(4, 4).unwrap();
@@ -86,72 +86,72 @@ fn image_and_canvas() {
     assert_eq!(canvas::snapshot(&bulk).unwrap().3, bulk_bytes, "bulk RGBA canvas changed pixel bytes");
     assert_eq!(match canvas::of_rgba_bytes(2, 1, vec![0; 7]) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "bulk RGBA accepted a short buffer");
     canvas::destroy(&bulk).unwrap();
-    let stable = Image::create(4, 4, &[0; 64]).unwrap();
-    let stable_identity = Image::identity(&stable);
-    let moved = Image::create(4, 4, &[0x42; 64]).unwrap();
-    let moved_generation = Image::generation(&stable);
-    Image::replace_owned(&stable, &moved).unwrap();
+    let stable = image::create(4, 4, &[0; 64]).unwrap();
+    let stable_identity = image::identity(&stable);
+    let moved = image::create(4, 4, &[0x42; 64]).unwrap();
+    let moved_generation = image::generation(&stable);
+    image::replace_owned(&stable, &moved).unwrap();
     assert!(
-        Image::destroyed(&moved)
-            && Image::identity(&stable) == stable_identity
-            && Image::generation(&stable) == moved_generation + 1
-            && Image::pixels(&stable).unwrap() == [0x42; 64],
+        image::destroyed(&moved)
+            && image::identity(&stable) == stable_identity
+            && image::generation(&stable) == moved_generation + 1
+            && image::pixels(&stable).unwrap() == [0x42; 64],
         "owned image replacement"
     );
-    let rejected = Image::create(1, 1, &[0x31; 4]).unwrap();
-    let rejected_pixels = Image::pixels(&rejected).unwrap();
-    let stable_pixels = Image::pixels(&stable).unwrap();
-    let stable_generation = Image::generation(&stable);
-    assert_eq!(match Image::replace_owned(&stable, &stable) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "self owned replacement accepted");
+    let rejected = image::create(1, 1, &[0x31; 4]).unwrap();
+    let rejected_pixels = image::pixels(&rejected).unwrap();
+    let stable_pixels = image::pixels(&stable).unwrap();
+    let stable_generation = image::generation(&stable);
+    assert_eq!(match image::replace_owned(&stable, &stable) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "self owned replacement accepted");
     assert!(
-        !Image::destroyed(&rejected)
-            && Image::pixels(&rejected).unwrap() == rejected_pixels
-            && Image::generation(&stable) == stable_generation
-            && Image::pixels(&stable).unwrap() == stable_pixels,
+        !image::destroyed(&rejected)
+            && image::pixels(&rejected).unwrap() == rejected_pixels
+            && image::generation(&stable) == stable_generation
+            && image::pixels(&stable).unwrap() == stable_pixels,
         "owned replacement rejection mutated images"
     );
-    Image::destroy(&rejected).unwrap();
+    image::destroy(&rejected).unwrap();
     for _ in 0..32 {
-        let source = Image::create(640, 480, &vec![0x5a; 640 * 480 * 4]).unwrap();
-        Image::replace_owned(&stable, &source).unwrap();
+        let source = image::create(640, 480, &vec![0x5a; 640 * 480 * 4]).unwrap();
+        image::replace_owned(&stable, &source).unwrap();
     }
-    assert_eq!(Image::size(&stable).unwrap(), (640, 480));
-    Image::destroy(&stable).unwrap();
+    assert_eq!(image::size(&stable).unwrap(), (640, 480));
+    image::destroy(&stable).unwrap();
     // Leased bytes stay as they were lent: a replacement goes to a second buffer, at most two are
     // lent at once, and a leased source cannot be moved.
-    let leased_image = Image::create(8, 8, &solid(64, b"\x10\x20\x30\xff")).unwrap();
-    let (_, _, _, leased_pixels, mut lease1) = Image::borrow_snapshot(&leased_image).unwrap();
+    let leased_image = image::create(8, 8, &solid(64, b"\x10\x20\x30\xff")).unwrap();
+    let (_, _, _, leased_pixels, mut lease1) = image::borrow_snapshot(&leased_image).unwrap();
     let leased_copy = leased_pixels.to_vec();
-    let lease_target = Image::create(1, 1, &[0x5c; 4]).unwrap();
-    let lease_target_before = Image::pixels(&lease_target).unwrap();
-    assert_eq!(match Image::replace_owned(&lease_target, &leased_image) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "leased source storage was moved");
+    let lease_target = image::create(1, 1, &[0x5c; 4]).unwrap();
+    let lease_target_before = image::pixels(&lease_target).unwrap();
+    assert_eq!(match image::replace_owned(&lease_target, &leased_image) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "leased source storage was moved");
     assert!(
-        !Image::destroyed(&leased_image) && Image::pixels(&lease_target).unwrap() == lease_target_before,
+        !image::destroyed(&leased_image) && image::pixels(&lease_target).unwrap() == lease_target_before,
         "leased owned replacement was not atomic"
     );
-    Image::destroy(&lease_target).unwrap();
-    Image::replace(&leased_image, 8, 8, &solid(64, b"\xaa\xbb\xcc\xff")).unwrap();
+    image::destroy(&lease_target).unwrap();
+    image::replace(&leased_image, 8, 8, &solid(64, b"\xaa\xbb\xcc\xff")).unwrap();
     assert_eq!(*leased_pixels, leased_copy, "image mutation changed leased snapshot");
-    let (_, _, _, second_pixels, mut lease2) = Image::borrow_snapshot(&leased_image).unwrap();
+    let (_, _, _, second_pixels, mut lease2) = image::borrow_snapshot(&leased_image).unwrap();
     assert_eq!(*second_pixels, solid(64, b"\xaa\xbb\xcc\xff"), "second lease is not the replacement");
     assert_eq!(
-        match Image::replace(&leased_image, 8, 8, &solid(64, b"\x11\x22\x33\xff")) { Ok(_) => panic!("expected an error"), Err(e) => e.kind },
+        match image::replace(&leased_image, 8, 8, &solid(64, b"\x11\x22\x33\xff")) { Ok(_) => panic!("expected an error"), Err(e) => e.kind },
         ErrorKind::InvalidArgument,
         "bounded image snapshot buffers were exceeded"
     );
-    assert_eq!(Image::pixels(&leased_image).unwrap(), solid(64, b"\xaa\xbb\xcc\xff"), "a refused replacement changed the image");
-    Image::release_snapshot(&mut lease1);
-    Image::replace(&leased_image, 8, 8, &solid(64, b"\x11\x22\x33\xff")).unwrap();
+    assert_eq!(image::pixels(&leased_image).unwrap(), solid(64, b"\xaa\xbb\xcc\xff"), "a refused replacement changed the image");
+    image::release_snapshot(&mut lease1);
+    image::replace(&leased_image, 8, 8, &solid(64, b"\x11\x22\x33\xff")).unwrap();
     assert_eq!(*second_pixels, solid(64, b"\xaa\xbb\xcc\xff"), "image mutation changed the second lease");
-    Image::release_snapshot(&mut lease2);
-    Image::release_snapshot(&mut lease2);
-    Image::destroy(&leased_image).unwrap();
-    let destroy_leased = Image::create(1, 1, b"\x12\x34\x56\x78").unwrap();
-    let (_, _, _, destroy_bytes, mut destroy_lease) = Image::borrow_snapshot(&destroy_leased).unwrap();
-    Image::destroy(&destroy_leased).unwrap();
+    image::release_snapshot(&mut lease2);
+    image::release_snapshot(&mut lease2);
+    image::destroy(&leased_image).unwrap();
+    let destroy_leased = image::create(1, 1, b"\x12\x34\x56\x78").unwrap();
+    let (_, _, _, destroy_bytes, mut destroy_lease) = image::borrow_snapshot(&destroy_leased).unwrap();
+    image::destroy(&destroy_leased).unwrap();
     assert_eq!(&destroy_bytes[..], b"\x12\x34\x56\x78", "destroy invalidated leased image bytes");
-    Image::release_snapshot(&mut destroy_lease);
-    Image::release_snapshot(&mut destroy_lease);
+    image::release_snapshot(&mut destroy_lease);
+    image::release_snapshot(&mut destroy_lease);
     let direct = canvas::create(640, 480).unwrap();
     assert!(canvas::gpu_snapshot(&direct).is_none(), "fresh Canvas reports a GPU frame");
     // A canvas published every frame: a capture lends the canvas storage, the next write moves
@@ -160,16 +160,16 @@ fn image_and_canvas() {
     let mut publish = |frame: i64| {
         canvas::set_pixel(&direct, frame % 640, frame % 480, ((((frame & 255) << 24) | 0x111fff) as u32) as i32).unwrap();
         let next = canvas::capture(&direct).unwrap();
-        Image::destroy(&published).unwrap();
+        image::destroy(&published).unwrap();
         published = next;
     };
     for frame in 0..=601 {
         publish(frame);
     }
-    let last = Image::pixels(&published).unwrap();
+    let last = image::pixels(&published).unwrap();
     let at = (601 % 480 * 640 + 601) * 4;
     assert_eq!(&last[at..at + 4], b"\x59\x11\x1f\xff", "the published capture is not the canvas after its last write");
-    Image::destroy(&published).unwrap();
+    image::destroy(&published).unwrap();
     canvas::destroy(&direct).unwrap();
     // A capture is a picture of its moment: later canvas writes and a replacement of another
     // capture leave it alone.
@@ -178,26 +178,26 @@ fn image_and_canvas() {
     let bank_image = canvas::capture(&bank_canvas).unwrap();
     for round in 1..=100_000 {
         canvas::set_pixel(&bank_canvas, round & 3, 0, 0x2468acffu32 as i32).unwrap();
-        Image::destroy(&canvas::capture(&bank_canvas).unwrap()).unwrap();
+        image::destroy(&canvas::capture(&bank_canvas).unwrap()).unwrap();
     }
-    let first_pixels = Image::pixels(&bank_image).unwrap();
+    let first_pixels = image::pixels(&bank_image).unwrap();
     assert_eq!(first_pixels, solid(16, b"\x24\x68\xac\xff"), "capture is not the canvas pixels");
     let second = canvas::capture(&bank_canvas).unwrap();
     fill(&bank_canvas, 0x010203ff);
     assert!(
-        Image::pixels(&bank_image).unwrap() == first_pixels && Image::pixels(&second).unwrap() == first_pixels,
+        image::pixels(&bank_image).unwrap() == first_pixels && image::pixels(&second).unwrap() == first_pixels,
         "a canvas write changed its captures"
     );
-    Image::replace(&bank_image, 4, 4, &[0x3c; 64]).unwrap();
+    image::replace(&bank_image, 4, 4, &[0x3c; 64]).unwrap();
     assert_eq!(canvas::snapshot(&bank_canvas).unwrap().3, solid(16, b"\x01\x02\x03\xff"), "external image replacement changed canvas");
-    Image::destroy(&bank_image).unwrap();
-    Image::destroy(&second).unwrap();
+    image::destroy(&bank_image).unwrap();
+    image::destroy(&second).unwrap();
     canvas::destroy(&bank_canvas).unwrap();
     let (captures_before, _) = canvas::pixel_stats(&canvas);
     for _ in 0..4 {
         let capture = canvas::capture(&canvas).unwrap();
-        assert!(Image::size(&capture).unwrap() == (4, 4) && Image::pixels(&capture).unwrap() == expected, "capture");
-        Image::destroy(&capture).unwrap();
+        assert!(image::size(&capture).unwrap() == (4, 4) && image::pixels(&capture).unwrap() == expected, "capture");
+        image::destroy(&capture).unwrap();
     }
     assert_eq!(canvas::pixel_stats(&canvas), (captures_before + 4, 0), "CPU Canvas successful capture/readback counters");
     let png = std::env::temp_dir().join(format!("rays-next-{}.png", std::process::id()));
@@ -211,13 +211,13 @@ fn image_and_canvas() {
         match canvas::set_pixel(&canvas, 0, 0, 0) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::Destroyed && match canvas::capture(&canvas) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::Destroyed,
         "a destroyed canvas was written or captured"
     );
-    Image::destroy(&image).unwrap();
-    assert_eq!(match Image::pixels(&image) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "a destroyed image was read");
+    image::destroy(&image).unwrap();
+    assert_eq!(match image::pixels(&image) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "a destroyed image was read");
     for _ in 0..100_000 {
-        let x = Image::create(1, 1, &[0; 4]).unwrap();
-        Image::destroy(&x).unwrap();
+        let x = image::create(1, 1, &[0; 4]).unwrap();
+        image::destroy(&x).unwrap();
     }
-    let off_thread = std::thread::spawn(|| Image::create(1, 1, &[0; 4]).err()).join().unwrap();
+    let off_thread = std::thread::spawn(|| image::create(1, 1, &[0; 4]).err()).join().unwrap();
     match off_thread {
         Some(e)
             if e.operation == "Image.create"
@@ -232,12 +232,12 @@ fn image_and_canvas() {
 fn capture_shares_storage_until_write() {
     let canvas = canvas::create(2, 2).unwrap();
     let image = canvas::capture(&canvas).unwrap();
-    let (_, _, _, before, mut lease) = Image::borrow_snapshot(&image).unwrap();
+    let (_, _, _, before, mut lease) = image::borrow_snapshot(&image).unwrap();
     canvas::set_pixel(&canvas, 0, 0, 0x01020304).unwrap();
     assert_eq!(&before[..4], &[0, 0, 0, 0], "the capture changed with the canvas");
     assert_eq!(canvas::snapshot(&canvas).unwrap().3[..4], [1, 2, 3, 4]);
-    Image::release_snapshot(&mut lease);
-    Image::destroy(&image).unwrap();
+    image::release_snapshot(&mut lease);
+    image::destroy(&image).unwrap();
     canvas::destroy(&canvas).unwrap();
 }
 
@@ -309,11 +309,11 @@ fn font() {
     let mut transferred = font::render(&mut font, None, None, 1, white, b"transfer").unwrap().unwrap();
     let mut expected = text::pixels(&transferred).unwrap();
     let image = text::into_image(&mut transferred).unwrap();
-    assert!(text::destroyed(&transferred) && Image::pixels(&image).unwrap() == expected, "text-to-image ownership transfer changed pixels");
+    assert!(text::destroyed(&transferred) && image::pixels(&image).unwrap() == expected, "text-to-image ownership transfer changed pixels");
     expected.fill(0);
-    assert!(Image::pixels(&image).unwrap() != expected, "public text pixels still alias the transferred image");
+    assert!(image::pixels(&image).unwrap() != expected, "public text pixels still alias the transferred image");
     text::destroy(&mut transferred).unwrap();
-    Image::destroy(&image).unwrap();
+    image::destroy(&image).unwrap();
     let mut advance = |density| font::glyph_metrics_at(&mut font, density, 'A' as i64).unwrap().advance;
     let (a1, a2) = (advance(1), advance(2));
     assert!(a1 > 0 && a2 > a1, "glyph metrics");

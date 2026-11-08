@@ -78,7 +78,7 @@ pub fn apply_with_mapping(
 ) -> Result<(geometry::T, Vec<i64>), error::T> {
     cancel::check_opt(cancel_value)?;
     let source_topology_value = geometry::topology(geometry_value);
-    let source = topology::View::view(source_topology_value)?;
+    let source = topology::view::view(source_topology_value)?;
     let source_points = source.point_count as usize;
     let source_vertices = source.vertex_points.len();
     let source_primitives = source.primitive_kinds.len();
@@ -252,7 +252,7 @@ pub fn apply_with_mapping(
         })?;
         remapped
     };
-    let output_topology = topology::View::create_validated_owned(
+    let output_topology = topology::view::create_validated_owned(
         point_map.len() as i64,
         vertex_points,
         primitive_offsets,
@@ -261,8 +261,8 @@ pub fn apply_with_mapping(
     let positions = if point_identity {
         geometry::positions(geometry_value).clone()
     } else {
-        let source_positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
-        packed::Float3::View::of_owned_exn(
+        let source_positions = packed::float3::view::view(geometry::positions(geometry_value))?;
+        packed::float3::view::of_owned_exn(
             topology_remap::select_float(cancel_value, grain, None, &point_map, &source_positions.x)?,
             topology_remap::select_float(cancel_value, grain, None, &point_map, &source_positions.y)?,
             topology_remap::select_float(cancel_value, grain, None, &point_map, &source_positions.z)?,

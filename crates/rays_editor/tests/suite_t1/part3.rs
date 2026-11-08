@@ -336,12 +336,12 @@ pub fn run_views() {
         e = editor::update(e, &frame(&[], (450., 300.), vec![], c));
     }
     let scene = editor::scene(&e, &frame(&[], (450., 300.), vec![], 231));
-    let staged = rays::scene::Layer::stage_native(900, 640, &scene);
+    let staged = rays::scene::layer::stage_native(900, 640, &scene);
     editor::close(&e);
     match staged {
         Err(m) => fail(&m),
         Ok(staged) => {
-            let viewports = staged.layers.iter().filter(|l| matches!(l, rays::scene::Layer::native_layer::Scene3_layer(_))).count();
+            let viewports = staged.layers.iter().filter(|l| matches!(l, rays::scene::layer::native_layer::Scene3_layer(_))).count();
             check(viewports == 4, &format!("four viewports draw four 3D layers, got {viewports}"));
         }
     }

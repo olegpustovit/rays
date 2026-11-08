@@ -47,7 +47,7 @@ mod tests {
     use rdk_core::{packed, topology};
 
     fn two_curves() -> geometry::T {
-        let positions = packed::Float3::of_owned(
+        let positions = packed::float3::of_owned(
             vec![0.0, 1.0, 2.0, 3.0],
             vec![0.0; 4],
             vec![0.0; 4],

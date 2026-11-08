@@ -37,7 +37,7 @@ pub type Inspector_result = (Option<Panel_result>, Vec<change>, Vec<(String, Val
 /// The inspector panel inside `inspector_root` at `bounds`.
 #[allow(clippy::too_many_arguments)]
 pub fn inspect_panel<'a>(
-    image: &dyn Fn(i64) -> Option<rays::image::t>,
+    image: &dyn Fn(i64) -> Option<rays::image::Image>,
     camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
     inspector_visible: bool,
     unchanged: &settings::T,

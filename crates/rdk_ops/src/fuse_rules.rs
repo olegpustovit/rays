@@ -469,7 +469,7 @@ fn weight_values(geometry_value: &geometry::T, name: &str) -> Result<Vec<f64>, e
     let Some(found) = geometry::find_attribute(attribute::Owner::Point, name, geometry_value) else {
         return Err(fail(format!("attribute-rule weight point attribute {name:?} is missing")));
     };
-    let values: Vec<f64> = match attribute::View::storage(&found).map_err(core_fail)? {
+    let values: Vec<f64> = match attribute::view::storage(&found).map_err(core_fail)? {
         attribute::Storage::Float(values) => values.to_vec(),
         attribute::Storage::Int(values) => values.iter().map(|&v| v as f64).collect(),
         _ => return Err(fail(format!("attribute-rule weight {name:?} must be scalar float or integer"))),
@@ -888,7 +888,7 @@ fn concatenate_int_scalar(
     compact: bool,
     source: &[i64],
     ordered: &[i64],
-) -> Result<packed::IntArray::T, error::T> {
+) -> Result<packed::int_array::T, error::T> {
     let lengths: Vec<i64> = (0..clusters.count as usize)
         .map(|c| clusters.offsets[c + 1] - clusters.offsets[c])
         .collect();
@@ -903,7 +903,7 @@ fn concatenate_int_scalar(
             at += 1;
         }
     }
-    Ok(packed::IntArray::View::create_validated_owned(offsets, values))
+    Ok(packed::int_array::view::create_validated_owned(offsets, values))
 }
 
 fn concatenate_float_scalar(
@@ -911,7 +911,7 @@ fn concatenate_float_scalar(
     compact: bool,
     source: &[f64],
     ordered: &[i64],
-) -> Result<packed::FloatArray::T, error::T> {
+) -> Result<packed::float_array::T, error::T> {
     let lengths: Vec<i64> = (0..clusters.count as usize)
         .map(|c| clusters.offsets[c + 1] - clusters.offsets[c])
         .collect();
@@ -926,16 +926,16 @@ fn concatenate_float_scalar(
             at += 1;
         }
     }
-    Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
+    Ok(packed::float_array::view::create_validated_owned(offsets, values))
 }
 
 fn concatenate_int_rows(
     clusters: &Clusters,
     compact: bool,
-    source: &packed::IntArray::T,
+    source: &packed::int_array::T,
     ordered: &[i64],
-) -> Result<packed::IntArray::T, error::T> {
-    let view = packed::IntArray::View::view(source);
+) -> Result<packed::int_array::T, error::T> {
+    let view = packed::int_array::view::view(source);
     let mut lengths = vec![0i64; clusters.count as usize];
     for cluster in 0..clusters.count as usize {
         for slot in clusters.offsets[cluster]..clusters.offsets[cluster + 1] {
@@ -961,16 +961,16 @@ fn concatenate_int_rows(
             at += length;
         }
     }
-    Ok(packed::IntArray::View::create_validated_owned(offsets, values))
+    Ok(packed::int_array::view::create_validated_owned(offsets, values))
 }
 
 fn concatenate_float_rows(
     clusters: &Clusters,
     compact: bool,
-    source: &packed::FloatArray::T,
+    source: &packed::float_array::T,
     ordered: &[i64],
-) -> Result<packed::FloatArray::T, error::T> {
-    let view = packed::FloatArray::View::view(source);
+) -> Result<packed::float_array::T, error::T> {
+    let view = packed::float_array::view::view(source);
     let mut lengths = vec![0i64; clusters.count as usize];
     for cluster in 0..clusters.count as usize {
         for slot in clusters.offsets[cluster]..clusters.offsets[cluster + 1] {
@@ -996,7 +996,7 @@ fn concatenate_float_rows(
             at += length;
         }
     }
-    Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
+    Ok(packed::float_array::view::create_validated_owned(offsets, values))
 }
 
 fn ordered_members(
@@ -1048,7 +1048,7 @@ fn reduced_attribute(
         Ok(expand_i64(clusters, compact, reduce_int(cancel_value, grain, &name, clusters, source, method, weights)?))
     };
     let concat_scalar_message = || fail(format!("attribute {name:?} concatenate requires scalar or array storage"));
-    let storage = match attribute::View::storage(item).map_err(core_fail)? {
+    let storage = match attribute::view::storage(item).map_err(core_fail)? {
         attribute::Storage::Float(values) if is_concatenate(method) => attribute::Storage::FloatArray(
             concatenate_float_scalar(clusters, compact, values, &ordered)?,
         ),
@@ -1121,10 +1121,10 @@ fn default_attribute(
     if !average_numeric {
         return topology_remap::attribute(cancel_value, grain, None, &representatives, item).map_err(core_fail);
     }
-    let source = attribute::View::storage(item).map_err(core_fail)?;
+    let source = attribute::view::storage(item).map_err(core_fail)?;
     let storage = match source {
         attribute::Storage::Float3(values) if attribute::name(item) == "N" => {
-            let view = packed::Float3::View::view(values).map_err(core_fail)?;
+            let view = packed::float3::view::view(values).map_err(core_fail)?;
             let mut x = average(&view.x);
             let mut y = average(&view.y);
             let mut z = average(&view.z);
@@ -1138,7 +1138,7 @@ fn default_attribute(
                     z[p] /= length;
                 }
             }
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z).map_err(core_fail)?)
+            attribute::Storage::Float3(packed::float3::view::of_owned_exn(x, y, z).map_err(core_fail)?)
         }
         source => match attribute::map_float_planes(source, |plane| Ok(average(plane))).map_err(core_fail)? {
             Some(storage) => storage,
@@ -1171,7 +1171,7 @@ fn with_cluster_order(
     source: &group::T,
     target: group::T,
 ) -> Result<group::T, error::T> {
-    let Some(source_order) = group::View::order_view(source) else {
+    let Some(source_order) = group::view::order_view(source) else {
         return Ok(target);
     };
     let cluster_count = clusters.count as usize;
@@ -1198,7 +1198,7 @@ fn with_cluster_order(
     for cluster in 0..cluster_count {
         visit(cluster, &mut order);
     }
-    group::View::with_owned_order(order, &target).map_err(core_fail)
+    group::view::with_owned_order(order, &target).map_err(core_fail)
 }
 
 fn reduced_group(
@@ -1332,14 +1332,14 @@ mod tests {
     }
 
     fn floats_of(list: &[attribute::T], name: &str) -> Vec<f64> {
-        match attribute::View::storage(&find(list, name)).unwrap() {
+        match attribute::view::storage(&find(list, name)).unwrap() {
             Storage::Float(values) => values.to_vec(),
             _ => panic!("not float"),
         }
     }
 
     fn ints_of(list: &[attribute::T], name: &str) -> Vec<i64> {
-        match attribute::View::storage(&find(list, name)).unwrap() {
+        match attribute::view::storage(&find(list, name)).unwrap() {
             Storage::Int(values) => values.to_vec(),
             _ => panic!("not int"),
         }
@@ -1383,7 +1383,7 @@ mod tests {
         assert_eq!(ints(Average), vec![5, 7]);
         assert_eq!(ints(Sum), vec![15, 7]);
         assert_eq!(ints(SumSquares), vec![99, 49]);
-        let texts = |method: AttributeMethod| match attribute::View::storage(&find(&reduce("t", method, true).unwrap(), "t"))
+        let texts = |method: AttributeMethod| match attribute::view::storage(&find(&reduce("t", method, true).unwrap(), "t"))
             .unwrap()
         {
             Storage::Text(values) => (**values).clone(),
@@ -1404,8 +1404,8 @@ mod tests {
     fn concatenate_builds_arrays_and_expands_per_point() {
         let out = reduce("i", AttributeMethod::Concatenate, true).unwrap();
         let found = find(&out, "i");
-        let Storage::IntArray(rows) = attribute::View::storage(&found).unwrap() else { panic!("rows") };
-        let view = packed::IntArray::View::view(rows);
+        let Storage::IntArray(rows) = attribute::view::storage(&found).unwrap() else { panic!("rows") };
+        let view = packed::int_array::view::view(rows);
         assert_eq!(view.offsets.to_vec(), vec![0, 3, 4]);
         assert_eq!(view.values.to_vec(), vec![3, 3, 9, 7]);
         // Not compact: one value per source point, repeated through the cluster.

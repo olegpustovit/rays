@@ -149,7 +149,7 @@ pub fn run_values() {
         let geo = sop::payload::geometry(&output.payload).expect("geometry");
         check(rdk_core::geometry::point_count(&geo) == 0, "ordinary attribute menu starter did not cook actual empty geometry");
         let attr = rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Point, "attribute", &geo).expect("attribute");
-        check(matches!(rdk_core::attribute::View::storage(&attr), Ok(rdk_core::attribute::Storage::Float3(data)) if rdk_core::packed::Float3::length(data) == 0), "ordinary attribute menu starter lost vec3 storage");
+        check(matches!(rdk_core::attribute::view::storage(&attr), Ok(rdk_core::attribute::Storage::Float3(data)) if rdk_core::packed::float3::length(data) == 0), "ordinary attribute menu starter lost vec3 storage");
         sop::session::close(&mut session);
     }
     editor::close(&e);

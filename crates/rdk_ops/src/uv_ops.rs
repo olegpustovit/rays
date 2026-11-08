@@ -49,7 +49,7 @@ mod tests {
             }
         }
         let count = x.len();
-        let positions = packed::Float3::of_owned(x, vec![0.0; count], z).unwrap();
+        let positions = packed::float3::of_owned(x, vec![0.0; count], z).unwrap();
         let topo = topology::polygons_owned(count as i64, vertices, offsets).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
@@ -69,9 +69,9 @@ mod tests {
 
     fn uv(value: &geometry::T) -> (Vec<f64>, Vec<f64>) {
         let item = geometry::find_attribute(rdk_core::attribute::Owner::Vertex, "uv", value).expect("uv");
-        match rdk_core::attribute::View::storage(&item).unwrap() {
+        match rdk_core::attribute::view::storage(&item).unwrap() {
             rdk_core::attribute::Storage::Float2(values) => {
-                let view = packed::Float2::View::view(values);
+                let view = packed::float2::view::view(values);
                 (view.x.to_vec(), view.y.to_vec())
             }
             _ => panic!("uv storage"),
@@ -90,7 +90,7 @@ mod tests {
         let mesh = grid(6, 6);
         let flat = flatten(&params(), &mesh).unwrap();
         let (u, v) = uv(&flat);
-        let view = topology::View::view(geometry::topology(&flat)).unwrap();
+        let view = topology::view::view(geometry::topology(&flat)).unwrap();
         for corner in 0..view.vertex_points.len() {
             let point = view.vertex_points[corner];
             let (row, column) = (point / 7, point % 7);
@@ -137,7 +137,7 @@ mod tests {
             "invalid_uv/solver tolerance must be finite and non-negative"
         );
         // A tetrahedron is closed: every edge has two faces and no seam is selected.
-        let positions = packed::Float3::of_owned(vec![0.0, 1.0, 0.0, 0.0], vec![0.0, 0.0, 1.0, 0.0], vec![0.0, 0.0, 0.0, 1.0]).unwrap();
+        let positions = packed::float3::of_owned(vec![0.0, 1.0, 0.0, 0.0], vec![0.0, 0.0, 1.0, 0.0], vec![0.0, 0.0, 0.0, 1.0]).unwrap();
         let topo = topology::polygons_owned(4, vec![0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3], vec![0, 3, 6, 9, 12]).unwrap();
         let tetra = geometry::create(positions, topo, None, None, None).unwrap();
         assert_eq!(message(flatten(&params(), &tetra)), "invalid_uv/closed UV island requires at least one seam");

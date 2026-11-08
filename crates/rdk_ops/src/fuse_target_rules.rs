@@ -112,7 +112,7 @@ fn validate_weight(target: &geometry::T, rule: &CompiledAttributeRule) -> Result
     let Some(found) = geometry::find_attribute(attribute::Owner::Point, name, target) else {
         return Err(fail(format!("target weight point attribute {name:?} is missing")));
     };
-    match attribute::View::storage(&found).map_err(core_fail)? {
+    match attribute::view::storage(&found).map_err(core_fail)? {
         attribute::Storage::Float(values) => {
             for (point, value) in values.iter().enumerate() {
                 if !value.is_finite() {
@@ -155,29 +155,29 @@ fn mapped_string(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i
     Ok(output.into_iter().collect())
 }
 
-fn scalar_int_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<packed::IntArray::T, error::T> {
+fn scalar_int_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<packed::int_array::T, error::T> {
     let count = destinations.len();
     let offsets: Vec<i64> = (0..=count as i64).collect();
     let values = mapped_i64(cancel_value, grain, destinations, source, target)?;
-    Ok(packed::IntArray::View::create_validated_owned(offsets, values))
+    Ok(packed::int_array::view::create_validated_owned(offsets, values))
 }
 
-fn scalar_float_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[f64], target: &[f64]) -> Result<packed::FloatArray::T, error::T> {
+fn scalar_float_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[f64], target: &[f64]) -> Result<packed::float_array::T, error::T> {
     let count = destinations.len();
     let offsets: Vec<i64> = (0..=count as i64).collect();
     let values = mapped_f64(cancel_value, grain, destinations, source, target)?;
-    Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
+    Ok(packed::float_array::view::create_validated_owned(offsets, values))
 }
 
 fn mapped_int_rows(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     destinations: &[i64],
-    source: &packed::IntArray::T,
-    target: &packed::IntArray::T,
-) -> Result<packed::IntArray::T, error::T> {
-    let source = packed::IntArray::View::view(source);
-    let target = packed::IntArray::View::view(target);
+    source: &packed::int_array::T,
+    target: &packed::int_array::T,
+) -> Result<packed::int_array::T, error::T> {
+    let source = packed::int_array::view::view(source);
+    let target = packed::int_array::view::view(target);
     let count = destinations.len();
     let mut offsets = vec![0i64; count + 1];
     for point in 0..count {
@@ -216,18 +216,18 @@ fn mapped_int_rows(
             Ok(())
         })?;
     }
-    Ok(packed::IntArray::View::create_validated_owned(offsets, values))
+    Ok(packed::int_array::view::create_validated_owned(offsets, values))
 }
 
 fn mapped_float_rows(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     destinations: &[i64],
-    source: &packed::FloatArray::T,
-    target: &packed::FloatArray::T,
-) -> Result<packed::FloatArray::T, error::T> {
-    let source = packed::FloatArray::View::view(source);
-    let target = packed::FloatArray::View::view(target);
+    source: &packed::float_array::T,
+    target: &packed::float_array::T,
+) -> Result<packed::float_array::T, error::T> {
+    let source = packed::float_array::view::view(source);
+    let target = packed::float_array::view::view(target);
     let count = destinations.len();
     let mut offsets = vec![0i64; count + 1];
     for point in 0..count {
@@ -266,7 +266,7 @@ fn mapped_float_rows(
             Ok(())
         })?;
     }
-    Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
+    Ok(packed::float_array::view::create_validated_owned(offsets, values))
 }
 
 fn apply_attribute(
@@ -288,8 +288,8 @@ fn apply_attribute(
         ))
     };
     let method = rule.method;
-    let source_storage = attribute::View::storage(source_attribute).map_err(core_fail)?;
-    let target_storage = attribute::View::storage(&target_attribute).map_err(core_fail)?;
+    let source_storage = attribute::view::storage(source_attribute).map_err(core_fail)?;
+    let target_storage = attribute::view::storage(&target_attribute).map_err(core_fail)?;
     let storage = match (source_storage, target_storage) {
         (attribute::Storage::Float(s), attribute::Storage::Float(t)) if concatenate(method) => {
             attribute::Storage::FloatArray(scalar_float_array(cancel_value, grain, destinations, s, t)?)
@@ -455,8 +455,8 @@ mod tests {
         // Concatenation keeps the scalar-to-array shape.
         let out = apply(None, 1, &[rule(AttributeMethod::Concatenate)], &[], &[2, -1, -1], &source, &target).unwrap();
         let found = geometry::find_attribute(Owner::Point, "f", &out).unwrap();
-        let Storage::FloatArray(rows) = attribute::View::storage(&found).unwrap() else { panic!("rows") };
-        let view = packed::FloatArray::View::view(rows);
+        let Storage::FloatArray(rows) = attribute::view::storage(&found).unwrap() else { panic!("rows") };
+        let view = packed::float_array::view::view(rows);
         assert_eq!(view.offsets.to_vec(), vec![0, 1, 2, 3]);
         assert_eq!(view.values.to_vec(), vec![30., 0., 0.]);
     }
@@ -513,7 +513,7 @@ mod tests {
             let g = with_attr(&g, Owner::Point, "t", Storage::Text(Arc::new((0..n).map(|p| format!("s{}", p + salt).into_bytes()).collect())));
             let offsets: Vec<i64> = std::iter::once(0).chain((1..=n).scan(0, |at, p| { *at += p % 4; Some(*at) })).collect();
             let values: Vec<f64> = (0..offsets[n as usize]).map(|v| v as f64 + salt as f64).collect();
-            let rows = packed::FloatArray::View::create_validated_owned(offsets, values);
+            let rows = packed::float_array::view::create_validated_owned(offsets, values);
             with_attr(&g, Owner::Point, "r", Storage::FloatArray(rows))
         };
         let (source, target) = (build(0), build(1_000_000));

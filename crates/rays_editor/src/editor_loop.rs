@@ -733,7 +733,7 @@ pub fn settle(before_rest: &Option<rest>, value: &mut LoopModel, frame_: &frame:
     }
     let picture = compose_scene(&value, frame_);
     let still = match before_rest {
-        Some(rest) if same_input(&rest.shown, frame_) && scene::Layer::same(&rest.picture, &picture) => rest.still + 1,
+        Some(rest) if same_input(&rest.shown, frame_) && scene::layer::same(&rest.picture, &picture) => rest.still + 1,
         _ => 0,
     };
     value.rest = Some(rest { picture, still, shown: frame_.clone() });

@@ -114,7 +114,7 @@ pub fn borrows_gpu(p: &prepared) -> bool {
     p.borrows.get()
 }
 
-pub type image_resolver = Rc<dyn Fn(&Value) -> Result<rays::image::t, Diagnostic>>;
+pub type image_resolver = Rc<dyn Fn(&Value) -> Result<rays::image::Image, Diagnostic>>;
 
 /// The optional arguments of [`render_prepared`].
 #[derive(Clone, Default)]
@@ -127,7 +127,7 @@ pub struct RenderOptions {
 
 struct ImageFrame {
     resolve: image_resolver,
-    images: Vec<rays::image::t>,
+    images: Vec<rays::image::Image>,
 }
 
 thread_local! {
@@ -242,7 +242,7 @@ fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: 
                 c::draw(program, live, size, buffers, &c::DrawOptions { root: Some(*root), ..draw_options })?
             }
         };
-        let table: Vec<rays::image::t> = match depth {
+        let table: Vec<rays::image::Image> = match depth {
             Some(depth) => IMAGES.with(|s| s.borrow()[depth].images.clone()),
             None => Vec::new(),
         };

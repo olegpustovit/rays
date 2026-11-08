@@ -93,7 +93,7 @@ pub fn validate_edge_group(geometry_value: &geometry::T, selection: Option<&edge
 }
 
 pub fn validate_positions(cancel_token: Option<&cancel::T>, geometry_value: &geometry::T) -> Result<(), error::T> {
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let mut invalid = -1_i64;
     let mut point = 0_usize;
     while point < positions.x.len() && invalid < 0 {
@@ -124,7 +124,7 @@ pub fn target_values(
     }
     match geometry::find_attribute(Owner::Point, name, geometry_value) {
         None => Err(fail(&format!("point target-size attribute {} does not exist", quoted(name)))),
-        Some(found) => match attribute::View::storage(&found)? {
+        Some(found) => match attribute::view::storage(&found)? {
             Storage::Float(values) => {
                 let mut invalid = -1_i64;
                 let mut point = 0_usize;
@@ -192,19 +192,19 @@ pub fn uv_reader(name: &str, geometry_value: &geometry::T) -> Result<Option<UvEq
     let Some(found) = geometry::find_attribute(Owner::Vertex, name, geometry_value) else {
         return Ok(None);
     };
-    let equal: Option<UvEqual> = match attribute::View::storage(&found)? {
+    let equal: Option<UvEqual> = match attribute::view::storage(&found)? {
         Storage::Float(values) => {
             let values = values.clone();
             Some(Box::new(move |a, b| gf(&values, a) == gf(&values, b)))
         }
         Storage::Float2(values) => {
-            let values = packed::Float2::View::view(values);
+            let values = packed::float2::view::view(values);
             Some(Box::new(move |a, b| {
                 gf(&values.x, a) == gf(&values.x, b) && gf(&values.y, a) == gf(&values.y, b)
             }))
         }
         Storage::Float3(values) => {
-            let values = packed::Float3::View::view(values)?;
+            let values = packed::float3::view::view(values)?;
             Some(Box::new(move |a, b| {
                 gf(&values.x, a) == gf(&values.x, b)
                     && gf(&values.y, a) == gf(&values.y, b)
@@ -212,7 +212,7 @@ pub fn uv_reader(name: &str, geometry_value: &geometry::T) -> Result<Option<UvEq
             }))
         }
         Storage::Float4(values) => {
-            let values = packed::Float4::View::view(values);
+            let values = packed::float4::view::view(values);
             Some(Box::new(move |a, b| {
                 gf(&values.x, a) == gf(&values.x, b)
                     && gf(&values.y, a) == gf(&values.y, b)
@@ -232,8 +232,8 @@ pub fn uv_reader(name: &str, geometry_value: &geometry::T) -> Result<Option<UvEq
 }
 
 pub fn endpoint_vertices(
-    topology_view: &topology::View::View,
-    index: &topology_index::View::View,
+    topology_view: &topology::view::View,
+    index: &topology_index::view::View,
     edge: i64,
     incidence: i64,
 ) -> Option<(i64, i64)> {
@@ -268,9 +268,9 @@ pub fn install_feature_groups(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     let topology_value = geometry::topology(geometry_value);
-    let topology_view = topology::View::view(topology_value)?;
+    let topology_view = topology::view::view(topology_value)?;
     let index_value = topology_index::create(cancel_token, topology_value)?;
-    let index = topology_index::View::view(&index_value);
+    let index = topology_index::view::view(&index_value);
     let uv_equal = if preserve_uv_seams { uv_reader(uv_attribute, geometry_value)? } else { None };
     cancel::check_opt(cancel_token)?;
     let feature_edges = edge_group::init(
@@ -327,7 +327,7 @@ pub fn feature_group(name: &str, geometry_value: &geometry::T) -> Result<edge_gr
     }
 }
 
-pub fn primitive_is_triangle(topology_view: &topology::View::View, primitive: i64) -> bool {
+pub fn primitive_is_triangle(topology_view: &topology::view::View, primitive: i64) -> bool {
     topology_view.primitive_kinds[primitive as usize] == 0
         && gi(&topology_view.primitive_offsets, primitive + 1)
             - gi(&topology_view.primitive_offsets, primitive)
@@ -641,7 +641,7 @@ pub fn local_of_geometry(
 ) -> Result<Local, error::T> {
     let cancel_token = cancel_arc.as_deref();
     let topology_value = geometry::topology(geometry_value);
-    let topology_view = topology::View::view(topology_value)?;
+    let topology_view = topology::view::view(topology_value)?;
     let tris = topology_view.primitive_kinds.len() as i64;
     for primitive in 0..tris {
         cancel::poll(cancel_token, primitive, 4095)?;
@@ -651,8 +651,8 @@ pub fn local_of_geometry(
     }
     let points = topology_view.point_count;
     let corners = tris * 3;
-    let index = topology_index::View::view(&topology_index::create(cancel_token, topology_value)?);
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let index = topology_index::view::view(&topology_index::create(cancel_token, topology_value)?);
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let point_groups: Vec<group::T> = geometry::groups(geometry_value)
         .into_iter()
         .filter(|item| group::owner(item) == group::Owner::Point)
@@ -665,7 +665,7 @@ pub fn local_of_geometry(
     let p_target = match target_size_attribute {
         None => Vec::new(),
         Some(name) => match geometry::find_attribute(Owner::Point, name, geometry_value) {
-            Some(found) => match attribute::View::storage(&found)? {
+            Some(found) => match attribute::view::storage(&found)? {
                 Storage::Float(values) => values.to_vec(),
                 _ => {
                     return Err(invalid_arg(format!(
@@ -1927,7 +1927,7 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
             vertex_weight[target] = l.c_weight[corner];
         }
     }
-    let topology_value = topology::View::create_validated_owned(
+    let topology_value = topology::view::create_validated_owned(
         point_count,
         vertex_points,
         (0..=ranking.tri_count).map(|position| position * 3).collect(),
@@ -1984,7 +1984,7 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
                                 if mapped >= 0 { Some(mapped) } else { None }
                             })
                             .collect();
-                        groups.push(group::View::with_owned_order(mapped, &target)?);
+                        groups.push(group::view::with_owned_order(mapped, &target)?);
                     }
                 }
             }
@@ -2019,7 +2019,7 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
                                 if mapped >= 0 { Some(mapped) } else { None }
                             })
                             .collect();
-                        groups.push(group::View::with_owned_order(mapped, &target)?);
+                        groups.push(group::view::with_owned_order(mapped, &target)?);
                     }
                 }
             }
@@ -2035,7 +2035,7 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
                 if !group::is_ordered(&source_group) {
                     groups.push(target);
                 } else {
-                    groups.push(group::View::remap_order(&source_group, &primitive_source, &target)?);
+                    groups.push(group::view::remap_order(&source_group, &primitive_source, &target)?);
                 }
             }
         }
@@ -2057,7 +2057,7 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
         )?);
     }
     let created = geometry::create(
-        packed::Float3::View::of_owned_exn(x, y, z)?,
+        packed::float3::view::of_owned_exn(x, y, z)?,
         topology_value,
         Some(attributes),
         Some(groups),
@@ -2153,9 +2153,9 @@ pub fn project_to_reference(
     if missed >= 0 {
         return Err(fail(&format!("could not project point {missed} to the input surface")));
     }
-    let source_positions = packed::Float3::View::view(geometry::positions(reference))?;
-    let source_topology = topology::View::view(geometry::topology(reference))?;
-    let current = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let source_positions = packed::float3::view::view(geometry::positions(reference))?;
+    let source_topology = topology::view::view(geometry::topology(reference))?;
+    let current = packed::float3::view::view(geometry::positions(geometry_value))?;
     let (mut x, mut y, mut z) = (current.x.to_vec(), current.y.to_vec(), current.z.to_vec());
     {
         let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));
@@ -2166,9 +2166,9 @@ pub fn project_to_reference(
                 if group::mem(point, &used) {
                     let at = (point - first) as usize;
                     let triangle = triangles[point as usize];
-                    let vertex0 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 0);
-                    let vertex1 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 1);
-                    let vertex2 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 2);
+                    let vertex0 = rdk_geom::surface_index::view::triangle_vertex(surface, triangle, 0);
+                    let vertex1 = rdk_geom::surface_index::view::triangle_vertex(surface, triangle, 1);
+                    let vertex2 = rdk_geom::surface_index::view::triangle_vertex(surface, triangle, 2);
                     let p0 = gi(&source_topology.vertex_points, vertex0);
                     let p1 = gi(&source_topology.vertex_points, vertex1);
                     let p2 = gi(&source_topology.vertex_points, vertex2);
@@ -2188,7 +2188,7 @@ pub fn project_to_reference(
         })?;
     }
     geometry::with_positions(
-        packed::Float3::View::of_owned_exn(x, y, z)?,
+        packed::float3::view::of_owned_exn(x, y, z)?,
         geometry_value,
     )
 }
@@ -2212,13 +2212,13 @@ pub fn install_outputs(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     let topology_value = geometry::topology(geometry_value);
-    let topology_view = topology::View::view(topology_value)?;
+    let topology_view = topology::view::view(topology_value)?;
     let features = feature_group(edge_name, geometry_value)?;
     let with_hard_edges = match output_hard_edges {
         None => geometry_value.clone(),
         Some(name) => {
             let index_value = topology_index::create(cancel_token, topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             cancel::check_opt(cancel_token)?;
             let created = edge_group::init(
                 Some(grain),
@@ -2253,7 +2253,7 @@ pub fn install_outputs(
     match output_quality {
         None => Ok(with_size),
         Some(name) => {
-            let positions = packed::Float3::View::view(geometry::positions(&with_size))?;
+            let positions = packed::float3::view::view(geometry::positions(&with_size))?;
             let primitive_count = geometry::primitive_count(&with_size);
             let mut quality = vec![0.0; primitive_count as usize];
             support::par_fill(cancel_token, grain, &mut quality, &|primitive| {
@@ -2441,7 +2441,7 @@ fn remesh_body(params: &Params, geometry_value: &geometry::T) -> Result<geometry
         cancel::check_opt(cancel_token)?;
         let (mut l, cached_ranking) = match cached.take() {
             Some((mut l, ranking)) => {
-                let positions = packed::Float3::View::view(geometry::positions(&current))?;
+                let positions = packed::float3::view::view(geometry::positions(&current))?;
                 let points = l.points as usize;
                 l.x[..points].copy_from_slice(&positions.x[..points]);
                 l.y[..points].copy_from_slice(&positions.y[..points]);
@@ -2680,7 +2680,7 @@ mod tests {
         }
         let count = x.len();
         let base = geometry::create(
-            packed::Float3::View::of_owned_exn(x, vec![0.0; count], z).unwrap(),
+            packed::float3::view::of_owned_exn(x, vec![0.0; count], z).unwrap(),
             topology::polygons_owned(count as i64, vertex_points, offsets).unwrap(),
             None,
             None,
@@ -2692,12 +2692,12 @@ mod tests {
             Owner::Point,
             "N",
             Storage::Float3(
-                packed::Float3::View::of_owned_exn(vec![0.0; count], vec![1.0; count], vec![0.0; count])
+                packed::float3::view::of_owned_exn(vec![0.0; count], vec![1.0; count], vec![0.0; count])
                     .unwrap(),
             ),
         );
         if uv {
-            add_attribute(&base, Owner::Point, "uv", Storage::Float2(packed::Float2::of_owned(u, v).unwrap()))
+            add_attribute(&base, Owner::Point, "uv", Storage::Float2(packed::float2::of_owned(u, v).unwrap()))
         } else {
             base
         }
@@ -2706,28 +2706,28 @@ mod tests {
     #[test]
     fn grid_fixture_matches_ocaml_generator() {
         let source = grid(9, 7, 6.0, true);
-        let topology = topology::View::view(geometry::topology(&source)).unwrap();
+        let topology = topology::view::view(geometry::topology(&source)).unwrap();
         assert_eq!(&topology.vertex_points[..12], &[0, 9, 10, 0, 10, 1, 1, 10, 2, 2, 10, 11]);
-        let positions = packed::Float3::View::view(geometry::positions(&source)).unwrap();
+        let positions = packed::float3::view::view(geometry::positions(&source)).unwrap();
         assert_eq!(positions.z[36].to_bits(), 0x3fef_ffff_ffff_fffe);
         let uv = geometry::find_attribute(Owner::Point, "uv", &source).unwrap();
-        let Storage::Float2(uv) = attribute::View::storage(&uv).unwrap() else {
+        let Storage::Float2(uv) = attribute::view::storage(&uv).unwrap() else {
             panic!("grid fixture UV storage drifted");
         };
-        let uv = packed::Float2::View::view(uv);
+        let uv = packed::float2::view::view(uv);
         assert_eq!(uv.y.len(), 63);
         assert_eq!(uv.y[9].to_bits(), (1.0_f64 / 6.0).to_bits());
     }
 
     fn scalar(owner: Owner, name: &str, value: &geometry::T) -> Vec<f64> {
-        match attribute::View::storage(&geometry::find_attribute(owner, name, value).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(owner, name, value).unwrap()).unwrap() {
             Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
     }
 
     fn check_triangles(value: &geometry::T) {
-        let view = topology::View::view(geometry::topology(value)).unwrap();
+        let view = topology::view::view(geometry::topology(value)).unwrap();
         for primitive in 0..geometry::primitive_count(value) as usize {
             assert!(
                 view.primitive_kinds[primitive] == 0
@@ -2753,12 +2753,12 @@ mod tests {
 
     fn geometry_equal(left: &geometry::T, right: &geometry::T) -> bool {
         let (lp, rp) = (
-            packed::Float3::View::view(geometry::positions(left)).unwrap(),
-            packed::Float3::View::view(geometry::positions(right)).unwrap(),
+            packed::float3::view::view(geometry::positions(left)).unwrap(),
+            packed::float3::view::view(geometry::positions(right)).unwrap(),
         );
         let (lt, rt) = (
-            topology::View::view(geometry::topology(left)).unwrap(),
-            topology::View::view(geometry::topology(right)).unwrap(),
+            topology::view::view(geometry::topology(left)).unwrap(),
+            topology::view::view(geometry::topology(right)).unwrap(),
         );
         if bits(&lp.x) != bits(&rp.x)
             || bits(&lp.y) != bits(&rp.y)
@@ -2778,18 +2778,18 @@ mod tests {
             if attribute::name(a) != attribute::name(b) || attribute::owner(a) != attribute::owner(b) {
                 return false;
             }
-            let same = match (attribute::View::storage(a).unwrap(), attribute::View::storage(b).unwrap()) {
+            let same = match (attribute::view::storage(a).unwrap(), attribute::view::storage(b).unwrap()) {
                 (Storage::Float(p), Storage::Float(q)) => bits(p) == bits(q),
                 (Storage::Int(p), Storage::Int(q)) => p == q,
                 (Storage::Text(p), Storage::Text(q)) => p == q,
                 (Storage::Float2(p), Storage::Float2(q)) => {
-                    let (p, q) = (packed::Float2::View::view(p), packed::Float2::View::view(q));
+                    let (p, q) = (packed::float2::view::view(p), packed::float2::view::view(q));
                     bits(&p.x) == bits(&q.x) && bits(&p.y) == bits(&q.y)
                 }
                 (Storage::Float3(p), Storage::Float3(q)) => {
                     let (p, q) = (
-                        packed::Float3::View::view(p).unwrap(),
-                        packed::Float3::View::view(q).unwrap(),
+                        packed::float3::view::view(p).unwrap(),
+                        packed::float3::view::view(q).unwrap(),
                     );
                     bits(&p.x) == bits(&q.x) && bits(&p.y) == bits(&q.y) && bits(&p.z) == bits(&q.z)
                 }
@@ -2808,7 +2808,7 @@ mod tests {
                 || group::name(a) != group::name(b)
                 || group::length(a) != group::length(b)
                 || group::ordered_elements(a) != group::ordered_elements(b)
-                || group::View::bits_view(a) != group::View::bits_view(b)
+                || group::view::bits_view(a) != group::view::bits_view(b)
             {
                 return false;
             }
@@ -2832,7 +2832,7 @@ mod tests {
 
     fn seam_fixture() -> (geometry::T, group::T) {
         let base = geometry::create(
-            packed::Float3::View::of_owned_exn(
+            packed::float3::view::of_owned_exn(
                 vec![0.0, 1.0, 1.0, 0.0],
                 vec![0.0, 0.0, 1.0, 1.0],
                 vec![0.0; 4],
@@ -2844,7 +2844,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let uv = packed::Float2::of_owned(
+        let uv = packed::float2::of_owned(
             vec![0.0, 1.0, 1.0, 2.0, 3.0, 2.0],
             vec![0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
         )
@@ -2879,7 +2879,7 @@ mod tests {
             "Remesh copied immutable detail payload"
         );
         let features = geometry::find_edge_group("features", &output).unwrap();
-        let index = topology_index::View::view(
+        let index = topology_index::view::view(
             &topology_index::create(None, geometry::topology(&output)).unwrap(),
         );
         let boundary_edges = (0..index.edge_a.len())
@@ -2889,7 +2889,7 @@ mod tests {
             edge_group::cardinality(&features) > boundary_edges,
             "Remesh did not preserve the UV discontinuity as a hard interior feature"
         );
-        let positions = packed::Float3::View::view(geometry::positions(&output)).unwrap();
+        let positions = packed::float3::view::view(geometry::positions(&output)).unwrap();
         let pinned = (0..positions.x.len())
             .any(|point| positions.x[point] == 0.0 && positions.y[point] == 0.0 && positions.z[point] == 0.0);
         assert!(pinned, "Remesh removed or moved an explicit hard point");
@@ -2898,7 +2898,7 @@ mod tests {
     #[test]
     fn input_points_only() {
         let source = geometry::create(
-            packed::Float3::View::of_owned_exn(
+            packed::float3::view::of_owned_exn(
                 vec![0.0, 2.0, 2.0, 0.0],
                 vec![0.0, 0.0, 1.0, 1.0],
                 vec![0.0; 4],
@@ -2958,23 +2958,23 @@ mod tests {
             }
             finish(hash ^ value.len() as u32)
         }
-        let positions = packed::Float3::View::view(geometry::positions(value)).unwrap();
-        let topology = topology::View::view(geometry::topology(value)).unwrap();
+        let positions = packed::float3::view::view(geometry::positions(value)).unwrap();
+        let topology = topology::view::view(geometry::topology(value)).unwrap();
         let mut hash = 17;
         hash = mix(hash, mix(mix(floats(&positions.x), floats(&positions.y)), floats(&positions.z)));
         hash = mix(hash, ints(&topology.vertex_points));
         hash = mix(hash, ints(&topology.primitive_offsets));
         for item in geometry::attributes(value) {
-            let component = match attribute::View::storage(&item).unwrap() {
+            let component = match attribute::view::storage(&item).unwrap() {
                 Storage::Float(values) => floats(values),
                 Storage::Int(values) => ints(values),
                 Storage::Text(values) => values.iter().fold(17, |hash, value| mix(hash, text(value))),
                 Storage::Float2(values) => {
-                    let planes = packed::Float2::View::view(values);
+                    let planes = packed::float2::view::view(values);
                     mix(floats(&planes.x), floats(&planes.y))
                 }
                 Storage::Float3(values) => {
-                    let planes = packed::Float3::View::view(values).unwrap();
+                    let planes = packed::float3::view::view(values).unwrap();
                     mix(mix(floats(&planes.x), floats(&planes.y)), floats(&planes.z))
                 }
                 _ => 1,
@@ -3135,7 +3135,7 @@ mod tests {
         let mut builder = topology::builder::create(3, Some(3), Some(1)).unwrap();
         topology::builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
         let curve = geometry::create(
-            packed::Float3::View::of_owned_exn(vec![0.0, 1.0, 2.0], vec![0.0; 3], vec![0.0; 3]).unwrap(),
+            packed::float3::view::of_owned_exn(vec![0.0, 1.0, 2.0], vec![0.0; 3], vec![0.0; 3]).unwrap(),
             topology::builder::freeze(&mut builder).unwrap(),
             None,
             None,

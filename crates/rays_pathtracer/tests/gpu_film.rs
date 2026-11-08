@@ -40,7 +40,7 @@ fn film() {
     get(p::render(&mut tracer, &camera));
     get(p::flush(&mut tracer));
     let image = rays::image::resource(&p::image(&tracer));
-    let snapshot = |image: &runtime_resources::Image::t| match runtime_resources::Image::gpu_snapshot(image) {
+    let snapshot = |image: &runtime_resources::image::Image| match runtime_resources::image::gpu_snapshot(image) {
         Ok(Some((_, _, _, texture))) => texture,
         _ => panic!("traced film was published through CPU image storage"),
     };

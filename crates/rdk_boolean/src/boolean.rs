@@ -46,7 +46,7 @@ fn has_duplicate(names: &[String]) -> bool {
 }
 
 fn has_corner_payload(geometry_value: &geometry::T) -> bool {
-    geometry::View::attributes(geometry_value).iter().any(|item| {
+    geometry::view::attributes(geometry_value).iter().any(|item| {
         matches!(attribute::owner(item), attribute::Owner::Point | attribute::Owner::Vertex)
     }) || geometry::groups(geometry_value)
         .iter()
@@ -422,7 +422,7 @@ mod tests {
         let y: Vec<f64> = points.iter().map(|p| p.1).collect();
         let z: Vec<f64> = points.iter().map(|p| p.2).collect();
         let topology_value = topology::polygons_owned(points.len() as i64, vertex_points, offsets).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None)
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None)
             .unwrap()
     }
 
@@ -535,8 +535,8 @@ mod tests {
     type Signature = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<i64>, Vec<i64>, Vec<u8>);
 
     fn signature(geometry_value: &geometry::T) -> Signature {
-        let positions = packed::Float3::View::view(geometry::positions(geometry_value)).unwrap();
-        let topology_view = topology::View::view(geometry::topology(geometry_value)).unwrap();
+        let positions = packed::float3::view::view(geometry::positions(geometry_value)).unwrap();
+        let topology_view = topology::view::view(geometry::topology(geometry_value)).unwrap();
         (
             positions.x.to_vec(),
             positions.y.to_vec(),
@@ -693,7 +693,7 @@ mod tests {
         let normals_of = |geometry_value: &geometry::T| {
             let item = geometry::find_attribute(attribute::Owner::Vertex, "N", geometry_value).unwrap();
             match attribute::storage(&item).unwrap() {
-                attribute::Storage::Float3(values) => packed::Float3::View::view(&values).unwrap(),
+                attribute::Storage::Float3(values) => packed::float3::view::view(&values).unwrap(),
                 _ => panic!("Boolean vertex normal payload is not float3"),
             }
         };
@@ -721,8 +721,8 @@ mod tests {
             panic!("Boolean normal payload differs between one and four domains ({differences} components, max {maximum})");
         }
         let normals = normals_of(&output);
-        let positions = packed::Float3::View::view(geometry::positions(&output)).unwrap();
-        let topology_view = topology::View::view(geometry::topology(&output)).unwrap();
+        let positions = packed::float3::view::view(geometry::positions(&output)).unwrap();
+        let topology_view = topology::view::view(geometry::topology(&output)).unwrap();
         for primitive in 0..geometry::primitive_count(&output) as usize {
             let first = topology_view.primitive_offsets[primitive] as usize;
             let last = topology_view.primitive_offsets[primitive + 1] as usize;
@@ -770,7 +770,7 @@ mod tests {
             values.iter().copied().fold(-1, i64::max) == 1,
             "one surface cutter did not produce exactly two Boolean-cell pieces"
         );
-        let topology_view = topology::View::view(geometry::topology(&output)).unwrap();
+        let topology_view = topology::view::view(geometry::topology(&output)).unwrap();
         for piece in 0..2 {
             let mut edges: HashMap<(i64, i64), i64> = HashMap::new();
             let mut primitives = 0;

@@ -22,7 +22,7 @@ fn marks(body: &str) -> (Buffers, Vec<Entry>) {
     let marks = ok(core_exec::draw(&prepared, &live(), (200,100), &buffers, &core_exec::DrawOptions { root, ..Default::default() }));
     (buffers, marks)
 }
-fn serialize(s: &[scene::node]) -> Vec<u8> { scene_command::render_ir::serialize(&scene::Layer::to_ir(s).unwrap()) }
+fn serialize(s: &[scene::node]) -> Vec<u8> { scene_command::render_ir::serialize(&scene::layer::to_ir(s).unwrap()) }
 fn new_scene(body: &str) -> Result<Vec<scene::node>, Diagnostic> {
     let (buffers, marks) = marks(body);
     ms::scene(&buffers, None, None, None, None, &marks)
@@ -189,7 +189,7 @@ fn allocation() {
     let before = mem_sys::alloc_bytes_total();
     let scene = ok(ms::scene(&buffers,None,None,None,None,&marks));
     let bytes = mem_sys::alloc_bytes_total()-before;
-    match scene::Layer::commands(None,&scene).unwrap().as_slice() {
+    match scene::layer::commands(None,&scene).unwrap().as_slice() {
         [scene_command::render_ir::Command::Shapes(batch)]=>assert_eq!(batch.count(),100000),
         _=>panic!("a circle set is one Shapes command"),
     }

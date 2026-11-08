@@ -45,7 +45,7 @@ pub fn same(a: &Font, b: &Font) -> bool {
 }
 
 // the pixels an image of a cached text holds
-fn image_bytes(img: &image::t) -> i64 {
+fn image_bytes(img: &image::Image) -> i64 {
     match (image::get_width(img), image::get_height(img)) {
         (Ok(width), Ok(height)) => width * height * 4,
         _ => 0,
@@ -53,7 +53,7 @@ fn image_bytes(img: &image::t) -> i64 {
 }
 
 fn destroy_image_item(_key: &TableKey, item: side_lru::Item) {
-    if let Ok(img) = item.downcast::<image::t>() {
+    if let Ok(img) = item.downcast::<image::Image>() {
         let _ = image::destroy(&img);
     }
 }
@@ -98,7 +98,7 @@ fn resource_align(a: alignment) -> RFont::alignment {
     }
 }
 
-fn paint(density: i64, wrap: Option<i64>, align: alignment, font: &Font, text: &str, mode: render_mode) -> Result<image::t, String> {
+fn paint(density: i64, wrap: Option<i64>, align: alignment, font: &Font, text: &str, mode: render_mode) -> Result<image::Image, String> {
     let rendered = RFont::render(&mut font.0.resource.borrow_mut(), wrap, Some(resource_align(align)), density, rgba(mode), text.as_bytes());
     match rendered {
         Err(error) => Err(message("Font.render_text", &error)),
@@ -112,7 +112,7 @@ fn paint(density: i64, wrap: Option<i64>, align: alignment, font: &Font, text: &
     }
 }
 
-fn image_of_text(text: &mut runtime_resources::text::Text) -> Result<image::t, String> {
+fn image_of_text(text: &mut runtime_resources::text::Text) -> Result<image::Image, String> {
     match runtime_resources::text::into_image(text) {
         Ok(img) => image::of_resource(img),
         Err(error) => Err(message("Font.image", &error)),
@@ -124,12 +124,12 @@ fn key(wrap: Option<i64>, align: alignment, density: i64, size: i64, text: &str,
     TableKey::Str(format!("{density}|{size}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
 }
 
-pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<i64>, font: &Font, text: &str, mode: render_mode) -> Result<image::t, String> {
+pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<i64>, font: &Font, text: &str, mode: render_mode) -> Result<image::Image, String> {
     let align = align.unwrap_or(alignment::Left);
     let density = density.unwrap_or(1);
     let k = key(wrap, align, density, 0, text, mode);
     if let Some(item) = side_lru::find(&mut font.0.cache.borrow_mut(), &k) {
-        if let Ok(img) = item.downcast::<image::t>() {
+        if let Ok(img) = item.downcast::<image::Image>() {
             return Ok((*img).clone());
         }
     }
@@ -180,7 +180,7 @@ pub mod raster {
     use super::*;
 
     struct automatic_entry {
-        image: image::t,
+        image: image::Image,
         references: Cell<i64>,
         cached: Cell<bool>,
     }
@@ -318,7 +318,7 @@ pub mod raster {
         Ok(automatic { entry, context: Some(context), released: Cell::new(false) })
     }
 
-    pub fn automatic_image(handle: &automatic) -> image::t {
+    pub fn automatic_image(handle: &automatic) -> image::Image {
         handle.entry.image.clone()
     }
 

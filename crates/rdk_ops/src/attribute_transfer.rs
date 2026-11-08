@@ -261,7 +261,7 @@ fn validate_target_kinds(
 fn validate_sampled_storage(operation: &str, attributes: &[attribute::T]) -> Result<(), error::T> {
     for item in attributes {
         if matches!(
-            attribute::View::storage(item)?,
+            attribute::view::storage(item)?,
             attribute::Storage::IntArray(_) | attribute::Storage::FloatArray(_)
         ) {
             return Err(fail(&format!(
@@ -302,7 +302,7 @@ fn initial_float(
     count: usize,
 ) -> Result<Vec<f64>, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
-        if let attribute::Storage::Float(values) = attribute::View::storage(&item)? {
+        if let attribute::Storage::Float(values) = attribute::view::storage(&item)? {
             let mut output = values.to_vec();
             if unmatched == Unmatched::DefaultValue {
                 reset_selected(selection, &mut |element| output[element] = 0.0);
@@ -320,7 +320,7 @@ fn initial_int(
     count: usize,
 ) -> Result<Vec<i64>, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
-        if let attribute::Storage::Int(values) = attribute::View::storage(&item)? {
+        if let attribute::Storage::Int(values) = attribute::view::storage(&item)? {
             let mut output = values.to_vec();
             if unmatched == Unmatched::DefaultValue {
                 reset_selected(selection, &mut |element| output[element] = 0);
@@ -338,7 +338,7 @@ fn initial_text(
     count: usize,
 ) -> Result<TextArray, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
-        if let attribute::Storage::Text(values) = attribute::View::storage(&item)? {
+        if let attribute::Storage::Text(values) = attribute::view::storage(&item)? {
             if unmatched == Unmatched::DefaultValue {
                 let mut reset = vec![false; values.len()];
                 reset_selected(selection, &mut |element| reset[element] = true);
@@ -360,7 +360,7 @@ fn initial_planes(
     count: usize,
 ) -> Result<Vec<Vec<f64>>, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
-        if let Some(planes) = attribute::float_planes(attribute::View::storage(&item)?)? {
+        if let Some(planes) = attribute::float_planes(attribute::view::storage(&item)?)? {
             let mut planes: Vec<Vec<f64>> = planes.iter().map(|plane| plane.to_vec()).collect();
             if unmatched == Unmatched::DefaultValue {
                 reset_selected(selection, &mut |element| {
@@ -485,9 +485,9 @@ fn primitive_barycenters(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     geometry_value: &geometry::T,
-) -> Result<packed::Float3::T, error::T> {
-    let topology_view = topology::View::view(geometry::topology(geometry_value))?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+) -> Result<packed::float3::T, error::T> {
+    let topology_view = topology::view::view(geometry::topology(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let count = geometry::primitive_count(geometry_value) as usize;
     let zeros = vec![0.0_f64; count];
     let planes = map_planes(cancel_token, grain, &[&zeros, &zeros, &zeros], &|primitive, slot| {
@@ -507,7 +507,7 @@ fn primitive_barycenters(
         Ok(())
     })?;
     let mut planes = planes.into_iter();
-    packed::Float3::View::of_owned_exn(
+    packed::float3::view::of_owned_exn(
         planes.next().unwrap_or_default(),
         planes.next().unwrap_or_default(),
         planes.next().unwrap_or_default(),
@@ -515,7 +515,7 @@ fn primitive_barycenters(
 }
 
 fn install_attributes_batch(attributes: Vec<attribute::T>, target: &geometry::T) -> Result<geometry::T, error::T> {
-    geometry::View::with_merged_attributes_owned(attributes, target)
+    geometry::view::with_merged_attributes_owned(attributes, target)
 }
 
 /// Per-target weight rows: `work(target, row)` fills `row` (`capacity` values, initialised from
@@ -560,8 +560,8 @@ fn spatial_transfer(
     target_elements: Option<&group::T>,
     operation: &str,
     owner: attribute::Owner,
-    source_positions: &dyn Fn() -> Result<packed::Float3::T, error::T>,
-    target_positions: &dyn Fn() -> Result<packed::Float3::T, error::T>,
+    source_positions: &dyn Fn() -> Result<packed::float3::T, error::T>,
+    target_positions: &dyn Fn() -> Result<packed::float3::T, error::T>,
     source: &geometry::T,
     target: &geometry::T,
 ) -> Result<geometry::T, error::T> {
@@ -613,11 +613,11 @@ fn spatial_transfer(
     }
     let source_positions = source_positions()?;
     let target_positions = target_positions()?;
-    if packed::Float3::length(&source_positions) != source_count || packed::Float3::length(&target_positions) != target_count {
+    if packed::float3::length(&source_positions) != source_count || packed::float3::length(&target_positions) != target_count {
         return Err(invalid(&format!("{operation}: internal sample cardinality mismatch")));
     }
-    let source_points = source_elements.map(|value| group::View::with_owner(group::Owner::Point, value));
-    let target_points = target_elements.map(|value| group::View::with_owner(group::Owner::Point, value));
+    let source_points = source_elements.map(|value| group::view::with_owner(group::Owner::Point, value));
+    let target_points = target_elements.map(|value| group::view::with_owner(group::Owner::Point, value));
     let index = spatial_index::create(cancel_token, Some(grain), source_points.as_ref(), &source_positions).map_err(
         |failure| {
             if error::is_cancelled(&failure) {
@@ -627,7 +627,7 @@ fn spatial_transfer(
             }
         },
     )?;
-    let target_view = packed::Float3::View::view(&target_positions)?;
+    let target_view = packed::float3::view::view(&target_positions)?;
     for element in 0..target_count {
         cancel::poll(cancel_token, element, 16_383)?;
         let e = element as usize;
@@ -775,7 +775,7 @@ fn spatial_transfer(
     for source_attribute in &attributes {
         let name = attribute::name(source_attribute);
         let existing = geometry::find_attribute(owner, name, target);
-        let storage = match attribute::View::storage(source_attribute)? {
+        let storage = match attribute::view::storage(source_attribute)? {
             like @ (attribute::Storage::Float(_)
             | attribute::Storage::Float2(_)
             | attribute::Storage::Float3(_)
@@ -836,8 +836,8 @@ fn spatial(owner: attribute::Owner, params: &SpatialParams) -> Result<geometry::
     let result = (|| {
         let (operation, source_positions, target_positions): (
             &str,
-            Box<dyn Fn() -> Result<packed::Float3::T, error::T> + '_>,
-            Box<dyn Fn() -> Result<packed::Float3::T, error::T> + '_>,
+            Box<dyn Fn() -> Result<packed::float3::T, error::T> + '_>,
+            Box<dyn Fn() -> Result<packed::float3::T, error::T> + '_>,
         ) = match owner {
             attribute::Owner::Point => (
                 "Rdk.Attribute_ops.transfer_points",
@@ -991,7 +991,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
                         specification.source_name
                     ))
                 }
-                Some(found) => match attribute::View::storage(&found)? {
+                Some(found) => match attribute::view::storage(&found)? {
                     attribute::Storage::IntArray(_) | attribute::Storage::FloatArray(_) => {
                         failure = Some(format!(
                             "sampled transfer of array attribute {} requires an explicit array policy",
@@ -1054,7 +1054,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         for (index, specification) in specifications.iter().enumerate() {
             let Some(source_attribute) = &source_attributes[index] else { continue };
             let existing = geometry::find_attribute(target_owner, &specification.target_name, target);
-            let storage = match attribute::View::storage(source_attribute)? {
+            let storage = match attribute::view::storage(source_attribute)? {
                 like @ (attribute::Storage::Float(_)
                 | attribute::Storage::Float2(_)
                 | attribute::Storage::Float3(_)
@@ -1096,10 +1096,10 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
             fail(&error::to_string(&failure))
         }
     })?;
-    let (query_positions, position_indices): (packed::Float3::T, Option<Arc<Vec<i64>>>) = match target_owner {
+    let (query_positions, position_indices): (packed::float3::T, Option<Arc<Vec<i64>>>) = match target_owner {
         attribute::Owner::Point => (geometry::positions(target).clone(), None),
         attribute::Owner::Vertex => {
-            let topology_view = topology::View::view(geometry::topology(target))?;
+            let topology_view = topology::view::view(geometry::topology(target))?;
             (geometry::positions(target).clone(), Some(topology_view.vertex_points))
         }
         attribute::Owner::Primitive => (primitive_barycenters(cancel_token, grain, target)?, None),
@@ -1140,14 +1140,14 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         })?;
         Some(planes.pop().unwrap_or_default())
     };
-    let source_topology = topology::View::view(geometry::topology(source))?;
+    let source_topology = topology::view::view(geometry::topology(source))?;
     let source_element = |owner: attribute::Owner, primitive: i64, triangle: i64, local: i64| -> i64 {
         match owner {
             attribute::Owner::Point => {
-                let vertex = surface_index::View::triangle_vertex(&surface, triangle, local);
+                let vertex = surface_index::view::triangle_vertex(&surface, triangle, local);
                 source_topology.vertex_points[vertex as usize]
             }
-            attribute::Owner::Vertex => surface_index::View::triangle_vertex(&surface, triangle, local),
+            attribute::Owner::Vertex => surface_index::view::triangle_vertex(&surface, triangle, local),
             attribute::Owner::Primitive => primitive,
             attribute::Owner::Detail => 0,
         }
@@ -1197,7 +1197,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         let Some(source_attribute) = &source_attributes[index] else { continue };
         let existing = geometry::find_attribute(target_owner, &specification.target_name, target);
         let owner = specification.source_owner;
-        let storage = match attribute::View::storage(source_attribute)? {
+        let storage = match attribute::view::storage(source_attribute)? {
             like @ (attribute::Storage::Float(_)
             | attribute::Storage::Float2(_)
             | attribute::Storage::Float3(_)

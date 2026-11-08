@@ -189,8 +189,8 @@ fn concatenate_positions(
     left: &geometry::T,
     right: &geometry::T,
 ) -> Result<(i64, Vec<f64>, Vec<f64>, Vec<f64>), error::T> {
-    let left = packed::Float3::View::view(geometry::positions(left))?;
-    let right = packed::Float3::View::view(geometry::positions(right))?;
+    let left = packed::float3::view::view(geometry::positions(left))?;
+    let right = packed::float3::view::view(geometry::positions(right))?;
     let total = left.x.len() + right.x.len();
     let mut x = Vec::with_capacity(total);
     let mut y = Vec::with_capacity(total);
@@ -209,7 +209,7 @@ fn all_triangle_points(vertex_points: &[i64], surface: &surface_index::T, offset
     let mut output = vec![0i64; (triangle_count * 3) as usize];
     for triangle in 0..triangle_count {
         for local in 0..3 {
-            let vertex = surface_index::View::triangle_vertex(surface, triangle, local);
+            let vertex = surface_index::view::triangle_vertex(surface, triangle, local);
             output[(triangle * 3 + local) as usize] = offset + vertex_points[vertex as usize];
         }
     }
@@ -469,14 +469,14 @@ pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result
     let left_surface = surface_index::create(cancel_value, Some(grain), None, None, None, left)?;
     let right_surface = surface_index::create(cancel_value, Some(grain), None, None, None, right)?;
     let (cross_first, cross_second) =
-        surface_index::View::overlapping_triangle_pairs(cancel_value, grain, 0., &left_surface, &right_surface)?;
+        surface_index::view::overlapping_triangle_pairs(cancel_value, grain, 0., &left_surface, &right_surface)?;
     let (left_self_first, left_self_second) = if params.resolve_left_self_intersections {
-        surface_index::View::overlapping_self_triangle_pairs(cancel_value, grain, 0., &left_surface)?
+        surface_index::view::overlapping_self_triangle_pairs(cancel_value, grain, 0., &left_surface)?
     } else {
         (Vec::new(), Vec::new())
     };
     let (right_self_first, right_self_second) = if params.resolve_right_self_intersections {
-        surface_index::View::overlapping_self_triangle_pairs(cancel_value, grain, 0., &right_surface)?
+        surface_index::view::overlapping_self_triangle_pairs(cancel_value, grain, 0., &right_surface)?
     } else {
         (Vec::new(), Vec::new())
     };
@@ -514,8 +514,8 @@ pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result
     for point in 0..x.len() {
         source_points.push(implicit_point::explicit(&source, point as i64).unwrap());
     }
-    let left_topology = topology::View::view(geometry::topology(left))?;
-    let right_topology = topology::View::view(geometry::topology(right))?;
+    let left_topology = topology::view::view(geometry::topology(left))?;
+    let right_topology = topology::view::view(geometry::topology(right))?;
     let left_triangle_points = all_triangle_points(&left_topology.vertex_points, &left_surface, 0);
     let right_triangle_points = all_triangle_points(&right_topology.vertex_points, &right_surface, left_offset);
 
@@ -739,7 +739,7 @@ mod tests {
         let x: Vec<f64> = points.iter().map(|p| p.0).collect();
         let y: Vec<f64> = points.iter().map(|p| p.1).collect();
         let z: Vec<f64> = points.iter().map(|p| p.2).collect();
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
         let offsets: Vec<i64> = (0..=(triangles.len() as i64 / 3)).map(|p| p * 3).collect();
         let kinds = vec![PrimitiveKind::Polygon; offsets.len() - 1];
         let topology = topology::create_owned(points.len() as i64, triangles.to_vec(), offsets, kinds).unwrap();

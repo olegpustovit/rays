@@ -9,7 +9,7 @@ use pxui::ui::*;
 use pxui_graph::scope_pane as scope;
 use pxui_graph::scope_state::{self, Change, Pane, ScopeOpts};
 use rays::frame as rframe;
-use rays::scene::Layer;
+use rays::scene::layer;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -141,13 +141,13 @@ pub fn rect_center(r: (f64, f64, f64, f64)) -> (i64, i64) {
 /// The instances the pane drew (`scope_paint`).
 pub fn scope_paint(ui: &mut Ui, view: Pane) -> i64 {
     let _ = scope_step(ui, view, &frame0());
-    match Layer::stage_native(1000, 700, &ui.scene(None)) {
+    match layer::stage_native(1000, 700, &ui.scene(None)) {
         Err(message) => fail(&message),
         Ok(staged) => staged
             .layers
             .iter()
             .fold(0, |total, l| match l {
-                Layer::native_layer::Ui_layer(batch, _) => total + batch.count(),
+                layer::native_layer::Ui_layer(batch, _) => total + batch.count(),
                 _ => total,
             }),
     }

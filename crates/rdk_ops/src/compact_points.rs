@@ -22,7 +22,7 @@ fn compact(
     cancel::check_opt(cancel_value)?;
     let point_count = geometry::point_count(value) as usize;
     let source_topology_value = geometry::topology(value);
-    let source = topology::View::view(source_topology_value)?;
+    let source = topology::view::view(source_topology_value)?;
     let mut used = vec![false; point_count];
     for (vertex, &point) in source.vertex_points.iter().enumerate() {
         cancel::poll(cancel_value, vertex as i64, 16_383)?;
@@ -41,16 +41,16 @@ fn compact(
         return Ok(value.clone());
     }
     let new_to_old: Vec<i64> = (0..point_count).filter(|&p| used[p]).map(|p| p as i64).collect();
-    let positions = packed::Float3::View::view(geometry::positions(value))?;
+    let positions = packed::float3::view::view(geometry::positions(value))?;
     let px = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.x)?;
     let py = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.y)?;
     let pz = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.z)?;
-    let positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
+    let positions = packed::float3::view::of_owned_exn(px, py, pz)?;
     let mut vertex_points = vec![0i64; source.vertex_points.len()];
     support::par_fill(cancel_value, grain, &mut vertex_points, &|vertex| {
         Ok(old_to_new[source.vertex_points[vertex as usize] as usize])
     })?;
-    let new_topology = topology::View::create_validated_owned(
+    let new_topology = topology::view::create_validated_owned(
         retained,
         vertex_points,
         source.primitive_offsets.to_vec(),
@@ -110,7 +110,7 @@ pub mod fixtures {
         offsets: &[i64],
         kinds: Option<Vec<PrimitiveKind>>,
     ) -> geometry::T {
-        let positions = packed::Float3::View::of_owned_exn(x.to_vec(), y.to_vec(), z.to_vec()).unwrap();
+        let positions = packed::float3::view::of_owned_exn(x.to_vec(), y.to_vec(), z.to_vec()).unwrap();
         let kinds = kinds.unwrap_or_else(|| vec![PrimitiveKind::Polygon; offsets.len() - 1]);
         let topology = topology::create_owned(x.len() as i64, vertex_points.to_vec(), offsets.to_vec(), kinds).unwrap();
         geometry::create(positions, topology, None, None, None).unwrap()
@@ -133,7 +133,7 @@ pub mod fixtures {
 
     pub fn floats(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<f64> {
         let found = geometry::find_attribute(owner, name, g).unwrap_or_else(|| panic!("missing {name}"));
-        match attribute::View::storage(&found).unwrap() {
+        match attribute::view::storage(&found).unwrap() {
             attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} is not float"),
         }
@@ -141,24 +141,24 @@ pub mod fixtures {
 
     pub fn ints(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<i64> {
         let found = geometry::find_attribute(owner, name, g).unwrap_or_else(|| panic!("missing {name}"));
-        match attribute::View::storage(&found).unwrap() {
+        match attribute::view::storage(&found).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} is not int"),
         }
     }
 
     pub fn positions(g: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        let v = packed::Float3::View::view(geometry::positions(g)).unwrap();
+        let v = packed::float3::view::view(geometry::positions(g)).unwrap();
         (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
     }
 
     pub fn topo(g: &geometry::T) -> (Vec<i64>, Vec<i64>, Vec<u8>) {
-        let v = topology::View::view(geometry::topology(g)).unwrap();
+        let v = topology::view::view(geometry::topology(g)).unwrap();
         (v.vertex_points.to_vec(), v.primitive_offsets.to_vec(), v.primitive_kinds.to_vec())
     }
 
     pub fn float3_attr(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> attribute::Storage {
-        attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z).unwrap())
+        attribute::Storage::Float3(packed::float3::view::of_owned_exn(x, y, z).unwrap())
     }
 
     // Points on a (columns+1) by (rows+1) lattice; quads or two triangles per cell, counter-clockwise.
@@ -229,28 +229,28 @@ pub mod fixtures {
 
     fn storage_equal(left: &attribute::T, right: &attribute::T) -> bool {
         use attribute::Storage as S;
-        match (attribute::View::storage(left).unwrap(), attribute::View::storage(right).unwrap()) {
+        match (attribute::view::storage(left).unwrap(), attribute::view::storage(right).unwrap()) {
             (S::Float(a), S::Float(b)) => a == b,
             (S::Int(a), S::Int(b)) => a == b,
             (S::Text(a), S::Text(b)) => a == b,
             (S::Float2(a), S::Float2(b)) => {
-                let (a, b) = (packed::Float2::View::view(a), packed::Float2::View::view(b));
+                let (a, b) = (packed::float2::view::view(a), packed::float2::view::view(b));
                 a.x == b.x && a.y == b.y
             }
             (S::Float3(a), S::Float3(b)) => {
-                let (a, b) = (packed::Float3::View::view(a).unwrap(), packed::Float3::View::view(b).unwrap());
+                let (a, b) = (packed::float3::view::view(a).unwrap(), packed::float3::view::view(b).unwrap());
                 a.x == b.x && a.y == b.y && a.z == b.z
             }
             (S::Float4(a), S::Float4(b)) => {
-                let (a, b) = (packed::Float4::View::view(a), packed::Float4::View::view(b));
+                let (a, b) = (packed::float4::view::view(a), packed::float4::view::view(b));
                 a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w
             }
             (S::IntArray(a), S::IntArray(b)) => {
-                let (a, b) = (packed::IntArray::View::view(a), packed::IntArray::View::view(b));
+                let (a, b) = (packed::int_array::view::view(a), packed::int_array::view::view(b));
                 a.offsets == b.offsets && a.values == b.values
             }
             (S::FloatArray(a), S::FloatArray(b)) => {
-                let (a, b) = (packed::FloatArray::View::view(a), packed::FloatArray::View::view(b));
+                let (a, b) = (packed::float_array::view::view(a), packed::float_array::view::view(b));
                 a.offsets == b.offsets && a.values == b.values
             }
             _ => false,
@@ -314,30 +314,30 @@ pub mod fixtures {
 
     /// Exact text of a stored attribute (floats as bit patterns) for equality checks.
     pub fn attribute_signature(item: &attribute::T) -> String {
-        let storage = match attribute::View::storage(item).unwrap() {
+        let storage = match attribute::view::storage(item).unwrap() {
             attribute::Storage::Float(v) => format!("{:?}", v.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
             attribute::Storage::Int(v) => format!("{v:?}"),
             attribute::Storage::Text(v) => format!("{v:?}"),
             attribute::Storage::FloatArray(a) => {
-                let v = packed::FloatArray::View::view(a);
+                let v = packed::float_array::view::view(a);
                 format!("{:?}{:?}", v.offsets, v.values.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
             }
             attribute::Storage::IntArray(a) => {
-                let v = packed::IntArray::View::view(a);
+                let v = packed::int_array::view::view(a);
                 format!("{:?}{:?}", v.offsets, v.values)
             }
             attribute::Storage::Float2(values) => {
-                let v = packed::Float2::View::view(values);
+                let v = packed::float2::view::view(values);
                 format!("{:?}{:?}", v.x.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
                     v.y.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
             }
             attribute::Storage::Float3(values) => {
-                let v = packed::Float3::View::view(values).unwrap();
+                let v = packed::float3::view::view(values).unwrap();
                 format!("{:?}{:?}{:?}", v.x.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
                     v.y.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), v.z.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
             }
             attribute::Storage::Float4(values) => {
-                let v = packed::Float4::View::view(values);
+                let v = packed::float4::view::view(values);
                 format!("{:?}{:?}{:?}{:?}", v.x.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
                     v.y.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), v.z.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
                     v.w.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
@@ -397,9 +397,9 @@ mod tests {
         let source = grid(1, 1, 2.0, true);
         for dimension in [2, 3, 4] {
             let tuple = |first| match dimension {
-                2 => Storage::Float2(packed::Float2::of_owned(vec![first; 4], vec![0.0; 4]).unwrap()),
-                3 => Storage::Float3(packed::Float3::of_owned(vec![first; 4], vec![0.0; 4], vec![0.0; 4]).unwrap()),
-                _ => Storage::Float4(packed::Float4::of_owned(vec![first; 4], vec![0.0; 4], vec![0.0; 4], vec![0.0; 4]).unwrap()),
+                2 => Storage::Float2(packed::float2::of_owned(vec![first; 4], vec![0.0; 4]).unwrap()),
+                3 => Storage::Float3(packed::float3::of_owned(vec![first; 4], vec![0.0; 4], vec![0.0; 4]).unwrap()),
+                _ => Storage::Float4(packed::float4::of_owned(vec![first; 4], vec![0.0; 4], vec![0.0; 4], vec![0.0; 4]).unwrap()),
             };
             let left = with_attr(&source, Owner::Point, "tuple", tuple(0.0));
             let right = with_attr(&source, Owner::Point, "tuple", tuple(-0.0));

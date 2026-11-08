@@ -92,7 +92,7 @@ fn length3(x: f64, y: f64, z: f64) -> f64 {
     }
 }
 
-fn unit_between(positions: &packed::Float3::View::View, source: usize, destination: usize) -> Option<(f64, f64, f64, f64)> {
+fn unit_between(positions: &packed::float3::view::View, source: usize, destination: usize) -> Option<(f64, f64, f64, f64)> {
     let dx = positions.x[destination] - positions.x[source];
     let dy = positions.y[destination] - positions.y[source];
     let dz = positions.z[destination] - positions.z[source];
@@ -164,7 +164,7 @@ fn interpolate_attribute(
         }
         attribute::Owner::Vertex => {
             let nearest = nearest_mapping(vertex_left, vertex_right, vertex_weight);
-            let source_storage = attribute::View::storage(source)?;
+            let source_storage = attribute::view::storage(source)?;
             let storage = match attribute::map_float_planes(source_storage, |values| {
                 Ok(interpolate_float(vertex_left, vertex_right, vertex_weight, values))
             })? {
@@ -270,9 +270,9 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     validate_name("corner fillet", &params.corner_group)?;
     validate_name("offset edge", &params.offset_group)?;
     let source_topology = geometry::topology(geometry_value);
-    let topology_view = topology::View::view(source_topology)?;
+    let topology_view = topology::view::view(source_topology)?;
     let index_value = topology_index::create(cancel_ref, source_topology)?;
-    let index = topology_index::View::view(&index_value);
+    let index = topology_index::view::view(&index_value);
     let edge_count = index.edge_a.len();
     let point_count = topology_view.point_count as usize;
     let vertex_count = topology_view.vertex_points.len();
@@ -293,7 +293,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         }
         Some(name) => match geometry::find_attribute(attribute::Owner::Point, name, geometry_value) {
             None => return Err(fail(format!("{PREFIX}: point float scale attribute \"{name}\" is missing"))),
-            Some(found) => match attribute::View::storage(&found)? {
+            Some(found) => match attribute::view::storage(&found)? {
                 attribute::Storage::Float(values) => Some(values.to_vec()),
                 _ => {
                     return Err(fail(format!(
@@ -312,7 +312,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             }
         }
     }
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let requested = |edge: usize| match &params.edges {
         None => true,
         Some(item) => edge_group::mem(edge as i64, item),
@@ -1119,8 +1119,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         pz = compact_z;
         point_map = compact_source;
     }
-    let output_positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
-    let output_topology = topology::View::create_validated_owned(
+    let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
+    let output_topology = topology::view::create_validated_owned(
         retained_points as i64,
         vertex_points,
         primitive_offsets,
@@ -1161,7 +1161,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             groups,
         )?;
     }
-    let target_edges = topology_edge_lookup::create(cancel_ref, &topology::View::view(&output_topology)?)?;
+    let target_edges = topology_edge_lookup::create(cancel_ref, &topology::view::view(&output_topology)?)?;
     let target_edge_count = topology_edge_lookup::count(&target_edges) as usize;
     let mut edge_groups: Vec<edge_group::T> = Vec::new();
     for source_group in geometry::edge_groups(geometry_value) {
@@ -1348,7 +1348,7 @@ mod tests {
             "PolyBevel generated/source group ancestry"
         );
         let detail = geometry::find_attribute(attribute::Owner::Detail, "tag", &chamfer).unwrap();
-        match attribute::View::storage(&detail).unwrap() {
+        match attribute::view::storage(&detail).unwrap() {
             attribute::Storage::Text(values) => assert_eq!(**values, vec![b"bevel".to_vec()]),
             _ => panic!("detail storage changed"),
         }
@@ -1428,7 +1428,7 @@ mod tests {
         let normals = attribute::create_owned(
             "N",
             attribute::Owner::Point,
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vec![0.0; 8], vec![0.0; 8], vec![1.0; 8]).unwrap()),
+            attribute::Storage::Float3(packed::float3::view::of_owned_exn(vec![0.0; 8], vec![0.0; 8], vec![1.0; 8]).unwrap()),
         )
         .unwrap();
         let divided = geometry::with_attribute(normals, &bx()).unwrap();

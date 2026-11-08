@@ -3,7 +3,7 @@
 use crate::support::*;
 use input::{Event, Key, Platform};
 use pxui::ui::*;
-use rays::scene::Layer;
+use rays::scene::layer;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -284,7 +284,7 @@ impl Rig {
     }
 
     pub fn region(&self) -> (i64, i64) {
-        match &Layer::text_regions(&self.ui.scene(None))[..] {
+        match &layer::text_regions(&self.ui.scene(None))[..] {
             [(_, y, _, _, true, cursor)] => (*y, *cursor),
             _ => fail("text area lost its IME region"),
         }

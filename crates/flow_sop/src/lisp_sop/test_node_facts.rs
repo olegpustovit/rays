@@ -45,7 +45,7 @@ fn plane_grid(columns: i64, rows: i64, size: f64) -> geo::T {
             offsets.extend([vp.len() as i64 - 3, vp.len() as i64]);
         }
     }
-    let positions = rdk_ok(rdk_core::packed::Float3::of_owned(x, z, y));
+    let positions = rdk_ok(rdk_core::packed::float3::of_owned(x, z, y));
     let topology = rdk_ok(rdk_core::topology::polygons_owned(stride * (rows + 1), vp, offsets));
     rdk_ok(geo::create(positions, topology, None, None, None))
 }
@@ -85,7 +85,7 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     let edges = rdk_ok(rdk_core::edge_group::init(None, topology, &index, "edges", &|_| true));
     let g = rdk_ok(geo::with_edge_group(edges, &g));
     let count = geo::point_count(&g) as usize;
-    let uv = rdk_ok(rdk_core::packed::Float2::of_owned(vec![0.0; count], vec![0.0; count]));
+    let uv = rdk_ok(rdk_core::packed::float2::of_owned(vec![0.0; count], vec![0.0; count]));
     let uv = rdk_ok(attribute::create_owned("uv", attribute::Owner::Point, attribute::Storage::Float2(uv)));
     let source = lisp_sop::snapshot(&rdk_ok(geo::with_attribute(uv, &g)));
     let image = edit::instantiate(&sop::image_nodes::noise_factory(), &[]).unwrap();
@@ -143,7 +143,7 @@ fn replacing_p_leaves_held_positions_unread() {
     let reads = Arc::new(AtomicUsize::new(0));
     let counted = reads.clone();
     let plain = rdk_ok(rdk_ops::line_geometry::points(&[(0., 0., 0.); 8]));
-    let held = rdk_ok(rdk_core::packed::Float3::deferred(None, None, None, 8, Arc::new(move || {
+    let held = rdk_ok(rdk_core::packed::float3::deferred(None, None, None, 8, Arc::new(move || {
         counted.fetch_add(1, Ordering::SeqCst);
         Ok(vec![vec![0.0; 8]; 3])
     })));
@@ -152,7 +152,7 @@ fn replacing_p_leaves_held_positions_unread() {
     let n = lisp_sop::node(&[("source".to_owned(), source)], "(sop/with_attr (sop/ext_source) :P (map (fn [i] [i (+ i t) 0]) (array/range 8)))");
     let mut s = new_eval_session();
     let out = cook(&mut s, &ctx(1), &n);
-    assert_eq!(rdk_core::packed::Float3::get(geo::positions(&out), 3).unwrap().0, 3.0);
+    assert_eq!(rdk_core::packed::float3::get(geo::positions(&out), 3).unwrap().0, 3.0);
     assert_eq!(reads.load(Ordering::SeqCst), 0, "the replaced positions were read back");
     session::close(&mut s);
 }

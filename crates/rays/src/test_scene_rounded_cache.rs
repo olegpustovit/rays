@@ -1,6 +1,6 @@
 use crate::camera;
 use crate::mesh;
-use crate::scene::{self, node, Layer};
+use crate::scene::{self, node, layer};
 use crate::scene3 as d3;
 use rays_math::color;
 use rays_math::vec3;
@@ -12,7 +12,7 @@ fn require(condition: bool, message: &str) {
 }
 
 fn serialize(scene: &[node]) -> Vec<u8> {
-    let ir = Layer::to_ir(scene).expect("to_ir");
+    let ir = layer::to_ir(scene).expect("to_ir");
     render_ir::serialize(&ir)
 }
 
@@ -41,8 +41,8 @@ fn require_geometry_reuse(label: &str, make: &dyn Fn() -> node) {
 /// a window presents only a picture that is not the same as the last one
 fn same_picture() {
     let picture = |label: &str| vec![scene::clear(color::black()), scene::translate(4, 8, vec![scene::text((1, 2), None, None, label)])];
-    require(Layer::same(&picture("a"), &picture("a")), "an equal picture rebuilt counts as changed");
-    require(!Layer::same(&picture("a"), &picture("b")), "a changed label counts as the same picture");
+    require(layer::same(&picture("a"), &picture("a")), "an equal picture rebuilt counts as changed");
+    require(!layer::same(&picture("a"), &picture("b")), "a changed label counts as the same picture");
 }
 
 /// a 3D view is the same picture when its meshes are the same arrays, decided without walking them
@@ -52,14 +52,14 @@ fn same_view3d() {
         vec![scene::view3d(None, &cam, d3::create(None, None, None, None, vec![d3::mesh(None, None, None, None, None, m.clone())]).expect("scene3"))]
     };
     let plane = mesh::plane(1., 1.).expect("plane");
-    require(Layer::same(&view(&plane), &view(&plane)), "a view of the same mesh counts as changed");
-    require(!Layer::same(&view(&plane), &view(&mesh::plane(1., 1.).expect("plane"))), "a view of a rebuilt mesh counts as the same picture");
+    require(layer::same(&view(&plane), &view(&plane)), "a view of the same mesh counts as changed");
+    require(!layer::same(&view(&plane), &view(&mesh::plane(1., 1.).expect("plane"))), "a view of a rebuilt mesh counts as the same picture");
 }
 
 #[test]
 fn rounded_and_path_caches_are_deterministic_and_bounded() {
-    let context = Layer::create_cache_context();
-    Layer::with_cache_context(&context, &mut || {
+    let context = layer::create_cache_context();
+    layer::with_cache_context(&context, &mut || {
         same_picture();
         same_view3d();
         let make = |x: i64, y: i64| {

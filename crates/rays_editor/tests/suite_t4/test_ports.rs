@@ -82,7 +82,7 @@ fn save_roundtrip(name: &str) {
 
 
 fn serialize(scene: &rays::scene::Scene) -> Vec<u8> {
-    let commands = rays::scene::Layer::commands(None, scene).unwrap();
+    let commands = rays::scene::layer::commands(None, scene).unwrap();
     // ponytail: scene_command is not a dependency of rays_editor; the commands compare by their Debug text
     format!("{commands:?}").into_bytes()
 }

@@ -1,7 +1,7 @@
 //! Immutable CPU-readable textures for 3D mesh sampling.
 use crate::num::{fmax, fmin, int_of_float};
 use rays_math::color;
-use runtime_resources::Image as Resource;
+use runtime_resources::image as Resource;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -34,7 +34,7 @@ pub struct cpu {
 
 pub enum backing {
     Cpu(cpu),
-    Borrowed(Resource::t),
+    Borrowed(Resource::Image),
 }
 
 pub struct texture_data {
@@ -44,7 +44,7 @@ pub struct texture_data {
 
 /// A texture value: clones share one immutable texture.
 #[derive(Clone)]
-pub struct t(Rc<texture_data>);
+pub struct Texture(Rc<texture_data>);
 
 static NEXT_ID: AtomicI64 = AtomicI64::new(1);
 
@@ -52,7 +52,7 @@ fn fresh_id() -> i64 {
     NEXT_ID.fetch_add(1, Ordering::SeqCst)
 }
 
-fn cpu_ref(texture: &t) -> Option<&cpu> {
+fn cpu_ref(texture: &Texture) -> Option<&cpu> {
     match &texture.0.backing {
         backing::Cpu(data) => Some(data),
         backing::Borrowed(_) => None,
@@ -63,13 +63,13 @@ fn borrowed_message(operation: &str) -> String {
     format!("{operation}: borrowed GPU texture needs an explicit CPU snapshot")
 }
 
-fn owned(data: cpu) -> t {
-    t(Rc::new(texture_data { backing: backing::Cpu(data), id: fresh_id() }))
+fn owned(data: cpu) -> Texture {
+    Texture(Rc::new(texture_data { backing: backing::Cpu(data), id: fresh_id() }))
 }
 
 /// Zero-copy construction for fresh immutable pixel arrays. The supplied array becomes backing
 /// storage.
-pub fn create_owned(width: i64, height: i64, pixels: Vec<color::T>) -> Result<t, String> {
+pub fn create_owned(width: i64, height: i64, pixels: Vec<color::T>) -> Result<Texture, String> {
     if width <= 0 || height <= 0 {
         return Err("Texture.create: dimensions must be positive".to_string());
     }
@@ -83,7 +83,7 @@ pub fn create_owned(width: i64, height: i64, pixels: Vec<color::T>) -> Result<t,
     Ok(owned(cpu { width, height, pixels, mipmaps: Vec::new() }))
 }
 
-pub fn init(width: i64, height: i64, make: &dyn Fn(i64, i64) -> color::T) -> Result<t, String> {
+pub fn init(width: i64, height: i64, make: &dyn Fn(i64, i64) -> color::T) -> Result<Texture, String> {
     if width <= 0 || height <= 0 {
         return Err("Texture.init: dimensions must be positive".to_string());
     }
@@ -91,7 +91,7 @@ pub fn init(width: i64, height: i64, make: &dyn Fn(i64, i64) -> color::T) -> Res
     Ok(owned(cpu { width, height, pixels, mipmaps: Vec::new() }))
 }
 
-pub fn size(texture: &t) -> Result<(i64, i64), String> {
+pub fn size(texture: &Texture) -> Result<(i64, i64), String> {
     match &texture.0.backing {
         backing::Cpu(data) => Ok((data.width, data.height)),
         backing::Borrowed(image) => {
@@ -100,7 +100,7 @@ pub fn size(texture: &t) -> Result<(i64, i64), String> {
     }
 }
 
-pub fn pixels(texture: &t) -> Result<Vec<color::T>, String> {
+pub fn pixels(texture: &Texture) -> Result<Vec<color::T>, String> {
     Ok(cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.pixels"))?.pixels.clone())
 }
 
@@ -133,7 +133,7 @@ fn next_level(source_width: i64, source_height: i64, source: &[color::T]) -> lev
     level { width, height, pixels }
 }
 
-pub fn generate_mipmaps(texture: &t) -> Result<t, String> {
+pub fn generate_mipmaps(texture: &Texture) -> Result<Texture, String> {
     let data = cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.generate_mipmaps"))?;
     let mut mipmaps: Vec<level> = Vec::new();
     loop {
@@ -150,7 +150,7 @@ pub fn generate_mipmaps(texture: &t) -> Result<t, String> {
     Ok(owned(cpu { width: data.width, height: data.height, pixels: data.pixels.clone(), mipmaps }))
 }
 
-pub fn subsection(x: i64, y: i64, width: i64, height: i64, texture: &t) -> Result<t, String> {
+pub fn subsection(x: i64, y: i64, width: i64, height: i64, texture: &Texture) -> Result<Texture, String> {
     let source = match &texture.0.backing {
         backing::Borrowed(_) => {
             return Err("Texture.subsection: borrowed GPU texture needs an explicit CPU snapshot".to_string());
@@ -256,7 +256,7 @@ pub fn sample_lod_packed(
     filter_: Option<filter>,
     wrap_u: Option<wrap>,
     wrap_v: Option<wrap>,
-    texture: &t,
+    texture: &Texture,
     lod: f64,
     u: f64,
     v: f64,
@@ -292,7 +292,7 @@ pub fn sample_lod(
     filter_: Option<filter>,
     wrap_u: Option<wrap>,
     wrap_v: Option<wrap>,
-    texture: &t,
+    texture: &Texture,
     lod: f64,
     u: f64,
     v: f64,
@@ -301,28 +301,28 @@ pub fn sample_lod(
 }
 
 /// Sample normalized texture coordinates. (0, 0) is the upper-left texel.
-pub fn sample(texture: &t, u: f64, v: f64) -> Result<color::T, String> {
+pub fn sample(texture: &Texture, u: f64, v: f64) -> Result<color::T, String> {
     sample_lod(None, None, None, texture, 0., u, v)
 }
 
-pub fn of_image(image: &Resource::t) -> Result<t, String> {
+pub fn of_image(image: &Resource::Image) -> Result<Texture, String> {
     match Resource::gpu_snapshot(image) {
         Err(error) => Err(format!("Texture.Private.of_image: {}", ogpu_core::error::to_string(&error))),
         Ok(None) => Err("Texture.Private.of_image: resident GPU image required".to_string()),
-        Ok(Some(_)) => Ok(t(Rc::new(texture_data { backing: backing::Borrowed(image.clone()), id: fresh_id() }))),
+        Ok(Some(_)) => Ok(Texture(Rc::new(texture_data { backing: backing::Borrowed(image.clone()), id: fresh_id() }))),
     }
 }
 
 /// Process-local identity: equal only for the same immutable texture value, so renderers can key
 /// uploads without hashing pixels.
-pub mod Private {
+pub mod private {
     use super::*;
 
-    pub fn identity(texture: &t) -> i64 {
+    pub fn identity(texture: &Texture) -> i64 {
         texture.0.id
     }
 
-    pub fn image(texture: &t) -> Option<Resource::t> {
+    pub fn image(texture: &Texture) -> Option<Resource::Image> {
         match &texture.0.backing {
             backing::Cpu(_) => None,
             backing::Borrowed(image) => Some(image.clone()),
@@ -330,7 +330,7 @@ pub mod Private {
     }
 
     /// Packed RGBA levels, base level first: (width, height, pixels) copies.
-    pub fn levels(texture: &t) -> Result<Vec<(i64, i64, Vec<color::T>)>, String> {
+    pub fn levels(texture: &Texture) -> Result<Vec<(i64, i64, Vec<color::T>)>, String> {
         let data = cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.Private.levels"))?;
         let mut out = vec![(data.width, data.height, data.pixels.clone())];
         for l in &data.mipmaps {

@@ -79,7 +79,7 @@ pub struct drawn_entry {
     pub graph: node::T,
     pub prepared: cook::Prepared_ref,
     pub rendered: d3::Scene3,
-    pub texture: Option<texture::t>,
+    pub texture: Option<texture::Texture>,
     pub error: Option<String>,
 }
 
@@ -115,7 +115,7 @@ pub struct LoopModel {
     /// the World of each viewport over another scene instance
     pub baked_views: Vec<(String, baked_pair)>,
     /// the lat-long view's upload
-    pub map: Option<(Rc<world::baked>, image::t)>,
+    pub map: Option<(Rc<world::baked>, image::Image)>,
     pub render_status: Option<String>,
     pub pending_render: Option<V::request>,
     pub background: color::T,
@@ -628,7 +628,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     };
     workspace_images::bind(&images, lowered);
     let plan = &lowered.plan;
-    let mut textures: BTreeMap<i64, texture::t> = BTreeMap::new();
+    let mut textures: BTreeMap<i64, texture::Texture> = BTreeMap::new();
     let mut errors: Vec<String> = Vec::new();
     for (id, source) in core.doc.scene_textures.iter() {
         match workspace_images::texture(None, &images, &core.cook.state, &live, plan, source) {

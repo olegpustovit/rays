@@ -22,7 +22,7 @@ fn reverse(
     let invalid = |m: &str| make("reverse", Code::InvalidTopology, m.to_owned());
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(geometry_value);
-    let source = topology::View::view(topology_value)?;
+    let source = topology::view::view(topology_value)?;
     let vertex_count = topology::vertex_count(topology_value) as usize;
     let primitive_count = topology::primitive_count(topology_value) as usize;
     if let Some(selection) = primitives {
@@ -107,7 +107,7 @@ fn reverse(
             Ok(())
         })?;
     }
-    let new_topology = topology::View::create_validated_owned(
+    let new_topology = topology::view::create_validated_owned(
         geometry::point_count(geometry_value),
         vertex_points,
         source.primitive_offsets.to_vec(),

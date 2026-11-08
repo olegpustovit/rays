@@ -439,7 +439,7 @@ enum Close {
 /// attribute is `E_GPU`.
 pub fn scene(
     buffers: &Buffers,
-    image: Option<&dyn Fn(i64) -> rays::image::t>,
+    image: Option<&dyn Fn(i64) -> rays::image::Image>,
     gpu_: Option<&gpu>,
     cache_: Option<&cache>,
     device: Option<Device>,

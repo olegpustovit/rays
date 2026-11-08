@@ -108,31 +108,31 @@ pub fn remap_int(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     mapping: &[i64],
-    source: &packed::IntArray::T,
-) -> Result<packed::IntArray::T, error::T> {
+    source: &packed::int_array::T,
+) -> Result<packed::int_array::T, error::T> {
     let grain = grain.unwrap_or(DEFAULT_GRAIN);
-    let view = packed::IntArray::View::view(source);
+    let view = packed::int_array::view::view(source);
     let operation = "Ragged_ops.remap_int";
     let offsets = offsets_for_mapping(cancel_token, grain, operation, &view.offsets, mapping)?;
     let values = remapped_values(cancel_token, grain, mapping, &view.offsets, &view.values, &offsets, operation)?;
-    Ok(packed::IntArray::View::create_validated_owned(offsets, values))
+    Ok(packed::int_array::view::create_validated_owned(offsets, values))
 }
 
 pub fn remap_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     mapping: &[i64],
-    source: &packed::FloatArray::T,
-) -> Result<packed::FloatArray::T, error::T> {
+    source: &packed::float_array::T,
+) -> Result<packed::float_array::T, error::T> {
     let grain = grain.unwrap_or(DEFAULT_GRAIN);
-    let view = packed::FloatArray::View::view(source);
+    let view = packed::float_array::view::view(source);
     let operation = "Ragged_ops.remap_float";
     let offsets = offsets_for_mapping(cancel_token, grain, operation, &view.offsets, mapping)?;
     let values = remapped_values(cancel_token, grain, mapping, &view.offsets, &view.values, &offsets, operation)?;
-    Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
+    Ok(packed::float_array::view::create_validated_owned(offsets, values))
 }
 
-fn concat_layout_int(views: &[packed::IntArray::View::View]) -> Result<(i64, i64), error::T> {
+fn concat_layout_int(views: &[packed::int_array::view::View]) -> Result<(i64, i64), error::T> {
     let mut total_rows = 0_i64;
     let mut total_values = 0_i64;
     for view in views {
@@ -150,7 +150,7 @@ fn concat_layout_int(views: &[packed::IntArray::View::View]) -> Result<(i64, i64
     Ok((total_rows, total_values))
 }
 
-fn concat_layout_float(views: &[packed::FloatArray::View::View]) -> Result<(i64, i64), error::T> {
+fn concat_layout_float(views: &[packed::float_array::view::View]) -> Result<(i64, i64), error::T> {
     let mut total_rows = 0_i64;
     let mut total_values = 0_i64;
     for view in views {
@@ -168,8 +168,8 @@ fn concat_layout_float(views: &[packed::FloatArray::View::View]) -> Result<(i64,
     Ok((total_rows, total_values))
 }
 
-pub fn concat_int(sources: &[packed::IntArray::T]) -> Result<packed::IntArray::T, error::T> {
-    let views: Vec<packed::IntArray::View::View> = sources.iter().map(packed::IntArray::View::view).collect();
+pub fn concat_int(sources: &[packed::int_array::T]) -> Result<packed::int_array::T, error::T> {
+    let views: Vec<packed::int_array::view::View> = sources.iter().map(packed::int_array::view::view).collect();
     let (rows, value_count) = concat_layout_int(&views)?;
     let rows = usize::try_from(rows)
         .map_err(|_| invalid_ragged("Ragged_ops.concat_int: packed cardinality overflow".to_owned()))?;
@@ -186,11 +186,11 @@ pub fn concat_int(sources: &[packed::IntArray::T]) -> Result<packed::IntArray::T
             offsets.push(values.len() as i64);
         }
     }
-    Ok(packed::IntArray::View::create_validated_owned(offsets, values))
+    Ok(packed::int_array::view::create_validated_owned(offsets, values))
 }
 
-pub fn concat_float(sources: &[packed::FloatArray::T]) -> Result<packed::FloatArray::T, error::T> {
-    let views: Vec<packed::FloatArray::View::View> = sources.iter().map(packed::FloatArray::View::view).collect();
+pub fn concat_float(sources: &[packed::float_array::T]) -> Result<packed::float_array::T, error::T> {
+    let views: Vec<packed::float_array::view::View> = sources.iter().map(packed::float_array::view::view).collect();
     let (rows, value_count) = concat_layout_float(&views)?;
     let rows = usize::try_from(rows)
         .map_err(|_| invalid_ragged("Ragged_ops.concat_float: packed cardinality overflow".to_owned()))?;
@@ -207,7 +207,7 @@ pub fn concat_float(sources: &[packed::FloatArray::T]) -> Result<packed::FloatAr
             offsets.push(values.len() as i64);
         }
     }
-    Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
+    Ok(packed::float_array::view::create_validated_owned(offsets, values))
 }
 #[cfg(test)]
 mod tests {
@@ -215,37 +215,37 @@ mod tests {
 
     #[test]
     fn remap_and_concat_preserve_empty_rows_and_order() {
-        let source = packed::IntArray::create_owned(vec![0, 2, 2, 3], vec![4, 5, 7]).unwrap();
+        let source = packed::int_array::create_owned(vec![0, 2, 2, 3], vec![4, 5, 7]).unwrap();
         let remapped = remap_int(None, Some(1), &[2, -1, 0, 2], &source).unwrap();
-        let view = packed::IntArray::View::view(&remapped);
+        let view = packed::int_array::view::view(&remapped);
         assert_eq!(&*view.offsets, &[0, 1, 1, 3, 4]);
         assert_eq!(&*view.values, &[7, 4, 5, 7]);
 
-        let empty = packed::IntArray::create_owned(vec![0], Vec::new()).unwrap();
+        let empty = packed::int_array::create_owned(vec![0], Vec::new()).unwrap();
         let concatenated = concat_int(&[source, empty]).unwrap();
-        let view = packed::IntArray::View::view(&concatenated);
+        let view = packed::int_array::view::view(&concatenated);
         assert_eq!(&*view.offsets, &[0, 2, 2, 3]);
         assert_eq!(&*view.values, &[4, 5, 7]);
     }
 
     #[test]
     fn float_rows_concatenate_in_source_order() {
-        let first = packed::FloatArray::create_owned(vec![0, 1], vec![1.5]).unwrap();
-        let second = packed::FloatArray::create_owned(vec![0, 2], vec![2.5, 3.5]).unwrap();
+        let first = packed::float_array::create_owned(vec![0, 1], vec![1.5]).unwrap();
+        let second = packed::float_array::create_owned(vec![0, 2], vec![2.5, 3.5]).unwrap();
         let concatenated = concat_float(&[first, second]).unwrap();
-        let view = packed::FloatArray::View::view(&concatenated);
+        let view = packed::float_array::view::view(&concatenated);
         assert_eq!(&*view.offsets, &[0, 1, 3]);
         assert_eq!(&*view.values, &[1.5, 2.5, 3.5]);
     }
     #[test]
     fn remap_matches_across_domains_with_many_ranges() {
-        let source = packed::IntArray::create_owned(vec![0, 2, 2, 3, 6], vec![4, 5, 7, 8, 9, 10]).unwrap();
+        let source = packed::int_array::create_owned(vec![0, 2, 2, 3, 6], vec![4, 5, 7, 8, 9, 10]).unwrap();
         let mapping: Vec<i64> = (0..100).map(|i| (i % 5) - 1).collect();
         let run = |domains| {
             let slot = std::sync::Mutex::new(None);
             parallel::run_unit(Some(domains), &|| {
                 let out = remap_int(None, Some(3), &mapping, &source).unwrap();
-                let view = packed::IntArray::View::view(&out);
+                let view = packed::int_array::view::view(&out);
                 *slot.lock().unwrap() = Some((view.offsets.to_vec(), view.values.to_vec()));
                 Ok(())
             })
@@ -259,7 +259,7 @@ mod tests {
     }
     #[test]
     fn invalid_mapping_is_not_reported_as_cancellation() {
-        let source = packed::IntArray::create_owned(vec![0, 1], vec![7]).unwrap();
+        let source = packed::int_array::create_owned(vec![0, 1], vec![7]).unwrap();
         let error = remap_int(None, Some(1), &[-2], &source).err().unwrap();
         assert_eq!(error::code(&error), Code::InvalidRagged);
     }

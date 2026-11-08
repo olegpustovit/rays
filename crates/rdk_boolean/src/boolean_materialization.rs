@@ -25,9 +25,9 @@ use crate::boolean_seam;
 const OPERATION: &str = "boolean_materialization";
 const MAX_ARRAY_LENGTH: i64 = 18_014_398_509_481_983;
 
-type Positions = packed::Float3::View::View;
-type TopologyView = topology::View::View;
-type IndexView = topology_index::View::View;
+type Positions = packed::float3::view::View;
+type TopologyView = topology::view::View;
+type IndexView = topology_index::view::View;
 
 fn make(code: Code, message: String) -> error::T {
     error::new(OPERATION, code, message)
@@ -109,11 +109,11 @@ fn bits_len(count: i64) -> usize {
 }
 
 fn positions_view(geometry_value: &geometry::T) -> Result<Positions, error::T> {
-    packed::Float3::View::view(geometry::positions(geometry_value)).map_err(raised)
+    packed::float3::view::view(geometry::positions(geometry_value)).map_err(raised)
 }
 
 fn topology_view(topology_value: &topology::T) -> Result<TopologyView, error::T> {
-    topology::View::view(topology_value).map_err(raised)
+    topology::view::view(topology_value).map_err(raised)
 }
 
 fn primitive_min_edge_length(positions: &Positions, topology: &TopologyView, primitive: i64) -> f64 {
@@ -247,7 +247,7 @@ pub fn safe_independent_edges(
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
             let index_value = topology_index::create(cx(cancel), topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let topology = topology_view(topology_value)?;
             let positions = positions_view(geometry_value)?;
             let edge_count = index.edge_a.len() as i64;
@@ -331,7 +331,7 @@ pub fn speculative_independent_edges(
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
             let index_value = topology_index::create(cx(cancel), topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let positions = positions_view(geometry_value)?;
             let edge_count = index.edge_a.len() as i64;
             if edge_group::topology_data_id(candidates) != topology::data_id(topology_value)
@@ -415,7 +415,7 @@ pub fn surface_seam_edges(
 }
 
 fn empty_geometry() -> Result<geometry::T, error::T> {
-    let positions = packed::Float3::View::of_owned_exn(Vec::new(), Vec::new(), Vec::new()).map_err(raised)?;
+    let positions = packed::float3::view::of_owned_exn(Vec::new(), Vec::new(), Vec::new()).map_err(raised)?;
     let topology_value = topology::empty(0).map_err(raised)?;
     geometry::create(positions, topology_value, None, None, None).map_err(raised)
 }
@@ -541,9 +541,9 @@ fn verify_extracted_contacts(
     topology: &TopologyView,
     geometry_value: &geometry::T,
 ) -> Result<(), error::T> {
-    let surface = surface_index::View::create_validated_triangles(cx(cancel), grain, geometry_value)?;
+    let surface = surface_index::view::create_validated_triangles(cx(cancel), grain, geometry_value)?;
     let (first_candidates, second_candidates) =
-        surface_index::View::self_pairs_disjoint_topology(cx(cancel), grain, 0., &surface)?;
+        surface_index::view::self_pairs_disjoint_topology(cx(cancel), grain, 0., &surface)?;
     let candidate_count = first_candidates.len() as i64;
     let ranges = (candidate_count + grain - 1) / grain;
     let failures: Vec<AtomicI64> = (0..ranges).map(|_| AtomicI64::new(-1)).collect();
@@ -555,12 +555,12 @@ fn verify_extracted_contacts(
             cancel::poll(cx(cancel), candidate, 4095)?;
             let left = first_candidates[u(candidate)];
             let right = second_candidates[u(candidate)];
-            let left_a = surface_index::View::triangle_point(&surface, left, 0);
-            let left_b = surface_index::View::triangle_point(&surface, left, 1);
-            let left_c = surface_index::View::triangle_point(&surface, left, 2);
-            let right_a = surface_index::View::triangle_point(&surface, right, 0);
-            let right_b = surface_index::View::triangle_point(&surface, right, 1);
-            let right_c = surface_index::View::triangle_point(&surface, right, 2);
+            let left_a = surface_index::view::triangle_point(&surface, left, 0);
+            let left_b = surface_index::view::triangle_point(&surface, left, 1);
+            let left_c = surface_index::view::triangle_point(&surface, left, 2);
+            let right_a = surface_index::view::triangle_point(&surface, right, 0);
+            let right_b = surface_index::view::triangle_point(&surface, right, 1);
+            let right_c = surface_index::view::triangle_point(&surface, right, 2);
             let count = predicates::view::triangle_triangle_features_into(
                 &positions.x, &positions.y, &positions.z, left_a, left_b, left_c, right_a, right_b, right_c,
                 &mut scratch,
@@ -597,8 +597,8 @@ fn verify_extracted_contacts(
     let candidate = failures[u(failure_range)].load(AtomicOrdering::Relaxed);
     let first_triangle = first_candidates[u(candidate)];
     let second_triangle = second_candidates[u(candidate)];
-    let first = surface_index::View::triangle_primitive(&surface, first_triangle);
-    let second = surface_index::View::triangle_primitive(&surface, second_triangle);
+    let first = surface_index::view::triangle_primitive(&surface, first_triangle);
+    let second = surface_index::view::triangle_primitive(&surface, second_triangle);
     match failure_kinds[u(failure_range)].load(AtomicOrdering::Relaxed) {
         1 => Err(fail_with(Code::RoundingDegenerate, "rounded Boolean surface contains a degenerate triangle pair")),
         2 => {
@@ -759,8 +759,8 @@ fn verify_extracted_surface(
     geometry_value: &geometry::T,
 ) -> Result<(), error::T> {
     let extracted = boolean_extract::geometry(ancestry);
-    if packed::Float3::data_id(geometry::positions(geometry_value))
-        != packed::Float3::data_id(geometry::positions(&extracted))
+    if packed::float3::data_id(geometry::positions(geometry_value))
+        != packed::float3::data_id(geometry::positions(&extracted))
         || topology::data_id(geometry::topology(geometry_value)) != topology::data_id(geometry::topology(&extracted))
     {
         return Err(fail_with(Code::GeometryMismatch, "fast Boolean verification requires unchanged extraction geometry"));
@@ -982,7 +982,7 @@ fn rounded_sliver_edges(
             let topology = topology_view(topology_value)?;
             let positions = positions_view(geometry_value)?;
             let index_value = topology_index::create(cx(cancel), topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let edge_count = topology_index::edge_count(&index_value);
             let mut bits = vec![0u8; bits_len(edge_count)];
             let mut degenerate_count = 0;
@@ -1068,13 +1068,13 @@ fn rounded_self_contact_edges(
             let topology = topology_view(topology_value)?;
             let positions = positions_view(geometry_value)?;
             let index_value = topology_index::create(cx(cancel), topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let surface = boolean_constraints::view::left_surface(&constraints);
             let edge_count = topology_index::edge_count(&index_value);
             let mut bits = vec![0u8; bits_len(edge_count)];
             let mut repairable = 0;
             let mut mark = |triangle: i64| {
-                let primitive = surface_index::View::triangle_primitive(&surface, triangle);
+                let primitive = surface_index::view::triangle_primitive(&surface, triangle);
                 let minimum = primitive_min_edge_length(&positions, &topology, primitive);
                 let ulp = primitive_ulp_scale(&positions, &topology, primitive);
                 if minimum <= 8. * ulp {
@@ -1235,7 +1235,7 @@ fn paired_rounded_slivers(
                 }
                 first = last;
             }
-            let selected = group::View::of_owned_bits(
+            let selected = group::view::of_owned_bits(
                 group::Owner::Primitive,
                 "__rdk_boolean_paired_rounded_sliver",
                 primitive_count,
@@ -1260,7 +1260,7 @@ fn closed_rounded_slivers(
             let topology = topology_view(topology_value)?;
             let positions = positions_view(geometry_value)?;
             let index_value = topology_index::create(cx(cancel), topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let primitive_count = geometry::primitive_count(geometry_value);
             let mut selected = vec![0u8; bits_len(primitive_count)];
             let mut selected_count = 0;
@@ -1289,7 +1289,7 @@ fn closed_rounded_slivers(
                 }
                 edge += 1;
             }
-            let selection = group::View::of_owned_bits(
+            let selection = group::view::of_owned_bits(
                 group::Owner::Primitive,
                 "__rdk_boolean_closed_rounded_sliver",
                 primitive_count,
@@ -1524,8 +1524,8 @@ fn repair_step(
     if remaining == 0 {
         let geometry_value = &cleanup.cleanup_geometry;
         let extracted = boolean_extract::geometry(ancestry);
-        let verified = if packed::Float3::data_id(geometry::positions(geometry_value))
-            == packed::Float3::data_id(geometry::positions(&extracted))
+        let verified = if packed::float3::data_id(geometry::positions(geometry_value))
+            == packed::float3::data_id(geometry::positions(&extracted))
             && topology::data_id(geometry::topology(geometry_value)) == topology::data_id(geometry::topology(&extracted))
         {
             verify_extracted_surface(cancel, grain, require_closed, allow_opposite_duplicates, ancestry, geometry_value)
@@ -1667,7 +1667,7 @@ fn tiny_cleanup_edges(
             }
             let topology = geometry::topology(geometry_value);
             let index_value = topology_index::create(cx(cancel), topology)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let positions = positions_view(geometry_value)?;
             let failure: Mutex<Option<error::T>> = Mutex::new(None);
             let group = edge_group::init(
@@ -1855,7 +1855,7 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             let topology_value = geometry::topology(geometry_value);
             let topology = topology_view(topology_value)?;
             let index_value = topology_index::create(cx(cancel), topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let primitive_count = u(geometry::primitive_count(geometry_value));
             let point_count = u(geometry::point_count(geometry_value));
             let vertex_count = u(geometry::vertex_count(geometry_value));
@@ -1955,7 +1955,7 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
                     return Err(inv("Boolean seam point plan did not match its prefix"));
                 }
             }
-            let target_topology = topology::View::create_validated_owned(
+            let target_topology = topology::view::create_validated_owned(
                 output_points,
                 vertex_points,
                 topology.primitive_offsets.to_vec(),
@@ -1967,7 +1967,7 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
                 support::par_fill(cx(cancel), grain, &mut values, &|output| Ok(source[u(point_map[output as usize])]))?;
                 Ok(values)
             };
-            let positions = packed::Float3::View::of_owned_exn(
+            let positions = packed::float3::view::of_owned_exn(
                 select(&source_positions.x)?,
                 select(&source_positions.y)?,
                 select(&source_positions.z)?,
@@ -2054,7 +2054,7 @@ pub fn detriangulate(
             let topology_value = geometry::topology(geometry_value);
             let topology = topology_view(topology_value)?;
             let index_value = topology_index::create(cx(cancel), topology_value)?;
-            let index = topology_index::View::view(&index_value);
+            let index = topology_index::view::view(&index_value);
             let primitive_count = u(geometry::primitive_count(geometry_value));
             if cleanup.cleanup_primitive_sources.len() != primitive_count {
                 return Err(inv("Boolean detriangulation primitive ancestry is inconsistent"));

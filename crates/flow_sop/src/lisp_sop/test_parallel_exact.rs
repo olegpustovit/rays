@@ -23,18 +23,18 @@ fn storage(left: &Storage, right: &Storage) -> bool {
         (Storage::Float(a), Storage::Float(b)) => floats(a,b),
         (Storage::Int(a), Storage::Int(b)) => a == b,
         (Storage::Text(a), Storage::Text(b)) => a == b,
-        (Storage::IntArray(a), Storage::IntArray(b)) => { let (a,b)=(packed::IntArray::View::view(a),packed::IntArray::View::view(b)); a.offsets==b.offsets && a.values==b.values },
-        (Storage::FloatArray(a), Storage::FloatArray(b)) => { let (a,b)=(packed::FloatArray::View::view(a),packed::FloatArray::View::view(b)); a.offsets==b.offsets && floats(&a.values,&b.values) },
-        (Storage::Float2(a), Storage::Float2(b)) => { let (a,b)=(packed::Float2::View::view(a),packed::Float2::View::view(b)); floats(&a.x,&b.x)&&floats(&a.y,&b.y) },
-        (Storage::Float3(a), Storage::Float3(b)) => { let (a,b)=(packed::Float3::View::view(a).unwrap(),packed::Float3::View::view(b).unwrap()); floats(&a.x,&b.x)&&floats(&a.y,&b.y)&&floats(&a.z,&b.z) },
-        (Storage::Float4(a), Storage::Float4(b)) => { let (a,b)=(packed::Float4::View::view(a),packed::Float4::View::view(b)); floats(&a.x,&b.x)&&floats(&a.y,&b.y)&&floats(&a.z,&b.z)&&floats(&a.w,&b.w) },
+        (Storage::IntArray(a), Storage::IntArray(b)) => { let (a,b)=(packed::int_array::view::view(a),packed::int_array::view::view(b)); a.offsets==b.offsets && a.values==b.values },
+        (Storage::FloatArray(a), Storage::FloatArray(b)) => { let (a,b)=(packed::float_array::view::view(a),packed::float_array::view::view(b)); a.offsets==b.offsets && floats(&a.values,&b.values) },
+        (Storage::Float2(a), Storage::Float2(b)) => { let (a,b)=(packed::float2::view::view(a),packed::float2::view::view(b)); floats(&a.x,&b.x)&&floats(&a.y,&b.y) },
+        (Storage::Float3(a), Storage::Float3(b)) => { let (a,b)=(packed::float3::view::view(a).unwrap(),packed::float3::view::view(b).unwrap()); floats(&a.x,&b.x)&&floats(&a.y,&b.y)&&floats(&a.z,&b.z) },
+        (Storage::Float4(a), Storage::Float4(b)) => { let (a,b)=(packed::float4::view::view(a),packed::float4::view::view(b)); floats(&a.x,&b.x)&&floats(&a.y,&b.y)&&floats(&a.z,&b.z)&&floats(&a.w,&b.w) },
         _ => false,
     }
 }
 fn equal(left: &geo::T, right: &geo::T) {
-    let (a,b)=(packed::Float3::View::view(geo::positions(left)).unwrap(),packed::Float3::View::view(geo::positions(right)).unwrap());
+    let (a,b)=(packed::float3::view::view(geo::positions(left)).unwrap(),packed::float3::view::view(geo::positions(right)).unwrap());
     assert!(floats(&a.x,&b.x)&&floats(&a.y,&b.y)&&floats(&a.z,&b.z), "position bytes differ");
-    let (a,b)=(topology::View::view(geo::topology(left)).unwrap(),topology::View::view(geo::topology(right)).unwrap());
+    let (a,b)=(topology::view::view(geo::topology(left)).unwrap(),topology::view::view(geo::topology(right)).unwrap());
     assert_eq!(a.point_count,b.point_count); assert_eq!(a.vertex_points,b.vertex_points); assert_eq!(a.primitive_offsets,b.primitive_offsets); assert_eq!(a.primitive_kinds,b.primitive_kinds);
     assert_eq!(geo::attributes(left).len(),geo::attributes(right).len());
     for (a,b) in geo::attributes(left).iter().zip(geo::attributes(right).iter()) {
@@ -44,7 +44,7 @@ fn equal(left: &geo::T, right: &geo::T) {
     assert_eq!(geo::groups(left).len(),geo::groups(right).len());
     for (a,b) in geo::groups(left).iter().zip(geo::groups(right).iter()) {
         assert_eq!(group::owner(a),group::owner(b)); assert_eq!(group::name(a),group::name(b)); assert_eq!(group::length(a),group::length(b));
-        assert_eq!(group::View::bits_view(a),group::View::bits_view(b)); assert_eq!(group::ordered_elements(a),group::ordered_elements(b));
+        assert_eq!(group::view::bits_view(a),group::view::bits_view(b)); assert_eq!(group::ordered_elements(a),group::ordered_elements(b));
     }
     assert_eq!(geo::edge_groups(left).len(),geo::edge_groups(right).len());
     for (a,b) in geo::edge_groups(left).iter().zip(geo::edge_groups(right).iter()) {
@@ -68,7 +68,7 @@ fn bounds(name: &str, min: [f64;3], max:[f64;3]) -> String {
 }
 fn grid(columns:i64,rows:i64,size:f64,quads:bool) -> geo::T {
     let count=(columns+1)*(rows+1);
-    let positions=packed::Float3::of_owned(
+    let positions=packed::float3::of_owned(
         (0..count).map(|p| ((p%(columns+1)) as f64/columns as f64-0.5)*size).collect(),
         vec![0.0;count as usize],
         (0..count).map(|p| ((p/(columns+1)) as f64/rows as f64-0.5)*size).collect(),
@@ -80,7 +80,7 @@ fn grid(columns:i64,rows:i64,size:f64,quads:bool) -> geo::T {
         else { vertices.extend([a,d,c,a,c,b]); offsets.extend([vertices.len() as i64-3,vertices.len() as i64]); }
     }}
     let topology=topology::polygons_owned(count,vertices,offsets).unwrap();
-    let normals=packed::Float3::of_owned(vec![0.0;count as usize],vec![1.0;count as usize],vec![0.0;count as usize]).unwrap();
+    let normals=packed::float3::of_owned(vec![0.0;count as usize],vec![1.0;count as usize],vec![0.0;count as usize]).unwrap();
     geo::create(positions,topology,Some(vec![attribute::create_owned("N",Owner::Point,Storage::Float3(normals)).unwrap()]),None,None).unwrap()
 }
 fn add(g:&geo::T, owner:Owner, name:&str, value:Storage) -> geo::T { geo::with_attribute(attribute::create_owned(name,owner,value).unwrap(),g).unwrap() }
@@ -90,12 +90,12 @@ fn merge(nodes:&[node::T]) -> node::T { let names=nodes.iter().enumerate().map(|
 fn inline_geometry(polygons:i64) -> geo::T {
     let count=polygons*6; let mut x=vec![0.0;count as usize]; let mut z=x.clone();
     for p in 0..polygons as usize { let at=p*6; let base=p as f64*4.0; for (i,dx) in [0.0,1.0,2.0,3.0,3.0,0.0].iter().enumerate(){x[at+i]=base+dx;} z[at+4]=1.0;z[at+5]=1.0; }
-    let positions=packed::Float3::of_owned(x,vec![0.0;count as usize],z).unwrap();
+    let positions=packed::float3::of_owned(x,vec![0.0;count as usize],z).unwrap();
     geo::create(positions,topology::polygons_owned(count,(0..count).collect(),(0..=polygons).map(|p|p*6).collect()).unwrap(),None,None,None).unwrap()
 }
 fn edge_equalize_geometry(count:i64) -> geo::T {
     let mut x=Vec::new(); for edge in 0..count {let base=edge as f64*3.0; x.extend([base,base+0.5+(edge%17) as f64*0.1]);}
-    let positions=packed::Float3::of_owned(x,vec![0.0;count as usize*2],vec![0.0;count as usize*2]).unwrap();
+    let positions=packed::float3::of_owned(x,vec![0.0;count as usize*2],vec![0.0;count as usize*2]).unwrap();
     geo::create(positions,topology::create_owned(count*2,(0..count*2).collect(),(0..=count).map(|p|p*2).collect(),vec![topology::PrimitiveKind::OpenPolyline;count as usize]).unwrap(),None,None,None).unwrap()
 }
 fn edge_flip_geometry(pairs:i64) -> geo::T {
@@ -104,11 +104,11 @@ fn edge_flip_geometry(pairs:i64) -> geo::T {
     let topology=topology::polygons_owned(pairs*4,vertices,(0..=pairs*2).map(|p|p*3).collect()).unwrap();
     let index=topology_index::create(None,&topology).unwrap();
     let edges=edge_group::init(Some(97),&topology,&index,"flip_edges",&|edge|{let (a,b)=topology_index::edge_points(&index,edge).unwrap(); (a-b).abs()==2&&a.min(b)%4==0}).unwrap();
-    geo::create(packed::Float3::of_owned(x,y,vec![0.0;pairs as usize*4]).unwrap(),topology,None,None,Some(vec![edges])).unwrap()
+    geo::create(packed::float3::of_owned(x,y,vec![0.0;pairs as usize*4]).unwrap(),topology,None,None,Some(vec![edges])).unwrap()
 }
 fn curve_chain_geometry(segments:i64) -> geo::T {
     let count=segments+1;
-    let positions=packed::Float3::of_owned((0..count).map(|p|p as f64*0.002).collect(),(0..count).map(|p|(p as f64*0.017).sin()).collect(),(0..count).map(|p|(p as f64*0.011).cos()*0.25).collect()).unwrap();
+    let positions=packed::float3::of_owned((0..count).map(|p|p as f64*0.002).collect(),(0..count).map(|p|(p as f64*0.017).sin()).collect(),(0..count).map(|p|(p as f64*0.011).cos()*0.25).collect()).unwrap();
     let topology=topology::create_owned(count,(0..segments*2).map(|v|v/2+(v&1)).collect(),(0..=segments).map(|p|p*2).collect(),vec![topology::PrimitiveKind::OpenPolyline;segments as usize]).unwrap();
     let source=geo::create(positions,topology,None,None,None).unwrap();
     let source=add(&source,Owner::Point,"curve_sample",Storage::Float(Arc::new((0..count).map(|p|((p%257) as f64).powi(2)).collect())));
@@ -872,7 +872,7 @@ fn subdivision_subdivided() {
 fn filters_constrained_source() {
     let source=grid(120,80,20.0,false);let count=geo::primitive_count(&source);
     let source=add(&source,Owner::Primitive,"region",Storage::Int(Arc::new((0..count).map(|p|if p<3*count/4 {0}else{1}).collect())));
-    let source=add(&source,Owner::Primitive,"flow",Storage::Float3(packed::Float3::of_owned(vec![0.0;count as usize],vec![0.0;count as usize],vec![1.0;count as usize]).unwrap()));
+    let source=add(&source,Owner::Primitive,"flow",Storage::Float3(packed::float3::of_owned(vec![0.0;count as usize],vec![0.0;count as usize],vec![1.0;count as usize]).unwrap()));
     let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"seed",count,&|p|p==0).unwrap(),&source).unwrap();
     let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"containment",count,&|p|p<count/2).unwrap(),&source).unwrap();
     let source=super::snapshot(&source);
@@ -1020,9 +1020,9 @@ fn subdivision_boundary_none() {
 
 #[test]
 fn subdivision_fvar_none() {
-    let source=grid(120,80,8.0,true);let topology=topology::View::view(geo::topology(&source)).unwrap();
+    let source=grid(120,80,8.0,true);let topology=topology::view::view(geo::topology(&source)).unwrap();
     let count=geo::vertex_count(&source);
-    let values=packed::Float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
+    let values=packed::float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
     let source=super::snapshot(&add(&source,Owner::Vertex,"fvar_uv",Storage::Float2(values)));
     let text=r###"(sop/subdivide (sop/ext_fvar_source) :crease_weight_mode "Auto"
        :boundary_interpolation "Edge only" :remove_holes true
@@ -1033,9 +1033,9 @@ fn subdivision_fvar_none() {
 
 #[test]
 fn subdivision_fvar_corners() {
-    let source=grid(120,80,8.0,true);let topology=topology::View::view(geo::topology(&source)).unwrap();
+    let source=grid(120,80,8.0,true);let topology=topology::view::view(geo::topology(&source)).unwrap();
     let count=geo::vertex_count(&source);
-    let values=packed::Float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
+    let values=packed::float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
     let source=super::snapshot(&add(&source,Owner::Vertex,"fvar_uv",Storage::Float2(values)));
     let text=r###"(sop/subdivide (sop/ext_fvar_source) :crease_weight_mode "Auto"
        :boundary_interpolation "Edge only" :remove_holes true
@@ -1046,9 +1046,9 @@ fn subdivision_fvar_corners() {
 
 #[test]
 fn subdivision_fvar_plus1() {
-    let source=grid(120,80,8.0,true);let topology=topology::View::view(geo::topology(&source)).unwrap();
+    let source=grid(120,80,8.0,true);let topology=topology::view::view(geo::topology(&source)).unwrap();
     let count=geo::vertex_count(&source);
-    let values=packed::Float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
+    let values=packed::float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
     let source=super::snapshot(&add(&source,Owner::Vertex,"fvar_uv",Storage::Float2(values)));
     let text=r###"(sop/subdivide (sop/ext_fvar_source) :crease_weight_mode "Auto"
        :boundary_interpolation "Edge only" :remove_holes true
@@ -1059,9 +1059,9 @@ fn subdivision_fvar_plus1() {
 
 #[test]
 fn subdivision_fvar_plus2() {
-    let source=grid(120,80,8.0,true);let topology=topology::View::view(geo::topology(&source)).unwrap();
+    let source=grid(120,80,8.0,true);let topology=topology::view::view(geo::topology(&source)).unwrap();
     let count=geo::vertex_count(&source);
-    let values=packed::Float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
+    let values=packed::float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
     let source=super::snapshot(&add(&source,Owner::Vertex,"fvar_uv",Storage::Float2(values)));
     let text=r###"(sop/subdivide (sop/ext_fvar_source) :crease_weight_mode "Auto"
        :boundary_interpolation "Edge only" :remove_holes true
@@ -1072,9 +1072,9 @@ fn subdivision_fvar_plus2() {
 
 #[test]
 fn subdivision_fvar_boundaries() {
-    let source=grid(120,80,8.0,true);let topology=topology::View::view(geo::topology(&source)).unwrap();
+    let source=grid(120,80,8.0,true);let topology=topology::view::view(geo::topology(&source)).unwrap();
     let count=geo::vertex_count(&source);
-    let values=packed::Float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
+    let values=packed::float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
     let source=super::snapshot(&add(&source,Owner::Vertex,"fvar_uv",Storage::Float2(values)));
     let text=r###"(sop/subdivide (sop/ext_fvar_source) :crease_weight_mode "Auto"
        :boundary_interpolation "Edge only" :remove_holes true
@@ -1085,9 +1085,9 @@ fn subdivision_fvar_boundaries() {
 
 #[test]
 fn subdivision_fvar_all() {
-    let source=grid(120,80,8.0,true);let topology=topology::View::view(geo::topology(&source)).unwrap();
+    let source=grid(120,80,8.0,true);let topology=topology::view::view(geo::topology(&source)).unwrap();
     let count=geo::vertex_count(&source);
-    let values=packed::Float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
+    let values=packed::float2::of_owned((0..count).map(|v|topology.vertex_points[v as usize] as f64).collect(),(0..count).map(|v|((v/4)%120/40) as f64).collect()).unwrap();
     let source=super::snapshot(&add(&source,Owner::Vertex,"fvar_uv",Storage::Float2(values)));
     let text=r###"(sop/subdivide (sop/ext_fvar_source) :crease_weight_mode "Auto"
        :boundary_interpolation "Edge only" :remove_holes true
@@ -1514,9 +1514,9 @@ fn emission_equalized() {
 #[test]
 fn emission_relax_source() {
     let source=edge_equalize_geometry(50_000);
-    let view=packed::Float3::View::view(geo::positions(&source)).unwrap();let mut x=view.x.to_vec();
+    let view=packed::float3::view::view(geo::positions(&source)).unwrap();let mut x=view.x.to_vec();
     for edge in 0..50_000 {let point=edge*2;x[point+1]=x[point]+0.8+(edge%11) as f64*0.1;}
-    let reference=geo::with_positions(packed::Float3::of_owned(x,view.y.to_vec(),view.z.to_vec()).unwrap(),&source).unwrap();
+    let reference=geo::with_positions(packed::float3::of_owned(x,view.y.to_vec(),view.z.to_vec()).unwrap(),&source).unwrap();
     let (source,reference)=(super::snapshot(&source),super::snapshot(&reference));
     let one=exact(&bind(&[("relax_source",&source),("in1757",&reference)],r###"(sop/edge_relax (sop/ext_relax_source) (sop/ext_in1757) :iterations 20)"###));
     assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(100_000,50_000));
@@ -1565,7 +1565,7 @@ fn attributes_promoted_arrays() {
        :into_pattern "primitive_points"))"###));
     let attribute=geo::find_attribute(Owner::Primitive,"primitive_points",&one).unwrap();
     let Storage::IntArray(values)=attribute::storage(&attribute).unwrap() else {panic!("array promotion storage");};
-    let values=packed::IntArray::View::view(&values);assert_eq!(values.offsets.len() as i64,geo::primitive_count(&one)+1);assert_eq!(values.values.len() as i64,geo::vertex_count(&one));
+    let values=packed::int_array::view::view(&values);assert_eq!(values.offsets.len() as i64,geo::primitive_count(&one)+1);assert_eq!(values.values.len() as i64,geo::vertex_count(&one));
 }
 
 #[test]

@@ -174,13 +174,13 @@ fn drawn_iterations() {
     check(reports.borrow_mut().readouts(&zone_node, &[]).contains(&("tier".to_owned(), "CPU".to_owned())), "the inspector lost its execution tier");
     let paint_hash = |ui: &mut Ui, view: Pane| -> Vec<u8> {
         let _ = scope_step(ui, view, &frame0());
-        match rays::scene::Layer::stage_native(1000, 700, &ui.scene(None)) {
+        match rays::scene::layer::stage_native(1000, 700, &ui.scene(None)) {
             Err(m) => fail(&m),
             Ok(staged) => staged
                 .layers
                 .iter()
                 .filter_map(|l| match l {
-                    rays::scene::Layer::native_layer::Ui_layer(batch, _) => Some(batch.instances().to_vec()),
+                    rays::scene::layer::native_layer::Ui_layer(batch, _) => Some(batch.instances().to_vec()),
                     _ => None,
                 })
                 .flatten()

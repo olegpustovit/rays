@@ -86,28 +86,28 @@ fn fuse_clusters(
             if attribute::owner(&item) != attribute::Owner::Point {
                 continue;
             }
-            point_attributes.push(match attribute::View::storage(&item)? {
+            point_attributes.push(match attribute::view::storage(&item)? {
                 attribute::Storage::Float(values) => FuseAttributeView::Float(values.clone()),
                 attribute::Storage::Int(values) => FuseAttributeView::Int(values.clone()),
                 attribute::Storage::Text(values) => FuseAttributeView::Text(values.clone()),
                 attribute::Storage::Float2(values) => {
-                    let v = packed::Float2::View::view(values);
+                    let v = packed::float2::view::view(values);
                     FuseAttributeView::Float2(v.x, v.y)
                 }
                 attribute::Storage::Float3(values) => {
-                    let v = packed::Float3::View::view(values)?;
+                    let v = packed::float3::view::view(values)?;
                     FuseAttributeView::Float3(v.x, v.y, v.z)
                 }
                 attribute::Storage::Float4(values) => {
-                    let v = packed::Float4::View::view(values);
+                    let v = packed::float4::view::view(values);
                     FuseAttributeView::Float4(v.x, v.y, v.z, v.w)
                 }
                 attribute::Storage::IntArray(values) => {
-                    let v = packed::IntArray::View::view(values);
+                    let v = packed::int_array::view::view(values);
                     FuseAttributeView::IntArray(v.offsets, v.values)
                 }
                 attribute::Storage::FloatArray(values) => {
-                    let v = packed::FloatArray::View::view(values);
+                    let v = packed::float_array::view::view(values);
                     FuseAttributeView::FloatArray(v.offsets, v.values)
                 }
             });
@@ -383,8 +383,8 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
         target_geometry,
     )?;
     let count = geometry::point_count(geometry_value);
-    let source = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let target_positions = packed::Float3::View::view(geometry::positions(target_geometry))?;
+    let source = packed::float3::view::view(geometry::positions(geometry_value))?;
+    let target_positions = packed::float3::view::view(geometry::positions(target_geometry))?;
     let mut mapped = 0i64;
     let mut moved = 0i64;
     for point in 0..count as usize {
@@ -460,7 +460,7 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
             })?;
         }
         let moved_geometry =
-            geometry::with_positions(packed::Float3::View::of_owned_exn(x, y, z)?, geometry_value)?;
+            geometry::with_positions(packed::float3::view::of_owned_exn(x, y, z)?, geometry_value)?;
         let moved_geometry = geometry::without_attribute(attribute::Owner::Point, "N", &moved_geometry);
         geometry::without_attribute(attribute::Owner::Vertex, "N", &moved_geometry)
     };

@@ -2,7 +2,7 @@
 #![allow(dead_code, unused_imports)]
 use std::collections::HashMap;
 
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use sop::{context, node, session};
 
 use super::super::support::*;
@@ -45,10 +45,10 @@ pub fn shattered_studio() {
     assert!(rdk_core::geometry::point_count(&g) == rdk_core::geometry::point_count(&h));
     assert!(rdk_core::geometry::primitive_count(&g) == rdk_core::geometry::primitive_count(&h));
     for i in 0..rdk_core::geometry::point_count(&g) {
-        assert!(Float3::get(rdk_core::geometry::positions(&g), i) == Float3::get(rdk_core::geometry::positions(&h), i));
+        assert!(float3::get(rdk_core::geometry::positions(&g), i) == float3::get(rdk_core::geometry::positions(&h), i));
     }
-    let tg = rdk_core::topology::View::view(rdk_core::geometry::topology(&g)).unwrap();
-    let th = rdk_core::topology::View::view(rdk_core::geometry::topology(&h)).unwrap();
+    let tg = rdk_core::topology::view::view(rdk_core::geometry::topology(&g)).unwrap();
+    let th = rdk_core::topology::view::view(rdk_core::geometry::topology(&h)).unwrap();
     assert!(tg.vertex_points == th.vertex_points && tg.primitive_offsets == th.primitive_offsets);
     let pieces = |geometry: &rdk_core::geometry::T| match rdk_core::attribute::storage(&rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Primitive, "piece", geometry).expect("piece")).unwrap() {
         rdk_core::attribute::Storage::Int(a) => a,

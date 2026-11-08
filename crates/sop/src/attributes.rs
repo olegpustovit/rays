@@ -126,7 +126,7 @@ pub mod image_texels {
                 })
                 .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
                 let plane = |k: usize| (0..count as usize).map(|i| rgba[4 * i + k]).collect::<Vec<f64>>();
-                let values = packed::Float4::of_owned(plane(0), plane(1), plane(2), plane(3))
+                let values = packed::float4::of_owned(plane(0), plane(1), plane(2), plane(3))
                     .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
                 let attribute_value = attribute::create_owned("rgba", attribute::Owner::Point, attribute::Storage::Float4(values))
                     .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
@@ -1948,7 +1948,7 @@ mod tests {
         let g = geometry_of(&cook(&mut s, 1, &texels));
         assert_eq!(rdk_core::geometry::point_count(&g), 12);
         let rgba = rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Point, "rgba", &g).expect("rgba");
-        assert!(matches!(rdk_core::attribute::View::storage(&rgba), Ok(rdk_core::attribute::Storage::Float4(_))));
+        assert!(matches!(rdk_core::attribute::view::storage(&rgba), Ok(rdk_core::attribute::Storage::Float4(_))));
         crate::session::close(&mut s);
     }
 

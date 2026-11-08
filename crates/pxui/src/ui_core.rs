@@ -390,7 +390,7 @@ pub struct Atlas {
     shelf_y: i64,
     shelf_h: i64,
     dirty: bool,
-    pub image: Option<image::t>,
+    pub image: Option<image::Image>,
     fonts: Vec<(font::Font, i64, i64)>,
     next_font: i64,
 }
@@ -802,7 +802,7 @@ pub struct Ui {
     batch_builder: Option<ui_batch::Builder>,
     regions: Vec<scene::node>,
     scene_layers: Vec<(i64, Vec<scene::node>)>,
-    borrowed_images: Vec<(i64, image::t)>,
+    borrowed_images: Vec<(i64, image::Image)>,
     scene: Vec<scene::node>,
     destroyed: bool,
 }
@@ -2655,7 +2655,7 @@ pub struct Paint {
     pub font_size: i64,
     pub row_height: i64,
     pub fonts: Fonts,
-    pub borrowed_images: Vec<(i64, image::t)>,
+    pub borrowed_images: Vec<(i64, image::Image)>,
     pub regions: Vec<scene::node>,
     /// the horizontal scroll of the focused text; painters adjust it
     pub edit_scroll_x: f64,
@@ -2672,7 +2672,7 @@ impl Paint {
     }
 
     /// Borrow a host-owned image for this frame through the normal UI texture batch.
-    pub fn image(&mut self, x: f64, y: f64, w: f64, h: f64, image: &image::t) {
+    pub fn image(&mut self, x: f64, y: f64, w: f64, h: f64, image: &image::Image) {
         // ponytail: at most 64 borrowed images per frame, linear identity lookup.
         let id = match self.borrowed_images.iter().find(|(_, other)| image::same(other, image)) {
             Some((id, _)) => *id,
@@ -3288,7 +3288,7 @@ impl Ui {
         let mut scene_layers = Vec::new();
         for (key, batch) in layers {
             let textures = batch.textures();
-            let mut images: Vec<(i64, image::t)> = Vec::new();
+            let mut images: Vec<(i64, image::Image)> = Vec::new();
             if let Some(atlas_image) = &self.fonts.atlas.image {
                 if !textures.is_empty() {
                     images.push((1, atlas_image.clone()));
@@ -3303,7 +3303,7 @@ impl Ui {
             let layer = if batch.count() == 0 {
                 Vec::new()
             } else {
-                vec![scene::Layer::ui(Some(images), batch).expect("Ui.frame: layer")]
+                vec![scene::layer::ui(Some(images), batch).expect("Ui.frame: layer")]
             };
             scene_layers.push((key, layer));
         }

@@ -39,9 +39,9 @@ pub fn polygon_area_vector(
         return Err(invalid(operation, format!("{operation}: grain must be positive")));
     }
     let topology_value = geometry::topology(geometry_value);
-    let source = topology::View::view(topology_value)
+    let source = topology::view::view(topology_value)
         .map_err(|value| view_error(operation, value))?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))
         .map_err(|value| view_error(operation, value))?;
     let count = topology::primitive_count(topology_value);
     let count_usize = usize::try_from(count)
@@ -132,9 +132,9 @@ pub fn compute(
             ));
         }
     }
-    let topology_view = topology::View::view(topology_value)
+    let topology_view = topology::view::view(topology_value)
         .map_err(|value| view_error(operation, value))?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))
         .map_err(|value| view_error(operation, value))?;
     let count = usize::try_from(primitive_count)
         .map_err(|_| invalid(operation, format!("{operation}: invalid primitive count")))?;
@@ -204,7 +204,7 @@ mod tests {
     fn triangle() -> geometry::T {
         let topology_value =
             topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
-        let positions = packed::Float3::View::of_owned_exn(
+        let positions = packed::float3::view::of_owned_exn(
             vec![0.0, 1.0, 0.0],
             vec![0.0, 0.0, 1.0],
             vec![0.0, 0.0, 0.0],

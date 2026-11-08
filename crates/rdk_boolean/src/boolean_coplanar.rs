@@ -416,7 +416,7 @@ mod tests {
         let x: Vec<f64> = points.iter().map(|p| p.0).collect();
         let y: Vec<f64> = points.iter().map(|p| p.1).collect();
         let z: Vec<f64> = points.iter().map(|p| p.2).collect();
-        let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
+        let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
         let offsets: Vec<i64> = (0..=(triangles.len() as i64 / 3)).map(|p| p * 3).collect();
         let kinds = vec![PrimitiveKind::Polygon; offsets.len() - 1];
         let topology = topology::create_owned(points.len() as i64, triangles.to_vec(), offsets, kinds).unwrap();

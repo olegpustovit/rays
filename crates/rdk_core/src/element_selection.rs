@@ -68,9 +68,9 @@ pub fn validate(
 fn point_selected(
     point: i64,
     selection: &T,
-    _topology: &topology::View::View,
-    points: Option<&point_index::View::View>,
-    edges: Option<&topology_index::View::View>,
+    _topology: &topology::view::View,
+    points: Option<&point_index::view::View>,
+    edges: Option<&topology_index::view::View>,
 ) -> bool {
     match selection {
         T::SelectedPoints(value) => group::mem(point, value),
@@ -117,9 +117,9 @@ fn point_selected(
 fn vertex_selected(
     vertex: i64,
     selection: &T,
-    topology: &topology::View::View,
-    points: Option<&point_index::View::View>,
-    edges: Option<&topology_index::View::View>,
+    topology: &topology::view::View,
+    points: Option<&point_index::view::View>,
+    edges: Option<&topology_index::view::View>,
 ) -> bool {
     match selection {
         T::SelectedPoints(value) => group::mem(topology.vertex_points[vertex as usize], value),
@@ -142,8 +142,8 @@ fn vertex_selected(
 fn primitive_selected(
     primitive: i64,
     selection: &T,
-    topology: &topology::View::View,
-    edges: Option<&topology_index::View::View>,
+    topology: &topology::view::View,
+    edges: Option<&topology_index::view::View>,
 ) -> bool {
     match selection {
         T::SelectedPrimitives(value) => group::mem(primitive, value),
@@ -210,7 +210,7 @@ pub fn promote(
         ));
     }
 
-    let topology = topology::View::view(topology_value)?;
+    let topology = topology::view::view(topology_value)?;
     let needs_point_index = matches!(
         (destination, selection),
         (group::Owner::Point, T::SelectedVertices(_) | T::SelectedPrimitives(_))
@@ -218,13 +218,13 @@ pub fn promote(
     );
     let point_index = if needs_point_index {
         let index = point_index::create(cancel_value, topology_value)?;
-        Some(point_index::View::view(&index))
+        Some(point_index::view::view(&index))
     } else {
         None
     };
     let edge_index = if matches!(selection, T::SelectedEdges(_)) {
         let index = topology_index::create(cancel_value, topology_value)?;
-        Some(topology_index::View::view(&index))
+        Some(topology_index::view::view(&index))
     } else {
         None
     };

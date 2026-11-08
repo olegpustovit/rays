@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use param::{FieldView, Impact, KindView, Value};
 use rdk_core::attribute::{self, Owner, Storage};
-use rdk_core::packed::{self, Deferred};
+use rdk_core::packed::{self, deferred};
 use rdk_core::{geometry, topology};
 use rdk_ops::poly_extrude;
 
@@ -17,9 +17,9 @@ use crate::rays_mesh;
 use crate::surface;
 
 struct Fixture;
-impl Deferred::Holder for Fixture {}
+impl deferred::Holder for Fixture {}
 
-fn holder() -> Option<Arc<dyn Deferred::Holder>> {
+fn holder() -> Option<Arc<dyn deferred::Holder>> {
     Some(Arc::new(Fixture))
 }
 
@@ -27,18 +27,18 @@ fn holder() -> Option<Arc<dyn Deferred::Holder>> {
 fn animated_device_surfaces_share_unchanged_topology() {
     use std::rc::Rc;
     let topo=topology::polygons_owned(3,vec![0,1,2],vec![0,3]).unwrap();
-    let corners=topology::View::view(&topo).unwrap().vertex_points;
+    let corners=topology::view::view(&topo).unwrap().vertex_points;
     let camera=rays::camera::perspective(None,None,None,rays_math::vec3::create(0.,0.,3.),rays_math::vec3::zero()).unwrap();
     let mut previous=None;
     for frame in 0..3 {
-        let positions=packed::Float3::deferred(holder(),None,None,3,Arc::new(||panic!("device preview read positions back"))).unwrap();
+        let positions=packed::float3::deferred(holder(),None,None,3,Arc::new(||panic!("device preview read positions back"))).unwrap();
         let geometry=geometry::create(positions,topo.clone(),None,None,None).unwrap();
         let surface=surface::of_geometry(None,&geometry).unwrap();
         let device=|_:&geometry::T|Some((format!("animated-{frame}"),false,None,0,Rc::new(||{}) as Rc<dyn Fn()>));
         let scene=surface::scene3_result(None,Some(&device),&surface).unwrap();
         let drawing=rays::scene3::walk::drawings(&scene).remove(0);
         assert!(Arc::ptr_eq(&rays::mesh::view::unread(&drawing.mesh).indices,&corners),"a new position stream copied the topology");
-        let prepared=rays::scene::Layer::stage_native(32,32,&[rays::scene::view3d(None,&camera,scene)]).unwrap();
+        let prepared=rays::scene::layer::stage_native(32,32,&[rays::scene::view3d(None,&camera,scene)]).unwrap();
         let indices=prepared.scene3[0].entries[0].draw.mesh.indices.clone();
         if let Some(previous)=previous { assert!(Rc::ptr_eq(&indices,&previous),"unchanged topology was packed again"); }
         previous=Some(indices);
@@ -50,15 +50,15 @@ fn surface_failure() {
     let x = vec![0.0, 1.0, 0.0, 1.0];
     let y = vec![0.0, 1.0, 1.0, 0.0];
     let z = vec![0.0; 4];
-    let positions = packed::Float3::of_owned(x.clone(), y.clone(), z.clone()).unwrap();
+    let positions = packed::float3::of_owned(x.clone(), y.clone(), z.clone()).unwrap();
     let deferred_positions = || {
         let planes = vec![x.clone(), y.clone(), z.clone()];
-        packed::Float3::deferred(holder(), None, None, 4, Arc::new(move || Ok(planes.clone()))).unwrap()
+        packed::float3::deferred(holder(), None, None, 4, Arc::new(move || Ok(planes.clone()))).unwrap()
     };
     let uv = attribute::create_owned(
         "uv",
         Owner::Point,
-        Storage::Float2(packed::Float2::of_owned(vec![0.0; 4], vec![0.0; 4]).unwrap()),
+        Storage::Float2(packed::float2::of_owned(vec![0.0; 4], vec![0.0; 4]).unwrap()),
     )
     .unwrap();
     let points = geometry::create(deferred_positions(), topology::empty(4).unwrap(), Some(vec![uv]), None, None).unwrap();
@@ -68,7 +68,7 @@ fn surface_failure() {
         Some("Attribute uv requires the host bridge.".to_owned()),
         "unsupported surface did not record its host reason"
     );
-    let empty_colors = Storage::Float3(packed::Float3::of_owned(vec![], vec![], vec![]).unwrap());
+    let empty_colors = Storage::Float3(packed::float3::of_owned(vec![], vec![], vec![]).unwrap());
     let points = geometry::with_attribute(attribute::create_owned("Cd", Owner::Primitive, empty_colors.clone()).unwrap(), &points).unwrap();
     let points = geometry::with_attribute(attribute::create_owned("N", Owner::Vertex, empty_colors).unwrap(), &points).unwrap();
     let mesh = rays_mesh::to_mesh(&points).unwrap();
@@ -96,7 +96,7 @@ fn surface_failure() {
     let deferred = geometry::create(deferred_positions(), deferred_topology, Some(vec![normals]), None, None).unwrap();
     let prepared = surface::of_geometry(None, &deferred).unwrap();
     assert_eq!(surface::host_reason(&prepared), None, "resident surface was refused");
-    assert!(packed::Float3::resident(geometry::positions(&deferred)), "surface preparation forced deferred P");
+    assert!(packed::float3::resident(geometry::positions(&deferred)), "surface preparation forced deferred P");
     assert_eq!(
         surface::scene3_result(None, None, &prepared).err(),
         Some(expected.clone()),
@@ -109,11 +109,11 @@ fn surface_failure() {
 }
 
 fn quad() -> geometry::T {
-    let mut builder = packed::Float3::builder::create(4).unwrap();
+    let mut builder = packed::float3::builder::create(4).unwrap();
     for (i, (x, y)) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)].iter().enumerate() {
-        packed::Float3::builder::set(&mut builder, i as i64, *x, *y, 0.0).unwrap();
+        packed::float3::builder::set(&mut builder, i as i64, *x, *y, 0.0).unwrap();
     }
-    let positions = packed::Float3::builder::freeze(&mut builder).unwrap();
+    let positions = packed::float3::builder::freeze(&mut builder).unwrap();
     let topo = topology::polygons_owned(4, vec![0, 1, 2, 3], vec![0, 4]).unwrap();
     geometry::create(positions, topo, None, None, None).unwrap()
 }
@@ -149,7 +149,7 @@ fn mesh_round_trip_and_trace_mesh() {
 // ---- Packed_pieces ----
 
 fn two_pieces() -> geometry::T {
-    let positions = packed::Float3::View::of_owned_exn(
+    let positions = packed::float3::view::of_owned_exn(
         vec![-2.5, -1.5, -2.0, 1.5, 2.5, 2.0],
         vec![-0.5, -0.5, 0.5, -0.5, -0.5, 0.5],
         vec![0.0; 6],
@@ -160,7 +160,7 @@ fn two_pieces() -> geometry::T {
     let normals = attribute::create_owned(
         "N",
         Owner::Vertex,
-        Storage::Float3(packed::Float3::View::of_owned_exn(vec![0.0; 6], vec![1.0; 6], vec![0.0; 6]).unwrap()),
+        Storage::Float3(packed::float3::view::of_owned_exn(vec![0.0; 6], vec![1.0; 6], vec![0.0; 6]).unwrap()),
     )
     .unwrap();
     let g = geometry::with_attribute(normals, &g).unwrap();
@@ -251,7 +251,7 @@ fn surface_materials_and_pieces_draw() {
     let colors = attribute::create_owned(
         "material_color",
         Owner::Primitive,
-        Storage::Float4(packed::Float4::of_owned(vec![1.0, 0.0], vec![0.0, 1.0], vec![0.0, 0.0], vec![1.0, 1.0]).unwrap()),
+        Storage::Float4(packed::float4::of_owned(vec![1.0, 0.0], vec![0.0, 1.0], vec![0.0, 0.0], vec![1.0, 1.0]).unwrap()),
     )
     .unwrap();
     let g = geometry::with_attribute(colors, &g).unwrap();
@@ -285,12 +285,12 @@ fn geometry_view_reads() {
     let tinted = geometry_view::tint("class", (1.0, 0.0, 0.0), &|tag| tag == 1, &g);
     let cd = geometry::find_attribute(Owner::Vertex, "Cd", &tinted).expect("tint writes Cd");
     let (r, gr, _, a) = match attribute::storage(&cd).unwrap() {
-        Storage::Float4(c) => packed::Float4::get(&c, 3).unwrap(),
+        Storage::Float4(c) => packed::float4::get(&c, 3).unwrap(),
         _ => panic!("Cd is float4"),
     };
     assert!((r - 1.0 * 0.4 - 0.6).abs() < 1e-12 && (gr - 0.4).abs() < 1e-12 && a == 1.0);
     let dim = match attribute::storage(&cd).unwrap() {
-        Storage::Float4(c) => packed::Float4::get(&c, 0).unwrap(),
+        Storage::Float4(c) => packed::float4::get(&c, 0).unwrap(),
         _ => unreachable!(),
     };
     assert!((dim.0 - 0.3).abs() < 1e-12);

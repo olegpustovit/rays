@@ -195,7 +195,7 @@ fn weight_values(name: &str, geometry_value: &geometry::T) -> Result<Vec<f64>, e
             "Rdk.Fuse_reduce.fuse: position weight point attribute {name:?} is missing"
         )));
     };
-    let values: Vec<f64> = match attribute::View::storage(&found)? {
+    let values: Vec<f64> = match attribute::view::storage(&found)? {
         attribute::Storage::Float(values) => values.to_vec(),
         attribute::Storage::Int(values) => values.iter().map(|&v| v as f64).collect(),
         _ => {
@@ -277,7 +277,7 @@ fn reduce(
     } else {
         None
     };
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let selected = match params.position {
         Position::MinimumWeight => Some(selected_by_weight(clusters, weights.as_deref().expect("w"), true)),
         Position::MaximumWeight => Some(selected_by_weight(clusters, weights.as_deref().expect("w"), false)),
@@ -293,7 +293,7 @@ fn reduce(
     let py = expand_f64(clusters, compact, cluster_plane(&positions.y)?);
     let pz = expand_f64(clusters, compact, cluster_plane(&positions.z)?);
     validate_positions(&px, &py, &pz)?;
-    let output_positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
+    let output_positions = packed::float3::view::of_owned_exn(px, py, pz)?;
     let point_map: Vec<i64> = if compact {
         clusters.of_point.clone()
     } else if rewire {
@@ -304,7 +304,7 @@ fn reduce(
         (0..source_count as i64).collect()
     };
     let source_topology_value = geometry::topology(geometry_value);
-    let source_topology = topology::View::view(source_topology_value)?;
+    let source_topology = topology::view::view(source_topology_value)?;
     let output_topology = if !compact && !rewire {
         source_topology_value.clone()
     } else {
@@ -312,7 +312,7 @@ fn reduce(
         support::par_fill(cancel_value, params.grain, &mut vertex_points, &|vertex| {
             Ok(point_map[source_topology.vertex_points[vertex as usize] as usize])
         })?;
-        topology::View::create_validated_owned(
+        topology::view::create_validated_owned(
             if compact { clusters.count } else { source_count as i64 },
             vertex_points,
             source_topology.primitive_offsets.to_vec(),

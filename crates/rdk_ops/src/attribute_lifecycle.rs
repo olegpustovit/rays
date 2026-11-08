@@ -87,7 +87,7 @@ fn compile_optional(label: &str, source: &Option<String>) -> Result<Option<attri
 fn reference_names(reference: &Option<geometry::T>) -> Vec<HashMap<String, ()>> {
     let mut tables: Vec<HashMap<String, ()>> = (0..4).map(|_| HashMap::new()).collect();
     if let Some(reference) = reference {
-        for item in geometry::View::attributes(reference) {
+        for item in geometry::view::attributes(reference) {
             tables[owner_index(attribute::owner(item))].insert(attribute::name(item).to_owned(), ());
         }
     }
@@ -113,7 +113,7 @@ pub fn delete(params: &DeleteParams, geometry_value: &geometry::T) -> Result<geo
             Some(pattern) => attribute_pattern::matches(pattern, name),
         }
     };
-    let attributes = geometry::View::attributes(geometry_value);
+    let attributes = geometry::view::attributes(geometry_value);
     if attributes.is_empty() {
         return Ok(geometry_value.clone());
     }
@@ -128,7 +128,7 @@ pub fn delete(params: &DeleteParams, geometry_value: &geometry::T) -> Result<geo
     if output.len() == attributes.len() {
         return Ok(geometry_value.clone());
     }
-    geometry::View::with_attributes_owned(output, geometry_value)
+    geometry::view::with_attributes_owned(output, geometry_value)
 }
 
 struct Entry {
@@ -141,13 +141,13 @@ struct Store {
     entries: Vec<Entry>,
     tables: Vec<HashMap<String, usize>>,
     changed: bool,
-    positions: packed::Float3::T,
+    positions: packed::float3::T,
     attributes_changed: bool,
     positions_changed: bool,
 }
 
 fn store_of_geometry(geometry_value: &geometry::T) -> Store {
-    let attributes = geometry::View::attributes(geometry_value);
+    let attributes = geometry::view::attributes(geometry_value);
     let entries: Vec<Entry> = attributes
         .iter()
         .map(|item| Entry { owner: attribute::owner(item), attribute: item.clone(), alive: true })
@@ -267,7 +267,7 @@ pub fn rename(
         .filter(|entry| entry.alive)
         .map(|entry| entry.attribute.clone())
         .collect();
-    geometry::View::with_attributes_owned(output, geometry_value)
+    geometry::view::with_attributes_owned(output, geometry_value)
 }
 
 #[derive(Clone, Copy)]
@@ -297,9 +297,9 @@ fn swap_remove(store: &mut Store, index: usize) {
 }
 
 fn swap_set_position(store: &mut Store, item: &attribute::T) -> Result<(), error::T> {
-    match attribute::View::storage(item)? {
+    match attribute::view::storage(item)? {
         attribute::Storage::Float3(positions) => {
-            if packed::Float3::data_id(positions) != packed::Float3::data_id(&store.positions) {
+            if packed::float3::data_id(positions) != packed::float3::data_id(&store.positions) {
                 store.positions = positions.clone();
                 store.positions_changed = true;
             }
@@ -542,9 +542,9 @@ pub fn swap(
         .map(|entry| entry.attribute.clone())
         .collect();
     if store.positions_changed {
-        geometry::View::with_positions_and_attributes_owned(store.positions.clone(), attributes, geometry_value)
+        geometry::view::with_positions_and_attributes_owned(store.positions.clone(), attributes, geometry_value)
     } else {
-        geometry::View::with_attributes_owned(attributes, geometry_value)
+        geometry::view::with_attributes_owned(attributes, geometry_value)
     }
 }
 
@@ -639,8 +639,8 @@ mod tests {
         assert_eq!(attribute::data_id(&after), attribute::data_id(&before));
         assert_eq!(attribute::storage_id(&after), attribute::storage_id(&before));
         assert_eq!(
-            packed::Float3::data_id(geometry::positions(&source)),
-            packed::Float3::data_id(geometry::positions(&deleted))
+            packed::float3::data_id(geometry::positions(&source)),
+            packed::float3::data_id(geometry::positions(&deleted))
         );
 
         let kept = attribute_ops::delete(
@@ -781,32 +781,32 @@ mod tests {
         let g = add_storage(
             Detail,
             "left_int_array",
-            attribute::Storage::IntArray(packed::IntArray::create_owned(vec![0, 2], vec![2, 5]).unwrap()),
+            attribute::Storage::IntArray(packed::int_array::create_owned(vec![0, 2], vec![2, 5]).unwrap()),
             &g,
         );
         let g = add_storage(
             Detail,
             "left_float_array",
-            attribute::Storage::FloatArray(packed::FloatArray::create_owned(vec![0, 2], vec![2.5, 5.5]).unwrap()),
+            attribute::Storage::FloatArray(packed::float_array::create_owned(vec![0, 2], vec![2.5, 5.5]).unwrap()),
             &g,
         );
         let g = add_storage(
             Detail,
             "left_float2",
-            attribute::Storage::Float2(packed::Float2::of_owned(vec![2.0], vec![3.0]).unwrap()),
+            attribute::Storage::Float2(packed::float2::of_owned(vec![2.0], vec![3.0]).unwrap()),
             &g,
         );
         let g = add_storage(
             Detail,
             "left_float3",
-            attribute::Storage::Float3(packed::Float3::of_owned(vec![2.0], vec![3.0], vec![4.0]).unwrap()),
+            attribute::Storage::Float3(packed::float3::of_owned(vec![2.0], vec![3.0], vec![4.0]).unwrap()),
             &g,
         );
         let g = add_storage(
             Detail,
             "left_float4",
             attribute::Storage::Float4(
-                packed::Float4::of_owned(vec![2.0], vec![3.0], vec![4.0], vec![5.0]).unwrap(),
+                packed::float4::of_owned(vec![2.0], vec![3.0], vec![4.0], vec![5.0]).unwrap(),
             ),
             &g,
         );
@@ -881,11 +881,11 @@ mod tests {
         .unwrap();
         match attribute::storage(&find(Point, "rest", &position_copy)).unwrap() {
             attribute::Storage::Float3(values) => {
-                assert_eq!(packed::Float3::data_id(&values), packed::Float3::data_id(geometry::positions(&source)))
+                assert_eq!(packed::float3::data_id(&values), packed::float3::data_id(geometry::positions(&source)))
             }
             _ => panic!("Attribute Copy P emitted non-float3 storage"),
         }
-        let alternate = packed::Float3::of_owned(vec![9.0, 8.0], vec![7.0, 6.0], vec![5.0, 4.0]).unwrap();
+        let alternate = packed::float3::of_owned(vec![9.0, 8.0], vec![7.0, 6.0], vec![5.0, 4.0]).unwrap();
         let with_rest = add_storage(Point, "rest", attribute::Storage::Float3(alternate), &source);
         let position_swapped = attribute_ops::swap(
             None,
@@ -893,7 +893,7 @@ mod tests {
             &with_rest,
         )
         .unwrap();
-        assert_eq!(packed::Float3::get(geometry::positions(&position_swapped), 0).unwrap(), (9.0, 7.0, 5.0));
+        assert_eq!(packed::float3::get(geometry::positions(&position_swapped), 0).unwrap(), (9.0, 7.0, 5.0));
         let (rx, ry, rz) = float3(Point, "rest", &position_swapped);
         assert_eq!((rx[0], ry[0], rz[0]), (1.0, 2.0, 3.0));
         let position_moved = attribute_ops::swap(
@@ -903,7 +903,7 @@ mod tests {
         )
         .unwrap();
         assert!(!has(Point, "rest", &position_moved));
-        assert_eq!(packed::Float3::get(geometry::positions(&position_moved), 1).unwrap(), (8.0, 6.0, 4.0));
+        assert_eq!(packed::float3::get(geometry::positions(&position_moved), 1).unwrap(), (8.0, 6.0, 4.0));
         let p_move = attribute_ops::swap(
             None,
             &[swap_rule(Point, "P", "rest", SwapMethod::AttributeMove)],

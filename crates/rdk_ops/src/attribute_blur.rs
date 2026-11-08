@@ -87,7 +87,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     let compiled = attribute_pattern::compile(&params.pattern)?;
     let mut targets: Vec<Target> = Vec::new();
     let mut original: Vec<Vec<f64>> = Vec::new();
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     if attribute_pattern::matches(&compiled, "P") {
         targets.push(Target::Position);
         original.push(positions.x.to_vec());
@@ -102,26 +102,26 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         }
         let name = attribute::name(&item).to_owned();
         let first = original.len();
-        match attribute::View::storage(&item)? {
+        match attribute::view::storage(&item)? {
             attribute::Storage::Float(values) => {
                 targets.push(Target::Float(name, first));
                 original.push(values.to_vec());
             }
             attribute::Storage::Float2(values) => {
-                let view = packed::Float2::View::view(values);
+                let view = packed::float2::view::view(values);
                 targets.push(Target::Float2(name, first));
                 original.push(view.x.to_vec());
                 original.push(view.y.to_vec());
             }
             attribute::Storage::Float3(values) => {
-                let view = packed::Float3::View::view(values)?;
+                let view = packed::float3::view::view(values)?;
                 targets.push(Target::Float3(name, first));
                 original.push(view.x.to_vec());
                 original.push(view.y.to_vec());
                 original.push(view.z.to_vec());
             }
             attribute::Storage::Float4(values) => {
-                let view = packed::Float4::View::view(values);
+                let view = packed::float4::view::view(values);
                 targets.push(Target::Float4(name, first));
                 original.push(view.x.to_vec());
                 original.push(view.y.to_vec());
@@ -146,7 +146,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         }
     }
     let topology_index_value = topology_index::create(cancel_token, geometry::topology(geometry_value))?;
-    let topology = topology_index::View::view(&topology_index_value);
+    let topology = topology_index::view::view(&topology_index_value);
     let mut current = original.clone();
     let mut next = original.clone();
     for iteration in 0..params.iterations {
@@ -227,7 +227,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     }
     let mut result = if positions_changed {
         let moved = geometry::with_positions(
-            packed::Float3::View::of_owned_exn(output[0].clone(), output[1].clone(), output[2].clone())?,
+            packed::float3::view::of_owned_exn(output[0].clone(), output[1].clone(), output[2].clone())?,
             geometry_value,
         )?;
         let moved = geometry::without_attribute(attribute::Owner::Point, "N", &moved);
@@ -241,14 +241,14 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
             Target::Float(name, first) => (name, attribute::Storage::Float(Arc::new(output[*first].clone()))),
             Target::Float2(name, first) => (
                 name,
-                attribute::Storage::Float2(packed::Float2::of_owned(
+                attribute::Storage::Float2(packed::float2::of_owned(
                     output[*first].clone(),
                     output[first + 1].clone(),
                 )?),
             ),
             Target::Float3(name, first) => (
                 name,
-                attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
+                attribute::Storage::Float3(packed::float3::view::of_owned_exn(
                     output[*first].clone(),
                     output[first + 1].clone(),
                     output[first + 2].clone(),
@@ -256,7 +256,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
             ),
             Target::Float4(name, first) => (
                 name,
-                attribute::Storage::Float4(packed::Float4::of_owned(
+                attribute::Storage::Float4(packed::float4::of_owned(
                     output[*first].clone(),
                     output[first + 1].clone(),
                     output[first + 2].clone(),
@@ -354,9 +354,9 @@ mod tests {
             &params("value", 2, Mode::CustomSteps { odd: 1.0, even: 0.0 }), &g,
         ).unwrap();
         assert_eq!(floats(Point, "value", &custom), vec![10.0, 0.0, 10.0]);
-        let uv = attribute::Storage::Float2(packed::Float2::of_owned(vec![0.0, 10.0, 0.0], vec![2.0, 4.0, 2.0]).unwrap());
+        let uv = attribute::Storage::Float2(packed::float2::of_owned(vec![0.0, 10.0, 0.0], vec![2.0, 4.0, 2.0]).unwrap());
         let color = attribute::Storage::Float4(
-            packed::Float4::of_owned(
+            packed::float4::of_owned(
                 vec![0.0, 1.0, 0.0],
                 vec![0.0, 2.0, 0.0],
                 vec![0.0, 3.0, 0.0],
@@ -368,11 +368,11 @@ mod tests {
         let g = add_storage(Point, "f_color", color, &g);
         let blurred = attribute_ops::blur_points(&params("f_*", 1, Mode::Laplacian(1.0)), &g).unwrap();
         let uv = match attribute::storage(&find(Point, "f_uv", &blurred)).unwrap() {
-            attribute::Storage::Float2(values) => packed::Float2::View::view(&values),
+            attribute::Storage::Float2(values) => packed::float2::view::view(&values),
             _ => panic!("Attribute Blur float2 storage"),
         };
         let color = match attribute::storage(&find(Point, "f_color", &blurred)).unwrap() {
-            attribute::Storage::Float4(values) => packed::Float4::View::view(&values),
+            attribute::Storage::Float4(values) => packed::float4::view::view(&values),
             _ => panic!("Attribute Blur float4 storage"),
         };
         assert_eq!(uv.x.to_vec(), vec![10.0, 0.0, 10.0]);

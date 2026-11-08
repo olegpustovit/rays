@@ -10,7 +10,7 @@ use flow_gpu::{pipelines, run};
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit::{self, Curves};
 use flow_syntax::value::Value;
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use rdk_core::{geometry, topology};
 
 const COUNT: usize = 256;
@@ -27,7 +27,7 @@ fn grid(size: f64) -> Points {
 const TRIANGLES: [[usize; 3]; 2] = [[0, 1, 2], [0, 2, 3]];
 
 fn mesh(points: &Points) -> geometry::T {
-    let positions = Float3::of_owned(points.iter().map(|p| p[0]).collect(), points.iter().map(|p| p[1]).collect(), points.iter().map(|p| p[2]).collect()).expect("positions");
+    let positions = float3::of_owned(points.iter().map(|p| p[0]).collect(), points.iter().map(|p| p[1]).collect(), points.iter().map(|p| p[2]).collect()).expect("positions");
     let top = topology::polygons_owned(points.len() as i64, TRIANGLES.iter().flatten().map(|i| *i as i64).collect(), vec![0, 3, 6]).expect("topology");
     geometry::create(positions, top, None, None, None).expect("mesh")
 }

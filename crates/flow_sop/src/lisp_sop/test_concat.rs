@@ -8,7 +8,7 @@ use crate::{lisp_sop, lower};
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::geometry as geo;
 use rdk_core::group;
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use sop::edit_graph as edit;
 use sop::{context as sctx, payload, session};
 use std::sync::Arc;
@@ -38,7 +38,7 @@ fn with_float(name: &str, owner: Owner, k: i64, g: &geo::T) -> geo::T {
 
 fn with_vec3(name: &str, k: i64, g: &geo::T) -> geo::T {
     let n = geo::point_count(g) as usize;
-    let storage = Storage::Float3(rk(Float3::View::of_owned_exn((0..n).map(|i| (i as i64 + k) as f64).collect(), vec![-0.0; n], vec![0.5; n])));
+    let storage = Storage::Float3(rk(float3::view::of_owned_exn((0..n).map(|i| (i as i64 + k) as f64).collect(), vec![-0.0; n], vec![0.5; n])));
     rk(geo::with_attribute(rk(attribute::create_owned(name, Owner::Point, storage)), g))
 }
 

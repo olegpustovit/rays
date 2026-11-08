@@ -10,11 +10,11 @@ pub struct Params {
 
 pub fn points(values: &[(f64, f64, f64)]) -> Result<geometry::T, error::T> {
     let count = values.len();
-    let mut builder = packed::Float3::builder::create(count as i64)?;
+    let mut builder = packed::float3::builder::create(count as i64)?;
     for (index, &(x, y, z)) in values.iter().enumerate() {
-        packed::Float3::builder::set(&mut builder, index as i64, x, y, z)?;
+        packed::float3::builder::set(&mut builder, index as i64, x, y, z)?;
     }
-    let positions = packed::Float3::builder::freeze(&mut builder)?;
+    let positions = packed::float3::builder::freeze(&mut builder)?;
     geometry::create(positions, topology::empty(count as i64)?, None, None, None)
 }
 
@@ -66,7 +66,7 @@ mod tests {
         let cloud = points(&[(1.0, 2.0, 3.0), (4.0, 5.0, 6.0)]).unwrap();
         assert_eq!(geometry::point_count(&cloud), 2);
         assert_eq!(geometry::primitive_count(&cloud), 0);
-        assert_eq!(packed::Float3::get(geometry::positions(&cloud), 1).unwrap(), (4.0, 5.0, 6.0));
+        assert_eq!(packed::float3::get(geometry::positions(&cloud), 1).unwrap(), (4.0, 5.0, 6.0));
     }
 
     #[test]

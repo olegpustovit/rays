@@ -145,8 +145,7 @@ fn valid_storage(width: i64, height: i64, length: usize) -> bool {
 // Image
 // ---------------------------------------------------------------------------------------------
 
-#[allow(non_snake_case)]
-pub mod Image {
+pub mod image {
     use super::*;
 
     /// A borrowed, generation-validated texture source.
@@ -176,34 +175,33 @@ pub mod Image {
         pub(crate) dead: bool,
     }
 
-    #[allow(non_camel_case_types)]
     #[derive(Clone)]
-    pub struct t(pub(crate) Rc<RefCell<image_data>>);
+    pub struct Image(pub(crate) Rc<RefCell<image_data>>);
 
     #[allow(non_camel_case_types)]
     pub struct lease {
-        owner: t,
+        owner: Image,
         bytes: bytes,
         released: bool,
     }
 
-    pub fn identity(x: &t) -> i64 {
+    pub fn identity(x: &Image) -> i64 {
         x.0.borrow().identity
     }
-    pub fn generation(x: &t) -> i64 {
+    pub fn generation(x: &Image) -> i64 {
         x.0.borrow().generation
     }
-    pub fn destroyed(x: &t) -> bool {
+    pub fn destroyed(x: &Image) -> bool {
         x.0.borrow().dead
     }
 
-    fn check(op: &str, x: &t) -> Result<(), error> {
+    fn check(op: &str, x: &Image) -> Result<(), error> {
         enter(op)?;
         if x.0.borrow().dead { Err(err_value(op, ErrorKind::Destroyed, "image is destroyed")) } else { Ok(()) }
     }
 
-    pub(crate) fn owned(width: i64, height: i64, rgba: bytes) -> t {
-        t(Rc::new(RefCell::new(image_data {
+    pub(crate) fn owned(width: i64, height: i64, rgba: bytes) -> Image {
+        Image(Rc::new(RefCell::new(image_data {
             identity: fresh_identity(),
             generation: 1,
             width,
@@ -219,7 +217,7 @@ pub mod Image {
         })))
     }
 
-    pub fn create(width: i64, height: i64, rgba: &[u8]) -> Result<t, error> {
+    pub fn create(width: i64, height: i64, rgba: &[u8]) -> Result<Image, error> {
         enter("Image.create")?;
             if !valid_storage(width, height, rgba.len()) {
                 Err(err_value("Image.create", ErrorKind::InvalidArgument, "invalid RGBA extent or storage"))
@@ -229,7 +227,7 @@ pub mod Image {
     }
 
     /// The decoded buffer becomes the image's storage (one move into the shared buffer).
-    pub fn load_file(path: &str) -> Result<t, error> {
+    pub fn load_file(path: &str) -> Result<Image, error> {
         enter("Image.load_file")?;
         match sdl3::image::load_file(path) {
             Err(e) => Err(err_value("Image.load_file", ErrorKind::Decode, &e.to_string())),
@@ -244,7 +242,7 @@ pub mod Image {
         }
     }
 
-    pub fn size(x: &t) -> Result<(i64, i64), error> {
+    pub fn size(x: &Image) -> Result<(i64, i64), error> {
         check("Image.size", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -298,7 +296,7 @@ pub mod Image {
         }
     }
 
-    pub fn pixels(x: &t) -> Result<Vec<u8>, error> {
+    pub fn pixels(x: &Image) -> Result<Vec<u8>, error> {
         check("Image.pixels", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -363,7 +361,7 @@ pub mod Image {
     /// The bytes remain stable until the lease is released, including across image destruction.
     /// Mutations use a second bounded buffer rather than changing leased storage; release is
     /// idempotent.
-    pub fn borrow_snapshot(x: &t) -> Result<(i64, i64, i64, bytes, lease), error> {
+    pub fn borrow_snapshot(x: &Image) -> Result<(i64, i64, i64, bytes, lease), error> {
         check("Image.borrow_snapshot", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -396,7 +394,7 @@ pub mod Image {
         }
     }
 
-    pub fn replace(x: &t, width: i64, height: i64, rgba: &[u8]) -> Result<(), error> {
+    pub fn replace(x: &Image, width: i64, height: i64, rgba: &[u8]) -> Result<(), error> {
         check("Image.replace", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -422,7 +420,7 @@ pub mod Image {
             Ok(())
     }
 
-    pub fn of_gpu(width: i64, height: i64, source: gpu_source_fn) -> Result<t, error> {
+    pub fn of_gpu(width: i64, height: i64, source: gpu_source_fn) -> Result<Image, error> {
         enter("Image.of_gpu")?;
             let texture = validate_gpu("Image.of_gpu", width, height, &source)?;
             let x = owned(width, height, new_bytes(Vec::new()));
@@ -434,7 +432,7 @@ pub mod Image {
     /// readback. Replacement preserves identity and may resize. The callback must return the
     /// published texture until invalidated; substitution or expiration is an error, never a CPU
     /// fallback. Destroying the image does not destroy its source texture.
-    pub fn replace_gpu_source(x: &t, width: i64, height: i64, source: gpu_source_fn) -> Result<(), error> {
+    pub fn replace_gpu_source(x: &Image, width: i64, height: i64, source: gpu_source_fn) -> Result<(), error> {
         check("Image.replace_gpu_source", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -449,7 +447,7 @@ pub mod Image {
     }
 
     /// Same-shape publication for owners that already manage raw texture lifetime.
-    pub fn replace_gpu(x: &t, texture: &Texture) -> Result<(), error> {
+    pub fn replace_gpu(x: &Image, texture: &Texture) -> Result<(), error> {
         let (width, height) = {
             let d = x.0.borrow();
             (d.width, d.height)
@@ -458,7 +456,7 @@ pub mod Image {
         replace_gpu_source(x, width, height, Rc::new(move || Some(texture.clone())))
     }
 
-    pub fn gpu_snapshot(x: &t) -> Result<Option<(i64, i64, i64, Texture)>, error> {
+    pub fn gpu_snapshot(x: &Image) -> Result<Option<(i64, i64, i64, Texture)>, error> {
         check("Image.gpu_snapshot", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -474,7 +472,7 @@ pub mod Image {
     /// Atomically transfer the source's owned pixel storage. On success the source is destroyed
     /// and the target retains its identity. A source with an active private snapshot lease is
     /// rejected without mutation.
-    pub fn replace_owned(target: &t, source: &t) -> Result<(), error> {
+    pub fn replace_owned(target: &Image, source: &Image) -> Result<(), error> {
         enter("Image.replace_owned")?;
             let op = "Image.replace_owned";
             {
@@ -511,7 +509,7 @@ pub mod Image {
             Ok(())
     }
 
-    pub fn destroy(x: &t) -> Result<(), error> {
+    pub fn destroy(x: &Image) -> Result<(), error> {
         enter("Image.destroy")?;
             let mut d = x.0.borrow_mut();
             if d.dead {
@@ -531,17 +529,17 @@ pub mod Image {
             Ok(())
     }
 
-    pub(crate) fn of_owned_rgba(width: i64, height: i64, rgba: bytes) -> t {
+    pub(crate) fn of_owned_rgba(width: i64, height: i64, rgba: bytes) -> Image {
         owned(width, height, rgba)
     }
 
     /// Successful GPU pixel reads through this image; publication does not read.
-    pub fn readbacks(x: &t) -> i64 {
+    pub fn readbacks(x: &Image) -> i64 {
         x.0.borrow().readbacks
     }
 
     /// Current CPU bank and spare, excluding separately leased snapshots.
-    pub fn cpu_storage_bytes(x: &t) -> i64 {
+    pub fn cpu_storage_bytes(x: &Image) -> i64 {
         let d = x.0.borrow();
         d.rgba.len() as i64 + d.spare.as_ref().map_or(0, |b| b.len() as i64)
     }
@@ -638,8 +636,8 @@ pub mod canvas {
         height: i64,
         rgba: bytes,
         spare: Option<bytes>,
-        mirror: Option<Image::t>,
-        blocked: Option<Image::t>,
+        mirror: Option<image::Image>,
+        blocked: Option<image::Image>,
         // The GPU frame this canvas last rendered (owned by its execution); CPU pixels are read
         // back lazily while `cpu_stale`. A CPU mutation makes the CPU bank authoritative again
         // and forgets the texture.
@@ -715,9 +713,9 @@ pub mod canvas {
         Ok((d.width, d.height))
     }
 
-    fn valid_mirror(x: &canvas_data, image: &Image::t) -> bool {
+    fn valid_mirror(x: &canvas_data, image: &image::Image) -> bool {
         let i = image.0.borrow();
-        !i.dead && i.canvas_owner == Some(x.identity) && Rc::ptr_eq(&Image::rgba_of(&i), &x.rgba)
+        !i.dead && i.canvas_owner == Some(x.identity) && Rc::ptr_eq(&image::rgba_of(&i), &x.rgba)
     }
 
     fn accept_returned_storage(x: &mut canvas_data, b: &bytes) {
@@ -726,10 +724,10 @@ pub mod canvas {
         }
     }
 
-    fn publish_storage(x: &canvas_data, weak: Weak<RefCell<canvas_data>>, image: &Image::t) {
+    fn publish_storage(x: &canvas_data, weak: Weak<RefCell<canvas_data>>, image: &image::Image) {
         let mut i = image.0.borrow_mut();
         i.canvas_owner = Some(x.identity);
-        Image::register_canvas_storage(
+        image::register_canvas_storage(
             &mut i,
             x.rgba.clone(),
             Rc::new(move |b: &bytes| {
@@ -847,20 +845,20 @@ pub mod canvas {
             Ok((d.width, d.height, d.generation, d.rgba.to_vec()))
     }
 
-    pub fn capture(x: &Canvas) -> Result<Image::t, error> {
+    pub fn capture(x: &Canvas) -> Result<image::Image, error> {
         check("Canvas.capture", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
             sync_cpu(d)?;
             discard_invalid_mirror(d);
             let image = if d.mirror.is_none() && d.blocked.is_none() {
-                let image = Image::of_owned_rgba(d.width, d.height, d.rgba.clone());
+                let image = image::of_owned_rgba(d.width, d.height, d.rgba.clone());
                 publish_storage(d, Rc::downgrade(&x.0), &image);
                 d.mirror = Some(image.clone());
                 image
             } else {
                 let pixels = d.rgba.to_vec();
-                Image::create(d.width, d.height, &pixels)?
+                image::create(d.width, d.height, &pixels)?
             };
             d.captures += 1;
             Ok(image)
@@ -995,9 +993,9 @@ pub mod text {
     }
 
     /// Consume the text and transfer its owned RGBA storage to an image.
-    pub fn into_image(x: &mut Text) -> Result<Image::t, error> {
+    pub fn into_image(x: &mut Text) -> Result<image::Image, error> {
         check("Text.into_image", x)?;
-        let image = Image::of_owned_rgba(x.width, x.height, x.rgba.clone());
+        let image = image::of_owned_rgba(x.width, x.height, x.rgba.clone());
         x.dead = true;
         x.rgba = new_bytes(Vec::new());
         Ok(image)

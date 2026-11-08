@@ -3,7 +3,7 @@ use super::support::*;
 use crate::{attribute_kernel,lower,value_lane};
 use flow_ir::{flow_ir::{Gpu,PlacementReason,Profile},packed};
 use flow_syntax::value::Value;
-use rdk_core::{geometry as geo, packed::Float3};
+use rdk_core::{geometry as geo, packed::float3};
 use sop::{context as ctx,edit_graph as edit,payload,session};
 use std::sync::{Arc,Mutex,atomic::{AtomicUsize,Ordering}};
 #[derive(Default)]
@@ -38,7 +38,7 @@ impl Gpu::Kernel for MockKernel{
     fn planes(&self,v:&Gpu::Value)->Result<Gpu::Planes,rays_diagnostic::Diagnostic>{self.calls.planes.fetch_add(1,Ordering::SeqCst);Gpu::planes_of(&|v|self.readback(v),v)}
 }
 fn ticks()->lower::Clock{let n=Arc::new(AtomicUsize::new(0));Arc::new(move||n.fetch_add(1,Ordering::SeqCst)as f64+1.)}
-fn positions(backend:Option<Arc<dyn Gpu::Backend>>)->Float3::T{
+fn positions(backend:Option<Arc<dyn Gpu::Backend>>)->float3::T{
     let text="(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 100 :rows 100 :size 3.0 :rotation 0.3)))";
     let gpu=backend.map_or_else(Gpu::default,|b|Gpu::Config{backend:Some(b),fast:true,..Gpu::default()});
     let(_,n)=lower_text(lower::Options{gpu,clock:ticks(),..Default::default()},text);
@@ -49,7 +49,7 @@ fn positions(backend:Option<Arc<dyn Gpu::Backend>>)->Float3::T{
 fn placement(cost:Option<f64>,expected:usize){
     let cpu=positions(None);let calls=Arc::new(Calls::default());let output=positions(Some(backend(cost,&calls)));
     assert_eq!(calls.dispatches.load(Ordering::SeqCst),expected);
-    for i in 0..10000{let(a,b,c)=Float3::get(&cpu,i).unwrap();let(x,y,z)=Float3::get(&output,i).unwrap();for(e,a)in[(a,x),(b,y),(c,z)]{if expected==0{assert_eq!(e.to_bits(),a.to_bits())}else{assert!((e-a).abs()<=1e-4*(1.+e.abs()));}}}
+    for i in 0..10000{let(a,b,c)=float3::get(&cpu,i).unwrap();let(x,y,z)=float3::get(&output,i).unwrap();for(e,a)in[(a,x),(b,y),(c,z)]{if expected==0{assert_eq!(e.to_bits(),a.to_bits())}else{assert!((e-a).abs()<=1e-4*(1.+e.abs()));}}}
 }
 #[test]fn measured_slower_gpu_never_dispatches(){placement(Some(1e6),0)}
 #[test]fn measured_cheaper_gpu_fuses_one_dispatch_per_cook(){placement(Some(0.),6)}
@@ -67,7 +67,7 @@ fn captured(points:bool,capture:bool,time:f64){
     if points{for(name,indexed)in[("sourcepoint",false),("sourceindex",true)]{let rdk_core::attribute::Storage::Int(xs)=rdk_core::attribute::storage(&geo::find_attribute(rdk_core::attribute::Owner::Point,name,&geometry).unwrap()).unwrap()else{panic!("source integer attribute")};assert_eq!(*xs,(0..32).map(|i|if indexed{i}else{-1}).collect::<Vec<_>>());}}
     assert_eq!(calls.planes.load(Ordering::SeqCst),usize::from(capture));
     if capture{assert!(Profile::placements(&l.profile).iter().any(|p|p.cpu_consumers==Some(1)&&p.reason==PlacementReason::Device_measured_cheaper));}
-    assert_eq!(Float3::get(geo::positions(&geometry),31).unwrap(),(31.+time,0.,0.));session::close(&mut s);
+    assert_eq!(float3::get(geo::positions(&geometry),31).unwrap(),(31.+time,0.,0.));session::close(&mut s);
 }
 #[test]fn opaque_mesh_declines_resident_record(){captured(false,false,0.)}
 #[test]fn capture_mesh_supplies_one_cpu_reader(){captured(false,true,0.);captured(false,true,1.)}

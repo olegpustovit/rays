@@ -547,15 +547,15 @@ fn copied_selection(
                 Selection::Ordinary(source_group) if !group::is_ordered(source_group) => target_group,
                 Selection::Ordinary(source_group) => match mapping {
                     ElementMap::Explicit(source_of_target) => {
-                        group::View::remap_order(source_group, source_of_target, &target_group)?
+                        group::view::remap_order(source_group, source_of_target, &target_group)?
                     }
                     ElementMap::Identity(source_count) => {
                         let source_of_target: Vec<i64> =
                             (0..count).map(|target| if target < *source_count { target } else { -1 }).collect();
-                        group::View::remap_order(source_group, &source_of_target, &target_group)?
+                        group::view::remap_order(source_group, &source_of_target, &target_group)?
                     }
                     ElementMap::Proximity { indices, distances_squared } => {
-                        let source_order = group::View::order_view(source_group).unwrap_or(&[]);
+                        let source_order = group::view::order_view(source_group).unwrap_or(&[]);
                         let mut rank = vec![-1_i64; group::length(source_group) as usize];
                         for (position, &element) in source_order.iter().enumerate() {
                             rank[element as usize] = position as i64;
@@ -576,7 +576,7 @@ fn copied_selection(
                                 })
                                 .then_with(|| left.cmp(&right))
                         });
-                        group::View::with_owned_order(order, &target_group)?
+                        group::view::with_owned_order(order, &target_group)?
                     }
                 },
             };
@@ -994,7 +994,7 @@ mod tests {
         let x: Vec<f64> = positions.iter().map(|p| p.0).collect();
         let y: Vec<f64> = positions.iter().map(|p| p.1).collect();
         let z: Vec<f64> = positions.iter().map(|p| p.2).collect();
-        geometry::with_positions(packed::Float3::of_owned(x, y, z).unwrap(), source).unwrap()
+        geometry::with_positions(packed::float3::of_owned(x, y, z).unwrap(), source).unwrap()
     }
 
     #[test]

@@ -11,7 +11,7 @@ use crate::value_lane;
 use flow_eval::Value;
 use flow_graph::probe;
 use rdk_core::geometry as geo;
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph as edit;
 use sop::node;
@@ -67,10 +67,10 @@ fn prims(g: &geo::T) -> i64 {
 
 fn mean_xy(g: &geo::T) -> (f64, f64) {
     let positions = geo::positions(g);
-    let n = Float3::length(positions);
+    let n = float3::length(positions);
     let (mut x, mut y) = (0.0, 0.0);
     for i in 0..n {
-        let (a, b, _) = Float3::get(positions, i).unwrap();
+        let (a, b, _) = float3::get(positions, i).unwrap();
         x += a;
         y += b;
     }
@@ -275,15 +275,15 @@ fn move_point(s: &mut session::T, graph: &lower::Graph, operation: &str, index: 
     let out = session::cook(s, None, &zctx(1), &compiled).unwrap_or_else(|e| panic!("{}", rays_diagnostic::error_to_string(&e)));
     let base = sop::payload::geometry(&out.payload).unwrap();
     let positions = geo::positions(&base);
-    let n = Float3::length(positions);
+    let n = float3::length(positions);
     let (mut x, mut y, mut z) = (Vec::new(), Vec::new(), Vec::new());
     for i in 0..n {
-        let (a, b, c) = Float3::get(positions, i).unwrap();
+        let (a, b, c) = float3::get(positions, i).unwrap();
         x.push(a);
         y.push(if i == index { b + by } else { b });
         z.push(c);
     }
-    let moved = geo::with_positions(Float3::of_owned(x, y, z).unwrap(), &base).unwrap();
+    let moved = geo::with_positions(float3::of_owned(x, y, z).unwrap(), &base).unwrap();
     let replaced = node::build::restore_id(field.id, &lisp_sop::snapshot(&moved)).unwrap();
     (base, edit::replace_node(&replaced, &graph.network.geometry).unwrap())
 }
@@ -484,9 +484,9 @@ fn pieces_are_primitives_and_keys_order_the_elements() {
     let ids = rdk_core::attribute::create_owned("id", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Int(Arc::new((0..n).map(|i| n - 1 - i).collect()))).unwrap();
     let keyed = geo::with_attribute(ids, &base).unwrap();
     let ordered = sop::zone::elements(sop::zone::Kind::Points, Some("id"), &keyed).unwrap();
-    assert!(ordered[0].key == 0 && Ok(ordered[0].position) == Float3::get(geo::positions(&base), n - 1), "elements follow the key attribute");
+    assert!(ordered[0].key == 0 && Ok(ordered[0].position) == float3::get(geo::positions(&base), n - 1), "elements follow the key attribute");
     let plain = sop::zone::elements(sop::zone::Kind::Points, None, &keyed).unwrap();
-    assert!(Ok(plain[0].position) == Float3::get(geo::positions(&base), 0), "index order without a key");
+    assert!(Ok(plain[0].position) == float3::get(geo::positions(&base), 0), "index order without a key");
 }
 
 fn cook_result(geometry: &edit::T, node_id: i64, time: f64) -> Result<geo::T, rays_diagnostic::Diagnostic> {

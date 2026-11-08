@@ -104,12 +104,12 @@ fn collect_attributes(
     let mut table: HashMap<String, usize> = HashMap::new();
     let mut pairs: Vec<AttributePair> = Vec::new();
     for (side, source) in [(0, left), (1, right)] {
-        for item in geometry::View::attributes(source) {
+        for item in geometry::view::attributes(source) {
             if attribute::owner(item) != owner {
                 continue;
             }
             let name = attribute::name(item).to_owned();
-            let kind = storage_kind(attribute::View::storage(item)?);
+            let kind = storage_kind(attribute::view::storage(item)?);
             match table.get(&name) {
                 None => {
                     table.insert(name.clone(), pairs.len());
@@ -275,8 +275,8 @@ fn interpolate_fixed(
     corner_count: usize,
     pair: &AttributePair,
 ) -> Result<Storage, Fail> {
-    let left = pair.left.as_ref().map(attribute::View::storage).transpose()?;
-    let right = pair.right.as_ref().map(attribute::View::storage).transpose()?;
+    let left = pair.left.as_ref().map(attribute::view::storage).transpose()?;
+    let right = pair.right.as_ref().map(attribute::view::storage).transpose()?;
     if pair.kind == 0 || (pair.kind >= 4 && pair.kind <= 6) {
         let like = left.or(right).expect("attribute pair has a source");
         let planes_of = planes_of_storage;
@@ -360,12 +360,12 @@ fn interpolate_csr(
     corner_count: usize,
     pair: &AttributePair,
 ) -> Result<Storage, Fail> {
-    let left = pair.left.as_ref().map(attribute::View::storage).transpose()?;
-    let right = pair.right.as_ref().map(attribute::View::storage).transpose()?;
+    let left = pair.left.as_ref().map(attribute::view::storage).transpose()?;
+    let right = pair.right.as_ref().map(attribute::view::storage).transpose()?;
     if pair.kind == 2 {
-        let view_of = |storage: Option<&Storage>| -> Option<packed::IntArray::View::View> {
+        let view_of = |storage: Option<&Storage>| -> Option<packed::int_array::view::View> {
             match storage {
-                Some(Storage::IntArray(value)) => Some(packed::IntArray::View::view(value)),
+                Some(Storage::IntArray(value)) => Some(packed::int_array::view::view(value)),
                 _ => None,
             }
         };
@@ -396,12 +396,12 @@ fn interpolate_csr(
                 values[to..to + length].copy_from_slice(&source_values.values[from..from + length]);
             }
         }
-        return Ok(Storage::IntArray(packed::IntArray::View::create_validated_owned(offsets, values)));
+        return Ok(Storage::IntArray(packed::int_array::view::create_validated_owned(offsets, values)));
     }
     if pair.kind == 3 {
-        let view_of = |storage: Option<&Storage>| -> Option<packed::FloatArray::View::View> {
+        let view_of = |storage: Option<&Storage>| -> Option<packed::float_array::view::View> {
             match storage {
-                Some(Storage::FloatArray(value)) => Some(packed::FloatArray::View::view(value)),
+                Some(Storage::FloatArray(value)) => Some(packed::float_array::view::view(value)),
                 _ => None,
             }
         };
@@ -461,7 +461,7 @@ fn interpolate_csr(
                     .copy_from_slice(&source_values.values[from..from + length]);
             }
         }
-        return Ok(Storage::FloatArray(packed::FloatArray::View::create_validated_owned(offsets, values)));
+        return Ok(Storage::FloatArray(packed::float_array::view::create_validated_owned(offsets, values)));
     }
     interpolate_fixed(cancel_value, ancestry, view, corner_count, pair)
 }
@@ -533,7 +533,7 @@ fn consolidate_to_points(
             Ok(Storage::Text(Arc::new(output)))
         }
         Storage::IntArray(value) => {
-            let source = packed::IntArray::View::view(&value);
+            let source = packed::int_array::view::view(&value);
             let lengths: Vec<i64> = (0..point_count)
                 .map(|point| {
                     let corner = rep(point);
@@ -562,10 +562,10 @@ fn consolidate_to_points(
                 let to = offsets[point] as usize;
                 values[to..to + length].copy_from_slice(&source.values[from..from + length]);
             }
-            Ok(Storage::IntArray(packed::IntArray::View::create_validated_owned(offsets, values)))
+            Ok(Storage::IntArray(packed::int_array::view::create_validated_owned(offsets, values)))
         }
         Storage::FloatArray(value) => {
-            let source = packed::FloatArray::View::view(&value);
+            let source = packed::float_array::view::view(&value);
             let lengths: Vec<i64> = (0..point_count)
                 .map(|point| {
                     let corner = rep(point);
@@ -594,7 +594,7 @@ fn consolidate_to_points(
                 let to = offsets[point] as usize;
                 values[to..to + length].copy_from_slice(&source.values[from..from + length]);
             }
-            Ok(Storage::FloatArray(packed::FloatArray::View::create_validated_owned(offsets, values)))
+            Ok(Storage::FloatArray(packed::float_array::view::create_validated_owned(offsets, values)))
         }
     }
 }
@@ -731,7 +731,7 @@ fn copy_group(
         });
     }
     keyed.sort_unstable();
-    Ok(group::View::with_owned_order(keyed.into_iter().map(|(_, _, element)| element).collect(), &output)?)
+    Ok(group::view::with_owned_order(keyed.into_iter().map(|(_, _, element)| element).collect(), &output)?)
 }
 
 fn copy_edge_group(
@@ -742,7 +742,7 @@ fn copy_edge_group(
     index: &topology_index::T,
     pair: &EdgeGroupPair,
 ) -> Result<edge_group::T, Fail> {
-    let output_index = topology_index::View::view(index);
+    let output_index = topology_index::view::view(index);
     let cancelled = AtomicBool::new(false);
     let member = |edge: i64| -> bool {
         if cancel::poll(cancel_value, edge, 4095).is_err() {
@@ -809,8 +809,8 @@ fn copy_points_inner(
 ) -> Result<geometry::T, Fail> {
     cancel::check_opt(cancel_value)?;
     let ancestry_base = extract::geometry(ancestry);
-    if packed::Float3::data_id(geometry::positions(base))
-        != packed::Float3::data_id(geometry::positions(ancestry_base))
+    if packed::float3::data_id(geometry::positions(base))
+        != packed::float3::data_id(geometry::positions(ancestry_base))
         || topology::data_id(geometry::topology(base))
             != topology::data_id(geometry::topology(ancestry_base))
     {
@@ -819,7 +819,7 @@ fn copy_points_inner(
             "corner payload target does not share the Boolean ancestry topology".to_owned(),
         )));
     }
-    let topology_view = topology::View::view(geometry::topology(base))?;
+    let topology_view = topology::view::view(geometry::topology(base))?;
     let primitive_count = geometry::primitive_count(base);
     let point_count = geometry::point_count(base) as usize;
     let corner_count = geometry::vertex_count(base);
@@ -945,8 +945,8 @@ fn copy_attribute(
     primitive_count: usize,
     pair: &AttributePair,
 ) -> Result<attribute::T, Fail> {
-    let left = pair.left.as_ref().map(attribute::View::storage).transpose()?;
-    let right = pair.right.as_ref().map(attribute::View::storage).transpose()?;
+    let left = pair.left.as_ref().map(attribute::view::storage).transpose()?;
+    let right = pair.right.as_ref().map(attribute::view::storage).transpose()?;
     if pair.kind == 0 || (pair.kind >= 4 && pair.kind <= 6) {
         let like = left.or(right).expect("attribute pair has a source");
         let planes_of = planes_of_storage;
@@ -994,9 +994,9 @@ fn copy_attribute(
         return make_attribute(pair, Storage::Text(Arc::new(output)));
     }
     if pair.kind == 2 {
-        let view_of = |storage: Option<&Storage>| -> Option<packed::IntArray::View::View> {
+        let view_of = |storage: Option<&Storage>| -> Option<packed::int_array::view::View> {
             match storage {
-                Some(Storage::IntArray(value)) => Some(packed::IntArray::View::view(value)),
+                Some(Storage::IntArray(value)) => Some(packed::int_array::view::view(value)),
                 _ => None,
             }
         };
@@ -1024,13 +1024,13 @@ fn copy_attribute(
         }
         return make_attribute(
             pair,
-            Storage::IntArray(packed::IntArray::View::create_validated_owned(offsets, values)),
+            Storage::IntArray(packed::int_array::view::create_validated_owned(offsets, values)),
         );
     }
     if pair.kind == 3 {
-        let view_of = |storage: Option<&Storage>| -> Option<packed::FloatArray::View::View> {
+        let view_of = |storage: Option<&Storage>| -> Option<packed::float_array::view::View> {
             match storage {
-                Some(Storage::FloatArray(value)) => Some(packed::FloatArray::View::view(value)),
+                Some(Storage::FloatArray(value)) => Some(packed::float_array::view::view(value)),
                 _ => None,
             }
         };
@@ -1058,7 +1058,7 @@ fn copy_attribute(
         }
         return make_attribute(
             pair,
-            Storage::FloatArray(packed::FloatArray::View::create_validated_owned(offsets, values)),
+            Storage::FloatArray(packed::float_array::view::create_validated_owned(offsets, values)),
         );
     }
     Err(Fail::Invalid(format!(
@@ -1131,7 +1131,7 @@ fn copy_primitives_inner(
             }
         }
         keyed.sort_unstable();
-        groups.push(group::View::with_owned_order(
+        groups.push(group::view::with_owned_order(
             keyed.into_iter().map(|(_, _, primitive)| primitive).collect(),
             &output,
         )?);
@@ -1203,14 +1203,14 @@ mod tests {
             vec![0, 4, 8, 12, 16, 20, 24],
         )
         .unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }
 
     fn find_storage(owner: AttributeOwner, name: &str, geometry_value: &geometry::T) -> Storage {
         let found = geometry::find_attribute(owner, name, geometry_value)
             .unwrap_or_else(|| panic!("missing attribute {name}"));
-        attribute::View::storage(&found).unwrap().clone()
+        attribute::view::storage(&found).unwrap().clone()
     }
 
     type Signature = (Vec<i64>, Vec<bool>);
@@ -1218,7 +1218,7 @@ mod tests {
     // test_surface_cut_payload
     fn run(domains: i64) -> Signature {
         let left = cube_quads();
-        let positions = packed::Float3::View::of_owned_exn(
+        let positions = packed::float3::view::of_owned_exn(
             vec![-1., 2., -1., 2.],
             vec![0.5, 0.5, 0.5, 0.5],
             vec![0.25, 0.25, 0.75, 0.75],

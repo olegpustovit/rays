@@ -72,8 +72,7 @@ fn row_range(name: &str, offsets: &[i64], index: i64) -> Result<(usize, usize), 
     Ok((first, last))
 }
 
-#[allow(non_snake_case)]
-pub mod IntArray {
+pub mod int_array {
     use super::{row_range, validate_offsets};
     use crate::error;
     use std::sync::Arc;
@@ -84,8 +83,7 @@ pub mod IntArray {
         values: Arc<Vec<i64>>,
     }
 
-    #[allow(non_snake_case)]
-    pub mod View {
+    pub mod view {
         use super::T;
         use std::sync::Arc;
 
@@ -144,8 +142,7 @@ pub mod IntArray {
     }
 }
 
-#[allow(non_snake_case)]
-pub mod FloatArray {
+pub mod float_array {
     use super::{row_range, validate_offsets};
     use crate::error;
     use std::sync::Arc;
@@ -156,8 +153,7 @@ pub mod FloatArray {
         values: Arc<Vec<f64>>,
     }
 
-    #[allow(non_snake_case)]
-    pub mod View {
+    pub mod view {
         use super::T;
         use std::sync::Arc;
 
@@ -220,8 +216,7 @@ pub mod FloatArray {
     }
 }
 
-#[allow(non_snake_case)]
-pub mod Float2 {
+pub mod float2 {
     use super::same_length;
     use crate::error::{self, Code};
     use std::sync::Arc;
@@ -232,8 +227,7 @@ pub mod Float2 {
         y: Arc<Vec<f64>>,
     }
 
-    #[allow(non_snake_case)]
-    pub mod View {
+    pub mod view {
         use super::T;
         use std::sync::Arc;
 
@@ -286,8 +280,7 @@ pub mod Float2 {
     }
 }
 
-#[allow(non_snake_case)]
-pub mod Deferred {
+pub mod deferred {
     use super::*;
 
     #[derive(Clone)]
@@ -408,26 +401,24 @@ pub mod Deferred {
     }
 }
 
-#[allow(non_snake_case)]
-pub mod Float3 {
-    use super::{Deferred, same_length};
+pub mod float3 {
+    use super::{deferred, same_length};
     use crate::error::{self, Code};
     use std::sync::Arc;
 
     #[derive(Clone)]
     pub struct T {
-        planes: View::View,
+        planes: view::View,
         length: i64,
         data_id: i64,
-        deferred: Option<Deferred::T>,
+        deferred: Option<deferred::T>,
         device_bounds: Option<Bounds>,
     }
 
     pub type Bounds = Arc<dyn Fn() -> Option<Vec<f64>> + Send + Sync>;
     pub type Materialise = Arc<dyn Fn() -> Result<Vec<Vec<f64>>, error::T> + Send + Sync>;
 
-    #[allow(non_snake_case)]
-    pub mod View {
+    pub mod view {
         use super::T;
         use super::same_length;
         use crate::error;
@@ -468,8 +459,8 @@ pub mod Float3 {
     fn plane_slices(value: &T) -> Result<[&[f64]; 3], error::T> {
         match &value.deferred {
             None => Ok([&value.planes.x, &value.planes.y, &value.planes.z]),
-            Some(deferred) => match Deferred::force_ref(deferred)? {
-                Deferred::Value::Float3Planes(planes) => Ok([&planes[0], &planes[1], &planes[2]]),
+            Some(deferred) => match deferred::force_ref(deferred)? {
+                deferred::Value::Float3Planes(planes) => Ok([&planes[0], &planes[1], &planes[2]]),
                 _ => Err(error::new(
                     "Packed.Float3.deferred",
                     Code::InvalidState,
@@ -486,8 +477,8 @@ pub mod Float3 {
                 Arc::clone(&value.planes.y),
                 Arc::clone(&value.planes.z),
             ]),
-            Some(deferred) => match Deferred::force(deferred)? {
-                Deferred::Value::Float3Planes(planes) => Ok(planes),
+            Some(deferred) => match deferred::force(deferred)? {
+                deferred::Value::Float3Planes(planes) => Ok(planes),
                 _ => Err(error::new(
                     "Packed.Float3.deferred",
                     Code::InvalidState,
@@ -497,15 +488,15 @@ pub mod Float3 {
         }
     }
 
-    fn empty_planes() -> View::View {
-        View::View {
+    fn empty_planes() -> view::View {
+        view::View {
             x: Arc::new(Vec::new()),
             y: Arc::new(Vec::new()),
             z: Arc::new(Vec::new()),
         }
     }
 
-    fn make(planes: View::View) -> T {
+    fn make(planes: view::View) -> T {
         T {
             length: i64::try_from(planes.x.len()).unwrap_or(i64::MAX),
             planes,
@@ -542,7 +533,7 @@ pub mod Float3 {
         let count = i64::try_from(x.len()).unwrap_or(i64::MAX);
         same_length("Packed.Float3", count, i64::try_from(y.len()).unwrap_or(i64::MAX))?;
         same_length("Packed.Float3", count, i64::try_from(z.len()).unwrap_or(i64::MAX))?;
-        Ok(make(View::View {
+        Ok(make(view::View {
             x: Arc::new(x),
             y: Arc::new(y),
             z: Arc::new(z),
@@ -550,8 +541,8 @@ pub mod Float3 {
     }
 
     pub fn deferred(
-        holder: Option<Arc<dyn Deferred::Holder>>,
-        release: Option<Deferred::Release>,
+        holder: Option<Arc<dyn deferred::Holder>>,
+        release: Option<deferred::Release>,
         bounds: Option<Bounds>,
         length: i64,
         materialise: Materialise,
@@ -563,7 +554,7 @@ pub mod Float3 {
                 "negative length".to_owned(),
             ));
         }
-        let make: Deferred::Make = Arc::new(move || {
+        let make: deferred::Make = Arc::new(move || {
             let planes = materialise()?;
             if planes.len() != 3
                 || planes.iter().any(|plane| {
@@ -583,7 +574,7 @@ pub mod Float3 {
                     "materialised planes changed shape".to_owned(),
                 )
             })?;
-            Ok(Deferred::Value::Float3Planes([
+            Ok(deferred::Value::Float3Planes([
                 Arc::new(x),
                 Arc::new(y),
                 Arc::new(z),
@@ -593,7 +584,7 @@ pub mod Float3 {
             planes: empty_planes(),
             length,
             data_id: crate::support::fresh_data_id(),
-            deferred: Some(Deferred::create(make, holder, release)),
+            deferred: Some(deferred::create(make, holder, release)),
             device_bounds: bounds,
         })
     }
@@ -602,15 +593,15 @@ pub mod Float3 {
         value
             .deferred
             .as_ref()
-            .is_some_and(|deferred| !Deferred::forced(deferred))
+            .is_some_and(|deferred| !deferred::forced(deferred))
     }
 
-    pub fn holder(value: &T) -> Option<Arc<dyn Deferred::Holder>> {
-        value.deferred.as_ref().and_then(Deferred::holder)
+    pub fn holder(value: &T) -> Option<Arc<dyn deferred::Holder>> {
+        value.deferred.as_ref().and_then(deferred::holder)
     }
 
-    pub fn releaser(value: &T) -> Option<Deferred::Release> {
-        value.deferred.as_ref().and_then(Deferred::releaser)
+    pub fn releaser(value: &T) -> Option<deferred::Release> {
+        value.deferred.as_ref().and_then(deferred::releaser)
     }
 
     pub fn bounds(value: &T) -> Result<Option<Vec<f64>>, error::T> {
@@ -637,9 +628,8 @@ pub mod Float3 {
         Ok(Some(result))
     }
 
-    #[allow(non_snake_case)]
     pub mod builder {
-        use super::{make, View};
+        use super::{make, view};
         use crate::error::{self, Code};
         use std::sync::Arc;
 
@@ -706,7 +696,7 @@ pub mod Float3 {
                 ));
             }
             value.frozen = true;
-            Ok(make(View::View {
+            Ok(make(view::View {
                 x: Arc::new(std::mem::take(&mut value.x)),
                 y: Arc::new(std::mem::take(&mut value.y)),
                 z: Arc::new(std::mem::take(&mut value.z)),
@@ -715,8 +705,7 @@ pub mod Float3 {
     }
 }
 
-#[allow(non_snake_case)]
-pub mod Float4 {
+pub mod float4 {
     use super::same_length;
     use crate::error::{self, Code};
     use std::sync::Arc;
@@ -729,8 +718,7 @@ pub mod Float4 {
         w: Arc<Vec<f64>>,
     }
 
-    #[allow(non_snake_case)]
-    pub mod View {
+    pub mod view {
         use super::T;
         use std::sync::Arc;
 
@@ -802,29 +790,29 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Resident(i64);
-    impl Deferred::Holder for Resident {}
+    impl deferred::Holder for Resident {}
     struct Other;
-    impl Deferred::Holder for Other {}
+    impl deferred::Holder for Other {}
 
     #[test]
     fn holders_downcast_to_their_concrete_type() {
-        let holder: Arc<dyn Deferred::Holder> = Arc::new(Resident(7));
+        let holder: Arc<dyn deferred::Holder> = Arc::new(Resident(7));
         assert!(holder.clone().downcast::<Other>().is_none());
         assert_eq!(holder.downcast::<Resident>().unwrap().0, 7);
     }
 
     #[test]
     fn csr_validation_views_and_copy_access_match_storage() {
-        let values = IntArray::create_owned(vec![0, 2, 2], vec![4, 9]).unwrap();
-        assert_eq!(IntArray::length(&values), 2);
-        assert_eq!(IntArray::value_count(&values), 2);
-        assert_eq!(IntArray::get(&values, 0).unwrap(), vec![4, 9]);
-        assert!(IntArray::get(&values, 1).unwrap().is_empty());
-        let view = IntArray::View::view(&values);
+        let values = int_array::create_owned(vec![0, 2, 2], vec![4, 9]).unwrap();
+        assert_eq!(int_array::length(&values), 2);
+        assert_eq!(int_array::value_count(&values), 2);
+        assert_eq!(int_array::get(&values, 0).unwrap(), vec![4, 9]);
+        assert!(int_array::get(&values, 1).unwrap().is_empty());
+        let view = int_array::view::view(&values);
         assert_eq!(&*view.offsets, &[0, 2, 2]);
-        assert!(IntArray::create_owned(vec![1], vec![]).is_err());
+        assert!(int_array::create_owned(vec![1], vec![]).is_err());
         let shared = values.clone();
-        let another_view = IntArray::View::view(&shared);
+        let another_view = int_array::view::view(&shared);
         assert!(Arc::ptr_eq(&view.offsets, &another_view.offsets));
     }
 
@@ -832,7 +820,7 @@ mod tests {
     fn deferred_float3_metadata_stays_lazy_until_a_plane_read() {
         let reads = Arc::new(AtomicUsize::new(0));
         let make_reads = Arc::clone(&reads);
-        let value = Float3::deferred(
+        let value = float3::deferred(
             None,
             None,
             None,
@@ -843,16 +831,16 @@ mod tests {
             }),
         )
         .unwrap();
-        assert_eq!(Float3::length(&value), 2);
-        assert_eq!(Float3::payload_bytes(&value), 48);
-        assert!(Float3::resident(&value));
+        assert_eq!(float3::length(&value), 2);
+        assert_eq!(float3::payload_bytes(&value), 48);
+        assert!(float3::resident(&value));
         assert_eq!(reads.load(Ordering::Relaxed), 0);
         assert_eq!(
-            Float3::bounds(&value).unwrap(),
+            float3::bounds(&value).unwrap(),
             Some(vec![-2.0, 3.0, 0.0, 1.0, 4.0, 5.0])
         );
-        assert!(!Float3::resident(&value));
+        assert!(!float3::resident(&value));
         assert_eq!(reads.load(Ordering::Relaxed), 1);
-        assert_eq!(Float3::get(&value, 1).unwrap(), (-2.0, 4.0, 5.0));
+        assert_eq!(float3::get(&value, 1).unwrap(), (-2.0, 4.0, 5.0));
     }
 }

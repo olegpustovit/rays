@@ -16,10 +16,10 @@ fn ok<T, E: std::fmt::Debug>(r: Result<T, E>) -> T {
 
 /// Two triangles side by side, authored vertex normals and a `class` primitive attribute.
 fn geometry() -> rdk_core::geometry::T {
-    let positions = ok(rdk_core::packed::Float3::of_owned(vec![-2.5, -1.5, -2., 1.5, 2.5, 2.], vec![-0.5, -0.5, 0.5, -0.5, -0.5, 0.5], vec![0.; 6]));
+    let positions = ok(rdk_core::packed::float3::of_owned(vec![-2.5, -1.5, -2., 1.5, 2.5, 2.], vec![-0.5, -0.5, 0.5, -0.5, -0.5, 0.5], vec![0.; 6]));
     let topology = ok(rdk_core::topology::polygons_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6]));
     let geometry = ok(rdk_core::geometry::create(positions, topology, None, None, None));
-    let normals = ok(rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float3(ok(rdk_core::packed::Float3::of_owned(vec![0.; 6], vec![1.; 6], vec![0.; 6])))));
+    let normals = ok(rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float3(ok(rdk_core::packed::float3::of_owned(vec![0.; 6], vec![1.; 6], vec![0.; 6])))));
     let geometry = ok(rdk_core::geometry::with_attribute(normals, &geometry));
     let pieces = ok(rdk_core::attribute::create_owned("class", rdk_core::attribute::Owner::Primitive, rdk_core::attribute::Storage::Int(std::sync::Arc::new(vec![0, 1]))));
     ok(rdk_core::geometry::with_attribute(pieces, &geometry))

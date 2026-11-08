@@ -148,7 +148,7 @@ fn attribute_result(
     mapping: &[i64],
     value: &attribute::T,
 ) -> Result<attribute::T, error::T> {
-    let storage = select_storage(cancel_value, grain, defaults, mapping, attribute::View::storage(value)?)?;
+    let storage = select_storage(cancel_value, grain, defaults, mapping, attribute::view::storage(value)?)?;
     attribute::create_owned(attribute::name(value), attribute::owner(value), storage)
 }
 
@@ -221,7 +221,7 @@ pub fn group(
     if invalid_mapping.load(Ordering::Relaxed) {
         return Err(invalid_remap("Topology_remap.group: source mapping index is out of bounds".to_owned()));
     }
-    group::View::remap_order(value, mapping, &output)
+    group::view::remap_order(value, mapping, &output)
 }
 
 pub fn blend_group(
@@ -375,8 +375,8 @@ pub fn split_point_edge_groups(
     if groups.is_empty() {
         return Ok(Vec::new());
     }
-    let source = topology_index::View::view(source_index);
-    let target = topology::View::view(target_topology)?;
+    let source = topology_index::view::view(source_index);
+    let target = topology::view::view(target_topology)?;
     if target.vertex_points.len() != source.next_vertex.len() {
         return Err(invalid_remap("split-point edge remap requires unchanged corner cardinality".to_owned()));
     }
@@ -574,9 +574,9 @@ pub fn blend_attribute(
 ) -> Result<attribute::T, error::T> {
     let owner = attribute::owner(value);
     let float = |source: &[f64]| blend_float(cancel_value, grain, left, right, weight, source);
-    let storage = match attribute::View::storage(value)? {
+    let storage = match attribute::view::storage(value)? {
         attribute::Storage::Float3(source) if attribute::name(value) == "N" => {
-            let view = packed::Float3::View::view(source)?;
+            let view = packed::float3::view::view(source)?;
             let mut x = float(&view.x)?;
             let mut y = float(&view.y)?;
             let mut z = float(&view.z)?;
@@ -595,7 +595,7 @@ pub fn blend_attribute(
                 }
                 first = last;
             }
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z)?)
+            attribute::Storage::Float3(packed::float3::view::of_owned_exn(x, y, z)?)
         }
         source => match attribute::map_float_planes(source, float)? {
             Some(blended) => blended,
@@ -611,10 +611,10 @@ pub fn blend_positions(
     left: &[i64],
     right: &[i64],
     weight: &[f64],
-    positions: &packed::Float3::T,
-) -> Result<packed::Float3::T, error::T> {
-    let view = packed::Float3::View::view(positions)?;
-    packed::Float3::View::of_owned_exn(
+    positions: &packed::float3::T,
+) -> Result<packed::float3::T, error::T> {
+    let view = packed::float3::view::view(positions)?;
+    packed::float3::view::of_owned_exn(
         blend_float(cancel_value, grain, left, right, weight, &view.x)?,
         blend_float(cancel_value, grain, left, right, weight, &view.y)?,
         blend_float(cancel_value, grain, left, right, weight, &view.z)?,
@@ -632,7 +632,7 @@ mod tests {
         );
 
         let storage = attribute::Storage::Float3(
-            packed::Float3::View::of_owned_exn(
+            packed::float3::view::of_owned_exn(
                 vec![1.0, 0.0],
                 vec![0.0, 1.0],
                 vec![0.0, 0.0],
@@ -641,10 +641,10 @@ mod tests {
         );
         let source = attribute::create_owned("N", attribute::Owner::Point, storage).unwrap();
         let blended = blend_attribute(None, 1, &[0], &[1], &[0.5], &source).unwrap();
-        let attribute::Storage::Float3(positions) = attribute::View::storage(&blended).unwrap() else {
+        let attribute::Storage::Float3(positions) = attribute::view::storage(&blended).unwrap() else {
             panic!("Float3 storage was not preserved");
         };
-        let view = packed::Float3::View::view(positions).unwrap();
+        let view = packed::float3::view::view(positions).unwrap();
         let expected = std::f64::consts::FRAC_1_SQRT_2;
         assert!((view.x[0] - expected).abs() < 1e-12);
         assert!((view.y[0] - expected).abs() < 1e-12);

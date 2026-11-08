@@ -164,9 +164,9 @@ fn primitive_locations(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     geometry_value: &geometry::T,
-) -> Result<packed::Float3::T, error::T> {
+) -> Result<packed::float3::T, error::T> {
     let topology_value = geometry::topology(geometry_value);
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let count = geometry::primitive_count(geometry_value) as usize;
     let zeros = vec![0.0_f64; count];
     let output = map_planes(cancel_token, grain, &[&zeros, &zeros, &zeros], &|primitive, slot| {
@@ -215,7 +215,7 @@ fn primitive_locations(
     })?;
     let mut planes = output.into_iter();
     let (x, y, z) = (planes.next().unwrap_or_default(), planes.next().unwrap_or_default(), planes.next().unwrap_or_default());
-    packed::Float3::View::of_owned_exn(x, y, z)
+    packed::float3::view::of_owned_exn(x, y, z)
 }
 
 fn locations(
@@ -223,7 +223,7 @@ fn locations(
     grain: i64,
     owner: attribute::Owner,
     geometry_value: &geometry::T,
-) -> Result<packed::Float3::T, error::T> {
+) -> Result<packed::float3::T, error::T> {
     match owner {
         attribute::Owner::Point => Ok(geometry::positions(geometry_value).clone()),
         attribute::Owner::Primitive => primitive_locations(cancel_token, grain, geometry_value),
@@ -274,7 +274,7 @@ fn plane_mapping(
 ) -> Result<Mapping, error::T> {
     let count = owner_count(owner, geometry_value)?;
     let located = locations(cancel_token, grain, owner, geometry_value)?;
-    let view = packed::Float3::View::view(&located)?;
+    let view = packed::float3::view::view(&located)?;
     let label = owner_name(owner)?;
     let zeros = vec![0_i64; count as usize];
     let side = map_ints(cancel_token, grain, &zeros, &|element, slot| {
@@ -308,7 +308,7 @@ fn plane_mapping(
         y.push(ry);
         z.push(rz);
     }
-    let reflected = packed::Float3::View::of_owned_exn(x, y, z)?;
+    let reflected = packed::float3::view::of_owned_exn(x, y, z)?;
     let index = spatial_index::create(cancel_token, Some(grain), None, &reflected)
         .map_err(|failure| fail(&error::to_string(&failure)))?;
     let (mut query_x, mut query_y, mut query_z) = (Vec::new(), Vec::new(), Vec::new());
@@ -318,7 +318,7 @@ fn plane_mapping(
         query_y.push(view.y[e]);
         query_z.push(view.z[e]);
     }
-    let queries = packed::Float3::View::of_owned_exn(query_x, query_y, query_z)?;
+    let queries = packed::float3::view::of_owned_exn(query_x, query_y, query_z)?;
     let n = destination_elements.len();
     let mut nearest = vec![-1_i64; n];
     let mut distances = vec![f64::INFINITY; n];
@@ -367,7 +367,7 @@ fn explicit_mapping(
             ocaml_quote(mapping_attribute)
         )));
     };
-    let values = match attribute::View::storage(&found)? {
+    let values = match attribute::view::storage(&found)? {
         attribute::Storage::Int(values) if values.len() as i64 == count => values.clone(),
         attribute::Storage::Int(_) => return Err(fail("Attribute Mirror mapping cardinality mismatch")),
         _ => return Err(fail("Attribute Mirror mapping attribute must be integer")),
@@ -559,7 +559,7 @@ fn remap_attribute(
         },
         ocaml_quote(name)
     );
-    let source = attribute::View::storage(item)?;
+    let source = attribute::view::storage(item)?;
     let storage = match source {
         attribute::Storage::Float(values) => {
             attribute::Storage::Float(Arc::new(copy_float(cancel_token, grain, mapping, &label, values)?))
@@ -617,8 +617,8 @@ fn position_attribute(
     transform: Transform,
     mapping: &Mapping,
     geometry_value: &geometry::T,
-) -> Result<packed::Float3::T, error::T> {
-    let values = packed::Float3::View::view(geometry::positions(geometry_value))?;
+) -> Result<packed::float3::T, error::T> {
+    let values = packed::float3::view::view(geometry::positions(geometry_value))?;
     let output = copy_tuple(
         cancel_token,
         grain,
@@ -628,7 +628,7 @@ fn position_attribute(
         &[&values.x, &values.y, &values.z],
     )?;
     let mut planes = output.into_iter();
-    packed::Float3::View::of_owned_exn(
+    packed::float3::view::of_owned_exn(
         planes.next().unwrap_or_default(),
         planes.next().unwrap_or_default(),
         planes.next().unwrap_or_default(),
@@ -756,7 +756,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         return Ok(geometry_value.clone());
     }
     let has_positions = positions.is_some();
-    let output = geometry::View::with_merged_owned(positions, generated, groups, geometry_value)?;
+    let output = geometry::view::with_merged_owned(positions, generated, groups, geometry_value)?;
     if !has_positions {
         return Ok(output);
     }
@@ -834,14 +834,14 @@ mod tests {
         let g = add_storage(
             Point,
             "uv",
-            attribute::Storage::Float2(packed::Float2::of_owned(vec![-0.2, -0.4, 0.0, 0.0], vec![0.1, 0.2, 0.0, 0.0]).unwrap()),
+            attribute::Storage::Float2(packed::float2::of_owned(vec![-0.2, -0.4, 0.0, 0.0], vec![0.1, 0.2, 0.0, 0.0]).unwrap()),
             &g,
         );
         let g = add_storage(
             Point,
             "Cd",
             attribute::Storage::Float4(
-                packed::Float4::of_owned(
+                packed::float4::of_owned(
                     vec![1.0, 0.5, 0.0, 0.0],
                     vec![0.0, 0.2, 0.0, 0.0],
                     vec![0.1, 0.3, 0.0, 0.0],
@@ -854,7 +854,7 @@ mod tests {
         let g = add_storage(
             Point,
             "rows",
-            attribute::Storage::IntArray(packed::IntArray::create_owned(vec![0, 1, 3, 3, 3], vec![7, 8, 9]).unwrap()),
+            attribute::Storage::IntArray(packed::int_array::create_owned(vec![0, 1, 3, 3, 3], vec![7, 8, 9]).unwrap()),
             &g,
         );
         geometry::with_group(make_group(group::Owner::Point, "destination", 4, &[2, 3]), &g).unwrap()
@@ -882,13 +882,13 @@ mod tests {
             vec![b"left_A".to_vec(), b"left_B".to_vec(), b"right_B".to_vec(), b"right_A".to_vec()]
         );
         let uv = match attribute::storage(&find(Point, "uv", &output)).unwrap() {
-            attribute::Storage::Float2(values) => packed::Float2::View::view(&values),
+            attribute::Storage::Float2(values) => packed::float2::view::view(&values),
             _ => panic!("uv storage"),
         };
         assert_eq!(&*uv.x, &[-0.2, -0.4, 0.4, 0.2]);
         assert_eq!(&*uv.y, &[0.1, 0.2, 0.2, 0.1]);
         let rows = match attribute::storage(&find(Point, "rows", &output)).unwrap() {
-            attribute::Storage::IntArray(values) => packed::IntArray::View::view(&values),
+            attribute::Storage::IntArray(values) => packed::int_array::view::view(&values),
             _ => panic!("rows storage"),
         };
         assert_eq!(&*rows.offsets, &[0, 1, 3, 5, 6]);
@@ -1045,7 +1045,7 @@ mod tests {
             Point,
             "Cd",
             attribute::Storage::Float4(
-                packed::Float4::of_owned(
+                packed::float4::of_owned(
                     (0..count).map(|p| (p % 251) as f64).collect(),
                     (0..count).map(|p| (p % 127) as f64).collect(),
                     (0..count).map(|p| (p % 67) as f64).collect(),

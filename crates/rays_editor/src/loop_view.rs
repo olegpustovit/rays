@@ -148,7 +148,7 @@ pub fn hidden_entry(background: color::T, rendered: Option<&d3::Scene3>, camera:
 
 #[allow(clippy::too_many_arguments)]
 pub fn compose_view(
-    map: Option<&image::t>,
+    map: Option<&image::Image>,
     canvases: &[(String, canvas_picture)],
     ui_visible: bool,
     background: color::T,

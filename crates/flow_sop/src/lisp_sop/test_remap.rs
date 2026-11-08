@@ -12,7 +12,7 @@ use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::geometry as geo;
-use rdk_core::packed::{Float2, Float3, Float4, FloatArray, IntArray};
+use rdk_core::packed::{float2, float3, float4, float_array, int_array};
 use rdk_core::{cancel, edge_group, group, topology, topology_index};
 use rdk_core::topology_remap as remap;
 use sop::context::Options as ContextOptions;
@@ -61,7 +61,7 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
         let kinds: Vec<(&str, Storage)> = vec![
             (
                 "N",
-                Storage::Float3(ok(Float3::View::of_owned_exn(
+                Storage::Float3(ok(float3::view::of_owned_exn(
                     (0..n).map(|i| i as f64 - 1.0).collect(),
                     (0..n).map(|i| 0.25 * (i % 3) as f64).collect(),
                     (0..n).map(|i| if i % 4 == 0 { 0.0 } else { 2.0 }).collect(),
@@ -70,12 +70,12 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
             ("float", Storage::Float(Arc::new(floats(0)))),
             ("int", Storage::Int(Arc::new((0..n as i64).map(|i| (1 << 55) + i).collect()))),
             ("text", Storage::Text(Arc::new((0..n).map(|i| if i % 2 == 0 { [0xe7,0x8c,0xab,0xff].to_vec() } else { [0xf0,0x9f,0x98,0x80,0].to_vec() }).collect()))),
-            ("vec2", Storage::Float2(ok(Float2::of_owned(floats(1), floats(2))))),
-            ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(floats(3), floats(4), floats(5))))),
-            ("vec4", Storage::Float4(ok(Float4::of_owned(floats(2), floats(3), floats(4), floats(5))))),
-            ("mat16", Storage::FloatArray(ok(FloatArray::create_owned(offsets, (0..n * 16).map(raw).collect())))),
-            ("ragged_float", Storage::FloatArray(ok(FloatArray::create_owned((0..=n as i64).map(|i| i / 2).collect(), (0..n / 2).map(raw).collect())))),
-            ("ragged", Storage::IntArray(ok(IntArray::create_owned((0..=n as i64).map(ragged_offsets).collect(), (0..ragged_offsets(n as i64)).map(|i| (1 << 55) + i).collect())))),
+            ("vec2", Storage::Float2(ok(float2::of_owned(floats(1), floats(2))))),
+            ("vec3", Storage::Float3(ok(float3::view::of_owned_exn(floats(3), floats(4), floats(5))))),
+            ("vec4", Storage::Float4(ok(float4::of_owned(floats(2), floats(3), floats(4), floats(5))))),
+            ("mat16", Storage::FloatArray(ok(float_array::create_owned(offsets, (0..n * 16).map(raw).collect())))),
+            ("ragged_float", Storage::FloatArray(ok(float_array::create_owned((0..=n as i64).map(|i| i / 2).collect(), (0..n / 2).map(raw).collect())))),
+            ("ragged", Storage::IntArray(ok(int_array::create_owned((0..=n as i64).map(ragged_offsets).collect(), (0..ragged_offsets(n as i64)).map(|i| (1 << 55) + i).collect())))),
         ];
         for (name, storage) in kinds {
             attrs.push(ok(attribute::create_owned(name, owner, storage)));
@@ -96,7 +96,7 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
     let edge_groups = vec![ok(edge_group::init(None, &t, &index, "edges", &|i| i % 2 == 0))];
     let n = count as usize;
     ok(geo::create(
-        ok(Float3::View::of_owned_exn((0..n).map(raw).collect(), (0..n).map(|i| raw(i + 1)).collect(), (0..n).map(|i| raw(i + 2)).collect())),
+        ok(float3::view::of_owned_exn((0..n).map(raw).collect(), (0..n).map(|i| raw(i + 1)).collect(), (0..n).map(|i| raw(i + 2)).collect())),
         t,
         Some(attrs),
         Some(groups),
@@ -105,7 +105,7 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
 }
 
 fn target(copies: i64, src: &geo::T) -> geo::T {
-    let t = ok(topology::View::view(geo::topology(src)));
+    let t = ok(topology::view::view(geo::topology(src)));
     let points = geo::point_count(src);
     let vertices = geo::vertex_count(src);
     let primitives = geo::primitive_count(src);
@@ -116,7 +116,7 @@ fn target(copies: i64, src: &geo::T) -> geo::T {
         vec![topology::PrimitiveKind::Polygon; (copies * primitives) as usize],
     ));
     let n = (copies * points) as usize;
-    ok(geo::create(ok(Float3::View::of_owned_exn(vec![3.0; n], vec![-0.0; n], vec![7.0; n])), made, None, None, None))
+    ok(geo::create(ok(float3::view::of_owned_exn(vec![3.0; n], vec![-0.0; n], vec![7.0; n])), made, None, None, None))
 }
 
 fn factory(key: &str, g: &geo::T) -> edit::Factory {
@@ -218,8 +218,8 @@ fn oracle(src: &geo::T, dst: &geo::T, p: &[i64], v: &[i64], prim: &[i64], offset
     let positions = if !mapped {
         geo::positions(dst).clone()
     } else {
-        let view = ok(Float3::View::view(geo::positions(src)));
-        ok(Float3::View::of_owned_exn(p.iter().map(|i| view.x[*i as usize]).collect(), p.iter().map(|i| view.y[*i as usize]).collect(), p.iter().map(|i| view.z[*i as usize]).collect()))
+        let view = ok(float3::view::view(geo::positions(src)));
+        ok(float3::view::of_owned_exn(p.iter().map(|i| view.x[*i as usize]).collect(), p.iter().map(|i| view.y[*i as usize]).collect(), p.iter().map(|i| view.z[*i as usize]).collect()))
     };
     ok(geo::create(positions, t.clone(), Some(attrs), Some(groups), Some(edges)))
 }
@@ -339,29 +339,29 @@ fn minus_one_rows_are_defaults_and_in_no_group() {
                             }
                         }
                         (Storage::Float2(x), Storage::Float2(y)) => {
-                            let (x, y) = (Float2::View::view(&x), Float2::View::view(&y));
+                            let (x, y) = (float2::view::view(&x), float2::view::view(&y));
                             eqf(map, &x.x, &y.x);
                             eqf(map, &x.y, &y.y);
                         }
                         (Storage::Float3(x), Storage::Float3(y)) => {
-                            let (x, y) = (ok(Float3::View::view(&x)), ok(Float3::View::view(&y)));
+                            let (x, y) = (ok(float3::view::view(&x)), ok(float3::view::view(&y)));
                             eqf(map, &x.x, &y.x);
                             eqf(map, &x.y, &y.y);
                             eqf(map, &x.z, &y.z);
                         }
                         (Storage::Float4(x), Storage::Float4(y)) => {
-                            let (x, y) = (Float4::View::view(&x), Float4::View::view(&y));
+                            let (x, y) = (float4::view::view(&x), float4::view::view(&y));
                             eqf(map, &x.x, &y.x);
                             eqf(map, &x.y, &y.y);
                             eqf(map, &x.z, &y.z);
                             eqf(map, &x.w, &y.w);
                         }
                         (Storage::IntArray(x), Storage::IntArray(y)) => {
-                            let (x, y) = (IntArray::View::view(&x), IntArray::View::view(&y));
+                            let (x, y) = (int_array::view::view(&x), int_array::view::view(&y));
                             ragged(map, &x.offsets, &x.values.iter().map(|v| *v as u64).collect::<Vec<_>>(), &y.offsets, &y.values.iter().map(|v| *v as u64).collect::<Vec<_>>());
                         }
                         (Storage::FloatArray(x), Storage::FloatArray(y)) => {
-                            let (x, y) = (FloatArray::View::view(&x), FloatArray::View::view(&y));
+                            let (x, y) = (float_array::view::view(&x), float_array::view::view(&y));
                             ragged(map, &x.offsets, &x.values.iter().map(|v| bits(*v)).collect::<Vec<_>>(), &y.offsets, &y.values.iter().map(|v| bits(*v)).collect::<Vec<_>>());
                         }
                         _ => panic!("remap changed a storage kind"),
@@ -378,8 +378,8 @@ fn minus_one_rows_are_defaults_and_in_no_group() {
                         assert!(group::mem(i as i64, &g) == (map[i] >= 0 && group::mem(i as i64, &n)), "created row is in a group or copied membership differs");
                     }
                 }
-                let view = ok(Float3::View::view(geo::positions(&actual)));
-                let expect = ok(Float3::View::view(geo::positions(&native)));
+                let view = ok(float3::view::view(geo::positions(&actual)));
+                let expect = ok(float3::view::view(geo::positions(&native)));
                 eqf(&p, &view.x, &expect.x);
                 eqf(&p, &view.y, &expect.y);
                 eqf(&p, &view.z, &expect.z);
@@ -499,7 +499,7 @@ fn packed_cutoff_with_all_native_storage_kept_opaque(reference:bool,domains:i64)
     // Original 32769-row boundary, independently registered per tier/domain.
     let n = 32769usize;
     let src = source(n as i64);
-    let dst = ok(geo::with_positions(ok(Float3::View::of_owned_exn(vec![1.0; n], vec![2.0; n], vec![3.0; n])), &src));
+    let dst = ok(geo::with_positions(ok(float3::view::of_owned_exn(vec![1.0; n], vec![2.0; n], vec![3.0; n])), &src));
     let p: Vec<i64> = (0..n as i64).map(|i| (i + 1) % n as i64).collect();
     let (v, prim, offsets, ancestors) = ([0i64, 1, 2], [0i64], [0i64, 1, 2, 3], [0i64, 1, 2]);
     let expected = oracle(&src, &dst, &p, &v, &prim, &offsets, &ancestors, true);
@@ -631,7 +631,7 @@ fn explicit_authored_target_topology() {
     // owner payload and edge ancestry come from src.
     let src = source(3);
     let t = ok(topology::create_owned(4, vec![0, 1, 2, 3, 3, 2], vec![0, 4, 6], vec![topology::PrimitiveKind::ClosedPolyline, topology::PrimitiveKind::OpenPolyline]));
-    let dst = ok(geo::create(ok(Float3::View::of_owned_exn(vec![1.0, 2.0, 3.0, 4.0], vec![0.0; 4], vec![-0.0, 0.0, -0.0, 0.0])), t.clone(), None, None, None));
+    let dst = ok(geo::create(ok(float3::view::of_owned_exn(vec![1.0, 2.0, 3.0, 4.0], vec![0.0; 4], vec![-0.0, 0.0, -0.0, 0.0])), t.clone(), None, None, None));
     let (p, v, prim) = ([2i64, 1, 0, 2], [2i64, 1, 0, 2, 1, 0], [0i64, 0]);
     let edges = topology_index::edge_count(&ok(topology_index::create(None, &t)));
     let offsets: Vec<i64> = (0..=edges).map(|i| 2 * i).collect();
@@ -657,7 +657,7 @@ fn changing_any_semantic_input_misses_the_cache() {
     let dst = target(1, &source(3));
     let ints = |a: &[i64]| Value::Int_array(Arc::new(a.to_vec()));
     let base = args(&[0, 1, 2], &[0, 1, 2], &[0], &[0, 1, 2, 3], &[0, 1, 2], "target");
-    let target_p = ok(geo::with_positions(ok(Float3::View::of_owned_exn(vec![9.0, 8.0, 7.0], vec![0.0; 3], vec![0.0; 3])), &dst));
+    let target_p = ok(geo::with_positions(ok(float3::view::of_owned_exn(vec![9.0, 8.0, 7.0], vec![0.0; 3], vec![0.0; 3])), &dst));
     let t = ok(topology::create_owned(3, vec![2, 1, 0], vec![0, 3], vec![topology::PrimitiveKind::Polygon]));
     let target_topology = ok(geo::create(geo::positions(&dst).clone(), t, None, None, None));
     let source_order = ok(geo::with_group(ok(group::ordered(group::Owner::Point, "ordered", 3, &[1, 0, 2])), &src));
@@ -693,7 +693,7 @@ fn changing_any_semantic_input_misses_the_cache() {
 #[test]
 fn implicit_edge_affinity_follows_the_target_topology_identity() {
     let src = source(3);
-    let changed_p = ok(geo::with_positions(ok(Float3::View::of_owned_exn(vec![8.0, 7.0, 6.0], vec![-0.0, 0.0, -0.0], vec![2.0, 3.0, 4.0])), &src));
+    let changed_p = ok(geo::with_positions(ok(float3::view::of_owned_exn(vec![8.0, 7.0, 6.0], vec![-0.0, 0.0, -0.0], vec![2.0, 3.0, 4.0])), &src));
     let inputs = args(&[0, 1, 2], &[0, 1, 2], &[0], &[0, 1, 2, 3], &[0, 1, 2], "target");
     for reference in [false, true] {
         let actual = geometry(run(&compile_with(reference, false, "", &src, &changed_p, &inputs)));
@@ -823,11 +823,11 @@ fn reference_attribute(carry: &Mix, a: &attribute::T) -> attribute::T {
     let storage = match ok(attribute::storage(a)) {
         Storage::Float(v) => Storage::Float(Arc::new(plane(&v))),
         Storage::Float2(v) => {
-            let v = Float2::View::view(&v);
-            Storage::Float2(ok(Float2::of_owned(plane(&v.x), plane(&v.y))))
+            let v = float2::view::view(&v);
+            Storage::Float2(ok(float2::of_owned(plane(&v.x), plane(&v.y))))
         }
         Storage::Float3(v) => {
-            let v = ok(Float3::View::view(&v));
+            let v = ok(float3::view::view(&v));
             let (mut x, mut y, mut z) = (plane(&v.x), plane(&v.y), plane(&v.z));
             if attribute::name(a) == "N" {
                 for i in 0..x.len() {
@@ -839,11 +839,11 @@ fn reference_attribute(carry: &Mix, a: &attribute::T) -> attribute::T {
                     }
                 }
             }
-            Storage::Float3(ok(Float3::View::of_owned_exn(x, y, z)))
+            Storage::Float3(ok(float3::view::of_owned_exn(x, y, z)))
         }
         Storage::Float4(v) => {
-            let v = Float4::View::view(&v);
-            Storage::Float4(ok(Float4::of_owned(plane(&v.x), plane(&v.y), plane(&v.z), plane(&v.w))))
+            let v = float4::view::view(&v);
+            Storage::Float4(ok(float4::of_owned(plane(&v.x), plane(&v.y), plane(&v.z), plane(&v.w))))
         }
         _ => ok(attribute::storage(&ok(remap::attribute(None, 97, None, &nearest(carry), a)))),
     };
@@ -860,28 +860,28 @@ fn nan_free(g: &geo::T) -> Vec<u8> {
             let storage = match ok(attribute::storage(a)) {
                 Storage::Float(v) => Storage::Float(Arc::new(cv(&v))),
                 Storage::Float2(v) => {
-                    let v = Float2::View::view(&v);
-                    Storage::Float2(ok(Float2::of_owned(cv(&v.x), cv(&v.y))))
+                    let v = float2::view::view(&v);
+                    Storage::Float2(ok(float2::of_owned(cv(&v.x), cv(&v.y))))
                 }
                 Storage::Float3(v) => {
-                    let v = ok(Float3::View::view(&v));
-                    Storage::Float3(ok(Float3::View::of_owned_exn(cv(&v.x), cv(&v.y), cv(&v.z))))
+                    let v = ok(float3::view::view(&v));
+                    Storage::Float3(ok(float3::view::of_owned_exn(cv(&v.x), cv(&v.y), cv(&v.z))))
                 }
                 Storage::Float4(v) => {
-                    let v = Float4::View::view(&v);
-                    Storage::Float4(ok(Float4::of_owned(cv(&v.x), cv(&v.y), cv(&v.z), cv(&v.w))))
+                    let v = float4::view::view(&v);
+                    Storage::Float4(ok(float4::of_owned(cv(&v.x), cv(&v.y), cv(&v.z), cv(&v.w))))
                 }
                 Storage::FloatArray(v) => {
-                    let v = FloatArray::View::view(&v);
-                    Storage::FloatArray(ok(FloatArray::create_owned(v.offsets.to_vec(), cv(&v.values))))
+                    let v = float_array::view::view(&v);
+                    Storage::FloatArray(ok(float_array::create_owned(v.offsets.to_vec(), cv(&v.values))))
                 }
                 other => other,
             };
             ok(attribute::create_owned(attribute::name(a), attribute::owner(a), storage))
         })
         .collect();
-    let p = ok(Float3::View::view(geo::positions(g)));
-    let positions = ok(Float3::View::of_owned_exn(cv(&p.x), cv(&p.y), cv(&p.z)));
+    let p = ok(float3::view::view(geo::positions(g)));
+    let positions = ok(float3::view::of_owned_exn(cv(&p.x), cv(&p.y), cv(&p.z)));
     geometry_bytes(&ok(geo::create(positions, geo::topology(g).clone(), Some(attrs), Some(geo::groups(g)), Some(geo::edge_groups(g)))))
 }
 
@@ -952,11 +952,11 @@ fn weighted_remap_every_owner_and_storage() {
                     ok(remap::group(None, 97, &if group_flag(owner) { nearest(m) } else { m.0.clone() }, g))
                 })
                 .collect();
-            let v = ok(Float3::View::view(geo::positions(&src)));
+            let v = ok(float3::view::view(geo::positions(&src)));
             let positions = if points {
-                ok(Float3::View::of_owned_exn(blend_plane(&pc, &v.x), blend_plane(&pc, &v.y), blend_plane(&pc, &v.z)))
+                ok(float3::view::of_owned_exn(blend_plane(&pc, &v.x), blend_plane(&pc, &v.y), blend_plane(&pc, &v.z)))
             } else {
-                ok(Float3::View::of_owned_exn(pc.0.iter().map(|i| v.x[*i as usize]).collect(), pc.0.iter().map(|i| v.y[*i as usize]).collect(), pc.0.iter().map(|i| v.z[*i as usize]).collect()))
+                ok(float3::view::of_owned_exn(pc.0.iter().map(|i| v.x[*i as usize]).collect(), pc.0.iter().map(|i| v.y[*i as usize]).collect(), pc.0.iter().map(|i| v.z[*i as usize]).collect()))
             };
             let expected = ok(geo::create(positions, geo::topology(&dst).clone(), Some(attributes), Some(groups), Some(geo::edge_groups(&base))));
             // the shared helper is Curve_join' rule, byte for byte

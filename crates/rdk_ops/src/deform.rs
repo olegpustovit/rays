@@ -103,8 +103,8 @@ pub fn point_selected(
     }
 }
 
-fn planes_of(values: &packed::Float3::T) -> Result<Planes, error::T> {
-    let values = packed::Float3::View::view(values)?;
+fn planes_of(values: &packed::float3::T) -> Result<Planes, error::T> {
+    let values = packed::float3::view::view(values)?;
     Ok(Planes { x: values.x.to_vec(), y: values.y.to_vec(), z: values.z.to_vec() })
 }
 
@@ -119,7 +119,7 @@ pub fn point_vector_attribute(
     let Some(found) = geometry::find_attribute(attribute::Owner::Point, name, geometry_value) else {
         return Err(fail(format!("{operation}: missing point float3 attribute {name}")));
     };
-    match attribute::View::storage(&found)? {
+    match attribute::view::storage(&found)? {
         attribute::Storage::Float3(values) => planes_of(values),
         _ => Err(fail(format!("{operation}: point attribute {name} must have float3 storage"))),
     }
@@ -129,7 +129,7 @@ fn vertex_normals(geometry_value: &geometry::T) -> Result<Option<Planes>, error:
     let Some(found) = geometry::find_attribute(attribute::Owner::Vertex, "N", geometry_value) else {
         return Ok(None);
     };
-    match attribute::View::storage(&found)? {
+    match attribute::view::storage(&found)? {
         attribute::Storage::Float3(values) => Ok(Some(planes_of(values)?)),
         _ => Err(fail("Rdk.Deform: vertex N must have float3 storage".to_owned())),
     }
@@ -152,7 +152,7 @@ fn point_vectors_from_vertices(
     topology_value: &topology::T,
     source: &Planes,
 ) -> Result<Planes, error::T> {
-    let view = topology::View::view(topology_value)?;
+    let view = topology::view::view(topology_value)?;
     let count = view.point_count as usize;
     let mut x = vec![0.0; count];
     let mut y = vec![0.0; count];
@@ -184,7 +184,7 @@ fn geometric_point_vectors(
     geometry_value: &geometry::T,
 ) -> Result<Planes, error::T> {
     let faces = face_vectors(cancel_value, grain, geometry_value)?;
-    let view = topology::View::view(geometry::topology(geometry_value))?;
+    let view = topology::view::view(geometry::topology(geometry_value))?;
     let count = view.point_count as usize;
     let mut x = vec![0.0; count];
     let mut y = vec![0.0; count];
@@ -209,7 +209,7 @@ pub fn resolve_directions(
     geometry_value: &geometry::T,
 ) -> Result<Planes, error::T> {
     if let Some(found) = geometry::find_attribute(attribute::Owner::Point, "N", geometry_value) {
-        return match attribute::View::storage(&found)? {
+        return match attribute::view::storage(&found)? {
             attribute::Storage::Float3(values) => planes_of(values),
             _ => Err(fail("Rdk.Deform: point N must have float3 storage".to_owned())),
         };

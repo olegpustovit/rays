@@ -3,16 +3,16 @@
 use std::sync::Arc;
 
 use param::Value;
-use rdk_core::packed::Float3;
+use rdk_core::packed::float3;
 use sop::node::{self, CookMode};
 use sop::{context, custom, edit_graph, session};
 
 use super::super::support::*;
 
 fn tri() -> rdk_core::geometry::T {
-    let positions = Float3::View::of_owned_exn(vec![-0.5, 0.5, 0.], vec![-0.5, -0.5, 0.5], vec![0., 0., 0.]).unwrap();
+    let positions = float3::view::of_owned_exn(vec![-0.5, 0.5, 0.], vec![-0.5, -0.5, 0.5], vec![0., 0., 0.]).unwrap();
     let topology = rdk_core::topology::polygons_owned(3, vec![0, 2, 1], vec![0, 3]).unwrap();
-    let values = Float3::View::of_owned_exn(vec![0.; 3], vec![0.; 3], vec![-1.; 3]).unwrap();
+    let values = float3::view::of_owned_exn(vec![0.; 3], vec![0.; 3], vec![-1.; 3]).unwrap();
     let normal = rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float3(values)).unwrap();
     rdk_core::geometry::create(positions, topology, Some(vec![normal]), None, None).unwrap()
 }
@@ -48,7 +48,7 @@ pub fn terminal_normals() {
         assert!(w.join().unwrap() == one, "terminal normal worker drift");
     }
     let source = tri();
-    let bad = rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float2(rdk_core::packed::Float2::of_owned(vec![0.; 3], vec![0.; 3]).unwrap())).unwrap();
+    let bad = rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float2(rdk_core::packed::float2::of_owned(vec![0.; 3], vec![0.; 3]).unwrap())).unwrap();
     let source = rdk_core::geometry::without_attribute(rdk_core::attribute::Owner::Vertex, "N", &source);
     let source = rdk_core::geometry::with_attribute(bad, &source).unwrap();
     assert!(mesh(&source).is_err(), "malformed terminal N was accepted");
@@ -70,7 +70,7 @@ fn float_of(v: &Value) -> f64 {
 }
 
 fn x_of(g: &rdk_core::geometry::T) -> f64 {
-    Float3::get(rdk_core::geometry::positions(g), 0).unwrap().0
+    float3::get(rdk_core::geometry::positions(g), 0).unwrap().0
 }
 
 fn cook(s: &mut session::T, c: &context::T, n: &node::T) -> rdk_core::geometry::T {
@@ -102,15 +102,15 @@ pub fn custom_sop() {
                     }
                     let offset = float_of(&params[0]) + float_of(&params[1]) * context::time(context);
                     let p = rdk_core::geometry::positions(&geometries[0]);
-                    let n = Float3::length(p);
+                    let n = float3::length(p);
                     let (mut xs, mut ys, mut zs) = (vec![], vec![], vec![]);
                     for i in 0..n {
-                        let (x, y, z) = Float3::get(p, i).unwrap();
+                        let (x, y, z) = float3::get(p, i).unwrap();
                         xs.push(x + offset);
                         ys.push(y);
                         zs.push(z);
                     }
-                    let positions = Float3::of_owned(xs, ys, zs).map_err(|e| format!("{e:?}"))?;
+                    let positions = float3::of_owned(xs, ys, zs).map_err(|e| format!("{e:?}"))?;
                     rdk_core::geometry::with_positions(positions, &geometries[0]).map_err(|e| format!("{e:?}"))
                 }),
             ))

@@ -4,7 +4,7 @@ use crate::steps::*;
 use crate::support::*;
 use input::{Event, Key, MouseButton, ScrollPhase};
 use pxui::ui::*;
-use rays::scene::Layer;
+use rays::scene::layer;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -570,7 +570,7 @@ fn scale_9(scale: f64) {
 }
 
 fn ime_cursor(ui: &Ui, lab: &dyn Fn(&str) -> String) -> i64 {
-    match &Layer::text_regions(&ui.scene(None))[..] {
+    match &layer::text_regions(&ui.scene(None))[..] {
         [(_, _, _, _, true, cursor)] => *cursor,
         _ => fail(&lab("focused text field lost its IME region")),
     }
@@ -743,7 +743,7 @@ fn scale_11(scale: f64) {
     field_step(&mut ui, vec![], vec![], &mut build);
     field_step(&mut ui, vec![], vec![press((40, 30)), release((40, 30))], &mut build);
     let cursor = |ui: &Ui| -> i64 {
-        match &Layer::text_regions(&ui.scene(None))[..] {
+        match &layer::text_regions(&ui.scene(None))[..] {
             [(_, _, _, _, true, cursor)] => *cursor,
             regions => fail(&lab(&format!("long field lost its IME region ({})", regions.len()))),
         }
@@ -947,11 +947,11 @@ pub fn window_pxui_batches() {
             ui.button("Quit");
         });
     });
-    match Layer::stage_native(320, 240, &ui.scene(None)) {
+    match layer::stage_native(320, 240, &ui.scene(None)) {
         Ok(staged) => {
             let mut batches = 0;
             for layer in &staged.layers {
-                if let Layer::native_layer::Ui_layer(batch, _) = layer {
+                if let layer::native_layer::Ui_layer(batch, _) = layer {
                     batches += batch.batches().len();
                 }
             }

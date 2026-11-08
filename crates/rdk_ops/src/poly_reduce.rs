@@ -131,7 +131,7 @@ struct Stamps {
     stamp: i64,
 }
 
-fn link_valid(index: &topology_index::View::View, stamps: &mut Stamps, incidence: &[i64], edge: usize) -> bool {
+fn link_valid(index: &topology_index::view::View, stamps: &mut Stamps, incidence: &[i64], edge: usize) -> bool {
     stamps.stamp += 1;
     let current = stamps.stamp;
     let a = index.edge_a[edge];
@@ -163,9 +163,9 @@ struct Faces {
 
 #[allow(clippy::too_many_arguments)]
 fn normal_valid(
-    index: &topology_index::View::View,
-    topology_view: &topology::View::View,
-    positions: &packed::Float3::View::View,
+    index: &topology_index::view::View,
+    topology_view: &topology::view::View,
+    positions: &packed::float3::view::View,
     coordinate_scale: f64,
     only_original_positions: bool,
     max_normal_deviation: Option<f64>,
@@ -283,16 +283,16 @@ fn plan_round(
     if !topology::all_triangles(topology_value)? {
         return Err(fail("Rdk.Poly_reduce: the round planner requires triangle polygons"));
     }
-    let topology_view = topology::View::view(topology_value)?;
+    let topology_view = topology::view::view(topology_value)?;
     let index_value = topology_index::create(cancel_ref, topology_value)?;
-    let index = topology_index::View::view(&index_value);
+    let index = topology_index::view::view(&index_value);
     let point_count = geometry::point_count(geometry_value) as usize;
     let primitive_count = geometry::primitive_count(geometry_value) as usize;
     let edge_count = index.edge_a.len();
     validate_group(group::Owner::Primitive, primitive_count as i64, "Rdk.Poly_reduce: primitive selection", primitive_selection)?;
     validate_group(group::Owner::Point, point_count as i64, "Rdk.Poly_reduce: hard points", hard_points)?;
     validate_edge_group(topology_value, edge_count as i64, "Rdk.Poly_reduce: hard edges", hard_edges)?;
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     support::parallel_for(cancel_ref, (grain / 3).max(1), point_count as i64, &|point| {
         let point = point as usize;
         if !(positions.x[point].is_finite() && positions.y[point].is_finite() && positions.z[point].is_finite()) {
@@ -905,7 +905,7 @@ mod tests {
         assert!(run(&p, &curve).is_err(), "accepted curve topology");
         let (mut x, y, z) = xyz(&source);
         x[3] = f64::NAN;
-        let non_finite = geometry::with_positions(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), &source).unwrap();
+        let non_finite = geometry::with_positions(packed::float3::view::of_owned_exn(x, y, z).unwrap(), &source).unwrap();
         assert!(run(&Params::new(Target::ReduceRatio(0.5)), &non_finite).is_err(), "accepted a non-finite position");
         let token = Arc::new(cancel::create());
         cancel::cancel(&token);

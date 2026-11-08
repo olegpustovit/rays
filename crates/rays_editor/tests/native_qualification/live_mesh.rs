@@ -2,7 +2,7 @@
 use flow_native::workspace_gpu as wg;
 use flow_ir::flow_ir::Gpu;
 use flow_sop::{lower,value_lane};
-use rdk_core::{geometry as g, attribute as a, packed::Float3 as p};
+use rdk_core::{geometry as g, attribute as a, packed::float3 as p};
 use std::{sync::{Arc,Weak},rc::Rc};
 fn ok<T>(r:Result<T,rays_diagnostic::Diagnostic>)->T { r.unwrap_or_else(|d|panic!("{}",rays_diagnostic::to_string(&d))) }
 const MESH: &str = r###"(workspace live_mesh
@@ -121,7 +121,7 @@ fn swarm_frames() {
         assert!(x*u+y*v+z*w>0.98,"tube {tube} frame flipped at ring {ring}");
       }}
     }
-    let topo=rdk_core::topology::View::view(g::topology(&hosts[0])).unwrap();
+    let topo=rdk_core::topology::view::view(g::topology(&hosts[0])).unwrap();
     let mut edges=std::collections::BTreeMap::new();
     for triangle in topo.vertex_points.chunks_exact(3) {
         for (a,b) in [(triangle[0],triangle[1]),(triangle[1],triangle[2]),(triangle[2],triangle[0])] {
@@ -437,7 +437,7 @@ fn orrery_frames() {
     let prepared=editor.core.cook.pieces[0].prepared.clone();
     let misses=rays_editor::cook::stats(&editor.core.cook).misses;
     let warm=wg::image_stats(&gpu).0;
-    let renderer=rays::canvas::Private::native_stats(&canvas).unwrap();
+    let renderer=rays::canvas::private::native_stats(&canvas).unwrap();
     assert!(renderer.pipeline_cache_entries>0,"native renderer did not use GPU pipelines");
     for tick in 32..=61 {
         f.input.frame=tick; f.input.tick=tick; f.input.t=tick as f64/60.;
@@ -455,6 +455,6 @@ fn orrery_frames() {
     let after=wg::image_stats(&gpu).0;
     assert_eq!(after.pipeline_compilations,warm.pipeline_compilations,"idle frame compiled a GPU kernel");
     assert_eq!(after.runners_created,warm.runners_created,"idle frame created a GPU runner");
-    assert_eq!(rays::canvas::Private::native_stats(&canvas).unwrap().pipeline_cache_entries,renderer.pipeline_cache_entries,"idle frame compiled a render pipeline");
+    assert_eq!(rays::canvas::private::native_stats(&canvas).unwrap().pipeline_cache_entries,renderer.pipeline_cache_entries,"idle frame compiled a render pipeline");
     editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap();
 }

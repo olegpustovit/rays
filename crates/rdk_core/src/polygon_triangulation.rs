@@ -100,8 +100,8 @@ pub fn find_projected_ear(
 
 pub fn primitive(
     cancel_token: Option<&cancel::T>,
-    positions: &packed::Float3::View::View,
-    topology_view: &topology::View::View,
+    positions: &packed::float3::view::View,
+    topology_view: &topology::view::View,
     scratch: Option<&mut T>,
     primitive: i64,
     emit: &mut dyn FnMut(i64, i64, i64, i64),
@@ -227,15 +227,15 @@ mod tests {
 
     #[test]
     fn degenerate_polygon_reports_source_failure() {
-        let positions = packed::Float3::View::of_owned_exn(
+        let positions = packed::float3::view::of_owned_exn(
             (0..8).map(f64::from).collect(),
             vec![0.0; 8],
             vec![0.0; 8],
         )
         .unwrap();
         let topology = topology::polygons_owned(8, vec![0, 1, 2, 3, 4, 5, 6, 7], vec![0, 4, 8]).unwrap();
-        let positions = packed::Float3::View::view(&positions).unwrap();
-        let topology = topology::View::view(&topology).unwrap();
+        let positions = packed::float3::view::view(&positions).unwrap();
+        let topology = topology::view::view(&topology).unwrap();
         let mut scratch = create_scratch();
         let mut emit = |_: i64, _: i64, _: i64, _: i64| {};
         let error = primitive(None, &positions, &topology, Some(&mut scratch), 0, &mut emit).unwrap_err();

@@ -10,7 +10,7 @@ use param::{Effects, FieldView, Impact, KindView, Value};
 use rdk_core::attribute::{self as attr, Owner, Storage};
 use rdk_core::geometry as geo;
 use rdk_core::group;
-use rdk_core::packed::{Float3, Float4};
+use rdk_core::packed::{float3, float4};
 use rdk_core::topology::{self, PrimitiveKind};
 use sop::context::{self as sctx, Options as CtxOptions};
 use sop::edit_graph::{self as edit, Factory, InputRequirement};
@@ -105,12 +105,12 @@ fn cook_at(domains: i64, grain: i64, entries: i64, bytes: i64, n: &node::T) -> g
 type Planes = (Vec<f64>, Vec<f64>, Vec<f64>);
 
 fn positions(g: &geo::T) -> Planes {
-    let v = Float3::View::view(geo::positions(g)).unwrap();
+    let v = float3::view::view(geo::positions(g)).unwrap();
     (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
 }
 
 fn topo(g: &geo::T) -> (i64, Vec<i64>, Vec<i64>, Vec<u8>) {
-    let v = topology::View::view(geo::topology(g)).unwrap();
+    let v = topology::view::view(geo::topology(g)).unwrap();
     (v.point_count, v.vertex_points.to_vec(), v.primitive_offsets.to_vec(), v.primitive_kinds.to_vec())
 }
 
@@ -118,7 +118,7 @@ fn float3(name: &str, g: &geo::T) -> Planes {
     let a = geo::find_attribute(Owner::Point, name, g).unwrap_or_else(|| panic!("missing {name}"));
     match attr::storage(&a) {
         Ok(Storage::Float3(v)) => {
-            let v = Float3::View::view(&v).unwrap();
+            let v = float3::view::view(&v).unwrap();
             (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
         }
         _ => panic!("{name} has wrong storage"),
@@ -139,9 +139,9 @@ fn bytes(g: &geo::T) -> String {
             Ok(Storage::Float(v)) => out.push_str(&format!("{:?}", v.iter().map(|x| x.to_bits()).collect::<Vec<_>>())),
             Ok(Storage::Int(v)) => out.push_str(&format!("{v:?}")),
             Ok(Storage::Text(v)) => out.push_str(&format!("{v:?}")),
-            Ok(Storage::Float2(v)) => out.push_str(&format!("{:?}", (0..rdk_core::packed::Float2::length(&v)).map(|i| rdk_core::packed::Float2::get(&v, i).map(|(a, b)| (a.to_bits(), b.to_bits()))).collect::<Vec<_>>())),
-            Ok(Storage::Float3(v)) => out.push_str(&format!("{:?}", (0..Float3::length(&v)).map(|i| Float3::get(&v, i).map(|(a, b, c)| (a.to_bits(), b.to_bits(), c.to_bits()))).collect::<Vec<_>>())),
-            Ok(Storage::Float4(v)) => out.push_str(&format!("{:?}", (0..Float4::length(&v)).map(|i| Float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))).collect::<Vec<_>>())),
+            Ok(Storage::Float2(v)) => out.push_str(&format!("{:?}", (0..rdk_core::packed::float2::length(&v)).map(|i| rdk_core::packed::float2::get(&v, i).map(|(a, b)| (a.to_bits(), b.to_bits()))).collect::<Vec<_>>())),
+            Ok(Storage::Float3(v)) => out.push_str(&format!("{:?}", (0..float3::length(&v)).map(|i| float3::get(&v, i).map(|(a, b, c)| (a.to_bits(), b.to_bits(), c.to_bits()))).collect::<Vec<_>>())),
+            Ok(Storage::Float4(v)) => out.push_str(&format!("{:?}", (0..float4::length(&v)).map(|i| float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))).collect::<Vec<_>>())),
             Ok(_) => out.push_str("array"),
             Err(e) => out.push_str(&format!("{e:?}")),
         }
@@ -243,10 +243,10 @@ fn motion() {
 fn set_color() {
     let mut s = session::create(8, 1_000_000).unwrap();
     let b = catalog_node("box", &[], &[]);
-    let colors = |s: &mut session::T, n: &node::T| -> Float4::View::View {
+    let colors = |s: &mut session::T, n: &node::T| -> float4::view::View {
         match geo::find_attribute(Owner::Point, "Cd", &cook(s, n)) {
             Some(a) => match attr::storage(&a) {
-                Ok(Storage::Float4(v)) => Float4::View::view(&v),
+                Ok(Storage::Float4(v)) => float4::view::view(&v),
                 _ => panic!("set_color did not write a float4 Cd"),
             },
             None => panic!("set_color wrote no Cd"),
@@ -586,7 +586,7 @@ fn morph_sketch() {
     // tinted: the mean of #2f6fb5 at weight 1 and #f2a03d at weight 0.35.
     let tinted = both("tinted");
     let cd = match geo::find_attribute(Owner::Point, "Cd", &tinted).map(|a| attr::storage(&a)) {
-        Some(Ok(Storage::Float4(v))) => Float4::View::view(&v),
+        Some(Ok(Storage::Float4(v))) => float4::view::view(&v),
         _ => panic!("Attribute Composite dropped or retyped Cd"),
     };
     let cool = rays_math::color::hex_exn("#2f6fb5").unwrap();
@@ -685,7 +685,7 @@ fn node_inputs() {
             })
             .collect();
         let t = topology::create_owned(8, (0..8).collect(), vec![0, 4, 8], vec![PrimitiveKind::ClosedPolyline; 2]).unwrap();
-        let p = Float3::View::of_owned_exn(pts.iter().map(|p| p.0).collect(), pts.iter().map(|p| p.1).collect(), pts.iter().map(|p| p.2).collect()).unwrap();
+        let p = float3::view::of_owned_exn(pts.iter().map(|p| p.0).collect(), pts.iter().map(|p| p.1).collect(), pts.iter().map(|p| p.2).collect()).unwrap();
         geo::create(p, t, None, None, None).unwrap()
     };
     let skin = |inputs: &[Option<node::T>]| both("Skin", &catalog_node("skin", inputs, &[]));

@@ -1,5 +1,5 @@
 use crate::side_lru::{self, Item, TableKey};
-use runtime_resources::{canvas, Image, text};
+use runtime_resources::{canvas, image, text};
 use scene_command::render_ir::{Command, RenderIr};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::rc::Rc;
 /// A resolved resource id. `Text` is shared by `Rc`: a stamp compares its `Text::identity`.
 #[derive(Clone)]
 pub enum Resource {
-    Image(Image::t),
+    Image(image::Image),
     Text(Rc<text::Text>),
     Canvas(canvas::Canvas),
 }
@@ -164,10 +164,10 @@ pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Co
         match resolve(id) {
             None => missing = true,
             Some(Resource::Image(image)) => {
-                if Image::gpu_snapshot(&image).is_err() {
+                if image::gpu_snapshot(&image).is_err() {
                     missing = true;
                 } else {
-                    stamps.push(ResourceStamp::ImageStamp(id, Image::identity(&image), Image::generation(&image)));
+                    stamps.push(ResourceStamp::ImageStamp(id, image::identity(&image), image::generation(&image)));
                 }
             }
             Some(Resource::Text(text)) => {

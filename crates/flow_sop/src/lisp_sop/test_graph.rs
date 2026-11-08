@@ -9,7 +9,7 @@ use flow_syntax::syntax;
 use flow_syntax::ty;
 use rdk_core::geometry as geo;
 use rdk_core::topology::{self as topo, PrimitiveKind as K};
-use rdk_core::topology_index::{self as tix, View::View};
+use rdk_core::topology_index::{self as tix, view::View};
 use rdk_core::packed;
 use rays_diagnostic::Diagnostic;
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ fn fixtures() -> Vec<(&'static str, geo::T)> {
     .into_iter()
     .map(|(name, topology)| {
         let count = topo::point_count(&topology) as usize;
-        let positions = packed::Float3::View::of_owned_exn((0..count).map(|i| i as f64).collect(), vec![0.0; count], vec![0.0; count]).unwrap();
+        let positions = packed::float3::view::of_owned_exn((0..count).map(|i| i as f64).collect(), vec![0.0; count], vec![0.0; count]).unwrap();
         (name, geo::create(positions, topology, None, None, None).unwrap())
     })
     .collect()
@@ -94,7 +94,7 @@ fn refused(geometry: &geo::T, decls: &str, inputs: &[(&str, Value)], body: &str,
 }
 
 fn view_of(geometry: &geo::T) -> View {
-    tix::View::view(&tix::create(None, geo::topology(geometry)).unwrap())
+    tix::view::view(&tix::create(None, geo::topology(geometry)).unwrap())
 }
 
 fn other(view: &View, p: i64, e: i64) -> i64 {

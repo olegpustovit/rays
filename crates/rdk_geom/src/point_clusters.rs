@@ -155,7 +155,7 @@ pub fn create(
         return Ok(T::Identity);
     }
     // ponytail: OCaml also rejects count > Sys.max_array_length / 2; unreachable for a Vec index here.
-    let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
+    let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let (px_all, py_all, pz_all) = (&positions.x, &positions.y, &positions.z);
     let count_usize = count as usize;
     let mut min = [f64::INFINITY; 3];

@@ -13,7 +13,7 @@ use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter}
 use rays_math::color;
 use renderer::renderer::Resource as retained_resource;
 use renderer::scene_execution as se;
-use runtime_resources::{canvas as RCanvas, Image as RImage, text as RText};
+use runtime_resources::{canvas as RCanvas, image as RImage, text as RText};
 use scene_command::display_list::{self, Segment};
 use scene_command::render_ir::{self, Command, Geometry, Transform};
 use scene_command::shape2;
@@ -42,19 +42,19 @@ pub struct text_node {
     pub align: font::alignment,
     pub provided_font: Option<font::Font>,
     automatic: RefCell<Option<font::raster::automatic>>,
-    rendered: RefCell<Option<image::t>>,
+    rendered: RefCell<Option<image::Image>>,
 }
 
 pub struct view3d_node {
     pub viewport: Option<(i64, i64, i64, i64)>,
     pub camera: crate::camera::Camera,
     pub scene: scene3::Scene3,
-    rendered3d: RefCell<Option<image::t>>,
+    rendered3d: RefCell<Option<image::Image>>,
 }
 
 #[derive(Clone)]
 pub struct image_node {
-    pub image: image::t,
+    pub image: image::Image,
     pub x: i64,
     pub y: i64,
     pub scale: f64,
@@ -132,7 +132,7 @@ struct shape_cache_context {
 thread_local! {
     static CURRENT_SHAPES: RefCell<Option<Rc<shape_cache_context>>> = const { RefCell::new(None) };
     static CURRENT_LOWER: RefCell<Option<Rc<lower_cache_context>>> = const { RefCell::new(None) };
-    static CURRENT_CONTEXT: RefCell<Option<Layer::cache_context>> = const { RefCell::new(None) };
+    static CURRENT_CONTEXT: RefCell<Option<layer::cache_context>> = const { RefCell::new(None) };
     static RENDERER: RefCell<Option<Rc<dyn Fn(&Scene)>>> = const { RefCell::new(None) };
     static SEGMENT_IRS: RefCell<Vec<(i64, i64, Rc<render_ir::RenderIr>)>> = const { RefCell::new(Vec::new()) };
 }
@@ -296,7 +296,7 @@ pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: 
     }))
 }
 
-pub fn image(image_: &image::t, at: (i64, i64), scale: Option<f64>, angle: Option<f64>) -> Result<node, String> {
+pub fn image(image_: &image::Image, at: (i64, i64), scale: Option<f64>, angle: Option<f64>) -> Result<node, String> {
     let scale = scale.unwrap_or(1.);
     let angle = angle.unwrap_or(0.);
     if !(scale.is_finite() && angle.is_finite()) || scale <= 0. {
@@ -310,7 +310,7 @@ pub fn view3d(viewport: Option<(i64, i64, i64, i64)>, camera: &crate::camera::Ca
 }
 
 /// A retained packed 2D segment.
-pub fn display_list(images: Option<Vec<(i64, image::t)>>, segment: Arc<Segment>) -> Result<node, String> {
+pub fn display_list(images: Option<Vec<(i64, image::Image)>>, segment: Arc<Segment>) -> Result<node, String> {
     let images = images.unwrap_or_default();
     let mut bound: Vec<i64> = Vec::new();
     for (id, _) in &images {
@@ -508,7 +508,7 @@ pub(crate) fn segment_ir(segment: &Arc<Segment>) -> Result<Rc<render_ir::RenderI
     Ok(ir)
 }
 
-pub mod Layer {
+pub mod layer {
     use super::*;
 
     pub struct cache_context(pub(super) Rc<cache_data>);
@@ -585,7 +585,7 @@ pub mod Layer {
 
     /// A native-only PXUI instance layer. Like `view3d`, it ignores enclosing Scene transforms and
     /// clips: the batch carries its own. Every batch texture id must be bound in `images`.
-    pub fn ui(images: Option<Vec<(i64, image::t)>>, batch: ui_batch::Table) -> Result<node, String> {
+    pub fn ui(images: Option<Vec<(i64, image::Image)>>, batch: ui_batch::Table) -> Result<node, String> {
         let images = images.unwrap_or_default();
         for id in batch.textures() {
             if !images.iter().any(|(i, _)| *i == id) {
@@ -613,7 +613,7 @@ pub mod Layer {
         pub resources: Vec<(i64, retained_resource)>,
         pub scene3: Vec<lowering::prepared>,
         pub layers: Vec<native_layer>,
-        pub mesh_images: Vec<RImage::t>,
+        pub mesh_images: Vec<RImage::Image>,
         pub retained: Option<(String, i64)>,
     }
 
@@ -662,7 +662,7 @@ pub mod Layer {
         f()
     }
 
-    fn text_image(density: i64, n: &text_node) -> Result<image::t, String> {
+    fn text_image(density: i64, n: &text_node) -> Result<image::Image, String> {
         if let Some(img) = n.rendered.borrow().as_ref() {
             return Ok(img.clone());
         }
@@ -683,7 +683,7 @@ pub mod Layer {
         values: Vec<Command>,
     }
 
-    fn image_command(builder: &mut command_builder, img: &image::t, x: i64, y: i64, scale: f64, angle: f64) {
+    fn image_command(builder: &mut command_builder, img: &image::Image, x: i64, y: i64, scale: f64, angle: f64) {
         let (width, height) = image::dimensions(img);
         let rect = render_ir::Rect { x: 0., y: 0., width: width as f64, height: height as f64 };
         let destination = render_ir::Rect { x: x as f64, y: y as f64, width: width as f64 * scale, height: height as f64 * scale };
@@ -1072,10 +1072,10 @@ pub mod Layer {
         }
     }
 
-    fn texture_levels(tex: &texture::t) -> Result<Rc<Vec<se::TextureLevel>>, String> {
-        let id = texture::Private::identity(tex);
+    fn texture_levels(tex: &texture::Texture) -> Result<Rc<Vec<se::TextureLevel>>, String> {
+        let id = texture::private::identity(tex);
         let create = || -> Result<Vec<se::TextureLevel>, String> {
-            Ok(texture::Private::levels(tex)?
+            Ok(texture::private::levels(tex)?
                 .into_iter()
                 .map(|(w, h, pixels)| {
                     let mut bytes = Vec::with_capacity(pixels.len() * 4);
@@ -1160,12 +1160,12 @@ pub mod Layer {
         Rc::new(render_ir::create_owned(Vec::new()).expect("empty IR"))
     }
 
-    fn texture_resources(mesh_images: Rc<RefCell<Vec<RImage::t>>>) -> lowering::resources {
+    fn texture_resources(mesh_images: Rc<RefCell<Vec<RImage::Image>>>) -> lowering::resources {
         lowering::resources {
             texture: Box::new(move |value: &scene3::texture_| {
-                let key = format!("texture:{}", texture::Private::identity(&value.value));
+                let key = format!("texture:{}", texture::private::identity(&value.value));
                 let source: Result<(String, Rc<Vec<se::TextureLevel>>, Option<ogpu_core::backend::Texture>), lowering::error> =
-                    match texture::Private::image(&value.value) {
+                    match texture::private::image(&value.value) {
                         None => texture_levels(&value.value).map(|levels| (key.clone(), levels, None)).map_err(|_| lowering::error::Unsupported_texture),
                         Some(image) => match RImage::gpu_snapshot(&image) {
                             Err(error) => Err(lowering::error::Resource(error)),
@@ -1237,7 +1237,7 @@ pub mod Layer {
         };
         let (scene2, resources) = materialized.map_err(native_error::Message)?;
         let mut failure: Option<native_error> = None;
-        let mesh_images: Rc<RefCell<Vec<RImage::t>>> = Rc::new(RefCell::new(Vec::new()));
+        let mesh_images: Rc<RefCell<Vec<RImage::Image>>> = Rc::new(RefCell::new(Vec::new()));
         let callbacks = texture_resources(mesh_images.clone());
         let layers: Vec<native_layer> = if single_two {
             vec![native_layer::Scene2_layer(scene2.clone(), resources.clone())]

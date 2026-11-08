@@ -420,8 +420,8 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
     }
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(value);
-    let source = topology::View::view(topology_value)?;
-    let positions = packed::Float3::View::view(geometry::positions(value))?;
+    let source = topology::view::view(topology_value)?;
+    let positions = packed::float3::view::view(geometry::positions(value))?;
     let primitive_count = topology::primitive_count(topology_value);
     validate_selection("Curve Join", primitives, primitive_count)?;
     let selected_count = match picked_ends {
@@ -456,7 +456,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
             }
         }
         None => match primitives {
-            Some(selection) => match group::View::order_view(selection) {
+            Some(selection) => match group::view::order_view(selection) {
                 Some(order) => selected_primitives[..sc].copy_from_slice(&order[..sc]),
                 None => {
                     let mut at = 0;
@@ -927,7 +927,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                     output_vertex_count,
                     &|vertex| group::mem(vertex_map[vertex as usize], &item),
                 )?;
-                group::View::remap_order(&item, &vertex_map, &target)?
+                group::view::remap_order(&item, &vertex_map, &target)?
             }
             group::Owner::Primitive => {
                 let target = group::init(
@@ -951,7 +951,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                         }
                     },
                 )?;
-                group::View::remap_order(&item, &primitive_map, &target)?
+                group::view::remap_order(&item, &primitive_map, &target)?
             }
         });
     }
@@ -1023,7 +1023,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
         } else {
             let source_index = topology_index::create(cancel_value, topology_value)?;
             let target_index = topology_index::create(cancel_value, &output_topology)?;
-            let target_view = topology_index::View::view(&target_index);
+            let target_view = topology_index::view::view(&target_index);
             for source_group in &source_groups {
                 let mut builder =
                     edge_group::builder::create(&output_topology, &target_index, edge_group::name(source_group))?;
@@ -1096,7 +1096,7 @@ mod tests {
     use super::*;
 
     fn curves(points: &[(f64, f64, f64)], rows: &[&[i64]]) -> geometry::T {
-        let positions = packed::Float3::of_owned(
+        let positions = packed::float3::of_owned(
             points.iter().map(|p| p.0).collect(),
             points.iter().map(|p| p.1).collect(),
             points.iter().map(|p| p.2).collect(),
@@ -1127,7 +1127,7 @@ mod tests {
     }
 
     fn rows(value: &geometry::T) -> Vec<Vec<i64>> {
-        let view = topology::View::view(geometry::topology(value)).unwrap();
+        let view = topology::view::view(geometry::topology(value)).unwrap();
         (0..view.primitive_offsets.len() - 1)
             .map(|p| view.vertex_points[view.primitive_offsets[p] as usize..view.primitive_offsets[p + 1] as usize].to_vec())
             .collect()
@@ -1164,7 +1164,7 @@ mod tests {
             rows(&join(&kept, &input).unwrap()),
             vec![vec![0, 1, 2], vec![4, 3, 2], vec![0, 1, 2, 3, 4]]
         );
-        let view = topology::View::view(geometry::topology(&join(&kept, &input).unwrap())).unwrap();
+        let view = topology::view::view(geometry::topology(&join(&kept, &input).unwrap())).unwrap();
         assert_eq!(&view.primitive_kinds[..], &[1, 1, 2]);
     }
 
@@ -1262,7 +1262,7 @@ mod tests {
         assert_eq!(attribute::length(&same), 1);
         let point = attribute::create_owned("p", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![0.0, 10.0]))).unwrap();
         let blended = interpolate_attribute(None, None, &[0], &[1], &[0.25], &[], &[], &[], &point).unwrap();
-        match attribute::View::storage(&blended).unwrap() {
+        match attribute::view::storage(&blended).unwrap() {
             attribute::Storage::Float(values) => assert_eq!(**values, vec![2.5]),
             _ => panic!("float"),
         }

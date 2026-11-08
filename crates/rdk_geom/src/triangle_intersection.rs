@@ -12,15 +12,15 @@ use crate::surface_index;
 
 pub struct Surface {
     pub index: Arc<surface_index::T>,
-    pub positions: packed::Float3::View::View,
-    pub topology: topology::View::View,
+    pub positions: packed::float3::view::View,
+    pub topology: topology::view::View,
 }
 
 pub fn surface(index: Arc<surface_index::T>, geometry_value: &geometry::T) -> Result<Surface, error::T> {
     Ok(Surface {
         index,
-        positions: packed::Float3::View::view(geometry::positions(geometry_value))?,
-        topology: topology::View::view(geometry::topology(geometry_value))?,
+        positions: packed::float3::view::view(geometry::positions(geometry_value))?,
+        topology: topology::view::view(geometry::topology(geometry_value))?,
     })
 }
 
@@ -318,8 +318,8 @@ fn add_vertex_if_inside(
 #[allow(clippy::too_many_arguments)]
 fn prepare_points(
     scratch: &mut [f64], point_info: &mut [i64], is_self: bool, tolerance: f64,
-    left_positions: &packed::Float3::View::View, a0: i64, a1: i64, a2: i64,
-    right_positions: &packed::Float3::View::View, b0: i64, b1: i64, b2: i64,
+    left_positions: &packed::float3::view::View, a0: i64, a1: i64, a2: i64,
+    right_positions: &packed::float3::view::View, b0: i64, b1: i64, b2: i64,
 ) -> bool {
     point_info[0] = a0;
     point_info[1] = a1;
@@ -407,11 +407,11 @@ pub fn events_points_into(
     is_self: bool,
     tolerance: f64,
     include_coplanar: bool,
-    left_positions: &packed::Float3::View::View,
+    left_positions: &packed::float3::view::View,
     left_a: i64,
     left_b: i64,
     left_c: i64,
-    right_positions: &packed::Float3::View::View,
+    right_positions: &packed::float3::view::View,
     right_a: i64,
     right_b: i64,
     right_c: i64,
@@ -524,7 +524,7 @@ pub fn events_into(
     let left_vertices = &left.topology.vertex_points;
     let right_vertices = &right.topology.vertex_points;
     let corner = |surface: &Surface, vertices: &[i64], triangle: i64, local: i64| {
-        vertices[surface_index::View::triangle_vertex(&surface.index, triangle, local) as usize]
+        vertices[surface_index::view::triangle_vertex(&surface.index, triangle, local) as usize]
     };
     events_points_into(
         scratch,
@@ -548,15 +548,15 @@ pub fn events_into(
 mod tests {
     use super::*;
 
-    fn view(points: &[[f64; 3]]) -> packed::Float3::View::View {
-        packed::Float3::View::View {
+    fn view(points: &[[f64; 3]]) -> packed::float3::view::View {
+        packed::float3::view::View {
             x: points.iter().map(|p| p[0]).collect::<Vec<_>>().into(),
             y: points.iter().map(|p| p[1]).collect::<Vec<_>>().into(),
             z: points.iter().map(|p| p[2]).collect::<Vec<_>>().into(),
         }
     }
 
-    fn run(positions: &packed::Float3::View::View, is_self: bool, include_coplanar: bool, right: [i64; 3]) -> (usize, Vec<f64>) {
+    fn run(positions: &packed::float3::view::View, is_self: bool, include_coplanar: bool, right: [i64; 3]) -> (usize, Vec<f64>) {
         let mut scratch = [0.0; 26];
         let mut point_info = [0_i64; 10];
         let mut events = [0.0; MAX_EVENTS * EVENT_STRIDE];

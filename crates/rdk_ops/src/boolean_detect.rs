@@ -145,7 +145,7 @@ fn install_outputs(
         output = geometry::with_group(item, &output).map_err(wrap)?;
     }
     if let Some(name) = intersections_attribute {
-        let values = packed::IntArray::create_owned(outputs.offsets.clone(), outputs.values.clone()).map_err(wrap)?;
+        let values = packed::int_array::create_owned(outputs.offsets.clone(), outputs.values.clone()).map_err(wrap)?;
         let item = attribute::create_owned(name, attribute::Owner::Primitive, attribute::Storage::IntArray(values))
             .map_err(wrap)?;
         output = geometry::with_attribute(item, &output).map_err(wrap)?;
@@ -175,9 +175,9 @@ fn detect_pairs(
     collision_geometry: &geometry::T,
 ) -> Result<(Vec<i64>, Vec<i64>), error::T> {
     let (source_triangles, collision_triangles) = if is_self {
-        surface_index::View::overlapping_self_triangle_pairs(cancel_value, grain, tolerance, source_surface)?
+        surface_index::view::overlapping_self_triangle_pairs(cancel_value, grain, tolerance, source_surface)?
     } else {
-        surface_index::View::overlapping_triangle_pairs(cancel_value, grain, tolerance, source_surface, collision_surface)?
+        surface_index::view::overlapping_triangle_pairs(cancel_value, grain, tolerance, source_surface, collision_surface)?
     };
     let candidates = source_triangles.len() as i64;
     let source_narrow = triangle_intersection::surface(Arc::clone(source_surface), source_geometry)?;
@@ -223,10 +223,10 @@ fn detect_pairs(
         cancel::poll(cancel_value, candidate, 4095)?;
         if support::bits::mem(&keep, candidate) {
             let source_primitive =
-                surface_index::View::triangle_primitive(source_surface, source_triangles[candidate as usize]);
+                surface_index::view::triangle_primitive(source_surface, source_triangles[candidate as usize]);
             raw_counts[source_primitive as usize] += 1;
             if is_self {
-                let collision_primitive = surface_index::View::triangle_primitive(
+                let collision_primitive = surface_index::view::triangle_primitive(
                     collision_surface,
                     collision_triangles[candidate as usize],
                 );
@@ -246,8 +246,8 @@ fn detect_pairs(
         cancel::poll(cancel_value, candidate, 4095)?;
         if support::bits::mem(&keep, candidate) {
             let source_primitive =
-                surface_index::View::triangle_primitive(source_surface, source_triangles[candidate as usize]) as usize;
-            let collision_primitive = surface_index::View::triangle_primitive(
+                surface_index::view::triangle_primitive(source_surface, source_triangles[candidate as usize]) as usize;
+            let collision_primitive = surface_index::view::triangle_primitive(
                 collision_surface,
                 collision_triangles[candidate as usize],
             ) as usize;
@@ -400,7 +400,7 @@ mod tests {
         let z = points.iter().map(|p| p.2).collect();
         let offsets = (0..=triangles.len() as i64 / 3).map(|p| p * 3).collect();
         let topology_value = topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets).unwrap();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 
     fn source() -> geometry::T {
@@ -420,9 +420,9 @@ mod tests {
     fn int_array(name: &str, value: &geometry::T) -> (Vec<i64>, Vec<i64>) {
         let item = geometry::find_attribute(attribute::Owner::Primitive, name, value)
             .unwrap_or_else(|| panic!("missing {name}"));
-        match attribute::View::storage(&item).unwrap() {
+        match attribute::view::storage(&item).unwrap() {
             attribute::Storage::IntArray(values) => {
-                let view = packed::IntArray::View::view(values);
+                let view = packed::int_array::view::view(values);
                 (view.offsets.to_vec(), view.values.to_vec())
             }
             _ => panic!("{name} has wrong storage"),
@@ -432,7 +432,7 @@ mod tests {
     fn ints(name: &str, value: &geometry::T) -> Vec<i64> {
         let item = geometry::find_attribute(attribute::Owner::Primitive, name, value)
             .unwrap_or_else(|| panic!("missing {name}"));
-        match attribute::View::storage(&item).unwrap() {
+        match attribute::view::storage(&item).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
@@ -443,8 +443,8 @@ mod tests {
     }
 
     fn topology_equal(left: &geometry::T, right: &geometry::T) -> bool {
-        let l = topology::View::view(geometry::topology(left)).unwrap();
-        let r = topology::View::view(geometry::topology(right)).unwrap();
+        let l = topology::view::view(geometry::topology(left)).unwrap();
+        let r = topology::view::view(geometry::topology(right)).unwrap();
         l.point_count == r.point_count
             && l.vertex_points == r.vertex_points
             && l.primitive_offsets == r.primitive_offsets
@@ -505,8 +505,8 @@ mod tests {
         let output = run_checked(&params, &collision, &source).unwrap();
         assert!(
             topology::data_id(geometry::topology(&output)) == topology::data_id(geometry::topology(&source))
-                && packed::Float3::data_id(geometry::positions(&output))
-                    == packed::Float3::data_id(geometry::positions(&source)),
+                && packed::float3::data_id(geometry::positions(&output))
+                    == packed::float3::data_id(geometry::positions(&source)),
             "copied unchanged source geometry"
         );
         let retained_temperature = geometry::find_attribute(attribute::Owner::Point, "temperature", &output).unwrap();
@@ -542,8 +542,8 @@ mod tests {
     }
 
     fn translated(value: &geometry::T, dx: f64, dy: f64, dz: f64) -> geometry::T {
-        let p = packed::Float3::View::view(geometry::positions(value)).unwrap();
-        let moved = packed::Float3::View::of_owned_exn(
+        let p = packed::float3::view::view(geometry::positions(value)).unwrap();
+        let moved = packed::float3::view::of_owned_exn(
             p.x.iter().map(|v| v + dx).collect(),
             p.y.iter().map(|v| v + dy).collect(),
             p.z.iter().map(|v| v + dz).collect(),

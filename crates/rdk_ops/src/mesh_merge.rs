@@ -75,7 +75,7 @@ fn find_matching_edge_group(template: &edge_group::T, geometry_value: &geometry:
 }
 
 fn empty_points() -> Result<geometry::T, error::T> {
-    let positions = packed::Float3::View::of_owned_exn(Vec::new(), Vec::new(), Vec::new()).map_err(lift)?;
+    let positions = packed::float3::view::of_owned_exn(Vec::new(), Vec::new(), Vec::new()).map_err(lift)?;
     geometry::create(positions, topology::empty(0).map_err(lift)?, None, None, None).map_err(lift)
 }
 
@@ -86,8 +86,8 @@ fn mismatch() -> error::T {
 fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -> Result<attribute::T, error::T> {
     use attribute::Storage;
     let storages: Vec<&Storage> =
-        attributes.iter().map(|item| attribute::View::storage(item).map_err(lift)).collect::<Result<Vec<_>, error::T>>()?;
-    let template_storage = attribute::View::storage(template).map_err(lift)?;
+        attributes.iter().map(|item| attribute::view::storage(item).map_err(lift)).collect::<Result<Vec<_>, error::T>>()?;
+    let template_storage = attribute::view::storage(template).map_err(lift)?;
     let storage = match template_storage {
         Storage::Float(_) | Storage::Float2(_) | Storage::Float3(_) | Storage::Float4(_) => {
             let mut output: Vec<Vec<f64>> = attribute::float_planes(template_storage).map_err(lift)?
@@ -210,8 +210,8 @@ fn merge_plain(
     let (mut point_at, mut vertex_at) = (0_i64, 0_i64);
     for item in geometries {
         cancel::check_opt(cancel_value).map_err(lift)?;
-        let positions = packed::Float3::View::view(geometry::positions(item)).map_err(lift)?;
-        let view = topology::View::view(geometry::topology(item)).map_err(lift)?;
+        let positions = packed::float3::view::view(geometry::positions(item)).map_err(lift)?;
+        let view = topology::view::view(geometry::topology(item)).map_err(lift)?;
         px.extend_from_slice(&positions.x);
         py.extend_from_slice(&positions.y);
         pz.extend_from_slice(&positions.z);
@@ -221,9 +221,9 @@ fn merge_plain(
         point_at += geometry::point_count(item);
         vertex_at += geometry::vertex_count(item);
     }
-    let positions = packed::Float3::View::of_owned_exn(px, py, pz).map_err(lift)?;
+    let positions = packed::float3::view::of_owned_exn(px, py, pz).map_err(lift)?;
     let topology_value =
-        topology::View::create_validated_owned(point_count, vertex_points, primitive_offsets, primitive_kinds);
+        topology::view::create_validated_owned(point_count, vertex_points, primitive_offsets, primitive_kinds);
     let mut attributes = Vec::new();
     for template in &first_attributes {
         let values: Vec<attribute::T> =
@@ -260,7 +260,7 @@ fn merge_plain(
                     order.extend(members_preferred(member).into_iter().map(|element| source_offset + element));
                 }
             }
-            merged_groups.push(group::View::with_owned_order(order, &target).map_err(lift)?);
+            merged_groups.push(group::view::with_owned_order(order, &target).map_err(lift)?);
         }
     }
     let mut merged_edge_groups = Vec::new();
@@ -419,7 +419,7 @@ mod tests {
         let x = points.iter().map(|p| p.0).collect();
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
-        geometry::create(packed::Float3::View::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
+        geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topology_value, None, None, None).unwrap()
     }
 
     fn params(source_attribute: Option<&str>, source_base: Option<i64>) -> RunParams {
@@ -427,7 +427,7 @@ mod tests {
     }
 
     fn ints(name: &str, owner: attribute::Owner, value: &geometry::T) -> Vec<i64> {
-        match attribute::View::storage(&geometry::find_attribute(owner, name, value).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(owner, name, value).unwrap()).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} storage"),
         }
@@ -448,10 +448,10 @@ mod tests {
         let merged = run(&params(None, None), &pair()).unwrap();
         assert_eq!(geometry::point_count(&merged), 4);
         assert_eq!(geometry::primitive_count(&merged), 2);
-        let topology_value = topology::View::view(geometry::topology(&merged)).unwrap();
+        let topology_value = topology::view::view(geometry::topology(&merged)).unwrap();
         assert_eq!(topology_value.vertex_points[..], [0, 1, 2, 3]);
         assert_eq!(topology_value.primitive_offsets[..], [0, 2, 4]);
-        match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "weight", &merged).unwrap()).unwrap() {
+        match attribute::view::storage(&geometry::find_attribute(attribute::Owner::Point, "weight", &merged).unwrap()).unwrap() {
             attribute::Storage::Float(values) => assert_eq!(values[..], [0., 1., 10., 12.]),
             _ => panic!("weight storage"),
         }

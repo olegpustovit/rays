@@ -68,7 +68,7 @@ fn corner_deleted(
     owner: group::Owner,
     selection: &group::T,
     delete_selected: bool,
-    view: &topology::View::View,
+    view: &topology::view::View,
     vertex: i64,
 ) -> bool {
     match owner {
@@ -85,7 +85,7 @@ fn primitive_retained_count(
     selection: &group::T,
     delete_selected: bool,
     policy: TopologyPolicy,
-    view: &topology::View::View,
+    view: &topology::view::View,
     primitive: usize,
 ) -> i64 {
     let first = view.primitive_offsets[primitive];
@@ -117,7 +117,7 @@ pub fn build_plan(
     selection: &group::T,
     source: &geometry::T,
 ) -> Result<Plan, error::T> {
-    let view = topology::View::view(geometry::topology(source))?;
+    let view = topology::view::view(geometry::topology(source))?;
     let owner = group::owner(selection);
     let primitive_count = view.primitive_kinds.len();
     let mut retained_counts = vec![0i64; primitive_count];
@@ -206,7 +206,7 @@ pub fn build_plan(
         }
         vertex_points[vertex] = point;
     }
-    let output_topology = topology::View::create_validated_owned(
+    let output_topology = topology::view::create_validated_owned(
         retained_points,
         vertex_points,
         primitive_offsets,
@@ -284,9 +284,9 @@ pub fn materialize_plan(
     let positions = if plan.point_identity {
         geometry::positions(geometry_value).clone()
     } else {
-        let source = packed::Float3::View::view(geometry::positions(geometry_value))?;
+        let source = packed::float3::view::view(geometry::positions(geometry_value))?;
         let grain = grain.unwrap_or(16_384);
-        packed::Float3::View::of_owned_exn(
+        packed::float3::view::of_owned_exn(
             topology_remap::select_float(cancel_value, grain, None, &plan.point_map, &source.x)?,
             topology_remap::select_float(cancel_value, grain, None, &plan.point_map, &source.y)?,
             topology_remap::select_float(cancel_value, grain, None, &plan.point_map, &source.z)?,
@@ -356,7 +356,7 @@ pub fn primitive_partitions(
     if piece_count < 0 {
         return Err(invalid_argument("Rdk.Deletion.primitive_partitions: negative piece count"));
     }
-    let view = topology::View::view(geometry::topology(geometry_value))?;
+    let view = topology::view::view(geometry::topology(geometry_value))?;
     let source_points = view.point_count as usize;
     let source_primitives = view.primitive_kinds.len();
     if primitive_pieces.len() != source_primitives {
@@ -427,7 +427,7 @@ pub fn primitive_partitions(
             }
             vertex_points[output] = point as i64;
         }
-        let output_topology = topology::View::create_validated_owned(
+        let output_topology = topology::view::create_validated_owned(
             point_map.len() as i64,
             vertex_points,
             primitive_offsets,

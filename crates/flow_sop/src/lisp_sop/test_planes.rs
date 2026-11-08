@@ -8,7 +8,7 @@ use super::support::*;
 use crate::{lisp_sop, lower};
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::geometry as geo;
-use rdk_core::packed::{Float2, Float3, Float4};
+use rdk_core::packed::{float2, float3, float4};
 use sop::edit_graph as edit;
 use sop::{context as sctx, payload, session};
 use std::sync::Arc;
@@ -39,9 +39,9 @@ fn make() -> geo::T {
             g = rk(geo::with_attribute(rk(attribute::create_owned(name, owner, storage)), &g));
         };
         add("f", Storage::Float(Arc::new(plane(0, n))));
-        add("v2", Storage::Float2(rk(Float2::of_owned(plane(1, n), plane(2, n)))));
-        add("v3", Storage::Float3(rk(Float3::View::of_owned_exn(plane(1, n), plane(2, n), plane(3, n)))));
-        add("v4", Storage::Float4(rk(Float4::of_owned(plane(1, n), plane(2, n), plane(3, n), plane(4, n)))));
+        add("v2", Storage::Float2(rk(float2::of_owned(plane(1, n), plane(2, n)))));
+        add("v3", Storage::Float3(rk(float3::view::of_owned_exn(plane(1, n), plane(2, n), plane(3, n)))));
+        add("v4", Storage::Float4(rk(float4::of_owned(plane(1, n), plane(2, n), plane(3, n), plane(4, n)))));
         add("i", Storage::Int(Arc::new((0..n as i64).collect())));
         add("nf", Storage::Float(Arc::new((0..n).map(|i| if i == 0 { f64::NAN } else { 1.0 }).collect())));
     }
@@ -81,15 +81,15 @@ fn planes_of(s: &Storage) -> Vec<Vec<u64>> {
     match s {
         Storage::Float(a) => vec![bits(a)],
         Storage::Float2(d) => {
-            let v = Float2::View::view(d);
+            let v = float2::view::view(d);
             vec![bits(&v.x), bits(&v.y)]
         }
         Storage::Float3(d) => {
-            let v = rk(Float3::View::view(d));
+            let v = rk(float3::view::view(d));
             vec![bits(&v.x), bits(&v.y), bits(&v.z)]
         }
         Storage::Float4(d) => {
-            let v = Float4::View::view(d);
+            let v = float4::view::view(d);
             vec![bits(&v.x), bits(&v.y), bits(&v.z), bits(&v.w)]
         }
         _ => Vec::new(),
@@ -164,8 +164,8 @@ fn planes_width_and_computed_p() {
     let out = cooked(&nodes[0].1, 1, 97).unwrap_or_else(|d| panic!("{}", rays_diagnostic::error_to_string(&d)));
     assert!(planes_of(&storage_of(Owner::Point, "w", &out)) == planes_of(&storage_of(Owner::Point, "v3", &src)), "width 3 lost");
     let out = cooked(&nodes[1].1, 1, 97).unwrap_or_else(|d| panic!("{}", rays_diagnostic::error_to_string(&d)));
-    let a = rk(Float3::View::view(geo::positions(&out)));
-    let b = rk(Float3::View::view(geo::positions(&src)));
+    let a = rk(float3::view::view(geo::positions(&out)));
+    let b = rk(float3::view::view(geo::positions(&src)));
     assert!(a.x.iter().zip(b.x.iter()).all(|(x, y)| *x == 2.0 * *y) && a.y == b.y && a.z == b.z, "computed P planes");
 }
 

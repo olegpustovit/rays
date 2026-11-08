@@ -114,7 +114,7 @@ pub fn raw(
     }
     let topology_value = geometry::topology(geometry_value);
     let index_value = topology_index::create(cancel_value, topology_value)?;
-    let index = topology_index::View::view(&index_value);
+    let index = topology_index::view::view(&index_value);
     let edge_count = index.edge_a.len();
     let point_count = geometry::point_count(geometry_value) as usize;
     let selected = |edge: usize| match edges {
@@ -144,28 +144,28 @@ pub fn raw(
                     "Rdk.Edge_collapse.edge_collapse: point connectivity attribute {name:?} is missing"
                 )));
             };
-            match attribute::View::storage(&found)? {
+            match attribute::view::storage(&found)? {
                 attribute::Storage::Float(v) => Connectivity::Float(v.clone()),
                 attribute::Storage::Int(v) => Connectivity::Int(v.clone()),
                 attribute::Storage::Text(v) => Connectivity::Text(v.clone()),
                 attribute::Storage::Float2(v) => {
-                    let v = packed::Float2::View::view(v);
+                    let v = packed::float2::view::view(v);
                     Connectivity::Float2(v.x, v.y)
                 }
                 attribute::Storage::Float3(v) => {
-                    let v = packed::Float3::View::view(v)?;
+                    let v = packed::float3::view::view(v)?;
                     Connectivity::Float3(v.x, v.y, v.z)
                 }
                 attribute::Storage::Float4(v) => {
-                    let v = packed::Float4::View::view(v);
+                    let v = packed::float4::view::view(v);
                     Connectivity::Float4(v.x, v.y, v.z, v.w)
                 }
                 attribute::Storage::IntArray(v) => {
-                    let v = packed::IntArray::View::view(v);
+                    let v = packed::int_array::view::view(v);
                     Connectivity::IntArray(v.offsets, v.values)
                 }
                 attribute::Storage::FloatArray(v) => {
-                    let v = packed::FloatArray::View::view(v);
+                    let v = packed::float_array::view::view(v);
                     Connectivity::FloatArray(v.offsets, v.values)
                 }
             }
@@ -350,7 +350,7 @@ mod tests {
             "label",
             Storage::Text(Arc::new(["a", "b", "c", "d"].iter().map(|s| s.as_bytes()).collect())),
         );
-        let rows = packed::IntArray::create_owned(vec![0, 1, 2, 3, 4], vec![10, 11, 12, 13]).unwrap();
+        let rows = packed::int_array::create_owned(vec![0, 1, 2, 3, 4], vec![10, 11, 12, 13]).unwrap();
         let g = with_attr(&g, Owner::Point, "rows", Storage::IntArray(rows));
         let g = with_attr(&g, Owner::Point, "__rdk_edge_collapse_target", Storage::Int(Arc::new(vec![9, 8, 7, 6])));
         let g = with_attr(&g, Owner::Point, "N", float3_attr(vec![1.; 4], vec![0.; 4], vec![0.; 4]));
@@ -393,8 +393,8 @@ mod tests {
         let ordered = geometry::find_group(group::Owner::Point, "ordered", &out).unwrap();
         assert_eq!(group::ordered_elements(&ordered), Some(vec![0, 1]));
         let normal = geometry::find_attribute(Owner::Point, "N", &out).unwrap();
-        let Storage::Float3(values) = attribute::View::storage(&normal).unwrap() else { panic!("storage") };
-        let v = packed::Float3::View::view(values).unwrap();
+        let Storage::Float3(values) = attribute::view::storage(&normal).unwrap() else { panic!("storage") };
+        let v = packed::float3::view::view(values).unwrap();
         assert_eq!((v.x.to_vec(), v.y.to_vec(), v.z.to_vec()), (vec![0.; 3], vec![0.; 3], vec![1.; 3]));
     }
 
