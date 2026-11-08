@@ -25,10 +25,10 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A2 | active | `e10bff22` edge_transport; `5a6e7269` sop::support; rdk unused re-exports trimmed (pending commit) |
 | A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
-| A5 | done | `region_snapshot` test-only in `flow_ir` |
+| A5 | done | `ec5c1b1b` — `region_snapshot` test-only in `flow_ir` |
 | A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int` until I) |
 | A7 | pending | |
-| A8 | done | `flow_check::op` — drop `finder`, `Rows`, `arithmetic` lookup |
+| A8 | done | `ec5c1b1b` — drop `finder`, `Rows`, `arithmetic` lookup in `flow_check::op` |
 | B0–B5 | pending | |
 | M1–M21 | pending | |
 | I | pending | |
