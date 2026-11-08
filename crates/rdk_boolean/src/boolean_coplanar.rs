@@ -2,7 +2,7 @@
 //! Boolean face pairs.
 #![allow(non_snake_case)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{cancel, error, support};
 use rdk_geom::implicit_point::{self, Projection};
@@ -370,33 +370,29 @@ pub fn build(
     let cancelled = |_: error::T| fail("cancelled", "Coplanar Boolean arrangement was cancelled");
     cancel::check_opt(cancel_value).map_err(cancelled)?;
     let count = constraints_mod::coplanar_pair_count(constraints);
-    // Each pair owns its output; ranges are joined in index order.
-    let range_count = if count == 0 { 0 } else { ((count - 1) / grain + 1) as usize };
-    let slots: Vec<Mutex<Vec<Option<Overlap>>>> = (0..range_count).map(|_| Mutex::new(Vec::new())).collect();
+    // Each pair owns its output slot, written in place.
+    let mut built: Vec<Option<Overlap>> = std::iter::repeat_with(|| None).take(count.max(0) as usize).collect();
     {
         let constraints_ref: &constraints_mod::T = constraints;
+        let windows = support::Windows::even(&mut built, grain);
         support::run_indexed_ranges(grain, count, &|range, first, last| {
-            let mut local = Vec::with_capacity((last - first) as usize);
-            for pair in first..last {
+            for (pair, slot) in (first..last).zip(windows.take(range)) {
                 cancel::poll(cancel_value, pair, 255)?;
-                local.push(build_pair(constraints_ref, pair));
+                *slot = build_pair(constraints_ref, pair);
             }
-            *slots[range as usize].lock().unwrap() = local;
             Ok(())
         })
         .map_err(cancelled)?;
     }
-    let mut overlaps: Vec<Overlap> = Vec::with_capacity(count as usize);
-    for slot in &slots {
-        for built in slot.lock().unwrap().iter() {
-            match built {
-                Some(overlap) => overlaps.push(overlap.clone()),
-                None => {
-                    return Err(fail(
-                        "exact_construction_failed",
-                        &format!("coplanar pair {} could not be arranged exactly", overlaps.len()),
-                    ));
-                }
+    let mut overlaps: Vec<Overlap> = Vec::with_capacity(built.len());
+    for item in built {
+        match item {
+            Some(overlap) => overlaps.push(overlap),
+            None => {
+                return Err(fail(
+                    "exact_construction_failed",
+                    &format!("coplanar pair {} could not be arranged exactly", overlaps.len()),
+                ));
             }
         }
     }

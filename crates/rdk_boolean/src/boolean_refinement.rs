@@ -2,7 +2,7 @@
 //! constraint refinement.
 #![allow(non_snake_case)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{cancel, error, support};
 
@@ -52,13 +52,12 @@ fn build_side(
     // Enough sequential faces per exclusively owned CDT workspace to amortize its planes while
     // keeping many coarse tasks on small, high-intersection inputs.
     let range_size = grain.max(8);
-    let range_count = if face_count <= 0 { 0 } else { ((face_count - 1) / range_size + 1) as usize };
-    let slots: Vec<Mutex<Vec<Option<FaceResult>>>> = (0..range_count).map(|_| Mutex::new(Vec::new())).collect();
+    let mut faces: Vec<Option<FaceResult>> = std::iter::repeat_with(|| None).take(face_count.max(0) as usize).collect();
+    let windows = support::Windows::even(&mut faces, range_size);
     let constraints_ref: &constraints_mod::T = constraints;
     support::run_indexed_ranges(range_size, face_count, &|range, first_face, last_face| {
         let mut workspace = cdt_mod::create_workspace();
-        let mut local: Vec<Option<FaceResult>> = Vec::with_capacity((last_face - first_face) as usize);
-        for face in first_face..last_face {
+        for (face, slot) in (first_face..last_face).zip(windows.take(range)) {
             cancel::poll(cancel_value, face, 255)
                 .map_err(|_| fail("cancelled", "Boolean refinement was cancelled"))?;
             let (first, last) = match side {
@@ -78,22 +77,17 @@ fn build_side(
                         cdt_mod::build(cancel_value, Some(&mut workspace), constraints_ref, &arrangement, side, face)
                     },
                 );
-                local.push(Some(result));
-            } else {
-                local.push(None);
+                *slot = Some(result);
             }
         }
-        *slots[range as usize].lock().unwrap() = local;
         Ok(())
     })?;
-    let mut output: Vec<Option<cdt_mod::T>> = Vec::with_capacity(face_count.max(0) as usize);
-    for slot in slots {
-        for item in slot.into_inner().unwrap() {
-            match item {
-                None => output.push(None),
-                Some(Ok(face)) => output.push(Some(face)),
-                Some(Err(failure)) => return Err(failure),
-            }
+    let mut output: Vec<Option<cdt_mod::T>> = Vec::with_capacity(faces.len());
+    for item in faces {
+        match item {
+            None => output.push(None),
+            Some(Ok(face)) => output.push(Some(face)),
+            Some(Err(failure)) => return Err(failure),
         }
     }
     Ok(output)

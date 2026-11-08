@@ -4,7 +4,6 @@
 #![allow(non_snake_case)]
 
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use rdk_core::{cancel, error, geometry, packed, support, topology};
 use rdk_geom::implicit_point::{self, Error as PointError};
@@ -519,20 +518,34 @@ pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result
     let left_triangle_points = all_triangle_points(&left_topology.vertex_points, &left_surface, 0);
     let right_triangle_points = all_triangle_points(&right_topology.vertex_points, &right_surface, left_offset);
 
-    // Classification: per-range local buffers (5 values per candidate), joined in range order.
+    // Classification: each candidate writes its count and features in place through disjoint windows.
     let chunk = grain.max(1);
-    let range_count = if candidate_count == 0 { 0 } else { (candidate_count as i64 - 1) / chunk + 1 };
-    let slots: Vec<Mutex<Vec<i64>>> = (0..range_count).map(|_| Mutex::new(Vec::new())).collect();
+    let mut counts = vec![0i64; candidate_count];
+    let mut feature0 = vec![0i64; candidate_count];
+    let mut feature1 = vec![0i64; candidate_count];
+    let mut feature2 = vec![0i64; candidate_count];
+    let mut feature3 = vec![0i64; candidate_count];
     {
+        let count_windows = support::Windows::even(&mut counts, chunk);
+        let feature0_windows = support::Windows::even(&mut feature0, chunk);
+        let feature1_windows = support::Windows::even(&mut feature1, chunk);
+        let feature2_windows = support::Windows::even(&mut feature2, chunk);
+        let feature3_windows = support::Windows::even(&mut feature3, chunk);
         let skip_opposite = params.skip_opposite_self_pairs;
         let (xs, ys, zs) = (&x[..], &y[..], &z[..]);
         let (fcs, scs) = (&first_candidate_sides, &second_candidate_sides);
         let (fc, sc) = (&first_candidates, &second_candidates);
         let (ltp, rtp) = (&left_triangle_points, &right_triangle_points);
         support::run_indexed_ranges(chunk, candidate_count as i64, &|range, first, last| {
-            let mut local = Vec::with_capacity(((last - first) * 5) as usize);
             let mut scratch = [0i64; 4];
-            for candidate in first..last {
+            let outputs = count_windows
+                .take(range)
+                .iter_mut()
+                .zip(feature0_windows.take(range))
+                .zip(feature1_windows.take(range))
+                .zip(feature2_windows.take(range))
+                .zip(feature3_windows.take(range));
+            for (candidate, ((((out_count, out0), out1), out2), out3)) in (first..last).zip(outputs) {
                 poll(cancel_value, candidate)?;
                 let c = candidate as usize;
                 let first_points = if fcs[c] == 0 { ltp } else { rtp };
@@ -571,27 +584,10 @@ pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result
                 if self_pair && ordinary_topology_contact(&left_triangle, &right_triangle, count, f0, f1, f2, f3) {
                     count = 0;
                 }
-                local.extend_from_slice(&[count, f0, f1, f2, f3]);
+                (*out_count, *out0, *out1, *out2, *out3) = (count, f0, f1, f2, f3);
             }
-            *slots[range as usize].lock().unwrap() = local;
             Ok(())
         })?;
-    }
-    let mut counts = vec![0i64; candidate_count];
-    let mut feature0 = vec![0i64; candidate_count];
-    let mut feature1 = vec![0i64; candidate_count];
-    let mut feature2 = vec![0i64; candidate_count];
-    let mut feature3 = vec![0i64; candidate_count];
-    for (range, slot) in slots.iter().enumerate() {
-        let local = slot.lock().unwrap();
-        let base = range * chunk as usize;
-        for (i, rec) in local.chunks(5).enumerate() {
-            counts[base + i] = rec[0];
-            feature0[base + i] = rec[1];
-            feature1[base + i] = rec[2];
-            feature2[base + i] = rec[3];
-            feature3[base + i] = rec[4];
-        }
     }
 
     let mut event_offsets = vec![0usize; candidate_count + 1];
