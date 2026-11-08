@@ -389,7 +389,12 @@ fn cocoa_layer_ownership_and_trackpad_phases() {
         return;
     }
     claim_main();
-    crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
+    // An SSH/tmux login has no window server (launchctl manager "Background"): nothing to test there.
+    if let Err(e) = crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]) {
+        assert!(e.message.contains("not available") || e.message.contains("No available video device"), "{e:?}");
+        eprintln!("skipped: no window server ({})", e.message);
+        return;
+    }
     let mut window = crate::Window::create(
         "SDL3 Rust Metal test", 64, 48,
         &[crate::WindowFlag::Hidden, crate::WindowFlag::HighPixelDensity, crate::WindowFlag::Metal],
