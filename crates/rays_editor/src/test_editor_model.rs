@@ -114,32 +114,32 @@ fn text_applies_drafts_history_and_reload() {
 }
 
 fn text_applies_body() {
-    let value = model();
+    let mut value = model();
     // an applied draft is one "Edit text" entry; the file's text is what Command-S last wrote
     assert!(!editor_text::unsaved(None, &value));
-    let value = editor_text::apply_text(value, &[TextIntent::DocDraft(TEXT2.to_string())]);
+    editor_text::apply_text(&mut value, &[TextIntent::DocDraft(TEXT2.to_string())]);
     assert!(editor_text::has_draft(None, &value));
     assert!(editor_text::unsaved(None, &value));
-    let value = editor_text::apply_text(value, &[TextIntent::DocApply(TEXT2.to_string())]);
+    editor_text::apply_text(&mut value, &[TextIntent::DocApply(TEXT2.to_string())]);
     assert!(!editor_text::has_draft(None, &value), "{:?}", value.text.doc_errors.found.iter().map(|d| d.message.clone()).collect::<Vec<_>>());
     assert_eq!(history::depth(&value.history), 1);
     assert_eq!(history::label(&value.history), "Edit text");
     assert!(Arc::ptr_eq(&value.doc, &history::present_arc(&value.history)));
     assert_eq!(editor_completion(&value), vec!["g".to_string(), "h".to_string()]);
     assert!(editor_text::unsaved(None, &value));
-    let value = editor_text::filed(value);
+    value = editor_text::filed(value);
     assert!(!editor_text::unsaved(None, &value));
 
     // a draft that does not check keeps its errors and changes nothing else
     let before = history::depth(&value.history);
-    let value = editor_text::apply_text(value, &[TextIntent::DocApply("(workspace".to_string())]);
+    editor_text::apply_text(&mut value, &[TextIntent::DocApply("(workspace".to_string())]);
     assert_eq!(history::depth(&value.history), before);
     assert!(!value.text.doc_errors.found.is_empty());
     assert_eq!(value.text.draft.as_deref(), Some("(workspace"));
     assert!(editor_text::has_draft(None, &value));
     // `apply_drafts` refuses to go on while it stands
     assert!(editor_text::apply_drafts(None, value.clone()).is_err());
-    let value = editor_text::apply_text(value, &[TextIntent::DocDiscard]);
+    editor_text::apply_text(&mut value, &[TextIntent::DocDiscard]);
     assert!(!editor_text::has_draft(None, &value));
     assert!(editor_text::apply_drafts(None, value.clone()).is_ok());
 

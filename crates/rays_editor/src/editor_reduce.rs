@@ -60,7 +60,7 @@ fn basename(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 /// A row of the Navigator opens its graph in the graph panel, selecting a node there.
-pub fn outline_step(created: &Option<String>, result: &frame_result, value2: t) -> (t, Option<(String, Option<Path>)>) {
+pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut t) -> Option<(String, Option<Path>)> {
     let mut outlined: Option<(String, Option<Path>)> = result.outline_intents.iter().find_map(|i| match i {
         crate::navigator::Intent::Open { graph, node } => Some((graph.clone(), node.clone())),
         _ => None,
@@ -73,7 +73,6 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, value2: t) 
             outlined = Some((graph.clone(), None));
         }
     }
-    let mut v = value2;
     v.outline = result.outline.clone();
     if let Some((_, Some(node))) = &outlined {
         v.select_later = vec![node.clone()];
@@ -83,19 +82,19 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, value2: t) 
     }
     // a node of the graph already shown is selected now; of another graph, once the pane shows it
     if let Some((graph, Some(node))) = &outlined {
-        if graph_name(&v).as_deref() == Some(graph.as_str()) && pane_laid(&v).is_some_and(|k| &k.graph == graph) {
+        if graph_name(&*v).as_deref() == Some(graph.as_str()) && pane_laid(&*v).is_some_and(|k| &k.graph == graph) {
             v.select_later = Vec::new();
             let node = node.clone();
-            v = with_pane(v, &|pane| graph_pane {
+            with_pane(v, &|pane| graph_pane {
                 view: scope_commands::run_command(scope::select(vec![node.clone()], pane.view.clone()), scope::Command::Frame_selection).0,
                 ..pane.clone()
             });
         }
     }
     if let Some((graph, _)) = &outlined {
-        v = go(v, graph);
+        go(v, graph);
     }
-    (v, outlined)
+    outlined
 }
 
 /// Entering and leaving levels: the graph a reference follows, the level i / u / list activation
@@ -890,8 +889,8 @@ fn same_pieces(a: &[cook::piece], b: &[cook::piece]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Rc::ptr_eq(&x.bounds, &y.bounds))
 }
 
-pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: t, result: frame_result) -> update {
-    let value = &owned;
+pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: &mut t, result: frame_result) -> update<()> {
+    let value = &*owned;
     let _timer = flow_syntax::phase_timer::measure("reduce");
     let Frame_input {
         carry_changed,
@@ -1191,23 +1190,23 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     } else {
         scope::select(added.clone(), result.scope_view.clone())
     };
-    let mut value2 = owned;
+    let value2 = owned;
     value2.timeline_frames = timeline_frames;
     value2.doc = doc.clone();
     value2.lisp_vocab = vocab;
     value2.workspace = workspace;
-    value2 = with_pane(value2, &|pane| graph_pane { at: level, ..pane.clone() });
+    with_pane(value2, &|pane| graph_pane { at: level, ..pane.clone() });
     // the selection keeps the nodes that still exist in the open network
     let mut selection = if level != previous_level || loaded_flag {
         selection::empty()
     } else {
         let current = selection::selected_nodes(&result.selection).to_vec();
-        let ids: Vec<i64> = current.iter().copied().filter(|id| lists(&value2, *id)).collect();
+        let ids: Vec<i64> = current.iter().copied().filter(|id| lists(&*value2, *id)).collect();
         if ids == current { result.selection.clone() } else { selection::select_nodes(&ids) }
     };
-    let (followed, target) = level_target(followed, had_route, &value2, level, &doc, &selection, &actions, &result);
+    let (followed, target) = level_target(followed, had_route, &*value2, level, &doc, &selection, &actions, &result);
     if let Some(id) = result.open_graph {
-        if lists(&value2, id) {
+        if lists(&*value2, id) {
             selection = selection::select(id);
         }
     }
@@ -1229,54 +1228,51 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         .or_else(|| value2.open_import.clone());
     {
         let sel = selection.clone();
-        value2 = with_pane(value2, &|pane| graph_pane { picked: sel.clone(), view: picked_view.clone(), ..pane.clone() });
+        with_pane(value2, &|pane| graph_pane { picked: sel.clone(), view: picked_view.clone(), ..pane.clone() });
     }
-    value2 = match target {
-        Some(level) if level != pane_level(&value2) => {
-            let remembered = remember(value2);
-            open_level(remembered, level)
+    if let Some(level) = target {
+        if level != pane_level(&*value2) {
+            remember(value2);
         }
-        Some(level) => open_level(value2, level),
-        None => value2,
-    };
+        open_level(value2, level);
+    }
     // u goes back along the route taken
     let pops = actions.iter().fold(0i64, |n, a| match a {
         action::Up => n.max(1),
         action::Back(k) => n.max(*k),
         _ => n,
     });
-    let route = pane_route(&value2).to_vec();
+    let route = pane_route(&*value2).to_vec();
     if pops > 0 && target.is_none() && followed.is_none() {
         if let Some(((back_level, pane_graph), rest)) = route.get((pops - 1).max(0) as usize..).and_then(|r| r.split_first()) {
             let back_level = document::resolve_level(&doc, *back_level);
             let rest = rest.to_vec();
             let pane_graph = pane_graph.clone();
-            value2 = with_pane(value2, &|pane| graph_pane { route: rest.clone(), ..pane.clone() });
-            value2 = open_level(value2, back_level);
-            value2 = with_pane(value2, &|pane| graph_pane { shown: pane_graph.clone(), ..pane.clone() });
+            with_pane(value2, &|pane| graph_pane { route: rest.clone(), ..pane.clone() });
+            open_level(value2, back_level);
+            with_pane(value2, &|pane| graph_pane { shown: pane_graph.clone(), ..pane.clone() });
         }
     }
     if let Some(graph) = &followed {
-        value2 = go(value2, graph);
+        go(value2, graph);
     }
     // In the World, / m flips the view pane to the lat-long map.
-    let map_view = if actions.contains(&action::Toggle_map) && in_world(&value2) { !value2.map_view } else { value2.map_view && in_world(&value2) };
+    let map_view = if actions.contains(&action::Toggle_map) && in_world(&*value2) { !value2.map_view } else { value2.map_view && in_world(&*value2) };
     value2.map_view = map_view;
     // a renamed graph keeps being the one shown, and the one [u] returns to
     if let Some((old, now)) = &renamed {
         let name = |g: &Option<String>| g.as_ref().map(|g| if g == old { now.clone() } else { g.clone() });
-        value2 = with_pane(value2, &|pane| graph_pane {
+        with_pane(value2, &|pane| graph_pane {
             shown: name(&pane.shown),
             route: pane.route.iter().map(|(level, g)| (*level, name(g))).collect(),
             ..pane.clone()
         });
     }
-    let (value3, outlined) = outline_step(&created, &result, value2);
-    value2 = value3;
+    let outlined = outline_step(&created, &result, value2);
     if let Some(prompt_intent::Find_node(path)) = &result.prompt_intent {
-        value2 = select_source(value2, path);
+        select_source(value2, path);
     }
-    let projections = projections_of(&outlined, &actions, &result, &value2);
+    let projections = projections_of(&outlined, &actions, &result, &*value2);
     let selection_changed = scope_selection_changed || outlined.is_some();
     let mut text = text;
     if selection_changed {
@@ -1298,30 +1294,30 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     value2.text = text;
     value2.rows = Rc::new(row_sets);
     value2.live_cook = result.live_cook;
-    value2 = with_pane(value2, &|pane| graph_pane { views: projections.clone(), ..pane.clone() });
+    with_pane(value2, &|pane| graph_pane { views: projections.clone(), ..pane.clone() });
     value2.locals = locals;
     for c in &result.changes {
         if let change::Follow_source(path) = c {
-            value2 = select_source(value2, path);
+            select_source(value2, path);
         }
     }
     value2.timeline = timeline.clone();
     value2.history = history2;
-    value2 = apply_text(value2, &result.text_intents);
+    apply_text(value2, &result.text_intents);
     // each other text pane's intents fold into its own state
     for (key, _, intents) in &result.other_texts {
-        value2 = apply_text_at(value2, key, intents);
+        apply_text_at(value2, key, intents);
     }
-    value2 = sync_scope(value2);
+    sync_scope(value2);
     for c in &scope_changes {
         if let scope::Change::Display_set(path) = c {
-            value2 = view_node(value2, path);
+            view_node(value2, path);
         }
     }
-    value2 = sync_scope(value2);
+    sync_scope(value2);
     let doc = value2.doc.clone();
-    let frame_request: Option<(i64, i64)> = match (result.frame_request, pane_level(&value2)) {
-        (Some(node), Level::Inside(id)) if kind(&value2, id).as_deref() == Some("geometry") => Some((id, node)),
+    let frame_request: Option<(i64, i64)> = match (result.frame_request, pane_level(&*value2)) {
+        (Some(node), Level::Inside(id)) if kind(&*value2, id).as_deref() == Some("geometry") => Some((id, node)),
         _ => None,
     };
     if !same_workspace_all(&doc.workspace, &previous_doc.workspace)
@@ -1330,17 +1326,17 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         let volatile = flow_sop::lower::is_volatile(&doc.workspace.lowered);
         cook::set_volatile(&previous_cook, Arc::new(move |id| volatile(id) || roots.contains(&id)));
     }
-    let probes_wanted: Vec<(i64, i64)> = match pane_laid(&value2) {
-        Some(k) if scope_name(&value2).is_some() => {
+    let probes_wanted: Vec<(i64, i64)> = match pane_laid(&*value2) {
+        Some(k) if scope_name(&*value2).is_some() => {
             // only the footers drawn and the selection are counted, not every node of the graph
-            let view = pane_view(&value2);
+            let view = pane_view(&*value2);
             let mut shown = pxui_graph::scope_frame::Inspect::footer_paths(view);
             shown.extend(scope::selected(view));
             k.targets.iter().filter_map(|(path, target)| if shown.contains(path) { Some(*target) } else { None }).collect()
         }
         _ => Vec::new(),
     };
-    let (lit, lit_cache) = lit_tags(&value2);
+    let (lit, lit_cache) = lit_tags(&*value2);
     let default_pump = || std::thread::sleep(std::time::Duration::from_micros(500));
     let pump_ref: &dyn Fn() = match pump {
         Some(p) => p,
@@ -1356,7 +1352,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         Some(pump_ref),
         &previous_cook,
         &doc.settings,
-        &geometry_objects(&value2),
+        &geometry_objects(&*value2),
         result.edit_error.clone(),
         effects,
         &timeline_changes,
@@ -1364,9 +1360,9 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         &frame_,
         frame_request,
     );
-    let (framing, framed) = framing_step(&value2, &doc, &cooked, frame_request, &actions, &frame_, &result);
+    let (framing, framed) = framing_step(&*value2, &doc, &cooked, frame_request, &actions, &frame_, &result);
     let document_changed = !Arc::ptr_eq(&doc, &previous_doc);
-    let (carry_value, pick_error) = pick_up(&value2, &actions, &frame_, carry_report);
+    let (carry_value, pick_error) = pick_up(&*value2, &actions, &frame_, carry_report);
     // a cook that gave back every piece it had (the text changed, the objects did not) leaves
     // nothing to recompose, and no accumulating render to restart
     let prepared_changed = cooked.prepared_changed && !same_pieces(cook::pieces(&cooked.cook), cook::pieces(&previous_cook));
@@ -1388,11 +1384,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     };
     let queued = match &result.prompt_intent {
         Some(prompt_intent::Run_action(a)) => vec![a.clone()],
-        _ if all_ui_visible && actions.contains(&action::Add_node) && !graph_shown && has_panel(&value2, &Panel::Graph) => vec![action::Add_node],
+        _ if all_ui_visible && actions.contains(&action::Add_node) && !graph_shown && has_panel(&*value2, &Panel::Graph) => vec![action::Add_node],
         _ => Vec::new(),
     };
     let notice_at = value2.notice_at;
-    let mut core = value2;
+    let core = value2;
     core.timeline = timeline;
     core.cook = std::rc::Rc::new(cooked.cook);
     core.lit = lit_cache;
@@ -1421,7 +1417,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         out_actions.push(action::Look_through_camera);
     }
     update {
-        core,
+        core: (),
         effects,
         prepared_changed,
         scene_changed,
@@ -1469,7 +1465,8 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, acti
     };
     let input = idle_input(&value, actions, frame_);
     let result = idle_result(&value, selection);
-    Ok(reduce(None, None, input, value, result).core)
+    reduce(None, None, input, &mut value, result);
+    Ok(value)
 }
 
 /// The frame result of a frame in which no pane asked for anything.

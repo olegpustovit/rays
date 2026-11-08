@@ -301,7 +301,7 @@ pub fn follow_start(value: t) -> t {
             _ => Graph_view,
         };
         if panel_map::key(&value.panes).as_ref() == Some(&key) {
-            value = with_pane(value, &|pane| graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane.clone() });
+            with_pane(&mut value, &|pane| graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane.clone() });
         } else if let Some((path, _)) = path_of(&value, &key) {
             let pane = pane_at(&value, (&key, &path)).into_owned();
             let pane = graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane };
@@ -417,19 +417,18 @@ pub fn panels_line<'a>(value: impl Into<ModelView<'a>>) -> String {
 }
 
 /// Follow a reference: the pane shows `graph`, and `u` comes back to what it showed.
-pub fn remember(value: t) -> t {
+pub fn remember(value: &mut t) {
     with_pane(value, &|pane| {
         let mut route = vec![(pane.at, pane.shown.clone())];
         route.extend(pane.route.iter().take(31).cloned());
         graph_pane { route, ..pane.clone() }
-    })
+    });
 }
 
-pub fn go(value: t, graph: &str) -> t {
-    if graph_name(&value).as_deref() == Some(graph) {
-        value
-    } else {
-        with_pane(remember(value), &|pane| graph_pane { shown: Some(graph.to_owned()), ..pane.clone() })
+pub fn go(value: &mut t, graph: &str) {
+    if graph_name(&*value).as_deref() != Some(graph) {
+        remember(value);
+        panel_map::active_mut(&mut value.panes).shown = Some(graph.to_owned());
     }
 }
 

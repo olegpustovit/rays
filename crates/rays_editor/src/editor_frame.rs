@@ -1010,7 +1010,7 @@ pub fn update_frame(
     let (workspace, selection, tree_value, timeline_now, timeline_changes) = actions.iter().fold((value.workspace.clone(), pane_selection(&value).clone(), value.tree.clone(), timeline_now, timeline_changes), |state, a| apply_action(&value, state, a));
     let mut value = value;
     value.timeline = timeline_now;
-    let mut value = sync_scope(value);
+    sync_scope(&mut value);
     let mut other_panes = Vec::new();
     if all_ui_visible {
         let mut leaves = graph_leaves(&value);
@@ -1023,7 +1023,7 @@ pub fn update_frame(
         for (key, path) in leaves {
             if active.as_ref() == Some(&key) { continue; }
             value = with_pane_in_use(value, (&key, &path));
-            value = sync_scope(value);
+            sync_scope(&mut value);
             value.select_later = select_later.clone();
             other_panes.push((key, path));
         }
@@ -1436,7 +1436,7 @@ pub fn update_frame(
         },
     };
     let timeline_for_reduce = value.timeline.clone();
-    reduce(
+    let changes = reduce(
         gpu,
         pump,
         Frame_input {
@@ -1462,9 +1462,20 @@ pub fn update_frame(
             row_sets,
             rows: rows_,
         },
-        value,
+        &mut value,
         result,
-    )
+    );
+    update {
+        core: value,
+        effects: changes.effects,
+        prepared_changed: changes.prepared_changed,
+        scene_changed: changes.scene_changed,
+        framed: changes.framed,
+        loaded_view: changes.loaded_view,
+        actions: changes.actions,
+        panel: changes.panel,
+        input: changes.input,
+    }
 }
 
 /// One frame of the editor. A carry takes its turn first (its keys, the ends of the gesture, the
@@ -1472,7 +1483,7 @@ pub fn update_frame(
 /// took removed.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
-    value: t,
+    mut value: t,
     all_ui_visible: bool,
     text_focus: bool,
     camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
@@ -1489,7 +1500,7 @@ pub fn update(
     let clock = value.clock.clone();
     let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || clock()));
     let before = value.doc.clone();
-    let (value, frame_after, carry_changed) = carry_step(value, text_focus, frame_);
+    let (frame_after, carry_changed) = carry_step(&mut value, text_focus, frame_);
     let no_image = |_: i64| None;
     let image: &dyn Fn(i64) -> Option<rays::image::t> = match image {
         Some(i) => i,

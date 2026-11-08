@@ -26,7 +26,7 @@ use crate::editor_scope::sync_scope;
 use crate::editor_shell::unrestore;
 use crate::text_pane::{self, Checked, Intent, Slot, Tab};
 
-type Applied = Result<t, Vec<Diagnostic>>;
+type Candidate = Result<Document, Vec<Diagnostic>>;
 
 /// Every editor path records the same immutable document. No-op/rejected edits leave both the
 /// present and the merge state untouched.
@@ -52,24 +52,21 @@ pub fn parameter_gesture(operation: &str, level: Level, id: i64, values: &[(Stri
 
 /// A workspace edit installed as the present: the source and its lowering are one history entry,
 /// the open level is re-resolved and the cook told about the new volatile nodes.
-pub fn install(value: &t, doc: Document, label: &str, merge: Merge) -> t {
+pub fn install(value: &mut t, doc: Document, label: &str, merge: Merge) {
     let doc = adopt(&value.history, doc);
-    let level = document::resolve_level(&doc, pane_level(value));
-    let mut next = value.clone();
-    next.lisp_vocab = vocabulary_for(value, &doc);
-    next.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
-    next.doc = doc.clone();
+    let level = document::resolve_level(&doc, pane_level(&*value));
+    value.lisp_vocab = vocabulary_for(value, &doc);
+    value.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
+    value.doc = doc.clone();
     cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
-    next.history = commit(&doc, Some(label), Some(merge), value.history.clone());
-    with_pane(next, &|pane| graph_pane { at: level, picked: if level == pane.at { pane.picked.clone() } else { crate::selection::empty() }, ..pane.clone() })
+    value.history = commit(&doc, Some(label), Some(merge), value.history.clone());
+    let pane = crate::panel_map::active_mut(&mut value.panes);
+    if level != pane.at {
+        pane.at = level;
+        pane.picked = crate::selection::empty();
+    }
 }
 
-/// The text pane's applies: the whole workspace text, or one binding's expression; atomic, one
-/// history entry "Edit text".
-pub fn text_edit(value: &t, text: &str, imports: Option<&[(String, String)]>, label: Option<&str>, merge: Option<Merge>) -> Applied {
-    let doc = document_edit::text_edit(imports, Some(&value.factories), &value.doc, text)?;
-    Ok(install(value, doc, label.unwrap_or("Edit text"), merge.unwrap_or(Merge::Step)))
-}
 
 fn at_line_1(mut d: Diagnostic) -> Diagnostic {
     d.position = Some(Position { line: 1, col: 0 });
@@ -80,12 +77,12 @@ fn at_line_1(mut d: Diagnostic) -> Diagnostic {
 /// Selection patches root bindings into one candidate graph, checked and installed once. Omitted
 /// bindings stay and the shown result cannot change. Without a closure the tab shows the graph
 /// form, replaced whole.
-pub fn binding_edit(value: &t, path: &[String], text: &str, merge: Option<Merge>) -> Applied {
+fn binding_document(value: &t, path: &[String], text: &str) -> Candidate {
     let ws = &value.doc.workspace.ws;
     match text_pane::graph_op(&ws.source, &path[0], Some(path), text) {
         Err(d) => Err(vec![if d.position.is_none() { at_line_1(d) } else { d }]),
         Ok(op) => match document_edit::syntax_edit_result(Some(&value.factories), &value.doc, &op) {
-            Ok(doc) => Ok(install(value, doc, "Edit text", merge.unwrap_or(Merge::Step))),
+            Ok(doc) => Ok(doc),
             Err(d) => Err(vec![at_line_1(d)]),
         },
     }
@@ -93,12 +90,12 @@ pub fn binding_edit(value: &t, path: &[String], text: &str, merge: Option<Merge>
 
 /// The Graph tab's apply: the draft must be the one graph (or function) form, which replaces the
 /// graph's; atomic like every apply.
-pub fn graph_edit(value: &t, name: &str, text: &str, merge: Option<Merge>) -> Applied {
+fn graph_document(value: &t, name: &str, text: &str) -> Candidate {
     let ws = &value.doc.workspace.ws;
     match text_pane::graph_op(&ws.source, name, None, text) {
         Err(d) => Err(vec![if d.position.is_none() { Diagnostic { position: Some(Position { line: 1, col: 0 }), ..d } } else { d }]),
         Ok(op) => match document_edit::syntax_edit_result(Some(&value.factories), &value.doc, &op) {
-            Ok(doc) => Ok(install(value, doc, "Edit text", merge.unwrap_or(Merge::Step))),
+            Ok(doc) => Ok(doc),
             Err(d) => Err(vec![at_line_1(d)]),
         },
     }
@@ -110,32 +107,44 @@ pub fn scrub_merge() -> Merge {
     Merge::Gesture("text-scrub".to_string())
 }
 
-pub fn select_source(value: t, path: &[String]) -> t {
-    let Some(graph) = path.first() else { return value };
+pub fn select_source(value: &mut t, path: &[String]) {
+    let Some(graph) = path.first() else { return };
     if graph.starts_with("macro:") {
-        return value;
+        return;
     }
-    let mut value = value;
-    let locals: Vec<(Vec<String>, local)> = value.locals.iter().map(|(key, l)| (key.clone(), local { code: text_pane::State { target: None, ..l.code.clone() }, ..l.clone() })).collect();
-    let original = value.clone();
-    value.text = text_pane::State { target: None, ..value.text.clone() };
-    value.locals = locals;
-    let mut next = sync_scope(go(value, graph));
-    let found = pane_laid(&next).is_some_and(|k| k.graph == *graph && (fproj::find(&k.scope, path).is_some() || k.scope.inputs.iter().any(|input| input.path == path)));
+    // A missing nested path is a no-op. Keep only the pane and caches touched by navigation.
+    let previous = (
+        pane(&*value).clone(), value.previews.clone(), value.viewed.clone(),
+        value.canvas_preview.clone(), value.canvas_viewed.clone(), value.view_key.clone(),
+        value.select_later.clone(),
+    );
+    go(value, graph);
+    sync_scope(value);
+    let found = pane_laid(&*value).is_some_and(|k| k.graph == *graph && (fproj::find(&k.scope, path).is_some() || k.scope.inputs.iter().any(|input| input.path == path)));
+    if !found && path.len() > 1 {
+        *crate::panel_map::active_mut(&mut value.panes) = previous.0;
+        value.previews = previous.1;
+        value.viewed = previous.2;
+        value.canvas_preview = previous.3;
+        value.canvas_viewed = previous.4;
+        value.view_key = previous.5;
+        value.select_later = previous.6;
+        return;
+    }
+    value.text.target = None;
+    for (_, local) in &mut value.locals {
+        local.code.target = None;
+    }
     if found {
-        if scope::selected(pane_view(&next)) == vec![path.to_vec()] {
-            next
-        } else {
-            next.select_later = Vec::new();
-            with_pane(next, &|pane| {
+        if scope::selected(pane_view(&*value)) != vec![path.to_vec()] {
+            value.select_later.clear();
+            with_pane(value, &|pane| {
                 let selected = scope::select(vec![path.to_vec()], pane.view.clone());
                 graph_pane { view: scope_commands::run_command(selected, scope::Command::Frame_selection).0, ..pane.clone() }
-            })
+            });
         }
-    } else if path.len() == 1 {
-        with_pane(next, &|pane| graph_pane { view: scope::select(Vec::new(), pane.view.clone()), ..pane.clone() })
     } else {
-        original
+        with_pane(value, &|pane| graph_pane { view: scope::select(Vec::new(), pane.view.clone()), ..pane.clone() });
     }
 }
 
@@ -163,7 +172,7 @@ fn of_graph(graph: &str, ws: &WorkspaceDoc) -> Result<String, Diagnostic> {
     text_pane::make_shown(&ws.source, graph, None, Tab::Graph).map(|shown| shown.text)
 }
 
-fn one_intent(value: t, intent: &Intent) -> t {
+fn one_intent(value: &mut t, intent: &Intent) {
     let (intent, literal): (&Intent, Option<(Arc<Vec<flow_syntax::syntax::Syntax>>, Op, Position)>) = match intent {
         Intent::LiteralScrub { source, op, position, fallback } => (fallback.as_ref(), Some((source.clone(), op.clone(), position.clone()))),
         other => (other, None),
@@ -179,10 +188,6 @@ fn one_intent(value: t, intent: &Intent) -> t {
     };
     let doc = value.doc.clone();
     let workspace: &WorkspaceDoc = &doc.workspace.ws;
-    let with_text = |mut value: t, text: text_pane::State| -> t {
-        value.text = text;
-        value
-    };
     let base = |old: Option<WorkspaceDoc>| -> Option<WorkspaceDoc> { Some(old.unwrap_or_else(|| workspace.clone())) };
     let slot_of = |text: &text_pane::State, graph: &str| -> Option<Slot> { text_pane::graph_slot(text, graph).cloned() };
     let failed = |text: &text_pane::State, graph: &str, draft: &str, errors: Vec<Diagnostic>| -> Option<Slot> {
@@ -190,7 +195,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
     };
     // a draft begun on an older document: merged with what changed since on the syntax tree
     // (`Text_pane::merge3`); only a value both changed keeps the draft as a conflict
-    let checked = |metadata: bool, shown: &dyn Fn(&WorkspaceDoc) -> Result<String, Diagnostic>, draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Applied| -> Applied {
+    let checked = |metadata: bool, shown: &dyn Fn(&WorkspaceDoc) -> Result<String, Diagnostic>, draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Candidate| -> Candidate {
         match old {
             Some(previous) if !Arc::ptr_eq(&previous.checked, &workspace.checked) || (metadata && (previous.layout != workspace.layout || !settings::same_values(&previous.settings, &workspace.settings))) => {
                 let previous = shown(previous).map_err(|error| vec![error])?;
@@ -204,7 +209,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
         }
     };
     let whole = |ws: &WorkspaceDoc| workspace_doc::to_text(ws);
-    let checked_binding = |merge: Option<Merge>, path: &[String], draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Applied| -> Applied {
+    let checked_binding = |path: &[String], draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Candidate| -> Candidate {
         match old {
             Some(previous) if !Arc::ptr_eq(&previous.checked, &workspace.checked) => {
                 // Selection can patch a root binding outside the printed upstream closure. Merge
@@ -217,7 +222,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
                         let previous = of_graph(&name, previous).map_err(|error| vec![error])?;
                         let current = of_graph(&name, workspace).map_err(|error| vec![error])?;
                         match text_pane::merge3(&previous, &mine, &current) {
-                            Some(merged) => graph_edit(&value, &name, &merged, merge),
+                            Some(merged) => graph_document(&*value, &name, &merged),
                             None => Err(vec![conflict()]),
                         }
                     }
@@ -227,10 +232,9 @@ fn one_intent(value: t, intent: &Intent) -> t {
             _ => apply(draft),
         }
     };
-    let scrub = |apply: &dyn Fn(&str) -> Applied, draft: &str| -> Applied {
+    let scrub = |apply: &dyn Fn(&str) -> Candidate, draft: &str| -> Candidate {
         match &literal {
             Some((source, op, position)) if **source == workspace.source => document_edit::syntax_edit_result(Some(&value.factories), &value.doc, op)
-                .map(|doc| install(&value, doc, "Edit text", scrub_merge()))
                 .map_err(|d| vec![Diagnostic { position: Some(position.clone()), span: None, ..d }]),
             _ => apply(draft),
         }
@@ -242,83 +246,78 @@ fn one_intent(value: t, intent: &Intent) -> t {
 
     match intent {
         Intent::PrintError(error) => {
-            let mut next = value;
             let message = rays_diagnostic::to_string(error);
-            next.edit_error = Some(message.clone());
-            next.notice = Some((notice_kind::Refusal, message));
-            next
+            value.edit_error = Some(message.clone());
+            value.notice = Some((notice_kind::Refusal, message));
         }
         Intent::Tab(tab) => {
             text.tab = *tab;
-            with_text(value, text)
+            value.text = text
         }
         Intent::Menu(menu) => {
             text.menu = *menu;
-            with_text(value, text)
+            value.text = text
         }
         Intent::ToggleWrap => {
             text.wrap = !text.wrap;
-            with_text(value, text)
+            value.text = text
         }
         Intent::ToggleParinfer => {
             text.parinfer = !text.parinfer;
-            with_text(value, text)
+            value.text = text
         }
         Intent::Picker(picker) => {
             text.picker = *picker;
-            with_text(value, text)
+            value.text = text
         }
         Intent::OpenGraph(graph) => go(value, graph),
         Intent::SelectBinding(path) => {
-            let mut v = value;
-            v.text = text_pane::State { target: None, ..text };
-            select_source(v, path)
+            value.text = text_pane::State { target: None, ..text };
+            select_source(value, path)
         }
         Intent::JumpDefinition(path) => {
-            let next = select_source(value, path);
-            let mut next = next;
-            next.text = text_pane::State { target: Some(path.clone()), nonce: text.nonce + 1, ..text };
-            next
+            select_source(value, path);
+            value.text = text_pane::State { target: Some(path.clone()), nonce: text.nonce + 1, ..text };
         }
         // opens the references prompt, see `Editor_reduce`
-        Intent::ReferencesOf(_) => value,
+        Intent::ReferencesOf(_) => {},
         // read by the carry's report, not an edit
-        Intent::CarryOver(..) => value,
+        Intent::CarryOver(..) => {},
         Intent::FindSet(find, reveal) => {
             text.find = find.clone();
             text.nonce += if *reveal { 1 } else { 0 };
-            with_text(value, text)
+            value.text = text
         }
         Intent::RequestSet(request) => {
             text.request = request.clone();
-            with_text(value, text)
+            value.text = text
         }
         Intent::Resolved => {
             text.pending = Vec::new();
-            with_text(value, text)
+            value.text = text
         }
         Intent::DocDraft(draft) => {
             text.draft = Some(draft.clone());
             text.doc_base = base(text.doc_base.clone());
             text.scrubbing = false;
-            with_text(value, text)
+            value.text = text
         }
         Intent::DocDiscard => {
             text.draft = None;
             text.doc_base = None;
             text.doc_errors = text_pane::no_errors();
-            with_text(value, text)
+            value.text = text
         }
-        Intent::DocApply(draft) => match checked(true, &whole, draft, text.doc_base.as_ref(), &|d| text_edit(&value, d, None, None, None)) {
-            Ok(mut v) => {
-                v.text = text_pane::State { draft: None, doc_base: None, doc_errors: text_pane::no_errors(), ..text };
-                v
+        Intent::DocApply(draft) => match checked(true, &whole, draft, text.doc_base.as_ref(), &|d| document_edit::text_edit(None, Some(&value.factories), &value.doc, d)) {
+            Ok(doc) => {
+                install(value, doc, "Edit text", Merge::Step);
+                value.text = text_pane::State { draft: None, doc_base: None, doc_errors: text_pane::no_errors(), ..text };
             }
             Err(found) => {
                 text.draft = Some(draft.clone());
                 text.doc_base = base(text.doc_base.clone());
                 text.doc_errors = Checked { at: draft.clone(), found };
-                with_text(value, text)
+                value.text = text
             }
         },
         Intent::BindingDraft(path, draft) => {
@@ -328,13 +327,13 @@ fn one_intent(value: t, intent: &Intent) -> t {
             };
             text.binding_base = base(kept);
             text.binding_draft = Some((path.clone(), draft.clone()));
-            with_text(value, text)
+            value.text = text
         }
         Intent::BindingDiscard => {
             text.binding_draft = None;
             text.binding_base = None;
             text.binding_errors = text_pane::no_errors();
-            with_text(value, text)
+            value.text = text
         }
         Intent::GraphDraft(graph, draft) => {
             let old = slot_of(&text, graph);
@@ -343,36 +342,36 @@ fn one_intent(value: t, intent: &Intent) -> t {
                 gbase: base(old.as_ref().and_then(|s| s.gbase.clone())),
                 gerrors: old.as_ref().map(|s| s.gerrors.clone()).unwrap_or_else(text_pane::no_errors),
             };
-            with_text(value, put(text, graph, Some(slot)))
+            value.text = put(text, graph, Some(slot))
         }
-        Intent::GraphDiscard(graph) => with_text(value, put(text, graph, None)),
+        Intent::GraphDiscard(graph) => value.text = put(text, graph, None),
         Intent::Live(live) => {
             text.live = Some(live.clone());
-            with_text(value, text)
+            value.text = text
         }
         Intent::GraphApply(graph, draft) => {
             let gbase = slot_of(&text, graph).and_then(|s| s.gbase);
-            match checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_ref(), &|d| graph_edit(&value, graph, d, None)) {
-                Ok(mut v) => {
-                    v.text = put(text, graph, None);
-                    v
+            match checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_ref(), &|d| graph_document(&*value, graph, d)) {
+                Ok(doc) => {
+                    install(value, doc, "Edit text", Merge::Step);
+                    value.text = put(text, graph, None);
                 }
                 Err(found) => {
                     let slot = failed(&text, graph, draft, found);
-                    with_text(value, put(text, graph, slot))
+                    value.text = put(text, graph, slot)
                 }
             }
         }
-        Intent::BindingApply(path, draft) => match checked_binding(None, path, draft, text.binding_base.as_ref(), &|d| binding_edit(&value, path, d, None)) {
-            Ok(mut v) => {
-                v.text = text_pane::State { binding_draft: None, binding_base: None, binding_errors: text_pane::no_errors(), ..text };
-                v
+        Intent::BindingApply(path, draft) => match checked_binding(path, draft, text.binding_base.as_ref(), &|d| binding_document(&*value, path, d)) {
+            Ok(doc) => {
+                install(value, doc, "Edit text", Merge::Step);
+                value.text = text_pane::State { binding_draft: None, binding_base: None, binding_errors: text_pane::no_errors(), ..text };
             }
             Err(found) => {
                 text.binding_draft = Some((path.clone(), draft.clone()));
                 text.binding_base = base(text.binding_base.clone());
                 text.binding_errors = Checked { at: draft.clone(), found };
-                with_text(value, text)
+                value.text = text
             }
         },
         // a dragged number: the text applies on every frame of the drag as one "Edit text" entry
@@ -380,14 +379,17 @@ fn one_intent(value: t, intent: &Intent) -> t {
         // the text it is dragging in
         Intent::DocScrub(draft, done) => {
             let result = if finished(*done, draft, text.doc_base.as_ref(), text.draft.as_deref()) {
-                Ok(value.clone())
+                Ok(None)
             } else {
-                checked(true, &whole, draft, text.doc_base.as_ref(), &|d| scrub(&|d2| text_edit(&value, d2, None, None, Some(scrub_merge())), d))
+                checked(true, &whole, draft, text.doc_base.as_ref(), &|d| scrub(&|d2| document_edit::text_edit(None, Some(&value.factories), &value.doc, d2), d)).map(Some)
             };
             match result {
-                Ok(mut v) => {
-                    let now = v.doc.workspace.ws.clone();
-                    v.text = text_pane::State {
+                Ok(doc) => {
+                    if let Some(doc) = doc {
+                        install(value, doc, "Edit text", scrub_merge());
+                    }
+                    let now = value.doc.workspace.ws.clone();
+                    value.text = text_pane::State {
                         draft: if *done { None } else { Some(draft.clone()) },
                         doc_base: if *done { None } else { Some(now) },
                         doc_errors: text_pane::no_errors(),
@@ -395,14 +397,13 @@ fn one_intent(value: t, intent: &Intent) -> t {
                         cache: if *done { None } else { text.cache.clone() },
                         ..text
                     };
-                    v
                 }
                 Err(found) => {
                     text.draft = Some(draft.clone());
                     text.doc_base = base(text.doc_base.clone());
                     text.doc_errors = Checked { at: draft.clone(), found };
                     text.scrubbing = false;
-                    with_text(value, text)
+                    value.text = text
                 }
             }
         }
@@ -410,28 +411,30 @@ fn one_intent(value: t, intent: &Intent) -> t {
             let gbase = slot_of(&text, graph).and_then(|s| s.gbase);
             let current = slot_of(&text, graph).map(|s| s.gtext);
             let result = if finished(*done, draft, gbase.as_ref(), current.as_deref()) {
-                Ok(value.clone())
+                Ok(None)
             } else {
-                checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_ref(), &|d| scrub(&|d2| graph_edit(&value, graph, d2, Some(scrub_merge())), d))
+                checked(false, &|ws| of_graph(graph, ws), draft, gbase.as_ref(), &|d| scrub(&|d2| graph_document(&*value, graph, d2), d)).map(Some)
             };
             match result {
-                Ok(mut v) => {
+                Ok(doc) => {
+                    if let Some(doc) = doc {
+                        install(value, doc, "Edit text", scrub_merge());
+                    }
                     let kept = if *done {
                         None
                     } else {
-                        Some(Slot { gtext: draft.clone(), gbase: Some(v.doc.workspace.ws.clone()), gerrors: text_pane::no_errors() })
+                        Some(Slot { gtext: draft.clone(), gbase: Some(value.doc.workspace.ws.clone()), gerrors: text_pane::no_errors() })
                     };
                     let mut next = put(text.clone(), graph, kept);
                     next.scrubbing = scrubbed(*done);
                     next.cache = if *done { None } else { text.cache.clone() };
-                    v.text = next;
-                    v
+                    value.text = next;
                 }
                 Err(found) => {
                     let slot = failed(&text, graph, draft, found);
                     let mut next = put(text, graph, slot);
                     next.scrubbing = false;
-                    with_text(value, next)
+                    value.text = next
                 }
             }
         }
@@ -441,14 +444,17 @@ fn one_intent(value: t, intent: &Intent) -> t {
                 _ => None,
             };
             let result = if finished(*done, draft, text.binding_base.as_ref(), current.as_deref()) {
-                Ok(value.clone())
+                Ok(None)
             } else {
-                checked_binding(Some(scrub_merge()), path, draft, text.binding_base.as_ref(), &|d| scrub(&|d2| binding_edit(&value, path, d2, Some(scrub_merge())), d))
+                checked_binding(path, draft, text.binding_base.as_ref(), &|d| scrub(&|d2| binding_document(&*value, path, d2), d)).map(Some)
             };
             match result {
-                Ok(mut v) => {
-                    let now = v.doc.workspace.ws.clone();
-                    v.text = text_pane::State {
+                Ok(doc) => {
+                    if let Some(doc) = doc {
+                        install(value, doc, "Edit text", scrub_merge());
+                    }
+                    let now = value.doc.workspace.ws.clone();
+                    value.text = text_pane::State {
                         binding_draft: if *done { None } else { Some((path.clone(), draft.clone())) },
                         binding_base: if *done { None } else { Some(now) },
                         binding_errors: text_pane::no_errors(),
@@ -456,39 +462,39 @@ fn one_intent(value: t, intent: &Intent) -> t {
                         cache: if *done { None } else { text.cache.clone() },
                         ..text
                     };
-                    v
                 }
                 Err(found) => {
                     text.binding_draft = Some((path.clone(), draft.clone()));
                     text.binding_base = base(text.binding_base.clone());
                     text.binding_errors = Checked { at: draft.clone(), found };
                     text.scrubbing = false;
-                    with_text(value, text)
+                    value.text = text
                 }
             }
         }
-        Intent::LiteralScrub { .. } => value,
+        Intent::LiteralScrub { .. } => {},
     }
 }
 
-pub fn apply_text(value: t, intents: &[Intent]) -> t {
-    intents.iter().fold(value, |value, intent| one_intent(value, intent))
+pub fn apply_text(value: &mut t, intents: &[Intent]) {
+    for intent in intents {
+        one_intent(value, intent);
+    }
 }
 
 /// The intents of a text pane that is not the one in use fold into its own state.
-pub fn apply_text_at(mut value: t, key: &Vec<String>, intents: &[Intent]) -> t {
+pub fn apply_text_at(value: &mut t, key: &Vec<String>, intents: &[Intent]) {
     if intents.is_empty() {
-        return value;
+        return;
     }
     let code = local_of(&value.locals, key).code;
     let mut mine = std::mem::replace(&mut value.text, code);
-    let mut value = apply_text(value, intents);
+    apply_text(value, intents);
     if intents.iter().any(|i| matches!(i, Intent::SelectBinding(_) | Intent::JumpDefinition(_))) {
         mine.target = None;
     }
     let code = std::mem::replace(&mut value.text, mine);
     value.locals = put_local(key, &|l| local { code: code.clone(), ..l }, &value.locals);
-    value
 }
 
 /// The unapplied drafts of a text pane, as the applies its Check & apply would make.
@@ -530,12 +536,12 @@ pub fn filed(mut value: t) -> t {
 
 /// Command-S with a draft: every draft is applied first (each one its "Edit text" entry); a draft
 /// that does not check stays with its errors, and `Err` says the save must wait.
-pub fn apply_drafts(except: Option<&str>, value: t) -> Result<t, t> {
+pub fn apply_drafts(except: Option<&str>, mut value: t) -> Result<t, t> {
     let applies = draft_applies(except, &value.text);
-    let mut value = apply_text(value, &applies);
+    apply_text(&mut value, &applies);
     let locals = value.locals.clone();
     for (key, l) in locals {
-        value = apply_text_at(value, &key, &draft_applies(except, &l.code));
+        apply_text_at(&mut value, &key, &draft_applies(except, &l.code));
     }
     if has_draft(except, &value) { Err(value) } else { Ok(value) }
 }

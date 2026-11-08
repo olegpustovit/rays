@@ -273,9 +273,9 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     // first) opens on the graph it pins
     let on: Option<layout::Path> = value.doc.shell.as_ref().and_then(|s| s.start.focus.clone());
     let focus = if on.is_none() { value.focus.clone() } else { panels::Panel::Graph };
-    let value = follow_graph(value, &focus, on.as_deref());
+    let mut value = follow_graph(value, &focus, on.as_deref());
     let views = graph_path(&value).map(|p| start_views(&value.doc, level, &p)).unwrap_or_else(level_map_empty);
-    let value = with_pane(value, &|pane| graph_pane { views: views.clone(), ..pane.clone() });
+    with_pane(&mut value, &|pane| graph_pane { views: views.clone(), ..pane.clone() });
     let hosts = panel_hosts(&value);
     let value = follow_hosts(value, on.as_ref(), &hosts);
     Ok(follow_start(value))

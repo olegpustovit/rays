@@ -121,23 +121,23 @@ fn reducer_idle_undo_and_gestures() {
         let op = Op::AddNode { scope: vec!["g".to_string()], name: "second".to_string(), expr };
         let mut result = idle_result(&value, selection::empty());
         result.changes = vec![change::Syntax_edit(op)];
-        let owned = value.clone();
+        let mut owned = value.clone();
         let identity = owned.preferences.as_ptr();
-        let out = reduce(None, None, idle_input(&owned, &[], &frame0), owned, result);
-        assert_eq!(out.core.preferences.as_ptr(), identity, "reducer copied its owned model");
-        assert!(!Arc::ptr_eq(&out.core.doc, &value.doc));
-        assert_eq!(history::depth(&out.core.history), 1);
-        assert_eq!(history::label(&out.core.history), "Add node");
-        assert!(out.core.doc.workspace.ws.source.len() == value.doc.workspace.ws.source.len());
-        assert!(editor_document::preset::text(&out.core.doc).unwrap().contains("second"));
+        let out = reduce(None, None, idle_input(&owned, &[], &frame0), &mut owned, result);
+        assert_eq!(owned.preferences.as_ptr(), identity, "reducer copied its owned model");
+        assert!(!Arc::ptr_eq(&owned.doc, &value.doc));
+        assert_eq!(history::depth(&owned.history), 1);
+        assert_eq!(history::label(&owned.history), "Add node");
+        assert!(owned.doc.workspace.ws.source.len() == value.doc.workspace.ws.source.len());
+        assert!(editor_document::preset::text(&owned.doc).unwrap().contains("second"));
         assert!(out.effects.cook);
-        assert!(out.core.edit_error.is_none());
-        let wrote = out.core.notice.clone().expect("a note of what was written");
+        assert!(owned.edit_error.is_none());
+        let wrote = owned.notice.clone().expect("a note of what was written");
         assert_eq!(wrote.0, notice_kind::Info);
         assert!(wrote.1.starts_with("Wrote "), "{}", wrote.1);
 
         // undo restores the text
-        let back = reduce_idle(None, None, &out.core, &[action::Undo], &frame0).expect("undo");
+        let back = reduce_idle(None, None, &owned, &[action::Undo], &frame0).expect("undo");
         assert!(!editor_document::preset::text(&back.doc).unwrap().contains("second"));
         assert_eq!(history::depth(&back.history), 0);
         assert_eq!(back.notice, Some((notice_kind::Info, "Undo Add node".to_string())));
@@ -148,9 +148,10 @@ fn reducer_idle_undo_and_gestures() {
         // a refused gesture leaves the document and says why
         let mut result = idle_result(&value, selection::empty());
         result.changes = vec![change::Syntax_edit(Op::RemoveGraph { name: "missing".to_string() })];
-        let refused = reduce(None, None, idle_input(&value, &[], &frame0), value.clone(), result);
-        assert!(Arc::ptr_eq(&refused.core.doc, &value.doc));
-        assert!(refused.core.edit_error.is_some());
+        let mut refused = value.clone();
+        reduce(None, None, idle_input(&value, &[], &frame0), &mut refused, result);
+        assert!(Arc::ptr_eq(&refused.doc, &value.doc));
+        assert!(refused.edit_error.is_some());
         editor_host_close(&value);
     });
 }
@@ -289,7 +290,7 @@ fn inactive_text_intents_reuse_the_owned_model() {
         value.text.target = Some(vec!["g".into()]);
         let key = vec!["other-text".into()];
         let doc = value.doc.clone();
-        let value = editor_text::apply_text_at(value, &key, &[text_pane::Intent::DocDraft("other draft".into())]);
+        editor_text::apply_text_at(&mut value, &key, &[text_pane::Intent::DocDraft("other draft".into())]);
         assert_eq!(value.preferences.as_ptr(), identity, "text intents copied the whole owned model");
         assert!(Arc::ptr_eq(&value.doc, &doc));
         assert_eq!(value.text.draft.as_deref(), Some("active draft"));
@@ -297,16 +298,93 @@ fn inactive_text_intents_reuse_the_owned_model() {
         let local = editor_panes::local_of(&value.locals, &key);
         assert_eq!(local.code.draft.as_deref(), Some("other draft"));
         assert!(local.code.doc_base.is_some());
-        let value = editor_text::apply_text_at(value, &key, &[text_pane::Intent::DocApply("(workspace broken".into())]);
+        editor_text::apply_text_at(&mut value, &key, &[text_pane::Intent::DocApply("(workspace broken".into())]);
         assert!(Arc::ptr_eq(&value.doc, &doc));
         assert_eq!(value.text.draft.as_deref(), Some("active draft"));
         let local = editor_panes::local_of(&value.locals, &key);
         assert_eq!(local.code.draft.as_deref(), Some("(workspace broken"));
         assert!(!local.code.doc_errors.found.is_empty());
-        let value = editor_text::apply_text_at(value, &key, &[text_pane::Intent::DocDiscard]);
+        editor_text::apply_text_at(&mut value, &key, &[text_pane::Intent::DocDiscard]);
         assert_eq!(value.preferences.as_ptr(), identity);
         assert!(editor_panes::local_of(&value.locals, &key).code.draft.is_none());
         assert_eq!(value.text.draft.as_deref(), Some("active draft"));
+        editor_host_close(&value);
+    });
+}
+
+#[test]
+fn text_installs_scrubs_and_navigation_mutate_the_model() {
+    big_stack(|| {
+        use crate::{editor_panes, editor_text, text_pane::Intent};
+        let mut value = model();
+        value.preferences = "x".repeat(100_000);
+        let identity = value.preferences.as_ptr();
+        let path = vec!["g".into(), "box".into()];
+        let text = |kind, size| {
+            let body = format!("(let* [box (sop/box :size [{size} {size} {size}])] box)");
+            match kind {
+                0 => format!("(workspace w (graph g :context sop {body}))"),
+                1 => format!("(graph g :context sop {body})"),
+                _ => body,
+            }
+        };
+        for kind in 0..3 {
+            let draft = text(kind, kind * 3 + 1);
+            let apply = match kind {
+                0 => Intent::DocApply(draft),
+                1 => Intent::GraphApply("g".into(), draft),
+                _ => Intent::BindingApply(path.clone(), draft),
+            };
+            editor_text::apply_text(&mut value, &[apply]);
+            assert_eq!(value.preferences.as_ptr(), identity, "apply copied the model");
+            assert_eq!(history::depth(&value.history), kind * 2 + 1);
+            assert!(!editor_text::has_draft(None, &value));
+            let scrub = |size, done| {
+                let draft = text(kind, size);
+                match kind {
+                    0 => Intent::DocScrub(draft, done),
+                    1 => Intent::GraphScrub("g".into(), draft, done),
+                    _ => Intent::BindingScrub(path.clone(), draft, done),
+                }
+            };
+            editor_text::apply_text(&mut value, &[scrub(kind * 3 + 2, false), scrub(kind * 3 + 3, false)]);
+            assert_eq!(value.preferences.as_ptr(), identity, "scrub copied the model");
+            assert_eq!(history::depth(&value.history), kind * 2 + 2, "scrub frames must merge");
+            let doc = value.doc.clone();
+            editor_text::apply_text(&mut value, &[scrub(kind * 3 + 3, true)]);
+            assert_eq!(value.preferences.as_ptr(), identity, "scrub release copied the model");
+            assert!(Arc::ptr_eq(&value.doc, &doc), "scrub release reinstalled the same edit");
+            assert_eq!(history::depth(&value.history), kind * 2 + 2);
+            assert!(!editor_text::has_draft(None, &value));
+        }
+        editor_text::select_source(&mut value, &path);
+        assert_eq!(scope::selected(pane_view(&value)), vec![path.clone()]);
+        value.text.target = Some(path.clone());
+        let key = vec!["other-text".into()];
+        let mut local = editor_panes::local_of(&value.locals, &key);
+        local.code.target = Some(path.clone());
+        value.locals.push((key.clone(), local));
+        value.select_later = vec![path.clone()];
+        let previous = pane(&value).clone();
+        for missing in [vec!["g".into(), "missing".into()], vec!["missing".into(), "box".into()]] {
+            editor_text::select_source(&mut value, &missing);
+            assert_eq!(value.preferences.as_ptr(), identity);
+            assert_eq!(pane(&value).shown, previous.shown);
+            assert_eq!(pane_route(&value), previous.route);
+            assert!(Rc::ptr_eq(pane(&value).laid.as_ref().unwrap(), previous.laid.as_ref().unwrap()));
+            assert_eq!(scope::selected(pane_view(&value)), vec![path.clone()]);
+            assert_eq!(value.select_later, vec![path.clone()]);
+            assert_eq!(value.text.target, Some(path.clone()));
+            assert_eq!(editor_panes::local_of(&value.locals, &key).code.target, Some(path.clone()));
+        }
+        editor_text::apply_text(&mut value, &[Intent::SelectBinding(path.clone())]);
+        assert_eq!(value.preferences.as_ptr(), identity);
+        assert!(value.text.target.is_none());
+        assert!(editor_panes::local_of(&value.locals, &key).code.target.is_none());
+        editor_text::apply_text(&mut value, &[Intent::JumpDefinition(path.clone())]);
+        assert_eq!(value.preferences.as_ptr(), identity);
+        assert_eq!(value.text.target, Some(path));
+        assert_eq!(value.text.nonce, 1);
         editor_host_close(&value);
     });
 }

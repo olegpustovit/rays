@@ -378,7 +378,8 @@ pub mod Reduce {
     pub fn select_path(editor: Editor::t, path: &[String]) -> Editor::t {
         match path.first() {
             Some(graph) => {
-                let mut core = editor_panes::go((*editor.core).clone(), graph);
+                let mut core = (*editor.core).clone();
+                editor_panes::go(&mut core, graph);
                 core.select_later = vec![path.to_vec()];
                 Editor::with_core(editor, core)
             }
@@ -388,7 +389,8 @@ pub mod Reduce {
 
     /// `v` on the checked lexical path, as the graph pane requests it; unstable test hook.
     pub fn view(editor: Editor::t, path: &[String]) -> Editor::t {
-        let core = editor_scope::view_node((*editor.core).clone(), path);
+        let mut core = (*editor.core).clone();
+        editor_scope::view_node(&mut core, path);
         Editor::with_core(editor, core)
     }
 

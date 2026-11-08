@@ -49,20 +49,19 @@ fn probes_for(value: &t, chain: &[Path]) -> Vec<i64> {
 
 /// Resolve the previews (viewport requests and the canvas's picture) of the model against its
 /// lowering, once per change of the lowering, the probes or the previews.
-pub fn sync_views(value: t) -> t {
+pub fn sync_views(value: &mut t) {
     let lowered = &value.doc.workspace.lowered;
     if let Some((previous, probes, previews, canvas)) = &value.view_key {
         if Arc::ptr_eq(previous, &lowered.evaluated) && *probes == value.probes && *previews == value.previews && *canvas == value.canvas_preview {
-            return value;
+            return;
         }
     }
     if value.previews.is_empty() && value.canvas_preview.is_none() {
         let evaluated = lowered.evaluated.clone();
-        let mut v = value;
-        v.viewed = BTreeMap::new();
-        v.canvas_viewed = None;
-        v.view_key = Some((evaluated, v.probes.clone(), v.previews.clone(), v.canvas_preview.clone()));
-        return v;
+        value.viewed = BTreeMap::new();
+        value.canvas_viewed = None;
+        value.view_key = Some((evaluated, value.probes.clone(), value.previews.clone(), value.canvas_preview.clone()));
+        return;
     }
     let dynamic_lowered = lowered.clone();
     let options = Options {
@@ -74,7 +73,7 @@ pub fn sync_views(value: t) -> t {
     let mut previews = BTreeMap::new();
     let mut viewed = BTreeMap::new();
     for (object_id, pv) in &value.previews {
-        let probes = probes_for(&value, &pv.chain);
+        let probes = probes_for(&*value, &pv.chain);
         let viewed_node = records.borrow().plan_node(None, &pv.path, &probes).and_then(|node| {
             value.doc.networks.get(object_id).and_then(|network| (lowered.preview)(node, &probes, &network.graph))
         });
@@ -86,7 +85,7 @@ pub fn sync_views(value: t) -> t {
     let (canvas_preview, canvas_viewed) = match &value.canvas_preview {
         None => (None, None),
         Some(pv) => {
-            let shown = picture_node(&records, &pv.path, &probes_for(&value, &pv.chain));
+            let shown = picture_node(&records, &pv.path, &probes_for(&*value, &pv.chain));
             match shown {
                 Some(_) => (value.canvas_preview.clone(), shown),
                 None => (None, None),
@@ -94,46 +93,42 @@ pub fn sync_views(value: t) -> t {
         }
     };
     let evaluated = lowered.evaluated.clone();
-    let mut v = value;
-    v.view_key = Some((evaluated, v.probes.clone(), previews.clone(), canvas_preview.clone()));
-    v.previews = previews;
-    v.viewed = viewed;
-    v.canvas_preview = canvas_preview;
-    v.canvas_viewed = canvas_viewed;
-    v
+    value.view_key = Some((evaluated, value.probes.clone(), previews.clone(), canvas_preview.clone()));
+    value.previews = previews;
+    value.viewed = viewed;
+    value.canvas_preview = canvas_preview;
+    value.canvas_viewed = canvas_viewed;
 }
 
 /// A node asked to be viewed: the preview of the object that owns it, else the canvas's.
-pub fn view_node(value: t, path: &[String]) -> t {
-    let Some(key) = pane_laid(&value).cloned() else { return value };
+pub fn view_node(value: &mut t, path: &[String]) {
+    let Some(key) = pane_laid(&*value).cloned() else { return };
     let chain = probe::chains(&key.scope).get(path).cloned().unwrap_or_default();
-    let probes = probes_for(&value, &chain);
+    let probes = probes_for(&*value, &chain);
     let node = key.records.as_ref().and_then(|records| records.borrow().plan_node(None, path, &probes));
     let lowered = value.doc.workspace.lowered.clone();
     let owner = node.and_then(|node| {
         let owns = |id: i64| value.doc.networks.get(&id).and_then(|network| (lowered.preview)(node, &probes, &network.graph)).is_some();
-        match pane_level(&value) {
+        match pane_level(&*value) {
             Level::Inside(id) if owns(id) => Some(id),
             _ => value.doc.networks.keys().copied().find(|id| owns(*id)),
         }
     });
     match owner {
         Some(owner) => {
-            let mut v = value;
-            v.previews.insert(owner, preview { path: path.to_vec(), chain });
-            sync_views(v)
+            value.previews.insert(owner, preview { path: path.to_vec(), chain });
+            sync_views(value)
         }
         None => {
             let picture = key.records.as_ref().and_then(|records| picture_node(records, path, &probes));
             if picture.is_none() {
-                return value;
+                return;
             }
-            let mut v = value;
-            match &v.canvas_preview {
-                Some(held) if held.path == path => v.canvas_preview = None,
-                _ => v.canvas_preview = Some(preview { path: path.to_vec(), chain }),
+            match &value.canvas_preview {
+                Some(held) if held.path == path => value.canvas_preview = None,
+                _ => value.canvas_preview = Some(preview { path: path.to_vec(), chain }),
             }
-            sync_views(v)
+            sync_views(value)
         }
     }
 }
@@ -177,21 +172,18 @@ impl scope::Saved for DocSaved {
 /// footers are rebuilt when the recording evaluation, the cook's geometry counts or (a live
 /// document) the time changed. The evaluation is retained by lowering, never repeated by a pane
 /// or a frame.
-pub fn sync_scope(value: t) -> t {
-    let value = sync_views(value);
-    let value = match pane_laid(&value).cloned() {
-        Some(key) => {
-            let display = viewed_path(&value, &key.scope);
-            with_pane(value, &|pane| graph_pane { view: scope::with_display(display.clone(), pane.view.clone()), ..pane.clone() })
-        }
-        None => value,
-    };
-    let Some(name) = graph_name(&value) else { return value };
-    let Some(catalog) = flow_catalog(&value) else { return value };
+pub fn sync_scope(value: &mut t) {
+    sync_views(value);
+    if let Some(key) = pane_laid(&*value).cloned() {
+        let display = viewed_path(&*value, &key.scope);
+        with_pane(value, &|pane| graph_pane { view: scope::with_display(display.clone(), pane.view.clone()), ..pane.clone() });
+    }
+    let Some(name) = graph_name(&*value) else { return };
+    let Some(catalog) = flow_catalog(&*value) else { return };
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
-    let previous = pane_laid(&value).cloned();
+    let previous = pane_laid(&*value).cloned();
     let arguments: Option<Vec<editor_document::literal_edit::Change>> = previous.as_ref().and_then(|k| {
         if k.graph != name || k.ws.layout.collapsed != ws.layout.collapsed {
             None
@@ -242,10 +234,11 @@ pub fn sync_scope(value: t) -> t {
     };
     if !moved && !fresh {
         // the first call after a forced frame learns what that frame cost
-        return with_pane(value, &|pane| graph_pane {
+        with_pane(value, &|pane| graph_pane {
             laid: pane.laid.as_ref().map(|k| Rc::new(scope_key { fresh_last: false, gap: if k.fresh_last { quiet(k) } else { k.gap }, ..(**k).clone() })),
             ..pane.clone()
         });
+        return;
     }
     let executions = probe_run::reports(&lowered.profile);
     let stamp = match &previous {
@@ -272,22 +265,22 @@ pub fn sync_scope(value: t) -> t {
         ),
     };
     let scope_view = if !moved {
-        scope::with_arguments(&edits, pane_view(&value).clone())
+        scope::with_arguments(&edits, pane_view(&*value).clone())
     } else {
-        let display = viewed_path(&value, &scope_proj);
+        let display = viewed_path(&*value, &scope_proj);
         let layouts: Vec<String> = match &value.doc.shell {
             Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name) == Some(name.clone()) => {
-                layouts(&value).into_iter().map(|(n, _)| n).collect()
+                layouts(&*value).into_iter().map(|(n, _)| n).collect()
             }
             _ => Vec::new(),
         };
         let saved = Rc::new(DocSaved { layout: ws.layout.clone(), probes: value.probes.clone(), imports: ws.imports.clone() });
         let opts = scope::ScopeOpts { saved, display, layouts };
         let _phase = phase_timer::measure("layout");
-        scope::with_scope(opts, &name, scope_proj.clone(), pane_view(&value).clone())
+        scope::with_scope(opts, &name, scope_proj.clone(), pane_view(&*value).clone())
     };
     // Probe snapshots need the published facts, not the previous cook's compiled graphs and their arrays.
-    let owner = node_owner_of(&value);
+    let owner = node_owner_of(&*value);
     let summaries = value.cook.summaries.clone();
     let sources = value.cook.sources.clone();
     let geometry: Rc<dyn Fn(i64) -> Option<probe::Geometry>> = {
@@ -390,13 +383,12 @@ pub fn sync_scope(value: t) -> t {
                 .into_iter()
                 .filter_map(|(path, id)| {
                     let node_id = *lowered.compiled.get(&id)?;
-                    node_owner(&value, node_id).map(|object_id| (path, (object_id, node_id)))
+                    node_owner(&*value, node_id).map(|object_id| (path, (object_id, node_id)))
                 })
                 .collect()
         }
         (None, _) => Vec::new(),
     };
-    let mut value = value;
     value.select_later = select_later;
     let key = scope_key {
         ws: ws.clone(),
@@ -414,7 +406,7 @@ pub fn sync_scope(value: t) -> t {
         gap,
         fresh_last: fresh,
     };
-    with_pane(value, &|pane| graph_pane { view: scope_view.clone(), laid: Some(Rc::new(key.clone())), ..pane.clone() })
+    with_pane(value, &|pane| graph_pane { view: scope_view.clone(), laid: Some(Rc::new(key.clone())), ..pane.clone() });
 }
 
 fn node_owner<'a>(value: impl Into<ModelView<'a>>, node_id: i64) -> Option<i64> {

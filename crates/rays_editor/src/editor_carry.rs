@@ -156,28 +156,25 @@ pub fn carry_payload<'a>(value: impl Into<ModelView<'a>>) -> Result<carry_mod::P
     scene.ok_or_else(|| "Nothing to pick up \u{b7} open a material, SOP or scene graph, or select a geometry or camera object".to_string())
 }
 
-pub fn carry_cancel(value: &t, c: &carry, notice: (notice_kind, String)) -> t {
+pub fn carry_cancel(value: &mut t, c: &carry, notice: (notice_kind, String)) {
     value.ui.borrow_mut().cancel_carry();
     let doc = c.original.clone();
-    let level = document::resolve_level(&doc, pane_level(value));
+    let level = document::resolve_level(&doc, pane_level(&*value));
     if !Arc::ptr_eq(&doc, &value.doc) {
         cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
     }
-    let mut next = value.clone();
-    next.carry = None;
-    next.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
-    next.doc = doc;
-    next.notice = Some(notice);
-    with_pane(next, &|pane| graph_pane { at: level, ..pane.clone() })
+    value.carry = None;
+    value.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
+    value.doc = doc;
+    value.notice = Some(notice);
+    with_pane(value, &|pane| graph_pane { at: level, ..pane.clone() });
 }
 
-pub fn carry_commit(value: &t, c: &carry, doc: &Arc<Document>, what: &str) -> t {
+pub fn carry_commit(value: &mut t, c: &carry, doc: &Arc<Document>, what: &str) {
     value.ui.borrow_mut().cancel_carry();
-    let mut base = value.clone();
-    base.carry = None;
-    let mut next = install(&base, (**doc).clone(), "Put", Merge::Step);
-    next.notice = Some((notice_kind::Info, format!("Put {} \u{b7} wrote {what} \u{b7} one undo entry", c.payload.value)));
-    next
+    value.carry = None;
+    install(value, (**doc).clone(), "Put", Merge::Step);
+    value.notice = Some((notice_kind::Info, format!("Put {} \u{b7} wrote {what} \u{b7} one undo entry", c.payload.value)));
 }
 
 fn first_char(letter: &str) -> char {
@@ -187,14 +184,13 @@ fn first_char(letter: &str) -> char {
 /// The carry's turn of a frame, before the panes build: the keys of the route and the ends of the
 /// gesture, then the preview (the scratch document the panels read), or the put or the restore.
 /// Returns the frame without the keys the carry took, and whether the document shown changed.
-pub fn carry_step(value: t, text_focus: bool, frame_: &frame::t) -> (t, frame::t, bool) {
+pub fn carry_step(value: &mut t, text_focus: bool, frame_: &frame::t) -> (frame::t, bool) {
     let c = match &value.carry {
         None => {
             let carrying = value.ui.borrow().carrying();
             return match carrying {
                 Some(payload) => {
-                    let mut next = value.clone();
-                    next.carry = Some(carry {
+                    value.carry = Some(carry {
                         payload,
                         via: Via::Pointer,
                         original: crate::editor_history::present_arc(&value.history),
@@ -207,9 +203,9 @@ pub fn carry_step(value: t, text_focus: bool, frame_: &frame::t) -> (t, frame::t
                         resting: None,
                         hint: None,
                     });
-                    (next, frame_.clone(), false)
+                    (frame_.clone(), false)
                 }
-                None => (value, frame_.clone(), false),
+                None => (frame_.clone(), false),
             };
         }
         Some(c) => c.clone(),
@@ -219,7 +215,7 @@ pub fn carry_step(value: t, text_focus: bool, frame_: &frame::t) -> (t, frame::t
     let escape = idle && pressed.contains(&Key::Escape);
     let lost = frame_.input.events.iter().any(|e| matches!(e, Event::Focus_lost));
     let typing = !text_focus && idle && value.prompt.is_none() && value.menu.is_none();
-    let c = if c.via == Via::Keys { carry_targets(&value, c) } else { c };
+    let c = if c.via == Via::Keys { carry_targets(&*value, c) } else { c };
     let letters: Vec<(String, Place, String)> = match &c.targets {
         Some((_, targets)) if c.via == Via::Keys && typing => targets.clone(),
         _ => Vec::new(),
@@ -263,21 +259,22 @@ pub fn carry_step(value: t, text_focus: bool, frame_: &frame::t) -> (t, frame::t
     let still_carrying = value.ui.borrow().carrying().is_some();
     if escape || lost || (!still_carrying && dropped.is_none()) {
         let message = if lost { "Carry dropped \u{b7} the window lost focus \u{b7} nothing written" } else { "Carry dropped \u{b7} nothing written" };
-        return (carry_cancel(&value, &c, (notice_kind::Info, message.to_string())), taken, true);
+        carry_cancel(value, &c, (notice_kind::Info, message.to_string()));
+        return (taken, true);
     }
-    let preview = if desired.as_ref() == c.preview.as_ref().map(carry_place) { c.preview.clone() } else { desired.as_ref().map(|d| carry_try(&value, &c, d)) };
+    let preview = if desired.as_ref() == c.preview.as_ref().map(carry_place) { c.preview.clone() } else { desired.as_ref().map(|d| carry_try(&*value, &c, d)) };
     c.preview = preview.clone();
     if dropped.is_some() || enter {
-        return match preview {
-            Some(carry_preview::Showing { doc, what, .. } | carry_preview::Held_back { doc, what, .. }) => (carry_commit(&value, &c, &doc, &what), taken, true),
-            Some(carry_preview::Refused { reason, .. }) => (carry_cancel(&value, &c, (notice_kind::Refusal, format!("Refused \u{b7} {reason} \u{b7} nothing written"))), taken, true),
-            None if dropped.is_some() => (carry_cancel(&value, &c, (notice_kind::Info, "Carry dropped \u{b7} nothing written".to_string())), taken, true),
+        match preview {
+            Some(carry_preview::Showing { doc, what, .. } | carry_preview::Held_back { doc, what, .. }) => carry_commit(value, &c, &doc, &what),
+            Some(carry_preview::Refused { reason, .. }) => carry_cancel(value, &c, (notice_kind::Refusal, format!("Refused \u{b7} {reason} \u{b7} nothing written"))),
+            None if dropped.is_some() => carry_cancel(value, &c, (notice_kind::Info, "Carry dropped \u{b7} nothing written".to_string())),
             None => {
-                let mut next = value.clone();
-                next.carry = Some(carry { hint: Some("Pick a target letter first, or Esc".to_string()), ..c });
-                (next, taken, false)
+                value.carry = Some(carry { hint: Some("Pick a target letter first, or Esc".to_string()), ..c });
+                return (taken, false);
             }
-        };
+        }
+        return (taken, true);
     }
     // the pointer resting on a node enters what it references, after a moment
     let resting: Option<(Place, f64)> = match &hovering {
@@ -290,28 +287,26 @@ pub fn carry_step(value: t, text_focus: bool, frame_: &frame::t) -> (t, frame::t
     let entered: Option<String> = match &resting {
         Some((Place::Node(path), since)) if frame_.input.t - *since >= carry_rest => {
             // what the original document references, not the preview
-            let mut original = value.clone();
+            let mut original = (*value).clone();
             original.doc = c.original.clone();
             follow_target(&original, Some(path.as_slice()))
         }
         _ => None,
     };
     c.resting = if entered.is_some() { None } else { resting };
-    let mut value = value;
     value.carry = Some(c.clone());
-    let value = match entered {
-        Some(graph) => go(value, &graph),
-        None => value,
-    };
+    if let Some(graph) = entered {
+        go(value, &graph);
+    }
     let shown = carry_shown(&c);
     if Arc::ptr_eq(&shown, &value.doc) {
-        return (value, taken, false);
+        return (taken, false);
     }
     cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&shown.workspace.lowered));
-    let level = document::resolve_level(&shown, pane_level(&value));
-    let mut next = value.clone();
-    next.lisp_vocab = vocabulary_for(&value, &shown);
-    next.workspace = unrestore(&value.doc, &shown, value.workspace.clone());
-    next.doc = shown;
-    (with_pane(next, &|pane| graph_pane { at: level, ..pane.clone() }), taken, true)
+    let level = document::resolve_level(&shown, pane_level(&*value));
+    value.lisp_vocab = vocabulary_for(value, &shown);
+    value.workspace = unrestore(&value.doc, &shown, value.workspace.clone());
+    value.doc = shown;
+    with_pane(value, &|pane| graph_pane { at: level, ..pane.clone() });
+    (taken, true)
 }

@@ -629,10 +629,9 @@ pub fn pane_selection<'a>(value: impl Into<ModelView<'a>>) -> &'a selection::t {
     let value = &value.into();
     value.selection
 }
-pub fn with_pane(mut value: t, f: &dyn Fn(&graph_pane) -> graph_pane) -> t {
+pub fn with_pane(value: &mut t, f: &dyn Fn(&graph_pane) -> graph_pane) {
     let pane = panel_map::active_mut(&mut value.panes);
     *pane = f(pane);
-    value
 }
 pub fn set_selection(value: &mut t, picked: selection::t) {
     panel_map::active_mut(&mut value.panes).picked = picked;
@@ -644,8 +643,8 @@ pub fn with_selection(mut value: t, picked: selection::t) -> t {
 
 /// What `reduce` hands back for a frame.
 #[derive(Clone)]
-pub struct update {
-    pub core: t,
+pub struct update<Core = t> {
+    pub core: Core,
     pub effects: Effects,
     pub prepared_changed: bool,
     /// objects, lights, or the World changed: recompose

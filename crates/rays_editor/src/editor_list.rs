@@ -33,18 +33,18 @@ pub fn enterable(value: &t, id: i64) -> bool {
 }
 
 /// Switch the open level: nothing is selected there, and the list starts again.
-pub fn open_level(mut value: t, level: Level) -> t {
-    if level == pane_level(&value) {
-        return value;
+pub fn open_level(value: &mut t, level: Level) {
+    if level == pane_level(&*value) {
+        return;
     }
     value.ui.borrow_mut().unfocus();
     let world = match level {
-        Level::Inside(id) => kind(&value, id).as_deref() == Some("world"),
+        Level::Inside(id) => kind(&*value, id).as_deref() == Some("world"),
         Level::Scene => false,
     };
     value.map_view = world;
     value.tree = tree::create();
-    with_pane(value, &|pane| graph_pane { at: level, shown: None, picked: selection::empty(), ..pane.clone() })
+    with_pane(value, &|pane| graph_pane { at: level, shown: None, picked: selection::empty(), ..pane.clone() });
 }
 
 /// The geometry objects to cook: visible ones, each with its network.

@@ -31,7 +31,7 @@ use crate::editor_inspect::{scene, view_wants, View};
 use crate::editor_list::pieces;
 use crate::editor_model::*;
 use crate::editor_panes::{go, scope_name};
-use crate::editor_text::{adopt, commit, install, parameter_gesture, same_text, text_edit};
+use crate::editor_text::{adopt, commit, install, parameter_gesture, same_text};
 use crate::text_pane;
 
 /// How `scene_edit` records: `Reset` starts the history, `Amend` folds into the present entry and
@@ -153,7 +153,11 @@ pub fn host_edit(value: &t, label: &str, gesture: Option<String>, edited: &dyn F
     let clock = value.clock.clone();
     let guard = SampleGuard::start_with_clock(Box::new(move || clock()));
     let result = edited(Some(&value.factories), &value.doc)
-        .map(|doc| install(value, doc, label, gesture.map(Merge::Gesture).unwrap_or(Merge::Step)))
+        .map(|doc| {
+            let mut next = value.clone();
+            install(&mut next, doc, label, gesture.map(Merge::Gesture).unwrap_or(Merge::Step));
+            next
+        })
         .map_err(|d| rays_diagnostic::to_string(&d));
     let phases = guard.finish();
     result.map(|mut v| {
@@ -309,7 +313,7 @@ fn nearest_by(placed: &[(mat4::T, cook::piece)], origin: vec3::T, direction: vec
 /// on nothing deselects.  A merge of merges keeps the innermost tag, so the origin is exact
 /// through nested collecting merges.  Geometry drawn as instances is picked per instance
 /// (`Cook::pick`), and hits compare by the ray parameter, so any scale is exact.
-pub fn pick(view: Option<&str>, alt: bool, value: t, origin: vec3::T, direction: vec3::T) -> t {
+pub fn pick(view: Option<&str>, alt: bool, mut value: t, origin: vec3::T, direction: vec3::T) -> t {
     // the focused viewport's own scene instance, when it has objects of its own
     let view = view_of(view, &value);
     let placed = placed_pieces(false, Some(&view), &value);
@@ -317,7 +321,10 @@ pub fn pick(view: Option<&str>, alt: bool, value: t, origin: vec3::T, direction:
         // Alt-click: the material on that primitive
         return match nearest_by(&placed, origin, direction, &|p, o, d| cook::pick_material(p, o, d).map(|(t, m)| (t, Hit::Material(m)))) {
             Some((_, Hit::Material(Some(path)), _)) => match material_graph(&value, &path) {
-                Some(graph) => go(value, &graph),
+                Some(graph) => {
+                    go(&mut value, &graph);
+                    value
+                },
                 None => {
                     let mut next = value;
                     next.notice = Some((notice_kind::Refusal, format!("No material graph for {path}")));
@@ -367,7 +374,8 @@ pub fn pick(view: Option<&str>, alt: bool, value: t, origin: vec3::T, direction:
                 match flow_catalog(&value).map(|catalog| fproj::of_graph(&catalog, &workspace.ws.checked, &root)) {
                     Some(Ok(found)) => {
                         let shown = root.clone();
-                        (with_pane(value, &|pane| graph_pane { shown: Some(shown.clone()), ..pane.clone() }), Rc::new(found))
+                        with_pane(&mut value, &|pane| graph_pane { shown: Some(shown.clone()), ..pane.clone() });
+                        (value, Rc::new(found))
                     }
                     _ => (value, scope),
                 }
@@ -386,12 +394,16 @@ pub fn pick(view: Option<&str>, alt: bool, value: t, origin: vec3::T, direction:
                     let mut next = value;
                     next.probes = probes;
                     next.select_later = if in_pane { Vec::new() } else { vec![shown.clone()] };
-                    with_pane(next, &|pane| if in_pane { graph_pane { view: pxui_graph::scope_state::select(vec![shown.clone()], pane.view.clone()), ..pane.clone() } } else { pane.clone() })
+                    with_pane(&mut next, &|pane| if in_pane { graph_pane { view: pxui_graph::scope_state::select(vec![shown.clone()], pane.view.clone()), ..pane.clone() } } else { pane.clone() });
+                    next
                 }
                 None => value,
             }
         }
-        None => with_pane(value, &|pane| graph_pane { view: pxui_graph::scope_state::clear_selection(pane.view.clone()), ..pane.clone() }),
+        None => {
+            with_pane(&mut value, &|pane| graph_pane { view: pxui_graph::scope_state::clear_selection(pane.view.clone()), ..pane.clone() });
+            value
+        },
     }
 }
 
@@ -400,7 +412,9 @@ pub fn pick(view: Option<&str>, alt: bool, value: t, origin: vec3::T, direction:
 /// the pane: it shows the file's text with the diagnostics, and the status says the last good
 /// document is kept.
 pub fn reload(imports: Option<&[(String, String)]>, value: &t, name: &str, text: &str) -> Result<t, Vec<Diagnostic>> {
-    let mut next = text_edit(value, text, imports, Some(&format!("Reload {name}")), None)?;
+    let doc = document_edit::text_edit(imports, Some(&value.factories), &value.doc, text)?;
+    let mut next = value.clone();
+    install(&mut next, doc, &format!("Reload {name}"), Merge::Step);
     cook::reset_state(true, &next.cook);
     let clean = |text: &text_pane::State| text_pane::State {
         draft: None,
