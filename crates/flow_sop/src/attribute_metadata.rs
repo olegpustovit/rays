@@ -503,10 +503,10 @@ fn owner_argument(args: &[(String, Value)]) -> Result<Option<Owner>, Diagnostic>
 /// Evaluate a metadata source (`sop/attr_entries`, `sop/attr_type`, `sop/attr_names`) over a
 /// cooked geometry; `geometry` finds a cooked geometry by deferred id.
 pub fn resolve(geometry: &dyn Fn(i64) -> Option<geometry::T>, value: &Value) -> Result<Value, Diagnostic> {
-    let Value::Source(operation, _, args) = value else {
+    let Value::Source(g) = value else {
         return Err(error("E_DATA_SOURCE", "Unknown metadata source."));
     };
-    let operation = operation.as_str();
+    let (operation, args) = (g.name.as_str(), &g.fields);
     if !matches!(operation, "sop/attr_entries" | "sop/attr_type" | "sop/attr_names") {
         return Err(error("E_DATA_SOURCE", "Unknown metadata source."));
     }

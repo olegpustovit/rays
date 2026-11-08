@@ -341,9 +341,10 @@ fn ints(values: Vec<i64>) -> Value {
 
 /// Resolve a `graph/` source value to the component it names.
 pub fn resolve(value: &Value) -> Result<Value, Diagnostic> {
-    let Value::Source(name, _, args) = value else {
+    let Value::Source(g) = value else {
         return Err(refuse("E_DATA_SOURCE", "Unknown graph data source."));
     };
+    let (name, args) = (&g.name, &g.fields);
     let component = match args.named("component") {
         Some(Value::Text(component)) => String::from_utf8_lossy(component).into_owned(),
         _ => return Err(refuse("E_DATA_SOURCE", "Graph source requires a component.")),

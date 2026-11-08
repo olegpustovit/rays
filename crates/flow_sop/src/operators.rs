@@ -59,13 +59,13 @@ fn find_named<'a>(args: &'a Named, name: &str) -> Option<&'a (String, Ty, Option
 
 /// A body returning one typed source.
 fn source_body(name: &'static str, ty: Ty) -> Body {
-    Arc::new(move |_, _, args| Ok(Value::Source(name.to_owned(), ty.clone(), args.to_vec())))
+    Arc::new(move |_, _, args| Ok(value::source_value(name.to_owned(), ty.clone(), args.to_vec())))
 }
 /// A body returning a record of sources, one per component.
 fn record_body(name: &'static str, fields: Vec<(String, Ty)>) -> Body {
     Arc::new(move |_, _, args| {
         Ok(Value::Record(
-            fields.iter().map(|(component, ty)| (component.clone(), Value::Source(name.to_owned(), ty.clone(), component_args(args, component)))).collect(),
+            fields.iter().map(|(component, ty)| (component.clone(), value::source_value(name.to_owned(), ty.clone(), component_args(args, component)))).collect(),
         ))
     })
 }
@@ -163,12 +163,12 @@ fn attr() -> Op {
                     fields
                         .into_iter()
                         .map(|(name, ty)| {
-                            let component = Value::Struct("sop/attr".to_owned(), ty, component_args(args, &name));
+                            let component = value::struct_value("sop/attr", ty, component_args(args, &name));
                             (name, component)
                         })
                         .collect(),
                 )),
-                ty => Ok(Value::Struct("sop/attr".to_owned(), ty, args.to_vec())),
+                ty => Ok(value::struct_value("sop/attr", ty, args.to_vec())),
             }
         }),
     }
@@ -200,7 +200,7 @@ fn attr_checked() -> Op {
                 fields
                     .into_iter()
                     .map(|(name, ty)| {
-                        let component = Value::Source("sop/attr_checked".to_owned(), ty, component_args(args, &name));
+                        let component = value::source_value("sop/attr_checked", ty, component_args(args, &name));
                         (name, component)
                     })
                     .collect(),
@@ -704,7 +704,7 @@ fn context_source(what: &'static str) -> Body {
                 "Context frame" => ("sop/context_frame", Ty::Float),
                 _ => ("sop/context_time", Ty::Float),
             };
-            Ok(Value::Source(name.to_owned(), ty, args.to_vec()))
+            Ok(value::source_value(name.to_owned(), ty, args.to_vec()))
         }
         _ => fail("E_NODE_CONTEXT", &format!("{what} is available inside a defnode body.")),
     })
@@ -1031,7 +1031,7 @@ fn glob_rewrite_set_error() -> Op {
 /// operations also run inside structured cooked loops.
 fn pure_source(ty: Ty, name: &str, args: &Args, run: &dyn Fn() -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
     if args.iter().any(|(_, v)| matches!(v, Value::Source(..) | Value::Residual(_))) {
-        Ok(Value::Source(name.to_owned(), ty, args.to_vec()))
+        Ok(value::source_value(name.to_owned(), ty, args.to_vec()))
     } else {
         run()
     }
@@ -1317,7 +1317,7 @@ mod tests {
         let op = find("sop/context_frame");
         assert_eq!((op.body)(&frame, node, &[]).err().unwrap().code, "E_NODE_CONTEXT");
         let labelled = vec![(context_label().to_owned(), text("card"))];
-        assert!(matches!((op.body)(&frame, node, &labelled).unwrap(), Value::Source(name, Ty::Float, _) if name == "sop/context_frame"));
+        assert!(matches!((op.body)(&frame, node, &labelled).unwrap(), Value::Source(g) if g.ty == Ty::Float && g.name == "sop/context_frame"));
         let provenance = find("sop/provenance_base");
         assert_eq!((provenance.body)(&frame, node, &labelled).unwrap(), Value::Int(PROVENANCE_SENTINEL));
     }

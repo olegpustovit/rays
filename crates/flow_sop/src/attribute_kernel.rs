@@ -95,7 +95,7 @@ pub fn sources(value: &Value) -> Vec<i64> {
                 }
             }
             v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => {
-                fs.iter().for_each(|(_, v)| visit(v, seen, ids))
+                v.geo_fields().unwrap().iter().for_each(|(_, v)| visit(v, seen, ids))
             }
             _ => {}
         }
@@ -113,7 +113,7 @@ const ATTR_OPS: [&str; 5] = ["sop/attr", "sop/attr_checked", "sop/attr_planes", 
 
 fn field_of(value: Option<Value>, field: &str) -> Option<Value> {
     match value? {
-        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => assoc(&v.geo_v.geo_fields().unwrap()().unwrap(), field).cloned(),
+        v @ (Value::Record(_) | Value::Struct(_)) => assoc(v.geo_fields().unwrap(), field).cloned(),
         _ => None,
     }
 }
@@ -214,19 +214,19 @@ fn attr_read(args: &[(String, Value)], st: &mut Reads) {
 
 fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
     match value {
-        Value::Source(op, _, args) if TOPOLOGY_OPS.contains(&op.as_str()) => {
-            if assoc(args, "geometry").and_then(geometry_id).is_none() {
+        Value::Source(g) if TOPOLOGY_OPS.contains(&g.name.as_str()) => {
+            if assoc(&g.fields, "geometry").and_then(geometry_id).is_none() {
                 st.opaque = true;
             }
         }
-        Value::Source(op, _, args) if op == "sop/attr_names" || op == "sop/attr_entries" => {
+        Value::Source(g) if g.name == "sop/attr_names" || g.name == "sop/attr_entries" => {
             st.names.push("*".to_owned());
-            if assoc(args, "geometry").and_then(geometry_id).is_none() {
+            if assoc(&g.fields, "geometry").and_then(geometry_id).is_none() {
                 st.opaque = true;
             }
         }
-        Value::Struct(op, _, args) if op == "sop/attr" => attr_read(args, st),
-        Value::Source(op, _, args) if ATTR_OPS.contains(&op.as_str()) => attr_read(args, st),
+        Value::Struct(g) if g.name == "sop/attr" => attr_read(&g.fields, st),
+        Value::Source(g) if ATTR_OPS.contains(&g.name.as_str()) => attr_read(&g.fields, st),
         Value::Deferred(t, id) if ty::is_geometry(t) => {
             if !safe.contains(id) {
                 st.opaque = true;
@@ -259,7 +259,7 @@ fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
         }
         Value::List(values) => values.iter().for_each(|v| visit_reads(safe, v, st)),
         v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => {
-            fs.iter().for_each(|(_, v)| visit_reads(safe, v, st))
+            v.geo_fields().unwrap().iter().for_each(|(_, v)| visit_reads(safe, v, st))
         }
         _ => {}
     }
@@ -619,10 +619,11 @@ fn read_planes(component: &str, owner: Owner, name: &str, g: &geometry::T) -> Re
 
 /// `(operation, count, value)` of a constant-array descriptor source.
 fn constant_source(value: &Value) -> Option<Result<(String, i64, Value), Diagnostic>> {
-    let Value::Source(name, ty, args) = value else { return None };
+    let Value::Source(g) = value else { return None };
+    let (name, ty, args) = (&g.name, &g.ty, &g.fields);
     let operation = name.strip_prefix("$core/constant-array/")?;
     Some(match op::constant_array_descriptor(operation, args) {
-        Ok(Value::Source(_, actual, fields)) if actual == *ty => match (assoc(&fields, "count"), assoc(&fields, "value")) {
+        Ok(Value::Source(g)) if g.ty == *ty => match (assoc(&g.fields, "count"), assoc(&g.fields, "value")) {
             (Some(Value::Int(count)), Some(value)) => Ok((operation.to_owned(), *count, value.clone())),
             _ => err("E_ARRAY_TYPE", "Malformed constant array descriptor."),
         },
@@ -649,7 +650,8 @@ pub fn context_label() -> &'static str {
 /// The cook context an inlined body reads: a kernel node declares it ([dependencies]) and
 /// resolves it from its cook context, as the nested card specialized it.
 fn context_value(context: &context::T, value: &Value) -> Option<Value> {
-    let Value::Source(name, _, args) = value else { return None };
+    let Value::Source(g) = value else { return None };
+    let (name, args) = (&g.name, &g.fields);
     match name.as_str() {
         "sop/context_seed" => {
             let text = |key: &str| match assoc(args, key) { None => Some(String::new()), Some(value) => text_of(value) };
@@ -678,11 +680,11 @@ fn context_fact(name: &str) -> Option<D::Fact> {
 pub fn context_reads(value: &Value) -> D::T {
     fn visit(value: &Value, seen: &mut Seen, found: &mut D::T) {
         match value {
-            Value::Source(name, _, fs) => {
-                if let Some(fact) = context_fact(name) {
+            Value::Source(g) => {
+                if let Some(fact) = context_fact(&g.name) {
                     *found = D::union(*found, D::one(fact));
                 }
-                fs.iter().for_each(|(_, v)| visit(v, seen, found));
+                g.fields.iter().for_each(|(_, v)| visit(v, seen, found));
             }
             Value::Residual(r) => {
                 if seen.residuals.insert(r.0) {
@@ -697,7 +699,7 @@ pub fn context_reads(value: &Value) -> D::T {
                     E::Residual::function_bindings(*f).iter().for_each(|(_, v)| visit(v, seen, found));
                 }
             }
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().for_each(|(_, v)| visit(v, seen, found)),
+            v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().for_each(|(_, v)| visit(v, seen, found)),
             _ => {}
         }
     }
@@ -786,13 +788,13 @@ impl Specializer<'_> {
                 let (fs, c) = self.fields(fs);
                 (Value::Record(fs), c)
             }
-            Value::Struct(n, t, fs) => {
-                let (fs, c) = self.fields(fs);
-                (Value::Struct(n.clone(), t.clone(), fs), c)
+            Value::Struct(g) => {
+                let (fs, c) = self.fields(&g.fields);
+                (struct_value(g.name.clone(), g.ty.clone(), fs), c)
             }
-            Value::Source(n, t, fs) => {
-                let (fs, c) = self.fields(fs);
-                (Value::Source(n.clone(), t.clone(), fs), c)
+            Value::Source(g) => {
+                let (fs, c) = self.fields(&g.fields);
+                (source_value(g.name.clone(), g.ty.clone(), fs), c)
             }
             other => (other.clone(), false),
         }
@@ -845,19 +847,22 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
             (found.body)(&input::at_time(0.0), &|_, _| unreachable!("constant array bodies run no nodes"), &args)
         }
         None => match value {
-            Value::Source(name, _, args) if name == "sop/attr_checked" => {
+            Value::Source(g) if g.name == "sop/attr_checked" => {
+                let args = &g.fields;
                 let (id, attribute, component) = component_sources(args, "sop/attr_checked")?;
                 let g = geometry(id).map_or_else(not_cooked, Ok)?;
                 let (owner, kind) = options(args)?;
                 read_checked(&component, owner, &kind, &attribute, &g)
             }
-            Value::Source(name, _, args) if name == "sop/attr_planes" => {
+            Value::Source(g) if g.name == "sop/attr_planes" => {
+                let args = &g.fields;
                 let (id, attribute, component) = component_sources(args, "sop/attr_planes")?;
                 let g = geometry(id).map_or_else(not_cooked, Ok)?;
                 let (owner, _) = options(args)?;
                 read_planes(&component, owner, &attribute, &g)
             }
-            Value::Struct(name, _, args) | Value::Source(name, _, args) if name == "sop/attr" => {
+            Value::Struct(g) | Value::Source(g) if g.name == "sop/attr" => {
+                let args = &g.fields;
                 match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of)) {
                     (Some(id), Some(attribute)) => match geometry(id) {
                         Some(g) => {
@@ -870,7 +875,8 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
                     _ => err("E_ATTR_TYPE", "sop/attr needs geometry and an attribute name."),
                 }
             }
-            Value::Source(name, _, args) if name == "sop/has_attr" => {
+            Value::Source(g) if g.name == "sop/has_attr" => {
+                let args = &g.fields;
                 match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of)) {
                     (Some(id), Some(attribute)) => {
                         let g = geometry(id).map_or_else(not_cooked, Ok)?;
@@ -884,24 +890,24 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
                     _ => err("E_ATTR_TYPE", "sop/has_attr needs geometry and an attribute name."),
                 }
             }
-            Value::Source(name, ty, args) if name == "sop/components" => {
-                let args = concrete_args(context, geometry, args)?;
-                topology_kernel_impl::resolve(&**geometry, &Value::Source(name.clone(), ty.clone(), args))
+            Value::Source(g) if g.name == "sop/components" => {
+                let args = concrete_args(context, geometry, &g.fields)?;
+                topology_kernel_impl::resolve(&**geometry, &source_value(g.name.clone(), g.ty.clone(), args))
             }
-            Value::Source(g) if ["sop/count", "sop/edges", "sop/topology", "sop/adjacency", "sop/triangles", "sop/fans"].contains(&name.as_str()) => {
+            Value::Source(g) if ["sop/count", "sop/edges", "sop/topology", "sop/adjacency", "sop/triangles", "sop/fans"].contains(&g.name.as_str()) => {
                 topology_kernel_impl::resolve(&**geometry, value)
             }
-            Value::Source(g) if ["sop/attr_type", "sop/attr_names", "sop/attr_entries"].contains(&name.as_str()) => {
+            Value::Source(g) if ["sop/attr_type", "sop/attr_names", "sop/attr_entries"].contains(&g.name.as_str()) => {
                 attribute_metadata::resolve(&**geometry, value)
             }
-            Value::Source(name, ty, args) if ["graph/shortest_paths", "graph/forest", "graph/color", "graph/chains"].contains(&name.as_str()) => {
-                let args = concrete_args(context, geometry, args)?;
-                graph_kernel::resolve(&Value::Source(name.clone(), ty.clone(), args))
+            Value::Source(g) if ["graph/shortest_paths", "graph/forest", "graph/color", "graph/chains"].contains(&g.name.as_str()) => {
+                let args = concrete_args(context, geometry, &g.fields)?;
+                graph_kernel::resolve(&source_value(g.name.clone(), g.ty.clone(), args))
             }
-            Value::Source(name, ty, args) if name == "$core/cooked" && ty::is_geometry(ty) && args.len() == 1 && args[0].0 == "id" => {
+            Value::Source(g) if g.name == "$core/cooked" && ty::is_geometry(&g.ty) && g.fields.len() == 1 && g.fields[0].0 == "id" => {
                 // a geometry a lowered program passes to a host source (Core_lower)
-                match &args[0].1 {
-                    Value::Int(id) if geometry(*id).is_some() => Ok(Value::Deferred(ty.clone(), *id)),
+                match &g.fields[0].1 {
+                    Value::Int(id) if geometry(*id).is_some() => Ok(Value::Deferred(g.ty.clone(), *id)),
                     Value::Int(_) => not_cooked(),
                     _ => group_kernel::resolve(&**geometry, value),
                 }
@@ -925,7 +931,7 @@ fn concrete_args(context: Option<&context::T>, geometry: &GeometryLookup, args: 
                 concrete(context, geometry, &forced)
             }
             Value::Source(..) => concrete(context, geometry, &resolve(context, geometry, value)?),
-            Value::Struct(name, _, _) if name == "sop/attr" => concrete(context, geometry, &resolve(context, geometry, value)?),
+            Value::Struct(g) if g.name == "sop/attr" => concrete(context, geometry, &resolve(context, geometry, value)?),
             Value::Record(fields) => Ok(Value::Record(
                 fields.iter().map(|(n, v)| Ok((n.clone(), concrete(context, geometry, v)?))).collect::<Result<Vec<_>, Diagnostic>>()?,
             )),
@@ -1065,7 +1071,8 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
 /// A whole-attribute read (`sop/attr` without a component) of storage a device still holds: its
 /// placeholder and count, which the device binds to the held buffer without reading it back.
 fn resident_read(geometry: &GeometryLookup, value: &Value) -> Option<(Value, i64)> {
-    let (Value::Struct(name, _, args) | Value::Source(name, _, args)) = value else { return None };
+    let (Value::Struct(p) | Value::Source(p)) = value else { return None };
+    let (name, args) = (&p.name, &p.fields);
     let id = assoc(args, "geometry").and_then(geometry_id)?;
     let g = geometry(id)?;
     if name != "sop/attr" {
@@ -1110,7 +1117,7 @@ pub fn resident_color(g: &geometry::T) -> Option<(Arc<Vec<f64>>, usize)> {
 
 fn descriptor(value: &Value) -> Option<(Ty, &Vec<(String, Value)>)> {
     match value {
-        Value::Struct(name, ty, args) | Value::Source(name, ty, args) if name == "sop/attr" => Some((ty.clone(), args)),
+        Value::Struct(g) | Value::Source(g) if g.name == "sop/attr" => Some((g.ty.clone(), &g.fields)),
         _ => None,
     }
 }
@@ -1610,7 +1617,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             Some((term.name(get.name).to_owned(), captured_args(&bindings, &inner, inner.arena().op(op).args)))
         }
         _ => match captured(&bindings, term) {
-            Some(Value::Source(n, _, args)) if n == "sop/topology" => assoc(&args, "component").and_then(text_of).map(|c| (c, args.clone())),
+            Some(Value::Source(g)) if g.name == "sop/topology" => assoc(&g.fields, "component").and_then(text_of).map(|c| (c, g.fields.clone())),
             _ => None,
         },
     };
@@ -1621,8 +1628,8 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
         match term.node {
             TNode::Op(id) if ["array/int", "array/float", "array/vec2", "array/vec3", "array/vec4", "array/range"].contains(&term.name(term.arena().op(id).op)) => {
                 match term.arena().fields(term.arena().op(id).args).iter().find(|field| term.name(field.name) == "count").and_then(|field| captured(&bindings, &term.child(field.term))) {
-                    Some(Value::Source(n, _, counted) | Value::Struct(n, _, counted)) if n == "sop/count" => {
-                        match (assoc(&counted, "geometry").and_then(geometry_id), assoc(&counted, "element").and_then(text_of)) {
+                    Some(Value::Source(g) | Value::Struct(g)) if g.name == "sop/count" => {
+                        match (assoc(&g.fields, "geometry").and_then(geometry_id), assoc(&g.fields, "element").and_then(text_of)) {
                             (Some(id), Some(element)) if element == "points" => owner_origin(by_source, id, &["@sop-owner", "point"]),
                             _ => None,
                         }
@@ -1692,11 +1699,11 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             (edge, if missing { None } else { Some(resolved.into_iter().filter_map(|(n, v)| v.map(|v| (n, v))).collect()) })
         }
         _ => match captured(&bindings, term) {
-            Some(Value::Struct(n, _, args)) if n == "sop/attr" => (false, Some(args)),
-            Some(Value::Source(n, _, args)) if n == "sop/attr" || n == "sop/attr_checked" => (false, Some(args)),
-            Some(Value::Source(n, _, args)) if n == "sop/edges" => (true, Some(args)),
-            Some(Value::Source(n, _, args)) if n == "sop/group" => {
-                let args = promoted(&args, &|x: &Value| x.clone());
+            Some(Value::Struct(g)) if g.name == "sop/attr" => (false, Some(g.fields)),
+            Some(Value::Source(g)) if g.name == "sop/attr" || g.name == "sop/attr_checked" => (false, Some(g.fields)),
+            Some(Value::Source(g)) if g.name == "sop/edges" => (true, Some(g.fields)),
+            Some(Value::Source(g)) if g.name == "sop/group" => {
+                let args = promoted(&g.fields, &|x: &Value| x.clone());
                 (matches!(assoc(&args, "owner"), Some(Value::Text(t)) if t == b"edge"), Some(args))
             }
             _ => (false, None),
@@ -1770,7 +1777,8 @@ fn columns_of(storage: &Storage) -> Result<Option<Vec<Column>>, Diagnostic> {
 
 fn borrowed_value(geometry: &GeometryLookup, value: &Value) -> Result<Option<Vec<Column>>, Diagnostic> {
     match value {
-        Value::Struct(n, _, args) | Value::Source(n, _, args) if n == "sop/attr" => {
+        Value::Struct(g) | Value::Source(g) if g.name == "sop/attr" => {
+            let args = &g.fields;
             match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of)) {
                 (Some(id), Some(name)) => match geometry(id) {
                     None => not_cooked(),
@@ -1813,7 +1821,7 @@ fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &
                 (Some(g), Some(a)) => {
                     let mut fields = vec![("geometry".to_owned(), g), ("attribute".to_owned(), a)];
                     fields.extend(["owner", "type"].iter().filter_map(|k| argument(k).map(|v| ((*k).to_owned(), v))));
-                    borrowed_value(geometry, &Value::Struct("sop/attr".into(), term.ty().clone(), fields))
+                    borrowed_value(geometry, &struct_value("sop/attr", term.ty().clone(), fields))
                 }
                 _ => Ok(None),
             }

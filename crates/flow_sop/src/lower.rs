@@ -17,7 +17,7 @@ use flow_ir::flow_ir::{Cost, Executor, Gpu, Placement, PlacementReason, Profile,
 use flow_syntax::context as fctx;
 use flow_syntax::syntax::{self, Syntax};
 use flow_syntax::ty::{self, FnSignature, Ty};
-use flow_syntax::value::{FnId, ResidualId};
+use flow_syntax::value::{FnId, ResidualId, source_value, struct_value};
 use rays_diagnostic::Diagnostic;
 use sop::context::{self as sctx, dependencies as deps_mod};
 use sop::edit_graph::{self as edit, Factory, InputRequirement};
@@ -325,7 +325,8 @@ fn material_args(kind: &str, args: Vec<(String, Value)>) -> Vec<(String, Value)>
     let mut out = Vec::new();
     for arg in args {
         match &arg {
-            (name, Value::Struct(s, _, fields)) if name == "material" && s == "material/standard" => {
+            (name, Value::Struct(g)) if name == "material" && g.name == "material/standard" => {
+                let fields = &g.fields;
                 let field = |n: &str, default: Value| get(fields, n).cloned().unwrap_or(default);
                 out.push(("material".into(), field("name", Value::Text(Vec::new()))));
                 out.push(("color".into(), field("color", Value::Vec3(1., 1., 1.))));
@@ -2060,7 +2061,7 @@ fn cooked_sources(value: &Value) -> Vec<i64> {
                     }
                 }
             }
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().for_each(|(_, v)| visit(v, residuals, functions, ids)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().for_each(|(_, v)| visit(v, residuals, functions, ids)),
             Value::List(values) => values.iter().for_each(|v| visit(v, residuals, functions, ids)),
             _ => {}
         }
@@ -2191,7 +2192,8 @@ fn static_facts_key(node: &dyn Fn(i64) -> Option<ENode>, id: i64) -> String {
 fn static_source_of(node: &dyn Fn(i64) -> Option<ENode>, value: &Value) -> Option<Value> {
     const OWNERS: [&str; 4] = ["point", "vertex", "primitive", "detail"];
     const KINDS: [&str; 8] = ["float", "int", "vec2", "vec3", "vec4", "text", "float_array", "int_array"];
-    let Value::Source(op, _, args) = value else { return None };
+    let Value::Source(g) = value else { return None };
+    let (op, args) = (&g.name, &g.fields);
     if op != "sop/has_attr" {
         return None;
     }
@@ -2456,11 +2458,11 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
     };
     let recount = |nodes: &Vec<ENode>, v: &Value| -> Option<Value> {
         match v {
-            Value::Source(op, ty, fields) | Value::Struct(op, ty, fields) if op == "sop/count" => match get(fields, "geometry") {
+            Value::Source(g) | Value::Struct(g) if g.name == "sop/count" => match get(&g.fields, "geometry") {
                 Some(Value::Deferred(gty, x)) if root(nodes, *x) != *x => {
                     let fields: Vec<(String, Value)> =
-                        fields.iter().map(|(k, v)| if k == "geometry" { (k.clone(), Value::Deferred(gty.clone(), root(nodes, *x))) } else { (k.clone(), v.clone()) }).collect();
-                    Some(if matches!(v, Value::Source(..)) { Value::Source(op.clone(), ty.clone(), fields) } else { Value::Struct(op.clone(), ty.clone(), fields) })
+                        g.fields.iter().map(|(k, v)| if k == "geometry" { (k.clone(), Value::Deferred(gty.clone(), root(nodes, *x))) } else { (k.clone(), v.clone()) }).collect();
+                    Some(if matches!(v, Value::Source(..)) { source_value(g.name.clone(), g.ty.clone(), fields) } else { struct_value(g.name.clone(), g.ty.clone(), fields) })
                 }
                 _ => None,
             },
@@ -2489,7 +2491,7 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
                 found
             }
             Value::List(vs) => vs.iter().any(|v| recounts(nodes, v, recount, seen)),
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().any(|(_, v)| recounts(nodes, v, recount, seen)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, v)| recounts(nodes, v, recount, seen)),
             _ => false,
         }
     }
@@ -2731,9 +2733,10 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
         let values = E::Host::rewrite_with(
             get(&w.args, "values").expect("write values"),
             &|v: &Value| match v {
-                Value::Struct(op, ty, fields) | Value::Source(op, ty, fields) => {
+                Value::Struct(g) | Value::Source(g) => {
+                    let (op, ty, fields) = (&g.name, &g.ty, &g.fields);
                     let chained = matches!(get(fields, "geometry"), Some(Value::Deferred(_, x)) if chain.contains(x));
-                    let rebuilt = |fields: Vec<(String, Value)>| if matches!(v, Value::Struct(..)) { Value::Struct(op.clone(), ty.clone(), fields) } else { Value::Source(op.clone(), ty.clone(), fields) };
+                    let rebuilt = |fields: Vec<(String, Value)>| if matches!(v, Value::Struct(..)) { struct_value(op.clone(), ty.clone(), fields) } else { source_value(op.clone(), ty.clone(), fields) };
                     if !chained {
                         return None;
                     }
@@ -3037,7 +3040,7 @@ impl CookServices {
                             match v {
                                 Value::Residual(_) | Value::Fn(_) => true,
                                 Value::List(xs) => xs.iter().any(terms),
-                                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().any(|(_, v)| terms(v)),
+                                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, v)| terms(v)),
                                 _ => false,
                             }
                         }
@@ -3623,7 +3626,8 @@ impl HostRun {
 
     fn deferred(v: &Value) -> bool {
         match v {
-            Value::Source(..) | Value::Struct(g) if matches!(g.ty, Ty::Array(_)) => true,
+            Value::Source(_) => true,
+            Value::Struct(g) if matches!(g.ty, Ty::Array(_)) => true,
             Value::Record(fields) => fields.iter().any(|(_, v)| Self::deferred(v)),
             Value::List(values) => values.iter().any(Self::deferred),
             _ => false,
@@ -3631,7 +3635,7 @@ impl HostRun {
     }
 
     fn constant(v: &Value) -> bool {
-        matches!(v, Value::Source(g) if name.starts_with("$core/constant-array/"))
+        matches!(v, Value::Source(g) if g.name.starts_with("$core/constant-array/"))
     }
 
     fn resolve_fn(self: &Arc<Self>) -> flow_ir::core_exec::ResolveFn {
@@ -3857,7 +3861,7 @@ impl HostRun {
             match v {
                 Value::Fn(_) => true,
                 Value::List(vs) => vs.iter().any(callable),
-                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().any(|(_, v)| callable(v)),
+                v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().any(|(_, v)| callable(v)),
                 _ => false,
             }
         }
@@ -3888,7 +3892,8 @@ impl HostRun {
     fn resolve(self: &Arc<Self>, value: &Value) -> R<Value> {
         let result = (|| -> R<Value> {
             match value {
-                Value::Source(name, Ty::Int, args) if name == "$core/diagnostic_index" && args.len() == 2 && args[0].0 == "rows" && args[1].0 == "policy" => {
+                Value::Source(g) if g.ty == Ty::Int && g.name == "$core/diagnostic_index" && g.fields.len() == 2 && g.fields[0].0 == "rows" && g.fields[1].0 == "policy" => {
+                    let args = &g.fields;
                     let Value::Text(policy) = &args[1].1 else { return Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs typed rows and policy.")) };
                     let grain = match txt(policy).as_str() {
                         "first" => None,
@@ -3907,23 +3912,24 @@ impl HostRun {
                         None => Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs a failing row.")),
                     }
                 }
-                Value::Source(g) if name == "$core/diagnostic_index" => Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs typed rows and policy.")),
-                Value::Source(name, ty, args) if name == "$core/complete" => match args.as_slice() {
+                Value::Source(g) if g.name == "$core/diagnostic_index" => Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs typed rows and policy.")),
+                Value::Source(g) if g.name == "$core/complete" => { let (ty, args) = (&g.ty, &g.fields); match args.as_slice() {
                     [(k, Value::Deferred(actual, id))] if k == "value" && actual == ty && ty::is_cooked(ty) => {
                         self.snapshot(ty, *id)?;
                         Ok(Value::Deferred(ty.clone(), *id))
                     }
                     [(k, Value::No_geo)] if k == "value" && is_geometry_ty(ty) => Ok(Value::No_geo),
                     _ => Err(data_source("Protected completion needs one matching cooked handle.")),
-                },
-                Value::Source(name, ty, args) if name == "$core/cooked" && args.len() == 1 && args[0].0 == "id" => match &args[0].1 {
+                } },
+                Value::Source(g) if g.name == "$core/cooked" && g.fields.len() == 1 && g.fields[0].0 == "id" => match &g.fields[0].1 {
                     Value::Int(id) => {
-                        self.handle_exists(ty, *id)?;
-                        Ok(Value::Deferred(ty.clone(), *id))
+                        self.handle_exists(&g.ty, *id)?;
+                        Ok(Value::Deferred(g.ty.clone(), *id))
                     }
                     _ => Err(data_source("A cooked handle is missing from this execution.")),
                 },
-                Value::Source(kind, ty, args) if kind == "$core/operator" || kind == "$core/catalog" => {
+                Value::Source(g) if g.name == "$core/operator" || g.name == "$core/catalog" => {
+                    let (kind, ty, args) = (&g.name, &g.ty, &g.fields);
                     if !ty::is_cooked(ty) {
                         return Err(data_source("Host calls return a declared cooked type."));
                     }
@@ -3996,7 +4002,8 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
             let (run, scope) = (run.clone(), scope.clone());
             move |value: &Value| -> R<Option<Value>> {
                 match value {
-                    Value::Source(name, ty, args) if name == "$core/operator" && is_geometry_ty(ty) && get(args, "$name") == Some(&Value::Text(b"sop/mesh".to_vec())) => {
+                    Value::Source(g) if g.name == "$core/operator" && is_geometry_ty(&g.ty) && get(&g.fields, "$name") == Some(&Value::Text(b"sop/mesh".to_vec())) => {
+                        let (ty, args) = (&g.ty, &g.fields);
                         let points = match get(args, "points") {
                             Some(p) => scope_count(&scope, p)?,
                             None => None,

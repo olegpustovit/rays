@@ -2,7 +2,7 @@
 //! mesh constructor (host and device-resident), `sop/remap` and `sop/concat`.
 use flow_ir::flow_ir::Gpu::{self, Integers, Planes, Residency};
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{self, Value, struct_value, source_value};
+use flow_syntax::value::{self, Value};
 use rays_diagnostic::Diagnostic;
 use rdk::geometry::{self, T as Geometry};
 use rdk::packed::{Deferred, Float3};
@@ -788,10 +788,10 @@ pub fn count(geometry: &Geometry, element: &str) -> Result<i64, Diagnostic> {
 /// Resolve one `sop/count`, `sop/edges`, `sop/topology`, `sop/adjacency`, `sop/components`,
 /// `sop/triangles` or `sop/fans` source over cooked geometry.
 pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Result<Value, Diagnostic> {
-    let Value::Source(name, _, args) = source else {
+    let Value::Source(g) = source else {
         return fail("E_DATA_SOURCE", "Unknown topology data source.");
     };
-    let name = name.as_str();
+    let (name, args) = (g.name.as_str(), &g.fields);
     if !matches!(name, "sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/components" | "sop/triangles" | "sop/fans") {
         return fail("E_DATA_SOURCE", "Unknown topology data source.");
     }
@@ -1094,6 +1094,7 @@ pub fn concat(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Geometry], 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flow_syntax::value::source_value;
 
     fn text(s: &str) -> Value {
         Value::Text(s.as_bytes().to_vec())
@@ -1184,6 +1185,7 @@ mod tests {
 #[cfg(test)]
 mod integration {
     use super::*;
+    use flow_syntax::value::source_value;
     use crate::{attribute_kernel, operators};
     use flow_check::catalog::Catalog;
     use flow_ir::flow_ir::Executor;

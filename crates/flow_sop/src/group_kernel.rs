@@ -243,9 +243,10 @@ fn cooked(args: &[(String, Value)], geometry: &dyn Fn(i64) -> Option<Geometry>) 
 
 /// Resolve a `text/glob_*`, `text/group_name_*`, `sop/group*` data source.
 pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Result<Value, Diagnostic> {
-    let Value::Source(operation, _, args) = source else {
+    let Value::Source(g) = source else {
         return fail("E_DATA_SOURCE", "Unknown group data source.");
     };
+    let (operation, args) = (&g.name, &g.fields);
     match operation.as_str() {
         "text/glob_rewrite" | "text/glob_rewrite_set" | "text/glob_literal" => {
             let value = metadata_text(args, "text")?;
