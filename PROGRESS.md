@@ -136,6 +136,15 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: native qualification at `3ca50482`, `RAYS_T_TIMEOUT=3600 cargo t -p rays_editor --features test-hooks --test gpu_editor`: 321 of 325 ok, 221.7 s, no assertion failures. Pass start: 285 of 322 with 37 failures.
+  - Five timeouts remained. A prelude pass fixed four:
+    - `d15bfd6a`: std-only Fx-style hasher on internal arena maps.
+    - `e6459c8a`: `Cx::with_path` avoids path copies.
+    - `97cd4849`: scrub fresh-process children run concurrently; step 7 reuses step 5.
+  - Results: sopcat graph_edits/morph_sketch/node_inputs 5.0 -> 4.5-4.6 s; native_scrub_gpu 5.0 -> 1.9-2.2 s.
+  - native_orrery_frames (~7.4 s) is in a 30-minute pass.
+  - The prelude check is still ~3.4 s per process. Next gains are interned checker paths or per-signature closure-check memos, both larger refactors and follow-ups.
+
 - 2026-11-08: final default qualification, `RAYS_T_TIMEOUT=7200 cargo t --workspace` at `1553dc64`: 2,823 of 2,839 pass, 305 s wall.
   - Three assertion failures, all pre-existing:
     - `e2e::lib_flow_gpu_shaders_indices`: fmt golden stale since `4ed6baf8` (pre-plan); refreshed in `9598a3d2`.
