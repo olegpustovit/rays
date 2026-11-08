@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::subdivide_refine::AFloats;
+use rdk_core::support::Windows;
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
 use rdk_geom::point_clusters::{self, Clusters};
 use rdk_geom::point_snap;
@@ -438,17 +438,25 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
     let output = if moved == 0 {
         geometry_value.clone()
     } else {
-        let (x, y, z) = (AFloats::from_slice(&source.x), AFloats::from_slice(&source.y), AFloats::from_slice(&source.z));
-        support::parallel_for(cancel_value, grain, count, &|point| {
-            let destination = destinations[point as usize];
-            if destination >= 0 {
-                x.set(point, target_positions.x[destination as usize]);
-                y.set(point, target_positions.y[destination as usize]);
-                z.set(point, target_positions.z[destination as usize]);
-            }
-            Ok(())
-        })?;
-        let (x, y, z) = (x.into_vec(), y.into_vec(), z.into_vec());
+        let grain = grain.max(1);
+        let (mut x, mut y, mut z) = (source.x.to_vec(), source.y.to_vec(), source.z.to_vec());
+        {
+            let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));
+            support::run_indexed_ranges(grain, count, &|range, first, last| {
+                let (x, y, z) = (wx.take(range), wy.take(range), wz.take(range));
+                for point in first..last {
+                    support::poll(cancel_value, point)?;
+                    let destination = destinations[point as usize];
+                    if destination >= 0 {
+                        let slot = (point - first) as usize;
+                        x[slot] = target_positions.x[destination as usize];
+                        y[slot] = target_positions.y[destination as usize];
+                        z[slot] = target_positions.z[destination as usize];
+                    }
+                }
+                Ok(())
+            })?;
+        }
         let moved_geometry =
             geometry::with_positions(packed::Float3::View::of_owned_exn(x, y, z)?, geometry_value)?;
         let moved_geometry = geometry::without_attribute(attribute::Owner::Point, "N", &moved_geometry);

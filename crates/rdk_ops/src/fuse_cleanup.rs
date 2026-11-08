@@ -1,7 +1,5 @@
-use crate::subdivide_refine::{ABytes, AInts};
-use rdk_core::{
-    attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index, topology_remap,
-};
+use rdk_core::support::{self, Windows};
+use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, topology, topology_index, topology_remap};
 
 const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
 
@@ -93,95 +91,121 @@ pub fn apply_with_mapping(
     if !remove_degenerate_primitives && !remove_all_unused_points {
         return Ok((geometry_value.clone(), (0..source_points as i64).collect()));
     }
-    let keep_vertex = ABytes::new(source_vertices as i64, 0);
-    let retained_counts = AInts::new(source_primitives as i64, 0);
-    support::parallel_for(cancel_value, grain, source_primitives as i64, &|primitive| {
-        let primitive = primitive as usize;
-        let first = source.primitive_offsets[primitive];
-        let last = source.primitive_offsets[primitive + 1];
-        if remove_degenerate_primitives {
-            let mut retained = 0i64;
-            let mut previous_point = -1i64;
-            let mut first_vertex = -1i64;
-            let mut last_vertex = -1i64;
-            for vertex in first..last {
-                let point = source.vertex_points[vertex as usize];
-                if retained == 0 || point != previous_point {
-                    keep_vertex.set(vertex, 1);
-                    if retained == 0 {
-                        first_vertex = vertex;
+    let grain = grain.max(1);
+    let primitive_count = source_primitives as i64;
+    let ranges = support::range_count(primitive_count, grain);
+    let chunk_start = |range: i64| range.saturating_mul(grain).min(primitive_count) as usize;
+    let offsets = &source.primitive_offsets;
+    let mut keep_vertex = vec![0u8; source_vertices];
+    let mut retained_counts = vec![0i64; source_primitives];
+    {
+        let keep_windows = Windows::new(&mut keep_vertex, ranges, |range| offsets[chunk_start(range)] as usize);
+        let count_windows = Windows::even(&mut retained_counts, grain);
+        support::run_indexed_ranges(grain, primitive_count, &|range, chunk_first, chunk_last| {
+            let (keep, counts) = (keep_windows.take(range), count_windows.take(range));
+            let base = offsets[chunk_first as usize];
+            for primitive in chunk_first..chunk_last {
+                support::poll(cancel_value, primitive)?;
+                let primitive = primitive as usize;
+                let first = offsets[primitive];
+                let last = offsets[primitive + 1];
+                if remove_degenerate_primitives {
+                    let mut retained = 0i64;
+                    let mut previous_point = -1i64;
+                    let mut first_vertex = -1i64;
+                    let mut last_vertex = -1i64;
+                    for vertex in first..last {
+                        let point = source.vertex_points[vertex as usize];
+                        if retained == 0 || point != previous_point {
+                            keep[(vertex - base) as usize] = 1;
+                            if retained == 0 {
+                                first_vertex = vertex;
+                            }
+                            last_vertex = vertex;
+                            previous_point = point;
+                            retained += 1;
+                        }
                     }
-                    last_vertex = vertex;
-                    previous_point = point;
-                    retained += 1;
+                    let kind = source.primitive_kinds[primitive];
+                    if kind != 1
+                        && retained > 1
+                        && source.vertex_points[first_vertex as usize] == source.vertex_points[last_vertex as usize]
+                    {
+                        keep[(last_vertex - base) as usize] = 0;
+                        retained -= 1;
+                    }
+                    if retained >= minimum_vertices(kind) {
+                        counts[primitive - chunk_first as usize] = retained;
+                    }
+                } else {
+                    counts[primitive - chunk_first as usize] = last - first;
+                    for vertex in first..last {
+                        keep[(vertex - base) as usize] = 1;
+                    }
                 }
             }
-            let kind = source.primitive_kinds[primitive];
-            if kind != 1
-                && retained > 1
-                && source.vertex_points[first_vertex as usize] == source.vertex_points[last_vertex as usize]
-            {
-                keep_vertex.set(last_vertex, 0);
-                retained -= 1;
-            }
-            if retained >= minimum_vertices(kind) {
-                retained_counts.set(primitive as i64, retained);
-            }
-        } else {
-            retained_counts.set(primitive as i64, last - first);
-            for vertex in first..last {
-                keep_vertex.set(vertex, 1);
-            }
-        }
-        Ok(())
-    })?;
-    let keep_vertex = keep_vertex.into_vec();
-    let retained_counts = retained_counts.into_vec();
-    let mut primitive_target = vec![-1i64; source_primitives];
-    let mut output_vertex_first = vec![0i64; source_primitives];
+            Ok(())
+        })?;
+    }
+    // Output positions before each primitive (kept or not), so every parallel range owns a contiguous window.
+    let mut primitive_first = vec![0i64; source_primitives + 1];
+    let mut vertex_first = vec![0i64; source_primitives + 1];
     let mut output_primitives = 0i64;
     let mut output_vertices = 0i64;
     for primitive in 0..source_primitives {
         cancel::poll(cancel_value, primitive as i64, 4095)?;
+        primitive_first[primitive] = output_primitives;
+        vertex_first[primitive] = output_vertices;
         let count = retained_counts[primitive];
         if count > 0 {
             if output_vertices > OCAML_MAX_INT - count {
                 return Err(fail("cleanup vertex cardinality exceeds integer limits"));
             }
-            primitive_target[primitive] = output_primitives;
-            output_vertex_first[primitive] = output_vertices;
             output_primitives += 1;
             output_vertices += count;
         }
     }
-    let vertex_map = AInts::new(output_vertices, 0);
-    let primitive_map = AInts::new(output_primitives, 0);
-    let vertex_points = AInts::new(output_vertices, 0);
-    let primitive_offsets = AInts::new(output_primitives + 1, 0);
-    let primitive_kinds = ABytes::new(output_primitives, 0);
-    support::parallel_for(cancel_value, grain, source_primitives as i64, &|primitive| {
-        let primitive = primitive as usize;
-        let target = primitive_target[primitive];
-        if target >= 0 {
-            let mut output = output_vertex_first[primitive];
-            primitive_map.set(target, primitive as i64);
-            primitive_kinds.set(target, source.primitive_kinds[primitive]);
-            for vertex in source.primitive_offsets[primitive]..source.primitive_offsets[primitive + 1] {
-                if keep_vertex[vertex as usize] != 0 {
-                    vertex_map.set(output, vertex);
-                    vertex_points.set(output, source.vertex_points[vertex as usize]);
-                    output += 1;
+    primitive_first[source_primitives] = output_primitives;
+    vertex_first[source_primitives] = output_vertices;
+    let mut vertex_map = vec![0i64; output_vertices as usize];
+    let mut primitive_map = vec![0i64; output_primitives as usize];
+    let mut vertex_points = vec![0i64; output_vertices as usize];
+    let mut primitive_offsets = vec![0i64; output_primitives as usize + 1];
+    let mut primitive_kinds = vec![0u8; output_primitives as usize];
+    {
+        let vertex_bound = |range: i64| vertex_first[chunk_start(range)] as usize;
+        let primitive_bound = |range: i64| primitive_first[chunk_start(range)] as usize;
+        let vertex_map_windows = Windows::new(&mut vertex_map, ranges, vertex_bound);
+        let vertex_point_windows = Windows::new(&mut vertex_points, ranges, vertex_bound);
+        let primitive_map_windows = Windows::new(&mut primitive_map, ranges, primitive_bound);
+        let primitive_kind_windows = Windows::new(&mut primitive_kinds, ranges, primitive_bound);
+        let primitive_offset_windows = Windows::new(&mut primitive_offsets, ranges, |range| primitive_bound(range) + 1);
+        support::run_indexed_ranges(grain, primitive_count, &|range, chunk_first, chunk_last| {
+            let (vertex_map, vertex_points) = (vertex_map_windows.take(range), vertex_point_windows.take(range));
+            let (primitive_map, primitive_kinds) = (primitive_map_windows.take(range), primitive_kind_windows.take(range));
+            let primitive_offsets = primitive_offset_windows.take(range);
+            let (vertex_base, primitive_base) = (vertex_first[chunk_first as usize], primitive_first[chunk_first as usize]);
+            for primitive in chunk_first..chunk_last {
+                support::poll(cancel_value, primitive)?;
+                let primitive = primitive as usize;
+                if retained_counts[primitive] > 0 {
+                    let target = (primitive_first[primitive] - primitive_base) as usize;
+                    let mut output = (vertex_first[primitive] - vertex_base) as usize;
+                    primitive_map[target] = primitive as i64;
+                    primitive_kinds[target] = source.primitive_kinds[primitive];
+                    for vertex in offsets[primitive]..offsets[primitive + 1] {
+                        if keep_vertex[vertex as usize] != 0 {
+                            vertex_map[output] = vertex;
+                            vertex_points[output] = source.vertex_points[vertex as usize];
+                            output += 1;
+                        }
+                    }
+                    primitive_offsets[target] = output as i64 + vertex_base;
                 }
             }
-            primitive_offsets.set(target + 1, output);
-        }
-        Ok(())
-    })?;
-    let vertex_map = vertex_map.into_vec();
-    let primitive_map = primitive_map.into_vec();
-    let vertex_points = vertex_points.into_vec();
-    let primitive_offsets = primitive_offsets.into_vec();
-    let primitive_kinds = primitive_kinds.into_vec();
+            Ok(())
+        })?;
+    }
     let (point_map, old_to_new): (Vec<i64>, Vec<i64>) =
         if !remove_all_unused_points && !remove_unused_points_from_degenerate_primitives {
             ((0..source_points as i64).collect(), (0..source_points as i64).collect())
@@ -224,16 +248,15 @@ pub fn apply_with_mapping(
     let vertex_points = if point_identity {
         vertex_points
     } else {
-        let remapped = AInts::new(output_vertices, 0);
-        support::parallel_for(cancel_value, grain, output_vertices, &|vertex| {
+        let mut remapped = vec![0i64; output_vertices as usize];
+        support::par_fill(cancel_value, grain, &mut remapped, &|vertex| {
             let point = old_to_new[vertex_points[vertex as usize] as usize];
             if point < 0 {
                 return Err(fail("cleanup retained a deleted point"));
             }
-            remapped.set(vertex, point);
-            Ok(())
+            Ok(point)
         })?;
-        remapped.into_vec()
+        remapped
     };
     let output_topology = topology::View::create_validated_owned(
         point_map.len() as i64,
