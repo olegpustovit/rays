@@ -1,8 +1,7 @@
 use std::collections::HashSet;
-use std::sync::Mutex;
 
+use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, support};
-use crate::subdivide_refine::{AFloats, AInts};
 
 use crate::fuse_rules::{AttributeMethod, AttributeRule, GroupRule};
 
@@ -129,39 +128,31 @@ fn validate_weight(target: &geometry::T, rule: &CompiledAttributeRule) -> Result
 }
 
 fn mapped_f64(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[f64], target: &[f64]) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::from_slice(source);
-    support::parallel_for(cancel_value, grain, destinations.len() as i64, &|point| {
+    let mut output = source.to_vec();
+    support::par_fill(cancel_value, grain, &mut output, &|point| {
         let destination = destinations[point as usize];
-        if destination >= 0 {
-            output.set(point, target[destination as usize]);
-        }
-        Ok(())
+        Ok(if destination >= 0 { target[destination as usize] } else { source[point as usize] })
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn mapped_i64(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<Vec<i64>, error::T> {
-    let output = AInts::from_slice(source);
-    support::parallel_for(cancel_value, grain, destinations.len() as i64, &|point| {
+    let mut output = source.to_vec();
+    support::par_fill(cancel_value, grain, &mut output, &|point| {
         let destination = destinations[point as usize];
-        if destination >= 0 {
-            output.set(point, target[destination as usize]);
-        }
-        Ok(())
+        Ok(if destination >= 0 { target[destination as usize] } else { source[point as usize] })
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn mapped_string(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[Vec<u8>], target: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, error::T> {
-    let output: Vec<Mutex<Vec<u8>>> = source.iter().map(|value| Mutex::new(value.clone())).collect();
-    support::parallel_for(cancel_value, grain, destinations.len() as i64, &|point| {
+    let mut output = source.to_vec();
+    support::par_fill(cancel_value, grain, &mut output, &|point| {
         let destination = destinations[point as usize];
-        if destination >= 0 {
-            *output[point as usize].lock().unwrap() = target[destination as usize].clone();
-        }
-        Ok(())
+        let value = if destination >= 0 { &target[destination as usize] } else { &source[point as usize] };
+        Ok(value.clone())
     })?;
-    Ok(output.into_iter().map(|slot| slot.into_inner().unwrap()).collect())
+    Ok(output)
 }
 
 fn scalar_int_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<packed::IntArray::T, error::T> {
@@ -201,22 +192,30 @@ fn mapped_int_rows(
         }
         offsets[point + 1] = offsets[point] + length;
     }
-    let values = AInts::new(offsets[count], 0);
-    support::parallel_for(cancel_value, grain, count as i64, &|point| {
-        let point = point as usize;
-        let destination = destinations[point];
-        let (input, first, last) = if destination < 0 {
-            (&source.values, source.offsets[point], source.offsets[point + 1])
-        } else {
-            (&target.values, target.offsets[destination as usize], target.offsets[destination as usize + 1])
-        };
-        let at = offsets[point];
-        for (k, &value) in input[first as usize..last as usize].iter().enumerate() {
-            values.set(at + k as i64, value);
-        }
-        Ok(())
-    })?;
-    let values = values.into_vec();
+    let mut values = vec![0i64; offsets[count] as usize];
+    let grain = grain.max(1);
+    {
+        let windows = Windows::new(&mut values, support::range_count(count as i64, grain), |range| {
+            offsets[(range.saturating_mul(grain) as usize).min(count)] as usize
+        });
+        support::run_indexed_ranges(grain, count as i64, &|range, chunk_first, chunk_last| {
+            let window = windows.take(range);
+            let base = offsets[chunk_first as usize];
+            for point in chunk_first..chunk_last {
+                support::poll(cancel_value, point)?;
+                let point = point as usize;
+                let destination = destinations[point];
+                let (input, first, last) = if destination < 0 {
+                    (&source.values, source.offsets[point], source.offsets[point + 1])
+                } else {
+                    (&target.values, target.offsets[destination as usize], target.offsets[destination as usize + 1])
+                };
+                let at = (offsets[point] - base) as usize;
+                window[at..at + (last - first) as usize].copy_from_slice(&input[first as usize..last as usize]);
+            }
+            Ok(())
+        })?;
+    }
     Ok(packed::IntArray::View::create_validated_owned(offsets, values))
 }
 
@@ -243,22 +242,30 @@ fn mapped_float_rows(
         }
         offsets[point + 1] = offsets[point] + length;
     }
-    let values = AFloats::new(offsets[count], 0.0);
-    support::parallel_for(cancel_value, grain, count as i64, &|point| {
-        let point = point as usize;
-        let destination = destinations[point];
-        let (input, first, last) = if destination < 0 {
-            (&source.values, source.offsets[point], source.offsets[point + 1])
-        } else {
-            (&target.values, target.offsets[destination as usize], target.offsets[destination as usize + 1])
-        };
-        let at = offsets[point];
-        for (k, &value) in input[first as usize..last as usize].iter().enumerate() {
-            values.set(at + k as i64, value);
-        }
-        Ok(())
-    })?;
-    let values = values.into_vec();
+    let mut values = vec![0.0; offsets[count] as usize];
+    let grain = grain.max(1);
+    {
+        let windows = Windows::new(&mut values, support::range_count(count as i64, grain), |range| {
+            offsets[(range.saturating_mul(grain) as usize).min(count)] as usize
+        });
+        support::run_indexed_ranges(grain, count as i64, &|range, chunk_first, chunk_last| {
+            let window = windows.take(range);
+            let base = offsets[chunk_first as usize];
+            for point in chunk_first..chunk_last {
+                support::poll(cancel_value, point)?;
+                let point = point as usize;
+                let destination = destinations[point];
+                let (input, first, last) = if destination < 0 {
+                    (&source.values, source.offsets[point], source.offsets[point + 1])
+                } else {
+                    (&target.values, target.offsets[destination as usize], target.offsets[destination as usize + 1])
+                };
+                let at = (offsets[point] - base) as usize;
+                window[at..at + (last - first) as usize].copy_from_slice(&input[first as usize..last as usize]);
+            }
+            Ok(())
+        })?;
+    }
     Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
 }
 

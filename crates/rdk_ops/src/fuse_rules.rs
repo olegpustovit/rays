@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use crate::subdivide_refine::{AFloats, AInts};
+use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, support};
-use std::sync::Mutex;
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 
@@ -85,15 +84,6 @@ fn core_fail(failure: error::T) -> error::T {
     } else {
         fail(error::message(&failure).to_owned())
     }
-}
-
-fn run(
-    cancel_value: Option<&cancel::T>,
-    grain: i64,
-    count: i64,
-    operation: &(dyn Fn(i64) -> Result<(), error::T> + Sync),
-) -> Result<(), error::T> {
-    support::parallel_for(cancel_value, grain, count, operation)
 }
 
 fn needs_weight(method: AttributeMethod) -> bool {
@@ -376,8 +366,8 @@ fn sorted_float(
     source: &[f64],
     method: AttributeMethod,
 ) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::new(clusters.count, 0.0);
-    run(cancel_value, grain, clusters.count, &|cluster| {
+    let mut output = vec![0.0; clusters.count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
         let mut values: Vec<f64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
@@ -385,7 +375,7 @@ fn sorted_float(
         let (first, last) = (0usize, last - first);
         sort_range_f64(&mut values, &mut points, first, last);
         if method == AttributeMethod::Median {
-            output.set(cluster, values[first + (last - first) / 2]);
+            Ok(values[first + (last - first) / 2])
         } else {
             let mut best_count = 0usize;
             let mut best_value = values[first];
@@ -400,11 +390,10 @@ fn sorted_float(
                     run_first = slot;
                 }
             }
-            output.set(cluster, best_value);
+            Ok(best_value)
         }
-        Ok(())
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn sorted_int(
@@ -414,8 +403,8 @@ fn sorted_int(
     source: &[i64],
     method: AttributeMethod,
 ) -> Result<Vec<i64>, error::T> {
-    let output = AInts::new(clusters.count, 0);
-    run(cancel_value, grain, clusters.count, &|cluster| {
+    let mut output = vec![0i64; clusters.count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
         let mut values: Vec<i64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
@@ -423,7 +412,7 @@ fn sorted_int(
         let (first, last) = (0usize, last - first);
         sort_range_i64(&mut values, &mut points, first, last);
         if method == AttributeMethod::Median {
-            output.set(cluster, values[first + (last - first) / 2]);
+            Ok(values[first + (last - first) / 2])
         } else {
             let mut best_count = 0usize;
             let mut best_value = values[first];
@@ -438,11 +427,10 @@ fn sorted_int(
                     run_first = slot;
                 }
             }
-            output.set(cluster, best_value);
+            Ok(best_value)
         }
-        Ok(())
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn sorted_text(
@@ -452,8 +440,8 @@ fn sorted_text(
     source: &[Vec<u8>],
     method: AttributeMethod,
 ) -> Result<Vec<Vec<u8>>, error::T> {
-    let output: Vec<Mutex<Vec<u8>>> = (0..clusters.count).map(|_| Mutex::new(Vec::new())).collect();
-    run(cancel_value, grain, clusters.count, &|cluster| {
+    let mut output = vec![Vec::new(); clusters.count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
         let mut values: Vec<Vec<u8>> = clusters.members[first..last].iter().map(|&point| source[point as usize].clone()).collect();
@@ -461,7 +449,7 @@ fn sorted_text(
         let (first, last) = (0usize, last - first);
         sort_range_string(&mut values, &mut points, first, last);
         if method == AttributeMethod::Median {
-            *output[cluster as usize].lock().unwrap() = values[first + (last - first) / 2].clone();
+            Ok(values[first + (last - first) / 2].clone())
         } else {
             let mut best_count = 0usize;
             let mut best_value = values[first].clone();
@@ -476,11 +464,10 @@ fn sorted_text(
                     run_first = slot;
                 }
             }
-            *output[cluster as usize].lock().unwrap() = best_value;
+            Ok(best_value)
         }
-        Ok(())
     })?;
-    Ok(output.into_iter().map(|slot| slot.into_inner().unwrap()).collect())
+    Ok(output)
 }
 
 fn weight_values(geometry_value: &geometry::T, name: &str) -> Result<Vec<f64>, error::T> {
@@ -591,8 +578,8 @@ fn reduce_float(
     if method == AttributeMethod::Mode || method == AttributeMethod::Median {
         return sorted_float(cancel_value, grain, clusters, source, method);
     }
-    let output = AFloats::new(clusters.count, 0.0);
-    run(cancel_value, grain, clusters.count, &|cluster| {
+    let mut output = vec![0.0; clusters.count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let cluster = cluster as usize;
         let first = clusters.offsets[cluster] as usize;
         let last = clusters.offsets[cluster + 1] as usize;
@@ -657,10 +644,9 @@ fn reduce_float(
         if !value.is_finite() {
             return Err(fail(format!("attribute {name:?} reduction is non-finite in cluster {cluster}")));
         }
-        output.set(cluster as i64, value);
-        Ok(())
+        Ok(value)
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn checked_add(name: &str, cluster: usize, left: i64, right: i64) -> Result<i64, error::T> {
@@ -706,8 +692,8 @@ fn reduce_int(
     if method == AttributeMethod::Mode || method == AttributeMethod::Median {
         return sorted_int(cancel_value, grain, clusters, source, method);
     }
-    let output = AInts::new(clusters.count, 0);
-    run(cancel_value, grain, clusters.count, &|cluster| {
+    let mut output = vec![0i64; clusters.count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let cluster = cluster as usize;
         let first = clusters.offsets[cluster] as usize;
         let last = clusters.offsets[cluster + 1] as usize;
@@ -782,10 +768,9 @@ fn reduce_int(
             }
             _ => return Err(fail("reduction method is handled before the cluster loop".to_owned())),
         };
-        output.set(cluster as i64, value);
-        Ok(())
+        Ok(value)
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn concatenate_text(
@@ -795,8 +780,8 @@ fn concatenate_text(
     source: &[Vec<u8>],
     ordered_members: &[i64],
 ) -> Result<Vec<Vec<u8>>, error::T> {
-    let output: Vec<Mutex<Vec<u8>>> = (0..clusters.count).map(|_| Mutex::new(Vec::new())).collect();
-    run(cancel_value, grain, clusters.count, &|cluster| {
+    let mut output = vec![Vec::new(); clusters.count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
         let mut length = 0i64;
@@ -811,10 +796,9 @@ fn concatenate_text(
         for slot in first..last {
             bytes.extend_from_slice(&source[ordered_members[slot] as usize]);
         }
-        *output[cluster as usize].lock().unwrap() = bytes;
-        Ok(())
+        Ok(bytes)
     })?;
-    Ok(output.into_iter().map(|slot| slot.into_inner().unwrap()).collect())
+    Ok(output)
 }
 
 fn reduce_text(
@@ -864,19 +848,30 @@ fn weighted_order(
     clusters: &Clusters,
     weights: &[f64],
 ) -> Result<Vec<i64>, error::T> {
-    let points = AInts::new(clusters.members.len() as i64, 0);
-    run(cancel_value, grain, clusters.count, &|cluster| {
-        let first = clusters.offsets[cluster as usize] as usize;
-        let last = clusters.offsets[cluster as usize + 1] as usize;
-        let mut values: Vec<f64> = clusters.members[first..last].iter().map(|&point| weights[point as usize]).collect();
-        let mut order = clusters.members[first..last].to_vec();
-        sort_range_f64(&mut values, &mut order, 0, last - first);
-        for (offset, &point) in order.iter().enumerate() {
-            points.set((first + offset) as i64, point);
-        }
-        Ok(())
-    })?;
-    Ok(points.into_vec())
+    let mut points = vec![0i64; clusters.members.len()];
+    let grain = grain.max(1);
+    {
+        let chunk_start = |range: i64| range.saturating_mul(grain).min(clusters.count) as usize;
+        let windows = Windows::new(&mut points, support::range_count(clusters.count, grain), |range| {
+            clusters.offsets[chunk_start(range)] as usize
+        });
+        support::run_indexed_ranges(grain, clusters.count, &|range, chunk_first, chunk_last| {
+            let window = windows.take(range);
+            let base = clusters.offsets[chunk_first as usize] as usize;
+            for cluster in chunk_first..chunk_last {
+                support::poll(cancel_value, cluster)?;
+                let first = clusters.offsets[cluster as usize] as usize;
+                let last = clusters.offsets[cluster as usize + 1] as usize;
+                let mut values: Vec<f64> =
+                    clusters.members[first..last].iter().map(|&point| weights[point as usize]).collect();
+                let mut order = clusters.members[first..last].to_vec();
+                sort_range_f64(&mut values, &mut order, 0, last - first);
+                window[first - base..last - base].copy_from_slice(&order);
+            }
+            Ok(())
+        })?;
+    }
+    Ok(points)
 }
 
 fn output_offsets(clusters: &Clusters, compact: bool, cluster_lengths: &[i64]) -> Result<Vec<i64>, error::T> {

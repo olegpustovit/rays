@@ -1,4 +1,3 @@
-use crate::subdivide_refine::{AFloats, AInts};
 use rdk_core::{attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index};
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
@@ -49,12 +48,11 @@ fn average_plane(
     clusters: &Clusters,
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::new(clusters.count, 0.0);
-    support::parallel_for(cancel_value, (grain / 8).max(1), clusters.count, &|cluster| {
-        output.set(cluster, average_float(clusters, source, cluster as usize));
-        Ok(())
+    let mut output = vec![0.0; clusters.count as usize];
+    support::par_fill(cancel_value, (grain / 8).max(1), &mut output, &|cluster| {
+        Ok(average_float(clusters, source, cluster as usize))
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn sorted_reduction(
@@ -64,8 +62,8 @@ fn sorted_reduction(
     source: &[f64],
     median: bool,
 ) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::new(clusters.count, 0.0);
-    support::parallel_for(cancel_value, (grain / 8).max(1), clusters.count, &|cluster| {
+    let mut output = vec![0.0; clusters.count as usize];
+    support::par_fill(cancel_value, (grain / 8).max(1), &mut output, &|cluster| {
         let cluster = cluster as usize;
         let first = clusters.offsets[cluster] as usize;
         let last = clusters.offsets[cluster + 1] as usize;
@@ -74,7 +72,7 @@ fn sorted_reduction(
         let (first, last) = (0usize, last - first);
         sort_range_f64(&mut values, &mut points, first, last);
         if median {
-            output.set(cluster as i64, values[first + (last - first) / 2]);
+            Ok(values[first + (last - first) / 2])
         } else {
             let mut best_count = 0usize;
             let mut best_first_point = i64::MAX;
@@ -92,12 +90,11 @@ fn sorted_reduction(
                     run_first = slot;
                 }
             }
-            output.set(cluster as i64, best_value);
+            Ok(best_value)
         }
-        Ok(())
     })?;
     let _ = compare_float_entry;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn numeric_reduction(
@@ -120,8 +117,8 @@ fn numeric_reduction(
             Err(fail("Rdk.Fuse_reduce.fuse: weight positions select a point before reduction".to_owned()))
         }
         _ => {
-            let output = AFloats::new(clusters.count, 0.0);
-            support::parallel_for(cancel_value, (grain / 8).max(1), clusters.count, &|cluster| {
+            let mut output = vec![0.0; clusters.count as usize];
+            support::par_fill(cancel_value, (grain / 8).max(1), &mut output, &|cluster| {
                 let cluster = cluster as usize;
                 let first = clusters.offsets[cluster] as usize;
                 let last = clusters.offsets[cluster + 1] as usize;
@@ -185,10 +182,9 @@ fn numeric_reduction(
                         }
                     }
                 }
-                output.set(cluster as i64, value);
-                Ok(())
+                Ok(value)
             })?;
-            Ok(output.into_vec())
+            Ok(output)
         }
     }
 }
@@ -312,12 +308,10 @@ fn reduce(
     let output_topology = if !compact && !rewire {
         source_topology_value.clone()
     } else {
-        let vertex_points = AInts::new(geometry::vertex_count(geometry_value), 0);
-        support::parallel_for(cancel_value, params.grain, geometry::vertex_count(geometry_value), &|vertex| {
-            vertex_points.set(vertex, point_map[source_topology.vertex_points[vertex as usize] as usize]);
-            Ok(())
+        let mut vertex_points = vec![0i64; geometry::vertex_count(geometry_value) as usize];
+        support::par_fill(cancel_value, params.grain, &mut vertex_points, &|vertex| {
+            Ok(point_map[source_topology.vertex_points[vertex as usize] as usize])
         })?;
-        let vertex_points = vertex_points.into_vec();
         topology::View::create_validated_owned(
             if compact { clusters.count } else { source_count as i64 },
             vertex_points,
