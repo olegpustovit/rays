@@ -16,9 +16,9 @@ fn run_chain(body: &str) -> (Vec<u8>, usize, Vec<u8>) {
     let cook_node = |n: &sop::node::T| geometry_bytes(&cook_once(1, n));
     let root = edit::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap();
     let bytes = cook_node(&root);
-    let mut runs = flow_ir::flow_ir::Profile::executions(&l.profile).len();
+    let mut runs = flow_ir::flow_ir::profile::executions(&l.profile).len();
     for p in profiles.lock().unwrap().iter() {
-        runs += flow_ir::flow_ir::Profile::executions(p).len();
+        runs += flow_ir::flow_ir::profile::executions(p).len();
     }
     let factory = lisp_sop::root(&l, &graph).unwrap();
     (bytes, runs, cook_node(&factory))

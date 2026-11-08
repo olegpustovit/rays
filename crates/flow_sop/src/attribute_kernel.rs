@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, Weak};
 use flow_check::op;
 use flow_check::workspace::{self as W, HofKind, Node as TNode, Term};
 use flow_eval as E;
-use flow_ir::flow_ir::{Cost, Executor, Gpu, Sink};
+use flow_ir::flow_ir::{cost, executor, gpu, Sink};
 use flow_ir::packed::Column;
 use flow_syntax::context as fctx;
 use flow_syntax::ty::{self, Ty};
@@ -80,7 +80,7 @@ pub fn sources(value: &Value) -> Vec<i64> {
             Value::Deferred(t, id) if ty::is_geometry(t) => ids.push(*id),
             Value::Residual(r) => {
                 if seen.residuals.insert(r.0) {
-                    if let Some(bindings) = E::Residual::residual_bindings(*r) {
+                    if let Some(bindings) = E::residual::residual_bindings(*r) {
                         for (_, v) in &bindings {
                             visit(v, seen, ids);
                         }
@@ -90,7 +90,7 @@ pub fn sources(value: &Value) -> Vec<i64> {
             Value::List(vs) => vs.iter().for_each(|v| visit(v, seen, ids)),
             Value::Fn(f) => {
                 if seen.functions.insert(f.0) {
-                    for (_, v) in E::Residual::function_bindings(*f) {
+                    for (_, v) in E::residual::function_bindings(*f) {
                         visit(&v, seen, ids);
                     }
                 }
@@ -235,7 +235,7 @@ fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
         }
         Value::Residual(r) => {
             if st.seen.residuals.insert(r.0) {
-                if let Ok(view) = E::Residual::residual_view(*r) {
+                if let Ok(view) = E::residual::residual_view(*r) {
                     let safe = checked_reads(&view.bindings, &view.term, st);
                     for (_, v) in &view.bindings {
                         visit_reads(&safe, v, st);
@@ -245,8 +245,8 @@ fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
         }
         Value::Fn(f) => {
             if st.seen.functions.insert(f.0) {
-                let bindings = E::Residual::function_bindings(*f);
-                let safe = match E::Residual::function_body(*f) {
+                let bindings = E::residual::function_bindings(*f);
+                let safe = match E::residual::function_body(*f) {
                     None => {
                         st.opaque = true;
                         Vec::new()
@@ -679,7 +679,7 @@ pub fn context_reads(value: &Value) -> D::T {
             }
             Value::Residual(r) => {
                 if seen.residuals.insert(r.0) {
-                    if let Some(bindings) = E::Residual::residual_bindings(*r) {
+                    if let Some(bindings) = E::residual::residual_bindings(*r) {
                         bindings.iter().for_each(|(_, v)| visit(v, seen, found));
                     }
                 }
@@ -687,7 +687,7 @@ pub fn context_reads(value: &Value) -> D::T {
             Value::List(vs) => vs.iter().for_each(|v| visit(v, seen, found)),
             Value::Fn(f) => {
                 if seen.functions.insert(f.0) {
-                    E::Residual::function_bindings(*f).iter().for_each(|(_, v)| visit(v, seen, found));
+                    E::residual::function_bindings(*f).iter().for_each(|(_, v)| visit(v, seen, found));
                 }
             }
             v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().for_each(|(_, v)| visit(v, seen, found)),
@@ -736,7 +736,7 @@ impl Specializer<'_> {
                 if let Some(done) = self.residuals.borrow().get(&r.0) {
                     return done.clone();
                 }
-                let done = match E::Residual::residual_view(*r) {
+                let done = match E::residual::residual_view(*r) {
                     Err(_) => (value.clone(), false),
                     Ok(view) => {
                         let mapped: Vec<(String, (Value, bool))> = view.bindings.iter().map(|(n, v)| (n.clone(), self.map(v))).collect();
@@ -744,7 +744,7 @@ impl Specializer<'_> {
                             (value.clone(), false)
                         } else {
                             let bindings: Vec<(String, Value)> = mapped.into_iter().map(|(n, (v, _))| (n, v)).collect();
-                            match E::Residual::with_bindings(*r, &view.term, &bindings) {
+                            match E::residual::with_bindings(*r, &view.term, &bindings) {
                                 Ok(id) => (Value::Residual(id), true),
                                 Err(_) => (value.clone(), false),
                             }
@@ -915,10 +915,10 @@ fn concrete_args(context: Option<&context::T>, geometry: &GeometryLookup, args: 
         match value {
             Value::Residual(_) => {
                 let live = context.map_or_else(|| input::at_time(0.0), |c| context::input(c).clone());
-                let program = Executor::compile(value, &Executor::CompileOptions { strict: true, ..Default::default() })?;
+                let program = executor::compile(value, &executor::CompileOptions { strict: true, ..Default::default() })?;
                 let (ctx, geo) = (context.cloned(), geometry.clone());
                 let resolver: flow_ir::core_exec::ResolveFn = Arc::new(move |v| resolve(ctx.as_ref(), &geo, v));
-                let forced = Executor::force(&program, &Executor::ForceOptions { strict: true, resolve: Some(resolver), ..Default::default() }, &live)?;
+                let forced = executor::force(&program, &executor::ForceOptions { strict: true, resolve: Some(resolver), ..Default::default() }, &live)?;
                 concrete(context, geometry, &forced)
             }
             Value::Source(..) => concrete(context, geometry, &resolve(context, geometry, value)?),
@@ -987,7 +987,7 @@ fn new_holder(value: Value, count: i64) -> Arc<dyn rdk_core::packed::deferred::H
 
 /// A device output as an attribute's storage, read from the device only when a CPU reader first
 /// needs it (any domain); until then the geometry holds the device's buffer.
-pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::Planes>, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
+pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<gpu::Planes>, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
     let holder = planes.resident.clone().map(|v| new_holder(v, planes.count));
     let release: rdk_core::packed::deferred::Release = {
         let p = planes.clone();
@@ -1539,7 +1539,7 @@ fn owner_origin(by_source: &[(i64, i64)], id: i64, parts: &[&str]) -> Option<Ori
 }
 
 fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
-    let bindings = E::Residual::residual_bindings(residual)?;
+    let bindings = E::residual::residual_bindings(residual)?;
     let topology_component: Option<(String, Vec<(String, Value)>)> = match term.node {
         TNode::Get(id) if {
             let inner = term.child(term.arena().get(id).value);
@@ -1558,7 +1558,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
     // a fill of one value per point ([array/int (sop/count g :points) v]) or its index
     // ([array/range (sop/count g :points)]) counts g's points
     fn filled(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
-        let bindings = E::Residual::residual_bindings(residual)?;
+        let bindings = E::residual::residual_bindings(residual)?;
         match term.node {
             TNode::Op(id) if ["array/int", "array/float", "array/vec2", "array/vec3", "array/vec4", "array/range"].contains(&term.name(term.arena().op(id).op)) => {
                 match term.arena().fields(term.arena().op(id).args).iter().find(|field| term.name(field.name) == "count").and_then(|field| captured(&bindings, &term.child(field.term))) {
@@ -1585,7 +1585,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             }
             TNode::RefBinding(..) | TNode::Get(..) => match captured(&bindings, term) {
                 Some(Value::Residual(r)) => {
-                    let view = E::Residual::residual_view(r).ok()?;
+                    let view = E::residual::residual_view(r).ok()?;
                     count_source(by_source, r, &view.term)
                 }
                 _ => None,
@@ -1671,17 +1671,17 @@ type ResidualIdAlias = flow_syntax::value::ResidualId;
 /// counts before dynamic multi-input fusion. CSR row offsets and flattened values use separate
 /// count origins.
 pub fn prepare(
-    profile: Option<Arc<flow_ir::flow_ir::Profile::T>>,
+    profile: Option<Arc<flow_ir::flow_ir::profile::T>>,
     strict: bool,
     approx: Option<flow_check::workspace::Paths>,
     sink: Option<Sink>,
     sources: &[i64],
     inputs: &[node::T],
     values: &Value,
-) -> Result<Executor::Program, Diagnostic> {
+) -> Result<executor::Program, Diagnostic> {
     let by_source = source_origins(sources, inputs)?;
     let count = flow_ir::packed::CountSource::new(Arc::new(move |residual, term| count_source(&by_source, residual, term)));
-    Executor::compile(values, &Executor::CompileOptions { trace: None, profile, strict, approx: approx.unwrap_or_default(), sink, count_source: Some(count) })
+    executor::compile(values, &executor::CompileOptions { trace: None, profile, strict, approx: approx.unwrap_or_default(), sink, count_source: Some(count) })
 }
 
 fn columns_of(storage: &Storage) -> Result<Option<Vec<Column>>, Diagnostic> {
@@ -1704,7 +1704,7 @@ fn borrowed_value(geometry: &GeometryLookup, value: &Value) -> Result<Option<Vec
                 _ => Ok(None),
             }
         }
-        Value::Residual(r) => match E::Residual::residual_view(*r) {
+        Value::Residual(r) => match E::residual::residual_view(*r) {
             Ok(view) => borrowed_source(geometry, *r, &view.term),
             Err(_) => Ok(None),
         },
@@ -1713,7 +1713,7 @@ fn borrowed_value(geometry: &GeometryLookup, value: &Value) -> Result<Option<Vec
 }
 
 fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &Term) -> Result<Option<Vec<Column>>, Diagnostic> {
-    let Ok(view) = E::Residual::residual_view(residual) else { return Ok(None) };
+    let Ok(view) = E::residual::residual_view(residual) else { return Ok(None) };
     let bindings = view.bindings;
     match term.node {
         TNode::Op(id) if term.name(term.arena().op(id).op) == "sop/attr" => {
@@ -1755,18 +1755,18 @@ fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &
 fn write_planes(
     state: Option<&E::State>,
     elems: Option<&[(String, Value)]>,
-    gpu: Option<&Gpu::Config>,
+    gpu: Option<&gpu::Config>,
     strict: bool,
     resolve: &flow_ir::core_exec::ResolveFn,
     geometry: &GeometryLookup,
     owner: Owner,
     kind: &str,
     name: &str,
-    program: &Executor::Program,
+    program: &executor::Program,
     target: &geometry::T,
     live: &input::Frame,
 ) -> Result<Option<geometry::T>, Diagnostic> {
-    let Some(region) = Executor::packed_root(program) else { return Ok(None) };
+    let Some(region) = executor::packed_root(program) else { return Ok(None) };
     if !flow_ir::packed::elementwise(&region) {
         return Ok(None);
     }
@@ -1775,7 +1775,7 @@ fn write_planes(
         return Ok(None);
     }
     let is_p = owner == Owner::Point && kind == "vec3" && name == "P";
-    use flow_ir::core_ir::Region::Instruction as I;
+    use flow_ir::core_ir::region::Instruction as I;
     // A P component that copies a borrowed column may keep the target's own plane. Only then is P
     // viewed: otherwise the view would read back positions a device still holds, for a write that
     // never reads them.
@@ -1810,8 +1810,8 @@ fn write_planes(
         })
         .collect();
     let outputs = Arc::new(Mutex::new(vec![keep.iter().map(|k| if *k { None } else { Some(vec![0.0; count]) }).collect::<Vec<Option<Vec<f64>>>>()]));
-    let options = Executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve: Some(resolve.clone()), strict, ..Default::default() };
-    let forced = Executor::force_into(&options, gpu.cloned(), column_source, count as i64, outputs.clone(), program, live).map_err(|mut d| {
+    let options = executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve: Some(resolve.clone()), strict, ..Default::default() };
+    let forced = executor::force_into(&options, gpu.cloned(), column_source, count as i64, outputs.clone(), program, live).map_err(|mut d| {
         if d.code == "E_ARRAY_COUNT" {
             d.code = "E_ATTR_COUNT".to_owned();
         }
@@ -1836,8 +1836,8 @@ fn write_planes(
 #[derive(Clone)]
 struct Constant {
     op: op::Op,
-    count: Executor::Program,
-    value: Option<Executor::Program>,
+    count: executor::Program,
+    value: Option<executor::Program>,
 }
 
 fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
@@ -1851,11 +1851,11 @@ fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
                 term.name(op.op) == "exact" && args.len() == 1 && term.name(args[0].name) == "value"
             } => find(constructors, kind, seen, residual, &term.child(term.arena().fields(term.arena().op(id).args)[0].term)),
             TNode::RefBinding(..) | TNode::Get(..) => {
-                let bindings = E::Residual::residual_bindings(residual)?;
+                let bindings = E::residual::residual_bindings(residual)?;
                 match captured(&bindings, term) {
                     Some(Value::Residual(nested)) if !seen.contains(&nested.0) => {
                         seen.push(nested.0);
-                        let view = E::Residual::residual_view(nested).ok()?;
+                        let view = E::residual::residual_view(nested).ok()?;
                         find(constructors, kind, seen, nested, &view.term)
                     }
                     _ => None,
@@ -1866,15 +1866,15 @@ fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
         }
     }
     let Value::Residual(residual) = values else { return None };
-    let view = E::Residual::residual_view(*residual).ok()?;
+    let view = E::residual::residual_view(*residual).ok()?;
     let (residual, term) = find(&constructors, kind, &mut vec![residual.0], *residual, &view.term)?;
     let TNode::Op(id) = term.node else { unreachable!() };
     let call = term.arena().op(id);
     let operation = term.name(call.op);
     let args = term.arena().fields(call.args);
-    let compile = |term: &Term| -> Result<Executor::Program, Diagnostic> {
-        let id = E::Residual::with_bindings(residual, term, &[])?;
-        Executor::compile(&Value::Residual(id), &Executor::CompileOptions { strict: true, ..Default::default() })
+    let compile = |term: &Term| -> Result<executor::Program, Diagnostic> {
+        let id = E::residual::with_bindings(residual, term, &[])?;
+        executor::compile(&Value::Residual(id), &executor::CompileOptions { strict: true, ..Default::default() })
     };
     let count = compile(&term.child(args.iter().find(|field| term.name(field.name) == "count")?.term));
     let value = args.iter().find(|field| term.name(field.name) == "value").map(|field| compile(&term.child(field.term)));
@@ -1898,11 +1898,11 @@ fn write_constant(
     live: &input::Frame,
 ) -> Result<Option<geometry::T>, Diagnostic> {
     let Some(c) = prepared else { return Ok(None) };
-    let options = Executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve: Some(resolve.clone()), strict: true, ..Default::default() };
-    let count = Executor::force(&c.count, &options, live)?;
+    let options = executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve: Some(resolve.clone()), strict: true, ..Default::default() };
+    let count = executor::force(&c.count, &options, live)?;
     let mut args = vec![("count".to_owned(), count)];
     if let Some(program) = &c.value {
-        args.push(("value".to_owned(), Executor::force(program, &options, live)?));
+        args.push(("value".to_owned(), executor::force(program, &options, live)?));
     }
     let sample = op::constant_array_descriptor(&c.op.name, &args)?;
     write_constant_source(4096, owner, kind, name, None, None, &sample, target)
@@ -1933,12 +1933,12 @@ pub fn delete_after(deletes: &[(String, String)], cancel_token: &Arc<cancel::T>,
 pub mod Display_sink {
     use super::*;
 
-    fn with_rates<R>(evidence: &Gpu::Evidence, f: impl FnOnce(&mut Gpu::Display) -> R) -> R {
+    fn with_rates<R>(evidence: &gpu::Evidence, f: impl FnOnce(&mut gpu::Display) -> R) -> R {
         f(&mut evidence.display.lock().unwrap())
     }
 
     /// Seconds the editor spent preparing a mesh of `floats` floats for display.
-    pub fn observe(evidence: &Gpu::Evidence, resident: bool, floats: i64, seconds: f64) {
+    pub fn observe(evidence: &gpu::Evidence, resident: bool, floats: i64, seconds: f64) {
         if floats > 0 {
             let rate = seconds / floats as f64;
             with_rates(evidence, |r| {
@@ -1953,7 +1953,7 @@ pub mod Display_sink {
 
     /// Seconds from a host mesh's frame to its presentation: the renderer's conversion and upload,
     /// which preparation does not see. The smallest rate is kept.
-    pub fn observe_draw(evidence: &Gpu::Evidence, floats: i64, seconds: f64) {
+    pub fn observe_draw(evidence: &gpu::Evidence, floats: i64, seconds: f64) {
         if floats > 0 {
             let rate = seconds / floats as f64;
             with_rates(evidence, |r| r.draw = r.draw.min(rate));
@@ -1962,7 +1962,7 @@ pub mod Display_sink {
 
     /// Seconds per float (host mesh, resident mesh); infinity while unmeasured. A host mesh's
     /// includes its first draw once seen.
-    pub fn rates(evidence: &Gpu::Evidence) -> (f64, f64) {
+    pub fn rates(evidence: &gpu::Evidence) -> (f64, f64) {
         with_rates(evidence, |r| (r.host + if r.draw < f64::INFINITY { r.draw } else { 0.0 }, r.resident))
     }
 
@@ -1981,7 +1981,7 @@ pub mod Display_sink {
 
     /// Whether a write site with no CPU measurement stays on the device: for its first two priced
     /// cooks, or while the device cannot price it. False: sample the CPU under a budget.
-    pub fn device_first(evidence: &Gpu::Evidence, site: &str, device_seconds: Option<f64>) -> bool {
+    pub fn device_first(evidence: &gpu::Evidence, site: &str, device_seconds: Option<f64>) -> bool {
         if device_seconds.is_none() {
             return true;
         }
@@ -2000,12 +2000,12 @@ pub mod Display_sink {
     }
 
     /// The measured seconds of an attribute write site's CPU route at `count` elements.
-    pub fn cpu_write(evidence: &Gpu::Evidence, site: &str, count: i64) -> Option<f64> {
+    pub fn cpu_write(evidence: &gpu::Evidence, site: &str, count: i64) -> Option<f64> {
         with_rates(evidence, |r| priced(r.writes.get(site).map_or(&[][..], |v| v.as_slice()), count))
     }
 
     /// One CPU cook of a write site.
-    pub fn observe_cpu_write(evidence: &Gpu::Evidence, site: &str, count: i64, seconds: f64) {
+    pub fn observe_cpu_write(evidence: &gpu::Evidence, site: &str, count: i64, seconds: f64) {
         if count > 0 {
             with_rates(evidence, |r| {
                 let mut old = r.writes.get(site).cloned().unwrap_or_default();
@@ -2029,11 +2029,11 @@ pub struct NodeOptions {
     pub reference: bool,
     pub strict: bool,
     pub elems: Option<Vec<(String, Value)>>,
-    pub profile: Option<Arc<flow_ir::flow_ir::Profile::T>>,
+    pub profile: Option<Arc<flow_ir::flow_ir::profile::T>>,
     pub approx: flow_check::workspace::Paths,
     /// the cache identity text of the kernel that built the node (`kernel_source`)
     pub source: String,
-    pub gpu: Option<Gpu::Config>,
+    pub gpu: Option<gpu::Config>,
     pub selection: Option<Value>,
     pub default: Option<Value>,
     pub guard: Option<Value>,
@@ -2071,7 +2071,7 @@ struct Kernel {
     reference: bool,
     strict: bool,
     elems: Option<Vec<(String, Value)>>,
-    gpu: Option<Gpu::Config>,
+    gpu: Option<gpu::Config>,
     guard: Option<Value>,
     prior: Vec<(String, String, Value)>,
     owner: Owner,
@@ -2081,11 +2081,11 @@ struct Kernel {
     sources: Vec<i64>,
     values: Value,
     selected: bool,
-    program: Result<Executor::Program, Diagnostic>,
-    lone_record: Option<Result<Executor::Program, Diagnostic>>,
+    program: Result<executor::Program, Diagnostic>,
+    lone_record: Option<Result<executor::Program, Diagnostic>>,
     owned_fields: Vec<String>,
     constant: Option<Constant>,
-    selected_constant: Option<(Constant, Result<Executor::Program, Diagnostic>)>,
+    selected_constant: Option<(Constant, Result<executor::Program, Diagnostic>)>,
 }
 
 fn site_of(id: &FId) -> String {
@@ -2106,14 +2106,14 @@ impl Kernel {
         };
         let live = context::input(context).clone();
         // the site and count a measured decision asked about, and when it left this cook to the CPU
-        let asked: Arc<Mutex<Option<(Arc<Gpu::Evidence>, String, i64)>>> = Arc::new(Mutex::new(None));
+        let asked: Arc<Mutex<Option<(Arc<gpu::Evidence>, String, i64)>>> = Arc::new(Mutex::new(None));
         let cpu_began: Mutex<Option<f64>> = Mutex::new(None);
         // set when this cook samples the CPU: when that sample has lost, and its cost
         let probe: Arc<Mutex<Option<(f64, f64)>>> = Arc::new(Mutex::new(None));
         // a cooked [:when] is decided before the values, which may read what it tests for
         let guarded: Result<bool, Diagnostic> = match &self.guard {
             None => Ok(true),
-            Some(guard) => E::Host::force_reference(guard, &live, self.state.as_ref(), self.elems.as_deref(), Some(resolver.clone())).and_then(|v| match v {
+            Some(guard) => E::host::force_reference(guard, &live, self.state.as_ref(), self.elems.as_deref(), Some(resolver.clone())).and_then(|v| match v {
                 Value::Bool(b) => Ok(b),
                 _ => err("E_ATTR_TYPE", "sop/with_attr :when must be a bool"),
             }),
@@ -2139,8 +2139,8 @@ impl Kernel {
             };
             // the record's outputs kept on the device, installed as deferred storage; `None` leaves
             // it to the CPU
-            let on_device = |program: &Executor::Program| -> Result<Option<geometry::T>, Diagnostic> {
-                let device: Option<Vec<(String, Gpu::Planes)>> = if self.reference || self.elems.is_some() || context::device_refused(context, node_id) {
+            let on_device = |program: &executor::Program| -> Result<Option<geometry::T>, Diagnostic> {
+                let device: Option<Vec<(String, gpu::Planes)>> = if self.reference || self.elems.is_some() || context::device_refused(context, node_id) {
                     None
                 } else {
                     let resident: Option<Arc<dyn Fn(&Value) -> Option<(Value, i64)> + Send + Sync>> = if geometries.iter().all(|g| geometry::releasers(g).is_empty()) {
@@ -2158,7 +2158,7 @@ impl Kernel {
                             let g = &geometries[0];
                             let floats = geometry::point_count(g) * 9 + geometry::primitive_count(g) * 6;
                             let (host, _) = Display_sink::rates(&gpu.evidence);
-                            if host < f64::INFINITY { host * floats as f64 } else { Cost::readback(Some(gpu), floats, 1) }
+                            if host < f64::INFINITY { host * floats as f64 } else { cost::readback(Some(gpu), floats, 1) }
                         }
                         _ => 0.0,
                     };
@@ -2180,16 +2180,16 @@ impl Kernel {
                             *asked.lock().unwrap() = Some((evidence.clone(), site.clone(), count));
                             // with a declared CPU reader the device route reads back: a write the CPU
                             // is expected to cook faster than the device dispatches measures the CPU first
-                            let cpu_first = consumers > 0 && device_seconds.is_some_and(|device| Cost::estimate(Cost::packed(count), count) < device);
+                            let cpu_first = consumers > 0 && device_seconds.is_some_and(|device| cost::estimate(cost::packed(count), count) < device);
                             if !cpu_first && Display_sink::device_first(&evidence, &site, device_seconds) {
                                 return true;
                             }
-                            let budget = Cost::probe_budget(device_seconds.unwrap_or(0.0));
+                            let budget = cost::probe_budget(device_seconds.unwrap_or(0.0));
                             *probe.lock().unwrap() = Some((clock() + budget, budget));
                             false
                         }) as Arc<dyn Fn(&FId, i64, Option<f64>) -> bool + Send + Sync>
                     });
-                    let options = Executor::RecordOptions {
+                    let options = executor::RecordOptions {
                         state: self.state.clone(),
                         resolve: Some(resolver.clone()),
                         resident,
@@ -2204,7 +2204,7 @@ impl Kernel {
                         device_first,
                         gpu: self.gpu.clone(),
                     };
-                    Executor::record_on_device(program, &options, &live)?
+                    executor::record_on_device(program, &options, &live)?
                 };
                 let Some(fields) = device else {
                     *cpu_began.lock().unwrap() = Some((self.clock)());
@@ -2212,7 +2212,7 @@ impl Kernel {
                 };
                 // in flight: the session settles the dispatch before a CPU reader, and recooks this
                 // write on the CPU if its status fails
-                let kept: Vec<(String, Arc<Gpu::Planes>)> = fields.into_iter().map(|(k, p)| (k, Arc::new(p))).collect();
+                let kept: Vec<(String, Arc<gpu::Planes>)> = fields.into_iter().map(|(k, p)| (k, Arc::new(p))).collect();
                 if let Some((_, first)) = kept.first() {
                     let first = first.clone();
                     context::defer(context, node_id, Box::new(move || first.settle()));
@@ -2242,7 +2242,7 @@ impl Kernel {
                     _ => Ok(None),
                 }
             };
-            let force_options = || Executor::ForceOptions {
+            let force_options = || executor::ForceOptions {
                 state: self.state.clone(),
                 elems: self.elems.clone(),
                 resolve: Some(resolver.clone()),
@@ -2258,7 +2258,7 @@ impl Kernel {
                 if let Some(g) = on_device(&program)? {
                     return Ok(g);
                 }
-                return match Executor::force(&program, &force_options(), &live)? {
+                return match executor::force(&program, &force_options(), &live)? {
                     Value::Record(fields) => write(&|key, n, k, g| {
                         let owned: Vec<&str> = if key == "values" { self.owned_fields.iter().map(String::as_str).collect() } else { Vec::new() };
                         let value = assoc(&fields, key).ok_or_else(|| fail("E_ATTR_TYPE", "A fused write's data must be a record."))?;
@@ -2269,7 +2269,7 @@ impl Kernel {
             }
             let program = self.program.clone()?;
             if self.selected {
-                let force = |program: &Executor::Program| Executor::force(program, &force_options(), &live);
+                let force = |program: &executor::Program| executor::force(program, &force_options(), &live);
                 let fields = match &self.selected_constant {
                     None => force(&program)?,
                     Some((c, rest)) => {
@@ -2318,7 +2318,7 @@ impl Kernel {
             if let Some(g) = direct {
                 return Ok(g);
             }
-            let values = Executor::force(&program, &force_options(), &live)?;
+            let values = executor::force(&program, &force_options(), &live)?;
             if context::cancelled(context) {
                 return cancelled_err();
             }
@@ -2391,7 +2391,7 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
         _ => None,
     };
     let owned_fields = if o.strict && !o.reference && (o.kind == "float_array" || o.kind == "int_array") {
-        program.as_ref().map(Executor::fresh_csr_fields).unwrap_or_default()
+        program.as_ref().map(executor::fresh_csr_fields).unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -2403,7 +2403,7 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
         )),
         _ => None,
     };
-    let key = |v: &Value| V::key_of(&|id| E::Residual::residual_id(id), v);
+    let key = |v: &Value| V::key_of(&|id| E::residual::residual_id(id), v);
     let mut parameters = format!(
         "{};{};{};{};{};{};",
         source,
@@ -2805,7 +2805,7 @@ use rdk_ops::line_geometry;
                 }
                 let dense = (op::find(&[], &name, &fctx::value()).unwrap().body)(&input::at_time(0.0), &|_, _| unreachable!(), &args).unwrap();
                 let resolved = resolve(None, &geo, &marker).unwrap();
-                let key = |v: &Value| V::key_of(&|id| E::Residual::residual_id(id), v);
+                let key = |v: &Value| V::key_of(&|id| E::residual::residual_id(id), v);
                 assert_eq!(key(&resolved), key(&dense));
                 for domains in [1, 4, 8] {
                     on_domains(domains, &|| {
@@ -2996,7 +2996,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let queried = evaluate("(sop/topology geo)");
         let live = input::at_time(0.0);
         let expected = Value::Record(topology_fields(&original));
-        let result = E::Host::force_reference(&queried, &live, None, None, Some(resolve_fn.clone())).unwrap();
+        let result = E::host::force_reference(&queried, &live, None, None, Some(resolve_fn.clone())).unwrap();
         assert_eq!(result, expected, "topology kind codes or plane order differ");
         let before = bits(&original);
         for read in [
@@ -3011,7 +3011,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
             "(array/sum topo.vertex_points)",
         ] {
             let expression = format!("(let* [topo (sop/topology geo)] {read})");
-            E::Host::force_reference(&evaluate(&expression), &live, None, None, Some(resolve_fn.clone())).unwrap();
+            E::host::force_reference(&evaluate(&expression), &live, None, None, Some(resolve_fn.clone())).unwrap();
             assert_eq!(bits(&original), before, "topology reader wrote its source: {read}");
         }
         let source = input_node(&original);
@@ -3023,7 +3023,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
                 let values = evaluate(expression);
                 assert_eq!(sources(&values), vec![7], "topology capture lost its geometry dependency");
                 let program = prepare(None, true, None, None, &[7], &[source.clone()], &values).unwrap();
-                let packed = Executor::packed_region(&program).expect("packed region");
+                let packed = executor::packed_region(&program).expect("packed region");
                 flow_ir::packed::count_origin(&packed).unwrap_or_else(|| panic!("topology count origin missing for {expression}"))
             };
             let (captured, direct) = (origin(&captured), origin(&direct));
@@ -3035,8 +3035,8 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(origins.len(), 3, "distinct topology plane counts share a false origin");
         for domains in [1, 8] {
             parallel::run_unit(Some(domains), &|| {
-                let program = Executor::compile(&queried, &Executor::CompileOptions { strict: true, ..Default::default() }).unwrap();
-                let forced = Executor::force(&program, &Executor::ForceOptions { strict: true, resolve: Some(resolve_fn.clone()), ..Default::default() }, &live).unwrap();
+                let program = executor::compile(&queried, &executor::CompileOptions { strict: true, ..Default::default() }).unwrap();
+                let forced = executor::force(&program, &executor::ForceOptions { strict: true, resolve: Some(resolve_fn.clone()), ..Default::default() }, &live).unwrap();
                 assert_eq!(forced, expected, "compiled topology differs from reference");
                 Ok(())
             })
@@ -3225,12 +3225,12 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let evaluated=E::r#static(&workspace.unwrap(),true,None).unwrap();
         let Value::Fn(original)=evaluated.records.iter().find(|(p,_)|p==&["g","f"]).unwrap().1[0].1 else {panic!("closure")};
         let captured=source("sop/context_time",&[]);
-        E::Host::map_function_bindings(original,&|_|captured.clone());
+        E::host::map_function_bindings(original,&|_|captured.clone());
         for time in [1.5,2.5] {
             let context=context::create(context::Options {time:Some(time),..Default::default()}).unwrap();
             let Value::Fn(bound)=specialize(&context,&Value::Fn(original)) else {panic!("bound closure")};
-            assert!(E::Residual::function_bindings(bound).iter().all(|(_,v)|*v==Value::Float(time)));
-            assert!(E::Residual::function_bindings(original).iter().all(|(_,v)|*v==captured));
+            assert!(E::residual::function_bindings(bound).iter().all(|(_,v)|*v==Value::Float(time)));
+            assert!(E::residual::function_bindings(original).iter().all(|(_,v)|*v==captured));
         }
         assert_eq!(D::to_list(context_reads(&seeded)), vec![D::Fact::Seed]);
         // the salt is the low 63 bits of a word
@@ -3245,7 +3245,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(Display_sink::priced(&[(100, 2.0)], 10), None);
         // the two samples nearest 400 are 100 and 1000; the cheaper per-unit rate wins
         assert_eq!(Display_sink::priced(&[(100, 3.0), (1000, 2.0), (1_000_000, 0.5)], 400), Some(2.0 * 400.0));
-        let backend = Gpu::Evidence::default();
+        let backend = gpu::Evidence::default();
         assert_eq!(Display_sink::rates(&backend), (f64::INFINITY, f64::INFINITY));
         Display_sink::observe(&backend, false, 100, 1.0);
         Display_sink::observe(&backend, false, 100, 2.0);

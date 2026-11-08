@@ -1,8 +1,8 @@
 // Port of lib/flow_ir/test_core_regions.ml.
 use crate::core_fuse;
-use crate::core_ir::Region as R;
+use crate::core_ir::region as R;
 use crate::core_lower;
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::packed::{self, host};
 use crate::test_support::{self as ts, ok};
 use flow_check::op::{self, Op};
@@ -71,8 +71,8 @@ fn a_nested_count_is_a_uniform() {
 fn source_count(declarations: &str, body: &str) -> (RegionT, flow_syntax::value::ResidualId) {
     let p = ts::compile_with(None, true, declarations, &format!("(map (fn [(i : int)] (int/add i 7)) (array/range {body} :type int))"));
     let (residual, term) = p.sources[0].clone();
-    let view = E::Residual::residual_view(residual).unwrap();
-    let input = ok(E::Residual::with_bindings(residual, &term, &view.bindings));
+    let view = E::residual::residual_view(residual).unwrap();
+    let input = ok(E::residual::with_bindings(residual, &term, &view.bindings));
     let rebuilt = R::rebuild(&p, R::Rebuild { sources: Some(vec![(input, term)]), count: Some(None), origin: Some(None), ..Default::default() }).unwrap_or_else(|ds| panic!("{}", ts::show_ds(&ds)));
     (rebuilt, input)
 }
@@ -104,12 +104,12 @@ fn reference(program: &RegionT, live: &Frame) -> Result<Value, Diagnostic> { hos
 #[test]
 fn merging_sibling_regions_requires_the_same_immutable_sources() {
     let (first, input) = source_count("", "(int t)");
-    let cloned = match E::Host::rewrite(&Value::Residual(input), &|_| None) {
+    let cloned = match E::host::rewrite(&Value::Residual(input), &|_| None) {
         Value::Residual(r) => r,
         _ => panic!("expected a residual"),
     };
     assert!(cloned != input);
-    let cloned_term = E::Residual::residual_view(cloned).unwrap().term;
+    let cloned_term = E::residual::residual_view(cloned).unwrap().term;
     let second = R::rebuild(&first, R::Rebuild { sources: Some(vec![(cloned, cloned_term)]), ..Default::default() }).unwrap_or_else(|ds| panic!("{}", ts::show_ds(&ds)));
     let merged = core_fuse::compact_sources(core_fuse::merge(&[first.clone(), second]).expect("merge"));
     assert_eq!(merged.sources.len(), 1);
@@ -170,12 +170,12 @@ fn check(times: &[f64], region: bool, name: &str, body: &str) {
     if has_region != region {
         panic!("{name}: region expectation\n{text}");
     }
-    let program = ok(Executor::compile(&value, &Default::default()));
+    let program = ok(executor::compile(&value, &Default::default()));
     // Preparation is invariant across the sweep, just as Executor::compile is.
     let prepared = ts::prepare_clobber(&core);
     for time in times {
         let live = input::at_time(*time);
-        let expected = E::Host::force_reference(&value, &live, None, None, None);
+        let expected = E::host::force_reference(&value, &live, None, None, None);
         // A failing region declines to the packed path, so only successes compare with the walker.
         match (crate::core_exec::execute(&prepared, &live, &Default::default()), &expected) {
             (Ok(a), Ok(b)) => assert!(same(&a, b), "{name} at {time} (direct)"),
@@ -184,7 +184,7 @@ fn check(times: &[f64], region: bool, name: &str, body: &str) {
             _ => panic!("{name} at {time} (direct outcome)"),
         }
         if !region || expected.is_ok() {
-            let actual = Executor::force(&program, &Default::default(), &live);
+            let actual = executor::force(&program, &Default::default(), &live);
             assert!(same_result(&actual, &expected), "{name} at {time} (core)");
         }
     }

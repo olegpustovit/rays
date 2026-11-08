@@ -45,7 +45,7 @@ fn frame_reads_force_against_the_live_frame() {
     changed.keys = vec![];
     changed.size = (900, 600);
     for l in [&live, &changed, &live] {
-        assert_eq!(force(&value, l, None), Host::force_reference(&value, l, None, None, None));
+        assert_eq!(force(&value, l, None), host::force_reference(&value, l, None, None, None));
     }
     assert_ne!(force(&value, &changed, None), Ok(expected));
     assert_eq!(result_g(&run(&w, false, None, None, Some(&live), 3.).unwrap()), Value::Float(12.));

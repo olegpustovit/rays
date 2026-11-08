@@ -4,7 +4,7 @@
 use crate::core_exec;
 use crate::core_ir as c;
 use crate::core_lower;
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::packed;
 use flow_check::catalog::Catalog;
 use flow_check::op::{self, Op, Signature};
@@ -74,7 +74,7 @@ pub fn compile_with(trace: Option<Trace>, fusion: bool, declarations: &str, body
         .expect("record g/tested");
     match &records[0].1 {
         Value::Residual(r) => {
-            let term = e::Residual::residual_view(*r).unwrap().term;
+            let term = e::residual::residual_view(*r).unwrap().term;
             let options = packed::CompileOptions { trace, fusion, ..Default::default() };
             match packed::compile_result(&options, *r, &term) {
                 Ok(p) => p,
@@ -177,8 +177,8 @@ pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
 pub fn two_outputs() -> packed::T {
     let region = compile("(map (fn [x] [x (+ x t)]) (array/range 1024))");
     let o = region.outputs[0].clone();
-    let rebuild = c::Region::Rebuild { outputs: Some(vec![vec![o[1]], vec![o[0], o[1]]]), ..Default::default() };
-    match c::Region::rebuild(&region, rebuild) {
+    let rebuild = c::region::Rebuild { outputs: Some(vec![vec![o[1]], vec![o[0], o[1]]]), ..Default::default() };
+    match c::region::rebuild(&region, rebuild) {
         Ok(p) => p,
         Err(ds) => panic!("{}", show_ds(&ds)),
     }
@@ -571,18 +571,18 @@ pub fn captured_helper(body: &str) -> flow_syntax::value::FnId {
     let template = callable(recorded(
         "(let* [data (array/int 1 7) tested (fn [(helper : (fn [int] int)) (i : int)] (if (int/lt i 0) (array/nth data 0) (helper (int/mod i 2))))] 0.)",
     ));
-    let (params, tbody) = e::Residual::function_body(template).unwrap();
+    let (params, tbody) = e::residual::function_body(template).unwrap();
     let root_eval = ok(e::static_eval(&composition_checked("", &live_body("t"))));
     let root = residual(&root_eval.results.iter().find(|(n, _)| n == "g").unwrap().1);
     KEEP.with(|k| k.borrow_mut().push(root_eval));
-    let view = e::Residual::residual_view(root).unwrap();
+    let view = e::residual::residual_view(root).unwrap();
     let mut bindings = vec![("helper".to_string(), Value::Fn(helper))];
-    bindings.extend(e::Residual::function_bindings(template));
-    ok(e::Residual::compiled_function(root, view.instance, vec![], vec!["g".into(), "tested".into()], params[1..].to_vec(), tbody, bindings))
+    bindings.extend(e::residual::function_bindings(template));
+    ok(e::residual::compiled_function(root, view.instance, vec![], vec!["g".into(), "tested".into()], params[1..].to_vec(), tbody, bindings))
 }
 pub fn helper_value(body: &str, count: i64) -> Result<Value, Diagnostic> {
     let signature = flow_syntax::ty::FnSignature { params: vec![Ty::Int], result: Ty::Int };
-    e::Host::map_function(None, None, &signature, captured_helper(body), &[Value::Int_array(Arc::new((0..count).collect()))])
+    e::host::map_function(None, None, &signature, captured_helper(body), &[Value::Int_array(Arc::new((0..count).collect()))])
 }
 /// `same`: equal results are equal bytes; equal errors have equal code, message and cause.
 pub fn same(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) {
@@ -593,14 +593,14 @@ pub fn same(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) {
     }
 }
 
-pub fn executor_compile(v: &Value, strict: bool) -> Executor::Program {
-    ok(Executor::compile(v, &Executor::CompileOptions { strict, ..Default::default() }))
+pub fn executor_compile(v: &Value, strict: bool) -> executor::Program {
+    ok(executor::compile(v, &executor::CompileOptions { strict, ..Default::default() }))
 }
-pub fn executor_force(p: &Executor::Program, strict: bool, live: &Frame) -> Result<Value, Diagnostic> {
-    Executor::force(p, &Executor::ForceOptions { strict, ..Default::default() }, live)
+pub fn executor_force(p: &executor::Program, strict: bool, live: &Frame) -> Result<Value, Diagnostic> {
+    executor::force(p, &executor::ForceOptions { strict, ..Default::default() }, live)
 }
 pub fn force_reference(v: &Value, live: &Frame) -> Result<Value, Diagnostic> {
-    e::Host::force_reference(v, live, None, None, None)
+    e::host::force_reference(v, live, None, None, None)
 }
 
 // ---- helpers shared by the array tests (irtest1)
@@ -620,8 +620,8 @@ pub fn reject(code: &str, r: Result<Value, Diagnostic>) {
     }
 }
 /// Compile a residual value's region with options.
-pub fn compile_region(r: ResidualId, fusion: bool, count_source: Option<c::Region::CountSource>) -> Result<packed::T, Vec<Diagnostic>> {
-    let term = e::Residual::residual_view(r).unwrap().term;
+pub fn compile_region(r: ResidualId, fusion: bool, count_source: Option<c::region::CountSource>) -> Result<packed::T, Vec<Diagnostic>> {
+    let term = e::residual::residual_view(r).unwrap().term;
     packed::compile_result(&packed::CompileOptions { fusion, count_source, ..Default::default() }, r, &term)
 }
 pub fn ok_ds<T>(r: Result<T, Vec<Diagnostic>>) -> T {
@@ -631,10 +631,10 @@ pub fn packed_force(p: &packed::T, live: &Frame, strict: bool, resolve: Option<R
     packed::force(p, live, &packed::ForceOptions { strict, resolve, ..Default::default() })
 }
 pub fn reference_with(v: &Value, live: &Frame, state: Option<&e::State>, resolve: Option<ResolveArc>) -> Result<Value, Diagnostic> {
-    e::Host::force_reference(v, live, state, None, resolve)
+    e::host::force_reference(v, live, state, None, resolve)
 }
-pub fn exec_force(p: &Executor::Program, live: &Frame, state: Option<&e::State>, resolve: Option<ResolveArc>) -> Result<Value, Diagnostic> {
-    Executor::force(p, &Executor::ForceOptions { strict: true, state: state.cloned(), resolve, ..Default::default() }, live)
+pub fn exec_force(p: &executor::Program, live: &Frame, state: Option<&e::State>, resolve: Option<ResolveArc>) -> Result<Value, Diagnostic> {
+    executor::force(p, &executor::ForceOptions { strict: true, state: state.cloned(), resolve, ..Default::default() }, live)
 }
 /// A host-context workspace with declared inputs, evaluated with source inputs.
 pub fn dynamic_value(inputs: &[(String, Vec<(String, Value)>)], declarations: &str, body: &str) -> Value {
@@ -642,8 +642,8 @@ pub fn dynamic_value(inputs: &[(String, Vec<(String, Value)>)], declarations: &s
     ok(e::r#static(&ws, false, Some(inputs))).results.iter().find(|(n, _)| n == "g").unwrap().1.clone()
 }
 /// A count source naming a `data` binding's origin `["fixture","data"]`.
-pub fn data_count_source() -> c::Region::CountSource {
-    c::Region::CountSource::new(Arc::new(|_, term| match &term.node {
+pub fn data_count_source() -> c::region::CountSource {
+    c::region::CountSource::new(Arc::new(|_, term| match &term.node {
         w::Node::RefBinding(id) if term.name(term.arena().ref_binding(*id).name) == "data" && term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => Some((vec!["fixture".to_string(), "data".to_string()], vec![])),
         _ => None,
     }))

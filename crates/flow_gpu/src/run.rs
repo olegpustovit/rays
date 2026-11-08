@@ -9,7 +9,7 @@
 //! native readback lease as soon as real owned planes have been published.
 use crate::kernels;
 use crate::pipelines;
-use flow_ir::flow_ir::Gpu;
+use flow_ir::flow_ir::gpu;
 use flow_shader::emit::Kernel;
 use flow_syntax::value::{self, Value};
 use ogpu_core::backend::{self as b, Accel, Buffer, Commands, ComputeEncoder, Device, Queue};
@@ -1603,7 +1603,7 @@ fn token_planes(token: &Token) -> Result<Arc<Vec<Vec<f64>>>, String> {
 /// A held output's planes: its token keeps the buffer alive, and every call reads the token's fate.
 struct Held(Arc<Token>);
 
-impl Gpu::PlanesOps for Held {
+impl gpu::PlanesOps for Held {
     fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic> {
         token_planes(&self.0).map(|planes| (*planes).clone()).map_err(|message| e_gpu(&message))
     }
@@ -1626,7 +1626,7 @@ impl Gpu::PlanesOps for Held {
     }
 }
 
-fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: i64, epoch: i64, settled: bool) -> (Gpu::Planes, Rc<Kept>) {
+fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: i64, epoch: i64, settled: bool) -> (gpu::Planes, Rc<Kept>) {
     let d = &*t.0;
     mem::charge(&HELD_OWNER, capacity);
     let id = NEXT_KEPT.fetch_add(1, Ordering::SeqCst);
@@ -1659,13 +1659,13 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     KEPT.with(|k| k.borrow_mut().insert(id, kept.clone()));
     BINDABLE.with(|b| b.borrow_mut().push((Arc::downgrade(&placeholder), weak.clone(), id, count * width)));
     let resident = Value::Floats(width as usize, placeholder);
-    let planes = Gpu::Planes { count, width, resident: if uint32 { None } else { Some(resident) }, ops: Box::new(Held(token)) };
+    let planes = gpu::Planes { count, width, resident: if uint32 { None } else { Some(resident) }, ops: Box::new(Held(token)) };
     (planes, kept)
 }
 
 
 /// Hand the output's buffer to a lazy planar store: nothing is read or waited for now.
-fn keep_storage(uint32: bool, index: Option<i64>, output: &Output) -> Result<(Gpu::Planes, Option<Rc<Kept>>), Diagnostic> {
+fn keep_storage(uint32: bool, index: Option<i64>, output: &Output) -> Result<(gpu::Planes, Option<Rc<Kept>>), Diagnostic> {
     let index = index.unwrap_or(output.index);
     let t = &output.owner;
     let d = &*t.0;
@@ -1709,7 +1709,7 @@ fn keep_storage(uint32: bool, index: Option<i64>, output: &Output) -> Result<(Gp
         None => {
             // an empty, unmapped or caller-encoded output is read now
             let read = self::planes(output, Some(index))?;
-            Ok((Gpu::Planes { count: output.count, width, resident: None, ops: Box::new(Gpu::ReadPlanes(Arc::new(read))) }, None))
+            Ok((gpu::Planes { count: output.count, width, resident: None, ops: Box::new(gpu::ReadPlanes(Arc::new(read))) }, None))
         }
     }
 }
@@ -1718,7 +1718,7 @@ fn keep_storage(uint32: bool, index: Option<i64>, output: &Output) -> Result<(Gp
 /// the creating thread) waits for the dispatch and reads its status once; `materialise` reads
 /// `planes` once. `release(true)` retires it; `release(false)` frees it. Uint32 outputs refuse with
 /// `E_GPU_UINT32_KEEP` until adopted by a typed topology holder.
-pub fn keep(output: &Output, index: Option<i64>) -> Result<Gpu::Planes, Diagnostic> {
+pub fn keep(output: &Output, index: Option<i64>) -> Result<gpu::Planes, Diagnostic> {
     keep_storage(false, index, output).map(|(planes, _)| planes)
 }
 
@@ -1764,7 +1764,7 @@ pub struct Uint32Holder {
 /// A holder's backend-neutral integers: `live` is its storage while that is still held.
 struct HolderIntegers { holder: Arc<Uint32Holder>, live: Option<(Arc<Fate>, Arc<AtomicBool>)> }
 
-impl Gpu::IntegersOps for HolderIntegers {
+impl gpu::IntegersOps for HolderIntegers {
     fn resident(&self) -> Option<Value> {
         self.live.as_ref().filter(|(f, s)| s.load(Ordering::SeqCst) && !f.destroyed() && f.planes().is_none()).and_then(|_| self.holder.resident.clone())
     }
@@ -1773,21 +1773,21 @@ impl Gpu::IntegersOps for HolderIntegers {
 }
 
 /// The same holder through the backend-neutral integer carrier, with shared ownership.
-pub fn integers(holder: &Uint32Holder) -> Gpu::Integers {
+pub fn integers(holder: &Uint32Holder) -> gpu::Integers {
     let live = holder.input.as_ref().and_then(held_storage).map(|(kept, _)| (kept.fate.clone(), kept.settled.clone()));
     let holder = Arc::new(holder.clone());
-    Gpu::Integers { count: holder.count, storage: Some(holder.clone()), ops: Box::new(HolderIntegers { holder, live }) }
+    gpu::Integers { count: holder.count, storage: Some(holder.clone()), ops: Box::new(HolderIntegers { holder, live }) }
 }
 
 /// Borrow native UInt32 storage without materialising it. Other backend tokens decline.
-pub fn pin_integers(holder: &Gpu::Integers) -> Option<Pin> {
+pub fn pin_integers(holder: &gpu::Integers) -> Option<Pin> {
     holder.storage.as_ref()?.downcast_ref::<Uint32Holder>().and_then(|native| (native.pin)())
 }
 
-fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>) -> Uint32Holder {
+fn integer_holder(domain: ThreadId, planes: gpu::Planes, kept: Option<Rc<Kept>>) -> Uint32Holder {
     let cache: Arc<Mutex<Option<Arc<Vec<i64>>>>> = Arc::new(Mutex::new(None));
     let kept_id = kept.as_ref().map(|k| k.id);
-    let (count, ops): (i64, Arc<dyn Gpu::PlanesOps>) = (planes.count, Arc::from(planes.ops));
+    let (count, ops): (i64, Arc<dyn gpu::PlanesOps>) = (planes.count, Arc::from(planes.ops));
     let input = kept.as_ref().and_then(|k| k.placeholder.clone());
     let resident = kept_id.map(|id| {
         let values = Arc::new(vec![id]);
@@ -1859,7 +1859,7 @@ pub fn keep_uint32(output: &Output, index: Option<i64>) -> Result<Uint32Holder, 
     Ok(integer_holder(output.owner.0.domain, planes, kept))
 }
 
-fn adopt_storage(t: &T, uint32: bool, buffer: &Buffer, count: i64, width: i64) -> Result<(Gpu::Planes, Rc<Kept>), Diagnostic> {
+fn adopt_storage(t: &T, uint32: bool, buffer: &Buffer, count: i64, width: i64) -> Result<(gpu::Planes, Rc<Kept>), Diagnostic> {
     let d = &*t.0;
     if d.state.borrow().closed || me() != d.domain {
         return Err(e_gpu("GPU owner is closed or called from another domain."));
@@ -1880,7 +1880,7 @@ pub fn adopt_uint32(t: &T, buffer: &Buffer, count: i64) -> Result<Uint32Holder, 
 }
 
 /// Transfer a caller-owned, completed and status-validated buffer without copying or reading it.
-pub fn adopt_float(t: &T, buffer: &Buffer, count: i64, width: i64) -> Result<Gpu::Planes, Diagnostic> {
+pub fn adopt_float(t: &T, buffer: &Buffer, count: i64, width: i64) -> Result<gpu::Planes, Diagnostic> {
     adopt_storage(t, false, buffer, count, width).map(|(planes, _)| planes)
 }
 

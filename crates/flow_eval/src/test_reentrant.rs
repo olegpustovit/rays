@@ -14,23 +14,23 @@ fn handlers(nested: Arc<AtomicI64>) -> ResidualHandlers {
     let fresh = Arc::new(AtomicI64::new(0));
     ResidualHandlers {
         kernel: Some(Arc::new(move |id| {
-            let view = Residual::residual_view(id).unwrap();
+            let view = residual::residual_view(id).unwrap();
             if let W::Node::Hof(hof) = view.term.node {
                 let node = view.term.arena().hof(hof);
                 assert_eq!(node.kind, W::HofKind::Map);
                 let terms = view.term.arena().term_ids(node.args);
-                let xs = Residual::eval_term(id, &view.term.child(terms[1]), &input::at_time(9.0), None, None, None).unwrap();
+                let xs = residual::eval_term(id, &view.term.child(terms[1]), &input::at_time(9.0), None, None, None).unwrap();
                 assert_eq!(flow_syntax::value::array_length(&xs).unwrap(), 8);
             }
             let fresh = fresh.clone();
             let mint = move || -(1i64 << 50) - fresh.fetch_add(1, Ordering::Relaxed) - 1;
             let inner = |value: &Value| match value {
-                Value::Fn(_) => Some(Host::rewrite_with(value, &|_| None, &mint, &|_, _| None)),
+                Value::Fn(_) => Some(host::rewrite_with(value, &|_| None, &mint, &|_, _| None)),
                 _ => None,
             };
-            let copy = Host::rewrite_with(&Value::Residual(id), &inner, &mint, &|_, _| None);
+            let copy = host::rewrite_with(&Value::Residual(id), &inner, &mint, &|_, _| None);
             let _ = frame_dependent(&copy);
-            let _ = Residual::with_bindings(id, &view.term, &[]).unwrap();
+            let _ = residual::with_bindings(id, &view.term, &[]).unwrap();
             nested.fetch_add(1, Ordering::Relaxed);
             None
         })),
@@ -40,7 +40,7 @@ fn handlers(nested: Arc<AtomicI64>) -> ResidualHandlers {
 
 fn force_at(evaluated: &Eval, value: &Value, t: f64, nested: &Arc<AtomicI64>) -> f64 {
     let mut out = None;
-    let _ = Residual::handle(handlers(nested.clone()), &mut || { out = Some(force(value, &input::at_time(t), None)); Ok(evaluated.clone()) });
+    let _ = residual::handle(handlers(nested.clone()), &mut || { out = Some(force(value, &input::at_time(t), None)); Ok(evaluated.clone()) });
     match out.unwrap().unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))) {
         Value::Int(n) => n as f64,
         Value::Float(x) => x,
@@ -97,14 +97,14 @@ fn a_kernel_callback_evaluating_its_own_term_is_not_offered_it_again() {
         kernel: Some(Arc::new(move |id| {
             counted.fetch_add(1, Ordering::Relaxed);
             assert!(counted.load(Ordering::Relaxed) < 100, "the kernel handler was offered its own term again");
-            let view = Residual::residual_view(id).unwrap();
-            let _ = Residual::eval_term(id, &view.term, &input::at_time(2.0), None, None, None).unwrap();
+            let view = residual::residual_view(id).unwrap();
+            let _ = residual::eval_term(id, &view.term, &input::at_time(2.0), None, None, None).unwrap();
             None
         })),
         ..Default::default()
     };
     let mut out = None;
-    let _ = Residual::handle(handlers, &mut || { out = Some(force(&residual, &input::at_time(2.0), None)); Ok(evaluated.clone()) });
+    let _ = residual::handle(handlers, &mut || { out = Some(force(&residual, &input::at_time(2.0), None)); Ok(evaluated.clone()) });
     assert_eq!(out.unwrap().unwrap(), Value::Float(expected(2.0)));
     assert!(offers.load(Ordering::Relaxed) > 0);
 }

@@ -5,7 +5,7 @@
 //! `Domain.spawn` workers are scoped threads.
 use crate::workspace_gpu as wg;
 use flow_ir::core_exec::Resident;
-use flow_ir::flow_ir::Gpu as G;
+use flow_ir::flow_ir::gpu as G;
 use flow_sop::{lower, value_lane};
 use flow_ir::packed;
 use flow_syntax::ty::Ty;

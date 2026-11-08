@@ -43,21 +43,21 @@ pub type RegionAllowed = Rc<dyn Fn(&C::RegionT) -> bool>;
 pub type LoweredHook = Rc<dyn Fn(ResidualId)>;
 
 fn static_sop(r: ResidualId) -> bool {
-    match E::Residual::residual_context(r) {
+    match E::residual::residual_context(r) {
         Some(c) => c == context::sop() && !E::frame_dependent(&Value::Residual(r)) && !E::state_dependent(&Value::Residual(r)),
         None => false,
     }
 }
 /// a SOP cook lowers what its kernels capture as producers, frame-driven or not
-fn sop_cook(r: ResidualId) -> bool { E::Residual::residual_context(r).is_some_and(|c| c == context::sop()) }
+fn sop_cook(r: ResidualId) -> bool { E::residual::residual_context(r).is_some_and(|c| c == context::sop()) }
 
 fn holds_arrays(ty: &Ty) -> bool {
     match ty { Ty::Array(_) => true, Ty::Record(fields) => fields.iter().any(|(_, t)| holds_arrays(t)), _ => false }
 }
 fn holds_array_residual(v: &Value) -> bool {
     match v {
-        Value::Residual(r) => E::Residual::residual_ty(*r).is_some_and(|ty| holds_arrays(&ty)),
-        Value::Fn(f) => E::Residual::function_bindings(*f).iter().any(|(_, v)| holds_array_residual(v)),
+        Value::Residual(r) => E::residual::residual_ty(*r).is_some_and(|ty| holds_arrays(&ty)),
+        Value::Fn(f) => E::residual::function_bindings(*f).iter().any(|(_, v)| holds_array_residual(v)),
         Value::Record(fields) => fields.iter().any(|(_, v)| holds_array_residual(v)),
         _ => false,
     }
@@ -478,7 +478,7 @@ impl Lowerer {
     fn ops(&mut self) -> R<std::sync::Arc<Vec<op::Op>>> {
         if self.root_ops.is_none() {
             let root = self.root()?;
-            self.root_ops = Some(E::Residual::residual_ops(root));
+            self.root_ops = Some(E::residual::residual_ops(root));
         }
         Ok(self.root_ops.clone().unwrap())
     }
@@ -486,7 +486,7 @@ impl Lowerer {
         let ops = self.ops()?;
         Ok(op::find(&ops, name, &context::value()))
     }
-    fn view(&self, r: ResidualId) -> R<E::Residual::View> { Ok(E::Residual::residual_view(r)?) }
+    fn view(&self, r: ResidualId) -> R<E::residual::View> { Ok(E::residual::residual_view(r)?) }
 
     fn emit(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, expression: C::Expr) -> Lowered {
         let n = self.local(ty);
@@ -619,7 +619,7 @@ impl Lowerer {
     fn type_of(&self, l: &Lowered) -> Ty {
         match l {
             Selected(items, _) => items.iter().fold(Ty::Any, |ty, v| ty::join(&ty, &self.type_of(v)).unwrap_or(ty)),
-            Known(Value::Residual(r)) => E::Residual::residual_ty(*r).unwrap_or(Ty::Any),
+            Known(Value::Residual(r)) => E::residual::residual_ty(*r).unwrap_or(Ty::Any),
             Known(Value::List(items)) => Ty::List(Box::new(items.iter().fold(Ty::Any, |ty, v| ty::join(&ty, &self.type_of(&Known(v.clone()))).unwrap_or(ty)))),
             Known(v) => V::ty_of(v),
             Computed(_, ty) => ty.clone(),
@@ -629,7 +629,7 @@ impl Lowerer {
         }
     }
 
-    fn source_of_view(&self, view: &E::Residual::View) -> C::Source {
+    fn source_of_view(&self, view: &E::residual::View) -> C::Source {
         C::Source {
             site: view.site.iter().skip(view.prefix.len()).cloned().collect(),
             owner: view.owner.clone(),
@@ -1115,13 +1115,13 @@ impl Lowerer {
         result
     }
 
-    fn residual_body(&mut self, s: &mut Scope, r: ResidualId, mut view: E::Residual::View, key: CacheKey) -> R<Lowered> {
+    fn residual_body(&mut self, s: &mut Scope, r: ResidualId, mut view: E::residual::View, key: CacheKey) -> R<Lowered> {
         let _phase = flow_syntax::phase_timer::measure("core.residual_body");
         let source = self.source_of_view(&view);
         // Draws and SOP cooks lower captured arrays as explicit producers, so compacted
         // counts and the regions consuming them share their Core locals.
         let captured_arrays = (self.initial.is_some() || self.has_draw || sop_cook(r))
-            && E::Residual::free_names(&view.term).iter().any(|name| view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| holds_array_residual(v)).unwrap_or(false));
+            && E::residual::free_names(&view.term).iter().any(|name| view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| holds_array_residual(v)).unwrap_or(false));
         let packed = if view.previous || captured_arrays { None } else { self.packed_region(r, &view) };
         let value = if let Some(region) = packed {
             self.region(s, Vec::new(), region, &view)
@@ -1183,7 +1183,7 @@ impl Lowerer {
             // a captured function's arrays follow the kernel's own rule
             Known(Value::Fn(f)) if sop => {
                 let mut replaced = Vec::new();
-                for (_, v) in E::Residual::function_bindings(*f) {
+                for (_, v) in E::residual::function_bindings(*f) {
                     let n = self.capture(s, source, parent, static_, sop, arguments, &Known(v.clone()))?;
                     replaced.push((v, n));
                 }
@@ -1208,7 +1208,7 @@ impl Lowerer {
                 for (name, v) in &cl.env { bindings.push((name.clone(), self.capture(s, source, parent, static_, sop, arguments, v)?)); }
                 let arena = cl.body.arena();
                 let params = arena.params(cl.params).iter().map(|p| (arena.owned_pattern(p.pattern), p.ty.map(|id| arena.ty(id).clone()))).collect();
-                let f = E::Residual::compiled_function(parent, cl.instance, cl.prefix.clone(), cl.zone.clone(), params, cl.body.clone(), bindings)?;
+                let f = E::residual::compiled_function(parent, cl.instance, cl.prefix.clone(), cl.zone.clone(), params, cl.body.clone(), bindings)?;
                 Ok(Value::Fn(f))
             }
             _ => Err(refusal("packed_capture")),
@@ -1218,7 +1218,7 @@ impl Lowerer {
     /// A packed kernel for this term under its parent residual, or why not.
     fn term_kernel(&mut self, s: &mut Scope, source: &C::Source, env: &Env, x: &Term, parent: ResidualId, static_: bool, sop: bool,
                    why: &mut Option<Vec<Diagnostic>>) -> R<Option<(ResidualId, Arc<C::RegionT>, Vec<i64>)>> {
-        let names = E::Residual::free_names(x);
+        let names = E::residual::free_names(x);
         let mut arguments: Vec<i64> = Vec::new();
         let attempt = (|| -> R<Option<(ResidualId, Arc<C::RegionT>, Vec<i64>)>> {
             let mut bindings = Vec::new();
@@ -1227,7 +1227,7 @@ impl Lowerer {
                     bindings.push((name.clone(), self.capture(s, source, parent, static_, sop, &mut arguments, v)?));
                 }
             }
-            let r = E::Residual::with_bindings(parent, x, &bindings)?;
+            let r = E::residual::with_bindings(parent, x, &bindings)?;
             if E::state_dependent(&Value::Residual(r)) { return Ok(None); }
             match packed::compile_result(&self.options, r, x) {
                 Err(d) => { *why = Some(d); Ok(None) }
@@ -1275,7 +1275,7 @@ impl Lowerer {
         let state_parent = self.current.is_some() && self.step_nodes.contains(&x.identity());
         // a kernel reading a state value takes it as an argument, lowered once before the region
         let reads_state = candidate
-            && E::Residual::free_names(x).iter().any(|name| matches!(env.get(name), Some(Known(Value::Residual(r))) if E::state_dependent(&Value::Residual(*r))));
+            && E::residual::free_names(x).iter().any(|name| matches!(env.get(name), Some(Known(Value::Residual(r))) if E::state_dependent(&Value::Residual(*r))));
         let mut why: Option<Vec<Diagnostic>> = None;
         let static_ = self.current.map(static_sop).unwrap_or(false);
         let sop = self.current.map(sop_cook).unwrap_or(false);
@@ -1606,10 +1606,10 @@ impl Lowerer {
                 let graph = x.name(arena.graph_ref(id).graph);
                 // The referenced graph's body in its own default instance, as the live walker re-runs it.
                 let root = self.root()?;
-                let g = E::Residual::residual_graph(root, graph).ok_or_else(|| refusal("ref"))?;
+                let g = E::residual::residual_graph(root, graph).ok_or_else(|| refusal("ref"))?;
                 let zone = vec![graph.to_owned()];
                 let mut src2 = source.clone();
-                src2.instance = E::Residual::graph_instance(root, graph).unwrap_or(source.instance);
+                src2.instance = E::residual::graph_instance(root, graph).unwrap_or(source.instance);
                 src2.prefix = Vec::new();
                 src2.site = zone.clone();
                 src2.owner = zone;
@@ -1762,7 +1762,7 @@ fn filter_range(owner: &Term, ts: &[TermId], ty: &Ty) -> Option<(TermId, TermId,
 }
 
 impl Lowerer {
-    fn packed_region(&mut self, r: ResidualId, view: &E::Residual::View) -> Option<Arc<C::RegionT>> {
+    fn packed_region(&mut self, r: ResidualId, view: &E::residual::View) -> Option<Arc<C::RegionT>> {
         // Packed-array forms run as one region through Packed.force, unchanged; list
         // loops stay structured core. A refusal by Packed leaves the structured path.
         let x = &view.term;
@@ -1789,7 +1789,7 @@ impl Lowerer {
         } else { None }
     }
 
-    fn region(&mut self, s: &mut Scope, args: Vec<i64>, packed: Arc<C::RegionT>, view: &E::Residual::View) -> Lowered {
+    fn region(&mut self, s: &mut Scope, args: Vec<i64>, packed: Arc<C::RegionT>, view: &E::residual::View) -> Lowered {
         let index = self.regions.len() as i64;
         self.regions.push(packed);
         let mut source = self.source_of_view(view);
@@ -1900,10 +1900,10 @@ impl Lowerer {
         match l {
             Callable(f) => Ok(f.clone()),
             Known(Value::Fn(f)) => {
-                let identity = E::Residual::function_id(*f);
-                match (E::Residual::function_body(*f), E::Residual::function_origin(*f)) {
+                let identity = E::residual::function_id(*f);
+                match (E::residual::function_body(*f), E::residual::function_origin(*f)) {
                     (Some((params, body)), Some((instance, prefix, zone))) => {
-                        let env: Env = E::Residual::function_bindings(*f).into_iter().map(|(n, v)| (n, Known(v))).collect();
+                        let env: Env = E::residual::function_bindings(*f).into_iter().map(|(n, v)| (n, Known(v))).collect();
                         let mut builder = TermBuilder::new();
                         let form = builder.import_form(&body.form());
                         let body_id = builder.import(&body);
@@ -1914,7 +1914,7 @@ impl Lowerer {
                         let body = arena.handle(body_id);
                         Ok(Callable::Closure(Arc::new(Closure { params, body, env, instance, prefix, zone, identity })))
                     }
-                    _ => match E::Residual::function_name(*f) {
+                    _ => match E::residual::function_name(*f) {
                         Some(name) => Ok(Callable::Named { name, identity }),
                         None => Err(refusal("fn")),
                     },
@@ -1949,7 +1949,7 @@ impl Lowerer {
             }
             Callable::Named { name, .. } => {
                 let root = self.root()?;
-                if E::Residual::residual_definition(root, name).is_some() {
+                if E::residual::residual_definition(root, name).is_some() {
                     return self.definition(borrow, s, &source, name, specialized, values);
                 }
                 let o = match self.find_op(name)? {
@@ -1978,7 +1978,7 @@ impl Lowerer {
 
     fn definition(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, name: &str, specialized: Option<&Term>, values: &[Lowered]) -> R<Lowered> {
         let root = self.root()?;
-        let declaration = E::Residual::residual_definition(root, name).ok_or_else(|| refusal("call_fn"))?;
+        let declaration = E::residual::residual_definition(root, name).ok_or_else(|| refusal("call_fn"))?;
         if declaration.inputs.len() != values.len() { return Err(refusal("call_fn")); }
         let zone = vec![format!("def:{name}")];
         let mut source = source.clone();
@@ -2354,7 +2354,7 @@ impl Lowerer {
                         None => self.term(false, s, zone_source, env, &value)?,
                     }
                 } else {
-                    if !self.invariant(&value)? || !E::Residual::free_names(&value).iter().all(|n| env.contains_key(n)) {
+                    if !self.invariant(&value)? || !E::residual::free_names(&value).iter().all(|n| env.contains_key(n)) {
                         return Err(refusal("text_collect_dependent_clause"));
                     }
                     let empty = match &source_ty {
@@ -3037,7 +3037,7 @@ static COUNT_SCOPES: AtomicI64 = AtomicI64::new(0);
 fn argument_index(residual: ResidualId, term: &Term) -> Option<i64> {
     match term.node {
         Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(id).fields).is_empty() =>
-            E::Residual::residual_binding(residual, term.name(term.arena().ref_binding(id).name)).as_ref().and_then(argument_value),
+            E::residual::residual_binding(residual, term.name(term.arena().ref_binding(id).name)).as_ref().and_then(argument_value),
         Node::Expanded(id) => argument_index(residual, &term.child(term.arena().expanded(id).body)),
         _ => None,
     }
@@ -3048,7 +3048,7 @@ fn argument_value(v: &Value) -> Option<i64> {
             [(k, Value::Int(index))] if k == "index" => Some(*index),
             _ => None,
         },
-        Value::Residual(r) => argument_index(*r, E::Residual::residual_term(*r)?.as_ref()),
+        Value::Residual(r) => argument_index(*r, E::residual::residual_term(*r)?.as_ref()),
         _ => None,
     }
 }
@@ -3059,12 +3059,12 @@ fn count_origins(program: C::Program) -> C::Program {
     let scope = COUNT_SCOPES.fetch_add(1, Ordering::SeqCst);
     let n = program.locals.len();
     let mut writes = vec![0i64; n];
-    let mut origins: Vec<Option<C::Region::Origin>> = vec![None; n];
+    let mut origins: Vec<Option<C::region::Origin>> = vec![None; n];
     C::iter(&mut |st| for l in C::writes(st) { writes[l as usize] += 1; }, &program.body);
-    let identity = |kind: &str, local: i64| -> Option<C::Region::Origin> {
+    let identity = |kind: &str, local: i64| -> Option<C::region::Origin> {
         Some((vec!["@core-count".to_owned(), scope.to_string(), kind.to_owned(), local.to_string()], Vec::new()))
     };
-    let count = |args: &[(String, i64)], writes: &[i64]| -> Option<C::Region::Origin> {
+    let count = |args: &[(String, i64)], writes: &[i64]| -> Option<C::region::Origin> {
         args.iter().find(|(n, _)| n == "count").and_then(|(_, local)| if writes[*local as usize] == 1 { identity("scalar", *local) } else { None })
     };
     let mut regions = program.regions.clone();
@@ -3087,14 +3087,14 @@ fn count_origins(program: C::Program) -> C::Program {
                 if matches!(program.locals[*result as usize], Ty::Array(_)) && writes[*result as usize] == 1 {
                     origins[*result as usize] = identity("array", *result);
                 }
-                if packed::elementwise(&packed) && packed.skip.is_empty() && (packed.iteration == C::Region::Iteration::Zip || packed.sources.len() == 1) {
-                    let inputs: Vec<Option<C::Region::Origin>> = packed.sources.iter().map(|(residual, term)| {
+                if packed::elementwise(&packed) && packed.skip.is_empty() && (packed.iteration == C::region::Iteration::Zip || packed.sources.len() == 1) {
+                    let inputs: Vec<Option<C::region::Origin>> = packed.sources.iter().map(|(residual, term)| {
                         argument_index(*residual, term).and_then(|index| {
                             if index < 0 || index as usize >= args.len() { None } else { origins[args[index as usize] as usize].clone() }
                         })
                     }).collect();
                     if !inputs.is_empty() && inputs[0].is_some() && inputs.iter().all(|i| *i == inputs[0]) {
-                        let rebuilt = C::Region::rebuild(&packed, C::Region::Rebuild { origin: Some(inputs[0].clone()), ..Default::default() });
+                        let rebuilt = C::region::rebuild(&packed, C::region::Rebuild { origin: Some(inputs[0].clone()), ..Default::default() });
                         if let Ok(region_t) = rebuilt {
                             regions[*region as usize] = Arc::new(region_t);
                             if writes[*result as usize] == 1 { origins[*result as usize] = inputs[0].clone(); }
@@ -3244,7 +3244,7 @@ mod tests {
         core_exec::execute(&core_exec::prepare(program, true, false, &Paths::new(), false), live, &options)
     }
 
-    fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::Host::force_reference(value, live, None, None, None) }
+    fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::host::force_reference(value, live, None, None, None) }
 
     fn lowered(r: ResidualId) -> C::Program { lower(None, None, false, None, None, r).expect("lowers") }
 
@@ -3255,7 +3255,7 @@ mod tests {
         let flag = observed.clone();
         let handlers = E::ResidualHandlers {
             observe: Some(Arc::new(move |r| {
-                let view = E::Residual::residual_view(r).unwrap();
+                let view = E::residual::residual_view(r).unwrap();
                 if matches!(view.term.node, Node::Loop(id) if view.term.arena().loop_node(id).kind == LoopKind::Fold) {
                     flag.store(true, Ordering::SeqCst);
                     let program = lowered(r);
@@ -3268,7 +3268,7 @@ mod tests {
             ..Default::default()
         };
         let ws = checked("(fold [s 0.] [i (range 2)] (+ s (+ t i)))");
-        E::Residual::handle(handlers, &mut || E::Host::static_with_requests(None, false, None, &ws)).expect("static");
+        E::residual::handle(handlers, &mut || E::host::static_with_requests(None, false, None, &ws)).expect("static");
         assert!(observed.load(Ordering::SeqCst));
     }
 
@@ -3499,9 +3499,9 @@ mod tests {
     fn a_capture_inside_a_host_source_lowers_to_plain_host_source_arguments() {
         let evaluation = E::static_eval(&checked("(let* [s (+ t 1.)] (+ s 1.))")).expect("static");
         let Value::Residual(r) = result_g(&evaluation) else { panic!("residual") };
-        let view = E::Residual::residual_view(r).unwrap();
+        let view = E::residual::residual_view(r).unwrap();
         let Some((_, Value::Residual(inner))) = view.bindings.iter().find(|(n, _)| n == "s").cloned() else { panic!("inner") };
-        let r = E::Residual::with_bindings(r, &view.term, &[("s".to_owned(), source_value("test/source", Ty::Float, vec![("value".into(), Value::Residual(inner))]))]).unwrap();
+        let r = E::residual::with_bindings(r, &view.term, &[("s".to_owned(), source_value("test/source", Ty::Float, vec![("value".into(), Value::Residual(inner))]))]).unwrap();
         let program = lowered(r);
         let mut host = false;
         C::iter(&mut |s| match &s.node {

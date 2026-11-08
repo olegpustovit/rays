@@ -313,7 +313,7 @@ pub fn roots<'a>(values: impl IntoIterator<Item = &'a Value>) -> Roots {
             Value::Residual(id) if seen.insert((false, id.0, id.1)) => {
                 if let Some(home) = slot_of(id.1) {
                     if !roots.0.iter().any(|root| root.id == home.id) { roots.0.push(home); }
-                    if let Some(bindings) = Residual::residual_bindings(*id) {
+                    if let Some(bindings) = residual::residual_bindings(*id) {
                         for (_, value) in &bindings { visit(value, roots, seen); }
                     }
                 }
@@ -321,7 +321,7 @@ pub fn roots<'a>(values: impl IntoIterator<Item = &'a Value>) -> Roots {
             Value::Fn(id) if seen.insert((true, id.0, id.1)) => {
                 if let Some(home) = slot_of(id.1) {
                     if !roots.0.iter().any(|root| root.id == home.id) { roots.0.push(home); }
-                    for (_, value) in &Residual::function_bindings(*id) { visit(value, roots, seen); }
+                    for (_, value) in &residual::function_bindings(*id) { visit(value, roots, seen); }
                 }
             }
             Value::List(values) => for value in values.iter() { visit(value, roots, seen); },
@@ -1690,7 +1690,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 let (state, _) = state_plane(a, c)?;
                 let key = state_key(c, &zone);
                 let existing = { let data = state.inner.lock().unwrap(); if c.host { data.host.as_ref().and_then(|p| p.next.get(&key).cloned()) } else { data.next.get(&key).cloned() } };
-                if let Some(v) = existing { return Ok(Device::thaw(&v)); }
+                if let Some(v) = existing { return Ok(device::thaw(&v)); }
                 let value = coerce(t.ty(), &eval_at(a, c, &local, &step)?)?;
                 state_write(a, c, &zone, value)
             }
@@ -2207,7 +2207,7 @@ fn state_previous(a: &mut Arena, c: &ExecCtx, env: &Env, zone: &Path, init: &Ter
     };
     let value = match previous { Some(value) => state_data(value), None => state_data(eval_at(a, c, env, init)?) }?;
     // The interpreter needs host data; compiled state reads keep device placeholders.
-    Ok(Device::thaw(&value))
+    Ok(device::thaw(&value))
 }
 fn state_write(a: &mut Arena, c: &ExecCtx, zone: &Path, value: Value) -> Result<Value, Diagnostic> {
     let value = state_data(concrete(a, value)?)?;
@@ -3140,7 +3140,7 @@ fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signatu
     Ok(Value::Residual(residual_id(arena, ResidualData { term: Arc::new(term), env, ctx: context, previous: false, live: None })))
 }
 pub fn map_kernel(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signature: &FnSignature, function: FnId, values: &[Value]) -> Result<Value, Diagnostic> {
-    Host::map_function(site, path, signature, function, values)
+    host::map_function(site, path, signature, function, values)
 }
 pub fn bind_captures(function: FnId, replace: &dyn Fn(&Value) -> Value) -> FnId {
     let Some(arena) = arena_for_function(function) else { return function; };
@@ -3188,7 +3188,7 @@ struct HeldArray {
     read: Arc<dyn Fn() -> Value + Send + Sync>,
 }
 static HELD_ARRAYS: LazyLock<Mutex<HashMap<usize, HeldArray>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-pub mod Device {
+pub mod device {
     use super::*;
     pub fn add(placeholder: &Value, read: Arc<dyn Fn() -> Value + Send + Sync>) -> Result<(), Diagnostic> {
         let data = match placeholder {
@@ -3284,7 +3284,7 @@ fn replace_eval_value(evaluated: &mut Eval, original: &Value, replacement: &Valu
     for values in arena.records.values_mut() { for (_, value) in values { replace_array(value, original, replacement); } }
     for value in arena.states.iter_mut() { replace_array(value, original, replacement); }
 }
-pub mod Residual {
+pub mod residual {
     use super::*;
     #[derive(Clone, Debug)]
     pub struct View {
@@ -3634,7 +3634,7 @@ fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residua
         _ => value.clone(),
     }
 }
-pub mod Host {
+pub mod host {
     use super::*;
     pub fn free_name_walks() -> usize { FREE_WALKS.load(Ordering::Relaxed) as usize }
     pub fn static_with_requests(budget: Option<usize>, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>, workspace: &Workspace) -> Result<Eval, Diagnostic> {
@@ -4749,9 +4749,9 @@ mod ownership_tests {
         });
         assert_eq!(DEP_MEMO.lock().unwrap().generation, generation, "unchanged or unread dependency inputs keep warm answers");
         let state = static_eval(&crate::test_workspace_eval::check("(workspace stateful (graph g :context host (state [n 0] (+ n 1))))")).unwrap().results[0].1.clone();
-        Host::map_function_bindings(function, &|_| state.clone());
+        host::map_function_bindings(function, &|_| state.clone());
         for value in values { assert!(state_dependent(value), "cached residuals in either home must see edited function captures"); }
-        Host::map_function_bindings(function, &|_| Value::Float(0.));
+        host::map_function_bindings(function, &|_| Value::Float(0.));
         for value in values { assert!(!state_dependent(value), "removing state must invalidate cached positive answers too"); }
     }
 
@@ -4761,13 +4761,13 @@ mod ownership_tests {
           (let* [f (fn [(x : float)] (+ x bias))] (map f (array/float 2)))))");
         let evaluation = r#static(&checked, true, None).unwrap();
         let Value::Fn(function) = evaluation.records.iter().find(|(p, _)| p == &["g", "f"]).unwrap().1[0].1 else { panic!("closure"); };
-        let before = Residual::function_bindings(function);
+        let before = residual::function_bindings(function);
         assert!(!before.is_empty());
         assert_eq!(bind_captures(function, &Value::clone), function);
         let bound = bind_captures(function, &|_| Value::Float(7.));
         assert_ne!(bound, function);
-        assert_eq!(Residual::function_bindings(function), before);
-        assert!(Residual::function_bindings(bound).iter().all(|(_, v)| *v == Value::Float(7.)));
+        assert_eq!(residual::function_bindings(function), before);
+        assert!(residual::function_bindings(bound).iter().all(|(_, v)| *v == Value::Float(7.)));
     }
 
     #[test]
@@ -4788,10 +4788,10 @@ mod ownership_tests {
 
         let state = crate::test_workspace_eval::check("(workspace stateful (graph g :context host (state [n 0] (+ n 1))))");
         let state = static_eval(&state).unwrap().results[0].1.clone();
-        Host::map_function_bindings(*id, &|_| state.clone());
+        host::map_function_bindings(*id, &|_| state.clone());
         assert_eq!(frame_reads(function), vec!["state", "time"]);
         assert!(state_dependent(function));
-        Host::map_function_bindings(*id, &|_| Value::Float(0.));
+        host::map_function_bindings(*id, &|_| Value::Float(0.));
         assert_eq!(frame_reads(function), vec!["time"]);
         assert!(!state_dependent(function));
 
@@ -4835,7 +4835,7 @@ mod ownership_tests {
                 let checked = crate::test_workspace_eval::check(&format!("(workspace w (graph g :context host {body}))"));
                 let value = static_eval(&checked).unwrap().results[0].1.clone();
                 let next = Cell::new(-8_440_299);
-                if same { Host::rewrite_with(&value, &|_| None, &|| { let id = next.get(); next.set(id - 1); id }, &|_, _| None) } else { value }
+                if same { host::rewrite_with(&value, &|_| None, &|| { let id = next.get(); next.set(id - 1); id }, &|_, _| None) } else { value }
             };
             let (clock, state) = (value("t"), value("(state [n 0] (+ n 1))"));
             let both = Value::Record(vec![("clock".into(), clock.clone()), ("state".into(), state.clone())]);
@@ -4876,14 +4876,14 @@ mod ownership_tests {
             let checked = crate::test_workspace_eval::check(&format!("(workspace w (graph g :context value (let* [f (fn [(x : float)] (+ x {add}))] 0)))"));
             let evaluation = r#static(&checked, true, None).unwrap();
             let value = &evaluation.records.iter().find(|(path, _)| path == &["g", "f"]).unwrap().1[0].1;
-            Host::rewrite_with(value, &|_| None, &|| -8_440_099, &|_, _| None)
+            host::rewrite_with(value, &|_| None, &|| -8_440_099, &|_, _| None)
         };
         let (left, right) = (function(1), function(2));
         let (Value::Fn(a), Value::Fn(b)) = (&left, &right) else { panic!("recorded functions"); };
         let (a, b) = (*a, *b);
         assert_eq!(a.0, b.0);
         assert_ne!(a.1, b.1);
-        let rewritten = Host::rewrite(&Value::List(Arc::new(vec![left.clone(), right.clone(), left])), &|_| None);
+        let rewritten = host::rewrite(&Value::List(Arc::new(vec![left.clone(), right.clone(), left])), &|_| None);
         let Value::List(values) = rewritten else { panic!("function list"); };
         let ids: Vec<_> = values.iter().map(|value| match value { Value::Fn(id) => (id.1, id.0), _ => panic!("function") }).collect();
         assert_ne!(ids[0], ids[1], "foreign closures must not share one rewritten body");

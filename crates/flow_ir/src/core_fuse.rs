@@ -3,11 +3,11 @@
 //! register limit. Declining leaves the region unfused; it never fails.
 //!
 //! OCaml physical equality (`==`) on terms and values is structural equality here.
-use crate::core_ir::Region::{self as R, CountSource, Instruction as I, Iteration, RegionResult};
+use crate::core_ir::region::{self as R, CountSource, Instruction as I, Iteration, RegionResult};
 use crate::core_ir::RegionT;
 use crate::core_region::{count_of, finish_loops, instruction_key, lower};
 use flow_check::workspace::{Node, Term};
-use flow_eval::Residual;
+use flow_eval::residual;
 use flow_syntax::packed_ops::{self, Conversion};
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{self as V, ResidualId, Value};
@@ -158,10 +158,10 @@ fn source_region(through_exact: bool, dynamic: bool, count_source: &CountSource,
     match term.node {
         Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
             let name = term.name(arena.ref_binding(id).name);
-            let view = Residual::residual_view(residual).ok()?;
+            let view = residual::residual_view(residual).ok()?;
             match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
                 Some(Value::Residual(r)) => {
-                    let inner = Residual::residual_view(*r).ok()?;
+                    let inner = residual::residual_view(*r).ok()?;
                     source_region(through_exact, dynamic, count_source, *r, &inner.term)
                 }
                 _ => None,
@@ -266,10 +266,10 @@ fn resolved(residual: ResidualId, term: &Term) -> Resolved {
         let binding = term.arena().ref_binding(id);
         if term.arena().name_ids(binding.fields).is_empty() {
             let name = term.name(binding.name);
-            if let Ok(view) = Residual::residual_view(residual) {
+            if let Ok(view) = residual::residual_view(residual) {
                 match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()) {
                     Some(Value::Residual(r)) => {
-                        if let Ok(inner) = Residual::residual_view(r) { return resolved(r, &inner.term); }
+                        if let Ok(inner) = residual::residual_view(r) { return resolved(r, &inner.term); }
                     }
                     Some(value) => return Resolved::Value(value),
                     None => {}
@@ -281,7 +281,7 @@ fn resolved(residual: ResidualId, term: &Term) -> Resolved {
 }
 
 fn same_ops(a: ResidualId, b: ResidualId) -> bool {
-    let (xs, ys) = (Residual::residual_ops(a), Residual::residual_ops(b));
+    let (xs, ys) = (residual::residual_ops(a), residual::residual_ops(b));
     xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(x, y)| crate::core_region::same_op(x, y))
 }
 
@@ -292,10 +292,10 @@ fn same_source(a: &Source, b: &Source) -> bool {
             let dependent = |r: ResidualId| flow_eval::state_dependent(&Value::Residual(r));
             if dependent(ar) || dependent(br) { return false; }
             (ar == br && x == y)
-                || (match (Residual::residual_view(ar), Residual::residual_view(br)) {
+                || (match (residual::residual_view(ar), residual::residual_view(br)) {
                     (Ok(va), Ok(vb)) => {
                         *va.term == x && *vb.term == y && same_ops(ar, br)
-                            && Residual::residual_authored_key(ar) == Residual::residual_authored_key(br)
+                            && residual::residual_authored_key(ar) == residual::residual_authored_key(br)
                             && flow_eval::structure(&Value::Residual(ar)) == flow_eval::structure(&Value::Residual(br))
                     }
                     _ => false,

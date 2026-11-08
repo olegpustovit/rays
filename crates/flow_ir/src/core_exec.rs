@@ -235,7 +235,7 @@ pub fn phys_eq(a: &Value, b: &Value) -> bool {
 
 /// A region ran: its planned result is ours if its block loop made it; a reader that did not run
 /// its block loop may have kept the array, which is then the collector's alone.
-fn arena_ran(a: &mut Arena, result: i64, args: &[i64], d: &c::Region::Destination, value: &Value) {
+fn arena_ran(a: &mut Arena, result: i64, args: &[i64], d: &c::region::Destination, value: &Value) {
     let ran = phys_eq(value, &d.produced());
     for n in args {
         if a.plan.first[ix(*n)] >= 0 { a.verified[ix(*n)] = a.verified[ix(*n)] && ran; }
@@ -782,7 +782,7 @@ fn hidden(frame: bool, value: &Value) -> bool {
         Value::Residual(r) => {
             (!frame && e::frame_dependent(value))
                 || e::state_dependent(value)
-                || e::Residual::residual_view(*r).map(|view| view.bindings.iter().any(|(_, x)| hidden(frame, x))).unwrap_or(false)
+                || e::residual::residual_view(*r).map(|view| view.bindings.iter().any(|(_, x)| hidden(frame, x))).unwrap_or(false)
         }
         Value::Deferred(..) => true,
         Value::List(xs) => xs.iter().any(|x| hidden(frame, x)),
@@ -791,8 +791,8 @@ fn hidden(frame: bool, value: &Value) -> bool {
     }
 }
 
-fn frame_free(frame: bool, instruction: &c::Region::Instruction) -> bool {
-    use c::Region::Instruction as I;
+fn frame_free(frame: bool, instruction: &c::region::Instruction) -> bool {
+    use c::region::Instruction as I;
     match instruction {
         I::Frame(_) | I::Int_frame(_) => frame,
         I::Rand_at(..) => false,
@@ -1227,16 +1227,16 @@ fn prepare_invoke(packed_region: Packed, args: Vec<i64>, result: i64, on_device:
                 bound_region = bind(st, None, &unbound)?;
             }
         }
-        let destination: Option<Arc<c::Region::Destination>> = match st.arena.as_mut() {
+        let destination: Option<Arc<c::region::Destination>> = match st.arena.as_mut() {
             Some(a) => {
                 let buffer = arena_take(a, result);
-                Some(Arc::new(c::Region::Destination::new(buffer, Value::No_geo, a.kills)))
+                Some(Arc::new(c::region::Destination::new(buffer, Value::No_geo, a.kills)))
             }
             None => {
-                if clobber { Some(Arc::new(c::Region::Destination::new(Value::No_geo, Value::No_geo, clobber))) } else { None }
+                if clobber { Some(Arc::new(c::region::Destination::new(Value::No_geo, Value::No_geo, clobber))) } else { None }
             }
         };
-        if let Some(d) = &destination { bound_region = c::Region::with_destination(&bound_region, d.clone()); }
+        if let Some(d) = &destination { bound_region = c::region::with_destination(&bound_region, d.clone()); }
         let forced = match st.force.clone() {
             Some(force) => force(&bound_region),
             None => packed::force(&bound_region, &st.live, &packed::ForceOptions::default()),
@@ -1466,7 +1466,7 @@ impl Ctx {
                     if let Some((owner, resolved)) = &*last.lock().unwrap() {
                         if *owner == st.id { return Ok(resolved.clone()); }
                     }
-                    let resolved = e::Host::force_reference(&value, &st.live, None, None, st.resolve.clone())?;
+                    let resolved = e::host::force_reference(&value, &st.live, None, None, st.resolve.clone())?;
                     *last.lock().unwrap() = Some((st.id, resolved.clone()));
                     Ok(resolved)
                 })
@@ -1502,7 +1502,7 @@ impl Ctx {
                                 Ok(Value::No_geo)
                             } else {
                                 let value = source_value(name.clone(), ty.clone(), given);
-                                e::Host::force_reference(&value, &st.live, None, None, st.resolve.clone())
+                                e::host::force_reference(&value, &st.live, None, None, st.resolve.clone())
                             }
                         }
                     }
@@ -2204,11 +2204,11 @@ impl Ctx {
                             _ => s.values[initial].clone(),
                         }
                     };
-                    let value = e::Residual::state_read(root, instance, path, iter, host, &seed);
+                    let value = e::residual::state_read(root, instance, path, iter, host, &seed);
                     drop(cell);
                     if let Some(d) = failed.into_inner() { return Err(d); }
                     let value = value?;
-                    st.values[result] = if st.resident_on { value } else { e::Device::thaw(&value) };
+                    st.values[result] = if st.resident_on { value } else { e::device::thaw(&value) };
                     Ok(())
                 })
             }
@@ -2218,10 +2218,10 @@ impl Ctx {
                 Arc::new(move |st| {
                     let (instance, path, iter, host) = key(st)?;
                     let root = state_root(st)?;
-                    let pending = e::Residual::state_peek(root, instance, path, iter, host);
+                    let pending = e::residual::state_peek(root, instance, path, iter, host);
                     st.values[found] = Value::Bool(pending.is_some());
                     let pending = pending.unwrap_or(Value::No_geo);
-                    st.values[value] = if st.resident_on { pending } else { e::Device::thaw(&pending) };
+                    st.values[value] = if st.resident_on { pending } else { e::device::thaw(&pending) };
                     Ok(())
                 })
             }
@@ -2239,7 +2239,7 @@ impl Ctx {
                     let (instance, path, iter, host) = key(st)?;
                     seal(st, value as i64);
                     let root = state_root(st)?;
-                    st.values[value] = e::Residual::state_write(root, instance, path, iter, host, st.values[value].clone())?;
+                    st.values[value] = e::residual::state_write(root, instance, path, iter, host, st.values[value].clone())?;
                     Ok(())
                 })
             }
@@ -2545,7 +2545,7 @@ fn general_values(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Valu
 /// tree walker. Ordinary failures retain the evaluator's fallback.
 pub fn execute(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Value, Diagnostic> {
     let restore: Box<dyn Fn()> = match o.root {
-        Some(r) if !prepared.stateless => e::Residual::checkpoint(r)?,
+        Some(r) if !prepared.stateless => e::residual::checkpoint(r)?,
         _ => Box::new(|| {}),
     };
     let close = || {
@@ -2573,7 +2573,7 @@ pub fn execute(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Value, 
             }
             Err(_) => {
                 restore();
-                e::Residual::rerun(r, o.on_walk.as_deref())
+                e::residual::rerun(r, o.on_walk.as_deref())
             }
         },
     }

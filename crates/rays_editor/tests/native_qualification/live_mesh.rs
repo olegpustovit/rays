@@ -1,6 +1,6 @@
 //! Real-device dynamic topology, state trails and editor-holder qualification.
 use flow_native::workspace_gpu as wg;
-use flow_ir::flow_ir::Gpu;
+use flow_ir::flow_ir::gpu;
 use flow_sop::{lower,value_lane};
 use rdk_core::{geometry as g, attribute as a, packed::float3 as p};
 use std::{sync::{Arc,Weak},rc::Rc};
@@ -273,10 +273,10 @@ fn sea_frames() {
     assert!(started.elapsed()<std::time::Duration::from_millis(250),"closing waited for an obsolete sea cook");
 }
 fn text(side:i64)->String { MESH.replace("%d",&side.to_string()) }
-fn lower_text(text:&str,gpu:Option<Gpu::Config>,defer:bool)->lower::T {
-    ok(lower::workspace(None,editor_document::kinds::descriptors(),lower::Options {gpu:gpu.unwrap_or_else(Gpu::default),defer,..Default::default()},&ok(flow_syntax::syntax::parse(text))))
+fn lower_text(text:&str,gpu:Option<gpu::Config>,defer:bool)->lower::T {
+    ok(lower::workspace(None,editor_document::kinds::descriptors(),lower::Options {gpu:gpu.unwrap_or_else(gpu::default),defer,..Default::default()},&ok(flow_syntax::syntax::parse(text))))
 }
-fn cook(text:&str,gpu:Option<Gpu::Config>,times:&[f64],graph_name:Option<&str>,defer:bool,mut each:impl FnMut(usize,&g::T)) {
+fn cook(text:&str,gpu:Option<gpu::Config>,times:&[f64],graph_name:Option<&str>,defer:bool,mut each:impl FnMut(usize,&g::T)) {
     let l=lower_text(text,gpu.clone(),defer);
     let graph=graph_name.map(|name|l.graphs.iter().find(|g|g.name==name).expect(name)).unwrap_or(&l.graphs[0]);
     let lane=value_lane::create(None); let mut session=sop::session::create(64,1<<30).unwrap();
@@ -304,7 +304,7 @@ fn same(a:&p::T,b:&p::T) {
 fn binding(gpu:&wg::WorkspaceGpu,geo:&g::T)->Option<rdk_rays::surface::DeviceBinding> {
     wg::display(gpu,geo).map(|(key,n,indices,color,keep)|(key,n,indices,color,Rc::from(keep)))
 }
-fn resident(gpu:&wg::WorkspaceGpu,config:&Gpu::Config,side:i64,times:&[f64],compare:bool,displayed:bool) {
+fn resident(gpu:&wg::WorkspaceGpu,config:&gpu::Config,side:i64,times:&[f64],compare:bool,displayed:bool) {
     let text=text(side); let mut cpu=Vec::new();
     if compare { cook(&text,None,times,None,false,|_,g|cpu.push((g::positions(g).clone(),vec3(g,"N"),vec3(g,"Cd"),g::primitive_count(g)))); }
     let mut uploads=0;
@@ -317,7 +317,7 @@ fn resident(gpu:&wg::WorkspaceGpu,config:&Gpu::Config,side:i64,times:&[f64],comp
         if compare { let (p,n,cd,count)=&cpu[frame]; assert_eq!(g::primitive_count(g),*count,"side {side} frame {frame}"); same(g::positions(g),p); same(&vec3(g,"N"),n); same(&vec3(g,"Cd"),cd); }
     });
 }
-fn traced(gpu:&wg::WorkspaceGpu,config:&Gpu::Config) {
+fn traced(gpu:&wg::WorkspaceGpu,config:&gpu::Config) {
     use rays_pathtracer::rays_pathtracer as pt;
     let camera=rays::camera::perspective(None,None,None,rays_math::vec3::create(20.,18.,22.),rays_math::vec3::create(4.,4.,4.)).unwrap();
     let picture=|mesh:rays::mesh::Mesh| {
@@ -329,7 +329,7 @@ fn traced(gpu:&wg::WorkspaceGpu,config:&Gpu::Config) {
     };
     let mut host=None;
     cook(&text(8),None,&[1./6.],None,false,|_,g|host=Some(picture(rdk_rays::rays_mesh::to_trace_mesh(g).unwrap())));
-    let qualified=Gpu::Config {policy:Gpu::Policy::Qualification,..config.clone()};
+    let qualified=gpu::Config {policy:gpu::Policy::Qualification,..config.clone()};
     cook(&text(8),Some(qualified),&[1./6.],None,false,|_,g|{
         let surface=rdk_rays::surface::of_geometry(None,g).unwrap();
         let scene=rdk_rays::surface::scene3(None,Some(&|g|binding(gpu,g)),&surface).unwrap();
@@ -387,7 +387,7 @@ fn holder_frames() {
         let doc=workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
         let canvas=rays::canvas::create(320,240).unwrap(); let gpu=wg::create(None); wg::qualification(&gpu);
         let mut editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
-        let mut previous:Option<(Arc<Vec<f64>>,Option<[Weak<Gpu::Integers>;3]>)>=None; let mut gone=0; let mut meshes=0;
+        let mut previous:Option<(Arc<Vec<f64>>,Option<[Weak<gpu::Integers>;3]>)>=None; let mut gone=0; let mut meshes=0;
         for tick in 1..=6 {
             let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
             editor=editor::update(editor,&frame); rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&frame)).unwrap(); editor=editor::after_present(editor,&frame);

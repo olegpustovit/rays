@@ -1,7 +1,7 @@
 //! Native measured placement, calibration and immutable generation qualification.
 use super::isogrid::{self, ok};
 use flow_native::workspace_gpu as gpu;
-use flow_ir::{flow_ir::{Gpu, Executor, Profile, Cost, Placement, PlacementReason as Reason}, packed};
+use flow_ir::{flow_ir::{gpu as ir_gpu, executor, profile, cost, Placement, PlacementReason as Reason}, packed};
 use flow_sop::{lower, value_lane};
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
@@ -16,7 +16,7 @@ fn compile_source(source: &str) -> packed::T {
     assert!(diagnostics.is_empty(),"{}",diagnostics.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; "));
     let evaluated = ok(flow_eval::static_eval(&workspace.unwrap()));
     let value = &evaluated.results.iter().find(|(name,_)| name=="g").unwrap().1;
-    Executor::packed_root(&ok(Executor::compile(value,&Default::default()))).unwrap()
+    executor::packed_root(&ok(executor::compile(value,&Default::default()))).unwrap()
 }
 fn compile(body: &str) -> packed::T {
     compile_source(&format!("(workspace placement (graph g :context host (map (fn [i] {body}) (array/range 32768))))"))
@@ -24,7 +24,7 @@ fn compile(body: &str) -> packed::T {
 fn inputs(program: &packed::T, index: bool, time: f64) -> packed::Inputs {
     ok(packed::host::prepare(program,&packed::host::PrepareOptions { fast:true,index,..Default::default() },&input::at_time(time)))
 }
-fn with_owner(run: impl Fn(&gpu::WorkspaceGpu,&Gpu::Config)) {
+fn with_owner(run: impl Fn(&gpu::WorkspaceGpu,&ir_gpu::Config)) {
     assert!(crate::common::gpu(),"native qualification requires Vulkan");
     let baseline = ogpu_core::impl_::live_handles().unwrap();
     let owner = gpu::create(None);
@@ -35,7 +35,7 @@ fn with_owner(run: impl Fn(&gpu::WorkspaceGpu,&Gpu::Config)) {
 fn calibration() {
     let program = compile("(+ (sin (+ i t)) 0.25)");
     with_owner(|owner,config| {
-        assert_eq!(config.policy,Gpu::Policy::Measured);
+        assert_eq!(config.policy,ir_gpu::Policy::Measured);
         let backend = config.backend.as_ref().unwrap();
         let stats = || gpu::image_stats(owner).0;
         let cost = |p: &packed::T, i: Option<&packed::Inputs>| backend.cost(i,true,p,32768);
@@ -127,19 +127,19 @@ fn calibration() {
     });
 }
 fn wave() -> String { (0..16).fold("(+ (float i) t)".into(),|x,_| format!("(sin {x})")) }
-fn lower_source(config: &Gpu::Config, source: &str) -> (lower::T,sop::node::T) {
+fn lower_source(config: &ir_gpu::Config, source: &str) -> (lower::T,sop::node::T) {
     let lowered = ok(lower::workspace(None,vec![],lower::Options { gpu:config.clone(),defer:true,..Default::default() },&ok(flow_syntax::syntax::parse(source))));
     let graph = &lowered.graphs[0];
     let node = sop::edit_graph::compile_node(&graph.network.geometry,graph.root.unwrap()).unwrap();
     (lowered,node)
 }
-fn consistent(p: &Placement) -> bool { p.reason==Cost::choose(p.cpu_seconds,p.device_seconds,false,p.cpu_consumers.unwrap()) }
+fn consistent(p: &Placement) -> bool { p.reason==cost::choose(p.cpu_seconds,p.device_seconds,false,p.cpu_consumers.unwrap()) }
 fn chain_source(n: i64) -> String {
     format!("(workspace chain (graph g :context sop (sop/mesh_planes :points {{:x (exact (map (fn [i] {}) (array/range {n}))) :y (array/float {n}) :z (array/float {n})}} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))))",wave())
 }
 fn chain_counterexamples() {
     with_owner(|_owner,config| {
-        assert_eq!(config.policy,Gpu::Policy::Measured);
+        assert_eq!(config.policy,ir_gpu::Policy::Measured);
         let mut session = sop::session::create(0,0).unwrap();
         let mut lowered_by_size = std::collections::HashMap::new();
         let mut cook = |n,readers| {
@@ -147,7 +147,7 @@ fn chain_counterexamples() {
             let context = sop::context::create(sop::context::Options {domains:Some(1),..Default::default()}).unwrap();
             let output = ok(sop::session::cook(&mut session,readers,&context,node));
             let geometry = ok(sop::payload::geometry(&output.payload));
-            (float3::resident(g::positions(&geometry)),Profile::placements(&lowered.profile)[0].clone())
+            (float3::resident(g::positions(&geometry)),profile::placements(&lowered.profile)[0].clone())
         };
         let (resident,p) = cook(65536,None);
         assert!(!resident && p.reason==Reason::Missing_consumer && p.cpu_consumers.is_none());
@@ -176,7 +176,7 @@ fn chain_counterexamples() {
             let wrapped = Arc::new(Observed { ran: device_ran.clone(), on: on_device.clone(), inner: backend.clone() });
             let now = Mutex::new(0.);
             let lowered = ok(lower::workspace(None,vec![],lower::Options {
-                gpu:Gpu::Config {backend:Some(wrapped),..config.clone()},defer:true,
+                gpu:ir_gpu::Config {backend:Some(wrapped),..config.clone()},defer:true,
                 clock:Arc::new(move || {let mut now=now.lock().unwrap();*now+=if device_ran.swap(false,Ordering::SeqCst) {1e-3} else {1e-6*n as f64};*now}),..Default::default()
             },&ok(flow_syntax::syntax::parse(&chain_source(n)))));
             let graph = &lowered.graphs[0];
@@ -186,9 +186,9 @@ fn chain_counterexamples() {
                 on_device.store(false,Ordering::SeqCst);
                 ok(sop::session::cook(&mut session,Some(readers),&context,&node));
             }
-            let p = Profile::placements(&lowered.profile)[0].clone();
+            let p = profile::placements(&lowered.profile)[0].clone();
             assert_eq!(p.reason,reason,"{n} points priced: {p:?}");
-            assert_eq!(on_device.load(Ordering::SeqCst),Cost::on_device(reason));
+            assert_eq!(on_device.load(Ordering::SeqCst),cost::on_device(reason));
         }
         sop::session::close(&mut session);
         for (side,readers,fresh) in [(512,0,true),(512,1,false),(8,0,false)] {
@@ -203,11 +203,11 @@ fn chain_counterexamples() {
                 let node = sop::edit_graph::compile_node(&resolved.geometry,graph.root.unwrap()).unwrap();
                 let context = sop::context::create(sop::context::Options {time:Some(time),input:Some(live),..Default::default()}).unwrap();
                 let geometry = ok(sop::payload::geometry(&ok(sop::session::cook(&mut session,Some(readers),&context,&node)).payload));
-                let p = Profile::placements(&lowered.profile).into_iter().find(|p| p.owner.0 != vec!["sop/mesh_planes".to_owned()]).unwrap();
+                let p = profile::placements(&lowered.profile).into_iter().find(|p| p.owner.0 != vec!["sop/mesh_planes".to_owned()]).unwrap();
                 assert_eq!(p.cpu_consumers,Some(readers));
                 let resident = float3::resident(g::positions(&geometry));
                 if fresh && frame<2 { assert!(p.reason==Reason::No_cost_evidence && p.cpu_seconds.is_none() && resident); }
-                else if frame>=4 { assert!(p.cpu_seconds.is_some() && p.device_seconds.is_some()); assert!(consistent(&p)); assert_eq!(resident,Cost::on_device(p.reason)); }
+                else if frame>=4 { assert!(p.cpu_seconds.is_some() && p.device_seconds.is_some()); assert!(consistent(&p)); assert_eq!(resident,cost::on_device(p.reason)); }
                 if side==512 && readers==0 && frame==5 {assert_eq!(p.reason,Reason::Device_measured_cheaper);}
             }
             sop::session::close(&mut session);
@@ -221,16 +221,16 @@ fn chain_counterexamples() {
 }
 fn retained_generations() {
     with_owner(|owner,config| {
-        let config = Gpu::Config {readback_per_float:None,..config.clone()};
+        let config = ir_gpu::Config {readback_per_float:None,..config.clone()};
         let source = format!("(workspace generations (graph g :context sop (sop/with_attr (sop/mesh_planes :points {{:x (array/float 262144) :y (array/float 262144) :z (array/float 262144)}} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)) :P (exact (map (fn [i] [(+ (+ (- (/ (mod i 256) 256) 0.5) (* t 0.002)) (* {} 0.01)) (- (/ (floor (/ i 256)) 256) 0.5) 0]) (array/range 262144))))))",wave());
         let (small,small_node) = lower_source(&config,&source.replace("262144","32"));
         let mut small_session = sop::session::create(0,0).unwrap();
         isogrid::cook(&mut small_session,&small_node,0.); isogrid::cook(&mut small_session,&small_node,0.);
         let geometry = isogrid::cook(&mut small_session,&small_node,0.);
         assert!(!float3::resident(g::positions(&geometry)));
-        let placements = Profile::placements(&small.profile);
+        let placements = profile::placements(&small.profile);
         assert!(placements.iter().any(|p| matches!(p.reason,Reason::Cpu_consumer|Reason::Cpu_measured_cheaper)));
-        assert!(!placements.iter().any(|p| Cost::on_device(p.reason)));
+        assert!(!placements.iter().any(|p| cost::on_device(p.reason)));
         sop::session::close(&mut small_session);
         let (lowered,node) = lower_source(&config,&source);
         let mut session = sop::session::create(4,1<<26).unwrap();
@@ -238,7 +238,7 @@ fn retained_generations() {
         let camera = rays::camera::orthographic(2.,vec3::create(0.,0.,3.),vec3::zero()).unwrap();
         let cook = |session: &mut sop::session::T,node: &sop::node::T,time| {
             let geometry = isogrid::cook(session,node,time);
-            assert!(float3::resident(g::positions(&geometry)),"Measured lifetime fixture chose CPU: {:?}",Profile::placements(&lowered.profile));
+            assert!(float3::resident(g::positions(&geometry)),"Measured lifetime fixture chose CPU: {:?}",profile::placements(&lowered.profile));
             let picture = isogrid::picture(owner,&geometry);
             let mesh = scene3::walk::drawings(&picture)[0].mesh.clone();
             let key = rays::mesh::view::device(&mesh).unwrap().0;
@@ -268,7 +268,7 @@ fn retained_generations() {
         assert!(last.held_buffers<=first.held_buffers+4);
         assert!(heap_delta<=262144*std::mem::size_of::<usize>() as i64,"retained bytes {heap_delta}");
         assert_eq!(last.payload_readback_bytes,0);
-        assert!(Profile::placements(&lowered.profile).iter().any(|p| p.cpu_consumers==Some(0) && Cost::on_device(p.reason)));
+        assert!(profile::placements(&lowered.profile).iter().any(|p| p.cpu_consumers==Some(0) && cost::on_device(p.reason)));
         let cancel=Arc::new(rdk_core::cancel::create());rdk_core::cancel::cancel(&cancel);
         let context=sop::context::create(sop::context::Options {domains:Some(1),cancel:Some(cancel),time:Some(201.),..Default::default()}).unwrap();
         match sop::session::cook(&mut session,Some(0),&context,&node) {Err(d)=>assert!(d.code=="E_CANCELLED" || d.code=="cancelled"),Ok(_)=>panic!("cancelled placement cook published geometry")}
@@ -314,7 +314,7 @@ fn isogrid_generations() {
         };
         let mut expected=Vec::new();
         for recipe in [3,0] {
-            let (_,node)=isogrid::recipe_node(&workspace,&Gpu::Config {fast:true,..Gpu::default()},recipe);
+            let (_,node)=isogrid::recipe_node(&workspace,&ir_gpu::Config {fast:true,..ir_gpu::default()},recipe);
             expected.push(checksum(&isogrid::cook(&mut session,&node,0.)));
         }
         let (_,node_a)=isogrid::recipe_node(&workspace,config,3);
@@ -342,9 +342,9 @@ pub fn cases() -> Vec<(&'static str, fn())> {
 }
 
 /// A backend that records that a residency scope was opened, otherwise forwarding to `inner`.
-struct Observed { ran: Arc<AtomicBool>, on: Arc<AtomicBool>, inner: Arc<dyn Gpu::Backend> }
-impl Gpu::Backend for Observed {
-    fn residency(&self, fast: bool) -> Option<Box<dyn Gpu::Residency>> { self.ran.store(true,Ordering::SeqCst); self.on.store(true,Ordering::SeqCst); self.inner.residency(fast) }
+struct Observed { ran: Arc<AtomicBool>, on: Arc<AtomicBool>, inner: Arc<dyn ir_gpu::Backend> }
+impl ir_gpu::Backend for Observed {
+    fn residency(&self, fast: bool) -> Option<Box<dyn ir_gpu::Residency>> { self.ran.store(true,Ordering::SeqCst); self.on.store(true,Ordering::SeqCst); self.inner.residency(fast) }
     fn cost(&self, i: Option<&packed::Inputs>, fast: bool, p: &packed::T, n: i64) -> Option<f64> { self.inner.cost(i,fast,p,n) }
-    fn prepare(&self, fast: bool, p: &packed::T) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> { self.inner.prepare(fast,p) }
+    fn prepare(&self, fast: bool, p: &packed::T) -> Result<Arc<dyn ir_gpu::Kernel>, Diagnostic> { self.inner.prepare(fast,p) }
 }

@@ -141,7 +141,7 @@ impl Shape {
                     return *known;
                 }
                 seen.residuals.insert(*r, false);
-                let found = E::Residual::residual_view(*r).map(|view| view.bindings.iter().any(|(_, v)| self.recounts(nodes, v, seen))).unwrap_or(false);
+                let found = E::residual::residual_view(*r).map(|view| view.bindings.iter().any(|(_, v)| self.recounts(nodes, v, seen))).unwrap_or(false);
                 seen.residuals.insert(*r, found);
                 found
             }
@@ -150,7 +150,7 @@ impl Shape {
                     return *known;
                 }
                 seen.functions.insert(*f, false);
-                let found = E::Residual::function_bindings(*f).iter().any(|(_, v)| self.recounts(nodes, v, seen));
+                let found = E::residual::function_bindings(*f).iter().any(|(_, v)| self.recounts(nodes, v, seen));
                 seen.functions.insert(*f, found);
                 found
             }
@@ -168,7 +168,7 @@ impl Shape {
                 nodes[id].args = nodes[id]
                     .args
                     .iter()
-                    .map(|(k, v)| (k.clone(), E::Host::rewrite_with(v, &|x: &Value| self.recount(&snapshot, x), &|| fresh.next(), &|_, _| None)))
+                    .map(|(k, v)| (k.clone(), E::host::rewrite_with(v, &|x: &Value| self.recount(&snapshot, x), &|| fresh.next(), &|_, _| None)))
                     .collect();
             }
         }
@@ -388,7 +388,7 @@ impl Fold {
         let mut entries = fused_entries(&u.args)?;
         entries.push((text_arg(&u.args, "attribute").expect("write attribute"), kind_of(&u), get(&u.args, "values").expect("write values").clone()));
         let take = Arc::new(Take { base, chain: chain.clone(), entries, fresh: fresh.clone(), fits: Arc::new(AtomicBool::new(true)) });
-        let values = E::Host::rewrite_with(get(&w.args, "values").expect("write values"), &|v: &Value| take.value(v), &|| fresh.next(), &{
+        let values = E::host::rewrite_with(get(&w.args, "values").expect("write values"), &|v: &Value| take.value(v), &|| fresh.next(), &{
             let take = take.clone();
             move |term: &Term, bindings: &[(String, Value)]| take.term(term, bindings)
         });
@@ -504,7 +504,7 @@ impl Take {
                                 _ => false,
                             }) =>
                         {
-                            Some(E::Host::rewrite_with(earlier, &|_| None, &|| self.fresh.next(), &|_, _| None))
+                            Some(E::host::rewrite_with(earlier, &|_| None, &|| self.fresh.next(), &|_, _| None))
                         }
                         Some(_) => {
                             self.fits.store(false, Ordering::SeqCst);
@@ -619,7 +619,7 @@ impl Scan<'_> {
                         }) =>
                     {
                         let name = format!("$fold{}", self.extra.len());
-                        self.extra.push((name.clone(), E::Host::rewrite_with(earlier, &|_| None, &|| self.take.fresh.next(), &|_, _| None)));
+                        self.extra.push((name.clone(), E::host::rewrite_with(earlier, &|_| None, &|| self.take.fresh.next(), &|_, _| None)));
                         self.replacements.insert(t.identity(), name);
                     }
                     _ => self.exit = true,
@@ -669,11 +669,11 @@ fn indexed(value: &Value) -> bool {
     fn visit(v: &Value, seen: &mut BTreeSet<i64>) -> bool {
         match v {
             Value::Residual(r) => {
-                let id = E::Residual::residual_id(*r);
+                let id = E::residual::residual_id(*r);
                 if !seen.insert(id) {
                     return false;
                 }
-                let Ok(view) = E::Residual::residual_view(*r) else { return false };
+                let Ok(view) = E::residual::residual_view(*r) else { return false };
                 term(&view.term) || view.bindings.iter().any(|(_, v)| visit(v, seen))
             }
             Value::Record(fs) => fs.iter().any(|(_, v)| visit(v, seen)),

@@ -3,8 +3,8 @@
 // compiled/Core checks use 0/1/13/2049 (still crossing two 1024-lane blocks) to fit the 5 s debug budget.
 // Not ported: the in-place `mutate` of results (OCaml arrays are mutable); the Rust equivalent is
 // that a result never shares its source's Arc storage and the sources compare equal afterwards.
-use crate::core_ir::Region::Instruction;
-use crate::flow_ir::Executor;
+use crate::core_ir::region::Instruction;
+use crate::flow_ir::executor;
 use crate::packed;
 use crate::test_support::*;
 use flow_eval as e;
@@ -89,7 +89,7 @@ fn instantiated(ty: &Ty, table: Value, body: &str, indices: Vec<i64>) -> Value {
         Value::Fn(f) => *f,
         _ => panic!("expected a function"),
     };
-    ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: ty.clone() }, f, &[Value::Int_array(Arc::new(indices))]))
+    ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: ty.clone() }, f, &[Value::Int_array(Arc::new(indices))]))
 }
 
 #[test]
@@ -378,9 +378,9 @@ fn stateful_slice_matches_the_reference() {
         let mut live = live_frame(*time, frame as i64);
         live.tick = frame as i64;
         same(&exec_force(&executor, &live, Some(&a), None), &reference_with(&stateful, &live, Some(&b), None));
-        let sa: Vec<String> = e::Host::state_values(&a).iter().map(bits).collect();
-        let sb: Vec<String> = e::Host::state_values(&b).iter().map(bits).collect();
+        let sa: Vec<String> = e::host::state_values(&a).iter().map(bits).collect();
+        let sb: Vec<String> = e::host::state_values(&b).iter().map(bits).collect();
         assert_eq!(sa, sb);
     }
-    let _ = Executor::kept_programs;
+    let _ = executor::kept_programs;
 }

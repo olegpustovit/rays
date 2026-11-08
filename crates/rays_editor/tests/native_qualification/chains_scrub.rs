@@ -22,7 +22,7 @@ fn cook_doc(doc:&document::T)->Vec<u8> {
     let mut session=sop::session::create(64,1<<30).unwrap();let context=sop::context::create(sop::context::Options {time:Some(0.7),..Default::default()}).unwrap();
     let output=ok(sop::session::cook(&mut session,None,&context,&n));let out=bytes(&sop::payload::geometry(&output.payload).unwrap());sop::session::close(&mut session);out
 }
-fn document(text:&str,gpu:&Gpu::Config)->document::T {
+fn document(text:&str,gpu:&gpu::Config)->document::T {
     let catalog=rays_editor::workspace_catalog(None).unwrap();let ws=wd::of_text(&Default::default(),&catalog,text).unwrap_or_else(|d|panic!("{d:?}"));
     ok(lowering::of_workspace(&lowering::Options {gpu:Some(gpu.clone()),..Default::default()},&ws))
 }

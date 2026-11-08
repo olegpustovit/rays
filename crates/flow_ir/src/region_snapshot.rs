@@ -1,7 +1,7 @@
 //! Port of lib/flow_ir/region_snapshot.ml: instruction-level snapshots of every packed program a
 //! test compiles. The state is process-global (as OCaml's module-level buffer); one test owns it.
 //! Snapshot files are `crates/flow_ir/snapshots/<name>.txt`; `REGION_SNAPSHOT_DIR` rewrites them.
-use crate::core_ir::{hex_float, quoted, Region::{self as R, Instruction as I, LiveFloat, LiveInt, Projection}};
+use crate::core_ir::{hex_float, quoted, region::{self as R, Instruction as I, LiveFloat, LiveInt, Projection}};
 use crate::core_ir::RegionT;
 use crate::packed;
 use flow_syntax::packed_ops::{self, Binary, Conversion, Unary};
@@ -219,9 +219,9 @@ pub fn finish(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{core_fuse, core_ir::Region::CountSource, core_region};
+    use crate::{core_fuse, core_ir::region::CountSource, core_region};
     use flow_check::{catalog::Catalog, workspace as W};
-    use flow_eval::Residual;
+    use flow_eval::residual;
     use flow_syntax::value::Value;
 
     fn compile_case(body: &str, fusion: bool) -> Result<String, String> {
@@ -235,7 +235,7 @@ mod tests {
         let evaluated = flow_eval::r#static(&workspace, true, None).map_err(|d| rays_diagnostic::to_string(&d))?;
         let records = &evaluated.records.iter().find(|(p, _)| *p == ["g".to_owned(), "tested".to_owned()]).ok_or("no record")?.1;
         let Value::Residual(residual) = records[0].1.clone() else { return Err("expected live packed program".to_owned()) };
-        let term = Residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
+        let term = residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
         let result = core_region::lower(fusion, false, &CountSource::none(), residual, &term).map(|r| if fusion { core_fuse::fuse(false, r) } else { r });
         let mut text: String = entry(&result).lines().filter(|l| !l.is_empty() && !l.starts_with("  gpu_refusal")).map(|l| format!("{}\n", l)).collect();
         if result.is_err() {
@@ -252,7 +252,7 @@ mod tests {
         let evaluated = flow_eval::r#static(&workspace.unwrap(), true, None).unwrap();
         let records = &evaluated.records.iter().find(|(p, _)| *p == ["g".to_owned(), "tested".to_owned()]).unwrap().1;
         let Value::Residual(residual) = records[0].1.clone() else { panic!("expected live packed program") };
-        let term = Residual::residual_view(residual).unwrap().term;
+        let term = residual::residual_view(residual).unwrap().term;
         core_fuse::fuse(false, core_region::lower(true, false, &CountSource::none(), residual, &term).unwrap())
     }
 
@@ -262,7 +262,7 @@ mod tests {
         use crate::core_ir::{pp, Program};
         let region = region_of("(map (fn [x] (+ (* x 2) t)) (array/range 4))");
         assert!(region.dependent.get().is_none());
-        assert_eq!(crate::core_ir::Region::dependent_flags(&region).len(), region.code.len());
+        assert_eq!(crate::core_ir::region::dependent_flags(&region).len(), region.code.len());
         assert!(region.dependent.get().is_some());
         let program = Program {
             constants: Vec::new(), locals: Vec::new(), body: Vec::new(), results: Vec::new(), state_slots: Vec::new(),

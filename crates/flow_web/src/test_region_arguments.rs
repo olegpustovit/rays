@@ -6,7 +6,7 @@ use crate::node_harness::{node_available, run_ok, runtime_url};
 use crate::test_program::die;
 use flow_check::{catalog::Catalog, workspace as W};
 use flow_eval as E;
-use flow_ir::{core_exec, core_ir::{self as C, Region, StatementNode}, core_lower, packed};
+use flow_ir::{core_exec, core_ir::{self as C, region, StatementNode}, core_lower, packed};
 use flow_syntax::{syntax, ty::Ty, value::{self, Value}};
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;
@@ -108,7 +108,7 @@ fn compare(body: &str) {
     source.push_str("const invoke=rt.invoke;rt.invoke=async function(k,args,plan){assert.ok(plan,'computed dependency needs a plan');assert.equal(plan.countLimit,9223372036854775807n,'native i64 iteration limit');const before=snapshot(args);try{return await invoke.call(this,k,args,plan)}finally{assert.deepEqual(snapshot(args),before,'arguments mutated')}};\n");
     for &(frame, time) in FRAMES {
         let live = input(&mut source, frame, time);
-        expectation(&mut source, E::Host::force_reference(&value, &live, None, None, None));
+        expectation(&mut source, E::host::force_reference(&value, &live, None, None, None));
     }
     source.push_str("}}\n");
     finish(source);
@@ -209,7 +209,7 @@ fn unused(value: Value, mut program: C::Program) -> C::Program {
         uniforms.push(value::source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]));
         let mut names = r.uniform_names.as_ref().clone();
         names.push((String::new(), vec![]));
-        let r = Region::rebuild(r, Region::Rebuild { uniforms: Some(uniforms), uniform_names: Some(names), ..Default::default() }).expect("unused declaration");
+        let r = region::rebuild(r, region::Rebuild { uniforms: Some(uniforms), uniform_names: Some(names), ..Default::default() }).expect("unused declaration");
         let declared = packed::host::argument_types(&r).unwrap_or_else(|d| die(d));
         assert_eq!(declared.len(), index + 1);
         assert_eq!(declared[index], ty);
@@ -239,14 +239,14 @@ fn float_product_empty_and_nonfinite_capture() {
         "(let* [gain (exp (* t 100000.))] (for [x (array/float (int/sub (frame/index) 32766)) y (array/float 2)] (+ x gain)))",
     ] {
         let (value, program) = compiled(body, false);
-        let regions: Vec<_> = program.regions.iter().filter(|r| r.iteration == Region::Iteration::Product).collect();
+        let regions: Vec<_> = program.regions.iter().filter(|r| r.iteration == region::Iteration::Product).collect();
         assert!(!regions.is_empty());
-        for r in regions { assert!(r.code.iter().all(|i| matches!(i, Region::Instruction::Input(..) | Region::Instruction::Const(..) | Region::Instruction::Uniform(..) | Region::Instruction::Frame(..) | Region::Instruction::Binary(..) | Region::Instruction::Unary(..)))); }
+        for r in regions { assert!(r.code.iter().all(|i| matches!(i, region::Instruction::Input(..) | region::Instruction::Const(..) | region::Instruction::Uniform(..) | region::Instruction::Frame(..) | region::Instruction::Binary(..) | region::Instruction::Unary(..)))); }
         let program = unused(Value::List(Arc::new(vec![Value::Int(1)])), program);
         open_frame(&mut source, &program, false);
         for (frame, time) in [(0, 0.25), (32766, 0.25), (32767, 0.25), (65535, -0.25)] {
             let live = input(&mut source, frame, time);
-            expectation(&mut source, E::Host::force_reference(&value, &live, None, None, None));
+            expectation(&mut source, E::host::force_reference(&value, &live, None, None, None));
         }
         source.push_str("}}\n");
     }
@@ -298,8 +298,8 @@ fn malformed_nested_integer_and_packed_layouts() {
 }
 
 fn replace_table(program: &C::Program, value: Value) -> C::Program {
-    fn slot(i: &Region::Instruction) -> Option<i64> {
-        match i { Region::Instruction::Array_prepare(n, _) => Some(*n), Region::Instruction::Guarded(_, body) => slot(body), _ => None }
+    fn slot(i: &region::Instruction) -> Option<i64> {
+        match i { region::Instruction::Array_prepare(n, _) => Some(*n), region::Instruction::Guarded(_, body) => slot(body), _ => None }
     }
     let mut program = program.clone();
     let mut replaced = false;
@@ -308,7 +308,7 @@ fn replace_table(program: &C::Program, value: Value) -> C::Program {
             let mut uniforms = r.uniforms.clone();
             uniforms[i as usize] = value.clone();
             replaced = true;
-            Arc::new(Region::rebuild(r, Region::Rebuild { uniforms: Some(uniforms), ..Default::default() }).expect("replace table"))
+            Arc::new(region::rebuild(r, region::Rebuild { uniforms: Some(uniforms), ..Default::default() }).expect("replace table"))
         } else { r.clone() }
     }).collect();
     assert!(replaced, "real lazy table preparation required");
@@ -330,7 +330,7 @@ fn capture_preparation_refusals() {
     let evaluation = E::static_with(&ws, false, Some(&inputs), None).unwrap_or_else(|d| die(d));
     let value = evaluation.results.iter().find(|(n, _)| n == "g").expect("g").1.clone();
     let Value::Residual(r) = &value else { panic!("async capture needs a residual") };
-    let view = E::Residual::residual_view(*r).unwrap_or_else(|d| die(d));
+    let view = E::residual::residual_view(*r).unwrap_or_else(|d| die(d));
     packed::compile_result(&packed::CompileOptions::default(), *r, &view.term).expect("packed async capture");
     let program = lower(&value, false);
     assert_eq!(program.call_slots, 0);
@@ -342,7 +342,7 @@ fn capture_preparation_refusals() {
     let mut source = script();
     open_frame(&mut source, &program, true);
     let live = input(&mut source, 3, 0.25);
-    expectation(&mut source, E::Host::force_reference(&value, &live, None, None, None));
+    expectation(&mut source, E::host::force_reference(&value, &live, None, None, None));
     source.push_str("}}\n");
     finish(source);
     refused(&replace_table(&table, value), Some("Asynchronous region captures require a compiled synchronous preparation path."));

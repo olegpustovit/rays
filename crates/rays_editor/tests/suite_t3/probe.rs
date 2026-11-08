@@ -379,10 +379,10 @@ pub fn compiled_inputs() {
     let c2 = calls.clone();
     let force: probe::Force = Rc::new(move |state, elems, resolve, value, live| {
         c2.set(c2.get() + 1);
-        use flow_ir::flow_ir::Executor;
-        let program = Executor::compile(value, &Executor::CompileOptions::default())?;
-        let o = Executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve, ..Default::default() };
-        Executor::force(&program, &o, live)
+        use flow_ir::flow_ir::executor;
+        let program = executor::compile(value, &executor::CompileOptions::default())?;
+        let o = executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve, ..Default::default() };
+        executor::force(&program, &o, live)
     });
     for frame in [0i64, 1, 3, 0] {
         let live = input::Frame { frame, dt: 0.125, size: (321, 123), ..input::at_time(frame as f64 / 60.) };

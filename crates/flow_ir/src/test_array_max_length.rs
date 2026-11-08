@@ -97,7 +97,7 @@ fn op_direct_and_literal_selectors() {
 }
 
 fn compile_packed(r: v::ResidualId) -> packed::T {
-    let term = e::Residual::residual_view(r).unwrap().term;
+    let term = e::residual::residual_view(r).unwrap().term;
     packed::compile_result(&Default::default(), r, &term).unwrap_or_else(|ds| panic!("{}", show_ds(&ds)))
 }
 

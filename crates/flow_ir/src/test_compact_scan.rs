@@ -1,5 +1,5 @@
 // Port of lib/flow_ir/test_compact_scan.ml.
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::*;
 use flow_eval as e;
 use flow_syntax::ty::Ty;
@@ -155,7 +155,7 @@ fn core_and_executor_match_the_reference() {
 #[test]
 fn unsupported_producer_and_dynamic_count_refuse() {
     let unsupported = live_value("(array/compact (map (fn [x] (int (value/rand x t))) (array/range 2049)))");
-    match Executor::compile(&unsupported, &Executor::CompileOptions { strict: true, ..Default::default() }) {
+    match executor::compile(&unsupported, &executor::CompileOptions { strict: true, ..Default::default() }) {
         Err(d) => assert_eq!(d.code, "E_KERNEL_FORM"),
         Ok(_) => panic!("Unsupported producer accepted"),
     }
@@ -256,7 +256,7 @@ fn state_matches_the_reference_across_frames() {
         let mut live = live_frame(*time, frame as i64);
         live.tick = frame as i64;
         same(&exec_force(&executor, &live, Some(&a), None), &reference_with(&stateful, &live, Some(&b), None));
-        assert_eq!(bits_all(&e::Host::state_values(&a)), bits_all(&e::Host::state_values(&b)));
+        assert_eq!(bits_all(&e::host::state_values(&a)), bits_all(&e::host::state_values(&b)));
     }
     // A state-reading map is a reference kernel by design: strict compilation accepts it and matches the reference.
     let reader = live_value("(let* [counter (state [s 0.] (+ s 1.))] (map (fn [x] (+ x counter)) (array/range 4)))");
@@ -267,7 +267,7 @@ fn state_matches_the_reference_across_frames() {
         let mut live = live_frame(1., frame);
         live.tick = frame;
         same(&exec_force(&executor, &live, Some(&a), None), &reference_with(&reader, &live, Some(&b), None));
-        assert_eq!(bits_all(&e::Host::state_values(&a)), bits_all(&e::Host::state_values(&b)));
+        assert_eq!(bits_all(&e::host::state_values(&a)), bits_all(&e::host::state_values(&b)));
     }
 }
 

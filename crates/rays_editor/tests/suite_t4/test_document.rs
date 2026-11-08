@@ -1,7 +1,7 @@
 //! test_editor_document.ml: validation, dump, preset round trip, delete-all through real UI events.
 use super::t4::*;
 use editor_document::{document, document_edit, kind_graph, lowering, objects, preset, workspace_doc};
-use flow_ir::flow_ir::Gpu;
+use flow_ir::flow_ir::gpu;
 use input::Key;
 use rays_editor::editor;
 use std::sync::Arc;
@@ -22,16 +22,16 @@ pub fn run() {
     let workspace = of_text(None, TEXT);
     let doc = lowering::of_workspace(&Default::default(), &workspace).unwrap_or_else(|d| panic!("{d:?}"));
     struct Unused;
-    impl Gpu::Backend for Unused {
-        fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> {
+    impl gpu::Backend for Unused {
+        fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn gpu::Kernel>, rays_diagnostic::Diagnostic> {
             Err(rays_diagnostic::error("E_TEST_GPU".into(), "unused test backend".into(), None, None, None, vec![], vec![]))
         }
     }
-    let backend: Arc<dyn Gpu::Backend> = Arc::new(Unused);
-    let gpu = Gpu::Config { backend: Some(backend.clone()), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
+    let backend: Arc<dyn gpu::Backend> = Arc::new(Unused);
+    let gpu = gpu::Config { backend: Some(backend.clone()), fast: true, policy: gpu::Policy::Qualification, readback_per_float: None, ..gpu::default() };
     let carries_gpu = |d: &document::T| {
         let g = &d.workspace.lowered.gpu;
-        g.fast && g.policy == Gpu::Policy::Qualification && g.backend.as_ref().is_some_and(|b| Arc::ptr_eq(b, &backend))
+        g.fast && g.policy == gpu::Policy::Qualification && g.backend.as_ref().is_some_and(|b| Arc::ptr_eq(b, &backend))
     };
     lap("lowered");
     let gpu_doc = lowering::of_workspace(&lowering::Options { gpu: Some(gpu.clone()), ..Default::default() }, &workspace).unwrap_or_else(|d| panic!("{d:?}"));

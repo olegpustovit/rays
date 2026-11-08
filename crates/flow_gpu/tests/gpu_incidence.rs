@@ -1,8 +1,8 @@
 //! GPU-only construction of deterministic incidence/fan tables and packed coordinate planes.
 mod common;
 use flow_gpu::{pipelines, run};
-use flow_ir::flow_ir::Executor;
-use flow_ir::flow_ir::Gpu::Residency as _;
+use flow_ir::flow_ir::executor;
+use flow_ir::flow_ir::gpu::Residency as _;
 use flow_syntax::{ty::Ty, value::Value};
 use ogpu_core::{backend as b, types::{BufferDescriptor, BufferUsage}};
 
@@ -93,10 +93,10 @@ fn constant_arrays() {
             let ws = common::test_program::check_workspace(&format!("(workspace w (graph g :context value (let* [tested {body}] 0.)))"));
             let evaluated = flow_eval::r#static(&ws, true, None).unwrap();
             let value = &evaluated.records.iter().find(|(p, _)| p == &["g", "tested"]).unwrap().1[0].1;
-            let compiled = Executor::compile(value, &Executor::CompileOptions { strict: true, ..Default::default() }).unwrap();
+            let compiled = executor::compile(value, &executor::CompileOptions { strict: true, ..Default::default() }).unwrap();
             let scope = flow_gpu::host::backend(&host).residency(true).unwrap();
             let before = flow_gpu::host::stats(&host);
-            let made = Executor::force(&compiled, &Executor::ForceOptions { strict: true, resident: Some(scope.executor().clone()), ..Default::default() }, &input::at_time(1.)).unwrap();
+            let made = executor::force(&compiled, &executor::ForceOptions { strict: true, resident: Some(scope.executor().clone()), ..Default::default() }, &input::at_time(1.)).unwrap();
             assert_eq!(scope.executor().count(&made).unwrap(), Some(count));
             let kept = scope.retain_float(&made).expect("constant array stayed on the CPU");
             scope.executor().close();

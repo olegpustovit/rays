@@ -1,6 +1,6 @@
 // Port of lib/flow_ir/test_core_state.ml.
 use crate::core_lower;
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::{self as ts, ok};
 use flow_check::workspace as W;
 use flow_eval as E;
@@ -38,7 +38,7 @@ fn live(frame: i64) -> Frame {
     }
 }
 
-fn state_dump(state: &E::State) -> String { format!("{:?}", E::Host::state_values(state)) }
+fn state_dump(state: &E::State) -> String { format!("{:?}", E::host::state_values(state)) }
 
 fn values_of(evaluation: &E::Eval) -> Vec<Value> {
     let mut values: Vec<Value> = evaluation.results.iter().map(|(_, v)| v.clone()).collect();
@@ -52,7 +52,7 @@ fn state_slice(cases: &[(String, String, String)], used: &mut usize, refused: &m
         let values = values_of(&evaluation);
         let reference = E::create_state();
         let core = E::create_state();
-        let programs: Vec<(Value, Result<Executor::Program, Diagnostic>)> = values.into_iter().map(|v| { let p = Executor::compile(&v, &Default::default()); (v, p) }).collect();
+        let programs: Vec<(Value, Result<executor::Program, Diagnostic>)> = values.into_iter().map(|v| { let p = executor::compile(&v, &Default::default()); (v, p) }).collect();
         for (_, program) in &programs {
             match program {
                 Ok(_) => *used += 1,
@@ -64,9 +64,9 @@ fn state_slice(cases: &[(String, String, String)], used: &mut usize, refused: &m
             for (v, program) in &programs {
                 let core_before = E::state_stamp(&core);
                 let reference_before = E::state_stamp(&reference);
-                let expected = E::Host::force_reference(v, &live, Some(&reference), None, None);
+                let expected = E::host::force_reference(v, &live, Some(&reference), None, None);
                 let actual = match program {
-                    Ok(program) => Executor::force(program, &Executor::ForceOptions { state: Some(core.clone()), ..Default::default() }, &live),
+                    Ok(program) => executor::force(program, &executor::ForceOptions { state: Some(core.clone()), ..Default::default() }, &live),
                     Err(_) => expected.clone(),
                 };
                 assert!(same(&actual, &expected), "{name} frame {frame}");
@@ -129,12 +129,12 @@ fn kernel_case(index: usize) {
             assert!(has_region, "{name}: state kernel did not lower to a Core region: {outcomes:?}");
             let reference = E::create_state();
             let core = E::create_state();
-            let programs: Vec<(Value, Executor::Program)> = values.into_iter().map(|v| { let p = ok(Executor::compile(&v, &Default::default())); (v, p) }).collect();
+            let programs: Vec<(Value, executor::Program)> = values.into_iter().map(|v| { let p = ok(executor::compile(&v, &Default::default())); (v, p) }).collect();
             for frame in 0..6 {
                 let live = live(frame);
                 for (v, program) in &programs {
-                    let expected = E::Host::force_reference(v, &live, Some(&reference), None, None);
-                    let actual = Executor::force(program, &Executor::ForceOptions { state: Some(core.clone()), ..Default::default() }, &live);
+                    let expected = E::host::force_reference(v, &live, Some(&reference), None, None);
+                    let actual = executor::force(program, &executor::ForceOptions { state: Some(core.clone()), ..Default::default() }, &live);
                     assert!(same(&actual, &expected), "{name} frame {frame} domains {domains}");
                     assert!(state_dump(&core) == state_dump(&reference), "{name} frame {frame} domains {domains}: state values differ");
                 }

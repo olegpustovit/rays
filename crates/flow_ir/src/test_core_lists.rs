@@ -1,7 +1,7 @@
 // Port of lib/flow_ir/test_core_lists.ml.
 use crate::core_ir as C;
 use crate::core_lower;
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::{self as ts, ok};
 use flow_check::op;
 use flow_check::workspace as W;
@@ -65,10 +65,10 @@ fn check(name: &str, body: &str, failures: &mut Vec<String>) {
     }
     assert!(C::pp(&core) == C::pp(&core_lower::lower(None, None, false, None, None, r).unwrap()));
     let value = Value::Residual(r);
-    let program = ok(Executor::compile(&value, &Default::default()));
+    let program = ok(executor::compile(&value, &Default::default()));
     for &time in times() {
         let live = input::at_time(time);
-        let expected = E::Host::force_reference(&value, &live, None, None, None);
+        let expected = E::host::force_reference(&value, &live, None, None, None);
         let mut verify = |label: &str, actual: Result<Value, Diagnostic>| match (&actual, &expected) {
             (Ok(a), Ok(b)) if same(a, b) => (),
             (Err(a), Err(b)) if a.code == b.code => (),
@@ -76,7 +76,7 @@ fn check(name: &str, body: &str, failures: &mut Vec<String>) {
         };
         verify("walker", E::force(&value, &live, None));
         verify("core", ts::run_simple(&core, &live));
-        verify("executor", Executor::force(&program, &Default::default(), &live));
+        verify("executor", executor::force(&program, &Default::default(), &live));
     }
 }
 
@@ -189,7 +189,7 @@ fn captured(ty: &str, body: &str, value: Value) -> ResidualId {
     let term = arena.bindings(arena.let_node(id).bindings).iter().find_map(|binding| {
         matches!(arena.pattern(binding.pattern), flow_check::term_arena::PatternNode::Name(name) if body.name(name) == "tested").then(|| body.child(binding.term))
     }).expect("Missing checked capture term");
-    ok(E::Residual::with_bindings(r, &term, &[("parts".to_owned(), value)]))
+    ok(E::residual::with_bindings(r, &term, &[("parts".to_owned(), value)]))
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn known_5001_geometry_map_filter_captures() {
         assert!(loops.iter().all(|body| builds(body) == 0));
         for time in [0., 0.25, 0.75, 1.] {
             let live: Frame = input::at_time(time);
-            let expected = ok(E::Host::force_reference(&Value::Residual(r), &live, None, None, Some(resolve.clone())));
+            let expected = ok(E::host::force_reference(&Value::Residual(r), &live, None, None, Some(resolve.clone())));
             let actual = ok(ts::run(None, true, None, Some(resolve.clone()), &core, &live));
             assert!(same(&actual, &expected));
         }
@@ -265,7 +265,7 @@ fn iterate_over_a_packed_array_is_one_region_and_one_counted_loop() {
     assert_eq!(core.regions.len(), 1);
     assert_eq!(counted, 1);
     let live = input::at_time(0.);
-    let want = E::Host::force_reference(&Value::Residual(r), &live, None, None, None);
+    let want = E::host::force_reference(&Value::Residual(r), &live, None, None, None);
     match (ts::run_simple(&core, &live), want) {
         (Ok(Value::Floats(1, a)), Ok(Value::Floats(1, b))) => assert!(a.len() == width && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits())),
         (a, b) => panic!("iterate packed: {} <> {}", show(&a), show(&b)),

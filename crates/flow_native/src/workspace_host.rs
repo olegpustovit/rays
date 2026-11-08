@@ -6,7 +6,7 @@ use crate::workspace_images;
 use crate::workspace_resources;
 use editor_document::workspace_doc;
 use flow_eval as e;
-use flow_ir::flow_ir::Executor as I;
+use flow_ir::flow_ir::executor as I;
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{self as v, Value};
 use input::{Event, Frame};

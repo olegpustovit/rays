@@ -4,7 +4,7 @@
 //! browser checks under tools/web/test) stay with the OCaml binary.
 use crate::test_program::{die, carried_fixtures, compile, fixtures, two_outputs, vector_fixtures};
 use crate::wgsl;
-use flow_ir::core_ir::Region::Instruction;
+use flow_ir::core_ir::region::Instruction;
 use flow_ir::kernel_layout::{self, PlanOptions};
 use flow_ir::packed::{self, host};
 

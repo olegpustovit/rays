@@ -41,7 +41,7 @@ fn compile(body: &str) -> (Value, packed::T) {
     let (_, values) = evaluation.records.iter().find(|(p, _)| p == &vec!["g".to_owned(), "tested".to_owned()]).expect("tested");
     let value = values[0].1.clone();
     let Value::Residual(r) = &value else { panic!("a live residual expected") };
-    let term = e::Residual::residual_view(*r).unwrap().term;
+    let term = e::residual::residual_view(*r).unwrap().term;
     let program = packed::compile_result(&packed::CompileOptions::default(), *r, &term).unwrap_or_else(|ds| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")));
     (value, program)
 }
@@ -55,7 +55,7 @@ fn packed_trace_matches_the_walker_and_a_direct_raycast() {
     ));
     assert_eq!(flow_web::js::region(false,&program).unwrap_err().code,"E_WEB_SOURCE");
     let live = input::at_time(1.0);
-    let reference = e::Host::force_reference(&value, &live, None, None, None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let reference = e::host::force_reference(&value, &live, None, None, None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     for domains in [1, 8] {
         parallel::run_unit(Some(domains), &|| {
             let forced = packed::force(&program, &live, &packed::ForceOptions { strict: true, ..Default::default() }).map_err(|d| rays_diagnostic::to_string(&d))?;

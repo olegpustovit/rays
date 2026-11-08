@@ -403,25 +403,25 @@ fn named_arguments_and_residual_capture() {
     let bindings = (0..20).map(|i| format!("b{i} {i}.0")).collect::<Vec<_>>().join(" ");
     let ws = check(&value(&format!("(let* [{bindings}] (+ (+ b3 b17) t))")));
     let Value::Residual(residual) = result(&static_ws(&ws), "g") else { panic!() };
-    assert_eq!(Residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["b17", "b3"]);
+    assert_eq!(residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["b17", "b3"]);
     assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Float(22.)));
     let ws = check(&value("(let* [outer 7.0 unused 99.0 mapped (map (fn [x] (+ x (+ outer t))) (array/range 2))] 0.0)"));
     let Value::Residual(residual) = static_rec(&ws).records.iter().find(|(q, _)| *q == p(&["g", "mapped"])).unwrap().1[0].1.clone() else { panic!() };
-    assert_eq!(Residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["outer"]);
+    assert_eq!(residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["outer"]);
     assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Floats(1, std::sync::Arc::new(vec![9., 10.]))));
     let ws = check(&value("(let* [outside 7.0 unused 8.0] (let* [local (+ outside t) f (fn [x] (+ x (+ local outside))) mapped (map f (list 1.0 2.0))] 0.0))"));
     let root = &ws.graphs[0].body;
     let W::Node::Let(id) = root.node else { panic!() };
     let term = root.child(root.arena().let_node(id).body);
-    assert_eq!(Residual::free_names(&term), vec!["outside"]);
-    let walks = Host::free_name_walks();
-    let _ = Residual::free_names(&term);
-    assert_eq!(Host::free_name_walks(), walks);
+    assert_eq!(residual::free_names(&term), vec!["outside"]);
+    let walks = host::free_name_walks();
+    let _ = residual::free_names(&term);
+    assert_eq!(host::free_name_walks(), walks);
     let ws = check(&value("(let* [source (list 3.0 4.0) initial 2.0] (let* [[x y] source total (state [s initial] (+ s t))] (+ x (+ y total))))"));
     let root = &ws.graphs[0].body;
     let W::Node::Let(id) = root.node else { panic!() };
     let term = root.child(root.arena().let_node(id).body);
-    assert_eq!(Residual::free_names(&term), vec!["initial", "source"]);
+    assert_eq!(residual::free_names(&term), vec!["initial", "source"]);
 }
 
 #[test]
@@ -636,7 +636,7 @@ fn live_packed_accumulators_defer_the_complete_iteration() {
         let v = result(&static_ws(&workspace), "g");
         match &v {
             Value::Residual(r) => {
-                let view = Residual::residual_view(*r).unwrap();
+                let view = residual::residual_view(*r).unwrap();
                 match view.term.node {
                     W::Node::Loop(id) if view.term.arena().loop_node(id).kind == W::LoopKind::Fold => (),
                     W::Node::Hof(id) if view.term.arena().hof(id).kind == W::HofKind::Reduce => (),
@@ -699,7 +699,7 @@ fn equality_and_updates_use_captured_field_tags() {
         for time in [-2.5, 0., 0.37, 2.] {
             let live = input::at_time(time);
             assert_eq!(force(&v, &live, None), Ok(Value::Int(2)), "{body}");
-            assert_eq!(Host::force_reference(&v, &live, None, None, None), Ok(Value::Int(2)), "{body}");
+            assert_eq!(host::force_reference(&v, &live, None, None, None), Ok(Value::Int(2)), "{body}");
         }
     }
     is(&value("(reduce (fn [a x] (+ a x)) 0 (list 0.5 0.25))"), Value::Float(0.75));
@@ -738,12 +738,12 @@ fn static_bulk_maps() {
         let off = offered.clone();
         let handlers = ResidualHandlers {
             bulk: Some(Arc::new(move |id| {
-                let view = Residual::residual_view(id).unwrap();
+                let view = residual::residual_view(id).unwrap();
                 let W::Node::Hof(hof) = view.term.node else { panic!("a map is offered"); };
                 let node = view.term.arena().hof(hof);
                 let terms = view.term.arena().term_ids(node.args);
                 assert!(node.kind == W::HofKind::Map && terms.len() == 2);
-                let n = match Residual::eval_term(id, &view.term.child(terms[1]), &input::at_time(0.), None, None, None) {
+                let n = match residual::eval_term(id, &view.term.child(terms[1]), &input::at_time(0.), None, None, None) {
                     Ok(v) => flow_syntax::value::array_length(&v).unwrap(),
                     Err(d) => panic!("{}", rays_diagnostic::to_string(&d)),
                 };
@@ -752,7 +752,7 @@ fn static_bulk_maps() {
             })),
             ..Default::default()
         };
-        ok(Residual::handle(handlers, &mut || Host::static_with_requests(None, true, None, &ws)))
+        ok(residual::handle(handlers, &mut || host::static_with_requests(None, true, None, &ws)))
     };
     // Supplied whole and correct: used. Only the maps over 4,096 elements are offered, once each.
     let w2 = ordinary.clone();
@@ -788,13 +788,13 @@ fn static_bulk_maps() {
     // A failure past the walked elements is the walker's own when the host has no value.
     let failing = check("(workspace bulk (graph g :context host (map (fn [i] (exp (- i 4300))) (array/range 5200))))");
     let a = static_eval(&failing);
-    let b = Residual::handle(ResidualHandlers { bulk: Some(Arc::new(|_| None)), ..Default::default() }, &mut || Host::static_with_requests(None, false, None, &failing));
+    let b = residual::handle(ResidualHandlers { bulk: Some(Arc::new(|_| None)), ..Default::default() }, &mut || host::static_with_requests(None, false, None, &failing));
     match (a, b) { (Err(a), Err(b)) => assert!(a.code == "E_NONFINITE" && a == b), _ => panic!("a nonfinite element past the walked ones fails either way") }
     // A map that reads the frame is never offered: it becomes a residual before any host call.
     let live = check("(workspace bulk (graph g :context host (map (fn [i] (+ i t)) (array/range 5000))))");
     let asked = Arc::new(Mutex::new(0));
     let ak = asked.clone();
-    let r = ok(Residual::handle(ResidualHandlers { bulk: Some(Arc::new(move |_| { *ak.lock().unwrap() += 1; None })), ..Default::default() }, &mut || Host::static_with_requests(None, false, None, &live)));
+    let r = ok(residual::handle(ResidualHandlers { bulk: Some(Arc::new(move |_| { *ak.lock().unwrap() += 1; None })), ..Default::default() }, &mut || host::static_with_requests(None, false, None, &live)));
     assert!(matches!(result(&r, "g"), Value::Residual(_)), "a live map stays a residual");
     assert_eq!(*asked.lock().unwrap(), 0);
 }

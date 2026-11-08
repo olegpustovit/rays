@@ -14,13 +14,13 @@ use super::super::support::*;
 fn functions(v: &Value) -> Value {
     match v {
         Value::Fn(f) => Value::Record(vec![
-            ("body".into(), Value::Text(match E::Residual::function_body(*f) {
+            ("body".into(), Value::Text(match E::residual::function_body(*f) {
                 Some((params, body)) => format!("{params:?}{}", lisp::flat(&body.form())).into_bytes(),
                 None => b"named".to_vec(),
             })),
-            ("captures".into(), functions(&Value::Record(E::Residual::function_bindings(*f)))),
+            ("captures".into(), functions(&Value::Record(E::residual::function_bindings(*f)))),
         ]),
-        Value::Residual(r) => match E::Residual::residual_view(*r) {
+        Value::Residual(r) => match E::residual::residual_view(*r) {
             Ok(view) => Value::Record(vec![("residual".into(), Value::Text(lisp::flat(&view.term.form()).into_bytes())), ("bindings".into(), functions(&Value::Record(view.bindings.clone())))]),
             Err(_) => v.clone(),
         },
@@ -32,7 +32,7 @@ fn functions(v: &Value) -> Value {
 }
 
 fn key(v: &Value) -> Vec<u8> {
-    flow_syntax::value::key_of(&|r| E::Residual::residual_id(r), &functions(v))
+    flow_syntax::value::key_of(&|r| E::residual::residual_id(r), &functions(v))
 }
 
 type Sig = (Vec<String>, Vec<String>, Vec<(String, Vec<u8>)>, Vec<Vec<u8>>, Vec<(Vec<String>, Vec<(Vec<i64>, Vec<u8>)>)>);
@@ -85,7 +85,7 @@ pub fn check(root_relative: &str) {
     }
     values.extend(evaluated.records.iter().filter(|(path, _)| !path.iter().any(|s| s.starts_with("node:"))).flat_map(|(_, records)| records.iter().map(|(_, value)| value.clone())));
     for v in &values {
-        flow_ir::flow_ir::Executor::compile(v, &Default::default()).unwrap_or_else(|d| panic!("{root_relative}: {}", rays_diagnostic::to_string(&d)));
+        flow_ir::flow_ir::executor::compile(v, &Default::default()).unwrap_or_else(|d| panic!("{root_relative}: {}", rays_diagnostic::to_string(&d)));
     }
 }
 

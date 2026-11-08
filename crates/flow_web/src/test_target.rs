@@ -1,7 +1,7 @@
 //! Port of lib/flow_web/test_target.ml: WebGPU kernel legality as diagnostics with spans.
 use crate::target;
 use crate::test_program::compile;
-use flow_ir::core_ir::Region;
+use flow_ir::core_ir::region;
 use rays_diagnostic::Diagnostic;
 
 fn has(code: &str, ds: &[Diagnostic]) -> bool { ds.iter().any(|d| d.code == code && d.span.is_some()) }
@@ -15,7 +15,7 @@ fn webgpu_regions_refuse_with_spans() {
     // Rule 1: more than eight storage buffers (one input, eight outputs, the status word).
     let many = {
         let o = small.outputs[0].clone();
-        Region::rebuild(&small, Region::Rebuild { outputs: Some(vec![o; 8]), ..Default::default() }).expect("outputs")
+        region::rebuild(&small, region::Rebuild { outputs: Some(vec![o; 8]), ..Default::default() }).expect("outputs")
     };
     let ds = target::region(&many, None);
     assert!(has("E_WEB_BUFFERS", &ds));

@@ -6,7 +6,7 @@ use super::test_group_kernel::{evaluated, flow_ok, ok};
 use crate::{attribute_metadata, catalog, lisp_sop, manifest, operators};
 use flow_graph::flow_edit::{apply_checked_with, ArgKey, Op};
 use flow_graph::projection as proj;
-use flow_ir::flow_ir::Executor;
+use flow_ir::flow_ir::executor;
 use flow_syntax::syntax::{self, Node};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::Value;
@@ -80,13 +80,13 @@ fn query(owner: Owner, name: &str, pattern: &str, input: &geo::T) -> Result<Valu
         Owner::Detail => "detail",
     };
     let (value, resolve) = evaluated(input, &format!("({} geo {} :owner {})", name, quoted(pattern), quoted(owner)));
-    let program = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+    let program = flow_ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
     let live = input::at_time(0.0);
-    let expected = flow_eval::Host::force_reference(&value, &live, None, None, Some(resolve.clone()));
+    let expected = flow_eval::host::force_reference(&value, &live, None, None, Some(resolve.clone()));
     for domains in [1i64, 8] {
         parallel::run_unit(Some(domains), &|| {
-            let options = Executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
-            let actual = Executor::force(&program, &options, &live);
+            let options = executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
+            let actual = executor::force(&program, &options, &live);
             assert!(actual == expected, "Metadata query strict/reference/domain results differ");
             Ok(())
         })

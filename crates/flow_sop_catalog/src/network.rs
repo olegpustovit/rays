@@ -3,7 +3,7 @@
 //! records.
 use flow_check::workspace::Paths;
 use flow_eval::{State, Value};
-use flow_ir::flow_ir::Profile;
+use flow_ir::flow_ir::profile;
 use input::Frame;
 use rays_diagnostic::Diagnostic;
 use sop::edit_graph;
@@ -32,7 +32,7 @@ pub struct Network {
     /// Frame folds of this workspace, advanced before its live parameters.
     pub states: Vec<Value>,
     pub frame_nodes: BTreeMap<i64, FrameNode>,
-    pub profile: Option<Arc<Profile::T>>,
+    pub profile: Option<Arc<profile::T>>,
     /// Independent reference execution for parity checks and inspected cones.
     pub reference: bool,
     pub approx: Paths,
@@ -76,7 +76,7 @@ pub fn with_approx(approx: Paths, network: &Network) -> Network {
     Network { approx, identity: fresh(), ..network.clone() }
 }
 
-pub fn with_profile(profile: Arc<Profile::T>, network: &Network) -> Network {
+pub fn with_profile(profile: Arc<profile::T>, network: &Network) -> Network {
     Network { profile: Some(profile), identity: fresh(), ..network.clone() }
 }
 

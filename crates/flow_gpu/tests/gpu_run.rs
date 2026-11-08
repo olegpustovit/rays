@@ -6,7 +6,7 @@
 mod common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
-use flow_ir::flow_ir::{Executor, Gpu};
+use flow_ir::flow_ir::{executor, gpu};
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::value::{self, Value};
@@ -216,7 +216,7 @@ fn empty_and_outputs() {
     let values = prepare(&program, false, 1.0);
     let empty = tp::ok(kernel.run(&phost::Inputs { count: 0, ..values }));
     let borrowed = tp::ok(host::output(&h, &empty)).expect("borrowed");
-    let read = tp::ok(kernel.readback(&Gpu::Value { width: run::width(&borrowed), ..empty.clone() }));
+    let read = tp::ok(kernel.readback(&gpu::Value { width: run::width(&borrowed), ..empty.clone() }));
     assert!(array(&read).is_empty() && host::stats(&h).status_reads == 0);
     host::close(&h);
     pipelines::close(&pipes);
@@ -266,10 +266,10 @@ fn gather_and_region() {
     println!("fast int32 and gather kernel matches the CPU at 4,096 elements");
     // a drawing's region read back from the device in fast precision, and declined in exact
     let h = host::create(&|| 0.0, &lease);
-    let config = Gpu::Config { backend: Some(host::backend(&h).into()), ..Gpu::default() };
-    let exact = Executor::region_readback(Some(config.clone()));
+    let config = gpu::Config { backend: Some(host::backend(&h).into()), ..gpu::default() };
+    let exact = executor::region_readback(Some(config.clone()));
     assert!(tp::ok(exact.call(&program, &live(1.0))).is_none(), "exact precision sent a region to the device");
-    let fast = Executor::region_readback(Some(Gpu::Config { fast: true, ..config }));
+    let fast = executor::region_readback(Some(gpu::Config { fast: true, ..config }));
     match tp::ok(fast.call(&program, &live(1.0))) {
         Some(v) => assert!(array(&v) == expected, "the device region differs from the CPU"),
         None => panic!("fast precision kept a 4,096-element region on the CPU"),
@@ -298,9 +298,9 @@ fn selected_outputs() {
     let value = tp::ok(kernel.run(&prepare(&program, false, 1.0)));
     for (out, e) in expected.iter().enumerate() {
         let width = phost::view(&program).outputs[out].len() as i64;
-        assert_eq!(array(&tp::ok(kernel.readback(&Gpu::Value { output: out as i64, width, ..value.clone() }))), array(e));
+        assert_eq!(array(&tp::ok(kernel.readback(&gpu::Value { output: out as i64, width, ..value.clone() }))), array(e));
     }
-    assert!(tp::ok(host::output(&h, &Gpu::Value { output: expected.len() as i64, ..value.clone() })).is_none());
+    assert!(tp::ok(host::output(&h, &gpu::Value { output: expected.len() as i64, ..value.clone() })).is_none());
     tp::ok(kernel.run(&prepare(&program, false, 1.0)));
     assert!(tp::ok(host::output(&h, &value)).is_none());
     host::close(&h);

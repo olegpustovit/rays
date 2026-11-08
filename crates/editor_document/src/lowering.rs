@@ -22,7 +22,7 @@ use flow_check::workspace::{self as w, Graph, LoopKind, Node as WNode, Term};
 use flow_check::term_arena::{Field, PatternNode, RangeId, TermArena, TermId};
 use flow_eval::Plan;
 use flow_graph::flow_edit::ArgKey;
-use flow_ir::flow_ir::{Gpu, StaticOptions};
+use flow_ir::flow_ir::{gpu, StaticOptions};
 use flow_sop::lower as lower_mod;
 use flow_sop_catalog::network as net;
 use flow_sop_catalog::port;
@@ -50,7 +50,7 @@ fn flow<T>(r: Result<T, String>) -> R<T> {
 pub struct Options {
     /// None: `sop::nodes::factories()`.
     pub factories: Option<Vec<Factory>>,
-    pub gpu: Option<Gpu::Config>,
+    pub gpu: Option<gpu::Config>,
     pub defer: Option<bool>,
     pub previous: Option<document::T>,
 }
@@ -837,7 +837,7 @@ fn same_settings(a: &settings::T, b: &settings::T) -> bool {
     values(a) == values(b)
 }
 
-fn same_gpu(a: &Gpu::Config, b: &Gpu::Config) -> bool {
+fn same_gpu(a: &gpu::Config, b: &gpu::Config) -> bool {
     a.fast == b.fast
         && a.policy == b.policy
         && match (&a.backend, &b.backend) {
@@ -869,7 +869,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
     let factories: Vec<Factory> = options.factories.clone().unwrap_or_else(sop::nodes::factories);
     let mut gpu = options.gpu.clone().unwrap_or_else(|| match previous {
         Some(doc) => doc.workspace.lowered.gpu.clone(),
-        None => Gpu::default(),
+        None => gpu::default(),
     });
     // A device's SOP writes follow the workspace precision (fast unless the settings say exact):
     // the previous document's, or fast; a first lowering that reads exact is lowered again.
@@ -904,7 +904,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
     let lowered = match previous_literal {
         Some(result) => result?,
         None => {
-            let lower = |gpu: &Gpu::Config| -> R<lower_mod::T> {
+            let lower = |gpu: &gpu::Config| -> R<lower_mod::T> {
                 let o = lower_mod::Options {
                     gpu: gpu.clone(),
                     defer,
@@ -917,7 +917,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
             };
             let lowered = lower(&gpu)?;
             match (gpu.backend.is_some(), plan_window(workspace, &lowered.plan)) {
-                (true, Ok(window)) if window.fast != gpu.fast => lower(&Gpu::Config { fast: window.fast, ..gpu.clone() })?,
+                (true, Ok(window)) if window.fast != gpu.fast => lower(&gpu::Config { fast: window.fast, ..gpu.clone() })?,
                 _ => lowered,
             }
         }

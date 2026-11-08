@@ -15,7 +15,7 @@ use flow_check::workspace::{Path, Paths};
 use flow_eval as e;
 use flow_gpu::image_sink;
 use flow_gpu::small_lru::List;
-use flow_ir::flow_ir::{Executor as I, Gpu as G};
+use flow_ir::flow_ir::{executor as I, gpu as G};
 use flow_sop::{attribute_kernel, image_kernel, lower as l, network, value_lane};
 use flow_syntax::ty;
 use flow_syntax::value::{self as v, FnId, Value};
@@ -659,13 +659,13 @@ fn size_dependencies(plan: &e::Plan, root: i64) -> (bool, bool) {
             v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().for_each(|(_, x)| visit(w, x)),
             Value::Fn(f) if !w.functions.contains(&f.0) => {
                 w.functions.insert(f.0);
-                for (_, x) in e::Residual::function_bindings(*f) {
+                for (_, x) in e::residual::function_bindings(*f) {
                     visit(w, &x);
                 }
             }
             Value::Residual(r) if !w.residuals.contains(&r.0) => {
                 w.residuals.insert(r.0);
-                if let Ok(view) = e::Residual::residual_view(*r) {
+                if let Ok(view) = e::residual::residual_view(*r) {
                     for (_, x) in &view.bindings {
                         visit(w, x);
                     }
@@ -708,13 +708,13 @@ fn image_dependencies(plan: &e::Plan, root: i64) -> (Vec<i64>, (bool, deps::T)) 
             v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().for_each(|(_, x)| visit(w, x)),
             Value::Fn(f) if !w.functions.contains(&f.0) => {
                 w.functions.insert(f.0);
-                for (_, x) in e::Residual::function_bindings(*f) {
+                for (_, x) in e::residual::function_bindings(*f) {
                     visit(w, &x);
                 }
             }
             Value::Residual(r) if !w.residuals.contains(&r.0) => {
                 w.residuals.insert(r.0);
-                if let Ok(view) = e::Residual::residual_view(*r) {
+                if let Ok(view) = e::residual::residual_view(*r) {
                     for (_, x) in &view.bindings {
                         visit(w, x);
                     }

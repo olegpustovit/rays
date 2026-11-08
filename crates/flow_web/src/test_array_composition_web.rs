@@ -3,7 +3,7 @@
 use crate::{js, kernel_table::json_string, node_harness::{run_ok, runtime_url}, text_literal, wgsl};
 use flow_check::{catalog::Catalog, workspace};
 use flow_eval as e;
-use flow_ir::{core_ir::Region::Instruction, core_lower, packed};
+use flow_ir::{core_ir::region::Instruction, core_lower, packed};
 use flow_syntax::{syntax, ty::{FnSignature, Ty}, value::{FnId, Value}};
 use std::sync::Arc;
 
@@ -88,7 +88,7 @@ rt.invoke=async function(k,args,plan){{assert.ok(plan,'Composition producer has 
         // Avoid the native oracle rebuilding that frame-sized array for every output row.
         let expected = match counted_capture {
             Some(length) => Ok(Value::Int_array(Arc::new(vec![9 + count; length as usize]))),
-            None => e::Host::force_reference(v, &live, None, None, None),
+            None => e::host::force_reference(v, &live, None, None, None),
         };
         match expected {
             Ok(expected) => {
@@ -191,13 +191,13 @@ fn closure(body: &str, name: &str, counts: &[i64], frames: &[(i64, f64)], analyt
     let (_root_ev, root) = value("t");
     let Value::Residual(root) = root else { panic!("residual expected") };
     let template = callable(&template_ev);
-    let (params, body) = e::Residual::function_body(template).unwrap();
+    let (params, body) = e::residual::function_body(template).unwrap();
     let mut bindings = vec![("helper".into(), Value::Fn(callable(&helper_ev)))];
-    bindings.extend(e::Residual::function_bindings(template));
-    let helper = e::Residual::compiled_function(root, e::Residual::residual_view(root).unwrap().instance, vec![], vec!["g".into(), "tested".into()], params[1..].to_vec(), body, bindings).unwrap();
+    bindings.extend(e::residual::function_bindings(template));
+    let helper = e::residual::compiled_function(root, e::residual::residual_view(root).unwrap().instance, vec![], vec!["g".into(), "tested".into()], params[1..].to_vec(), body, bindings).unwrap();
     let mut script = prelude();
     for &count in counts {
-        let v = e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: Ty::Int }, helper,
+        let v = e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: Ty::Int }, helper,
             &[Value::Int_array(Arc::new((0..count).collect()))]).unwrap();
         append_case_frames(&mut script, &format!("{name}/{count}"), &v, frames, analytic_count.then_some(count));
     }

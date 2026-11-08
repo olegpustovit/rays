@@ -202,21 +202,21 @@ fn resident_state() {
     let mut last = Value::No_geo;
     for frame in 0..32 {
         let live = input::Frame { frame, tick: frame, ..input::at_time(frame as f64 / 60.) };
-        tp::ok(flow_eval::Residual::bind_live(root, &live, Some(&state)));
+        tp::ok(flow_eval::residual::bind_live(root, &live, Some(&state)));
         let resident = host::resident(false, true, &h);
         last = tp::ok(c::execute(&prepared, &live, &c::Options { root: Some(root), strict: true, resident: Some(resident.clone()), ..Default::default() }));
-        assert!(flow_eval::Device::held_by_device(&last));
+        assert!(flow_eval::device::held_by_device(&last));
         resident.close();
         assert_eq!(host::stats(&h).payload_readback_bytes, 0, "state read back at frame {frame}");
         assert!(owner.bytes() - before <= 6 * run::size_class(262144 * 3 * 4), "old state buffers retained at frame {frame}: {} bytes", owner.bytes() - before);
     }
-    let materialised = flow_eval::Device::thaw(&last);
+    let materialised = flow_eval::device::thaw(&last);
     assert_eq!(array(&materialised).len(), 262144 * 3);
     assert!(array(&materialised).chunks_exact(3).all(|p| p == [32.0, 16.0, 8.0]));
     // CPU placement can peek this frame's device result or advance the next frame.
     for frame in [31, 32] {
         let live = input::Frame { frame, tick: frame, ..input::at_time(frame as f64 / 60.) };
-        tp::ok(flow_eval::Residual::bind_live(root, &live, Some(&state)));
+        tp::ok(flow_eval::residual::bind_live(root, &live, Some(&state)));
         let cpu = tp::ok(c::execute(&prepared, &live, &c::Options { root: Some(root), strict: true, ..Default::default() }));
         assert_eq!(array(&cpu).len(), 262144 * 3);
         let step = (frame + 1) as f64;
@@ -271,7 +271,7 @@ fn resident_value() {
             assert_eq!(published.payload_readback_bytes, before.payload_readback_bytes);
             if count >= 256 { assert!(published.count_readback_bytes > before.count_readback_bytes); }
             let materialised = tp::ok(c::host_value(&*resident, &result));
-            assert_eq!(materialised, tp::ok(flow_eval::Host::force_reference(value, &live, None, None, None)));
+            assert_eq!(materialised, tp::ok(flow_eval::host::force_reference(value, &live, None, None, None)));
             let read = host::stats(&h);
             if count >= 256 { assert!(read.payload_readback_bytes > published.payload_readback_bytes); }
             assert_eq!(read.readback_bytes, read.payload_readback_bytes + read.bounds_readback_bytes);

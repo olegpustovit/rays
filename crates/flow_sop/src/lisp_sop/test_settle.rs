@@ -5,7 +5,7 @@
 //! whose root, and the previous cook's, do not hold them.
 use super::support::*;
 use crate::lower;
-use flow_ir::flow_ir::Gpu;
+use flow_ir::flow_ir::gpu;
 use rdk_core::geometry as geo;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -25,31 +25,31 @@ struct Counters {
 }
 
 /// every output reads as 42s: a device result is recognisable, a CPU one is not
-fn backend(c: &Arc<Counters>) -> Arc<dyn Gpu::Backend> {
+fn backend(c: &Arc<Counters>) -> Arc<dyn gpu::Backend> {
     Arc::new(Mock(c.clone()))
 }
 
 struct Mock(Arc<Counters>);
 struct MockPlanes { c: Arc<Counters>, count: i64, width: i64 }
 
-impl Gpu::Backend for Mock {
+impl gpu::Backend for Mock {
     fn cost(&self, _: Option<&flow_ir::packed::Inputs>, _: bool, _: &flow_ir::packed::T, _: i64) -> Option<f64> { Some(0.0) }
-    fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> { Ok(Arc::new(Mock(self.0.clone()))) }
+    fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn gpu::Kernel>, rays_diagnostic::Diagnostic> { Ok(Arc::new(Mock(self.0.clone()))) }
 }
 
-impl Gpu::Kernel for Mock {
-    fn run(&self, inputs: &flow_ir::packed::Inputs) -> Result<Gpu::Value, rays_diagnostic::Diagnostic> {
-        Ok(Gpu::Value { identity: 1, count: inputs.count, width: 1, output: 0, stamp: 0, gpu_seconds: None })
+impl gpu::Kernel for Mock {
+    fn run(&self, inputs: &flow_ir::packed::Inputs) -> Result<gpu::Value, rays_diagnostic::Diagnostic> {
+        Ok(gpu::Value { identity: 1, count: inputs.count, width: 1, output: 0, stamp: 0, gpu_seconds: None })
     }
-    fn readback(&self, _: &Gpu::Value) -> Result<flow_syntax::value::Value, rays_diagnostic::Diagnostic> {
+    fn readback(&self, _: &gpu::Value) -> Result<flow_syntax::value::Value, rays_diagnostic::Diagnostic> {
         Err(rays_diagnostic::error("E_GPU".into(), "no readback".into(), None, None, None, Vec::new(), Vec::new()))
     }
-    fn planes(&self, v: &Gpu::Value) -> Result<Gpu::Planes, rays_diagnostic::Diagnostic> {
-        Ok(Gpu::Planes { count: v.count, width: v.width, resident: None, ops: Box::new(MockPlanes { c: self.0.clone(), count: v.count, width: v.width }) })
+    fn planes(&self, v: &gpu::Value) -> Result<gpu::Planes, rays_diagnostic::Diagnostic> {
+        Ok(gpu::Planes { count: v.count, width: v.width, resident: None, ops: Box::new(MockPlanes { c: self.0.clone(), count: v.count, width: v.width }) })
     }
 }
 
-impl Gpu::PlanesOps for MockPlanes {
+impl gpu::PlanesOps for MockPlanes {
     fn materialise(&self) -> Result<Vec<Vec<f64>>, rays_diagnostic::Diagnostic> { Ok((0..self.width).map(|_| vec![42.0; self.count as usize]).collect()) }
     fn settle(&self) -> Result<(), rays_diagnostic::Diagnostic> {
         self.c.settles.fetch_add(1, Ordering::SeqCst);
@@ -66,8 +66,8 @@ impl Gpu::PlanesOps for MockPlanes {
     }
 }
 
-fn node(gpu: Option<&Gpu::Config>, y: f64) -> sop::node::T {
-    let options = lower::Options { gpu: gpu.cloned().unwrap_or_else(Gpu::default), ..lower::Options::default() };
+fn node(gpu: Option<&gpu::Config>, y: f64) -> sop::node::T {
+    let options = lower::Options { gpu: gpu.cloned().unwrap_or_else(gpu::default), ..lower::Options::default() };
     lower_text(options, &text(y)).1
 }
 
@@ -80,7 +80,7 @@ fn positions(g: &geo::T) -> Vec<(f64, f64, f64)> {
 
 fn in_flight_device_writes_settle_at_a_cooks_end() {
     let c = Arc::new(Counters { settles: AtomicI64::new(0), releases: AtomicI64::new(0), bounded: AtomicI64::new(0), fail: AtomicBool::new(false) });
-    let gpu = Gpu::Config { backend: Some(backend(&c)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
+    let gpu = gpu::Config { backend: Some(backend(&c)), fast: true, policy: gpu::Policy::Qualification, readback_per_float: None, ..gpu::default() };
     let ctx = sop::context::create(sop::context::Options { time: Some(0.0), ..Default::default() }).unwrap();
     let session = || new_session(2, 1 << 24);
     let cpu = positions(&cook(&mut session(), &ctx, &node(None, 1.0)));

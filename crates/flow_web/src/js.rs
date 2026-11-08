@@ -8,8 +8,8 @@ use crate::text_literal;
 use flow_check::workspace::DiagnosticPolicy;
 use flow_eval as E;
 use flow_ir::core_exec;
-use flow_ir::core_ir::{self as C, Draw, Expr, FrameField, Iteration, Literal, Plane, Primitive, Region, Statement, StatementNode};
-use flow_ir::core_ir::Region::{Instruction, Projection, RegionResult};
+use flow_ir::core_ir::{self as C, Draw, Expr, FrameField, Iteration, Literal, Plane, Primitive, region, Statement, StatementNode};
+use flow_ir::core_ir::region::{Instruction, Projection, RegionResult};
 use flow_ir::core_lower;
 use flow_ir::packed::{self, host};
 use flow_syntax::packed_ops::{Binary, Comparison, Conversion, Integer, Unary};
@@ -120,7 +120,7 @@ struct Printer {
 
 impl Printer {
     fn numeric(&self, r: i64) -> String {
-        if Region::integer_register(&self.view.code[r as usize]) {
+        if region::integer_register(&self.view.code[r as usize]) {
             if self.fast { format!("(r{r}h * 4294967296 + r{r}l)") } else { format!("Number({})", register(r)) }
         } else {
             register(r)
@@ -128,7 +128,7 @@ impl Printer {
     }
 
     fn index(&self, r: i64) -> String {
-        if self.fast && Region::integer_register(&self.view.code[r as usize]) { self.numeric(r) } else { register(r) }
+        if self.fast && region::integer_register(&self.view.code[r as usize]) { self.numeric(r) } else { register(r) }
     }
 
     fn expression(&self, slot: i64, instruction: &Instruction) -> Result<String, Diagnostic> {
@@ -145,13 +145,13 @@ impl Printer {
             Instruction::Unary(op, a) => unary(*op, &self.numeric(*a)),
             Instruction::Select(c, yes, no) => format!("{} !== 0 ? {} : {}", self.numeric(*c), self.numeric(*yes), self.numeric(*no)),
             Instruction::Noise3(x, y, z, seed, octaves, lacunarity, gain) => {
-                let fractal = |f: &Region::LiveFloat| match f {
-                    Region::LiveFloat::Fixed(v) => number(*v),
-                    Region::LiveFloat::Live(r) => self.numeric(*r),
+                let fractal = |f: &region::LiveFloat| match f {
+                    region::LiveFloat::Fixed(v) => number(*v),
+                    region::LiveFloat::Live(r) => self.numeric(*r),
                 };
                 let octaves = match octaves {
-                    Region::LiveInt::Fixed(n) => format!("{n}n"),
-                    Region::LiveInt::Live(r) => {
+                    region::LiveInt::Fixed(n) => format!("{n}n"),
+                    region::LiveInt::Live(r) => {
                         if fast { format!("BigInt({})", self.numeric(*r)) } else { register(*r) }
                     }
                 };
@@ -328,7 +328,7 @@ impl Printer {
     fn emit(&mut self, slot: i64, instruction: &Instruction) -> Result<(), Diagnostic> {
         let (guards, body) = guarded_of(instruction);
         let guard = guard_text(self, &guards);
-        if self.fast && Region::integer_register(body) {
+        if self.fast && region::integer_register(body) {
             let _ = writeln!(self.line, "    let r{slot}h = 0, r{slot}l = 0;");
             if !guards.is_empty() {
                 let _ = writeln!(self.line, "    if ({guard}) {{");
@@ -360,7 +360,7 @@ impl Printer {
             }
             let expression = self.expression(slot, body)?;
             let _ = writeln!(self.line, "    r{slot} = {expression};");
-            if !Region::integer_register(body) && self.checks[slot as usize] {
+            if !region::integer_register(body) && self.checks[slot as usize] {
                 let _ = writeln!(self.line, "    if (!Number.isFinite(r{slot})) {}", self.nonfinite);
             }
             if !guards.is_empty() {
@@ -371,7 +371,7 @@ impl Printer {
     }
 
     fn declare(&mut self, slot: i64) {
-        if self.fast && Region::integer_register(&self.view.code[slot as usize]) {
+        if self.fast && region::integer_register(&self.view.code[slot as usize]) {
             let _ = writeln!(self.line, "    let r{slot}h = 0, r{slot}l = 0;");
         } else {
             let _ = writeln!(self.line, "    let r{slot};");
@@ -379,7 +379,7 @@ impl Printer {
     }
 
     fn assign(&mut self, target: i64, source: i64) {
-        if self.fast && Region::integer_register(&self.view.code[target as usize]) {
+        if self.fast && region::integer_register(&self.view.code[target as usize]) {
             let _ = writeln!(self.line, "    r{target}h = r{source}h; r{target}l = r{source}l;");
         } else {
             let _ = writeln!(self.line, "    r{target} = r{source};");
@@ -433,7 +433,7 @@ impl Printer {
                         let _ = writeln!(self.line, "    const stop{header} = {} !== 0;", self.numeric(source));
                     }
                     for (component, source) in values.iter().enumerate() {
-                        if self.fast && Region::integer_register(&self.view.code[*source as usize]) {
+                        if self.fast && region::integer_register(&self.view.code[*source as usize]) {
                             let _ = writeln!(self.line, "    const next{header}h{component} = r{source}h, next{header}l{component} = r{source}l;");
                         } else {
                             let _ = writeln!(self.line, "    const next{header}_{component} = r{source};");
@@ -441,7 +441,7 @@ impl Printer {
                     }
                     for component in 0..values.len() {
                         let target = header + 1 + component as i64;
-                        if self.fast && Region::integer_register(&self.view.code[target as usize]) {
+                        if self.fast && region::integer_register(&self.view.code[target as usize]) {
                             let _ = writeln!(self.line, "    r{target}h = next{header}h{component}; r{target}l = next{header}l{component};");
                         } else {
                             let _ = writeln!(self.line, "    r{target} = next{header}_{component};");
@@ -498,10 +498,10 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
     let accumulating = program.result != RegionResult::Collect;
     let outputs = view.outputs.len();
     let width = view.outputs[0].len();
-    let textual = view.code.iter().any(Region::text_register);
+    let textual = view.code.iter().any(region::text_register);
     let state = if collecting { outputs } else { 0 };
     let sources = view.widths.len();
-    let product = program.iteration == Region::Iteration::Product && sources > 1;
+    let product = program.iteration == region::Iteration::Product && sources > 1;
     let mut skip: Vec<i64> = program.skip.iter().copied().filter(|i| *i >= 0).collect();
     skip.sort();
     skip.dedup();
@@ -611,15 +611,15 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
         for (component, slot) in registers.iter().enumerate() {
             let slot = *slot;
             let code = &view.code[slot as usize];
-            if !(Region::integer_register(code) || Region::text_register(code)) {
+            if !(region::integer_register(code) || region::text_register(code)) {
                 let _ = writeln!(p.line, "    if (!Number.isFinite(r{slot})) {}", p.nonfinite);
             }
             match &program.result {
                 RegionResult::Collect | RegionResult::Accumulate(..) => {}
-                RegionResult::Sum(true) if Region::integer_register(code) => {
+                RegionResult::Sum(true) if region::integer_register(code) => {
                     let _ = writeln!(p.line, "    st[{component}] = st[{width}] !== 0 ? wrap(st[{component}] + r{slot}) : r{slot};");
                 }
-                RegionResult::Sum(false) if Region::integer_register(code) => {
+                RegionResult::Sum(false) if region::integer_register(code) => {
                     let _ = writeln!(p.line, "    st[{component}] = st[{width}] !== 0 ? convert('+', Math.floor(Number(st[{component}]) + Number(r{slot}) + 0.5)) : r{slot};");
                 }
                 RegionResult::Sum(_) => {
@@ -630,10 +630,10 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
                 }
             }
             if collecting {
-                if Region::text_register(code) {
+                if region::text_register(code) {
                     let _ = writeln!(p.line, "    out{k}[o - outputBase] = r{slot};");
                 } else {
-                    let value = if registers.len() == 1 && Region::integer_register(code) {
+                    let value = if registers.len() == 1 && region::integer_register(code) {
                         if fast { format!("big(r{slot}h, r{slot}l)") } else { register(slot) }
                     } else {
                         p.numeric(slot)
@@ -1222,7 +1222,7 @@ fn statement(ctx: &mut Context, depth: usize, s: &Statement) -> Result<(), Diagn
                 let mut dynamic = ctx.templated || r.uniforms.iter().any(E::frame_dependent);
                 if !dynamic {
                     for (residual, term) in r.sources.iter() {
-                        let bound = E::Residual::with_bindings(*residual, term, &[]).expect("residual with its term");
+                        let bound = E::residual::with_bindings(*residual, term, &[]).expect("residual with its term");
                         if E::frame_dependent(&Value::Residual(bound)) {
                             dynamic = true;
                             break;
@@ -1292,8 +1292,8 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
     };
     let mut sources: Vec<String> = Vec::new();
     for (residual, term) in r.sources.iter() {
-        let view = E::Residual::residual_view(*residual)?;
-        let bound = E::Residual::with_bindings(*residual, term, &view.bindings)?;
+        let view = E::residual::residual_view(*residual)?;
+        let bound = E::residual::with_bindings(*residual, term, &view.bindings)?;
         let program = match core_lower::lower(None, None, true, None, None, bound) {
             Ok(p) => p,
             Err(form) => return Err(refuse(&format!("Region input preparation: {form}"))),
@@ -1302,7 +1302,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
     }
     let mut captures: Vec<String> = Vec::new();
     for value in r.uniforms.iter() {
-        let view = E::Residual::residual_view(r.residual)?;
+        let view = E::residual::residual_view(r.residual)?;
         let source = C::Source {
             site: view.site.clone(),
             owner: view.owner.clone(),
@@ -1324,7 +1324,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
             Err(form) => return Err(refuse(&format!("Region capture preparation: {form}"))),
         };
         let ty = match value {
-            Value::Residual(residual) => E::Residual::residual_view(*residual)?.term.ty().clone(),
+            Value::Residual(residual) => E::residual::residual_view(*residual)?.term.ty().clone(),
             v => value::ty_of(v),
         };
         captures.push(format!("{{type:{},source:{}}}", ty_json(&ty), escape(&prepare(true, &program)?)));
@@ -1338,8 +1338,8 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
         }
     }
     let terminal = &r.outputs[0];
-    let integer = terminal.len() == 1 && Region::integer_register(&r.code[terminal[0] as usize]);
-    let text = terminal.len() == 1 && Region::text_register(&r.code[terminal[0] as usize]);
+    let integer = terminal.len() == 1 && region::integer_register(&r.code[terminal[0] as usize]);
+    let text = terminal.len() == 1 && region::text_register(&r.code[terminal[0] as usize]);
     let frame_facts: Vec<String> = r.code.iter().enumerate().flat_map(|(slot, i)| facts(slot, i)).collect();
     Ok(format!(
         "{{source:{},argumentTypes:[{}],sources:[{}],captures:[{}],product:{},skip:[{}],frame:[{}],length:{},width:{},integer:{integer},text:{text},frameValue:{needs_frame_value},arrayLimit:{}n,countLimit:{}n,kernel:{},shapes:{}}}",
@@ -1347,7 +1347,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
         argument_types.iter().map(ty_json).collect::<Vec<_>>().join(","),
         sources.join(","),
         captures.join(","),
-        r.iteration == Region::Iteration::Product,
+        r.iteration == region::Iteration::Product,
         r.skip.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","),
         frame_facts.join(","),
         r.code.len(),

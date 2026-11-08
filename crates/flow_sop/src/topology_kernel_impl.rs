@@ -1,6 +1,6 @@
 //! Port of lib/flow_sop/topology_kernel_impl.ml: topology data sources over cooked geometry, the
 //! mesh constructor (host and device-resident), `sop/remap` and `sop/concat`.
-use flow_ir::flow_ir::Gpu::{self, Integers, Planes, Residency};
+use flow_ir::flow_ir::gpu::{self, Integers, Planes, Residency};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self, Value};
 use rays_diagnostic::Diagnostic;
@@ -426,8 +426,8 @@ pub struct ResidentTopology {
     pub offsets: Arc<Integers>,
     pub kinds: Arc<Integers>,
     point_count: i64,
-    incidence: OnceLock<Result<Option<Gpu::Incidence>, Diagnostic>>,
-    build_incidence: Gpu::IncidenceBuilder,
+    incidence: OnceLock<Result<Option<gpu::Incidence>, Diagnostic>>,
+    build_incidence: gpu::IncidenceBuilder,
 }
 impl deferred::Holder for ResidentTopology {}
 
@@ -1159,7 +1159,7 @@ mod integration {
     use flow_syntax::value::source_value;
     use crate::{attribute_kernel, operators};
     use flow_check::catalog::Catalog;
-    use flow_ir::flow_ir::Executor;
+    use flow_ir::flow_ir::executor;
     use rdk_core::analysis;
 
     fn ok<R>(r: Result<R, error::T>) -> R {
@@ -1248,11 +1248,11 @@ mod integration {
     fn agree(geometry: &Geometry, body: &str, expected: &Value) {
         let (value, resolve) = evaluate(geometry, body);
         let live = input::at_time(0.25);
-        let core = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+        let core = flow_ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
         over_domains(&|| {
-            assert_eq!(&flow_ok(flow_eval::Host::force_reference(&value, &live, None, None, Some(resolve.clone()))), expected, "{body}");
-            let options = Executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
-            assert_eq!(&flow_ok(Executor::force(&core, &options, &live)), expected, "{body}");
+            assert_eq!(&flow_ok(flow_eval::host::force_reference(&value, &live, None, None, Some(resolve.clone()))), expected, "{body}");
+            let options = executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
+            assert_eq!(&flow_ok(executor::force(&core, &options, &live)), expected, "{body}");
         });
     }
 
@@ -1274,18 +1274,18 @@ mod integration {
             let mut live = input::at_time(0.25);
             live.frame = 3;
             let (value, resolve) = evaluate(&geometry, "(map (fn [(x : int)] (int/add x (frame/index))) (get (sop/edges geo) :a))");
-            let core = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+            let core = flow_ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
             let expected = ints(&view.edge_a.iter().map(|x| x + 3).collect::<Vec<_>>());
             over_domains(&|| {
-                assert_eq!(flow_ok(flow_eval::Host::force_reference(&value, &live, None, None, Some(resolve.clone()))), expected);
-                let options = Executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
-                assert_eq!(flow_ok(Executor::force(&core, &options, &live)), expected);
+                assert_eq!(flow_ok(flow_eval::host::force_reference(&value, &live, None, None, Some(resolve.clone()))), expected);
+                let options = executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
+                assert_eq!(flow_ok(executor::force(&core, &options, &live)), expected);
             });
             let (value, resolve) = evaluate(&geometry, "(let* [n (sop/count geo :points)] (array/int n 9007199254740993))");
-            let core = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
-            let options = Executor::ForceOptions { strict: true, resolve: Some(resolve), ..Default::default() };
+            let core = flow_ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
+            let options = executor::ForceOptions { strict: true, resolve: Some(resolve), ..Default::default() };
             let expected = ints(&vec![9007199254740993; geometry::point_count(&geometry) as usize]);
-            assert_eq!(flow_ok(Executor::force(&core, &options, &live)), expected, "{name}");
+            assert_eq!(flow_ok(executor::force(&core, &options, &live)), expected, "{name}");
         }
     }
 
@@ -1395,7 +1395,7 @@ mod integration {
             }
             let refused = |body: &str, code: &str| {
                 let (value, resolve) = evaluate(&geometry, body);
-                let result = flow_eval::Host::force_reference(&value, &input::at_time(0.25), None, None, Some(resolve));
+                let result = flow_eval::host::force_reference(&value, &input::at_time(0.25), None, None, Some(resolve));
                 assert_eq!(result.err().unwrap().code, code, "{body}");
             };
             refused(&format!("(sop/components geo :seams (array/int {} 0))", edges + 1), "E_COMPONENTS_SEAMS");

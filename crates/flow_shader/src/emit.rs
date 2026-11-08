@@ -10,8 +10,8 @@ use crate::noise;
 use crate::trace::Back;
 pub use crate::trace::Curves;
 use crate::trace;
-use flow_ir::core_ir::Region::{self, Instruction, Loop, Projection, Stage};
-use flow_ir::kernel_layout::{self, Scope, Visit};
+use flow_ir::core_ir::region::{self, Instruction, Loop, Projection, Stage};
+use flow_ir::kernel_layout::{self, scope, Visit};
 use flow_ir::packed;
 use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
 use flow_syntax::ty::Ty;
@@ -470,7 +470,7 @@ struct Gen {
     named: Vec<bool>,
     hits: HashMap<(i64, Guards, bool, bool, Vec<i64>), String>,
     scans: Vec<i64>,
-    scopes: Vec<Scope::T>,
+    scopes: Vec<scope::T>,
     failure: Option<Diagnostic>,
 }
 
@@ -518,7 +518,7 @@ impl Gen {
     }
 
     fn integer_register(&self, slot: i64) -> bool {
-        Region::integer_register(self.code(slot))
+        region::integer_register(self.code(slot))
     }
 
     fn narrow(&self, slot: i64) -> bool {
@@ -690,7 +690,7 @@ impl Gen {
         format!("uniforms[{}]", word.expect("scene count word"))
     }
 
-    fn current(&mut self) -> &mut Scope::T {
+    fn current(&mut self) -> &mut scope::T {
         self.scopes.last_mut().expect("a scope")
     }
 
@@ -705,7 +705,7 @@ impl Gen {
             Some(name) => name.clone(),
             None => {
                 let name = format!("hit{slot}");
-                fn declare(scope: &mut Scope::T, name: &str, ty: &str, field: &str, zero: &str) {
+                fn declare(scope: &mut scope::T, name: &str, ty: &str, field: &str, zero: &str) {
                     scope.decls.push_str(&format!("  {ty} {name}{field}={zero};\n"));
                 }
                 if curve && !native {
@@ -735,7 +735,7 @@ impl Gen {
                         declare(scope, &name, "uint", "_p", "0u");
                         declare(scope, &name, "float", "_u", "0.0f");
                     }
-                    let indentation = Scope::indent(scope);
+                    let indentation = scope::indent(scope);
                     scope.code.push_str(&format!("{indentation}{body}\n"));
                 } else {
                     let mut a: Vec<String> = Vec::new();
@@ -791,7 +791,7 @@ impl Gen {
                             }
                         )
                     };
-                    let indentation = Scope::indent(scope);
+                    let indentation = scope::indent(scope);
                     scope.code.push_str(&format!(
                         "{indentation}{{intersector<{data}> q;q.assume_geometry_type(geometry_type::{kind});q.force_opacity(forced_opacity::opaque);{}{}{}}}\n",
                         if curve {
@@ -900,7 +900,7 @@ impl Gen {
     }
 
     fn enter(&mut self, scope_index: usize, guards: &[(i64, bool)]) {
-        Scope::enter(&mut self.scopes[scope_index], &opening, guards);
+        scope::enter(&mut self.scopes[scope_index], &opening, guards);
     }
 
     /// The instruction's value expression.
@@ -1112,7 +1112,7 @@ impl Gen {
     fn print(&mut self) -> Result<String, Diagnostic> {
         self.hits.clear();
         self.scans.clear();
-        self.scopes = vec![Scope::create(None, Some(Arc::new(AtomicI64::new(0))), 0)];
+        self.scopes = vec![scope::create(None, Some(Arc::new(AtomicI64::new(0))), 0)];
         let layout = self.layout.clone();
         kernel_layout::iter(&layout, self);
         if let Some(d) = self.failure.take() {
@@ -1231,11 +1231,11 @@ impl Visit for Gen {
         if !(constant || inline) {
             self.enter(ci, &guards);
         }
-        self.blocks = if constant { self.scopes[ci].outer.clone() } else { Scope::stack(&self.scopes[ci]) };
+        self.blocks = if constant { self.scopes[ci].outer.clone() } else { scope::stack(&self.scopes[ci]) };
         if self.counting {
             self.defined_in[slot] = self.blocks.clone();
         }
-        let indentation = Scope::indent(&self.scopes[ci]);
+        let indentation = scope::indent(&self.scopes[ci]);
         let expression = self.expression(s, &guards, ins);
         if self.failure.is_some() {
             return;
@@ -1301,8 +1301,8 @@ impl Visit for Gen {
             self.scopes[oi].decls.push_str(&line);
         }
         self.enter(oi, &guards);
-        self.blocks = Scope::stack(&self.scopes[oi]);
-        let indentation = Scope::indent(&self.scopes[oi]);
+        self.blocks = scope::stack(&self.scopes[oi]);
+        let indentation = scope::indent(&self.scopes[oi]);
         if let Some(limit) = control.limit {
             let il = self.loop_bound(control.last);
             let if_ = self.loop_bound(control.first);
@@ -1329,13 +1329,13 @@ impl Visit for Gen {
         };
         let first = bound(self, h, control.first);
         self.scopes[oi].code.push_str(&format!("{indentation}for(r{header}={first};r{header}<{last};r{header}++){{\n"));
-        let inner = Scope::create(Some(Scope::stack(&self.scopes[oi])), Some(self.scopes[oi].next.clone()), h);
+        let inner = scope::create(Some(scope::stack(&self.scopes[oi])), Some(self.scopes[oi].next.clone()), h);
         self.scopes.push(inner);
         body(self);
         let ii = self.scopes.len() - 1;
         self.enter(ii, &[]);
         self.context = (self.scopes[ii].id, vec![]);
-        self.blocks = Scope::stack(&self.scopes[ii]);
+        self.blocks = scope::stack(&self.scopes[ii]);
         let inner = self.scopes.pop().expect("inner scope");
         let decls = declarations(&inner.decls);
         self.scopes[oi].code.push_str(&decls);
@@ -1461,7 +1461,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
             return Err(fail_d("Uint32 output index is outside its producer."));
         }
         match view.outputs[u(*index)].as_slice() {
-            [slot] if fast && Region::integer_register(&view.code[u(*slot)]) => output_flags[u(*index)] = true,
+            [slot] if fast && region::integer_register(&view.code[u(*slot)]) => output_flags[u(*index)] = true,
             _ => return Err(fail_d("Uint32 output requires a scalar integer result in fast precision.")),
         }
     }

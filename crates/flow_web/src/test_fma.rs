@@ -11,7 +11,7 @@ use crate::wgsl;
 use flow_check::catalog::Catalog;
 use flow_check::workspace as W;
 use flow_eval as E;
-use flow_ir::core_ir::Region::{self, Instruction, Projection};
+use flow_ir::core_ir::region::{self, Instruction, Projection};
 use flow_ir::core_lower;
 use flow_ir::packed::{self, host};
 use flow_syntax::syntax;
@@ -42,7 +42,7 @@ fn live() -> input::Frame {
 
 fn compiled(value: &Value) -> packed::T {
     let Value::Residual(r) = value else { panic!("not live") };
-    let view = E::Residual::residual_view(*r).unwrap();
+    let view = E::residual::residual_view(*r).unwrap();
     match packed::compile_result(&Default::default(), *r, &view.term) {
         Ok(p) => p,
         Err(ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join(";")),
@@ -127,9 +127,9 @@ fn explicit_fma_regions_match_exact_binary64() {
     script.push_str("if(fma(1.0000000000000002,0.9999999999999998,-1)===1.0000000000000002*0.9999999999999998-1)throw Error('FMA lost single rounding');\n");
     script.push_str("for(const args of [[Infinity,0,1],[1,NaN,0],[1,1,-Infinity],[Number.MAX_VALUE,2,0]]){try{fma(...args);throw Error('accepted')}catch(e){if(e.code!=='E_NONFINITE')throw e}}\n");
     // a malformed region with a nonfinite FMA input reports the status, not a value
-    let bad = Region::rebuild(
+    let bad = region::rebuild(
         &packed,
-        Region::Rebuild {
+        region::Rebuild {
             code: Some(vec![Instruction::Const(f64::INFINITY), Instruction::Const(0.0), Instruction::Const(1.0), Instruction::Fma(0, 1, 2)]),
             outputs: Some(vec![vec![3]]),
             ..Default::default()
@@ -188,7 +188,7 @@ fn checked_arithmetic_regions_match_exact_binary64() {
     let source = host_value(&format!("(if (> t 0.) {body} {body})"), data.clone());
     let Value::Residual(residual) = &source else { panic!("not live") };
     let core = core_lower::lower(None, None, true, None, None, *residual).expect("checked main lowers");
-    let view = E::Residual::residual_view(*residual).unwrap();
+    let view = E::residual::residual_view(*residual).unwrap();
     let packed = match packed::compile_result(&Default::default(), *residual, &view.term) {
         Ok(p) => p,
         // The outer structural if belongs to Core; inspect its actual map region.
@@ -217,9 +217,9 @@ fn checked_arithmetic_regions_match_exact_binary64() {
             Instruction::Checked_fma(Projection::Value, 0, 1, 2),
             Instruction::Checked_fma(Projection::Valid, 0, 1, 2),
         ] {
-            let malformed = Region::rebuild(
+            let malformed = region::rebuild(
                 &packed,
-                Region::Rebuild {
+                region::Rebuild {
                     code: Some(vec![Instruction::Const(bad), Instruction::Const(1.0), Instruction::Const(0.0), instruction]),
                     outputs: Some(vec![vec![3]]),
                     ..Default::default()
@@ -235,9 +235,9 @@ fn checked_arithmetic_regions_match_exact_binary64() {
             script.push_str("if(region([new Float64Array(3)],[],[new Float64Array(1)],0,1)!==1)throw Error('checked nonfinite input accepted');\n}\n");
         }
     }
-    let guarded = Region::rebuild(
+    let guarded = region::rebuild(
         &packed,
-        Region::Rebuild {
+        region::Rebuild {
             code: Some(vec![
                 Instruction::Const(0.0),
                 Instruction::Const(f64::INFINITY),

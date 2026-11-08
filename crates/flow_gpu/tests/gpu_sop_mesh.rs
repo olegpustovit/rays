@@ -3,7 +3,7 @@
 mod common;
 use flow_gpu::{host as h,run};
 use common::{Observe,Seen};
-use flow_ir::{flow_ir::Gpu,core_exec,packed};
+use flow_ir::{flow_ir::gpu,core_exec,packed};
 use rays_diagnostic::Diagnostic;
 use flow_sop::{lower,value_lane,topology_kernel,topology_kernel_impl};
 use flow_syntax::{syntax,ty::Ty,value::Value};
@@ -31,21 +31,21 @@ fn read(geometry:&g::T,count:i64,case:&str){
     for i in 0..3*count{assert_eq!(float3::get(g::positions(geometry),i).unwrap(),(i as f64,0.,0.));}
 }
 /// A residency whose executor is another's; the rest is the base's.
-struct Wrapped{base:Box<dyn Gpu::Residency>,executor:Arc<dyn core_exec::Resident>}
-impl Gpu::Residency for Wrapped{
+struct Wrapped{base:Box<dyn gpu::Residency>,executor:Arc<dyn core_exec::Resident>}
+impl gpu::Residency for Wrapped{
     fn executor(&self)->&Arc<dyn core_exec::Resident>{&self.executor}
-    fn retain_uint32(&self,v:&Value)->Option<Gpu::Integers>{self.base.retain_uint32(v)}
-    fn retain_float(&self,v:&Value)->Option<Gpu::Planes>{self.base.retain_float(v)}
+    fn retain_uint32(&self,v:&Value)->Option<gpu::Integers>{self.base.retain_uint32(v)}
+    fn retain_float(&self,v:&Value)->Option<gpu::Planes>{self.base.retain_float(v)}
     fn pack_planes(&self,v:&[Value;3])->Result<Option<Value>,Diagnostic>{self.base.pack_planes(v)}
-    fn incidence(&self)->Gpu::IncidenceBuilder{self.base.incidence()}
+    fn incidence(&self)->gpu::IncidenceBuilder{self.base.incidence()}
     fn validate_topology(&self,n:i64,v:&Value,o:&Value,k:&Value,max:i64)->Option<Result<(),Diagnostic>>{self.base.validate_topology(n,v,o,k,max)}
     fn ready(&self)->bool{self.base.ready()}
 }
 /// A backend whose residencies are observed: once the device has dispatched, `cancel_case` cancels
 /// the cook at its next settle or count, and a close is counted.
-struct Watched{base:Box<dyn Gpu::Backend>,cancel:Arc<cancel::T>,closes:Arc<AtomicUsize>,cancel_case:bool}
-impl Gpu::Backend for Watched{
-    fn residency(&self,fast:bool)->Option<Box<dyn Gpu::Residency>>{
+struct Watched{base:Box<dyn gpu::Backend>,cancel:Arc<cancel::T>,closes:Arc<AtomicUsize>,cancel_case:bool}
+impl gpu::Backend for Watched{
+    fn residency(&self,fast:bool)->Option<Box<dyn gpu::Residency>>{
         let base=self.base.residency(fast)?;
         // Retained-stream callbacks share this executor; observe it by delegation.
         let dispatched=AtomicBool::new(false);let(cancel,closes,cancel_case)=(self.cancel.clone(),self.closes.clone(),self.cancel_case);
@@ -58,7 +58,7 @@ impl Gpu::Backend for Watched{
         Some(Box::new(Wrapped{base,executor}))
     }
     fn cost(&self,inputs:Option<&packed::Inputs>,fast:bool,packed:&packed::T,count:i64)->Option<f64>{self.base.cost(inputs,fast,packed,count)}
-    fn prepare(&self,fast:bool,packed:&packed::T)->Result<Arc<dyn Gpu::Kernel>,Diagnostic>{self.base.prepare(fast,packed)}
+    fn prepare(&self,fast:bool,packed:&packed::T)->Result<Arc<dyn gpu::Kernel>,Diagnostic>{self.base.prepare(fast,packed)}
 }
 fn run_case(test:&str,empty_offset:bool){
     assert!(common::gpu(),"native SOP mesh qualification requires a real GPU");common::release_keepalive();let baseline=ogpu_core::impl_::live_handles().unwrap();
@@ -72,7 +72,7 @@ fn run_case(test:&str,empty_offset:bool){
     }
     let cancel=Arc::new(cancel::create());let closes=Arc::new(AtomicUsize::new(0));
     let backend=Watched{base:h::backend(&host),cancel:cancel.clone(),closes:closes.clone(),cancel_case:case=="cancel"};
-    let config=Gpu::Config{backend:Some(Arc::new(backend)),fast:true,policy:Gpu::Policy::Qualification,readback_per_float:None,..Gpu::default()};
+    let config=gpu::Config{backend:Some(Arc::new(backend)),fast:true,policy:gpu::Policy::Qualification,readback_per_float:None,..gpu::default()};
     let lowered=lower::workspace(None,vec![],lower::Options{defer:true,gpu:config.clone(),..Default::default()},&syntax::parse(&source(host_call,case)).unwrap()).unwrap_or_else(|d|panic!("{}",rays_diagnostic::to_string(&d)));
     let graph=&lowered.graphs[0];let resolved=value_lane::resolve(Some(&config),None,&value_lane::create(None),0.,&graph.network).unwrap();let root=edit::compile_node(&resolved.geometry,graph.root.unwrap()).unwrap();if host_call{assert_eq!(node::operation(&root),"flow.geometry_select");}
     let mut session=session::create(4,1<<24).unwrap();let mut held=vec![];let mut replays=0;
@@ -103,7 +103,7 @@ fn static_topology_stays_resident() {
     assert!(common::gpu());
     let gpu = common::lease();
     let host = h::create(&|| 0., &gpu);
-    let config = Gpu::Config { backend: Some(h::backend(&host).into()), fast: true, policy: Gpu::Policy::Qualification, ..Gpu::default() };
+    let config = gpu::Config { backend: Some(h::backend(&host).into()), fast: true, policy: gpu::Policy::Qualification, ..gpu::default() };
     let text = "(workspace static_mesh (graph g :context sop (sop/mesh :points (exact (map (fn [(i : int)] [(+ (float i) t) 0. 0.]) (array/range 15000 :type int))) :vertex_points (exact (array/range 15000 :type int)) :primitive_offsets (exact (map (fn [(i : int)] (int/mul i 3)) (array/range 5001 :type int))) :kinds (array/int 5000))))";
     let lowered = lower::workspace(None, Vec::new(), lower::Options { gpu: config, defer: true, ..Default::default() }, &syntax::parse(text).unwrap()).unwrap();
     let graph = &lowered.graphs[0];

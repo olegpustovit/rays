@@ -360,7 +360,7 @@ fn invalid_region_layouts_are_rejected() {
         .iter()
         .find_map(|p| invoked_region(&p.body).map(|r| p.regions[r as usize].clone()))
         .expect("a program that invokes a region");
-    assert!(C::Region::rebuild(&region, C::Region::Rebuild { outputs: Some(vec![]), ..Default::default() }).is_err());
+    assert!(C::region::rebuild(&region, C::region::Rebuild { outputs: Some(vec![]), ..Default::default() }).is_err());
 }
 
 fn diagnose_span(statements: &[C::Statement]) -> Option<rays_diagnostic::Span> {

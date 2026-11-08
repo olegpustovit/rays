@@ -80,7 +80,7 @@ fn text_arrays_through_the_evaluator() {
     let c = bulk_calls.clone();
     let handlers = ResidualHandlers { bulk: Some(Arc::new(move |_| { c.fetch_add(1, Ordering::SeqCst); None })), ..Default::default() };
     let w = check("host", "(map (fn [x] x) (array/text 5001 \"猫\"))");
-    Residual::handle(handlers, &mut || Host::static_with_requests(None, false, None, &w)).unwrap();
+    residual::handle(handlers, &mut || host::static_with_requests(None, false, None, &w)).unwrap();
     assert_eq!(bulk_calls.load(Ordering::SeqCst), 0);
     for body in ["(array/text -1)", "(array/nth (array/text 0) 0)", "(array/slice (array/text 1) 0 2)", "(array/concat (array/text 1) (array/int 1))", "(array/sum (array/text 0))"] {
         assert!(static_eval(&check("host", body)).is_err(), "{body}");

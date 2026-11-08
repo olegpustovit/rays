@@ -3,7 +3,7 @@
 use flow_check::catalog::{self as flow_catalog, Parameter};
 use flow_check::workspace::{Graph, Node, NodeDefinition, Pattern, Term, Workspace};
 use flow_check::term_arena::{Draft, TermBuilder};
-use flow_eval::{Host, Residual, ResidualHandlers, Value};
+use flow_eval::{host, residual, ResidualHandlers, Value};
 use flow_syntax::context;
 use flow_syntax::phase_timer;
 use flow_syntax::syntax::Syntax;
@@ -29,8 +29,8 @@ fn normalize_error(span: &Syntax, message: &str) -> Diagnostic {
 
 fn evaluate(workspace: &Workspace, graph: &str, form: &Syntax, raw: &[u8]) -> Result<Vec<u8>, Diagnostic> {
     let inputs = vec![(graph.to_owned(), vec![("raw_value".to_owned(), Value::Text(raw.to_vec()))])];
-    let result = Residual::handle(ResidualHandlers::default(), &mut || {
-        Host::static_with_requests(None, false, Some(&inputs), workspace)
+    let result = residual::handle(ResidualHandlers::default(), &mut || {
+        host::static_with_requests(None, false, Some(&inputs), workspace)
     })?;
     match result.results.iter().find(|(name, _)| name == graph) {
         Some((_, Value::Text(canonical))) if result.plan.nodes.is_empty() => Ok(canonical.clone()),

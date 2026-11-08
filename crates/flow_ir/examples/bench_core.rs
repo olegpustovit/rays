@@ -26,7 +26,7 @@ fn compile(body: &str, fusion: bool) -> packed::T {
     let Value::Residual(residual) = evaluation.records.iter().find(|(p, _)| *p == path).expect("tested").1[0].1.clone() else {
         panic!("kernel did not defer: {body}")
     };
-    let term = E::Residual::residual_view(residual).unwrap().term;
+    let term = E::residual::residual_view(residual).unwrap().term;
     packed::compile(&CompileOptions { fusion, ..Default::default() }, residual, &term).expect("kernel does not compile")
 }
 

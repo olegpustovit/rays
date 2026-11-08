@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use editor_document::settings;
 use flow_graph::probe;
-use flow_ir::flow_ir::Gpu;
+use flow_ir::flow_ir::gpu;
 use flow_sop::network::Network;
 use flow_sop::value_lane;
 use param::Effects;
@@ -352,7 +352,7 @@ fn same_key(entry: &Cache_entry, id: i64, settings: &settings::T, output: &Outpu
 /// `Gpu` (when the editor draws on a device) is fed the time preparing took, the measured display
 /// sink the mesh placement prices, per route of the geometry.
 pub fn prepare_cached(
-    gpu: Option<&Gpu::Config>,
+    gpu: Option<&gpu::Config>,
     p: &Preparer,
     id: i64,
     context: &[u8],
@@ -477,7 +477,7 @@ pub fn prepared_context(readers: i64, context: context::T, nodes: &[node::T]) ->
 /// device while a fixed-step run waits (default: sleep 0.5 ms).
 #[allow(clippy::too_many_arguments)]
 pub fn update(
-    gpu: Option<&Gpu::Config>,
+    gpu: Option<&gpu::Config>,
     input: Option<input::Frame>,
     live: bool,
     probes: &[Key2],
@@ -912,7 +912,7 @@ impl Job {
 /// The initial domain's half of a cook: a piece per displayed graph, reusing the previous pieces of
 /// an unchanged graph, settings, context projection and highlight, else preparing the (tinted)
 /// output.
-fn finish(gpu: Option<&Gpu::Config>, preparer: &Preparer, previous: &[piece], raw: Raw) -> Result<cooked, String> {
+fn finish(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[piece], raw: Raw) -> Result<cooked, String> {
     let (probe_only, graphs, outputs, settings, lit, context, found, data) = match raw {
         Raw::Framed(b) => return Ok(cooked::Framed(b)),
         Raw::Cooked { probe_only, graphs, outputs, settings, lit, context, found, data } => (probe_only, graphs, outputs, settings, lit, context, found, data),
@@ -949,7 +949,7 @@ fn finish(gpu: Option<&Gpu::Config>, preparer: &Preparer, previous: &[piece], ra
     Ok(if probe_only { cooked::Probed(pieces, found, data) } else { cooked::Displayed(pieces, found, data) })
 }
 
-fn complete(gpu: Option<&Gpu::Config>, preparer: &Preparer, previous: &[piece], prepared: Prepared) -> Result<cooked, String> {
+fn complete(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[piece], prepared: Prepared) -> Result<cooked, String> {
     match prepared.downcast::<Raw>() {
         Ok(raw) => finish(gpu, preparer, previous, *raw),
         Err(_) => Err("cook returned an unexpected value".to_string()),

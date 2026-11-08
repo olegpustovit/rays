@@ -153,9 +153,9 @@ fn walker_loop_allocations() {
     assert!(matches!(residual, flow_syntax::value::Value::Residual(_)));
     let live = input::at_time(0.5);
     // Warm route and pattern caches; only execution belongs to the steady-state budget.
-    flow_eval::Host::force_reference(residual, &live, None, None, None).unwrap();
+    flow_eval::host::force_reference(residual, &live, None, None, None).unwrap();
     mem_sys::local_reset();
-    let result = flow_eval::Host::force_reference(residual, &live, None, None, None).unwrap();
+    let result = flow_eval::host::force_reference(residual, &live, None, None, None).unwrap();
     let (allocs, peak) = (mem_sys::local_alloc_count(), mem_sys::local_peak_bytes());
     assert_eq!(result, flow_syntax::value::Value::Float(1_050_112.0));
     eprintln!("walker loop: {allocs} allocs / {peak} peak bytes");

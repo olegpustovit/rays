@@ -184,7 +184,7 @@ pub fn compile(shared: &[(String, i64)], declarations: &str, entry: &str) -> Res
         Some((_, Value::Fn(f))) => *f,
         _ => return fail(&format!("{entry}: the stage is not a function")),
     };
-    let result = match E::Residual::function_body(function) {
+    let result = match E::residual::function_body(function) {
         Some((_, body)) => body.ty().clone(),
         None => Ty::Any,
     };
@@ -204,7 +204,7 @@ pub fn compile(shared: &[(String, i64)], declarations: &str, entry: &str) -> Res
     let residual = E::map_kernel(None, None, &signature, function, &columns)?;
     match residual {
         Value::Residual(r) => {
-            let term = E::Residual::residual_view(r)?.term;
+            let term = E::residual::residual_view(r)?.term;
             let options = CompileOptions::default();
             match packed::compile_template(&options, r, &term) {
                 Some(program) => Ok(Stage { params, leaves: leaves(false, &[], &result), program, bindings }),

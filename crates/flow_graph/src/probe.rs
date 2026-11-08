@@ -162,7 +162,7 @@ pub fn make(eval: &Eval, o: Options) -> Probe {
     };
     let state = o.state.as_ref().map(e::fork_state);
     let force: Force = o.force.unwrap_or_else(|| {
-        Rc::new(|state, elems, resolve, v, live| e::Host::force_reference(v, live, state, elems, resolve))
+        Rc::new(|state, elems, resolve, v, live| e::host::force_reference(v, live, state, elems, resolve))
     });
     Probe {
         force,
@@ -500,7 +500,7 @@ impl Probe {
                                     got = Some(Err(d));
                                     true
                                 }
-                                Ok(_) => self.guard(&mut || got = Some(e::Host::map_probe(*call, &live, state.as_ref(), resolve.clone(), None, *offset as usize))),
+                                Ok(_) => self.guard(&mut || got = Some(e::host::map_probe(*call, &live, state.as_ref(), resolve.clone(), None, *offset as usize))),
                             };
                             if let (true, Some(Ok((count, at)))) = (completed, got) {
                                 let at: Rc<dyn Fn(usize) -> Result<Records, Diagnostic>> = Rc::from(at);
@@ -656,7 +656,7 @@ impl Probe {
         let records = self.raw.get(&node.path)?;
         records.iter().find_map(|(tuple, value)| match value {
             Value::Residual(residual) if tuple == probes => {
-                let view = e::Residual::residual_view(*residual).ok()?;
+                let view = e::residual::residual_view(*residual).ok()?;
                 let arena = view.term.arena();
                 let term: Option<w::Term> = match (view.term.node, key) {
                     (w::Node::If(id), "test") => Some(view.term.child(arena.if_node(id).test)),
@@ -664,7 +664,7 @@ impl Probe {
                     (w::Node::Cond(id), key) if key.starts_with("test") => key[4..].parse::<usize>().ok().and_then(|i| arena.arms(arena.cond(id).arms).get(i)).map(|arm| view.term.child(arm.test)),
                     _ => None,
                 };
-                term.and_then(|term| e::Residual::eval_term(*residual, &term, &live, self.state.as_ref(), None, self.resolve.clone()).ok()).map(Summary::Value)
+                term.and_then(|term| e::residual::eval_term(*residual, &term, &live, self.state.as_ref(), None, self.resolve.clone()).ok()).map(Summary::Value)
             }
             _ => None,
         })

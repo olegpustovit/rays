@@ -10,7 +10,7 @@ use crate::preset;
 use crate::workspace_doc::{self, TextOptions};
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{self as fe, ArgKey, Op};
-use flow_ir::flow_ir::Gpu;
+use flow_ir::flow_ir::gpu;
 use flow_syntax::syntax::{self as s, Node};
 use std::sync::Arc;
 
@@ -61,23 +61,23 @@ const DOCUMENT_TEXT: &str = r#"(workspace document
     (scene/merge (scene/geometry (ref geo1) :name "geo1") (scene/camera :name "camera1"))))"#;
 
 struct UnusedBackend;
-impl Gpu::Backend for UnusedBackend {
-    fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> {
+impl gpu::Backend for UnusedBackend {
+    fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn gpu::Kernel>, rays_diagnostic::Diagnostic> {
         Err(rays_diagnostic::error("E_TEST_GPU".to_owned(), "unused test backend".to_owned(), None, None, None, Vec::new(), Vec::new()))
     }
 }
 
-fn test_backend() -> Arc<dyn Gpu::Backend> { Arc::new(UnusedBackend) }
+fn test_backend() -> Arc<dyn gpu::Backend> { Arc::new(UnusedBackend) }
 
 #[test]
 fn document_boundary_validation_dump_preset_gpu() {
     let workspace = ws_of_text(DOCUMENT_TEXT);
     let doc = lower(None, &workspace);
     let backend = test_backend();
-    let gpu = Gpu::Config { backend: Some(backend.clone()), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
+    let gpu = gpu::Config { backend: Some(backend.clone()), fast: true, policy: gpu::Policy::Qualification, readback_per_float: None, ..gpu::default() };
     let carries_gpu = |doc: &document::T| {
         let l = &doc.workspace.lowered.gpu;
-        l.fast && l.policy == Gpu::Policy::Qualification && l.backend.as_ref().map_or(false, |b| Arc::ptr_eq(b, &backend))
+        l.fast && l.policy == gpu::Policy::Qualification && l.backend.as_ref().map_or(false, |b| Arc::ptr_eq(b, &backend))
     };
     let gpu_doc = lowering::of_workspace(&Options { factories: Some(factories()), gpu: Some(gpu.clone()), ..Default::default() }, &workspace).expect("gpu lowering");
     assert!(carries_gpu(&gpu_doc), "workspace lowering discarded its explicit GPU config");

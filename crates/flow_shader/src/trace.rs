@@ -3,7 +3,7 @@
 //! inlines trace.rays' trace-hit (trace-occluded for a ray whose only read field is hit), compiled once
 //! a scene variant, in place of those fields.
 use crate::lisp_stage;
-use flow_ir::core_ir::Region::{self, Instruction, LiveFloat, Rebuild};
+use flow_ir::core_ir::region::{self, Instruction, LiveFloat, Rebuild};
 use flow_ir::kernel_layout;
 use flow_ir::packed;
 use flow_syntax::value;
@@ -82,9 +82,9 @@ pub fn remap(f: &dyn Fn(i64) -> i64, instruction: &Instruction) -> Instruction {
         Text_gather(a, i) => Text_gather(f(*a), f(*i)),
         Text_select(c, a, b) => Text_select(f(*c), f(*a), f(*b)),
         Noise3(a, b, c, seed, octaves, lacunarity, gain) => {
-            let live_int = |x: &Region::LiveInt| match x {
-                Region::LiveInt::Fixed(v) => Region::LiveInt::Fixed(*v),
-                Region::LiveInt::Live(r) => Region::LiveInt::Live(f(*r)),
+            let live_int = |x: &region::LiveInt| match x {
+                region::LiveInt::Fixed(v) => region::LiveInt::Fixed(*v),
+                region::LiveInt::Live(r) => region::LiveInt::Live(f(*r)),
             };
             let live_float = |x: &LiveFloat| match x {
                 LiveFloat::Fixed(v) => LiveFloat::Fixed(*v),
@@ -100,7 +100,7 @@ pub fn remap(f: &dyn Fn(i64) -> i64, instruction: &Instruction) -> Instruction {
         Stage(stage, r) => Stage(*stage, all(r)),
         Select(c, a, b) => Select(f(*c), f(*a), f(*b)),
         Int_select(c, a, b) => Int_select(f(*c), f(*a), f(*b)),
-        Loop_begin(l) => Loop_begin(Region::Loop { first: f(l.first), last: f(l.last), initial: all(&l.initial), ..l.clone() }),
+        Loop_begin(l) => Loop_begin(region::Loop { first: f(l.first), last: f(l.last), initial: all(&l.initial), ..l.clone() }),
         Loop_carry(owner, component, ty) => Loop_carry(f(*owner), *component, ty.clone()),
         Loop_end(owner, next, stop) => Loop_end(f(*owner), all(next), stop.map(f)),
         Loop_result(owner, component, ty) => Loop_result(f(*owner), *component, ty.clone()),
@@ -114,7 +114,7 @@ pub fn remap(f: &dyn Fn(i64) -> i64, instruction: &Instruction) -> Instruction {
 pub fn rebuild(program: &packed::T, mut code: Vec<Instruction>, back: Vec<i64>, map: &[i64]) -> Result<(packed::T, Back), Diagnostic> {
     fn close(i: &Instruction, slot: i64) -> Instruction {
         match i {
-            Instruction::Loop_begin(l) => Instruction::Loop_begin(Region::Loop { finish: slot, ..l.clone() }),
+            Instruction::Loop_begin(l) => Instruction::Loop_begin(region::Loop { finish: slot, ..l.clone() }),
             Instruction::Guarded(g, body) => Instruction::Guarded(g.clone(), Box::new(close(body, slot))),
             other => other.clone(),
         }
@@ -126,7 +126,7 @@ pub fn rebuild(program: &packed::T, mut code: Vec<Instruction>, back: Vec<i64>, 
         }
     }
     let outputs: Vec<Vec<i64>> = program.outputs.iter().map(|o| o.iter().map(|x| map[*x as usize]).collect()).collect();
-    match Region::rebuild(program, Rebuild { code: Some(code), outputs: Some(outputs), ..Rebuild::default() }) {
+    match region::rebuild(program, Rebuild { code: Some(code), outputs: Some(outputs), ..Rebuild::default() }) {
         Ok(expanded) => Ok((expanded, Back::from_vec(back))),
         Err(mut d) if !d.is_empty() => Err(d.remove(0)),
         Err(_) => fail("the kernel with its spliced helpers did not rebuild"),

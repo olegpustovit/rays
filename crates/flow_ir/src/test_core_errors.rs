@@ -1,7 +1,7 @@
 // Port of lib/flow_ir/test_core_errors.ml.
 use crate::core_exec::{self, Options};
 use crate::core_lower;
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::{self as ts, ok};
 use flow_check::op;
 use flow_check::workspace as W;
@@ -39,7 +39,7 @@ fn recorded(body: &str) -> Value {
     evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1.clone()
 }
 
-fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::Host::force_reference(value, live, None, None, None) }
+fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::host::force_reference(value, live, None, None, None) }
 
 fn live_frame(frame: i64) -> Frame { Frame { frame, ..input::at_time(frame as f64 * 0.25) } }
 
@@ -68,17 +68,17 @@ fn core_loops_observe_cancellation_without_restarting_the_walker() {
     }
 }
 
-fn state_values(state: &E::State) -> Value { Value::List(Arc::new(E::Host::state_values(state))) }
+fn state_values(state: &E::State) -> Value { Value::List(Arc::new(E::host::state_values(state))) }
 
-fn compile_strict(value: &Value) -> crate::flow_ir::Executor::Program {
-    ok(Executor::compile(value, &Executor::CompileOptions { strict: true, ..Default::default() }))
+fn compile_strict(value: &Value) -> crate::flow_ir::executor::Program {
+    ok(executor::compile(value, &executor::CompileOptions { strict: true, ..Default::default() }))
 }
 
 #[test]
 fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     let rewrite = |value: Value| {
         let next = std::cell::Cell::new(-8_440_001i64);
-        E::Host::rewrite_with(&value, &|_| None, &|| {
+        E::host::rewrite_with(&value, &|_| None, &|| {
             let id = next.get();
             next.set(id - 1);
             id
@@ -86,29 +86,29 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     };
     let good = rewrite(recorded("(map (fn [x] (+ x t)) (array/range 16))"));
     let bad = recorded(r#"(map (fn [x] (if (> t 0.) (error "E_DYNAMIC" (str x)) x)) (array/range 16))"#);
-    let options = Executor::CompileOptions { strict: true, ..Default::default() };
-    assert!(matches!(Executor::compile(&bad, &options), Err(d) if d.code == "E_KERNEL_FORM"), "the uncached fixture must refuse");
+    let options = executor::CompileOptions { strict: true, ..Default::default() };
+    assert!(matches!(executor::compile(&bad, &options), Err(d) if d.code == "E_KERNEL_FORM"), "the uncached fixture must refuse");
     let bad = rewrite(bad);
     let (Value::Residual(a), Value::Residual(b)) = (&good, &bad) else { panic!("live maps must be residuals"); };
     assert_eq!(a.0, b.0);
     assert_ne!(a.1, b.1);
-    assert!(Executor::compile(&good, &options).is_ok());
+    assert!(executor::compile(&good, &options).is_ok());
     for value in [&bad, &Value::Record(vec![("good".into(), good.clone()), ("bad".into(), bad.clone())])] {
-        match Executor::compile(value, &options) {
+        match executor::compile(value, &options) {
             Err(d) => assert_eq!(d.code, "E_KERNEL_FORM"),
             Ok(_) => panic!("a different home's cached or visited residual hid the dynamic error"),
         }
     }
-    assert!(Executor::compile(&good, &options).is_ok(), "a refusal in another home must not poison valid compilation");
+    assert!(executor::compile(&good, &options).is_ok(), "a refusal in another home must not poison valid compilation");
     let other = rewrite(recorded("(map (fn [x] (* x t)) (array/range 16))"));
     let root = *a;
     let both = Value::Record(vec![("sum".into(), good), ("product".into(), other)]);
-    let program = ok(Executor::compile(&both, &options));
+    let program = ok(executor::compile(&both, &options));
     let core = core_lower::lower(Some(both.clone()), None, true, None, None, root).expect("mixed-home core");
     let prepared = core_exec::prepare(&core, false, false, &W::Paths::new(), false);
     for time in [0.5, 2.0] {
         let live = input::at_time(time);
-        let actual = Executor::force(&program, &Executor::ForceOptions { strict: true, ..Default::default() }, &live);
+        let actual = executor::force(&program, &executor::ForceOptions { strict: true, ..Default::default() }, &live);
         let expected = reference(&both, &live);
         assert!(same_result(&actual, &expected), "core lowering differs at t={time}: actual {actual:?}, expected {expected:?}");
         let direct = core_exec::execute(&prepared, &live, &Options { strict: true, rerun_on_error: false, ..Default::default() });
@@ -121,8 +121,8 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     let workspace = workspace.unwrap();
     let evaluation = ok(E::static_with(&workspace, false, Some(&inputs), None));
     let value = &evaluation.results[0].1;
-    let program = ok(Executor::compile(value, &options));
-    let packed = Executor::packed_region(&program).expect("direct packed map with mixed-home uniforms");
+    let program = ok(executor::compile(value, &options));
+    let packed = executor::packed_region(&program).expect("direct packed map with mixed-home uniforms");
     assert_eq!(packed.uniforms.len(), 2, "both foreign scalar captures must reach host preparation");
     for time in [0.5, 2.0] {
         let live = input::at_time(time);
@@ -146,8 +146,8 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     };
     let inputs = vec![("g".into(), vec![("a".into(), argument(0)), ("b".into(), argument(1))])];
     let evaluation = ok(E::static_with(&workspace, false, Some(&inputs), None));
-    let program = ok(Executor::compile(&evaluation.results[0].1, &Default::default()));
-    let packed = Executor::packed_region(&program).expect("packed map with mixed-home argument captures");
+    let program = ok(executor::compile(&evaluation.results[0].1, &Default::default()));
+    let packed = executor::packed_region(&program).expect("packed map with mixed-home argument captures");
     assert_eq!(ok(crate::packed::host::argument_types(&packed)), vec![flow_syntax::ty::Ty::Float; 2], "both homes' argument declarations must be visited");
     let bound = ok(crate::packed::host::bind_arguments(&packed, &[Value::Float(2.0), Value::Float(5.0)], None));
     for time in [0.5, 2.0] {
@@ -177,7 +177,7 @@ fn core_failures_answer_with_the_walkers_diagnostic() {
         let Value::Residual(r) = value else { panic!("{name}: not live") };
         let program = core_lower::lower(None, None, false, None, None, r).unwrap_or_else(|n| panic!("{name}: refused {n}"));
         let prepared = core_exec::prepare(&program, false, false, &Default::default(), false);
-        let compiled = ok(Executor::compile(&value, &Default::default()));
+        let compiled = ok(executor::compile(&value, &Default::default()));
         for time in times {
             let live = input::at_time(time);
             let expected = reference(&value, &live);
@@ -186,7 +186,7 @@ fn core_failures_answer_with_the_walkers_diagnostic() {
             assert!(plain.is_err(), "{name}: the core should fail");
             let strict = core_exec::execute(&prepared, &live, &Options { root: Some(r), strict: true, ..Default::default() });
             assert!(same_result(&strict, &plain));
-            let actual = Executor::force(&compiled, &Default::default(), &live);
+            let actual = executor::force(&compiled, &Default::default(), &live);
             assert!(same_result(&actual, &expected), "{name} at {time}: diagnostic differs from the walker");
         }
     }
@@ -234,13 +234,13 @@ fn a_failure_after_a_state_write_restores_the_plane() {
     let reference_state = E::create_state();
     let core = E::create_state();
     let mut failures = 0;
-    let compiled = ok(Executor::compile(&value, &Default::default()));
+    let compiled = ok(executor::compile(&value, &Default::default()));
     for frame in 0..8 {
         let live = live_frame(frame);
         let core_before = E::state_stamp(&core);
         let reference_before = E::state_stamp(&reference_state);
-        let expected = E::Host::force_reference(&value, &live, Some(&reference_state), None, None);
-        let (actual, _, walks) = Executor::Private::force_with_walker_counts(&compiled, &Executor::ForceOptions { state: Some(core.clone()), ..Default::default() }, &live);
+        let expected = E::host::force_reference(&value, &live, Some(&reference_state), None, None);
+        let (actual, _, walks) = executor::private::force_with_walker_counts(&compiled, &executor::ForceOptions { state: Some(core.clone()), ..Default::default() }, &live);
         if expected.is_err() { failures += 1; }
         assert!(same_result(&actual, &expected), "state frame {frame}");
         if expected.is_err() {
@@ -278,9 +278,9 @@ fn a_refused_extension_op_is_interpreted_once_and_shared() {
     };
     assert_eq!(core_lower::lower(None, None, false, None, None, residual).err().as_deref(), Some("test/opaque"));
     let shared = Value::List(Arc::new(vec![Value::Residual(residual), Value::List(Arc::new(vec![Value::Residual(residual)]))]));
-    let program = ok(Executor::compile(&shared, &Default::default()));
+    let program = ok(executor::compile(&shared, &Default::default()));
     let live = input::at_time(0.25);
-    let (actual, attempts, walks) = Executor::Private::force_with_walker_counts(&program, &Default::default(), &live);
+    let (actual, attempts, walks) = executor::private::force_with_walker_counts(&program, &Default::default(), &live);
     assert!(actual == reference(&shared, &live));
     assert!(attempts == 1 && walks == 1);
 }
@@ -295,8 +295,8 @@ fn strict_state_failures_keep_their_exact_diagnostic_and_rollback() {
         let live = live_frame(frame);
         let reference_before = E::state_stamp(&reference_state);
         let strict_before = E::state_stamp(&strict);
-        let expected = E::Host::force_reference(&value, &live, Some(&reference_state), None, None);
-        let actual = Executor::force(&compiled, &Executor::ForceOptions { strict: true, state: Some(strict.clone()), ..Default::default() }, &live);
+        let expected = E::host::force_reference(&value, &live, Some(&reference_state), None, None);
+        let actual = executor::force(&compiled, &executor::ForceOptions { strict: true, state: Some(strict.clone()), ..Default::default() }, &live);
         match (&actual, &expected) {
             (Err(a), Err(b)) => assert!(a.code == b.code && a.message == b.message && a.cause == b.cause),
             (a, b) => assert!(same_result(a, b)),
@@ -325,7 +325,7 @@ fn authored_errors_keep_exact_dynamic_messages() {
             },
         };
         check(ts::run_simple(&core, &live));
-        check(Executor::force(&compiled, &Executor::ForceOptions { strict: true, ..Default::default() }, &live));
+        check(executor::force(&compiled, &executor::ForceOptions { strict: true, ..Default::default() }, &live));
     }
     match E::static_eval(&workspace(r##"(error "E_LITERAL" "literal failure" :cause "literal cause")"##)) {
         Err(d) => assert!(d.code == "E_LITERAL" && d.cause.as_deref() == Some(b"literal cause") && d.span.is_some()),
@@ -341,7 +341,7 @@ fn authored_errors_keep_exact_dynamic_messages() {
             let expected = reference(&value, &live);
             for domains in [1, 8] {
                 ts::with_domains(domains, &|| {
-                    match (Executor::force(&compiled, &Executor::ForceOptions { strict: true, ..Default::default() }, &live), &expected) {
+                    match (executor::force(&compiled, &executor::ForceOptions { strict: true, ..Default::default() }, &live), &expected) {
                         (Ok(actual), Ok(expected)) => assert!(&actual == expected),
                         (Err(actual), Err(expected)) => assert!(actual.code == expected.code && actual.message == expected.message && actual.cause == expected.cause),
                         _ => panic!("packed error parity"),
@@ -351,7 +351,7 @@ fn authored_errors_keep_exact_dynamic_messages() {
         }
     }
     let dynamic = recorded(r##"(map (fn [x] (if (> t 0.) (error "E_DYNAMIC" (str x)) x)) (array/range 5001))"##);
-    match Executor::compile(&dynamic, &Executor::CompileOptions { strict: true, ..Default::default() }) {
+    match executor::compile(&dynamic, &executor::CompileOptions { strict: true, ..Default::default() }) {
         Err(d) if d.code == "E_KERNEL_FORM" => (),
         Err(d) => panic!("dynamic packed refusal returned {}", rays_diagnostic::to_string(&d)),
         Ok(_) => panic!("dynamic packed refusal was accepted"),

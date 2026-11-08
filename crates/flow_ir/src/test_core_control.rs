@@ -1,7 +1,7 @@
 // Port of lib/flow_ir/test_core_control.ml (core_control.expected is read in place).
 use crate::core_ir as C;
 use crate::core_lower;
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::{self as ts, ok};
 use flow_check::workspace as W;
 use flow_eval as E;
@@ -51,7 +51,7 @@ fn dump() -> String {
         assert!(printed == C::pp(&lower(r)));
         for time in [-3., -2.5, 0., 0.37, 1., 1.9, 100.25] {
             let live = input::at_time(time);
-            let expected = E::Host::force_reference(&Value::Residual(r), &live, None, None, None);
+            let expected = E::host::force_reference(&Value::Residual(r), &live, None, None, None);
             match (ts::run_simple(&core, &live), expected) {
                 (Ok(actual), Ok(expected)) => {
                     if name == "bypass" || name == "bypass-keyword" {
@@ -176,10 +176,10 @@ fn bypass_returns_the_unevaluated_time() {
     for body in ["^:bypass (+ t 5.)", "^:bypass (+ t (exp 10000.))", "^:bypass (test/offset :offset (exp 10000.) t)"] {
         let r = residual(&ts::workspace("", "", body));
         let core = lower(r);
-        let program = ok(Executor::compile(&Value::Residual(r), &Default::default()));
+        let program = ok(executor::compile(&Value::Residual(r), &Default::default()));
         for time in [0., 0.37, 2.] {
             let live = input::at_time(time);
-            assert!(ok(Executor::force(&program, &Default::default(), &live)) == Value::Float(time));
+            assert!(ok(executor::force(&program, &Default::default(), &live)) == Value::Float(time));
             assert!(ok(ts::run_simple(&core, &live)) == Value::Float(time));
         }
     }

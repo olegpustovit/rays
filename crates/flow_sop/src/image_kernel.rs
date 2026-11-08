@@ -3,7 +3,7 @@
 use crate::attribute_kernel;
 use flow_check::workspace::{Path, Paths};
 use flow_eval as e;
-use flow_ir::flow_ir::{Executor, Sink};
+use flow_ir::flow_ir::{executor, Sink};
 use flow_ir::packed;
 use flow_syntax::ty::{FnSignature, Ty};
 use flow_syntax::value::{FnId, Value};
@@ -22,7 +22,7 @@ pub struct T {
     sources: Vec<i64>,
     inputs: Vec<node::T>,
     origins: Vec<(i64, i64)>,
-    program: Executor::Program,
+    program: executor::Program,
     packed: flow_ir::flow_ir::Packed,
 }
 
@@ -53,7 +53,7 @@ pub fn prepare(
     if width > MAX_STORAGE / 4 / height {
         return error("Image dimensions exceed native storage bounds.");
     }
-    let vec4_body = e::Residual::function_body(function).is_some_and(|(_, body)| *body.ty() == Ty::Vec4);
+    let vec4_body = e::residual::function_body(function).is_some_and(|(_, body)| *body.ty() == Ty::Vec4);
     if !vec4_body {
         return error("Image map needs an instantiated vec4 pixel body.");
     }
@@ -68,10 +68,10 @@ pub fn prepare(
         }
     }
     let signature = FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 };
-    let values = e::Host::map_function(site, path.clone(), &signature, function, &[Value::Floats(2, Arc::new(uv))])?;
+    let values = e::host::map_function(site, path.clone(), &signature, function, &[Value::Floats(2, Arc::new(uv))])?;
     let approx = if path.is_none() { Paths::new() } else { approx.unwrap_or_default() };
     let program = attribute_kernel::prepare(None, false, Some(approx), Some(Sink::Display("image/map".to_owned())), sources, inputs, &values)?;
-    match Executor::packed_region(&program) {
+    match executor::packed_region(&program) {
         Some(packed) => Ok(T {
             identity,
             width,
@@ -85,7 +85,7 @@ pub fn prepare(
         }),
         None => match &values {
             Value::Residual(r) => {
-                let view = e::Residual::residual_view(*r)?;
+                let view = e::residual::residual_view(*r)?;
                 match packed::compile_result(&packed::CompileOptions::default(), *r, &view.term) {
                     Err(mut diagnostics) if !diagnostics.is_empty() => Err(diagnostics.remove(0)),
                     _ => Err(flow_syntax::value::fail("E_KERNEL_FORM", "Image function needs a packed map body.")),
@@ -96,7 +96,7 @@ pub fn prepare(
     }
 }
 
-pub fn program(t: &T) -> Executor::Program {
+pub fn program(t: &T) -> executor::Program {
     t.program.clone()
 }
 
@@ -211,7 +211,7 @@ mod tests {
         let eight = cook(0.0, 8, &kernel);
         assert_eq!(one, eight);
         assert_eq!(one.len(), 387 * 91 * 4);
-        let reference = match Executor::force(&program(&kernel), &Executor::ForceOptions { reference: true, ..Default::default() }, &input::at_time(0.0)).unwrap() {
+        let reference = match executor::force(&program(&kernel), &executor::ForceOptions { reference: true, ..Default::default() }, &input::at_time(0.0)).unwrap() {
             Value::Floats(4, xs) => xs,
             _ => panic!("vec4 pixels expected"),
         };
@@ -268,7 +268,7 @@ mod tests {
         let stateful = function("(workspace w (graph img :context image\n    (let* [bias (state [n 0.0] (+ n 0.1))]\n      (image/map (fn [uv] [uv.x uv.y bias 1])))))");
         let kernel = prepared(65, 3, stateful);
         let program = program(&kernel);
-        let packed = Executor::packed_region(&program).unwrap();
+        let packed = executor::packed_region(&program).unwrap();
         for domains in [1, 8] {
             parallel::run_unit(Some(domains), &|| {
                 let (state, reference) = (e::create_state(), e::create_state());
@@ -277,9 +277,9 @@ mod tests {
                     let mut live = input::at_time(0.0);
                     live.frame = frame;
                     let actual = packed::force(&packed, &live, &packed::ForceOptions { state: Some(state.clone()), ..Default::default() }).unwrap();
-                    let walked = Executor::force(&program, &Executor::ForceOptions { reference: true, state: Some(reference.clone()), ..Default::default() }, &live).unwrap();
+                    let walked = executor::force(&program, &executor::ForceOptions { reference: true, state: Some(reference.clone()), ..Default::default() }, &live).unwrap();
                     assert_eq!(actual, walked);
-                    assert_eq!(e::Host::state_values(&state), e::Host::state_values(&reference));
+                    assert_eq!(e::host::state_values(&state), e::host::state_values(&reference));
                     match actual {
                         Value::Floats(4, xs) => blues.push(xs[2]),
                         _ => panic!("vec4 pixels expected"),

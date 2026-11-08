@@ -3,7 +3,7 @@ use super::support::*;
 use crate::{catalog,manifest,lower,operators,attribute_kernel as ak};
 use flow_graph::{flow_edit::{self as e,ArgKey,Op},projection as p};
 use flow_syntax::{syntax,ty::{Ty,FnSignature},value::Value};
-use flow_ir::flow_ir::Executor;
+use flow_ir::flow_ir::executor;
 use sop::{edit_graph as edit,node::{self,build,CookMode},kernel::{self,Column},payload,context as ctx,session};
 use std::sync::Arc;
 fn factory()->edit::Factory{
@@ -38,9 +38,9 @@ fn live_cache(domains:i64){
     let first=lowered(false,None,&text(7));let functions=first.plan.nodes.iter().filter(|n|n.kind=="sop/test_field").map(|n|{let Value::Fn(f)=n.args.iter().find(|(k,_)|k=="field").unwrap().1 else{panic!("function input")};f}).collect::<Vec<_>>();assert_eq!(functions.len(),2);
     let values=std::sync::Mutex::new(vec![Value::No_geo;functions.len()]);
     parallel::run_unit(Some(domains),&||parallel::for_(1,0,functions.len()as i64-1,&|i|{
-        let v=flow_eval::Host::map_function(None,None,&FnSignature{params:vec![Ty::Vec3,Ty::Float],result:Ty::Vec3},functions[i as usize],&[Value::Floats(3, Arc::new(vec![2.,0.,0.])),Value::Floats(1, Arc::new(vec![0.]))]).unwrap();
-        let p=ak::prepare(None,false,None,None,&[],&[],&v).unwrap();let packed=Executor::packed_region(&p).unwrap();let live=input::at_time(0.5);
-        let a=flow_ir::packed::force(&packed,&live,&Default::default()).unwrap();let b=Executor::force(&p,&Executor::ForceOptions{reference:true,..Default::default()},&live).unwrap();assert_eq!(a,b);
+        let v=flow_eval::host::map_function(None,None,&FnSignature{params:vec![Ty::Vec3,Ty::Float],result:Ty::Vec3},functions[i as usize],&[Value::Floats(3, Arc::new(vec![2.,0.,0.])),Value::Floats(1, Arc::new(vec![0.]))]).unwrap();
+        let p=ak::prepare(None,false,None,None,&[],&[],&v).unwrap();let packed=executor::packed_region(&p).unwrap();let live=input::at_time(0.5);
+        let a=flow_ir::packed::force(&packed,&live,&Default::default()).unwrap();let b=executor::force(&p,&executor::ForceOptions{reference:true,..Default::default()},&live).unwrap();assert_eq!(a,b);
         values.lock().unwrap()[i as usize]=a;Ok(())
     })).unwrap();
     assert_eq!(*values.lock().unwrap(),vec![Value::Floats(3, Arc::new(vec![9.5;3])),Value::Floats(3, Arc::new(vec![6.5;3]))]);

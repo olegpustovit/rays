@@ -55,7 +55,7 @@ fn vectors_widen_and_check() {
     for time in [0., 0.25, 2.] {
         let live = input::at_time(time);
         let actual = force(&result, &live, None).unwrap();
-        let reference = Host::force_reference(&result, &live, None, None, None).unwrap();
+        let reference = host::force_reference(&result, &live, None, None, None).unwrap();
         let expected = Value::Record(vec![
             ("pair".into(), Value::Vec2(time, 2.)),
             ("quad".into(), Value::Vec4(1., 2., 3., time)),
@@ -129,10 +129,10 @@ fn function_ports_instantiate_bodies_and_keep_captures() {
     let functions = evaluated.plan.nodes.iter().filter(|n| n.kind == "sop/test_field").map(|n| match n.args.iter().find(|(k, _)| k == "field").unwrap().1 { Value::Fn(f) => f, ref other => panic!("function port lost its callable: {other:?}") }).collect::<Vec<_>>();
     assert_eq!(functions.len(), 2);
     for (i, f) in functions.iter().enumerate() {
-        let (_, body) = Residual::function_body(*f).unwrap();
+        let (_, body) = residual::function_body(*f).unwrap();
         assert_eq!(body.ty(), &Ty::Float);
         if i == 0 {
-            assert_eq!(Residual::function_bindings(*f).iter().find(|(k, _)| k == "offset").unwrap().1, Value::Float(7.));
+            assert_eq!(residual::function_bindings(*f).iter().find(|(k, _)| k == "offset").unwrap().1, Value::Float(7.));
         }
     }
 }

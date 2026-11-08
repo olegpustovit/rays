@@ -5,9 +5,9 @@ use rays_math::{vec3,color};
 use rdk_rays::{surface,geometry_view,rays_mesh};
 use std::rc::Rc;
 
-struct Animation { lower:lower::T, lane:value_lane::Lane, session:sop::session::T, gpu:Option<Gpu::Config> }
+struct Animation { lower:lower::T, lane:value_lane::Lane, session:sop::session::T, gpu:Option<gpu::Config> }
 impl Animation {
-    fn new(text:&str,gpu:Option<Gpu::Config>)->Self { Self {lower:lowered(text,gpu.clone()),lane:value_lane::create(None),session:sop::session::create(64,1<<30).unwrap(),gpu} }
+    fn new(text:&str,gpu:Option<gpu::Config>)->Self { Self {lower:lowered(text,gpu.clone()),lane:value_lane::create(None),session:sop::session::create(64,1<<30).unwrap(),gpu} }
     fn cook(&mut self,frame:i64)->g::T {
         let time=frame as f64/60.; let live=input::at_time(time); let graph=&self.lower.graphs[0];
         let resolved=ok(value_lane::resolve(self.gpu.as_ref(),Some(&live),&self.lane,time,&graph.network));

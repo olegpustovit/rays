@@ -3,7 +3,7 @@
 use super::support::*;
 use crate::lower;
 use flow_eval as E;
-use flow_ir::flow_ir::{Profile, Tier};
+use flow_ir::flow_ir::{profile, Tier};
 use sop::edit_graph as edit;
 use sop::node;
 use sop::session;
@@ -26,7 +26,7 @@ fn chain_text(stages: &[(f64, f64, i64)]) -> String {
     format!("(workspace fused (graph g :context sop (let* [g {} {}] d{})))", grid(), body, stages.len())
 }
 
-type Profiles = Arc<Mutex<Vec<Arc<Profile::T>>>>;
+type Profiles = Arc<Mutex<Vec<Arc<profile::T>>>>;
 
 fn lower_with(profiles: &Profiles, reference: bool, previous: Option<&lower::T>, text: &str) -> lower::T {
     let sink = profiles.clone();
@@ -53,7 +53,7 @@ fn cook_fresh(domains: i64, n: &node::T) -> Vec<u8> {
 }
 
 fn kernel_runs(profiles: &Profiles) -> usize {
-    profiles.lock().unwrap().iter().map(|p| Profile::executions(p).iter().filter(|e| e.tier == Tier::Cpu_kernel).count()).sum()
+    profiles.lock().unwrap().iter().map(|p| profile::executions(p).iter().filter(|e| e.tier == Tier::Cpu_kernel).count()).sum()
 }
 
 fn with_attr_writes(root: &node::T) -> usize {

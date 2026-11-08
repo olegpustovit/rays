@@ -6,7 +6,7 @@
 //! visitor for the loop body, which two borrowed closures could not do.
 #![allow(non_snake_case, non_camel_case_types)]
 
-use crate::core_ir::Region::{self, Instruction, Loop};
+use crate::core_ir::region::{self, Instruction, Loop};
 use crate::packed::{self, host};
 use flow_syntax::packed_ops::{Binary, Comparison, Integer, Unary};
 use flow_syntax::ty::Ty;
@@ -107,7 +107,7 @@ enum Use {
 fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
     let code: Vec<&Instruction> = view.code.iter().map(guarded).collect();
     let size = code.len();
-    let integer = |slot: usize| Region::integer_register(&view.code[slot]);
+    let integer = |slot: usize| region::integer_register(&view.code[slot]);
     let mut carried: Vec<Option<(i64, i64)>> = vec![None; size];
     let mut results: Vec<Vec<usize>> = vec![Vec::new(); size];
     for (slot, instruction) in code.iter().enumerate() {
@@ -231,11 +231,11 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
             // a scene count, a primitive and an instance index are 32-bit words
             Instruction::Int_frame(name) if scene_fact(name) => Bound::Max(limit),
             Instruction::Stage(
-                Region::Stage::Trace_triangles(1 | 5) | Region::Stage::Trace_curves(1) | Region::Stage::Group_scan(_),
+                region::Stage::Trace_triangles(1 | 5) | region::Stage::Trace_curves(1) | region::Stage::Group_scan(_),
                 _,
             ) => Bound::Max(limit),
-            Instruction::Stage(Region::Stage::Store, _) => Bound::Max(1),
-            Instruction::Stage(Region::Stage::Noise_table(_), _) => Bound::Max(255),
+            Instruction::Stage(region::Stage::Store, _) => Bound::Max(1),
+            Instruction::Stage(region::Stage::Noise_table(_), _) => Bound::Max(255),
             Instruction::Loop_result(loop_, c, _) => bound[(*loop_ + 1 + *c) as usize],
             _ => Bound::Top,
         }
@@ -305,20 +305,20 @@ fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
             }
             // a store's index and Int value, a group scan's operand and a noise table index are
             // uint words on every target
-            Instruction::Stage(Region::Stage::Store | Region::Stage::Group_scan(_) | Region::Stage::Noise_table(_) | Region::Stage::Float_bits, r) => {
+            Instruction::Stage(region::Stage::Store | region::Stage::Group_scan(_) | region::Stage::Noise_table(_) | region::Stage::Float_bits, r) => {
                 for r in r {
                     add(&mut uses, Use::Bits, *r);
                 }
             }
             instruction => {
-                for r in Region::operands(instruction) {
+                for r in region::operands(instruction) {
                     add(&mut uses, Use::Exact, r);
                 }
             }
         }
     }
     // a compute stage's result is discarded: its stores are its effect
-    if !code.iter().any(|i| matches!(i, Instruction::Stage(Region::Stage::Store, _))) {
+    if !code.iter().any(|i| matches!(i, Instruction::Stage(region::Stage::Store, _))) {
         for output in &view.outputs {
             for r in output {
                 add(&mut uses, Use::Exact, *r);
@@ -518,7 +518,7 @@ fn operands(i: &Instruction) -> Vec<i64> {
             v
         }
         Instruction::Select(_, a, b) | Instruction::Int_select(_, a, b) if a == b => vec![*a],
-        instruction => Region::operands(instruction),
+        instruction => region::operands(instruction),
     }
 }
 
@@ -600,7 +600,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         .iter()
         .enumerate()
         .filter_map(|(index, instruction)| match guarded(instruction) {
-            Instruction::Noise3(_, _, _, seed, _, _, _) | Instruction::Stage(Region::Stage::Noise_table(seed), _) if used[index] => Some(*seed),
+            Instruction::Noise3(_, _, _, seed, _, _, _) | Instruction::Stage(region::Stage::Noise_table(seed), _) if used[index] => Some(*seed),
             _ => None,
         })
         .collect();
@@ -633,14 +633,14 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
     let traced = view.code.iter().any(|i| match guarded(i) {
         Instruction::Trace(..) => true,
         Instruction::Stage(
-            Region::Stage::Trace_triangles(_)
-            | Region::Stage::Trace_any
-            | Region::Stage::Trace_curves(_)
-            | Region::Stage::Trace_curves_any
-            | Region::Stage::Scene_vertex(..)
-            | Region::Stage::Scene_instance
-            | Region::Stage::Scene_sphere(_)
-            | Region::Stage::Scene_strand(_),
+            region::Stage::Trace_triangles(_)
+            | region::Stage::Trace_any
+            | region::Stage::Trace_curves(_)
+            | region::Stage::Trace_curves_any
+            | region::Stage::Scene_vertex(..)
+            | region::Stage::Scene_instance
+            | region::Stage::Scene_sphere(_)
+            | region::Stage::Scene_strand(_),
             _,
         ) => true,
         Instruction::Int_frame(name) => scene_fact(name),
@@ -747,7 +747,7 @@ pub fn iter(plan: &T, visitor: &mut dyn Visit) {
 /// declared first (`decls`), then its code runs, where consecutive instructions under the same
 /// guards share one nest of blocks (`opened`, outermost first) instead of testing their conditions
 /// instruction by instruction.
-pub mod Scope {
+pub mod scope {
     use super::*;
 
     /// `blocks` numbers the open blocks of `opened` (from `next`, shared by a kernel's scopes);

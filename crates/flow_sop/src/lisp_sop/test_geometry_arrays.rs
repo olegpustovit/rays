@@ -1,7 +1,7 @@
 //! Assertion map: lib/flow_sop/test_geometry_arrays.ml C1/C4 (both public mesh representations).
 use super::support::*;
 use crate::{attribute_kernel as ak, catalog, lisp_sop, lower, operators, value_lane};
-use flow_ir::flow_ir::Executor;
+use flow_ir::flow_ir::executor;
 use flow_syntax::{ty::{self, Ty}, value::{Value, source_value}};
 use rdk_core::{attribute::{self, Owner, Storage}, geometry as geo, packed::float3, topology};
 use sop::{context as ctx, edit_graph as edit, node, session};
@@ -109,7 +109,7 @@ fn evaluate(body:&str) -> Value {
     ev.records.iter().find(|(p,_)|p==&vec!["g".to_owned(),"tested".to_owned()]).unwrap().1[0].1.clone()
 }
 fn lookup(g:&geo::T) -> ak::GeometryLookup {let g=g.clone();Arc::new(move |id|if id==7{Some(g.clone())}else{None})}
-fn force(g:&geo::T,v:&Value) -> Value {let lookup=lookup(g);flow_eval::Host::force_reference(v,&input::at_time(0.0),None,None,Some(Arc::new(move |v|ak::resolve(None,&lookup,v)))).unwrap()}
+fn force(g:&geo::T,v:&Value) -> Value {let lookup=lookup(g);flow_eval::host::force_reference(v,&input::at_time(0.0),None,None,Some(Arc::new(move |v|ak::resolve(None,&lookup,v)))).unwrap()}
 #[test]
 fn topology_queries_keep_planes_origins_and_immutable_readers() {
     let original=fixture(1);let before=geometry_bytes(&original);let queried=evaluate("(sop/topology geo)");
@@ -130,13 +130,13 @@ fn topology_queries_keep_planes_origins_and_immutable_readers() {
         for expression in [format!("(let* [topology (sop/topology geo)] (map (fn [(i : int)] i) topology.{field}))"),format!("(map (fn [(i : int)] i) (get (sop/topology geo) :{field}))")] {
             let value=evaluate(&expression);assert_eq!(ak::sources(&value),vec![7]);
             let program=ak::prepare(None,true,None,None,&[7],std::slice::from_ref(&source_node),&value).unwrap();
-            pair.push(flow_ir::packed::count_origin(Executor::packed_region(&program).as_ref().unwrap()).expect("topology count origin"));
+            pair.push(flow_ir::packed::count_origin(executor::packed_region(&program).as_ref().unwrap()).expect("topology count origin"));
         }
         assert_eq!(pair[0],pair[1]);origins.push(pair[0].clone());
     }
     assert!(origins[0]!=origins[1]&&origins[0]!=origins[2]&&origins[1]!=origins[2]);
-    let p=Executor::compile(&queried,&Executor::CompileOptions{strict:true,..Default::default()}).unwrap();
-    for domains in [1,8] {parallel::run_unit(Some(domains),&||{let lookup=lookup(&original);let opts=Executor::ForceOptions{strict:true,resolve:Some(Arc::new(move|v|ak::resolve(None,&lookup,v))),..Default::default()};assert_eq!(Executor::force(&p,&opts,&input::at_time(0.0)).unwrap(),expected);Ok(())}).unwrap();}
+    let p=executor::compile(&queried,&executor::CompileOptions{strict:true,..Default::default()}).unwrap();
+    for domains in [1,8] {parallel::run_unit(Some(domains),&||{let lookup=lookup(&original);let opts=executor::ForceOptions{strict:true,resolve:Some(Arc::new(move|v|ak::resolve(None,&lookup,v))),..Default::default()};assert_eq!(executor::force(&p,&opts,&input::at_time(0.0)).unwrap(),expected);Ok(())}).unwrap();}
 }
 
 #[test]
@@ -252,7 +252,7 @@ fn captured_coordinate_planes_share_position_owner_count(){
     assert_eq!(ak::sources(&coords),vec![7]);assert_eq!(ak::reads(&coords),vec!["P"]);
     let Value::Record(planes)=coords else{panic!("record expected")};let mut origins=vec![];
     let input = lisp_sop::snapshot(&fixture(1));
-    for(_,v)in planes{let p=ak::prepare(None,true,None,None,&[7],std::slice::from_ref(&input),&v).unwrap();assert!(Executor::packed_region(&p).is_none());assert!(Executor::root_is_packed_or_readback(&p));origins.push(flow_ir::packed::count_origin(&Executor::packed_root(&p).unwrap()).unwrap());}
+    for(_,v)in planes{let p=ak::prepare(None,true,None,None,&[7],std::slice::from_ref(&input),&v).unwrap();assert!(executor::packed_region(&p).is_none());assert!(executor::root_is_packed_or_readback(&p));origins.push(flow_ir::packed::count_origin(&executor::packed_root(&p).unwrap()).unwrap());}
     assert_eq!(origins[0],origins[1]);assert_eq!(origins[1],origins[2]);
 }
 #[test]
@@ -307,12 +307,12 @@ fn attribute_writes(root:&node::T)->usize{fn visit(n:&node::T,seen:&mut std::col
 #[test]
 fn deferred_static_mesh_writes_fold_without_frame_or_gpu_probes(){
     struct NoGpu;
-    impl Gpu::Backend for NoGpu{
+    impl gpu::Backend for NoGpu{
         fn cost(&self,_:Option<&flow_ir::packed::Inputs>,_:bool,_:&flow_ir::packed::T,_:i64)->Option<f64>{panic!("static deferred data reached GPU cost")}
-        fn prepare(&self,_:bool,_:&flow_ir::packed::T)->Result<Arc<dyn Gpu::Kernel>,rays_diagnostic::Diagnostic>{panic!("static deferred data reached GPU prepare")}
+        fn prepare(&self,_:bool,_:&flow_ir::packed::T)->Result<Arc<dyn gpu::Kernel>,rays_diagnostic::Diagnostic>{panic!("static deferred data reached GPU prepare")}
     }
-    use flow_ir::flow_ir::Gpu;
-    let gpu=Gpu::Config{fast:true,backend:Some(Arc::new(NoGpu)),..Gpu::default()};
+    use flow_ir::flow_ir::gpu;
+    let gpu=gpu::Config{fast:true,backend:Some(Arc::new(NoGpu)),..gpu::default()};
     let(l,n)=lower_text(lower::Options{defer:true,gpu:gpu.clone(),..Default::default()},&deferred_source("colored"));
     assert_eq!(attribute_writes(&n),0);let g=&l.graphs[0];assert!(g.network.frame_nodes.is_empty());
     let(_,moving)=lower_text(lower::Options{defer:true,..Default::default()},&deferred_source(r#"(sop/with_attr colored "heat" (exact (map (fn [(n : vec3)] (+ n.y t)) normals)) :owner "point" :type float)"#));assert_eq!(attribute_writes(&moving),2);

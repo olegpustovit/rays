@@ -1,5 +1,5 @@
 // Port of lib/flow_ir/test_grade_index.ml.
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::*;
 use flow_eval as e;
 use flow_syntax::ty::Ty;
@@ -215,7 +215,7 @@ fn small_and_gather_programs_match_the_reference() {
 #[test]
 fn unsupported_and_dynamic_programs_refuse() {
     let unsupported = live_value("(array/grade (map (fn [x] (value/rand x t)) (array/range 2049)))");
-    match Executor::compile(&unsupported, &Executor::CompileOptions { strict: true, ..Default::default() }) {
+    match executor::compile(&unsupported, &executor::CompileOptions { strict: true, ..Default::default() }) {
         Err(d) => assert_eq!(d.code, "E_KERNEL_FORM"),
         Ok(_) => panic!("Unsupported producer accepted"),
     }
@@ -240,8 +240,8 @@ fn inputs() -> Vec<(String, Vec<(String, Value)>)> {
 fn dynamic(body: &str) -> Value {
     dynamic_value(&inputs(), declarations(), body)
 }
-fn count_source() -> crate::core_ir::Region::CountSource {
-    crate::core_ir::Region::CountSource::new(Arc::new(|_, term| match &term.node {
+fn count_source() -> crate::core_ir::region::CountSource {
+    crate::core_ir::region::CountSource::new(Arc::new(|_, term| match &term.node {
         flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "keys" => Some((vec!["fixture".to_string(), "keys".to_string()], vec![])),
         flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "queries" => Some((vec!["fixture".to_string(), "queries".to_string()], vec![])),
         _ => None,
@@ -327,8 +327,8 @@ fn source_errors_untaken_sources_and_state() {
         let mut live = live_frame(*time, frame as i64);
         live.tick = frame as i64;
         same(&exec_force(&executor, &live, Some(&a), None), &reference_with(&stateful, &live, Some(&b), None));
-        let sa: Vec<String> = e::Host::state_values(&a).iter().map(bits).collect();
-        let sb: Vec<String> = e::Host::state_values(&b).iter().map(bits).collect();
+        let sa: Vec<String> = e::host::state_values(&a).iter().map(bits).collect();
+        let sb: Vec<String> = e::host::state_values(&b).iter().map(bits).collect();
         assert_eq!(sa, sb);
     }
 }

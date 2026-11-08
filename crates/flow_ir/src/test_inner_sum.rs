@@ -1,5 +1,5 @@
 // Port of lib/flow_ir/test_inner_sum.ml.
-use crate::flow_ir::{self, Profile};
+use crate::flow_ir::{self, profile};
 use crate::packed;
 use crate::test_support::*;
 use flow_check::workspace as w;
@@ -25,7 +25,7 @@ fn mapped(data: &str, bindings: &str, result: Ty, body: &str, indices: Vec<i64>)
     let ev = ok(e::r#static(&workspace, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     match &records[0].1 {
-        Value::Fn(f) => ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result }, *f, &[Value::Int_array(Arc::new(indices))])),
+        Value::Fn(f) => ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result }, *f, &[Value::Int_array(Arc::new(indices))])),
         _ => panic!("expected a function"),
     }
 }
@@ -35,7 +35,7 @@ fn m(body: &str, indices: Vec<i64>) -> Value {
 
 fn compile(value: &Value) -> Result<packed::T, Vec<Diagnostic>> {
     let r = residual(value);
-    let term = e::Residual::residual_view(r).unwrap().term;
+    let term = e::residual::residual_view(r).unwrap().term;
     packed::compile_result(&Default::default(), r, &term)
 }
 
@@ -138,11 +138,11 @@ fn late_slice_diagnostic_matches_the_walker() {
 #[test]
 fn static_map_profile() {
     let workspace = checked("(map (fn [(i : int)]\n         (array/sum (map (fn [(j : int)] (+ i j)) (array/range 3 :type int))))\n         (array/range 4101 :type int))");
-    let profile = Profile::create(Arc::new(|| 0.));
-    let fast = ok(Profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { verify: true, ..Default::default() }, &workspace)));
+    let profile = profile::create(Arc::new(|| 0.));
+    let fast = ok(profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { verify: true, ..Default::default() }, &workspace)));
     let reference = ok(e::static_eval(&workspace));
     assert_eq!(format!("{:?}", fast.results), format!("{:?}", reference.results));
-    let maps = Profile::static_maps(&profile);
+    let maps = profile::static_maps(&profile);
     assert!(maps.iter().any(|m| m.count == 4101 && m.head_elements == 0 && m.tail_elements == 0), "static maps (last): {:?}", maps.last().map(|m| (m.count, m.head_elements, m.tail_elements, m.deferred)));
 }
 

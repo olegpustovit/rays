@@ -201,7 +201,7 @@ pub struct StateSlot {
 
 /// A region: a pure numeric loop body over packed arrays, as a register program (instruction `n`
 /// defines register `n` from earlier registers).
-pub mod Region {
+pub mod region {
     use super::*;
     use std::sync::{Mutex, OnceLock};
 
@@ -819,7 +819,7 @@ pub mod Region {
     /// The type of an uniform value; a residual's own term type (expired residual: `Any`).
     fn uniform_ty(value: &Value) -> Ty {
         match value {
-            Value::Residual(id) => flow_eval::Residual::residual_ty(*id).unwrap_or(Ty::Any),
+            Value::Residual(id) => flow_eval::residual::residual_ty(*id).unwrap_or(Ty::Any),
             other => value::ty_of(other),
         }
     }
@@ -1044,7 +1044,7 @@ pub mod Region {
         Ok(t)
     }
 
-    pub mod Private {
+    pub mod private {
         use super::*;
         /// Rebinds a region's captures; the capture layout (types, counts) must not change.
         pub fn with_captures(
@@ -1071,7 +1071,7 @@ pub mod Region {
 }
 
 /// OCaml `type region = Region.t`.
-pub type RegionT = Region::T;
+pub type RegionT = region::T;
 
 #[derive(Clone, Debug)]
 pub struct Program {
@@ -1513,10 +1513,10 @@ pub fn pp(p: &Program) -> String {
             o.push('\n');
         }
     }
-    fn instruction(o: &mut String, x: &Region::Instruction) {
-        use Region::Instruction as I;
+    fn instruction(o: &mut String, x: &region::Instruction) {
+        use region::Instruction as I;
         let regs = |r: &[i64]| r.iter().map(|r| format!("r{}", r)).collect::<Vec<_>>().join(" ");
-        let proj = |p: &Region::Projection| match p { Region::Projection::Value => "value", Region::Projection::Valid => "valid" };
+        let proj = |p: &region::Projection| match p { region::Projection::Value => "value", region::Projection::Valid => "valid" };
         match x {
             I::Const(f) => o.push_str(&lisp_float(*f)),
             I::Input(s, w, c) => o.push_str(&format!("input[{}].{}/{}", s, c, w)),
@@ -1526,9 +1526,9 @@ pub fn pp(p: &Program) -> String {
             I::Binary(op, a, b) => o.push_str(&format!("{}(r{} r{})", primitive_name(&Primitive::Numeric(*op)), a, b)),
             I::Unary(op, a) => o.push_str(&format!("{}(r{})", primitive_name(&Primitive::Math(*op)), a)),
             I::Noise3(x, y, z, seed, octaves, lacunarity, gain) => {
-                let fractal = |v: &Region::LiveFloat| match v { Region::LiveFloat::Fixed(v) => hex_float(*v), Region::LiveFloat::Live(r) => format!("r{}", r) };
-                let oct = match octaves { Region::LiveInt::Fixed(n) => n.to_string(), Region::LiveInt::Live(r) => format!("r{}", r) };
-                let extra = if *lacunarity == Region::LiveFloat::Fixed(2.0) && *gain == Region::LiveFloat::Fixed(0.5) { String::new() }
+                let fractal = |v: &region::LiveFloat| match v { region::LiveFloat::Fixed(v) => hex_float(*v), region::LiveFloat::Live(r) => format!("r{}", r) };
+                let oct = match octaves { region::LiveInt::Fixed(n) => n.to_string(), region::LiveInt::Live(r) => format!("r{}", r) };
+                let extra = if *lacunarity == region::LiveFloat::Fixed(2.0) && *gain == region::LiveFloat::Fixed(0.5) { String::new() }
                     else { format!(" lacunarity={} gain={}", fractal(lacunarity), fractal(gain)) };
                 o.push_str(&format!("noise3(r{} r{} r{} seed={} octaves={}{})", x, y, z, seed, oct, extra));
             }
@@ -1557,13 +1557,13 @@ pub fn pp(p: &Program) -> String {
             I::Int_abs(a) => o.push_str(&format!("int:abs(r{})", a)),
             I::Convert(op, a) => {
                 let name = match op {
-                    Region::Conversion::ToFloat => "float".to_owned(),
-                    Region::Conversion::Truncate => "int".to_owned(),
-                    Region::Conversion::Floor => "floor".to_owned(),
-                    Region::Conversion::Ceil => "ceil".to_owned(),
-                    Region::Conversion::Round => "round".to_owned(),
-                    Region::Conversion::CoerceInt => "coerce:int".to_owned(),
-                    Region::Conversion::IntegerResult(name) => format!("int-result:{}", name),
+                    region::Conversion::ToFloat => "float".to_owned(),
+                    region::Conversion::Truncate => "int".to_owned(),
+                    region::Conversion::Floor => "floor".to_owned(),
+                    region::Conversion::Ceil => "ceil".to_owned(),
+                    region::Conversion::Round => "round".to_owned(),
+                    region::Conversion::CoerceInt => "coerce:int".to_owned(),
+                    region::Conversion::IntegerResult(name) => format!("int-result:{}", name),
                 };
                 o.push_str(&format!("{}(r{})", name, a));
             }
@@ -1607,11 +1607,11 @@ pub fn pp(p: &Program) -> String {
         o.push_str(&format!(
             "  region[{}] {} {} count={} widths=[{}] output=[{}] uniforms={} skip=[{}] stages={}\n",
             n,
-            match r.iteration { Region::Iteration::Zip => "zip", Region::Iteration::Product => "product" },
+            match r.iteration { region::Iteration::Zip => "zip", region::Iteration::Product => "product" },
             match &r.result {
-                Region::RegionResult::Collect => "collect",
-                Region::RegionResult::Sum(zero) => if *zero { "sum0" } else { "sum" },
-                Region::RegionResult::Accumulate(_, scan) => if *scan { "scan" } else { "fold" },
+                region::RegionResult::Collect => "collect",
+                region::RegionResult::Sum(zero) => if *zero { "sum0" } else { "sum" },
+                region::RegionResult::Accumulate(_, scan) => if *scan { "scan" } else { "fold" },
             },
             r.count.map(|c| c.to_string()).unwrap_or_else(|| "?".to_owned()),
             names(&r.widths),

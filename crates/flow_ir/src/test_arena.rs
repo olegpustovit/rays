@@ -105,7 +105,7 @@ fn long_body_few_slots() {
     body.push_str(&format!("] (if (> x 100.0) v{links} (- 0.0 v{links})))) (array/range 4096 :type int))"));
     let program = core(&body);
     let region = &program.regions[0];
-    let registers = c::Region::registers(region);
+    let registers = c::region::registers(region);
     let code = region.code.len();
     assert!(code >= links && registers.slots <= (code / 10) as i64, "{code} registers took {} slots", registers.slots);
     let plain = result_of(&prepare(&program), &live);

@@ -2,8 +2,8 @@
 // Sizes: OCaml used 32769-element maps/tables and counts up to 32769 (and 16385 for the rollback);
 // 2049 keeps two 1024-lane block crossings (the count sweep 0/1/1023/1024/1025/2049 keeps the edges)
 // to fit the 5 s debug budget. The 13,824-element chunk check keeps its size.
-use crate::core_ir::Region::Instruction;
-use crate::flow_ir::Executor;
+use crate::core_ir::region::Instruction;
+use crate::flow_ir::executor;
 use crate::packed::{self, host};
 use crate::test_support::*;
 use flow_check::op::{self, Op};
@@ -117,9 +117,9 @@ fn fixture(ty: &Ty, reducer: &str, over: Option<Op>, seed: Option<&str>) -> Fixt
     let ev = ok(e::r#static(&ws, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = function_of(&records[0].1);
-    let sum = e::Residual::function_bindings(f).into_iter().find(|(n, _)| n == "s").expect("binding s").1;
+    let sum = e::residual::function_bindings(f).into_iter().find(|(n, _)| n == "s").expect("binding s").1;
     let uv = Value::Floats(2, Arc::new((0..2049 * 2).map(|i| (i % 17) as f64 / 16.).collect()));
-    let value = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 }, f, &[uv]));
+    let value = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 }, f, &[uv]));
     let r = residual(&value);
     let packed = compile_region(r, true, None).unwrap_or_else(|ds| panic!("uniform compile {} reducer={reducer} seed={seed}: {}", flow_syntax::ty::to_string(ty), show_ds(&ds)));
     Fixture { value, sum, packed, _keep: vec![ev] }
@@ -188,10 +188,10 @@ fn tiny_maps_in_recorded_call_records() {
     let ev = ok(e::r#static(&ws, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = function_of(&records[0].1);
-    let call = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Floats(1, Arc::new((0..13).map(|i| i as f64).collect()))]));
+    let call = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Floats(1, Arc::new((0..13).map(|i| i as f64).collect()))]));
     let value = Value::Record(vec![("offset".into(), Value::Int(0)), ("call".into(), call)]);
     for strict in [false, true] {
-        let program = ok(Executor::compile(&value, &Executor::CompileOptions { strict, ..Default::default() }));
+        let program = ok(executor::compile(&value, &executor::CompileOptions { strict, ..Default::default() }));
         for time in [0., 0.25] {
             let live = live_at(time);
             let expected = force_reference(&value, &live);
@@ -211,13 +211,13 @@ fn one_force_lowers_129_residuals_once() {
     let ev = ok(e::r#static(&ws, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = function_of(&records[0].1);
-    let residuals: Vec<Value> = (0..129).map(|i| ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Floats(1, Arc::new(vec![i as f64]))]))).collect();
+    let residuals: Vec<Value> = (0..129).map(|i| ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Floats(1, Arc::new(vec![i as f64]))]))).collect();
     let mut items = residuals.clone();
     items.push(residuals[0].clone());
     let value = Value::List(Arc::new(items));
-    let program = ok(Executor::compile(&value, &Default::default()));
+    let program = ok(executor::compile(&value, &Default::default()));
     let live = live_at(0.25);
-    let (actual, attempts) = Executor::Private::force_with_lower_attempts(&program, &Default::default(), &live);
+    let (actual, attempts) = executor::private::force_with_lower_attempts(&program, &Default::default(), &live);
     assert!(same(&actual, &force_reference(&value, &live)));
     assert_eq!(attempts, 129);
 }
@@ -234,7 +234,7 @@ fn strict_uniform_reductions() {
                 let ev = ok(e::r#static(&ws, true, None));
                 let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
                 let f = function_of(&records[0].1);
-                let value = ok(e::Host::map_function(
+                let value = ok(e::host::map_function(
                     None,
                     None,
                     &FnSignature { params: vec![Ty::Float], result: if integer { Ty::Int } else { Ty::Float } },
@@ -242,7 +242,7 @@ fn strict_uniform_reductions() {
                     &[Value::Floats(1, Arc::new((0..2049).map(|i| (i % 11) as f64).collect()))],
                 ));
                 let r = residual(&value);
-                let p = packed::compile(&Default::default(), r, &e::Residual::residual_view(r).unwrap().term).expect("packed region");
+                let p = packed::compile(&Default::default(), r, &e::residual::residual_view(r).unwrap().term).expect("packed region");
                 let current = Arc::new(Mutex::new(Value::Floats(1, Arc::new(vec![1., 2., 3., 4.]))));
                 let resolve = resolve_source(current);
                 let live = live_at(0.25);
@@ -250,7 +250,7 @@ fn strict_uniform_reductions() {
                 for domains in [1, 8] {
                     with_domains(domains, &|| {
                         let actual = packed_force(&p, &live, true, Some(resolve.clone()));
-                        let compiled = Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() });
+                        let compiled = executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() });
                         if reducer == "+" {
                             assert!(same(&actual, &reference), "strict uniform packed mismatch reducer={reducer} actual={} expected={}", show(&actual), show(&reference));
                             assert!(same(&exec_force(&ok(compiled), &live, None, Some(resolve.clone())), &reference));
@@ -332,8 +332,8 @@ fn uniform_case(index: usize) {
                     let gpu = Arc::new(AtomicI64::new(0));
                     let forced = packed::force(&fx.packed, &live, &packed::ForceOptions { resolve: Some(resolve.clone()), measure: Some(observed(fast, cpu.clone())), ..Default::default() });
                     assert!(same(&forced, &expected));
-                    let program = ok(Executor::compile(&fx.sum, &Default::default()));
-                    let actual = Executor::force(&program, &Executor::ForceOptions { resolve: Some(resolve.clone()), ..Default::default() }, &live);
+                    let program = ok(executor::compile(&fx.sum, &Default::default()));
+                    let actual = executor::force(&program, &executor::ForceOptions { resolve: Some(resolve.clone()), ..Default::default() }, &live);
                     assert!(same(&actual, &Ok(scalar.clone())), "uniform executor {:?} reducer={reducer} count={count} time={time} domains={domains} expected={scalar:?} actual={}", ty, show(&actual));
                     let prepared = ok(host::prepare(&fx.packed, &host::PrepareOptions { resolve: Some(resolve.clone()), measure: Some(observed(fast, gpu.clone())), ..Default::default() }, &live));
                     assert!(prepared.uniforms.iter().any(|a| float_bits(a) == float_bits(&uniform)));
@@ -358,7 +358,7 @@ uniform_cases!(
 fn compile_value(body: &str) -> (Value, packed::T) {
     let value = evaluate(&workspace("", &[], body));
     let r = residual(&value);
-    let p = packed::compile(&Default::default(), r, &e::Residual::residual_view(r).unwrap().term).expect("packed region");
+    let p = packed::compile(&Default::default(), r, &e::residual::residual_view(r).unwrap().term).expect("packed region");
     (value, p)
 }
 
@@ -369,7 +369,7 @@ fn changed_captures_keep_the_register_code() {
     let compile = |seed: i64, scale: f64| {
         let value = evaluate(&workspace(&format!("seed {seed} scale {scale:?}"), &[], "(map (fn [(i : int)] (* scale (+ t (float (int/xor i seed))))) (array/range 64 :type int))"));
         let r = residual(&value);
-        let p = packed::compile(&Default::default(), r, &e::Residual::residual_view(r).unwrap().term).expect("packed region");
+        let p = packed::compile(&Default::default(), r, &e::residual::residual_view(r).unwrap().term).expect("packed region");
         assert!(same(&packed_force(&p, &live_at(0.), true, None), &force_reference(&value, &live_at(0.))));
         p
     };
@@ -440,7 +440,7 @@ fn rollback_case_on(ty: Ty, failed_component: usize, check_state: bool, domain_l
                     let resolve: ResolveArc = {
                         let (state, fold, current, live) = (state.clone(), fold.clone(), current.clone(), live.clone());
                         Arc::new(move |value: &Value| {
-                            ok(e::Host::force_reference(&fold, &live, Some(&state), None, None));
+                            ok(e::host::force_reference(&fold, &live, Some(&state), None, None));
                             resolve_source(current.clone())(value)
                         })
                     };
@@ -449,7 +449,7 @@ fn rollback_case_on(ty: Ty, failed_component: usize, check_state: bool, domain_l
                     let reference_resolve: ResolveArc = {
                         let (state, fold, current, live) = (reference_state.clone(), fold.clone(), current.clone(), live.clone());
                         Arc::new(move |value: &Value| {
-                            ok(e::Host::force_reference(&fold, &live, Some(&state), None, None));
+                            ok(e::host::force_reference(&fold, &live, Some(&state), None, None));
                             resolve_source(current.clone())(value)
                         })
                     };

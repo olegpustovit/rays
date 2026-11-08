@@ -1,6 +1,6 @@
 // Port of lib/flow_ir/test_reductions.ml. The `--bench` block is not ported (a timing harness,
 // not an assertion).
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::packed;
 use crate::test_support::*;
 use flow_check::op::{reduce_array, Reduction};
@@ -141,7 +141,7 @@ fn reductions_core_reference_and_cpu_agree() {
 fn empty_body_reduction_and_argument_binding() {
     let empty = value("(map (fn [x] (if (> t 0.) (array/min (array/float 0)) 0.)) (array/range 0))");
     assert_eq!(ok(force_reference(&empty, &live_at(1.))), floats(&[]));
-    assert!(Executor::compile(&empty, &Executor::CompileOptions { strict: true, ..Default::default() }).is_err(), "strict compilation accepted an empty body reduction");
+    assert!(executor::compile(&empty, &executor::CompileOptions { strict: true, ..Default::default() }).is_err(), "strict compilation accepted an empty body reduction");
 
     let captured = value("(let* [minimum (array/min (array/float 7 t))] (map (fn [x] (+ x minimum)) (array/range 11)))");
     let core = lower_strict(residual(&captured)).unwrap();
@@ -212,14 +212,14 @@ fn source_column_and_unsupported_producer() {
                 })
             };
             let live = live_at(0.25);
-            let forced = Executor::force(&compiled, &Executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() }, &live);
-            let reference = e::Host::force_reference(&source, &live, None, None, Some(resolve));
+            let forced = executor::force(&compiled, &executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() }, &live);
+            let reference = e::host::force_reference(&source, &live, None, None, Some(resolve));
             assert!(same(&ok(forced), &ok(reference)));
             assert_eq!(before, bits(&data));
         });
     }
     let unsupported = value("(array/min (map (fn [x] (value/rand (+ x t))) (array/range 2049)))");
-    match Executor::compile(&unsupported, &Executor::CompileOptions { strict: true, ..Default::default() }) {
+    match executor::compile(&unsupported, &executor::CompileOptions { strict: true, ..Default::default() }) {
         Err(d) => assert_eq!(d.code, "E_KERNEL_FORM"),
         Ok(_) => panic!("unsupported producer accepted"),
     }

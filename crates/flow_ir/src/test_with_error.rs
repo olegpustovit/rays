@@ -49,7 +49,7 @@ fn compare(body: &str) -> Result<Value, Diagnostic> {
     let program = ts::lower_strict(r).unwrap_or_else(|form| panic!("{form}"));
     let live = input::at_time(0.);
     let a = ts::run_simple(&program, &live);
-    let b = E::Host::force_reference(&Value::Residual(r), &live, None, None, None);
+    let b = E::host::force_reference(&Value::Residual(r), &live, None, None, None);
     match (&a, &b) {
         (Ok(a), Ok(b)) => assert!(a == b),
         (Err(a), Err(b)) => assert!(a.code == b.code && a.message == b.message && a.cause == b.cause && a.hints == b.hints && a.trace == b.trace, "{a:?} / {b:?}"),

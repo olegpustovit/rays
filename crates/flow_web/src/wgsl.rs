@@ -6,8 +6,8 @@
 //! Rust shape notes: OCaml's `Diagnostic.Error` exception is a `Result<_, Diagnostic>`; the
 //! fast-kernel printer is a struct implementing `kernel_layout::Visit` (the loop callback
 //! re-enters the visitor), and records its first failure.
-use flow_ir::core_ir::Region::{self, Instruction, LiveFloat, LiveInt, Stage as RStage};
-use flow_ir::kernel_layout::{self, PlanOptions, Scope, Visit};
+use flow_ir::core_ir::region::{self, Instruction, LiveFloat, LiveInt, Stage as RStage};
+use flow_ir::kernel_layout::{self, PlanOptions, scope, Visit};
 use flow_ir::packed;
 use flow_syntax::packed_ops::{Binary, Comparison, Conversion, Integer, Unary};
 use flow_syntax::ty::Ty;
@@ -197,7 +197,7 @@ fn integer_status(operation: Integer, b: &str) -> String {
 }
 
 /// As the Metal printer: status bits gather in `sb` and reach the shared word once; guarded
-/// instructions share blocks per scope (`kernel_layout::Scope`).
+/// instructions share blocks per scope (`kernel_layout::scope`).
 const FLUSH_STATUS: &str = "if (sb != 0u) { atomicOr(&status, sb); }";
 
 fn guarded(instruction: &Instruction) -> (Vec<(i64, bool)>, &Instruction) {
@@ -274,8 +274,8 @@ fn kind_text(kind: Kind) -> &'static str {
 fn lo32(n: i64) -> u64 { (n as u64) & 0xffff_ffff }
 fn hi32(n: i64) -> u64 { ((n as u64) >> 32) & 0xffff_ffff }
 
-fn enter_with(condition: &dyn Fn(i64) -> String, scope: &mut Scope::T, guards: &[(i64, bool)]) {
-    Scope::enter(scope, &|slot, selected| format!("if ({} {} 0.0) {{", condition(slot), if selected { "!=" } else { "==" }), guards);
+fn enter_with(condition: &dyn Fn(i64) -> String, scope: &mut scope::T, guards: &[(i64, bool)]) {
+    scope::enter(scope, &|slot, selected| format!("if ({} {} 0.0) {{", condition(slot), if selected { "!=" } else { "==" }), guards);
 }
 
 /// Plain f32 kernel (the non-fast precision), or with `image` a pixel-center UV kernel.
@@ -396,12 +396,12 @@ struct Printer {
     hoisted: HashSet<String>,
     scans: HashSet<i64>,
     workgroup: String,
-    scopes: Vec<Scope::T>,
+    scopes: Vec<scope::T>,
     failure: Option<Diagnostic>,
 }
 
 impl Printer {
-    fn integer(&self, slot: i64) -> bool { Region::integer_register(&self.layout.view.code[slot as usize]) }
+    fn integer(&self, slot: i64) -> bool { region::integer_register(&self.layout.view.code[slot as usize]) }
 
     fn int_of(&self, r: i64) -> String {
         if self.layout.narrow[r as usize] {
@@ -544,7 +544,7 @@ impl Printer {
     /// A compute stage's group scan (Hillis-Steele in workgroup memory between barriers, once a
     /// scanned register, in uniform control flow) and store (a statement before its register's 1),
     /// as the Metal printer's.
-    fn group(&mut self, current: &mut Scope::T, guards_empty: bool, indentation: &str, stage: &RStage, r: &[i64]) -> Result<String, Diagnostic> {
+    fn group(&mut self, current: &mut scope::T, guards_empty: bool, indentation: &str, stage: &RStage, r: &[i64]) -> Result<String, Diagnostic> {
         let compute = match &self.placement {
             Some(Placement::Compute(c)) => c.clone(),
             _ => return Err(fail("A workgroup intrinsic runs only in a compute stage.")),
@@ -586,7 +586,7 @@ impl Printer {
         }
     }
 
-    fn enter(&self, scope: &mut Scope::T, guards: &[(i64, bool)]) {
+    fn enter(&self, scope: &mut scope::T, guards: &[(i64, bool)]) {
         enter_with(&|r| self.float_of(r), scope, guards);
     }
 
@@ -626,7 +626,7 @@ impl Printer {
         }
     }
 
-    fn print_instruction(&mut self, current: &mut Scope::T, slot: usize, instruction: &Instruction) -> Result<(), Diagnostic> {
+    fn print_instruction(&mut self, current: &mut scope::T, slot: usize, instruction: &Instruction) -> Result<(), Diagnostic> {
         let layout = self.layout.clone();
         let s = slot as i64;
         if !layout.used[slot] || (self.fast && matches!(unguarded(instruction), Instruction::Array_prepare(..))) {
@@ -643,7 +643,7 @@ impl Printer {
         if !constant {
             self.enter(current, &guards);
         }
-        let indentation = Scope::indent(current);
+        let indentation = scope::indent(current);
         let compute = matches!(self.placement, Some(Placement::Compute(_)));
         let (raster, placed) = (self.raster, self.placed);
         let narrow = layout.narrow[slot];
@@ -780,7 +780,7 @@ impl Printer {
         Ok(())
     }
 
-    fn print_loop(&mut self, header: usize, control: &Region::Loop, next: &[i64], stop: Option<i64>, body: &mut dyn FnMut(&mut dyn Visit)) -> Result<(), Diagnostic> {
+    fn print_loop(&mut self, header: usize, control: &region::Loop, next: &[i64], stop: Option<i64>, body: &mut dyn FnMut(&mut dyn Visit)) -> Result<(), Diagnostic> {
         if !self.layout.used[header] {
             return Ok(());
         }
@@ -794,9 +794,9 @@ impl Printer {
     #[allow(clippy::too_many_arguments)]
     fn print_loop_in(
         &mut self,
-        outer: &mut Scope::T,
+        outer: &mut scope::T,
         header: usize,
-        control: &Region::Loop,
+        control: &region::Loop,
         next: &[i64],
         stop: Option<i64>,
         body: &mut dyn FnMut(&mut dyn Visit),
@@ -809,7 +809,7 @@ impl Printer {
             let _ = writeln!(outer.decls, "  var r{slot}: {} = {};", self.type_of(slot), self.zero_of(slot));
         }
         self.enter(outer, guards);
-        let indentation = Scope::indent(outer);
+        let indentation = scope::indent(outer);
         // a pass count over the limit flags the status and runs no pass (as the Metal printer)
         if let Some(limit) = control.limit {
             let _ = write!(
@@ -849,7 +849,7 @@ impl Printer {
                 last(&|r| self.int_of(r))
             );
         }
-        self.scopes.push(Scope::create(None, None, h));
+        self.scopes.push(scope::create(None, None, h));
         body(self);
         let mut inner = self.scopes.pop().expect("loop scope");
         self.enter(&mut inner, &[]);
@@ -886,7 +886,7 @@ impl Visit for Printer {
         }
     }
 
-    fn loop_(&mut self, header: usize, control: &Region::Loop, next: &[i64], stop: Option<i64>, body: &mut dyn FnMut(&mut dyn Visit)) {
+    fn loop_(&mut self, header: usize, control: &region::Loop, next: &[i64], stop: Option<i64>, body: &mut dyn FnMut(&mut dyn Visit)) {
         if self.failure.is_some() {
             return;
         }
@@ -925,7 +925,7 @@ fn print(fast: bool, image: bool, placement: Option<Placement>, program: &packed
         hoisted: HashSet::new(),
         scans: HashSet::new(),
         workgroup: String::with_capacity(64),
-        scopes: vec![Scope::create(None, None, 0)],
+        scopes: vec![scope::create(None, None, 0)],
         failure: None,
     };
     kernel_layout::iter(&layout, &mut printer);

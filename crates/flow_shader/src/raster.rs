@@ -5,7 +5,7 @@
 use crate::emit::{self, Raster};
 use crate::lisp_stage::{self, compile, fail, is_buffer, Leaf, Stage as LStage};
 use crate::spirv::{self, Output};
-use flow_ir::core_ir::Region::{self, Instruction, Rebuild};
+use flow_ir::core_ir::region::{self, Instruction, Rebuild};
 use flow_ir::packed;
 use flow_syntax::syntax;
 use flow_syntax::ty::{self, Ty};
@@ -79,7 +79,7 @@ fn body(stage: &LStage, input: Box<dyn Fn(i64, i64) -> String>, int_input: Box<d
 /// The textures a fragment's intrinsics read: texture t with its sampler at t + 1 (none when it is
 /// only read by texel), or (an argument-buffer pipeline) both in the argument buffer at buffer t.
 fn textures(stage: &LStage) -> Vec<(i64, bool)> {
-    use Region::Stage as S;
+    use region::Stage as S;
     let used: Vec<(i64, bool)> = stage
         .program
         .code
@@ -166,7 +166,7 @@ fn pipeline(declarations: &str, vertex: &str, fragment: &str) -> Result<(LStage,
     }
     let order: Vec<usize> = keep.iter().chain(discard.iter()).copied().collect();
     let outputs: Vec<Vec<i64>> = order.iter().map(|k| f.program.outputs[*k].clone()).collect();
-    match Region::rebuild(&f.program, Rebuild { outputs: Some(outputs), ..Rebuild::default() }) {
+    match region::rebuild(&f.program, Rebuild { outputs: Some(outputs), ..Rebuild::default() }) {
         Ok(program) => {
             let leaves = order.iter().map(|k| f.leaves[*k].clone()).collect();
             Ok((v, LStage { leaves, program, ..f }))
@@ -331,7 +331,7 @@ fn stored(c: &LStage) -> Vec<i64> {
         .code
         .iter()
         .filter_map(|i| match crate::trace::flat(i).1 {
-            Instruction::Stage(Region::Stage::Store, r) => match crate::trace::flat(&c.program.code[r[0] as usize]).1 {
+            Instruction::Stage(region::Stage::Store, r) => match crate::trace::flat(&c.program.code[r[0] as usize]).1 {
                 Instruction::Array_prepare(u, _) => Some(slot(&c.program, *u as usize)),
                 _ => None,
             },

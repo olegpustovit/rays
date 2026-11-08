@@ -889,7 +889,7 @@ fn same_pieces(a: &[cook::piece], b: &[cook::piece]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Rc::ptr_eq(&x.bounds, &y.bounds))
 }
 
-pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: &mut EditorModel, result: frame_result) -> update {
+pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: &mut EditorModel, result: frame_result) -> update {
     let value = &*owned;
     let _timer = flow_syntax::phase_timer::measure("reduce");
     let Frame_input {

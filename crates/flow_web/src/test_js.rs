@@ -6,7 +6,7 @@ use crate::js;
 use crate::node_harness::{node_available, run_ok, runtime_url};
 use crate::test_program::{die, carried_fixtures, compile, fixtures, two_outputs};
 use flow_eval as E;
-use flow_ir::core_ir::Region::{self, Instruction, Iteration, RegionResult};
+use flow_ir::core_ir::region::{self, Instruction, Iteration, RegionResult};
 use flow_ir::packed::{self, host, ForceOptions};
 use flow_syntax::value::{self, Value};
 
@@ -95,7 +95,7 @@ pub(crate) fn run_node_raw(fast: bool, program: &packed::T) -> (i64, Vec<Vec<Str
         .iter()
         .enumerate()
         .map(|(k, length)| {
-            let integer = Region::integer_register(&view.code[view.outputs[k.min(view.outputs.len() - 1)][0] as usize]);
+            let integer = region::integer_register(&view.code[view.outputs[k.min(view.outputs.len() - 1)][0] as usize]);
             if integer && program.result != RegionResult::Collect && k == outputs.len() - 1 {
                 format!("Array({length}).fill(0n)")
             } else {
@@ -108,7 +108,7 @@ pub(crate) fn run_node_raw(fast: bool, program: &packed::T) -> (i64, Vec<Vec<Str
         RegionResult::Sum(false) => script.push_str(&format!("outputs[outputs.length - 1][{width}] = 0;\n")),
         RegionResult::Sum(true) => script.push_str(&format!("outputs[outputs.length - 1][{width}] = 1;\n")),
         RegionResult::Accumulate(seed, _) => {
-            let seed = ((E::Residual::eval_term(program.residual, seed, &live, None, None, None))).unwrap_or_else(|d| die(d));
+            let seed = ((E::residual::eval_term(program.residual, seed, &live, None, None, None))).unwrap_or_else(|d| die(d));
             let values: Vec<String> = match &seed {
                 Value::Int(_) => vec![scalar(&seed)],
                 _ => flatten(&seed).iter().map(|v| param::float_text(*v)).collect(),

@@ -145,7 +145,7 @@ fn device_registration() {
     let registered = std::rc::Rc::new(Cell::new(0));
     let count = registered.clone();
     let gpu = move |_:i64,_:i64,_:i64,_:&[ms::attribute]| { count.set(count.get()+1); Ok(m::gpu_token(1,2,1).unwrap()) };
-    let device = |_| Ok(flow_ir::flow_ir::Gpu::Value { identity:1,count:2,width:1,output:0,stamp:1,gpu_seconds:None });
+    let device = |_| Ok(flow_ir::flow_ir::gpu::Value { identity:1,count:2,width:1,output:0,stamp:1,gpu_seconds:None });
     let run = |x| {
         let (buffers, mut entries) = marks(&format!("(draw/circles (map (fn [i] [(+ {x} i) 0 0]) (array/range 2)) :radius (map (fn [i] 1.0) (array/range 2)))"));
         for entry in &mut entries { if let Entry::MarkSet { kind:Kind::Circle { radius,.. },.. } = entry { if let S::Buffer(b)=radius { *radius=S::Device(*b); } } }

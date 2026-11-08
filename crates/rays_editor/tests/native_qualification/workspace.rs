@@ -369,7 +369,7 @@ fn capture_cycles() {
     assert_eq!(run(1, true), expected); assert_eq!(run(8, false), expected); assert_eq!(run(8, true), expected); assert_eq!(handles(), before);
 }
 
-fn publish(gpu: &wg::WorkspaceGpu, key: &str, v: &flow_ir::flow_ir::Gpu::Value) -> Result<flow_gpu::image_sink::Output, Diagnostic> {
+fn publish(gpu: &wg::WorkspaceGpu, key: &str, v: &flow_ir::flow_ir::gpu::Value) -> Result<flow_gpu::image_sink::Output, Diagnostic> {
     let mut output = None;
     wg::image(gpu, key, 65, 17, &mut |o| { output = Some(o.clone()); Ok(()) }, v)?;
     Ok(output.unwrap())
@@ -385,8 +385,8 @@ fn gpu_sinks() {
     let program = flow_sop::image_kernel::program(&kernel);
     let mut shown = None;
     wg::with_backend(&owner, false, &mut |gpu| {
-        shown = match ok(flow_ir::flow_ir::Executor::try_display(None, None, false, gpu, &program, &input::at_time(0.))) {
-            Some(flow_ir::flow_ir::Executor::Displayed::Gpu(v)) => Some(v), _ => panic!("resident GPU output required")
+        shown = match ok(flow_ir::flow_ir::executor::try_display(None, None, false, gpu, &program, &input::at_time(0.))) {
+            Some(flow_ir::flow_ir::executor::Displayed::Gpu(v)) => Some(v), _ => panic!("resident GPU output required")
         };
     });
     let v = shown.unwrap(); let held = ok(publish(&owner, "held", &v)); let native_handles = handles();

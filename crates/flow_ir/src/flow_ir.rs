@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 
 pub type Packed = packed::T;
 
-pub mod Gpu {
+pub mod gpu {
     use super::*;
 
     /// Borrowed output metadata; `output` selects a fused producer's buffer. `gpu_seconds` is the
@@ -255,7 +255,7 @@ pub struct Execution {
     pub seconds: f64,
 }
 
-pub mod Profile {
+pub mod profile {
     use super::*;
 
     #[derive(Clone, Debug)]
@@ -455,7 +455,7 @@ pub mod Profile {
     }
 }
 
-pub mod Cost {
+pub mod cost {
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -552,13 +552,13 @@ pub mod Cost {
 
     /// Seconds to move `count` elements of `width` floats between host and device: the M1 table, or
     /// the gpu config's `readback_per_float` when the device measured its own.
-    pub fn readback(gpu: Option<&Gpu::Config>, count: i64, width: i64) -> f64 {
+    pub fn readback(gpu: Option<&gpu::Config>, count: i64, width: i64) -> f64 {
         let cost = table(Tier::Gpu_readback);
         let per_float = gpu.and_then(|g| g.readback_per_float).unwrap_or(cost.per_element);
         cost.fixed + (per_float * count as f64 * width as f64)
     }
 
-    pub fn outputs_readback(gpu: Option<&Gpu::Config>, packed: &Packed, count: i64) -> f64 {
+    pub fn outputs_readback(gpu: Option<&gpu::Config>, packed: &Packed, count: i64) -> f64 {
         packed.outputs.iter().fold(0.0, |total, lanes| total + readback(gpu, count, lanes.len() as i64))
     }
 }
@@ -567,7 +567,7 @@ fn scalar_uniforms(packed: &Packed) -> bool {
     let scalar = |ty: &Ty| matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Text);
     packed.uniforms.iter().all(|u| match u {
         Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..) | Value::Text(_) => true,
-        Value::Residual(r) => e::Residual::residual_ty(*r).is_some_and(|ty| scalar(&ty)),
+        Value::Residual(r) => e::residual::residual_ty(*r).is_some_and(|ty| scalar(&ty)),
         Value::Struct(g) | Value::Source(g) => scalar(&g.ty),
         _ => false,
     })
@@ -616,10 +616,10 @@ fn guarded_force(f: &mut dyn FnMut() -> Result<Value, Diagnostic>) -> Result<Val
 /// zero; eager recording still checks its ordinary head. Qualification additionally compares every
 /// element with the reference (a difference is recorded in `failure`).
 fn static_map(verify: bool, failure: &Arc<Mutex<Option<Diagnostic>>>, residual: ResidualId) -> Option<Value> {
-    Profile::attempt(Tier::Cpu_kernel, &mut |refuse: &dyn Fn(Vec<Diagnostic>)| {
+    profile::attempt(Tier::Cpu_kernel, &mut |refuse: &dyn Fn(Vec<Diagnostic>)| {
         let value = Value::Residual(residual);
         if e::frame_dependent(&value) || e::state_dependent(&value) { return None; }
-        let view = e::Residual::residual_view(residual).ok()?;
+        let view = e::residual::residual_view(residual).ok()?;
         let options = packed::CompileOptions::default();
         let compiled = packed::compile_result(&options, residual, &view.term);
         let packed = match compiled {
@@ -634,7 +634,7 @@ fn static_map(verify: bool, failure: &Arc<Mutex<Option<Diagnostic>>>, residual: 
         match guarded_force(&mut || packed::force(&packed, &input::at_time(0.0), &packed::ForceOptions::default())) {
             Ok(value) => {
                 if verify {
-                    let reference = match e::Host::force_reference(&Value::Residual(residual), &input::at_time(0.0), None, None, None) {
+                    let reference = match e::host::force_reference(&Value::Residual(residual), &input::at_time(0.0), None, None, None) {
                         Ok(v) => v,
                         Err(d) => {
                             *failure.lock().unwrap() = Some(v::fail(STATIC_VERIFICATION_FAILED, &d.message));
@@ -677,15 +677,15 @@ pub fn static_(options: &StaticOptions, workspace: &w::Workspace) -> Result<e::E
     let handlers = e::ResidualHandlers {
         trusted: true,
         replay: options.replay,
-        map: Some(Arc::new(|site, term, count| Profile::map(site, term, count))),
+        map: Some(Arc::new(|site, term, count| profile::map(site, term, count))),
         bulk: Some(Arc::new({
             let failure = failure.clone();
             move |r| static_map(verify, &failure, r)
         })),
         ..e::ResidualHandlers::default()
     };
-    let result = e::Residual::handle(handlers, &mut || {
-        e::Host::static_with_requests(None, options.record, options.inputs.as_deref(), workspace)
+    let result = e::residual::handle(handlers, &mut || {
+        e::host::static_with_requests(None, options.record, options.inputs.as_deref(), workspace)
     });
     if let Some(d) = failure.lock().unwrap().take() { return Err(d); }
     result
@@ -706,7 +706,7 @@ pub struct QualifyOptions {
     /// Keep qualifying large static maps in SOP graphs as residuals for their cook. Host graphs
     /// stay eager; the default is false for CLI checking and independent evaluation.
     pub defer: bool,
-    pub gpu: Option<Gpu::Config>,
+    pub gpu: Option<gpu::Config>,
 }
 
 type Form = flow_syntax::arena::SyntaxRow;
@@ -840,7 +840,7 @@ fn plain_value(value: &Value) -> bool {
 
 /// A map's iteration tuple only names its sites (a loop's tuple selects its skips), and a closure
 /// has no value key, so a view holding one is never matched.
-fn acceptance_key(view: &e::Residual::View) -> Option<String> {
+fn acceptance_key(view: &e::residual::View) -> Option<String> {
     if !view.bindings.iter().all(|(_, x)| plain_value(x)) { return None; }
     let iter: Vec<i64> = match view.term.node { w::Node::Hof(..) => Vec::new(), _ => view.iter.clone() };
     let bindings: Vec<(String, Vec<u8>)> = view.bindings.iter().map(|(n, x)| (n.clone(), v::key_of(&|r| r.0, x))).collect();
@@ -866,7 +866,7 @@ fn pending(path: &Path) -> Vec<Diagnostic> {
 struct Qualifier {
     t: Tables,
     ops: Arc<Vec<flow_check::op::Op>>,
-    gpu: Gpu::Config,
+    gpu: gpu::Config,
     accepted: Mutex<HashMap<String, Vec<(Path, Arc<Term>)>>>,
     outcomes: Mutex<HashMap<Path, Vec<Diagnostic>>>,
     observe: Option<Arc<dyn Fn(Option<Path>, ResidualId) + Send + Sync>>,
@@ -876,7 +876,7 @@ struct Qualifier {
 
 impl Qualifier {
     fn observed(&self, residual: ResidualId) {
-        let Ok(view) = e::Residual::residual_view(residual) else { return };
+        let Ok(view) = e::residual::residual_view(residual) else { return };
         let arena = view.term.arena();
         let form = arena.syntax().row(view.term.form);
         let producers: Paths = self
@@ -915,8 +915,8 @@ impl Qualifier {
                     match arena.fields(arena.op(id).args).iter().find(|field| arena.name(field.name) == "function") {
                         None => Err(vec![v::fail("E_KERNEL_FORM", "Image map needs a pixel function.")]),
                         Some(field) => {
-                            let mapped = e::Residual::eval_term(residual, &arena.handle(field.term), &input::at_time(0.0), None, None, None).and_then(|x| match x {
-                                Value::Fn(function) => e::Host::map_function(
+                            let mapped = e::residual::eval_term(residual, &arena.handle(field.term), &input::at_time(0.0), None, None, None).and_then(|x| match x {
+                                Value::Fn(function) => e::host::map_function(
                                     Some((view.instance, view.site.clone(), view.iter.clone())),
                                     Some(path.clone()),
                                     &flow_syntax::ty::FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 },
@@ -952,7 +952,7 @@ impl Qualifier {
             if !(settled || seen) {
                 let reasons = match &adapted {
                     Err(reasons) => reasons.clone(),
-                    Ok(r) => match e::Residual::residual_view(*r) {
+                    Ok(r) => match e::residual::residual_view(*r) {
                         Err(d) => vec![d],
                         Ok(rv) => match packed::compile_result(&packed::CompileOptions::default(), *r, &rv.term) {
                             Err(reasons) => reasons,
@@ -993,9 +993,9 @@ impl Qualifier {
     /// back as a 32-bit array: the SOP-input readback of the owner decision, taken within a
     /// tolerance.
     fn bulk_approx(&self, residual: ResidualId) -> Option<Value> {
-        Profile::attempt(Tier::Gpu, &mut |_| {
+        profile::attempt(Tier::Gpu, &mut |_| {
             let backend = self.gpu.backend.clone()?;
-            let view = e::Residual::residual_view(residual).ok()?;
+            let view = e::residual::residual_view(residual).ok()?;
             if self.defer && view.context == context::sop() { return None; }
             let value = Value::Residual(residual);
             if e::frame_dependent(&value) || e::state_dependent(&value) { return None; }
@@ -1007,17 +1007,17 @@ impl Qualifier {
             let fast = self.gpu.fast;
             let count = packed::static_count(&packed).unwrap_or(0);
             let placed = |inputs: Option<&packed::Inputs>, count: i64| -> bool {
-                if self.gpu.policy == Gpu::Policy::Qualification { return true; }
-                let cpu_seconds = Some(Cost::estimate(Cost::packed(count), count));
+                if self.gpu.policy == gpu::Policy::Qualification { return true; }
+                let cpu_seconds = Some(cost::estimate(cost::packed(count), count));
                 let device_seconds = backend.cost(inputs, fast, &packed, count).and_then(|seconds| {
-                    if !(seconds.is_finite() && seconds >= 0.0) { None } else { Some(seconds + Cost::outputs_readback(Some(&self.gpu), &packed, count)) }
+                    if !(seconds.is_finite() && seconds >= 0.0) { None } else { Some(seconds + cost::outputs_readback(Some(&self.gpu), &packed, count)) }
                 });
-                let reason = Cost::choose(cpu_seconds, device_seconds, false, 1);
-                                Profile::place(
+                let reason = cost::choose(cpu_seconds, device_seconds, false, 1);
+                                profile::place(
                     None,
                     &Placement { owner: (site_path.clone(), site_iter.clone()), count: Some(count), reason, cpu_seconds, device_seconds, cpu_consumers: Some(1) },
                 );
-                Cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::No_cost_evidence)
+                cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::No_cost_evidence)
             };
             if !packed::gpu_refusals(true, fast, &packed).is_empty() || (scalar_uniforms(&packed) && !placed(None, count)) {
                 return None;
@@ -1031,17 +1031,17 @@ impl Qualifier {
     }
 
     fn defer_map(&self, residual: ResidualId) -> bool {
-        let Ok(view) = e::Residual::residual_view(residual) else { return false };
+        let Ok(view) = e::residual::residual_view(residual) else { return false };
         let value = Value::Residual(residual);
         if view.context != context::sop() || e::frame_dependent(&value) || e::state_dependent(&value) { return false; }
         if matches!(view.term.node, w::Node::Op(id) if matches!(view.term.name(view.term.arena().op(id).op), "array/range" | "array/int" | "array/float" | "array/vec3" | "array/vec4")) {
-            Profile::deferred();
+            profile::deferred();
             return true;
         }
         match packed::compile(&packed::CompileOptions::default(), residual, &view.term) {
             None => false,
             Some(_) => {
-                Profile::deferred();
+                profile::deferred();
                 true
             }
         }
@@ -1056,7 +1056,7 @@ impl Qualifier {
 pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> Result<(w::Workspace, e::Eval), Diagnostic> {
     let _phase = flow_syntax::phase_timer::measure("qualify");
     let index_phase = flow_syntax::phase_timer::measure("qualify.index");
-    let gpu = options.gpu.clone().unwrap_or_else(Gpu::default);
+    let gpu = options.gpu.clone().unwrap_or_else(gpu::default);
     let mut roots: HashMap<i64, Vec<(FormKey, Path)>> = HashMap::new();
     for (form, path) in &workspace.packed_roots {
         roots.entry(form.id).or_default().push((key_of_form(form), path.clone()));
@@ -1096,7 +1096,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
     let handlers = e::ResidualHandlers {
         trusted: true,
         replay: options.replay,
-        map: Some(Arc::new(|site, term, count| Profile::map(site, term, count))),
+        map: Some(Arc::new(|site, term, count| profile::map(site, term, count))),
         observe: Some(Arc::new({
             let q = q.clone();
             move |r| q.observed(r)
@@ -1119,8 +1119,8 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
         })),
         ..e::ResidualHandlers::default()
     };
-    let evaluated = e::Residual::handle(handlers, &mut || {
-        e::Host::static_with_requests(None, options.record, options.inputs.as_deref(), workspace)
+    let evaluated = e::residual::handle(handlers, &mut || {
+        e::host::static_with_requests(None, options.record, options.inputs.as_deref(), workspace)
     });
     if let Some(d) = failure.lock().unwrap().take() { return Err(d); }
     let evaluated = evaluated?;
@@ -1153,7 +1153,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
 // ---------------------------------------------------------------------------------------------
 // Executor.
 
-pub mod Executor {
+pub mod executor {
     use super::*;
     use flow_check::workspace::Node;
 
@@ -1164,7 +1164,7 @@ pub mod Executor {
         Reference,
     }
 
-    type CountSource = c::Region::CountSource;
+    type CountSource = c::region::CountSource;
 
     pub struct ProgramData {
         pub value: Value,
@@ -1174,10 +1174,10 @@ pub mod Executor {
         packed_root: Option<(Packed, bool)>,
         trace: Option<core_lower::Trace>,
         count_source: CountSource,
-        profile: Option<Arc<Profile::T>>,
+        profile: Option<Arc<profile::T>>,
         approx: Paths,
         sink: Option<Sink>,
-        gpu_kernel: Mutex<Option<(Arc<dyn Gpu::Backend>, bool, Packed, Arc<dyn Gpu::Kernel>)>>,
+        gpu_kernel: Mutex<Option<(Arc<dyn gpu::Backend>, bool, Packed, Arc<dyn gpu::Kernel>)>>,
         record_region: std::sync::OnceLock<Option<(Vec<String>, Packed)>>,
     }
 
@@ -1227,9 +1227,9 @@ pub mod Executor {
                 Node::Op(id) if term.name(arena.op(id).op) == "array/sum" => compile_region(trace, through_exact, count_source, residual, term).map(|p| (p, false)),
                 // A bound map is the map it names.
                 Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
-                    match e::Residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
+                    match e::residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
                         Some(Value::Residual(nested)) => {
-                            let term = e::Residual::residual_term(nested)?;
+                            let term = e::residual::residual_term(nested)?;
                             find(trace, through_exact, readback, count_source, seen, nested, &term)
                         }
                         _ => None,
@@ -1240,7 +1240,7 @@ pub mod Executor {
         }
         match value {
             Value::Residual(residual) => {
-                let term = e::Residual::residual_term(*residual)?;
+                let term = e::residual::residual_term(*residual)?;
                 find(trace, through_exact, readback, count_source, &mut Vec::new(), *residual, &term)
             }
             _ => None,
@@ -1283,7 +1283,7 @@ pub mod Executor {
     #[derive(Clone, Default)]
     pub struct CompileOptions {
         pub trace: Option<core_lower::Trace>,
-        pub profile: Option<Arc<Profile::T>>,
+        pub profile: Option<Arc<profile::T>>,
         pub strict: bool,
         pub approx: Paths,
         pub sink: Option<Sink>,
@@ -1323,7 +1323,7 @@ pub mod Executor {
                 Node::Op(op) if arena.name(arena.op(op).op) == "array/sum" => self.region_source(residual, &arena.handle(id)),
                 Node::RefBinding(binding) => {
                     let binding = arena.ref_binding(binding);
-                    let mut captured = e::Residual::residual_binding(residual, arena.name(binding.name));
+                    let mut captured = e::residual::residual_binding(residual, arena.name(binding.name));
                     for &field in arena.name_ids(binding.fields) {
                         captured = captured.and_then(|x| match x {
                             v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().find(|(n, _)| n == arena.name(field)).map(|(_, x)| x.clone()),
@@ -1332,7 +1332,7 @@ pub mod Executor {
                     }
                     match captured {
                         Some(Value::Residual(r)) => {
-                            let term = e::Residual::residual_term(r)?;
+                            let term = e::residual::residual_term(r)?;
                             self.unsupported_source(r, &term)
                         }
                         _ => None,
@@ -1355,7 +1355,7 @@ pub mod Executor {
                     let call = arena.call_fn(call);
                     if let Some(span) = arena.term_ids(call.args).iter().find_map(|&id| child(id)) { return Some(span); }
                     let body = call.body?;
-                    match e::Residual::residual_definition(residual, arena.name(call.name)) {
+                    match e::residual::residual_definition(residual, arena.name(call.name)) {
                         None => child(body),
                         Some(definition) => {
                             let bindings: Vec<(String, Value)> = definition
@@ -1366,7 +1366,7 @@ pub mod Executor {
                                     (name.clone(), source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
                                 })
                                 .collect();
-                            let nested = e::Residual::with_bindings(residual, &arena.handle(body), &bindings).ok()?;
+                            let nested = e::residual::with_bindings(residual, &arena.handle(body), &bindings).ok()?;
                             self.unsupported_row(nested, arena, body)
                         }
                     }
@@ -1397,7 +1397,7 @@ pub mod Executor {
                                 (name, source_value("$core/argument", param_ty(index).expect("typed").clone(), vec![("index".into(), Value::Int(index as i64))]))
                             })
                             .collect();
-                        let nested = e::Residual::with_bindings(residual, &arena.handle(function.body), &bindings).ok()?;
+                        let nested = e::residual::with_bindings(residual, &arena.handle(function.body), &bindings).ok()?;
                         self.unsupported_row(nested, arena, function.body)
                     } else {
                         child(function.body).or_else(|| function.capture.and_then(child))
@@ -1423,7 +1423,7 @@ pub mod Executor {
         fn unsupported_captured(&self, value: &Value) -> Option<rays_diagnostic::Span> {
             match value {
                 Value::Residual(r) => {
-                    let term = e::Residual::residual_term(*r)?;
+                    let term = e::residual::residual_term(*r)?;
                     self.unsupported_source(*r, &term)
                 }
                 Value::List(xs) => xs.iter().find_map(|x| self.unsupported_captured(x)),
@@ -1433,7 +1433,7 @@ pub mod Executor {
         }
 
         fn validate_residual(&mut self, residual: ResidualId) -> Result<(), Diagnostic> {
-            let view = e::Residual::residual_view(residual)?;
+            let view = e::residual::residual_view(residual)?;
             // Per-element Vec3 placeholders are runtime uniforms, not nested kernels.
             let element_capture = matches!(view.term.node, Node::RefBinding(id) if view.term.arena().name_ids(view.term.arena().ref_binding(id).fields).is_empty() && *view.term.ty() == Ty::Vec3 && view.term.name(view.term.arena().ref_binding(id).name).starts_with("$elem:"));
             if view.previous || element_capture || e::state_dependent(&Value::Residual(residual)) { return Ok(()); }
@@ -1453,7 +1453,7 @@ pub mod Executor {
                 Value::Residual(r) => {
                     self.validated.insert((r.1, r.0), ());
                     if !self.inline.contains_key(&(r.1, r.0)) { self.validate_residual(*r)?; }
-                    let view = e::Residual::residual_view(*r)?;
+                    let view = e::residual::residual_view(*r)?;
                     for (_, x) in &view.bindings { self.validate_value(x)?; }
                     Ok(())
                 }
@@ -1466,7 +1466,7 @@ pub mod Executor {
                     Ok(())
                 }
                 Value::Fn(f) => {
-                    for (_, x) in e::Residual::function_bindings(*f) { self.validate_value(&x)?; }
+                    for (_, x) in e::residual::function_bindings(*f) { self.validate_value(&x)?; }
                     Ok(())
                 }
                 _ => Ok(()),
@@ -1527,7 +1527,7 @@ pub mod Executor {
     }
 
     /// One timing per packed group, recorded when the group runs.
-    fn measure(ran: Arc<std::sync::atomic::AtomicBool>, profile: &Option<Arc<Profile::T>>) -> Option<packed::Measure> {
+    fn measure(ran: Arc<std::sync::atomic::AtomicBool>, profile: &Option<Arc<profile::T>>) -> Option<packed::Measure> {
         let profile = profile.clone()?;
         Some(packed::Measure {
             clock: profile.clock.clone(),
@@ -1537,7 +1537,7 @@ pub mod Executor {
                     ran.store(true, Ordering::Relaxed);
                     let sites = packed::provenance(packed);
                     let (_, path, iter) = packed::site(packed);
-                    Profile::record(
+                    profile::record(
                         &profile,
                         &Execution { owner: (path, iter), sites, seconds, tier: if reference { Tier::Interp } else { Tier::Cpu_kernel } },
                     );
@@ -1592,7 +1592,7 @@ pub mod Executor {
 
     fn reference(run: &Run, value: &Value, state: &e::State) -> Result<Value, Diagnostic> {
         let walk = count_walk(&run.counters.walker);
-        e::Host::force_reference_observed(value, &run.live, Some(state), run.o.elems.as_deref(), run.o.resolve.clone(), &*walk)
+        e::host::force_reference_observed(value, &run.live, Some(state), run.o.elems.as_deref(), run.o.resolve.clone(), &*walk)
     }
 
     impl Run {
@@ -1612,7 +1612,7 @@ pub mod Executor {
                                 fusion: true,
                                 count_source: Some(self.p.count_source.clone()),
                             };
-                            match e::Residual::residual_view(r).ok().and_then(|view| packed::compile_template(&options, r, &view.term)) {
+                            match e::residual::residual_view(r).ok().and_then(|view| packed::compile_template(&options, r, &view.term)) {
                                 Some(p) => Candidate::Packed(p),
                                 None => Candidate::Reference,
                             }
@@ -1621,7 +1621,7 @@ pub mod Executor {
                             Ok(core) => {
                                 // Placement declines before execution, while state is untouched.
                                 let declined = !self.o.strict
-                                    && core.regions.iter().any(|region| region.count.map(|count| Cost::packed(count) != Tier::Cpu_kernel).unwrap_or(false));
+                                    && core.regions.iter().any(|region| region.count.map(|count| cost::packed(count) != Tier::Cpu_kernel).unwrap_or(false));
                                 if declined { template(r) } else { Candidate::Core(Arc::new(core_exec::prepare(&core, false, false, &Paths::new(), false))) }
                             }
                             Err(_) => template(r),
@@ -1642,8 +1642,8 @@ pub mod Executor {
         fn dispatch_fn(self: &Arc<Self>) -> packed::Dispatch {
             let run = self.clone();
             Arc::new(move |residual, term| {
-                let view = e::Residual::residual_view(residual)?;
-                let residual = if *view.term == *term { residual } else { e::Residual::with_bindings(residual, term, &view.bindings)? };
+                let view = e::residual::residual_view(residual)?;
+                let residual = if *view.term == *term { residual } else { e::residual::with_bindings(residual, term, &view.bindings)? };
                 run.walk(&Value::Residual(residual))
             })
         }
@@ -1694,12 +1694,12 @@ pub mod Executor {
             match self.candidate(r) {
                 Candidate::Core(p) => Some(self.execute_core(Some(r), &p)),
                 Candidate::Packed(p)
-                    if self.o.strict || !packed::static_count(&p).map(|count| Cost::packed(count) != Tier::Cpu_kernel).unwrap_or(false) =>
+                    if self.o.strict || !packed::static_count(&p).map(|count| cost::packed(count) != Tier::Cpu_kernel).unwrap_or(false) =>
                 {
                     Some(packed::force(&p, live, &self.force_options()))
                 }
                 _ => {
-                    let view = e::Residual::residual_view(r).ok();
+                    let view = e::residual::residual_view(r).ok();
                     let needs_kernel = view.is_some_and(|view| match view.term.node {
                         Node::Hof(id) => matches!(view.term.arena().hof(id).kind, w::HofKind::Map | w::HofKind::Reduce),
                         Node::Loop(_) => true,
@@ -1722,8 +1722,8 @@ pub mod Executor {
                 Value::Residual(r) => {
                     let key = (r.1, r.0);
                     if let Some(found) = self.forced.lock().unwrap().get(&key) { return Ok(found.clone()); }
-                    e::Residual::bind_live(*r, &self.live, Some(&state))?;
-                    let restore = e::Residual::checkpoint(*r)?;
+                    e::residual::bind_live(*r, &self.live, Some(&state))?;
+                    let restore = e::residual::checkpoint(*r)?;
                     let result = match self.execute(*r, &self.live) {
                         Some(Ok(value)) => Ok(value),
                         Some(Err(d)) => {
@@ -1789,7 +1789,7 @@ pub mod Executor {
                     Ok(v) => Ok(v),
                     Err(_) if !o.strict && o.resident.is_none() => {
                         let walk = count_walk(&counters.walker);
-                        e::Host::force_reference_observed(&program.value, live, None, None, None, &*walk)
+                        e::host::force_reference_observed(&program.value, live, None, None, None, &*walk)
                     }
                     Err(d) => Err(d),
                 };
@@ -1829,7 +1829,7 @@ pub mod Executor {
                             Value::Record(fields) if o.resident.is_some() || !(e::frame_dependent(&program.value) || e::state_dependent(&program.value)) => {
                                 let root = fields.iter().find_map(|(_, x)| match x {
                                     Value::Residual(r)
-                                        if o.resident.is_some() || e::Residual::residual_context(*r).is_some_and(|c| c == context::sop()) =>
+                                        if o.resident.is_some() || e::residual::residual_context(*r).is_some_and(|c| c == context::sop()) =>
                                     {
                                         Some(*r)
                                     }
@@ -1844,7 +1844,7 @@ pub mod Executor {
                                         Some(p) => Some(p),
                                         None => match core_lower::lower(Some(program.value.clone()), program.trace.clone(), o.strict, None, None, root) {
                                             Err(name) => {
-                                                let site = e::Residual::residual_view(root).map(|v| v.site.join("/")).unwrap_or_default();
+                                                let site = e::residual::residual_view(root).map(|v| v.site.join("/")).unwrap_or_default();
                                                 fallback::note(&site, &format!("record does not lower: {name}"));
                                                 None
                                             }
@@ -1866,7 +1866,7 @@ pub mod Executor {
                                 // a stateful record's root, bound to this frame and state, carries
                                 // what its reads see
                                 let ran = if e::state_dependent(&program.value) {
-                                    e::Residual::bind_live(root, live, Some(&state)).and_then(|_| run.execute_core(Some(root), &prepared))
+                                    e::residual::bind_live(root, live, Some(&state)).and_then(|_| run.execute_core(Some(root), &prepared))
                                 } else {
                                     run.execute_core(None, &prepared)
                                 };
@@ -1902,7 +1902,7 @@ pub mod Executor {
         if let Some(profile) = &program.profile {
             if !packed_ran.load(Ordering::Relaxed) {
                 let (id, sites): (Id, Vec<(i64, Path, Vec<i64>)>) = match &program.value {
-                    Value::Residual(residual) => match e::Residual::residual_view(*residual) {
+                    Value::Residual(residual) => match e::residual::residual_view(*residual) {
                         Ok(view) => {
                             let sites = match packed_root(program) {
                                 Some(p) => packed::provenance(&p),
@@ -1918,7 +1918,7 @@ pub mod Executor {
                     Tier::Interp
                 } else {
                     match packed_root(program) {
-                        Some(p) => Cost::packed(packed::static_count(&p).unwrap_or(1)),
+                        Some(p) => cost::packed(packed::static_count(&p).unwrap_or(1)),
                         None => Tier::Core,
                     }
                 };
@@ -1926,7 +1926,7 @@ pub mod Executor {
                     Some((namespace, rest)) if namespace.starts_with("@instance:") => rest.to_vec(),
                     _ => id.0.clone(),
                 };
-                Profile::record(
+                profile::record(
                     profile,
                     &Execution { owner: (path, id.1), sites, tier, seconds: ((profile.clock)() - started.unwrap_or(0.0)).max(0.0) },
                 );
@@ -1953,7 +1953,7 @@ pub mod Executor {
         }
     }
 
-    pub mod Private {
+    pub mod private {
         use super::*;
 
         pub fn force_with_lower_attempts(program: &Program, o: &ForceOptions, live: &Frame) -> (Result<Value, Diagnostic>, usize) {
@@ -1985,13 +1985,13 @@ pub mod Executor {
     #[derive(Clone)]
     pub enum Displayed {
         Cpu(Value),
-        Gpu(Gpu::Value),
+        Gpu(gpu::Value),
     }
 
     /// The owner's one-kernel cache.
     pub struct KernelCache {
-        pub cached: Box<dyn Fn() -> Option<(Arc<dyn Gpu::Backend>, bool, Packed, Arc<dyn Gpu::Kernel>)>>,
-        pub store: Box<dyn Fn((Arc<dyn Gpu::Backend>, bool, Packed, Arc<dyn Gpu::Kernel>))>,
+        pub cached: Box<dyn Fn() -> Option<(Arc<dyn gpu::Backend>, bool, Packed, Arc<dyn gpu::Kernel>)>>,
+        pub store: Box<dyn Fn((Arc<dyn gpu::Backend>, bool, Packed, Arc<dyn gpu::Kernel>))>,
     }
 
     /// A packed region on the GPU when the backend takes it and measures it cheaper. `display` says
@@ -2000,10 +2000,10 @@ pub mod Executor {
         state: Option<&e::State>,
         resolve: Option<&core_exec::ResolveFn>,
         source: Option<&packed::host::SourceFn>,
-        gpu: &Gpu::Config,
+        gpu: &gpu::Config,
         approx: &Paths,
         display: bool,
-        profile: &Option<Arc<Profile::T>>,
+        profile: &Option<Arc<profile::T>>,
         cache: &KernelCache,
         readback: bool,
         packed_region: &Packed,
@@ -2011,7 +2011,7 @@ pub mod Executor {
     ) -> Result<Option<Displayed>, Diagnostic> {
         let refused = |reason: PlacementReason| -> Result<Option<Displayed>, Diagnostic> {
             let (_, path, iter) = packed::site(packed_region);
-            Profile::place(
+            profile::place(
                 profile.as_ref(),
                 &Placement {
                     owner: (path, iter),
@@ -2032,23 +2032,23 @@ pub mod Executor {
             return refused(PlacementReason::Unsupported_form);
         }
         let cheaper = |inputs: Option<&packed::Inputs>, count: i64| -> bool {
-            if gpu.policy == Gpu::Policy::Qualification { return true; }
-            let cpu_seconds = Some(Cost::estimate(Cost::packed(count), count) + if readback { 0.0 } else { Cost::display_sink(Tier::Cpu_kernel, count) });
+            if gpu.policy == gpu::Policy::Qualification { return true; }
+            let cpu_seconds = Some(cost::estimate(cost::packed(count), count) + if readback { 0.0 } else { cost::display_sink(Tier::Cpu_kernel, count) });
             let device_seconds = backend.cost(inputs, fast, packed_region, count).and_then(|seconds| {
                 if !(seconds.is_finite() && seconds >= 0.0) {
                     None
                 } else {
-                    Some(seconds + if readback { Cost::outputs_readback(Some(gpu), packed_region, count) } else { Cost::display_sink(Tier::Gpu, count) })
+                    Some(seconds + if readback { cost::outputs_readback(Some(gpu), packed_region, count) } else { cost::display_sink(Tier::Gpu, count) })
                 }
             });
             let cpu_consumers = if readback { 1 } else { 0 };
-            let reason = Cost::choose(cpu_seconds, device_seconds, false, cpu_consumers);
+            let reason = cost::choose(cpu_seconds, device_seconds, false, cpu_consumers);
             let (_, path, iter) = packed::site(packed_region);
-            Profile::place(
+            profile::place(
                 profile.as_ref(),
                 &Placement { owner: (path, iter), count: Some(count), reason, cpu_seconds, device_seconds, cpu_consumers: Some(cpu_consumers) },
             );
-            Cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::No_cost_evidence)
+            cost::on_device(reason) || (inputs.is_none() && reason == PlacementReason::No_cost_evidence)
         };
         // Static cardinality lets unmeasured placement decline before allocating producer inputs,
         // especially the million-element exact SOP value lane.
@@ -2068,13 +2068,13 @@ pub mod Executor {
                 "GPU arrays require a display sink or (exact x) before CPU, SOP, state, export or cache use.",
             ));
         }
-        let timed = |tier: Tier, seconds: &dyn Fn(&Gpu::Value) -> Option<f64>, run: &mut dyn FnMut() -> Result<Gpu::Value, Diagnostic>| -> Result<Gpu::Value, Diagnostic> {
+        let timed = |tier: Tier, seconds: &dyn Fn(&gpu::Value) -> Option<f64>, run: &mut dyn FnMut() -> Result<gpu::Value, Diagnostic>| -> Result<gpu::Value, Diagnostic> {
             let start = profile.as_ref().map(|p| (p.clock)());
             let result = run();
             let elapsed = match &result { Ok(value) => seconds(value), Err(_) => None };
             if let Some(p) = profile {
                 let (_, path, iter) = packed::site(packed_region);
-                Profile::record(
+                profile::record(
                     p,
                     &Execution {
                         owner: (path, iter),
@@ -2096,7 +2096,7 @@ pub mod Executor {
                 let result = backend.prepare(fast, packed_region);
                 if let Some(p) = profile {
                     let (_, path, iter) = packed::site(packed_region);
-                    Profile::record(
+                    profile::record(
                         p,
                         &Execution {
                             owner: (path, iter),
@@ -2111,7 +2111,7 @@ pub mod Executor {
                 kernel
             }
         };
-        let output = timed(Tier::Gpu, &|o: &Gpu::Value| o.gpu_seconds, &mut || kernel.run(&inputs))?;
+        let output = timed(Tier::Gpu, &|o: &gpu::Value| o.gpu_seconds, &mut || kernel.run(&inputs))?;
         if readback {
             let value = timed_value(profile, packed_region, Tier::Gpu_readback, &mut || kernel.readback(&output))?;
             Ok(Some(Displayed::Cpu(value)))
@@ -2120,12 +2120,12 @@ pub mod Executor {
         }
     }
 
-    fn timed_value(profile: &Option<Arc<Profile::T>>, packed_region: &Packed, tier: Tier, run: &mut dyn FnMut() -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
+    fn timed_value(profile: &Option<Arc<profile::T>>, packed_region: &Packed, tier: Tier, run: &mut dyn FnMut() -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
         let start = profile.as_ref().map(|p| (p.clock)());
         let result = run();
         if let Some(p) = profile {
             let (_, path, iter) = packed::site(packed_region);
-            Profile::record(
+            profile::record(
                 p,
                 &Execution { owner: (path, iter), sites: packed::provenance(packed_region), tier, seconds: ((p.clock)() - start.unwrap_or(0.0)).max(0.0) },
             );
@@ -2148,7 +2148,7 @@ pub mod Executor {
         state: Option<&e::State>,
         resolve: Option<&core_exec::ResolveFn>,
         reference: bool,
-        gpu: &Gpu::Config,
+        gpu: &gpu::Config,
         program: &Program,
         live: &Frame,
     ) -> Result<Option<Displayed>, Diagnostic> {
@@ -2177,16 +2177,16 @@ pub mod Executor {
     /// `Qualification` says so), else `None` for the CPU. It keeps the kernels of the last 64
     /// regions it saw.
     pub struct RegionDisplay {
-        gpu: Gpu::Config,
-        profile: Option<Arc<Profile::T>>,
+        gpu: gpu::Config,
+        profile: Option<Arc<profile::T>>,
         approx: Paths,
-        kernels: Arc<Mutex<Vec<(bool, Arc<dyn Gpu::Backend>, Packed, Arc<dyn Gpu::Kernel>)>>>,
+        kernels: Arc<Mutex<Vec<(bool, Arc<dyn gpu::Backend>, Packed, Arc<dyn gpu::Kernel>)>>>,
         ranges: Arc<Mutex<HashMap<i64, Value>>>,
     }
 
-    pub fn region_display(gpu: Option<Gpu::Config>, profile: Option<Arc<Profile::T>>, approx: Option<Paths>) -> RegionDisplay {
+    pub fn region_display(gpu: Option<gpu::Config>, profile: Option<Arc<profile::T>>, approx: Option<Paths>) -> RegionDisplay {
         RegionDisplay {
-            gpu: gpu.unwrap_or_else(Gpu::default),
+            gpu: gpu.unwrap_or_else(gpu::default),
             profile,
             approx: approx.unwrap_or_default(),
             kernels: Arc::new(Mutex::new(Vec::new())),
@@ -2196,7 +2196,7 @@ pub mod Executor {
     }
 
     impl RegionDisplay {
-        pub fn call(&self, state: Option<&e::State>, resolve: Option<&core_exec::ResolveFn>, packed_region: &Packed, live: &Frame) -> Result<Option<Gpu::Value>, Diagnostic> {
+        pub fn call(&self, state: Option<&e::State>, resolve: Option<&core_exec::ResolveFn>, packed_region: &Packed, live: &Frame) -> Result<Option<gpu::Value>, Diagnostic> {
             if self.gpu.backend.is_none() { return Ok(None); }
             let ranges = self.ranges.clone();
             let source: packed::host::SourceFn = Arc::new(move |residual: ResidualId, term: &Term| -> Result<Option<Value>, Diagnostic> {
@@ -2204,10 +2204,10 @@ pub mod Executor {
                     let arena = term.arena();
                     match term.node {
                         Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
-                            let view = e::Residual::residual_view(residual)?;
+                            let view = e::residual::residual_view(residual)?;
                             match view.bindings.iter().find(|(n, _)| n == term.name(arena.ref_binding(id).name)) {
                                 Some((_, Value::Residual(r))) => {
-                                    let rv = e::Residual::residual_view(*r)?;
+                                    let rv = e::residual::residual_view(*r)?;
                                     find(ranges, *r, &rv.term)
                                 }
                                 _ => Ok(None),
@@ -2218,7 +2218,7 @@ pub mod Executor {
                                 if let flow_check::term_arena::Literal::Int(count) = arena.literal(literal) {
                                     if matches!(term.ty(), Ty::Array(inner) if **inner == Ty::Float) && count >= 0 && count <= 64 * 1024 * 1024 / 8 {
                                         if let Some(found) = ranges.lock().unwrap().get(&count) { return Ok(Some(found.clone())); }
-                                        let value = e::Residual::eval_term(residual, term, &input::at_time(0.0), None, None, None)?;
+                                        let value = e::residual::eval_term(residual, term, &input::at_time(0.0), None, None, None)?;
                                         let mut table = ranges.lock().unwrap();
                                         if table.len() >= 16 { table.clear(); }
                                         table.insert(count, value.clone());
@@ -2264,12 +2264,12 @@ pub mod Executor {
     /// leaves it to the CPU. Kernels are kept by the region's form, at most 16.
     /// ponytail: a fixed 4,096-element threshold, not the measured cost.
     pub struct RegionReadback {
-        gpu: Gpu::Config,
-        kernels: Mutex<Vec<(bool, String, Arc<dyn Gpu::Backend>, Arc<dyn Gpu::Kernel>)>>,
+        gpu: gpu::Config,
+        kernels: Mutex<Vec<(bool, String, Arc<dyn gpu::Backend>, Arc<dyn gpu::Kernel>)>>,
     }
 
-    pub fn region_readback(gpu: Option<Gpu::Config>) -> RegionReadback {
-        RegionReadback { gpu: gpu.unwrap_or_else(Gpu::default), kernels: Mutex::new(Vec::new()) }
+    pub fn region_readback(gpu: Option<gpu::Config>) -> RegionReadback {
+        RegionReadback { gpu: gpu.unwrap_or_else(gpu::default), kernels: Mutex::new(Vec::new()) }
     }
 
     impl RegionReadback {
@@ -2307,14 +2307,14 @@ pub mod Executor {
     /// omitted output planes are still checked.
     pub fn force_into(
         o: &ForceOptions,
-        gpu: Option<Gpu::Config>,
+        gpu: Option<gpu::Config>,
         column_source: packed::ColumnSource,
         count: i64,
         outputs: Arc<Mutex<Vec<Vec<Option<Vec<f64>>>>>>,
         program: &Program,
         live: &Frame,
     ) -> Result<Option<()>, Diagnostic> {
-        let gpu = gpu.unwrap_or_else(Gpu::default);
+        let gpu = gpu.unwrap_or_else(gpu::default);
         let widths = outputs.lock().unwrap().len();
         let into_cpu = || {
             let packed_root = packed_root(program).ok_or_else(|| v::fail("E_CORE", "no packed root"));
@@ -2401,26 +2401,26 @@ pub mod Executor {
         /// prices the CPU route of this site from its measured cooks
         pub cpu_cost: Option<Arc<dyn Fn(&Id, i64) -> Option<f64> + Send + Sync>>,
         pub device_first: Option<Arc<dyn Fn(&Id, i64, Option<f64>) -> bool + Send + Sync>>,
-        pub gpu: Option<Gpu::Config>,
+        pub gpu: Option<gpu::Config>,
     }
 
     /// The elementwise fields of a record program (a fused SOP write's) as one region on the
     /// device, in fast precision when the shared measured comparison places it: one dispatch, each
     /// output kept on the device as its planes, by field name, read only when they materialise.
     /// `None` keeps the record on the CPU, also when the device fails.
-    pub fn record_on_device(program: &Program, o: &RecordOptions, live: &Frame) -> Result<Option<Vec<(String, Gpu::Planes)>>, Diagnostic> {
-        let gpu = o.gpu.clone().unwrap_or_else(Gpu::default);
+    pub fn record_on_device(program: &Program, o: &RecordOptions, live: &Frame) -> Result<Option<Vec<(String, gpu::Planes)>>, Diagnostic> {
+        let gpu = o.gpu.clone().unwrap_or_else(gpu::default);
         if let Some(count) = o.cpu_consumers { assert!(count >= 0, "record_on_device: negative consumers"); }
         if let Some(count) = o.expected_count { assert!(count >= 0, "record_on_device: negative expected count"); }
         if gpu.backend.is_none() {
             fn site(value: &Value) -> Option<Id> {
                 match value {
-                    Value::Residual(r) => e::Residual::residual_view(*r).ok().map(|view| (view.site, view.iter)),
+                    Value::Residual(r) => e::residual::residual_view(*r).ok().map(|view| (view.site, view.iter)),
                     Value::Record(fields) => fields.iter().rev().find_map(|(_, x)| site(x)),
                     _ => None,
                 }
             }
-            Profile::place(
+            profile::place(
                 program.profile.as_ref(),
                 &Placement {
                     owner: site(&program.value).unwrap_or_else(|| (vec!["@value".to_owned()], Vec::new())),
@@ -2435,7 +2435,7 @@ pub mod Executor {
         }
         let report = |merged: &Packed, count: Option<i64>, reason: PlacementReason, cpu_seconds: Option<f64>, device_seconds: Option<f64>| {
             let (_, path, iter) = packed::site(merged);
-            Profile::place(
+            profile::place(
                 program.profile.as_ref(),
                 &Placement { owner: (path, iter), count, reason, cpu_seconds, device_seconds, cpu_consumers: o.cpu_consumers },
             );
@@ -2444,15 +2444,15 @@ pub mod Executor {
         let backend = gpu.backend.clone().expect("backend");
         match region {
             Some((names, merged)) if gpu.fast && packed::gpu_refusals(true, true, &merged).is_empty() => {
-                if gpu.policy == Gpu::Policy::Measured && o.cpu_consumers.is_none() {
+                if gpu.policy == gpu::Policy::Measured && o.cpu_consumers.is_none() {
                     report(&merged, packed::static_count(&merged), PlacementReason::Missing_consumer, None, None);
                     return Ok(None);
                 }
                 let select = |inputs: Option<&packed::Inputs>, preflight: bool, held: bool, held_readback: f64, count: i64| -> bool {
-                    if gpu.policy == Gpu::Policy::Qualification { return true; }
+                    if gpu.policy == gpu::Policy::Qualification { return true; }
                     let readers = o.cpu_consumers.expect("consumers known");
                     let cpu_seconds = (match &o.cpu_cost {
-                        None => Some(Cost::estimate(Cost::packed(count), count)),
+                        None => Some(cost::estimate(cost::packed(count), count)),
                         Some(cost) => {
                             let (_, path, iter) = packed::site(&merged);
                             cost(&(path, iter), count)
@@ -2469,13 +2469,13 @@ pub mod Executor {
                             if !(seconds.is_finite() && seconds >= 0.0) {
                                 None
                             } else {
-                                Some(seconds + if readers == 0 { 0.0 } else { Cost::outputs_readback(Some(&gpu), &merged, count) })
+                                Some(seconds + if readers == 0 { 0.0 } else { cost::outputs_readback(Some(&gpu), &merged, count) })
                             }
                         })
                     };
-                    let reason = Cost::choose(cpu_seconds, device_seconds, held, readers);
+                    let reason = cost::choose(cpu_seconds, device_seconds, held, readers);
                     report(&merged, Some(count), reason, cpu_seconds, device_seconds);
-                    Cost::on_device(reason)
+                    cost::on_device(reason)
                         || (preflight && reason == PlacementReason::No_cost_evidence && (cpu_seconds.is_some() || first.is_some()))
                         || (!preflight
                             && match &first {
@@ -2506,13 +2506,13 @@ pub mod Executor {
                                 h.0 = true;
                                 h.1.push(v0.clone());
                                 let width = match v0 { Value::Floats(width, _) => *width as i64, _ => 1 };
-                                h.2 += Cost::readback(Some(&gpu), *count, width);
+                                h.2 += cost::readback(Some(&gpu), *count, width);
                             }
                         }
                         found
                     }) as Arc<dyn Fn(&Value) -> Option<(Value, i64)> + Send + Sync>
                 });
-                let device = (|| -> Result<Option<Vec<(String, Gpu::Planes)>>, Diagnostic> {
+                let device = (|| -> Result<Option<Vec<(String, gpu::Planes)>>, Diagnostic> {
                     let inputs = packed::host::prepare(
                         &merged,
                         &packed::host::PrepareOptions {
@@ -2537,9 +2537,9 @@ pub mod Executor {
                         }
                     };
                     let output = kernel.run(&inputs)?;
-                    let mut values: Vec<(String, Gpu::Planes)> = Vec::new();
+                    let mut values: Vec<(String, gpu::Planes)> = Vec::new();
                     for (i, name) in names.iter().enumerate() {
-                        let planes = kernel.planes(&Gpu::Value { output: i as i64, width: merged.outputs[i].len() as i64, ..output.clone() });
+                        let planes = kernel.planes(&gpu::Value { output: i as i64, width: merged.outputs[i].len() as i64, ..output.clone() });
                         match planes {
                             Ok(planes) => values.push((name.clone(), planes)),
                             Err(d) => {
@@ -2572,8 +2572,8 @@ pub mod Executor {
         }
     }
 
-    pub fn force_display(state: Option<&e::State>, reference: bool, gpu: Option<Gpu::Config>, program: &Program, live: &Frame) -> Result<Displayed, Diagnostic> {
-        let gpu = gpu.unwrap_or_else(Gpu::default);
+    pub fn force_display(state: Option<&e::State>, reference: bool, gpu: Option<gpu::Config>, program: &Program, live: &Frame) -> Result<Displayed, Diagnostic> {
+        let gpu = gpu.unwrap_or_else(gpu::default);
         match try_display(state, None, reference, &gpu, program, live)? {
             Some(value) => Ok(value),
             None => {
@@ -2635,7 +2635,7 @@ mod tests {
 
     #[test]
     fn cost_choose_picks_by_measured_total_time() {
-        let choose = |cpu: Option<f64>, device: Option<f64>, resident: bool, consumers: i64| Cost::choose(cpu, device, resident, consumers);
+        let choose = |cpu: Option<f64>, device: Option<f64>, resident: bool, consumers: i64| cost::choose(cpu, device, resident, consumers);
         for bad in [None, Some(f64::NAN), Some(f64::INFINITY), Some(f64::NEG_INFINITY), Some(-1e-12)] {
             assert_eq!(choose(bad, Some(1.0), false, 0), PlacementReason::No_cost_evidence);
             assert_eq!(choose(Some(1.0), bad, false, 0), PlacementReason::No_cost_evidence);
@@ -2644,8 +2644,8 @@ mod tests {
         assert_eq!(choose(Some(1.0), Some(0.5), true, 0), PlacementReason::Held_on_device);
         assert_eq!(choose(Some(1.0), Some(1.0), false, 0), PlacementReason::Cpu_measured_cheaper);
         assert_eq!(choose(Some(1.0), Some(1.5), true, 1), PlacementReason::Cpu_consumer);
-        assert!(!Cost::on_device(choose(None, None, true, 0)));
-        assert_eq!(Cost::reason_name(PlacementReason::Cpu_consumer), "cpu_consumer");
+        assert!(!cost::on_device(choose(None, None, true, 0)));
+        assert_eq!(cost::reason_name(PlacementReason::Cpu_consumer), "cpu_consumer");
     }
 
     // --- the resident device emulator (test_core_resident.ml) ----------------------------------
@@ -2813,7 +2813,7 @@ mod tests {
                             ensure(d.invokes.load(Ordering::SeqCst) >= 2 && d.closes.load(Ordering::SeqCst) == 0, "invokes without closes")?;
                             if !(cpu || decline) { ensure(d.reads.load(Ordering::SeqCst) == 0, "no reads")?; }
                             if cpu { ensure(d.reads.load(Ordering::SeqCst) > 0, "cpu readers read")?; }
-                            let reference = e::Host::force_reference(&value, &live, None, None, None).map_err(|x| rays_diagnostic::to_string(&x))?;
+                            let reference = e::host::force_reference(&value, &live, None, None, None).map_err(|x| rays_diagnostic::to_string(&x))?;
                             ensure(materialise(&d, &result) == reference, "matches the reference")?;
                             d.resident.close();
                         }
@@ -2837,14 +2837,14 @@ mod tests {
         let live = input::at_time(17.0);
         let result = ok(exec(&prepared, &live, &d));
         assert!(d.closes.load(Ordering::SeqCst) == 0 && d.reads.load(Ordering::SeqCst) == 0);
-        assert_eq!(materialise(&d, &result), ok(e::Host::force_reference(&value, &live, None, None, None)));
+        assert_eq!(materialise(&d, &result), ok(e::host::force_reference(&value, &live, None, None, None)));
         d.resident.close();
 
         let (value, _, prepared) = compile_value(&body(false));
         let d = device(false, true, false);
         let result = ok(exec(&prepared, &live, &d));
         assert!(d.closes.load(Ordering::SeqCst) == 1 && d.reads.load(Ordering::SeqCst) == 0);
-        assert_eq!(materialise(&d, &result), ok(e::Host::force_reference(&value, &live, None, None, None)));
+        assert_eq!(materialise(&d, &result), ok(e::host::force_reference(&value, &live, None, None, None)));
         d.resident.close();
 
         let d = device(false, false, true);
@@ -2869,7 +2869,7 @@ mod tests {
             "{:first (map (fn [(i : int)] (int/add i 1)) (array/range (int t) :type int)) :second (map (fn [(i : int)] (int/mul i 2)) (array/range (int t) :type int))}",
         );
         let Value::Residual(root) = &record else { panic!("residual") };
-        let view = ok(e::Residual::residual_view(*root));
+        let view = ok(e::residual::residual_view(*root));
         fn fields(arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) -> Option<Vec<(String, Term)>> {
             match arena.row(id).node {
                 w::Node::Record(fs) => Some(arena.fields(fs).iter().map(|field| (arena.name(field.name).to_owned(), arena.handle(field.term))).collect()),
@@ -2878,9 +2878,9 @@ mod tests {
         }
         let fs = fields(view.term.arena(), view.term.row_id()).expect("record fields");
         let value = Value::Record(
-            fs.iter().map(|(name, term)| (name.clone(), Value::Residual(ok(e::Residual::with_bindings(*root, term, &view.bindings))))).collect(),
+            fs.iter().map(|(name, term)| (name.clone(), Value::Residual(ok(e::residual::with_bindings(*root, term, &view.bindings))))).collect(),
         );
-        let program = ok(Executor::compile(&value, &Executor::CompileOptions::default()));
+        let program = ok(executor::compile(&value, &executor::CompileOptions::default()));
         let live = input::at_time(5001.0);
         let d = device(false, false, false);
         // the second field's settle fails
@@ -2889,13 +2889,13 @@ mod tests {
         let closes = d.closes.clone();
         let reads = d.reads.clone();
         let resident = FailingSettle { inner, invokes: invokes.clone() };
-        let actual = ok(Executor::force(
+        let actual = ok(executor::force(
             &program,
-            &Executor::ForceOptions { strict: true, resident: Some(Arc::new(resident)), ..Default::default() },
+            &executor::ForceOptions { strict: true, resident: Some(Arc::new(resident)), ..Default::default() },
             &live,
         ));
         assert!(invokes.load(Ordering::SeqCst) == 2 && closes.load(Ordering::SeqCst) > 0 && reads.load(Ordering::SeqCst) == 0);
-        assert_eq!(actual, ok(e::Host::force_reference(&value, &live, None, None, None)));
+        assert_eq!(actual, ok(e::host::force_reference(&value, &live, None, None, None)));
     }
 
     // --- parity (test_core_parity.ml) ----------------------------------------------------------
@@ -2934,12 +2934,12 @@ mod tests {
     /// Compare the executor, the reference walker and the direct Core run of one value at several
     /// times; returns how many direct runs matched.
     fn compare(value: &Value) -> usize {
-        let program = ok(Executor::compile(value, &Executor::CompileOptions::default()));
+        let program = ok(executor::compile(value, &executor::CompileOptions::default()));
         let mut direct = 0;
         for time in [0.0, 0.37, 1.9, 6.28, 100.25, -3.0] {
             let live = input::at_time(time);
-            let reference = e::Host::force_reference(value, &live, None, None, None);
-            let forced = Executor::force(&program, &Executor::ForceOptions::default(), &live);
+            let reference = e::host::force_reference(value, &live, None, None, None);
+            let forced = executor::force(&program, &executor::ForceOptions::default(), &live);
             assert!(same(&forced, &reference), "executor vs reference at t={time}");
             if let Value::Residual(r) = value {
                 if let Ok(core) = core_lower::lower(None, None, false, None, None, *r) {
@@ -2991,20 +2991,20 @@ mod tests {
         // Repeated forces use the stateless shortcut, but ownership, invalid frames and a later
         // arithmetic failure still take their original diagnostics.
         let v = value_of("(exp t)");
-        let a = ok(Executor::compile(&v, &Executor::CompileOptions::default()));
-        let b = ok(Executor::compile(&v, &Executor::CompileOptions::default()));
+        let a = ok(executor::compile(&v, &executor::CompileOptions::default()));
+        let b = ok(executor::compile(&v, &executor::CompileOptions::default()));
         for time in [0.0, 1.0, 10000.0, 2.0] {
             let live = input::at_time(time);
-            let expected = e::Host::force_reference(&v, &live, None, None, None);
-            let o = Executor::ForceOptions::default();
-            assert!(same(&Executor::force(&a, &o, &live), &expected));
-            assert!(same(&Executor::force(&a, &o, &live), &expected));
-            assert!(same(&Executor::force(&b, &o, &live), &expected));
+            let expected = e::host::force_reference(&v, &live, None, None, None);
+            let o = executor::ForceOptions::default();
+            assert!(same(&executor::force(&a, &o, &live), &expected));
+            assert!(same(&executor::force(&a, &o, &live), &expected));
+            assert!(same(&executor::force(&b, &o, &live), &expected));
         }
         let mut live = input::at_time(1.0);
         live.dt = f64::NAN;
-        let expected = e::Host::force_reference(&v, &live, None, None, None);
-        assert!(same(&Executor::force(&a, &Executor::ForceOptions::default(), &live), &expected));
+        let expected = e::host::force_reference(&v, &live, None, None, None);
+        assert!(same(&executor::force(&a, &executor::ForceOptions::default(), &live), &expected));
     }
 
     #[test]
@@ -3037,18 +3037,18 @@ mod tests {
     }
 
     fn compare_frames(value: &Value, frames: &[(i64, f64)]) {
-        let program = ok(Executor::compile(value, &Executor::CompileOptions::default()));
+        let program = ok(executor::compile(value, &executor::CompileOptions::default()));
         let states = [e::create_state(), e::create_state()];
         let reference = e::create_state();
         for (frame, dt) in frames {
             let live = live_at(*frame, *dt);
-            let expected = e::Host::force_reference(value, &live, Some(&reference), None, None);
+            let expected = e::host::force_reference(value, &live, Some(&reference), None, None);
             for (domains, state) in [(1, &states[0]), (8, &states[1])] {
                 parallel::run_unit(Some(domains), &|| {
-                    let o = Executor::ForceOptions { state: Some(state.clone()), ..Default::default() };
-                    let actual = Executor::force(&program, &o, &live);
+                    let o = executor::ForceOptions { state: Some(state.clone()), ..Default::default() };
+                    let actual = executor::force(&program, &o, &live);
                     ensure(same(&actual, &expected), "forced value matches the reference")?;
-                    ensure(format!("{:?}", e::Host::state_values(state)) == format!("{:?}", e::Host::state_values(&reference)), "state matches")
+                    ensure(format!("{:?}", e::host::state_values(state)) == format!("{:?}", e::host::state_values(&reference)), "state matches")
                 })
                 .unwrap();
             }
@@ -3063,8 +3063,8 @@ mod tests {
         let reference = e::create_state();
         for (frame, dt) in frames {
             let live = live_at(*frame, *dt);
-            let expected = e::Host::force_reference(value, &live, Some(&reference), None, None);
-            let actual = e::Residual::bind_live(*r, &live, Some(&state))
+            let expected = e::host::force_reference(value, &live, Some(&reference), None, None);
+            let actual = e::residual::bind_live(*r, &live, Some(&state))
                 .and_then(|_| core_exec::execute(&prepared, &live, &core_exec::Options { root: Some(*r), ..Default::default() }));
             assert!(same(&actual, &expected), "prepared kernel vs reference at frame {frame}: {:?} / {:?}", actual.as_ref().map(|v| format!("{v:?}").chars().take(300).collect::<String>()), expected.as_ref().map(|v| format!("{v:?}").chars().take(300).collect::<String>()));
         }
@@ -3145,7 +3145,7 @@ mod tests {
 
     fn check(source: &str) -> w::Workspace { check_in(&empty(), source) }
 
-    fn fast_gpu() -> Gpu::Config { Gpu::Config { fast: true, ..Gpu::default() } }
+    fn fast_gpu() -> gpu::Config { gpu::Config { fast: true, ..gpu::default() } }
 
     fn qualify_with(options: QualifyOptions, workspace: &w::Workspace) -> (w::Workspace, e::Eval) {
         ok(qualify_workspace(&options, workspace))
@@ -3192,7 +3192,7 @@ mod tests {
     #[test]
     fn image_qualification_authored_sites_and_shared_functions() {
         let observed: Arc<Mutex<Vec<(Option<Path>, Path)>>> = Arc::new(Mutex::new(Vec::new()));
-        let qualify = |inputs: Option<Vec<(String, Vec<(String, Value)>)>>, gpu: Gpu::Config, workspace: &w::Workspace| {
+        let qualify = |inputs: Option<Vec<(String, Vec<(String, Value)>)>>, gpu: gpu::Config, workspace: &w::Workspace| {
             observed.lock().unwrap().clear();
             let seen = observed.clone();
             let options = QualifyOptions {
@@ -3200,7 +3200,7 @@ mod tests {
                 inputs,
                 gpu: Some(gpu),
                 observe: Some(Arc::new(move |producer: Option<Path>, residual: ResidualId| {
-                    let view = e::Residual::residual_view(residual).unwrap();
+                    let view = e::residual::residual_view(residual).unwrap();
                     if producer.is_some() && matches!(view.term.ty(), Ty::Array(inner) if **inner == Ty::Vec4) {
                         for fusion in [true, false] {
                             let o = packed::CompileOptions { fusion, ..packed::CompileOptions::default() };
@@ -3226,7 +3226,7 @@ mod tests {
             ("[(floor uv.x) uv.y t 1]", false, "E_GPU_FORM"),
             ("[(+ uv.x 1e39) uv.y t 1]", false, "E_GPU_FORM"),
         ] {
-            let (qualified, _, _) = qualify(None, Gpu::default(), &check(&image(body)));
+            let (qualified, _, _) = qualify(None, gpu::default(), &check(&image(body)));
             assert_eq!(qualified.approx.contains(&path), accepted, "{body}");
             if !accepted { assert!(reasons_of(&qualified, &path).iter().any(|d| d.code == code), "{body}"); }
         }
@@ -3240,7 +3240,7 @@ mod tests {
             }
         }
         let shared = check("(workspace pixels (graph img :context image\n    (let* [f (fn [uv] [uv.x uv.y t 1]) held (fn [uv] [uv.x uv.y t 1])\n      a (image/map f) b (image/map f)] b)))");
-        let (qualified, _, seen) = qualify(None, Gpu::default(), &shared);
+        let (qualified, _, seen) = qualify(None, gpu::default(), &shared);
         assert!(qualified.approx.contains(&p(&["img", "a"])) && qualified.approx.contains(&p(&["img", "b"])));
         assert!(!qualified.approx.contains(&p(&["img", "held"])));
         assert!(seen.iter().any(|(pr, _)| *pr == Some(p(&["img", "a"]))) && seen.iter().any(|(pr, _)| *pr == Some(p(&["img", "b"]))));
@@ -3249,19 +3249,19 @@ mod tests {
         );
         for (one, two, accepted) in [(1e39, 7.0, false), (7.0, 1e39, false), (2.0, 7.0, true)] {
             let inputs = vec![("host".to_owned(), vec![("one".to_owned(), Value::Float(one)), ("two".to_owned(), Value::Float(two))])];
-            let (qualified, _, _) = qualify(Some(inputs), Gpu::default(), &captures);
+            let (qualified, _, _) = qualify(Some(inputs), gpu::default(), &captures);
             assert_eq!(qualified.approx.contains(&path), accepted);
             if !accepted { assert!(reasons_of(&qualified, &path).iter().any(|d| d.code == "E_GPU_FORM")); }
         }
         let state = check("(workspace pixels (graph img :context image\n    (let* [bias (state [n 0.0] (+ n 0.1)) picture (image/map (fn [uv] [uv.x uv.y bias 1]))] picture)))");
-        let (qualified, _, _) = qualify(None, Gpu::default(), &state);
+        let (qualified, _, _) = qualify(None, gpu::default(), &state);
         // a state value is a uniform the host steps with its own state each frame
         assert!(qualified.approx.contains(&path));
         let mut counterfeit = flow_check::op::find(&[], "image/map", &context::image()).expect("image/map");
         counterfeit.category = "Counterfeit image map".into();
         let mut counterfeited = shared.clone();
         Arc::make_mut(&mut counterfeited.ops).insert(0, counterfeit);
-        let (qualified, _, _) = qualify(None, Gpu::default(), &counterfeited);
+        let (qualified, _, _) = qualify(None, gpu::default(), &counterfeited);
         assert!(!qualified.approx.contains(&p(&["img", "a"])));
         assert!(reasons_of(&qualified, &p(&["img", "a"])).iter().any(|d| d.code == "E_GPU_FORM"));
     }
@@ -3270,20 +3270,20 @@ mod tests {
     struct StaticBackend { width: i64, shape: Option<f64>, actual: Option<f64>, calls: Arc<AtomicUsize> }
     struct StaticKernel { width: i64, actual: Option<f64>, calls: Arc<AtomicUsize>, region: Packed }
 
-    impl Gpu::Backend for StaticBackend {
+    impl gpu::Backend for StaticBackend {
         fn cost(&self, inputs: Option<&packed::Inputs>, _fast: bool, _packed: &Packed, _count: i64) -> Option<f64> { if inputs.is_some() { self.actual } else { self.shape } }
-        fn prepare(&self, _fast: bool, packed: &Packed) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> {
+        fn prepare(&self, _fast: bool, packed: &Packed) -> Result<Arc<dyn gpu::Kernel>, Diagnostic> {
             Ok(Arc::new(StaticKernel { width: self.width, actual: self.actual, calls: self.calls.clone(), region: packed.clone() }))
         }
     }
 
-    impl Gpu::Kernel for StaticKernel {
-        fn run(&self, inputs: &packed::Inputs) -> Result<Gpu::Value, Diagnostic> {
+    impl gpu::Kernel for StaticKernel {
+        fn run(&self, inputs: &packed::Inputs) -> Result<gpu::Value, Diagnostic> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Gpu::Value { identity: 1, output: 0, count: inputs.count, width: self.width, stamp: 0, gpu_seconds: self.actual })
+            Ok(gpu::Value { identity: 1, output: 0, count: inputs.count, width: self.width, stamp: 0, gpu_seconds: self.actual })
         }
-        fn readback(&self, _value: &Gpu::Value) -> Result<Value, Diagnostic> { packed::force(&self.region, &input::at_time(0.0), &packed::ForceOptions::default()) }
-        fn planes(&self, _value: &Gpu::Value) -> Result<Gpu::Planes, Diagnostic> { Err(v::fail("E_TEST", "static map uses readback, not planes")) }
+        fn readback(&self, _value: &gpu::Value) -> Result<Value, Diagnostic> { packed::force(&self.region, &input::at_time(0.0), &packed::ForceOptions::default()) }
+        fn planes(&self, _value: &gpu::Value) -> Result<gpu::Planes, Diagnostic> { Err(v::fail("E_TEST", "static map uses readback, not planes")) }
     }
 
     fn static_map_case(width: i64, readback_per_float: Option<f64>, shape: Option<f64>, actual: Option<f64>, expected: PlacementReason, dispatched: usize) {
@@ -3298,10 +3298,10 @@ mod tests {
         {
             let ws = host(width);
             let calls = Arc::new(AtomicUsize::new(0));
-            let profile = Profile::create(Arc::new(|| 0.0));
+            let profile = profile::create(Arc::new(|| 0.0));
             let backend = StaticBackend { width, shape, actual, calls: calls.clone() };
-            let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Measured, readback_per_float, ..Gpu::default() };
-            let result = Profile::sample(&profile, &mut || ok(qualify_workspace(&QualifyOptions { record: true, gpu: Some(gpu.clone()), ..Default::default() }, &ws)));
+            let gpu = gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: gpu::Policy::Measured, readback_per_float, ..gpu::default() };
+            let result = profile::sample(&profile, &mut || ok(qualify_workspace(&QualifyOptions { record: true, gpu: Some(gpu.clone()), ..Default::default() }, &ws)));
             let expected_value = if width == 1 {
                 Value::Floats(1, Arc::new((0..4097).map(|i| i as f64 + 0.25).collect()))
             } else {
@@ -3310,14 +3310,14 @@ mod tests {
             let g = result.1.results.iter().find(|(n, _)| n == "g").unwrap().1.clone();
             assert_eq!(g, expected_value);
             assert_eq!(calls.load(Ordering::SeqCst), dispatched);
-            let placement = Profile::placements(&profile).remove(0);
+            let placement = profile::placements(&profile).remove(0);
             assert!(placement.reason == expected && placement.cpu_consumers == Some(1), "{:?}", placement);
         }
     }
 
     fn static_price() -> Option<f64> {
-        let cpu = Cost::estimate(Cost::packed(4097), 4097);
-        Some(cpu - Cost::estimate(Tier::Gpu_readback, 8194))
+        let cpu = cost::estimate(cost::packed(4097), 4097);
+        Some(cpu - cost::estimate(Tier::Gpu_readback, 8194))
     }
 
     // One test per case: each qualifies a 4,097-element map (the static-kernel threshold) and
@@ -3338,7 +3338,7 @@ mod tests {
     fn static_maps_priced_readback_vec4() { let p = static_price(); static_map_case(4, None, p, p, PlacementReason::Cpu_consumer, 0); }
     #[test]
     fn static_maps_slow_card_readback() {
-        let per_float = (Cost::estimate(Tier::Gpu_readback, 2048) - Cost::estimate(Tier::Gpu_readback, 1024)) / 1024.0;
+        let per_float = (cost::estimate(Tier::Gpu_readback, 2048) - cost::estimate(Tier::Gpu_readback, 1024)) / 1024.0;
         let p = static_price();
         static_map_case(1, Some(2.0 * per_float), p, p, PlacementReason::Cpu_consumer, 0);
     }
@@ -3354,14 +3354,14 @@ mod tests {
         fn has_fields(fs: &[(String, Value)]) -> bool { fs.iter().any(|(_, x)| has_region(x)) }
         match value {
             Value::Residual(r) => {
-                let view = e::Residual::residual_view(*r).unwrap();
+                let view = e::residual::residual_view(*r).unwrap();
                 core_lower::lower(None, None, false, None, None, *r).map(|core| !core.regions.is_empty()).unwrap_or(false)
                     || packed_child_region(*r, &view.term)
                     || has_fields(&view.bindings)
             }
             Value::List(xs) => xs.iter().any(has_region),
             v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => has_fields(v.geo_fields().unwrap()),
-            Value::Fn(f) => has_fields(&e::Residual::function_bindings(*f)),
+            Value::Fn(f) => has_fields(&e::residual::function_bindings(*f)),
             _ => false,
         }
     }
@@ -3373,28 +3373,28 @@ mod tests {
     }
     fn value(body: &str) -> Value { value_with(Vec::new(), body) }
 
-    fn compiled(v: &Value) -> Executor::Program { ok(Executor::compile(v, &Executor::CompileOptions::default())) }
-    fn forced(program: &Executor::Program, live: &Frame) -> Result<Value, Diagnostic> { Executor::force(program, &Executor::ForceOptions::default(), live) }
+    fn compiled(v: &Value) -> executor::Program { ok(executor::compile(v, &executor::CompileOptions::default())) }
+    fn forced(program: &executor::Program, live: &Frame) -> Result<Value, Diagnostic> { executor::force(program, &executor::ForceOptions::default(), live) }
 
     #[test]
     fn executor_sums_match_the_reference_for_edge_counts() {
         let live = input::at_time(0.125);
         for count in [0, 16, 33, 34, 512, 1024] {
             let v = value(&format!("(array/sum (map (fn [x] (sin (+ x t))) (array/range {count})))"));
-            assert!(same(&forced(&compiled(&v), &live), &e::Host::force_reference(&v, &live, None, None, None)));
+            assert!(same(&forced(&compiled(&v), &live), &e::host::force_reference(&v, &live, None, None, None)));
         }
     }
 
     #[test]
     fn executor_profile_keeps_512_groups_and_scalar_bodies_match_across_domains() {
-        let profile = Profile::create(Arc::new(|| 1.0));
+        let profile = profile::create(Arc::new(|| 1.0));
         for i in 0..=512 {
             let ws = check(&format!("(workspace w (graph g{i} :context value (+ t 1)))"));
             let evaluated = ok(e::r#static(&ws, false, None));
-            let program = ok(Executor::compile(&evaluated.results[0].1, &Executor::CompileOptions { profile: Some(profile.clone()), ..Default::default() }));
+            let program = ok(executor::compile(&evaluated.results[0].1, &executor::CompileOptions { profile: Some(profile.clone()), ..Default::default() }));
             ok(forced(&program, &input::at_time(0.0)));
         }
-        let reports = Profile::executions(&profile);
+        let reports = profile::executions(&profile);
         assert_eq!(reports.len(), 512);
         assert!(reports.iter().all(|r| r.sites.iter().all(|(instance, _, _)| *instance == 0)));
         assert!(reports[0].seconds == 0.0 && reports[0].tier == Tier::Core);
@@ -3414,12 +3414,12 @@ mod tests {
             let program = compiled(&v);
             for time in [0.0, 0.125, 1.25, 7.0] {
                 let live = input::at_time(time);
-                let reference = e::Host::force_reference(&v, &live, None, None, None);
+                let reference = e::host::force_reference(&v, &live, None, None, None);
                 for domains in [1, 8] {
                     parallel::run_unit(Some(domains), &|| {
                         ensure(same(&forced(&program, &live), &reference), "executor matches")?;
-                        let o = Executor::ForceOptions { reference: true, ..Default::default() };
-                        ensure(same(&Executor::force(&program, &o, &live), &reference), "reference option matches")
+                        let o = executor::ForceOptions { reference: true, ..Default::default() };
+                        ensure(same(&executor::force(&program, &o, &live), &reference), "reference option matches")
                     })
                     .unwrap();
                 }
@@ -3428,7 +3428,7 @@ mod tests {
         let mut bad_live = input::at_time(0.0);
         bad_live.dt = f64::NAN;
         let v = value("(+ t 1)");
-        assert!(same(&forced(&compiled(&v), &bad_live), &e::Host::force_reference(&v, &bad_live, None, None, None)));
+        assert!(same(&forced(&compiled(&v), &bad_live), &e::host::force_reference(&v, &bad_live, None, None, None)));
         let v = value("(let* [a (state [p 0.0] (+ p (frame/dt))) b (* a 2)] (+ a b))");
         let program = compiled(&v);
         let optimized = e::create_state();
@@ -3437,10 +3437,10 @@ mod tests {
             let mut live = input::at_time(frame as f64);
             live.frame = frame;
             live.dt = 0.125;
-            let o = Executor::ForceOptions { state: Some(optimized.clone()), ..Default::default() };
-            assert!(same(&Executor::force(&program, &o, &live), &e::Host::force_reference(&v, &live, Some(&reference), None, None)));
+            let o = executor::ForceOptions { state: Some(optimized.clone()), ..Default::default() };
+            assert!(same(&executor::force(&program, &o, &live), &e::host::force_reference(&v, &live, Some(&reference), None, None)));
         }
-        let (a, b) = (e::Host::state_values(&optimized), e::Host::state_values(&reference));
+        let (a, b) = (e::host::state_values(&optimized), e::host::state_values(&reference));
         assert!(a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| same_bits(x, y)));
     }
 
@@ -3460,7 +3460,7 @@ mod tests {
             assert!(has_region(&v), "packed Core region missing for: {body}");
             for time in [0.0, 0.125, 7.0] {
                 let live = input::at_time(time);
-                let reference = e::Host::force_reference(&v, &live, None, None, None);
+                let reference = e::host::force_reference(&v, &live, None, None, None);
                 for domains in [1, 8] {
                     parallel::run_unit(Some(domains), &|| ensure(same(&forced(&program, &live), &reference), "region matches the reference")).unwrap();
                 }
@@ -3470,7 +3470,7 @@ mod tests {
         let program = compiled(&v);
         for time in [0.0, 0.125, 7.0] {
             let live = input::at_time(time);
-            assert!(same(&forced(&program, &live), &e::Host::force_reference(&v, &live, None, None, None)));
+            assert!(same(&forced(&program, &live), &e::host::force_reference(&v, &live, None, None, None)));
         }
         let v = value("(array/sum (map (fn [x] (+ x t)) (array/float 0)))");
         assert_eq!(forced(&compiled(&v), &input::at_time(1.0)), Ok(Value::Float(0.0)));
@@ -3479,7 +3479,7 @@ mod tests {
         for count in [0, 1023, 1024, 2051] {
             let mut live = input::at_time(1.25);
             live.frame = count;
-            assert!(same(&forced(&program, &live), &e::Host::force_reference(&v, &live, None, None, None)));
+            assert!(same(&forced(&program, &live), &e::host::force_reference(&v, &live, None, None, None)));
         }
     }
 
@@ -3493,10 +3493,10 @@ mod tests {
     fn executor_noise_kernels_are_exact_and_custom_noise_stays_unpacked() {
         let v = mapped_value(Vec::new(), "(map (fn [p] (exact (noise3 (+ p [t 0 0])))) (array/vec3 2051 [0.3 0.7 -0.2]))");
         let program = compiled(&v);
-        assert!(Executor::packed_region(&program).is_some());
+        assert!(executor::packed_region(&program).is_some());
         for time in [0.0, 0.125, 1.25, 7.0] {
             let live = input::at_time(time);
-            let reference = ok(e::Host::force_reference(&v, &live, None, None, None));
+            let reference = ok(e::host::force_reference(&v, &live, None, None, None));
             for domains in [1, 8] {
                 parallel::run_unit(Some(domains), &|| {
                     let result = forced(&program, &live).map_err(|d| rays_diagnostic::to_string(&d))?;
@@ -3514,15 +3514,15 @@ mod tests {
         }
         let v = mapped_value(Vec::new(), "(map (fn [p] (noise3 (* p (pow t 1000000)))) (array/vec3 2051 [1 2 3]))");
         let live = input::at_time(7.0);
-        assert!(same(&forced(&compiled(&v), &live), &e::Host::force_reference(&v, &live, None, None, None)));
+        assert!(same(&forced(&compiled(&v), &live), &e::host::force_reference(&v, &live, None, None, None)));
         let mut custom = flow_check::op::find(&[], "noise3", &context::value()).expect("noise3");
         custom.name = "toy_noise3".into();
         custom.packed_extension = None;
         custom.body = Arc::new(|_, _, _| Ok(Value::Float(0.125)));
         let v = mapped_value(vec![custom], "(map (fn [p] (toy_noise3 p)) (array/vec3 2051 [1 2 3]))");
         let program = compiled(&v);
-        assert!(Executor::packed_region(&program).is_none());
-        assert!(same(&forced(&program, &live), &e::Host::force_reference(&v, &live, None, None, None)));
+        assert!(executor::packed_region(&program).is_none());
+        assert!(same(&forced(&program, &live), &e::host::force_reference(&v, &live, None, None, None)));
         match ok(forced(&program, &live)) {
             Value::Floats(1, xs) => assert!(xs.iter().all(|x| *x == 0.125)),
             other => panic!("{other:?}"),
@@ -3538,10 +3538,10 @@ mod tests {
                     &format!("(map (fn [p] (noise3 (+ p [t 0 0]) :seed {seed} :octaves {octaves})) (array/vec3 2051 [0.31 0.73 -0.29]))"),
                 );
                 let program = compiled(&v);
-                assert!(Executor::packed_region(&program).is_some());
+                assert!(executor::packed_region(&program).is_some());
                 for time in [0.0, 1.25] {
                     let live = input::at_time(time);
-                    let reference = ok(e::Host::force_reference(&v, &live, None, None, None));
+                    let reference = ok(e::host::force_reference(&v, &live, None, None, None));
                     for domains in [1, 8] {
                         parallel::run_unit(Some(domains), &|| {
                             let actual = forced(&program, &live).map_err(|d| rays_diagnostic::to_string(&d))?;
@@ -3581,7 +3581,7 @@ mod tests {
         })
         .unwrap();
         let (one, eight) = (one.into_inner().unwrap().unwrap(), eight.into_inner().unwrap().unwrap());
-        let reference = ok(e::Host::force_reference(&v, &live, None, None, None));
+        let reference = ok(e::host::force_reference(&v, &live, None, None, None));
         assert!(same_bits(&one, &reference));
         assert!(same_bits(&one, &eight));
         match one {
@@ -3609,7 +3609,7 @@ mod tests {
                 values.extend(instance.inputs.iter().map(|(_, x)| x.clone()));
             }
             for (_, records) in &evaluated.records { values.extend(records.iter().map(|(_, x)| x.clone())); }
-            let prepared: Vec<(Value, Executor::Program)> = values.into_iter().map(|x| { let program = compiled(&x); (x, program) }).collect();
+            let prepared: Vec<(Value, executor::Program)> = values.into_iter().map(|x| { let program = compiled(&x); (x, program) }).collect();
             for time in [0.0, 1.25] {
                 let live = input::at_time(time);
                 for domains in [1, 8] {
@@ -3617,9 +3617,9 @@ mod tests {
                         let reference_state = e::create_state();
                         let ir_state = e::create_state();
                         for (x, program) in &prepared {
-                            let o = Executor::ForceOptions { state: Some(ir_state.clone()), ..Default::default() };
+                            let o = executor::ForceOptions { state: Some(ir_state.clone()), ..Default::default() };
                             ensure(
-                                same(&Executor::force(program, &o, &live), &e::Host::force_reference(x, &live, Some(&reference_state), None, None)),
+                                same(&executor::force(program, &o, &live), &e::host::force_reference(x, &live, Some(&reference_state), None, None)),
                                 "workspace value matches",
                             )?;
                         }

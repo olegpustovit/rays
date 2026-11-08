@@ -163,7 +163,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
         match prepare(&previous) {
             Err(d) => rendered = Some(Err(d)),
             Ok(p) => {
-                workspace_gpu::with_backend(&gpu_t, fast, &mut |gpu: &flow_ir::flow_ir::Gpu::Config| {
+                workspace_gpu::with_backend(&gpu_t, fast, &mut |gpu: &flow_ir::flow_ir::gpu::Config| {
                     let image_images = images.clone();
                     let state = core.cook.state.clone();
                     let live = input.clone();

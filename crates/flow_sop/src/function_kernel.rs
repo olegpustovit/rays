@@ -2,7 +2,7 @@
 //! payload boundary.
 use crate::attribute_kernel;
 use flow_eval as e;
-use flow_ir::flow_ir::Executor;
+use flow_ir::flow_ir::executor;
 use flow_ir::packed;
 use flow_syntax::ty::FnSignature;
 use flow_syntax::value::{self, FnId, ResidualId, Value};
@@ -44,8 +44,8 @@ fn storage(values: &[Value]) -> i64 {
             Value::Text(s) => s.len() as i64,
             Value::List(xs) => xs.iter().fold(0, |bytes, x| add_bytes(bytes, visit(seen, x))),
             v @ (Value::Record(_) | Value::Struct(_)) => fields(seen, v.geo_fields().unwrap()),
-            Value::Fn(f) if seen.functions.insert(*f) => fields(seen, &e::Residual::function_bindings(*f)),
-            Value::Residual(r) if seen.residuals.insert(*r) => match e::Residual::residual_view(*r) {
+            Value::Fn(f) if seen.functions.insert(*f) => fields(seen, &e::residual::function_bindings(*f)),
+            Value::Residual(r) if seen.residuals.insert(*r) => match e::residual::residual_view(*r) {
                 Ok(view) => fields(seen, &view.bindings),
                 Err(_) => 0,
             },
@@ -83,7 +83,7 @@ pub fn node(
     }
     let (signature, sources_owned, state, elems_owned) = (signature.clone(), sources.to_vec(), state.cloned(), elems.map(|e| e.to_vec()));
     let function_value = Value::Fn(function);
-    let state_values = state.as_ref().map(e::Host::state_values);
+    let state_values = state.as_ref().map(e::host::state_values);
     let roots = e::roots(std::iter::once(&function_value)
         .chain(elems_owned.iter().flatten().map(|(_, value)| value))
         .chain(state_values.iter().flatten()));
@@ -109,9 +109,9 @@ pub fn node(
                 let roots = roots.clone();
                 Arc::new(move |columns: &[Column]| -> Result<Runner, Diagnostic> {
                     let arrays: Vec<Value> = columns.iter().map(column_value).collect();
-                    let values = e::Host::map_function(None, None, &signature, function, &arrays)?;
+                    let values = e::host::map_function(None, None, &signature, function, &arrays)?;
                     let program = attribute_kernel::prepare(None, true, None, None, &sources, &inputs, &values)?;
-                    let Some(packed_region) = Executor::packed_region(&program) else {
+                    let Some(packed_region) = executor::packed_region(&program) else {
                         return Err(value::fail("E_KERNEL_FORM", "This function cannot compile to a packed kernel."));
                     };
                     let (state, elems, resolve) = (state.clone(), elems.clone(), resolve.clone());
@@ -123,14 +123,14 @@ pub fn node(
                         }
                         let live = context::input(ctx);
                         let forced = if reference {
-                            let options = Executor::ForceOptions {
+                            let options = executor::ForceOptions {
                                 state: state.clone(),
                                 elems: elems.clone(),
                                 resolve: Some(resolve.clone()),
                                 reference: true,
                                 ..Default::default()
                             };
-                            Executor::force(&program, &options, live)?
+                            executor::force(&program, &options, live)?
                         } else {
                             let options = packed::ForceOptions {
                                 state: state.clone(),
@@ -153,7 +153,7 @@ pub fn node(
             let mut roots: Vec<Value> = vec![Value::Fn(function)];
             roots.extend(elems_owned.iter().flatten().map(|(_, v)| v.clone()));
             if let Some(state) = &state {
-                roots.extend(e::Host::state_values(state));
+                roots.extend(e::host::state_values(state));
             }
             let mut bytes = storage(&roots);
             for payload in payloads {

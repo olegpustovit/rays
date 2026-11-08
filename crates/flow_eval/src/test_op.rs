@@ -236,15 +236,15 @@ fn large_array_constructors_defer_through_compiled_scalar_calls() {
     ] {
         let workspace = checked(&[], body);
         let handlers = ResidualHandlers { defer: Some(Arc::new(|_| true)), ..Default::default() };
-        let deferred = Residual::handle(handlers, &mut || Host::static_with_requests(None, false, None, &workspace)).unwrap();
+        let deferred = residual::handle(handlers, &mut || host::static_with_requests(None, false, None, &workspace)).unwrap();
         let value = result_of(&deferred, "g");
         assert!(matches!(value, Value::Residual(_)), "eager constant array: {body}");
-        assert_eq!(Host::force_reference(&value, &input::at_time(0.), None, None, None).unwrap(), value_of(body));
+        assert_eq!(host::force_reference(&value, &input::at_time(0.), None, None, None).unwrap(), value_of(body));
     }
     let invalid = checked(&[], "(array/int 1152921504606846976 0)");
-    let expected = Host::static_with_requests(None, false, None, &invalid).err().unwrap();
+    let expected = host::static_with_requests(None, false, None, &invalid).err().unwrap();
     let handlers = ResidualHandlers { defer: Some(Arc::new(|_| true)), ..Default::default() };
-    let actual = Residual::handle(handlers, &mut || Host::static_with_requests(None, false, None, &invalid)).err().unwrap();
+    let actual = residual::handle(handlers, &mut || host::static_with_requests(None, false, None, &invalid)).err().unwrap();
     assert_eq!((actual.code, actual.message), (expected.code, expected.message));
 }
 
@@ -270,7 +270,7 @@ fn high_integers_stay_exact_end_to_end() {
     let expected = ia(&vec![high + 1; 4097]);
     let run_bulk = |bulk: Value| {
         let handlers = ResidualHandlers { bulk: Some(Arc::new(move |_| Some(bulk.clone()))), ..Default::default() };
-        let e = Residual::handle(handlers, &mut || Host::static_with_requests(None, false, None, &workspace)).unwrap();
+        let e = residual::handle(handlers, &mut || host::static_with_requests(None, false, None, &workspace)).unwrap();
         result_of(&e, "g")
     };
     assert_eq!(run_bulk(expected.clone()), expected);
@@ -328,12 +328,12 @@ fn typed_and_source_operators() {
     let marker = static_of("(test/present)");
     assert!(is_live(&marker) && !frame_dependent(&marker));
     let live = input::at_time(0.);
-    assert_eq!(Host::force_reference(&marker, &live, None, None, resolve.clone()), Ok(Value::Bool(false)));
-    assert_eq!(Host::force_reference(&static_of("(if (test/present) (sqrt -1) 7)"), &live, None, None, resolve.clone()), Ok(Value::Int(7)));
-    match Host::force_reference(&marker, &live, None, None, None) { Err(d) => assert_eq!(d.code, "E_DATA_SOURCE"), Ok(_) => panic!() }
+    assert_eq!(host::force_reference(&marker, &live, None, None, resolve.clone()), Ok(Value::Bool(false)));
+    assert_eq!(host::force_reference(&static_of("(if (test/present) (sqrt -1) 7)"), &live, None, None, resolve.clone()), Ok(Value::Int(7)));
+    match host::force_reference(&marker, &live, None, None, None) { Err(d) => assert_eq!(d.code, "E_DATA_SOURCE"), Ok(_) => panic!() }
     for resolved in [marker.clone(), Value::Float(1.)] {
         let r: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>> = Some(Arc::new(move |_| Ok(resolved.clone())));
-        match Host::force_reference(&marker, &live, None, None, r) { Err(d) => assert_eq!(d.code, "E_DATA_SOURCE"), Ok(_) => panic!() }
+        match host::force_reference(&marker, &live, None, None, r) { Err(d) => assert_eq!(d.code, "E_DATA_SOURCE"), Ok(_) => panic!() }
     }
 }
 
@@ -355,19 +355,19 @@ fn host_forcing_agrees_with_supplied_state() {
             let calls = Arc::new(Mutex::new(0));
             let (c, d) = (calls.clone(), data.clone());
             let resolve: Resolve = Arc::new(move |_| { *c.lock().unwrap() += 1; Ok(d.clone()) });
-            let actual = Host::force_reference(&marker, &live, supplied, None, Some(resolve.clone())).unwrap();
+            let actual = host::force_reference(&marker, &live, supplied, None, Some(resolve.clone())).unwrap();
             assert!(actual == data && *calls.lock().unwrap() == 1 && state_stamp(&state) == before);
             for (resolved, code) in [(marker.clone(), "E_DATA_SOURCE"), (ia(&[0, 1]), "E_DATA_SOURCE"), (fa(&[0., f64::NAN]), "E_NONFINITE")] {
                 let r: Resolve = Arc::new(move |_| Ok(resolved.clone()));
-                match Host::force_reference(&marker, &live, supplied, None, Some(r)) { Err(d) => assert_eq!(d.code, code), Ok(_) => panic!() }
+                match host::force_reference(&marker, &live, supplied, None, Some(r)) { Err(d) => assert_eq!(d.code, code), Ok(_) => panic!() }
             }
             let reason = host_error("host cause", "E_HOST", "host failure");
             let rr = reason.clone();
             let r: Resolve = Arc::new(move |_| Err(rr.clone()));
-            assert_eq!(Host::force_reference(&marker, &live, supplied, None, Some(r)), Err(reason));
+            assert_eq!(host::force_reference(&marker, &live, supplied, None, Some(r)), Err(reason));
             *calls.lock().unwrap() = 0;
             let mut bad = live.clone(); bad.dt = f64::NAN;
-            match Host::force_reference(&marker, &bad, supplied, None, Some(resolve)) { Err(d) => assert!(d.code == "E_FRAME" && *calls.lock().unwrap() == 0), Ok(_) => panic!() }
+            match host::force_reference(&marker, &bad, supplied, None, Some(resolve)) { Err(d) => assert!(d.code == "E_FRAME" && *calls.lock().unwrap() == 0), Ok(_) => panic!() }
         }
     }
     let (ws, ds) = wcheck(&[], &empty(), "(workspace nested_source (graph g :context value (+ t 1.)))");
@@ -378,12 +378,12 @@ fn host_forcing_agrees_with_supplied_state() {
     let calls = Arc::new(Mutex::new(0));
     let (c, f) = (calls.clone(), fields.clone());
     let resolve: Resolve = Arc::new(move |_| { *c.lock().unwrap() += 1; Ok(Value::Record(f.clone())) });
-    assert_eq!(Host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Record(vec![na("value", Value::Float(3.))])));
+    assert_eq!(host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Record(vec![na("value", Value::Float(3.))])));
     assert_eq!(*calls.lock().unwrap(), 1);
     let marker = value::source_value("test/live_argument", Ty::Float, fields);
     let m2 = marker.clone();
     let resolve: Resolve = Arc::new(move |actual| { assert_eq!(*actual, m2); Ok(Value::Float(7.)) });
-    assert_eq!(Host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Float(7.)));
+    assert_eq!(host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Float(7.)));
     let descriptor = value::source_value("test/borrowed", Ty::Array(Box::new(Ty::Float)), vec![na("geometry", Value::Deferred(ty::geometry(), 17)), na("owner", t("point"))]);
     let legacy = value::struct_value("test/borrowed", Ty::Array(Box::new(Ty::Int)), vec![na("count", Value::Int(2))]);
     let nested = value::source_value("test/write", Ty::Array(Box::new(Ty::Float)), vec![na("values", Value::Record(vec![na("offsets", legacy), na("values", descriptor)]))]);
@@ -391,18 +391,18 @@ fn host_forcing_agrees_with_supplied_state() {
         let calls = Arc::new(Mutex::new(0));
         let (c, d, n) = (calls.clone(), data.clone(), nested.clone());
         let resolve: Resolve = Arc::new(move |actual| { assert_eq!(*actual, n); *c.lock().unwrap() += 1; Ok(d.clone()) });
-        assert_eq!(Host::force_reference(&nested, &live, supplied, None, Some(resolve.clone())).unwrap(), data);
+        assert_eq!(host::force_reference(&nested, &live, supplied, None, Some(resolve.clone())).unwrap(), data);
         assert_eq!(*calls.lock().unwrap(), 1);
         let n = nested.clone();
         let r: Resolve = Arc::new(move |actual| { assert_eq!(*actual, n); Ok(Value::Int(0)) });
-        match Host::force_reference(&nested, &live, supplied, None, Some(r)) { Err(d) => assert_eq!(d.code, "E_DATA_SOURCE"), Ok(_) => panic!() }
+        match host::force_reference(&nested, &live, supplied, None, Some(r)) { Err(d) => assert_eq!(d.code, "E_DATA_SOURCE"), Ok(_) => panic!() }
         let reason = host_error("nested host cause", "E_HOST", "nested host failure");
         let (n, rr) = (nested.clone(), reason.clone());
         let r: Resolve = Arc::new(move |actual| { assert_eq!(*actual, n); Err(rr.clone()) });
-        assert_eq!(Host::force_reference(&nested, &live, supplied, None, Some(r)), Err(reason));
+        assert_eq!(host::force_reference(&nested, &live, supplied, None, Some(r)), Err(reason));
         *calls.lock().unwrap() = 0;
         let mut bad = live.clone(); bad.dt = f64::NAN;
-        match Host::force_reference(&nested, &bad, supplied, None, Some(resolve)) { Err(d) => assert!(d.code == "E_FRAME" && *calls.lock().unwrap() == 0), Ok(_) => panic!() }
+        match host::force_reference(&nested, &bad, supplied, None, Some(resolve)) { Err(d) => assert!(d.code == "E_FRAME" && *calls.lock().unwrap() == 0), Ok(_) => panic!() }
     }
     let (ws, ds) = wcheck(&[], &empty(), "(workspace source_state (graph g :context value (state [previous 0.0] (+ previous 1.0))))");
     assert!(ds.is_empty());
@@ -415,7 +415,7 @@ fn host_forcing_agrees_with_supplied_state() {
         assert_ne!(state_stamp(&st), b2);
         Err(rr.clone())
     });
-    assert_eq!(Host::force_reference(&marker, &live, Some(&state), None, Some(resolve)), Err(reason));
+    assert_eq!(host::force_reference(&marker, &live, Some(&state), None, Some(resolve)), Err(reason));
     assert_eq!(state_stamp(&state), before);
 }
 

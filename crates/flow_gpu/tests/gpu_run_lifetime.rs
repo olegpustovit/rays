@@ -3,7 +3,7 @@
 mod common;
 use common::test_program as tp;
 use flow_gpu::{pipelines, run};
-use flow_ir::{flow_ir::Gpu, packed::{self, host as phost}};
+use flow_ir::{flow_ir::gpu, packed::{self, host as phost}};
 use flow_shader::emit;
 use flow_syntax::value::Value;
 use ogpu_core::{backend as b, error::{self, ErrorKind}};
@@ -160,8 +160,8 @@ fn fixture(name: &str, count: i64) -> packed::T {
 }
 fn prepare(p: &packed::T) -> phost::Inputs { tp::ok(phost::prepare(p, &phost::PrepareOptions::default(), &input::at_time(1.0))) }
 fn dispatch(r: &run::T, v: &phost::Inputs) -> Result<run::Output, rays_diagnostic::Diagnostic> { run::dispatch(r, &run::Options::default(), None, None, v) }
-fn kept(r: &run::T, v: &phost::Inputs) -> Gpu::Planes { tp::ok(run::keep(&tp::ok(dispatch(r, v)), None)) }
-fn settled(r: &run::T, v: &phost::Inputs) -> Gpu::Planes { let p = kept(r, v); tp::ok(p.settle()); p }
+fn kept(r: &run::T, v: &phost::Inputs) -> gpu::Planes { tp::ok(run::keep(&tp::ok(dispatch(r, v)), None)) }
+fn settled(r: &run::T, v: &phost::Inputs) -> gpu::Planes { let p = kept(r, v); tp::ok(p.settle()); p }
 fn len(p: Vec<Vec<f64>>) -> i64 { p.iter().map(|a| a.len() as i64).sum() }
 fn pinned(r: &run::T, v: &phost::Inputs) -> (Arc<Vec<f64>>, run::Pin) {
     let p = settled(r, v);

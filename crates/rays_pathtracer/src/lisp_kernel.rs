@@ -404,7 +404,7 @@ fn replace_sources(values: Vec<(String, (Ty, Value))>) -> Box<dyn Fn(&Value) -> 
 
 fn deferred(name: &str, bound: FnId, inputs: &[Value], result: Ty) -> Result<flow_syntax::value::ResidualId, String> {
     let signature = FnSignature { params: inputs.iter().map(|_| Ty::Int).collect(), result };
-    match e::Host::map_function(None, None, &signature, bound, inputs) {
+    match e::host::map_function(None, None, &signature, bound, inputs) {
         Ok(Value::Residual(r)) => Ok(r),
         Ok(_) => Err("path tracer kernel did not defer".to_string()),
         Err(d) => Err(format!("{name}: {}", rays_diagnostic::to_string(&d))),
@@ -418,7 +418,7 @@ fn front(job: &mut FrontJob, name: &str) -> Result<FrontResult, String> {
     let bound = e::bind_captures(f, &*replace_sources(job.values.clone()));
     let inputs = if name == "trace" { vec![job.pixels.clone(), job.pixels.clone()] } else { vec![job.pixels.clone()] };
     let residual = deferred(name, bound, &inputs, Ty::Vec4)?;
-    let term = e::Residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
+    let term = e::residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
     let template = packed::compile_template(&packed::CompileOptions::default(), residual, &term).ok_or_else(|| format!("path tracer kernel {name} has no device template"))?;
     let options = emit::Options {
         spirv: job.vulkan,
@@ -600,7 +600,7 @@ pub fn gather_kernel(lease: &renderer::renderer::Gpu, pipes: &pipelines::T) -> R
         v => v.clone(),
     });
     let residual = deferred("gather", bound, &[Value::Int_array(Arc::new(vec![0]))], Ty::Vec3)?;
-    let term = e::Residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
+    let term = e::residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
     let template = packed::compile_template(&packed::CompileOptions::default(), residual, &term).ok_or("path tracer gather has no device template")?;
     let options = emit::Options {
         spirv: ogpu_core::impl_::backend().map(|b| b == "vulkan").unwrap_or(false),
@@ -682,7 +682,7 @@ fn cpu_run(facts: &Facts, checked: &mut Option<w::Workspace>, words: Vec<(String
     });
     let inputs = if name == "trace" { vec![pixels.clone(), pixels.clone()] } else { vec![pixels.clone()] };
     let residual = deferred(name, bound, &inputs, Ty::Vec4)?;
-    let term = e::Residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
+    let term = e::residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
     let program = packed::compile_result(&packed::CompileOptions::default(), residual, &term).map_err(|ds| diagnostics(&ds))?;
     packed::force(&program, &input::at_time(0.), &Default::default()).map_err(|d| rays_diagnostic::to_string(&d))
 }

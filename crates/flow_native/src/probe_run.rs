@@ -4,7 +4,7 @@
 use flow_eval as e;
 use flow_gpu::small_lru::List;
 use flow_graph::probe::{Execution as ProbeExecution, Force};
-use flow_ir::flow_ir::{Executor, Profile, Tier};
+use flow_ir::flow_ir::{executor, profile, Tier};
 use flow_syntax::value::{ResidualId, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,12 +12,12 @@ use std::rc::Rc;
 /// The profile of the executed groups (a snapshot of at most 512).
 pub type reports = Vec<flow_ir::flow_ir::Execution>;
 
-pub fn report_count(profile: &Profile::T) -> usize {
-    Profile::execution_count(profile)
+pub fn report_count(profile: &profile::T) -> usize {
+    profile::execution_count(profile)
 }
 
-pub fn reports(profile: &Profile::T) -> reports {
-    Profile::executions(profile)
+pub fn reports(profile: &profile::T) -> reports {
+    profile::executions(profile)
 }
 
 pub fn no_reports() -> reports {
@@ -32,7 +32,7 @@ pub fn same_count(a: &reports, b: &reports) -> bool {
 /// The probes' forcing function over the frame/region compiler, with its own bounded program cache
 /// (64, most recent): per probed value, a compiled program of the document's own terms.
 pub fn force() -> Force {
-    let programs: Rc<RefCell<List<ResidualId, Executor::Program>>> = Rc::new(RefCell::new(List::new(64, Box::new(|_, _| {}))));
+    let programs: Rc<RefCell<List<ResidualId, executor::Program>>> = Rc::new(RefCell::new(List::new(64, Box::new(|_, _| {}))));
     Rc::new(move |state, elems, resolve, value, live| {
         let prepared = match value {
             Value::Residual(residual) => {
@@ -40,7 +40,7 @@ pub fn force() -> Force {
                 match found {
                     Some(program) => Ok(program),
                     None => {
-                        let program = Executor::compile(value, &Executor::CompileOptions::default());
+                        let program = executor::compile(value, &executor::CompileOptions::default());
                         if let Ok(p) = &program {
                             programs.borrow_mut().add(*residual, p.clone());
                         }
@@ -48,14 +48,14 @@ pub fn force() -> Force {
                     }
                 }
             }
-            _ => Executor::compile(value, &Executor::CompileOptions::default()),
+            _ => executor::compile(value, &executor::CompileOptions::default()),
         };
         match prepared {
             Ok(program) => {
-                let o = Executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve, ..Default::default() };
-                Executor::force(&program, &o, live)
+                let o = executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve, ..Default::default() };
+                executor::force(&program, &o, live)
             }
-            Err(_) => e::Host::force_reference(value, live, state, elems, resolve),
+            Err(_) => e::host::force_reference(value, live, state, elems, resolve),
         }
     })
 }

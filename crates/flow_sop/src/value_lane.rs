@@ -7,7 +7,7 @@
 //! remain untouched.
 use flow_check::port_type::PortValue;
 use flow_eval::{State, Value};
-use flow_ir::flow_ir::{Executor, Gpu, Sink};
+use flow_ir::flow_ir::{executor, gpu, Sink};
 use input::Frame;
 use param::{KindView, Value as ParamValue};
 use rays_diagnostic::Diagnostic;
@@ -25,7 +25,7 @@ use crate::port::{self, Literal, Parameter, Port};
 struct Target {
     port: Port,
     parameter: Parameter,
-    program: Executor::Program,
+    program: executor::Program,
 }
 
 #[derive(Clone)]
@@ -45,7 +45,7 @@ struct Plan {
     network: Network,
     targets: Vec<Target>,
     late: Vec<LateTarget>,
-    states: Option<Executor::Program>,
+    states: Option<executor::Program>,
     time_dependent: bool,
     reads: dependencies::T,
 }
@@ -64,7 +64,7 @@ pub struct Resolved {
 struct Cache {
     plan: Arc<Plan>,
     live: Frame,
-    gpu: Gpu::Config,
+    gpu: gpu::Config,
     result: Result<Resolved, Diagnostic>,
 }
 
@@ -106,14 +106,14 @@ fn live_error(message: &str) -> Diagnostic {
     port::error("E_LIVE", message)
 }
 
-fn compile(network: &Network, value: &Value) -> Result<Executor::Program, Diagnostic> {
-    Executor::compile(
+fn compile(network: &Network, value: &Value) -> Result<executor::Program, Diagnostic> {
+    executor::compile(
         value,
-        &Executor::CompileOptions {
+        &executor::CompileOptions {
             profile: network.profile.clone(),
             approx: network.approx.clone(),
             sink: Some(Sink::Sop_input),
-            ..Executor::CompileOptions::default()
+            ..executor::CompileOptions::default()
         },
     )
 }
@@ -215,10 +215,10 @@ fn live_points(value: Value) -> Result<Vec<(f64, f64, f64)>, Diagnostic> {
     }
 }
 
-fn force(gpu: &Gpu::Config, reference: bool, state: &State, live: &Frame, program: &Executor::Program) -> Result<Value, Diagnostic> {
-    match Executor::force_display(Some(state), reference, Some(gpu.clone()), program, live)? {
-        Executor::Displayed::Cpu(value) => Ok(value),
-        Executor::Displayed::Gpu(_) => Err(port::error("E_APPROX_SINK", "Live SOP values require (exact x).")),
+fn force(gpu: &gpu::Config, reference: bool, state: &State, live: &Frame, program: &executor::Program) -> Result<Value, Diagnostic> {
+    match executor::force_display(Some(state), reference, Some(gpu.clone()), program, live)? {
+        executor::Displayed::Cpu(value) => Ok(value),
+        executor::Displayed::Gpu(_) => Err(port::error("E_APPROX_SINK", "Live SOP values require (exact x).")),
     }
 }
 
@@ -237,7 +237,7 @@ fn same_points(old: &[(f64, f64, f64)], points: &[(f64, f64, f64)]) -> bool {
 }
 
 fn compute(
-    gpu: &Gpu::Config,
+    gpu: &gpu::Config,
     state: &State,
     previous: Option<&Cache>,
     plan: &Plan,
@@ -249,13 +249,13 @@ fn compute(
         let scope = if gpu.fast && !reference { gpu.backend.as_ref().and_then(|b| b.residency(true)) } else { None };
         match scope {
             Some(scope) => {
-                let outcome = Executor::force(
+                let outcome = executor::force(
                     program,
-                    &Executor::ForceOptions {
+                    &executor::ForceOptions {
                         resident: Some(scope.executor().clone()),
                         state: Some(state.clone()),
                         reference,
-                        ..Executor::ForceOptions::default()
+                        ..executor::ForceOptions::default()
                     },
                     live,
                 );
@@ -375,7 +375,7 @@ fn compute(
     Ok(Resolved { geometry, applied, applied_text, applied_points, time_dependent: plan.time_dependent })
 }
 
-fn same_gpu(a: &Gpu::Config, b: &Gpu::Config) -> bool {
+fn same_gpu(a: &gpu::Config, b: &gpu::Config) -> bool {
     a.fast == b.fast
         && a.policy == b.policy
         && match (&a.backend, &b.backend) {
@@ -389,13 +389,13 @@ fn same_gpu(a: &Gpu::Config, b: &Gpu::Config) -> bool {
 /// are applied while the literal graph is unchanged. Static networks reuse their successful or
 /// failed result without recomputation.
 pub fn resolve(
-    gpu: Option<&Gpu::Config>,
+    gpu: Option<&gpu::Config>,
     live: Option<&Frame>,
     lane: &Lane,
     time: f64,
     network: &Network,
 ) -> Result<Resolved, Diagnostic> {
-    let gpu = gpu.cloned().unwrap_or_else(Gpu::default);
+    let gpu = gpu.cloned().unwrap_or_else(gpu::default);
     let live = live.cloned().unwrap_or_else(|| input::at_time(time));
     let previous = lane.previous.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
     if let Some(cache) = &previous {

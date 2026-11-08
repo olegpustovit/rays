@@ -3,7 +3,7 @@
 // Sizes: OCaml used 32769-row maps; 2049 keeps two 1024-lane block crossings (a second block
 // boundary for the block/chunk error-order checks at 1500) within the 5 s debug budget. The
 // 16383/16384 chunk-edge cases are shrunk to the 1023/1024/1025 block edges.
-use crate::core_ir::Region::{self, Instruction};
+use crate::core_ir::region::{self, Instruction};
 use crate::packed;
 use crate::test_support::*;
 use flow_check::op::{self, Op};
@@ -65,12 +65,12 @@ fn elem(ty: &Ty) -> Ty {
 fn instantiate_with(table: Option<Value>, bindings: &str, ty: &Ty, body: &str, indices: Vec<i64>) -> Value {
     let mut f = make_fn(bindings, ty, body);
     if let Some(table) = table {
-        f = e::Host::map_function_bindings(f, &|value| match value {
+        f = e::host::map_function_bindings(f, &|value| match value {
             Value::Source(g) if g.name == "probe/table" => table.clone(),
             other => other.clone(),
         });
     }
-    ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: elem(ty) }, f, &[Value::Int_array(Arc::new(indices))]))
+    ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: elem(ty) }, f, &[Value::Int_array(Arc::new(indices))]))
 }
 fn instantiate(table: Option<&Value>, ty: &Ty, body: &str, indices: Vec<i64>) -> Value {
     instantiate_with(table.cloned(), "", ty, body, indices)
@@ -267,15 +267,15 @@ fn handles_cannot_escape() {
     let value = instantiate(Some(&table), &arr(Ty::Int), "(fn [(index : int)] (array/nth data index))", (0..2049).map(|i| if i == 4 { 3 } else { 0 }).collect());
     let region = pk(&value);
     let prepare = region.code.iter().position(|i| matches!(i, Instruction::Array_prepare(..))).expect("Array_prepare");
-    assert!(Region::rebuild(&region, Region::Rebuild { outputs: Some(vec![vec![prepare as i64]]), ..Default::default() }).is_err());
+    assert!(region::rebuild(&region, region::Rebuild { outputs: Some(vec![vec![prepare as i64]]), ..Default::default() }).is_err());
     let input = region.code.iter().position(|i| matches!(i, Instruction::Int_input(..))).expect("Int_input") as i64;
     let mut code: Vec<Instruction> = region.code.to_vec();
     let last = code.len() - 1;
     code[last] = Instruction::Int_gather(input, input);
-    assert!(Region::rebuild(&region, Region::Rebuild { code: Some(code), ..Default::default() }).is_err());
+    assert!(region::rebuild(&region, region::Rebuild { code: Some(code), ..Default::default() }).is_err());
     let mut code: Vec<Instruction> = region.code.to_vec();
     code[prepare] = Instruction::Guarded(vec![(input, true)], Box::new(code[prepare].clone()));
-    assert!(Region::rebuild(&region, Region::Rebuild { code: Some(code), ..Default::default() }).is_err());
+    assert!(region::rebuild(&region, region::Rebuild { code: Some(code), ..Default::default() }).is_err());
     let dependent = instantiate(Some(&table), &arr(Ty::Int), "(fn [(index : int)] (array/nth (array/int (int/add index 1)) 0))", vec![0, 1]);
     assert!(compile_region(residual(&dependent), true, None).is_err());
 }
@@ -355,7 +355,7 @@ fn structured_core_changing_arguments_and_rebind() {
         assert_eq!(bits(&ok(executor_force(&program, true, &l))), bits(&ok(force_reference(&changing, &l))));
     }
     let r = residual(&changing);
-    let term = e::Residual::residual_view(r).unwrap().term;
+    let term = e::residual::residual_view(r).unwrap().term;
     let template = packed::compile_template(&Default::default(), r, &term).expect("template");
     let rebound = packed::rebind(&template, r).expect("rebind");
     assert_eq!(bits(&ok(force(&rebound, &live))), bits(&ok(force_reference(&changing, &live))));
@@ -395,7 +395,7 @@ fn float_bits_of(a: &[f64]) -> Vec<u64> {
 
 fn rollback_resolver(state: e::State, fold: Value, live: input::Frame, table: Value) -> ResolveArc {
     resolver(move |_| {
-        ok(e::Host::force_reference(&fold, &live, Some(&state), None, None));
+        ok(e::host::force_reference(&fold, &live, Some(&state), None, None));
         Ok(table.clone())
     })
 }
@@ -506,9 +506,9 @@ fn malformed_public_region_input_is_checked_when_selected() {
     let row = builder.push(None, term.ty(), form, flow_check::term_arena::Draft::RefBinding("bad_storage".into(), vec![]));
     let term = builder.freeze().handle(row);
     for count in [1usize, 2049] {
-        let rid = ok(e::Residual::with_bindings(rid, &term, &[("bad_storage".to_string(), Value::Floats(1, Arc::new(vec![0.; count])))]));
+        let rid = ok(e::residual::with_bindings(rid, &term, &[("bad_storage".to_string(), Value::Floats(1, Arc::new(vec![0.; count])))]));
         for selected in [false, true] {
-            let rebuild = Region::Rebuild {
+            let rebuild = region::Rebuild {
                 sources: Some(vec![(rid, Arc::new(term.clone()))]),
                 widths: Some(vec![1]),
                 uniforms: Some(vec![]),
@@ -517,7 +517,7 @@ fn malformed_public_region_input_is_checked_when_selected() {
                 count: Some(Some(count as i64)),
                 ..Default::default()
             };
-            let p = Region::rebuild(&template, rebuild).unwrap_or_else(|ds| panic!("{}", show_ds(&ds)));
+            let p = region::rebuild(&template, rebuild).unwrap_or_else(|ds| panic!("{}", show_ds(&ds)));
             for domains in [1, 4, 8] {
                 with_domains(domains, &|| match force(&p, &live) {
                     Ok(result) => assert!(!selected && result == Value::Text_array(Arc::new(vec![b"safe\xff\0".to_vec(); count].into()))),
@@ -602,7 +602,7 @@ fn late_bounds_versus_earlier_table_cause() {
     let thread = std::thread::current().id();
     let fields = Ty::Record(vec![("a".into(), arr(Ty::Text)), ("b".into(), arr(Ty::Text))]);
     let closure = make_fn("", &fields, "(fn [(index : int)] (let* [chosen (array/nth data.a index)] (if (int/eq index 1) (array/nth data.b 0) chosen)))");
-    let closure = e::Host::map_function_bindings(closure, &|value| match value {
+    let closure = e::host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => Value::Record(vec![
             ("a".into(), source_value("probe/a", arr(Ty::Text), vec![])),
             ("b".into(), source_value("probe/b", arr(Ty::Text), vec![])),
@@ -611,7 +611,7 @@ fn late_bounds_versus_earlier_table_cause() {
     });
     let advancing = recorded(&arr(Ty::Text), "(state [counter 0] (int/add counter 1))");
     for (early, late) in [(500i64, 1050i64), (1050, 500), (1023, 1024), (1024, 1023)] {
-        let value = ok(e::Host::map_function(
+        let value = ok(e::host::map_function(
             None,
             None,
             &FnSignature { params: vec![Ty::Int], result: Ty::Text },
@@ -630,7 +630,7 @@ fn late_bounds_versus_earlier_table_cause() {
                 Value::Source(g) if g.name == "probe/b" => {
                     assert_eq!(std::thread::current().id(), thread);
                     calls.lock().unwrap().push("b");
-                    ok(e::Host::force_reference(&advancing, &live, Some(&state), None, None));
+                    ok(e::host::force_reference(&advancing, &live, Some(&state), None, None));
                     Err(data_source_error("E_LATE_TABLE", "B failed", Some("b\u{ff}\0cause")))
                 }
                 _ => panic!("unexpected source"),
@@ -737,13 +737,13 @@ fn text_select_and_error_causes() {
     let table = Value::Text_array(Arc::new(strs.clone().into()));
 
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
-    let closure = e::Host::map_function_bindings(closure, &|value| match value {
+    let closure = e::host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => table.clone(),
         other => other.clone(),
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
     let old: Vec<Vec<u8>> = (0..2049).map(|i| strs[(i + 2) % 7].clone()).collect();
-    let selected = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices.clone())), Value::Text_array(Arc::new(old.clone().into()))]));
+    let selected = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices.clone())), Value::Text_array(Arc::new(old.clone().into()))]));
     let selected_reference = bits(&ok(force_reference(&selected, &live)));
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {
@@ -841,7 +841,7 @@ fn text_products_changing_tables_fusion_and_refusals() {
     let changing = recorded(&arr(Ty::Text), &format!("(let* [table (array/text 7 (if (> t 0.) {} \"other\")) nested {{:names table}}] (map (fn [(index : int)] (array/nth nested.names (int/mod index 7))) (array/range 2049 :type int)))", lit("é日本😀".as_bytes())));
     let program = executor_compile(&changing, true);
     let r = residual(&changing);
-    let term = e::Residual::residual_view(r).unwrap().term;
+    let term = e::residual::residual_view(r).unwrap().term;
     let template = packed::compile_template(&Default::default(), r, &term).expect("template");
     let rebound = packed::rebind(&template, r).expect("rebind");
     for time in [-1., 1.] {
@@ -867,7 +867,7 @@ fn text_products_changing_tables_fusion_and_refusals() {
     let mut code: Vec<Instruction> = p.code.to_vec();
     code.push(Instruction::Unary(Unary::Not, output));
     let last = code.len() as i64 - 1;
-    assert!(Region::rebuild(&p, Region::Rebuild { code: Some(code), outputs: Some(vec![vec![last]]), ..Default::default() }).is_err());
+    assert!(region::rebuild(&p, region::Rebuild { code: Some(code), outputs: Some(vec![vec![last]]), ..Default::default() }).is_err());
 }
 
 // ---------------------------------------------------------------- inline invariant table choices
@@ -958,12 +958,12 @@ fn list_tables_exact_widths_and_range_guards() {
         same_error(&packed_force(&pk(&value), &live, false, None), &expected);
     }
     let closure = make_fn("", &list_int, "(fn [(index : float)] (nth data index))");
-    let closure = e::Host::map_function_bindings(closure, &|value| match value {
+    let closure = e::host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => table.clone(),
         other => other.clone(),
     });
     for index in [-1., 3., 0.5, 2.0000000001, f64::MAX] {
-        let value = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Int }, closure, &[Value::Floats(1, Arc::new(vec![index]))]));
+        let value = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Int }, closure, &[Value::Floats(1, Arc::new(vec![index]))]));
         let actual = force(&pk(&value), &live);
         assert_eq!(actual.as_ref().err().expect("range error").code, "E_LIST_RANGE");
         same_error(&packed_force(&pk(&value), &live, false, None), &force_reference(&value, &live));
@@ -977,10 +977,10 @@ fn list_tables_exact_widths_and_range_guards() {
     }
     let value = instantiate(Some(&table), &list_int, "(fn [(index : int)] (nth data (int/mod index 3)))", vec![0, 1, 2]);
     let r = residual(&value);
-    let term = e::Residual::residual_view(r).unwrap().term;
+    let term = e::residual::residual_view(r).unwrap().term;
     let p = packed::compile_template(&Default::default(), r, &term).expect("template");
     let changed = |items: Vec<Value>| -> v::ResidualId {
-        match e::Host::rewrite(&value, &|x| match x {
+        match e::host::rewrite(&value, &|x| match x {
             Value::List(_) => Some(Value::List(Arc::new(items.clone()))),
             _ => None,
         }) {
@@ -1004,13 +1004,13 @@ fn text_select_reference_inside_domains() {
     let strs = strings();
     let table = Value::Text_array(Arc::new(strs.clone().into()));
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
-    let closure = e::Host::map_function_bindings(closure, &|value| match value {
+    let closure = e::host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => table.clone(),
         other => other.clone(),
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
     let old: Vec<Vec<u8>> = (0..2049).map(|i| strs[(i + 2) % 7].clone()).collect();
-    let selected = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices)), Value::Text_array(Arc::new(old.into()))]));
+    let selected = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices)), Value::Text_array(Arc::new(old.into()))]));
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {
             assert_eq!(bits(&ok(force(&pk(&selected), &live))), bits(&ok(force_reference(&selected, &live))));

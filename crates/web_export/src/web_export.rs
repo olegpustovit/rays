@@ -7,7 +7,7 @@ use editor_document::workspace_doc as doc;
 use flow_check::workspace::{self as W, Graph, Node, Term};
 use flow_eval as E;
 use flow_ir::core_draw;
-use flow_ir::core_ir::{self as C, Region};
+use flow_ir::core_ir::{self as C, region};
 use flow_ir::core_lower::{self, DrawContext, RegionAllowed};
 use flow_ir::packed::{self, host};
 use flow_syntax::context::{self, Context};
@@ -91,7 +91,7 @@ fn first_draw(d: &doc::T) -> R<&Graph> {
 
 fn fixed_region(region: &C::RegionT) -> bool {
     host::argument_types(region).map(|t| t.is_empty()).unwrap_or(false)
-        && !(region.sources.iter().any(|(residual, term)| match E::Residual::with_bindings(*residual, term, &[]) {
+        && !(region.sources.iter().any(|(residual, term)| match E::residual::with_bindings(*residual, term, &[]) {
             Ok(id) => E::frame_dependent(&Value::Residual(id)),
             Err(_) => false,
         }) || region.uniforms.iter().any(E::frame_dependent))
@@ -246,9 +246,9 @@ struct Fixed {
     frame: Vec<(i64, String, bool)>,
 }
 
-fn region_instruction(i: &Region::Instruction) -> &Region::Instruction {
+fn region_instruction(i: &region::Instruction) -> &region::Instruction {
     match i {
-        Region::Instruction::Guarded(_, body) => region_instruction(body),
+        region::Instruction::Guarded(_, body) => region_instruction(body),
         other => other,
     }
 }
@@ -300,8 +300,8 @@ fn fixed_inputs(r: &C::RegionT) -> R<Fixed> {
         .iter()
         .enumerate()
         .filter_map(|(slot, i)| match region_instruction(i) {
-            Region::Instruction::Frame(name) => Some((slot as i64, name.clone(), false)),
-            Region::Instruction::Int_frame(name) => Some((slot as i64, name.clone(), true)),
+            region::Instruction::Frame(name) => Some((slot as i64, name.clone(), false)),
+            region::Instruction::Int_frame(name) => Some((slot as i64, name.clone(), true)),
             _ => None,
         })
         .collect();
@@ -337,7 +337,7 @@ fn fixed_members(kept: Option<i64>, data: &dyn Fn(&Value) -> (i64, i64), f: &Fix
     };
     let uniforms = list(
         &|(index, v): &(usize, Value)| {
-            let integer = f.view.code.iter().any(|i| matches!(region_instruction(i), Region::Instruction::Int_uniform(slot) if *slot == *index as i64));
+            let integer = f.view.code.iter().any(|i| matches!(region_instruction(i), region::Instruction::Int_uniform(slot) if *slot == *index as i64));
             match (integer, v) {
                 (_, Value::Text_array(t)) => texts(t),
                 (_, Value::Text(t)) => format!("{{\"text\":{}}}", json_bytes(t)),
@@ -386,7 +386,7 @@ fn region_entry(fast: bool, data: &dyn Fn(&Value) -> (i64, i64), r: &C::RegionT)
         return Ok(RegionEntry { prefix: format!("{{\"source\": {}", kernel_table::json_string(&source)), fixed: f, kernel: None, width });
     }
     let f = fixed_inputs(r)?;
-    if r.result != Region::RegionResult::Collect || f.view.outputs.len() != 1 {
+    if r.result != region::RegionResult::Collect || f.view.outputs.len() != 1 {
         return Err(err(
             "E_WEB_REGION",
             "The web export runs collecting single-output regions only; this sum or fold needs a later release.",
@@ -397,7 +397,7 @@ fn region_entry(fast: bool, data: &dyn Fn(&Value) -> (i64, i64), r: &C::RegionT)
     skip.sort();
     skip.dedup();
     let skipped = skip.len() as i64;
-    let textual = f.view.code.iter().any(Region::text_register);
+    let textual = f.view.code.iter().any(region::text_register);
     let source = js::region(fast, &f.packed)?;
     let members = fixed_members(Some(f.count - skipped), data, &f);
     let out0 = &f.view.outputs[0];
@@ -407,7 +407,7 @@ fn region_entry(fast: bool, data: &dyn Fn(&Value) -> (i64, i64), r: &C::RegionT)
         members,
         f.view.code.len(),
         out0.len(),
-        out0.len() == 1 && Region::integer_register(&f.view.code[out0[0] as usize])
+        out0.len() == 1 && region::integer_register(&f.view.code[out0[0] as usize])
     );
     if textual {
         prefix.push_str(&format!(",\"text\":true,\"skip\":{}", list(&|i: &i64| i.to_string(), &skip)));
@@ -525,10 +525,10 @@ fn map_entry(lowered: &Lowered, id: usize) -> R<MapEntry> {
     match node_arg(node, "function", Value::Int(0)) {
         Value::Fn(f) => {
             let signature = FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 };
-            let pixels = E::Host::map_function(Some((node.inst, node.site.clone(), node.iter.clone())), None, &signature, f, &[Value::Floats(2, Arc::new(vec![0.5, 0.5]))])?;
+            let pixels = E::host::map_function(Some((node.inst, node.site.clone(), node.iter.clone())), None, &signature, f, &[Value::Floats(2, Arc::new(vec![0.5, 0.5]))])?;
             match pixels {
                 Value::Residual(r) => {
-                    let view = E::Residual::residual_view(r)?;
+                    let view = E::residual::residual_view(r)?;
                     let packed = packed::compile_result(&packed::CompileOptions::default(), r, &view.term)
                         .map_err(|mut ds| if ds.is_empty() { err("E_WEB_IMAGE", "Image kernel did not compile.", None) } else { ds.remove(0) })?;
                     if let Some(d) = target::region(&packed, None).into_iter().next() {
@@ -538,12 +538,12 @@ fn map_entry(lowered: &Lowered, id: usize) -> R<MapEntry> {
                     let mut values = vec![node_arg(node, "width", Value::Int(256)), node_arg(node, "height", Value::Int(256))];
                     values.extend(packed.uniforms.iter().cloned());
                     let args = image_arguments(false, &Lowered { program: lowered.program.clone(), span: lowered.span.clone(), root: Some(r), plan: lowered.plan.clone() }, node, &values)?;
-                    let animated = values.iter().any(E::frame_dependent) || packed.code.iter().any(|i| matches!(i, Region::Instruction::Frame(_)));
+                    let animated = values.iter().any(E::frame_dependent) || packed.code.iter().any(|i| matches!(i, region::Instruction::Frame(_)));
                     let frames: Vec<(i64, String)> = packed
                         .code
                         .iter()
                         .enumerate()
-                        .filter_map(|(slot, i)| if let Region::Instruction::Frame(n) = i { Some((slot as i64, n.clone())) } else { None })
+                        .filter_map(|(slot, i)| if let region::Instruction::Frame(n) = i { Some((slot as i64, n.clone())) } else { None })
                         .collect();
                     if let Some((_, name)) = frames.iter().find(|(_, n)| !FRAME_FACTS.contains(&n.as_str())) {
                         return refuse(&format!("Image kernel reads an unavailable frame fact: {name}"));
@@ -589,7 +589,7 @@ fn image_ids(program: &C::Program) -> Vec<i64> {
 fn live(program: &C::Program) -> bool {
     !program.state_slots.is_empty()
         || all_statements(&program.body).iter().any(|s| matches!(s.node, C::StatementNode::Assign(_, C::Expr::Frame(_))))
-        || program.regions.iter().any(|r| r.code.iter().any(|i| matches!(i, Region::Instruction::Frame(_))))
+        || program.regions.iter().any(|r| r.code.iter().any(|i| matches!(i, region::Instruction::Frame(_))))
 }
 
 impl Export<'_> {

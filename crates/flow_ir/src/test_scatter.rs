@@ -1,5 +1,5 @@
 // Port of lib/flow_ir/test_scatter.ml. The `--bench` block is not ported.
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::*;
 use flow_check::op::MAX_WOSIZE;
 use flow_eval as e;
@@ -149,7 +149,7 @@ fn core_and_executor_match_the_reference() {
         }
     }
     let unsupported = value("(array/scatter_add (array/int 2049 0) (map (fn [x] (value/rand x t)) (array/range 2049)) 1)");
-    match Executor::compile(&unsupported, &Executor::CompileOptions { strict: true, ..Default::default() }) {
+    match executor::compile(&unsupported, &executor::CompileOptions { strict: true, ..Default::default() }) {
         Err(d) => assert_eq!(d.code, "E_KERNEL_FORM"),
         Ok(_) => panic!("Unsupported scatter producer accepted"),
     }
@@ -239,8 +239,8 @@ fn state_matches_the_reference_across_frames() {
         let mut live = live_frame(*time, frame as i64);
         live.tick = frame as i64;
         same(&exec_force(&executable, &live, Some(&compiled_state), None), &reference_with(&stateful, &live, Some(&reference_state), None));
-        let a: Vec<String> = e::Host::state_values(&reference_state).iter().map(bits).collect();
-        let b: Vec<String> = e::Host::state_values(&compiled_state).iter().map(bits).collect();
+        let a: Vec<String> = e::host::state_values(&reference_state).iter().map(bits).collect();
+        let b: Vec<String> = e::host::state_values(&compiled_state).iter().map(bits).collect();
         assert_eq!(a, b);
     }
 }

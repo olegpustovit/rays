@@ -5,7 +5,7 @@ use super::support::*;
 use crate::{attribute_kernel, catalog, lisp_sop, lower, manifest, operators, value_lane};
 use flow_graph::flow_edit::{apply_checked_with, ArgKey, Op};
 use flow_graph::projection as proj;
-use flow_ir::flow_ir::Executor;
+use flow_ir::flow_ir::executor;
 use flow_syntax::syntax::{self, Node};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{Value, source_value};
@@ -129,17 +129,17 @@ pub(super) fn evaluated(g: &geo::T, body: &str) -> (Value, flow_ir::core_exec::R
 
 fn exact(g: &geo::T, body: &str, expected: &Value) {
     let (value, resolve) = evaluated(g, body);
-    let program = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+    let program = flow_ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
     exact_prepared(&value, &program, resolve, body, expected);
 }
 
-fn exact_prepared(value: &Value, program: &Executor::Program, resolve: flow_ir::core_exec::ResolveFn, body: &str, expected: &Value) {
+fn exact_prepared(value: &Value, program: &executor::Program, resolve: flow_ir::core_exec::ResolveFn, body: &str, expected: &Value) {
     for domains in [1i64, 8] {
         parallel::run_unit(Some(domains), &|| {
             let live = input::at_time(0.25);
-            assert!(&flow_ok(flow_eval::Host::force_reference(value, &live, None, None, Some(resolve.clone()))) == expected, "{body}: reference");
-            let options = Executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
-            assert!(&flow_ok(Executor::force(program, &options, &live)) == expected, "{body}: strict");
+            assert!(&flow_ok(flow_eval::host::force_reference(value, &live, None, None, Some(resolve.clone()))) == expected, "{body}: reference");
+            let options = executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
+            assert!(&flow_ok(executor::force(program, &options, &live)) == expected, "{body}: strict");
             Ok(())
         })
         .unwrap();
@@ -665,7 +665,7 @@ fn promotion_matches(n: i64, owner: &str, native_owner: Option<group::Owner>, se
     let body = format!("(exact (map (fn [(value : int)] value) (sop/group geo :name \"promoted\" :owner {owner} :as_owner point)))");
     // Only the resolver's immutable geometry changes between masks: check and compile once.
     let (value, _) = evaluated(&geometry, &body);
-    let program = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+    let program = flow_ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
     let length = count(&geometry, native_owner);
     let selected: [&dyn Fn(i64) -> bool; 4] = [&|_| false, &|_| true, &|i| i % 2 == 0, &|i| i == length - 1];
     for selector in selectors {
@@ -876,7 +876,7 @@ fn promoted_group_descriptors_share_point_fusion_origins() {
             let evaluation = flow_ok(flow_eval::static_with(&checked, true, Some(&[("g".to_owned(), vec![("p".to_owned(), positions), ("mask".to_owned(), marker)])]), None));
             let values = evaluation.records.iter().find(|(path, _)| path == &vec!["g".to_owned(), "tested".to_owned()]).map(|(_, v)| v[0].1.clone()).unwrap();
             let program = flow_ok(attribute_kernel::prepare(None, true, None, None, &[7], &[lisp_sop::snapshot(&g)], &values));
-            let stages = Executor::packed_root(&program).map_or(0, |r| r.stages.len());
+            let stages = executor::packed_root(&program).map_or(0, |r| r.stages.len());
             assert!(stages == if promoted || owner == "point" { 3 } else { 1 }, "{owner} promoted={promoted}: {stages} stages");
             let resolve = {
                 let lookup = lookup_of(Some(g.clone()));
@@ -885,8 +885,8 @@ fn promoted_group_descriptors_share_point_fusion_origins() {
             for domains in [1i64, 4, 8] {
                 parallel::run_unit(Some(domains), &|| {
                     let live = input::at_time(0.25);
-                    let expected = flow_eval::Host::force_reference(&values, &live, None, None, Some(resolve.clone()));
-                    let actual = Executor::force(&program, &Executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() }, &live);
+                    let expected = flow_eval::host::force_reference(&values, &live, None, None, Some(resolve.clone()));
+                    let actual = executor::force(&program, &executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() }, &live);
                     assert!(actual == expected);
                     Ok(())
                 })

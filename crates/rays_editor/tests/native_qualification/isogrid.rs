@@ -1,6 +1,6 @@
 //! Native IsoGrid viewport qualification, ported from test_isogrid_viewport.ml.
 use flow_native::workspace_gpu as gpu;
-use flow_ir::flow_ir::Gpu;
+use flow_ir::flow_ir::gpu as ir_gpu;
 use rdk_core::{geometry as g, packed::float3, topology};
 use rays::{canvas, scene, scene3};
 use rays_math::{color, vec3};
@@ -19,7 +19,7 @@ pub(super) fn text() -> String {
 pub(super) fn workspace() -> editor_document::workspace_doc::T {
     rays_editor::workspace::load(None, Vec::new(), None, &text()).unwrap_or_else(|ds| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")))
 }
-pub(super) fn recipe_node(workspace: &editor_document::workspace_doc::T, config: &Gpu::Config, recipe: i64) -> (lower::T, sop::node::T) {
+pub(super) fn recipe_node(workspace: &editor_document::workspace_doc::T, config: &ir_gpu::Config, recipe: i64) -> (lower::T, sop::node::T) {
     let catalog = ok(rays_editor::workspace_catalog(None));
     let value = ok(flow_syntax::syntax::parse(&recipe.to_string())).remove(0);
     let workspace = ok(editor_document::workspace_doc::edit(&catalog, workspace, &flow_graph::flow_edit::Op::SetArg {
@@ -59,7 +59,7 @@ pub(super) fn draw(canvas: &canvas::Canvas, frame: &[scene::node]) -> Vec<color:
     canvas::render(None, canvas, frame).unwrap();
     canvas::pixels(canvas).unwrap()
 }
-fn run(owner: &gpu::WorkspaceGpu, config: &Gpu::Config, workspace: &editor_document::workspace_doc::T, recipe: i64) {
+fn run(owner: &gpu::WorkspaceGpu, config: &ir_gpu::Config, workspace: &editor_document::workspace_doc::T, recipe: i64) {
     let publication = gpu::image_stats(owner).0;
     let (_lowered, node) = recipe_node(workspace, config, recipe);
     let mut session = sop::session::create(0, 1 << 28).unwrap();
@@ -204,7 +204,7 @@ fn viewport(recipe: i64) {
     let baseline = ogpu_core::impl_::live_handles().unwrap();
     let owner = gpu::create(None);
     gpu::with_backend(&owner,true,&mut |config| {
-        let config = Gpu::Config { policy: Gpu::Policy::Qualification, ..config.clone() };
+        let config = ir_gpu::Config { policy: ir_gpu::Policy::Qualification, ..config.clone() };
         run(&owner,&config,&workspace,recipe);
     });
     gpu::close(&owner);

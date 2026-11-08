@@ -13,7 +13,7 @@ use flow_check::workspace::{self as W, Graph as WGraph, NodeDefinition, Term, Wo
 use flow_check::term_arena::{Draft, TermBuilder, TermId};
 use flow_eval::{self as E, Instance, Node as ENode, Plan, State, Value};
 use input::Frame;
-use flow_ir::flow_ir::{Cost, Executor, Gpu, Placement, PlacementReason, Profile, Sink};
+use flow_ir::flow_ir::{cost, executor, gpu, Placement, PlacementReason, profile, Sink};
 use flow_syntax::context as fctx;
 use flow_syntax::syntax::{self, Syntax};
 use flow_syntax::ty::{self, FnSignature, Ty};
@@ -34,7 +34,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 type R<T> = Result<T, Diagnostic>;
 pub type PathMap = BTreeMap<Vec<i64>, i64>;
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
-pub type OnProfile = Arc<dyn Fn(&Arc<Profile::T>) + Send + Sync>;
+pub type OnProfile = Arc<dyn Fn(&Arc<profile::T>) + Send + Sync>;
 
 /// `Rdk.Mesh_merge.provenance_attribute`: the primitive int attribute every collecting merge writes.
 pub const SOURCE_ATTRIBUTE: &str = "__flow_src";
@@ -91,7 +91,7 @@ pub type CardNodeFn = Arc<dyn Fn(i64) -> Result<node::T, String> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct T {
-    pub gpu: Gpu::Config,
+    pub gpu: gpu::Config,
     pub defer: bool,
     pub graphs: Vec<Graph>,
     pub factories: Vec<Factory>,
@@ -109,7 +109,7 @@ pub struct T {
     pub evaluated: Arc<E::Eval>,
     pub approx: W::Paths,
     pub approx_reasons: Arc<Vec<(W::Path, Vec<Diagnostic>)>>,
-    pub profile: Arc<Profile::T>,
+    pub profile: Arc<profile::T>,
     pub preview: PreviewFn,
     pub card_node: CardNodeFn,
     /// The lowering behind `preview` and `card_node`; cook nodes retain only its cycle-free services.
@@ -138,7 +138,7 @@ fn lookup(geometries: Vec<rdk_core::geometry::T>, sources: Vec<i64>) -> ak::Geom
     Arc::new(move |id: i64| sources.iter().position(|s| *s == id).map(|i| geometries[i].clone()))
 }
 fn key_text(v: &Value) -> String {
-    txt(&flow_syntax::value::key_of(&|r: ResidualId| E::Residual::residual_id(r), v))
+    txt(&flow_syntax::value::key_of(&|r: ResidualId| E::residual::residual_id(r), v))
 }
 fn txt(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
@@ -172,7 +172,7 @@ pub struct ImageContext {
 }
 
 pub type ImageResolver = Arc<
-    dyn Fn(Option<&Gpu::Config>, Option<&ImageContext>, &Plan, &State, &Frame, &Value) -> Result<sop::image::T, Diagnostic>
+    dyn Fn(Option<&gpu::Config>, Option<&ImageContext>, &Plan, &State, &Frame, &Value) -> Result<sop::image::T, Diagnostic>
         + Send
         + Sync,
 >;
@@ -189,7 +189,7 @@ thread_local! {
 }
 
 /// Scope an initial-domain resource resolver around value-lane resolution.
-pub fn with_images(gpu: Option<Gpu::Config>, metadata: Option<ImageMetadata>, resolver: ImageResolver, run: &mut dyn FnMut()) {
+pub fn with_images(gpu: Option<gpu::Config>, metadata: Option<ImageMetadata>, resolver: ImageResolver, run: &mut dyn FnMut()) {
     let metadata: ImageMetadata = metadata.unwrap_or_else(|| Arc::new(|_, _| None));
     let wrapped: ImageResolver = Arc::new(move |requested, context, plan, state, live, value| {
         let used = requested.cloned().or_else(|| gpu.clone());
@@ -425,12 +425,12 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                 match &value {
                     Value::List(xs) if xs.len() == 3 => Some(xs[axis as usize].clone()),
                     Value::Residual(r) => {
-                        let view = E::Residual::residual_view(*r).ok()?;
+                        let view = E::residual::residual_view(*r).ok()?;
                         let mut builder = TermBuilder::new();
                         let form = builder.import_form(&view.term.form());
                         let term = builder.push(None, &Ty::Float, form, Draft::RefBinding("$vec3".into(), vec![["x", "y", "z"][axis as usize].to_owned()]));
                         let term = builder.freeze().handle(term);
-                        E::Residual::with_bindings(*r, &term, &[("$vec3".to_owned(), value.clone())]).ok().map(Value::Residual)
+                        E::residual::with_bindings(*r, &term, &[("$vec3".to_owned(), value.clone())]).ok().map(Value::Residual)
                     }
                     _ => None,
                 }
@@ -458,7 +458,7 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                     if (range.hard_min.is_some() || range.hard_max.is_some()) && !normalizers.iter().any(|(n, _)| *n == name) =>
                 {
                     let mut builder = TermBuilder::new();
-                    let form = builder.import_form(&E::Residual::residual_view(*r)?.term.form());
+                    let form = builder.import_form(&E::residual::residual_view(*r)?.term.form());
                     let mut bounded = builder.push(None, &Ty::Int, form, Draft::RefBinding("$int".into(), Vec::new()));
                     for (op, limit) in [("int/lt", range.hard_min), ("int/gt", range.hard_max)] {
                         if let Some(n) = limit {
@@ -469,7 +469,7 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                     }
                     clamped.push(name.clone());
                     let bounded = builder.freeze().handle(bounded);
-                    let r2 = E::Residual::with_bindings(*r, &bounded, &[("$int".to_owned(), value.clone())])?;
+                    let r2 = E::residual::with_bindings(*r, &bounded, &[("$int".to_owned(), value.clone())])?;
                     next_live.push((name, Value::Residual(r2)));
                 }
                 _ => next_live.push((name, value)),
@@ -666,7 +666,7 @@ fn per_context(value: &Value, build_with: Arc<Build>) -> node::T {
 // ---------------------------------------------------------------------------------------------
 // Whole-chain placement of a resident mesh scope, measured rather than assumed. Per backend and
 // authored site, each route keeps the seconds-per-output-float of its recent cooks, with the output
-// size they had. The evidence is `Gpu::Evidence`, owned with the config's backend, so a closed
+// size they had. The evidence is `gpu::Evidence`, owned with the config's backend, so a closed
 // owner's evidence goes with it.
 pub mod chain {
     use super::*;
@@ -680,7 +680,7 @@ pub mod chain {
     pub fn site_of(value: &Value) -> Option<(W::Path, Vec<i64>)> {
         match value {
             Value::Residual(r) => {
-                let view = E::Residual::residual_view(*r).ok()?;
+                let view = E::residual::residual_view(*r).ok()?;
                 Some((view.site.clone(), view.iter.clone()))
             }
             Value::Record(fields) => fields.iter().rev().find_map(|(_, v)| site_of(v)),
@@ -688,14 +688,14 @@ pub mod chain {
         }
     }
 
-    pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
-        if let (Some(_), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
+    pub fn observe_display(gpu: &gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
+        if let (Some(_), gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
             ak::Display_sink::observe(&gpu.evidence, rdk_core::packed::float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
         }
     }
 
-    pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
-        if let (Some(_), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
+    pub fn observe_draw(gpu: &gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
+        if let (Some(_), gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
             if !rdk_core::packed::float3::resident(rdk_core::geometry::positions(geometry)) {
                 ak::Display_sink::observe_draw(&gpu.evidence, floats_of(geometry), seconds);
             }
@@ -720,23 +720,23 @@ pub mod chain {
         Placed { route, record: Box::new(|_, _, _| {}), abandoned: Box::new(|| {}) }
     }
 
-    pub fn place(gpu: &Gpu::Config, profile: &Arc<Profile::T>, owner: (W::Path, Vec<i64>), readers: Option<i64>) -> Placed {
-        if gpu.policy == Gpu::Policy::Qualification {
+    pub fn place(gpu: &gpu::Config, profile: &Arc<profile::T>, owner: (W::Path, Vec<i64>), readers: Option<i64>) -> Placed {
+        if gpu.policy == gpu::Policy::Qualification {
             return unplaced(Route::Device);
         }
         let site = format!("{}#{}", owner.0.join("/"), owner.1.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","));
         let report = {
             let (profile, owner, readers) = (profile.clone(), owner.clone(), readers);
             move |points: Option<i64>, reason: PlacementReason, cpu_seconds: Option<f64>, device_seconds: Option<f64>| {
-                Profile::place(Some(&profile), &Placement { owner: owner.clone(), count: points, reason, cpu_seconds, device_seconds, cpu_consumers: readers });
+                profile::place(Some(&profile), &Placement { owner: owner.clone(), count: points, reason, cpu_seconds, device_seconds, cpu_consumers: readers });
             }
         };
         let state = gpu.backend.as_ref().map(|_| gpu.evidence.chain.clone());
         let gpu_c = gpu.clone();
         let device_cost = {
             let gpu = gpu.clone();
-            move |samples: &Gpu::Samples, floats: i64| -> Option<f64> {
-                let moved = Cost::readback(Some(&gpu), floats, 1);
+            move |samples: &gpu::Samples, floats: i64| -> Option<f64> {
+                let moved = cost::readback(Some(&gpu), floats, 1);
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
                 let (_, resident_sink) = ak::Display_sink::rates(&gpu.evidence);
                 ak::Display_sink::priced(&samples.device, floats).map(|s| {
@@ -747,17 +747,17 @@ pub mod chain {
         let device_cost = Arc::new(device_cost);
         let decide = {
             let (gpu, device_cost, report, site) = (gpu_c.clone(), device_cost.clone(), report.clone(), site.clone());
-            move |state: &Arc<Mutex<Gpu::Chain>>, floats: i64, points: i64| -> PlacementReason {
+            move |state: &Arc<Mutex<gpu::Chain>>, floats: i64, points: i64| -> PlacementReason {
                 let cpu_consumers = readers.unwrap_or(0);
                 let mut guard = state.lock().unwrap();
                 let st = &mut *guard;
                 let samples = st.sites.get(&site).expect("site evidence");
-                let moved = Cost::readback(Some(&gpu), floats, 1);
+                let moved = cost::readback(Some(&gpu), floats, 1);
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
                 let (host_sink, _) = ak::Display_sink::rates(&gpu.evidence);
                 let cpu_seconds = ak::Display_sink::priced(&samples.cpu, floats).map(|s| s + rate(host_sink, moved));
                 let device_seconds = device_cost(samples, floats);
-                let reason = Cost::choose(cpu_seconds, device_seconds, false, cpu_consumers);
+                let reason = cost::choose(cpu_seconds, device_seconds, false, cpu_consumers);
                 report(Some(points), reason, cpu_seconds, device_seconds);
                 reason
             }
@@ -765,14 +765,14 @@ pub mod chain {
         let decide = Arc::new(decide);
         let evidence = {
             let site = site.clone();
-            move |state: &Arc<Mutex<Gpu::Chain>>| {
+            move |state: &Arc<Mutex<gpu::Chain>>| {
                 let mut st = state.lock().unwrap();
                 if !st.sites.contains_key(&site) {
                     if st.sites.len() >= SITES_CAP {
                         st.sites.clear();
                         st.last.clear();
                     }
-                    st.sites.insert(site.clone(), Gpu::Samples::default());
+                    st.sites.insert(site.clone(), gpu::Samples::default());
                 }
             }
         };
@@ -831,7 +831,7 @@ pub mod chain {
                         // The CPU runs unbudgeted only on measured cooks: a bound left by an abandoned probe
                         // can lose to one noisy device sample while the true cost is minutes, so it is probed
                         // again under a budget that follows the device's present cost.
-                        let on_device = if n_cpu >= 2 { Some(Cost::on_device(decide(state, floats, points))) } else { None };
+                        let on_device = if n_cpu >= 2 { Some(cost::on_device(decide(state, floats, points))) } else { None };
                         match on_device {
                             Some(true) => rebuild_record(Route::Device, Box::new(|| {}), record),
                             Some(false) if measured >= 2 => rebuild_record(Route::Cpu, Box::new(|| {}), record),
@@ -839,7 +839,7 @@ pub mod chain {
                                 let budget = {
                                     let st = state.lock().unwrap();
                                     let samples = st.sites.get(&site).unwrap();
-                                    Cost::probe_budget(device_cost(samples, floats).unwrap_or(0.0))
+                                    cost::probe_budget(device_cost(samples, floats).unwrap_or(0.0))
                                 };
                                 let abandoned: Box<dyn Fn() + Send + Sync> = {
                                     let (state, site, decide) = (state.clone(), site.clone(), decide.clone());
@@ -898,7 +898,7 @@ fn mesh_host_attributes(grain: i64, fields: &[(String, Value)], geometry: rdk_co
 
 /// On the device each attribute keeps its buffer. A stream that is not resident, or whose count is
 /// not the mesh's, takes the host writer, which reports the count error as a CPU cook does.
-fn mesh_resident_attributes(grain: i64, scope: &dyn Gpu::Residency, fields: &[(String, Value)], geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
+fn mesh_resident_attributes(grain: i64, scope: &dyn gpu::Residency, fields: &[(String, Value)], geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
     let points = rdk_core::geometry::point_count(&geometry);
     let mut current = geometry.clone();
     let mut result: R<()> = Ok(());
@@ -943,15 +943,15 @@ impl std::hash::Hash for StatefulKey {
     }
 }
 
-type StatefulPrograms = (R<Executor::Program>, Arc<std::sync::OnceLock<R<Executor::Program>>>);
+type StatefulPrograms = (R<executor::Program>, Arc<std::sync::OnceLock<R<executor::Program>>>);
 // ponytail: the 8 newest; key a weak table if more stateful meshes live at once
 static STATEFUL_PROGRAMS: LazyLock<lru::Memo<StatefulKey, StatefulPrograms>> = LazyLock::new(|| lru::Memo::new("flow_sop.stateful_programs", 8));
 
 /// Settings shared by every kernel-node builder (the labelled arguments of the OCaml functions).
 #[derive(Clone)]
 pub struct KernelEnv {
-    pub gpu: Gpu::Config,
-    pub profile: Arc<Profile::T>,
+    pub gpu: gpu::Config,
+    pub profile: Arc<profile::T>,
     pub clock: Clock,
     pub strict_body: bool,
     pub reference: bool,
@@ -1014,7 +1014,7 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
     // a topology no frame or state changes is built once (Topology_kernel_impl.static_cached): later
     // cooks run `points_program`, without it
     let static_topology = static_topology_of(operation, args);
-    let make_programs = || -> (R<Executor::Program>, Arc<OnceLock<R<Executor::Program>>>) {
+    let make_programs = || -> (R<executor::Program>, Arc<OnceLock<R<executor::Program>>>) {
         let lazy = Arc::new(OnceLock::new());
         let first = prepare(&data);
         let points = match &data {
@@ -1093,8 +1093,8 @@ fn mesh_cook(
     sources: &[i64],
     data: &Value,
     static_topology: bool,
-    program: &R<Executor::Program>,
-    points_program: &Arc<OnceLock<R<Executor::Program>>>,
+    program: &R<executor::Program>,
+    points_program: &Arc<OnceLock<R<executor::Program>>>,
     node_id: i64,
     context: &sctx::T,
     geometries: &[rdk_core::geometry::T],
@@ -1123,7 +1123,7 @@ fn mesh_cook(
         // stateful node's per-frame rebuilds too
         let topology_key = get(args, "vertex_points").cloned().unwrap_or_else(|| data.clone());
         let cached = static_topology && device && tki::static_cached(&topology_key);
-        let program: Executor::Program = if cached { points_program.get().cloned().unwrap_or_else(|| program.clone())? } else { program.clone()? };
+        let program: executor::Program = if cached { points_program.get().cloned().unwrap_or_else(|| program.clone())? } else { program.clone()? };
         let force = |resident: Option<Arc<dyn flow_ir::core_exec::Resident>>| -> R<Value> {
             let resolve: flow_ir::core_exec::ResolveFn = {
                 let (context, geoms, sources) = (context.clone(), geometries.to_vec(), sources.to_vec());
@@ -1131,11 +1131,11 @@ fn mesh_cook(
                     ak::resolve(Some(&context), &lookup(geoms.clone(), sources.clone()), v)
                 })
             };
-            let options = Executor::ForceOptions { resident, state: opts.state.clone(), elems: opts.elems.clone(), resolve: Some(resolve), reference: env.reference, strict: env.strict_body };
+            let options = executor::ForceOptions { resident, state: opts.state.clone(), elems: opts.elems.clone(), resolve: Some(resolve), reference: env.reference, strict: env.strict_body };
             // Core and evaluator loops must observe the cook's cancellation, including a first cook.
             let cancel = sctx::cancel_token(context).clone();
             let mut result = Err(fail("E_CANCELLED", "Mesh kernel cancelled."));
-            E::with_interrupt(Arc::new(move || rdk_core::cancel::is_cancelled(&cancel)), &mut || result = Executor::force(&program, &options, sctx::input(context)));
+            E::with_interrupt(Arc::new(move || rdk_core::cancel::is_cancelled(&cancel)), &mut || result = executor::force(&program, &options, sctx::input(context)));
             result
         };
         let scope = if device { env.gpu.backend.as_ref().and_then(|b| b.residency(true)) } else { None };
@@ -1526,9 +1526,9 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], source
                             ak::resolve(Some(&context), &lookup(geoms.clone(), sources.clone()), v)
                         })
                     };
-                    let forced = Executor::force(
+                    let forced = executor::force(
                         &program,
-                        &Executor::ForceOptions { resident: None, state: o_c.state.clone(), elems: o_c.elems.clone(), resolve: Some(resolve), reference: env_c.reference, strict: env_c.strict_body },
+                        &executor::ForceOptions { resident: None, state: o_c.state.clone(), elems: o_c.elems.clone(), resolve: Some(resolve), reference: env_c.reference, strict: env_c.strict_body },
                         sctx::input(context),
                     )?;
                     match forced {
@@ -1774,7 +1774,7 @@ pub fn build_call(
             for (name, f, index) in &forwarded {
                 let sources: R<Vec<(i64, i64)>> = geometry_captures.iter().filter(|(_, _, slot, _)| slot == index).map(|(n, source, _, _)| Ok((*source, marker(n)?))).collect();
                 let sources = sources?;
-                remapped.push((name.clone(), E::Host::remap_function_geometry(&sources, *f), marker(name)?, *index, sources));
+                remapped.push((name.clone(), E::host::remap_function_geometry(&sources, *f), marker(name)?, *index, sources));
             }
             let functions2: Vec<(String, Value)> = functions
                 .iter()
@@ -1954,21 +1954,21 @@ pub fn build_call(
     })
 }
 
-type BuiltEntry = (Option<Arc<dyn Gpu::Backend>>, node::T);
+type BuiltEntry = (Option<Arc<dyn gpu::Backend>>, node::T);
 static BUILT: LazyLock<lru::Memo<String, BuiltEntry>> = LazyLock::new(|| lru::Memo::new("flow_sop.built", 64));
 
 /// Drops the inlined-body nodes built for a closed owner's backend.
-pub fn forget_backend(backend: &Arc<dyn Gpu::Backend>) {
+pub fn forget_backend(backend: &Arc<dyn gpu::Backend>) {
     BUILT.remove_where(|(held, _)| held.as_ref().is_some_and(|b| Arc::ptr_eq(b, backend)));
 }
 
 /// The seconds from a host mesh's frame to its first presentation, added to its display sink.
-pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
+pub fn observe_draw(gpu: &gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
     chain::observe_draw(gpu, geometry, seconds)
 }
 
 /// The seconds the editor spent preparing a mesh for display.
-pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
+pub fn observe_display(gpu: &gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
     chain::observe_display(gpu, geometry, seconds)
 }
 
@@ -1994,8 +1994,8 @@ fn cooked_sources(value: &Value) -> Vec<i64> {
         match v {
             Value::Deferred(t, id) if ty::is_cooked(t) => ids.push(*id),
             Value::Residual(r) => {
-                if residuals.insert(E::Residual::residual_id(*r)) {
-                    if let Ok(view) = E::Residual::residual_view(*r) {
+                if residuals.insert(E::residual::residual_id(*r)) {
+                    if let Ok(view) = E::residual::residual_view(*r) {
                         for (_, b) in &view.bindings {
                             visit(b, residuals, functions, ids);
                         }
@@ -2003,8 +2003,8 @@ fn cooked_sources(value: &Value) -> Vec<i64> {
                 }
             }
             Value::Fn(f) => {
-                if functions.insert(E::Residual::function_id(*f)) {
-                    for (_, b) in E::Residual::function_bindings(*f) {
+                if functions.insert(E::residual::function_id(*f)) {
+                    for (_, b) in E::residual::function_bindings(*f) {
                         visit(&b, residuals, functions, ids);
                     }
                 }
@@ -2180,7 +2180,7 @@ pub fn install_hooks() {
         E::set_live_kernels(Arc::new(|nodes: &[ENode]| {
             nodes.iter().all(|n| match kernel_data(n) {
                 Some(data) if E::frame_dependent(&data) => {
-                    Executor::compile(&data, &Executor::CompileOptions { strict: true, sink: Some(Sink::Sop_input), ..Default::default() }).is_ok()
+                    executor::compile(&data, &executor::CompileOptions { strict: true, sink: Some(Sink::Sop_input), ..Default::default() }).is_ok()
                 }
                 _ => true,
             })
@@ -2212,12 +2212,12 @@ fn static_cpu_data(data: &Value) -> bool {
 
 fn same_function(a: FnId, b: FnId) -> bool {
     a == b
-        || (E::Residual::function_id(a) == E::Residual::function_id(b)
-            && E::Residual::function_origin(a) == E::Residual::function_origin(b)
-            && E::Host::function_scope(a) == E::Host::function_scope(b)
-            && E::Residual::function_name(a) == E::Residual::function_name(b)
+        || (E::residual::function_id(a) == E::residual::function_id(b)
+            && E::residual::function_origin(a) == E::residual::function_origin(b)
+            && E::host::function_scope(a) == E::host::function_scope(b)
+            && E::residual::function_name(a) == E::residual::function_name(b)
             && {
-                let (x, y) = (E::Residual::function_bindings(a), E::Residual::function_bindings(b));
+                let (x, y) = (E::residual::function_bindings(a), E::residual::function_bindings(b));
                 x.len() == y.len() && x.iter().zip(y.iter()).all(|((an, av), (bn, bv))| an == bn && av == bv)
             })
 }
@@ -2261,7 +2261,7 @@ pub struct Options {
     pub provenance_tags: bool,
     pub tag_base: i64,
     pub reference: bool,
-    pub gpu: Gpu::Config,
+    pub gpu: gpu::Config,
     pub defer: bool,
     pub strict_body: bool,
     pub defer_body_errors: bool,
@@ -2283,7 +2283,7 @@ impl Default for Options {
             provenance_tags: true,
             tag_base: 0,
             reference: false,
-            gpu: Gpu::default(),
+            gpu: gpu::default(),
             defer: false,
             strict_body: false,
             defer_body_errors: false,
@@ -2342,7 +2342,7 @@ pub struct CookServices {
     checked: Arc<Workspace>,
     evaluated: Arc<E::Eval>,
     _roots: E::Roots,
-    profile: Arc<Profile::T>,
+    profile: Arc<profile::T>,
     plan: Plan,
     templ: Vec<bool>,
     compiled: Vec<i64>,
@@ -2519,7 +2519,7 @@ impl CookServices {
             self.o.strict_body.to_string(),
             self.o.defer.to_string(),
             self.o.gpu.fast.to_string(),
-            (self.o.gpu.policy == Gpu::Policy::Qualification).to_string(),
+            (self.o.gpu.policy == gpu::Policy::Qualification).to_string(),
         ];
         parts.extend(inputs.iter().map(input_key));
         let key = parts.join("\0");
@@ -2825,8 +2825,8 @@ impl CookServices {
 
 #[derive(Clone)]
 struct StructEnv {
-    profile: Arc<Profile::T>,
-    gpu: Gpu::Config,
+    profile: Arc<profile::T>,
+    gpu: gpu::Config,
     reference: bool,
     checked: Arc<Workspace>,
     captures: Vec<(i64, Ty, node::T)>,
@@ -3022,7 +3022,7 @@ impl HostRun {
         args.iter()
             .map(|(name, value)| {
                 let forced = if Self::deferred(value) && !(keep_constant && name == "values" && Self::constant(value)) {
-                    let r = E::Host::force_reference(value, sctx::input(&self.context), None, None, Some(self.resolve_fn()));
+                    let r = E::host::force_reference(value, sctx::input(&self.context), None, None, Some(self.resolve_fn()));
                     self.take_stash(r)?
                 } else {
                     value.clone()
@@ -3372,7 +3372,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
     for (index, (id, ty, _)) in env.captures.iter().enumerate() {
         run.handles.lock().unwrap().insert(*id, (ty.clone(), None, Some(sop::session::Output { payload: payloads[index].clone(), instances: None })));
     }
-    let execute = |scope: Option<&Arc<Box<dyn Gpu::Residency>>>| -> R<Value> {
+    let execute = |scope: Option<&Arc<Box<dyn gpu::Residency>>>| -> R<Value> {
         let host_source = scope.map(|scope| {
             let (run, scope) = (run.clone(), scope.clone());
             move |value: &Value| -> R<Option<Value>> {
@@ -3475,7 +3475,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
     })
 }
 
-fn scope_count(scope: &dyn Gpu::Residency, value: &Value) -> R<Option<i64>> {
+fn scope_count(scope: &dyn gpu::Residency, value: &Value) -> R<Option<i64>> {
     scope.executor().count(value)
 }
 
@@ -4059,7 +4059,7 @@ impl Lowerer {
                                         ak::resolve(Some(&context), &lookup(geoms.clone(), sources.clone()), v)
                                     })
                                 };
-                                match E::Host::force_reference(&g, sctx::input(context), None, None, Some(resolve))? {
+                                match E::host::force_reference(&g, sctx::input(context), None, None, Some(resolve))? {
                                     Value::Bool(b) => Ok(b),
                                     _ => Err(fail("E_ATTR_TYPE", "sop/delete_attr :when must be a bool")),
                                 }
@@ -4451,9 +4451,9 @@ impl Lowerer {
             if n.kind != "sop/with_attr" || edit::find(graph, self.compiled[n.id as usize]).is_none() {
                 continue;
             }
-            let program = Arc::new(Executor::compile(
+            let program = Arc::new(executor::compile(
                 values,
-                &Executor::CompileOptions { profile: Some(self.profile.clone()), approx: self.checked.approx.clone(), sink: Some(Sink::Sop_input), ..Default::default() },
+                &executor::CompileOptions { profile: Some(self.profile.clone()), approx: self.checked.approx.clone(), sink: Some(Sink::Sop_input), ..Default::default() },
             )?);
             // Fast writes choose placement in their cook, where downstream consumers are known,
             // stateful ones too: the lane has advanced the state, and the rebuilt node cooks over its
@@ -4461,7 +4461,7 @@ impl Lowerer {
             let eligible = (!self.o.gpu.fast || self.o.gpu.backend.is_none())
                 && !self.deferred_cpu(&attribute_data(&n.args))
                 && ak::sources(values).is_empty()
-                && Executor::root_is_packed_or_readback(&program);
+                && executor::root_is_packed_or_readback(&program);
             if !eligible && !E::state_dependent(&attribute_data(&n.args)) {
                 continue;
             }
@@ -4475,9 +4475,9 @@ impl Lowerer {
                     };
                     // Only input-independent producers can materialize before SOP cooking.
                     // Attribute-reading cones keep their existing cooked-input CPU path.
-                    let selected = if eligible { Executor::try_display(Some(state), None, this.o.reference, &this.o.gpu, &program, live)? } else { None };
+                    let selected = if eligible { executor::try_display(Some(state), None, this.o.reference, &this.o.gpu, &program, live)? } else { None };
                     let values = match &selected {
-                        Some(Executor::Displayed::Cpu(value)) => value.clone(),
+                        Some(executor::Displayed::Cpu(value)) => value.clone(),
                         None => values.clone(),
                         Some(_) => unreachable!("a displayed write is on the CPU"),
                     };
@@ -4579,7 +4579,7 @@ impl Lowerer {
         let (mut graph, root) = match &instance.result {
             Value::Deferred(t, id) if ty::is_cooked(t) => (graph, Some(self.compiled[*id as usize])),
             Value::No_geo => (graph, None),
-            Value::Residual(r) if *E::Residual::residual_view(*r)?.term.ty() == ty::geometry() => {
+            Value::Residual(r) if *E::residual::residual_view(*r)?.term.ty() == ty::geometry() => {
                 let ids = cooked_sources(&instance.result);
                 let captures: R<Vec<(i64, Ty, node::T)>> = ids
                     .iter()
@@ -4721,7 +4721,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
     let observe: Arc<dyn Fn(Option<W::Path>, ResidualId) + Send + Sync> = {
         let origins = image_origins.clone();
         Arc::new(move |producer: Option<W::Path>, residual: ResidualId| {
-            let Ok(view) = E::Residual::residual_view(residual) else { return };
+            let Ok(view) = E::residual::residual_view(residual) else { return };
             let key = (view.instance, view.site.clone(), view.iter.clone());
             let mut origins = origins.lock().unwrap();
             let origin = match origins.get(&key) {
@@ -4738,7 +4738,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
     )?;
     let checked = Arc::new(checked);
     let evaluated = Arc::new(evaluated);
-    let profile = Profile::create(o.clock.clone());
+    let profile = profile::create(o.clock.clone());
     // Kernel bodies are cache inputs as well as their captures. The digest is lazy so ordinary
     // catalog edits retain their existing pipeline counts. ponytail: the whole source invalidates
     // kernels; narrow to body/defn cones if unrelated structural edits measurably recook them.
@@ -5010,7 +5010,7 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
     let defaults: Vec<param::FieldView> = lowered.factories.iter().find(|f| edit::factory_key(f) == "iso_surface").map(|f| edit::factory_fields(f).to_vec()).unwrap_or_default();
     let vector = |args: &[(String, Value)], name: &str| -> Option<(f64, f64, f64)> {
         match get(args, name) {
-            Some(value) => match E::Host::force_reference(value, live, state.as_ref(), None, Some(resolve.clone())) {
+            Some(value) => match E::host::force_reference(value, live, state.as_ref(), None, Some(resolve.clone())) {
                 Ok(Value::Vec3(x, y, z)) => Some((x, y, z)),
                 _ => None,
             },
@@ -5038,7 +5038,7 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
         };
         let Some(args) = args else { continue };
         let Some(Value::Fn(f)) = get(&args, "field") else { continue };
-        if E::Host::function_scope(*f) != Some((zone.clone(), outer.to_vec())) {
+        if E::host::function_scope(*f) != Some((zone.clone(), outer.to_vec())) {
             continue;
         }
         let (Some((rx, ry, rz)), Some((lx, ly, lz)), Some((hx, hy, hz))) = (vector(&args, "resolution"), vector(&args, "min"), vector(&args, "max")) else { continue };
@@ -5070,9 +5070,9 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
                 rays_math::fma::fma((k / (nx * ny)) as f64, (hz - lz) / rz, lz),
             ];
             let signature = FnSignature { params: vec![Ty::Vec3], result: Ty::Float };
-            match E::Host::map_function(None, None, &signature, f, &[Value::Floats(3, Arc::new(p))])? {
+            match E::host::map_function(None, None, &signature, f, &[Value::Floats(3, Arc::new(p))])? {
                 Value::Residual(residual) => {
-                    let (_, at) = E::Host::map_probe(residual, &live, state.as_ref(), Some(resolve.clone()), None, (start + k) as usize)?;
+                    let (_, at) = E::host::map_probe(residual, &live, state.as_ref(), Some(resolve.clone()), None, (start + k) as usize)?;
                     at(0)
                 }
                 _ => unreachable!("a mapped function is a residual"),

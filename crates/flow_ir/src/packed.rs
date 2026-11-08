@@ -8,7 +8,7 @@
 #![allow(non_snake_case, non_camel_case_types, clippy::too_many_arguments)]
 
 use crate::core_fuse;
-use crate::core_ir::Region::{self, Instruction, LiveFloat, LiveInt, Loop, Projection, RegionResult};
+use crate::core_ir::region::{self, Instruction, LiveFloat, LiveInt, Loop, Projection, RegionResult};
 use crate::core_region;
 use flow_check::workspace::{Node, Path, Term};
 use flow_check::{op, ray_host};
@@ -24,12 +24,12 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
-pub use crate::core_ir::Region::{Iteration, Stage};
-pub use crate::core_ir::Region::Origin;
+pub use crate::core_ir::region::{Iteration, Stage};
+pub use crate::core_ir::region::Origin;
 pub use host::Inputs;
-pub use Region::CountSource;
+pub use region::CountSource;
 
-pub type T = Region::T;
+pub type T = region::T;
 pub type Resolve = Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>;
 pub type Dispatch = Arc<dyn Fn(ResidualId, &Term) -> Result<Value, Diagnostic> + Send + Sync>;
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
@@ -122,7 +122,7 @@ fn is_array_of_int(term: &Term) -> bool {
 
 pub fn integer_program(t: &T) -> bool {
     t.code.iter().any(typed_instruction)
-        || t.outputs.iter().any(|o| o.iter().any(|r| Region::integer_register(&t.code[*r as usize])))
+        || t.outputs.iter().any(|o| o.iter().any(|r| region::integer_register(&t.code[*r as usize])))
         || t.sources.iter().any(|(_, term)| is_array_of_int(term))
 }
 
@@ -279,7 +279,7 @@ pub fn output_reachable(t: &T) -> Vec<bool> {
             return;
         }
         used[slot] = true;
-        for r in Region::operands(&t.code[slot]) {
+        for r in region::operands(&t.code[slot]) {
             mark(t, used, r as usize);
         }
         if let Instruction::Loop_begin(loop_) = unguarded(&t.code[slot]) {
@@ -310,7 +310,7 @@ pub fn finite_checks(t: &T) -> Vec<bool> {
                 _,
                 _,
             ) => false,
-            body if Region::text_register(body) => false,
+            body if region::text_register(body) => false,
             _ => true,
         })
         .collect()
@@ -325,7 +325,7 @@ fn gpu_error(message: &str) -> Diagnostic {
 pub fn gpu_refusals(fused: bool, fast: bool, t: &T) -> Vec<Diagnostic> {
     let mut reasons: Vec<Diagnostic> = Vec::new();
     let any = |f: &dyn Fn(&Instruction) -> bool| t.code.iter().any(|i| f(unguarded(i)));
-    if t.code.iter().any(Region::text_register) {
+    if t.code.iter().any(region::text_register) {
         reasons.push(gpu_error("Text kernels stay on the CPU."));
     }
     if !fast && any(&|i| matches!(i, Instruction::Trace(..))) {
@@ -335,7 +335,7 @@ pub fn gpu_refusals(fused: bool, fast: bool, t: &T) -> Vec<Diagnostic> {
     if !fast && any(&|i| matches!(i, Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..))) {
         reasons.push(gpu_error("Indexed array reads stay on the CPU."));
     }
-    if !fast && integer_program(t) && !t.code.iter().any(Region::text_register) {
+    if !fast && integer_program(t) && !t.code.iter().any(region::text_register) {
         reasons.push(gpu_error("Integer sources, uniforms and instructions stay on the CPU."));
     }
     if fast && any(&|i| matches!(i, Instruction::Rand_at(..) | Instruction::Int_accumulator)) {
@@ -500,7 +500,7 @@ pub fn provenance(t: &T) -> Vec<(i64, Path, Vec<i64>)> {
 
 /// The consuming stage, where the group's single timing belongs.
 pub fn site(t: &T) -> (i64, Path, Vec<i64>) {
-    match E::Residual::residual_view(t.residual) {
+    match E::residual::residual_view(t.residual) {
         Ok(view) => (view.instance, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or(view.site), view.iter),
         Err(_) => (0, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or_default(), Vec::new()),
     }
@@ -1151,9 +1151,9 @@ pub fn ordered_add(t: &T) -> bool {
                 && t.widths[0] == width as i64
                 && t.skip.is_empty()
                 && t.code.len() == 3 * width
-                && Region::dependent_flags(t).len() == 3 * width =>
+                && region::dependent_flags(t).len() == 3 * width =>
         {
-            let dependent = Region::dependent_flags(t);
+            let dependent = region::dependent_flags(t);
             let w = width as i64;
             (0..width).all(|k| {
                 t.code[k] == Instruction::Input(0, w, k as i64)
@@ -1476,15 +1476,15 @@ struct TC {
 impl TC {
     // inlined: the guarded span scan calls these per lane (select kernel -5% instructions)
     #[inline(always)]
-    fn numeric(&self, regs: &Region::Registers, bs: usize, r: usize, j: usize) -> f64 {
+    fn numeric(&self, regs: &region::Registers, bs: usize, r: usize, j: usize) -> f64 {
         let at = r * bs + j;
         if regs.integer_slots[r] { self.integer[at] as f64 } else { self.floats[at] }
     }
     #[inline(always)]
-    fn selected(&self, regs: &Region::Registers, bs: usize, j: usize, guards: &[(i64, bool)]) -> bool {
+    fn selected(&self, regs: &region::Registers, bs: usize, j: usize, guards: &[(i64, bool)]) -> bool {
         guards.iter().all(|(r, yes)| (self.numeric(regs, bs, *r as usize, j) != 0.0) == *yes)
     }
-    fn copy_loop(&mut self, regs: &Region::Registers, bs: usize, source: usize, target: usize, lane: usize) {
+    fn copy_loop(&mut self, regs: &region::Registers, bs: usize, source: usize, target: usize, lane: usize) {
         if regs.text_slots[target] >= 0 {
             self.texts[regs.text_slots[target] as usize * bs + lane] = self.texts[regs.text_slots[source] as usize * bs + lane].clone();
         } else if regs.integer_slots[target] {
@@ -1497,7 +1497,7 @@ impl TC {
 
 fn texec_range(
     sh: &TS,
-    regs: &Region::Registers,
+    regs: &region::Registers,
     tc: &mut TC,
     fo: Option<&Forcer<'_>>,
     dependent: Option<bool>,
@@ -1531,7 +1531,7 @@ fn texec_range(
 
 fn execute_loop(
     sh: &TS,
-    regs: &Region::Registers,
+    regs: &region::Registers,
     tc: &mut TC,
     fo: Option<&Forcer<'_>>,
     header: usize,
@@ -1620,7 +1620,7 @@ fn execute_loop(
 
 fn texec(
     sh: &TS,
-    regs: &Region::Registers,
+    regs: &region::Registers,
     tc: &mut TC,
     fo: Option<&Forcer<'_>>,
     slot: usize,
@@ -2145,9 +2145,9 @@ fn integer_range(residual: ResidualId, term: &Term) -> Option<(ResidualId, Term)
     let arena = term.arena();
     match term.node {
         Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
-            match E::Residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
+            match E::residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
                 Some(Value::Residual(nested)) => {
-                    let term = E::Residual::residual_term(nested)?;
+                    let term = E::residual::residual_term(nested)?;
                     integer_range(nested, &term)
                 }
                 _ => None,
@@ -2184,7 +2184,7 @@ fn cached_table(sh: &TS, register: i64) -> Option<&Value> {
     }
 }
 
-fn valid_indices(sh: &TS, regs: &Region::Registers, tc: &TC, length: usize, guards: &[(i64, bool)], index: i64, count: usize) -> bool {
+fn valid_indices(sh: &TS, regs: &region::Registers, tc: &TC, length: usize, guards: &[(i64, bool)], index: i64, count: usize) -> bool {
     let bs = sh.block_size;
     let mut j = 0;
     while j < length
@@ -2200,7 +2200,7 @@ fn valid_indices(sh: &TS, regs: &Region::Registers, tc: &TC, length: usize, guar
 
 // whether an instruction may run before the lane-major redo: its table is already published and
 // every selected index is in bounds
-fn safe(sh: &TS, regs: &Region::Registers, tc: &TC, length: usize, guards: Vec<(i64, bool)>, instruction: &Instruction) -> bool {
+fn safe(sh: &TS, regs: &region::Registers, tc: &TC, length: usize, guards: Vec<(i64, bool)>, instruction: &Instruction) -> bool {
     match instruction {
         Instruction::Guarded(more, body) => {
             let mut all = guards;
@@ -2229,7 +2229,7 @@ fn safe(sh: &TS, regs: &Region::Registers, tc: &TC, length: usize, guards: Vec<(
 /// One chunk of the general path: its blocks' instructions, then their results stored.
 fn typed_chunk(
     sh: &TS,
-    regs: &Region::Registers,
+    regs: &region::Registers,
     chunk: usize,
     fo: Option<&Forcer<'_>>,
     base: usize,
@@ -2267,7 +2267,7 @@ fn typed_chunk(
         stamp: 0,
         acc: [0.0; 4],
     };
-    if Region::clobbered(t) {
+    if region::clobbered(t) {
         for (slot, dedicated) in regs.dedicated.iter().enumerate() {
             if !dedicated {
                 if integers {
@@ -2488,7 +2488,7 @@ fn run_typed(
         });
     let gather = t.code.iter().any(|i| match unguarded(i) {
         Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..) | Instruction::Loop_begin(_) => true,
-        body => Region::text_register(body),
+        body => region::text_register(body),
     });
     let cache_guards = carried == 0 && t.result == RegionResult::Collect && t.code.iter().any(|i| matches!(i, Instruction::Guarded(..)));
     // typed inputs
@@ -2542,7 +2542,7 @@ fn run_typed(
             }
         }
     };
-    let regs = Region::registers(t);
+    let regs = region::registers(t);
     let mut sh_ranges = ranges.clone();
     let _ = &mut sh_ranges;
     let ucells: Vec<UCell> = t
@@ -2644,8 +2644,8 @@ fn run_typed(
         }
     }
     let collecting = matches!(t.result, RegionResult::Collect | RegionResult::Accumulate(_, true));
-    let integer_outputs: Vec<bool> = t.outputs.iter().map(|regs| regs.len() == 1 && Region::integer_register(&t.code[regs[0] as usize])).collect();
-    let text_outputs: Vec<bool> = t.outputs.iter().map(|regs| regs.len() == 1 && Region::text_register(&t.code[regs[0] as usize])).collect();
+    let integer_outputs: Vec<bool> = t.outputs.iter().map(|regs| regs.len() == 1 && region::integer_register(&t.code[regs[0] as usize])).collect();
+    let text_outputs: Vec<bool> = t.outputs.iter().map(|regs| regs.len() == 1 && region::text_register(&t.code[regs[0] as usize])).collect();
     if let Some(planes) = &plane_outputs {
         if t.result != RegionResult::Collect || planes.len() != t.outputs.len() {
             return Err(fail("E_ARRAY_TYPE", "Column sinks require matching Collect outputs."));
@@ -2681,12 +2681,12 @@ fn run_typed(
                 if kept > MAX_ARRAY {
                     return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
                 }
-                ivec[k] = Region::ints_for(t, kept);
+                ivec[k] = region::ints_for(t, kept);
             } else {
                 if kept > MAX_ARRAY / width {
                     return Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
                 }
-                fvec[k] = Region::floats_for(t, kept * width);
+                fvec[k] = region::floats_for(t, kept * width);
             }
         }
     }
@@ -2713,7 +2713,7 @@ fn run_typed(
     // a block's scratch holds every register for each of its lanes: a large kernel takes fewer
     // lanes, so scratch stays near 64K slots (512 KiB a bank)
     let (block_size, blocks, blocks_per_chunk, chunks) = block_layout(count, 64.max(1024.min(65536 / 1.max(regs.slots as usize))));
-    let dependent_flags = if count == 0 { Vec::new() } else { Region::dependent_flags(t).clone() };
+    let dependent_flags = if count == 0 { Vec::new() } else { region::dependent_flags(t).clone() };
     sh.strides = strides;
     sh.skip = skip;
     sh.count = count;
@@ -2940,7 +2940,7 @@ fn run_typed(
         (m.report)(t, ((m.clock)() - started - excluded.get()).max(0.0), false);
     }
     if result.len() == 1 {
-        Region::finished(t, result[0].clone());
+        region::finished(t, result[0].clone());
     }
     Ok(result)
 }
@@ -2955,7 +2955,7 @@ fn run_typed(
 // nested evaluations when all four are the same and the term reads no state, and dropped when
 // that run ends.
 
-type RView = E::Residual::View;
+type RView = E::residual::View;
 
 struct ScopeData {
     resolve: Option<Resolve>,
@@ -3014,7 +3014,7 @@ fn same_residual(a: ResidualId, b: ResidualId) -> bool {
     if a == b {
         return true;
     }
-    let (Ok(x), Ok(y)) = (E::Residual::residual_view(a), E::Residual::residual_view(b)) else { return false };
+    let (Ok(x), Ok(y)) = (E::residual::residual_view(a), E::residual::residual_view(b)) else { return false };
     x.term == y.term
         && x.previous == y.previous
         && x.instance == y.instance
@@ -3132,7 +3132,7 @@ fn eval_term(run: &Run, residual: ResidualId, term: &Term) -> Result<Value, Diag
     if let Some(on_walk) = &run.on_walk {
         on_walk();
     }
-    let result = E::Residual::eval_term(residual, term, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone());
+    let result = E::residual::eval_term(residual, term, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone());
     match take_pending() {
         Some(d) => Err(d),
         None => result,
@@ -3140,7 +3140,7 @@ fn eval_term(run: &Run, residual: ResidualId, term: &Term) -> Result<Value, Diag
 }
 
 fn evaluate(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, term: &Arc<Term>) -> Result<Value, Diagnostic> {
-    let view = E::Residual::residual_view(residual)?;
+    let view = E::residual::residual_view(residual)?;
     let looped = !leaf_term(term)
         && ACTIVE.with(|stack| stack.borrow().iter().any(|(t, other)| same_term(t, term) && same_context(&view, other) && view.iter == other.iter));
     if looped {
@@ -3173,10 +3173,10 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
     let nested = match &term.node {
         Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => {
             let name = term.name(term.arena().ref_binding(*id).name);
-            let view = E::Residual::residual_view(residual)?;
+            let view = E::residual::residual_view(residual)?;
             match view.bindings.iter().find(|(n, _)| n == name) {
                 Some((_, Value::Residual(r))) => {
-                    let inner = E::Residual::residual_view(*r)?;
+                    let inner = E::residual::residual_view(*r)?;
                     Some((*r, inner.term))
                 }
                 _ => None,
@@ -3216,7 +3216,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
             (true, Node::Loop(id)) if term.arena().bindings(term.arena().loop_node(*id).clauses).iter().all(|c| matches!(term.arena().ty(term.arena().row(c.term).ty), Ty::List(_))) => eval_term(run, residual, term),
             (true, _) if numeric_loop(term) => Err(kernel_form_error()),
             (false, _) if numeric_loop(term) => eval_term(run, residual, term),
-            _ => uniform(run, dispatch, &Value::Residual(E::Residual::with_bindings(residual, term, &[])?)),
+            _ => uniform(run, dispatch, &Value::Residual(E::residual::with_bindings(residual, term, &[])?)),
         },
     }
 }
@@ -3225,7 +3225,7 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
     if !E::is_live(value) {
         return Ok(value.clone());
     }
-    let reference = |v: &Value| E::Host::force_reference(v, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone());
+    let reference = |v: &Value| E::host::force_reference(v, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone());
     match value {
         Value::Residual(r) => {
             let forced = residual(*r)?;
@@ -3262,13 +3262,13 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
 
 fn uniform(run: &Run, dispatch: &Option<Dispatch>, value: &Value) -> Result<Value, Diagnostic> {
     force_values(run, value, &|residual| {
-        let view = E::Residual::residual_view(residual)?;
+        let view = E::residual::residual_view(residual)?;
         evaluate(run, dispatch, residual, &view.term)
     })
 }
 
 fn execute_request(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId) -> Option<Value> {
-    let view = E::Residual::residual_view(residual).ok()?;
+    let view = E::residual::residual_view(residual).ok()?;
     let term = view.term.clone();
     let active = REQUESTS.with(|stack| stack.borrow().iter().any(|(t, other)| same_term(t, &term) && same_context(&view, other)));
     if active {
@@ -3342,7 +3342,7 @@ fn run_all(run: &Run, dispatch: Option<Dispatch>, plane_outputs: PlaneOutputs) -
             Err(value::fail("$handled", ""))
         };
         let _ = E::transaction(&run.state, &mut || {
-            let _ = E::Residual::handle(handlers.clone(), &mut handled);
+            let _ = E::residual::handle(handlers.clone(), &mut handled);
             match &*result.borrow() {
                 Some(Err(d)) => Err(d.clone()),
                 _ => Ok(()),
@@ -3373,7 +3373,7 @@ fn reference_observed(run: &Run, on_walk: Option<&Arc<dyn Fn() + Send + Sync>>) 
     if let Some(f) = on_walk.or(run.on_walk.as_ref()) {
         f();
     }
-    E::Residual::eval_term(run.t.residual, &run.t.term, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone())
+    E::residual::eval_term(run.t.residual, &run.t.term, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -3444,7 +3444,7 @@ pub fn force_into(
 
 /// The reference interpreter over the region's own term.
 pub fn reference(t: &T, live: &Live, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<Resolve>) -> Result<Value, Diagnostic> {
-    E::Residual::eval_term(t.residual, &t.term, live, state, elems, resolve)
+    E::residual::eval_term(t.residual, &t.term, live, state, elems, resolve)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -3492,7 +3492,7 @@ pub mod host {
             match v {
                 Value::Residual(r) => residual(*r, types, visited)?,
                 Value::Fn(f) => {
-                    for (_, v) in E::Residual::function_bindings(*f) {
+                    for (_, v) in E::residual::function_bindings(*f) {
                         value(&v, types, visited)?;
                     }
                 }
@@ -3513,7 +3513,7 @@ pub mod host {
         fn residual(r: ResidualId, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<(i64, i64)>) -> Result<(), Diagnostic> {
             let id = (r.1, r.0);
             if visited.insert(id) {
-                for (_, v) in E::Residual::residual_view(r)?.bindings {
+                for (_, v) in E::residual::residual_view(r)?.bindings {
                     value(&v, types, visited)?;
                 }
             }
@@ -3567,7 +3567,7 @@ pub mod host {
                 _ => None,
             }
         };
-        let (rewritten, _roots) = E::Host::rewrite_owned(&Value::List(Arc::new(all)), &replace);
+        let (rewritten, _roots) = E::host::rewrite_owned(&Value::List(Arc::new(all)), &replace);
         let Value::List(rewritten) = rewritten else {
             return Err(value::fail("E_CORE_ARGUMENT", "Compiled region rewrite changed shape."));
         };
@@ -3590,7 +3590,7 @@ pub mod host {
             stages.push((residual_of(&rewritten[at])?, term.clone()));
             at += 1;
         }
-        Region::Private::with_captures(t, residual, uniforms, sources, stages, t.count)
+        region::private::with_captures(t, residual, uniforms, sources, stages, t.count)
     }
 
     #[derive(Clone, Debug)]
@@ -3634,7 +3634,7 @@ pub mod host {
     }
 
     fn binding_of(r: ResidualId, name: &str) -> Option<Value> {
-        E::Residual::residual_binding(r, name)
+        E::residual::residual_binding(r, name)
     }
 
     // What a source or uniform reads: a value itself; `array/range` of an array's count times `mul`
@@ -3647,7 +3647,7 @@ pub mod host {
                 Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::FnRef(_) => Some(acc),
                 Node::RefBinding(id) => match binding_of(r, term.name(term.arena().ref_binding(*id).name)) {
                     Some(Value::Residual(inner)) => {
-                        let term = E::Residual::residual_term(inner)?;
+                        let term = E::residual::residual_term(inner)?;
                         refs(inner, &term, Some(acc))
                     }
                     Some(v) => {
@@ -3740,7 +3740,7 @@ pub mod host {
         match &term.node {
             Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => match binding_of(residual, term.name(term.arena().ref_binding(*id).name)) {
                 Some(Value::Residual(r)) => {
-                    let term = E::Residual::residual_term(r)?;
+                    let term = E::residual::residual_term(r)?;
                     index_range(r, &term)
                 }
                 _ => None,
@@ -3766,7 +3766,7 @@ pub mod host {
         t.uniforms
             .iter()
             .map(|v| match v {
-                Value::Residual(r) => match E::Residual::residual_term(*r) {
+                Value::Residual(r) => match E::residual::residual_term(*r) {
                     Some(term) => shape(*r, &term),
                     None => Shape::Opaque(None),
                 },
@@ -3857,7 +3857,7 @@ pub mod host {
     fn with_kernel(kernel: Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>, f: &mut dyn FnMut() -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
         let mut result: Option<Result<Value, Diagnostic>> = None;
         let handlers = E::ResidualHandlers { kernel: Some(kernel), ..Default::default() };
-        let _ = E::Residual::handle(handlers, &mut || {
+        let _ = E::residual::handle(handlers, &mut || {
             result = Some(f());
             Err(value::fail("$handled", ""))
         });
@@ -3875,7 +3875,7 @@ pub mod host {
     fn pv_eval_term(pv: &Pv, resolve: &Option<Resolve>, residual: ResidualId, term: &Term) -> Result<Value, Diagnostic> {
         let (p, r) = (pv.clone(), resolve.clone());
         with_kernel(Arc::new(move |id| pv_execute_request(&p, &r, id)), &mut || {
-            E::Residual::eval_term(residual, term, &pv.live, Some(&pv.state), None, resolve.clone())
+            E::residual::eval_term(residual, term, &pv.live, Some(&pv.state), None, resolve.clone())
         })
     }
 
@@ -3883,7 +3883,7 @@ pub mod host {
         if E::state_dependent(&Value::Residual(residual)) {
             return None;
         }
-        let term = E::Residual::residual_term(residual)?;
+        let term = E::residual::residual_term(residual)?;
         match compile_source(&pv.t, residual, &term) {
             Ok(program) => pv_force(pv, resolve, &program).ok(),
             Err(_) => None,
@@ -3901,7 +3901,7 @@ pub mod host {
             let binding = term.arena().ref_binding(id);
             if term.arena().name_ids(binding.fields).is_empty() {
                 if let Some(Value::Residual(inner)) = binding_of(residual, term.name(binding.name)) {
-                    let view = E::Residual::residual_view(inner)?;
+                    let view = E::residual::residual_view(inner)?;
                     return pv_evaluate_with(pv, resolve, inner, &view.term);
                 }
             }
@@ -4143,9 +4143,9 @@ pub mod host {
             if let Some(v) = made.borrow().get(&id) {
                 return Ok(v.clone());
             }
-            let view = E::Residual::residual_view(residual)?;
+            let view = E::residual::residual_view(residual)?;
             let bindings: Vec<(String, Value)> = view.bindings.iter().map(|(n, v)| (n.clone(), binding_of_value(pv, resolve, made, v))).collect();
-            let residual = if same_bindings(&view.bindings, &bindings) { residual } else { E::Residual::with_bindings(residual, &view.term, &bindings)? };
+            let residual = if same_bindings(&view.bindings, &bindings) { residual } else { E::residual::with_bindings(residual, &view.term, &bindings)? };
             let value = pv_evaluate_with(pv, resolve, residual, &view.term)?;
             made.borrow_mut().insert(id, value.clone());
             Ok(value)
@@ -4234,7 +4234,7 @@ pub mod host {
         let mut plan_uniforms = Vec::new();
         for v in t.uniforms.iter() {
             let v = match v {
-                Value::Residual(r) => match shape(*r, E::Residual::residual_term(*r)?.as_ref()) {
+                Value::Residual(r) => match shape(*r, E::residual::residual_term(*r)?.as_ref()) {
                     Shape::Value(v) => v,
                     _ => return None,
                 },
@@ -4289,10 +4289,10 @@ pub mod host {
     /// uniform as the table a gather reads.
     pub fn prepare(t: &T, o: &PrepareOptions, live: &Live) -> Result<Inputs, Diagnostic> {
         let fast = o.fast;
-        if t.code.iter().any(Region::text_register) || (integer_program(t) && !fast) {
+        if t.code.iter().any(region::text_register) || (integer_program(t) && !fast) {
             return Err(value::fail(
                 "E_GPU_FORM",
-                if t.code.iter().any(Region::text_register) { "Text kernels stay on the CPU." } else { "Integer sources, uniforms and instructions stay on the CPU." },
+                if t.code.iter().any(region::text_register) { "Text kernels stay on the CPU." } else { "Integer sources, uniforms and instructions stay on the CPU." },
             ));
         }
         device_inputs(&prepare_values(t, o, live)?)
@@ -4329,7 +4329,7 @@ mod tests {
         let value = recorded(body);
         let Value::Residual(residual) = value else { panic!("expected a live packed program: {body}") };
         let options = CompileOptions { fusion, ..Default::default() };
-        let view = E::Residual::residual_view(residual).unwrap();
+        let view = E::residual::residual_view(residual).unwrap();
         match compile_result(&options, residual, &view.term) {
             Ok(program) => (Value::Residual(residual), program),
             Err(ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")),
@@ -4490,7 +4490,7 @@ mod tests {
             let (value, packed) = compile_body(&body, true);
             let mut live = input::at_time(0.25);
             live.frame = 3;
-            let expected = E::Host::force_reference(&value, &live, None, None, None);
+            let expected = E::host::force_reference(&value, &live, None, None, None);
             for domains in [1, 4, 8] {
                 at_domains(domains, &|| {
                     assert!(same(&expected, &force(&packed, &live, &strict())), "Small chunk parity: {body}");
@@ -4521,7 +4521,7 @@ mod tests {
             for frame in [0, 42] {
                 let mut live = input::at_time(0.25);
                 live.frame = frame;
-                let expected = E::Host::force_reference(&value, &live, None, None, None);
+                let expected = E::host::force_reference(&value, &live, None, None, None);
                 for domains in [1, 4, 8] {
                     at_domains(domains, &|| {
                         assert!(same(&expected, &force(&packed, &live, &strict())), "Typed block parity: {body}");
@@ -4582,9 +4582,9 @@ mod tests {
             "(map (fn [index]\n      (let* [x (+ (float index) t)]\n        (if (< (mod x 2053.0) 1025.0)\n          (let* [a (float/mul_checked x 0.5)]\n            (if (< (mod x 7.0) 3.0)\n              [a.value (float a.valid) (+ x 1.0) (- x 1.0)]\n              [a.value (float a.valid) (+ x 2.0) (- x 2.0)]))\n          (if (int/lt index 0)\n            (error \"E_UNTAKEN\" \"Inactive guarded instruction ran.\")\n            [-0.0 0.0 x (- 0.0 x)])))) (array/range 5000 :type int))",
             true,
         );
-        let nested = Region::rebuild(
+        let nested = region::rebuild(
             &packed,
-            Region::Rebuild {
+            region::Rebuild {
                 code: Some(
                     packed
                         .code

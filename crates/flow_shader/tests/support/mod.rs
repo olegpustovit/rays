@@ -4,7 +4,7 @@
 use flow_check::catalog::Catalog;
 use flow_check::workspace::{self as W, Path};
 use flow_eval as E;
-use flow_ir::core_ir::Region;
+use flow_ir::core_ir::region;
 use flow_ir::packed::{self, CompileOptions};
 use flow_syntax::syntax;
 use flow_syntax::value::Value;
@@ -27,7 +27,7 @@ fn recorded(declarations: &str, body: &str) -> Value {
 pub fn compile_with(declarations: &str, fusion: bool, body: &str) -> packed::T {
     let Value::Residual(residual) = recorded(declarations, body) else { panic!("expected live packed program: {body}") };
     let options = CompileOptions { fusion, ..Default::default() };
-    let view = E::Residual::residual_view(residual).unwrap();
+    let view = E::residual::residual_view(residual).unwrap();
     match packed::compile_result(&options, residual, &view.term) {
         Ok(program) => program,
         Err(ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")),
@@ -149,7 +149,7 @@ pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
 pub fn two_outputs() -> packed::T {
     let region = compile("(map (fn [x] [x (+ x t)]) (array/range 1024))");
     let o = region.outputs[0].clone();
-    match Region::rebuild(&region, Region::Rebuild { outputs: Some(vec![vec![o[1]], vec![o[0], o[1]]]), ..Default::default() }) {
+    match region::rebuild(&region, region::Rebuild { outputs: Some(vec![vec![o[1]], vec![o[0], o[1]]]), ..Default::default() }) {
         Ok(program) => program,
         Err(ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")),
     }

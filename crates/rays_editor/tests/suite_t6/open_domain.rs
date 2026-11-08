@@ -89,7 +89,7 @@ pub fn open_domain() {
     let field_plan = static_eval(&field_doc.checked, false);
     match field_plan.plan.nodes[0].args.iter().find(|(k, _)| k == "field").map(|(_, v)| v) {
         Some(Value::Fn(f)) => {
-            let (params, body) = flow_eval::Residual::function_body(*f).expect("function body");
+            let (params, body) = flow_eval::residual::function_body(*f).expect("function body");
             assert!(params == vec![(W::Pattern::Name("p".into()), Some(Ty::Vec3))] && *body.ty() == Ty::Float, "external function port lost its specialization");
         }
         _ => panic!("external function port lost its callable"),

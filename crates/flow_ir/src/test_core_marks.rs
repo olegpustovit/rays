@@ -2,7 +2,7 @@
 use crate::core_draw;
 use crate::core_exec::{self, Buffers, DeviceFn, DrawOptions};
 use crate::core_ir as C;
-use crate::flow_ir::{Executor, Gpu};
+use crate::flow_ir::{executor, gpu};
 use crate::packed::{self, host};
 use crate::test_support::{self as ts, ok};
 use flow_check::workspace::{self as W, Paths};
@@ -287,7 +287,7 @@ fn nested_maps_draw_the_walkers_points_at_one_four_and_eight_domains() {
     let ws = ts::check_workspace(&format!("(workspace w (graph g :context value (array/sum (map (fn [v] (+ v.x (* v.y 1000))) {boxes}))))"));
     let evaluation = ok(E::static_eval(&ws));
     let reference_value = evaluation.results.iter().find(|(n, _)| n == "g").unwrap().1.clone();
-    let expected = match E::Host::force_reference(&reference_value, &live, None, None, None) {
+    let expected = match E::host::force_reference(&reference_value, &live, None, None, None) {
         Ok(Value::Float(f)) => f,
         Ok(_) => panic!("nested maps: the reference sum is not a float"),
         Err(d) => panic!("{}", rays_diagnostic::to_string(&d)),
@@ -428,22 +428,22 @@ fn compatible_regions_group_into_one_fused_dispatch() {
 struct FusedBackend { seen: Arc<Mutex<Vec<Vec<Arc<Vec<f64>>>>>>, serial: Arc<AtomicI64> }
 struct FusedKernel { width: i64, seen: Arc<Mutex<Vec<Vec<Arc<Vec<f64>>>>>>, serial: Arc<AtomicI64> }
 
-impl Gpu::Backend for FusedBackend {
+impl gpu::Backend for FusedBackend {
     fn cost(&self, _inputs: Option<&packed::Inputs>, _fast: bool, _packed: &packed::T, _count: i64) -> Option<f64> { Some(0.) }
-    fn prepare(&self, _fast: bool, packed: &packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> {
+    fn prepare(&self, _fast: bool, packed: &packed::T) -> Result<Arc<dyn gpu::Kernel>, rays_diagnostic::Diagnostic> {
         let width = host::view(packed).outputs[0].len() as i64;
         Ok(Arc::new(FusedKernel { width, seen: self.seen.clone(), serial: self.serial.clone() }))
     }
 }
 
-impl Gpu::Kernel for FusedKernel {
-    fn run(&self, inputs: &packed::Inputs) -> Result<Gpu::Value, rays_diagnostic::Diagnostic> {
+impl gpu::Kernel for FusedKernel {
+    fn run(&self, inputs: &packed::Inputs) -> Result<gpu::Value, rays_diagnostic::Diagnostic> {
         self.seen.lock().unwrap().insert(0, inputs.arrays.clone());
         let stamp = self.serial.fetch_add(1, Ordering::SeqCst) + 1;
-        Ok(Gpu::Value { identity: 1, output: 0, count: inputs.count, width: self.width, stamp, gpu_seconds: None })
+        Ok(gpu::Value { identity: 1, output: 0, count: inputs.count, width: self.width, stamp, gpu_seconds: None })
     }
-    fn readback(&self, _value: &Gpu::Value) -> Result<Value, rays_diagnostic::Diagnostic> { unreachable!("no readback in this test") }
-    fn planes(&self, _value: &Gpu::Value) -> Result<Gpu::Planes, rays_diagnostic::Diagnostic> { unreachable!("no planes in this test") }
+    fn readback(&self, _value: &gpu::Value) -> Result<Value, rays_diagnostic::Diagnostic> { unreachable!("no readback in this test") }
+    fn planes(&self, _value: &gpu::Value) -> Result<gpu::Planes, rays_diagnostic::Diagnostic> { unreachable!("no planes in this test") }
 }
 
 #[test]
@@ -455,8 +455,8 @@ fn fused_device_dispatches_share_their_inputs_and_follow_the_frame_count() {
         let serial = serial.clone();
         FusedBackend { seen, serial }
     };
-    let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
-    let display = Rc::new(Executor::region_display(Some(gpu), None, None));
+    let gpu = gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: gpu::Policy::Qualification, readback_per_float: None, ..gpu::default() };
+    let display = Rc::new(executor::region_display(Some(gpu), None, None));
     let prepared = |count: &str| {
         let body = format!("(draw/circles (map (fn [i] [(+ i t) i 0]) (array/range {count})) :radius (map (fn [i] (+ i t)) (array/range {count})))");
         let (program, root) = lowered(&body);
@@ -504,5 +504,5 @@ fn sibling_regions_group_at_the_first() {
     let sibling = found.iter().find(|g| g.at_first).expect("a sibling group");
     assert_eq!(sibling.members.len(), 2);
     assert_eq!(sibling.region.outputs.len(), 2);
-    assert!(sibling.region.code.iter().any(|i| matches!(i, C::Region::Instruction::Gather(..))));
+    assert!(sibling.region.code.iter().any(|i| matches!(i, C::region::Instruction::Gather(..))));
 }

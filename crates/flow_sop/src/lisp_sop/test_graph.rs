@@ -4,7 +4,7 @@
 use crate::{attribute_kernel as ak, catalog, operators};
 use flow_check::catalog::Catalog;
 use flow_eval::{self as e, Value};
-use flow_ir::flow_ir::Executor;
+use flow_ir::flow_ir::executor;
 use flow_syntax::syntax;
 use flow_syntax::ty;
 use rdk_core::geometry as geo;
@@ -68,14 +68,14 @@ fn evaluate(geometry: &geo::T, decls: &str, inputs: &[(&str, Value)], body: &str
 fn agree(geometry: &geo::T, decls: &str, inputs: &[(&str, Value)], body: &str, expected: &Exp) {
     let (value, resolve) = evaluate(geometry, decls, inputs, body);
     let live = input::at_time(0.25);
-    let program = Executor::compile(&value, &flow_ir::flow_ir::Executor::CompileOptions { strict: true, ..Default::default() }).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let program = executor::compile(&value, &flow_ir::flow_ir::executor::CompileOptions { strict: true, ..Default::default() }).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     for domains in [1, 8] {
         parallel::run_unit(Some(domains), &|| {
-            let reference = e::Host::force_reference(&value, &live, None, None, Some(resolve.clone())).map_err(|d| rays_diagnostic::to_string(&d))?;
+            let reference = e::host::force_reference(&value, &live, None, None, Some(resolve.clone())).map_err(|d| rays_diagnostic::to_string(&d))?;
             if &reference != expected {
                 return Err(format!("reference differs for {body}: {reference:?} <> {expected:?}"));
             }
-            let compiled = Executor::force(&program, &flow_ir::flow_ir::Executor::ForceOptions { resolve: Some(resolve.clone()), strict: true, ..Default::default() }, &live).map_err(|d| rays_diagnostic::to_string(&d))?;
+            let compiled = executor::force(&program, &flow_ir::flow_ir::executor::ForceOptions { resolve: Some(resolve.clone()), strict: true, ..Default::default() }, &live).map_err(|d| rays_diagnostic::to_string(&d))?;
             if &compiled != expected {
                 return Err(format!("strict tier differs for {body}: {compiled:?} <> {expected:?}"));
             }
@@ -87,7 +87,7 @@ fn agree(geometry: &geo::T, decls: &str, inputs: &[(&str, Value)], body: &str, e
 
 fn refused(geometry: &geo::T, decls: &str, inputs: &[(&str, Value)], body: &str, code: &str) {
     let (value, resolve) = evaluate(geometry, decls, inputs, body);
-    match e::Host::force_reference(&value, &input::at_time(0.0), None, None, Some(resolve)) {
+    match e::host::force_reference(&value, &input::at_time(0.0), None, None, Some(resolve)) {
         Err(Diagnostic { code: c, .. }) => assert_eq!(c, code),
         Ok(_) => panic!("expected {code}"),
     }

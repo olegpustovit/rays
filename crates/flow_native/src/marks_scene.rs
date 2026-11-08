@@ -4,7 +4,7 @@
 //! same commands.
 use flow_gpu::small_lru::List;
 use flow_ir::core_exec::Buffers;
-use flow_ir::flow_ir::Gpu as G;
+use flow_ir::flow_ir::gpu as G;
 use flow_syntax::value::{self as v, Value};
 use rays::scene;
 use rays_diagnostic::Diagnostic;

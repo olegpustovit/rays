@@ -4,7 +4,7 @@
 //! the OCaml file belong to flow_web and flow_ir and are not repeated here.
 mod support;
 use flow_check::op;
-use flow_ir::core_ir::Region::{Instruction, Loop};
+use flow_ir::core_ir::region::{Instruction, Loop};
 use flow_ir::kernel_layout::{self, PlanOptions, Visit};
 use flow_ir::packed;
 use flow_shader::emit::{self, Options};

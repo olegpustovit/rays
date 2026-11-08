@@ -7,7 +7,7 @@
 use crate::core_exec;
 use crate::core_ir::{Expr, StatementNode};
 use crate::core_lower;
-use crate::flow_ir::{self, Executor, Profile, Tier};
+use crate::flow_ir::{self, executor, profile, Tier};
 use crate::packed;
 use crate::test_support::*;
 use flow_check::workspace as w;
@@ -117,13 +117,13 @@ fn failures_are_the_walkers() {
 #[test]
 fn kernel_makes_the_elements_past_the_head() {
     let ws = checked("(map (fn [i] [(sin i) (cos i) 0]) (array/range 20000))");
-    let profile = Profile::create(clock_zero());
-    let fast = ok(Profile::sample(&profile, &mut || fast_static(&ws)));
+    let profile = profile::create(clock_zero());
+    let fast = ok(profile::sample(&profile, &mut || fast_static(&ws)));
     match result_of(&fast, "g") {
         Value::Floats(3, d) => assert!(d.len() == 60000 && d[3 * 19999] == 19999f64.sin()),
         _ => panic!("a vec3 array"),
     }
-    let maps = Profile::static_maps(&profile);
+    let maps = profile::static_maps(&profile);
     assert!(maps.iter().any(|m| m.count == 20000 && m.tier == Tier::Cpu_kernel && m.tail_elements == 0), "walked: {:?}", maps.last().map(|m| (m.tier, m.head_elements, m.tail_elements)));
 }
 
@@ -132,12 +132,12 @@ fn static_map_profile_head_tail_and_refusal() {
     let ticks = Arc::new(AtomicU64::new(0));
     let profile = {
         let ticks = ticks.clone();
-        Profile::create(Arc::new(move || (ticks.fetch_add(1, Ordering::SeqCst) + 1) as f64))
+        profile::create(Arc::new(move || (ticks.fetch_add(1, Ordering::SeqCst) + 1) as f64))
     };
     let workspace = checked("(map (fn [i] (* i 0.5)) (array/range 4100))");
-    let observed = ok(Profile::sample(&profile, &mut || fast_static(&workspace)));
+    let observed = ok(profile::sample(&profile, &mut || fast_static(&workspace)));
     assert!(same(&result_of(&observed, "g"), &result_of(&ok(e::static_eval(&workspace)), "g")));
-    let maps = Profile::static_maps(&profile);
+    let maps = profile::static_maps(&profile);
     assert_eq!(maps.len(), 1, "static map profile missing");
     let map = &maps[0];
     assert!(map.site == vec!["g".to_string(), "@result".to_string()] && map.count == 4100);
@@ -146,42 +146,42 @@ fn static_map_profile_head_tail_and_refusal() {
     assert_eq!(map.seconds, map.head_seconds + map.kernel_seconds + map.tail_seconds);
 
     let refused = checked("(map (fn [i] (value/rand i 7)) (array/range 4100))");
-    ok(Profile::sample(&profile, &mut || fast_static(&refused)));
-    let map = Profile::static_maps(&profile).into_iter().last().unwrap();
+    ok(profile::sample(&profile, &mut || fast_static(&refused)));
+    let map = profile::static_maps(&profile).into_iter().last().unwrap();
     assert!(map.tier == Tier::Interp && !map.refusal.is_empty());
     assert!(map.head_elements == 4096 && map.tail_elements == 4);
 
     let failing = checked("(map (fn [i] (exp (- i 4300))) (array/range 5200))");
-    match (Profile::sample(&profile, &mut || fast_static(&failing)), e::static_eval(&failing)) {
+    match (profile::sample(&profile, &mut || fast_static(&failing)), e::static_eval(&failing)) {
         (Err(a), Err(b)) => assert!(eq_err(&a, &b)),
         _ => panic!("expected the walker's failure"),
     }
-    let map = Profile::static_maps(&profile).into_iter().last().unwrap();
+    let map = profile::static_maps(&profile).into_iter().last().unwrap();
     assert!(map.tier == Tier::Interp && map.tail_elements > 0);
     assert!(map.refusal.iter().any(|d| d.code == "E_NONFINITE"));
 
     // A failed scope must restore its predecessor; no platform clock or waiting in this check.
-    let scope = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Profile::sample(&profile, &mut || -> () { panic!("scope") })));
+    let scope = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| profile::sample(&profile, &mut || -> () { panic!("scope") })));
     assert!(scope.is_err());
     let small = checked("(map (fn [i] (* i 0.5)) (array/range 2))");
     for _ in 0..513 {
-        ok(Profile::sample(&profile, &mut || fast_static(&small)));
+        ok(profile::sample(&profile, &mut || fast_static(&small)));
     }
-    assert_eq!(Profile::static_maps(&profile).len(), 512);
+    assert_eq!(profile::static_maps(&profile).len(), 512);
     ok(fast_static(&workspace));
-    assert_eq!(Profile::static_maps(&profile).len(), 512);
+    assert_eq!(profile::static_maps(&profile).len(), 512);
 }
 
 #[test]
 fn profiles_are_scoped_per_domain() {
     let small = checked("(map (fn [i] (* i 0.5)) (array/range 2))");
-    let concurrent = Profile::create(clock_zero());
+    let concurrent = profile::create(clock_zero());
     let run = |domains: i64| -> Vec<Value> {
         let out = Mutex::new(Vec::<Value>::new());
         with_domains(domains, &|| {
             let outcome = Mutex::new(Vec::new());
             parallel::for_(1, 0, 7, &|_| {
-                let ev = ok(Profile::sample(&concurrent, &mut || fast_static(&small)));
+                let ev = ok(profile::sample(&concurrent, &mut || fast_static(&small)));
                 outcome.lock().unwrap().push(result_of(&ev, "g"));
                 Ok(())
             })
@@ -193,7 +193,7 @@ fn profiles_are_scoped_per_domain() {
     let sequential = run(1);
     let parallel = run(8);
     assert!(sequential.iter().zip(parallel.iter()).all(|(a, b)| same(a, b)));
-    assert_eq!(Profile::static_maps(&concurrent).len(), 16);
+    assert_eq!(profile::static_maps(&concurrent).len(), 16);
 }
 
 fn gather_workspace(table: &str, bindings: &str, body: &str) -> w::Workspace {
@@ -202,16 +202,16 @@ fn gather_workspace(table: &str, bindings: &str, body: &str) -> w::Workspace {
     ))
 }
 fn gather_parity(workspace: &w::Workspace) {
-    let profile = Profile::create(clock_zero());
-    match (e::static_eval(workspace), Profile::sample(&profile, &mut || fast_static(workspace))) {
+    let profile = profile::create(clock_zero());
+    match (e::static_eval(workspace), profile::sample(&profile, &mut || fast_static(workspace))) {
         (Ok(reference), Ok(compiled)) => {
             assert!(same(&result_of(&reference, "g"), &result_of(&compiled, "g")));
-            let map = Profile::static_maps(&profile).into_iter().find(|m| m.count == 4101).expect("4101 map");
+            let map = profile::static_maps(&profile).into_iter().find(|m| m.count == 4101).expect("4101 map");
             assert!(map.tier == Tier::Cpu_kernel && map.tail_elements == 0, "gather walked: {}", show_ds(&map.refusal));
         }
         (Err(reference), Err(compiled)) => {
             assert!(eq_err(&reference, &compiled) && reference.code == "E_ARRAY_RANGE");
-            let map = Profile::static_maps(&profile).into_iter().last().unwrap();
+            let map = profile::static_maps(&profile).into_iter().last().unwrap();
             assert!(map.head_elements == 4096 && map.tail_elements > 0);
         }
         _ => panic!("gather result differs from walker"),
@@ -241,7 +241,7 @@ fn text_gather_residual() {
         Value::Fn(f) => *f,
         _ => panic!("missing Text lookup function"),
     };
-    let value = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: Ty::Text }, f, &[Value::Int_array(Arc::new((0..4101).collect()))]));
+    let value = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Int], result: Ty::Text }, f, &[Value::Int_array(Arc::new((0..4101).collect()))]));
     let r = residual(&value);
     let p = compile_region(r, true, None).unwrap_or_else(|ds| panic!("{}", show_ds(&ds[..1])));
     assert_eq!(bits(&ok(packed_force(&p, &live_at(0.), true, None))), bits(&ok(force_reference(&value, &live_at(0.)))));
@@ -263,9 +263,9 @@ fn inconsistent_gather_type_is_refused() {
         }),
         ..Default::default()
     };
-    ok(e::Residual::handle(handlers, &mut || e::Host::static_with_requests(None, false, None, &checked_ws)));
+    ok(e::residual::handle(handlers, &mut || e::host::static_with_requests(None, false, None, &checked_ws)));
     let residual_id = seen.lock().unwrap().expect("a bulk request");
-    let view = e::Residual::residual_view(residual_id).unwrap();
+    let view = e::residual::residual_view(residual_id).unwrap();
     let mut builder = flow_check::term_arena::TermBuilder::new();
     let term = builder.rewrite_roots_with(std::slice::from_ref(view.term.as_ref()), &mut |builder, source, draft| {
         let id = builder.rebuild(source, draft);
@@ -275,7 +275,7 @@ fn inconsistent_gather_type_is_refused() {
         }
     })[0];
     let term = builder.freeze().handle(term);
-    let rid = ok(e::Residual::with_bindings(residual_id, &term, &view.bindings));
+    let rid = ok(e::residual::with_bindings(residual_id, &term, &view.bindings));
     match compile_region_term(rid, &term) {
         Err(ds) if ds.len() == 1 => {
             let diagnostic = &ds[0];
@@ -316,10 +316,10 @@ fn static_list_guards() {
 fn trusted_replay_verifies_bits() {
     let workspace = checked("(let* [f (fn [(i : int)] (let* [y (+ i 7)] (* y 2))) a (map f (array/range 4101 :type int)) b (map f (array/range 4101 :type int))] {:a a :b b :last (f 7)})");
     let eager = ok(flow_ir::static_(&flow_ir::StaticOptions { record: true, verify: true, ..Default::default() }, &workspace));
-    let profile = Profile::create(clock_zero());
-    let replay = ok(Profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &workspace)));
+    let profile = profile::create(clock_zero());
+    let replay = ok(profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &workspace)));
     assert!(same(&result_of(&eager, "g"), &result_of(&replay, "g")));
-    for map in Profile::static_maps(&profile) {
+    for map in profile::static_maps(&profile) {
         assert!(map.tier == Tier::Cpu_kernel && map.tail_elements == 0);
     }
     let mut eager_probe = flow_graph::probe::make(&eager, Default::default());
@@ -354,8 +354,8 @@ fn replay_failures_and_named_function_recording() {
         }
     }
     let workspace = check_source("(workspace w (defn f :context host [(i : int)] (+ i 1)) (graph g :context host (map f (array/range 4101 :type int))))");
-    let profile = Profile::create(clock_zero());
-    let replay = ok(Profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &workspace)));
+    let profile = profile::create(clock_zero());
+    let replay = ok(profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &workspace)));
     let eager = ok(flow_ir::static_(&record_options(), &workspace));
     assert!(same(&result_of(&eager, "g"), &result_of(&replay, "g")));
     assert_eq!(eager.records.len(), replay.records.len());
@@ -365,7 +365,7 @@ fn replay_failures_and_named_function_recording() {
             assert!(i == j && same(a, b), "named record differs at {path:?}");
         }
     }
-    for map in Profile::static_maps(&profile) {
+    for map in profile::static_maps(&profile) {
         assert_eq!(map.head_elements, 4096);
     }
 }
@@ -393,11 +393,11 @@ fn kernel_first_profile_clock() {
     let ticks = Arc::new(AtomicU64::new(0));
     let profile = {
         let ticks = ticks.clone();
-        Profile::create(Arc::new(move || if ticks.fetch_add(1, Ordering::SeqCst) + 1 < 3 { 0. } else { 1. }))
+        profile::create(Arc::new(move || if ticks.fetch_add(1, Ordering::SeqCst) + 1 < 3 { 0. } else { 1. }))
     };
     let workspace = checked("(map (fn [i] (* i 0.5)) (array/range 4100))");
-    ok(Profile::sample(&profile, &mut || fast_static(&workspace)));
-    let maps = Profile::static_maps(&profile);
+    ok(profile::sample(&profile, &mut || fast_static(&workspace)));
+    let maps = profile::static_maps(&profile);
     assert_eq!(maps.len(), 1, "kernel-first profile missing");
     let map = &maps[0];
     assert!(map.head_elements == 0 && map.tail_elements == 0);
@@ -441,8 +441,8 @@ fn qualify(ws: &w::Workspace, defer: bool) -> e::Eval {
 fn sop_deferral() {
     let checked_ws = staged();
     let eager = qualify(&checked_ws, false);
-    let profile = Profile::create(clock_zero());
-    let deferred = ok(Profile::sample(&profile, &mut || flow_ir::qualify_workspace(&flow_ir::QualifyOptions { defer: true, record: true, replay: true, ..Default::default() }, &checked_ws))).1;
+    let profile = profile::create(clock_zero());
+    let deferred = ok(profile::sample(&profile, &mut || flow_ir::qualify_workspace(&flow_ir::QualifyOptions { defer: true, record: true, replay: true, ..Default::default() }, &checked_ws))).1;
     assert!(same(&result_of(&eager, "volume"), &result_of(&deferred, "volume")));
     for name in ["mask", "faces", "count", "vertices", "points"] {
         let value = recorded(&deferred, name);
@@ -456,7 +456,7 @@ fn sop_deferral() {
     }
     let points = recorded(&deferred, "points");
     let program = executor_compile(&points, true);
-    assert!(Executor::packed_root(&program).is_some());
+    assert!(executor::packed_root(&program).is_some());
     let root = residual(&points);
     let core = core_lower::lower(None, None, false, None, None, root).unwrap_or_else(|f| panic!("{f}"));
     assert!(core.regions.len() >= 2);
@@ -468,7 +468,7 @@ fn sop_deferral() {
         },
         &core.body,
     );
-    let production = ok(Executor::compile(&points, &Default::default()));
+    let production = ok(executor::compile(&points, &Default::default()));
     let prepared = prepare(&core);
     let names = ["mask", "faces", "count", "vertices", "points"];
     let record = |ev: &e::Eval| Value::Record(names.iter().map(|n| (n.to_string(), recorded(ev, n))).collect());
@@ -489,14 +489,14 @@ fn sop_deferral() {
     assert!(origins("copied").is_some() && origins("pairs").is_none());
     assert!(origins("face_copy").is_some() && origins("drop_copy").is_some());
     assert!(origins("face_copy") != origins("drop_copy"));
-    let shared_profile = Profile::create(clock_zero());
-    let shared_program = ok(Executor::compile(&shared, &Executor::CompileOptions { profile: Some(shared_profile.clone()), strict: true, ..Default::default() }));
+    let shared_profile = profile::create(clock_zero());
+    let shared_program = ok(executor::compile(&shared, &executor::CompileOptions { profile: Some(shared_profile.clone()), strict: true, ..Default::default() }));
     for domains in [1, 8] {
         with_domains(domains, &|| {
             let live = live_at(0.);
             let strict = core_exec::Options { strict: true, ..Default::default() };
             assert!(same(&recorded(&eager, "points"), &ok(core_exec::execute(&prepared, &live, &strict))));
-            assert!(same(&recorded(&eager, "points"), &ok(Executor::force(&production, &Default::default(), &live))));
+            assert!(same(&recorded(&eager, "points"), &ok(executor::force(&production, &Default::default(), &live))));
             let runs = Arc::new(Mutex::new(0));
             let force: core_exec::ForceFn = {
                 let runs = runs.clone();
@@ -509,11 +509,11 @@ fn sop_deferral() {
             let actual = ok(core_exec::execute(&prepare(&shared_core), &live, &core_exec::Options { force: Some(force), ..Default::default() }));
             assert!(*runs.lock().unwrap() == 2 && same(&record(&eager), &actual));
             assert!(same(&record(&eager), &ok(executor_force(&shared_program, true, &live))));
-            let cpu = Profile::executions(&shared_profile).iter().filter(|x| x.tier == Tier::Cpu_kernel).count();
+            let cpu = profile::executions(&shared_profile).iter().filter(|x| x.tier == Tier::Cpu_kernel).count();
             assert_eq!(cpu, 2);
             let outputs = Arc::new(Mutex::new(vec![(0..3).map(|_| Some(vec![f64::NAN; 8000])).collect::<Vec<_>>()]));
             let column_source: packed::ColumnSource = Arc::new(|_, _| Ok(None));
-            let done = ok(Executor::force_into(&Executor::ForceOptions { strict: true, ..Default::default() }, None, column_source, 8000, outputs.clone(), &production, &live));
+            let done = ok(executor::force_into(&executor::ForceOptions { strict: true, ..Default::default() }, None, column_source, 8000, outputs.clone(), &production, &live));
             assert_eq!(done, Some(()));
             let planes = outputs.lock().unwrap();
             let interleaved = Value::Floats(3, Arc::new((0..24000).map(|i| planes[0][i % 3].as_ref().unwrap()[i / 3]).collect()));
@@ -521,7 +521,7 @@ fn sop_deferral() {
         });
     }
     assert!(same(&recorded(&eager, "small"), &recorded(&deferred, "small")));
-    let maps = Profile::static_maps(&profile);
+    let maps = profile::static_maps(&profile);
     // The large constant arrays (`array/range 4101`, ...) defer at their constructor, so every large SOP map
     // over them becomes a residual before `eval_map` runs and records no static-map entry (the OCaml
     // reference deferred at the map, where `Profile::deferred` marked its entry). What the entry proved
@@ -549,13 +549,13 @@ fn sop_deferral_preserves_late_diagnostics() {
     let program = executor_compile(&value, true);
     // Production force restores the authored error span by rerunning a failed compiled leaf.
     // Qualification above still requires a fully compiled form.
-    match Executor::force(&program, &Default::default(), &live_at(0.)) {
+    match executor::force(&program, &Default::default(), &live_at(0.)) {
         Err(actual) => assert!(eq_err(&actual, &expected), "deferred diagnostic expected {} but got {}", rays_diagnostic::to_string(&expected), rays_diagnostic::to_string(&actual)),
         Ok(_) => panic!("deferred late error missing"),
     }
     let record = Value::Record(vec![("before".into(), Value::Int(17)), ("failed".into(), value)]);
     let program = executor_compile(&record, true);
-    match Executor::force(&program, &Default::default(), &live_at(0.)) {
+    match executor::force(&program, &Default::default(), &live_at(0.)) {
         Err(actual) => assert!(eq_err(&actual, &expected)),
         Ok(_) => panic!("deferred late error missing in the record"),
     }
@@ -564,14 +564,14 @@ fn sop_deferral_preserves_late_diagnostics() {
 #[test]
 fn kernel_first_head_is_zero() {
     let workspace = checked("(map (fn [i] (* i 0.5)) (array/range 4100))");
-    let profile = Profile::create(clock_zero());
-    ok(Profile::sample(&profile, &mut || fast_static(&workspace)));
-    let map = Profile::static_maps(&profile).remove(0);
+    let profile = profile::create(clock_zero());
+    ok(profile::sample(&profile, &mut || fast_static(&workspace)));
+    let map = profile::static_maps(&profile).remove(0);
     assert!(map.head_elements == 0 && map.tail_elements == 0);
     let workspace = checked("(let* [f (fn [(i : int)] (let* [y (+ i 7)] (* y 2))) a (map f (array/range 4101 :type int))] {:a a})");
-    let profile = Profile::create(clock_zero());
-    ok(Profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &workspace)));
-    for map in Profile::static_maps(&profile) {
+    let profile = profile::create(clock_zero());
+    ok(profile::sample(&profile, &mut || flow_ir::static_(&flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &workspace)));
+    for map in profile::static_maps(&profile) {
         assert!(map.head_elements == 0 && map.tail_elements == 0);
     }
 }

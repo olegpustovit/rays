@@ -1,6 +1,6 @@
 // Port of lib/flow_ir/test_core_operators.ml.
 use crate::core_lower;
-use crate::flow_ir::Executor;
+use crate::flow_ir::executor;
 use crate::test_support::{self as ts, ok};
 use flow_check::op::{self, Shape};
 use flow_eval as E;
@@ -216,7 +216,7 @@ fn operator_cases(cases: &[(&str, &str)], failures: &mut Vec<String>) -> usize {
         let core = core_lower::lower(None, None, false, None, None, *r).unwrap_or_else(|n| panic!("{name} {body}: refused {n}"));
         for live in &lives {
             n += 1;
-            match (ts::run_simple(&core, live), E::Host::force_reference(&value, live, None, None, None)) {
+            match (ts::run_simple(&core, live), E::host::force_reference(&value, live, None, None, None)) {
                 (Ok(a), Ok(b)) => {
                     if !same(&a, &b) {
                         failures.push(format!("{body} at {}: {a:?} <> {b:?}", live.t));
@@ -260,8 +260,8 @@ fn residual_of(value: &Value) -> flow_syntax::value::ResidualId {
     }
 }
 
-fn force_strict(program: &Executor::Program, live: &Frame) -> Result<Value, Diagnostic> {
-    Executor::force(program, &Executor::ForceOptions { strict: true, ..Default::default() }, live)
+fn force_strict(program: &executor::Program, live: &Frame) -> Result<Value, Diagnostic> {
+    executor::force(program, &executor::ForceOptions { strict: true, ..Default::default() }, live)
 }
 
 #[test]
@@ -284,8 +284,8 @@ fn builtin_integer_boundaries_match_native_i64() {
     for (body, expected) in cases {
         let value = live_value(&body);
         let core = ts::lower_strict(residual_of(&value)).unwrap_or_else(|form| panic!("{body}: {form}"));
-        let program = ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
-        assert_eq!(ok(E::Host::force_reference(&value, &live, None, None, None)), expected, "walker: {body}");
+        let program = ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
+        assert_eq!(ok(E::host::force_reference(&value, &live, None, None, None)), expected, "walker: {body}");
         assert_eq!(ok(ts::run_simple(&core, &live)), expected, "core: {body}");
         assert_eq!(ok(force_strict(&program, &live)), expected, "executor: {body}");
     }
@@ -313,10 +313,10 @@ fn text_array_bodies(bodies: &[&str]) {
         let core = ts::lower_strict(residual_of(&value)).unwrap_or_else(|form| panic!("{body}: strict Core refused {form}"));
         // Text leaves may collect in a region; Text transformations and scans
         // retain the structured Core path. Both execute without a walker retry.
-        let program = ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+        let program = ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
         for time in [-1., 0., 1.] {
             let live = input::at_time(time);
-            let expected = ok(E::Host::force_reference(&value, &live, None, None, None));
+            let expected = ok(E::host::force_reference(&value, &live, None, None, None));
             assert!(ok(ts::run_simple(&core, &live)) == expected, "{body} at {time}");
             for domains in [1, 8] {
                 ts::with_domains(domains, &|| assert!(ok(force_strict(&program, &live)) == expected, "{body} at {time}, {domains} domains"));
@@ -338,8 +338,8 @@ fn text_arrays_strict_core_and_executor_match_reference_beyond_4096_part_4() { t
 fn text_arrays_dependent_clauses_and_nested_numeric_bodies_refuse_honestly() {
     let dependent = live_value(r##"(for [x (array/text 2 "猫") y (array/text (if (equal? x "猫") 2501 0) "😀")] (if (> t 0.) x y))"##);
     assert_eq!(ts::lower_strict(residual_of(&dependent)).err().as_deref(), Some("text_collect_dependent_clause"));
-    assert!(Executor::compile(&dependent, &Executor::CompileOptions { strict: true, ..Default::default() }).is_err());
-    assert!(ok(E::Host::force_reference(&dependent, &input::at_time(1.), None, None, None)) == Value::Text_array(Arc::new(vec!["猫".as_bytes().to_vec(); 5002].into())));
+    assert!(executor::compile(&dependent, &executor::CompileOptions { strict: true, ..Default::default() }).is_err());
+    assert!(ok(E::host::force_reference(&dependent, &input::at_time(1.), None, None, None)) == Value::Text_array(Arc::new(vec!["猫".as_bytes().to_vec(); 5002].into())));
     let nested_numeric = live_value(
         "(map (fn [x] (text/trim (text/lower (str (array/sum (map (fn [y] (value/rand y t)) (array/float 2))))))) (array/text 2))",
     );
@@ -347,9 +347,9 @@ fn text_arrays_dependent_clauses_and_nested_numeric_bodies_refuse_honestly() {
         Ok(program) => assert!(!program.regions.is_empty()),
         Err(form) => panic!("Nested numeric Text body refused as {form}"),
     }
-    match Executor::compile(&nested_numeric, &Executor::CompileOptions { strict: true, ..Default::default() }) {
+    match executor::compile(&nested_numeric, &executor::CompileOptions { strict: true, ..Default::default() }) {
         Err(d) => assert!(d.code == "E_KERNEL_FORM"),
         Ok(_) => panic!("Unsupported numeric producer inside Text map qualified"),
     }
-    assert!(matches!(ok(E::Host::force_reference(&nested_numeric, &input::at_time(1.), None, None, None)), Value::Text_array(values) if values.len() == 2));
+    assert!(matches!(ok(E::host::force_reference(&nested_numeric, &input::at_time(1.), None, None, None)), Value::Text_array(values) if values.len() == 2));
 }

@@ -12,8 +12,8 @@ use crate::pipelines::{self, is_vulkan};
 use crate::run::{self, gpu as gpu_r, Options, Uint32Holder};
 use crate::small_lru::List;
 use flow_ir::core_exec;
-use flow_ir::core_ir::Region::Instruction;
-use flow_ir::flow_ir::Gpu as G;
+use flow_ir::core_ir::region::Instruction;
+use flow_ir::flow_ir::gpu as G;
 use flow_ir::packed::host as phost;
 use flow_shader::emit::{self, Kernel};
 use flow_syntax::ty::Ty;
@@ -672,7 +672,7 @@ fn integer_outputs(packed: &Packed) -> Vec<i64> {
     let mut outputs = Vec::new();
     for (k, registers) in packed.outputs.iter().enumerate() {
         if let [slot] = registers.as_slice() {
-            if flow_ir::core_ir::Region::integer_register(&packed.code[*slot as usize]) {
+            if flow_ir::core_ir::region::integer_register(&packed.code[*slot as usize]) {
                 outputs.push(k as i64);
             }
         }
@@ -774,7 +774,7 @@ impl Scope {
     /// an array a device holds past its scope (`Eval::Device`), bound where it is
     fn durable(&self, v: &Value) -> Option<Rc<Placeholder>> {
         let a = float_array(v)?;
-        if !flow_eval::Device::held_by_device(v) {
+        if !flow_eval::device::held_by_device(v) {
             return None;
         }
         let (buffer, count, _, unpin) = run::pin(a)?;
@@ -1746,7 +1746,7 @@ impl Scope {
     fn finish(&self, v: &Value) -> Result<Value, Diagnostic> {
         let Some(p) = self.find(v) else { return Ok(v.clone()) };
         if self.s.borrow().durables.contains(&p.key) {
-            return Ok(flow_eval::Device::thaw(v));
+            return Ok(flow_eval::device::thaw(v));
         }
         if self.s.borrow().adopted.contains(&p.key) {
             return Ok(v.clone());
@@ -2237,7 +2237,7 @@ impl Scope {
                 Value::Floats(w, a)
             })
         };
-        flow_eval::Device::add(&placeholder, read)?;
+        flow_eval::device::add(&placeholder, read)?;
         Ok(Some(placeholder))
     }
 }

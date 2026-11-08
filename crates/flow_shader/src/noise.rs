@@ -3,7 +3,7 @@
 //! the seed's table entries (Region::Noise_table).
 use crate::lisp_stage;
 use crate::trace::{self, Back, Curves};
-use flow_ir::core_ir::Region::{Instruction, LiveFloat, LiveInt, Stage};
+use flow_ir::core_ir::region::{Instruction, LiveFloat, LiveInt, Stage};
 use flow_ir::kernel_layout;
 use flow_ir::packed;
 use rays_diagnostic::Diagnostic;

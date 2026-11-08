@@ -4,7 +4,7 @@ mod frames;
 #[path = "chains_scrub.rs"]
 mod scrub;
 pub fn scrub_child() -> bool { scrub::child() }
-use flow_ir::{flow_ir::Gpu, packed};
+use flow_ir::{flow_ir::gpu, packed};
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
 use flow_native::workspace_gpu as wg;
@@ -17,10 +17,10 @@ pub fn cases() -> Vec<(&'static str, fn())> {
 }
 fn ok<T>(v: Result<T, rays_diagnostic::Diagnostic>) -> T { v.unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))) }
 fn side() -> i64 { std::env::var("GRID_SIDE").map(|s| s.parse().expect("GRID_SIDE integer")).unwrap_or(256) }
-fn lowered(text: &str, gpu: Option<Gpu::Config>) -> lower::T {
-    ok(lower::workspace(None, Vec::new(), lower::Options { gpu: gpu.unwrap_or_else(Gpu::default), ..Default::default() }, &ok(flow_syntax::syntax::parse(text))))
+fn lowered(text: &str, gpu: Option<gpu::Config>) -> lower::T {
+    ok(lower::workspace(None, Vec::new(), lower::Options { gpu: gpu.unwrap_or_else(gpu::default), ..Default::default() }, &ok(flow_syntax::syntax::parse(text))))
 }
-fn node(text: &str, gpu: Option<Gpu::Config>, after: Option<&str>) -> sop::node::T {
+fn node(text: &str, gpu: Option<gpu::Config>, after: Option<&str>) -> sop::node::T {
     let l = lowered(text, gpu);
     let graph = &l.graphs[0];
     let id = if let Some(name) = after {
@@ -51,23 +51,23 @@ fn same(a: &p::T, b: &p::T, tolerance: f64) {
         assert!((x-u).abs() <= tolerance && (y-v).abs() <= tolerance && (z-w).abs() <= tolerance, "point {i}: {x} {y} {z} != {u} {v} {w}");
     }
 }
-fn counted(config: &Gpu::Config, count: &Arc<AtomicUsize>) -> Gpu::Config {
-    Gpu::Config { backend: Some(Arc::new(Counted { inner: config.backend.clone().unwrap(), count: count.clone() })), ..config.clone() }
+fn counted(config: &gpu::Config, count: &Arc<AtomicUsize>) -> gpu::Config {
+    gpu::Config { backend: Some(Arc::new(Counted { inner: config.backend.clone().unwrap(), count: count.clone() })), ..config.clone() }
 }
 /// A backend whose kernels count their dispatches.
-struct Counted { inner: Arc<dyn Gpu::Backend>, count: Arc<AtomicUsize> }
-struct CountedKernel { inner: Arc<dyn Gpu::Kernel>, count: Arc<AtomicUsize> }
-impl Gpu::Backend for Counted {
-    fn residency(&self, fast: bool) -> Option<Box<dyn Gpu::Residency>> { self.inner.residency(fast) }
+struct Counted { inner: Arc<dyn gpu::Backend>, count: Arc<AtomicUsize> }
+struct CountedKernel { inner: Arc<dyn gpu::Kernel>, count: Arc<AtomicUsize> }
+impl gpu::Backend for Counted {
+    fn residency(&self, fast: bool) -> Option<Box<dyn gpu::Residency>> { self.inner.residency(fast) }
     fn cost(&self, i: Option<&packed::Inputs>, f: bool, p: &packed::T, n: i64) -> Option<f64> { self.inner.cost(i,f,p,n) }
-    fn prepare(&self, fast: bool, p: &packed::T) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> {
+    fn prepare(&self, fast: bool, p: &packed::T) -> Result<Arc<dyn gpu::Kernel>, Diagnostic> {
         Ok(Arc::new(CountedKernel { inner: self.inner.prepare(fast,p)?, count: self.count.clone() }))
     }
 }
-impl Gpu::Kernel for CountedKernel {
-    fn run(&self, i: &packed::Inputs) -> Result<Gpu::Value, Diagnostic> { self.count.fetch_add(1,Ordering::SeqCst); self.inner.run(i) }
-    fn readback(&self, v: &Gpu::Value) -> Result<Value, Diagnostic> { self.inner.readback(v) }
-    fn planes(&self, v: &Gpu::Value) -> Result<Gpu::Planes, Diagnostic> { self.inner.planes(v) }
+impl gpu::Kernel for CountedKernel {
+    fn run(&self, i: &packed::Inputs) -> Result<gpu::Value, Diagnostic> { self.count.fetch_add(1,Ordering::SeqCst); self.inner.run(i) }
+    fn readback(&self, v: &gpu::Value) -> Result<Value, Diagnostic> { self.inner.readback(v) }
+    fn planes(&self, v: &gpu::Value) -> Result<gpu::Planes, Diagnostic> { self.inner.planes(v) }
 }
 fn grid() {
     assert!(crate::common::gpu(), "native GPU required");

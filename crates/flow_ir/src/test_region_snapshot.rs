@@ -2,7 +2,7 @@
 // fixtures and four workspaces, compared byte for byte with crates/flow_ir/snapshots/*.txt.
 // Region_snapshot keeps one process-wide buffer, so the tests of this file take a lock.
 use crate::core_lower;
-use crate::flow_ir::{self, Executor, QualifyOptions};
+use crate::flow_ir::{self, executor, QualifyOptions};
 use crate::packed;
 use crate::region_snapshot;
 use crate::test_support::{self as ts, ok};
@@ -23,12 +23,12 @@ fn manifest() -> Catalog {
     ok(catalog::catalog_of_manifest(&std::fs::read_to_string(path).expect("flow_manifest.sexp"))).0
 }
 
-fn state_dump(state: &E::State) -> String { format!("{:?}", E::Host::state_values(state)) }
+fn state_dump(state: &E::State) -> String { format!("{:?}", E::host::state_values(state)) }
 
 fn run(require_state_kernel: bool, checked: &W::Workspace) {
     let options = QualifyOptions {
         observe: Some(Arc::new(|_, residual| {
-            let term = E::Residual::residual_view(residual).unwrap().term;
+            let term = E::residual::residual_view(residual).unwrap().term;
             for fusion in [true, false] {
                 let options = packed::CompileOptions { trace: Some(trace()), fusion, ..Default::default() };
                 let _ = packed::compile_result(&options, residual, &term);
@@ -61,11 +61,11 @@ fn run(require_state_kernel: bool, checked: &W::Workspace) {
         }
         let state = E::create_state();
         let reference_state = E::create_state();
-        let program = ok(Executor::compile(value, &Executor::CompileOptions { trace: Some(trace()), ..Default::default() }));
+        let program = ok(executor::compile(value, &executor::CompileOptions { trace: Some(trace()), ..Default::default() }));
         for frame in 0..2 {
             let live = Frame { frame, dt: 1. / 60., size: (800, 600), ..input::at_time(frame as f64 / 60.) };
-            let actual = Executor::force(&program, &Executor::ForceOptions { state: Some(state.clone()), ..Default::default() }, &live);
-            let expected = E::Host::force_reference(value, &live, Some(&reference_state), None, None);
+            let actual = executor::force(&program, &executor::ForceOptions { state: Some(state.clone()), ..Default::default() }, &live);
+            let expected = E::host::force_reference(value, &live, Some(&reference_state), None, None);
             let same = match (&actual, &expected) {
                 (Ok(a), Ok(b)) => format!("{a:?}") == format!("{b:?}"),
                 (Err(a), Err(b)) => rays_diagnostic::to_string(a) == rays_diagnostic::to_string(b),
@@ -118,13 +118,13 @@ fn state_branch_laziness_and_shared_fixture_snapshot() {
     let checked = ts::check_workspace(source);
     let evaluation = ok(E::static_eval(&checked));
     let value = evaluation.states[0].clone();
-    let program = ok(Executor::compile(&value, &Executor::CompileOptions { trace: Some(trace()), ..Default::default() }));
+    let program = ok(executor::compile(&value, &executor::CompileOptions { trace: Some(trace()), ..Default::default() }));
     let reference_state = E::create_state();
     let core_state = E::create_state();
     for time in [0., 101.] {
         let live = input::at_time(time);
-        let expected = E::Host::force_reference(&value, &live, Some(&reference_state), None, None);
-        let actual = Executor::force(&program, &Executor::ForceOptions { state: Some(core_state.clone()), ..Default::default() }, &live);
+        let expected = E::host::force_reference(&value, &live, Some(&reference_state), None, None);
+        let actual = executor::force(&program, &executor::ForceOptions { state: Some(core_state.clone()), ..Default::default() }, &live);
         let same = match (&actual, &expected) {
             (Ok(a), Ok(b)) => a == b,
             (Err(a), Err(b)) => rays_diagnostic::to_string(a) == rays_diagnostic::to_string(b),

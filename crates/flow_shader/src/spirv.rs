@@ -7,7 +7,7 @@
 #![allow(non_snake_case)]
 use crate::noise;
 use crate::trace;
-use flow_ir::core_ir::Region::{self, Instruction, Loop, Projection, Stage};
+use flow_ir::core_ir::region::{self, Instruction, Loop, Projection, Stage};
 use flow_ir::kernel_layout::{self, Visit};
 use flow_ir::packed;
 use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
@@ -613,7 +613,7 @@ fn needs_integer(layout: &kernel_layout::T) -> bool {
     let mut needed = false;
     for (slot, instruction) in layout.view.code.iter().enumerate() {
         let instruction = unguarded(instruction);
-        let integer = Region::integer_register(instruction);
+        let integer = region::integer_register(instruction);
         whole[slot] = integer
             || match instruction {
                 Instruction::Const(value) => value.is_finite() && value.fract() == 0.0 && value.abs() < 9007199254740992.0,
@@ -1727,7 +1727,7 @@ struct EP {
 
 impl EP {
     fn integer(&self, slot: i64) -> bool {
-        Region::integer_register(&self.layout.view.code[slot as usize])
+        region::integer_register(&self.layout.view.code[slot as usize])
     }
     fn narrow(&self, slot: i64) -> bool {
         self.layout.narrow[slot as usize]
@@ -2833,7 +2833,7 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
             return Err(fail_d("Uint32 output index is outside its producer."));
         }
         match layout.view.outputs[*index as usize].as_slice() {
-            [slot] if fast && Region::integer_register(&layout.view.code[*slot as usize]) => output_uint32[*index as usize] = true,
+            [slot] if fast && region::integer_register(&layout.view.code[*slot as usize]) => output_uint32[*index as usize] = true,
             _ => return Err(fail_d("Uint32 output requires a scalar integer result in fast precision.")),
         }
     }
@@ -3176,7 +3176,7 @@ pub fn stage(s: &StageSpec, program: &packed::T) -> Result<Vec<u8>, Diagnostic> 
     let uint = words.declare(21, &[32, 0]);
     let sint = words.declare(21, &[32, 1]);
     let float = words.declare(22, &[32]);
-    let (long, ulong) = if needs_integer(&layout) || layout.view.code.iter().any(|i| Region::integer_register(unguarded(i))) {
+    let (long, ulong) = if needs_integer(&layout) || layout.view.code.iter().any(|i| region::integer_register(unguarded(i))) {
         let long = words.declare(21, &[64, 1]);
         let ulong = words.declare(21, &[64, 0]);
         (Some(long), Some(ulong))

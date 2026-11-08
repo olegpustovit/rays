@@ -1379,7 +1379,7 @@ mod parity {
 
     fn compile(mapped: &Value) -> packed::T {
         let Value::Residual(r) = mapped else { panic!("mapped live value must be residual") };
-        let term = e::Residual::residual_view(*r).unwrap().term;
+        let term = e::residual::residual_view(*r).unwrap().term;
         match packed::compile_result(&packed::CompileOptions::default(), *r, &term) {
             Ok(p) => p,
             Err(ds) => panic!("{}", ds.iter().map(|d| d.message.clone()).collect::<Vec<_>>().join("\n")),
@@ -1389,7 +1389,7 @@ mod parity {
         let source = format!("(fn [(i : {})] {body})", flow_syntax::ty::to_string(&ty));
         let Value::Fn(f) = value(seed, &source) else { panic!("fn expected") };
         let signature = flow_syntax::ty::FnSignature { params: vec![ty], result: Ty::Float };
-        let mapped = e::Host::map_function(None, None, &signature, f, &[input]).unwrap();
+        let mapped = e::host::map_function(None, None, &signature, f, &[input]).unwrap();
         let program = compile(&mapped);
         (mapped, program)
     }
@@ -1397,7 +1397,7 @@ mod parity {
         packed::force(program, live, &packed::ForceOptions { strict: true, ..Default::default() })
     }
     fn reference(mapped: &Value, live: &input::Frame) -> Result<Value, Diagnostic> {
-        e::Host::force_reference(mapped, live, None, None, None)
+        e::host::force_reference(mapped, live, None, None, None)
     }
     fn same(expected: &[f64], actual: &Value) {
         let Value::Floats(1, actual) = actual else { panic!("float array expected") };
@@ -1499,7 +1499,7 @@ mod parity {
             panic!("fn expected")
         };
         let signature = flow_syntax::ty::FnSignature { params: vec![Ty::Int, Ty::Int], result: Ty::Float };
-        let mapped = e::Host::map_function(None, None, &signature, f, &[Value::Int_array(Arc::new(seeds.clone())), Value::Int_array(Arc::new(indices.clone()))]).unwrap();
+        let mapped = e::host::map_function(None, None, &signature, f, &[Value::Int_array(Arc::new(seeds.clone())), Value::Int_array(Arc::new(indices.clone()))]).unwrap();
         let program = compile(&mapped);
         let expected: Vec<f64> = seeds.iter().zip(&indices).map(|(s, i)| native(*s, *i)).collect();
         random_proof(&mapped,&program,&live,&expected);
@@ -1640,7 +1640,7 @@ mod parity {
     fn math_compile(input_ty: Ty, output_ty: Ty, input: Value, body: &str) -> (Value, packed::T) {
         let f = math_function(input_ty.clone(), body);
         let signature = flow_syntax::ty::FnSignature { params: vec![input_ty], result: output_ty };
-        let mapped = e::Host::map_function(None, None, &signature, f, &[input]).unwrap();
+        let mapped = e::host::map_function(None, None, &signature, f, &[input]).unwrap();
         let program = compile(&mapped);
         (mapped, program)
     }
@@ -1733,9 +1733,9 @@ mod parity {
         domains(&|| assert_eq!(bytes(&force(&program, &live).unwrap()), expected));
     }
     fn fma_proof(input_ty:Ty,output_ty:Ty,input:Value,body:&str,expected:Vec<f64>){
-        use flow_ir::flow_ir::Executor;
+        use flow_ir::flow_ir::executor;
         let(value,program)=math_compile(input_ty,output_ty,input,body);
-        let compiled=Executor::compile(&value,&Executor::CompileOptions{strict:true,..Default::default()}).unwrap();
+        let compiled=executor::compile(&value,&executor::CompileOptions{strict:true,..Default::default()}).unwrap();
         let live=input::at_time(0.0);
         let check=|actual:Value|{
             let actual=bytes(&actual);assert_eq!(actual.len(),expected.len());
@@ -1744,7 +1744,7 @@ mod parity {
         check(reference(&value,&live).unwrap());
         for domains in [1,4,8]{parallel::run_unit(Some(domains),&||{
             check(force(&program,&live).unwrap());
-            check(Executor::force(&compiled,&Executor::ForceOptions{strict:true,..Default::default()},&live).unwrap());Ok(())
+            check(executor::force(&compiled,&executor::ForceOptions{strict:true,..Default::default()},&live).unwrap());Ok(())
         }).unwrap();}
         assert!(!packed::gpu_refusals(false,false,&program).is_empty(),"binary64 FMA must refuse fast GPU export");
         js_exact(&program,&live,&expected);

@@ -46,7 +46,7 @@ fn forked_states_diverge() {
 fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     let evaluation = static_eval(&checked("(array/sum (state [p (exact (array/range 3))] p))")).unwrap();
     let Value::Residual(root) = evaluation.states[0] else { panic!("state residual") };
-    let view = Residual::residual_view(root).unwrap();
+    let view = residual::residual_view(root).unwrap();
     let flow_check::workspace::Node::State(id) = view.term.node else { panic!("state term") };
     let arena = view.term.arena();
     let mut path = view.prefix.clone();
@@ -55,19 +55,19 @@ fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     let reads = Arc::new(AtomicI64::new(0));
     let data = Value::Floats(1, Arc::new(vec![0.]));
     let count = reads.clone();
-    Device::add(&data, Arc::new(move || {
+    device::add(&data, Arc::new(move || {
         count.fetch_add(1, O::SeqCst);
         Value::Floats(1, Arc::new(vec![2., 3., 4.]))
     })).unwrap();
     let live = at(0., 0, 0);
-    Residual::bind_live(root, &live, Some(&state)).unwrap();
-    let read = || Residual::state_read(root, view.instance, path.clone(), view.iter.clone(), false, &|| data.clone()).unwrap();
-    assert!(Device::held_by_device(&read()));
-    let stored = Residual::state_write(root, view.instance, path.clone(), view.iter.clone(), false, data).unwrap();
-    assert!(Device::held_by_device(&stored));
-    assert!(Device::held_by_device(&Residual::state_peek(root, view.instance, path.clone(), view.iter.clone(), false).unwrap()));
+    residual::bind_live(root, &live, Some(&state)).unwrap();
+    let read = || residual::state_read(root, view.instance, path.clone(), view.iter.clone(), false, &|| data.clone()).unwrap();
+    assert!(device::held_by_device(&read()));
+    let stored = residual::state_write(root, view.instance, path.clone(), view.iter.clone(), false, data).unwrap();
+    assert!(device::held_by_device(&stored));
+    assert!(device::held_by_device(&residual::state_peek(root, view.instance, path.clone(), view.iter.clone(), false).unwrap()));
     assert_eq!(reads.load(O::SeqCst), 0);
-    assert_eq!(Host::force_reference(&Value::Residual(root), &live, Some(&state), None, None).unwrap(), Value::Floats(1, Arc::new(vec![2., 3., 4.])));
+    assert_eq!(host::force_reference(&Value::Residual(root), &live, Some(&state), None, None).unwrap(), Value::Floats(1, Arc::new(vec![2., 3., 4.])));
     assert!(reads.load(O::SeqCst) > 0);
 }
 
@@ -79,7 +79,7 @@ fn graph_state_clocks_and_snapshots_agree() {
     let original = identities();
     assert_eq!(original.len(), 12);
     type Force = fn(&Value, &input::Frame, &State) -> Result<Value, Diagnostic>;
-    let forces: [Force; 2] = [|v, l, s| force(v, l, Some(s)), |v, l, s| Host::force_reference(v, l, Some(s), None, None)];
+    let forces: [Force; 2] = [|v, l, s| force(v, l, Some(s)), |v, l, s| host::force_reference(v, l, Some(s), None, None)];
     for force_fn in forces {
         let caller = create_state();
         for (tick, frame, level, host) in [(0i64, 0i64, 1i64, 1i64), (1, 0, 1, 2), (1, 1, 2, 2)] {
@@ -181,7 +181,7 @@ fn exact_images_cannot_be_state() {
     assert_eq!(value_of(&run(&checked("(state [s (exact 1.0)] (+ s 1))"), false, None, None, None, 0.)), Value::Float(2.));
     let array_state = create_state();
     assert_eq!(value_of(&run(&checked("(array/sum (state [s (exact (array/range 3))] s))"), false, None, Some(&array_state), None, 0.)), Value::Float(3.));
-    assert!(Host::state_values(&array_state).contains(&Value::Floats(1, Arc::new(vec![0., 1., 2.]))));
+    assert!(host::state_values(&array_state).contains(&Value::Floats(1, Arc::new(vec![0., 1., 2.]))));
     // An opaque extension can conceal resources from static types. Check the seed before the step
     // reads it, and the step before it reaches next.
     for wrap in 0..4 {
@@ -204,13 +204,13 @@ fn exact_images_cannot_be_state() {
             let evaluation = r#static(&workspace, false, None).unwrap();
             let residual = get(&evaluation, "g");
             type Force = fn(&Value, &input::Frame, &State) -> Result<Value, Diagnostic>;
-            let forces: [Force; 2] = [|v, l, s| force(v, l, Some(s)), |v, l, s| Host::force_reference(v, l, Some(s), None, None)];
+            let forces: [Force; 2] = [|v, l, s| force(v, l, Some(s)), |v, l, s| host::force_reference(v, l, Some(s), None, None)];
             for force_fn in forces {
                 let state = create_state();
                 let stamp = state_stamp(&state);
                 calls.store(0, O::SeqCst);
                 match force_fn(&residual, &input::at_time(0.), &state) { Err(d) => assert_eq!(d.code, "E_STATE_TYPE"), Ok(_) => panic!("accepted") }
-                assert!(calls.load(O::SeqCst) == expected_calls && state_stamp(&state) == stamp && Host::state_values(&state).is_empty(), "{wrap} {seed}: calls {}", calls.load(O::SeqCst));
+                assert!(calls.load(O::SeqCst) == expected_calls && state_stamp(&state) == stamp && host::state_values(&state).is_empty(), "{wrap} {seed}: calls {}", calls.load(O::SeqCst));
             }
         }
     }

@@ -3,7 +3,7 @@
 use crate::core_exec::{self, Options};
 use crate::core_ir as C;
 use crate::core_lower;
-use crate::flow_ir::{Executor, Profile, Tier};
+use crate::flow_ir::{executor, profile, Tier};
 use flow_check::catalog::Catalog;
 use flow_check::workspace::{self as W, Paths};
 use flow_eval as E;
@@ -51,7 +51,7 @@ fn same(a: &Value, b: &Value) -> bool {
     }
 }
 
-fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::Host::force_reference(value, live, None, None, None) }
+fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::host::force_reference(value, live, None, None, None) }
 
 
 fn equal_result(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) -> bool {
@@ -71,8 +71,8 @@ fn concrete_values_skip_resolver_and_state() {
     for reference in [false, true] {
         let ticks = Arc::new(AtomicI64::new(0));
         let clock = ticks.clone();
-        let profile = Profile::create(Arc::new(move || (clock.fetch_add(1, Ordering::SeqCst) + 1) as f64));
-        let program = ok(Executor::compile(&value, &crate::flow_ir::Executor::CompileOptions { strict: true, profile: Some(profile.clone()), ..Default::default() }));
+        let profile = profile::create(Arc::new(move || (clock.fetch_add(1, Ordering::SeqCst) + 1) as f64));
+        let program = ok(executor::compile(&value, &crate::flow_ir::executor::CompileOptions { strict: true, profile: Some(profile.clone()), ..Default::default() }));
         let state = E::create_state();
         let stamp = E::state_stamp(&state);
         let resolutions = Arc::new(AtomicI64::new(0));
@@ -81,11 +81,11 @@ fn concrete_values_skip_resolver_and_state() {
             counter.fetch_add(1, Ordering::SeqCst);
             Err(rays_diagnostic::error("E_UNUSED".into(), "unused resolver".into(), None, None, None, Vec::new(), Vec::new()))
         });
-        let options = Executor::ForceOptions { strict: true, reference, state: Some(state.clone()), resolve: Some(resolve), ..Default::default() };
-        let result = ok(Executor::force(&program, &options, &input::at_time(f64::NAN)));
+        let options = executor::ForceOptions { strict: true, reference, state: Some(state.clone()), resolve: Some(resolve), ..Default::default() };
+        let result = ok(executor::force(&program, &options, &input::at_time(f64::NAN)));
         // OCaml also checks physical identity; Rust values are cloned, so structural equality stands in.
         assert!(result == value && E::state_stamp(&state) == stamp && resolutions.load(Ordering::SeqCst) == 0 && ticks.load(Ordering::SeqCst) == 2);
-        let executions = Profile::executions(&profile);
+        let executions = profile::executions(&profile);
         assert_eq!(executions.len(), 1, "Concrete execution lost its profile entry");
         assert!(executions[0].seconds == 1. && executions[0].tier == if reference { Tier::Interp } else { Tier::Core });
     }
@@ -150,7 +150,7 @@ fn dump() -> (String, Vec<String>) {
     let mut failures = Vec::new();
     for (name, r) in cases() {
         let core = lower(r).unwrap_or_else(|n| panic!("{name}: Core refused {n}"));
-        let program = ok(Executor::compile(&Value::Residual(r), &Default::default()));
+        let program = ok(executor::compile(&Value::Residual(r), &Default::default()));
         let printed = C::pp(&core);
         for time in [-3., -2.5, -0., 0., 0.00005, 0.00015, 0.37, 1., 1.9, 100.25] {
             let live = input::at_time(time);
@@ -160,7 +160,7 @@ fn dump() -> (String, Vec<String>) {
             if !equal_result(&E::force(&value, &live, None), &expected) {
                 failures.push(format!("{name} at {time}: E::force differs from the reference"));
             }
-            let actual = Executor::force(&program, &Default::default(), &live);
+            let actual = executor::force(&program, &Default::default(), &live);
             if !equal_result(&actual, &expected) {
                 failures.push(format!("{name} at {time}: executor {actual:?} <> reference {expected:?}"));
             }
@@ -213,11 +213,11 @@ fn lazy_record_accumulator_errors_keep_their_fields() {
     ] {
         let r = residual("", body);
         let core = lower(r).unwrap_or_else(|n| panic!("{n}"));
-        let program = ok(Executor::compile(&Value::Residual(r), &Default::default()));
+        let program = ok(executor::compile(&Value::Residual(r), &Default::default()));
         for time in [0., 1.] {
             let live = input::at_time(time);
             let expected = reference(&Value::Residual(r), &live);
-            for actual in [run(&core, &live), Executor::force(&program, &Default::default(), &live)] {
+            for actual in [run(&core, &live), executor::force(&program, &Default::default(), &live)] {
                 match (&actual, &expected) {
                     (Ok(a), Ok(b)) => assert!(same(a, b)),
                     (Err(a), Err(b)) => assert!(a.code == b.code && a.message == b.message && a.cause == b.cause),

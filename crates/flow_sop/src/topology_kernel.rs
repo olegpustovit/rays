@@ -1,6 +1,6 @@
 //! Port of lib/flow_sop/topology_kernel.ml(i): the public face of `topology_kernel_impl`.
 use crate::topology_kernel_impl as imp;
-use flow_ir::flow_ir::Gpu::Integers;
+use flow_ir::flow_ir::gpu::Integers;
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
 use rdk_core::geometry::T as Geometry;

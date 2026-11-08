@@ -43,7 +43,7 @@ fn evaluate(resolve: Option<ResolveFn>, flags: Value, body: &str) -> Result<Valu
     let program = ts::lower_strict(*residual).unwrap_or_else(|form| panic!("{form}"));
     let live = input::at_time(0.);
     let native = ts::run(None, false, None, resolve.clone(), &program, &live);
-    let reference = E::Host::force_reference(&value, &live, None, None, resolve);
+    let reference = E::host::force_reference(&value, &live, None, None, resolve);
     match (&native, &reference) {
         (Ok(a), Ok(b)) => assert!(a == b),
         (Err(a), Err(b)) => assert!(a.code == b.code && a.message == b.message && a.cause == b.cause),
@@ -186,7 +186,7 @@ mod graph_edits {
         let result = ok(E::static_with(&workspace, true, Some(&[("g".to_owned(), vec![("flags".to_owned(), Value::Int_array(Arc::new(vec![])))])]), None));
         let path = vec!["g".to_owned(), "tested".to_owned()];
         let value = result.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1.clone();
-        failure(0, E::Host::force_reference(&value, &input::at_time(0.), None, None, None));
+        failure(0, E::host::force_reference(&value, &input::at_time(0.), None, None, None));
         assert!(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path, key: ArgKey::Pos(1), sub: vec![], value: make(Node::Str(b"wrong storage".to_vec())) }).is_err());
     }
 

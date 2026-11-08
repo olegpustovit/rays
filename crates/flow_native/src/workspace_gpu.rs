@@ -15,7 +15,7 @@ use flow_gpu::image_sink;
 use flow_gpu::run;
 use flow_gpu::small_lru::List;
 use flow_ir::core_exec as c;
-use flow_ir::flow_ir::Gpu as G;
+use flow_ir::flow_ir::gpu as G;
 use flow_ir::packed::host as phost;
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{self as v, Value};

@@ -5,7 +5,7 @@
 mod common;
 use common::test_program as tp;
 use flow_gpu::{host, image_sink as s, pipelines, run};
-use flow_ir::flow_ir::{Executor as ex, Gpu};
+use flow_ir::flow_ir::{executor as ex, gpu};
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::value::Value;
@@ -158,7 +158,7 @@ fn qualified_publication() {
     let gpu = common::lease();
     let host = host::create(&|| 0.0, &gpu);
     let sink = tp::ok(s::create(&gpu));
-    let config = Gpu::Config { backend: Some(host::backend(&host).into()), policy: Gpu::Policy::Qualification, ..Gpu::default() };
+    let config = gpu::Config { backend: Some(host::backend(&host).into()), policy: gpu::Policy::Qualification, ..gpu::default() };
     let produce = |time| {
         let value = match tp::ok(ex::try_display(None, None, false, &config, &program, &input::at_time(time))) { Some(ex::Displayed::Gpu(v)) => v, _ => panic!("qualified GPU image") };
         let output = tp::ok(host::output(&host, &value)).unwrap();

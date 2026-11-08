@@ -4,14 +4,14 @@
 //! OCaml exceptions: `Unsupported` / `Compile_refused d` / `Diagnostic.Error d` are the variants of
 //! [`Stop`]; `Invalid_argument` (an out-of-bounds register read, `Option.get`) is `Stop::Invalid`.
 //! Registers are numbered in source order: first operand first.
-use crate::core_ir::Region::{
+use crate::core_ir::region::{
     self as R, CountSource, Instruction as I, Iteration, LiveFloat, LiveInt, Loop, Parts, Projection, RegionResult, Stage,
 };
 use crate::core_ir::RegionT;
 use flow_check::op::{self, PackedKind};
 use flow_check::workspace::{self as W, HofKind, LoopKind, Node, Path, Pattern, Term};
 use flow_check::term_arena::{Draft, Field, Literal, PatternNode, TermBuilder, TermId};
-use flow_eval::Residual;
+use flow_eval::residual;
 use flow_syntax::context;
 use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
 use flow_syntax::syntax::Node as SNode;
@@ -162,7 +162,7 @@ fn integer_work(instruction: &I) -> bool {
     }
 }
 
-fn paths(view: &Residual::View, sites: &mut Vec<(i64, Path, Vec<i64>)>, t: &Term) {
+fn paths(view: &residual::View, sites: &mut Vec<(i64, Path, Vec<i64>)>, t: &Term) {
     if let Some(path) = t.path() {
         sites.push((view.instance, path.iter().map(|name| t.name(*name).to_owned()).collect(), view.iter.clone()));
     }
@@ -193,7 +193,7 @@ pub(crate) fn same_op(a: &op::Op, b: &op::Op) -> bool {
 }
 
 fn canonical_operator(residual: ResidualId, name: &str) -> bool {
-    let extra = Residual::residual_ops(residual);
+    let extra = residual::residual_ops(residual);
     match (op::find(&extra, name, &context::value()), op::find(&[], name, &context::value())) {
         (Some(actual), Some(builtin)) => same_op(&actual, &builtin),
         _ => false,
@@ -201,7 +201,7 @@ fn canonical_operator(residual: ResidualId, name: &str) -> bool {
 }
 
 fn residual_term(residual: ResidualId) -> Res<std::sync::Arc<Term>> {
-    Residual::residual_term(residual).ok_or_else(|| V::fail("E_RESIDUAL_ID", "Residual belongs to an expired evaluation.").into())
+    residual::residual_term(residual).ok_or_else(|| V::fail("E_RESIDUAL_ID", "Residual belongs to an expired evaluation.").into())
 }
 
 /// A field of a live record (a matrix chosen per frame): the field of the one residual; a live
@@ -219,7 +219,7 @@ fn field_residual(r: ResidualId, value: &Value, field: &str) -> Res<Value> {
     let form = builder.import_form(&source.form());
     let term = builder.push(None, &ty, form, flow_check::term_arena::Draft::RefBinding("$field".to_owned(), vec![field.to_owned()]));
     let term = builder.freeze().handle(term);
-    let bound = Residual::with_bindings(r, &term, &[("$field".to_owned(), value.clone())])?;
+    let bound = residual::with_bindings(r, &term, &[("$field".to_owned(), value.clone())])?;
     Ok(Value::Residual(bound))
 }
 
@@ -238,7 +238,7 @@ fn field_step(value: Value, field: &str) -> Res<Value> {
             (Value::Residual(r), f) => field_residual(*r, &value, f)?,
             (Value::Record(fs), f) => fs.iter().find(|(n, _)| n == f).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?,
             (Value::Struct(g), f) => g.fields.iter().find(|(n, _)| n == f).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?,
-            (Value::Fn(function), f) => Residual::function_bindings(*function).into_iter().find(|(n, _)| n == f).map(|(_, v)| v).ok_or(Stop::Unsupported)?,
+            (Value::Fn(function), f) => residual::function_bindings(*function).into_iter().find(|(n, _)| n == f).map(|(_, v)| v).ok_or(Stop::Unsupported)?,
             (Value::Vec3(x, _, _), "x") | (Value::Vec3(_, x, _), "y") | (Value::Vec3(_, _, x), "z") => Value::Float(*x),
             (Value::Vec2(x, _), "x") | (Value::Vec2(_, x), "y") => Value::Float(*x),
             (Value::Vec4(x, _, _, _), "x") | (Value::Vec4(_, x, _, _), "y") | (Value::Vec4(_, _, x, _), "z") | (Value::Vec4(_, _, _, x), "w") => Value::Float(*x),
@@ -250,7 +250,7 @@ type Params = Vec<(Pattern, Option<Ty>)>;
 type Scope = Option<(String, Vec<String>)>;
 
 fn definition_body(at: &Term, residual: ResidualId, name: &str) -> Res<(Params, Term, Scope)> {
-    match Residual::residual_definition(residual, name) {
+    match residual::residual_definition(residual, name) {
         Some(definition) => Ok((definition.inputs.iter().map(|(n, ty, _)| (Pattern::Name(n.clone()), Some(ty.clone()))).collect(), definition.body.clone(), None)),
         None => Err(refusal(at, "E_PACKED_FUNCTION", &format!("Packed helper {} is unavailable.", name))),
     }
@@ -258,9 +258,9 @@ fn definition_body(at: &Term, residual: ResidualId, name: &str) -> Res<(Params, 
 
 fn helper_body(at: &Term, residual: ResidualId, bindings: &[(String, Value)], function: &str, name: &str, path: &[String]) -> Res<(Params, Term, Scope)> {
     match captured_value(bindings, name, path) {
-        Ok(Value::Fn(callable)) => match Residual::function_body(callable) {
+        Ok(Value::Fn(callable)) => match residual::function_body(callable) {
             Some((params, body)) => Ok((params, body, Some((name.to_owned(), path.to_vec())))),
-            None => match Residual::function_name(callable) {
+            None => match residual::function_name(callable) {
                 Some(name) => definition_body(at, residual, &name),
                 None => Err(refusal(at, "E_PACKED_FUNCTION", "Captured helper has no checked body.")),
             },
@@ -297,7 +297,7 @@ pub fn count_of(residual: ResidualId, s: &Term) -> Option<i64> {
     match s.node {
         Node::RefBinding(id) => {
             let binding = arena.ref_binding(id);
-            let mut value = Residual::residual_binding(residual, s.name(binding.name))?;
+            let mut value = residual::residual_binding(residual, s.name(binding.name))?;
             for name in arena.name_ids(binding.fields) {
                 value = field_step(value, s.name(*name)).ok()?;
             }
@@ -383,9 +383,9 @@ fn function_body<'b>(
     f: &Term,
 ) -> Res<(Params, Term, Cow<'b, [(String, Value)]>)> {
     let captured_body = |f: &Term| -> Res<(Params, Term, Cow<'b, [(String, Value)]>)> {
-        match Residual::eval_term(residual, f, &input::at_time(0.0), None, None, None) {
-            Ok(Value::Fn(function)) => match Residual::function_body(function) {
-                Some((params, body)) => Ok((params, body, Cow::Owned(Residual::function_bindings(function)))),
+        match residual::eval_term(residual, f, &input::at_time(0.0), None, None, None) {
+            Ok(Value::Fn(function)) => match residual::function_body(function) {
+                Some((params, body)) => Ok((params, body, Cow::Owned(residual::function_bindings(function)))),
                 None => Err(refusal(f, "E_PACKED_FUNCTION", "Captured function has no instantiated packed body.")),
             },
             Err(d) => Err(Stop::Refused(d)),
@@ -402,15 +402,15 @@ fn function_body<'b>(
         Node::RefBinding(id) if f.arena().name_ids(f.arena().ref_binding(id).fields).is_empty() => {
             let name = f.name(f.arena().ref_binding(id).name);
             match bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
-            Some(Value::Fn(function)) => match Residual::function_body(*function) {
-                Some((params, body)) => Ok((params, body, Cow::Owned(Residual::function_bindings(*function)))),
+            Some(Value::Fn(function)) => match residual::function_body(*function) {
+                Some((params, body)) => Ok((params, body, Cow::Owned(residual::function_bindings(*function)))),
                 None => Err(refusal(f, "E_PACKED_FUNCTION", &format!("Function {} has no instantiated packed body.", name))),
             },
             _ => Err(refusal(f, "E_PACKED_FUNCTION", &format!("Function binding {} is unavailable.", name))),
             }
         },
         Node::FnRef(name) if f.name(name) == "+" && reduction.is_some() => {
-            let extra = Residual::residual_ops(residual);
+            let extra = residual::residual_ops(residual);
             match op::find(&extra, "+", &context::value()) {
                 Some(declaration) if op::packed_kind(&declaration) == Some(PackedKind::Binary(Binary::Add)) => {
                     let (seed, source) = reduction.unwrap();
@@ -809,11 +809,11 @@ impl Lower {
         let bindings = match &self.capture_scope {
             None => self.bindings.clone(),
             Some((name, fields)) => match captured_value(&self.bindings, name, fields)? {
-                Value::Fn(function) => Residual::function_bindings(function),
+                Value::Fn(function) => residual::function_bindings(function),
                 _ => return Err(Stop::Unsupported),
             },
         };
-        let bound = Residual::with_bindings(self.residual, at, &bindings)?;
+        let bound = residual::with_bindings(self.residual, at, &bindings)?;
         self.uniform(at, (String::new(), Vec::new()), &Value::Residual(bound))
     }
 
@@ -1052,7 +1052,7 @@ impl Lower {
 
     #[allow(clippy::too_many_lines)]
     fn operation(&mut self, env: &Env, t: &Term, op_name: &str, args: &[Field]) -> Res<Expression> {
-        let extra = Residual::residual_ops(self.residual);
+        let extra = residual::residual_ops(self.residual);
         let declaration = match op::find(&extra, op_name, &context::value()) {
             Some(o) => match op::packed_kind(&o) {
                 Some(kind) => (o, kind),
@@ -1554,7 +1554,7 @@ impl Lower {
                         ("array/concat" | "array/slice", Ty::Array(_)) => true,
                         _ => false,
                     }
-                    && !Residual::free_names(t).iter().any(|n| env_find(env, n).is_some())
+                    && !residual::free_names(t).iter().any(|n| env_find(env, n).is_some())
                     && self.constant_only(t.name(arena.op(id).op)) =>
             {
                 // Preserve checked argument order and copying. Invariant composition and its count
@@ -1609,7 +1609,7 @@ impl Lower {
                     (None, [c]) => self.with_guard(*c, op_name == "and", &mut |me| me.expression(env, &t.child(args[1].term)))?,
                     _ => self.expression(env, &t.child(args[1].term))?,
                 };
-                let extra = Residual::residual_ops(self.residual);
+                let extra = residual::residual_ops(self.residual);
                 let declaration = op::find(&extra, op_name, &context::value()).ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is unavailable.", op_name)))?;
                 let kind = op::packed_kind(&declaration).ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is not a canonical scalar declaration.", op_name)))?;
                 self.operation_value(t, op_name, args, &declaration, kind, &[first, second])
@@ -1759,7 +1759,7 @@ impl Lower {
                 self.expression(env, &folded)
             }
             Node::If(..)
-                if matches!(t.ty(), Ty::Array(_)) && !Residual::free_names(t).iter().any(|n| env_find(env, n).is_some()) =>
+                if matches!(t.ty(), Ty::Array(_)) && !residual::free_names(t).iter().any(|n| env_find(env, n).is_some()) =>
             {
                 // An invariant array choice is a lazy table preparation, not a numeric select.
                 self.invariant_value(t)
@@ -1827,7 +1827,7 @@ impl Lower {
     }
 
     fn constant_only(&self, name: &str) -> bool {
-        let extra = Residual::residual_ops(self.residual);
+        let extra = residual::residual_ops(self.residual);
         op::find(&extra, name, &context::value()).and_then(|o| op::packed_kind(&o)) == Some(PackedKind::ConstantOnly)
     }
 
@@ -1939,7 +1939,7 @@ impl Lower {
                 let length_term = builder.with_type(length_term, &Ty::Int);
                 let length_term = builder.freeze().handle(length_term);
                 let table_value = self.array_values.get(&prepared).cloned().ok_or_else(|| invalid("Not_found"))?;
-                let bound = Residual::with_bindings(self.residual, &length_term, &[("$inner-sum-table".to_owned(), table_value)])?;
+                let bound = residual::with_bindings(self.residual, &length_term, &[("$inner-sum-table".to_owned(), table_value)])?;
                 let uniform = self.uniform(source, (String::new(), Vec::new()), &Value::Residual(bound))?;
                 let length = reg(&self.as_int(&uniform)?, 0)?;
                 let constant = |me: &mut Lower, n: i64| me.emit(I::Int_const(n));
@@ -2048,7 +2048,7 @@ pub fn lower(fusion: bool, dynamic: bool, count_source: &CountSource, residual: 
 }
 
 fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term) -> Res<RegionT> {
-    let mut view = Residual::residual_view(residual)?;
+    let mut view = residual::residual_view(residual)?;
     let refuse = |code: &str, message: &str| -> Stop { refusal(term, code, message) };
     let result_ty = term.ty().clone();
     let arena = term.arena();
@@ -2254,8 +2254,8 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                     sites.push((view.instance, zone, view.iter.clone()));
                 }
                 Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
-                    if let Some(Value::Fn(f)) = Residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
-                        if let Some((_, body)) = Residual::function_body(f) {
+                    if let Some(Value::Fn(f)) = residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
+                        if let Some((_, body)) = residual::function_body(f) {
                             if let Some(p) = body.path() {
                                 let keep = p.len().saturating_sub(1);
                                 sites.push((view.instance, p[..keep.min(p.len())].iter().map(|&id| body.name(id).to_owned()).collect(), view.iter.clone()));
@@ -2313,7 +2313,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
 
 /// A frame-fold template keeps its captures as uniforms: rebinding reads the next step's bindings.
 pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
-    let view = Residual::residual_view(residual).ok()?;
+    let view = residual::residual_view(residual).ok()?;
     if !t.dynamic
         || t.stages.len() != 1
         || *t.term != *view.term
@@ -2331,15 +2331,15 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
             _ => None,
         };
         let bindings_of = |residual: ResidualId| -> Res<Vec<(String, Value)>> {
-            let view = Residual::residual_view(residual)?;
+            let view = residual::residual_view(residual)?;
             match (&captured, &t.binding_fn) {
-                (Some(f), _) => match Residual::eval_term(residual, f, &input::at_time(0.0), None, None, None) {
-                    Ok(Value::Fn(function)) if Residual::function_body(function).map(|(_, body)| body == *t.body).unwrap_or(false) => Ok(Residual::function_bindings(function)),
+                (Some(f), _) => match residual::eval_term(residual, f, &input::at_time(0.0), None, None, None) {
+                    Ok(Value::Fn(function)) if residual::function_body(function).map(|(_, body)| body == *t.body).unwrap_or(false) => Ok(residual::function_bindings(function)),
                     _ => Err(Stop::Unsupported),
                 },
                 (None, None) => Ok(view.bindings),
                 (None, Some(name)) => match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
-                    Some(Value::Fn(f)) if Residual::function_body(*f).map(|(_, body)| body == *t.body).unwrap_or(false) => Ok(Residual::function_bindings(*f)),
+                    Some(Value::Fn(f)) if residual::function_body(*f).map(|(_, body)| body == *t.body).unwrap_or(false) => Ok(residual::function_bindings(*f)),
                     _ => Err(Stop::Unsupported),
                 },
             }
@@ -2369,7 +2369,7 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
         }
         let counts: Vec<Option<i64>> = sources.iter().map(|(r, s)| count_of(*r, s)).collect();
         let count = count_of_sources(t.iteration, &counts)?;
-        match R::Private::with_captures(t, residual, uniforms, sources, vec![(residual, t.term.clone())], count) {
+        match R::private::with_captures(t, residual, uniforms, sources, vec![(residual, t.term.clone())], count) {
             Ok(region) => Ok(Some(region)),
             Err(_) => Ok(None),
         }

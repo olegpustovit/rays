@@ -5,7 +5,7 @@ use flow_check::workspace::Paths;
 use flow_eval as e;
 use flow_ir::core_exec::{self as c, Buffers};
 use flow_ir::core_draw;
-use flow_ir::flow_ir::{Executor as I, Gpu as G, Profile};
+use flow_ir::flow_ir::{executor as I, gpu as G, profile};
 use flow_syntax::ty;
 use flow_syntax::value::{self as v, ResidualId, Value};
 use input::Frame;
@@ -49,7 +49,7 @@ pub struct prepared {
 #[derive(Clone, Default)]
 pub struct PrepareOptions {
     pub gpu: Option<G::Config>,
-    pub profile: Option<Arc<Profile::T>>,
+    pub profile: Option<Arc<profile::T>>,
     pub approx: Option<Paths>,
     pub states: Vec<Value>,
 }
@@ -238,7 +238,7 @@ fn render_core(core: &Core, state: &e::State, p: &prepared, live: &Frame, size: 
             None => c::draw(program, live, size, buffers, &draw_options)?,
             Some(root) => {
                 // Bind the residual's evaluator state plane before the core draws directly.
-                e::Residual::bind_live(*root, live, Some(state))?;
+                e::residual::bind_live(*root, live, Some(state))?;
                 c::draw(program, live, size, buffers, &c::DrawOptions { root: Some(*root), ..draw_options })?
             }
         };

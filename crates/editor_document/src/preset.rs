@@ -116,7 +116,7 @@ pub fn delete(directory: &str, name: &str) -> Result<(), String> {
 
 /// Parse, check and lower the file; `settings` is the sketch's settings value the saved fields
 /// apply to. An unreadable, unchecked or unlowerable file is an `Err` carrying the diagnostic text.
-pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::Gpu::Config>, ops: Vec<FlowOp>, path: &str, factories: Option<&[Factory]>, settings_value: &settings::T) -> Result<Loaded, String> {
+pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::gpu::Config>, ops: Vec<FlowOp>, path: &str, factories: Option<&[Factory]>, settings_value: &settings::T) -> Result<Loaded, String> {
     let text = editor_core::store::read_text(path)?;
     let catalog = kinds::shared(factories).map_err(|d| rays_diagnostic::to_string(&d))?;
     let options = TextOptions { ops: Some(std::sync::Arc::new(ops)), settings: Some(settings::defaults(settings_value)), ..Default::default() };
@@ -139,6 +139,6 @@ pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::Gpu::Config>, ops: Vec<FlowOp
     Ok(Loaded { doc, view })
 }
 
-pub fn load(gpu: Option<flow_ir::flow_ir::Gpu::Config>, path: &str, factories: Option<&[Factory]>, settings_value: &settings::T) -> Result<Loaded, String> {
+pub fn load(gpu: Option<flow_ir::flow_ir::gpu::Config>, path: &str, factories: Option<&[Factory]>, settings_value: &settings::T) -> Result<Loaded, String> {
     load_with_ops(gpu, flow_sop::operators::all().to_vec(), path, factories, settings_value)
 }

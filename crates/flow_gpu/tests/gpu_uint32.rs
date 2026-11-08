@@ -6,8 +6,8 @@
 mod common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
-use flow_ir::flow_ir::{Executor, Gpu};
-use flow_ir::flow_ir::Gpu::Residency as _;
+use flow_ir::flow_ir::{executor, gpu};
+use flow_ir::flow_ir::gpu::Residency as _;
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::ty::Ty;
@@ -37,7 +37,7 @@ fn force_strict(p: &packed::T, t: f64) -> Value {
 }
 
 /// The native holder behind a backend-neutral integer stream.
-fn native(stream: &Gpu::Integers) -> &run::Uint32Holder {
+fn native(stream: &gpu::Integers) -> &run::Uint32Holder {
     stream.storage.as_ref().and_then(|s| s.downcast_ref()).expect("native uint32 storage")
 }
 fn ints(v: &Value) -> Vec<i64> {
@@ -204,13 +204,13 @@ fn kinds_of_values() {
         let ws = tp::check_workspace(&source);
         let evaluated = tp::ok(flow_eval::r#static(&ws, true, None));
         let value = evaluated.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).expect("record").1[0].1.clone();
-        let compiled = tp::ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+        let compiled = tp::ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
         let h = host::create(&|| 0.0, &lease);
         for time in [0.0, 1.0] {
             let before_run = host::stats(&h);
             let scope = host::backend(&h).residency(true).expect("residency");
             let resident = scope.executor().clone();
-            let result = tp::ok(Executor::force(&compiled, &Executor::ForceOptions { strict: true, resident: Some(resident.clone()), ..Default::default() }, &live(time)));
+            let result = tp::ok(executor::force(&compiled, &executor::ForceOptions { strict: true, resident: Some(resident.clone()), ..Default::default() }, &live(time)));
             if no_read {
                 assert_eq!(host::stats(&h).payload_readback_bytes, before_run.payload_readback_bytes);
             }
@@ -221,7 +221,7 @@ fn kinds_of_values() {
                     assert_eq!(host::stats(&h).validation_readback_bytes, before_run.validation_readback_bytes + 36);
                 }
             }
-            fn capture(scope: &dyn Gpu::Residency, v: &Value) -> Box<dyn Fn() -> Value> {
+            fn capture(scope: &dyn gpu::Residency, v: &Value) -> Box<dyn Fn() -> Value> {
                 match v {
                     Value::Record(fields) => {
                         let fields: Vec<(String, Box<dyn Fn() -> Value>)> = fields.iter().map(|(k, v)| (k.clone(), capture(scope, v))).collect();
@@ -257,7 +257,7 @@ fn kinds_of_values() {
             if no_read {
                 assert_eq!(host::stats(&h).payload_readback_bytes, before_run.payload_readback_bytes);
             }
-            let expected = tp::ok(flow_eval::Host::force_reference(&value, &live(time), None, None, None));
+            let expected = tp::ok(flow_eval::host::force_reference(&value, &live(time), None, None, None));
             assert_eq!(format!("{:?}", materialise()), format!("{expected:?}"));
             let before = host::stats(&h).payload_readback_bytes;
             assert_eq!(format!("{:?}", materialise()), format!("{expected:?}"));
@@ -568,7 +568,7 @@ fn resident_inputs() {
         let mut inputs = prepare(&consumer, 0.);
         if gather {
             let u = consumer.code.iter().find_map(|c| match c {
-                flow_ir::core_ir::Region::Instruction::Array_prepare(u, _) => Some(*u as usize), _ => None,
+                flow_ir::core_ir::region::Instruction::Array_prepare(u, _) => Some(*u as usize), _ => None,
             }).expect("integer table capture");
             inputs.tables[u] = numeric.clone();
         } else { inputs.arrays[0] = numeric.clone(); }
