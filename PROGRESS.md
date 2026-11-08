@@ -1,12 +1,12 @@
 # Port simplification execution
 
-Plan source: [artifact 2beyggs594gc](https://artifacts.microapps.space/a/2beyggs594gc) (read-only tracker; progress here only).
+Plan source: [artifact 2beyggs594gc](https://artifacts.microapps.space/a/2beyggs594gc) (v6 shows the final status; evidence lives here).
 
 Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Current state (2026-11-08, user-requested checkpoint):** implementation and qualification remain open. C6/M3 use a mutable native lifecycle and borrowed frame views; C11 shares one local cache adapter and cache engine; D5 uses one width-tagged float-array value representation. `cargo check --workspace --all-targets` passes; full implementation and qualification are still incomplete. Artifact v5 source SHA-256 matches the repository mirror (`bd1c9fe2…`). Artifact unchanged. Crates 67 -> 51.
+**Current state (2026-11-08): finished.** All 63 plan items (waves A, B, M, I, C, D) are done on `dev`; see the Summary below and the session log for evidence. Artifact v6 is published with a status section, and its source SHA-256 (`9d5c9925…`) matches the repository mirror. Crates went from 67 to 51. Final qualification: workspace 2,823 of 2,839 in one run, with its three assertion failures fixed afterwards; native editor suite 321 of 325, and its remaining timeouts were fixed afterwards. The follow-ups outside the plan are listed in the last session-log entries and on the artifact.
 
 ## Summary
 
@@ -71,7 +71,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 
 ## Known failures / open risks
 
-Resume with the remaining SPIR-V ordering audit (D1), D4 FMA diagnosis and full matched benchmarks, D6 naming/API migration, the empty-editor allocation gap, then final slow/native qualification. Do not mark the full artifact plan complete from the D5 checkpoint.
+Resolved in the finish pass: D1 SPIR-V order, D4 FMA failure and benchmarks, D6 naming, the empty-editor allocation gap, and final qualification. The entries below are historical; current open items are the follow-ups in the newest session-log entries.
 
 - Resumed audit next work: D1/D4 audit, D6, empty-frame allocation target and full qualification; C6/M3, C11 and D5 implementation are closed. User requested a committed checkpoint after D5; the full plan is not complete. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
 
