@@ -6,8 +6,9 @@ mod common;
 use flow_gpu::{host, pipelines, run};
 use ogpu::backend as b;
 use ogpu::types::{BufferDescriptor, BufferUsage};
-use rdk::packed::Float3;
-use rdk::{geometry, topology, triangulate};
+use rdk_core::packed::Float3;
+use rdk_core::{error, geometry, topology};
+use rdk_ops::triangulate;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -107,7 +108,7 @@ fn run_case(lease: &renderer::renderer::gpu, pipes: &pipelines::T, host_: Option
         let geo = geometry::create(positions, top, None, None, None).expect("geometry");
         let expected = match triangulate::run(&triangulate::Params { cancel: None, grain: None, primitives: None }, &geo) {
             Ok(g) => topology::View::view(geometry::topology(&g)).expect("view").vertex_points.to_vec(),
-            Err(e) => panic!("{}", rdk::error::to_string(&e)),
+            Err(e) => panic!("{}", error::to_string(&e)),
         };
         let actual = b::read_buffer(&out, 0, count * 4).unwrap();
         assert_eq!(count as usize, expected.len());

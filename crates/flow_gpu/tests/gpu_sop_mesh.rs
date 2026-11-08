@@ -5,7 +5,8 @@ use flow_gpu::{host as h,run};
 use flow_ir::{flow_ir::Gpu,core_exec};
 use flow_sop::{lower,value_lane,topology_kernel,topology_kernel_impl};
 use flow_syntax::{syntax,ty::Ty,value::Value};
-use rdk::{geometry as g,topology,packed::Float3};
+use rdk_core::cancel;
+use rdk_core::{geometry as g, packed::Float3, topology};
 use sop::{context as ctx,edit_graph as edit,node,payload,session};
 use std::sync::{Arc,atomic::{AtomicBool,AtomicUsize,Ordering}};
 fn source(host:bool,case:&str)->String{
@@ -37,7 +38,7 @@ fn run_case(test:&str,empty_offset:bool){
         let args=vec![("points".into(),Value::Vec3_array(Arc::new(vec![]))),("vertex_points".into(),Value::Int_array(Arc::new(vec![]))),("primitive_offsets".into(),offset),("kinds".into(),Value::Int_array(Arc::new(vec![])))];
         let d=topology_kernel_impl::mesh_resident(None,&scope,&args).expect("resident path").err().expect("malformed empty offset accepted");assert_eq!((d.code.as_str(),d.message.as_str()),("E_TOPOLOGY","Topology: first primitive offset must be zero"));(scope.executor.close)();assert_eq!((h::stats(&host).payload_readback_bytes,h::stats(&host).validation_readback_bytes),(0,36));
     }
-    let cancel=Arc::new(rdk::cancel::create());let closes=Arc::new(AtomicUsize::new(0));let backend=h::backend(&host);let residency=backend.residency;let cancel_wrap=cancel.clone();let closes_wrap=closes.clone();let cancel_case=case=="cancel";
+    let cancel=Arc::new(cancel::create());let closes=Arc::new(AtomicUsize::new(0));let backend=h::backend(&host);let residency=backend.residency;let cancel_wrap=cancel.clone();let closes_wrap=closes.clone();let cancel_case=case=="cancel";
     let backend=Gpu::Backend{residency:Box::new(move|fast|residency(fast).map(|scope|{
         // Retained-stream callbacks share this executor; observe it by delegation.
         let dispatched=Arc::new(AtomicBool::new(false));let base=scope.executor;let invoke=base.clone();let settle=base.clone();let count=base.clone();let close=base.clone();
@@ -45,8 +46,8 @@ fn run_case(test:&str,empty_offset:bool){
         let executor=core_exec::Resident{
             invoke_all:Box::new(|_,_,_,_,_|Ok(None)),
             invoke:Box::new(move|p,args,locals,live|{let result=(invoke.invoke)(p,args,locals,live)?;if result.is_some(){inv.store(true,Ordering::SeqCst);}Ok(result)}),
-            settle:Box::new(move||{(settle.settle)()?;if cancel_case&&set.load(Ordering::SeqCst){rdk::cancel::cancel(&cancel_set);}Ok(())}),
-            count:Box::new(move|v|{let n=(count.count)(v)?;if cancel_case&&cnt.load(Ordering::SeqCst)&&n.is_some(){rdk::cancel::cancel(&cancel_count);}Ok(n)}),
+            settle:Box::new(move||{(settle.settle)()?;if cancel_case&&set.load(Ordering::SeqCst){cancel::cancel(&cancel_set);}Ok(())}),
+            count:Box::new(move|v|{let n=(count.count)(v)?;if cancel_case&&cnt.load(Ordering::SeqCst)&&n.is_some(){cancel::cancel(&cancel_count);}Ok(n)}),
             close:Box::new(move||{if dispatched.load(Ordering::SeqCst){closes.fetch_add(1,Ordering::SeqCst);}(close.close)()}),
             fill:Box::new({let b=base.clone();move|ty,n,v|(b.fill)(ty,n,v)}),
             unfold:Box::new({let b=base.clone();move|p,args,n,v,locals,live|(b.unfold)(p,args,n,v,locals,live)}),
@@ -66,7 +67,7 @@ fn run_case(test:&str,empty_offset:bool){
     let counts:&[i64]=if matches!(case,"dynamic"|"overflow"){&[0,342,683,1025,0,342]}else{&[342]};
     for &count in counts{
         session::clear(&mut session);let before=h::stats(&host);let closed=closes.load(Ordering::SeqCst);let context=ctx::create(ctx::Options{cancel:Some(cancel.clone()),domains:Some(1),time:Some(0.),frame:Some(count),..Default::default()}).unwrap();let result=session::cook(&mut session,None,&context,&root);
-        let result=if case=="cancel"{assert!(rdk::cancel::is_cancelled(&cancel));let d=result.err().expect("cancelled resident cook published");assert!(d.code=="E_CANCELLED"||d.code=="cancelled");assert!(session::cached(&session,&context,&root).is_none());assert_eq!((h::stats(&host).payload_readback_bytes,h::stats(&host).validation_readback_bytes),(0,0));let retry=ctx::create(ctx::Options{domains:Some(1),time:Some(0.),frame:Some(count),..Default::default()}).unwrap();session::cook(&mut session,None,&retry,&root)}else{result};
+        let result=if case=="cancel"{assert!(cancel::is_cancelled(&cancel));let d=result.err().expect("cancelled resident cook published");assert!(d.code=="E_CANCELLED"||d.code=="cancelled");assert!(session::cached(&session,&context,&root).is_none());assert_eq!((h::stats(&host).payload_readback_bytes,h::stats(&host).validation_readback_bytes),(0,0));let retry=ctx::create(ctx::Options{domains:Some(1),time:Some(0.),frame:Some(count),..Default::default()}).unwrap();session::cook(&mut session,None,&retry,&root)}else{result};
         if bad{
             let d=result.err().expect("malformed GPU mesh published");let message=match case{"vertex"|"negative"=>"Topology: vertex references an invalid point","missing"=>"Topology: primitive offsets must contain the initial zero","start"=>"Topology: first primitive offset must be zero","terminal"=>"Topology: final primitive offset must equal vertex count","order"=>"Topology: primitive offsets are not ordered","minimum"=>"Topology: primitive has too few vertices for its kind","length"=>"Topology: primitive kind count must match primitive count","kind"=>"Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline).",_=>unreachable!()};
             assert_eq!((d.code.as_str(),d.message.as_str()),(if case=="kind"{"E_TOPOLOGY_KIND"}else{"E_TOPOLOGY"},message));assert!(session::cached(&session,&context,&root).is_none());let stats=h::stats(&host);assert_eq!((stats.payload_readback_bytes,stats.validation_readback_bytes),(0,if case=="negative"{0}else{36}));

@@ -29,8 +29,8 @@ rays_diagnostic = { path = "../rays_diagnostic" }
 [dev-dependencies]
 ogpu_mock = { path = "../ogpu_mock" }
 flow_sop = { path = "../flow_sop" }
-rdk = { path = "../rdk" }
 rdk_core = { path = "../rdk_core" }
+rdk_ops = { path = "../rdk_ops" }
 flow_graph = { path = "../flow_graph" }
 sop = { path = "../sop" }
 rays = { path = "../rays" }

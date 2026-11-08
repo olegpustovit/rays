@@ -10,8 +10,8 @@ use flow_gpu::{pipelines, run};
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit::{self, Curves};
 use flow_syntax::value::Value;
-use rdk::packed::Float3;
-use rdk::{geometry, topology};
+use rdk_core::packed::Float3;
+use rdk_core::{geometry, topology};
 
 const COUNT: usize = 256;
 const SPHERES: [(f64, f64, f64, f64); 2] = [(0.3, 0.2, 1.0, 0.4), (-0.5, -0.4, 0.5, 0.3)];
