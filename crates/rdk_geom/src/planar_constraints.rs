@@ -12,7 +12,6 @@ use crate::predicates::{self, Sign};
 
 const MAX_INT: i64 = (1 << 62) - 1;
 const MIN_INT: i64 = -(1 << 62);
-const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 
 pub struct T {
     source_count: i64,
@@ -435,18 +434,15 @@ fn run(
                 count(index)?;
             }
         }
-        if embedded_count as i64 == MAX_ARRAY_LENGTH {
-            return Err(invalid("Planar embedded point cardinality exceeds array limits"));
-        }
         let mut offsets = vec![0i64; embedded_count + 1];
         for index in 0..embedded_count {
             let c = counts[index].load(AtomicOrdering::Relaxed);
-            if offsets[index] > MAX_ARRAY_LENGTH - c {
+            let Some(next) = offsets[index].checked_add(c) else {
                 return Err(invalid(
                     "Planar embedded incidence cardinality exceeds array limits",
                 ));
-            }
-            offsets[index + 1] = offsets[index] + c;
+            };
+            offsets[index + 1] = next;
         }
         let incidences: Vec<AtomicI64> = (0..offsets[embedded_count])
             .map(|_| AtomicI64::new(0))
@@ -502,11 +498,11 @@ fn run(
         for &point in embedded_points {
             include_original(point);
         }
-        if crossing_count as i64 > MAX_ARRAY_LENGTH - original_count {
+        let Some(_) = (crossing_count as i64).checked_add(original_count) else {
             return Err(invalid(
                 "Planar constraint intersection cardinality exceeds array limits",
             ));
-        }
+        };
         let entries = original_count as usize + crossing_count;
         let mut entry_points: Vec<implicit_point::T> = Vec::with_capacity(entries);
         let mut entry_original = vec![-1i64; entries];

@@ -8,7 +8,6 @@ use rdk_geom::point_grid::{float_max, float_min};
 
 const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
 const OCAML_MIN_INT: i64 = -(1i64 << 62);
-const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
 const MAX_STRING_LENGTH: i64 = (1i64 << 57) - 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -886,10 +885,10 @@ fn output_offsets(clusters: &Clusters, compact: bool, cluster_lengths: &[i64]) -
     for output in 0..count {
         let cluster = if compact { output } else { clusters.of_point[output] as usize };
         let length = cluster_lengths[cluster];
-        if offsets[output] > MAX_ARRAY_LENGTH - length {
+        let Some(next) = offsets[output].checked_add(length) else {
             return Err(fail("concatenated attribute exceeds array limits".to_owned()));
-        }
-        offsets[output + 1] = offsets[output] + length;
+        };
+        offsets[output + 1] = next;
     }
     Ok(offsets)
 }
@@ -960,10 +959,10 @@ fn concatenate_int_rows(
         for slot in clusters.offsets[cluster]..clusters.offsets[cluster + 1] {
             let point = ordered[slot as usize] as usize;
             let length = view.offsets[point + 1] - view.offsets[point];
-            if lengths[cluster] > MAX_ARRAY_LENGTH - length {
+            let Some(next) = lengths[cluster].checked_add(length) else {
                 return Err(fail("concatenated integer array exceeds array limits".to_owned()));
-            }
-            lengths[cluster] += length;
+            };
+            lengths[cluster] = next;
         }
     }
     let offsets = output_offsets(clusters, compact, &lengths)?;
@@ -995,10 +994,10 @@ fn concatenate_float_rows(
         for slot in clusters.offsets[cluster]..clusters.offsets[cluster + 1] {
             let point = ordered[slot as usize] as usize;
             let length = view.offsets[point + 1] - view.offsets[point];
-            if lengths[cluster] > MAX_ARRAY_LENGTH - length {
+            let Some(next) = lengths[cluster].checked_add(length) else {
                 return Err(fail("concatenated float array exceeds array limits".to_owned()));
-            }
-            lengths[cluster] += length;
+            };
+            lengths[cluster] = next;
         }
     }
     let offsets = output_offsets(clusters, compact, &lengths)?;

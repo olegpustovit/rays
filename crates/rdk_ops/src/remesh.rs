@@ -15,7 +15,6 @@ use crate::subdivide_refine::{
 const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
 
 /// OCaml `Sys.max_array_length` on a 64-bit build.
-pub const MAX_ARRAY_LENGTH: i64 = (1_i64 << 54) - 1;
 
 /// `fail message = Error (operation ^ ": " ^ message)`.
 pub fn fail(message: &str) -> error::T {
@@ -345,10 +344,11 @@ pub fn primitive_is_triangle(topology_view: &topology::View::View, primitive: i6
 }
 
 pub fn checked_add(label: &str, left: i64, right: i64) -> Result<i64, error::T> {
-    if left < 0 || right < 0 || left > MAX_ARRAY_LENGTH - right {
+    if left < 0 || right < 0 {
         return Err(invalid_arg(format!("{OPERATION}: {label} exceeds array limits")));
     }
-    Ok(left + right)
+    left.checked_add(right)
+        .ok_or_else(|| invalid_arg(format!("{OPERATION}: {label} exceeds array limits")))
 }
 
 // ---------------------------------------------------------------------------
@@ -411,10 +411,10 @@ pub struct Local {
 }
 
 pub fn capacity_for(label: &str, current: i64, needed: i64) -> Result<i64, error::T> {
-    if needed > MAX_ARRAY_LENGTH {
+    if needed < 0 {
         return Err(invalid_arg(format!("{OPERATION}: {label} exceeds array limits")));
     }
-    Ok(MAX_ARRAY_LENGTH.min(needed.max(16.max(current * 2))))
+    Ok(needed.max(16.max(current.saturating_mul(2))))
 }
 
 pub fn corner_next(corner: i64) -> i64 {
@@ -465,10 +465,9 @@ impl Local {
         if needed as usize > self.t_source.len() {
             let capacity =
                 capacity_for("primitive cardinality", self.t_source.len() as i64, needed)?;
-            if capacity > MAX_ARRAY_LENGTH / 3 {
-                return Err(invalid_arg(format!("{OPERATION}: vertex cardinality exceeds array limits")));
-            }
-            let corners = (capacity * 3) as usize;
+            let corners = capacity
+                .checked_mul(3)
+                .ok_or_else(|| invalid_arg(format!("{OPERATION}: vertex cardinality exceeds array limits")))? as usize;
             let capacity = capacity as usize;
             self.c_point.resize(corners, 0);
             self.c_left.resize(corners, 0);

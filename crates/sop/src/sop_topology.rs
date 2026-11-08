@@ -2979,9 +2979,6 @@ pub mod triangulate_2d {
         Triangulate2dProjection::Plane,
         Triangulate2dProjection::Attribute,
     ];
-    /// `Sys.max_array_length` on a 64-bit OCaml.
-    const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
-
     #[derive(Clone, Debug)]
     pub struct Parameters {
         pub point_group: String,
@@ -3091,7 +3088,6 @@ pub mod triangulate_2d {
             || p.maximum_area < 0.
             || p.target_edge_length < 0.
             || p.maximum_new_points < 0
-            || p.maximum_new_points >= MAX_ARRAY_LENGTH
             || p.regularization_steps < 0
         {
             return refuse("triangulate_2d", "refinement bounds must be nonnegative");

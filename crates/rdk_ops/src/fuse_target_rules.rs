@@ -6,7 +6,6 @@ use crate::subdivide_refine::{AFloats, AInts};
 
 use crate::fuse_rules::{AttributeMethod, AttributeRule, GroupRule};
 
-const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
 
 struct CompiledAttributeRule {
     pattern: attribute_pattern::T,
@@ -197,7 +196,7 @@ fn mapped_int_rows(
         } else {
             target.offsets[destination as usize + 1] - target.offsets[destination as usize]
         };
-        if offsets[point] > MAX_ARRAY_LENGTH - length {
+        if offsets[point].checked_add(length).is_none() {
             return Err(fail("fixed-target integer array exceeds array limits".to_owned()));
         }
         offsets[point + 1] = offsets[point] + length;
@@ -239,7 +238,7 @@ fn mapped_float_rows(
         } else {
             target.offsets[destination as usize + 1] - target.offsets[destination as usize]
         };
-        if offsets[point] > MAX_ARRAY_LENGTH - length {
+        if offsets[point].checked_add(length).is_none() {
             return Err(fail("fixed-target float array exceeds array limits".to_owned()));
         }
         offsets[point + 1] = offsets[point] + length;

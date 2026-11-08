@@ -545,7 +545,6 @@ fn weight_rows(
     Ok(output)
 }
 
-const MAX_ARRAY_LENGTH: i64 = (1_i64 << 54) - 1;
 
 #[allow(clippy::too_many_arguments)]
 fn spatial_transfer(
@@ -612,9 +611,6 @@ fn spatial_transfer(
     validate_target_kinds(operation, owner, &attributes, target)?;
     if attributes.is_empty() {
         return Ok(target.clone());
-    }
-    if target_count > MAX_ARRAY_LENGTH / neighbor_capacity {
-        return Err(fail(&format!("{operation}: neighbor table is too large")));
     }
     let source_positions = source_positions()?;
     let target_positions = target_positions()?;

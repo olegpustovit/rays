@@ -318,9 +318,6 @@ fn run(
         ring = splice(&ring, best as usize, hole, hole_index);
     }
     let ring_count = ring.len();
-    if ring_count as i64 > MAX_ARRAY_LENGTH / 3 {
-        return Err(fail("triangulation output exceeds OCaml array limits"));
-    }
     let mut output = vec![0i64; (ring_count - 2) * 3];
     let mut remaining = ring.clone();
     let mut active = ring_count;

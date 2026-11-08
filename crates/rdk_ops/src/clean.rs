@@ -13,7 +13,6 @@ use crate::group_ops;
 use crate::reverse_faces;
 
 const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
-const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
 
 fn make(operation: &str, code: &str, message: String) -> error::T {
     error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
@@ -350,9 +349,6 @@ fn delete_overlaps_general(
     if polygon_count == 0 {
         return Ok(geometry_value.clone());
     }
-    if polygon_count > MAX_ARRAY_LENGTH / 4 {
-        return Err(message_error("Rdk_mesh.Clean.clean: overlap table exceeds array limits"));
-    }
     support::parallel_for(cancel_value.as_deref(), grain, primitive_count as i64, &|primitive| {
         let primitive = primitive as usize;
         if view.primitive_kinds[primitive] != 0 {
@@ -452,9 +448,6 @@ fn delete_triangle_overlaps(
     let primitive_count = geometry::primitive_count(geometry_value);
     if primitive_count == 0 {
         return Ok(geometry_value.clone());
-    }
-    if primitive_count > MAX_ARRAY_LENGTH / 4 {
-        return Err(message_error("Rdk_mesh.Clean.clean: overlap table exceeds array limits"));
     }
     let count = primitive_count as usize;
     let first_points = AInts::new(count as i64, 0);
