@@ -13,6 +13,8 @@ mod live_mesh;
 mod marks_scene;
 #[path = "../native_qualification/smoke.rs"]
 mod smoke;
+#[path = "../native_qualification/alloc_budget.rs"]
+mod alloc_budget;
 
 pub fn scrub_child() -> bool {
     chains::scrub_child()
@@ -27,5 +29,6 @@ pub fn cases() -> Vec<(&'static str, fn())> {
     cases.extend(live_mesh::cases());
     cases.extend(marks_scene::cases());
     cases.extend(smoke::cases());
+    cases.extend(alloc_budget::cases());
     cases
 }
