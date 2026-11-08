@@ -445,18 +445,19 @@ fn gpu_execution_scratch_boundaries() {
         }
     }
     let affine = |offset| new_bytes(common::floats(&[1.,0.,offset,0.,1.,0.]));
-    let transforms = [affine(0.), affine(1.)];
-    let draws: Vec<_> = transforms.iter().enumerate().map(|(i,u)| plain(&format!("scratch-uniform-{i}"), (0,0,64,64), (0,0,64,64), Some(u.clone()))).collect();
+    // bytes are immutable: a changed uniform set is a new buffer under the same draw keys
+    let draws_with = |offset: f32| -> Vec<_> {
+        [affine(0.), affine(offset)].iter().enumerate().map(|(i,u)| plain(&format!("scratch-uniform-{i}"), (0,0,64,64), (0,0,64,64), Some(u.clone()))).collect()
+    };
+    let draws = draws_with(1.);
     renderer::draw(None, &e, &draws).unwrap();
     let uploaded = renderer::stats(&e).unwrap().uploaded_bytes;
     renderer::draw(None, &e, &draws).unwrap();
     assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes, uploaded);
-    transforms[1].borrow_mut()[8..12].copy_from_slice(&2f32.to_le_bytes());
-    renderer::draw(None, &e, &draws).unwrap();
-    assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes, uploaded + 64, "mutated input aliased the completed uniform page");
+    renderer::draw(None, &e, &draws_with(2.)).unwrap();
+    assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes, uploaded + 64, "a changed uniform set uploads a new page");
     for frame in 3..=7 {
-        transforms[1].borrow_mut()[8..12].copy_from_slice(&(frame as f32).to_le_bytes());
-        renderer::draw(None, &e, &draws).unwrap();
+        renderer::draw(None, &e, &draws_with(frame as f32)).unwrap();
     }
     let too_many = vec![draws[0].clone(); 65_537];
     match renderer::draw(None, &e, &too_many) {
@@ -884,8 +885,8 @@ fn gpu_execution_lease_rollback() {
     assert!(Image::replace(&image,1,1,&[0,255,0,255]).is_err(),"two leased buffers must bound image storage");
     leases::rollback(&policy,checkpoint);
     Image::replace(&image,1,1,&[0,255,0,255]).unwrap();
-    assert_eq!(&*first.borrow(),&[255,0,0,255],"rollback released the earlier submission lease");
-    assert_eq!(&*second.borrow(),&[0,255,0,255],"rollback did not release the later buffer");
+    assert_eq!(&*first,&[255,0,0,255],"rollback released the earlier submission lease");
+    assert_eq!(&*second,&[0,0,255,255],"a released snapshot stays immutable");
     leases::release(&held);
     leases::release(&held);
     Image::replace(&image,1,1,&[255,255,255,255]).unwrap();

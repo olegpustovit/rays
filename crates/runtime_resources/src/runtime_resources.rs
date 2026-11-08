@@ -10,10 +10,11 @@ use std::sync::atomic::{AtomicI64, Ordering};
 #[allow(non_camel_case_types)]
 pub type error = ogpu::error::Error;
 
-/// A shared byte buffer. OCaml's `bytes` is compared by physical equality in the storage
-/// hand-over between canvases and images, so the buffer is an `Rc` and `Rc::ptr_eq` is `==`.
+/// A shared immutable byte buffer, compared by physical equality (`Rc::ptr_eq`) in the storage
+/// hand-over between canvases and images. Image and canvas storage is written in place only through
+/// [`unique`], which copies first when a lease or mirror still holds the buffer.
 #[allow(non_camel_case_types)]
-pub type bytes = Rc<RefCell<Vec<u8>>>;
+pub type bytes = Rc<[u8]>;
 
 
 /// OCaml's `max_int` on 64-bit and `Sys.max_string_length`.
@@ -29,7 +30,16 @@ fn err_value(operation: &str, kind: ErrorKind, message: &str) -> error {
 }
 
 fn new_bytes(v: Vec<u8>) -> bytes {
-    Rc::new(RefCell::new(v))
+    Rc::from(v)
+}
+
+/// The buffer's bytes for writing: written in place when this is the only holder, else copied into
+/// a fresh buffer first.
+fn unique(b: &mut bytes) -> &mut [u8] {
+    if Rc::get_mut(b).is_none() {
+        *b = Rc::from(&b[..]);
+    }
+    Rc::get_mut(b).expect("a fresh buffer is unique")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -123,12 +133,12 @@ fn fresh_identity() -> i64 {
     NEXT.fetch_add(1, Ordering::SeqCst)
 }
 
-fn valid_storage(width: i64, height: i64, rgba: &bytes) -> bool {
+fn valid_storage(width: i64, height: i64, length: usize) -> bool {
     width > 0
         && height > 0
         && width <= MAX_INT / 4
         && height <= MAX_INT / (width * 4)
-        && rgba.borrow().len() as i64 == width * height * 4
+        && length as i64 == width * height * 4
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -211,25 +221,22 @@ pub mod Image {
 
     pub fn create(width: i64, height: i64, rgba: &[u8]) -> Result<t, error> {
         enter("Image.create")?;
-            let copy = new_bytes(rgba.to_vec());
-            if !valid_storage(width, height, &copy) {
+            if !valid_storage(width, height, rgba.len()) {
                 Err(err_value("Image.create", ErrorKind::InvalidArgument, "invalid RGBA extent or storage"))
             } else {
-                Ok(owned(width, height, copy))
+                Ok(owned(width, height, Rc::from(rgba)))
             }
     }
 
-    /// The decoder hands over a buffer nobody else holds: it becomes the image's storage without
-    /// another copy.
+    /// The decoded buffer becomes the image's storage (one move into the shared buffer).
     pub fn load_file(path: &str) -> Result<t, error> {
         enter("Image.load_file")?;
         match sdl3::image::load_file(path) {
             Err(e) => Err(err_value("Image.load_file", ErrorKind::Decode, &e.to_string())),
             Ok(decoded) => {
                 let (w, h) = (decoded.width as i64, decoded.height as i64);
-                let pixels = new_bytes(decoded.pixels);
-                if valid_storage(w, h, &pixels) {
-                    Ok(owned(w, h, pixels))
+                if valid_storage(w, h, decoded.pixels.len()) {
+                    Ok(owned(w, h, new_bytes(decoded.pixels)))
                 } else {
                     Err(err_value("Image.load_file", ErrorKind::Decode, "decoded image has invalid RGBA storage"))
                 }
@@ -281,7 +288,7 @@ pub mod Image {
 
     fn gpu_pixels(operation: &str, x: &mut image_data) -> Result<Vec<u8>, error> {
         match x.gpu.clone() {
-            None => Ok(x.rgba.borrow().clone()),
+            None => Ok(x.rgba.to_vec()),
             Some(source) => {
                 let texture = gpu_texture(operation, x, &source)?;
                 let pixels = backend::read_texture(&texture, x.width * 4)?;
@@ -323,7 +330,7 @@ pub mod Image {
     }
 
     fn writable(x: &mut image_data, length: usize) -> Result<bytes, error> {
-        if x.rgba.borrow().len() == length
+        if x.rgba.len() == length
             && x.canvas_owner.is_none()
             && !canvas_storage(x, &x.rgba)
             && !leased(x, &x.rgba)
@@ -331,7 +338,7 @@ pub mod Image {
             return Ok(x.rgba.clone());
         }
         if let Some(b) = x.spare.clone() {
-            if b.borrow().len() == length && !leased(x, &b) {
+            if b.len() == length && !leased(x, &b) {
                 x.spare = None;
                 return Ok(b);
             }
@@ -393,12 +400,21 @@ pub mod Image {
         check("Image.replace", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
-            if !valid_storage(width, height, &new_bytes(rgba.to_vec())) {
+            if !valid_storage(width, height, rgba.len()) {
                 return Err(err_value("Image.replace", ErrorKind::InvalidArgument, "invalid RGBA replacement"));
             }
-            let b = writable(d, rgba.len())?;
-            b.borrow_mut().copy_from_slice(rgba);
-            install(d, b);
+            let mut b = writable(d, rgba.len())?;
+            // the image's own storage is rewritten in place: set it aside so `b` is its only holder
+            let in_place = Rc::ptr_eq(&b, &d.rgba);
+            if in_place {
+                d.rgba = new_bytes(Vec::new());
+            }
+            unique(&mut b).copy_from_slice(rgba);
+            if in_place {
+                d.rgba = b;
+            } else {
+                install(d, b);
+            }
             d.width = width;
             d.height = height;
             d.gpu = None;
@@ -527,7 +543,7 @@ pub mod Image {
     /// Current CPU bank and spare, excluding separately leased snapshots.
     pub fn cpu_storage_bytes(x: &t) -> i64 {
         let d = x.0.borrow();
-        d.rgba.borrow().len() as i64 + d.spare.as_ref().map_or(0, |b| b.borrow().len() as i64)
+        d.rgba.len() as i64 + d.spare.as_ref().map_or(0, |b| b.len() as i64)
     }
 
     pub(crate) fn rgba_of(x: &image_data) -> bytes {
@@ -687,7 +703,7 @@ pub mod Canvas {
     pub fn of_rgba_bytes(width: i64, height: i64, rgba: Vec<u8>) -> Result<t, error> {
         enter("Canvas.of_rgba_bytes")?;
             let rgba = new_bytes(rgba);
-            if !valid_storage(width, height, &rgba) {
+            if !valid_storage(width, height, rgba.len()) {
                 Err(err_value("Canvas.of_rgba_bytes", ErrorKind::InvalidArgument, "invalid RGBA extent or storage"))
             } else {
                 Ok(make(width, height, rgba))
@@ -707,7 +723,7 @@ pub mod Canvas {
     }
 
     fn accept_returned_storage(x: &mut canvas_data, b: &bytes) {
-        if !x.dead && b.borrow().len() == x.rgba.borrow().len() && !Rc::ptr_eq(b, &x.rgba) && x.spare.is_none() {
+        if !x.dead && b.len() == x.rgba.len() && !Rc::ptr_eq(b, &x.rgba) && x.spare.is_none() {
             x.spare = Some(b.clone());
         }
     }
@@ -747,13 +763,13 @@ pub mod Canvas {
         match x.mirror.clone() {
             Some(image) if valid_mirror(x, &image) => {
                 let replacement = match x.spare.take() {
-                    Some(spare) if spare.borrow().len() == x.rgba.borrow().len() => {
-                        spare.borrow_mut().copy_from_slice(&x.rgba.borrow());
+                    Some(mut spare) if spare.len() == x.rgba.len() => {
+                        unique(&mut spare).copy_from_slice(&x.rgba);
                         spare
                     }
                     other => {
                         x.spare = other;
-                        new_bytes(x.rgba.borrow().clone())
+                        Rc::from(&x.rgba[..])
                     }
                 };
                 detach_mirror(x);
@@ -768,10 +784,10 @@ pub mod Canvas {
         match x.mirror.clone() {
             Some(image) if valid_mirror(x, &image) => {
                 let replacement = match x.spare.take() {
-                    Some(spare) if spare.borrow().len() == x.rgba.borrow().len() => spare,
+                    Some(spare) if spare.len() == x.rgba.len() => spare,
                     other => {
                         x.spare = other;
-                        new_bytes(vec![0; x.rgba.borrow().len()])
+                        new_bytes(vec![0; x.rgba.len()])
                     }
                 };
                 detach_mirror(x);
@@ -793,7 +809,7 @@ pub mod Canvas {
             }
             Some(texture) => {
                 detach_for_overwrite(x);
-                backend::read_texture_into(&texture, x.width * 4, &mut x.rgba.borrow_mut())?;
+                backend::read_texture_into(&texture, x.width * 4, unique(&mut x.rgba))?;
                 x.cpu_stale = false;
                 x.readbacks += 1;
                 Ok(())
@@ -818,7 +834,7 @@ pub mod Canvas {
             cpu_mutates(d)?;
             detach_for_mutation(d);
             let offset = (((py * d.width) + px) * 4) as usize;
-            d.rgba.borrow_mut()[offset..offset + 4].copy_from_slice(&color.to_be_bytes());
+            unique(&mut d.rgba)[offset..offset + 4].copy_from_slice(&color.to_be_bytes());
             d.generation += 1;
             Ok(())
     }
@@ -830,7 +846,7 @@ pub mod Canvas {
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
             sync_cpu(d)?;
-            Ok((d.width, d.height, d.generation, d.rgba.borrow().clone()))
+            Ok((d.width, d.height, d.generation, d.rgba.to_vec()))
     }
 
     pub fn capture(x: &t) -> Result<Image::t, error> {
@@ -845,7 +861,7 @@ pub mod Canvas {
                 d.mirror = Some(image.clone());
                 image
             } else {
-                let pixels = d.rgba.borrow().clone();
+                let pixels = d.rgba.to_vec();
                 Image::create(d.width, d.height, &pixels)?
             };
             d.captures += 1;
@@ -857,7 +873,7 @@ pub mod Canvas {
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
             sync_cpu(d)?;
-            let encoded = png::encode(d.width, d.height, &d.rgba.borrow());
+            let encoded = png::encode(d.width, d.height, &d.rgba);
             match std::fs::write(path, encoded) {
                 Ok(()) => Ok(()),
                 Err(e) => Err(err_value("Canvas.save_png", ErrorKind::Io, &e.to_string())),
@@ -959,7 +975,7 @@ pub mod Text {
 
     pub fn pixels(x: &t) -> Result<Vec<u8>, error> {
         check("Text.pixels", x)?;
-        Ok(x.rgba.borrow().clone())
+        Ok(x.rgba.to_vec())
     }
 
     pub fn destroy(x: &mut t) -> Result<(), error> {

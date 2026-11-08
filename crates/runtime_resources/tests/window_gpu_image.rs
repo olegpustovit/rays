@@ -115,7 +115,7 @@ fn gpu_image() {
     assert!(same(&snapshot(&image), &first) && reads.get() == 0);
     assert!(I::pixels(&image).unwrap() == bytes && reads.get() == 1 && I::readbacks(&image) == 1);
     let (_, _, _, saved, mut lease) = I::borrow_snapshot(&image).unwrap();
-    assert!(*saved.borrow() == bytes && reads.get() == 2);
+    assert!(*saved == bytes && reads.get() == 2);
     *source.borrow_mut() = Some(second.clone());
     assert!(I::gpu_snapshot(&image).is_err() && I::pixels(&image).is_err());
     assert!(reads.get() == 2 && I::generation(&image) == generation);
@@ -129,7 +129,7 @@ fn gpu_image() {
     let resized_source: Rc<RefCell<Option<Texture>>> = Rc::new(RefCell::new(Some(resized.clone())));
     I::replace_gpu_source(&image, 17, 5, from(&resized_source)).unwrap();
     assert!(I::identity(&image) == identity && I::size(&image).unwrap() == (17, 5) && I::generation(&image) == generation + 2);
-    assert!(same(&snapshot(&image), &resized) && *saved.borrow() == bytes && I::cpu_storage_bytes(&image) == 0);
+    assert!(same(&snapshot(&image), &resized) && *saved == bytes && I::cpu_storage_bytes(&image) == 0);
     I::release_snapshot(&mut lease);
     I::release_snapshot(&mut lease);
     assert_eq!(I::cpu_storage_bytes(&image), 0);
@@ -162,7 +162,7 @@ fn gpu_image() {
     assert!(I::gpu_snapshot(&image).unwrap().is_none() && I::pixels(&image).unwrap() == cpu && reads.get() == 2);
     let (_, _, _, cpu_saved, mut cpu_lease) = I::borrow_snapshot(&image).unwrap();
     I::replace_gpu_source(&image, 17, 5, from(&resized_source)).unwrap();
-    assert!(*cpu_saved.borrow() == cpu && I::cpu_storage_bytes(&image) == 0);
+    assert!(*cpu_saved == cpu && I::cpu_storage_bytes(&image) == 0);
     I::release_snapshot(&mut cpu_lease);
     assert_eq!(I::cpu_storage_bytes(&image), 0);
     I::replace_gpu_source(&image, 17, 5, from(&resized_source)).unwrap();
@@ -192,7 +192,7 @@ fn gpu_image() {
     I::destroy(&destroyed).unwrap();
     I::release_snapshot(&mut lease);
     I::release_snapshot(&mut lease);
-    assert!(*saved.borrow() == [0x5a; 4] && I::cpu_storage_bytes(&destroyed) == 0);
+    assert!(*saved == [0x5a; 4] && I::cpu_storage_bytes(&destroyed) == 0);
     for t in textures.borrow().iter() {
         let _ = b::destroy_texture(t);
     }

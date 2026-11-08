@@ -205,7 +205,7 @@ pub fn sampled_texture_bytes(texture: &SampledTexture) -> i64 {
     }
     let mut total: i64 = 0;
     for level in texture.levels.iter() {
-        let bytes_ = level.bytes.borrow().len() as i64;
+        let bytes_ = level.bytes.len() as i64;
         if total > SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY - bytes_ {
             total = SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY + 1;
         } else {
@@ -222,7 +222,6 @@ pub struct Lowering {
     out_list: Vec<Draw>,
     ui_slots: side_lru::Table,
     ui_indices_scratch: bytes,
-    ui_affine_scratch: bytes,
 }
 
 pub fn create() -> Lowering {
@@ -233,22 +232,23 @@ pub fn create() -> Lowering {
         out_list: Vec::new(),
         ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
         ui_indices_scratch: empty_bytes(),
-        ui_affine_scratch: new_bytes(vec![0; 24]),
     }
 }
 
-/// Writes the affine into the shared scratch and returns it: copy it to keep it.
-pub fn write_ui_affine(value: &Lowering, transform: &Transform) -> bytes {
-    write_affine(&mut value.ui_affine_scratch.borrow_mut(), transform);
-    value.ui_affine_scratch.clone()
+pub fn ui_affine(transform: &Transform) -> bytes {
+    let mut target = vec![0u8; 24];
+    write_affine(&mut target, transform);
+    new_bytes(target)
 }
 
 pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> bytes {
     let needed = (count * 24) as usize;
-    let length = value.ui_indices_scratch.borrow().len();
+    let length = value.ui_indices_scratch.len();
     if length < needed {
         let capacity = needed.max(2 * length);
-        let mut data = vec![0u8; capacity];
+        // built in place: a Vec moved into the shared buffer would allocate the table twice
+        let mut shared: bytes = std::iter::repeat_n(0u8, capacity).collect();
+        let data = Rc::get_mut(&mut shared).expect("a fresh buffer is unique");
         for quad in 0..capacity / 24 {
             let base = (quad * 4) as i32;
             let at = quad * 24;
@@ -256,12 +256,12 @@ pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> bytes {
                 data[at + offset * 4..at + offset * 4 + 4].copy_from_slice(&word.to_le_bytes());
             }
         }
-        value.ui_indices_scratch = new_bytes(data);
+        value.ui_indices_scratch = shared;
     }
-    if value.ui_indices_scratch.borrow().len() == needed {
+    if value.ui_indices_scratch.len() == needed {
         value.ui_indices_scratch.clone()
     } else {
-        new_bytes(value.ui_indices_scratch.borrow()[..needed].to_vec())
+        Rc::from(&value.ui_indices_scratch[..needed])
     }
 }
 
@@ -512,14 +512,14 @@ pub fn lower_scene2(
                     {
                         // Published UI bytes remain immutable; the draw retains their Arc directly.
                         let mut s = slot.borrow_mut();
-                        if !s.vertices.borrow().is_empty() { s.vertices=empty_bytes(); }
+                        if !s.vertices.is_empty() { s.vertices=empty_bytes(); }
                         s.source=s.vertices.clone();
-                        if s.indices.borrow().len() as i64 != count * 24 {
+                        if s.indices.len() as i64 != count * 24 {
                             s.indices = ui_index_bytes(state_, count);
                         }
-                        let affine = write_ui_affine(state_, &render_transform(transforms.last().expect("transform")));
-                        if s.affine.borrow()[..] != affine.borrow()[..] {
-                            s.affine = new_bytes(affine.borrow().clone());
+                        let affine = ui_affine(&render_transform(transforms.last().expect("transform")));
+                        if s.affine != affine {
+                            s.affine = affine;
                         }
                     }
                     let s = slot.borrow();

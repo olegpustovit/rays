@@ -86,7 +86,7 @@ fn borrowed_vertices_reuse_indices_with_fresh_empty_host_planes() {
     next.vertices = new_bytes(vec![1]);
     assert!(!same_bytes(&next, &Some(source.clone())));
     next.vertices = empty_bytes();
-    next.indices = new_bytes(source.indices.borrow().clone());
+    next.indices = Rc::from(&source.indices[..]);
     assert!(!same_bytes(&next, &Some(source)), "new index storage still needs content validation");
 }
 
@@ -105,7 +105,7 @@ fn published_shapes_retain_immutable_vertices_without_copying() {
     let mut snapshot=|_,_| panic!("shape fixture unexpectedly resolves an image");
     let draws=lowering::lower_scene2(&mut state,&facts,1,&mut snapshot,&|_| Ok(None),&|| {},&|_| None,&commands).unwrap();
     let mesh=&draws[0].draw.mesh;
-    assert!(mesh.vertices.borrow().is_empty());
+    assert!(mesh.vertices.is_empty());
     assert!(Arc::ptr_eq(mesh.shared_vertices.as_ref().unwrap(),&storage));
     assert_eq!(mesh.vertex_bytes_len(),2*64);
     let cloned=mesh.clone();
@@ -119,9 +119,9 @@ fn published_shapes_retain_immutable_vertices_without_copying() {
     assert_eq!(cloned.shared_vertices.as_ref().unwrap().as_slice(),expected.as_slice());
     let mut owned=entry();
     let hash=vertex_hash(&owned.draw.mesh);
-    owned.draw.mesh.vertices.borrow_mut()[0]=1;
+    owned.draw.mesh.vertices=new_bytes(vec![1;72]);
     assert_ne!(vertex_hash(&owned.draw.mesh),hash,"owned mesh mutation stopped reaching its source");
     owned.draw.mesh.shared_vertices=Some(Arc::new(vec![0;72]));
     invalid(owned);
-    assert_eq!(std::mem::size_of::<super::Mesh>(),80,"hot mesh owner layout");
+    assert_eq!(std::mem::size_of::<super::Mesh>(),96,"hot mesh owner layout (two fat Rc<[u8]> byte buffers)");
 }

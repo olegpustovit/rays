@@ -29,7 +29,7 @@ fn stage(lights: Vec<light::t>) -> Vec<u8> {
     let scene3 = d3::create(Some(lights), None, None, None, vec![d3::mesh(None, None, None, None, None, triangle())]).expect("scene3");
     let staged = Layer::stage_native(320, 240, &[scene::view3d(None, &cam, scene3)]).expect("stage");
     let bytes = staged.scene3[0].entries[0].draw.state.transform_uniforms.clone().expect("uniforms");
-    let copy = bytes.borrow().clone();
+    let copy = bytes.to_vec();
     copy
 }
 

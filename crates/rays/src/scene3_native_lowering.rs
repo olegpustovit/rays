@@ -788,9 +788,9 @@ fn prepared_bytes(p: &se::PreparedScene3) -> i64 {
         .map(|entry| {
             let m = &entry.draw.mesh;
             m.vertex_bytes_len() as i64
-                + m.indices.borrow().len() as i64
-                + entry.vertex_attributes.as_ref().map_or(0, |(_, b)| b.borrow().len() as i64)
-                + entry.draw.state.transform_uniforms.as_ref().map_or(0, |b| b.borrow().len() as i64)
+                + m.indices.len() as i64
+                + entry.vertex_attributes.as_ref().map_or(0, |(_, b)| b.len() as i64)
+                + entry.draw.state.transform_uniforms.as_ref().map_or(0, |b| b.len() as i64)
         })
         .sum()
 }
@@ -1313,7 +1313,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                             put32(
                                 &mut transform_uniforms,
                                 81,
-                                if width_ == 0 && packed.vertex_attributes.1.borrow().is_empty() { -1. } else { width_ as f64 },
+                                if width_ == 0 && packed.vertex_attributes.1.is_empty() { -1. } else { width_ as f64 },
                             );
                         }
                         let state = se::State {

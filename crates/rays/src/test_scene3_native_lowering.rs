@@ -104,14 +104,14 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         });
         assert_eq!(prepared.entries.len(), 1, "native triangle draw count");
         let entry = &prepared.entries[0];
-        let vertices = entry.draw.mesh.vertices.borrow().clone();
+        let vertices = entry.draw.mesh.vertices.to_vec();
         assert!(vertices.len() == 72 && entry.draw.mesh.index_count == 3, "native Scene3 ABI cardinality");
         // blending an opaque draw keeps a tile-based GPU from dropping its hidden fragments
         assert!(entry.blend == ogpu::pipeline::Blend::Replace, "an opaque default-blend draw kept blending");
         assert!(word32(&vertices, 0) == -0.5, "native Scene3 vertex ABI");
-        let attrs = entry.vertex_attributes.as_ref().expect("attributes").1.borrow().clone();
+        let attrs = entry.vertex_attributes.as_ref().expect("attributes").1.to_vec();
         assert!(u32::from_le_bytes([attrs[0], attrs[1], attrs[2], attrs[3]]) == 0xff0000ff, "native Scene3 vertex ABI");
-        let uniforms = entry.draw.state.transform_uniforms.as_ref().expect("uniforms").borrow().clone();
+        let uniforms = entry.draw.state.transform_uniforms.as_ref().expect("uniforms").to_vec();
         assert!(uniforms.len() == 5456 && word32(&uniforms, 64) == 1., "native Scene3 uniform ABI");
         let check_clip_depth = |label: &str, offset: usize, bytes: &[u8]| {
             let word = |index: usize| word32(bytes, offset + index);
@@ -120,7 +120,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         };
         check_clip_depth("ordinary MVP", 0, &uniforms);
         let instanced = prepare(16, 16, scene_of(vec![d3::instances_array(None, None, None, None, m.clone(), &[mat4::identity(), mat4::identity()])]));
-        let instanced_uniforms = instanced.entries[0].draw.state.transform_uniforms.as_ref().expect("uniforms").borrow().clone();
+        let instanced_uniforms = instanced.entries[0].draw.state.transform_uniforms.as_ref().expect("uniforms").to_vec();
         check_clip_depth("instance MVP", 1364, &instanced_uniforms);
         let texture_ = texture::generate_mipmaps(
             &texture::init(2, 2, &|x, y| if x == y { color::red() } else { color::rgb(0, 0, 255) }).expect("texture"),
@@ -137,14 +137,14 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         let textured_stage = Layer::stage_native(16, 16, &[scene::view3d(None, &cam, textured)]).expect("stage");
         let textured_entry = &textured_stage.scene3[0].entries[0];
         match (&textured_entry.family, &textured_entry.texture) {
-            (se::PipelineFamily::Scene3Textured, Some(value)) if value.levels.len() == 2 && value.levels[0].bytes.borrow().len() == 16 => {}
+            (se::PipelineFamily::Scene3Textured, Some(value)) if value.levels.len() == 2 && value.levels[0].bytes.len() == 16 => {}
             _ => panic!("native texture mip/sampler staging"),
         }
         let light_ = light::directional(None, None, vec3::create(0., 0., -1.)).expect("light");
         let lit = d3::create(Some(vec![light_]), None, None, None, vec![plain(&m)]).expect("scene3");
         let baked = world::bake(Some(1), None, 64, 32, &world::default()).expect("bake");
         let world_stage = prepare(16, 16, d3::with_world(baked, &lit));
-        let inverse = world_stage.entries[0].draw.state.transform_uniforms.as_ref().expect("uniforms").borrow().clone();
+        let inverse = world_stage.entries[0].draw.state.transform_uniforms.as_ref().expect("uniforms").to_vec();
         let word = |index: usize| word32(&inverse, 84 + index);
         let world_z = |depth: f64| ((word(10) * depth) + word(11)) / ((word(14) * depth) + word(15));
         assert!((world_z(0.) - 1.9).abs() <= 1e-5 && (world_z(1.) + 998.).abs() <= 1e-3, "World background inverse did not use native depth endpoints");
@@ -155,7 +155,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
             &[vec3::zero(), vec3::unit_x(), vec3::unit_y(), vec3::create(1., 1., 0.)],
         );
         let strip_prepared = prepare(16, 16, scene_of(vec![plain(&strip)]));
-        let encoded = strip_prepared.entries[0].draw.mesh.indices.borrow().clone();
+        let encoded = strip_prepared.entries[0].draw.mesh.indices.to_vec();
         let actual: Vec<i32> = (0..6).map(|i| i32::from_le_bytes([encoded[i * 4], encoded[i * 4 + 1], encoded[i * 4 + 2], encoded[i * 4 + 3]])).collect();
         assert_eq!(actual, vec![0, 1, 2, 2, 1, 3], "native triangle strip winding");
         let first = prepare(16, 16, scene3.clone());
@@ -255,10 +255,10 @@ fn resident_streams() {
         let faces = stage_faces();
         assert!(Rc::ptr_eq(&stage_faces(), &faces));
         let entry = faces.scene3[0].entries[0].clone();
-        assert!(entry.draw.mesh.vertices.borrow().is_empty() && entry.draw.mesh.indices.borrow().is_empty());
+        assert!(entry.draw.mesh.vertices.is_empty() && entry.draw.mesh.indices.is_empty());
         assert_eq!(entry.draw.mesh.index_count, 36);
-        assert!(entry.vertex_attributes.as_ref().is_some_and(|(_, b)| b.borrow().is_empty()));
-        let uniforms = entry.draw.state.transform_uniforms.as_ref().expect("uniforms").borrow().clone();
+        assert!(entry.vertex_attributes.as_ref().is_some_and(|(_, b)| b.is_empty()));
+        let uniforms = entry.draw.state.transform_uniforms.as_ref().expect("uniforms").to_vec();
         assert_eq!(word32(&uniforms, 81), 3.);
         assert_eq!(made.get(), 0);
         let _ = stage(d3::render_mode::Wireframe);
@@ -284,7 +284,7 @@ fn resident_streams() {
             let staged = Layer::stage_native(16, 16, &[scene::view3d(None, &cam, scene_of(vec![node]))]).expect("stage");
             let entry = &staged.scene3[0].entries[0];
             assert!(matches!(entry.draw.mesh.key, se::MeshKey::Host(_)));
-            assert!(!entry.draw.mesh.vertices.borrow().is_empty());
+            assert!(!entry.draw.mesh.vertices.is_empty());
         }
         assert_eq!(made.get(), 2);
     });

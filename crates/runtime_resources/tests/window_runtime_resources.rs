@@ -121,7 +121,7 @@ fn image_and_canvas() {
     // lent at once, and a leased source cannot be moved.
     let leased_image = Image::create(8, 8, &solid(64, b"\x10\x20\x30\xff")).unwrap();
     let (_, _, _, leased_pixels, mut lease1) = Image::borrow_snapshot(&leased_image).unwrap();
-    let leased_copy = leased_pixels.borrow().clone();
+    let leased_copy = leased_pixels.to_vec();
     let lease_target = Image::create(1, 1, &[0x5c; 4]).unwrap();
     let lease_target_before = Image::pixels(&lease_target).unwrap();
     assert_eq!(match Image::replace_owned(&lease_target, &leased_image) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "leased source storage was moved");
@@ -131,9 +131,9 @@ fn image_and_canvas() {
     );
     Image::destroy(&lease_target).unwrap();
     Image::replace(&leased_image, 8, 8, &solid(64, b"\xaa\xbb\xcc\xff")).unwrap();
-    assert_eq!(*leased_pixels.borrow(), leased_copy, "image mutation changed leased snapshot");
+    assert_eq!(*leased_pixels, leased_copy, "image mutation changed leased snapshot");
     let (_, _, _, second_pixels, mut lease2) = Image::borrow_snapshot(&leased_image).unwrap();
-    assert_eq!(*second_pixels.borrow(), solid(64, b"\xaa\xbb\xcc\xff"), "second lease is not the replacement");
+    assert_eq!(*second_pixels, solid(64, b"\xaa\xbb\xcc\xff"), "second lease is not the replacement");
     assert_eq!(
         match Image::replace(&leased_image, 8, 8, &solid(64, b"\x11\x22\x33\xff")) { Ok(_) => panic!("expected an error"), Err(e) => e.kind },
         ErrorKind::InvalidArgument,
@@ -142,14 +142,14 @@ fn image_and_canvas() {
     assert_eq!(Image::pixels(&leased_image).unwrap(), solid(64, b"\xaa\xbb\xcc\xff"), "a refused replacement changed the image");
     Image::release_snapshot(&mut lease1);
     Image::replace(&leased_image, 8, 8, &solid(64, b"\x11\x22\x33\xff")).unwrap();
-    assert_eq!(*second_pixels.borrow(), solid(64, b"\xaa\xbb\xcc\xff"), "image mutation changed the second lease");
+    assert_eq!(*second_pixels, solid(64, b"\xaa\xbb\xcc\xff"), "image mutation changed the second lease");
     Image::release_snapshot(&mut lease2);
     Image::release_snapshot(&mut lease2);
     Image::destroy(&leased_image).unwrap();
     let destroy_leased = Image::create(1, 1, b"\x12\x34\x56\x78").unwrap();
     let (_, _, _, destroy_bytes, mut destroy_lease) = Image::borrow_snapshot(&destroy_leased).unwrap();
     Image::destroy(&destroy_leased).unwrap();
-    assert_eq!(*destroy_bytes.borrow(), b"\x12\x34\x56\x78", "destroy invalidated leased image bytes");
+    assert_eq!(&destroy_bytes[..], b"\x12\x34\x56\x78", "destroy invalidated leased image bytes");
     Image::release_snapshot(&mut destroy_lease);
     Image::release_snapshot(&mut destroy_lease);
     let direct = Canvas::create(640, 480).unwrap();
@@ -234,7 +234,7 @@ fn capture_shares_storage_until_write() {
     let image = Canvas::capture(&canvas).unwrap();
     let (_, _, _, before, mut lease) = Image::borrow_snapshot(&image).unwrap();
     Canvas::set_pixel(&canvas, 0, 0, 0x01020304).unwrap();
-    assert_eq!(&before.borrow()[..4], &[0, 0, 0, 0], "the capture changed with the canvas");
+    assert_eq!(&before[..4], &[0, 0, 0, 0], "the capture changed with the canvas");
     assert_eq!(Canvas::snapshot(&canvas).unwrap().3[..4], [1, 2, 3, 4]);
     Image::release_snapshot(&mut lease);
     Image::destroy(&image).unwrap();

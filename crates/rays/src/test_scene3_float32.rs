@@ -20,7 +20,7 @@ pub fn stage(m: &mesh::t) -> Rc<se::SampledDraw> {
 }
 
 pub fn attributes(entry: &se::SampledDraw) -> Vec<u8> {
-    entry.vertex_attributes.as_ref().expect("attributes").1.borrow().clone()
+    entry.vertex_attributes.as_ref().expect("attributes").1.to_vec()
 }
 
 fn f32_at(bytes: &[u8], offset: usize) -> f32 {
@@ -55,14 +55,14 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         let (source, _, first, second) = pair();
         let packed = first.draw.mesh.vertices.clone();
         let attrs = attributes(&first);
-        assert!(packed.borrow().len() == 72 && attrs.len() == 36);
+        assert!(packed.len() == 72 && attrs.len() == 36);
         let original = mesh::View::view(&source).unwrap();
         for (i, position) in original.vertices.iter().enumerate() {
             let normal = original.normals.as_ref().expect("normals")[i];
             for (word, expected) in [position.x, position.y, position.z, normal.x, normal.y, normal.z].iter().enumerate() {
-                assert_eq!(f32_at(&packed.borrow(), i * 24 + word * 4), *expected as f32);
+                assert_eq!(f32_at(&packed, i * 24 + word * 4), *expected as f32);
             }
-            assert_eq!(first.draw.mesh.indices.borrow()[i * 4..i * 4 + 4], (i as i32).to_le_bytes());
+            assert_eq!(first.draw.mesh.indices[i * 4..i * 4 + 4], (i as i32).to_le_bytes());
             let c = original.colors.as_ref().expect("colors")[i];
             let packed_color = ((c.r << 24) | (c.g << 16) | (c.b << 8) | c.a) as u32;
             assert_eq!(u32::from_le_bytes([attrs[i * 12], attrs[i * 12 + 1], attrs[i * 12 + 2], attrs[i * 12 + 3]]), packed_color);
@@ -75,7 +75,7 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
             let s = attributes(&second);
             assert_eq!(u32::from_le_bytes([s[i * 12], s[i * 12 + 1], s[i * 12 + 2], s[i * 12 + 3]]), 0xffff00ff);
         }
-        assert_eq!(f32_at(&first.draw.state.transform_uniforms.as_ref().unwrap().borrow(), 82 * 4), 1.);
+        assert_eq!(f32_at(&first.draw.state.transform_uniforms.as_ref().unwrap(), 82 * 4), 1.);
         let repeated = stage(&source);
         assert!(Rc::ptr_eq(&repeated.draw.mesh.vertices, &packed));
         assert!(Rc::ptr_eq(&repeated.vertex_attributes.as_ref().unwrap().1, &first.vertex_attributes.as_ref().unwrap().1));

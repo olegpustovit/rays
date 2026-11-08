@@ -1098,7 +1098,7 @@ pub mod Layer {
             }
         }
         let levels = Rc::new(create()?);
-        let bytes = levels.iter().map(|l| l.bytes.borrow().len() as i64).sum();
+        let bytes = levels.iter().map(|l| l.bytes.len() as i64).sum();
         side_lru::add(&mut context.texture_levels.borrow_mut(), bytes, key, levels.clone());
         Ok(levels)
     }
@@ -1343,8 +1343,8 @@ pub mod Layer {
                     .iter()
                     .map(|e| {
                         e.draw.mesh.vertex_bytes_len() as i64
-                            + e.draw.mesh.indices.borrow().len() as i64
-                            + e.draw.state.transform_uniforms.as_ref().map_or(0, |b| b.borrow().len() as i64)
+                            + e.draw.mesh.indices.len() as i64
+                            + e.draw.state.transform_uniforms.as_ref().map_or(0, |b| b.len() as i64)
                     })
                     .sum(),
             })

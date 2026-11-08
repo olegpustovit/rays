@@ -22,7 +22,7 @@ use std::sync::{Arc, OnceLock};
 pub use runtime_resources::bytes;
 
 pub fn new_bytes(value: Vec<u8>) -> bytes {
-    Rc::new(RefCell::new(value))
+    Rc::from(value)
 }
 
 pub fn empty_bytes() -> bytes {
@@ -30,7 +30,7 @@ pub fn empty_bytes() -> bytes {
 }
 
 fn blen(value: &bytes) -> usize {
-    value.borrow().len()
+    value.len()
 }
 
 /// OCaml `Sys.max_string_length` on 64-bit.
@@ -344,7 +344,7 @@ struct UniformPage {
 }
 
 struct CachedAuxiliary {
-    copy: Vec<u8>,
+    copy: bytes,
     buffer: Buffer,
     /// The bytes this entry was uploaded from: a physically equal source is a hit without comparing
     /// (World blocks can carry a whole shadow map).
@@ -684,7 +684,7 @@ fn resolve_gpu_vertices(value: &SceneExecution, entry: &SampledDraw) -> Result<O
         Some(source) if gpu_vertices_valid(&source) => {
             let color_width = match &entry.draw.state.transform_uniforms {
                 Some(bytes_) if blen(bytes_) >= 82 * 4 => {
-                    let b = bytes_.borrow();
+                    let b = bytes_;
                     f32::from_bits(u32::from_le_bytes(b[81 * 4..81 * 4 + 4].try_into().unwrap())) as f64
                 }
                 _ => 0.0,
@@ -1044,7 +1044,7 @@ fn same_bytes(mesh: &Mesh, source: &Option<Mesh>) -> bool {
             (match (&source.shared_vertices, &mesh.shared_vertices) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a,b),
                 (None, None) => Rc::ptr_eq(&source.vertices,&mesh.vertices)
-                    || (source.vertices.borrow().is_empty() && mesh.vertices.borrow().is_empty()),
+                    || (source.vertices.is_empty() && mesh.vertices.is_empty()),
                 _ => false,
             })
                 && Rc::ptr_eq(&source.indices, &mesh.indices)
@@ -1056,13 +1056,13 @@ fn same_bytes(mesh: &Mesh, source: &Option<Mesh>) -> bool {
 }
 
 fn vertex_hash(mesh: &Mesh) -> String {
-    let owned=mesh.vertices.borrow();
-    let vertices=mesh.shared_vertices.as_ref().map_or(owned.as_slice(), |bytes| bytes.as_slice());
+    let owned=&mesh.vertices;
+    let vertices=mesh.shared_vertices.as_ref().map_or(&owned[..], |bytes| bytes.as_slice());
     digest_hex(vertices)
 }
 
 fn content_hash(mesh: &Mesh, uniform_bytes: &[u8]) -> String {
-    format!("{}:{}:{}", vertex_hash(mesh), digest_hex(&mesh.indices.borrow()), digest_hex(uniform_bytes))
+    format!("{}:{}:{}", vertex_hash(mesh), digest_hex(&mesh.indices), digest_hex(uniform_bytes))
 }
 
 fn f32_at(bytes_: &[u8], index: usize) -> f32 {
@@ -1096,8 +1096,8 @@ fn scratch_mem_mesh(scratch: &PreparedScratch, item: &CachedRef) -> bool {
 /// keep the exact source bytes they were uploaded from and compare them physically. Content hashing
 /// happens once per upload and only decides a same-key miss for fresh but equal bytes.
 fn prepare(value: &mut SceneExecution, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &Mesh) -> Result<CachedRef, Error> {
-    let uniform_bytes: Vec<u8> = uniforms.map(|b| b.borrow().clone()).unwrap_or_default();
-    let valid_uniforms = uniforms.is_none_or(|bytes_| valid_uniform_bytes(&bytes_.borrow()));
+    let uniform_bytes: Vec<u8> = uniforms.map(|b| b.to_vec()).unwrap_or_default();
+    let valid_uniforms = uniforms.is_none_or(|bytes_| valid_uniform_bytes(&bytes_));
     let key = mesh_key_string(&mesh.key);
     // a borrowed stream that was unregistered can never be named again: its cached copies go,
     // rather than waiting for the table's byte or entry limit
@@ -1168,9 +1168,9 @@ fn prepare_upload(
     key: &str,
     existing: Option<CachedRef>,
 ) -> Result<CachedRef, Error> {
-    let owned_vertices = mesh.vertices.borrow();
-    let vertices = mesh.shared_vertices.as_ref().map_or(owned_vertices.as_slice(), |bytes| bytes.as_slice());
-    let indices = mesh.indices.borrow();
+    let owned_vertices = &mesh.vertices;
+    let vertices = mesh.shared_vertices.as_ref().map_or(&owned_vertices[..], |bytes| bytes.as_slice());
+    let indices = &mesh.indices;
     let (vertex_count, index_count) = (mesh.vertex_count, mesh.index_count);
     let total = (vertices.len() + indices.len() + uniform_bytes.len()) as i64;
     if mesh_key_string(&mesh.key).is_empty()
@@ -1289,13 +1289,13 @@ fn geometry_constants(affine: Option<&bytes>) -> bytes {
             put(4, 1.0);
         }
         Some(bytes_) if blen(bytes_) == 24 => {
-            let b = bytes_.borrow();
+            let b = bytes_;
             for index in 0..6 {
                 put(index, f32_at(&b, index));
             }
         }
         Some(bytes_) => {
-            let b = bytes_.borrow();
+            let b = bytes_;
             for index in 0..6 {
                 put(index, f64_at(&b, index) as f32);
             }
@@ -1336,7 +1336,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
         && sources.iter().zip(value.previous_uniforms.iter()).all(|(source, retained)| match (source, retained) {
             (None, None) => true,
             (Some(bytes_), Some(slice)) => {
-                let b = bytes_.borrow();
+                let b = bytes_;
                 b.len() == slice.length
                     && b[..] == slice.staging[slice.staging_offset..slice.staging_offset + slice.length]
             }
@@ -1348,7 +1348,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     let malformed_scene3 = || {
         sources.iter().any(|source| match source {
             Some(bytes_) if blen(bytes_) >= 5456 => {
-                let b = bytes_.borrow();
+                let b = bytes_;
                 let finite = (0..b.len() / 4).all(|index| f32_at(&b, index).is_finite());
                 let lights = f32_at(&b, 73) as f64;
                 !(finite && (0.0..=64.0).contains(&lights) && lights.fract() == 0.0)
@@ -1415,7 +1415,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     let mut offsets: Vec<Option<(i64, usize)>> = vec![None; sources.len()];
     for (index, source) in sources.iter().enumerate() {
         if let Some(bytes_) = source {
-            let b = bytes_.borrow();
+            let b = bytes_;
             staging[cursor as usize..cursor as usize + b.len()].copy_from_slice(&b);
             offsets[index] = Some((cursor, b.len()));
             cursor += align256(b.len() as i64);
@@ -1526,7 +1526,7 @@ fn levels_hash(source: &SampledTexture) -> String {
     let parts: Vec<String> = source
         .levels
         .iter()
-        .map(|level| format!("{}x{}:{}", level.width, level.height, digest_hex(&level.bytes.borrow())))
+        .map(|level| format!("{}x{}:{}", level.width, level.height, digest_hex(&level.bytes)))
         .collect();
     digest_hex(parts.join("|").as_bytes())
 }
@@ -1657,7 +1657,7 @@ fn upload_texture(
         staging = scratch.buffer.clone();
         let packed = &mut scratch.bytes;
         for (level_index, level) in source.levels.iter().enumerate() {
-            let pixels = level.bytes.borrow();
+            let pixels = &level.bytes;
             let row_bytes = (level.width * texel) as usize;
             for row in 0..level.height as usize {
                 let to = offsets[level_index] as usize + row * rows[level_index] as usize;
@@ -1750,12 +1750,12 @@ fn prepare_storage(value: &mut SceneExecution, key: &str, bytes_: &bytes) -> Res
         if Rc::ptr_eq(&item.borrow().source, bytes_) {
             return Ok(item);
         }
-        if item.borrow().copy == *bytes_.borrow() {
+        if item.borrow().copy == *bytes_ {
             item.borrow_mut().source = bytes_.clone();
             return Ok(item);
         }
     }
-    let data = bytes_.borrow();
+    let data = bytes_;
     let descriptor = BufferDescriptor {
         label: Some(format!("scene-auxiliary-{}", key)),
         size: data.len() as i64,
@@ -1800,14 +1800,14 @@ fn mesh_identity(mesh: &Mesh) -> String {
         mesh_key_string(&mesh.key),
         primitive_code(mesh.primitive),
         vertex_hash(mesh),
-        digest_hex(&mesh.indices.borrow())
+        digest_hex(&mesh.indices)
     )
 }
 
 fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
     let operation = "Scene_execution.combine_meshes";
     let valid_indices = |mesh: &Mesh| {
-        let indices = mesh.indices.borrow();
+        let indices = &mesh.indices;
         (0..mesh.index_count as usize).all(|index| {
             let value = u32_le(&indices, index * 4) as i32 as i64;
             value >= 0 && value < mesh.vertex_count
@@ -1840,10 +1840,10 @@ fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
     let mut indices = vec![0u8; (index_count * 4) as usize];
     let (mut vertex_offset, mut vertex_base, mut index_offset) = (0usize, 0i64, 0usize);
     for mesh in meshes {
-        let owned = mesh.vertices.borrow();
-        let source = mesh.shared_vertices.as_ref().map_or(owned.as_slice(), |bytes| bytes.as_slice());
+        let owned = &mesh.vertices;
+        let source = mesh.shared_vertices.as_ref().map_or(&owned[..], |bytes| bytes.as_slice());
         vertices[vertex_offset..vertex_offset + source.len()].copy_from_slice(source);
-        let source_indices = mesh.indices.borrow();
+        let source_indices = &mesh.indices;
         for index in 0..mesh.index_count as usize {
             let value = u32_le(&source_indices, index * 4) as i32 as i64;
             set_u32_le(&mut indices, index_offset + index * 4, (value + vertex_base) as i32 as u32);
@@ -1939,7 +1939,7 @@ fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
                 );
                 let mut joined: Vec<u8> = Vec::new();
                 for (_, b) in attributes {
-                    joined.extend_from_slice(&b.borrow());
+                    joined.extend_from_slice(&b);
                 }
                 (key, new_bytes(joined))
             });
@@ -2000,17 +2000,15 @@ fn auxiliary_signature(entry: &(Rc<AuxiliaryResource>, CachedAuxiliaryRef, Cache
     )
 }
 
-/// Submission signatures own affine bytes. Scene values are immutable by contract, but callers may
-/// reuse their input buffer after `render` returns; retaining it here would turn later mutation
-/// into a false cache hit. Completed ring slices may be replayed when the whole uniform set is
+/// Submission signatures share the affine bytes, which are immutable, so a caller reusing its own
+/// buffer cannot turn into a false cache hit. Completed ring slices may be replayed when the whole uniform set is
 /// unchanged. A changed set gets a different page and offsets.
 fn automatic_signature(slot: &PreparedSlot) -> AutomaticSignature {
     let item = slot.mesh.as_ref().expect("slot mesh").borrow();
     let mut signature_state = slot.state.clone().expect("slot state");
-    signature_state.transform_uniforms = match &slot.uniform {
-        Some(_) => None,
-        None => signature_state.transform_uniforms.as_ref().map(|b| new_bytes(b.borrow().clone())),
-    };
+    if slot.uniform.is_some() {
+        signature_state.transform_uniforms = None;
+    }
     AutomaticSignature {
         family: slot.family,
         blend: slot.blend,

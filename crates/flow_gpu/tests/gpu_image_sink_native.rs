@@ -197,12 +197,12 @@ fn qualified_publication() {
         assert_eq!(i::pixels(&current).unwrap(), actual);
         assert_eq!(i::readbacks(&current), before + 1);
         let (_, _, _, bytes, lease) = i::borrow_snapshot(&current).unwrap();
-        assert_eq!(&*bytes.borrow(), &actual);
+        assert_eq!(&bytes[..], &actual[..]);
         assert_eq!(i::readbacks(&current), before + 2);
-        let saved = bytes.borrow().clone();
+        let saved = bytes.to_vec();
         snapshots.push((bytes, saved, lease));
         assert_eq!(i::cpu_storage_bytes(&current), 0);
-        for (bytes, saved, _) in &snapshots { assert_eq!(&*bytes.borrow(), saved); }
+        for (bytes, saved, _) in &snapshots { assert_eq!(&bytes[..], &saved[..]); }
         parity("published_named", 65, 17, time, &actual, &expected);
     }
     let current = image.unwrap();
@@ -343,11 +343,11 @@ fn resident_consumers() {
     assert_eq!(staged.mesh_images.len(), 1);
     assert_eq!(i::identity(&staged.mesh_images[0]), i::identity(&current));
     let sampled = staged.scene3[0].entries[0].texture.as_ref().unwrap();
-    assert!(sampled.gpu.is_some() && sampled.levels[0].bytes.borrow().is_empty());
+    assert!(sampled.gpu.is_some() && sampled.levels[0].bytes.is_empty());
     verify_resident(&canvas, &current, &scenes, &first, 65, 17, 0.25);
     assert_eq!(i::readbacks(&current), 0);
     let (_, _, _, saved, mut lease) = i::borrow_snapshot(&current).unwrap();
-    let saved_copy = saved.borrow().clone();
+    let saved_copy = saved.to_vec();
     let generation = i::generation(&current);
     let second = produce(65, 17, 0.75);
     assert_eq!(i::generation(&current), generation);
@@ -367,7 +367,7 @@ fn resident_consumers() {
     let resized_image = image::of_resource(current.clone()).unwrap();
     scenes = vec![image_scene(&resized_image), meshed, mixed(&resized_image, &view)];
     verify_resident(&canvas, &current, &scenes, &resized, 17, 5, 0.5);
-    assert_eq!(&*saved.borrow(), &saved_copy);
+    assert_eq!(&saved[..], &saved_copy[..]);
     let device = b::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
     let texture = b::create_texture(&device, ogpu::types::TextureDescriptor { label: None, width: 17, height: 5, depth: 1, mip_levels: 1, sample_count: 1, format: ogpu::types::TextureFormat::Rgba8Unorm, usage: vec![ogpu::types::TextureUsage::TextureBinding, ogpu::types::TextureUsage::TextureCopySrc] }).unwrap();
     let foreign = texture.clone();
@@ -381,7 +381,7 @@ fn resident_consumers() {
     i::destroy(&current).unwrap();
     assert!(!b::texture_destroyed(&texture));
     expire(&canvas, &current, &scenes);
-    assert_eq!(&*saved.borrow(), &saved_copy);
+    assert_eq!(&saved[..], &saved_copy[..]);
     canvas::destroy(&canvas).unwrap();
     i::release_snapshot(&mut lease);
     s::close(&sink);
