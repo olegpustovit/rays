@@ -27,14 +27,14 @@ vertex geometry_vertex_out geometry_vertex(
   float r33=((((((buffer1[r9*1+0])*r13))+(((buffer1[(4u)*1+0])*r16))))+(buffer1[(5u)*1+0]));
   if(r7!=0.0f) {
     long r38=long(buffer0[((r11+r36))*1+0]);
-    long r40=(as_type<long>(ulong(long((ulong(r38)&0x7fffffffffffffffUL)>>(long(r39)&63)))<<1)>>1);
-    sb|=(r39>62u)?4u:0u;
+    long r40=as_type<long>(ulong(r38)>>(long(r39)&63));
+    sb|=(r39>63u)?4u:0u;
     r45=(r44==0.0f?0.0f:(float(((uint(r40)&r41))))/r44);
-    long r47=(as_type<long>(ulong(long((ulong(r38)&0x7fffffffffffffffUL)>>(long(r46)&63)))<<1)>>1);
-    sb|=(r46>62u)?4u:0u;
+    long r47=as_type<long>(ulong(r38)>>(long(r46)&63));
+    sb|=(r46>63u)?4u:0u;
     r50=(r44==0.0f?0.0f:(float(((uint(r47)&r41))))/r44);
-    long r52=(as_type<long>(ulong(long((ulong(r38)&0x7fffffffffffffffUL)>>(long(r51)&63)))<<1)>>1);
-    sb|=(r51>62u)?4u:0u;
+    long r52=as_type<long>(ulong(r38)>>(long(r51)&63));
+    sb|=(r51>63u)?4u:0u;
     r55=(r44==0.0f?0.0f:(float(((uint(r52)&r41))))/r44);
     r58=(r44==0.0f?0.0f:(float(((uint(r38)&r41))))/r44);
   }

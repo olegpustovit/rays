@@ -57,13 +57,13 @@ kernel void triangle_indices(
   long r0=long(gid);
   long r11=long(buffer7[(2u)*1+0]);
   long r13=long(buffer7[(3u)*1+0]);
-  long r14=(as_type<long>(ulong((long(r9)==0?0:r0/long(r9)))<<1)>>1);
+  long r14=(long(r9)==0?0:long(r9)==-1?as_type<long>(0ul-ulong(r0)):r0/long(r9));
   sb|=(r9==0)?2u:0u;
-  long r15=(as_type<long>(ulong((long(r9)==0?0:r0%long(r9)))<<1)>>1);
+  long r15=(long(r9)==0||long(r9)==-1?0:r0%long(r9));
   sb|=(r9==0)?2u:0u;
-  long r18=(as_type<long>(ulong((long(r9)==0?0:((as_type<long>(ulong((ulong(r11)+ulong(long(r16))))<<1)>>1))/long(r9)))<<1)>>1);
+  long r18=(long(r9)==0?0:long(r9)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(r11)+ulong(long(r16)))))):(as_type<long>(ulong(r11)+ulong(long(r16))))/long(r9));
   sb|=(r9==0)?2u:0u;
-  long r20=(as_type<long>(ulong((long(r9)==0?0:((as_type<long>(ulong((ulong(r18)+ulong(long(r16))))<<1)>>1))/long(r9)))<<1)>>1);
+  long r20=(long(r9)==0?0:long(r9)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(r18)+ulong(long(r16)))))):(as_type<long>(ulong(r18)+ulong(long(r16))))/long(r9));
   sb|=(r9==0)?2u:0u;
   float r22=(r13==long(r21)?1.0f:0.0f);
   if(r22!=0.0f) {
@@ -74,17 +74,17 @@ kernel void triangle_indices(
       long r29=long(buffer7[r28*1+0]);
       long r30=long(buffer2[r0*1+0]);
       long r32=long(buffer2[((uint(r0)+r26))*1+0]);
-      long r33=(as_type<long>(ulong((ulong(r32)-ulong(r30)))<<1)>>1);
-      long r34=(as_type<long>(ulong((ulong(r0)*ulong(long(r28))))<<1)>>1);
-      long r37=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r30)-ulong(r34)))<<1)>>1)))*ulong(long(r36))))<<1)>>1);
-      long r38=(as_type<long>(ulong((ulong(r29)*ulong(long(r28))))<<1)>>1);
+      long r33=as_type<long>(ulong(r32)-ulong(r30));
+      long r34=as_type<long>(ulong(r0)*ulong(long(r28)));
+      long r37=as_type<long>(ulong((as_type<long>(ulong(r30)-ulong(r34))))*ulong(long(r36)));
+      long r38=as_type<long>(ulong(r29)*ulong(long(r28)));
       r41=(r0==long(r24)?1.0f:0.0f);
       if(r41!=0.0f) {
         r43=(r30==long((0u))?1.0f:0.0f);
       }
       r45=(r41!=0.0f?r43:(as_type<float>(0x3f800000u)));
       if(r45!=0.0f) {
-        r48=(((as_type<long>(ulong((ulong(r0)+ulong(long(r46))))<<1)>>1))==r29?1.0f:0.0f);
+        r48=((as_type<long>(ulong(r0)+ulong(long(r46))))==r29?1.0f:0.0f);
         if(r48!=0.0f) {
           r49=(r32==r27?1.0f:0.0f);
         }
@@ -96,8 +96,8 @@ kernel void triangle_indices(
         if(r55!=0.0f) {
           r60=(((r33==long((3u))?1.0f:0.0f))!=0.0f||((r33==long((4u))?1.0f:0.0f))!=0.0f);
           if(r60!=0.0f) {
-            long r67=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r33)-ulong(long(r61))))<<1)>>1)))*ulong(long(r66))))<<1)>>1);
-            r71=(((r30>=((as_type<long>(ulong((ulong(r0)*ulong(long(r61))))<<1)>>1))?1.0f:0.0f))!=0.0f&&((((r32<=r27?1.0f:0.0f))!=0.0f&&((((as_type<long>(ulong((ulong(r37)+ulong(r67)))<<1)>>1))<=((as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r27)-ulong(r38)))<<1)>>1)))*ulong(long(r36))))<<1)>>1))?1.0f:0.0f))!=0.0f))!=0.0f);
+            long r67=as_type<long>(ulong((as_type<long>(ulong(r33)-ulong(long(r61)))))*ulong(long(r66)));
+            r71=(((r30>=(as_type<long>(ulong(r0)*ulong(long(r61))))?1.0f:0.0f))!=0.0f&&((((r32<=r27?1.0f:0.0f))!=0.0f&&(((as_type<long>(ulong(r37)+ulong(r67)))<=(as_type<long>(ulong((as_type<long>(ulong(r27)-ulong(r38))))*ulong(long(r36))))?1.0f:0.0f))!=0.0f))!=0.0f);
           }
           r72=(r60!=0.0f&&r71!=0.0f);
         }
@@ -386,8 +386,8 @@ kernel void triangle_indices(
   long r620=0;
   uint r623=0u;
   if(r22==0.0f) {
-    long r617=(as_type<long>(ulong((ulong(r614)*ulong(long(r616))))<<1)>>1);
-    long r618=(as_type<long>(ulong((ulong(r15)+ulong(r617)))<<1)>>1);
+    long r617=as_type<long>(ulong(r614)*ulong(long(r616)));
+    long r618=as_type<long>(ulong(r15)+ulong(r617));
     r619=(r618<r18?1.0f:0.0f);
     if(r619!=0.0f) {
       r620=long(buffer5[r618*1+0]);

@@ -15,9 +15,9 @@ vertex quad_vertex_out quad_vertex(
   float r58=as_type<float>(0x0u),r59=as_type<float>(0x3f800000u);
   uint r60=16u,r63=18u,r70=17u,r73=19u,r80=8u,r83=9u,r86=10u,r89=11u;
   long r0=long(vid);
-  long r3=(as_type<long>(ulong((long(r2)==0?0:r0%long(r2)))<<1)>>1);
+  long r3=(long(r2)==0||long(r2)==-1?0:r0%long(r2));
   sb|=(r2==0)?2u:0u;
-  long r4=(as_type<long>(ulong((long(r2)==0?0:r0/long(r2)))<<1)>>1);
+  long r4=(long(r2)==0?0:long(r2)==-1?as_type<long>(0ul-ulong(r0)):r0/long(r2));
   sb|=(r2==0)?2u:0u;
   uint r6=(uint(r4)*r5);
   float r11=(((r3==long(r7)?1.0f:0.0f))!=0.0f||((r3==long(r9)?1.0f:0.0f))!=0.0f);

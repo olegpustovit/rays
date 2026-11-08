@@ -19,10 +19,10 @@ kernel void compact_mask_uint32(
   float r92=0.0f;
   uint r95=1073741823u,r98=0u,r100=0u,r101=0u;
   long r0=long(gid);
-  long r8=(as_type<long>(ulong((long(r7)==0?0:r0/long(r7)))<<1)>>1);
+  long r8=(long(r7)==0?0:long(r7)==-1?as_type<long>(0ul-ulong(r0)):r0/long(r7));
   sb|=(r7==0)?2u:0u;
-  long r9=(as_type<long>(ulong((ulong(r8)*ulong(long(r7))))<<1)>>1);
-  long r10=(as_type<long>(ulong((ulong(r0)-ulong(r9)))<<1)>>1);
+  long r9=as_type<long>(ulong(r8)*ulong(long(r7)));
+  long r10=as_type<long>(ulong(r0)-ulong(r9));
   uint r14=(uint((long(buffer3[(2u)*1+0])))&r13);
   float r19=(long(((uint((long(buffer3[r15*1+0])))&r13)))==long(r18)?1.0f:0.0f);
   if(r19!=0.0f) {
@@ -40,9 +40,9 @@ kernel void compact_mask_uint32(
   sb|=(r7==0)?2u:0u;
   uint r41=(r7==0u?0u:((r39+r35))/r7);
   sb|=(r7==0)?2u:0u;
-  long r42=(as_type<long>(ulong((ulong(r10)*ulong(long(r41))))<<1)>>1);
+  long r42=as_type<long>(ulong(r10)*ulong(long(r41)));
   long r44=(((long(r39)<r42?1.0f:0.0f))!=0.0f?long(r39):r42);
-  long r45=(as_type<long>(ulong((ulong(r44)+ulong(long(r41))))<<1)>>1);
+  long r45=as_type<long>(ulong(r44)+ulong(long(r41)));
   long r47=(((long(r39)<r45?1.0f:0.0f))!=0.0f?long(r39):r45);
   float r48=(r0<long(r32)?1.0f:0.0f);
   if(r48!=0.0f) {

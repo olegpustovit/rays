@@ -30,7 +30,7 @@ kernel void point_normal(
   uint r23=3u,r29=1u,r32=2u;
   float r66=0.0f,r67=0.0f,r68=0.0f;
   if(r12!=0.0f) {
-    long r24=(as_type<long>(ulong((long(r23)==0?0:(long(buffer3[r18*1+0]))/long(r23)))<<1)>>1);
+    long r24=(long(r23)==0?0:long(r23)==-1?as_type<long>(0ul-ulong((long(buffer3[r18*1+0])))):(long(buffer3[r18*1+0]))/long(r23));
     sb|=(r23==0)?2u:0u;
     uint r25=(uint(r24)*r23);
     uint r27=(uint((long(buffer1[r25*1+0])))*r23);

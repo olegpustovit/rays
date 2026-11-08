@@ -14,8 +14,8 @@ kernel void chunk_bounds(
   long r0=long(gid);
   long r6=long(buffer2[r5*1+0]);
   uint r10=(uint((long(buffer2[r7*1+0])))&r9);
-  long r11=(as_type<long>(ulong((ulong(r6)-ulong(long(r5))))<<1)>>1);
-  long r13=(as_type<long>(ulong((r6==0?0:((as_type<long>(ulong((ulong(long(r10))+ulong(r11)))<<1)>>1))/r6))<<1)>>1);
+  long r11=as_type<long>(ulong(r6)-ulong(long(r5)));
+  long r13=(r6==0?0:r6==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(long(r10))+ulong(r11))))):(as_type<long>(ulong(long(r10))+ulong(r11)))/r6);
   sb|=(r6==0)?2u:0u;
   float r16=(((r0<long(r10)?1.0f:0.0f))!=0.0f&&((r0<r6?1.0f:0.0f))!=0.0f);
   if(r16!=0.0f) {
@@ -39,7 +39,7 @@ kernel void chunk_bounds(
     float r37=buffer0[r36*1+0];
     float r40=buffer0[((r36+r38))*1+0];
     float r43=buffer0[((r36+r41))*1+0];
-    r44=(as_type<long>(ulong((ulong(r28)+ulong(r6)))<<1)>>1);
+    r44=as_type<long>(ulong(r28)+ulong(r6));
     r45=min(r29,r37);
     r46=min(r30,r40);
     r47=min(r31,r43);

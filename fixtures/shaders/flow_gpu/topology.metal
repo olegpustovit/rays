@@ -31,8 +31,8 @@ kernel void topology_check(
     r21=(((r12>r14?1.0f:0.0f))!=0.0f?r12:r14);
   }
   long r24=long(buffer4[(5u)*1+0]);
-  long r25=(as_type<long>(ulong((ulong(r24)-ulong(long(r9))))<<1)>>1);
-  long r27=(as_type<long>(ulong((r24==0?0:((as_type<long>(ulong((ulong(((r17!=0.0f?r19:r21)))+ulong(r25)))<<1)>>1))/r24))<<1)>>1);
+  long r25=as_type<long>(ulong(r24)-ulong(long(r9)));
+  long r27=(r24==0?0:r24==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(((r17!=0.0f?r19:r21)))+ulong(r25))))):(as_type<long>(ulong(((r17!=0.0f?r19:r21)))+ulong(r25)))/r24);
   sb|=(r24==0)?2u:0u;
   r29=r0;
   r30=r7;
@@ -50,7 +50,7 @@ kernel void topology_check(
   if(r39!=0.0f) {
     r45=((((long(buffer2[r29*1+0]))>long((2u))?1.0f:0.0f))!=0.0f?(64u):(0u));
   }
-  float r49=(((as_type<long>(ulong((ulong(r29)+ulong(long(r47))))<<1)>>1))<r12?1.0f:0.0f);
+  float r49=((as_type<long>(ulong(r29)+ulong(long(r47))))<r12?1.0f:0.0f);
   if(r49!=0.0f) {
     long r50=long(buffer1[r29*1+0]);
     long r53=long(buffer1[((uint(r29)+r51))*1+0]);
@@ -59,7 +59,7 @@ kernel void topology_check(
       r55=(r29<r14?1.0f:0.0f);
       if(r55!=0.0f) {
         long r56=long(buffer2[r29*1+0]);
-        long r57=(as_type<long>(ulong((ulong(r53)-ulong(r50)))<<1)>>1);
+        long r57=as_type<long>(ulong(r53)-ulong(r50));
         r67=(r56==long(r64)?1.0f:0.0f);
         if(r67!=0.0f) {
           r68=(r57>r16?1.0f:0.0f);
@@ -74,7 +74,7 @@ kernel void topology_check(
   uint r78=(r49!=0.0f?r77:r37);
   uint r80=(((r39!=0.0f?r45:r37))|r78);
   uint r81=(((r31!=0.0f?r36:r37))|r80);
-  long next28_0=((as_type<long>(ulong((ulong(r29)+ulong(r24)))<<1)>>1));
+  long next28_0=(as_type<long>(ulong(r29)+ulong(r24)));
   uint next28_1=((r30|r81));
   r29=next28_0;
   r30=next28_1;
@@ -86,7 +86,7 @@ kernel void topology_check(
       r93=((((long(buffer1[r89*1+0]))==long(r89)?1.0f:0.0f))!=0.0f?r89:(2u));
       r101=((((long(buffer1[((uint(r12)-r96))*1+0]))==r10?1.0f:0.0f))!=0.0f?r89:(4u));
     }
-    uint r106=(((r12==((as_type<long>(ulong((ulong(r14)+ulong(long(r94))))<<1)>>1))?1.0f:0.0f))!=0.0f?r87:(8u));
+    uint r106=(((r12==(as_type<long>(ulong(r14)+ulong(long(r94))))?1.0f:0.0f))!=0.0f?r87:(8u));
     uint r107=(((r88!=0.0f?r87:r101))|r106);
     r108=(((r88!=0.0f?r94:r93))|r107);
   }
@@ -119,10 +119,10 @@ kernel void topology_check(
   threadgroup uint scan158[256];
   {uint v=((((long(((r110&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan158[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan158[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan158[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan158_before=v-((((long(((r110&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan158_total=scan158[256-1];}
   uint r159=scan158_total;
-  long r161=(as_type<long>(ulong((long(r6)==0?0:r0/long(r6)))<<1)>>1);
+  long r161=(long(r6)==0?0:long(r6)==-1?as_type<long>(0ul-ulong(r0)):r0/long(r6));
   sb|=(r6==0)?2u:0u;
   uint r163=(uint(r161)*r162);
-  long r164=(as_type<long>(ulong((long(r6)==0?0:r0%long(r6)))<<1)>>1);
+  long r164=(long(r6)==0||long(r6)==-1?0:r0%long(r6));
   sb|=(r6==0)?2u:0u;
   float r165=(r164==long(r7)?1.0f:0.0f);
   if(r165!=0.0f) {

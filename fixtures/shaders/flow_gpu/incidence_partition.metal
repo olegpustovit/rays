@@ -28,17 +28,17 @@ kernel void incidence_partition(
   long r8=long(buffer4[r7*1+0]);
   long r10=long(buffer4[r9*1+0]);
   long r12=long(buffer4[(2u)*1+0]);
-  long r13=(as_type<long>(ulong((long(r6)==0?0:r0/long(r6)))<<1)>>1);
+  long r13=(long(r6)==0?0:long(r6)==-1?as_type<long>(0ul-ulong(r0)):r0/long(r6));
   sb|=(r6==0)?2u:0u;
-  long r14=(as_type<long>(ulong((long(r6)==0?0:r0%long(r6)))<<1)>>1);
+  long r14=(long(r6)==0||long(r6)==-1?0:r0%long(r6));
   sb|=(r6==0)?2u:0u;
-  long r17=(as_type<long>(ulong((long(r6)==0?0:((as_type<long>(ulong((ulong(r8)+ulong(long(r15))))<<1)>>1))/long(r6)))<<1)>>1);
+  long r17=(long(r6)==0?0:long(r6)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(r8)+ulong(long(r15)))))):(as_type<long>(ulong(r8)+ulong(long(r15))))/long(r6));
   sb|=(r6==0)?2u:0u;
-  long r19=(as_type<long>(ulong((long(r6)==0?0:((as_type<long>(ulong((ulong(r17)+ulong(long(r15))))<<1)>>1))/long(r6)))<<1)>>1);
+  long r19=(long(r6)==0?0:long(r6)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(r17)+ulong(long(r15)))))):(as_type<long>(ulong(r17)+ulong(long(r15))))/long(r6));
   sb|=(r6==0)?2u:0u;
-  long r20=(as_type<long>(ulong((ulong(r14)*ulong(r19)))<<1)>>1);
+  long r20=as_type<long>(ulong(r14)*ulong(r19));
   long r22=(((r17<r20?1.0f:0.0f))!=0.0f?r17:r20);
-  long r23=(as_type<long>(ulong((ulong(r22)+ulong(r19)))<<1)>>1);
+  long r23=as_type<long>(ulong(r22)+ulong(r19));
   long r25=(((r17<r23?1.0f:0.0f))!=0.0f?r17:r23);
   float r27=(r12==long(r9)?1.0f:0.0f);
   float r29=(((r0<r8?1.0f:0.0f))!=0.0f&&((r27==0.0f))!=0.0f);
@@ -51,8 +51,8 @@ kernel void incidence_partition(
   }
   uint r34=(r29!=0.0f?r33:r7);
   if(r29!=0.0f) {
-    long r36=(as_type<long>(ulong(long((ulong((long(buffer0[r34*1+0])))&0x7fffffffffffffffUL)>>(r10&63)))<<1)>>1);
-    sb|=(r10<0 || r10>62)?4u:0u;
+    long r36=as_type<long>(ulong((long(buffer0[r34*1+0])))>>(r10&63));
+    sb|=(r10<0 || r10>63)?4u:0u;
     r40=(((long(((uint(r36)&r37)))==long(r30)?1.0f:0.0f))!=0.0f?r37:r30);
   }
   uint r41=(r29!=0.0f?r40:r7);

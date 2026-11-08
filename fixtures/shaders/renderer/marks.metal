@@ -53,9 +53,9 @@ vertex marks_vertex_out marks_vertex(
   uint r280=8u;
   float r284=0.0f,r287=0.0f,r291=0.0f,r295=0.0f,r299=0.0f,r302=0.0f,r303=0.0f;
   long r0=long(vid);
-  long r9=(as_type<long>(ulong((long(r8)==0?0:r0/long(r8)))<<1)>>1);
+  long r9=(long(r8)==0?0:long(r8)==-1?as_type<long>(0ul-ulong(r0)):r0/long(r8));
   sb|=(r8==0)?2u:0u;
-  long r10=(as_type<long>(ulong((long(r8)==0?0:r0%long(r8)))<<1)>>1);
+  long r10=(long(r8)==0||long(r8)==-1?0:r0%long(r8));
   sb|=(r8==0)?2u:0u;
   float r15=(((r10==long(r11)?1.0f:0.0f))!=0.0f||((r10==long(r13)?1.0f:0.0f))!=0.0f);
   float r18=(r15!=0.0f?(as_type<float>(0x3f800000u)):(as_type<float>(0x0u)));
@@ -77,14 +77,14 @@ vertex marks_vertex_out marks_vertex(
     r41=long(buffer3[r37*1+0]);
   }
   if(r40==0.0f) {
-    long r54=(as_type<long>(ulong((ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer3[r37*1+0]))))),r44)),r46))*r48))+r50))))))<<(long(r53)&63)))<<1)>>1);
-    sb|=(r53>62u)?4u:0u;
-    long r65=(as_type<long>(ulong((ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer3[((r37+r55))*1+0]))))),r44)),r46))*r48))+r50))))))<<(long(r64)&63)))<<1)>>1);
-    sb|=(r64>62u)?4u:0u;
-    long r77=(as_type<long>(ulong((ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer3[((r37+r67))*1+0]))))),r44)),r46))*r48))+r50))))))<<(long(r76)&63)))<<1)>>1);
-    sb|=(r76>62u)?4u:0u;
-    long r79=(as_type<long>(ulong((r77|long(r78)))<<1)>>1);
-    r80=(as_type<long>(ulong((((as_type<long>(ulong((r54|r65))<<1)>>1))|r79))<<1)>>1);
+    long r54=as_type<long>(ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer3[r37*1+0]))))),r44)),r46))*r48))+r50))))))<<(long(r53)&63));
+    sb|=(r53>63u)?4u:0u;
+    long r65=as_type<long>(ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer3[((r37+r55))*1+0]))))),r44)),r46))*r48))+r50))))))<<(long(r64)&63));
+    sb|=(r64>63u)?4u:0u;
+    long r77=as_type<long>(ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer3[((r37+r67))*1+0]))))),r44)),r46))*r48))+r50))))))<<(long(r76)&63));
+    sb|=(r76>63u)?4u:0u;
+    long r79=(r77|long(r78));
+    r80=(((r54|r65))|r79);
   }
   long r81=(r40!=0.0f?r41:r80);
   float r82=(r24==long(r32)?1.0f:0.0f);
@@ -111,14 +111,14 @@ vertex marks_vertex_out marks_vertex(
     r127=(((r110+((((((r86+r108))-r110))*r18))))+((r99*r123)));
     r136=((((((buffer6[(0u)*1+0])*r126))+(((buffer6[r84*1+0])*r127))))+(buffer6[(2u)*1+0]));
     r146=((((((buffer6[(3u)*1+0])*r126))+(((buffer6[(4u)*1+0])*r127))))+(buffer6[(5u)*1+0]));
-    long r148=(as_type<long>(ulong(long((ulong(r81)&0x7fffffffffffffffUL)>>(long(r147)&63)))<<1)>>1);
-    sb|=(r147>62u)?4u:0u;
+    long r148=as_type<long>(ulong(r81)>>(long(r147)&63));
+    sb|=(r147>63u)?4u:0u;
     r153=(r152==0.0f?0.0f:(float(((uint(r148)&r149))))/r152);
-    long r155=(as_type<long>(ulong(long((ulong(r81)&0x7fffffffffffffffUL)>>(long(r154)&63)))<<1)>>1);
-    sb|=(r154>62u)?4u:0u;
+    long r155=as_type<long>(ulong(r81)>>(long(r154)&63));
+    sb|=(r154>63u)?4u:0u;
     r158=(r152==0.0f?0.0f:(float(((uint(r155)&r149))))/r152);
-    long r160=(as_type<long>(ulong(long((ulong(r81)&0x7fffffffffffffffUL)>>(long(r159)&63)))<<1)>>1);
-    sb|=(r159>62u)?4u:0u;
+    long r160=as_type<long>(ulong(r81)>>(long(r159)&63));
+    sb|=(r159>63u)?4u:0u;
     r163=(r152==0.0f?0.0f:(float(((uint(r160)&r149))))/r152);
     r166=(r152==0.0f?0.0f:(float(((uint(r81)&r149))))/r152);
   }
@@ -155,34 +155,34 @@ vertex marks_vertex_out marks_vertex(
       r227=long(buffer2[r223*1+0]);
     }
     if(r226==0.0f) {
-      long r240=(as_type<long>(ulong((ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer2[r223*1+0]))))),r230)),r232))*r234))+r236))))))<<(long(r239)&63)))<<1)>>1);
-      sb|=(r239>62u)?4u:0u;
-      long r251=(as_type<long>(ulong((ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer2[((r223+r241))*1+0]))))),r230)),r232))*r234))+r236))))))<<(long(r250)&63)))<<1)>>1);
-      sb|=(r250>62u)?4u:0u;
-      long r263=(as_type<long>(ulong((ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer2[((r223+r253))*1+0]))))),r230)),r232))*r234))+r236))))))<<(long(r262)&63)))<<1)>>1);
-      sb|=(r262>62u)?4u:0u;
-      long r265=(as_type<long>(ulong((r263|long(r264)))<<1)>>1);
-      r266=(as_type<long>(ulong((((as_type<long>(ulong((r240|r251))<<1)>>1))|r265))<<1)>>1);
+      long r240=as_type<long>(ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer2[r223*1+0]))))),r230)),r232))*r234))+r236))))))<<(long(r239)&63));
+      sb|=(r239>63u)?4u:0u;
+      long r251=as_type<long>(ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer2[((r223+r241))*1+0]))))),r230)),r232))*r234))+r236))))))<<(long(r250)&63));
+      sb|=(r250>63u)?4u:0u;
+      long r263=as_type<long>(ulong((long(floor((((((min((max((as_type<float>(uint((long(buffer2[((r223+r253))*1+0]))))),r230)),r232))*r234))+r236))))))<<(long(r262)&63));
+      sb|=(r262>63u)?4u:0u;
+      long r265=(r263|long(r264));
+      r266=(((r240|r251))|r265);
     }
     long r267=(r226!=0.0f?r227:r266);
-    long r269=(as_type<long>(ulong(long((ulong(r267)&0x7fffffffffffffffUL)>>(long(r268)&63)))<<1)>>1);
-    sb|=(r268>62u)?4u:0u;
+    long r269=as_type<long>(ulong(r267)>>(long(r268)&63));
+    sb|=(r268>63u)?4u:0u;
     r274=(r273==0.0f?0.0f:(float(((uint(r269)&r270))))/r273);
-    long r276=(as_type<long>(ulong(long((ulong(r267)&0x7fffffffffffffffUL)>>(long(r275)&63)))<<1)>>1);
-    sb|=(r275>62u)?4u:0u;
+    long r276=as_type<long>(ulong(r267)>>(long(r275)&63));
+    sb|=(r275>63u)?4u:0u;
     r279=(r273==0.0f?0.0f:(float(((uint(r276)&r270))))/r273);
-    long r281=(as_type<long>(ulong(long((ulong(r267)&0x7fffffffffffffffUL)>>(long(r280)&63)))<<1)>>1);
-    sb|=(r280>62u)?4u:0u;
+    long r281=as_type<long>(ulong(r267)>>(long(r280)&63));
+    sb|=(r280>63u)?4u:0u;
     r284=(r273==0.0f?0.0f:(float(((uint(r281)&r270))))/r273);
     r287=(r273==0.0f?0.0f:(float(((uint(r267)&r270))))/r273);
-    long r288=(as_type<long>(ulong(long((ulong(r81)&0x7fffffffffffffffUL)>>(long(r268)&63)))<<1)>>1);
-    sb|=(r268>62u)?4u:0u;
+    long r288=as_type<long>(ulong(r81)>>(long(r268)&63));
+    sb|=(r268>63u)?4u:0u;
     r291=(r273==0.0f?0.0f:(float(((uint(r288)&r270))))/r273);
-    long r292=(as_type<long>(ulong(long((ulong(r81)&0x7fffffffffffffffUL)>>(long(r275)&63)))<<1)>>1);
-    sb|=(r275>62u)?4u:0u;
+    long r292=as_type<long>(ulong(r81)>>(long(r275)&63));
+    sb|=(r275>63u)?4u:0u;
     r295=(r273==0.0f?0.0f:(float(((uint(r292)&r270))))/r273);
-    long r296=(as_type<long>(ulong(long((ulong(r81)&0x7fffffffffffffffUL)>>(long(r280)&63)))<<1)>>1);
-    sb|=(r280>62u)?4u:0u;
+    long r296=as_type<long>(ulong(r81)>>(long(r280)&63));
+    sb|=(r280>63u)?4u:0u;
     r299=(r273==0.0f?0.0f:(float(((uint(r296)&r270))))/r273);
     r302=(r273==0.0f?0.0f:(float(((uint(r81)&r270))))/r273);
     r303=float(r24);

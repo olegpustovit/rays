@@ -50,11 +50,18 @@ fn exact_uint32_buffers_and_outputs() {
 fn integer_status_bits_are_published() {
     for (source, flag) in [
         (r#"(map (fn [(x : int)] (float (int/div x (int/sub (frame/index) (frame/index))))) (array/range 8 :type int))"#, "2"),
-        (r#"(map (fn [(x : int)] (float (int/shr x (int/add 63 (int/mod (frame/index) 1))))) (array/range 8 :type int))"#, "4"),
+        (r#"(map (fn [(x : int)] (float (int/shr x (int/add 64 (int/mod (frame/index) 1))))) (array/range 8 :type int))"#, "4"),
     ] {
         let msl = fast_kernel(&tp::compile(source));
         assert!(msl.source.contains(&format!("?{flag}u:0u;")));
     }
+}
+
+#[test]
+fn msl_division_guards_minus_one() {
+    // MIN / -1 and MIN % -1 overflow, which C++ leaves undefined; the kernel must not divide by -1
+    let msl = fast_kernel(&tp::compile("(map (fn [(x : int)] (let* [m (int/sub 0 (int/add 1 (int/mod (frame/index) 1)))] (float (int/add (int/div x m) (int/mod x m))))) (array/range 8 :type int))"));
+    assert!(msl.source.contains("==-1"));
 }
 
 struct Loops(i64);

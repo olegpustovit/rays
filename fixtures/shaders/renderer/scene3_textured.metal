@@ -155,22 +155,22 @@ vertex scene3_vertex_out scene3_vertex(
       long r385=long(floor(r384));
       float r387=(r384-(floor(r384)));
       uint r399=(((((r387>r391))!=0.0f||((((r387==r391))!=0.0f&&(((fma(r382,r383,((r384*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r398:r397);
-      long r402=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r385)+ulong(long(r399))))<<1)>>1)))<<(long(r401)&63)))<<1)>>1);
-      sb|=(r401>62u)?4u:0u;
+      long r402=as_type<long>(ulong((as_type<long>(ulong(r385)+ulong(long(r399)))))<<(long(r401)&63));
+      sb|=(r401>63u)?4u:0u;
       float r406=min(r379,(max(r380,(buffer4[((r372+r398))*1+0]))));
       float r407=(r406*r383);
       long r408=long(floor(r407));
       float r410=(r407-(floor(r407)));
       uint r418=(((((r410>r391))!=0.0f||((((r410==r391))!=0.0f&&(((fma(r406,r383,((r407*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r398:r397);
-      long r421=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r408)+ulong(long(r418))))<<1)>>1)))<<(long(r420)&63)))<<1)>>1);
-      sb|=(r420>62u)?4u:0u;
+      long r421=as_type<long>(ulong((as_type<long>(ulong(r408)+ulong(long(r418)))))<<(long(r420)&63));
+      sb|=(r420>63u)?4u:0u;
       float r426=min(r379,(max(r380,(buffer4[((r372+r422))*1+0]))));
       float r427=(r426*r383);
       long r428=long(floor(r427));
       float r430=(r427-(floor(r427)));
       uint r438=(((((r430>r391))!=0.0f||((((r430==r391))!=0.0f&&(((fma(r426,r383,((r427*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r398:r397);
-      long r441=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r428)+ulong(long(r438))))<<1)>>1)))<<(long(r440)&63)))<<1)>>1);
-      sb|=(r440>62u)?4u:0u;
+      long r441=as_type<long>(ulong((as_type<long>(ulong(r428)+ulong(long(r438)))))<<(long(r440)&63));
+      sb|=(r440>63u)?4u:0u;
       r443=(r371==long((4u))?1.0f:0.0f);
       if(r443!=0.0f) {
         float r450=min((as_type<float>(0x3f800000u)),(max(r448,(buffer4[((r372+r444))*1+0]))));
@@ -178,33 +178,33 @@ vertex scene3_vertex_out scene3_vertex(
         long r453=long(floor(r452));
         float r455=(r452-(floor(r452)));
         uint r467=(((((r455>r459))!=0.0f||((((r455==r459))!=0.0f&&(((fma(r450,r451,((r452*(as_type<float>(0xbf800000u))))))>=r448))!=0.0f))!=0.0f))!=0.0f?(1u):(0u));
-        r468=(as_type<long>(ulong((ulong(r453)+ulong(long(r467))))<<1)>>1);
+        r468=as_type<long>(ulong(r453)+ulong(long(r467)));
       }
       long r470=(r443!=0.0f?r468:long(r469));
-      long r471=(as_type<long>(ulong((r441|r470))<<1)>>1);
-      long r472=(as_type<long>(ulong((r421|r471))<<1)>>1);
-      long r473=(as_type<long>(ulong((r402|r472))<<1)>>1);
-      long r474=(as_type<long>(ulong(long((ulong(r473)&0x7fffffffffffffffUL)>>(long(r401)&63)))<<1)>>1);
-      sb|=(r401>62u)?4u:0u;
+      long r471=(r441|r470);
+      long r472=(r421|r471);
+      long r473=(r402|r472);
+      long r474=as_type<long>(ulong(r473)>>(long(r401)&63));
+      sb|=(r401>63u)?4u:0u;
       r477=(r383==0.0f?0.0f:(float(((uint(r474)&r469))))/r383);
-      long r478=(as_type<long>(ulong(long((ulong(r473)&0x7fffffffffffffffUL)>>(long(r420)&63)))<<1)>>1);
-      sb|=(r420>62u)?4u:0u;
+      long r478=as_type<long>(ulong(r473)>>(long(r420)&63));
+      sb|=(r420>63u)?4u:0u;
       r481=(r383==0.0f?0.0f:(float(((uint(r478)&r469))))/r383);
-      long r482=(as_type<long>(ulong(long((ulong(r473)&0x7fffffffffffffffUL)>>(long(r440)&63)))<<1)>>1);
-      sb|=(r440>62u)?4u:0u;
+      long r482=as_type<long>(ulong(r473)>>(long(r440)&63));
+      sb|=(r440>63u)?4u:0u;
       r485=(r383==0.0f?0.0f:(float(((uint(r482)&r469))))/r383);
       r488=(r383==0.0f?0.0f:(float(((uint(r473)&r469))))/r383);
     }
     if(r377==0.0f) {
       long r489=long(buffer5[r368*1+0]);
-      long r491=(as_type<long>(ulong(long((ulong(r489)&0x7fffffffffffffffUL)>>(long(r490)&63)))<<1)>>1);
-      sb|=(r490>62u)?4u:0u;
+      long r491=as_type<long>(ulong(r489)>>(long(r490)&63));
+      sb|=(r490>63u)?4u:0u;
       r496=(r495==0.0f?0.0f:(float(((uint(r491)&r492))))/r495);
-      long r498=(as_type<long>(ulong(long((ulong(r489)&0x7fffffffffffffffUL)>>(long(r497)&63)))<<1)>>1);
-      sb|=(r497>62u)?4u:0u;
+      long r498=as_type<long>(ulong(r489)>>(long(r497)&63));
+      sb|=(r497>63u)?4u:0u;
       r501=(r495==0.0f?0.0f:(float(((uint(r498)&r492))))/r495);
-      long r503=(as_type<long>(ulong(long((ulong(r489)&0x7fffffffffffffffUL)>>(long(r502)&63)))<<1)>>1);
-      sb|=(r502>62u)?4u:0u;
+      long r503=as_type<long>(ulong(r489)>>(long(r502)&63));
+      sb|=(r502>63u)?4u:0u;
       r506=(r495==0.0f?0.0f:(float(((uint(r503)&r492))))/r495);
       r509=(r495==0.0f?0.0f:(float(((uint(r489)&r492))))/r495);
     }
@@ -394,7 +394,7 @@ fragment float4 scene3_textured_fragment(
       long r247=long(round((sqrt(fabs((buffer2[((r92+r243))*1+0]))))));
       long r248=r247;
       long r250=(((r248<long(r194)?1.0f:0.0f))!=0.0f?long(r194):r248);
-      long r251=(as_type<long>(ulong((ulong(r250)*ulong(r250)))<<1)>>1);
+      long r251=as_type<long>(ulong(r250)*ulong(r250));
       float r252=float(r251);
       bool over255=r250>long(r254) && ulong(r250-long(r254))>4096uL;
       sb|=over255?1u:0u;

@@ -33,11 +33,11 @@ kernel void incidence_tables(
   if(r17!=0.0f) {
     r23=(r21<r22?1.0f:0.0f);
     if(r23!=0.0f) {
-      long r26=(as_type<long>(ulong((long(r25)==0?0:((as_type<long>(ulong((ulong(r21)+ulong(r22)))<<1)>>1))/long(r25)))<<1)>>1);
+      long r26=(long(r25)==0?0:long(r25)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(r21)+ulong(r22))))):(as_type<long>(ulong(r21)+ulong(r22)))/long(r25));
       sb|=(r25==0)?2u:0u;
       r29=((long(buffer0[(long(buffer3[r26*1+0]))*1+0]))<r0?1.0f:0.0f);
       if(r29!=0.0f) {
-        r31=(as_type<long>(ulong((ulong(r26)+ulong(long(r30))))<<1)>>1);
+        r31=as_type<long>(ulong(r26)+ulong(long(r30)));
       }
       r32=(r29!=0.0f?r31:r21);
       r33=(r29!=0.0f?r22:r26);
@@ -66,11 +66,11 @@ kernel void incidence_tables(
   if(r41!=0.0f) {
     r48=(r46<r47?1.0f:0.0f);
     if(r48!=0.0f) {
-      long r51=(as_type<long>(ulong((long(r50)==0?0:((as_type<long>(ulong((ulong(r46)+ulong(r47)))<<1)>>1))/long(r50)))<<1)>>1);
+      long r51=(long(r50)==0?0:long(r50)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(r46)+ulong(r47))))):(as_type<long>(ulong(r46)+ulong(r47)))/long(r50));
       sb|=(r50==0)?2u:0u;
       r55=((long(buffer1[((uint(r51)+r52))*1+0]))<=r42?1.0f:0.0f);
       if(r55!=0.0f) {
-        r57=(as_type<long>(ulong((ulong(r51)+ulong(long(r56))))<<1)>>1);
+        r57=as_type<long>(ulong(r51)+ulong(long(r56)));
       }
       r58=(r55!=0.0f?r57:r46);
       r59=(r55!=0.0f?r47:r51);
@@ -85,7 +85,7 @@ kernel void incidence_tables(
     }
     long r63=r46;
     long r65=long(buffer1[r63*1+0]);
-    long r69=(as_type<long>(ulong((ulong((long(buffer1[((uint(r63)+r66))*1+0])))-ulong(r65)))<<1)>>1);
+    long r69=as_type<long>(ulong((long(buffer1[((uint(r63)+r66))*1+0])))-ulong(r65));
     uint r70=(buffer5[uint(r42)]=uint(r63),1u);
     uint r71=(buffer6[uint(r0)]=uint(r65),1u);
     uint r78=(buffer7[uint(r0)]=(((((((long(buffer2[r63*1+0]))==long(r43)?1.0f:0.0f))!=0.0f&&((r69>=long((3u))?1.0f:0.0f))!=0.0f))!=0.0f?uint(r69):r43)),1u);

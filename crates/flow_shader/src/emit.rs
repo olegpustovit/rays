@@ -214,16 +214,12 @@ fn checked(projection: Projection, expression: &str) -> String {
     }
 }
 
-fn wrap_integer(value: &str) -> String {
-    format!("(as_type<long>(ulong({value})<<1)>>1)")
-}
-
-/// Integer registers occupy 64 bits; Int operations wrap in the signed 63-bit domain.
+/// Integer registers occupy 64 bits; Int operations wrap in two's complement.
 fn integer_status(unsigned: bool, indentation: &str, operation: Integer, b: &str) -> String {
     match operation {
         Integer::Idiv | Integer::Imod => format!("{indentation}sb|=({b}==0)?2u:0u;\n"),
-        Integer::Ishl | Integer::Ishr if unsigned => format!("{indentation}sb|=({b}>62u)?4u:0u;\n"),
-        Integer::Ishl | Integer::Ishr => format!("{indentation}sb|=({b}<0 || {b}>62)?4u:0u;\n"),
+        Integer::Ishl | Integer::Ishr if unsigned => format!("{indentation}sb|=({b}>63u)?4u:0u;\n"),
+        Integer::Ishl | Integer::Ishr => format!("{indentation}sb|=({b}<0 || {b}>63)?4u:0u;\n"),
         _ => String::new(),
     }
 }
@@ -293,7 +289,7 @@ fn integer32(operation: Integer, a: &str, b: &str) -> String {
         Integer::Iadd => wrap("+"),
         Integer::Isub => wrap("-"),
         Integer::Imul => wrap("*"),
-        // -1 apart: the minimum Int over -1 wraps, as the 63-bit form's does
+        // -1 apart: the minimum Int over -1 wraps, as the CPU's wrapping_div does
         Integer::Idiv => format!("({b}==0?0:{b}==-1?as_type<int>(0u-uint({a})):{a}/{b})"),
         Integer::Imod => format!("({b}==0||{b}==-1?0:{a}%{b})"),
         Integer::Iand => format!("({a}&{b})"),
@@ -311,21 +307,23 @@ fn int_literal(n: i64) -> String {
 }
 
 fn integer(operation: Integer, a: &str, b: &str) -> String {
-    wrap_integer(&match operation {
-        Integer::Iadd => format!("(ulong({a})+ulong({b}))"),
-        Integer::Isub => format!("(ulong({a})-ulong({b}))"),
-        Integer::Imul => format!("(ulong({a})*ulong({b}))"),
-        Integer::Idiv => format!("({b}==0?0:{a}/{b})"),
-        Integer::Imod => format!("({b}==0?0:{a}%{b})"),
+    let wrap = |operator: &str| format!("as_type<long>(ulong({a}){operator}ulong({b}))");
+    match operation {
+        Integer::Iadd => wrap("+"),
+        Integer::Isub => wrap("-"),
+        Integer::Imul => wrap("*"),
+        // b==-1 apart: the minimum over -1 overflows, which C++ leaves undefined; it wraps to the minimum
+        Integer::Idiv => format!("({b}==0?0:{b}==-1?as_type<long>(0ul-ulong({a})):{a}/{b})"),
+        Integer::Imod => format!("({b}==0||{b}==-1?0:{a}%{b})"),
         Integer::Iand => format!("({a}&{b})"),
         Integer::Ior => format!("({a}|{b})"),
         Integer::Ixor => format!("({a}^{b})"),
-        Integer::Ishl => format!("(ulong({a})<<({b}&63))"),
-        Integer::Ishr => format!("long((ulong({a})&0x7fffffffffffffffUL)>>({b}&63))"),
-    })
+        Integer::Ishl => format!("as_type<long>(ulong({a})<<({b}&63))"),
+        Integer::Ishr => format!("as_type<long>(ulong({a})>>({b}&63))"),
+    }
 }
 
-/// A narrow (32-bit unsigned) Int register's operation: the low 32 bits of the signed-63 result.
+/// A narrow (32-bit unsigned) Int register's operation: the low 32 bits of the 64-bit result.
 fn narrow_integer(operation: Integer, a: &str, b: &str) -> String {
     let shift = |operator: &str| format!("(({b}&63)>31?0u:({a}{operator}uint({b}&63)))");
     match operation {
@@ -1031,7 +1029,7 @@ impl Gen {
             }
             Instruction::Int_abs(a) => {
                 let ia = self.int_of(*a);
-                if self.int32 { format!("abs({ia})") } else { wrap_integer(&format!("abs({ia})")) }
+                if self.int32 { format!("abs({ia})") } else { format!("as_type<long>(ulong(abs({ia})))") }
             }
             Instruction::Int_select(_, yes, no) if yes == no => self.int_of(*yes),
             Instruction::Int_select(condition, yes, no) => {

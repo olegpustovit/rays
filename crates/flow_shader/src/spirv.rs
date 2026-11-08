@@ -525,12 +525,6 @@ fn integer_binary(e: &mut Emitter, operation: Integer, a: i64, b: i64) -> i64 {
         Integer::Ior => e.result(long, 197, &[a, b]),
         Integer::Ixor => e.result(long, 198, &[a, b]),
         Integer::Ishl | Integer::Ishr => {
-            let a = if operation == Integer::Ishr {
-                let max = e.l(i64::MAX);
-                e.result(long, 199, &[a, max])
-            } else {
-                a
-            };
             let sixty_three = e.l(63);
             let masked = e.result(long, 199, &[b, sixty_three]);
             e.result(long, if operation == Integer::Ishl { 196 } else { 194 }, &[a, masked])
@@ -578,16 +572,6 @@ fn integer_binary(e: &mut Emitter, operation: Integer, a: i64, b: i64) -> i64 {
             e.select_l(zero, z, signed)
         }
     }
-}
-
-fn wrap_integer(e: &mut Emitter, value: i64) -> i64 {
-    if e.int32 {
-        return value;
-    }
-    let long = e.long();
-    let one = e.l(1);
-    let shifted = e.result(long, 196, &[value, one]);
-    e.result(long, 195, &[shifted, one])
 }
 
 fn integer_float_binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
@@ -2061,8 +2045,8 @@ impl EP {
             }
             Integer::Ishl | Integer::Ishr => {
                 let boolean = self.e.boolean;
-                let c62 = self.e.l(62);
-                let hi = self.e.compare(173, b, c62);
+                let c63 = self.e.l(63);
+                let hi = self.e.compare(173, b, c63);
                 let z = self.e.l(0);
                 let lo = self.e.compare(177, b, z);
                 let c = self.e.result(boolean, 166, &[lo, hi]);
@@ -2313,8 +2297,7 @@ impl EP {
                 let a = self.int_of(*a);
                 let b = self.int_of(*b);
                 self.integer_status(*op, b);
-                let v = integer_binary(&mut self.e, *op, a, b);
-                wrap_integer(&mut self.e, v)
+                integer_binary(&mut self.e, *op, a, b)
             }
             Instruction::Int_compare(op, a, b) => {
                 let ib = self.int_of(*b);
@@ -2328,8 +2311,7 @@ impl EP {
                 let abs = self.e.result(long, 126, &[value]);
                 let z = self.e.l(0);
                 let c = self.e.compare(177, value, z);
-                let s = self.e.select_l(c, abs, value);
-                wrap_integer(&mut self.e, s)
+                self.e.select_l(c, abs, value)
             }
             Instruction::Int_select(condition, yes, no) => {
                 if yes == no {

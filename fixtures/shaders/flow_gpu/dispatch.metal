@@ -10,11 +10,11 @@ kernel void dispatch_arguments(
   uint r8=(uint((long(buffer1[r5*1+0])))&r7);
   uint r12=(uint((long(buffer1[r4*1+0])))&r7);
   uint r16=(uint((long(buffer1[(2u)*1+0])))&r7);
-  long r17=(as_type<long>(ulong((long(r16)==0?0:((as_type<long>(ulong((ulong(long(((uint((long(buffer0[r5*1+0])))&r7))))*ulong(long(r12))))<<1)>>1))/long(r16)))<<1)>>1);
+  long r17=(long(r16)==0?0:long(r16)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(long(((uint((long(buffer0[r5*1+0])))&r7))))*ulong(long(r12)))))):(as_type<long>(ulong(long(((uint((long(buffer0[r5*1+0])))&r7))))*ulong(long(r12))))/long(r16));
   sb|=(r16==0)?2u:0u;
   uint r22=(uint((long(buffer1[(3u)*1+0])))&r7);
-  long r23=(as_type<long>(ulong((ulong(long(r22))-ulong(long(r4))))<<1)>>1);
-  long r25=(as_type<long>(ulong((long(r22)==0?0:((as_type<long>(ulong((ulong(((((long(r8)<r17?1.0f:0.0f))!=0.0f?long(r8):r17)))+ulong(r23)))<<1)>>1))/long(r22)))<<1)>>1);
+  long r23=as_type<long>(ulong(long(r22))-ulong(long(r4)));
+  long r25=(long(r22)==0?0:long(r22)==-1?as_type<long>(0ul-ulong((as_type<long>(ulong(((((long(r8)<r17?1.0f:0.0f))!=0.0f?long(r8):r17)))+ulong(r23))))):(as_type<long>(ulong(((((long(r8)<r17?1.0f:0.0f))!=0.0f?long(r8):r17)))+ulong(r23)))/long(r22));
   sb|=(r22==0)?2u:0u;
   float r26=((long(lid))==long(r5)?1.0f:0.0f);
   if(r26!=0.0f) {
