@@ -1,5 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_edge_lookup, topology_index};
 
@@ -31,43 +30,37 @@ fn validate_mapping(operation: &str, source_count: i64, mapping: &[i64], allow_m
     Ok(())
 }
 
-fn range_count(count: i64, grain: i64) -> usize {
-    if count == 0 { 0 } else { ((count - 1) / grain + 1) as usize }
-}
-
-fn join_ranges_int(slots: Vec<Mutex<Option<Vec<i64>>>>, capacity: usize, operation: &str) -> Result<Vec<i64>, error::T> {
-    let mut output = Vec::with_capacity(capacity);
-    for slot in slots {
-        let range = slot.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(range) = range else {
-            return Err(invalid_remap(format!("{operation}: missing output range")));
-        };
-        output.extend(range);
+fn select<T: Clone + Default + Send + Sync>(
+    cancel_value: Option<&cancel::T>,
+    grain: i64,
+    (operation, grain_error): (&str, &str),
+    missing: Option<T>,
+    mapping: &[i64],
+    source: &[T],
+) -> Result<Vec<T>, error::T> {
+    if mapping.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(output)
-}
-
-fn join_ranges_float(slots: Vec<Mutex<Option<Vec<f64>>>>, capacity: usize, operation: &str) -> Result<Vec<f64>, error::T> {
-    let mut output = Vec::with_capacity(capacity);
-    for slot in slots {
-        let range = slot.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(range) = range else {
-            return Err(invalid_remap(format!("{operation}: missing output range")));
-        };
-        output.extend(range);
+    if grain <= 0 {
+        return Err(invalid_remap(grain_error.to_owned()));
     }
-    Ok(output)
-}
-
-fn join_ranges_text(slots: Vec<Mutex<Option<Vec<Vec<u8>>>>>, capacity: usize, operation: &str) -> Result<Vec<Vec<u8>>, error::T> {
-    let mut output = Vec::with_capacity(capacity);
-    for slot in slots {
-        let range = slot.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(range) = range else {
-            return Err(invalid_remap(format!("{operation}: missing output range")));
-        };
-        output.extend(range);
-    }
+    cancel::poll(cancel_value, 0, 4095).map_err(|_| cancelled_error())?;
+    validate_mapping(operation, checked_count(source.len(), operation)?, mapping, missing.is_some())?;
+    let count = checked_count(mapping.len(), operation)?;
+    let mut output = vec![T::default(); mapping.len()];
+    let windows = support::Windows::even(&mut output, grain);
+    run_indexed_ranges(grain, count, &|range, first, last| {
+        for (element, slot) in (first..last).zip(windows.take(range)) {
+            cancel::poll(cancel_value, element, 4095).map_err(|_| cancelled_error())?;
+            let source_index = mapping[element as usize];
+            *slot = if source_index < 0 {
+                missing.clone().unwrap_or_default()
+            } else {
+                source[source_index as usize].clone()
+            };
+        }
+        Ok(())
+    })?;
     Ok(output)
 }
 
@@ -78,33 +71,7 @@ pub fn select_int(
     mapping: &[i64],
     source: &[i64],
 ) -> Result<Vec<i64>, error::T> {
-    let operation = "Topology_remap.select";
-    if mapping.is_empty() {
-        return Ok(Vec::new());
-    }
-    if grain <= 0 {
-        return Err(invalid_remap("Support.run_ranges: grain must be positive".to_owned()));
-    }
-    cancel::poll(cancel_value, 0, 4095).map_err(|_| cancelled_error())?;
-    validate_mapping(operation, checked_count(source.len(), operation)?, mapping, missing.is_some())?;
-    let count = checked_count(mapping.len(), operation)?;
-    let ranges = range_count(count, grain);
-    let slots: Vec<Mutex<Option<Vec<i64>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut values = Vec::with_capacity((last - first) as usize);
-        for output in first..last {
-            cancel::poll(cancel_value, output, 4095).map_err(|_| cancelled_error())?;
-            let source_index = mapping[output as usize];
-            values.push(if source_index < 0 {
-                missing.unwrap_or(0)
-            } else {
-                source[source_index as usize]
-            });
-        }
-        *slots[range as usize].lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(values);
-        Ok(())
-    })?;
-    join_ranges_int(slots, mapping.len(), operation)
+    select(cancel_value, grain, ("Topology_remap.select", "Support.run_ranges: grain must be positive"), missing, mapping, source)
 }
 
 pub fn select_text(
@@ -114,33 +81,7 @@ pub fn select_text(
     mapping: &[i64],
     source: &[Vec<u8>],
 ) -> Result<Vec<Vec<u8>>, error::T> {
-    let operation = "Topology_remap.select";
-    if mapping.is_empty() {
-        return Ok(Vec::new());
-    }
-    if grain <= 0 {
-        return Err(invalid_remap("Support.run_ranges: grain must be positive".to_owned()));
-    }
-    cancel::poll(cancel_value, 0, 4095).map_err(|_| cancelled_error())?;
-    validate_mapping(operation, checked_count(source.len(), operation)?, mapping, missing.is_some())?;
-    let count = checked_count(mapping.len(), operation)?;
-    let ranges = range_count(count, grain);
-    let slots: Vec<Mutex<Option<Vec<Vec<u8>>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut values = Vec::with_capacity((last - first) as usize);
-        for output in first..last {
-            cancel::poll(cancel_value, output, 4095).map_err(|_| cancelled_error())?;
-            let source_index = mapping[output as usize];
-            values.push(if source_index < 0 {
-                missing.unwrap_or_default().to_owned()
-            } else {
-                source[source_index as usize].clone()
-            });
-        }
-        *slots[range as usize].lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(values);
-        Ok(())
-    })?;
-    join_ranges_text(slots, mapping.len(), operation)
+    select(cancel_value, grain, ("Topology_remap.select", "Support.run_ranges: grain must be positive"), missing.map(<[u8]>::to_vec), mapping, source)
 }
 
 pub fn select_float(
@@ -150,33 +91,7 @@ pub fn select_float(
     mapping: &[i64],
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
-    let operation = "Topology_remap.select_float";
-    if mapping.is_empty() {
-        return Ok(Vec::new());
-    }
-    if grain <= 0 {
-        return Err(invalid_remap("Parallel.for_: chunk size must be positive".to_owned()));
-    }
-    cancel::check_opt(cancel_value)?;
-    validate_mapping(operation, checked_count(source.len(), operation)?, mapping, missing.is_some())?;
-    let count = checked_count(mapping.len(), operation)?;
-    let ranges = range_count(count, grain);
-    let slots: Vec<Mutex<Option<Vec<f64>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut values = Vec::with_capacity((last - first) as usize);
-        for output in first..last {
-            cancel::poll(cancel_value, output, 4095).map_err(|_| cancelled_error())?;
-            let source_index = mapping[output as usize];
-            values.push(if source_index < 0 {
-                missing.unwrap_or(0.0)
-            } else {
-                source[source_index as usize]
-            });
-        }
-        *slots[range as usize].lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(values);
-        Ok(())
-    })?;
-    join_ranges_float(slots, mapping.len(), operation)
+    select(cancel_value, grain, ("Topology_remap.select_float", "Parallel.for_: chunk size must be positive"), missing, mapping, source)
 }
 
 fn attribute_result(
@@ -513,8 +428,8 @@ pub fn split_point_edge_groups(
     let chunk = (grain / 8).max(1);
     let mut output = Vec::with_capacity(groups.len());
     for value in groups {
-        let bytes: Vec<AtomicU8> = (0..byte_count).map(|_| AtomicU8::new(0)).collect();
-        support::parallel_for(cancel_value, chunk, byte_count, &|byte| {
+        let mut bits = vec![0_u8; byte_count as usize];
+        support::par_fill(cancel_value, chunk, &mut bits, &|byte| {
             cancel::poll(cancel_value, byte, 511).map_err(|_| cancelled_error())?;
             let mut packed = 0_u8;
             for bit in 0..8_i64 {
@@ -523,10 +438,8 @@ pub fn split_point_edge_groups(
                     packed |= 1 << bit;
                 }
             }
-            bytes[byte as usize].store(packed, Ordering::Relaxed);
-            Ok(())
+            Ok(packed)
         })?;
-        let bits = bytes.iter().map(|byte| byte.load(Ordering::Relaxed)).collect();
         output.push(edge_group::View::of_owned_bits(target_topology, edge_count, edge_group::name(value), bits)?);
     }
     Ok(output)
@@ -578,8 +491,8 @@ pub fn edge_groups_from_ancestry(
     let byte_count = support::ceiling_div(target_edges, 8)?;
     let mut output = Vec::with_capacity(groups.len());
     for value in groups {
-        let bits: Vec<AtomicU8> = (0..byte_count).map(|_| AtomicU8::new(0)).collect();
-        support::parallel_for(cancel_value, grain, byte_count, &|byte| {
+        let mut bits = vec![0_u8; byte_count as usize];
+        support::par_fill(cancel_value, grain, &mut bits, &|byte| {
             let mut packed = 0_u8;
             for bit in 0..8_i64 {
                 let edge = byte * 8 + bit;
@@ -596,11 +509,9 @@ pub fn edge_groups_from_ancestry(
                     }
                 }
             }
-            bits[byte as usize].store(packed, Ordering::Relaxed);
-            Ok(())
+            Ok(packed)
         })?;
-        let bytes = bits.iter().map(|byte| byte.load(Ordering::Relaxed)).collect();
-        output.push(edge_group::View::of_owned_bits(target_topology, target_edges, edge_group::name(value), bytes)?);
+        output.push(edge_group::View::of_owned_bits(target_topology, target_edges, edge_group::name(value), bits)?);
     }
     Ok(output)
 }
@@ -631,27 +542,20 @@ fn blend_float(
     }
     validate_mapping(operation, checked_count(source.len(), operation)?, left, false)?;
     validate_mapping(operation, checked_count(source.len(), operation)?, right, false)?;
-    let count = checked_count(weight.len(), operation)?;
-    let ranges = range_count(count, grain);
-    let slots: Vec<Mutex<Option<Vec<f64>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut output = Vec::with_capacity((last - first) as usize);
-        for index in first..last {
-            cancel::check_opt(cancel_value)?;
-            let index = index as usize;
-            let a = source[left[index] as usize];
-            let b = source[right[index] as usize];
-            let delta = b - a;
-            output.push(if delta.is_finite() {
-                a + delta * weight[index]
-            } else {
-                a * (1.0 - weight[index]) + b * weight[index]
-            });
-        }
-        *slots[range as usize].lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(output);
-        Ok(())
+    let mut output = vec![0.0; weight.len()];
+    support::par_fill(cancel_value, grain, &mut output, &|index| {
+        cancel::check_opt(cancel_value)?;
+        let index = index as usize;
+        let a = source[left[index] as usize];
+        let b = source[right[index] as usize];
+        let delta = b - a;
+        Ok(if delta.is_finite() {
+            a + delta * weight[index]
+        } else {
+            a * (1.0 - weight[index]) + b * weight[index]
+        })
     })?;
-    join_ranges_float(slots, weight.len(), operation)
+    Ok(output)
 }
 
 pub fn blend_attribute(

@@ -1,5 +1,4 @@
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Mutex;
+use std::mem::take;
 
 use crate::{cancel, error, packed, support};
 
@@ -38,8 +37,6 @@ fn offsets_for_mapping(
     if grain <= 0 {
         return Err(invalid_ragged(format!("{operation}: grain must be positive")));
     }
-    let output_count = i64::try_from(mapping.len())
-        .map_err(|_| invalid_ragged(format!("{operation}: output row count overflow")))?;
     let source_count = i64::try_from(source_offsets.len())
         .map_err(|_| invalid_ragged(format!("{operation}: source row count overflow")))?
         - 1;
@@ -48,136 +45,61 @@ fn offsets_for_mapping(
         validate_source_index(operation, source_count, source)?;
     }
 
-    let lengths: Vec<AtomicI64> = (0..mapping.len()).map(|_| AtomicI64::new(0)).collect();
-    support::parallel_for(cancel_token, grain, output_count, &|output| {
+    let mut offsets = vec![0_i64; mapping.len().checked_add(1)
+        .ok_or_else(|| invalid_ragged(format!("{operation}: output row count overflow")))?];
+    support::par_fill(cancel_token, grain, &mut offsets[1..], &|output| {
         let source = mapping[output as usize];
-        if source >= 0 {
+        Ok(if source >= 0 {
             let source = source as usize;
-            lengths[output as usize].store(source_offsets[source + 1] - source_offsets[source], Ordering::Relaxed);
-        }
-        Ok(())
+            source_offsets[source + 1] - source_offsets[source]
+        } else {
+            0
+        })
     })?;
-
-    let offset_capacity = mapping.len().checked_add(1)
-        .ok_or_else(|| invalid_ragged(format!("{operation}: output row count overflow")))?;
-    let mut offsets = Vec::with_capacity(offset_capacity);
     let mut total = 0_i64;
-    offsets.push(total);
-    for output in 0..mapping.len() {
+    for (output, offset) in offsets[1..].iter_mut().enumerate() {
         cancel::poll(cancel_token, output as i64, 4095).map_err(|_| cancelled_error())?;
-        let length = lengths[output].load(Ordering::Relaxed);
-        if length > i64::MAX - total {
+        if *offset > i64::MAX - total {
             return Err(invalid_ragged(format!("{operation}: packed value count overflow")));
         }
-        total += length;
-        offsets.push(total);
+        total += *offset;
+        *offset = total;
     }
     Ok(offsets)
 }
 
-fn remapped_int_values(
-    cancel_token: Option<&cancel::T>,
-    grain: i64,
-    mapping: &[i64],
-    source: &packed::IntArray::View::View,
-    offsets: &[i64],
-    operation: &str,
-) -> Result<Vec<i64>, error::T> {
-    remapped_values_int(cancel_token, grain, mapping, &source.offsets, &source.values, offsets, operation)
-}
-
-fn remapped_float_values(
-    cancel_token: Option<&cancel::T>,
-    grain: i64,
-    mapping: &[i64],
-    source: &packed::FloatArray::View::View,
-    offsets: &[i64],
-    operation: &str,
-) -> Result<Vec<f64>, error::T> {
-    remapped_values_float(cancel_token, grain, mapping, &source.offsets, &source.values, offsets, operation)
-}
-
-fn range_count(count: i64, grain: i64) -> usize {
-    if count <= 0 { 0 } else { ((count - 1) / grain + 1) as usize }
-}
-
-fn remapped_values_int(
+fn remapped_values<T: Copy + Default + Send + Sync>(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     mapping: &[i64],
     source_offsets: &[i64],
-    source_values: &[i64],
+    source_values: &[T],
     offsets: &[i64],
     operation: &str,
-) -> Result<Vec<i64>, error::T> {
+) -> Result<Vec<T>, error::T> {
     let count = i64::try_from(mapping.len())
         .map_err(|_| invalid_ragged(format!("{operation}: output row count overflow")))?;
-    let ranges = range_count(count, grain);
-    let slots: Vec<Mutex<Option<Vec<i64>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
+    let total = usize::try_from(offsets[offsets.len() - 1])
+        .map_err(|_| invalid_ragged(format!("{operation}: packed value count overflow")))?;
+    let mut values = vec![T::default(); total];
+    let windows = support::Windows::new(&mut values, support::range_count(count, grain), |range| {
+        offsets[range.saturating_mul(grain).min(count) as usize] as usize
+    });
     run_indexed_ranges(grain, count, &|range, first, last| {
-        let capacity = (offsets[last as usize] - offsets[first as usize]) as usize;
-        let mut local = Vec::with_capacity(capacity);
+        let mut window = windows.take(range);
         for output in first..last {
             cancel::poll(cancel_token, output, 4095).map_err(|_| cancelled_error())?;
             let source = mapping[output as usize];
             if source >= 0 {
                 let source = source as usize;
-                local.extend_from_slice(&source_values[source_offsets[source] as usize..source_offsets[source + 1] as usize]);
+                let row = &source_values[source_offsets[source] as usize..source_offsets[source + 1] as usize];
+                let (head, tail) = take(&mut window).split_at_mut(row.len());
+                head.copy_from_slice(row);
+                window = tail;
             }
         }
-        *slots[range as usize].lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(local);
         Ok(())
     })?;
-    let total = usize::try_from(offsets[offsets.len() - 1])
-        .map_err(|_| invalid_ragged(format!("{operation}: packed value count overflow")))?;
-    let mut values = Vec::with_capacity(total);
-    for slot in slots {
-        let range = slot.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(range) = range else {
-            return Err(invalid_ragged(format!("{operation}: missing output range")));
-        };
-        values.extend(range);
-    }
-    Ok(values)
-}
-
-fn remapped_values_float(
-    cancel_token: Option<&cancel::T>,
-    grain: i64,
-    mapping: &[i64],
-    source_offsets: &[i64],
-    source_values: &[f64],
-    offsets: &[i64],
-    operation: &str,
-) -> Result<Vec<f64>, error::T> {
-    let count = i64::try_from(mapping.len())
-        .map_err(|_| invalid_ragged(format!("{operation}: output row count overflow")))?;
-    let ranges = range_count(count, grain);
-    let slots: Vec<Mutex<Option<Vec<f64>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    run_indexed_ranges(grain, count, &|range, first, last| {
-        let capacity = (offsets[last as usize] - offsets[first as usize]) as usize;
-        let mut local = Vec::with_capacity(capacity);
-        for output in first..last {
-            cancel::poll(cancel_token, output, 4095).map_err(|_| cancelled_error())?;
-            let source = mapping[output as usize];
-            if source >= 0 {
-                let source = source as usize;
-                local.extend_from_slice(&source_values[source_offsets[source] as usize..source_offsets[source + 1] as usize]);
-            }
-        }
-        *slots[range as usize].lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(local);
-        Ok(())
-    })?;
-    let total = usize::try_from(offsets[offsets.len() - 1])
-        .map_err(|_| invalid_ragged(format!("{operation}: packed value count overflow")))?;
-    let mut values = Vec::with_capacity(total);
-    for slot in slots {
-        let range = slot.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(range) = range else {
-            return Err(invalid_ragged(format!("{operation}: missing output range")));
-        };
-        values.extend(range);
-    }
     Ok(values)
 }
 
@@ -191,7 +113,7 @@ pub fn remap_int(
     let view = packed::IntArray::View::view(source);
     let operation = "Ragged_ops.remap_int";
     let offsets = offsets_for_mapping(cancel_token, grain, operation, &view.offsets, mapping)?;
-    let values = remapped_int_values(cancel_token, grain, mapping, &view, &offsets, operation)?;
+    let values = remapped_values(cancel_token, grain, mapping, &view.offsets, &view.values, &offsets, operation)?;
     Ok(packed::IntArray::View::create_validated_owned(offsets, values))
 }
 
@@ -205,7 +127,7 @@ pub fn remap_float(
     let view = packed::FloatArray::View::view(source);
     let operation = "Ragged_ops.remap_float";
     let offsets = offsets_for_mapping(cancel_token, grain, operation, &view.offsets, mapping)?;
-    let values = remapped_float_values(cancel_token, grain, mapping, &view, &offsets, operation)?;
+    let values = remapped_values(cancel_token, grain, mapping, &view.offsets, &view.values, &offsets, operation)?;
     Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
 }
 
@@ -313,6 +235,26 @@ mod tests {
         let view = packed::FloatArray::View::view(&concatenated);
         assert_eq!(&*view.offsets, &[0, 1, 3]);
         assert_eq!(&*view.values, &[1.5, 2.5, 3.5]);
+    }
+    #[test]
+    fn remap_matches_across_domains_with_many_ranges() {
+        let source = packed::IntArray::create_owned(vec![0, 2, 2, 3, 6], vec![4, 5, 7, 8, 9, 10]).unwrap();
+        let mapping: Vec<i64> = (0..100).map(|i| (i % 5) - 1).collect();
+        let run = |domains| {
+            let slot = std::sync::Mutex::new(None);
+            parallel::run_unit(Some(domains), &|| {
+                let out = remap_int(None, Some(3), &mapping, &source).unwrap();
+                let view = packed::IntArray::View::view(&out);
+                *slot.lock().unwrap() = Some((view.offsets.to_vec(), view.values.to_vec()));
+                Ok(())
+            })
+            .unwrap();
+            slot.into_inner().unwrap().unwrap()
+        };
+        let (offsets, values) = run(1);
+        assert_eq!(offsets.len(), 101);
+        assert_eq!(values.len(), offsets[100] as usize);
+        assert_eq!((offsets, values), run(4));
     }
     #[test]
     fn invalid_mapping_is_not_reported_as_cancellation() {
