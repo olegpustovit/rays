@@ -151,7 +151,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= ["#14161c", Float64Array.of(12, 12, 0), "O: open images   S: save   F: folder   drag a file in   pinch to scale", 16n, Float64Array.of(1, 1, 1), 2n, [], false, Float64Array.of(0, 0, 0), 1, 0n, 0n, 4096n, 0n, "dialog-opened", "dialog ", " opened", "file-dropped", "dropped ", "file-dialog", "", "dialog ", " failed: ", "file-dialog", 0n, "dialog ", " cancelled", "", "", 8n, 0n, 0n, "file-dialog", "", 0n, 0n, 4096n, 0n, "dialog ", ": ", 8n, 0n, 0n, 0n, 0n, 1n, 1n, "file-drag-moved", true, "file-drag-ended", false, "file-drag-moved", "pinched", 4, 0.25, 0n, 0n, 1n, 1n, 80n, 2n, 60n, 0n, 0n, "#5aaaf0", 0n, 10n, "#f0b43c", "#00000000", Float64Array.of(12, 200, 0), 1n, 0n, 0n, "", 16n, Float64Array.of(1, 1, 1), Float64Array.of(12, 218, 0), 1n, 1n, "", 16n, Float64Array.of(1, 1, 1), Float64Array.of(12, 236, 0), 2n, 2n, "", 16n, Float64Array.of(1, 1, 1), Float64Array.of(12, 254, 0), 3n, 3n, "", 16n, Float64Array.of(1, 1, 1), Float64Array.of(12, 272, 0), 4n, 4n, "", 16n, Float64Array.of(1, 1, 1), Float64Array.of(12, 290, 0), 5n, 5n, "", 16n, Float64Array.of(1, 1, 1), Float64Array.of(12, 308, 0), 6n, 6n, "", 16n, Float64Array.of(1, 1, 1), Float64Array.of(12, 326, 0), 7n, 7n, "", 16n, Float64Array.of(1, 1, 1)];
+  K ??= ["#14161c", Float64Array.of(12, 12, 0), "O: open images   S: save   F: folder   drag a file in   pinch to scale", Float64Array.of(1, 1, 1), 16n, 2n, [], false, Float64Array.of(0, 0, 0), 1, 0n, 0n, 4096n, 0n, "dialog-opened", "dialog ", " opened", "file-dropped", "dropped ", "file-dialog", "", "dialog ", " failed: ", "file-dialog", 0n, "dialog ", " cancelled", "", "", 8n, 0n, 0n, "file-dialog", "", 0n, 0n, 4096n, 0n, "dialog ", ": ", 8n, 0n, 0n, 0n, 0n, 1n, 1n, "file-drag-moved", true, "file-drag-ended", false, "file-drag-moved", "pinched", 4, 0.25, 0n, 0n, 1n, 1n, 80n, 2n, 60n, 0n, 0n, "#5aaaf0", 0n, 10n, "#f0b43c", "#00000000", Float64Array.of(12, 200, 0), 1n, 0n, 0n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 218, 0), 1n, 1n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 236, 0), 2n, 2n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 254, 0), 3n, 3n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 272, 0), 4n, 4n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 290, 0), 5n, 5n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 308, 0), 6n, 6n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 326, 0), 7n, 7n, "", Float64Array.of(1, 1, 1), 16n];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31;
   let l32, l33, l34, l35, l36, l37, l38, l39, l40, l41, l42, l43, l44, l45, l46, l47;
@@ -180,7 +180,7 @@ export function frame(input, state, rt) {
     at = 3; l2 = K[2];
     at = 4; l3 = K[3];
     at = 5; l4 = K[4];
-    at = 6; if (typeof l2 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l2 !== "") { const [x, y] = point(rt, l1); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l3)), color: ink(rt, l4), text: l2}); }
+    at = 6; if (typeof l2 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l2 !== "") { const [x, y] = point(rt, l1); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l4)), color: ink(rt, l3), text: l2}); }
     at = 7; l5 = BigInt(input.size[0]);
     at = 8; l6 = K[5];
     at = 9; l7 = rt.int_div(l5, l6);
@@ -534,7 +534,7 @@ export function frame(input, state, rt) {
     }
     at = 286; l242 = K[74];
     at = 287; l243 = K[75];
-    at = 288; if (typeof l238 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l238 !== "") { const [x, y] = point(rt, l226); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l242)), color: ink(rt, l243), text: l238}); }
+    at = 288; if (typeof l238 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l238 !== "") { const [x, y] = point(rt, l226); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l243)), color: ink(rt, l242), text: l238}); }
     at = 289; l244 = K[76];
     at = 290; l245 = rt.sequence_length(l229);
     at = 291; l246 = K[77];
@@ -549,7 +549,7 @@ export function frame(input, state, rt) {
     }
     at = 299; l252 = K[80];
     at = 300; l253 = K[81];
-    at = 301; if (typeof l248 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l248 !== "") { const [x, y] = point(rt, l244); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l252)), color: ink(rt, l253), text: l248}); }
+    at = 301; if (typeof l248 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l248 !== "") { const [x, y] = point(rt, l244); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l253)), color: ink(rt, l252), text: l248}); }
     at = 302; l254 = K[82];
     at = 303; l255 = rt.sequence_length(l229);
     at = 304; l256 = K[83];
@@ -564,7 +564,7 @@ export function frame(input, state, rt) {
     }
     at = 312; l262 = K[86];
     at = 313; l263 = K[87];
-    at = 314; if (typeof l258 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l258 !== "") { const [x, y] = point(rt, l254); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l262)), color: ink(rt, l263), text: l258}); }
+    at = 314; if (typeof l258 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l258 !== "") { const [x, y] = point(rt, l254); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l263)), color: ink(rt, l262), text: l258}); }
     at = 315; l264 = K[88];
     at = 316; l265 = rt.sequence_length(l229);
     at = 317; l266 = K[89];
@@ -579,7 +579,7 @@ export function frame(input, state, rt) {
     }
     at = 325; l272 = K[92];
     at = 326; l273 = K[93];
-    at = 327; if (typeof l268 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l268 !== "") { const [x, y] = point(rt, l264); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l272)), color: ink(rt, l273), text: l268}); }
+    at = 327; if (typeof l268 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l268 !== "") { const [x, y] = point(rt, l264); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l273)), color: ink(rt, l272), text: l268}); }
     at = 328; l274 = K[94];
     at = 329; l275 = rt.sequence_length(l229);
     at = 330; l276 = K[95];
@@ -594,7 +594,7 @@ export function frame(input, state, rt) {
     }
     at = 338; l282 = K[98];
     at = 339; l283 = K[99];
-    at = 340; if (typeof l278 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l278 !== "") { const [x, y] = point(rt, l274); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l282)), color: ink(rt, l283), text: l278}); }
+    at = 340; if (typeof l278 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l278 !== "") { const [x, y] = point(rt, l274); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l283)), color: ink(rt, l282), text: l278}); }
     at = 341; l284 = K[100];
     at = 342; l285 = rt.sequence_length(l229);
     at = 343; l286 = K[101];
@@ -609,7 +609,7 @@ export function frame(input, state, rt) {
     }
     at = 351; l292 = K[104];
     at = 352; l293 = K[105];
-    at = 353; if (typeof l288 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l288 !== "") { const [x, y] = point(rt, l284); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l292)), color: ink(rt, l293), text: l288}); }
+    at = 353; if (typeof l288 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l288 !== "") { const [x, y] = point(rt, l284); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l293)), color: ink(rt, l292), text: l288}); }
     at = 354; l294 = K[106];
     at = 355; l295 = rt.sequence_length(l229);
     at = 356; l296 = K[107];
@@ -624,7 +624,7 @@ export function frame(input, state, rt) {
     }
     at = 364; l302 = K[110];
     at = 365; l303 = K[111];
-    at = 366; if (typeof l298 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l298 !== "") { const [x, y] = point(rt, l294); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l302)), color: ink(rt, l303), text: l298}); }
+    at = 366; if (typeof l298 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l298 !== "") { const [x, y] = point(rt, l294); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l303)), color: ink(rt, l302), text: l298}); }
     at = 367; l304 = K[112];
     at = 368; l305 = rt.sequence_length(l229);
     at = 369; l306 = K[113];
@@ -639,7 +639,7 @@ export function frame(input, state, rt) {
     }
     at = 377; l312 = K[116];
     at = 378; l313 = K[117];
-    at = 379; if (typeof l308 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l308 !== "") { const [x, y] = point(rt, l304); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l312)), color: ink(rt, l313), text: l308}); }
+    at = 379; if (typeof l308 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l308 !== "") { const [x, y] = point(rt, l304); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l313)), color: ink(rt, l312), text: l308}); }
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

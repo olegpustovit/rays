@@ -1,5 +1,3 @@
-@group(0) @binding(7) var texture7: texture_2d<f32>;
-@group(0) @binding(8) var sampler8: sampler;
 @group(0) @binding(0) var<storage, read> buffer0: array<u32>;
 @group(0) @binding(1) var<storage, read> buffer1: array<f32>;
 @group(0) @binding(2) var<storage, read> buffer2: array<u32>;
@@ -7,6 +5,8 @@
 @group(0) @binding(4) var<storage, read> buffer4: array<f32>;
 @group(0) @binding(5) var<storage, read> buffer5: array<u32>;
 @group(0) @binding(6) var<storage, read> buffer6: array<f32>;
+@group(0) @binding(7) var texture7: texture_2d<f32>;
+@group(0) @binding(8) var sampler8: sampler;
 const quad_corner = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
 fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
 fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
@@ -1029,8 +1029,8 @@ fn geometry_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid
   var o: geometry_vertex_out;
   let r3: u32 = 6u;
   let r6: u32 = 1u;
-  let r8: u32 = 2u;
-  let r9: u32 = 3u;
+  let r8: u32 = 3u;
+  let r9: u32 = 2u;
   let r17: u32 = 0u;
   let r27: u32 = 4u;
   let r31: u32 = 5u;
@@ -1071,7 +1071,7 @@ fn geometry_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid
   let r4: f32 = buffer6[r3 * 1u + 0u];
   let r5: vec2<u32> = i64_from_f(r4);
   let r7: f32 = select(0.0, 1.0, all(r5 == vec2<u32>(r6, 0u)));
-  let r10: u32 = select(r8, r9, r7 != 0.0);
+  let r10: u32 = select(r9, r8, r7 != 0.0);
   let r11: u32 = ((r0).x * r10);
     let r12: vec2<u32> = vec2<u32>(buffer0[r11 * 1u + 0u], 0u);
   let r13: f32 = bitcast<f32>((r12).x);
@@ -1083,9 +1083,9 @@ fn geometry_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid
   let r20: f32 = buffer6[r6 * 1u + 0u];
   let r21: f32 = (r20 * r16);
   let r22: f32 = (r19 + r21);
-  let r23: f32 = buffer6[r8 * 1u + 0u];
+  let r23: f32 = buffer6[r9 * 1u + 0u];
   let r24: f32 = (r22 + r23);
-  let r25: f32 = buffer6[r9 * 1u + 0u];
+  let r25: f32 = buffer6[r8 * 1u + 0u];
   let r26: f32 = (r25 * r13);
   let r28: f32 = buffer6[r27 * 1u + 0u];
   let r29: f32 = (r28 * r16);

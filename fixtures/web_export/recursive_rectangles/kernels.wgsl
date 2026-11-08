@@ -411,7 +411,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_9df28b67d3893755226175c2abd24777(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_6089e24750d5de758b77a8ffce0c9557(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].x != 0u) { n = min(n, count_in[0] * uniforms[0].z / uniforms[0].w); }
@@ -421,8 +421,8 @@ fn kernel_9df28b67d3893755226175c2abd24777(@builtin(global_invocation_id) gid: v
   let r4: f32 = bitcast<f32>(0x40000000u);
   let r8: f32 = bitcast<f32>(0x3f800000u);
   let r14: f32 = bitcast<f32>(0x0u);
-  let r16: u32 = 0u;
-  let r17: u32 = 1u;
+  let r16: u32 = 1u;
+  let r17: u32 = 0u;
   let r0: f32 = input0[i * 1u + 0u];
   if (!wfinite(r0)) { sb |= 1u; }
   let r2: vec2<u32> = i64_from_f(r0);
@@ -434,7 +434,7 @@ fn kernel_9df28b67d3893755226175c2abd24777(@builtin(global_invocation_id) gid: v
   let r10: vec2<u32> = i64_add(r6, vec2<u32>(1u, 0u));
   let r11: f32 = gather0[u32(clamp(i32(i64_to_f(r10)), 0, max(i32(uniforms[0].y) - 1, 0))) * 3u + 0u];
   let r15: f32 = select(0.0, 1.0, (r11 >= r14));
-  let r18: u32 = select(r16, r17, r15 != 0.0);
+  let r18: u32 = select(r17, r16, r15 != 0.0);
   if (sb != 0u) { atomicOr(&status, sb); }
   outbuf[i * 1u + 0u] = i64_to_f(vec2<u32>(r18, 0u));
 }
@@ -823,7 +823,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_2256164183600c5e8f28a14c86d092a0(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_d10ebf52ab4e1a74b4ba22ac812c4cdb(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].y != 0u) { n = min(n, count_in[0] * uniforms[0].w / uniforms[1].x); }
@@ -997,12 +997,12 @@ fn kernel_2256164183600c5e8f28a14c86d092a0(@builtin(global_invocation_id) gid: v
   let r222: u32 = 73u;
   let r224: f32 = bitcast<f32>(0x42a60000u);
   let r232: f32 = bitcast<f32>(0x43a50000u);
-  let r241: f32 = bitcast<f32>(0x42700000u);
-  let r242: f32 = bitcast<f32>(0x43b40000u);
-  let r263: f32 = bitcast<f32>(0x40800000u);
-  let r266: f32 = bitcast<f32>(0x40400000u);
-  let r273: f32 = bitcast<f32>(0x437f0000u);
-  let r274: f32 = bitcast<f32>(0x3f000000u);
+  let r241: f32 = bitcast<f32>(0x43b40000u);
+  let r243: f32 = bitcast<f32>(0x42700000u);
+  let r263: f32 = bitcast<f32>(0x40400000u);
+  let r265: f32 = bitcast<f32>(0x40800000u);
+  let r276: f32 = bitcast<f32>(0x437f0000u);
+  let r278: f32 = bitcast<f32>(0x3f000000u);
   let r0: f32 = input0[i * 1u + 0u];
   if (!wfinite(r0)) { sb |= 1u; }
   let r2: vec2<u32> = i64_from_f(r0);
@@ -1219,8 +1219,8 @@ fn kernel_2256164183600c5e8f28a14c86d092a0(@builtin(global_invocation_id) gid: v
   let r238: f32 = i64_to_f(r191);
   let r239: f32 = (r39 + r238);
   let r240: f32 = (r239 + r202);
-  let r243: f32 = select(((r240 % r242) + r242) % r242, 0.0, r242 == 0.0);
-  let r244: f32 = select(r243 / r241, 0.0, r241 == 0.0);
+  let r242: f32 = select(((r240 % r241) + r241) % r241, 0.0, r241 == 0.0);
+  let r244: f32 = select(r242 / r243, 0.0, r243 == 0.0);
   let r245: f32 = min(r21, r220);
   let r246: f32 = max(r47, r245);
   let r247: f32 = min(r21, r237);
@@ -1237,55 +1237,55 @@ fn kernel_2256164183600c5e8f28a14c86d092a0(@builtin(global_invocation_id) gid: v
   let r258: f32 = (r253 * r257);
   let r259: f32 = select(r253 / r4, 0.0, r4 == 0.0);
   let r260: f32 = (r248 - r259);
-  let r261: f32 = select(0.0, 1.0, (r244 < r43));
-  let r262: f32 = select(r258, r253, r261 != 0.0);
+  let r261: f32 = select(0.0, 1.0, (r244 < r21));
+  let r262: f32 = select(0.0, 1.0, (r244 < r4));
   let r264: f32 = select(0.0, 1.0, (r244 < r263));
-  let r265: f32 = select(r262, r253, r264 != 0.0);
-  let r267: f32 = select(0.0, 1.0, (r244 < r266));
-  let r268: f32 = select(r265, r258, r267 != 0.0);
-  let r269: f32 = select(0.0, 1.0, (r244 < r4));
-  let r270: f32 = select(r268, r47, r269 != 0.0);
-  let r271: f32 = select(0.0, 1.0, (r244 < r21));
-  let r272: f32 = select(r270, r47, r271 != 0.0);
-  let r275: f32 = (r272 + r260);
-  let r276: f32 = min(r21, r275);
-  let r277: f32 = max(r47, r276);
-  let r278: f32 = (r277 * r273);
-  let r279: f32 = (r278 + r274);
+  let r266: f32 = select(0.0, 1.0, (r244 < r265));
+  let r267: f32 = select(0.0, 1.0, (r244 < r43));
+  let r268: f32 = select(r253, r258, r267 != 0.0);
+  let r269: f32 = select(r268, r47, r266 != 0.0);
+  let r270: f32 = select(r269, r47, r264 != 0.0);
+  let r271: f32 = select(r270, r258, r262 != 0.0);
+  let r272: f32 = select(r271, r253, r261 != 0.0);
+  let r273: f32 = (r272 + r260);
+  let r274: f32 = min(r21, r273);
+  let r275: f32 = max(r47, r274);
+  let r277: f32 = (r275 * r276);
+  let r279: f32 = (r277 + r278);
   let r280: vec2<u32> = i64_from_f(r279);
   let r281: f32 = i64_to_f(r280);
-  let r282: f32 = select(r281 / r273, 0.0, r273 == 0.0);
-  let r283: f32 = select(r47, r47, r261 != 0.0);
-  let r284: f32 = select(r283, r258, r264 != 0.0);
-  let r285: f32 = select(r284, r253, r267 != 0.0);
-  let r286: f32 = select(r285, r253, r269 != 0.0);
-  let r287: f32 = select(r286, r258, r271 != 0.0);
+  let r282: f32 = select(r281 / r276, 0.0, r276 == 0.0);
+  let r283: f32 = select(r47, r47, r267 != 0.0);
+  let r284: f32 = select(r283, r258, r266 != 0.0);
+  let r285: f32 = select(r284, r253, r264 != 0.0);
+  let r286: f32 = select(r285, r253, r262 != 0.0);
+  let r287: f32 = select(r286, r258, r261 != 0.0);
   let r288: f32 = (r287 + r260);
   let r289: f32 = min(r21, r288);
   let r290: f32 = max(r47, r289);
-  let r291: f32 = (r290 * r273);
-  let r292: f32 = (r291 + r274);
+  let r291: f32 = (r290 * r276);
+  let r292: f32 = (r291 + r278);
   let r293: vec2<u32> = i64_from_f(r292);
   let r294: f32 = i64_to_f(r293);
-  let r295: f32 = select(r294 / r273, 0.0, r273 == 0.0);
-  let r296: f32 = select(r253, r258, r261 != 0.0);
-  let r297: f32 = select(r296, r47, r264 != 0.0);
-  let r298: f32 = select(r297, r47, r267 != 0.0);
-  let r299: f32 = select(r298, r258, r269 != 0.0);
-  let r300: f32 = select(r299, r253, r271 != 0.0);
+  let r295: f32 = select(r294 / r276, 0.0, r276 == 0.0);
+  let r296: f32 = select(r258, r253, r267 != 0.0);
+  let r297: f32 = select(r296, r253, r266 != 0.0);
+  let r298: f32 = select(r297, r258, r264 != 0.0);
+  let r299: f32 = select(r298, r47, r262 != 0.0);
+  let r300: f32 = select(r299, r47, r261 != 0.0);
   let r301: f32 = (r300 + r260);
   let r302: f32 = min(r21, r301);
   let r303: f32 = max(r47, r302);
-  let r304: f32 = (r303 * r273);
-  let r305: f32 = (r304 + r274);
+  let r304: f32 = (r303 * r276);
+  let r305: f32 = (r304 + r278);
   let r306: vec2<u32> = i64_from_f(r305);
   let r307: f32 = i64_to_f(r306);
-  let r308: f32 = select(r307 / r273, 0.0, r273 == 0.0);
-  if (!wfinite(r308)) { sb |= 1u; }
-  if (!wfinite(r295)) { sb |= 1u; }
+  let r308: f32 = select(r307 / r276, 0.0, r276 == 0.0);
   if (!wfinite(r282)) { sb |= 1u; }
+  if (!wfinite(r295)) { sb |= 1u; }
+  if (!wfinite(r308)) { sb |= 1u; }
   if (sb != 0u) { atomicOr(&status, sb); }
-  outbuf[i * 3u + 0u] = r308;
+  outbuf[i * 3u + 0u] = r282;
   outbuf[i * 3u + 1u] = r295;
-  outbuf[i * 3u + 2u] = r282;
+  outbuf[i * 3u + 2u] = r308;
 }

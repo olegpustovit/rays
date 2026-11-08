@@ -137,7 +137,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export async function frame(input, state, rt) {
-  K ??= ["#0b0b0e", Float64Array.of(8, 8, 0), 0, 1, Float64Array.of(8, 8, 0), 0, 1, Float64Array.of(8, 8, 0), 0, 1, Float64Array.of(8, 8, 0), 0, 1, Float64Array.of(372, 8, 0), 0, 1, Float64Array.of(372, 8, 0), 0, 1, Float64Array.of(372, 8, 0), 0, 1, Float64Array.of(372, 8, 0), 0, 1, Float64Array.of(8, 256, 0), 0, 1, Float64Array.of(8, 256, 0), 0, 1, Float64Array.of(8, 256, 0), 0, 1, Float64Array.of(8, 256, 0), 0, 1, Float64Array.of(372, 256, 0), 0, 1, Float64Array.of(372, 256, 0), 0, 1, Float64Array.of(372, 256, 0), 0, 1, Float64Array.of(372, 256, 0), 0, 1, Float64Array.of(8, 504, 0), 0, 1, Float64Array.of(8, 504, 0), 0, 1, Float64Array.of(8, 504, 0), 0, 1, Float64Array.of(8, 504, 0), 0, 1, Float64Array.of(8, 504, 0), 0, 1, Float64Array.of(372, 504, 0), 0, 1, Float64Array.of(372, 504, 0), 0, 1, Float64Array.of(372, 504, 0), 0, 1, Float64Array.of(372, 504, 0), 0, 1];
+  K ??= ["#0b0b0e", Float64Array.of(8, 8, 0), 1, 0, Float64Array.of(8, 8, 0), 1, 0, Float64Array.of(8, 8, 0), 1, 0, Float64Array.of(8, 8, 0), 1, 0, Float64Array.of(372, 8, 0), 1, 0, Float64Array.of(372, 8, 0), 1, 0, Float64Array.of(372, 8, 0), 1, 0, Float64Array.of(372, 8, 0), 1, 0, Float64Array.of(8, 256, 0), 1, 0, Float64Array.of(8, 256, 0), 1, 0, Float64Array.of(8, 256, 0), 1, 0, Float64Array.of(8, 256, 0), 1, 0, Float64Array.of(372, 256, 0), 1, 0, Float64Array.of(372, 256, 0), 1, 0, Float64Array.of(372, 256, 0), 1, 0, Float64Array.of(372, 256, 0), 1, 0, Float64Array.of(8, 504, 0), 1, 0, Float64Array.of(8, 504, 0), 1, 0, Float64Array.of(8, 504, 0), 1, 0, Float64Array.of(8, 504, 0), 1, 0, Float64Array.of(8, 504, 0), 1, 0, Float64Array.of(372, 504, 0), 1, 0, Float64Array.of(372, 504, 0), 1, 0, Float64Array.of(372, 504, 0), 1, 0, Float64Array.of(372, 504, 0), 1, 0];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31;
   let l32, l33, l34, l35, l36, l37, l38, l39, l40, l41, l42, l43, l44, l45, l46, l47;
@@ -150,103 +150,103 @@ export async function frame(input, state, rt) {
     at = 2; l1 = K[1];
     at = 3; l2 = K[2];
     at = 4; l3 = K[3];
-    at = 5; { const resource = await rt.image(1); const [x, y] = point(rt, l1), scale = num(rt, l3), angle = num(rt, l2); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 5; { const resource = await rt.image(1); const [x, y] = point(rt, l1), scale = num(rt, l2), angle = num(rt, l3); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 6; l4 = K[4];
     at = 7; l5 = K[5];
     at = 8; l6 = K[6];
-    at = 9; { const resource = await rt.image(3); const [x, y] = point(rt, l4), scale = num(rt, l6), angle = num(rt, l5); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 9; { const resource = await rt.image(3); const [x, y] = point(rt, l4), scale = num(rt, l5), angle = num(rt, l6); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 10; l7 = K[7];
     at = 11; l8 = K[8];
     at = 12; l9 = K[9];
-    at = 13; { const resource = await rt.image(5); const [x, y] = point(rt, l7), scale = num(rt, l9), angle = num(rt, l8); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 13; { const resource = await rt.image(5); const [x, y] = point(rt, l7), scale = num(rt, l8), angle = num(rt, l9); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 14; l10 = K[10];
     at = 15; l11 = K[11];
     at = 16; l12 = K[12];
-    at = 17; { const resource = await rt.image(7); const [x, y] = point(rt, l10), scale = num(rt, l12), angle = num(rt, l11); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 17; { const resource = await rt.image(7); const [x, y] = point(rt, l10), scale = num(rt, l11), angle = num(rt, l12); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 18; l13 = K[13];
     at = 19; l14 = K[14];
     at = 20; l15 = K[15];
-    at = 21; { const resource = await rt.image(10); const [x, y] = point(rt, l13), scale = num(rt, l15), angle = num(rt, l14); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 21; { const resource = await rt.image(10); const [x, y] = point(rt, l13), scale = num(rt, l14), angle = num(rt, l15); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 22; l16 = K[16];
     at = 23; l17 = K[17];
     at = 24; l18 = K[18];
-    at = 25; { const resource = await rt.image(12); const [x, y] = point(rt, l16), scale = num(rt, l18), angle = num(rt, l17); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 25; { const resource = await rt.image(12); const [x, y] = point(rt, l16), scale = num(rt, l17), angle = num(rt, l18); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 26; l19 = K[19];
     at = 27; l20 = K[20];
     at = 28; l21 = K[21];
-    at = 29; { const resource = await rt.image(14); const [x, y] = point(rt, l19), scale = num(rt, l21), angle = num(rt, l20); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 29; { const resource = await rt.image(14); const [x, y] = point(rt, l19), scale = num(rt, l20), angle = num(rt, l21); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 30; l22 = K[22];
     at = 31; l23 = K[23];
     at = 32; l24 = K[24];
-    at = 33; { const resource = await rt.image(16); const [x, y] = point(rt, l22), scale = num(rt, l24), angle = num(rt, l23); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 33; { const resource = await rt.image(16); const [x, y] = point(rt, l22), scale = num(rt, l23), angle = num(rt, l24); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 34; l25 = K[25];
     at = 35; l26 = K[26];
     at = 36; l27 = K[27];
-    at = 37; { const resource = await rt.image(19); const [x, y] = point(rt, l25), scale = num(rt, l27), angle = num(rt, l26); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 37; { const resource = await rt.image(19); const [x, y] = point(rt, l25), scale = num(rt, l26), angle = num(rt, l27); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 38; l28 = K[28];
     at = 39; l29 = K[29];
     at = 40; l30 = K[30];
-    at = 41; { const resource = await rt.image(21); const [x, y] = point(rt, l28), scale = num(rt, l30), angle = num(rt, l29); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 41; { const resource = await rt.image(21); const [x, y] = point(rt, l28), scale = num(rt, l29), angle = num(rt, l30); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 42; l31 = K[31];
     at = 43; l32 = K[32];
     at = 44; l33 = K[33];
-    at = 45; { const resource = await rt.image(23); const [x, y] = point(rt, l31), scale = num(rt, l33), angle = num(rt, l32); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 45; { const resource = await rt.image(23); const [x, y] = point(rt, l31), scale = num(rt, l32), angle = num(rt, l33); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 46; l34 = K[34];
     at = 47; l35 = K[35];
     at = 48; l36 = K[36];
-    at = 49; { const resource = await rt.image(25); const [x, y] = point(rt, l34), scale = num(rt, l36), angle = num(rt, l35); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 49; { const resource = await rt.image(25); const [x, y] = point(rt, l34), scale = num(rt, l35), angle = num(rt, l36); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 50; l37 = K[37];
     at = 51; l38 = K[38];
     at = 52; l39 = K[39];
-    at = 53; { const resource = await rt.image(28); const [x, y] = point(rt, l37), scale = num(rt, l39), angle = num(rt, l38); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 53; { const resource = await rt.image(28); const [x, y] = point(rt, l37), scale = num(rt, l38), angle = num(rt, l39); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 54; l40 = K[40];
     at = 55; l41 = K[41];
     at = 56; l42 = K[42];
-    at = 57; { const resource = await rt.image(30); const [x, y] = point(rt, l40), scale = num(rt, l42), angle = num(rt, l41); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 57; { const resource = await rt.image(30); const [x, y] = point(rt, l40), scale = num(rt, l41), angle = num(rt, l42); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 58; l43 = K[43];
     at = 59; l44 = K[44];
     at = 60; l45 = K[45];
-    at = 61; { const resource = await rt.image(32); const [x, y] = point(rt, l43), scale = num(rt, l45), angle = num(rt, l44); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 61; { const resource = await rt.image(32); const [x, y] = point(rt, l43), scale = num(rt, l44), angle = num(rt, l45); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 62; l46 = K[46];
     at = 63; l47 = K[47];
     at = 64; l48 = K[48];
-    at = 65; { const resource = await rt.image(34); const [x, y] = point(rt, l46), scale = num(rt, l48), angle = num(rt, l47); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 65; { const resource = await rt.image(34); const [x, y] = point(rt, l46), scale = num(rt, l47), angle = num(rt, l48); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 66; l49 = K[49];
     at = 67; l50 = K[50];
     at = 68; l51 = K[51];
-    at = 69; { const resource = await rt.image(37); const [x, y] = point(rt, l49), scale = num(rt, l51), angle = num(rt, l50); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 69; { const resource = await rt.image(37); const [x, y] = point(rt, l49), scale = num(rt, l50), angle = num(rt, l51); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 70; l52 = K[52];
     at = 71; l53 = K[53];
     at = 72; l54 = K[54];
-    at = 73; { const resource = await rt.image(39); const [x, y] = point(rt, l52), scale = num(rt, l54), angle = num(rt, l53); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 73; { const resource = await rt.image(39); const [x, y] = point(rt, l52), scale = num(rt, l53), angle = num(rt, l54); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 74; l55 = K[55];
     at = 75; l56 = K[56];
     at = 76; l57 = K[57];
-    at = 77; { const resource = await rt.image(41); const [x, y] = point(rt, l55), scale = num(rt, l57), angle = num(rt, l56); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 77; { const resource = await rt.image(41); const [x, y] = point(rt, l55), scale = num(rt, l56), angle = num(rt, l57); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 78; l58 = K[58];
     at = 79; l59 = K[59];
     at = 80; l60 = K[60];
-    at = 81; { const resource = await rt.image(43); const [x, y] = point(rt, l58), scale = num(rt, l60), angle = num(rt, l59); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 81; { const resource = await rt.image(43); const [x, y] = point(rt, l58), scale = num(rt, l59), angle = num(rt, l60); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 82; l61 = K[61];
     at = 83; l62 = K[62];
     at = 84; l63 = K[63];
-    at = 85; { const resource = await rt.image(46); const [x, y] = point(rt, l61), scale = num(rt, l63), angle = num(rt, l62); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 85; { const resource = await rt.image(46); const [x, y] = point(rt, l61), scale = num(rt, l62), angle = num(rt, l63); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 86; l64 = K[64];
     at = 87; l65 = K[65];
     at = 88; l66 = K[66];
-    at = 89; { const resource = await rt.image(49); const [x, y] = point(rt, l64), scale = num(rt, l66), angle = num(rt, l65); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 89; { const resource = await rt.image(49); const [x, y] = point(rt, l64), scale = num(rt, l65), angle = num(rt, l66); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 90; l67 = K[67];
     at = 91; l68 = K[68];
     at = 92; l69 = K[69];
-    at = 93; { const resource = await rt.image(51); const [x, y] = point(rt, l67), scale = num(rt, l69), angle = num(rt, l68); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 93; { const resource = await rt.image(51); const [x, y] = point(rt, l67), scale = num(rt, l68), angle = num(rt, l69); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 94; l70 = K[70];
     at = 95; l71 = K[71];
     at = 96; l72 = K[72];
-    at = 97; { const resource = await rt.image(53); const [x, y] = point(rt, l70), scale = num(rt, l72), angle = num(rt, l71); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 97; { const resource = await rt.image(53); const [x, y] = point(rt, l70), scale = num(rt, l71), angle = num(rt, l72); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
     at = 98; l73 = K[73];
     at = 99; l74 = K[74];
     at = 100; l75 = K[75];
-    at = 101; { const resource = await rt.image(55); const [x, y] = point(rt, l73), scale = num(rt, l75), angle = num(rt, l74); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 101; { const resource = await rt.image(55); const [x, y] = point(rt, l73), scale = num(rt, l74), angle = num(rt, l75); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

@@ -117,7 +117,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= ["#111827", Float64Array.of(40, 60, 0), "Press 1–8 or click a key", 16n, Float64Array.of(1, 1, 1), Float64Array.of(40, 150, 0), Float64Array.of(64, 160, 0), -1n, 0n, 0n, 4096n, 0n, 0n, "key-pressed", "1", 0n, "key-pressed", "2", 1n, "key-pressed", "3", 2n, "key-pressed", "4", 3n, "key-pressed", "5", 4n, "key-pressed", "6", 5n, "key-pressed", "7", 6n, "key-pressed", "8", 7n, "pointer-pressed", "left", 40n, 600n, 150n, 310n, 40n, 70n, 7n, 1n, 1n, 0n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(110, 150, 0), Float64Array.of(64, 160, 0), 1n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(180, 150, 0), Float64Array.of(64, 160, 0), 2n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(250, 150, 0), Float64Array.of(64, 160, 0), 3n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(320, 150, 0), Float64Array.of(64, 160, 0), 4n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(390, 150, 0), Float64Array.of(64, 160, 0), 5n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(460, 150, 0), Float64Array.of(64, 160, 0), 6n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(530, 150, 0), Float64Array.of(64, 160, 0), 7n, "#22d3ee", "#f8fafc", "#0f172a"];
+  K ??= ["#111827", Float64Array.of(40, 60, 0), "Press 1–8 or click a key", Float64Array.of(1, 1, 1), 16n, Float64Array.of(40, 150, 0), Float64Array.of(64, 160, 0), -1n, 0n, 0n, 4096n, 0n, 0n, "key-pressed", "1", 0n, "key-pressed", "2", 1n, "key-pressed", "3", 2n, "key-pressed", "4", 3n, "key-pressed", "5", 4n, "key-pressed", "6", 5n, "key-pressed", "7", 6n, "key-pressed", "8", 7n, "pointer-pressed", "left", 40n, 600n, 150n, 310n, 40n, 70n, 7n, 1n, 1n, 0n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(110, 150, 0), Float64Array.of(64, 160, 0), 1n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(180, 150, 0), Float64Array.of(64, 160, 0), 2n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(250, 150, 0), Float64Array.of(64, 160, 0), 3n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(320, 150, 0), Float64Array.of(64, 160, 0), 4n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(390, 150, 0), Float64Array.of(64, 160, 0), 5n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(460, 150, 0), Float64Array.of(64, 160, 0), 6n, "#22d3ee", "#f8fafc", "#0f172a", Float64Array.of(530, 150, 0), Float64Array.of(64, 160, 0), 7n, "#22d3ee", "#f8fafc", "#0f172a"];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31;
   let l32, l33, l34, l35, l36, l37, l38, l39, l40, l41, l42, l43, l44, l45, l46, l47;
@@ -139,7 +139,7 @@ export function frame(input, state, rt) {
     at = 3; l2 = K[2];
     at = 4; l3 = K[3];
     at = 5; l4 = K[4];
-    at = 6; if (typeof l2 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l2 !== "") { const [x, y] = point(rt, l1); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l3)), color: ink(rt, l4), text: l2}); }
+    at = 6; if (typeof l2 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l2 !== "") { const [x, y] = point(rt, l1); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l4)), color: ink(rt, l3), text: l2}); }
     at = 7; l5 = K[5];
     at = 8; l6 = K[6];
     at = 9; l7 = K[7];
