@@ -2,7 +2,7 @@
 //! analysis; two inputs perform AxB analysis. Provenance attributes are aligned point-owned CSR
 //! rows: input number, primitive number, primitive barycentric triplets, and an incident source
 //! point number or `-1`. Inputs are not passed through.
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support, topology};
 use rdk_core::error::Code;
@@ -171,6 +171,7 @@ fn narrow(
 }
 
 /// Events of one contiguous candidate range, joined in range order.
+#[derive(Default)]
 struct RangeEvents {
     floats: Vec<f64>,
     source_piece: Vec<i64>,
@@ -193,56 +194,56 @@ fn event_pass(
     };
     let candidate_count = source_pieces.len() as i64;
     let chunk = grain.max(1);
-    let ranges = if candidate_count <= 0 { 0 } else { (candidate_count - 1) / chunk + 1 };
-    let slots: Vec<Mutex<Option<RangeEvents>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(chunk, candidate_count, &|range, first, last| {
-        let mut scratch = [0.0_f64; 26];
-        let mut point_info = [0_i64; 10];
-        let mut events = [0.0_f64; MAX_EVENTS * EVENT_STRIDE];
-        let mut part = RangeEvents { floats: Vec::new(), source_piece: Vec::new(), collision_piece: Vec::new() };
-        for candidate in first..last {
-            cancel::poll(cancel_value, candidate, 4095)?;
-            let source_piece = source_pieces[candidate as usize];
-            let collision_piece = collision_pieces[candidate as usize];
-            let count = narrow(
-                &mut scratch,
-                &mut point_info,
-                &mut events,
-                is_self,
-                tolerance,
-                include_coplanar,
-                source_index,
-                collision_index,
-                source_piece,
-                collision_piece,
-            )?;
-            part.floats.extend_from_slice(&events[..count * EVENT_STRIDE]);
-            for _ in 0..count {
-                part.source_piece.push(source_piece);
-                part.collision_piece.push(collision_piece);
+    // ponytail: event counts are unknown until narrow runs; retain range buffers to avoid running it twice.
+    // A count-only narrow API would allow prefix-sized final output windows.
+    let mut parts: Vec<_> = (0..support::range_count(candidate_count, chunk)).map(|_| RangeEvents::default()).collect();
+    {
+        let windows = support::Windows::even(&mut parts, 1);
+        support::run_indexed_ranges(chunk, candidate_count, &|range, first, last| {
+            let mut scratch = [0.0_f64; 26];
+            let mut point_info = [0_i64; 10];
+            let mut events = [0.0_f64; MAX_EVENTS * EVENT_STRIDE];
+            let part = &mut windows.take(range)[0];
+            for candidate in first..last {
+                cancel::poll(cancel_value, candidate, 4095)?;
+                let source_piece = source_pieces[candidate as usize];
+                let collision_piece = collision_pieces[candidate as usize];
+                let count = narrow(
+                    &mut scratch,
+                    &mut point_info,
+                    &mut events,
+                    is_self,
+                    tolerance,
+                    include_coplanar,
+                    source_index,
+                    collision_index,
+                    source_piece,
+                    collision_piece,
+                )?;
+                part.floats.extend_from_slice(&events[..count * EVENT_STRIDE]);
+                for _ in 0..count {
+                    part.source_piece.push(source_piece);
+                    part.collision_piece.push(collision_piece);
+                }
             }
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(part);
-        Ok(())
-    })?;
+            Ok(())
+        })?;
+    }
+    let count = parts.iter().map(|part| part.source_piece.len()).sum();
     let mut raw = Raw {
-        x: Vec::new(),
-        y: Vec::new(),
-        z: Vec::new(),
-        au: Vec::new(),
-        av: Vec::new(),
-        aw: Vec::new(),
-        bu: Vec::new(),
-        bv: Vec::new(),
-        bw: Vec::new(),
-        source_piece: Vec::new(),
-        collision_piece: Vec::new(),
+        x: Vec::with_capacity(count),
+        y: Vec::with_capacity(count),
+        z: Vec::with_capacity(count),
+        au: Vec::with_capacity(count),
+        av: Vec::with_capacity(count),
+        aw: Vec::with_capacity(count),
+        bu: Vec::with_capacity(count),
+        bv: Vec::with_capacity(count),
+        bw: Vec::with_capacity(count),
+        source_piece: Vec::with_capacity(count),
+        collision_piece: Vec::with_capacity(count),
     };
-    for slot in slots {
-        let part = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(part) = part else {
-            return Err(make(Code::InvalidGeometry, "Intersection Analysis count/fill drift".to_owned()));
-        };
+    for part in parts {
         for event in part.floats.chunks_exact(EVENT_STRIDE) {
             raw.x.push(event[0]);
             raw.y.push(event[1]);
@@ -542,6 +543,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use super::*;
     use rdk_core::topology::PrimitiveKind;
 

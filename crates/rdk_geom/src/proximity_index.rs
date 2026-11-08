@@ -2,8 +2,6 @@
 //!
 //! OCaml returns `(_, string) result`; a failure here is an `error::T` with code
 //! `invalid_parameter` and the OCaml message, and a cancellation keeps code `cancelled`.
-use std::sync::Mutex;
-
 use rdk_core::{cancel, error, geometry, packed, polygon_triangulation, support, topology, topology_index};
 use rdk_core::error::Code;
 
@@ -57,12 +55,12 @@ fn validate_point(positions: &packed::Float3::View::View, point: i64, label: &st
     Ok(())
 }
 
-struct Chunk {
-    entities: Vec<i64>,
-    kinds: Vec<u8>,
-    a: Vec<i64>,
-    b: Vec<i64>,
-    c: Vec<i64>,
+struct Chunk<'a> {
+    entities: &'a mut [i64],
+    kinds: &'a mut [u8],
+    a: &'a mut [i64],
+    b: &'a mut [i64],
+    c: &'a mut [i64],
     failure: Option<String>,
 }
 
@@ -91,91 +89,86 @@ pub fn primitive_features(
         offsets[primitive + 1] = offsets[primitive] + count;
     }
     let total = offsets[entity_count as usize] as usize;
-    let ranges = if entity_count == 0 { 0 } else { ((entity_count - 1) / grain + 1) as usize };
-    let slots: Vec<Mutex<Option<Chunk>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(grain, entity_count, &|range, first_primitive, last_primitive| {
-        let base = offsets[first_primitive as usize];
-        let length = (offsets[last_primitive as usize] - base) as usize;
-        let mut chunk = Chunk {
-            entities: vec![0; length],
-            kinds: vec![SEGMENT; length],
-            a: vec![0; length],
-            b: vec![0; length],
-            c: vec![-1; length],
-            failure: None,
-        };
-        let mut scratch = polygon_triangulation::create_scratch();
-        for primitive in first_primitive..last_primitive {
-            cancel::poll(cancel_value, primitive, 4095)?;
-            if chunk.failure.is_some() {
-                continue;
-            }
-            let p = primitive as usize;
-            let first = topology_view.primitive_offsets[p];
-            let last = topology_view.primitive_offsets[p + 1];
-            let at = (offsets[p] - base) as usize;
-            match topology_view.primitive_kinds[p] {
-                0 => {
-                    let result = polygon_triangulation::primitive(
-                        cancel_value,
-                        &positions,
-                        &topology_view,
-                        Some(&mut scratch),
-                        primitive,
-                        &mut |local, va, vb, vc| {
+    let ranges = support::range_count(entity_count, grain);
+    let mut entities = vec![0; total];
+    let mut kinds = vec![SEGMENT; total];
+    let mut a = vec![0; total];
+    let mut b = vec![0; total];
+    let mut c = vec![-1; total];
+    let mut failures = vec![None; ranges as usize];
+    {
+        let bound = |range: i64| offsets[(range.saturating_mul(grain)).min(entity_count) as usize] as usize;
+        let entities = support::Windows::new(&mut entities, ranges, bound);
+        let kinds = support::Windows::new(&mut kinds, ranges, bound);
+        let a = support::Windows::new(&mut a, ranges, bound);
+        let b = support::Windows::new(&mut b, ranges, bound);
+        let c = support::Windows::new(&mut c, ranges, bound);
+        let failures = support::Windows::even(&mut failures, 1);
+        support::run_indexed_ranges(grain, entity_count, &|range, first_primitive, last_primitive| {
+            let base = offsets[first_primitive as usize];
+            let mut chunk = Chunk {
+                entities: entities.take(range),
+                kinds: kinds.take(range),
+                a: a.take(range),
+                b: b.take(range),
+                c: c.take(range),
+                failure: None,
+            };
+            let mut scratch = polygon_triangulation::create_scratch();
+            for primitive in first_primitive..last_primitive {
+                cancel::poll(cancel_value, primitive, 4095)?;
+                if chunk.failure.is_some() {
+                    continue;
+                }
+                let p = primitive as usize;
+                let first = topology_view.primitive_offsets[p];
+                let last = topology_view.primitive_offsets[p + 1];
+                let at = (offsets[p] - base) as usize;
+                match topology_view.primitive_kinds[p] {
+                    0 => {
+                        let result = polygon_triangulation::primitive(
+                            cancel_value,
+                            &positions,
+                            &topology_view,
+                            Some(&mut scratch),
+                            primitive,
+                            &mut |local, va, vb, vc| {
+                                let feature = at + local as usize;
+                                chunk.entities[feature] = primitive;
+                                chunk.kinds[feature] = TRIANGLE;
+                                chunk.a[feature] = topology_view.vertex_points[va as usize];
+                                chunk.b[feature] = topology_view.vertex_points[vb as usize];
+                                chunk.c[feature] = topology_view.vertex_points[vc as usize];
+                            },
+                        );
+                        if let Err(problem) = result {
+                            if error::is_cancelled(&problem) {
+                                return Err(problem);
+                            }
+                            chunk.failure = Some(error::message(&problem).to_owned());
+                        }
+                    }
+                    kind => {
+                        for local in 0..(last - first - 1).max(0) {
                             let feature = at + local as usize;
                             chunk.entities[feature] = primitive;
-                            chunk.kinds[feature] = TRIANGLE;
-                            chunk.a[feature] = topology_view.vertex_points[va as usize];
-                            chunk.b[feature] = topology_view.vertex_points[vb as usize];
-                            chunk.c[feature] = topology_view.vertex_points[vc as usize];
-                        },
-                    );
-                    if let Err(problem) = result {
-                        if error::is_cancelled(&problem) {
-                            return Err(problem);
+                            chunk.a[feature] = topology_view.vertex_points[(first + local) as usize];
+                            chunk.b[feature] = topology_view.vertex_points[(first + local + 1) as usize];
                         }
-                        chunk.failure = Some(error::message(&problem).to_owned());
-                    }
-                }
-                kind => {
-                    for local in 0..(last - first - 1).max(0) {
-                        let feature = at + local as usize;
-                        chunk.entities[feature] = primitive;
-                        chunk.a[feature] = topology_view.vertex_points[(first + local) as usize];
-                        chunk.b[feature] = topology_view.vertex_points[(first + local + 1) as usize];
-                    }
-                    if kind == 2 {
-                        let feature = (offsets[p + 1] - 1 - base) as usize;
-                        chunk.entities[feature] = primitive;
-                        chunk.a[feature] = topology_view.vertex_points[(last - 1) as usize];
-                        chunk.b[feature] = topology_view.vertex_points[first as usize];
+                        if kind == 2 {
+                            let feature = (offsets[p + 1] - 1 - base) as usize;
+                            chunk.entities[feature] = primitive;
+                            chunk.a[feature] = topology_view.vertex_points[(last - 1) as usize];
+                            chunk.b[feature] = topology_view.vertex_points[first as usize];
+                        }
                     }
                 }
             }
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(chunk);
-        Ok(())
-    })?;
-    let mut entities = Vec::with_capacity(total);
-    let mut kinds = Vec::with_capacity(total);
-    let mut a = Vec::with_capacity(total);
-    let mut b = Vec::with_capacity(total);
-    let mut c = Vec::with_capacity(total);
-    let mut first_failure: Option<String> = None;
-    for slot in slots {
-        if let Some(chunk) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            if first_failure.is_none() {
-                first_failure = chunk.failure;
-            }
-            entities.extend(chunk.entities);
-            kinds.extend(chunk.kinds);
-            a.extend(chunk.a);
-            b.extend(chunk.b);
-            c.extend(chunk.c);
-        }
+            failures.take(range)[0] = chunk.failure;
+            Ok(())
+        })?;
     }
-    if let Some(message) = first_failure {
+    if let Some(message) = failures.into_iter().flatten().next() {
         return Err(failure(message));
     }
     for feature in 0..total {
@@ -252,49 +245,40 @@ pub fn create(cancel_value: Option<&cancel::T>, grain: Option<i64>, features: Fe
             count: Vec::new(),
         });
     }
-    // Per-range chunks of nine planes: centroid, min, max.
-    type Planes = [Vec<f64>; 9];
-    let ranges = (total - 1) / grain as usize + 1;
-    let slots: Vec<Mutex<Option<Planes>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
+    // Centroid, minimum and maximum planes, filled directly in final storage.
+    let mut all: [Vec<f64>; 9] = std::array::from_fn(|_| vec![0.0; total]);
     let positions = &features.positions;
-    support::run_indexed_ranges(grain, total as i64, &|range, first, last| {
-        let length = (last - first) as usize;
-        let mut planes: Planes = std::array::from_fn(|_| vec![0.0; length]);
-        for feature in first..last {
-            cancel::poll(cancel_value, feature, 4095)?;
-            let f = feature as usize;
-            let at = f - first as usize;
-            let point_a = features.a[f] as usize;
-            let point_b = features.b[f] as usize;
-            let (ax, ay, az) = (positions.x[point_a], positions.y[point_a], positions.z[point_a]);
-            let (bx, by, bz) = (positions.x[point_b], positions.y[point_b], positions.z[point_b]);
-            let point_c = features.c[f];
-            let (cx, cy, cz) = if point_c >= 0 {
-                let pc = point_c as usize;
-                (positions.x[pc], positions.y[pc], positions.z[pc])
-            } else {
-                (bx, by, bz)
-            };
-            planes[3][at] = float_min(ax, float_min(bx, cx));
-            planes[4][at] = float_min(ay, float_min(by, cy));
-            planes[5][at] = float_min(az, float_min(bz, cz));
-            planes[6][at] = float_max(ax, float_max(bx, cx));
-            planes[7][at] = float_max(ay, float_max(by, cy));
-            planes[8][at] = float_max(az, float_max(bz, cz));
-            planes[0][at] = (ax / 3.0) + (bx / 3.0) + (cx / 3.0);
-            planes[1][at] = (ay / 3.0) + (by / 3.0) + (cy / 3.0);
-            planes[2][at] = (az / 3.0) + (bz / 3.0) + (cz / 3.0);
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(planes);
-        Ok(())
-    })?;
-    let mut all: Planes = std::array::from_fn(|_| Vec::with_capacity(total));
-    for slot in slots {
-        if let Some(planes) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            for (target, part) in all.iter_mut().zip(planes) {
-                target.extend(part);
+    {
+        let windows = all.each_mut().map(|plane| support::Windows::even(plane, grain));
+        support::run_indexed_ranges(grain, total as i64, &|range, first, last| {
+            let planes = windows.each_ref().map(|window| window.take(range));
+            for feature in first..last {
+                cancel::poll(cancel_value, feature, 4095)?;
+                let f = feature as usize;
+                let at = f - first as usize;
+                let point_a = features.a[f] as usize;
+                let point_b = features.b[f] as usize;
+                let (ax, ay, az) = (positions.x[point_a], positions.y[point_a], positions.z[point_a]);
+                let (bx, by, bz) = (positions.x[point_b], positions.y[point_b], positions.z[point_b]);
+                let point_c = features.c[f];
+                let (cx, cy, cz) = if point_c >= 0 {
+                    let pc = point_c as usize;
+                    (positions.x[pc], positions.y[pc], positions.z[pc])
+                } else {
+                    (bx, by, bz)
+                };
+                planes[3][at] = float_min(ax, float_min(bx, cx));
+                planes[4][at] = float_min(ay, float_min(by, cy));
+                planes[5][at] = float_min(az, float_min(bz, cz));
+                planes[6][at] = float_max(ax, float_max(bx, cx));
+                planes[7][at] = float_max(ay, float_max(by, cy));
+                planes[8][at] = float_max(az, float_max(bz, cz));
+                planes[0][at] = (ax / 3.0) + (bx / 3.0) + (cx / 3.0);
+                planes[1][at] = (ay / 3.0) + (by / 3.0) + (cy / 3.0);
+                planes[2][at] = (az / 3.0) + (bz / 3.0) + (cz / 3.0);
             }
-        }
+            Ok(())
+        })?;
     }
     let bounds = bounds3_index::create(
         cancel_value, None, grain, &all[0], &all[1], &all[2], &all[3], &all[4], &all[5], &all[6], &all[7], &all[8],
@@ -625,36 +609,30 @@ pub fn nearest_entities_with_distances(
     }
     let maximum = max_distance * max_distance;
     let count = queries.entity_count;
-    let ranges = if count <= 0 { 0 } else { ((count - 1) / grain + 1) as usize };
-    let slots: Vec<Mutex<Option<(Vec<i64>, Vec<f64>)>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(grain, count, &|range, first_entity, last_entity| {
-        let length = (last_entity - first_entity) as usize;
-        let mut out_ids = vec![-1_i64; length];
-        let mut out_distances = vec![f64::INFINITY; length];
-        let mut stack = [0_i64; 128];
-        let mut bounds = [0.0_f64; 6];
-        for entity in first_entity..last_entity {
-            cancel::poll(cancel_value, entity, 4095)?;
-            let mut best_distance = maximum;
-            let mut best_ids = [-1_i64; 2];
-            for feature in queries.offsets[entity as usize]..queries.offsets[entity as usize + 1] {
-                query_feature(source, queries, feature as usize, &mut best_distance, &mut best_ids, &mut stack, &mut bounds)?;
+    let mut output = vec![-1; count as usize];
+    let mut distances = vec![f64::INFINITY; count as usize];
+    {
+        let ids = support::Windows::even(&mut output, grain);
+        let distances = support::Windows::even(&mut distances, grain);
+        support::run_indexed_ranges(grain, count, &|range, first_entity, last_entity| {
+            let out_ids = ids.take(range);
+            let out_distances = distances.take(range);
+            let mut stack = [0_i64; 128];
+            let mut bounds = [0.0_f64; 6];
+            for entity in first_entity..last_entity {
+                cancel::poll(cancel_value, entity, 4095)?;
+                let mut best_distance = maximum;
+                let mut best_ids = [-1_i64; 2];
+                for feature in queries.offsets[entity as usize]..queries.offsets[entity as usize + 1] {
+                    query_feature(source, queries, feature as usize, &mut best_distance, &mut best_ids, &mut stack, &mut bounds)?;
+                }
+                if best_ids[0] >= 0 {
+                    out_ids[(entity - first_entity) as usize] = best_ids[0];
+                    out_distances[(entity - first_entity) as usize] = best_distance;
+                }
             }
-            if best_ids[0] >= 0 {
-                out_ids[(entity - first_entity) as usize] = best_ids[0];
-                out_distances[(entity - first_entity) as usize] = best_distance;
-            }
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((out_ids, out_distances));
-        Ok(())
-    })?;
-    let mut output = Vec::with_capacity(count as usize);
-    let mut distances = Vec::with_capacity(count as usize);
-    for slot in slots {
-        if let Some((ids, range_distances)) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            output.extend(ids);
-            distances.extend(range_distances);
-        }
+            Ok(())
+        })?;
     }
     Ok((output, distances))
 }
@@ -668,6 +646,47 @@ mod tests {
         let positions = packed::Float3::View::of_owned_exn(x, y, z).unwrap();
         let topo = topology::View::create_validated_owned(count, vertices, offsets, kinds);
         geometry::create(positions, topo, None, None, None).unwrap()
+    }
+
+    #[test]
+    fn final_windows_match_across_grains_and_domains() {
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        let mut vertices = Vec::new();
+        let mut offsets = vec![0];
+        let mut kinds = Vec::new();
+        for primitive in 0..96 {
+            x.extend([primitive as f64 * 3.0, primitive as f64 * 3.0 + 1.0, primitive as f64 * 3.0 + 1.0, primitive as f64 * 3.0]);
+            y.extend([0.0, 0.0, 1.0, 1.0]);
+            vertices.extend(primitive * 4..primitive * 4 + 4);
+            offsets.push(vertices.len() as i64);
+            kinds.push((primitive % 3) as u8);
+        }
+        let input = geometry_of(x, y, vec![0.0; 384], vertices, offsets, kinds);
+        let expected = create(None, Some(1024), primitive_features(None, Some(1024), &input).unwrap()).unwrap();
+        for domains in [1, 8] {
+            parallel::run_unit(Some(domains), &|| {
+                let actual = create(None, Some(7), primitive_features(None, Some(7), &input).unwrap()).unwrap();
+                assert_eq!(actual.features.offsets, expected.features.offsets);
+                assert_eq!(actual.features.entities, expected.features.entities);
+                assert_eq!(actual.features.kinds, expected.features.kinds);
+                assert_eq!(actual.features.a, expected.features.a);
+                assert_eq!(actual.features.b, expected.features.b);
+                assert_eq!(actual.features.c, expected.features.c);
+                assert_eq!(actual.order, expected.order);
+                for (left, right) in [(&actual.min_x, &expected.min_x), (&actual.min_y, &expected.min_y), (&actual.min_z, &expected.min_z), (&actual.max_x, &expected.max_x), (&actual.max_y, &expected.max_y), (&actual.max_z, &expected.max_z)] {
+                    assert_eq!(left, right);
+                }
+                assert_eq!(actual.left, expected.left);
+                assert_eq!(actual.right, expected.right);
+                assert_eq!(actual.first, expected.first);
+                assert_eq!(actual.count, expected.count);
+                let (ids, distances) = nearest_entities_with_distances(None, Some(7), 0.0, &actual, &actual.features).unwrap();
+                assert_eq!(ids, (0..96).collect::<Vec<_>>());
+                assert_eq!(distances, vec![0.0; 96]);
+                Ok(())
+            }).unwrap();
+        }
     }
 
     #[test]

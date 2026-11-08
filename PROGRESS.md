@@ -14,9 +14,9 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|---------|----------|
 | A | A1-A8 | - | - |
 | B | B0-B5 | - | - |
-| M | M1-M2, M4-M16, M18-M21 | M3, M17 | - |
+| M | M1-M2, M4-M21 | M3 | - |
 | I | I1-I6 | - | - |
-| C | C1-C2, C4-C5, C7-C9, C12-C21 | C3, C6, C10, C11 | - |
+| C | C1-C5, C7-C9, C12-C21 | C6, C10, C11 | - |
 | D | D2-D3 | D1, D4 (benchmark evidence missing) | D5-D6 |
 
 ## Items (commits)
@@ -32,7 +32,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | M13 | done | `6f88bce2` Arc<Vec<T>> attributes; COLUMNS ring + FLOW_COPIES deleted; guard `attribute_round_trip_bytes` |
 | M14 | done | `a0e5d08e` + repair `19868fbe` etc. (boxed `GeoPayload`) |
 | M15, M16 | done | `38bfb307`, `00c4d596` |
-| M17 | partial | C3 commits (`25726291` ... `141a4afe`), `bd2a526f`, `8afb4996` cover the main kernels; resumed source census found remaining production chunk-result slots (see C3). |
+| M17 | done, bounded variable-size buffers | C3 closure below removes the remaining numeric chunk copies and result slots. Shared attribute-map guard measures roughly half the float peak. Variable-length text/intersection results retain documented range buffers because output sizes are unknown before work executes. |
 | M18 | done | `ed08c91b` `21da1965` i32 scratch; `INT_FLOATS` charged to ledger in `8bf0c0d0` |
 | M19 | done | `13abe74c` `rays_math::text_array::TextArray` (offsets+bytes); 1M rows = 8 allocs; text literals as `Arc<[u8]>` skipped (hundreds of sites) |
 | M21 | done, deviates | `1ccd60fc` `Rc<[u8]>` with `unique()` copy-on-write; plan premise "nothing mutates" was false (set_pixel, Image::replace, readback) |
@@ -46,7 +46,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | I fallout | done | `49737e72` scatter `sc_rf`; `2c7ebd25` sort/prelude/operators; `e2e2ed18` gpu_run carried fixture |
 | C1 | done | `dc2ee86b` `ef645352` `e6ae19d5` `2612f106` `b4b90916`; Vulkan only type-checked on macOS; source lines grew, gain is allocations/closure types |
 | C2 | done | `33e163b0` `faa8090e` |
-| C3 | partial | ~30 commits `25726291`..`141a4afe`; resumed production-source census contradicts the earlier two-test-slots claim: chunk-result slots remain in `rdk_geom::proximity_index` (3), `curve_join` (3), `attribute_ops`, `ordering`, `intersection_analysis`. Convert fixed-size outputs to disjoint windows and inspect variable-size results separately. |
+| C3 | done, bounded variable-size buffers | ~30 earlier commits plus resumed closure: all three proximity-index and curve-join paths, numeric attribute mappers and primitive ordering write final disjoint windows. Text/intersection transforms use disjoint range structs and reserve exact final capacity; their variable payloads still need a merge until output sizes can be declared without running work twice (`ponytail:` comments). Census finds no remaining production per-range owned numeric result slots. 533 RDK/SOP tests and six allocation guards pass. |
 | C4 | done | `a08c927c`, `fee04de1` plus resumed closure: triangulation/defaulted gathers use the central selector; instance repetition, fuse reductions, target mapping, Boolean consolidation, mesh merge and tuple mirroring use shared float-plane operations. `of_float_planes` consumes output buffers instead of copying them; all callers migrated. Normals keep their joint normalisation paths. Regression proves buffer identity for widths 1–4, missing/mismatched-plane errors, and tuple instance repetition. |
 | C5 | done | `a12b1efb` |
 | C6 | partial | `4cfcff4a` `7d7241ae`: panel_map plain struct, Cow panes, Rc core; reducers do NOT take `&mut t`, `reduce` still clones once; basic 2509 -> 2089 allocs/frame, empty 5732 -> 4549 |
@@ -71,14 +71,14 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 
 ## Known failures / open risks
 
-- Resumed audit next work: finish C3/M17 remaining chunk slots and C6/M3 ownership/borrowed panes; then C10/C11/D1/D4 audit, D5/D6 and full qualification. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
+- Resumed audit next work: finish C6/M3 ownership/borrowed panes; then C10/C11/D1/D4 audit, D5/D6 and full qualification. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
 
 - `cargo t -p flow_sop` on the D2 tree: 700 tests, 696 pass; the 4 failures are the baseline ones below (`lend_session_tests` confirmed pre-existing by LowerClean at `11988707`). `cargo t -p rdk_core/rdk_geom/rdk_boolean/rdk_ops/sop`: 523 pass; `rdk_rays` 10 pass. Other full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
 - Pre-existing at baseline `11988707` (bisected by LowerClean): `test_node_facts::declared_preserved_topology`, `test_keyword_ports::keyword_manifest_defaults_projection_checked_gestures` (E_SHADOW), `test_settle::in_flight_device_writes_settle_at_a_cooks_end`, `test_projection::snapshots_of_the_scene_fixtures`, `lend_session_tests::escaped_zone_nodes_own_only_their_cook_context`.
 - `flow_ir test_static_map::sop_deferral`: root cause `4ed6baf8` (constructor deferral); test rewritten (`a3e8c6df`); `StaticMap.deferred` now effectively dead.
 - Unconfirmed after D4: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` (E_NONFINITE); all four `flow_ir test_core_operators` text-array parts now pass (slowest 2.923 s on the resumed I2 tree); `rays_editor` full suite and `pxui_graph --features test-hooks` unverified after C6.
 - Remesh macOS golden switched to the Windows hash constant (`3107f153`); cause (libm) unverified.
-- Per-cook guards (a) walker, (b) aliased 4096-element store, (c) round trip, (d) subdivide peak and 1M-text now exist in `flow_sop/src/test_alloc_budget.rs`. The walker uses `Host::force_reference`, bypassing compiled execution. The store guard was verified with a temporary negative control: disabling alias release produced 8,204 allocations and failed the guard; restored code uses 12. All five pass. Per-frame guards `alloc_budget_basic`/`alloc_budget_empty` exist (`e74d3f1d`; empty-editor limit 4650, plan said ~1200 - plan figure does not match full-layout editor).
+- Per-cook guards (a) walker, (b) aliased 4096-element store, (c) round trip, (d) subdivide peak and 1M-text now exist in `flow_sop/src/test_alloc_budget.rs`. The walker uses `Host::force_reference`, bypassing compiled execution. The store guard was verified with a temporary negative control: disabling alias release produced 8,204 allocations and failed the guard; restored code uses 12. All six pass after C3 adds the shared numeric-mapper guard. Per-frame guards `alloc_budget_basic`/`alloc_budget_empty` exist (`e74d3f1d`; empty-editor limit 4650, plan said ~1200 - plan figure does not match full-layout editor).
 - Not measured: B-wave compile-time gains, bench_core before/after for D4 (PackedMerge reported no regression sign only from one noisy run).
 - `gate deps`: 28 pre-existing violations, none new.
 - Throwaway worktrees `/tmp/rays-m13b`, `/tmp/rays-base`, `/tmp/rays-snap` can be deleted.
@@ -131,6 +131,11 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: C3/M17 closure: reused `support::Windows` for three proximity paths, three curve-join paths, numeric attribute mapping and primitive ordering. Removed owned result-slot helpers; variable-length text/intersection outputs keep one-pass range buffers with explicit ceilings, avoiding duplicate callback/intersection work. Added exact one/eight-domain checks for mixed feature kinds, nonuniform primitive sizes, curve plans and mapper values/errors; existing intersection parallel/provenance cases pass. Shared mapper guard failed before refactor (72 integer allocations over 60); tightened after: float 6,297,928 -> 3,155,152 peak B, 166 -> 105 allocations (caps 3,160,000 / 110); int 1,574,880 -> 1,051,712 B, 72 -> 35 (caps 1,055,000 / 40). Single sampled mapper times are noisy (float 1.626 -> 1.126 ms, int 0.349 -> 0.335 ms); no speed claim.
+  - `cargo check -p rdk_geom -p rdk_ops`: pass / 0.86 s. Focused mapper/ordering: 8.513 / 0.173 s; proximity/curve windows: 14.368 s including rebuild, slowest 0.024 s. `cargo t -p rdk_core -p rdk_geom -p rdk_ops -p rdk_boolean -p sop`: 533 pass / 24.185 s, slowest interpolation parallel-exactness 1.039 s. `cargo t -p flow_sop test_alloc_budget -- --nocapture`: six pass / 15.477 s including rebuild, slowest text 0.117 s. Existing limits unchanged.
+  - Required before/after build measurements: `BUILDTIME_LEAF=rdk_core BUILDTIME_MIDDLE=rdk_geom BUILDTIME_TOP=rdk_ops BUILDTIME_EDITOR_TOUCH=rdk_ops cargo run -p buildtime -- measure`. Warm check / touch check / touch build, seconds: core 0.066/0.199/0.364 -> 0.100/0.188/0.335; geom 0.243/0.220/0.452 -> 0.247/0.220/0.457; ops 0.546/0.468/1.089 -> 0.521/0.453/1.110. Geom build+test 2.227 -> 1.952; ops 6.469 -> 7.451 (new regressions + run variance); W1 editor warm/touch 3.547/1.828 -> 3.039/1.813. All tool budgets pass; no compile-speed improvement claimed.
+  - Seven debug `rays check` samples after one warmup (basic, gpu_sea, million_marks): median 0.602402 -> 0.588328 s, `/tmp/rays-c3-perf.json`. `cargo run -p flow_ir --example bench_core -- '1,024'`: min/median and digest recorded in `/tmp/rays-c3-bench-{before,after}.log`; both domain counts match reference and digest `c4bbf006c82014c7`. Full D4 qualification remains open. `git diff --check`: clean. No dependencies, boundaries, goldens or profiles changed.
 
 - 2026-11-08: I6 export closure. Baseline normal `cargo t -p web_export`: 17 pass / 5.137 s. Both formerly ignored cases now terminate (0.166 / 0.496 s); only stale goldens failed. Added a runtime assertion on the actual region `countLimit` passed to `invoke`; it failed with 4611686018427387903 before the fix, then passed with native i64 MAX (2.729 s including build, case 0.289 s). `cargo t -p flow_web test_region_arguments`: 23 pass / 4.301 s, slowest all-byte text 1.896 s. `cargo t -p web_export`: 19 pass / 1.534 s, no ignored exports, slowest particles 0.591 s. Written golden review: five ordinary program fixtures change only `countLimit`; verified by replacing the new literal back and comparing original bytes/digest. Formerly ignored fixtures include already-intended i63 removal, unsigned i64 division, D1 register/scan-result order and updated source spans. The image module content is unchanged; its filename/reference now match MD5. Every generated `data.bin` matches the prior bytes or stored digest. `git diff --check`: clean.
 

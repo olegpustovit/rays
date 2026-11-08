@@ -1,10 +1,6 @@
 //! Stable reorder of primitives by an integer primitive attribute.
-use std::sync::Mutex;
-
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
 use rdk_core::error::Code;
-
-type Slot = Mutex<Option<(Vec<i64>, Vec<i64>)>>;
 
 fn fail(message: String) -> error::T {
     error::new("Error.Fail", Code::InvalidParameter, message)
@@ -26,38 +22,33 @@ fn apply_primitives(
             - source.primitive_offsets[source_primitive];
     }
     let vertex_count = offsets[primitive_count] as usize;
-    let mut vertex_points = Vec::with_capacity(vertex_count);
-    let mut vertex_map = Vec::with_capacity(vertex_count);
+    let mut vertex_points = vec![0; vertex_count];
+    let mut vertex_map = vec![0; vertex_count];
     let mut kinds = vec![0_u8; primitive_count];
     if primitive_count > 0 {
         let chunk = (grain / 8).max(1);
-        let ranges = ((primitive_count as i64 - 1) / chunk + 1) as usize;
-        let slots: Vec<Slot> = (0..ranges).map(|_| Mutex::new(None)).collect();
+        let ranges = support::range_count(primitive_count as i64, chunk);
+        let bound = |range: i64| offsets[(range as usize * chunk as usize).min(primitive_count)] as usize;
+        let points = support::Windows::new(&mut vertex_points, ranges, bound);
+        let map = support::Windows::new(&mut vertex_map, ranges, bound);
         support::run_indexed_ranges(chunk, primitive_count as i64, &|range, first, last| {
-            let mut points = Vec::new();
-            let mut map = Vec::new();
+            let points = points.take(range);
+            let map = map.take(range);
+            let base = offsets[first as usize];
             for primitive in first..last {
                 cancel::poll(cancel_value, primitive, 4095)?;
                 let source_primitive = permutation[primitive as usize] as usize;
-                for source_vertex in
-                    source.primitive_offsets[source_primitive]..source.primitive_offsets[source_primitive + 1]
-                {
-                    points.push(source.vertex_points[source_vertex as usize]);
-                    map.push(source_vertex);
+                let start = source.primitive_offsets[source_primitive];
+                let end = source.primitive_offsets[source_primitive + 1];
+                let at = (offsets[primitive as usize] - base) as usize;
+                points[at..at + (end - start) as usize]
+                    .copy_from_slice(&source.vertex_points[start as usize..end as usize]);
+                for (slot, source_vertex) in map[at..at + (end - start) as usize].iter_mut().zip(start..end) {
+                    *slot = source_vertex;
                 }
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some((points, map));
             Ok(())
         })?;
-        for slot in slots {
-            let (points, map) = slot
-                .into_inner()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .unwrap_or_default();
-            vertex_points.extend(points);
-            vertex_map.extend(map);
-        }
         for primitive in 0..primitive_count {
             kinds[primitive] = source.primitive_kinds[permutation[primitive] as usize];
         }
@@ -169,9 +160,19 @@ mod tests {
     }
 
     #[test]
-    fn small_grain_ranges_join_in_order() {
-        let tiny = sort_primitives(None, Some(8), "k", &triangles()).unwrap();
-        let view = topology::View::view(geometry::topology(&tiny)).unwrap();
-        assert_eq!(&view.vertex_points[..], &[1, 2, 3, 0, 2, 3, 0, 1, 2]);
+    fn small_grain_windows_preserve_variable_primitive_sizes() {
+        use crate::attribute_ops::{fixtures, fixtures2};
+        let positions: Vec<_> = (0..8).map(|i| (i as f64, 0.0, 0.0)).collect();
+        let primitives: Vec<_> = (0..513).map(|i| (topology::PrimitiveKind::Polygon, (0..3 + i % 5).collect())).collect();
+        let input = fixtures::mesh(&positions, &primitives);
+        let input = fixtures2::add_ints(attribute::Owner::Primitive, "k", (0..513).map(|i| (i * 7) % 13).collect(), &input);
+        let input = fixtures2::add_ints(attribute::Owner::Vertex, "v", (0..geometry::vertex_count(&input)).collect(), &input);
+        let expected = fixtures::on_domains(1, &|| sort_primitives(None, Some(8192), "k", &input).unwrap());
+        let actual = fixtures::on_domains(8, &|| sort_primitives(None, Some(24), "k", &input).unwrap());
+        assert_eq!(fixtures2::signature(&expected), fixtures2::signature(&actual));
+        let mut order: Vec<_> = (0..513).collect();
+        order.sort_by_key(|i| (i * 7) % 13);
+        let expected_points: Vec<_> = order.into_iter().flat_map(|i| 0..3 + i % 5).collect();
+        assert_eq!(topology::View::view(geometry::topology(&actual)).unwrap().vertex_points.as_slice(), expected_points);
     }
 }

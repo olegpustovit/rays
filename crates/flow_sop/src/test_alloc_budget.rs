@@ -202,3 +202,39 @@ fn aliased_store_allocations() {
     assert!(allocs <= 16, "aliased store: {allocs} allocations");
     assert!(peak <= 165_000, "aliased store: {peak} peak bytes");
 }
+
+/// C3: the shared fixed-width attribute mappers should own one output buffer per plane.
+#[test]
+fn attribute_map_output_buffers() {
+    use rdk_ops::attribute_ops::{map_ints, map_planes};
+    const COUNT: usize = 131_072;
+    parallel::run_unit(Some(1), &|| {
+        let planes = [vec![1.0; COUNT], vec![2.0; COUNT], vec![3.0; COUNT]];
+        let refs = planes.each_ref().map(Vec::as_slice);
+        mem_sys::local_reset();
+        let start = std::time::Instant::now();
+        let output = map_planes(None, 4096, &refs, &|i, slot| {
+            slot[0] += i as f64;
+            slot[1] *= 2.0;
+            slot[2] -= 0.25;
+            Ok(())
+        }).unwrap();
+        let (float_peak, float_allocs, elapsed) = (mem_sys::local_peak_bytes(), mem_sys::local_alloc_count(), start.elapsed());
+        assert!(output[0].iter().enumerate().all(|(i, value)| *value == i as f64 + 1.0));
+        assert!(output[1].iter().all(|value| *value == 4.0) && output[2].iter().all(|value| *value == 2.75));
+        assert!(planes[0].iter().all(|value| *value == 1.0));
+        eprintln!("attribute float map: {float_peak} peak bytes / {float_allocs} allocs / {elapsed:?}");
+        assert!(float_peak <= 3_160_000 && float_allocs <= 110);
+        drop(output);
+        let initial = vec![7_i64; COUNT];
+        mem_sys::local_reset();
+        let start = std::time::Instant::now();
+        let output = map_ints(None, 4096, &initial, &|i, slot| { *slot += i; Ok(()) }).unwrap();
+        let (int_peak, int_allocs, elapsed) = (mem_sys::local_peak_bytes(), mem_sys::local_alloc_count(), start.elapsed());
+        assert!(output.iter().enumerate().all(|(i, value)| *value == i as i64 + 7));
+        assert!(initial.iter().all(|value| *value == 7));
+        eprintln!("attribute int map: {int_peak} peak bytes / {int_allocs} allocs / {elapsed:?}");
+        assert!(int_peak <= 1_055_000 && int_allocs <= 40);
+        Ok(())
+    }).unwrap();
+}

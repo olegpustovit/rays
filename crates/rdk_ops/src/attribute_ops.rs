@@ -1,7 +1,5 @@
 //! Attribute ownership and reduction operations (OCaml `Attribute_ops`). The thin wrappers over the
 //! lifecycle/blur/transfer/interpolate modules re-code their failures as OCaml does.
-use std::sync::Mutex;
-
 use rdk_core::{cancel, error, support};
 use rdk_core::error::Code;
 use rays_math::text_array::TextArray;
@@ -35,34 +33,8 @@ pub fn ocaml_quote(text: impl AsRef<[u8]>) -> String {
     out
 }
 
-enum Chunk {
-    Planes(Vec<Vec<f64>>),
-    Ints(Vec<i64>),
-    Texts(TextArray),
-}
-
-type Slots = Vec<Mutex<Option<Chunk>>>;
-
-fn new_slots(count: i64, grain: i64) -> Slots {
-    let ranges = if count <= 0 { 0 } else { ((count - 1) / grain + 1) as usize };
-    (0..ranges).map(|_| Mutex::new(None)).collect()
-}
-
-fn put(slots: &Slots, range: i64, value: Chunk) {
-    *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(value);
-}
-
-fn take(slots: Slots) -> Vec<Chunk> {
-    slots
-        .into_iter()
-        .filter_map(|slot| slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner))
-        .collect()
-}
-
-/// Runs `work(element, planes)` for every element of `0..count`, in disjoint ranges of `grain`
-/// elements on the pool. `planes` holds the element's component values, loaded from `init` (one
-/// slice per plane, each `count` long) and stored back; per-range buffers are joined in range order,
-/// so the result is identical for any domain count. The first failing element (lowest range) wins.
+/// Runs `work(element, planes)` for every element in disjoint final output windows.
+/// The result is identical for any domain count; the lowest failing range wins.
 pub fn map_planes(
     cancel_token: Option<&cancel::T>,
     grain: i64,
@@ -71,31 +43,32 @@ pub fn map_planes(
 ) -> Result<Vec<Vec<f64>>, error::T> {
     let width = init.len();
     let count = init.first().map_or(0, |plane| plane.len()) as i64;
-    let slots: Slots = new_slots(count, grain);
-    support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut local: Vec<Vec<f64>> = init.iter().map(|plane| plane[first as usize..last as usize].to_vec()).collect();
-        let mut slot = [0.0_f64; 8];
-        for element in first..last {
-            cancel::poll(cancel_token, element, 4095)?;
-            let at = (element - first) as usize;
-            for plane in 0..width {
-                slot[plane] = local[plane][at];
+    // ponytail: eight stack components cover attribute widths; use dynamic scratch if wider types ship.
+    if width > 8 || init.iter().any(|plane| plane.len() != count as usize) {
+        return Err(make_error("map_planes", Code::InvalidArgument, "expected at most eight equal-length planes"));
+    }
+    let mut output: Vec<Vec<f64>> = init.iter().map(|plane| plane.to_vec()).collect();
+    {
+        let windows: Vec<_> = output.iter_mut().map(|plane| support::Windows::even(plane, grain)).collect();
+        support::run_indexed_ranges(grain, count, &|range, first, last| {
+            let mut local: [&mut [f64]; 8] = std::array::from_fn(|_| &mut [][..]);
+            for (plane, window) in local.iter_mut().zip(&windows) {
+                *plane = window.take(range);
             }
-            work(element, &mut slot[..width])?;
-            for plane in 0..width {
-                local[plane][at] = slot[plane];
+            let mut slot = [0.0_f64; 8];
+            for element in first..last {
+                cancel::poll(cancel_token, element, 4095)?;
+                let at = (element - first) as usize;
+                for plane in 0..width {
+                    slot[plane] = local[plane][at];
+                }
+                work(element, &mut slot[..width])?;
+                for plane in 0..width {
+                    local[plane][at] = slot[plane];
+                }
             }
-        }
-        put(&slots, range, Chunk::Planes(local));
-        Ok(())
-    })?;
-    let mut output: Vec<Vec<f64>> = (0..width).map(|_| Vec::with_capacity(count as usize)).collect();
-    for chunk in take(slots) {
-        if let Chunk::Planes(local) = chunk {
-            for (plane, values) in local.into_iter().enumerate() {
-                output[plane].extend(values);
-            }
-        }
+            Ok(())
+        })?;
     }
     Ok(output)
 }
@@ -107,22 +80,16 @@ pub fn map_ints(
     init: &[i64],
     work: &(dyn Fn(i64, &mut i64) -> Result<(), error::T> + Sync),
 ) -> Result<Vec<i64>, error::T> {
-    let count = init.len() as i64;
-    let slots: Slots = new_slots(count, grain);
-    support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut local = init[first as usize..last as usize].to_vec();
-        for element in first..last {
-            cancel::poll(cancel_token, element, 4095)?;
-            work(element, &mut local[(element - first) as usize])?;
-        }
-        put(&slots, range, Chunk::Ints(local));
-        Ok(())
-    })?;
-    let mut output = Vec::new();
-    for chunk in take(slots) {
-        if let Chunk::Ints(values) = chunk {
-            output.extend(values);
-        }
+    let mut output = init.to_vec();
+    {
+        let windows = support::Windows::even(&mut output, grain);
+        support::run_indexed_ranges(grain, init.len() as i64, &|range, first, last| {
+            for (element, slot) in (first..last).zip(windows.take(range)) {
+                cancel::poll(cancel_token, element, 4095)?;
+                work(element, slot)?;
+            }
+            Ok(())
+        })?;
     }
     Ok(output)
 }
@@ -135,25 +102,26 @@ pub fn map_texts(
     work: &(dyn Fn(i64, &mut Vec<u8>) -> Result<(), error::T> + Sync),
 ) -> Result<TextArray, error::T> {
     let count = init.len() as i64;
-    let slots: Slots = new_slots(count, grain);
-    support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut local = TextArray::new();
-        let mut row = Vec::new();
-        for element in first..last {
-            cancel::poll(cancel_token, element, 4095)?;
-            row.clear();
-            row.extend_from_slice(&init[element as usize]);
-            work(element, &mut row)?;
-            local.push(&row);
-        }
-        put(&slots, range, Chunk::Texts(local));
-        Ok(())
-    })?;
-    let mut output = TextArray::new();
-    for chunk in take(slots) {
-        if let Chunk::Texts(values) = chunk {
-            output.extend(values.iter());
-        }
+    // ponytail: variable-length transforms need range byte buffers until callbacks declare output sizes.
+    let mut chunks: Vec<_> = (0..support::range_count(count, grain)).map(|_| TextArray::new()).collect();
+    {
+        let windows = support::Windows::even(&mut chunks, 1);
+        support::run_indexed_ranges(grain, count, &|range, first, last| {
+            let local = &mut windows.take(range)[0];
+            let mut row = Vec::new();
+            for element in first..last {
+                cancel::poll(cancel_token, element, 4095)?;
+                row.clear();
+                row.extend_from_slice(&init[element as usize]);
+                work(element, &mut row)?;
+                local.push(&row);
+            }
+            Ok(())
+        })?;
+    }
+    let mut output = TextArray::with_capacity(init.len(), chunks.iter().map(TextArray::byte_len).sum());
+    for chunk in chunks {
+        output.extend(chunk.iter());
     }
     Ok(output)
 }
@@ -698,5 +666,50 @@ pub(crate) mod fixtures2 {
     /// The shared byte-exact geometry oracle, including topology and ordered/edge groups.
     pub fn signature(g: &geometry::T) -> String {
         crate::compact_points::fixtures::geometry_signature(g)
+    }
+}
+
+#[cfg(test)]
+mod map_tests {
+    use super::*;
+
+    #[test]
+    fn output_windows_preserve_values_and_lowest_failure() {
+        let input: Vec<_> = (0..513).map(|i| i as f64).collect();
+        let ints: Vec<_> = (0..513).collect();
+        let texts: TextArray = [b"a".as_slice(), b"", b"xyz"].into_iter().cycle().take(513).collect();
+        for domains in [1, 8] {
+            parallel::run_unit(Some(domains), &|| {
+                let planes = map_planes(None, 17, &[&input, &input], &|i, slot| {
+                    slot[0] += 0.25;
+                    slot[1] *= i as f64;
+                    Ok(())
+                }).unwrap();
+                assert_eq!(planes[0], input.iter().map(|v| v + 0.25).collect::<Vec<_>>());
+                assert_eq!(planes[1], input.iter().map(|v| v * v).collect::<Vec<_>>());
+                assert_eq!(map_ints(None, 17, &ints, &|i, v| { *v += i; Ok(()) }).unwrap(), ints.iter().map(|v| v * 2).collect::<Vec<_>>());
+                let output = map_texts(None, 17, &texts, &|i, row| {
+                    if i % 2 == 0 { row.clear(); } else { row.extend_from_slice(b"more"); }
+                    Ok(())
+                }).unwrap();
+                for (i, row) in output.iter().enumerate() {
+                    let mut expected = texts[i].to_vec();
+                    if i % 2 == 0 { expected.clear(); } else { expected.extend_from_slice(b"more"); }
+                    assert_eq!(row, expected);
+                }
+                let fail = |i: i64| if i == 18 || i == 500 {
+                    Err(make_error("map", Code::InvalidArgument, &i.to_string()))
+                } else { Ok(()) };
+                assert_eq!(error::message(&map_planes(None, 17, &[&input], &|i, _| fail(i)).unwrap_err()), "18");
+                assert_eq!(error::message(&map_ints(None, 17, &ints, &|i, _| fail(i)).unwrap_err()), "18");
+                assert_eq!(error::message(&map_texts(None, 17, &texts, &|i, _| fail(i)).unwrap_err()), "18");
+                Ok(())
+            }).unwrap();
+        }
+        assert!(map_planes(None, 17, &[&input, &[]], &|_, _| Ok(())).is_err());
+        assert!(map_planes(None, 17, &[&[] as &[f64]; 9], &|_, _| Ok(())).is_err());
+        assert!(map_planes(None, 0, &[], &|_, _| Ok(())).is_err());
+        assert!(map_ints(None, 0, &[], &|_, _| Ok(())).is_err());
+        assert!(map_texts(None, 0, &TextArray::new(), &|_, _| Ok(())).is_err());
     }
 }

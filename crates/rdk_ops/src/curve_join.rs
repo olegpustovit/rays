@@ -4,7 +4,7 @@
 //! an `error::T` with operation `Curve_join.join`, code `invalid_parameter` and the OCaml message,
 //! and a cancellation keeps code `cancelled`.
 use std::cmp::Ordering;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology,
@@ -385,14 +385,6 @@ pub struct Params {
     pub wrap: bool,
 }
 
-type FloatTriple = (Vec<f64>, Vec<f64>, Vec<f64>);
-type PickRange = (Vec<bool>, Vec<bool>, Vec<i64>);
-
-fn range_count(count: i64, grain: i64) -> usize {
-    let ranges = if count <= 0 { 0 } else { ((count - 1) / grain + 1) as usize };
-    ranges
-}
-
 /// Welds the selected open polyline curves of `geometry` into chains.
 pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
@@ -563,21 +555,24 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
             };
             chain_count = fixed_chain_count;
             let chunk = grain.unwrap_or(16_384);
-            let slots: Vec<Mutex<Option<PickRange>>> = (0..range_count(selected_count, chunk)).map(|_| Mutex::new(None)).collect();
+            let reversed_windows = support::Windows::even(&mut reversed, chunk);
+            let welded_windows = support::Windows::even(&mut welded, chunk);
+            let chain_windows = support::Windows::even(&mut selected_chain, chunk);
             let selected_ref = &selected_primitives;
             support::run_indexed_ranges(chunk, selected_count, &|range, first, last| {
                 cancel::check_opt(cancel_value)?;
-                let mut local_reversed = Vec::new();
-                let mut local_welded = Vec::new();
-                let mut local_chain = Vec::new();
+                let local_reversed = reversed_windows.take(range);
+                let local_welded = welded_windows.take(range);
+                let local_chain = chain_windows.take(range);
                 for index in first..last {
                     let subgroup = starts_subgroup(index);
                     let reverse = picked_reverse(index);
-                    local_reversed.push(reverse);
-                    local_chain.push(match group_size {
+                    let at = (index - first) as usize;
+                    local_reversed[at] = reverse;
+                    local_chain[at] = match group_size {
                         None => 0,
                         Some(size) => index / size,
-                    });
+                    };
                     let mut weld = false;
                     if index > 0 && !subgroup {
                         let previous = selected_ref[index as usize - 1];
@@ -588,21 +583,10 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                             weld = true;
                         }
                     }
-                    local_welded.push(weld);
+                    local_welded[at] = weld;
                 }
-                *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((local_reversed, local_welded, local_chain));
                 Ok(())
             })?;
-            let mut at = 0;
-            for slot in slots {
-                let (r, w, c) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).unwrap_or_default();
-                for k in 0..r.len() {
-                    reversed[at] = r[k];
-                    welded[at] = w[k];
-                    selected_chain[at] = c[k];
-                    at += 1;
-                }
-            }
         }
     } else if connect_closest_ends {
         if selected_count > i64::MAX / 2 {
@@ -611,36 +595,34 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
         let input_primitives = selected_primitives.clone();
         let endpoint_count = selected_count * 2;
         let chunk = grain.unwrap_or(16_384);
-        let slots: Vec<Mutex<Option<FloatTriple>>> = (0..range_count(endpoint_count, chunk)).map(|_| Mutex::new(None)).collect();
-        support::run_indexed_ranges(chunk, endpoint_count, &|range, first, last| {
-            let mut xs = Vec::new();
-            let mut ys = Vec::new();
-            let mut zs = Vec::new();
-            for endpoint_slot in first..last {
-                cancel::poll(cancel_value, endpoint_slot, 16_383)?;
-                let primitive = input_primitives[(endpoint_slot >> 1) as usize];
-                let point = endpoint(primitive, false, endpoint_slot & 1 == 1) as usize;
-                let (x, y, z) = (positions.x[point], positions.y[point], positions.z[point]);
-                if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-                    return Err(fail(
-                        "Curve Join requires finite selected endpoint positions".to_owned(),
-                    ));
+        let mut endpoint_x = vec![0.0; endpoint_count as usize];
+        let mut endpoint_y = vec![0.0; endpoint_count as usize];
+        let mut endpoint_z = vec![0.0; endpoint_count as usize];
+        {
+            let xs = support::Windows::even(&mut endpoint_x, chunk);
+            let ys = support::Windows::even(&mut endpoint_y, chunk);
+            let zs = support::Windows::even(&mut endpoint_z, chunk);
+            support::run_indexed_ranges(chunk, endpoint_count, &|range, first, last| {
+                let xs = xs.take(range);
+                let ys = ys.take(range);
+                let zs = zs.take(range);
+                for endpoint_slot in first..last {
+                    cancel::poll(cancel_value, endpoint_slot, 16_383)?;
+                    let primitive = input_primitives[(endpoint_slot >> 1) as usize];
+                    let point = endpoint(primitive, false, endpoint_slot & 1 == 1) as usize;
+                    let (x, y, z) = (positions.x[point], positions.y[point], positions.z[point]);
+                    if !(x.is_finite() && y.is_finite() && z.is_finite()) {
+                        return Err(fail(
+                            "Curve Join requires finite selected endpoint positions".to_owned(),
+                        ));
+                    }
+                    let at = (endpoint_slot - first) as usize;
+                    xs[at] = x;
+                    ys[at] = y;
+                    zs[at] = z;
                 }
-                xs.push(x);
-                ys.push(y);
-                zs.push(z);
-            }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((xs, ys, zs));
-            Ok(())
-        })?;
-        let mut endpoint_x = Vec::with_capacity(endpoint_count as usize);
-        let mut endpoint_y = Vec::with_capacity(endpoint_count as usize);
-        let mut endpoint_z = Vec::with_capacity(endpoint_count as usize);
-        for slot in slots {
-            let (xs, ys, zs) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).unwrap_or_default();
-            endpoint_x.extend(xs);
-            endpoint_y.extend(ys);
-            endpoint_z.extend(zs);
+                Ok(())
+            })?;
         }
         let mut tree = EndpointTree::create(cancel_value, endpoint_x, endpoint_y, endpoint_z)?;
         let mut used = vec![false; sc];
@@ -858,24 +840,27 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
         primitive_offsets[primitive + 1] = primitive_offsets[primitive] + output_sizes[primitive];
     }
     let output_vertex_count = primitive_offsets[opc];
-    let mut vertex_map = Vec::with_capacity(output_vertex_count as usize);
-    let mut vertex_points = Vec::with_capacity(output_vertex_count as usize);
-    let mut edge_source_corner = Vec::with_capacity(output_vertex_count as usize);
+    let mut vertex_map = vec![0; output_vertex_count as usize];
+    let mut vertex_points = vec![0; output_vertex_count as usize];
+    let mut edge_source_corner = vec![-1; output_vertex_count as usize];
     {
         let chunk = grain.unwrap_or(16_384);
-        let slots: Vec<Mutex<Option<FillBuf>>> = (0..range_count(output_primitive_count, chunk)).map(|_| Mutex::new(None)).collect();
         let offsets = &primitive_offsets;
+        let ranges = support::range_count(output_primitive_count, chunk);
+        let bound = |range: i64| offsets[(range.saturating_mul(chunk)).min(output_primitive_count) as usize] as usize;
+        let map = support::Windows::new(&mut vertex_map, ranges, bound);
+        let points = support::Windows::new(&mut vertex_points, ranges, bound);
+        let corner = support::Windows::new(&mut edge_source_corner, ranges, bound);
         let (descriptor_primitive, descriptor_chain) = (&descriptor_primitive, &descriptor_chain);
         let (selected_primitives, reversed, welded) = (&selected_primitives, &reversed, &welded);
         let (chain_first, chain_last) = (&chain_first, &chain_last);
         support::run_indexed_ranges(chunk, output_primitive_count, &|range, first_output, last_output| {
             cancel::check_opt(cancel_value)?;
             let base = offsets[first_output as usize];
-            let total = (offsets[last_output as usize] - base) as usize;
             let mut buf = FillBuf {
-                map: vec![0; total],
-                points: vec![0; total],
-                corner: vec![-1; total],
+                map: map.take(range),
+                points: points.take(range),
+                corner: corner.take(range),
             };
             for output_primitive in first_output..last_output {
                 let mut output_at = (offsets[output_primitive as usize] - base) as usize;
@@ -913,16 +898,8 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                     buf.corner[previous as usize] = -1;
                 }
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(buf);
             Ok(())
         })?;
-        for slot in slots {
-            if let Some(buf) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-                vertex_map.extend(buf.map);
-                vertex_points.extend(buf.points);
-                edge_source_corner.extend(buf.corner);
-            }
-        }
     }
     let output_topology = topology::create_owned(
         source.point_count,
@@ -1074,17 +1051,17 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
     )
 }
 
-/// Range-local output of the vertex fill; `corner` is the source corner each output edge follows.
-struct FillBuf {
-    map: Vec<i64>,
-    points: Vec<i64>,
-    corner: Vec<i64>,
+/// Disjoint final output of the vertex fill; `corner` is the source corner each output edge follows.
+struct FillBuf<'a> {
+    map: &'a mut [i64],
+    points: &'a mut [i64],
+    corner: &'a mut [i64],
 }
 
 /// Appends one source piece to the output primitive being filled; `piece` is
 /// `(source_first, source_size)` and `flags` is `(reverse, skip_first)`.
 fn fill_source(
-    buf: &mut FillBuf,
+    buf: &mut FillBuf<'_>,
     source_vertex_points: &[i64],
     output_at: &mut usize,
     previous: &mut i64,
@@ -1231,6 +1208,33 @@ mod tests {
             panic!("expected cancellation")
         };
         assert_eq!(error::code(&failure), Code::Cancelled);
+    }
+
+    #[test]
+    fn final_windows_preserve_parallel_curve_layouts() {
+        use crate::attribute_ops::{fixtures, fixtures2};
+        let mut points = Vec::new();
+        let mut rows = Vec::new();
+        let mut start = 0.0;
+        for i in 0..96 {
+            let row: Vec<_> = (0..2 + i % 4).map(|j| {
+                let index = points.len() as i64;
+                points.push((start + j as f64, 0.0, 0.0));
+                index
+            }).collect();
+            start += row.len() as f64 - 1.0;
+            rows.push(row);
+        }
+        let refs: Vec<_> = rows.iter().map(Vec::as_slice).collect();
+        let input = curves(&points, &refs);
+        let input = fixtures2::add_ints(attribute::Owner::Vertex, "v", (0..geometry::vertex_count(&input)).collect(), &input);
+        let input = fixtures2::add_ints(attribute::Owner::Primitive, "p", (0..96).collect(), &input);
+        for connect in [false, true] {
+            let options = Params { orient_closest: false, connect_closest_ends: connect, group_size: Some(7), keep_originals: true, ..params() };
+            let expected = fixtures::on_domains(1, &|| join(&Params { grain: Some(8192), ..options.clone() }, &input).unwrap());
+            let actual = fixtures::on_domains(8, &|| join(&Params { grain: Some(3), ..options.clone() }, &input).unwrap());
+            assert_eq!(fixtures2::signature(&expected), fixtures2::signature(&actual));
+        }
     }
 
     #[test]
