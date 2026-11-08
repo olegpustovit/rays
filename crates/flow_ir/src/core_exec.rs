@@ -2638,10 +2638,9 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
             if i < 0 || i as usize >= data.len() { return Err(range_error()); }
             match x {
                 Value::Text(text) => {
-                    // ponytail: a row store rebuilds the offsets+bytes array, O(n) per store; give TextArray an in-place replace if text stores get hot
-                    let mut rows = rays_math::text_array::TextArray::with_capacity(data.len(), data.byte_len() + text.len());
-                    for (j, row) in data.iter().enumerate() { rows.push(if j == i as usize { text } else { row }); }
-                    *data = Arc::new(rows);
+                    // ponytail: a store that changes a row's length shifts the rows after it, O(n); keep
+                    // per-row buffers in the builder if length-changing text stores get hot
+                    Arc::make_mut(data).replace(i as usize, text);
                 }
                 _ => return Err(v::fail("E_ARRAY_TYPE", "Text arrays contain text values.")),
             }
