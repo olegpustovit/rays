@@ -1,6 +1,10 @@
-//! lib/sop/test_parallel_exact.ml's 84 registered sections map to 98 enabled tests: the first 14
+//! lib/sop/test_parallel_exact.ml's 84 registered sections map to 98 section functions: the first 14
 //! use generated_* names, attributes expands into 14 attributes_* checks, curve_samples is split in two
 //! (curve_samples, curve_samples_grouped), all others keep source names.
+//! cargo t runs each test in its own process, so the sections share processes to share the cached
+//! library check and node lowering: the 71 light ones (< 1.5 s alone) run in file order as light_01..17
+//! (~2-2.6 s each), five pairs of 60x40 subdivide sections share the subdivide lowering, and the other
+//! 17 heavy ones stay single tests. `sections` names the failing section before re-raising its panic.
 //! One/four domains, grain 97 and seed 42 are retained, and so are the original fixture scales except
 //! where shrunk for the debug case and whole-run budgets (the floor is per-process node lowering: a
 //! Lisp node such as subdivide is checked and lowered about three times before it cooks, ~1.4 s).
@@ -196,7 +200,6 @@ fn surface_sources(vertex:bool) -> (node::T,node::T) {
     (source,target)
 }
 
-#[test]
 fn generated_line() {
     let one = exact(&super::node(&[], r###"(sop/line :points 500001 :origin [-10.0 2.0 3.0] :direction [1.0 2.0 3.0] :length 25.0)"###));
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one)),(500_001,500_001));
@@ -215,7 +218,6 @@ fn generated_polyframe() {
     for name in ["N","tangentu","tangentv"] { assert!(has(&one,Owner::Vertex,name)); }
 }
 
-#[test]
 fn generated_facet() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid
        :width_mode "Auto"
@@ -235,7 +237,6 @@ fn generated_facet() {
     assert_eq!(geo::point_count(&one),geo::vertex_count(&one)); assert!(has(&one,Owner::Point,"uv"));
 }
 
-#[test]
 fn generated_grid() {
     let one = exact(&super::node(&[], r###"(sop/grid
    :counts "Point counts"
@@ -253,7 +254,6 @@ fn generated_grid() {
     assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(351_201,700_000));
 }
 
-#[test]
 fn generated_circle() {
     let one = exact(&super::node(&[], r###"(sop/circle
    :arc "Sliced"
@@ -272,7 +272,6 @@ fn generated_circle() {
     assert_eq!(geo::point_count(&one),500_002); assert_eq!(topology::primitive_kind(geo::topology(&one),0).unwrap(),topology::PrimitiveKind::ClosedPolyline);
 }
 
-#[test]
 fn generated_box() {
     let one = exact(&super::node(&[], r###"(sop/box :connectivity "Quads" :consolidate_points true :normals "Vertex"
    :center [3.0 -2.0 5.0] :rotation [0.3 0.5 0.7] :rotation_order "ZXY"
@@ -298,7 +297,6 @@ fn generated_sphere() {
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one),geo::primitive_count(&one)),(33_024,195_072,65_024));
 }
 
-#[test]
 fn generated_torus() {
     let one = exact(&super::node(&[], r###"(sop/torus
    :connectivity "Alternating triangles"
@@ -323,7 +321,6 @@ fn generated_torus() {
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one),geo::primitive_count(&one)),(32_768,196_096,65_282));
 }
 
-#[test]
 fn generated_tube() {
     let one = exact(&super::node(&[], r###"(sop/tube
    :connectivity "Alternating triangles"
@@ -342,7 +339,6 @@ fn generated_tube() {
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one),geo::primitive_count(&one)),(32_769,195_584,65_153));
 }
 
-#[test]
 fn generated_platonic() {
     let one = exact(&super::node(&[], r###"(sop/platonic
    :kind "Soccer ball"
@@ -356,7 +352,6 @@ fn generated_platonic() {
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one),geo::primitive_count(&one)),(60,180,32));
 }
 
-#[test]
 fn generated_spiral() {
     let one = exact(&super::node(&[], r###"(sop/spiral
    :extent_mode "Height and pitch"
@@ -417,7 +412,6 @@ fn filters_blurred() {
     assert!(has(&one,Owner::Point,"Cd"));
 }
 
-#[test]
 fn filters_smoothed() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 150 :rows 110 :size 18.0)
      (sop/noise_displace :seed 313 :amplitude 1.1 :frequency 0.52)
@@ -446,7 +440,6 @@ fn filters_smoothed() {
     assert!(has(&one,Owner::Point,"Cd")); assert_eq!(geo::point_count(&one),151*111);
 }
 
-#[test]
 fn filters_grid_snapped() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)
      (sop/noise_displace :seed 321 :amplitude 0.37 :frequency 0.29)
@@ -457,7 +450,6 @@ fn filters_grid_snapped() {
     assert!(geo::find_group(group::Owner::Point,"snapped",&one).is_some());
 }
 
-#[test]
 fn filters_bounded() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 30.0)
      (sop/noise_displace :seed 323 :amplitude 2.0 :frequency 0.23)
@@ -473,7 +465,6 @@ fn filters_bounded() {
     assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(116_486,229_376));
 }
 
-#[test]
 fn filters_instances() {
     let one = exact(&super::node(&[], r###"(-> (sop/box :normals "Auto" :connectivity "Triangles")
      (sop/group_edges :name "instance_edges")
@@ -483,7 +474,6 @@ fn filters_instances() {
     assert_eq!(geo::point_count(&one),81*61*24);
 }
 
-#[test]
 fn filters_clipped() {
     let one = exact(&super::node(&[], r###"(-> (sop/uv_sphere
        :radius_x_mode "Auto"
@@ -513,7 +503,6 @@ fn filters_clipped() {
     assert_eq!(group_count(&one,group::Owner::Primitive,"caps"),2); assert!(edges(&one,"clip_edges")>0);
 }
 
-#[test]
 fn subdivision_creased_subdivision() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 60 :rows 40 :size 8.0)
      (sop/set_float :owner "Vertex" :name "creaseweight" :value 1.5)
@@ -564,7 +553,6 @@ fn subdivision_smooth_triangles() {
     assert_eq!(geo::primitive_count(&one),60*40*2*3);
 }
 
-#[test]
 fn modeling_enumerate_source() {
     let source=grid(500,300,20.0,false);let count=geo::point_count(&source);
     let source=super::snapshot(&add(&source,Owner::Point,"piece",Storage::Int(Arc::new((0..count).map(|p|p*31%4093).collect()))));
@@ -576,7 +564,6 @@ fn modeling_enumerate_source() {
            :key "Attribute component" :attribute "selection_index" :component 0)"###));
 }
 
-#[test]
 fn modeling_scattered() {
     exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 200 :rows 125 :size 20.0)
      (sop/attribute_randomize
@@ -603,7 +590,6 @@ fn modeling_scattered() {
     
 }
 
-#[test]
 fn modeling_duplicated() {
     exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 80 :size 4.0)
      (sop/color_by_height :low_red 0 :low_green 0 :low_blue 255 :high_green 0 :high_blue 0)
@@ -612,7 +598,6 @@ fn modeling_duplicated() {
     
 }
 
-#[test]
 fn combining_converted_lines() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 256 :rows 192 :size 16.0)
      (sop/group_edges :name "converted_edges")
@@ -631,7 +616,6 @@ fn combining_connected_lines() {
     assert!(geo::primitive_count(&one)>0&&geo::primitive_count(&one)<147_904); assert!(has(&one,Owner::Primitive,"path_length")); assert_eq!(edges(&one,"connected_edges"),147_904);
 }
 
-#[test]
 fn combining_attribute_boundaries() {
     exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 90 :size 20.0)
      (sop/enumerate :owner "Primitive" :name "face_id")
@@ -640,7 +624,6 @@ fn combining_attribute_boundaries() {
     
 }
 
-#[test]
 fn editing_extruded() {
     exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 40 :rows 30 :size 8.0)
      (sop/group_range :owner "Primitives" :name "all" :range_mode "From ends")
@@ -660,7 +643,6 @@ fn editing_extruded() {
     
 }
 
-#[test]
 fn editing_cleaned() {
     exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 320 :rows 240 :size 12.0)
      (sop/set_float :name "temporary_weight" :value 1.0)
@@ -676,7 +658,6 @@ fn editing_cleaned() {
     
 }
 
-#[test]
 fn editing_volume_graph() {
     exact(&super::node(&[], r###"(-> (sop/box :normals "Auto" :connectivity "Triangles" :size [2.0 3.0 4.0])
      (sop/duplicate :copies 512 :m03 3.0)
@@ -684,7 +665,6 @@ fn editing_volume_graph() {
     
 }
 
-#[test]
 fn editing_collapsed() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 240 :rows 180 :size 12.0)
      (sop/set_int :name "piece" :value 1)
@@ -693,7 +673,6 @@ fn editing_collapsed() {
     assert!(geo::point_count(&one)<241*181&&geo::primitive_count(&one)>0);
 }
 
-#[test]
 fn editing_reduced() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid
        :width_mode "Auto"
@@ -714,7 +693,6 @@ fn editing_reduced() {
     assert!(geo::primitive_count(&one)<119*89*2); assert!(geo::find_group(group::Owner::Primitive,"reduced",&one).is_some()); assert!(geo::find_edge_group("boundary",&one).is_some());
 }
 
-#[test]
 fn editing_beveled() {
     let one = exact(&super::node(&[], r###"(-> (sop/box :connectivity "Quads" :consolidate_points true
        :normals "None" :size [1.0 1.0 1.0])
@@ -729,7 +707,6 @@ fn editing_beveled() {
     assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(501*72,501*50)); assert!(geo::find_group(group::Owner::Primitive,"edge_fillets",&one).is_some()); assert!(geo::find_edge_group("offset_edges",&one).is_some());
 }
 
-#[test]
 fn editing_point_split() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid
        :width_mode "Auto"
@@ -742,7 +719,6 @@ fn editing_point_split() {
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one)),(400*300*4,400*300*4));
 }
 
-#[test]
 fn emission_cusped() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 160 :rows 120 :size 12.0)
      (sop/set_int :name "source_id" :value 17)
@@ -751,7 +727,6 @@ fn emission_cusped() {
     assert!(geo::point_count(&one)>161*121); assert_eq!(geo::vertex_count(&one),160*120*6);
 }
 
-#[test]
 fn emission_straightened() {
     let one = exact(&super::node(&[], r###"(-> (sop/grid :columns 200 :rows 150 :width 14.0 :height 9.0)
      (sop/mountain :seed 919 :height 0.8 :frequency [0.7 1.1 0.9])
@@ -760,7 +735,6 @@ fn emission_straightened() {
     assert_eq!(geo::point_count(&one),201*151); assert!(edges(&one,"straightened")>0);
 }
 
-#[test]
 fn emission_parameterized() {
     exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 96 :rows 64 :size 8.0)
      (sop/uv_flatten :iterations 400 :tolerance 1e-10)
@@ -768,7 +742,6 @@ fn emission_parameterized() {
     
 }
 
-#[test]
 fn generated_resample() {
     let points=curve((0..5_001).map(|p|{let t=p as f64*0.003;(t,(t*0.7).sin(),(t*0.43).cos()*0.6)}));
     let graph=super::node(&[],&r###"(-> (sop/curve %s)
@@ -783,7 +756,6 @@ fn generated_resample() {
     let one=exact(&graph); assert!(geo::point_count(&one)>5_001);assert!(has(&one,Owner::Point,"tangent"));
 }
 
-#[test]
 fn generated_grouped_facet() {
     let source=cook(1,&super::node(&[], r###"(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 401 :rows 301
           :uv_attribute "uv" :size 20.0)"###));
@@ -793,7 +765,6 @@ fn generated_grouped_facet() {
           :group "facet_even" :pre_compute_normals true :unique_points true :reverse_normals true)"###));
 }
 
-#[test]
 fn generated_inline_facet() {
     let source=super::snapshot(&inline_geometry(40_000));
     let one=exact(&bind(&[("in1689",&source)],r###"(sop/facet
@@ -804,7 +775,6 @@ fn generated_inline_facet() {
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one)),(160_000,160_000));
 }
 
-#[test]
 fn groups() {
     let one=exact(&group_fixture());
     assert!(has(&one,Owner::Point,"N")&&has(&one,Owner::Point,"Cd"));
@@ -825,7 +795,6 @@ fn groups() {
     for (owner,name,present) in [(Owner::Point,"reference_keep",true),(Owner::Point,"reference_drop",false),(Owner::Point,"final_point",true),(Owner::Vertex,"final_vertex",true),(Owner::Primitive,"final_primitive",true),(Owner::Detail,"final_detail",false),(Owner::Detail,"stored_detail",true),(Owner::Point,"rest",true)] {assert_eq!(has(&one,owner,name),present,"{name}");}
 }
 
-#[test]
 fn filters_ray_collision() {
     let collision=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 320 :rows 240 :size 20.0)
      (sop/noise_displace :seed 319 :amplitude 0.9 :frequency 0.37)
@@ -852,7 +821,6 @@ fn filters_ray_collision() {
     assert_eq!(geo::point_count(&one),321*241);assert!(has(&one,Owner::Point,"Cd"));
 }
 
-#[test]
 fn filters_expanded_groups() {
     let text=r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 200 :rows 150 :size 20.0)
      %s
@@ -864,7 +832,6 @@ fn filters_expanded_groups() {
     assert!(geo::find_group(group::Owner::Primitive,"grown_faces",&one).is_some());assert!(geo::find_edge_group("grown_edges",&one).is_some());
 }
 
-#[test]
 fn filters_mirrored() {
     exact(&super::node(&[],&r###"(-> (sop/box :normals "Auto" :connectivity "Triangles")
      (sop/group_edges :name "box_edges")
@@ -876,7 +843,6 @@ fn filters_mirrored() {
      (sop/mirror :origin %s :normal [1.0 1.0 0.0]))"###.replace("%s","[0.0 0.0 0.0]")));
 }
 
-#[test]
 fn subdivision_subdivided() {
     let text=r###"(-> (sop/box :normals "Auto" :connectivity "Triangles" :size [2.0 1.5 1.0])
      (sop/fuse
@@ -1000,7 +966,6 @@ fn subdivision_hole_indices() {
     let one=exact(&super::node(&[],&text));assert_eq!(geo::primitive_count(&one),(48*32-holes.len() as i64)*16);
 }
 
-#[test]
 fn subdivision_boundary_edge() {
     let text=r###"(-> (sop/grid
        :width_mode "Auto"
@@ -1016,7 +981,6 @@ fn subdivision_boundary_edge() {
     let one=exact(&super::node(&[],&text));
 }
 
-#[test]
 fn subdivision_boundary_corner() {
     let text=r###"(-> (sop/grid
        :width_mode "Auto"
@@ -1032,7 +996,6 @@ fn subdivision_boundary_corner() {
     let one=exact(&super::node(&[],&text));
 }
 
-#[test]
 fn subdivision_boundary_none() {
     let text=r###"(-> (sop/grid
        :width_mode "Auto"
@@ -1048,22 +1011,16 @@ fn subdivision_boundary_none() {
     let one=exact(&super::node(&[],&text));assert_eq!(geo::primitive_count(&one),(60-2)*(40-2)*4);
 }
 
-#[test]
 fn subdivision_fvar_none() { fvar("None"); }
 
-#[test]
 fn subdivision_fvar_corners() { fvar("Corners only"); }
 
-#[test]
 fn subdivision_fvar_plus1() { fvar("Corners plus 1"); }
 
-#[test]
 fn subdivision_fvar_plus2() { fvar("Corners plus 2"); }
 
-#[test]
 fn subdivision_fvar_boundaries() { fvar("Boundaries"); }
 
-#[test]
 fn subdivision_fvar_all() { fvar("All"); }
 
 #[test]
@@ -1089,7 +1046,6 @@ fn subdivision_detail_source() {
     assert!(edges(&one,"detail_override_creases")>0);
 }
 
-#[test]
 fn modeling_generated_attributes() {
     exact(&super::node(&[],&r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)
      (sop/attribute_randomize
@@ -1110,7 +1066,6 @@ fn modeling_generated_attributes() {
        :ramp "0:0,0.35:0.15,0.7:0.85,1:1"))"###.replace("%s","[0.0 0.0 0.0]")));
 }
 
-#[test]
 fn modeling_deformed() {
     let source=super::node(&[], r###"(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)"###);
     let source=chain(&source,&bounds("deform_center",[-8.0,-1.0,-8.0],[8.0,1.0,8.0]));
@@ -1122,7 +1077,6 @@ fn modeling_deformed() {
            :recompute_normals true)"###));
 }
 
-#[test]
 fn modeling_bent() {
     let source=super::node(&[], r###"(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)"###);
     let source=chain(&source,&bounds("bend_center",[-8.0,-1.0,-10.0],[8.0,1.0,10.0]));
@@ -1132,7 +1086,6 @@ fn modeling_bent() {
            :capture_attribute "bend_capture" :recompute_normals true)"###));
 }
 
-#[test]
 fn modeling_blasted() {
     let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 12.0)
      (sop/color_by_height :low_red 0 :low_green 0 :low_blue 255 :high_green 0 :high_blue 0))"###);
@@ -1140,7 +1093,6 @@ fn modeling_blasted() {
     exact(&chain(&source,r###"(sop/blast :owner "Points" :group "left_half" :compact_points true)"###));
 }
 
-#[test]
 fn modeling_extended_random() {
     let source=super::node(&[],r###"(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 500 :rows 300 :size 20.0)"###);
     let source=indices(&source,"Vertices","randomize_vertices",[0,5,11,17,23,29]);
@@ -1170,7 +1122,6 @@ fn modeling_extended_random() {
     exact(&bind(&[("migration_input",&source)],&text));
 }
 
-#[test]
 fn modeling_match_target() {
     let target=super::node(&[], r###"(-> (sop/box :normals "Auto" :connectivity "Triangles" :size [4.0 3.0 5.0])
      (sop/group_range :name "target_bounds" :range_mode "From ends"))"###);
@@ -1192,7 +1143,6 @@ fn modeling_match_target() {
    :offset [0.25 0.0 -0.5])"###));
 }
 
-#[test]
 fn modeling_curve_points() {
     let points=curve((0..2_001).map(|p|{let x=p as f64*0.01;(x,x.sin(),0.0)}));
     let source=super::node(&[],&r###"(sop/curve %s)"###.replace("%s",&points));
@@ -1211,7 +1161,6 @@ fn modeling_curve_samples() {
     assert!(geo::point_count(&exact(&source))>4_096);
 }
 
-#[test]
 fn modeling_curve_samples_grouped() {
     let short=curve((0..769).map(|p|{let x=p as f64*(20.0/768.0);(x,(x*0.7).sin(),(x*0.31).cos())}));
     let source=super::node(&[],&r###"(-> (sop/curve %s)
@@ -1261,7 +1210,6 @@ fn modeling_joined_curve_parts() {
     let one=exact(&chain(&source,&text));assert_eq!(geo::primitive_count(&one),70);assert!(geo::vertex_count(&one)>=16_400);
 }
 
-#[test]
 fn combining_many_wires() {
     let text=r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 64 :rows 48 :size 10.0)
      (sop/set_float :name "wire_scale" :value 0.75)
@@ -1305,7 +1253,6 @@ fn combining_general_backbone() {
     assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(1_560,3_074));assert!(has(&one,Owner::Point,"cross_section_profile_id"));
 }
 
-#[test]
 fn combining_split_source() {
     let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 20 :size 4.0)
      (sop/group_edges :name "split_edges"))"###);
@@ -1315,14 +1262,12 @@ fn combining_split_source() {
     assert_eq!((geo::primitive_count(&selected),geo::primitive_count(&remainder)),(100,300));
 }
 
-#[test]
 fn combining_merged() {
     let source=group_fixture();
     let shifted=chain(&source,r#"(sop/transform :mode "Matrix" :m03 30.0 :m13 0.0 :m23 0.0)"#);
     exact(&bind(&[("graph",&source),("in1744",&shifted)],r###"(sop/merge (sop/ext_graph) (sop/ext_in1744))"###));
 }
 
-#[test]
 fn combining_transfer_source() {
     let source=super::node(&[],r###"(sop/grid :width_mode "Auto" :height_mode "Auto" :columns 40 :rows 30 :size 8.0)"###);
     let source=indices(&source,"Points","transfer_points",(0..200).map(|i|i*6));
@@ -1334,7 +1279,6 @@ fn combining_transfer_source() {
        :rules "point\ttransfer_points\tmapped_\nprimitive\ttransfer_faces\tmapped_\nedge\ttransfer_edges\tmapped_")"###));
 }
 
-#[test]
 fn combining_columns() {
     let points=(0..32).map(|i|if i&1==0 {i/2*5*121}else{i/2*5*121+120}).map(|i|i.to_string()).collect::<Vec<_>>().join(" ");
     let text=r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 120 :rows 90 :size 20.0)
@@ -1355,7 +1299,6 @@ fn combining_columns() {
        :name "face_paths"))"###.replace("%S",&format!("{primitives:?}"));exact(&super::node(&[],&text));
 }
 
-#[test]
 fn combining_named_count() {
     let source=line_geometry::points(&(0..20_003).map(|p|(p as f64,0.0,0.0)).collect::<Vec<_>>()).unwrap();
     let source=super::snapshot(&add(&source,Owner::Point,"piece_name",Storage::Text(Arc::new((0..20_003).map(|p|if p%101==0 {Vec::new()}else{format!("piece_{:02}",p%32).into_bytes()}).collect()))));
@@ -1368,7 +1311,6 @@ fn combining_named_count() {
    :owner "Point")"###));
 }
 
-#[test]
 fn combining_random_groups() {
     let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 20.0)
      (sop/group_random :seed 917 :probability 0.431 :name "random_points")
@@ -1408,7 +1350,6 @@ fn combining_random_groups() {
     exact(&bind(&[("random_groups",&source)],&text));
 }
 
-#[test]
 fn combining_normal_groups() {
     let text=r###"(-> (sop/box :normals "Auto" :connectivity "Triangles" :size [5.0 4.0 3.0])
      (sop/mountain :seed 929 :height 0.21 :frequency [0.7 1.1 0.9])
@@ -1434,7 +1375,6 @@ fn combining_normal_groups() {
     exact(&super::node(&[],&text));
 }
 
-#[test]
 fn editing_compacted() {
     let source=super::snapshot(&line_geometry::points(&[(8.0,0.0,0.0)]).unwrap());
     let one=exact(&bind(&[("in1751",&source)],r###"(-> (sop/curve (list [0.0 0.0 0.0] [1.0 0.0 0.0] [2.0 0.0 0.0]))
@@ -1471,14 +1411,12 @@ fn emission_emission_points() {
     assert_eq!(geo::point_count(&one),600_000);assert!(geo::find_group(group::Owner::Point,"cloud",&one).is_some());
 }
 
-#[test]
 fn emission_flipped() {
     let source=super::snapshot(&edge_flip_geometry(20_000));
     let one=exact(&bind(&[("in1754",&source)],r###"(sop/edge_flip (sop/ext_in1754) :group "flip_edges")"###));
     assert_eq!((geo::point_count(&one),geo::vertex_count(&one),geo::primitive_count(&one)),(80_000,120_000,40_000));
 }
 
-#[test]
 fn emission_equalized() {
     let source=super::snapshot(&edge_equalize_geometry(50_000));
     let one=exact(&bind(&[("in1755",&source)],r###"(-> (sop/group_edges (sop/ext_in1755) :name "equalize_edges")
@@ -1486,7 +1424,6 @@ fn emission_equalized() {
     assert_eq!(geo::point_count(&one),100_000);assert_eq!(edges(&one,"equalized"),50_000);
 }
 
-#[test]
 fn emission_relax_source() {
     let source=edge_equalize_geometry(50_000);
     let view=packed::float3::view::view(geo::positions(&source)).unwrap();let mut x=view.x.to_vec();
@@ -1523,14 +1460,12 @@ fn emission_uv_mapped() {
     let one=exact(&super::node(&[],&text));assert!(has(&one,Owner::Vertex,"uv"));
 }
 
-#[test]
 fn attributes_promoted() {
     exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 240 :rows 160 :size 12.0)
      (sop/color_by_height :low_red 0 :low_green 0 :low_blue 255 :high_green 0 :high_blue 0)
      (sop/promote_attributes :delete_source true :pattern "Cd"))"###));
 }
 
-#[test]
 fn attributes_promoted_arrays() {
     let one=exact(&super::node(&[],r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 240 :rows 160 :size 12.0)
      (sop/enumerate :name "point_number")
@@ -1543,7 +1478,6 @@ fn attributes_promoted_arrays() {
     let values=packed::int_array::view::view(&values);assert_eq!(values.offsets.len() as i64,geo::primitive_count(&one)+1);assert_eq!(values.values.len() as i64,geo::vertex_count(&one));
 }
 
-#[test]
 fn attributes_promoted_patterns() {
     let one=exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 10.0)
      (sop/color_by_height :low_red 0 :low_green 0 :low_blue 255 :high_green 0 :high_blue 0)
@@ -1553,7 +1487,6 @@ fn attributes_promoted_patterns() {
     assert!(has(&one,Owner::Primitive,"Cd")&&has(&one,Owner::Primitive,"weight")&&!has(&one,Owner::Primitive,"temporary"));
 }
 
-#[test]
 fn attributes_renamed_patterns() {
     let one=exact(&super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 10.0)
      (sop/set_float :name "sample_a" :value 3.0)
@@ -1567,7 +1500,6 @@ fn attributes_renamed_patterns() {
     for name in ["reduced_a","reduced_b","source_a","source_b"] {assert!(has(&one,Owner::Primitive,name));} assert!(!has(&one,Owner::Point,"sample_a"));
 }
 
-#[test]
 fn attributes_piece_promoted() {
     let source=grid(200,120,12.0,false);let count=geo::point_count(&source);
     let source=add(&source,Owner::Point,"piece_value",Storage::Int(Arc::new((0..count).map(|p|p*37%211).collect())));
@@ -1581,7 +1513,6 @@ fn attributes_piece_promoted() {
    :pattern "piece_value")"###));
 }
 
-#[test]
 fn attributes_transferred() {
     let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 180 :rows 120 :size 12.0)
      (sop/noise_displace :seed 81 :amplitude 0.3 :frequency 0.4)
@@ -1600,7 +1531,6 @@ fn attributes_transferred() {
    :target_group "transfer_target")"###));
 }
 
-#[test]
 fn attributes_directly_copied() {
     let (source,target)=owner_transfer_sources();
     let one=exact(&bind(&[("owner_transfer_source",&source),("owner_transfer_target",&target)],r###"(sop/attribute_copy
@@ -1615,7 +1545,6 @@ fn attributes_directly_copied() {
 
 }
 
-#[test]
 fn attributes_primitive_transferred() {
     let (source,target)=owner_transfer_sources();
     let one=exact(&bind(&[("owner_transfer_source",&source),("owner_transfer_target",&target)],r###"(sop/attribute_transfer
@@ -1630,7 +1559,6 @@ fn attributes_primitive_transferred() {
 
 }
 
-#[test]
 fn attributes_vertex_transferred() {
     let (source,target)=owner_transfer_sources();
     let one=exact(&bind(&[("owner_transfer_source",&source),("owner_transfer_target",&target)],r###"(sop/attribute_transfer
@@ -1646,7 +1574,6 @@ fn attributes_vertex_transferred() {
 
 }
 
-#[test]
 fn attributes_detail_transferred() {
     let (source,target)=owner_transfer_sources();
     let one=exact(&bind(&[("owner_transfer_source",&source),("owner_transfer_target",&target)],r###"(sop/attribute_transfer
@@ -1661,7 +1588,6 @@ fn attributes_detail_transferred() {
 
 }
 
-#[test]
 fn attributes_all_transferred() {
     let (source,target)=owner_transfer_sources();
     let one=exact(&bind(&[("owner_transfer_source",&source),("owner_transfer_target",&target)],r###"(sop/attribute_transfer_all
@@ -1682,7 +1608,6 @@ fn attributes_all_transferred() {
 
 }
 
-#[test]
 fn attributes_interpolated() {
     let source=super::node(&[], r###"(-> (sop/grid :width_mode "Auto" :height_mode "Auto" :columns 2 :rows 2 :size 2.0)
      (sop/normals :weighting "Face area" :owner "Point")
@@ -1716,7 +1641,6 @@ fn attributes_interpolated() {
    :attributes "")"###));
 }
 
-#[test]
 fn attributes_surface_transferred() {
     let (source,target)=surface_sources(false);
     let one=exact(&bind(&[("surface_source",&source),("surface_target",&target)],r###"(sop/attribute_transfer_surface
@@ -1733,7 +1657,6 @@ fn attributes_surface_transferred() {
     assert!(has(&one,Owner::Point,"surface_distance"));
 }
 
-#[test]
 fn attributes_surface_vertex_transferred() {
     let (source,target)=surface_sources(true);
     let one=exact(&bind(&[("surface_source",&source),("surface_vertex_target",&target)],r###"(sop/attribute_transfer_surface
@@ -1750,3 +1673,55 @@ fn attributes_surface_vertex_transferred() {
    :falloff "Smoothstep")"###));
     assert!(has(&one,Owner::Vertex,"surface_distance"));
 }
+
+// Light sections share one process (and its cached library check/lowering) per group; see the module doc.
+fn sections(list: &[(&str, fn())]) {
+    for (name, section) in list {
+        if let Err(panic) = std::panic::catch_unwind(section) { eprintln!("test_parallel_exact section {name} failed"); std::panic::resume_unwind(panic); }
+    }
+}
+#[test]
+fn light_01() { sections(&[("generated_line", generated_line), ("generated_facet", generated_facet), ("generated_grid", generated_grid), ("generated_circle", generated_circle), ("generated_box", generated_box), ("generated_torus", generated_torus), ("generated_tube", generated_tube), ("generated_platonic", generated_platonic), ("generated_spiral", generated_spiral)]); }
+#[test]
+fn light_02() { sections(&[("filters_smoothed", filters_smoothed), ("filters_grid_snapped", filters_grid_snapped), ("filters_bounded", filters_bounded), ("filters_instances", filters_instances)]); }
+#[test]
+fn light_03() { sections(&[("filters_clipped", filters_clipped), ("modeling_enumerate_source", modeling_enumerate_source), ("modeling_scattered", modeling_scattered)]); }
+#[test]
+fn light_04() { sections(&[("modeling_duplicated", modeling_duplicated), ("combining_converted_lines", combining_converted_lines), ("combining_attribute_boundaries", combining_attribute_boundaries), ("editing_extruded", editing_extruded), ("editing_cleaned", editing_cleaned)]); }
+#[test]
+fn light_05() { sections(&[("editing_volume_graph", editing_volume_graph), ("editing_collapsed", editing_collapsed), ("editing_reduced", editing_reduced), ("editing_beveled", editing_beveled)]); }
+#[test]
+fn light_06() { sections(&[("editing_point_split", editing_point_split), ("emission_cusped", emission_cusped), ("emission_straightened", emission_straightened), ("emission_parameterized", emission_parameterized), ("generated_resample", generated_resample)]); }
+#[test]
+fn light_07() { sections(&[("generated_grouped_facet", generated_grouped_facet), ("generated_inline_facet", generated_inline_facet), ("groups", groups), ("filters_ray_collision", filters_ray_collision)]); }
+#[test]
+fn light_08() { sections(&[("filters_expanded_groups", filters_expanded_groups), ("filters_mirrored", filters_mirrored), ("subdivision_subdivided", subdivision_subdivided)]); }
+#[test]
+fn light_09() { sections(&[("modeling_generated_attributes", modeling_generated_attributes), ("modeling_deformed", modeling_deformed)]); }
+#[test]
+fn light_10() { sections(&[("modeling_bent", modeling_bent), ("modeling_blasted", modeling_blasted), ("modeling_extended_random", modeling_extended_random)]); }
+#[test]
+fn light_11() { sections(&[("modeling_match_target", modeling_match_target), ("modeling_curve_points", modeling_curve_points), ("modeling_curve_samples_grouped", modeling_curve_samples_grouped)]); }
+#[test]
+fn light_12() { sections(&[("combining_many_wires", combining_many_wires), ("combining_split_source", combining_split_source), ("combining_merged", combining_merged)]); }
+#[test]
+fn light_13() { sections(&[("combining_transfer_source", combining_transfer_source), ("combining_columns", combining_columns), ("combining_named_count", combining_named_count), ("combining_random_groups", combining_random_groups), ("combining_normal_groups", combining_normal_groups), ("editing_compacted", editing_compacted)]); }
+#[test]
+fn light_14() { sections(&[("emission_flipped", emission_flipped), ("emission_equalized", emission_equalized), ("emission_relax_source", emission_relax_source), ("attributes_promoted", attributes_promoted), ("attributes_promoted_arrays", attributes_promoted_arrays), ("attributes_promoted_patterns", attributes_promoted_patterns), ("attributes_renamed_patterns", attributes_renamed_patterns)]); }
+#[test]
+fn light_15() { sections(&[("attributes_piece_promoted", attributes_piece_promoted), ("attributes_transferred", attributes_transferred), ("attributes_directly_copied", attributes_directly_copied), ("attributes_primitive_transferred", attributes_primitive_transferred), ("attributes_vertex_transferred", attributes_vertex_transferred)]); }
+#[test]
+fn light_16() { sections(&[("attributes_detail_transferred", attributes_detail_transferred), ("attributes_all_transferred", attributes_all_transferred), ("attributes_interpolated", attributes_interpolated)]); }
+#[test]
+fn light_17() { sections(&[("attributes_surface_transferred", attributes_surface_transferred), ("attributes_surface_vertex_transferred", attributes_surface_vertex_transferred)]); }
+// Pairs of 60x40 subdivide sections share the subdivide node's check and lowering (~0.8 s).
+#[test]
+fn subdivision_fvar_none_and_fvar_corners() { sections(&[("subdivision_fvar_none", subdivision_fvar_none), ("subdivision_fvar_corners", subdivision_fvar_corners)]); }
+#[test]
+fn subdivision_fvar_plus1_and_fvar_plus2() { sections(&[("subdivision_fvar_plus1", subdivision_fvar_plus1), ("subdivision_fvar_plus2", subdivision_fvar_plus2)]); }
+#[test]
+fn subdivision_fvar_boundaries_and_fvar_all() { sections(&[("subdivision_fvar_boundaries", subdivision_fvar_boundaries), ("subdivision_fvar_all", subdivision_fvar_all)]); }
+#[test]
+fn subdivision_boundary_edge_and_boundary_corner() { sections(&[("subdivision_boundary_edge", subdivision_boundary_edge), ("subdivision_boundary_corner", subdivision_boundary_corner)]); }
+#[test]
+fn subdivision_boundary_none_and_creased_subdivision() { sections(&[("subdivision_boundary_none", subdivision_boundary_none), ("subdivision_creased_subdivision", subdivision_creased_subdivision)]); }

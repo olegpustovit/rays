@@ -1546,38 +1546,23 @@ mod parity {
         };
         check(&all,seed,octaves,lacunarity,gain);
     }
+    // One process per parameter family; a failure names its octave count.
     macro_rules! noise_case {
         ($name:ident,$seed:expr,$octaves:expr,$lacunarity:expr,$gain:expr,$special:expr)=>{
-            #[test]fn $name(){noise3_strict_packed_matches_the_reference($seed,$octaves,$lacunarity,$gain,$special)}
+            #[test]fn $name(){for octaves in $octaves {
+                if let Err(panic)=std::panic::catch_unwind(||noise3_strict_packed_matches_the_reference($seed,octaves,$lacunarity,$gain,$special)) { eprintln!("{} octaves {octaves} failed",stringify!($name)); std::panic::resume_unwind(panic); }
+            }}
         };
     }
-    noise_case!(noise_default_octave1,42,1,2.,0.5,false);
-    noise_case!(noise_default_octave4,42,4,2.,0.5,false);
-    noise_case!(noise_default_octave32,42,32,2.,0.5,false);
-    noise_case!(noise_special_seed0_octave1,0,1,2.,0.5,true);
-    noise_case!(noise_special_seed0_octave4,0,4,2.,0.5,true);
-    noise_case!(noise_special_seed0_octave32,0,32,2.,0.5,true);
-    noise_case!(noise_special_seed1_octave1,1,1,2.,0.5,true);
-    noise_case!(noise_special_seed1_octave4,1,4,2.,0.5,true);
-    noise_case!(noise_special_seed1_octave32,1,32,2.,0.5,true);
-    noise_case!(noise_special_seed42_octave1,42,1,2.,0.5,true);
-    noise_case!(noise_special_seed42_octave4,42,4,2.,0.5,true);
-    noise_case!(noise_special_seed42_octave32,42,32,2.,0.5,true);
-    noise_case!(noise_lacunarity17_octave2,7,2,1.7,0.62,false);
-    noise_case!(noise_lacunarity17_octave5,7,5,1.7,0.62,false);
-    noise_case!(noise_lacunarity17_octave32,7,32,1.7,0.62,false);
-    noise_case!(noise_zero_gain_octave2,7,2,3.,0.,false);
-    noise_case!(noise_zero_gain_octave5,7,5,3.,0.,false);
-    noise_case!(noise_zero_gain_octave32,7,32,3.,0.,false);
-    noise_case!(noise_lacunarity05_octave2,7,2,0.5,1.,false);
-    noise_case!(noise_lacunarity05_octave5,7,5,0.5,1.,false);
-    noise_case!(noise_lacunarity05_octave32,7,32,0.5,1.,false);
-    noise_case!(noise_unit_gain_octave2,7,2,2.,1.,false);
-    noise_case!(noise_unit_gain_octave5,7,5,2.,1.,false);
-    noise_case!(noise_unit_gain_octave32,7,32,2.,1.,false);
-    noise_case!(noise_lacunarity231_octave2,7,2,2.31,0.25,false);
-    noise_case!(noise_lacunarity231_octave5,7,5,2.31,0.25,false);
-    noise_case!(noise_lacunarity231_octave32,7,32,2.31,0.25,false);
+    noise_case!(noise_default,42,[1, 4, 32],2.,0.5,false);
+    noise_case!(noise_special_seed0,0,[1, 4, 32],2.,0.5,true);
+    noise_case!(noise_special_seed1,1,[1, 4, 32],2.,0.5,true);
+    noise_case!(noise_special_seed42,42,[1, 4, 32],2.,0.5,true);
+    noise_case!(noise_lacunarity17,7,[2, 5, 32],1.7,0.62,false);
+    noise_case!(noise_zero_gain,7,[2, 5, 32],3.,0.,false);
+    noise_case!(noise_lacunarity05,7,[2, 5, 32],0.5,1.,false);
+    noise_case!(noise_unit_gain,7,[2, 5, 32],2.,1.,false);
+    noise_case!(noise_lacunarity231,7,[2, 5, 32],2.31,0.25,false);
 
     /// `Float.frexp`: mantissa in [0.5, 1) and exponent, for finite nonzero values.
     fn frexp(x: f64) -> (f64, i32) {
@@ -1676,13 +1661,8 @@ mod parity {
     }
     macro_rules! math_cases {
         ($module:ident, $body:literal, $input:expr, $output:expr) => {
-            mod $module {
-                use super::*;
-                #[test] fn negative_zero() { packed_math_case($body, $input, $output, -0.0); }
-                #[test] fn zero() { packed_math_case($body, $input, $output, 0.0); }
-                #[test] fn fractional() { packed_math_case($body, $input, $output, 0.37); }
-                #[test] fn one() { packed_math_case($body, $input, $output, 1.0); }
-            }
+            // One process per operator: failures name the body and time bits.
+            #[test] fn $module() { for time in [-0.0, 0.0, 0.37, 1.0] { packed_math_case($body, $input, $output, time); } }
         };
     }
     math_cases!(packed_tan, "(tan (+ x t))", Ty::Float, Ty::Float);
