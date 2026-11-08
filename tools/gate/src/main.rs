@@ -182,9 +182,6 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
     let file = path.rsplit('/').next().unwrap_or(path);
     let test_file = path.contains("/tests/") || file == "tests.rs" || file.starts_with("test_");
     let test_ranges = if test_file { vec![(0, tokens.len())] } else { test_regions(&tokens) };
-    // ponytail: editor_core and pxui_shell keep OCaml's generic History/Command/Router (and their key-sheet views) until rays_editor (its one
-    // caller) is ported; then specialise them to concrete types and drop it from this list (shrink only).
-    let adapter_crate = matches!(crate_name, "rays_collections");
     let unsafe_allowed = crate_name.ends_with("_sys") || crate_name == "parallel";
     let mut issues = Vec::new();
 
@@ -198,11 +195,8 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         if token.text == "catch_unwind" && crate_name != "parallel" {
             issue(&mut issues, path, token.line, "catch_unwind is restricted to parallel worker isolation and the bin/rays crash reporter");
         }
-        let shared_test_macro = crate_name == "rays_collections"
-            && tokens.get(index + 2).is_some_and(|name| name.text == "shared_tests");
         if token.text == "macro_rules"
             && tokens.get(index + 1).is_some_and(|next| next.text == "!")
-            && !shared_test_macro
         {
             issue(&mut issues, path, token.line, "macro_rules! is not allowed in product crates");
         }
@@ -213,13 +207,13 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         {
             issue(&mut issues, path, token.line, "panic macros must not be used for control flow");
         }
-        if token.text == "impl" && !adapter_crate {
+        if token.text == "impl" {
             let previous = index.checked_sub(1).and_then(|previous| tokens.get(previous)).map(|token| token.text.as_str());
             let lifetime_reference = index >= 3 && tokens[index - 2].text == "'" && tokens[index - 3].text == "&";
             if matches!(previous, Some(":") | Some("->") | Some("=") | Some("<") | Some(",") | Some("(") | Some("&") | Some("mut") | Some(">"))
                 || lifetime_reference
             {
-                issue(&mut issues, path, token.line, "impl Trait is restricted to rays_collections");
+                issue(&mut issues, path, token.line, "impl Trait is not allowed in product crates");
             }
         }
         if token.text == "proc_macro" || token.text == "proc_macro_derive" || token.text == "proc_macro_attribute" {
@@ -248,8 +242,8 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
                                 || (at > 0 && parameters[at - 1].text == "'" && is_identifier(&parameter.text))
                         })
                     });
-                if !adapter_crate && !borrow_lifetimes_only {
-                    issue(&mut issues, path, token.line, "generic items are restricted to rays_collections");
+                if !borrow_lifetimes_only {
+                    issue(&mut issues, path, token.line, "generic items are not allowed in product crates");
                 }
                 if matches!(token.text.as_str(), "struct" | "enum") {
                     if let Some(end) = generic_end(&tokens, generic_index) {
@@ -794,7 +788,7 @@ fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
 }
 
 /// Rust-only helper leaves that stand in for OCaml stdlib, printf and int semantics: any product crate may name them.
-const HELPER_LEAVES: [&str; 4] = ["cfmt", "ocaml_int", "rays_hash", "rays_collections"];
+const HELPER_LEAVES: [&str; 2] = ["cfmt", "ocaml_int"];
 /// OCaml leaves a crate may name directly when its allowed dependencies reach them (flow reaches
 /// rays_diagnostic and input; lru reaches mem).
 // param: OCaml flow depends on it, so anything reaching flow reaches param.
@@ -820,8 +814,6 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("rays_math", &["rays_math_sys", "ocaml_int"][..]),
         ("scene_command", &[][..]),
         ("parallel", &[][..]),
-        ("rays_hash", &[][..]),
-        ("rays_collections", &["mem", "lru", "parallel", "rays_hash"][..]),
         ("sdl3_sys", &["native_layer_token_sys"][..]),
         ("sdl3_image_sys", &[][..]),
         ("sdl3_ttf_sys", &[][..]),
@@ -942,7 +934,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let foundational = [
         "cfmt", "cfmt_sys",
         "diagnostic", "rays_diagnostic", "native_layer_token", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "rays_hash", "parallel", "scene_command", "rays_collections", "sdl3", "sdl3_image",
+        "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "sdl3_image",
         "sdl3_ttf", "sdl3_mixer", "metal", "vulkan", "ogpu_core", "ogpu",
         "rdk_core",
     ];
@@ -1397,8 +1389,6 @@ mod tests {
         assert!(issues.iter().any(|issue| issue.contains("lifetime parameters")));
         assert!(issues.iter().any(|issue| issue.contains("impl Trait")));
         assert!(issues.iter().any(|issue| issue.contains("panic macros")));
-        assert!(shape_source("rays_collections", "rays_collections/src/lib.rs", "pub fn id<T>(value: T) -> T { value }\n").is_empty());
-        assert!(shape_source("rays_collections", "rays_collections/src/lib.rs", "macro_rules! shared_tests { () => {} }\n").is_empty());
         assert!(shape_source("geometry", "geometry/src/lib.rs", "macro_rules! extra { () => {} }\n").iter().any(|issue| issue.contains("macro_rules!")));
         assert!(shape_source("geometry", "geometry/src/lib.rs", "unsafe fn raw() {}\n").iter().any(|issue| issue.contains("unsafe")));
         assert!(shape_source("parallel", "parallel/src/lib.rs", "unsafe fn raw() {}\n").is_empty());

@@ -487,16 +487,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rays_collections"
-version = "0.1.0"
-dependencies = [
- "lru",
- "mem",
- "parallel",
- "rays_hash",
-]
-
-[[package]]
 name = "rays_diagnostic"
 version = "0.1.0"
 
@@ -541,10 +531,6 @@ dependencies = [
  "sdl3",
  "sop",
 ]
-
-[[package]]
-name = "rays_hash"
-version = "0.1.0"
 
 [[package]]
 name = "rays_math"

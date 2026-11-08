@@ -1,0 +1,428 @@
+<title>Rays Port Simplification</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single reading column, wide tables scroll in place; waves as the spine, findings grouped by crate area */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --fg:#1b2230; --muted:#5b6474; --line:#dde1e8;
+  --accent:#2c5f8f; --accent-soft:#e3edf7;
+  --low:#2e7d4f; --med:#a86a12; --high:#b23a3a;
+  --display:"Instrument Sans",system-ui,sans-serif; --body:"Instrument Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --panel:#1a2029; --fg:#e4e8ef; --muted:#97a1b1; --line:#2c3440;
+  --accent:#7fb0e0; --accent-soft:#1e2c3c; --low:#6cc495; --med:#e0a957; --high:#ec7f7f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --panel:#1a2029; --fg:#e4e8ef; --muted:#97a1b1; --line:#2c3440;
+  --accent:#7fb0e0; --accent-soft:#1e2c3c; --low:#6cc495; --med:#e0a957; --high:#ec7f7f; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 80px}
+main{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:2.1rem;font-weight:700}
+h2{font-size:1.4rem;font-weight:700;padding-bottom:6px;border-bottom:1px solid var(--line)}
+h3{font-size:1.05rem;font-weight:600}
+p{margin:0;max-width:70ch}
+section{display:flex;flex-direction:column;gap:14px}
+.eyebrow{font:500 .75rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.lede{font-size:1.08rem;color:var(--muted)}
+code{font-family:var(--mono);font-size:.86em;background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.stat b{display:block;font:600 1.5rem var(--mono);font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:.85rem}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:.88rem}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{font:500 .72rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.id{font:600 .8rem var(--mono);color:var(--accent);white-space:nowrap}
+.risk{display:inline-block;font:500 .72rem var(--mono);padding:1px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.risk.low{color:var(--low)} .risk.med{color:var(--med)} .risk.high{color:var(--high)}
+.wave{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.wave ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.wave .meta{color:var(--muted);font-size:.88rem}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.cols>div{min-width:0}
+ul.plain{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.note{border-left:3px solid var(--med);padding:8px 14px;background:var(--panel);border-radius:0 6px 6px 0;max-width:80ch}
+a{color:var(--accent)}
+nav.track{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0}
+nav.track a{font-size:.88rem;text-decoration:none;border-bottom:1px solid transparent}
+nav.track a:hover{border-bottom-color:var(--accent)}
+.tag{display:inline-block;font:500 .72rem var(--mono);padding:1px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.tag.pending{color:var(--muted)} .tag.active{color:var(--med)} .tag.done{color:var(--low)} .tag.skip{color:var(--muted);opacity:.7}
+#progress-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+#progress-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+#progress-grid div b{display:block;font:600 1.35rem var(--mono);font-variant-numeric:tabular-nums}
+#progress-grid div span{font-size:.82rem;color:var(--muted)}
+#progress-table{font-size:.82rem}
+#progress-table td,#progress-table th{padding:6px 8px}
+#progress-note{font-size:.85rem;color:var(--muted);margin:0}
+[hidden]{display:none!important}
+</style>
+
+<main>
+<header style="display:flex;flex-direction:column;gap:10px">
+  <div class="eyebrow">Proposal · dev @ 11988707 · 2026-11-08 · <code>docs/history/port-simplification</code></div>
+  <h1>Rays port simplification</h1>
+  <p class="lede">Audit and execution ledger for the 67-crate Rust workspace after the OCaml port. Same capabilities, Lisp semantics, determinism and sequential/parallel equality; smaller surface and faster compile/debug loops. Line counts and build numbers are spot measurements on a shared machine unless a row cites a closing commit.</p>
+  <nav class="track" aria-label="Sections">
+    <a href="#progress">Progress</a><a href="#stand">Baseline</a><a href="#compile">Compile</a><a href="#memory">Memory</a><a href="#int">Int</a><a href="#waves">Waves</a><a href="#findings">Findings</a><a href="#kept">Kept</a><a href="#run">Runbook</a>
+  </nav>
+</header>
+
+<section id="progress">
+  <h2>Execution progress</h2>
+  <p id="progress-note">Loading tracker…</p>
+  <div id="progress-panel">
+    <div id="progress-grid" aria-live="polite"></div>
+    <div class="scroll" id="progress-table-wrap" hidden><table id="progress-table"><thead><tr><th>ID</th><th>Wave</th><th>Status</th><th>Commit / note</th></tr></thead><tbody id="progress-tbody"></tbody></table></div>
+  </div>
+</section>
+
+<section id="stand">
+  <h2>Where things stand</h2>
+  <div class="stats">
+    <div class="stat"><b>318k</b><span>library lines (src, non-test)</span></div>
+    <div class="stat"><b>76k</b><span>test lines (40k tests/, 36k inline)</span></div>
+    <div class="stat"><b>67</b><span>crates; dependency chain 12 deep</span></div>
+    <div class="stat"><b>7.6 s</b><span>warm rebuild after touching rays_math (measured)</span></div>
+    <div class="stat"><b>41 s</b><span>same touch with incremental caches invalid (measured)</span></div>
+    <div class="stat"><b>−14…18k</b><span>estimated lines removable, plus about 18 crates</span></div>
+    <div class="stat"><b>3,154</b><span>allocations per frame, <code>basic.rays</code> (measured)</span></div>
+    <div class="stat"><b>33,034</b><span>allocations per frame, <code>gpu_sea.rays</code> (measured)</span></div>
+  </div>
+  <p>The line savings are modest (about 4–5%). The larger gains are structural: OCaml closure records become Rust traits, atomics used to emulate shared arrays become plain disjoint slices, per-frame whole-model clones go away, test binaries stop being duplicated, and the edit-loop rebuild chain gets shorter.</p>
+</section>
+
+<section id="compile">
+  <h2>Measured compile picture</h2>
+  <div class="cols">
+    <div>
+      <h3>Codegen dominates</h3>
+      <p>85–95% of each Flow crate's build time is codegen at <code>opt-level=1</code>. <code>flow_check</code> is the outlier: 2.0 s of codegen per 1k lines, against 0.5–0.65 s for <code>flow_ir</code> and <code>flow_sop</code>, and 14 crates depend on it. Something in it expands badly, and <code>cargo llvm-lines</code> would show what. The tool is not installed yet.</p>
+    </div>
+    <div>
+      <h3>Critical path</h3>
+      <p><code>rays_math → rdk_core → rdk_geom → rdk_ops → rdk_boolean → rdk → sop → flow_sop → editor_document → flow_native → rays_editor → rays_bin</code>. That is 12 crates built one after another, about 0.5–1.7 s each, mostly frontend. Touching <code>flow_ir</code> takes 3.8 s.</p>
+    </div>
+    <div>
+      <h3>Generics are not the problem</h3>
+      <p>The shape gate already keeps generics and macros rare: at most 28 generic functions in any crate. Most of the remaining type bloat is closure types. There are about 230 in the OGPU driver records and about 50 in Flow's GPU records. A single concrete map type also gets compiled separately in every crate that uses it: flow_sop uses 57 such types.</p>
+    </div>
+    <div>
+      <h3>Largest files</h3>
+      <p><code>flow_sop/lower.rs</code> 5.8k lines, <code>flow_ir/packed.rs</code> 5.4k, <code>rdk_ops/subdivide_refine.rs</code> 5.1k, <code>flow_eval/eval.rs</code> 4.8k, <code>renderer/scene_execution.rs</code> 3.7k, <code>flow_check/workspace.rs</code> 3.7k. An edit inside any of them recompiles one large unit.</p>
+    </div>
+  </div>
+  <p><b>Why flow_check compiles slowly</b> (from reading the code): the built-in op table in <code>op.rs</code> is built at runtime. <code>array_ops</code> alone has 47 closures, and there are 77 <code>Arc::new(|…|)</code> bodies in all, each with owned <code>String</code>/<code>Ty</code> signatures and their drop and cleanup code. <code>workspace.rs</code> has 14 different B-tree map and set types, and <code>Cx.env: Rc&lt;BTreeMap&lt;String, Info&gt;&gt;</code> is copied whole for each scope. <code>term_arena</code> derives <code>Debug</code>/<code>PartialEq</code> across 36 table types. Per byte of source, the outlier is still about 2.5×.</p>
+  <p class="note">In one run, touching <code>rays_math</code> took 41 s instead of 7.6 s because the incremental caches of the Flow crates were stale. If something regularly invalidates the shared <code>target/</code>, such as a build with other flags or another profile, that one problem costs more than every other item on this page combined. Find the cause first (B0).</p>
+</section>
+
+<section id="memory">
+  <h2>Memory and allocations</h2>
+  <p>Measured with a real Metal window on the dev build (O1), 400 frames. Allocation counts come from a malloc counter injected into the process; the steady-state cost per frame is the 400-frame run minus the 100-frame run, divided by 300. Sources were found by sampling every 61st allocation's stack.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Workload</th><th>Allocations / frame</th><th>Bytes / frame</th><th>Max RSS</th><th>Peak footprint</th></tr></thead>
+    <tbody>
+      <tr><td>Empty editor</td><td class="n">1,121</td><td class="n">113 KB</td><td class="n">139 MB</td><td class="n">82 MB</td></tr>
+      <tr><td><code>basic.rays</code> (2D)</td><td class="n">3,154</td><td class="n">430 KB</td><td class="n">144 MB</td><td class="n">64 MB</td></tr>
+      <tr><td><code>million_marks.rays</code></td><td class="n">4,087</td><td class="n">380 KB</td><td class="n">215 MB</td><td class="n">441 MB</td></tr>
+      <tr><td><code>gpu_sea.rays</code> (1M points, GPU)</td><td class="n">33,034</td><td class="n">2.25 MB</td><td class="n">331 MB</td><td class="n">650 MB</td></tr>
+    </tbody>
+  </table></div>
+  <p>Metal and system libraries account for only 7–20% of these allocations; the rest is our Rust code. In <code>gpu_sea</code>, about 40% comes from the Lisp evaluator rebuilding route paths every frame. The idle editor's 82 MB footprint is above the 72 MB idle budget in <code>memory-budgets.sexp</code>, but the two are measured differently, so this needs confirming on the gate scenario.</p>
+
+  <h3>Per frame: editor, UI, renderer, GPU</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding</th><th>Where</th><th>Measured</th><th>Expected win</th><th>Risk</th></tr></thead>
+    <tbody>
+<tr><td class="id">M1</td><td>The evaluator builds a fresh <code>Vec&lt;String&gt;</code> path for each node and residual, plus <code>format!("def:…")</code> and <code>Arc::new(site)</code> per call. Use interned <code>Arc</code> route nodes instead; <code>sub_at</code> already caches them</td><td><code>flow_eval/src/eval.rs:556,609,1085,1913</code></td><td class="n">~14k/frame in gpu_sea</td><td class="n">−5…10k/frame</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">M2</td><td><code>editor_graph</code> deep-clones the whole graph term tree when <code>panel_key</code> only needs <code>.name</code>. Return <code>Option&lt;&amp;Graph&gt;</code></td><td><code>editor_document/src/workspace_doc.rs:125</code>, <code>rays_editor/src/editor_shell.rs:81</code></td><td class="n">315 (basic), 1,434 (sea)</td><td class="n">~10% of basic</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M3</td><td>The whole editor model is cloned 9–10 times per frame: <code>get(model)</code> twice, <code>value.clone()</code>, <code>as_pane</code> per panel, <code>pane_of</code>. Same root cause as C6</td><td><code>editor_loop.rs:478,1031,1040</code>, <code>editor_shell.rs:244</code>, <code>editor_frame.rs:1001</code></td><td class="n">396 + 187 (basic)</td><td class="n">−400…600/frame</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">M4</td><td><code>sync_scope</code> runs at least twice per frame and materializes the full profile report and scope key before checking whether anything changed. Compare counts first</td><td><code>rays_editor/src/editor_scope.rs:144,188,210</code></td><td class="n">~3.3k (sea)</td><td class="n">−3k/frame</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M5</td><td>About 18 boxed closures and 15 <code>Rc</code> clones for each render encoder, one encoder per batch. Fixed by C1 (driver records become traits)</td><td><code>ogpu_metal/src/render_encoder.rs:200-325</code></td><td class="n">~200/frame</td><td class="n">−200/frame</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M6</td><td><code>plan_entry</code> rebuilds 4–6 binding <code>Vec</code>s per draw using <code>insert(0,…)</code>. Reuse vectors held in <code>prepared_scratch</code></td><td><code>renderer/src/scene_execution.rs:2798</code></td><td class="n">123–578 + 110–316</td><td class="n">−200…800/frame</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M7</td><td>Texture and sampler binds box a cleanup closure every time, without the dedup <code>keep_buffer</code> already has</td><td><code>ogpu_metal/src/command_control.rs:185</code>, <code>render_encoder.rs:268</code></td><td class="n">30–80/frame</td><td class="n">−30…80/frame</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M8</td><td>Lookups that allocate a key just to search: <code>sampler_key = format!("{:?}")</code>, <code>side_lru::lru_key</code> builds an <code>Arc</code> per find, and <code>content_hash</code>/<code>digest_hex</code> produce hex strings. Use <code>u128</code>/tuple keys and <code>find_opt_by</code></td><td><code>scene_execution.rs:1024,1065,2276</code>, <code>renderer/src/side_lru.rs:35</code></td><td class="n">~70/frame</td><td class="n">−70/frame</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M9</td><td><code>panels::at</code> returns a cloned subtree, and <code>leaves</code>/<code>walk</code> re-walk the tree many times per frame</td><td><code>editor_core/src/panels.rs:96-136</code></td><td class="n">118–282</td><td class="n">−100…300/frame</td><td><span class="risk low">low</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>Ruled out by measurement: the pxui painter Box→Rc double allocation (only 3–8 per frame) and pxui text layout. C9 drops to cleanup only.</p>
+
+  <h3>Per cook: Lisp evaluation and geometry</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding</th><th>Where</th><th>Win (estimate)</th><th>Lines</th><th>Risk</th></tr></thead>
+    <tbody>
+<tr><td class="id">M10</td><td>Likely O(n²) copying on stores: writing back to alias slots keeps the refcount at 2, so the next <code>Arc::make_mut</code> copies the whole array</td><td><code>flow_ir/src/core_exec.rs:2157-2176</code>, <code>:2649-2657</code></td><td>each store O(n) → O(1)</td><td class="n">~6</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M11</td><td>Every variable reference in the walker allocates a path string and <code>format!</code> for an error message that is rarely needed. <code>{:keys}</code> patterns clone the whole Record for each field</td><td><code>flow_eval/src/eval.rs:630,670,699,1451</code></td><td>1+k allocations → 0 per reference</td><td class="n">~15</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M12</td><td>Recording builds owned path keys and <code>format!</code> per parameter even after its 4096-entry cap is reached</td><td><code>eval.rs:576,676-700</code></td><td>most walker allocations while editing</td><td class="n">~10</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M13</td><td>Attribute storage and Lisp values hold arrays in different container types, so every attribute read and write deep-copies. The <code>COLUMNS</code> ring keeps up to 64 extra plane copies that the memory ledger cannot see. Use <code>Arc&lt;Vec&lt;T&gt;&gt;</code> for both</td><td><code>flow_sop/src/attribute_kernel.rs:538,950,1234,1745</code>, <code>rdk_core/src/attribute.rs:164,305</code></td><td>one full copy per read and per write removed</td><td class="n">~250</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">M14</td><td><code>Value</code> is 72 bytes because of <code>Struct</code>/<code>Source</code>. Boxing those two variants brings it to 40 bytes. Text literals are re-allocated on every evaluation; <code>Arc&lt;[u8]&gt;</code> would fix that</td><td><code>flow_syntax/src/value.rs:43</code></td><td>−44% for every list, slot and environment node</td><td class="n">222 sites</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M15</td><td>Each call and loop iteration copies the whole iteration path through <code>Arc::make_mut(...).push(i)</code>. Use a persistent list, as <code>Route</code> already does</td><td><code>eval.rs:1933,1950,2478,2532</code></td><td>O(depth) → 1 node</td><td class="n">~40</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">M16</td><td>Closure environments are <code>Arc&lt;BTreeMap&lt;String, Value&gt;&gt;</code>, allocating one String per captured name. Use a sorted <code>Arc&lt;[(Arc&lt;str&gt;, Value)]&gt;</code> built from interned names</td><td><code>eval.rs:401,407,793-821,4276</code></td><td>k + nodes → 1 per closure</td><td class="n">~40</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M17</td><td>Parallel kernels build per-chunk <code>Mutex&lt;Option&lt;Vec&gt;&gt;</code> slots and then join them (31 sites). Write into <code>&amp;mut [T]</code> through <code>chunks_mut</code> with fixed boundaries instead. Same work as C3</td><td><code>attribute_kernel.rs:420</code>, <code>topology_remap.rs:38</code>, <code>ragged_ops</code>, <code>attribute_blur</code>, <code>attribute_interpolate</code></td><td>peak halves, one full copy removed</td><td class="n">−120</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">M18</td><td>Seven <code>i64</code> scratch arrays per output vertex in subdivide could be <code>i32</code>. <code>INT_FLOATS</code> keeps i64→f64 copies that no owner is charged for. Topology as <code>u32</code> would halve 1M-triangle meshes (24 → 12 MB) but crosses the Lisp boundary, so defer it</td><td><code>rdk_ops/src/subdivide_refine.rs:1220</code>, <code>flow_ir/src/packed.rs:4643</code></td><td>−50% for scratch</td><td class="n">~30</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M19</td><td>Text attributes are <code>Vec&lt;Vec&lt;u8&gt;&gt;</code>, one heap allocation per row. Use offsets plus bytes, like <code>IntArray</code>. Do this after M13</td><td><code>Storage::Text</code>, <code>Value::Text_array</code></td><td>1M rows: 1M allocations → 2</td><td class="n">179 sites</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">M20</td><td>A leftover "TEMP" allocation sampler adds an atomic load and a branch to every allocation</td><td><code>mem_sys/src/lib.rs:155-170</code></td><td>every allocation</td><td class="n">−15</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">M21</td><td><code>runtime_resources::bytes = Rc&lt;RefCell&lt;Vec&lt;u8&gt;&gt;&gt;</code> ("OCaml bytes"). Nothing mutates it in production. Make it <code>Rc&lt;[u8]&gt;</code></td><td>16 files</td><td>removes RefCell borrows everywhere</td><td class="n">−40</td><td><span class="risk med">med</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Regression guards</h3>
+  <ul class="plain">
+    <li><b>Per frame:</b> one serialized GPU <code>cargo t</code> case in <code>rays_editor</code>, built on the <code>isogrid_orbit</code> harness. Warm 30 frames of <code>basic.rays</code>, then assert that <code>mem_sys::alloc_count()</code> over the next 30 frames stays at or below about 3,300 per frame (and add a bytes bound). Add a second case for the empty editor at or below about 1,200. Tighten the limits after each fix. On failure, turn on <code>mem_sys::TRACE</code> so the report names the sites.</li>
+    <li><b>Per cook:</b> add thread-local allocation counters to <code>mem_sys</code> (about 8 lines) and a <code>test_alloc_budget.rs</code> file in flow_sop: (a) a walker loop with field access, destructuring and a closure, for M11, M12, M15 and M16; (b) an aliased 4096-element store, for M10; (c) a round trip of P, Cd and a text attribute on a 100k-point grid, for M13 and M19; (d) peak bytes during subdivide, for M17 and M18. Limits may only go down, the same rule <code>memory-budgets.sexp</code> follows.</li>
+  </ul>
+</section>
+
+<section id="int">
+  <h2>Int becomes plain i64</h2>
+  <p>Owner decision: drop the signed 63-bit Int that was inherited from OCaml. Int becomes a native <code>i64</code> with two's-complement wrapping, and the spec changes to match. Every Lisp Int operation goes through one function, <code>flow_syntax::packed_ops::integer_apply</code>, so this is mostly deletion.</p>
+  <div class="cols">
+    <div>
+      <h3>What gets simpler</h3>
+      <ul class="plain">
+        <li><code>packed_ops</code> moves to plain <code>wrapping_*</code>; <code>wrap63</code> in flow_check is removed.</li>
+        <li>The <code>ocaml_int</code> crate is deleted; 5 of the 8 crates that depend on it never use it.</li>
+        <li>Five <code>MAX_INT</code>/<code>OCAML_*</code> constants become <code>i64::MAX</code>/<code>i64::MIN</code>.</li>
+        <li>Four Int literal parsers drop the 63-bit sign fold and become <code>i64::from_str_radix</code>.</li>
+        <li>MSL: <code>wrap_integer</code> is removed. SPIR-V: <code>wrap_integer</code> and the <code>shr</code> mask are removed. WGSL: <code>i63</code> is removed. JS: <code>BigInt.asIntN(64)</code>, and the fast path drops its <code>&lt;&lt;1&gt;&gt;1</code>.</li>
+        <li>Fixes three existing bugs: <code>abs(-2^62)</code> goes out of range in <code>packed.rs:2731</code>; literals between 2^62 and 2^63−1 come out as Float in some paths and as Int in others; and a CPU/JS mismatch in <code>color/byte</code>.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What needs care</h3>
+      <ul class="plain">
+        <li><code>i64::MIN</code> becomes a value Lisp can reach. Rust <code>/</code> and <code>%</code> need <code>wrapping_div</code>/<code>wrapping_rem</code>. MSL needs a <code>b==-1</code> guard (it is undefined behaviour in C++). About 25 RDK negate, abs and square guards move to <code>checked_*</code>.</li>
+        <li>WGSL <code>i64_divmod</code> uses a signed compare that breaks for <code>|b| = 2^63</code>. Switch it to an unsigned <code>i64_ult</code>.</li>
+        <li><b>Keep <code>rand/at</code>, <code>Rand.float_at</code> and the geometry hashes exactly as they are.</b> They become named hash functions that keep a <code>wrap63</code> helper in <code>rays_math::hash</code>. JS <code>randAt</code> needs its own <code>w63</code>. Seeds at 2^62 and above alias other seeds; this is deterministic and goes into the spec.</li>
+        <li>The INT63 test constant appears three times (flow_ir, flow_gpu, flow_web). All three must change together.</li>
+      </ul>
+    </div>
+  </div>
+  <p><b>Golden impact:</b> text-only regeneration of about 104 JS goldens, 19 of 24 <code>.metal</code> fixtures and their <code>.spv</code> files. No pixel, geometry or sketch golden should change. Steps: (1) update the spec text in core.md, flow.md and gpu-codegen.md; (2) change the Rust core and add one table test: <code>MAX+1=MIN</code>, <code>MIN/-1=MIN</code>, <code>MIN%-1=0</code>, <code>shl(1,63)=MIN</code>, <code>shr(-1,1)=MAX</code>, <code>abs(MIN)=MIN</code>; (3) move <code>wrap63</code> into <code>rays_math::hash</code>, delete <code>ocaml_int</code>, and check that the hash tests are unchanged; (4) move the RDK guards to <code>checked_*</code>; (5) update MSL/SPIR-V and refresh their fixtures on Metal; (6) update WGSL, JS and the web runtime, and add JS cases for <code>int/div(min,-1)</code> and <code>rand/at</code>.</p>
+</section>
+
+<section id="waves">
+  <h2>Plan in six waves</h2>
+  <div class="wave">
+    <div class="eyebrow">Wave A · deletions and dependency hygiene · low risk</div>
+    <h3>Pure removals; goldens unchanged</h3>
+    <ul>
+      <li>Delete the unused crates <code>rays_collections</code> and <code>rays_hash</code> (about 1.5k lines). With them gone, the shape gate's generics rule becomes a plain ban.</li>
+      <li>Delete the 48 uncalled <code>sop::support</code> functions, <code>rdk_ops::edge_transport</code>, five empty <code>rdk_ops</code> modules and 16 unused <code>rdk</code> re-exports (about 550 lines).</li>
+      <li>Remove unused dependencies: <code>ocaml_int</code> from four UI crates, <code>flow_eval</code> from pxui_graph, and editor_core and input from rays_bin.</li>
+      <li>Remove the three <code>gpu_suite_*_b</code> test targets and <code>shard()</code>. <code>cargo t</code> already runs one process per case.</li>
+      <li>Delete the 66 <code>MAX_ARRAY_LENGTH</code> checks that emulate OCaml's array-size limit (about 250 lines). Keep the key-packing overflow checks.</li>
+      <li>Merge the six MD5 copies into <code>rays_math::hash</code>. Make <code>region_snapshot</code> test-only. Make the <code>Editor::Private</code> forwarders and pxui_graph accessors used only by tests test-only too.</li>
+    </ul>
+    <div class="meta">About −3.5k lines, 2 fewer crates, fewer test links. One commit per bullet, each followed by <code>cargo t</code> on the crates it touched.</div>
+  </div>
+  <div class="wave">
+    <div class="eyebrow">Wave B · build speed · measure each change</div>
+    <h3>Fix the edit loop before refactoring</h3>
+    <ul>
+      <li><b>B0</b>: find what invalidates incremental caches in the shared target (the 41 s vs 7.6 s run above).</li>
+      <li><b>B1</b>: run <code>cargo llvm-lines -p flow_check</code> and fix whatever is causing its codegen outlier.</li>
+      <li><b>B2</b>: compare <code>opt-level=0</code> against 1 for the UI crates that are off the <code>rays check</code> hot path: rays_editor, pxui_graph, editor_document, flow_graph and flow_native. These used about 30 s of codegen. Keep the change only if debug run speed holds.</li>
+      <li><b>B3</b>: merge the <code>gpu_suite_t1..t6</code> and qualification tests into one <code>gpu_editor</code> test binary and share one test-support module. That is 10 test links reduced to about 2.</li>
+      <li><b>B4</b>: add a buildtime canary for the editor chain (rebuild rays_bin after touching flow_ir).</li>
+      <li><b>B5</b>: move flow_sop's catalog, manifest, port and network types into a small crate below it, so editor_document no longer waits for flow_sop. Delete the re-export-only <code>rdk</code> crate.</li>
+    </ul>
+    <div class="meta">Expected (estimate): 10–15 s off the cold cascade, about 1–1.5 s off each mid-level edit, and much faster test builds.</div>
+  </div>
+  <div class="wave">
+    <div class="eyebrow">Wave M · allocation quick wins · low risk, measured</div>
+    <h3>Add the guards first, then cut allocations</h3>
+    <ul>
+      <li>Add the per-frame and per-cook allocation guards with today's limits, and delete the <code>mem_sys</code> TEMP sampler (M20).</li>
+      <li>Fixes that take one line to a few dozen: M10 (O(n²) stores), M11 and M12 (allocations in the walker and in recording), M2 and M9 (borrow instead of clone), M4 (check whether the scope changed before doing the work), M6–M8 (renderer scratch reuse and allocation-free keys).</li>
+      <li>Then M1 (interned evaluator routes), M14 (40-byte <code>Value</code>) and M16 (closure environments). Run the sequential/parallel equality tests after each.</li>
+      <li>M13 then M19 (one array type for attributes and Lisp values, then flat text rows). M3, M5, M15 and M17 land with C6, C1 and C3.</li>
+    </ul>
+    <div class="meta">Target (estimate): <code>basic</code> from about 3.2k to under 2k allocations per frame, <code>gpu_sea</code> from about 33k to under 15k. Lower each guard's limit as fixes land.</div>
+  </div>
+  <div class="wave">
+    <div class="eyebrow">Wave I · Int becomes i64 · medium risk, text-only goldens</div>
+    <h3>Spec change, then each target</h3>
+    <ul>
+      <li>Follow the six steps in the "Int becomes plain i64" section above. This runs in parallel with Wave A, since it also deletes <code>ocaml_int</code>, which replaces that item in C10.</li>
+    </ul>
+    <div class="meta">About −150 lines net, one crate fewer, and three existing bugs fixed. Hashes are frozen, so pixel and geometry goldens stay the same.</div>
+  </div>
+  <div class="wave">
+    <div class="eyebrow">Wave C · replace OCaml-port patterns · medium risk</div>
+    <h3>Same behaviour, written for Rust</h3>
+    <ul>
+      <li>Turn closure records into traits: OGPU's <code>Driver*</code> records (97 <code>Box&lt;dyn Fn&gt;</code> fields across three backends) and Flow's <code>Resident</code>/<code>Gpu::*</code> records (about 35 fields, a guard cloned 13 times).</li>
+      <li>Replace the atomic <code>AInts/AFloats/ABytes</code> arrays and about 70 per-range mutex slots with one <code>par_fill</code> over disjoint <code>chunks_mut</code> in <code>rdk_core::support</code>.</li>
+      <li>Unify the attribute gather/select code (four implementations, about 40 matches over all eight storage types) on <code>float_planes</code> plus one <code>select</code>.</li>
+      <li>Return <code>Result</code> from <code>materialise</code> and delete the three <code>catch_unwind</code> calls. Narrow <code>guarded_force</code>.</li>
+      <li>Editor: reducers take <code>&amp;mut t</code>, the pane uses borrowed views, and <code>panel_map</code> becomes a plain struct. This removes the whole-model clones made several times per frame.</li>
+      <li>Merge thin crates: <code>ogpu</code>→ogpu_core, <code>native_layer_token</code>→_sys, <code>vulkan</code>→ogpu_vulkan, <code>ocaml_int</code>→rays_math::int63, <code>runtime_input</code>→runtime, the six SDL satellites into sdl3/sdl3_sys, and <code>cfmt_sys</code>→cfmt.</li>
+    </ul>
+    <div class="meta">About −5…7k lines and about 13 fewer crates. Debug execution should also get faster: no per-element atomics, no per-frame clones, and painters allocated once instead of twice. Run GPU checks per backend change.</div>
+  </div>
+  <div class="wave">
+    <div class="eyebrow">Wave D · deliberate golden refresh · higher risk</div>
+    <h3>Drop OCaml ordering, error text and the duplicate interpreter</h3>
+    <ul>
+      <li>Write register, ID and evaluation order in natural Rust order, removing about 30 "match OCaml order" workarounds. Replace the 47 <code>Vec::insert(0,…)</code> list-prepend copies. Refresh the MSL, SPIR-V, WGSL and snapshot goldens in one commit.</li>
+      <li>rdk errors become <code>{op, code: enum, message}</code>. This deletes 22 error re-coders, 71 <code>unwrap_or_else(|bad| bad)</code> calls and the string-compared <code>"cancelled"</code> check.</li>
+      <li>Merge the two WGSL printers into one with a precision flag, as the Metal side already does.</li>
+      <li><code>packed.rs</code>: keep the typed CPU engine and turn the float engine into fast paths inside it (about −1k lines). Do this only behind <code>bench_core</code> showing no regression.</li>
+      <li>Last: merge <code>Value</code>'s four float-array variants into <code>Floats(width, …)</code>, which touches 90 sites in 23 files.</li>
+    </ul>
+    <div class="meta">About −2.5…3.5k lines. Each bullet ships with its golden refresh and a written diff review.</div>
+  </div>
+</section>
+
+<section id="findings">
+  <h2>All findings</h2>
+  <p>The ID prefix is the wave. Line deltas count library code. Memory items <code>M1</code>–<code>M21</code> are tabulated under <a href="#memory">Memory and allocations</a> and tracked in the progress table with the same IDs.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding</th><th>Where</th><th>Lines</th><th>Compile</th><th>Risk</th></tr></thead>
+    <tbody>
+<tr><td class="id">A1</td><td>Unused crates: <code>rays_collections</code> and <code>rays_hash</code> (an unused typed copy of lru and parallel)</td><td><code>crates/rays_collections</code>, <code>tools/gate</code></td><td class="n">−1.5k</td><td>2 crates</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">A2</td><td>48 uncalled <code>sop::support</code> functions left after the move to Lisp, plus dead rdk_ops modules and re-exports</td><td><code>sop/src/support.rs</code>, <code>rdk_ops/src/edge_transport.rs</code>, <code>rdk/src/lib.rs</code></td><td class="n">−550</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">A3</td><td><code>MAX_ARRAY_LENGTH</code> (OCaml <code>Sys.max_array_length</code>) checks that can never fire</td><td>27 files in rdk_*</td><td class="n">−250</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">A4</td><td>Six copies of MD5, <code>guarded</code> defined six times, <code>ocaml_min/max</code>, <code>ldexp</code>, <code>format_g</code></td><td>flow_shader, flow_web, flow_check, flow_sop, web_export, core_*</td><td class="n">−250</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">A5</td><td>Test-only code compiled into libraries: <code>region_snapshot</code>, <code>Editor::Private</code>, about 15 pxui_graph accessors, plus dead <code>window_to_values</code> and <code>live_delay</code></td><td><code>flow_ir/src/region_snapshot.rs</code>, <code>rays_editor/src/rays_editor.rs</code></td><td class="n">−500</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">A6</td><td>Unused dependencies. editor_core pulls in all of <code>rays</code> and <code>runtime_resources</code> for a 21-line frame type and a one-line write helper</td><td>Cargo.toml of rays_editor, editor_document, pxui_*, rays_bin, editor_core</td><td class="n">~0</td><td>shorter dependency graph</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">A7</td><td>Duplicated UI kit helpers and OCaml compatibility code (<code>cap_*</code>, <code>ocaml_trim</code> ×4, <code>Filename.concat</code> ×2), and the closest-point-on-triangle routine written twice</td><td><code>pxui_shell/src/kit.rs</code>, rdk_geom surface/proximity index</td><td class="n">−125</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">A8</td><td>Dead public items: <code>op::arithmetic</code> (a linear-scan duplicate of <code>op::arith</code>), <code>op::finder</code>, <code>RowCallback</code>, three <code>term_arena</code> setters, seven <code>param</code> getters, <code>presentation_facts_</code> and <code>runtime_of</code></td><td><code>flow_check/src/op.rs:15,145,160</code>, <code>param/src/lib.rs:383-411</code>, renderer</td><td class="n">−90</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">B0</td><td>Incremental caches in the shared target were invalid (41 s vs 7.6 s for the same touch)</td><td>shared <code>target/</code></td><td class="n">0</td><td>up to −35 s per hit</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">B1</td><td>flow_check codegen is about 3× denser than other Flow crates, with 14 crates downstream. Move the op table to static <code>&amp;[Spec]</code> data with <code>fn</code> pointers, replace per-scope map copies with a scope stack keyed by interned <code>PathId</code>, and trim the <code>Debug</code>/<code>PartialEq</code> derives in <code>term_arena</code></td><td><code>flow_check/src/op.rs:478,685,801</code>, <code>workspace.rs:523,1101</code>, <code>term_arena.rs:110,694</code></td><td class="n">−200?</td><td>about −10 s per cascade</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">B2</td><td><code>opt-level=0</code> for UI crates off the hot path (A/B against debug run speed)</td><td>workspace <code>Cargo.toml</code></td><td class="n">+5</td><td>−10…15 s cold</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">B3</td><td>10 GPU test binaries, three of them compiled twice for an unused nextest split, and helpers copied up to five times</td><td><code>rays_editor/Cargo.toml</code>, <code>rays/tests/common/window.rs</code></td><td class="n">−400</td><td>10 test links → about 2</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">B4</td><td>No buildtime budget covers the editor chain</td><td><code>tools/buildtime</code></td><td class="n">+10</td><td>guards against regressions</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">B5</td><td>editor_document waits on all of flow_sop for its catalog types; <code>rdk</code> only re-exports</td><td>flow_sop catalog/manifest/port, <code>crates/rdk</code></td><td class="n">−75</td><td>−1…1.5 s per edit</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C1</td><td>OGPU driver interface built from closure records (97 fields, about 230 closure types, 9+ allocations per encoder)</td><td><code>ogpu_core/src/backend.rs</code>, ogpu_metal, ogpu_vulkan, ogpu_mock</td><td class="n">−600…900</td><td>large</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C2</td><td>Flow GPU <code>Resident</code>/<code>Gpu</code> closure records, a guard cloned 13 times, 17 proxy re-wraps, 7 <code>route_*</code> helpers</td><td><code>flow_ir/src/core_exec.rs:46</code>, <code>flow_ir.rs:29</code>, <code>flow_gpu/src/host.rs:2373</code>, <code>flow_native/src/workspace_gpu.rs:538</code></td><td class="n">−250…350</td><td>about 50 closure types</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C3</td><td>Per-element atomic arrays and per-range mutex slots emulating OCaml's shared mutable arrays</td><td><code>rdk_ops/src/subdivide_refine.rs:132</code>, about 20 files, <code>rdk_core/src/topology_remap.rs:38</code></td><td class="n">−600…900</td><td>small, faster debug runs</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C4</td><td>Attribute gather/select written four times, with about 40 matches over all eight storage types</td><td>topology_remap, subdivide_refine:3722, convex_hull:603, plane_clip:1840</td><td class="n">−800…1.2k</td><td>moderate</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C5</td><td>Panics caught with <code>catch_unwind</code> as OCaml-style exceptions; <code>guarded_force</code> hides real bugs</td><td><code>flow_gpu/src/run.rs:1387,1577,1992</code>, <code>flow_ir.rs:528</code></td><td class="n">−30</td><td>—</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C6</td><td>Whole editor model cloned several times per frame, with three copy-on-write workarounds layered on top</td><td><code>editor_frame.rs:1005</code>, <code>editor_loop.rs:478</code>, <code>panel_map.rs</code></td><td class="n">−260</td><td>—</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C7</td><td>Type catalog rebuilt on every edit and cached five different ways</td><td><code>document_edit.rs:28</code>, <code>rays_bin/src/lib.rs:8</code>, <code>editor_model.rs:419</code></td><td class="n">−80</td><td>—</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C8</td><td>Graph pane passes 7 lookup closures, rebuilt on every sync</td><td><code>pxui_graph/src/scope_state.rs:194</code>, <code>editor_scope.rs:251</code></td><td class="n">−80</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C9</td><td>Every UI painter allocated twice per frame. Measured at only 3–8 per frame, so this is cleanup only</td><td><code>pxui/src/ui_core.rs:2277,3058</code></td><td class="n">~0</td><td>—</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C10</td><td>Thin crates: ogpu, native_layer_token, vulkan, runtime_input, cfmt_sys, and the six SDL satellites with three identical build scripts</td><td>crates/*</td><td class="n">−650</td><td>about 13 crates, 4 build scripts</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C11</td><td>Three local LRU caches</td><td><code>rays/src/table.rs</code>, <code>renderer/src/side_lru.rs</code>, <code>rays/src/idlist.rs</code></td><td class="n">−150…250</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C12</td><td><code>fma</code> calls into C on every platform. <code>mul_add</code> is a single instruction on aarch64; keep C only on Windows</td><td><code>rays_math/src/fma.rs</code></td><td class="n">+3</td><td>faster runtime</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C13</td><td><code>ocaml_float</code> searches %g at precisions 15, 16 and 17, then binary-searches; <code>{:e}</code> already gives the shortest round-trip text</td><td><code>cfmt/src/lib.rs:107</code></td><td class="n">−50</td><td>faster runtime</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C14</td><td>Hand-written containers: an AVL tree, a key heap and a second 2D bounding-box tree</td><td><code>rdk_boolean/src/boolean_face_arrangement.rs:217-480</code>, <code>rdk_geom/src/planar_cdt.rs:404</code></td><td class="n">−300…450</td><td>small</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C15</td><td>70 <code>*_LABELS</code> choice tables, each with its own wrapper functions; five overlapping owner enums</td><td><code>sop/src/sop_topology.rs</code>, <code>sop/src/support.rs</code>, shapes, attributes</td><td class="n">−400…500</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C16</td><td><code>Holder</code> cannot be downcast, so three global registries look holders up by address behind a mutex. Make it <code>Holder: Any</code> and use <code>Arc::downcast</code></td><td><code>rdk_core/src/packed.rs:297</code>, <code>flow_sop/src/topology_kernel_impl.rs:432</code>, <code>attribute_kernel.rs:1002</code></td><td class="n">−50</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C17</td><td>Two global registries keyed by <code>Weak&lt;Backend&gt;</code> for measured placement. Make them one field on <code>Gpu::Backend</code></td><td><code>flow_sop/src/lower.rs:684</code>, <code>attribute_kernel.rs:2017</code></td><td class="n">−60</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C18</td><td><code>CallEnv</code> is a record of three closures with one construction site. Make it a method on <code>CallEnvShared</code></td><td><code>lower.rs:1608,4198</code></td><td class="n">−40</td><td>fewer closure types</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C19</td><td>Renderer cache-slot equality is written out by hand three times. Derive <code>PartialEq, Hash</code> on the signature</td><td><code>renderer/src/scene_execution.rs:379,2011,2086,2136-2223</code></td><td class="n">−130</td><td>small</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">C20</td><td><code>fold_writes</code> is 412 lines with about ten local closures and a chain walk written three times. Ad-hoc global <code>Mutex&lt;Vec&lt;(K,V)&gt;&gt;</code> caches scan linearly and move to front with <code>insert(0)</code>. Split out <code>fold.rs</code> and use <code>lru::Cache</code></td><td><code>lower.rs:960,1988,2345-2831,2850</code>, <code>op.rs:130,191</code></td><td class="n">−140</td><td>smaller codegen units</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">C21</td><td>renderer and rays_pathtracer keep OCaml names (<code>t</code>, 158 type-prefixed fields, 51 <code>fn f(value: &amp;mut t)</code>) behind <code>#![allow(clippy::all)]</code>. Rename, and turn clippy back on</td><td><code>renderer/src/lib.rs:1</code>, <code>rays_pathtracer/src/lib.rs:3</code></td><td class="n">~0</td><td>—</td><td><span class="risk low">low</span></td></tr>
+<tr><td class="id">D1</td><td>Code kept in OCaml's register and ID order, plus 47 <code>Vec::insert(0,…)</code> list prepends</td><td>core_region, spirv, core_lower, js, wgsl, <code>flow_gpu/src/host.rs</code></td><td class="n">−100</td><td>—</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">D2</td><td>rdk errors rebuild OCaml message text; cancellation detected by comparing strings</td><td><code>rdk_ops/src/triangulate2d.rs:109</code>, about 200 sites</td><td class="n">−400…700</td><td>fewer allocations</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">D3</td><td>Two WGSL printers; <code>target::region</code> builds a whole kernel just to read refusals</td><td><code>flow_web/src/wgsl.rs:281,998</code>, <code>web_export.rs:382</code></td><td class="n">−150</td><td>small</td><td><span class="risk med">med</span></td></tr>
+<tr><td class="id">D4</td><td>Two CPU interpreters in packed.rs matching the same 39 instruction variants</td><td><code>flow_ir/src/packed.rs:719-2135</code> vs <code>2449-3650</code></td><td class="n">−900…1.2k</td><td>large</td><td><span class="risk high">high</span></td></tr>
+<tr><td class="id">D5</td><td><code>Value</code> has four float-array variants with the same payload</td><td><code>flow_syntax/src/value.rs:37</code>, 90 sites</td><td class="n">−150…250</td><td>moderate</td><td><span class="risk high">high</span></td></tr>
+<tr><td class="id">D6</td><td>OCaml module structure: <code>pub mod Gpu/Profile/Cost</code>, types named <code>t</code>, free functions instead of methods</td><td><code>flow_ir/src/flow_ir.rs</code>, rays_editor</td><td class="n">−50</td><td>—</td><td><span class="risk low">low</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="kept">
+  <h2>Checked and kept</h2>
+  <div class="cols">
+    <ul class="plain">
+      <li>Execution tiers (eval walker → core_exec → packed → GPU): each tier has different capabilities.</li>
+      <li>The four kernel printers (MSL, SPIR-V, WGSL, JS) already share <code>kernel_layout::Visit</code>.</li>
+      <li>Type erasure with <code>dyn Any</code> in <code>lru</code>/<code>mem</code> is the intended way to avoid generics.</li>
+    </ul>
+    <ul class="plain">
+      <li>Triangulation and the 3D bounding-volume trees are already shared. The <code>shortest_paths</code> heap needs decrease-key.</li>
+      <li><code>Rc&lt;RefCell&gt;</code> in the GPU owners stays, because GPU state is confined to the main thread.</li>
+      <li>The crate boundaries of editor_core, editor_document, editor_commands and the pxui_shell intents are real.</li>
+      <li><code>mem_sys</code>, <code>metal_sys</code> and <code>vulkan_sys</code> hold real platform code.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="run">
+  <h2>How to run it</h2>
+  <ul class="plain">
+    <li>One stage per commit. Run <code>cargo check -p</code> while editing, then <code>cargo t -p</code> on the touched crates and their consumers, then native and GPU checks before committing. <code>cargo run -p gate -- deps</code> after any boundary change.</li>
+    <li>Waves A and B can run in parallel. Each Wave C item gets its own owner, on a separate branch. Wave D goes last, one golden refresh per bullet.</li>
+    <li>Measure before and after each B item, and after C1, C3 and D4: <code>tools/buildtime</code>, warm touch rebuilds, debug <code>rays check sketches/*.rays</code> time, and <code>bench_core</code>.</li>
+    <li>Order: A, B, M and I in parallel, one owner each. C follows, with M3, M5, M15 and M17 landing inside C6, C1 and C3. D goes last.</li>
+    <li>Memory and allocation claims are measured with a real window (<code>RAYS_MAX_FRAMES=400</code>, an injected malloc counter, <code>/usr/bin/time -l</code>), never inferred from a gate that never presents a frame.</li>
+  </ul>
+</section>
+</main>
+<script>
+(async function(){
+  const IDS=[];
+  for(let i=1;i<=8;i++)IDS.push('A'+i);
+  IDS.push('B0'); for(let i=1;i<=5;i++)IDS.push('B'+i);
+  for(let i=1;i<=21;i++)IDS.push('M'+i);
+  IDS.push('I');
+  for(let i=1;i<=21;i++)IDS.push('C'+i);
+  for(let i=1;i<=6;i++)IDS.push('D'+i);
+  const WAVE=id=>id[0]==='A'?'A':id[0]==='B'?'B':id[0]==='M'?'M':id==='I'?'I':id[0]==='C'?'C':'D';
+  const grid=document.getElementById('progress-grid');
+  const note=document.getElementById('progress-note');
+  const tbody=document.getElementById('progress-tbody');
+  const wrap=document.getElementById('progress-table-wrap');
+  function render(counts,rows){
+    const waves=['A','B','M','I','C','D'];
+    grid.replaceChildren();
+    waves.forEach(w=>{
+      const c=counts[w]||{done:0,active:0,pending:IDS.filter(id=>WAVE(id)===w).length,skip:0};
+      const el=document.createElement('div');
+      el.innerHTML='<b>'+c.done+'/'+c.total+'</b><span>Wave '+w+' done</span>';
+      grid.appendChild(el);
+    });
+    const tot=IDS.length;
+    const done=rows.filter(r=>r.status==='done').length;
+    note.textContent='Tracker: '+done+' of '+tot+' items done. Evidence closes only after focused tests or measured runs on dev.';
+    tbody.replaceChildren();
+    rows.sort((a,b)=>IDS.indexOf(a.id)-IDS.indexOf(b.id));
+    rows.forEach(r=>{
+      const tr=document.createElement('tr');
+      const st=r.status||'pending';
+      tr.innerHTML='<td class="id">'+r.id+'</td><td>'+WAVE(r.id)+'</td><td><span class="tag '+st+'">'+st+'</span></td><td>'+(r.note?String(r.note).replace(/</g,'&lt;'):'—')+'</td>';
+      tbody.appendChild(tr);
+    });
+    wrap.hidden=false;
+  }
+  function emptyRows(){
+    return IDS.map(id=>({id,status:'pending',note:''}));
+  }
+  const db=await (window.claude&&claude.use)?claude.use('db'):null;
+  if(!db){
+    render({},emptyRows());
+    note.textContent+=' Shared tracker unavailable in this view; counts are pending.';
+    return;
+  }
+  try{
+    let rows=[];
+    for(const id of IDS){
+      const snap=await db.doc('plan/items/'+id).get();
+      rows.push(snap.exists()?{id,...snap.data()}:{id,status:'pending',note:''});
+    }
+    const counts={};
+    rows.forEach(r=>{
+      const w=WAVE(r.id);
+      counts[w]=counts[w]||{done:0,active:0,pending:0,skip:0,total:0};
+      counts[w].total++;
+      const s=r.status||'pending';
+      if(counts[w][s]!==undefined)counts[w][s]++; else counts[w].pending++;
+    });
+    render(counts,rows);
+  }catch(e){
+    render({},emptyRows());
+    note.textContent='Tracker read failed; showing pending rows.';
+  }
+})();
+</script>
