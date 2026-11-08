@@ -590,3 +590,26 @@ fn map_million_marks_hash() {
 fn map_hash_one_call() {
     check_map("(let* [indices (array/range 4097) extent 300.0]\n     (map (fn [i] (let* [x (- (abs (mod (* (sin (+ (* i 12.9898) 78.233)) 43758.5453) 1.0)) 0.5)]\n                    [(* x extent) (* x 2.0) 0])) indices))");
 }
+
+/// A fold over a table, and its count, in a map body (spiral's ramp segment, a helper whose array is
+/// a parameter) is the kernel's, with the walker's values; so is a fold over a captured or sliced table.
+#[test]
+fn fold_over_a_table_is_the_kernels() {
+    let ws = check_source(
+        "(workspace w
+           (defn seg :context value [(ps : (array float)) (u : float)]
+             (let* [below (fold [n 0] [p ps] (if (<= p u) (int/add n 1) n))] (int/sub below (array/count ps))))
+           (graph g :context host
+             (let* [knots (map (fn [i] (* i 0.25)) (array/range 5))]
+               {:helper (map (fn [i] (seg knots (* i 0.0002))) (array/range 5000))
+                :captured (map (fn [i] (fold [s 0.0] [k knots] (+ s (* k i)))) (array/range 4200))
+                :sliced (map (fn [i] (fold [s 0.0] [k (array/slice knots 1 3)] (+ s (* k i)))) (array/range 4300))})))",
+    );
+    let walked = ok(e::r#static(&ws, true, None));
+    let profile = profile::create(clock_zero());
+    let fast = ok(profile::sample(&profile, &mut || fast_static(&ws)));
+    assert!(same(&result_of(&walked, "g"), &result_of(&fast, "g")), "fold over a table differs from the walker");
+    let maps = profile::static_maps(&profile);
+    let kernels = maps.iter().filter(|m| m.count > 4096 && m.tier == Tier::Cpu_kernel && m.refusal.is_empty()).count();
+    assert_eq!(kernels, 3, "{:?}", maps.iter().map(|m| (m.count, m.tier, m.refusal.iter().map(|d| d.message.clone()).collect::<Vec<_>>())).collect::<Vec<_>>());
+}

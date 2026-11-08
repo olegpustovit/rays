@@ -1561,6 +1561,20 @@ impl Lower {
                 // use the existing selected table/integer captures.
                 self.invariant_value(t)
             }
+            Node::Op(id)
+                if t.name(arena.op(id).op) == "array/count"
+                    && *t.ty() == Ty::Int
+                    && arena.fields(arena.op(id).args).len() == 1
+                    && !self.dynamic
+                    && self.constant_only("array/count") =>
+            {
+                // a table bound in the body (a helper's parameter): its length where captures are constants
+                let table = self.expression(env, &t.child(arena.fields(arena.op(id).args)[0].term))?;
+                match self.table_length(&table) {
+                    Some(length) => Ok(one(self.emit(I::Int_const(length))?)),
+                    None => Err(refusal(t, "E_PACKED_OPERATOR", "Dynamic operator array/count has no packed instruction for 1 arguments at width 1.")),
+                }
+            }
             Node::Op(id) if t.name(arena.op(id).op) == "error" && self.constant_only("error") => {
                 let args = arena.fields(arena.op(id).args);
                 let text = |me: &Lower, arg: &Term| -> Res<Vec<u8>> {
@@ -1645,8 +1659,9 @@ impl Lower {
                 node.kind == LoopKind::Fold && accs.len() == 1 && clauses.len() == 1 && arena.skip(node.skip).is_empty()
                     && matches!(arena.pattern(accs[0].pattern), PatternNode::Name(_))
                     && matches!(arena.pattern(clauses[0].pattern), PatternNode::Name(_))
-                    && matches!(arena.row(clauses[0].term).node, Node::Op(id) if t.name(arena.op(id).op) == "range" && arena.skip(arena.op(id).skip).is_empty())
-                    && canonical_operator(self.residual, "range")
+                    && ((matches!(arena.row(clauses[0].term).node, Node::Op(id) if t.name(arena.op(id).op) == "range" && arena.skip(arena.op(id).skip).is_empty())
+                        && canonical_operator(self.residual, "range"))
+                        || matches!(t.child(clauses[0].term).ty(), Ty::Array(_)) && canonical_operator(self.residual, "array/nth"))
             } => {
                 let node = arena.loop_node(id);
                 let acc = arena.bindings(node.accs)[0];
@@ -1656,32 +1671,72 @@ impl Lower {
                 let seed = t.child(acc.term);
                 let source = t.child(clause.term);
                 let body = t.child(node.body);
-                let Node::Op(id) = source.node else { return Err(invalid("unreachable")) };
-                let args = arena.fields(arena.op(id).args);
                 let seed_e = self.expression(env, &seed)?;
                 let initial = self.carried_initial(&seed, t.ty(), &seed_e)?;
                 let bound = |me: &mut Lower, term: &Term| -> Res<i64> {
                     let e = me.expression(env, term)?;
                     reg(&me.as_int(&e)?, 0)
                 };
-                let (first, last) = match args {
-                    [last] => {
-                        let first = self.emit(I::Int_const(0))?;
-                        (first, bound(self, &t.child(last.term))?)
+                // `[x array]` over a table: an index loop over its length, `x` its gather (unbounded,
+                // as the walker's fold over an array is). Only where captures are constants: a
+                // rebound uniform table could change its length. An invariant array's length is a
+                // count capture (`Ok`), any other table's its value's (`Err`).
+                let element = match source.node {
+                    Node::Op(id) if t.name(arena.op(id).op) == "range" => None,
+                    _ => {
+                        let unsupported = || refusal(t, "E_PACKED_FORM", "Unsupported packed body form fold.");
+                        if self.dynamic { return Err(unsupported()); }
+                        let table = self.expression(env, &source)?;
+                        if !self.is_table(&table) { return Err(unsupported()); }
+                        let mut builder = TermBuilder::new();
+                        let form = builder.import_form(&source.form());
+                        let length = match self.table_length(&table) {
+                            Some(length) => Err(length),
+                            None if !residual::free_names(&source).iter().any(|n| env_find(env, n).is_some()) && self.constant_only("array/count") => {
+                                let array = builder.import(&source);
+                                Ok(builder.push(None, &Ty::Int, form, Draft::Op { op: "array/count".to_owned(), args: vec![("array".to_owned(), array)], skip: Vec::new() }))
+                            }
+                            None => return Err(unsupported()),
+                        };
+                        let array = builder.push(None, source.ty(), form, Draft::RefBinding("@fold_array".to_owned(), Vec::new()));
+                        let index = builder.push(None, &Ty::Int, form, Draft::RefBinding("@fold_index".to_owned(), Vec::new()));
+                        let item_ty = ty::elem(source.ty()).ok_or_else(|| invalid("option is None"))?;
+                        let nth = builder.push(None, &item_ty, form, Draft::Op { op: "array/nth".to_owned(), args: vec![("array".to_owned(), array), ("index".to_owned(), index)], skip: Vec::new() });
+                        let arena = builder.freeze();
+                        Some((length.map(|count| arena.handle(count)), table, arena.handle(nth)))
                     }
-                    [first, last] => {
-                        let first = bound(self, &t.child(first.term))?;
-                        (first, bound(self, &t.child(last.term))?)
-                    }
-                    _ => return Err(refusal(&source, "E_PACKED_FORM", "A counted loop requires one or two range bounds.")),
                 };
-                let control = Loop { first, last, finish: -1, initial, limit: Some(op::max_iterations() as i64), span: source.form().span.clone() };
+                let (first, last, limit) = match (&element, source.node) {
+                    (Some((Ok(count), ..)), _) => (self.emit(I::Int_const(0))?, bound(self, count)?, None),
+                    (Some((Err(length), ..)), _) => (self.emit(I::Int_const(0))?, self.emit(I::Int_const(*length))?, None),
+                    (None, Node::Op(id)) => match arena.fields(arena.op(id).args) {
+                        [last] => {
+                            let first = self.emit(I::Int_const(0))?;
+                            (first, bound(self, &t.child(last.term))?, Some(op::max_iterations() as i64))
+                        }
+                        [first, last] => {
+                            let first = bound(self, &t.child(first.term))?;
+                            (first, bound(self, &t.child(last.term))?, Some(op::max_iterations() as i64))
+                        }
+                        _ => return Err(refusal(&source, "E_PACKED_FORM", "A counted loop requires one or two range bounds.")),
+                    },
+                    _ => return Err(invalid("unreachable")),
+                };
+                let control = Loop { first, last, finish: -1, initial, limit, span: source.form().span.clone() };
                 let ty = t.ty().clone();
                 self.carried_loop(&ty, control, &mut |me, header, carried| {
                     let index = one(header);
                     let mut env2 = env.clone();
                     env2.push((t.name(accumulator).to_owned(), carried.clone()));
-                    env2.push((t.name(index_name).to_owned(), index));
+                    match &element {
+                        None => env2.push((t.name(index_name).to_owned(), index)),
+                        Some((_, table, nth)) => {
+                            env2.push(("@fold_array".to_owned(), table.clone()));
+                            env2.push(("@fold_index".to_owned(), index));
+                            let item = me.expression(&env2, nth)?;
+                            env2.push((t.name(index_name).to_owned(), item));
+                        }
+                    }
                     // `(index_name, index) :: (accumulator, carried) :: env`: index_name shadows
                     let value = me.expression(&env2, &body)?;
                     let next = me.leaves(&body, &ty, &value)?.into_iter().map(|(r, _)| r).collect();
@@ -1823,6 +1878,15 @@ impl Lower {
                 self.expression(&env2, &t.child(node.body))
             }
             _ => Err(refusal(t, "E_PACKED_FORM", &format!("Unsupported packed body form {}.", flow_syntax::syntax::head(&t.form()).map(str::to_owned).unwrap_or_else(|| ty::to_string(t.ty()))))),
+        }
+    }
+
+    /// A table's length when captures are constants (a fixed compile never rebinds them).
+    fn table_length(&self, e: &Expression) -> Option<i64> {
+        if self.dynamic || !self.is_table(e) { return None; }
+        match self.array_values.get(&e.registers[0])? {
+            Value::Residual(_) => None,
+            v => V::array_length(v).ok().map(|n| n as i64),
         }
     }
 
