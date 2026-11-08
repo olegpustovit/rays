@@ -12,7 +12,6 @@ use rdk_core::{
     topology_index, topology_remap,
 };
 use rdk_geom::implicit_point;
-use rdk_ops::subdivide_refine::AFloats;
 use rdk_geom::predicates::{self, Sign};
 use rdk_geom::surface_index;
 use rdk_ops::{deletion, dissolve, edge_collapse, fuse_reduce};
@@ -1963,12 +1962,9 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             );
             let source_positions = positions_view(geometry_value)?;
             let select = |source: &[f64]| -> Result<Vec<f64>, error::T> {
-                let values = AFloats::new(point_map.len() as i64, 0.0);
-                support::parallel_for(cx(cancel), grain, point_map.len() as i64, &|output| {
-                    values.set(output, source[u(point_map[output as usize])]);
-                    Ok(())
-                })?;
-                Ok(values.into_vec())
+                let mut values = vec![0.0_f64; point_map.len()];
+                support::par_fill(cx(cancel), grain, &mut values, &|output| Ok(source[u(point_map[output as usize])]))?;
+                Ok(values)
             };
             let positions = packed::Float3::View::of_owned_exn(
                 select(&source_positions.x)?,

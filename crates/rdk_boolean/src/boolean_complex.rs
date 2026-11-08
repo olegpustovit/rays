@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, geometry, support};
-use rdk_ops::subdivide_refine::AInts;
 use rdk_geom::implicit_point::{self, Construction};
 
 use crate::boolean_constraints::{self as constraints_mod, Side};
@@ -251,57 +250,50 @@ fn parallel_sort_indices(
         values.sort_by(|&l, &r| compare_points(token_points, l, r));
         return Ok(values);
     }
-    let mut source = AInts::from_slice(&values);
-    let mut destination = AInts::new(count as i64, 0);
-    let runs = count.div_ceil(run_size);
-    support::parallel_for(cancel_value, 1, runs as i64, &|run| {
-        cancel::check_opt(cancel_value)?;
-        let first = run as usize * run_size;
-        let length = run_size.min(count - first);
-        let mut local: Vec<i64> = (0..length).map(|at| source.get((first + at) as i64)).collect();
-        local.sort_by(|&l, &r| compare_points(token_points, l, r));
-        for (at, value) in local.into_iter().enumerate() {
-            source.set((first + at) as i64, value);
-        }
-        Ok(())
-    })?;
+    let mut source = values;
+    let mut destination = vec![0_i64; count];
+    {
+        let windows = support::Windows::even(&mut source, run_size as i64);
+        support::run_indexed_ranges(run_size as i64, count as i64, &|range, _, _| {
+            cancel::check_opt(cancel_value)?;
+            windows.take(range).sort_by(|&l, &r| compare_points(token_points, l, r));
+            Ok(())
+        })?;
+    }
     let mut width = run_size;
     while width < count {
         let span = width * 2;
-        let merges = count.div_ceil(span);
-        support::parallel_for(cancel_value, 1, merges as i64, &|merge| {
-            cancel::check_opt(cancel_value)?;
-            let first = merge as usize * span;
-            let middle = count.min(first + width);
-            let last = count.min(first + span);
-            let (mut left, mut right, mut output) = (first, middle, first);
-            while left < middle && right < last {
-                let (a, b) = (source.get(left as i64), source.get(right as i64));
-                if compare_points(token_points, a, b) != std::cmp::Ordering::Greater {
-                    destination.set(output as i64, a);
-                    left += 1;
-                } else {
-                    destination.set(output as i64, b);
-                    right += 1;
+        {
+            let sorted = &source;
+            let windows = support::Windows::even(&mut destination, span as i64);
+            support::run_indexed_ranges(span as i64, count as i64, &|merge, _, _| {
+                cancel::check_opt(cancel_value)?;
+                let output = windows.take(merge);
+                let first = merge as usize * span;
+                let middle = count.min(first + width);
+                let last = count.min(first + span);
+                let (mut left, mut right, mut at) = (first, middle, 0);
+                while left < middle && right < last {
+                    let (a, b) = (sorted[left], sorted[right]);
+                    if compare_points(token_points, a, b) != std::cmp::Ordering::Greater {
+                        output[at] = a;
+                        left += 1;
+                    } else {
+                        output[at] = b;
+                        right += 1;
+                    }
+                    at += 1;
                 }
-                output += 1;
-            }
-            while left < middle {
-                destination.set(output as i64, source.get(left as i64));
-                left += 1;
-                output += 1;
-            }
-            while right < last {
-                destination.set(output as i64, source.get(right as i64));
-                right += 1;
-                output += 1;
-            }
-            Ok(())
-        })?;
+                output[at..at + (middle - left)].copy_from_slice(&sorted[left..middle]);
+                at += middle - left;
+                output[at..at + (last - right)].copy_from_slice(&sorted[right..last]);
+                Ok(())
+            })?;
+        }
         std::mem::swap(&mut source, &mut destination);
         width = span;
     }
-    Ok(source.into_vec())
+    Ok(source)
 }
 
 fn merge_orders(token_points: &[implicit_point::T], first: &[i64], second: &[i64]) -> Vec<i64> {

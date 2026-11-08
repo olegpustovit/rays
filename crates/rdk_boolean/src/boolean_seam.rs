@@ -7,7 +7,6 @@ use std::sync::Arc;
 use rdk_core::packed;
 use rdk_core::topology::PrimitiveKind;
 use rdk_core::{cancel, error, geometry, support, topology, topology_index};
-use rdk_ops::subdivide_refine::AInts;
 use rdk_geom::implicit_point;
 use rdk_geom::linear_piece_index;
 use rdk_geom::predicates::{self, SegmentSegment};
@@ -658,12 +657,9 @@ fn build_inner(
     let facet_masks: Vec<i64> = if facets < options.parallel_cutoff {
         (0..facets).map(|facet| facet_mask(c, facet)).collect()
     } else {
-        let masks = AInts::new(facets, 0);
-        support::parallel_for(cancel_value, options.grain, facets, &|facet| {
-            masks.set(facet, facet_mask(c, facet));
-            Ok(())
-        })?;
-        masks.into_vec()
+        let mut masks = vec![0_i64; facets as usize];
+        support::par_fill(cancel_value, options.grain, &mut masks, &|facet| Ok(facet_mask(c, facet)))?;
+        masks
     };
     let constraints_value = complex::View::constraints(c);
     let index_of = |geometry_value: &geometry::T| -> Result<topology_index::View::View, Fail> {
