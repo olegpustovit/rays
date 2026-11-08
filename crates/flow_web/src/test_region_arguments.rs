@@ -177,7 +177,6 @@ fn malformed_count_and_integer_storage() {
     for (mutation, message) in [
         ("args=[];", "Compiled region argument count differs from its declaration."),
         ("args[plan.argumentTypes.findIndex(t=>t.array==='int')]=new p.PArray(1,Float64Array.of(1));", STORAGE),
-        ("args[plan.argumentTypes.findIndex(t=>t.array==='int')]=new p.PArray(1,BigInt64Array.of(-(1n<<63n)));", STORAGE),
     ] { malformed(&mut source, INT_MAP, mutation, "E_CORE_ARGUMENT", message); }
     finish(source);
 }
@@ -288,9 +287,9 @@ fn malformed_nested_integer_and_packed_layouts() {
     let (_, original) = compiled(INT_MAP, true);
     let mut source = script();
     for (value, mutation) in [
-        (leaves(), "args.at(-1)[0]=1n<<62n"),
-        (list(vec![Value::Text(b"fallback".to_vec()), Value::Int(9007199254740993), Value::Float(0.5)]), "args.at(-1)[1]=-(1n<<62n)-1n"),
-        (record(leaves()), "args.at(-1).get('leaves')[0]=1n<<62n"),
+        (leaves(), "args.at(-1)[0]=1n<<63n"),
+        (list(vec![Value::Text(b"fallback".to_vec()), Value::Int(9007199254740993), Value::Float(0.5)]), "args.at(-1)[1]=-(1n<<63n)-1n"),
+        (record(leaves()), "args.at(-1).get('leaves')[0]=1n<<63n"),
         (list(vec![int_array()]), "args.at(-1)[0]=new p.PArray(3,BigInt64Array.of(1n,2n,3n))"),
         (record(list(vec![int_array()])), "args.at(-1).get('leaves')[0]=new p.PArray(3,BigInt64Array.of(1n,2n,3n))"),
         (list(vec![Value::Text(b"fallback".to_vec()), int_array()]), "args.at(-1)[1]=new p.PArray(5,Float64Array.of(1))"),

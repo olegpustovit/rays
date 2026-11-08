@@ -22,7 +22,7 @@ export function frame(input, state, rt) {
       at = 10; l8 = K[3];
       at = 11; {
         const f11 = rt.coerce("int", l7), e11 = rt.coerce("int", l8), n11 = e11 > f11 ? e11 - f11 : 0n;
-        if (n11 > 4611686018427387903n) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
+        if (n11 > 9223372036854775807n) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
         l9 = n11;
         for (let i11 = 0n, c11 = n11; i11 < c11 && !rt.truthy(l6); i11++) {
           const j11 = i11; l10 = j11; l11 = f11 + j11;
@@ -74,7 +74,7 @@ export function frame(input, state, rt) {
       at = 48; l37 = K[9];
       at = 49; {
         const f49 = rt.coerce("int", l36), e49 = rt.coerce("int", l37), n49 = e49 > f49 ? e49 - f49 : 0n;
-        if (n49 > 4611686018427387903n) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
+        if (n49 > 9223372036854775807n) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
         l38 = n49;
         for (let i49 = 0n, c49 = n49; i49 < c49 && !rt.truthy(l35); i49++) {
           const j49 = i49; l39 = j49; l40 = f49 + j49;

@@ -70,11 +70,11 @@ pub fn error_cases() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "error_shift_selected",
-            "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 16 :type int))",
+            "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 64 (int/mod (frame/index) 1)))) (float x))) (array/range 16 :type int))",
         ),
         (
             "error_shift_untaken",
-            "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 16 :type int))",
+            "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/add 64 (int/mod (frame/index) 1)))) (float x))) (array/range 16 :type int))",
         ),
         (
             "error_negative_shift_selected",

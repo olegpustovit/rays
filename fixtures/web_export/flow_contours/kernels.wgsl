@@ -1,6 +1,6 @@
 // kernel image1
 @group(0) @binding(0) var<storage, read_write> outbuf: array<f32>;
-@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 2>;
+@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 3>;
 @group(0) @binding(2) var<storage, read_write> status: atomic<u32>;
 @group(0) @binding(3) var<storage, read> table: array<i32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
@@ -54,29 +54,30 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_bbbf5d92ee45ba28011c58bb4a03e973(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_99d8d6589a44e30b2622666b82861587(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
-  let image_width = u32(bitcast<f32>(uniforms[1].y));
+  let image_width = u32(bitcast<f32>(uniforms[2].x));
   var r42: f32 = 0.0;
   var r43: f32 = 0.0;
   var r44: f32 = 0.0;
   var r45: f32 = 0.0;
   var r46: f32 = 0.0;
   var r47: f32 = 0.0;
-  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].y));
+  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[2].x));
   if (!wfinite(r0)) { sb |= 1u; }
-  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[1].z));
+  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[2].y));
   if (!wfinite(r1)) { sb |= 1u; }
   let r2: f32 = bitcast<f32>(0x3f800000u);
   let r3: f32 = bitcast<f32>(0x3f000000u);
-  let r4: f32 = bitcast<f32>(0x3d4ccccdu);
-  let r5: f32 = bitcast<f32>(uniforms[0].y);
+  let r4: f32 = bitcast<f32>(uniforms[0].y);
+  if (!wfinite(r4)) { sb |= 1u; }
+  let r5: f32 = bitcast<f32>(uniforms[0].z);
   if (!wfinite(r5)) { sb |= 1u; }
   let r6: f32 = (r4 * r5);
   if (!wfinite(r6)) { sb |= 1u; }
-  let r7: f32 = bitcast<f32>(uniforms[0].z);
+  let r7: f32 = bitcast<f32>(uniforms[0].w);
   if (!wfinite(r7)) { sb |= 1u; }
   let r8: f32 = select(r6 / r7, 0.0, r7 == 0.0);
   if (!wfinite(r8)) { sb |= 1u; }
@@ -84,13 +85,13 @@ fn kernel_bbbf5d92ee45ba28011c58bb4a03e973(@builtin(global_invocation_id) gid: v
   if (!wfinite(r9)) { sb |= 1u; }
   let r10: f32 = (r9 * r4);
   if (!wfinite(r10)) { sb |= 1u; }
-  let r11: f32 = bitcast<f32>(uniforms[0].w);
+  let r11: f32 = bitcast<f32>(uniforms[1].x);
   if (!wfinite(r11)) { sb |= 1u; }
   let r12: f32 = (r1 * r11);
   if (!wfinite(r12)) { sb |= 1u; }
   let r13: f32 = (r12 * r4);
   if (!wfinite(r13)) { sb |= 1u; }
-  let r14: f32 = bitcast<f32>(uniforms[1].x);
+  let r14: f32 = bitcast<f32>(uniforms[1].y);
   if (!wfinite(r14)) { sb |= 1u; }
   let r15: f32 = wfbm(vec3<f32>(r10, r13, r14), 2, 0);
   if (!wfinite(r15)) { sb |= 1u; }
@@ -106,10 +107,12 @@ fn kernel_bbbf5d92ee45ba28011c58bb4a03e973(@builtin(global_invocation_id) gid: v
   if (!wfinite(r20)) { sb |= 1u; }
   let r21: f32 = (r20 - r15);
   if (!wfinite(r21)) { sb |= 1u; }
-  let r22: f32 = bitcast<f32>(0x42400000u);
+  let r22: f32 = bitcast<f32>(uniforms[1].z);
+  if (!wfinite(r22)) { sb |= 1u; }
   let r23: f32 = (r15 * r22);
   if (!wfinite(r23)) { sb |= 1u; }
-  let r24: f32 = bitcast<f32>(0x41c00000u);
+  let r24: f32 = bitcast<f32>(uniforms[1].w);
+  if (!wfinite(r24)) { sb |= 1u; }
   let r25: f32 = (r23 - r24);
   if (!wfinite(r25)) { sb |= 1u; }
   let r26: f32 = (r25 + r3);
@@ -158,7 +161,7 @@ fn kernel_bbbf5d92ee45ba28011c58bb4a03e973(@builtin(global_invocation_id) gid: v
 
 // kernel image3
 @group(0) @binding(0) var<storage, read_write> outbuf: array<f32>;
-@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 2>;
+@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 3>;
 @group(0) @binding(2) var<storage, read_write> status: atomic<u32>;
 @group(0) @binding(3) var<storage, read> table: array<i32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
@@ -212,15 +215,15 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_e87630f57fc6d038c7d0cc14c480b040(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_fc078c331161f42ff56e5f59e86f3cfb(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
-  let image_width = u32(bitcast<f32>(uniforms[1].x));
+  let image_width = u32(bitcast<f32>(uniforms[1].w));
   var r58: f32 = 0.0;
-  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].x));
+  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].w));
   if (!wfinite(r0)) { sb |= 1u; }
-  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[1].y));
+  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[2].x));
   if (!wfinite(r1)) { sb |= 1u; }
   let r2: f32 = bitcast<f32>(0x3f800000u);
   let r3: f32 = bitcast<f32>(0x3f000000u);
@@ -243,21 +246,24 @@ fn kernel_e87630f57fc6d038c7d0cc14c480b040(@builtin(global_invocation_id) gid: v
   if (!wfinite(r12)) { sb |= 1u; }
   let r13: f32 = (r11 + r3);
   if (!wfinite(r13)) { sb |= 1u; }
-  let r14: f32 = bitcast<f32>(0x3d4ccccdu);
+  let r14: f32 = bitcast<f32>(uniforms[0].w);
+  if (!wfinite(r14)) { sb |= 1u; }
   let r15: f32 = (r13 * r14);
   if (!wfinite(r15)) { sb |= 1u; }
   let r16: f32 = (r12 + r3);
   if (!wfinite(r16)) { sb |= 1u; }
   let r17: f32 = (r16 * r14);
   if (!wfinite(r17)) { sb |= 1u; }
-  let r18: f32 = bitcast<f32>(uniforms[0].w);
+  let r18: f32 = bitcast<f32>(uniforms[1].x);
   if (!wfinite(r18)) { sb |= 1u; }
   let r19: f32 = wfbm(vec3<f32>(r15, r17, r18), 2, 0);
   if (!wfinite(r19)) { sb |= 1u; }
-  let r20: f32 = bitcast<f32>(0x42400000u);
+  let r20: f32 = bitcast<f32>(uniforms[1].y);
+  if (!wfinite(r20)) { sb |= 1u; }
   let r21: f32 = (r19 * r20);
   if (!wfinite(r21)) { sb |= 1u; }
-  let r22: f32 = bitcast<f32>(0x41c00000u);
+  let r22: f32 = bitcast<f32>(uniforms[1].z);
+  if (!wfinite(r22)) { sb |= 1u; }
   let r23: f32 = (r21 - r22);
   if (!wfinite(r23)) { sb |= 1u; }
   let r24: f32 = bitcast<f32>(0x0u);
@@ -319,7 +325,7 @@ fn kernel_e87630f57fc6d038c7d0cc14c480b040(@builtin(global_invocation_id) gid: v
 
 // kernel image5
 @group(0) @binding(0) var<storage, read_write> outbuf: array<f32>;
-@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 2>;
+@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 3>;
 @group(0) @binding(2) var<storage, read_write> status: atomic<u32>;
 @group(0) @binding(3) var<storage, read> table: array<i32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
@@ -373,15 +379,15 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_8ed6731c666e62cf1e4563803c556608(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_388bdddef624e648398f82b10f356c16(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
-  let image_width = u32(bitcast<f32>(uniforms[1].x));
+  let image_width = u32(bitcast<f32>(uniforms[1].w));
   var r57: f32 = 0.0;
-  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].x));
+  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].w));
   if (!wfinite(r0)) { sb |= 1u; }
-  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[1].y));
+  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[2].x));
   if (!wfinite(r1)) { sb |= 1u; }
   let r2: f32 = bitcast<f32>(0x3f800000u);
   let r3: f32 = bitcast<f32>(0x3f000000u);
@@ -404,21 +410,24 @@ fn kernel_8ed6731c666e62cf1e4563803c556608(@builtin(global_invocation_id) gid: v
   if (!wfinite(r12)) { sb |= 1u; }
   let r13: f32 = (r11 + r3);
   if (!wfinite(r13)) { sb |= 1u; }
-  let r14: f32 = bitcast<f32>(0x3d4ccccdu);
+  let r14: f32 = bitcast<f32>(uniforms[0].w);
+  if (!wfinite(r14)) { sb |= 1u; }
   let r15: f32 = (r13 * r14);
   if (!wfinite(r15)) { sb |= 1u; }
   let r16: f32 = (r12 + r3);
   if (!wfinite(r16)) { sb |= 1u; }
   let r17: f32 = (r16 * r14);
   if (!wfinite(r17)) { sb |= 1u; }
-  let r18: f32 = bitcast<f32>(uniforms[0].w);
+  let r18: f32 = bitcast<f32>(uniforms[1].x);
   if (!wfinite(r18)) { sb |= 1u; }
   let r19: f32 = wfbm(vec3<f32>(r15, r17, r18), 2, 0);
   if (!wfinite(r19)) { sb |= 1u; }
-  let r20: f32 = bitcast<f32>(0x42400000u);
+  let r20: f32 = bitcast<f32>(uniforms[1].y);
+  if (!wfinite(r20)) { sb |= 1u; }
   let r21: f32 = (r19 * r20);
   if (!wfinite(r21)) { sb |= 1u; }
-  let r22: f32 = bitcast<f32>(0x41c00000u);
+  let r22: f32 = bitcast<f32>(uniforms[1].z);
+  if (!wfinite(r22)) { sb |= 1u; }
   let r23: f32 = (r21 - r22);
   if (!wfinite(r23)) { sb |= 1u; }
   let r24: f32 = (r23 - r2);
@@ -479,7 +488,7 @@ fn kernel_8ed6731c666e62cf1e4563803c556608(@builtin(global_invocation_id) gid: v
 
 // kernel image7
 @group(0) @binding(0) var<storage, read_write> outbuf: array<f32>;
-@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 2>;
+@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 3>;
 @group(0) @binding(2) var<storage, read_write> status: atomic<u32>;
 @group(0) @binding(3) var<storage, read> table: array<i32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
@@ -533,15 +542,15 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_568917e37bd5f093f58aad2fc18d3be5(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_bee610fcc103fb4dcf3f64f2c262ba40(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
-  let image_width = u32(bitcast<f32>(uniforms[1].x));
+  let image_width = u32(bitcast<f32>(uniforms[1].w));
   var r59: f32 = 0.0;
-  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].x));
+  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].w));
   if (!wfinite(r0)) { sb |= 1u; }
-  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[1].y));
+  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[2].x));
   if (!wfinite(r1)) { sb |= 1u; }
   let r2: f32 = bitcast<f32>(0x3f800000u);
   let r3: f32 = bitcast<f32>(0x3f000000u);
@@ -564,21 +573,24 @@ fn kernel_568917e37bd5f093f58aad2fc18d3be5(@builtin(global_invocation_id) gid: v
   if (!wfinite(r12)) { sb |= 1u; }
   let r13: f32 = (r11 + r3);
   if (!wfinite(r13)) { sb |= 1u; }
-  let r14: f32 = bitcast<f32>(0x3d4ccccdu);
+  let r14: f32 = bitcast<f32>(uniforms[0].w);
+  if (!wfinite(r14)) { sb |= 1u; }
   let r15: f32 = (r13 * r14);
   if (!wfinite(r15)) { sb |= 1u; }
   let r16: f32 = (r12 + r3);
   if (!wfinite(r16)) { sb |= 1u; }
   let r17: f32 = (r16 * r14);
   if (!wfinite(r17)) { sb |= 1u; }
-  let r18: f32 = bitcast<f32>(uniforms[0].w);
+  let r18: f32 = bitcast<f32>(uniforms[1].x);
   if (!wfinite(r18)) { sb |= 1u; }
   let r19: f32 = wfbm(vec3<f32>(r15, r17, r18), 2, 0);
   if (!wfinite(r19)) { sb |= 1u; }
-  let r20: f32 = bitcast<f32>(0x42400000u);
+  let r20: f32 = bitcast<f32>(uniforms[1].y);
+  if (!wfinite(r20)) { sb |= 1u; }
   let r21: f32 = (r19 * r20);
   if (!wfinite(r21)) { sb |= 1u; }
-  let r22: f32 = bitcast<f32>(0x41c00000u);
+  let r22: f32 = bitcast<f32>(uniforms[1].z);
+  if (!wfinite(r22)) { sb |= 1u; }
   let r23: f32 = (r21 - r22);
   if (!wfinite(r23)) { sb |= 1u; }
   let r24: f32 = bitcast<f32>(0x40000000u);
@@ -641,7 +653,7 @@ fn kernel_568917e37bd5f093f58aad2fc18d3be5(@builtin(global_invocation_id) gid: v
 
 // kernel image9
 @group(0) @binding(0) var<storage, read_write> outbuf: array<f32>;
-@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 2>;
+@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 3>;
 @group(0) @binding(2) var<storage, read_write> status: atomic<u32>;
 @group(0) @binding(3) var<storage, read> table: array<i32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
@@ -695,15 +707,15 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_55ffd94af2979bf9af6ecfff371d2d95(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_50b586d61fe6a8e9eac24456200a1173(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
-  let image_width = u32(bitcast<f32>(uniforms[1].x));
+  let image_width = u32(bitcast<f32>(uniforms[1].w));
   var r59: f32 = 0.0;
-  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].x));
+  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].w));
   if (!wfinite(r0)) { sb |= 1u; }
-  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[1].y));
+  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[2].x));
   if (!wfinite(r1)) { sb |= 1u; }
   let r2: f32 = bitcast<f32>(0x3f800000u);
   let r3: f32 = bitcast<f32>(0x3f000000u);
@@ -726,21 +738,24 @@ fn kernel_55ffd94af2979bf9af6ecfff371d2d95(@builtin(global_invocation_id) gid: v
   if (!wfinite(r12)) { sb |= 1u; }
   let r13: f32 = (r11 + r3);
   if (!wfinite(r13)) { sb |= 1u; }
-  let r14: f32 = bitcast<f32>(0x3d4ccccdu);
+  let r14: f32 = bitcast<f32>(uniforms[0].w);
+  if (!wfinite(r14)) { sb |= 1u; }
   let r15: f32 = (r13 * r14);
   if (!wfinite(r15)) { sb |= 1u; }
   let r16: f32 = (r12 + r3);
   if (!wfinite(r16)) { sb |= 1u; }
   let r17: f32 = (r16 * r14);
   if (!wfinite(r17)) { sb |= 1u; }
-  let r18: f32 = bitcast<f32>(uniforms[0].w);
+  let r18: f32 = bitcast<f32>(uniforms[1].x);
   if (!wfinite(r18)) { sb |= 1u; }
   let r19: f32 = wfbm(vec3<f32>(r15, r17, r18), 2, 0);
   if (!wfinite(r19)) { sb |= 1u; }
-  let r20: f32 = bitcast<f32>(0x42400000u);
+  let r20: f32 = bitcast<f32>(uniforms[1].y);
+  if (!wfinite(r20)) { sb |= 1u; }
   let r21: f32 = (r19 * r20);
   if (!wfinite(r21)) { sb |= 1u; }
-  let r22: f32 = bitcast<f32>(0x41c00000u);
+  let r22: f32 = bitcast<f32>(uniforms[1].z);
+  if (!wfinite(r22)) { sb |= 1u; }
   let r23: f32 = (r21 - r22);
   if (!wfinite(r23)) { sb |= 1u; }
   let r24: f32 = bitcast<f32>(0x40000000u);
@@ -803,7 +818,7 @@ fn kernel_55ffd94af2979bf9af6ecfff371d2d95(@builtin(global_invocation_id) gid: v
 
 // kernel image11
 @group(0) @binding(0) var<storage, read_write> outbuf: array<f32>;
-@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 2>;
+@group(0) @binding(1) var<uniform> uniforms: array<vec4<u32>, 3>;
 @group(0) @binding(2) var<storage, read_write> status: atomic<u32>;
 @group(0) @binding(3) var<storage, read> table: array<i32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
@@ -857,15 +872,15 @@ fn wfbm(p: vec3<f32>, octaves: i32, o: i32) -> f32 {
   return select(sum / weights, 0.0, weights == 0.0);
 }
 @compute @workgroup_size(64)
-fn kernel_97f8fdaa71b039c77cb1fcdca99fa233(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_3b96400b64538af252e24bd71dda36c1(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
-  let image_width = u32(bitcast<f32>(uniforms[1].x));
+  let image_width = u32(bitcast<f32>(uniforms[1].w));
   var r56: f32 = 0.0;
-  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].x));
+  let r0: f32 = pixel_uv(i % image_width, bitcast<f32>(uniforms[1].w));
   if (!wfinite(r0)) { sb |= 1u; }
-  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[1].y));
+  let r1: f32 = pixel_uv(i / image_width, bitcast<f32>(uniforms[2].x));
   if (!wfinite(r1)) { sb |= 1u; }
   let r2: f32 = bitcast<f32>(0x3f800000u);
   let r3: f32 = bitcast<f32>(0x3f000000u);
@@ -888,21 +903,24 @@ fn kernel_97f8fdaa71b039c77cb1fcdca99fa233(@builtin(global_invocation_id) gid: v
   if (!wfinite(r12)) { sb |= 1u; }
   let r13: f32 = (r11 + r3);
   if (!wfinite(r13)) { sb |= 1u; }
-  let r14: f32 = bitcast<f32>(0x3d4ccccdu);
+  let r14: f32 = bitcast<f32>(uniforms[0].w);
+  if (!wfinite(r14)) { sb |= 1u; }
   let r15: f32 = (r13 * r14);
   if (!wfinite(r15)) { sb |= 1u; }
   let r16: f32 = (r12 + r3);
   if (!wfinite(r16)) { sb |= 1u; }
   let r17: f32 = (r16 * r14);
   if (!wfinite(r17)) { sb |= 1u; }
-  let r18: f32 = bitcast<f32>(uniforms[0].w);
+  let r18: f32 = bitcast<f32>(uniforms[1].x);
   if (!wfinite(r18)) { sb |= 1u; }
   let r19: f32 = wfbm(vec3<f32>(r15, r17, r18), 2, 0);
   if (!wfinite(r19)) { sb |= 1u; }
-  let r20: f32 = bitcast<f32>(0x42400000u);
+  let r20: f32 = bitcast<f32>(uniforms[1].y);
+  if (!wfinite(r20)) { sb |= 1u; }
   let r21: f32 = (r19 * r20);
   if (!wfinite(r21)) { sb |= 1u; }
-  let r22: f32 = bitcast<f32>(0x41c00000u);
+  let r22: f32 = bitcast<f32>(uniforms[1].z);
+  if (!wfinite(r22)) { sb |= 1u; }
   let r23: f32 = (r21 - r22);
   if (!wfinite(r23)) { sb |= 1u; }
   let r24: f32 = bitcast<f32>(0x40400000u);

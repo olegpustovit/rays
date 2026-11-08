@@ -12,7 +12,7 @@
 //
 // All coordinates are logical points. The canvas backing store is round(size * dpr) pixels (dpr defaults to
 // devicePixelRatio) and the projection 2/w, -2/h, -1, 1 maps points to clip space, as native `native_projection`.
-// Entries follow specification/marks.md and crates/flow_web/src/js.rs, plus three the compiler never emits yet:
+// Entries follow specification/marks.md and lib/flow_web/js.mli, plus three the compiler never emits yet:
 // `push_clip`/`pop_clip` ({x, y, width, height}; integers, intersected with the enclosing clip, not
 // transformed: the scissor, as native) and `set_blend` ({mode}: replace, alpha, add, multiply, screen,
 // subtract; alpha at the start of every frame). Mark sets draw as instanced `Marks` quads; geometry as

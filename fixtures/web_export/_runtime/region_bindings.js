@@ -5,7 +5,7 @@ import * as p from './prims.js';
 const prepared = new Map();
 const WIDTH = {float:1,vec2:2,vec3:3,vec4:4};
 const storageError = () => p.fail('E_CORE_ARGUMENT', 'Compiled region argument storage differs from its declared type.');
-const integer = x => typeof x === 'bigint' && BigInt.asIntN(63, x) === x;
+const integer = x => typeof x === 'bigint' && BigInt.asIntN(64, x) === x;
 const equalType = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 function joinType(a,b) {
   if (equalType(a,b) || b === 'any') return a;

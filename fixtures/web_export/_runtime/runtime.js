@@ -1,7 +1,7 @@
 // Browser runtime, part 1: input translation, the frame record, state slots and the frame loop.
 // Hand-written and the same for every sketch; the compiler emits only `program.js`.
 //
-// Program module (the export's program.js, see crates/flow_web/src/js.rs and lib/web_export/web_export.mli):
+// Program module (the export's program.js, see lib/flow_web/js.mli and lib/web_export/web_export.mli):
 //   export function frame(input, state, rt)   // async when it invokes a region; state is rt.slots
 //   export const regions = [ {source, count, kept, inputs: [[offset, length]], uniforms, frame: [[slot, fact]],
 //                             length, width, kernel} ]

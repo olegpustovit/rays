@@ -374,6 +374,26 @@ fn integer_registers_past_2_pow_53_loop() {
     }
 }
 
+/// `i64::MIN / -1` wraps to MIN and `MIN % -1` is 0; `rand/at` keeps its 63-bit hash domain, so seeds
+/// from 2^62 alias other seeds (the same in native, JS and the fast register pairs).
+#[test]
+fn int_div_of_min_and_rand_at_agree_with_native() {
+    if !node_available() {
+        eprintln!("node is absent: SKIPPED");
+        return;
+    }
+    let cases = [
+        "(map (fn [(x : int)] (let* [m (int/shl 1 (int/add 63 (int/mod (frame/index) 1))) n (int/sub 0 (int/add 1 (int/mod (frame/index) 1)))]
+        (+ (if (int/eq (int/div m n) m) 1. 0.) (if (int/eq (int/mod m n) 0) 2. 0.)))) (array/range 16 :type int))",
+        "(map (fn [(x : int)] (rand/at (int/add 4611686018427387904 (frame/index)) (int/sub 0 (int/add x 4611686018427387905)))) (array/range 16 :type int))",
+    ];
+    for fast in [false, true] {
+        for source in cases {
+            compare_native(fast, source, &compile(source));
+        }
+    }
+}
+
 #[test]
 fn integer_registers_past_2_pow_53_a() { wide_integers(0, 4); }
 

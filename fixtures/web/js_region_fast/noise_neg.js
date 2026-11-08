@@ -17,9 +17,9 @@ function region(inputs, uniforms, outputs, start, stop) {
     if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
     return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
   const shift64 = (ah, al, b, right) => {
-    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b < 0 || b > 63) fail('E_RANGE', 'Integer shift count must be within [0, 63].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
   const noise = (...args) => { try { return noise3(...args); } catch (e) { if (e?.code === 'E_NONFINITE') return NaN; throw e; } };

@@ -17,9 +17,9 @@ function region(inputs, uniforms, outputs, start, stop) {
     if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
     return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
   const shift64 = (ah, al, b, right) => {
-    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b < 0 || b > 63) fail('E_RANGE', 'Integer shift count must be within [0, 63].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
   const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
@@ -36,21 +36,21 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r2h = 0, r2l = 0;
     r2h = 0; r2l = 2654435761;
     let r3h = 0, r3l = 0;
-    r3l = mul64(r1h, r1l, r2h, r2l); r3h = RH; r3h = (r3h << 1) >> 1;
+    r3l = mul64(r1h, r1l, r2h, r2l); r3h = RH;
     let r4h = 0, r4l = 0;
     r4h = 0; r4l = 37;
     let r5h = 0, r5l = 0;
-    r5l = shift64(r3h, r3l, (r4h * 4294967296 + r4l), true); r5h = RH; r5h = (r5h << 1) >> 1;
+    r5l = shift64(r3h, r3l, (r4h * 4294967296 + r4l), true); r5h = RH;
     let r6h = 0, r6l = 0;
     r6h = 0; r6l = 40;
     let r7h = 0, r7l = 0;
-    r7l = shift64(r1h, r1l, (r6h * 4294967296 + r6l), false); r7h = RH; r7h = (r7h << 1) >> 1;
+    r7l = shift64(r1h, r1l, (r6h * 4294967296 + r6l), false); r7h = RH;
     let r8h = 0, r8l = 0;
     r8h = 0; r8l = 38;
     let r9h = 0, r9l = 0;
-    r9l = shift64(r7h, r7l, (r8h * 4294967296 + r8l), true); r9h = RH; r9h = (r9h << 1) >> 1;
+    r9l = shift64(r7h, r7l, (r8h * 4294967296 + r8l), true); r9h = RH;
     let r10h = 0, r10l = 0;
-    r10l = add64(r5h, r5l, r9h, r9l); r10h = RH; r10h = (r10h << 1) >> 1;
+    r10l = add64(r5h, r5l, r9h, r9l); r10h = RH;
     out0[o * 1 + 0] = big(r10h, r10l);
   }
   return 0;

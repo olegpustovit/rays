@@ -1,4 +1,4 @@
-kernel_f9d80dee1ec9817cec0595566505043a
+kernel_0b6eab60d971e5a6011afe871db11763
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 1>;
@@ -7,7 +7,6 @@ kernel_f9d80dee1ec9817cec0595566505043a
 @group(0) @binding(5) var<storage, read_write> count_out: array<u32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
 fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
-fn i63(a: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x, bitcast<u32>(bitcast<i32>(a.y << 1u) >> 1u)); }
 fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
 fn mulhi32(a: u32, b: u32) -> u32 {
   let a0 = a & 0xffffu; let a1 = a >> 16u; let b0 = b & 0xffffu; let b1 = b >> 16u;
@@ -18,6 +17,7 @@ fn mulhi32(a: u32, b: u32) -> u32 {
 fn i64_mul(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x * b.x, mulhi32(a.x, b.x) + a.x * b.y + a.y * b.x); }
 fn i64_neg(a: vec2<u32>) -> bool { return bitcast<i32>(a.y) < 0; }
 fn i64_lt(a: vec2<u32>, b: vec2<u32>) -> bool { let x = bitcast<i32>(a.y); let y = bitcast<i32>(b.y); return x < y || (x == y && a.x < b.x); }
+fn i64_ult(a: vec2<u32>, b: vec2<u32>) -> bool { return a.y < b.y || (a.y == b.y && a.x < b.x); }
 fn i64_abs(a: vec2<u32>) -> vec2<u32> { return select(a, i64_sub(vec2<u32>(0u, 0u), a), i64_neg(a)); }
 fn i64_to_f(a: vec2<u32>) -> f32 {
   if ((a.y == 0u && a.x < 0x80000000u) || (a.y == 0xffffffffu && a.x >= 0x80000000u)) { return f32(bitcast<i32>(a.x)); }
@@ -60,7 +60,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
     r = vec2<u32>(r.x << 1u, (r.y << 1u) | (r.x >> 31u));
     let bit = select((ua.x >> u32(k)) & 1u, (ua.y >> u32(k - 32)) & 1u, k >= 32);
     r.x = r.x | bit;
-    if (!i64_lt(r, ub) || bitcast<i32>(r.y) < 0) {
+    if (!i64_ult(r, ub)) {
       r = i64_sub(r, ub);
       if (k >= 32) { q.y = q.y | (1u << u32(k - 32)); } else { q.x = q.x | (1u << u32(k)); }
     }
@@ -69,7 +69,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_f9d80dee1ec9817cec0595566505043a(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_0b6eab60d971e5a6011afe871db11763(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[0].w != 0u) { n = min(n, count_in[0] * uniforms[0].y / uniforms[0].z); }
@@ -83,14 +83,14 @@ fn kernel_f9d80dee1ec9817cec0595566505043a(@builtin(global_invocation_id) gid: v
   let r0: f32 = input0[i * 1u + 0u];
   if (!wfinite(r0)) { sb |= 1u; }
   let r1: vec2<u32> = i64_from_f(r0);
-  let r3: vec2<u32> = i63(i64_mul(r1, vec2<u32>(r2, 0u)));
-    let r5: vec2<u32> = i63(i64_shr((r3 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r4, 0u)));
-  if (vec2<u32>(r4, 0u).y != 0u || vec2<u32>(r4, 0u).x > 62u) { sb |= 4u; }
-  let r7: vec2<u32> = i63(i64_shl(r1, vec2<u32>(r6, 0u)));
-  if (vec2<u32>(r6, 0u).y != 0u || vec2<u32>(r6, 0u).x > 62u) { sb |= 4u; }
-  let r9: vec2<u32> = i63(i64_shr((r7 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r8, 0u)));
-  if (vec2<u32>(r8, 0u).y != 0u || vec2<u32>(r8, 0u).x > 62u) { sb |= 4u; }
-  let r10: vec2<u32> = i63(i64_add(r5, r9));
+  let r3: vec2<u32> = i64_mul(r1, vec2<u32>(r2, 0u));
+    let r5: vec2<u32> = i64_shr(r3, vec2<u32>(r4, 0u));
+  if (vec2<u32>(r4, 0u).y != 0u || vec2<u32>(r4, 0u).x > 63u) { sb |= 4u; }
+  let r7: vec2<u32> = i64_shl(r1, vec2<u32>(r6, 0u));
+  if (vec2<u32>(r6, 0u).y != 0u || vec2<u32>(r6, 0u).x > 63u) { sb |= 4u; }
+  let r9: vec2<u32> = i64_shr(r7, vec2<u32>(r8, 0u));
+  if (vec2<u32>(r8, 0u).y != 0u || vec2<u32>(r8, 0u).x > 63u) { sb |= 4u; }
+  let r10: vec2<u32> = i64_add(r5, r9);
     if (sb != 0u) { atomicOr(&status, sb); }
   outbuf[i * 1u + 0u] = i64_to_f(r10);
 }

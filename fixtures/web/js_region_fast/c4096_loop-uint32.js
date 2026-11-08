@@ -17,9 +17,9 @@ function region(inputs, uniforms, outputs, start, stop) {
     if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
     return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
   const shift64 = (ah, al, b, right) => {
-    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b < 0 || b > 63) fail('E_RANGE', 'Integer shift count must be within [0, 63].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
   const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
@@ -36,7 +36,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r2h = 0, r2l = 0;
     r2h = 0; r2l = 4294967295;
     let r3h = 0, r3l = 0;
-    r3h = r1h & r2h; r3l = (r1l & r2l) >>> 0; r3h = (r3h << 1) >> 1;
+    r3h = r1h & r2h; r3l = (r1l & r2l) >>> 0;
     let r4h = 0, r4l = 0;
     r4h = 0; r4l = 0;
     let r5h = 0, r5l = 0;
@@ -53,43 +53,43 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r9h = 0, r9l = 0;
     r9h = 0; r9l = 747796405;
     let r10h = 0, r10l = 0;
-    r10l = mul64(r7h, r7l, r9h, r9l); r10h = RH; r10h = (r10h << 1) >> 1;
+    r10l = mul64(r7h, r7l, r9h, r9l); r10h = RH;
     let r11h = 0, r11l = 0;
     r11h = 0; r11l = 2891336453;
     let r12h = 0, r12l = 0;
-    r12l = add64(r10h, r10l, r11h, r11l); r12h = RH; r12h = (r12h << 1) >> 1;
+    r12l = add64(r10h, r10l, r11h, r11l); r12h = RH;
     let r13h = 0, r13l = 0;
     r13h = 0; r13l = 4294967295;
     let r14h = 0, r14l = 0;
-    r14h = r12h & r13h; r14l = (r12l & r13l) >>> 0; r14h = (r14h << 1) >> 1;
+    r14h = r12h & r13h; r14l = (r12l & r13l) >>> 0;
     let r15h = 0, r15l = 0;
     r15h = 0; r15l = 28;
     let r16h = 0, r16l = 0;
-    r16l = shift64(r14h, r14l, (r15h * 4294967296 + r15l), true); r16h = RH; r16h = (r16h << 1) >> 1;
+    r16l = shift64(r14h, r14l, (r15h * 4294967296 + r15l), true); r16h = RH;
     let r17h = 0, r17l = 0;
     r17h = 0; r17l = 4;
     let r18h = 0, r18l = 0;
-    r18l = add64(r16h, r16l, r17h, r17l); r18h = RH; r18h = (r18h << 1) >> 1;
+    r18l = add64(r16h, r16l, r17h, r17l); r18h = RH;
     let r19h = 0, r19l = 0;
-    r19l = shift64(r14h, r14l, (r18h * 4294967296 + r18l), true); r19h = RH; r19h = (r19h << 1) >> 1;
+    r19l = shift64(r14h, r14l, (r18h * 4294967296 + r18l), true); r19h = RH;
     let r20h = 0, r20l = 0;
-    r20h = r19h ^ r14h; r20l = (r19l ^ r14l) >>> 0; r20h = (r20h << 1) >> 1;
+    r20h = r19h ^ r14h; r20l = (r19l ^ r14l) >>> 0;
     let r21h = 0, r21l = 0;
     r21h = 0; r21l = 277803737;
     let r22h = 0, r22l = 0;
-    r22l = mul64(r20h, r20l, r21h, r21l); r22h = RH; r22h = (r22h << 1) >> 1;
+    r22l = mul64(r20h, r20l, r21h, r21l); r22h = RH;
     let r23h = 0, r23l = 0;
-    r23h = r22h & r13h; r23l = (r22l & r13l) >>> 0; r23h = (r23h << 1) >> 1;
+    r23h = r22h & r13h; r23l = (r22l & r13l) >>> 0;
     let r24h = 0, r24l = 0;
     r24h = 0; r24l = 22;
     let r25h = 0, r25l = 0;
-    r25l = shift64(r23h, r23l, (r24h * 4294967296 + r24l), true); r25h = RH; r25h = (r25h << 1) >> 1;
+    r25l = shift64(r23h, r23l, (r24h * 4294967296 + r24l), true); r25h = RH;
     let r26h = 0, r26l = 0;
-    r26h = r25h ^ r23h; r26l = (r25l ^ r23l) >>> 0; r26h = (r26h << 1) >> 1;
+    r26h = r25h ^ r23h; r26l = (r25l ^ r23l) >>> 0;
     let r27h = 0, r27l = 0;
     r27h = 0; r27l = 65535;
     let r28h = 0, r28l = 0;
-    r28h = r26h & r27h; r28l = (r26l & r27l) >>> 0; r28h = (r28h << 1) >> 1;
+    r28h = r26h & r27h; r28l = (r26l & r27l) >>> 0;
     const next6h0 = r14h, next6l0 = r14l;
     const next6h1 = r28h, next6l1 = r28l;
     r7h = next6h0; r7l = next6l0;

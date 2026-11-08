@@ -17,9 +17,9 @@ function region(inputs, uniforms, outputs, start, stop) {
     if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
     return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
   const shift64 = (ah, al, b, right) => {
-    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b < 0 || b > 63) fail('E_RANGE', 'Integer shift count must be within [0, 63].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
   const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
@@ -36,7 +36,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r2h = 0, r2l = 0;
     r2l = (typeof (uniforms[0][2]) === 'bigint' ? unbig(uniforms[0][2]) : split(uniforms[0][2])); r2h = RH;
     let r3h = 0, r3l = 0;
-    r3l = add64(r1h, r1l, r2h, r2l); r3h = RH; r3h = (r3h << 1) >> 1;
+    r3l = add64(r1h, r1l, r2h, r2l); r3h = RH;
     let r4h = 0, r4l = 0;
     r4h = 0; r4l = 2;
     let r5h = 0, r5l = 0;
@@ -49,7 +49,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r8h = 0, r8l = 0;
     r8h = 1073741823; r8l = 4294967295;
     let r9h = 0, r9l = 0;
-    r9l = add64(r7h, r7l, r8h, r8l); r9h = RH; r9h = (r9h << 1) >> 1;
+    r9l = add64(r7h, r7l, r8h, r8l); r9h = RH;
     const next6h0 = r9h, next6l0 = r9l;
     r7h = next6h0; r7l = next6l0;
     r6l = add64(r6h, r6l, 0, 1); r6h = RH;
@@ -66,7 +66,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r15h = 0, r15l = 0;
     r15l = (typeof (uniforms[0][15]) === 'bigint' ? unbig(uniforms[0][15]) : split(uniforms[0][15])); r15h = RH;
     let r16h = 0, r16l = 0;
-    r16h = r14h ^ r15h; r16l = (r14l ^ r15l) >>> 0; r16h = (r16h << 1) >> 1;
+    r16h = r14h ^ r15h; r16l = (r14l ^ r15l) >>> 0;
     const next13h0 = r16h, next13l0 = r16l;
     r14h = next13h0; r14l = next13l0;
     r13l = add64(r13h, r13l, 0, 1); r13h = RH;

@@ -9,7 +9,6 @@
 @group(0) @binding(6) var<storage, read> buffer6: array<f32>;
 const quad_corner = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
 fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
-fn i63(a: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x, bitcast<u32>(bitcast<i32>(a.y << 1u) >> 1u)); }
 fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
 fn mulhi32(a: u32, b: u32) -> u32 {
   let a0 = a & 0xffffu; let a1 = a >> 16u; let b0 = b & 0xffffu; let b1 = b >> 16u;
@@ -20,6 +19,7 @@ fn mulhi32(a: u32, b: u32) -> u32 {
 fn i64_mul(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x * b.x, mulhi32(a.x, b.x) + a.x * b.y + a.y * b.x); }
 fn i64_neg(a: vec2<u32>) -> bool { return bitcast<i32>(a.y) < 0; }
 fn i64_lt(a: vec2<u32>, b: vec2<u32>) -> bool { let x = bitcast<i32>(a.y); let y = bitcast<i32>(b.y); return x < y || (x == y && a.x < b.x); }
+fn i64_ult(a: vec2<u32>, b: vec2<u32>) -> bool { return a.y < b.y || (a.y == b.y && a.x < b.x); }
 fn i64_abs(a: vec2<u32>) -> vec2<u32> { return select(a, i64_sub(vec2<u32>(0u, 0u), a), i64_neg(a)); }
 fn i64_to_f(a: vec2<u32>) -> f32 {
   if ((a.y == 0u && a.x < 0x80000000u) || (a.y == 0xffffffffu && a.x >= 0x80000000u)) { return f32(bitcast<i32>(a.x)); }
@@ -62,7 +62,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
     r = vec2<u32>(r.x << 1u, (r.y << 1u) | (r.x >> 31u));
     let bit = select((ua.x >> u32(k)) & 1u, (ua.y >> u32(k - 32)) & 1u, k >= 32);
     r.x = r.x | bit;
-    if (!i64_lt(r, ub) || bitcast<i32>(r.y) < 0) {
+    if (!i64_ult(r, ub)) {
       r = i64_sub(r, ub);
       if (k >= 32) { q.y = q.y | (1u << u32(k - 32)); } else { q.x = q.x | (1u << u32(k)); }
     }
@@ -365,9 +365,9 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
   var r302: f32 = 0.0;
   var r303: f32 = 0.0;
   let r0: vec2<u32> = vec2<u32>(iid * 4u + quad_corner[vid], 0u);
-  let r9: vec2<u32> = i63(i64_divmod(r0, vec2<u32>(r8, 0u), false));
+  let r9: vec2<u32> = i64_divmod(r0, vec2<u32>(r8, 0u), false);
   if (all(vec2<u32>(r8, 0u) == vec2<u32>(0u))) { sb |= 2u; }
-  let r10: vec2<u32> = i63(i64_divmod(r0, vec2<u32>(r8, 0u), true));
+  let r10: vec2<u32> = i64_divmod(r0, vec2<u32>(r8, 0u), true);
   if (all(vec2<u32>(r8, 0u) == vec2<u32>(0u))) { sb |= 2u; }
   let r12: f32 = select(0.0, 1.0, all(r10 == vec2<u32>(r11, 0u)));
   let r14: f32 = select(0.0, 1.0, all(r10 == vec2<u32>(r13, 0u)));
@@ -401,8 +401,8 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
     r49 = (r47 * r48);
     r51 = (r49 + r50);
     r52 = i64_from_f(floor(r51));
-    r54 = i63(i64_shl(r52, vec2<u32>(r53, 0u)));
-    if (vec2<u32>(r53, 0u).y != 0u || vec2<u32>(r53, 0u).x > 62u) { sb |= 4u; }
+    r54 = i64_shl(r52, vec2<u32>(r53, 0u));
+    if (vec2<u32>(r53, 0u).y != 0u || vec2<u32>(r53, 0u).x > 63u) { sb |= 4u; }
     r56 = (r37 + r55);
         r57 = vec2<u32>(buffer3[r56 * 1u + 0u], 0u);
     r58 = bitcast<f32>((r57).x);
@@ -411,9 +411,9 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
     r61 = (r60 * r48);
     r62 = (r61 + r50);
     r63 = i64_from_f(floor(r62));
-    r65 = i63(i64_shl(r63, vec2<u32>(r64, 0u)));
-    if (vec2<u32>(r64, 0u).y != 0u || vec2<u32>(r64, 0u).x > 62u) { sb |= 4u; }
-    r66 = i63((r54 | r65));
+    r65 = i64_shl(r63, vec2<u32>(r64, 0u));
+    if (vec2<u32>(r64, 0u).y != 0u || vec2<u32>(r64, 0u).x > 63u) { sb |= 4u; }
+    r66 = (r54 | r65);
         r68 = (r37 + r67);
         r69 = vec2<u32>(buffer3[r68 * 1u + 0u], 0u);
     r70 = bitcast<f32>((r69).x);
@@ -422,10 +422,10 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
     r73 = (r72 * r48);
     r74 = (r73 + r50);
     r75 = i64_from_f(floor(r74));
-    r77 = i63(i64_shl(r75, vec2<u32>(r76, 0u)));
-    if (vec2<u32>(r76, 0u).y != 0u || vec2<u32>(r76, 0u).x > 62u) { sb |= 4u; }
-    r79 = i63((r77 | vec2<u32>(r78, 0u)));
-        r80 = i63((r66 | r79));
+    r77 = i64_shl(r75, vec2<u32>(r76, 0u));
+    if (vec2<u32>(r76, 0u).y != 0u || vec2<u32>(r76, 0u).x > 63u) { sb |= 4u; }
+    r79 = (r77 | vec2<u32>(r78, 0u));
+        r80 = (r66 | r79);
       }
   let r81: vec2<u32> = select(r80, r41, r40 != 0.0);
   let r82: f32 = select(0.0, 1.0, all(r24 == vec2<u32>(r32, 0u)));
@@ -482,18 +482,18 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
     r143 = (r139 + r142);
     r145 = buffer6[r144 * 1u + 0u];
     r146 = (r143 + r145);
-    r148 = i63(i64_shr((r81 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r147, 0u)));
-    if (vec2<u32>(r147, 0u).y != 0u || vec2<u32>(r147, 0u).x > 62u) { sb |= 4u; }
+    r148 = i64_shr(r81, vec2<u32>(r147, 0u));
+    if (vec2<u32>(r147, 0u).y != 0u || vec2<u32>(r147, 0u).x > 63u) { sb |= 4u; }
     r150 = ((r148).x & r149);
         r151 = i64_to_f(vec2<u32>(r150, 0u));
     r153 = select(r151 / r152, 0.0, r152 == 0.0);
-    r155 = i63(i64_shr((r81 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r154, 0u)));
-    if (vec2<u32>(r154, 0u).y != 0u || vec2<u32>(r154, 0u).x > 62u) { sb |= 4u; }
+    r155 = i64_shr(r81, vec2<u32>(r154, 0u));
+    if (vec2<u32>(r154, 0u).y != 0u || vec2<u32>(r154, 0u).x > 63u) { sb |= 4u; }
     r156 = ((r155).x & r149);
         r157 = i64_to_f(vec2<u32>(r156, 0u));
     r158 = select(r157 / r152, 0.0, r152 == 0.0);
-    r160 = i63(i64_shr((r81 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r159, 0u)));
-    if (vec2<u32>(r159, 0u).y != 0u || vec2<u32>(r159, 0u).x > 62u) { sb |= 4u; }
+    r160 = i64_shr(r81, vec2<u32>(r159, 0u));
+    if (vec2<u32>(r159, 0u).y != 0u || vec2<u32>(r159, 0u).x > 63u) { sb |= 4u; }
     r161 = ((r160).x & r149);
         r162 = i64_to_f(vec2<u32>(r161, 0u));
     r163 = select(r162 / r152, 0.0, r152 == 0.0);
@@ -564,8 +564,8 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
       r235 = (r233 * r234);
       r237 = (r235 + r236);
       r238 = i64_from_f(floor(r237));
-      r240 = i63(i64_shl(r238, vec2<u32>(r239, 0u)));
-      if (vec2<u32>(r239, 0u).y != 0u || vec2<u32>(r239, 0u).x > 62u) { sb |= 4u; }
+      r240 = i64_shl(r238, vec2<u32>(r239, 0u));
+      if (vec2<u32>(r239, 0u).y != 0u || vec2<u32>(r239, 0u).x > 63u) { sb |= 4u; }
       r242 = (r223 + r241);
             r243 = vec2<u32>(buffer2[r242 * 1u + 0u], 0u);
       r244 = bitcast<f32>((r243).x);
@@ -574,9 +574,9 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
       r247 = (r246 * r234);
       r248 = (r247 + r236);
       r249 = i64_from_f(floor(r248));
-      r251 = i63(i64_shl(r249, vec2<u32>(r250, 0u)));
-      if (vec2<u32>(r250, 0u).y != 0u || vec2<u32>(r250, 0u).x > 62u) { sb |= 4u; }
-      r252 = i63((r240 | r251));
+      r251 = i64_shl(r249, vec2<u32>(r250, 0u));
+      if (vec2<u32>(r250, 0u).y != 0u || vec2<u32>(r250, 0u).x > 63u) { sb |= 4u; }
+      r252 = (r240 | r251);
             r254 = (r223 + r253);
             r255 = vec2<u32>(buffer2[r254 * 1u + 0u], 0u);
       r256 = bitcast<f32>((r255).x);
@@ -585,42 +585,42 @@ fn marks_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u
       r259 = (r258 * r234);
       r260 = (r259 + r236);
       r261 = i64_from_f(floor(r260));
-      r263 = i63(i64_shl(r261, vec2<u32>(r262, 0u)));
-      if (vec2<u32>(r262, 0u).y != 0u || vec2<u32>(r262, 0u).x > 62u) { sb |= 4u; }
-      r265 = i63((r263 | vec2<u32>(r264, 0u)));
-            r266 = i63((r252 | r265));
+      r263 = i64_shl(r261, vec2<u32>(r262, 0u));
+      if (vec2<u32>(r262, 0u).y != 0u || vec2<u32>(r262, 0u).x > 63u) { sb |= 4u; }
+      r265 = (r263 | vec2<u32>(r264, 0u));
+            r266 = (r252 | r265);
           }
     r267 = select(r266, r227, r226 != 0.0);
-    r269 = i63(i64_shr((r267 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r268, 0u)));
-    if (vec2<u32>(r268, 0u).y != 0u || vec2<u32>(r268, 0u).x > 62u) { sb |= 4u; }
+    r269 = i64_shr(r267, vec2<u32>(r268, 0u));
+    if (vec2<u32>(r268, 0u).y != 0u || vec2<u32>(r268, 0u).x > 63u) { sb |= 4u; }
     r271 = ((r269).x & r270);
         r272 = i64_to_f(vec2<u32>(r271, 0u));
     r274 = select(r272 / r273, 0.0, r273 == 0.0);
-    r276 = i63(i64_shr((r267 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r275, 0u)));
-    if (vec2<u32>(r275, 0u).y != 0u || vec2<u32>(r275, 0u).x > 62u) { sb |= 4u; }
+    r276 = i64_shr(r267, vec2<u32>(r275, 0u));
+    if (vec2<u32>(r275, 0u).y != 0u || vec2<u32>(r275, 0u).x > 63u) { sb |= 4u; }
     r277 = ((r276).x & r270);
         r278 = i64_to_f(vec2<u32>(r277, 0u));
     r279 = select(r278 / r273, 0.0, r273 == 0.0);
-    r281 = i63(i64_shr((r267 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r280, 0u)));
-    if (vec2<u32>(r280, 0u).y != 0u || vec2<u32>(r280, 0u).x > 62u) { sb |= 4u; }
+    r281 = i64_shr(r267, vec2<u32>(r280, 0u));
+    if (vec2<u32>(r280, 0u).y != 0u || vec2<u32>(r280, 0u).x > 63u) { sb |= 4u; }
     r282 = ((r281).x & r270);
         r283 = i64_to_f(vec2<u32>(r282, 0u));
     r284 = select(r283 / r273, 0.0, r273 == 0.0);
     r285 = ((r267).x & r270);
         r286 = i64_to_f(vec2<u32>(r285, 0u));
     r287 = select(r286 / r273, 0.0, r273 == 0.0);
-    r288 = i63(i64_shr((r81 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r268, 0u)));
-    if (vec2<u32>(r268, 0u).y != 0u || vec2<u32>(r268, 0u).x > 62u) { sb |= 4u; }
+    r288 = i64_shr(r81, vec2<u32>(r268, 0u));
+    if (vec2<u32>(r268, 0u).y != 0u || vec2<u32>(r268, 0u).x > 63u) { sb |= 4u; }
     r289 = ((r288).x & r270);
         r290 = i64_to_f(vec2<u32>(r289, 0u));
     r291 = select(r290 / r273, 0.0, r273 == 0.0);
-    r292 = i63(i64_shr((r81 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r275, 0u)));
-    if (vec2<u32>(r275, 0u).y != 0u || vec2<u32>(r275, 0u).x > 62u) { sb |= 4u; }
+    r292 = i64_shr(r81, vec2<u32>(r275, 0u));
+    if (vec2<u32>(r275, 0u).y != 0u || vec2<u32>(r275, 0u).x > 63u) { sb |= 4u; }
     r293 = ((r292).x & r270);
         r294 = i64_to_f(vec2<u32>(r293, 0u));
     r295 = select(r294 / r273, 0.0, r273 == 0.0);
-    r296 = i63(i64_shr((r81 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r280, 0u)));
-    if (vec2<u32>(r280, 0u).y != 0u || vec2<u32>(r280, 0u).x > 62u) { sb |= 4u; }
+    r296 = i64_shr(r81, vec2<u32>(r280, 0u));
+    if (vec2<u32>(r280, 0u).y != 0u || vec2<u32>(r280, 0u).x > 63u) { sb |= 4u; }
     r297 = ((r296).x & r270);
         r298 = i64_to_f(vec2<u32>(r297, 0u));
     r299 = select(r298 / r273, 0.0, r273 == 0.0);
@@ -1095,18 +1095,18 @@ fn geometry_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid
   if (r7 != 0.0) {
     r37 = (r11 + r36);
         r38 = vec2<u32>(buffer0[r37 * 1u + 0u], 0u);
-    r40 = i63(i64_shr((r38 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r39, 0u)));
-    if (vec2<u32>(r39, 0u).y != 0u || vec2<u32>(r39, 0u).x > 62u) { sb |= 4u; }
+    r40 = i64_shr(r38, vec2<u32>(r39, 0u));
+    if (vec2<u32>(r39, 0u).y != 0u || vec2<u32>(r39, 0u).x > 63u) { sb |= 4u; }
     r42 = ((r40).x & r41);
         r43 = i64_to_f(vec2<u32>(r42, 0u));
     r45 = select(r43 / r44, 0.0, r44 == 0.0);
-    r47 = i63(i64_shr((r38 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r46, 0u)));
-    if (vec2<u32>(r46, 0u).y != 0u || vec2<u32>(r46, 0u).x > 62u) { sb |= 4u; }
+    r47 = i64_shr(r38, vec2<u32>(r46, 0u));
+    if (vec2<u32>(r46, 0u).y != 0u || vec2<u32>(r46, 0u).x > 63u) { sb |= 4u; }
     r48 = ((r47).x & r41);
         r49 = i64_to_f(vec2<u32>(r48, 0u));
     r50 = select(r49 / r44, 0.0, r44 == 0.0);
-    r52 = i63(i64_shr((r38 & vec2<u32>(0xffffffffu, 0x7fffffffu)), vec2<u32>(r51, 0u)));
-    if (vec2<u32>(r51, 0u).y != 0u || vec2<u32>(r51, 0u).x > 62u) { sb |= 4u; }
+    r52 = i64_shr(r38, vec2<u32>(r51, 0u));
+    if (vec2<u32>(r51, 0u).y != 0u || vec2<u32>(r51, 0u).x > 63u) { sb |= 4u; }
     r53 = ((r52).x & r41);
         r54 = i64_to_f(vec2<u32>(r53, 0u));
     r55 = select(r54 / r44, 0.0, r44 == 0.0);
@@ -1183,9 +1183,9 @@ fn quad_vertex(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u3
   let r86: u32 = 10u;
   let r89: u32 = 11u;
   let r0: vec2<u32> = vec2<u32>(iid * 4u + quad_corner[vid], 0u);
-  let r3: vec2<u32> = i63(i64_divmod(r0, vec2<u32>(r2, 0u), true));
+  let r3: vec2<u32> = i64_divmod(r0, vec2<u32>(r2, 0u), true);
   if (all(vec2<u32>(r2, 0u) == vec2<u32>(0u))) { sb |= 2u; }
-  let r4: vec2<u32> = i63(i64_divmod(r0, vec2<u32>(r2, 0u), false));
+  let r4: vec2<u32> = i64_divmod(r0, vec2<u32>(r2, 0u), false);
   if (all(vec2<u32>(r2, 0u) == vec2<u32>(0u))) { sb |= 2u; }
   let r6: u32 = ((r4).x * r5);
     let r8: f32 = select(0.0, 1.0, all(r3 == vec2<u32>(r7, 0u)));

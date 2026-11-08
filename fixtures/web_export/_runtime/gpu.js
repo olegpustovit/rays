@@ -38,7 +38,7 @@
 const WORKGROUP = 64;
 const fail = message => { throw Object.assign(new Error(message), { code: 'E_KERNEL' }); };
 const kernelStatus = flags => flags & 4
-  ? { code: 'E_RANGE', message: 'Integer shift count must be within [0, 62].' }
+  ? { code: 'E_RANGE', message: 'Integer shift count must be within [0, 63].' }
   : flags & 2 ? { code: 'E_RANGE', message: 'Integer division by zero.' }
   : flags & 8 ? { code: 'E_LIST_RANGE', message: 'nth index is out of range or is not a whole number.' }
   : flags & 32 ? { code: 'E_ARRAY_RANGE', message: 'array/slice needs a non-negative whole length.' }

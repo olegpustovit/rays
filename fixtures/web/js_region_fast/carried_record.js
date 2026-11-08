@@ -17,9 +17,9 @@ function region(inputs, uniforms, outputs, start, stop, outputBase = 0) {
     if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
     return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
   const shift64 = (ah, al, b, right) => {
-    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b < 0 || b > 63) fail('E_RANGE', 'Integer shift count must be within [0, 63].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
   const text = value => typeof value === 'string' ? value : fail('E_ARRAY_TYPE', 'Kernel input changed its packed element type.');
@@ -52,7 +52,7 @@ function region(inputs, uniforms, outputs, start, stop, outputBase = 0) {
     let r9h = 0, r9l = 0;
     r9h = 0; r9l = 5;
     let r10h = 0, r10l = 0;
-    r10l = div64(r8h, r8l, r9h, r9l, true); r10h = RH; r10h = (r10h << 1) >> 1;
+    r10l = div64(r8h, r8l, r9h, r9l, true); r10h = RH;
     let r11h = 0, r11l = 0;
     let r12h = 0, r12l = 0;
     let r13h = 0, r13l = 0;

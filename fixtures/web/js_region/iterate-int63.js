@@ -1,9 +1,9 @@
 function region(inputs, uniforms, outputs, start, stop) {
   const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
-  const wrap = x => BigInt.asIntN(63, x);
+  const wrap = x => BigInt.asIntN(64, x);
   const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Math.trunc(x)) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
   const divide = (a, b, mod) => b === 0n ? fail('E_RANGE', 'Integer division by zero.') : wrap(mod ? a % b : a / b);
-  const shift = (a, b, right) => b < 0n || b > 62n ? fail('E_RANGE', 'Integer shift count must be within [0, 62].') : wrap(right ? BigInt.asUintN(63, a) >> b : a << b);
+  const shift = (a, b, right) => b < 0n || b > 63n ? fail('E_RANGE', 'Integer shift count must be within [0, 63].') : wrap(right ? BigInt.asUintN(64, a) >> b : a << b);
   const in0 = inputs[0];
   const out0 = outputs[0];
   for (let i = start; i < stop; i++) {
@@ -53,13 +53,13 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r19;
     r19 = divide(r12, r15, true);
     let r20;
-    r20 = 62n;
+    r20 = 63n;
     let r21;
     r21 = wrap(r20 + r19);
     let r22;
     r22 = shift(r15, r21, false);
     let r23;
-    r23 = 4611686018427387903n;
+    r23 = 9223372036854775807n;
     let r24;
     r24 = wrap(r23 + r16);
     let r25;

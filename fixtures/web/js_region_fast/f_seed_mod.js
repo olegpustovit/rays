@@ -17,9 +17,9 @@ function region(inputs, uniforms, outputs, start, stop) {
     if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
     return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
   const shift64 = (ah, al, b, right) => {
-    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b < 0 || b > 63) fail('E_RANGE', 'Integer shift count must be within [0, 63].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
   const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');
@@ -46,7 +46,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r6h = 0, r6l = 0;
     r6h = 0; r6l = 1103515245;
     let r7h = 0, r7l = 0;
-    r7l = mul64(r5h, r5l, r6h, r6l); r7h = RH; r7h = (r7h << 1) >> 1;
+    r7l = mul64(r5h, r5l, r6h, r6l); r7h = RH;
     let r8;
     r8 = (r7h * 4294967296 + r7l);
     if (!Number.isFinite(r8)) return 1;
@@ -60,7 +60,7 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r12h = 0, r12l = 0;
     r12h = 1073741823; r12l = 4294967295;
     let r13h = 0, r13l = 0;
-    r13h = r11h & r12h; r13l = (r11l & r12l) >>> 0; r13h = (r13h << 1) >> 1;
+    r13h = r11h & r12h; r13l = (r11l & r12l) >>> 0;
     let r14;
     r14 = (r13h * 4294967296 + r13l);
     if (!Number.isFinite(r14)) return 1;

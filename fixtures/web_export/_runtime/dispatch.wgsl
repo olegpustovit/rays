@@ -2,7 +2,6 @@
 @group(0) @binding(1) var<storage, read> buffer1: array<u32>;
 @group(0) @binding(2) var<storage, read_write> buffer2: array<u32>;
 fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
-fn i63(a: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x, bitcast<u32>(bitcast<i32>(a.y << 1u) >> 1u)); }
 fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
 fn mulhi32(a: u32, b: u32) -> u32 {
   let a0 = a & 0xffffu; let a1 = a >> 16u; let b0 = b & 0xffffu; let b1 = b >> 16u;
@@ -13,6 +12,7 @@ fn mulhi32(a: u32, b: u32) -> u32 {
 fn i64_mul(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x * b.x, mulhi32(a.x, b.x) + a.x * b.y + a.y * b.x); }
 fn i64_neg(a: vec2<u32>) -> bool { return bitcast<i32>(a.y) < 0; }
 fn i64_lt(a: vec2<u32>, b: vec2<u32>) -> bool { let x = bitcast<i32>(a.y); let y = bitcast<i32>(b.y); return x < y || (x == y && a.x < b.x); }
+fn i64_ult(a: vec2<u32>, b: vec2<u32>) -> bool { return a.y < b.y || (a.y == b.y && a.x < b.x); }
 fn i64_abs(a: vec2<u32>) -> vec2<u32> { return select(a, i64_sub(vec2<u32>(0u, 0u), a), i64_neg(a)); }
 fn i64_to_f(a: vec2<u32>) -> f32 {
   if ((a.y == 0u && a.x < 0x80000000u) || (a.y == 0xffffffffu && a.x >= 0x80000000u)) { return f32(bitcast<i32>(a.x)); }
@@ -55,7 +55,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
     r = vec2<u32>(r.x << 1u, (r.y << 1u) | (r.x >> 31u));
     let bit = select((ua.x >> u32(k)) & 1u, (ua.y >> u32(k - 32)) & 1u, k >= 32);
     r.x = r.x | bit;
-    if (!i64_lt(r, ub) || bitcast<i32>(r.y) < 0) {
+    if (!i64_ult(r, ub)) {
       r = i64_sub(r, ub);
       if (k >= 32) { q.y = q.y | (1u << u32(k - 32)); } else { q.x = q.x | (1u << u32(k)); }
     }
@@ -88,18 +88,18 @@ fn dispatch_arguments(@builtin(local_invocation_index) lid: u32, @builtin(global
   let r10: u32 = ((r9).x & r7);
     let r11: vec2<u32> = vec2<u32>(buffer1[r4 * 1u + 0u], 0u);
   let r12: u32 = ((r11).x & r7);
-    let r13: vec2<u32> = i63(i64_mul(vec2<u32>(r10, 0u), vec2<u32>(r12, 0u)));
+    let r13: vec2<u32> = i64_mul(vec2<u32>(r10, 0u), vec2<u32>(r12, 0u));
     let r15: vec2<u32> = vec2<u32>(buffer1[r14 * 1u + 0u], 0u);
   let r16: u32 = ((r15).x & r7);
-    let r17: vec2<u32> = i63(i64_divmod(r13, vec2<u32>(r16, 0u), false));
+    let r17: vec2<u32> = i64_divmod(r13, vec2<u32>(r16, 0u), false);
   if (all(vec2<u32>(r16, 0u) == vec2<u32>(0u))) { sb |= 2u; }
   let r18: f32 = select(0.0, 1.0, i64_lt(vec2<u32>(r8, 0u), r17));
   let r19: vec2<u32> = select(r17, vec2<u32>(r8, 0u), r18 != 0.0);
   let r21: vec2<u32> = vec2<u32>(buffer1[r20 * 1u + 0u], 0u);
   let r22: u32 = ((r21).x & r7);
-    let r23: vec2<u32> = i63(i64_sub(vec2<u32>(r22, 0u), vec2<u32>(r4, 0u)));
-    let r24: vec2<u32> = i63(i64_add(r19, r23));
-    let r25: vec2<u32> = i63(i64_divmod(r24, vec2<u32>(r22, 0u), false));
+    let r23: vec2<u32> = i64_sub(vec2<u32>(r22, 0u), vec2<u32>(r4, 0u));
+    let r24: vec2<u32> = i64_add(r19, r23);
+    let r25: vec2<u32> = i64_divmod(r24, vec2<u32>(r22, 0u), false);
   if (all(vec2<u32>(r22, 0u) == vec2<u32>(0u))) { sb |= 2u; }
   let r26: f32 = select(0.0, 1.0, all(r0 == vec2<u32>(r5, 0u)));
   if (r26 != 0.0) {

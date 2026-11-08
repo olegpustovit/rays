@@ -296,10 +296,10 @@ impl Printer {
                     Integer::Ishl => lo(&format!("shift64({}, {}, {}, false)", h(a), l(a), self.numeric(b))),
                     Integer::Ishr => lo(&format!("shift64({}, {}, {}, true)", h(a), l(a), self.numeric(b))),
                 };
-                format!("{head} r{slot}h = (r{slot}h << 1) >> 1;")
+                head
             }
             Instruction::Int_abs(a) => format!(
-                "if ({} < 0) {{ r{slot}l = sub64(0, 0, {}, {}); r{slot}h = RH; }} else {{ r{slot}h = {}; r{slot}l = {}; }} r{slot}h = (r{slot}h << 1) >> 1;",
+                "if ({} < 0) {{ r{slot}l = sub64(0, 0, {}, {}); r{slot}h = RH; }} else {{ r{slot}h = {}; r{slot}l = {}; }}",
                 h(*a),
                 h(*a),
                 l(*a),
@@ -519,7 +519,7 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
     if fast {
         p.add(FAST64);
     } else {
-        p.add("  const wrap = x => BigInt.asIntN(63, x);\n");
+        p.add("  const wrap = x => BigInt.asIntN(64, x);\n");
     }
     if gathered {
         p.add("  const tables = new Map();\n");
@@ -559,14 +559,14 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
         p.add("  const noise = (...args) => { try { return noise3(...args); } catch (e) { if (e?.code === 'E_NONFINITE') return NaN; throw e; } };\n");
     }
     if exists(&|i| matches!(i, Instruction::Rand_at(..))) {
-        p.add("  const randAt = (seed, index) => { let x = wrap(seed ^ wrap(wrap(index + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n)); x = wrap(x ^ (BigInt.asUintN(63, x) >> 30n)); x = wrap(x * 0x3f58476d1ce4e5b9n); x = wrap(x ^ (BigInt.asUintN(63, x) >> 27n)); x = wrap(x * 0x14d049bb133111ebn); x = wrap(x ^ (BigInt.asUintN(63, x) >> 31n)); return Number(BigInt.asUintN(63, x) >> 10n) / 9007199254740992; };\n");
+        p.add("  const w63 = x => BigInt.asIntN(63, x);\n  const randAt = (seed, index) => { let x = w63(w63(seed) ^ w63(w63(w63(index) + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n)); x = w63(x ^ (BigInt.asUintN(63, x) >> 30n)); x = w63(x * 0x3f58476d1ce4e5b9n); x = w63(x ^ (BigInt.asUintN(63, x) >> 27n)); x = w63(x * 0x14d049bb133111ebn); x = w63(x ^ (BigInt.asUintN(63, x) >> 31n)); return Number(BigInt.asUintN(63, x) >> 10n) / 9007199254740992; };\n");
     }
     if fast {
         p.add("  const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? Math.trunc(x) : fail('E_NONFINITE', name + ' produced a nonfinite value.');\n");
     } else {
         p.add("  const convert = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Math.trunc(x)) : fail('E_NONFINITE', name + ' produced a nonfinite value.');\n");
         p.add("  const divide = (a, b, mod) => b === 0n ? fail('E_RANGE', 'Integer division by zero.') : wrap(mod ? a % b : a / b);\n");
-        p.add("  const shift = (a, b, right) => b < 0n || b > 62n ? fail('E_RANGE', 'Integer shift count must be within [0, 62].') : wrap(right ? BigInt.asUintN(63, a) >> b : a << b);\n");
+        p.add("  const shift = (a, b, right) => b < 0n || b > 63n ? fail('E_RANGE', 'Integer shift count must be within [0, 63].') : wrap(right ? BigInt.asUintN(64, a) >> b : a << b);\n");
     }
     for k in 0..view.widths.len() {
         let _ = writeln!(p.line, "  const in{k} = inputs[{k}];");
@@ -1582,9 +1582,9 @@ const FAST64: &str = r##"  let RH = 0;
     if (Math.abs(a) <= 9007199254740991 && Math.abs(b) <= 9007199254740991) return split(mod ? a % b : Math.trunc(a / b));
     return unbig(mod ? big(ah, al) % big(bh, bl) : big(ah, al) / big(bh, bl)); };
   const shift64 = (ah, al, b, right) => {
-    if (b < 0 || b > 62) fail('E_RANGE', 'Integer shift count must be within [0, 62].');
+    if (b < 0 || b > 63) fail('E_RANGE', 'Integer shift count must be within [0, 63].');
     if (b === 0) { RH = ah; return al; }
-    if (right) { ah &= 0x7fffffff; if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
+    if (right) { if (b >= 32) { RH = 0; return ah >>> (b - 32); } RH = (ah >>> b) | 0; return ((al >>> b) | (ah << (32 - b))) >>> 0; }
     if (b >= 32) { RH = (al << (b - 32)) | 0; return 0; }
     RH = ((ah << b) | (al >>> (32 - b))) | 0; return (al << b) >>> 0; };
 "##;

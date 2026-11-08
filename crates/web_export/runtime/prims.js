@@ -64,7 +64,9 @@ const fin = (name, x) => Number.isFinite(x) ? x : err('E_NONFINITE', `${name} pr
 const toInt = (name, x) => Number.isFinite(x) && Math.abs(x) < 4e18 ? BigInt(Math.trunc(x))
   : err('E_NONFINITE', `${name} produced a nonfinite value.`);
 const intOf = v => typeof v === 'bigint' ? v : toInt('int', Math.floor(num(v) + 0.5));
-const wrap = n => BigInt.asIntN(63, n);
+const wrap = n => BigInt.asIntN(64, n);
+// rand/at and the geometry hashes keep the 63-bit domain of the OCaml port: seeds from 2^62 alias.
+const w63 = n => BigInt.asIntN(63, n);
 const isVec = v => v instanceof Float64Array;
 const isNum = v => typeof v === 'bigint' || typeof v === 'number';
 
@@ -186,10 +188,10 @@ export const int_mod = (a, b) => { const [x, y] = nonzero(a, b); return wrap(x %
 export const int_and = (a, b) => wrap(operand(a) & operand(b));
 export const int_or = (a, b) => wrap(operand(a) | operand(b));
 export const int_xor = (a, b) => wrap(operand(a) ^ operand(b));
-const shiftCount = b => { const n = operand(b); return n < 0n || n > 62n
-  ? err('E_RANGE', 'Integer shift count must be within [0, 62].') : n; };
+const shiftCount = b => { const n = operand(b); return n < 0n || n > 63n
+  ? err('E_RANGE', 'Integer shift count must be within [0, 63].') : n; };
 export const int_shl = (a, b) => wrap(operand(a) << shiftCount(b));
-export const int_shr = (a, b) => wrap(BigInt.asUintN(63, operand(a)) >> shiftCount(b));
+export const int_shr = (a, b) => wrap(BigInt.asUintN(64, operand(a)) >> shiftCount(b));
 export const int_lt = (a, b) => operand(a) < operand(b);
 export const int_le = (a, b) => operand(a) <= operand(b);
 export const int_gt = (a, b) => operand(a) > operand(b);
@@ -198,12 +200,12 @@ export const int_eq = (a, b) => operand(a) === operand(b);
 export function rand_at(seed, index) {
   if (typeof seed !== 'bigint' || typeof index !== 'bigint' || wrap(seed) !== seed || wrap(index) !== index)
     err('E_TYPE', 'rand/at needs integer seed and index.');
-  let x = wrap(seed ^ wrap(wrap(index + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n));
-  x = wrap(x ^ (BigInt.asUintN(63, x) >> 30n));
-  x = wrap(x * 0x3f58476d1ce4e5b9n);
-  x = wrap(x ^ (BigInt.asUintN(63, x) >> 27n));
-  x = wrap(x * 0x14d049bb133111ebn);
-  x = wrap(x ^ (BigInt.asUintN(63, x) >> 31n));
+  let x = w63(w63(seed) ^ w63(w63(w63(index) + 0x11b54a32d192ed03n) * 0x1e3779b97f4a7c15n));
+  x = w63(x ^ (BigInt.asUintN(63, x) >> 30n));
+  x = w63(x * 0x3f58476d1ce4e5b9n);
+  x = w63(x ^ (BigInt.asUintN(63, x) >> 27n));
+  x = w63(x * 0x14d049bb133111ebn);
+  x = w63(x ^ (BigInt.asUintN(63, x) >> 31n));
   return Number(BigInt.asUintN(63, x) >> 10n) / 9007199254740992;
 }
 
@@ -316,7 +318,7 @@ export function text_to_int(text) {
   if (typeof text !== 'string') err('E_TYPE', 'Expected text.');
   const s = tokenTrim(text);
   const value = /^[+-]?\d+$/.test(s) ? BigInt(s) : null;
-  const valid = value !== null && value === BigInt.asIntN(63, value);
+  const valid = value !== null && value === BigInt.asIntN(64, value);
   return new Map([['value', valid ? value : 0n], ['valid', valid]]);
 }
 export function text_table_encode(rows) {
@@ -813,7 +815,7 @@ export function sop_context_seed(namespace, context) {
   for (const byte of textBytes(`${namespace}:${context.get('label')}`))
     identity = BigInt.asUintN(64, (identity ^ BigInt(byte)) * 0x100000001b3n);
   const mixed = BigInt.asUintN(64, BigInt(context.get('seed')) ^ (identity * 0x9e3779b97f4a7c15n));
-  return BigInt.asIntN(63, mixed ^ (mixed >> 32n));
+  return w63(mixed ^ (mixed >> 32n));
 }
 
 function attributePattern(source, rewriteLabel = null) {

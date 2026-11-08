@@ -5,7 +5,7 @@
 @group(0) @binding(3) var<storage, read_write> status: atomic<u32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
 @compute @workgroup_size(64)
-fn kernel_52bcaa569f0e7ba3f2797d87120cf88f(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_f782dfbf86d0da88bfb58daadef0f0b6(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= uniforms[0].x) { return; }
   var sb: u32 = 0u;
@@ -53,11 +53,12 @@ fn kernel_52bcaa569f0e7ba3f2797d87120cf88f(@builtin(global_invocation_id) gid: v
   let r27: f32 = bitcast<f32>(0x3f000000u);
   let r28: f32 = (r26 - r27);
   if (!wfinite(r28)) { sb |= 1u; }
-  let r29: f32 = bitcast<f32>(0x43960000u);
+  let r29: f32 = bitcast<f32>(uniforms[0].y);
+  if (!wfinite(r29)) { sb |= 1u; }
   let r30: f32 = (r19 * r29);
   if (!wfinite(r30)) { sb |= 1u; }
   let r31: f32 = bitcast<f32>(0x3dcccccdu);
-  let r32: f32 = bitcast<f32>(uniforms[0].y);
+  let r32: f32 = bitcast<f32>(uniforms[0].z);
   if (!wfinite(r32)) { sb |= 1u; }
   let r33: f32 = bitcast<f32>(0x40c00000u);
   let r34: f32 = (r19 * r33);

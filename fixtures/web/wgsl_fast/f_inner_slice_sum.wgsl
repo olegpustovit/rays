@@ -1,4 +1,4 @@
-kernel_0857370fb9e61beb90ccfecdcc231429
+kernel_c6f8f37f0f201b6506b40c7637d2da54
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 2>;
@@ -8,7 +8,6 @@ kernel_0857370fb9e61beb90ccfecdcc231429
 @group(0) @binding(6) var<storage, read_write> count_out: array<u32>;
 fn wfinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }
 fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
-fn i63(a: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x, bitcast<u32>(bitcast<i32>(a.y << 1u) >> 1u)); }
 fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
 fn mulhi32(a: u32, b: u32) -> u32 {
   let a0 = a & 0xffffu; let a1 = a >> 16u; let b0 = b & 0xffffu; let b1 = b >> 16u;
@@ -19,6 +18,7 @@ fn mulhi32(a: u32, b: u32) -> u32 {
 fn i64_mul(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x * b.x, mulhi32(a.x, b.x) + a.x * b.y + a.y * b.x); }
 fn i64_neg(a: vec2<u32>) -> bool { return bitcast<i32>(a.y) < 0; }
 fn i64_lt(a: vec2<u32>, b: vec2<u32>) -> bool { let x = bitcast<i32>(a.y); let y = bitcast<i32>(b.y); return x < y || (x == y && a.x < b.x); }
+fn i64_ult(a: vec2<u32>, b: vec2<u32>) -> bool { return a.y < b.y || (a.y == b.y && a.x < b.x); }
 fn i64_abs(a: vec2<u32>) -> vec2<u32> { return select(a, i64_sub(vec2<u32>(0u, 0u), a), i64_neg(a)); }
 fn i64_to_f(a: vec2<u32>) -> f32 {
   if ((a.y == 0u && a.x < 0x80000000u) || (a.y == 0xffffffffu && a.x >= 0x80000000u)) { return f32(bitcast<i32>(a.x)); }
@@ -61,7 +61,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
     r = vec2<u32>(r.x << 1u, (r.y << 1u) | (r.x >> 31u));
     let bit = select((ua.x >> u32(k)) & 1u, (ua.y >> u32(k - 32)) & 1u, k >= 32);
     r.x = r.x | bit;
-    if (!i64_lt(r, ub) || bitcast<i32>(r.y) < 0) {
+    if (!i64_ult(r, ub)) {
       r = i64_sub(r, ub);
       if (k >= 32) { q.y = q.y | (1u << u32(k - 32)); } else { q.x = q.x | (1u << u32(k)); }
     }
@@ -70,7 +70,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_0857370fb9e61beb90ccfecdcc231429(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_c6f8f37f0f201b6506b40c7637d2da54(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].z != 0u) { n = min(n, count_in[0] * uniforms[1].x / uniforms[1].y); }
@@ -89,7 +89,7 @@ fn kernel_0857370fb9e61beb90ccfecdcc231429(@builtin(global_invocation_id) gid: v
   let r24: u32 = 2u;
   var r26: vec2<u32> = vec2<u32>(0u, 0u);
   let r0: vec2<u32> = i64_from_f(input0[i]);
-  let r3: vec2<u32> = i63(i64_divmod(r0, vec2<u32>(r2, 0u), true));
+  let r3: vec2<u32> = i64_divmod(r0, vec2<u32>(r2, 0u), true);
   if (all(vec2<u32>(r2, 0u) == vec2<u32>(0u))) { sb |= 2u; }
   let r4: vec2<u32> = i64_from_f(bitcast<f32>(uniforms[0].y));
   let r6: f32 = select(0.0, 1.0, !i64_lt(r5, r3));
@@ -100,7 +100,7 @@ fn kernel_0857370fb9e61beb90ccfecdcc231429(@builtin(global_invocation_id) gid: v
     sb |= 32u;
   }
   let r11: vec2<u32> = select(r10, r3, r9 != 0.0);
-  let r12: vec2<u32> = i63(i64_sub(r4, r11));
+  let r12: vec2<u32> = i64_sub(r4, r11);
     let r14: f32 = select(0.0, 1.0, !i64_lt(r12, vec2<u32>(r13, 0u)));
   let r15: f32 = select(0.0, 1.0, !i64_lt(r4, r11));
   let r16: f32 = select(0.0, 1.0, (r15 != 0.0 && r14 != 0.0));
@@ -121,9 +121,9 @@ fn kernel_0857370fb9e61beb90ccfecdcc231429(@builtin(global_invocation_id) gid: v
     if (r16 != 0.0) {
     r26 = i64_from_f(gather0[u32(clamp(i32(bitcast<i32>(r25)), 0, max(i32(uniforms[0].w) - 1, 0))) * 1u + 0u]);
   }
-  let r27: vec2<u32> = i63(i64_add(r18, r20));
-    let r28: vec2<u32> = i63(i64_add(r27, r23));
-    let r29: vec2<u32> = i63(i64_add(r28, r26));
+  let r27: vec2<u32> = i64_add(r18, r20);
+    let r28: vec2<u32> = i64_add(r27, r23);
+    let r29: vec2<u32> = i64_add(r28, r26);
     let r30: vec2<u32> = i64_from_f(bitcast<f32>(uniforms[0].z));
   let r31: f32 = i64_to_f(r29);
   let r32: f32 = i64_to_f(r30);

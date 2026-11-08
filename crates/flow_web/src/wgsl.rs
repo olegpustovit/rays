@@ -191,7 +191,7 @@ fn register(index: i64) -> String { format!("r{index}") }
 fn integer_status(operation: Integer, b: &str) -> String {
     match operation {
         Integer::Idiv | Integer::Imod => format!("if (all({b} == vec2<u32>(0u))) {{ sb |= 2u; }}\n"),
-        Integer::Ishl | Integer::Ishr => format!("if ({b}.y != 0u || {b}.x > 62u) {{ sb |= 4u; }}\n"),
+        Integer::Ishl | Integer::Ishr => format!("if ({b}.y != 0u || {b}.x > 63u) {{ sb |= 4u; }}\n"),
         _ => String::new(),
     }
 }
@@ -419,7 +419,6 @@ pub fn kernel(image: bool, program: &packed::T) -> Result<Wgsl, Diagnostic> {
 /// `long`s: wrapping add, sub and mul, truncating division (`0` for a zero divisor), logical right
 /// shift, shifts by `n & 63`.
 pub const INT64: &str = "fn i64_add(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { let lo = a.x + b.x; return vec2<u32>(lo, a.y + b.y + select(0u, 1u, lo < a.x)); }
-fn i63(a: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x, bitcast<u32>(bitcast<i32>(a.y << 1u) >> 1u)); }
 fn i64_sub(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x - b.x, a.y - b.y - select(0u, 1u, a.x < b.x)); }
 fn mulhi32(a: u32, b: u32) -> u32 {
   let a0 = a & 0xffffu; let a1 = a >> 16u; let b0 = b & 0xffffu; let b1 = b >> 16u;
@@ -430,6 +429,7 @@ fn mulhi32(a: u32, b: u32) -> u32 {
 fn i64_mul(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { return vec2<u32>(a.x * b.x, mulhi32(a.x, b.x) + a.x * b.y + a.y * b.x); }
 fn i64_neg(a: vec2<u32>) -> bool { return bitcast<i32>(a.y) < 0; }
 fn i64_lt(a: vec2<u32>, b: vec2<u32>) -> bool { let x = bitcast<i32>(a.y); let y = bitcast<i32>(b.y); return x < y || (x == y && a.x < b.x); }
+fn i64_ult(a: vec2<u32>, b: vec2<u32>) -> bool { return a.y < b.y || (a.y == b.y && a.x < b.x); }
 fn i64_abs(a: vec2<u32>) -> vec2<u32> { return select(a, i64_sub(vec2<u32>(0u, 0u), a), i64_neg(a)); }
 fn i64_to_f(a: vec2<u32>) -> f32 {
   if ((a.y == 0u && a.x < 0x80000000u) || (a.y == 0xffffffffu && a.x >= 0x80000000u)) { return f32(bitcast<i32>(a.x)); }
@@ -472,7 +472,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
     r = vec2<u32>(r.x << 1u, (r.y << 1u) | (r.x >> 31u));
     let bit = select((ua.x >> u32(k)) & 1u, (ua.y >> u32(k - 32)) & 1u, k >= 32);
     r.x = r.x | bit;
-    if (!i64_lt(r, ub) || bitcast<i32>(r.y) < 0) {
+    if (!i64_ult(r, ub)) {
       r = i64_sub(r, ub);
       if (k >= 32) { q.y = q.y | (1u << u32(k - 32)); } else { q.x = q.x | (1u << u32(k)); }
     }
@@ -806,7 +806,7 @@ impl Fast {
                 Instruction::Int_frame(_) => format!("i64_from_f(bitcast<f32>({}))", word(layout.frames[slot])),
                 Instruction::Int_binary(op, a, b) => {
                     let (a, b) = (self.int_of(*a), self.int_of(*b));
-                    let inner = match op {
+                    match op {
                         Integer::Iadd => format!("i64_add({a}, {b})"),
                         Integer::Isub => format!("i64_sub({a}, {b})"),
                         Integer::Imul => format!("i64_mul({a}, {b})"),
@@ -816,9 +816,8 @@ impl Fast {
                         Integer::Ior => format!("({a} | {b})"),
                         Integer::Ixor => format!("({a} ^ {b})"),
                         Integer::Ishl => format!("i64_shl({a}, {b})"),
-                        Integer::Ishr => format!("i64_shr(({a} & vec2<u32>(0xffffffffu, 0x7fffffffu)), {b})"),
-                    };
-                    format!("i63({inner})")
+                        Integer::Ishr => format!("i64_shr({a}, {b})"),
+                    }
                 }
                 Instruction::Int_compare(op, a, b) => {
                     let (a, b) = (self.int_of(*a), self.int_of(*b));
@@ -830,7 +829,7 @@ impl Fast {
                         Comparison::Ieq => format!("all({a} == {b})"),
                     })
                 }
-                Instruction::Int_abs(a) => format!("i63(i64_abs({}))", self.int_of(*a)),
+                Instruction::Int_abs(a) => format!("i64_abs({})", self.int_of(*a)),
                 Instruction::Int_select(condition, yes, no) => format!("select({}, {}, {} != 0.0)", self.int_of(*no), self.int_of(*yes), self.float_of(*condition)),
                 Instruction::Convert(Conversion::ToFloat, a) => self.float_of(*a),
                 Instruction::Convert(Conversion::Truncate | Conversion::CoerceInt | Conversion::IntegerResult(_), a) => self.int_of(*a),

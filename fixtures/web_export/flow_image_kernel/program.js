@@ -1,4 +1,4 @@
-import * as image0 from "./image0-22341d0adb75980c7afacd2d876ad303.js";
+import * as image0 from "./image0-258dde90175bb8605028be956ca780f3.js";
 // Rays web export: frame program. frame(input, state, rt); see crates/flow_web/src/js.rs.
 let K;
 const num = (rt, v) => typeof v === "number" ? v : typeof v === "bigint" ? Number(v)
