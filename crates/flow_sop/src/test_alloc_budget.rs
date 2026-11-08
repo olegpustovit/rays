@@ -66,8 +66,8 @@ fn subdivide_peak_bytes() {
     assert!(peak.get() <= LIMIT, "subdivide peak {} > {LIMIT}", peak.get());
 }
 
-// 29_629_590 B measured after M18 (34_086_038 B before C3/M18): quad grid 128x128, one Catmull-Clark pass.
-const LIMIT: i64 = 29_700_000;
+// 29_101_694 B after C4 (29_629_590 after M18; 34_086_038 before C3/M18): 128x128 quads, one Catmull-Clark pass.
+const LIMIT: i64 = 29_150_000;
 
 /// (c) Flow read then write of P, Cd, a float, an int and a text attribute on a 100k-point grid, on
 /// one thread: peak live bytes and allocation count above the baseline.
@@ -133,3 +133,72 @@ fn text_attribute_million_rows() {
 // Measured: 267 B / 8 allocs for 1M rows (Arc clones; the rows are never copied).
 const TEXT_PEAK: i64 = 400;
 const TEXT_ALLOCS: u64 = 8;
+
+// Measured: 49_180 allocs / 82_472 peak bytes after warming the evaluator caches.
+/// (a) The reference walker: field access, list destructuring and a captured closure in a loop.
+#[test]
+fn walker_loop_allocations() {
+    let forms = flow_syntax::syntax::parse("(workspace budget
+        (graph g :context host
+            (let* [offset {:step (+ t 1.)}
+                   f (fn [[x y]] (+ (+ x y) offset.step))]
+                (sum [i (range 1024)]
+                    (let* [row {:n i :next (+ i 1)}]
+                        (f (list row.n row.next)))))))").unwrap();
+    let catalog = flow_check::catalog::Catalog { version: 1, kinds: vec![] };
+    let (workspace, diagnostics) = flow_check::workspace::check(&[], false, false, None, &catalog, &forms);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let evaluated = flow_eval::static_eval(&workspace.unwrap()).unwrap();
+    let residual = &evaluated.results[0].1;
+    assert!(matches!(residual, flow_syntax::value::Value::Residual(_)));
+    let live = input::at_time(0.5);
+    // Warm route and pattern caches; only execution belongs to the steady-state budget.
+    flow_eval::Host::force_reference(residual, &live, None, None, None).unwrap();
+    mem_sys::local_reset();
+    let result = flow_eval::Host::force_reference(residual, &live, None, None, None).unwrap();
+    let (allocs, peak) = (mem_sys::local_alloc_count(), mem_sys::local_peak_bytes());
+    assert_eq!(result, flow_syntax::value::Value::Float(1_050_112.0));
+    eprintln!("walker loop: {allocs} allocs / {peak} peak bytes");
+    assert!(allocs <= 49_200, "walker loop: {allocs} allocations");
+    assert!(peak <= 83_000, "walker loop: {peak} peak bytes");
+}
+
+// Measured: 12 allocs / 164_634 peak bytes; the 4096 stores allocate no per-store copies.
+/// (b) An unpublished 4096-element builder retained in two locals: each store must reuse its buffer.
+#[test]
+fn aliased_store_allocations() {
+    use flow_ir::{core_exec, core_ir as c};
+    use flow_syntax::{ty::Ty, value::Value};
+    let source = c::Source { site: vec!["store-budget".into()], owner: vec![], instance: 0, prefix: vec![], iter: vec![], span: None };
+    let statement = |id, node| c::Statement { id, source: source.clone(), node };
+    let list = Ty::List(Box::new(Ty::Int));
+    let program = c::Program {
+        constants: vec![c::Literal::Int(4096), c::Literal::Int(0)],
+        locals: vec![Ty::Int, list.clone(), list.clone(), Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Record(vec![("original".into(), list.clone()), ("alias".into(), list)])],
+        body: vec![
+            statement(0, c::StatementNode::Assign(0, c::Expr::Constant(0))),
+            statement(1, c::StatementNode::Assign(1, c::Expr::Prim(c::Primitive::Sequence_build, vec![("count".into(), 0)]))),
+            statement(2, c::StatementNode::Assign(2, c::Expr::Local(1))),
+            statement(3, c::StatementNode::Assign(3, c::Expr::Constant(1))),
+            statement(4, c::StatementNode::Counted {
+                first: 3, last: 0, count: 4, index: 5, item: 6, limit: 4096, stop: None, init: vec![],
+                body: vec![statement(5, c::StatementNode::Store { sequence: 2, index: 5, value: 6 })],
+            }),
+            statement(6, c::StatementNode::Assign(7, c::Expr::Fields(vec![("original".into(), 1), ("alias".into(), 2)]))),
+        ],
+        results: vec![7], state_slots: vec![], regions: vec![], call_slots: 0,
+    };
+    let prepared = core_exec::prepare(&program, false, false, &Default::default(), false);
+    let options = core_exec::Options { strict: true, ..Default::default() };
+    mem_sys::local_reset();
+    let output = core_exec::execute(&prepared, &input::at_time(0.0), &options).unwrap();
+    let (allocs, peak) = (mem_sys::local_alloc_count(), mem_sys::local_peak_bytes());
+    let Value::Record(fields) = output else { panic!("expected both aliases") };
+    let (Value::List(original), Value::List(alias)) = (&fields[0].1, &fields[1].1) else { panic!("expected lists") };
+    assert!(std::sync::Arc::ptr_eq(original, alias));
+    assert_eq!(original.len(), 4096);
+    assert!(original.iter().enumerate().all(|(i, value)| *value == Value::Int(i as i64)));
+    eprintln!("aliased store: {allocs} allocs / {peak} peak bytes");
+    assert!(allocs <= 16, "aliased store: {allocs} allocations");
+    assert!(peak <= 165_000, "aliased store: {peak} peak bytes");
+}

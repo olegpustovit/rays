@@ -74,7 +74,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 - `flow_ir test_static_map::sop_deferral`: root cause `4ed6baf8` (constructor deferral); test rewritten (`a3e8c6df`); `StaticMap.deferred` now effectively dead.
 - Unconfirmed after D4: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` (E_NONFINITE) and `flow_ir test_core_operators::text_arrays_part_*` near the 5 s limit; `rays_editor` full suite and `pxui_graph --features test-hooks` unverified after C6.
 - Remesh macOS golden switched to the Windows hash constant (`3107f153`); cause (libm) unverified.
-- Per-cook guards: (c) round trip and (d) subdivide peak and 1M-text exist in `flow_sop/src/test_alloc_budget.rs`; (a) walker and (b) aliased store guards **not added**. Per-frame guards `alloc_budget_basic`/`alloc_budget_empty` exist (`e74d3f1d`; empty-editor limit 4650, plan said ~1200 - plan figure does not match full-layout editor).
+- Per-cook guards (a) walker, (b) aliased 4096-element store, (c) round trip, (d) subdivide peak and 1M-text now exist in `flow_sop/src/test_alloc_budget.rs`. The walker uses `Host::force_reference`, bypassing compiled execution. The store guard was verified with a temporary negative control: disabling alias release produced 8,204 allocations and failed the guard; restored code uses 12. All five pass. Per-frame guards `alloc_budget_basic`/`alloc_budget_empty` exist (`e74d3f1d`; empty-editor limit 4650, plan said ~1200 - plan figure does not match full-layout editor).
 - Not measured: B-wave compile-time gains, bench_core before/after for D4 (PackedMerge reported no regression sign only from one noisy run).
 - `gate deps`: 28 pre-existing violations, none new.
 - Throwaway worktrees `/tmp/rays-m13b`, `/tmp/rays-base`, `/tmp/rays-snap` can be deleted.
@@ -127,6 +127,8 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: Wave M missing guards added. Walker: 49,180 allocations / 82,472 peak bytes, limits 49,200 / 83,000; aliased store: 12 / 164,634, limits 16 / 165,000. Subdivide peak tightened from 29,700,000 to 29,150,000 B after C4 (measured 29,101,694 B). `cargo t -p flow_sop test_alloc_budget -- --nocapture`: 5 pass / 6.445 s, slowest 0.112 s. Negative-control mutation was restored before final run; `core_exec.rs` has no diff. `git diff --check`: clean.
 
 - 2026-11-08: C4 follow-up: `cargo t -p rdk_ops subdivide` baseline 14 pass / 22.065 s; after change 15 pass / 11.228 s (slowest 0.031 s). `cargo t -p rdk_ops -p sop`: 319 pass / 13.512 s (slowest `attribute_interpolate::tests::parallel_exactness_at_scale`, 1.199 s). `cargo t -p flow_sop test_alloc_budget`: 3 pass / 40.894 s including 40.07 s rebuild (slowest 0.136 s); existing bounds unchanged. `cargo check -p rdk_ops -p sop -p flow_sop`: pass / 18.47 s including build-lock wait, pre-existing warnings only. `git diff --check`: clean. No goldens or boundaries changed.
 
