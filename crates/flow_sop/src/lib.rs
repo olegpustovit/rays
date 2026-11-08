@@ -29,3 +29,6 @@ mod test_encoded_parameters;
 #[cfg(test)]
 #[path = "test_catalog_ops.rs"]
 mod test_catalog_ops;
+#[cfg(test)]
+#[path = "test_alloc_budget.rs"]
+mod test_alloc_budget;
