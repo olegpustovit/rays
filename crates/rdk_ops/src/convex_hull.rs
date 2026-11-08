@@ -420,23 +420,16 @@ fn assign_points(
     queue: &mut VecDeque<usize>,
 ) -> Result<(), error::T> {
     let point_count = points.len();
-    let assignments: Vec<AtomicI64> = (0..point_count).map(|_| AtomicI64::new(-1)).collect();
+    let mut assignments = vec![-1_i64; point_count];
     {
         let faces_ref: &Faces = faces;
-        let assign = |index: i64| -> Result<(), error::T> {
+        support::par_fill(cancel_value, grain, &mut assignments, &|index| {
             let point = points[index as usize];
-            for &face in face_ids {
-                if visible(p, faces_ref, face, point) {
-                    assignments[index as usize].store(face as i64, atomic::Ordering::Relaxed);
-                    break;
-                }
-            }
-            Ok(())
-        };
-        support::parallel_for(cancel_value, grain, point_count as i64, &assign)?;
+            Ok(face_ids.iter().find(|&&face| visible(p, faces_ref, face, point)).map_or(-1, |&face| face as i64))
+        })?;
     }
     for index in 0..point_count {
-        let face = assignments[index].load(atomic::Ordering::Relaxed);
+        let face = assignments[index];
         if face >= 0 {
             faces.outside[face as usize].push(points[index]);
         }

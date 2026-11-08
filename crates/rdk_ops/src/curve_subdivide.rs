@@ -3,8 +3,7 @@
 //! OCaml raises `Error.Fail`, `Invalid_argument` and `Cancel.Cancelled` out of `iterate`; here each
 //! is an `error::T`: a failure has code `invalid_parameter` and the OCaml message, a cancellation
 //! has code `cancelled`.
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology,
@@ -51,82 +50,24 @@ fn checked_add(name: &str, left: i64, right: i64) -> Result<i64, error::T> {
     Ok(left + right)
 }
 
-/// Output arrays written by index from the pool; joined into plain vectors afterwards.
-struct Ints(Vec<AtomicI64>);
-struct Floats(Vec<AtomicU64>);
-
-impl Ints {
-    fn new(count: usize, fill: i64) -> Ints {
-        Ints((0..count).map(|_| AtomicI64::new(fill)).collect())
-    }
-    fn set(&self, index: i64, value: i64) {
-        self.0[index as usize].store(value, Ordering::Relaxed);
-    }
-    fn into_vec(self) -> Vec<i64> {
-        self.0.into_iter().map(AtomicI64::into_inner).collect()
-    }
-    fn into_flags(self) -> Vec<bool> {
-        self.0.into_iter().map(|value| value.into_inner() != 0).collect()
-    }
-}
-
-impl Floats {
-    fn new(count: usize, fill: f64) -> Floats {
-        Floats((0..count).map(|_| AtomicU64::new(fill.to_bits())).collect())
-    }
-    fn set(&self, index: i64, value: f64) {
-        self.0[index as usize].store(value.to_bits(), Ordering::Relaxed);
-    }
-    fn into_vec(self) -> Vec<f64> {
-        self.0.into_iter().map(|value| f64::from_bits(value.into_inner())).collect()
-    }
-}
-
-fn run(
-    grain: Option<i64>,
-    cancel_value: Option<&cancel::T>,
-    count: i64,
-    operation: &(dyn Fn(i64) -> Result<(), error::T> + Sync),
-) -> Result<(), error::T> {
+fn grain_size(grain: Option<i64>) -> Result<i64, error::T> {
     let grain = grain.unwrap_or(16_384);
     if grain <= 0 {
         return Err(fail("Rdk_curve.Curve_subdivide.subdivide: grain must be positive"));
     }
-    if count > 0 {
-        support::parallel_for(cancel_value, grain, count, operation)?;
-    }
-    Ok(())
+    Ok(grain)
 }
 
-/// One float per index, joined in range order.
+/// One float per index.
 fn map_floats(
     grain: Option<i64>,
     cancel_value: Option<&cancel::T>,
     count: i64,
     value: &(dyn Fn(i64) -> f64 + Sync),
 ) -> Result<Vec<f64>, error::T> {
-    let chunk = grain.unwrap_or(16_384);
-    if chunk <= 0 {
-        return Err(fail("Rdk_curve.Curve_subdivide.subdivide: grain must be positive"));
-    }
-    if count <= 0 {
-        return Ok(Vec::new());
-    }
-    let ranges = ((count - 1) / chunk + 1) as usize;
-    let slots: Vec<Mutex<Vec<f64>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
-    support::run_indexed_ranges(chunk, count, &|range, first, last| {
-        let mut local = Vec::with_capacity((last - first) as usize);
-        for index in first..last {
-            cancel::poll(cancel_value, index, 4095)?;
-            local.push(value(index));
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = local;
-        Ok(())
-    })?;
-    let mut output = Vec::with_capacity(count as usize);
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
+    let chunk = grain_size(grain)?;
+    let mut output = vec![0.0; count.max(0) as usize];
+    support::par_fill(cancel_value, chunk, &mut output, &|index| Ok(value(index)))?;
     Ok(output)
 }
 
@@ -206,40 +147,75 @@ fn shared_plan(
         point_offsets[at + 1] = checked_add("curve subdivision point stencil", point_offsets[at], 2)?;
     }
     let stencil_count = point_offsets[output_points as usize] as usize;
-    let point_sources = Ints::new(stencil_count, 0);
-    let point_weights = Floats::new(stencil_count, 0.0);
-    let point_representative = Ints::new(output_points as usize, 0);
-    let point_old = Ints::new(output_points as usize, 0);
-    run(grain, cancel_value, source_points, &|point| {
-        let first = point_offsets[point as usize];
-        point_old.set(point, 1);
-        point_representative.set(point, point);
-        let edge_first = index.point_edge_offsets[point as usize];
-        let edge_last = index.point_edge_offsets[point as usize + 1];
-        if scheme == Scheme::CatmullClark && edge_last - edge_first == 2 {
-            point_sources.set(first, other_endpoint(index, point, index.point_edges[edge_first as usize])?);
-            point_weights.set(first, 0.125);
-            point_sources.set(first + 1, point);
-            point_weights.set(first + 1, 0.75);
-            point_sources.set(first + 2, other_endpoint(index, point, index.point_edges[edge_first as usize + 1])?);
-            point_weights.set(first + 2, 0.125);
-        } else {
-            point_sources.set(first, point);
-            point_weights.set(first, 1.0);
-        }
-        Ok(())
-    })?;
-    run(grain, cancel_value, edge_count, &|edge| {
-        let output = source_points + edge;
-        let first = point_offsets[output as usize];
-        let (a, b) = (index.edge_a[edge as usize], index.edge_b[edge as usize]);
-        point_sources.set(first, a);
-        point_weights.set(first, 0.5);
-        point_sources.set(first + 1, b);
-        point_weights.set(first + 1, 0.5);
-        point_representative.set(output, a.min(b));
-        Ok(())
-    })?;
+    let grain = grain_size(grain)?;
+    let mut point_sources = vec![0_i64; stencil_count];
+    let mut point_weights = vec![0.0_f64; stencil_count];
+    let mut point_representative = vec![0_i64; output_points as usize];
+    let mut point_old = vec![false; output_points as usize];
+    {
+        let ranges = support::range_count(source_points, grain);
+        let slot = |range: i64| range.saturating_mul(grain).min(source_points);
+        let rows = |range: i64| point_offsets[slot(range) as usize] as usize;
+        let (sources, weights) = (
+            support::Windows::new(&mut point_sources, ranges, rows),
+            support::Windows::new(&mut point_weights, ranges, rows),
+        );
+        let (representative, old) = (
+            support::Windows::new(&mut point_representative, ranges, |range| slot(range) as usize),
+            support::Windows::new(&mut point_old, ranges, |range| slot(range) as usize),
+        );
+        support::run_indexed_ranges(grain, source_points, &|range, first_point, last_point| {
+            let (sources, weights) = (sources.take(range), weights.take(range));
+            let (representative, old) = (representative.take(range), old.take(range));
+            let base = rows(range);
+            for point in first_point..last_point {
+                cancel::poll(cancel_value, point, 4095)?;
+                let first = point_offsets[point as usize] as usize - base;
+                let slot = (point - first_point) as usize;
+                old[slot] = true;
+                representative[slot] = point;
+                let edge_first = index.point_edge_offsets[point as usize];
+                let edge_last = index.point_edge_offsets[point as usize + 1];
+                if scheme == Scheme::CatmullClark && edge_last - edge_first == 2 {
+                    sources[first] = other_endpoint(index, point, index.point_edges[edge_first as usize])?;
+                    weights[first] = 0.125;
+                    sources[first + 1] = point;
+                    weights[first + 1] = 0.75;
+                    sources[first + 2] = other_endpoint(index, point, index.point_edges[edge_first as usize + 1])?;
+                    weights[first + 2] = 0.125;
+                } else {
+                    sources[first] = point;
+                    weights[first] = 1.0;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    {
+        let ranges = support::range_count(edge_count, grain);
+        let slot = |range: i64| range.saturating_mul(grain).min(edge_count);
+        let rows = |range: i64| point_offsets[(source_points + slot(range)) as usize] as usize;
+        let (sources, weights) = (
+            support::Windows::new(&mut point_sources, ranges, rows),
+            support::Windows::new(&mut point_weights, ranges, rows),
+        );
+        let representative = support::Windows::new(&mut point_representative, ranges, |range| (source_points + slot(range)) as usize);
+        support::run_indexed_ranges(grain, edge_count, &|range, first_edge, last_edge| {
+            let (sources, weights, representative) = (sources.take(range), weights.take(range), representative.take(range));
+            let base = rows(range);
+            for edge in first_edge..last_edge {
+                cancel::poll(cancel_value, edge, 4095)?;
+                let first = point_offsets[(source_points + edge) as usize] as usize - base;
+                let (a, b) = (index.edge_a[edge as usize], index.edge_b[edge as usize]);
+                sources[first] = a;
+                weights[first] = 0.5;
+                sources[first + 1] = b;
+                weights[first + 1] = 0.5;
+                representative[(edge - first_edge) as usize] = a.min(b);
+            }
+            Ok(())
+        })?;
+    }
     let mut primitive_offsets = vec![0_i64; source_primitives + 1];
     for primitive in 0..source_primitives {
         let size = primitive_size(&view.primitive_offsets, primitive);
@@ -251,48 +227,67 @@ fn shared_plan(
         )?;
     }
     let output_vertices = primitive_offsets[source_primitives] as usize;
-    let vertex_points = Ints::new(output_vertices, 0);
+    let mut vertex_points = vec![0_i64; output_vertices];
     let primitive_kinds: Vec<u8> = view.primitive_kinds.to_vec();
-    let vertex_left = Ints::new(output_vertices, 0);
-    let vertex_right = Ints::new(output_vertices, 0);
-    let vertex_weight = Floats::new(output_vertices, 0.0);
-    let vertex_old = Ints::new(output_vertices, 0);
-    let source_edge_of_output_vertex = Ints::new(output_vertices, -1);
-    run(grain, cancel_value, source_primitives as i64, &|primitive| {
-        let first = view.primitive_offsets[primitive as usize];
-        let last = view.primitive_offsets[primitive as usize + 1];
-        let mut output = primitive_offsets[primitive as usize];
-        for vertex in first..last {
-            let old = output;
-            output += 1;
-            vertex_points.set(old, view.vertex_points[vertex as usize]);
-            vertex_left.set(old, vertex);
-            vertex_right.set(old, vertex);
-            vertex_old.set(old, 1);
-            let edge = index.edge_of_vertex[vertex as usize];
-            if edge >= 0 {
-                source_edge_of_output_vertex.set(old, edge);
-                let midpoint = output;
-                output += 1;
-                let next = index.next_vertex[vertex as usize];
-                if next < 0 {
-                    return Err(fail("curve edge has no following corner"));
+    let mut vertex_left = vec![0_i64; output_vertices];
+    let mut vertex_right = vec![0_i64; output_vertices];
+    let mut vertex_weight = vec![0.0_f64; output_vertices];
+    let mut vertex_old = vec![false; output_vertices];
+    let mut source_edge_of_output_vertex = vec![-1_i64; output_vertices];
+    {
+        let primitives = source_primitives as i64;
+        let ranges = support::range_count(primitives, grain);
+        let rows = |range: i64| primitive_offsets[range.saturating_mul(grain).min(primitives) as usize] as usize;
+        let (points, left, right, old, source_edge) = (
+            support::Windows::new(&mut vertex_points, ranges, rows),
+            support::Windows::new(&mut vertex_left, ranges, rows),
+            support::Windows::new(&mut vertex_right, ranges, rows),
+            support::Windows::new(&mut vertex_old, ranges, rows),
+            support::Windows::new(&mut source_edge_of_output_vertex, ranges, rows),
+        );
+        let weight = support::Windows::new(&mut vertex_weight, ranges, rows);
+        support::run_indexed_ranges(grain, primitives, &|range, first_primitive, last_primitive| {
+            let (points, left, right) = (points.take(range), left.take(range), right.take(range));
+            let (old, source_edge, weight) = (old.take(range), source_edge.take(range), weight.take(range));
+            let base = rows(range) as i64;
+            for primitive in first_primitive..last_primitive {
+                cancel::poll(cancel_value, primitive, 4095)?;
+                let first = view.primitive_offsets[primitive as usize];
+                let last = view.primitive_offsets[primitive as usize + 1];
+                let mut output = primitive_offsets[primitive as usize] - base;
+                for vertex in first..last {
+                    let at = output as usize;
+                    output += 1;
+                    points[at] = view.vertex_points[vertex as usize];
+                    left[at] = vertex;
+                    right[at] = vertex;
+                    old[at] = true;
+                    let edge = index.edge_of_vertex[vertex as usize];
+                    if edge >= 0 {
+                        source_edge[at] = edge;
+                        let midpoint = output as usize;
+                        output += 1;
+                        let next = index.next_vertex[vertex as usize];
+                        if next < 0 {
+                            return Err(fail("curve edge has no following corner"));
+                        }
+                        points[midpoint] = source_points + edge;
+                        left[midpoint] = vertex;
+                        right[midpoint] = next;
+                        weight[midpoint] = 0.5;
+                        source_edge[midpoint] = edge;
+                    }
                 }
-                vertex_points.set(midpoint, source_points + edge);
-                vertex_left.set(midpoint, vertex);
-                vertex_right.set(midpoint, next);
-                vertex_weight.set(midpoint, 0.5);
-                source_edge_of_output_vertex.set(midpoint, edge);
+                if output != primitive_offsets[primitive as usize + 1] - base {
+                    return Err(fail("curve subdivision vertex cardinality mismatch"));
+                }
             }
-        }
-        if output != primitive_offsets[primitive as usize + 1] {
-            return Err(fail("curve subdivision vertex cardinality mismatch"));
-        }
-        Ok(())
-    })?;
+            Ok(())
+        })?;
+    }
     let output_topology = topology::View::create_validated_owned(
         output_points,
-        vertex_points.into_vec(),
+        vertex_points,
         primitive_offsets,
         primitive_kinds,
     );
@@ -306,16 +301,16 @@ fn shared_plan(
         output_topology,
         output_index,
         point_offsets,
-        point_sources: point_sources.into_vec(),
-        point_weights: point_weights.into_vec(),
-        point_representative: point_representative.into_vec(),
-        point_old: point_old.into_flags(),
-        vertex_left: vertex_left.into_vec(),
-        vertex_right: vertex_right.into_vec(),
-        vertex_weight: vertex_weight.into_vec(),
-        vertex_old: vertex_old.into_flags(),
+        point_sources,
+        point_weights,
+        point_representative,
+        point_old,
+        vertex_left,
+        vertex_right,
+        vertex_weight,
+        vertex_old,
         primitive_source: (0..source_primitives as i64).collect(),
-        source_edge_of_output_vertex: source_edge_of_output_vertex.into_vec(),
+        source_edge_of_output_vertex,
     })
 }
 
@@ -388,42 +383,59 @@ fn independent_plan(
         }
     }
     let stencil_count = point_offsets[count] as usize;
-    let point_sources = Ints::new(stencil_count, 0);
-    let point_weights = Floats::new(stencil_count, 0.0);
-    run(grain, cancel_value, source_primitives as i64, &|primitive| {
-        let first = view.primitive_offsets[primitive as usize];
-        let last = view.primitive_offsets[primitive as usize + 1];
-        let closed = view.primitive_kinds[primitive as usize] == 2;
-        let mut output = primitive_offsets[primitive as usize];
-        for vertex in first..last {
-            let at = point_offsets[output as usize];
-            output += 1;
-            let smooth = scheme == Scheme::CatmullClark && (closed || (vertex > first && vertex + 1 < last));
-            if smooth {
-                let previous = if vertex > first { vertex - 1 } else { last - 1 };
-                let next = if vertex + 1 < last { vertex + 1 } else { first };
-                point_sources.set(at, view.vertex_points[previous as usize]);
-                point_weights.set(at, 0.125);
-                point_sources.set(at + 1, view.vertex_points[vertex as usize]);
-                point_weights.set(at + 1, 0.75);
-                point_sources.set(at + 2, view.vertex_points[next as usize]);
-                point_weights.set(at + 2, 0.125);
-            } else {
-                point_sources.set(at, view.vertex_points[vertex as usize]);
-                point_weights.set(at, 1.0);
+    let grain = grain_size(grain)?;
+    let mut point_sources = vec![0_i64; stencil_count];
+    let mut point_weights = vec![0.0_f64; stencil_count];
+    {
+        let primitives = source_primitives as i64;
+        let ranges = support::range_count(primitives, grain);
+        let rows = |range: i64| {
+            point_offsets[primitive_offsets[range.saturating_mul(grain).min(primitives) as usize] as usize] as usize
+        };
+        let (sources, weights) = (
+            support::Windows::new(&mut point_sources, ranges, rows),
+            support::Windows::new(&mut point_weights, ranges, rows),
+        );
+        support::run_indexed_ranges(grain, primitives, &|range, first_primitive, last_primitive| {
+            let (sources, weights) = (sources.take(range), weights.take(range));
+            let base = rows(range) as i64;
+            for primitive in first_primitive..last_primitive {
+                cancel::poll(cancel_value, primitive, 4095)?;
+                let first = view.primitive_offsets[primitive as usize];
+                let last = view.primitive_offsets[primitive as usize + 1];
+                let closed = view.primitive_kinds[primitive as usize] == 2;
+                let mut output = primitive_offsets[primitive as usize];
+                for vertex in first..last {
+                    let at = (point_offsets[output as usize] - base) as usize;
+                    output += 1;
+                    let smooth = scheme == Scheme::CatmullClark && (closed || (vertex > first && vertex + 1 < last));
+                    if smooth {
+                        let previous = if vertex > first { vertex - 1 } else { last - 1 };
+                        let next = if vertex + 1 < last { vertex + 1 } else { first };
+                        sources[at] = view.vertex_points[previous as usize];
+                        weights[at] = 0.125;
+                        sources[at + 1] = view.vertex_points[vertex as usize];
+                        weights[at + 1] = 0.75;
+                        sources[at + 2] = view.vertex_points[next as usize];
+                        weights[at + 2] = 0.125;
+                    } else {
+                        sources[at] = view.vertex_points[vertex as usize];
+                        weights[at] = 1.0;
+                    }
+                    let next = index.next_vertex[vertex as usize];
+                    if next >= 0 {
+                        let midpoint_at = (point_offsets[output as usize] - base) as usize;
+                        output += 1;
+                        sources[midpoint_at] = view.vertex_points[vertex as usize];
+                        weights[midpoint_at] = 0.5;
+                        sources[midpoint_at + 1] = view.vertex_points[next as usize];
+                        weights[midpoint_at + 1] = 0.5;
+                    }
+                }
             }
-            let next = index.next_vertex[vertex as usize];
-            if next >= 0 {
-                let midpoint_at = point_offsets[output as usize];
-                output += 1;
-                point_sources.set(midpoint_at, view.vertex_points[vertex as usize]);
-                point_weights.set(midpoint_at, 0.5);
-                point_sources.set(midpoint_at + 1, view.vertex_points[next as usize]);
-                point_weights.set(midpoint_at + 1, 0.5);
-            }
-        }
-        Ok(())
-    })?;
+            Ok(())
+        })?;
+    }
     let output_topology = topology::View::create_validated_owned(
         output_points,
         vertex_points,
@@ -440,8 +452,8 @@ fn independent_plan(
         output_topology,
         output_index,
         point_offsets,
-        point_sources: point_sources.into_vec(),
-        point_weights: point_weights.into_vec(),
+        point_sources,
+        point_weights,
         point_representative,
         point_old,
         vertex_left,
