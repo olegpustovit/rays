@@ -76,7 +76,16 @@ pub fn isogrid_deferred() {
         }
     }
     release(&gate);
-    let completion = async_cook::await_completion(&ed.core.cook.worker);
+    // the worker's cook asks the GPU service for mesh residency, which only this (initial) thread
+    // serves: wait by pumping it, as the editor loop does, not by blocking in await_completion
+    let gpu = ed.host.borrow().gpu.clone();
+    let completion = loop {
+        if let Some(completion) = async_cook::poll(&ed.core.cook.worker) {
+            break completion;
+        }
+        flow_native::workspace_gpu::pump(&gpu, true);
+        std::thread::yield_now();
+    };
     assert!(completion.result.is_ok(), "the released cook failed");
     editor::close(&ed);
 }
