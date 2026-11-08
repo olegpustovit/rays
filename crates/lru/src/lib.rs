@@ -746,6 +746,55 @@ impl Cache {
     }
 }
 
+/// A typed, bounded map of shared values for process-wide memo tables: `Cache` keyed by `K: Hash + Eq`,
+/// without the byte ledger (the bound is the entry count).
+pub struct Memo<K, V> {
+    cache: Cache,
+    marker: std::marker::PhantomData<fn(K) -> V>,
+}
+
+fn hash_of<K: std::hash::Hash>(key: &K) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
+impl<K: std::hash::Hash + Eq + Send + Sync + 'static, V: Send + Sync + 'static> Memo<K, V> {
+    pub fn new(name: &str, capacity: i64) -> Self {
+        let equal = |stored: &Key, probe: &(dyn Any + Send + Sync)| {
+            matches!((stored.as_any().downcast_ref::<K>(), probe.downcast_ref::<K>()), (Some(a), Some(b)) if a == b)
+        };
+        let options = CacheOptions { charges: false, ..CacheOptions::default() };
+        Self { cache: Cache::with_options(cache(name), capacity, Arc::new(equal), options), marker: std::marker::PhantomData }
+    }
+
+    /// The value under `key`, now the newest.
+    pub fn get(&self, key: &K) -> Option<Arc<V>> {
+        self.cache.find_opt_by(hash_of(key), key)?.downcast::<V>().ok()
+    }
+
+    /// Stores `value` under `key` (replacing any) and returns it shared.
+    pub fn insert(&self, key: K, value: V) -> Arc<V> {
+        let value = Arc::new(value);
+        self.cache.add(Key::new(hash_of(&key), Arc::new(key)), value.clone(), 0);
+        value
+    }
+
+    /// Drops every entry whose value satisfies `doomed`.
+    pub fn remove_where(&self, doomed: impl Fn(&V) -> bool) {
+        let mut keys = Vec::new();
+        self.cache.iter(&mut |key, value| {
+            if value.downcast_ref::<V>().is_some_and(&doomed) {
+                keys.push(key.clone());
+            }
+        });
+        for key in keys {
+            self.cache.remove(&key);
+        }
+    }
+}
+
 impl Drop for Cache {
     fn drop(&mut self) {
         self.clear();

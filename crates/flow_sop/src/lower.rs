@@ -24,10 +24,12 @@ use sop::edit_graph::{self as edit, Factory, InputRequirement};
 use sop::node::{self, build, CookMode, Elementwise, Facts, InputUse, Topology};
 use sop::payload;
 use sop::zone as szone;
+mod fold;
+use fold::{fold_mesh_writes, fold_writes, template_flags};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 type R<T> = Result<T, Diagnostic>;
 pub type PathMap = BTreeMap<Vec<i64>, i64>;
@@ -956,9 +958,25 @@ fn mesh_resident_attributes(grain: i64, scope: &Gpu::Residency, fields: &[(Strin
     }
 }
 
-type StatefulKey = (Vec<(String, Value)>, Vec<node::T>);
+/// A stateful mesh's arguments and inputs: the arguments by content, the input nodes by identity.
+struct StatefulKey(Vec<(String, Value)>, Vec<node::T>);
+
+impl PartialEq for StatefulKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && self.1.len() == other.1.len() && self.1.iter().zip(&other.1).all(|(a, b)| node::ptr_eq(a, b))
+    }
+}
+impl Eq for StatefulKey {}
+impl std::hash::Hash for StatefulKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.iter().for_each(|(name, _)| name.hash(state));
+        self.1.iter().for_each(|node| node::id(node).hash(state));
+    }
+}
+
 type StatefulPrograms = (R<Executor::Program>, Arc<std::sync::OnceLock<R<Executor::Program>>>);
-static STATEFUL_PROGRAMS: Mutex<Vec<(StatefulKey, StatefulPrograms)>> = Mutex::new(Vec::new());
+// ponytail: the 8 newest; key a weak table if more stateful meshes live at once
+static STATEFUL_PROGRAMS: LazyLock<lru::Memo<StatefulKey, StatefulPrograms>> = LazyLock::new(|| lru::Memo::new("flow_sop.stateful_programs", 8));
 
 /// Settings shared by every kernel-node builder (the labelled arguments of the OCaml functions).
 #[derive(Clone)]
@@ -1044,19 +1062,10 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
     let (program, points_program) = if opts.state.is_none() {
         make_programs()
     } else {
-        let key: StatefulKey = (args.to_vec(), inputs.to_vec());
-        let same = |k: &StatefulKey| k.0.len() == key.0.len() && k.0 == key.0 && k.1.len() == key.1.len() && k.1.iter().zip(key.1.iter()).all(|(a, b)| node::ptr_eq(a, b));
-        let found = STATEFUL_PROGRAMS.lock().unwrap().iter().find(|(k, _)| same(k)).map(|(_, p)| p.clone());
-        match found {
-            Some(p) => p,
-            None => {
-                let made = make_programs();
-                // ponytail: the 8 newest; key a weak table if more stateful meshes live at once
-                let mut guard = STATEFUL_PROGRAMS.lock().unwrap();
-                guard.insert(0, (key, made.clone()));
-                guard.truncate(8);
-                made
-            }
+        let key = StatefulKey(args.to_vec(), inputs.to_vec());
+        match STATEFUL_PROGRAMS.get(&key) {
+            Some(programs) => (*programs).clone(),
+            None => STATEFUL_PROGRAMS.insert(key, make_programs()).as_ref().clone(),
         }
     };
     if env.strict_body && check {
@@ -1975,31 +1984,12 @@ pub fn build_call(
     })
 }
 
-// ponytail: a plain 64-entry most-recently-used list standing in for the owner-registered `Lru.cache`
-// ("flow_sop.built"); register it with the ledger when `lru::Owner` takes a typed entry list.
-const BUILT_CAPACITY: usize = 64;
 type BuiltEntry = (Option<Arc<Gpu::Backend>>, node::T);
-static BUILT: Mutex<Vec<(String, BuiltEntry)>> = Mutex::new(Vec::new());
+static BUILT: LazyLock<lru::Memo<String, BuiltEntry>> = LazyLock::new(|| lru::Memo::new("flow_sop.built", 64));
 
 /// Drops the inlined-body nodes built for a closed owner's backend.
 pub fn forget_backend(backend: &Arc<Gpu::Backend>) {
-    BUILT.lock().unwrap().retain(|(_, (held, _))| !held.as_ref().is_some_and(|b| Arc::ptr_eq(b, backend)));
-}
-
-fn built_find(key: &str) -> Option<BuiltEntry> {
-    let mut cache = BUILT.lock().unwrap();
-    let i = cache.iter().position(|(k, _)| k == key)?;
-    let entry = cache.remove(i);
-    let found = entry.1.clone();
-    cache.insert(0, entry);
-    Some(found)
-}
-
-fn built_add(key: String, entry: BuiltEntry) {
-    let mut cache = BUILT.lock().unwrap();
-    cache.retain(|(k, _)| *k != key);
-    cache.insert(0, (key, entry));
-    cache.truncate(BUILT_CAPACITY);
+    BUILT.remove_where(|(held, _)| held.as_ref().is_some_and(|b| Arc::ptr_eq(b, backend)));
 }
 
 /// Placement states still owned by a live backend, for the close checks.
@@ -2072,14 +2062,7 @@ pub fn is_volatile(lowered: &T) -> Arc<dyn Fn(i64) -> bool + Send + Sync> {
     Arc::new(move |id| volatile.contains_key(&id))
 }
 
-// Fusion across cards (single-program design, E4). A point write whose geometry is, through card
-// markers and deletions of other attributes, a point write that nothing else reads is rewritten to
-// write over that write's input: its reads of an attribute the chain writes become the values
-// written, its other attribute reads and counts of the chain read the input, the earlier writes run
-// first in the same node (`FUSED_WRITES`, one record program) and the chain's deletions run after
-// them (`FUSED_DELETES`; they commute with writes of other attributes). The earlier write is no
-// longer cooked, so the maps are one region; folding left to right chains any number of writes. The
-// intermediate cards are unchanged, for display and probes.
+// Fusion across cards: see `fold.rs`.
 fn literal_pattern(pattern: &str) -> bool {
     !pattern.chars().any(|c| matches!(c, '*' | '?' | '[' | '\\' | '^' | ' ' | '\t' | '\n' | '\r'))
 }
@@ -2242,10 +2225,6 @@ pub fn install_hooks() {
     });
 }
 
-fn fused_entry(name: &str, kind: &str, values: Value) -> Value {
-    Value::Record(vec![("attribute".into(), Value::Text(name.as_bytes().to_vec())), ("type".into(), Value::Text(kind.as_bytes().to_vec())), ("values".into(), values)])
-}
-
 fn fused_entries(args: &[(String, Value)]) -> R<Vec<(String, String, Value)>> {
     match get(args, FUSED_WRITES) {
         Some(Value::List(entries)) => entries
@@ -2262,567 +2241,8 @@ fn fused_entries(args: &[(String, Value)]) -> R<Vec<(String, String, Value)>> {
     }
 }
 
-/// whether a write's values map an index (`array/range`); one that reads no attribute too is a
-/// generated attribute (a grid's P)
-fn indexed(value: &Value) -> bool {
-    fn term(t: &Term) -> bool {
-        matches!(t.node, W::Node::Op(id) if t.name(t.arena().op(id).op) == "array/range")
-            || t.children().iter().any(|&id| term(&t.child(id)))
-    }
-    fn visit(v: &Value, seen: &mut BTreeSet<i64>) -> bool {
-        match v {
-            Value::Residual(r) => {
-                let id = E::Residual::residual_id(*r);
-                if !seen.insert(id) {
-                    return false;
-                }
-                let Ok(view) = E::Residual::residual_view(*r) else { return false };
-                term(&view.term) || view.bindings.iter().any(|(_, v)| visit(v, seen))
-            }
-            Value::Record(fs) => fs.iter().any(|(_, v)| visit(v, seen)),
-            Value::List(vs) => vs.iter().any(|v| visit(v, seen)),
-            _ => false,
-        }
-    }
-    visit(value, &mut BTreeSet::new())
-}
-
-/// `device`: a fused write may run on a device. Without one an indexed earlier write (a grid's P) is
-/// not folded: the CPU would compute it again with every recook of the chain, where its own node is
-/// cooked once and cached; a device makes it from the element index instead of an upload.
 fn static_cpu_data(data: &Value) -> bool {
     !(E::frame_dependent(data) || E::state_dependent(data)) && ak::sources(data).is_empty() && ak::context_reads(data) == deps_mod::STATIC
-}
-
-fn template_flags(nodes: &[ENode]) -> Vec<bool> {
-    let count = nodes.len() as i64;
-    let mut templ = vec![false; nodes.len()];
-    for n in nodes {
-        if is_zone(&n.kind) {
-            if let (Some(Value::Int(lo)), Some(Value::Int(hi))) = (get(&n.args, "lo"), get(&n.args, "hi")) {
-                for id in (*lo).max(0)..count.min(*hi) {
-                    templ[id as usize] = true;
-                }
-            }
-        }
-    }
-    templ
-}
-
-fn usage_counts(plan: &Plan, nodes: &[ENode], skip: &[bool]) -> Vec<i64> {
-    let count = nodes.len() as i64;
-    let mut uses = vec![0i64; nodes.len()];
-    let mut note = |values: Vec<&Value>| {
-        let mut ids: Vec<i64> = values.into_iter().flat_map(ak::sources).collect();
-        ids.sort();
-        ids.dedup();
-        for id in ids {
-            if id >= 0 && id < count {
-                uses[id as usize] += 1;
-            }
-        }
-    };
-    for n in nodes {
-        if !skip[n.id as usize] {
-            note(n.args.iter().map(|(_, v)| v).collect());
-        }
-    }
-    for i in &plan.instances {
-        note(std::iter::once(&i.result).chain(i.inputs.iter().map(|(_, v)| v)).collect());
-    }
-    uses
-}
-
-/// A chain of point writes over a `sop/mesh` that nothing else reads becomes fields of the mesh's
-/// record, so one program builds them: a compacted face list their maps gather is one producer on
-/// the device, rather than evaluated on the CPU and uploaded for each write. A static mesh under a
-/// frame-driven write keeps its own node, or the mesh would cook again every frame.
-fn fold_mesh_writes(plan: &Plan) -> Plan {
-    let mut nodes = plan.nodes.clone();
-    let count = nodes.len() as i64;
-    let templ = template_flags(&nodes);
-    // an earlier write `fold_writes` folded into a later one stays in the plan, unread: not a reader
-    let mut folded = vec![false; nodes.len()];
-    for n in &nodes {
-        if let Some(Value::List(ids)) = get(&n.args, FUSED_CHAIN) {
-            for id in ids.iter() {
-                if let Value::Int(id) = id {
-                    if *id >= 0 && *id < count {
-                        folded[*id as usize] = true;
-                    }
-                }
-            }
-        }
-    }
-    let uses = usage_counts(plan, &nodes, &folded);
-    let mesh_under = |nodes: &Vec<ENode>, id: i64| -> Option<ENode> {
-        let mut id = id;
-        loop {
-            if id < 0 || id >= count || uses[id as usize] != 1 || templ[id as usize] {
-                return None;
-            }
-            let n = &nodes[id as usize];
-            if n.kind == "sop/mesh" {
-                return Some(n.clone());
-            }
-            if n.kind == E::card_kind() && guards_of("guards", &n.args).is_empty() {
-                match get(&n.args, "value") {
-                    Some(Value::Deferred(_, below)) if *below < id => id = *below,
-                    _ => return None,
-                }
-            } else {
-                return None;
-            }
-        }
-    };
-    let text = |n: &ENode, key: &str| -> Option<String> {
-        match get(&n.args, key) {
-            Some(Value::Text(t)) => Some(txt(t)),
-            _ => None,
-        }
-    };
-    for id in 0..nodes.len() {
-        let w = nodes[id].clone();
-        if w.kind == "sop/with_attr"
-            && !templ[id]
-            && w.args.iter().all(|(k, _)| ["geometry", "attribute", "values", "owner", "type", FUSED_WRITES, FUSED_CHAIN].contains(&k.as_str()))
-            && text(&w, "owner").is_none_or(|o| o == "point")
-        {
-            if let (Some(Value::Deferred(_, g)), Some(name), Some(values)) = (get(&w.args, "geometry"), text(&w, "attribute"), get(&w.args, "values")) {
-                let kind = text(&w, "type").unwrap_or_else(|| "vec3".into());
-                let Ok(mut writes) = fused_entries(&w.args) else { continue };
-                writes.push((name, kind, values.clone()));
-                let plain = |(name, _, values): &(String, String, Value)| !name.contains(':') && name != "P" && ak::sources(values).is_empty() && !matches!(values, Value::Record(_));
-                if let Some(mesh) = mesh_under(&nodes, *g) {
-                    let data = geometry_arrays_data(&mesh.args);
-                    if writes.iter().all(plain)
-                        && (E::frame_dependent(&data) || !writes.iter().any(|(_, _, v)| E::frame_dependent(v)))
-                        // a stateful write folds when its mesh is stateful too: one node cooks both over the state's fork
-                        && (E::state_dependent(&data) || !writes.iter().any(|(_, _, v)| E::state_dependent(v)))
-                    {
-                        let mut args = mesh.args.clone();
-                        args.extend(writes.into_iter().map(|(name, kind, values)| (format!("{MESH_ATTRIBUTE_PREFIX}{name}:{kind}"), values)));
-                        nodes[id] = ENode { kind: mesh.kind.clone(), args, ..w };
-                    }
-                }
-            }
-        }
-    }
-    Plan { id: E::fresh_plan_id(), nodes, ..plan.clone() }
-}
-
-fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
-    let mut nodes = plan.nodes.clone();
-    let count = nodes.len() as i64;
-    let templ = template_flags(&nodes);
-    // the copies' residual ids are cache keys: deterministic per plan, outside the evaluator's
-    let next_fresh = Arc::new(AtomicI64::new(0));
-    let fresh = {
-        let next_fresh = next_fresh.clone();
-        move || -(1i64 << 50) - (next_fresh.fetch_add(1, Ordering::SeqCst) + 1)
-    };
-    // A count of a geometry that only writes or deletes attributes (or a card over one) is its
-    // input's count: counting the input instead, a read of counts alone keeps no chain alive.
-    let root = |nodes: &Vec<ENode>, id: i64| -> i64 {
-        let mut id = id;
-        loop {
-            if id < 0 || id >= count || templ[id as usize] {
-                return id;
-            }
-            let n = &nodes[id as usize];
-            let input = |key: &str| -> Option<i64> {
-                match get(&n.args, key) {
-                    Some(Value::Deferred(t, x)) if is_geometry_ty(t) && *x < id => Some(*x),
-                    _ => None,
-                }
-            };
-            let next = if n.kind == E::card_kind() {
-                input("value").or(Some(id))
-            } else if ["sop/with_attr", "sop/delete_attr", "sop/with_group"].contains(&n.kind.as_str()) {
-                input("geometry").or(Some(id))
-            } else {
-                return id;
-            };
-            match next {
-                Some(x) if x != id => id = x,
-                _ => return id,
-            }
-        }
-    };
-    let recount = |nodes: &Vec<ENode>, v: &Value| -> Option<Value> {
-        match v {
-            Value::Source(g) | Value::Struct(g) if g.name == "sop/count" => match get(&g.fields, "geometry") {
-                Some(Value::Deferred(gty, x)) if root(nodes, *x) != *x => {
-                    let fields: Vec<(String, Value)> =
-                        g.fields.iter().map(|(k, v)| if k == "geometry" { (k.clone(), Value::Deferred(gty.clone(), root(nodes, *x))) } else { (k.clone(), v.clone()) }).collect();
-                    Some(if matches!(v, Value::Source(..)) { source_value(g.name.clone(), g.ty.clone(), fields) } else { struct_value(g.name.clone(), g.ty.clone(), fields) })
-                }
-                _ => None,
-            },
-            _ => None,
-        }
-    };
-    // residual and closure environments share values: each residual or function is answered once per node (without the memo the walk is
-    // exponential in the sharing: a driven transform's inlined body took 30 s). The answer is a function of the id, so the memo is exact.
-    #[derive(Default)]
-    struct Seen { residuals: HashMap<ResidualId, bool>, functions: HashMap<FnId, bool> }
-    fn recounts(nodes: &Vec<ENode>, v: &Value, recount: &dyn Fn(&Vec<ENode>, &Value) -> Option<Value>, seen: &mut Seen) -> bool {
-        match v {
-            Value::Source(..) | Value::Struct(..) if recount(nodes, v).is_some() => true,
-            Value::Residual(r) => {
-                if let Some(known) = seen.residuals.get(r) { return *known; }
-                seen.residuals.insert(*r, false);
-                let found = E::Residual::residual_view(*r).map(|view| view.bindings.iter().any(|(_, v)| recounts(nodes, v, recount, seen))).unwrap_or(false);
-                seen.residuals.insert(*r, found);
-                found
-            }
-            Value::Fn(f) => {
-                if let Some(known) = seen.functions.get(f) { return *known; }
-                seen.functions.insert(*f, false);
-                let found = E::Residual::function_bindings(*f).iter().any(|(_, v)| recounts(nodes, v, recount, seen));
-                seen.functions.insert(*f, found);
-                found
-            }
-            Value::List(vs) => vs.iter().any(|v| recounts(nodes, v, recount, seen)),
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, v)| recounts(nodes, v, recount, seen)),
-            _ => false,
-        }
-    }
-    for id in 0..nodes.len() {
-        if !templ[id] && nodes[id].args.iter().any(|(_, v)| recounts(&nodes, v, &recount, &mut Seen::default())) {
-            let snapshot = nodes.clone();
-            let args: Vec<(String, Value)> =
-                nodes[id].args.iter().map(|(k, v)| (k.clone(), E::Host::rewrite_with(v, &|x: &Value| recount(&snapshot, x), &fresh, &|_, _| None))).collect();
-            nodes[id].args = args;
-        }
-    }
-    let uses = usage_counts(plan, &nodes, &vec![false; nodes.len()]);
-    let text = |n: &ENode, k: &str| -> Option<String> {
-        match get(&n.args, k) {
-            Some(Value::Text(t)) => Some(txt(t)),
-            _ => None,
-        }
-    };
-    let kind_of = |n: &ENode| text(n, "type").unwrap_or_else(|| "vec3".into());
-    let point_write = |n: &ENode| -> bool {
-        n.kind == "sop/with_attr"
-            && !templ[n.id as usize]
-            && n.args.iter().all(|(k, _)| ["geometry", "attribute", "values", "owner", "type", FUSED_DELETES, FUSED_WRITES, FUSED_CHAIN, FUSED_GUARDS].contains(&k.as_str()))
-            && text(n, "owner").is_none_or(|o| o == "point")
-            && text(n, "attribute").is_some()
-            // a write of planes ({:x .. :y ..}) is not a value a read of the attribute could take
-            && !matches!(get(&n.args, "values"), Some(Value::Record(_)))
-    };
-    let deletes = |n: &ENode| -> Vec<Value> {
-        match get(&n.args, FUSED_DELETES) {
-            Some(Value::List(ds)) => (**ds).clone(),
-            _ => Vec::new(),
-        }
-    };
-    let pattern = |v: &Value| -> Option<String> {
-        match v {
-            Value::Record(f) if f.len() == 2 && f[1].0 == "pattern" => match &f[1].1 {
-                Value::Text(p) => Some(txt(p)),
-                _ => None,
-            },
-            _ => None,
-        }
-    };
-    // back from a write's geometry to the earlier write: the ids passed and the deletions
-    let back = |nodes: &Vec<ENode>, name: &str, start: i64| -> Option<(ENode, i64, Vec<i64>, Vec<Value>)> {
-        let mut id = start;
-        let mut chain: Vec<i64> = Vec::new();
-        let mut dels: Vec<Value> = Vec::new();
-        loop {
-            if id < 0 || id >= count || uses[id as usize] != 1 || templ[id as usize] {
-                return None;
-            }
-            let u = &nodes[id as usize];
-            if u.kind == E::card_kind() {
-                match get(&u.args, "value") {
-                    Some(Value::Deferred(_, x)) => {
-                        chain.insert(0, id);
-                        id = *x;
-                    }
-                    _ => return None,
-                }
-            } else if u.kind == "sop/delete_attr" {
-                match (get(&u.args, "geometry"), text(u, "attribute")) {
-                    (Some(Value::Deferred(_, x)), Some(pat)) if pat != name && literal_pattern(&pat) && u.args.iter().all(|(k, _)| ["geometry", "attribute", "owner"].contains(&k.as_str())) => {
-                        let owner = text(u, "owner").unwrap_or_else(|| "point".into());
-                        chain.insert(0, id);
-                        dels.insert(0, Value::Record(vec![("owner".into(), Value::Text(owner.into_bytes())), ("pattern".into(), Value::Text(pat.into_bytes()))]));
-                        id = *x;
-                    }
-                    _ => return None,
-                }
-            } else if point_write(u) && !deletes(u).iter().any(|d| pattern(d).as_deref() == Some(name)) {
-                return match get(&u.args, "geometry") {
-                    Some(Value::Deferred(_, base)) => {
-                        chain.insert(0, id);
-                        let mut all = deletes(u);
-                        all.extend(dels);
-                        Some((u.clone(), *base, chain, all))
-                    }
-                    _ => None,
-                };
-            } else {
-                return None;
-            }
-        }
-    };
-    // the write each write would fold into (a look-ahead: the read checks are not made)
-    let mut next = vec![-1i64; nodes.len()];
-    for id in 0..nodes.len() {
-        let w = &nodes[id];
-        if let (Some(Value::Deferred(_, g)), Some(name)) = (get(&w.args, "geometry"), text(w, "attribute")) {
-            if point_write(w) {
-                if let Some((u, ..)) = back(&nodes, &name, *g) {
-                    next[u.id as usize] = id as i64;
-                }
-            }
-        }
-    }
-    let writes_from = |nodes: &Vec<ENode>, mut id: i64| -> Vec<String> {
-        let mut out = Vec::new();
-        while id >= 0 {
-            out.extend(text(&nodes[id as usize], "attribute"));
-            id = next[id as usize];
-        }
-        out
-    };
-    // An indexed earlier write (a grid's P) folds only where a device makes it, and only into a chain
-    // that writes its attribute again: otherwise the chain's output would carry it, a new array with
-    // every recook (a driven noise would make P new each frame, and every reader of P cook again).
-    let indexed_fold = |nodes: &Vec<ENode>, u: &ENode, w: &ENode, id: i64| -> bool {
-        let values = get(&u.args, "values").expect("write values");
-        let fixed = (defer || device) && static_cpu_data(values);
-        let next_fixed = static_cpu_data(get(&w.args, "values").expect("write values"));
-        let rewritten = device && writes_from(nodes, id).iter().any(|a| Some(a) == text(u, "attribute").as_ref());
-        // Keep a static prefix cached when the following write changes. An indexed field rewritten
-        // later can still fold into that device chain.
-        (!(fixed && !next_fixed) || rewritten)
-            && (has(&u.args, FUSED_CHAIN) || !(indexed(values) && ak::reads(values).is_empty()) || (fixed && next_fixed) || rewritten)
-    };
-    for id in 0..nodes.len() {
-        let w = nodes[id].clone();
-        let (Some(Value::Deferred(_, g)), Some(name)) = (get(&w.args, "geometry"), text(&w, "attribute")) else { continue };
-        if !point_write(&w) {
-            continue;
-        }
-        let Some((u, base, chain, dels)) = back(&nodes, &name, *g) else { continue };
-        if !indexed_fold(&nodes, &u, &w, id as i64) {
-            continue;
-        }
-        let deleted: Vec<String> = dels.iter().filter_map(&pattern).collect();
-        let reads = ak::reads(get(&w.args, "values").expect("write values"));
-        if reads.iter().any(|r| r == "*") || deleted.iter().any(|p| reads.contains(p)) {
-            continue;
-        }
-        // what the chain writes, in order, over `base`
-        let mut entries = fused_entries(&u.args)?;
-        entries.push((text(&u, "attribute").expect("write attribute"), kind_of(&u), get(&u.args, "values").expect("write values").clone()));
-        let written = |a: &str| entries.iter().rev().find(|(n, _, _)| n == a).cloned();
-        let fits = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let on_base = |fields: &[(String, Value)]| -> Vec<(String, Value)> {
-            let mut out = vec![("geometry".to_owned(), Value::Deferred(ty::geometry(), base))];
-            out.extend(fields.iter().filter(|(k, _)| k != "geometry").cloned());
-            out
-        };
-        // A lazy term that reads the chain itself (`(map f (sop/attr in0 :P))`): its reads of a
-        // written attribute become captures of the values written, and the geometry it captures is
-        // the input. Any other use of the capture refuses.
-        let retarget = {
-            let (chain, entries, fresh, fits) = (chain.clone(), entries.clone(), fresh.clone(), fits.clone());
-            move |term: &Term, bindings: &[(String, Value)]| -> Option<(Term, Vec<(String, Value)>)> {
-            let written = |a: &str| entries.iter().rev().find(|(n, _, _)| n == a).cloned();
-            let chained: Vec<String> =
-                bindings.iter().filter_map(|b| match b {
-                    (name, Value::Deferred(ty, x)) if is_geometry_ty(ty) && chain.contains(x) => Some(name.clone()),
-                    _ => None,
-                }).collect();
-            if chained.is_empty() {
-                return None;
-            }
-            let extra: RefCell<Vec<(String, Value)>> = RefCell::new(Vec::new());
-            let exit = std::cell::Cell::new(false);
-            fn binds(t: &Term, p: flow_check::term_arena::PatternId, chained: &[String]) -> bool {
-                use flow_check::term_arena::PatternNode;
-                match t.arena().pattern(p) {
-                    PatternNode::Name(n) => chained.iter().any(|s| s == t.name(n)),
-                    PatternNode::Seq(ps) => t.arena().pattern_ids(ps).iter().any(|&p| binds(t, p, chained)),
-                    PatternNode::Keys(ns) => t.arena().name_ids(ns).iter().any(|&n| chained.iter().any(|s| s == t.name(n))),
-                }
-            }
-            let literal = |t: &Term| -> Option<String> {
-                match t.node {
-                    W::Node::Text(id) => Some(txt(t.arena().bytes(id))),
-                    _ => None,
-                }
-            };
-            fn scan(t: &Term, chained: &[String], extra: &RefCell<Vec<(String, Value)>>, exit: &std::cell::Cell<bool>, written: &dyn Fn(&str) -> Option<(String, String, Value)>, literal: &dyn Fn(&Term) -> Option<String>, fresh: &dyn Fn() -> i64, replacements: &mut HashMap<(u64, u32), String>) {
-                let reads_chain = |args| t.arena().fields(args).iter().find(|field| t.name(field.name) == "geometry").is_some_and(|field| {
-                    let child = t.child(field.term);
-                    match child.node {
-                        W::Node::RefBinding(id) => {
-                            let binding = child.arena().ref_binding(id);
-                            child.arena().name_ids(binding.fields).is_empty() && chained.iter().any(|s| s == child.name(binding.name))
-                        }
-                        _ => false,
-                    }
-                });
-                match t.node {
-                    W::Node::RefBinding(id) if chained.iter().any(|s| s == t.name(t.arena().ref_binding(id).name)) => { exit.set(true); return; }
-                    W::Node::Op(id) if t.name(t.arena().op(id).op) == "sop/count" && reads_chain(t.arena().op(id).args) => return,
-                    W::Node::Op(id) if t.name(t.arena().op(id).op) == "sop/attr" && reads_chain(t.arena().op(id).args) => {
-                        let args = t.arena().fields(t.arena().op(id).args);
-                        let attribute = args.iter().find(|field| t.name(field.name) == "attribute").and_then(|field| literal(&t.child(field.term)));
-                        match attribute.as_deref().map(written) {
-                            Some(None) | None if attribute.is_some() => {}
-                            Some(Some((_, kind, earlier))) if args.iter().all(|field| match t.name(field.name) {
-                                "geometry" | "attribute" => true,
-                                "owner" => literal(&t.child(field.term)).as_deref() == Some("point"),
-                                "type" => literal(&t.child(field.term)).as_deref() == Some(kind.as_str()),
-                                _ => false,
-                            }) => {
-                                let name = format!("$fold{}", extra.borrow().len());
-                                extra.borrow_mut().push((name.clone(), E::Host::rewrite_with(&earlier, &|_| None, fresh, &|_, _| None)));
-                                replacements.insert(t.identity(), name);
-                            }
-                            _ => exit.set(true),
-                        }
-                        return;
-                    }
-                    W::Node::Let(id) if t.arena().bindings(t.arena().let_node(id).bindings).iter().any(|binding| binds(t, binding.pattern, chained)) => { exit.set(true); return; }
-                    W::Node::Loop(id) if {
-                        let node = t.arena().loop_node(id);
-                        t.arena().bindings(node.accs).iter().chain(t.arena().bindings(node.clauses)).any(|binding| binds(t, binding.pattern, chained))
-                    } => { exit.set(true); return; }
-                    W::Node::Fn(id) if t.arena().params(t.arena().function(id).params).iter().any(|param| binds(t, param.pattern, chained)) => { exit.set(true); return; }
-                    W::Node::State(id) if binds(t, t.arena().state(id).binder, chained) => { exit.set(true); return; }
-                    _ => {}
-                }
-                for &child in t.children() { scan(&t.child(child), chained, extra, exit, written, literal, fresh, replacements); }
-            }
-            let mut replacements = HashMap::new();
-            scan(term, &chained, &extra, &exit, &|a| written(a), &literal, &fresh, &mut replacements);
-            let mut builder = TermBuilder::new();
-            let mapped = builder.rewrite(term, &mut |_, source, draft| {
-                match replacements.get(&source.identity()) {
-                    Some(name) => Draft::RefBinding(name.clone(), Vec::new()),
-                    None => draft,
-                }
-            });
-            let mapped = builder.freeze().handle(mapped);
-            if exit.get() {
-                fits.store(false, Ordering::SeqCst);
-                return None;
-            }
-            let mut bound: Vec<(String, Value)> = chained.iter().map(|name| (name.clone(), Value::Deferred(ty::geometry(), base))).collect();
-            bound.extend(extra.into_inner());
-            Some((mapped, bound))
-            }
-        };
-        let values = E::Host::rewrite_with(
-            get(&w.args, "values").expect("write values"),
-            &|v: &Value| match v {
-                Value::Struct(g) | Value::Source(g) => {
-                    let (op, ty, fields) = (&g.name, &g.ty, &g.fields);
-                    let chained = matches!(get(fields, "geometry"), Some(Value::Deferred(_, x)) if chain.contains(x));
-                    let rebuilt = |fields: Vec<(String, Value)>| if matches!(v, Value::Struct(..)) { struct_value(op.clone(), ty.clone(), fields) } else { source_value(op.clone(), ty.clone(), fields) };
-                    if !chained {
-                        return None;
-                    }
-                    match (op.as_str(), get(fields, "attribute")) {
-                        ("sop/attr", Some(Value::Text(a))) => match written(&txt(a)) {
-                            None => Some(rebuilt(on_base(fields))),
-                            Some((_, kind, earlier))
-                                if fields.iter().all(|(k, v)| match k.as_str() {
-                                    "geometry" | "attribute" => true,
-                                    "owner" => *v == Value::Text(b"point".to_vec()),
-                                    "type" => *v == Value::Text(kind.clone().into_bytes()),
-                                    _ => false,
-                                }) =>
-                            {
-                                Some(E::Host::rewrite_with(&earlier, &|_| None, &fresh, &|_, _| None))
-                            }
-                            Some(_) => {
-                                fits.store(false, Ordering::SeqCst);
-                                Some(v.clone())
-                            }
-                        },
-                        ("sop/count", _) => Some(rebuilt(on_base(fields))),
-                        _ => {
-                            fits.store(false, Ordering::SeqCst);
-                            Some(v.clone())
-                        }
-                    }
-                }
-                Value::Deferred(ty, x) if is_geometry_ty(ty) && chain.contains(x) => {
-                    fits.store(false, Ordering::SeqCst);
-                    None
-                }
-                _ => None,
-            },
-            &fresh,
-            &retarget,
-        );
-        // an attribute's last write wins; this write supersedes the chain's of `name`
-        fn last(entries: &[(String, String, Value)], name: &str) -> Vec<(String, String, Value)> {
-            let mut out = Vec::new();
-            for (i, e) in entries.iter().enumerate() {
-                if e.0 == name || entries[i + 1..].iter().any(|m| m.0 == e.0) {
-                    continue;
-                }
-                out.push(e.clone());
-            }
-            out
-        }
-        let earlier: Vec<Value> = last(&entries, &name).into_iter().map(|(n, k, v)| fused_entry(&n, &k, v)).collect();
-        // the folded writes, whose cards key this one's kernels with its own
-        let mut chain_ids: Vec<Value> = match get(&u.args, FUSED_CHAIN) {
-            Some(Value::List(ids)) => (**ids).clone(),
-            _ => Vec::new(),
-        };
-        chain_ids.push(Value::Int(u.id));
-        // the deferred checks of the folded writes and of the cards passed
-        let mut guards = guards_of(FUSED_GUARDS, &w.args);
-        guards.extend(guards_of(FUSED_GUARDS, &u.args));
-        for i in &chain {
-            if nodes[*i as usize].kind == E::card_kind() {
-                guards.extend(guards_of("guards", &nodes[*i as usize].args));
-            }
-        }
-        if fits.load(Ordering::SeqCst) {
-            let mut args: Vec<(String, Value)> = w
-                .args
-                .iter()
-                .filter_map(|(k, v)| {
-                    if k == "geometry" {
-                        Some((k.clone(), Value::Deferred(ty::geometry(), base)))
-                    } else if k == "values" {
-                        Some((k.clone(), values.clone()))
-                    } else if [FUSED_DELETES, FUSED_WRITES, FUSED_CHAIN, FUSED_GUARDS].contains(&k.as_str()) {
-                        None
-                    } else {
-                        Some((k.clone(), v.clone()))
-                    }
-                })
-                .collect();
-            args.push((FUSED_CHAIN.into(), Value::List(Arc::new(chain_ids))));
-            if !earlier.is_empty() {
-                args.push((FUSED_WRITES.into(), Value::List(Arc::new(earlier))));
-            }
-            if !dels.is_empty() {
-                args.push((FUSED_DELETES.into(), Value::List(Arc::new(dels))));
-            }
-            if !guards.is_empty() {
-                args.push((FUSED_GUARDS.into(), Value::List(Arc::new(guards))));
-            }
-            nodes[id].args = args;
-        }
-    }
-    Ok(Plan { id: E::fresh_plan_id(), nodes, ..plan.clone() })
 }
 
 fn same_function(a: FnId, b: FnId) -> bool {
@@ -2843,7 +2263,7 @@ pub fn objects(lowered: &T) -> Vec<(usize, network::Network, i64)> {
 
 /// One host call lowers a synthetic workspace. Memoize the source digest by the checked workspace
 /// content: 8 entries (each pins a workspace's forms).
-static DIGEST_CACHE: Mutex<Vec<(Vec<usize>, String)>> = Mutex::new(Vec::new());
+static DIGEST_CACHE: LazyLock<lru::Memo<Vec<usize>, String>> = LazyLock::new(|| lru::Memo::new("flow_sop.digests", 8));
 
 fn cached_digest(checked: &Workspace, extra: &[NodeDefinition], compute: &dyn Fn() -> String) -> String {
     // Keyed by the identity (address) of the forms the lowering shares: a one-call lowering rebuilds the
@@ -2860,14 +2280,10 @@ fn cached_digest(checked: &Workspace, extra: &[NodeDefinition], compute: &dyn Fn
     key.extend(checked.graphs.iter().map(|g| g as *const WGraph as usize));
     key.push(4);
     key.extend(extra.iter().map(|g| g as *const NodeDefinition as usize));
-    if let Some((_, d)) = DIGEST_CACHE.lock().unwrap().iter().find(|(k, _)| *k == key) {
-        return d.clone();
+    if let Some(digest) = DIGEST_CACHE.get(&key) {
+        return (*digest).clone();
     }
-    let d = compute();
-    let mut cache = DIGEST_CACHE.lock().unwrap();
-    cache.insert(0, (key, d.clone()));
-    cache.truncate(8);
-    d
+    DIGEST_CACHE.insert(key, compute()).as_ref().clone()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -3142,7 +2558,7 @@ impl CookServices {
         ];
         parts.extend(inputs.iter().map(input_key));
         let key = parts.join("\0");
-        if let Some((backend, n)) = built_find(&key) {
+        if let Some((backend, n)) = BUILT.get(&key).map(|entry| (*entry).clone()) {
             let same = match (&backend, &self.o.gpu.backend) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b),
                 (None, None) => true,
@@ -3153,7 +2569,7 @@ impl CookServices {
             }
         }
         let n = build_fn()?;
-        built_add(key, (self.o.gpu.backend.clone(), n.clone()));
+        BUILT.insert(key, (self.o.gpu.backend.clone(), n.clone()));
         Ok(n)
     }
 

@@ -830,7 +830,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("runtime_resources", &["sdl3", "ogpu"][..]),
         ("renderer", &["ogpu", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
-        ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math"][..]),
+        ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math", "lru"][..]),
         ("flow_eval", &["flow_syntax", "flow_check", "param", "rays_diagnostic", "input", "rays_math"][..]),
         ("flow_graph", &["flow_syntax", "flow_check", "flow_eval", "param"][..]),
         ("flow_ir", &[

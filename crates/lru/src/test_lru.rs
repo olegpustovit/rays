@@ -429,3 +429,20 @@ fn never_table_is_not_dropped() {
     retreat(&usage);
     assert!(table.length() == 1 && owner.bytes() == 64, "Never: not dropped");
 }
+
+#[test]
+fn memo_is_a_bounded_typed_map() {
+    let _guard = setup();
+    let memo: Memo<String, i32> = Memo::new("test.memo", 2);
+    memo.insert("a".into(), 1);
+    memo.insert("b".into(), 2);
+    assert_eq!(memo.get(&"a".into()).as_deref(), Some(&1));
+    memo.insert("c".into(), 3);
+    let kept = ["a", "b", "c"].iter().filter(|k| memo.get(&k.to_string()).is_some()).count();
+    assert_eq!(kept, 2, "capacity bounds the entries");
+    assert_eq!(memo.get(&"c".into()).as_deref(), Some(&3));
+    memo.insert("c".into(), 4);
+    assert_eq!(memo.get(&"c".into()).as_deref(), Some(&4), "insert replaces");
+    memo.remove_where(|v| *v == 4);
+    assert!(memo.get(&"c".into()).is_none());
+}

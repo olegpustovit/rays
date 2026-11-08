@@ -67,6 +67,7 @@ version = "0.1.0"
 dependencies = [
  "flow_syntax",
  "input",
+ "lru",
  "param",
  "rays_diagnostic",
  "rays_math",

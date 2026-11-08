@@ -214,14 +214,8 @@ use crate::ray_host;
 
 pub fn max_iterations() -> usize { MAX_ITERATIONS }
 pub fn noise_table(seed:i64)->Arc<rays_math::noise::T>{
-    static TABLES:LazyLock<Mutex<Vec<(i64,Arc<rays_math::noise::T>)>>>=LazyLock::new(||Mutex::new(Vec::new()));
-    // ponytail: one shared seed-cache lock; shard it only if cross-thread noise workloads contend.
-    let mut entries=TABLES.lock().unwrap_or_else(|e|e.into_inner());
-    if let Some((_,value))=entries.iter().find(|(key,_)|*key==seed){return value.clone()}
-    let value=Arc::new(rays_math::noise::create(seed));
-    if entries.len()==16{entries.pop();}
-    entries.insert(0,(seed,value.clone()));
-    value
+    static TABLES:LazyLock<lru::Memo<i64,rays_math::noise::T>>=LazyLock::new(||lru::Memo::new("flow_check.noise",16));
+    TABLES.get(&seed).unwrap_or_else(||TABLES.insert(seed,rays_math::noise::create(seed)))
 }
 fn array_type_error()->Diagnostic{fail("E_ARRAY_TYPE","Array operation received an incompatible packed array.")}
 fn array_memory_error()->Diagnostic{fail("E_ARRAY_MEMORY","Frame data exceeds available memory.")}
