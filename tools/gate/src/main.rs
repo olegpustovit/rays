@@ -827,11 +827,10 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("rdk", &["rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "parallel"][..]),
         ("rdk_rays", &["rdk_core", "rdk_geom", "rdk_ops", "rays", "rays_math", "param"][..]),
         ("rays", &[
-            "input", "rays_math", "lru", "runtime_resources", "runtime_input", "runtime", "scene_command", "renderer",
+            "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
             "parallel",
         ][..]),
-        ("runtime", &["sdl3", "ogpu"][..]),
-        ("runtime_input", &["sdl3", "input"][..]),
+        ("runtime", &["sdl3", "ogpu", "input"][..]),
         ("runtime_resources", &["sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "ogpu"][..]),
         ("renderer", &["ogpu", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
@@ -922,7 +921,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let gpu = [
         "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu",
         "ogpu_mock", "ogpu_metal", "ogpu_metal_native", "ogpu_vulkan", "ogpu_native", "runtime",
-        "runtime_input", "runtime_resources", "renderer",
+        "runtime_resources", "renderer",
     ];
     let mut upper_no_gpu = upper.to_vec();
     upper_no_gpu.extend(["runtime", "runtime_resources", "renderer"]);
@@ -946,7 +945,6 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
     }
     forbid("runtime", &upper);
-    forbid("runtime_input", &upper);
     forbid("flow_native", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
     forbid("flow_ir", &[
         "rays", "pxui", "pxui_shell", "pxui_graph", "sop", "rdk", "rdk_core", "rdk_geom", "rdk_ops",

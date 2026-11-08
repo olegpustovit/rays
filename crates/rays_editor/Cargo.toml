@@ -17,7 +17,7 @@ flow_native = { path = "../flow_native" }
 rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
 input = { path = "../input" }
-runtime_input = { path = "../runtime_input" }
+runtime = { path = "../runtime" }
 sdl3 = { path = "../sdl3" }
 rdk_rays = { path = "../rdk_rays" }
 rays_pathtracer = { path = "../rays_pathtracer" }

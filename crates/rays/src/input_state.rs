@@ -1,7 +1,7 @@
 //! Per-sketch native input source and the held state folded into each frame.
 use input::{Event, Key, MouseButton};
-use runtime_input as ri;
-use runtime_input::runtime_input_sdl3 as sdl;
+use runtime::runtime_input as ri;
+use runtime::runtime_input_sdl3 as sdl;
 
 /// OCaml's polymorphic `compare` on `Input.key`: constant constructors (ArrowUp .. Delete) in
 /// declaration order first, then `KeyChar c`, then `Unknown n`.

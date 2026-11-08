@@ -438,7 +438,6 @@ dependencies = [
  "rays_math",
  "renderer",
  "runtime",
- "runtime_input",
  "runtime_resources",
  "scene_command",
 ]
@@ -509,7 +508,7 @@ dependencies = [
  "rdk_ops",
  "rdk_rays",
  "renderer",
- "runtime_input",
+ "runtime",
  "runtime_resources",
  "scene_command",
  "sdl3",
@@ -627,7 +626,6 @@ dependencies = [
  "ogpu_vulkan",
  "rays_math",
  "runtime",
- "runtime_input",
  "runtime_resources",
  "scene_command",
 ]
@@ -636,16 +634,9 @@ dependencies = [
 name = "runtime"
 version = "0.1.0"
 dependencies = [
+ "input",
  "ogpu",
  "ogpu_mock",
- "sdl3",
-]
-
-[[package]]
-name = "runtime_input"
-version = "0.1.0"
-dependencies = [
- "input",
  "sdl3",
 ]
 

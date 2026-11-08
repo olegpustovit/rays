@@ -13,7 +13,6 @@ input = { path = "../input" }
 rays_math = { path = "../rays_math" }
 lru = { path = "../lru" }
 runtime_resources = { path = "../runtime_resources" }
-runtime_input = { path = "../runtime_input" }
 runtime = { path = "../runtime" }
 scene_command = { path = "../scene_command" }
 renderer = { path = "../renderer" }

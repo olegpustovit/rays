@@ -51,11 +51,11 @@ fn window_runtime_render() {
     let prepared = |state: state| renderer::prepared_draw(family::Scene2, None, None, None, None, None, geometry_draw { mesh: mesh_.clone(), state });
     let draw = prepared(state_.clone());
     // Service the host event loop between presents, as Sketch::run does.
-    let mut input = runtime_input::create(4096, 4, 4).unwrap();
+    let mut input = runtime::runtime_input::create(4096, 4, 4).unwrap();
     let mut pump = || {
-        runtime_input::begin_frame(&mut input);
-        runtime_input::runtime_input_sdl3::pump(&mut input).unwrap();
-        runtime_input::drain(&mut input);
+        runtime::runtime_input::begin_frame(&mut input);
+        runtime::runtime_input_sdl3::pump(&mut input).unwrap();
+        runtime::runtime_input::drain(&mut input);
     };
     for frame in 1..=600 {
         pump();

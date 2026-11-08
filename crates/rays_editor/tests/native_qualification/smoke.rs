@@ -93,7 +93,7 @@ fn run_keys() {
         (S::Meta, K::Meta), (S::PageUp, K::PageUp), (S::Char('a'), K::KeyChar('a')),
         (S::Space, K::Space), (S::F12, K::F12), (S::Unknown(4242), K::Unknown(4242)),
     ] {
-        assert_eq!(runtime_input::runtime_input_sdl3::key(raw), expected);
+        assert_eq!(runtime::runtime_input_sdl3::key(raw), expected);
     }
 }
 

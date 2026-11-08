@@ -1,9 +1,0 @@
-[package]
-name = "runtime_input"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-
-[dependencies]
-input = { path = "../input" }
-sdl3 = { path = "../sdl3" }

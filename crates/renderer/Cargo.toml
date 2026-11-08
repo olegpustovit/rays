@@ -19,7 +19,6 @@ mem = { path = "../mem" }
 cfmt = { path = "../cfmt" }
 
 [dev-dependencies]
-runtime_input = { path = "../runtime_input" }
 ogpu_mock = { path = "../ogpu_mock" }
 mem_sys = { path = "../mem_sys" }
 
