@@ -46,7 +46,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M8 | done | `66136b7f` — side_lru `find_*_by`; sampler keys `mix::sampler`; `cargo check -p renderer` |
 | M6 | done | `69d08a8a` — `plan_entry` prepends via `with_capacity`+extend (no `insert(0)`); `cargo check -p renderer` |
 | M18 | done (partial) | `ed08c91b` — `vertex_primitive` `AtomicI32` scratch in `make_topology`; `cargo t -p rdk_ops m18_vertex_primitive_scratch` 2 pass; **deferred** five other per-vertex scratch arrays |
-| M1 | done | **this session** — `ExecCtx.site` interned (`sub`/`sub_at`/`sync_site`); route cache; `eval_at_sub`/`eval_concrete_sub`/`arm_error_sub`; `cargo t -p flow_eval test_workspace_eval` 29 pass (~13s) |
+| M1 | done | `9dae5ebd` — `ExecCtx.site` interned (`sub`/`sub_at`/`sync_site`); route cache; `eval_at_sub`/`eval_concrete_sub`/`arm_error_sub`; `cargo t -p flow_eval test_workspace_eval` 29 pass (~13s) |
 | M14 | pending | WIP reverted 2026-11-08 (incomplete `GeoPayload`); resume after clean tree |
 | M3,M5,M13–M17,M19,M21 | pending | |
 | I | pending | |
@@ -102,7 +102,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
-- 2026-11-08: **pause** — M1 squashed to one commit; M14 attempt reverted (tree green); **~28/63**; artifact unchanged; next **I**, **M14**, **B5** `rdk`.
+- 2026-11-08: **pause** — `9dae5ebd` M1 squash; M14 WIP reverted; **~28/63**; artifact unchanged; next **I**, **M14**, **B5** `rdk`.
 - 2026-11-08: M1 landed (site cache); `cargo check -p rays_bin` ~7.4s.
 - 2026-11-08: `684b3d58` **I prep** — `rays` drops unused `ocaml_int`; M1 site-cache rolled back; `m1-retry` worker queued.
 - 2026-11-08: `ba113180` B1 `ScopeStack`; `ed08c91b` M18 partial; Wave B **6/6** (B5 partial); M **11/21**; ~27/63 IDs.
