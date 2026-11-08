@@ -20,10 +20,11 @@ const FRAMES: i64 = 30;
 // M: one shell layout for compose and focus, UI scopes keep depths: basic 1,408 / 157,975;
 // empty 1,263 / 83,202; bare 1,489 / 98,366.
 // M: chrome box labels format the leaf path in place: empty 1,230 / 82,806; bare 1,456 / 97,970.
+// M: the scene graph is read in place: basic 1,384 / 157,167; empty 1,206 / 81,998; bare 1,417 / 96,657.
 // Never raise.
-const BASIC: (u64, u64) = (1_410, 158_500);
-const EMPTY: (u64, u64) = (1_235, 83_000);
-const BARE: (u64, u64) = (1_460, 98_500);
+const BASIC: (u64, u64) = (1_390, 157_500);
+const EMPTY: (u64, u64) = (1_210, 82_500);
+const BARE: (u64, u64) = (1_420, 97_000);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

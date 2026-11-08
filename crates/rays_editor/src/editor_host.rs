@@ -184,7 +184,7 @@ pub fn world(view: Option<&View>, value: &EditorModel, time: Option<f64>) -> Opt
 /// geometry.
 pub fn scene_for_view(override_: Option<kg::T>, view: Option<&View>, value: &EditorModel) -> kg::T {
     let view = view.cloned().unwrap_or(View::Primary);
-    let scene_graph = override_.unwrap_or_else(|| scene(value));
+    let scene_graph = override_.unwrap_or_else(|| scene(value).clone());
     let unwanted: Vec<i64> = scene_graph.iter().filter(|n| !view_wants(value, &view, n.id)).map(|n| n.id).collect();
     if unwanted.is_empty() { scene_graph } else { kg::remove(&unwanted, &scene_graph) }
 }

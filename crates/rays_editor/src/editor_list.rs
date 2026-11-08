@@ -347,7 +347,7 @@ pub fn rows<'a>(value: impl Into<ModelView<'a>>) -> (row_source, lazy_rows) {
     let value = &value.into();
     match (pane_level(value), network(value)) {
         (Level::Scene, _) => {
-            let scene_graph = scene(value);
+            let scene_graph = scene(value).clone();
             let active = value.doc.active_camera;
             (row_source::Objects(scene_graph.clone()), Rc::new(move || (scene_rows(active, &scene_graph), vec!["v".to_string(), "r".to_string()])))
         }

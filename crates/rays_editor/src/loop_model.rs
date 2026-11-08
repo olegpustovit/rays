@@ -397,7 +397,7 @@ pub fn level(value: &LoopModel) -> Option<String> {
 }
 
 pub fn scene_document(value: &LoopModel) -> kg::T {
-    editor_inspect::scene(&value.core)
+    editor_inspect::scene(&value.core).clone()
 }
 
 pub fn same_context(a: &Document, b: &Document) -> bool {
@@ -407,7 +407,7 @@ pub fn same_context(a: &Document, b: &Document) -> bool {
 pub fn resolved_scene(value: &LoopModel) -> kg::T {
     match &value.resolved {
         Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => scene.clone(),
-        _ => editor_inspect::scene(&value.core),
+        _ => editor_inspect::scene(&value.core).clone(),
     }
 }
 

@@ -361,7 +361,7 @@ pub fn sync_cameras(mode: editor_host::scene_mode, core: &mut Model, easy: &easy
     };
     if active != core.doc.active_camera {
         let scene = editor_inspect::scene(core);
-        editor_host::scene_edit(core, editor_host::scene_mode::Amend, Some(active), scene);
+        editor_host::scene_edit(core, editor_host::scene_mode::Amend, Some(active), scene.clone());
     }
 }
 

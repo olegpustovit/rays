@@ -418,7 +418,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let panel_camera = value.camera.clone();
     let panel_extra = extra.clone();
     let camera_panel = move |ui: &mut Ui| -> Panel_result { Rc::new(V::panel(ui, &panel_control, &panel_camera, &panel_extra, inspector)) };
-    let handles_scene = editor_inspect::scene(&value.core);
+    let handles_scene = editor_inspect::scene(&value.core).clone();
     let handles_view = view_camera(&value);
     let handles_extra = extra.clone();
     let handles_key = focus_key(&value);

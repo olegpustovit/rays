@@ -61,8 +61,8 @@ fn int_of(t: &str) -> Option<i64> {
 // ---- levels ----
 
 /// The scene's objects.
-pub fn scene(value: &Model) -> kind_graph::T {
-    doc_mod::scene_graph(&value.doc)
+pub fn scene(value: &Model) -> &kind_graph::T {
+    &value.doc.scene
 }
 
 /// Which objects a view draws: all, the primary view (those no named view lists), or one view.
@@ -91,7 +91,7 @@ pub fn view_wants(value: &Model, view: &View, id: i64) -> bool {
 }
 
 pub fn kind(value: &Model, id: i64) -> Option<String> {
-    scene(value).into_iter().find(|n| n.id == id).map(|n| n.kind)
+    scene(value).iter().find(|n| n.id == id).map(|n| n.kind.clone())
 }
 
 pub fn level_key(level: Level) -> String {
@@ -126,7 +126,7 @@ pub fn kinds(value: &Model, ctx: &context::Context) -> Vec<scat::Descriptor> {
 pub fn objects<'a>(value: impl Into<ModelView<'a>>) -> kind_graph::T {
     let value = &value.into();
     match crate::editor_model::pane_level(value) {
-        Level::Scene => scene(value),
+        Level::Scene => scene(value).clone(),
         Level::Inside(id) => doc_mod::layers(&value.doc, id).cloned().unwrap_or_else(kind_graph::empty),
     }
 }
