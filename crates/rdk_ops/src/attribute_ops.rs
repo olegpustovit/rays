@@ -333,10 +333,10 @@ pub struct Params {
 pub fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
     const OP: &str = "attribute_interpolate";
     let invalid_interpolate = |failure: &error::T| {
-        let code = error::code(failure).as_str();
-        if code == "cancelled" {
+        let code = error::code(failure);
+        if code == Code::Cancelled {
             error::cancelled(OP)
-        } else if code == "invalid_parameter" {
+        } else if code == Code::InvalidParameter {
             make_error(OP, Code::InvalidParameter, error::message(failure))
         } else {
             make_error(OP, Code::InvalidInterpolate, error::message(failure))
