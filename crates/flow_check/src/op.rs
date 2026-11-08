@@ -85,9 +85,47 @@ fn pairs(fields: Vec<(&str, Ty)>) -> Vec<(String, Ty)> { fields.into_iter().map(
 fn signature(pos: Vec<(&str,Ty)>, opt: Vec<(&str,Ty)>, rest: Option<(&str,Ty)>, kw: Vec<(&str,Ty)>) -> Signature {
     Signature { pos: pairs(pos), opt: pairs(opt), rest: rest.map(|(n,t)|(n.into(),t)), kw: pairs(kw) }
 }
-fn empty_check() -> Check { Arc::new(|_| Ok(())) }
+type NodeDelegate = fn(&Frame, &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), &Args) -> Result<Value, Diagnostic>;
+static EMPTY_CHECK: LazyLock<Check> = LazyLock::new(|| Arc::new(|_| Ok(())));
+fn delegate_body(f: NodeDelegate) -> Body { Arc::new(f) }
+macro_rules! builtin_delegates {
+    ($(($var:ident, $name:literal)),* $(,)?) => {
+        $(fn $var(_: &Frame, node: &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), args: &Args) -> Result<Value, Diagnostic> { node($name, args) })*
+        static BUILTIN_DELEGATE: &[(&str, NodeDelegate)] = &[$(($name, $var)),*];
+    };
+}
+macro_rules! gpu_stage_only {
+    ($(($var:ident, $name:literal)),* $(,)?) => {
+        $(fn $var(_: &Frame, _: &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), _: &Args) -> Result<Value, Diagnostic> {
+            Err(fail("E_GPU_STAGE", concat!($name, " runs only in a fragment stage.")))
+        })*
+        static GPU_STAGE_ONLY: &[(&str, NodeDelegate)] = &[$(($name, $var)),*];
+    };
+}
+fn builtin_delegate(name: &str) -> Option<NodeDelegate> { BUILTIN_DELEGATE.iter().find(|(n, _)| *n == name).map(|(_, f)| *f) }
+fn gpu_stage_body(name: &str) -> NodeDelegate { GPU_STAGE_ONLY.iter().find(|(n, _)| *n == name).map(|(_, f)| *f).unwrap_or_else(|| panic!("missing gpu stage body for {name}")) }
+builtin_delegates!(
+    (del_draw_image, "draw/image"), (del_draw_background, "draw/background"), (del_draw_point, "draw/point"), (del_draw_points, "draw/points"),
+    (del_draw_line, "draw/line"), (del_draw_rect, "draw/rect"), (del_draw_circle, "draw/circle"), (del_draw_circles, "draw/circles"),
+    (del_draw_rects, "draw/rects"), (del_draw_lines, "draw/lines"), (del_draw_text, "draw/text"), (del_draw_translate, "draw/translate"),
+    (del_draw_rotate, "draw/rotate"), (del_draw_scale, "draw/scale"), (del_draw_rounded_rect, "draw/rounded_rect"), (del_draw_polygon, "draw/polygon"),
+    (del_draw_polyline, "draw/polyline"), (del_draw_merge, "draw/merge"),
+    (del_host_quit, "host/quit"), (del_host_save_png, "host/save_png"), (del_host_dialog, "host/dialog"), (del_host_play, "host/play"),
+    (del_audio_synth, "audio/synth"), (del_audio_load, "audio/load"),
+    (del_image_load, "image/load"), (del_image_render, "image/render"), (del_image_map, "image/map"),
+);
+gpu_stage_only!(
+    (gpu_err_fwidth, "gpu/fwidth"), (gpu_err_float_bits, "gpu/float-bits"), (gpu_err_sample, "gpu/sample"), (gpu_err_sample_level, "gpu/sample-level"),
+    (gpu_err_read, "gpu/read"), (gpu_err_texture_size, "gpu/texture-size"), (gpu_err_instance_id, "gpu/instance-id"), (gpu_err_front_facing, "gpu/front-facing"),
+    (gpu_err_depth, "gpu/depth"), (gpu_err_fragment_x, "gpu/fragment-x"), (gpu_err_fragment_y, "gpu/fragment-y"),
+    (gpu_err_trace_triangles, "gpu/trace-triangles"), (gpu_err_trace_any, "gpu/trace-any"), (gpu_err_trace_curves, "gpu/trace-curves"),
+    (gpu_err_trace_curves_any, "gpu/trace-curves-any"), (gpu_err_scene_vertex, "gpu/scene-vertex"), (gpu_err_scene_vertex_end, "gpu/scene-vertex-end"),
+    (gpu_err_scene_instance, "gpu/scene-instance"), (gpu_err_scene_sphere, "gpu/scene-sphere"), (gpu_err_scene_strand, "gpu/scene-strand"),
+    (gpu_err_scene_spheres, "gpu/scene-spheres"), (gpu_err_scene_strands, "gpu/scene-strands"), (gpu_err_group_scan, "gpu/group-scan"),
+    (gpu_err_store, "gpu/store"), (gpu_err_store_int, "gpu/store-int"),
+);
 fn mk(name: &str, ctx: Context, signature: Signature, out: Out, body: Body) -> Op {
-    Op { name:name.into(), ctx, signature, out, out_args:None, any_num:false, choices:Vec::new(), shape:Shape::Scalar, live:false, check:empty_check(), body, category:"Math".into(), arithmetic:None, packed_extension:None }
+    Op { name:name.into(), ctx, signature, out, out_args:None, any_num:false, choices:Vec::new(), shape:Shape::Scalar, live:false, check:EMPTY_CHECK.clone(), body, category:"Math".into(), arithmetic:None, packed_extension:None }
 }
 fn with_defaults(mut op: Op, category: &str) -> Op { op.category=category.into(); op }
 fn output_const(ty: Ty) -> Out { Arc::new(move |_| Ok(ty.clone())) }
@@ -544,7 +582,7 @@ fn draw_ops()->Vec<Op>{
         ("draw/polyline",vec![("points",arr(Ty::Vec3))],vec![],None,vec![("color",Ty::Color)]),
         ("draw/merge",vec![],vec![],Some(("drawing",Ty::Any)),vec![]),
     ];
-    specs.drain(..).map(|(name,pos,optv,rest,kw)|op_with(name,context::draw(),pos,optv,rest,kw,drawing.clone(),"Drawing",Arc::new(move |_,node,args|node(name,args)))).collect()
+    specs.drain(..).map(|(name,pos,optv,rest,kw)|op_with(name,context::draw(),pos,optv,rest,kw,drawing.clone(),"Drawing",delegate_body(builtin_delegate(name).expect("draw delegate")))).collect()
 }
 fn host_ops()->Vec<Op>{
     let effect=named_ty("effect");let sample=named_ty("sample");
@@ -556,7 +594,7 @@ fn host_ops()->Vec<Op>{
         ("audio/synth",vec![],vec![],None,vec![("waveform",Ty::Text),("frequency",Ty::Float),("duration",Ty::Float),("volume",Ty::Float)],sample.clone(),vec![("waveform",vec!["sine","square","triangle","sawtooth"])]),
         ("audio/load",vec![("path",Ty::Text)],vec![],None,vec![],sample,vec![]),
     ];
-    specs.into_iter().map(|(name,pos,optv,rest,kw,out,choices)|{let mut op=op_with(name,context::host(),pos,optv,rest,kw,out,"Host",Arc::new(move |_,node,args|node(name,args)));op.choices=choices.into_iter().map(|(k,vs)|(k.into(),vs.into_iter().map(str::to_owned).collect())).collect();op}).collect()
+    specs.into_iter().map(|(name,pos,optv,rest,kw,out,choices)|{let mut op=op_with(name,context::host(),pos,optv,rest,kw,out,"Host",delegate_body(builtin_delegate(name).expect("host delegate")));op.choices=choices.into_iter().map(|(k,vs)|(k.into(),vs.iter().map(|s|(*s).into()).collect())).collect();op}).collect()
 }
 fn image_ops()->Vec<Op>{
     let map_ty=Ty::Fn(Some(Box::new(ty::FnSignature{params:vec![Ty::Vec2],result:Ty::Vec4})));
@@ -573,7 +611,7 @@ fn image_ops()->Vec<Op>{
             if let Some(value)=frequency{out.push(("frequency".into(),value));}
             out.extend(args.iter().filter(|(n,_)|n!="freq"&&n!="frequency").cloned());
             node(name,&out)
-        })}else{Arc::new(move |_,node,args|node(name,args))};
+        })}else{delegate_body(builtin_delegate(name).expect("image delegate"))};
         let mut op=op_with(name,context::value(),pos,vec![],None,kw,named_ty("image"),"Image",body);op.shape=Shape::Struct{splice:false};op
     }).collect()
 }
@@ -598,7 +636,7 @@ fn stage_ops()->Vec<Op>{
         ("gpu/scene-spheres",vec![],Ty::Int),("gpu/scene-strands",vec![],Ty::Int),
         ("gpu/group-scan",vec![("x",Ty::Int)],rec(vec![("before",Ty::Int),("total",Ty::Int)])),
         ("gpu/store",vec![("buffer",arr(Ty::Float)),("index",Ty::Int),("value",Ty::Float)],Ty::Int),("gpu/store-int",vec![("buffer",arr(Ty::Int)),("index",Ty::Int),("value",Ty::Int)],Ty::Int),
-    ].into_iter().map(|(name,pos,out)|{let mut op=value_op(name,pos,vec![],None,vec![],out,"Raster",Arc::new(move |_,_,_|Err(fail("E_GPU_STAGE",&format!("{name} runs only in a fragment stage.")))));op.live=true;op}).collect::<Vec<_>>();
+    ].into_iter().map(|(name,pos,out)|{let mut op=value_op(name,pos,vec![],None,vec![],out,"Raster",delegate_body(gpu_stage_body(name)));op.live=true;op}).collect::<Vec<_>>();
     let scene_ty=rec(vec![("t",Ty::Float),("prim",Ty::Int),("u",Ty::Float),("v",Ty::Float),("normal",Ty::Vec3),("hit",Ty::Bool),("instance",Ty::Int)]);
     let body:Body=Arc::new(|_,_,args|{
         let origin=vec3(args.get_arg("origin")?)?;let dir=vec3(args.get_arg("dir")?)?;
@@ -863,7 +901,7 @@ fn builtins()->Vec<Op>{
     ops.append(&mut available);
     ops
 }
-// ponytail: B1 — static builtin `&[Spec]` fn pointers; workspace scope stack keyed by `PathId`.
+// ponytail: B1 — workspace scope stack keyed by `PathId` (interned); more builtin delegate tables in draw/host/image/gpu.
 static ALL:LazyLock<Vec<Op>>=LazyLock::new(builtins);
 pub fn all()->&'static [Op]{ALL.as_slice()}
 fn builtin_index()->&'static std::collections::HashMap<&'static str,usize>{

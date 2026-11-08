@@ -32,13 +32,13 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
 | B3 | done | `5fdb5fb3` — `gpu_editor` + `tests/support`; 7× `gpu_suite_t*` + qual → 2 test links; `cargo t -p rays_editor run_lowering` ~2.9s |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1 | active | `3455ea12` — term_arena: drop `Debug`/`PartialEq` on 31 table payload rows (ids + manual `Term` debug/eq unchanged); ponytail static builtin op table + workspace scope stack in `op.rs`; no `cargo-llvm-lines` (op.rs 935 LOC, 141× `Arc::new`) |
+| B1 | active | `533489ee` term_arena derive trim; `a5219422` op static `BUILTIN_DELEGATE`/`GPU_STAGE_ONLY` fn pointers + `EMPTY_CHECK`; ponytail workspace scope stack `PathId`; op.rs ~138× `Arc::new` (was 141) |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
 | B5 | done (partial) | `flow_sop_catalog` crate; `editor_document` → catalog/port/network/manifest; `flow_sop` re-exports + `generate()` wrapper; operator tests in `flow_sop`; **rdk delete deferred** (sop/flow_sop/flow_gpu/flow_native/rays_editor) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
 | M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
 | M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
-| M4 | done | `5b5c36a9` — `Profile::execution_count` / `probe_run::report_count`; `sync_scope` defers profile clone until after `!moved && !fresh`; `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` 3 pass |
+| M4 | done | `0f3804c3` — `Profile::execution_count` / `probe_run::report_count`; `sync_scope` defers profile clone until after `!moved && !fresh`; `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` 3 pass |
 | M1,M3,M5–M9,M11–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
@@ -94,7 +94,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 ## Session log
 
 - 2026-11-08: B5 — `flow_sop_catalog` (catalog/manifest/port/network/encoded_parameters); `editor_document` direct dep; `cargo check -p flow_sop_catalog -p flow_sop -p editor_document -p rays_bin`.
-- 2026-11-08: B5 `94aa4546` + catalog tests; B1 `533489ee` term_arena trim; `cargo t -p flow_sop catalog` 2 pass.
+- 2026-11-08: B5 `94aa4546` + catalog tests; B1 `533489ee` term_arena trim, `a5219422` delegate fn tables; `cargo t -p flow_sop catalog` 2 pass.
 - 2026-11-08: `f6ca915b` M20, `bbe7f6ae` M2, `96fab43d` B2; `cargo check -p rays_bin` ~23s after profile shift.
 - 2026-11-08: B0 — invalidation checklist + script audit in PROGRESS §B0; warm pair flow_check 0.15 s / 0.07 s; log `.subagent-logs/b0.log`.
 - 2026-11-08: **Wave A closed** `3a293e9b` A6; plan audit appended; m10/b0 workers queued.
