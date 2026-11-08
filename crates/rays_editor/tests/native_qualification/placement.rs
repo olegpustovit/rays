@@ -222,7 +222,7 @@ fn chain_counterexamples() {
 fn retained_generations() {
     with_owner(|owner,config| {
         let config = Gpu::Config {readback_per_float:None,..config.clone()};
-        let source = format!("(workspace generations (graph g :context sop (sop/with_attr (sop/mesh_planes :points {{:x (array/float 262144) :y (array/float 262144) :z (array/float 262144)}} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)) :P (exact (map (fn [i] [(+ (+ (- (/ (mod i 256) 256) 0.5) (* t 0.002)) (* {} 0.01)) (- (/ (floor (/ i 256)) 256) 0]) (array/range 262144))))))",wave());
+        let source = format!("(workspace generations (graph g :context sop (sop/with_attr (sop/mesh_planes :points {{:x (array/float 262144) :y (array/float 262144) :z (array/float 262144)}} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)) :P (exact (map (fn [i] [(+ (+ (- (/ (mod i 256) 256) 0.5) (* t 0.002)) (* {} 0.01)) (- (/ (floor (/ i 256)) 256) 0.5) 0]) (array/range 262144))))))",wave());
         let (small,small_node) = lower_source(&config,&source.replace("262144","32"));
         let mut small_session = sop::session::create(0,0).unwrap();
         isogrid::cook(&mut small_session,&small_node,0.); isogrid::cook(&mut small_session,&small_node,0.);
