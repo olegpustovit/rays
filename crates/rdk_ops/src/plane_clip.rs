@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::subdivide_refine::{ABytes, AFloats, AInts};
 use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, geometry, group, packed, ragged_ops, support,
     topology, topology_index,
@@ -760,8 +759,8 @@ fn fast_plan(
     }
     let slots = if ctx.keep == Keep::All { 2 } else { 1 };
     let candidate_count = primitive_count * slots;
-    let candidate_corners = AInts::new(candidate_count as i64, 0);
-    support::parallel_for(ctx.cancel_ref(), (grain / 8).max(1), candidate_count as i64, &|candidate| {
+    let mut candidate_corners = vec![0i64; candidate_count];
+    support::par_fill(ctx.cancel_ref(), (grain / 8).max(1), &mut candidate_corners, &|candidate| {
         let candidate = candidate as usize;
         let primitive = candidate / slots;
         let side = match ctx.keep {
@@ -772,9 +771,7 @@ fn fast_plan(
         let first = ctx.primitive_offsets[primitive] as usize;
         let last = ctx.primitive_offsets[primitive + 1] as usize;
         if !ctx.primitive_selected(primitive) {
-            if slots == 1 || candidate % slots == 0 {
-                candidate_corners.set(candidate as i64, (last - first) as i64);
-            }
+            Ok(if slots == 1 || candidate % slots == 0 { (last - first) as i64 } else { 0 })
         } else {
             let arity = last - first;
             let mut repeated = arity > 64;
@@ -794,7 +791,7 @@ fn fast_plan(
                 (first..last).any(|vertex| ctx.classified_distance[ctx.vertex_points[vertex] as usize] < 0.0)
             };
             if repeated {
-                candidate_corners.set(candidate as i64, -1);
+                Ok(-1)
             } else if enabled {
                 let mut count: i64 = 0;
                 let mut inside_runs = 0;
@@ -812,21 +809,18 @@ fn fast_plan(
                     }
                     previous = current;
                 }
-                candidate_corners.set(
-                    candidate as i64,
-                    if inside_runs > 1 {
-                        -1
-                    } else if count >= 3 {
-                        count
-                    } else {
-                        0
-                    },
-                );
+                Ok(if inside_runs > 1 {
+                    -1
+                } else if count >= 3 {
+                    count
+                } else {
+                    0
+                })
+            } else {
+                Ok(0)
             }
         }
-        Ok(())
     })?;
-    let mut candidate_corners = candidate_corners.into_vec();
     if candidate_corners.iter().any(|&count| count < 0) {
         return Ok(None);
     }
@@ -854,123 +848,148 @@ fn fill_fast_plan(
     slots: usize,
     candidate_output: &[i64],
 ) -> Result<(), error::T> {
-    let total = b.tokens.len() as i64;
-    let output_count = b.kinds.len() as i64;
-    let tokens = AInts::new(total, 0);
-    let corner_a = AInts::new(total, -1);
-    let corner_b = AInts::new(total, -1);
-    let corner_t = AFloats::new(total, 0.0);
-    let kinds = ABytes::new(output_count, 0);
-    let primitive_source = AInts::new(output_count, -1);
-    let primitive_side = AInts::new(output_count, 0);
-    let primitive_clipped = ABytes::new(output_count, 0);
-    let primitive_cap = ABytes::new(output_count, 0);
+    let total = b.tokens.len();
+    let output_count = b.kinds.len();
+    let mut tokens = vec![0usize; total];
+    let mut corner_a = vec![-1i64; total];
+    let mut corner_b = vec![-1i64; total];
+    let mut corner_t = vec![0.0f64; total];
+    let mut kinds = vec![0u8; output_count];
+    let mut primitive_source = vec![-1i64; output_count];
+    let mut primitive_side = vec![0i64; output_count];
+    let mut primitive_clipped = vec![false; output_count];
+    let mut primitive_cap = vec![false; output_count];
     let offsets = &b.offsets;
-    support::parallel_for(ctx.cancel_ref(), (grain / 8).max(1), candidate_output.len() as i64, &|candidate| {
-        let candidate = candidate as usize;
-        let encoded = candidate_output[candidate];
-        if encoded <= 0 {
-            return Ok(());
-        }
-        let output = (encoded - 1) as usize;
-        let primitive = candidate / slots;
-        let first = ctx.primitive_offsets[primitive] as usize;
-        let last = ctx.primitive_offsets[primitive + 1] as usize;
-        let mut at = offsets[output] as usize;
-        if !ctx.primitive_selected(primitive) {
-            for vertex in first..last {
-                let point = ctx.vertex_points[vertex] as usize;
-                tokens.set(at as i64, (ctx.passthrough_token(point)) as i64);
-                corner_a.set(at as i64, vertex as i64);
-                corner_b.set(at as i64, vertex as i64);
-                corner_t.set(at as i64, 0.0);
-                at += 1;
-            }
-            if at as i64 != offsets[output + 1] {
-                return Err(fail("Rdk.Plane_clip.clip: passthrough plan/fill disagreement"));
-            }
-            kinds.set(output as i64, 0);
-            primitive_source.set(output as i64, primitive as i64);
-            primitive_side.set(output as i64, -1);
-            primitive_clipped.set(output as i64, u8::from(false));
-            primitive_cap.set(output as i64, 0);
-        } else {
-            let side = match ctx.keep {
-                Keep::Above => 0,
-                Keep::Below => 1,
-                Keep::All => candidate % 2,
-            };
-            let mut has_positive = false;
-            let mut has_negative = false;
-            let mut previous = last - 1;
-            for current in first..last {
-                let previous_point = ctx.vertex_points[previous];
-                let current_point = ctx.vertex_points[current] as usize;
-                let value = ctx.classified_distance[current_point];
-                if value > 0.0 {
-                    has_positive = true;
+    // Candidates map to outputs in order, so each candidate range owns a contiguous block of outputs and corners.
+    let candidate_grain = (grain / 8).max(1);
+    let mut first_output = vec![0usize];
+    for chunk in candidate_output.chunks(candidate_grain as usize) {
+        first_output.push(first_output[first_output.len() - 1] + chunk.iter().filter(|&&encoded| encoded > 0).count());
+    }
+    let ranges = first_output.len() as i64 - 1;
+    let corner_bound = |range: i64| offsets[first_output[range as usize]] as usize;
+    let output_bound = |range: i64| first_output[range as usize];
+    {
+        let (wt, wa, wb, wf) = (
+            support::Windows::new(&mut tokens, ranges, corner_bound),
+            support::Windows::new(&mut corner_a, ranges, corner_bound),
+            support::Windows::new(&mut corner_b, ranges, corner_bound),
+            support::Windows::new(&mut corner_t, ranges, corner_bound),
+        );
+        let (wk, wsrc, wside, wclipped, wcap) = (
+            support::Windows::new(&mut kinds, ranges, output_bound),
+            support::Windows::new(&mut primitive_source, ranges, output_bound),
+            support::Windows::new(&mut primitive_side, ranges, output_bound),
+            support::Windows::new(&mut primitive_clipped, ranges, output_bound),
+            support::Windows::new(&mut primitive_cap, ranges, output_bound),
+        );
+        support::run_indexed_ranges(candidate_grain, candidate_output.len() as i64, &|range, first_candidate, last_candidate| {
+            let (tokens, corner_a, corner_b, corner_t) = (wt.take(range), wa.take(range), wb.take(range), wf.take(range));
+            let (kinds, primitive_source, primitive_side) = (wk.take(range), wsrc.take(range), wside.take(range));
+            let (primitive_clipped, primitive_cap) = (wclipped.take(range), wcap.take(range));
+            let (corner_base, output_base) = (corner_bound(range), output_bound(range));
+            for candidate in first_candidate..last_candidate {
+                support::poll(ctx.cancel_ref(), candidate)?;
+                let candidate = candidate as usize;
+                let encoded = candidate_output[candidate];
+                if encoded <= 0 {
+                    continue;
                 }
-                if value < 0.0 {
-                    has_negative = true;
-                }
-                let previous_inside = ctx.inside(side, previous_point);
-                let current_inside = side_inside(side, value);
-                if current_inside || previous_inside {
-                    if current_inside != previous_inside {
-                        // write_intersection previous -> current
-                        let previous_point = previous_point as usize;
-                        let previous_distance = ctx.classified_distance[previous_point];
-                        let current_distance = value;
-                        if previous_distance == 0.0 {
-                            tokens.set(at as i64, (ctx.token(side, previous_point)) as i64);
-                            corner_a.set(at as i64, previous as i64);
-                            corner_b.set(at as i64, previous as i64);
-                        } else if current_distance == 0.0 {
-                            tokens.set(at as i64, (ctx.token(side, current_point)) as i64);
-                            corner_a.set(at as i64, current as i64);
-                            corner_b.set(at as i64, current as i64);
-                        } else {
-                            let denominator = ctx.raw_distance[current_point] - ctx.raw_distance[previous_point];
-                            if denominator == 0.0 || !denominator.is_finite() {
-                                return Err(fail("Rdk.Plane_clip.clip: unstable plane intersection"));
-                            }
-                            tokens.set(at as i64, (ctx.edge_token(side, previous)?) as i64);
-                            corner_a.set(at as i64, previous as i64);
-                            corner_b.set(at as i64, current as i64);
-                            corner_t.set(at as i64, clamp01(-ctx.raw_distance[previous_point] / denominator));
+                let output = (encoded - 1) as usize;
+                let primitive = candidate / slots;
+                let first = ctx.primitive_offsets[primitive] as usize;
+                let last = ctx.primitive_offsets[primitive + 1] as usize;
+                let mut at = offsets[output] as usize;
+                if !ctx.primitive_selected(primitive) {
+                    for vertex in first..last {
+                        let point = ctx.vertex_points[vertex] as usize;
+                        tokens[at - corner_base] = ctx.passthrough_token(point);
+                        corner_a[at - corner_base] = vertex as i64;
+                        corner_b[at - corner_base] = vertex as i64;
+                        corner_t[at - corner_base] = 0.0;
+                        at += 1;
+                    }
+                    if at as i64 != offsets[output + 1] {
+                        return Err(fail("Rdk.Plane_clip.clip: passthrough plan/fill disagreement"));
+                    }
+                    kinds[output - output_base] = 0;
+                    primitive_source[output - output_base] = primitive as i64;
+                    primitive_side[output - output_base] = -1;
+                    primitive_clipped[output - output_base] = false;
+                    primitive_cap[output - output_base] = false;
+                } else {
+                    let side = match ctx.keep {
+                        Keep::Above => 0,
+                        Keep::Below => 1,
+                        Keep::All => candidate % 2,
+                    };
+                    let mut has_positive = false;
+                    let mut has_negative = false;
+                    let mut previous = last - 1;
+                    for current in first..last {
+                        let previous_point = ctx.vertex_points[previous];
+                        let current_point = ctx.vertex_points[current] as usize;
+                        let value = ctx.classified_distance[current_point];
+                        if value > 0.0 {
+                            has_positive = true;
                         }
-                        at += 1;
+                        if value < 0.0 {
+                            has_negative = true;
+                        }
+                        let previous_inside = ctx.inside(side, previous_point);
+                        let current_inside = side_inside(side, value);
+                        if current_inside || previous_inside {
+                            if current_inside != previous_inside {
+                                // write_intersection previous -> current
+                                let previous_point = previous_point as usize;
+                                let previous_distance = ctx.classified_distance[previous_point];
+                                let current_distance = value;
+                                if previous_distance == 0.0 {
+                                    tokens[at - corner_base] = ctx.token(side, previous_point);
+                                    corner_a[at - corner_base] = previous as i64;
+                                    corner_b[at - corner_base] = previous as i64;
+                                } else if current_distance == 0.0 {
+                                    tokens[at - corner_base] = ctx.token(side, current_point);
+                                    corner_a[at - corner_base] = current as i64;
+                                    corner_b[at - corner_base] = current as i64;
+                                } else {
+                                    let denominator = ctx.raw_distance[current_point] - ctx.raw_distance[previous_point];
+                                    if denominator == 0.0 || !denominator.is_finite() {
+                                        return Err(fail("Rdk.Plane_clip.clip: unstable plane intersection"));
+                                    }
+                                    tokens[at - corner_base] = ctx.edge_token(side, previous)?;
+                                    corner_a[at - corner_base] = previous as i64;
+                                    corner_b[at - corner_base] = current as i64;
+                                    corner_t[at - corner_base] = clamp01(-ctx.raw_distance[previous_point] / denominator);
+                                }
+                                at += 1;
+                            }
+                            if current_inside {
+                                tokens[at - corner_base] = ctx.token(side, current_point);
+                                corner_a[at - corner_base] = current as i64;
+                                corner_b[at - corner_base] = current as i64;
+                                corner_t[at - corner_base] = 0.0;
+                                at += 1;
+                            }
+                        }
+                        previous = current;
                     }
-                    if current_inside {
-                        tokens.set(at as i64, (ctx.token(side, current_point)) as i64);
-                        corner_a.set(at as i64, current as i64);
-                        corner_b.set(at as i64, current as i64);
-                        corner_t.set(at as i64, 0.0);
-                        at += 1;
+                    if at as i64 != offsets[output + 1] {
+                        return Err(fail("Rdk.Plane_clip.clip: polygon plan/fill disagreement"));
                     }
+                    kinds[output - output_base] = 0;
+                    primitive_source[output - output_base] = primitive as i64;
+                    primitive_side[output - output_base] = side as i64;
+                    primitive_clipped[output - output_base] = has_positive && has_negative;
+                    primitive_cap[output - output_base] = false;
                 }
-                previous = current;
             }
-            if at as i64 != offsets[output + 1] {
-                return Err(fail("Rdk.Plane_clip.clip: polygon plan/fill disagreement"));
-            }
-            kinds.set(output as i64, 0);
-            primitive_source.set(output as i64, primitive as i64);
-            primitive_side.set(output as i64, side as i64);
-            primitive_clipped.set(output as i64, u8::from(has_positive && has_negative));
-            primitive_cap.set(output as i64, 0);
-        }
-        Ok(())
-    })?;
-    b.tokens = tokens.into_vec().into_iter().map(|token| token as usize).collect();
-    b.corner_a = corner_a.into_vec();
-    b.corner_b = corner_b.into_vec();
-    b.corner_t = corner_t.into_vec();
-    b.kinds = kinds.into_vec();
-    b.primitive_source = primitive_source.into_vec();
-    b.primitive_side = primitive_side.into_vec();
-    b.primitive_clipped = primitive_clipped.into_vec().into_iter().map(|flag| flag != 0).collect();
-    b.primitive_cap = primitive_cap.into_vec().into_iter().map(|flag| flag != 0).collect();
+            Ok(())
+        })?;
+    }
+    (b.tokens, b.corner_a, b.corner_b, b.corner_t) = (tokens, corner_a, corner_b, corner_t);
+    (b.kinds, b.primitive_source, b.primitive_side) = (kinds, primitive_source, primitive_side);
+    (b.primitive_clipped, b.primitive_cap) = (primitive_clipped, primitive_cap);
     Ok(())
 }
 
@@ -1385,17 +1404,18 @@ fn float_plane(
     b: &[i64],
     t: &[f64],
 ) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::new(a.len() as i64, 0.0);
-    support::parallel_for(cancel_ref, grain, a.len() as i64, &|index| {
+    let mut output = vec![0.0; a.len()];
+    support::par_fill(cancel_ref, grain, &mut output, &|index| {
         let at = index as usize;
-        if a[at] >= 0 {
+        Ok(if a[at] >= 0 {
             let sa = source[a[at] as usize];
             let sb = source[b[at] as usize];
-            output.set(index, sa + (sb - sa) * t[at]);
-        }
-        Ok(())
+            sa + (sb - sa) * t[at]
+        } else {
+            0.0
+        })
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 fn nearest_plane(
@@ -1404,15 +1424,12 @@ fn nearest_plane(
     source: &[f64],
     primitive_source: &[i64],
 ) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::new(primitive_source.len() as i64, 0.0);
-    support::parallel_for(cancel_ref, grain, primitive_source.len() as i64, &|index| {
+    let mut output = vec![0.0; primitive_source.len()];
+    support::par_fill(cancel_ref, grain, &mut output, &|index| {
         let input = primitive_source[index as usize];
-        if input >= 0 {
-            output.set(index, source[input as usize]);
-        }
-        Ok(())
+        Ok(if input >= 0 { source[input as usize] } else { 0.0 })
     })?;
-    Ok(output.into_vec())
+    Ok(output)
 }
 
 pub fn clip(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -1521,32 +1538,37 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             },
         }
     };
-    let raw_distance = AFloats::new(point_count as i64, 0.0);
-    let classified_distance = AFloats::new(point_count as i64, 0.0);
-    support::parallel_for(cancel_ref, grain, point_count as i64, &|point| {
-        let point = point as usize;
-        let (x, y, z) = (positions.x[point], positions.y[point], positions.z[point]);
-        if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-            return Err(fail("Rdk.Plane_clip.clip: point positions must be finite"));
-        }
-        let cx = clip_x[point];
-        let cy = clip_y.as_ref().map_or(0.0, |values| values[point]);
-        let cz = clip_z.as_ref().map_or(0.0, |values| values[point]);
-        if !(cx.is_finite() && cy.is_finite() && cz.is_finite()) {
-            return Err(fail(&format!(
-                "Rdk.Plane_clip.clip: point clip attribute \"{clip_attribute}\" must contain finite values"
-            )));
-        }
-        let value = (cx - ox) * nx + (cy - oy) * ny + (cz - oz) * nz - distance;
-        if !value.is_finite() {
-            return Err(fail("Rdk.Plane_clip.clip: signed plane distance overflowed"));
-        }
-        raw_distance.set(point as i64, value);
-        classified_distance.set(point as i64, if value.abs() <= snapping_tolerance { 0.0 } else { value });
-        Ok(())
-    })?;
-    let raw_distance = raw_distance.into_vec();
-    let classified_distance = classified_distance.into_vec();
+    let (mut raw_distance, mut classified_distance) = (vec![0.0f64; point_count], vec![0.0f64; point_count]);
+    {
+        let (wr, wc) = (support::Windows::even(&mut raw_distance, grain), support::Windows::even(&mut classified_distance, grain));
+        support::run_indexed_ranges(grain, point_count as i64, &|range, first, last| {
+            let (raw_distance, classified_distance) = (wr.take(range), wc.take(range));
+            for element in first..last {
+                support::poll(cancel_ref, element)?;
+                let local = (element - first) as usize;
+                let point = element as usize;
+                let (x, y, z) = (positions.x[point], positions.y[point], positions.z[point]);
+                if !(x.is_finite() && y.is_finite() && z.is_finite()) {
+                    return Err(fail("Rdk.Plane_clip.clip: point positions must be finite"));
+                }
+                let cx = clip_x[point];
+                let cy = clip_y.as_ref().map_or(0.0, |values| values[point]);
+                let cz = clip_z.as_ref().map_or(0.0, |values| values[point]);
+                if !(cx.is_finite() && cy.is_finite() && cz.is_finite()) {
+                    return Err(fail(&format!(
+                        "Rdk.Plane_clip.clip: point clip attribute \"{clip_attribute}\" must contain finite values"
+                    )));
+                }
+                let value = (cx - ox) * nx + (cy - oy) * ny + (cz - oz) * nz - distance;
+                if !value.is_finite() {
+                    return Err(fail("Rdk.Plane_clip.clip: signed plane distance overflowed"));
+                }
+                raw_distance[local] = value;
+                classified_distance[local] = if value.abs() <= snapping_tolerance { 0.0 } else { value };
+            }
+            Ok(())
+        })?;
+    }
     let source_topology = geometry::topology(geometry_value);
     let topology_view = topology::View::view(source_topology)?;
     let source_index = topology_index::create(cancel_ref, source_topology)?;
@@ -1569,33 +1591,38 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let (affected_points, shared_points): (Option<Vec<u8>>, Option<Vec<u8>>) = match &primitive_selection {
         None => (None, None),
         Some(_) => {
-            let affected = ABytes::new(point_count as i64, 0);
-            let shared = ABytes::new(point_count as i64, 0);
-            support::parallel_for(cancel_ref, grain, point_count as i64, &|point| {
-                let point = point as usize;
-                let mut has_selected = false;
-                let mut has_unselected = false;
-                let mut at = index_view.point_offsets[point] as usize;
-                let last = index_view.point_offsets[point + 1] as usize;
-                while at < last && !(has_selected && has_unselected) {
-                    let vertex = index_view.point_vertices[at] as usize;
-                    if primitive_selected(index_view.primitive_of_vertex[vertex] as usize) {
-                        has_selected = true;
-                    } else {
-                        has_unselected = true;
+            let (mut affected, mut shared) = (vec![0u8; point_count], vec![0u8; point_count]);
+            {
+                let (wa, ws) = (support::Windows::even(&mut affected, grain), support::Windows::even(&mut shared, grain));
+                support::run_indexed_ranges(grain, point_count as i64, &|range, first, last| {
+                    let (affected, shared) = (wa.take(range), ws.take(range));
+                    for element in first..last {
+                        support::poll(cancel_ref, element)?;
+                        let local = (element - first) as usize;
+                        let point = element as usize;
+                        let mut has_selected = false;
+                        let mut has_unselected = false;
+                        let mut at = index_view.point_offsets[point] as usize;
+                        let last = index_view.point_offsets[point + 1] as usize;
+                        while at < last && !(has_selected && has_unselected) {
+                            let vertex = index_view.point_vertices[at] as usize;
+                            if primitive_selected(index_view.primitive_of_vertex[vertex] as usize) {
+                                has_selected = true;
+                            } else {
+                                has_unselected = true;
+                            }
+                            at += 1;
+                        }
+                        if has_selected {
+                            affected[local] = 1;
+                        }
+                        if has_selected && has_unselected {
+                            shared[local] = 1;
+                        }
                     }
-                    at += 1;
-                }
-                if has_selected {
-                    affected.set(point as i64, 1);
-                }
-                if has_selected && has_unselected {
-                    shared.set(point as i64, 1);
-                }
-                Ok(())
-            })?;
-            let mut affected = affected.into_vec();
-            let shared = shared.into_vec();
+                    Ok(())
+                })?;
+            }
             if let Some(element_selection::T::SelectedPoints(selected)) = &params.selection {
                 for point in 0..point_count {
                     if group::mem(point as i64, selected) {
@@ -1763,44 +1790,61 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     }
     let output_point_count = point_token.len();
     let n = output_point_count as i64;
-    let (point_source_a, point_source_b, point_source_t) = (AInts::new(n, 0), AInts::new(n, 0), AFloats::new(n, 0.0));
-    let (px, py, pz) = (AFloats::new(n, 0.0), AFloats::new(n, 0.0), AFloats::new(n, 0.0));
-    support::parallel_for(cancel_ref, grain, n, &|output| {
-        let output = output as usize;
-        let value = point_token[output];
-        if ctx.is_passthrough_token(value) {
-            let point = ctx.passthrough_point(value);
-            point_source_a.set(output as i64, point as i64);
-            point_source_b.set(output as i64, point as i64);
-            px.set(output as i64, positions.x[point]);
-            py.set(output as i64, positions.y[point]);
-            pz.set(output as i64, positions.z[point]);
-        } else {
-            let base = ctx.base_of_token(value);
-            if base < point_count {
-                point_source_a.set(output as i64, base as i64);
-                point_source_b.set(output as i64, base as i64);
-                let projection = ctx.projection(base);
-                px.set(output as i64, positions.x[base] - projection * nx);
-                py.set(output as i64, positions.y[base] - projection * ny);
-                pz.set(output as i64, positions.z[base] - projection * nz);
-            } else {
-                let edge = base - point_count;
-                let a = index_view.edge_a[edge] as usize;
-                let c = index_view.edge_b[edge] as usize;
-                let t = clamp01(-ctx.raw_distance[a] / (ctx.raw_distance[c] - ctx.raw_distance[a]));
-                point_source_a.set(output as i64, a as i64);
-                point_source_b.set(output as i64, c as i64);
-                point_source_t.set(output as i64, t);
-                px.set(output as i64, positions.x[a] + (positions.x[c] - positions.x[a]) * t);
-                py.set(output as i64, positions.y[a] + (positions.y[c] - positions.y[a]) * t);
-                pz.set(output as i64, positions.z[a] + (positions.z[c] - positions.z[a]) * t);
+    let len = output_point_count;
+    let (mut point_source_a, mut point_source_b, mut point_source_t) = (vec![0i64; len], vec![0i64; len], vec![0.0f64; len]);
+    let (mut px, mut py, mut pz) = (vec![0.0f64; len], vec![0.0f64; len], vec![0.0f64; len]);
+    {
+        let (wa, wb, wt) = (
+            support::Windows::even(&mut point_source_a, grain),
+            support::Windows::even(&mut point_source_b, grain),
+            support::Windows::even(&mut point_source_t, grain),
+        );
+        let (wx, wy, wz) = (
+            support::Windows::even(&mut px, grain),
+            support::Windows::even(&mut py, grain),
+            support::Windows::even(&mut pz, grain),
+        );
+        support::run_indexed_ranges(grain, n, &|range, first, last| {
+            let (point_source_a, point_source_b, point_source_t) = (wa.take(range), wb.take(range), wt.take(range));
+            let (px, py, pz) = (wx.take(range), wy.take(range), wz.take(range));
+            for element in first..last {
+                support::poll(cancel_ref, element)?;
+                let local = (element - first) as usize;
+                let output = element as usize;
+                let value = point_token[output];
+                if ctx.is_passthrough_token(value) {
+                    let point = ctx.passthrough_point(value);
+                    point_source_a[local] = point as i64;
+                    point_source_b[local] = point as i64;
+                    px[local] = positions.x[point];
+                    py[local] = positions.y[point];
+                    pz[local] = positions.z[point];
+                } else {
+                    let base = ctx.base_of_token(value);
+                    if base < point_count {
+                        point_source_a[local] = base as i64;
+                        point_source_b[local] = base as i64;
+                        let projection = ctx.projection(base);
+                        px[local] = positions.x[base] - projection * nx;
+                        py[local] = positions.y[base] - projection * ny;
+                        pz[local] = positions.z[base] - projection * nz;
+                    } else {
+                        let edge = base - point_count;
+                        let a = index_view.edge_a[edge] as usize;
+                        let c = index_view.edge_b[edge] as usize;
+                        let t = clamp01(-ctx.raw_distance[a] / (ctx.raw_distance[c] - ctx.raw_distance[a]));
+                        point_source_a[local] = a as i64;
+                        point_source_b[local] = c as i64;
+                        point_source_t[local] = t;
+                        px[local] = positions.x[a] + (positions.x[c] - positions.x[a]) * t;
+                        py[local] = positions.y[a] + (positions.y[c] - positions.y[a]) * t;
+                        pz[local] = positions.z[a] + (positions.z[c] - positions.z[a]) * t;
+                    }
+                }
             }
-        }
-        Ok(())
-    })?;
-    let (point_source_a, point_source_b, point_source_t) = (point_source_a.into_vec(), point_source_b.into_vec(), point_source_t.into_vec());
-    let (px, py, pz) = (px.into_vec(), py.into_vec(), pz.into_vec());
+            Ok(())
+        })?;
+    }
     let corner_count = builder.corner_count();
     let primitive_total = builder.kinds.len();
     let output_vertex_points: Vec<i64> = builder.tokens.iter().map(|&token| token_to_point[token]).collect();
@@ -2012,35 +2056,47 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             }
             Some(_) => {}
             None => {
-                let vx = AFloats::new(corner_count as i64, 0.0);
-                let vy = AFloats::new(corner_count as i64, 0.0);
-                let vz = AFloats::new(corner_count as i64, 0.0);
-                support::parallel_for(cancel_ref, (grain / 8).max(1), primitive_total as i64, &|primitive| {
-                    let primitive = primitive as usize;
-                    if builder.kinds[primitive] == 0 {
-                        let first = builder.offsets[primitive] as usize;
-                        let last = builder.offsets[primitive + 1] as usize;
-                        let (mut sx, mut sy, mut sz) = (0.0, 0.0, 0.0);
-                        for corner in first..last {
-                            let next = if corner + 1 == last { first } else { corner + 1 };
-                            let a = output_vertex_points[corner] as usize;
-                            let c = output_vertex_points[next] as usize;
-                            sx += (py[a] - py[c]) * (pz[a] + pz[c]);
-                            sy += (pz[a] - pz[c]) * (px[a] + px[c]);
-                            sz += (px[a] - px[c]) * (py[a] + py[c]);
-                        }
-                        let length: f64 = (sx * sx + sy * sy + sz * sz).sqrt();
-                        if length > 1e-20 {
-                            for corner in first..last {
-                                vx.set(corner as i64, sx / length);
-                                vy.set(corner as i64, sy / length);
-                                vz.set(corner as i64, sz / length);
+                let (mut vx, mut vy, mut vz) = (vec![0.0; corner_count], vec![0.0; corner_count], vec![0.0; corner_count]);
+                let normal_grain = (grain / 8).max(1);
+                let ranges = support::range_count(primitive_total as i64, normal_grain);
+                let bound = |range: i64| builder.offsets[(range * normal_grain).min(primitive_total as i64) as usize] as usize;
+                {
+                    let (wx, wy, wz) = (
+                        support::Windows::new(&mut vx, ranges, bound),
+                        support::Windows::new(&mut vy, ranges, bound),
+                        support::Windows::new(&mut vz, ranges, bound),
+                    );
+                    support::run_indexed_ranges(normal_grain, primitive_total as i64, &|range, first_primitive, last_primitive| {
+                        let (vx, vy, vz) = (wx.take(range), wy.take(range), wz.take(range));
+                        let base = bound(range);
+                        for primitive in first_primitive..last_primitive {
+                            support::poll(cancel_ref, primitive)?;
+                            let primitive = primitive as usize;
+                            if builder.kinds[primitive] == 0 {
+                                let first = builder.offsets[primitive] as usize;
+                                let last = builder.offsets[primitive + 1] as usize;
+                                let (mut sx, mut sy, mut sz) = (0.0, 0.0, 0.0);
+                                for corner in first..last {
+                                    let next = if corner + 1 == last { first } else { corner + 1 };
+                                    let a = output_vertex_points[corner] as usize;
+                                    let c = output_vertex_points[next] as usize;
+                                    sx += (py[a] - py[c]) * (pz[a] + pz[c]);
+                                    sy += (pz[a] - pz[c]) * (px[a] + px[c]);
+                                    sz += (px[a] - px[c]) * (py[a] + py[c]);
+                                }
+                                let length: f64 = (sx * sx + sy * sy + sz * sz).sqrt();
+                                if length > 1e-20 {
+                                    for corner in first..last {
+                                        vx[corner - base] = sx / length;
+                                        vy[corner - base] = sy / length;
+                                        vz[corner - base] = sz / length;
+                                    }
+                                }
                             }
                         }
-                    }
-                    Ok(())
-                })?;
-                let (vx, vy, vz) = (vx.into_vec(), vy.into_vec(), vz.into_vec());
+                        Ok(())
+                    })?;
+                }
                 attributes.push(attribute::create_key_owned(
                     &attribute::normal(attribute::Owner::Vertex),
                     attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vx, vy, vz)?),
