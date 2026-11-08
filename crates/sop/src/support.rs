@@ -462,9 +462,6 @@ pub enum NumericKind {
 }
 pub const NUMERIC_KIND_LABELS: [&str; 4] = ["Scalar", "Vector 2", "Vector 3", "Vector 4"];
 pub const NUMERIC_KIND: [NumericKind; 4] = [NumericKind::Scalar, NumericKind::Vec2, NumericKind::Vec3, NumericKind::Vec4];
-pub fn numeric_kind_kind() -> Kind {
-    choice_kind(&NUMERIC_KIND_LABELS)
-}
 pub fn numeric_kind_of_value(value: &Value) -> NumericKind {
     NUMERIC_KIND[choice_index(&NUMERIC_KIND_LABELS, value)]
 }

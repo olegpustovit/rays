@@ -12,8 +12,6 @@ pub type Body = Arc<dyn Fn(&Frame, &(dyn Fn(&str, &Args) -> Result<Value, Diagno
 pub type Out = Arc<dyn Fn(&[Ty]) -> Result<Ty, Diagnostic> + Send + Sync>;
 pub type OutArgs = Arc<dyn Fn(&[(String, Ty, Option<param::Value>)]) -> Result<Ty, Diagnostic> + Send + Sync>;
 pub type ArithmeticFn = dyn Fn(&Value, &Value) -> Result<Value, Diagnostic> + Send + Sync;
-pub type RowCallback = dyn Fn(i64) + Send + Sync;
-pub type Rows = dyn Fn(i64, i64, &(dyn Fn(i64)+Send+Sync)) + Send + Sync;
 // ponytail: segmented writes use one short-lived result mutex; replace with disjoint owned chunks only if profiling shows contention.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,14 +140,6 @@ pub fn find_indexed<'a>(extra:&'a Arc<Vec<Op>>,name:&str,context:&Context)->Opti
     lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
 }
 pub fn find(extra:&[Op],name:&str,context:&Context)->Option<Op>{ find_ref(extra,name,context).cloned() }
-pub fn finder(extra:&[Op])->Box<dyn Fn(&str,&Context)->Option<Op>+Send+Sync>{
-    let mut index=std::collections::HashMap::<String,Op>::new();
-    for op in extra{index.entry(op.name.clone()).or_insert_with(||op.clone());}
-    Box::new(move |name,context|{
-        let lookup=|key:&str|index.get(key).cloned().or_else(||all().iter().find(|op|op.name==key).cloned());
-        lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
-    })
-}
 pub fn of_context(extra:&[Op],context:&Context)->Vec<Op>{
     let mut ops=Vec::new();
     if *context!=context::value(){for op in all(){if op.ctx==*context{ops.push(op.clone())}}for op in extra{if op.ctx==*context{ops.push(op.clone())}}}
@@ -157,7 +147,6 @@ pub fn of_context(extra:&[Op],context:&Context)->Vec<Op>{
     for op in extra{if op.ctx==context::value(){ops.push(op.clone())}}
     ops
 }
-pub fn arithmetic(name:&str)->Option<Arithmetic>{all().iter().find(|o|o.name==name).and_then(|o|o.arithmetic.clone())}
 pub fn is_display_kind(name:&str)->bool{name.starts_with("draw/")||name.starts_with("ui/")}
 pub fn validate(extra:&[Op])->Option<Diagnostic>{
     let mut seen=Vec::<String>::new();

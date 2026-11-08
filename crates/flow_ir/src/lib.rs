@@ -11,7 +11,8 @@ pub mod core_lower;
 pub mod core_draw;
 pub mod core_exec;
 pub mod flow_ir;
-pub mod region_snapshot;
+#[cfg(test)]
+mod region_snapshot;
 
 // Ported OCaml test files (lib/flow_ir/test_*.ml).
 #[cfg(test)] mod test_arena;
