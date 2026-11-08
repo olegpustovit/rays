@@ -276,7 +276,7 @@ pub mod Profile {
     pub struct T {
         pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
         executions: Mutex<Vec<Execution>>,
-        placements: Mutex<Vec<Placement>>,
+        placements: Mutex<std::collections::VecDeque<Placement>>,
         /// 512 slots of (serial, entry)
         maps: Mutex<Vec<Option<(usize, StaticMap)>>>,
         map_next: AtomicUsize,
@@ -301,7 +301,7 @@ pub mod Profile {
         Arc::new(T {
             clock,
             executions: Mutex::new(Vec::new()),
-            placements: Mutex::new(Vec::new()),
+            placements: Mutex::new(std::collections::VecDeque::new()),
             maps: Mutex::new(vec![None; 512]),
             map_next: AtomicUsize::new(0),
         })
@@ -317,14 +317,14 @@ pub mod Profile {
     pub fn executions(profile: &T) -> Vec<Execution> { profile.executions.lock().unwrap().clone() }
 
     /// At most 512 recent placement decisions, newest first, one per owner.
-    pub fn placements(profile: &T) -> Vec<Placement> { profile.placements.lock().unwrap().clone() }
+    pub fn placements(profile: &T) -> Vec<Placement> { profile.placements.lock().unwrap().iter().cloned().collect() }
 
     fn record_placement(profile: &T, placement: &Placement) {
         // ponytail: scan at most 512 owners per decision; index if profiling itself becomes costly.
         let mut list = profile.placements.lock().unwrap();
         list.retain(|old| old.owner != placement.owner);
         list.truncate(511);
-        list.insert(0, placement.clone());
+        list.push_front(placement.clone());
     }
 
     /// Record one decision for its owner, replacing the owner's previous one; `None` uses the

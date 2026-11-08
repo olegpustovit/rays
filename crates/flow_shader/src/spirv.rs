@@ -227,8 +227,8 @@ impl Emitter {
         self.compare(183, value, zero)
     }
     fn numeric_truth(&mut self, value: i64) -> i64 {
-        let zero = self.f(0.0);
         let one = self.f(1.0);
+        let zero = self.f(0.0);
         self.select_f(value, one, zero)
     }
     fn ext(&mut self, opcode: i64, operands: &[i64]) -> i64 {
@@ -347,9 +347,9 @@ fn binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
         Binary::Sub => e.floating(131, &[a, b]),
         Binary::Mul => e.floating(133, &[a, b]),
         Binary::Div => {
-            let q = e.floating(136, &[a, b]);
             let z = e.f(0.0);
             let c = e.compare(180, b, z);
+            let q = e.floating(136, &[a, b]);
             e.select_f(c, z, q)
         }
         Binary::Mod => {
@@ -462,10 +462,10 @@ fn unary(e: &mut Emitter, operation: Unary, value: i64) -> i64 {
             let minus = e.f(-1.0);
             let one = e.f(1.0);
             let clamped = e.ext(43, &[value, minus, one]);
-            let r = e.ext(if operation == Unary::Asin { 16 } else { 17 }, &[clamped]);
             let abs = e.ext(4, &[value]);
             let c = e.compare(186, abs, one);
             let nan = e.f(f64::NAN);
+            let r = e.ext(if operation == Unary::Asin { 16 } else { 17 }, &[clamped]);
             e.select_f(c, nan, r)
         }
         Unary::Exp => e.ext(27, &[value]),
@@ -636,8 +636,8 @@ fn round_float(e: &mut Emitter, op: &Conversion, value: i64) -> i64 {
         Conversion::Ceil => e.ext(9, &[value]),
         _ => {
             let sign = unary(e, Unary::Sign, value);
-            let half = e.f(0.5);
             let abs = e.ext(4, &[value]);
+            let half = e.f(0.5);
             let sum = e.floating(129, &[abs, half]);
             let floor = e.ext(8, &[sum]);
             e.floating(133, &[sign, floor])
@@ -1169,9 +1169,9 @@ fn capsule_intersection(e: &mut Emitter, ray: &[i64], primitive: i64) -> (i64, i
     let qaqc = mul(e, qa, qc);
     let discriminant = sub(e, qbqb, qaqc);
     let root = sqrt(e, discriminant);
-    let one = e.f(1.0);
     let zero = e.f(0.0);
     let c = e.compare(186, qa, zero);
+    let one = e.f(1.0);
     let safe_qa = e.select_f(c, qa, one);
     let nqb = e.floating(127, &[qb]);
     let n0 = sub(e, nqb, root);
@@ -1771,9 +1771,9 @@ impl EP {
     }
     fn to_int(&mut self, value: i64) -> i64 {
         let boolean = self.e.boolean;
-        let hi = self.e.f(9223372036854775808.0);
         let lo = self.e.f(-9223372036854775808.0);
         let c190 = self.e.compare(190, value, lo);
+        let hi = self.e.f(9223372036854775808.0);
         let c184 = self.e.compare(184, value, hi);
         let valid = self.e.result(boolean, 167, &[c190, c184]);
         let not_valid = self.e.result(boolean, 168, &[valid]);

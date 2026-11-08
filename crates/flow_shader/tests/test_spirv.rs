@@ -72,8 +72,7 @@ fn fast_cases() -> Vec<(String, flow_ir::packed::T)> {
     out
 }
 
-/// Exact kernels keep the OCaml goldens; fast kernels (32-bit Int registers) diverge from OCaml and
-/// keep their own, rewritten with `RAYS_UPDATE_FIXTURES=1`.
+/// Exact and fast kernel digests (fast: 32-bit Int registers), rewritten with `RAYS_UPDATE_FIXTURES=1`.
 const EXACT_GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/flow_gpu/goldens/spirv.sexp");
 const FAST_GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/spirv_fast.sexp");
 
@@ -137,14 +136,14 @@ fn check(name: &str, fast: bool, program: &flow_ir::packed::T, golden: &HashMap<
 }
 
 fn check_all(cases: Vec<(String, flow_ir::packed::T)>, fast: bool) {
-    let update = fast && std::env::var_os("RAYS_UPDATE_FIXTURES").is_some();
+    let update = std::env::var_os("RAYS_UPDATE_FIXTURES").is_some();
     let golden = if update { HashMap::new() } else { golden(if fast { FAST_GOLDEN } else { EXACT_GOLDEN }) };
     let lines: Vec<String> = cases.iter().map(|(name, program)| {
         let (size, digest) = check(name, fast, program, &golden);
         format!("({name} {size} {digest})\n")
     }).collect();
     if update {
-        fs::write(FAST_GOLDEN, lines.concat()).unwrap();
+        fs::write(if fast { FAST_GOLDEN } else { EXACT_GOLDEN }, lines.concat()).unwrap();
     }
 }
 

@@ -31,6 +31,9 @@ fn compare_some(owner: &str, lib_dir: &str, golden_dir: &str, skip: &[&str], wan
         if skip.contains(&name.as_str()) {
             continue;
         }
+        if std::env::var_os("RAYS_UPDATE_FIXTURES").is_some() {
+            fs::write(golden.join(&name), &bytes).unwrap();
+        }
         let expected = fs::read(golden.join(&name)).unwrap_or_else(|e| panic!("{name}: {e}"));
         if bytes != expected {
             failures.push(format!("{name}: {}", first_difference(&bytes, &expected)));
