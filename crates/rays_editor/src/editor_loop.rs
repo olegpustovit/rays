@@ -874,6 +874,16 @@ pub fn crash_dump(value: &LoopModel, directory: &str) -> Result<(), String> {
     // workspace documents
     write("document.txt", &editor_document::document::dump(&core.doc))?;
     editor_document::preset::save(directory, "document", &core.doc, &V::section(&value.camera, &value.extra))?;
+    write("editor.txt", &state_text(value))?;
+    // no collection: a crashing process should not start one
+    let device = workspace_gpu::device_limits(&host_gpu(value)).map(|(bytes, _, _)| bytes).unwrap_or(0);
+    write("memory.txt", &mem::report_with(mem::ReportOptions { walk: false, device, budget: None }).to_string())?;
+    Ok(())
+}
+
+/// The editor's state, one `key: value` line each: the dump's editor.txt.
+pub fn state_text(value: &LoopModel) -> String {
+    let core = &value.core;
     let hist = &core.history;
     let mut editor = String::new();
     let selected = match editor_list::selected_node(core) {
@@ -918,11 +928,7 @@ pub fn crash_dump(value: &LoopModel, directory: &str) -> Result<(), String> {
         core.presets,
     ));
     editor.push_str(&format!("last edit: {:.3} ms\nphases: {}\n", core.edit_phases.total * 1000., flow_syntax::phase_timer::summary(&core.edit_phases)));
-    write("editor.txt", &editor)?;
-    // no collection: a crashing process should not start one
-    let device = workspace_gpu::device_limits(&host_gpu(value)).map(|(bytes, _, _)| bytes).unwrap_or(0);
-    write("memory.txt", &mem::report_with(mem::ReportOptions { walk: false, device, budget: None }).to_string())?;
-    Ok(())
+    editor
 }
 
 pub fn close(value: &LoopModel) {

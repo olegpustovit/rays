@@ -130,11 +130,8 @@ pub fn source(e: &editor::Editor) -> String {
     workspace_doc::print(&editor::workspace(e)).unwrap().0
 }
 pub fn dump_line(e: &editor::Editor, key: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("rays-shell-dump-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-    std::fs::create_dir_all(&dir).unwrap();
-    editor::crash_dump(e, dir.to_str().unwrap()).expect("crash dump");
-    let text = std::fs::read_to_string(dir.join("editor.txt")).expect("editor.txt");
-    let _ = std::fs::remove_dir_all(&dir);
+    // the dump's editor.txt, without writing the document, preset and memory report each time
+    let text = editor::private::state_text(e);
     let prefix = format!("{key}: ");
     match text.lines().find(|l| l.starts_with(&prefix)) {
         Some(l) => l[prefix.len()..].to_string(),

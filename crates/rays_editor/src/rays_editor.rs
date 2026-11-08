@@ -141,6 +141,11 @@ pub mod editor {
             workspace_gpu::qualification(&value.host.borrow().gpu)
         }
 
+        /// The crash dump's editor.txt, without writing the dump.
+        pub fn state_text(value: &Editor) -> String {
+            editor_loop::state_text(value)
+        }
+
         /// The shell the editor's own lowering of its workspace made.
         pub fn shell(value: &Editor) -> Option<editor_document::document::Shell> {
             value.core.doc.shell.as_deref().cloned()
