@@ -13,7 +13,7 @@ editor_document = { path = "../editor_document" }
 rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
 input = { path = "../input" }
-rdk = { path = "../rdk" }
+rdk_core = { path = "../rdk_core" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
 flow_eval = { path = "../flow_eval" }
@@ -33,7 +33,6 @@ mem = { path = "../mem" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 
 [dev-dependencies]
-rdk_core = { path = "../rdk_core" }
 flow_ir = { path = "../flow_ir" }
 
 [target.'cfg(windows)'.dev-dependencies]

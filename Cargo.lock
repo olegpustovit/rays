@@ -181,7 +181,6 @@ dependencies = [
  "rays",
  "rays_diagnostic",
  "rays_math",
- "rdk",
  "rdk_core",
  "renderer",
  "runtime_resources",

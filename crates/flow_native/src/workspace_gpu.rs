@@ -1086,7 +1086,7 @@ pub fn held_displays(t_: &t) -> i64 {
 /// while the mesh that keeps the returned closure lives. Initial domain, after the cook settled.
 /// `(key, whether N is bound, device triangle index count if any, colour width, keep-alive)`;
 /// `None` (draw the host copy) otherwise.
-pub fn display(t_: &t, geometry: &rdk::geometry::T) -> Option<(String, bool, Option<i64>, i64, Box<dyn Fn()>)> {
+pub fn display(t_: &t, geometry: &rdk_core::geometry::T) -> Option<(String, bool, Option<i64>, i64, Box<dyn Fn()>)> {
     let d = &*t_.0;
     if !on_owner(d) {
         return None;
@@ -1096,7 +1096,7 @@ pub fn display(t_: &t, geometry: &rdk::geometry::T) -> Option<(String, bool, Opt
         return None;
     }
     *d.display_refusal.borrow_mut() = None;
-    let id = rdk::geometry::data_id(geometry);
+    let id = rdk_core::geometry::data_id(geometry);
     let again = {
         let shown = d.shown.borrow();
         match shown.get(&id) {
@@ -1118,7 +1118,7 @@ pub fn display(t_: &t, geometry: &rdk::geometry::T) -> Option<(String, bool, Opt
         *d.display_refusal.borrow_mut() = Some("Resident positions or the workspace device are unavailable.".to_owned());
         return None;
     };
-    let count = rdk::geometry::point_count(geometry);
+    let count = rdk_core::geometry::point_count(geometry);
     let releases: Rc<RefCell<Vec<Box<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
     let checks: Rc<RefCell<Vec<Rc<dyn Fn() -> bool>>>> = Rc::new(RefCell::new(Vec::new()));
     let hold = |valid: Rc<dyn Fn() -> bool>, release: Box<dyn Fn()>| {
@@ -1155,16 +1155,16 @@ pub fn display(t_: &t, geometry: &rdk::geometry::T) -> Option<(String, bool, Opt
         }));
         buffer
     };
-    let topology = rdk::geometry::topology(geometry);
+    let topology = rdk_core::geometry::topology(geometry);
     let bound = (|| -> Result<(String, bool, Option<i64>, i64, Box<dyn Fn()>), String> {
         let buffer = pin(&positions)?;
-        let normals = match rdk::geometry::find_attribute(rdk::attribute::Owner::Point, "N", geometry) {
-            None if rdk::geometry::primitive_count(geometry) == 0 => None,
-            None if rdk::topology::resident(topology) => return Err("Resident topology without authored normals requires the host display.".to_owned()),
-            None if !rdk::topology::all_triangles(topology).unwrap_or(false) => return Err("Host polygon topology requires the host display.".to_owned()),
+        let normals = match rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Point, "N", geometry) {
+            None if rdk_core::geometry::primitive_count(geometry) == 0 => None,
+            None if rdk_core::topology::resident(topology) => return Err("Resident topology without authored normals requires the host display.".to_owned()),
+            None if !rdk_core::topology::all_triangles(topology).unwrap_or(false) => return Err("Host polygon topology requires the host display.".to_owned()),
             None => {
                 // lit triangles without N: the host display's normals, made from P on the device
-                let corners = rdk::topology::View::view(topology).map_err(|_| "Device normals could not be derived.".to_owned())?.vertex_points.to_vec();
+                let corners = rdk_core::topology::View::view(topology).map_err(|_| "Device normals could not be derived.".to_owned())?.vertex_points.to_vec();
                 match h::normals(&host, &buffer, count, &Arc::new(corners)) {
                     Some((buffer, release)) => Some(owned(buffer, release)),
                     None => return Err("Device normals could not be derived.".to_owned()),
@@ -1175,18 +1175,18 @@ pub fn display(t_: &t, geometry: &rdk::geometry::T) -> Option<(String, bool, Opt
                 None => return Err("Point normals are not an unread resident vec3 stream.".to_owned()),
             },
         };
-        let colors = match rdk::geometry::find_attribute(rdk::attribute::Owner::Point, "Cd", geometry) {
+        let colors = match rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Point, "Cd", geometry) {
             None => None,
             Some(_) => match flow_sop::attribute_kernel::resident_color(geometry) {
                 Some((value, width)) => Some((pin(&value)?, width as i64)),
                 None => return Err("Point colours are not an unread resident float3/float4 stream.".to_owned()),
             },
         };
-        let indices = if rdk::geometry::primitive_count(geometry) == 0 {
+        let indices = if rdk_core::geometry::primitive_count(geometry) == 0 {
             None
         } else {
             match flow_sop::topology_kernel::resident(geometry) {
-                None if !rdk::topology::resident(topology) && rdk::topology::all_triangles(topology).unwrap_or(false) => None,
+                None if !rdk_core::topology::resident(topology) && rdk_core::topology::all_triangles(topology).unwrap_or(false) => None,
                 None => return Err("Topology is unavailable as resident triangle/quad streams.".to_owned()),
                 Some((vertices, offsets, kinds)) => {
                     let pins: Vec<Option<run::Pin>> = [&vertices, &offsets, &kinds].iter().map(|x| run::pin_integers(x)).collect();

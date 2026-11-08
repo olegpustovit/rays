@@ -44,10 +44,10 @@ fn cook(gpu: Option<&G::Config>, graph: &lower::Graph) -> Vec<f64> {
     let output = session::cook(&mut session, None, &context, &node);
     session::close(&mut session);
     let geometry = ok(payload::geometry(&ok(output).payload));
-    let positions = rdk::geometry::positions(&geometry);
+    let positions = rdk_core::geometry::positions(&geometry);
     let mut flat = Vec::new();
     for i in 0..COUNT {
-        let (x, y, z) = rdk::packed::Float3::get(positions, i).unwrap();
+        let (x, y, z) = rdk_core::packed::Float3::get(positions, i).unwrap();
         flat.extend([x, y, z]);
     }
     flat

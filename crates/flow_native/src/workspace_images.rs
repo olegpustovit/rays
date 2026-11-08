@@ -43,7 +43,7 @@ pub fn plan_id(plan: &e::Plan) -> PlanId {
 }
 
 struct Captured {
-    geometry: rdk::geometry::T,
+    geometry: rdk_core::geometry::T,
     attributes: Vec<(String, Value)>,
     bytes: i64,
 }
@@ -533,7 +533,7 @@ fn captured(d: &Data, request: &RequestRef, live: &Frame, id: i64, source: &Sour
             let output = cook_node(request, &context, &materializer)?;
             let geometry = payload::geometry(&output.payload)?;
             d.source_cooks.set(d.source_cooks.get() + 1);
-            let bytes = rdk::geometry::payload_bytes(&geometry);
+            let bytes = rdk_core::geometry::payload_bytes(&geometry);
             Rc::new(Captured { geometry, attributes: Vec::new(), bytes })
         }
     };
