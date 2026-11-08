@@ -5,8 +5,6 @@ use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, pac
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 
-const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
-const OCAML_MIN_INT: i64 = -(1i64 << 62);
 const MAX_STRING_LENGTH: i64 = (1i64 << 57) - 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -650,26 +648,15 @@ fn reduce_float(
 }
 
 fn checked_add(name: &str, cluster: usize, left: i64, right: i64) -> Result<i64, error::T> {
-    if (right > 0 && left > OCAML_MAX_INT - right) || (right < 0 && left < OCAML_MIN_INT - right) {
-        return Err(fail(format!("integer attribute {name:?} overflows in cluster {cluster}")));
-    }
-    Ok(left + right)
+    left.checked_add(right).ok_or_else(|| fail(format!("integer attribute {name:?} overflows in cluster {cluster}")))
 }
 
 fn checked_square(name: &str, cluster: usize, value: i64) -> Result<i64, error::T> {
-    let overflow = || fail(format!("integer attribute {name:?} square overflows in cluster {cluster}"));
-    if value == OCAML_MIN_INT {
-        return Err(overflow());
-    }
-    let absolute = value.abs();
-    if absolute != 0 && absolute > OCAML_MAX_INT / absolute {
-        return Err(overflow());
-    }
-    Ok(absolute * absolute)
+    value.checked_mul(value).ok_or_else(|| fail(format!("integer attribute {name:?} square overflows in cluster {cluster}")))
 }
 
 fn int_of_float_checked(name: &str, cluster: usize, value: f64) -> Result<i64, error::T> {
-    let lower = OCAML_MIN_INT as f64;
+    let lower = i64::MIN as f64;
     let upper = -lower;
     if !value.is_finite() || value < lower || value >= upper {
         return Err(fail(format!("integer attribute {name:?} reduction overflows in cluster {cluster}")));

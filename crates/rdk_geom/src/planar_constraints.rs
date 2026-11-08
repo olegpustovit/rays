@@ -10,7 +10,6 @@ use crate::implicit_point::{self, Projection};
 use crate::predicates::{self, Sign};
 
 const MAX_INT: i64 = (1 << 62) - 1;
-const MIN_INT: i64 = -(1 << 62);
 
 pub struct T {
     source_count: i64,
@@ -710,10 +709,8 @@ fn run(
         let winding = atomic_winding[segment];
         let winding = if atomic[segment * 2] == a {
             winding
-        } else if winding == MIN_INT {
-            return Err(invalid("Planar constraint winding exceeds integer range"));
         } else {
-            -winding
+            winding.checked_neg().ok_or_else(|| invalid("Planar constraint winding exceeds integer range"))?
         };
         if a != previous_a || b != previous_b {
             unique_constraints.push(a);
@@ -724,12 +721,8 @@ fn run(
         } else {
             let last = unique_winding.len() - 1;
             let previous = unique_winding[last];
-            if (winding > 0 && previous > MAX_INT - winding)
-                || (winding < 0 && previous < MIN_INT - winding)
-            {
-                return Err(invalid("Planar constraint winding exceeds integer range"));
-            }
-            unique_winding[last] = previous + winding;
+            unique_winding[last] =
+                previous.checked_add(winding).ok_or_else(|| invalid("Planar constraint winding exceeds integer range"))?;
         }
     }
     let inserted: Vec<i64> = (0..unique_count as i64).map(|split| sc + split).collect();

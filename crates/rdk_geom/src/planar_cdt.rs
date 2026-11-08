@@ -11,7 +11,6 @@ use rdk_core::cancel;
 use crate::predicates::Sign;
 
 const MAX_INT: i64 = (1 << 62) - 1;
-const MIN_INT: i64 = -(1 << 62);
 
 pub struct T {
     triangle_points: Arc<[i64]>,
@@ -473,10 +472,8 @@ fn canonical_constraints(
         let weight = winding[constraint_index];
         weights[constraint_index] = if first < second {
             weight
-        } else if weight == MIN_INT {
-            return Err(err_message("Planar CDT constraint winding exceeds integer range"));
         } else {
-            -weight
+            weight.checked_neg().ok_or_else(|| err_message("Planar CDT constraint winding exceeds integer range"))?
         };
     }
     // ponytail: stable sort where OCaml's heap sort is unstable; equal keys only differ in the
@@ -494,12 +491,8 @@ fn canonical_constraints(
             let last = unique_weights.len() - 1;
             let previous = unique_weights[last];
             let value = weights[source];
-            if (value > 0 && previous > MAX_INT - value)
-                || (value < 0 && previous < MIN_INT - value)
-            {
-                return Err(err_message("Planar CDT constraint winding exceeds integer range"));
-            }
-            unique_weights[last] = previous + value;
+            unique_weights[last] =
+                previous.checked_add(value).ok_or_else(|| err_message("Planar CDT constraint winding exceeds integer range"))?;
         }
     }
     let mut output = vec![0i64; unique_pairs.len() * 2];
@@ -1568,17 +1561,11 @@ fn recover_constraints(
 }
 
 fn checked_add(left: i64, right: i64) -> Result<i64, String> {
-    if (right > 0 && left > MAX_INT - right) || (right < 0 && left < MIN_INT - right) {
-        return Err(err_message("Planar CDT polygon winding exceeds integer range"));
-    }
-    Ok(left + right)
+    left.checked_add(right).ok_or_else(|| err_message("Planar CDT polygon winding exceeds integer range"))
 }
 
 fn checked_negate(value: i64) -> Result<i64, String> {
-    if value == MIN_INT {
-        return Err(err_message("Planar CDT polygon winding exceeds integer range"));
-    }
-    Ok(-value)
+    value.checked_neg().ok_or_else(|| err_message("Planar CDT polygon winding exceeds integer range"))
 }
 
 struct Outcome {
@@ -2191,6 +2178,12 @@ pub fn build(
 mod tests {
     use super::*;
     use crate::{delaunay2, predicates};
+
+    #[test]
+    fn winding_guards_are_native_i64_overflow() {
+        assert!(checked_negate(i64::MIN).is_err() && checked_negate(1 << 62) == Ok(-(1 << 62)));
+        assert!(checked_add(i64::MAX, 1).is_err() && checked_add(1 << 62, 5) == Ok((1 << 62) + 5));
+    }
 
     fn cdt(x: &[f64], y: &[f64], constraints: &[i64]) -> Result<T, String> {
         let seed = delaunay2::build(None, Some(17), x, y).unwrap();

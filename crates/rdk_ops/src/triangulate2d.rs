@@ -21,7 +21,6 @@ const OPERATION: &str = "Rdk_mesh.Triangulate2d.triangulate_2d";
 const GUARD_OPERATION: &str = "triangulate_2d";
 /// OCaml `max_int`.
 const MAX_INT: i64 = (1 << 62) - 1;
-const MIN_INT: i64 = -(1 << 62);
 
 
 pub enum Projection {
@@ -529,10 +528,9 @@ fn constraint_segments(
                         let b = projected_vertex_points[next as usize];
                         if a != b {
                             let contribution = if a < b { 1 } else { -1 };
-                            if (contribution > 0 && weight == MAX_INT) || (contribution < 0 && weight == MIN_INT) {
-                                return Err(invalid("silhouette winding exceeds integer range"));
-                            }
-                            weight += contribution;
+                            weight = weight
+                                .checked_add(contribution)
+                                .ok_or_else(|| invalid("silhouette winding exceeds integer range"))?;
                         }
                     }
                 }
