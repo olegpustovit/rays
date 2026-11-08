@@ -11,7 +11,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 5/6 | B1 | 1 |
+| B | 5/6 | B1 (scope stack) | 0 |
 | M | 10/21 | — | 11 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
@@ -34,7 +34,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
 | B1 | active | `533489ee` term_arena; `e16247cd` `BUILTIN_DELEGATE`/`GPU_STAGE_ONLY` + `EMPTY_CHECK`; ponytail workspace `PathId` scope stack; op.rs ~138× `Arc::new` (was 141) |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
-| B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native`; `7b374363` `flow_gpu` → `rdk_core`/`rdk_ops`; **rdk delete deferred** (sop/flow_sop/rays_editor) |
+| B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native`; `7b374363` `flow_gpu`; **this session** `rays_editor` → `rdk_core` + `rdk_ops` (tests); **rdk delete deferred** (`sop`, `flow_sop`) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
 | M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
 | M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
@@ -99,6 +99,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `69d08a8a` M6; `66136b7f` M8; `7b374363` B5 `flow_gpu`; M wave 10/21; ~24/63 IDs.
 - 2026-11-08: B5 — `flow_gpu` dropped `rdk` dev-dep (`rdk_core`/`rdk_ops` in gpu_* tests); `cargo check -p flow_gpu -p flow_native`.
 - 2026-11-08: B5 — `flow_native` no longer depends on `rdk` facade (`rdk_core` direct); `cargo check -p flow_native -p rays_editor`.
 - 2026-11-08: B5 — `flow_sop_catalog` (catalog/manifest/port/network/encoded_parameters); `editor_document` direct dep; `cargo check -p flow_sop_catalog -p flow_sop -p editor_document -p rays_bin`.

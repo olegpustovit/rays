@@ -1,0 +1,1 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Finish B1 ponytail in flow_check ONLY: workspace scope stack keyed by PathId in workspace.rs (read op.rs ponytail ~904). Smallest slice that helps check hot path; ONE commit "B1:". cargo check -p flow_check -p flow_ir; cargo t -p flow_check narrow filter. Update PROGRESS B1 row. No artifact.

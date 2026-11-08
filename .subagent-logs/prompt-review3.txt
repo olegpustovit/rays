@@ -1,0 +1,1 @@
+Rays dev read-only. Summarize PROGRESS.md vs git HEAD: counts per wave, partial IDs, next 5 highest-plan-impact pending items from docs/history/port-simplification/index.html. No edits.
