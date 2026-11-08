@@ -477,8 +477,8 @@ pub fn layout_intents(value: &t, workspace: &shell, intents: &[chrome::Intent]) 
         }
     };
     let beside = |path: &layout::Path| -> &'static str {
-        match panels::at(path, &base) {
-            Some(panels::t::Leaf(panel)) => panel_kinds::beside(panel_kind(&panel)),
+        match panels::at_ref(path, &base) {
+            Some(panels::t::Leaf(panel)) => panel_kinds::beside(panel_kind(panel)),
             _ => panel_kinds::beside(""),
         }
     };

@@ -91,7 +91,7 @@ pub fn panel_key(doc: &Document, path: &[usize]) -> Vec<String> {
     }
     // [name (ui/floating (ui/inspector))]: the window is the float's binding
     if let Some((0, up)) = path.split_last().map(|(last, up)| (*last, up)) {
-        let is_float = doc.shell.as_ref().and_then(|s| panels::at(up, &s.tree)).is_some_and(|t| matches!(t, panels::t::Float(_)));
+        let is_float = doc.shell.as_ref().and_then(|s| panels::at_ref(up, &s.tree)).is_some_and(|t| matches!(t, panels::t::Float(_)));
         if is_float {
             if let Some(Origin::Bound(name)) = origin(up) {
                 return vec![graph, name.clone()];
@@ -208,7 +208,7 @@ pub fn graph_leaves(value: &t) -> Vec<(Vec<String>, layout::Path)> {
 pub fn graph_path(value: &t) -> Option<layout::Path> {
     if let (Some(key), Some(path)) = (panel_map::key(&value.panes), panel_map::leaf(&value.panes)) {
         let tree = shell_tree(value, &value.workspace);
-        if matches!(panels::at(&path, &tree), Some(panels::t::Leaf(Panel::Graph))) && panel_key(&value.doc, &path) == key {
+        if matches!(panels::at_ref(&path, &tree), Some(panels::t::Leaf(Panel::Graph))) && panel_key(&value.doc, &path) == key {
             return Some(path);
         }
     }

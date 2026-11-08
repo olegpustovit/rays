@@ -131,15 +131,20 @@ pub fn leaves(tree: &t) -> Vec<(Path, Panel)> {
 }
 
 /// The subtree at a path of [`leaves`]; `None` when the tree has no such place.
-pub fn at(path: &[usize], tree: &t) -> Option<t> {
+pub fn at_ref<'a>(path: &[usize], tree: &'a t) -> Option<&'a t> {
     match (path, tree) {
-        ([], tree) => Some(tree.clone()),
-        ([0, rest @ ..], t::Split { a, .. }) => at(rest, a),
-        ([1, rest @ ..], t::Split { b, .. }) => at(rest, b),
-        ([i, rest @ ..], t::Tile(cells)) => cells.get(*i).and_then(|cell| at(rest, cell)),
-        ([0, rest @ ..], t::Float(inner)) => at(rest, inner),
+        ([], tree) => Some(tree),
+        ([0, rest @ ..], t::Split { a, .. }) => at_ref(rest, a),
+        ([1, rest @ ..], t::Split { b, .. }) => at_ref(rest, b),
+        ([i, rest @ ..], t::Tile(cells)) => cells.get(*i).and_then(|cell| at_ref(rest, cell)),
+        ([0, rest @ ..], t::Float(inner)) => at_ref(rest, inner),
         _ => None,
     }
+}
+
+/// Owned copy of the subtree at `path` (prefer [`at_ref`] on hot paths).
+pub fn at(path: &[usize], tree: &t) -> Option<t> {
+    at_ref(path, tree).cloned()
 }
 
 // OCaml's Float.min and Float.max propagate NaN; f64::min and f64::max do not.
