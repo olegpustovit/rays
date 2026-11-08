@@ -57,7 +57,7 @@
     (exact (map (fn [(i : int)]
       (let* [tg (array/nth next_same i)]
         (if (int/lt tg 0) (array/nth o i) (array/nth jumped (if (int/lt tg 0) 0 tg))))) idx))))
-; Morton helpers: 21 bits spread to every third bit (all masks fit a 63-bit int).
+; Morton helpers: 21 bits spread to every third bit (all masks fit a non-negative 63-bit key).
 (defn sort_spread :context value [(v : int)]
   (let* [a (int/and v 2097151)
          b (int/and (int/or a (int/shl a 32)) 8725724278095871)
@@ -237,7 +237,7 @@
                                   qy (exact (map (fn [(a : float)] (sort_spread (sort_quantize ly hy a))) c.y))
                                   qz (exact (map (fn [(a : float)] (sort_spread (sort_quantize lz hz a))) c.z))
                                   keys (exact (map (fn [(a : int) (b : int) (d : int)]
-                                    (int/xor (int/or a (int/or (int/shl b 1) (int/shl d 2))) (int/shl 1 62))) qx qy qz))]
+                                    (int/or a (int/or (int/shl b 1) (int/shl d 2)))) qx qy qz))]
                              (sort_by_int sources keys descending)))
                        :else
                          (case attribute_type

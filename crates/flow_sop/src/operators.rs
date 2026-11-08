@@ -1428,7 +1428,7 @@ mod parity {
     }
     fn indices(count: usize) -> Vec<i64> {
         let b = bases();
-        (0..count).map(|i| b[i % b.len()] + (i / b.len()) as i64).collect()
+        (0..count).map(|i| b[i % b.len()].wrapping_add((i / b.len()) as i64)).collect()
     }
 
     fn random_proof(mapped:&Value,program:&packed::T,live:&input::Frame,expected:&[f64]){
@@ -1494,7 +1494,7 @@ mod parity {
         let indices=indices(100000);
         let live=input::at_time(0.0);
         let b = bases();
-        let seeds: Vec<i64> = (0..indices.len()).map(|i| b[i / 7 % b.len()] + (i / b.len()) as i64).collect();
+        let seeds: Vec<i64> = (0..indices.len()).map(|i| b[i / 7 % b.len()].wrapping_add((i / b.len()) as i64)).collect();
         let Value::Fn(f) = value(None, "(fn [(s : int) (i : int)] (if (int/lt s 0) (rand/at s (int/add i (frame/index))) (rand/at s (int/sub i (frame/index)))))") else {
             panic!("fn expected")
         };
