@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::subdivide_refine::{ABytes, AFloats, AInts};
+use rdk_core::support::Windows;
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, polygon_triangulation, ragged_ops, support,
     topology, topology_index,
@@ -54,6 +54,11 @@ fn fail(message: String) -> error::T {
 
 fn blank(value: &str) -> bool {
     value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
+}
+
+/// First loop of `range` when `loop_count` loops are split into `grain`-sized ranges.
+fn first_loop(range: i64, grain: i64, loop_count: usize) -> usize {
+    range.saturating_mul(grain).min(loop_count as i64) as usize
 }
 
 struct BoundaryPlan {
@@ -229,36 +234,48 @@ fn plan_boundaries(
             loop_index += 1;
         }
     }
-    let loop_vertices = AInts::new(boundary_count as i64, 0);
-    let loop_points = AInts::new(boundary_count as i64, 0);
+    let mut loop_vertices = vec![0usize; boundary_count];
+    let mut loop_points = vec![0usize; boundary_count];
     let failed_loop = std::sync::atomic::AtomicI64::new(i64::MAX);
-    support::parallel_for(cancel_ref, (grain / 16).max(1), loop_count as i64, &|loop_index| {
-        let loop_index = loop_index as usize;
-        let mut failed = false;
-        let first = loop_offsets[loop_index];
-        let last = loop_offsets[loop_index + 1];
-        let start_edge = loop_roots[loop_index];
-        let mut current = start_edge as i64;
-        for at in first..last {
-            cancel::poll(cancel_ref, at as i64, 16_383)?;
-            if current < 0 {
-                failed = true;
-                break;
+    let loop_grain = (grain / 16).max(1);
+    let loop_ranges = support::range_count(loop_count as i64, loop_grain);
+    let loop_start = |range: i64| loop_offsets[first_loop(range, loop_grain, loop_count)];
+    let (wvertices, wpoints) = (
+        Windows::new(&mut loop_vertices, loop_ranges, loop_start),
+        Windows::new(&mut loop_points, loop_ranges, loop_start),
+    );
+    support::run_indexed_ranges(loop_grain, loop_count as i64, &|range, begin, end| {
+        let (loop_vertices, loop_points) = (wvertices.take(range), wpoints.take(range));
+        let origin = loop_offsets[begin as usize];
+        for loop_index in begin..end {
+            support::poll(cancel_ref, loop_index)?;
+            let loop_index = loop_index as usize;
+            let mut failed = false;
+            let first = loop_offsets[loop_index];
+            let last = loop_offsets[loop_index + 1];
+            let start_edge = loop_roots[loop_index];
+            let mut current = start_edge as i64;
+            for at in first..last {
+                cancel::poll(cancel_ref, at as i64, 16_383)?;
+                if current < 0 {
+                    failed = true;
+                    break;
+                }
+                let edge = current as usize;
+                let vertex = reverse.edge_vertices[reverse.edge_offsets[edge] as usize] as usize;
+                let next = reverse.next_vertex[vertex] as usize;
+                let point = source.vertex_points[vertex] as usize;
+                let next_point = source.vertex_points[next] as usize;
+                loop_vertices[at - origin] = vertex;
+                loop_points[at - origin] = point;
+                current = outgoing[next_point];
             }
-            let edge = current as usize;
-            let vertex = reverse.edge_vertices[reverse.edge_offsets[edge] as usize] as usize;
-            let next = reverse.next_vertex[vertex] as usize;
-            let point = source.vertex_points[vertex] as usize;
-            let next_point = source.vertex_points[next] as usize;
-            loop_vertices.set(at as i64, vertex as i64);
-            loop_points.set(at as i64, point as i64);
-            current = outgoing[next_point];
-        }
-        if current != start_edge as i64 {
-            failed = true;
-        }
-        if failed {
-            failed_loop.fetch_min(loop_index as i64, std::sync::atomic::Ordering::Relaxed);
+            if current != start_edge as i64 {
+                failed = true;
+            }
+            if failed {
+                failed_loop.fetch_min(loop_index as i64, std::sync::atomic::Ordering::Relaxed);
+            }
         }
         Ok(())
     })?;
@@ -266,8 +283,6 @@ fn plan_boundaries(
         i64::MAX => -1,
         value => value,
     };
-    let loop_vertices: Vec<usize> = loop_vertices.into_vec().into_iter().map(|value| value as usize).collect();
-    let loop_points: Vec<usize> = loop_points.into_vec().into_iter().map(|value| value as usize).collect();
     if failed >= 0 {
         return Err(fail(format!("{OPERATION}: boundary loop {failed} did not close exactly")));
     }
@@ -312,29 +327,38 @@ fn analyze_positions(
     positions: &packed::Float3::View::View,
 ) -> Result<Centers, error::T> {
     let loop_count = plan.loop_offsets.len() - 1;
-    let center_x = AFloats::new(loop_count as i64, 0.0);
-    let center_y = AFloats::new(loop_count as i64, 0.0);
-    let center_z = AFloats::new(loop_count as i64, 0.0);
-    support::parallel_for(cancel_ref, (grain / 64).max(1), loop_count as i64, &|loop_index| {
-        let loop_index = loop_index as usize;
-        cancel::check_opt(cancel_ref)?;
-        let first = plan.loop_offsets[loop_index];
-        let last = plan.loop_offsets[loop_index + 1];
-        let valid = (first..last).all(|at| {
-            let point = plan.loop_points[at];
-            positions.x[point].is_finite() && positions.y[point].is_finite() && positions.z[point].is_finite()
-        });
-        if !valid {
-            return Err(fail(format!(
-                "{OPERATION}: boundary loop {loop_index} contains a non-finite position"
-            )));
+    let (mut center_x, mut center_y, mut center_z) = (vec![0.0f64; loop_count], vec![0.0f64; loop_count], vec![0.0f64; loop_count]);
+    let loop_grain = (grain / 64).max(1);
+    let (wx, wy, wz) = (
+        Windows::even(&mut center_x, loop_grain),
+        Windows::even(&mut center_y, loop_grain),
+        Windows::even(&mut center_z, loop_grain),
+    );
+    support::run_indexed_ranges(loop_grain, loop_count as i64, &|range, begin, end| {
+        let (center_x, center_y, center_z) = (wx.take(range), wy.take(range), wz.take(range));
+        for loop_index in begin..end {
+            support::poll(cancel_ref, loop_index)?;
+            let slot = (loop_index - begin) as usize;
+            let loop_index = loop_index as usize;
+            cancel::check_opt(cancel_ref)?;
+            let first = plan.loop_offsets[loop_index];
+            let last = plan.loop_offsets[loop_index + 1];
+            let valid = (first..last).all(|at| {
+                let point = plan.loop_points[at];
+                positions.x[point].is_finite() && positions.y[point].is_finite() && positions.z[point].is_finite()
+            });
+            if !valid {
+                return Err(fail(format!(
+                    "{OPERATION}: boundary loop {loop_index} contains a non-finite position"
+                )));
+            }
+            center_x[slot] = safe_component_mean(&positions.x, &plan.loop_points, first, last);
+            center_y[slot] = safe_component_mean(&positions.y, &plan.loop_points, first, last);
+            center_z[slot] = safe_component_mean(&positions.z, &plan.loop_points, first, last);
         }
-        center_x.set(loop_index as i64, safe_component_mean(&positions.x, &plan.loop_points, first, last));
-        center_y.set(loop_index as i64, safe_component_mean(&positions.y, &plan.loop_points, first, last));
-        center_z.set(loop_index as i64, safe_component_mean(&positions.z, &plan.loop_points, first, last));
         Ok(())
     })?;
-    Ok((center_x.into_vec(), center_y.into_vec(), center_z.into_vec()))
+    Ok((center_x, center_y, center_z))
 }
 
 fn triangulate_loops(
@@ -346,126 +370,138 @@ fn triangulate_loops(
     let loop_count = plan.loop_offsets.len() - 1;
     let boundary_count = plan.loop_points.len();
     let triangle_count = boundary_count - 2 * loop_count;
-    let triangle_local = AInts::new((triangle_count * 3) as i64, 0);
+    let mut triangle_local = vec![0usize; triangle_count * 3];
     // failure code per loop: 2 degenerate projected area, 3 non-simple
-    let failures = ABytes::new(loop_count as i64, 0);
-    let _ = boundary_count;
-    support::parallel_for(cancel_ref, (grain / 64).max(1), loop_count as i64, &|loop_index| {
-        let loop_index = loop_index as usize;
-        cancel::check_opt(cancel_ref)?;
-        let first = plan.loop_offsets[loop_index];
-        let last = plan.loop_offsets[loop_index + 1];
-        let size = last - first;
-        let mut u = vec![0.0f64; size];
-        let mut v = vec![0.0f64; size];
-        let mut remaining = vec![0i64; size];
-        let mut coordinate_scale = 0.0f64;
-        for at in first..last {
-            let point = plan.loop_points[at];
-            coordinate_scale = float_max(coordinate_scale, positions.x[point].abs());
-            coordinate_scale = float_max(coordinate_scale, positions.y[point].abs());
-            coordinate_scale = float_max(coordinate_scale, positions.z[point].abs());
-        }
-        if coordinate_scale == 0.0 {
-            failures.set(loop_index as i64, 2);
-            return Ok(());
-        }
-        let (mut nx, mut ny, mut nz) = (0.0f64, 0.0f64, 0.0f64);
-        for local in 0..size {
-            let next = (local + 1) % size;
-            let a = plan.loop_points[first + local];
-            let b = plan.loop_points[first + next];
-            let ax = positions.x[a] / coordinate_scale;
-            let ay = positions.y[a] / coordinate_scale;
-            let az = positions.z[a] / coordinate_scale;
-            let bx = positions.x[b] / coordinate_scale;
-            let by = positions.y[b] / coordinate_scale;
-            let bz = positions.z[b] / coordinate_scale;
-            nx += (ay - by) * (az + bz);
-            ny += (az - bz) * (ax + bx);
-            nz += (ax - bx) * (ay + by);
-        }
-        let (ax, ay, az) = (nx.abs(), ny.abs(), nz.abs());
-        let dominant = if ax >= ay && ax >= az { 0 } else if ay >= az { 1 } else { 2 };
-        let mut umin = f64::INFINITY;
-        let mut umax = f64::NEG_INFINITY;
-        let mut vmin = f64::INFINITY;
-        let mut vmax = f64::NEG_INFINITY;
-        for local in 0..size {
-            let point = plan.loop_points[first + local];
-            let x = positions.x[point] / coordinate_scale;
-            let y = positions.y[point] / coordinate_scale;
-            let z = positions.z[point] / coordinate_scale;
-            let (pu, pv) = if dominant == 0 { (y, z) } else if dominant == 1 { (x, z) } else { (x, y) };
-            u[local] = pu;
-            v[local] = pv;
-            umin = float_min(umin, pu);
-            umax = float_max(umax, pu);
-            vmin = float_min(vmin, pv);
-            vmax = float_max(vmax, pv);
-        }
-        let projection_scale = float_max(umax - umin, vmax - vmin);
-        if projection_scale == 0.0 || !projection_scale.is_finite() {
-            failures.set(loop_index as i64, 2);
-            return Ok(());
-        }
-        for local in 0..size {
-            u[local] = (u[local] - umin) / projection_scale;
-            v[local] = (v[local] - vmin) / projection_scale;
-            remaining[local] = local as i64;
-        }
-        let mut area = 0.0f64;
-        for local in 0..size {
-            let next = (local + 1) % size;
-            area += u[local] * v[next] - u[next] * v[local];
-        }
-        if !area.is_finite() || area.abs() <= 1e-14 {
-            failures.set(loop_index as i64, 2);
-            return Ok(());
-        }
-        let orientation = if area > 0.0 { 1.0 } else { -1.0 };
-        let triangle_base = (first - 2 * loop_index) * 3;
-        let mut active = size;
-        let mut emitted = 0usize;
-        let mut ear_failed = false;
-        while active > 3 && !ear_failed {
+    let mut failures = vec![0u8; loop_count];
+    let loop_grain = (grain / 64).max(1);
+    let ranges = support::range_count(loop_count as i64, loop_grain);
+    let (wtriangle, wfailure) = (
+        Windows::new(&mut triangle_local, ranges, |range| {
+            let first = plan.loop_offsets[first_loop(range, loop_grain, loop_count)];
+            (first - 2 * first_loop(range, loop_grain, loop_count)) * 3
+        }),
+        Windows::even(&mut failures, loop_grain),
+    );
+    support::run_indexed_ranges(loop_grain, loop_count as i64, &|range, begin, end| {
+        let (triangle_local, failures) = (wtriangle.take(range), wfailure.take(range));
+        let triangle_origin = (plan.loop_offsets[begin as usize] - 2 * begin as usize) * 3;
+        for loop_index in begin..end {
+            support::poll(cancel_ref, loop_index)?;
+            let failure = &mut failures[(loop_index - begin) as usize];
+            let loop_index = loop_index as usize;
             cancel::check_opt(cancel_ref)?;
-            let ear = polygon_triangulation::find_projected_ear(
-                &u,
-                &v,
-                0,
-                orientation,
-                &remaining,
-                active as i64,
-            );
-            if ear < 0 {
-                ear_failed = true;
-            } else {
-                let ear = ear as usize;
-                let a = remaining[(ear + active - 1) % active] as usize;
-                let b = remaining[ear] as usize;
-                let c = remaining[(ear + 1) % active] as usize;
-                let output = triangle_base + emitted * 3;
-                triangle_local.set(output as i64, a as i64);
-                triangle_local.set(output as i64 + 1, b as i64);
-                triangle_local.set(output as i64 + 2, c as i64);
-                remaining.copy_within(ear + 1..active, ear);
-                active -= 1;
-                emitted += 1;
+            let first = plan.loop_offsets[loop_index];
+            let last = plan.loop_offsets[loop_index + 1];
+            let size = last - first;
+            let mut u = vec![0.0f64; size];
+            let mut v = vec![0.0f64; size];
+            let mut remaining = vec![0i64; size];
+            let mut coordinate_scale = 0.0f64;
+            for at in first..last {
+                let point = plan.loop_points[at];
+                coordinate_scale = float_max(coordinate_scale, positions.x[point].abs());
+                coordinate_scale = float_max(coordinate_scale, positions.y[point].abs());
+                coordinate_scale = float_max(coordinate_scale, positions.z[point].abs());
             }
-        }
-        if ear_failed {
-            failures.set(loop_index as i64, 3);
-        } else {
-            let output = triangle_base + emitted * 3;
-            triangle_local.set(output as i64, remaining[0]);
-            triangle_local.set(output as i64 + 1, remaining[1]);
-            triangle_local.set(output as i64 + 2, remaining[2]);
+            if coordinate_scale == 0.0 {
+                *failure = 2;
+                continue;
+            }
+            let (mut nx, mut ny, mut nz) = (0.0f64, 0.0f64, 0.0f64);
+            for local in 0..size {
+                let next = (local + 1) % size;
+                let a = plan.loop_points[first + local];
+                let b = plan.loop_points[first + next];
+                let ax = positions.x[a] / coordinate_scale;
+                let ay = positions.y[a] / coordinate_scale;
+                let az = positions.z[a] / coordinate_scale;
+                let bx = positions.x[b] / coordinate_scale;
+                let by = positions.y[b] / coordinate_scale;
+                let bz = positions.z[b] / coordinate_scale;
+                nx += (ay - by) * (az + bz);
+                ny += (az - bz) * (ax + bx);
+                nz += (ax - bx) * (ay + by);
+            }
+            let (ax, ay, az) = (nx.abs(), ny.abs(), nz.abs());
+            let dominant = if ax >= ay && ax >= az { 0 } else if ay >= az { 1 } else { 2 };
+            let mut umin = f64::INFINITY;
+            let mut umax = f64::NEG_INFINITY;
+            let mut vmin = f64::INFINITY;
+            let mut vmax = f64::NEG_INFINITY;
+            for local in 0..size {
+                let point = plan.loop_points[first + local];
+                let x = positions.x[point] / coordinate_scale;
+                let y = positions.y[point] / coordinate_scale;
+                let z = positions.z[point] / coordinate_scale;
+                let (pu, pv) = if dominant == 0 { (y, z) } else if dominant == 1 { (x, z) } else { (x, y) };
+                u[local] = pu;
+                v[local] = pv;
+                umin = float_min(umin, pu);
+                umax = float_max(umax, pu);
+                vmin = float_min(vmin, pv);
+                vmax = float_max(vmax, pv);
+            }
+            let projection_scale = float_max(umax - umin, vmax - vmin);
+            if projection_scale == 0.0 || !projection_scale.is_finite() {
+                *failure = 2;
+                continue;
+            }
+            for local in 0..size {
+                u[local] = (u[local] - umin) / projection_scale;
+                v[local] = (v[local] - vmin) / projection_scale;
+                remaining[local] = local as i64;
+            }
+            let mut area = 0.0f64;
+            for local in 0..size {
+                let next = (local + 1) % size;
+                area += u[local] * v[next] - u[next] * v[local];
+            }
+            if !area.is_finite() || area.abs() <= 1e-14 {
+                *failure = 2;
+                continue;
+            }
+            let orientation = if area > 0.0 { 1.0 } else { -1.0 };
+            let triangle_base = (first - 2 * loop_index) * 3 - triangle_origin;
+            let mut active = size;
+            let mut emitted = 0usize;
+            let mut ear_failed = false;
+            while active > 3 && !ear_failed {
+                cancel::check_opt(cancel_ref)?;
+                let ear = polygon_triangulation::find_projected_ear(
+                    &u,
+                    &v,
+                    0,
+                    orientation,
+                    &remaining,
+                    active as i64,
+                );
+                if ear < 0 {
+                    ear_failed = true;
+                } else {
+                    let ear = ear as usize;
+                    let a = remaining[(ear + active - 1) % active] as usize;
+                    let b = remaining[ear] as usize;
+                    let c = remaining[(ear + 1) % active] as usize;
+                    let output = triangle_base + emitted * 3;
+                    triangle_local[output] = a;
+                    triangle_local[output + 1] = b;
+                    triangle_local[output + 2] = c;
+                    remaining.copy_within(ear + 1..active, ear);
+                    active -= 1;
+                    emitted += 1;
+                }
+            }
+            if ear_failed {
+                *failure = 3;
+            } else {
+                let output = triangle_base + emitted * 3;
+                triangle_local[output] = remaining[0] as usize;
+                triangle_local[output + 1] = remaining[1] as usize;
+                triangle_local[output + 2] = remaining[2] as usize;
+            }
         }
         Ok(())
     })?;
-    let failures = failures.into_vec();
-    let triangle_local: Vec<usize> = triangle_local.into_vec().into_iter().map(|value| value as usize).collect();
     if let Some(failed) = failures.iter().position(|&code| code != 0) {
         if failures[failed] == 2 {
             return Err(fail(format!("{OPERATION}: boundary loop {failed} has degenerate projected area")));
@@ -825,8 +861,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         }
         packed::Float3::View::of_owned_exn(x, y, z)?
     };
-    let mut patch_primitive_base = vec![0usize; loop_count];
-    let mut patch_vertex_base = vec![0usize; loop_count];
+    let mut patch_primitive_base = vec![0usize; loop_count + 1];
+    let mut patch_vertex_base = vec![0usize; loop_count + 1];
     let mut primitive_at = source_primitives;
     let mut vertex_at = source_vertices;
     for loop_index in 0..loop_count {
@@ -844,6 +880,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             Mode::FillTriangleFan => size * 3,
         };
     }
+    patch_primitive_base[loop_count] = primitive_at;
+    patch_vertex_base[loop_count] = vertex_at;
     let mut vertex_points = vec![0i64; output_vertices];
     let mut vertex_map = vec![0i64; output_vertices];
     let mut primitive_offsets = vec![0i64; output_primitives + 1];
@@ -873,76 +911,94 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         reverse.primitive_of_vertex[vertex_of_local(loop_index, local) as usize]
     };
     let center_base = source_points + added_boundary_points;
-    let (vertex_points_a, vertex_map_a) = (AInts::from_slice(&vertex_points), AInts::from_slice(&vertex_map));
-    let (primitive_offsets_a, primitive_map_a) = (AInts::from_slice(&primitive_offsets), AInts::from_slice(&primitive_map));
-    support::parallel_for(cancel_ref, (grain / 64).max(1), loop_count as i64, &|loop_index| {
-        let loop_index = loop_index as usize;
-        cancel::check_opt(cancel_ref)?;
-        let first = plan.loop_offsets[loop_index];
-        let size = plan.loop_offsets[loop_index + 1] - first;
-        let primitive_base = patch_primitive_base[loop_index];
-        let vertex_base = patch_vertex_base[loop_index];
-        match mode {
-            Mode::FillSinglePolygon => {
-                primitive_offsets_a.set((primitive_base) as i64, vertex_base as i64);
-                primitive_map_a.set((primitive_base) as i64, source_primitive_of_local(loop_index, 0));
-                for output_local in 0..size {
-                    let source_local = if reverse_patches || output_local == 0 { output_local } else { size - output_local };
-                    let output = vertex_base + output_local;
-                    vertex_points_a.set((output) as i64, point_of_local(loop_index, source_local));
-                    vertex_map_a.set((output) as i64, vertex_of_local(loop_index, source_local));
+    let patch_grain = (grain / 64).max(1);
+    let patch_ranges = support::range_count(loop_count as i64, patch_grain);
+    let (patch_points, patch_map) = (&mut vertex_points[source_vertices..], &mut vertex_map[source_vertices..]);
+    let vertex_start = |range: i64| patch_vertex_base[first_loop(range, patch_grain, loop_count)] - source_vertices;
+    let primitive_start = |range: i64| patch_primitive_base[first_loop(range, patch_grain, loop_count)] - source_primitives;
+    let (wvp, wvm) = (
+        Windows::new(patch_points, patch_ranges, vertex_start),
+        Windows::new(patch_map, patch_ranges, vertex_start),
+    );
+    let (woff, wpm) = (
+        Windows::new(&mut primitive_offsets[source_primitives..output_primitives], patch_ranges, primitive_start),
+        Windows::new(&mut primitive_map[source_primitives..], patch_ranges, primitive_start),
+    );
+    support::run_indexed_ranges(patch_grain, loop_count as i64, &|range, begin, end| {
+        let (vertex_points, vertex_map) = (wvp.take(range), wvm.take(range));
+        let (primitive_offsets, primitive_map) = (woff.take(range), wpm.take(range));
+        let (primitive_origin, vertex_origin) = (patch_primitive_base[begin as usize], patch_vertex_base[begin as usize]);
+        for loop_index in begin..end {
+            support::poll(cancel_ref, loop_index)?;
+            let loop_index = loop_index as usize;
+            cancel::check_opt(cancel_ref)?;
+            let first = plan.loop_offsets[loop_index];
+            let size = plan.loop_offsets[loop_index + 1] - first;
+            let primitive_base = patch_primitive_base[loop_index];
+            let vertex_base = patch_vertex_base[loop_index];
+            match mode {
+                Mode::FillSinglePolygon => {
+                    primitive_offsets[primitive_base - primitive_origin] = vertex_base as i64;
+                    primitive_map[primitive_base - primitive_origin] = source_primitive_of_local(loop_index, 0);
+                    for output_local in 0..size {
+                        let source_local =
+                            if reverse_patches || output_local == 0 { output_local } else { size - output_local };
+                        let output = vertex_base + output_local - vertex_origin;
+                        vertex_points[output] = point_of_local(loop_index, source_local);
+                        vertex_map[output] = vertex_of_local(loop_index, source_local);
+                    }
                 }
-            }
-            Mode::FillTriangles => {
-                let triangle_base = (first - 2 * loop_index) * 3;
-                for triangle in 0..size - 2 {
-                    let primitive = primitive_base + triangle;
-                    let output = vertex_base + triangle * 3;
-                    let source_triangle = triangle_base + triangle * 3;
-                    let a = triangle_local[source_triangle];
-                    let b = triangle_local[source_triangle + 1];
-                    let c = triangle_local[source_triangle + 2];
-                    let (a, b, c) = if reverse_patches { (a, b, c) } else { (a, c, b) };
-                    primitive_offsets_a.set((primitive) as i64, output as i64);
-                    primitive_map_a.set((primitive) as i64, source_primitive_of_local(loop_index, a));
-                    vertex_points_a.set((output) as i64, point_of_local(loop_index, a));
-                    vertex_points_a.set((output + 1) as i64, point_of_local(loop_index, b));
-                    vertex_points_a.set((output + 2) as i64, point_of_local(loop_index, c));
-                    vertex_map_a.set((output) as i64, vertex_of_local(loop_index, a));
-                    vertex_map_a.set((output + 1) as i64, vertex_of_local(loop_index, b));
-                    vertex_map_a.set((output + 2) as i64, vertex_of_local(loop_index, c));
+                Mode::FillTriangles => {
+                    let triangle_base = (first - 2 * loop_index) * 3;
+                    for triangle in 0..size - 2 {
+                        let primitive = primitive_base + triangle - primitive_origin;
+                        let output = vertex_base + triangle * 3;
+                        let window = output - vertex_origin;
+                        let source_triangle = triangle_base + triangle * 3;
+                        let a = triangle_local[source_triangle];
+                        let b = triangle_local[source_triangle + 1];
+                        let c = triangle_local[source_triangle + 2];
+                        let (a, b, c) = if reverse_patches { (a, b, c) } else { (a, c, b) };
+                        primitive_offsets[primitive] = output as i64;
+                        primitive_map[primitive] = source_primitive_of_local(loop_index, a);
+                        vertex_points[window] = point_of_local(loop_index, a);
+                        vertex_points[window + 1] = point_of_local(loop_index, b);
+                        vertex_points[window + 2] = point_of_local(loop_index, c);
+                        vertex_map[window] = vertex_of_local(loop_index, a);
+                        vertex_map[window + 1] = vertex_of_local(loop_index, b);
+                        vertex_map[window + 2] = vertex_of_local(loop_index, c);
+                    }
                 }
-            }
-            Mode::FillTriangleFan => {
-                let center = (center_base + loop_index) as i64;
-                for edge in 0..size {
-                    let next = (edge + 1) % size;
-                    let primitive = primitive_base + edge;
-                    let output = vertex_base + edge * 3;
-                    primitive_offsets_a.set((primitive) as i64, output as i64);
-                    primitive_map_a.set((primitive) as i64, source_primitive_of_local(loop_index, edge));
-                    if reverse_patches {
-                        vertex_points_a.set((output) as i64, point_of_local(loop_index, edge));
-                        vertex_points_a.set((output + 1) as i64, point_of_local(loop_index, next));
-                        vertex_points_a.set((output + 2) as i64, center);
-                        vertex_map_a.set((output) as i64, vertex_of_local(loop_index, edge));
-                        vertex_map_a.set((output + 1) as i64, vertex_of_local(loop_index, next));
-                        vertex_map_a.set((output + 2) as i64, vertex_of_local(loop_index, 0));
-                    } else {
-                        vertex_points_a.set((output) as i64, point_of_local(loop_index, edge));
-                        vertex_points_a.set((output + 1) as i64, center);
-                        vertex_points_a.set((output + 2) as i64, point_of_local(loop_index, next));
-                        vertex_map_a.set((output) as i64, vertex_of_local(loop_index, edge));
-                        vertex_map_a.set((output + 1) as i64, vertex_of_local(loop_index, 0));
-                        vertex_map_a.set((output + 2) as i64, vertex_of_local(loop_index, next));
+                Mode::FillTriangleFan => {
+                    let center = (center_base + loop_index) as i64;
+                    for edge in 0..size {
+                        let next = (edge + 1) % size;
+                        let primitive = primitive_base + edge - primitive_origin;
+                        let output = vertex_base + edge * 3;
+                        let window = output - vertex_origin;
+                        primitive_offsets[primitive] = output as i64;
+                        primitive_map[primitive] = source_primitive_of_local(loop_index, edge);
+                        if reverse_patches {
+                            vertex_points[window] = point_of_local(loop_index, edge);
+                            vertex_points[window + 1] = point_of_local(loop_index, next);
+                            vertex_points[window + 2] = center;
+                            vertex_map[window] = vertex_of_local(loop_index, edge);
+                            vertex_map[window + 1] = vertex_of_local(loop_index, next);
+                            vertex_map[window + 2] = vertex_of_local(loop_index, 0);
+                        } else {
+                            vertex_points[window] = point_of_local(loop_index, edge);
+                            vertex_points[window + 1] = center;
+                            vertex_points[window + 2] = point_of_local(loop_index, next);
+                            vertex_map[window] = vertex_of_local(loop_index, edge);
+                            vertex_map[window + 1] = vertex_of_local(loop_index, 0);
+                            vertex_map[window + 2] = vertex_of_local(loop_index, next);
+                        }
                     }
                 }
             }
         }
         Ok(())
     })?;
-    let (vertex_points, vertex_map) = (vertex_points_a.into_vec(), vertex_map_a.into_vec());
-    let (mut primitive_offsets, primitive_map) = (primitive_offsets_a.into_vec(), primitive_map_a.into_vec());
     primitive_offsets[output_primitives] = output_vertices as i64;
     let point_centers = match point_center_base {
         None => CenterMap::None,
