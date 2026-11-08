@@ -136,6 +136,23 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `8f3cedb6`: six test_parallel_exact fixtures shrunk with multi-chunk coverage kept (>=8 grain-97 chunks per domain on the dominant owner; the 6,145-point curve keeps the >4096 topology path).
+
+  | Case | Before (s) | After (s) |
+  |---|---|---|
+  | combining_general_backbone | 7.12 | 3.7 |
+  | combining_named_count | 5.70 | 0.7 |
+  | modeling_curve_samples | 9.25 | 4.5 |
+  | subdivision_all_edge_source | 6.62 | 2.8 |
+  | subdivision_detail_source | 5.22 | 2.9 |
+  | subdivision_hole_indices | 5.72 | 2.4 |
+
+  97 pass; summed time 164 -> 137 s. The doc comment records the reductions.
+  - Follow-ups:
+    - `test_workspace_cook::the_other_sop_fixtures_lower_and_cook` 5.007 s (pre-existing at baseline).
+    - combining_merged 4.5-4.7 s and groups 4.3-4.5 s are near the limit.
+    - A full `cargo t -p flow_sop` (714 cases, ~240 s summed) needs `RAYS_T_TIMEOUT` for the whole-run cap, like any broad qualification.
+
 - 2026-11-08: `0413a083`: native_orrery_frames plays 12 animated frames instead of 30, with every assertion kept (animation, no re-lowering during playback, 30 idle frames with no recompiles/re-prepares/new kernels/pipelines); 3.18 s. All five former native timeouts now pass.
   - **Follow-up (design, outside the plan):** value-dependent Lisp lowering costs ~210 ms per animated frame in debug for time-driven nodes (orrery ~5 fps in a debug editor). The same cost drives sopcat_perturbation (47 s, RAYS_SLOW) and the thin sopcat margins (~4.5 s). The fix is to lower driven bodies once and bind parameter values at cook time, or to cache `qualify_workspace` on everything except values (`flow_sop/src/lower.rs` `build_call`, `make_lowerer` -> `qualify_workspace`).
 
