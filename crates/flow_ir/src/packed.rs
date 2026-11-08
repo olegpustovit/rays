@@ -3179,6 +3179,12 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
                     let inner = E::residual::residual_view(*r)?;
                     Some((*r, inner.term))
                 }
+                // a settled value (a captured array per iterate step) is read, not compiled
+                Some((_, v)) if !E::is_live(v) => return match dispatch {
+                    Some(d) => d(residual, term),
+                    None if value::ty_of(v) == *term.ty() => Ok(v.clone()),
+                    None => eval_term(run, residual, term),
+                },
                 _ => None,
             }
         }
