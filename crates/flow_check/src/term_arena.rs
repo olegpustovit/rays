@@ -16,11 +16,11 @@ pub struct PathId(std::num::NonZeroU32);
 pub struct PatternId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RangeId(pub u32);
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 struct Range { start: u32, len: u32 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub enum Node {
     Lit(u32), Text(u32), Nil, Time, Vec(RangeId), RefBinding(u32),
     Call(u32), Op(u32), CallFn(u32), FnRef(NameId), GraphRef(u32), Let(u32),
@@ -28,11 +28,11 @@ pub enum Node {
     Fn(u32), Hof(u32), ListLit(RangeId), Record(RangeId), Get(u32), Assoc(u32),
     Str(RangeId), ListOp(u32), Bypass(TermId), Expanded(u32),
 }
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy)]
 pub enum Literal { Bool(bool), Int(i64), Float(f64), Text(u32), Choice(NameId) }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub enum PatternNode { Name(NameId), Seq(RangeId), Keys(RangeId) }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct TermRow {
     pub ty: TypeId,
     pub path: Option<PathId>,
@@ -40,53 +40,53 @@ pub struct TermRow {
     pub node: Node,
     children: RangeId,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Field { pub name: NameId, pub term: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Binding { pub pattern: PatternId, pub term: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Arm { pub test: TermId, pub body: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct CaseArm { pub form: SyntaxId, pub body: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Parameter { pub pattern: PatternId, pub ty: Option<TypeId> }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct RefBinding { pub name: NameId, pub fields: RangeId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Call { pub kind: NameId, pub ctx: Context, pub args: RangeId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Op { pub op: NameId, pub args: RangeId, pub skip: RangeId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct CallFn { pub name: NameId, pub args: RangeId, pub body: Option<TermId> }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct GraphRef { pub graph: NameId, pub inputs: RangeId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Let { pub bindings: RangeId, pub body: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct State { pub binder: PatternId, pub init: TermId, pub step: TermId, pub zone: PathId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Loop { pub kind: LoopKind, pub accs: RangeId, pub clauses: RangeId, pub skip: RangeId, pub body: TermId, pub zone: PathId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Pair { pub first: TermId, pub second: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct ErrorRows { pub rows: TermId, pub policy: DiagnosticPolicy, pub mapper: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct If { pub test: TermId, pub yes: TermId, pub no: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Cond { pub arms: RangeId, pub default: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Case { pub value: TermId, pub arms: RangeId, pub default: TermId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Function { pub params: RangeId, pub body: TermId, pub zone: PathId, pub capture: Option<TermId> }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Hof { pub kind: HofKind, pub args: RangeId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Get { pub value: TermId, pub name: NameId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Assoc { pub value: TermId, pub fields: RangeId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct ListOp { pub name: NameId, pub args: RangeId }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct Expanded { pub name: NameId, pub body: TermId }
 
 /// Construction-only values use local child IDs; no node imports its own recursive subtree.

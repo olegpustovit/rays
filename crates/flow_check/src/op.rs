@@ -863,6 +863,7 @@ fn builtins()->Vec<Op>{
     ops.append(&mut available);
     ops
 }
+// ponytail: B1 — static builtin `&[Spec]` fn pointers; workspace scope stack keyed by `PathId`.
 static ALL:LazyLock<Vec<Op>>=LazyLock::new(builtins);
 pub fn all()->&'static [Op]{ALL.as_slice()}
 fn builtin_index()->&'static std::collections::HashMap<&'static str,usize>{

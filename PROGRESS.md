@@ -32,7 +32,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
 | B3 | done | `5fdb5fb3` — `gpu_editor` + `tests/support`; 7× `gpu_suite_t*` + qual → 2 test links; `cargo t -p rays_editor run_lowering` ~2.9s |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1 | pending | omp `.subagent-logs/b1.log` (flow_check codegen) |
+| B1 | active | `3455ea12` — term_arena: drop `Debug`/`PartialEq` on 31 table payload rows (ids + manual `Term` debug/eq unchanged); ponytail static builtin op table + workspace scope stack in `op.rs`; no `cargo-llvm-lines` (op.rs 935 LOC, 141× `Arc::new`) |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
 | B5 | pending | |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
