@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::subdivide_refine::{ABytes, AFloats, AInts};
+use rdk_core::support::Windows;
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
 };
@@ -310,12 +310,23 @@ fn plan_round(
         );
     }
     let coordinate_scale = if coordinate_scale == 0.0 { 1.0 } else { coordinate_scale };
-    let face_a = AFloats::new(primitive_count as i64, 0.0);
-    let face_b = AFloats::new(primitive_count as i64, 0.0);
-    let face_c = AFloats::new(primitive_count as i64, 0.0);
-    let face_valid = ABytes::new(primitive_count as i64, 0);
-    let face_d = AFloats::new(primitive_count as i64, 0.0);
-    support::parallel_for(cancel_ref, (grain / 3).max(1), primitive_count as i64, &|primitive| {
+    let (mut face_a, mut face_b, mut face_c, mut face_d) =
+        (vec![0.0f64; primitive_count], vec![0.0f64; primitive_count], vec![0.0f64; primitive_count], vec![0.0f64; primitive_count]);
+    let mut face_valid = vec![false; primitive_count];
+    let face_grain = (grain / 3).max(1);
+    let (wa, wb, wc, wd, wvalid) = (
+        Windows::even(&mut face_a, face_grain),
+        Windows::even(&mut face_b, face_grain),
+        Windows::even(&mut face_c, face_grain),
+        Windows::even(&mut face_d, face_grain),
+        Windows::even(&mut face_valid, face_grain),
+    );
+    support::run_indexed_ranges(face_grain, primitive_count as i64, &|range, begin, end| {
+      let (face_a, face_b, face_c) = (wa.take(range), wb.take(range), wc.take(range));
+      let (face_d, face_valid) = (wd.take(range), wvalid.take(range));
+      for primitive in begin..end {
+        support::poll(cancel_ref, primitive)?;
+        let slot = (primitive - begin) as usize;
         let primitive = primitive as usize;
         let first = topology_view.primitive_offsets[primitive] as usize;
         let p0 = topology_view.vertex_points[first] as usize;
@@ -339,25 +350,20 @@ fn plan_round(
             let length = (nx * nx + ny * ny + nz * nz).sqrt();
             if length != 0.0 && length.is_finite() {
                 let (a, b, c) = (nx / length, ny / length, nz / length);
-                face_a.set(primitive as i64, a);
-                face_b.set(primitive as i64, b);
-                face_c.set(primitive as i64, c);
-                face_d.set(primitive as i64, -(a * ax + b * ay + c * az));
-                face_valid.set(primitive as i64, 1);
+                face_a[slot] = a;
+                face_b[slot] = b;
+                face_c[slot] = c;
+                face_d[slot] = -(a * ax + b * ay + c * az);
+                face_valid[slot] = true;
             }
         }
-        Ok(())
+      }
+      Ok(())
     })?;
-    let faces = Faces {
-        a: face_a.into_vec(),
-        b: face_b.into_vec(),
-        c: face_c.into_vec(),
-        valid: face_valid.into_vec().into_iter().map(|flag| flag != 0).collect(),
-    };
-    let face_d = face_d.into_vec();
+    let faces = Faces { a: face_a, b: face_b, c: face_c, valid: face_valid };
     // Quadric planes per point: q[0..10] = q00 q01 q02 q03 q11 q12 q13 q22 q23 q33.
-    let quadrics = AFloats::new(point_count as i64 * 10, 0.0);
-    support::parallel_for(cancel_ref, (grain / 6).max(1), point_count as i64, &|point| {
+    let mut q = vec![[0.0f64; 10]; point_count];
+    support::par_fill(cancel_ref, (grain / 6).max(1), &mut q, &|point| {
         let point = point as usize;
         let mut entry = [0.0f64; 10];
         for slot in index.point_offsets[point]..index.point_offsets[point + 1] {
@@ -377,12 +383,8 @@ fn plan_round(
                 entry[9] += d * d;
             }
         }
-        for (k, value) in entry.iter().enumerate() {
-            quadrics.set(point as i64 * 10 + k as i64, *value);
-        }
-        Ok(())
+        Ok(entry)
     })?;
-    let q: Vec<[f64; 10]> = quadrics.into_vec().chunks_exact(10).map(|chunk| <[f64; 10]>::try_from(chunk).unwrap()).collect();
     let mut locked = vec![false; point_count];
     if let Some(item) = hard_points {
         for point in 0..point_count {
@@ -418,8 +420,8 @@ fn plan_round(
             }
         }
     }
-    let costs = AFloats::new(edge_count as i64, f64::INFINITY);
-    let incidence = AInts::new(edge_count as i64, 0);
+    let mut costs = vec![f64::INFINITY; edge_count];
+    let mut incidence = vec![0i64; edge_count];
     let eligible_primitives = |edge: usize| -> bool {
         let first = index.edge_offsets[edge];
         let last = index.edge_offsets[edge + 1];
@@ -434,12 +436,17 @@ fn plan_round(
                 }),
             }
     };
-    support::parallel_for(cancel_ref, grain.max(1), edge_count as i64, &|edge| {
+    let (wcosts, wincidence) = (Windows::even(&mut costs, grain), Windows::even(&mut incidence, grain));
+    support::run_indexed_ranges(grain, edge_count as i64, &|range, begin, end| {
+      let (costs, incidence) = (wcosts.take(range), wincidence.take(range));
+      for edge in begin..end {
+        support::poll(cancel_ref, edge)?;
+        let slot = (edge - begin) as usize;
         let edge = edge as usize;
         let a = index.edge_a[edge] as usize;
         let b = index.edge_b[edge] as usize;
         let count = index.edge_offsets[edge + 1] - index.edge_offsets[edge];
-        incidence.set(edge as i64, count);
+        incidence[slot] = count;
         if a != b && !locked[a] && !locked[b] && eligible_primitives(edge) {
             let ax = positions.x[a] / coordinate_scale;
             let ay = positions.y[a] / coordinate_scale;
@@ -459,13 +466,12 @@ fn plan_round(
                 sum[0], sum[1], sum[2], sum[3], sum[4], sum[5], sum[6], sum[7], sum[8], sum[9], x, y, z,
             ) + (equalize_lengths * (dx * dx + dy * dy + dz * dz));
             if err.is_finite() {
-                costs.set(edge as i64, float_max(0.0, err));
+                costs[slot] = float_max(0.0, err);
             }
         }
-        Ok(())
+      }
+      Ok(())
     })?;
-    let costs = costs.into_vec();
-    let incidence = incidence.into_vec();
     let mut order: Vec<usize> = (0..edge_count).collect();
     order.sort_by(|&left, &right| {
         costs[left].partial_cmp(&costs[right]).unwrap_or(std::cmp::Ordering::Equal).then(left.cmp(&right))
