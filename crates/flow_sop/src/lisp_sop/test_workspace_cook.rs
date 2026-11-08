@@ -347,7 +347,10 @@ fn same_value(a: &flow_eval::Value, b: &flow_eval::Value) -> bool {
     match (a, b) {
         (Fn(_), Fn(_)) => true,
         (List(a), List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| same_value(a, b)),
-        (Record(a), Record(b)) | (Struct(_, _, a), Struct(_, _, b)) => a.len() == b.len() && a.iter().zip(b).all(|((n, a), (m, b))| n == m && same_value(a, b)),
+        (a @ (Record(_) | Struct(_)), b @ (Record(_) | Struct(_))) if std::mem::discriminant(a) == std::mem::discriminant(b) => {
+            let (a, b) = (a.geo_fields().unwrap(), b.geo_fields().unwrap());
+            a.len() == b.len() && a.iter().zip(b).all(|((n, a), (m, b))| n == m && same_value(a, b))
+        }
         // Marshal compares NaN bits, `==` does not: fall back to the printed form
         _ => a == b || format!("{a:?}") == format!("{b:?}"),
     }

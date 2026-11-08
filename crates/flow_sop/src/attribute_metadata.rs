@@ -612,7 +612,7 @@ mod tests {
         let source = |operation: &str, extra: Vec<(&str, Value)>| {
             let mut args = vec![("geometry".to_owned(), Value::Deferred(flow_syntax::ty::geometry(), 7))];
             args.extend(extra.into_iter().map(|(n, v)| (n.to_owned(), v)));
-            Value::Source(operation.to_owned(), Ty::Any, args)
+            flow_syntax::value::source_value(operation, Ty::Any, args)
         };
         let text = |s: &str| Value::Text(s.as_bytes().to_vec());
         let attr_type = source("sop/attr_type", vec![("attribute", text("Cd"))]);

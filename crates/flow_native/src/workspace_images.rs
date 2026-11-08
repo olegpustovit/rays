@@ -547,7 +547,8 @@ fn assoc<'a>(args: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
 }
 
 fn resolve_capture(d: &Data, request: &RequestRef, live: &Frame, sources: &[(i64, SourceRef)], value: &Value) -> Result<Value, Diagnostic> {
-    let Value::Struct(name, _, args) = value else { return Err(v::fail("E_DATA_SOURCE", "Unknown packed data source.")) };
+    let Value::Struct(g) = value else { return Err(v::fail("E_DATA_SOURCE", "Unknown packed data source.")) };
+    let (name, args) = (&g.name, &g.fields);
     if name != "sop/attr" {
         return Err(v::fail("E_DATA_SOURCE", "Unknown packed data source."));
     }

@@ -86,7 +86,7 @@ pub fn effects(workspace: &workspace_doc::T, plan: &e::Plan) -> Option<Value> {
     let graph = workspace_doc::editor_graph(workspace)?;
     let instance = plan.instances.iter().find(|i| i.default && i.graph == graph.name)?;
     match &instance.result {
-        Value::Struct(name, _, args) if name == "ui/workspace" => assoc(args, "effects").cloned(),
+        Value::Struct(g) if g.name == "ui/workspace" => assoc(&g.fields, "effects").cloned(),
         _ => None,
     }
 }

@@ -345,7 +345,7 @@ fn a_malformed_cooked_handle_is_refused_by_its_typed_guard() {
             live: false,
             arithmetic: None,
             packed_extension: None,
-            body: Arc::new(move |_, _, _| Ok(Value::Source("$core/cooked".to_owned(), Ty::Bool, vec![("id".to_owned(), Value::Int(id))]))),
+            body: Arc::new(move |_, _, _| Ok(flow_syntax::value::source_value("$core/cooked", Ty::Bool, vec![("id".to_owned(), Value::Int(id))]))),
             ..original.clone()
         };
         for count in [0usize, 1] {

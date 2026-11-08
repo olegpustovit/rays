@@ -2,7 +2,7 @@
 use super::support::*;
 use crate::{attribute_kernel as ak, catalog, lisp_sop, lower, operators, value_lane};
 use flow_ir::flow_ir::Executor;
-use flow_syntax::{ty::{self, Ty}, value::Value};
+use flow_syntax::{ty::{self, Ty}, value::{Value, source_value}};
 use rdk::{attribute::{self, Owner, Storage}, geometry as geo, packed::Float3, topology};
 use sop::{context as ctx, edit_graph as edit, node, session};
 use std::sync::Arc;

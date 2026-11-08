@@ -8,7 +8,7 @@ use flow_graph::projection as proj;
 use flow_ir::flow_ir::Executor;
 use flow_syntax::syntax::{self, Node};
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::Value;
+use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
 use rdk::attribute::{self, Owner, Storage};
 use rdk::geometry as geo;
@@ -93,7 +93,7 @@ fn lookup_of(g: Option<geo::T>) -> attribute_kernel::GeometryLookup {
 }
 
 fn group_source(name: &str, args: Vec<(&str, Value)>) -> Value {
-    Value::Source(name.to_owned(), Ty::Any, [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.to_owned(), v)).collect())
+    source_value(name, Ty::Any, [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.to_owned(), v)).collect())
 }
 
 fn query(g: &geo::T, owner: &str, name: &str, component: Option<&str>) -> Value {
@@ -629,7 +629,7 @@ fn ordinary_group_byte_masks_preserve_immutable_storage() {
 }
 
 fn promoted_query(g: &geo::T, owner: &str, name: &str) -> Result<Value, Diagnostic> {
-    let source = Value::Source(
+    let source = source_value(
         "sop/group".to_owned(),
         Ty::Array(Box::new(Ty::Int)),
         vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("owner".into(), text(owner)), ("name".into(), text(name)), ("as_owner".into(), text("point"))],
@@ -756,7 +756,7 @@ fn group_query_promotion_names_and_refusals() {
         ("absent", "vertex", text("edge"), "E_GROUP_TARGET"),
         ("absent", "vertex", Value::Int(0), "E_GROUP_TYPE"),
     ] {
-        let source = Value::Source(
+        let source = source_value(
             "sop/group".to_owned(),
             Ty::Array(Box::new(Ty::Int)),
             vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("name".into(), text(name)), ("owner".into(), text(owner)), ("as_owner".into(), target)],
@@ -767,7 +767,7 @@ fn group_query_promotion_names_and_refusals() {
         }
     }
     let point_only = native_write(None, Some(group::Owner::Point), "other_owner", &[1; 7], &geometry);
-    let source = Value::Source(
+    let source = source_value(
         "sop/group".to_owned(),
         Ty::Array(Box::new(Ty::Int)),
         vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("name".into(), text("other_owner")), ("owner".into(), text("vertex")), ("as_owner".into(), text("point"))],
@@ -867,8 +867,8 @@ fn promoted_group_descriptors_share_point_fusion_origins() {
             if promoted {
                 args.push(("as_owner", text("point")));
             }
-            let marker = Value::Source("sop/group".to_owned(), Ty::Array(Box::new(Ty::Int)), [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.to_owned(), v)).collect());
-            let positions = Value::Source(
+            let marker = source_value("sop/group", Ty::Array(Box::new(Ty::Int)), [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.to_owned(), v)).collect());
+            let positions = source_value(
                 "sop/attr".to_owned(),
                 Ty::Array(Box::new(Ty::Vec3)),
                 vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("attribute".into(), text("P"))],

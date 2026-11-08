@@ -399,7 +399,7 @@ mod tests {
 
     fn source(name: &str, component: &str, mut args: Vec<(String, Value)>) -> Value {
         args.push(("component".to_owned(), Value::Text(component.as_bytes().to_vec())));
-        Value::Source(name.to_owned(), flow_syntax::ty::Ty::Any, args)
+        flow_syntax::value::source_value(name, flow_syntax::ty::Ty::Any, args)
     }
 
     fn path_adjacency() -> Value {
