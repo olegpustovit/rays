@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::vec3;
 use rdk_core::{
-    attribute, cancel, edge_group, element_selection, error, geometry, group, normal_ops, packed, ragged_ops, support,
+    attribute, cancel, edge_group, element_selection, error, geometry, group, normal_ops, packed, support,
     topology, topology_index, topology_remap,
 };
 use rdk_core::error::Code;
@@ -1062,51 +1062,27 @@ fn interpolate_point_attribute(
         }
         Ok(output)
     };
-    let storage = match attribute::View::storage(item).map_err(pass)? {
-        Storage::Float(values) => Storage::Float(Arc::new(numeric(values)?)),
-        Storage::Int(values) => Storage::Int(Arc::new(plan.representative.iter().map(|&r| values[r as usize]).collect())),
-        Storage::IntArray(values) => Storage::IntArray(
-            ragged_ops::remap_int(cancel_value, Some(grain), &plan.representative, values).map_err(pass)?,
-        ),
-        Storage::FloatArray(values) => Storage::FloatArray(
-            ragged_ops::remap_float(cancel_value, Some(grain), &plan.representative, values).map_err(pass)?,
-        ),
-        Storage::Text(values) => {
-            Storage::Text(Arc::new(values.gather(plan.representative.iter().map(|&r| r as usize))))
-        }
-        Storage::Float2(values) => {
-            let values = packed::Float2::View::view(values);
-            Storage::Float2(packed::Float2::of_owned(numeric(&values.x)?, numeric(&values.y)?).map_err(pass)?)
-        }
-        Storage::Float3(values) => {
+    let source = attribute::View::storage(item).map_err(pass)?;
+    let storage = match source {
+        Storage::Float3(values) if attribute::name(item) == "N" => {
             let values = packed::Float3::View::view(values).map_err(pass)?;
             let mut x = numeric(&values.x)?;
             let mut y = numeric(&values.y)?;
             let mut z = numeric(&values.z)?;
-            if attribute::name(item) == "N" {
-                for point in 0..count as usize {
-                    let length = ((x[point] * x[point]) + (y[point] * y[point]) + (z[point] * z[point])).sqrt();
-                    if length > 1e-20 {
-                        x[point] /= length;
-                        y[point] /= length;
-                        z[point] /= length;
-                    }
+            for point in 0..count as usize {
+                let length = ((x[point] * x[point]) + (y[point] * y[point]) + (z[point] * z[point])).sqrt();
+                if length > 1e-20 {
+                    x[point] /= length;
+                    y[point] /= length;
+                    z[point] /= length;
                 }
             }
             Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z).map_err(pass)?)
         }
-        Storage::Float4(values) => {
-            let values = packed::Float4::View::view(values);
-            Storage::Float4(
-                packed::Float4::of_owned(
-                    numeric(&values.x)?,
-                    numeric(&values.y)?,
-                    numeric(&values.z)?,
-                    numeric(&values.w)?,
-                )
-                .map_err(pass)?,
-            )
-        }
+        source => match attribute::map_float_planes(source, numeric).map_err(pass)? {
+            Some(storage) => storage,
+            None => topology_remap::select_storage(cancel_value, grain, false, &plan.representative, source).map_err(pass)?,
+        },
     };
     attribute::create_owned(attribute::name(item), attribute::Owner::Point, storage).map_err(pass)
 }
@@ -1118,65 +1094,13 @@ fn checked_add(label: &str, first: i64, second: i64) -> Result<i64, error::T> {
     Ok(first + second)
 }
 
-fn mapped_f64(mapping: &[i64], source: &[f64]) -> Vec<f64> {
-    mapping.iter().map(|&index| if index >= 0 { source[index as usize] } else { 0.0 }).collect()
-}
-
 fn defaulted_attribute(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     mapping: &[i64],
     item: &attribute::T,
 ) -> Result<attribute::T, error::T> {
-    use attribute::Storage;
-    for (target, _) in mapping.iter().enumerate() {
-        cancel::poll(cancel_value, target as i64, 4095).map_err(pass)?;
-    }
-    let storage = match attribute::View::storage(item).map_err(pass)? {
-        Storage::Float(values) => Storage::Float(Arc::new(mapped_f64(mapping, values))),
-        Storage::Int(values) => {
-            Storage::Int(Arc::new(mapping.iter().map(|&index| if index >= 0 { values[index as usize] } else { 0 }).collect()))
-        }
-        Storage::Text(values) => Storage::Text(Arc::new(
-            mapping.iter().map(|&index| if index >= 0 { &values[index as usize] } else { &[][..] }).collect(),
-        )),
-        Storage::IntArray(values) => {
-            Storage::IntArray(ragged_ops::remap_int(cancel_value, Some(grain), mapping, values).map_err(pass)?)
-        }
-        Storage::FloatArray(values) => {
-            Storage::FloatArray(ragged_ops::remap_float(cancel_value, Some(grain), mapping, values).map_err(pass)?)
-        }
-        Storage::Float2(values) => {
-            let values = packed::Float2::View::view(values);
-            Storage::Float2(
-                packed::Float2::of_owned(mapped_f64(mapping, &values.x), mapped_f64(mapping, &values.y)).map_err(pass)?,
-            )
-        }
-        Storage::Float3(values) => {
-            let values = packed::Float3::View::view(values).map_err(pass)?;
-            Storage::Float3(
-                packed::Float3::View::of_owned_exn(
-                    mapped_f64(mapping, &values.x),
-                    mapped_f64(mapping, &values.y),
-                    mapped_f64(mapping, &values.z),
-                )
-                .map_err(pass)?,
-            )
-        }
-        Storage::Float4(values) => {
-            let values = packed::Float4::View::view(values);
-            Storage::Float4(
-                packed::Float4::of_owned(
-                    mapped_f64(mapping, &values.x),
-                    mapped_f64(mapping, &values.y),
-                    mapped_f64(mapping, &values.z),
-                    mapped_f64(mapping, &values.w),
-                )
-                .map_err(pass)?,
-            )
-        }
-    };
-    attribute::create_owned(attribute::name(item), attribute::owner(item), storage).map_err(pass)
+    topology_remap::attribute(cancel_value, grain, Some(true), mapping, item).map_err(pass)
 }
 
 fn defaulted_group(cancel_value: Option<&cancel::T>, grain: i64, mapping: &[i64], source: &group::T) -> Result<group::T, error::T> {

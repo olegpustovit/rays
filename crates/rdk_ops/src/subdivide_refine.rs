@@ -2851,8 +2851,7 @@ pub fn concatenate_part_attribute(
                     plane[base_total as usize + extra] = plane[source as usize];
                 }
             }
-            let slices: Vec<&[f64]> = planes.iter().map(|plane| plane.as_slice()).collect();
-            attribute::of_float_planes(attribute::View::storage(template)?, &slices)?
+            attribute::of_float_planes(attribute::View::storage(template)?, planes)?
         }
         Storage::Int(_) => {
             let mut output = vec![0_i64; total as usize];
@@ -3185,8 +3184,7 @@ pub fn concatenate_welded_point_attribute(
                     .collect();
                 planes.push(welded_float_plane(cancel_token, grain, weld, point_offsets, &sources)?);
             }
-            let slices: Vec<&[f64]> = planes.iter().map(|plane| plane.as_slice()).collect();
-            attribute::of_float_planes(attribute::View::storage(template)?, &slices)?
+            attribute::of_float_planes(attribute::View::storage(template)?, planes)?
         }
         Storage::Int(_) => {
             let rows = representative_rows()?;

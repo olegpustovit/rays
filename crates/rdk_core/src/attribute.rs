@@ -432,62 +432,20 @@ pub fn map_float_planes(
     }))
 }
 
+/// Rebuild the template's float kind, transferring ownership of the output planes.
 pub fn of_float_planes(
     like: &Storage,
-    planes: &[&[f64]],
+    planes: Vec<Vec<f64>>,
 ) -> Result<Storage, error::T> {
-    let missing = || invalid_attribute("Attribute.of_float_planes", "missing component plane");
+    let mut planes = planes.into_iter();
+    let mut next = || planes.next().ok_or_else(|| invalid_attribute("Attribute.of_float_planes", "missing component plane"));
     match like {
-        Storage::Float(_) => planes
-            .first()
-            .map(|plane| Storage::Float(Arc::new(plane.to_vec())))
-            .ok_or_else(missing),
-        Storage::Float2(_) => {
-            let x = planes.first().ok_or_else(missing)?;
-            let y = planes.get(1).ok_or_else(missing)?;
-            packed::Float2::of_owned(x.to_vec(), y.to_vec())
-                .map(Storage::Float2)
-                .map_err(|error| {
-                    invalid_attribute(
-                        "Attribute.of_float_planes",
-                        crate::error::message(&error),
-                    )
-                })
-        }
-        Storage::Float3(_) => {
-            let x = planes.first().ok_or_else(missing)?;
-            let y = planes.get(1).ok_or_else(missing)?;
-            let z = planes.get(2).ok_or_else(missing)?;
-            packed::Float3::of_owned(x.to_vec(), y.to_vec(), z.to_vec())
-                .map(Storage::Float3)
-                .map_err(|error| {
-                    invalid_attribute(
-                        "Attribute.of_float_planes",
-                        crate::error::message(&error),
-                    )
-                })
-        }
-        Storage::Float4(_) => {
-            let x = planes.first().ok_or_else(missing)?;
-            let y = planes.get(1).ok_or_else(missing)?;
-            let z = planes.get(2).ok_or_else(missing)?;
-            let w = planes.get(3).ok_or_else(missing)?;
-            packed::Float4::of_owned(x.to_vec(), y.to_vec(), z.to_vec(), w.to_vec())
-                .map(Storage::Float4)
-                .map_err(|error| {
-                    invalid_attribute(
-                        "Attribute.of_float_planes",
-                        crate::error::message(&error),
-                    )
-                })
-        }
-        Storage::Int(_) | Storage::IntArray(_) | Storage::FloatArray(_) | Storage::Text(_) => {
-            Err(invalid_attribute(
-                "Attribute.of_float_planes",
-                "not a float storage",
-            ))
-        }
-    }
+        Storage::Float(_) => Ok(Storage::Float(Arc::new(next()?))),
+        Storage::Float2(_) => packed::Float2::of_owned(next()?, next()?).map(Storage::Float2),
+        Storage::Float3(_) => packed::Float3::of_owned(next()?, next()?, next()?).map(Storage::Float3),
+        Storage::Float4(_) => packed::Float4::of_owned(next()?, next()?, next()?, next()?).map(Storage::Float4),
+        _ => Err(invalid_attribute("Attribute.of_float_planes", "not a float storage")),
+    }.map_err(|error| invalid_attribute("Attribute.of_float_planes", crate::error::message(&error)))
 }
 
 #[cfg(test)]
@@ -583,7 +541,39 @@ mod tests {
         let value = Storage::Float(Arc::new(vec![1.0, 2.0]));
         let planes = super::float_planes(&value).unwrap().unwrap();
         assert_eq!(planes[0], &[1.0, 2.0]);
-        assert!(matches!(super::of_float_planes(&value, &planes).unwrap(), Storage::Float(result) if *result == vec![1.0, 2.0]));
+        assert!(matches!(super::of_float_planes(&value, planes.iter().map(|plane| plane.to_vec()).collect()).unwrap(), Storage::Float(result) if *result == vec![1.0, 2.0]));
+    }
+
+    #[test]
+    fn rebuilding_float_planes_moves_buffers_and_validates_shape() {
+        use crate::{error, packed};
+        let templates = [
+            Storage::Float(Arc::new(vec![])),
+            Storage::Float2(packed::Float2::of_owned(vec![], vec![]).unwrap()),
+            Storage::Float3(packed::Float3::of_owned(vec![], vec![], vec![]).unwrap()),
+            Storage::Float4(packed::Float4::of_owned(vec![], vec![], vec![], vec![]).unwrap()),
+        ];
+        for (index, template) in templates.iter().enumerate() {
+            let width = index + 1;
+            let planes: Vec<Vec<f64>> = (0..width).map(|p| vec![p as f64, 10.0 + p as f64]).collect();
+            let pointers: Vec<_> = planes.iter().map(|plane| plane.as_ptr()).collect();
+            let output = super::of_float_planes(template, planes).unwrap();
+            let output = super::float_planes(&output).unwrap().unwrap();
+            assert_eq!(output.len(), width);
+            for (p, plane) in output.iter().enumerate() {
+                assert_eq!(plane.as_ptr(), pointers[p], "reconstruction copied a plane");
+                assert_eq!(*plane, &[p as f64, 10.0 + p as f64]);
+            }
+            let missing = super::of_float_planes(template, vec![vec![]; width - 1]).err().unwrap();
+            assert_eq!(error::code(&missing), error::Code::InvalidAttribute);
+            if width > 1 {
+                let mut mismatched = vec![vec![1.0]; width];
+                mismatched[width - 1].clear();
+                let bad = super::of_float_planes(template, mismatched).err().unwrap();
+                assert_eq!(error::code(&bad), error::Code::InvalidAttribute);
+            }
+        }
+        assert!(super::of_float_planes(&Storage::Int(Arc::new(vec![])), vec![]).is_err());
     }
 
     #[test]

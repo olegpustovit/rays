@@ -310,8 +310,7 @@ fn interpolate_fixed(
                 output[2][corner] = z;
             }
         }
-        let refs: Vec<&[f64]> = output.iter().map(|plane| plane.as_slice()).collect();
-        return Ok(attribute::of_float_planes(like, &refs)?);
+        return Ok(attribute::of_float_planes(like, output)?);
     }
     if pair.kind == 1 {
         let int_of = int_of_storage;
@@ -495,7 +494,7 @@ fn consolidate_to_points(
     storage: Storage,
 ) -> Result<Storage, Fail> {
     let rep = |point: usize| representatives[point] as usize;
-    let planes_check = |planes: &[&[f64]], outputs: &[Vec<f64>]| -> Result<(), Fail> {
+    let planes_check = |planes: &[&[f64]], outputs: &[&[f64]]| -> Result<(), Fail> {
         for (corner, &point) in vertex_points.iter().enumerate() {
             let point = point as usize;
             for (plane, output) in planes.iter().zip(outputs) {
@@ -508,10 +507,12 @@ fn consolidate_to_points(
     };
     let gather = |plane: &[f64]| -> Vec<f64> { (0..point_count).map(|point| plane[rep(point)]).collect() };
     match storage {
-        Storage::Float(source) => {
-            let output = gather(&source);
-            planes_check(&[&source], &[output.clone()])?;
-            Ok(Storage::Float(Arc::new(output)))
+        source @ (Storage::Float(_) | Storage::Float2(_) | Storage::Float3(_) | Storage::Float4(_)) => {
+            let output = attribute::map_float_planes(&source, |plane| Ok(gather(plane)))?.expect("float storage has planes");
+            let planes = attribute::float_planes(&source)?.expect("float source planes");
+            let outputs = attribute::float_planes(&output)?.expect("float output planes");
+            planes_check(&planes, &outputs)?;
+            Ok(output)
         }
         Storage::Int(source) => {
             let output: Vec<i64> = (0..point_count).map(|point| source[rep(point)]).collect();
@@ -530,28 +531,6 @@ fn consolidate_to_points(
                 }
             }
             Ok(Storage::Text(Arc::new(output)))
-        }
-        Storage::Float2(value) => {
-            let source = packed::Float2::View::view(&value);
-            let (x, y) = (gather(&source.x), gather(&source.y));
-            planes_check(&[&source.x, &source.y], &[x.clone(), y.clone()])?;
-            Ok(Storage::Float2(packed::Float2::of_owned(x, y)?))
-        }
-        Storage::Float3(value) => {
-            let source = packed::Float3::View::view(&value)?;
-            let (x, y, z) = (gather(&source.x), gather(&source.y), gather(&source.z));
-            planes_check(&[&source.x, &source.y, &source.z], &[x.clone(), y.clone(), z.clone()])?;
-            Ok(Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z)?))
-        }
-        Storage::Float4(value) => {
-            let source = packed::Float4::View::view(&value);
-            let (x, y, z, w) =
-                (gather(&source.x), gather(&source.y), gather(&source.z), gather(&source.w));
-            planes_check(
-                &[&source.x, &source.y, &source.z, &source.w],
-                &[x.clone(), y.clone(), z.clone(), w.clone()],
-            )?;
-            Ok(Storage::Float4(packed::Float4::of_owned(x, y, z, w)?))
         }
         Storage::IntArray(value) => {
             let source = packed::IntArray::View::view(&value);
@@ -985,8 +964,7 @@ fn copy_attribute(
                 }
             }
         }
-        let refs: Vec<&[f64]> = output.iter().map(|plane| plane.as_slice()).collect();
-        return make_attribute(pair, attribute::of_float_planes(like, &refs)?);
+        return make_attribute(pair, attribute::of_float_planes(like, output)?);
     }
     if pair.kind == 1 {
         let int_of = int_of_storage;

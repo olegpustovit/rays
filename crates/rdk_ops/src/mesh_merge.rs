@@ -87,16 +87,17 @@ fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -
     use attribute::Storage;
     let storages: Vec<&Storage> =
         attributes.iter().map(|item| attribute::View::storage(item).map_err(lift)).collect::<Result<Vec<_>, error::T>>()?;
-    let storage = match attribute::View::storage(template).map_err(lift)? {
-        Storage::Float(_) => {
-            let mut out = Vec::new();
+    let template_storage = attribute::View::storage(template).map_err(lift)?;
+    let storage = match template_storage {
+        Storage::Float(_) | Storage::Float2(_) | Storage::Float3(_) | Storage::Float4(_) => {
+            let mut output: Vec<Vec<f64>> = attribute::float_planes(template_storage).map_err(lift)?
+                .expect("a float-kind storage has planes").iter().map(|_| Vec::new()).collect();
             for item in &storages {
-                match item {
-                    Storage::Float(values) => out.extend_from_slice(values),
-                    _ => return Err(mismatch()),
-                }
+                let planes = attribute::float_planes(item).map_err(lift)?.ok_or_else(mismatch)?;
+                if planes.len() != output.len() { return Err(mismatch()); }
+                for (target, plane) in output.iter_mut().zip(planes) { target.extend_from_slice(plane); }
             }
-            Storage::Float(Arc::new(out))
+            attribute::of_float_planes(template_storage, output).map_err(lift)?
         }
         Storage::Int(_) => {
             let mut out = Vec::new();
@@ -117,51 +118,6 @@ fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -
                 }
             }
             Storage::Text(Arc::new(out))
-        }
-        Storage::Float2(_) => {
-            let (mut x, mut y) = (Vec::new(), Vec::new());
-            for item in &storages {
-                match item {
-                    Storage::Float2(values) => {
-                        let view = packed::Float2::View::view(values);
-                        x.extend_from_slice(&view.x);
-                        y.extend_from_slice(&view.y);
-                    }
-                    _ => return Err(mismatch()),
-                }
-            }
-            Storage::Float2(packed::Float2::of_owned(x, y).map_err(lift)?)
-        }
-        Storage::Float3(_) => {
-            let (mut x, mut y, mut z) = (Vec::new(), Vec::new(), Vec::new());
-            for item in &storages {
-                match item {
-                    Storage::Float3(values) => {
-                        let view = packed::Float3::View::view(values).map_err(lift)?;
-                        x.extend_from_slice(&view.x);
-                        y.extend_from_slice(&view.y);
-                        z.extend_from_slice(&view.z);
-                    }
-                    _ => return Err(mismatch()),
-                }
-            }
-            Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z).map_err(lift)?)
-        }
-        Storage::Float4(_) => {
-            let (mut x, mut y, mut z, mut w) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-            for item in &storages {
-                match item {
-                    Storage::Float4(values) => {
-                        let view = packed::Float4::View::view(values);
-                        x.extend_from_slice(&view.x);
-                        y.extend_from_slice(&view.y);
-                        z.extend_from_slice(&view.z);
-                        w.extend_from_slice(&view.w);
-                    }
-                    _ => return Err(mismatch()),
-                }
-            }
-            Storage::Float4(packed::Float4::of_owned(x, y, z, w).map_err(lift)?)
         }
         Storage::IntArray(_) => {
             let mut sources = Vec::new();

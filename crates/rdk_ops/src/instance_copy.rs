@@ -109,43 +109,14 @@ fn repeat_attribute(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, i
     if attribute::owner(item) == attribute::Owner::Detail {
         return Ok(item.clone());
     }
-    let storage = match attribute::View::storage(item).map_err(lift)? {
-        Storage::Float(values) => Storage::Float(Arc::new(repeat_f64(cancel_value, grain, copies, values)?)),
+    let source = attribute::View::storage(item).map_err(lift)?;
+    let storage = match source {
+        Storage::Float(_) | Storage::Float2(_) | Storage::Float3(_) | Storage::Float4(_) => {
+            attribute::map_float_planes(source, |plane| repeat_f64(cancel_value, grain, copies, plane))
+                .map_err(lift)?.expect("a float-kind storage has planes")
+        }
         Storage::Int(values) => Storage::Int(Arc::new(repeat_i64(cancel_value, grain, copies, values)?)),
         Storage::Text(values) => Storage::Text(Arc::new(repeat_text(copies, values))),
-        Storage::Float2(values) => {
-            let view = packed::Float2::View::view(values);
-            Storage::Float2(
-                packed::Float2::of_owned(
-                    repeat_f64(cancel_value, grain, copies, &view.x)?,
-                    repeat_f64(cancel_value, grain, copies, &view.y)?,
-                )
-                .map_err(lift)?,
-            )
-        }
-        Storage::Float3(values) => {
-            let view = packed::Float3::View::view(values).map_err(lift)?;
-            Storage::Float3(
-                packed::Float3::View::of_owned_exn(
-                    repeat_f64(cancel_value, grain, copies, &view.x)?,
-                    repeat_f64(cancel_value, grain, copies, &view.y)?,
-                    repeat_f64(cancel_value, grain, copies, &view.z)?,
-                )
-                .map_err(lift)?,
-            )
-        }
-        Storage::Float4(values) => {
-            let view = packed::Float4::View::view(values);
-            Storage::Float4(
-                packed::Float4::of_owned(
-                    repeat_f64(cancel_value, grain, copies, &view.x)?,
-                    repeat_f64(cancel_value, grain, copies, &view.y)?,
-                    repeat_f64(cancel_value, grain, copies, &view.z)?,
-                    repeat_f64(cancel_value, grain, copies, &view.w)?,
-                )
-                .map_err(lift)?,
-            )
-        }
         Storage::IntArray(values) => {
             let source_count = packed::IntArray::length(values);
             let mapping: Vec<i64> = (0..copies * source_count).map(|index| index % source_count).collect();
@@ -540,11 +511,31 @@ mod tests {
         let mut source = geometry::with_attribute(weight, &source).unwrap();
         source = geometry::with_attribute(detail, &source).unwrap();
         source = geometry::with_group(ordered, &source).unwrap();
+        for width in 2..=4 {
+            let template = attribute::Storage::Float4(packed::Float4::of_owned(vec![], vec![], vec![], vec![]).unwrap());
+            let planes = (0..width).map(|p| vec![p as f64, 10.0 + p as f64, 20.0 + p as f64]).collect();
+            let storage = match width {
+                2 => attribute::Storage::Float2(packed::Float2::of_owned(vec![], vec![]).unwrap()),
+                3 => attribute::Storage::Float3(packed::Float3::of_owned(vec![], vec![], vec![]).unwrap()),
+                _ => template,
+            };
+            let item = attribute::create_owned(&format!("tuple{width}"), attribute::Owner::Point, attribute::of_float_planes(&storage, planes).unwrap()).unwrap();
+            source = geometry::with_attribute(item, &source).unwrap();
+        }
         let output = materialize_instances(&transforms(3), &source).unwrap();
         let weights = geometry::find_attribute(attribute::Owner::Point, "weight", &output).unwrap();
         match attribute::View::storage(&weights).unwrap() {
             attribute::Storage::Float(values) => assert_eq!(values[..], [1., 2., 3., 1., 2., 3., 1., 2., 3.]),
             _ => panic!("weight storage"),
+        }
+        for item in geometry::attributes(&source) {
+            let storage = attribute::View::storage(&item).unwrap();
+            if let Some(planes) = attribute::float_planes(storage).unwrap() {
+                let target = geometry::find_attribute(attribute::Owner::Point, attribute::name(&item), &output).unwrap();
+                assert_eq!(attribute::kind_name(&target), attribute::kind_name(&item));
+                let target_planes = attribute::float_planes(attribute::View::storage(&target).unwrap()).unwrap().unwrap();
+                for (source, target) in planes.iter().zip(target_planes) { assert_eq!(target, source.repeat(3)); }
+            }
         }
         assert!(geometry::find_attribute(attribute::Owner::Detail, "tag", &output).is_some());
         let members = geometry::find_group(group::Owner::Point, "pts", &output).unwrap();

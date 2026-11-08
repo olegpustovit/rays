@@ -297,9 +297,6 @@ fn apply_attribute(
         (attribute::Storage::Int(s), attribute::Storage::Int(t)) if concatenate(method) => {
             attribute::Storage::IntArray(scalar_int_array(cancel_value, grain, destinations, s, t)?)
         }
-        (attribute::Storage::Float(s), attribute::Storage::Float(t)) => {
-            attribute::Storage::Float(Arc::new(mapped_f64(cancel_value, grain, destinations, s, t)?))
-        }
         (attribute::Storage::Int(s), attribute::Storage::Int(t)) => {
             attribute::Storage::Int(Arc::new(mapped_i64(cancel_value, grain, destinations, s, t)?))
         }
@@ -315,50 +312,16 @@ fn apply_attribute(
             }
             attribute::Storage::Text(Arc::new(mapped_string(cancel_value, grain, destinations, s, t)?))
         }
-        (attribute::Storage::Float2(s), attribute::Storage::Float2(t)) => {
-            if concatenate(method) {
-                return Err(incompatible());
-            }
-            let s = packed::Float2::View::view(s);
-            let t = packed::Float2::View::view(t);
-            attribute::Storage::Float2(
-                packed::Float2::of_owned(
-                    mapped_f64(cancel_value, grain, destinations, &s.x, &t.x)?,
-                    mapped_f64(cancel_value, grain, destinations, &s.y, &t.y)?,
-                )
-                .map_err(core_fail)?,
-            )
-        }
-        (attribute::Storage::Float3(s), attribute::Storage::Float3(t)) => {
-            if concatenate(method) {
-                return Err(incompatible());
-            }
-            let s = packed::Float3::View::view(s).map_err(core_fail)?;
-            let t = packed::Float3::View::view(t).map_err(core_fail)?;
-            attribute::Storage::Float3(
-                packed::Float3::View::of_owned_exn(
-                    mapped_f64(cancel_value, grain, destinations, &s.x, &t.x)?,
-                    mapped_f64(cancel_value, grain, destinations, &s.y, &t.y)?,
-                    mapped_f64(cancel_value, grain, destinations, &s.z, &t.z)?,
-                )
-                .map_err(core_fail)?,
-            )
-        }
-        (attribute::Storage::Float4(s), attribute::Storage::Float4(t)) => {
-            if concatenate(method) {
-                return Err(incompatible());
-            }
-            let s = packed::Float4::View::view(s);
-            let t = packed::Float4::View::view(t);
-            attribute::Storage::Float4(
-                packed::Float4::of_owned(
-                    mapped_f64(cancel_value, grain, destinations, &s.x, &t.x)?,
-                    mapped_f64(cancel_value, grain, destinations, &s.y, &t.y)?,
-                    mapped_f64(cancel_value, grain, destinations, &s.z, &t.z)?,
-                    mapped_f64(cancel_value, grain, destinations, &s.w, &t.w)?,
-                )
-                .map_err(core_fail)?,
-            )
+        (attribute::Storage::Float(_), attribute::Storage::Float(_))
+        | (attribute::Storage::Float2(_), attribute::Storage::Float2(_))
+        | (attribute::Storage::Float3(_), attribute::Storage::Float3(_))
+        | (attribute::Storage::Float4(_), attribute::Storage::Float4(_)) => {
+            if concatenate(method) { return Err(incompatible()); }
+            let source_planes = attribute::float_planes(source_storage).map_err(core_fail)?.expect("float source planes");
+            let target_planes = attribute::float_planes(target_storage).map_err(core_fail)?.expect("float target planes");
+            let output = source_planes.iter().zip(target_planes).map(|(s, t)| mapped_f64(cancel_value, grain, destinations, s, t))
+                .collect::<Result<Vec<_>, _>>()?;
+            attribute::of_float_planes(source_storage, output).map_err(core_fail)?
         }
         (attribute::Storage::IntArray(s), attribute::Storage::IntArray(t))
             if concatenate(method) || selection(method) =>

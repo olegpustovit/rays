@@ -559,7 +559,8 @@ fn remap_attribute(
         },
         ocaml_quote(name)
     );
-    let storage = match attribute::View::storage(item)? {
+    let source = attribute::View::storage(item)?;
+    let storage = match source {
         attribute::Storage::Float(values) => {
             attribute::Storage::Float(Arc::new(copy_float(cancel_token, grain, mapping, &label, values)?))
         }
@@ -589,42 +590,10 @@ fn remap_attribute(
             }
             attribute::Storage::Text(Arc::new(output))
         }
-        attribute::Storage::Float2(values) => {
-            let view = packed::Float2::View::view(values);
-            let output = copy_tuple(cancel_token, grain, mapping, transform, &label, &[&view.x, &view.y])?;
-            let mut planes = output.into_iter();
-            attribute::Storage::Float2(packed::Float2::of_owned(
-                planes.next().unwrap_or_default(),
-                planes.next().unwrap_or_default(),
-            )?)
-        }
-        attribute::Storage::Float3(values) => {
-            let view = packed::Float3::View::view(values)?;
-            let output = copy_tuple(cancel_token, grain, mapping, transform, &label, &[&view.x, &view.y, &view.z])?;
-            let mut planes = output.into_iter();
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
-                planes.next().unwrap_or_default(),
-                planes.next().unwrap_or_default(),
-                planes.next().unwrap_or_default(),
-            )?)
-        }
-        attribute::Storage::Float4(values) => {
-            let view = packed::Float4::View::view(values);
-            let output = copy_tuple(
-                cancel_token,
-                grain,
-                mapping,
-                transform,
-                &label,
-                &[&view.x, &view.y, &view.z, &view.w],
-            )?;
-            let mut planes = output.into_iter();
-            attribute::Storage::Float4(packed::Float4::of_owned(
-                planes.next().unwrap_or_default(),
-                planes.next().unwrap_or_default(),
-                planes.next().unwrap_or_default(),
-                planes.next().unwrap_or_default(),
-            )?)
+        attribute::Storage::Float2(_) | attribute::Storage::Float3(_) | attribute::Storage::Float4(_) => {
+            let planes = attribute::float_planes(source)?.expect("a tuple storage has float planes");
+            let output = copy_tuple(cancel_token, grain, mapping, transform, &label, &planes)?;
+            attribute::of_float_planes(source, output)?
         }
         attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
             cancel_token,

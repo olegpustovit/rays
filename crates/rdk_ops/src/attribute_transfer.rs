@@ -800,8 +800,7 @@ fn spatial_transfer(
                         &transferred,
                     )?;
                 }
-                let refs: Vec<&[f64]> = transferred.iter().map(|plane| plane.as_slice()).collect();
-                attribute::of_float_planes(like, &refs)?
+                attribute::of_float_planes(like, transferred)?
             }
             attribute::Storage::Int(source_values) => {
                 let output = initial_int(target_elements, unmatched, &existing, target_count as usize)?;
@@ -1061,8 +1060,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
                 | attribute::Storage::Float3(_)
                 | attribute::Storage::Float4(_)) => {
                     let planes = initial_planes(target_elements, unmatched, &existing, like, target_count)?;
-                    let refs: Vec<&[f64]> = planes.iter().map(|plane| plane.as_slice()).collect();
-                    attribute::of_float_planes(like, &refs)?
+                    attribute::of_float_planes(like, planes)?
                 }
                 attribute::Storage::Int(_) => {
                     attribute::Storage::Int(Arc::new(initial_int(target_elements, unmatched, &existing, target_count)?))
@@ -1224,8 +1222,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
                         &transferred,
                     )?;
                 }
-                let refs: Vec<&[f64]> = transferred.iter().map(|plane| plane.as_slice()).collect();
-                attribute::of_float_planes(like, &refs)?
+                attribute::of_float_planes(like, transferred)?
             }
             attribute::Storage::Int(values) => {
                 let output = initial_int(target_elements, unmatched, &existing, target_count)?;

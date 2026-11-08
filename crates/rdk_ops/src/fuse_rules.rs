@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use rdk_core::support::Windows;
-use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, support};
+use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, support, topology_remap};
 use rdk_core::error::Code;
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
@@ -1055,50 +1055,15 @@ fn reduced_attribute(
         attribute::Storage::Int(values) if is_concatenate(method) => {
             attribute::Storage::IntArray(concatenate_int_scalar(clusters, compact, values, &ordered)?)
         }
-        attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane_float(values)?)),
         attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(plane_int(values)?)),
         attribute::Storage::Text(values) => attribute::Storage::Text(Arc::new(expand_string(
             clusters,
             compact,
             reduce_text(cancel_value, grain, &name, clusters, values, method, weights, &ordered)?,
         ))),
-        attribute::Storage::Float2(values) => {
-            if is_concatenate(method) {
-                return Err(concat_scalar_message());
-            }
-            let view = packed::Float2::View::view(values);
-            attribute::Storage::Float2(
-                packed::Float2::of_owned(plane_float(&view.x)?, plane_float(&view.y)?).map_err(core_fail)?,
-            )
-        }
-        attribute::Storage::Float3(values) => {
-            if is_concatenate(method) {
-                return Err(concat_scalar_message());
-            }
-            let view = packed::Float3::View::view(values).map_err(core_fail)?;
-            attribute::Storage::Float3(
-                packed::Float3::View::of_owned_exn(
-                    plane_float(&view.x)?,
-                    plane_float(&view.y)?,
-                    plane_float(&view.z)?,
-                )
-                .map_err(core_fail)?,
-            )
-        }
-        attribute::Storage::Float4(values) => {
-            if is_concatenate(method) {
-                return Err(concat_scalar_message());
-            }
-            let view = packed::Float4::View::view(values);
-            attribute::Storage::Float4(
-                packed::Float4::of_owned(
-                    plane_float(&view.x)?,
-                    plane_float(&view.y)?,
-                    plane_float(&view.z)?,
-                    plane_float(&view.w)?,
-                )
-                .map_err(core_fail)?,
-            )
+        source @ (attribute::Storage::Float(_) | attribute::Storage::Float2(_) | attribute::Storage::Float3(_) | attribute::Storage::Float4(_)) => {
+            if is_concatenate(method) { return Err(concat_scalar_message()); }
+            attribute::map_float_planes(source, plane_float).map_err(core_fail)?.expect("a float-kind storage has planes")
         }
         attribute::Storage::IntArray(values) => match method {
             AttributeMethod::Concatenate | AttributeMethod::ConcatenateWeightOrder => {
@@ -1153,53 +1118,32 @@ fn default_attribute(
             (0..clusters.count as usize).map(|c| average_float(clusters, source, c)).collect(),
         )
     };
-    let first = |source: &[f64]| select_f64(source, &representatives);
-    let plane = |source: &[f64]| if average_numeric { average(source) } else { first(source) };
-    let storage = match attribute::View::storage(item).map_err(core_fail)? {
-        attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values))),
-        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(select_i64(values, &representatives))),
-        attribute::Storage::Text(values) => {
-            attribute::Storage::Text(Arc::new(select_string(values, &representatives)))
-        }
-        attribute::Storage::Float2(values) => {
-            let view = packed::Float2::View::view(values);
-            attribute::Storage::Float2(
-                packed::Float2::of_owned(plane(&view.x), plane(&view.y)).map_err(core_fail)?,
-            )
-        }
-        attribute::Storage::Float3(values) => {
+    if !average_numeric {
+        return topology_remap::attribute(cancel_value, grain, None, &representatives, item).map_err(core_fail);
+    }
+    let source = attribute::View::storage(item).map_err(core_fail)?;
+    let storage = match source {
+        attribute::Storage::Float3(values) if attribute::name(item) == "N" => {
             let view = packed::Float3::View::view(values).map_err(core_fail)?;
-            let mut x = plane(&view.x);
-            let mut y = plane(&view.y);
-            let mut z = plane(&view.z);
-            if average_numeric && attribute::name(item) == "N" {
-                for point in 0..x.len() as i64 {
-                    cancel::poll(cancel_value, point, 4095)?;
-                    let p = point as usize;
-                    let length = ((x[p] * x[p]) + (y[p] * y[p]) + (z[p] * z[p])).sqrt();
-                    if length > 1e-20 {
-                        x[p] /= length;
-                        y[p] /= length;
-                        z[p] /= length;
-                    }
+            let mut x = average(&view.x);
+            let mut y = average(&view.y);
+            let mut z = average(&view.z);
+            for point in 0..x.len() as i64 {
+                cancel::poll(cancel_value, point, 4095)?;
+                let p = point as usize;
+                let length = ((x[p] * x[p]) + (y[p] * y[p]) + (z[p] * z[p])).sqrt();
+                if length > 1e-20 {
+                    x[p] /= length;
+                    y[p] /= length;
+                    z[p] /= length;
                 }
             }
-            let _ = grain;
             attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z).map_err(core_fail)?)
         }
-        attribute::Storage::Float4(values) => {
-            let view = packed::Float4::View::view(values);
-            attribute::Storage::Float4(
-                packed::Float4::of_owned(plane(&view.x), plane(&view.y), plane(&view.z), plane(&view.w))
-                    .map_err(core_fail)?,
-            )
-        }
-        attribute::Storage::IntArray(values) => attribute::Storage::IntArray(
-            ragged_ops::remap_int(cancel_value, Some(grain), &representatives, values).map_err(core_fail)?,
-        ),
-        attribute::Storage::FloatArray(values) => attribute::Storage::FloatArray(
-            ragged_ops::remap_float(cancel_value, Some(grain), &representatives, values).map_err(core_fail)?,
-        ),
+        source => match attribute::map_float_planes(source, |plane| Ok(average(plane))).map_err(core_fail)? {
+            Some(storage) => storage,
+            None => topology_remap::select_storage(cancel_value, grain, false, &representatives, source).map_err(core_fail)?,
+        },
     };
     attribute::create_owned(attribute::name(item), attribute::Owner::Point, storage).map_err(core_fail)
 }
