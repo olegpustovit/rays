@@ -12,8 +12,8 @@ pub enum Owner {
 
 #[derive(Clone)]
 pub enum Storage {
-    Float(Vec<f64>),
-    Int(Vec<i64>),
+    Float(Arc<Vec<f64>>),
+    Int(Arc<Vec<i64>>),
     IntArray(packed::IntArray::T),
     FloatArray(packed::FloatArray::T),
     Float2(packed::Float2::T),
@@ -424,7 +424,7 @@ pub fn of_float_planes(
     match like {
         Storage::Float(_) => planes
             .first()
-            .map(|plane| Storage::Float(plane.to_vec()))
+            .map(|plane| Storage::Float(Arc::new(plane.to_vec())))
             .ok_or_else(missing),
         Storage::Float2(_) => {
             let x = planes.first().ok_or_else(missing)?;
@@ -476,26 +476,26 @@ pub fn of_float_planes(
 
 #[cfg(test)]
 mod tests {
-    use super::{Owner, Storage};
+    use super::{Arc, Owner, Storage};
 
 
     #[test]
     fn name_whitespace_is_ascii_only() {
         let whitespace = " \t\n\r\u{000c}";
-        assert!(super::create_owned(whitespace, Owner::Point, Storage::Float(vec![])).is_err());
+        assert!(super::create_owned(whitespace, Owner::Point, Storage::Float(Arc::new(vec![]))).is_err());
         let nbsp = "\u{00a0}";
-        let value = super::create_owned(nbsp, Owner::Point, Storage::Float(vec![])).unwrap();
+        let value = super::create_owned(nbsp, Owner::Point, Storage::Float(Arc::new(vec![]))).unwrap();
         assert_eq!(super::name(&value), nbsp);
         assert!(super::with_name(nbsp, &value).is_ok());
     }
     #[test]
     fn typed_key_checks_owner_and_storage_and_rename_shares_payload_identity() {
-        let value = super::create_owned("signal", Owner::Point, Storage::Float(vec![1.0, 2.0]))
+        let value = super::create_owned("signal", Owner::Point, Storage::Float(Arc::new(vec![1.0, 2.0])))
             .unwrap();
         let key = super::key("signal", Owner::Point, super::float());
         assert!(matches!(
             super::get(&key, &value).unwrap(),
-            Some(Storage::Float(values)) if values == vec![1.0, 2.0]
+            Some(Storage::Float(values)) if *values == vec![1.0, 2.0]
         ));
         assert!(super::get(&super::key("signal", Owner::Vertex, super::float()), &value).unwrap().is_none());
         let renamed = super::with_name("renamed", &value).unwrap();
@@ -512,14 +512,14 @@ mod tests {
         let count_reads = Arc::clone(&reads);
         let materialise = Arc::new(move || {
             count_reads.fetch_add(1, Ordering::SeqCst);
-            Storage::Float(vec![1.0, 2.0])
+            Storage::Float(Arc::new(vec![1.0, 2.0]))
         });
         let value = super::create_deferred(
             None,
             None,
             "lazy",
             Owner::Point,
-            &Storage::Float(Vec::new()),
+            &Storage::Float(Arc::new(Vec::new())),
             2,
             materialise,
         )
@@ -529,7 +529,7 @@ mod tests {
         assert_eq!(super::kind_name(&value), "float");
         assert_eq!(super::payload_bytes(&value), 16);
         assert_eq!(reads.load(Ordering::SeqCst), 0);
-        assert!(matches!(super::storage(&value).unwrap(), Storage::Float(values) if values == vec![1.0, 2.0]));
+        assert!(matches!(super::storage(&value).unwrap(), Storage::Float(values) if *values == vec![1.0, 2.0]));
         assert!(super::storage(&value).is_ok());
         assert_eq!(reads.load(Ordering::SeqCst), 1);
         assert!(!super::resident(&value));
@@ -544,14 +544,14 @@ mod tests {
         let count_reads = Arc::clone(&reads);
         let materialise = Arc::new(move || {
             count_reads.fetch_add(1, Ordering::SeqCst);
-            Storage::Int(vec![1, 2, 3])
+            Storage::Int(Arc::new(vec![1, 2, 3]))
         });
         let value = super::create_deferred(
             None,
             None,
             "lazy_int",
             Owner::Point,
-            &Storage::Int(vec![0; 32]),
+            &Storage::Int(Arc::new(vec![0; 32])),
             3,
             materialise,
         )
@@ -564,10 +564,10 @@ mod tests {
 
     #[test]
     fn float_planes_are_borrowed_and_rebuilt_with_matching_kind() {
-        let value = Storage::Float(vec![1.0, 2.0]);
+        let value = Storage::Float(Arc::new(vec![1.0, 2.0]));
         let planes = super::float_planes(&value).unwrap().unwrap();
         assert_eq!(planes[0], &[1.0, 2.0]);
-        assert!(matches!(super::of_float_planes(&value, &planes).unwrap(), Storage::Float(result) if result == vec![1.0, 2.0]));
+        assert!(matches!(super::of_float_planes(&value, &planes).unwrap(), Storage::Float(result) if *result == vec![1.0, 2.0]));
     }
 
     #[test]

@@ -1062,8 +1062,8 @@ fn interpolate_point_attribute(
         Ok(output)
     };
     let storage = match attribute::View::storage(item).map_err(pass)? {
-        Storage::Float(values) => Storage::Float(numeric(values)?),
-        Storage::Int(values) => Storage::Int(plan.representative.iter().map(|&r| values[r as usize]).collect()),
+        Storage::Float(values) => Storage::Float(Arc::new(numeric(values)?)),
+        Storage::Int(values) => Storage::Int(Arc::new(plan.representative.iter().map(|&r| values[r as usize]).collect())),
         Storage::IntArray(values) => Storage::IntArray(
             ragged_ops::remap_int(cancel_value, Some(grain), &plan.representative, values).map_err(pass)?,
         ),
@@ -1132,9 +1132,9 @@ fn defaulted_attribute(
         cancel::poll(cancel_value, target as i64, 4095).map_err(pass)?;
     }
     let storage = match attribute::View::storage(item).map_err(pass)? {
-        Storage::Float(values) => Storage::Float(mapped_f64(mapping, values)),
+        Storage::Float(values) => Storage::Float(Arc::new(mapped_f64(mapping, values))),
         Storage::Int(values) => {
-            Storage::Int(mapping.iter().map(|&index| if index >= 0 { values[index as usize] } else { 0 }).collect())
+            Storage::Int(Arc::new(mapping.iter().map(|&index| if index >= 0 { values[index as usize] } else { 0 }).collect()))
         }
         Storage::Text(values) => Storage::Text(
             mapping.iter().map(|&index| if index >= 0 { values[index as usize].clone() } else { Vec::new() }).collect(),
@@ -1897,14 +1897,14 @@ mod tests {
 
     fn float_values(owner: attribute::Owner, name: &str, value: &geometry::T) -> Vec<f64> {
         match storage(owner, name, value) {
-            attribute::Storage::Float(values) => values,
+            attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("float storage changed"),
         }
     }
 
     fn int_values(owner: attribute::Owner, name: &str, value: &geometry::T) -> Vec<i64> {
         match storage(owner, name, value) {
-            attribute::Storage::Int(values) => values,
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("integer storage changed"),
         }
     }
@@ -1943,7 +1943,7 @@ mod tests {
     #[test]
     fn xy_payload_and_group() {
         let input = points(&[(0., 0., 3.), (1., 0., 4.), (1., 1., 5.), (0., 1., 6.)]);
-        let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(vec![10, 11, 12, 13]));
+        let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(Arc::new(vec![10, 11, 12, 13])));
         let selected = pgroup(group::Owner::Point, "selected", 4, &|_| true);
         let input = geometry::with_group(selected, &geometry::with_attribute(id, &input).unwrap()).unwrap();
         let output = tri(Params { triangle_group: Some("triangles".to_owned()), ..xy() }, &input);
@@ -2108,8 +2108,8 @@ mod tests {
         let v = attribute::Owner::Vertex;
         let range = |offset: f64| -> Vec<f64> { (0..8).map(|i| i as f64 + offset).collect() };
         let attributes = vec![
-            attr("vertex_weight", v, attribute::Storage::Float(vec![10., 11., 12., 13., 14., 15., 16., 17.])),
-            attr("vertex_id", v, attribute::Storage::Int(vec![10, 11, 12, 13, 14, 15, 16, 17])),
+            attr("vertex_weight", v, attribute::Storage::Float(Arc::new(vec![10., 11., 12., 13., 14., 15., 16., 17.]))),
+            attr("vertex_id", v, attribute::Storage::Int(Arc::new(vec![10, 11, 12, 13, 14, 15, 16, 17]))),
             attr("vertex_rows", v, rows_int(vec![0, 1, 3, 3, 4, 5, 7, 8, 10], vec![0, 10, 11, 30, 40, 50, 51, 60, 70, 71])),
             attr(
                 "vertex_float_rows",
@@ -2131,7 +2131,7 @@ mod tests {
                 attribute::Owner::Primitive,
                 attribute::Storage::Text(vec![b"surface".to_vec(), b"constraint".to_vec(), b"guide".to_vec()]),
             ),
-            attr("detail_id", attribute::Owner::Detail, attribute::Storage::Int(vec![73])),
+            attr("detail_id", attribute::Owner::Detail, attribute::Storage::Int(Arc::new(vec![73]))),
         ];
         let constraints = pgroup(group::Owner::Primitive, "constraints", 3, &|p| p == 1);
         let vertex_order = group::ordered(group::Owner::Vertex, "vertex_order", 8, &[7, 4, 2, 0]).unwrap();
@@ -2343,8 +2343,8 @@ mod tests {
             vec![0, 2, 4],
             vec![PrimitiveKind::OpenPolyline, PrimitiveKind::OpenPolyline],
         );
-        let weight = attr("weight", attribute::Owner::Point, attribute::Storage::Float(vec![0., 100., 10., 200.]));
-        let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(vec![10, 11, 12, 13]));
+        let weight = attr("weight", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![0., 100., 10., 200.])));
+        let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(Arc::new(vec![10, 11, 12, 13])));
         let label = attr(
             "label",
             attribute::Owner::Point,
@@ -2552,7 +2552,7 @@ mod tests {
     #[test]
     fn remove_duplicate_points() {
         let input = points(&[(0., 0., 0.), (1., 0., 0.), (1., 1., 0.), (0., 1., 0.), (0., 0., 7.), (9., 9., 9.)]);
-        let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(vec![10, 11, 12, 13, 14, 15]));
+        let id = attr("id", attribute::Owner::Point, attribute::Storage::Int(Arc::new(vec![10, 11, 12, 13, 14, 15])));
         let selected = group::ordered(group::Owner::Point, "selected", 6, &[0, 1, 2, 3, 4]).unwrap();
         let markers = pgroup(group::Owner::Point, "markers", 6, &|p| p == 4 || p == 5);
         let input = geometry::with_group(
@@ -2596,7 +2596,7 @@ mod tests {
     #[test]
     fn quality_refinement() {
         let input = points(&[(0., 0., 0.), (2., 0., 2.), (2., 2., 6.), (0., 2., 4.)]);
-        let value = attr("value", attribute::Owner::Point, attribute::Storage::Float(vec![0., 2., 6., 4.]));
+        let value = attr("value", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![0., 2., 6., 4.])));
         let input = geometry::with_attribute(value, &input).unwrap();
         let (output, parallel) = one_four(&|| {
             tri(

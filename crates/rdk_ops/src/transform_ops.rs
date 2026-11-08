@@ -245,9 +245,9 @@ fn lower(first_invalid: &AtomicI64, point: i64) {
 }
 
 struct Positions {
-    x: Arc<[f64]>,
-    y: Arc<[f64]>,
-    z: Arc<[f64]>,
+    x: Arc<Vec<f64>>,
+    y: Arc<Vec<f64>>,
+    z: Arc<Vec<f64>>,
 }
 
 fn validate_finite_positions(
@@ -388,7 +388,7 @@ fn point_float_output(
                 if values.len() as i64 != geometry::point_count(value) {
                     Err(fail(format!("{operation}: point attribute {} length mismatch", ocaml_quote(name))))
                 } else {
-                    Ok(values.clone())
+                    Ok(values.to_vec())
                 }
             }
             _ => Err(fail(format!("{operation}: point attribute {} must be float", ocaml_quote(name)))),
@@ -611,14 +611,14 @@ fn run_distance_from_geometry(
         attributes.push(attribute::create_owned(
             name,
             attribute::Owner::Point,
-            attribute::Storage::Float(values),
+            attribute::Storage::Float(Arc::new(values)),
         )?);
     }
     if let (Some(name), Some(values)) = (mask_attribute, mask_values) {
         attributes.push(attribute::create_owned(
             name,
             attribute::Owner::Point,
-            attribute::Storage::Float(values),
+            attribute::Storage::Float(Arc::new(values)),
         )?);
     }
     geometry::View::with_merged_attributes_owned(attributes, source)
@@ -836,7 +836,7 @@ fn run_soft_transform(
     match params.falloff_attribute.as_deref() {
         None => Ok(output),
         Some(name) => {
-            let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Float(weights))?;
+            let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Float(Arc::new(weights)))?;
             geometry::with_attribute(item, &output)
         }
     }
@@ -1027,13 +1027,13 @@ mod tests {
     fn float_attribute(name: &str, value: &geometry::T) -> Vec<f64> {
         let item = geometry::find_attribute(attribute::Owner::Point, name, value).expect("attribute");
         match attribute::View::storage(&item).unwrap() {
-            attribute::Storage::Float(values) => values.clone(),
+            attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
     }
 
     fn with_float(name: &str, values: Vec<f64>, value: &geometry::T) -> geometry::T {
-        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Float(values)).unwrap();
+        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Float(Arc::new(values))).unwrap();
         geometry::with_attribute(item, value).unwrap()
     }
 
@@ -1138,7 +1138,7 @@ mod tests {
         let attribute_metric = |name: &str| SoftAttribute { attribute: name.to_owned(), apply_rolloff: false };
         let missing = soft_transform(&soft(attribute_metric("missing"), SoftCubic, 1.0, None, None), &mat4::identity(), &source);
         assert_eq!(failure_code(missing), "invalid_transform");
-        let wrong = attribute::create_owned("wrong", attribute::Owner::Point, attribute::Storage::Int(vec![1; 5])).unwrap();
+        let wrong = attribute::create_owned("wrong", attribute::Owner::Point, attribute::Storage::Int(Arc::new(vec![1; 5]))).unwrap();
         let wrong = geometry::with_attribute(wrong, &source).unwrap();
         let params = soft(attribute_metric("wrong"), SoftCubic, 1.0, None, None);
         assert_eq!(failure_code(soft_transform(&params, &mat4::identity(), &wrong)), "invalid_transform");
@@ -1311,7 +1311,7 @@ mod tests {
             &source,
         );
         invalid(DistanceFromGeometryParams { radius: DistanceAlongRadius::DistanceFixed(0.0), ..params(&reference) }, &source);
-        let wrong = attribute::create_owned("distance", attribute::Owner::Point, attribute::Storage::Int(vec![1, 2])).unwrap();
+        let wrong = attribute::create_owned("distance", attribute::Owner::Point, attribute::Storage::Int(Arc::new(vec![1, 2]))).unwrap();
         invalid(params(&reference), &geometry::with_attribute(wrong, &source).unwrap());
         let malformed = point_group("malformed", 3, &|point| point == 0);
         invalid(

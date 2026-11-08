@@ -3,6 +3,7 @@
 //! OCaml raises `Error.Fail`, `Invalid_argument` and `Cancel.Cancelled` out of `iterate`; here each
 //! is an `error::T`: a failure has code `invalid_parameter` and the OCaml message, a cancellation
 //! has code `cancelled`.
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rdk_core::{
@@ -559,15 +560,15 @@ fn remap_attribute(
     let chunk = grain.unwrap_or(16_384);
     let storage = match attribute::View::storage(value)? {
         attribute::Storage::Float(values) => {
-            attribute::Storage::Float(numeric(cancel_value, grain, plan, owner, values)?)
+            attribute::Storage::Float(Arc::new(numeric(cancel_value, grain, plan, owner, values)?))
         }
-        attribute::Storage::Int(values) => attribute::Storage::Int(topology_remap::select_int(
+        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(topology_remap::select_int(
             cancel_value,
             chunk,
             None,
             &discrete_mapping(plan, owner),
             values,
-        )?),
+        )?)),
         attribute::Storage::Text(values) => attribute::Storage::Text(topology_remap::select_text(
             cancel_value,
             chunk,
@@ -773,7 +774,7 @@ mod tests {
             topology::Builder::add_open_polyline(&mut builder, &[0, 1, 2, 3]).unwrap();
         }
         let topo = topology::Builder::freeze(&mut builder).unwrap();
-        let weights = attribute::create_owned("w", attribute::Owner::Point, attribute::Storage::Float(vec![0.0, 4.0, 8.0, 12.0])).unwrap();
+        let weights = attribute::create_owned("w", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![0.0, 4.0, 8.0, 12.0]))).unwrap();
         geometry::create(positions, topo, Some(vec![weights]), None, None).unwrap()
     }
 

@@ -143,8 +143,8 @@ fn shared(values: &[i64]) -> Arc<[i64]> {
     Arc::from(values)
 }
 
-fn shared_floats(values: &[f64]) -> Arc<[f64]> {
-    Arc::from(values)
+fn shared_floats(values: &[f64]) -> Arc<Vec<f64>> {
+    Arc::new(values.to_vec())
 }
 
 /// `(distance, parent, path, order)`.

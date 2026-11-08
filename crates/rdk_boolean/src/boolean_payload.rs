@@ -2,6 +2,7 @@
 //! extraction. Every per-element loop writes its own slot, so the loops run sequentially (the
 //! parallel path of the OCaml is byte-identical by construction); `grain` is validated and passed
 //! to group construction. Cancellation is polled every 4096 elements like `Support.parallel_for`.
+use std::sync::Arc;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -327,7 +328,7 @@ fn interpolate_fixed(
                 )];
             }
         }
-        return Ok(Storage::Int(output));
+        return Ok(Storage::Int(Arc::new(output)));
     }
     if pair.kind == 7 {
         let text_of = text_of_storage;
@@ -513,7 +514,7 @@ fn consolidate_to_points(
         Storage::Float(source) => {
             let output = gather(&source);
             planes_check(&[&source], &[output.clone()])?;
-            Ok(Storage::Float(output))
+            Ok(Storage::Float(Arc::new(output)))
         }
         Storage::Int(source) => {
             let output: Vec<i64> = (0..point_count).map(|point| source[rep(point)]).collect();
@@ -522,7 +523,7 @@ fn consolidate_to_points(
                     return Err(conflict_fail(name, point as usize));
                 }
             }
-            Ok(Storage::Int(output))
+            Ok(Storage::Int(Arc::new(output)))
         }
         Storage::Text(source) => {
             let output: Vec<Vec<u8>> = (0..point_count).map(|point| source[rep(point)].clone()).collect();
@@ -1001,7 +1002,7 @@ fn copy_attribute(
                 output[primitive] = values[index];
             }
         }
-        return make_attribute(pair, Storage::Int(output));
+        return make_attribute(pair, Storage::Int(Arc::new(output)));
     }
     if pair.kind == 7 {
         let text_of = text_of_storage;
@@ -1249,7 +1250,7 @@ mod tests {
         .unwrap();
         let topo = topology::polygons_owned(4, vec![0, 1, 2, 1, 3, 2], vec![0, 3, 6]).unwrap();
         let cut_id =
-            attribute::create_owned("cut_id", AttributeOwner::Primitive, Storage::Int(vec![42, 43])).unwrap();
+            attribute::create_owned("cut_id", AttributeOwner::Primitive, Storage::Int(Arc::new(vec![42, 43]))).unwrap();
         let cut_group =
             group::init(None, group::Owner::Primitive, "cut_surface", 2, &|_| true).unwrap();
         let right =
@@ -1299,7 +1300,7 @@ mod tests {
             }
             assert!(sheet_count > 0 && sheet_count & 1 == 0, "surface cut payload did not cover paired walls");
             *slot.lock().unwrap() = Some((
-                ids.clone(),
+                ids.to_vec(),
                 (0..group::length(&cut)).map(|element| group::mem(element, &cut)).collect(),
             ));
             Ok(())

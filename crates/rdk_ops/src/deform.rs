@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, face_normals, geometry, group, normal_ops,
     packed, topology, topology_index,
@@ -324,7 +325,7 @@ mod tests {
         assert_eq!(from_vertex.x, vec![1., 3., 0., 0.]);
         let point = with_attr(&g, Owner::Point, "N", float3_attr(vec![0.; 4], vec![2.; 4], vec![0.; 4]));
         assert_eq!(resolve_directions(None, 16_384, &point).unwrap().y, vec![2.0; 4]);
-        let bad = with_attr(&g, Owner::Point, "N", Storage::Float(vec![0.; 4]));
+        let bad = with_attr(&g, Owner::Point, "N", Storage::Float(Arc::new(vec![0.; 4])));
         assert!(resolve_directions(None, 16_384, &bad).is_err());
     }
 

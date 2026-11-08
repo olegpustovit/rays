@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::collections::HashSet;
 
 use rdk_core::support::Windows;
@@ -298,10 +299,10 @@ fn apply_attribute(
             attribute::Storage::IntArray(scalar_int_array(cancel_value, grain, destinations, s, t)?)
         }
         (attribute::Storage::Float(s), attribute::Storage::Float(t)) => {
-            attribute::Storage::Float(mapped_f64(cancel_value, grain, destinations, s, t)?)
+            attribute::Storage::Float(Arc::new(mapped_f64(cancel_value, grain, destinations, s, t)?))
         }
         (attribute::Storage::Int(s), attribute::Storage::Int(t)) => {
-            attribute::Storage::Int(mapped_i64(cancel_value, grain, destinations, s, t)?)
+            attribute::Storage::Int(Arc::new(mapped_i64(cancel_value, grain, destinations, s, t)?))
         }
         (attribute::Storage::Text(s), attribute::Storage::Text(t)) => {
             let supported = selection(method)
@@ -473,7 +474,7 @@ mod tests {
 
     fn cloud(f: Vec<f64>) -> geometry::T {
         let g = geom(&[0., 1., 2.], &[0.; 3], &[0.; 3], &[], &[0], None);
-        with_attr(&g, Owner::Point, "f", Storage::Float(f))
+        with_attr(&g, Owner::Point, "f", Storage::Float(Arc::new(f)))
     }
 
     fn rule(method: AttributeMethod) -> AttributeRule {
@@ -527,7 +528,7 @@ mod tests {
         let bare = geom(&[0., 1., 2.], &[0.; 3], &[0.; 3], &[], &[0], None);
         let failure = apply(None, 1, &[rule(AttributeMethod::Sum)], &[], &[0, 0, 0], &source, &bare).err().unwrap();
         assert!(error::message(&failure).contains("target point attribute \"f\" is missing"));
-        let ints = with_attr(&bare, Owner::Point, "f", Storage::Int(vec![1, 2, 3]));
+        let ints = with_attr(&bare, Owner::Point, "f", Storage::Int(Arc::new(vec![1, 2, 3])));
         let failure = apply(None, 1, &[rule(AttributeMethod::Sum)], &[], &[0, 0, 0], &source, &ints).err().unwrap();
         assert!(error::message(&failure).contains("storage differs"));
         let weighted = AttributeRule {
@@ -545,8 +546,8 @@ mod tests {
         let build = |salt: i64| {
             let z = vec![0.0; n as usize];
             let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
-            let g = with_attr(&g, Owner::Point, "f", Storage::Float((0..n).map(|p| (p + salt) as f64 * 0.5).collect()));
-            let g = with_attr(&g, Owner::Point, "i", Storage::Int((0..n).map(|p| p * 3 + salt).collect()));
+            let g = with_attr(&g, Owner::Point, "f", Storage::Float(Arc::new((0..n).map(|p| (p + salt) as f64 * 0.5).collect())));
+            let g = with_attr(&g, Owner::Point, "i", Storage::Int(Arc::new((0..n).map(|p| p * 3 + salt).collect())));
             let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("s{}", p + salt).into_bytes()).collect()));
             let offsets: Vec<i64> = std::iter::once(0).chain((1..=n).scan(0, |at, p| { *at += p % 4; Some(*at) })).collect();
             let values: Vec<f64> = (0..offsets[n as usize]).map(|v| v as f64 + salt as f64).collect();

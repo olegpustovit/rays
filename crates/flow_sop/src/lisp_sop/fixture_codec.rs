@@ -1,4 +1,5 @@
 //! Test fixture interchange from lib/flow_sop/goldens/fixture_codec.ml.
+use std::sync::Arc;
 use flow_syntax::{syntax::{self,Node,Syntax},lisp};
 use flow_syntax::arena::{SyntaxArena, SyntaxId};
 use rdk_core::{attribute::{self,Owner,Storage},geometry as geo,packed,topology,group,edge_group,topology_index};
@@ -46,7 +47,7 @@ pub fn decode(source:&str)->R<geo::T>{
     let topology=rk(topology::create_owned(integer(a,*n)?,int_array(a,*vp)?,int_array(a,*po)?,kinds))?;
     let attrs=children("attributes",a,unique("attributes")?)?.iter().map(|&id|{let [o,n,k,p]=children("attribute",a,id)? else{return Err(bad("invalid attribute"))};let p=array(a,*p)?;
         let storage=match(sym(a,*k)?,p){
-            ("float",[v])=>Storage::Float(float_array(a,*v)?),("int",[v])=>Storage::Int(int_array(a,*v)?),
+            ("float",[v])=>Storage::Float(Arc::new(float_array(a,*v)?)),("int",[v])=>Storage::Int(Arc::new(int_array(a,*v)?)),
             ("text",[v])=>Storage::Text(array(a,*v)?.iter().map(|&id|text(a,id).map(<[u8]>::to_vec)).collect::<R<Vec<_>>>()?),
             ("float2",[x,y])=>Storage::Float2(rk(packed::Float2::of_owned(float_array(a,*x)?,float_array(a,*y)?))?),
             ("float3",[x,y,z])=>Storage::Float3(rk(packed::Float3::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?))?),

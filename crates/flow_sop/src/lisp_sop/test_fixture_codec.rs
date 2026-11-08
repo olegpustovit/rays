@@ -1,4 +1,5 @@
 //! lib/flow_sop/goldens/test_fixture_codec.ml: complete storage/owner/group fixture and malformed inputs.
+use std::sync::Arc;
 use super::{fixture_codec as codec,support::geometry_bytes};
 use rdk_core::{attribute::{self,Owner,Storage},geometry as geo,packed,topology,topology_index,group,edge_group};
 fn geometry()->geo::T{
@@ -8,7 +9,7 @@ fn geometry()->geo::T{
     for owner in [Owner::Point,Owner::Vertex,Owner::Primitive,Owner::Detail]{
         let n=match owner{Owner::Point=>3,Owner::Vertex=>5,Owner::Primitive=>2,Owner::Detail=>1};
         let floats=(0..n).map(|i|if i==0{-0.}else{i as f64}).collect::<Vec<_>>();let ints=(0..n as i64).map(|i|i-2).collect::<Vec<_>>();let offsets=(0..=n as i64).collect::<Vec<_>>();
-        let storages=vec![("f",Storage::Float(floats.clone())),("i",Storage::Int(ints.clone())),("s",Storage::Text(vec!["\u{e9}\u{1f408}".as_bytes().to_vec();n])),("v2",Storage::Float2(packed::Float2::of_owned(floats.clone(),floats.clone()).unwrap())),("v3",Storage::Float3(packed::Float3::of_owned(floats.clone(),floats.clone(),floats.clone()).unwrap())),("v4",Storage::Float4(packed::Float4::of_owned(floats.clone(),floats.clone(),floats.clone(),floats.clone()).unwrap())),("ia",Storage::IntArray(packed::IntArray::create_owned(offsets.clone(),ints).unwrap())),("fa",Storage::FloatArray(packed::FloatArray::create_owned(offsets,floats).unwrap()))];
+        let storages=vec![("f",Storage::Float(Arc::new(floats.clone()))),("i",Storage::Int(Arc::new(ints.clone()))),("s",Storage::Text(vec!["\u{e9}\u{1f408}".as_bytes().to_vec();n])),("v2",Storage::Float2(packed::Float2::of_owned(floats.clone(),floats.clone()).unwrap())),("v3",Storage::Float3(packed::Float3::of_owned(floats.clone(),floats.clone(),floats.clone()).unwrap())),("v4",Storage::Float4(packed::Float4::of_owned(floats.clone(),floats.clone(),floats.clone(),floats.clone()).unwrap())),("ia",Storage::IntArray(packed::IntArray::create_owned(offsets.clone(),ints).unwrap())),("fa",Storage::FloatArray(packed::FloatArray::create_owned(offsets,floats).unwrap()))];
         for(name,storage)in storages{g=geo::with_attribute(attribute::create_owned(name,owner,storage).unwrap(),&g).unwrap();}
     }
     for(owner,n)in[(group::Owner::Point,3),(group::Owner::Vertex,5),(group::Owner::Primitive,2)]{let ordered=group::ordered(owner,"ordered",n,&[n-1,0]).unwrap();let unordered=group::init(None,owner,"unordered",n,&|i|i%2==0).unwrap();g=geo::with_group(unordered,&g).unwrap();g=geo::with_group(ordered,&g).unwrap();}

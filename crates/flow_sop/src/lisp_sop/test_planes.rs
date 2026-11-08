@@ -38,12 +38,12 @@ fn make() -> geo::T {
         let mut add = |name: &str, storage: Storage| {
             g = rk(geo::with_attribute(rk(attribute::create_owned(name, owner, storage)), &g));
         };
-        add("f", Storage::Float(plane(0, n)));
+        add("f", Storage::Float(Arc::new(plane(0, n))));
         add("v2", Storage::Float2(rk(Float2::of_owned(plane(1, n), plane(2, n)))));
         add("v3", Storage::Float3(rk(Float3::View::of_owned_exn(plane(1, n), plane(2, n), plane(3, n)))));
         add("v4", Storage::Float4(rk(Float4::of_owned(plane(1, n), plane(2, n), plane(3, n), plane(4, n)))));
-        add("i", Storage::Int((0..n as i64).collect()));
-        add("nf", Storage::Float((0..n).map(|i| if i == 0 { f64::NAN } else { 1.0 }).collect()));
+        add("i", Storage::Int(Arc::new((0..n as i64).collect())));
+        add("nf", Storage::Float(Arc::new((0..n).map(|i| if i == 0 { f64::NAN } else { 1.0 }).collect())));
     }
     g
 }

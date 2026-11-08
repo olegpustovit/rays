@@ -223,7 +223,7 @@ pub fn columns(owner: i64, value: &T) -> Vec<Column> {
 pub fn tags(attribute_name: &str, value: &T) -> Option<Vec<i64>> {
     let a = geometry::find_attribute(Owner::Primitive, attribute_name, value)?;
     match attribute::View::storage(&a) {
-        Ok(Storage::Int(values)) => Some(values.clone()),
+        Ok(Storage::Int(values)) => Some(values.to_vec()),
         _ => None,
     }
 }

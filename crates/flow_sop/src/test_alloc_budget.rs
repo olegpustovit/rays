@@ -1,6 +1,9 @@
 //! Per-cook allocation budgets (thread-local `mem_sys` counters). Limits may only go down.
 use rdk_ops::subdivide::{self, BoundaryInterpolation, CrackPolicy, CreasingMethod, FaceVaryingInterpolation, Params, Scheme, TrianglePolicy};
+use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::{geometry, packed, topology};
+
+use crate::attribute_kernel;
 
 fn grid(cells: i64) -> geometry::T {
     let stride = cells + 1;
@@ -65,3 +68,39 @@ fn subdivide_peak_bytes() {
 
 // 29_629_590 B measured after M18 (34_086_038 B before C3/M18): quad grid 128x128, one Catmull-Clark pass.
 const LIMIT: i64 = 29_700_000;
+
+/// (c) Flow read then write of P, Cd, a float, an int and a text attribute on a 100k-point grid, on
+/// one thread: peak live bytes and allocation count above the baseline.
+#[test]
+fn attribute_round_trip_bytes() {
+    let mut source = grid(316);
+    let n = geometry::point_count(&source) as usize;
+    for (name, storage) in [
+        ("Cd", Storage::Float4(packed::Float4::of_owned(vec![0.25; n], vec![0.5; n], vec![0.75; n], vec![1.0; n]).unwrap())),
+        ("mass", Storage::Float(std::sync::Arc::new((0..n).map(|i| i as f64).collect()))),
+        ("id", Storage::Int(std::sync::Arc::new((0..n as i64).collect()))),
+        ("tag", Storage::Text((0..n).map(|i| format!("t{i}").into_bytes()).collect())),
+    ] {
+        source = geometry::with_attribute(attribute::create_owned(name, Owner::Point, storage).unwrap(), &source).unwrap();
+    }
+    let (peak, allocs) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
+    parallel::run_unit(Some(1), &|| {
+        mem_sys::local_reset();
+        let mut out = source.clone();
+        for (kind, name) in [("vec3", "P"), ("vec4", "Cd"), ("float", "mass"), ("int", "id"), ("text", "tag")] {
+            let value = attribute_kernel::read(None, Owner::Point, kind, name, &source).unwrap();
+            out = attribute_kernel::write(16_384, Owner::Point, kind, name, &value, &out).unwrap();
+        }
+        (peak.set(mem_sys::local_peak_bytes()), allocs.set(mem_sys::local_alloc_count()));
+        assert_eq!(geometry::point_count(&out), n as i64);
+        Ok(())
+    })
+    .unwrap();
+    eprintln!("attribute round trip peak bytes: {} allocs: {}", peak.get(), allocs.get());
+    assert!(peak.get() <= ROUND_TRIP_PEAK, "round trip peak {} > {ROUND_TRIP_PEAK}", peak.get());
+    assert!(allocs.get() <= ROUND_TRIP_ALLOCS, "round trip allocs {} > {ROUND_TRIP_ALLOCS}", allocs.get());
+}
+
+// Measured after M13: 17_264_704 B / 201_176 allocs (18_872_512 B / 201_220 before; the allocs are the text rows).
+const ROUND_TRIP_PEAK: i64 = 17_300_000;
+const ROUND_TRIP_ALLOCS: u64 = 201_200;

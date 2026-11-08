@@ -1,5 +1,6 @@
 //! Blur canonical `P` and matching point-owned float attributes over topology connectivity.
 
+use std::sync::Arc;
 use rdk_core::{
     attribute, attribute_pattern, cancel, error, geometry, group, packed, support, topology_index,
 };
@@ -103,7 +104,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         match attribute::View::storage(&item)? {
             attribute::Storage::Float(values) => {
                 targets.push(Target::Float(name, first));
-                original.push(values.clone());
+                original.push(values.to_vec());
             }
             attribute::Storage::Float2(values) => {
                 let view = packed::Float2::View::view(values);
@@ -236,7 +237,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     for target in &targets {
         let (name, storage) = match target {
             Target::Position => continue,
-            Target::Float(name, first) => (name, attribute::Storage::Float(output[*first].clone())),
+            Target::Float(name, first) => (name, attribute::Storage::Float(Arc::new(output[*first].clone()))),
             Target::Float2(name, first) => (
                 name,
                 attribute::Storage::Float2(packed::Float2::of_owned(

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::cell::RefCell;
 
 use rdk_core::{
@@ -610,9 +611,9 @@ mod tests {
 
     fn payload() -> geometry::T {
         let g = grid(2, 1, 2.0, true);
-        let g = with_attr(&g, Owner::Point, "pid", Storage::Int((0..6).collect()));
-        let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int((10..18).collect()));
-        let g = with_attr(&g, Owner::Primitive, "fid", Storage::Int(vec![20, 21]));
+        let g = with_attr(&g, Owner::Point, "pid", Storage::Int(Arc::new((0..6).collect())));
+        let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int(Arc::new((10..18).collect())));
+        let g = with_attr(&g, Owner::Primitive, "fid", Storage::Int(Arc::new(vec![20, 21])));
         with_attr(&g, Owner::Primitive, "label", Storage::Text(vec![b"a".to_vec(), b"b".to_vec()]))
     }
 

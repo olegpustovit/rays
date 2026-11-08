@@ -32,7 +32,7 @@ fn count_of(owner: Owner, g: &geo::T) -> usize {
 
 fn with_float(name: &str, owner: Owner, k: i64, g: &geo::T) -> geo::T {
     let n = count_of(owner, g);
-    let storage = Storage::Float((0..n).map(|i| (i as i64 + k) as f64 / 3.0).collect());
+    let storage = Storage::Float(Arc::new((0..n).map(|i| (i as i64 + k) as f64 / 3.0).collect()));
     rk(geo::with_attribute(rk(attribute::create_owned(name, owner, storage)), g))
 }
 

@@ -1,5 +1,6 @@
 //! Port of lib/flow_sop/test_metadata_kernel.ml: authored metadata operations preserve native owner,
 //! storage and ordering semantics.
+use std::sync::Arc;
 use super::support::*;
 use super::test_group_kernel::{evaluated, flow_ok, ok};
 use crate::{attribute_metadata, catalog, lisp_sop, manifest, operators};
@@ -107,7 +108,7 @@ fn text(s: &str) -> Value {
 }
 
 fn add(owner: Owner, name: &str, value: f64, geometry: &geo::T) -> geo::T {
-    ok(geo::with_attribute(ok(attribute::create_owned(name, owner, Storage::Float(vec![value]))), geometry))
+    ok(geo::with_attribute(ok(attribute::create_owned(name, owner, Storage::Float(Arc::new(vec![value])))), geometry))
 }
 
 fn fixture() -> geo::T {
@@ -188,8 +189,8 @@ fn all_owners_and_storages_rename_without_copying() {
         let plane = |v: f64| vec![v; count];
         let offsets: Vec<i64> = (0..=count as i64).map(|i| i * 16).collect();
         vec![
-            ("float", Storage::Float(plane(-0.0))),
-            ("int", Storage::Int(vec![MAX_INT; count])),
+            ("float", Storage::Float(Arc::new(plane(-0.0)))),
+            ("int", Storage::Int(Arc::new(vec![MAX_INT; count]))),
             ("vec2", Storage::Float2(ok(Float2::of_owned(plane(-0.0), plane(2.0))))),
             ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(plane(1.0), plane(2.0), plane(3.0))))),
             ("vec4", Storage::Float4(ok(Float4::of_owned(plane(1.0), plane(2.0), plane(3.0), plane(4.0))))),

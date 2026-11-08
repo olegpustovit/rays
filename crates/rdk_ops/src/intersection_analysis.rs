@@ -284,10 +284,7 @@ fn numerical_weld_tolerance(requested: f64, raw: &Raw) -> f64 {
 }
 
 fn cluster_events(cancel_value: Option<&cancel::T>, tolerance: f64, raw: &Raw) -> Result<point_clusters::T, error::T> {
-    let x: Arc<[f64]> = Arc::from(raw.x.clone());
-    let y: Arc<[f64]> = Arc::from(raw.y.clone());
-    let z: Arc<[f64]> = Arc::from(raw.z.clone());
-    let positions = packed::Float3::View::of_shared_exn(x, y, z).map_err(lift)?;
+    let positions = packed::Float3::View::of_shared_exn(Arc::new(raw.x.clone()), Arc::new(raw.y.clone()), Arc::new(raw.z.clone())).map_err(lift)?;
     let temporary =
         geometry::create(positions, topology::empty(raw.x.len() as i64).map_err(lift)?, None, None, None)
             .map_err(lift)?;

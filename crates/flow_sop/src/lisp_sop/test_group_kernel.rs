@@ -390,7 +390,7 @@ fn captured_geometry_and_group_changes_invalidate_caches() {
     assert!(node::facts(&read).reads.is_empty());
     let mut s = create_session();
     let assert_mask = |output: &geo::T, mask: Vec<i64>| match attribute::storage(&geo::find_attribute(Owner::Point, "mark", output).unwrap()) {
-        Ok(Storage::Int(data)) => assert!(data == mask),
+        Ok(Storage::Int(data)) => assert!(data == Arc::new(mask)),
         _ => panic!("mark is not an int attribute"),
     };
     assert_mask(&cook(&mut s, 1, &read), vec![1; n as usize]);
@@ -547,7 +547,7 @@ fn cooked_folds_traverse_inventory() {
         let output = cook(&mut s, domains, &node);
         assert!(geo::groups(&output).len() == 5001);
         match attribute::storage(&geo::find_attribute(Owner::Detail, "iteration", &output).unwrap()) {
-            Ok(Storage::Int(values)) => assert!(values == vec![5001]),
+            Ok(Storage::Int(values)) => assert!(*values == vec![5001]),
             _ => panic!("iteration is not an int attribute"),
         }
     }
@@ -572,7 +572,7 @@ fn cooked_folds_traverse_inventory() {
     let output = cook(&mut s, 1, &node);
     assert!(geo::find_attribute(Owner::Detail, "iteration", &output).is_none());
     match attribute::storage(&geo::find_attribute(Owner::Detail, "seen", &output).unwrap()) {
-        Ok(Storage::Int(values)) => assert!(values == vec![1111]),
+        Ok(Storage::Int(values)) => assert!(*values == vec![1111]),
         _ => panic!("seen is not an int attribute"),
     }
     session::close(&mut s);
@@ -805,7 +805,7 @@ fn promotion_origin_defnodes_cook_the_promoted_mask() {
                 let output = cook(&mut s, domains, &node);
                 assert!(node::facts(&node).reads == ["P"]);
                 match (attribute::storage(&geo::find_attribute(Owner::Point, "mark", &output).unwrap()), &expected) {
-                    (Ok(Storage::Int(actual)), Value::Int_array(expected)) => assert!(actual == **expected),
+                    (Ok(Storage::Int(actual)), Value::Int_array(expected)) => assert!(actual == *expected),
                     _ => panic!("mark is not the promoted mask"),
                 }
             }

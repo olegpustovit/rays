@@ -1,4 +1,5 @@
 //! Stable reorder of primitives by an integer primitive attribute.
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
@@ -165,7 +166,7 @@ mod tests {
         let keys = attribute::create_owned(
             "k",
             attribute::Owner::Primitive,
-            attribute::Storage::Int(vec![2, 0, 1]),
+            attribute::Storage::Int(Arc::new(vec![2, 0, 1])),
         )
         .unwrap();
         geometry::create(positions, topo, Some(vec![keys]), None, None).unwrap()
@@ -178,7 +179,7 @@ mod tests {
         assert_eq!(&view.vertex_points[..], &[1, 2, 3, 0, 2, 3, 0, 1, 2]);
         let keys = geometry::find_attribute(attribute::Owner::Primitive, "k", &sorted).unwrap();
         match attribute::View::storage(&keys).unwrap() {
-            attribute::Storage::Int(values) => assert_eq!(values, &vec![0, 1, 2]),
+            attribute::Storage::Int(values) => assert_eq!(**values, vec![0, 1, 2]),
             _ => panic!("int"),
         }
         let Err(missing) = sort_primitives(None, None, "nope", &triangles()) else { panic!("expected failure") };

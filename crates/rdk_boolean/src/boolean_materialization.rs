@@ -868,7 +868,7 @@ fn fresh_edge_name(geometry_value: &geometry::T, base: &str) -> String {
 
 fn install_source_ids(geometry_value: &geometry::T, name: &str) -> Result<geometry::T, error::T> {
     let add = |owner: attribute::Owner, count: i64, value: &geometry::T| -> Result<geometry::T, error::T> {
-        let attribute_value = attribute::create_owned(name, owner, attribute::Storage::Int((0..count).collect()))
+        let attribute_value = attribute::create_owned(name, owner, attribute::Storage::Int(Arc::new((0..count).collect())))
             .map_err(raised)?;
         geometry::with_attribute(attribute_value, value).map_err(raised)
     };
@@ -877,7 +877,7 @@ fn install_source_ids(geometry_value: &geometry::T, name: &str) -> Result<geomet
     add(attribute::Owner::Primitive, geometry::primitive_count(geometry_value), &tagged)
 }
 
-fn source_ids(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Result<Vec<i64>, error::T> {
+fn source_ids(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Result<Arc<Vec<i64>>, error::T> {
     match geometry::find_attribute(owner, name, geometry_value) {
         Some(item) => match attribute::storage(&item).map_err(raised)? {
             attribute::Storage::Int(values) => Ok(values),

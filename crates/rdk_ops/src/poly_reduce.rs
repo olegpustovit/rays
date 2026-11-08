@@ -823,14 +823,14 @@ mod tests {
         let (points, vertices, primitives) =
             (geometry::point_count(&base), geometry::vertex_count(&base), geometry::primitive_count(&base));
         let point_id =
-            attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int((0..points).collect())).unwrap();
+            attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int(Arc::new((0..points).collect()))).unwrap();
         let corner_id =
-            attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int((0..vertices).collect()))
+            attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int(Arc::new((0..vertices).collect())))
                 .unwrap();
         let source_face = attribute::create_owned(
             "source_face",
             attribute::Owner::Primitive,
-            attribute::Storage::Int((0..primitives).collect()),
+            attribute::Storage::Int(Arc::new((0..primitives).collect())),
         )
         .unwrap();
         let detail = attribute::create_owned(

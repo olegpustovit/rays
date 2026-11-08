@@ -165,9 +165,9 @@ fn interpolate_attribute(
             let nearest = nearest_mapping(vertex_left, vertex_right, vertex_weight);
             let plane = |values: &[f64]| interpolate_float(vertex_left, vertex_right, vertex_weight, values);
             let storage = match attribute::View::storage(source)? {
-                attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)),
+                attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values))),
                 attribute::Storage::Int(values) => {
-                    attribute::Storage::Int(nearest.iter().map(|&m| values[m as usize]).collect())
+                    attribute::Storage::Int(Arc::new(nearest.iter().map(|&m| values[m as usize]).collect()))
                 }
                 attribute::Storage::Text(values) => {
                     attribute::Storage::Text(nearest.iter().map(|&m| values[m as usize].clone()).collect())
@@ -326,7 +326,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         Some(name) => match geometry::find_attribute(attribute::Owner::Point, name, geometry_value) {
             None => return Err(fail(format!("{PREFIX}: point float scale attribute \"{name}\" is missing"))),
             Some(found) => match attribute::View::storage(&found)? {
-                attribute::Storage::Float(values) => Some(values.clone()),
+                attribute::Storage::Float(values) => Some(values.to_vec()),
                 _ => {
                     return Err(fail(format!(
                         "{PREFIX}: point scale attribute \"{name}\" must use float storage"
@@ -1300,23 +1300,23 @@ mod tests {
             geometry::positions(source).clone(),
             geometry::topology(source).clone(),
             Some(vec![
-                attribute_of(attribute::Owner::Point, "id", attribute::Storage::Int((0..points).collect())),
+                attribute_of(attribute::Owner::Point, "id", attribute::Storage::Int(Arc::new((0..points).collect()))),
                 attribute_of(
                     attribute::Owner::Point,
                     "pscale",
-                    attribute::Storage::Float((0..points).map(|p| if p & 1 == 0 { 1.0 } else { 0.5 }).collect()),
+                    attribute::Storage::Float(Arc::new((0..points).map(|p| if p & 1 == 0 { 1.0 } else { 0.5 }).collect())),
                 ),
                 attribute_of(
                     attribute::Owner::Vertex,
                     "corner_value",
-                    attribute::Storage::Float((0..vertices).map(|v| v as f64).collect()),
+                    attribute::Storage::Float(Arc::new((0..vertices).map(|v| v as f64).collect())),
                 ),
                 attribute_of(
                     attribute::Owner::Vertex,
                     "corner_name",
                     attribute::Storage::Text((0..vertices).map(|v| v.to_string().into_bytes()).collect()),
                 ),
-                attribute_of(attribute::Owner::Primitive, "material", attribute::Storage::Int((0..primitives).collect())),
+                attribute_of(attribute::Owner::Primitive, "material", attribute::Storage::Int(Arc::new((0..primitives).collect()))),
                 attribute_of(attribute::Owner::Detail, "tag", attribute::Storage::Text(vec![b"bevel".to_vec()])),
             ]),
             Some(vec![point_order, corner_group, face_order]),
@@ -1541,7 +1541,7 @@ mod tests {
         let scale = |zero_at: usize, value: f64| -> geometry::T {
             let values: Vec<f64> = (0..8).map(|p| if p == zero_at { value } else { 1.0 }).collect();
             geometry::with_attribute(
-                attribute::create_owned("scale", attribute::Owner::Point, attribute::Storage::Float(values)).unwrap(),
+                attribute::create_owned("scale", attribute::Owner::Point, attribute::Storage::Float(Arc::new(values))).unwrap(),
                 &source,
             )
             .unwrap()

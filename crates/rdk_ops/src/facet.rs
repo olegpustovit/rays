@@ -2223,7 +2223,7 @@ mod tests {
 
     fn point_ints(name: &str, value: &geometry::T) -> Vec<i64> {
         match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, name, value).unwrap()).unwrap() {
-            attribute::Storage::Int(values) => values.clone(),
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
     }
@@ -2263,8 +2263,8 @@ mod tests {
         let csr_offsets = vec![0_i64, 2, 4, 6, 8, 10];
         let p = attribute::Owner::Point;
         let mut value = geometry_value;
-        value = add_attribute(p, "weight", attribute::Storage::Float(indices.iter().map(|&v| v as f64 + 0.25).collect()), &value);
-        value = add_attribute(p, "id", attribute::Storage::Int(indices.clone()), &value);
+        value = add_attribute(p, "weight", attribute::Storage::Float(Arc::new(indices.iter().map(|&v| v as f64 + 0.25).collect())), &value);
+        value = add_attribute(p, "id", attribute::Storage::Int(Arc::new(indices.clone())), &value);
         value = add_attribute(p, "label", attribute::Storage::Text(indices.iter().map(|v| format!("p{v}").into_bytes()).collect()), &value);
         value = add_attribute(
             p,
@@ -2629,7 +2629,7 @@ mod tests {
         let wrong = add_attribute(
             attribute::Owner::Point,
             "N",
-            attribute::Storage::Float(vec![1.; 6]),
+            attribute::Storage::Float(Arc::new(vec![1.; 6])),
             &geometry::without_attribute(attribute::Owner::Point, "N", &source),
         );
         expect_code(
@@ -2655,9 +2655,9 @@ mod tests {
             vec![0, 6, 9, 12],
             vec![0, 0, 1],
         );
-        let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int((0..12).collect())).unwrap();
-        let corner_id = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int((0..12).collect())).unwrap();
-        let face_id = attribute::create_owned("face_id", attribute::Owner::Primitive, attribute::Storage::Int(vec![10, 11, 12])).unwrap();
+        let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int(Arc::new((0..12).collect()))).unwrap();
+        let corner_id = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int(Arc::new((0..12).collect()))).unwrap();
+        let face_id = attribute::create_owned("face_id", attribute::Owner::Primitive, attribute::Storage::Int(Arc::new(vec![10, 11, 12]))).unwrap();
         let detail = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Text(vec![b"inline".to_vec()])).unwrap();
         let points = group::ordered(group::Owner::Point, "point_order", 12, &[2, 1, 6]).unwrap();
         let corners = group::ordered(group::Owner::Vertex, "corner_order", 12, &[1, 2, 4, 10]).unwrap();
@@ -2673,7 +2673,7 @@ mod tests {
 
     fn int_attr(owner: attribute::Owner, name: &str, value: &geometry::T) -> Vec<i64> {
         match attribute::View::storage(&geometry::find_attribute(owner, name, value).unwrap()).unwrap() {
-            attribute::Storage::Int(values) => values.clone(),
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
     }
@@ -2785,7 +2785,7 @@ mod tests {
         let base = source();
         let point_count = view_of(&base).point_count;
         let topology_value = polygons(point_count, vec![0, 1, 2, 0, 3, 2], vec![0, 3, 6]);
-        let corner = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int((0..6).collect())).unwrap();
+        let corner = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int(Arc::new((0..6).collect()))).unwrap();
         let corners = group::ordered(group::Owner::Vertex, "corner_order", 6, &[3, 5]).unwrap();
         let geometry_value = build(geometry::positions(&base).clone(), topology_value.clone(), vec![corner], vec![corners]);
         let index = topology_index::create(None, &topology_value).unwrap();
@@ -2826,7 +2826,7 @@ mod tests {
     fn primitive_group_orient_polygons() {
         let positions = f3(vec![0., 1., 0., 1., 2.], vec![0., 0., 1., 1., 1.], vec![0.; 5]);
         let topology_value = polygons(5, vec![0, 1, 2, 0, 3, 2, 2, 3, 4], vec![0, 3, 6, 9]);
-        let corners = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int((0..9).collect())).unwrap();
+        let corners = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int(Arc::new((0..9).collect()))).unwrap();
         let source = build(positions.clone(), topology_value, vec![corners], Vec::new());
         let selected = primitive_group(&source, &|p| p < 2);
         let output = facet_ok(Params { selection: selection(&selected), orient_polygons: Some(true), ..Params::default() }, &source);
@@ -2879,7 +2879,7 @@ mod tests {
 
     #[test]
     fn cusp_polygons() {
-        let source = add_attribute(attribute::Owner::Point, "point_id", attribute::Storage::Int((0..8).collect()), &cube());
+        let source = add_attribute(attribute::Owner::Point, "point_id", attribute::Storage::Int(Arc::new((0..8).collect())), &cube());
         let corner = group::ordered(group::Owner::Point, "corner", 8, &[0]).unwrap();
         let source = geometry::with_group(corner, &source).unwrap();
         let topology_value = geometry::topology(&source);
@@ -2982,7 +2982,7 @@ mod tests {
             vec![0., 0., 1., 1., 2., 2.],
             vec![0., 0., 0.6, 0., 0.4, 0.],
         );
-        let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int((0..6).collect())).unwrap();
+        let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int(Arc::new((0..6).collect()))).unwrap();
         build(positions, polygons(6, vec![0, 1, 2, 3, 0, 3, 4, 5], vec![0, 4, 8]), vec![point_id], Vec::new())
     }
 
@@ -3091,7 +3091,7 @@ mod tests {
             }
             _ => panic!("grouped Facet vertex N has wrong storage"),
         }
-        let face_id = attribute::create_owned("face_id", attribute::Owner::Primitive, attribute::Storage::Int(vec![10, 20])).unwrap();
+        let face_id = attribute::create_owned("face_id", attribute::Owner::Primitive, attribute::Storage::Int(Arc::new(vec![10, 20]))).unwrap();
         let degenerate = build(
             f3(vec![0., 1., 2., 0., 1., 2.], vec![0., 0., 0., 1., 1., 1.], vec![0.; 6]),
             polygons(6, (0..6).collect(), vec![0, 3, 6]),
@@ -3143,7 +3143,7 @@ mod tests {
             "invalid_geometry",
             "Facet accepted a negative consolidation distance",
         );
-        let wrong = add_attribute(attribute::Owner::Point, "N", attribute::Storage::Float(vec![1.; 5]), &source);
+        let wrong = add_attribute(attribute::Owner::Point, "N", attribute::Storage::Float(Arc::new(vec![1.; 5])), &source);
         expect_code(
             run_facet(Params { make_normals_unit_length: Some(true), ..Params::default() }, &wrong),
             "invalid_geometry",
@@ -3245,7 +3245,7 @@ mod tests {
             x[point + 5] = base;
             z[point + 5] = 1.0;
         }
-        let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int((0..points as i64).collect())).unwrap();
+        let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int(Arc::new((0..points as i64).collect()))).unwrap();
         build(
             f3(x, y, z),
             polygons(points as i64, (0..points as i64).collect(), (0..=polygons_count).map(|p| p * 6).collect()),

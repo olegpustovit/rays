@@ -61,7 +61,7 @@ pub fn fixture() -> geometry::T {
 }
 
 pub fn scalar(owner: attribute::Owner, name: &str, count: i64, value: f64) -> attribute::T {
-    attribute::create_owned(name, owner, attribute::Storage::Float(vec![value; count as usize])).unwrap()
+    attribute::create_owned(name, owner, attribute::Storage::Float(Arc::new(vec![value; count as usize]))).unwrap()
 }
 
 pub fn with_color(value: f64, g: &geometry::T) -> geometry::T {

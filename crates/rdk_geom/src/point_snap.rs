@@ -3,6 +3,8 @@
 //! OCaml returns `(int array, string) result`; here a failure is an `error::T` with code
 //! `invalid_parameter` and the OCaml message (prefix included), a cancellation has code `cancelled`.
 
+use std::sync::Arc;
+
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
 
 use crate::point_clusters::Metric;
@@ -52,8 +54,8 @@ fn members(value: &group::T) -> Vec<i64> {
 }
 
 enum Scalar {
-    Float(Vec<f64>),
-    Int(Vec<i64>),
+    Float(Arc<Vec<f64>>),
+    Int(Arc<Vec<i64>>),
     Text(Vec<Vec<u8>>),
 }
 
@@ -62,7 +64,6 @@ fn scalar_attribute(label: &str, name: &str, geometry_value: &geometry::T) -> Re
         return Err(fail(format!("{label} point attribute {name:?} is missing")));
     };
     match attribute::View::storage(&found)? {
-        // ponytail: storage is cloned once per query; borrow a slice if attribute reads ever show up in a profile.
         attribute::Storage::Float(values) => Ok(Scalar::Float(values.clone())),
         attribute::Storage::Int(values) => Ok(Scalar::Int(values.clone())),
         attribute::Storage::Text(values) => Ok(Scalar::Text(values.clone())),
@@ -107,8 +108,8 @@ fn radius_at(values: &Option<(Scalar, f64)>, point: usize) -> f64 {
 }
 
 enum MatchViews {
-    Float(Vec<f64>, Vec<f64>),
-    Int(Vec<i64>, Vec<i64>),
+    Float(Arc<Vec<f64>>, Arc<Vec<f64>>),
+    Int(Arc<Vec<i64>>, Arc<Vec<i64>>),
     Text(Vec<Vec<u8>>, Vec<Vec<u8>>),
 }
 

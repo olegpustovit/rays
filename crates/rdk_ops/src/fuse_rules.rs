@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::collections::HashMap;
 
 use rdk_core::support::Windows;
@@ -473,7 +474,7 @@ fn weight_values(geometry_value: &geometry::T, name: &str) -> Result<Vec<f64>, e
         return Err(fail(format!("attribute-rule weight point attribute {name:?} is missing")));
     };
     let values: Vec<f64> = match attribute::View::storage(&found).map_err(core_fail)? {
-        attribute::Storage::Float(values) => values.clone(),
+        attribute::Storage::Float(values) => values.to_vec(),
         attribute::Storage::Int(values) => values.iter().map(|&v| v as f64).collect(),
         _ => return Err(fail(format!("attribute-rule weight {name:?} must be scalar float or integer"))),
     };
@@ -1055,8 +1056,8 @@ fn reduced_attribute(
         attribute::Storage::Int(values) if is_concatenate(method) => {
             attribute::Storage::IntArray(concatenate_int_scalar(clusters, compact, values, &ordered)?)
         }
-        attribute::Storage::Float(values) => attribute::Storage::Float(plane_float(values)?),
-        attribute::Storage::Int(values) => attribute::Storage::Int(plane_int(values)?),
+        attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane_float(values)?)),
+        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(plane_int(values)?)),
         attribute::Storage::Text(values) => attribute::Storage::Text(expand_string(
             clusters,
             compact,
@@ -1156,8 +1157,8 @@ fn default_attribute(
     let first = |source: &[f64]| select_f64(source, &representatives);
     let plane = |source: &[f64]| if average_numeric { average(source) } else { first(source) };
     let storage = match attribute::View::storage(item).map_err(core_fail)? {
-        attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)),
-        attribute::Storage::Int(values) => attribute::Storage::Int(select_i64(values, &representatives)),
+        attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values))),
+        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(select_i64(values, &representatives))),
         attribute::Storage::Text(values) => {
             attribute::Storage::Text(select_string(values, &representatives))
         }
@@ -1352,11 +1353,11 @@ mod tests {
 
     fn cloud() -> geometry::T {
         let g = geom(&[0., 1., 2., 3.], &[0.; 4], &[0.; 4], &[], &[0], None);
-        let g = with_attr(&g, Owner::Point, "f", Storage::Float(vec![1., 5., 10., 2.]));
-        let g = with_attr(&g, Owner::Point, "i", Storage::Int(vec![3, 3, 7, 9]));
+        let g = with_attr(&g, Owner::Point, "f", Storage::Float(Arc::new(vec![1., 5., 10., 2.])));
+        let g = with_attr(&g, Owner::Point, "i", Storage::Int(Arc::new(vec![3, 3, 7, 9])));
         let text = ["b", "a", "z", "c"].iter().map(|s| s.as_bytes().to_vec()).collect();
         let g = with_attr(&g, Owner::Point, "t", Storage::Text(text));
-        let g = with_attr(&g, Owner::Point, "w", Storage::Float(vec![1., 1., 1., 4.]));
+        let g = with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new(vec![1., 1., 1., 4.])));
         geometry::with_group(group::init(None, group::Owner::Point, "g1", 4, &|p| p == 0 || p == 2).unwrap(), &g).unwrap()
     }
 
@@ -1389,14 +1390,14 @@ mod tests {
 
     fn floats_of(list: &[attribute::T], name: &str) -> Vec<f64> {
         match attribute::View::storage(&find(list, name)).unwrap() {
-            Storage::Float(values) => values.clone(),
+            Storage::Float(values) => values.to_vec(),
             _ => panic!("not float"),
         }
     }
 
     fn ints_of(list: &[attribute::T], name: &str) -> Vec<i64> {
         match attribute::View::storage(&find(list, name)).unwrap() {
-            Storage::Int(values) => values.clone(),
+            Storage::Int(values) => values.to_vec(),
             _ => panic!("not int"),
         }
     }
@@ -1536,7 +1537,7 @@ mod tests {
             .unwrap();
         assert!(error::message(&failure).contains("weight point attribute \"nope\" is missing"));
         // Non-finite source values are rejected for float reductions.
-        let poisoned = with_attr(&cloud(), Owner::Point, "f", Storage::Float(vec![1., f64::NAN, 10., 2.]));
+        let poisoned = with_attr(&cloud(), Owner::Point, "f", Storage::Float(Arc::new(vec![1., f64::NAN, 10., 2.])));
         let failure = apply(
             None, 1, DefaultAttributes::KeepFirst, &[rule("f", AttributeMethod::Sum)], &[], true, true,
             &clusters(), &poisoned,
@@ -1580,10 +1581,10 @@ mod tests {
         };
         let z = vec![0.0; n as usize];
         let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
-        let g = with_attr(&g, Owner::Point, "f", Storage::Float((0..n).map(|p| ((p * 7919) % 101) as f64 * 0.37).collect()));
-        let g = with_attr(&g, Owner::Point, "i", Storage::Int((0..n).map(|p| (p * 31) % 17).collect()));
+        let g = with_attr(&g, Owner::Point, "f", Storage::Float(Arc::new((0..n).map(|p| ((p * 7919) % 101) as f64 * 0.37).collect())));
+        let g = with_attr(&g, Owner::Point, "i", Storage::Int(Arc::new((0..n).map(|p| (p * 31) % 17).collect())));
         let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("t{}", (p * 13) % 29).into_bytes()).collect()));
-        let g = with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| 1.0 + (p % 5) as f64).collect()));
+        let g = with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new((0..n).map(|p| 1.0 + (p % 5) as f64).collect())));
         for method in [Average, Median, Mode, Sum, SumSquares, RootMeanSquare, WeightedAverage, ConcatenateWeightOrder] {
             let patterns: &[&str] = if matches!(method, Mode | Median | ConcatenateWeightOrder) { &["f", "i", "t"] } else { &["f", "i"] };
             let rules: Vec<AttributeRule> = patterns

@@ -485,7 +485,7 @@ pub fn transfer_all(params: &attribute_transfer::AllParams) -> Result<geometry::
 /// helpers, reduced to what those tests use).
 #[cfg(test)]
 pub(crate) mod fixtures {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use rdk_core::{attribute, error, geometry, group, packed, topology};
 
@@ -569,7 +569,7 @@ pub(crate) mod fixtures {
     pub fn add_float(owner: attribute::Owner, name: &str, seed: f64, geometry_value: &geometry::T) -> geometry::T {
         let count = owner_count(geometry_value, owner);
         let values: Vec<f64> = (0..count).map(|index| seed + index as f64).collect();
-        add_storage(owner, name, attribute::Storage::Float(values), geometry_value)
+        add_storage(owner, name, attribute::Storage::Float(Arc::new(values)), geometry_value)
     }
 
     pub fn find(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> attribute::T {
@@ -583,14 +583,14 @@ pub(crate) mod fixtures {
 
     pub fn floats(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<f64> {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
-            attribute::Storage::Float(values) => values,
+            attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("wrong float storage for {name}"),
         }
     }
 
     pub fn ints(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<i64> {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
-            attribute::Storage::Int(values) => values,
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("wrong int storage for {name}"),
         }
     }
@@ -658,14 +658,16 @@ pub(crate) mod fixtures {
 
 #[cfg(test)]
 pub(crate) mod fixtures2 {
+    use std::sync::Arc;
+
     use rdk_core::{attribute, geometry, packed};
 
     pub fn add_values(owner: attribute::Owner, name: &str, values: Vec<f64>, g: &geometry::T) -> geometry::T {
-        super::fixtures::add_storage(owner, name, attribute::Storage::Float(values), g)
+        super::fixtures::add_storage(owner, name, attribute::Storage::Float(Arc::new(values)), g)
     }
 
     pub fn add_ints(owner: attribute::Owner, name: &str, values: Vec<i64>, g: &geometry::T) -> geometry::T {
-        super::fixtures::add_storage(owner, name, attribute::Storage::Int(values), g)
+        super::fixtures::add_storage(owner, name, attribute::Storage::Int(Arc::new(values)), g)
     }
 
     pub fn add_float3s(

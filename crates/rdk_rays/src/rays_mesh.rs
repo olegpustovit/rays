@@ -4,7 +4,7 @@
 //! deterministic corner expansion because Rays's render mesh has one attribute tuple per render
 //! vertex. Both values remain immutable.
 //!
-//! Gap against OCaml: rays' `Mesh` planes are `Arc<Vec<f64>>` and rdk's are `Arc<[f64]>`, so the
+//! Gap against OCaml: rays' `Mesh` planes are `Arc<Vec<f64>>` and rdk's are `Arc<Vec<f64>>`, so the
 //! conversion copies the planes and indices where OCaml shared them.
 use std::sync::Arc;
 
@@ -333,7 +333,7 @@ pub fn to_trace_mesh(g: &geometry::T) -> Result<mesh::t, error::T> {
 }
 
 fn rdk_float3(view: &Vec3_buffer) -> Result<packed::Float3::T, String> {
-    packed::Float3::View::of_shared_exn(Arc::from(view.x.as_slice()), Arc::from(view.y.as_slice()), Arc::from(view.z.as_slice())).map_err(text)
+    packed::Float3::View::of_shared_exn(Arc::new(view.x.to_vec()), Arc::new(view.y.to_vec()), Arc::new(view.z.to_vec())).map_err(text)
 }
 
 fn color_attribute(colors: &[color::T]) -> Result<attribute::T, String> {

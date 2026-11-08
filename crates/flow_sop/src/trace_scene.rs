@@ -26,7 +26,7 @@ fn miss() -> Hit {
     host::MISS
 }
 
-fn planes(positions: &Float3::T) -> Result<(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>), String> {
+fn planes(positions: &Float3::T) -> Result<(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>), String> {
     let view = Float3::View::view(positions).map_err(|e| rdk_error::to_string(&e))?;
     Ok((view.x, view.y, view.z))
 }

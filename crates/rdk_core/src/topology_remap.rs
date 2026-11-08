@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_edge_lookup, topology_index};
@@ -103,12 +104,12 @@ fn attribute_result(
 ) -> Result<attribute::T, error::T> {
     let owner = attribute::owner(value);
     let storage = match attribute::View::storage(value)? {
-        attribute::Storage::Float(values) => attribute::Storage::Float(select_float(
+        attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(select_float(
             cancel_value, grain, defaults.then_some(0.0), mapping, values,
-        )?),
-        attribute::Storage::Int(values) => attribute::Storage::Int(select_int(
+        )?)),
+        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(select_int(
             cancel_value, grain, defaults.then_some(0), mapping, values,
-        )?),
+        )?)),
         attribute::Storage::Text(values) => attribute::Storage::Text(select_text(
             cancel_value, grain, defaults.then_some(&[][..]), mapping, values,
         )?),
@@ -570,10 +571,10 @@ pub fn blend_attribute(
     let owner = attribute::owner(value);
     let float = |source: &[f64]| blend_float(cancel_value, grain, left, right, weight, source);
     let storage = match attribute::View::storage(value)? {
-        attribute::Storage::Float(source) => attribute::Storage::Float(float(source)?),
+        attribute::Storage::Float(source) => attribute::Storage::Float(Arc::new(float(source)?)),
         attribute::Storage::Int(source) => {
             let mapping = nearest()?;
-            attribute::Storage::Int(select_int(cancel_value, grain, None, &mapping, source)?)
+            attribute::Storage::Int(Arc::new(select_int(cancel_value, grain, None, &mapping, source)?))
         }
         attribute::Storage::Text(source) => {
             let mapping = nearest()?;

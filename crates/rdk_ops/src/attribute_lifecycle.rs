@@ -775,8 +775,8 @@ mod tests {
         let g = add_float(Point, "right_weight", 20.0, &g);
         let g = add_float(Vertex, "left_corner", 30.0, &g);
         let g = add_float(Primitive, "left_face", 40.0, &g);
-        let g = add_storage(Detail, "left_float", attribute::Storage::Float(vec![1.25]), &g);
-        let g = add_storage(Detail, "left_int", attribute::Storage::Int(vec![7]), &g);
+        let g = add_storage(Detail, "left_float", attribute::Storage::Float(Arc::new(vec![1.25])), &g);
+        let g = add_storage(Detail, "left_int", attribute::Storage::Int(Arc::new(vec![7])), &g);
         let g = add_storage(
             Detail,
             "left_int_array",
@@ -967,7 +967,7 @@ mod tests {
                 attribute::create_owned(
                     &format!("{prefix}_{index:05}"),
                     Detail,
-                    attribute::Storage::Float(vec![index as f64]),
+                    attribute::Storage::Float(Arc::new(vec![index as f64])),
                 )
                 .unwrap()
             })

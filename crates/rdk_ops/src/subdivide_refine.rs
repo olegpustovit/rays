@@ -1,5 +1,6 @@
 //! Port of lib/rdk/ops/mesh/subdivide_refine.ml: stencil plans, creases, face-varying refinement,
 //! attribute/group remapping and local-part combination for polygon subdivision.
+use std::sync::Arc;
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::support::Windows;
 use rdk_core::{
@@ -224,7 +225,7 @@ pub fn float_attribute(
     match geometry::find_attribute(owner, name, geometry_value) {
         None => Ok(None),
         Some(found) => match attribute::View::storage(&found)? {
-            Storage::Float(values) => Ok(Some(values.clone())),
+            Storage::Float(values) => Ok(Some(values.to_vec())),
             _ => Err(fail(format!("{} {} must use float storage", owner_name(owner), name))),
         },
     }
@@ -519,7 +520,7 @@ pub fn apply_crease_input(
             values[vertex] = edge_sharpness[edge as usize];
         }
     }
-    let created = attribute::create_owned("creaseweight", Owner::Vertex, Storage::Float(values))?;
+    let created = attribute::create_owned("creaseweight", Owner::Vertex, Storage::Float(Arc::new(values)))?;
     let stripped = geometry::without_attribute(Owner::Primitive, "creaseweight", source);
     geometry::with_attribute(created, &stripped)
 }
@@ -2056,7 +2057,7 @@ pub fn fvar_refinement(
             }
             attributes.insert(
                 0,
-                attribute::create_owned("creaseweight", Owner::Vertex, Storage::Float(weights))?,
+                attribute::create_owned("creaseweight", Owner::Vertex, Storage::Float(Arc::new(weights)))?,
             );
         }
     }
@@ -2066,7 +2067,7 @@ pub fn fvar_refinement(
             attribute::create_owned(
                 "cornerweight",
                 Owner::Point,
-                Storage::Float(corner_weights.clone()),
+                Storage::Float(Arc::new(corner_weights.clone())),
             )?,
         );
     }
@@ -2462,7 +2463,7 @@ pub fn remap_attribute(
         return Ok(Some(attribute::create_owned(
             name,
             Owner::Vertex,
-            Storage::Int(vertex_edge_discrete_map(cancel_token, grain, plan, values, -1)?),
+            Storage::Int(Arc::new(vertex_edge_discrete_map(cancel_token, grain, plan, values, -1)?)),
         )?));
     }
     if name == "creaseweight" && (owner == Owner::Vertex || owner == Owner::Primitive) {
@@ -2486,7 +2487,7 @@ pub fn remap_attribute(
         return Ok(Some(attribute::create_owned(
             "cornerweight",
             Owner::Point,
-            Storage::Float(output),
+            Storage::Float(Arc::new(output)),
         )?));
     }
     let use_fvar = fvar_enabled(owner, face_varying_interpolation, plan);
@@ -2504,11 +2505,11 @@ pub fn remap_attribute(
             } else {
                 numeric_map(cancel_token, grain, plan, owner, values)?
             };
-            Storage::Float(mapped)
+            Storage::Float(Arc::new(mapped))
         }
         Storage::Int(values) => {
             let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
-            Storage::Int(discrete_map_ints(&mapping, values)?)
+            Storage::Int(Arc::new(discrete_map_ints(&mapping, values)?))
         }
         Storage::Text(values) => {
             let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
@@ -2647,7 +2648,7 @@ pub fn resulting_crease_attribute(
     Ok(Some(attribute::create_owned(
         "creaseweight",
         Owner::Vertex,
-        Storage::Float(values),
+        Storage::Float(Arc::new(values)),
     )?))
 }
 
@@ -3006,7 +3007,7 @@ pub fn concatenate_part_attribute(
                 check_source(source, "attribute")?;
                 output[base_total as usize + extra] = output[source as usize];
             }
-            Storage::Int(output)
+            Storage::Int(Arc::new(output))
         }
         Storage::Text(_) => {
             let mut output = vec![Vec::new(); total as usize];
@@ -3332,7 +3333,7 @@ pub fn concatenate_welded_point_attribute(
                     }
                 });
             }
-            Storage::Int(output)
+            Storage::Int(Arc::new(output))
         }
         Storage::Text(_) => {
             let rows = representative_rows()?;
@@ -3820,8 +3821,8 @@ pub fn select_storage(
     storage: &Storage,
 ) -> Result<Storage, error::T> {
     Ok(match storage {
-        Storage::Float(values) => Storage::Float(select_floats(cancel_token, grain, mapping, values)?),
-        Storage::Int(values) => Storage::Int(select_ints(cancel_token, grain, mapping, values)?),
+        Storage::Float(values) => Storage::Float(Arc::new(select_floats(cancel_token, grain, mapping, values)?)),
+        Storage::Int(values) => Storage::Int(Arc::new(select_ints(cancel_token, grain, mapping, values)?)),
         Storage::Text(values) => Storage::Text(select_texts(cancel_token, mapping, values)?),
         Storage::Float2(values) => {
             let values = packed::Float2::View::view(values);
@@ -4110,7 +4111,7 @@ pub fn annotate_pull_interfaces(
             }
         }
     }
-    let created = attribute::create_owned(&name, Owner::Vertex, Storage::Int(ancestry))?;
+    let created = attribute::create_owned(&name, Owner::Vertex, Storage::Int(Arc::new(ancestry)))?;
     let annotated = geometry::with_attribute(created, geometry_value)?;
     let mut unselected_used_points = vec![0u8; topology_view.point_count as usize];
     for primitive in 0..topology_view.primitive_kinds.len() as i64 {
@@ -4347,7 +4348,7 @@ pub fn interpolate_owned_attribute(
     };
     let storage = match attribute::View::storage(attribute_value)? {
         Storage::Float(values) => {
-            Storage::Float(interpolate_array(cancel_token, grain, left, right, weight, values)?)
+            Storage::Float(Arc::new(interpolate_array(cancel_token, grain, left, right, weight, values)?))
         }
         Storage::Float2(values) => {
             let values = packed::Float2::View::view(values);

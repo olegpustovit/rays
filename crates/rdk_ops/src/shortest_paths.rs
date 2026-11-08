@@ -114,7 +114,7 @@ pub struct SearchParams {
     pub point_edges: Arc<[i64]>,
     pub edge_a: Arc<[i64]>,
     pub edge_b: Arc<[i64]>,
-    pub lengths: Arc<[f64]>,
+    pub lengths: Arc<Vec<f64>>,
 }
 
 /// Returns `(distances, parents)`, one entry per point. `lengths` holds one non-negative length per
@@ -170,7 +170,7 @@ pub struct HopSearchParams {
     pub point_edges: Arc<[i64]>,
     pub edge_a: Arc<[i64]>,
     pub edge_b: Arc<[i64]>,
-    pub lengths: Arc<[f64]>,
+    pub lengths: Arc<Vec<f64>>,
 }
 
 /// Hop-first search: layer-synchronous breadth-first levels, then the smaller accumulated length,
@@ -332,12 +332,12 @@ mod tests {
     use super::*;
 
     // A path 0-1-2-3 of unit edges plus a long chord 0-3 of length 2.5.
-    fn path() -> (Arc<[i64]>, Arc<[i64]>, Arc<[i64]>, Arc<[i64]>, Arc<[f64]>) {
+    fn path() -> (Arc<[i64]>, Arc<[i64]>, Arc<[i64]>, Arc<[i64]>, Arc<Vec<f64>>) {
         let edge_a: Arc<[i64]> = Arc::from(vec![0, 1, 2, 0]);
         let edge_b: Arc<[i64]> = Arc::from(vec![1, 2, 3, 3]);
         let offsets: Arc<[i64]> = Arc::from(vec![0, 2, 4, 6, 8]);
         let edges: Arc<[i64]> = Arc::from(vec![0, 3, 0, 1, 1, 2, 2, 3]);
-        let lengths: Arc<[f64]> = Arc::from(vec![1.0, 1.0, 1.0, 2.5]);
+        let lengths: Arc<Vec<f64>> = Arc::from(vec![1.0, 1.0, 1.0, 2.5]);
         (offsets, edges, edge_a, edge_b, lengths)
     }
 
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(depths, vec![0, 1, 2, 1]);
         assert_eq!(previous[3], 0);
         assert_eq!(distances[3], 2.5);
-        let huge: Arc<[f64]> = Arc::from(vec![f64::MAX, f64::MAX, f64::MAX, f64::MAX]);
+        let huge: Arc<Vec<f64>> = Arc::from(vec![f64::MAX, f64::MAX, f64::MAX, f64::MAX]);
         let overflow = HopSearchParams { lengths: huge, ..base };
         let both = hop_search(&overflow, &mut depths, &mut distances, &mut previous, &mut queue, &[0, 1]);
         assert_eq!(both, Err(HopOverflow));

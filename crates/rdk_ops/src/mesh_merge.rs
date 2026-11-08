@@ -94,7 +94,7 @@ fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -
                     _ => return Err(mismatch()),
                 }
             }
-            Storage::Float(out)
+            Storage::Float(Arc::new(out))
         }
         Storage::Int(_) => {
             let mut out = Vec::new();
@@ -104,7 +104,7 @@ fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -
                     _ => return Err(mismatch()),
                 }
             }
-            Storage::Int(out)
+            Storage::Int(Arc::new(out))
         }
         Storage::Text(_) => {
             let mut out = Vec::new();
@@ -343,7 +343,7 @@ fn tag_inputs(name: &str, base: i64, geometries: &[geometry::T]) -> Result<Vec<g
             tagged.push(item.clone());
         } else {
             let values = vec![base + index as i64; geometry::primitive_count(item) as usize];
-            let created = attribute::create_owned(name, owner, attribute::Storage::Int(values)).map_err(lift)?;
+            let created = attribute::create_owned(name, owner, attribute::Storage::Int(Arc::new(values))).map_err(lift)?;
             tagged.push(geometry::with_attribute(created, item).map_err(lift)?);
         }
     }
@@ -383,7 +383,7 @@ fn merge(
             let merged = merge_plain(cancel_value, grain, geometries)?;
             cancel::check_opt(cancel_value).map_err(lift)?;
             let values = source_values(geometry::primitive_count(&merged), source_base, geometries, cancel_value)?;
-            let created = attribute::create_owned(name, owner, attribute::Storage::Int(values)).map_err(lift)?;
+            let created = attribute::create_owned(name, owner, attribute::Storage::Int(Arc::new(values))).map_err(lift)?;
             geometry::with_attribute(created, &merged).map_err(lift)
         }
         Some(name) => {
@@ -442,7 +442,7 @@ pub fn run_tagged(params: &RunTaggedParams, geometries: &[geometry::T]) -> Resul
         return Ok(tagged);
     }
     let values = source_values(geometry::primitive_count(&tagged), params.source_base, geometries, cancel_value)?;
-    let created = attribute::create_owned(&attribute_name, owner, attribute::Storage::Int(values)).map_err(lift)?;
+    let created = attribute::create_owned(&attribute_name, owner, attribute::Storage::Int(Arc::new(values))).map_err(lift)?;
     geometry::with_attribute(created, &tagged).map_err(lift)
 }
 
@@ -470,14 +470,14 @@ mod tests {
 
     fn ints(name: &str, owner: attribute::Owner, value: &geometry::T) -> Vec<i64> {
         match attribute::View::storage(&geometry::find_attribute(owner, name, value).unwrap()).unwrap() {
-            attribute::Storage::Int(values) => values.clone(),
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} storage"),
         }
     }
 
     fn pair() -> Vec<geometry::T> {
         let weight = |values: Vec<f64>| {
-            attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(values)).unwrap()
+            attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(Arc::new(values))).unwrap()
         };
         let a = geometry::with_attribute(weight(vec![0., 1.]), &polyline(&[(0., 0., 0.), (1., 0., 0.)])).unwrap();
         let b = geometry::with_attribute(weight(vec![10., 12.]), &polyline(&[(10., 0., 0.), (12., 0., 0.)])).unwrap();

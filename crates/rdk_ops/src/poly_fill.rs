@@ -593,9 +593,9 @@ fn remap_attribute(
     };
     let plane = |values: &[f64]| map_float(loop_offsets, center_sources, mapping, centers, values);
     let storage = match attribute::View::storage(source)? {
-        attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)),
+        attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values))),
         attribute::Storage::Int(values) => {
-            attribute::Storage::Int(mapping.iter().map(|&m| values[m as usize]).collect())
+            attribute::Storage::Int(Arc::new(mapping.iter().map(|&m| values[m as usize]).collect()))
         }
         attribute::Storage::IntArray(values) => {
             attribute::Storage::IntArray(ragged_ops::remap_int(cancel_ref, Some(grain), mapping, values)?)
@@ -1106,8 +1106,8 @@ mod tests {
         };
         let ints = |n: i64| (0..n).collect::<Vec<i64>>();
         let floats = |n: i64| (0..n).map(|v| v as f64).collect::<Vec<f64>>();
-        let g = add(attribute::Owner::Point, "weight", attribute::Storage::Float(floats(8)), &source);
-        let g = add(attribute::Owner::Point, "point_id", attribute::Storage::Int(ints(8)), &g);
+        let g = add(attribute::Owner::Point, "weight", attribute::Storage::Float(Arc::new(floats(8))), &source);
+        let g = add(attribute::Owner::Point, "point_id", attribute::Storage::Int(Arc::new(ints(8))), &g);
         let g = add(
             attribute::Owner::Point,
             "point_tag",
@@ -1155,8 +1155,8 @@ mod tests {
             ),
             &g,
         );
-        let g = add(attribute::Owner::Vertex, "vertex_weight", attribute::Storage::Float(floats(20)), &g);
-        let g = add(attribute::Owner::Primitive, "primitive_id", attribute::Storage::Int(vec![10, 20, 30, 40, 50]), &g);
+        let g = add(attribute::Owner::Vertex, "vertex_weight", attribute::Storage::Float(Arc::new(floats(20))), &g);
+        let g = add(attribute::Owner::Primitive, "primitive_id", attribute::Storage::Int(Arc::new(vec![10, 20, 30, 40, 50])), &g);
         let top = group::init(None, group::Owner::Point, "top", 8, &|p| p >= 4).unwrap();
         let first_vertex = group::init(None, group::Owner::Vertex, "first_vertex", 20, &|v| v == 0).unwrap();
         let bottom = group::init(None, group::Owner::Primitive, "bottom", 5, &|p| p == 0).unwrap();
@@ -1443,17 +1443,17 @@ mod tests {
             }
         }
         let g = polygons(x, y, z, &polys);
-        let g = with_owned_attribute("id", attribute::Owner::Point, attribute::Storage::Int((0..count as i64 * 8).collect()), &g);
+        let g = with_owned_attribute("id", attribute::Owner::Point, attribute::Storage::Int(Arc::new((0..count as i64 * 8).collect())), &g);
         let g = with_owned_attribute(
             "u",
             attribute::Owner::Vertex,
-            attribute::Storage::Float((0..count * 20).map(|v| v as f64).collect()),
+            attribute::Storage::Float(Arc::new((0..count * 20).map(|v| v as f64).collect())),
             &g,
         );
         with_owned_attribute(
             "piece",
             attribute::Owner::Primitive,
-            attribute::Storage::Int((0..count as i64 * 5).map(|p| p / 5).collect()),
+            attribute::Storage::Int(Arc::new((0..count as i64 * 5).map(|p| p / 5).collect())),
             &g,
         )
     }

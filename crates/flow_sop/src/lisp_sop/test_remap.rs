@@ -67,8 +67,8 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
                     (0..n).map(|i| if i % 4 == 0 { 0.0 } else { 2.0 }).collect(),
                 ))),
             ),
-            ("float", Storage::Float(floats(0))),
-            ("int", Storage::Int((0..n as i64).map(|i| (1 << 55) + i).collect())),
+            ("float", Storage::Float(Arc::new(floats(0)))),
+            ("int", Storage::Int(Arc::new((0..n as i64).map(|i| (1 << 55) + i).collect()))),
             ("text", Storage::Text((0..n).map(|i| if i % 2 == 0 { [0xe7,0x8c,0xab,0xff].to_vec() } else { [0xf0,0x9f,0x98,0x80,0].to_vec() }).collect())),
             ("vec2", Storage::Float2(ok(Float2::of_owned(floats(1), floats(2))))),
             ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(floats(3), floats(4), floats(5))))),
@@ -460,7 +460,7 @@ fn unchanged_remap_hits_the_cache_and_source_metadata_misses() {
     let first = session::stats(&s);
     let _ = session::cook(&mut s, None, &context, &node);
     assert!(session::stats(&s).misses == first.misses, "unchanged remap cache missed");
-    let payload_geometry = ok(geo::with_attribute(ok(attribute::create_owned("fresh", Owner::Point, Storage::Int(vec![1, 2, 3]))), &src));
+    let payload_geometry = ok(geo::with_attribute(ok(attribute::create_owned("fresh", Owner::Point, Storage::Int(Arc::new(vec![1, 2, 3])))), &src));
     let rebuild = build::adopt_identity(&node, &build::rebuild_with_inputs(&node, &[lisp_sop::snapshot(&payload_geometry), lisp_sop::snapshot(&dst)]));
     let actual = geometry(session::cook(&mut s, None, &context, &rebuild));
     assert!(geo::find_attribute(Owner::Point, "fresh", &actual).is_some(), "cached remap stale source payload");
@@ -526,7 +526,7 @@ fn outputs_are_owned_untaken_branches_are_not_evaluated_and_live_maps_follow_tim
     }
     // the output's storage is read back as a copy here: writing to it cannot reach the source
     if let Ok(Storage::Float(mut values)) = attribute::storage(&geo::find_attribute(Owner::Point, "float", &actual).unwrap()) {
-        values[0] = 99.0;
+        Arc::make_mut(&mut values)[0] = 99.0;
     }
     assert!(geometry_bytes(&src) == before, "mutating an owned output changed source bytes");
     let body = r#"(if false
@@ -712,7 +712,7 @@ fn primitive_ancestry_permutation_and_nan_payload() {
     let map = [0i64, 1, 2, 0, 1, 2];
     let offsets: Vec<i64> = (0..7).collect();
     let src = oracle(&original, &repeated, &map, &map, &[0, 0], &offsets, &map, true);
-    let src = ok(geo::with_attribute(ok(attribute::create_owned("float", Owner::Primitive, Storage::Float(vec![raw_with(false, 5), raw_with(false, 6)]))), &src));
+    let src = ok(geo::with_attribute(ok(attribute::create_owned("float", Owner::Primitive, Storage::Float(Arc::new(vec![raw_with(false, 5), raw_with(false, 6)])))), &src));
     let src = ok(geo::with_group(ok(group::ordered(group::Owner::Primitive, "ordered", 2, &[1, 0])), &src));
     let dst = target(1, &src);
     let identity: Vec<i64> = (0..6).collect();
@@ -821,7 +821,7 @@ fn blend_plane(m: &Mix, plane: &[f64]) -> Vec<f64> {
 fn reference_attribute(carry: &Mix, a: &attribute::T) -> attribute::T {
     let plane = |v: &[f64]| blend_plane(carry, v);
     let storage = match ok(attribute::storage(a)) {
-        Storage::Float(v) => Storage::Float(plane(&v)),
+        Storage::Float(v) => Storage::Float(Arc::new(plane(&v))),
         Storage::Float2(v) => {
             let v = Float2::View::view(&v);
             Storage::Float2(ok(Float2::of_owned(plane(&v.x), plane(&v.y))))
@@ -858,7 +858,7 @@ fn nan_free(g: &geo::T) -> Vec<u8> {
         .iter()
         .map(|a| {
             let storage = match ok(attribute::storage(a)) {
-                Storage::Float(v) => Storage::Float(cv(&v)),
+                Storage::Float(v) => Storage::Float(Arc::new(cv(&v))),
                 Storage::Float2(v) => {
                     let v = Float2::View::view(&v);
                     Storage::Float2(ok(Float2::of_owned(cv(&v.x), cv(&v.y))))

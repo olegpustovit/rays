@@ -655,10 +655,10 @@ mod tests {
         let reads = Arc::new(AtomicUsize::new(0));
         let noise_reads = reads.clone();
         let noise = attribute::create_deferred(
-            None, None, "noise", attribute::Owner::Point, &attribute::Storage::Float(vec![]), count,
+            None, None, "noise", attribute::Owner::Point, &attribute::Storage::Float(Arc::new(vec![])), count,
             Arc::new(move || {
                 noise_reads.fetch_add(1, Ordering::SeqCst);
-                attribute::Storage::Float((0..count).map(|i| i as f64).collect())
+                attribute::Storage::Float(Arc::new((0..count).map(|i| i as f64).collect()))
             }),
         ).unwrap();
         let position_reads = reads.clone();
@@ -689,7 +689,7 @@ mod tests {
             let attribute::Storage::Float(values) = attribute::storage(&noise).unwrap() else {
                 panic!("deferred noise returned non-float storage");
             };
-            assert_eq!(values, vec![0.0, 1.0, 2.0, 3.0]);
+            assert_eq!(*values, vec![0.0, 1.0, 2.0, 3.0]);
         }
         assert_eq!(reads.load(Ordering::SeqCst), raced + 1);
         assert!(!attribute::resident(&noise));
@@ -751,7 +751,7 @@ mod tests {
         let canonical = attribute::create_owned(
             "P",
             attribute::Owner::Point,
-            attribute::Storage::Float(vec![1.0, 2.0]),
+            attribute::Storage::Float(Arc::new(vec![1.0, 2.0])),
         )
         .unwrap();
         let error = create(

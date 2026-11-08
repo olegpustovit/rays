@@ -192,9 +192,9 @@ struct Ctx {
     ny: f64,
     nz: f64,
     point_count: usize,
-    px: Arc<[f64]>,
-    py: Arc<[f64]>,
-    pz: Arc<[f64]>,
+    px: Arc<Vec<f64>>,
+    py: Arc<Vec<f64>>,
+    pz: Arc<Vec<f64>>,
     raw_distance: Vec<f64>,
     classified_distance: Vec<f64>,
     vertex_points: Arc<Vec<i64>>,
@@ -1514,7 +1514,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 )));
             }
             Some(found) => match attribute::View::storage(&found)? {
-                attribute::Storage::Float(values) => (values.clone(), None, None),
+                attribute::Storage::Float(values) => (values.to_vec(), None, None),
                 attribute::Storage::Int(values) => (values.iter().map(|&v| v as f64).collect(), None, None),
                 attribute::Storage::Float2(values) => {
                     let values = packed::Float2::View::view(values);
@@ -1872,14 +1872,14 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             attribute::Owner::Primitive => {
                 let storage = match storage {
                     attribute::Storage::Float(values) => {
-                        attribute::Storage::Float(nearest_plane(cancel_ref, grain, values, primitive_source)?)
+                        attribute::Storage::Float(Arc::new(nearest_plane(cancel_ref, grain, values, primitive_source)?))
                     }
-                    attribute::Storage::Int(values) => attribute::Storage::Int(
+                    attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(
                         primitive_source
                             .iter()
                             .map(|&input| if input >= 0 { values[input as usize] } else { 0 })
                             .collect(),
-                    ),
+                    )),
                     attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
                         cancel_ref,
                         Some(grain),
@@ -1947,13 +1947,13 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 let is_normal = name == "N";
                 let plane = |values: &[f64]| float_plane(cancel_ref, grain, values, mapping_a, mapping_b, mapping_t);
                 let storage = match storage {
-                    attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)?),
-                    attribute::Storage::Int(values) => attribute::Storage::Int(
+                    attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values)?)),
+                    attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(
                         nearest_mapping
                             .iter()
                             .map(|&source| if source >= 0 { values[source as usize] } else { 0 })
                             .collect(),
-                    ),
+                    )),
                     attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
                         cancel_ref,
                         Some(grain),
@@ -2318,7 +2318,7 @@ pub(crate) mod test_util {
     pub fn int_attribute(owner: attribute::Owner, name: &str, source: &geometry::T) -> Vec<i64> {
         let found = geometry::find_attribute(owner, name, source).expect("missing attribute");
         match attribute::View::storage(&found).unwrap() {
-            attribute::Storage::Int(values) => values.clone(),
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} has unexpected storage"),
         }
     }
@@ -2517,7 +2517,7 @@ mod tests {
 
     #[test]
     fn custom_clip_attribute() {
-        let source = with_attribute("field", attribute::Storage::Float(vec![-1.0, 1.0, 1.0]), &triangle());
+        let source = with_attribute("field", attribute::Storage::Float(Arc::new(vec![-1.0, 1.0, 1.0])), &triangle());
         let mut p = params();
         p.clip_attribute = "field".to_owned();
         let clipped = clip(&p, &source).unwrap();
@@ -2536,7 +2536,7 @@ mod tests {
             run(attribute::Storage::Float3(f3(vec![-1.0, 1.0, 1.0], vec![0.0; 3], vec![0.0; 3]))),
             run(attribute::Storage::Float4(f4(vec![-1.0, 1.0, 1.0], vec![0.0; 3], vec![0.0; 3], vec![-100.0, 100.0, 500.0]))),
             run(attribute::Storage::Float4(f4(vec![-1.0, 1.0, 1.0], vec![0.0; 3], vec![0.0; 3], vec![1.0, 2.0, 3.0]))),
-            run(attribute::Storage::Int(vec![-1, 1, 1])),
+            run(attribute::Storage::Int(Arc::new(vec![-1, 1, 1]))),
         ];
         for output in &outputs {
             assert_eq!(xyz(&clipped), xyz(output), "numeric tuple zero-fill/first-three behavior differs");
@@ -2561,7 +2561,7 @@ mod tests {
             vec![0.0; 4],
             &[vec![0, 1, 2], vec![1, 3, 2]],
         );
-        with_owned_attribute("primitive_id", attribute::Owner::Primitive, attribute::Storage::Int(vec![10, 20]), &source)
+        with_owned_attribute("primitive_id", attribute::Owner::Primitive, attribute::Storage::Int(Arc::new(vec![10, 20])), &source)
     }
 
     fn primitive_selection(source_count: i64, pick: &(dyn Fn(i64) -> bool + Send + Sync)) -> group::T {
@@ -2664,7 +2664,7 @@ mod tests {
     #[test]
     fn selected_free_points() {
         let source = geom(vec![-2.0, -1.0, 1.0], vec![0.0; 3], vec![0.0; 3], &[]);
-        let source = with_attribute("id", attribute::Storage::Int(vec![10, 20, 30]), &source);
+        let source = with_attribute("id", attribute::Storage::Int(Arc::new(vec![10, 20, 30])), &source);
         let selected = group::init(None, group::Owner::Point, "selected_free", 3, &|p| p == 0).unwrap();
         let mut p = params();
         p.selection = Some(element_selection::T::SelectedPoints(selected));
@@ -2766,7 +2766,7 @@ mod tests {
         let mut p = params();
         p.clip_attribute = "field".to_owned();
         expect_code(clip(&p, &text), "invalid_geometry");
-        let non_finite = with_attribute("field", attribute::Storage::Float(vec![-1.0, f64::INFINITY, 1.0]), &source);
+        let non_finite = with_attribute("field", attribute::Storage::Float(Arc::new(vec![-1.0, f64::INFINITY, 1.0])), &source);
         expect_code(clip(&p, &non_finite), "invalid_geometry");
         let mut p = params();
         p.grain = 0;
@@ -2778,7 +2778,7 @@ mod tests {
         let source = with_owned_attribute(
             "source_primitive",
             attribute::Owner::Primitive,
-            attribute::Storage::Int(vec![17]),
+            attribute::Storage::Int(Arc::new(vec![17])),
             &c_polygon(),
         );
         let build = || {
@@ -3015,8 +3015,8 @@ mod tests {
         use rdk_core::attribute::{Owner, Storage};
         let g = fx::grid(150, 150, 2.0, true);
         let n = geometry::point_count(&g);
-        let g = fx::with_attr(&g, Owner::Point, "id", Storage::Int((0..n).collect()));
-        let g = fx::with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| (p % 97) as f64 * 0.125).collect()));
+        let g = fx::with_attr(&g, Owner::Point, "id", Storage::Int(Arc::new((0..n).collect())));
+        let g = fx::with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new((0..n).map(|p| (p % 97) as f64 * 0.125).collect())));
         let g = fx::with_attr(&g, Owner::Point, "N", fx::float3_attr(vec![0.3; n as usize], vec![0.4; n as usize], vec![0.5; n as usize]));
         let primitives = geometry::primitive_count(&g);
         let selected = group::init(None, group::Owner::Primitive, "half", primitives, &|p| p % 3 != 0).unwrap();
@@ -3044,7 +3044,7 @@ mod tests {
         use std::time::Instant;
         let g = fx::grid(700, 700, 2.0, true);
         let n = geometry::point_count(&g);
-        let g = fx::with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| (p % 97) as f64).collect()));
+        let g = fx::with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new((0..n).map(|p| (p % 97) as f64).collect())));
         let domains = parallel::recommended_domains();
         let time = |label: &str, work: &(dyn Fn() + Sync)| {
             let mut line = format!("{label:<26}");

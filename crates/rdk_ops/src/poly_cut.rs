@@ -148,8 +148,8 @@ fn numeric_attribute(name: &str, value: &geometry::T) -> Result<Numeric, error::
         return Err(fail(format!("point cut attribute {} was not found", ocaml_quote(name))));
     };
     Ok(match attribute::View::storage(&item)? {
-        attribute::Storage::Float(values) => Numeric::ScalarFloat(values.clone()),
-        attribute::Storage::Int(values) => Numeric::ScalarInt(values.clone()),
+        attribute::Storage::Float(values) => Numeric::ScalarFloat(values.to_vec()),
+        attribute::Storage::Int(values) => Numeric::ScalarInt(values.to_vec()),
         attribute::Storage::Float2(values) => Numeric::Tuple2(packed::Float2::View::view(values)),
         attribute::Storage::Float3(values) => Numeric::Tuple3(packed::Float3::View::view(values)?),
         attribute::Storage::Float4(values) => Numeric::Tuple4(packed::Float4::View::view(values)),
@@ -1430,7 +1430,7 @@ mod tests {
     }
 
     fn with_float(name: &str, values: Vec<f64>, value: &geometry::T) -> geometry::T {
-        with_attribute(attribute::Owner::Point, name, attribute::Storage::Float(values), value)
+        with_attribute(attribute::Owner::Point, name, attribute::Storage::Float(Arc::new(values)), value)
     }
 
     fn polyline(points: &[(f64, f64, f64)], closed: bool) -> geometry::T {
@@ -1498,14 +1498,14 @@ mod tests {
     fn crossing_source() -> geometry::T {
         let curve = with_float("signal", vec![-1.0, 1.0, 2.0, -1.0, -2.0], &open_curve(5));
         let curve = with_float("weight", vec![0.0, 10.0, 20.0, 30.0, 40.0], &curve);
-        let curve = with_attribute(attribute::Owner::Point, "id", attribute::Storage::Int(vec![0, 1, 2, 3, 4]), &curve);
+        let curve = with_attribute(attribute::Owner::Point, "id", attribute::Storage::Int(Arc::new(vec![0, 1, 2, 3, 4])), &curve);
         let curve = with_attribute(
             attribute::Owner::Vertex,
             "vertex_weight",
-            attribute::Storage::Float(vec![0.0, 10.0, 20.0, 30.0, 40.0]),
+            attribute::Storage::Float(Arc::new(vec![0.0, 10.0, 20.0, 30.0, 40.0])),
             &curve,
         );
-        with_attribute(attribute::Owner::Primitive, "piece", attribute::Storage::Int(vec![17]), &curve)
+        with_attribute(attribute::Owner::Primitive, "piece", attribute::Storage::Int(Arc::new(vec![17])), &curve)
     }
 
     fn message(result: Result<geometry::T, error::T>) -> (String, String) {

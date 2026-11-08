@@ -735,7 +735,7 @@ mod tests {
                 PrimitiveKind::OpenPolyline,
             ]),
         );
-        let source = with_attr(&source, Owner::Primitive, "primitive_id", Storage::Int(vec![10, 20, 30, 40, 50]));
+        let source = with_attr(&source, Owner::Primitive, "primitive_id", Storage::Int(Arc::new(vec![10, 20, 30, 40, 50])));
         let before = topo(&source);
         for (policy, expected_ids, expected_vertices) in [
             (OverlapPolicy::KeepFirstOverlap, vec![10, 40, 50], vec![0, 1, 2, 0, 2, 3, 0, 1, 2]),
@@ -770,7 +770,7 @@ mod tests {
         let dense_offsets: Vec<i64> = (0..=(primitives * 3) as i64).map(|p| p * 3).collect();
         let dense = geom(&x, &y, &z, &dense_vp, &dense_offsets, None);
         let ids: Vec<i64> = (0..primitives as i64 * 3).map(|p| p / 3).collect();
-        let dense = with_attr(&dense, Owner::Primitive, "source_id", Storage::Int(ids));
+        let dense = with_attr(&dense, Owner::Primitive, "source_id", Storage::Int(Arc::new(ids)));
         let out = run(
             &Params {
                 grain: 257,
@@ -811,10 +811,10 @@ mod tests {
     #[test]
     fn attribute_and_group_cleanup() {
         let g = geom(&[0., 1., 0.], &[0., 0., 1.], &[0.; 3], &[0, 1, 2], &[0, 3], None);
-        let g = with_attr(&g, Owner::Point, "temp_point", Storage::Int(vec![0, 1, 2]));
-        let g = with_attr(&g, Owner::Vertex, "keep_vertex", Storage::Int(vec![0, 1, 2]));
-        let g = with_attr(&g, Owner::Vertex, "temp_vertex", Storage::Float(vec![1., 2., 3.]));
-        let g = with_attr(&g, Owner::Primitive, "temp_primitive", Storage::Int(vec![4]));
+        let g = with_attr(&g, Owner::Point, "temp_point", Storage::Int(Arc::new(vec![0, 1, 2])));
+        let g = with_attr(&g, Owner::Vertex, "keep_vertex", Storage::Int(Arc::new(vec![0, 1, 2])));
+        let g = with_attr(&g, Owner::Vertex, "temp_vertex", Storage::Float(Arc::new(vec![1., 2., 3.])));
+        let g = with_attr(&g, Owner::Primitive, "temp_primitive", Storage::Int(Arc::new(vec![4])));
         let g = with_attr(&g, Owner::Detail, "temp_detail", Storage::Text(vec![b"drop".to_vec()]));
         let g = geometry::with_group(group::init(None, group::Owner::Point, "drop_points", 3, &|p| p == 0).unwrap(), &g).unwrap();
         let g = geometry::with_group(group::init(None, group::Owner::Vertex, "empty_vertices", 3, &|_| false).unwrap(), &g).unwrap();

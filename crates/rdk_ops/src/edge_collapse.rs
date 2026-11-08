@@ -30,14 +30,14 @@ fn same_ragged_f64(offsets: &[i64], values: &[f64], left: usize, right: usize) -
 
 enum Connectivity {
     Always,
-    Float(Vec<f64>),
-    Int(Vec<i64>),
+    Float(Arc<Vec<f64>>),
+    Int(Arc<Vec<i64>>),
     Text(Vec<Vec<u8>>),
-    Float2(Arc<[f64]>, Arc<[f64]>),
-    Float3(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>),
-    Float4(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>, Arc<[f64]>),
-    IntArray(Arc<[i64]>, Arc<[i64]>),
-    FloatArray(Arc<[i64]>, Arc<[f64]>),
+    Float2(Arc<Vec<f64>>, Arc<Vec<f64>>),
+    Float3(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>),
+    Float4(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>),
+    IntArray(Arc<Vec<i64>>, Arc<Vec<i64>>),
+    FloatArray(Arc<Vec<i64>>, Arc<Vec<f64>>),
 }
 
 impl Connectivity {
@@ -340,8 +340,8 @@ mod tests {
 
     fn quad() -> geometry::T {
         let g = geom(&[0., 2., 2., 0.], &[0., 0., 2., 2.], &[0.; 4], &[0, 1, 2, 3], &[0, 4], None);
-        let g = with_attr(&g, Owner::Point, "weight", Storage::Float(vec![0., 2., 4., 6.]));
-        let g = with_attr(&g, Owner::Point, "piece", Storage::Int(vec![0, 0, 1, 1]));
+        let g = with_attr(&g, Owner::Point, "weight", Storage::Float(Arc::new(vec![0., 2., 4., 6.])));
+        let g = with_attr(&g, Owner::Point, "piece", Storage::Int(Arc::new(vec![0, 0, 1, 1])));
         let g = with_attr(
             &g,
             Owner::Point,
@@ -350,11 +350,11 @@ mod tests {
         );
         let rows = packed::IntArray::create_owned(vec![0, 1, 2, 3, 4], vec![10, 11, 12, 13]).unwrap();
         let g = with_attr(&g, Owner::Point, "rows", Storage::IntArray(rows));
-        let g = with_attr(&g, Owner::Point, "__rdk_edge_collapse_target", Storage::Int(vec![9, 8, 7, 6]));
+        let g = with_attr(&g, Owner::Point, "__rdk_edge_collapse_target", Storage::Int(Arc::new(vec![9, 8, 7, 6])));
         let g = with_attr(&g, Owner::Point, "N", float3_attr(vec![1.; 4], vec![0.; 4], vec![0.; 4]));
-        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Float(vec![10., 20., 30., 40.]));
+        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Float(Arc::new(vec![10., 20., 30., 40.])));
         let g = with_attr(&g, Owner::Primitive, "material", Storage::Text(vec![b"panel".to_vec()]));
-        let g = with_attr(&g, Owner::Detail, "meta", Storage::Int(vec![42]));
+        let g = with_attr(&g, Owner::Detail, "meta", Storage::Int(Arc::new(vec![42])));
         let ordered = group::ordered(group::Owner::Point, "ordered", 4, &[1, 0, 2]).unwrap();
         let corners = group::init(None, group::Owner::Vertex, "corners", 4, &|v| v < 3).unwrap();
         let g = geometry::with_group(ordered, &g).unwrap();

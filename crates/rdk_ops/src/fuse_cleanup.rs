@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use rdk_core::support::{self, Windows};
 use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, topology, topology_index, topology_remap};
 
@@ -349,9 +350,9 @@ mod tests {
                 PrimitiveKind::OpenPolyline,
             ]),
         );
-        let g = with_attr(&g, Owner::Point, "pid", Storage::Int(vec![0, 1, 2, 3, 4, 5]));
-        let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int((0..13).collect()));
-        with_attr(&g, Owner::Primitive, "fid", Storage::Int(vec![0, 1, 2, 3]))
+        let g = with_attr(&g, Owner::Point, "pid", Storage::Int(Arc::new(vec![0, 1, 2, 3, 4, 5])));
+        let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int(Arc::new((0..13).collect())));
+        with_attr(&g, Owner::Primitive, "fid", Storage::Int(Arc::new(vec![0, 1, 2, 3])))
     }
 
     #[test]
@@ -410,8 +411,8 @@ mod tests {
         }
         let zeros = vec![0.0; x.len()];
         let g = geom(&x, &zeros, &zeros, &vp, &offsets, Some(kinds));
-        let g = with_attr(&g, Owner::Point, "pid", Storage::Int((0..x.len() as i64).collect()));
-        let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int((0..vp.len() as i64).collect()));
+        let g = with_attr(&g, Owner::Point, "pid", Storage::Int(Arc::new((0..x.len() as i64).collect())));
+        let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int(Arc::new((0..vp.len() as i64).collect())));
         let mappings = std::sync::Mutex::new(Vec::new());
         let one_four = exact_at_one_and_four(&|| {
             let (out, map) = apply_with_mapping(None, 64, true, true, false, &g).unwrap();

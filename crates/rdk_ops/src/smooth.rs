@@ -220,7 +220,7 @@ mod tests {
     fn point_float(name: &str, value: &geometry::T) -> Vec<f64> {
         let found = geometry::find_attribute(Owner::Point, name, value).unwrap();
         match attribute::View::storage(&found).unwrap() {
-            Storage::Float(values) => values.clone(),
+            Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has unexpected storage"),
         }
     }
@@ -316,7 +316,7 @@ mod tests {
         let heat = attribute::create_owned(
             "heat",
             Owner::Point,
-            Storage::Float(vec![0.0, 6.0, 0.0, 0.0, 8.0, 0.0]),
+            Storage::Float(Arc::new(vec![0.0, 6.0, 0.0, 0.0, 8.0, 0.0])),
         )
         .unwrap();
         let curves = with_attribute(&curves, heat);
@@ -446,7 +446,7 @@ mod tests {
         let weight = attribute::create_owned(
             "weight",
             Owner::Point,
-            Storage::Float((0..count).map(|point| 0.25 + ((point % 257) as f64 / 256.0)).collect()),
+            Storage::Float(Arc::new((0..count).map(|point| 0.25 + ((point % 257) as f64 / 256.0)).collect())),
         )
         .unwrap();
         let scale = with_attribute(&with_y(&base, y), weight);

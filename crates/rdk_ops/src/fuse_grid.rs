@@ -17,13 +17,13 @@ pub enum FuseMetric {
 }
 
 enum FuseAttributeView {
-    Float(Vec<f64>),
-    Int(Vec<i64>),
-    Float2(Arc<[f64]>, Arc<[f64]>),
-    Float3(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>),
-    Float4(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>, Arc<[f64]>),
-    IntArray(Arc<[i64]>, Arc<[i64]>),
-    FloatArray(Arc<[i64]>, Arc<[f64]>),
+    Float(Arc<Vec<f64>>),
+    Int(Arc<Vec<i64>>),
+    Float2(Arc<Vec<f64>>, Arc<Vec<f64>>),
+    Float3(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>),
+    Float4(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>),
+    IntArray(Arc<Vec<i64>>, Arc<Vec<i64>>),
+    FloatArray(Arc<Vec<i64>>, Arc<Vec<f64>>),
     Text(Vec<Vec<u8>>),
 }
 
@@ -232,7 +232,7 @@ fn install_outputs(
                 }
             }
         }
-        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(values))?;
+        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(Arc::new(values)))?;
         output = geometry::with_attribute(item, &output)?;
     }
     if let Some(name) = &params.snapped_group {
@@ -275,7 +275,7 @@ fn install_reduced_outputs(
                 if point < 0 { -1 } else { destinations[point as usize] }
             })
             .collect();
-        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(values))?;
+        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(Arc::new(values)))?;
         output = geometry::with_attribute(item, &output)?;
     }
     if let Some(name) = &params.snapped_group {
@@ -688,7 +688,7 @@ mod tests {
             &points(&[(9., 0., 0.), (9., 0., 0.), (2., 0., 0.), (5., 0., 0.)]),
             Owner::Point,
             "target_point",
-            Storage::Int(vec![2, 0, 99, -1]),
+            Storage::Int(Arc::new(vec![2, 0, 99, -1])),
         );
         let target = points(&[(0., 0., 0.), (1., 0., 0.), (3., 0., 0.)]);
         let output = fuse(
@@ -728,8 +728,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(xs(&output), vec![center]);
-        let invalid_radius = with_attr(&points(&[(0., 0., 0.)]), Owner::Point, "radius", Storage::Float(vec![-1.0]));
-        let valid_radius = with_attr(&points(&[(0., 0., 0.)]), Owner::Point, "radius", Storage::Float(vec![0.0]));
+        let invalid_radius = with_attr(&points(&[(0., 0., 0.)]), Owner::Point, "radius", Storage::Float(Arc::new(vec![-1.0])));
+        let valid_radius = with_attr(&points(&[(0., 0., 0.)]), Owner::Point, "radius", Storage::Float(Arc::new(vec![0.0])));
         assert_eq!(
             code(fuse(
                 &Params { target: Some(valid_radius), radius_attribute: Some("radius".to_owned()), ..base() },
@@ -764,22 +764,22 @@ mod tests {
                 &points(&[(1.9, 0., 0.), (0.9, 0., 0.), (0.1, 0., 0.)]),
                 Owner::Point,
                 "radius",
-                Storage::Float(vec![0.6, 0., 0.]),
+                Storage::Float(Arc::new(vec![0.6, 0., 0.])),
             ),
             Owner::Point,
             "piece",
-            Storage::Int(vec![3, 2, 1]),
+            Storage::Int(Arc::new(vec![3, 2, 1])),
         );
         let target = with_attr(
             &with_attr(
                 &points(&[(0., 0., 0.), (1., 0., 0.), (3., 0., 0.)]),
                 Owner::Point,
                 "radius",
-                Storage::Float(vec![0., 0., 0.5]),
+                Storage::Float(Arc::new(vec![0., 0., 0.5])),
             ),
             Owner::Point,
             "piece",
-            Storage::Int(vec![1, 2, 3]),
+            Storage::Int(Arc::new(vec![1, 2, 3])),
         );
         let run = |tolerance: f64, radius: bool, matching: bool, unequal: bool| {
             fuse(
@@ -804,8 +804,8 @@ mod tests {
         assert_eq!(xs(&run(0.0, true, false, false)), vec![3., 0.9, 0.1]);
         assert_eq!(xs(&run(2.0, false, true, false)), vec![3., 1., 0.]);
         assert_eq!(xs(&run(2.0, false, true, true)), vec![1., 0., 1.]);
-        let float_source = with_attr(&points(&[(0., 0., 0.)]), Owner::Point, "key", Storage::Float(vec![1.001]));
-        let float_target = with_attr(&points(&[(1., 0., 0.)]), Owner::Point, "key", Storage::Float(vec![1.0]));
+        let float_source = with_attr(&points(&[(0., 0., 0.)]), Owner::Point, "key", Storage::Float(Arc::new(vec![1.001])));
+        let float_target = with_attr(&points(&[(1., 0., 0.)]), Owner::Point, "key", Storage::Float(Arc::new(vec![1.0])));
         let tolerant = fuse(
             &Params {
                 target: Some(float_target),
@@ -886,7 +886,7 @@ mod tests {
             &points(&[(0., 3., 6.), (2., 1., 4.), (4., 2., 5.)]),
             Owner::Point,
             "weight",
-            Storage::Float(vec![1., 2., 3.]),
+            Storage::Float(Arc::new(vec![1., 2., 3.])),
         );
         let position = |mode: Position| {
             let out = fuse(
@@ -940,7 +940,7 @@ mod tests {
             &points(&[(0., 0., 0.), (0., 0., 0.)]),
             Owner::Point,
             "weight",
-            Storage::Float(vec![1., -1.]),
+            Storage::Float(Arc::new(vec![1., -1.])),
         );
         assert_eq!(
             code(fuse(
@@ -966,9 +966,9 @@ mod tests {
             &[0, 4, 6, 8],
             Some(vec![PrimitiveKind::Polygon, PrimitiveKind::OpenPolyline, PrimitiveKind::OpenPolyline]),
         );
-        let g = with_attr(&g, Owner::Point, "point_id", Storage::Int(vec![100, 101, 102, 103, 104, 105, 106]));
-        let g = with_attr(&g, Owner::Vertex, "vertex_id", Storage::Int(vec![10, 11, 12, 13, 14, 15, 16, 17]));
-        let g = with_attr(&g, Owner::Primitive, "primitive_id", Storage::Int(vec![20, 21, 22]));
+        let g = with_attr(&g, Owner::Point, "point_id", Storage::Int(Arc::new(vec![100, 101, 102, 103, 104, 105, 106])));
+        let g = with_attr(&g, Owner::Vertex, "vertex_id", Storage::Int(Arc::new(vec![10, 11, 12, 13, 14, 15, 16, 17])));
+        let g = with_attr(&g, Owner::Primitive, "primitive_id", Storage::Int(Arc::new(vec![20, 21, 22])));
         let unused = group::ordered(group::Owner::Point, "unused", 7, &[6]).unwrap();
         let g = geometry::with_group(unused, &g).unwrap();
         let topology_value = geometry::topology(&g).clone();
@@ -1059,15 +1059,15 @@ mod tests {
             &linked,
             Owner::Point,
             "rule_weight",
-            Storage::Float((0..total).map(|p| if p < count { 1.0 } else { 3.0 }).collect()),
+            Storage::Float(Arc::new((0..total).map(|p| if p < count { 1.0 } else { 3.0 }).collect())),
         );
         let linked = with_attr(
             &linked,
             Owner::Point,
             "rule_value",
-            Storage::Float((0..total).map(|p| ((p % count) as f64 * 0.013).sin()).collect()),
+            Storage::Float(Arc::new((0..total).map(|p| ((p % count) as f64 * 0.013).sin()).collect())),
         );
-        let linked = with_attr(&linked, Owner::Point, "rule_id", Storage::Int((0..total).map(|p| p % 17).collect()));
+        let linked = with_attr(&linked, Owner::Point, "rule_id", Storage::Int(Arc::new((0..total).map(|p| p % 17).collect())));
         let output = fuse(
             &Params {
                 selection: Some(point_group("queries", total, &|p| p < count)),
@@ -1160,9 +1160,9 @@ mod tests {
         all_offsets.extend(offsets.iter().skip(1).map(|o| o + base_len));
         let linked = geom(&both(&x, &x2), &both(&y, &y2), &both(&z, &z.clone()), &all_vp, &all_offsets, None);
         let total = geometry::point_count(&linked);
-        let linked = with_attr(&linked, Owner::Point, "rule_weight", Storage::Float((0..total).map(|p| if p < half { 1.0 } else { 3.0 }).collect()));
-        let linked = with_attr(&linked, Owner::Point, "rule_value", Storage::Float((0..total).map(|p| ((p % half) as f64 * 0.013).sin()).collect()));
-        let linked = with_attr(&linked, Owner::Point, "rule_id", Storage::Int((0..total).map(|p| p % 17).collect()));
+        let linked = with_attr(&linked, Owner::Point, "rule_weight", Storage::Float(Arc::new((0..total).map(|p| if p < half { 1.0 } else { 3.0 }).collect())));
+        let linked = with_attr(&linked, Owner::Point, "rule_value", Storage::Float(Arc::new((0..total).map(|p| ((p % half) as f64 * 0.013).sin()).collect())));
+        let linked = with_attr(&linked, Owner::Point, "rule_id", Storage::Int(Arc::new((0..total).map(|p| p % 17).collect())));
         let linked = with_attr(
             &linked,
             Owner::Point,

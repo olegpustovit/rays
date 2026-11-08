@@ -1259,13 +1259,13 @@ mod tests {
 
     #[test]
     fn interpolate_attribute_leaves_primitive_payload_alone() {
-        let value = attribute::create_owned("a", attribute::Owner::Primitive, attribute::Storage::Float(vec![1.0])).unwrap();
+        let value = attribute::create_owned("a", attribute::Owner::Primitive, attribute::Storage::Float(Arc::new(vec![1.0]))).unwrap();
         let same = interpolate_attribute(None, None, &[], &[], &[], &[], &[], &[], &value).unwrap();
         assert_eq!(attribute::length(&same), 1);
-        let point = attribute::create_owned("p", attribute::Owner::Point, attribute::Storage::Float(vec![0.0, 10.0])).unwrap();
+        let point = attribute::create_owned("p", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![0.0, 10.0]))).unwrap();
         let blended = interpolate_attribute(None, None, &[0], &[1], &[0.25], &[], &[], &[], &point).unwrap();
         match attribute::View::storage(&blended).unwrap() {
-            attribute::Storage::Float(values) => assert_eq!(values, &vec![2.5]),
+            attribute::Storage::Float(values) => assert_eq!(**values, vec![2.5]),
             _ => panic!("float"),
         }
         let Err(failure) = interpolate_attribute(None, Some(0), &[0], &[1], &[0.25], &[], &[], &[], &point) else {

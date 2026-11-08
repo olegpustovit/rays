@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use rdk_core::support::Windows;
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
 
@@ -174,9 +175,9 @@ mod tests {
     #[test]
     fn reverse_flips_winding_and_remaps_vertex_data() {
         let g = grid(1, 1, 2.0, true);
-        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int(vec![10, 11, 12, 13]));
+        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int(Arc::new(vec![10, 11, 12, 13])));
         let g = with_attr(&g, Owner::Point, "N", float3_attr(vec![0.; 4], vec![0.; 4], vec![1.; 4]));
-        let g = with_attr(&g, Owner::Point, "keep", Storage::Int(vec![0, 1, 2, 3]));
+        let g = with_attr(&g, Owner::Point, "keep", Storage::Int(Arc::new(vec![0, 1, 2, 3])));
         let ordered = group::ordered(group::Owner::Vertex, "corners", 4, &[0, 1]).unwrap();
         let g = geometry::with_group(ordered, &g).unwrap();
         let out = run(None, &g).unwrap();
@@ -208,7 +209,7 @@ mod tests {
         let g = grid(200, 200, 2.0, true);
         let n = geometry::topology(&g);
         let corners = topology::vertex_count(n);
-        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int((0..corners).collect()));
+        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int(Arc::new((0..corners).collect())));
         let out = exact_at_one_and_four(&|| run(None, &g).unwrap());
         assert_ne!(topo(&out).0, topo(&g).0);
     }

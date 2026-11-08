@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use rdk_core::{attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index};
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
@@ -196,7 +197,7 @@ fn weight_values(name: &str, geometry_value: &geometry::T) -> Result<Vec<f64>, e
         )));
     };
     let values: Vec<f64> = match attribute::View::storage(&found)? {
-        attribute::Storage::Float(values) => values.clone(),
+        attribute::Storage::Float(values) => values.to_vec(),
         attribute::Storage::Int(values) => values.iter().map(|&v| v as f64).collect(),
         _ => {
             return Err(fail(format!(
@@ -414,7 +415,7 @@ mod tests {
             &[0, 4],
             Some(vec![PrimitiveKind::OpenPolyline]),
         );
-        with_attr(&g, Owner::Point, "w", Storage::Float(vec![1., 2., 3., 4.]))
+        with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new(vec![1., 2., 3., 4.])))
     }
 
     #[test]
@@ -458,7 +459,7 @@ mod tests {
         );
         let mut zero = params(Position::WeightedAverage, true, true);
         zero.weight_attribute = Some("w".to_owned());
-        let zeroed = with_attr(&source, Owner::Point, "w", Storage::Float(vec![1., -1., 1., 0.]));
+        let zeroed = with_attr(&source, Owner::Point, "w", Storage::Float(Arc::new(vec![1., -1., 1., 0.])));
         let failure = apply(None, &zero, &clusters(), &zeroed).err().unwrap();
         assert!(error::message(&failure).contains("position weight sum is zero for cluster 0"));
     }
@@ -513,7 +514,7 @@ mod tests {
         let y: Vec<f64> = (0..n).map(|p| ((p * 31) % 17) as f64).collect();
         let z: Vec<f64> = (0..n).map(|p| (p % 5) as f64 * 0.25).collect();
         let g = geom(&x, &y, &z, &[0, 1, 2], &[0, 3], None);
-        let g = with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| 1.0 + (p % 5) as f64).collect()));
+        let g = with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new((0..n).map(|p| 1.0 + (p % 5) as f64).collect())));
         for position in [Position::Average, Position::Median, Position::Mode, Position::Sum, Position::RootMeanSquare, Position::WeightedAverage] {
             let mut p = params(position, true, true);
             p.grain = 256;

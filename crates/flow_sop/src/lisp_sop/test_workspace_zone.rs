@@ -368,7 +368,7 @@ fn a_garden_zone_cooks_deterministically_with_provenance() {
     // provenance: every tag names an element of the zone, at its index
     let attribute = geo::find_attribute(rdk_core::attribute::Owner::Primitive, lower::source_attribute(), &one).expect("the source attribute");
     let tags = match rdk_core::attribute::storage(&attribute) {
-        Ok(rdk_core::attribute::Storage::Int(values)) => values,
+        Ok(rdk_core::attribute::Storage::Int(values)) => values.to_vec(),
         _ => panic!("tag storage"),
     };
     let mut sorted = tags.clone();
@@ -481,7 +481,7 @@ fn pieces_are_primitives_and_keys_order_the_elements() {
         1,
     );
     let n = geo::point_count(&base);
-    let ids = rdk_core::attribute::create_owned("id", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Int((0..n).map(|i| n - 1 - i).collect())).unwrap();
+    let ids = rdk_core::attribute::create_owned("id", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Int(Arc::new((0..n).map(|i| n - 1 - i).collect()))).unwrap();
     let keyed = geo::with_attribute(ids, &base).unwrap();
     let ordered = sop::zone::elements(sop::zone::Kind::Points, Some("id"), &keyed).unwrap();
     assert!(ordered[0].key == 0 && Ok(ordered[0].position) == Float3::get(geo::positions(&base), n - 1), "elements follow the key attribute");

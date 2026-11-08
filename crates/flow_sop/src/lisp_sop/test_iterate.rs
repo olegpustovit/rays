@@ -90,7 +90,7 @@ fn iterate_smoothing_matches_direct_computation() {
 fn weights(g: &geo::T) -> Vec<f64> {
     let a = geo::find_attribute(rdk_core::attribute::Owner::Point, "w", g).expect("w attribute");
     match rdk_core::attribute::storage(&a) {
-        Ok(rdk_core::attribute::Storage::Float(w)) => w,
+        Ok(rdk_core::attribute::Storage::Float(w)) => w.to_vec(),
         _ => panic!("w is not a float attribute"),
     }
 }

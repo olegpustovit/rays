@@ -142,7 +142,7 @@ pub fn target_values(
                     point += 1;
                 }
                 if invalid < 0 {
-                    Ok(Some(values.clone()))
+                    Ok(Some(values.to_vec()))
                 } else {
                     Err(fail(&format!(
                         "target-size attribute {} must be finite and positive at point {}",
@@ -672,7 +672,7 @@ pub fn local_of_geometry(
         None => Vec::new(),
         Some(name) => match geometry::find_attribute(Owner::Point, name, geometry_value) {
             Some(found) => match attribute::View::storage(&found)? {
-                Storage::Float(values) => values.clone(),
+                Storage::Float(values) => values.to_vec(),
                 _ => {
                     return Err(invalid_arg(format!(
                         "{OPERATION}: point target-size attribute {} must be scalar float",
@@ -2251,7 +2251,7 @@ pub fn install_outputs(
             },
             None => {
                 let values = vec![target_length; geometry::point_count(&with_hard_edges) as usize];
-                let created = attribute::create_owned(name, Owner::Point, Storage::Float(values))?;
+                let created = attribute::create_owned(name, Owner::Point, Storage::Float(Arc::new(values)))?;
                 geometry::with_attribute(created, &with_hard_edges)?
             }
         },
@@ -2326,7 +2326,7 @@ pub fn install_outputs(
             let created = attribute::create_owned(
                 name,
                 Owner::Primitive,
-                Storage::Float(quality),
+                Storage::Float(Arc::new(quality)),
             )?;
             geometry::with_attribute(created, &with_size)
         }
@@ -2737,7 +2737,7 @@ mod tests {
 
     fn scalar(owner: Owner, name: &str, value: &geometry::T) -> Vec<f64> {
         match attribute::View::storage(&geometry::find_attribute(owner, name, value).unwrap()).unwrap() {
-            Storage::Float(values) => values.clone(),
+            Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
     }
@@ -2866,7 +2866,7 @@ mod tests {
         )
         .unwrap();
         let value = add_attribute(&base, Owner::Vertex, "uv", Storage::Float2(uv));
-        let value = add_attribute(&value, Owner::Point, "target", Storage::Float(vec![0.4; 4]));
+        let value = add_attribute(&value, Owner::Point, "target", Storage::Float(Arc::new(vec![0.4; 4])));
         let value = add_attribute(&value, Owner::Detail, "tag", Storage::Text(vec![b"fixture".to_vec()]));
         let hard_points = group::init(None, group::Owner::Point, "pin", 4, &|point| point == 0).unwrap();
         (value, hard_points)
@@ -3023,7 +3023,7 @@ mod tests {
             &source,
             Owner::Point,
             "point_id",
-            Storage::Int((0..point_count).map(|point| point * 3).collect()),
+            Storage::Int(Arc::new((0..point_count).map(|point| point * 3).collect())),
         );
         let source = add_attribute(
             &source,
@@ -3141,7 +3141,7 @@ mod tests {
         let sizes: Vec<f64> = (0..geometry::point_count(&source))
             .map(|point| if point == 2 { f64::NAN } else { 1.0 })
             .collect();
-        let bad_size = add_attribute(&source, Owner::Point, "size", Storage::Float(sizes));
+        let bad_size = add_attribute(&source, Owner::Point, "size", Storage::Float(Arc::new(sizes)));
         expect(
             remesh(&bad_size, 1.0, &|p| p.target_size_attribute = Some("size".to_owned())),
             "invalid_remesh",

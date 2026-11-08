@@ -65,9 +65,9 @@ fn fcmp(a: f64, b: f64) -> Ordering {
 }
 
 struct Positions {
-    x: Arc<[f64]>,
-    y: Arc<[f64]>,
-    z: Arc<[f64]>,
+    x: Arc<Vec<f64>>,
+    y: Arc<Vec<f64>>,
+    z: Arc<Vec<f64>>,
 }
 
 fn positions_of(geometry_value: &geometry::T) -> Result<Positions, error::T> {
@@ -644,7 +644,7 @@ fn remap_output(
     let mut output =
         geometry::create(positions, topology_value, Some(attributes), Some(groups), None).map_err(lift)?;
     if let Some(name) = source_point_attribute {
-        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(point_map.to_vec()))?;
+        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(Arc::new(point_map.to_vec())))?;
         output = geometry::with_attribute(item, &output)?;
     }
     if let Some(name) = hull_group {
@@ -996,7 +996,7 @@ mod tests {
         let id = attribute::create_owned(
             "id",
             attribute::Owner::Point,
-            attribute::Storage::Int((0..points as i64).map(|point| 100 + point).collect()),
+            attribute::Storage::Int(Arc::new((0..points as i64).map(|point| 100 + point).collect())),
         ).unwrap();
         let normal = attribute::create_owned(
             "N",
@@ -1024,7 +1024,7 @@ mod tests {
 
     fn int_storage(value: Option<attribute::T>) -> Vec<i64> {
         match attribute::View::storage(&value.unwrap()).unwrap() {
-            attribute::Storage::Int(values) => values.clone(),
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("int storage"),
         }
     }

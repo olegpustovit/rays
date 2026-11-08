@@ -68,7 +68,7 @@ pub fn project_to_source_edge(
 fn ancestry_of(plan: &PullPlan, geometry_value: &geometry::T) -> Result<Vec<i64>, rdk_core::error::T> {
     match geometry::find_attribute(Owner::Vertex, &plan.ancestry_attribute, geometry_value) {
         Some(found) => match attribute::View::storage(&found)? {
-            Storage::Int(values) => Ok(values.clone()),
+            Storage::Int(values) => Ok(values.to_vec()),
             _ => Err(failm("internal edge ancestry changed storage")),
         },
         None => Err(failm("local subdivision dropped internal edge ancestry")),

@@ -80,8 +80,8 @@ pub mod IntArray {
 
     #[derive(Clone)]
     pub struct T {
-        offsets: Arc<[i64]>,
-        values: Arc<[i64]>,
+        offsets: Arc<Vec<i64>>,
+        values: Arc<Vec<i64>>,
     }
 
     #[allow(non_snake_case)]
@@ -91,8 +91,8 @@ pub mod IntArray {
 
         #[derive(Clone)]
         pub struct View {
-            pub offsets: Arc<[i64]>,
-            pub values: Arc<[i64]>,
+            pub offsets: Arc<Vec<i64>>,
+            pub values: Arc<Vec<i64>>,
         }
 
         pub fn view(value: &T) -> View {
@@ -104,8 +104,8 @@ pub mod IntArray {
 
         pub fn create_validated_owned(offsets: Vec<i64>, values: Vec<i64>) -> T {
             T {
-                offsets: Arc::from(offsets),
-                values: Arc::from(values),
+                offsets: Arc::new(offsets),
+                values: Arc::new(values),
             }
         }
     }
@@ -131,15 +131,16 @@ pub mod IntArray {
     }
 
     pub fn create_owned(offsets: Vec<i64>, values: Vec<i64>) -> Result<T, error::T> {
+        create_shared(Arc::new(offsets), Arc::new(values))
+    }
+
+    pub fn create_shared(offsets: Arc<Vec<i64>>, values: Arc<Vec<i64>>) -> Result<T, error::T> {
         validate_offsets(
             "Int_array",
             &offsets,
             i64::try_from(values.len()).unwrap_or(i64::MAX),
         )?;
-        Ok(T {
-            offsets: Arc::from(offsets),
-            values: Arc::from(values),
-        })
+        Ok(T { offsets, values })
     }
 }
 
@@ -151,8 +152,8 @@ pub mod FloatArray {
 
     #[derive(Clone)]
     pub struct T {
-        offsets: Arc<[i64]>,
-        values: Arc<[f64]>,
+        offsets: Arc<Vec<i64>>,
+        values: Arc<Vec<f64>>,
     }
 
     #[allow(non_snake_case)]
@@ -162,8 +163,8 @@ pub mod FloatArray {
 
         #[derive(Clone)]
         pub struct View {
-            pub offsets: Arc<[i64]>,
-            pub values: Arc<[f64]>,
+            pub offsets: Arc<Vec<i64>>,
+            pub values: Arc<Vec<f64>>,
         }
 
         pub fn view(value: &T) -> View {
@@ -175,8 +176,8 @@ pub mod FloatArray {
 
         pub fn create_validated_owned(offsets: Vec<i64>, values: Vec<f64>) -> T {
             T {
-                offsets: Arc::from(offsets),
-                values: Arc::from(values),
+                offsets: Arc::new(offsets),
+                values: Arc::new(values),
             }
         }
     }
@@ -206,15 +207,16 @@ pub mod FloatArray {
     }
 
     pub fn create_owned(offsets: Vec<i64>, values: Vec<f64>) -> Result<T, error::T> {
+        create_shared(Arc::new(offsets), Arc::new(values))
+    }
+
+    pub fn create_shared(offsets: Arc<Vec<i64>>, values: Arc<Vec<f64>>) -> Result<T, error::T> {
         validate_offsets(
             "Float_array",
             &offsets,
             i64::try_from(values.len()).unwrap_or(i64::MAX),
         )?;
-        Ok(T {
-            offsets: Arc::from(offsets),
-            values: Arc::from(values),
-        })
+        Ok(T { offsets, values })
     }
 }
 
@@ -226,8 +228,8 @@ pub mod Float2 {
 
     #[derive(Clone)]
     pub struct T {
-        x: Arc<[f64]>,
-        y: Arc<[f64]>,
+        x: Arc<Vec<f64>>,
+        y: Arc<Vec<f64>>,
     }
 
     #[allow(non_snake_case)]
@@ -237,8 +239,8 @@ pub mod Float2 {
 
         #[derive(Clone)]
         pub struct View {
-            pub x: Arc<[f64]>,
-            pub y: Arc<[f64]>,
+            pub x: Arc<Vec<f64>>,
+            pub y: Arc<Vec<f64>>,
         }
 
         pub fn view(value: &T) -> View {
@@ -271,15 +273,16 @@ pub mod Float2 {
     }
 
     pub fn of_owned(x: Vec<f64>, y: Vec<f64>) -> Result<T, error::T> {
+        of_shared(Arc::new(x), Arc::new(y))
+    }
+
+    pub fn of_shared(x: Arc<Vec<f64>>, y: Arc<Vec<f64>>) -> Result<T, error::T> {
         same_length(
             "Packed.Float2",
             i64::try_from(x.len()).unwrap_or(i64::MAX),
             i64::try_from(y.len()).unwrap_or(i64::MAX),
         )?;
-        Ok(T {
-            x: Arc::from(x),
-            y: Arc::from(y),
-        })
+        Ok(T { x, y })
     }
 }
 
@@ -289,7 +292,7 @@ pub mod Deferred {
 
     #[derive(Clone)]
     pub enum Value {
-        Float3Planes([Arc<[f64]>; 3]),
+        Float3Planes([Arc<Vec<f64>>; 3]),
         Topology(crate::topology::T),
         AttributeStorage(crate::attribute::Storage),
     }
@@ -432,9 +435,9 @@ pub mod Float3 {
 
         #[derive(Clone)]
         pub struct View {
-            pub x: Arc<[f64]>,
-            pub y: Arc<[f64]>,
-            pub z: Arc<[f64]>,
+            pub x: Arc<Vec<f64>>,
+            pub y: Arc<Vec<f64>>,
+            pub z: Arc<Vec<f64>>,
         }
 
         pub fn view(value: &T) -> Result<View, error::T> {
@@ -451,9 +454,9 @@ pub mod Float3 {
         }
 
         pub fn of_shared_exn(
-            x: Arc<[f64]>,
-            y: Arc<[f64]>,
-            z: Arc<[f64]>,
+            x: Arc<Vec<f64>>,
+            y: Arc<Vec<f64>>,
+            z: Arc<Vec<f64>>,
         ) -> Result<T, error::T> {
             let count = i64::try_from(x.len()).unwrap_or(i64::MAX);
             same_length("Packed.Float3", count, i64::try_from(y.len()).unwrap_or(i64::MAX))?;
@@ -476,7 +479,7 @@ pub mod Float3 {
         }
     }
 
-    fn plane_arcs(value: &T) -> Result<[Arc<[f64]>; 3], error::T> {
+    fn plane_arcs(value: &T) -> Result<[Arc<Vec<f64>>; 3], error::T> {
         match &value.deferred {
             None => Ok([
                 Arc::clone(&value.planes.x),
@@ -496,9 +499,9 @@ pub mod Float3 {
 
     fn empty_planes() -> View::View {
         View::View {
-            x: Arc::from(Vec::<f64>::new()),
-            y: Arc::from(Vec::<f64>::new()),
-            z: Arc::from(Vec::<f64>::new()),
+            x: Arc::new(Vec::new()),
+            y: Arc::new(Vec::new()),
+            z: Arc::new(Vec::new()),
         }
     }
 
@@ -540,9 +543,9 @@ pub mod Float3 {
         same_length("Packed.Float3", count, i64::try_from(y.len()).unwrap_or(i64::MAX))?;
         same_length("Packed.Float3", count, i64::try_from(z.len()).unwrap_or(i64::MAX))?;
         Ok(make(View::View {
-            x: Arc::from(x),
-            y: Arc::from(y),
-            z: Arc::from(z),
+            x: Arc::new(x),
+            y: Arc::new(y),
+            z: Arc::new(z),
         }))
     }
 
@@ -581,9 +584,9 @@ pub mod Float3 {
                 )
             })?;
             Ok(Deferred::Value::Float3Planes([
-                Arc::from(x),
-                Arc::from(y),
-                Arc::from(z),
+                Arc::new(x),
+                Arc::new(y),
+                Arc::new(z),
             ]))
         });
         Ok(T {
@@ -704,9 +707,9 @@ pub mod Float3 {
             }
             value.frozen = true;
             Ok(make(View::View {
-                x: Arc::from(std::mem::take(&mut value.x)),
-                y: Arc::from(std::mem::take(&mut value.y)),
-                z: Arc::from(std::mem::take(&mut value.z)),
+                x: Arc::new(std::mem::take(&mut value.x)),
+                y: Arc::new(std::mem::take(&mut value.y)),
+                z: Arc::new(std::mem::take(&mut value.z)),
             }))
         }
     }
@@ -720,10 +723,10 @@ pub mod Float4 {
 
     #[derive(Clone)]
     pub struct T {
-        x: Arc<[f64]>,
-        y: Arc<[f64]>,
-        z: Arc<[f64]>,
-        w: Arc<[f64]>,
+        x: Arc<Vec<f64>>,
+        y: Arc<Vec<f64>>,
+        z: Arc<Vec<f64>>,
+        w: Arc<Vec<f64>>,
     }
 
     #[allow(non_snake_case)]
@@ -733,10 +736,10 @@ pub mod Float4 {
 
         #[derive(Clone)]
         pub struct View {
-            pub x: Arc<[f64]>,
-            pub y: Arc<[f64]>,
-            pub z: Arc<[f64]>,
-            pub w: Arc<[f64]>,
+            pub x: Arc<Vec<f64>>,
+            pub y: Arc<Vec<f64>>,
+            pub z: Arc<Vec<f64>>,
+            pub w: Arc<Vec<f64>>,
         }
 
         pub fn view(value: &T) -> View {
@@ -776,16 +779,20 @@ pub mod Float4 {
         z: Vec<f64>,
         w: Vec<f64>,
     ) -> Result<T, error::T> {
+        of_shared(Arc::new(x), Arc::new(y), Arc::new(z), Arc::new(w))
+    }
+
+    pub fn of_shared(
+        x: Arc<Vec<f64>>,
+        y: Arc<Vec<f64>>,
+        z: Arc<Vec<f64>>,
+        w: Arc<Vec<f64>>,
+    ) -> Result<T, error::T> {
         let count = i64::try_from(x.len()).unwrap_or(i64::MAX);
         same_length("Packed.Float4", count, i64::try_from(y.len()).unwrap_or(i64::MAX))?;
         same_length("Packed.Float4", count, i64::try_from(z.len()).unwrap_or(i64::MAX))?;
         same_length("Packed.Float4", count, i64::try_from(w.len()).unwrap_or(i64::MAX))?;
-        Ok(T {
-            x: Arc::from(x),
-            y: Arc::from(y),
-            z: Arc::from(z),
-            w: Arc::from(w),
-        })
+        Ok(T { x, y, z, w })
     }
 }
 

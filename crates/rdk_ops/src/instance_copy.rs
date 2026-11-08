@@ -2,6 +2,7 @@
 //!
 //! Output ranges are filled by disjoint parallel ranges joined in range order, so every result is
 //! byte-identical to the sequential path.
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::mat4;
@@ -106,8 +107,8 @@ fn repeat_attribute(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, i
         return Ok(item.clone());
     }
     let storage = match attribute::View::storage(item).map_err(lift)? {
-        Storage::Float(values) => Storage::Float(repeat_f64(cancel_value, grain, copies, values)?),
-        Storage::Int(values) => Storage::Int(repeat_i64(cancel_value, grain, copies, values)?),
+        Storage::Float(values) => Storage::Float(Arc::new(repeat_f64(cancel_value, grain, copies, values)?)),
+        Storage::Int(values) => Storage::Int(Arc::new(repeat_i64(cancel_value, grain, copies, values)?)),
         Storage::Text(values) => Storage::Text(repeat_text(copies, values)),
         Storage::Float2(values) => {
             let view = packed::Float2::View::view(values);
@@ -530,8 +531,8 @@ mod tests {
     #[test]
     fn payload_repeats_per_instance() {
         let source = polyline(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)], true);
-        let weight = attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(vec![1., 2., 3.])).unwrap();
-        let detail = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Int(vec![5])).unwrap();
+        let weight = attribute::create_owned("weight", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![1., 2., 3.]))).unwrap();
+        let detail = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Int(Arc::new(vec![5]))).unwrap();
         let ordered = group::ordered(group::Owner::Point, "pts", 3, &[2, 0]).unwrap();
         let mut source = geometry::with_attribute(weight, &source).unwrap();
         source = geometry::with_attribute(detail, &source).unwrap();
@@ -599,7 +600,7 @@ mod tests {
         let source_second = group::ordered(group::Owner::Primitive, "source_second", 2, &[1]).unwrap();
         let restricted_source = geometry::with_group(source_second, &restricted_source).unwrap();
         let restricted_targets = point_cloud(&[(0., 0., 0.), (0., 10., 0.), (0., 20., 0.)]);
-        let scale = attribute::create_owned("pscale", attribute::Owner::Point, attribute::Storage::Float(vec![1., 9., 2.])).unwrap();
+        let scale = attribute::create_owned("pscale", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![1., 9., 2.]))).unwrap();
         let restricted_targets = geometry::with_attribute(scale, &restricted_targets).unwrap();
         assert!(geometry::payload_bytes(&restricted_source) > 0 && geometry::payload_bytes(&restricted_targets) > 0);
         let profile = packed::FloatArray::create_owned(vec![0, 2, 4], vec![10., 20., 30., 40.]).unwrap();

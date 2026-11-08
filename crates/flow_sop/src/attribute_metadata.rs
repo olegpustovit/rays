@@ -565,7 +565,7 @@ mod tests {
 
     fn fixture() -> geometry::T {
         let points = line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]).expect("points");
-        let colour = attribute::create_owned("Cd", Owner::Point, attribute::Storage::Float(vec![0.25; 3])).expect("Cd");
+        let colour = attribute::create_owned("Cd", Owner::Point, attribute::Storage::Float(Arc::new(vec![0.25; 3]))).expect("Cd");
         let tag = attribute::create_owned("tag", Owner::Detail, attribute::Storage::Text(vec![b"a".to_vec()])).expect("tag");
         let geometry = geometry::with_attribute(colour, &points).expect("with Cd");
         geometry::with_attribute(tag, &geometry).expect("with tag")

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use rdk_core::support::Windows;
 use rdk_core::{
     cancel, error, geometry, group, packed, polygon_triangulation, support, topology, topology_remap,
@@ -342,7 +343,7 @@ mod tests {
     #[test]
     fn collapsed_quad_and_deterministic_failure() {
         let collapsed = geom(&[0., 1., 1., 0.], &[0., 0., 0., 1.], &[0.; 4], &[0, 1, 2, 3], &[0, 4], None);
-        let collapsed = with_attr(&collapsed, Owner::Vertex, "corner", Storage::Int(vec![10, 11, 12, 13]));
+        let collapsed = with_attr(&collapsed, Owner::Vertex, "corner", Storage::Int(Arc::new(vec![10, 11, 12, 13])));
         let out = run(&params(), &collapsed).unwrap();
         assert_eq!(topo(&out).0, vec![0, 1, 3]);
         assert_eq!(ints(Owner::Vertex, "corner", &out), vec![10, 11, 13]);
@@ -372,7 +373,7 @@ mod tests {
     #[test]
     fn quads_become_triangles_with_ancestry() {
         let quads = grid(2, 1, 2.0, true);
-        let quads = with_attr(&quads, Owner::Primitive, "face", Storage::Int(vec![7, 8]));
+        let quads = with_attr(&quads, Owner::Primitive, "face", Storage::Int(Arc::new(vec![7, 8])));
         let out = run(&params(), &quads).unwrap();
         assert_eq!(geometry::primitive_count(&out), 4);
         assert_eq!(ints(Owner::Primitive, "face", &out), vec![7, 7, 8, 8]);

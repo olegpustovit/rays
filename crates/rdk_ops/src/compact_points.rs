@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use rdk_core::{
     attribute, cancel, error, geometry, group, packed, support, topology, topology_remap,
 };
@@ -133,7 +134,7 @@ pub mod fixtures {
     pub fn floats(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<f64> {
         let found = geometry::find_attribute(owner, name, g).unwrap_or_else(|| panic!("missing {name}"));
         match attribute::View::storage(&found).unwrap() {
-            attribute::Storage::Float(values) => values.clone(),
+            attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} is not float"),
         }
     }
@@ -141,7 +142,7 @@ pub mod fixtures {
     pub fn ints(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<i64> {
         let found = geometry::find_attribute(owner, name, g).unwrap_or_else(|| panic!("missing {name}"));
         match attribute::View::storage(&found).unwrap() {
-            attribute::Storage::Int(values) => values.clone(),
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} is not int"),
         }
     }
@@ -417,7 +418,7 @@ mod tests {
     fn compacts_unused_points_and_remaps_payload() {
         // Points 1 and 3 are unreferenced.
         let g = geom(&[0., 9., 1., 9., 0.], &[0., 9., 0., 9., 1.], &[0.; 5], &[0, 2, 4], &[0, 3], None);
-        let g = with_attr(&g, Owner::Point, "id", Storage::Int(vec![10, 11, 12, 13, 14]));
+        let g = with_attr(&g, Owner::Point, "id", Storage::Int(Arc::new(vec![10, 11, 12, 13, 14])));
         let out = run(None, None, &g).unwrap();
         assert_eq!(geometry::point_count(&out), 3);
         assert_eq!(ints(Owner::Point, "id", &out), vec![10, 12, 14]);
@@ -447,7 +448,7 @@ mod tests {
         let vp: Vec<i64> = vertex_points.iter().map(|p| p + 1).collect();
         let g = geom(&shift(&x), &shift(&y), &shift(&z), &vp, &offsets, None);
         let count = geometry::point_count(&g);
-        let g = with_attr(&g, Owner::Point, "id", Storage::Int((0..count).collect()));
+        let g = with_attr(&g, Owner::Point, "id", Storage::Int(Arc::new((0..count).collect())));
         let out = exact_at_one_and_four(&|| run(None, Some(1000), &g).unwrap());
         assert_eq!(geometry::point_count(&out), count - 1);
     }

@@ -55,7 +55,7 @@ fn keys(owner: attribute::Owner, count: i64, name: Option<&str>, geometry_value:
     let by_index: Vec<i64> = (0..count).collect();
     let Some(name) = name else { return by_index };
     match geometry::find_attribute(owner, name, geometry_value).and_then(|a| attribute::storage(&a).ok()) {
-        Some(attribute::Storage::Int(values)) if values.len() as i64 == count => values,
+        Some(attribute::Storage::Int(values)) if values.len() as i64 == count => values.to_vec(),
         Some(attribute::Storage::Float(values)) if values.len() as i64 == count => {
             values.iter().map(|v| v.floor() as i64).collect()
         }

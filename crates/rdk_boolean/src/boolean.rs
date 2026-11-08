@@ -191,7 +191,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
                     source,
                     geometry::primitive_count(&geometry_value),
                 )?;
-                let item = attribute::create_owned(name, attribute::Owner::Primitive, attribute::Storage::Int(values))
+                let item = attribute::create_owned(name, attribute::Owner::Primitive, attribute::Storage::Int(Arc::new(values)))
                     .map_err(|failure| invalid_output("boolean", &failure))?;
                 geometry::with_attribute(item, &geometry_value).map_err(|failure| invalid_output("boolean", &failure))?
             }
@@ -550,7 +550,7 @@ mod tests {
         let item = attribute::create_owned(
             "weight",
             attribute::Owner::Point,
-            attribute::Storage::Float(vec![value; geometry::point_count(geometry_value) as usize]),
+            attribute::Storage::Float(Arc::new(vec![value; geometry::point_count(geometry_value) as usize])),
         )
         .unwrap();
         geometry::with_attribute(item, geometry_value).unwrap()

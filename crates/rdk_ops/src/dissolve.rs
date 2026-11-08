@@ -666,9 +666,9 @@ mod tests {
         let vertices = geometry::vertex_count(g);
         let primitives = geometry::primitive_count(g);
         let points = geometry::point_count(g);
-        let g = with_attr(g, Owner::Point, "weight", Storage::Float((0..points).map(|v| v as f64).collect()));
-        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int((0..vertices).map(|v| 100 + v).collect()));
-        let g = with_attr(&g, Owner::Primitive, "face", Storage::Int((0..primitives).map(|v| 10 + v).collect()));
+        let g = with_attr(g, Owner::Point, "weight", Storage::Float(Arc::new((0..points).map(|v| v as f64).collect())));
+        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int(Arc::new((0..vertices).map(|v| 100 + v).collect())));
+        let g = with_attr(&g, Owner::Primitive, "face", Storage::Int(Arc::new((0..primitives).map(|v| 10 + v).collect())));
         let lists = packed::IntArray::create_owned(
             (0..=vertices).map(|v| v * 2).collect(),
             (0..vertices * 2).map(|v| v % 7).collect(),

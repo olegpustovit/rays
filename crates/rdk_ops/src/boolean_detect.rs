@@ -153,7 +153,7 @@ fn install_outputs(
         let item = attribute::create_owned(
             name,
             attribute::Owner::Primitive,
-            attribute::Storage::Int(outputs.unique_counts.clone()),
+            attribute::Storage::Int(Arc::new(outputs.unique_counts.clone())),
         )
         .map_err(wrap)?;
         output = geometry::with_attribute(item, &output).map_err(wrap)?;
@@ -432,7 +432,7 @@ mod tests {
         let item = geometry::find_attribute(attribute::Owner::Primitive, name, value)
             .unwrap_or_else(|| panic!("missing {name}"));
         match attribute::View::storage(&item).unwrap() {
-            attribute::Storage::Int(values) => values.clone(),
+            attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("{name} has wrong storage"),
         }
     }
@@ -479,13 +479,13 @@ mod tests {
         let temperature = attribute::create_owned(
             "temperature",
             attribute::Owner::Point,
-            attribute::Storage::Float(vec![0., 1., 2., 3., 4., 5.]),
+            attribute::Storage::Float(Arc::new(vec![0., 1., 2., 3., 4., 5.])),
         ).unwrap();
         let preserved = group::init(None, group::Owner::Primitive, "preserved", 2, &|p| p == 1).unwrap();
         let stale_hits = attribute::create_owned(
             "hits",
             attribute::Owner::Primitive,
-            attribute::Storage::Int(vec![9, 9]),
+            attribute::Storage::Int(Arc::new(vec![9, 9])),
         ).unwrap();
         let stale_intersections = group::init(None, group::Owner::Primitive, "intersections", 2, &|_| true).unwrap();
         let mut source = source();

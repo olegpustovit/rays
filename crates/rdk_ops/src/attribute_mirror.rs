@@ -559,9 +559,9 @@ fn remap_attribute(
     );
     let storage = match attribute::View::storage(item)? {
         attribute::Storage::Float(values) => {
-            attribute::Storage::Float(copy_float(cancel_token, grain, mapping, &label, values)?)
+            attribute::Storage::Float(Arc::new(copy_float(cancel_token, grain, mapping, &label, values)?))
         }
-        attribute::Storage::Int(values) => attribute::Storage::Int(copy_ints(cancel_token, grain, mapping, values)?),
+        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(copy_ints(cancel_token, grain, mapping, values)?)),
         attribute::Storage::Text(values) => {
             let mut output = copy_texts(cancel_token, grain, mapping, values)?;
             if let Some((search, replacement)) = string_replace {
@@ -762,7 +762,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         let item = attribute::create_owned(
             name,
             owner_of_attribute,
-            attribute::Storage::Int(output_mapping_values(&mapping)),
+            attribute::Storage::Int(Arc::new(output_mapping_values(&mapping))),
         )?;
         generated.insert(0, item);
     }

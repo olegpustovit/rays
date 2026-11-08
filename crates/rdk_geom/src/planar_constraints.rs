@@ -16,8 +16,8 @@ pub struct T {
     source: implicit_point::Source,
     explicit_cache: Mutex<Vec<Option<implicit_point::T>>>,
     split_points: Vec<implicit_point::T>,
-    x: Arc<[f64]>,
-    y: Arc<[f64]>,
+    x: Arc<Vec<f64>>,
+    y: Arc<Vec<f64>>,
     inserted: Arc<[i64]>,
     constraints: Arc<[i64]>,
     constraint_winding: Arc<[i64]>,
@@ -119,8 +119,8 @@ pub mod View {
 
     #[derive(Clone, Debug)]
     pub struct View {
-        pub x: Arc<[f64]>,
-        pub y: Arc<[f64]>,
+        pub x: Arc<Vec<f64>>,
+        pub y: Arc<Vec<f64>>,
         pub insert_points: Arc<[i64]>,
         pub constraint_points: Arc<[i64]>,
         pub constraint_winding: Arc<[i64]>,

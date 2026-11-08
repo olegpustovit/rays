@@ -101,8 +101,8 @@ fn is_blank(text: &str) -> bool {
 }
 
 enum Data {
-    F(Vec<Arc<[f64]>>),
-    I(Vec<i64>),
+    F(Vec<Arc<Vec<f64>>>),
+    I(Arc<Vec<i64>>),
     T(Vec<Vec<u8>>),
     IntArray(packed::IntArray::View::View),
     FloatArray(packed::FloatArray::View::View),
@@ -281,7 +281,7 @@ fn selection_elements(
 
 fn data_of(storage: &attribute::Storage) -> Result<Data, error::T> {
     Ok(match storage {
-        attribute::Storage::Float(values) => Data::F(vec![Arc::from(values.clone())]),
+        attribute::Storage::Float(values) => Data::F(vec![values.clone()]),
         attribute::Storage::Float2(values) => {
             let view = packed::Float2::View::view(values);
             Data::F(vec![view.x, view.y])
@@ -378,7 +378,7 @@ fn create_job(
             out.f = (0..planes.len()).map(|k| old[k].to_vec()).collect();
         }
         (Data::F(planes), _) => out.f = (0..planes.len()).map(|_| vec![0.0; count]).collect(),
-        (Data::I(_), Some(Data::I(old))) => out.i = old.clone(),
+        (Data::I(_), Some(Data::I(old))) => out.i = old.to_vec(),
         (Data::I(_), _) => out.i = vec![0; count],
         (Data::T(_), Some(Data::T(old))) => out.t = old.clone(),
         (Data::T(_), _) => out.t = vec![Vec::new(); count],
@@ -699,7 +699,7 @@ fn materialize_int_array(
         cancel_token,
         "Attribute Interpolate int array",
         &source.offsets,
-        existing.map(|view| &*view.offsets),
+        existing.map(|view| view.offsets.as_slice()),
         choices,
     )?;
     let count = choices.len() as i64;
@@ -743,7 +743,7 @@ fn materialize_float_array(
         cancel_token,
         "Attribute Interpolate float array",
         &source.offsets,
-        existing.map(|view| &*view.offsets),
+        existing.map(|view| view.offsets.as_slice()),
         choices,
     )?;
     let count = choices.len() as i64;
@@ -785,7 +785,7 @@ fn storage_of_job(
         Data::F(planes) => {
             let mut planes_out = job.out.f.iter().cloned();
             match planes.len() {
-                1 => attribute::Storage::Float(planes_out.next().unwrap_or_default()),
+                1 => attribute::Storage::Float(Arc::new(planes_out.next().unwrap_or_default())),
                 2 => attribute::Storage::Float2(packed::Float2::of_owned(
                     planes_out.next().unwrap_or_default(),
                     planes_out.next().unwrap_or_default(),
@@ -803,7 +803,7 @@ fn storage_of_job(
                 )?),
             }
         }
-        Data::I(_) => attribute::Storage::Int(job.out.i.clone()),
+        Data::I(_) => attribute::Storage::Int(Arc::new(job.out.i.clone())),
         Data::T(_) => attribute::Storage::Text(job.out.t.clone()),
         Data::IntArray(source) => {
             let existing = match &job.existing {
@@ -2291,7 +2291,7 @@ mod tests {
     fn parallel_exactness_at_scale() {
         let count = 200_003_i64;
         let source = polygons(&[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0), (1.0, 0.0, 0.0)], &[vec![0, 1, 2, 3]]);
-        let source = add_storage(Point, "weight", attribute::Storage::Float(vec![0.0, 1.0, 2.0, 3.0]), &source);
+        let source = add_storage(Point, "weight", attribute::Storage::Float(Arc::new(vec![0.0, 1.0, 2.0, 3.0])), &source);
         let source = add_ints(Point, "id", vec![3, 5, 7, 11], &source);
         let source = add_storage(Point, "label", attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec(), b"d".to_vec()]), &source);
         let source = add_storage(

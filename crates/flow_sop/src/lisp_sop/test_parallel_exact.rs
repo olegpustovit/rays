@@ -1,6 +1,7 @@
 //! lib/sop/test_parallel_exact.ml's 84 registered sections map to 97 enabled tests: the first 14
 //! use generated_* names, attributes expands into 14 attributes_* checks, all others keep source names.
 //! Original fixture scales, one/four domains, grain 97 and seed 42 are retained.
+use std::sync::Arc;
 use rdk_core::{attribute, edge_group, geometry as geo, group, packed, topology, topology_index};
 use rdk_ops::line_geometry;
 use rdk_core::attribute::{Owner, Storage};
@@ -110,9 +111,9 @@ fn curve_chain_geometry(segments:i64) -> geo::T {
     let positions=packed::Float3::of_owned((0..count).map(|p|p as f64*0.002).collect(),(0..count).map(|p|(p as f64*0.017).sin()).collect(),(0..count).map(|p|(p as f64*0.011).cos()*0.25).collect()).unwrap();
     let topology=topology::create_owned(count,(0..segments*2).map(|v|v/2+(v&1)).collect(),(0..=segments).map(|p|p*2).collect(),vec![topology::PrimitiveKind::OpenPolyline;segments as usize]).unwrap();
     let source=geo::create(positions,topology,None,None,None).unwrap();
-    let source=add(&source,Owner::Point,"curve_sample",Storage::Float((0..count).map(|p|((p%257) as f64).powi(2)).collect()));
-    let source=add(&source,Owner::Vertex,"curve_u",Storage::Float((0..segments*2).map(|v|(v&1) as f64).collect()));
-    add(&source,Owner::Primitive,"curve_id",Storage::Int((0..segments).collect()))
+    let source=add(&source,Owner::Point,"curve_sample",Storage::Float(Arc::new((0..count).map(|p|((p%257) as f64).powi(2)).collect())));
+    let source=add(&source,Owner::Vertex,"curve_u",Storage::Float(Arc::new((0..segments*2).map(|v|(v&1) as f64).collect())));
+    add(&source,Owner::Primitive,"curve_id",Storage::Int(Arc::new((0..segments).collect())))
 }
 fn group_fixture() -> node::T {
     use rays_math::{mat4,vec3};
@@ -536,7 +537,7 @@ fn subdivision_smooth_triangles() {
 #[test]
 fn modeling_enumerate_source() {
     let source=grid(500,300,20.0,false);let count=geo::point_count(&source);
-    let source=super::snapshot(&add(&source,Owner::Point,"piece",Storage::Int((0..count).map(|p|p*31%4093).collect())));
+    let source=super::snapshot(&add(&source,Owner::Point,"piece",Storage::Int(Arc::new((0..count).map(|p|p*31%4093).collect()))));
     let source=chain(&source,&bounds("middle",[-5.0,-1.0,-10.0],[5.0,1.0,10.0]));
     exact(&chain(&source,r###"(sop/enumerate :group "middle" :start 7 :step 3
            :piece_attribute "piece" :mode "Elements within pieces"
@@ -870,7 +871,7 @@ fn subdivision_subdivided() {
 #[test]
 fn filters_constrained_source() {
     let source=grid(120,80,20.0,false);let count=geo::primitive_count(&source);
-    let source=add(&source,Owner::Primitive,"region",Storage::Int((0..count).map(|p|if p<3*count/4 {0}else{1}).collect()));
+    let source=add(&source,Owner::Primitive,"region",Storage::Int(Arc::new((0..count).map(|p|if p<3*count/4 {0}else{1}).collect())));
     let source=add(&source,Owner::Primitive,"flow",Storage::Float3(packed::Float3::of_owned(vec![0.0;count as usize],vec![0.0;count as usize],vec![1.0;count as usize]).unwrap()));
     let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"seed",count,&|p|p==0).unwrap(),&source).unwrap();
     let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"containment",count,&|p|p<count/2).unwrap(),&source).unwrap();
@@ -1098,10 +1099,10 @@ fn subdivision_fvar_all() {
 #[test]
 fn subdivision_detail_source() {
     let source=grid(60,40,8.0,false);let count=geo::vertex_count(&source);
-    let source=add(&source,Owner::Vertex,"fvar_sample",Storage::Float((0..count).map(|v|((v%127) as f64).powi(2)).collect()));
-    let mut source=add(&source,Owner::Vertex,"creaseweight",Storage::Float((0..count).map(|v|((v*17%41) as f64)/10.0).collect()));
+    let source=add(&source,Owner::Vertex,"fvar_sample",Storage::Float(Arc::new((0..count).map(|v|((v%127) as f64).powi(2)).collect())));
+    let mut source=add(&source,Owner::Vertex,"creaseweight",Storage::Float(Arc::new((0..count).map(|v|((v*17%41) as f64)/10.0).collect())));
     source=add(&source,Owner::Detail,"osd_scheme",Storage::Text(vec![b"catmull-clark".to_vec()]));
-    for (name,value) in [("osd_vtxboundaryinterpolation",2),("osd_fvarlinearinterpolation",0),("osd_creasingmethod",1),("osd_trianglesubdiv",1)] {source=add(&source,Owner::Detail,name,Storage::Int(vec![value]));}
+    for (name,value) in [("osd_vtxboundaryinterpolation",2),("osd_fvarlinearinterpolation",0),("osd_creasingmethod",1),("osd_trianglesubdiv",1)] {source=add(&source,Owner::Detail,name,Storage::Int(Arc::new(vec![value])));}
     let source=super::snapshot(&source);
     let one=exact(&bind(&[("detail_source",&source)],r###"(sop/subdivide
    (sop/ext_detail_source)
@@ -1594,8 +1595,8 @@ fn attributes_renamed_patterns() {
 #[test]
 fn attributes_piece_promoted() {
     let source=grid(200,120,12.0,false);let count=geo::point_count(&source);
-    let source=add(&source,Owner::Point,"piece_value",Storage::Int((0..count).map(|p|p*37%211).collect()));
-    let source=super::snapshot(&add(&source,Owner::Point,"piece_id",Storage::Int((0..count).map(|p|p/48).collect())));
+    let source=add(&source,Owner::Point,"piece_value",Storage::Int(Arc::new((0..count).map(|p|p*37%211).collect())));
+    let source=super::snapshot(&add(&source,Owner::Point,"piece_id",Storage::Int(Arc::new((0..count).map(|p|p/48).collect()))));
     exact(&bind(&[("piece_geometry",&source)],r###"(sop/promote_attributes
    (sop/ext_piece_geometry)
    :method_ "Median"

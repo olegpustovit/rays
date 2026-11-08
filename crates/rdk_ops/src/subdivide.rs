@@ -1015,7 +1015,7 @@ fn mixed_subdivide(
     let source_order = attribute::create_owned(
         &source_order_name,
         Owner::Primitive,
-        Storage::Int((0..geometry::primitive_count(&prepared)).collect()),
+        Storage::Int(Arc::new((0..geometry::primitive_count(&prepared)).collect())),
     )?;
     let prepared = geometry::with_attribute(source_order, &prepared)?;
     let mut parts: Vec<geometry::T> = Vec::new();
@@ -1228,7 +1228,7 @@ mod tests {
     }
 
     fn float_attr(owner: Owner, name: &str, values: Vec<f64>) -> attribute::T {
-        attr(owner, name, Storage::Float(values))
+        attr(owner, name, Storage::Float(Arc::new(values)))
     }
 
     fn quad(
@@ -1298,7 +1298,7 @@ mod tests {
         let found = geometry::find_attribute(owner, name, geometry_value)
             .unwrap_or_else(|| panic!("missing float attribute {name}"));
         match attribute::View::storage(&found).unwrap() {
-            Storage::Float(values) => values.clone(),
+            Storage::Float(values) => values.to_vec(),
             _ => panic!("wrong float storage for {name}"),
         }
     }
@@ -1307,7 +1307,7 @@ mod tests {
         let found = geometry::find_attribute(owner, name, geometry_value)
             .unwrap_or_else(|| panic!("missing integer attribute {name}"));
         match attribute::View::storage(&found).unwrap() {
-            Storage::Int(values) => values.clone(),
+            Storage::Int(values) => values.to_vec(),
             _ => panic!("wrong integer storage for {name}"),
         }
     }
@@ -1468,7 +1468,7 @@ mod tests {
                 vec![0, 3, 4, 1, 1, 4, 5, 2, 3, 6, 7, 4, 4, 7, 8, 5],
                 vec![0, 4, 8, 12, 16],
             ),
-            vec![attr(Owner::Point, "point_id", Storage::Int((0..9).map(|p| 100 + p).collect()))],
+            vec![attr(Owner::Point, "point_id", Storage::Int(Arc::new((0..9).map(|p| 100 + p).collect())))],
         );
         let diagonal = primitive_group("diagonal", 4, &[0, 3]);
         let run = |domains: i64| {
@@ -2391,7 +2391,7 @@ mod tests {
         .unwrap();
         let attributes = vec![
             float_attr(Owner::Point, "mass", vec![0.0, 8.0, 16.0]),
-            attr(Owner::Point, "id", Storage::Int(vec![10, 11, 12])),
+            attr(Owner::Point, "id", Storage::Int(Arc::new(vec![10, 11, 12]))),
             attr(
                 Owner::Point,
                 "rows",
@@ -2412,7 +2412,7 @@ mod tests {
                 "label",
                 Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.as_bytes().to_vec()).collect()),
             ),
-            attr(Owner::Primitive, "material", Storage::Int(vec![7, 9])),
+            attr(Owner::Primitive, "material", Storage::Int(Arc::new(vec![7, 9]))),
             attr(Owner::Detail, "tag", Storage::Text(vec![b"curves".to_vec()])),
         ];
         let point_group = group::ordered(group::Owner::Point, "picked_points", 3, &[1, 0]).unwrap();
@@ -2657,7 +2657,7 @@ mod tests {
                 ),
             ),
             float_attr(Owner::Vertex, "u", vec![0.0, 2.0, 3.0, 4.0, 5.0, 6.0, 10.0, 14.0]),
-            attr(Owner::Primitive, "source_kind", Storage::Int(vec![1, 0, 1])),
+            attr(Owner::Primitive, "source_kind", Storage::Int(Arc::new(vec![1, 0, 1]))),
             attr(Owner::Detail, "tag", Storage::Text(vec![b"mixed".to_vec()])),
         ];
         geometry::create(

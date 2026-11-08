@@ -388,9 +388,10 @@ fn columns(storage: &Storage) -> Result<Option<Vec<&[f64]>>, Diagnostic> {
     attribute::float_planes(storage).map_err(|e| fail("E_ATTR_TYPE", &rerr(&e)))
 }
 
-/// Shared planes of a storage (`None` for a plain float vector, which has no identity to key on).
-fn shared_planes(storage: &Storage) -> Option<Vec<Arc<[f64]>>> {
+/// Shared planes of a float-kind storage (`None` for integer, text and CSR storage).
+fn shared_planes(storage: &Storage) -> Option<Vec<Arc<Vec<f64>>>> {
     match storage {
+        Storage::Float(d) => Some(vec![d.clone()]),
         Storage::Float2(d) => {
             let v = Float2::View::view(d);
             Some(vec![v.x, v.y])
@@ -440,11 +441,11 @@ fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, us
 /// A bounded ring keyed by the identity of a first plane (OCaml `Flow.Value.remember ()`): a hit
 /// whose other planes differ is a miss that does not replace the entry.
 struct Ring<X> {
-    slots: Mutex<Vec<(Vec<Weak<[f64]>>, X)>>,
+    slots: Mutex<Vec<(Vec<Weak<Vec<f64>>>, X)>>,
 }
 const RING: usize = 32;
 
-fn same_planes(seen: &[Weak<[f64]>], planes: &[Arc<[f64]>]) -> bool {
+fn same_planes(seen: &[Weak<Vec<f64>>], planes: &[Arc<Vec<f64>>]) -> bool {
     seen.len() == planes.len() && seen.iter().zip(planes).all(|(w, p)| w.upgrade().is_some_and(|a| Arc::ptr_eq(&a, p)))
 }
 
@@ -452,7 +453,7 @@ impl<X: Clone> Ring<X> {
     const fn new() -> Ring<X> {
         Ring { slots: Mutex::new(Vec::new()) }
     }
-    fn recall(&self, planes: &[Arc<[f64]>], build: &dyn Fn() -> X) -> X {
+    fn recall(&self, planes: &[Arc<Vec<f64>>], build: &dyn Fn() -> X) -> X {
         {
             let slots = self.slots.lock().unwrap();
             if let Some((seen, value)) = slots.iter().find(|(seen, _)| seen[0].upgrade().is_some_and(|a| Arc::ptr_eq(&a, &planes[0]))) {
@@ -520,17 +521,17 @@ fn wide_array(width: usize, values: Vec<f64>) -> Value {
     }
 }
 
-fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str, g: &geometry::T) -> Result<Value, Diagnostic> {
+pub(crate) fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str, g: &geometry::T) -> Result<Value, Diagnostic> {
     let held = typed_storage(owner, name, kind, g)?;
     let storage = held_storage(&held)?;
     let Some(planes) = columns(storage)? else {
         return match (storage, component) {
-            (Storage::Int(data), None) => Ok(Value::Int_array(Arc::new(data.clone()))),
+            (Storage::Int(data), None) => Ok(Value::Int_array(data.clone())),
             (Storage::Text(data), None) => Ok(Value::Text_array(Arc::new(data.clone()))),
-            (Storage::FloatArray(data), Some("offsets")) => Ok(Value::Int_array(Arc::new(FloatArray::View::view(data).offsets.to_vec()))),
-            (Storage::FloatArray(data), Some("values")) => Ok(float_array(FloatArray::View::view(data).values.to_vec())),
-            (Storage::IntArray(data), Some("offsets")) => Ok(Value::Int_array(Arc::new(IntArray::View::view(data).offsets.to_vec()))),
-            (Storage::IntArray(data), Some("values")) => Ok(Value::Int_array(Arc::new(IntArray::View::view(data).values.to_vec()))),
+            (Storage::FloatArray(data), Some("offsets")) => Ok(Value::Int_array(FloatArray::View::view(data).offsets)),
+            (Storage::FloatArray(data), Some("values")) => Ok(Value::Float_array(FloatArray::View::view(data).values)),
+            (Storage::IntArray(data), Some("offsets")) => Ok(Value::Int_array(IntArray::View::view(data).offsets)),
+            (Storage::IntArray(data), Some("values")) => Ok(Value::Int_array(IntArray::View::view(data).values)),
             _ => err("E_ATTR_TYPE", "This attribute storage requires its typed array foundation."),
         };
     };
@@ -538,6 +539,11 @@ fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str, g: &geome
     let width = planes.len();
     if count > max_floats(width) {
         return err("E_ATTR_COUNT", "Attribute buffer exceeds array limits.");
+    }
+    if let Storage::Float(data) = storage {
+        if data.len() == count {
+            return Ok(Value::Float_array(data.clone()));
+        }
     }
     if count * width > 4096 && planes.iter().all(|p| p.len() == count) {
         if let Some(arcs) = shared_planes(storage) {
@@ -933,39 +939,19 @@ fn concrete_args(context: Option<&context::T>, geometry: &GeometryLookup, args: 
 
 // ---- writing attributes ------------------------------------------------------------------------
 
-/// Plane data to install: freshly computed vectors, or shared copies whose identity a recook keeps.
-enum Planes {
-    Owned(Vec<Vec<f64>>),
-    Shared(Vec<Arc<[f64]>>),
+/// Plane data to install: freshly computed vectors wrapped once, or planes shared with a Flow value.
+fn shared(planes: Vec<Vec<f64>>) -> Vec<Arc<Vec<f64>>> {
+    planes.into_iter().map(Arc::new).collect()
 }
 
-fn make_storage(kind: &str, planes: Planes) -> Result<Storage, String> {
-    let owned = |planes: Planes| -> Vec<Vec<f64>> {
-        match planes {
-            Planes::Owned(v) => v,
-            Planes::Shared(v) => v.iter().map(|p| p.to_vec()).collect(),
-        }
-    };
+fn make_storage(kind: &str, planes: Vec<Arc<Vec<f64>>>) -> Result<Storage, String> {
+    let mut p = planes.into_iter();
+    let mut next = || p.next().unwrap();
     match kind {
-        "float" => Ok(Storage::Float(owned(planes).swap_remove(0))),
-        "vec2" => {
-            let mut p = owned(planes).into_iter();
-            let (x, y) = (p.next().unwrap(), p.next().unwrap());
-            Float2::of_owned(x, y).map(Storage::Float2).map_err(|e| rerr(&e))
-        }
-        "vec3" => match planes {
-            Planes::Shared(p) => Float3::View::of_shared_exn(p[0].clone(), p[1].clone(), p[2].clone()).map(Storage::Float3).map_err(|e| rerr(&e)),
-            Planes::Owned(p) => {
-                let mut p = p.into_iter();
-                let (x, y, z) = (p.next().unwrap(), p.next().unwrap(), p.next().unwrap());
-                Float3::of_owned(x, y, z).map(Storage::Float3).map_err(|e| rerr(&e))
-            }
-        },
-        "vec4" => {
-            let mut p = owned(planes).into_iter();
-            let (x, y, z, w) = (p.next().unwrap(), p.next().unwrap(), p.next().unwrap(), p.next().unwrap());
-            Float4::of_owned(x, y, z, w).map(Storage::Float4).map_err(|e| rerr(&e))
-        }
+        "float" => Ok(Storage::Float(next())),
+        "vec2" => Float2::of_shared(next(), next()).map(Storage::Float2).map_err(|e| rerr(&e)),
+        "vec3" => Float3::View::of_shared_exn(next(), next(), next()).map(Storage::Float3).map_err(|e| rerr(&e)),
+        "vec4" => Float4::of_shared(next(), next(), next(), next()).map(Storage::Float4).map_err(|e| rerr(&e)),
         _ => Err("Unsupported floating attribute type".to_owned()),
     }
 }
@@ -987,12 +973,12 @@ fn place(owner: Owner, name: &str, storage: Storage, g: &geometry::T) -> Result<
     }
 }
 
-fn install_planes(owner: Owner, kind: &str, name: &str, planes: Planes, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
+fn install_planes(owner: Owner, kind: &str, name: &str, planes: Vec<Arc<Vec<f64>>>, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
     make_storage(kind, planes).and_then(|s| place(owner, name, s, g)).map_err(attr_err)
 }
 
 fn install(owner: Owner, kind: &str, name: &str, planes: Vec<Vec<f64>>, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
-    install_planes(owner, kind, name, Planes::Owned(planes), g)
+    install_planes(owner, kind, name, shared(planes), g)
 }
 
 /// OCaml `Resident (v, count)` read back from a holder.
@@ -1016,7 +1002,7 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
         let p = planes.clone();
         move || p.materialise()
     };
-    let like = make_storage(kind, Planes::Owned(vec![Vec::new(); width(kind).max(1)])).map_err(attr_err)?;
+    let like = make_storage(kind, shared(vec![Vec::new(); width(kind).max(1)])).map_err(attr_err)?;
     if owner == Owner::Point && name == "P" {
         match like {
             Storage::Float3(_) => {
@@ -1040,7 +1026,7 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
             &like,
             planes.count,
             // ponytail: `create_deferred`'s reader cannot fail and the holder outlives the attribute, so an Err is a broken invariant. Upgrade: a fallible reader in rdk_core.
-            Arc::new(move || make_storage(&kind, Planes::Owned(materialise().expect("deferred planes"))).expect("deferred storage")),
+            Arc::new(move || make_storage(&kind, shared(materialise().expect("deferred planes"))).expect("deferred storage")),
         )
         .map_err(|e| attr_err(rerr(&e)))?;
         geometry::with_attribute(attr, g).map_err(|e| attr_err(rerr(&e)))
@@ -1125,22 +1111,22 @@ fn borrowed_storage(geometry: GeometryFn, values: &Value) -> Result<Option<(Stor
             (Storage::FloatArray(_) | Storage::IntArray(_), None) => return typed_array_foundation(),
             (_, None) => (storage, count),
             (Storage::FloatArray(data), Some(Value::Text(c))) if c == b"offsets" => {
-                let data = FloatArray::View::view(data).offsets.to_vec();
+                let data = FloatArray::View::view(data).offsets;
                 let n = data.len();
                 (Storage::Int(data), n)
             }
             (Storage::FloatArray(data), Some(Value::Text(c))) if c == b"values" => {
-                let data = FloatArray::View::view(data).values.to_vec();
+                let data = FloatArray::View::view(data).values;
                 let n = data.len();
                 (Storage::Float(data), n)
             }
             (Storage::IntArray(data), Some(Value::Text(c))) if c == b"offsets" => {
-                let data = IntArray::View::view(data).offsets.to_vec();
+                let data = IntArray::View::view(data).offsets;
                 let n = data.len();
                 (Storage::Int(data), n)
             }
             (Storage::IntArray(data), Some(Value::Text(c))) if c == b"values" => {
-                let data = IntArray::View::view(data).values.to_vec();
+                let data = IntArray::View::view(data).values;
                 let n = data.len();
                 (Storage::Int(data), n)
             }
@@ -1217,7 +1203,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             if data.len() != count {
                 return err("E_ATTR_COUNT", "Integer attribute count differs from owner count.");
             }
-            semantic_owned(owner, name, Storage::Int(data.to_vec()), g)
+            semantic_owned(owner, name, Storage::Int(data.clone()), g)
         }
         ("text", Value::Text_array(data)) => {
             if data.len() != count {
@@ -1248,30 +1234,28 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             if let Some(bad) = planes.iter().find(|d| d.len() != count) {
                 return err("E_ATTR_COUNT", &format!("{name} needs {count} {} values; got {}.", owner_name(owner), bad.len()));
             }
-            // a recook writing the same planes reuses their copies and their check; the Flow
-            // arrays are not Arc<[f64]>, so the copy itself is the cached unit here
-            match owned_copies_of_vectors(&planes) {
-                None => err("E_NONFINITE", "Attribute values must be finite."),
-                Some(copies) => install_planes(owner, kind, name, Planes::Shared(copies), g),
+            // the Flow arrays become the planes themselves; only their finiteness is checked
+            if !planes.iter().all(|p| all_finite(p)) {
+                return err("E_NONFINITE", "Attribute values must be finite.");
             }
+            install_planes(owner, kind, name, planes.into_iter().cloned().collect(), g)
         }
         ("float_array" | "int_array", Value::Record(fields)) => match (assoc(fields, "offsets"), assoc(fields, "values")) {
             (Some(Value::Int_array(offsets)), Some(values)) => {
                 if offsets.len() != count + 1 {
                     return err("E_ATTR_COUNT", "CSR row count differs from owner count.");
                 }
-                let offsets = offsets.to_vec();
                 let values_owned = owned_fields.contains(&"values");
                 match (kind, values) {
                     ("float_array", Value::Float_array(data)) => {
                         if !values_owned && !all_finite(data) {
                             return err("E_NONFINITE", "Attribute values must be finite.");
                         }
-                        let csr = FloatArray::create_owned(offsets, data.to_vec()).map_err(|e| fail("E_ATTR_COUNT", &rerr(&e)))?;
+                        let csr = FloatArray::create_shared(offsets.clone(), data.clone()).map_err(|e| fail("E_ATTR_COUNT", &rerr(&e)))?;
                         semantic_owned(owner, name, Storage::FloatArray(csr), g)
                     }
                     ("int_array", Value::Int_array(data)) => {
-                        let csr = IntArray::create_owned(offsets, data.to_vec()).map_err(|e| fail("E_ATTR_COUNT", &rerr(&e)))?;
+                        let csr = IntArray::create_shared(offsets.clone(), data.clone()).map_err(|e| fail("E_ATTR_COUNT", &rerr(&e)))?;
                         semantic_owned(owner, name, Storage::IntArray(csr), g)
                     }
                     _ => err("E_ATTR_TYPE", "CSR values do not match the requested storage type."),
@@ -1288,6 +1272,12 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             let w = width(kind);
             if count > max_floats(w) || values.len() / w != count || values.len() % w != 0 {
                 return err("E_ATTR_COUNT", &format!("{name} needs {count} {} values; got {}.", owner_name(owner), values.len() / w));
+            }
+            if w == 1 {
+                if !all_finite(values) {
+                    return err("E_NONFINITE", "Attribute values must be finite.");
+                }
+                return semantic_owned(owner, name, Storage::Float(values.clone()), g);
             }
             if count == 1 {
                 if !values[..w].iter().all(|x| x.is_finite()) {
@@ -1314,32 +1304,6 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
         }
     }
 }
-
-/// `owned_copies` for Flow's `Arc<Vec<f64>>` planes: the cache is keyed by the identity of the
-/// copies' first plane, so a recook of the same Flow arrays copies and checks them once. The key is
-/// the Flow array itself (its address, held weakly by `FLOW_COPIES`).
-fn owned_copies_of_vectors(planes: &[&Arc<Vec<f64>>]) -> Option<Vec<Arc<[f64]>>> {
-    let copy = || -> Vec<Arc<[f64]>> { planes.iter().map(|p| Arc::from(p.as_slice())).collect() };
-    if planes.is_empty() || planes[0].len() <= 4096 {
-        return if planes.iter().all(|p| all_finite(p)) { Some(copy()) } else { None };
-    }
-    let mut cache = FLOW_COPIES.lock().unwrap();
-    cache.retain(|(keys, _)| keys[0].strong_count() > 0);
-    if let Some((_, copies)) = cache.iter().find(|(keys, _)| {
-        keys.len() == planes.len() && keys.iter().zip(planes).all(|(w, p)| w.upgrade().is_some_and(|a| Arc::ptr_eq(&a, p)))
-    }) {
-        return if copies.is_empty() { None } else { Some(copies.clone()) };
-    }
-    let copies: Vec<Arc<[f64]>> = if planes.iter().all(|p| all_finite(p)) { copy() } else { Vec::new() };
-    if cache.len() >= RING {
-        cache.remove(0);
-    }
-    cache.push((planes.iter().map(|p| Arc::downgrade(p)).collect(), copies.clone()));
-    if copies.is_empty() { None } else { Some(copies) }
-}
-
-type FlowCopies = Vec<(Vec<Weak<Vec<f64>>>, Vec<Arc<[f64]>>)>;
-static FLOW_COPIES: Mutex<FlowCopies> = Mutex::new(Vec::new());
 
 /// Write concrete typed arrays into fresh owned storage.
 pub fn write(grain: i64, owner: Owner, kind: &str, name: &str, values: &Value, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
@@ -1486,7 +1450,7 @@ pub fn write_constant_source(
     match (selection, default) {
         (Some(selection), Some(default)) => write_selected(grain, owner, kind, name, values, selection, default, g).map(Some),
         (None, None) => match &value {
-            Value::Int(n) => semantic_owned(owner, name, Storage::Int(vec![*n; count]), g).map(Some),
+            Value::Int(n) => semantic_owned(owner, name, Storage::Int(Arc::new(vec![*n; count])), g).map(Some),
             Value::Text(t) => semantic_owned(owner, name, Storage::Text(vec![t.clone(); count]), g).map(Some),
             Value::Float(x) => install(owner, kind, name, vec![vec![*x; count]], g).map(Some),
             Value::Vec3(x, y, z) => install(owner, kind, name, [*x, *y, *z].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
@@ -1725,29 +1689,8 @@ pub fn prepare(
     Executor::compile(values, &Executor::CompileOptions { trace: None, profile, strict, approx: approx.unwrap_or_default(), sink, count_source: Some(count) })
 }
 
-fn column_arc(plane: &Arc<[f64]>) -> Arc<Vec<f64>> {
-    let mut cache = COLUMNS.lock().unwrap();
-    cache.retain(|(w, _)| w.strong_count() > 0);
-    if let Some((_, col)) = cache.iter().find(|(w, _)| w.upgrade().is_some_and(|a| Arc::ptr_eq(&a, plane))) {
-        return col.clone();
-    }
-    let col = Arc::new(plane.to_vec());
-    if cache.len() >= 64 {
-        cache.remove(0);
-    }
-    cache.push((Arc::downgrade(plane), col.clone()));
-    col
-}
-// ponytail: Flow columns are Arc<Vec<f64>> where geometry planes are Arc<[f64]>, so a borrowed
-// column is a cached copy keyed by the plane's identity; the ring keeps 64.
-static COLUMNS: Mutex<Vec<(Weak<[f64]>, Arc<Vec<f64>>)>> = Mutex::new(Vec::new());
-
 fn columns_of(storage: &Storage) -> Result<Option<Vec<Column>>, Diagnostic> {
-    let column = |data: Arc<Vec<f64>>| Column { data, offset: 0, stride: 1 };
-    Ok(match shared_planes(storage) {
-        Some(arcs) => Some(arcs.iter().map(|p| column(column_arc(p))).collect()),
-        None => columns(storage)?.map(|ps| ps.into_iter().map(|p| column(Arc::new(p.to_vec()))).collect()),
-    })
+    Ok(shared_planes(storage).map(|arcs| arcs.into_iter().map(|data| Column { data, offset: 0, stride: 1 }).collect()))
 }
 
 fn borrowed_value(geometry: &GeometryLookup, value: &Value) -> Result<Option<Vec<Column>>, Diagnostic> {
@@ -1853,7 +1796,7 @@ fn write_planes(
                 match borrowed_source(geometry, *residual, term) {
                     Ok(Some(columns)) => {
                         let column = &columns[*index as usize];
-                        Arc::ptr_eq(&column.data, &column_arc(&original[component])) && column.offset == 0 && column.stride == 1
+                        Arc::ptr_eq(&column.data, &original[component]) && column.offset == 0 && column.stride == 1
                     }
                     _ => false,
                 }
@@ -1875,11 +1818,11 @@ fn write_planes(
     }
     let mut filled = std::mem::take(&mut outputs.lock().unwrap()[0]);
     if is_p {
-        let planes: Vec<Arc<[f64]>> = (0..3).map(|c| match filled[c].take() {
-            Some(data) => Arc::from(data),
+        let planes: Vec<Arc<Vec<f64>>> = (0..3).map(|c| match filled[c].take() {
+            Some(data) => Arc::new(data),
             None => original[c].clone(),
         }).collect();
-        install_planes(owner, kind, name, Planes::Shared(planes), target).map(Some)
+        install_planes(owner, kind, name, planes, target).map(Some)
     } else {
         let planes: Vec<Vec<f64>> = filled.into_iter().map(|p| p.unwrap_or_default()).collect();
         install(owner, kind, name, planes, target).map(Some)
@@ -2631,7 +2574,7 @@ use rdk_ops::line_geometry;
     }
 
     fn pack(width: usize, planes: &[Vec<f64>]) -> Storage {
-        make_storage(["float", "vec2", "vec3", "vec4"][width - 1], Planes::Owned(planes.to_vec())).unwrap()
+        make_storage(["float", "vec2", "vec3", "vec4"][width - 1], shared(planes.to_vec())).unwrap()
     }
 
     fn array(width: usize, values: Vec<f64>) -> Value {
@@ -2698,7 +2641,7 @@ use rdk_ops::line_geometry;
                     for mode in ["absent", "wrong", "matching"] {
                         let original = match mode {
                             "absent" => base.clone(),
-                            "wrong" => with_attr(&base, owner, "selected", Storage::Int(vec![7; count])),
+                            "wrong" => with_attr(&base, owner, "selected", Storage::Int(Arc::new(vec![7; count]))),
                             _ => with_attr(&base, owner, "selected", pack(width, &old)),
                         };
                         let before = bits(&original);
@@ -2937,7 +2880,7 @@ use rdk_ops::line_geometry;
 
     /// Full planar attributes: all owners/vec widths, native raw payload bytes, capacity type
     /// boundary and exact 1/4/8-domain errors. (OCaml's physical-identity asserts on the Flow
-    /// planes have no Rust meaning: Flow arrays are `Arc<Vec>`, geometry planes are `Arc<[f64]>`.)
+    /// planes have no Rust meaning: Flow arrays are `Arc<Vec>`, geometry planes are `Arc<Vec<f64>>`.)
     #[test]
     fn full_planar_attributes() {
         for n in [0usize, 1, 6, 32769] {
@@ -2946,7 +2889,7 @@ use rdk_ops::line_geometry;
                 let t = topology::create_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6], vec![topology::PrimitiveKind::Polygon, topology::PrimitiveKind::OpenPolyline]).unwrap();
                 base = geometry::create(geometry::positions(&base).clone(), t, None, None, None).unwrap();
             }
-            let raw = attribute::create_owned("untouched", Owner::Detail, Storage::Float(vec![f64::from_bits(0x7ff8000000001234)])).unwrap();
+            let raw = attribute::create_owned("untouched", Owner::Detail, Storage::Float(Arc::new(vec![f64::from_bits(0x7ff8000000001234)]))).unwrap();
             let text = attribute::create_owned("bytes", Owner::Detail, Storage::Text(vec!["é".as_bytes().to_vec()])).unwrap();
             let matrix = FloatArray::create_owned(vec![0, 16], (0..16).map(|i| if i == 0 { -0.0 } else { i as f64 }).collect()).unwrap();
             let mut original = base;
@@ -3134,7 +3077,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn topology_capture_reads_nothing_and_caches() {
         let mut input = fixture(1);
         let n = geometry::point_count(&input) as usize;
-        input = with_attr(&input, Owner::Point, "unrelated", Storage::Float(vec![0.0; n]));
+        input = with_attr(&input, Owner::Point, "unrelated", Storage::Float(Arc::new(vec![0.0; n])));
         let value = evaluate("(array/int 1 (array/count (get (sop/topology geo) :kinds)))");
         let kernel = node(
             None,
@@ -3149,7 +3092,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         cook_ok(&mut session, &kernel);
         let positions = Float3::of_owned(vec![8.0; n], vec![4.0; n], vec![2.0; n]).unwrap();
         let changed = geometry::with_positions(positions.clone(), &input).unwrap();
-        let changed = with_attr(&changed, Owner::Point, "unrelated", Storage::Float(vec![1.0; n]));
+        let changed = with_attr(&changed, Owner::Point, "unrelated", Storage::Float(Arc::new(vec![1.0; n])));
         let source = input_node(&changed);
         cook_ok(&mut session, &source);
         let before = sop::session::stats(&session);
@@ -3158,10 +3101,10 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(sop::session::stats(&session).misses, before.misses, "topology capture missed for position/attribute-only change");
         assert_eq!(Float3::data_id(geometry::positions(&output)), Float3::data_id(&positions), "cached capture failed to carry fresh positions");
         match attribute::storage(&geometry::find_attribute(Owner::Point, "unrelated", &output).unwrap()).unwrap() {
-            Storage::Float(v) => assert_eq!(v, vec![1.0; n], "cached capture failed to carry fresh unread attribute values"),
+            Storage::Float(v) => assert_eq!(*v, vec![1.0; n], "cached capture failed to carry fresh unread attribute values"),
             _ => panic!("unrelated is float"),
         }
-        let changed = with_attr(&changed, Owner::Point, "added", Storage::Float(vec![2.0; n]));
+        let changed = with_attr(&changed, Owner::Point, "added", Storage::Float(Arc::new(vec![2.0; n])));
         let source = input_node(&changed);
         cook_ok(&mut session, &source);
         let before = sop::session::stats(&session);
@@ -3172,7 +3115,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let output = cook_ok(&mut session, &rebuilt(&input_node(&other)));
         assert!(sop::session::stats(&session).misses > before.misses, "topology change did not invalidate query");
         match attribute::storage(&geometry::find_attribute(Owner::Detail, "primitive_count", &output).unwrap()).unwrap() {
-            Storage::Int(v) => assert_eq!(v, vec![1], "topology query carried stale count"),
+            Storage::Int(v) => assert_eq!(*v, vec![1], "topology query carried stale count"),
             _ => panic!("primitive_count is int"),
         }
         let _ = line_geometry::points;

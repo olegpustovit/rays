@@ -65,7 +65,7 @@ fn lazy_cooked_selection_keeps_a_chained_write() {
                 for (owner, name, value) in [(rdk_core::attribute::Owner::Point, "stage", 7i64), (rdk_core::attribute::Owner::Detail, "seen", 1)] {
                     let a = geo::find_attribute(owner, name, &actual).expect("chained cooked write lost an attribute");
                     match rdk_core::attribute::storage(&a) {
-                        Ok(rdk_core::attribute::Storage::Int(values)) => assert!(values == vec![value], "chained cooked write has wrong values"),
+                        Ok(rdk_core::attribute::Storage::Int(values)) => assert!(*values == vec![value], "chained cooked write has wrong values"),
                         _ => panic!("chained cooked write has wrong type"),
                     }
                 }
@@ -407,12 +407,12 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     let positions = rdk_ok(rdk_core::packed::Float3::of_owned(vec![-1.0, 0.0, 1.0], vec![-0.0, 0.0, 0.0], vec![2.0, 3.0, 4.0]));
     let topology = rdk_ok(rdk_core::topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]));
     let attributes: Vec<rdk_core::attribute::T> = vec![
-        (Owner::Point, "weight", Storage::Float(vec![0.25, 0.5, 0.75])),
-        (Owner::Point, "id", Storage::Int(vec![2, 1, 0])),
+        (Owner::Point, "weight", Storage::Float(Arc::new(vec![0.25, 0.5, 0.75]))),
+        (Owner::Point, "id", Storage::Int(Arc::new(vec![2, 1, 0]))),
         (Owner::Point, "tag", Storage::Text(vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()])),
         (Owner::Point, "weights", Storage::FloatArray(rdk_ok(rdk_core::packed::FloatArray::create_owned(vec![0, 0, 2, 3], vec![0.25, 0.5, 0.75])))),
         (Owner::Vertex, "uv", Storage::Float3(positions.clone())),
-        (Owner::Primitive, "material", Storage::Int(vec![7])),
+        (Owner::Primitive, "material", Storage::Int(Arc::new(vec![7]))),
     ]
     .into_iter()
     .map(|(owner, name, storage)| rdk_ok(rdk_core::attribute::create_owned(name, owner, storage)))

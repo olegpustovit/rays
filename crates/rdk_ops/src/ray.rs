@@ -674,7 +674,7 @@ fn existing_point_float(name: &str, count: usize, source: &geometry::T, default:
     match geometry::find_attribute(attribute::Owner::Point, name, source) {
         None => Ok(vec![default; count]),
         Some(found) => match attribute::View::storage(&found)? {
-            attribute::Storage::Float(values) => Ok(values.clone()),
+            attribute::Storage::Float(values) => Ok(values.to_vec()),
             _ => Err(fail("invalid_output", &format!("point output attribute \"{name}\" must have float storage"))),
         },
     }
@@ -684,7 +684,7 @@ fn existing_point_int(name: &str, count: usize, source: &geometry::T, default: i
     match geometry::find_attribute(attribute::Owner::Point, name, source) {
         None => Ok(vec![default; count]),
         Some(found) => match attribute::View::storage(&found)? {
-            attribute::Storage::Int(values) => Ok(values.clone()),
+            attribute::Storage::Int(values) => Ok(values.to_vec()),
             _ => Err(fail("invalid_output", &format!("point output attribute \"{name}\" must have integer storage"))),
         },
     }
@@ -1087,7 +1087,7 @@ fn run_inner(
                 values[point] = if primitives[point] < 0 { -1.0 } else { distances[point] };
             }
         }
-        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Float(values))?;
+        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Float(Arc::new(values)))?;
         attributes.insert(0, item.clone());
         protected_attributes.insert(0, item);
     }
@@ -1098,7 +1098,7 @@ fn run_inner(
                 values[point] = primitives[point];
             }
         }
-        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(values))?;
+        let item = attribute::create_owned(name, attribute::Owner::Point, attribute::Storage::Int(Arc::new(values)))?;
         attributes.insert(0, item.clone());
         protected_attributes.insert(0, item);
     }
@@ -1325,7 +1325,7 @@ mod tests {
 
     fn point_float(source: &geometry::T, name: &str) -> Vec<f64> {
         match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, name, source).unwrap()).unwrap() {
-            attribute::Storage::Float(values) => values.clone(),
+            attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("{name} has unexpected storage"),
         }
     }
@@ -1476,7 +1476,7 @@ mod tests {
         assert!(near(point_float3(&average, "hit_N").1[0].abs(), 1.0), "averaged hit normal");
         assert!(same_geometry(&average, &project(Combine::RayAverage, 0.35, 71)), "seeded jitter is not deterministic");
         let (cx, _, _) = xyz(&collision);
-        let signal = attribute::create_owned("signal", attribute::Owner::Point, attribute::Storage::Float(cx.clone())).unwrap();
+        let signal = attribute::create_owned("signal", attribute::Owner::Point, attribute::Storage::Float(Arc::new(cx.clone()))).unwrap();
         let collision_with_signal = geometry::with_attribute(signal, &collision).unwrap();
         let mut p = base();
         p.samples = 4;
@@ -1579,13 +1579,13 @@ mod tests {
         let collision = add(
             "temperature",
             attribute::Owner::Point,
-            attribute::Storage::Float((0..points).map(|p| p as f64).collect()),
+            attribute::Storage::Float(Arc::new((0..points).map(|p| p as f64).collect())),
             &collision,
         );
         let collision = add(
             "corner",
             attribute::Owner::Vertex,
-            attribute::Storage::Float((0..vertices).map(|v| 10.0 + v as f64).collect()),
+            attribute::Storage::Float(Arc::new((0..vertices).map(|v| 10.0 + v as f64).collect())),
             &collision,
         );
         let collision = add(
@@ -1594,7 +1594,7 @@ mod tests {
             attribute::Storage::Text((0..primitives).map(|p| format!("m{p}").into_bytes()).collect()),
             &collision,
         );
-        let collision = add("revision", attribute::Owner::Detail, attribute::Storage::Int(vec![7]), &collision);
+        let collision = add("revision", attribute::Owner::Detail, attribute::Storage::Int(Arc::new(vec![7])), &collision);
         let collision = geometry::with_group(
             group::init(None, group::Owner::Primitive, "marked", primitives, &|_| true).unwrap(),
             &collision,

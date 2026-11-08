@@ -164,7 +164,7 @@ fn two_pieces() -> geometry::T {
     )
     .unwrap();
     let g = geometry::with_attribute(normals, &g).unwrap();
-    let pieces = attribute::create_owned("class", Owner::Primitive, Storage::Int(vec![0, 1])).unwrap();
+    let pieces = attribute::create_owned("class", Owner::Primitive, Storage::Int(Arc::new(vec![0, 1]))).unwrap();
     geometry::with_attribute(pieces, &g).unwrap()
 }
 
@@ -258,7 +258,7 @@ fn surface_materials_and_pieces_draw() {
     let prepared = surface::of_geometry(None, &g).unwrap();
     assert_eq!(surface::host_reason(&prepared), Some("Positions are on the CPU.".to_owned()));
     assert!(surface::scene3(None, None, &prepared).is_ok());
-    let bad = attribute::create_owned("material_roughness", Owner::Primitive, Storage::Float(vec![2.0, 0.0])).unwrap();
+    let bad = attribute::create_owned("material_roughness", Owner::Primitive, Storage::Float(Arc::new(vec![2.0, 0.0]))).unwrap();
     let g = geometry::with_attribute(bad, &g).unwrap();
     assert_eq!(surface::of_geometry(None, &g).err(), Some("material channels must be finite and in [0,1]".to_owned()));
 }

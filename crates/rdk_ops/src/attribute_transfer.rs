@@ -301,7 +301,7 @@ fn initial_float(
 ) -> Result<Vec<f64>, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
         if let attribute::Storage::Float(values) = attribute::View::storage(&item)? {
-            let mut output = values.clone();
+            let mut output = values.to_vec();
             if unmatched == Unmatched::DefaultValue {
                 reset_selected(selection, &mut |element| output[element] = 0.0);
             }
@@ -319,7 +319,7 @@ fn initial_int(
 ) -> Result<Vec<i64>, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
         if let attribute::Storage::Int(values) = attribute::View::storage(&item)? {
-            let mut output = values.clone();
+            let mut output = values.to_vec();
             if unmatched == Unmatched::DefaultValue {
                 reset_selected(selection, &mut |element| output[element] = 0);
             }
@@ -802,12 +802,12 @@ fn spatial_transfer(
             }
             attribute::Storage::Int(source_values) => {
                 let output = initial_int(target_elements, unmatched, &existing, target_count as usize)?;
-                attribute::Storage::Int(map_ints(cancel_token, grain, &output, &|target_element, slot| {
+                attribute::Storage::Int(Arc::new(map_ints(cancel_token, grain, &output, &|target_element, slot| {
                     if discrete_selected(target_element) {
                         *slot = source_values[neighbors[(target_element * neighbor_capacity) as usize] as usize];
                     }
                     Ok(())
-                })?)
+                })?))
             }
             attribute::Storage::Text(source_values) => {
                 let output = initial_text(target_elements, unmatched, &existing, target_count as usize)?;
@@ -1066,7 +1066,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
                     attribute::of_float_planes(like, &refs)?
                 }
                 attribute::Storage::Int(_) => {
-                    attribute::Storage::Int(initial_int(target_elements, unmatched, &existing, target_count)?)
+                    attribute::Storage::Int(Arc::new(initial_int(target_elements, unmatched, &existing, target_count)?))
                 }
                 attribute::Storage::Text(_) => {
                     attribute::Storage::Text(initial_text(target_elements, unmatched, &existing, target_count)?)
@@ -1080,7 +1080,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         if let Some(name) = &distance_name {
             let existing = geometry::find_attribute(target_owner, name, target);
             let values = initial_float(target_elements, unmatched, &existing, target_count)?;
-            made.push(attribute::create_owned(name, target_owner, attribute::Storage::Float(values))?);
+            made.push(attribute::create_owned(name, target_owner, attribute::Storage::Float(Arc::new(values)))?);
         }
         return install_attributes_batch(made, target);
     }
@@ -1230,13 +1230,13 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
             }
             attribute::Storage::Int(values) => {
                 let output = initial_int(target_elements, unmatched, &existing, target_count)?;
-                attribute::Storage::Int(map_ints(cancel_token, grain, &output, &|point, slot| {
+                attribute::Storage::Int(Arc::new(map_ints(cancel_token, grain, &output, &|point, slot| {
                     if let Some(local) = discrete_local(owner, point as usize) {
                         let primitive = primitives[point as usize];
                         *slot = values[source_element(owner, primitive, triangles[point as usize], local) as usize];
                     }
                     Ok(())
-                })?)
+                })?))
             }
             attribute::Storage::Text(values) => {
                 let output = initial_text(target_elements, unmatched, &existing, target_count)?;
@@ -1267,7 +1267,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         made.push(attribute::create_owned(
             name,
             target_owner,
-            attribute::Storage::Float(planes.pop().unwrap_or_default()),
+            attribute::Storage::Float(Arc::new(planes.pop().unwrap_or_default())),
         )?);
     }
     install_attributes_batch(made, target)
@@ -1796,7 +1796,7 @@ mod tests {
         let moved = find(Detail, "asset", &detail_target);
         assert_eq!(attribute::storage_id(&moved), attribute::storage_id(&asset));
         assert_eq!(texts(Detail, "asset", &detail_target), vec![b"oak".to_vec()]);
-        let detail_p = attribute::create_owned("P", Detail, attribute::Storage::Int(vec![23])).unwrap();
+        let detail_p = attribute::create_owned("P", Detail, attribute::Storage::Int(Arc::new(vec![23]))).unwrap();
         let detail_p_source = geometry::with_attribute(detail_p, &detail_source).unwrap();
         let excluded = attribute_ops::transfer_detail(&DetailParams {
             names: None,
