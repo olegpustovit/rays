@@ -41,7 +41,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M4 | done | `0f3804c3` — `Profile::execution_count` / `probe_run::report_count`; `sync_scope` defers profile clone until after `!moved && !fresh`; `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` 3 pass |
 | M9 | done | `20c1dfb3` — `panels::at_ref`; shell `graph_path` / `panel_key` + `beside` borrow; `cargo check -p editor_core -p rays_editor` |
 | M11 | done | `49ec71f3` — lazy `field()` error `form`; `Keys` pattern name once; `cargo t -p flow_eval test_workspace_eval` 2 pass |
-| M1,M3,M5–M8,M10,M12–M19,M21 | pending | |
+| M1,M3,M5–M8,M12–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |
@@ -97,7 +97,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 - 2026-11-08: B5 — `flow_native` no longer depends on `rdk` facade (`rdk_core` direct); `cargo check -p flow_native -p rays_editor`.
 - 2026-11-08: B5 — `flow_sop_catalog` (catalog/manifest/port/network/encoded_parameters); `editor_document` direct dep; `cargo check -p flow_sop_catalog -p flow_sop -p editor_document -p rays_bin`.
-- 2026-11-08: `49ec71f3` M11; `0f3804c3` M4; `e16247cd` B1 op delegates; B5 + `cargo t -p flow_sop catalog` 2 pass.
+- 2026-11-08: `20c1dfb3` M9; `49ec71f3` M11; `0f3804c3` M4; `e16247cd` B1; B5 + `cargo t -p flow_sop catalog` 2 pass.
 - 2026-11-08: review2 — 16 done, 2 partial, 45 pending (PROGRESS ↔ git aligned).
 - 2026-11-08: `f6ca915b` M20, `bbe7f6ae` M2, `96fab43d` B2; `cargo check -p rays_bin` ~23s after profile shift.
 - 2026-11-08: B0 — invalidation checklist + script audit in PROGRESS §B0; warm pair flow_check 0.15 s / 0.07 s; log `.subagent-logs/b0.log`.
