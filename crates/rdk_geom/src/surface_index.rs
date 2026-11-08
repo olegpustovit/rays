@@ -10,7 +10,7 @@
 use rdk_core::{cancel, error, geometry, group, packed, polygon_triangulation, support, topology};
 
 use crate::bounds3_index::{self, Extra};
-use crate::linear_piece_index::{join_pairs, members, pair_slots, remap};
+use crate::linear_piece_index::{join_pairs, members, plane_windows, remap, take_planes};
 use crate::point_grid::{float_max, float_min, point_triangle_barycentric_into};
 use crate::predicates;
 
@@ -146,14 +146,6 @@ fn empty_bounds(length: usize) -> Bounds {
         min_d: std::array::from_fn(|_| vec![0.0; length]),
         max_d: std::array::from_fn(|_| vec![0.0; length]),
     }
-}
-
-fn plane_windows<'a>(planes: &'a mut [Vec<f64>], grain: i64) -> Vec<support::Windows<'a, f64>> {
-    planes.iter_mut().map(|plane| support::Windows::even(plane, grain)).collect()
-}
-
-fn take_planes<'a>(windows: &[support::Windows<'a, f64>], range: i64) -> Vec<&'a mut [f64]> {
-    windows.iter().map(|window| window.take(range)).collect()
 }
 
 /// Keeps the entries of `items` (in order) for which `keep` holds, one parallel range at a time.
@@ -713,7 +705,8 @@ fn triangle_pairs_of(
     // order give the same bytes in one traversal, so both modes share this path.
     let range_size = if single_pass { grain.max(128) } else { grain.max(1) };
     let ranges = support::range_count(left_count, range_size) as usize;
-    let slots = pair_slots(ranges);
+    let mut parts = vec![(Vec::new(), Vec::new()); ranges];
+    let part_windows = support::Windows::even(&mut parts, 1);
     support::run_indexed_ranges(range_size, left_count, &|range, first, last| {
         let mut node_stack = [0_i64; 65];
         let mut left_bounds = [0.0_f64; 15];
@@ -761,10 +754,10 @@ fn triangle_pairs_of(
                 }
             }
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((out_left, out_right));
+        part_windows.take(range)[0] = (out_left, out_right);
         Ok(())
     })?;
-    Ok(join_pairs(slots))
+    Ok(join_pairs(parts))
 }
 
 fn overlapping_triangle_pairs(

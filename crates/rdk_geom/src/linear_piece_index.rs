@@ -1,5 +1,5 @@
 //! Packed BVH over the linear pieces accepted by Intersection Analysis.
-use std::sync::Mutex;
+
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use rdk_core::{cancel, error, geometry, group, packed, support, topology};
@@ -68,20 +68,23 @@ pub(crate) fn members(value: &group::T) -> Vec<i64> {
 }
 
 /// Concatenates per-range `(left, right)` pair buffers in range order.
-pub(crate) fn join_pairs(slots: Vec<Mutex<Option<(Vec<i64>, Vec<i64>)>>>) -> (Vec<i64>, Vec<i64>) {
-    let mut left = Vec::new();
-    let mut right = Vec::new();
-    for slot in slots {
-        if let Some((range_left, range_right)) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            left.extend(range_left);
-            right.extend(range_right);
-        }
+pub(crate) fn join_pairs(parts: Vec<(Vec<i64>, Vec<i64>)>) -> (Vec<i64>, Vec<i64>) {
+    let total = parts.iter().map(|(left, _)| left.len()).sum();
+    let mut left = Vec::with_capacity(total);
+    let mut right = Vec::with_capacity(total);
+    for (range_left, range_right) in parts {
+        left.extend(range_left);
+        right.extend(range_right);
     }
     (left, right)
 }
 
-pub(crate) fn pair_slots(ranges: usize) -> Vec<Mutex<Option<(Vec<i64>, Vec<i64>)>>> {
-    (0..ranges).map(|_| Mutex::new(None)).collect()
+pub(crate) fn plane_windows<'a>(planes: &'a mut [Vec<f64>], grain: i64) -> Vec<support::Windows<'a, f64>> {
+    planes.iter_mut().map(|plane| support::Windows::even(plane, grain)).collect()
+}
+
+pub(crate) fn take_planes<'a>(windows: &[support::Windows<'a, f64>], range: i64) -> Vec<&'a mut [f64]> {
+    windows.iter().map(|window| window.take(range)).collect()
 }
 
 struct Pieces {
@@ -157,20 +160,33 @@ fn create_inner(
         support::ceiling_div(piece_count, selected_count as i64)?.max(1)
     };
     let chunk = (grain / average).max(1);
-    let chunk_ranges = if selected_count == 0 { 0 } else { (selected_count - 1) / chunk as usize + 1 };
-    let chunk_slots: Vec<Mutex<Option<Pieces>>> = (0..chunk_ranges).map(|_| Mutex::new(None)).collect();
+    let total = piece_count as usize;
+    let mut pieces = Pieces {
+        kinds: vec![0; total],
+        primitives: vec![0; total],
+        locals: vec![0; total],
+        vertex_a: vec![0; total],
+        vertex_b: vec![0; total],
+        vertex_c: vec![-1; total],
+        u0: vec![0.0; total],
+        u1: vec![0.0; total],
+    };
+    let selected_ranges = support::range_count(selected_count as i64, chunk);
+    let selected_bound = |range: i64| piece_offsets[(range.saturating_mul(chunk) as usize).min(selected_count)] as usize;
+    let Pieces { kinds, primitives, locals, vertex_a, vertex_b, vertex_c, u0, u1 } = &mut pieces;
+    let kind_windows = support::Windows::new(kinds, selected_ranges, &selected_bound);
+    let primitive_windows = support::Windows::new(primitives, selected_ranges, &selected_bound);
+    let local_windows = support::Windows::new(locals, selected_ranges, &selected_bound);
+    let a_windows = support::Windows::new(vertex_a, selected_ranges, &selected_bound);
+    let b_windows = support::Windows::new(vertex_b, selected_ranges, &selected_bound);
+    let c_windows = support::Windows::new(vertex_c, selected_ranges, &selected_bound);
+    let u0_windows = support::Windows::new(u0, selected_ranges, &selected_bound);
+    let u1_windows = support::Windows::new(u1, selected_ranges, &selected_bound);
     support::run_indexed_ranges(chunk, selected_count as i64, &|range, first_selected, last_selected| {
-        let capacity = (piece_offsets[last_selected as usize] - piece_offsets[first_selected as usize]) as usize;
-        let mut local = Pieces {
-            kinds: vec![0; capacity],
-            primitives: vec![0; capacity],
-            locals: vec![0; capacity],
-            vertex_a: vec![0; capacity],
-            vertex_b: vec![0; capacity],
-            vertex_c: vec![-1; capacity],
-            u0: vec![0.0; capacity],
-            u1: vec![0.0; capacity],
-        };
+        let (kinds, primitives, locals) =
+            (kind_windows.take(range), primitive_windows.take(range), local_windows.take(range));
+        let (vertex_a, vertex_b, vertex_c) = (a_windows.take(range), b_windows.take(range), c_windows.take(range));
+        let (u0, u1) = (u0_windows.take(range), u1_windows.take(range));
         let base = piece_offsets[first_selected as usize];
         for slot in first_selected..last_selected {
             cancel::poll(cancel_value, slot, 4095)?;
@@ -181,62 +197,44 @@ fn create_inner(
             let size = last - first;
             let code = topology_view.primitive_kinds[primitive as usize];
             if code == 0 {
-                local.primitives[output] = primitive;
-                local.vertex_a[output] = first;
-                local.vertex_b[output] = first + 1;
-                local.vertex_c[output] = first + 2;
+                primitives[output] = primitive;
+                vertex_a[output] = first;
+                vertex_b[output] = first + 1;
+                vertex_c[output] = first + 2;
             } else {
                 let segment_count = if code == 1 { size - 1 } else { size };
                 for at in 0..segment_count {
                     let piece = output + at as usize;
-                    local.kinds[piece] = 1;
-                    local.primitives[piece] = primitive;
-                    local.locals[piece] = at;
-                    local.vertex_a[piece] = first + at;
-                    local.vertex_b[piece] = if at + 1 < size { first + at + 1 } else { first };
-                    local.u0[piece] = at as f64 / segment_count as f64;
-                    local.u1[piece] = (at + 1) as f64 / segment_count as f64;
+                    kinds[piece] = 1;
+                    primitives[piece] = primitive;
+                    locals[piece] = at;
+                    vertex_a[piece] = first + at;
+                    vertex_b[piece] = if at + 1 < size { first + at + 1 } else { first };
+                    u0[piece] = at as f64 / segment_count as f64;
+                    u1[piece] = (at + 1) as f64 / segment_count as f64;
                 }
             }
         }
-        *chunk_slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(local);
         Ok(())
     })?;
-    let total = piece_count as usize;
-    let mut pieces = Pieces {
-        kinds: Vec::with_capacity(total),
-        primitives: Vec::with_capacity(total),
-        locals: Vec::with_capacity(total),
-        vertex_a: Vec::with_capacity(total),
-        vertex_b: Vec::with_capacity(total),
-        vertex_c: Vec::with_capacity(total),
-        u0: Vec::with_capacity(total),
-        u1: Vec::with_capacity(total),
+    let mut bounds = Bounds {
+        centroid: std::array::from_fn(|_| vec![0.0; total]),
+        min: std::array::from_fn(|_| vec![0.0; total]),
+        max: std::array::from_fn(|_| vec![0.0; total]),
     };
-    for slot in chunk_slots {
-        if let Some(part) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            pieces.kinds.extend(part.kinds);
-            pieces.primitives.extend(part.primitives);
-            pieces.locals.extend(part.locals);
-            pieces.vertex_a.extend(part.vertex_a);
-            pieces.vertex_b.extend(part.vertex_b);
-            pieces.vertex_c.extend(part.vertex_c);
-            pieces.u0.extend(part.u0);
-            pieces.u1.extend(part.u1);
-        }
-    }
-    let piece_ranges = if total == 0 { 0 } else { (total - 1) / grain as usize + 1 };
-    let bound_slots: Vec<Mutex<Option<(Bounds, Option<String>)>>> =
-        (0..piece_ranges).map(|_| Mutex::new(None)).collect();
+    let mut failures: Vec<Option<String>> = vec![None; support::range_count(piece_count, grain) as usize];
     let vertex_points = &topology_view.vertex_points;
+    let Bounds { centroid, min, max } = &mut bounds;
+    let (centroid_windows, min_windows, max_windows) =
+        (plane_windows(centroid, grain), plane_windows(min, grain), plane_windows(max, grain));
+    let failure_windows = support::Windows::even(&mut failures, 1);
     support::run_indexed_ranges(grain, piece_count, &|range, first_piece, last_piece| {
-        let length = (last_piece - first_piece) as usize;
-        let mut local = Bounds {
-            centroid: [vec![0.0; length], vec![0.0; length], vec![0.0; length]],
-            min: [vec![0.0; length], vec![0.0; length], vec![0.0; length]],
-            max: [vec![0.0; length], vec![0.0; length], vec![0.0; length]],
-        };
-        let mut failure: Option<String> = None;
+        let (mut centroid, mut min, mut max) = (
+            take_planes(&centroid_windows, range),
+            take_planes(&min_windows, range),
+            take_planes(&max_windows, range),
+        );
+        let failure = &mut failure_windows.take(range)[0];
         for piece in first_piece..last_piece {
             cancel::poll(cancel_value, piece, 4095)?;
             if failure.is_some() {
@@ -250,29 +248,29 @@ fn create_inner(
             let (ax, ay, az) = (positions.x[pa], positions.y[pa], positions.z[pa]);
             let (bx, by, bz) = (positions.x[pb], positions.y[pb], positions.z[pb]);
             if !(ax.is_finite() && ay.is_finite() && az.is_finite() && bx.is_finite() && by.is_finite() && bz.is_finite()) {
-                failure = Some(format!("primitive {primitive} has a non-finite position"));
+                *failure = Some(format!("primitive {primitive} has a non-finite position"));
             } else if pieces.kinds[p] == 1 {
                 if ax == bx && ay == by && az == bz {
-                    failure = Some(format!(
+                    *failure = Some(format!(
                         "primitive {primitive} segment {} is degenerate",
                         pieces.locals[p]
                     ));
                 } else {
-                    local.centroid[0][at] = (ax * 0.5) + (bx * 0.5);
-                    local.centroid[1][at] = (ay * 0.5) + (by * 0.5);
-                    local.centroid[2][at] = (az * 0.5) + (bz * 0.5);
-                    local.min[0][at] = float_min(ax, bx);
-                    local.min[1][at] = float_min(ay, by);
-                    local.min[2][at] = float_min(az, bz);
-                    local.max[0][at] = float_max(ax, bx);
-                    local.max[1][at] = float_max(ay, by);
-                    local.max[2][at] = float_max(az, bz);
+                    centroid[0][at] = (ax * 0.5) + (bx * 0.5);
+                    centroid[1][at] = (ay * 0.5) + (by * 0.5);
+                    centroid[2][at] = (az * 0.5) + (bz * 0.5);
+                    min[0][at] = float_min(ax, bx);
+                    min[1][at] = float_min(ay, by);
+                    min[2][at] = float_min(az, bz);
+                    max[0][at] = float_max(ax, bx);
+                    max[1][at] = float_max(ay, by);
+                    max[2][at] = float_max(az, bz);
                 }
             } else {
                 let pc = vertex_points[pieces.vertex_c[p] as usize] as usize;
                 let (cx, cy, cz) = (positions.x[pc], positions.y[pc], positions.z[pc]);
                 if !(cx.is_finite() && cy.is_finite() && cz.is_finite()) {
-                    failure = Some(format!("primitive {primitive} has a non-finite position"));
+                    *failure = Some(format!("primitive {primitive} has a non-finite position"));
                 } else {
                     let abx = bx - ax;
                     let aby = by - ay;
@@ -285,43 +283,24 @@ fn create_inner(
                     let nz = (abx * acy) - (aby * acx);
                     let area2 = (nx * nx) + (ny * ny) + (nz * nz);
                     if !area2.is_finite() || area2 <= 1e-30 {
-                        failure = Some(format!("primitive {primitive} is degenerate"));
+                        *failure = Some(format!("primitive {primitive} is degenerate"));
                     } else {
-                        local.centroid[0][at] = (ax + bx + cx) / 3.0;
-                        local.centroid[1][at] = (ay + by + cy) / 3.0;
-                        local.centroid[2][at] = (az + bz + cz) / 3.0;
-                        local.min[0][at] = float_min(ax, float_min(bx, cx));
-                        local.min[1][at] = float_min(ay, float_min(by, cy));
-                        local.min[2][at] = float_min(az, float_min(bz, cz));
-                        local.max[0][at] = float_max(ax, float_max(bx, cx));
-                        local.max[1][at] = float_max(ay, float_max(by, cy));
-                        local.max[2][at] = float_max(az, float_max(bz, cz));
+                        centroid[0][at] = (ax + bx + cx) / 3.0;
+                        centroid[1][at] = (ay + by + cy) / 3.0;
+                        centroid[2][at] = (az + bz + cz) / 3.0;
+                        min[0][at] = float_min(ax, float_min(bx, cx));
+                        min[1][at] = float_min(ay, float_min(by, cy));
+                        min[2][at] = float_min(az, float_min(bz, cz));
+                        max[0][at] = float_max(ax, float_max(bx, cx));
+                        max[1][at] = float_max(ay, float_max(by, cy));
+                        max[2][at] = float_max(az, float_max(bz, cz));
                     }
                 }
             }
         }
-        *bound_slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((local, failure));
         Ok(())
     })?;
-    let mut bounds = Bounds {
-        centroid: [Vec::with_capacity(total), Vec::with_capacity(total), Vec::with_capacity(total)],
-        min: [Vec::with_capacity(total), Vec::with_capacity(total), Vec::with_capacity(total)],
-        max: [Vec::with_capacity(total), Vec::with_capacity(total), Vec::with_capacity(total)],
-    };
-    let mut first_failure: Option<String> = None;
-    for slot in bound_slots {
-        if let Some((part, failure)) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            if first_failure.is_none() {
-                first_failure = failure;
-            }
-            for axis in 0..3 {
-                bounds.centroid[axis].extend(&part.centroid[axis]);
-                bounds.min[axis].extend(&part.min[axis]);
-                bounds.max[axis].extend(&part.max[axis]);
-            }
-        }
-    }
-    if let Some(message) = first_failure {
+    if let Some(message) = failures.into_iter().flatten().next() {
         return Err(fail("invalid_surface", message));
     }
     let tree = bounds3_index::create(
@@ -436,10 +415,11 @@ fn pairs_of(
     if left_count == 0 || piece_count(right_index) == 0 {
         return Ok((Vec::new(), Vec::new()));
     }
-    let ranges = ((left_count - 1) / grain + 1) as usize;
+    let ranges = support::range_count(left_count, grain) as usize;
     // ponytail: OCaml counts then fills (two traversals) to size output exactly; one pass into
     // per-range buffers joined in range order yields the same bytes.
-    let slots = pair_slots(ranges);
+    let mut parts = vec![(Vec::new(), Vec::new()); ranges];
+    let part_windows = support::Windows::even(&mut parts, 1);
     support::run_indexed_ranges(grain, left_count, &|range, first, last| {
         let mut stack = [0_i64; 65];
         let mut out_left: Vec<i64> = Vec::new();
@@ -473,10 +453,10 @@ fn pairs_of(
                 }
             }
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((out_left, out_right));
+        part_windows.take(range)[0] = (out_left, out_right);
         Ok(())
     })?;
-    Ok(join_pairs(slots))
+    Ok(join_pairs(parts))
 }
 
 fn self_pair_of(
