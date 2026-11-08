@@ -115,8 +115,7 @@ fn scope_elbow() {
     let mut ui = new_ui();
     let w = checked("(workspace s (graph g :context value (let* [a (array/range 3) b (map (fn [i] (* i 2.0)) a) c (array/nth b 0)] c)))");
     // c sits 40 points left of its column and b 30 to the right: the elbow still leaves and enters cleanly
-    let mut o = ScopeOpts::default();
-    o.at = Rc::new(|q: &[String]| {
+    let o = at_fn(|q: &[String]| {
         if q == ["g", "c"] {
             Some((-40.0, 250.0))
         } else if q == ["g", "b"] {
@@ -161,8 +160,7 @@ fn scope_spine() {
     );
     // zones are obstacles for a wire that does not enter them: [k] feeds [r], right of the zone
     let w = checked("(workspace s (graph g :context value (let* [k 2.0 ys (map (fn [i] (* i k)) (array/range 3)) r (+ (array/nth ys 0) k)] r)))");
-    let mut o = ScopeOpts::default();
-    o.at = Rc::new(|q: &[String]| match q.iter().map(|s| s.as_str()).collect::<Vec<_>>().as_slice() {
+    let o = at_fn(|q: &[String]| match q.iter().map(|s| s.as_str()).collect::<Vec<_>>().as_slice() {
         ["g", "k"] => Some((0.0, 0.0)),
         ["g", "ys#0"] => Some((300.0, 96.0)),
         ["g", "ys"] => Some((300.0, 336.0)),

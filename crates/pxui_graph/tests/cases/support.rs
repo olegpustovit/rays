@@ -233,7 +233,7 @@ pub mod g {
 /// A path from its segments.
 /// What a test's host has saved: positions, levels, probes, frames, folds and imports.
 #[derive(Default)]
-pub struct Saved {
+pub struct TestSaved {
     pub at: Vec<(Vec<String>, (f64, f64))>,
     pub level: Vec<(Vec<String>, (p::Level, bool))>,
     pub probe: Vec<(Vec<String>, i64)>,
@@ -246,7 +246,7 @@ fn find<'a, V>(list: &'a [(Vec<String>, V)], path: &[String]) -> Option<&'a V> {
     list.iter().find(|(k, _)| k.as_slice() == path).map(|(_, v)| v)
 }
 
-impl scope_state::Saved for Saved {
+impl scope_state::Saved for TestSaved {
     fn at(&self, path: &[String]) -> Option<(f64, f64)> {
         find(&self.at, path).copied()
     }
@@ -267,7 +267,18 @@ impl scope_state::Saved for Saved {
     }
 }
 
-pub fn saved_opts(saved: Saved) -> ScopeOpts {
+/// A host whose saved positions are a function.
+pub struct AtFn(pub Box<dyn Fn(&[String]) -> Option<(f64, f64)>>);
+impl scope_state::Saved for AtFn {
+    fn at(&self, path: &[String]) -> Option<(f64, f64)> {
+        (self.0)(path)
+    }
+}
+pub fn at_fn(f: impl Fn(&[String]) -> Option<(f64, f64)> + 'static) -> ScopeOpts {
+    ScopeOpts { saved: Rc::new(AtFn(Box::new(f))), ..Default::default() }
+}
+
+pub fn saved_opts(saved: TestSaved) -> ScopeOpts {
     ScopeOpts { saved: Rc::new(saved), ..Default::default() }
 }
 

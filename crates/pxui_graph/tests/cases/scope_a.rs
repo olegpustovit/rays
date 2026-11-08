@@ -14,7 +14,7 @@ use pxui_graph::scope_state::{Change, Command, Pane, ScopeOpts};
 use std::rc::Rc;
 
 fn at_of(pairs: Vec<(Path, (f64, f64))>) -> ScopeOpts {
-    saved_opts(Saved { at: pairs, ..Default::default() })
+    saved_opts(TestSaved { at: pairs, ..Default::default() })
 }
 
 fn menu_requested(changes: &[Change]) -> bool {
@@ -39,7 +39,7 @@ fn scope_zoom_geometry() {
         (true, 0.45, |z| z < 0.5),
     ];
     for (pinned, factor, expect) in cases {
-        let o = saved_opts(Saved { level: if pinned { vec![(path(&["g", "b"]), (Level::Full, true))] } else { Vec::new() }, ..Default::default() });
+        let o = saved_opts(TestSaved { level: if pinned { vec![(path(&["g", "b"]), (Level::Full, true))] } else { Vec::new() }, ..Default::default() });
         let (view, _) = scope_view(o, &ws, "g");
         let (view, _) = scope_step(&mut ui, view, &frame0());
         let mouse = (500, 350);
@@ -107,8 +107,7 @@ fn scope_levels_a() {
     let (_pointed, changes) = scope::run_command(sel, Command::Point_level);
     check(changes == vec![Change::Level_set(vec![(a.clone(), Some(Level::Point), false)])], "p is not Level_set point");
     let a2 = a.clone();
-    let mut o = at_of(vec![(a.clone(), (24.0, 24.0))]);
-    o.level = Rc::new(move |q: &[String]| if q == a2.as_slice() { Some((Level::Point, false)) } else { None });
+    let o = saved_opts(TestSaved { at: vec![(a.clone(), (24.0, 24.0))], level: vec![(a2, (Level::Point, false))], ..Default::default() });
     let (pview, _) = scope_view(o, &ws, "g");
     let (pview, _) = scope_step(&mut ui, pview, &frame0());
     let (_, _, pw, ph) = scope::Inspect::box_of(&pview, &a).unwrap();
@@ -440,7 +439,7 @@ fn scope_ghost_values() {
     let w = checked("(workspace w (graph g :context value (let* [k 6.0 ys (for [i (range 4)] (let* [a (* k (float i)) b (+ a 1.0)] b)) n (reduce (fn [acc x] (+ acc x)) 0.0 ys)] n)))");
     let sc = Rc::new(p::of_graph(&scope_catalog(), &w, "g").unwrap());
     let view = |index: i64| {
-        let o = saved_opts(Saved { probe: sc.nodes.iter().filter(|n| n.zone.is_some()).map(|n| (n.path.clone(), index)).collect(), ..Default::default() });
+        let o = saved_opts(TestSaved { probe: sc.nodes.iter().filter(|n| n.zone.is_some()).map(|n| (n.path.clone(), index)).collect(), ..Default::default() });
         let v = scope::with_scope(o, "g", sc.clone(), scope::create(Some(1000), Some(700)));
         scope::with_records(recorded(&w), v)
     };
