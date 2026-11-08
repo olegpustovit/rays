@@ -971,18 +971,28 @@ impl Scope {
             return None;
         }
         let slot = self.adopt_slot();
-        let mut bytes = vec![0u8; 4 * f.len()];
-        for (k, x) in f.iter().enumerate() {
-            bytes[4 * k..4 * k + 4].copy_from_slice(&(*x as f32).to_le_bytes());
-        }
-        let b_ = self.alloc(&slot, bytes.len() as i64).ok()?;
-        if b::write_buffer(&b_.0, 0, &bytes).is_err() {
+        let b_ = self.alloc(&slot, 4 * f.len() as i64).ok()?;
+        // a constant array (a fill's zero planes) is filled on the device, not uploaded
+        let first = (f[0] as f32).to_bits();
+        let written = if f32::from_bits(first).is_finite() && f.iter().all(|x| (*x as f32).to_bits() == first) {
+            self.commands().and_then(|(_, encoder)| run::encode_float_fill(&encoder, &self.t.0.pipelines, &b_.0, f.len() as i64, &[f[0]])).is_ok()
+        } else {
+            let mut bytes = vec![0u8; 4 * f.len()];
+            for (k, x) in f.iter().enumerate() {
+                bytes[4 * k..4 * k + 4].copy_from_slice(&(*x as f32).to_le_bytes());
+            }
+            let written = b::write_buffer(&b_.0, 0, &bytes).is_ok();
+            if written {
+                let t = &self.t;
+                t.0.adopted_uploads.set(t.0.adopted_uploads.get() + 1);
+                t.0.adopted_uploaded_bytes.set(t.0.adopted_uploaded_bytes.get() + bytes.len() as i64);
+            }
+            written
+        };
+        if !written {
             self.give_back(&slot, b_);
             return None;
         }
-        let t = &self.t;
-        t.0.adopted_uploads.set(t.0.adopted_uploads.get() + 1);
-        t.0.adopted_uploaded_bytes.set(t.0.adopted_uploaded_bytes.get() + bytes.len() as i64);
         let kind = kind_of(v);
         let p = Rc::new(Placeholder {
             key: Arc::as_ptr(f) as usize,
