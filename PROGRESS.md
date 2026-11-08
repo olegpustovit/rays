@@ -10,7 +10,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
-| A | 1/8 | — | 7 |
+| A | 1/8 | A2,A3 | 7 |
 | B | 0/6 | — | 6 |
 | M | 0/21 | — | 21 |
 | I | 0/1 | — | 1 |
@@ -22,8 +22,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | ID | Status | Commit / evidence |
 |----|--------|-------------------|
 | A1 | done | `6802a325` — delete `rays_collections` / `rays_hash`; gate bans generics |
-| A2 | pending | |
-| A3 | pending | |
+| A2 | active | `e10bff22` partial — edge_transport + support hooks; 48 uncalled fns remain |
+| A3 | active | `e10bff22` partial — bounds2_index, delaunay2, contour_triangulation |
 | A4 | pending | |
 | A5 | pending | |
 | A6 | pending | |
@@ -38,3 +38,5 @@ Repo mirror: `docs/history/port-simplification/index.html`
 ## Session log
 
 - 2026-11-08: Resume execution; A1 verified on `dev` (ahead 2).
+- 2026-11-08: `3c86b2a1` Wave A gpu_suite sharding removed (renamed t1–t3).
+- 2026-11-08: `e10bff22` A2 edge_transport deletion; A3 started (3 geom files).
