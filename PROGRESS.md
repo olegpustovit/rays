@@ -17,7 +17,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M | M1-M21, empty-frame target (1,206/frame) | - | - |
 | I | I1-I6 | - | - |
 | C | C1-C21 | - | - |
-| D | D1-D6 | D4 release `map` fast path | - |
+| D | D1-D6 | - | - |
 
 ## Items (commits)
 
@@ -65,7 +65,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | D1 | done | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; `a9213d00` last prepend -> VecDeque, six SPIR-V operand-order sites fixed after audit against spirv.ml (34 .spv fixtures, byte lengths unchanged, all pass spirv-val vulkan1.2) |
 | D2 | done | `37691759` .. `2e224106` + `a0809e01` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
 | D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
-| D4 | done (release `map` open) | `8bf0c0d0` `18180e84` packed.rs one CPU engine (historical implementation size 4,714 lines); `1455271c` bench_core example |
+| D4 | done | `8bf0c0d0` `18180e84` packed.rs one CPU engine (historical implementation size 4,714 lines); `1455271c` bench_core example |
 | D5 | done | Replaced the four float-array variants with `Value::Floats(width, Arc<Vec<f64>>)` throughout production and tests. Shared slicing, concatenation, reductions, literal conversion, cache/physical equality and GPU readback retain width. Validation rejects widths outside 1–4 and incomplete rows before indexing. `Value` remains 40 bytes; original type-specific keys, Lisp display and numerical data are preserved. 902 selected tests pass; one web FMA failure is reproduced on committed baseline `b52600c7`. |
 | D6 | done | `f680001d` `d3b9fa62` `597110e1` `0bc18308` `cb8a0ade` `d3109b85` `c0de6479` `cc0680a2` `6570d563` (+ `da51a0c7` stale C8 test-hooks cases): rust-analyzer rename codemod plus perl for macro args and test-hooks code; `pub mod [A-Z]` 87 -> 0, `t` types 52 -> 0, capitalised re-export aliases 6 -> 0; 15 naming allows removed; 4 dead suite support copies deleted. 653 tests across flow_ir/gpu/eval, rdk_core and rays pass; gate deps 28 |
 
@@ -135,6 +135,18 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: residency and release pass.
+  - `2521c306`: all-constant arrays are filled on the device, not uploaded.
+  - `17014952`: input/gather tables are skipped when their bits match the last upload.
+  - `12e7f15a`: the evaluator drops its resolver after the outermost call; it held the cook's device buffers.
+  - `66fb612f`: resident release closures hold planes weakly, so the holder no longer keeps the old P. The holder test checks topology only when streams differ, because static topology is shared since `4ed6baf8`.
+  - native_chain_frames was split into six cases (0.8-2.2 s each). A warm cook uploads 0 B; frame 0 uploads 12 B/pt, as in OCaml.
+  - `ea3f6adb`: packed float add/sub/mul/div run blocks of 16 or more lanes over split slices with one nonfinite check. Release `map 1M` takes 2.29 ms (old engine 2.57, before 3.49); whole bench 139.3G (old engine) -> 111.2G instructions. **D4 closed.**
+  - Bench `text map` digests: the old-engine/dev mismatch was the debug-format digest of text arrays. bench_core now hashes row bytes and checks the case against the reference interpreter; digest `b7fa12b23ecf8830` equals an independently computed 5,001 x "猫".
+  - Tests: flow_gpu 94, flow_ir 342, flow_eval 105, native_chain 7, native_holder pass.
+  - Open: native_scrub_gpu 5.46 s (eight child processes each re-lower gpu_sea; caching agent).
+  - Follow-up, not in the plan: the path tracer rebuilds meshes whose topology is device-generated every frame. A prototype refit patch was reverted because it needs a liveness check.
 
 - 2026-11-08: editor round 3 closed.
   - `1d40581a`: shattered_studio default case is 10 sheets, >=40 shards, exact 1/4-domain fracture and shading (0.92 s). The full sketch is `shattered_studio_full`, RAYS_SLOW only (33.6 s).
