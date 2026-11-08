@@ -26,6 +26,9 @@ driver *traits* in `ogpu::backend` (`Driver`, `DriverDevice`, `DriverQueue`, `Dr
 records: a driver object is one struct, an encoder is one boxed object rather than a boxed closure per
 operation, and the `backend` layer keeps its liveness/state guards around each `&self` call. Metal, Vulkan
 and mock depend only on `ogpu`; `native_layer_token` lives in `native_layer_token_sys::portable`.
+Thin crates were folded into their owners (C10): SDL3_image/ttf/mixer are `sdl3::{image,ttf,mixer}` over
+`sdl3_sys::{image,ttf,mixer}` (one build script), `runtime_input` is `runtime::runtime_input`, `cfmt_sys` is
+`cfmt::sys`, and the safe Vulkan wrapper is `ogpu_vulkan::vulkan`.
 
 The Rust renderer does not expose a raw SDL window accessor. Window ownership and
 resizing stay in `runtime`; renderer callers use its typed native-runtime bridge
