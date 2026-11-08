@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+test-hooks = []
+
 [lib]
 name = "rays_editor"
 path = "src/lib.rs"
@@ -59,6 +62,7 @@ ogpu_metal = { path = "../ogpu_metal" }
 [[test]]
 name = "window_editor_smoke"
 harness = false
+required-features = ["test-hooks"]
 
 
 
@@ -66,29 +70,36 @@ harness = false
 name = "gpu_suite_t1"
 path = "tests/gpu_suite_t1.rs"
 harness = false
+required-features = ["test-hooks"]
 
 [[test]]
 name = "gpu_suite_t2"
 path = "tests/gpu_suite_t2.rs"
 harness = false
+required-features = ["test-hooks"]
 
 [[test]]
 name = "gpu_suite_t3"
 path = "tests/gpu_suite_t3.rs"
 harness = false
+required-features = ["test-hooks"]
 
 [[test]]
 name = "gpu_suite_t4"
 harness = false
+required-features = ["test-hooks"]
 
 [[test]]
 name = "gpu_suite_t5"
 harness = false
+required-features = ["test-hooks"]
 
 [[test]]
 name = "gpu_suite_t6"
 harness = false
+required-features = ["test-hooks"]
 
 [[test]]
 name = "gpu_native_qualification"
 harness = false
+required-features = ["test-hooks"]

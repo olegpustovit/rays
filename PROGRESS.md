@@ -25,11 +25,12 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A2 | active | `ec5c1b1b` re-exports; `5a6e7269` support prune; **this session** — drop `mixed_seed`, privatize internal helpers; restore `uv_ops` / `point_index` re-exports |
 | A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
-| A5 | active | `ec5c1b1b` — `region_snapshot` test-only; **this session** — remove dead `window_to_values`, `live_delay()`; `Editor::Private` + pxui_graph accessors still open |
+| A5 | active | `ec5c1b1b` — `region_snapshot` test-only; **this session** — dead `window_to_values`, `live_delay()`; `Editor::Private` behind `test-hooks` feature (+ `required-features` on GPU/window tests); pxui_graph accessors still open |
 | A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int` until I) |
 | A7 | active | `d01750db` — `cap_y_paint` dedupe; **this session** — shared `point_triangle_*` in `rdk_geom::point_grid`; `ocaml_trim` / path concat still open |
 | A8 | active | `ec5c1b1b` — op.rs prune; **this session** — term_arena in-place setters, param `Field` getters, `presentation_facts_`; `Native::runtime_of` kept (in use) |
-| B0–B5 | pending | B0 investigation next (incremental `target/` invalidation) |
+| B0 | active | Warm incremental: `touch rays_math` → `cargo check -p flow_check` ~1.6s (healthy). Staleness likely from `cargo clean`, non-dev profile, or RUSTFLAGS — per AGENTS.md avoid. |
+| B1–B5 | pending | |
 | M1–M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
@@ -48,3 +49,4 @@ Repo mirror: `docs/history/port-simplification/index.html`
 - 2026-11-08: `d01750db` — pxui_shell `cap_y_paint` dedupe.
 - 2026-11-08: verify — `cargo t -p flow_ir` 337 tests; bg `flow_sop` 133 tests (~66s).
 - 2026-11-08: A5 dead window/live_delay; A7 triangle closest-point unify; A8 term_arena/param/renderer trim; A2 sop + rdk re-export fix; `cargo t -p rdk_geom planar` pass.
+- 2026-11-08: A5 `test-hooks` gates `Editor::Private`; B0 warm incremental smoke on `flow_check`.

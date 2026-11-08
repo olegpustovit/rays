@@ -134,6 +134,7 @@ pub mod Editor {
         loop_model::with_core(value, core)
     }
 
+    #[cfg(feature = "test-hooks")]
     pub mod Private {
         use super::*;
 
