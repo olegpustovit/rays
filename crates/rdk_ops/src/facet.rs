@@ -2,7 +2,7 @@
 //! orientation and cusping, degenerate removal, planarization and normal adjustment, composed
 //! over an optional selection.
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, face_normals, geometry, group, packed, support,
@@ -347,6 +347,7 @@ fn inline_corner(
 }
 
 /// Retained corner count, per-corner keep flags and failure flag of one primitive.
+#[derive(Clone, Default)]
 struct InlineResult {
     retained: i64,
     keep: Vec<bool>,
@@ -438,21 +439,15 @@ fn remove_inline_points(
         return Err(fail(message));
     }
     let chunk = (grain / 8).max(1);
-    let ranges = if primitive_count <= 0 { 0 } else { (primitive_count - 1) / chunk + 1 };
-    let slots: Vec<Mutex<Vec<InlineResult>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    let mut results = vec![InlineResult::default(); primitive_count.max(0) as usize];
+    let windows = support::Windows::even(&mut results, chunk);
     support::run_indexed_ranges(chunk, primitive_count, &|range, first, last| {
-        let mut part = Vec::with_capacity((last - first) as usize);
-        for primitive in first..last {
+        for (primitive, out) in (first..last).zip(windows.take(range)) {
             cancel::poll(cancel_value, primitive, 1023)?;
-            part.push(inline_primitive(distance, &positions, &view, primitives, primitive));
+            *out = inline_primitive(distance, &positions, &view, primitives, primitive);
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
         Ok(())
     })?;
-    let mut results: Vec<InlineResult> = Vec::with_capacity(primitive_count.max(0) as usize);
-    for slot in slots {
-        results.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     if let Some(invalid) = results.iter().position(|result| result.failure) {
         return Err(failf(format!(
             "Facet Remove Inline Points encountered a non-finite position in primitive {invalid}"
@@ -1099,11 +1094,10 @@ fn cusp_polygons(
     let edge_count = iv.edge_a.len() as i64;
     let threshold = angle.cos();
     let epsilon = 64.0 * f64::EPSILON;
-    let ranges = if edge_count <= 0 { 0 } else { (edge_count - 1) / grain + 1 };
-    let slots: Vec<Mutex<Vec<u8>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    let mut cusp = vec![0_u8; edge_count.max(0) as usize];
+    let windows = support::Windows::even(&mut cusp, grain);
     support::run_indexed_ranges(grain, edge_count, &|range, first_edge, last_edge| {
-        let mut part = Vec::with_capacity((last_edge - first_edge) as usize);
-        for edge in first_edge..last_edge {
+        for (edge, out) in (first_edge..last_edge).zip(windows.take(range)) {
             cancel::poll(cancel_value, edge, 4095)?;
             let first = iv.edge_offsets[edge as usize];
             let last = iv.edge_offsets[edge as usize + 1];
@@ -1128,15 +1122,10 @@ fn cusp_polygons(
                     }
                 }
             }
-            part.push(value);
+            *out = value;
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
         Ok(())
     })?;
-    let mut cusp: Vec<u8> = Vec::with_capacity(edge_count.max(0) as usize);
-    for slot in slots {
-        cusp.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     if let Some(invalid_edge) = cusp.iter().position(|&value| value == 2) {
         return Err(failf(format!(
             "Facet Cusp Polygons requires manifold edges; edge {invalid_edge} has more than two incident primitives"
@@ -1154,6 +1143,7 @@ fn planar_world(value: f64, origin: f64, scale: f64, relative: bool) -> f64 {
     if relative { origin + (value * scale) } else { value * scale }
 }
 
+#[derive(Clone, Default)]
 struct PlanarResult {
     failure: u8,
     changed: bool,
@@ -1292,21 +1282,15 @@ fn make_planar(
     }
     let source_positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
     let chunk = (grain / 8).max(1);
-    let ranges = if primitive_count <= 0 { 0 } else { (primitive_count - 1) / chunk + 1 };
-    let slots: Vec<Mutex<Vec<PlanarResult>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    let mut results = vec![PlanarResult::default(); primitive_count.max(0) as usize];
+    let windows = support::Windows::even(&mut results, chunk);
     support::run_indexed_ranges(chunk, primitive_count, &|range, first, last| {
-        let mut part = Vec::with_capacity((last - first) as usize);
-        for primitive in first..last {
+        for (primitive, out) in (first..last).zip(windows.take(range)) {
             cancel::poll(cancel_value, primitive, 1023)?;
-            part.push(planar_primitive(&source_positions, &view, primitives, primitive));
+            *out = planar_primitive(&source_positions, &view, primitives, primitive);
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
         Ok(())
     })?;
-    let mut results: Vec<PlanarResult> = Vec::with_capacity(primitive_count.max(0) as usize);
-    for slot in slots {
-        results.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     if let Some(failed) = results.iter().position(|result| result.failure != 0) {
         let reason = match results[failed].failure {
             1 => "contains a non-finite position",
@@ -1443,11 +1427,11 @@ fn consolidate_point_normal(
     let mut y = source.y.to_vec();
     let mut z = source.z.to_vec();
     let chunk = (grain / 8).max(1);
-    let ranges = if clusters.count <= 0 { 0 } else { (clusters.count - 1) / chunk + 1 };
-    let slots: Vec<Mutex<Vec<(usize, f64, f64, f64)>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    // ponytail: per-cluster values are computed in parallel into a 1:1 buffer; the scatter into x/y/z is sequential.
+    let mut averages: Vec<Option<(f64, f64, f64)>> = vec![None; clusters.count.max(0) as usize];
+    let windows = support::Windows::even(&mut averages, chunk);
     support::run_indexed_ranges(chunk, clusters.count, &|range, first_cluster, last_cluster| {
-        let mut part = Vec::new();
-        for cluster in first_cluster..last_cluster {
+        for (cluster, out) in (first_cluster..last_cluster).zip(windows.take(range)) {
             cancel::poll(cancel_value, cluster, 1023)?;
             let first = clusters.offsets[cluster as usize];
             let last = clusters.offsets[cluster as usize + 1];
@@ -1470,19 +1454,19 @@ fn consolidate_point_normal(
                     }
                 }
                 let divisor = (last - first) as f64;
-                let nx = scaled_average(ax, divisor, scale);
-                let ny = scaled_average(ay, divisor, scale);
-                let nz = scaled_average(az, divisor, scale);
-                for slot in first..last {
-                    part.push((clusters.members[slot as usize] as usize, nx, ny, nz));
-                }
+                *out = Some((
+                    scaled_average(ax, divisor, scale),
+                    scaled_average(ay, divisor, scale),
+                    scaled_average(az, divisor, scale),
+                ));
             }
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
         Ok(())
     })?;
-    for slot in slots {
-        for (point, nx, ny, nz) in slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
+    for (cluster, average) in averages.iter().enumerate() {
+        let Some((nx, ny, nz)) = *average else { continue };
+        for slot in clusters.offsets[cluster]..clusters.offsets[cluster + 1] {
+            let point = clusters.members[slot as usize] as usize;
             x[point] = nx;
             y[point] = ny;
             z[point] = nz;
@@ -1503,13 +1487,13 @@ fn consolidate_vertex_normal(
     let mut y = source.y.to_vec();
     let mut z = source.z.to_vec();
     let chunk = (grain / 8).max(1);
-    let ranges = if clusters.count <= 0 { 0 } else { (clusters.count - 1) / chunk + 1 };
-    let slots: Vec<Mutex<Vec<(usize, f64, f64, f64)>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    // ponytail: per-cluster values are computed in parallel into a 1:1 buffer; the scatter into x/y/z is sequential.
+    let mut averages: Vec<Option<(f64, f64, f64)>> = vec![None; clusters.count.max(0) as usize];
+    let windows = support::Windows::even(&mut averages, chunk);
     let in_selection =
         |vertex: i64| is_selected(primitives, incidence.primitive_of_vertex[vertex as usize]);
     support::run_indexed_ranges(chunk, clusters.count, &|range, first_cluster, last_cluster| {
-        let mut part = Vec::new();
-        for cluster in first_cluster..last_cluster {
+        for (cluster, out) in (first_cluster..last_cluster).zip(windows.take(range)) {
             cancel::poll(cancel_value, cluster, 1023)?;
             let first = clusters.offsets[cluster as usize];
             let last = clusters.offsets[cluster as usize + 1];
@@ -1547,29 +1531,28 @@ fn consolidate_vertex_normal(
                         }
                     }
                     let divisor = elements as f64;
-                    let nx = scaled_average(ax, divisor, scale);
-                    let ny = scaled_average(ay, divisor, scale);
-                    let nz = scaled_average(az, divisor, scale);
-                    for slot in first..last {
-                        let point = clusters.members[slot as usize] as usize;
-                        for at in incidence.point_offsets[point]..incidence.point_offsets[point + 1] {
-                            let vertex = incidence.point_vertices[at as usize];
-                            if in_selection(vertex) {
-                                part.push((vertex as usize, nx, ny, nz));
-                            }
-                        }
-                    }
+                    *out = Some((
+                        scaled_average(ax, divisor, scale),
+                        scaled_average(ay, divisor, scale),
+                        scaled_average(az, divisor, scale),
+                    ));
                 }
             }
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
         Ok(())
     })?;
-    for slot in slots {
-        for (vertex, nx, ny, nz) in slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            x[vertex] = nx;
-            y[vertex] = ny;
-            z[vertex] = nz;
+    for (cluster, average) in averages.iter().enumerate() {
+        let Some((nx, ny, nz)) = *average else { continue };
+        for slot in clusters.offsets[cluster]..clusters.offsets[cluster + 1] {
+            let point = clusters.members[slot as usize] as usize;
+            for at in incidence.point_offsets[point]..incidence.point_offsets[point + 1] {
+                let vertex = incidence.point_vertices[at as usize];
+                if in_selection(vertex) {
+                    x[vertex as usize] = nx;
+                    y[vertex as usize] = ny;
+                    z[vertex as usize] = nz;
+                }
+            }
         }
     }
     packed::Float3::View::of_owned_exn(x, y, z)
@@ -1709,12 +1692,16 @@ fn adjust_normal_attribute(
         attribute::Storage::Float3(values) => {
             let values = packed::Float3::View::view(values)?;
             let count = values.x.len() as i64;
-            let ranges = if count <= 0 { 0 } else { (count - 1) / grain + 1 };
-            let slots: Vec<Mutex<(Vec<(f64, f64, f64)>, bool)>> =
-                (0..ranges).map(|_| Mutex::new((Vec::new(), false))).collect();
+            let zeros = vec![0.0_f64; count.max(0) as usize];
+            let (mut x, mut y, mut z) = (zeros.clone(), zeros.clone(), zeros);
+            let (wx, wy, wz) = (
+                support::Windows::even(&mut x, grain),
+                support::Windows::even(&mut y, grain),
+                support::Windows::even(&mut z, grain),
+            );
+            let failed = AtomicBool::new(false);
             support::run_indexed_ranges(grain, count, &|range, first, last| {
-                let mut part = Vec::with_capacity((last - first) as usize);
-                let mut failed = false;
+                let (ox, oy, oz) = (wx.take(range), wy.take(range), wz.take(range));
                 for element in first..last {
                     cancel::poll(cancel_value, element, 4095)?;
                     let e = element as usize;
@@ -1722,7 +1709,7 @@ fn adjust_normal_attribute(
                     let mut output = (vx, vy, vz);
                     if selected.is_none_or(|mask| mask[e]) {
                         if !(vx.is_finite() && vy.is_finite() && vz.is_finite()) {
-                            failed = true;
+                            failed.store(true, Ordering::Relaxed);
                         } else {
                             let sign = if reverse { -1.0 } else { 1.0 };
                             if !unit_length {
@@ -1739,23 +1726,12 @@ fn adjust_normal_attribute(
                             }
                         }
                     }
-                    part.push(output);
+                    let at = (element - first) as usize;
+                    (ox[at], oy[at], oz[at]) = output;
                 }
-                *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (part, failed);
                 Ok(())
             })?;
-            let (mut x, mut y, mut z) = (Vec::new(), Vec::new(), Vec::new());
-            let mut failed = false;
-            for slot in slots {
-                let (part, range_failed) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-                failed |= range_failed;
-                for (px, py, pz) in part {
-                    x.push(px);
-                    y.push(py);
-                    z.push(pz);
-                }
-            }
-            if failed {
+            if failed.load(Ordering::Relaxed) {
                 return Err(failf(format!("{} normal attribute contains a non-finite vector", owner_word(owner))));
             }
             let created = attribute::create_owned(
@@ -2090,6 +2066,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 mod tests {
     use super::*;
     use rdk_core::topology::PrimitiveKind;
+    use std::sync::Mutex;
 
     type P3 = (f64, f64, f64);
 
