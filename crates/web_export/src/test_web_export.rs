@@ -1,7 +1,7 @@
 //! Byte-for-byte comparison of the Rust export with the OCaml `rays web FILE.rays -o DIR`
 //! (fixtures: fixtures/web_export, captured by capture.sh). A file over 1 MiB is held as its
 //! `.md5` digest.
-use crate::md5::md5_hex;
+use rays_math::hash::md5_hex;
 use crate::{web_export, web_runtime};
 use std::path::PathBuf;
 

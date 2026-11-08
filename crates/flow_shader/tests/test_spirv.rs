@@ -5,7 +5,7 @@
 mod support;
 use flow_ir::kernel_layout;
 use flow_shader::emit::{self, Curves};
-use flow_shader::md5::md5_hex;
+use rays_math::hash::md5_hex;
 use flow_shader::spirv;
 use ogpu_core::shader;
 use std::collections::HashMap;

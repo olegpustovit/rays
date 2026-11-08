@@ -19,3 +19,4 @@ flow_eval = { path = "../flow_eval" }
 flow_ir = { path = "../flow_ir" }
 ogpu_core = { path = "../ogpu_core" }
 rays_diagnostic = { path = "../rays_diagnostic" }
+rays_math = { path = "../rays_math" }

@@ -1,6 +1,6 @@
 //! Port of lib/web_export/web_export.ml: the static 2D workspace export, with its JavaScript/WGSL
 //! runtime embedded. `lower` checks and lowers the first draw graph; `files` prints the export.
-use crate::md5::md5_hex;
+use rays_math::hash::md5_hex;
 use crate::web_runtime;
 use editor_document::workspace_doc as doc;
 use flow_check::workspace::{self as W, Graph, Node, Term};

@@ -202,6 +202,7 @@ dependencies = [
  "flow_syntax",
  "ogpu_core",
  "rays_diagnostic",
+ "rays_math",
 ]
 
 [[package]]
@@ -789,6 +790,7 @@ dependencies = [
  "input",
  "param",
  "rays_diagnostic",
+ "rays_math",
  "scene_command",
  "sdl3_image",
  "sop",

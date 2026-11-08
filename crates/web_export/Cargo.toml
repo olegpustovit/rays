@@ -11,6 +11,7 @@ flow_eval = { path = "../flow_eval" }
 flow_ir = { path = "../flow_ir" }
 flow_web = { path = "../flow_web" }
 flow_shader = { path = "../flow_shader" }
+rays_math = { path = "../rays_math" }
 flow_sop = { path = "../flow_sop" }
 editor_document = { path = "../editor_document" }
 sop = { path = "../sop" }

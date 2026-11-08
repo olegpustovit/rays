@@ -3,7 +3,6 @@
 //! the OCaml library's device-side helpers (compiled once per scene variant / octave count).
 pub mod emit;
 pub mod lisp_stage;
-pub mod md5;
 pub mod noise;
 pub mod print;
 pub mod raster;

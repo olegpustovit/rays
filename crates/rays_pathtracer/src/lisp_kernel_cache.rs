@@ -294,9 +294,9 @@ pub fn disk_cached(t: &T, name: &str, make: &dyn Fn() -> Result<front_result, St
     let text = lisp_kernel::text(&t.facts, previews.contains(&name));
     let backend = ogpu::impl_::backend().unwrap_or_default();
     let key = [executable.as_str(), name, text.as_str(), format!("{:?}", t.facts).as_str(), backend.as_str()].join("\0");
-    let file = Path::new(&dir).join(flow_shader::md5::md5_hex(key.as_bytes()));
+    let file = Path::new(&dir).join(rays_math::hash::md5_hex(key.as_bytes()));
     if let Ok(data) = std::fs::read(&file) {
-        if data.len() > 32 && flow_shader::md5::md5_hex(&data[32..]).as_bytes() == &data[..32] {
+        if data.len() > 32 && rays_math::hash::md5_hex(&data[32..]).as_bytes() == &data[..32] {
             if let Some(found) = decode(&data[32..]) {
                 return Ok(found);
             }
@@ -310,7 +310,7 @@ pub fn disk_cached(t: &T, name: &str, make: &dyn Fn() -> Result<front_result, St
 fn store(dir: &str, file: &Path, value: &front_result) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let payload = encode(value);
-    let mut data = flow_shader::md5::md5_hex(&payload).into_bytes();
+    let mut data = rays_math::hash::md5_hex(&payload).into_bytes();
     data.extend_from_slice(&payload);
     let temp = Path::new(dir).join(format!("kernel-{}-{}.part", std::process::id(), SERIAL.fetch_add(1, Ordering::Relaxed)));
     std::fs::write(&temp, data)?;

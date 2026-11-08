@@ -5,7 +5,7 @@
 //! Rust shape notes: OCaml's exception-based `fail` becomes a recorded failure (`Gen::failure`)
 //! after which the printer stops; the layout visitor is the `Visit` impl of the generator.
 #![allow(non_snake_case)]
-use crate::md5::md5_hex;
+use rays_math::hash::md5_hex;
 use crate::noise;
 use crate::trace::Back;
 pub use crate::trace::Curves;
