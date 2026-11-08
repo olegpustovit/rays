@@ -136,6 +136,20 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: Flow round 2.
+  - Fixed:
+    - `882e12e1`: marks picture 19 golden was stale. It is a serialized-scene digest, and macOS 27 now matches the Windows value.
+    - `61e173bf`: sopcat_manifest compares against all registered factories, as the OCaml test did.
+    - `b79de591`: `pipeline_compilations` counts only compiles a dispatch waits for, not background specialisation (regression `specialized_captures`).
+    - `7653b55e`: isogrid_deferred deadlock. The test awaited a cook whose worker needed the main-thread GPU service; it now pumps as the editor loop does (1.02 s).
+  - Root-caused, open:
+    - Per-call region compile in `core_exec` (`compile_impl` on every `prepare_invoke`, ~40% malloc) and packed static evaluation of `fold` bodies element by element: test_parallel_exact 4.7 s, no regressing commit found across 5 builds.
+    - Lisp node re-lowering on every field change: sopcat_perturbation 60.8 s; sopcat_manifest 5.7 s from factory registration.
+    - chain: `mesh_resident` (`4ed6baf8`) uploads a 65,536-float grid array plus a fused P upload.
+    - holder: old P device output held one frame.
+    - release `map` +29%: the cost is outside the arithmetic loop; a fused `a+x*y` plan did not help and was reverted.
+    - native_scrub_gpu 5.4 s.
+
 - 2026-11-08: editor round 2.
   - Allocations/frame (Rust allocations in the harness), with caps lowered each stage:
 
