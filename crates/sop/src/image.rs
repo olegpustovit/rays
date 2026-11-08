@@ -1,7 +1,7 @@
 //! Port of lib/sop/image.ml: immutable, renderer-independent row-major images, backed by float
 //! samples in [0,1] or owned RGBA8 bytes.
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rays_diagnostic::Diagnostic;
 
@@ -122,18 +122,18 @@ pub fn of_vec4(context: &context::T, width: i64, height: i64, rgba: &[f64]) -> R
     let grain: i64 = 16_384;
     let invalid = AtomicBool::new(false);
     let last = (count - 1) / grain;
-    let chunks: Mutex<Vec<Option<Vec<u8>>>> = Mutex::new(vec![None; (last + 1) as usize]);
+    let mut bytes = vec![0u8; rgba.len()];
+    let windows = rdk::support::Windows::even(&mut bytes, grain * 4);
     let chunk = |k: i64| -> Result<(), String> {
         if context::cancelled(context) {
             return Ok(());
         }
         let from = (k * grain * 4) as usize;
-        let to = (rgba.len() as i64).min((k + 1) * grain * 4) as usize;
-        let mut out = Vec::with_capacity(to - from);
-        for sample in &rgba[from..to] {
+        let out = windows.take(k);
+        for (slot, sample) in out.iter_mut().zip(&rgba[from..]) {
             if !sample.is_finite() {
                 invalid.store(true, Ordering::Relaxed);
-                out.push(0);
+                *slot = 0;
             } else {
                 let q = sample.min(1.0).max(0.0) * 255.0;
                 let mut n = q.floor() as i64;
@@ -141,10 +141,9 @@ pub fn of_vec4(context: &context::T, width: i64, height: i64, rgba: &[f64]) -> R
                 if fraction > 0.5 || (fraction == 0.5 && n & 1 == 1) {
                     n += 1;
                 }
-                out.push(n as u8);
+                *slot = n as u8;
             }
         }
-        chunks.lock().unwrap()[k as usize] = Some(out);
         Ok(())
     };
     if count < 2 * grain {
@@ -159,10 +158,6 @@ pub fn of_vec4(context: &context::T, width: i64, height: i64, rgba: &[f64]) -> R
     }
     if invalid.load(Ordering::Relaxed) {
         return Err(error("Image kernel channels must be finite."));
-    }
-    let mut bytes = Vec::with_capacity(rgba.len());
-    for part in chunks.into_inner().unwrap() {
-        bytes.extend(part.unwrap_or_default());
     }
     of_owned_rgba8(width, height, bytes)
 }

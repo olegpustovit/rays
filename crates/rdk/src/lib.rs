@@ -3,6 +3,7 @@
 pub use rdk_ops::line_geometry;
 pub use rdk_core::error;
 pub use rdk_core::cancel;
+pub use rdk_core::support;
 pub use rdk_core::packed;
 pub use rdk_core::topology;
 pub use rdk_core::topology_index;
