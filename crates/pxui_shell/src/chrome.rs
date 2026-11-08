@@ -307,10 +307,6 @@ fn edge_color(theme: &theme::Theme, moving: &Rc<RefCell<Option<Path>>>, path: &P
     if moving.borrow().as_ref() == Some(path) { theme.accent } else { theme::border(theme) }
 }
 
-fn cap_y_of(paint: &Paint, y: f64, h: f64) -> f64 {
-    paint.text_top(Some(8.max(paint.font_size - 2)), y, h)
-}
-
 fn cut(paint: &mut Paint, size: Option<i64>, room: f64, part: &str) -> String {
     ellipsis(&mut |s| paint.text_width(size, s), room.max(0.0), part)
 }
@@ -589,7 +585,7 @@ pub fn update(
             Box::new(move |paint, (x, y, w, h)| {
                 paint.fill(x, y, w, h, theme.input);
                 paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
-                let cy = cap_y_of(paint, y, h);
+                let cy = kit::cap_y_paint(paint, y, h);
                 paint.text_s((x + 7.0, cy), size, theme.foreground, words);
             }),
         );
@@ -659,7 +655,7 @@ pub fn update(
                         limit = tx;
                     }
                     if labelled {
-                        let cy = cap_y_of(paint, y, h);
+                        let cy = kit::cap_y_paint(paint, y, h);
                         paint.cap((tx, cy), Some(if focused { theme.foreground } else { ink_2 }), &main);
                     }
                     tx += paint.cap_width(&main) + 8.0;
@@ -676,7 +672,7 @@ pub fn update(
                     if !sub.is_empty() && l.floating && !collapsed {
                         // the subject follows the kind, 8 points on (windows.html's title row)
                         let size = cap;
-                        let cy = cap_y_of(paint, y, h);
+                        let cy = kit::cap_y_paint(paint, y, h);
                         let shown = cut(paint, Some(size), limit - tx, &sub);
                         paint.text_s((tx, cy), size, rays_math::color::with_alpha(ink_2, 179), &shown);
                     } else if !sub.is_empty() && !collapsed {
@@ -705,7 +701,7 @@ pub fn update(
                     // the window's close mark is the label-size multiplication sign, centred in its button
                     let size = cap;
                     let tw = paint.text_width(Some(size), "\u{d7}");
-                    let ty = cap_y_of(paint, y, h);
+                    let ty = kit::cap_y_paint(paint, y, h);
                     paint.text_s((cx - (tw / 2.0), ty), size, ink_2, "\u{d7}");
                 } else {
                     paint.chevron((cx, cy), if collapsed { Dir::Down } else { Dir::Left }, if l.floating { ink_2 } else { theme.foreground });
@@ -854,7 +850,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             ui.draw(
                 &tip,
                 Box::new(move |paint, (x, y, _, h)| {
-                    let cy = cap_y_of(paint, y, h);
+                    let cy = kit::cap_y_paint(paint, y, h);
                     paint.ratio((x, cy), a, 100 - a);
                 }),
             );

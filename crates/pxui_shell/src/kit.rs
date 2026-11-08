@@ -110,7 +110,7 @@ pub fn button(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, o: &ButtonOpts, la
 }
 
 fn cap_y_of(paint: &Paint, y: f64, h: f64) -> f64 {
-    paint.text_top(Some(8.max(paint.font_size - 2)), y, h)
+    cap_y_paint(paint, y, h)
 }
 
 /// A colour: a 20-point swatch, then its hex field to the right edge of the control column; the
