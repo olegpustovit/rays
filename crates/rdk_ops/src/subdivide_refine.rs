@@ -1,6 +1,6 @@
 //! Port of lib/rdk/ops/mesh/subdivide_refine.ml: stencil plans, creases, face-varying refinement,
 //! attribute/group remapping and local-part combination for polygon subdivision.
-use std::sync::atomic::{AtomicI64, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, AtomicU8, Ordering};
 
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::{
@@ -148,6 +148,57 @@ impl AInts {
     }
     pub fn into_vec(self) -> Vec<i64> {
         self.values.into_iter().map(AtomicI64::into_inner).collect()
+    }
+}
+
+/// Parallel `i32` scratch for per-vertex topology indices that fit the narrow range.
+struct AIntsI32 {
+    values: Vec<AtomicI32>,
+}
+
+impl AIntsI32 {
+    fn new(count: i64, fill: i64) -> Option<AIntsI32> {
+        if count > i32::MAX as i64 {
+            return None;
+        }
+        let fill = i32::try_from(fill).ok()?;
+        let count = count as usize;
+        Some(AIntsI32 {
+            values: (0..count).map(|_| AtomicI32::new(fill)).collect(),
+        })
+    }
+    fn set(&self, index: i64, value: i64) {
+        self.values[index as usize].store(i32::try_from(value).expect("narrow scratch value"), Ordering::Relaxed);
+    }
+    fn into_vec_i64(self) -> Vec<i64> {
+        self.values.into_iter().map(|value| i64::from(value.into_inner())).collect()
+    }
+}
+
+// ponytail: first of seven per-vertex `make_topology` scratch arrays; widen remaining `AInts` the same way.
+enum VertexPrimitiveScratch {
+    I32(AIntsI32),
+    I64(AInts),
+}
+
+impl VertexPrimitiveScratch {
+    fn new(count: i64, fill: i64) -> Self {
+        match AIntsI32::new(count, fill) {
+            Some(scratch) => Self::I32(scratch),
+            None => Self::I64(AInts::new(count, fill)),
+        }
+    }
+    fn set(&self, index: i64, value: i64) {
+        match self {
+            Self::I32(scratch) => scratch.set(index, value),
+            Self::I64(scratch) => scratch.set(index, value),
+        }
+    }
+    fn into_vec(self) -> Vec<i64> {
+        match self {
+            Self::I32(scratch) => scratch.into_vec_i64(),
+            Self::I64(scratch) => scratch.into_vec(),
+        }
     }
 }
 
@@ -1223,7 +1274,7 @@ pub fn make_topology(
             let vertex_kind = ABytes::new(output_vertices, 0);
             let vertex_a = AInts::new(output_vertices, 0);
             let vertex_b = AInts::new(output_vertices, -1);
-            let vertex_primitive = AInts::new(output_vertices, -1);
+            let vertex_primitive = VertexPrimitiveScratch::new(output_vertices, -1);
             let vertex_edge_source = AInts::new(output_vertices, -1);
             let primitive_source = AInts::new(output_primitives, 0);
             run(grain, cancel_token, topology_view.vertex_points.len() as i64, &|vertex| {
@@ -1306,7 +1357,7 @@ pub fn make_topology(
             let vertex_kind = ABytes::new(output_vertices, 0);
             let vertex_a = AInts::new(output_vertices, 0);
             let vertex_b = AInts::new(output_vertices, -1);
-            let vertex_primitive = AInts::new(output_vertices, -1);
+            let vertex_primitive = VertexPrimitiveScratch::new(output_vertices, -1);
             let vertex_edge_source = AInts::new(output_vertices, -1);
             let primitive_source = AInts::new(output_primitives, 0);
             let set = |vertex: i64, point: i64, kind: u8, a: i64, b: i64, primitive: i64| {
@@ -5065,4 +5116,24 @@ pub fn once(
         Some(groups),
         Some(edge_groups),
     )
+}
+
+#[cfg(test)]
+mod m18_vertex_primitive_scratch {
+    use super::{AIntsI32, VertexPrimitiveScratch};
+
+    #[test]
+    fn vertex_primitive_i32_scratch_round_trip() {
+        let scratch = VertexPrimitiveScratch::new(8, -1);
+        scratch.set(2, 5);
+        scratch.set(6, 0);
+        assert_eq!(scratch.into_vec(), vec![-1, -1, 5, -1, -1, -1, 0, -1]);
+    }
+
+    #[test]
+    fn vertex_primitive_i32_direct() {
+        let narrow = AIntsI32::new(4, 0).expect("narrow length");
+        narrow.set(1, 7);
+        assert_eq!(narrow.into_vec_i64(), vec![0, 7, 0, 0]);
+    }
 }
