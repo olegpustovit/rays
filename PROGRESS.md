@@ -136,6 +136,19 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: native suite triage. All 37 dev failures also fail at the pre-plan baseline `11988707` (full suite built and run at both commits in a throwaway worktree, plus `RAYS_SLOW=1` timing runs), so none is a plan regression. The plan made most slow cases faster (e.g. sopcat_graph_edits 16.0 -> 6.7 s, node_inputs 17.9 -> 6.8 s; orrery no longer hits its 444 MB OOM). The chain failure point moved at `537345e4`, which fixed a pre-baseline fuse bug and exposed hidden assertions: warm re-upload, 16 vs 12 B/pt. Pre-existing bugs to fix:
+  - GPU handle leaks after close: images x2, isogrid_viewport x8, placement_retained.
+  - chain warm re-upload: chain_gpu, chain_frames.
+  - scrub-back recompiles a pipeline.
+  - holder frames retain the old P.
+  - sopcat manifest omits kinds.
+  - marks picture 19 (rounded_rect) digest.
+  - inspector drag offsets: run_loop_copies, scene_tree_c_slider.
+  - threading test path is `../../../`, stale since `57487bbd`.
+  - `export_or_skip` doesn't recognise SDL's "(dummy)" error.
+  - 5 s budget overruns: run_ops/unbound_panels/editor/panels/panel_keys, sopcat_*, shattered_studio, isogrid_deferred, sopcat_perturbation, workspace_packed_capture_state, orrery.
+  Logs are in the session scratchpad (`base.log`, `dev.log`, `*_slow.log`, `bisect-*`).
+
 - 2026-11-08: Flow finish pass:
   - `bfb2a44a`: packed engine no longer finite-checks constants (fixes `test_fma`; introduced by `8bf0c0d0`).
   - `537345e4`: `core_fuse::merge` handles mixed uniform/constant captures (fixes `test_settle`).
