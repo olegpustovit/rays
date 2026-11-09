@@ -14,21 +14,21 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
-| X | 6 | 1 | 0 | 5 |
+| X | 6 | 2 | 0 | 4 |
 | B | 8 | 0 | 0 | 8 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 0 | 0 | 12 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **1** | **0** | **57** |
+| **All** | **58** | **2** | **0** | **56** |
 
 ## Items
 
 | ID | Wave | Status | Commit / evidence | Regression check |
 |----|------|--------|-------------------|------------------|
-| X1 | X | done | `753036dd` — `packed_ops::{float_min,float_max,ldexp,binary_apply,unary_apply}`; walker `min`/`max`/`array/min`/`array/max`; `min_max_signed_zero_walker_matches_packed`, `float_min_max_signed_zeros` | New case: walker equals packed for (min -0. 0.) and (max 0. -0.) |
-| X2 | X | pending | — | test_store: a 2^62 literal decodes as Int |
+| X1 | X | done | `098310fa` — `packed_ops::{float_min,float_max,ldexp,binary_apply,unary_apply}`; walker `min`/`max`/`array/min`/`array/max`; `min_max_signed_zero_walker_matches_packed`, `float_min_max_signed_zeros` | New case: walker equals packed for (min -0. 0.) and (max 0. -0.) |
+| X2 | X | active | `dd1656a0` — `store/form::int_of_string_opt` (i64); `settings_int_above_2_62_decodes_as_int`. **Remaining:** `1<<62` caps/sentinels (~dozen sites) | test_store: a 2^62 literal decodes as Int |
 | X3 | X | pending | — | A context-dependent failure reports its real code |
 | X4 | X | pending | — | Both surfaces give the same step for the same drag |
 | X5 | X | pending | — | test_editor_inspect covers vec2 and vec4 operator rows |
