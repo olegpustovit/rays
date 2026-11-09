@@ -19,9 +19,9 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
 | Z | 11 | 0 | 1 | 10 |
-| R | 10 | 4 | 2 | 4 |
+| R | 10 | 5 | 2 | 3 |
 | G | 7 | 0 | 1 | 6 |
-| **All** | **58** | **32** | **5** | **21** |
+| **All** | **58** | **33** | **5** | **20** |
 
 ## Items
 
@@ -72,8 +72,8 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | R2 | R | done | `25c98948` — immutable parent cache layers; snapshot isolation; iterative destruction; scatter guard lowered | IR346, 10000-layer/drop guard, bench digest c4bbf006c82014c7, workspace all-targets, native/three-kernel guards pass |
 | R3 | R | done | `608c3385` — immutable lexical free-name ranges; global/per-evaluation caches removed; bypass active-input semantics preserved | Flow490, parallel40, zero-allocation reads, lowered idle/sea/three-kernel caps and workspace check pass |
 | R4 | R | active | Owner/lifetime and all operator callers traced; baseline helpers prepared; no production changes yet | Library plus 49 sketches byte-identical |
-| R5 | R | pending | — | flow_eval state |
-| R6 | R | active | Result predicates and par_fill installed across 243 constructor calls; group12 and par_fill3 guards pass | Shared parallel40 pass; full CPU/native qualification and paired timing pending |
+| R5 | R | active | Shared state maps and integer-pair stamps implemented; initial fork/stamp/transaction allocation guard passes | Full state/rollback/native consumer qualification pending; restore snapshots by move |
+| R6 | R | done | `39d6f261` — 243 Result predicates; par_fill and plain zip; ten cancellation atomics and two error Mutex channels removed | CPU558, group12/par_fill3, parallel40, native/sea/warm caps and workspace check pass; serial ABI cost disclosed |
 | R7 | R | done | `85e72ed5` — fourteen repoint paths share offsets/kinds; one validated constructor; polygons_shared deleted | Geometry429/native10, shared-storage identity, idle/sea/three warm guards pass; repoint9.8x faster |
 | R8 | R | pending | — | pxui_graph (31 cases); alloc_budget |
 | R9 | R | pending | — | Lower the alloc_budget.rs limits |
@@ -249,3 +249,10 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - **R3 complete** `608c3385`: final workspace all-target check9.20s passes; shared parallel40 proof above and latest native/geometry guards cover coherent R3+R6+G1 source. Idle3 pass15.27s then tightened byte limits confirmed3/3 in4.56s (slowest0.378s): basic1382/157055, empty1206/81958, bare1417/96617 allocations/B per frame. Sea passes1.68s wall (case1.171s), maximum51561/2822715 with all residency/zero-upload/bounded-close invariants; cap lowered to51565/2823000. Three warm cooks pass3.03s (scatter2.671s, subdivide2.392s, Boolean0.393s); changed caps lowered to subdivision114105/3452650 and scatter1402035/16429860, Boolean26695/926350 unchanged. No cap raised.
 - Source/index boundaries remain separate: R3 commit contains only root's guard hunk in flow_sop/test_alloc_budget; R6's Result predicate callback remains in its own diff. R4 begins exact baseline capture before checker/operator changes; G2 implementation prepares outside the worktree until its build slot is available.
 - Artifact **v23** published with the CLI and verified by byte-identical source readback, matching embedded/tracked seeds and all58 live database documents. Tracker immediate/live/offline regression passes. Snapshot **32done/5active/21pending (55.2% by item count)**. All original requirements remain; B8 timeout,495historical shape violations, zero/O(1) end state and final full qualification stay open.
+
+- **R6 complete** `39d6f261`:57files net+5lines including five regression guards and an ignored timing case. Group/edge init now takes Result<bool>; constructors use par_fill, combine uses plain zip. All243actual constructor calls migrated (173group/70edge). Ten cancellation AtomicBools, one misleading incidence validation flag and two Boolean error Mutex channels removed. Invalid mapping flag remains deliberately to preserve cancellation-over-invalid-map priority. Grain/name/topology validation order, ordering/padding, deterministic lowest-range typed errors, callback panics and4096-element polling remain checked. Triangulate2d cancellation retains its existing InvalidTriangulation message.
+- R6 validation: focused group12 and par_fill3 pass; all-target workspace9.20s; full affected CPU558cases24.194s (slowest parallel attribute interpolation1.137s); shared FlowSOPparallel40cases43.19s and lowered native idle3/sea/three warm cooks pass as recorded above. Temporary reference constructors were removed and final production source byte-compared before commit; diff--check clean.
+- R6 paired same-process four-operation medians: domains4 init1.957→0.834ms(grain97),1.831→0.454ms(grain4096),2.35–4.03x faster; unions15–34x faster. Domains1 init1.785→2.768ms and0.991→1.264ms,28–55% slower from the required Result predicate ABI. This serial cost remains visible; no second API or generic adapter was added to disguise it. Actual warm/native checks stay within their unchanged time and lowered allocation limits.
+- **R4 baseline captured** before checker ownership changes: all178 static cases (129actual library sources with dependencies plus49sketches), existing sketch golden and custom-mutated Op guard pass. Full-library monolithic case exceeded the original5s case cap; per-source coverage replaces only that oversized fixture, retaining every source and original deadlines. Prelude clone64times47488allocations/4.334ms; warm-check median1.748ms/12864allocations. Borrowed/cached Op batch compiles; full checker base/PathId changes remain active.
+- **R5 active**: new guard fails before changes (fork85allocations,1024stamp reads2048, read-only transaction85), then passes after shared snapshots (1/0/0). Added nested rollback and repeatable checkpoint coverage; packed-scope and native image caches migrate from String to typed stamp fields. An initial scoped check identified a remaining packed String field; full caller audit fixes this and native image sentinel fields before workspace verification. Full qualification remains pending, so R5 is not counted complete.
+- Artifact **v24** published and CLI readback verifies source bytes, both seeds and58live records. Snapshot **33done/5active/20pending (56.9% by item count)**. R5 remains active pending full consumer qualification; all original scope remains.

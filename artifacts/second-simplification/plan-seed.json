@@ -180,12 +180,12 @@
     "note": "Owner/lifetime and all operator callers traced; baseline helpers prepared; no production changes yet"
   },
   "R5": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Shared state maps and integer-pair stamps implemented; initial fork/stamp/transaction allocation guard passes"
   },
   "R6": {
-    "status": "active",
-    "note": "Result predicates and par_fill installed across 243 constructor calls; group12 and par_fill3 guards pass"
+    "status": "done",
+    "note": "39d6f261 \u2014 243 Result predicates; par_fill and plain zip; ten cancellation atomics and two error Mutex channels removed"
   },
   "R7": {
     "status": "done",
