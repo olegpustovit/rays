@@ -38,6 +38,7 @@ async function check(db, liveDone) {
     assert.equal(path, 'plan');
     return {get: async () => ({docs: Object.keys(JSON.parse(seed)).map(id => ({id, data: () => ({status: 'done'})}))})};
   }}, 58);
+  await check({collection: () => ({get: async () => ({docs: [{id: 'B8', data: () => ({status: '<invalid>'})}]})})});
   await check({collection: () => ({get: async () => { throw Error('offline'); }})});
   console.log('Tracker: immediate snapshot, live collection and offline fallback pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
