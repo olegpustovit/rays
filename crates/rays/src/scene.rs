@@ -96,9 +96,6 @@ pub enum node {
 
 pub type Scene = Vec<node>;
 
-pub fn empty() -> Scene {
-    Vec::new()
-}
 
 pub fn group(x: Scene) -> node {
     node::Group(Rc::new(x))
@@ -119,11 +116,13 @@ fn rgba(c: color::T) -> i32 {
 // ---- shape caches ----
 
 const PATH_GEOMETRY_CACHE_CAPACITY: i64 = 256;
+#[cfg(test)]
 const ROUNDED_CACHE_CAPACITY: i64 = 256;
 const ELLIPSE_CACHE_CAPACITY: i64 = 256;
 
 struct shape_cache_context {
     path_geometry: RefCell<Table>,
+    #[cfg(test)]
     rounded: RefCell<Table>,
     ellipse: RefCell<Table>,
     fonts: font::raster::cache_context,
@@ -140,6 +139,7 @@ thread_local! {
 fn create_shape_cache_context() -> shape_cache_context {
     shape_cache_context {
         path_geometry: RefCell::new(side_lru::create(lru::cache("rays.path_geometry"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), PATH_GEOMETRY_CACHE_CAPACITY)),
+        #[cfg(test)]
         rounded: RefCell::new(side_lru::create(lru::cache("rays.rounded"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), ROUNDED_CACHE_CAPACITY)),
         ellipse: RefCell::new(side_lru::create(lru::cache("rays.ellipse"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), ELLIPSE_CACHE_CAPACITY)),
         fonts: font::raster::create_cache_context(),
@@ -164,11 +164,10 @@ fn path_geometry_cached(key: TableKey, make: &dyn Fn() -> Result<node, String>) 
     let Some(context) = context else {
         return make();
     };
-    if let Some(item) = side_lru::find(&mut context.path_geometry.borrow_mut(), &key) {
-        if let Ok(n) = item.downcast::<node>() {
+    if let Some(item) = side_lru::find(&mut context.path_geometry.borrow_mut(), &key)
+        && let Ok(n) = item.downcast::<node>() {
             return Ok((*n).clone());
         }
-    }
     let value = make()?;
     side_lru::add(&mut context.path_geometry.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()));
     Ok(value)
@@ -190,7 +189,7 @@ pub fn line(from_: (i64, i64), to_: (i64, i64), color_: Option<color::T>, width:
     })
 }
 
-pub fn polygon(points: &[(i64, i64)], fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
+pub(crate) fn polygon(points: &[(i64, i64)], fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
     let fill = if fill.is_none() && stroke.is_none() { Some(default_color()) } else { fill };
     let key = path_geometry_key(points, true, 1., fill, stroke);
     path_geometry_cached(key, &|| {
@@ -199,14 +198,6 @@ pub fn polygon(points: &[(i64, i64)], fill: Option<color::T>, stroke: Option<col
     })
 }
 
-pub fn polyline(points: &[(i64, i64)], color_: Option<color::T>) -> Result<node, String> {
-    let color_ = color_.unwrap_or_else(default_color);
-    let key = path_geometry_key(points, false, 1., None, Some(color_));
-    path_geometry_cached(key, &|| {
-        let floats: Vec<(f64, f64)> = points.iter().map(|&(x, y)| (x as f64, y as f64)).collect();
-        Ok(node::Geometry(Rc::new(shape2::polyline(&floats, rgba(color_))?)))
-    })
-}
 
 pub fn point(at: (i64, i64), color_: Option<color::T>) -> Result<node, String> {
     let (x, y) = at;
@@ -218,7 +209,8 @@ pub fn rect(at: (i64, i64), w: i64, h: i64, fill: Option<color::T>, stroke: Opti
     polygon(&[(x, y), (x + w, y), (x + w, y + h), (x, y + h)], fill, stroke)
 }
 
-pub fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
+#[cfg(test)]
+pub(crate) fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Option<color::T>, stroke: Option<color::T>) -> Result<node, String> {
     let (x, y) = at;
     let radius = std::cmp::max(0, std::cmp::min(radius, std::cmp::min(w.abs(), h.abs()) / 2));
     let key = TableKey::Str(format!("rr|{w}|{h}|{radius}|{:?}|{:?}", fill.map(rgba), stroke.map(rgba)));
@@ -329,11 +321,10 @@ pub fn display_list(images: Option<Vec<(i64, image::Image)>>, segment: Arc<Segme
                     return Err("Scene.display_list: unbound image resource".to_string());
                 }
             }
-            Command::Glyphs(g) => {
-                if !bound.contains(&g.resource_id) {
+            Command::Glyphs(g)
+                if !bound.contains(&g.resource_id) => {
                     return Err("Scene.display_list: unbound glyph resource".to_string());
                 }
-            }
             _ => {}
         }
     }
@@ -458,7 +449,7 @@ pub fn transform(tr: Transform, nodes: Scene) -> node {
     node::Affine(tr, Rc::new(nodes))
 }
 
-pub fn render(scene: &Scene) {
+pub(crate) fn render(scene: &Scene) {
     let callback = RENDERER.with(|r| r.borrow().clone());
     if let Some(callback) = callback {
         callback(scene);
@@ -568,7 +559,7 @@ pub mod layer {
         });
     }
 
-    pub fn clear_cache_context(context: &cache_context) {
+    pub(crate) fn clear_cache_context(context: &cache_context) {
         font::raster::clear_cache_context(&context.0.shapes.fonts);
     }
 
@@ -636,7 +627,7 @@ pub mod layer {
         s
     }
 
-    pub fn native_segment_version(segment: &Segment, resources: &[(i64, retained_resource)]) -> i64 {
+    pub(crate) fn native_segment_version(segment: &Segment, resources: &[(i64, retained_resource)]) -> i64 {
         let mix = |stamp: i64, value: i64| rays_math::hash::fnv64_mix(stamp, value);
         let mut stamp = display_list::version(segment);
         for (_, r) in resources {
@@ -649,7 +640,7 @@ pub mod layer {
         stamp & i64::MAX
     }
 
-    pub fn with_renderer(callback: Rc<dyn Fn(&Scene)>, f: &mut dyn FnMut()) {
+    pub(crate) fn with_renderer(callback: Rc<dyn Fn(&Scene)>, f: &mut dyn FnMut()) {
         let previous = RENDERER.with(|r| r.borrow_mut().replace(callback));
         struct R(Option<Rc<dyn Fn(&Scene)>>);
         impl Drop for R {
@@ -1092,11 +1083,10 @@ pub mod layer {
             return Ok(Rc::new(create()?));
         };
         let key = TableKey::Int(id);
-        if let Some(item) = side_lru::find(&mut context.texture_levels.borrow_mut(), &key) {
-            if let Ok(levels) = item.downcast::<Vec<se::TextureLevel>>() {
+        if let Some(item) = side_lru::find(&mut context.texture_levels.borrow_mut(), &key)
+            && let Ok(levels) = item.downcast::<Vec<se::TextureLevel>>() {
                 return Ok(levels);
             }
-        }
         let levels = Rc::new(create()?);
         let bytes = levels.iter().map(|l| l.bytes.len() as i64).sum();
         side_lru::add(&mut context.texture_levels.borrow_mut(), bytes, key, levels.clone());
@@ -1108,15 +1098,12 @@ pub mod layer {
         let versions: Vec<(i64, i64, i64)> = resources.iter().map(resource_version).collect();
         let lower = CURRENT_LOWER.with(|c| c.borrow().clone());
         let key = TableKey::Int(mix(hash_native_scene(nodes), density));
-        if let Some(context) = &lower {
-            if let Some(item) = side_lru::find(&mut context.scene2_layers.borrow_mut(), &key) {
-                if let Ok(entry) = item.downcast::<layer_entry>() {
-                    if entry.density == density && same_native_scene(&entry.scene, nodes) && entry.versions == versions {
+        if let Some(context) = &lower
+            && let Some(item) = side_lru::find(&mut context.scene2_layers.borrow_mut(), &key)
+                && let Ok(entry) = item.downcast::<layer_entry>()
+                    && entry.density == density && same_native_scene(&entry.scene, nodes) && entry.versions == versions {
                         return Ok((entry.ir.clone(), resources));
                     }
-                }
-            }
-        }
         let (ir, _) = stage_materialized(density, nodes)?;
         if let Some(context) = &lower {
             let bytes = scene2_layer_bytes(&ir) + (versions.len() * 7 * 8) as i64;
@@ -1210,7 +1197,6 @@ pub mod layer {
     fn lowering_error_message(e: &lowering::error) -> String {
         use lowering::error as E;
         let detail = match e {
-            E::Unsupported_mode => "render mode",
             E::Unsupported_texture => "borrowed GPU texture needs an explicit CPU snapshot",
             E::Too_many_lights => "more than 64 lights",
             E::Invalid_mesh => "mesh",
@@ -1399,16 +1385,15 @@ pub mod layer {
         let hash = mix(mix(mix(mix(hash_native_scene(scene), aggregate as i64), density), width), height);
         let key = TableKey::Int(hash);
         let cached = side_lru::find(&mut context.0.native_stages.borrow_mut(), &key).and_then(|i| i.downcast::<native_stage_cache_entry>().ok());
-        if let Some(entry) = &cached {
-            if entry.cached_aggregate == aggregate
-                && entry.cached_density == density
-                && entry.cached_width == width
-                && entry.cached_height == height
-                && same_native_scene(&entry.cached_scene, scene)
-                && entry.cached_resource_stamp == native_resource_stamp(&entry.cached_stage)
-            {
-                return Ok(entry.cached_stage.clone());
-            }
+        if let Some(entry) = &cached
+            && entry.cached_aggregate == aggregate
+            && entry.cached_density == density
+            && entry.cached_width == width
+            && entry.cached_height == height
+            && same_native_scene(&entry.cached_scene, scene)
+            && entry.cached_resource_stamp == native_resource_stamp(&entry.cached_stage)
+        {
+            return Ok(entry.cached_stage.clone());
         }
         if cached.is_some() {
             side_lru::remove(&mut context.0.native_stages.borrow_mut(), &key);

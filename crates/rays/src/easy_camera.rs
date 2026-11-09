@@ -69,11 +69,10 @@ fn validate_distance(distance: f64) -> Result<(), String> {
 }
 
 fn validate_control_area(area: Option<(i64, i64, i64, i64)>) -> Result<(), String> {
-    if let Some((_, _, width, height)) = area {
-        if width < 0 || height < 0 {
+    if let Some((_, _, width, height)) = area
+        && (width < 0 || height < 0) {
             return Err("Easy_camera: control-area dimensions must be non-negative".to_string());
         }
-    }
     Ok(())
 }
 
@@ -132,17 +131,16 @@ fn orbit_basis(up: vec3::T) -> (vec3::T, vec3::T) {
 }
 
 pub fn camera(value: &EasyCamera) -> Result<camera::Camera, String> {
-    if let Some(cached) = value.camera_cache.borrow().as_ref() {
-        if cached.snapshot_target == value.target
-            && cached.snapshot_distance == value.distance
-            && cached.snapshot_azimuth == value.azimuth
-            && cached.snapshot_elevation == value.elevation
-            && cached.snapshot_fov_y == value.fov_y
-            && cached.snapshot_near == value.near
-            && cached.snapshot_far == value.far
-        {
-            return Ok(cached.snapshot_camera.clone());
-        }
+    if let Some(cached) = value.camera_cache.borrow().as_ref()
+        && cached.snapshot_target == value.target
+        && cached.snapshot_distance == value.distance
+        && cached.snapshot_azimuth == value.azimuth
+        && cached.snapshot_elevation == value.elevation
+        && cached.snapshot_fov_y == value.fov_y
+        && cached.snapshot_near == value.near
+        && cached.snapshot_far == value.far
+    {
+        return Ok(cached.snapshot_camera.clone());
     }
     let up = vec3::unit_y();
     let (right, forward) = orbit_basis(up);

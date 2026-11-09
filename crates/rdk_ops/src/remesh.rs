@@ -19,12 +19,12 @@ const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
 /// OCaml `Sys.max_array_length` on a 64-bit build.
 
 /// `fail message = Error (operation ^ ": " ^ message)`.
-pub fn fail(message: &str) -> error::T {
+pub(crate) fn fail(message: &str) -> error::T {
     error::new("remesh", Code::InvalidRemesh, format!("{OPERATION}: {message}"))
 }
 
 /// OCaml `Invalid_argument`; the public entry turns it into a prefixed failure.
-pub fn invalid_arg(message: String) -> error::T {
+pub(crate) fn invalid_arg(message: String) -> error::T {
     error::new("remesh", Code::InvalidArgument, message)
 }
 
@@ -57,14 +57,14 @@ pub struct ProjectionScratch {
     pub distances_squared: Vec<f64>,
 }
 
-pub fn validate_name(label: &str, name: Option<&str>) -> Result<(), error::T> {
+pub(crate) fn validate_name(label: &str, name: Option<&str>) -> Result<(), error::T> {
     match name {
         Some(name) if rdk_core::support::ocaml_trim_is_empty(name) => Err(fail(&format!("{label} name must not be empty"))),
         _ => Ok(()),
     }
 }
 
-pub fn validate_point_group(geometry_value: &geometry::T, selection: Option<&group::T>) -> Result<(), error::T> {
+pub(crate) fn validate_point_group(geometry_value: &geometry::T, selection: Option<&group::T>) -> Result<(), error::T> {
     match selection {
         None => Ok(()),
         Some(selection) if group::owner(selection) != group::Owner::Point => {
@@ -77,7 +77,7 @@ pub fn validate_point_group(geometry_value: &geometry::T, selection: Option<&gro
     }
 }
 
-pub fn validate_edge_group(geometry_value: &geometry::T, selection: Option<&edge_group::T>) -> Result<(), error::T> {
+pub(crate) fn validate_edge_group(geometry_value: &geometry::T, selection: Option<&edge_group::T>) -> Result<(), error::T> {
     let Some(selection) = selection else {
         return Ok(());
     };
@@ -92,7 +92,7 @@ pub fn validate_edge_group(geometry_value: &geometry::T, selection: Option<&edge
     }
 }
 
-pub fn validate_positions(cancel_token: Option<&cancel::T>, geometry_value: &geometry::T) -> Result<(), error::T> {
+pub(crate) fn validate_positions(cancel_token: Option<&cancel::T>, geometry_value: &geometry::T) -> Result<(), error::T> {
     let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let mut invalid = -1_i64;
     let mut point = 0_usize;
@@ -111,7 +111,7 @@ pub fn validate_positions(cancel_token: Option<&cancel::T>, geometry_value: &geo
     }
 }
 
-pub fn target_values(
+pub(crate) fn target_values(
     cancel_token: Option<&cancel::T>,
     name: Option<&str>,
     geometry_value: &geometry::T,
@@ -153,7 +153,7 @@ pub fn target_values(
     }
 }
 
-pub fn fresh_group_name(
+pub(crate) fn fresh_group_name(
     geometry_value: &geometry::T,
     owner: group::Owner,
     base: &str,
@@ -170,7 +170,7 @@ pub fn fresh_group_name(
     }
 }
 
-pub fn fresh_edge_group_name(
+pub(crate) fn fresh_edge_group_name(
     geometry_value: &geometry::T,
     base: &str,
     reserved: Option<&str>,
@@ -186,9 +186,9 @@ pub fn fresh_edge_group_name(
     }
 }
 
-pub type UvEqual = Box<dyn Fn(i64, i64) -> bool + Send + Sync>;
+pub(crate) type UvEqual = Box<dyn Fn(i64, i64) -> bool + Send + Sync>;
 
-pub fn uv_reader(name: &str, geometry_value: &geometry::T) -> Result<Option<UvEqual>, error::T> {
+pub(crate) fn uv_reader(name: &str, geometry_value: &geometry::T) -> Result<Option<UvEqual>, error::T> {
     let Some(found) = geometry::find_attribute(Owner::Vertex, name, geometry_value) else {
         return Ok(None);
     };
@@ -231,7 +231,7 @@ pub fn uv_reader(name: &str, geometry_value: &geometry::T) -> Result<Option<UvEq
     }
 }
 
-pub fn endpoint_vertices(
+pub(crate) fn endpoint_vertices(
     topology_view: &topology::view::View,
     index: &topology_index::view::View,
     edge: i64,
@@ -256,7 +256,7 @@ pub fn endpoint_vertices(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn install_feature_groups(
+pub(crate) fn install_feature_groups(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     hard_points: Option<&group::T>,
@@ -320,21 +320,21 @@ pub fn install_feature_groups(
     geometry::with_group(points, &with_edges)
 }
 
-pub fn feature_group(name: &str, geometry_value: &geometry::T) -> Result<edge_group::T, error::T> {
+pub(crate) fn feature_group(name: &str, geometry_value: &geometry::T) -> Result<edge_group::T, error::T> {
     match geometry::find_edge_group(name, geometry_value) {
         Some(found) => Ok(found),
         None => Err(fail("internal feature-edge ancestry was lost")),
     }
 }
 
-pub fn primitive_is_triangle(topology_view: &topology::view::View, primitive: i64) -> bool {
+pub(crate) fn primitive_is_triangle(topology_view: &topology::view::View, primitive: i64) -> bool {
     topology_view.primitive_kinds[primitive as usize] == 0
         && gi(&topology_view.primitive_offsets, primitive + 1)
             - gi(&topology_view.primitive_offsets, primitive)
             == 3
 }
 
-pub fn checked_add(label: &str, left: i64, right: i64) -> Result<i64, error::T> {
+pub(crate) fn checked_add(label: &str, left: i64, right: i64) -> Result<i64, error::T> {
     if left < 0 || right < 0 {
         return Err(invalid_arg(format!("{OPERATION}: {label} exceeds array limits")));
     }
@@ -401,27 +401,27 @@ pub struct Local {
     pub scratch_count: i64,
 }
 
-pub fn capacity_for(label: &str, current: i64, needed: i64) -> Result<i64, error::T> {
+pub(crate) fn capacity_for(label: &str, current: i64, needed: i64) -> Result<i64, error::T> {
     if needed < 0 {
         return Err(invalid_arg(format!("{OPERATION}: {label} exceeds array limits")));
     }
     Ok(needed.max(16.max(current.saturating_mul(2))))
 }
 
-pub fn corner_next(corner: i64) -> i64 {
+pub(crate) fn corner_next(corner: i64) -> i64 {
     corner - (corner % 3) + ((corner + 1) % 3)
 }
 
-pub fn corner_previous(corner: i64) -> i64 {
+pub(crate) fn corner_previous(corner: i64) -> i64 {
     corner - (corner % 3) + ((corner + 2) % 3)
 }
 
 impl Local {
-    pub fn cancel_token(&self) -> Option<&cancel::T> {
+    pub(crate) fn cancel_token(&self) -> Option<&cancel::T> {
         self.cancel.as_deref()
     }
 
-    pub fn scratch_push(&mut self, value: i64) {
+    pub(crate) fn scratch_push(&mut self, value: i64) {
         if self.scratch_count as usize == self.scratch.len() {
             let capacity = 64.max(2 * self.scratch_count) as usize;
             self.scratch.resize(capacity, 0);
@@ -430,7 +430,7 @@ impl Local {
         self.scratch_count += 1;
     }
 
-    pub fn ensure_points(&mut self, needed: i64) -> Result<(), error::T> {
+    pub(crate) fn ensure_points(&mut self, needed: i64) -> Result<(), error::T> {
         if needed as usize > self.x.len() {
             let capacity = capacity_for("point cardinality", self.x.len() as i64, needed)? as usize;
             self.x.resize(capacity, 0.0);
@@ -452,7 +452,7 @@ impl Local {
         Ok(())
     }
 
-    pub fn ensure_tris(&mut self, needed: i64) -> Result<(), error::T> {
+    pub(crate) fn ensure_tris(&mut self, needed: i64) -> Result<(), error::T> {
         if needed as usize > self.t_source.len() {
             let capacity =
                 capacity_for("primitive cardinality", self.t_source.len() as i64, needed)?;
@@ -475,7 +475,7 @@ impl Local {
         Ok(())
     }
 
-    pub fn ensure_edges(&mut self, needed: i64) -> Result<(), error::T> {
+    pub(crate) fn ensure_edges(&mut self, needed: i64) -> Result<(), error::T> {
         if needed as usize > self.e_a.len() {
             let capacity = capacity_for("edge cardinality", self.e_a.len() as i64, needed)? as usize;
             self.e_a.resize(capacity, 0);
@@ -490,7 +490,7 @@ impl Local {
         Ok(())
     }
 
-    pub fn edge_add(&mut self, a: i64, b: i64) -> Result<i64, error::T> {
+    pub(crate) fn edge_add(&mut self, a: i64, b: i64) -> Result<i64, error::T> {
         self.ensure_edges(self.edges + 1)?;
         let edge = self.edges;
         self.edges = edge + 1;
@@ -506,7 +506,7 @@ impl Local {
         Ok(edge)
     }
 
-    pub fn edge_kill(&mut self, edge: i64) {
+    pub(crate) fn edge_kill(&mut self, edge: i64) {
         if self.e_alive[edge as usize] != 0 {
             self.e_alive[edge as usize] = 0;
             self.e_first[edge as usize] = -1;
@@ -514,22 +514,22 @@ impl Local {
         }
     }
 
-    pub fn edge_revive(&mut self, edge: i64) {
+    pub(crate) fn edge_revive(&mut self, edge: i64) {
         if self.e_alive[edge as usize] == 0 {
             self.e_alive[edge as usize] = 1;
             self.live_edges += 1;
         }
     }
 
-    pub fn edge_live(&self, edge: i64) -> bool {
+    pub(crate) fn edge_live(&self, edge: i64) -> bool {
         self.e_alive[edge as usize] != 0
     }
 
-    pub fn opposite_point(&self, corner: i64) -> i64 {
+    pub(crate) fn opposite_point(&self, corner: i64) -> i64 {
         self.c_point[corner_next(corner_next(corner)) as usize]
     }
 
-    pub fn attach_edge(&mut self, corner: i64, edge: i64) {
+    pub(crate) fn attach_edge(&mut self, corner: i64, edge: i64) {
         self.c_edge[corner as usize] = edge;
         self.c_next_in_edge[corner as usize] = self.e_first[edge as usize];
         self.e_first[edge as usize] = corner;
@@ -537,7 +537,7 @@ impl Local {
     }
 
     /// The edge joining `a` and `b`, found along `a`'s corners, or -1.
-    pub fn adjacent_edge(&self, a: i64, b: i64) -> i64 {
+    pub(crate) fn adjacent_edge(&self, a: i64, b: i64) -> i64 {
         let mut found = -1;
         let mut corner = self.p_first[a as usize];
         while found < 0 && corner >= 0 {
@@ -554,7 +554,7 @@ impl Local {
 
     /// Unlink a corner from its edge; the edge slot survives even at zero incidence so a rewired
     /// triangle can rejoin it with its groups intact.
-    pub fn detach_edge_soft(&mut self, corner: i64) -> i64 {
+    pub(crate) fn detach_edge_soft(&mut self, corner: i64) -> i64 {
         let edge = self.c_edge[corner as usize];
         if self.e_first[edge as usize] == corner {
             self.e_first[edge as usize] = self.c_next_in_edge[corner as usize];
@@ -570,20 +570,20 @@ impl Local {
         edge
     }
 
-    pub fn detach_edge(&mut self, corner: i64) {
+    pub(crate) fn detach_edge(&mut self, corner: i64) {
         let edge = self.detach_edge_soft(corner);
         if self.e_incidence[edge as usize] == 0 {
             self.edge_kill(edge);
         }
     }
 
-    pub fn attach_point(&mut self, corner: i64, point: i64) {
+    pub(crate) fn attach_point(&mut self, corner: i64, point: i64) {
         self.c_point[corner as usize] = point;
         self.c_next_at_point[corner as usize] = self.p_first[point as usize];
         self.p_first[point as usize] = corner;
     }
 
-    pub fn detach_point(&mut self, corner: i64) {
+    pub(crate) fn detach_point(&mut self, corner: i64) {
         let point = self.c_point[corner as usize];
         if self.p_first[point as usize] == corner {
             self.p_first[point as usize] = self.c_next_at_point[corner as usize];
@@ -596,7 +596,7 @@ impl Local {
         }
     }
 
-    pub fn detach_triangle(&mut self, tri: i64) {
+    pub(crate) fn detach_triangle(&mut self, tri: i64) {
         let first = tri * 3;
         self.detach_edge(first);
         self.detach_edge(first + 1);
@@ -607,7 +607,7 @@ impl Local {
         self.t_alive[tri as usize] = 0;
     }
 
-    pub fn point_group_index(&self, name: &str) -> i64 {
+    pub(crate) fn point_group_index(&self, name: &str) -> i64 {
         let mut found = -1;
         for (index, item) in self.point_groups.iter().enumerate() {
             if group::name(item) == name {
@@ -617,7 +617,7 @@ impl Local {
         found
     }
 
-    pub fn edge_group_index(&self, name: &str) -> i64 {
+    pub(crate) fn edge_group_index(&self, name: &str) -> i64 {
         let mut found = -1;
         for (index, candidate) in self.edge_group_names.iter().enumerate() {
             if candidate == name {
@@ -627,13 +627,13 @@ impl Local {
         found
     }
 
-    pub fn local_length(&self, a: i64, b: i64) -> f64 {
+    pub(crate) fn local_length(&self, a: i64, b: i64) -> f64 {
         let (a, b) = (a as usize, b as usize);
         (self.x[a] - self.x[b]).hypot((self.y[a] - self.y[b]).hypot(self.z[a] - self.z[b]))
     }
 }
 
-pub fn local_of_geometry(
+pub(crate) fn local_of_geometry(
     cancel_arc: &Option<Arc<cancel::T>>,
     grain: i64,
     target_size_attribute: Option<&str>,
@@ -763,7 +763,7 @@ pub struct Ranking {
     pub point_corners: Vec<i64>,
 }
 
-pub fn rank(l: &Local, incidence: bool) -> Result<Ranking, error::T> {
+pub(crate) fn rank(l: &Local, incidence: bool) -> Result<Ranking, error::T> {
     let mut order = vec![0_i64; l.tris as usize];
     let mut count = 0_i64;
     for tri in 0..l.source_tris {
@@ -832,14 +832,14 @@ pub fn rank(l: &Local, incidence: bool) -> Result<Ranking, error::T> {
 
 /// The two incident corners of a two-sided edge, ordered as `Topology_index` would list them: by
 /// output corner position.
-pub fn sided_corners(l: &Local, ranking: &Ranking, edge: i64) -> (i64, i64) {
+pub(crate) fn sided_corners(l: &Local, ranking: &Ranking, edge: i64) -> (i64, i64) {
     let first = l.e_first[edge as usize];
     let second = l.c_next_in_edge[first as usize];
     let position = |corner: i64| ranking.t_rank[(corner / 3) as usize] * 3 + (corner % 3);
     if position(first) <= position(second) { (first, second) } else { (second, first) }
 }
 
-pub fn local_target(l: &Local, target_length: f64, a: i64, b: i64) -> f64 {
+pub(crate) fn local_target(l: &Local, target_length: f64, a: i64, b: i64) -> f64 {
     if l.p_target.is_empty() {
         target_length
     } else {
@@ -848,7 +848,7 @@ pub fn local_target(l: &Local, target_length: f64, a: i64, b: i64) -> f64 {
 }
 
 /// Selection over the freshly built structure: edge slots are in index order.
-pub fn select_long(l: &Local, target_length: f64) -> Result<(Vec<u8>, i64), error::T> {
+pub(crate) fn select_long(l: &Local, target_length: f64) -> Result<(Vec<u8>, i64), error::T> {
     let mut selected = vec![0u8; l.edges as usize];
     let mut count = 0_i64;
     for edge in 0..l.edges {
@@ -863,7 +863,7 @@ pub fn select_long(l: &Local, target_length: f64) -> Result<(Vec<u8>, i64), erro
     Ok((selected, count))
 }
 
-pub fn interpolate_target(l: &Local, a: i64, b: i64) -> Result<f64, error::T> {
+pub(crate) fn interpolate_target(l: &Local, a: i64, b: i64) -> Result<f64, error::T> {
     let t = 0.5;
     let value = ((1.0 - t) * l.p_target[a as usize]) + (t * l.p_target[b as usize]);
     if !value.is_finite() || value <= 0.0 {
@@ -876,7 +876,7 @@ pub fn interpolate_target(l: &Local, a: i64, b: i64) -> Result<f64, error::T> {
 
 /// Rebuild every point and edge incidence list from the live triangles in slot order, then retire
 /// edges that no triangle references.
-pub fn relink(l: &mut Local) -> Result<(), error::T> {
+pub(crate) fn relink(l: &mut Local) -> Result<(), error::T> {
     let points = l.points as usize;
     let edges = l.edges as usize;
     l.p_first[..points].fill(-1);
@@ -993,7 +993,7 @@ fn split_edge_of_pair(
 /// source split's emission pattern. Child edges are derived from the parent's: an unselected
 /// parent edge keeps its slot, a selected one is replaced by its two halves (which inherit its
 /// groups), and edges interior to the parent are fresh. No edge is looked up.
-pub fn split(l: &mut Local, selected: &[u8], count: i64) -> Result<(), error::T> {
+pub(crate) fn split(l: &mut Local, selected: &[u8], count: i64) -> Result<(), error::T> {
     let start_edges = l.edges;
     let start_points = l.points;
     l.ensure_points(checked_add("split point cardinality", start_points, count)?)?;
@@ -1173,7 +1173,7 @@ pub fn split(l: &mut Local, selected: &[u8], count: i64) -> Result<(), error::T>
 }
 
 /// Points held by hard selection, a feature edge, or a non-two-sided edge.
-pub fn constrained_points(l: &Local, hard: i64, feature: i64) -> Vec<u8> {
+pub(crate) fn constrained_points(l: &Local, hard: i64, feature: i64) -> Vec<u8> {
     let mut out = vec![0u8; l.points as usize];
     if hard >= 0 {
         out.copy_from_slice(&l.p_groups[hard as usize][..l.points as usize]);
@@ -1196,7 +1196,7 @@ pub fn constrained_points(l: &Local, hard: i64, feature: i64) -> Vec<u8> {
 
 /// Stable LSD radix sort of candidate ranks by the bit pattern of their non-negative lengths
 /// (monotone in the value), four 16-bit passes; ties keep rank order.
-pub fn sort_candidates(bits: &mut [u64], keys: &mut [i64], count: usize) {
+pub(crate) fn sort_candidates(bits: &mut [u64], keys: &mut [i64], count: usize) {
     let mut scratch_bits = vec![0_u64; count];
     let mut scratch_keys = vec![0_i64; count];
     let mut counts = vec![0_usize; 65_537];
@@ -1240,7 +1240,7 @@ fn float_max(a: f64, b: f64) -> f64 {
 /// The triangle keeps a non-degenerate normal on the old side after `a` and `b` move to the
 /// midpoint.
 #[allow(clippy::too_many_arguments)]
-pub fn collapse_preserves_triangle(
+pub(crate) fn collapse_preserves_triangle(
     l: &Local,
     tri: i64,
     a: i64,
@@ -1315,7 +1315,7 @@ pub fn collapse_preserves_triangle(
 
 /// Does collapsing `(a, b)` keep every other triangle at `point` valid and unreserved?
 #[allow(clippy::too_many_arguments)]
-pub fn inspect_point(
+pub(crate) fn inspect_point(
     l: &Local,
     ranking: &Ranking,
     used_tris: &[u8],
@@ -1346,7 +1346,7 @@ pub fn inspect_point(
     valid
 }
 
-pub fn reserve_point(ranking: &Ranking, used_tris: &mut [u8], point: i64) {
+pub(crate) fn reserve_point(ranking: &Ranking, used_tris: &mut [u8], point: i64) {
     for slot in gi(&ranking.point_offsets, point)..gi(&ranking.point_offsets, point + 1) {
         used_tris[(gi(&ranking.point_corners, slot) / 3) as usize] = 1;
     }
@@ -1355,7 +1355,7 @@ pub fn reserve_point(ranking: &Ranking, used_tris: &mut [u8], point: i64) {
 /// The link condition: `a` and `b` share exactly the opposite points of the edge's two triangles
 /// as neighbours.
 #[allow(clippy::too_many_arguments)]
-pub fn link_condition(
+pub(crate) fn link_condition(
     l: &Local,
     ranking: &Ranking,
     stamps: &mut [i64],
@@ -1412,7 +1412,7 @@ pub fn link_condition(
 
 /// Independent short edges whose collapse keeps every neighbouring triangle oriented; greedy from
 /// the shortest, ties by output edge index.
-pub fn select_short(
+pub(crate) fn select_short(
     l: &Local,
     ranking: &Ranking,
     target_length: f64,
@@ -1486,7 +1486,7 @@ pub fn select_short(
 }
 
 /// Average of two coordinates as the fuse kernel computes it.
-pub fn average_pair(a: f64, b: f64) -> f64 {
+pub(crate) fn average_pair(a: f64, b: f64) -> f64 {
     let sum = a + b;
     if sum.is_finite() {
         sum / 2.0
@@ -1502,7 +1502,7 @@ pub fn average_pair(a: f64, b: f64) -> f64 {
 /// other edges are renamed. The link condition guarantees those are the only shared neighbours,
 /// so no edge is looked up. Merged targets union the groups of their sources, as the fuse
 /// kernel's edge-group remap does.
-pub fn collapse(l: &mut Local, chosen: &[u8]) -> Result<(), error::T> {
+pub(crate) fn collapse(l: &mut Local, chosen: &[u8]) -> Result<(), error::T> {
     for edge in 0..l.edges {
         cancel::poll(l.cancel_token(), edge, 4095)?;
         if chosen[edge as usize] == 0 {
@@ -1635,7 +1635,7 @@ fn collapse_merge(l: &mut Local, source: i64, target: i64) -> i64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn same_orientation_local(l: &Local, a0: i64, b0: i64, c0: i64, a1: i64, b1: i64, c1: i64) -> bool {
+pub(crate) fn same_orientation_local(l: &Local, a0: i64, b0: i64, c0: i64, a1: i64, b1: i64, c1: i64) -> bool {
     let (a0, b0, c0, a1, b1, c1) =
         (a0 as usize, b0 as usize, c0 as usize, a1 as usize, b1 as usize, c1 as usize);
     let abx = l.x[b0] - l.x[a0];
@@ -1662,7 +1662,7 @@ pub fn same_orientation_local(l: &Local, a0: i64, b0: i64, c0: i64, a1: i64, b1:
 }
 
 /// Are `a` and `b` joined by an edge? Checked along `a`'s live corners.
-pub fn adjacent(ranking: &Ranking, l: &Local, a: i64, b: i64) -> bool {
+pub(crate) fn adjacent(ranking: &Ranking, l: &Local, a: i64, b: i64) -> bool {
     let mut found = false;
     for slot in gi(&ranking.point_offsets, a)..gi(&ranking.point_offsets, a + 1) {
         let corner = gi(&ranking.point_corners, slot);
@@ -1677,7 +1677,7 @@ pub fn adjacent(ranking: &Ranking, l: &Local, a: i64, b: i64) -> bool {
 
 /// Independent two-sided edges whose flip lowers the valence penalty and keeps both triangles
 /// oriented; greedy in output edge order.
-pub fn select_flip(l: &Local, ranking: &Ranking, hard: i64, feature: i64) -> Result<(Vec<u8>, i64), error::T> {
+pub(crate) fn select_flip(l: &Local, ranking: &Ranking, hard: i64, feature: i64) -> Result<(Vec<u8>, i64), error::T> {
     let constrained = constrained_points(l, hard, feature);
     let features = if feature >= 0 { Some(&l.e_groups[feature as usize]) } else { None };
     let mut valence = vec![0_i64; l.points as usize];
@@ -1786,7 +1786,7 @@ fn rotate_slots(l: &mut Local, tri: i64, slot0: i64, point0: i64, point1: i64, p
 /// Rotate each chosen edge: triangle A (a0, b0, c) becomes (d, c, a0) and triangle B (b0, a0, d)
 /// becomes (c, d, b0) in their own corner slots, corner payload rotating one slot with them; the
 /// new diagonal inherits the edge's groups.
-pub fn flip(l: &mut Local, ranking: &Ranking, chosen: &[u8]) -> Result<(), error::T> {
+pub(crate) fn flip(l: &mut Local, ranking: &Ranking, chosen: &[u8]) -> Result<(), error::T> {
     let mut saved = vec![0u8; l.e_groups.len()];
     // Corner payload moves one slot back; ordered vertex groups follow it.
     let tracking = l.v_orders.iter().any(Option::is_some);
@@ -1864,7 +1864,7 @@ pub fn flip(l: &mut Local, ranking: &Ranking, chosen: &[u8]) -> Result<(), error
 /// One Geometry per iteration: compact live points (dropping points that lost every triangle),
 /// emit triangles in output order, interpolate payload once through ancestry, and rebuild groups
 /// and edge groups.
-pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
+pub(crate) fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
     let cancel_token = l.cancel_token();
     let ranking = rank(l, false)?;
     let mut used_after = vec![0u8; l.points as usize];
@@ -2067,7 +2067,7 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
 }
 
 /// Smoothing constraints over the materialized points.
-pub fn constraint_group(
+pub(crate) fn constraint_group(
     l: &Local,
     point_map: &[i64],
     hard: i64,
@@ -2087,7 +2087,7 @@ pub fn constraint_group(
     group::init(Some(l.grain), group::Owner::Point, name, count, &|point| out[point as usize] != 0)
 }
 
-pub fn projection_scratch(scratch: &mut Option<ProjectionScratch>, count: i64) {
+pub(crate) fn projection_scratch(scratch: &mut Option<ProjectionScratch>, count: i64) {
     let reusable = matches!(scratch, Some(value) if value.count == count);
     if !reusable {
         *scratch = Some(ProjectionScratch {
@@ -2102,7 +2102,7 @@ pub fn projection_scratch(scratch: &mut Option<ProjectionScratch>, count: i64) {
     }
 }
 
-pub fn project_to_reference(
+pub(crate) fn project_to_reference(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     surface: &rdk_geom::surface_index::T,
@@ -2200,7 +2200,7 @@ fn collect_group_points(selection: &group::T) -> Vec<i64> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn install_outputs(
+pub(crate) fn install_outputs(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     target_length: f64,

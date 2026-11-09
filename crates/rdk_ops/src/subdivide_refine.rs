@@ -62,31 +62,31 @@ use CreasingMethod::*;
 use FaceVaryingInterpolation::*;
 use TrianglePolicy::*;
 
-pub const EDGE_ANCESTRY_PREFIX: &str = "__rdk_subdivide_edge_ancestry_";
+pub(crate) const EDGE_ANCESTRY_PREFIX: &str = "__rdk_subdivide_edge_ancestry_";
 
 /// OCaml `Error.Fail message`: the guard at the public entry rebuilds it with the operation's code.
-pub fn fail(message: String) -> error::T {
+pub(crate) fn fail(message: String) -> error::T {
     error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidParameter, message)
 }
 
-pub fn failm(message: &str) -> error::T {
+pub(crate) fn failm(message: &str) -> error::T {
     fail(message.to_owned())
 }
 
 /// OCaml `Invalid_argument`.
-pub fn invalid_arg(message: String) -> error::T {
+pub(crate) fn invalid_arg(message: String) -> error::T {
     error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidArgument, message)
 }
 
-pub fn checked_add(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
+pub(crate) fn checked_add(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
     a.checked_add(b).filter(|_| a >= 0 && b >= 0).ok_or_else(|| fail(format!("{name} exceeds integer limits")))
 }
 
-pub fn checked_mul(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
+pub(crate) fn checked_mul(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
     a.checked_mul(b).filter(|_| a >= 0 && b >= 0).ok_or_else(|| fail(format!("{name} exceeds integer limits")))
 }
 
-pub fn gi(values: &[i64], index: i64) -> i64 {
+pub(crate) fn gi(values: &[i64], index: i64) -> i64 {
     values[index as usize]
 }
 
@@ -96,25 +96,25 @@ fn narrow(value: i64) -> i32 {
 }
 
 /// `gi` for the i32 scratch arrays.
-pub fn gn(values: &[i32], index: i64) -> i64 {
+pub(crate) fn gn(values: &[i32], index: i64) -> i64 {
     i64::from(values[index as usize])
 }
 
-pub fn gf(values: &[f64], index: i64) -> f64 {
+pub(crate) fn gf(values: &[f64], index: i64) -> f64 {
     values[index as usize]
 }
 
-pub fn gu(values: &[u8], index: i64) -> u8 {
+pub(crate) fn gu(values: &[u8], index: i64) -> u8 {
     values[index as usize]
 }
 
 /// Stdlib `max` on floats: `if a >= b then a else b`.
-pub fn fmax(a: f64, b: f64) -> f64 {
+pub(crate) fn fmax(a: f64, b: f64) -> f64 {
     if a >= b { a } else { b }
 }
 
 /// Stdlib `min` on floats: `if a <= b then a else b`.
-pub fn fmin(a: f64, b: f64) -> f64 {
+pub(crate) fn fmin(a: f64, b: f64) -> f64 {
     if a <= b { a } else { b }
 }
 
@@ -196,7 +196,7 @@ fn owner_name(owner: Owner) -> &'static str {
     }
 }
 
-pub fn float_attribute(
+pub(crate) fn float_attribute(
     owner: Owner,
     name: &str,
     geometry_value: &geometry::T,
@@ -220,9 +220,9 @@ fn validate_sharpness(name: &str, values: &[f64]) -> Result<(), error::T> {
 }
 
 /// (edge sharpness, corner sharpness, has edge creases, has corner creases).
-pub type CreaseData = (Vec<f64>, Vec<f64>, bool, bool);
+pub(crate) type CreaseData = (Vec<f64>, Vec<f64>, bool, bool);
 
-pub fn crease_data(
+pub(crate) fn crease_data(
     edge_override: Option<f64>,
     geometry_value: &geometry::T,
     topology_view: &topology::view::View,
@@ -317,7 +317,7 @@ fn validate_crease_selection(selection: &group::T, creases: &geometry::T) -> Res
     Ok(())
 }
 
-pub fn validate_hole_group(holes: &group::T, geometry_value: &geometry::T) -> Result<(), error::T> {
+pub(crate) fn validate_hole_group(holes: &group::T, geometry_value: &geometry::T) -> Result<(), error::T> {
     if group::owner(holes) != group::Owner::Primitive {
         return Err(failm("subdivision holes must be a primitive group"));
     }
@@ -332,7 +332,7 @@ pub fn validate_hole_group(holes: &group::T, geometry_value: &geometry::T) -> Re
     Ok(())
 }
 
-pub fn apply_crease_input(
+pub(crate) fn apply_crease_input(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     selection: Option<&group::T>,
@@ -504,7 +504,7 @@ pub fn apply_crease_input(
     geometry::with_attribute(created, &stripped)
 }
 
-pub fn clamp_sharpness(value: f64) -> f64 {
+pub(crate) fn clamp_sharpness(value: f64) -> f64 {
     if value <= 0.0 {
         0.0
     } else if value >= 1.0 {
@@ -514,7 +514,7 @@ pub fn clamp_sharpness(value: f64) -> f64 {
     }
 }
 
-pub fn build_child_edge_sharpness(
+pub(crate) fn build_child_edge_sharpness(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     method_: CreasingMethod,
@@ -563,7 +563,7 @@ pub fn build_child_edge_sharpness(
     })
 }
 
-pub fn build_vertex_sharp_plan(
+pub(crate) fn build_vertex_sharp_plan(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     method_: CreasingMethod,
@@ -686,7 +686,7 @@ pub fn build_vertex_sharp_plan(
     })
 }
 
-pub fn primitive_size(topology_view: &topology::view::View, primitive: i64) -> i64 {
+pub(crate) fn primitive_size(topology_view: &topology::view::View, primitive: i64) -> i64 {
     gi(&topology_view.primitive_offsets, primitive + 1)
         - gi(&topology_view.primitive_offsets, primitive)
 }
@@ -695,7 +695,7 @@ fn not_finite(value: &f64) -> bool {
     !value.is_finite()
 }
 
-pub fn validate(
+pub(crate) fn validate(
     cancel_token: Option<&cancel::T>,
     scheme: Scheme,
     geometry_value: &geometry::T,
@@ -820,7 +820,7 @@ pub fn validate(
     Ok(())
 }
 
-pub fn boundary_neighbors(index: &topology_index::view::View, point: i64) -> (i64, i64, i64) {
+pub(crate) fn boundary_neighbors(index: &topology_index::view::View, point: i64) -> (i64, i64, i64) {
     let first = gi(&index.point_edge_offsets, point);
     let last = gi(&index.point_edge_offsets, point + 1);
     let mut a = -1;
@@ -845,7 +845,7 @@ pub fn boundary_neighbors(index: &topology_index::view::View, point: i64) -> (i6
     (a, b, count)
 }
 
-pub fn boundary_corner(
+pub(crate) fn boundary_corner(
     boundary_interpolation: BoundaryInterpolation,
     index: &topology_index::view::View,
     point: i64,
@@ -854,7 +854,7 @@ pub fn boundary_corner(
         && gi(&index.point_offsets, point + 1) - gi(&index.point_offsets, point) == 1
 }
 
-pub fn point_term_count(
+pub(crate) fn point_term_count(
     boundary_interpolation: BoundaryInterpolation,
     scheme: Scheme,
     topology_view: &topology::view::View,
@@ -935,7 +935,7 @@ pub fn point_term_count(
 
 /// Writes `output`'s stencil terms into its exactly-sized `sources`/`weights` slots.
 #[allow(clippy::too_many_arguments)]
-pub fn fill_point_stencil(
+pub(crate) fn fill_point_stencil(
     boundary_interpolation: BoundaryInterpolation,
     triangle_subdivision: TrianglePolicy,
     scheme: Scheme,
@@ -1178,7 +1178,7 @@ pub struct Built {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn make_topology(
+pub(crate) fn make_topology(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     holes: Option<&group::T>,
@@ -1456,7 +1456,7 @@ pub fn make_topology(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn make_plan(
+pub(crate) fn make_plan(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     edge_ancestry_attribute: Option<String>,
@@ -1581,7 +1581,7 @@ pub fn make_plan(
     })
 }
 
-pub fn creased_vertex_value(creases: &CreasePlan, source: &[f64], point: i64, smooth: f64) -> f64 {
+pub(crate) fn creased_vertex_value(creases: &CreasePlan, source: &[f64], point: i64, smooth: f64) -> f64 {
     let masks = &creases.vertex_masks;
     let value = |kind: u8, a: i64, b: i64| match kind {
         2 => gf(source, point),
@@ -1600,7 +1600,7 @@ pub fn creased_vertex_value(creases: &CreasePlan, source: &[f64], point: i64, sm
     }
 }
 
-pub fn creased_edge_factor(creases: &CreasePlan, edge: i64) -> f64 {
+pub(crate) fn creased_edge_factor(creases: &CreasePlan, edge: i64) -> f64 {
     let parent = gf(&creases.edge_sharpness, edge);
     if creases.method_ == SubdivideCreasingChaikin
         && parent > 0.0
@@ -1614,7 +1614,7 @@ pub fn creased_edge_factor(creases: &CreasePlan, edge: i64) -> f64 {
     }
 }
 
-pub fn point_float(
+pub(crate) fn point_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -1690,7 +1690,7 @@ pub enum FvarRefinement {
 }
 
 /// Union-find `find` with path compression.
-pub fn find_root(parents: &mut [i64], value: i64) -> i64 {
+pub(crate) fn find_root(parents: &mut [i64], value: i64) -> i64 {
     let mut root = value;
     while parents[root as usize] != root {
         root = parents[root as usize];
@@ -1705,7 +1705,7 @@ pub fn find_root(parents: &mut [i64], value: i64) -> i64 {
 }
 
 /// Union by rank.
-pub fn union_roots(parents: &mut [i64], ranks: &mut [i64], left: i64, right: i64) {
+pub(crate) fn union_roots(parents: &mut [i64], ranks: &mut [i64], left: i64, right: i64) {
     let left = find_root(parents, left);
     let right = find_root(parents, right);
     if left != right {
@@ -1721,13 +1721,13 @@ pub fn union_roots(parents: &mut [i64], ranks: &mut [i64], left: i64, right: i64
 }
 
 /// OCaml `Float.equal`: NaN equals itself, zeros of either sign are equal.
-pub fn float_equal(a: f64, b: f64) -> bool {
+pub(crate) fn float_equal(a: f64, b: f64) -> bool {
     a == b || (a.is_nan() && b.is_nan())
 }
 
 // The face-varying refinement walks union-find sets, so it runs sequentially (the OCaml runs
 // disjoint per-point sets concurrently); the result is identical.
-pub fn fvar_refinement(
+pub(crate) fn fvar_refinement(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     mode: FaceVaryingInterpolation,
@@ -2152,7 +2152,7 @@ pub fn fvar_refinement(
     Ok(FvarRefinement::SplitFvar { refinement, source_vertex_of_point, output_point_of_vertex })
 }
 
-pub fn fvar_point_float(
+pub(crate) fn fvar_point_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &FvarPointPlan,
@@ -2194,7 +2194,7 @@ pub fn fvar_point_float(
     })
 }
 
-pub fn linear_vertex_float(
+pub(crate) fn linear_vertex_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2222,7 +2222,7 @@ pub fn linear_vertex_float(
     })
 }
 
-pub fn isolated_vertex_float(
+pub(crate) fn isolated_vertex_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2261,7 +2261,7 @@ pub fn isolated_vertex_float(
     })
 }
 
-pub fn fvar_float(
+pub(crate) fn fvar_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     fvar: &FvarRefinement,
@@ -2299,7 +2299,7 @@ pub fn fvar_float(
     }
 }
 
-pub fn vertex_float(
+pub(crate) fn vertex_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2308,7 +2308,7 @@ pub fn vertex_float(
     linear_vertex_float(cancel_token, grain, plan, source)
 }
 
-pub fn primitive_float(
+pub(crate) fn primitive_float(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2321,7 +2321,7 @@ pub fn primitive_float(
 }
 
 /// For each output element of `owner`, the source element a discrete attribute copies.
-pub fn discrete_mapping(
+pub(crate) fn discrete_mapping(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2347,7 +2347,7 @@ pub fn discrete_mapping(
     })
 }
 
-pub fn vertex_edge_discrete_map(
+pub(crate) fn vertex_edge_discrete_map(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2366,7 +2366,7 @@ pub fn vertex_edge_discrete_map(
     })
 }
 
-pub fn numeric_map(
+pub(crate) fn numeric_map(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2391,7 +2391,7 @@ fn fvar_enabled(
         && plan.scheme != Scheme::Bilinear
 }
 
-pub fn remap_attribute(
+pub(crate) fn remap_attribute(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     generate_resulting_creases: bool,
@@ -2460,7 +2460,7 @@ pub fn remap_attribute(
     Ok(Some(attribute::create_owned(name, owner, storage)?))
 }
 
-pub fn child_crease_sharpness(plan: &Plan) -> Option<Vec<f64>> {
+pub(crate) fn child_crease_sharpness(plan: &Plan) -> Option<Vec<f64>> {
     match &plan.creases {
         None => None,
         Some(creases) if !creases.has_edge_creases => None,
@@ -2474,7 +2474,7 @@ pub fn child_crease_sharpness(plan: &Plan) -> Option<Vec<f64>> {
     }
 }
 
-pub fn resulting_crease_attribute(
+pub(crate) fn resulting_crease_attribute(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2542,7 +2542,7 @@ pub struct OutputEdgePlan {
     pub output_edge_count: i64,
 }
 
-pub fn output_edge_plan(cancel_token: Option<&cancel::T>, plan: &Plan) -> Result<OutputEdgePlan, error::T> {
+pub(crate) fn output_edge_plan(cancel_token: Option<&cancel::T>, plan: &Plan) -> Result<OutputEdgePlan, error::T> {
     let internal_count = match plan.scheme {
         Scheme::CatmullClark | Scheme::Bilinear => plan.source_vertices,
         Scheme::Loop => checked_mul("subdivision internal edge count", plan.source_primitives, 3)?,
@@ -2595,11 +2595,11 @@ pub fn output_edge_plan(cancel_token: Option<&cancel::T>, plan: &Plan) -> Result
     Ok(OutputEdgePlan { child_edges: ordinal_of_key, output_edge_count: next_ordinal })
 }
 
-pub fn set_edge_bit(bits: &mut [u8], edge: i64) {
+pub(crate) fn set_edge_bit(bits: &mut [u8], edge: i64) {
     bits[(edge >> 3) as usize] |= 1 << (edge & 7);
 }
 
-pub fn edge_group_from_source(
+pub(crate) fn edge_group_from_source(
     cancel_token: Option<&cancel::T>,
     plan: &Plan,
     edge_plan: &OutputEdgePlan,
@@ -2623,7 +2623,7 @@ pub fn edge_group_from_source(
     edge_group::view::of_owned_bits(&plan.topology, edge_plan.output_edge_count, name, bits)
 }
 
-pub fn resulting_crease_group(
+pub(crate) fn resulting_crease_group(
     cancel_token: Option<&cancel::T>,
     name: &str,
     plan: &Plan,
@@ -2645,7 +2645,7 @@ pub fn resulting_crease_group(
     edge_group::view::of_owned_bits(&plan.topology, edge_plan.output_edge_count, name, bits)
 }
 
-pub fn remap_group(
+pub(crate) fn remap_group(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -2717,7 +2717,7 @@ pub fn remap_group(
     group::view::remap_order(group_value, &source_of_target, &target)
 }
 
-pub fn owner_count(geometry_value: &geometry::T, owner: Owner) -> i64 {
+pub(crate) fn owner_count(geometry_value: &geometry::T, owner: Owner) -> i64 {
     match owner {
         Owner::Point => geometry::point_count(geometry_value),
         Owner::Vertex => geometry::vertex_count(geometry_value),
@@ -2726,15 +2726,15 @@ pub fn owner_count(geometry_value: &geometry::T, owner: Owner) -> i64 {
     }
 }
 
-pub fn same_attribute_slot(left: &attribute::T, right: &attribute::T) -> bool {
+pub(crate) fn same_attribute_slot(left: &attribute::T, right: &attribute::T) -> bool {
     attribute::owner(left) == attribute::owner(right) && attribute::name(left) == attribute::name(right)
 }
 
-pub fn same_attribute_schema(left: &attribute::T, right: &attribute::T) -> bool {
+pub(crate) fn same_attribute_schema(left: &attribute::T, right: &attribute::T) -> bool {
     same_attribute_slot(left, right) && attribute::kind_name(left) == attribute::kind_name(right)
 }
 
-pub fn find_attribute_like(
+pub(crate) fn find_attribute_like(
     template: &attribute::T,
     geometry_value: &geometry::T,
 ) -> Option<attribute::T> {
@@ -2743,7 +2743,7 @@ pub fn find_attribute_like(
         .find(|candidate| same_attribute_slot(template, candidate))
 }
 
-pub fn checked_total(name: &str, values: &[i64]) -> Result<i64, error::T> {
+pub(crate) fn checked_total(name: &str, values: &[i64]) -> Result<i64, error::T> {
     let mut total = 0;
     for &value in values {
         total = checked_add(name, total, value)?;
@@ -2776,7 +2776,7 @@ fn wrong_storage() -> error::T {
     failm("attribute storage does not match its template")
 }
 
-pub fn concatenate_part_attribute(
+pub(crate) fn concatenate_part_attribute(
     cancel_token: Option<&cancel::T>,
     extra_sources: &[i64],
     template: &attribute::T,
@@ -3062,7 +3062,7 @@ pub struct PointWeld {
     pub bias: f64,
 }
 
-pub fn locate_part(offsets: &[i64], source: i64) -> Result<(usize, i64), error::T> {
+pub(crate) fn locate_part(offsets: &[i64], source: i64) -> Result<(usize, i64), error::T> {
     let mut part = 0_usize;
     while part + 1 < offsets.len() && source >= offsets[part + 1] {
         part += 1;
@@ -3073,7 +3073,7 @@ pub fn locate_part(offsets: &[i64], source: i64) -> Result<(usize, i64), error::
     Ok((part, source - offsets[part]))
 }
 
-pub fn welded_float_plane(
+pub(crate) fn welded_float_plane(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     weld: &PointWeld,
@@ -3105,7 +3105,7 @@ pub fn welded_float_plane(
     })
 }
 
-pub fn welded_representatives(weld: &PointWeld) -> Vec<i64> {
+pub(crate) fn welded_representatives(weld: &PointWeld) -> Vec<i64> {
     weld.output_source
         .iter()
         .enumerate()
@@ -3120,7 +3120,7 @@ pub fn welded_representatives(weld: &PointWeld) -> Vec<i64> {
         .collect()
 }
 
-pub fn concatenate_welded_point_attribute(
+pub(crate) fn concatenate_welded_point_attribute(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     template: &attribute::T,
@@ -3284,25 +3284,25 @@ pub fn concatenate_welded_point_attribute(
     attribute::create_owned(attribute::name(template), Owner::Point, storage)
 }
 
-pub fn collect_group_members(group_value: &group::T) -> Vec<i64> {
+pub(crate) fn collect_group_members(group_value: &group::T) -> Vec<i64> {
     let members = std::cell::RefCell::new(Vec::new());
     group::iter(&|element| members.borrow_mut().push(element), group_value);
     members.into_inner()
 }
 
-pub fn collect_ordered_members(group_value: &group::T) -> Vec<i64> {
+pub(crate) fn collect_ordered_members(group_value: &group::T) -> Vec<i64> {
     let members = std::cell::RefCell::new(Vec::new());
     group::iter_ordered(&|element| members.borrow_mut().push(element), group_value);
     members.into_inner()
 }
 
-pub fn collect_edge_members(group_value: &edge_group::T) -> Vec<i64> {
+pub(crate) fn collect_edge_members(group_value: &edge_group::T) -> Vec<i64> {
     let members = std::cell::RefCell::new(Vec::new());
     edge_group::iter(&|edge| members.borrow_mut().push(edge), group_value);
     members.into_inner()
 }
 
-pub fn combine_parts(
+pub(crate) fn combine_parts(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     append: Option<&TriangleAppend>,
@@ -3626,7 +3626,7 @@ pub fn combine_parts(
     geometry::create(positions, topology_value, Some(attributes), Some(groups), Some(edge_groups))
 }
 
-pub fn select_floats(
+pub(crate) fn select_floats(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     mapping: &[i64],
@@ -3649,7 +3649,7 @@ fn select_storage(
     topology_remap::select_storage(cancel_token, grain_of(grain)?, false, mapping, storage)
 }
 
-pub fn duplicate_point_attribute(
+pub(crate) fn duplicate_point_attribute(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     point_source: &[i64],
@@ -3663,7 +3663,7 @@ pub fn duplicate_point_attribute(
     attribute::create_owned(attribute::name(attribute_value), Owner::Point, storage)
 }
 
-pub fn split_disconnected_point_fans(
+pub(crate) fn split_disconnected_point_fans(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     geometry_value: &geometry::T,
@@ -3829,7 +3829,7 @@ pub struct PullPlan {
     pub unselected_primitive_of_source: Vec<i64>,
 }
 
-pub fn fresh_edge_ancestry_name(geometry_value: &geometry::T) -> String {
+pub(crate) fn fresh_edge_ancestry_name(geometry_value: &geometry::T) -> String {
     let mut suffix = 0_i64;
     loop {
         let name = format!("{EDGE_ANCESTRY_PREFIX}{suffix}");
@@ -3840,7 +3840,7 @@ pub fn fresh_edge_ancestry_name(geometry_value: &geometry::T) -> String {
     }
 }
 
-pub fn annotate_pull_interfaces(
+pub(crate) fn annotate_pull_interfaces(
     cancel_token: Option<&cancel::T>,
     primitives: &group::T,
     geometry_value: &geometry::T,
@@ -3955,7 +3955,7 @@ pub struct InterfaceChains {
     pub vertices: Vec<i64>,
 }
 
-pub fn interface_chains(
+pub(crate) fn interface_chains(
     cancel_token: Option<&cancel::T>,
     plan: &PullPlan,
     refined: &geometry::T,
@@ -4084,7 +4084,7 @@ pub fn interface_chains(
     Ok(InterfaceChains { edge_offsets, points, vertices })
 }
 
-pub fn interpolate_array(
+pub(crate) fn interpolate_array(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     left: &[i64],
@@ -4105,7 +4105,7 @@ pub fn interpolate_array(
     })
 }
 
-pub fn representative_map(left: &[i64], right: &[i64], weight: &[f64]) -> Vec<i64> {
+pub(crate) fn representative_map(left: &[i64], right: &[i64], weight: &[f64]) -> Vec<i64> {
     left.iter()
         .enumerate()
         .map(|(target, &source)| if weight[target] < 0.5 { source } else { right[target] })
@@ -4113,7 +4113,7 @@ pub fn representative_map(left: &[i64], right: &[i64], weight: &[f64]) -> Vec<i6
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn interpolate_owned_attribute(
+pub(crate) fn interpolate_owned_attribute(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     point_left: &[i64],
@@ -4156,7 +4156,7 @@ pub struct DividedBoundary {
     pub source_primitive_to_output: Vec<i64>,
 }
 
-pub fn divide_unselected_edges(
+pub(crate) fn divide_unselected_edges(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &PullPlan,
@@ -4427,7 +4427,7 @@ pub fn divide_unselected_edges(
     })
 }
 
-pub fn remap_divided_attribute(
+pub(crate) fn remap_divided_attribute(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     vertex_map: &[i64],
@@ -4448,7 +4448,7 @@ pub fn remap_divided_attribute(
     )
 }
 
-pub fn remap_divided_group(
+pub(crate) fn remap_divided_group(
     grain: Option<i64>,
     vertex_map: &[i64],
     primitive_map: &[i64],
@@ -4518,7 +4518,7 @@ impl TriangleOutput {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn triangulate_divided_boundary(
+pub(crate) fn triangulate_divided_boundary(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     pull_bias: Option<f64>,
@@ -4722,7 +4722,7 @@ pub fn triangulate_divided_boundary(
     })
 }
 
-pub fn validate_primitive_selection(primitives: &group::T, geometry_value: &geometry::T) -> Result<(), error::T> {
+pub(crate) fn validate_primitive_selection(primitives: &group::T, geometry_value: &geometry::T) -> Result<(), error::T> {
     if group::owner(primitives) != group::Owner::Primitive {
         return Err(failm("selection must be a primitive group"));
     }
@@ -4769,7 +4769,7 @@ impl Default for OnceOptions {
     }
 }
 
-pub fn once(
+pub(crate) fn once(
     cancel_token: Option<&cancel::T>,
     options: &OnceOptions,
     scheme: Scheme,

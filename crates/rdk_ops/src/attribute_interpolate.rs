@@ -1186,7 +1186,7 @@ fn indices_of(jobs: &[Job], owner: attribute::Owner, numeric: bool) -> Vec<usize
     (0..jobs.len()).filter(|&index| jobs[index].source_owner == owner && is_numeric(&jobs[index]) == numeric).collect()
 }
 
-pub fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry::T, error::T> {
+pub(crate) fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry::T, error::T> {
     let cancel_token = params.cancel.as_deref();
     let grain = support::resolve(params.grain).map_err(|_| invalid("Attribute Interpolate: grain must be positive"))?;
     let pre_scale = params.pre_scale.unwrap_or(1.0);
@@ -1460,7 +1460,7 @@ fn interpolate_weighted_groups(
     })
 }
 
-pub fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::T, error::T> {
+pub(crate) fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::T, error::T> {
     let cancel_token = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
     let numbers_attribute = params.numbers_attribute.clone().unwrap_or_else(|| "source_elements".to_owned());

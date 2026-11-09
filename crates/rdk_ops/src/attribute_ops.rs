@@ -5,12 +5,12 @@ use rdk_core::error::Code;
 use rays_math::text_array::TextArray;
 
 /// `Error.make` for an operation, code and message (neither operation nor code is blank here).
-pub fn make_error(operation: &str, code: Code, message: &str) -> error::T {
+pub(crate) fn make_error(operation: &str, code: Code, message: &str) -> error::T {
     error::new(operation, code, message.to_owned())
 }
 
 /// OCaml `String.trim s = ""`.
-pub fn is_blank(text: &str) -> bool {
+pub(crate) fn is_blank(text: &str) -> bool {
     support::ocaml_trim_is_empty(text)
 }
 
@@ -95,7 +95,7 @@ pub fn map_ints(
 }
 
 /// `map_planes` for one text value per element.
-pub fn map_texts(
+pub(crate) fn map_texts(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     init: &TextArray,
@@ -185,14 +185,14 @@ pub struct InterpolateComputed {
     pub computed_weights_attribute: String,
 }
 
-pub fn blur_points(
+pub(crate) fn blur_points(
     params: &attribute_blur::Params,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     attribute_blur::run(params, geometry_value)
 }
 
-pub fn interpolate_attribute(
+pub(crate) fn interpolate_attribute(
     into: Option<&str>,
     owner: attribute::Owner,
     name: &str,
@@ -298,7 +298,7 @@ pub struct Params {
     pub target: geometry::T,
 }
 
-pub fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
+pub(crate) fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
     const OP: &str = "attribute_interpolate";
     let invalid_interpolate = |failure: &error::T| {
         let code = error::code(failure);
@@ -453,12 +453,12 @@ pub(crate) mod fixtures {
 
     use rdk_core::{attribute, error, geometry, group, packed, topology};
 
-    pub fn points(values: &[(f64, f64, f64)]) -> geometry::T {
+    pub(crate) fn points(values: &[(f64, f64, f64)]) -> geometry::T {
         crate::line_geometry::points(values).unwrap()
     }
 
     /// Geometry over `positions` whose primitives are `(kind, points)`.
-    pub fn mesh(
+    pub(crate) fn mesh(
         positions: &[(f64, f64, f64)],
         primitives: &[(topology::PrimitiveKind, Vec<i64>)],
     ) -> geometry::T {
@@ -485,14 +485,14 @@ pub(crate) mod fixtures {
         .unwrap()
     }
 
-    pub fn polygons(positions: &[(f64, f64, f64)], faces: &[Vec<i64>]) -> geometry::T {
+    pub(crate) fn polygons(positions: &[(f64, f64, f64)], faces: &[Vec<i64>]) -> geometry::T {
         let primitives: Vec<(topology::PrimitiveKind, Vec<i64>)> =
             faces.iter().map(|face| (topology::PrimitiveKind::Polygon, face.clone())).collect();
         mesh(positions, &primitives)
     }
 
     /// A `columns` x `rows` grid of unit-size triangle pairs in the XZ plane.
-    pub fn grid(columns: i64, rows: i64) -> geometry::T {
+    pub(crate) fn grid(columns: i64, rows: i64) -> geometry::T {
         let mut positions = Vec::new();
         for row in 0..=rows {
             for column in 0..=columns {
@@ -511,7 +511,7 @@ pub(crate) mod fixtures {
         polygons(&positions, &faces)
     }
 
-    pub fn owner_count(geometry_value: &geometry::T, owner: attribute::Owner) -> i64 {
+    pub(crate) fn owner_count(geometry_value: &geometry::T, owner: attribute::Owner) -> i64 {
         match owner {
             attribute::Owner::Point => geometry::point_count(geometry_value),
             attribute::Owner::Vertex => geometry::vertex_count(geometry_value),
@@ -520,7 +520,7 @@ pub(crate) mod fixtures {
         }
     }
 
-    pub fn add_storage(
+    pub(crate) fn add_storage(
         owner: attribute::Owner,
         name: &str,
         storage: attribute::Storage,
@@ -530,36 +530,36 @@ pub(crate) mod fixtures {
         geometry::with_attribute(item, geometry_value).unwrap()
     }
 
-    pub fn add_float(owner: attribute::Owner, name: &str, seed: f64, geometry_value: &geometry::T) -> geometry::T {
+    pub(crate) fn add_float(owner: attribute::Owner, name: &str, seed: f64, geometry_value: &geometry::T) -> geometry::T {
         let count = owner_count(geometry_value, owner);
         let values: Vec<f64> = (0..count).map(|index| seed + index as f64).collect();
         add_storage(owner, name, attribute::Storage::Float(Arc::new(values)), geometry_value)
     }
 
-    pub fn find(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> attribute::T {
+    pub(crate) fn find(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> attribute::T {
         geometry::find_attribute(owner, name, geometry_value)
             .unwrap_or_else(|| panic!("missing attribute {name}"))
     }
 
-    pub fn has(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> bool {
+    pub(crate) fn has(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> bool {
         geometry::find_attribute(owner, name, geometry_value).is_some()
     }
 
-    pub fn floats(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<f64> {
+    pub(crate) fn floats(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<f64> {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
             attribute::Storage::Float(values) => values.to_vec(),
             _ => panic!("wrong float storage for {name}"),
         }
     }
 
-    pub fn ints(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<i64> {
+    pub(crate) fn ints(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<i64> {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
             _ => panic!("wrong int storage for {name}"),
         }
     }
 
-    pub fn texts(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> rays_math::text_array::TextArray {
+    pub(crate) fn texts(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> rays_math::text_array::TextArray {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
             attribute::Storage::Text(values) => (*values).clone(),
             _ => panic!("wrong text storage for {name}"),
@@ -567,7 +567,7 @@ pub(crate) mod fixtures {
     }
 
     /// The three position planes (or any float3 attribute) of a geometry.
-    pub fn float3(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    pub(crate) fn float3(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
             attribute::Storage::Float3(values) => {
                 let view = packed::float3::view::view(&values).unwrap();
@@ -577,39 +577,33 @@ pub(crate) mod fixtures {
         }
     }
 
-    pub fn positions(geometry_value: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    pub(crate) fn positions(geometry_value: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let view = packed::float3::view::view(geometry::positions(geometry_value)).unwrap();
         (view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
     }
 
-    pub fn names(geometry_value: &geometry::T) -> Vec<(attribute::Owner, String)> {
+    pub(crate) fn names(geometry_value: &geometry::T) -> Vec<(attribute::Owner, String)> {
         geometry::attributes(geometry_value)
             .iter()
             .map(|item| (attribute::owner(item), attribute::name(item).to_owned()))
             .collect()
     }
 
-    pub fn group_of(owner: group::Owner, name: &str, members: &[i64], count: i64) -> group::T {
+    pub(crate) fn group_of(owner: group::Owner, name: &str, members: &[i64], count: i64) -> group::T {
         group::init(Some(1), owner, name, count, &|index| members.contains(&index)).unwrap()
     }
 
-    pub fn with_group(group_value: group::T, geometry_value: &geometry::T) -> geometry::T {
-        geometry::with_group(group_value, geometry_value).unwrap()
-    }
 
-    pub fn err_code(result: Result<geometry::T, error::T>) -> String {
+    pub(crate) fn err_code(result: Result<geometry::T, error::T>) -> String {
         match result {
             Ok(_) => "ok".to_owned(),
             Err(failure) => error::code(&failure).as_str().to_owned(),
         }
     }
 
-    pub fn code(failure: &error::T) -> String {
-        error::code(failure).as_str().to_owned()
-    }
 
     /// Runs `work` on a pool of `domains` domains and returns its geometry.
-    pub fn on_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
+    pub(crate) fn on_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
         let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
         parallel::run_unit(Some(domains), &|| {
             *slot.lock().unwrap() = Some(work());
@@ -626,15 +620,15 @@ pub(crate) mod fixtures2 {
 
     use rdk_core::{attribute, geometry, packed};
 
-    pub fn add_values(owner: attribute::Owner, name: &str, values: Vec<f64>, g: &geometry::T) -> geometry::T {
+    pub(crate) fn add_values(owner: attribute::Owner, name: &str, values: Vec<f64>, g: &geometry::T) -> geometry::T {
         super::fixtures::add_storage(owner, name, attribute::Storage::Float(Arc::new(values)), g)
     }
 
-    pub fn add_ints(owner: attribute::Owner, name: &str, values: Vec<i64>, g: &geometry::T) -> geometry::T {
+    pub(crate) fn add_ints(owner: attribute::Owner, name: &str, values: Vec<i64>, g: &geometry::T) -> geometry::T {
         super::fixtures::add_storage(owner, name, attribute::Storage::Int(Arc::new(values)), g)
     }
 
-    pub fn add_float3s(
+    pub(crate) fn add_float3s(
         owner: attribute::Owner,
         name: &str,
         x: Vec<f64>,
@@ -651,20 +645,20 @@ pub(crate) mod fixtures2 {
     }
 
     /// A triangle (0,0) (2,0) (0,2) at height `z`.
-    pub fn triangle(z: f64) -> geometry::T {
+    pub(crate) fn triangle(z: f64) -> geometry::T {
         super::fixtures::polygons(&[(0.0, 0.0, z), (2.0, 0.0, z), (0.0, 2.0, z)], &[vec![0, 1, 2]])
     }
 
-    pub fn near(left: f64, right: f64) -> bool {
+    pub(crate) fn near(left: f64, right: f64) -> bool {
         (left - right).abs() <= 1e-12
     }
 
-    pub fn near_all(expected: &[f64], actual: &[f64]) -> bool {
+    pub(crate) fn near_all(expected: &[f64], actual: &[f64]) -> bool {
         expected.len() == actual.len() && expected.iter().zip(actual).all(|(a, b)| near(*a, *b))
     }
 
     /// The shared byte-exact geometry oracle, including topology and ordered/edge groups.
-    pub fn signature(g: &geometry::T) -> String {
+    pub(crate) fn signature(g: &geometry::T) -> String {
         crate::compact_points::fixtures::geometry_signature(g)
     }
 }

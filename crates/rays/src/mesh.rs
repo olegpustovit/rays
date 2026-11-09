@@ -40,7 +40,7 @@ impl Vec3_buffer {
         vec3::create(self.x[index], self.y[index], self.z[index])
     }
 
-    pub fn of_array(values: &[vec3::T]) -> Vec3_buffer {
+    pub(crate) fn of_array(values: &[vec3::T]) -> Vec3_buffer {
         Vec3_buffer {
             x: Arc::new(values.iter().map(|v| v.x).collect()),
             y: Arc::new(values.iter().map(|v| v.y).collect()),
@@ -52,7 +52,8 @@ impl Vec3_buffer {
         Vec3_buffer { x: Arc::new(x), y: Arc::new(y), z: Arc::new(z) }
     }
 
-    pub fn to_array(&self) -> Vec<vec3::T> {
+    #[cfg(test)]
+    pub(crate) fn to_array(&self) -> Vec<vec3::T> {
         (0..self.x.len()).map(|i| self.get(i)).collect()
     }
 
@@ -134,8 +135,8 @@ pub fn same(a: &Mesh, b: &Mesh) -> bool {
 
 /// A device mesh's host copy where a reader needs vertices; any other mesh itself.
 fn readable(mesh: &Mesh) -> Result<Mesh, String> {
-    if let Some(d) = &mesh.device {
-        if let Some(host) = &d.host {
+    if let Some(d) = &mesh.device
+        && let Some(host) = &d.host {
             if let Some(made) = d.host_made.borrow().as_ref() {
                 return Ok(made.clone());
             }
@@ -143,7 +144,6 @@ fn readable(mesh: &Mesh) -> Result<Mesh, String> {
             *d.host_made.borrow_mut() = Some(made.clone());
             return Ok(made);
         }
-    }
     Ok(mesh.clone())
 }
 
@@ -171,7 +171,7 @@ fn first_bad_index(indices: &[i64], vertex_count: i64) -> Option<i64> {
     indices.iter().copied().find(|&index| index < 0 || index >= vertex_count)
 }
 
-pub fn create_owned_full(
+pub(crate) fn create_owned_full(
     mode_: Option<mode>,
     indices: Option<Vec<i64>>,
     normals: Option<Vec<vec3::T>>,
@@ -206,7 +206,7 @@ pub fn create_owned_full(
     })
 }
 
-pub fn create_packed_owned(
+pub(crate) fn create_packed_owned(
     mode_: Option<mode>,
     indices: Option<Vec<i64>>,
     normals: Option<Vec3_buffer>,
@@ -214,20 +214,14 @@ pub fn create_packed_owned(
     tex_coords: Option<Vec<vec2::T>>,
     vertices: Vec3_buffer,
 ) -> Result<Mesh, String> {
-    let colors = match colors {
-        None => None,
-        Some(c) => Some(Arc::new(c)),
-    };
-    let tex_coords = match tex_coords {
-        None => None,
-        Some(c) => Some(Arc::new(c)),
-    };
+    let colors = colors.map(Arc::new);
+    let tex_coords = tex_coords.map(Arc::new);
     create_packed_arcs(mode_, indices.map(Arc::new), normals, colors, tex_coords, vertices)
 }
 
 /// Zero-copy construction from already-published immutable packed storage: the arrays are
 /// retained and may be shared with another immutable value.
-pub fn create_packed_arcs(
+pub(crate) fn create_packed_arcs(
     mode_: Option<mode>,
     indices: Option<Arc<Vec<i64>>>,
     normals: Option<Vec3_buffer>,
@@ -271,9 +265,6 @@ pub fn mode(mesh: &Mesh) -> mode {
     mesh.mode
 }
 
-pub fn vertices(mesh: &Mesh) -> Result<Vec<vec3::T>, String> {
-    Ok(readable(mesh)?.vertices.to_array())
-}
 
 pub fn vertex_count(mesh: &Mesh) -> i64 {
     match &mesh.device {
@@ -307,12 +298,11 @@ pub fn centroid(mesh: &Mesh) -> Result<Option<vec3::T>, String> {
 
 /// The vertices' box: a device mesh's `bounds` where it has them (its host copy is not made),
 /// otherwise a scan of the vertices.
-pub fn bounds(mesh: &Mesh) -> Result<Option<(vec3::T, vec3::T)>, String> {
-    if let Some(d) = &mesh.device {
-        if let Some(bounds) = &d.device_bounds {
+pub(crate) fn bounds(mesh: &Mesh) -> Result<Option<(vec3::T, vec3::T)>, String> {
+    if let Some(d) = &mesh.device
+        && let Some(bounds) = &d.device_bounds {
             return Ok(bounds());
         }
-    }
     let readable = readable(mesh)?;
     let v = &readable.vertices;
     if v.x.is_empty() {
@@ -331,14 +321,6 @@ pub fn bounds(mesh: &Mesh) -> Result<Option<(vec3::T, vec3::T)>, String> {
     Ok(Some((vec3::create(lo[0], lo[1], lo[2]), vec3::create(hi[0], hi[1], hi[2]))))
 }
 
-pub fn vertex(index: i64, mesh: &Mesh) -> Result<Option<vec3::T>, String> {
-    let mesh = readable(mesh)?;
-    Ok(if index < 0 || index >= mesh.vertices.length() { None } else { Some(mesh.vertices.get(index as usize)) })
-}
-
-pub fn with_mode(mode_: mode, mesh: &Mesh) -> Mesh {
-    Mesh { mode: mode_, ..mesh.clone() }
-}
 
 pub fn recalculate_normals(mesh: &Mesh) -> Mesh {
     if mesh.device.is_some() { mesh.clone() } else { recalculate_host_normals(mesh) }
@@ -441,7 +423,8 @@ pub mod view {
         pub tex_coords: Option<Arc<Vec<vec2::T>>>,
     }
 
-    pub fn view(mesh: &Mesh) -> Result<view, String> {
+    #[cfg(test)]
+    pub(crate) fn view(mesh: &Mesh) -> Result<view, String> {
         let mesh = readable(mesh)?;
         Ok(view {
             mode: mesh.mode,
@@ -634,7 +617,8 @@ pub mod view {
         mesh.device.as_ref().is_some_and(|d| d.derived)
     }
 
-    pub fn triangle_count(mesh: &Mesh) -> i64 {
+    #[cfg(test)]
+    pub(crate) fn triangle_count(mesh: &Mesh) -> i64 {
         match mesh.mode {
             mode::Triangles => index_count(mesh) / 3,
             mode::Triangle_strip | mode::Triangle_fan => (mesh.indices.len() as i64 - 2).max(0),

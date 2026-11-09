@@ -39,11 +39,11 @@ pub mod int_buffer {
         pub length: i64,
     }
 
-    pub fn create(capacity: usize) -> T {
+    pub(crate) fn create(capacity: usize) -> T {
         T { values: Vec::with_capacity(capacity.max(8)), length: 0 }
     }
 
-    pub fn add(value: &mut T, item: i64) {
+    pub(crate) fn add(value: &mut T, item: i64) {
         value.values.push(item);
         value.length += 1;
     }
@@ -61,7 +61,7 @@ pub mod output {
         pub kinds: Vec<PrimitiveKind>,
     }
 
-    pub fn create(source_vertices: usize, source_primitives: usize) -> T {
+    pub(crate) fn create(source_vertices: usize, source_primitives: usize) -> T {
         let mut offsets = int_buffer::create(source_primitives + 1);
         int_buffer::add(&mut offsets, 0);
         T {
@@ -73,7 +73,7 @@ pub mod output {
         }
     }
 
-    pub fn add(value: &mut T, source: i64, kind: PrimitiveKind, corners: &[i64], source_points: &[i64]) {
+    pub(crate) fn add(value: &mut T, source: i64, kind: PrimitiveKind, corners: &[i64], source_points: &[i64]) {
         let minimum = if kind == PrimitiveKind::OpenPolyline { 2 } else { 3 };
         if corners.len() >= minimum {
             for &vertex in corners {

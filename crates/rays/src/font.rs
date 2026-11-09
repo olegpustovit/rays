@@ -128,11 +128,10 @@ pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<
     let align = align.unwrap_or(alignment::Left);
     let density = density.unwrap_or(1);
     let k = key(wrap, align, density, 0, text, mode);
-    if let Some(item) = side_lru::find(&mut font.0.cache.borrow_mut(), &k) {
-        if let Ok(img) = item.downcast::<image::Image>() {
+    if let Some(item) = side_lru::find(&mut font.0.cache.borrow_mut(), &k)
+        && let Ok(img) = item.downcast::<image::Image>() {
             return Ok((*img).clone());
         }
-    }
     let img = paint(density, wrap, align, font, text, mode)?;
     side_lru::add(&mut font.0.cache.borrow_mut(), image_bytes(&img), k, Rc::new(img.clone()));
     Ok(img)
@@ -261,17 +260,16 @@ pub mod raster {
 
     fn font(context: &cache_context, size: i64) -> Result<super::Font, String> {
         let k = TableKey::Int(size);
-        if let Some(item) = side_lru::find(&mut context.0.automatic_fonts.borrow_mut(), &k) {
-            if let Ok(value) = item.downcast::<super::Font>() {
+        if let Some(item) = side_lru::find(&mut context.0.automatic_fonts.borrow_mut(), &k)
+            && let Ok(value) = item.downcast::<super::Font>() {
                 return Ok((*value).clone());
             }
-        }
         let value = system(Some(size))?;
         side_lru::add(&mut context.0.automatic_fonts.borrow_mut(), 0, k, Rc::new(value.clone()));
         Ok(value)
     }
 
-    pub fn borrow_automatic(
+    pub(crate) fn borrow_automatic(
         wrap: Option<i64>,
         align: Option<alignment>,
         density: Option<i64>,
@@ -294,14 +292,13 @@ pub mod raster {
             });
         };
         let found = side_lru::find(&mut context.0.automatic_cache.borrow_mut(), &k);
-        if let Some(item) = found {
-            if let Ok(entry) = item.downcast::<automatic_entry>() {
+        if let Some(item) = found
+            && let Ok(entry) = item.downcast::<automatic_entry>() {
                 entry.references.set(entry.references.get() + 1);
                 side_lru::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &k, true);
                 context.0.automatic_references.set(context.0.automatic_references.get() + 1);
                 return Ok(automatic { entry, context: Some(context), released: Cell::new(false) });
             }
-        }
         let font = font(&context, size)?;
         let image = paint(density, wrap, align, &font, text, mode)?;
         // Borrowed entries remain pinned until their scene is released.
@@ -318,11 +315,11 @@ pub mod raster {
         Ok(automatic { entry, context: Some(context), released: Cell::new(false) })
     }
 
-    pub fn automatic_image(handle: &automatic) -> image::Image {
+    pub(crate) fn automatic_image(handle: &automatic) -> image::Image {
         handle.entry.image.clone()
     }
 
-    pub fn release_automatic(handle: &automatic) {
+    pub(crate) fn release_automatic(handle: &automatic) {
         if handle.released.get() {
             return;
         }
@@ -347,11 +344,10 @@ pub mod raster {
     fn unpin_entry(context: &cache_context, entry: &Rc<automatic_entry>) {
         let mut keys = Vec::new();
         side_lru::iter(&mut context.0.automatic_cache.borrow_mut(), &mut |key, item| {
-            if let Some(e) = item.downcast_ref::<automatic_entry>() {
-                if std::ptr::eq(e, Rc::as_ptr(entry)) {
+            if let Some(e) = item.downcast_ref::<automatic_entry>()
+                && std::ptr::eq(e, Rc::as_ptr(entry)) {
                     keys.push(key.clone());
                 }
-            }
         });
         for key in keys {
             side_lru::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &key, false);

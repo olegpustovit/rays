@@ -6,69 +6,21 @@ fn make(operation: &str, code: Code, message: String) -> error::T {
     error::new(operation, code, message)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Operation {
-    ReverseVertices,
-    ShiftVertices(i64),
-}
-
 fn reverse(
     cancel_value: Option<&cancel::T>,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     let grain = 16_384i64;
-    let operation = Operation::ReverseVertices;
-    let primitives: Option<&group::T> = None;
-    let invalid = |m: &str| make("reverse", Code::InvalidTopology, m.to_owned());
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(geometry_value);
     let source = topology::view::view(topology_value)?;
     let vertex_count = topology::vertex_count(topology_value) as usize;
     let primitive_count = topology::primitive_count(topology_value) as usize;
-    if let Some(selection) = primitives {
-        if group::owner(selection) != group::Owner::Primitive {
-            return Err(invalid("Rdk_mesh.Reverse_faces.reverse: selection must own primitives"));
-        }
-        if group::length(selection) != primitive_count as i64 {
-            return Err(invalid(
-                "Rdk_mesh.Reverse_faces.reverse: selection length does not match primitive count",
-            ));
-        }
-    }
-    let selected = |primitive: usize| match primitives {
-        None => true,
-        Some(selection) => group::mem(primitive as i64, selection),
-    };
-    let normalized_shift = |count: i64, offset: i64| {
-        let shift = offset % count;
-        if shift < 0 { shift + count } else { shift }
-    };
-    let changes = match operation {
-        Operation::ReverseVertices => match primitives {
-            None => primitive_count > 0,
-            Some(selection) => group::cardinality(selection) > 0,
-        },
-        Operation::ShiftVertices(0) => false,
-        Operation::ShiftVertices(offset) => (0..primitive_count).any(|primitive| {
-            selected(primitive) && {
-                let count = source.primitive_offsets[primitive + 1] - source.primitive_offsets[primitive];
-                normalized_shift(count, offset) != 0
-            }
-        }),
-    };
-    if !changes {
+    if primitive_count == 0 {
         return Ok(geometry_value.clone());
     }
-    let full_selection = match primitives {
-        None => true,
-        Some(selection) => group::cardinality(selection) == primitive_count as i64,
-    };
-    let (mut vertex_points, mut vertex_map): (Vec<i64>, Vec<i64>) = if full_selection {
-        (vec![0; vertex_count], vec![0; vertex_count])
-    } else {
-        (source.vertex_points[..vertex_count].to_vec(), (0..vertex_count as i64).collect())
-    };
-    let average_primitive_size = if primitive_count == 0 { 1 } else { (vertex_count / primitive_count).max(1) };
+    let (mut vertex_points, mut vertex_map) = (vec![0; vertex_count], vec![0; vertex_count]);
+    let average_primitive_size = (vertex_count / primitive_count).max(1);
     let primitive_grain = (grain / average_primitive_size as i64).max(1);
     {
         // Primitive range `r` owns the vertices of its primitives: a disjoint window per range.
@@ -84,20 +36,10 @@ fn reverse(
             for primitive in first..last {
                 support::poll(cancel_value, primitive)?;
                 let primitive = primitive as usize;
-                if !selected(primitive) {
-                    continue;
-                }
                 let first = source.primitive_offsets[primitive];
                 let count = source.primitive_offsets[primitive + 1] - first;
-                let shift = match operation {
-                    Operation::ReverseVertices => 0,
-                    Operation::ShiftVertices(offset) => normalized_shift(count, offset),
-                };
                 for local in 0..count {
-                    let old_local = match operation {
-                        Operation::ReverseVertices => count - local - 1,
-                        Operation::ShiftVertices(_) => (local + shift) % count,
-                    };
+                    let old_local = count - local - 1;
                     let at = (first + local - base) as usize;
                     let old_vertex = first + old_local;
                     points[at] = source.vertex_points[old_vertex as usize];
@@ -116,8 +58,7 @@ fn reverse(
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {
         let owner = attribute::owner(&item);
-        if operation == Operation::ReverseVertices
-            && attribute::name(&item) == "N"
+        if attribute::name(&item) == "N"
             && (owner == attribute::Owner::Point || owner == attribute::Owner::Vertex)
         {
             continue;
@@ -153,7 +94,7 @@ fn reverse(
     )
 }
 
-pub fn run(
+pub(crate) fn run(
     cancel_value: Option<&cancel::T>,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {

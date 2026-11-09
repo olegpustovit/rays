@@ -37,7 +37,8 @@ pub struct Params {
 
 impl Params {
     /// The defaults of the OCaml test front end (`Plane_clip_front.clip`).
-    pub fn new(origin: rays_math::vec3::T, normal: rays_math::vec3::T) -> Params {
+    #[cfg(test)]
+    pub(crate) fn new(origin: rays_math::vec3::T, normal: rays_math::vec3::T) -> Params {
         Params {
             cancel: None,
             grain: 16_384,
@@ -2182,7 +2183,7 @@ pub(crate) mod test_util {
     use rdk_core::{attribute, error, geometry, packed, topology};
     use std::sync::Mutex;
 
-    pub fn geom(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, polys: &[(topology::PrimitiveKind, Vec<i64>)]) -> geometry::T {
+    pub(crate) fn geom(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, polys: &[(topology::PrimitiveKind, Vec<i64>)]) -> geometry::T {
         let mut vertex_points = Vec::new();
         let mut offsets = vec![0i64];
         let mut kinds = Vec::new();
@@ -2195,21 +2196,21 @@ pub(crate) mod test_util {
         geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None).unwrap()
     }
 
-    pub fn polygons(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, polys: &[Vec<i64>]) -> geometry::T {
+    pub(crate) fn polygons(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, polys: &[Vec<i64>]) -> geometry::T {
         let list: Vec<(topology::PrimitiveKind, Vec<i64>)> =
             polys.iter().map(|p| (topology::PrimitiveKind::Polygon, p.clone())).collect();
         geom(x, y, z, &list)
     }
 
-    pub fn triangle() -> geometry::T {
+    pub(crate) fn triangle() -> geometry::T {
         polygons(vec![-10.0, 0.0, 10.0], vec![0.0, 4.0, 0.0], vec![0.0; 3], &[vec![0, 1, 2]])
     }
 
-    pub fn with_attribute(name: &str, storage: attribute::Storage, source: &geometry::T) -> geometry::T {
+    pub(crate) fn with_attribute(name: &str, storage: attribute::Storage, source: &geometry::T) -> geometry::T {
         with_owned_attribute(name, attribute::Owner::Point, storage, source)
     }
 
-    pub fn with_owned_attribute(
+    pub(crate) fn with_owned_attribute(
         name: &str,
         owner: attribute::Owner,
         storage: attribute::Storage,
@@ -2218,7 +2219,7 @@ pub(crate) mod test_util {
         geometry::with_attribute(attribute::create_owned(name, owner, storage).unwrap(), source).unwrap()
     }
 
-    pub fn int_attribute(owner: attribute::Owner, name: &str, source: &geometry::T) -> Vec<i64> {
+    pub(crate) fn int_attribute(owner: attribute::Owner, name: &str, source: &geometry::T) -> Vec<i64> {
         let found = geometry::find_attribute(owner, name, source).expect("missing attribute");
         match attribute::view::storage(&found).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
@@ -2226,17 +2227,17 @@ pub(crate) mod test_util {
         }
     }
 
-    pub fn xyz(source: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    pub(crate) fn xyz(source: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let view = packed::float3::view::view(geometry::positions(source)).unwrap();
         (view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
     }
 
-    pub fn topo(source: &geometry::T) -> topology::view::View {
+    pub(crate) fn topo(source: &geometry::T) -> topology::view::View {
         topology::view::view(geometry::topology(source)).unwrap()
     }
 
     /// Eight-point quad box with outward winding.
-    pub fn cuboid(center: (f64, f64, f64), size: (f64, f64, f64)) -> geometry::T {
+    pub(crate) fn cuboid(center: (f64, f64, f64), size: (f64, f64, f64)) -> geometry::T {
         let mut x = Vec::new();
         let mut y = Vec::new();
         let mut z = Vec::new();
@@ -2261,20 +2262,20 @@ pub(crate) mod test_util {
     }
 
     /// The simple C polygon of the OCaml clip tests, counter-clockwise in the XY plane.
-    pub fn c_outline() -> (Vec<f64>, Vec<f64>) {
+    pub(crate) fn c_outline() -> (Vec<f64>, Vec<f64>) {
         (
             vec![-2.0, 2.0, 2.0, -1.0, -1.0, 2.0, 2.0, -2.0],
             vec![-2.0, -2.0, -1.0, -1.0, 1.0, 1.0, 2.0, 2.0],
         )
     }
 
-    pub fn c_polygon() -> geometry::T {
+    pub(crate) fn c_polygon() -> geometry::T {
         let (x, y) = c_outline();
         polygons(x, y, vec![0.0; 8], &[(0..8).collect()])
     }
 
     /// Closed prism of the C outline from z = 0 to `height`, outward winding.
-    pub fn c_prism(height: f64) -> geometry::T {
+    pub(crate) fn c_prism(height: f64) -> geometry::T {
         let (ox, oy) = c_outline();
         let n = ox.len();
         let mut x = ox.clone();
@@ -2291,7 +2292,7 @@ pub(crate) mod test_util {
         polygons(x, y, z, &polys)
     }
 
-    pub fn reverse(source: &geometry::T) -> geometry::T {
+    pub(crate) fn reverse(source: &geometry::T) -> geometry::T {
         let view = topo(source);
         let (x, y, z) = xyz(source);
         let mut polys = Vec::new();
@@ -2305,7 +2306,7 @@ pub(crate) mod test_util {
     }
 
     /// Concatenates polygon-only geometries (no attributes).
-    pub fn merge(parts: &[geometry::T]) -> geometry::T {
+    pub(crate) fn merge(parts: &[geometry::T]) -> geometry::T {
         let (mut x, mut y, mut z) = (Vec::new(), Vec::new(), Vec::new());
         let mut polys: Vec<Vec<i64>> = Vec::new();
         for part in parts {
@@ -2327,7 +2328,7 @@ pub(crate) mod test_util {
         polygons(x, y, z, &polys)
     }
 
-    pub fn map_positions(source: &geometry::T, f: &dyn Fn(f64, f64, f64) -> (f64, f64, f64)) -> geometry::T {
+    pub(crate) fn map_positions(source: &geometry::T, f: &dyn Fn(f64, f64, f64) -> (f64, f64, f64)) -> geometry::T {
         let (x, y, z) = xyz(source);
         let (mut nx, mut ny, mut nz) = (Vec::new(), Vec::new(), Vec::new());
         for i in 0..x.len() {
@@ -2339,11 +2340,11 @@ pub(crate) mod test_util {
         geometry::with_positions(packed::float3::view::of_owned_exn(nx, ny, nz).unwrap(), source).unwrap()
     }
 
-    pub fn near(a: f64, b: f64) -> bool {
+    pub(crate) fn near(a: f64, b: f64) -> bool {
         (a - b).abs() <= 1e-10
     }
 
-    pub fn same_geometry(a: &geometry::T, b: &geometry::T) -> bool {
+    pub(crate) fn same_geometry(a: &geometry::T, b: &geometry::T) -> bool {
         let (ta, tb) = (topo(a), topo(b));
         xyz(a) == xyz(b)
             && ta.vertex_points == tb.vertex_points
@@ -2352,14 +2353,14 @@ pub(crate) mod test_util {
             && geometry::groups(a).len() == geometry::groups(b).len()
     }
 
-    pub fn expect_code(result: Result<geometry::T, error::T>, code: Code) {
+    pub(crate) fn expect_code(result: Result<geometry::T, error::T>, code: Code) {
         match result {
             Err(e) => assert_eq!(error::code(&e), code, "{}", error::to_string(&e)),
             Ok(_) => panic!("expected error {code:?}"),
         }
     }
 
-    pub fn with_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
+    pub(crate) fn with_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
         let slot = Mutex::new(None);
         parallel::run_unit(Some(domains), &|| {
             *slot.lock().unwrap() = Some(work());
@@ -2369,7 +2370,7 @@ pub(crate) mod test_util {
         slot.into_inner().unwrap().unwrap()
     }
 
-    pub fn boundary_and_non_manifold(source: &geometry::T) -> (usize, usize) {
+    pub(crate) fn boundary_and_non_manifold(source: &geometry::T) -> (usize, usize) {
         let index = rdk_core::topology_index::create(None, geometry::topology(source)).unwrap();
         let (mut boundary, mut non_manifold) = (0, 0);
         for edge in 0..rdk_core::topology_index::edge_count(&index) {

@@ -11,6 +11,7 @@ use crate::attribute_ops::{make_error};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Laplacian(f64),
+    #[cfg(test)]
     CustomSteps { odd: f64, even: f64 },
 }
 
@@ -38,7 +39,7 @@ fn invalid(message: &str) -> error::T {
     make_error(OPERATION, Code::InvalidBlur, &format!("{PREFIX}{message}"))
 }
 
-pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
+pub(crate) fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run_inner(params, geometry_value)
         .map_err(|failure| {
             if error::code(&failure) == Code::InvalidParameter {
@@ -61,6 +62,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     }
     let steps_valid = match params.mode {
         Mode::Laplacian(step) => step.is_finite(),
+        #[cfg(test)]
         Mode::CustomSteps { odd, even } => odd.is_finite() && even.is_finite(),
     };
     if !steps_valid {
@@ -146,12 +148,13 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     let topology = topology_index::view::view(&topology_index_value);
     let mut current = original.clone();
     let mut next = original.clone();
-    for iteration in 0..params.iterations {
+    for _iteration in 0..params.iterations {
         cancel::check_opt(cancel_token)?;
         let step = match params.mode {
             Mode::Laplacian(step) => step,
+            #[cfg(test)]
             Mode::CustomSteps { odd, even } => {
-                if iteration & 1 == 0 {
+                if _iteration & 1 == 0 {
                     odd
                 } else {
                     even

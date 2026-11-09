@@ -1,27 +1,27 @@
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, clippy::all)]
+#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 
 pub mod num;
 pub mod light;
 pub mod material;
 pub mod path;
 pub mod texture;
-pub mod input_state;
+pub(crate) mod input_state;
 pub mod frame;
-pub mod time;
+pub(crate) mod time;
 pub mod clipboard;
 pub mod image;
-pub mod canvas_runtime;
+pub(crate) mod canvas_runtime;
 pub mod audio;
 pub mod mesh;
 pub mod camera;
 pub mod font;
 pub mod world;
-pub mod idlist;
+pub(crate) mod idlist;
 pub mod scene3;
-pub mod scene3_native_lowering;
+pub(crate) mod scene3_native_lowering;
 pub mod scene;
 pub mod easy_camera;
-pub mod native_scene_lowering;
+pub(crate) mod native_scene_lowering;
 pub mod canvas;
 pub mod sketch;
 

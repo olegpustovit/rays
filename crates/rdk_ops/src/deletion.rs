@@ -109,7 +109,7 @@ fn primitive_retained_count(
     }
 }
 
-pub fn build_plan(
+pub(crate) fn build_plan(
     cancel_value: Option<&cancel::T>,
     delete_selected: bool,
     compact_points: bool,
@@ -227,7 +227,7 @@ pub fn build_plan(
     })
 }
 
-pub fn remap_attribute(
+pub(crate) fn remap_attribute(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -253,7 +253,7 @@ pub fn remap_attribute(
     topology_remap::attribute(cancel_value, grain, None, mapping, item).map(Some)
 }
 
-pub fn remap_group(
+pub(crate) fn remap_group(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &Plan,
@@ -271,7 +271,7 @@ pub fn remap_group(
     topology_remap::group(cancel_value, grain, mapping, item)
 }
 
-pub fn materialize_plan(
+pub(crate) fn materialize_plan(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     remap_edges: bool,
@@ -531,7 +531,7 @@ pub struct DeleteParams {
     pub compact_points: bool,
 }
 
-pub fn delete(
+pub(crate) fn delete(
     params: &DeleteParams,
     selection: &group::T,
     geometry_value: &geometry::T,

@@ -99,7 +99,7 @@ fn apply_primitives(
 }
 
 /// Stable primitive reorder by an integer primitive attribute.
-pub fn sort_primitives(
+pub(crate) fn sort_primitives(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     name: &str,

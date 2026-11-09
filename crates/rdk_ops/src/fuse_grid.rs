@@ -517,7 +517,7 @@ pub struct WeldParams {
 }
 
 /// Fuse of the points within the tolerance, averaging positions and keeping the first attributes.
-pub fn weld(params: WeldParams, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
+pub(crate) fn weld(params: WeldParams, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     fuse(
         &Params {
             cancel: params.cancel,

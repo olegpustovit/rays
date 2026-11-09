@@ -68,7 +68,7 @@ fn identity_mapping(mapping: &[i64], source_count: usize) -> bool {
     mapping.len() == source_count && mapping.iter().enumerate().all(|(index, &value)| value == index as i64)
 }
 
-pub fn apply_with_mapping(
+pub(crate) fn apply_with_mapping(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     remove_degenerate_primitives: bool,
@@ -301,7 +301,7 @@ pub fn apply_with_mapping(
     Ok((result, old_to_new))
 }
 
-pub fn apply(
+pub(crate) fn apply(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     remove_degenerate_primitives: bool,

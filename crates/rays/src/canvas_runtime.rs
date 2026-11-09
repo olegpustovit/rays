@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub type save = Rc<dyn Fn(&str) -> Result<(), String>>;
+pub(crate) type save = Rc<dyn Fn(&str) -> Result<(), String>>;
 
 thread_local! {
     static CURRENT: RefCell<Option<save>> = const { RefCell::new(None) };
@@ -18,13 +18,13 @@ impl Drop for Restore {
     }
 }
 
-pub fn with_save(save: save, f: &mut dyn FnMut()) {
+pub(crate) fn with_save(save: save, f: &mut dyn FnMut()) {
     let previous = CURRENT.with(|c| c.borrow_mut().replace(save));
     let _guard = Restore(previous);
     f()
 }
 
-pub fn save(filename: &str) -> Result<(), String> {
+pub(crate) fn save(filename: &str) -> Result<(), String> {
     let callback = CURRENT.with(|c| c.borrow().clone());
     match callback {
         None => Err("Canvas.save_screen_png: no active renderer".to_string()),

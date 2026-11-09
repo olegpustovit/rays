@@ -17,7 +17,7 @@ pub enum error {
     Step(ogpu_core::error::Error),
 }
 
-pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {
+pub(crate) fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {
     let text = |e: &ogpu_core::error::Error| ogpu_core::error::to_string(e);
     let _ = match e {
         error::Stage(message) => write!(formatter, "native Scene staging: {message}"),
@@ -28,7 +28,7 @@ pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {
     };
 }
 
-pub fn error_to_string(e: &error) -> String {
+pub(crate) fn error_to_string(e: &error) -> String {
     let mut s = String::new();
     pp_error(&mut s, e);
     s
@@ -61,7 +61,7 @@ thread_local! {
     static CURRENT: RefCell<Option<cache_context>> = const { RefCell::new(None) };
 }
 
-pub fn create_cache_context() -> cache_context {
+pub(crate) fn create_cache_context() -> cache_context {
     // ponytail: 16 immutable layers keyed by identity; add stable IDs if this cache grows.
     cache_context(Rc::new(RefCell::new(idlist::create(
         lru::cache("rays.retained_draws"),
@@ -83,7 +83,7 @@ impl Drop for Restore {
     }
 }
 
-pub fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
+pub(crate) fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
     let previous = CURRENT.with(|c| c.borrow_mut().replace(context.clone()));
     let _restore = Restore(previous);
     f()
@@ -98,11 +98,10 @@ fn sweep_retained(owner: &se::GpuVerticesOwner) {
     if let Some(context) = current() {
         let mut stale: Vec<Item> = Vec::new();
         idlist::iter(&mut context.0.borrow_mut(), &mut |layer, _| {
-            if let Some(prepared) = layer.downcast_ref::<se::PreparedScene3>() {
-                if se::borrows_unregistered(owner, prepared) {
+            if let Some(prepared) = layer.downcast_ref::<se::PreparedScene3>()
+                && se::borrows_unregistered(owner, prepared) {
                     stale.push(layer.clone());
                 }
-            }
         });
         for layer in stale {
             idlist::remove(&mut context.0.borrow_mut(), &layer);
@@ -110,7 +109,7 @@ fn sweep_retained(owner: &se::GpuVerticesOwner) {
     }
 }
 
-pub fn draws_of_prepared(staged: &layer::staged_native, prepared: &Rc<se::PreparedScene3>) -> Vec<rr::Draw> {
+pub(crate) fn draws_of_prepared(staged: &layer::staged_native, prepared: &Rc<se::PreparedScene3>) -> Vec<rr::Draw> {
     let direct = || prepared.entries.iter().map(draw_of_scene3_entry).collect::<Vec<_>>();
     if staged.retained.is_none() {
         return direct();
@@ -218,7 +217,7 @@ fn lower_all(
     Ok(batches)
 }
 
-pub fn render(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::node]) -> Result<(), error> {
+pub(crate) fn render(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::node]) -> Result<(), error> {
     let mut cancel = Cancel(None);
     let prepared: Result<outcome, error> = {
         let _release = Release(scene.to_vec());

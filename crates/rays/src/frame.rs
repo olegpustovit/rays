@@ -17,5 +17,5 @@ pub fn mouse_down(button: MouseButton, frame: &Frame) -> bool {
 }
 
 pub fn has_event(predicate: &dyn Fn(&Event) -> bool, frame: &Frame) -> bool {
-    frame.input.events.iter().any(|e| predicate(e))
+    frame.input.events.iter().any(predicate)
 }

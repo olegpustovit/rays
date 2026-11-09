@@ -199,13 +199,13 @@ impl baked {
     /// Irradiance-ready SH: the lighting map's coefficients on the real basis, already multiplied
     /// by the cosine-lobe factors pi, 2pi/3, pi/4 (Ramamoorthi-Hanrahan). Computed when first
     /// forced.
-    pub fn sh9(&self) -> &Vec<rgb> {
+    pub(crate) fn sh9(&self) -> &Vec<rgb> {
         &self.sh9
     }
 
     /// 6 GGX-prefiltered lighting mips for roughness 0, 0.2, .., 1: 128x64, 64x32, .., 4x2. Mip 0
     /// is a box downsample. Computed when first forced.
-    pub fn specular(&self) -> &Vec<map> {
+    pub(crate) fn specular(&self) -> &Vec<map> {
         &self.specular
     }
 }
@@ -1069,11 +1069,10 @@ pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height:
     let lights: Vec<light> = layers.iter().flat_map(|l| extract(rotation, light_radius, l)).collect();
     let mut sun_out = None;
     for l in &layers {
-        if let layer::Sun { angular_radius, intensity, tint } = l {
-            if sun_.y > 0. {
+        if let layer::Sun { angular_radius, intensity, tint } = l
+            && sun_.y > 0. {
                 sun_out = Some(sun { direction: rotate(rotation, sun_), angular_radius: *angular_radius, radiance: scale_rgb(*intensity, *tint) });
             }
-        }
     }
     // Local azimuth per column: layers are evaluated at phi - rotation.
     let phis: Vec<f64> = (0..width)
@@ -1108,9 +1107,7 @@ pub fn bake(domains: Option<i64>, light_radius: Option<f64>, width: i64, height:
             acc[10] = y;
             for i in 0..width as usize {
                 let phi = phis[i];
-                for c in 0..6 {
-                    acc[c] = 0.;
-                }
+                acc[..6].fill(0.);
                 acc[6] = (phi / TWO_PI) + 0.5;
                 acc[8] = phi;
                 acc[9] = s * sin_phis[i];
@@ -1217,7 +1214,7 @@ pub mod private {
     pub use super::cache_context;
     pub use super::create_cache_context;
 
-    pub fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
+    pub(crate) fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
         let previous = super::CURRENT_CACHE.with(|c| c.borrow_mut().replace(context.clone()));
         let _restore = super::Restore(previous);
         f()

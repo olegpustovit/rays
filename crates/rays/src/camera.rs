@@ -98,11 +98,10 @@ pub fn with_lens(lens: lens, camera: &Camera) -> Result<Camera, String> {
     if !lens.aperture.is_finite() || lens.aperture < 0. {
         return Err("Camera.with_lens: aperture must be finite and non-negative".to_string());
     }
-    if let Some(distance) = lens.focus_distance {
-        if !distance.is_finite() || distance <= 0. {
+    if let Some(distance) = lens.focus_distance
+        && (!distance.is_finite() || distance <= 0.) {
             return Err("Camera.with_lens: focus distance must be finite and positive".to_string());
         }
-    }
     Ok(Camera { lens, ..camera.clone() })
 }
 
@@ -141,7 +140,7 @@ fn projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<
     }
 }
 
-pub fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<mat4::T, String> {
+pub(crate) fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<mat4::T, String> {
     // OCaml evaluates the right operand of an application first: the view matrix, then the projection.
     let view = view_matrix(camera)?;
     let projection = projection_matrix(viewport, camera)?;

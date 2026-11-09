@@ -9,7 +9,7 @@ pub struct Time {
     vsync_enabled: bool,
 }
 
-pub fn create(target_fps: i64, vsync_enabled: bool) -> Time {
+pub(crate) fn create(target_fps: i64, vsync_enabled: bool) -> Time {
     Time {
         origin: Instant::now(),
         last_frame_time: 0.,
@@ -19,21 +19,21 @@ pub fn create(target_fps: i64, vsync_enabled: bool) -> Time {
     }
 }
 
-pub fn now(state: &Time) -> f64 {
+pub(crate) fn now(state: &Time) -> f64 {
     state.origin.elapsed().as_secs_f64()
 }
 
-pub fn delta(state: &Time) -> f64 {
+pub(crate) fn delta(state: &Time) -> f64 {
     state.delta_time
 }
 
-pub fn update(state: &mut Time) {
+pub(crate) fn update(state: &mut Time) {
     let current_time = now(state);
     state.delta_time = (current_time - state.last_frame_time).min(0.1);
     state.last_frame_time = current_time;
 }
 
-pub fn limit_frame_rate(state: &Time) {
+pub(crate) fn limit_frame_rate(state: &Time) {
     match state.target_fps {
         None => {}
         Some(_) if state.vsync_enabled => {}

@@ -359,7 +359,7 @@ fn reduce(
     )
 }
 
-pub fn apply(
+pub(crate) fn apply(
     cancel_value: Option<&cancel::T>,
     params: &Params,
     clusters: &Clusters,

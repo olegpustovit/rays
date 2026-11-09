@@ -9,7 +9,7 @@ use crate::subdivide_refine::{
     InterfaceChains, PointWeld, PullPlan, TriangleAppend,
 };
 
-pub fn shared_edge_endpoint(index: &topology_index::view::View, left: i64, right: i64) -> i64 {
+pub(crate) fn shared_edge_endpoint(index: &topology_index::view::View, left: i64, right: i64) -> i64 {
     let left_a = gi(&index.edge_a, left);
     let left_b = gi(&index.edge_b, left);
     let right_a = gi(&index.edge_a, right);
@@ -23,7 +23,7 @@ pub fn shared_edge_endpoint(index: &topology_index::view::View, left: i64, right
     }
 }
 
-pub fn project_to_source_edge(
+pub(crate) fn project_to_source_edge(
     source_positions: &packed::float3::view::View,
     index: &topology_index::view::View,
     edge: i64,
@@ -75,7 +75,7 @@ fn ancestry_of(plan: &PullPlan, geometry_value: &geometry::T) -> Result<Vec<i64>
     }
 }
 
-pub fn pull_boundary_no_edge_division(
+pub(crate) fn pull_boundary_no_edge_division(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     plan: &PullPlan,
@@ -208,7 +208,7 @@ impl TriangleSink {
     }
 }
 
-pub fn stitch_boundary_no_edge_division(
+pub(crate) fn stitch_boundary_no_edge_division(
     cancel_token: Option<&cancel::T>,
     plan: &PullPlan,
     unselected: &geometry::T,
@@ -409,7 +409,7 @@ pub fn stitch_boundary_no_edge_division(
     Ok(sink.finish())
 }
 
-pub fn stitch_boundary_divide_edges(
+pub(crate) fn stitch_boundary_divide_edges(
     cancel_token: Option<&cancel::T>,
     consistent_topology: bool,
     plan: &PullPlan,
@@ -512,7 +512,7 @@ pub fn stitch_boundary_divide_edges(
     Ok(sink.finish())
 }
 
-pub fn make_boundary_weld(
+pub(crate) fn make_boundary_weld(
     cancel_token: Option<&cancel::T>,
     bias: f64,
     only_equal: bool,

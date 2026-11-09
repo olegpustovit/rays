@@ -398,11 +398,10 @@ fn report_crash(state: &crash_state) {
     let frames: Vec<frame::Frame> = state.recent.borrow().iter().filter(|f| f.input.frame > 0).cloned().collect();
     let model_ref = state.model.try_borrow();
     let dump = |dir: &str| {
-        if let (Ok(m), Some(d)) = (&model_ref, &state.program.crash_dump) {
-            if let Some(m) = m.as_ref() {
+        if let (Ok(m), Some(d)) = (&model_ref, &state.program.crash_dump)
+            && let Some(m) = m.as_ref() {
                 d(m.as_ref(), dir);
             }
-        }
     };
     write_crash(&state.crash_dir, &state.title, &dump, &frames, &message, &backtrace);
 }
@@ -460,11 +459,10 @@ impl Drop for Finish {
         }
         if !self.done {
             // on_stop runs before the renderer goes, as OCaml's Fun.protect did
-            if let (Some(on_stop), Ok(m)) = (&self.model.program.on_stop, self.model.model.try_borrow()) {
-                if let Some(m) = m.as_ref() {
+            if let (Some(on_stop), Ok(m)) = (&self.model.program.on_stop, self.model.model.try_borrow())
+                && let Some(m) = m.as_ref() {
                     on_stop(m.as_ref());
                 }
-            }
             self.run();
         }
     }
@@ -483,27 +481,23 @@ fn run_state_internal(
     if config_.width <= 0 || config_.height <= 0 {
         return Err(invalid("dimensions must be positive"));
     }
-    if let Some(frames) = max_frames {
-        if frames <= 0 {
+    if let Some(frames) = max_frames
+        && frames <= 0 {
             return Err(invalid("max_frames must be positive"));
         }
-    }
-    if let Some(fps) = config_.fps {
-        if fps <= 0 {
+    if let Some(fps) = config_.fps
+        && fps <= 0 {
             return Err(invalid("fps must be positive"));
         }
-    }
-    if let Some(domains) = config_.domains {
-        if domains <= 0 {
+    if let Some(domains) = config_.domains
+        && domains <= 0 {
             return Err(invalid("domains must be positive"));
         }
-    }
     let vsync = !matches!(config_.clock, clock::Fixed(_));
-    if let clock::Fixed(dt) = config_.clock {
-        if !(dt.is_finite() && dt > 0.) {
+    if let clock::Fixed(dt) = config_.clock
+        && !(dt.is_finite() && dt > 0.) {
             return Err(invalid("fixed dt must be finite and positive"));
         }
-    }
     let input = input_state::create().map_err(|m| startup_error(op, ErrorKind::InvalidState, &format!("input: {m}")))?;
     let time_ = time::create(config_.fps.unwrap_or(0), vsync);
     let caches = layer::create_cache_context();
@@ -719,11 +713,10 @@ fn run_state_internal(
         result
     };
     // on_stop sees the final model, then the renderer goes
-    if let (Some(on_stop), Ok(m)) = (&program_.on_stop, crash.model.try_borrow()) {
-        if let Some(m) = m.as_ref() {
+    if let (Some(on_stop), Ok(m)) = (&program_.on_stop, crash.model.try_borrow())
+        && let Some(m) = m.as_ref() {
             on_stop(m.as_ref());
         }
-    }
     finish.run();
     drop(finish);
     looped?;
@@ -900,8 +893,8 @@ fn one_frame(
     if let Some(e) = PENDING_FAILURE.with(|p| p.borrow_mut().take()) {
         return Err(e);
     }
-    if profile && *count % 30 == 0 {
-        if let Ok(s) = rr::stats(coordinator) {
+    if profile && *count % 30 == 0
+        && let Ok(s) = rr::stats(coordinator) {
             eprintln!(
                 "profile frame {}: gpu {:.2} ms, draws {}, passes {}, uploaded {} B, sun passes {}, plan hits {} misses {}",
                 count,
@@ -914,7 +907,6 @@ fn one_frame(
                 s.retained_plan_misses
             );
         }
-    }
     Ok(())
 }
 
@@ -988,19 +980,6 @@ pub fn export_state(config_: Option<config>, fps: Option<i64>, prefix: Option<St
     out.into_inner().unwrap_or_else(|| Err(startup_error(op, ErrorKind::InvalidState, "parallel run did not start")))
 }
 
-/// Renders a deterministic PNG sequence named `prefix-NNNNNN.png`.
-pub fn export(config_: Option<config>, prefix: Option<String>, directory: &str, frames: i64, view: Box<dyn Fn(&frame::Frame) -> scene::Scene>) -> Result<(), error> {
-    let program_ = program {
-        init: Box::new(|_| Box::new(()) as model),
-        update: Box::new(|_, _| None),
-        view: Box::new(move |_, f| view(f)),
-        after_present: None,
-        crash_dump: None,
-        idle: None,
-        on_stop: None,
-    };
-    export_state(config_, None, prefix, directory, frames, program_).map(|_| ())
-}
 
 #[cfg(test)]
 mod tests {

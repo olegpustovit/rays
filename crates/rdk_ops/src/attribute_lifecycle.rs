@@ -94,7 +94,7 @@ fn reference_names(reference: &Option<geometry::T>) -> Vec<HashMap<String, ()>> 
     tables
 }
 
-pub fn delete(params: &DeleteParams, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
+pub(crate) fn delete(params: &DeleteParams, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_token = params.cancel.as_deref();
     let point = compile_optional("Attribute Delete point pattern", &params.point_pattern)?;
     let vertex = compile_optional("Attribute Delete vertex pattern", &params.vertex_pattern)?;
@@ -225,7 +225,7 @@ fn name_of(bytes: Vec<u8>) -> String {
     String::from_utf8(bytes).unwrap_or_else(|bad| String::from_utf8_lossy(bad.as_bytes()).into_owned())
 }
 
-pub fn rename(
+pub(crate) fn rename(
     cancel_value: Option<&cancel::T>,
     rules: &[RenameRule],
     geometry_value: &geometry::T,
@@ -460,7 +460,7 @@ fn swap_two_slots(
     }
 }
 
-pub fn swap(
+pub(crate) fn swap(
     cancel_value: Option<&cancel::T>,
     rules: &[SwapRule],
     geometry_value: &geometry::T,

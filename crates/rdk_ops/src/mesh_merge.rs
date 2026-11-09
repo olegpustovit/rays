@@ -32,7 +32,7 @@ pub struct RunTaggedParams {
 }
 
 /// The primitive int attribute the editor's merge lowering writes.
-pub const PROVENANCE_ATTRIBUTE: &str = "__flow_src";
+pub(crate) const PROVENANCE_ATTRIBUTE: &str = "__flow_src";
 
 fn make(code: Code, message: String) -> error::T {
     error::new(OPERATION, code, message)

@@ -673,7 +673,7 @@ fn once(
     )
 }
 
-pub fn iterate(
+pub(crate) fn iterate(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     independent: bool,

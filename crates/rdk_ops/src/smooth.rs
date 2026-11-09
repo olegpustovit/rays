@@ -109,7 +109,7 @@ fn cancelled() -> error::T {
     error::cancelled("smooth")
 }
 
-pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
+pub(crate) fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = support::resolve(params.grain).map_err(|_| fail(Code::InvalidParameter, "grain must be positive"))?;
     let cancel_token = params.cancel.as_deref();
     let in_run = || -> Result<geometry::T, error::T> {

@@ -161,7 +161,7 @@ fn representative_mapping(clusters: &Clusters, compact: bool) -> Vec<i64> {
     }
 }
 
-pub fn expand_f64(clusters: &Clusters, compact: bool, values: Vec<f64>) -> Vec<f64> {
+pub(crate) fn expand_f64(clusters: &Clusters, compact: bool, values: Vec<f64>) -> Vec<f64> {
     if compact {
         values
     } else {
@@ -169,7 +169,7 @@ pub fn expand_f64(clusters: &Clusters, compact: bool, values: Vec<f64>) -> Vec<f
     }
 }
 
-pub fn expand_i64(clusters: &Clusters, compact: bool, values: Vec<i64>) -> Vec<i64> {
+pub(crate) fn expand_i64(clusters: &Clusters, compact: bool, values: Vec<i64>) -> Vec<i64> {
     if compact {
         values
     } else {
@@ -177,7 +177,7 @@ pub fn expand_i64(clusters: &Clusters, compact: bool, values: Vec<i64>) -> Vec<i
     }
 }
 
-pub fn expand_string(clusters: &Clusters, compact: bool, values: TextArray) -> TextArray {
+pub(crate) fn expand_string(clusters: &Clusters, compact: bool, values: TextArray) -> TextArray {
     if compact {
         values
     } else {
@@ -191,20 +191,20 @@ fn greatest_mapping(clusters: &Clusters) -> Vec<i64> {
         .collect()
 }
 
-pub fn select_f64(source: &[f64], mapping: &[i64]) -> Vec<f64> {
+pub(crate) fn select_f64(source: &[f64], mapping: &[i64]) -> Vec<f64> {
     mapping.iter().map(|&index| source[index as usize]).collect()
 }
 
-pub fn select_i64(source: &[i64], mapping: &[i64]) -> Vec<i64> {
+pub(crate) fn select_i64(source: &[i64], mapping: &[i64]) -> Vec<i64> {
     mapping.iter().map(|&index| source[index as usize]).collect()
 }
 
-pub fn select_string(source: &TextArray, mapping: &[i64]) -> TextArray {
+pub(crate) fn select_string(source: &TextArray, mapping: &[i64]) -> TextArray {
     source.gather(mapping.iter().map(|&index| index as usize))
 }
 
 /// OCaml Float.compare: nan equals itself and sorts before every other float.
-pub fn float_compare(a: f64, b: f64) -> i64 {
+pub(crate) fn float_compare(a: f64, b: f64) -> i64 {
     if a < b {
         -1
     } else if a > b {
@@ -223,7 +223,7 @@ fn int_compare(a: i64, b: i64) -> i64 {
 }
 
 /// Order two slots by value, then by point index.
-pub fn compare_float_entry(values: &[f64], points: &[i64], left: usize, right: usize) -> i64 {
+pub(crate) fn compare_float_entry(values: &[f64], points: &[i64], left: usize, right: usize) -> i64 {
     let compared = float_compare(values[left], values[right]);
     if compared != 0 { compared } else { int_compare(points[left], points[right]) }
 }
@@ -243,7 +243,7 @@ fn compare_text_entry(values: &[Vec<u8>], points: &[i64], left: usize, right: us
 }
 
 // Heap sort of slots first..last of both planes; the three element types each get one copy.
-pub fn sort_range_f64(values: &mut [f64], points: &mut [i64], first: usize, last: usize) {
+pub(crate) fn sort_range_f64(values: &mut [f64], points: &mut [i64], first: usize, last: usize) {
     let count = last - first;
     if count < 2 {
         return;
@@ -482,7 +482,7 @@ fn weight_values(geometry_value: &geometry::T, name: &str) -> Result<Vec<f64>, e
     Ok(values)
 }
 
-pub fn validate(
+pub(crate) fn validate(
     attribute_rules: &[AttributeRule],
     group_rules: &[GroupRule],
     _geometry: &geometry::T,
@@ -533,7 +533,7 @@ fn validate_float(name: &str, source: &[f64]) -> Result<(), error::T> {
     Ok(())
 }
 
-pub fn average_float(clusters: &Clusters, source: &[f64], cluster: usize) -> f64 {
+pub(crate) fn average_float(clusters: &Clusters, source: &[f64], cluster: usize) -> f64 {
     let first = clusters.offsets[cluster] as usize;
     let last = clusters.offsets[cluster + 1] as usize;
     let mut sum = 0.0;
@@ -1233,7 +1233,7 @@ fn reduced_group(
 
 /// Apply point-attribute and point-group cluster policies. Failures carry the Invalid_argument
 /// message of the original.
-pub fn apply(
+pub(crate) fn apply(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     default_attributes: DefaultAttributes,

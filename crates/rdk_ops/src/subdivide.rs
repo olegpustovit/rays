@@ -11,7 +11,7 @@ use crate::deform;
 use crate::deletion;
 use crate::ordering;
 pub use crate::subdivide_refine::*;
-pub use crate::subdivide_stitch::*;
+pub(crate) use crate::subdivide_stitch::*;
 
 use BoundaryInterpolation::*;
 use CreasingMethod::*;
@@ -38,7 +38,7 @@ fn delete_part(
     )
 }
 
-pub fn extract_primitive_part(
+pub(crate) fn extract_primitive_part(
     cancel_arc: &Option<Arc<cancel::T>>,
     grain: Option<i64>,
     selected: bool,
@@ -53,7 +53,7 @@ pub fn extract_primitive_part(
     }
 }
 
-pub fn free_point_part(
+pub(crate) fn free_point_part(
     cancel_arc: &Option<Arc<cancel::T>>,
     grain: Option<i64>,
     geometry_value: &geometry::T,
@@ -79,7 +79,7 @@ pub fn free_point_part(
     Ok(Some(delete_part(cancel_arc, grain, true, false, &referenced, geometry_value)?))
 }
 
-pub fn iterate(
+pub(crate) fn iterate(
     cancel_token: Option<&cancel::T>,
     options: &OnceOptions,
     scheme: Scheme,
@@ -112,7 +112,7 @@ pub fn iterate(
     }
 }
 
-pub fn with_empty_edge_group(
+pub(crate) fn with_empty_edge_group(
     cancel_token: Option<&cancel::T>,
     name: &str,
     geometry_value: &geometry::T,
@@ -123,13 +123,13 @@ pub fn with_empty_edge_group(
     geometry::with_edge_group(empty, geometry_value)
 }
 
-pub fn without_resulting_creases(geometry_value: &geometry::T) -> geometry::T {
+pub(crate) fn without_resulting_creases(geometry_value: &geometry::T) -> geometry::T {
     let stripped = geometry::without_attribute(Owner::Vertex, "creaseweight", geometry_value);
     let stripped = geometry::without_attribute(Owner::Primitive, "creaseweight", &stripped);
     geometry::without_attribute(Owner::Point, "cornerweight", &stripped)
 }
 
-pub fn automatic_boundary_holes(
+pub(crate) fn automatic_boundary_holes(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     geometry_value: &geometry::T,
@@ -208,7 +208,7 @@ pub struct DetailOverrides {
     pub osd_trianglesubdiv: Option<attribute::T>,
 }
 
-pub fn detail_overrides(geometry_value: &geometry::T) -> DetailOverrides {
+pub(crate) fn detail_overrides(geometry_value: &geometry::T) -> DetailOverrides {
     let mut found = DetailOverrides::default();
     for item in geometry::view::attributes(geometry_value) {
         if attribute::owner(item) == Owner::Detail {
@@ -261,7 +261,7 @@ fn ocaml_quoted(value: &str) -> String {
     out
 }
 
-pub fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Result<Scheme, error::T> {
+pub(crate) fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Result<Scheme, error::T> {
     let Some(item) = found else {
         return Ok(default);
     };
@@ -293,7 +293,7 @@ pub fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Result<S
     }
 }
 
-pub fn resolve_boundary_interpolation(
+pub(crate) fn resolve_boundary_interpolation(
     default: BoundaryInterpolation,
     found: Option<&attribute::T>,
 ) -> Result<BoundaryInterpolation, error::T> {
@@ -310,7 +310,7 @@ pub fn resolve_boundary_interpolation(
     }
 }
 
-pub fn resolve_face_varying_interpolation(
+pub(crate) fn resolve_face_varying_interpolation(
     default: FaceVaryingInterpolation,
     found: Option<&attribute::T>,
 ) -> Result<FaceVaryingInterpolation, error::T> {
@@ -330,7 +330,7 @@ pub fn resolve_face_varying_interpolation(
     }
 }
 
-pub fn resolve_creasing_method(
+pub(crate) fn resolve_creasing_method(
     default: CreasingMethod,
     found: Option<&attribute::T>,
 ) -> Result<CreasingMethod, error::T> {
@@ -346,7 +346,7 @@ pub fn resolve_creasing_method(
     }
 }
 
-pub fn resolve_triangle_subdivision(
+pub(crate) fn resolve_triangle_subdivision(
     default: TrianglePolicy,
     found: Option<&attribute::T>,
 ) -> Result<TrianglePolicy, error::T> {
@@ -451,7 +451,7 @@ fn validate_crease_arguments(
     Ok(())
 }
 
-pub fn subdivide_polygons(
+pub(crate) fn subdivide_polygons(
     cancel_arc: &Option<Arc<cancel::T>>,
     grain: Option<i64>,
     options: &PolygonOptions,
@@ -733,7 +733,7 @@ pub fn subdivide_polygons(
     Ok(if generate_resulting_creases { output } else { without_resulting_creases(&output) })
 }
 
-pub fn primitive_kind_counts(geometry_value: &geometry::T) -> Result<(i64, i64), error::T> {
+pub(crate) fn primitive_kind_counts(geometry_value: &geometry::T) -> Result<(i64, i64), error::T> {
     let topology_view = topology::view::view(geometry::topology(geometry_value))?;
     let mut polygons = 0_i64;
     let mut curves = 0_i64;
@@ -747,7 +747,7 @@ pub fn primitive_kind_counts(geometry_value: &geometry::T) -> Result<(i64, i64),
     Ok((polygons, curves))
 }
 
-pub fn internal_attribute_name(geometry_value: &geometry::T, base: &str) -> String {
+pub(crate) fn internal_attribute_name(geometry_value: &geometry::T, base: &str) -> String {
     let mut suffix = 0_i64;
     loop {
         let name = if suffix == 0 { base.to_owned() } else { format!("{base}_{suffix}") };
@@ -758,7 +758,7 @@ pub fn internal_attribute_name(geometry_value: &geometry::T, base: &str) -> Stri
     }
 }
 
-pub fn primitive_kind_group(
+pub(crate) fn primitive_kind_group(
     grain: Option<i64>,
     polygon: bool,
     geometry_value: &geometry::T,
@@ -773,7 +773,7 @@ pub fn primitive_kind_group(
     )
 }
 
-pub fn extract_kind(
+pub(crate) fn extract_kind(
     cancel_arc: &Option<Arc<cancel::T>>,
     grain: Option<i64>,
     polygon: bool,
@@ -783,7 +783,7 @@ pub fn extract_kind(
     delete_part(cancel_arc, grain, false, true, &selection, geometry_value)
 }
 
-pub fn selection_for_kind(
+pub(crate) fn selection_for_kind(
     grain: Option<i64>,
     polygon: bool,
     selection: Option<&group::T>,
@@ -805,7 +805,7 @@ pub fn selection_for_kind(
     )?))
 }
 
-pub fn refine_curves(
+pub(crate) fn refine_curves(
     cancel_arc: &Option<Arc<cancel::T>>,
     grain: Option<i64>,
     selection: Option<&group::T>,

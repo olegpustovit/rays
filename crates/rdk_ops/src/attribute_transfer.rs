@@ -37,7 +37,7 @@ pub enum Falloff {
     Uniform(f64),
 }
 
-pub type SurfaceFalloff = Falloff;
+pub(crate) type SurfaceFalloff = Falloff;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SurfaceAttribute {
@@ -874,15 +874,15 @@ fn spatial(owner: attribute::Owner, params: &SpatialParams) -> Result<geometry::
     finish(result, "attribute_transfer")
 }
 
-pub fn transfer_points(params: &SpatialParams) -> Result<geometry::T, error::T> {
+pub(crate) fn transfer_points(params: &SpatialParams) -> Result<geometry::T, error::T> {
     spatial(attribute::Owner::Point, params)
 }
 
-pub fn transfer_primitives(params: &SpatialParams) -> Result<geometry::T, error::T> {
+pub(crate) fn transfer_primitives(params: &SpatialParams) -> Result<geometry::T, error::T> {
     spatial(attribute::Owner::Primitive, params)
 }
 
-pub fn transfer_detail(params: &DetailParams) -> Result<geometry::T, error::T> {
+pub(crate) fn transfer_detail(params: &DetailParams) -> Result<geometry::T, error::T> {
     let result = (|| {
         let operation = "Rdk.Attribute_ops.transfer_detail";
         let attributes = selected_attributes(
@@ -898,7 +898,7 @@ pub fn transfer_detail(params: &DetailParams) -> Result<geometry::T, error::T> {
     finish(result, "attribute_transfer")
 }
 
-pub fn surface_attribute(
+pub(crate) fn surface_attribute(
     into: Option<&str>,
     owner: attribute::Owner,
     name: &str,
@@ -920,7 +920,7 @@ pub fn surface_attribute(
     Ok(SurfaceAttribute { source_owner: owner, source_name: name.to_owned(), target_name })
 }
 
-pub fn transfer_surface(params: &SurfaceParams) -> Result<geometry::T, error::T> {
+pub(crate) fn transfer_surface(params: &SurfaceParams) -> Result<geometry::T, error::T> {
     finish(transfer_surface_inner(params), "attribute_transfer_surface")
 }
 
@@ -1264,7 +1264,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
     install_attributes_batch(made, target)
 }
 
-pub fn transfer_vertices(params: &VerticesParams) -> Result<geometry::T, error::T> {
+pub(crate) fn transfer_vertices(params: &VerticesParams) -> Result<geometry::T, error::T> {
     let result = (|| {
         let attributes = selected_attributes(
             "Rdk.Attribute_ops.transfer_vertices",
@@ -1298,7 +1298,7 @@ pub fn transfer_vertices(params: &VerticesParams) -> Result<geometry::T, error::
     finish(result, "attribute_transfer")
 }
 
-pub fn transfer_all(params: &AllParams) -> Result<geometry::T, error::T> {
+pub(crate) fn transfer_all(params: &AllParams) -> Result<geometry::T, error::T> {
     let result = (|| {
         let spatial_step = |owner: attribute::Owner, pattern: &str, target: geometry::T| {
             flatten(spatial(

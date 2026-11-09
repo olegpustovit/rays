@@ -174,7 +174,8 @@ pub fn nodes(scene: &Scene3) -> Vec<node> {
     scene.nodes.clone()
 }
 
-pub fn group(nodes: Vec<node>) -> node {
+#[cfg(test)]
+pub(crate) fn group(nodes: Vec<node>) -> node {
     node::Group(Rc::new(nodes))
 }
 
@@ -252,7 +253,7 @@ pub mod walk {
         pub transform: mat4::T,
     }
 
-    pub fn cacheable(scene: &Scene3) -> bool {
+    pub(crate) fn cacheable(scene: &Scene3) -> bool {
         fn nodes(list: &[node]) -> bool {
             list.iter().all(|n| match n {
                 node::Mesh(_, _, texture, ..) => texture.is_none(),
@@ -364,7 +365,7 @@ pub mod walk {
         scene.separate_specular
     }
 
-    pub fn depth_clear(_scene: &Scene3) -> f64 {
+    pub(crate) fn depth_clear(_scene: &Scene3) -> f64 {
         1.
     }
 

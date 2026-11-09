@@ -129,7 +129,7 @@ fn delete_flagged(
     )
 }
 
-pub fn delete_degenerate(
+pub(crate) fn delete_degenerate(
     params: &DeleteDegenerateParams,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {

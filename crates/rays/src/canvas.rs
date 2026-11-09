@@ -198,21 +198,6 @@ pub mod private {
     }
 }
 
-/// Releases the texture staging its renderer keeps while frame after frame uploads, which the
-/// next upload makes again: a settled reading of the canvas then does not depend on the last two
-/// frames.
-pub fn release_staging(value: &Canvas) -> Result<(), String> {
-    match value.0.execution.borrow().as_ref() {
-        None => Ok(()),
-        Some(execution) => rr::release_staging(execution).map_err(|e| renderer_message("Canvas.release_staging", &e)),
-    }
-}
-
-/// The device's GPU time so far, summed over completed command buffers: the difference across a
-/// `render` is that frame's GPU time.
-pub fn gpu_seconds(value: &Canvas) -> Result<f64, String> {
-    private::native_stats(value).map(|s| s.gpu_duration_seconds)
-}
 
 pub fn save_png(value: &Canvas, path: &str) -> Result<(), String> {
     runtime_resources::write_atomic(path, &|temporary| {

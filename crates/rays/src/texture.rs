@@ -252,7 +252,7 @@ fn sample_index_packed(filter_: filter, wrap_u: wrap, wrap_v: wrap, texture: &cp
     }
 }
 
-pub fn sample_lod_packed(
+pub(crate) fn sample_lod_packed(
     filter_: Option<filter>,
     wrap_u: Option<wrap>,
     wrap_v: Option<wrap>,
@@ -288,7 +288,7 @@ pub fn sample_lod_packed(
     })
 }
 
-pub fn sample_lod(
+pub(crate) fn sample_lod(
     filter_: Option<filter>,
     wrap_u: Option<wrap>,
     wrap_v: Option<wrap>,

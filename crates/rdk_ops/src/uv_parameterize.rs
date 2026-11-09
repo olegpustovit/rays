@@ -728,7 +728,7 @@ fn solve_checked(
 
 /// Solves the chart parameterization; `Circle` maps island boundaries to circles, `Preserve` keeps
 /// the existing vertex float2 attribute `name` on boundaries.
-pub fn solve(
+pub(crate) fn solve(
     params: &Params,
     boundary_mode: BoundaryMode,
     value: &geometry::T,

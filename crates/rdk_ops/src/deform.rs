@@ -15,7 +15,7 @@ fn fail(message: String) -> error::T {
     error::new("Rdk.Deform", Code::InvalidParameter, message)
 }
 
-pub fn validate_selection(
+pub(crate) fn validate_selection(
     topology_value: &topology::T,
     selection: Option<&element_selection::T>,
 ) -> Result<(), error::T> {
@@ -63,7 +63,7 @@ pub fn validate_selection(
 }
 
 // The index is required for every selection but None and point groups.
-pub fn point_selected(
+pub(crate) fn point_selected(
     selection: Option<&element_selection::T>,
     index: Option<&topology_index::T>,
     point: i64,
@@ -108,7 +108,7 @@ fn planes_of(values: &packed::float3::T) -> Result<Planes, error::T> {
     Ok(Planes { x: values.x.to_vec(), y: values.y.to_vec(), z: values.z.to_vec() })
 }
 
-pub fn point_vector_attribute(
+pub(crate) fn point_vector_attribute(
     operation: &str,
     name: &str,
     geometry_value: &geometry::T,
@@ -203,7 +203,7 @@ fn geometric_point_vectors(
     Ok(Planes { x, y, z })
 }
 
-pub fn resolve_directions(
+pub(crate) fn resolve_directions(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     geometry_value: &geometry::T,
@@ -228,7 +228,7 @@ pub struct Params {
     pub primitives: Option<group::T>,
 }
 
-pub fn normals(params: Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
+pub(crate) fn normals(params: Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     support::check_positive(params.grain)
         .map_err(|_| fail("Rdk_mesh.Deform.normals: grain must be positive".to_owned()))?;
     // ponytail: core Normal_ops owns its cancel token, so an Arc token is checked here and not forwarded.

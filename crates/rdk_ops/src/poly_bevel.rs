@@ -33,7 +33,8 @@ pub struct Params {
 
 impl Params {
     /// The defaults of the OCaml test front end (`Poly_bevel_front.run`).
-    pub fn new(distance: f64) -> Params {
+    #[cfg(test)]
+    pub(crate) fn new(distance: f64) -> Params {
         Params {
             cancel: None,
             grain: None,

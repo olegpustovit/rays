@@ -34,10 +34,6 @@ pub fn load(path: &str) -> Result<Image, String> {
     }
 }
 
-/// `load`, failing with the message (OCaml's `load_exn` raised `Failure`).
-pub fn load_exn(path: &str) -> Result<Image, String> {
-    load(path)
-}
 
 pub fn create(width: i64, height: i64, color: Option<color::T>) -> Result<Image, String> {
     let color = color.unwrap_or_else(color::transparent);
@@ -80,11 +76,11 @@ pub fn get_size(image: &Image) -> Result<(i64, i64), String> {
     Resource::size(&image.0.resource).map_err(|e| message("Image.get_size", &e))
 }
 
-pub fn get_width(image: &Image) -> Result<i64, String> {
+pub(crate) fn get_width(image: &Image) -> Result<i64, String> {
     get_size(image).map(|s| s.0)
 }
 
-pub fn get_height(image: &Image) -> Result<i64, String> {
+pub(crate) fn get_height(image: &Image) -> Result<i64, String> {
     get_size(image).map(|s| s.1)
 }
 

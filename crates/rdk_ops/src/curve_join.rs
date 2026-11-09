@@ -383,7 +383,7 @@ pub struct Params {
 }
 
 /// Welds the selected open polyline curves of `geometry` into chains.
-pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
+pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain;
     let tolerance = params.tolerance;

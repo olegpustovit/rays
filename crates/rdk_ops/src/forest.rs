@@ -23,7 +23,6 @@ pub struct T {
     pub root_count: i64,
 }
 
-pub type Forest = T;
 
 pub struct Params {
     pub selected: Option<Box<dyn Fn(i64) -> bool + Send + Sync>>,

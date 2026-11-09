@@ -91,7 +91,7 @@ fn union(parent: &mut [usize], rank: &mut [u8], left: usize, right: usize) -> bo
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn raw(
+pub(crate) fn raw(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     edges: Option<&edge_group::T>,

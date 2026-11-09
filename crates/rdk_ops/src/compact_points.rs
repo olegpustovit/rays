@@ -80,7 +80,7 @@ fn compact(
     geometry::create(positions, new_topology, Some(attributes), Some(groups), Some(edge_groups))
 }
 
-pub fn run(
+pub(crate) fn run(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     value: &geometry::T,
@@ -100,7 +100,7 @@ pub mod fixtures {
     use rdk_core::topology::PrimitiveKind;
     use rdk_core::{attribute, edge_group, geometry, group, packed, topology, topology_index};
 
-    pub fn geom(
+    pub(crate) fn geom(
         x: &[f64],
         y: &[f64],
         z: &[f64],
@@ -114,22 +114,22 @@ pub mod fixtures {
         geometry::create(positions, topology, None, None, None).unwrap()
     }
 
-    pub fn err(result: Result<geometry::T, rdk_core::error::T>) -> rdk_core::error::T {
+    pub(crate) fn err(result: Result<geometry::T, rdk_core::error::T>) -> rdk_core::error::T {
         match result {
             Err(failure) => failure,
             Ok(_) => panic!("expected an error"),
         }
     }
 
-    pub fn attr(owner: attribute::Owner, name: &str, storage: attribute::Storage) -> attribute::T {
+    pub(crate) fn attr(owner: attribute::Owner, name: &str, storage: attribute::Storage) -> attribute::T {
         attribute::create_owned(name, owner, storage).unwrap()
     }
 
-    pub fn with_attr(g: &geometry::T, owner: attribute::Owner, name: &str, storage: attribute::Storage) -> geometry::T {
+    pub(crate) fn with_attr(g: &geometry::T, owner: attribute::Owner, name: &str, storage: attribute::Storage) -> geometry::T {
         geometry::with_attribute(attr(owner, name, storage), g).unwrap()
     }
 
-    pub fn floats(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<f64> {
+    pub(crate) fn floats(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<f64> {
         let found = geometry::find_attribute(owner, name, g).unwrap_or_else(|| panic!("missing {name}"));
         match attribute::view::storage(&found).unwrap() {
             attribute::Storage::Float(values) => values.to_vec(),
@@ -137,7 +137,7 @@ pub mod fixtures {
         }
     }
 
-    pub fn ints(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<i64> {
+    pub(crate) fn ints(owner: attribute::Owner, name: &str, g: &geometry::T) -> Vec<i64> {
         let found = geometry::find_attribute(owner, name, g).unwrap_or_else(|| panic!("missing {name}"));
         match attribute::view::storage(&found).unwrap() {
             attribute::Storage::Int(values) => values.to_vec(),
@@ -145,22 +145,22 @@ pub mod fixtures {
         }
     }
 
-    pub fn positions(g: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    pub(crate) fn positions(g: &geometry::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let v = packed::float3::view::view(geometry::positions(g)).unwrap();
         (v.x.to_vec(), v.y.to_vec(), v.z.to_vec())
     }
 
-    pub fn topo(g: &geometry::T) -> (Vec<i64>, Vec<i64>, Vec<u8>) {
+    pub(crate) fn topo(g: &geometry::T) -> (Vec<i64>, Vec<i64>, Vec<u8>) {
         let v = topology::view::view(geometry::topology(g)).unwrap();
         (v.vertex_points.to_vec(), v.primitive_offsets.to_vec(), v.primitive_kinds.to_vec())
     }
 
-    pub fn float3_attr(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> attribute::Storage {
+    pub(crate) fn float3_attr(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> attribute::Storage {
         attribute::Storage::Float3(packed::float3::view::of_owned_exn(x, y, z).unwrap())
     }
 
     // Points on a (columns+1) by (rows+1) lattice; quads or two triangles per cell, counter-clockwise.
-    pub fn grid(columns: i64, rows: i64, size: f64, quads: bool) -> geometry::T {
+    pub(crate) fn grid(columns: i64, rows: i64, size: f64, quads: bool) -> geometry::T {
         let stride = columns + 1;
         let (mut x, mut y) = (Vec::new(), Vec::new());
         for j in 0..=rows {
@@ -189,7 +189,7 @@ pub mod fixtures {
         geom(&x, &y, &z, &vp, &offsets, None)
     }
 
-    pub fn polyline(points: &[(f64, f64, f64)]) -> geometry::T {
+    pub(crate) fn polyline(points: &[(f64, f64, f64)]) -> geometry::T {
         let x: Vec<f64> = points.iter().map(|p| p.0).collect();
         let y: Vec<f64> = points.iter().map(|p| p.1).collect();
         let z: Vec<f64> = points.iter().map(|p| p.2).collect();
@@ -197,7 +197,7 @@ pub mod fixtures {
         geom(&x, &y, &z, &vp, &[0, points.len() as i64], Some(vec![PrimitiveKind::OpenPolyline]))
     }
 
-    pub fn edge_group_where(
+    pub(crate) fn edge_group_where(
         g: &geometry::T,
         name: &str,
         predicate: &(dyn Fn(i64, i64, i64) -> bool + Send + Sync),
@@ -212,7 +212,7 @@ pub mod fixtures {
         .unwrap()
     }
 
-    pub fn edge_group_pairs(topology_value: &topology::T, name: &str, pairs: &[(i64, i64)]) -> edge_group::T {
+    pub(crate) fn edge_group_pairs(topology_value: &topology::T, name: &str, pairs: &[(i64, i64)]) -> edge_group::T {
         let index = topology_index::create(None, topology_value).unwrap();
         let edges: Vec<i64> = pairs
             .iter()
@@ -225,38 +225,9 @@ pub mod fixtures {
         edge_group::init(Some(1), topology_value, &index, name, &|edge| edges.contains(&edge)).unwrap()
     }
 
-    fn storage_equal(left: &attribute::T, right: &attribute::T) -> bool {
-        use attribute::Storage as S;
-        match (attribute::view::storage(left).unwrap(), attribute::view::storage(right).unwrap()) {
-            (S::Float(a), S::Float(b)) => a == b,
-            (S::Int(a), S::Int(b)) => a == b,
-            (S::Text(a), S::Text(b)) => a == b,
-            (S::Float2(a), S::Float2(b)) => {
-                let (a, b) = (packed::float2::view::view(a), packed::float2::view::view(b));
-                a.x == b.x && a.y == b.y
-            }
-            (S::Float3(a), S::Float3(b)) => {
-                let (a, b) = (packed::float3::view::view(a).unwrap(), packed::float3::view::view(b).unwrap());
-                a.x == b.x && a.y == b.y && a.z == b.z
-            }
-            (S::Float4(a), S::Float4(b)) => {
-                let (a, b) = (packed::float4::view::view(a), packed::float4::view::view(b));
-                a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w
-            }
-            (S::IntArray(a), S::IntArray(b)) => {
-                let (a, b) = (packed::int_array::view::view(a), packed::int_array::view::view(b));
-                a.offsets == b.offsets && a.values == b.values
-            }
-            (S::FloatArray(a), S::FloatArray(b)) => {
-                let (a, b) = (packed::float_array::view::view(a), packed::float_array::view::view(b));
-                a.offsets == b.offsets && a.values == b.values
-            }
-            _ => false,
-        }
-    }
 
     /// Runs `work` under `domains` worker domains and returns its geometry.
-    pub fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
+    pub(crate) fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
         let slot = std::cell::Cell::new(None);
         parallel::run_unit(Some(domains), &|| {
             slot.set(Some(work()));
@@ -267,7 +238,7 @@ pub mod fixtures {
     }
 
     /// The one-domain result of `work`, after asserting four domains give the same geometry.
-    pub fn exact_at_one_and_four(work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
+    pub(crate) fn exact_at_one_and_four(work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
         let one = at_domains(1, work);
         let four = at_domains(4, work);
         assert!(geometry_signature(&one) == geometry_signature(&four), "one/four-domain output drift");
@@ -275,7 +246,7 @@ pub mod fixtures {
     }
 
     /// Runs `work` under `domains` worker domains and returns its value.
-    pub fn at_domains_strings(domains: i64, work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
+    pub(crate) fn at_domains_strings(domains: i64, work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
         let slot = std::cell::Cell::new(None);
         parallel::run_unit(Some(domains), &|| {
             slot.set(Some(work()));
@@ -286,7 +257,7 @@ pub mod fixtures {
     }
 
     /// The one-domain value of `work`, after asserting four domains give an equal value.
-    pub fn same_at_one_and_four_strings(work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
+    pub(crate) fn same_at_one_and_four_strings(work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
         let one = at_domains_strings(1, work);
         let four = at_domains_strings(4, work);
         assert!(one == four, "one/four-domain output drift");
@@ -294,7 +265,7 @@ pub mod fixtures {
     }
 
     /// Bit-exact text of positions, topology, attributes and groups (NaN-safe, unlike `geometry_equal`).
-    pub fn geometry_signature(g: &geometry::T) -> String {
+    pub(crate) fn geometry_signature(g: &geometry::T) -> String {
         let (x, y, z) = positions(g);
         let bits = |v: &Vec<f64>| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
         let attributes: Vec<String> = geometry::attributes(g).iter().map(|a| format!("{:?}{}", attribute::owner(a), attribute_signature(a))).collect();
@@ -311,7 +282,7 @@ pub mod fixtures {
     }
 
     /// Exact text of a stored attribute (floats as bit patterns) for equality checks.
-    pub fn attribute_signature(item: &attribute::T) -> String {
+    pub(crate) fn attribute_signature(item: &attribute::T) -> String {
         let storage = match attribute::view::storage(item).unwrap() {
             attribute::Storage::Float(v) => format!("{:?}", v.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
             attribute::Storage::Int(v) => format!("{v:?}"),
@@ -344,43 +315,6 @@ pub mod fixtures {
         format!("{}:{}:{storage}", attribute::kind_name(item), attribute::name(item))
     }
 
-    pub fn geometry_equal(left: &geometry::T, right: &geometry::T) -> bool {
-        if positions(left) != positions(right) || topo(left) != topo(right) {
-            return false;
-        }
-        if geometry::point_count(left) != geometry::point_count(right) {
-            return false;
-        }
-        let (la, ra) = (geometry::attributes(left), geometry::attributes(right));
-        if la.len() != ra.len()
-            || !la.iter().zip(&ra).all(|(l, r)| {
-                attribute::owner(l) == attribute::owner(r)
-                    && attribute::name(l) == attribute::name(r)
-                    && storage_equal(l, r)
-            })
-        {
-            return false;
-        }
-        let (lg, rg) = (geometry::groups(left), geometry::groups(right));
-        if lg.len() != rg.len()
-            || !lg.iter().zip(&rg).all(|(l, r)| {
-                group::owner(l) == group::owner(r)
-                    && group::name(l) == group::name(r)
-                    && group::ordered_elements(l) == group::ordered_elements(r)
-                    && group::length(l) == group::length(r)
-                    && (0..group::length(l)).all(|e| group::mem(e, l) == group::mem(e, r))
-            })
-        {
-            return false;
-        }
-        let (le, re) = (geometry::edge_groups(left), geometry::edge_groups(right));
-        le.len() == re.len()
-            && le.iter().zip(&re).all(|(l, r)| {
-                edge_group::name(l) == edge_group::name(r)
-                    && edge_group::length(l) == edge_group::length(r)
-                    && (0..edge_group::length(l)).all(|e| edge_group::mem(e, l) == edge_group::mem(e, r))
-            })
-    }
 }
 
 #[cfg(test)]

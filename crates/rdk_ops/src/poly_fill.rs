@@ -29,7 +29,8 @@ pub struct Params {
 }
 
 impl Params {
-    pub fn new(mode: Mode) -> Params {
+    #[cfg(test)]
+    pub(crate) fn new(mode: Mode) -> Params {
         Params {
             cancel: None,
             grain: None,

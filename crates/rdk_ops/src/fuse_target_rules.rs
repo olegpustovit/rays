@@ -390,7 +390,7 @@ fn apply_groups(
     Ok(output)
 }
 
-pub fn apply(
+pub(crate) fn apply(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     attribute_rules: &[AttributeRule],

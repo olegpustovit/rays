@@ -57,7 +57,7 @@ pub mod sample {
     }
 
     /// The 16-bit mono WAV file of a synthesized tone.
-    pub fn wav(volume: f64, waveform: waveform, frequency: f64, duration: f64) -> Result<Vec<u8>, String> {
+    pub(crate) fn wav(volume: f64, waveform: waveform, frequency: f64, duration: f64) -> Result<Vec<u8>, String> {
         let sample_rate = 48000_i64;
         if frequency <= 0. || duration <= 0. {
             return Err("Audio.Sample.synth: invalid frequency or duration".to_string());
