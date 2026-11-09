@@ -13,7 +13,7 @@ use std::{cell::Cell, rc::Rc, sync::Arc};
 struct Faults {
     completion: Cell<bool>, table: Cell<bool>, input: Cell<bool>, invalid: Cell<bool>,
     pipelines: Cell<i64>, submitted: Cell<i64>, tables: Cell<i64>, inputs: Cell<i64>,
-    creates: Cell<i64>, views: Cell<i64>, releases: Cell<i64>, working_set: Cell<Option<i64>>,
+    creates: Cell<i64>, working_set: Cell<Option<i64>>,
 }
 fn bump(c: &Cell<i64>) { c.set(c.get() + 1); }
 fn injected(message: &str) -> error::Error { error::make("test", ErrorKind::InvalidState, message) }
@@ -49,10 +49,7 @@ impl b::DriverResource for Faulty<dyn b::DriverResource> {
     }
 }
 impl b::DriverMapping for Faulty<dyn b::DriverMapping> {
-    fn readback(&self) -> b::OwnedReadback {
-        bump(&self.f.views);
-        self.inner.readback()
-    }
+    forward! { readback() -> b::OwnedReadback; }
 }
 impl b::DriverPipeline for Faulty<dyn b::DriverPipeline> {
     forward! { pipeline_token() -> b::Token; max_threads() -> i64; }
@@ -230,20 +227,22 @@ fn failed_commands_and_uploads() {
 }
 fn retired_holders_and_discard() {
     with_fixture(|Fixture { f, r, values, .. }| {
-        tp::ok(dispatch(r, values));
+        let output = tp::ok(dispatch(r, values));
+        let buffer = run::buffer(&output, None).expect("dispatched buffer");
+        let initial = tp::ok(run::keep(&output, None));
+        tp::ok(initial.settle());
+        let host_view = Rc::downgrade(&b::mapped_view(&buffer).expect("central host view"));
+        initial.release(true); drop(initial);
         let creations = run::private::buffer_creations(r);
         let thaws = run::private::materialisations(r);
-        let releases = f.releases.get();
-        let mut views = 0;
-        for i in 0..24 {
+        for _ in 0..24 {
             let p = settled(r, values);
-            if i == 0 { views = f.views.get(); }
             p.release(true); drop(p);
         }
         assert_eq!(run::private::materialisations(r), thaws);
         assert!(run::private::held_buffers(r) <= 2);
         assert!(run::private::buffer_creations(r) - creations <= 4);
-        assert!(f.views.get() == views && f.releases.get() > releases);
+        assert!(host_view.upgrade().is_none(), "recycling must release the central host view");
         f.working_set.set(Some(4));
         let oldest = settled(r, values); let expected = oldest.count * oldest.width;
         oldest.release(true);
