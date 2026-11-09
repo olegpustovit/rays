@@ -15,13 +15,13 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
 | X | 6 | 6 | 0 | 0 |
-| B | 8 | 3 | 0 | 5 |
+| B | 8 | 4 | 0 | 4 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 0 | 0 | 12 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **9** | **0** | **49** |
+| **All** | **58** | **10** | **0** | **48** |
 
 ## Items
 
@@ -34,10 +34,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | X5 | X | done | `cc2c7bcc` — `literal_fields`; `operator_rows_split_vec2_and_vec4_literals` | test_editor_inspect covers vec2 and vec4 operator rows |
 | X6 | X | done | `f97f3c30` — `MappedHost` in `ogpu_core`; `DriverMapping` = `readback` only | ogpu_mock: after a release, the view reads back again |
 | B1 | B | done | `aaaaf431` — `lisp_sop` always on; `#[doc(hidden)]` hooks; features removed | After cargo t -p rays_editor, cargo build -p rays_bin -v shows flow_sop as Fresh |
-| B2 | B | done | `c2d1c582` — workspace study tests in `editor_document`; no `flow_sop` dev-dep on `editor_document` | Same cases in cargo t -p flow_sop plus -p editor_document |
+| B2 | B | done | `c2d1c582` — workspace study tests in `editor_document`; no `flow_sop` dev-dep; `cargo t -p flow_sop` ~81s green | Same cases in cargo t -p flow_sop plus -p editor_document |
 | B3 | B | done | `2be4b822` — `check_cli` + `tests/e2e` in `web_export`; `rays_bin` re-exports | cargo t -p web_export --test e2e; gate deps |
 | B4 | B | pending | — | Each crate lists the same case names before and after |
-| B5 | B | pending | — | Gate shape rule |
+| B5 | B | done | `403aaac4` — `[lib] test = false` on 11 libs + `print_shader`; gate rejects `#[test]` in those libs | Gate shape rule |
 | B6 | B | pending | — | cargo t -p rays-t, -p gate; gate deps |
 | B7 | B | pending | — | cargo-timings critical path; gate deps |
 | B8 | B | pending | — | cargo t -p rays_editor |
