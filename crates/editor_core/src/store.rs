@@ -103,7 +103,7 @@ pub fn filename_concat(dir: &str, file: &str) -> String {
 /// A sketch's or the editor's saved settings: one `(settings :sketch "name" :key value ...)` form.
 pub mod settings {
     use super::{read_text, write_text};
-    use super::form::{container, kw, num_of, print, vec_of_numbers, vec_values};
+    use super::form::{container, int_of_string_opt, kw, num_of, print, vec_of_numbers, vec_values};
     use flow_syntax::syntax::{make as make_node, Draft, Node, Syntax};
 
     #[derive(Clone, Debug, PartialEq)]
@@ -132,59 +132,16 @@ pub mod settings {
         }
     }
 
-    /// OCaml's `int_of_string_opt` for a Lisp number: optional sign, 0x/0o/0b prefix, digits with
-    /// underscores, in the 63-bit range that `int` has.
-    // ponytail: prefixed literals accept the unsigned 63-bit range without the 0u form.
-    fn int_of_string(text: &str) -> Option<i64> {
-        let (negative, body) = match text.as_bytes().first() {
-            Some(b'-') => (true, &text[1..]),
-            Some(b'+') => (false, &text[1..]),
-            _ => (false, text),
-        };
-        let (radix, digits) = match body.as_bytes() {
-            [b'0', b'x' | b'X', ..] => (16, &body[2..]),
-            [b'0', b'o' | b'O', ..] => (8, &body[2..]),
-            [b'0', b'b' | b'B', ..] => (2, &body[2..]),
-            _ => (10, body),
-        };
-        if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') {
-            return None;
-        }
-        let mut magnitude: i128 = 0;
-        for c in digits.chars() {
-            if c == '_' {
-                continue;
-            }
-            let d = c.to_digit(radix)? as i128;
-            magnitude = magnitude * radix as i128 + d;
-            if magnitude > (1i128 << 64) {
-                return None;
-            }
-        }
-        let value = if negative { -magnitude } else { magnitude };
-        let (low, high) = if radix == 10 {
-            (-(1i128 << 62), (1i128 << 62) - 1)
-        } else {
-            (-(1i128 << 63), (1i128 << 63) - 1)
-        };
-        if value < low || value > high {
-            return None;
-        }
-        // a prefixed literal above max_int wraps into the negative 63-bit range
-        let wrapped = if value >= (1i128 << 62) { value - (1i128 << 63) } else { value };
-        Some(wrapped as i64)
-    }
-
     fn decode(form: &Syntax) -> Result<Value, String> {
         match &form.node {
             Node::Sym(s) if form.name(*s) == "true" => Ok(Value::Bool(true)),
             Node::Sym(s) if form.name(*s) == "false" => Ok(Value::Bool(false)),
-            Node::Num(n) if int_of_string(form.name(*n)).is_some() => {
-                Ok(Value::Int(int_of_string(form.name(*n)).unwrap_or_default()))
-            }
-            Node::Num(_) => match num_of(form) {
-                Some(v) => Ok(Value::Float(v)),
-                None => Err("invalid settings number".into()),
+            Node::Num(n) => match int_of_string_opt(form.name(*n)) {
+                Some(v) => Ok(Value::Int(v)),
+                None => match num_of(form) {
+                    Some(v) => Ok(Value::Float(v)),
+                    None => Err("invalid settings number".into()),
+                },
             },
             Node::Str(v) => match String::from_utf8(form.bytes(*v).to_vec()) {
                 Ok(text) => Ok(Value::Text(text)),

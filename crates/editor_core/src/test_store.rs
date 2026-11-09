@@ -81,6 +81,27 @@ fn settings_round_trip() {
     println!("editor store: atomic s-expression round-trip");
 }
 
+#[test]
+fn settings_int_above_2_62_decodes_as_int() {
+    let root = temp_dir("rays-store-int63");
+    let path = root.join("settings.rays");
+    let _cleanup = Cleanup(vec![path.clone(), root.clone()]);
+    let filename = path.to_str().unwrap();
+    write_text(
+        filename,
+        "(settings :sketch \"test\" :lim 4611686018427387904)",
+    )
+    .unwrap();
+    let loaded = settings::load("test", filename).unwrap();
+    assert_eq!(
+        loaded,
+        vec![(
+            "lim".to_string(),
+            settings::Value::Int(1i64 << 62),
+        )]
+    );
+}
+
 // The per-user folder is a function of the platform and the facts it is given.
 #[test]
 fn user_folder_follows_platform() {
