@@ -17,11 +17,11 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | X | 6 | 6 | 0 | 0 |
 | B | 8 | 6 | 1 | 1 |
 | A | 4 | 4 | 0 | 0 |
-| D | 12 | 10 | 2 | 0 |
+| D | 12 | 12 | 0 | 0 |
 | Z | 11 | 0 | 1 | 10 |
-| R | 10 | 1 | 1 | 8 |
+| R | 10 | 2 | 3 | 5 |
 | G | 7 | 0 | 1 | 6 |
-| **All** | **58** | **27** | **6** | **25** |
+| **All** | **58** | **30** | **6** | **22** |
 
 ## Items
 
@@ -46,10 +46,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | A3 | A | done | `5c9c9f82` — removed C/build.rs/cc; bounded powi scaling, exact subnormal rounding retained | cargo t -p cfmt -p param -p flow_syntax: 61 passed, 6.31s; slowest 0.150s |
 | A4 | A | done | `a013679f` — dead stubs/wrappers/Exp removed; derived Change/Op equality; choice callback removed | all-targets check 6.31s; param/pxui_graph 46 passed; flow_ir/flow_web 465 passed, 30.88s, slowest 1.872s |
 | D1 | D | done | `d42f55e4` — 13 geometry union-find engines use support::DisjointSet; min/rank/tie/mask semantics preserved; net −271 lines | 481 unique touched cases pass; frozen Boolean payload and dissolve 1/4-domain equality unchanged; warm guards pass |
-| D2 | D | active | Std-sort patch prepared with explicit original tie keys; baseline and old/new timings next after D5 stable batch | rdk_ops fuse/ray; Boolean/path exact goldens and stable tie order |
+| D2 | D | done | `2795d1b2` `5a2da040` — seven custom sorts removed; explicit source ties; padding-sized path ordinal preserves allocations | Ops/Boolean347 +scene26 +native64 pass; fuse8.3x and arrangement19.7x faster; native allocation3 pass exact caps |
 | D3 | D | done | `caf6359f` — one 64-bit/u128 exact engine; arena temporaries, persistent outputs only | geom60 and Boolean74 plus frozen snapshot pass; predicates3.96x and circumcenter3.45x faster |
 | D4 | D | done | `029244f0` — canonical rays_math float extrema/total ordering; numeric equivalence preserved | 580 CPU cases covered with2 focused assertion repairs; native/UI pass; sort1.44x faster |
-| D5 | D | active | Shared owner/count/group/quote batch installed; canonical domain helper and narrow gate exception; consumer checks running | Exact quote/owner/count/merge/domain regressions; affected consumers |
+| D5 | D | done | `0b6ee7ef` — canonical owner/count/group/quote/domain helpers; net −193 lines; no dependencies added | Core/parallel/geom/gate163, poly30, transform9, ops/Boolean347, native64, text13, IR346 and warm Boolean pass |
 | D6 | D | done | `7ef8286f` `5279bbd3` — shared grain validation; strict canonical grain diagnostics before cancellation | grain-filtered ops/core; normal_ops grain0/-1 InvalidArgument and valid-grain Cancelled pass |
 | D7 | D | done | `861fcfef` — shared bounds3 index, sorted candidates, inclusive filtering and bounded stack scratch | Boolean76, shared-index equality, frozen payload/cancellation pass; paired runtime97–100% of old; warm guard passes |
 | D8 | D | done | `095418dc` — shared primitive table and Instruction guard methods; 91 lowering primitives unchanged | Flow573/573 pass27.59s; 114 golden files byte-identical; native Metal fixtures and loops pass |
@@ -57,7 +57,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | D10 | D | done | `3457d151` `82ba264f` — std i64/trim/round/min/max; syntax-aware literal-spelling comparison | Boundary/UI/SOP/text checks pass; spelling-focused1/1 and literal qualification1/1 pass |
 | D11 | D | done | `92542f6a` — canonical input Frame/panel types; borrowed routing; ec_frame/converters deleted | All-targets check10.25s; input/core17, commands9, reducer10, layout2, alloc3 pass |
 | D12 | D | done | `98ee157a` — validated Syntax replaces settings Value/codec; preferences read once; shared text helpers | all-targets5.83s; store5, text12, native guide1 pass; i64 save/Unicode regressions |
-| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` — native/sea/warm-kernel guards established and ratcheted | Sea cap51700/2840000; changed subdiv115325, Boolean26695, scatter1447250 allocations; zero/O(1) targets open |
+| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` `25c98948` — established guards and measured ratchets | Sea51700/2840000; changed subdiv115325, Boolean26695, scatter1433020 allocations; zero/O(1) targets open |
 | Z1 | Z | pending | — | Z0 idle frames at 0 |
 | Z2 | Z | pending | — | Z0; flow_ir and flow_eval suites |
 | Z3 | Z | pending | — | bench_core instructions; warm rebuild ≤ 7.4 s |
@@ -69,16 +69,16 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Z9 | Z | pending | — | Z0 warm-cook guards on subdivide, boolean and scatter |
 | Z10 | Z | pending | — | Z0; per-crate clone count tracked in PROGRESS.md |
 | R1 | R | done | `c1617a45` — shared captures/paths/persistent iteration; consumers borrow; allocation guards lowered | 451 evaluator/IR +40 sequential/parallel +zero-view/native/three-kernel allocation checks pass |
-| R2 | R | active | Scope-cache callers traced; parent-chain implementation and baseline preparation | bench_core digest c4bbf006c82014c7 unchanged; scope inheritance/isolation/allocation guard |
-| R3 | R | pending | — | Sequential/parallel equality; capture order stays sorted by string |
+| R2 | R | done | `25c98948` — immutable parent cache layers; snapshot isolation; iterative destruction; scatter guard lowered | IR346, 10000-layer/drop guard, bench digest c4bbf006c82014c7, workspace all-targets, native/three-kernel guards pass |
+| R3 | R | active | Immutable-term free-name construction and all capture callers traced; preparation only | Sorted string capture order and sequential/parallel equality; remove runtime free-name caches |
 | R4 | R | pending | — | Library plus 49 sketches byte-identical |
 | R5 | R | pending | — | flow_eval state |
-| R6 | R | pending | — | rdk_core group; flow_sop parallel_exact |
-| R7 | R | pending | — | owned_planes_reuse |
+| R6 | R | active | 243 init callers and error/cancellation side channels traced; result predicates and par_fill patch in preparation | Group/edge-group and FlowSOP parallel equality; error priority and warm allocation caps preserved |
+| R7 | R | active | Fourteen layout-copy sites traced; shared offset/kind constructor and alias deletion underway | owned_planes_reuse; geometry signatures and topology identity |
 | R8 | R | pending | — | pxui_graph (31 cases); alloc_budget |
 | R9 | R | pending | — | Lower the alloc_budget.rs limits |
 | R10 | R | pending | — | test_prepared_scene3 |
-| G1 | G | active | Call-chain and native safety baseline preparation; production unchanged | Destroyed-handle/wrong-thread cases; main-thread/release-drain boundaries; Windows evidence |
+| G1 | G | active | Windows baseline28 GPU cases pass; core validation batch underway; thread/drain and caller migration pending | Destroyed-handle/wrong-thread regressions; macOS Metal and exact-commit Windows Vulkan parity |
 | G2 | G | pending | — | Move metal/tests/gpu_metal.rs into ogpu_metal |
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
@@ -113,15 +113,15 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 ## D-wave parallel map
 
-At most two agents build concurrently. Core/ops owner: D5; Boolean owner: D7; Flow owner: root (R1). D2 prepares without building until overlapping owners release their files.
+The D wave is complete. At most two agents build concurrently. Current build slots: R7 and G1. Root prepares R3; R6 prepares/rebases its callback migration after R7.
 
 | ID | Primary crate | State |
 |----|---------------|-------|
 | D1 | `rdk_core`, geometry consumers | Complete: `d42f55e4` |
-| D2 | `rdk_ops`, `rdk_boolean`, path | Baseline preparation; after D5/D7 source batches |
+| D2 | `rdk_ops`, `rdk_boolean`, path | Complete: `2795d1b2`, `5a2da040` |
 | D3 | `rdk_geom` | Complete: `caf6359f` |
 | D4 | `rays_math` | Complete: `029244f0` |
-| D5 | `rdk_core`, `rdk_ops` | Shared API batch installed; checks running |
+| D5 | `rdk_core`, `rdk_ops` | Complete: `0b6ee7ef` |
 | D6 | `rdk_core`, consumers | Complete: `7ef8286f`, `5279bbd3` |
 | D7 | `rdk_boolean` | Complete: `861fcfef` |
 | D8 | `flow_ir` | Complete: `095418dc` |
@@ -223,3 +223,16 @@ At most two agents build concurrently. Core/ops owner: D5; Boolean owner: D7; Fl
 - Three warm-kernel guards pass with lowered caps in 9.72 s wall (slowest scatter 2.719 s, subdivide 2.469 s, Boolean 0.375 s). Unchanged hits remain subdivide18/3752, Boolean25/4426, scatter18/5359. Across the three sizes, changed allocations now subdivide103471→107931→115321 (previous139383→143843→151233), Boolean2407→7252→26693 (D1 baseline2391→7242→26707), scatter1436323→1437821→1447246 (previous1601563→1603061→1612486). New changed caps: **115325/3453750**, **26695/926350**, **1447250/16451200** allocations/scratch-peak bytes; scatter hit peak cap lowered5400→5360. Rounding covers observed key-length variation; every previous cap only decreases. Scratch peaks still grow with fixture size, so Z0/Z9 remain open.
 - D5 and D2 own the next two build slots; root prepares R2 without building. G1 prepares call-chain/safety evidence without source edits/builds. Full scope, original deadlines and final macOS/Windows qualification remain unchanged.
 - Artifact **v21** published with the CLI; source byte readback and all 58 database documents match the ledger. Tracked seed JSON is now synchronized with the embedded seed. Tracker fallback/live/offline regression passes. Snapshot: **27 done / 6 active / 25 pending (46.6% by item count)**.
+
+### D-wave complete and R2 verified
+
+- **D5 complete** `0b6ee7ef`: 37 files, net −193 lines. Canonical attribute/group owner names and geometry counts, two distinct byte/Unicode quote codecs, ordered first-match group/edge-group unions, ASCII blank checks and fourteen domain adapters. Detail refusal and Facet shorthand fallback stay intact. The only generic exception is the exact canonical `parallel::with_domains<R>(domains: i64, work: impl FnOnce() -> R) -> R`; sibling/extra-generic/FnMut/nested variants remain rejected. No new dependency.
+- D5 validation: all-target affected check6.26 s; core/parallel/geom/gate163 cases6.204 s (slowest0.089 s); poly30 cases13.040 s including rebuild; transform9 cases0.678 s (slowest0.532 s); shared ops/Boolean347 cases3.98 s; native sop/rdk_rays64 cases9.887 s; text13 cases21.816 s including rebuild (slowest0.207 s); reused full IR346 and warm Boolean checks. Dependency gate green; shape497→495 only from D2 deleting generic legacy sort code, with no new normalized diagnostic.
+- **D2 complete** `2795d1b2`, allocation correction `5a2da040`: seven bulk custom sorts and obsolete comparators removed, including the real Fuse-reduce caller. Explicit source primitive/edge tie keys replace unspecified heap ties. Fuse8×16384 median31.990→3.856 ms (8.3×); exact-axis arrangement2048 median9.946→0.504 ms (19.7×). All-target1.81 s; ops/Boolean347 pass3.98 s, slowest1.259 s; scene26 pass3.06 s. Frozen Boolean payload unchanged. Of40 shape constants,38 stay byte-identical; the two shared-edge NonZero vertex/index strings intentionally change, with independent covered-area3 assertions. Odd-sliver tie intentionally retains highest original primitive0→2.
+- D2's first explicit edge tie tuple increased path crossing storage24→32 B. The established idle guard correctly failed basic+32 B and bare+64 B while counts stayed fixed. A checked u32 source ordinal now uses Crossing's existing padding; a 24-byte size regression and exact path goldens pass. Native allocation3 cases pass20.77 s including18.58 s rebuild, restoring exact previous budgets (basic1384/157167, empty1206/81998, bare1417/96657). No cap raised.
+- **R2 complete** `25c98948`: scope forks freeze/move local cache entries into an immutable parent layer, then share it; later parent/child writes cannot leak into older snapshots. Empty-local forks reuse the inherited layer. Reads and last-owner cleanup are iterative; a10,000-layer chain is checked. The new identity/snapshot regression fails against old whole-map copying and passes after the change (15.92 s including rebuild; case0.051 s). Paired128-fork/1024-capture sample: copied14.677291 ms, shared53.750 µs. This is a cache-fork microbenchmark, not an end-to-end frame speed claim.
+- R2 full IR346 cases pass10.56 s wall (runner8.158 s; slowest array composition0.903 s). `bench_core` map1024 digest remains **c4bbf006c82014c7** in1/8 domains; sampled force medians0.0084/0.0079 ms before and0.0105/0.0117 ms after under differing concurrent load, so no force-speed claim. Warm example command after takes0.53 s; full workspace all-target boundary passes19.49 s.
+- R2 allocation checks: three warm kernels pass14.75 s wall while the workspace check also compiled (slowest scatter4.952 s, subdivision4.579 s; both below unchanged5 s case cap). Isolated scatter confirmation passes6.14 s wall including2.73 s build (case2.553 s), showing no persistent case slowdown. Changed scatter across sizes now1422093→1423591→1433015 allocations; cap lowered1447250→**1433020**. Subdivision/Boolean and all peak-byte caps stay unchanged. Sea passes1.83 s wall/case1.206 s with unchanged tightened51700/2840000 cap and all resident/lifecycle invariants. Native idle exact-budget proof reused from D2 follow-up on the same R2 source.
+- **Windows GPU baseline now verified** at exact committed `76f1a7f5d5c0b588d4d7b204dd3a1e8677d3c7f8`, detached clean checkout on the trusted Windows host, pinned GNU Rust1.99.1; global toolchain unchanged. Scoped core/mock/Vulkan all-target check9.831 s passes. `RAYS_VULKAN_VALIDATION=fatal cargo +1.99.1-x86_64-pc-windows-gnu t -p ogpu_core -p ogpu_mock -p ogpu_vulkan`: **28/28 pass**,14.437 s wall (slowest core ownership2.156 s). Native transfer/compute, ray tracing, render, OOM and low-level texture cases actually execute, with no adapter skips; conformance asserts zero remaining handles/validation messages. This is a baseline, not proof of future G1–G5 changes or final workspace qualification.
+- Next source owners: G1 GPU validation/layering; R7 topology layout sharing; R6 prepares group callback migration after R7; root prepares R3 immutable free names. Only G1/R7 build at this boundary. All58 requirements remain; B8 full-run timeout, preexisting shape violations, zero allocation/O(1) scratch and final qualification stay open.
+- Artifact **v22** published and verified by byte-identical source readback plus all58 live database documents. Embedded/tracked seeds agree and tracker immediate/live/offline regression passes. Snapshot **30 done / 6 active / 22 pending (51.7% by item count)**.
