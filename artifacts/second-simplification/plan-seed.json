@@ -124,8 +124,8 @@
     "note": "296c35c2 bf116466 c1617a45 25c98948 608c3385 21eef57a \u2014 established guards and measured ratchets"
   },
   "Z1": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Real update/scene/render/after_present allocation trace; owner-buffer and callback/published-scene reuse preparation"
   },
   "Z2": {
     "status": "pending",
@@ -140,8 +140,8 @@
     "note": ""
   },
   "Z5": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Full CPU/Lisp/hash/JS/prelude engine and seed/spec audit; preparation only, no source changes"
   },
   "Z6": {
     "status": "pending",
@@ -196,20 +196,20 @@
     "note": "70a05621 \u2014 thirty mutable Pane operations, all64 Pane rebuilds/with_pane removed; three mutable Tree operations"
   },
   "R9": {
-    "status": "active",
-    "note": "Existing model/history already use Arc; traced deep hot-path copies in reducer helpers; preparation only"
+    "status": "done",
+    "note": "dbacce38 \u2014 existing Arc<Document> retained through reducer/layout/World/adopt; snapshots only on changes"
   },
   "R10": {
-    "status": "pending",
-    "note": ""
+    "status": "done",
+    "note": "1f52f3db \u2014 u128 renderer hashes, framed components and explicit GPU name/index fields; Mesh96\u219288B"
   },
   "G1": {
     "status": "active",
     "note": "29c9efbf \u2014 common validation moved to core; entry checks109\u219227; 98 immediate closures removed"
   },
   "G2": {
-    "status": "active",
-    "note": "9556c305 \u2014 metal crate removed; native work/tests moved into ogpu_metal; shared types and typed errors; exact Windows run pending"
+    "status": "done",
+    "note": "9556c305 \u2014 metal crate deleted; real work/tests moved to ogpu_metal; 25 mirror enums/error graph removed"
   },
   "G3": {
     "status": "pending",

@@ -18,10 +18,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B | 8 | 6 | 1 | 1 |
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
-| Z | 11 | 0 | 1 | 10 |
-| R | 10 | 8 | 1 | 1 |
-| G | 7 | 0 | 2 | 5 |
-| **All** | **58** | **36** | **5** | **17** |
+| Z | 11 | 0 | 3 | 8 |
+| R | 10 | 10 | 0 | 0 |
+| G | 7 | 1 | 1 | 5 |
+| **All** | **58** | **39** | **5** | **14** |
 
 ## Items
 
@@ -57,12 +57,12 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | D10 | D | done | `3457d151` `82ba264f` — std i64/trim/round/min/max; syntax-aware literal-spelling comparison | Boundary/UI/SOP/text checks pass; spelling-focused1/1 and literal qualification1/1 pass |
 | D11 | D | done | `92542f6a` — canonical input Frame/panel types; borrowed routing; ec_frame/converters deleted | All-targets check10.25s; input/core17, commands9, reducer10, layout2, alloc3 pass |
 | D12 | D | done | `98ee157a` — validated Syntax replaces settings Value/codec; preferences read once; shared text helpers | all-targets5.83s; store5, text12, native guide1 pass; i64 save/Unicode regressions |
-| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` `25c98948` `608c3385` `21eef57a` — established guards and measured ratchets | Sea51505/2809000; changed subdiv113035, Boolean26695, scatter1378530 allocations; zero/O(1) targets open |
-| Z1 | Z | pending | — | Z0 idle frames at 0 |
+| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` `25c98948` `608c3385` `21eef57a` — established guards and measured ratchets | Sea51365/2805000; changed subdiv113035, Boolean26695, scatter1378530 allocations; zero/O(1) targets open |
+| Z1 | Z | active | Real update/scene/render/after_present allocation trace; owner-buffer and callback/published-scene reuse preparation | Current idle1305/1154/1378 allocations; zero end state still required, no render/input shortcuts |
 | Z2 | Z | pending | — | Z0; flow_ir and flow_eval suites |
 | Z3 | Z | pending | — | bench_core instructions; warm rebuild ≤ 7.4 s |
 | Z4 | Z | pending | — | rdk/sop suites; parallel equality; memory guard |
-| Z5 | Z | pending | — | A cross-platform hash and random vector test |
+| Z5 | Z | active | Full CPU/Lisp/hash/JS/prelude engine and seed/spec audit; preparation only, no source changes | Cross-platform full64-bit seed/hash/random vectors, spec and intentional golden refresh required |
 | Z6 | Z | pending | — | grep -ri ocaml crates finds only docs/history references; suites green with regenerated goldens |
 | Z7 | Z | pending | — | Orrery frames lower 0 times after warm-up; flow_sop run well under its cap |
 | Z8 | Z | pending | — | An oversized array reports a typed error |
@@ -76,10 +76,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | R6 | R | done | `39d6f261` — 243 Result predicates; par_fill and plain zip; ten cancellation atomics and two error Mutex channels removed | CPU558, group12/par_fill3, parallel40, native/sea/warm caps and workspace check pass; serial ABI cost disclosed |
 | R7 | R | done | `85e72ed5` — fourteen repoint paths share offsets/kinds; one validated constructor; polygons_shared deleted | Geometry429/native10, shared-storage identity, idle/sea/three warm guards pass; repoint9.8x faster |
 | R8 | R | done | `70a05621` — thirty mutable Pane operations, all64 Pane rebuilds/with_pane removed; three mutable Tree operations | Graph/shell67, reducer10, editor51, idle3/sea pass; empty cap lowered1198/81820 and confirmed |
-| R9 | R | active | Existing model/history already use Arc; traced deep hot-path copies in reducer helpers; preparation only | Carry existing Arc through helpers; mutate only actual edits; preserve rollback and lower native caps |
-| R10 | R | pending | — | test_prepared_scene3 |
+| R9 | R | done | `dbacce38` — existing Arc<Document> retained through reducer/layout/World/adopt; snapshots only on changes | 109 distinct editor/native/warm cases pass; idle helper21→0 allocations; all native caps lowered and confirmed |
+| R10 | R | done | `1f52f3db` — u128 renderer hashes, framed components and explicit GPU name/index fields; Mesh96→88B | Renderer54 collective/Rays33/native idle+sea/warm pass; hashes9216→0 allocations; sea cap lowered51365/2805000 |
 | G1 | G | active | `29c9efbf` — common validation moved to core; entry checks109→27; 98 immediate closures removed | Local56 pass10.61s; exact-commit Windows29 pass7.008s; native-only semantic migration still requires G2 |
-| G2 | G | active | `9556c305` — metal crate removed; native work/tests moved into ogpu_metal; shared types and typed errors; exact Windows run pending | Local57 plus real LineStrip draw pass; workspace/deps/gate green; initial sea overrun retained |
+| G2 | G | done | `9556c305` — metal crate deleted; real work/tests moved to ogpu_metal; 25 mirror enums/error graph removed | Local57 plus real LineStrip; workspace/deps/gate; exact Windows30/30 with fatal validation pass |
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
 | G5 | G | pending | — | Mock queue tests; a Metal queue case |
@@ -298,3 +298,25 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - **R9 baseline** on committed R8/G2: new focused idle helper guard fails as intended at**21local allocations/144.083µs**,3.638s wall. Temporary baseline test restored, five-file production patch installed only after70a05621; scoped all-target compiler check passes2.87s. Reusing exact coherent R8 native counts as baseline; focused and consumer regression remains before closure. Root takes the released second build slot for R10, preserving the two-agent building limit.
 
 - Artifact **v27** published with the CLI; downloaded HTML matches tracked source byte-for-byte, embedded/tracked seeds and all58 live database documents match. Immediate/live/offline tracker regression passes. Snapshot **36done/5active/17pending (62.1% by item count)**; no requirement removed.
+
+
+### R9 complete and G2 scope audit
+
+- **R9 complete** `dbacce38`: seven files,+142/−135. Existing model/history Arc<Document> now stays shared through reducer reconciliation, layout, World and adoption; direct edits call make_mut only when values change. Loaded document/view move together. Eligible changes retain the existing post-reconciliation rollback boundary; an AddNode followed by refused RemoveGraph proves source/history rollback. ModelView/122 borrowed parameters remain.
+- R9 focused idle21→0allocations and retained Arc/100klabel identity pass4.098s including3.22s compile. Full editor unit **67/67** pass1.577s (slowest0.210s); affected native **39/39** pass34.966s aggregate external wall including first6.98s compile (slowest run_panels2.786s); warm-kernel **3/3** pass2.697s (slowest scatter2.549s).109distinct passing cases; this does not replace B8's still-failing full editor run. Workspace all-target check1.970s, dependency gate green, shape495preexisting/zero new, diff check green. Detailed evidence `/tmp/rays-r9-evidence.md`.
+- R9 native ratchets: basic1356/149687→**1305/148265**, empty1198/81820→**1154/80422**, bare1417/96617→**1378/95326** allocations/bytes. Exact reduced idle caps reconfirmed4.884s external. Sea measured maximum**51365/2804734** twice with zero uploads/payload reads,24Bbounds/frame,1.503ms final close. Cap lowered51505/2809000→**51370/2806000**, retaining room for the previously observed808B variation while its cause remains open under Z0; reduced cap reconfirmed4.548s external (case0.984s). No cap increased.
+- **G2 complete** after requirement-by-requirement source audit: old native57enum definitions (53public) become32 (29public),25production definitions removed, including14core aliases, four acceleration mode mirrors, the third error type/mapping and duplicated raw/reflection graphs. The remaining native enums express actual capabilities absent from core (managed/cache/hazard modes, advanced texture shapes, eleven constants, mesh/object/intersection reflection, stencil, six address modes, combined store/resolve and timed presentation); removing those would narrow functionality. Native ownership/lifetime state belongs to G4. All20native cases moved; actual Metal+Vulkan LineStrip pixels prove capability preservation. Final production Metal Rust7980→6535(−1445), whole-commit net−1198. `native` remains doc-hidden public for moved conformance tests; no other workspace production crate consumes it. Full audit `/tmp/rays-g2-closure-audit.txt`; local, exact Windows and shared workspace proof above. G1 still requires remaining native/common validation migration.
+- **R10 baseline and first implementation:**1024content hashes allocate9216times/982µs before; focused numeric version observes0allocations/859.25µs (single local samples, no frame speed claim). Explicit Rc-backed GPU name/index fields replace newline encoding and preserve independent shared index identity. First renderer/rays all-target check passes2.06s. Mesh layout improves96→88B; existing exact96B assertion caught the intentional improvement, now tightened to88B. First focused run's two failures were only those stale exact-size assertions; all other focused assertions passed. Full renderer/native/gates and allocation ratchets remain before closure.
+
+
+### All R items complete —39done
+
+- **R10 complete** `1f52f3db`: seven files,+135/−101. Renderer content, texture-level, mesh and batch/attribute identities are u128; framed component lengths and numeric little-endian fields avoid joined strings and boundary ambiguity. Missing hashes remain explicit Options, with no sentinel collision. GPU keys have independent shared name/index fields, registry lookup uses the entire name, and the packed producer retains its typed key; redundant GPU name metadata is deleted. Only final cache/debug labels format the numeric hash. The existing byte mixer is retained here; Z5 owns its replacement by the shared word hash.
+- R10 fail-before guard:1024content hashes**9216allocations/982µs→0/886.125µs** in local single observations. Frozen numeric vector, component boundaries, fresh-equal/changed/shared immutable payloads and independent newline-containing name/index keys pass. Mesh exact-size assertion is tightened**96→88B** after the initial run correctly rejected the old96B expectation; no layout padding or relaxed bound was added.
+- `cargo t -p renderer` exercised54cases in25.811s (slowest window_runtime_render2.344s):52passed and2exact96B expectations failed. After tightening both to88B, final `cargo t -p renderer --lib test_prepared_scene3 -- --nocapture` passes all5selected cases1.803s; thus all54unique renderer cases are proven collectively, not a claim that the original failing command passed. Native pixels, real GPU newline registry names, shared index uploads across changed names, unregister invalidation, texture updates and retained/window lifetimes all pass.
+- `cargo t -p rays --lib --test gpu_rays_all` passes**33/33**7.365s (slowest primitives0.579s); after removing the now-redundant packed GPU name, affected `--test gpu_rays_all` reconfirms**7/7**5.068s (slowest0.573s). Native idle3 pass12.313s including rebuild, at unchanged strict R9caps1305/148265,1154/80422,1378/95326. Three actual warm-kernel guards pass2.703s (scatter2.543s/subdivide2.278s/Boolean0.380s), unchanged already-lowered bounds.
+- R10 sea first max51358/2803652, then final max**51358/2803638**, zero uploads/payload reads and24Bbounds/frame with2.553ms close. Cap ratcheted51370/2806000→**51365/2805000**, preserving room for known808B variation, and confirmed both before and after final metadata cleanup. Final sea command passes11.853s including relink, case1.012s. The older pre-R8+443B failure remains recorded under Z0; this lower measured source is not a causal explanation of that observation.
+- Final `/usr/bin/time -p cargo check --workspace --all-targets` passes**3.16s wall**; dependency gate green; shape**495→495**, no new/removed normalized class, no exceptions. `git diff --check` and scoped cached check pass. No dependency, profile, deadline or Lisp golden changes. Source commits `70a05621`/`dbacce38`/`1f52f3db` close R8/R9/R10; all ten R items now have verified proof.
+- Build slots handed to G1 remaining common/native validation migration and Z1 real-phase allocation profiling. Z1 retains actual pointer alternation, update/scene/render/after_present and full zero-idle requirement. Z5 audits full64-bit CPU/public Lisp seeds, indexed generators, JS/prelude copies, word hashes and spec/golden scope outside the worktree; no Z5 implementation/benefit claimed. Root prepares remaining work without a third build. B8's full-run timeout, historical shape failures, zero/O(1) allocations and final macOS/Windows qualification remain open.
+
+- Artifact **v28** published with the CLI and verified by byte-identical downloaded HTML, equal embedded/tracked seeds and all58live database documents. Tracker immediate/live/offline regression passes. Snapshot **39done/5active/14pending (67.2% by item count)**. Original58requirements remain intact.
