@@ -204,140 +204,9 @@ pub(crate) fn select_string(source: &TextArray, mapping: &[i64]) -> TextArray {
     source.gather(mapping.iter().map(|&index| index as usize))
 }
 
-fn int_compare(a: i64, b: i64) -> i64 {
-    if a < b { -1 } else if a > b { 1 } else { 0 }
-}
-
-/// Order two slots by value, then by point index.
-pub(crate) fn compare_float_entry(values: &[f64], points: &[i64], left: usize, right: usize) -> i64 {
-    let compared = float_compare(values[left], values[right]);
-    if !compared.is_eq() { compared as i64 } else { int_compare(points[left], points[right]) }
-}
-
-fn compare_int_entry(values: &[i64], points: &[i64], left: usize, right: usize) -> i64 {
-    let compared = int_compare(values[left], values[right]);
-    if compared != 0 { compared } else { int_compare(points[left], points[right]) }
-}
-
-fn compare_text_entry(values: &[Vec<u8>], points: &[i64], left: usize, right: usize) -> i64 {
-    let compared = match values[left].cmp(&values[right]) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    };
-    if compared != 0 { compared } else { int_compare(points[left], points[right]) }
-}
-
-// Heap sort of slots first..last of both planes; the three element types each get one copy.
-pub(crate) fn sort_range_f64(values: &mut [f64], points: &mut [i64], first: usize, last: usize) {
-    let count = last - first;
-    if count < 2 {
-        return;
-    }
-    let sift = |values: &mut [f64], points: &mut [i64], root: usize, count: usize| {
-        let mut root = root;
-        loop {
-            let child = root * 2 + 1;
-            if child >= count {
-                break;
-            }
-            let selected =
-                if child + 1 < count && compare_float_entry(values, points, first + child, first + child + 1) < 0 {
-                    child + 1
-                } else {
-                    child
-                };
-            if compare_float_entry(values, points, first + root, first + selected) < 0 {
-                values.swap(first + root, first + selected);
-                points.swap(first + root, first + selected);
-                root = selected;
-            } else {
-                break;
-            }
-        }
-    };
-    for root in (0..count / 2).rev() {
-        sift(values, points, root, count);
-    }
-    for remaining in (1..count).rev() {
-        values.swap(first, first + remaining);
-        points.swap(first, first + remaining);
-        sift(values, points, 0, remaining);
-    }
-}
-
-fn sort_range_i64(values: &mut [i64], points: &mut [i64], first: usize, last: usize) {
-    let count = last - first;
-    if count < 2 {
-        return;
-    }
-    let sift = |values: &mut [i64], points: &mut [i64], root: usize, count: usize| {
-        let mut root = root;
-        loop {
-            let child = root * 2 + 1;
-            if child >= count {
-                break;
-            }
-            let selected =
-                if child + 1 < count && compare_int_entry(values, points, first + child, first + child + 1) < 0 {
-                    child + 1
-                } else {
-                    child
-                };
-            if compare_int_entry(values, points, first + root, first + selected) < 0 {
-                values.swap(first + root, first + selected);
-                points.swap(first + root, first + selected);
-                root = selected;
-            } else {
-                break;
-            }
-        }
-    };
-    for root in (0..count / 2).rev() {
-        sift(values, points, root, count);
-    }
-    for remaining in (1..count).rev() {
-        values.swap(first, first + remaining);
-        points.swap(first, first + remaining);
-        sift(values, points, 0, remaining);
-    }
-}
-
-fn sort_range_string(values: &mut [Vec<u8>], points: &mut [i64], first: usize, last: usize) {
-    let count = last - first;
-    if count < 2 {
-        return;
-    }
-    let sift = |values: &mut [Vec<u8>], points: &mut [i64], root: usize, count: usize| {
-        let mut root = root;
-        loop {
-            let child = root * 2 + 1;
-            if child >= count {
-                break;
-            }
-            let selected =
-                if child + 1 < count && compare_text_entry(values, points, first + child, first + child + 1) < 0 {
-                    child + 1
-                } else {
-                    child
-                };
-            if compare_text_entry(values, points, first + root, first + selected) < 0 {
-                values.swap(first + root, first + selected);
-                points.swap(first + root, first + selected);
-                root = selected;
-            } else {
-                break;
-            }
-        }
-    };
-    for root in (0..count / 2).rev() {
-        sift(values, points, root, count);
-    }
-    for remaining in (1..count).rev() {
-        values.swap(first, first + remaining);
-        points.swap(first, first + remaining);
-        sift(values, points, 0, remaining);
-    }
+/// Float reductions use the shared total order, then original point IDs.
+pub(crate) fn sort_float_entries(values: &mut [(f64, i64)]) {
+    values.sort_unstable_by(|a, b| float_compare(a.0, b.0).then(a.1.cmp(&b.1)));
 }
 
 fn sorted_float(
@@ -351,24 +220,23 @@ fn sorted_float(
     support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
-        let mut values: Vec<f64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
-        let mut points = clusters.members[first..last].to_vec();
+        let mut values: Vec<(f64, i64)> = clusters.members[first..last].iter().map(|&point| (source[point as usize], point)).collect();
         let (first, last) = (0usize, last - first);
-        sort_range_f64(&mut values, &mut points, first, last);
+        sort_float_entries(&mut values);
         if method == AttributeMethod::Median {
-            Ok(values[first + (last - first) / 2])
+            Ok(values[first + (last - first) / 2].0)
         } else {
             let mut best_count = 0usize;
-            let mut best_value = values[first];
+            let mut best_value = values[first].0;
             let mut run_first = first;
             for slot in first + 1..=last {
-                if slot == last || values[slot] != values[run_first] {
+                if slot == last || values[slot].0 != values[run_first].0 {
                     let count = slot - run_first;
                     if count > best_count {
                         best_count = count;
                         // Numeric modes merge signed zeros and retain the least source point.
-                        let representative = (run_first..slot).min_by_key(|&i| points[i]).unwrap();
-                        best_value = values[representative];
+                        let representative = (run_first..slot).min_by_key(|&i| values[i].1).unwrap();
+                        best_value = values[representative].0;
                     }
                     run_first = slot;
                 }
@@ -390,22 +258,21 @@ fn sorted_int(
     support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
-        let mut values: Vec<i64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
-        let mut points = clusters.members[first..last].to_vec();
+        let mut values: Vec<(i64, i64)> = clusters.members[first..last].iter().map(|&point| (source[point as usize], point)).collect();
         let (first, last) = (0usize, last - first);
-        sort_range_i64(&mut values, &mut points, first, last);
+        values.sort_unstable();
         if method == AttributeMethod::Median {
-            Ok(values[first + (last - first) / 2])
+            Ok(values[first + (last - first) / 2].0)
         } else {
             let mut best_count = 0usize;
-            let mut best_value = values[first];
+            let mut best_value = values[first].0;
             let mut run_first = first;
             for slot in first + 1..=last {
-                if slot == last || values[slot] != values[run_first] {
+                if slot == last || values[slot].0 != values[run_first].0 {
                     let count = slot - run_first;
                     if count > best_count {
                         best_count = count;
-                        best_value = values[run_first];
+                        best_value = values[run_first].0;
                     }
                     run_first = slot;
                 }
@@ -427,22 +294,21 @@ fn sorted_text(
     support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
-        let mut values: Vec<Vec<u8>> = clusters.members[first..last].iter().map(|&point| source[point as usize].to_vec()).collect();
-        let mut points = clusters.members[first..last].to_vec();
+        let mut values: Vec<(&[u8], i64)> = clusters.members[first..last].iter().map(|&point| (&source[point as usize], point)).collect();
         let (first, last) = (0usize, last - first);
-        sort_range_string(&mut values, &mut points, first, last);
+        values.sort_unstable();
         if method == AttributeMethod::Median {
-            Ok(values[first + (last - first) / 2].clone())
+            Ok(values[first + (last - first) / 2].0.to_vec())
         } else {
             let mut best_count = 0usize;
-            let mut best_value = values[first].clone();
+            let mut best_value = values[first].0.to_vec();
             let mut run_first = first;
             for slot in first + 1..=last {
-                if slot == last || values[slot] != values[run_first] {
+                if slot == last || values[slot].0 != values[run_first].0 {
                     let count = slot - run_first;
                     if count > best_count {
                         best_count = count;
-                        best_value = values[run_first].clone();
+                        best_value = values[run_first].0.to_vec();
                     }
                     run_first = slot;
                 }
@@ -837,10 +703,8 @@ fn weighted_order(
                 support::poll(cancel_value, cluster)?;
                 let first = clusters.offsets[cluster as usize] as usize;
                 let last = clusters.offsets[cluster as usize + 1] as usize;
-                let mut values: Vec<f64> =
-                    clusters.members[first..last].iter().map(|&point| weights[point as usize]).collect();
                 let mut order = clusters.members[first..last].to_vec();
-                sort_range_f64(&mut values, &mut order, 0, last - first);
+                order.sort_unstable_by(|&a, &b| float_compare(weights[a as usize], weights[b as usize]).then(a.cmp(&b)));
                 window[first - base..last - base].copy_from_slice(&order);
             }
             Ok(())
@@ -1487,11 +1351,9 @@ mod tests {
         assert_eq!(float_compare(-0.0, 0.0), Less);
         let mode = sorted_float(None, 1, &clusters(), &[0., -0., 10., 1.], AttributeMethod::Mode).unwrap();
         assert_eq!(mode[0].to_bits(), 0f64.to_bits(), "signed zero modes retain the first source sign");
-        let mut values = vec![3.0, 1.0, 2.0, 1.0];
-        let mut points = vec![3, 2, 1, 0];
-        sort_range_f64(&mut values, &mut points, 0, 4);
-        assert_eq!(values, vec![1.0, 1.0, 2.0, 3.0]);
-        assert_eq!(points, vec![0, 2, 1, 3], "ties order by point index");
+        let mut values = vec![(3.0, 3), (1.0, 2), (2.0, 1), (1.0, 0)];
+        sort_float_entries(&mut values);
+        assert_eq!(values, [(1.0, 0), (1.0, 2), (2.0, 1), (3.0, 3)], "ties order by point index");
         if std::env::var_os("RAYS_FLOAT_SORT_BENCH").is_some() {
             let input: Vec<_> = (0..16_384u64).map(|i| {
                 let bits = i.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(97);
@@ -1501,16 +1363,15 @@ mod tests {
             for _ in 0..5 {
                 let started = std::time::Instant::now();
                 for _ in 0..8 {
-                    let mut values = input.clone();
-                    let mut points: Vec<_> = (0..values.len() as i64).collect();
-                    sort_range_f64(&mut values, &mut points, 0, input.len());
-                    assert!(values.windows(2).all(|v| v[0] <= v[1]));
-                    std::hint::black_box((values, points));
+                    let mut values: Vec<_> = input.iter().enumerate().map(|(point, &value)| (value, point as i64)).collect();
+                    sort_float_entries(&mut values);
+                    assert!(values.windows(2).all(|v| v[0].0 <= v[1].0));
+                    std::hint::black_box(values);
                 }
                 samples.push(started.elapsed().as_micros());
             }
             samples.sort_unstable();
-            println!("D4 debug median (8 sorts of 16384 finite values): {} us", samples[2]);
+            println!("sort median (8 sorts of 16384 finite values): {} us", samples[2]);
         }
     }
 

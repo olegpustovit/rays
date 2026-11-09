@@ -238,35 +238,8 @@ fn compare_samples(float_results: &[f64], left: usize, right: usize) -> i64 {
     }
 }
 
-fn sample_sift_down(float_results: &[f64], values: &mut [usize], root: usize, count: usize) {
-    let mut at = root;
-    loop {
-        let child = at * 2 + 1;
-        if child >= count {
-            break;
-        }
-        let selected = if child + 1 < count && compare_samples(float_results, values[child], values[child + 1]) < 0 {
-            child + 1
-        } else {
-            child
-        };
-        if compare_samples(float_results, values[at], values[selected]) < 0 {
-            values.swap(at, selected);
-            at = selected;
-        } else {
-            break;
-        }
-    }
-}
-
 fn sort_samples(float_results: &[f64], values: &mut [usize], count: usize) {
-    for root in (0..count / 2).rev() {
-        sample_sift_down(float_results, values, root, count);
-    }
-    for remaining in (1..count).rev() {
-        values.swap(0, remaining);
-        sample_sift_down(float_results, values, 0, remaining);
-    }
+    values[..count].sort_unstable_by(|&a, &b| compare_samples(float_results, a, b).cmp(&0));
 }
 
 struct Combined {
@@ -1724,5 +1697,22 @@ mod tests {
             let out = exact_at_one_and_four(&|| ray(&p, &source, &collision).unwrap());
             assert!(point_float(&out, "dist").iter().any(|&d| d > 0.0));
         }
+    }
+
+    #[test]
+    fn median_samples_keep_numeric_ties_and_the_scratch_suffix() {
+        let mut distances = vec![0.; 5 * 4];
+        for (slot, distance) in [-0., 0., 3., 1., 1.].into_iter().enumerate() {
+            distances[slot * 4] = distance;
+        }
+        let mut order = [4, 1, 3, 0, 2, 99, 98];
+        sort_samples(&distances, &mut order, 5);
+        assert_eq!(order, [0, 1, 3, 4, 2, 99, 98]);
+        let mut combined = Combined { counts: [0, 17], distances: [f64::INFINITY, 42.], selected: [-1, 9] };
+        combine_samples(Combine::RayMedian, &[0; 10], &distances, 0, 5, &mut order, &mut combined, 0);
+        assert_eq!(combined.counts, [5, 17]);
+        assert_eq!(combined.distances, [1., 42.]);
+        assert_eq!(combined.selected, [3, 9]);
+        assert_eq!(&order[5..], &[99, 98]);
     }
 }

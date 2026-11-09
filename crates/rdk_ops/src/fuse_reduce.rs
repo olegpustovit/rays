@@ -4,7 +4,7 @@ use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 
 use crate::fuse_rules::{
-    self, average_float, compare_float_entry, expand_f64, select_f64, sort_range_f64,
+    self, average_float, expand_f64, select_f64, sort_float_entries,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,27 +67,26 @@ fn sorted_reduction(
         let cluster = cluster as usize;
         let first = clusters.offsets[cluster] as usize;
         let last = clusters.offsets[cluster + 1] as usize;
-        let mut values: Vec<f64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
-        let mut points = clusters.members[first..last].to_vec();
+        let mut values: Vec<(f64, i64)> = clusters.members[first..last].iter().map(|&point| (source[point as usize], point)).collect();
         let (first, last) = (0usize, last - first);
-        sort_range_f64(&mut values, &mut points, first, last);
+        sort_float_entries(&mut values);
         if median {
-            Ok(values[first + (last - first) / 2])
+            Ok(values[first + (last - first) / 2].0)
         } else {
             let mut best_count = 0usize;
             let mut best_first_point = i64::MAX;
-            let mut best_value = values[first];
+            let mut best_value = values[first].0;
             let mut run_first = first;
             for slot in first + 1..=last {
-                if slot == last || values[slot] != values[run_first] {
+                if slot == last || values[slot].0 != values[run_first].0 {
                     let count = slot - run_first;
                     // Numeric modes merge signed zeros and retain the least source point.
-                    let representative = (run_first..slot).min_by_key(|&i| points[i]).unwrap();
-                    let point = points[representative];
+                    let representative = (run_first..slot).min_by_key(|&i| values[i].1).unwrap();
+                    let point = values[representative].1;
                     if count > best_count || (count == best_count && point < best_first_point) {
                         best_count = count;
                         best_first_point = point;
-                        best_value = values[representative];
+                        best_value = values[representative].0;
                     }
                     run_first = slot;
                 }
@@ -95,7 +94,6 @@ fn sorted_reduction(
             Ok(best_value)
         }
     })?;
-    let _ = compare_float_entry;
     Ok(output)
 }
 

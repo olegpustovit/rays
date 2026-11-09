@@ -5,7 +5,6 @@
 //! cancellation) into the stable diagnostic each OCaml `try ... with` produced.
 use rdk_core::support::DisjointSet;
 use rays_math::float::{min as omin, max as omax, compare as float_compare};
-use std::cmp::Ordering;
 use std::sync::atomic::{AtomicI64, AtomicU8, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 
@@ -1073,98 +1072,6 @@ fn rounded_self_contact_edges(
         })().map_err(|f| guard_fail(Code::InvalidOutput, f))
 }
 
-/// OCaml's `Array.sort` (ternary heap sort) specialised to `((i64, i64, i64), i64)` keyed by the
-/// first component only: equal keys land where OCaml puts them, which decides which sliver of an
-/// odd group survives.
-fn ocaml_sort_keyed(a: &mut [((i64, i64, i64), i64)]) {
-    let cmp = |x: &((i64, i64, i64), i64), y: &((i64, i64, i64), i64)| x.0.cmp(&y.0);
-    fn maxson(a: &[((i64, i64, i64), i64)], l: usize, i: usize, cmp: &dyn Fn(&((i64, i64, i64), i64), &((i64, i64, i64), i64)) -> Ordering) -> Option<usize> {
-        let i31 = i + i + i + 1;
-        let mut x = i31;
-        if i31 + 2 < l {
-            if cmp(&a[i31], &a[i31 + 1]) == Ordering::Less {
-                x = i31 + 1;
-            }
-            if cmp(&a[x], &a[i31 + 2]) == Ordering::Less {
-                x = i31 + 2;
-            }
-            Some(x)
-        } else if i31 + 1 < l && cmp(&a[i31], &a[i31 + 1]) == Ordering::Less {
-            Some(i31 + 1)
-        } else if i31 < l {
-            Some(i31)
-        } else {
-            None
-        }
-    }
-    let l = a.len();
-    let trickle = |a: &mut [((i64, i64, i64), i64)], l: usize, mut i: usize, e: ((i64, i64, i64), i64)| loop {
-        match maxson(a, l, i, &cmp) {
-            None => {
-                a[i] = e;
-                break;
-            }
-            Some(j) => {
-                if cmp(&a[j], &e) == Ordering::Greater {
-                    a[i] = a[j];
-                    i = j;
-                } else {
-                    a[i] = e;
-                    break;
-                }
-            }
-        }
-    };
-    let bubble = |a: &mut [((i64, i64, i64), i64)], l: usize, mut i: usize| -> usize {
-        loop {
-            match maxson(a, l, i, &cmp) {
-                None => return i,
-                Some(j) => {
-                    a[i] = a[j];
-                    i = j;
-                }
-            }
-        }
-    };
-    let trickleup = |a: &mut [((i64, i64, i64), i64)], mut i: usize, e: ((i64, i64, i64), i64)| loop {
-        let father = (i - 1) / 3;
-        if cmp(&a[father], &e) == Ordering::Less {
-            a[i] = a[father];
-            if father > 0 {
-                i = father;
-            } else {
-                a[0] = e;
-                break;
-            }
-        } else {
-            a[i] = e;
-            break;
-        }
-    };
-    if l == 0 {
-        return;
-    }
-    let mut i = ((l + 1) / 3) as i64 - 1;
-    while i >= 0 {
-        let e = a[i as usize];
-        trickle(a, l, i as usize, e);
-        i -= 1;
-    }
-    let mut i = l as i64 - 1;
-    while i >= 2 {
-        let e = a[i as usize];
-        a[i as usize] = a[0];
-        let hole = bubble(a, i as usize, 0);
-        trickleup(a, hole, e);
-        i -= 1;
-    }
-    if l > 1 {
-        let e = a[1];
-        a[1] = a[0];
-        a[0] = e;
-    }
-}
-
 fn paired_rounded_slivers(
     cancel: Option<&Arc<cancel::T>>,
     grain: i64,
@@ -1183,7 +1090,8 @@ fn paired_rounded_slivers(
                     keyed.push((triangle_point_key(&topology, primitive), primitive));
                 }
             }
-            ocaml_sort_keyed(&mut keyed);
+            // Equal triangle keys retain source primitive order; an odd group keeps its last one.
+            keyed.sort_by_key(|&(key, primitive)| (key, primitive));
             let mut bits = vec![0u8; bits_len(primitive_count)];
             let mut removed = 0;
             let mut first = 0;
@@ -2245,22 +2153,14 @@ mod tests {
     }
 
     #[test]
-    fn ocaml_heap_sort_sorts_by_key_only() {
-        let mut state = 12345u64;
-        for length in [0usize, 1, 2, 3, 4, 7, 20, 101] {
-            let mut items: Vec<((i64, i64, i64), i64)> = (0..length)
-                .map(|slot| {
-                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                    (((state >> 33) as i64 % 5, (state >> 40) as i64 % 3, 0), slot as i64)
-                })
-                .collect();
-            let mut expected: Vec<i64> = items.iter().map(|item| item.1).collect();
-            ocaml_sort_keyed(&mut items);
-            assert!(items.windows(2).all(|pair| pair[0].0 <= pair[1].0));
-            let mut seen: Vec<i64> = items.iter().map(|item| item.1).collect();
-            seen.sort();
-            expected.sort();
-            assert_eq!(seen, expected);
+    fn odd_sliver_pairing_keeps_the_last_source_primitive() {
+        let positions = packed::float3::view::of_owned_exn(vec![0., 1., 2.], vec![0.; 3], vec![0.; 3]).unwrap();
+        let topology = topology::create_owned(3, vec![0, 1, 2, 0, 1, 2, 0, 1, 2], vec![0, 3, 6, 9], vec![topology::PrimitiveKind::Polygon; 3]).unwrap();
+        let value = geometry::create(positions, topology, None, None, None).unwrap();
+        for grain in [1, 7] {
+            let (count, removed) = paired_rounded_slivers(None, grain, &value).unwrap();
+            assert_eq!(count, 2);
+            assert_eq!((0..3).map(|primitive| group::mem(primitive, &removed)).collect::<Vec<_>>(), [true, true, false]);
         }
     }
 }

@@ -77,70 +77,6 @@ fn midpoint(a: Point, b: Point) -> Point {
     Point { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 }
 }
 
-/// OCaml `Array.sort` (heap sort, not stable), reproduced step for step so that
-/// equal keys end up in the same order as in the OCaml tessellator.
-fn ocaml_sort<T: Copy, F: Fn(T, T) -> std::cmp::Ordering>(a: &mut [T], cmp: F) {
-    use std::cmp::Ordering::{Greater, Less};
-    // Ok(child) of the larger son, or Err(i) where OCaml raises `Bottom i`.
-    fn maxson<T: Copy, F: Fn(T, T) -> std::cmp::Ordering>(a: &[T], cmp: &F, l: usize, i: usize) -> Result<usize, usize> {
-        let i31 = i + i + i + 1;
-        if i31 + 2 < l {
-            let mut x = i31;
-            if cmp(a[i31], a[i31 + 1]) == Less { x = i31 + 1; }
-            if cmp(a[x], a[i31 + 2]) == Less { x = i31 + 2; }
-            Ok(x)
-        } else if i31 + 1 < l && cmp(a[i31], a[i31 + 1]) == Less {
-            Ok(i31 + 1)
-        } else if i31 < l {
-            Ok(i31)
-        } else {
-            Err(i)
-        }
-    }
-    let l = a.len();
-    let trickle = |a: &mut [T], mut i: usize, e: T| loop {
-        match maxson(a, &cmp, l, i) {
-            Err(b) => { a[b] = e; return; }
-            Ok(j) => {
-                if cmp(a[j], e) == Greater { a[i] = a[j]; i = j; } else { a[i] = e; return; }
-            }
-        }
-    };
-    let bubble = |a: &mut [T], l: usize, mut i: usize| -> usize {
-        loop {
-            match maxson(a, &cmp, l, i) {
-                Err(b) => return b,
-                Ok(j) => { a[i] = a[j]; i = j; }
-            }
-        }
-    };
-    let trickleup = |a: &mut [T], mut i: usize, e: T| loop {
-        let father = (i - 1) / 3;
-        if cmp(a[father], e) == Less {
-            a[i] = a[father];
-            if father > 0 { i = father; } else { a[0] = e; return; }
-        } else {
-            a[i] = e;
-            return;
-        }
-    };
-    for i in (0..(l + 1) / 3).rev() {
-        let e = a[i];
-        trickle(a, i, e);
-    }
-    for i in (2..l).rev() {
-        let e = a[i];
-        a[i] = a[0];
-        let b = bubble(a, i, 0);
-        trickleup(a, b, e);
-    }
-    if l > 1 {
-        let e = a[1];
-        a[1] = a[0];
-        a[0] = e;
-    }
-}
-
 fn distance_to_line_squared(p: Point, a: Point, b: Point) -> f64 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -291,7 +227,7 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
     if active || open_contour { return Err(Error::OpenContour); }
     let contours = flatten(tolerance, path)?;
     let mut ys: Vec<f64> = contours.iter().flatten().map(|p| p.y).collect();
-    ocaml_sort(&mut ys, compare_float);
+    ys.sort_by(|a, b| compare_float(*a, *b));
     ys.dedup_by(|a, b| *a == *b);
     let mut vertices = Vec::new();
     let mut triangles = Vec::new();
@@ -323,17 +259,15 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
                 let high = a.y.max(b.y);
                 if a.y != b.y && middle >= low && middle < high {
                     let at = |y| a.x + ((y - a.y) * (b.x - a.x) / (b.y - a.y));
-                    edges.push(Crossing { x0: at(y0), x1: at(y1), winding: if b.y > a.y { 1 } else { -1 } });
+                    edges.push((edges.len(), Crossing { x0: at(y0), x1: at(y1), winding: if b.y > a.y { 1 } else { -1 } }));
                 }
             }
         }
-        // OCaml collects crossings by prepending, so the array it sorts is in reverse order.
-        edges.reverse();
-        ocaml_sort(&mut edges, |a: Crossing, b: Crossing| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5));
+        edges.sort_by(|(a_index, a), (b_index, b)| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5).then(a_index.cmp(b_index)));
         let mut inside = false;
         let mut winding = 0;
         let mut left = None;
-        for edge in edges {
+        for (_, edge) in edges {
             let was_inside = inside;
             match fill_rule {
                 FillRule::EvenOdd => inside = !inside,

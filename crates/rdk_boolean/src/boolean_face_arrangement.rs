@@ -166,13 +166,7 @@ fn between(first: &implicit_point::T, point: &implicit_point::T, second: &implic
 }
 
 fn sort_range(values: &mut [i64], first: usize, last: usize, compare: &dyn Fn(i64, i64) -> i64) {
-    for i in (first + 1)..last {
-        let mut j = i;
-        while j > first && compare(values[j], values[j - 1]) < 0 {
-            values.swap(j, j - 1);
-            j -= 1;
-        }
-    }
+    values[first..last].sort_by(|&a, &b| compare(a, b).cmp(&0));
 }
 
 struct CandidatePlan {
@@ -1340,6 +1334,31 @@ mod tests {
         match build(Some(&token), None, &crossing_plan(), Side::Left, 0) {
             Err(e) => assert_eq!(error::code(&e), Code::Cancelled),
             Ok(_) => panic!("cancelled face arrangement completed"),
+        }
+    }
+
+    #[test]
+    fn split_sort_keeps_equal_axis_points_in_source_order() {
+        let source = implicit_point::source((0..12).map(|i| (i / 3) as f64).collect(), vec![0.; 12], vec![0.; 12]).unwrap();
+        let points: Vec<_> = (0..12).map(|i| implicit_point::explicit(&source, i).unwrap()).collect();
+        let mut order = vec![-1, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, -2];
+        sort_range(&mut order, 1, 13, &|a, b| implicit_point::compare_x(&points[a as usize], &points[b as usize]));
+        assert_eq!(order, [-1, 2, 1, 0, 5, 4, 3, 8, 7, 6, 11, 10, 9, -2]);
+        if std::env::var_os("RAYS_SORT_BENCH").is_some() {
+            const COUNT: usize = 2048;
+            let source = implicit_point::source((0..COUNT).map(|i| (i / 3) as f64).collect(), vec![0.; COUNT], vec![0.; COUNT]).unwrap();
+            let points: Vec<_> = (0..COUNT as i64).map(|i| implicit_point::explicit(&source, i).unwrap()).collect();
+            let input: Vec<i64> = (0..COUNT as i64).rev().collect();
+            let mut samples = Vec::new();
+            for _ in 0..7 {
+                let mut values = input.clone();
+                let started = std::time::Instant::now();
+                sort_range(&mut values, 0, COUNT, &|a, b| implicit_point::compare_x(&points[a as usize], &points[b as usize]));
+                samples.push(started.elapsed().as_nanos());
+                assert!(values.windows(2).all(|pair| implicit_point::compare_x(&points[pair[0] as usize], &points[pair[1] as usize]) <= 0));
+            }
+            samples.sort_unstable();
+            println!("exact-axis sort: median {} ns (7 sorts of {COUNT} points; setup excluded)", samples[3]);
         }
     }
 }
