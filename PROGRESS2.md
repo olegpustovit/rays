@@ -19,9 +19,9 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
 | Z | 11 | 0 | 1 | 10 |
-| R | 10 | 5 | 2 | 3 |
-| G | 7 | 0 | 1 | 6 |
-| **All** | **58** | **33** | **5** | **20** |
+| R | 10 | 6 | 2 | 2 |
+| G | 7 | 0 | 2 | 5 |
+| **All** | **58** | **34** | **6** | **18** |
 
 ## Items
 
@@ -72,14 +72,14 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | R2 | R | done | `25c98948` — immutable parent cache layers; snapshot isolation; iterative destruction; scatter guard lowered | IR346, 10000-layer/drop guard, bench digest c4bbf006c82014c7, workspace all-targets, native/three-kernel guards pass |
 | R3 | R | done | `608c3385` — immutable lexical free-name ranges; global/per-evaluation caches removed; bypass active-input semantics preserved | Flow490, parallel40, zero-allocation reads, lowered idle/sea/three-kernel caps and workspace check pass |
 | R4 | R | active | Owner/lifetime and all operator callers traced; baseline helpers prepared; no production changes yet | Library plus 49 sketches byte-identical |
-| R5 | R | active | Shared state maps and integer-pair stamps implemented; initial fork/stamp/transaction allocation guard passes | Full state/rollback/native consumer qualification pending; restore snapshots by move |
+| R5 | R | done | `8aab3a26` — COW state maps, moved rollback snapshots, integer-pair stamps and typed packed/native image cache fields | Flow492, stateSOP6, native workspace35, allocation13 and sea pass; populated-map guard85/2048/85→1/0/0 allocations |
 | R6 | R | done | `39d6f261` — 243 Result predicates; par_fill and plain zip; ten cancellation atomics and two error Mutex channels removed | CPU558, group12/par_fill3, parallel40, native/sea/warm caps and workspace check pass; serial ABI cost disclosed |
 | R7 | R | done | `85e72ed5` — fourteen repoint paths share offsets/kinds; one validated constructor; polygons_shared deleted | Geometry429/native10, shared-storage identity, idle/sea/three warm guards pass; repoint9.8x faster |
-| R8 | R | pending | — | pxui_graph (31 cases); alloc_budget |
+| R8 | R | active | Full 24-file mutation draft prepared outside worktree; no production installation or builds | All32 current graph cases; nonempty Change buffer ordering; native allocation caps |
 | R9 | R | pending | — | Lower the alloc_budget.rs limits |
 | R10 | R | pending | — | test_prepared_scene3 |
 | G1 | G | active | `29c9efbf` — common validation moved to core; entry checks109→27; 98 immediate closures removed | Local56 pass10.61s; exact-commit Windows29 pass7.008s; native-only semantic migration still requires G2 |
-| G2 | G | pending | — | Move metal/tests/gpu_metal.rs into ogpu_metal |
+| G2 | G | active | Crate/type/error consolidation and 20 native test migrations prepared outside worktree; acceleration validation gaps audited | Full native functionality, GPU suites/gates and exact-commit Windows qualification |
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
 | G5 | G | pending | — | Mock queue tests; a Metal queue case |
@@ -256,3 +256,11 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - **R4 baseline captured** before checker ownership changes: all178 static cases (129actual library sources with dependencies plus49sketches), existing sketch golden and custom-mutated Op guard pass. Full-library monolithic case exceeded the original5s case cap; per-source coverage replaces only that oversized fixture, retaining every source and original deadlines. Prelude clone64times47488allocations/4.334ms; warm-check median1.748ms/12864allocations. Borrowed/cached Op batch compiles; full checker base/PathId changes remain active.
 - **R5 active**: new guard fails before changes (fork85allocations,1024stamp reads2048, read-only transaction85), then passes after shared snapshots (1/0/0). Added nested rollback and repeatable checkpoint coverage; packed-scope and native image caches migrate from String to typed stamp fields. An initial scoped check identified a remaining packed String field; full caller audit fixes this and native image sentinel fields before workspace verification. Full qualification remains pending, so R5 is not counted complete.
 - Artifact **v24** published and CLI readback verifies source bytes, both seeds and58live records. Snapshot **33done/5active/20pending (56.9% by item count)**. R5 remains active pending full consumer qualification; all original scope remains.
+
+- **R5 complete** `8aab3a26`: existing Shared COW container owns frame/host before/next maps; public forks share payloads, internal snapshots avoid a new State/Mutex and rollback moves the saved StateData with mem::replace. Shared immutable empty maps avoid empty-state heap allocations. Frame advance reuses a whole newer map when previous is empty and skips empty updates, so no-op advance does not clone the retained previous map. A true write can still clone a shared map (explicit ponytail ceiling); Z0/O(1) changed scratch remains open.
+- R5 StateStamp stores the frame epoch plus optional host epoch as an integer pair; Display preserves exact old epoch[:host] parameter bytes without allocating an intermediate String. The packed scope and native image/source cache compare typed stamps; stateless image absence stays distinct from an initialized epoch0 host. Every actual state_stamp caller was audited, including native image caches. No public Lisp syntax or golden changed.
+- R5 regression fails before changes: fork85allocations,1024stamp reads2048, read-only transaction85 on four populated maps with empty source metadata. After:1/0/0; read-only frame advance also0. Guard covers snapshot isolation, success/failure, all four map payloads/metadata, nested rollback and a checkpoint invoked twice; final focused guard passes9.34s including8.39s compile (case0.056s). Source metadata strings still clone with snapshots; this is not a claim of zero allocations for arbitrary state metadata or writes.
+- R5 validation: workspace all-target13.02s; Flow check/eval/IR492cases35.09s (slowest deterministic evaluator2.109s); FlowSOP state6cases20.28s including rebuild (slowest prepared-body/state0.570s); native workspace35cases29.64s (slowest packed-state capture2.471s). After the final no-op-copy guard: full allocation selection13cases17.76s, slowest scatter2.514s/subdivision2.281s; sea1case1.81s (case1.268s), all existing lower caps intact. Sea retains resident million points/1996002triangles, zero uploads/payload reads and bounded1.923ms close.
+- Combined current R4 borrowed-Op + R5 observations: basic1356/149687 allocations/B, empty1206/81958, bare1417/96617; sea maximum51501/2808931. Native caps are deliberately not attributed or lowered solely in R5 while R4 is uncommitted; R4 final integration will ratchet the coherent source. R5 commit excludes R4 prototype clone and Constant borrowed-Op hunks.
+- R4 checker/base/ID batch now installs after the root validation handoff; first scoped check passes1.78s. G2 owns the second build slot after R4's coherent check. Root performs ledger/publication work without a third Rust builder. R8 remains preparation-only with actual inventory30by-value mutators,64Pane rebuilds,16with_pane callers and32registered graph tests; paint snapshot and document intent boundary remain required.
+- Artifact **v25** published with the CLI; source byte readback, embedded/tracked seeds and all58live DB records verified. Immediate/live/offline tracker check passes. Snapshot **34done/6active/18pending (58.6% by item count)**. The objective remains active: all original58 requirements, B8 full-run failure,495historical shape violations, zero/O(1) targets and final macOS/Windows qualification remain in scope. This goal turn is **progress**: R3/R5/R6 source and R7 verification completed, exact-commit Windows G1 proof and R4 baselines collected.

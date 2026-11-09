@@ -180,8 +180,8 @@
     "note": "Owner/lifetime and all operator callers traced; baseline helpers prepared; no production changes yet"
   },
   "R5": {
-    "status": "active",
-    "note": "Shared state maps and integer-pair stamps implemented; initial fork/stamp/transaction allocation guard passes"
+    "status": "done",
+    "note": "8aab3a26 \u2014 COW state maps, moved rollback snapshots, integer-pair stamps and typed packed/native image cache fields"
   },
   "R6": {
     "status": "done",
@@ -192,8 +192,8 @@
     "note": "85e72ed5 \u2014 fourteen repoint paths share offsets/kinds; one validated constructor; polygons_shared deleted"
   },
   "R8": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Full 24-file mutation draft prepared outside worktree; no production installation or builds"
   },
   "R9": {
     "status": "pending",
@@ -208,8 +208,8 @@
     "note": "29c9efbf \u2014 common validation moved to core; entry checks109\u219227; 98 immediate closures removed"
   },
   "G2": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Crate/type/error consolidation and 20 native test migrations prepared outside worktree; acceleration validation gaps audited"
   },
   "G3": {
     "status": "pending",
