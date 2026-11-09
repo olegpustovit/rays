@@ -1,6 +1,13 @@
 //! Port of lib/editor_core/test_store.ml.
 use crate::store::{read_text, settings, user_folder, write_text};
 use input::Platform;
+use flow_syntax::syntax::{self, Syntax};
+
+fn value(text: &str) -> Syntax { syntax::parse(text).unwrap().remove(0) }
+
+fn same_settings(a: &settings::Settings, b: &settings::Settings) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|((ka, va), (kb, vb))| ka == kb && syntax::equal(va, vb))
+}
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -61,23 +68,23 @@ fn settings_round_trip() {
     let _cleanup = Cleanup(vec![path.clone(), directory.clone(), root.clone()]);
     let filename = path.to_str().unwrap();
     let values = vec![
-        ("animate".to_string(), settings::Value::Bool(true)),
-        ("density".to_string(), settings::Value::Float(0.625)),
-        ("count".to_string(), settings::Value::Int(42)),
-        ("mode".to_string(), settings::Value::Choice("orbit".into())),
-        ("label".to_string(), settings::Value::Text("hello\nworld".into())),
-        ("range".to_string(), settings::Value::Pair(0.2, 0.8)),
+        ("animate".to_string(), value("true")),
+        ("density".to_string(), value("0.625")),
+        ("count".to_string(), value("42")),
+        ("mode".to_string(), value("(choice \"orbit\")")),
+        ("label".to_string(), value("\"hello\\nworld\"")),
+        ("range".to_string(), value("[0.2 0.8]")),
     ];
     settings::save("test", filename, &values).unwrap();
-    assert!(settings::load("test", filename).unwrap() == values);
+    assert!(same_settings(&settings::load("test", filename).unwrap(), &values));
     assert!(settings::load("other", filename).is_err());
     let text = read_text(filename).unwrap();
     assert!(text.starts_with("(settings :sketch \"test\""));
     assert!(
-        settings::save("test", filename, &[("bad".to_string(), settings::Value::Float(f64::INFINITY))])
+        settings::save("test", filename, &[("bad".to_string(), crate::store::form::number(f64::INFINITY))])
             .is_err()
     );
-    assert!(settings::load("test", filename).unwrap() == values);
+    assert!(same_settings(&settings::load("test", filename).unwrap(), &values));
     println!("editor store: atomic s-expression round-trip");
 }
 
@@ -89,7 +96,11 @@ fn settings_int_above_2_62_decodes_as_int() {
     let filename = path.to_str().unwrap();
     for value in [1i64 << 62, i64::MIN, i64::MAX] {
         write_text(filename, &format!("(settings :sketch \"test\" :lim {value})")).unwrap();
-        assert_eq!(settings::load("test", filename).unwrap(), vec![("lim".into(), settings::Value::Int(value))]);
+        let loaded = settings::load("test", filename).unwrap();
+        assert_eq!(settings::int(&loaded, "lim"), Some(value));
+        assert_eq!(settings::float(&loaded, "lim"), None);
+        settings::save("test", filename, &loaded).unwrap();
+        assert_eq!(settings::int(&settings::load("test", filename).unwrap(), "lim"), Some(value));
     }
 }
 
@@ -103,4 +114,27 @@ fn user_folder_follows_platform() {
     assert!(user_folder(Platform::Other, pref, "/h") == "C:/AppData/rays/editor/");
     assert!(user_folder(Platform::Other, None, "/h") == expected);
     println!("editor store: user folder follows the platform's preference folder ok");
+}
+
+#[test]
+fn settings_keep_first_typed_entry_and_refuse_invalid_overwrite() {
+    let root = temp_dir("rays-store-preferences");
+    let path = root.join("preferences.rays");
+    let _cleanup = Cleanup(vec![path.clone(), root.clone()]);
+    let filename = path.to_str().unwrap();
+    let original = "(settings :sketch \"rays-editor\" :guide false :guide true :memory_budget -9223372036854775808 :unknown (choice \"é\"))";
+    write_text(filename, original).unwrap();
+    let values = settings::load("rays-editor", filename).unwrap();
+    assert_eq!(settings::bool(&values, "guide"), Some(false));
+    assert_eq!(settings::int(&values, "memory_budget"), Some(i64::MIN));
+    assert_eq!(settings::int(&values, "guide"), None);
+    assert_eq!(settings::bool(&vec![("guide".into(), value("1")), ("guide".into(), value("true"))], "guide"), None);
+    assert!(settings::save("rays-editor", filename, &[("bad".into(), value("[1 2 3]"))]).is_err());
+    assert_eq!(read_text(filename).unwrap(), original);
+    settings::save("rays-editor", filename, &values).unwrap();
+    assert!(same_settings(&settings::load("rays-editor", filename).unwrap(), &values));
+    for text in ["(settings :guide)", "(settings guide false)", "(settings :guide (run))", "(settings :guide [1 NaN])"] {
+        write_text(filename, text).unwrap();
+        assert!(settings::load("rays-editor", filename).is_err(), "accepted {text}");
+    }
 }

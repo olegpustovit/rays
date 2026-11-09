@@ -245,15 +245,6 @@ pub fn sub(text: &str, a: i64, len: i64) -> String {
     String::from_utf8_lossy(&bytes[a.min(end)..end]).into_owned()
 }
 
-fn index_from(text: &str, from: i64, c: u8) -> Option<i64> {
-    let bytes = text.as_bytes();
-    let from = from.max(0) as usize;
-    if from > bytes.len() {
-        return None;
-    }
-    bytes[from..].iter().position(|b| *b == c).map(|i| (i + from) as i64)
-}
-
 // ---- reading the source ----
 
 fn root_forms(source: &[S]) -> Option<(&S, &[SyntaxId])> {
@@ -724,10 +715,6 @@ pub fn cameras(source: &[S], graph: &str) -> Vec<String> {
         .collect()
 }
 
-fn plural(n: usize, what: &str) -> String {
-    format!("{} {}{}", n, what, if n == 1 { "" } else { "s" })
-}
-
 /// the top-level ancestor with what it reads, as a `let*` over the root bindings it needs; None
 /// when the graph body is not a scope
 fn closure(root: &S, top: &str) -> Option<S> {
@@ -774,7 +761,7 @@ fn closure(root: &S, top: &str) -> Option<S> {
     let note = format!(
         "{} \u{b7} {}{}",
         top,
-        if needed.len() > 1 { format!("with {}", plural(needed.len() - 1, "upstream binding")) } else { "no upstream bindings".to_owned() },
+        if needed.len() > 1 { format!("with {}", crate::navigator::plural((needed.len() - 1) as i64, "upstream binding")) } else { "no upstream bindings".to_owned() },
         if inputs.is_empty() { String::new() } else { format!(" and inputs {}", inputs.join(", ")) }
     );
     let mut ctor = SyntaxBuilder::new();
@@ -1493,39 +1480,8 @@ pub fn symbols(text: &str) -> Vec<(String, String, i64)> {
 }
 
 /// the byte where 1-based `line` of `text` starts (the last line's for a line past the end)
-fn line_start(text: &str, line: i64) -> i64 {
-    let (mut k, mut from) = (line, 0);
-    while k > 1 {
-        match index_from(text, from, b'\n') {
-            Some(j) => {
-                from = j + 1;
-                k -= 1;
-            }
-            None => return from,
-        }
-    }
-    from
-}
-
-/// where the line starting at `from` ends
-fn line_end(text: &str, from: i64) -> i64 {
-    index_from(text, from, b'\n').unwrap_or(text.len() as i64)
-}
-
-/// OCaml `Uchar.utf_decode_length (String.get_utf_8_uchar text i)`
-fn utf8_len(text: &str, i: i64) -> i64 {
-    let b = text.as_bytes();
-    let i = i as usize;
-    if i >= b.len() {
-        return 1;
-    }
-    let want = match b[i] {
-        0xC2..=0xDF => 2,
-        0xE0..=0xEF => 3,
-        0xF0..=0xF4 => 4,
-        _ => return 1,
-    };
-    if i + want <= b.len() && std::str::from_utf8(&b[i..i + want]).is_ok() { want as i64 } else { 1 }
+fn line_offset(text: &str, line: i64) -> usize {
+    text.match_indices('\n').map(|(at, _)| at + 1).take(line.saturating_sub(1).max(0) as usize).last().unwrap_or(0)
 }
 
 /// `line_target text "12:5"`: the byte of that 1-based line and character column (`":5"` is
@@ -1540,14 +1496,9 @@ pub fn line_target(text: &str, input: &str) -> Option<i64> {
         None => (number(input), Some(1)),
     };
     let (line, column) = (line?, column?);
-    let from = line_start(text, line);
-    let stop = line_end(text, from);
-    let (mut i, mut k) = (from, column);
-    while !(k <= 1 || i >= stop) {
-        i += utf8_len(text, i);
-        k -= 1;
-    }
-    Some(i)
+    let from = line_offset(text, line);
+    let stop = pxui::ui_text::line_end(text, from);
+    Some(text[from..stop].char_indices().nth((column - 1) as usize).map_or(stop, |(at, _)| from + at) as i64)
 }
 
 /// the Graph tab's slot for a graph
@@ -1600,7 +1551,7 @@ fn real_errors(l: &[Diagnostic]) -> Vec<Diagnostic> {
 
 /// the byte where 1-based `line` of `text` ends
 fn line_stop(text: &str, line: i64) -> i64 {
-    line_end(text, line_start(text, line))
+    pxui::ui_text::line_end(text, line_offset(text, line)) as i64
 }
 
 fn symbol_spans(text: &str) -> Vec<(String, Span)> {
@@ -1632,9 +1583,9 @@ pub fn references(text: &str, name: &str) -> Vec<(i64, String)> {
         .into_iter()
         .filter(|(n, _)| n == name)
         .map(|(_, span)| {
-            let line = i64::from(diagnostic::position_of_offset(text, span.start).line);
-            let a = line_start(text, line);
-            (i64::from(span.start), sub(text, a, line_stop(text, line) - a).trim().to_owned())
+            let a = pxui::ui_text::line_start(text, span.start as usize);
+            let b = pxui::ui_text::line_end(text, a);
+            (i64::from(span.start), text[a..b].trim().to_owned())
         })
         .collect()
 }

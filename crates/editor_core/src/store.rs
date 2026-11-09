@@ -103,79 +103,30 @@ pub fn filename_concat(dir: &str, file: &str) -> String {
 /// A sketch's or the editor's saved settings: one `(settings :sketch "name" :key value ...)` form.
 pub mod settings {
     use super::{read_text, write_text};
-    use super::form::{container, kw, num_of, print, vec_of_numbers, vec_values};
+    use super::form::{container, kw, num_of, print, vec_values};
     use flow_syntax::syntax::{make as make_node, Draft, Node, Syntax};
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub enum Value {
-        Bool(bool),
-        Float(f64),
-        Int(i64),
-        Text(String),
-        Choice(String),
-        Pair(f64, f64),
-    }
+    // Keep the syntax for arbitrary sketch settings and unknown preference keys without a second
+    // value model. The editor preferences use typed accessors below.
+    pub type Settings = Vec<(String, Syntax)>;
 
-    pub type Settings = Vec<(String, Value)>;
-
-    fn encode(value: &Value) -> Syntax {
-        match value {
-            Value::Bool(v) => make_node(Draft::Sym(v.to_string())),
-            Value::Float(v) => super::form::number(*v),
-            Value::Int(v) => make_node(Draft::Num(v.to_string())),
-            Value::Text(v) => make_node(Draft::Str(v.clone().into_bytes())),
-            Value::Choice(v) => container(Draft::List, vec![
-                make_node(Draft::Sym("choice".into())),
-                make_node(Draft::Str(v.clone().into_bytes())),
-            ]),
-            Value::Pair(x, y) => vec_of_numbers(&[*x, *y]),
-        }
-    }
-
-    fn decode(form: &Syntax) -> Result<Value, String> {
-        match &form.node {
-            Node::Sym(s) if form.name(*s) == "true" => Ok(Value::Bool(true)),
-            Node::Sym(s) if form.name(*s) == "false" => Ok(Value::Bool(false)),
-            Node::Num(n) => match form.name(*n).parse::<i64>() {
-                Ok(v) => Ok(Value::Int(v)),
-                Err(_) => match num_of(form) {
-                    Some(v) => Ok(Value::Float(v)),
-                    None => Err("invalid settings number".into()),
-                },
-            },
-            Node::Str(v) => match String::from_utf8(form.bytes(*v).to_vec()) {
-                Ok(text) => Ok(Value::Text(text)),
-                Err(_) => Err("invalid settings text".into()),
-            },
-            Node::List(items) => match form.range(*items) {
-                [head, value] if matches!(form.arena().row(*head).node, Node::Sym(s) if form.name(s) == "choice")
-                    && matches!(form.arena().row(*value).node, Node::Str(_)) =>
-                {
-                    let Node::Str(v) = form.arena().row(*value).node else { unreachable!() };
-                    match String::from_utf8(form.bytes(v).to_vec()) {
-                        Ok(text) => Ok(Value::Choice(text)),
-                        Err(_) => Err("invalid settings text".into()),
-                    }
-                }
-                _ => Err("invalid settings value".into()),
-            },
-            Node::Vec(_) => match vec_values(form) {
-                Some(values) if values.len() == 2 => Ok(Value::Pair(values[0], values[1])),
-                _ => Err("invalid settings pair".into()),
-            },
-            _ => Err("invalid settings value".into()),
+    fn valid(form: &Syntax) -> bool {
+        match form.node {
+            Node::Sym(name) => matches!(form.name(name), "true" | "false"),
+            Node::Num(name) => form.name(name).parse::<i64>().is_ok() || num_of(form).is_some(),
+            Node::Str(text) => std::str::from_utf8(form.bytes(text)).is_ok(),
+            Node::List(_) => matches!(form.children(), [head, value]
+                if matches!(form.arena().row(*head).node, Node::Sym(name) if form.name(name) == "choice")
+                && matches!(form.arena().row(*value).node, Node::Str(text) if std::str::from_utf8(form.bytes(text)).is_ok())),
+            Node::Vec(_) => vec_values(form).is_some_and(|values| values.len() == 2),
+            _ => false,
         }
     }
 
     /// One `(settings :sketch "name" :key value ...)` form, written atomically.
-    pub fn save(sketch: &str, filename: &str, values: &[(String, Value)]) -> Result<(), String> {
-        let finite = values.iter().all(|(_, value)| match value {
-            Value::Float(x) => x.is_finite(),
-            Value::Pair(x, y) => x.is_finite() && y.is_finite(),
-            _ => true,
-        });
-        if !finite {
-            return Err("non-finite settings value".into());
+    pub fn save(sketch: &str, filename: &str, values: &[(String, Syntax)]) -> Result<(), String> {
+        if !values.iter().all(|(_, value)| valid(value)) {
+            return Err("invalid settings value".into());
         }
         let mut items = vec![
             make_node(Draft::Sym("settings".into())),
@@ -184,7 +135,7 @@ pub mod settings {
         ];
         for (name, value) in values {
             items.push(kw(name));
-            items.push(encode(value));
+            items.push(value.clone());
         }
         let form = container(Draft::List, items);
         write_text(filename, &print(&form)?)
@@ -214,7 +165,8 @@ pub mod settings {
                             return Err("settings belong to another sketch".into());
                         }
                     } else {
-                        let value = decode(&form.child(*v))?;
+                        let value = form.child(*v);
+                        if !valid(&value) { return Err("invalid settings value".into()); }
                         acc.push((k.to_owned(), value));
                     }
                     rest = tail;
@@ -224,28 +176,32 @@ pub mod settings {
         }
     }
 
-    /// The first entry named `name` (OCaml's `List.assoc_opt`), when it has the right kind.
-    fn first_named(settings: &Settings, name: &str) -> Option<Value> {
-        settings.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone())
+    /// The first entry named `name`, when it has the right kind.
+    fn first_named<'a>(settings: &'a Settings, name: &str) -> Option<&'a Syntax> {
+        settings.iter().find(|(key, _)| key == name).map(|(_, value)| value)
     }
 
     pub fn bool(settings: &Settings, name: &str) -> Option<bool> {
-        match first_named(settings, name)? {
-            Value::Bool(v) => Some(v),
+        let form = first_named(settings, name)?;
+        match form.node {
+            Node::Sym(value) if form.name(value) == "true" => Some(true),
+            Node::Sym(value) if form.name(value) == "false" => Some(false),
             _ => None,
         }
     }
 
     pub fn float(settings: &Settings, name: &str) -> Option<f64> {
-        match first_named(settings, name)? {
-            Value::Float(v) => Some(v),
+        let form = first_named(settings, name)?;
+        match form.node {
+            Node::Num(value) if form.name(value).parse::<i64>().is_err() => num_of(form),
             _ => None,
         }
     }
 
     pub fn int(settings: &Settings, name: &str) -> Option<i64> {
-        match first_named(settings, name)? {
-            Value::Int(v) => Some(v),
+        let form = first_named(settings, name)?;
+        match form.node {
+            Node::Num(value) => form.name(value).parse().ok(),
             _ => None,
         }
     }

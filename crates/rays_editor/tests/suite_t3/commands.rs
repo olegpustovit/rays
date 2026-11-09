@@ -440,7 +440,7 @@ pub fn guide_preference() {
     step(&mut d, vec![ch('?')], 7);
     assert!(enabled() == Some(false), "key-sheet dismissal kept keyboard focus");
     // Toggle preserves unrelated preferences, and Hide follows the same save path.
-    store::save("rays-editor", &filename, &[("guide".to_string(), store::Value::Bool(false)), ("other".to_string(), store::Value::Int(7))]).expect("save");
+    store::save("rays-editor", &filename, &[("guide".to_string(), flow_syntax::syntax::parse("false").unwrap().remove(0)), ("other".to_string(), flow_syntax::syntax::parse("7").unwrap().remove(0))]).expect("save");
     step(&mut d, vec![key(Key::Shift), ch('/'), Event::Key_released(Key::Shift)], 8);
     step(&mut d, vec![ch('?')], 9);
     let values = store::load("rays-editor", &filename).expect("load");

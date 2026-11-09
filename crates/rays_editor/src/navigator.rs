@@ -279,7 +279,7 @@ fn macro_name(form: &S) -> Option<String> {
     None
 }
 
-fn plural(n: i64, what: &str) -> String {
+pub(crate) fn plural(n: i64, what: &str) -> String {
     format!("{} {}{}", n, what, if n == 1 { "" } else { "s" })
 }
 

@@ -531,3 +531,19 @@ fn lisp_text_numbers_and_parinfer() {
         "the language rewrites only with parinfer on"
     );
 }
+
+#[test]
+fn line_targets_keep_unicode_boundaries() {
+    let text = "aé中🦀e\u{301}\n終\n";
+    for (column, byte) in [0, 1, 3, 6, 10, 11, 13, 13].into_iter().enumerate() {
+        let target = t::line_target(text, &format!("1:{}", column + 1)).unwrap();
+        assert_eq!(target, byte);
+        assert!(text.is_char_boundary(target as usize));
+    }
+    assert_eq!(t::line_target(text, "2:99"), Some(17));
+    assert_eq!(t::line_target(text, "3"), Some(18));
+    assert_eq!(t::line_target(text, "9223372036854775807:9223372036854775807"), Some(18));
+    assert_eq!(t::line_target("", "1:99"), Some(0));
+    assert_eq!(t::line_target(text, "1:-1"), None);
+    assert_eq!(t::references("(café café)\n(café)", "café"), vec![(1, "(café café)".into()), (7, "(café café)".into()), (15, "(café)".into())]);
+}

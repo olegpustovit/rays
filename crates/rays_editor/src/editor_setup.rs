@@ -15,6 +15,7 @@ use flow_native::workspace_gpu;
 use flow_sop::{lower, manifest};
 use flow_syntax::context;
 use flow_syntax::phase_timer;
+use flow_syntax::syntax::{self, Draft};
 use input::Platform;
 use pxui::ui::Ui;
 use pxui_graph::scope_state as scope;
@@ -84,7 +85,7 @@ pub fn read_preferences(filename: &str) -> Result<store::settings::Settings, Str
 pub fn save_guide(filename: &str, guide: bool) -> Result<(), String> {
     let mut values = if std::path::Path::new(filename).exists() { read_preferences(filename)? } else { Vec::new() };
     values.retain(|(k, _)| k != "guide");
-    values.insert(0, ("guide".to_string(), store::settings::Value::Bool(guide)));
+    values.insert(0, ("guide".to_string(), syntax::make(Draft::Sym(guide.to_string()))));
     store::settings::save("rays-editor", filename, &values)
 }
 
@@ -178,12 +179,13 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     let level = Level::Scene;
     let preferences = preferences_file(platform, preferences.as_deref());
     // a machine's setting, beside the guide: an override from the process still wins
-    if let Ok(values) = read_preferences(&preferences) {
-        if let Some(n) = store::settings::int(&values, "memory_budget") {
+    let saved_preferences = read_preferences(&preferences);
+    if let Ok(values) = &saved_preferences {
+        if let Some(n) = store::settings::int(values, "memory_budget") {
             mem::set_budget_from(mem::Source::Preference, n);
         }
     }
-    let guide = match read_preferences(&preferences) {
+    let guide = match saved_preferences {
         Ok(values) => store::settings::bool(&values, "guide").unwrap_or(true),
         Err(_) => true,
     };
