@@ -270,7 +270,7 @@ pub fn scrubbed(literal: &str, dx: f64, coarse: bool) -> String {
             if n == 0.0 {
                 literal.to_owned()
             } else {
-                ((v as f64) + n).round() as i64).to_string()
+                (((v as f64) + n).round() as i64).to_string()
             }
         }
         (Some(dot), _) => {

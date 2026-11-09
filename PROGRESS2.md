@@ -14,23 +14,23 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
-| X | 6 | 1 | 1 | 4 |
+| X | 6 | 4 | 0 | 2 |
 | B | 8 | 0 | 0 | 8 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 0 | 0 | 12 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **2** | **0** | **56** |
+| **All** | **58** | **4** | **0** | **54** |
 
 ## Items
 
 | ID | Wave | Status | Commit / evidence | Regression check |
 |----|------|--------|-------------------|------------------|
 | X1 | X | done | `098310fa` — `packed_ops::{float_min,float_max,ldexp,binary_apply,unary_apply}`; walker `min`/`max`/`array/min`/`array/max`; `min_max_signed_zero_walker_matches_packed`, `float_min_max_signed_zeros` | New case: walker equals packed for (min -0. 0.) and (max 0. -0.) |
-| X2 | X | active | `dd1656a0` — `store/form::int_of_string_opt` (i64); `settings_int_above_2_62_decodes_as_int`. **Remaining:** `1<<62` caps/sentinels (~dozen sites) | test_store: a 2^62 literal decodes as Int |
-| X3 | X | pending | — | A context-dependent failure reports its real code |
-| X4 | X | pending | — | Both surfaces give the same step for the same drag |
+| X2 | X | done | `dd1656a0` `d915cccd` — settings `int_of_string_opt`; resource caps → `i64::MAX`/`MIN` (sentinels like `PROVENANCE_SENTINEL` kept) | test_store: a 2^62 literal decodes as Int |
+| X3 | X | done | `63d191b0` — `Build` → `R<node::T>`; `per_context` uses `?`; `authored_body_errors_cook_lazily` | A context-dependent failure reports its real code |
+| X4 | X | done | `ee88ca64` — `param::number::int_scrub_delta` shared with `pxui::scrubbed` | Both surfaces give the same step for the same drag |
 | X5 | X | pending | — | test_editor_inspect covers vec2 and vec4 operator rows |
 | X6 | X | pending | — | ogpu_mock: after a release, the view reads back again |
 | B1 | B | pending | — | After cargo t -p rays_editor, cargo build -p rays_bin -v shows flow_sop as Fresh |
@@ -107,7 +107,8 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 - Opened ledger; artifact tracker seeded (58 pending); baseline `e2e4ab02`.
 - Artifact [v4](https://artifacts.microapps.space/a/ap6ev04y67bb): execution progress panel, `db` capability, runbook, R11→Z7 note; publish source `artifacts/second-simplification/index.html`.
 - **WaveX1** subagent + integration: X1 code complete; tests `float_min_max_signed_zeros`, `min_max_signed_zero_walker_matches_packed` pass.
-- **WaveX2** `dd1656a0`: settings parser (regression green). Caps/sentinels still open on X2 row.
+- **WaveX2–X4** `d915cccd` `63d191b0` `ee88ca64` (subagents + integration commits).
+- **WaveX5** spawned (`literal_fields` in `editor_inspect`).
 - **ScoutD**: D-wave slice schedule below (≤2 agents, distinct primaries).
 
 ## D-wave parallel map
