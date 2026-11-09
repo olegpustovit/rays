@@ -65,9 +65,7 @@ fn fail(message: String) -> error::T {
     make(Code::InvalidTopology, &message)
 }
 
-fn blank(value: &str) -> bool {
-    value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
+use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {
@@ -98,29 +96,9 @@ fn unit_between(positions: &packed::float3::view::View, source: usize, destinati
     }
 }
 
-fn merge_group(value: group::T, groups: Vec<group::T>) -> Result<Vec<group::T>, error::T> {
-    let mut groups = groups;
-    for existing in groups.iter_mut() {
-        if group::owner(existing) == group::owner(&value) && group::name(existing) == group::name(&value) {
-            *existing = group::union(existing, &value)?;
-            return Ok(groups);
-        }
-    }
-    groups.push(value);
-    Ok(groups)
-}
+use rdk_core::group::merge as merge_group;
 
-fn merge_edge_group(value: edge_group::T, groups: Vec<edge_group::T>) -> Result<Vec<edge_group::T>, error::T> {
-    let mut groups = groups;
-    for existing in groups.iter_mut() {
-        if edge_group::name(existing) == edge_group::name(&value) {
-            *existing = edge_group::union(existing, &value)?;
-            return Ok(groups);
-        }
-    }
-    groups.push(value);
-    Ok(groups)
-}
+use rdk_core::edge_group::merge as merge_edge_group;
 
 fn nearest_mapping(left: &[i64], right: &[i64], weights: &[f64]) -> Vec<i64> {
     (0..weights.len()).map(|i| if weights[i] < 0.5 { left[i] } else { right[i] }).collect()

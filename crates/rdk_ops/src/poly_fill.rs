@@ -55,9 +55,7 @@ fn fail(message: String) -> error::T {
     make(Code::InvalidGeometry, &message)
 }
 
-fn blank(value: &str) -> bool {
-    value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
+use rdk_core::support::ocaml_trim_is_empty as blank;
 
 /// First loop of `range` when `loop_count` loops are split into `grain`-sized ranges.
 fn first_loop(range: i64, grain: i64, loop_count: usize) -> usize {
@@ -625,17 +623,7 @@ fn remap_group(
     group::view::remap_order(source, &ancestry, &target)
 }
 
-fn merge_patch_group(patch: group::T, groups: Vec<group::T>) -> Result<Vec<group::T>, error::T> {
-    let mut groups = groups;
-    for existing in groups.iter_mut() {
-        if group::owner(existing) == group::Owner::Primitive && group::name(existing) == group::name(&patch) {
-            *existing = group::union(existing, &patch)?;
-            return Ok(groups);
-        }
-    }
-    groups.push(patch);
-    Ok(groups)
-}
+use rdk_core::group::merge as merge_patch_group;
 
 fn target_edge_count(
     cancel_ref: Option<&cancel::T>,

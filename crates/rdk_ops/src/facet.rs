@@ -2024,7 +2024,6 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 mod tests {
     use super::*;
     use rdk_core::topology::PrimitiveKind;
-    use std::sync::Mutex;
 
     type P3 = (f64, f64, f64);
 
@@ -2161,15 +2160,7 @@ mod tests {
             })
     }
 
-    fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    use parallel::with_domains as at_domains;
 
     fn one_four(work: &(dyn Fn() -> geometry::T + Sync)) -> (geometry::T, geometry::T) {
         (at_domains(1, work), at_domains(4, work))

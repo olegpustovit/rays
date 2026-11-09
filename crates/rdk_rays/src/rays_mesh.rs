@@ -35,14 +35,7 @@ fn mesh_vec3(view: &packed::float3::view::View) -> Vec3_buffer {
     Vec3_buffer::of_planes(view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
 }
 
-fn owner_name(owner: Owner) -> &'static str {
-    match owner {
-        Owner::Point => "point",
-        Owner::Vertex => "vertex",
-        Owner::Primitive => "primitive",
-        Owner::Detail => "detail",
-    }
-}
+use rdk_core::attribute::owner_name;
 
 fn standard(
     g: &geometry::T,

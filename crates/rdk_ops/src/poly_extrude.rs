@@ -65,33 +65,11 @@ fn fail(message: &str) -> error::T {
     make(Code::InvalidGeometry, message)
 }
 
-fn blank(value: &str) -> bool {
-    value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
+use rdk_core::support::ocaml_trim_is_empty as blank;
 
-fn merge_group(item: group::T, groups: Vec<group::T>) -> Result<Vec<group::T>, error::T> {
-    let mut groups = groups;
-    for existing in groups.iter_mut() {
-        if group::owner(existing) == group::owner(&item) && group::name(existing) == group::name(&item) {
-            *existing = group::union(existing, &item)?;
-            return Ok(groups);
-        }
-    }
-    groups.push(item);
-    Ok(groups)
-}
+use rdk_core::group::merge as merge_group;
 
-fn merge_edge_group(item: edge_group::T, groups: Vec<edge_group::T>) -> Result<Vec<edge_group::T>, error::T> {
-    let mut groups = groups;
-    for existing in groups.iter_mut() {
-        if edge_group::name(existing) == edge_group::name(&item) {
-            *existing = edge_group::union(existing, &item)?;
-            return Ok(groups);
-        }
-    }
-    groups.push(item);
-    Ok(groups)
-}
+use rdk_core::edge_group::merge as merge_edge_group;
 
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {

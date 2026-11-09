@@ -1075,7 +1075,6 @@ mod tests {
     use super::*;
     use rdk_core::topology::PrimitiveKind;
     use rdk_core::{geometry, packed, topology};
-    use std::sync::Mutex;
 
     #[test]
     fn bounds_index_overlaps_match_a_brute_force_scan_in_ascending_order() {
@@ -1286,15 +1285,7 @@ mod tests {
         )
     }
 
-    fn on_domains(domains: i64, work: &(dyn Fn() -> Signature + Sync)) -> Signature {
-        let slot: Mutex<Option<Signature>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    use parallel::with_domains as on_domains;
 
     #[test]
     fn sparse_sweep_and_point_candidates() {

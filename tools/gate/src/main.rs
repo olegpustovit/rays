@@ -182,6 +182,16 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
     let file = path.rsplit('/').next().unwrap_or(path);
     let test_file = path.contains("/tests/") || file == "tests.rs" || file.starts_with("test_");
     let test_ranges = if test_file { vec![(0, tokens.len())] } else { test_regions(&tokens) };
+    // Only the value-returning worker-context helper may use this generic signature.
+    // Keep the exception in its header; sibling and nested generic items still fail.
+    let domain_header = if crate_name == "parallel" && matches!(path, "parallel/src/lib.rs" | "crates/parallel/src/lib.rs") {
+        let signature = lex("fn with_domains<R>(domains: i64, work: impl FnOnce() -> R) -> R");
+        tokens.iter().enumerate().find_map(|(index, token)| {
+            if token.text != "fn" { return None; }
+            let (body, _) = function_body(&tokens, index)?;
+            tokens[index..body].iter().map(|token| &token.text).eq(signature.iter().map(|token| &token.text)).then_some((index, body))
+        })
+    } else { None };
     let unsafe_allowed = crate_name.ends_with("_sys") || crate_name == "parallel";
     let mut issues = Vec::new();
 
@@ -210,8 +220,9 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         if token.text == "impl" {
             let previous = index.checked_sub(1).and_then(|previous| tokens.get(previous)).map(|token| token.text.as_str());
             let lifetime_reference = index >= 3 && tokens[index - 2].text == "'" && tokens[index - 3].text == "&";
-            if matches!(previous, Some(":") | Some("->") | Some("=") | Some("<") | Some(",") | Some("(") | Some("&") | Some("mut") | Some(">"))
-                || lifetime_reference
+            if (matches!(previous, Some(":") | Some("->") | Some("=") | Some("<") | Some(",") | Some("(") | Some("&") | Some("mut") | Some(">"))
+                || lifetime_reference)
+                && !domain_header.is_some_and(|(start, body)| start <= index && index < body)
             {
                 issue(&mut issues, path, token.line, "impl Trait is not allowed in product crates");
             }
@@ -242,7 +253,7 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
                                 || (at > 0 && parameters[at - 1].text == "'" && is_identifier(&parameter.text))
                         })
                     });
-                if !borrow_lifetimes_only {
+                if !borrow_lifetimes_only && !domain_header.is_some_and(|(start, _)| token.text == "fn" && start == index) {
                     issue(&mut issues, path, token.line, "generic items are not allowed in product crates");
                 }
                 if matches!(token.text.as_str(), "struct" | "enum") {
@@ -1428,6 +1439,25 @@ mod tests {
         assert!(typed.iter().any(|issue| issue.contains("generic items")));
         let borrowed = shape_source("other", "other/src/lib.rs", "struct View<'a>(&'a str);");
         assert!(borrowed.iter().any(|issue| issue.contains("lifetime parameters")));
+    }
+
+    #[test]
+    fn shape_gate_allows_only_the_requested_domain_helper() {
+        let helper = "pub fn with_domains<R>(domains: i64, work: impl FnOnce() -> R) -> R { work() }";
+        let path = "crates/parallel/src/lib.rs";
+        assert!(shape_source("parallel", path, helper).is_empty());
+        assert!(shape_source("parallel", "parallel/src/lib.rs", helper).is_empty());
+        for (name, file, source) in [
+            ("parallel", path, "pub fn sibling<R>(work: impl FnOnce() -> R) -> R { work() }"),
+            ("other", path, helper),
+            ("parallel", "crates/parallel/src/other.rs", helper),
+            ("parallel", path, "pub fn with_domains<R>(domains: i64, work: impl FnOnce() -> R) -> R { fn nested<T>() {} work() }"),
+            ("parallel", path, "struct with_domains<T> { value: T }"),
+            ("parallel", path, "pub fn with_domains<R, S>(domains: i64, work: impl FnOnce(S) -> R) -> R { work() }"),
+            ("parallel", path, "pub fn with_domains<R>(domains: i64, work: impl FnMut() -> R) -> R { work() }"),
+        ] {
+            assert!(!shape_source(name, file, source).is_empty(), "{source}");
+        }
     }
 
     #[test]

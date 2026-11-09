@@ -43,12 +43,6 @@ fn make_error(code: Code, message: String) -> error::T {
     error::new("normals", code, message)
 }
 
-fn blank_attribute_name(name: &str) -> bool {
-    name.as_bytes()
-        .iter()
-        .all(|byte| matches!(*byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c))
-}
-
 fn remap_error(value: error::T) -> error::T {
     if error::is_cancelled(&value) {
         make_error(Code::Cancelled, "geometry operation was cancelled".to_owned())
@@ -528,7 +522,7 @@ fn fast_point_area(
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = support::grain(OPERATION, params.grain)?;
     let cancel_value = params.cancel.as_ref();
-    if blank_attribute_name(&params.attribute) {
+    if support::ocaml_trim_is_empty(&params.attribute) {
         return Err(make_error(Code::InvalidTopology, format!("{OPERATION}: attribute name must not be empty")));
     }
     if !params.cusp_angle.is_finite()

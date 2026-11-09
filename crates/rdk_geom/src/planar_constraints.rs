@@ -796,15 +796,7 @@ mod tests {
         assert_eq!(cp(&overlap), vec![0, 2, 1, 3, 2, 3]);
     }
 
-    fn with_domains(domains: i64, work: &dyn Fn() -> T) -> T {
-        let slot: std::cell::RefCell<Option<T>> = std::cell::RefCell::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.borrow_mut() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap()
-    }
+    use parallel::with_domains;
 
     #[test]
     fn embedded_source_points() {

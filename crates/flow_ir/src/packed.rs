@@ -4282,13 +4282,7 @@ mod tests {
         ForceOptions { strict: true, ..Default::default() }
     }
 
-    fn at_domains(domains: i64, work: &(dyn Fn() + Sync)) {
-        parallel::run_unit(Some(domains), &|| {
-            work();
-            Ok(())
-        })
-        .unwrap();
-    }
+    use parallel::with_domains as at_domains;
 
     fn reference_of(t: &T, live: &Live) -> Result<Value, Diagnostic> {
         super::reference(t, live, None, None, None)

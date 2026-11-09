@@ -10,27 +10,11 @@ pub(crate) fn make_error(operation: &str, code: Code, message: &str) -> error::T
 }
 
 /// OCaml `String.trim s = ""`.
-pub(crate) fn is_blank(text: &str) -> bool {
-    support::ocaml_trim_is_empty(text)
-}
+pub(crate) use rdk_core::support::ocaml_trim_is_empty as is_blank;
 
 /// OCaml `Printf "%S"`: a double-quoted string with `String.escaped` escapes.
 pub fn ocaml_quote(text: impl AsRef<[u8]>) -> String {
-    let mut out = String::from("\"");
-    for &byte in text.as_ref() {
-        match byte {
-            b'"' => out.push_str("\\\""),
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\t' => out.push_str("\\t"),
-            b'\r' => out.push_str("\\r"),
-            8 => out.push_str("\\b"),
-            32..=126 => out.push(byte as char),
-            _ => out.push_str(&format!("\\{byte:03}")),
-        }
-    }
-    out.push('"');
-    out
+    rdk_core::attribute::quote_bytes(text.as_ref())
 }
 
 /// Runs `work(element, planes)` for every element in disjoint final output windows.
@@ -449,7 +433,7 @@ pub fn transfer_all(params: &attribute_transfer::AllParams) -> Result<geometry::
 /// helpers, reduced to what those tests use).
 #[cfg(test)]
 pub(crate) mod fixtures {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     use rdk_core::{attribute, error, geometry, group, packed, topology};
 
@@ -511,14 +495,7 @@ pub(crate) mod fixtures {
         polygons(&positions, &faces)
     }
 
-    pub(crate) fn owner_count(geometry_value: &geometry::T, owner: attribute::Owner) -> i64 {
-        match owner {
-            attribute::Owner::Point => geometry::point_count(geometry_value),
-            attribute::Owner::Vertex => geometry::vertex_count(geometry_value),
-            attribute::Owner::Primitive => geometry::primitive_count(geometry_value),
-            attribute::Owner::Detail => 1,
-        }
-    }
+    pub(crate) use rdk_core::geometry::owner_count;
 
     pub(crate) fn add_storage(
         owner: attribute::Owner,
@@ -603,15 +580,7 @@ pub(crate) mod fixtures {
 
 
     /// Runs `work` on a pool of `domains` domains and returns its geometry.
-    pub(crate) fn on_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    pub(crate) use parallel::with_domains as on_domains;
 }
 
 #[cfg(test)]

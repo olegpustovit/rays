@@ -390,7 +390,6 @@ pub fn run_checked(params: &Params, collision: &geometry::T, geometry_value: &ge
 mod tests {
     use super::*;
     use rdk_core::topology;
-    use std::sync::Mutex;
 
     fn mesh(points: &[(f64, f64, f64)], triangles: &[i64]) -> geometry::T {
         let x = points.iter().map(|p| p.0).collect();
@@ -700,15 +699,7 @@ mod tests {
         (points, triangles)
     }
 
-    fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    use parallel::with_domains as at_domains;
 
     fn parallel_exact_fixture(source_fixture: bool) {
         let (mut points, mut triangles) = if source_fixture { grid(79, 59, 20.0) } else { grid(80, 60, 20.0) };

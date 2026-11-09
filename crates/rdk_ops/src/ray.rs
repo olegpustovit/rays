@@ -70,9 +70,7 @@ fn fail(code: Code, message: &str) -> error::T {
     error::new("ray", code, message.to_owned())
 }
 
-fn blank(value: &str) -> bool {
-    value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
+use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {

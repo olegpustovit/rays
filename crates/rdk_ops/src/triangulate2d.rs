@@ -724,22 +724,7 @@ fn project(
 }
 
 /// OCaml `%S`: a double-quoted string with `\\`, `\"` and control characters escaped.
-fn ocaml_quoted(text: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in text.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            c if (c as u32) < 32 || c as u32 == 127 => out.push_str(&format!("\\{:03}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
+use rdk_core::attribute::quote as ocaml_quoted;
 
 struct PointMaterialization {
     positions: packed::float3::T,
@@ -1733,7 +1718,6 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
 mod tests {
     use super::*;
     use rdk_core::topology::PrimitiveKind;
-    use std::sync::Mutex;
 
     type P3 = (f64, f64, f64);
 
@@ -1828,15 +1812,7 @@ mod tests {
         }
     }
 
-    fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    use parallel::with_domains as at_domains;
 
     fn one_four(work: &(dyn Fn() -> geometry::T + Sync)) -> (geometry::T, geometry::T) {
         (at_domains(1, work), at_domains(4, work))

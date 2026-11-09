@@ -407,7 +407,6 @@ pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, erro
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Mutex;
 
     use rdk_core::{normal_ops, packed, topology};
     use rdk_ops::triangulate;
@@ -599,14 +598,7 @@ mod tests {
     }
 
     /// `Parallel.run ~domains`.
-    fn with_domains(domains: i64, work: &mut (dyn FnMut() + Send)) {
-        let cell = Mutex::new(work);
-        parallel::run_unit(Some(domains), &|| {
-            (cell.lock().unwrap())();
-            Ok(())
-        })
-        .unwrap();
-    }
+    use parallel::with_domains;
 
     fn group_flags(name: &str, geometry_value: &geometry::T) -> Vec<bool> {
         let item = geometry::find_group(group::Owner::Primitive, name, geometry_value).unwrap();

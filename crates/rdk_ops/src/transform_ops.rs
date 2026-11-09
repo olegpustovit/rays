@@ -69,23 +69,7 @@ fn fail(message: String) -> error::T {
 }
 
 /// OCaml `%S`: a quoted string with OCaml escapes (non-ASCII bytes as decimal `\ddd`).
-pub(crate) fn ocaml_quote(text: &str) -> String {
-    let mut out = String::from("\"");
-    for byte in text.bytes() {
-        match byte {
-            b'"' => out.push_str("\\\""),
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\t' => out.push_str("\\t"),
-            b'\r' => out.push_str("\\r"),
-            8 => out.push_str("\\b"),
-            32..=126 => out.push(byte as char),
-            _ => out.push_str(&format!("\\{byte:03}")),
-        }
-    }
-    out.push('"');
-    out
-}
+pub(crate) use crate::attribute_ops::ocaml_quote;
 
 fn transform_rotation_matrix(order: TransformRotationOrder, angles: vec3::T) -> mat4::T {
     let x = mat4::rotation_x(angles.x);
@@ -386,9 +370,7 @@ fn valid_output_attribute_name(name: Option<&str>) -> bool {
     }
 }
 
-fn blank(name: &str) -> bool {
-    name.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c')).is_empty()
-}
+use rdk_core::support::ocaml_trim_is_empty as blank;
 
 pub struct DistanceFromGeometryParams {
     pub cancel: Option<Arc<cancel::T>>,

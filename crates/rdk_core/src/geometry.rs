@@ -14,7 +14,7 @@ pub struct T {
     data_id: i64,
 }
 
-fn owner_count(value: &topology::T, owner: attribute::Owner) -> i64 {
+fn topology_owner_count(value: &topology::T, owner: attribute::Owner) -> i64 {
     match owner {
         attribute::Owner::Point => topology::point_count(value),
         attribute::Owner::Vertex => topology::vertex_count(value),
@@ -23,7 +23,7 @@ fn owner_count(value: &topology::T, owner: attribute::Owner) -> i64 {
     }
 }
 
-fn group_count(value: &topology::T, owner: group::Owner) -> i64 {
+fn topology_group_count(value: &topology::T, owner: group::Owner) -> i64 {
     match owner {
         group::Owner::Point => topology::point_count(value),
         group::Owner::Vertex => topology::vertex_count(value),
@@ -72,7 +72,7 @@ fn validate(
         ));
     }
     for item in attributes {
-        if attribute::length(item) != owner_count(topology_value, attribute::owner(item)) {
+        if attribute::length(item) != topology_owner_count(topology_value, attribute::owner(item)) {
             return Err(geometry_error(format!(
                 "Geometry.create: attribute {} has the wrong element count",
                 attribute::name(item)
@@ -80,7 +80,7 @@ fn validate(
         }
     }
     for item in groups {
-        if group::length(item) != group_count(topology_value, group::owner(item)) {
+        if group::length(item) != topology_group_count(topology_value, group::owner(item)) {
             return Err(geometry_error(format!(
                 "Geometry.create: group {} has the wrong element count",
                 group::name(item)
@@ -185,6 +185,15 @@ pub fn vertex_count(value: &T) -> i64 {
 
 pub fn primitive_count(value: &T) -> i64 {
     topology::primitive_count(&value.topology)
+}
+
+/// Number of elements in an attribute owner, including the single detail row.
+pub fn owner_count(value: &T, owner: attribute::Owner) -> i64 {
+    topology_owner_count(&value.topology, owner)
+}
+
+pub fn group_count(value: &T, owner: group::Owner) -> i64 {
+    topology_group_count(&value.topology, owner)
 }
 
 pub fn payload_bytes(value: &T) -> i64 {
@@ -332,7 +341,7 @@ pub fn with_attribute(item: attribute::T, value: &T) -> Result<T, error::T> {
             "Geometry.with_attribute: use with_positions to replace canonical P".to_owned(),
         ));
     }
-    if attribute::length(&item) != owner_count(&value.topology, attribute::owner(&item)) {
+    if attribute::length(&item) != topology_owner_count(&value.topology, attribute::owner(&item)) {
         return Err(geometry_error(
             "Geometry.with_attribute: element count does not match owner".to_owned(),
         ));
@@ -347,7 +356,7 @@ pub fn with_attribute(item: attribute::T, value: &T) -> Result<T, error::T> {
 }
 
 pub fn with_group(item: group::T, value: &T) -> Result<T, error::T> {
-    if group::length(&item) != group_count(&value.topology, group::owner(&item)) {
+    if group::length(&item) != topology_group_count(&value.topology, group::owner(&item)) {
         return Err(geometry_error(
             "Geometry.with_group: element count does not match owner".to_owned(),
         ));
@@ -646,6 +655,22 @@ pub fn generate_point_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owner_counts_follow_topology_and_keep_one_detail_row() {
+        let value = create(positions(), topology::polygons_owned(2, vec![0, 1, 0], vec![0, 3]).unwrap(), None, None, None).unwrap();
+        for (owner, expected) in [(attribute::Owner::Point, 2), (attribute::Owner::Vertex, 3), (attribute::Owner::Primitive, 1), (attribute::Owner::Detail, 1)] {
+            assert_eq!(owner_count(&value, owner), expected);
+        }
+        for (owner, expected, name) in [(group::Owner::Point, 2, "point"), (group::Owner::Vertex, 3, "vertex"), (group::Owner::Primitive, 1, "primitive")] {
+            assert_eq!(group_count(&value, owner), expected);
+            assert_eq!(group::owner_name(owner), name);
+        }
+        let empty = create(positions(), topology::empty(2).unwrap(), None, None, None).unwrap();
+        assert_eq!(owner_count(&empty, attribute::Owner::Vertex), 0);
+        assert_eq!(owner_count(&empty, attribute::Owner::Primitive), 0);
+        assert_eq!(owner_count(&empty, attribute::Owner::Detail), 1);
+    }
 
     // Top-level deferred-storage assertions in lib/rdk/test_attribute_lifecycle.ml.
     #[test]

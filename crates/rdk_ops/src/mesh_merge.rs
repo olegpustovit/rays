@@ -143,13 +143,7 @@ fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -
     attribute::create_owned(attribute::name(template), attribute::owner(template), storage).map_err(lift)
 }
 
-fn owner_count(geometry_value: &geometry::T, owner: group::Owner) -> i64 {
-    match owner {
-        group::Owner::Point => geometry::point_count(geometry_value),
-        group::Owner::Vertex => geometry::vertex_count(geometry_value),
-        group::Owner::Primitive => geometry::primitive_count(geometry_value),
-    }
-}
+use rdk_core::geometry::group_count as owner_count;
 
 /// Members of a group in its preferred (ordered, else ascending) order.
 fn members_preferred(value: &group::T) -> Vec<i64> {

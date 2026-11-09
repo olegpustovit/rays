@@ -97,9 +97,7 @@ fn invalid(message: &str) -> error::T {
     make_error(OPERATION, Code::InvalidParameter, message)
 }
 
-fn is_blank(text: &str) -> bool {
-    crate::attribute_ops::is_blank(text)
-}
+use rdk_core::support::ocaml_trim_is_empty as is_blank;
 
 enum Data {
     F(Vec<Arc<Vec<f64>>>),
@@ -147,23 +145,9 @@ struct Cell {
     choice: i64,
 }
 
-fn owner_count(geometry_value: &geometry::T, owner: attribute::Owner) -> i64 {
-    match owner {
-        attribute::Owner::Point => geometry::point_count(geometry_value),
-        attribute::Owner::Vertex => geometry::vertex_count(geometry_value),
-        attribute::Owner::Primitive => geometry::primitive_count(geometry_value),
-        attribute::Owner::Detail => 1,
-    }
-}
+use rdk_core::geometry::owner_count;
 
-fn owner_name(owner: attribute::Owner) -> &'static str {
-    match owner {
-        attribute::Owner::Point => "point",
-        attribute::Owner::Vertex => "vertex",
-        attribute::Owner::Primitive => "primitive",
-        attribute::Owner::Detail => "detail",
-    }
-}
+use rdk_core::attribute::owner_name;
 
 fn group_owner(owner: attribute::Owner) -> Option<group::Owner> {
     match owner {

@@ -69,9 +69,7 @@ fn fail(message: &str) -> error::T {
     make("clip", Code::InvalidGeometry, message)
 }
 
-fn blank(value: &str) -> bool {
-    value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
+use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn clamp01(value: f64) -> f64 {
     if value < 0.0 {
@@ -2178,7 +2176,6 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
 pub(crate) mod test_util {
     use rdk_core::error::Code;
     use rdk_core::{attribute, error, geometry, packed, topology};
-    use std::sync::Mutex;
 
     pub(crate) fn geom(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, polys: &[(topology::PrimitiveKind, Vec<i64>)]) -> geometry::T {
         let mut vertex_points = Vec::new();
@@ -2357,15 +2354,7 @@ pub(crate) mod test_util {
         }
     }
 
-    pub(crate) fn with_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    pub(crate) use parallel::with_domains;
 
     pub(crate) fn boundary_and_non_manifold(source: &geometry::T) -> (usize, usize) {
         let index = rdk_core::topology_index::create(None, geometry::topology(source)).unwrap();

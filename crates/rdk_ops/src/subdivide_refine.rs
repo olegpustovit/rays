@@ -179,14 +179,7 @@ pub struct VertexMaskPlan {
     pub child_b: Vec<i64>,
 }
 
-fn owner_name(owner: Owner) -> &'static str {
-    match owner {
-        Owner::Point => "point",
-        Owner::Vertex => "vertex",
-        Owner::Primitive => "primitive",
-        Owner::Detail => "detail",
-    }
-}
+use rdk_core::attribute::owner_name;
 
 pub(crate) fn float_attribute(
     owner: Owner,
@@ -2679,14 +2672,7 @@ pub(crate) fn remap_group(
     group::view::remap_order(group_value, &source_of_target, &target)
 }
 
-pub(crate) fn owner_count(geometry_value: &geometry::T, owner: Owner) -> i64 {
-    match owner {
-        Owner::Point => geometry::point_count(geometry_value),
-        Owner::Vertex => geometry::vertex_count(geometry_value),
-        Owner::Primitive => geometry::primitive_count(geometry_value),
-        Owner::Detail => 1,
-    }
-}
+pub(crate) use rdk_core::geometry::owner_count;
 
 pub(crate) fn same_attribute_slot(left: &attribute::T, right: &attribute::T) -> bool {
     attribute::owner(left) == attribute::owner(right) && attribute::name(left) == attribute::name(right)

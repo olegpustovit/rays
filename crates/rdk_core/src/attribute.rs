@@ -13,6 +13,53 @@ pub enum Owner {
     Detail,
 }
 
+/// Lowercase owner names used in attribute diagnostics.
+pub fn owner_name(owner: Owner) -> &'static str {
+    match owner {
+        Owner::Point => "point",
+        Owner::Vertex => "vertex",
+        Owner::Primitive => "primitive",
+        Owner::Detail => "detail",
+    }
+}
+
+/// Quote opaque bytes: printable ASCII is literal, other bytes use decimal escapes.
+pub fn quote_bytes(text: &[u8]) -> String {
+    let mut out = String::from("\"");
+    for &byte in text {
+        match byte {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'\r' => out.push_str("\\r"),
+            8 => out.push_str("\\b"),
+            32..=126 => out.push(byte as char),
+            _ => out.push_str(&format!("\\{byte:03}")),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Quote UTF-8 text, preserving Unicode and escaping ASCII controls.
+pub fn quote(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 32 || c as u32 == 127 => out.push_str(&format!("\\{:03}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 #[derive(Clone)]
 pub enum Storage {
     Float(Arc<Vec<f64>>),
@@ -69,13 +116,6 @@ pub struct T {
 
 fn invalid_attribute(operation: &str, message: &str) -> error::T {
     error::new(operation, Code::InvalidAttribute, message.to_owned())
-}
-
-
-fn name_is_blank(name: &str) -> bool {
-    name.as_bytes().iter().all(|byte| {
-        matches!(*byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
-    })
 }
 fn storage_kind(storage: &Storage) -> StorageKind {
     match storage {
@@ -208,7 +248,7 @@ pub fn tex_coord(owner: Owner) -> Key {
 }
 
 pub fn create_owned(name: &str, owner: Owner, storage: Storage) -> Result<T, error::T> {
-    if name_is_blank(name) {
+    if support::ocaml_trim_is_empty(name) {
         return Err(invalid_attribute("Attribute.create_owned", "empty name"));
     }
     Ok(T {
@@ -229,7 +269,7 @@ pub fn create_deferred(
     length: i64,
     materialise: Arc<dyn Fn() -> Storage + Send + Sync>,
 ) -> Result<T, error::T> {
-    if name_is_blank(name) {
+    if support::ocaml_trim_is_empty(name) {
         return Err(invalid_attribute("Attribute.create_deferred", "empty name"));
     }
     let kind = storage_kind(like);
@@ -325,7 +365,7 @@ pub fn storage_id(value: &T) -> i64 {
 }
 
 pub fn with_name(name: &str, value: &T) -> Result<T, error::T> {
-    if name_is_blank(name) {
+    if support::ocaml_trim_is_empty(name) {
         return Err(invalid_attribute("Attribute.with_name", "empty name"));
     }
     if name == value.name {
@@ -450,6 +490,21 @@ pub fn of_float_planes(
 #[cfg(test)]
 mod tests {
     use super::{Arc, Owner, Storage};
+
+    #[test]
+    fn quote_codecs_preserve_bytes_and_unicode_separately() {
+        assert_eq!(
+            super::quote_bytes(b"\"\\\n\t\r\x08\x00\x1f\x7f\xc3\xa9\xff"),
+            r#""\"\\\n\t\r\b\000\031\127\195\169\255""#,
+        );
+        assert_eq!(
+            super::quote("\"\\\n\t\r\x08\x00\x1f\x7fé"),
+            r#""\"\\\n\t\r\008\000\031\127é""#,
+        );
+        for (owner, name) in [(Owner::Point, "point"), (Owner::Vertex, "vertex"), (Owner::Primitive, "primitive"), (Owner::Detail, "detail")] {
+            assert_eq!(super::owner_name(owner), name);
+        }
+    }
 
 
     #[test]

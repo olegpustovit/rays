@@ -27,14 +27,8 @@ fn byte_count(length: i64) -> usize {
     length / 8 + usize::from(length % 8 != 0)
 }
 
-fn name_is_blank(name: &str) -> bool {
-    name.as_bytes().iter().all(|byte| {
-        matches!(*byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
-    })
-}
-
 fn require_name(operation: &str, name: &str) -> Result<(), error::T> {
-    if name_is_blank(name) {
+    if support::ocaml_trim_is_empty(name) {
         Err(invalid_group(operation, "Group: empty name"))
     } else {
         Ok(())
@@ -62,6 +56,14 @@ pub fn name(value: &T) -> &str {
 
 pub fn owner(value: &T) -> Owner {
     value.owner
+}
+
+pub fn owner_name(owner: Owner) -> &'static str {
+    match owner {
+        Owner::Point => "point",
+        Owner::Vertex => "vertex",
+        Owner::Primitive => "primitive",
+    }
 }
 
 pub fn length(value: &T) -> i64 {
@@ -162,7 +164,7 @@ pub fn ordered(
     length: i64,
     elements: &[i64],
 ) -> Result<T, error::T> {
-    if name_is_blank(name) {
+    if support::ocaml_trim_is_empty(name) {
         return Err(invalid_group("Group.ordered", "Group: empty name"));
     }
     if length < 0 {
@@ -318,6 +320,18 @@ fn combine(
     };
     base.order = order.map(Arc::from);
     Ok(base)
+}
+
+/// Union into the first matching group, preserving table and member order.
+pub fn merge(item: T, mut groups: Vec<T>) -> Result<Vec<T>, error::T> {
+    for existing in &mut groups {
+        if owner(existing) == owner(&item) && name(existing) == name(&item) {
+            *existing = union(existing, &item)?;
+            return Ok(groups);
+        }
+    }
+    groups.push(item);
+    Ok(groups)
 }
 
 pub fn union(left: &T, right: &T) -> Result<T, error::T> {
@@ -664,6 +678,26 @@ mod tests {
         assert_eq!(super::cardinality(&union), 3);
         assert!(super::mem(4, &union));
         assert!(!super::mem(2, &union));
+    }
+
+    #[test]
+    fn merge_keeps_first_slot_member_order_and_union_errors() {
+        let other = super::ordered(Owner::Vertex, "selected", 4, &[0]).unwrap();
+        let existing = super::ordered(Owner::Point, "selected", 4, &[2]).unwrap();
+        let later = super::ordered(Owner::Point, "selected", 4, &[3]).unwrap();
+        let incoming = super::ordered(Owner::Point, "selected", 4, &[1, 2]).unwrap();
+        let merged = super::merge(incoming, vec![other, existing, later]).unwrap();
+        assert_eq!(super::owner(&merged[0]), Owner::Vertex);
+        assert_eq!(super::ordered_elements(&merged[1]), Some(vec![2, 1]));
+        assert_eq!(super::ordered_elements(&merged[2]), Some(vec![3]));
+        let appended = super::ordered(Owner::Point, "new", 4, &[0]).unwrap();
+        let merged = super::merge(appended, merged).unwrap();
+        assert_eq!(super::name(&merged[3]), "new");
+        let wrong_length = super::ordered(Owner::Point, "selected", 5, &[4]).unwrap();
+        let expected = super::union(&merged[1], &wrong_length).err().unwrap();
+        let actual = super::merge(wrong_length, merged).err().unwrap();
+        assert_eq!(error::code(&actual), error::code(&expected));
+        assert_eq!(error::message(&actual), error::message(&expected));
     }
 
     #[test]

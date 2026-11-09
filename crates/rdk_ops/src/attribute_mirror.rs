@@ -99,21 +99,13 @@ fn group_owner(owner: attribute::Owner) -> Result<group::Owner, error::T> {
 }
 
 fn owner_name(owner: attribute::Owner) -> Result<&'static str, error::T> {
-    match owner {
-        attribute::Owner::Point => Ok("point"),
-        attribute::Owner::Vertex => Ok("vertex"),
-        attribute::Owner::Primitive => Ok("primitive"),
-        attribute::Owner::Detail => Err(detail_refused()),
-    }
+    attribute_owner(owner)?;
+    Ok(attribute::owner_name(owner))
 }
 
 fn owner_count(owner: attribute::Owner, geometry_value: &geometry::T) -> Result<i64, error::T> {
-    match owner {
-        attribute::Owner::Point => Ok(geometry::point_count(geometry_value)),
-        attribute::Owner::Vertex => Ok(geometry::vertex_count(geometry_value)),
-        attribute::Owner::Primitive => Ok(geometry::primitive_count(geometry_value)),
-        attribute::Owner::Detail => Err(detail_refused()),
-    }
+    attribute_owner(owner)?;
+    Ok(geometry::owner_count(geometry_value, owner))
 }
 
 fn validate_group(label: &str, owner: attribute::Owner, count: i64, value: Option<&group::T>) -> Result<(), error::T> {

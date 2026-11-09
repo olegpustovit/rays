@@ -61,14 +61,7 @@ fn owner_index(owner: attribute::Owner) -> usize {
     }
 }
 
-fn owner_name(owner: attribute::Owner) -> &'static str {
-    match owner {
-        attribute::Owner::Point => "point",
-        attribute::Owner::Vertex => "vertex",
-        attribute::Owner::Primitive => "primitive",
-        attribute::Owner::Detail => "detail",
-    }
-}
+use rdk_core::attribute::owner_name;
 
 fn check_cancel(cancel_token: Option<&cancel::T>, index: i64) -> Result<(), error::T> {
     cancel::poll(cancel_token, index, 1023)

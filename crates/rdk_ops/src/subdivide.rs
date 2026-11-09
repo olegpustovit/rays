@@ -243,23 +243,7 @@ fn detail_int(name: &str, item: &attribute::T) -> Result<i64, error::T> {
 }
 
 /// OCaml `%S`: a double-quoted string with `String.escaped` escapes.
-fn ocaml_quoted(value: &str) -> String {
-    let mut out = String::from("\"");
-    for byte in value.bytes() {
-        match byte {
-            b'"' => out.push_str("\\\""),
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\t' => out.push_str("\\t"),
-            b'\r' => out.push_str("\\r"),
-            8 => out.push_str("\\b"),
-            32..=126 => out.push(byte as char),
-            other => out.push_str(&format!("\\{other:03}")),
-        }
-    }
-    out.push('"');
-    out
-}
+use crate::attribute_ops::ocaml_quote as ocaml_quoted;
 
 pub(crate) fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Result<Scheme, error::T> {
     let Some(item) = found else {
@@ -1145,7 +1129,6 @@ pub fn subdivide(
 mod tests {
     use super::*;
     use rdk_core::packed;
-    use std::sync::Mutex;
 
     fn defaults() -> Params {
         Params {
@@ -1182,15 +1165,7 @@ mod tests {
         sub(source, configure).unwrap_or_else(|failure| panic!("{}", error::to_string(&failure)))
     }
 
-    fn with_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    use parallel::with_domains;
 
     fn polygons(point_count: i64, vertex_points: Vec<i64>, offsets: Vec<i64>) -> topology::T {
         topology::polygons_owned(point_count, vertex_points, offsets).unwrap()

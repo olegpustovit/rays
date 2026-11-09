@@ -174,15 +174,6 @@ pub struct TransferParams {
     pub target: geometry::T,
 }
 
-fn owner_name(owner: Owner) -> &'static str {
-    match owner {
-        Owner::GroupPoints => "point",
-        Owner::GroupVertices => "vertex",
-        Owner::GroupPrimitives => "primitive",
-        Owner::GroupEdges => "edge",
-    }
-}
-
 fn ordinary_owner(owner: Owner) -> Option<group::Owner> {
     match owner {
         Owner::GroupPoints => Some(group::Owner::Point),
@@ -401,7 +392,7 @@ fn rename_entry(
                 Code::InvalidGroup,
                 &format!(
                     "Group Rename: destination {} group {} already exists",
-                    owner_name(owner),
+                    ordinary_owner(owner).map(group::owner_name).unwrap_or("edge"),
                     ocaml_quote(new_name)
                 ),
             )),

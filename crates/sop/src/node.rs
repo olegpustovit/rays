@@ -256,22 +256,7 @@ pub fn apply_parameters(value: &T, changes: &[(String, Value)]) -> Result<(T, Ef
 }
 
 /// OCaml `%S` for a plain string.
-pub fn ocaml_quote(text: &str) -> String {
-    let mut out = String::from("\"");
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            c if (c as u32) < 32 || c as u32 == 127 => out.push_str(&format!("\\{:03}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
+pub use rdk_core::attribute::quote as ocaml_quote;
 
 fn facts_key(facts: &Facts) -> Vec<u8> {
     let mut out = Vec::new();

@@ -1647,25 +1647,6 @@ pub fn first_error(state: &State) -> Option<Diagnostic> {
     doc.into_iter().chain(binding).chain(graph_errors(state)).chain(live_errors(state)).next()
 }
 
-/// OCaml `%S`: `String.escaped` between double quotes (bytes outside printable ASCII in decimal).
-fn ocaml_quote(text: &str) -> String {
-    let mut out = String::from("\"");
-    for &b in text.as_bytes() {
-        match b {
-            b'"' => out.push_str("\\\""),
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\t' => out.push_str("\\t"),
-            b'\r' => out.push_str("\\r"),
-            8 => out.push_str("\\b"),
-            32..=126 => out.push(b as char),
-            _ => out.push_str(&format!("\\{:03}", b)),
-        }
-    }
-    out.push('"');
-    out
-}
-
 /// One line for crash reports: tab, draft, first error and its line.
 pub fn summary(state: &State) -> String {
     let (doc, binding) = held_errors(state);
@@ -1709,7 +1690,7 @@ pub fn summary(state: &State) -> String {
         out.push_str(&format!(", graph drafts: {}", names.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")));
     }
     if let Some(f) = &state.find {
-        out.push_str(&format!(", find {} at {}{}", ocaml_quote(&f.query), f.at, if f.replacing { " replacing" } else { "" }));
+        out.push_str(&format!(", find {} at {}{}", rdk_core::attribute::quote_bytes(f.query.as_bytes()), f.at, if f.replacing { " replacing" } else { "" }));
     }
     out
 }

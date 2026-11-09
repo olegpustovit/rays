@@ -89,13 +89,7 @@ fn storage_kind(storage: &Storage) -> i64 {
     }
 }
 
-fn owner_name(owner: AttributeOwner) -> &'static str {
-    match owner {
-        AttributeOwner::Point => "point",
-        AttributeOwner::Vertex => "vertex",
-        _ => "primitive",
-    }
-}
+use rdk_core::attribute::owner_name;
 
 fn collect_attributes(
     owner: AttributeOwner,

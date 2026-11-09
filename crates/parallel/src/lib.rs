@@ -63,6 +63,18 @@ pub fn run_unit(domains: Option<i64>, work: &dyn Fn() -> Result<(), String>) -> 
     }
 }
 
+/// Run once in the requested worker context and return the callback's value.
+#[doc(hidden)]
+pub fn with_domains<R>(domains: i64, work: impl FnOnce() -> R) -> R {
+    let work = Cell::new(Some(work));
+    let result = Cell::new(None);
+    run_unit(Some(domains), &|| {
+        result.set(Some(work.take().unwrap()()));
+        Ok(())
+    }).unwrap();
+    result.into_inner().unwrap()
+}
+
 struct JobHeader {
     chunks: usize,
     width: usize,
@@ -631,6 +643,27 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn with_domains_returns_owned_values_once_and_restores_nested_context() {
+        assert!(context() == Context::Outside);
+        let owned = String::from("moved once");
+        let mut calls = 0;
+        let result = with_domains(1, || {
+            calls += 1;
+            assert!(context() == Context::Sequential);
+            with_domains(4, || {
+                assert!(context() == Context::Sequential);
+                owned
+            })
+        });
+        assert_eq!(result, "moved once");
+        assert_eq!(calls, 1);
+        assert!(context() == Context::Outside);
+        let panic = std::panic::catch_unwind(|| with_domains(1, || panic!("restore context")));
+        assert!(panic.is_err());
+        assert!(context() == Context::Outside);
+    }
 
     fn collect(values: &[AtomicUsize]) -> Vec<usize> {
         values

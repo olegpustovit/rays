@@ -63,9 +63,7 @@ fn fail(message: &str) -> error::T {
     make(Code::InvalidTopology, message)
 }
 
-fn blank(value: &str) -> bool {
-    value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
+use rdk_core::support::ocaml_trim_is_empty as blank;
 
 fn validate_group(owner: group::Owner, length: i64, label: &str, item: Option<&group::T>) -> Result<(), error::T> {
     match item {

@@ -541,7 +541,6 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
     use super::*;
     use rdk_core::topology::PrimitiveKind;
 
@@ -863,15 +862,7 @@ mod tests {
         (points, triangles)
     }
 
-    fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    use parallel::with_domains as at_domains;
 
     fn parallel_exact_fixture(source_fixture: bool) {
         let (mut points, mut triangles) = if source_fixture { grid(79, 59, 20.0) } else { grid(80, 60, 20.0) };

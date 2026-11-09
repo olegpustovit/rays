@@ -29,23 +29,7 @@ pub(crate) fn invalid_arg(message: String) -> error::T {
 }
 
 /// OCaml `%S`.
-fn quoted(value: &str) -> String {
-    let mut out = String::from("\"");
-    for byte in value.bytes() {
-        match byte {
-            b'"' => out.push_str("\\\""),
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\t' => out.push_str("\\t"),
-            b'\r' => out.push_str("\\r"),
-            8 => out.push_str("\\b"),
-            32..=126 => out.push(byte as char),
-            other => out.push_str(&format!("\\{other:03}")),
-        }
-    }
-    out.push('"');
-    out
-}
+use crate::attribute_ops::ocaml_quote as quoted;
 
 pub struct ProjectionScratch {
     pub count: i64,
@@ -2596,7 +2580,6 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     fn defaults(target_length: f64) -> Params {
         Params {
@@ -2814,15 +2797,7 @@ mod tests {
             })
     }
 
-    fn with_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
-            Ok(())
-        })
-        .unwrap();
-        slot.into_inner().unwrap().unwrap()
-    }
+    use parallel::with_domains;
 
     fn seam_fixture() -> (geometry::T, group::T) {
         let base = geometry::create(

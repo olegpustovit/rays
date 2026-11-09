@@ -227,15 +227,7 @@ pub mod fixtures {
 
 
     /// Runs `work` under `domains` worker domains and returns its geometry.
-    pub(crate) fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot = std::cell::Cell::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            slot.set(Some(work()));
-            Ok(())
-        })
-        .unwrap();
-        slot.take().unwrap()
-    }
+    pub(crate) use parallel::with_domains as at_domains;
 
     /// The one-domain result of `work`, after asserting four domains give the same geometry.
     pub(crate) fn exact_at_one_and_four(work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
@@ -246,15 +238,7 @@ pub mod fixtures {
     }
 
     /// Runs `work` under `domains` worker domains and returns its value.
-    pub(crate) fn at_domains_strings(domains: i64, work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
-        let slot = std::cell::Cell::new(None);
-        parallel::run_unit(Some(domains), &|| {
-            slot.set(Some(work()));
-            Ok(())
-        })
-        .unwrap();
-        slot.take().unwrap()
-    }
+    pub(crate) use parallel::with_domains as at_domains_strings;
 
     /// The one-domain value of `work`, after asserting four domains give an equal value.
     pub(crate) fn same_at_one_and_four_strings(work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {

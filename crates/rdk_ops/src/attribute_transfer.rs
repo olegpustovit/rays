@@ -162,23 +162,9 @@ fn flatten(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::
     })
 }
 
-fn owner_count(geometry_value: &geometry::T, owner: attribute::Owner) -> i64 {
-    match owner {
-        attribute::Owner::Point => geometry::point_count(geometry_value),
-        attribute::Owner::Vertex => geometry::vertex_count(geometry_value),
-        attribute::Owner::Primitive => geometry::primitive_count(geometry_value),
-        attribute::Owner::Detail => 1,
-    }
-}
+use rdk_core::geometry::owner_count;
 
-fn owner_label(owner: attribute::Owner) -> &'static str {
-    match owner {
-        attribute::Owner::Point => "point",
-        attribute::Owner::Vertex => "vertex",
-        attribute::Owner::Primitive => "primitive",
-        attribute::Owner::Detail => "detail",
-    }
-}
+use rdk_core::attribute::owner_name as owner_label;
 
 fn same_kind(left: &attribute::T, right: &attribute::T) -> bool {
     attribute::kind_name(left) == attribute::kind_name(right)

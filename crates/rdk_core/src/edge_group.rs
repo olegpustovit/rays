@@ -30,14 +30,8 @@ fn byte_count(length: i64) -> usize {
     length / 8 + usize::from(length % 8 != 0)
 }
 
-fn name_is_blank(name: &str) -> bool {
-    name.as_bytes().iter().all(|byte| {
-        matches!(*byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
-    })
-}
-
 fn require_name(operation: &str, name: &str) -> Result<(), error::T> {
-    if name_is_blank(name) {
+    if support::ocaml_trim_is_empty(name) {
         Err(invalid_edge_group(operation, "Edge_group: empty name"))
     } else {
         Ok(())
@@ -193,6 +187,18 @@ fn combine(operation_name: &str, operation: Operation, left: &T, right: &T) -> R
         .into_inner()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     Ok(new(left.topology_id, left.name.clone(), left.length, bits))
+}
+
+/// Union into the first matching group, preserving table and member order.
+pub fn merge(item: T, mut groups: Vec<T>) -> Result<Vec<T>, error::T> {
+    for existing in &mut groups {
+        if name(existing) == name(&item) {
+            *existing = union(existing, &item)?;
+            return Ok(groups);
+        }
+    }
+    groups.push(item);
+    Ok(groups)
 }
 
 pub fn union(left: &T, right: &T) -> Result<T, error::T> {
@@ -512,6 +518,25 @@ mod tests {
     use crate::{topology, topology_index};
 
     use super::with_name;
+
+    #[test]
+    fn merge_preserves_slots_and_rejects_foreign_topology() {
+        let topology = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
+        let index = topology_index::create(None, &topology).unwrap();
+        let make = |name, selected| super::init(None, &topology, &index, name, &|edge| edge == selected).unwrap();
+        let merged = super::merge(make("selected", 1), vec![make("other", 2), make("selected", 0), make("selected", 2)]).unwrap();
+        assert_eq!(super::name(&merged[0]), "other");
+        assert!(super::mem(0, &merged[1]) && super::mem(1, &merged[1]));
+        assert_eq!(super::cardinality(&merged[1]), 2);
+        assert_eq!(super::cardinality(&merged[2]), 1);
+        let foreign = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
+        let foreign_index = topology_index::create(None, &foreign).unwrap();
+        let item = super::init(None, &foreign, &foreign_index, "selected", &|_| false).unwrap();
+        let expected = super::union(&merged[1], &item).err().unwrap();
+        let actual = super::merge(item, merged).err().unwrap();
+        assert_eq!(crate::error::code(&actual), crate::error::code(&expected));
+        assert_eq!(crate::error::message(&actual), crate::error::message(&expected));
+    }
 
     #[test]
     fn edge_membership_is_topology_affine_and_rename_shares_storage() {
