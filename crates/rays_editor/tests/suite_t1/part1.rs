@@ -179,6 +179,7 @@ pub fn run_panel_keys() {
     r.step(m, vec![slash(), ch('o'), ch('x')]);
     r.step(m, vec![]);
     check(r.undo_label() == Some("Close panel".into()), "/ o x closed it again");
+    r.close();
     // a document without an editor graph gets one written from its layout before the retype
     let mut r = Run::new(editor("(workspace w (graph g :context sop (sop/box)))"));
     let m = (600., 300.);

@@ -354,6 +354,7 @@ pub fn editor_w9() {
         vec![(22, Box::new(soft_click)), (26, Box::new(|_| vec![ch('m')])), (30, Box::new(|_| click_events((700., 437.)))), (34, Box::new(|_| vec![key(Key::Enter)]))],
     );
     check(has(&text, "(defmacro soft_tpl [p1 inner]") && label.as_deref() == Some("Make macro"), &format!("Enter in the make-macro dialog: {}", lab(&label)));
+    editor::close(&fresh);
     let wheel = || -> Box<dyn Fn(&editor::Editor) -> Vec<Event>> { Box::new(|_| vec![Event::Pointer_moved((1260., 405.)), Event::Scrolled((0., -2.))]) };
     let (text, label) = scenario(
         &prefix,
