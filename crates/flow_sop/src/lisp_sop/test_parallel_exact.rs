@@ -1232,25 +1232,42 @@ fn combining_many_wires() {
     let one=exact(&super::node(&[],&text));assert_eq!(geo::primitive_count(&one),74_624);assert_eq!(group_count(&one,group::Owner::Primitive,"wire_caps"),18_656);
 }
 
-#[test]
-fn combining_general_backbone() {
-    let points=curve((0..65).map(|p|{let t=p as f64*(10.0/64.0);(0.3*(t*0.71).sin(),0.2*(t*0.43).cos(),t)}));
+/// The swept geometry with every group and edge group, as one digest: the two cooks below each
+/// take ~1 s of Lisp sweep work, so they are separate cases joined by the same recorded digest
+/// (inputs use rays_math::libm, so the digest is one on every platform).
+fn general_backbone_digest(domains: i64) -> String {
+    let points=curve((0..65).map(|p|{let t=p as f64*(10.0/64.0);(0.3*rays_math::libm::sin(t*0.71),0.2*rays_math::libm::cos(t*0.43),t)}));
     let backbone=super::node(&[],&r###"(-> (sop/curve %s)
      (sop/set_float :name "pscale" :value 0.85)
      (sop/group_edges :name "backbone_edges"))"###.replace("%s",&points));
-    let profile=line_geometry::polyline(&line_geometry::Params { closed: true },&(0..24).map(|p|{let a=2.0*std::f64::consts::PI*p as f64/24.0;(0.08*a.cos(),0.08*a.sin(),0.0)}).collect::<Vec<_>>()).unwrap();
+    let profile=line_geometry::polyline(&line_geometry::Params { closed: true },&(0..24).map(|p|{let a=2.0*std::f64::consts::PI*p as f64/24.0;(0.08*rays_math::libm::cos(a),0.08*rays_math::libm::sin(a),0.0)}).collect::<Vec<_>>()).unwrap();
     let profile=super::snapshot(&profile);
     let profile=bind(&[("profile",&profile)],r###"(-> (sop/ext_profile)
      (sop/set_int :name "profile_id" :value 17)
      (sop/group_edges :name "profile_edges"))"###);
-    let one=exact(&bind(&[("general_backbone",&backbone),("general_profile",&profile)],r###"(sop/sweep
+    let g=cook(domains,&bind(&[("general_backbone",&backbone),("general_profile",&profile)],r###"(sop/sweep
    (sop/ext_general_backbone)
    (sop/ext_general_profile)
    :connectivity "Alternating triangles"
    :twist 2.3
    :caps true
    :cap_group "sweep_caps")"###));
-    assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(1_560,3_074));assert!(has(&one,Owner::Point,"cross_section_profile_id"));
+    assert_eq!((geo::point_count(&g),geo::primitive_count(&g)),(1_560,3_074));assert!(has(&g,Owner::Point,"cross_section_profile_id"));
+    let mut bytes=crate::lisp_sop::support::geometry_bytes(&g);
+    for a in geo::groups(&g).iter() { bytes.extend(format!("G{:?}:{}:{}:{:?}:{:?};",group::owner(a),group::name(a),group::length(a),group::view::bits_view(a),group::ordered_elements(a)).bytes()); }
+    for a in geo::edge_groups(&g).iter() { bytes.extend(format!("E{}:{}:{:?};",edge_group::name(a),edge_group::length(a),(0..edge_group::length(a)).map(|i|edge_group::mem(i,a)).collect::<Vec<_>>()).bytes()); }
+    rays_math::hash::md5_hex(&bytes)
+}
+const GENERAL_BACKBONE: &str = "cfbc8eb560e7e1c41b2f21d48f22af2d";
+
+#[test]
+fn combining_general_backbone() {
+    assert_eq!(general_backbone_digest(1), GENERAL_BACKBONE);
+}
+
+#[test]
+fn combining_general_backbone_parallel() {
+    assert_eq!(general_backbone_digest(4), GENERAL_BACKBONE);
 }
 
 fn combining_split_source() {
