@@ -2014,7 +2014,7 @@ impl Ui {
     /// the text, lights the bracket pair at the caret, indents after Enter, pairs brackets,
     /// completes the token at the caret and describes the token under the pointer. A numeric
     /// literal of the language dragged sideways follows the pointer (a float by a tenth of its last
-    /// decimal place per point, an integer by one per five points, Shift ten times faster): `on_scrub
+    /// decimal place per point, an integer by one per six points, Shift ten times faster): `on_scrub
     /// Live` is called on each frame the returned text changed that way and `Done` when the drag
     /// ends. `reveal` scrolls the offset into view once per (offset, text length, `reveal_nonce`);
     /// `select` (anchor, caret) takes the keyboard for the area and places the selection; `splice`

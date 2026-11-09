@@ -330,8 +330,11 @@ pub fn text_area_3(rig: &mut Rig) {
 }
 
 pub fn text_area_4(rig: &mut Rig) {
-    // a number dragged sideways follows the pointer: an integer one per five points, a float a
+    // a number dragged sideways follows the pointer: an integer one per six points, a float a
     // tenth of its last place per point; the host hears Live frames and one Done
+    for dx in [-20.0, -6.0, -2.0, 0.0, 2.0, 6.0, 20.0] {
+        assert_eq!(scrubbed("10", dx, false), param::number::scrub(param::number::Kind::Int, None, "10", dx, false));
+    }
     rig.area = String::new();
     rig.plain(vec![press((150, 12)), release((150, 12))]);
     let origin = rig.region().1;
@@ -346,8 +349,8 @@ pub fn text_area_4(rig: &mut Rig) {
     rig.plain(vec![press((nx, 18))]);
     rig.plain(vec![move_to((nx + 10, 18))]);
     rig.plain(vec![move_to((nx + 20, 18))]);
-    rig.expect("a dragged integer moves one per five points", "14 x");
-    if rig.scrub_edits.borrow()[0] != ((0, 2), "14".to_owned()) {
+    rig.expect("a dragged integer moves one per six points", "13 x");
+    if rig.scrub_edits.borrow()[0] != ((0, 2), "13".to_owned()) {
         fail("a numeric drag lost its pre-edit token span");
     }
     if !rig.scrubs.borrow().contains(&ScrubPhase::Live) {
@@ -357,7 +360,7 @@ pub fn text_area_4(rig: &mut Rig) {
     if rig.scrubs.borrow()[0] != ScrubPhase::Done {
         fail("a drag's end did not report on_scrub Done");
     }
-    rig.expect("the release keeps the value", "14 x");
+    rig.expect("the release keeps the value", "13 x");
     rig.keyed(vec![Key::Meta], vec![key_down(kc('z'))]);
     rig.expect("Command-Z takes the whole drag back", "10 x");
     rig.area = "0.5 y".to_owned();
