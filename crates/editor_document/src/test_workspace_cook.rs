@@ -2,8 +2,9 @@
 //! for byte the same at 1 and 3 domains; node counts; provenance.
 //!
 //! Uses the editor's full kinds catalog for scene/world/settings/UI fixtures as well as SOP graphs.
-use super::support::*;
-use crate::{catalog as fcat, lisp_sop, lower, operators};
+use flow_sop::lisp_sop::support::*;
+use flow_sop::{catalog as fcat, lower, operators};
+use flow_sop::lisp_sop;
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{self as e, ArgKey, Op};
 use flow_graph::projection as p;
@@ -21,7 +22,7 @@ fn factories() -> Vec<Factory> {
 }
 
 fn catalog_of(factories: &[Factory]) -> Catalog {
-    editor_document::kinds::catalog(1, factories).unwrap()
+    crate::kinds::catalog(1, factories).unwrap()
 }
 
 fn diag(d: rays_diagnostic::Diagnostic) -> String {
@@ -198,7 +199,7 @@ fn optional_rest() {
     let mut all = vec![rest_fixture()];
     all.extend(factories());
     let cat = catalog_of(&all);
-    let (manifest, _) = crate::manifest::generate(&[], Some(&[]), &all).unwrap_or_else(|d| panic!("{}", diag(d)));
+    let (manifest, _) = flow_sop::manifest::generate(&[], Some(&[]), &all).unwrap_or_else(|d| panic!("{}", diag(d)));
     let manifest_catalog = flow_check::catalog::catalog_of_manifest(&manifest).unwrap_or_else(|d| panic!("{}", diag(d))).0;
     let fixture = manifest_catalog.kinds.iter().find(|k| k.qualified == "sop/rest_fixture");
     assert!(fixture.is_some_and(|k| k.slots.iter().any(|slot| slot.rest && !slot.required)), "optional rest survives manifest serialization");

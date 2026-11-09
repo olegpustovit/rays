@@ -3,8 +3,8 @@
 //! nothing.
 //!
 //! Uses the editor's complete kinds catalog, including scene/world/layout gestures.
-use super::support::*;
-use crate::{lisp_sop, manifest};
+use flow_sop::lisp_sop::support::*;
+use flow_sop::{manifest, lisp_sop};
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{self as e, ArgKey, Loop, Op};
 use flow_graph::projection as p;
@@ -12,7 +12,7 @@ use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::{lisp, ty};
 
 fn catalog() -> Catalog {
-    editor_document::kinds::catalog(1, &lisp_sop::factories()).unwrap()
+    crate::kinds::catalog(1, &lisp_sop::factories()).unwrap()
 }
 
 fn canon(forms: &[Syntax]) -> String {
@@ -696,7 +696,7 @@ fn part11_atomic_refusals_and_labels() {
     let before = norm(&base());
     assert!(e::apply(&catalog(), &parse(&base()), &rename(node(&["b"]), "a")).is_err(), "expected a refusal");
     assert_eq!(canon(&parse(&base())), before, "source unchanged after a refusal");
-    use editor_document::layout_edit as layout;
+    use crate::layout_edit as layout;
     for active in ["5","-1"] {
         let text=format!("(workspace w (graph editor :context editor (let* [a (ui/graph) b (ui/lisp)] (ui/workspace (ui/switch a b :active {active})))))");
         let forms=parse(&text);

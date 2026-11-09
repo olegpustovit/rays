@@ -26,5 +26,4 @@ rdk_core = { path = "../rdk_core" }
 [dev-dependencies]
 mem_sys = { path = "../mem_sys" }
 flow_graph = { path = "../flow_graph" }
-editor_document = { path = "../editor_document" }
 flow_web = { path = "../flow_web" }

@@ -24,3 +24,9 @@ mod test_workspace_doc;
 mod test_lowering;
 #[cfg(test)]
 mod test_scene_sync;
+#[cfg(test)]
+mod test_workspace_cook;
+#[cfg(test)]
+mod test_workspace_edit;
+#[cfg(test)]
+mod test_projection;

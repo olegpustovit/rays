@@ -21,3 +21,6 @@ flow_graph = { path = "../flow_graph" }
 editor_core = { path = "../editor_core" }
 cfmt = { path = "../cfmt" }
 
+[dev-dependencies]
+rdk_core = { path = "../rdk_core" }
+

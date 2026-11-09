@@ -2,8 +2,9 @@
 //! fixture (nodes, zones, rows, chips), liveness and invariance flags, and the layout.
 //!
 //! Uses the editor's complete kinds catalog, retaining the study's graph and layout projections.
-use super::support::*;
-use crate::{catalog as fcat, lisp_sop, port};
+use flow_sop::lisp_sop::support::*;
+use flow_sop::{catalog as fcat, port};
+use flow_sop::lisp_sop;
 use flow_check::catalog::Catalog;
 use flow_check::workspace as w;
 use flow_graph::flow_edit::{self as e, ArgKey, Op};
@@ -15,7 +16,7 @@ use param::Value;
 const SOP_ONLY: [&str; 10] = ["facade", "garland", "kit", "orrery", "rosette", "sunflower", "tiles", "tree", "tunnel", "wave"];
 
 fn catalog() -> Catalog {
-    editor_document::kinds::catalog(1, &lisp_sop::factories()).unwrap()
+    crate::kinds::catalog(1, &lisp_sop::factories()).unwrap()
 }
 
 fn workspace_of(text: &str) -> w::Workspace {
@@ -106,7 +107,7 @@ fn noise3_rows_edit_and_survive_reload() {
     let value = flow_eval::run(&edited, false, None, None, None, 7.0).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let r = value.results.iter().find(|(n, _)| n == "g").unwrap().1.clone();
     assert!(matches!(r, flow_eval::Value::Float(x) if (0.0..=1.0).contains(&x)), "noise3 row edit did not evaluate");
-    crate::lower::workspace(None, Vec::new(), crate::lower::Options::default(), &forms).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    flow_sop::lower::workspace(None, Vec::new(), flow_sop::lower::Options::default(), &forms).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     // Workspace_doc.to_text / of_text: print and check again
     let reloaded = workspace_of(&lisp::print(&edited_forms).unwrap().0);
     let again = flow_eval::run(&reloaded, false, None, None, None, 7.0).unwrap();

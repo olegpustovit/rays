@@ -163,8 +163,8 @@ pub fn curve_points(points: &[(f64, f64, f64)]) -> String {
 #[allow(dead_code)]
 fn _unused(_: &payload::T) {}
 
-#[cfg(test)]
-mod support;
+#[doc(hidden)]
+pub mod support;
 #[cfg(test)]
 mod test_concat;
 #[cfg(test)]
@@ -192,15 +192,9 @@ mod test_node_sources;
 #[cfg(test)]
 mod test_graph;
 #[cfg(test)]
-mod test_workspace_cook;
-#[cfg(test)]
-mod test_workspace_edit;
-#[cfg(test)]
 mod test_workspace_zone;
 #[cfg(test)]
 mod test_perf_lower;
-#[cfg(test)]
-mod test_projection;
 #[cfg(test)]
 mod test_lisp_projection;
 #[cfg(test)]

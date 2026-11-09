@@ -52,6 +52,7 @@ dependencies = [
  "rays",
  "rays_diagnostic",
  "rays_math",
+ "rdk_core",
  "sop",
 ]
 
@@ -201,7 +202,6 @@ name = "flow_sop"
 version = "0.1.0"
 dependencies = [
  "cfmt",
- "editor_document",
  "flow_check",
  "flow_eval",
  "flow_graph",
