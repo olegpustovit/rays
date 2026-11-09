@@ -25,10 +25,12 @@ const FRAMES: i64 = 30;
 // empty 1,206 / 81,958; bare 1,417 / 96,617.
 // R4/R5: shared prelude/operator/state storage: basic 1,356 / 149,687.
 // R8: mutate pane view state in place: empty 1,198 / 81,820.
+// R9: retain the shared document and skip idle gesture rollback snapshots: basic 1,305 / 148,265;
+// empty 1,154 / 80,422; bare 1,378 / 95,326.
 // Never raise.
-const BASIC: (u64, u64) = (1_356, 149_687);
-const EMPTY: (u64, u64) = (1_198, 81_820);
-const BARE: (u64, u64) = (1_417, 96_617);
+const BASIC: (u64, u64) = (1_305, 148_265);
+const EMPTY: (u64, u64) = (1_154, 80_422);
+const BARE: (u64, u64) = (1_378, 95_326);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

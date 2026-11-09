@@ -5,6 +5,7 @@
 //! OCaml optional arguments are `Option` parameters, placed as in the OCaml signature.
 #![allow(non_camel_case_types)]
 use std::rc::Rc;
+use std::sync::Arc;
 
 use editor_document::document::{self, Level, T as Document};
 use editor_document::kind_graph as kg;
@@ -68,7 +69,7 @@ pub fn scene_edit(value: &mut EditorModel, mode: scene_mode, active_camera: Opti
             value.edit_error = Some(message);
         }
         Ok(doc) => {
-            let doc = adopt(&value.history, doc);
+            let doc = adopt(&value.history, Arc::new(doc));
             let history = match mode {
                 scene_mode::Reset => history::restart(doc.clone(), value.history.clone()),
                 scene_mode::Amend => commit(&doc, None, Some(Merge::Repair), value.history.clone()),
@@ -104,7 +105,7 @@ pub fn set_settings(value: &mut EditorModel, new_settings: &settings::T) {
         }
         Ok(None) => {},
         Ok(Some((doc, _))) => {
-            let doc = adopt(&value.history, doc);
+            let doc = adopt(&value.history, Arc::new(doc));
             let history = commit(&doc, Some("Settings"), None, value.history.clone());
             value.cook = std::rc::Rc::new(cook::force(&value.cook));
             value.doc = doc;
@@ -125,7 +126,7 @@ pub fn set_root(value: &mut EditorModel, root: &objects::root::Parameters) {
         }
         Ok(None) => {},
         Ok(Some((doc, _))) => {
-            let doc = adopt(&value.history, doc);
+            let doc = adopt(&value.history, Arc::new(doc));
             let history = commit(&doc, Some("Render settings"), Some(Merge::Gesture("render settings".to_string())), value.history.clone());
             value.doc = doc;
             value.history = history;
@@ -215,7 +216,7 @@ pub fn edit_node(value: &mut EditorModel, level: Level, node_id: i64, values: &[
         return;
     }
     let written = |value: &mut EditorModel, doc: Document| {
-        let doc = adopt(&value.history, doc);
+        let doc = adopt(&value.history, Arc::new(doc));
         cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
         let history = commit(&doc, Some(label), Some(Merge::Gesture(parameter_gesture(label, level, node_id, values))), value.history.clone());
         value.doc = doc;

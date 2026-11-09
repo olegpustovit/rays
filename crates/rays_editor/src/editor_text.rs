@@ -38,9 +38,9 @@ pub fn commit(doc: &Arc<Document>, label: Option<&str>, merge: Option<Merge>, hi
 }
 
 /// The document as the history's present, keeping the present's identity when nothing changed.
-pub fn adopt(history: &history::EditorHistory, doc: Document) -> Arc<Document> {
+pub fn adopt(history: &history::EditorHistory, doc: Arc<Document>) -> Arc<Document> {
     let present = history::present_arc(history);
-    if same_document(&present, &doc) { present } else { Arc::new(doc) }
+    if Arc::ptr_eq(&present, &doc) || same_document(&present, &doc) { present } else { doc }
 }
 
 pub fn parameter_gesture(operation: &str, level: Level, id: i64, values: &[(String, Value)]) -> String {
@@ -53,7 +53,7 @@ pub fn parameter_gesture(operation: &str, level: Level, id: i64, values: &[(Stri
 /// A workspace edit installed as the present: the source and its lowering are one history entry,
 /// the open level is re-resolved and the cook told about the new volatile nodes.
 pub fn install(value: &mut EditorModel, doc: Document, label: &str, merge: Merge) {
-    let doc = adopt(&value.history, doc);
+    let doc = adopt(&value.history, Arc::new(doc));
     let level = document::resolve_level(&doc, pane_level(&(&*value).into()));
     value.lisp_vocab = vocabulary_for(value, &doc);
     value.workspace = unrestore(&value.doc, &doc, value.workspace.clone());

@@ -164,9 +164,7 @@ pub fn gesture_key<'a>(value: &ModelView<'a>, frame_: &frame::Frame, loaded: boo
 }
 
 /// The graph pane's layout gestures: moving, collapsing, levels, frames, probes.
-pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], next: Document, result: frame_result, scope_changes: &[scope::Change]) -> (Document, frame_result, PathMap<i64>) {
-    let mut next = next;
-    let mut result = result;
+pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], mut next: Arc<Document>, mut result: frame_result, scope_changes: &[scope::Change]) -> (Arc<Document>, frame_result, PathMap<i64>) {
     let mut probes = value.probes.clone();
     if loaded {
         return (next, result, probes);
@@ -174,70 +172,45 @@ pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], next: 
     for c in scope_changes {
         match c {
             scope::Change::Zone_collapsed { zone, collapsed } => {
-                // opening a frame that starts collapsed is stored, so it stays open; an expression
-                // starts folded: opening it is stored too
                 let default = zone.last().is_some_and(|leaf| fe::nested(leaf));
-                let (zone, collapsed) = (zone.clone(), *collapsed);
-                next = document_edit::layout_edit(&next, &|l| {
-                    let mut l = l.clone();
-                    if collapsed {
-                        l.collapsed.insert(zone.clone(), true);
-                    } else if default {
-                        l.collapsed.insert(zone.clone(), false);
-                    } else {
-                        l.collapsed.remove(&zone);
+                let desired = if *collapsed || default { Some(*collapsed) } else { None };
+                if next.workspace.ws.layout.collapsed.get(zone).copied() != desired {
+                    let layout = &mut Arc::make_mut(&mut next).workspace.ws.layout;
+                    match desired {
+                        Some(v) => { layout.collapsed.insert(zone.clone(), v); }
+                        None => { layout.collapsed.remove(zone); }
                     }
-                    l
-                });
-                result.label = if collapsed { "Collapse zone" } else { "Expand zone" }.to_string();
+                }
+                result.label = if *collapsed { "Collapse zone" } else { "Expand zone" }.to_string();
             }
             scope::Change::Moved(placed) => {
-                next = document_edit::layout_edit(&next, &|l| {
-                    let mut l = l.clone();
-                    for (path, x, y) in placed {
-                        l.at.insert(path.clone(), (*x, *y));
-                    }
-                    l
-                });
-                if added.is_empty() {
-                    result.label = "Move".to_string();
+                if placed.iter().any(|(path, x, y)| next.workspace.ws.layout.at.get(path) != Some(&(*x, *y))) {
+                    let layout = &mut Arc::make_mut(&mut next).workspace.ws.layout;
+                    for (path, x, y) in placed { layout.at.insert(path.clone(), (*x, *y)); }
                 }
+                if added.is_empty() { result.label = "Move".to_string(); }
             }
             scope::Change::Level_set(changes) => {
-                next = document_edit::layout_edit(&next, &|l| {
-                    let mut l = l.clone();
+                if changes.iter().any(|(path, level, pinned)| next.workspace.ws.layout.level.get(path) != level.as_ref() || next.workspace.ws.layout.pinned.get(path).copied() != if *pinned { Some(true) } else { None }) {
+                    let layout = &mut Arc::make_mut(&mut next).workspace.ws.layout;
                     for (path, level, pinned) in changes {
                         match level {
-                            Some(v) => {
-                                l.level.insert(path.clone(), v.clone());
-                            }
-                            None => {
-                                l.level.remove(path);
-                            }
+                            Some(v) => { layout.level.insert(path.clone(), v.clone()); }
+                            None => { layout.level.remove(path); }
                         }
-                        if *pinned {
-                            l.pinned.insert(path.clone(), true);
-                        } else {
-                            l.pinned.remove(path);
-                        }
+                        if *pinned { layout.pinned.insert(path.clone(), true); } else { layout.pinned.remove(path); }
                     }
-                    l
-                });
+                }
                 result.label = "Detail level".to_string();
             }
-            scope::Change::Probe_set { zone, index } => {
-                probes.insert(zone.clone(), *index);
-            }
+            scope::Change::Probe_set { zone, index } => { probes.insert(zone.clone(), *index); }
             scope::Change::Frames_set { scope: sc, frames } => {
-                next = document_edit::layout_edit(&next, &|l| {
-                    let mut l = l.clone();
-                    if frames.is_empty() {
-                        l.frames.remove(sc);
-                    } else {
-                        l.frames.insert(sc.clone(), frames.iter().map(|(title, at, size)| lbp::Frame { title: title.clone(), at: *at, size: *size }).collect());
-                    }
-                    l
-                });
+                let frames: Vec<_> = frames.iter().map(|(title, at, size)| lbp::Frame { title: title.clone(), at: *at, size: *size }).collect();
+                let desired = if frames.is_empty() { None } else { Some(&frames) };
+                if next.workspace.ws.layout.frames.get(sc) != desired {
+                    let layout = &mut Arc::make_mut(&mut next).workspace.ws.layout;
+                    if frames.is_empty() { layout.frames.remove(sc); } else { layout.frames.insert(sc.clone(), frames); }
+                }
                 result.label = "Frame".to_string();
             }
             _ => {}
@@ -248,10 +221,11 @@ pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], next: 
 
 /// The scene and World edits act on derived objects: each difference is written to the text (a
 /// refused one changes nothing).
-pub fn reconciled(value: &EditorModel, before: &Document, next: Document, result: frame_result) -> (Document, frame_result) {
+pub fn reconciled(value: &EditorModel, before: &Arc<Document>, next: Arc<Document>, result: frame_result) -> (Arc<Document>, frame_result) {
+    if Arc::ptr_eq(before, &next) { return (next, result); }
     let mut result = result;
     match document_edit::reconcile(Some(&value.factories), None, before, &next) {
-        Ok(doc) => (doc, result),
+        Ok(doc) => (Arc::new(doc), result),
         Err(message) => {
             result.edit_error = Some(message);
             (before.clone(), result)
@@ -293,25 +267,25 @@ fn inline_gesture(value: &EditorModel, next: &Document, home: &Home, key: &ArgKe
     }
 }
 
-type Written = (Document, frame_result, Vec<Path>, Option<String>, Option<(String, String)>, Option<String>);
+type Written = (Arc<Document>, frame_result, Vec<Path>, Option<String>, Option<(String, String)>, Option<String>);
 
 /// The frame's changes and gestures written to the document, text first: the first refusal leaves
 /// none applied. Returns the document, the result, the nodes added, a graph made, a graph renamed
 /// and the note the echo shows.
-pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Document, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Document, result: frame_result) -> Written {
+pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Document>, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Arc<Document>, result: frame_result) -> Written {
     let (mut next, mut result) = if loaded { (next, result) } else { reconciled(value, present, next, result) };
     // Workspace gestures: one rewrite of the source per gesture, lowered into the document, one
     // history entry named by the op. A frame's gestures land together: the first one refused leaves
     // none of them applied, and a later one cannot hide its message.
-    let gestures = (next.clone(), result.clone());
+    let gestures = (!loaded && (!tree_edits.is_empty() || result.handle_changes.is_some() || !result.changes.is_empty())).then(|| (next.clone(), result.clone()));
     let mut g = gesture_log::default();
     let factories: &[Factory] = &value.factories;
     let level = pane_level(value);
-    let set_fields = |next: &mut Document, result: &mut frame_result, g: &mut gesture_log, node: i64, values: &[(String, Value)]| {
+    let set_fields = |next: &mut Arc<Document>, result: &mut frame_result, g: &mut gesture_log, node: i64, values: &[(String, Value)]| {
         match sync::set_fields(Some(factories), next, level, node, values) {
             Ok(Some((doc, effects, home))) => {
                 let note = sync::template_note(next, &home);
-                *next = doc;
+                *next = Arc::new(doc);
                 result.edit_error = None;
                 result.effects = param::union_effects(result.effects, node_effects(effects));
                 first_note(g, note);
@@ -327,7 +301,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
             }
             match sync::write(Some(factories), &next, level, edit) {
                 Ok(Some((doc, note))) => {
-                    next = doc;
+                    next = Arc::new(doc);
                     result.edit_error = None;
                     first_note(&mut g, note);
                 }
@@ -355,7 +329,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                 }
                 change::Dock_panels(source, target, side) => match dock_panels(factories, &next, source, target, *side) {
                     Ok(doc) => {
-                        next = doc;
+                        next = Arc::new(doc);
                         result.label = "Arrange panel".to_string();
                         result.edit_error = None;
                     }
@@ -364,18 +338,16 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                 change::Panel_state(path, state) => {
                     let key = panel_key(&next, path);
                     let state = *state;
-                    next = document_edit::layout_edit(&next, &|layout| {
-                        let mut layout = layout.clone();
-                        layout.panels.insert(key.clone(), state);
-                        layout
-                    });
+                    if next.workspace.ws.layout.panels.get(&key) != Some(&state) {
+                        Arc::make_mut(&mut next).workspace.ws.layout.panels.insert(key, state);
+                    }
                     result.label = if state.collapsed { "Collapse panel" } else { "Arrange panel" }.to_string();
                     result.edit_error = None;
                 }
                 change::Select_layout(name) if editor_document::workspace_doc::editor_graph(&next.workspace.ws).map(|g| g.name).as_ref() == Some(name) => {}
                 change::Select_layout(name) => match document_edit::select_layout(Some(factories), &next, name) {
                     Ok(doc) => {
-                        next = doc;
+                        next = Arc::new(doc);
                         result.label = "Switch layout".to_string();
                         result.edit_error = None;
                     }
@@ -419,7 +391,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                             Op::Duplicate { nodes } => g.added = fe::duplicated(&next.workspace.ws.source, nodes),
                             _ => {}
                         }
-                        next = doc;
+                        next = Arc::new(doc);
                         result.label = fe::label(op).to_string();
                         result.edit_error = None;
                         result.effects = param::union_effects(result.effects, document_edit::cook_effects());
@@ -429,7 +401,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                 },
                 change::Layout_edit(op) => match document_edit::layout_op(Some(factories), &next, op) {
                     Ok(doc) => {
-                        next = doc;
+                        next = Arc::new(doc);
                         result.label = layout_edit::label(op).to_string();
                         result.edit_error = None;
                         result.effects = param::union_effects(result.effects, document_edit::cook_effects());
@@ -449,7 +421,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                                 _ => {}
                             }
                         }
-                        next = doc;
+                        next = Arc::new(doc);
                         result.label = label.clone();
                         result.edit_error = None;
                         result.effects = param::union_effects(result.effects, document_edit::cook_effects());
@@ -458,25 +430,20 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                     Err(message) => g.refused = Some(message),
                 },
                 change::Pin_row { node, label, pin } => {
-                    let (node, label, pin) = (node.clone(), label.clone(), *pin);
-                    next = document_edit::layout_edit(&next, &|l| {
-                        let mut l = l.clone();
-                        let mut rows = l.rows.get(&node).cloned().unwrap_or_default();
+                    let pin = *pin;
+                    let current = next.workspace.ws.layout.rows.get(node).and_then(|rows| rows.get(label)).copied();
+                    if current != pin || next.workspace.ws.layout.rows.get(node).is_some_and(|rows| rows.is_empty()) {
+                        let rows = &mut Arc::make_mut(&mut next).workspace.ws.layout.rows;
                         match pin {
-                            Some(v) => {
-                                rows.insert(label.clone(), v);
-                            }
+                            Some(v) => { rows.entry(node.clone()).or_default().insert(label.clone(), v); }
                             None => {
-                                rows.remove(&label);
+                                if let Some(pinned) = rows.get_mut(node) {
+                                    pinned.remove(label);
+                                    if pinned.is_empty() { rows.remove(node); }
+                                }
                             }
                         }
-                        if rows.is_empty() {
-                            l.rows.remove(&node);
-                        } else {
-                            l.rows.insert(node.clone(), rows);
-                        }
-                        l
-                    });
+                    }
                     result.label = if pin == Some(false) { "Unpin row from card" } else { "Pin row to card" }.to_string();
                     result.edit_error = None;
                 }
@@ -496,7 +463,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                             match applied {
                                 Ok(doc) => {
                                     let note = sync::template_note(&next, &home);
-                                    next = doc;
+                                    next = Arc::new(doc);
                                     result.label = "Edit expression".to_string();
                                     result.effects = param::union_effects(result.effects, document_edit::cook_effects());
                                     g.note = note;
@@ -514,7 +481,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                     });
                     match applied {
                         Ok((doc, label)) => {
-                            next = doc;
+                            next = Arc::new(doc);
                             result.label = label;
                             result.effects = param::union_effects(result.effects, document_edit::cook_effects());
                         }
@@ -529,7 +496,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
                     });
                     match applied {
                         Ok((doc, label)) => {
-                            next = doc;
+                            next = Arc::new(doc);
                             result.label = label;
                             result.effects = param::union_effects(result.effects, document_edit::cook_effects());
                         }
@@ -541,7 +508,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Documen
         }
     }
     if let Some(edit_error) = g.refused.clone() {
-        let (doc, mut res) = gestures;
+        let (doc, mut res) = gestures.expect("a refused gesture has a rollback snapshot");
         res.edit_error = Some(edit_error);
         g.added = Vec::new();
         g.created = None;
@@ -1021,7 +988,6 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             None => "Edit".to_string(),
         },
     };
-    let original_document = document.clone();
     let result_document_unchanged = kg::same(&document, &level_objects(&value.into()));
     result.document = document;
     result.selection = selection;
@@ -1031,24 +997,23 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     result.effects = param::union_effects(node_effects(param::union_effects(editor_effects, parameter_effects)), settings_effects);
     result.settings = new_settings;
     result.label = label;
-    let _ = original_document;
     let (timeline, timeline_changes, timeline_frames) = timeline_step(value, timeline, timeline_changes, &result);
     let (prompt, notice, loaded) = prompt_step(value, &*view_state, &result);
     let loaded_flag = loaded.is_some();
     // Shared undo stack: every document change (a parameter, a workspace gesture, an inspector
     // commit) becomes one history entry; Command/Ctrl-Z undoes, Shift-Command/Ctrl-Z or Ctrl-Y redoes.
     let present: Arc<Document> = value.doc.clone();
-    let mut next: Document = match &loaded {
-        Some(preset) => preset.doc.clone(),
-        None => {
+    let (mut next, loaded_view) = match loaded {
+        Some(preset) => (Arc::new(preset.doc), Some(preset.view)),
+        None => ( {
             // the host's objects or layers as this frame's derived edits leave them
             if result_document_unchanged || network_present(&value.into()) {
-                (*present).clone()
+                present.clone()
             } else {
                 let doc = document::with_kinds(&present, pane_level(&value.into()), result.document.clone());
-                if pane_level(&value.into()) == Level::Scene { document::prune(&doc) } else { doc }
+                Arc::new(if pane_level(&value.into()) == Level::Scene { document::prune(&doc) } else { doc })
             }
-        }
+        }, None)
     };
     // Enter and row activation share camera selection and look-through.
     let entered_camera: Option<i64> = if pane_level(&value.into()) != Level::Scene || loaded_flag || carrying {
@@ -1103,7 +1068,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     if objects::ids("world", &next.scene).is_empty() && actions.contains(&action::Go_world) {
         if let Ok(ops) = sync::add_world(&next) {
             if let Ok(doc) = document_edit::syntax_batch(Some(&value.factories), &next, &ops) {
-                next = doc;
+                next = Arc::new(doc);
                 world_added = true;
             }
         }
@@ -1117,7 +1082,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
                 continue;
             }
             match sync::write(Some(&value.factories), &next, *level, edit) {
-                Ok(Some((doc, _))) => next = doc,
+                Ok(Some((doc, _))) => next = Arc::new(doc),
                 Ok(None) => {}
                 Err(message) => result.edit_error = Some(message),
             }
@@ -1125,7 +1090,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     let input_frame = view_input(value, &result);
     let gesture = gesture_key(&value.into(), &frame_, loaded_flag, world_added, &world_label, &result);
-    let history_after = if same_document(&next, &present) {
+    let history_after = if Arc::ptr_eq(&next, &present) || same_document(&next, &present) {
         value.history.clone()
     } else {
         let label = if matches!(result.prompt_intent, Some(prompt_intent::Load_last_state)) && loaded_flag {
@@ -1418,7 +1383,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         prepared_changed,
         scene_changed,
         framed,
-        loaded_view: loaded.map(|p| p.view),
+        loaded_view,
         actions: out_actions,
         panel: result.panel.clone(),
         input: input_frame,

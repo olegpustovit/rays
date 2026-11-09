@@ -90,6 +90,7 @@ fn actions_routing_and_labels() {
         // World keys outside a World edit nothing
         let (doc, label, edits) = world_keys(&(&value).into(), &value.doc, &selection::empty(), &[action::World_emit]);
         assert!(label.is_none() && edits.is_empty());
+        assert!(Arc::ptr_eq(&doc, &value.doc));
         assert!(editor_document::document::scene_graph(&doc).len() == editor_document::document::scene_graph(&value.doc).len());
         editor_host_close(&value);
     });
@@ -145,13 +146,18 @@ fn reducer_idle_undo_and_gestures() {
         let forth = reduce_idle(None, None, &back, &[action::Redo], &frame0).expect("redo");
         assert!(editor_document::preset::text(&forth.doc).unwrap().contains("second"));
 
-        // a refused gesture leaves the document and says why
+        // A successful prefix and then a refusal roll the whole gesture batch back.
         let mut result = idle_result(&(&value).into(), selection::empty());
-        result.changes = vec![change::Syntax_edit(Op::RemoveGraph { name: "missing".to_string() })];
+        result.changes = vec![
+            change::Syntax_edit(Op::AddNode { scope: vec!["g".to_string()], name: "rolled_back".to_string(), expr: syntax::parse("(sop/box)").unwrap().remove(0) }),
+            change::Syntax_edit(Op::RemoveGraph { name: "missing".to_string() }),
+        ];
         let mut refused = value.clone();
         reduce(None, None, idle_input(&(&value).into(), &[], &frame0), &mut refused, result);
         assert!(Arc::ptr_eq(&refused.doc, &value.doc));
         assert!(refused.edit_error.is_some());
+        assert_eq!(history::depth(&refused.history), 0);
+        assert_eq!(editor_document::preset::text(&refused.doc).unwrap(), editor_document::preset::text(&value.doc).unwrap());
         editor_host_close(&value);
     });
 }
@@ -176,13 +182,18 @@ fn reducer_gesture_keys_layout_and_prompts() {
         // a moved card is a layout edit with the label of the gesture
         let mut result = idle_result(&(&value).into(), selection::empty());
         result.scope_changes = vec![scope::Change::Moved(vec![(vec!["g".to_string(), "a".to_string()], 10.0, 20.0)])];
-        let (next, result, _) = editor_reduce::layout_gestures(&value, false, &[], (*value.doc).clone(), result.clone(), &result.scope_changes.clone());
+        let (next, result, _) = editor_reduce::layout_gestures(&value, false, &[], value.doc.clone(), result.clone(), &result.scope_changes.clone());
         assert_eq!(result.label, "Move");
         assert_eq!(next.workspace.ws.layout.at.get(&vec!["g".to_string(), "a".to_string()]), Some(&(10.0, 20.0)));
+        let same = next.clone();
+        let repeated = result.scope_changes.clone();
+        let (next, repeated_result, _) = editor_reduce::layout_gestures(&value, false, &[], next, result.clone(), &repeated);
+        assert!(Arc::ptr_eq(&next, &same));
+        assert_eq!(repeated_result.label, "Move");
         // a zone collapsed is stored, a probe is view state only
         let mut result = idle_result(&(&value).into(), selection::empty());
         result.scope_changes = vec![scope::Change::Zone_collapsed { zone: vec!["g".to_string(), "z".to_string()], collapsed: true }, scope::Change::Probe_set { zone: vec!["g".to_string(), "z".to_string()], index: 3 }];
-        let (next, result, probes) = editor_reduce::layout_gestures(&value, false, &[], (*value.doc).clone(), result.clone(), &result.scope_changes.clone());
+        let (next, result, probes) = editor_reduce::layout_gestures(&value, false, &[], value.doc.clone(), result.clone(), &result.scope_changes.clone());
         assert_eq!(result.label, "Collapse zone");
         assert_eq!(next.workspace.ws.layout.collapsed.get(&vec!["g".to_string(), "z".to_string()]), Some(&true));
         assert_eq!(probes.get(&vec!["g".to_string(), "z".to_string()]), Some(&3));
@@ -489,6 +500,31 @@ fn frame_views_borrow_the_owned_model() {
         eprintln!("borrowed frame views: {peak} peak bytes");
         assert_eq!(value.preferences.as_ptr(), identity, "frame copied its owned model");
         assert!(peak <= 100_000, "frame copied model payloads: {peak} peak bytes");
+        editor_host_close(&value);
+    });
+}
+
+#[test]
+fn idle_gestures_keep_document_and_frame_storage() {
+    big_stack(|| {
+        let value = model();
+        let mut result = idle_result(&(&value).into(), selection::empty());
+        result.label = "idle".repeat(25_000);
+        let label = result.label.as_ptr();
+        let next = value.doc.clone();
+        mem_sys::local_reset();
+        let started = std::time::Instant::now();
+        let (doc, result, added, created, renamed, note) = editor_reduce::write_gestures(
+            &(&value).into(), false, &value.doc, &[], &|_| false, &|effects| effects, next, result,
+        );
+        let elapsed = started.elapsed();
+        let allocations = mem_sys::local_alloc_count();
+        eprintln!("idle write_gestures: {allocations} allocations, {elapsed:?}");
+        assert!(Arc::ptr_eq(&doc, &value.doc));
+        assert_eq!(result.label.as_ptr(), label);
+        assert!(result.edit_error.is_none());
+        assert!(added.is_empty() && created.is_none() && renamed.is_none() && note.is_none());
+        assert_eq!(allocations, 0, "idle gestures copied document or rollback storage");
         editor_host_close(&value);
     });
 }

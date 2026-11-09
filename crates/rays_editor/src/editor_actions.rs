@@ -4,6 +4,7 @@
 use editor_core::keymap::Trigger;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use editor_core::panels::{self, Panel};
 use editor_document::document::{self, Level, T as Document};
 use editor_document::kind_graph as kg;
@@ -86,7 +87,7 @@ pub fn in_world<'a>(value: &ModelView<'a>) -> bool {
 
 /// World keys: edit the selected layer, or the World node in the scene. Returns the derived
 /// document, the last label and the edits the text can write.
-pub fn world_keys<'a>(value: &ModelView<'a>, doc: &Document, selection: &selection::Selection, actions: &[action]) -> (Document, Option<String>, Vec<(Level, Edit)>) {
+pub fn world_keys<'a>(value: &ModelView<'a>, doc: &Arc<Document>, selection: &selection::Selection, actions: &[action]) -> (Arc<Document>, Option<String>, Vec<(Level, Edit)>) {
     let world_id = match pane_level(value) {
         Level::Inside(id) => Some(id),
         Level::Scene => None,
@@ -103,29 +104,29 @@ pub fn world_keys<'a>(value: &ModelView<'a>, doc: &Document, selection: &selecti
         f(&found).map(|values| (Level::Scene, Edit::Fields(vec![(id, values)]), label.to_string()))
     };
     // a World the text does not have is edited as a derived object, for reconcile to adopt
-    let with_fields = |doc: &Document, level: Level, edits: &[(i64, Vec<(String, Value)>)]| -> Document {
-        match document::kinds(doc, level) {
-            None => doc.clone(),
-            Some(graph) => {
-                let graph = edits.iter().fold(graph, |graph, (id, values)| match kg::set_fields(&graph, *id, values) {
-                    Ok((graph, _)) => graph,
-                    Err(_) => graph,
-                });
-                document::with_kinds(doc, level, graph)
+    let with_fields = |doc: &mut Arc<Document>, level: Level, edits: &[(i64, Vec<(String, Value)>)]| {
+        if let Some(graph) = document::kinds(doc, level) {
+            let graph = edits.iter().fold(graph, |graph, (id, values)| match kg::set_fields(&graph, *id, values) {
+                Ok((graph, _)) => graph,
+                Err(_) => graph,
+            });
+            let current = match level { Level::Scene => Some(&doc.scene), Level::Inside(id) => document::layers(doc, id) };
+            if current.is_none_or(|current| !kg::same(current, &graph)) {
+                let doc = Arc::make_mut(doc);
+                match level { Level::Scene => doc.scene = graph, Level::Inside(id) => { doc.layers.insert(id, graph); } }
             }
         }
     };
-    let derived = |doc: &Document, level: Level, edit: &Edit| -> Document {
+    let derived = |doc: &mut Arc<Document>, level: Level, edit: &Edit| {
         match edit {
             Edit::Fields(edits) => with_fields(doc, level, edits),
-            Edit::Layers(new_layers, values) => match level {
-                Level::Inside(id) => {
-                    let doc = document::with_layers(doc, id, new_layers.clone());
-                    with_fields(&doc, Level::Scene, &[(id, values.clone())])
+            Edit::Layers(new_layers, values) => if let Level::Inside(id) = level {
+                if document::layers(doc, id).is_none_or(|current| !kg::same(current, new_layers)) {
+                    Arc::make_mut(doc).layers.insert(id, new_layers.clone());
                 }
-                Level::Scene => doc.clone(),
+                with_fields(doc, Level::Scene, &[(id, values.clone())]);
             },
-            _ => doc.clone(),
+            _ => {}
         }
     };
     let field = |name: &str, node: &kg::Node| kg::field(node, name);
@@ -182,7 +183,7 @@ pub fn world_keys<'a>(value: &ModelView<'a>, doc: &Document, selection: &selecti
         if sync::writes(doc, level, &edit) {
             edits.push((level, edit));
         } else {
-            derived_doc = derived(&derived_doc, level, &edit);
+            derived(&mut derived_doc, level, &edit);
         }
         label = Some(name);
     }
