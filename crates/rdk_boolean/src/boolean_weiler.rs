@@ -1,4 +1,5 @@
 //! Port of lib/rdk/boolean/boolean_weiler.ml: Weiler half-facet adjacency and local shell graph.
+use rdk_core::support::DisjointSet;
 use std::sync::Arc;
 
 use rdk_core::{cancel, error};
@@ -60,32 +61,6 @@ pub mod view {
     }
 }
 
-fn find(parent: &mut [i64], value: i64) -> i64 {
-    let mut root = value;
-    while parent[root as usize] != root {
-        root = parent[root as usize];
-    }
-    let mut cursor = value;
-    while parent[cursor as usize] != cursor {
-        let next = parent[cursor as usize];
-        parent[cursor as usize] = root;
-        cursor = next;
-    }
-    root
-}
-
-fn unite(parent: &mut [i64], left: i64, right: i64) {
-    let left = find(parent, left);
-    let right = find(parent, right);
-    if left != right {
-        if left < right {
-            parent[right as usize] = left;
-        } else {
-            parent[left as usize] = right;
-        }
-    }
-}
-
 fn cancelled(failure: error::T) -> error::T {
     if error::is_cancelled(&failure) {
         error::cancelled(OPERATION)
@@ -110,7 +85,7 @@ pub fn build(
     let facets = complex::facet_count(c);
     let half_facets = facets * 2;
     let mut neighbors = vec![-1_i64; (half_facets * 3) as usize];
-    let mut parent: Vec<i64> = (0..half_facets).collect();
+    let mut parent = DisjointSet::new(half_facets as usize);
     let mut set_neighbor = |half: i64, local: i64, neighbor: i64| -> Result<(), error::T> {
         let slot = (half * 3 + local) as usize;
         if neighbors[slot] >= 0 && neighbors[slot] != neighbor {
@@ -155,26 +130,26 @@ pub fn build(
             let next_half = half_facet(next_facet, next_side);
             set_neighbor(current_half, current_local, next_half)?;
             set_neighbor(next_half, next_local, current_half)?;
-            unite(&mut parent, current_half, next_half);
+            parent.union_min(current_half as usize, next_half as usize);
         }
     }
     if neighbors.iter().any(|&slot| slot < 0) {
         return Err(invalid("Weiler half-edge has no radial neighbor"));
     }
     for half in 0..half_facets {
-        let root = find(&mut parent, half);
-        parent[half as usize] = root;
+        let root = parent.find(half as usize) as i64;
+        parent.parent[half as usize] = root;
     }
     let mut shell_of_root = vec![-1_i64; half_facets as usize];
     let mut shell_count = 0_i64;
     for half in 0..half_facets {
-        if parent[half as usize] == half {
+        if parent.parent[half as usize] == half {
             shell_of_root[half as usize] = shell_count;
             shell_count += 1;
         }
     }
     let shells: Vec<i64> =
-        (0..half_facets).map(|half| shell_of_root[parent[half as usize] as usize]).collect();
+        (0..half_facets).map(|half| shell_of_root[parent.parent[half as usize] as usize]).collect();
     let mut left_winding = vec![0_i64; facets as usize];
     let mut right_winding = vec![0_i64; facets as usize];
     for facet in 0..facets {

@@ -36,6 +36,77 @@ pub mod bits {
     }
 }
 
+/// Disjoint sets with full path compression. Negative parents mark excluded elements; only active
+/// elements may be passed to `find` and `union_min`. Rank union skips excluded elements.
+/// Rank storage is allocated only when rank union is used.
+pub struct DisjointSet {
+    pub parent: Vec<i64>,
+    pub rank: Vec<u8>,
+}
+
+impl DisjointSet {
+    #[inline(always)]
+    pub fn new(count: usize) -> Self {
+        Self::from_parents((0..count as i64).collect())
+    }
+
+    #[inline(always)]
+    pub fn from_parents(parent: Vec<i64>) -> Self {
+        Self { parent, rank: Vec::new() }
+    }
+
+    #[inline(always)]
+    pub fn find(&mut self, value: usize) -> usize {
+        let parent = self.parent.as_mut_slice();
+        let mut root = value;
+        while parent[root] != root as i64 {
+            root = parent[root] as usize;
+        }
+        let mut current = value;
+        while parent[current] != root as i64 {
+            let next = parent[current] as usize;
+            parent[current] = root as i64;
+            current = next;
+        }
+        root
+    }
+
+    #[inline(always)]
+    pub fn union_min(&mut self, left: usize, right: usize) -> bool {
+        let left = self.find(left);
+        let right = self.find(right);
+        if left == right { return false; }
+        if left < right {
+            self.parent[right] = left as i64;
+        } else {
+            self.parent[left] = right as i64;
+        }
+        true
+    }
+
+    /// Union by rank; ties keep the left root unless `min_on_tie` selects the smaller root.
+    #[inline(always)]
+    pub fn union_rank(&mut self, left: usize, right: usize, min_on_tie: bool) -> bool {
+        if self.parent[left] < 0 || self.parent[right] < 0 { return false; }
+        let left = self.find(left);
+        let right = self.find(right);
+        if left == right { return false; }
+        if self.rank.is_empty() { self.rank = vec![0; self.parent.len()]; }
+        let (parent, rank) = (self.parent.as_mut_slice(), self.rank.as_mut_slice());
+        let (left_rank, right_rank) = (rank[left], rank[right]);
+        if left_rank < right_rank {
+            parent[left] = right as i64;
+        } else if left_rank > right_rank {
+            parent[right] = left as i64;
+        } else {
+            let (root, child) = if min_on_tie && right < left { (right, left) } else { (left, right) };
+            parent[child] = root as i64;
+            rank[root] = left_rank + 1;
+        }
+        true
+    }
+}
+
 #[derive(Clone)]
 pub enum IdentityValue {
     PointIndex(crate::point_index::T),
@@ -726,5 +797,51 @@ mod tests {
         assert_eq!(owner.bytes(), CHARGE);
         drop(token);
         assert_eq!(owner.bytes(), 0);
+    }
+    #[test]
+    fn disjoint_set_policies_compress_paths_and_preserve_roots() {
+        use std::time::Instant;
+        const COUNT: usize = 262_144;
+        let median = |mut values: Vec<u128>| { values.sort_unstable(); values[values.len() / 2] };
+        let mut min_times = Vec::new();
+        let mut rank_times = Vec::new();
+        for _ in 0..7 {
+            let started = Instant::now();
+            let mut set = DisjointSet::new(COUNT);
+            for point in (1..COUNT).rev() { set.union_min(point, point - 1); }
+            let sum: usize = (0..COUNT).map(|point| set.find((point * 40_503) % COUNT)).sum();
+            min_times.push(started.elapsed().as_nanos());
+            assert_eq!(sum, 0);
+            assert!(set.parent.iter().all(|&parent| parent == 0));
+            assert!(set.rank.is_empty());
+            let started = Instant::now();
+            let mut set = DisjointSet::new(COUNT);
+            for point in (1..COUNT).rev() { set.union_rank(point, point - 1, false); }
+            let sum: usize = (0..COUNT).map(|point| set.find((point * 40_503) % COUNT)).sum();
+            rank_times.push(started.elapsed().as_nanos());
+            assert_eq!(sum, COUNT * (COUNT - 1));
+            assert!(set.parent.iter().all(|&parent| parent == (COUNT - 1) as i64));
+            assert_eq!(set.rank[COUNT - 1], 1);
+        }
+        println!("disjoint-set: min {} ns, rank {} ns (median 7 × {COUNT} union/find; construction included)", median(min_times), median(rank_times));
+        let mut left_tie = DisjointSet::new(6);
+        assert!(left_tie.union_rank(5, 4, false));
+        left_tie.union_rank(3, 2, false);
+        left_tie.union_rank(5, 3, false);
+        assert_eq!(left_tie.find(2), 5);
+        assert_eq!(left_tie.rank[5], 2);
+        assert!(!left_tie.union_rank(2, 4, false));
+        let mut min_tie = DisjointSet::new(6);
+        min_tie.union_rank(5, 4, true);
+        min_tie.union_rank(3, 2, true);
+        min_tie.union_rank(4, 2, true);
+        min_tie.union_rank(0, 1, true);
+        min_tie.union_rank(0, 2, true);
+        assert_eq!(min_tie.find(0), 2); // Rank wins before the smaller-root tie break.
+        assert_eq!(min_tie.rank[2], 2);
+        let mut masked = DisjointSet::from_parents(vec![-1, 1, 2]);
+        assert!(!masked.union_rank(2, 0, false));
+        assert!(masked.union_min(2, 1));
+        assert_eq!(masked.parent, vec![-1, 1, 1]);
     }
 }

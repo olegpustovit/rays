@@ -1,6 +1,7 @@
 //! The Facet SOP: unique points, point and normal consolidation, inline-point removal, polygon
 //! orientation and cusping, degenerate removal, planarization and normal adjustment, composed
 //! over an optional selection.
+use rdk_core::support::DisjointSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -836,45 +837,6 @@ fn orient_polygons(
     )
 }
 
-struct UnionFind {
-    parent: Vec<i64>,
-    rank: Vec<u8>,
-}
-
-impl UnionFind {
-    fn root(&mut self, vertex: i64) -> i64 {
-        let mut representative = vertex;
-        while self.parent[representative as usize] != representative {
-            representative = self.parent[representative as usize];
-        }
-        let mut current = vertex;
-        while self.parent[current as usize] != representative {
-            let next = self.parent[current as usize];
-            self.parent[current as usize] = representative;
-            current = next;
-        }
-        representative
-    }
-
-    fn union(&mut self, left: i64, right: i64) {
-        let left = self.root(left);
-        let right = self.root(right);
-        if left != right {
-            let left_rank = self.rank[left as usize];
-            let right_rank = self.rank[right as usize];
-            if left_rank < right_rank {
-                self.parent[left as usize] = right;
-            } else if right_rank < left_rank {
-                self.parent[right as usize] = left;
-            } else {
-                let (representative, child) = if left < right { (left, right) } else { (right, left) };
-                self.parent[child as usize] = representative;
-                self.rank[representative as usize] = left_rank + 1;
-            }
-        }
-    }
-}
-
 fn split_points_on_edge_ends(
     cancel_value: Option<&cancel::T>,
     grain: i64,
@@ -888,7 +850,7 @@ fn split_points_on_edge_ends(
     let iv = topology_index::view::view(index);
     let vertex_count = view.vertex_points.len() as i64;
     let edge_count = iv.edge_a.len() as i64;
-    let mut sets = UnionFind { parent: (0..vertex_count).collect(), rank: vec![0; vertex_count as usize] };
+    let mut sets = DisjointSet::new(vertex_count as usize);
     let mut affected = vec![false; view.point_count as usize];
     for edge in 0..edge_count as usize {
         let flags = split_ends[edge];
@@ -910,7 +872,7 @@ fn split_points_on_edge_ends(
                 if representative < 0 {
                     representative = vertex;
                 } else {
-                    sets.union(representative, vertex);
+                    sets.union_rank(representative as usize, vertex as usize, true);
                 }
             }
         }
@@ -933,14 +895,14 @@ fn split_points_on_edge_ends(
                     if representative_a < 0 {
                         representative_a = vertex_a;
                     } else {
-                        sets.union(representative_a, vertex_a);
+                        sets.union_rank(representative_a as usize, vertex_a as usize, true);
                     }
                 }
                 if flags & 2 == 0 {
                     if representative_b < 0 {
                         representative_b = vertex_b;
                     } else {
-                        sets.union(representative_b, vertex_b);
+                        sets.union_rank(representative_b as usize, vertex_b as usize, true);
                     }
                 }
             }
@@ -960,7 +922,7 @@ fn split_points_on_edge_ends(
             while at < last && component == 0 {
                 let vertex = iv.point_vertices[at as usize];
                 if !is_selected(primitives, iv.primitive_of_vertex[vertex as usize]) {
-                    let representative = sets.root(vertex);
+                    let representative = sets.find(vertex as usize);
                     root_output[representative as usize] = point;
                     component = 1;
                 }
@@ -968,7 +930,7 @@ fn split_points_on_edge_ends(
             }
         }
         for local in first..last {
-            let representative = sets.root(iv.point_vertices[local as usize]);
+            let representative = sets.find(iv.point_vertices[local as usize] as usize);
             if root_output[representative as usize] < 0 {
                 if component == 0 {
                     root_output[representative as usize] = point;
@@ -999,7 +961,7 @@ fn split_points_on_edge_ends(
     let mut vertex_points = vec![0_i64; vertex_count as usize];
     for vertex in 0..vertex_count {
         poll(cancel_value, vertex, 4095)?;
-        let root = sets.root(vertex);
+        let root = sets.find(vertex as usize);
         vertex_points[vertex as usize] = root_output[root as usize];
     }
     let target_topology = topology::view::create_validated_owned(

@@ -1,6 +1,7 @@
 //! Port of lib/rdk/boolean/boolean_cells.ml: exact-axis shell winding classification for a
 //! Weiler complex. `Parallel.both` of the two component builds runs sequentially (the result is
 //! identical); BVH query scratch is local to each query so queries share no mutable state.
+use rdk_core::support::DisjointSet;
 use rays_math::float::compare as float_compare;
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
@@ -237,32 +238,6 @@ fn triangle_point(c: &constraints::T, side: Side, triangle: i64, local: i64) -> 
     }
 }
 
-fn find(parent: &mut [i64], value: i64) -> i64 {
-    let mut root = value;
-    while parent[root as usize] != root {
-        root = parent[root as usize];
-    }
-    let mut cursor = value;
-    while parent[cursor as usize] != cursor {
-        let next = parent[cursor as usize];
-        parent[cursor as usize] = root;
-        cursor = next;
-    }
-    root
-}
-
-fn unite(parent: &mut [i64], left: i64, right: i64) {
-    let left = find(parent, left);
-    let right = find(parent, right);
-    if left != right {
-        if left < right {
-            parent[right as usize] = left;
-        } else {
-            parent[left as usize] = right;
-        }
-    }
-}
-
 fn build_components(
     cancel_value: Option<&cancel::T>,
     c: &constraints::T,
@@ -272,7 +247,7 @@ fn build_components(
         Side::Left => constraints::left_triangle_count(c),
         Side::Right => constraints::right_triangle_count(c),
     };
-    let mut parent: Vec<i64> = (0..triangle_count).collect();
+    let mut parent = DisjointSet::new(triangle_count as usize);
     let source_points = constraints::view::source_point_count(c);
     let mut first_triangle = vec![-1_i64; source_points as usize];
     for triangle in 0..triangle_count {
@@ -286,20 +261,20 @@ fn build_components(
             if other < 0 {
                 first_triangle[point as usize] = triangle;
             } else {
-                unite(&mut parent, triangle, other);
+                parent.union_min(triangle as usize, other as usize);
             }
         }
     }
     for triangle in 0..triangle_count {
         cancel::poll(cancel_value, triangle, 4095)?;
-        let root = find(&mut parent, triangle);
-        parent[triangle as usize] = root;
+        let root = parent.find(triangle as usize) as i64;
+        parent.parent[triangle as usize] = root;
     }
     let mut component_of_root = vec![-1_i64; triangle_count as usize];
     let mut count = 0_i64;
     for triangle in 0..triangle_count {
         cancel::poll(cancel_value, triangle, 4095)?;
-        if parent[triangle as usize] == triangle {
+        if parent.parent[triangle as usize] == triangle {
             component_of_root[triangle as usize] = count;
             count += 1;
         }
@@ -307,7 +282,7 @@ fn build_components(
     let mut component_of_triangle = Vec::with_capacity(triangle_count as usize);
     for triangle in 0..triangle_count {
         cancel::poll(cancel_value, triangle, 4095)?;
-        component_of_triangle.push(component_of_root[parent[triangle as usize] as usize]);
+        component_of_triangle.push(component_of_root[parent.parent[triangle as usize] as usize]);
     }
     let n = count as usize;
     let mut counts = vec![0_i64; n];

@@ -1,3 +1,4 @@
+use crate::support::DisjointSet;
 use crate::{attribute, edge_group, error, geometry, group, topology, topology_index};
 use crate::error::Code;
 
@@ -27,87 +28,37 @@ pub fn signed_volume(geometry_value: &geometry::T) -> Result<f64, error::T> {
     Ok(volume / 6.0)
 }
 
-struct DisjointSet {
-    parent: Vec<i64>,
-    rank: Vec<u8>,
-}
-
-impl DisjointSet {
-    fn new(count: i64, allowed: &dyn Fn(i64) -> bool) -> Self {
-        let mut parent = Vec::with_capacity(count as usize);
-        for element in 0..count {
-            parent.push(if allowed(element) { element } else { -1 });
-        }
-        Self { parent, rank: vec![0; count as usize] }
-    }
-
-    fn root(&mut self, element: i64) -> i64 {
-        let element_index = element as usize;
-        let mut cursor = element_index;
-        while self.parent[cursor] != cursor as i64 {
-            cursor = self.parent[cursor] as usize;
-        }
-        let result = cursor as i64;
-        let mut cursor = element_index;
-        while self.parent[cursor] != cursor as i64 {
-            let next = self.parent[cursor] as usize;
-            self.parent[cursor] = result;
-            cursor = next;
-        }
-        result
-    }
-
-    fn union(&mut self, left: i64, right: i64) {
-        if left < 0 || right < 0 || self.parent[left as usize] < 0 || self.parent[right as usize] < 0 {
-            return;
-        }
-        let left_root = self.root(left);
-        let right_root = self.root(right);
-        if left_root == right_root {
-            return;
-        }
-        let left_rank = self.rank[left_root as usize];
-        let right_rank = self.rank[right_root as usize];
-        if left_rank < right_rank {
-            self.parent[left_root as usize] = right_root;
-        } else if left_rank > right_rank {
-            self.parent[right_root as usize] = left_root;
-        } else {
-            self.parent[right_root as usize] = left_root;
-            self.rank[left_root as usize] = left_rank + 1;
-        }
-    }
-
-    fn component_classes(mut self) -> (Vec<i64>, i64) {
-        let mut next_class = 0;
-        for element in 0..self.parent.len() {
-            if self.parent[element] >= 0 {
-                let mut representative = element;
-                while self.rank[representative] != u8::MAX
-                    && self.parent[representative] != representative as i64
-                {
-                    representative = self.parent[representative] as usize;
-                }
-                let class_id = if self.rank[representative] == u8::MAX {
-                    self.parent[representative]
-                } else {
-                    let class_id = next_class;
-                    next_class += 1;
-                    self.parent[representative] = class_id;
-                    self.rank[representative] = u8::MAX;
-                    class_id
-                };
-                let mut cursor = element;
-                while self.rank[cursor] != u8::MAX {
-                    let next = self.parent[cursor] as usize;
-                    self.parent[cursor] = class_id;
-                    self.rank[cursor] = u8::MAX;
-                    cursor = next;
-                }
+// Union is finished: reuse the parent and rank storage for first-member-ordered class IDs.
+fn component_classes(mut set: DisjointSet) -> (Vec<i64>, i64) {
+    if set.rank.is_empty() { set.rank = vec![0; set.parent.len()]; }
+    let mut next_class = 0;
+    for element in 0..set.parent.len() {
+        if set.parent[element] >= 0 {
+            let mut representative = element;
+            while set.rank[representative] != u8::MAX
+                && set.parent[representative] != representative as i64
+            {
+                representative = set.parent[representative] as usize;
+            }
+            let class_id = if set.rank[representative] == u8::MAX {
+                set.parent[representative]
+            } else {
+                let class_id = next_class;
+                next_class += 1;
+                set.parent[representative] = class_id;
+                set.rank[representative] = u8::MAX;
+                class_id
+            };
+            let mut cursor = element;
+            while set.rank[cursor] != u8::MAX {
+                let next = set.parent[cursor] as usize;
+                set.parent[cursor] = class_id;
+                set.rank[cursor] = u8::MAX;
+                cursor = next;
             }
         }
-        (self.parent, next_class)
     }
+    (set.parent, next_class)
 }
 
 fn make_error(message: String) -> error::T {
@@ -187,7 +138,7 @@ pub fn classify_connectivity(
             if seams.is_some_and(|value| edge_group::length(value) != topology_index::edge_count(&index)) {
                 return Err(make_error("Connectivity: seam group length does not match topology".to_owned()));
             }
-            let mut set = DisjointSet::new(point_count, &|point| allowed(points, point));
+            let mut set = DisjointSet::from_parents((0..point_count).map(|point| if allowed(points, point) { point } else { -1 }).collect());
             for primitive in 0..primitive_count {
                 if allowed(primitives, primitive) {
                     let first = topology_view.primitive_offsets[primitive as usize];
@@ -197,18 +148,19 @@ pub fn classify_connectivity(
                         let is_seam = edge >= 0
                             && seams.map_or(false, |value| edge_group::mem(edge, value));
                         if edge >= 0 && !is_seam {
-                            set.union(
-                                reverse.edge_a[edge as usize],
-                                reverse.edge_b[edge as usize],
+                            set.union_rank(
+                                reverse.edge_a[edge as usize] as usize,
+                                reverse.edge_b[edge as usize] as usize,
+                                false,
                             );
                         }
                     }
                 }
             }
-            Ok(set.component_classes())
+            Ok(component_classes(set))
         }
         attribute::Owner::Primitive => {
-            let mut set = DisjointSet::new(primitive_count, &|primitive| allowed(primitives, primitive));
+            let mut set = DisjointSet::from_parents((0..primitive_count).map(|primitive| if allowed(primitives, primitive) { primitive } else { -1 }).collect());
             match seams {
                 None => {
                     let mut first_primitive = vec![-1; point_count as usize];
@@ -222,12 +174,12 @@ pub fn classify_connectivity(
                                 if previous < 0 {
                                     first_primitive[point as usize] = primitive;
                                 } else {
-                                    set.union(primitive, previous);
+                                    set.union_rank(primitive as usize, previous as usize, false);
                                 }
                             }
                         }
                     }
-                    Ok(set.component_classes())
+                    Ok(component_classes(set))
                 }
                 Some(seam_group) => {
                     let index = topology_index::create(None, topology_value).map_err(connectivity_error)?;
@@ -247,14 +199,14 @@ pub fn classify_connectivity(
                                         let right_vertex = reverse.edge_vertices[right_slot as usize];
                                         let right = reverse.primitive_of_vertex[right_vertex as usize];
                                         if allowed(primitives, right) {
-                                            set.union(left, right);
+                                            set.union_rank(left as usize, right as usize, false);
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    Ok(set.component_classes())
+                    Ok(component_classes(set))
                 }
             }
         }

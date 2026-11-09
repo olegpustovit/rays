@@ -1,6 +1,7 @@
 //! Port of lib/rdk/ops/mesh/subdivide_refine.ml: stencil plans, creases, face-varying refinement,
 //! attribute/group remapping and local-part combination for polygon subdivision.
 pub(crate) use rays_math::float::{min as fmin, max as fmax};
+use rdk_core::support::DisjointSet;
 use std::sync::Arc;
 use rays_math::text_array::TextArray;
 use rdk_core::attribute::{self, Owner, Storage};
@@ -1680,36 +1681,7 @@ pub enum FvarRefinement {
     },
 }
 
-/// Union-find `find` with path compression.
-pub(crate) fn find_root(parents: &mut [i64], value: i64) -> i64 {
-    let mut root = value;
-    while parents[root as usize] != root {
-        root = parents[root as usize];
-    }
-    let mut current = value;
-    while parents[current as usize] != root {
-        let next = parents[current as usize];
-        parents[current as usize] = root;
-        current = next;
-    }
-    root
-}
 
-/// Union by rank.
-pub(crate) fn union_roots(parents: &mut [i64], ranks: &mut [i64], left: i64, right: i64) {
-    let left = find_root(parents, left);
-    let right = find_root(parents, right);
-    if left != right {
-        if ranks[left as usize] < ranks[right as usize] {
-            parents[left as usize] = right;
-        } else {
-            parents[right as usize] = left;
-            if ranks[left as usize] == ranks[right as usize] {
-                ranks[left as usize] += 1;
-            }
-        }
-    }
-}
 
 /// OCaml `Float.equal`: NaN equals itself, zeros of either sign are equal.
 pub(crate) fn float_equal(a: f64, b: f64) -> bool {
@@ -1774,8 +1746,7 @@ pub(crate) fn fvar_refinement(
             output_point_of_vertex: topology::view::view(&plan.topology)?.vertex_points.to_vec(),
         });
     }
-    let mut parents: Vec<i64> = (0..vertex_count).collect();
-    let mut ranks = vec![0_i64; vertex_count as usize];
+    let mut parents = DisjointSet::new(vertex_count as usize);
     let corner_at_point = |directed: i64, point: i64| -> Result<i64, error::T> {
         if gi(&topology_view.vertex_points, directed) == point {
             Ok(directed)
@@ -1797,7 +1768,7 @@ pub(crate) fn fvar_refinement(
                 let left = corner_at_point(gi(&index.edge_vertices, first), point)?;
                 let right = corner_at_point(gi(&index.edge_vertices, first + 1), point)?;
                 if equal(left, right) {
-                    union_roots(&mut parents, &mut ranks, left, right);
+                    parents.union_rank(left as usize, right as usize, false);
                 }
             }
         }
@@ -1808,7 +1779,7 @@ pub(crate) fn fvar_refinement(
         cancel::poll(cancel_token, point, 4095)?;
         let mut count = 0_i64;
         for at in gi(&index.point_offsets, point)..gi(&index.point_offsets, point + 1) {
-            let root = find_root(&mut parents, gi(&index.point_vertices, at));
+            let root = parents.find(gi(&index.point_vertices, at) as usize);
             if root_seen[root as usize] == 0 {
                 root_seen[root as usize] = 1;
                 count += 1;
@@ -1833,7 +1804,7 @@ pub(crate) fn fvar_refinement(
         let mut next = component_offsets[point as usize];
         for at in gi(&index.point_offsets, point)..gi(&index.point_offsets, point + 1) {
             let vertex = gi(&index.point_vertices, at);
-            let root = find_root(&mut parents, vertex);
+            let root = parents.find(vertex as usize);
             if root_target[root as usize] < 0 {
                 root_target[root as usize] = next;
                 source_vertex_of_point[next as usize] = vertex;
@@ -1848,7 +1819,7 @@ pub(crate) fn fvar_refinement(
     let mut fvar_vertex_points = vec![0_i64; vertex_count as usize];
     for vertex in 0..vertex_count {
         cancel::poll(cancel_token, vertex, 4095)?;
-        let root = find_root(&mut parents, vertex);
+        let root = parents.find(vertex as usize);
         let target = root_target[root as usize];
         if target < 0 {
             return Err(failm("face-varying corner has no value component"));
@@ -3667,8 +3638,7 @@ pub(crate) fn split_disconnected_point_fans(
     }
     let topology_index_value = topology_index::create(cancel_token, topology_value)?;
     let index = topology_index::view::view(&topology_index_value);
-    let mut parents: Vec<i64> = (0..vertex_count).collect();
-    let mut ranks = vec![0_i64; vertex_count as usize];
+    let mut parents = DisjointSet::new(vertex_count as usize);
     for edge in 0..index.edge_a.len() as i64 {
         cancel::poll(cancel_token, edge, 16_383)?;
         let first = gi(&index.edge_offsets, edge);
@@ -3687,16 +3657,16 @@ pub(crate) fn split_disconnected_point_fans(
                     return Err(failm("topology index exposed an incomplete edge"));
                 }
                 if gi(&topology_view.vertex_points, vertex) == reference_a {
-                    union_roots(&mut parents, &mut ranks, reference, vertex);
-                    union_roots(&mut parents, &mut ranks, reference_next, next);
+                    parents.union_rank(reference as usize, vertex as usize, false);
+                    parents.union_rank(reference_next as usize, next as usize, false);
                 } else {
-                    union_roots(&mut parents, &mut ranks, reference, next);
-                    union_roots(&mut parents, &mut ranks, reference_next, vertex);
+                    parents.union_rank(reference as usize, next as usize, false);
+                    parents.union_rank(reference_next as usize, vertex as usize, false);
                 }
             }
         }
     }
-    let roots: Vec<i64> = (0..vertex_count).map(|vertex| find_root(&mut parents, vertex)).collect();
+    let roots: Vec<i64> = (0..vertex_count).map(|vertex| parents.find(vertex as usize) as i64).collect();
     let mut root_target = vec![-1_i64; vertex_count as usize];
     let mut root_source = vec![-1_i64; vertex_count as usize];
     let mut extra = 0_i64;

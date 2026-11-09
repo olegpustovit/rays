@@ -3,6 +3,7 @@
 //! OCaml returns `(t, string) result` and lets `Cancel.Cancelled` escape; here both are an
 //! `error::T`: a plain failure has code `invalid_parameter` and the OCaml message, a cancellation
 //! has code `cancelled`.
+use rdk_core::support::DisjointSet;
 use rdk_core::{cancel, error, geometry, group, packed};
 use rdk_core::error::Code;
 
@@ -33,20 +34,6 @@ fn failure(operation: &str, message: String) -> error::T {
     error::new(operation, Code::InvalidParameter, message)
 }
 
-/// Root of `point` with full path compression.
-fn root(parent: &mut [i64], point: usize) -> usize {
-    let mut top = point;
-    while parent[top] as usize != top {
-        top = parent[top] as usize;
-    }
-    let mut at = point;
-    while parent[at] as usize != top {
-        let next = parent[at] as usize;
-        parent[at] = top as i64;
-        at = next;
-    }
-    top
-}
 
 /// Packs `cluster_of[point]` (already numbered 0..cluster_count in first-seen order) into clusters.
 fn pack(cluster_of: Vec<i64>, cluster_count: usize) -> Clusters {
@@ -81,7 +68,7 @@ pub fn of_links(
     destinations: &[i64],
 ) -> Result<T, error::T> {
     let count = destinations.len();
-    let mut parent: Vec<i64> = (0..count as i64).collect();
+    let mut parent = DisjointSet::new(count);
     for point in 0..count {
         cancel::poll(cancel_value, point as i64, 4095)?;
         let destination = destinations[point];
@@ -92,21 +79,13 @@ pub fn of_links(
             ));
         }
         if destination >= 0 && destination != point as i64 {
-            let left = root(&mut parent, point);
-            let right = root(&mut parent, destination as usize);
-            if left != right {
-                if left < right {
-                    parent[right] = left as i64;
-                } else {
-                    parent[left] = right as i64;
-                }
-            }
+            parent.union_min(point, destination as usize);
         }
     }
     let mut changed = false;
     for point in 0..count {
-        let representative = root(&mut parent, point);
-        parent[point] = representative as i64;
+        let representative = parent.find(point);
+        parent.parent[point] = representative as i64;
         if representative != point {
             changed = true;
         }
@@ -117,14 +96,14 @@ pub fn of_links(
     let mut representative_to_cluster = vec![-1_i64; count];
     let mut cluster_count = 0_usize;
     for point in 0..count {
-        let representative = parent[point] as usize;
+        let representative = parent.parent[point] as usize;
         if representative_to_cluster[representative] < 0 {
             representative_to_cluster[representative] = cluster_count as i64;
             cluster_count += 1;
         }
-        parent[point] = representative_to_cluster[representative];
+        parent.parent[point] = representative_to_cluster[representative];
     }
-    Ok(T::Clusters(pack(parent, cluster_count)))
+    Ok(T::Clusters(pack(parent.parent, cluster_count)))
 }
 
 #[allow(clippy::too_many_arguments)]

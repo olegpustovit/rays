@@ -1,3 +1,4 @@
+use rdk_core::support::DisjointSet;
 use std::sync::Arc;
 
 use rdk_core::topology::PrimitiveKind;
@@ -278,32 +279,6 @@ pub struct Params {
     pub recompute_normals: bool,
 }
 
-fn find(parent: &mut [usize], value: usize) -> usize {
-    let mut root = value;
-    while parent[root] != root {
-        root = parent[root];
-    }
-    let mut at = value;
-    while parent[at] != root {
-        let next = parent[at];
-        parent[at] = root;
-        at = next;
-    }
-    root
-}
-
-fn union(parent: &mut [usize], a: usize, b: usize) {
-    let a = find(parent, a);
-    let b = find(parent, b);
-    if a != b {
-        if a < b {
-            parent[b] = a;
-        } else {
-            parent[a] = b;
-        }
-    }
-}
-
 fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let grain = support::resolve(params.grain).map_err(|_| fail("grain must be positive"))?;
@@ -363,7 +338,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
         return Ok(geometry_value.clone());
     }
     let point_of_vertex = |vertex: i64| view.vertex_points[vertex as usize];
-    let mut parent: Vec<usize> = (0..primitive_count).collect();
+    let mut parent = DisjointSet::new(primitive_count);
     for edge in 0..edge_count {
         if selected(&selected_edges, edge) {
             let first = index.edge_offsets[edge] as usize;
@@ -380,8 +355,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
                         "selected manifold edge {edge} has inconsistent polygon winding"
                     )));
                 }
-                union(
-                    &mut parent,
+                parent.union_min(
                     index.primitive_of_vertex[left_vertex as usize] as usize,
                     index.primitive_of_vertex[right_vertex as usize] as usize,
                 );
@@ -389,8 +363,8 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
         }
     }
     for primitive in 0..primitive_count {
-        let root = find(&mut parent, primitive);
-        parent[primitive] = root;
+        let root = parent.find(primitive);
+        parent.parent[primitive] = root as i64;
     }
     let mut component_selected = vec![false; primitive_count];
     let mut component_boundary = vec![false; primitive_count];
@@ -399,7 +373,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
             let first = index.edge_offsets[edge] as usize;
             let last = index.edge_offsets[edge + 1] as usize;
             if first < last {
-                let root = parent[index.primitive_of_vertex[index.edge_vertices[first] as usize] as usize];
+                let root = parent.parent[index.primitive_of_vertex[index.edge_vertices[first] as usize] as usize] as usize;
                 component_selected[root] = true;
                 if last - first == 1 {
                     component_boundary[root] = true;
@@ -414,7 +388,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
     for vertex in 0..vertex_count {
         let primitive = index.primitive_of_vertex[vertex] as usize;
         if view.primitive_kinds[primitive] == 0 {
-            let root = parent[primitive];
+            let root = parent.parent[primitive] as usize;
             let edge = index.edge_of_vertex[vertex];
             if component_selected[root] && edge >= 0 && !selected(&selected_edges, edge as usize) {
                 candidate[vertex] = true;
@@ -490,7 +464,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
     };
     for primitive in 0..primitive_count {
         cancel::poll(cancel_value, primitive as i64, 1023)?;
-        let root = parent[primitive];
+        let root = parent.parent[primitive] as usize;
         if !component_selected[root] {
             let first = view.primitive_offsets[primitive];
             let last = view.primitive_offsets[primitive + 1];

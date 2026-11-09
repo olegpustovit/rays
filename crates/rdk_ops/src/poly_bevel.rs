@@ -1,3 +1,4 @@
+use rdk_core::support::DisjointSet;
 use rays_math::float::{min as omin, max as omax};
 use std::sync::Arc;
 
@@ -202,32 +203,6 @@ fn add_empty_outputs(
         Some(groups),
         Some(edge_groups),
     )
-}
-
-fn corner_root(parent: &mut [usize], vertex: usize) -> usize {
-    let mut root = vertex;
-    while parent[root] != root {
-        root = parent[root];
-    }
-    let mut current = vertex;
-    while parent[current] != root {
-        let next = parent[current];
-        parent[current] = root;
-        current = next;
-    }
-    root
-}
-
-fn union_corners(parent: &mut [usize], left: usize, right: usize) {
-    let left = corner_root(parent, left);
-    let right = corner_root(parent, right);
-    if left != right {
-        if left < right {
-            parent[right] = left;
-        } else {
-            parent[left] = right;
-        }
-    }
 }
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -460,7 +435,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     // Equal slide positions on the two sides of an unselected manifold ring edge share one
     // topological point. Continuation detection below then shares profile rails at degree-two
     // selected points, avoiding duplicate corner patches and four-incidence edges.
-    let mut corner_parent: Vec<usize> = (0..vertex_count).collect();
+    let mut corner_parent = DisjointSet::new(vertex_count);
     for edge in 0..edge_count {
         if !edge_selected(edge as i64) && index.edge_offsets[edge + 1] - index.edge_offsets[edge] == 2 {
             let first = index.edge_offsets[edge] as usize;
@@ -475,10 +450,10 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             {
                 let (left_next, right_next) = (left_next as usize, right_next as usize);
                 if touched[left] && touched[right_next] && move_to_next[left] == move_to_previous[right_next] {
-                    union_corners(&mut corner_parent, left, right_next);
+                    corner_parent.union_min(left, right_next);
                 }
                 if touched[left_next] && touched[right] && move_to_previous[left_next] == move_to_next[right] {
-                    union_corners(&mut corner_parent, left_next, right);
+                    corner_parent.union_min(left_next, right);
                 }
             }
         }
@@ -534,8 +509,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             let first = component_offsets[component];
             let last = component_offsets[component + 1];
             if last - first >= 2
-                && corner_root(&mut corner_parent, component_corners[first])
-                    == corner_root(&mut corner_parent, component_corners[last - 1])
+                && corner_parent.find(component_corners[first])
+                    == corner_parent.find(component_corners[last - 1])
             {
                 component_joined[component] = true;
             }
@@ -654,7 +629,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     }
     for vertex in 0..vertex_count {
         if corner_storage[vertex] >= 0 {
-            let root = corner_root(&mut corner_parent, vertex);
+            let root = corner_parent.find(vertex);
             corner_point[vertex] = corner_storage[root];
         }
     }

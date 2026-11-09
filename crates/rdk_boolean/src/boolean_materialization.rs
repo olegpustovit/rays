@@ -3,6 +3,7 @@
 //! OCaml exceptions (`Cancelled`, `Invalid_argument`) become `Err` values: `inv` marks an
 //! `Invalid_argument` with the reserved code `invalid_argument` and `guard` turns it (and every
 //! cancellation) into the stable diagnostic each OCaml `try ... with` produced.
+use rdk_core::support::DisjointSet;
 use rays_math::float::{min as omin, max as omax, compare as float_compare};
 use std::cmp::Ordering;
 use std::sync::atomic::{AtomicI64, AtomicU8, Ordering as AtomicOrdering};
@@ -1784,20 +1785,6 @@ pub fn collapse_tiny_seams(
     }
 }
 
-fn find_root(parent: &mut [usize], primitive: usize) -> usize {
-    let mut root = primitive;
-    while parent[root] != root {
-        root = parent[root];
-    }
-    let mut current = primitive;
-    while parent[current] != root {
-        let next = parent[current];
-        parent[current] = root;
-        current = next;
-    }
-    root
-}
-
 /// Duplicate each seam point once per primitive component obtained after removing exact seam
 /// edges. Corner/primitive order is unchanged; point payload and native edge groups follow exact
 /// packed ancestry.
@@ -1821,8 +1808,7 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             {
                 return Err(inv("Boolean seam split group belongs to a different topology"));
             }
-            let mut parent: Vec<usize> = (0..primitive_count).collect();
-            let mut rank = vec![0u8; primitive_count];
+            let mut parent = DisjointSet::new(primitive_count);
             for edge in 0..index.edge_a.len() {
                 cancel::poll(cx(cancel), edge as i64, 4095)?;
                 if !edge_group::mem(edge as i64, &cleanup.cleanup_seam_edges) {
@@ -1832,20 +1818,7 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
                         let base = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
                         for incident in first + 1..last {
                             let other = u(index.primitive_of_vertex[u(index.edge_vertices[u(incident)])]);
-                            let first_root = find_root(&mut parent, base);
-                            let second_root = find_root(&mut parent, other);
-                            if first_root != second_root {
-                                let first_rank = rank[first_root];
-                                let second_rank = rank[second_root];
-                                if first_rank < second_rank {
-                                    parent[first_root] = second_root;
-                                } else if second_rank < first_rank {
-                                    parent[second_root] = first_root;
-                                } else {
-                                    parent[second_root] = first_root;
-                                    rank[first_root] = first_rank + 1;
-                                }
-                            }
+                            parent.union_rank(base, other, false);
                         }
                     }
                 }
@@ -1854,7 +1827,7 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             let mut primitive_component = vec![0i64; primitive_count];
             let mut component_count = 0i64;
             for primitive in 0..primitive_count {
-                let root = find_root(&mut parent, primitive);
+                let root = parent.find(primitive);
                 if root_component[root] < 0 {
                     root_component[root] = component_count;
                     component_count += 1;
@@ -2113,42 +2086,34 @@ pub fn detriangulate(
                 selected
             } else {
                 let selected_edges = members(&selected);
-                let mut parent: Vec<usize> = (0..primitive_count).collect();
+                let mut parent = DisjointSet::new(primitive_count);
                 for edge in &selected_edges {
                     let first = index.edge_offsets[u(*edge)];
                     let a = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
                     let b = u(index.primitive_of_vertex[u(index.edge_vertices[u(first + 1)])]);
-                    let first_root = find_root(&mut parent, a);
-                    let second_root = find_root(&mut parent, b);
-                    if first_root != second_root {
-                        if first_root < second_root {
-                            parent[second_root] = first_root;
-                        } else {
-                            parent[first_root] = second_root;
-                        }
-                    }
+                    parent.union_min(a, b);
                 }
                 for primitive in 0..primitive_count {
-                    let root = find_root(&mut parent, primitive);
-                    parent[primitive] = root;
+                    let root = parent.find(primitive);
+                    parent.parent[primitive] = root as i64;
                 }
                 let mut component_selected = vec![0u8; primitive_count];
                 let mut head = vec![-1i64; primitive_count];
                 let mut next = vec![-1i64; primitive_count];
                 for primitive in (0..primitive_count).rev() {
-                    let root = parent[primitive];
+                    let root = parent.parent[primitive] as usize;
                     next[primitive] = head[root];
                     head[root] = primitive as i64;
                 }
                 for edge in &selected_edges {
                     let first = index.edge_offsets[u(*edge)];
                     let primitive = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
-                    component_selected[parent[primitive]] = 1;
+                    component_selected[parent.parent[primitive] as usize] = 1;
                 }
                 let points = u(geometry::point_count(geometry_value));
                 let mut stamp = vec![-1i64; points];
                 let mut degree = vec![0i64; points];
-                let mut boundary_parent: Vec<usize> = (0..points).collect();
+                let mut boundary_parent = DisjointSet::new(points);
                 let mut touched = vec![0usize; points];
                 let mut safe = vec![0u8; primitive_count];
                 for root in 0..primitive_count {
@@ -2167,7 +2132,7 @@ pub fn detriangulate(
                                 let mut internal = false;
                                 for incident in index.edge_offsets[u(edge)]..index.edge_offsets[u(edge + 1)] {
                                     let other = index.primitive_of_vertex[u(index.edge_vertices[u(incident)])];
-                                    if other != primitive && parent[u(other)] == root {
+                                    if other != primitive && parent.parent[u(other)] == root as i64 {
                                         internal = true;
                                     }
                                 }
@@ -2180,17 +2145,17 @@ pub fn detriangulate(
                                         if stamp[point] != root as i64 {
                                             stamp[point] = root as i64;
                                             degree[point] = 0;
-                                            boundary_parent[point] = point;
+                                            boundary_parent.parent[point] = point as i64;
                                             touched[touched_count] = point;
                                             touched_count += 1;
                                         }
                                     }
                                     degree[a] += 1;
                                     degree[b] += 1;
-                                    let a_root = find_root(&mut boundary_parent, a);
-                                    let b_root = find_root(&mut boundary_parent, b);
+                                    let a_root = boundary_parent.find(a);
+                                    let b_root = boundary_parent.find(b);
                                     if a_root != b_root {
-                                        boundary_parent[b_root] = a_root;
+                                        boundary_parent.parent[b_root] = a_root as i64;
                                     }
                                 }
                             }
@@ -2203,7 +2168,7 @@ pub fn detriangulate(
                         if degree[point] != 2 {
                             valid = false;
                         }
-                        if find_root(&mut boundary_parent, point) == point {
+                        if boundary_parent.find(point) == point {
                             cycles += 1;
                         }
                     }
@@ -2222,7 +2187,7 @@ pub fn detriangulate(
                         } else {
                             let first = index.edge_offsets[u(edge)];
                             let primitive = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
-                            safe[parent[primitive]] != 0
+                            safe[parent.parent[primitive] as usize] != 0
                         }
                     },
                 )

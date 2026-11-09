@@ -1,3 +1,4 @@
+use rdk_core::support::DisjointSet;
 use std::sync::Arc;
 use rays_math::text_array::TextArray;
 
@@ -56,38 +57,6 @@ impl Connectivity {
             Connectivity::FloatArray(o, v) => same_ragged_f64(o, v, a, b),
         }
     }
-}
-
-fn find(parent: &mut [usize], point: usize) -> usize {
-    let mut root = point;
-    while parent[root] != root {
-        root = parent[root];
-    }
-    let mut at = point;
-    while parent[at] != root {
-        let next = parent[at];
-        parent[at] = root;
-        at = next;
-    }
-    root
-}
-
-fn union(parent: &mut [usize], rank: &mut [u8], left: usize, right: usize) -> bool {
-    let left_root = find(parent, left);
-    let right_root = find(parent, right);
-    if left_root == right_root {
-        return false;
-    }
-    let (left_rank, right_rank) = (rank[left_root], rank[right_root]);
-    if left_rank < right_rank {
-        parent[left_root] = right_root;
-    } else if right_rank < left_rank {
-        parent[right_root] = left_root;
-    } else {
-        parent[right_root] = left_root;
-        rank[left_root] = left_rank + 1;
-    }
-    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -169,8 +138,7 @@ pub(crate) fn raw(
             }
         }
     };
-    let mut parent: Vec<usize> = (0..point_count).collect();
-    let mut rank = vec![0u8; point_count];
+    let mut parent = DisjointSet::new(point_count);
     let mut merged = 0i64;
     let mut selected_self_edge = false;
     for edge in 0..edge_count {
@@ -180,7 +148,7 @@ pub(crate) fn raw(
             let b = index.edge_b[edge] as usize;
             if a == b {
                 selected_self_edge = true;
-            } else if connectivity.same(a, b) && union(&mut parent, &mut rank, a, b) {
+            } else if connectivity.same(a, b) && parent.union_rank(a, b, false) {
                 merged += 1;
             }
         }
@@ -196,7 +164,7 @@ pub(crate) fn raw(
     let mut of_point = vec![0i64; point_count];
     let mut cluster_count = 0i64;
     for point in 0..point_count {
-        let root = find(&mut parent, point);
+        let root = parent.find(point);
         if root_to_cluster[root] < 0 {
             root_to_cluster[root] = cluster_count;
             cluster_count += 1;

@@ -3,6 +3,7 @@
 //! OCaml returns `(Geometry.t, string) result` and lets `Cancel.Cancelled` escape; here a failure is
 //! an `error::T` with operation `Uv_parameterize.solve`, code `invalid_parameter` and the OCaml
 //! message, and a cancellation keeps code `cancelled`.
+use rdk_core::support::DisjointSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -36,38 +37,6 @@ fn fail(message: &str) -> error::T {
 
 fn finite(value: f64) -> bool {
     value.is_finite()
-}
-
-
-fn find_root(parent: &mut [i64], value: i64) -> i64 {
-    let mut root = value;
-    while parent[root as usize] != root {
-        root = parent[root as usize];
-    }
-    let mut at = value;
-    while parent[at as usize] != root {
-        let next = parent[at as usize];
-        parent[at as usize] = root;
-        at = next;
-    }
-    root
-}
-
-fn union_roots(parent: &mut [i64], rank: &mut [u8], left: i64, right: i64) {
-    let left = find_root(parent, left);
-    let right = find_root(parent, right);
-    if left != right {
-        let (left_rank, right_rank) = (rank[left as usize], rank[right as usize]);
-        if left_rank < right_rank {
-            parent[left as usize] = right;
-        } else if right_rank < left_rank {
-            parent[right as usize] = left;
-        } else {
-            let (root, child) = if left < right { (left, right) } else { (right, left) };
-            parent[child as usize] = root;
-            rank[root as usize] = left_rank + 1;
-        }
-    }
 }
 
 fn selected_seam(value: &group::T, index_view: &topology_index::view::View, edge: i64) -> bool {
@@ -353,22 +322,21 @@ fn solve_checked(
     // Corners sharing one point remain one UV variable exactly while their incident faces are
     // connected across non-seam manifold edges.
     let vc = vertex_count as usize;
-    let mut corner_parent: Vec<i64> = (0..vertex_count).collect();
-    let mut corner_rank = vec![0_u8; vc];
+    let mut corner_parent = DisjointSet::new(vc);
     for edge in 0..edge_count {
         cancel::poll(cancel_value, edge, 16_383)?;
         if topology_index::edge_incidence_count(&index, edge)? == 2 && !edge_is_seam[edge as usize] {
             let (left_a, left_b) = edge_endpoint_corners(&topology_view, &index_view, edge, 0)?;
             let (right_a, right_b) = edge_endpoint_corners(&topology_view, &index_view, edge, 1)?;
-            union_roots(&mut corner_parent, &mut corner_rank, left_a, right_a);
-            union_roots(&mut corner_parent, &mut corner_rank, left_b, right_b);
+            corner_parent.union_rank(left_a as usize, right_a as usize, true);
+            corner_parent.union_rank(left_b as usize, right_b as usize, true);
         }
     }
     let mut root_to_variable = vec![-1_i64; vc];
     let mut corner_to_variable = vec![-1_i64; vc];
     let mut variable_total = 0_i64;
     for corner in 0..vc {
-        let root = find_root(&mut corner_parent, corner as i64) as usize;
+        let root = corner_parent.find(corner);
         if root_to_variable[root] < 0 {
             root_to_variable[root] = variable_total;
             variable_total += 1;
@@ -388,8 +356,7 @@ fn solve_checked(
         }
     }
 
-    let mut component_parent: Vec<i64> = (0..variable_count).collect();
-    let mut component_rank = vec![0_u8; nv];
+    let mut component_parent = DisjointSet::new(nv);
     for primitive in 0..primitive_count as usize {
         let first = topology_view.primitive_offsets[primitive] as usize;
         let a = corner_to_variable[first];
@@ -398,14 +365,14 @@ fn solve_checked(
         if a == b || b == c || c == a {
             return Err(fail("UV parameterization rejects triangles with repeated chart vertices"));
         }
-        union_roots(&mut component_parent, &mut component_rank, a, b);
-        union_roots(&mut component_parent, &mut component_rank, b, c);
+        component_parent.union_rank(a as usize, b as usize, true);
+        component_parent.union_rank(b as usize, c as usize, true);
     }
     let mut root_to_component = vec![-1_i64; nv];
     let mut variable_component = vec![-1_i64; nv];
     let mut component_total = 0_i64;
     for variable in 0..nv {
-        let root = find_root(&mut component_parent, variable as i64) as usize;
+        let root = component_parent.find(variable);
         if root_to_component[root] < 0 {
             root_to_component[root] = component_total;
             component_total += 1;

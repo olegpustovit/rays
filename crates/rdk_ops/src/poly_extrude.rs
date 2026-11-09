@@ -1,3 +1,4 @@
+use rdk_core::support::DisjointSet;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -66,32 +67,6 @@ fn fail(message: &str) -> error::T {
 
 fn blank(value: &str) -> bool {
     value.bytes().all(|b| matches!(b, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
-
-fn find_root(parent: &mut [i64], value: usize) -> usize {
-    let mut root = value;
-    while parent[root] as usize != root {
-        root = parent[root] as usize;
-    }
-    let mut current = value;
-    while parent[current] as usize != root {
-        let next = parent[current] as usize;
-        parent[current] = root as i64;
-        current = next;
-    }
-    root
-}
-
-fn union_roots(parent: &mut [i64], left: usize, right: usize) {
-    let left = find_root(parent, left);
-    let right = find_root(parent, right);
-    if left != right {
-        if left < right {
-            parent[right] = left as i64;
-        } else {
-            parent[left] = right as i64;
-        }
-    }
 }
 
 fn merge_group(item: group::T, groups: Vec<group::T>) -> Result<Vec<group::T>, error::T> {
@@ -425,9 +400,9 @@ fn run_general(
             next
         }
         Divide::ExtrudeConnectedComponents => {
-            let mut parent: Vec<i64> = (0..source_primitives)
+            let mut parent = DisjointSet::from_parents((0..source_primitives)
                 .map(|primitive| if selected[primitive] { primitive as i64 } else { -1 })
-                .collect();
+                .collect());
             let mut non_manifold: i64 = -1;
             for edge in 0..topology_index::edge_count(&index) as usize {
                 cancel::poll(cancel_ref, edge as i64, 16_383)?;
@@ -455,7 +430,7 @@ fn run_general(
                             if base < 0 {
                                 base = primitive as i64;
                             } else {
-                                union_roots(&mut parent, base as usize, primitive);
+                                parent.union_min(base as usize, primitive);
                             }
                         }
                     }
@@ -470,7 +445,7 @@ fn run_general(
             let mut next = 0i64;
             for primitive in 0..source_primitives {
                 if selected[primitive] {
-                    let root = find_root(&mut parent, primitive);
+                    let root = parent.find(primitive);
                     if root_component[root] < 0 {
                         root_component[root] = next;
                         next += 1;

@@ -1,3 +1,4 @@
+use rdk_core::support::DisjointSet;
 use std::sync::Arc;
 
 use rdk_core::support::Windows;
@@ -70,32 +71,6 @@ struct BoundaryPlan {
     loop_points: Vec<usize>,
 }
 
-fn find_root(parent: &mut [i64], value: usize) -> usize {
-    let mut root = value;
-    while parent[root] as usize != root {
-        root = parent[root] as usize;
-    }
-    let mut at = value;
-    while parent[at] as usize != root {
-        let next = parent[at] as usize;
-        parent[at] = root as i64;
-        at = next;
-    }
-    root
-}
-
-fn union_min(parent: &mut [i64], left: usize, right: usize) {
-    let left = find_root(parent, left);
-    let right = find_root(parent, right);
-    if left != right {
-        if left < right {
-            parent[right] = left as i64;
-        } else {
-            parent[left] = right as i64;
-        }
-    }
-}
-
 fn plan_boundaries(
     cancel_ref: Option<&cancel::T>,
     grain: i64,
@@ -118,7 +93,7 @@ fn plan_boundaries(
     }
     let point_count = source.point_count as usize;
     let mut candidates = vec![false; edge_count];
-    let mut parent = vec![-1i64; edge_count];
+    let mut parent = DisjointSet::from_parents(vec![-1i64; edge_count]);
     let mut first_at_point = vec![-1i64; point_count];
     let mut outgoing = vec![-1i64; point_count];
     let mut incoming = vec![-1i64; point_count];
@@ -130,7 +105,7 @@ fn plan_boundaries(
             let primitive = reverse.primitive_of_vertex[vertex] as usize;
             if source.primitive_kinds[primitive] == 0 {
                 candidates[edge] = true;
-                parent[edge] = edge as i64;
+                parent.parent[edge] = edge as i64;
             }
         }
     }
@@ -153,14 +128,14 @@ fn plan_boundaries(
                 if first < 0 {
                     first_at_point[point] = edge as i64;
                 } else {
-                    union_min(&mut parent, first as usize, edge);
+                    parent.union_min(first as usize, edge);
                 }
             }
         }
     }
     for edge in 0..edge_count {
-        if parent[edge] >= 0 {
-            parent[edge] = find_root(&mut parent, edge) as i64;
+        if parent.parent[edge] >= 0 {
+            parent.parent[edge] = parent.find(edge) as i64;
         }
     }
     for edge in 0..edge_count {
@@ -189,8 +164,8 @@ fn plan_boundaries(
     let mut component_size = vec![0usize; edge_count];
     let mut component_selected = vec![false; edge_count];
     for edge in 0..edge_count {
-        if parent[edge] >= 0 {
-            let root = parent[edge] as usize;
+        if parent.parent[edge] >= 0 {
+            let root = parent.parent[edge] as usize;
             component_size[root] += 1;
             match boundary {
                 None => component_selected[root] = true,
@@ -203,7 +178,7 @@ fn plan_boundaries(
         cancel::poll(cancel_ref, point as i64, 16_383)?;
         let edge = first_at_point[point];
         if edge >= 0 {
-            let root = find_root(&mut parent, edge as usize);
+            let root = parent.find(edge as usize);
             if outgoing[point] < 0 || incoming[point] < 0 || point_bad[point] {
                 component_bad[root] = true;
             }
@@ -213,7 +188,7 @@ fn plan_boundaries(
     let mut loop_count = 0usize;
     let mut boundary_count = 0usize;
     for edge in 0..edge_count {
-        if parent[edge] == edge as i64 && component_selected[edge] {
+        if parent.parent[edge] == edge as i64 && component_selected[edge] {
             if component_bad[edge] && invalid_root < 0 {
                 invalid_root = edge as i64;
             }
@@ -230,7 +205,7 @@ fn plan_boundaries(
     let mut loop_roots = vec![0usize; loop_count];
     let mut loop_index = 0;
     for edge in 0..edge_count {
-        if parent[edge] == edge as i64 && component_selected[edge] {
+        if parent.parent[edge] == edge as i64 && component_selected[edge] {
             loop_roots[loop_index] = edge;
             loop_offsets[loop_index + 1] = loop_offsets[loop_index] + component_size[edge];
             loop_index += 1;
