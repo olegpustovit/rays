@@ -129,9 +129,7 @@ pub fn pull_boundary_no_edge_division(
     let source_positions = packed::float3::view::view(&plan.source_positions)?;
     let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()))?;
     let (mut x, mut y, mut z) = (positions.x.to_vec(), positions.y.to_vec(), positions.z.to_vec());
     {
         let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));

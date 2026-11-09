@@ -1,6 +1,7 @@
 //! Port of lib/rdk/boolean/boolean.ml: exact treatment-aware polygon Boolean products.
 use std::sync::Arc;
 
+use rdk_core::support;
 use rdk_core::{attribute, cancel, error, geometry, group};
 use rdk_core::error::Code;
 
@@ -84,9 +85,7 @@ pub struct Params {
 /// promoted explicitly. Output is triangle-only by default. `Shatter` requires two solids and
 /// emits A-only, overlap, and B-only boundaries in that stable order.
 pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T> {
-    if params.grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(params.grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     if !params.point_tolerance.is_finite() || params.point_tolerance < 0. {
         return Err(fail_with(Code::InvalidParameter, "point_tolerance must be finite and non-negative"));
     }
@@ -333,9 +332,7 @@ pub fn default_seam_params(right: geometry::T) -> SeamParams {
 /// self-intersection, between-input, and right self-intersection products. The coincident output
 /// can receive one complete primitive group. No approximate proximity edge is introduced.
 pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, error::T> {
-    if params.grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(params.grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     let names: Vec<String> = match params.output {
         SeamOutput::SeamCurves => {
             [&params.left_self_group, &params.between_group, &params.right_self_group]

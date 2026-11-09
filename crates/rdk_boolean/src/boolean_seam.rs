@@ -253,9 +253,7 @@ pub fn verify_curves(
     grain: i64,
     curves_value: &geometry::T,
 ) -> Result<(), error::T> {
-    if grain <= 0 {
-        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| make(Code::InvalidParameter, "grain must be positive".to_owned()))?;
     let cancelled = || error::cancelled(OPERATION);
     let topology_value = geometry::topology(curves_value);
     for primitive in 0..topology::primitive_count(topology_value) {
@@ -629,9 +627,7 @@ pub fn build(
     options: &Params,
     c: &Arc<complex::T>,
 ) -> Result<T, error::T> {
-    if options.grain <= 0 {
-        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
-    }
+    support::check_positive(options.grain).map_err(|_| make(Code::InvalidParameter, "grain must be positive".to_owned()))?;
     if options.parallel_cutoff <= 0 {
         return Err(make(Code::InvalidParameter, "parallel_cutoff must be positive".to_owned()));
     }

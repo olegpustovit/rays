@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use rdk_core::attribute::Owner;
-use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, topology_index};
+use rdk_core::{support, attribute, attribute_pattern, cancel, error, geometry, group, packed, topology_index};
 use rdk_core::error::Code;
 
 use crate::attribute_blur;
@@ -110,10 +110,7 @@ fn cancelled() -> error::T {
 }
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
-    let grain = params.grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(fail(Code::InvalidParameter, "grain must be positive"));
-    }
+    let grain = support::resolve(params.grain).map_err(|_| fail(Code::InvalidParameter, "grain must be positive"))?;
     let cancel_token = params.cancel.as_deref();
     let in_run = || -> Result<geometry::T, error::T> {
         validate_point_group(

@@ -75,10 +75,7 @@ pub fn interpolate_attribute(
         attribute::Owner::Vertex => (vertex_left, vertex_right, vertex_weight),
         attribute::Owner::Primitive | attribute::Owner::Detail => return Ok(value.clone()),
     };
-    let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(fail("grain must be positive".to_owned()));
-    }
+    let grain = support::resolve(grain).map_err(|_| fail("grain must be positive".to_owned()))?;
     topology_remap::blend_attribute(cancel_value, grain, left, right, weight, value)
 }
 

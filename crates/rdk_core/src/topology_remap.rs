@@ -44,9 +44,7 @@ fn select<T: Clone + Default + Send + Sync>(
     if mapping.is_empty() {
         return Ok(Vec::new());
     }
-    if grain <= 0 {
-        return Err(invalid_remap(grain_error.to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_remap(grain_error.to_owned()))?;
     cancel::poll(cancel_value, 0, 4095).map_err(|_| cancelled_error())?;
     validate_mapping(operation, checked_count(source.len(), operation)?, mapping, missing.is_some())?;
     let count = checked_count(mapping.len(), operation)?;
@@ -89,9 +87,7 @@ pub fn select_text(
     if mapping.is_empty() {
         return Ok(TextArray::new());
     }
-    if grain <= 0 {
-        return Err(invalid_remap("Support.run_ranges: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_remap("Support.run_ranges: grain must be positive".to_owned()))?;
     cancel::poll(cancel_value, 0, 4095).map_err(|_| cancelled_error())?;
     validate_mapping("Topology_remap.select", checked_count(source.len(), "Topology_remap.select")?, mapping, missing.is_some())?;
     let mut output = TextArray::with_capacity(mapping.len(), 0);
@@ -194,9 +190,7 @@ pub fn group(
     mapping: &[i64],
     value: &group::T,
 ) -> Result<group::T, error::T> {
-    if grain <= 0 {
-        return Err(invalid_remap("Topology_remap.group: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_remap("Topology_remap.group: grain must be positive".to_owned()))?;
     let count = checked_count(mapping.len(), "Topology_remap.group")?;
     let source_count = group::length(value);
     let invalid_mapping = AtomicBool::new(false);
@@ -369,9 +363,7 @@ pub fn split_point_edge_groups(
     target_topology: &topology::T,
     groups: &[edge_group::T],
 ) -> Result<Vec<edge_group::T>, error::T> {
-    if grain <= 0 {
-        return Err(invalid_remap("Topology_remap.split_point_edge_groups: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_remap("Topology_remap.split_point_edge_groups: grain must be positive".to_owned()))?;
     if groups.is_empty() {
         return Ok(Vec::new());
     }
@@ -464,9 +456,7 @@ pub fn edge_groups_from_ancestry(
     cancel::check_opt(cancel_value)?;
     let target_edges = topology_index::edge_count(target_index);
     let source_edges = topology_index::edge_count(source_index);
-    if grain <= 0 {
-        return Err(invalid_remap("Topology_remap.edge_groups_from_ancestry: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_remap("Topology_remap.edge_groups_from_ancestry: grain must be positive".to_owned()))?;
     if topology::data_id(target_topology) != topology_index::topology_data_id(target_index) {
         return Err(invalid_remap("Topology_remap.edge_groups_from_ancestry: target index affinity mismatch".to_owned()));
     }
@@ -540,9 +530,7 @@ fn blend_float(
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
     let operation = "Topology_remap.blend";
-    if grain <= 0 {
-        return Err(invalid_remap(format!("{operation}: grain must be positive")));
-    }
+    support::check_positive(grain).map_err(|_| invalid_remap(format!("{operation}: grain must be positive")))?;
     if left.len() != weight.len() || right.len() != weight.len() {
         return Err(invalid_remap(format!("{operation}: mapping and weight lengths differ")));
     }

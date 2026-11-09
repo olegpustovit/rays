@@ -51,14 +51,11 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 
 fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_token = params.cancel.as_deref();
-    let grain = params.grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(make_error(
+    let grain = support::resolve(params.grain).map_err(|_| make_error(
             OPERATION,
             Code::InvalidParameter,
             &format!("{PREFIX}grain must be positive"),
-        ));
-    }
+        ))?;
     if params.iterations < 0 {
         return Err(invalid("iterations must be non-negative"));
     }

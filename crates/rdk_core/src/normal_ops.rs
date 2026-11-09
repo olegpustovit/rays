@@ -1,6 +1,6 @@
 use crate::{
     attribute, cancel, element_selection, error, face_normals, geometry, group, packed, point_index,
-    topology,
+    support, topology,
 };
 use crate::error::Code;
 
@@ -526,11 +526,8 @@ fn fast_point_area(
 }
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
-    let grain = params.grain.unwrap_or(16_384);
+    let grain = support::grain(OPERATION, params.grain)?;
     let cancel_value = params.cancel.as_ref();
-    if grain <= 0 {
-        return Err(make_error(Code::InvalidTopology, format!("{OPERATION}: grain must be positive")));
-    }
     if blank_attribute_name(&params.attribute) {
         return Err(make_error(Code::InvalidTopology, format!("{OPERATION}: attribute name must not be empty")));
     }

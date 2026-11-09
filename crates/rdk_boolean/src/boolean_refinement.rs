@@ -100,9 +100,7 @@ pub fn build(
     grain: i64,
     constraints: &Arc<constraints_mod::T>,
 ) -> Result<T, error::T> {
-    if grain <= 0 {
-        return Err(fail(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail(Code::InvalidParameter, "grain must be positive"))?;
     let left_count = constraints_mod::left_triangle_count(constraints);
     let right_count = constraints_mod::right_triangle_count(constraints);
     let left = build_side(cancel_value, coplanar, grain, constraints, Side::Left, left_count)?;

@@ -734,10 +734,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 
 fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
-    let grain = params.grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(fail(format!("{OPERATION}: grain must be positive")));
-    }
+    let grain = support::resolve(params.grain).map_err(|_| fail(format!("{OPERATION}: grain must be positive")))?;
     if let Some(name) = &params.source_point_attribute {
         if support::ocaml_trim_is_empty(name) || name == "P" {
             return Err(fail(format!("{OPERATION}: source point attribute name must be non-empty and not P")));

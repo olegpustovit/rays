@@ -525,18 +525,31 @@ pub fn par_fill<T: Send>(
     })
 }
 
+pub fn resolve(grain: Option<i64>) -> Result<i64, ()> {
+    let grain = grain.unwrap_or(16_384);
+    if grain <= 0 { Err(()) } else { Ok(grain) }
+}
+
+pub fn check_positive(grain: i64) -> Result<(), ()> {
+    if grain <= 0 { Err(()) } else { Ok(()) }
+}
+
+pub fn grain(operation: &str, grain: Option<i64>) -> Result<i64, error::T> {
+    resolve(grain).map_err(|_| {
+        error::new(
+            operation,
+            Code::InvalidArgument,
+            format!("{operation}: grain must be positive"),
+        )
+    })
+}
+
 pub fn run_indexed_ranges(
-    grain: i64,
+    chunk: i64,
     count: i64,
     operation: &(dyn Fn(i64, i64, i64) -> Result<(), error::T> + Sync),
 ) -> Result<(), error::T> {
-    if grain <= 0 {
-        return Err(error::new(
-            "Support.run_ranges",
-            Code::InvalidArgument,
-            "grain must be positive".to_owned(),
-        ));
-    }
+    let grain = grain("Support.run_ranges", Some(chunk))?;
     if count <= 0 {
         return Ok(());
     }
@@ -549,11 +562,11 @@ pub fn run_indexed_ranges(
 }
 
 pub fn run_ranges(
-    grain: Option<i64>,
+    requested: Option<i64>,
     count: i64,
     operation: &(dyn Fn(i64, i64) -> Result<(), error::T> + Sync),
 ) -> Result<(), error::T> {
-    let grain = grain.unwrap_or(16_384);
+    let grain = grain("Support.run_ranges", requested)?;
     run_indexed_ranges(grain, count, &|_, first, last| operation(first, last))
 }
 

@@ -1,6 +1,6 @@
 use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, face_normals, geometry, group, normal_ops,
-    packed, topology, topology_index,
+    packed, support, topology, topology_index,
 };
 use rdk_core::error::Code;
 
@@ -229,9 +229,8 @@ pub struct Params {
 }
 
 pub fn normals(params: Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
-    if params.grain <= 0 {
-        return Err(fail("Rdk_mesh.Deform.normals: grain must be positive".to_owned()));
-    }
+    support::check_positive(params.grain)
+        .map_err(|_| fail("Rdk_mesh.Deform.normals: grain must be positive".to_owned()))?;
     // ponytail: core Normal_ops owns its cancel token, so an Arc token is checked here and not forwarded.
     cancel::check_opt(params.cancel.as_deref())?;
     let selection = params.primitives.clone().map(element_selection::T::SelectedPrimitives);

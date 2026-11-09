@@ -12,13 +12,11 @@ fn compact(
     grain: i64,
     value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    if grain <= 0 {
-        return Err(make(
+    support::check_positive(grain).map_err(|_| make(
             "Rdk.Compact_points",
             Code::InvalidArgument,
             "Rdk.Compact_points.compact_points: grain must be positive".to_owned(),
-        ));
-    }
+        ))?;
     cancel::check_opt(cancel_value)?;
     let point_count = geometry::point_count(value) as usize;
     let source_topology_value = geometry::topology(value);

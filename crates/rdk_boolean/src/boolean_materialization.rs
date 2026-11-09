@@ -239,9 +239,7 @@ pub fn safe_independent_edges(
     candidates: &edge_group::T,
     geometry_value: &geometry::T,
 ) -> Result<edge_group::T, error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     let keep_greatest = keep_greatest.unwrap_or(false);
     (|| {
             cancel::check_opt(cx(cancel))?;
@@ -324,9 +322,7 @@ pub fn speculative_independent_edges(
     candidates: &edge_group::T,
     geometry_value: &geometry::T,
 ) -> Result<edge_group::T, error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     (|| {
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
@@ -377,9 +373,7 @@ pub fn surface_seam_edges(
     ancestry: &boolean_extract::Ancestry,
     seam: &boolean_seam::T,
 ) -> Result<edge_group::T, error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     (|| {
             cancel::check_opt(cx(cancel))?;
             let complex = boolean_extract::view::complex(ancestry);
@@ -787,9 +781,7 @@ fn verify_surface(
     allow_opposite_duplicates: bool,
     geometry_value: &geometry::T,
 ) -> Result<(), error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     (|| {
             cancel::check_opt(cx(cancel))?;
             let positions = positions_view(geometry_value)?;
@@ -973,9 +965,7 @@ fn rounded_sliver_edges(
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(i64, edge_group::T), error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     (|| {
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
@@ -1016,9 +1006,7 @@ pub fn verify_unchanged_extraction(
     ancestry: &boolean_extract::Ancestry,
     geometry_value: &geometry::T,
 ) -> Result<bool, error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     match verify_extracted_surface(cancel, grain, require_closed, allow_opposite_duplicates, ancestry, geometry_value) {
         Ok(()) => Ok(true),
         Err(failure)
@@ -1055,9 +1043,7 @@ fn rounded_self_contact_edges(
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(i64, i64, edge_group::T), error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     let mut constraint_params = boolean_constraints::params(grain);
     constraint_params.cancel = cancel.cloned();
     constraint_params.resolve_left_self_intersections = true;
@@ -1204,9 +1190,7 @@ fn paired_rounded_slivers(
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(i64, group::T), error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     (|| {
             cancel::check_opt(cx(cancel))?;
             let topology = topology_view(geometry::topology(geometry_value))?;
@@ -1251,9 +1235,7 @@ fn closed_rounded_slivers(
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<(bool, i64, group::T), error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     (|| {
             cancel::check_opt(cx(cancel))?;
             let topology_value = geometry::topology(geometry_value);
@@ -1641,9 +1623,7 @@ fn tiny_cleanup_edges(
     seam: &boolean_seam::T,
     cleanup: &Cleanup,
 ) -> Result<edge_group::T, error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     if !threshold.is_finite() || threshold < 0. {
         return Err(fail_with(Code::InvalidParameter, "threshold must be finite and non-negative"));
     }
@@ -1843,9 +1823,7 @@ fn find_root(parent: &mut [usize], primitive: usize) -> usize {
 /// edges. Corner/primitive order is unchanged; point payload and native edge groups follow exact
 /// packed ancestry.
 pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &Cleanup) -> Result<Cleanup, error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     if edge_group::cardinality(&cleanup.cleanup_seam_edges) == 0 {
         return Ok(cleanup.clone());
     }
@@ -2042,9 +2020,7 @@ pub fn detriangulate(
     ancestry: &boolean_extract::Ancestry,
     cleanup: &Cleanup,
 ) -> Result<Cleanup, error::T> {
-    if grain <= 0 {
-        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail_with(Code::InvalidParameter, "grain must be positive"))?;
     if mode == Detriangulation::Triangles {
         return Ok(cleanup.clone());
     }

@@ -71,9 +71,7 @@ pub fn primitive_features(
     geometry_value: &geometry::T,
 ) -> Result<Features, error::T> {
     let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(failure("Proximity index: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| failure("Proximity index: grain must be positive".to_owned()))?;
     let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let topology_view = topology::view::view(geometry::topology(geometry_value))?;
     let entity_count = geometry::primitive_count(geometry_value);
@@ -225,9 +223,7 @@ pub fn edge_features(
 
 pub fn create(cancel_value: Option<&cancel::T>, grain: Option<i64>, features: Features) -> Result<T, error::T> {
     let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(failure("Proximity index: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| failure("Proximity index: grain must be positive".to_owned()))?;
     let total = feature_count(&features);
     if total == 0 {
         return Ok(T {
@@ -599,9 +595,7 @@ pub fn nearest_entities_with_distances(
     queries: &Features,
 ) -> Result<(Vec<i64>, Vec<f64>), error::T> {
     let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(failure("Proximity query: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| failure("Proximity query: grain must be positive".to_owned()))?;
     if !max_distance.is_finite() || max_distance < 0.0 || max_distance > f64::MAX.sqrt() {
         return Err(failure(
             "Proximity query: distance threshold must be finite, non-negative, and safely squarable".to_owned(),

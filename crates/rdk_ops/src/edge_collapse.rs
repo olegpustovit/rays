@@ -105,13 +105,11 @@ pub fn raw(
     let position = position.unwrap_or(Position::Average);
     let remove_degenerate_primitives = remove_degenerate_primitives.unwrap_or(true);
     let recompute_point_normals = recompute_point_normals.unwrap_or(true);
-    if grain <= 0 {
-        return Err(make(
+    support::check_positive(grain).map_err(|_| make(
             "Rdk.Edge_collapse",
             Code::InvalidArgument,
             "Rdk.Edge_collapse.edge_collapse: grain must be positive".to_owned(),
-        ));
-    }
+        ))?;
     let topology_value = geometry::topology(geometry_value);
     let index_value = topology_index::create(cancel_value, topology_value)?;
     let index = topology_index::view::view(&index_value);

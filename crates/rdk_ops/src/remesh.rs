@@ -2371,9 +2371,7 @@ fn remesh_body(params: &Params, geometry_value: &geometry::T) -> Result<geometry
     let iterations = params.iterations;
     let target_length = params.target_length;
     let smoothing = params.smoothing;
-    if grain <= 0 {
-        return Err(fail("grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail("grain must be positive"))?;
     if iterations < 0 {
         return Err(fail("iterations must be non-negative"));
     }

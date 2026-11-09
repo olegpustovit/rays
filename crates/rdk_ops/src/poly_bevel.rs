@@ -239,9 +239,7 @@ fn union_corners(parent: &mut [usize], left: usize, right: usize) {
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(make(Code::InvalidArgument, &format!("{PREFIX}: grain must be positive")));
-    }
+    support::check_positive(grain).map_err(|_| make(Code::InvalidArgument, &format!("{PREFIX}: grain must be positive")))?;
     run_inner(params, grain, geometry_value).map_err(|value| error::guard(value, "poly_bevel", Code::InvalidTopology))
 }
 

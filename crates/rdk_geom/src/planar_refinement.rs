@@ -5,7 +5,7 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use rdk_core::{cancel, error};
+use rdk_core::{support, cancel, error};
 use rdk_core::error::Code;
 
 use crate::bounds2_index;
@@ -780,9 +780,7 @@ fn run(
     regularization_steps: i64,
     allow_movement_of_interior_input_points: bool,
 ) -> Result<T, String> {
-    if grain <= 0 {
-        return Err("Planar refinement grain must be positive".to_owned());
-    }
+    support::check_positive(grain).map_err(|_| "Planar refinement grain must be positive".to_owned())?;
     if minimum_edge_length < 0. || !minimum_edge_length.is_finite() {
         return Err("Planar refinement minimum edge length must be finite and non-negative".to_owned());
     }

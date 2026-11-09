@@ -568,9 +568,7 @@ fn spatial_transfer(
     if owner == attribute::Owner::Detail || owner == attribute::Owner::Vertex {
         return Err(invalid(&format!("{operation}: spatial samples require point or primitive ownership")));
     }
-    if grain <= 0 {
-        return Err(invalid(&format!("{operation}: grain must be positive")));
-    }
+    support::check_positive(grain).map_err(|_| invalid(&format!("{operation}: grain must be positive")))?;
     cancel::check_opt(cancel_token)?;
     let neighbor_capacity_result: Result<i64, error::T> = match mode {
         Mode::Nearest => Ok(1),
@@ -932,9 +930,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
     let (source, target) = (&params.source, &params.target);
     let target_owner = params.target_owner;
     let target_elements = params.target_elements.as_ref();
-    if grain <= 0 {
-        return Err(invalid("Rdk.Attribute_ops.transfer_surface: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid("Rdk.Attribute_ops.transfer_surface: grain must be positive"))?;
     cancel::check_opt(cancel_token)?;
     let operation = "Rdk.Attribute_ops.transfer_surface";
     let (threshold_squared, maximum_squared) =

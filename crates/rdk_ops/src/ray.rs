@@ -365,9 +365,7 @@ fn raycast_samples_into(
     normals: Option<(&mut [f64], &mut [f64], &mut [f64])>,
 ) -> Result<(), error::T> {
     let invalid = |m: &str| fail(Code::InvalidParameter, m);
-    if grain <= 0 {
-        return Err(invalid("Surface_index: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid("Surface_index: grain must be positive"))?;
     if !(2..=1024).contains(&samples) {
         return Err(invalid("Surface_index: sampled ray count must be between 2 and 1024"));
     }
@@ -743,9 +741,7 @@ fn run_inner(
     let lift = params.lift;
     let min_distance = params.min_distance;
     let tolerance = params.tolerance;
-    if grain <= 0 {
-        return Err(fail(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail(Code::InvalidParameter, "grain must be positive"))?;
     if !(1..=1024).contains(&samples) {
         return Err(fail(Code::InvalidParameter, "ray samples must be between 1 and 1024"));
     }

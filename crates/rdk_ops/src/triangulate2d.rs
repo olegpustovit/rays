@@ -1383,9 +1383,7 @@ fn finish(
 
 fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain;
-    if grain <= 0 {
-        return Err(invalid("grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid("grain must be positive"))?;
     blank(&params.triangle_group, "triangle group name must be non-empty")?;
     blank(&params.constraint_group, "constraint group name must be non-empty")?;
     blank(&params.split_point_group, "split point group name must be non-empty")?;

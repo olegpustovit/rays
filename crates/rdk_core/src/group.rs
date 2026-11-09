@@ -126,13 +126,7 @@ pub fn init(
     if length < 0 {
         return Err(invalid_group("Group.init", "Group.init: negative length"));
     }
-    let grain = grain.unwrap_or(4096);
-    if grain <= 0 {
-        return Err(invalid_group(
-            "Group.init",
-            "Group.init: grain must be positive",
-        ));
-    }
+    let grain = support::grain("Group.init", grain.or(Some(4096)))?;
     let count = byte_count(length);
     let bits = Mutex::new(vec![0u8; count]);
     if count > 0 {
@@ -337,13 +331,7 @@ pub fn union_many(
     groups: &[T],
 ) -> Result<T, error::T> {
     require_name("Group.union_many", name)?;
-    let grain = grain.unwrap_or(32_768);
-    if grain <= 0 {
-        return Err(invalid_group(
-            "Group.union_many",
-            "Group.union_many: grain must be positive",
-        ));
-    }
+    let grain = support::grain("Group.union_many", grain.or(Some(32_768)))?;
     let Some(first) = groups.first() else {
         return Err(invalid_group(
             "Group.union_many",

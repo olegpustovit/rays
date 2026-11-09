@@ -931,9 +931,10 @@ fn run_general(
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(1_024);
     let cancel_ref = params.cancel.as_deref();
-    let result = if grain <= 0 {
-        Err(make(Code::InvalidArgument, "Rdk_mesh.Poly_extrude.poly_extrude: grain must be positive"))
-    } else if params.primitives.is_none()
+    support::check_positive(grain).map_err(|_| {
+        make(Code::InvalidArgument, "Rdk_mesh.Poly_extrude.poly_extrude: grain must be positive")
+    })?;
+    let result = if params.primitives.is_none()
         && params.split_edges.is_none()
         && params.divide == Divide::ExtrudeIndividual
         && params.divisions == 1

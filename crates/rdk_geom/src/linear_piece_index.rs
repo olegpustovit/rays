@@ -103,9 +103,7 @@ fn create_inner(
     primitives_group: Option<&group::T>,
     geometry_value: &geometry::T,
 ) -> Result<T, error::T> {
-    if grain <= 0 {
-        return Err(fail(Code::InvalidParameter, "Linear_piece_index: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| fail(Code::InvalidParameter, "Linear_piece_index: grain must be positive".to_owned()))?;
     cancel::check_opt(cancel_value)?;
     let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let topology_view = topology::view::view(geometry::topology(geometry_value))?;
@@ -392,9 +390,7 @@ fn pairs_of(
     left_index: &T,
     right_index: &T,
 ) -> Result<(Vec<i64>, Vec<i64>), error::T> {
-    if grain <= 0 {
-        return Err(invalid_argument("Linear_piece_index.overlapping_pairs: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid_argument("Linear_piece_index.overlapping_pairs: grain must be positive"))?;
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(invalid_argument(
             "Linear_piece_index.overlapping_pairs: tolerance must be finite and non-negative",
@@ -455,9 +451,7 @@ fn self_pair_of(
     index: &T,
     predicate: &(dyn Fn(i64, i64) -> bool + Sync),
 ) -> Result<Option<(i64, i64)>, error::T> {
-    if grain <= 0 {
-        return Err(invalid_argument("Linear_piece_index.find_overlapping_self_pair: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid_argument("Linear_piece_index.find_overlapping_self_pair: grain must be positive"))?;
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(invalid_argument(
             "Linear_piece_index.find_overlapping_self_pair: tolerance must be finite and non-negative",

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use rdk_core::topology::PrimitiveKind;
-use rdk_core::{attribute, cancel, edge_group, error, geometry, normal_ops, packed, topology, topology_index, topology_remap};
+use rdk_core::{support, attribute, cancel, edge_group, error, geometry, normal_ops, packed, topology, topology_index, topology_remap};
 use rdk_core::error::Code;
 
 use crate::fuse_cleanup;
@@ -306,10 +306,7 @@ fn union(parent: &mut [usize], a: usize, b: usize) {
 
 fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
-    let grain = params.grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(fail("grain must be positive"));
-    }
+    let grain = support::resolve(params.grain).map_err(|_| fail("grain must be positive"))?;
     let tolerance = params.collinearity_tolerance;
     if !tolerance.is_finite() || !(0.0..=std::f64::consts::PI).contains(&tolerance) {
         return Err(fail("collinearity tolerance must be finite and between zero and pi radians"));

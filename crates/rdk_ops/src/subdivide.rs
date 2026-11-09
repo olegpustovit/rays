@@ -141,9 +141,7 @@ pub fn automatic_boundary_holes(
     let point_count = topology_view.point_count;
     let point_byte_count = (point_count >> 3) + if point_count & 7 == 0 { 0 } else { 1 };
     let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()))?;
     let mut boundary_points = vec![0_u8; point_byte_count as usize];
     support::par_fill(cancel_token, grain, &mut boundary_points, &|byte| {
         let base = byte << 3;

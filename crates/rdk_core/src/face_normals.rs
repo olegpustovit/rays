@@ -1,4 +1,4 @@
-use crate::{cancel, error, geometry, group, packed, topology};
+use crate::{cancel, error, geometry, group, packed, support, topology};
 use crate::error::Code;
 
 fn selected(selection: Option<&group::T>, primitive: i64) -> bool {
@@ -35,9 +35,7 @@ pub fn polygon_area_vector(
     operation: &str,
     geometry_value: &geometry::T,
 )-> Result<((Vec<f64>, Vec<f64>, Vec<f64>), Vec<f64>), error::T> {
-    if grain <= 0 {
-        return Err(invalid(operation, format!("{operation}: grain must be positive")));
-    }
+    support::check_positive(grain).map_err(|_| invalid(operation, format!("{operation}: grain must be positive")))?;
     let topology_value = geometry::topology(geometry_value);
     let source = topology::view::view(topology_value)
         .map_err(|value| view_error(operation, value))?;
@@ -115,10 +113,7 @@ pub fn compute(
     operation: &str,
     geometry_value: &geometry::T,
 )-> Result<(Vec<f64>, Vec<f64>, Vec<f64>), error::T> {
-    let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(invalid(operation, format!("{operation}: grain must be positive")));
-    }
+    let grain = support::grain(operation, grain)?;
     let topology_value = geometry::topology(geometry_value);
     let primitive_count = topology::primitive_count(topology_value);
     if let Some(group_value) = primitives {

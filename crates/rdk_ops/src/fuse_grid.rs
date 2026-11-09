@@ -62,13 +62,11 @@ fn fuse_clusters(
     options: &ClusterOptions,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    if grain <= 0 {
-        return Err(make(
+    support::check_positive(grain).map_err(|_| make(
             "Rdk.Fuse_grid",
             Code::InvalidArgument,
             "Rdk.Fuse_grid.fuse: grain must be positive".to_owned(),
-        ));
-    }
+        ))?;
     let count = geometry::point_count(geometry_value);
     if let Some(item) = options.selection.as_ref() {
         if group::owner(item) != group::Owner::Point || group::length(item) != count {

@@ -79,9 +79,7 @@ fn triangulate(
     primitives: Option<&group::T>,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    if grain <= 0 {
-        return Err(fail("Rdk_mesh.Triangulate.triangulate: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| fail("Rdk_mesh.Triangulate.triangulate: grain must be positive".to_owned()))?;
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(geometry_value);
     let primitive_count = topology::primitive_count(topology_value) as usize;

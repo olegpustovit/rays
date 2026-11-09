@@ -15,13 +15,13 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
 | X | 6 | 6 | 0 | 0 |
-| B | 8 | 4 | 0 | 4 |
+| B | 8 | 5 | 0 | 3 |
 | A | 4 | 0 | 0 | 4 |
-| D | 12 | 0 | 0 | 12 |
+| D | 12 | 1 | 0 | 11 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **10** | **0** | **48** |
+| **All** | **58** | **12** | **0** | **46** |
 
 ## Items
 
@@ -38,7 +38,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B3 | B | done | `2be4b822` — `check_cli` + `tests/e2e` in `web_export`; `rays_bin` re-exports | cargo t -p web_export --test e2e; gate deps |
 | B4 | B | pending | — | Each crate lists the same case names before and after |
 | B5 | B | done | `403aaac4` — `[lib] test = false` on 11 libs + `print_shader`; gate rejects `#[test]` in those libs | Gate shape rule |
-| B6 | B | pending | — | cargo t -p rays-t, -p gate; gate deps |
+| B6 | B | done | `c10ccba4` — removed `[profile.e2e|gpu|slow]`; trimmed gate phantom crates; nextest comments | cargo t -p rays-t, -p gate; gate deps |
 | B7 | B | pending | — | cargo-timings critical path; gate deps |
 | B8 | B | pending | — | cargo t -p rays_editor |
 | A1 | A | pending | — | cargo check -p ogpu_metal |
@@ -50,7 +50,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | D3 | D | pending | — | rdk_geom exact, implicit_point |
 | D4 | D | pending | — | rdk_geom |
 | D5 | D | pending | — | rdk_ops poly_, transform |
-| D6 | D | pending | — | The 17 grain-0 error tests |
+| D6 | D | done | `(pending commit)` — `support::{resolve,check_positive,grain}`; rdk_core/ops/geom/boolean | grain-filtered rdk_ops + `cargo t -p rdk_core` |
 | D7 | D | pending | — | rdk_boolean cells, parallel-equality signatures |
 | D8 | D | pending | — | flow_ir and flow_web goldens byte-identical |
 | D9 | D | pending | — | manifest golden byte-identical; sopcat_manifest |

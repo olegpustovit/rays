@@ -44,10 +44,7 @@ fn checked_add(name: &str, left: i64, right: i64) -> Result<i64, error::T> {
 }
 
 fn grain_size(grain: Option<i64>) -> Result<i64, error::T> {
-    let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(fail("Rdk_curve.Curve_subdivide.subdivide: grain must be positive"));
-    }
+    let grain = support::resolve(grain).map_err(|_| fail("Rdk_curve.Curve_subdivide.subdivide: grain must be positive"))?;
     Ok(grain)
 }
 

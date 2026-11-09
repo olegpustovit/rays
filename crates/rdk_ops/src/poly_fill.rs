@@ -737,10 +737,7 @@ fn remap_edge_groups(
 }
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
-    let grain = params.grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(make(Code::InvalidArgument, &format!("{OPERATION}: grain must be positive")));
-    }
+    let grain = support::resolve(params.grain).map_err(|_| make(Code::InvalidArgument, &format!("{OPERATION}: grain must be positive")))?;
     run_inner(params, grain, geometry_value).map_err(|value| error::guard(value, "poly_fill", Code::InvalidGeometry))
 }
 

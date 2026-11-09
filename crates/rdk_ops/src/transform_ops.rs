@@ -423,9 +423,7 @@ fn run_distance_from_geometry(
     let operation = "Rdk.Transform_ops.distance_from_geometry";
     let distance_attribute = params.distance_attribute.as_deref();
     let mask_attribute = params.mask_attribute.as_deref();
-    if grain <= 0 {
-        return Err(fail(format!("{operation}: grain must be positive")));
-    }
+    support::check_positive(grain).map_err(|_| fail(format!("{operation}: grain must be positive")))?;
     if !valid_output_attribute_name(distance_attribute) {
         return Err(fail(format!("{operation}: distance attribute name must be non-empty and not P")));
     }
@@ -687,9 +685,7 @@ fn run_soft_transform(
     let grain = params.grain.unwrap_or(16_384);
     let operation = "Rdk.Transform_ops.soft_transform";
     let (radius, falloff) = (params.radius, params.falloff);
-    if grain <= 0 {
-        return Err(fail(format!("{operation}: grain must be positive")));
-    }
+    support::check_positive(grain).map_err(|_| fail(format!("{operation}: grain must be positive")))?;
     if !radius.is_finite() || radius < 0.0 {
         return Err(fail(format!("{operation}: radius must be finite and non-negative")));
     }

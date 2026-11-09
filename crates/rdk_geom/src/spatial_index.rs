@@ -51,9 +51,7 @@ pub fn create(
     source: &packed::float3::T,
 ) -> Result<T, error::T> {
     let grain = grain.unwrap_or(DEFAULT_GRAIN);
-    if grain <= 0 {
-        return Err(fail(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail(Code::InvalidParameter, "grain must be positive"))?;
     let positions = packed::float3::view::view(source)?;
     let count = packed::float3::length(source);
     let mut order: Vec<i64> = match points {
@@ -310,9 +308,7 @@ pub mod view {
         counts: &mut [i64],
     ) -> Result<(), error::T> {
         const OP: &str = "Spatial_index.View.nearest_k_many_into";
-        if grain <= 0 {
-            return Err(invalid(OP, "grain must be positive"));
-        }
+        support::check_positive(grain).map_err(|_| invalid(OP, "grain must be positive"))?;
         let query_count = packed::float3::length(queries);
         check_selection(OP, points, query_count)?;
         let len = |slice_len: usize| i64::try_from(slice_len).unwrap_or(i64::MAX);
@@ -432,9 +428,7 @@ pub mod view {
         distances_squared: &mut [f64],
     ) -> Result<(), error::T> {
         const OP: &str = "Spatial_index.View.nearest_distances_many_into";
-        if grain <= 0 {
-            return Err(invalid(OP, "grain must be positive"));
-        }
+        support::check_positive(grain).map_err(|_| invalid(OP, "grain must be positive"))?;
         let query_count = packed::float3::length(queries);
         check_selection(OP, points, query_count)?;
         if (distances_squared.len() as i64) < query_count {

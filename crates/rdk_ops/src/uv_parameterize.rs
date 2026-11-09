@@ -279,12 +279,9 @@ fn solve_checked(
     value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
-    let grain = params.grain.unwrap_or(16_384);
+    let grain = support::resolve(params.grain).map_err(|_| fail("grain must be positive"))?;
     let name = params.name.as_str();
     let (iterations, tolerance, uv_tolerance) = (params.iterations, params.tolerance, params.uv_tolerance);
-    if grain <= 0 {
-        return Err(fail("grain must be positive"));
-    }
     if name.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c')).is_empty() {
         return Err(fail("UV attribute name must not be empty"));
     }

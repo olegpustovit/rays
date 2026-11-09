@@ -35,9 +35,7 @@ fn offsets_for_mapping(
     source_offsets: &[i64],
     mapping: &[i64],
 ) -> Result<Vec<i64>, error::T> {
-    if grain <= 0 {
-        return Err(invalid_ragged(format!("{operation}: grain must be positive")));
-    }
+    let grain = support::grain(operation, Some(grain))?;
     let source_count = i64::try_from(source_offsets.len())
         .map_err(|_| invalid_ragged(format!("{operation}: source row count overflow")))?
         - 1;

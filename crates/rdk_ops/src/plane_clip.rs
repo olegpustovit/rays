@@ -1430,9 +1430,7 @@ pub fn clip(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
 fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_ref = params.cancel.as_deref();
     let grain = params.grain;
-    if grain <= 0 {
-        return Err(make("clip", Code::InvalidArgument, "Rdk.Plane_clip.clip: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| make("clip", Code::InvalidArgument, "Rdk.Plane_clip.clip: grain must be positive"))?;
     cancel::check_opt(cancel_ref)?;
     let (ox, oy, oz) = (params.origin.x, params.origin.y, params.origin.z);
     let (supplied_nx, supplied_ny, supplied_nz) = (params.normal.x, params.normal.y, params.normal.z);

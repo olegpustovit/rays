@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use rdk_core::{attribute, attribute_pattern, cancel, edge_group, error, geometry, group, topology_index};
+use rdk_core::{support, attribute, attribute_pattern, cancel, edge_group, error, geometry, group, topology_index};
 use rdk_core::error::Code;
 use rdk_geom::{proximity_index, spatial_index};
 
@@ -695,9 +695,7 @@ fn transfer_inner(params: &TransferParams) -> Result<geometry::T, error::T> {
     let cancel_token = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
     let fail = |message: &str| make_error("group_transfer", Code::InvalidGroup, message);
-    if grain <= 0 {
-        return Err(fail("Group Transfer: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail("Group Transfer: grain must be positive"))?;
     let distance = params.distance;
     if !distance.is_finite() || distance < 0.0 || distance > f64::MAX.sqrt() {
         return Err(fail(

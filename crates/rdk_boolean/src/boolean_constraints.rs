@@ -462,9 +462,7 @@ fn triple(points: &[i64], index: i64) -> [i64; 3] {
 
 pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result<T, error::T> {
     let cancel_value = params.cancel.as_deref();
-    if params.grain <= 0 {
-        return Err(fail(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(params.grain).map_err(|_| fail(Code::InvalidParameter, "grain must be positive"))?;
     let grain = params.grain;
     let left_surface = surface_index::create(cancel_value, Some(grain), None, None, None, left)?;
     let right_surface = surface_index::create(cancel_value, Some(grain), None, None, None, right)?;

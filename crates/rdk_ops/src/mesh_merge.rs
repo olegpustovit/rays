@@ -165,9 +165,7 @@ fn merge_plain(
     geometries: &[geometry::T],
 ) -> Result<geometry::T, error::T> {
     let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(make(Code::InvalidArgument, "Rdk.Mesh_merge.merge: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| make(Code::InvalidArgument, "Rdk.Mesh_merge.merge: grain must be positive".to_owned()))?;
     let Some(first) = geometries.first() else {
         return empty_points();
     };

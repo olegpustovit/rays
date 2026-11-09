@@ -365,9 +365,7 @@ pub fn build(
     grain: i64,
     constraints: &Arc<constraints_mod::T>,
 ) -> Result<T, error::T> {
-    if grain <= 0 {
-        return Err(fail(Code::InvalidParameter, "grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail(Code::InvalidParameter, "grain must be positive"))?;
     let cancelled = |_: error::T| error::cancelled(OPERATION);
     cancel::check_opt(cancel_value).map_err(cancelled)?;
     let count = constraints_mod::coplanar_pair_count(constraints);

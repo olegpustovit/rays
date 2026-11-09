@@ -276,9 +276,7 @@ fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain;
     let tolerance = params.tolerance;
-    if grain <= 0 {
-        return Err(invalid("grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid("grain must be positive"))?;
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(invalid("tolerance must be finite and non-negative"));
     }

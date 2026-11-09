@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::text_array::TextArray;
+use rdk_core::support;
 use rdk_core::attribute::{self, Owner as AttributeOwner, Storage};
 use rdk_core::{cancel, edge_group, error, geometry, group, packed, topology, topology_index};
 use rdk_core::error::Code;
@@ -787,9 +788,7 @@ pub fn copy_points_and_vertices(
     ancestry: &extract::Ancestry,
     base: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    if grain <= 0 {
-        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| make(Code::InvalidParameter, "grain must be positive".to_owned()))?;
     if !point_tolerance.is_finite() || point_tolerance < 0.0 {
         return Err(make(
             Code::InvalidParameter,
@@ -1074,9 +1073,7 @@ pub fn copy_primitives(
     grain: i64,
     ancestry: &extract::Ancestry,
 ) -> Result<geometry::T, error::T> {
-    if grain <= 0 {
-        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| make(Code::InvalidParameter, "grain must be positive".to_owned()))?;
     copy_primitives_inner(cancel_value, grain, ancestry).map_err(|f| finish_fail(f))
 }
 

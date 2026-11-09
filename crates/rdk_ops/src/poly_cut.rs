@@ -682,14 +682,12 @@ impl Samples<'_> {
 
 fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
-    let grain = params.grain.unwrap_or(16_384);
+    let grain = support::resolve(params.grain).map_err(|_| fail("grain must be positive".to_owned()))?;
     let (element, strategy, keep_closed) = (params.element, params.strategy, params.keep_closed);
     let primitives = params.primitives.as_ref();
     let cut_points = params.cut_points.as_ref();
     let cut_edges = params.cut_edges.as_ref();
-    if grain <= 0 {
-        return Err(fail("grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| fail("grain must be positive".to_owned()))?;
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(value);
     let view = topology::view::view(topology_value)?;

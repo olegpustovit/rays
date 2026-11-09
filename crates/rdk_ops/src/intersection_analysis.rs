@@ -491,9 +491,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
     let tolerance = params.tolerance;
-    if grain <= 0 {
-        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| make(Code::InvalidParameter, "grain must be positive".to_owned()))?;
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(make(Code::InvalidParameter, "tolerance must be finite and non-negative".to_owned()));
     }

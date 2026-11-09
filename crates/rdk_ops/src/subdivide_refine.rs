@@ -121,9 +121,7 @@ pub fn fmin(a: f64, b: f64) -> f64 {
 /// The `?grain` argument: positive, default 16 384.
 fn grain_of(grain: Option<i64>) -> Result<i64, error::T> {
     let grain = grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()))?;
     Ok(grain)
 }
 

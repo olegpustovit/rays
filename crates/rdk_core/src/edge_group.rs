@@ -123,13 +123,7 @@ pub fn init(
 ) -> Result<T, error::T> {
     require_name("Edge_group.init", name)?;
     require_index("Edge_group.init", topology_value, index)?;
-    let grain = grain.unwrap_or(4096);
-    if grain <= 0 {
-        return Err(invalid_edge_group(
-            "Edge_group.init",
-            "Edge_group.init: grain must be positive",
-        ));
-    }
+    let grain = support::grain("Edge_group.init", grain.or(Some(4096)))?;
     let length = topology_index::edge_count(index);
     let count = byte_count(length);
     let bits = Mutex::new(vec![0u8; count]);

@@ -1188,7 +1188,7 @@ fn indices_of(jobs: &[Job], owner: attribute::Owner, numeric: bool) -> Vec<usize
 
 pub fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry::T, error::T> {
     let cancel_token = params.cancel.as_deref();
-    let grain = params.grain.unwrap_or(16_384);
+    let grain = support::resolve(params.grain).map_err(|_| invalid("Attribute Interpolate: grain must be positive"))?;
     let pre_scale = params.pre_scale.unwrap_or(1.0);
     let blend = params.blend.unwrap_or(1.0);
     let unmatched = params.unmatched.unwrap_or(Unmatched::KeepTarget);
@@ -1196,9 +1196,7 @@ pub fn interpolate_primitive(params: &PrimitiveParams) -> Result<geometry::T, er
     let uvw_attribute = params.uvw_attribute.clone().unwrap_or_else(|| "source_uvw".to_owned());
     let target_owner = params.target_owner;
     let (source, target) = (&params.source, &params.target);
-    if grain <= 0 {
-        return Err(invalid("Attribute Interpolate: grain must be positive"));
-    }
+    
     cancel::check_opt(cancel_token)?;
     if !pre_scale.is_finite() {
         return Err(fail("Attribute Interpolate: pre_scale must be finite"));
@@ -1475,9 +1473,7 @@ pub fn interpolate_weighted(params: &WeightedParams) -> Result<geometry::T, erro
     let weighted_owner = params.weighted_owner;
     let target_owner = params.target_owner;
     let (source, target) = (&params.source, &params.target);
-    if grain <= 0 {
-        return Err(invalid("Attribute Interpolate: grain must be positive"));
-    }
+    
     cancel::check_opt(cancel_token)?;
     if !pre_scale.is_finite() {
         return Err(fail("Attribute Interpolate: pre_scale must be finite"));

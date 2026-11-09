@@ -547,9 +547,7 @@ fn unique_edge_name(base: &str, geometry_value: &geometry::T) -> String {
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
-    if grain <= 0 {
-        return Err(make(Code::InvalidTopology, "Rdk.Poly_reduce.poly_reduce: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| make(Code::InvalidTopology, "Rdk.Poly_reduce.poly_reduce: grain must be positive"))?;
     run_inner(params, grain, geometry_value).map_err(|value| error::guard(value, "poly_reduce", Code::InvalidTopology))
 }
 

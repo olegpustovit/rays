@@ -1,4 +1,4 @@
-use crate::{cancel, edge_group, error, group, point_index, topology, topology_index};
+use crate::{support, cancel, edge_group, error, group, point_index, topology, topology_index};
 use crate::error::Code;
 
 pub enum T {
@@ -203,12 +203,10 @@ pub fn promote(
         }
         _ => {}
     }
-    if grain <= 0 {
-        return Err(selection_error(
+    support::check_positive(grain).map_err(|_| selection_error(
             "element selection",
             "Group.init: grain must be positive".to_owned(),
-        ));
-    }
+        ))?;
 
     let topology = topology::view::view(topology_value)?;
     let needs_point_index = matches!(

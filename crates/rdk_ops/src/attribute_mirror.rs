@@ -1,7 +1,7 @@
 //! Mirror attributes across a plane or an explicit element mapping.
 use std::sync::Arc;
 
-use rdk_core::{
+use rdk_core::{support, 
     attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, topology,
 };
 use rdk_geom::spatial_index;
@@ -644,9 +644,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     let cancel_token = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
     let owner = params.owner;
-    if grain <= 0 {
-        return Err(fail("Attribute Mirror grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| fail("Attribute Mirror grain must be positive"))?;
     let count = owner_count(owner, geometry_value)?;
     validate_group("group", owner, count, params.group.as_ref())?;
     validate_name("output mapping name", &params.output_mapping)?;

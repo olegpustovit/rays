@@ -421,9 +421,7 @@ pub fn plan(
     source: &geometry::T,
     target: &geometry::T,
 ) -> Result<Vec<i64>, error::T> {
-    if grain <= 0 {
-        return Err(fail("grain must be positive".to_owned()));
-    }
+    support::check_positive(grain).map_err(|_| fail("grain must be positive".to_owned()))?;
     validate_group("query selection", geometry::point_count(source), queries)?;
     validate_group("target selection", geometry::point_count(target), targets)?;
     if !tolerance.is_finite() || tolerance < 0.0 {

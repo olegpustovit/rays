@@ -220,9 +220,7 @@ fn run(
     segment_winding: Option<&[i64]>,
 ) -> Result<T, error::T> {
     cancel::check_opt(cancel_value)?;
-    if grain <= 0 {
-        return Err(invalid("Planar constraint grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid("Planar constraint grain must be positive"))?;
     let source_count = x.len();
     if source_count == 0 || y.len() != source_count {
         return Err(invalid(

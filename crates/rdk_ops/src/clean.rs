@@ -562,13 +562,11 @@ pub struct Params {
 fn clean(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_value = &params.cancel;
     let grain = params.grain;
-    if grain <= 0 {
-        return Err(make(
+    support::check_positive(grain).map_err(|_| make(
             "Rdk_mesh.Clean",
             Code::InvalidArgument,
             "Rdk_mesh.Clean.clean: grain must be positive".to_owned(),
-        ));
-    }
+        ))?;
     if !params.epsilon.is_finite() || params.epsilon < 0.0 {
         return Err(message_error("Rdk_mesh.Clean.clean: epsilon must be finite and non-negative"));
     }

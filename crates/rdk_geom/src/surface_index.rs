@@ -180,9 +180,7 @@ fn create_with(
     validated_triangles: bool,
     geometry_value: &geometry::T,
 ) -> Result<T, error::T> {
-    if grain <= 0 {
-        return Err(invalid_argument("Surface_index: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid_argument("Surface_index: grain must be positive"))?;
     if validated_triangles && (selection.is_some() || vertices.is_some()) {
         return Err(invalid_argument("Surface_index: validated triangle construction cannot select elements"));
     }
@@ -687,9 +685,7 @@ fn triangle_pairs_of(
     left_surface: &T,
     right_surface: &T,
 ) -> Result<(Vec<i64>, Vec<i64>), error::T> {
-    if grain <= 0 {
-        return Err(invalid_argument("Surface_index.overlapping_triangle_pairs: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid_argument("Surface_index.overlapping_triangle_pairs: grain must be positive"))?;
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(invalid_argument(
             "Surface_index.overlapping_triangle_pairs: tolerance must be finite and non-negative",
@@ -1026,9 +1022,7 @@ pub fn closest_many_into(
     barycentric_c: &mut [f64],
     distances_squared: &mut [f64],
 ) -> Result<(), error::T> {
-    if grain <= 0 {
-        return Err(invalid_argument("Surface_index: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid_argument("Surface_index: grain must be positive"))?;
     let position_count = packed::float3::length(queries);
     let query_count = match position_indices {
         None => position_count,
@@ -1140,9 +1134,7 @@ pub fn closest_distances_many_into(
     max_distance_squared: f64,
     distances_squared: &mut [f64],
 ) -> Result<(), error::T> {
-    if grain <= 0 {
-        return Err(invalid_argument("Surface_index: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid_argument("Surface_index: grain must be positive"))?;
     let query_count = packed::float3::length(queries);
     if let Some(selected_group) = selection {
         if group::owner(selected_group) != group::Owner::Point || group::length(selected_group) != query_count {
@@ -1587,9 +1579,7 @@ fn raycast_many_into(
     barycentric_c: &mut [f64],
     distances: &mut [f64],
 ) -> Result<(), error::T> {
-    if grain <= 0 {
-        return Err(invalid_argument("Surface_index: grain must be positive"));
-    }
+    support::check_positive(grain).map_err(|_| invalid_argument("Surface_index: grain must be positive"))?;
     let query_count = packed::float3::length(queries);
     if let RayDirections::PerQueryDirections(values) = directions {
         let n = query_count as usize;
