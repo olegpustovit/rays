@@ -1,25 +1,5 @@
-use std::ffi::{c_char, c_void, CString};
-use std::sync::LazyLock;
-
-static C_LOCALE: LazyLock<usize> = LazyLock::new(|| unsafe { cfmt_locale_create() as usize });
-
-unsafe extern "C" {
-    fn cfmt_locale_create() -> *mut c_void;
-    fn cfmt_parse(locale: *mut c_void, text: *const c_char, value: *mut f64) -> i32;
-}
-
-// ldexp comes from the C runtime std already links (ucrt/msvcrt on Windows, libm elsewhere);
-// naming a library here pulled msvcrt next to ucrt and broke links (duplicate __imp_ldexp).
-unsafe extern "C" {
-    #[link_name = "ldexp"]
-    fn cfmt_ldexp(value: f64, exponent: i32) -> f64;
-}
-
 pub fn parse(text: &str) -> Option<f64> {
     let text = text.replace('_', "");
-    if text.is_empty() || text.contains('(') || text.contains(')') {
-        return None;
-    }
     let input = text.trim_start_matches(|character: char| character.is_ascii_whitespace());
     let (negative, number) = if let Some(number) = input.strip_prefix('-') {
         (true, number)
@@ -44,15 +24,7 @@ pub fn parse(text: &str) -> Option<f64> {
         return parse_hex(number, negative);
     }
 
-    // Rust's decimal parse is correctly rounded (as glibc strtod, OCaml's on Unix); the Windows CRT's
-    // strtod rounds some subnormals one ulp low. The C path stays for forms Rust rejects.
-    if let Ok(value) = input.parse::<f64>() {
-        return Some(value);
-    }
-    let text = CString::new(text).ok()?;
-    let mut value = 0.0;
-    let parsed = unsafe { cfmt_parse(*C_LOCALE as *mut c_void, text.as_ptr(), &mut value) };
-    (parsed != 0).then_some(value)
+    input.parse().ok()
 }
 
 fn parse_hex(text: &str, negative: bool) -> Option<f64> {
@@ -142,7 +114,10 @@ fn parse_hex(text: &str, negative: bool) -> Option<f64> {
         };
         f64::from_bits(units as u64)
     } else {
-        unsafe { cfmt_ldexp(mantissa as f64, exponent) }
+        // Keep both powers normal and finite, including for zero and extreme exponents.
+        let exponent = exponent.clamp(-2044, 2046);
+        let half = exponent / 2;
+        mantissa as f64 * 2.0_f64.powi(half) * 2.0_f64.powi(exponent - half)
     };
     Some(if negative { -value } else { value })
 }

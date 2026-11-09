@@ -263,6 +263,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_decimal_and_hex_extremes_without_c() {
+        for (text, expected) in [
+            ("1.", 1.0),
+            (".5", 0.5),
+            ("+inf", f64::INFINITY),
+            ("1_2.5_0", 12.5),
+            ("5e-324", f64::from_bits(1)),
+            ("0x1p-1074", f64::from_bits(1)),
+            ("0x1p-1075", 0.0),
+            ("0x3p-1075", f64::from_bits(2)),
+            ("0xfffffffffffffp-1074", f64::MIN_POSITIVE.next_down()),
+            ("0x1p-1022", f64::MIN_POSITIVE),
+            ("0x1fffffffffffffp971", f64::MAX),
+            ("0x1p1024", f64::INFINITY),
+            ("0x0p2000000000", 0.0),
+            ("-0x0p-2000000000", -0.0),
+        ] {
+            assert_eq!(parse_ocaml_float(text).unwrap().to_bits(), expected.to_bits(), "{text}");
+        }
+        for exponent in -1022..=1023 {
+            let text = format!("0x1p{exponent}");
+            let expected = ((exponent + 1023) as u64) << 52;
+            assert_eq!(parse_ocaml_float(&text).unwrap().to_bits(), expected, "{text}");
+        }
+    }
+
+    #[test]
     fn ocaml_float_round_trips_and_keeps_compatibility_fixtures() {
         let values = [
             0.0,
