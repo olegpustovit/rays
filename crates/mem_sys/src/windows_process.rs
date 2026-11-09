@@ -54,6 +54,14 @@ unsafe extern "system" {
     fn ResumeThread(thread: *mut c_void) -> u32;
     fn OpenProcess(access: u32, inherit: i32, process_id: u32) -> *mut c_void;
     fn WaitForSingleObject(handle: *mut c_void, milliseconds: u32) -> u32;
+    fn SetProcessInformation(process: *mut c_void, class: i32, info: *const c_void, length: u32) -> i32;
+}
+
+#[repr(C)]
+struct PowerThrottling {
+    version: u32,
+    control_mask: u32,
+    state_mask: u32,
 }
 
 /// Owns a process tree even after its root exits. Closing the last handle kills the tree.
@@ -94,6 +102,15 @@ impl Job {
     fn assign_and_resume(&self, child: &Child) -> io::Result<()> {
         if unsafe { AssignProcessToJobObject(self.0.as_raw_handle(), child.as_raw_handle()) } == 0 {
             return Err(io::Error::last_os_error());
+        }
+        // A process without a foreground window (started over SSH, from a service or a background
+        // console) gets EcoQoS, and the scheduler keeps it on efficiency cores: on a hybrid i9-12900K
+        // a gpu_editor case took 9.0 s there, 4.6 s on performance cores and 6.1 s mixed. Execution
+        // speed is never throttled for the processes the harness times. A Windows without the
+        // class (before 10 1709) keeps its default scheduling, as before.
+        let speed = PowerThrottling { version: 1, control_mask: 0x1, state_mask: 0 }; // EXECUTION_SPEED, off
+        unsafe {
+            SetProcessInformation(child.as_raw_handle(), 4, (&speed as *const PowerThrottling).cast(), size_of::<PowerThrottling>() as u32); // ProcessPowerThrottling
         }
         // Stable std hides the primary thread handle. The suspended process has only that thread.
         let snapshot = unsafe { CreateToolhelp32Snapshot(0x4, 0) }; // TH32CS_SNAPTHREAD
