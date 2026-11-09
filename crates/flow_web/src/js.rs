@@ -91,19 +91,7 @@ fn unary(operation: Unary, a: &str) -> String {
 /// pairs (`FAST64`), as native fast precision's kernels hold them.
 fn fast_less(a: i64, b: i64) -> String { format!("(r{a}h < r{b}h || (r{a}h === r{b}h && r{a}l < r{b}l))") }
 
-fn guarded_of(instruction: &Instruction) -> (Vec<(i64, bool)>, &Instruction) {
-    match instruction {
-        Instruction::Guarded(g, b) => (g.clone(), b),
-        b => (Vec::new(), b),
-    }
-}
 
-fn unguarded(instruction: &Instruction) -> &Instruction {
-    match instruction {
-        Instruction::Guarded(_, body) => unguarded(body),
-        instruction => instruction,
-    }
-}
 
 fn guard_text(printer: &Printer, guards: &[(i64, bool)]) -> String {
     guards.iter().map(|(r, yes)| format!("{}{}", printer.numeric(*r), if *yes { " !== 0" } else { " === 0" })).collect::<Vec<_>>().join(" && ")
@@ -326,7 +314,7 @@ impl Printer {
     fn add(&mut self, text: &str) { self.line.push_str(text); }
 
     fn emit(&mut self, slot: i64, instruction: &Instruction) -> Result<(), Diagnostic> {
-        let (guards, body) = guarded_of(instruction);
+        let (guards, body) = Instruction::guarded(instruction);
         let guard = guard_text(self, &guards);
         if self.fast && region::integer_register(body) {
             let _ = writeln!(self.line, "    let r{slot}h = 0, r{slot}l = 0;");
@@ -392,7 +380,7 @@ impl Printer {
         let mut slot = first;
         while slot < last {
             let instruction = self.view.code[slot as usize].clone();
-            match unguarded(&instruction) {
+            match Instruction::unguarded(&instruction) {
                 Instruction::Loop_begin(lp) => {
                     let header = slot;
                     let count = lp.initial.len() as i64;
@@ -425,7 +413,7 @@ impl Printer {
                     let cond = if self.fast { fast_less(header, lp.last) } else { format!("r{header} < r{}", lp.last) };
                     let _ = writeln!(self.line, "    for (; {cond};) {{");
                     self.emit_range(header + 1 + count, lp.finish)?;
-                    let (values, stop) = match unguarded(&self.view.code[lp.finish as usize]) {
+                    let (values, stop) = match Instruction::unguarded(&self.view.code[lp.finish as usize]) {
                         Instruction::Loop_end(_, values, stop) => (values.clone(), *stop),
                         _ => unreachable!("loop without its end"),
                     };
@@ -491,7 +479,7 @@ pub fn region(fast: bool, program: &packed::T) -> Result<String, Diagnostic> {
     });
     let fast = fast && program.result == RegionResult::Collect && !has_rand;
     let checks = packed::finite_checks(program);
-    let exists = |f: &dyn Fn(&Instruction) -> bool| view.code.iter().any(|i| f(unguarded(i)));
+    let exists = |f: &dyn Fn(&Instruction) -> bool| view.code.iter().any(|i| f(Instruction::unguarded(i)));
     let gathered = exists(&|i| matches!(i, Instruction::Array_prepare(..)));
     let nonfinite: &'static str = if gathered { "fail('E_NONFINITE', 'packed produced a nonfinite value.');" } else { "return 1;" };
     let collecting = matches!(program.result, RegionResult::Collect | RegionResult::Accumulate(_, true));

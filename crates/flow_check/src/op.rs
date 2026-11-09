@@ -201,9 +201,28 @@ fn valid_noise_extension(op:&Op)->bool {
     op.packed_extension==Some(PackedKind::Noise3)&&op.name=="noise3"&&op.ctx==context::value()&&op.shape==Shape::Scalar&&!op.live&&!op.any_num&&op.arithmetic.is_none()&&op.out_args.is_none()&&op.signature.pos==pairs(vec![("position",Ty::Vec3)])&&op.signature.opt.is_empty()&&op.signature.rest.is_none()&&op.signature.kw.len()==wanted.len()&&wanted.iter().all(|item|op.signature.kw.contains(item))&&matches!((op.out)(&[Ty::Vec3]),Ok(Ty::Float))
 }
 fn builtin_packed_kind(op:&Op)->Option<PackedKind>{
-    if let Some(x)=packed_ops::binary(&op.name){return Some(PackedKind::Binary(x))} if let Some(x)=packed_ops::unary(&op.name){return Some(PackedKind::Unary(x))} if let Some(x)=packed_ops::integer(&op.name){return Some(PackedKind::Integer(x))} if let Some(x)=packed_ops::comparison(&op.name){return Some(PackedKind::IntegerCompare(x))}
-    Some(match op.name.as_str(){"float"=>PackedKind::Convert(packed_ops::Conversion::ToFloat),"int"=>PackedKind::Convert(packed_ops::Conversion::Truncate),"floor"=>PackedKind::Convert(packed_ops::Conversion::Floor),"ceil"=>PackedKind::Convert(packed_ops::Conversion::Ceil),"round"=>PackedKind::Convert(packed_ops::Conversion::Round),"length"=>PackedKind::Length,"dot"=>PackedKind::Dot,"cross"=>PackedKind::Cross,"normalize"=>PackedKind::Normalize,"fma"=>PackedKind::Fma,"float/mul_checked"=>PackedKind::CheckedMul,"float/fma_checked"=>PackedKind::CheckedFma,"rand/at"=>PackedKind::RandAt,"scene/trace"=>PackedKind::Trace,"exact"=>PackedKind::Exact,"array/nth"|"nth"=>PackedKind::Gather,n if n.starts_with("gpu/")=>PackedKind::Stage,_ if op.name=="noise3"=>PackedKind::Noise3,_ if op.live=>PackedKind::Frame,_=>PackedKind::ConstantOnly})
+    use packed_ops::{Conversion as C, Primitive as P};
+    let primitive = match packed_ops::primitive(&op.name) {
+        Some(P::Numeric(x)) => Some(PackedKind::Binary(x)),
+        Some(P::Math(x)) => Some(PackedKind::Unary(x)),
+        Some(P::Integer(x)) => Some(PackedKind::Integer(x)),
+        Some(P::Integer_compare(x)) => Some(PackedKind::IntegerCompare(x)),
+        Some(P::Float_convert) => Some(PackedKind::Convert(C::ToFloat)),
+        Some(P::Int_convert) => Some(PackedKind::Convert(C::Truncate)),
+        Some(P::Floor) => Some(PackedKind::Convert(C::Floor)),
+        Some(P::Ceil) => Some(PackedKind::Convert(C::Ceil)),
+        Some(P::Round) => Some(PackedKind::Convert(C::Round)),
+        Some(P::Fma) => Some(PackedKind::Fma),
+        Some(P::Checked_mul) => Some(PackedKind::CheckedMul),
+        Some(P::Checked_fma) => Some(PackedKind::CheckedFma),
+        Some(P::Rand_at) => Some(PackedKind::RandAt),
+        Some(P::Array_nth) => Some(PackedKind::Gather),
+        Some(P::Noise3) => Some(PackedKind::Noise3),
+        _ => None,
+    };
+    primitive.or_else(||Some(match op.name.as_str(){"length"=>PackedKind::Length,"dot"=>PackedKind::Dot,"cross"=>PackedKind::Cross,"normalize"=>PackedKind::Normalize,"scene/trace"=>PackedKind::Trace,"exact"=>PackedKind::Exact,"nth"=>PackedKind::Gather,n if n.starts_with("gpu/")=>PackedKind::Stage,_ if op.live=>PackedKind::Frame,_=>PackedKind::ConstantOnly}))
 }
+
 // OCaml compares physically; a clone shares every Arc, so equal fields and the same closures are the same declaration.
 fn same_op(a:&Op,b:&Op)->bool{a.name==b.name&&a.ctx==b.ctx&&a.signature==b.signature&&a.any_num==b.any_num&&a.choices==b.choices&&a.shape==b.shape&&a.live==b.live&&a.category==b.category&&Arc::ptr_eq(&a.out,&b.out)&&Arc::ptr_eq(&a.check,&b.check)&&Arc::ptr_eq(&a.body,&b.body)&&a.out_args.is_some()==b.out_args.is_some()&&a.packed_extension==b.packed_extension&&a.arithmetic.is_some()==b.arithmetic.is_some()}
 pub fn packed_kind(op:&Op)->Option<PackedKind>{
@@ -243,8 +262,7 @@ fn offsets(values:Option<&Value>,count:usize)->Result<Option<Vec<i64>>,Diagnosti
     }
     Ok(Some(copied(xs)?))
 }
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub enum Reduction{Sum,Minimum,Maximum}
+pub use flow_syntax::packed_ops::Reduction;
 fn dispatch_rows(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+Sync)>,count:usize,work:&(dyn Fn(i64)+Send+Sync))->Result<(),Diagnostic>{
     let finish=count as i64-1;
     if let Some(rows)=rows{rows(0,finish,work)}else{for row in 0..count{work(row as i64)}}

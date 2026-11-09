@@ -147,21 +147,7 @@ fn register(index: i64) -> String {
     format!("r{index}")
 }
 
-fn guarded(instruction: &Instruction) -> (Vec<(i64, bool)>, &Instruction) {
-    match instruction {
-        Instruction::Guarded(more, body) => {
-            let (mut inner, i) = guarded(body);
-            let mut guards = more.clone();
-            guards.append(&mut inner);
-            (guards, i)
-        }
-        i => (vec![], i),
-    }
-}
 
-fn unguarded(instruction: &Instruction) -> &Instruction {
-    guarded(instruction).1
-}
 
 fn binary(operation: Binary, a: &str, b: &str) -> Result<String, Diagnostic> {
     let infix = |operator: &str| format!("({a}{operator}{b})");
@@ -586,7 +572,7 @@ impl Gen {
             return Some(self.int_of(r));
         }
         let instruction = self.layout.view.code[u(r)].clone();
-        match unguarded(&instruction) {
+        match Instruction::unguarded(&instruction) {
             Instruction::Convert(Conversion::ToFloat, x) if self.integer_register(*x) => Some(self.int_of(*x)),
             Instruction::Const(c) if c.is_finite() && c.fract() == 0.0 && c.abs() < if self.int32 { 2147483648.0 } else { 9007199254740992.0 } => {
                 Some(if self.int32 { int_literal(*c as i64) } else { format!("{:.0}L", c) })
@@ -883,7 +869,7 @@ impl Gen {
             }
             Stage::Store => {
                 let table = self.code(r[0]).clone();
-                let (u_, ty) = match unguarded(&table) {
+                let (u_, ty) = match Instruction::unguarded(&table) {
                     Instruction::Array_prepare(u_, ty) => (*u_, ty.clone()),
                     _ => {
                         self.fail("A store names a bound buffer.");
@@ -1040,7 +1026,7 @@ impl Gen {
             }
             Instruction::Convert(Conversion::ToFloat, a) if self.rounded_float(*a) => {
                 let inner = self.code(*a).clone();
-                match unguarded(&inner) {
+                match Instruction::unguarded(&inner) {
                     Instruction::Convert(op, x) => {
                         let f = match op {
                             Conversion::Floor => "floor(",
@@ -1103,7 +1089,7 @@ impl Gen {
 
     /// `Convert (To_float, a)` where `a` rounds a non-integer float register.
     fn rounded_float(&self, a: i64) -> bool {
-        match unguarded(self.code(a)) {
+        match Instruction::unguarded(self.code(a)) {
             Instruction::Convert(Conversion::Floor | Conversion::Ceil | Conversion::Round | Conversion::Truncate, x) => !self.integer_register(*x),
             _ => false,
         }
@@ -1205,7 +1191,7 @@ impl Visit for Gen {
         if self.failure.is_some() || !self.layout.used[slot] {
             return;
         }
-        let (guards, ins) = guarded(instruction);
+        let (guards, ins) = Instruction::guarded(instruction);
         if matches!(ins, Instruction::Array_prepare(..)) {
             return;
         }
@@ -1277,7 +1263,7 @@ impl Visit for Gen {
         }
         let h = header as i64;
         let oi = self.scopes.len() - 1;
-        let guards = guarded(&self.layout.view.code[header]).0;
+        let guards = Instruction::guarded(&self.layout.view.code[header]).0;
         self.context = (self.scopes[oi].id, guards.clone());
         fn ty(g: &Gen, slot: i64) -> &'static str {
             if g.narrow(slot) {
@@ -1289,7 +1275,7 @@ impl Visit for Gen {
             }
         }
         // a raster stage counts a capped pass from a small constant in 32 bits
-        let counter = match (self.raster.is_some(), control.limit, unguarded(self.code(control.first))) {
+        let counter = match (self.raster.is_some(), control.limit, Instruction::unguarded(self.code(control.first))) {
             (true, Some(limit), Instruction::Int_const(v)) if !self.narrow(h) && v.abs() + limit < (1 << 30) => "int",
             _ => ty(self, h),
         };
@@ -1364,7 +1350,7 @@ impl Gen {
     /// A loop bound: in 32-bit registers an Int constant past them saturates, so `(iterate
     /// 4611686018427387903 ... :until ...)` still runs until it stops.
     fn loop_bound(&mut self, r: i64) -> String {
-        match unguarded(self.code(r)) {
+        match Instruction::unguarded(self.code(r)) {
             Instruction::Int_const(n) if self.int32 && *n != *n as i32 as i64 => int_literal((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
             _ => self.int_of(r),
         }
@@ -1431,7 +1417,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
             return Err(fail_d("Uint32 scalars require fast precision."));
         }
         for (slot, code) in view.code.iter().enumerate() {
-            match unguarded(code) {
+            match Instruction::unguarded(code) {
                 Instruction::Int_uniform(un) => uint32_uniforms.push(layout.uniforms[u(*un)] * 4),
                 Instruction::Int_frame(_) if layout.frames[slot] >= 0 => uint32_uniforms.push(layout.frames[slot] * 4),
                 _ => {}
@@ -1449,7 +1435,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
     }
     for (slot, instruction) in view.code.iter().enumerate() {
         if layout.used[slot] {
-            for (c, _) in guarded(instruction).0 {
+            for (c, _) in Instruction::guarded(instruction).0 {
                 named[u(c)] = true;
             }
         }

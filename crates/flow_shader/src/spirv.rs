@@ -601,18 +601,13 @@ fn integer_float_binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i
     }
 }
 
-fn unguarded(i: &Instruction) -> &Instruction {
-    match i {
-        Instruction::Guarded(_, body) => unguarded(body),
-        body => body,
-    }
-}
+
 
 fn needs_integer(layout: &kernel_layout::T) -> bool {
     let mut whole = vec![false; layout.view.code.len()];
     let mut needed = false;
     for (slot, instruction) in layout.view.code.iter().enumerate() {
-        let instruction = unguarded(instruction);
+        let instruction = Instruction::unguarded(instruction);
         let integer = region::integer_register(instruction);
         whole[slot] = integer
             || match instruction {
@@ -1797,7 +1792,7 @@ impl EP {
         self.invalid = invalid;
     }
     fn table_of(&self, prepared: i64) -> i64 {
-        match unguarded(&self.layout.view.code[prepared as usize]) {
+        match Instruction::unguarded(&self.layout.view.code[prepared as usize]) {
             Instruction::Array_prepare(u, _) => *u,
             _ => panic!("a table register"),
         }
@@ -2395,7 +2390,7 @@ impl EP {
 
     /// A loop bound, as Emit's: in 32-bit registers an Int constant past them saturates.
     fn loop_bound(&mut self, slot: i64) -> i64 {
-        match unguarded(&self.layout.view.code[slot as usize]) {
+        match Instruction::unguarded(&self.layout.view.code[slot as usize]) {
             Instruction::Int_const(n) if self.e.int32 && *n != *n as i32 as i64 => self.e.l((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
             _ => self.int_of(slot),
         }
@@ -2418,10 +2413,7 @@ impl EP {
         let h = header as i64;
         let boolean = self.e.boolean;
         let uint = self.e.uint;
-        let guards = match &self.layout.view.code[header] {
-            Instruction::Guarded(guards, _) => guards.clone(),
-            _ => vec![],
-        };
+        let guards = self.layout.view.code[header].guarded().0;
         let guarded = !guards.is_empty();
         let preheader = self.e.words.id();
         let skipped = self.e.words.id();
@@ -2625,7 +2617,7 @@ impl Visit for EP {
         if self.e.failure.is_some() || !self.layout.used[slot] {
             return;
         }
-        if !matches!(unguarded(instruction), Instruction::Array_prepare(..)) {
+        if !matches!(Instruction::unguarded(instruction), Instruction::Array_prepare(..)) {
             self.emit(slot as i64, vec![], instruction);
         }
     }
@@ -2843,7 +2835,7 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
             return Err(fail_d("Uint32 scalars require fast precision."));
         }
         for (slot, code) in layout.view.code.iter().enumerate() {
-            match unguarded(code) {
+            match Instruction::unguarded(code) {
                 Instruction::Int_uniform(u) => uint32_words.push(layout.uniforms[*u as usize]),
                 Instruction::Int_frame(_) if layout.frames[slot] >= 0 => uint32_words.push(layout.frames[slot]),
                 _ => {}
@@ -3176,7 +3168,7 @@ pub fn stage(s: &StageSpec, program: &packed::T) -> Result<Vec<u8>, Diagnostic> 
     let uint = words.declare(21, &[32, 0]);
     let sint = words.declare(21, &[32, 1]);
     let float = words.declare(22, &[32]);
-    let (long, ulong) = if needs_integer(&layout) || layout.view.code.iter().any(|i| region::integer_register(unguarded(i))) {
+    let (long, ulong) = if needs_integer(&layout) || layout.view.code.iter().any(|i| region::integer_register(Instruction::unguarded(i))) {
         let long = words.declare(21, &[64, 1]);
         let ulong = words.declare(21, &[64, 0]);
         (Some(long), Some(ulong))

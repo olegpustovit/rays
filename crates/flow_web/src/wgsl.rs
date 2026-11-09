@@ -200,17 +200,7 @@ fn integer_status(operation: Integer, b: &str) -> String {
 /// instructions share blocks per scope (`kernel_layout::scope`).
 const FLUSH_STATUS: &str = "if (sb != 0u) { atomicOr(&status, sb); }";
 
-fn guarded(instruction: &Instruction) -> (Vec<(i64, bool)>, &Instruction) {
-    let mut guards: Vec<(i64, bool)> = Vec::new();
-    let mut current = instruction;
-    while let Instruction::Guarded(more, body) = current {
-        guards.extend(more.iter().copied());
-        current = body;
-    }
-    (guards, current)
-}
 
-fn unguarded(instruction: &Instruction) -> &Instruction { guarded(instruction).1 }
 
 fn truth(condition: &str) -> String { format!("select(0.0, 1.0, {condition})") }
 
@@ -449,7 +439,7 @@ impl Printer {
         if self.integer(r) {
             return Some(self.int_of(r));
         }
-        match unguarded(&self.layout.view.code[r as usize]) {
+        match Instruction::unguarded(&self.layout.view.code[r as usize]) {
             Instruction::Convert(Conversion::ToFloat, x) if self.integer(*x) => Some(self.int_of(*x)),
             Instruction::Const(c) if c.is_finite() && c.fract() == 0.0 && c.abs() < 9007199254740992.0 => {
                 let n = *c as i64;
@@ -486,7 +476,7 @@ impl Printer {
     /// a placed stage reads its bound buffers unclamped, as the Metal raster placement; a float
     /// from a binding of words is their bits
     fn read(&self, prepared: i64, index: i64, width: i64, component: i64) -> Result<String, Diagnostic> {
-        match unguarded(&self.layout.view.code[prepared as usize]) {
+        match Instruction::unguarded(&self.layout.view.code[prepared as usize]) {
             Instruction::Array_prepare(u, ty) => {
                 let binding = match self.buffers.iter().find(|(v, _, _, _)| v == u) {
                     Some((_, b, _, _)) => *b,
@@ -517,7 +507,7 @@ impl Printer {
     }
 
     fn intrinsic(&mut self, stage: &RStage, r: &[i64]) -> Result<String, Diagnostic> {
-        let source = unguarded(&self.layout.view.code[r[0] as usize]).clone();
+        let source = Instruction::unguarded(&self.layout.view.code[r[0] as usize]).clone();
         match (stage, &source) {
             (RStage::Fwidth, Instruction::Input(input, width, component)) => {
                 let name = format!("fw{input}_{component}");
@@ -570,7 +560,7 @@ impl Printer {
                 Ok(format!("{name}{}", if *field == 0 { "_before" } else { "_total" }))
             }
             RStage::Store => {
-                let (u, ty) = match unguarded(&self.layout.view.code[r[0] as usize]) {
+                let (u, ty) = match Instruction::unguarded(&self.layout.view.code[r[0] as usize]) {
                     Instruction::Array_prepare(u, ty) => (*u, ty.clone()),
                     _ => return Err(fail("A store names a bound buffer.")),
                 };
@@ -629,10 +619,10 @@ impl Printer {
     fn print_instruction(&mut self, current: &mut scope::T, slot: usize, instruction: &Instruction) -> Result<(), Diagnostic> {
         let layout = self.layout.clone();
         let s = slot as i64;
-        if !layout.used[slot] || (self.fast && matches!(unguarded(instruction), Instruction::Array_prepare(..))) {
+        if !layout.used[slot] || (self.fast && matches!(Instruction::unguarded(instruction), Instruction::Array_prepare(..))) {
             return Ok(());
         }
-        let (guards, instruction) = guarded(instruction);
+        let (guards, instruction) = Instruction::guarded(instruction);
         if !self.fast {
             self.precise_refusal(instruction)?;
         }
@@ -784,7 +774,7 @@ impl Printer {
         if !self.layout.used[header] {
             return Ok(());
         }
-        let (guards, _) = guarded(&self.layout.view.code[header].clone());
+        let (guards, _) = Instruction::guarded(&self.layout.view.code[header].clone());
         let mut outer = self.scopes.pop().expect("a scope");
         let result = self.print_loop_in(&mut outer, header, control, next, stop, body, &guards);
         self.scopes.push(outer);
@@ -939,7 +929,7 @@ fn print(fast: bool, image: bool, placement: Option<Placement>, program: &packed
     let mut body = String::with_capacity(4096);
     body.push_str(&root.decls);
     body.push_str(&root.code);
-    let has = |operation: &dyn Fn(&Instruction) -> bool| view.code.iter().enumerate().any(|(slot, i)| layout.used[slot] && operation(unguarded(i)));
+    let has = |operation: &dyn Fn(&Instruction) -> bool| view.code.iter().enumerate().any(|(slot, i)| layout.used[slot] && operation(Instruction::unguarded(i)));
     let empty = |source: String, entry: String| Wgsl {
         source,
         entry,
@@ -1154,7 +1144,7 @@ pub fn raster(pipelines: &[(bool, Stage, Stage)]) -> Result<String, Diagnostic> 
                 replace(&mut resources, Resource::Buffer(*b), *w);
             }
             for i in s.program.code.iter() {
-                if let Instruction::Stage(RStage::Sample(t, _), _) = unguarded(i) {
+                if let Instruction::Stage(RStage::Sample(t, _), _) = Instruction::unguarded(i) {
                     replace(&mut resources, Resource::Texture(*t), true);
                 }
             }

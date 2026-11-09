@@ -22,9 +22,7 @@ type Res<X> = Result<X, Unsupported>;
 
 type Source = (ResidualId, Arc<Term>);
 
-fn bare(i: &I) -> &I {
-    match i { I::Guarded(_, body) => bare(body), other => other }
-}
+
 
 fn source_input(term: &Term, source: i64, width: i64, component: i64) -> I {
     match term.ty() {
@@ -56,7 +54,7 @@ impl Builder {
     fn emit(&mut self, instruction: I) -> Res<i64> {
         // ponytail: the sharing key is the Debug text of (scope, key); a typed hash only if fusion shows hot.
         let key = format!("{:?}|{:?}", self.scope, instruction_key(&instruction));
-        let control = matches!(bare(&instruction), I::Loop_begin(_) | I::Loop_carry(..) | I::Loop_end(..));
+        let control = matches!(I::unguarded(&instruction), I::Loop_begin(_) | I::Loop_carry(..) | I::Loop_end(..));
         if !control {
             if let Some(id) = self.shared.get(&key) { return Ok(*id); }
         }
@@ -83,7 +81,7 @@ impl Builder {
     fn append_code(&mut self, p: &RegionT, input: InputFn, uniform: i64) -> Res<Vec<Vec<i64>>> {
         let mut registers = vec![0_i64; p.code.len()];
         for (i, instruction) in p.code.iter().enumerate() {
-            let produced = match bare(instruction) {
+            let produced = match I::unguarded(instruction) {
                 I::Input(source, width, component) => {
                     let register = input(self, *source, *width, *component)?;
                     Some(if R::integer_register(&self.code[register as usize]) { self.emit(I::Convert(Conversion::ToFloat, register))? } else { register })
@@ -109,7 +107,7 @@ impl Builder {
                     self.emit(remapped)?
                 }
             };
-            match bare(instruction) {
+            match I::unguarded(instruction) {
                 I::Loop_begin(_) => self.scope.push(registers[i]),
                 I::Loop_end(owner, _, _) => {
                     self.finishes.insert(registers[*owner as usize], registers[i]);

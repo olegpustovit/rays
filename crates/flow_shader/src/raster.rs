@@ -46,12 +46,7 @@ fn buffer_name(program: &packed::T, u: i64) -> String {
     format!("buffer{}", slot(program, u as usize))
 }
 
-fn unguarded(i: &Instruction) -> &Instruction {
-    match i {
-        Instruction::Guarded(_, body) => unguarded(body),
-        i => i,
-    }
-}
+
 
 fn raster_for(stage: &LStage, input: Box<dyn Fn(i64, i64) -> String>, int_input: Box<dyn Fn(i64) -> String>, store: Box<dyn Fn(&Leaf, i64, &str) -> String>) -> Raster {
     let program = stage.program.clone();
@@ -84,7 +79,7 @@ fn textures(stage: &LStage) -> Vec<(i64, bool)> {
         .program
         .code
         .iter()
-        .filter_map(|i| match unguarded(i) {
+        .filter_map(|i| match Instruction::unguarded(i) {
             Instruction::Stage(S::Sample(t, _) | S::Sample_level(t, _) | S::Texture_size(t, _), _) => Some((*t, true)),
             Instruction::Stage(S::Read(t, _), _) => Some((*t, false)),
             _ => None,
@@ -125,7 +120,7 @@ fn texture_locals(arguments: bool, stage: &LStage) -> String {
 
 /// A built-in argument, only when the stage reads its fact (Frame or Int_frame `name`).
 fn builtin(stage: &LStage, name: &str, argument: &str) -> Vec<String> {
-    if stage.program.code.iter().any(|i| match unguarded(i) {
+    if stage.program.code.iter().any(|i| match Instruction::unguarded(i) {
         Instruction::Frame(n) | Instruction::Int_frame(n) => n == name,
         _ => false,
     }) {

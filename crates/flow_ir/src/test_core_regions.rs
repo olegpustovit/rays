@@ -283,15 +283,10 @@ fn core_regions_region_ref_forms_match_the_walker() {
 
 // ---- carried loops
 
-fn bare(instruction: &R::Instruction) -> &R::Instruction {
-    match instruction {
-        R::Instruction::Guarded(_, body) => bare(body),
-        other => other,
-    }
-}
+
 
 fn verify_loop(name: &str, program: &RegionT) {
-    assert!(program.code.iter().any(|i| matches!(bare(i), R::Instruction::Loop_begin(_))), "{name}: no loop");
+    assert!(program.code.iter().any(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))), "{name}: no loop");
     for time in [-1., 0.37, 5.] {
         let live = input::at_time(time);
         let expected = reference(program, &live);
@@ -415,9 +410,9 @@ fn carried_loops_uint32_and_iterate_fixtures() {
 #[test]
 fn malformed_loops_are_rejected_when_rebuilt() {
     let program = ts::compile("(map (fn [x] (fold [a t] [i (range 2)] (+ a x))) (array/range 1))");
-    let header = program.code.iter().position(|i| matches!(bare(i), R::Instruction::Loop_begin(_))).expect("loop header");
-    let R::Instruction::Loop_begin(loop_) = bare(&program.code[header]).clone() else { unreachable!("matched above") };
-    let result = program.code.iter().position(|i| matches!(bare(i), R::Instruction::Loop_result(..))).expect("loop result");
+    let header = program.code.iter().position(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))).expect("loop header");
+    let R::Instruction::Loop_begin(loop_) = R::Instruction::unguarded(&program.code[header]).clone() else { unreachable!("matched above") };
+    let result = program.code.iter().position(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_result(..))).expect("loop result");
     let rejected = |name: &str, code: Vec<R::Instruction>, outputs: Vec<Vec<i64>>| {
         if R::rebuild(&program, R::Rebuild { code: Some(code), outputs: Some(outputs), ..Default::default() }).is_ok() {
             panic!("accepted malformed loop: {name}");
@@ -477,7 +472,7 @@ fn loop_fusion_producer_consumer_scopes_guards_and_sibling_outputs_agree() {
     let text = ts::compile("(map (fn [s] (if (> t 0.) s \"other\"))\n      (map (fn [x] (iterate 2 \"old\" (fn [s] (if (> x t) \"next\" s)))) (array/range 7)))");
     assert_eq!(text.stages.len(), 2);
     let independent = ts::compile("(map (fn [x] [(fold [a t] [i (range 2)] (+ a x))\n                   (fold [a t] [i (range 2)] (+ a x))]) (array/range 7))");
-    assert_eq!(independent.code.iter().filter(|i| matches!(bare(i), R::Instruction::Loop_begin(_))).count(), 2);
+    assert_eq!(independent.code.iter().filter(|i| matches!(R::Instruction::unguarded(i), R::Instruction::Loop_begin(_))).count(), 2);
     let reduction = ts::compile("(fold [total 1.] [x (map (fn [x] (iterate 3 (+ x t) (fn [a] (+ a 1.))))\n      (array/range 7))] (+ (* total 0.5) x))");
     assert_eq!(reduction.stages.len(), 2);
     for program in [&text, &independent, &reduction] {

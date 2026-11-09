@@ -184,3 +184,16 @@ fn bypass_returns_the_unevaluated_time() {
         }
     }
 }
+
+#[test]
+fn instruction_guard_layers_preserve_order_and_borrow_the_body() {
+    use C::region::Instruction as I;
+    let instruction = I::Guarded(vec![(5, true)], Box::new(I::Guarded(vec![], Box::new(
+        I::Guarded(vec![(2, false), (7, true)], Box::new(I::Const(2.0))),
+    ))));
+    let (guards, body) = instruction.guarded();
+    assert_eq!(guards, [(5, true), (2, false), (7, true)]);
+    assert_eq!(*body, I::Const(2.0));
+    assert!(std::ptr::eq(body, instruction.unguarded()));
+    assert_eq!(body.guarded(), (Vec::new(), body));
+}

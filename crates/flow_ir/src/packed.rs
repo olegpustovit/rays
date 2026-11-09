@@ -160,12 +160,7 @@ fn convert_int(op: &Conversion, x: f64) -> K<i64> {
     })
 }
 
-fn unguarded(i: &Instruction) -> &Instruction {
-    match i {
-        Instruction::Guarded(_, body) => unguarded(body),
-        other => other,
-    }
-}
+
 
 fn zipped(t: &T) -> bool {
     t.iteration == Iteration::Zip || t.sources.len() == 1
@@ -182,7 +177,7 @@ pub fn output_reachable(t: &T) -> Vec<bool> {
         for r in region::operands(&t.code[slot]) {
             mark(t, used, r as usize);
         }
-        if let Instruction::Loop_begin(loop_) = unguarded(&t.code[slot]) {
+        if let Instruction::Loop_begin(loop_) = Instruction::unguarded(&t.code[slot]) {
             for body in slot + 1..=loop_.finish as usize {
                 mark(t, used, body);
             }
@@ -200,7 +195,7 @@ pub fn output_reachable(t: &T) -> Vec<bool> {
 pub fn finite_checks(t: &T) -> Vec<bool> {
     t.code
         .iter()
-        .map(|instruction| match unguarded(instruction) {
+        .map(|instruction| match Instruction::unguarded(instruction) {
             Instruction::Const(_) | Instruction::Select(..) | Instruction::Array_prepare(..)
             | Instruction::Unary(Unary::Abs | Unary::Sqrt | Unary::Not, _)
             | Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..)
@@ -224,7 +219,7 @@ fn gpu_error(message: &str) -> Diagnostic {
 /// fused and checked multiply-add; the default keeps the binary64 forms (the web export).
 pub fn gpu_refusals(fused: bool, fast: bool, t: &T) -> Vec<Diagnostic> {
     let mut reasons: Vec<Diagnostic> = Vec::new();
-    let any = |f: &dyn Fn(&Instruction) -> bool| t.code.iter().any(|i| f(unguarded(i)));
+    let any = |f: &dyn Fn(&Instruction) -> bool| t.code.iter().any(|i| f(Instruction::unguarded(i)));
     if t.code.iter().any(region::text_register) {
         reasons.push(gpu_error("Text kernels stay on the CPU."));
     }
@@ -262,7 +257,7 @@ pub fn gpu_refusals(fused: bool, fast: bool, t: &T) -> Vec<Diagnostic> {
     let (mut bad_noise, mut bad_constant) = (false, false);
     for (i, instruction) in t.code.iter().enumerate() {
         if used[i] {
-            match unguarded(instruction) {
+            match Instruction::unguarded(instruction) {
                 Instruction::Noise3(_, _, _, _, LiveInt::Fixed(octaves), _, _) => {
                     if !packed_ops::supported_gpu_noise_octaves(*octaves) {
                         bad_noise = true;
@@ -1283,7 +1278,7 @@ impl TS {
     }
     fn frame(&self, slot: usize) -> K<Value> {
         self.frames[slot]
-            .get_or_init(|| match unguarded(&self.t.code[slot]) {
+            .get_or_init(|| match Instruction::unguarded(&self.t.code[slot]) {
                 Instruction::Int_frame(name) | Instruction::Frame(name) => frame_fact(name, &self.live),
                 _ => Ok(Value::No_geo),
             })
@@ -1302,7 +1297,7 @@ impl TS {
         Ok(self.prepared[i].get().unwrap())
     }
     fn table(&self, register: i64) -> K<&Value> {
-        match unguarded(&self.t.code[register as usize]) {
+        match Instruction::unguarded(&self.t.code[register as usize]) {
             Instruction::Array_prepare(i, _) => self.prepared[*i as usize].get().ok_or_else(|| fail("E_PACKED_LAYOUT", "Array lookup needs its prepared table.")),
             _ => Err(fail("E_PACKED_LAYOUT", "Array lookup needs a table handle.")),
         }
@@ -1457,7 +1452,7 @@ fn texec_range(
             if wanted(slot) {
                 texec(sh, regs, tc, fo, slot, instruction, first, last)?;
             }
-            slot = match unguarded(instruction) {
+            slot = match Instruction::unguarded(instruction) {
                 Instruction::Loop_begin(l) => l.finish as usize + 1,
                 _ => slot + 1,
             };
@@ -1477,7 +1472,7 @@ fn execute_loop(
     last: usize,
 ) -> K<()> {
     let bs = sh.block_size;
-    let (next, stop) = match unguarded(&regs.run_code[lp.finish as usize]) {
+    let (next, stop) = match Instruction::unguarded(&regs.run_code[lp.finish as usize]) {
         Instruction::Loop_end(_, next, stop) => (next.clone(), *stop),
         _ => unreachable!("loop without its end"),
     };
@@ -2094,7 +2089,7 @@ fn cached_ty(sh: &TS, i: i64, ty: &Ty) -> bool {
 }
 
 fn cached_table(sh: &TS, register: i64) -> Option<&Value> {
-    match unguarded(&sh.t.code[register as usize]) {
+    match Instruction::unguarded(&sh.t.code[register as usize]) {
         Instruction::Array_prepare(i, ty) if cached_ty(sh, *i, ty) => sh.prepared[*i as usize].get(),
         _ => None,
     }
@@ -2166,7 +2161,7 @@ fn typed_chunk(
     let slots = regs.slots as usize;
     // a bank nothing writes stays empty
     let integers = banks.contains(&true);
-    let traces = t.code.iter().any(|i| matches!(unguarded(i), Instruction::Trace(..)));
+    let traces = t.code.iter().any(|i| matches!(Instruction::unguarded(i), Instruction::Trace(..)));
     let mut tc = TC {
         integer: vec![0; if integers { slots * bs } else { 0 }],
         floats: vec![0.0; slots * bs],
@@ -2255,7 +2250,7 @@ fn typed_chunk(
                 // proof leaves the whole remaining suffix lane-major.
                 let mut prefix = sh.total_prefix;
                 while prefix < regs.run_code.len() && safe(sh, regs, &tc, length, Vec::new(), &regs.run_code[prefix]) {
-                    if !matches!(unguarded(&t.code[prefix]), Instruction::Array_prepare(..)) {
+                    if !matches!(Instruction::unguarded(&t.code[prefix]), Instruction::Array_prepare(..)) {
                         texec(sh, regs, &mut tc, fo, prefix, &regs.run_code[prefix], 0, length)?;
                     }
                     prefix += 1;
@@ -2398,11 +2393,11 @@ fn run_typed(
     let carried = t
         .code
         .iter()
-        .fold(0usize, |count, i| match unguarded(i) {
+        .fold(0usize, |count, i| match Instruction::unguarded(i) {
             Instruction::Loop_begin(l) => count.max(l.initial.len()),
             _ => count,
         });
-    let gather = t.code.iter().any(|i| match unguarded(i) {
+    let gather = t.code.iter().any(|i| match Instruction::unguarded(i) {
         Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..) | Instruction::Loop_begin(_) => true,
         body => region::text_register(body),
     });
@@ -3726,7 +3721,7 @@ pub mod host {
             && p.outputs.len() == 1
             && p.sources[0].1.ty() == p.term.ty()
             && p.outputs[0].len() as i64 == p.widths[0]
-            && p.outputs[0].iter().enumerate().all(|(c, r)| matches!(unguarded(&p.code[*r as usize]), Instruction::Input(0, w, c2) if *w == p.widths[0] && *c2 == c as i64))
+            && p.outputs[0].iter().enumerate().all(|(c, r)| matches!(Instruction::unguarded(&p.code[*r as usize]), Instruction::Input(0, w, c2) if *w == p.widths[0] && *c2 == c as i64))
     }
 
     pub type SourceFn = Arc<dyn Fn(ResidualId, &Term) -> Result<Option<Value>, Diagnostic> + Send + Sync>;
@@ -4107,7 +4102,7 @@ pub mod host {
         }
         let mut frame = Vec::with_capacity(t.code.len());
         for instruction in t.code.iter() {
-            frame.push(match unguarded(instruction) {
+            frame.push(match Instruction::unguarded(instruction) {
                 Instruction::Frame(name) | Instruction::Int_frame(name) => frame_fact(name, live)?,
                 _ => Value::Float(0.0),
             });
@@ -4166,8 +4161,8 @@ pub mod host {
         }
         let mut plan_frames: Vec<(usize, Arc<dyn Fn(&Live) -> f64 + Send + Sync>)> = Vec::new();
         for (i, instruction) in t.code.iter().enumerate() {
-            match unguarded(instruction) {
-                Instruction::Frame(name) | Instruction::Int_frame(name) if name == "t" && matches!(unguarded(instruction), Instruction::Frame(_)) => {
+            match Instruction::unguarded(instruction) {
+                Instruction::Frame(name) | Instruction::Int_frame(name) if name == "t" && matches!(Instruction::unguarded(instruction), Instruction::Frame(_)) => {
                     plan_frames.push((i, Arc::new(|live: &Live| live.t)));
                 }
                 Instruction::Frame(name) | Instruction::Int_frame(name) => {

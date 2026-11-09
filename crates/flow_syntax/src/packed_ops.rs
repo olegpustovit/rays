@@ -1,4 +1,5 @@
-use crate::{ty::Ty, value};
+#![allow(non_camel_case_types)]
+use crate::{ty::Ty, value, Diagnostic};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Binary { Add, Sub, Mul, Div, Mod, Pow, Min, Max, Lt, Le, Gt, Ge, Eq, And, Or, Atan2, Hypot, Ldexp }
@@ -32,26 +33,197 @@ pub fn array_width(ty: &Ty) -> Option<usize> {
     match ty { Ty::Array(element) if matches!(element.as_ref(), Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) => scalar_width(element), _ => None }
 }
 
-const BINARIES: &[(&str, Binary)] = &[
-    ("+", Binary::Add), ("-", Binary::Sub), ("*", Binary::Mul), ("/", Binary::Div), ("mod", Binary::Mod), ("pow", Binary::Pow), ("min", Binary::Min), ("max", Binary::Max),
-    ("<", Binary::Lt), ("<=", Binary::Le), (">", Binary::Gt), (">=", Binary::Ge), ("=", Binary::Eq), ("and", Binary::And), ("or", Binary::Or), ("atan2", Binary::Atan2), ("hypot", Binary::Hypot), ("ldexp", Binary::Ldexp),
-];
-const UNARIES: &[(&str, Unary)] = &[
-    ("sin", Unary::Sin), ("cos", Unary::Cos), ("sqrt", Unary::Sqrt), ("abs", Unary::Abs), ("not", Unary::Not), ("tan", Unary::Tan), ("asin", Unary::Asin), ("acos", Unary::Acos), ("exp", Unary::Exp), ("log", Unary::Log), ("sign", Unary::Sign), ("rsqrt", Unary::Rsqrt),
-];
-const INTEGERS: &[(&str, Integer)] = &[
-    ("int/add", Integer::Iadd), ("int/sub", Integer::Isub), ("int/mul", Integer::Imul), ("int/div", Integer::Idiv), ("int/mod", Integer::Imod), ("int/and", Integer::Iand), ("int/or", Integer::Ior), ("int/xor", Integer::Ixor), ("int/shl", Integer::Ishl), ("int/shr", Integer::Ishr),
-];
-const COMPARISONS: &[(&str, Comparison)] = &[("int/lt", Comparison::Ilt), ("int/le", Comparison::Ile), ("int/gt", Comparison::Igt), ("int/ge", Comparison::Ige), ("int/eq", Comparison::Ieq)];
-pub const NOISE_NAMES: &[&str] = &["noise3"];
-const DERIVED_NAMES: &[&str] = &["length", "dot", "cross", "normalize", "fma"];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reduction { Sum, Minimum, Maximum }
 
-pub fn binary(name: &str) -> Option<Binary> { BINARIES.iter().find(|(n, _)| *n == name).map(|(_, op)| *op) }
-pub fn unary(name: &str) -> Option<Unary> { UNARIES.iter().find(|(n, _)| *n == name).map(|(_, op)| *op) }
-pub fn integer(name: &str) -> Option<Integer> { INTEGERS.iter().find(|(n, _)| *n == name).map(|(_, op)| *op) }
-pub fn comparison(name: &str) -> Option<Comparison> { COMPARISONS.iter().find(|(n, _)| *n == name).map(|(_, op)| *op) }
-pub fn integer_name(operation: Integer) -> &'static str { INTEGERS.iter().find(|(_, op)| *op == operation).expect("complete integer operation table").0 }
-pub fn comparison_name(operation: Comparison) -> &'static str { COMPARISONS.iter().find(|(_, op)| *op == operation).expect("complete integer comparison table").0 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteMode { Clamped, Unclamped }
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Primitive {
+    Numeric(Binary),
+    Math(Unary),
+    Remainder,
+    Floor,
+    Ceil,
+    Round,
+    Int_convert,
+    Float_convert,
+    Integer(Integer),
+    Integer_compare(Comparison),
+    Equal,
+    Show,
+    Text_concat,
+    Text_blank,
+    Text_trim,
+    Text_lower,
+    Text_repr,
+    Text_table_decode,
+    Text_table_encode,
+    Text_split,
+    Text_tokens,
+    Text_to_float,
+    Text_to_int,
+    Sequence_length,
+    Sequence_get,
+    Sequence_build,
+    Sequence_slice,
+    Sequence_concat,
+    Array_max_length,
+    Array_range,
+    Array_int,
+    Array_text,
+    Array_float,
+    Array_vec3,
+    Array_vec4,
+    Array_nth,
+    Array_count,
+    Array_slice,
+    Array_concat,
+    Array_reduce(Reduction),
+    Array_segment(Reduction),
+    Array_segment_argmax,
+    Next_after,
+    Array_scatter_add,
+    Array_compact,
+    Array_scan_sum,
+    Array_grade,
+    Array_index_of,
+    Rand,
+    Rand_at,
+    Fma,
+    Checked_mul,
+    Checked_fma,
+    Noise3,
+    Color_parse,
+    Color_byte(ByteMode),
+    Coerce(Ty),
+    Truthy,
+    Error,
+    Fail(String, String),
+    Fail_diagnostic(Diagnostic),
+}
+
+pub const PRIMITIVES: &[(&str, Primitive)] = &[
+    ("+", Primitive::Numeric(Binary::Add)),
+    ("-", Primitive::Numeric(Binary::Sub)),
+    ("*", Primitive::Numeric(Binary::Mul)),
+    ("/", Primitive::Numeric(Binary::Div)),
+    ("mod", Primitive::Numeric(Binary::Mod)),
+    ("pow", Primitive::Numeric(Binary::Pow)),
+    ("min", Primitive::Numeric(Binary::Min)),
+    ("max", Primitive::Numeric(Binary::Max)),
+    ("<", Primitive::Numeric(Binary::Lt)),
+    ("<=", Primitive::Numeric(Binary::Le)),
+    (">", Primitive::Numeric(Binary::Gt)),
+    (">=", Primitive::Numeric(Binary::Ge)),
+    ("=", Primitive::Numeric(Binary::Eq)),
+    ("and", Primitive::Numeric(Binary::And)),
+    ("or", Primitive::Numeric(Binary::Or)),
+    ("atan2", Primitive::Numeric(Binary::Atan2)),
+    ("hypot", Primitive::Numeric(Binary::Hypot)),
+    ("ldexp", Primitive::Numeric(Binary::Ldexp)),
+    ("sin", Primitive::Math(Unary::Sin)),
+    ("cos", Primitive::Math(Unary::Cos)),
+    ("sqrt", Primitive::Math(Unary::Sqrt)),
+    ("abs", Primitive::Math(Unary::Abs)),
+    ("not", Primitive::Math(Unary::Not)),
+    ("tan", Primitive::Math(Unary::Tan)),
+    ("asin", Primitive::Math(Unary::Asin)),
+    ("acos", Primitive::Math(Unary::Acos)),
+    ("exp", Primitive::Math(Unary::Exp)),
+    ("log", Primitive::Math(Unary::Log)),
+    ("sign", Primitive::Math(Unary::Sign)),
+    ("rsqrt", Primitive::Math(Unary::Rsqrt)),
+    ("int/add", Primitive::Integer(Integer::Iadd)),
+    ("int/sub", Primitive::Integer(Integer::Isub)),
+    ("int/mul", Primitive::Integer(Integer::Imul)),
+    ("int/div", Primitive::Integer(Integer::Idiv)),
+    ("int/mod", Primitive::Integer(Integer::Imod)),
+    ("int/and", Primitive::Integer(Integer::Iand)),
+    ("int/or", Primitive::Integer(Integer::Ior)),
+    ("int/xor", Primitive::Integer(Integer::Ixor)),
+    ("int/shl", Primitive::Integer(Integer::Ishl)),
+    ("int/shr", Primitive::Integer(Integer::Ishr)),
+    ("int/lt", Primitive::Integer_compare(Comparison::Ilt)),
+    ("int/le", Primitive::Integer_compare(Comparison::Ile)),
+    ("int/gt", Primitive::Integer_compare(Comparison::Igt)),
+    ("int/ge", Primitive::Integer_compare(Comparison::Ige)),
+    ("int/eq", Primitive::Integer_compare(Comparison::Ieq)),
+    ("remainder", Primitive::Remainder),
+    ("floor", Primitive::Floor),
+    ("ceil", Primitive::Ceil),
+    ("round", Primitive::Round),
+    ("int", Primitive::Int_convert),
+    ("float", Primitive::Float_convert),
+    ("equal?", Primitive::Equal),
+    ("show", Primitive::Show),
+    ("text/concat", Primitive::Text_concat),
+    ("text/blank?", Primitive::Text_blank),
+    ("text/trim", Primitive::Text_trim),
+    ("text/lower", Primitive::Text_lower),
+    ("text/repr", Primitive::Text_repr),
+    ("text/table_decode", Primitive::Text_table_decode),
+    ("text/table_encode", Primitive::Text_table_encode),
+    ("text/split", Primitive::Text_split),
+    ("text/tokens", Primitive::Text_tokens),
+    ("text/to_float", Primitive::Text_to_float),
+    ("text/to_int", Primitive::Text_to_int),
+    ("array/sum", Primitive::Array_reduce(Reduction::Sum)),
+    ("array/min", Primitive::Array_reduce(Reduction::Minimum)),
+    ("array/max", Primitive::Array_reduce(Reduction::Maximum)),
+    ("array/segment_sum", Primitive::Array_segment(Reduction::Sum)),
+    ("array/segment_min", Primitive::Array_segment(Reduction::Minimum)),
+    ("array/segment_max", Primitive::Array_segment(Reduction::Maximum)),
+    ("array/segment_argmax", Primitive::Array_segment_argmax),
+    ("float/next_after", Primitive::Next_after),
+    ("array/grade", Primitive::Array_grade),
+    ("array/index_of", Primitive::Array_index_of),
+    ("array/compact", Primitive::Array_compact),
+    ("array/scan_sum", Primitive::Array_scan_sum),
+    ("array/scatter_add", Primitive::Array_scatter_add),
+    ("sequence/length", Primitive::Sequence_length),
+    ("sequence/get", Primitive::Sequence_get),
+    ("sequence/build", Primitive::Sequence_build),
+    ("sequence/slice", Primitive::Sequence_slice),
+    ("sequence/concat", Primitive::Sequence_concat),
+    ("array/max_length", Primitive::Array_max_length),
+    ("array/range", Primitive::Array_range),
+    ("array/int", Primitive::Array_int),
+    ("array/float", Primitive::Array_float),
+    ("array/vec3", Primitive::Array_vec3),
+    ("array/vec4", Primitive::Array_vec4),
+    ("array/text", Primitive::Array_text),
+    ("array/nth", Primitive::Array_nth),
+    ("array/count", Primitive::Array_count),
+    ("array/slice", Primitive::Array_slice),
+    ("array/concat", Primitive::Array_concat),
+    ("value/rand", Primitive::Rand),
+    ("rand/at", Primitive::Rand_at),
+    ("fma", Primitive::Fma),
+    ("noise3", Primitive::Noise3),
+    ("color/parse", Primitive::Color_parse),
+    ("float/mul_checked", Primitive::Checked_mul),
+    ("float/fma_checked", Primitive::Checked_fma),
+    ("truthy", Primitive::Truthy),
+    ("error", Primitive::Error),
+];
+
+pub fn primitive(name: &str) -> Option<Primitive> { PRIMITIVES.iter().find(|(n, _)| *n == name).map(|(_, op)| op.clone()) }
+pub fn primitive_name(operation: &Primitive) -> &'static str {
+    match operation {
+        Primitive::Color_byte(_) => "color/byte",
+        Primitive::Coerce(_) => "coerce",
+        Primitive::Fail(..) | Primitive::Fail_diagnostic(_) => "fail",
+        _ => PRIMITIVES.iter().find(|(_, op)| op == operation).expect("complete primitive table").0,
+    }
+}
+pub fn binary(name: &str) -> Option<Binary> { if let Some(Primitive::Numeric(op)) = primitive(name) { Some(op) } else { None } }
+pub fn unary(name: &str) -> Option<Unary> { if let Some(Primitive::Math(op)) = primitive(name) { Some(op) } else { None } }
+pub fn integer(name: &str) -> Option<Integer> { if let Some(Primitive::Integer(op)) = primitive(name) { Some(op) } else { None } }
+pub fn comparison(name: &str) -> Option<Comparison> { if let Some(Primitive::Integer_compare(op)) = primitive(name) { Some(op) } else { None } }
+pub fn integer_name(operation: Integer) -> &'static str { primitive_name(&Primitive::Integer(operation)) }
+pub fn comparison_name(operation: Comparison) -> &'static str { primitive_name(&Primitive::Integer_compare(operation)) }
 
 #[inline]
 pub fn integer_apply(operation: Integer, a: i64, b: i64) -> Result<i64, crate::Diagnostic> {
@@ -180,21 +352,38 @@ pub fn unary_apply(op: Unary, x: f64) -> f64 {
 
 pub fn rand_at(seed: i64, index: i64) -> f64 { rays_math::rand::float_at_int(seed, index) }
 
-pub fn noise_names() -> Vec<String> { NOISE_NAMES.iter().map(|name| (*name).to_owned()).collect() }
+const DERIVED_NAMES: &[&str] = &["length", "dot", "cross", "normalize"];
+pub fn noise_names() -> Vec<String> { vec![primitive_name(&Primitive::Noise3).to_owned()] }
 pub fn names() -> Vec<String> {
-    BINARIES.iter().map(|(name, _)| (*name).to_owned())
-        .chain(UNARIES.iter().map(|(name, _)| (*name).to_owned()))
-        .chain(NOISE_NAMES.iter().map(|name| (*name).to_owned()))
+    let names = |filter: fn(&Primitive) -> bool| PRIMITIVES.iter().filter(move |(_, op)| filter(op)).map(|(name, _)| (*name).to_owned());
+    names(|op| matches!(op, Primitive::Numeric(_) | Primitive::Math(_)))
+        .chain(noise_names())
         .chain(DERIVED_NAMES.iter().map(|name| (*name).to_owned()))
-        .chain(INTEGERS.iter().map(|(name, _)| (*name).to_owned()))
-        .chain(COMPARISONS.iter().map(|(name, _)| (*name).to_owned()))
-        .chain(std::iter::once("rand/at".to_owned())).collect()
+        .chain(std::iter::once(primitive_name(&Primitive::Fma).to_owned()))
+        .chain(names(|op| matches!(op, Primitive::Integer(_) | Primitive::Integer_compare(_))))
+        .chain(std::iter::once(primitive_name(&Primitive::Rand_at).to_owned())).collect()
 }
-pub fn supports(name: &str) -> bool { BINARIES.iter().any(|(n, _)| *n == name) || UNARIES.iter().any(|(n, _)| *n == name) || NOISE_NAMES.contains(&name) || DERIVED_NAMES.contains(&name) || INTEGERS.iter().any(|(n, _)| *n == name) || COMPARISONS.iter().any(|(n, _)| *n == name) || name == "rand/at" }
+pub fn supports(name: &str) -> bool {
+    DERIVED_NAMES.contains(&name) || matches!(primitive(name), Some(Primitive::Numeric(_) | Primitive::Math(_) | Primitive::Integer(_) | Primitive::Integer_compare(_) | Primitive::Noise3 | Primitive::Fma | Primitive::Rand_at))
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn primitive_names_round_trip_without_aliases() {
+        let mut names = std::collections::HashSet::new();
+        for (name, operation) in PRIMITIVES {
+            assert!(names.insert(*name), "duplicate primitive {name}");
+            assert_eq!(primitive(name).as_ref(), Some(operation), "{name}");
+            assert_eq!(primitive_name(operation), *name);
+        }
+        assert!(primitive("unknown").is_none());
+        assert!(binary("text/trim").is_none());
+        assert_eq!(primitive_name(&Primitive::Coerce(Ty::Int)), "coerce");
+        assert_eq!(primitive_name(&Primitive::Color_byte(ByteMode::Unclamped)), "color/byte");
+    }
+
     #[test]
     fn packed_names_widths_and_limits() {
         assert!(supports("noise3") && supports("rand/at") && !supports("exact"));

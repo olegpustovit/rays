@@ -71,12 +71,7 @@ pub struct PlanOptions {
     pub curves: bool,
 }
 
-fn guarded(i: &Instruction) -> &Instruction {
-    match i {
-        Instruction::Guarded(_, body) => guarded(body),
-        other => other,
-    }
-}
+
 
 /// `gpu/scene-spheres` and `gpu/scene-strands`: built-in counts read from the scene's uniform
 /// words, not frame facts.
@@ -105,7 +100,7 @@ enum Use {
 // shift, a select, a carried next value). The low 32 bits of signed-63 wrapping arithmetic are the
 // uint32 results, so CPU bits are kept. Both are greatest fixpoints over the loop-carried registers.
 fn narrow_registers(view: &host::View, used: &[bool]) -> Vec<bool> {
-    let code: Vec<&Instruction> = view.code.iter().map(guarded).collect();
+    let code: Vec<&Instruction> = view.code.iter().map(Instruction::unguarded).collect();
     let size = code.len();
     let integer = |slot: usize| region::integer_register(&view.code[slot]);
     let mut carried: Vec<Option<(i64, i64)>> = vec![None; size];
@@ -405,7 +400,7 @@ fn specialize(view: &host::View) -> (host::View, Vec<bool>) {
             (Some(x), Some(y)) => f(x, y),
             _ => None,
         };
-        known[slot] = match guarded(instruction) {
+        known[slot] = match Instruction::unguarded(instruction) {
             Instruction::Const(c) => Some(*c),
             Instruction::Int_const(n) if n.abs() < 1 << 53 => Some(*n as f64),
             Instruction::Int_compare(op, a, b) => both(&known, *a, *b, &|x, y| {
@@ -454,7 +449,7 @@ fn specialize(view: &host::View) -> (host::View, Vec<bool>) {
     let mut empty: Vec<(usize, Instruction)> = Vec::new();
     // a loop of no passes keeps only its initial values: its end reads them back
     for (slot, instruction) in view.code.iter().enumerate() {
-        if let Instruction::Loop_begin(loop_) = guarded(instruction) {
+        if let Instruction::Loop_begin(loop_) = Instruction::unguarded(instruction) {
             if let (Some(first), Some(last)) = (known[loop_.first as usize], known[loop_.last as usize]) {
                 if first >= last {
                     for body in slot + 1 + loop_.initial.len()..loop_.finish as usize {
@@ -532,7 +527,7 @@ fn reachable(whole_loops: bool, view: &host::View, dead: &[bool]) -> Vec<bool> {
         for r in operands(&view.code[slot]) {
             mark(whole_loops, view, dead, used, r as usize);
         }
-        if let Instruction::Loop_begin(loop_) = guarded(&view.code[slot]) {
+        if let Instruction::Loop_begin(loop_) = Instruction::unguarded(&view.code[slot]) {
             if !whole_loops {
                 for carried in slot + 1..=slot + loop_.initial.len() {
                     mark(whole_loops, view, dead, used, carried);
@@ -565,7 +560,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         first / 4
     };
     let tabled: Vec<i64> = if fast {
-        view.code.iter().filter_map(|i| match guarded(i) { Instruction::Array_prepare(u, _) => Some(*u), _ => None }).collect()
+        view.code.iter().filter_map(|i| match Instruction::unguarded(i) { Instruction::Array_prepare(u, _) => Some(*u), _ => None }).collect()
     } else {
         Vec::new()
     };
@@ -579,7 +574,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         .code
         .iter()
         .enumerate()
-        .map(|(index, instruction)| match guarded(instruction) {
+        .map(|(index, instruction)| match Instruction::unguarded(instruction) {
             Instruction::Int_frame(name) if scene_fact(name) => 0,
             Instruction::Frame(name) | Instruction::Int_frame(name) => uniform(format!("frame:{index}:{name}"), 1),
             _ => 0,
@@ -591,7 +586,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
     let used = reachable(!fast, &view, &dead);
     // fast checks its inputs (a resident producer's buffer is not scanned on the host) and outputs
     let finite_checks = if fast {
-        view.code.iter().map(|i| matches!(guarded(i), Instruction::Input(..))).collect()
+        view.code.iter().map(|i| matches!(Instruction::unguarded(i), Instruction::Input(..))).collect()
     } else {
         packed::finite_checks(program)
     };
@@ -599,7 +594,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         .code
         .iter()
         .enumerate()
-        .filter_map(|(index, instruction)| match guarded(instruction) {
+        .filter_map(|(index, instruction)| match Instruction::unguarded(instruction) {
             Instruction::Noise3(_, _, _, seed, _, _, _) | Instruction::Stage(region::Stage::Noise_table(seed), _) if used[index] => Some(*seed),
             _ => None,
         })
@@ -612,7 +607,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
         view.code
             .iter()
             .enumerate()
-            .filter_map(|(slot, instruction)| match guarded(instruction) {
+            .filter_map(|(slot, instruction)| match Instruction::unguarded(instruction) {
                 Instruction::Array_prepare(u, ty) if used[slot] => Some((
                     slot as i64,
                     (
@@ -630,7 +625,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
             .collect()
     };
     let gather_lengths: Vec<i64> = gathers.iter().enumerate().map(|(k, (_, (u, _)))| uniform(format!("gather:{k}:{u}"), 1)).collect();
-    let traced = view.code.iter().any(|i| match guarded(i) {
+    let traced = view.code.iter().any(|i| match Instruction::unguarded(i) {
         Instruction::Trace(..) => true,
         Instruction::Stage(
             region::Stage::Trace_triangles(_)
@@ -665,7 +660,7 @@ pub fn plan(options: PlanOptions, program: &packed::T) -> T {
     let scene = count_base + if counts.is_none() { 0 } else { 2 };
     let mut input_used = vec![false; count as usize];
     for (slot, instruction) in view.code.iter().enumerate() {
-        if let Instruction::Input(input, _, _) | Instruction::Int_input(input) = guarded(instruction) {
+        if let Instruction::Input(input, _, _) | Instruction::Int_input(input) = Instruction::unguarded(instruction) {
             if used[slot] && !image {
                 input_used[*input as usize] = true;
             }
@@ -722,10 +717,10 @@ pub fn iter(plan: &T, visitor: &mut dyn Visit) {
     fn visit(code: &[Instruction], first: usize, last: usize, visitor: &mut dyn Visit) {
         let mut slot = first;
         while slot < last {
-            match guarded(&code[slot]) {
+            match Instruction::unguarded(&code[slot]) {
                 Instruction::Loop_begin(control) => {
                     let header = slot;
-                    let (next, stop) = match guarded(&code[control.finish as usize]) {
+                    let (next, stop) = match Instruction::unguarded(&code[control.finish as usize]) {
                         Instruction::Loop_end(_, values, stop) => (values.clone(), *stop),
                         _ => unreachable!("loop without its end"),
                     };

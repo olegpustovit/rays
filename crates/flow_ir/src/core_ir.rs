@@ -8,10 +8,9 @@
 //! `Region::T` fields are all `pub` for reading; build one only through `make`/`rebuild`.
 #![allow(non_camel_case_types, non_snake_case)]
 
-use flow_check::op::Reduction;
 use flow_check::workspace::{DiagnosticPolicy, Path, Term};
 use flow_syntax::packed_ops;
-pub use flow_syntax::packed_ops::{Comparison, Integer};
+pub use flow_syntax::packed_ops::{ByteMode, Comparison, Integer, Primitive, primitive_name};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self, ResidualId, Value};
 pub use flow_syntax::Diagnostic;
@@ -31,74 +30,6 @@ pub enum Literal {
     Int_array(Arc<Vec<i64>>),
     Text_array(Arc<rays_math::text_array::TextArray>),
     Empty_geometry,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ByteMode { Clamped, Unclamped }
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Primitive {
-    Numeric(packed_ops::Binary),
-    Math(packed_ops::Unary),
-    Remainder,
-    Floor,
-    Ceil,
-    Round,
-    Int_convert,
-    Float_convert,
-    Integer(Integer),
-    Integer_compare(Comparison),
-    Equal,
-    Show,
-    Text_concat,
-    Text_blank,
-    Text_trim,
-    Text_lower,
-    Text_repr,
-    Text_table_decode,
-    Text_table_encode,
-    Text_split,
-    Text_tokens,
-    Text_to_float,
-    Text_to_int,
-    Sequence_length,
-    Sequence_get,
-    Sequence_build,
-    Sequence_slice,
-    Sequence_concat,
-    Array_max_length,
-    Array_range,
-    Array_int,
-    Array_text,
-    Array_float,
-    Array_vec3,
-    Array_vec4,
-    Array_nth,
-    Array_count,
-    Array_slice,
-    Array_concat,
-    Array_reduce(Reduction),
-    Array_segment(Reduction),
-    Array_segment_argmax,
-    Next_after,
-    Array_scatter_add,
-    Array_compact,
-    Array_scan_sum,
-    Array_grade,
-    Array_index_of,
-    Rand,
-    Rand_at,
-    Fma,
-    Checked_mul,
-    Checked_fma,
-    Noise3,
-    Color_parse,
-    Color_byte(ByteMode),
-    Coerce(Ty),
-    Truthy,
-    Error,
-    Fail(String, String),
-    Fail_diagnostic(Diagnostic),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -293,6 +224,25 @@ pub mod region {
         Loop_carry(i64, i64, Ty),
         Loop_end(i64, Vec<i64>, Option<i64>),
         Loop_result(i64, i64, Ty),
+    }
+
+    impl Instruction {
+        pub fn unguarded(&self) -> &Self {
+            let mut current = self;
+            while let Self::Guarded(_, body) = current { current = body; }
+            current
+        }
+
+        /// Conditions in execution order, from outermost guard to innermost.
+        pub fn guarded(&self) -> (Vec<(i64, bool)>, &Self) {
+            let mut guards = Vec::new();
+            let mut current = self;
+            while let Self::Guarded(more, body) = current {
+                guards.extend_from_slice(more);
+                current = body;
+            }
+            (guards, current)
+        }
     }
 
     pub fn integer_register(instruction: &Instruction) -> bool {
@@ -685,15 +635,7 @@ pub mod region {
 
     pub fn dependent_flags(r: &T) -> &Vec<bool> { r.dependent.get_or_init(|| dependent_of(&r.code)) }
 
-    fn bare(i: &Instruction) -> &Instruction {
-        match i { Instruction::Guarded(_, body) => bare(body), other => other }
-    }
-    fn guards_of(i: &Instruction) -> Vec<(i64, bool)> {
-        match i {
-            Instruction::Guarded(gs, body) => { let mut r = gs.clone(); r.extend(guards_of(body)); r }
-            _ => Vec::new(),
-        }
-    }
+
 
     fn controls_valid(code: &[Instruction], outputs: &[Vec<i64>]) -> bool {
         let n = code.len();
@@ -703,7 +645,7 @@ pub mod region {
         let mut valid = true;
         let inside = |outer: &[i64], inner: &[i64]| outer.iter().all(|s| inner.contains(s));
         let header = |id: i64| -> Option<&Loop> {
-            if id < 0 || id >= n as i64 { None } else if let Instruction::Loop_begin(l) = bare(&code[id as usize]) { Some(l) } else { None }
+            if id < 0 || id >= n as i64 { None } else if let Instruction::Loop_begin(l) = Instruction::unguarded(&code[id as usize]) { Some(l) } else { None }
         };
         let scalar = |id: i64, ty: &Ty| -> bool {
             if id < 0 || id >= n as i64 { return false; }
@@ -721,13 +663,13 @@ pub mod region {
             let reads = operands(instruction);
             if reads.iter().any(|id| *id < 0 || *id >= slot as i64) {
                 valid = false;
-            } else if !matches!(bare(instruction), Instruction::Loop_result(..))
+            } else if !matches!(Instruction::unguarded(instruction), Instruction::Loop_result(..))
                 && reads.iter().any(|id| !inside(&scopes[*id as usize], &active))
             {
                 valid = false;
             }
             let slot_i = slot as i64;
-            match bare(instruction) {
+            match Instruction::unguarded(instruction) {
                 Instruction::Loop_begin(loop_) => {
                     if loop_.finish <= slot_i + loop_.initial.len() as i64
                         || loop_.finish >= n as i64
@@ -739,12 +681,12 @@ pub mod region {
                     {
                         valid = false;
                     } else {
-                        match bare(&code[loop_.finish as usize]) {
+                        match Instruction::unguarded(&code[loop_.finish as usize]) {
                             Instruction::Loop_end(owner, values, _) if *owner == slot_i && values.len() == loop_.initial.len() => {}
                             _ => valid = false,
                         }
                         for (component, initial) in loop_.initial.iter().enumerate() {
-                            match bare(&code[slot + 1 + component]) {
+                            match Instruction::unguarded(&code[slot + 1 + component]) {
                                 Instruction::Loop_carry(owner, index, ty) if *owner == slot_i && *index == component as i64 && scalar(*initial, ty) => {}
                                 _ => valid = false,
                             }
@@ -760,7 +702,7 @@ pub mod region {
                                 && *component < control.initial.len() as i64
                                 && slot_i == loop_ + 1 + component
                                 && scalar(control.initial[*component as usize], ty)
-                                && guards_of(instruction) == guards_of(&code[*loop_ as usize])
+                                && Instruction::guarded(instruction).0 == Instruction::guarded(&code[*loop_ as usize]).0
                         }
                         _ => false,
                     };
@@ -773,13 +715,13 @@ pub mod region {
                                 && control.finish > loop_ + control.initial.len() as i64
                                 && control.finish < n as i64
                                 && values.len() == control.initial.len()
-                                && guards_of(instruction) == guards_of(&code[*loop_ as usize])
+                                && Instruction::guarded(instruction).0 == Instruction::guarded(&code[*loop_ as usize]).0
                         }
                         _ => false,
                     };
                     if ok {
                         for (component, value) in values.iter().enumerate() {
-                            match bare(&code[(*loop_ as usize) + 1 + component]) {
+                            match Instruction::unguarded(&code[(*loop_ as usize) + 1 + component]) {
                                 Instruction::Loop_carry(_, _, ty) if scalar(*value, ty) => {}
                                 _ => valid = false,
                             }
@@ -798,8 +740,8 @@ pub mod region {
                                 && loop_ + 1 + component < n as i64
                                 && *component < control.initial.len() as i64
                                 && inside(&scopes[*loop_ as usize][..scopes[*loop_ as usize].len().saturating_sub(1)], &active)
-                                && guards_of(instruction) == guards_of(&code[*loop_ as usize])
-                                && matches!(bare(&code[(loop_ + 1 + component) as usize]), Instruction::Loop_carry(_, _, stored) if stored == ty)
+                                && Instruction::guarded(instruction).0 == Instruction::guarded(&code[*loop_ as usize]).0
+                                && matches!(Instruction::unguarded(&code[(loop_ + 1 + component) as usize]), Instruction::Loop_carry(_, _, stored) if stored == ty)
                         }
                         None => false,
                     };
@@ -811,7 +753,7 @@ pub mod region {
         valid && active.is_empty()
             && outputs.iter().all(|o| o.iter().all(|id| {
                 *id >= 0 && *id < n as i64 && scopes[*id as usize].is_empty()
-                    && !matches!(bare(&code[*id as usize]), Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..))
+                    && !matches!(Instruction::unguarded(&code[*id as usize]), Instruction::Loop_begin(_) | Instruction::Loop_carry(..) | Instruction::Loop_end(..))
             }))
     }
 
@@ -832,10 +774,10 @@ pub mod region {
         let mut operands_ok = true;
         let mut controls = false;
         let ncode = r.code.len() as i64;
-        let array_handle_id = |id: i64| id >= 0 && id < ncode && matches!(bare(&r.code[id as usize]), Instruction::Array_prepare(..));
-        let table_type = |id: i64| match bare(&r.code[id as usize]) { Instruction::Array_prepare(_, ty) => ty.clone(), _ => Ty::Any };
+        let array_handle_id = |id: i64| id >= 0 && id < ncode && matches!(Instruction::unguarded(&r.code[id as usize]), Instruction::Array_prepare(..));
+        let table_type = |id: i64| match Instruction::unguarded(&r.code[id as usize]) { Instruction::Array_prepare(_, ty) => ty.clone(), _ => Ty::Any };
         let text = |id: i64| id >= 0 && id < ncode && text_register(&r.code[id as usize]);
-        let prepared_for = |selected: &[(i64, bool)], array: i64| guards_of(&r.code[array as usize]).iter().all(|g| selected.contains(g));
+        let prepared_for = |selected: &[(i64, bool)], array: i64| Instruction::guarded(&r.code[array as usize]).0.iter().all(|g| selected.contains(g));
         fn check(
             r: &T, slot: usize, instruction: &Instruction, selected: &[(i64, bool)], operands_ok: &mut bool, controls: &mut bool,
             array_handle_id: &dyn Fn(i64) -> bool, table_type: &dyn Fn(i64) -> Ty, text: &dyn Fn(i64) -> bool,
@@ -1165,82 +1107,6 @@ pub fn iter(f: &mut dyn FnMut(&Statement), statements: &[Statement]) {
     }
 }
 
-pub fn primitive_name(p: &Primitive) -> &'static str {
-    use packed_ops::{Binary as B, Unary as U};
-    match p {
-        Primitive::Numeric(op) => match op {
-            B::Add => "+", B::Sub => "-", B::Mul => "*", B::Div => "/", B::Mod => "mod", B::Pow => "pow",
-            B::Min => "min", B::Max => "max", B::Lt => "<", B::Le => "<=", B::Gt => ">", B::Ge => ">=",
-            B::Eq => "=", B::And => "and", B::Or => "or", B::Atan2 => "atan2", B::Hypot => "hypot", B::Ldexp => "ldexp",
-        },
-        Primitive::Math(op) => match op {
-            U::Sin => "sin", U::Cos => "cos", U::Sqrt => "sqrt", U::Abs => "abs", U::Not => "not", U::Tan => "tan",
-            U::Asin => "asin", U::Acos => "acos", U::Exp => "exp", U::Log => "log", U::Sign => "sign", U::Rsqrt => "rsqrt",
-        },
-        Primitive::Remainder => "remainder",
-        Primitive::Floor => "floor",
-        Primitive::Ceil => "ceil",
-        Primitive::Round => "round",
-        Primitive::Int_convert => "int",
-        Primitive::Float_convert => "float",
-        Primitive::Integer(op) => packed_ops::integer_name(*op),
-        Primitive::Integer_compare(op) => packed_ops::comparison_name(*op),
-        Primitive::Equal => "equal?",
-        Primitive::Show => "show",
-        Primitive::Text_concat => "text/concat",
-        Primitive::Text_blank => "text/blank?",
-        Primitive::Text_trim => "text/trim",
-        Primitive::Text_lower => "text/lower",
-        Primitive::Text_repr => "text/repr",
-        Primitive::Text_table_decode => "text/table_decode",
-        Primitive::Text_table_encode => "text/table_encode",
-        Primitive::Text_split => "text/split",
-        Primitive::Text_tokens => "text/tokens",
-        Primitive::Text_to_float => "text/to_float",
-        Primitive::Text_to_int => "text/to_int",
-        Primitive::Array_reduce(Reduction::Sum) => "array/sum",
-        Primitive::Array_reduce(Reduction::Minimum) => "array/min",
-        Primitive::Array_reduce(Reduction::Maximum) => "array/max",
-        Primitive::Array_segment(Reduction::Sum) => "array/segment_sum",
-        Primitive::Array_segment(Reduction::Minimum) => "array/segment_min",
-        Primitive::Array_segment(Reduction::Maximum) => "array/segment_max",
-        Primitive::Array_segment_argmax => "array/segment_argmax",
-        Primitive::Next_after => "float/next_after",
-        Primitive::Array_grade => "array/grade",
-        Primitive::Array_index_of => "array/index_of",
-        Primitive::Array_compact => "array/compact",
-        Primitive::Array_scan_sum => "array/scan_sum",
-        Primitive::Array_scatter_add => "array/scatter_add",
-        Primitive::Sequence_length => "sequence/length",
-        Primitive::Sequence_get => "sequence/get",
-        Primitive::Sequence_build => "sequence/build",
-        Primitive::Sequence_slice => "sequence/slice",
-        Primitive::Sequence_concat => "sequence/concat",
-        Primitive::Array_max_length => "array/max_length",
-        Primitive::Array_range => "array/range",
-        Primitive::Array_int => "array/int",
-        Primitive::Array_float => "array/float",
-        Primitive::Array_vec3 => "array/vec3",
-        Primitive::Array_vec4 => "array/vec4",
-        Primitive::Array_text => "array/text",
-        Primitive::Array_nth => "array/nth",
-        Primitive::Array_count => "array/count",
-        Primitive::Array_slice => "array/slice",
-        Primitive::Array_concat => "array/concat",
-        Primitive::Rand => "value/rand",
-        Primitive::Rand_at => "rand/at",
-        Primitive::Fma => "fma",
-        Primitive::Noise3 => "noise3",
-        Primitive::Color_parse => "color/parse",
-        Primitive::Color_byte(_) => "color/byte",
-        Primitive::Checked_mul => "float/mul_checked",
-        Primitive::Checked_fma => "float/fma_checked",
-        Primitive::Coerce(_) => "coerce",
-        Primitive::Truthy => "truthy",
-        Primitive::Error => "error",
-        Primitive::Fail(..) | Primitive::Fail_diagnostic(_) => "fail",
-    }
-}
 
 fn frame_name(f: FrameField) -> &'static str {
     match f {
