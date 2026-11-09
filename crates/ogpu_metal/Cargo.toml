@@ -7,6 +7,7 @@ license.workspace = true
 [lib]
 name = "ogpu_metal"
 path = "src/lib.rs"
+test = false
 
 # ponytail: no `lru` dependency; metal handles are not Send, so the 64 depth-stencil states are a small local LRU.
 [dependencies]

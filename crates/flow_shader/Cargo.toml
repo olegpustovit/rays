@@ -7,10 +7,12 @@ license.workspace = true
 [lib]
 name = "flow_shader"
 path = "src/lib.rs"
+test = false
 
 [[bin]]
 name = "print_shader"
 path = "src/print_shader.rs"
+test = false
 
 [dependencies]
 flow_syntax = { path = "../flow_syntax" }

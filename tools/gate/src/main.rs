@@ -452,8 +452,23 @@ fn rust_sources(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+fn lib_unit_tests_disabled(workspace: &Path) -> Result<std::collections::HashSet<String>, String> {
+    let mut manifests = Vec::new();
+    cargo_manifests(&workspace.join("crates"), &mut manifests)?;
+    let mut disabled = std::collections::HashSet::new();
+    for manifest in manifests {
+        let parsed = parse_manifest(&manifest)?;
+        let Some(package_name) = parsed.package_name.as_deref() else { continue };
+        if !parsed.lib_unit_tests {
+            disabled.insert(crate_name(package_name, parsed.lib_name.as_deref()));
+        }
+    }
+    Ok(disabled)
+}
+
 fn shape(workspace: &Path) -> Result<Vec<String>, String> {
     let crates = workspace.join("crates");
+    let disabled_lib_tests = lib_unit_tests_disabled(workspace)?;
     let mut files = Vec::new();
     rust_sources(&crates, &mut files).map_err(|error| format!("cannot scan {}: {error}", crates.display()))?;
     files.sort();
@@ -467,6 +482,15 @@ fn shape(workspace: &Path) -> Result<Vec<String>, String> {
             .map(|component| component.as_os_str().to_string_lossy().into_owned())
             .unwrap_or_default();
         let source = fs::read_to_string(&file).map_err(|error| format!("cannot read {}: {error}", file.display()))?;
+        if disabled_lib_tests.contains(&crate_name) {
+            let file_name = file.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let in_lib_src = relative.starts_with(&format!("crates/{crate_name}/src/"));
+            if in_lib_src && !file_name.starts_with("test_") && source.contains("#[test]") {
+                issues.push(format!(
+                    "{relative}: unit tests in library sources require `[lib] test` to stay enabled"
+                ));
+            }
+        }
         issues.extend(shape_source(&crate_name, &relative, &source));
     }
     issues.sort();
@@ -500,6 +524,7 @@ struct Package {
 struct ParsedManifest {
     package_name: Option<String>,
     lib_name: Option<String>,
+    lib_unit_tests: bool,
     has_binary: bool,
     has_test_target: bool,
     deps: Vec<DepSpec>,
@@ -699,9 +724,14 @@ fn parse_manifest(path: &Path) -> Result<ParsedManifest, String> {
         let key = table.iter().map(|part| (*part).to_owned()).collect::<Vec<_>>();
         sections.get(&key)?.get(name).and_then(|(value, _)| toml_string(value))
     };
+    let lib_unit_tests = sections
+        .get(&vec!["lib".into()])
+        .and_then(|entries| entries.get("test"))
+        .is_none_or(|(value, _)| value != "false");
     let mut parsed = ParsedManifest {
         package_name: field(&["package"], "name"),
         lib_name: field(&["lib"], "name"),
+        lib_unit_tests,
         has_binary,
         has_test_target,
         ..ParsedManifest::default()
@@ -1365,6 +1395,19 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    #[test]
+    fn lib_unit_tests_disabled_includes_integration_only_libs() {
+        let workspace = std::env::current_dir().expect("cwd");
+        let root = if workspace.ends_with("gate") {
+            workspace.parent().and_then(|p| p.parent()).expect("workspace root")
+        } else {
+            workspace.as_path()
+        };
+        let disabled = super::lib_unit_tests_disabled(root).expect("manifest scan");
+        assert!(disabled.contains("pxui") && disabled.contains("flow_shader"));
+    }
 
     #[test]
     fn shape_gate_restricts_types_and_control_flow() {

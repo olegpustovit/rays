@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+test = false
+
 [dependencies]
 sdl3 = { path = "../sdl3" }
 ogpu_core = { path = "../ogpu_core" }
