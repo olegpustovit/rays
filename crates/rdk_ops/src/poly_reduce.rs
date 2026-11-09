@@ -685,7 +685,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             Some(name) => {
                 let item = match &params.primitives {
                     Some(item) => group::with_name(name, item)?,
-                    None => group::init(Some(grain), group::Owner::Primitive, name, original_primitives, &|_| true)?,
+                    None => group::init(Some(grain), group::Owner::Primitive, name, original_primitives, &|_| Ok(true))?,
                 };
                 geometry::with_group(item, geometry_value)
             }
@@ -701,7 +701,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                     group::Owner::Primitive,
                     name,
                     geometry::primitive_count(&output),
-                    &|_| false,
+                    &|_| Ok(false),
                 )?,
             },
             None => group::init(
@@ -709,7 +709,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                 group::Owner::Primitive,
                 name,
                 geometry::primitive_count(&output),
-                &|_| true,
+                &|_| Ok(true),
             )?,
         };
         output = geometry::with_group(item, &output)?;
@@ -793,7 +793,7 @@ mod tests {
     fn original_positions_and_constraints() {
         let source = grid(18, 14);
         let (sx, sy, sz) = xyz(&source);
-        let hard = group::init(None, group::Owner::Point, "pin", geometry::point_count(&source), &|p| p == 100).unwrap();
+        let hard = group::init(None, group::Owner::Point, "pin", geometry::point_count(&source), &|p| Ok(p == 100)).unwrap();
         let mut p = Params::new(Target::ReduceRatio(0.35));
         p.grain = Some(11);
         p.equalize_lengths = 1e-10;
@@ -837,9 +837,9 @@ mod tests {
         let ordered = group::ordered(group::Owner::Point, "ordered_points", points, &[3, 7, 11, 15, 19]).unwrap();
         let topology_value = geometry::topology(&base).clone();
         let index = topology_index::create(None, &topology_value).unwrap();
-        let boundary = edge_group::init(None, &topology_value, &index, "boundary", &|edge| {
+        let boundary = edge_group::init(None, &topology_value, &index, "boundary", &|edge| Ok({
             topology_index::edge_incidence_count(&index, edge).unwrap() == 1
-        })
+        }))
         .unwrap();
         let source = geometry::create(
             geometry::positions(&base).clone(),
@@ -878,11 +878,11 @@ mod tests {
         p.equalize_lengths = 1e-10;
         assert_eq!(geometry::data_id(&run(&p, &source).unwrap()), geometry::data_id(&source));
         let all_hard =
-            group::init(None, group::Owner::Point, "all_hard", geometry::point_count(&source), &|_| true).unwrap();
+            group::init(None, group::Owner::Point, "all_hard", geometry::point_count(&source), &|_| Ok(true)).unwrap();
         let mut p = Params::new(Target::ReduceRatio(0.0));
         p.hard_points = Some(all_hard);
         assert_eq!(geometry::data_id(&run(&p, &source).unwrap()), geometry::data_id(&source));
-        let wrong = group::init(None, group::Owner::Point, "wrong", geometry::point_count(&source), &|_| true).unwrap();
+        let wrong = group::init(None, group::Owner::Point, "wrong", geometry::point_count(&source), &|_| Ok(true)).unwrap();
         let mut p = Params::new(Target::ReduceRatio(0.5));
         p.primitives = Some(wrong);
         assert!(run(&p, &source).is_err(), "accepted a point-owned primitive selection");

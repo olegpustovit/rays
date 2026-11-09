@@ -780,9 +780,9 @@ fn run_general(
         match name {
             None => Ok(groups),
             Some(name) => merge_group(
-                group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|primitive| {
+                group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|primitive| Ok({
                     membership[primitive as usize] != 0
-                })?,
+                }))?,
                 groups,
             ),
         }
@@ -954,7 +954,7 @@ mod tests {
                 (PrimitiveKind::OpenPolyline, vec![4, 5]),
             ],
         );
-        let polygon_selection = group::init(None, group::Owner::Primitive, "polygons", 3, &|p| p < 2).unwrap();
+        let polygon_selection = group::init(None, group::Owner::Primitive, "polygons", 3, &|p| Ok(p < 2)).unwrap();
         let mixed = geometry::with_group(polygon_selection.clone(), &mixed).unwrap();
         let mut p = Params::new(1.0);
         p.primitives = Some(polygon_selection);
@@ -963,7 +963,7 @@ mod tests {
         assert_eq!(geometry::primitive_count(&output), 9);
         let kinds = topo(&output).primitive_kinds;
         assert!(kinds.iter().any(|&k| k == 1), "did not preserve an unselected curve");
-        let curve_selection = group::init(None, group::Owner::Primitive, "curve", 3, &|p| p == 2).unwrap();
+        let curve_selection = group::init(None, group::Owner::Primitive, "curve", 3, &|p| Ok(p == 2)).unwrap();
         let mut p = Params::new(1.0);
         p.primitives = Some(curve_selection);
         p.divide = Divide::ExtrudeConnectedComponents;

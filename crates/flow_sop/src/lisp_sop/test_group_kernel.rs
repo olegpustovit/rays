@@ -76,11 +76,11 @@ fn native_write(order: Option<&[i64]>, owner: Option<group::Owner>, name: &str, 
             assert!(order.is_none());
             let t = geo::topology(g);
             let index = ok(topology_index::create(None, t));
-            ok(geo::with_edge_group(ok(edge_group::init(None, t, &index, name, &|i| mask[i as usize] == 1)), g))
+            ok(geo::with_edge_group(ok(edge_group::init(None, t, &index, name, &|i| Ok(mask[i as usize] == 1))), g))
         }
         Some(owner) => {
             let made = match order {
-                None => ok(group::init(None, owner, name, mask.len() as i64, &|i| mask[i as usize] == 1)),
+                None => ok(group::init(None, owner, name, mask.len() as i64, &|i| Ok(mask[i as usize] == 1))),
                 Some(order) => ok(group::ordered(owner, name, mask.len() as i64, order)),
             };
             ok(geo::with_group(made, g))
@@ -597,7 +597,7 @@ fn ordinary_group_byte_masks_preserve_immutable_storage() {
                     let members: Vec<i64> = (0..length).map(|i| length - i - 1).filter(|i| selected(*i)).collect();
                     ok(group::ordered(native_owner, "bytes", length, &members))
                 } else {
-                    ok(group::init(None, native_owner, "bytes", length, &|i| selected(i)))
+                    ok(group::init(None, native_owner, "bytes", length, &|i| Ok(selected(i))))
                 };
                 let geometry = ok(geo::with_group(made.clone(), &geometry));
                 let bits = group::view::bits_view(&made).to_vec();
@@ -778,7 +778,7 @@ fn group_query_promotion_names_and_refusals() {
     }
     let foreign = ok(topology::empty(7));
     let index = ok(topology_index::create(None, &foreign));
-    let edge = ok(edge_group::init(None, &foreign, &index, "foreign", &|_| true));
+    let edge = ok(edge_group::init(None, &foreign, &index, "foreign", &|_| Ok(true)));
     assert!(geo::with_edge_group(edge, &geometry).is_err());
 }
 

@@ -325,7 +325,7 @@ fn warm_scatter_allocations() {
         let source = grid(cells);
         let density = Storage::Float(std::sync::Arc::new((0..geometry::point_count(&source)).map(|i| 0.05 + (i % 19) as f64 / 20.).collect()));
         let source = geometry::with_attribute(attribute::create_owned("scatter_density", Owner::Point, density).unwrap(), &source).unwrap();
-        let selection = rdk_core::group::init(None, rdk_core::group::Owner::Primitive, "scatter_surface", geometry::primitive_count(&source), &|i| i % 4 != 0).unwrap();
+        let selection = rdk_core::group::init(None, rdk_core::group::Owner::Primitive, "scatter_surface", geometry::primitive_count(&source), &|i| Ok(i % 4 != 0)).unwrap();
         let source = geometry::with_group(selection, &source).unwrap();
         let inputs = [vec![source.clone()], vec![shifted(&source, 0.25)], vec![shifted(&source, 0.5)]];
         let root = lisp_sop::node(&[("src".into(), lisp_sop::snapshot(&source))], &format!(

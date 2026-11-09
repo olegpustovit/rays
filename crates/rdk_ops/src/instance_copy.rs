@@ -3,7 +3,6 @@
 //! Output ranges are filled by disjoint parallel ranges joined in range order, so every result is
 //! byte-identical to the sequential path.
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::mat4;
 use rays_math::text_array::TextArray;
@@ -133,23 +132,17 @@ fn repeat_attribute(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, i
 
 fn repeat_group(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &group::T) -> Result<group::T, error::T> {
     let source_count = group::length(source);
-    let cancelled = AtomicBool::new(false);
     let target = group::init(
         Some(grain),
         group::owner(source),
         group::name(source),
         copies * source_count,
-        &|index| {
-            if cancel::poll(cancel_value, index, 4095).is_err() {
-                cancelled.store(true, Ordering::Relaxed);
-            }
+        &|index| Ok({
+            cancel::poll(cancel_value, index, 4095)?;
             group::mem(index % source_count, source)
-        },
+        }),
     )
     .map_err(lift)?;
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(error::cancelled(OPERATION));
-    }
     match group::view::order_view(source) {
         None => Ok(target),
         Some(source_order) => {
@@ -601,7 +594,7 @@ mod tests {
         let profile = attribute::create_owned("profile", attribute::Owner::Point, attribute::Storage::FloatArray(profile)).unwrap();
         let transfer_source = geometry::with_attribute(profile, &polyline(&[(0., 0., 0.), (1., 0., 0.)], false)).unwrap();
         let transfer_source = geometry::with_group(
-            group::init(None, group::Owner::Point, "union_mask", 2, &|point| point == 0).unwrap(),
+            group::init(None, group::Owner::Point, "union_mask", 2, &|point| Ok(point == 0)).unwrap(),
             &transfer_source,
         ).unwrap();
         assert!(geometry::payload_bytes(&transfer_source) > 0);

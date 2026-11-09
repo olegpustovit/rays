@@ -88,12 +88,12 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
             group::Owner::Vertex => topology::vertex_count(&t),
             group::Owner::Primitive => topology::primitive_count(&t),
         };
-        groups.push(ok(group::init(None, owner, "plain", n, &|i| i % 2 == 0)));
+        groups.push(ok(group::init(None, owner, "plain", n, &|i| Ok(i % 2 == 0))));
         groups.push(ok(group::ordered(owner, "ordered", n, &(0..n).map(|i| n - 1 - i).collect::<Vec<_>>())));
         groups.push(ok(group::ordered(owner, "ordered_empty", n, &[])));
     }
     let index = ok(topology_index::create(None, &t));
-    let edge_groups = vec![ok(edge_group::init(None, &t, &index, "edges", &|i| i % 2 == 0))];
+    let edge_groups = vec![ok(edge_group::init(None, &t, &index, "edges", &|i| Ok(i % 2 == 0)))];
     let n = count as usize;
     ok(geo::create(
         ok(float3::view::of_owned_exn((0..n).map(raw).collect(), (0..n).map(|i| raw(i + 1)).collect(), (0..n).map(|i| raw(i + 2)).collect())),
@@ -210,9 +210,9 @@ fn oracle(src: &geo::T, dst: &geo::T, p: &[i64], v: &[i64], prim: &[i64], offset
     let edges: Vec<edge_group::T> = geo::edge_groups(src)
         .iter()
         .map(|g| {
-            ok(edge_group::init(None, t, &index, edge_group::name(g), &|edge| {
+            ok(edge_group::init(None, t, &index, edge_group::name(g), &|edge| Ok({
                 (offsets[edge as usize]..offsets[edge as usize + 1]).any(|at| edge_group::mem(ancestors[at as usize], g))
-            }))
+            })))
         })
         .collect();
     let positions = if !mapped {
@@ -662,7 +662,7 @@ fn changing_any_semantic_input_misses_the_cache() {
     let target_topology = ok(geo::create(geo::positions(&dst).clone(), t, None, None, None));
     let source_order = ok(geo::with_group(ok(group::ordered(group::Owner::Point, "ordered", 3, &[1, 0, 2])), &src));
     let st = geo::topology(&src);
-    let source_edges = ok(geo::with_edge_group(ok(edge_group::init(None, st, &ok(topology_index::create(None, st)), "edges", &|i| i == 1)), &src));
+    let source_edges = ok(geo::with_edge_group(ok(edge_group::init(None, st, &ok(topology_index::create(None, st)), "edges", &|i| Ok(i == 1))), &src));
     let variants: Vec<(geo::T, geo::T, Args)> = vec![
         (src.clone(), dst.clone(), replace(&base, "points", ints(&[1, 2, 0]))),
         (src.clone(), dst.clone(), replace(&base, "vertices", ints(&[1, 2, 0]))),
@@ -1035,10 +1035,10 @@ fn lead_groups_lists_target_groups_first() {
     // [:lead_groups true] lists the target's own groups and edge groups ahead of the carried ones.
     let src = source(3);
     let dst = target(1, &src);
-    let dst = ok(geo::with_group(ok(group::init(None, group::Owner::Point, "lead", 3, &|i| i == 1)), &dst));
+    let dst = ok(geo::with_group(ok(group::init(None, group::Owner::Point, "lead", 3, &|i| Ok(i == 1))), &dst));
     let t = geo::topology(&dst).clone();
     let index = ok(topology_index::create(None, &t));
-    let dst = ok(geo::with_edge_group(ok(edge_group::init(None, &t, &index, "lead_edges", &|i| i == 0)), &dst));
+    let dst = ok(geo::with_edge_group(ok(edge_group::init(None, &t, &index, "lead_edges", &|i| Ok(i == 0))), &dst));
     let identity = [0i64, 1, 2];
     let inputs = args(&identity, &identity, &[0], &[0, 1, 2, 3], &[0, 1, 2], "target");
     let lead = "(sop/remap source target :points points :vertices vertices :primitives primitives :positions positions :edges edge_map :lead_groups true)";

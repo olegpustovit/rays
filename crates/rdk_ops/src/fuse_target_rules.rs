@@ -375,14 +375,14 @@ fn apply_groups(
                 group::Owner::Point,
                 group::name(&item),
                 geometry::point_count(source),
-                &|point| {
+                &|point| Ok({
                     let destination = destinations[point as usize];
                     if destination >= 0 {
                         target_group.as_ref().is_some_and(|g| group::mem(destination, g))
                     } else {
                         source_group.as_ref().is_some_and(|g| group::mem(point, g))
                     }
-                },
+                }),
             )
             .map_err(core_fail)?,
         );
@@ -465,7 +465,7 @@ mod tests {
     fn target_groups_are_appended_and_membership_follows_destinations() {
         let source = cloud(vec![0., 0., 0.]);
         let target = geometry::with_group(
-            group::init(None, group::Owner::Point, "only_target", 3, &|p| p == 1).unwrap(),
+            group::init(None, group::Owner::Point, "only_target", 3, &|p| Ok(p == 1)).unwrap(),
             &cloud(vec![1., 2., 3.]),
         )
         .unwrap();

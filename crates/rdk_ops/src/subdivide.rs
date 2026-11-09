@@ -74,7 +74,7 @@ pub(crate) fn free_point_part(
         group::Owner::Point,
         "__rdk_subdivide_referenced_points",
         topology_view.point_count,
-        &|point| used[point as usize] != 0,
+        &|point| Ok(used[point as usize] != 0),
     )?;
     Ok(Some(delete_part(cancel_arc, grain, true, false, &referenced, geometry_value)?))
 }
@@ -119,7 +119,7 @@ pub(crate) fn with_empty_edge_group(
 ) -> Result<geometry::T, error::T> {
     let topology_value = geometry::topology(geometry_value);
     let index = topology_index::create(cancel_token, topology_value)?;
-    let empty = edge_group::init(None, topology_value, &index, name, &|_| false)?;
+    let empty = edge_group::init(None, topology_value, &index, name, &|_| Ok(false))?;
     geometry::with_edge_group(empty, geometry_value)
 }
 
@@ -753,7 +753,7 @@ pub(crate) fn primitive_kind_group(
         group::Owner::Primitive,
         "__rdk_subdivide_primitive_kind",
         topology_view.primitive_kinds.len() as i64,
-        &|primitive| (gu(&topology_view.primitive_kinds, primitive) == 0) == polygon,
+        &|primitive| Ok((gu(&topology_view.primitive_kinds, primitive) == 0) == polygon),
     )
 }
 
@@ -785,7 +785,7 @@ pub(crate) fn selection_for_kind(
         group::Owner::Primitive,
         "__rdk_subdivide_kind_selection",
         source_of_output.len() as i64,
-        &|output| group::mem(gi(&source_of_output, output), selection),
+        &|output| Ok(group::mem(gi(&source_of_output, output), selection)),
     )?))
 }
 
@@ -1422,7 +1422,7 @@ mod tests {
             polygons(7, vec![0, 1, 2, 3, 4, 5, 6], vec![0, 3, 7]),
             Vec::new(),
         );
-        let triangle = group::init(None, group::Owner::Primitive, "triangle", 2, &|p| p == 0).unwrap();
+        let triangle = group::init(None, group::Owner::Primitive, "triangle", 2, &|p| Ok(p == 0)).unwrap();
         let output = ok(&source, &|p| {
             p.scheme = Scheme::Loop;
             p.primitives = Some(triangle.clone());

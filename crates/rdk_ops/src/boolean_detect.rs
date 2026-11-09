@@ -138,9 +138,9 @@ fn install_outputs(
     };
     if let Some(name) = intersecting_group {
         let counts = &outputs.unique_counts;
-        let item = group::init(Some(grain), group::Owner::Primitive, name, primitive_count, &|primitive| {
+        let item = group::init(Some(grain), group::Owner::Primitive, name, primitive_count, &|primitive| Ok({
             counts[primitive as usize] > 0
-        })
+        }))
         .map_err(wrap)?;
         output = geometry::with_group(item, &output).map_err(wrap)?;
     }
@@ -479,13 +479,13 @@ mod tests {
             attribute::Owner::Point,
             attribute::Storage::Float(Arc::new(vec![0., 1., 2., 3., 4., 5.])),
         ).unwrap();
-        let preserved = group::init(None, group::Owner::Primitive, "preserved", 2, &|p| p == 1).unwrap();
+        let preserved = group::init(None, group::Owner::Primitive, "preserved", 2, &|p| Ok(p == 1)).unwrap();
         let stale_hits = attribute::create_owned(
             "hits",
             attribute::Owner::Primitive,
             attribute::Storage::Int(Arc::new(vec![9, 9])),
         ).unwrap();
-        let stale_intersections = group::init(None, group::Owner::Primitive, "intersections", 2, &|_| true).unwrap();
+        let stale_intersections = group::init(None, group::Owner::Primitive, "intersections", 2, &|_| Ok(true)).unwrap();
         let mut source = source();
         source = geometry::with_attribute(temperature.clone(), &source).unwrap();
         source = geometry::with_attribute(stale_hits, &source).unwrap();

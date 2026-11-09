@@ -252,7 +252,7 @@ mod tests {
             group::Owner::Point,
             "without_bridge",
             6,
-            &|point| point != 1 && point != 4,
+            &|point| Ok(point != 1 && point != 4),
         )
         .unwrap();
         let (classes, count) = classify_connectivity(
@@ -278,7 +278,7 @@ mod tests {
             topology_value,
             &index,
             "seam",
-            &|edge| topology_index::edge_points(&index, edge).map_or(false, |points| points == (1, 4)),
+            &|edge| Ok(topology_index::edge_points(&index, edge).map_or(false, |points| points == (1, 4))),
         )
         .unwrap();
         let (classes, count) = classify_connectivity(
@@ -300,7 +300,7 @@ mod tests {
         let geometry_value = two_quads();
         let (classes, count) = classify_connectivity(None, None, None, attribute::Owner::Point, &geometry_value).unwrap();
         assert_eq!((classes, count), (vec![0; 6], 1), "edge-connected point connectivity");
-        let right = group::init(Some(1), group::Owner::Primitive, "right", 2, &|primitive| primitive == 1).unwrap();
+        let right = group::init(Some(1), group::Owner::Primitive, "right", 2, &|primitive| Ok(primitive == 1)).unwrap();
         let (classes, count) =
             classify_connectivity(Some(&right), None, None, attribute::Owner::Primitive, &geometry_value).unwrap();
         assert_eq!((classes, count), (vec![-1, 0], 1), "excluded primitives retain the minus-one sentinel");
@@ -308,9 +308,9 @@ mod tests {
         let topology_value = geometry::topology(&geometry_value);
         let index = topology_index::create(None, topology_value).unwrap();
         let seam = |topology_value: &topology::T, index: &topology_index::T| {
-            edge_group::init(Some(1), topology_value, index, "seam", &|edge| {
+            edge_group::init(Some(1), topology_value, index, "seam", &|edge| Ok({
                 topology_index::edge_points(index, edge).map_or(false, |points| points == (1, 4))
-            })
+            }))
             .unwrap()
         };
         let seams = seam(topology_value, &index);
@@ -319,8 +319,8 @@ mod tests {
         assert!(classes.len() as i64 == geometry::point_count(&geometry_value) && count == 1, "point seam classification");
 
         let code = |result: Result<(Vec<i64>, i64), error::T>| error::code(&result.unwrap_err()).as_str().to_owned();
-        let point_group = group::init(Some(1), group::Owner::Point, "points", 6, &|_| true).unwrap();
-        let wrong_length = group::init(Some(1), group::Owner::Primitive, "bad", 1, &|_| true).unwrap();
+        let point_group = group::init(Some(1), group::Owner::Point, "points", 6, &|_| Ok(true)).unwrap();
+        let wrong_length = group::init(Some(1), group::Owner::Primitive, "bad", 1, &|_| Ok(true)).unwrap();
         assert_eq!(
             code(classify_connectivity(None, Some(&point_group), None, attribute::Owner::Primitive, &geometry_value)),
             "invalid_connectivity"

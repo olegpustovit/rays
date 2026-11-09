@@ -118,7 +118,7 @@ fn point_selection(
                 group::Owner::Point,
                 "__ray_selection",
                 geometry::point_count(geometry_value),
-                &|point| deform::point_selected(selection, Some(&index), point).unwrap_or(false),
+                &|point| Ok(deform::point_selected(selection, Some(&index), point).unwrap_or(false)),
             )?))
         }
     }
@@ -1152,9 +1152,9 @@ fn run_inner(
     }
     let hit_selection = if needs_interpolation || params.hit_group.is_some() {
         let name = params.hit_group.clone().unwrap_or_else(|| "__ray_hits".to_owned());
-        Some(group::init(Some(grain), group::Owner::Point, &name, point_count as i64, &|point| {
+        Some(group::init(Some(grain), group::Owner::Point, &name, point_count as i64, &|point| Ok({
             triangles[point as usize] >= 0
-        })?)
+        }))?)
     } else {
         None
     };
@@ -1402,9 +1402,9 @@ mod tests {
         p.tolerance = 0.001;
         let tolerated = ray(&p, &near_edge, &plane(4.0, 0.0)).unwrap();
         assert!(xyz(&missed).1[0] == 1.0 && near(xyz(&tolerated).1[0], 0.0), "world-space edge tolerance");
-        let upper = group::init(None, group::Owner::Primitive, "upper", geometry::primitive_count(&collision), &|p| {
+        let upper = group::init(None, group::Owner::Primitive, "upper", geometry::primitive_count(&collision), &|p| Ok({
             (2..4).contains(&p)
-        })
+        }))
         .unwrap();
         let mut p = base();
         p.collision_primitives = Some(upper);
@@ -1496,7 +1496,7 @@ mod tests {
     #[test]
     fn selection_and_directions() {
         let source = source_points(&[(-1.0, 2.0, 0.0), (0.0, 2.0, 0.0), (1.0, 2.0, 0.0)]);
-        let selection = group::init(None, group::Owner::Point, "middle", 3, &|p| p == 1).unwrap();
+        let selection = group::init(None, group::Owner::Point, "middle", 3, &|p| Ok(p == 1)).unwrap();
         let mut p = base();
         p.selection = Some(element_selection::T::SelectedPoints(selection));
         p.direction = down();
@@ -1563,7 +1563,7 @@ mod tests {
         );
         let collision = add("revision", attribute::Owner::Detail, attribute::Storage::Int(Arc::new(vec![7])), &collision);
         let collision = geometry::with_group(
-            group::init(None, group::Owner::Primitive, "marked", primitives, &|_| true).unwrap(),
+            group::init(None, group::Owner::Primitive, "marked", primitives, &|_| Ok(true)).unwrap(),
             &collision,
         )
         .unwrap();
@@ -1651,7 +1651,7 @@ mod tests {
         p.method = Method::RayMinimumDistance;
         p.samples = 2;
         check(p, Code::InvalidParameter);
-        let wrong = group::init(None, group::Owner::Point, "wrong", geometry::point_count(&collision), &|_| true).unwrap();
+        let wrong = group::init(None, group::Owner::Point, "wrong", geometry::point_count(&collision), &|_| Ok(true)).unwrap();
         let mut p = base();
         p.collision_primitives = Some(wrong);
         check(p, Code::InvalidGroup);

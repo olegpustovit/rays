@@ -1,7 +1,6 @@
 //! Named group metadata (rename, delete, transfer) over one local group store.
 use rays_math::float::compare as float_compare;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use rdk_core::{support, attribute, attribute_pattern, cancel, edge_group, error, geometry, group, topology_index};
@@ -511,24 +510,14 @@ fn copied_selection(
     target: &geometry::T,
 ) -> Result<Selection, error::T> {
     let count = target_owner_count(cancel_token, owner, target)?;
-    let polled = AtomicBool::new(false);
-    let member = |element: i64| -> bool {
-        if cancel::poll(cancel_token, element, 16_383).is_err() {
-            polled.store(true, Ordering::Relaxed);
-            return false;
-        }
+    let member = |element: i64| -> Result<bool, error::T> {
+        cancel::poll(cancel_token, element, 16_383).map_err(|_| error::cancelled("group_transfer"))?;
         let source = mapped_source(mapping, element);
-        source >= 0 && selection_mem(source_group, source)
-    };
-    let cancelled = || {
-        error::cancelled("group_transfer")
+        Ok(source >= 0 && selection_mem(source_group, source))
     };
     match ordinary_owner(owner) {
         Some(group_owner) => {
             let target_group = group::init(Some(grain), group_owner, "__copied", count, &member)?;
-            if polled.load(Ordering::Relaxed) {
-                return Err(cancelled());
-            }
             let target_group = match source_group {
                 Selection::NativeEdges(_) => target_group,
                 Selection::Ordinary(source_group) if !group::is_ordered(source_group) => target_group,
@@ -573,9 +562,6 @@ fn copied_selection(
             let topology = geometry::topology(target);
             let index = topology_index::create(cancel_token, topology)?;
             let edges = edge_group::init(Some(grain), topology, &index, "__copied", &member)?;
-            if polled.load(Ordering::Relaxed) {
-                return Err(cancelled());
-            }
             Ok(Selection::NativeEdges(edges))
         }
     }
@@ -792,7 +778,7 @@ mod tests {
     }
 
     fn with_group_where(owner: group::Owner, name: &str, predicate: &(dyn Fn(i64) -> bool + Send + Sync), g: &geometry::T) -> geometry::T {
-        let value = group::init(Some(1), owner, name, owner_len(g, owner), predicate).unwrap();
+        let value = group::init(Some(1), owner, name, owner_len(g, owner), &|index| Ok(predicate(index))).unwrap();
         geometry::with_group(value, g).unwrap()
     }
 
@@ -804,7 +790,7 @@ mod tests {
     fn with_edges(name: &str, predicate: &(dyn Fn(i64) -> bool + Send + Sync), g: &geometry::T) -> geometry::T {
         let topology_value = geometry::topology(g);
         let index = topology_index::create(None, topology_value).unwrap();
-        let value = edge_group::init(Some(1), topology_value, &index, name, predicate).unwrap();
+        let value = edge_group::init(Some(1), topology_value, &index, name, &|index| Ok(predicate(index))).unwrap();
         geometry::with_edge_group(value, g).unwrap()
     }
 

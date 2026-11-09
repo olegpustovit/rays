@@ -194,24 +194,18 @@ pub fn group(
     let count = checked_count(mapping.len(), "Topology_remap.group")?;
     let source_count = group::length(value);
     let invalid_mapping = AtomicBool::new(false);
-    let cancelled = AtomicBool::new(false);
     let owner = group::owner(value);
     let name = group::name(value);
-    let output = group::init(Some(grain), owner, name, count, &|target| {
+    let output = group::init(Some(grain), owner, name, count, &|target| Ok({
         let source = mapping[target as usize];
-        if cancel::poll(cancel_value, target, 4095).is_err() {
-            cancelled.store(true, Ordering::Relaxed);
-            false
-        } else if source < -1 || source >= source_count {
+        cancel::poll(cancel_value, target, 4095).map_err(|_| cancelled_error())?;
+        if source < -1 || source >= source_count {
             invalid_mapping.store(true, Ordering::Relaxed);
             false
         } else {
             source >= 0 && group::mem(source, value)
         }
-    })?;
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(cancelled_error());
-    }
+    }))?;
     if invalid_mapping.load(Ordering::Relaxed) {
         return Err(invalid_remap("Topology_remap.group: source mapping index is out of bounds".to_owned()));
     }
@@ -649,7 +643,7 @@ mod tests {
         .unwrap();
         let index = topology_index::create(None, &topology).unwrap();
         let shared = topology_index::find_edge(&index, 1, 4).unwrap();
-        let seam = edge_group::init(None, &topology, &index, "seam", &|edge| edge == shared).unwrap();
+        let seam = edge_group::init(None, &topology, &index, "seam", &|edge| Ok(edge == shared)).unwrap();
 
         let point_map = [0, 1, 2, 3, 4, 5];
         let remapped = edge_groups(None, &topology, &topology, &point_map, &[seam.clone()]).unwrap();
@@ -674,6 +668,24 @@ mod tests {
         let boundary = topology_index::find_edge(&index, 0, 1).unwrap();
         assert!(!edge_group::mem(boundary, &remapped[0]));
     }
+    #[test]
+    fn group_cancellation_precedes_invalid_mapping_but_follows_grain_validation() {
+        let source = group::ordered(group::Owner::Point, "selected", 4, &[3, 1]).unwrap();
+        let token = cancel::create();
+        cancel::cancel(&token);
+        for domains in [1, 4] {
+            parallel::with_domains(domains, || {
+                let invalid = group(None, 1, &[0, 99, -1, 2], &source).err().unwrap();
+                assert_eq!(error::code(&invalid), Code::InvalidRemap);
+                let cancelled = group(Some(&token), 1, &[0, 99, -1, 2], &source).err().unwrap();
+                assert_eq!(error::to_string(&cancelled), error::to_string(&cancelled_error()));
+                let bad_grain = group(Some(&token), 0, &[0, 99, -1, 2], &source).err().unwrap();
+                assert_eq!(error::code(&bad_grain), Code::InvalidRemap);
+                assert!(group(Some(&token), 1, &[], &source).is_ok());
+            });
+        }
+    }
+
     #[test]
     fn float_selection_preserves_mapping_and_cancellation_errors() {
         let invalid = select_float(None, 1, None, &[-1], &[1.0]).unwrap_err();

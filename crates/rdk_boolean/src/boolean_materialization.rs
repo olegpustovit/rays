@@ -6,7 +6,7 @@
 use rdk_core::support::DisjointSet;
 use rays_math::float::{min as omin, max as omax, compare as float_compare};
 use std::sync::atomic::{AtomicI64, AtomicU8, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology,
@@ -1537,48 +1537,32 @@ fn tiny_cleanup_edges(
             let index_value = topology_index::create(cx(cancel), topology)?;
             let index = topology_index::view::view(&index_value);
             let positions = positions_view(geometry_value)?;
-            let failure: Mutex<Option<error::T>> = Mutex::new(None);
             let group = edge_group::init(
                 Some(grain),
                 topology,
                 &index_value,
                 "__rdk_boolean_tiny_seam_continuation",
-                &|edge| {
-                    let outcome = (|| -> Result<bool, error::T> {
-                        cancel::poll(cx(cancel), edge, 4095)?;
-                        let first = index.edge_offsets[u(edge)];
-                        let last = index.edge_offsets[u(edge + 1)];
-                        let mut adjacent = false;
-                        let mut incident = first;
-                        while !adjacent && incident < last {
-                            let primitive = index.primitive_of_vertex[u(index.edge_vertices[u(incident)])];
-                            let extraction = cleanup.cleanup_primitive_sources[u(primitive)];
-                            if extraction < 0 || extraction >= extraction_primitives {
-                                return Err(inv("Boolean cleanup primitive ancestry is out of range"));
-                            }
-                            let facet = boolean_extract::view::primitive_complex_facet(ancestry, extraction);
-                            adjacent = seam_facets[u(facet)] != 0;
-                            incident += 1;
+                &|edge| -> Result<bool, error::T> {
+                    cancel::poll(cx(cancel), edge, 4095)?;
+                    let first = index.edge_offsets[u(edge)];
+                    let last = index.edge_offsets[u(edge + 1)];
+                    let mut adjacent = false;
+                    let mut incident = first;
+                    while !adjacent && incident < last {
+                        let primitive = index.primitive_of_vertex[u(index.edge_vertices[u(incident)])];
+                        let extraction = cleanup.cleanup_primitive_sources[u(primitive)];
+                        if extraction < 0 || extraction >= extraction_primitives {
+                            return Err(inv("Boolean cleanup primitive ancestry is out of range"));
                         }
-                        Ok(adjacent
-                            && edge_length(&positions, index.edge_a[u(edge)], index.edge_b[u(edge)]) <= threshold)
-                    })();
-                    match outcome {
-                        Ok(value) => value,
-                        Err(problem) => {
-                            let mut slot = failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                            if slot.is_none() {
-                                *slot = Some(problem);
-                            }
-                            false
-                        }
+                        let facet = boolean_extract::view::primitive_complex_facet(ancestry, extraction);
+                        adjacent = seam_facets[u(facet)] != 0;
+                        incident += 1;
                     }
+                    Ok(adjacent
+                        && edge_length(&positions, index.edge_a[u(edge)], index.edge_b[u(edge)]) <= threshold)
                 },
             )
             .map_err(raised)?;
-            if let Some(problem) = failure.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-                return Err(problem);
-            }
             Ok(group)
         })().map_err(|f| guard_fail(Code::InvalidInput, f))
 }
@@ -1937,54 +1921,38 @@ pub fn detriangulate(
                 let d = opposite(second_vertex);
                 predicates::orient3d_packed(&positions.x, &positions.y, &positions.z, a, b, c, d) == Sign::Zero
             };
-            let failure: Mutex<Option<error::T>> = Mutex::new(None);
             let selected = edge_group::init(
                 Some(grain),
                 topology_value,
                 &index_value,
                 "__rdk_boolean_detriangulate",
-                &|edge| {
-                    let outcome = (|| -> Result<bool, error::T> {
-                        cancel::poll(cx(cancel), edge, 4095)?;
-                        let first = index.edge_offsets[u(edge)];
-                        let last = index.edge_offsets[u(edge + 1)];
-                        if last - first != 2 || edge_group::mem(edge, &cleanup.cleanup_seam_edges) {
-                            return Ok(false);
-                        }
-                        let first_primitive = index.primitive_of_vertex[u(index.edge_vertices[u(first)])];
-                        let second_primitive = index.primitive_of_vertex[u(index.edge_vertices[u(first + 1)])];
-                        if topology.primitive_offsets[u(first_primitive + 1)]
-                            - topology.primitive_offsets[u(first_primitive)]
-                            != 3
-                            || topology.primitive_offsets[u(second_primitive + 1)]
-                                - topology.primitive_offsets[u(second_primitive)]
-                                != 3
-                        {
-                            return Ok(false);
-                        }
-                        let (first_side, first_face) = source(first_primitive)?;
-                        let (second_side, second_face) = source(second_primitive)?;
-                        Ok(first_side == second_side
-                            && first_face == second_face
-                            && (mode == Detriangulation::AllPolygons || unchanged(first_side, first_face))
-                            && (assume_flat || coplanar(edge)))
-                    })();
-                    match outcome {
-                        Ok(value) => value,
-                        Err(problem) => {
-                            let mut slot = failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                            if slot.is_none() {
-                                *slot = Some(problem);
-                            }
-                            false
-                        }
+                &|edge| -> Result<bool, error::T> {
+                    cancel::poll(cx(cancel), edge, 4095)?;
+                    let first = index.edge_offsets[u(edge)];
+                    let last = index.edge_offsets[u(edge + 1)];
+                    if last - first != 2 || edge_group::mem(edge, &cleanup.cleanup_seam_edges) {
+                        return Ok(false);
                     }
+                    let first_primitive = index.primitive_of_vertex[u(index.edge_vertices[u(first)])];
+                    let second_primitive = index.primitive_of_vertex[u(index.edge_vertices[u(first + 1)])];
+                    if topology.primitive_offsets[u(first_primitive + 1)]
+                        - topology.primitive_offsets[u(first_primitive)]
+                        != 3
+                        || topology.primitive_offsets[u(second_primitive + 1)]
+                            - topology.primitive_offsets[u(second_primitive)]
+                            != 3
+                    {
+                        return Ok(false);
+                    }
+                    let (first_side, first_face) = source(first_primitive)?;
+                    let (second_side, second_face) = source(second_primitive)?;
+                    Ok(first_side == second_side
+                        && first_face == second_face
+                        && (mode == Detriangulation::AllPolygons || unchanged(first_side, first_face))
+                        && (assume_flat || coplanar(edge)))
                 },
             )
             .map_err(raised)?;
-            if let Some(problem) = failure.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-                return Err(problem);
-            }
             // Dissolving every diagonal of a cut source face is valid only when each selected
             // triangle component has one simple boundary cycle. A component with a hole would
             // otherwise be encoded by Dissolve as a repeated bridge walk, which is deliberately not
@@ -2089,7 +2057,7 @@ pub fn detriangulate(
                     topology_value,
                     &index_value,
                     "__rdk_boolean_detriangulate_safe",
-                    &|edge| {
+                    &|edge| Ok({
                         if !edge_group::mem(edge, &selected) {
                             false
                         } else {
@@ -2097,7 +2065,7 @@ pub fn detriangulate(
                             let primitive = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
                             safe[parent.parent[primitive] as usize] != 0
                         }
-                    },
+                    }),
                 )
                 .map_err(raised)?
             };

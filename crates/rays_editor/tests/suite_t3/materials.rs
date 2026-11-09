@@ -80,7 +80,7 @@ pub fn face_materials_preserve_explosion() {
     };
     let merged = node(&[("in2".to_string(), piece(-2., 0)), ("in3".to_string(), piece(2., 1))], "(sop/merge (sop/ext_in2) (sop/ext_in3))");
     let geometry = geometry_of(&cook(1, &merged));
-    let group = ok(rdk_core::group::init(None, rdk_core::group::Owner::Primitive, "one_face", rdk_core::geometry::primitive_count(&geometry), &|i| i == 0));
+    let group = ok(rdk_core::group::init(None, rdk_core::group::Owner::Primitive, "one_face", rdk_core::geometry::primitive_count(&geometry), &|i| Ok(i == 0)));
     let with_group = ok(rdk_core::geometry::with_group(group, &geometry));
     let n = node(
         &[("in4".to_string(), snapshot(&with_group))],

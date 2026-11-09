@@ -567,7 +567,7 @@ pub(crate) mod fixtures {
     }
 
     pub(crate) fn group_of(owner: group::Owner, name: &str, members: &[i64], count: i64) -> group::T {
-        group::init(Some(1), owner, name, count, &|index| members.contains(&index)).unwrap()
+        group::init(Some(1), owner, name, count, &|index| Ok(members.contains(&index))).unwrap()
     }
 
 

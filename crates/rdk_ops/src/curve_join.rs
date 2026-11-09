@@ -908,7 +908,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
                     group::Owner::Vertex,
                     group::name(&item),
                     output_vertex_count,
-                    &|vertex| group::mem(vertex_map[vertex as usize], &item),
+                    &|vertex| Ok(group::mem(vertex_map[vertex as usize], &item)),
                 )?;
                 group::view::remap_order(&item, &vertex_map, &target)?
             }
@@ -918,7 +918,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
                     group::Owner::Primitive,
                     group::name(&item),
                     output_primitive_count,
-                    &|output| {
+                    &|output| Ok({
                         let single = descriptor_primitive[output as usize];
                         if single >= 0 {
                             group::mem(single, &item)
@@ -932,7 +932,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
                             }
                             member
                         }
-                    },
+                    }),
                 )?;
                 group::view::remap_order(&item, &primitive_map, &target)?
             }
@@ -1224,7 +1224,7 @@ mod tests {
     fn edge_groups_follow_surviving_edges_and_small_grains_agree() {
         let base = curves(&LINE, &[&[0, 1, 2], &[3, 4, 5]]);
         let index = topology_index::create(None, geometry::topology(&base)).unwrap();
-        let group_value = edge_group::init(None, geometry::topology(&base), &index, "g", &|edge| edge == 1 || edge == 3)
+        let group_value = edge_group::init(None, geometry::topology(&base), &index, "g", &|edge| Ok(edge == 1 || edge == 3))
             .unwrap();
         let input = geometry::with_edge_group(group_value, &base).unwrap();
         let sequential = join(&params(), &input).unwrap();

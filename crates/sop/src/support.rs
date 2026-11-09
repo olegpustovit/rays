@@ -644,7 +644,7 @@ pub fn resolve_transfer_group(
                     owner,
                     "__attribute_transfer_empty",
                     group_length(owner, geometry_value),
-                    &|_| false,
+                    &|_| Ok(false),
                 ),
                 1 => Ok(matches[0].clone()),
                 _ => group::union_many(Some(cancel_token), Some(grain), "__attribute_transfer_union", &matches),

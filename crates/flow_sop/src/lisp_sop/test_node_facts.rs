@@ -82,7 +82,7 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     let g = fixture();
     let topology = geo::topology(&g);
     let index = rdk_ok(rdk_core::topology_index::create(None, topology));
-    let edges = rdk_ok(rdk_core::edge_group::init(None, topology, &index, "edges", &|_| true));
+    let edges = rdk_ok(rdk_core::edge_group::init(None, topology, &index, "edges", &|_| Ok(true)));
     let g = rdk_ok(geo::with_edge_group(edges, &g));
     let count = geo::point_count(&g) as usize;
     let uv = rdk_ok(rdk_core::packed::float2::of_owned(vec![0.0; count], vec![0.0; count]));

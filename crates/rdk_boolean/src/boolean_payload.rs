@@ -4,7 +4,6 @@
 //! to group construction. Cancellation is polled every 4096 elements like `Support.parallel_for`.
 use std::sync::Arc;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::text_array::TextArray;
 use rdk_core::support;
@@ -631,17 +630,10 @@ fn init_group(
     length: i64,
     predicate: &(dyn Fn(i64) -> bool + Send + Sync),
 ) -> Result<group::T, Fail> {
-    let cancelled = AtomicBool::new(false);
-    let result = group::init(Some(grain), owner, name, length, &|element| {
-        if cancel::poll(cancel_value, element, 4095).is_err() {
-            cancelled.store(true, Ordering::Relaxed);
-            return false;
-        }
+    let result = group::init(Some(grain), owner, name, length, &|element| Ok({
+        cancel::poll(cancel_value, element, 4095)?;
         predicate(element)
-    });
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(Fail::Cancelled);
-    }
+    }));
     Ok(result?)
 }
 
@@ -738,12 +730,8 @@ fn copy_edge_group(
     pair: &EdgeGroupPair,
 ) -> Result<edge_group::T, Fail> {
     let output_index = topology_index::view::view(index);
-    let cancelled = AtomicBool::new(false);
-    let member = |edge: i64| -> bool {
-        if cancel::poll(cancel_value, edge, 4095).is_err() {
-            cancelled.store(true, Ordering::Relaxed);
-            return false;
-        }
+    let member = |edge: i64| -> Result<bool, error::T> {
+        cancel::poll(cancel_value, edge, 4095)?;
         let first = output_index.edge_offsets[edge as usize];
         let last = output_index.edge_offsets[edge as usize + 1];
         for incident in first..last {
@@ -758,18 +746,15 @@ fn copy_edge_group(
                 };
                 if let Some(group) = group {
                     if edge_group::mem(view.edge_source_edges[entry], group) {
-                        return true;
+                        return Ok(true);
                     }
                 }
             }
         }
-        false
+        Ok(false)
     };
     let result =
         edge_group::init(Some(grain), topology_value, index, &pair.edge_group_name, &member);
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(Fail::Cancelled);
-    }
     Ok(result?)
 }
 
@@ -1219,7 +1204,7 @@ mod tests {
         let cut_id =
             attribute::create_owned("cut_id", AttributeOwner::Primitive, Storage::Int(Arc::new(vec![42, 43]))).unwrap();
         let cut_group =
-            group::init(None, group::Owner::Primitive, "cut_surface", 2, &|_| true).unwrap();
+            group::init(None, group::Owner::Primitive, "cut_surface", 2, &|_| Ok(true)).unwrap();
         let right =
             geometry::create(positions, topo, Some(vec![cut_id]), Some(vec![cut_group]), None).unwrap();
         let slot: Mutex<Option<Signature>> = Mutex::new(None);

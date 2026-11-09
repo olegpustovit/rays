@@ -414,7 +414,7 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     .collect();
     let groups = vec![rdk_ok(rdk_core::group::ordered(rdk_core::group::Owner::Point, "ordered", 3, &[2, 0]))];
     let index = rdk_ok(rdk_core::topology_index::create(None, &topology));
-    let edge_groups = vec![rdk_ok(rdk_core::edge_group::init(None, &topology, &index, "selected_edges", &|i| i == 0))];
+    let edge_groups = vec![rdk_ok(rdk_core::edge_group::init(None, &topology, &index, "selected_edges", &|i| Ok(i == 0)))];
     let original = rdk_ok(geo::create(positions, topology, Some(attributes), Some(groups), Some(edge_groups)));
     let before = geometry_bytes(&original);
     let p = rdk_ok(rdk_core::packed::float3::view::view(geo::positions(&original)));

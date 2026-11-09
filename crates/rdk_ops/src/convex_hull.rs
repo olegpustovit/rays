@@ -625,7 +625,7 @@ fn remap_output(
         output = geometry::with_attribute(item, &output)?;
     }
     if let Some(name) = hull_group {
-        let item = group::init(Some(grain), group::Owner::Primitive, name, geometry::primitive_count(&output), &|_| true)?;
+        let item = group::init(Some(grain), group::Owner::Primitive, name, geometry::primitive_count(&output), &|_| Ok(true))?;
         output = geometry::with_group(item, &output)?;
     }
     Ok(output)
@@ -1049,7 +1049,7 @@ mod tests {
             Some(vec![7, 0, 3, 4]),
             "ordered point-group ancestry"
         );
-        let selected = group::init(Some(1), group::Owner::Point, "bottom", 11, &|point| point < 4).unwrap();
+        let selected = group::init(Some(1), group::Owner::Point, "bottom", 11, &|point| Ok(point < 4)).unwrap();
         let plane = run_with(
             Params { selection: Some(element_selection::T::SelectedPoints(selected)), ..Params::default() },
             &source,
@@ -1086,7 +1086,7 @@ mod tests {
         );
         let bad = point_cloud(&[(0., 0., 0.), (f64::NAN, 0., 0.)]);
         expect_error(run_with(Params::default(), &bad), Code::InvalidGeometry);
-        let wrong = group::init(Some(1), group::Owner::Point, "wrong", 3, &|_| true).unwrap();
+        let wrong = group::init(Some(1), group::Owner::Point, "wrong", 3, &|_| Ok(true)).unwrap();
         expect_error(
             run_with(
                 Params { selection: Some(element_selection::T::SelectedPoints(wrong)), ..Params::default() },

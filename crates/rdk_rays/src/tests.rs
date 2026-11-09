@@ -325,8 +325,8 @@ fn geometry_view_keeps_opaque_bytes_and_validates_material_identifiers() {
 #[test]
 fn groups_extrude_remap_and_construction_refusals() {
     use rdk_core::group;
-    let even = group::init(None, group::Owner::Point, "even", 4, &|i| i & 1 == 0).unwrap();
-    let all = group::init(None, group::Owner::Point, "all", 4, &|_| true).unwrap();
+    let even = group::init(None, group::Owner::Point, "even", 4, &|i| Ok(i & 1 == 0)).unwrap();
+    let all = group::init(None, group::Owner::Point, "all", 4, &|_| Ok(true)).unwrap();
     let odd = group::difference(&all, &even).unwrap();
     assert!(group::cardinality(&odd) == 2 && !group::mem(0, &odd) && group::mem(1, &odd), "packed group difference");
     assert_eq!(group::cardinality(&even), 2, "packed group cardinality");

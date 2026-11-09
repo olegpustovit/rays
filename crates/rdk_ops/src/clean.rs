@@ -116,7 +116,7 @@ fn delete_flagged(
     flags: &[u8],
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    let selection = group::init(Some(grain), owner, name, count, &|index| flags[index as usize] != 0)?;
+    let selection = group::init(Some(grain), owner, name, count, &|index| Ok(flags[index as usize] != 0))?;
     deletion::delete(
         &deletion::DeleteParams {
             cancel: cancel_value.clone(),
@@ -815,9 +815,9 @@ mod tests {
         let g = with_attr(&g, Owner::Vertex, "temp_vertex", Storage::Float(Arc::new(vec![1., 2., 3.])));
         let g = with_attr(&g, Owner::Primitive, "temp_primitive", Storage::Int(Arc::new(vec![4])));
         let g = with_attr(&g, Owner::Detail, "temp_detail", Storage::Text(std::sync::Arc::new(vec![b"drop".to_vec()].into())));
-        let g = geometry::with_group(group::init(None, group::Owner::Point, "drop_points", 3, &|p| p == 0).unwrap(), &g).unwrap();
-        let g = geometry::with_group(group::init(None, group::Owner::Vertex, "empty_vertices", 3, &|_| false).unwrap(), &g).unwrap();
-        let g = geometry::with_group(group::init(None, group::Owner::Primitive, "keep_faces", 1, &|_| true).unwrap(), &g).unwrap();
+        let g = geometry::with_group(group::init(None, group::Owner::Point, "drop_points", 3, &|p| Ok(p == 0)).unwrap(), &g).unwrap();
+        let g = geometry::with_group(group::init(None, group::Owner::Vertex, "empty_vertices", 3, &|_| Ok(false)).unwrap(), &g).unwrap();
+        let g = geometry::with_group(group::init(None, group::Owner::Primitive, "keep_faces", 1, &|_| Ok(true)).unwrap(), &g).unwrap();
         let out = run(
             &Params {
                 remove_degenerate: false,
@@ -868,14 +868,14 @@ mod tests {
             &[0, 3, 6],
             None,
         );
-        let selection = group::init(None, group::Owner::Primitive, "pick", 2, &|p| p == 1).unwrap();
+        let selection = group::init(None, group::Owner::Primitive, "pick", 2, &|p| Ok(p == 1)).unwrap();
         let params = DeleteDegenerateParams { cancel: None, grain: 1, primitives: Some(selection), epsilon: 1e-9 };
         let out = delete_degenerate(&params, &g).unwrap();
         assert_eq!(geometry::primitive_count(&out), 2, "the unselected degenerate triangle stays");
         let all = DeleteDegenerateParams { cancel: None, grain: 1, primitives: None, epsilon: 1e-9 };
         let out = delete_degenerate(&all, &g).unwrap();
         assert_eq!(geometry::primitive_count(&out), 1);
-        let wrong = group::init(None, group::Owner::Point, "pick", 6, &|_| true).unwrap();
+        let wrong = group::init(None, group::Owner::Point, "pick", 6, &|_| Ok(true)).unwrap();
         let bad = DeleteDegenerateParams { cancel: None, grain: 1, primitives: Some(wrong), epsilon: 1e-9 };
         assert!(delete_degenerate(&bad, &g).is_err());
     }

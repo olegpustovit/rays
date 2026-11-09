@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::{cancel, error, support};
 use crate::error::Code;
@@ -116,13 +116,12 @@ pub fn cardinality(value: &T) -> i64 {
     value.bits.iter().map(|byte| i64::from(byte.count_ones())).sum()
 }
 
-// ponytail: shared byte output uses one mutex; split mutable ranges if store contention matters.
 pub fn init(
     grain: Option<i64>,
     owner: Owner,
     name: &str,
     length: i64,
-    predicate: &(dyn Fn(i64) -> bool + Send + Sync),
+    predicate: &(dyn Fn(i64) -> Result<bool, error::T> + Send + Sync),
 ) -> Result<T, error::T> {
     require_name("Group.init", name)?;
     if length < 0 {
@@ -130,30 +129,27 @@ pub fn init(
     }
     let grain = support::grain("Group.init", grain.or(Some(4096)))?;
     let count = byte_count(length);
-    let bits = Mutex::new(vec![0u8; count]);
+    let mut bits = vec![0u8; count];
     if count > 0 {
-        let byte_count_i64 = i64::try_from(count).expect("group byte count exceeds i64");
         let chunk = (grain / 8).max(1);
         let work = |byte: i64| {
             let base = byte * 8;
             let mut bits_byte = 0u8;
             for bit in 0..8 {
                 let index = base + bit;
-                if index < length && predicate(index) {
+                if index < length && predicate(index)? {
                     bits_byte |= 1 << bit;
                 }
             }
-            bits.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[byte as usize] =
-                bits_byte;
-            Ok(())
+            Ok(bits_byte)
         };
-        support::parallel_for(None, chunk, byte_count_i64, &work)?;
+        support::par_fill(None, chunk, &mut bits, &work)?;
     }
     Ok(new(
         owner,
         name.to_owned(),
         length,
-        bits.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
+        bits,
         None,
     ))
 }
@@ -253,18 +249,8 @@ fn combine(
     if left.owner != right.owner || left.length != right.length {
         return Err(invalid_group(operation, "Group: owners and lengths must match"));
     }
-    let bits = Mutex::new(vec![0u8; left.bits.len()]);
-    let count = i64::try_from(left.bits.len()).expect("group byte count exceeds i64");
-    let work = |index: i64| {
-        let index = index as usize;
-        let byte = apply(bit_operation, left.bits[index], right.bits[index]);
-        bits.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[index] = byte;
-        Ok(())
-    };
-    support::parallel_for(None, 4096, count, &work)?;
-    let bits = bits
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let bits = left.bits.iter().zip(right.bits.iter())
+        .map(|(&left, &right)| apply(bit_operation, left, right)).collect();
     let mut base = new(left.owner, left.name.clone(), left.length, bits, None);
     let order = match order_kind {
         CombineOrder::Difference => left.order.as_ref().map(|left_order| {
@@ -365,27 +351,22 @@ pub fn union_many(
     if groups.len() == 1 {
         return with_name(name, first);
     }
-    let bits = Mutex::new(vec![0u8; first.bits.len()]);
-    let count = i64::try_from(first.bits.len()).expect("group byte count exceeds i64");
+    let mut bits = vec![0u8; first.bits.len()];
     let chunk = (grain / 8).max(1);
     let work = |byte: i64| {
         let mut combined = 0;
         for group in groups {
             combined |= group.bits[byte as usize];
         }
-        bits.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[byte as usize] = combined;
-        Ok(())
+        Ok(combined)
     };
-    support::parallel_for(cancel_value, chunk, count, &work).map_err(|failure| {
+    support::par_fill(cancel_value, chunk, &mut bits, &work).map_err(|failure| {
         if error::is_cancelled(&failure) {
             error::cancelled("Group.union_many")
         } else {
             failure
         }
     })?;
-    let bits = bits
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Ok(new(first.owner, name.to_owned(), first.length, bits, None))
 }
 
@@ -659,10 +640,63 @@ mod tests {
     use super::{builder, Owner, view};
     use crate::error::Code;
 
+    #[test]
+    #[ignore]
+    fn bit_array_timing() {
+        let median = |work: &dyn Fn()| {
+            let mut samples = [std::time::Duration::ZERO; 3];
+            for sample in &mut samples {
+                let start = std::time::Instant::now();
+                for _ in 0..4 { work(); }
+                *sample = start.elapsed();
+            }
+            samples.sort();
+            samples[1]
+        };
+        for domains in [1, 4] {
+            parallel::with_domains(domains, || {
+                for grain in [97, 4096] {
+                    let create = || super::init(Some(grain), Owner::Point, "left", 100_003, &|i| Ok(i % 3 == 0)).unwrap();
+                    let left = create();
+                    assert_eq!(super::cardinality(&left), 33_335);
+                    let right = super::init(Some(grain), Owner::Point, "right", 100_003, &|i| Ok(i % 5 == 0)).unwrap();
+                    let init = median(&|| drop(std::hint::black_box(create())));
+                    let union = median(&|| drop(std::hint::black_box(super::union(&left, &right).unwrap())));
+                    eprintln!("R6 bits domains={domains} grain={grain}: init4={init:?} union4={union:?}");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn init_packs_partial_bytes_and_keeps_the_first_typed_predicate_error() {
+        for domains in [1, 4] {
+            parallel::with_domains(domains, || {
+                for length in [0, 1, 7, 8, 9, 100_003] {
+                    let value = super::init(Some(137), Owner::Point, "selected", length, &|index| Ok(index % 3 == 0)).unwrap();
+                    for index in 0..length {
+                        assert_eq!(super::mem(index, &value), index % 3 == 0);
+                    }
+                    assert_eq!(super::cardinality(&value), (0..length).filter(|index| index % 3 == 0).count() as i64);
+                    assert!(!super::mem(length, &value));
+                    assert!(!super::is_ordered(&value));
+                }
+                let result = super::init(Some(137), Owner::Point, "errors", 100_003, &|index| {
+                    if index == 17 || index == 20_000 {
+                        Err(error::new("test.predicate", Code::InvalidInput, format!("element {index}")))
+                    } else { Ok(false) }
+                });
+                let actual = result.err().unwrap();
+                let expected = error::new("test.predicate", Code::InvalidInput, "element 17".to_owned());
+                assert_eq!(error::to_string(&actual), error::to_string(&expected));
+            });
+        }
+    }
+
     // The only behavioral assertion in lib/rdk/test_point_jitter.ml; its runner never jitters.
     #[test]
     fn point_jitter_source_selection_membership() {
-        let selected = super::init(Some(1), Owner::Point, "selected", 4, &|point| point < 3).unwrap();
+        let selected = super::init(Some(1), Owner::Point, "selected", 4, &|point| Ok(point < 3)).unwrap();
         assert!(super::mem(0, &selected));
         assert!(super::mem(1, &selected));
         assert!(super::mem(2, &selected));
@@ -725,7 +759,7 @@ mod tests {
                 Owner::Point,
                 name,
                 100_003,
-                &|index| index % divisor == 0,
+                &|index| Ok(index % divisor == 0),
             )
             .unwrap()
         };

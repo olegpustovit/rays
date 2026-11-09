@@ -618,7 +618,7 @@ fn remap_group(
             group::Owner::Primitive => target < source_primitives && group::mem(target as i64, source),
         }
     };
-    let target = group::init(Some(grain), owner, group::name(source), target_count as i64, &selected)?;
+    let target = group::init(Some(grain), owner, group::name(source), target_count as i64, &|index| Ok(selected(index)))?;
     let ancestry: Vec<i64> = if mapping.is_empty() { (0..target_count as i64).collect() } else { mapping.to_vec() };
     group::view::remap_order(source, &ancestry, &target)
 }
@@ -971,9 +971,9 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         )?);
     }
     if let Some(name) = &params.patch_group {
-        let patch = group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|primitive| {
+        let patch = group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|primitive| Ok({
             primitive as usize >= source_primitives
-        })?;
+        }))?;
         groups = merge_patch_group(patch, groups)?;
     }
     let edge_groups = remap_edge_groups(
@@ -1083,21 +1083,21 @@ mod tests {
         );
         let g = add(attribute::Owner::Vertex, "vertex_weight", attribute::Storage::Float(Arc::new(floats(20))), &g);
         let g = add(attribute::Owner::Primitive, "primitive_id", attribute::Storage::Int(Arc::new(vec![10, 20, 30, 40, 50])), &g);
-        let top = group::init(None, group::Owner::Point, "top", 8, &|p| p >= 4).unwrap();
-        let first_vertex = group::init(None, group::Owner::Vertex, "first_vertex", 20, &|v| v == 0).unwrap();
-        let bottom = group::init(None, group::Owner::Primitive, "bottom", 5, &|p| p == 0).unwrap();
+        let top = group::init(None, group::Owner::Point, "top", 8, &|p| Ok(p >= 4)).unwrap();
+        let first_vertex = group::init(None, group::Owner::Vertex, "first_vertex", 20, &|v| Ok(v == 0)).unwrap();
+        let bottom = group::init(None, group::Owner::Primitive, "bottom", 5, &|p| Ok(p == 0)).unwrap();
         let g = geometry::with_group(top, &g).unwrap();
         let g = geometry::with_group(first_vertex, &g).unwrap();
         let g = geometry::with_group(bottom, &g).unwrap();
         let topology_value = geometry::topology(&g).clone();
         let index = topology_index::create(None, &topology_value).unwrap();
         let (_, _, pz) = xyz(&g);
-        let rim = edge_group::init(None, &topology_value, &index, "rim", &|edge| {
+        let rim = edge_group::init(None, &topology_value, &index, "rim", &|edge| Ok({
             topology_index::edge_incidence_count(&index, edge).unwrap() == 1 && {
                 let (a, b) = topology_index::edge_points(&index, edge).unwrap();
                 pz[a as usize] == 1.0 && pz[b as usize] == 1.0
             }
-        })
+        }))
         .unwrap();
         geometry::with_edge_group(rim, &g).unwrap()
     }
@@ -1274,23 +1274,23 @@ mod tests {
                 interior = edge;
             }
         }
-        let selected = edge_group::init(None, &topology_value, &index, "selected", &|e| e == one_edge).unwrap();
+        let selected = edge_group::init(None, &topology_value, &index, "selected", &|e| Ok(e == one_edge)).unwrap();
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.boundary = Some(selected);
         let output = run(&p, &merged).unwrap();
         assert_eq!(geometry::primitive_count(&output), geometry::primitive_count(&merged) + 1);
-        let bad = edge_group::init(None, &topology_value, &index, "bad", &|e| e == interior).unwrap();
+        let bad = edge_group::init(None, &topology_value, &index, "bad", &|e| Ok(e == interior)).unwrap();
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.boundary = Some(bad);
         expect_code(run(&p, &merged), Code::InvalidGeometry);
-        let empty = edge_group::init(None, &topology_value, &index, "empty", &|_| false).unwrap();
+        let empty = edge_group::init(None, &topology_value, &index, "empty", &|_| Ok(false)).unwrap();
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.boundary = Some(empty);
         let unchanged = run(&p, &merged).unwrap();
         assert_eq!(geometry::data_id(&unchanged), geometry::data_id(&merged), "empty explicit boundary was not identity");
         let other = open_box(20.0);
         let other_index = topology_index::create(None, geometry::topology(&other)).unwrap();
-        let foreign = edge_group::init(None, geometry::topology(&other), &other_index, "foreign", &|e| e == 0).unwrap();
+        let foreign = edge_group::init(None, geometry::topology(&other), &other_index, "foreign", &|e| Ok(e == 0)).unwrap();
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.boundary = Some(foreign);
         expect_code(run(&p, &merged), Code::InvalidGeometry);
@@ -1334,7 +1334,7 @@ mod tests {
         .unwrap();
         let diagonal_source = geometry::create(geometry::positions(&diagonal_source).clone(), topology_value.clone(), None, None, None).unwrap();
         let diagonal_index = topology_index::create(None, &topology_value).unwrap();
-        let all_edges = edge_group::init(None, &topology_value, &diagonal_index, "all", &|_| true).unwrap();
+        let all_edges = edge_group::init(None, &topology_value, &diagonal_index, "all", &|_| Ok(true)).unwrap();
         let diagonal_source = geometry::with_edge_group(all_edges, &diagonal_source).unwrap();
         let diagonal_fill = run(&Params::new(Mode::FillTriangles), &diagonal_source).unwrap();
         let mapped = geometry::find_edge_group("all", &diagonal_fill).unwrap();

@@ -84,7 +84,7 @@ fn make_update_selection(
         group::Owner::Point,
         "__smooth_update",
         point_count,
-        &|point| {
+        &|point| Ok({
             let constrained = match constrained_points {
                 None => false,
                 Some(selection) => group::mem(point, selection),
@@ -97,7 +97,7 @@ fn make_update_selection(
                     Boundary::SmoothUnshared => !point_on_unshared_edge(&index, point),
                 }
             }
-        },
+        }),
     )?))
 }
 
@@ -325,7 +325,7 @@ mod tests {
         assert_eq!(point_float("heat", &smooth), vec![6.0, 0.0, 6.0, 8.0, 0.0, 8.0]);
 
         let constrained =
-            group::init(None, group::Owner::Point, "locked", 6, &|point| point == 1 || point == 4).unwrap();
+            group::init(None, group::Owner::Point, "locked", 6, &|point| Ok(point == 1 || point == 4)).unwrap();
         let locked = ok(&curves, &|p| {
             p.constrained_points = Some(constrained.clone());
             p.iterations = 3;
@@ -414,7 +414,7 @@ mod tests {
             _ => panic!("smoothed N has unexpected storage"),
         }
 
-        let wrong_length = group::init(None, group::Owner::Point, "wrong_length", 1, &|_| true).unwrap();
+        let wrong_length = group::init(None, group::Owner::Point, "wrong_length", 1, &|_| Ok(true)).unwrap();
         expect_code(
             run_with(&grid_value, &|p| p.constrained_points = Some(wrong_length.clone())),
             Code::InvalidSelection,

@@ -213,7 +213,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
                         group::Owner::Primitive,
                         name,
                         geometry::primitive_count(&geometry_value),
-                        predicate,
+                        &|index| Ok(predicate(index)),
                     )
                     .map_err(|failure| invalid_output("boolean", &failure))?;
                     geometry::with_group(item, &geometry_value)
@@ -378,7 +378,7 @@ pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, erro
                     group::Owner::Primitive,
                     name,
                     geometry::primitive_count(&geometry_value),
-                    predicate,
+                    &|index| Ok(predicate(index)),
                 )
                 .map_err(|failure| invalid_output("boolean_seam", &failure))?;
                 geometry::with_group(item, &geometry_value).map_err(|failure| invalid_output("boolean_seam", &failure))

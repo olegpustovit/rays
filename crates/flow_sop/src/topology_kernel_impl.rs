@@ -225,7 +225,7 @@ pub fn components(geometry: &Geometry, args: &Args) -> Result<Value, Diagnostic>
             }
             let mask = mask.clone();
             Some(
-                group::init(None, group_owner, "mask", count, &move |i| mask[i as usize] == 1)
+                group::init(None, group_owner, "mask", count, &move |i| Ok(mask[i as usize] == 1))
                     .map_err(|e| diag("E_COMPONENTS_MASK", &rdk_message(&e)))?,
             )
         }
@@ -248,7 +248,7 @@ pub fn components(geometry: &Geometry, args: &Args) -> Result<Value, Diagnostic>
             }
             let mask = mask.clone();
             Some(
-                edge_group::init(None, topology, &index, "seams", &move |i| mask[i as usize] == 1)
+                edge_group::init(None, topology, &index, "seams", &move |i| Ok(mask[i as usize] == 1))
                     .map_err(|e| diag("E_COMPONENTS_SEAMS", &rdk_message(&e)))?,
             )
         }
@@ -1343,7 +1343,7 @@ mod integration {
                 let classify = |mask: Option<&[i64]>| {
                     let made = mask.map(|mask| {
                         let mask = mask.to_vec();
-                        ok(group::init(None, group_owner, "m", count, &move |i| mask[i as usize] == 1))
+                        ok(group::init(None, group_owner, "m", count, &move |i| Ok(mask[i as usize] == 1)))
                     });
                     let (primitives, points) = if owner == attribute::Owner::Primitive { (made.as_ref(), None) } else { (None, made.as_ref()) };
                     let (ids, n) = ok(analysis::classify_connectivity(primitives, points, None, owner, &geometry));
@@ -1371,14 +1371,14 @@ mod integration {
             let topology = geometry::topology(&geometry);
             let index = flow_ok(index_of(topology));
             let edges = topology_index::edge_count(&index);
-            let seams = ok(edge_group::init(None, topology, &index, "seams", &|i| i % 3 == 1));
+            let seams = ok(edge_group::init(None, topology, &index, "seams", &|i| Ok(i % 3 == 1)));
             let seam_text = format!("(exact (map (fn [(i : int)] (if (int/eq (int/mod i 3) 1) 1 0)) (array/range {edges} :type int)))");
             for (over, owner, group_owner, count) in [
                 ("edges", attribute::Owner::Point, group::Owner::Point, geometry::point_count(&geometry)),
                 ("points", attribute::Owner::Primitive, group::Owner::Primitive, geometry::primitive_count(&geometry)),
             ] {
                 let classify = |mask: Option<Vec<i64>>| {
-                    let made = mask.map(|mask| ok(group::init(None, group_owner, "m", count, &move |i| mask[i as usize] == 1)));
+                    let made = mask.map(|mask| ok(group::init(None, group_owner, "m", count, &move |i| Ok(mask[i as usize] == 1))));
                     let (primitives, points) = if owner == attribute::Owner::Primitive { (made.as_ref(), None) } else { (None, made.as_ref()) };
                     let (ids, n) = ok(analysis::classify_connectivity(primitives, points, Some(&seams), owner, &geometry));
                     Value::Record(vec![("id".into(), ints(&ids)), ("count".into(), Value::Int(n))])

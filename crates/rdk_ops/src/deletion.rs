@@ -615,7 +615,7 @@ mod tests {
     #[test]
     fn deletes_primitives_and_keeps_ancestry() {
         let g = payload();
-        let first = group::init(None, group::Owner::Primitive, "first", 2, &|p| p == 0).unwrap();
+        let first = group::init(None, group::Owner::Primitive, "first", 2, &|p| Ok(p == 0)).unwrap();
         let out = delete(&delete_params(true, false), &first, &g).unwrap();
         assert_eq!(geometry::primitive_count(&out), 1);
         assert_eq!(geometry::point_count(&out), 6);
@@ -628,7 +628,7 @@ mod tests {
         let kept = delete(&delete_params(false, false), &first, &g).unwrap();
         assert_eq!(ints(Owner::Primitive, "fid", &kept), vec![20]);
         // An empty selection is a no-op that returns the same geometry.
-        let none = group::init(None, group::Owner::Primitive, "none", 2, &|_| false).unwrap();
+        let none = group::init(None, group::Owner::Primitive, "none", 2, &|_| Ok(false)).unwrap();
         let same = delete(&delete_params(true, false), &none, &g).unwrap();
         assert_eq!(geometry::data_id(&same), geometry::data_id(&g));
     }
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn point_selection_destroys_touched_primitives() {
         let g = payload();
-        let corner = group::init(None, group::Owner::Point, "corner", 6, &|p| p == 0).unwrap();
+        let corner = group::init(None, group::Owner::Point, "corner", 6, &|p| Ok(p == 0)).unwrap();
         let out = delete(&delete_params(true, false), &corner, &g).unwrap();
         assert_eq!(geometry::primitive_count(&out), 1);
         assert_eq!(geometry::point_count(&out), 5);
@@ -647,14 +647,14 @@ mod tests {
     #[test]
     fn invalid_selections_are_diagnosed() {
         let g = payload();
-        let wrong_length = group::init(None, group::Owner::Primitive, "bad", 3, &|_| true).unwrap();
+        let wrong_length = group::init(None, group::Owner::Primitive, "bad", 3, &|_| Ok(true)).unwrap();
         let failure = err(delete(&delete_params(true, false), &wrong_length, &g));
         assert_eq!(error::code(&failure), Code::InvalidSelection);
         assert_eq!(
             error::message(&failure),
             "Rdk.Deletion.delete: selection length 3 does not match its primitive owner count 2"
         );
-        let points = group::init(None, group::Owner::Point, "p", 6, &|_| true).unwrap();
+        let points = group::init(None, group::Owner::Point, "p", 6, &|_| Ok(true)).unwrap();
         let failure = err(delete_primitives(
             DeletePrimitivesParams { cancel: None, grain: None, compact_points: false },
             &points,
@@ -664,7 +664,7 @@ mod tests {
         assert_eq!(error::operation(&failure), "delete_primitives");
         let token = std::sync::Arc::new(cancel::create());
         cancel::cancel(&token);
-        let first = group::init(None, group::Owner::Primitive, "first", 2, &|p| p == 0).unwrap();
+        let first = group::init(None, group::Owner::Primitive, "first", 2, &|p| Ok(p == 0)).unwrap();
         let failure = err(delete(
             &DeleteParams { cancel: Some(token), grain: Some(1), selected: true, compact_points: false },
             &first,

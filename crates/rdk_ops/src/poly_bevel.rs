@@ -158,7 +158,7 @@ fn add_empty_outputs(
     for name in [&params.edge_group, &params.corner_group] {
         if let Some(name) = name {
             groups = merge_group(
-                group::init(Some(grain), group::Owner::Primitive, name, primitive_count, &|_| false)?,
+                group::init(Some(grain), group::Owner::Primitive, name, primitive_count, &|_| Ok(false))?,
                 groups,
             )?;
         }
@@ -169,7 +169,7 @@ fn add_empty_outputs(
             let topology_value = geometry::topology(geometry_value);
             let index = topology_index::create(None, topology_value)?;
             merge_edge_group(
-                edge_group::init(Some(grain), topology_value, &index, name, &|_| false)?,
+                edge_group::init(Some(grain), topology_value, &index, name, &|_| Ok(false))?,
                 geometry::edge_groups(geometry_value),
             )?
         }
@@ -296,7 +296,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                 group::Owner::Primitive,
                 "__rdk_poly_bevel_faces",
                 primitive_count as i64,
-                &|primitive| candidate_faces[primitive as usize],
+                &|primitive| Ok(candidate_faces[primitive as usize]),
             )?;
             Some(face_normals::compute(cancel_ref, Some(grain), Some(&selection), "Poly Bevel", geometry_value)?)
         }
@@ -1091,17 +1091,17 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     }
     if let Some(name) = &params.edge_group {
         groups = merge_group(
-            group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|p| {
+            group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|p| Ok({
                 edge_membership[p as usize]
-            })?,
+            }))?,
             groups,
         )?;
     }
     if let Some(name) = &params.corner_group {
         groups = merge_group(
-            group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|p| {
+            group::init(Some(grain), group::Owner::Primitive, name, output_primitives as i64, &|p| Ok({
                 corner_membership[p as usize]
-            })?,
+            }))?,
             groups,
         )?;
     }
@@ -1185,7 +1185,7 @@ mod tests {
     fn all_edges(source: &geometry::T, name: &str) -> edge_group::T {
         let topology_value = geometry::topology(source);
         let index = topology_index::create(None, topology_value).unwrap();
-        edge_group::init(Some(1), topology_value, &index, name, &|_| true).unwrap()
+        edge_group::init(Some(1), topology_value, &index, name, &|_| Ok(true)).unwrap()
     }
 
     fn edge_pair(source: &geometry::T, name: &str, a: i64, b: i64) -> edge_group::T {
@@ -1193,7 +1193,7 @@ mod tests {
         let index = topology_index::create(None, topology_value).unwrap();
         let selected = topology_index::find_edge_index(&index, a, b);
         assert!(selected >= 0, "PolyBevel test edge is absent");
-        edge_group::init(Some(1), topology_value, &index, name, &|edge| edge == selected).unwrap()
+        edge_group::init(Some(1), topology_value, &index, name, &|edge| Ok(edge == selected)).unwrap()
     }
 
     fn with_payload(source: &geometry::T) -> geometry::T {
@@ -1205,7 +1205,7 @@ mod tests {
         };
         let reversed: Vec<i64> = (0..points).map(|i| points - i - 1).collect();
         let point_order = group::ordered(group::Owner::Point, "point_order", points, &reversed).unwrap();
-        let corner_group = group::init(Some(1), group::Owner::Vertex, "corners", vertices, &|v| v & 1 == 0).unwrap();
+        let corner_group = group::init(Some(1), group::Owner::Vertex, "corners", vertices, &|v| Ok(v & 1 == 0)).unwrap();
         let identity: Vec<i64> = (0..primitives).collect();
         let face_order = group::ordered(group::Owner::Primitive, "face_order", primitives, &identity).unwrap();
         geometry::create(
@@ -1352,7 +1352,7 @@ mod tests {
             topology_index::point_edge(&index, 0, 0).unwrap(),
             topology_index::point_edge(&index, 0, 1).unwrap(),
         ];
-        let selected = edge_group::init(Some(1), geometry::topology(&source), &index, "corner_pair", &|e| ids.contains(&e))
+        let selected = edge_group::init(Some(1), geometry::topology(&source), &index, "corner_pair", &|e| Ok(ids.contains(&e)))
             .unwrap();
         let mut p = Params::new(0.18);
         p.grain = Some(2);
@@ -1433,7 +1433,7 @@ mod tests {
             }
         }
         let flat_group =
-            edge_group::init(None, geometry::topology(&flat), &flat_index, "flat", &|e| e == interior).unwrap();
+            edge_group::init(None, geometry::topology(&flat), &flat_index, "flat", &|e| Ok(e == interior)).unwrap();
         let mut p = Params::new(0.2);
         p.edges = Some(flat_group.clone());
         p.ignore_flat_angle = Some(0.0);

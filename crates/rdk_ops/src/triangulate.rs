@@ -388,11 +388,11 @@ mod tests {
     #[test]
     fn selection_keeps_other_primitives() {
         let quads = grid(2, 1, 2.0, true);
-        let selection = group::init(None, group::Owner::Primitive, "pick", 2, &|p| p == 1).unwrap();
+        let selection = group::init(None, group::Owner::Primitive, "pick", 2, &|p| Ok(p == 1)).unwrap();
         let out = run(&Params { primitives: Some(selection), ..params() }, &quads).unwrap();
         let (_, offsets, _) = topo(&out);
         assert_eq!(offsets, vec![0, 4, 7, 10]);
-        let wrong = group::init(None, group::Owner::Point, "pick", 2, &|_| true).unwrap();
+        let wrong = group::init(None, group::Owner::Point, "pick", 2, &|_| Ok(true)).unwrap();
         assert_eq!(error::code(&err(run(&Params { primitives: Some(wrong), ..params() }, &quads))).as_str(), "invalid_topology");
     }
 
@@ -417,7 +417,7 @@ mod tests {
             &[0, 4, 6],
             Some(vec![PrimitiveKind::Polygon, PrimitiveKind::OpenPolyline]),
         );
-        let selection = group::init(None, group::Owner::Primitive, "polys", 2, &|p| p == 0).unwrap();
+        let selection = group::init(None, group::Owner::Primitive, "polys", 2, &|p| Ok(p == 0)).unwrap();
         let out = run(&Params { primitives: Some(selection), ..params() }, &mixed).unwrap();
         assert_eq!(topo(&out).2, vec![0, 0, 1]);
     }

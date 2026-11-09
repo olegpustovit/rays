@@ -2613,7 +2613,7 @@ pub(crate) fn remap_group(
         group::Owner::Primitive => plan.primitive_source.len() as i64,
     };
     cancel::check_opt(cancel_token)?;
-    let target = group::init(grain, owner, group::name(group_value), count, &|output| match owner {
+    let target = group::init(grain, owner, group::name(group_value), count, &|output| Ok(match owner {
         group::Owner::Point => {
             if output < plan.source_points {
                 group::mem(output, group_value)
@@ -2654,7 +2654,7 @@ pub(crate) fn remap_group(
             }
         },
         group::Owner::Primitive => group::mem(gn(&plan.primitive_source, output), group_value),
-    })?;
+    }))?;
     if !group::is_ordered(group_value) {
         return Ok(target);
     }
@@ -3473,7 +3473,7 @@ pub(crate) fn combine_parts(
         let target = match (weld, owner) {
             (Some(weld), group::Owner::Point) => {
                 cancel::check_opt(cancel_token)?;
-                group::init(grain, owner, &name, total, &|output| {
+                group::init(grain, owner, &name, total, &|output| Ok({
                     let mut selected =
                         group::mem(gi(&weld.output_source, output), &base_target);
                     for at in gi(&weld.merge_offsets, output)..gi(&weld.merge_offsets, output + 1) {
@@ -3482,18 +3482,18 @@ pub(crate) fn combine_parts(
                         }
                     }
                     selected
-                })?
+                }))?
             }
             _ if extra_sources.is_empty() => base_target.clone(),
             _ => {
                 cancel::check_opt(cancel_token)?;
-                group::init(grain, owner, &name, total, &|output| {
+                group::init(grain, owner, &name, total, &|output| Ok({
                     if output < base_total {
                         group::mem(output, &base_target)
                     } else {
                         group::mem(gi(extra_sources, output - base_total), &base_target)
                     }
-                })?
+                }))?
             }
         };
         if !ordered {
@@ -3724,7 +3724,7 @@ pub(crate) fn split_disconnected_point_fans(
                 group::Owner::Point,
                 group::name(&found),
                 output_points,
-                &|point| group::mem(gi(&point_source, point), &found),
+                &|point| Ok(group::mem(gi(&point_source, point), &found)),
             )?;
             groups.push(group::view::remap_order(&found, &point_source, &target)?);
         }
@@ -4312,9 +4312,9 @@ pub(crate) fn divide_unselected_edges(
             group::Owner::Primitive => (&primitive_source, &primitive_source, &zero_weights),
         };
         cancel::check_opt(cancel_token)?;
-        let target = group::init(grain, owner, group::name(&found), left.len() as i64, &|output| {
+        let target = group::init(grain, owner, group::name(&found), left.len() as i64, &|output| Ok({
             group::mem(gi(left, output), &found) && group::mem(gi(right, output), &found)
-        })?;
+        }))?;
         let source_of_target: Vec<i64> = left
             .iter()
             .enumerate()
@@ -4411,7 +4411,7 @@ pub(crate) fn remap_divided_group(
         group::owner(group_value),
         group::name(group_value),
         mapping.len() as i64,
-        &|output| group::mem(gi(mapping, output), group_value),
+        &|output| Ok(group::mem(gi(mapping, output), group_value)),
     )?;
     if group::is_ordered(group_value) {
         group::view::remap_order(group_value, mapping, &target)

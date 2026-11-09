@@ -1065,7 +1065,7 @@ fn reduced_group(
         group::Owner::Point,
         group::name(item),
         clusters.count,
-        &|cluster| cluster_membership(clusters, item, method, cluster),
+        &|cluster| Ok(cluster_membership(clusters, item, method, cluster)),
     )
     .map_err(core_fail)?;
     let target = if compact {
@@ -1076,7 +1076,7 @@ fn reduced_group(
             group::Owner::Point,
             group::name(item),
             clusters.of_point.len() as i64,
-            &|point| group::mem(clusters.of_point[point as usize], &cluster_group),
+            &|point| Ok(group::mem(clusters.of_point[point as usize], &cluster_group)),
         )
         .map_err(core_fail)?
     };
@@ -1153,7 +1153,7 @@ mod tests {
         let text = ["b", "a", "z", "c"].iter().map(|s| s.as_bytes()).collect();
         let g = with_attr(&g, Owner::Point, "t", Storage::Text(Arc::new(text)));
         let g = with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new(vec![1., 1., 1., 4.])));
-        geometry::with_group(group::init(None, group::Owner::Point, "g1", 4, &|p| p == 0 || p == 2).unwrap(), &g).unwrap()
+        geometry::with_group(group::init(None, group::Owner::Point, "g1", 4, &|p| Ok(p == 0 || p == 2)).unwrap(), &g).unwrap()
     }
 
     fn rule(pattern: &str, method: AttributeMethod) -> AttributeRule {

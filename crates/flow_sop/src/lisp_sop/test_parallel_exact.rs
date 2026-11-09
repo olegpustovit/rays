@@ -137,7 +137,7 @@ fn edge_flip_geometry(pairs:i64) -> geo::T {
     for pair in 0..pairs { let p=pair*4; let (ox,oy)=((pair%250) as f64*2.0,(pair/250) as f64*2.0); x.extend([ox,ox+1.0,ox+1.0,ox]);y.extend([oy,oy,oy+1.0,oy+1.0]);vertices.extend([p,p+1,p+2,p,p+2,p+3]); }
     let topology=topology::polygons_owned(pairs*4,vertices,(0..=pairs*2).map(|p|p*3).collect()).unwrap();
     let index=topology_index::create(None,&topology).unwrap();
-    let edges=edge_group::init(Some(97),&topology,&index,"flip_edges",&|edge|{let (a,b)=topology_index::edge_points(&index,edge).unwrap(); (a-b).abs()==2&&a.min(b)%4==0}).unwrap();
+    let edges=edge_group::init(Some(97),&topology,&index,"flip_edges",&|edge| Ok({let (a,b)=topology_index::edge_points(&index,edge).unwrap(); (a-b).abs()==2&&a.min(b)%4==0})).unwrap();
     geo::create(packed::float3::of_owned(x,y,vec![0.0;pairs as usize*4]).unwrap(),topology,None,None,Some(vec![edges])).unwrap()
 }
 fn curve_chain_geometry(segments:i64) -> geo::T {
@@ -869,8 +869,8 @@ fn filters_constrained_source() {
     let source=grid(120,80,20.0,false);let count=geo::primitive_count(&source);
     let source=add(&source,Owner::Primitive,"region",Storage::Int(Arc::new((0..count).map(|p|if p<3*count/4 {0}else{1}).collect())));
     let source=add(&source,Owner::Primitive,"flow",Storage::Float3(packed::float3::of_owned(vec![0.0;count as usize],vec![0.0;count as usize],vec![1.0;count as usize]).unwrap()));
-    let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"seed",count,&|p|p==0).unwrap(),&source).unwrap();
-    let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"containment",count,&|p|p<count/2).unwrap(),&source).unwrap();
+    let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"seed",count,&|p| Ok(p==0)).unwrap(),&source).unwrap();
+    let source=geo::with_group(group::init(Some(97),group::Owner::Primitive,"containment",count,&|p| Ok(p<count/2)).unwrap(),&source).unwrap();
     let source=super::snapshot(&source);
     let one=exact(&bind(&[("constrained_source",&source)],r###"(sop/group_expand (sop/ext_constrained_source)
        :connectivity_tolerance 1e-06 :flood true :step_attribute "constraint_step"

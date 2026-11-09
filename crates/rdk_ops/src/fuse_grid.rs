@@ -236,9 +236,9 @@ fn install_outputs(
         output = geometry::with_attribute(item, &output)?;
     }
     if let Some(name) = &params.snapped_group {
-        let item = group::init(Some(params.grain), group::Owner::Point, name, count, &|point| {
+        let item = group::init(Some(params.grain), group::Owner::Point, name, count, &|point| Ok({
             destinations[point as usize] >= 0
-        })?;
+        }))?;
         output = geometry::with_group(item, &output)?;
     }
     Ok(output)
@@ -279,9 +279,9 @@ fn install_reduced_outputs(
         output = geometry::with_attribute(item, &output)?;
     }
     if let Some(name) = &params.snapped_group {
-        let item = group::init(Some(params.grain), group::Owner::Point, name, output_count, &|output_point| {
+        let item = group::init(Some(params.grain), group::Owner::Point, name, output_count, &|output_point| Ok({
             source_point(output_point) >= 0
-        })?;
+        }))?;
         output = geometry::with_group(item, &output)?;
     }
     Ok(output)
@@ -475,10 +475,10 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
     if !params.fuse_points || mapped == 0 {
         return Ok(output);
     }
-    let selected = group::init(Some(grain), group::Owner::Point, "__rdk_fuse_snapped", count, &|point| {
+    let selected = group::init(Some(grain), group::Owner::Point, "__rdk_fuse_snapped", count, &|point| Ok({
         destinations[point as usize] >= 0
             || destination_bits.as_ref().is_some_and(|bits| bits[point as usize])
-    })?;
+    }))?;
     fuse_clusters(
         cancel_value,
         grain,
@@ -602,7 +602,7 @@ mod tests {
     }
 
     fn point_group(name: &str, count: i64, predicate: &(dyn Fn(i64) -> bool + Send + Sync)) -> group::T {
-        group::init(None, group::Owner::Point, name, count, predicate).unwrap()
+        group::init(None, group::Owner::Point, name, count, &|index| Ok(predicate(index))).unwrap()
     }
 
     fn xs(g: &geometry::T) -> Vec<f64> {

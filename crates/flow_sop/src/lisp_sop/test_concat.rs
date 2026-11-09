@@ -50,7 +50,7 @@ fn with_text(name: &str, g: &geo::T) -> geo::T {
 
 fn with_group(name: &str, phase: i64, g: &geo::T) -> geo::T {
     let n = geo::point_count(g);
-    rk(geo::with_group(rk(group::init(None, group::Owner::Point, name, n, &|i| i % 2 == phase)), g))
+    rk(geo::with_group(rk(group::init(None, group::Owner::Point, name, n, &|i| Ok(i % 2 == phase))), g))
 }
 
 fn with_ordered(name: &str, g: &geo::T) -> geo::T {

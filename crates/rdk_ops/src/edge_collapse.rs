@@ -324,7 +324,7 @@ mod tests {
         let g = with_attr(&g, Owner::Primitive, "material", Storage::Text(std::sync::Arc::new(vec![b"panel".to_vec()].into())));
         let g = with_attr(&g, Owner::Detail, "meta", Storage::Int(Arc::new(vec![42])));
         let ordered = group::ordered(group::Owner::Point, "ordered", 4, &[1, 0, 2]).unwrap();
-        let corners = group::init(None, group::Owner::Vertex, "corners", 4, &|v| v < 3).unwrap();
+        let corners = group::init(None, group::Owner::Vertex, "corners", 4, &|v| Ok(v < 3)).unwrap();
         let g = geometry::with_group(ordered, &g).unwrap();
         let g = geometry::with_group(corners, &g).unwrap();
         let t = geometry::topology(&g).clone();
@@ -412,7 +412,7 @@ mod tests {
             &t,
             &topology_index::create(None, &t).unwrap(),
             "empty",
-            &|_| false,
+            &|_| Ok(false),
         )
         .unwrap();
         let same = run(&Params { edges: Some(empty), ..params() }, &source).unwrap();

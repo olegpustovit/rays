@@ -145,7 +145,7 @@ mod tests {
         rdk_core::cancel::cancel(&token);
         let Err(stopped) = flatten(&Params { cancel: Some(token), ..params() }, &mesh) else { panic!("expected cancel") };
         assert_eq!(error::code(&stopped), Code::Cancelled);
-        let wrong_seams = group::init(Some(1), group::Owner::Point, "s", 9, &|_| false).unwrap();
+        let wrong_seams = group::init(Some(1), group::Owner::Point, "s", 9, &|_| Ok(false)).unwrap();
         assert_eq!(
             message(flatten(&Params { seams: Some(wrong_seams), ..params() }, &mesh)),
             "invalid_uv/UV seam group must own one outgoing-edge entry per vertex"

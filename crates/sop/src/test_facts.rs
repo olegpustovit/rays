@@ -50,12 +50,12 @@ fn dependencies() {
     cook(&mut evaluator, 1, &rewire(&n, &changed_topology));
     check(count(&calls) == 4, "topology did not invalidate");
     let selection =
-        group::init(None, group::Owner::Point, "selection", geometry::point_count(&geometry_value), &|_| true).unwrap();
+        group::init(None, group::Owner::Point, "selection", geometry::point_count(&geometry_value), &|_| Ok(true)).unwrap();
     let changed_group = geometry::with_group(selection, &changed_topology).unwrap();
     cook(&mut evaluator, 1, &rewire(&n, &changed_group));
     check(count(&calls) == 5, "group did not invalidate");
     let index = topology_index::create(None, &fresh_topology).unwrap();
-    let edges = edge_group::init(None, &fresh_topology, &index, "edges", &|_| true).unwrap();
+    let edges = edge_group::init(None, &fresh_topology, &index, "edges", &|_| Ok(true)).unwrap();
     cook(&mut evaluator, 1, &rewire(&n, &geometry::with_edge_group(edges, &changed_group).unwrap()));
     check(count(&calls) == 6, "edge group did not invalidate");
     let opaque_calls = Arc::clone(&calls);
@@ -150,7 +150,7 @@ fn refusals(entries: i64) {
     rejects(&node_with(Arc::new(|g| geometry::without_attribute(attribute::Owner::Point, "N", g))));
     rejects(&node_with(Arc::new(|_| fixture())));
     rejects(&node_with(Arc::new(|g| {
-        let added = group::init(None, group::Owner::Point, "added", geometry::point_count(g), &|_| true).unwrap();
+        let added = group::init(None, group::Owner::Point, "added", geometry::point_count(g), &|_| Ok(true)).unwrap();
         geometry::with_group(added, g).unwrap()
     })));
     let packed_node = build::make_geometry(

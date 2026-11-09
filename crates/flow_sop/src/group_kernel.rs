@@ -199,11 +199,11 @@ pub fn write(order: Option<&[i64]>, owner: Owner, name: &str, mask: &[i64], geom
         (Owner::Edge, None) => {
             let topology = geometry::topology(geometry);
             let index = topology_index::create(None, topology).map_err(order_error)?;
-            let made = edge_group::init(None, topology, &index, name, &|i| mask[i as usize] == 1).map_err(order_error)?;
+            let made = edge_group::init(None, topology, &index, name, &|i| Ok(mask[i as usize] == 1)).map_err(order_error)?;
             geometry::with_edge_group(made, geometry).map_err(order_error)
         }
         (Owner::Ordinary(owner), None) => {
-            let made = group::init(None, owner, name, mask.len() as i64, &|i| mask[i as usize] == 1).map_err(order_error)?;
+            let made = group::init(None, owner, name, mask.len() as i64, &|i| Ok(mask[i as usize] == 1)).map_err(order_error)?;
             geometry::with_group(made, geometry).map_err(order_error)
         }
         (Owner::Ordinary(owner), Some(order)) => {

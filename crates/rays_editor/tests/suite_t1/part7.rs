@@ -333,7 +333,7 @@ pub fn run_spreadsheet() {
     check(columns.len() >= 4 && (0..4).map(|i| columns[i].0.clone()).collect::<Vec<_>>() == ["index", "P.x", "P.y", "P.z"], "canonical position tuple columns");
     let attr = rdk_core::attribute::create_owned("label", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Text(std::sync::Arc::new(vec![b"sample".to_vec(); 8].into()))).expect("attribute");
     let geometry = rdk_core::geometry::with_attribute(attr, &geometry).expect("with_attribute");
-    let group = rdk_core::group::init(None, rdk_core::group::Owner::Point, "odd", 8, &|i| i % 2 == 1).expect("group");
+    let group = rdk_core::group::init(None, rdk_core::group::Owner::Point, "odd", 8, &|i| Ok(i % 2 == 1)).expect("group");
     let geometry = rdk_core::geometry::with_group(group, &geometry).expect("with_group");
     let columns = sheet::columns(0, &geometry);
     let col = |name: &str| &columns.iter().find(|(n, _)| n == name).unwrap_or_else(|| fail(&format!("no column {name}"))).1;

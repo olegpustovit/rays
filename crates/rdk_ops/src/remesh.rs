@@ -262,18 +262,18 @@ pub(crate) fn install_feature_groups(
         topology_value,
         &index_value,
         edge_name,
-        &|edge| {
+        &|edge| Ok({
             let explicit = match hard_edges {
                 None => false,
                 Some(selection) => edge_group::mem(edge, selection),
             };
             if explicit {
-                return true;
+                return Ok(true);
             }
             let first = gi(&index.edge_offsets, edge);
             let last = gi(&index.edge_offsets, edge + 1);
             if last - first > 2 {
-                return true;
+                return Ok(true);
             }
             match &uv_equal {
                 None => false,
@@ -288,17 +288,17 @@ pub(crate) fn install_feature_groups(
                 }
                 Some(_) => false,
             }
-        },
+        }),
     )?;
     let points = group::init(
         Some(grain),
         group::Owner::Point,
         point_name,
         geometry::point_count(geometry_value),
-        &|point| match hard_points {
+        &|point| Ok(match hard_points {
             None => false,
             Some(selection) => group::mem(point, selection),
-        },
+        }),
     )?;
     let with_edges = geometry::with_edge_group(feature_edges, geometry_value)?;
     geometry::with_group(points, &with_edges)
@@ -1977,10 +1977,10 @@ pub(crate) fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T
                     group::Owner::Vertex,
                     group::name(&source_group),
                     corner_count,
-                    &|corner| {
+                    &|corner| Ok({
                         group::mem(gi(&vertex_left, corner), &source_group)
                             && group::mem(gi(&vertex_right, corner), &source_group)
-                    },
+                    }),
                 )?;
                 match &l.v_orders[index] {
                     None => groups.push(target),
@@ -2010,7 +2010,7 @@ pub(crate) fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T
                     group::Owner::Primitive,
                     group::name(&source_group),
                     ranking.tri_count,
-                    &|position| group::mem(gi(&primitive_source, position), &source_group),
+                    &|position| Ok(group::mem(gi(&primitive_source, position), &source_group)),
                 )?;
                 if !group::is_ordered(&source_group) {
                     groups.push(target);
@@ -2064,7 +2064,7 @@ pub(crate) fn constraint_group(
         }
     }
     cancel::check_opt(l.cancel_token())?;
-    group::init(Some(l.grain), group::Owner::Point, name, count, &|point| out[point as usize] != 0)
+    group::init(Some(l.grain), group::Owner::Point, name, count, &|point| Ok(out[point as usize] != 0))
 }
 
 pub(crate) fn projection_scratch(scratch: &mut Option<ProjectionScratch>, count: i64) {
@@ -2099,7 +2099,7 @@ pub(crate) fn project_to_reference(
         group::Owner::Point,
         "__rdk_remesh_used",
         count,
-        &|point| topology_index::point_incidence_count(&index, point).unwrap_or(0) > 0,
+        &|point| Ok(topology_index::point_incidence_count(&index, point).unwrap_or(0) > 0),
     )?;
     projection_scratch(scratch, count);
     let Some(scratch) = scratch.as_mut() else {
@@ -2205,10 +2205,10 @@ pub(crate) fn install_outputs(
                 topology_value,
                 &index_value,
                 name,
-                &|edge| {
+                &|edge| Ok({
                     edge_group::mem(edge, &features)
                         || gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge) != 2
-                },
+                }),
             )?;
             geometry::with_edge_group(created, geometry_value)?
         }
@@ -2821,7 +2821,7 @@ mod tests {
         let value = add_attribute(&base, Owner::Vertex, "uv", Storage::Float2(uv));
         let value = add_attribute(&value, Owner::Point, "target", Storage::Float(Arc::new(vec![0.4; 4])));
         let value = add_attribute(&value, Owner::Detail, "tag", Storage::Text(std::sync::Arc::new(vec![b"fixture".to_vec()].into())));
-        let hard_points = group::init(None, group::Owner::Point, "pin", 4, &|point| point == 0).unwrap();
+        let hard_points = group::init(None, group::Owner::Point, "pin", 4, &|point| Ok(point == 0)).unwrap();
         (value, hard_points)
     }
 
@@ -2994,18 +2994,18 @@ mod tests {
         let ordered =
             group::ordered(group::Owner::Point, "ordered_points", point_count, &ordered_members).unwrap();
         let corners =
-            group::init(None, group::Owner::Vertex, "corners", vertex_count, &|v| v % 5 != 2).unwrap();
+            group::init(None, group::Owner::Vertex, "corners", vertex_count, &|v| Ok(v % 5 != 2)).unwrap();
         let faces =
-            group::init(None, group::Owner::Primitive, "faces", primitive_count, &|p| p % 4 < 2).unwrap();
+            group::init(None, group::Owner::Primitive, "faces", primitive_count, &|p| Ok(p % 4 < 2)).unwrap();
         let pinned =
-            group::init(None, group::Owner::Point, "pinned", point_count, &|p| p == 12 || p == 40).unwrap();
+            group::init(None, group::Owner::Point, "pinned", point_count, &|p| Ok(p == 12 || p == 40)).unwrap();
         let index = topology_index::create(None, geometry::topology(&source)).unwrap();
         let authored = edge_group::init(
             None,
             geometry::topology(&source),
             &index,
             "authored_edges",
-            &|edge| edge % 3 != 1,
+            &|edge| Ok(edge % 3 != 1),
         )
         .unwrap();
         let mut value = source;
@@ -3089,7 +3089,7 @@ mod tests {
             group::Owner::Vertex,
             "wrong",
             geometry::vertex_count(&source),
-            &|_| true,
+            &|_| Ok(true),
         )
         .unwrap();
         expect(remesh(&source, 1.0, &|p| p.hard_points = Some(wrong.clone())), "invalid_remesh");

@@ -264,7 +264,7 @@ mod tests {
             group::Owner::Point,
             "selected",
             3,
-            &|point| point == 1,
+            &|point| Ok(point == 1),
         )
         .unwrap();
         let selection = T::SelectedPoints(points);
@@ -297,7 +297,7 @@ mod tests {
     fn validation_rejects_a_selection_with_the_wrong_owner() {
         let topology_value = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
         let vertices =
-            group::init(None, group::Owner::Vertex, "corners", 3, &|_| true).unwrap();
+            group::init(None, group::Owner::Vertex, "corners", 3, &|_| Ok(true)).unwrap();
         let selection = T::SelectedPoints(vertices);
         let error = validate("normals", &topology_value, Some(&selection)).unwrap_err();
         assert_eq!(error::code(&error), Code::InvalidSelection);

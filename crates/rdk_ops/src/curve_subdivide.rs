@@ -3,7 +3,6 @@
 //! OCaml raises `Error.Fail`, `Invalid_argument` and `Cancel.Cancelled` out of `iterate`; here each
 //! is an `error::T`: a failure has code `invalid_parameter` and the OCaml message, a cancellation
 //! has code `cancelled`.
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology,
@@ -567,12 +566,8 @@ fn remap_group(
         group::Owner::Vertex => plan.vertex_left.len(),
         group::Owner::Primitive => plan.primitive_source.len(),
     } as i64;
-    let cancelled = AtomicBool::new(false);
-    let target = group::init(grain, owner, group::name(value), count, &|output| {
-        if cancel::poll(cancel_value, output, 4095).is_err() {
-            cancelled.store(true, Ordering::Relaxed);
-            return false;
-        }
+    let target = group::init(grain, owner, group::name(value), count, &|output| Ok({
+        cancel::poll(cancel_value, output, 4095)?;
         let u = output as usize;
         match owner {
             group::Owner::Point => {
@@ -592,10 +587,7 @@ fn remap_group(
             }
             group::Owner::Primitive => group::mem(plan.primitive_source[u], value),
         }
-    })?;
-    if cancelled.load(Ordering::Relaxed) {
-        cancel::check_opt(cancel_value)?;
-    }
+    }))?;
     if !group::is_ordered(value) {
         return Ok(target);
     }

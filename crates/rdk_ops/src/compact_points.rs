@@ -205,10 +205,10 @@ pub mod fixtures {
         let topology = geometry::topology(g);
         let index = topology_index::create(None, topology).unwrap();
         let probe = index.clone();
-        edge_group::init(Some(1), topology, &index, name, &|edge| {
+        edge_group::init(Some(1), topology, &index, name, &|edge| Ok({
             let (a, b) = topology_index::edge_points(&probe, edge).unwrap();
             predicate(edge, a, b)
-        })
+        }))
         .unwrap()
     }
 
@@ -222,7 +222,7 @@ pub mod fixtures {
                 edge
             })
             .collect();
-        edge_group::init(Some(1), topology_value, &index, name, &|edge| edges.contains(&edge)).unwrap()
+        edge_group::init(Some(1), topology_value, &index, name, &|edge| Ok(edges.contains(&edge))).unwrap()
     }
 
 

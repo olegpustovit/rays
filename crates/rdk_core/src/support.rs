@@ -578,14 +578,21 @@ pub fn par_fill<T: Send>(
     work: &(dyn Fn(i64) -> Result<T, error::T> + Sync),
 ) -> Result<(), error::T> {
     let (count, grain) = (out.len() as i64, grain.max(1));
-    let windows = Windows::even(out, grain);
-    run_indexed_ranges(grain, count, &|range, first, last| {
-        for (element, slot) in (first..last).zip(windows.take(range)) {
+    let fill = |first: i64, last: i64, out: &mut [T]| {
+        for (element, slot) in (first..last).zip(out) {
             poll(cancel_value, element)?;
             *slot = work(element)?;
         }
         Ok(())
-    })
+    };
+    if count <= grain {
+        let out = Mutex::new(out);
+        return run_indexed_ranges(grain, count, &|_, first, last| {
+            fill(first, last, &mut out.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+        });
+    }
+    let windows = Windows::even(out, grain);
+    run_indexed_ranges(grain, count, &|range, first, last| fill(first, last, windows.take(range)))
 }
 
 pub fn resolve(grain: Option<i64>) -> Result<i64, ()> {
@@ -695,6 +702,47 @@ mod tests {
         drop(second);
         assert_eq!(owner.bytes(), 0);
     }
+    #[test]
+    fn par_fill_single_range_boundary_preserves_errors_and_cancellation() {
+        for domains in [1, 4] {
+            parallel::with_domains(domains, || {
+                for count in [0, 7, 8, 9] {
+                    let mut output = vec![-1_i64; count];
+                    par_fill(None, 8, &mut output, &|i| Ok(i * 3)).unwrap();
+                    assert_eq!(output, (0..count as i64).map(|i| i * 3).collect::<Vec<_>>());
+                    let token = cancel::create();
+                    cancel::cancel(&token);
+                    let calls = AtomicUsize::new(0);
+                    let cancelled = par_fill(Some(&token), 8, &mut output, &|i| {
+                        calls.fetch_add(1, AtomicOrdering::Relaxed);
+                        Ok(i * 3)
+                    });
+                    assert_eq!(calls.load(AtomicOrdering::Relaxed), usize::from(count > 8));
+                    if count == 0 { assert!(cancelled.is_ok()); }
+                    else { assert_eq!(error::code(&cancelled.err().unwrap()), Code::Cancelled); }
+                }
+                for count in [8, 9] {
+                    let mut output = vec![-1_i64; count];
+                    let failure = par_fill(None, 8, &mut output, &|i| {
+                        if i == 3 { Err(error::new("test.fill", Code::InvalidInput, "element 3".into())) }
+                        else { Ok(i) }
+                    }).unwrap_err();
+                    assert_eq!(error::to_string(&failure), error::to_string(&error::new("test.fill", Code::InvalidInput, "element 3".into())));
+                    assert_eq!(&output[..4], &[0, 1, 2, -1]);
+                }
+            });
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "single-range predicate panic")]
+    fn par_fill_single_range_keeps_callback_panics() {
+        parallel::with_domains(4, || {
+            let mut output = [0_i64; 8];
+            par_fill(None, 8, &mut output, &|_| panic!("single-range predicate panic")).unwrap();
+        });
+    }
+
     #[test]
     fn par_fill_and_windows_are_deterministic_across_domains() {
         let run = |domains| {

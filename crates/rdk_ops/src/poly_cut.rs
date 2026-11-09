@@ -1466,7 +1466,7 @@ mod tests {
     }
 
     fn point_group(name: &str, count: i64, member: &(dyn Fn(i64) -> bool + Send + Sync)) -> group::T {
-        group::init(None, group::Owner::Point, name, count, member).unwrap()
+        group::init(None, group::Owner::Point, name, count, &|index| Ok(member(index))).unwrap()
     }
 
     fn crossing_source() -> geometry::T {
@@ -1637,7 +1637,7 @@ mod tests {
         let square = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)];
         let source = polyline(&square, true);
         let index = topology_index::create(None, geometry::topology(&source)).unwrap();
-        let one = edge_group::init(None, geometry::topology(&source), &index, "one", &|edge| edge == 0).unwrap();
+        let one = edge_group::init(None, geometry::topology(&source), &index, "one", &|edge| Ok(edge == 0)).unwrap();
         let edges = |keep_closed| Params {
             element: Element::PolyCutEdges,
             cut_edges: Some(one.clone()),
@@ -1667,7 +1667,7 @@ mod tests {
         )
         .unwrap();
         let face_index = topology_index::create(None, geometry::topology(&face)).unwrap();
-        let face_edge = edge_group::init(None, geometry::topology(&face), &face_index, "face_edge", &|edge| edge == 0).unwrap();
+        let face_edge = edge_group::init(None, geometry::topology(&face), &face_index, "face_edge", &|edge| Ok(edge == 0)).unwrap();
         let face_cut = cut_of(
             &Params { element: Element::PolyCutEdges, cut_edges: Some(face_edge), grain: None, ..params() },
             &face,
@@ -1704,15 +1704,15 @@ mod tests {
             ),
             "unrepresentable change",
         );
-        let wrong_points = group::init(None, group::Owner::Primitive, "wrong", geometry::primitive_count(&source), &|_| true).unwrap();
+        let wrong_points = group::init(None, group::Owner::Primitive, "wrong", geometry::primitive_count(&source), &|_| Ok(true)).unwrap();
         expect_invalid(cut(&Params { cut_points: Some(wrong_points), ..params() }, &source), "wrong point-selection owner");
         let wrong_owner = point_group("wrong_owner", geometry::point_count(&source), &|_| true);
         expect_invalid(cut(&Params { primitives: Some(wrong_owner), ..params() }, &source), "wrong primitive-selection owner");
-        let wrong_length = group::init(None, group::Owner::Primitive, "wrong_length", 2, &|_| true).unwrap();
+        let wrong_length = group::init(None, group::Owner::Primitive, "wrong_length", 2, &|_| Ok(true)).unwrap();
         expect_invalid(cut(&Params { primitives: Some(wrong_length), ..params() }, &source), "wrong primitive-selection length");
         let other = open_curve(5);
         let other_index = topology_index::create(None, geometry::topology(&other)).unwrap();
-        let wrong_edges = edge_group::init(None, geometry::topology(&other), &other_index, "wrong", &|_| true).unwrap();
+        let wrong_edges = edge_group::init(None, geometry::topology(&other), &other_index, "wrong", &|_| Ok(true)).unwrap();
         expect_invalid(
             cut(&Params { element: Element::PolyCutEdges, cut_edges: Some(wrong_edges), ..params() }, &source),
             "wrong edge affinity",
@@ -1741,7 +1741,7 @@ mod tests {
         let (one, four) = (message_at(1), message_at(4));
         assert_eq!(one, four);
         assert!(one.ends_with("point 0"), "{one}");
-        let none = group::init(None, group::Owner::Primitive, "none", 1, &|_| false).unwrap();
+        let none = group::init(None, group::Owner::Primitive, "none", 1, &|_| Ok(false)).unwrap();
         let opaque = cut_of(
             &Params {
                 primitives: Some(none),
@@ -1759,7 +1759,7 @@ mod tests {
         );
         assert_eq!(geometry::data_id(&opaque_points), geometry::data_id(&malformed));
         let malformed_index = topology_index::create(None, geometry::topology(&malformed)).unwrap();
-        let no_edges = edge_group::init(None, geometry::topology(&malformed), &malformed_index, "no_edges", &|_| false).unwrap();
+        let no_edges = edge_group::init(None, geometry::topology(&malformed), &malformed_index, "no_edges", &|_| Ok(false)).unwrap();
         let opaque_edges = cut_of(
             &Params {
                 cut_edges: Some(no_edges),

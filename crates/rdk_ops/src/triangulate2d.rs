@@ -1,6 +1,5 @@
 //! Geometry adapter for the shared packed planar Delaunay kernel.
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::vec3;
 use rdk_core::{
@@ -1085,18 +1084,12 @@ fn defaulted_attribute(
 }
 
 fn defaulted_group(cancel_value: Option<&cancel::T>, grain: i64, mapping: &[i64], source: &group::T) -> Result<group::T, error::T> {
-    let cancelled = AtomicBool::new(false);
-    let output = group::init(Some(grain), group::owner(source), group::name(source), mapping.len() as i64, &|target| {
-        if cancel::poll(cancel_value, target, 4095).is_err() {
-            cancelled.store(true, Ordering::Relaxed);
-        }
+    let output = group::init(Some(grain), group::owner(source), group::name(source), mapping.len() as i64, &|target| Ok({
+        cancel::poll(cancel_value, target, 4095)?;
         let from = mapping[target as usize];
         from >= 0 && group::mem(from, source)
-    })
+    }))
     .map_err(pass)?;
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(fail(format!("{OPERATION}: triangulation was cancelled")));
-    }
     group::view::remap_order(source, mapping, &output).map_err(pass)
 }
 
@@ -1624,24 +1617,24 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
     }
     let source_point_count = geometry::point_count(geometry_value);
     if let Some(name) = &params.split_point_group {
-        let item = group::init(Some(grain), group::Owner::Point, name, output_point_count, &|point| {
+        let item = group::init(Some(grain), group::Owner::Point, name, output_point_count, &|point| Ok({
             point >= source_point_count && point < source_point_count + split_count
-        })
+        }))
         .map_err(pass)?;
         groups = replace_group(item, groups);
     }
     if let Some(name) = &params.refinement_point_group {
-        let item = group::init(Some(grain), group::Owner::Point, name, output_point_count, &|point| {
+        let item = group::init(Some(grain), group::Owner::Point, name, output_point_count, &|point| Ok({
             point >= output_point_count - refinement_count
-        })
+        }))
         .map_err(pass)?;
         groups = replace_group(item, groups);
     }
     if let Some(name) = &params.triangle_group {
         let kept = topology_plan.kept_primitive_count;
-        let item = group::init(Some(grain), group::Owner::Primitive, name, kept + triangle_count, &|primitive| {
+        let item = group::init(Some(grain), group::Owner::Primitive, name, kept + triangle_count, &|primitive| Ok({
             primitive >= kept
-        })
+        }))
         .map_err(pass)?;
         groups = replace_group(item, groups);
     }
@@ -1703,7 +1696,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
         group::Owner::Point,
         "__triangulate_2d_duplicate_points",
         output_point_count,
-        &|point| duplicate[point as usize],
+        &|point| Ok(duplicate[point as usize]),
     )
     .map_err(pass)?;
     deletion::delete(
@@ -1766,7 +1759,7 @@ mod tests {
     }
 
     fn pgroup(owner: group::Owner, name: &str, length: i64, member: &(dyn Fn(i64) -> bool + Send + Sync)) -> group::T {
-        group::init(None, owner, name, length, member).unwrap()
+        group::init(None, owner, name, length, &|index| Ok(member(index))).unwrap()
     }
 
     fn run_with(params: Params, input: &geometry::T) -> Result<geometry::T, error::T> {
@@ -2043,8 +2036,8 @@ mod tests {
         let old_triangles = pgroup(group::Owner::Primitive, "triangles", 3, &|p| p == 0);
         let source_index = topology_index::create(None, &topology_value).unwrap();
         let retained_edge = topology_index::find_edge_index(&source_index, 0, 1);
-        let boundary = edge_group::init(None, &topology_value, &source_index, "boundary", &|e| e == retained_edge).unwrap();
-        let old_recovered = edge_group::init(None, &topology_value, &source_index, "recovered", &|e| e == retained_edge).unwrap();
+        let boundary = edge_group::init(None, &topology_value, &source_index, "boundary", &|e| Ok(e == retained_edge)).unwrap();
+        let old_recovered = edge_group::init(None, &topology_value, &source_index, "recovered", &|e| Ok(e == retained_edge)).unwrap();
         let input = build(
             positions,
             topology_value,
@@ -2213,7 +2206,7 @@ mod tests {
         check_constraint_edge(&output);
         let source_index = topology_index::create(None, geometry::topology(&input)).unwrap();
         let edge = topology_index::find_edge_index(&source_index, 1, 3);
-        let edges = edge_group::init(None, geometry::topology(&input), &source_index, "edge_constraint", &|c| c == edge).unwrap();
+        let edges = edge_group::init(None, geometry::topology(&input), &source_index, "edge_constraint", &|c| Ok(c == edge)).unwrap();
         let output = tri(
             Params { constraint_edges: Some(edges), constraint_group: Some("constraints".to_owned()), ..xy() },
             &input,
@@ -2384,7 +2377,7 @@ mod tests {
         );
         check(geometry::primitive_count(&empty) == 0, "unblocked adapter hull flood did not remove all triangles");
         let index = topology_index::create(None, &topology_value).unwrap();
-        let all_edges = edge_group::init(None, &topology_value, &index, "edge_only", &|_| true).unwrap();
+        let all_edges = edge_group::init(None, &topology_value, &index, "edge_only", &|_| Ok(true)).unwrap();
         let edge_only = tri(
             Params { constraint_edges: Some(all_edges), remove_outside_constraint_polygons: true, ..xy() },
             &input,

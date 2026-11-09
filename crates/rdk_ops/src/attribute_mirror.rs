@@ -733,14 +733,14 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     let mut groups: Vec<group::T> = Vec::new();
     if let Some(name) = &params.source_group {
         let members = source_members(&mapping);
-        groups.push(group::init(Some(grain), group_owner(owner)?, name, count, &|element| {
+        groups.push(group::init(Some(grain), group_owner(owner)?, name, count, &|element| Ok({
             members[element as usize] == 1
-        })?);
+        }))?);
     }
     if let Some(name) = &params.destination_group {
-        groups.push(group::init(Some(grain), group_owner(owner)?, name, count, &|element| {
+        groups.push(group::init(Some(grain), group_owner(owner)?, name, count, &|element| Ok({
             mapping.pair_destination[element as usize] == 1
-        })?);
+        }))?);
     }
     if !changed && positions.is_none() && !had_attributes && params.output_mapping.is_none() && groups.is_empty() {
         return Ok(geometry_value.clone());

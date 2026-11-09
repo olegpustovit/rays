@@ -2009,11 +2009,11 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         let name = group::name(&source).to_owned();
         let (target, source_of_target): (group::T, Vec<i64>) = match group::owner(&source) {
             group::Owner::Point => (
-                group::init(Some(grain), group::Owner::Point, &name, output_point_count as i64, &|output| {
+                group::init(Some(grain), group::Owner::Point, &name, output_point_count as i64, &|output| Ok({
                     let a = point_source_a[output as usize];
                     let c = point_source_b[output as usize];
                     group::mem(a, &source) || group::mem(c, &source)
-                })?,
+                }))?,
                 if group::is_ordered(&source) {
                     (0..output_point_count)
                         .map(|output| {
@@ -2027,11 +2027,11 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 },
             ),
             group::Owner::Vertex => (
-                group::init(Some(grain), group::Owner::Vertex, &name, corner_count as i64, &|output| {
+                group::init(Some(grain), group::Owner::Vertex, &name, corner_count as i64, &|output| Ok({
                     let a = corner_a[output as usize];
                     let c = corner_b[output as usize];
                     a >= 0 && (group::mem(a, &source) || group::mem(c, &source))
-                })?,
+                }))?,
                 if group::is_ordered(&source) {
                     (0..corner_count)
                         .map(|output| {
@@ -2045,10 +2045,10 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 },
             ),
             group::Owner::Primitive => (
-                group::init(Some(grain), group::Owner::Primitive, &name, primitive_total as i64, &|output| {
+                group::init(Some(grain), group::Owner::Primitive, &name, primitive_total as i64, &|output| Ok({
                     let origin = primitive_source[output as usize];
                     origin >= 0 && group::mem(origin, &source)
-                })?,
+                }))?,
                 if group::is_ordered(&source) { primitive_source.clone() } else { Vec::new() },
             ),
         };
@@ -2095,10 +2095,10 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 &output_topology,
                 target_index,
                 edge_group::name(source_group),
-                &|edge| match source_edge_of_output_edge(edge as usize) {
+                &|edge| Ok(match source_edge_of_output_edge(edge as usize) {
                     None => false,
                     Some(source_edge) => edge_group::mem(source_edge, source_group),
-                },
+                }),
             )?);
         }
     }
@@ -2113,11 +2113,11 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         (None, _) => output,
         (Some(name), Some(target_index)) => {
             let target_view = topology_index::view::view(target_index);
-            let generated = edge_group::init(Some(grain), &output_topology, target_index, name, &|edge| {
+            let generated = edge_group::init(Some(grain), &output_topology, target_index, name, &|edge| Ok({
                 let a = target_view.edge_a[edge as usize] as usize;
                 let c = target_view.edge_b[edge as usize] as usize;
                 ctx.token_on_plane(point_token[a]) && ctx.token_on_plane(point_token[c])
-            })?;
+            }))?;
             let merged = if params.replace_existing_groups {
                 generated
             } else {
@@ -2141,7 +2141,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             None => Ok(output),
             Some(name) => {
                 let generated =
-                    group::init(Some(grain), group::Owner::Primitive, name, primitive_total as i64, predicate)?;
+                    group::init(Some(grain), group::Owner::Primitive, name, primitive_total as i64, &|index| Ok(predicate(index)))?;
                 let merged = if params.replace_existing_groups {
                     generated
                 } else {
@@ -2455,7 +2455,7 @@ mod tests {
     }
 
     fn primitive_selection(source_count: i64, pick: &(dyn Fn(i64) -> bool + Send + Sync)) -> group::T {
-        group::init(None, group::Owner::Primitive, "selected", source_count, pick).unwrap()
+        group::init(None, group::Owner::Primitive, "selected", source_count, &|index| Ok(pick(index))).unwrap()
     }
 
     #[test]
@@ -2528,24 +2528,24 @@ mod tests {
     fn typed_selection_promotion() {
         let source = shared_selection_fixture();
         let unrestricted = clip(&params(), &source).unwrap();
-        let points = group::init(None, group::Owner::Point, "shared_point", 4, &|p| p == 1).unwrap();
+        let points = group::init(None, group::Owner::Point, "shared_point", 4, &|p| Ok(p == 1)).unwrap();
         let mut p = params();
         p.selection = Some(element_selection::T::SelectedPoints(points));
         assert!(same_geometry(&unrestricted, &clip(&p, &source).unwrap()), "point selection did not promote");
-        let vertices = group::init(None, group::Owner::Vertex, "first_corner", 6, &|v| v == 0).unwrap();
+        let vertices = group::init(None, group::Owner::Vertex, "first_corner", 6, &|v| Ok(v == 0)).unwrap();
         assert_eq!(clipped_count(element_selection::T::SelectedVertices(vertices), &source), 1);
         let index = topology_index::create(None, geometry::topology(&source)).unwrap();
         let shared_edge = topology_index::find_edge_index(&index, 1, 2);
         let boundary_edge = topology_index::find_edge_index(&index, 0, 1);
-        let shared = edge_group::init(None, geometry::topology(&source), &index, "shared", &|e| e == shared_edge).unwrap();
+        let shared = edge_group::init(None, geometry::topology(&source), &index, "shared", &|e| Ok(e == shared_edge)).unwrap();
         let boundary =
-            edge_group::init(None, geometry::topology(&source), &index, "boundary", &|e| e == boundary_edge).unwrap();
+            edge_group::init(None, geometry::topology(&source), &index, "boundary", &|e| Ok(e == boundary_edge)).unwrap();
         assert_eq!(clipped_count(element_selection::T::SelectedEdges(shared), &source), 2);
         assert_eq!(clipped_count(element_selection::T::SelectedEdges(boundary), &source), 1);
         let foreign = cuboid((0.0, 0.0, 0.0), (2.0, 2.0, 2.0));
         let foreign_index = topology_index::create(None, geometry::topology(&foreign)).unwrap();
         let foreign_edges =
-            edge_group::init(None, geometry::topology(&foreign), &foreign_index, "foreign", &|e| e == 0).unwrap();
+            edge_group::init(None, geometry::topology(&foreign), &foreign_index, "foreign", &|e| Ok(e == 0)).unwrap();
         let mut p = params();
         p.selection = Some(element_selection::T::SelectedEdges(foreign_edges));
         expect_code(clip(&p, &source), Code::InvalidGeometry);
@@ -2555,7 +2555,7 @@ mod tests {
     fn selected_free_points() {
         let source = geom(vec![-2.0, -1.0, 1.0], vec![0.0; 3], vec![0.0; 3], &[]);
         let source = with_attribute("id", attribute::Storage::Int(Arc::new(vec![10, 20, 30])), &source);
-        let selected = group::init(None, group::Owner::Point, "selected_free", 3, &|p| p == 0).unwrap();
+        let selected = group::init(None, group::Owner::Point, "selected_free", 3, &|p| Ok(p == 0)).unwrap();
         let mut p = params();
         p.selection = Some(element_selection::T::SelectedPoints(selected));
         let output = clip(&p, &source).unwrap();
@@ -2573,9 +2573,9 @@ mod tests {
         let first_primitives = geometry::primitive_count(&first);
         let source = merge(&[first, second]);
         let selected =
-            group::init(None, group::Owner::Primitive, "first_box", geometry::primitive_count(&source), &|p| {
+            group::init(None, group::Owner::Primitive, "first_box", geometry::primitive_count(&source), &|p| Ok({
                 p < first_primitives
-            })
+            }))
             .unwrap();
         let build = || {
             let mut p = Params::new(ZERO, rays_math::vec3::create(0.0, 1.0, 0.0));
@@ -2597,7 +2597,7 @@ mod tests {
             vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
             &[vec![0, 1, 2], vec![3, 4, 5]],
         );
-        let selected = group::init(None, group::Owner::Primitive, "first", 2, &|p| p == 0).unwrap();
+        let selected = group::init(None, group::Owner::Primitive, "first", 2, &|p| Ok(p == 0)).unwrap();
         let mut p = params();
         p.selection = Some(element_selection::T::SelectedPrimitives(selected));
         p.clipped_edge_group = Some("plane_edges".to_owned());
@@ -2909,7 +2909,7 @@ mod tests {
         let g = fx::with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new((0..n).map(|p| (p % 97) as f64 * 0.125).collect())));
         let g = fx::with_attr(&g, Owner::Point, "N", fx::float3_attr(vec![0.3; n as usize], vec![0.4; n as usize], vec![0.5; n as usize]));
         let primitives = geometry::primitive_count(&g);
-        let selected = group::init(None, group::Owner::Primitive, "half", primitives, &|p| p % 3 != 0).unwrap();
+        let selected = group::init(None, group::Owner::Primitive, "half", primitives, &|p| Ok(p % 3 != 0)).unwrap();
         for keep in [Keep::Above, Keep::Below, Keep::All] {
             for use_selection in [false, true] {
                 let build = || {

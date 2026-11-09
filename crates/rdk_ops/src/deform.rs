@@ -267,20 +267,20 @@ mod tests {
     fn selection_validation_messages() {
         let g = grid(1, 1, 2.0, true);
         let t = geometry::topology(&g);
-        let ok = group::init(None, group::Owner::Point, "p", 4, &|_| true).unwrap();
+        let ok = group::init(None, group::Owner::Point, "p", 4, &|_| Ok(true)).unwrap();
         assert!(validate_selection(t, Some(&element_selection::T::SelectedPoints(ok))).is_ok());
         assert!(validate_selection(t, None).is_ok());
-        let short = group::init(None, group::Owner::Point, "p", 3, &|_| true).unwrap();
+        let short = group::init(None, group::Owner::Point, "p", 3, &|_| Ok(true)).unwrap();
         assert_eq!(
             code(validate_selection(t, Some(&element_selection::T::SelectedPoints(short)))),
             "Rdk.Deform: point selection length does not match point count"
         );
-        let wrong_owner = group::init(None, group::Owner::Vertex, "v", 4, &|_| true).unwrap();
+        let wrong_owner = group::init(None, group::Owner::Vertex, "v", 4, &|_| Ok(true)).unwrap();
         assert_eq!(
             code(validate_selection(t, Some(&element_selection::T::SelectedPoints(wrong_owner)))),
             "Rdk.Deform: point selection must own points"
         );
-        let faces = group::init(None, group::Owner::Primitive, "f", 2, &|_| true).unwrap();
+        let faces = group::init(None, group::Owner::Primitive, "f", 2, &|_| Ok(true)).unwrap();
         assert_eq!(
             code(validate_selection(t, Some(&element_selection::T::SelectedPrimitives(faces)))),
             "Rdk.Deform: primitive selection length does not match primitive count"
@@ -296,14 +296,14 @@ mod tests {
     fn point_selection_follows_incidence() {
         let g = grid(2, 1, 2.0, true);
         let index = topology_index::create(None, geometry::topology(&g)).unwrap();
-        let faces = group::init(None, group::Owner::Primitive, "f", 2, &|p| p == 1).unwrap();
+        let faces = group::init(None, group::Owner::Primitive, "f", 2, &|p| Ok(p == 1)).unwrap();
         let selection = element_selection::T::SelectedPrimitives(faces);
         let picked: Vec<bool> = (0..6)
             .map(|p| point_selected(Some(&selection), Some(&index), p).unwrap())
             .collect();
         assert_eq!(picked, vec![false, true, true, false, true, true]);
         assert!(point_selected(None, None, 3).unwrap());
-        let corners = group::init(None, group::Owner::Vertex, "c", 8, &|v| v == 0).unwrap();
+        let corners = group::init(None, group::Owner::Vertex, "c", 8, &|v| Ok(v == 0)).unwrap();
         let selection = element_selection::T::SelectedVertices(corners);
         assert!(point_selected(Some(&selection), Some(&index), 0).unwrap());
         assert!(!point_selected(Some(&selection), Some(&index), 1).unwrap());

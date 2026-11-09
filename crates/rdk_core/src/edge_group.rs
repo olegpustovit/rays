@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::{cancel, error, support, topology, topology_index};
 use crate::error::Code;
@@ -107,42 +107,39 @@ pub fn mem(edge: i64, value: &T) -> bool {
     value.bits[edge >> 3] & (1 << (edge & 7)) != 0
 }
 
-// ponytail: shared byte output uses one mutex; split mutable ranges if store contention matters.
 pub fn init(
     grain: Option<i64>,
     topology_value: &topology::T,
     index: &topology_index::T,
     name: &str,
-    predicate: &(dyn Fn(i64) -> bool + Send + Sync),
+    predicate: &(dyn Fn(i64) -> Result<bool, error::T> + Send + Sync),
 ) -> Result<T, error::T> {
     require_name("Edge_group.init", name)?;
     require_index("Edge_group.init", topology_value, index)?;
     let grain = support::grain("Edge_group.init", grain.or(Some(4096)))?;
     let length = topology_index::edge_count(index);
     let count = byte_count(length);
-    let bits = Mutex::new(vec![0u8; count]);
+    let mut bits = vec![0u8; count];
     if count > 0 {
-        let count_i64 = i64::try_from(count).expect("edge group byte count exceeds i64");
         let chunk = (grain / 8).max(1);
         let work = |byte: i64| {
             let base = byte * 8;
             let mut value = 0u8;
             for bit in 0..8 {
                 let edge = base + bit;
-                if edge < length && predicate(edge) {
+                if edge < length && predicate(edge)? {
                     value |= 1 << bit;
                 }
             }
-            bits.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[byte as usize] = value;
-            Ok(())
+            Ok(value)
         };
-        support::parallel_for(None, chunk, count_i64, &work)?;
+        support::par_fill(None, chunk, &mut bits, &work)?;
     }
     Ok(new(
         topology::data_id(topology_value),
         name.to_owned(),
         length,
-        bits.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
+        bits,
     ))
 }
 
@@ -174,18 +171,8 @@ fn combine(operation_name: &str, operation: Operation, left: &T, right: &T) -> R
             "Edge_group: topology identities and lengths must match",
         ));
     }
-    let bits = Mutex::new(vec![0u8; left.bits.len()]);
-    let count = i64::try_from(left.bits.len()).expect("edge group byte count exceeds i64");
-    let work = |index: i64| {
-        let index = index as usize;
-        let byte = apply(operation, left.bits[index], right.bits[index]);
-        bits.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[index] = byte;
-        Ok(())
-    };
-    support::parallel_for(None, 4096, count, &work)?;
-    let bits = bits
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let bits = left.bits.iter().zip(right.bits.iter())
+        .map(|(&left, &right)| apply(operation, left, right)).collect();
     Ok(new(left.topology_id, left.name.clone(), left.length, bits))
 }
 
@@ -520,10 +507,44 @@ mod tests {
     use super::with_name;
 
     #[test]
+    fn init_and_combines_preserve_edge_bits_and_predicate_errors_across_domains() {
+        let topology = topology::create_owned(10_004, (0..10_004).collect(), vec![0, 10_004], vec![topology::PrimitiveKind::OpenPolyline]).unwrap();
+        let index = topology_index::create(None, &topology).unwrap();
+        let length = topology_index::edge_count(&index);
+        assert_eq!(length, 10_003);
+        for domains in [1, 4] {
+            parallel::with_domains(domains, || {
+                let left = super::init(Some(137), &topology, &index, "left", &|edge| Ok(edge % 3 == 0)).unwrap();
+                let right = super::init(Some(137), &topology, &index, "right", &|edge| Ok(edge % 5 == 0)).unwrap();
+                let union = super::union(&left, &right).unwrap();
+                let intersection = super::intersection(&left, &right).unwrap();
+                let difference = super::difference(&left, &right).unwrap();
+                let xor = super::symmetric_difference(&left, &right).unwrap();
+                for edge in 0..length {
+                    let (a, b) = (edge % 3 == 0, edge % 5 == 0);
+                    assert_eq!(super::mem(edge, &union), a || b);
+                    assert_eq!(super::mem(edge, &intersection), a && b);
+                    assert_eq!(super::mem(edge, &difference), a && !b);
+                    assert_eq!(super::mem(edge, &xor), a != b);
+                }
+                assert_eq!(super::cardinality(&left), (0..length).filter(|edge| edge % 3 == 0).count() as i64);
+                assert!(!super::mem(length, &left));
+                let result = super::init(Some(137), &topology, &index, "error", &|edge| {
+                    if edge == 17 || edge == 8_000 {
+                        Err(crate::error::new("test.edge_predicate", crate::error::Code::InvalidInput, format!("edge {edge}")))
+                    } else { Ok(false) }
+                });
+                let expected = crate::error::new("test.edge_predicate", crate::error::Code::InvalidInput, "edge 17".to_owned());
+                assert_eq!(crate::error::to_string(&result.err().unwrap()), crate::error::to_string(&expected));
+            });
+        }
+    }
+
+    #[test]
     fn merge_preserves_slots_and_rejects_foreign_topology() {
         let topology = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
         let index = topology_index::create(None, &topology).unwrap();
-        let make = |name, selected| super::init(None, &topology, &index, name, &|edge| edge == selected).unwrap();
+        let make = |name, selected| super::init(None, &topology, &index, name, &|edge| Ok(edge == selected)).unwrap();
         let merged = super::merge(make("selected", 1), vec![make("other", 2), make("selected", 0), make("selected", 2)]).unwrap();
         assert_eq!(super::name(&merged[0]), "other");
         assert!(super::mem(0, &merged[1]) && super::mem(1, &merged[1]));
@@ -531,7 +552,7 @@ mod tests {
         assert_eq!(super::cardinality(&merged[2]), 1);
         let foreign = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
         let foreign_index = topology_index::create(None, &foreign).unwrap();
-        let item = super::init(None, &foreign, &foreign_index, "selected", &|_| false).unwrap();
+        let item = super::init(None, &foreign, &foreign_index, "selected", &|_| Ok(false)).unwrap();
         let expected = super::union(&merged[1], &item).err().unwrap();
         let actual = super::merge(item, merged).err().unwrap();
         assert_eq!(crate::error::code(&actual), crate::error::code(&expected));
@@ -542,9 +563,9 @@ mod tests {
     fn edge_membership_is_topology_affine_and_rename_shares_storage() {
         let topology = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
         let index = topology_index::create(None, &topology).unwrap();
-        assert!(super::init(None, &topology, &index, " \t\n\r\u{000c}", &|_| false).is_err());
+        assert!(super::init(None, &topology, &index, " \t\n\r\u{000c}", &|_| Ok(false)).is_err());
         let group =
-            super::init(None, &topology, &index, "boundary", &|edge| edge == 0).unwrap();
+            super::init(None, &topology, &index, "boundary", &|edge| Ok(edge == 0)).unwrap();
         assert_eq!(super::cardinality(&group), 1);
         assert!(super::mem(0, &group));
         assert!(!super::mem(1, &group));

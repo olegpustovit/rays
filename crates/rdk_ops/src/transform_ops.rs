@@ -975,7 +975,7 @@ mod tests {
     }
 
     fn point_group(name: &str, length: i64, predicate: &(dyn Fn(i64) -> bool + Send + Sync)) -> group::T {
-        group::init(Some(1), group::Owner::Point, name, length, predicate).unwrap()
+        group::init(Some(1), group::Owner::Point, name, length, &|index| Ok(predicate(index))).unwrap()
     }
 
     fn ys(value: &geometry::T) -> Vec<f64> {
@@ -1215,7 +1215,7 @@ mod tests {
         assert_eq!(float_attribute("distance", &output), vec![1.0, 91.0, 3.0]);
         let mask = float_attribute("mask", &output);
         assert!(close(mask[0], 2.0 / 3.0) && mask[1] == 81.0 && close(mask[2], 0.0));
-        let all = group::init(Some(1), group::Owner::Primitive, "surface", geometry::primitive_count(&plane), &|_| true).unwrap();
+        let all = group::init(Some(1), group::Owner::Primitive, "surface", geometry::primitive_count(&plane), &|_| Ok(true)).unwrap();
         let selected = distance_from_geometry(
             &DistanceFromGeometryParams {
                 reference_selection: Some(element_selection::T::SelectedPrimitives(all)),
