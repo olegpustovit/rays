@@ -926,6 +926,11 @@ pub mod number {
         }
     }
 
+    /// Pointer drag in points → rounded change in integer units (one unit per six points).
+    pub fn int_scrub_delta(dx: f64) -> f64 {
+        (dx / 6.0).round()
+    }
+
     pub fn scrub(kind: Kind, range: Option<(f64, f64)>, origin: &str, dx: f64, fine: bool) -> String {
         let Some(value) = parse_float(origin) else {
             return origin.to_owned();
@@ -939,7 +944,7 @@ pub mod number {
         };
         match kind {
             Kind::Int => {
-                let n = (dx / 6.0).round();
+                let n = int_scrub_delta(dx);
                 if n == 0.0 {
                     origin.to_owned()
                 } else {

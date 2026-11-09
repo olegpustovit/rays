@@ -260,12 +260,19 @@ pub fn word_at(text: &str, i: usize) -> (usize, usize) {
 }
 
 /// A number literal dragged `dx` points: a float moves a tenth of its last decimal place per
-/// point (Shift: ten times that) and keeps one more decimal; an integer moves one per five points
-/// (Shift: one per point).
+/// point (Shift: ten times that) and keeps one more decimal; an integer moves one per six points
+/// (`param::number::int_scrub_delta`, same as the inspector).
 pub fn scrubbed(literal: &str, dx: f64, coarse: bool) -> String {
     let int_value = literal.parse::<i64>().ok();
     match (literal.find('.'), int_value) {
-        (None, Some(v)) => (v + ocaml_round(dx / if coarse { 1.0 } else { 5.0 }) as i64).to_string(),
+        (None, Some(v)) => {
+            let n = param::number::int_scrub_delta(dx);
+            if n == 0.0 {
+                literal.to_owned()
+            } else {
+                ((v as f64) + n).round() as i64).to_string()
+            }
+        }
         (Some(dot), _) => {
             let decimals = literal.len() - dot - 1;
             let step = 10.0f64.powf(-((decimals + 1) as f64)) * if coarse { 10.0 } else { 1.0 };
