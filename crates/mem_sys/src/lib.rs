@@ -3,7 +3,7 @@ pub mod windows_process;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 static LIVE: AtomicU64 = AtomicU64::new(0);
@@ -21,14 +21,25 @@ static GLOBAL: CountingAllocator = CountingAllocator;
 // Per-thread (live delta, peak delta, alloc count) since `local_reset`; const + no Drop, so safe inside the allocator.
 thread_local! { static LOCAL: Cell<(i64, i64, u64)> = const { Cell::new((0, 0, 0)) }; }
 
+// Off until the first `local_reset`: a thread-local access per allocation costs ~15 ns on
+// windows-gnu (OS TLS slot, not a native `#[thread_local]`), which made allocation-heavy Lisp
+// lowering ~2x slower there than on macOS.
+static LOCAL_ON: AtomicBool = AtomicBool::new(false);
+
 fn note_local(delta: i64, allocs: u64) {
+    if !LOCAL_ON.load(Ordering::Relaxed) {
+        return;
+    }
     LOCAL.with(|local| {
         let (live, peak, count) = local.get();
         local.set((live + delta, peak.max(live + delta), count + allocs));
     });
 }
 
-pub fn local_reset() { LOCAL.with(|local| local.set((0, 0, 0))); }
+pub fn local_reset() {
+    LOCAL_ON.store(true, Ordering::Relaxed);
+    LOCAL.with(|local| local.set((0, 0, 0)));
+}
 /// Peak bytes live above the `local_reset` baseline on this thread.
 pub fn local_peak_bytes() -> i64 { LOCAL.with(|local| local.get().1) }
 pub fn local_alloc_count() -> u64 { LOCAL.with(|local| local.get().2) }
