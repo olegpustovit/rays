@@ -238,3 +238,97 @@ fn attribute_map_output_buffers() {
         Ok(())
     }).unwrap();
 }
+
+// Initial maxima across all three fixture sizes, rounded to cover key-size variation. Never raise.
+// Each pair is (allocations, peak B); changed-input peak excludes only newly owned output payload.
+const SUBDIVIDE_WARM: [(u64, i64); 2] = [(18, 3_752), (151_250, 3_454_000)];
+const BOOLEAN_WARM: [(u64, i64); 2] = [(25, 4_426), (26_710, 927_000)];
+const SCATTER_WARM: [(u64, i64); 2] = [(18, 5_400), (1_612_500, 16_452_000)];
+
+// These are session cooks: lowering and input construction stay outside the counters.
+// Measure a cache hit, then a genuinely new input after the same-sized kernel has warmed.
+fn warm_cook_allocations(name: &str, root: &sop::node::T, inputs: &[Vec<geometry::T>; 3], limits: [(u64, i64); 2]) {
+    use crate::lisp_sop::{self, support};
+    use sop::{node, session};
+    assert_eq!(node::inputs(root).len(), inputs[0].len(), "{name}: fixture inputs must reach the kernel");
+    let variants = inputs.each_ref().map(|inputs| node::build::rebuild_with_inputs(root,
+        &inputs.iter().map(lisp_sop::snapshot).collect::<Vec<_>>()));
+    let input_ids: Vec<_> = inputs[2].iter().flat_map(geometry::payload_components).map(|(id, _)| id).collect();
+    let context = support::context(1, 97);
+    let mut session = support::new_session(128, 64 * 1024 * 1024);
+    support::cook(&mut session, &context, &variants[0]);
+    let warm = support::cook(&mut session, &context, &variants[1]);
+    let misses = session::stats(&session).misses;
+    mem_sys::local_reset();
+    let unchanged = support::cook(&mut session, &context, &variants[1]);
+    let hit = (mem_sys::local_alloc_count(), mem_sys::local_peak_bytes());
+    assert_eq!(session::stats(&session).misses, misses, "{name}: unchanged cook missed");
+    assert_eq!(geometry::data_id(&unchanged), geometry::data_id(&warm), "{name}: cache hit rebuilt output");
+    mem_sys::local_reset();
+    let changed = support::cook(&mut session, &context, &variants[2]);
+    let changed_allocs = mem_sys::local_alloc_count();
+    let changed_peak = mem_sys::local_peak_bytes();
+    let mut output_components = geometry::payload_components(&changed);
+    output_components.sort_unstable_by_key(|(id, _)| *id);
+    output_components.dedup_by_key(|(id, _)| *id);
+    let output_bytes: i64 = output_components.iter()
+        .filter(|(id, _)| !input_ids.contains(id)).map(|(_, bytes)| bytes).sum();
+    let scratch = (changed_allocs, (changed_peak - output_bytes).max(0));
+    assert!(session::stats(&session).misses > misses, "{name}: changed input hit stale output");
+    assert!(geometry::point_count(&changed) > 0, "{name}: empty kernel result");
+    let bytes = support::geometry_bytes(&changed);
+    assert_ne!(bytes, support::geometry_bytes(&warm), "{name}: changed input did no work");
+    assert_eq!(bytes, support::geometry_bytes(&support::cook_once(1, &variants[2])), "{name}: warm result differs from fresh cook");
+    session::close(&mut session);
+    eprintln!("{name}: hit {hit:?}; changed {scratch:?} (allocations / scratch peak B, output {output_bytes} B)");
+    for (actual, limit) in [hit, scratch].into_iter().zip(limits) {
+        assert!(actual.0 <= limit.0 && actual.1 <= limit.1, "{name}: {actual:?} exceeds {limit:?}");
+    }
+}
+
+fn shifted(source: &geometry::T, dx: f64) -> geometry::T {
+    let view = packed::float3::view::view(geometry::positions(source)).unwrap();
+    let positions = packed::float3::view::of_owned_exn(view.x.iter().map(|x| x + dx).collect(), view.y.iter().map(|y| y + dx*0.3).collect(), view.z.iter().map(|z| z + dx*0.2).collect()).unwrap();
+    geometry::with_positions(positions, source).unwrap()
+}
+
+#[test]
+fn warm_subdivide_allocations() {
+    use crate::lisp_sop;
+    for cells in [8, 16, 32] {
+        let source = grid(cells);
+        let inputs = [vec![source.clone()], vec![shifted(&source, 0.25)], vec![shifted(&source, 0.5)]];
+        let root = lisp_sop::node(&[("src".into(), lisp_sop::snapshot(&source))], "(sop/subdivide (sop/ext_src) :iterations 1 :hole_group \"\")");
+        warm_cook_allocations("subdivide", &root, &inputs, SUBDIVIDE_WARM);
+    }
+}
+
+#[test]
+fn warm_boolean_allocations() {
+    use crate::lisp_sop::{self, support};
+    for count in [1, 4, 16] {
+        let boxes = lisp_sop::node(&[], &format!(r#"(sop/merge (for [i (range {count})]
+            (sop/transform (sop/box :size [2 2 2] :consolidate_points true) :translate [(* i 4.) 0. 0.])))"#));
+        let source = support::cook_once(1, &boxes);
+        let inputs = [0.25, 0.5, 0.75].map(|dx| vec![source.clone(), shifted(&source, dx)]);
+        let root = lisp_sop::node(&[("left".into(), lisp_sop::snapshot(&inputs[0][0])), ("right".into(), lisp_sop::snapshot(&inputs[0][1]))],
+            "(sop/boolean (sop/ext_left) (sop/ext_right) :operation \"Intersection\")");
+        warm_cook_allocations("boolean", &root, &inputs, BOOLEAN_WARM);
+    }
+}
+
+#[test]
+fn warm_scatter_allocations() {
+    use crate::lisp_sop;
+    for cells in [8, 16, 32] {
+        let source = grid(cells);
+        let density = Storage::Float(std::sync::Arc::new((0..geometry::point_count(&source)).map(|i| 0.05 + (i % 19) as f64 / 20.).collect()));
+        let source = geometry::with_attribute(attribute::create_owned("scatter_density", Owner::Point, density).unwrap(), &source).unwrap();
+        let selection = rdk_core::group::init(None, rdk_core::group::Owner::Primitive, "scatter_surface", geometry::primitive_count(&source), &|i| i % 4 != 0).unwrap();
+        let source = geometry::with_group(selection, &source).unwrap();
+        let inputs = [vec![source.clone()], vec![shifted(&source, 0.25)], vec![shifted(&source, 0.5)]];
+        let root = lisp_sop::node(&[("src".into(), lisp_sop::snapshot(&source))], &format!(
+            "(sop/scatter (sop/ext_src) :count {} :seed 1339 :group \"scatter_surface\" :use_density true :density_owner \"Point\" :density_attribute \"scatter_density\" :point_pattern \"scatter_density\" :source_primitive_attribute \"source_primitive\")", cells*cells));
+        warm_cook_allocations("scatter", &root, &inputs, SCATTER_WARM);
+    }
+}
