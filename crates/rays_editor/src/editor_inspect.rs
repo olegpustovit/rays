@@ -518,6 +518,80 @@ fn all_numbers(form: &S, l: &[s::SyntaxId]) -> bool {
     l.iter().all(|&id| matches!(form.arena().row(id).node, SNode::Num(t) if float_of(form.name(t)).is_some()))
 }
 
+const VEC_SUFFIXES: [&str; 4] = [".x", ".y", ".z", ".w"];
+
+/// Literals in operator rows and nested operator args share one field builder (vectors 2–4 wide, all numeric).
+fn literal_fields(
+    syntax: &S,
+    base: &str,
+    row_label: &str,
+    ty: Option<&Ty>,
+    float_range: &dyn Fn(f64) -> FloatRange,
+) -> Option<(Vec<FieldView>, Option<String>)> {
+    let field = |vec3: Option<(String, i64)>, suffix: &str, kind: KindView, current: Value| -> FieldView {
+        FieldView {
+            name: format!("{base}{suffix}"),
+            label: if vec3.is_none() { row_label.to_owned() } else { suffix.to_owned() },
+            description: None,
+            folder: vec![],
+            impact: Impact::Cook,
+            primary: false,
+            unit: None,
+            vec3,
+            kind,
+            default: current.clone(),
+            current,
+        }
+    };
+    match &syntax.node {
+        SNode::Num(t) => {
+            let name = syntax.name(*t);
+            if matches!(ty, Some(Ty::Int)) {
+                if let Some(i) = int_of(name) {
+                    return Some((vec![field(None, "", KindView::Integer(int_range(i)), Value::Int(i))], None));
+                }
+            } else if ty.is_none() {
+                if let Some(i) = int_of(name) {
+                    return Some((vec![field(None, "", KindView::Integer(int_range(i)), Value::Int(i))], None));
+                }
+            }
+            float_of(name).map(|f| (vec![field(None, "", KindView::Floating(float_range(f)), Value::Float(f))], None))
+        }
+        SNode::Str(t) => Some((vec![field(None, "", KindView::Text, Value::Text(syntax.bytes(*t).to_vec()))], None)),
+        SNode::Sym(b) if matches!(syntax.name(*b), "true" | "false") => Some((
+            vec![field(
+                None,
+                "",
+                KindView::Toggle,
+                Value::Bool(syntax.name(*b) == "true"),
+            )],
+            None,
+        )),
+        SNode::Vec(l) if (2..=4).contains(&syntax.range(*l).len()) && all_numbers(syntax, syntax.range(*l)) => {
+            let range = syntax.range(*l);
+            let fields = range
+                .iter()
+                .enumerate()
+                .map(|(i, &id)| {
+                    let f = match syntax.arena().row(id).node {
+                        SNode::Num(t) => float_of(syntax.name(t)).unwrap_or(0.0),
+                        _ => 0.0,
+                    };
+                    field(
+                        Some((base.to_owned(), i as i64)),
+                        VEC_SUFFIXES[i],
+                        KindView::Floating(float_range(f)),
+                        Value::Float(f),
+                    )
+                })
+                .collect();
+            Some((fields, None))
+        }
+        SNode::Sym(sy) => Some((vec![field(None, "", KindView::Text, text_value(""))], Some(syntax.name(*sy).to_owned()))),
+        _ => Some((vec![field(None, "", KindView::Text, text_value(""))], Some(format!("={}", lisp::flat(syntax))))),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn walk_sub(row: &p::Row, shown: bool, chain: &[String], depth: i64, sub: &[i64], e: &S, count: &mut i64, out: &mut Vec<Entry>) {
     if depth >= 4 { return; }
@@ -541,56 +615,13 @@ fn walk_sub(row: &p::Row, shown: bool, chain: &[String], depth: i64, sub: &[i64]
         *count += 1;
         let label = format!("{}.{}", row.label, sub2.iter().map(|k| (k - 1).to_string()).collect::<Vec<_>>().join("."));
         let base = format!("{}{}@{}", ARG_PREFIX, row.label, sub2.iter().map(|k| k.to_string()).collect::<Vec<_>>().join("."));
-        let field = |vec3: Option<(String, i64)>, suffix: &str, kind: KindView, current: Value| -> FieldView {
-            FieldView {
-                name: format!("{base}{suffix}"),
-                label: if vec3.is_none() { label.clone() } else { suffix.to_owned() },
-                description: None,
-                folder: vec![],
-                impact: Impact::Cook,
-                primary: false,
-                unit: None,
-                vec3,
-                kind,
-                default: current.clone(),
-                current,
-            }
-        };
-        let make = |fields: Vec<FieldView>, drive: Option<String>, out: &mut Vec<Entry>| {
+        if let Some((fields, drive)) = literal_fields(&c, &base, &label, None, &num_range) {
             out.push((
                 base.clone(),
                 row.clone(),
                 sub2.clone(),
                 insp::FlowRow { path: base.clone(), fields, shown, locked: false, drive, live: None },
             ));
-        };
-        match &c.node {
-            SNode::Num(t) => match (int_of(c.name(*t)), float_of(c.name(*t))) {
-                (Some(i), _) => make(vec![field(None, "", KindView::Integer(int_range(i)), Value::Int(i))], None, out),
-                (_, Some(f)) => make(vec![field(None, "", KindView::Floating(num_range(f)), Value::Float(f))], None, out),
-                _ => {}
-            },
-            SNode::Str(t) => make(vec![field(None, "", KindView::Text, Value::Text(c.bytes(*t).to_vec()))], None, out),
-            SNode::Sym(b) if matches!(c.name(*b), "true" | "false") => {
-                make(vec![field(None, "", KindView::Toggle, Value::Bool(c.name(*b) == "true"))], None, out)
-            }
-            SNode::Vec(l) if (2..=4).contains(&c.range(*l).len()) && all_numbers(&c, c.range(*l)) => {
-                let l = c.range(*l);
-                let fields = l
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &id)| {
-                        let f = match c.arena().row(id).node {
-                            SNode::Num(t) => float_of(c.name(t)).unwrap_or(0.0),
-                            _ => 0.0,
-                        };
-                        field(Some((base.clone(), i as i64)), [".x", ".y", ".z", ".w"][i], KindView::Floating(num_range(f)), Value::Float(f))
-                    })
-                    .collect();
-                make(fields, None, out)
-            }
-            SNode::Sym(sy) => make(vec![field(None, "", KindView::Text, text_value(""))], Some(c.name(*sy).to_owned()), out),
-            _ => make(vec![field(None, "", KindView::Text, text_value(""))], Some(format!("={}", lisp::flat(&c))), out),
         }
     }
 }
@@ -1005,21 +1036,6 @@ pub fn operator_rows(n: &p::Node, pin_of: &dyn Fn(&p::Row) -> Option<bool>, size
             _ => continue,
         };
         let name = format!("{ARG_PREFIX}{}", r.label);
-        let field = |vec3: Option<(String, i64)>, suffix: &str, kind: KindView, current: Value| -> FieldView {
-            FieldView {
-                name: format!("{name}{suffix}"),
-                label: if vec3.is_none() { r.label.clone() } else { suffix.to_owned() },
-                description: None,
-                folder: vec![],
-                impact: Impact::Cook,
-                primary: false,
-                unit: None,
-                vec3,
-                kind,
-                default: current.clone(),
-                current,
-            }
-        };
         let float_range = |f: f64| -> FloatRange {
             match r.control {
                 p::Control::Range(lo, hi) => FloatRange { soft_min: lo, soft_max: hi, hard_min: None, hard_max: None },
@@ -1030,39 +1046,28 @@ pub fn operator_rows(n: &p::Node, pin_of: &dyn Fn(&p::Row) -> Option<bool>, size
         let row = |fields: Vec<FieldView>, drive: Option<String>| (r.clone(), sheet_row(&name, fields, shown, drive, None));
         let wired = || {
             row(
-                vec![field(None, "", KindView::Text, text_value(""))],
+                vec![FieldView {
+                    name: name.clone(),
+                    label: r.label.clone(),
+                    description: None,
+                    folder: vec![],
+                    impact: Impact::Cook,
+                    primary: false,
+                    unit: None,
+                    vec3: None,
+                    kind: KindView::Text,
+                    default: text_value(""),
+                    current: text_value(""),
+                }],
                 Some(match &e.node {
                     SNode::Sym(sy) => e.name(*sy).to_owned(),
                     _ => format!("={}", lisp::flat(e)),
                 }),
             )
         };
-        let made = match &e.node {
-            SNode::Num(t) => match (&r.ty, float_of(e.name(*t))) {
-                (Some(Ty::Int), _) if int_of(e.name(*t)).is_some() => {
-                    let i = int_of(e.name(*t)).unwrap();
-                    row(vec![field(None, "", KindView::Integer(int_range(i)), Value::Int(i))], None)
-                }
-                (_, Some(f)) => row(vec![field(None, "", KindView::Floating(float_range(f)), Value::Float(f))], None),
-                _ => wired(),
-            },
-            SNode::Str(t) => row(vec![field(None, "", KindView::Text, Value::Text(e.bytes(*t).to_vec()))], None),
-            SNode::Sym(b) if matches!(e.name(*b), "true" | "false") => row(vec![field(None, "", KindView::Toggle, Value::Bool(e.name(*b) == "true"))], None),
-            SNode::Vec(l) if e.range(*l).len() == 3 && all_numbers(e, e.range(*l)) => row(
-                e.range(*l).iter()
-                    .enumerate()
-                    .map(|(i, &id)| {
-                        let f = match e.arena().row(id).node {
-                            SNode::Num(t) => float_of(e.name(t)).unwrap_or(0.0),
-                            _ => 0.0,
-                        };
-                        field(Some((name.clone(), i as i64)), [".x", ".y", ".z"][i], KindView::Floating(float_range(f)), Value::Float(f))
-                    })
-                    .collect(),
-                None,
-            ),
-            _ => wired(),
-        };
+        let made = literal_fields(e, &name, &r.label, r.ty.as_ref(), &float_range)
+            .map(|(fields, drive)| row(fields, drive))
+            .unwrap_or_else(wired);
         out.push(made);
     }
     out

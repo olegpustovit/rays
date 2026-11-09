@@ -1,7 +1,7 @@
 //! Checks of the pure parts of editor_inspect, editor_add, editor_menu and editor_panes (the ones
 //! that need no `Editor`; the model-driven checks of test_sop_ui run once the loop is ported).
 use crate::editor_add::{binding_name, reads, value_entries, value_expression, FORMS};
-use crate::editor_inspect::{arg_row_in, expression_text, group_digits, inspector_paths, kind_label, operator_call, sub_entries, ARG_PREFIX};
+use crate::editor_inspect::{arg_row_in, expression_text, group_digits, inspector_paths, kind_label, operator_call, operator_rows, sub_entries, ARG_PREFIX};
 use flow_check::workspace as w;
 use flow_graph::projection as p;
 use flow_syntax::context;
@@ -118,6 +118,35 @@ fn every_form_of_the_add_menu_parses_and_every_value_entry_makes_an_expression()
         assert!(!name.is_empty(), "{}", e.key);
         assert!(!matches!(&expr.node, SNode::Kw(_)), "{}", e.key);
     }
+}
+
+#[test]
+fn operator_rows_split_vec2_and_vec4_literals() {
+    let pin_none = |_: &p::Row| None;
+    let n = p::Node {
+        path: path(&["g"]),
+        name: "g".into(),
+        binds: vec![],
+        head: "+".into(),
+        rows: vec![row("a", "[1.0 2.0]"), row("b", "[1.0 2.0 3.0 4.0]")],
+        outputs: vec![],
+        ty: Ty::Float,
+        note: None,
+        bypass: false,
+        macro_: None,
+        lens: None,
+        live: false,
+        invariant: false,
+        synthetic: false,
+        zone: None,
+        expr: false,
+    };
+    let rows = operator_rows(&n, &pin_none, false, false, false, false);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].1.fields.len(), 2);
+    assert_eq!(rows[0].1.fields[1].name, format!("{ARG_PREFIX}a.y"));
+    assert_eq!(rows[1].1.fields.len(), 4);
+    assert_eq!(rows[1].1.fields[3].name, format!("{ARG_PREFIX}b.w"));
 }
 
 #[test]

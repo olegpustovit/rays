@@ -14,14 +14,14 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
-| X | 6 | 4 | 0 | 2 |
+| X | 6 | 5 | 0 | 1 |
 | B | 8 | 0 | 0 | 8 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 0 | 0 | 12 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **4** | **0** | **54** |
+| **All** | **58** | **5** | **0** | **53** |
 
 ## Items
 
@@ -31,7 +31,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | X2 | X | done | `dd1656a0` `d915cccd` — settings `int_of_string_opt`; resource caps → `i64::MAX`/`MIN` (sentinels like `PROVENANCE_SENTINEL` kept) | test_store: a 2^62 literal decodes as Int |
 | X3 | X | done | `63d191b0` — `Build` → `R<node::T>`; `per_context` uses `?`; `authored_body_errors_cook_lazily` | A context-dependent failure reports its real code |
 | X4 | X | done | `ee88ca64` — `param::number::int_scrub_delta` shared with `pxui::scrubbed` | Both surfaces give the same step for the same drag |
-| X5 | X | pending | — | test_editor_inspect covers vec2 and vec4 operator rows |
+| X5 | X | done | `literal_fields` unifies `walk_sub` and `operator_rows` (vectors 2–4); `operator_rows_split_vec2_and_vec4_literals` | test_editor_inspect covers vec2 and vec4 operator rows |
 | X6 | X | pending | — | ogpu_mock: after a release, the view reads back again |
 | B1 | B | pending | — | After cargo t -p rays_editor, cargo build -p rays_bin -v shows flow_sop as Fresh |
 | B2 | B | pending | — | Same cases in cargo t -p flow_sop plus -p editor_document |
@@ -110,6 +110,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 - **WaveX2–X4** `d915cccd` `63d191b0` `ee88ca64` (subagents + integration commits).
 - **WaveX5** spawned (`literal_fields` in `editor_inspect`).
 - **ScoutD**: D-wave slice schedule below (≤2 agents, distinct primaries).
+- **WaveX5**: `literal_fields` in `editor_inspect.rs`; regression `operator_rows_split_vec2_and_vec4_literals`.
 
 ## D-wave parallel map
 
