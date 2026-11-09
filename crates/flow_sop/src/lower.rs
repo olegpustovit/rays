@@ -607,23 +607,23 @@ fn cook_wrapped(n: &node::T, node_id: i64, context: &sctx::T, payloads: &[payloa
     build::cook(n, &context, payloads)
 }
 
-type Build = dyn Fn(&dyn Fn(&Value) -> Value) -> node::T + Send + Sync;
+type Build = dyn Fn(&dyn Fn(&Value) -> Value) -> R<node::T> + Send + Sync;
 
 fn own_roots(roots: E::Roots, node: node::T) -> node::T {
     if roots.is_empty() { node } else { build::with_owner(Arc::new(roots), node) }
 }
 
-fn per_context(value: &Value, build_with: Arc<Build>) -> node::T {
+fn per_context(value: &Value, build_with: Arc<Build>) -> R<node::T> {
     let roots = E::roots(std::iter::once(value));
     let reads = ak::context_reads(value);
     if reads == deps_mod::STATIC {
-        return own_roots(roots, build_with(&|v: &Value| v.clone()));
+        return Ok(own_roots(roots, build_with(&|v: &Value| v.clone())?));
     }
     let make = {
         let build_with = build_with.clone();
         move |context: &sctx::T| build_with(&|v: &Value| ak::specialize(context, v))
     };
-    let base = make(&sctx::create(sctx::Options::default()).expect("context"));
+    let base = make(&sctx::create(sctx::Options::default()).expect("context"))?;
     let key = move |context: &sctx::T| -> (i64, i64, u64) {
         let has = |fact| deps_mod::mem(fact, reads);
         (
@@ -652,7 +652,7 @@ fn per_context(value: &Value, build_with: Arc<Build>) -> node::T {
             let n = match cached {
                 Some(n) => n,
                 None => {
-                    let n = make(context);
+                    let n = make(context)?;
                     *last.lock().unwrap() = Some((k, n.clone()));
                     n
                 }
@@ -660,7 +660,7 @@ fn per_context(value: &Value, build_with: Arc<Build>) -> node::T {
             cook_wrapped(&n, node_id, context, payloads)
         }),
     );
-    own_roots(roots, build::with_facts(facts, &build::with_input_use(node::input_use(&base), &wrapped)))
+    Ok(own_roots(roots, build::with_facts(facts, &build::with_input_use(node::input_use(&base), &wrapped))))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -979,28 +979,16 @@ pub fn geometry_arrays_node(env: &KernelEnv, opts: &NodeOpts, operation: &str, a
     let operation = operation.to_owned();
     let (env_c, opts_c, sources_c, inputs_c) = (env.clone(), opts.clone(), sources.to_vec(), inputs.to_vec());
     let args_all = args.to_vec();
-    let result: Arc<Mutex<Option<R<node::T>>>> = Arc::new(Mutex::new(None));
-    let slot = result.clone();
-    let built = per_context(
+    per_context(
         &Value::Record(args.to_vec()),
         Arc::new(move |specialize: &dyn Fn(&Value) -> Value| {
             let args = match specialize(&Value::Record(args_all.clone())) {
                 Value::Record(a) => a,
                 _ => unreachable!("a record specializes to a record"),
             };
-            match geometry_arrays_node_in(&env_c, &opts_c, &operation, &args, &sources_c, &inputs_c) {
-                Ok(n) => n,
-                Err(e) => {
-                    *slot.lock().unwrap() = Some(Err(e));
-                    build::make(build::args("flow.failed"), None, Arc::new(|_, _, _| Err(fail("E_LOWER", "failed node"))))
-                }
-            }
+            geometry_arrays_node_in(&env_c, &opts_c, &operation, &args, &sources_c, &inputs_c)
         }),
-    );
-    match result.lock().unwrap().take() {
-        Some(Err(e)) => Err(e),
-        _ => Ok(built),
-    }
+    )
 }
 
 fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
@@ -1394,9 +1382,8 @@ pub fn attribute_node(env: &KernelEnv, o: &AttrOpts, name: &str, values: &Value,
         fields.push(("when".into(), v.clone()));
     }
     let data = Value::Record(fields);
-    let failure: Arc<Mutex<Option<Diagnostic>>> = Arc::new(Mutex::new(None));
-    let (env_c, o_c, name_c, values_c, sources_c, inputs_c, slot) = (env.clone(), o.clone(), name.to_owned(), values.clone(), sources.to_vec(), inputs.to_vec(), failure.clone());
-    let n = per_context(
+    let (env_c, o_c, name_c, values_c, sources_c, inputs_c) = (env.clone(), o.clone(), name.to_owned(), values.clone(), sources.to_vec(), inputs.to_vec());
+    per_context(
         &data,
         Arc::new(move |specialize: &dyn Fn(&Value) -> Value| {
             let values = specialize(&values_c);
@@ -1407,73 +1394,49 @@ pub fn attribute_node(env: &KernelEnv, o: &AttrOpts, name: &str, values: &Value,
                 prior: o_c.prior.iter().map(|(n, k, v)| (n.clone(), k.clone(), specialize(v))).collect(),
                 ..o_c.clone()
             };
-            let go = || -> R<node::T> {
-                if env_c.strict_body && o_c.check.unwrap_or(true) {
-                    ak::prepare(None, true, None, None, &sources_c, &inputs_c, &values)?;
-                }
-                Ok(ak::node(
-                    Some(env_c.clock.clone()),
-                    &ak::NodeOptions {
-                        state: o.state.clone(),
-                        reference: env_c.reference,
-                        strict: env_c.strict_body,
-                        elems: o.elems.clone(),
-                        profile: Some(env_c.profile.clone()),
-                        approx: env_c.approx.clone(),
-                        source: (env_c.kernel_source)(),
-                        gpu: Some(env_c.gpu.clone()),
-                        selection: o.selection.clone(),
-                        default: o.default.clone(),
-                        guard: o.guard.clone(),
-                        prior: o.prior.clone(),
-                        owner: o.owner.unwrap_or(rdk_core::attribute::Owner::Point),
-                        kind: o.kind.clone().unwrap_or_else(|| "vec3".into()),
-                        deletes: o.deletes.clone().unwrap_or_default(),
-                    },
-                    &name_c,
-                    &values,
-                    &sources_c,
-                    &inputs_c,
-                ))
-            };
-            match go() {
-                Ok(n) => n,
-                Err(e) => {
-                    *slot.lock().unwrap() = Some(e);
-                    build::make(build::args("flow.failed"), None, Arc::new(|_, _, _| Err(fail("E_LOWER", "failed node"))))
-                }
+            if env_c.strict_body && o_c.check.unwrap_or(true) {
+                ak::prepare(None, true, None, None, &sources_c, &inputs_c, &values)?;
             }
+            Ok(ak::node(
+                Some(env_c.clock.clone()),
+                &ak::NodeOptions {
+                    state: o.state.clone(),
+                    reference: env_c.reference,
+                    strict: env_c.strict_body,
+                    elems: o.elems.clone(),
+                    profile: Some(env_c.profile.clone()),
+                    approx: env_c.approx.clone(),
+                    source: (env_c.kernel_source)(),
+                    gpu: Some(env_c.gpu.clone()),
+                    selection: o.selection.clone(),
+                    default: o.default.clone(),
+                    guard: o.guard.clone(),
+                    prior: o.prior.clone(),
+                    owner: o.owner.unwrap_or(rdk_core::attribute::Owner::Point),
+                    kind: o.kind.clone().unwrap_or_else(|| "vec3".into()),
+                    deletes: o.deletes.clone().unwrap_or_default(),
+                },
+                &name_c,
+                &values,
+                &sources_c,
+                &inputs_c,
+            ))
         }),
-    );
-    match failure.lock().unwrap().take() {
-        Some(e) => Err(e),
-        None => Ok(n),
-    }
+    )
 }
 
 pub fn group_node(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
-    let failure: Arc<Mutex<Option<Diagnostic>>> = Arc::new(Mutex::new(None));
-    let (env_c, o_c, args_c, sources_c, inputs_c, slot) = (env.clone(), o.clone(), args.to_vec(), sources.to_vec(), inputs.to_vec(), failure.clone());
-    let n = per_context(
+    let (env_c, o_c, args_c, sources_c, inputs_c) = (env.clone(), o.clone(), args.to_vec(), sources.to_vec(), inputs.to_vec());
+    per_context(
         &Value::Record(args.to_vec()),
         Arc::new(move |specialize: &dyn Fn(&Value) -> Value| {
             let args = match specialize(&Value::Record(args_c.clone())) {
                 Value::Record(a) => a,
                 _ => unreachable!("a record specializes to a record"),
             };
-            match group_node_in(&env_c, &o_c, &args, &sources_c, &inputs_c) {
-                Ok(n) => n,
-                Err(e) => {
-                    *slot.lock().unwrap() = Some(e);
-                    build::make(build::args("flow.failed"), None, Arc::new(|_, _, _| Err(fail("E_LOWER", "failed node"))))
-                }
-            }
+            group_node_in(&env_c, &o_c, &args, &sources_c, &inputs_c)
         }),
-    );
-    match failure.lock().unwrap().take() {
-        Some(e) => Err(e),
-        None => Ok(n),
-    }
+    )
 }
 
 fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
@@ -2833,57 +2796,42 @@ impl CookServices {
         let (profile, gpu, reference, strict_clock, factories) = (self.profile.clone(), self.o.gpu.clone(), self.o.reference, self.o.clock.clone(), self.factories.clone());
         let checked = self.checked.clone();
         let captures: Vec<(i64, Ty, node::T)> = captures.to_vec();
-        let failure: Arc<Mutex<Option<Diagnostic>>> = Arc::new(Mutex::new(None));
-        let slot = failure.clone();
-        let built = per_context(
+        per_context(
             &Value::Residual(residual),
             Arc::new(move |specialize: &dyn Fn(&Value) -> Value| {
-                let go = || -> R<node::T> {
-                    let residual = match specialize(&Value::Residual(residual)) {
-                        Value::Residual(r) => r,
-                        _ => unreachable!("a residual specializes to a residual"),
-                    };
-                    let program = flow_ir::core_lower::lower(Some(Value::Residual(residual)), None, true, Some(32768), None, residual)
-                        .map_err(|name| fail("E_PACKED_FORM", &format!("Cooked selection cannot compile {name}.")))?;
-                    let inputs: Vec<node::T> = captures.iter().map(|(_, _, n)| n.clone()).collect();
-                    let state_slots = program.state_slots.len();
-                    // Preparing cannot fail: a node replaced before it cooks (a Lisp call's inlined body
-                    // under its factory node, `lisp_sop::root`) never pays for it.
-                    let prepared: Arc<LazyPrepared> = Arc::new(LazyLock::new(Box::new(move || {
-                        let _phase = flow_syntax::phase_timer::measure("lower.structural_prepare");
-                        flow_ir::core_exec::prepare(&program, false, false, &W::Paths::new(), false)
-                    })));
-                    let n = build::make(
-                        build::Args {
-                            parameters: kernel_source().into_bytes(),
-                            cook_mode: CookMode::Generic,
-                            inputs,
-                            dependencies: ak::dependencies(&Value::Residual(residual)),
-                            ..build::args("flow.geometry_select")
-                        },
-                        None,
-                        {
-                            let (profile, gpu, checked, captures, prepared, clock, factories) = (profile.clone(), gpu.clone(), checked.clone(), captures.clone(), prepared.clone(), strict_clock.clone(), factories.clone());
-                            Arc::new(move |node_id, context, payloads| {
-                                structural_cook(&StructEnv { profile: profile.clone(), gpu: gpu.clone(), reference, checked: checked.clone(), captures: captures.clone(), prepared: prepared.clone(), clock: clock.clone(), residual, state_slots, factories: factories.clone() }, node_id, context, payloads)
-                            })
-                        },
-                    );
-                    Ok(build::with_facts(Facts { reads: vec!["*".into()], writes: vec!["*".into()], ..node::facts(&n).clone() }, &n))
+                let residual = match specialize(&Value::Residual(residual)) {
+                    Value::Residual(r) => r,
+                    _ => unreachable!("a residual specializes to a residual"),
                 };
-                match go() {
-                    Ok(n) => n,
-                    Err(e) => {
-                        *slot.lock().unwrap() = Some(e);
-                        build::make(build::args("flow.failed"), None, Arc::new(|_, _, _| Err(fail("E_LOWER", "failed node"))))
-                    }
-                }
+                let program = flow_ir::core_lower::lower(Some(Value::Residual(residual)), None, true, Some(32768), None, residual)
+                    .map_err(|name| fail("E_PACKED_FORM", &format!("Cooked selection cannot compile {name}.")))?;
+                let inputs: Vec<node::T> = captures.iter().map(|(_, _, n)| n.clone()).collect();
+                let state_slots = program.state_slots.len();
+                // Preparing cannot fail: a node replaced before it cooks (a Lisp call's inlined body
+                // under its factory node, `lisp_sop::root`) never pays for it.
+                let prepared: Arc<LazyPrepared> = Arc::new(LazyLock::new(Box::new(move || {
+                    let _phase = flow_syntax::phase_timer::measure("lower.structural_prepare");
+                    flow_ir::core_exec::prepare(&program, false, false, &W::Paths::new(), false)
+                })));
+                let n = build::make(
+                    build::Args {
+                        parameters: kernel_source().into_bytes(),
+                        cook_mode: CookMode::Generic,
+                        inputs,
+                        dependencies: ak::dependencies(&Value::Residual(residual)),
+                        ..build::args("flow.geometry_select")
+                    },
+                    None,
+                    {
+                        let (profile, gpu, checked, captures, prepared, clock, factories) = (profile.clone(), gpu.clone(), checked.clone(), captures.clone(), prepared.clone(), strict_clock.clone(), factories.clone());
+                        Arc::new(move |node_id, context, payloads| {
+                            structural_cook(&StructEnv { profile: profile.clone(), gpu: gpu.clone(), reference, checked: checked.clone(), captures: captures.clone(), prepared: prepared.clone(), clock: clock.clone(), residual, state_slots, factories: factories.clone() }, node_id, context, payloads)
+                        })
+                    },
+                );
+                Ok(build::with_facts(Facts { reads: vec!["*".into()], writes: vec!["*".into()], ..node::facts(&n).clone() }, &n))
             }),
-        );
-        match failure.lock().unwrap().take() {
-            Some(e) => Err(e),
-            None => Ok(built),
-        }
+        )
     }
 }
 
