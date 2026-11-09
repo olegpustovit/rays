@@ -6,7 +6,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Current state (2026-11-09): finished.** All 63 plan items (waves A, B, M, I, C, D) are done on `dev`; see the Summary below and the session log for evidence. Artifact v8 is published with the final status, and its source SHA-256 (`abbafc85…`) matches the repository mirror. Crates went from 67 to 51. Final qualification on the final code: Mac workspace 2,609 cases exit 0, Mac native editor 325/325; Windows (RTX 2080 Ti, Vulkan) workspace 2,583 cases exit 0, Windows native editor 313/325, with the other 12 passing functionally but over the 5 s budget on that slower machine. The follow-ups outside the plan are listed in the last session-log entries and on the artifact.
+**Current state (2026-11-09): finished.** All 63 plan items (waves A, B, M, I, C, D) are done on `dev`; see the Summary below and the session log for evidence. Artifact v9 is published with the final status, and its source SHA-256 (`70cb9c89…`) matches the repository mirror. Crates went from 67 to 51. Final qualification on the final code: Mac workspace 2,612 cases exit 0 and native editor suite 325/325; Windows (RTX 2080 Ti, Vulkan) workspace 2,585 cases exit 0 and native editor suite 325/325. The follow-ups outside the plan are listed in the last session-log entries and on the artifact.
 
 ## Summary
 
@@ -135,6 +135,23 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-09: **both platforms pass the native editor suite under unchanged limits** (`6fd9abe6`).
+  - Commits:
+    - `0fd78c5f` perf: the checker reuses identical defn and closure call-site bodies (80% of library-check inferences were re-checks). Full library and 49 sketches give byte-identical graphs, defs, paths, diagnostics and row counts. Library check 3.03 -> 1.64 s on the Mac. Regression `repeated_call_sites_check_to_fresh_equal_bodies`. ponytail: reused bodies live as long as the cached prelude.
+    - `396cd70c` perf: a Lisp node rebuild reads only the packed sites and roots its body reaches.
+    - `8f766a4b` harness: Windows test processes opt out of EcoQoS execution-speed throttling (run_ops 9.0 s on E-cores vs 4.6 s on P-cores).
+    - `6fd9abe6` perf: a packed compile that no capture steers skips its fixed recompile. Regression `a_compile_no_capture_steers_is_the_fixed_one`.
+  - Mac:
+    - flow_check/eval/ir/syntax: 527 pass.
+    - flow_sop: 475 pass in 45.8 s.
+    - Native editor suite: 325/325, 179 s.
+    - Workspace: 2,612 cases, exit 0, 201.9 s.
+  - Windows (RTX 2080 Ti, Vulkan):
+    - Native editor suite: **325/325**, exit 0, 270.9 s.
+    - Workspace: 2,585 cases, exit 0, 277.8 s.
+  - sopcat_perturbation (RAYS_SLOW): Mac 47 -> 25.7 s; Windows >60 -> 36.4 s.
+  - Margins: Windows native_orrery_frames 4.62 s (peak 4.79), run_panels 4.42 s and run_ops 4.25 s are near the 5 s limit. Their remaining cost is lowering: ~80 ms per edit, ~240 ms per new editor, and orrery's per-frame time-driven rebuild. The follow-up stays parameter-independent lowering.
 
 - 2026-11-09: Windows pass (kyiv-win-1, RTX 2080 Ti, Vulkan), commits `bda9754b`..`2104129f`.
   - `bda9754b`: Windows test harnesses release the shared Vulkan device after a panic and exit 101. Before, a leftover device crashed the process at exit (0xc0000005) and hid the real assertion. Vulkan does not specialize captures (no source to fold), so `specialized_captures` asserts none happen there.
