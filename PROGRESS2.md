@@ -15,13 +15,13 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
 | X | 6 | 5 | 0 | 1 |
-| B | 8 | 0 | 0 | 8 |
+| B | 8 | 1 | 0 | 7 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 0 | 0 | 12 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **5** | **0** | **53** |
+| **All** | **58** | **6** | **0** | **52** |
 
 ## Items
 
@@ -31,9 +31,9 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | X2 | X | done | `dd1656a0` `d915cccd` — settings `int_of_string_opt`; resource caps → `i64::MAX`/`MIN` (sentinels like `PROVENANCE_SENTINEL` kept) | test_store: a 2^62 literal decodes as Int |
 | X3 | X | done | `63d191b0` — `Build` → `R<node::T>`; `per_context` uses `?`; `authored_body_errors_cook_lazily` | A context-dependent failure reports its real code |
 | X4 | X | done | `ee88ca64` — `param::number::int_scrub_delta` shared with `pxui::scrubbed` | Both surfaces give the same step for the same drag |
-| X5 | X | done | `literal_fields` unifies `walk_sub` and `operator_rows` (vectors 2–4); `operator_rows_split_vec2_and_vec4_literals` | test_editor_inspect covers vec2 and vec4 operator rows |
+| X5 | X | done | `20e408c2` — `literal_fields` unifies `walk_sub` and `operator_rows` (vectors 2–4); `operator_rows_split_vec2_and_vec4_literals` | test_editor_inspect covers vec2 and vec4 operator rows |
 | X6 | X | pending | — | ogpu_mock: after a release, the view reads back again |
-| B1 | B | pending | — | After cargo t -p rays_editor, cargo build -p rays_bin -v shows flow_sop as Fresh |
+| B1 | B | done | `aaaaf431` — `lisp_sop` always on; `#[doc(hidden)]` hooks; features removed | After cargo t -p rays_editor, cargo build -p rays_bin -v shows flow_sop as Fresh |
 | B2 | B | pending | — | Same cases in cargo t -p flow_sop plus -p editor_document |
 | B3 | B | pending | — | cargo t -p web_export --test e2e; gate deps |
 | B4 | B | pending | — | Each crate lists the same case names before and after |
@@ -107,8 +107,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 - Opened ledger; artifact tracker seeded (58 pending); baseline `e2e4ab02`.
 - Artifact [v4](https://artifacts.microapps.space/a/ap6ev04y67bb): execution progress panel, `db` capability, runbook, R11→Z7 note; publish source `artifacts/second-simplification/index.html`.
 - **WaveX1** subagent + integration: X1 code complete; tests `float_min_max_signed_zeros`, `min_max_signed_zero_walker_matches_packed` pass.
-- **WaveX2–X4** `d915cccd` `63d191b0` `ee88ca64` (subagents + integration commits).
-- **WaveX5** spawned (`literal_fields` in `editor_inspect`).
+- **Wave X** through X5 `20e408c2`; **B1** `aaaaf431` (flow_sop single artifact).
 - **ScoutD**: D-wave slice schedule below (≤2 agents, distinct primaries).
 - **WaveX5**: `literal_fields` in `editor_inspect.rs`; regression `operator_rows_split_vec2_and_vec4_literals`.
 
