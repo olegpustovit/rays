@@ -142,11 +142,33 @@ fn int(n: i64) -> Lowered { Known(Value::Int(n)) }
 fn float(x: f64) -> Lowered { Known(Value::Float(x)) }
 fn boolean(b: bool) -> Lowered { Known(Value::Bool(b)) }
 
-/// A statement list with the cache of what it already computed (OCaml's `statements cache`).
-pub struct Scope { st: Vec<C::Statement>, cache: HashMap<CacheKey, Lowered> }
+/// Completed cache layers are shared by a scope and its children.
+struct CacheLayer { values: HashMap<CacheKey, Lowered>, parent: Option<Arc<CacheLayer>> }
+impl Drop for CacheLayer {
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(layer) = parent { parent = Arc::try_unwrap(layer).ok().and_then(|mut layer| layer.parent.take()); }
+    }
+}
+/// A statement list with local cache entries and the immutable snapshot inherited at its fork.
+pub struct Scope { st: Vec<C::Statement>, cache: HashMap<CacheKey, Lowered>, parent: Option<Arc<CacheLayer>> }
 impl Scope {
-    fn fresh() -> Scope { Scope { st: Vec::new(), cache: HashMap::new() } }
-    fn fork(&self) -> Scope { Scope { st: Vec::new(), cache: self.cache.clone() } }
+    fn fresh() -> Scope { Scope { st: Vec::new(), cache: HashMap::new(), parent: None } }
+    fn cached(&self, key: &CacheKey) -> Option<&Lowered> {
+        if let Some(value) = self.cache.get(key) { return Some(value); }
+        let mut parent = self.parent.as_deref();
+        while let Some(layer) = parent {
+            if let Some(value) = layer.values.get(key) { return Some(value); }
+            parent = layer.parent.as_deref();
+        }
+        None
+    }
+    fn fork(&mut self) -> Scope {
+        if !self.cache.is_empty() {
+            self.parent = Some(Arc::new(CacheLayer { values: std::mem::take(&mut self.cache), parent: self.parent.take() }));
+        }
+        Scope { st: Vec::new(), cache: HashMap::new(), parent: self.parent.clone() }
+    }
 }
 
 fn shipped(o: &op::Op) -> bool {
@@ -443,7 +465,7 @@ impl Lowerer {
 
     fn frame(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, field: C::FrameField) -> Lowered {
         let key = CacheKey::Frame(frame_key(field));
-        if let Some(v) = s.cache.get(&key) { return v.clone(); }
+        if let Some(v) = s.cached(&key) { return v.clone(); }
         let value = self.emit(s, source, ty, C::Expr::Frame(field));
         s.cache.insert(key, value.clone());
         value
@@ -478,7 +500,7 @@ impl Lowerer {
             }
             Known(Value::Deferred(ty, id)) if ty::is_cooked(ty) => {
                 let key = CacheKey::Cooked(ty::to_string(ty), *id);
-                let value = match s.cache.get(&key) {
+                let value = match s.cached(&key) {
                     Some(v) => v.clone(),
                     None => {
                         let value = self.emit(s, source, ty, C::Expr::Source(source_value("$core/cooked", ty.clone(), vec![("id".into(), Value::Int(*id))])));
@@ -498,7 +520,7 @@ impl Lowerer {
                 let cooked = geometry_collection(&ty)
                     && items.iter().all(|i| match i { Value::Deferred(t, _) => *t == ty::geometry(), Value::No_geo => true, _ => false });
                 let key = CacheKey::CookedList(items.iter().map(|i| match i { Value::Deferred(_, id) => *id, _ => i64::MIN }).collect());
-                let cached = if cooked { s.cache.get(&key).cloned() } else { None };
+                let cached = if cooked { s.cached(&key).cloned() } else { None };
                 let result = match cached {
                     Some(r) => r,
                     None => {
@@ -988,7 +1010,7 @@ impl Lowerer {
         }
     }
 
-    fn arm(&mut self, s: &Scope, source: &C::Source, result: i64, lower: Lower) -> R<Vec<C::Statement>> {
+    fn arm(&mut self, s: &mut Scope, source: &C::Source, result: i64, lower: Lower) -> R<Vec<C::Statement>> {
         let mut body = s.fork();
         let v = lower(self, &mut body)?;
         let value = self.ensure(&mut body, source, &v)?;
@@ -1033,7 +1055,7 @@ impl Lowerer {
     fn residual(&mut self, s: &mut Scope, r: ResidualId) -> R<Lowered> {
         let id = (r.1, r.0);
         let key = CacheKey::Residual(id);
-        if let Some(v) = s.cache.get(&key) { return Ok(v.clone()); }
+        if let Some(v) = s.cached(&key) { return Ok(v.clone()); }
         let view = self.view(r)?;
         if self.active.contains(&id) { return Err(refusal("cycle")); }
         self.active.insert(id);
@@ -3068,6 +3090,40 @@ mod tests {
     use flow_syntax::syntax;
 
     fn empty() -> Catalog { Catalog { version: 1, kinds: vec![] } }
+
+    #[test]
+    fn scope_forks_share_values_and_keep_their_snapshot() {
+        let key = CacheKey::Residual((7, 3));
+        let mut parent = Scope::fresh();
+        parent.cache.insert(key.clone(), Known(Value::Record(vec![("data".into(), Value::Text(vec![b'x'; 4096]))])));
+        let original = parent.cached(&key).unwrap() as *const Lowered;
+        let mut child = parent.fork();
+        assert!(std::ptr::eq(child.cached(&key).unwrap(), original), "fork must share cached values");
+        parent.cache.insert(key.clone(), int(20));
+        let sibling = parent.fork();
+        assert!(std::ptr::eq(child.cached(&key).unwrap(), original), "later parent writes leaked into the child");
+        assert!(matches!(sibling.cached(&key), Some(Known(Value::Int(20)))));
+        child.cache.insert(key.clone(), int(30));
+        let grandchild = child.fork();
+        assert!(matches!(grandchild.cached(&key), Some(Known(Value::Int(30)))));
+        assert!(matches!(parent.cached(&key), Some(Known(Value::Int(20)))));
+        let absent = CacheKey::Frame(99);
+        child.cache.insert(absent.clone(), int(40));
+        assert!(grandchild.cached(&absent).is_none());
+        assert!(sibling.cached(&absent).is_none());
+
+        let mut populated = Scope::fresh();
+        for i in 0..1024 { populated.cache.insert(CacheKey::Residual((i, 0)), Known(Value::Text(vec![b'x'; 64]))); }
+        let started = std::time::Instant::now();
+        for _ in 0..128 { std::hint::black_box(populated.cache.clone()); }
+        let copied = started.elapsed();
+        let started = std::time::Instant::now();
+        for _ in 0..128 { std::hint::black_box(populated.fork()); }
+        eprintln!("128 forks of 1024 captures: copied {copied:?}, shared {:?}", started.elapsed());
+        for i in 0..10_000 { populated.cache.insert(CacheKey::Residual((i, 1)), int(i)); std::hint::black_box(populated.fork()); }
+        assert!(populated.cached(&CacheKey::Residual((0, 0))).is_some());
+        drop(populated); // A long last-owned parent chain must unlink without recursive destruction.
+    }
 
     #[test]
     fn packed_state_step_identity_survives_fresh_handles() {
