@@ -824,7 +824,7 @@ fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnost
     if let Some(p) = invalid {
         return Err(e_edit(format!(
             "{} is not a binding of {}; add or remove bindings in the Graph tab.",
-            pxui_shell::kit::ocaml_trim(&printed_of(&form.child(p[0]))),
+            printed_of(&form.child(p[0])).trim(),
             graph
         )));
     }
@@ -1531,7 +1531,7 @@ fn utf8_len(text: &str, i: i64) -> i64 {
 /// `line_target text "12:5"`: the byte of that 1-based line and character column (`":5"` is
 /// optional; past the end is clamped); `None` for anything else.
 pub fn line_target(text: &str, input: &str) -> Option<i64> {
-    let number = |s: &str| match pxui_shell::kit::int_of_string_opt(pxui_shell::kit::ocaml_trim(s)) {
+    let number = |s: &str| match s.trim().parse::<i64>().ok() {
         Some(n) if n >= 1 => Some(n),
         _ => None,
     };
@@ -1634,7 +1634,7 @@ pub fn references(text: &str, name: &str) -> Vec<(i64, String)> {
         .map(|(_, span)| {
             let line = i64::from(diagnostic::position_of_offset(text, span.start).line);
             let a = line_start(text, line);
-            (i64::from(span.start), pxui_shell::kit::ocaml_trim(&sub(text, a, line_stop(text, line) - a)).to_owned())
+            (i64::from(span.start), sub(text, a, line_stop(text, line) - a).trim().to_owned())
         })
         .collect()
 }

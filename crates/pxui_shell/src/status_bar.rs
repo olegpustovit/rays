@@ -54,11 +54,6 @@ impl Default for Opts {
     }
 }
 
-fn string_of_float(x: f64) -> String {
-    let s = cfmt::g(x, 12);
-    if s.bytes().all(|c| c == b'-' || c.is_ascii_digit()) { format!("{s}.") } else { s }
-}
-
 /// where the lead's parts go: the file, the dot, the status cut to `limit`, and the end
 fn lead_plan(width: &mut dyn FnMut(&str) -> f64, x: f64, file: &str, limit: f64, text: &str) -> (f64, f64, f64, String, f64) {
     let mut tx = x + 12.0;
@@ -295,10 +290,10 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     ui.request_cursor(Cursor::Horizontal_resize);
                 }
                 if sg.pressed && w.is_none() {
-                    ui.set_text_state(&bar, Some(string_of_float(natural_end - fx)));
+                    ui.set_text_state(&bar, Some((natural_end - fx).to_string()));
                 }
                 if sg.held {
-                    ui.set_text_state(&bar, Some(string_of_float(max_w.min(24.0f64.max(sg.pointer.0 - 4.0 - fx)))));
+                    ui.set_text_state(&bar, Some(max_w.min(24.0f64.max(sg.pointer.0 - 4.0 - fx)).to_string()));
                 }
                 match stored(ui) {
                     Some(w) => (fx + w, fx + w),

@@ -179,34 +179,6 @@ pub fn cap_y_paint(paint: &Paint, y: f64, h: f64) -> f64 {
     paint.text_top(Some(8.max(paint.font_size - 2)), y, h)
 }
 
-/// OCaml's `String.trim`: space, tab, newline, form feed and carriage return.
-pub fn ocaml_trim(s: &str) -> &str {
-    s.trim_matches(|c: char| matches!(c as u32, 32 | 9 | 10 | 12 | 13))
-}
-
-/// OCaml's `int_of_string_opt`: optional sign, `0x`/`0o`/`0b` prefixes, `_` separators; no trimming.
-pub fn int_of_string_opt(text: &str) -> Option<i64> {
-    let (neg, rest) = match text.strip_prefix('-') {
-        Some(r) => (true, r),
-        None => (false, text.strip_prefix('+').unwrap_or(text)),
-    };
-    let (radix, digits) = if let Some(r) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
-        (16, r)
-    } else if let Some(r) = rest.strip_prefix("0o").or_else(|| rest.strip_prefix("0O")) {
-        (8, r)
-    } else if let Some(r) = rest.strip_prefix("0b").or_else(|| rest.strip_prefix("0B")) {
-        (2, r)
-    } else {
-        (10, rest)
-    };
-    if digits.is_empty() || digits.starts_with('_') {
-        return None;
-    }
-    let clean: String = digits.chars().filter(|c| *c != '_').collect();
-    let v = i64::from_str_radix(&clean, radix).ok()?;
-    Some(if neg { -v } else { v })
-}
-
 /// A vector: cells in the control column, 8 between, each with its axis letter in ink-3 drawn on
 /// `boxed` (the row); `cell index x w` makes the cell's own field (x, w relative to `boxed`).
 /// `reserve` keeps room at the right for a row's toggle.

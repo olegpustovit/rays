@@ -169,7 +169,7 @@ pub fn delete(guard: Option<Guard>, owner: &str, pattern: &str, input: &node::T)
 }
 
 fn lowered(text: &str) -> String {
-    sop::support::ocaml_trim(text).to_ascii_lowercase()
+    text.trim().to_ascii_lowercase()
 }
 
 pub fn attribute_owner(text: &str) -> Result<Option<Owner>, Diagnostic> {

@@ -110,11 +110,16 @@ fn choice_tables_round_trip_their_values() {
     for (_, owner) in ATTRIBUTE_OWNER.0 {
         assert_eq!(ATTRIBUTE_OWNER.of(&ATTRIBUTE_OWNER.value(owner)), *owner);
     }
-    assert_eq!(int_of_string_opt("0x1F"), Some(31));
-    assert_eq!(int_of_string_opt("1_000"), Some(1000));
-    assert_eq!(int_of_string_opt("-7"), Some(-7));
-    assert_eq!(int_of_string_opt("abc"), None);
-    assert_eq!(int_of_string_opt(""), None);
+}
+
+#[test]
+fn curve_join_picks_use_decimal_i64_indices() {
+    use crate::support::decode_curve_join_picks;
+    let picks = decode_curve_join_picks(" 9223372036854775807:start ").unwrap().unwrap();
+    assert_eq!(picks[0].primitive, i64::MAX);
+    for input in ["0x1F:start", "1_000:start", "-1:start", "9223372036854775808:start"] {
+        assert!(decode_curve_join_picks(input).is_err(), "accepted invalid primitive {input}");
+    }
 }
 
 #[test]

@@ -829,6 +829,8 @@ iteration also makes objects that remain.
   in an ordinary numeric spelling (`1e999`) remains an `E_TYPE` error. Lowercase
   `nan` and `inf` remain names. Value cards edit these literals directly; ranged
   parameter fields reject them with `E_NONFINITE`.
+  Editor integer fields and timeline frames use signed decimal `i64` input, including the
+  full range −2^63…2^63−1. Radix prefixes and underscore separators are not integer spellings.
 - String: `"…"` with the escapes `\"`, `\\`, `\n`, `\t`, `\r`, and exactly three
   decimal digits `\000`–`\255` for one byte; any other escape is
   `E_UNEXPECTED`.

@@ -34,28 +34,6 @@ pub fn print(form: &Syntax) -> Result<String, String> {
     lisp::print(std::slice::from_ref(form)).map(|(text, _)| text).map_err(|error| rays_diagnostic::to_string(&error))
 }
 
-/// Integer literal in full `i64` range (decimal or 0x/0o/0b, underscores allowed).
-pub fn int_of_string_opt(text: &str) -> Option<i64> {
-    let (neg, body) = match text.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, text.strip_prefix('+').unwrap_or(text)),
-    };
-    let (radix, digits) = if let Some(r) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-        (16, r)
-    } else if let Some(r) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
-        (8, r)
-    } else if let Some(r) = body.strip_prefix("0b").or_else(|| body.strip_prefix("0B")) {
-        (2, r)
-    } else {
-        (10, body)
-    };
-    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') {
-        return None;
-    }
-    let clean: String = digits.chars().filter(|c| *c != '_').collect();
-    i64::from_str_radix(&format!("{}{clean}", if neg { "-" } else { "" }), radix).ok()
-}
-
 /// OCaml's `float_of_string_opt` on a number form, finite only.
 pub fn num_of(form: &Syntax) -> Option<f64> {
     match &form.node {

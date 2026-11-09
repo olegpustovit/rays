@@ -82,7 +82,7 @@ fn top_folder(row: &FlowRow) -> Option<&str> {
 }
 
 fn expression(text: &str) -> bool {
-    text.starts_with('=') && kit::ocaml_trim(text).len() > 1
+    text.starts_with('=') && text.trim().len() > 1
 }
 
 fn text_of(bytes: &[u8]) -> String {
@@ -212,7 +212,7 @@ fn input(
             Some((range.soft_min as f64, range.soft_max as f64)),
             None,
             &value.to_string(),
-            &|text| kit::int_of_string_opt(text).map(Value::Int),
+            &|text| text.parse::<i64>().ok().map(Value::Int),
             field,
             path,
             &key,

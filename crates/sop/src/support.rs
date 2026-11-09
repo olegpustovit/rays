@@ -11,11 +11,6 @@ use crate::node::GeometryCooked;
 
 // ---------------------------------------------------------------- choice helpers
 
-/// OCaml's `String.trim`: space, tab, newline, form feed and carriage return.
-pub fn ocaml_trim(text: &str) -> &str {
-    text.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
-}
-
 /// A choice parameter: the labels the user sees, each with the value it selects, in declaration order.
 pub struct Choice<T: 'static>(pub &'static [(&'static str, T)]);
 
@@ -113,29 +108,6 @@ pub fn decode_table(text: &[u8]) -> Result<Vec<Vec<String>>, String> {
 
 pub fn parameter_table_rows(name: &str, text: &[u8]) -> Result<Vec<Vec<String>>, String> {
     decode_table(text).map_err(|message| format!("{name}: {message}"))
-}
-
-/// OCaml `int_of_string_opt`: optional sign, `_` separators, `0x`/`0o`/`0b` prefixes.
-pub fn int_of_string_opt(text: &str) -> Option<i64> {
-    let (negative, rest) = match text.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, text.strip_prefix('+').unwrap_or(text)),
-    };
-    let lower = rest.to_ascii_lowercase();
-    let (radix, digits) = if let Some(d) = lower.strip_prefix("0x") {
-        (16, d.to_owned())
-    } else if let Some(d) = lower.strip_prefix("0o") {
-        (8, d.to_owned())
-    } else if let Some(d) = lower.strip_prefix("0b") {
-        (2, d.to_owned())
-    } else {
-        (10, lower)
-    };
-    if digits.is_empty() || digits.starts_with('_') {
-        return None;
-    }
-    let digits: String = digits.chars().filter(|c| *c != '_').collect();
-    i64::from_str_radix(&format!("{}{digits}", if negative { "-" } else { "" }), radix).ok()
 }
 
 // ---------------------------------------------------------------- plain enums
@@ -465,10 +437,10 @@ pub fn decode_fuse_group_rules(name: &str, text: &[u8]) -> Result<Vec<rdk_ops::f
 
 pub fn decode_curve_join_picks(text: &str) -> Result<Option<Vec<rdk_ops::curve_join::CurveJoinPick>>, String> {
     use rdk_ops::curve_join::{CurveJoinEnd, CurveJoinPick};
-    if ocaml_trim(text).is_empty() {
+    if text.trim().is_empty() {
         return Ok(None);
     }
-    if ocaml_trim(text) == "[]" {
+    if text.trim() == "[]" {
         return Ok(Some(Vec::new()));
     }
     let mut seen = std::collections::HashSet::new();
@@ -478,8 +450,8 @@ pub fn decode_curve_join_picks(text: &str) -> Result<Option<Vec<rdk_ops::curve_j
         let [primitive, end] = parts.as_slice() else {
             return Err("sop/join_curves: picks must be comma-separated primitive:start/end pairs".to_owned());
         };
-        let primitive = match int_of_string_opt(primitive.trim()) {
-            Some(value) if value >= 0 => value,
+        let primitive = match primitive.trim().parse::<i64>() {
+            Ok(value) if value >= 0 => value,
             _ => return Err("sop/join_curves: picked primitive must be nonnegative".to_owned()),
         };
         if !seen.insert(primitive) {
@@ -504,7 +476,7 @@ pub fn decode_surface_attributes(text: &[u8]) -> Result<Vec<rdk_ops::attribute_t
                     .map_err(|m| format!("sop/attribute_transfer_surface: {m}"))?;
                 if source_owner == attribute::Owner::Detail {
                     Err("sop/attribute_transfer_surface: detail source is not spatial".to_owned())
-                } else if ocaml_trim(source_name).is_empty() || ocaml_trim(target_name).is_empty() {
+                } else if source_name.trim().is_empty() || target_name.trim().is_empty() {
                     Err("sop/attribute_transfer_surface: attribute names must be nonblank".to_owned())
                 } else if source_owner == attribute::Owner::Point && source_name == "P" {
                     Err("sop/attribute_transfer_surface: source P is not an ordinary attribute".to_owned())

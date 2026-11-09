@@ -668,7 +668,7 @@ impl Fonts {
             0.0
         } else {
             let exact = ratio * size as f64 * density as f64;
-            (ocaml_round(exact) - (exact - 0.02).ceil()) / density as f64
+            (exact.round() - (exact - 0.02).ceil()) / density as f64
         }
     }
 
@@ -710,11 +710,6 @@ impl Fonts {
         }
         self.atlas.fonts.clear();
     }
-}
-
-/// OCaml's `Float.round`: half away from zero.
-pub fn ocaml_round(x: f64) -> f64 {
-    x.round()
 }
 
 // ----------------------------------------------------------------- Ui
@@ -2470,7 +2465,7 @@ impl Ui {
                 } else {
                     // on whole device pixels, so text is sharp where the coast ends
                     let density = self.density as f64;
-                    self.scroll_y[slot] = ocaml_round(y * density) / density;
+                    self.scroll_y[slot] = (y * density).round() / density;
                     if (velocity * (-t / SCROLL_COAST_TAU).exp()).abs() < SCROLL_MIN_VELOCITY {
                         self.slots[slot].scroll_mode = 0;
                     }
@@ -2810,18 +2805,18 @@ impl Paint {
         let density = self.fonts.density as f64;
         // Snap the run's origin to a physical pixel so each glyph texel lands on exactly one
         // backing pixel, as whole-string text does.
-        let snap = |value: f64| ocaml_round(value * density) / density;
+        let snap = |value: f64| (value * density).round() / density;
         let screen_x = snap(at.0);
         let shift = self.fonts.ascent_shift(size.unwrap_or(self.font_size), self.fonts.density);
         let screen_y = snap(at.1 + shift);
         // the pen runs in fractional physical pixels (0.88 points of tracking is 1.76 at 2x); each
         // glyph is placed on a whole pixel
-        let mut pen = 0.0;
+        let mut pen = 0.0_f64;
         let tracking = tracking * density;
         for c in text.chars() {
             if let Some(glyph) = self.fonts.glyph(&font, id, c as i64) {
                 if glyph.gw > 0 {
-                    let gx = screen_x + ocaml_round(pen) / density;
+                    let gx = screen_x + pen.round() / density;
                     let gw = glyph.gw as f64 / density;
                     let gh = glyph.gh as f64 / density;
                     self.builder
@@ -2990,7 +2985,7 @@ impl Paint {
             w as i64,
             h as i64,
             Some(focused),
-            Some(0.max(ocaml_round(cursor) as i64)),
+            Some(0.max(cursor.round() as i64)),
         )
         .expect("Ui.Paint.input_region");
         self.regions.push(region);
@@ -3211,7 +3206,7 @@ impl Ui {
             panic!("Ui.frame: time must be finite");
         }
         let (scale_x, scale_y) = frame.pixel_scale;
-        self.density = 1.max(ocaml_round(scale_x.max(scale_y)) as i64);
+        self.density = 1.max(scale_x.max(scale_y).round() as i64);
         self.fonts.density = self.density;
         self.frame_number += 1;
         // the window's title bar shows the ground the UI is painted on; no window, no effect

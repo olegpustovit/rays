@@ -132,7 +132,7 @@ fn selection_text() {
     assert_eq!(marked(&sh), "r (* spread (sqrt i))");
     assert_eq!(sh.key, p(&["sunflower", "seeds_each", "r"]), "the selection's key");
     let bound = match t::binding(&src, &p(&["sunflower", "seeds_each", "r"])) {
-        Some((_, v)) => pxui_shell::kit::ocaml_trim(&flow_syntax::lisp::print(&[v]).unwrap().0).to_owned(),
+        Some((_, v)) => flow_syntax::lisp::print(&[v]).unwrap().0.trim().to_owned(),
         None => String::new(),
     };
     assert_eq!(bound, "(* spread (sqrt i))", "binding text");

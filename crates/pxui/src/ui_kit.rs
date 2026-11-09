@@ -696,8 +696,8 @@ impl Ui {
         }
         let height = self.modal_height(key);
         let (view_w, view_h) = self.view_size();
-        let x = ocaml_round(0.0f64.max((view_w - width) / 2.0));
-        let y = ocaml_round(0.0f64.max((view_h - height) / 2.0));
+        let x = (0.0f64.max((view_w - width) / 2.0)).round();
+        let y = (0.0f64.max((view_h - height) / 2.0)).round();
         let stroke = theme::border(&self.theme());
         self.popup(Some(stroke), Some(48.0f64.max(view_h - 32.0)), false, false, (x, y), width, height, label, f)
     }

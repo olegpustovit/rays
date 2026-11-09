@@ -39,28 +39,6 @@ pub struct Change {
     pub expr: S,
 }
 
-/// OCaml `int_of_string_opt` for the forms a literal can take (64-bit range).
-pub fn int_of_string_opt(text: &str) -> Option<i64> {
-    let (neg, body) = match text.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, text.strip_prefix('+').unwrap_or(text)),
-    };
-    let (radix, digits) = if let Some(r) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-        (16, r)
-    } else if let Some(r) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
-        (8, r)
-    } else if let Some(r) = body.strip_prefix("0b").or_else(|| body.strip_prefix("0B")) {
-        (2, r)
-    } else {
-        (10, body)
-    };
-    if digits.is_empty() || digits.starts_with('_') {
-        return None;
-    }
-    let clean: String = digits.chars().filter(|c| *c != '_').collect();
-    i64::from_str_radix(&format!("{}{clean}", if neg { "-" } else { "" }), radix).ok()
-}
-
 fn float_of_string_opt(text: &str) -> Option<f64> {
     cfmt::parse_ocaml_float(text)
 }
@@ -72,7 +50,7 @@ fn literal(form: &S) -> Option<Lit> {
         return None;
     }
     match &form.node {
-        Node::Num(text) if s::number(form.name(*text)) => match (int_of_string_opt(form.name(*text)), float_of_string_opt(form.name(*text))) {
+        Node::Num(text) if s::number(form.name(*text)) => match (form.name(*text).parse::<i64>().ok(), float_of_string_opt(form.name(*text))) {
             (Some(n), _) => Some((Ty::Int, E::Int(n))),
             (None, Some(n)) if n.is_finite() => Some((Ty::Float, E::Float(n))),
             _ => None,

@@ -110,7 +110,7 @@ fn vs(values: &[Value], index: usize) -> String {
 
 /// OCaml `String.trim t = ""`.
 fn blank(text: &str) -> bool {
-    support::ocaml_trim(text).is_empty()
+    text.trim().is_empty()
 }
 
 /// `List.length l <> List.length (List.sort_uniq compare l)`.
@@ -777,7 +777,7 @@ pub mod convex_hull {
     }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        if support::ocaml_trim(&from_values(values).source_point_attribute) == "P" {
+        if from_values(values).source_point_attribute.trim() == "P" {
             return refuse("convex_hull", "source point attribute must not be P");
         }
         Ok(())

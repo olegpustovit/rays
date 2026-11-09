@@ -246,7 +246,7 @@ fn read_settings(base: &settings::T, form: &S) -> Result<settings::T, String> {
                 let value = match (&field.current, form.arena().row(*value).node) {
                     (PV::Bool(_), Node::Sym(text)) if form.name(text) == "true" => PV::Bool(true),
                     (PV::Bool(_), Node::Sym(text)) if form.name(text) == "false" => PV::Bool(false),
-                    (PV::Int(_), Node::Num(text)) => PV::Int(literal_edit::int_of_string_opt(form.name(text)).ok_or_else(wrong)?),
+                    (PV::Int(_), Node::Num(text)) => PV::Int(form.name(text).parse::<i64>().map_err(|_| wrong())?),
                     (PV::Float(_), Node::Num(text)) => PV::Float(cfmt::parse_ocaml_float(form.name(text)).ok_or_else(wrong)?),
                     (PV::Text(_), Node::Str(bytes)) => PV::Text(form.bytes(bytes).to_vec()),
                     (PV::Choice(_), Node::Str(bytes)) => PV::Choice(String::from_utf8_lossy(form.bytes(bytes)).into_owned()),

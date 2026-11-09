@@ -372,7 +372,7 @@ fn graph_row(pa: &Params, g: &Graph, detail: String) -> Row {
 }
 
 fn search(state: &State, pa: &Params, defs: &[&Graph], chains: &Chains, counts: &[(Path, i64)]) -> Vec<Row> {
-    let q = pxui_shell::kit::ocaml_trim(&state.query).to_owned();
+    let q = state.query.trim().to_owned();
     let mut acc: Vec<Row> = Vec::new();
     let ws = &pa.workspace;
     for g in ws.graphs.iter() {
@@ -448,7 +448,7 @@ pub fn rows(wide: bool, state: &State, pa: &Params) -> Vec<Row> {
         }
         _ => Vec::new(),
     };
-    if !pxui_shell::kit::ocaml_trim(&state.query).is_empty() {
+    if !state.query.trim().is_empty() {
         return search(state, pa, &defs, &chains, &counts);
     }
     let mut acc: Vec<Row> = Vec::new();

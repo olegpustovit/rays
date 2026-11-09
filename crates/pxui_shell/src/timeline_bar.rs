@@ -14,10 +14,6 @@ pub enum Intent {
     Set_end(i64),
 }
 
-fn int_of_string_opt(text: &str) -> Option<i64> {
-    kit::int_of_string_opt(kit::ocaml_trim(text))
-}
-
 /// The strip of the workspace sheet is one 24-point bar: Play, Stop, F, the frame field, the time
 /// and the ruler to the edge. A taller panel has the bar, Reset, the rule, Frame, Time and End, a
 /// hairline and the ruler under it. `edge` draws the line-2 hairline above a strip that has no
@@ -64,7 +60,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
         let field_w = if tall { 64.0 } else { 48.0 };
         let field_x = cx;
         let current = frame.to_string();
-        let valid_frame = |text: &str| int_of_string_opt(text).is_some();
+        let valid_frame = |text: &str| text.trim().parse::<i64>().is_ok();
         let typed = ui
             .value_field((field_x, cy), field_w, 20.0, &ValueFieldOpts::default(), &valid_frame, "timeline-frame-field", &current)
             .0;
@@ -76,7 +72,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
         // the last frame, typed, at the end of a tall panel's bar
         let last = max_frame.to_string();
         let end_x = fw - 12.0 - 64.0;
-        let valid_end = |text: &str| int_of_string_opt(text).map(|n| n >= 1).unwrap_or(false);
+        let valid_end = |text: &str| text.trim().parse::<i64>().is_ok_and(|n| n >= 1);
         let ended = if !tall {
             last.clone()
         } else {
@@ -155,12 +151,12 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
         });
         // a typed frame clamps to the timeline: 0 to the last frame
         if typed != current {
-            if let Some(n) = int_of_string_opt(&typed) {
+            if let Ok(n) = typed.trim().parse::<i64>() {
                 out.push(Intent::Seek_playback(0.max(max_frame.min(n))));
             }
         }
         if ended != last {
-            if let Some(n) = int_of_string_opt(&ended) {
+            if let Ok(n) = ended.trim().parse::<i64>() {
                 out.push(Intent::Set_end(n));
             }
         }

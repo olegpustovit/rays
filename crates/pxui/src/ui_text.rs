@@ -2699,7 +2699,7 @@ impl AreaPaint {
             let ls = start_of(rows, caret_line);
             let caret_x = text_x + width(paint, &final_text[ls..edit.caret]);
             paint.input_region(caret_x - bx, bx, y, bw, row, true);
-            paint.fill(ocaml_round(caret_x), y + 2.0, 1.0, row - 4.0, theme.accent);
+            paint.fill(caret_x.round(), y + 2.0, 1.0, row - 4.0, theme.accent);
         } else {
             paint.input_region(0.0, bx, by, bw, bh, false);
         }

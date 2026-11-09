@@ -137,7 +137,7 @@ fn field(spec: Spec) -> Field {
     let folder: Vec<String> =
         spec.folder
             .split('/')
-            .filter(|item| !support::ocaml_trim(item).is_empty())
+            .filter(|item| !item.trim().is_empty())
             .map(str::to_owned)
             .collect();
     if !folder.is_empty() {
@@ -287,8 +287,8 @@ pub fn factory(decl: &Decl) -> Factory {
     let category: Vec<String> =
         meta.category.split('/').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect();
     assert!(
-        !support::ocaml_trim(&meta.key).is_empty()
-            && !support::ocaml_trim(&meta.label).is_empty()
+        !meta.key.trim().is_empty()
+            && !meta.label.trim().is_empty()
             && !category.is_empty(),
         "sop_node key, label, and category must not be blank"
     );

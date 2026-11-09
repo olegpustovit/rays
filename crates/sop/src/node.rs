@@ -191,11 +191,11 @@ pub fn has_parameters(value: &T) -> bool {
 
 /// The same node (id, parameters, cook identity) under a new display label; a blank label is ignored.
 pub fn relabel(label: &str, value: &T) -> T {
-    if support::ocaml_trim(label).is_empty() {
+    if label.trim().is_empty() {
         return value.clone();
     }
     let mut data = (*value.0).clone();
-    data.label = support::ocaml_trim(label).to_owned();
+    data.label = label.trim().to_owned();
     T(Arc::new(data))
 }
 
@@ -358,9 +358,9 @@ pub mod build {
 
     pub fn make(args: Args, expand: Option<ExpandFn>, cook: CookFn) -> T {
         assert!(args.version >= 0, "Node.make: version must be non-negative");
-        assert!(!support::ocaml_trim(&args.operation).is_empty(), "Node.make: empty operation");
+        assert!(!args.operation.trim().is_empty(), "Node.make: empty operation");
         let label = match args.label {
-            Some(label) if !support::ocaml_trim(&label).is_empty() => label,
+            Some(label) if !label.trim().is_empty() => label,
             _ => args.operation.clone(),
         };
         let input_policy = args.input_policy.unwrap_or(InputPolicy::All);
@@ -442,7 +442,7 @@ pub mod build {
                 .reads
                 .iter()
                 .chain(facts.writes.iter())
-                .any(|name| support::ocaml_trim(name).is_empty()),
+                .any(|name| name.trim().is_empty()),
             "Node.with_facts: component names must not be blank"
         );
         let mut data = (*value.0).clone();

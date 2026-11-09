@@ -103,7 +103,7 @@ pub fn filename_concat(dir: &str, file: &str) -> String {
 /// A sketch's or the editor's saved settings: one `(settings :sketch "name" :key value ...)` form.
 pub mod settings {
     use super::{read_text, write_text};
-    use super::form::{container, int_of_string_opt, kw, num_of, print, vec_of_numbers, vec_values};
+    use super::form::{container, kw, num_of, print, vec_of_numbers, vec_values};
     use flow_syntax::syntax::{make as make_node, Draft, Node, Syntax};
 
     #[derive(Clone, Debug, PartialEq)]
@@ -136,9 +136,9 @@ pub mod settings {
         match &form.node {
             Node::Sym(s) if form.name(*s) == "true" => Ok(Value::Bool(true)),
             Node::Sym(s) if form.name(*s) == "false" => Ok(Value::Bool(false)),
-            Node::Num(n) => match int_of_string_opt(form.name(*n)) {
-                Some(v) => Ok(Value::Int(v)),
-                None => match num_of(form) {
+            Node::Num(n) => match form.name(*n).parse::<i64>() {
+                Ok(v) => Ok(Value::Int(v)),
+                Err(_) => match num_of(form) {
                     Some(v) => Ok(Value::Float(v)),
                     None => Err("invalid settings number".into()),
                 },
