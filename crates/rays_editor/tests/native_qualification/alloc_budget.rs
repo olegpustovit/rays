@@ -21,10 +21,12 @@ const FRAMES: i64 = 30;
 // empty 1,263 / 83,202; bare 1,489 / 98,366.
 // M: chrome box labels format the leaf path in place: empty 1,230 / 82,806; bare 1,456 / 97,970.
 // M: the scene graph is read in place: basic 1,384 / 157,167; empty 1,206 / 81,998; bare 1,417 / 96,657.
+// R3/R7 and G1: shared immutable data and GPU metadata: basic 1,382 / 157,055;
+// empty 1,206 / 81,958; bare 1,417 / 96,617.
 // Never raise.
-const BASIC: (u64, u64) = (1_384, 157_167);
-const EMPTY: (u64, u64) = (1_206, 81_998);
-const BARE: (u64, u64) = (1_417, 96_657);
+const BASIC: (u64, u64) = (1_382, 157_055);
+const EMPTY: (u64, u64) = (1_206, 81_958);
+const BARE: (u64, u64) = (1_417, 96_617);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

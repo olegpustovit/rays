@@ -414,14 +414,25 @@ fn named_arguments_and_residual_capture() {
     let W::Node::Let(id) = root.node else { panic!() };
     let term = root.child(root.arena().let_node(id).body);
     assert_eq!(residual::free_names(&term), vec!["outside"]);
-    let walks = host::free_name_walks();
-    let _ = residual::free_names(&term);
-    assert_eq!(host::free_name_walks(), walks);
+    let names = term.arena().free_names(term.row_id());
+    assert!(std::ptr::eq(names, term.arena().free_names(term.row_id())));
     let ws = check(&value("(let* [source (list 3.0 4.0) initial 2.0] (let* [[x y] source total (state [s initial] (+ s t))] (+ x (+ y total))))"));
     let root = &ws.graphs[0].body;
     let W::Node::Let(id) = root.node else { panic!() };
     let term = root.child(root.arena().let_node(id).body);
     assert_eq!(residual::free_names(&term), vec!["initial", "source"]);
+    for (context, body) in [
+        ("value", "(let* [a 2.0 z 9.0] ^:bypass (+ a z))"),
+        ("value", "(let* [a 2.0 z 9.0 f (fn [x y] (+ x y))] ^:bypass (f a z))"),
+        ("sop", "(let* [a (sop/box) z 9.0] ^:bypass (sop/transform :translate [z 0 0] a))"),
+    ] {
+        let ws = check(&format!("(workspace w (graph g :context {context} {body}))"));
+        let root = &ws.graphs[0].body;
+        let W::Node::Let(id) = root.node else { panic!("let") };
+        let term = root.child(root.arena().let_node(id).body);
+        assert_eq!(residual::free_names(&term), ["a"], "a bypass only reads its authored first input: {body}");
+    }
+
 }
 
 #[test]

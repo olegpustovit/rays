@@ -107,9 +107,6 @@ impl Storage {
         if self.shared(&arena.names.0) { for name in arena.names.iter() { self.heap.allocation(Arc::as_ptr(name) as *const u8, name.len()); } }
         if self.shared(&arena.arg_pool.0) { for fields in arena.arg_pool.values() { self.fields(fields); } }
         if self.shared(&arena.terms.0) { for (_, term) in arena.terms.values() { if self.shared(term) { self.term(term); } } }
-        if self.shared(&arena.frees.0) {
-            for (_, names) in arena.frees.values() { if self.shared(names) && self.buffer(names) { for name in names.iter() { self.name(name); } } }
-        }
     }
     fn allocations(self) -> Vec<(usize, usize)> {
         let (syntax, checked) = self.workspace.into_allocations();

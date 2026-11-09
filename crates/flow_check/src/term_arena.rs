@@ -122,6 +122,7 @@ pub struct TermArena {
     owner: u64,
     tables: Tables,
     names: Vec<String>,
+    free_names: Vec<RangeId>,
     syntax: Arc<SyntaxArena>,
     /// Rows whose subtree passed a caller's structural check (flow_eval's authored-nesting bound,
     /// run per static evaluation over every catalog body): the arena is immutable, so the answer is.
@@ -192,6 +193,109 @@ impl TermArena {
         case: cases -> Case, function: functions -> Function, hof: hofs -> Hof, get: gets -> Get,
         assoc: assocs -> Assoc, list_op: list_ops -> ListOp, expanded: expanded -> Expanded,
     }
+    pub fn bypass_input(&self, id: TermId) -> Option<TermId> {
+        let term = self.row(id);
+        let entries = match term.node {
+            Node::Call(_) | Node::Op(_) => self.children(id),
+            Node::CallFn(id) => self.term_ids(self.call_fn(id).args),
+            _ => return None,
+        };
+        let syntax = &self.syntax;
+        match syntax.row(term.form).node {
+            arena::Node::List(range) if !syntax.range(range).is_empty() => {
+                let mut rest = &syntax.range(range)[1..];
+                let first = loop {
+                    let (&id, tail) = rest.split_first()?;
+                    if matches!(syntax.row(id).node, arena::Node::Kw(_)) && !tail.is_empty() { rest = &tail[1..]; }
+                    else { break syntax.row(id); }
+                };
+                entries.iter().copied().find(|&id| {
+                    let candidate = syntax.row(self.row(id).form);
+                    candidate.id == first.id && candidate.span == first.span
+                })
+            }
+            _ => entries.first().copied(),
+        }
+    }
+    pub fn free_names(&self, id: TermId) -> &[NameId] { self.name_ids(self.free_names[id.0 as usize]) }
+
+    fn pattern_names(&self, id: PatternId, names: &mut Vec<NameId>) {
+        match self.pattern(id) {
+            PatternNode::Name(name) => names.push(name),
+            PatternNode::Keys(range) => names.extend_from_slice(self.name_ids(range)),
+            PatternNode::Seq(range) => for &pattern in self.pattern_ids(range) { self.pattern_names(pattern, names); },
+        }
+    }
+    // ponytail: bound-name membership is linear; use per-name marks if large binding lists dominate freeze time.
+    fn add_free_names(&self, id: TermId, bound: &[NameId], names: &mut Vec<NameId>) {
+        names.extend(self.free_names(id).iter().filter(|name| !bound.contains(name)).copied());
+    }
+    fn build_free_names(&mut self) {
+        let empty = RangeId(index(self.tables.ranges.len()));
+        self.tables.ranges.push(Range { start: index(self.tables.names.len()), len: 0 });
+        let mut singles = vec![None; self.names.len()];
+        let (mut free, mut bound) = (Vec::new(), Vec::new());
+        for i in 0..self.tables.rows.len() {
+            let id = TermId(index(i));
+            free.clear();
+            bound.clear();
+            match self.row(id).node {
+                Node::RefBinding(reference) => free.push(self.ref_binding(reference).name),
+                Node::FnRef(name) => free.push(name),
+                Node::Let(binding) => {
+                    let binding = self.let_node(binding);
+                    for binding in self.bindings(binding.bindings) {
+                        self.add_free_names(binding.term, &bound, &mut free);
+                        self.pattern_names(binding.pattern, &mut bound);
+                    }
+                    self.add_free_names(binding.body, &bound, &mut free);
+                }
+                Node::Fn(function) => {
+                    let function = self.function(function);
+                    if let Some(capture) = function.capture { self.add_free_names(capture, &bound, &mut free); }
+                    for parameter in self.params(function.params) { self.pattern_names(parameter.pattern, &mut bound); }
+                    self.add_free_names(function.body, &bound, &mut free);
+                }
+                Node::Loop(loop_id) => {
+                    let loop_node = self.loop_node(loop_id);
+                    for binding in self.bindings(loop_node.accs).iter().chain(self.bindings(loop_node.clauses)) {
+                        self.add_free_names(binding.term, &bound, &mut free);
+                        self.pattern_names(binding.pattern, &mut bound);
+                    }
+                    self.add_free_names(loop_node.body, &bound, &mut free);
+                }
+                Node::Bypass(call) => {
+                    let range = self.bypass_input(call).map_or(empty, |input| self.free_names[input.0 as usize]);
+                    self.free_names.push(range);
+                    continue;
+                }
+                Node::State(state) => {
+                    let state = self.state(state);
+                    self.add_free_names(state.init, &bound, &mut free);
+                    self.pattern_names(state.binder, &mut bound);
+                    self.add_free_names(state.step, &bound, &mut free);
+                }
+                node => {
+                    if let Node::CallFn(call) = node { free.push(self.call_fn(call).name); }
+                    for &child in self.children(id) { self.add_free_names(child, &bound, &mut free); }
+                }
+            }
+            free.sort_unstable_by(|a, b| self.name(*a).cmp(self.name(*b)));
+            free.dedup();
+            let reuse = if free.is_empty() { Some(empty) }
+                else if free.len() == 1 { singles[free[0].0 as usize] }
+                else { self.children(id).iter().find(|&&child| self.free_names(child) == free.as_slice()).map(|child| self.free_names[child.0 as usize]) };
+            let range = reuse.unwrap_or_else(|| {
+                let range = RangeId(index(self.tables.ranges.len()));
+                self.tables.ranges.push(Range { start: index(self.tables.names.len()), len: index(free.len()) });
+                self.tables.names.extend_from_slice(&free);
+                range
+            });
+            if free.len() == 1 { singles[free[0].0 as usize] = Some(range); }
+            self.free_names.push(range);
+        }
+    }
+
     pub fn attribute(&self, checked: &mut flow_syntax::syntax::Memory, syntax: &mut flow_syntax::syntax::Memory) {
         if !checked.allocation(self as *const Self, std::mem::size_of::<Self>()) { return; }
         macro_rules! buffers {
@@ -207,6 +311,7 @@ impl TermArena {
             loops: Loop, pairs: Pair, errors: ErrorRows, ifs: If, conds: Cond, cases: Case, functions: Function,
             hofs: Hof, gets: Get, assocs: Assoc, list_ops: ListOp, expanded: Expanded,
         }
+        checked.allocation(self.free_names.as_ptr(), self.free_names.capacity() * std::mem::size_of::<RangeId>());
         checked.allocation(self.names.as_ptr(), self.names.capacity() * std::mem::size_of::<String>());
         for name in &self.names { checked.allocation(name.as_ptr(), name.capacity()); }
         for bytes in &self.tables.bytes { checked.allocation(bytes.as_ptr(), bytes.capacity()); }
@@ -740,9 +845,12 @@ impl TermBuilder {
 
     pub fn freeze(mut self) -> Arc<TermArena> {
         self.tables.rows.shrink_to_fit();
-        self.tables.ranges.shrink_to_fit();
         self.tables.terms.shrink_to_fit();
-        Arc::new(TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze(), syntax: self.syntax.freeze(), checked: Default::default() })
+        let free_names = Vec::with_capacity(self.tables.rows.len());
+        let mut arena = TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze(), free_names, syntax: self.syntax.freeze(), checked: Default::default() };
+        arena.build_free_names();
+        arena.tables.ranges.shrink_to_fit();
+        Arc::new(arena)
     }
 }
 

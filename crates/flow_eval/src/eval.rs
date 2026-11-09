@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use flow_check::{op, workspace::{self as W, Graph, Node as TermNode, Path, Term, Workspace}};
-use flow_check::term_arena::{TermArena, TermId, PatternId, PatternNode, Binding, RangeId, TermBuilder, Draft, Literal};
+use flow_check::term_arena::{TermArena, TermId, NameId, PatternId, PatternNode, Binding, RangeId, TermBuilder, Draft, Literal};
 use flow_syntax::{context::Context, ty, value};
 pub use flow_syntax::ty::{Ty, FnSignature};
 pub use flow_syntax::value::{FnId, ResidualId, Value};
@@ -358,8 +358,6 @@ static NEXT_ARENA: AtomicI64 = AtomicI64::new(1);
 static NEXT_FID: AtomicI64 = AtomicI64::new(1);
 static NEXT_RID: AtomicI64 = AtomicI64::new(1);
 static NEXT_BULK: AtomicI64 = AtomicI64::new(-1);
-static FREE_WALKS: AtomicI64 = AtomicI64::new(0);
-static FREE_NAMES_CACHE: LazyLock<Mutex<HashMap<(u64, u32), BTreeSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 type Interrupt = Arc<dyn Fn() -> bool + Send + Sync>;
 static INTERRUPTS: LazyLock<Mutex<HashMap<std::thread::ThreadId, Interrupt>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static ARENAS: LazyLock<Mutex<HashMap<i64, Weak<Slot>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -443,7 +441,7 @@ struct Arena {
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
-    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<HashSet<Arc<Path>>>, ops_seen: Shared<HashMap<String, (&'static str, OpRef)>>, names: Shared<HashSet<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route, Arc<Path>, Arc<Path>)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(&'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<Arc<str>>>)>>,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<HashSet<Arc<Path>>>, ops_seen: Shared<HashMap<String, (&'static str, OpRef)>>, names: Shared<HashSet<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route, Arc<Path>, Arc<Path>)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(&'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>,
     packed_bases: Shared<IdMap<(u64, flow_check::term_arena::PathId), Arc<Path>>>,
     // while an inlined body with a live argument evaluates: its deferred checks, oldest first (OCaml st.guards, newest first). A test that reads
     // only frame facts and selects an arm that fails statically is checked when the card cooks: the card fails with that diagnostic when the test is that bool
@@ -462,7 +460,7 @@ impl Arena {
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
-            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), frees: Shared::default(), guards: None,
+            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), pure: Shared::default(), terms: Shared::default(), guards: None,
             packed_bases: Shared::default(),
         }
     }
@@ -826,78 +824,7 @@ fn closure_params(closure: &ClosureData) -> &[flow_check::term_arena::Parameter]
 fn packed_path(term: &Term, path: flow_check::term_arena::PathId) -> Path {
     term.arena().path(path).iter().map(|name| term.name(*name).to_owned()).collect()
 }
-fn packed_names(arena: &flow_check::term_arena::TermArena, pattern: flow_check::term_arena::PatternId, out: &mut BTreeSet<String>) {
-    use flow_check::term_arena::PatternNode;
-    match arena.pattern(pattern) {
-        PatternNode::Name(name) => { out.insert(arena.name(name).to_owned()); }
-        PatternNode::Seq(range) => for pattern in arena.pattern_ids(range) { packed_names(arena, *pattern, out); },
-        PatternNode::Keys(range) => out.extend(arena.name_ids(range).iter().map(|name| arena.name(*name).to_owned())),
-    }
-}
-fn free_names(term: &Term) -> BTreeSet<String> {
-    let key = term.identity();
-    if let Some(names) = FREE_NAMES_CACHE.lock().unwrap().get(&key) { return names.clone(); }
-    FREE_WALKS.fetch_add(1, Ordering::Relaxed);
-    fn walk(t: &Term, bound: &mut BTreeSet<String>, free: &mut BTreeSet<String>) {
-        let arena = t.arena();
-        match t.node {
-            TermNode::RefBinding(id) => {
-                let name = t.name(arena.ref_binding(id).name);
-                if !bound.contains(name) { free.insert(name.to_owned()); }
-            }
-            TermNode::FnRef(id) => {
-                let name = t.name(id);
-                if !bound.contains(name) { free.insert(name.to_owned()); }
-            }
-            TermNode::CallFn(id) => {
-                let call = arena.call_fn(id);
-                let name = t.name(call.name);
-                if !bound.contains(name) { free.insert(name.to_owned()); }
-                for term in arena.term_ids(call.args) { walk(&t.child(*term), bound, free); }
-                if let Some(term) = call.body { walk(&t.child(term), bound, free); }
-            }
-            TermNode::Let(id) => {
-                let node = arena.let_node(id);
-                let prior = bound.clone();
-                for binding in arena.bindings(node.bindings) { walk(&t.child(binding.term), bound, free); packed_names(arena, binding.pattern, bound); }
-                walk(&t.child(node.body), bound, free);
-                *bound = prior;
-            }
-            TermNode::Fn(id) => {
-                let node = arena.function(id);
-                if let Some(term) = node.capture { walk(&t.child(term), bound, free); }
-                let prior = bound.clone();
-                for parameter in arena.params(node.params) { packed_names(arena, parameter.pattern, bound); }
-                walk(&t.child(node.body), bound, free);
-                *bound = prior;
-            }
-            TermNode::Loop(id) => {
-                let node = arena.loop_node(id);
-                let prior = bound.clone();
-                for binding in arena.bindings(node.accs).iter().chain(arena.bindings(node.clauses)) {
-                    walk(&t.child(binding.term), bound, free); packed_names(arena, binding.pattern, bound);
-                }
-                walk(&t.child(node.body), bound, free);
-                *bound = prior;
-            }
-            TermNode::State(id) => {
-                let node = arena.state(id);
-                walk(&t.child(node.init), bound, free);
-                let prior = bound.clone();
-                packed_names(arena, node.binder, bound);
-                walk(&t.child(node.step), bound, free);
-                *bound = prior;
-            }
-            _ => for child in children(t) { walk(&child, bound, free); },
-        }
-    }
-    let mut free = BTreeSet::new();
-    walk(term, &mut BTreeSet::new(), &mut free);
-    let mut cache = FREE_NAMES_CACHE.lock().unwrap();
-    if cache.len() >= 16_384 { cache.clear(); }
-    cache.insert(key, free.clone());
-    free
-}
+fn free_names(term: &Term) -> &[NameId] { term.arena().free_names(term.row_id()) }
 #[derive(Clone)]
 struct Stamp((u64, u32));
 impl Stamp {
@@ -916,15 +843,14 @@ fn make_residual(a: &mut Arena, t: &Term, env: &Env, c: &ExecCtx, previous: bool
     let (term, env) = (shared_term(a, t), capture_in(a, t, env));
     residual_id(a, ResidualData { term, env, ctx: c.clone(), previous, live })
 }
-// The free names of the term, found once per arena and interned, bound as in `env`.
+// Free names are computed with the immutable term arena and sorted by string.
 fn capture_in(a: &mut Arena, t: &Term, env: &Env) -> Captured {
-    let key = t.identity();
-    let names = match a.frees.get(&key) {
-        Some((stamp, names)) if stamp.is(t) => names.clone(),
-        _ => { let names = Arc::new(free_names(t).into_iter().map(|name| intern(a, &name)).collect::<Vec<_>>()); a.frees.insert(key, (Stamp::of(t), names.clone())); names }
-    };
-    // the free names are sorted, so the captures are too
-    names.iter().filter_map(|name| env.get(name).map(|value| (name.clone(), value))).collect()
+    let names = free_names(t);
+    if names.is_empty() { return no_captures(); }
+    names.iter().filter_map(|&id| {
+        let name = t.name(id);
+        env.get(name).map(|value| (intern(a, name), value))
+    }).collect()
 }
 
 fn eval_at(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
@@ -2726,7 +2652,6 @@ pub fn static_with(workspace: &Workspace, record: bool, inputs: Option<&[(String
             for (_, value) in inputs { check_value_nesting(value)?; value::validate(value)?; }
         }
     }
-    FREE_NAMES_CACHE.lock().unwrap().clear();
     let slot = Arena::new(workspace, record, budget.unwrap_or(MAX_STEPS));
     let mut arena = checkout(&slot);
     let (graphs, root) = (arena.workspace.graphs.clone(), root_ctx(&mut arena));
@@ -3320,7 +3245,7 @@ pub mod residual {
         drop(scope);
         result
     }
-    pub fn free_names(term: &Term) -> Vec<String> { super::free_names(term).into_iter().collect() }
+    pub fn free_names(term: &Term) -> Vec<String> { super::free_names(term).iter().map(|&id| term.name(id).to_owned()).collect() }
     pub fn residual_id(id: ResidualId) -> i64 { id.0 }
     /// Cheap single-field reads (no ResidualData / Term clone) for the lowering's hot predicates.
     pub fn residual_context(id: ResidualId) -> Option<Context> {
@@ -3522,7 +3447,7 @@ pub mod residual {
         pairs.extend(bindings.iter().map(|(name, value)| (intern(arena, name), value.clone())));
         residual.term = Arc::new(term.clone());
         let free = super::free_names(term);
-        pairs.retain(|(name, _)| free.contains(&**name));
+        pairs.retain(|(name, _)| free.binary_search_by(|&id| term.name(id).cmp(name.as_ref())).is_ok());
         residual.env = captured_of(pairs);
         residual.live = None;
         Ok(super::residual_id(arena, residual))
@@ -3659,7 +3584,6 @@ fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residua
 }
 pub mod host {
     use super::*;
-    pub fn free_name_walks() -> usize { FREE_WALKS.load(Ordering::Relaxed) as usize }
     pub fn static_with_requests(budget: Option<usize>, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>, workspace: &Workspace) -> Result<Eval, Diagnostic> {
         static_with(workspace, record, inputs, budget)
     }
@@ -3780,6 +3704,28 @@ pub fn live_kernels_get() -> Arc<dyn Fn(&[Node]) -> bool + Send + Sync> { LIVE_K
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn immutable_free_names_are_shared_across_evaluations_without_allocating() {
+        use crate::test_workspace_eval::{check, result};
+        let started = std::time::Instant::now();
+        let checked = check("(workspace w (graph g :context value (let* [z 7.0 a 2.0] (+ a (* z t)))))");
+        let checking = started.elapsed();
+        mem_sys::local_reset();
+        let started = std::time::Instant::now();
+        for _ in 0..32 { std::hint::black_box(static_eval(&checked).unwrap()); }
+        let evaluation = (started.elapsed(), mem_sys::local_alloc_count(), mem_sys::local_peak_bytes());
+        let evaluated = static_eval(&checked).unwrap();
+        let Value::Residual(id) = result(&evaluated, "g") else { panic!("residual") };
+        let view = residual::residual_view(id).unwrap();
+        assert_eq!(residual::free_names(&view.term), ["a", "z"]);
+        mem_sys::local_reset();
+        let started = std::time::Instant::now();
+        for _ in 0..1024 { std::hint::black_box(free_names(&view.term)); }
+        let allocations = mem_sys::local_alloc_count();
+        eprintln!("check {checking:?}; 32 evaluations {evaluation:?}; 1024 free-name reads: {allocations} allocations / {:?}", started.elapsed());
+        assert_eq!(allocations, 0, "immutable term names must be read from the arena");
+    }
 
     #[test]
     fn residual_views_share_captures_paths_and_iteration_without_allocating() {
@@ -4290,9 +4236,10 @@ impl Compiler {
                     let original = Box::new(self.term(a, &t.child(original), None)?);
                     Kind::PortFn(original, Box::new(MakeFn { params, body: shared_term(a, &body), zone, captures: Vec::new(), steps: self.steps.clone() }))
                 } else {
-                    let captures = free_names(&body).into_iter().map(|name| {
-                        let slot = self.scope.iter().rev().find(|(bound, _)| *bound == name).map(|(_, slot)| *slot);
-                        (intern(a, &name), slot)
+                    let captures = free_names(&body).iter().map(|&id| {
+                        let name = body.name(id);
+                        let slot = self.scope.iter().rev().find(|(bound, _)| bound == name).map(|(_, slot)| *slot);
+                        (intern(a, name), slot)
                     }).collect();
                     Kind::MakeFn(Box::new(MakeFn { params, body: shared_term(a, &body), zone, captures, steps: self.steps.clone() }))
                 }

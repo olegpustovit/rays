@@ -200,30 +200,7 @@ pub fn kind_calls(term: &Term) -> Vec<String> {
 }
 
 pub fn bypass_input(term: &Term) -> Option<Term> {
-    let arena = term.arena();
-    let entries = match term.node {
-        Node::Call(_) | Node::Op(_) => term.children(),
-        Node::CallFn(id) => arena.term_ids(arena.call_fn(id).args),
-        _ => return None,
-    };
-    let syntax = arena.syntax();
-    let form = syntax.row(term.form);
-    let selected = match form.node {
-        SNode::List(range) if !syntax.range(range).is_empty() => {
-            let mut rest = &syntax.range(range)[1..];
-            let first = loop {
-                let (&id, tail) = rest.split_first()?;
-                if matches!(syntax.row(id).node, SNode::Kw(_)) && !tail.is_empty() { rest = &tail[1..]; }
-                else { break syntax.row(id); }
-            };
-            entries.iter().copied().find(|&id| {
-                let candidate = syntax.row(arena.row(id).form);
-                candidate.id == first.id && candidate.span == first.span
-            })
-        }
-        _ => entries.first().copied(),
-    };
-    selected.map(|id| term.child(id))
+    term.arena().bypass_input(term.row_id()).map(|id| term.child(id))
 }
 
 pub fn slot_ty(slot:Option<&catalog::Slot>,kind:&catalog::Kind)->Ty { if let Some(t)=slot.and_then(|s|s.ty.as_ref()){return t.clone()} match kind.qualified.as_str(){"scene/world"=>ty::world(),"scene/root"=>ty::scene(),_ if kind.context==context::scene()=>ty::geometry(),_=>context::result(kind.context)} }

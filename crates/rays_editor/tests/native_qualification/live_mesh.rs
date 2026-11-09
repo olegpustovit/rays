@@ -229,8 +229,8 @@ fn sea_initial_close() {
 
 // Four warm frames, then four complete million-point frames. Initial observations:
 // 54,446–54,448 allocations / 2,904,464–2,922,176 B; round the new ceiling up once. Never raise.
-// R1 shared residual views: observed maxima 51,698 allocations / 2,835,442 B. Never raise.
-const SEA_FRAME_BUDGET: (u64,u64) = (51_700,2_840_000);
+// R3/R7: observed maxima 51,561 allocations / 2,822,819 B. Never raise.
+const SEA_FRAME_BUDGET: (u64,u64) = (51_565,2_823_000);
 
 fn sea_frames() {
     use rays_editor::{editor,workspace};
