@@ -360,7 +360,7 @@ fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
             } else {
                 let primitive_count = view.indices.len() / 3;
                 let offsets: Vec<i64> = (0..=primitive_count as i64).map(|i| i * 3).collect();
-                topology::view::polygons_shared(point_count, view.indices.to_vec(), offsets).map_err(text)
+                topology::polygons_owned(point_count, view.indices.to_vec(), offsets).map_err(text)
             }?;
             let mut attributes = Vec::new();
             if let Some(normals) = &view.normals {

@@ -49,11 +49,11 @@ fn reverse(
             Ok(())
         })?;
     }
-    let new_topology = topology::view::create_validated_owned(
+    let new_topology = topology::view::create_validated_shared(
         geometry::point_count(geometry_value),
         vertex_points,
-        source.primitive_offsets.to_vec(),
-        source.primitive_kinds.to_vec(),
+        source.primitive_offsets.clone(),
+        source.primitive_kinds.clone(),
     );
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {

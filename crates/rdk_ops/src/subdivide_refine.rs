@@ -1854,11 +1854,11 @@ pub(crate) fn fvar_refinement(
         }
         return Ok(make_isolated(&corner_weights));
     }
-    let fvar_topology = topology::view::create_validated_owned(
+    let fvar_topology = topology::view::create_validated_shared(
         fvar_point_count,
         fvar_vertex_points.clone(),
-        topology_view.primitive_offsets.to_vec(),
-        topology_view.primitive_kinds.to_vec(),
+        topology_view.primitive_offsets.clone(),
+        topology_view.primitive_kinds.clone(),
     );
     let fvar_index_value = topology_index::create(cancel_token, &fvar_topology)?;
     let fvar_index = topology_index::view::view(&fvar_index_value);
@@ -3697,11 +3697,11 @@ pub(crate) fn split_disconnected_point_fans(
         }
         Ok(target)
     })?;
-    let output_topology = topology::view::create_validated_owned(
+    let output_topology = topology::view::create_validated_shared(
         output_points,
         vertex_points.clone(),
-        topology_view.primitive_offsets.to_vec(),
-        topology_view.primitive_kinds.to_vec(),
+        topology_view.primitive_offsets.clone(),
+        topology_view.primitive_kinds.clone(),
     );
     let source_positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let positions = packed::float3::view::of_owned_exn(

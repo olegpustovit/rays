@@ -489,11 +489,11 @@ fn remove_inline_points(
     }
     let output_points = point_map.len() as i64;
     let vertex_points: Vec<i64> = vertex_map.iter().map(|&vertex| old_to_new[view.vertex_points[vertex as usize] as usize]).collect();
-    let target_topology = topology::view::create_validated_owned(
+    let target_topology = topology::view::create_validated_shared(
         output_points,
         vertex_points,
-        primitive_offsets,
-        view.primitive_kinds.to_vec(),
+        primitive_offsets.into(),
+        view.primitive_kinds.clone(),
     );
     let point_identity = output_points == source_points;
     let new_positions =
@@ -550,11 +550,11 @@ fn unique_points_all(cancel_value: Option<&cancel::T>, grain: i64, geometry_valu
     let output_points = source_vertices + isolated.len() as i64;
     let mut point_map: Vec<i64> = view.vertex_points.to_vec();
     point_map.extend_from_slice(&isolated);
-    let target_topology = topology::view::create_validated_owned(
+    let target_topology = topology::view::create_validated_shared(
         output_points,
         (0..source_vertices).collect(),
-        view.primitive_offsets.to_vec(),
-        view.primitive_kinds.to_vec(),
+        view.primitive_offsets.clone(),
+        view.primitive_kinds.clone(),
     );
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
@@ -674,11 +674,11 @@ fn unique_points_selected(
             }
         }
     }
-    let target_topology = topology::view::create_validated_owned(
+    let target_topology = topology::view::create_validated_shared(
         output_points,
         vertex_points,
-        view.primitive_offsets.to_vec(),
-        view.primitive_kinds.to_vec(),
+        view.primitive_offsets.clone(),
+        view.primitive_kinds.clone(),
     );
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
@@ -805,11 +805,11 @@ fn orient_polygons(
             vertex_map[vertex as usize] = source;
         }
     }
-    let target_topology = topology::view::create_validated_owned(
+    let target_topology = topology::view::create_validated_shared(
         view.point_count,
         vertex_points,
-        view.primitive_offsets.to_vec(),
-        view.primitive_kinds.to_vec(),
+        view.primitive_offsets.clone(),
+        view.primitive_kinds.clone(),
     );
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {
@@ -964,11 +964,11 @@ fn split_points_on_edge_ends(
         let root = sets.find(vertex as usize);
         vertex_points[vertex as usize] = root_output[root as usize];
     }
-    let target_topology = topology::view::create_validated_owned(
+    let target_topology = topology::view::create_validated_shared(
         output_points,
         vertex_points,
-        view.primitive_offsets.to_vec(),
-        view.primitive_kinds.to_vec(),
+        view.primitive_offsets.clone(),
+        view.primitive_kinds.clone(),
     );
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
@@ -1332,11 +1332,11 @@ fn make_planar(
     if extras == 0 {
         return geometry::with_positions(positions, geometry_value);
     }
-    let target_topology = topology::view::create_validated_owned(
+    let target_topology = topology::view::create_validated_shared(
         output_points,
         vertex_points,
-        view.primitive_offsets.to_vec(),
-        view.primitive_kinds.to_vec(),
+        view.primitive_offsets.clone(),
+        view.primitive_kinds.clone(),
     );
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
     let groups = remap_point_groups(cancel_value, grain, &point_map, geometry_value)?;
@@ -3299,11 +3299,11 @@ mod tests {
         }
         let inconsistent = geometry::create(
             geometry::positions(&source).clone(),
-            topology::view::create_validated_owned(
+            topology::view::create_validated_shared(
                 source_view.point_count,
                 vertex_points,
-                source_view.primitive_offsets.to_vec(),
-                source_view.primitive_kinds.to_vec(),
+                source_view.primitive_offsets.clone(),
+                source_view.primitive_kinds.clone(),
             ),
             Some(geometry::attributes(&source)),
             Some(geometry::groups(&source)),

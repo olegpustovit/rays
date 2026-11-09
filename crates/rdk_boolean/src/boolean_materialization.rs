@@ -1793,11 +1793,11 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
                     return Err(inv("Boolean seam point plan did not match its prefix"));
                 }
             }
-            let target_topology = topology::view::create_validated_owned(
+            let target_topology = topology::view::create_validated_shared(
                 output_points,
                 vertex_points,
-                topology.primitive_offsets.to_vec(),
-                topology.primitive_kinds.to_vec(),
+                topology.primitive_offsets.clone(),
+                topology.primitive_kinds.clone(),
             );
             let source_positions = positions_view(geometry_value)?;
             let select = |source: &[f64]| -> Result<Vec<f64>, error::T> {

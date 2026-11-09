@@ -48,11 +48,11 @@ fn compact(
     support::par_fill(cancel_value, grain, &mut vertex_points, &|vertex| {
         Ok(old_to_new[source.vertex_points[vertex as usize] as usize])
     })?;
-    let new_topology = topology::view::create_validated_owned(
+    let new_topology = topology::view::create_validated_shared(
         retained,
         vertex_points,
-        source.primitive_offsets.to_vec(),
-        source.primitive_kinds.to_vec(),
+        source.primitive_offsets.clone(),
+        source.primitive_kinds.clone(),
     );
     let mut attributes = Vec::new();
     for item in geometry::attributes(value) {

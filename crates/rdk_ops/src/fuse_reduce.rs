@@ -312,11 +312,11 @@ fn reduce(
         support::par_fill(cancel_value, params.grain, &mut vertex_points, &|vertex| {
             Ok(point_map[source_topology.vertex_points[vertex as usize] as usize])
         })?;
-        topology::view::create_validated_owned(
+        topology::view::create_validated_shared(
             if compact { clusters.count } else { source_count as i64 },
             vertex_points,
-            source_topology.primitive_offsets.to_vec(),
-            source_topology.primitive_kinds.to_vec(),
+            source_topology.primitive_offsets.clone(),
+            source_topology.primitive_kinds.clone(),
         )
     };
     let (output_attributes, output_groups) = fuse_rules::apply(

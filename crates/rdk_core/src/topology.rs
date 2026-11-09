@@ -63,26 +63,7 @@ fn make_owned(
     primitive_offsets: Vec<i64>,
     primitive_kinds: Vec<u8>,
 ) -> T {
-    let data_id = support::fresh_data_id();
-    let identity = support::IdentityToken::new(data_id);
-    let vertex_count = i64::try_from(vertex_points.len()).expect("Topology: too many vertices");
-    let primitive_count = i64::try_from(primitive_kinds.len()).expect("Topology: too many primitives");
-    T {
-        inner: Arc::new(Inner {
-            point_count,
-            vertex_count,
-            primitive_count,
-            data_id,
-            identity,
-            payload: Some(Payload {
-                vertex_points: Arc::new(vertex_points),
-                primitive_offsets: Arc::new(primitive_offsets),
-                primitive_kinds: Arc::from(primitive_kinds),
-            }),
-            deferred: None,
-            shape: None,
-        }),
-    }
+    view::create_validated_shared(point_count, vertex_points, Arc::new(primitive_offsets), primitive_kinds.into())
 }
 
 fn validate(
@@ -680,12 +661,33 @@ pub mod view {
         }
     }
 
-    pub fn polygons_shared(
+    /// Reuses the primitive layout planes while taking ownership of new vertex references.
+    pub fn create_validated_shared(
         point_count: i64,
         vertex_points: Vec<i64>,
-        primitive_offsets: Vec<i64>,
-    ) -> Result<T, error::T> {
-        polygons_owned(point_count, vertex_points, primitive_offsets)
+        primitive_offsets: Arc<Vec<i64>>,
+        primitive_kinds: Arc<[u8]>,
+    ) -> T {
+        let data_id = support::fresh_data_id();
+        let identity = support::IdentityToken::new(data_id);
+        let vertex_count = i64::try_from(vertex_points.len()).expect("Topology: too many vertices");
+        let primitive_count = i64::try_from(primitive_kinds.len()).expect("Topology: too many primitives");
+        T {
+            inner: Arc::new(Inner {
+                point_count,
+                vertex_count,
+                primitive_count,
+                data_id,
+                identity,
+                payload: Some(Payload {
+                    vertex_points: Arc::new(vertex_points),
+                    primitive_offsets,
+                    primitive_kinds,
+                }),
+                deferred: None,
+                shape: None,
+            }),
+        }
     }
 
     pub fn create_validated_owned(
@@ -725,6 +727,51 @@ mod tests {
         Arc::make_mut(&mut reader)[0] = 2;
         assert_eq!(view::view(&owned).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
         assert_eq!(view::view(&deferred).unwrap().vertex_points.as_slice(), &[0, 1, 2]);
+    }
+
+    #[test]
+    fn repointed_layout_reuses_arcs_and_has_fresh_identity() {
+        let repoint = |source: &view::View, vertices: Vec<i64>| view::create_validated_shared(
+            source.point_count, vertices, source.primitive_offsets.clone(), source.primitive_kinds.clone(),
+        );
+        if std::env::var_os("RAYS_TOPOLOGY_BENCH").is_some() {
+            let count = 4096;
+            let source = polygons_owned(3, (0..count * 3).map(|v| v % 3).collect(), (0..=count).map(|p| p * 3).collect()).unwrap();
+            let source = view::view(&source).unwrap();
+            let mut samples = Vec::new();
+            for _ in 0..7 {
+                let mut elapsed = std::time::Duration::ZERO;
+                for _ in 0..64 {
+                    let vertices = source.vertex_points.to_vec();
+                    let started = std::time::Instant::now();
+                    let result = repoint(&source, vertices);
+                    elapsed += started.elapsed();
+                    std::hint::black_box(result);
+                }
+                samples.push(elapsed.as_nanos());
+            }
+            samples.sort_unstable();
+            println!("topology repoint: median {} ns (64 repoints of {count} triangles; vertex setup excluded)", samples[3]);
+        }
+        let source = create_owned(4, vec![0, 1, 2, 2, 3, 0], vec![0, 3, 6], vec![PrimitiveKind::Polygon, PrimitiveKind::OpenPolyline]).unwrap();
+        let layout = view::view(&source).unwrap();
+        let vertices = vec![2, 1, 0, 3, 2, 1];
+        let vertices_ptr = vertices.as_ptr();
+        let target = repoint(&layout, vertices);
+        let target_view = view::view(&target).unwrap();
+        assert_eq!(target_view.vertex_points.as_ptr(), vertices_ptr);
+        assert_eq!(target_view.vertex_points.as_slice(), &[2, 1, 0, 3, 2, 1]);
+        assert_eq!(layout.vertex_points.as_slice(), &[0, 1, 2, 2, 3, 0]);
+        assert_ne!(data_id(&target), data_id(&source));
+        assert!(!Arc::ptr_eq(&identity_token(&target), &identity_token(&source)));
+        assert!(Arc::ptr_eq(&layout.primitive_offsets, &target_view.primitive_offsets));
+        assert!(Arc::ptr_eq(&layout.primitive_kinds, &target_view.primitive_kinds));
+        let changed_offsets = Arc::new(vec![0, 4, 6]);
+        let resized = view::create_validated_shared(4, target_view.vertex_points.to_vec(), changed_offsets.clone(), layout.primitive_kinds.clone());
+        let resized = view::view(&resized).unwrap();
+        assert!(Arc::ptr_eq(&changed_offsets, &resized.primitive_offsets));
+        assert!(Arc::ptr_eq(&layout.primitive_kinds, &resized.primitive_kinds));
+        validate("shared layout", resized.point_count, &resized.vertex_points, &resized.primitive_offsets, &resized.primitive_kinds).unwrap();
     }
 
     #[test]

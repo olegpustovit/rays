@@ -218,7 +218,7 @@ fn shared_plan(
     }
     let output_vertices = primitive_offsets[source_primitives] as usize;
     let mut vertex_points = vec![0_i64; output_vertices];
-    let primitive_kinds: Vec<u8> = view.primitive_kinds.to_vec();
+    let primitive_kinds = view.primitive_kinds.clone();
     let mut vertex_left = vec![0_i64; output_vertices];
     let mut vertex_right = vec![0_i64; output_vertices];
     let mut vertex_weight = vec![0.0_f64; output_vertices];
@@ -275,10 +275,10 @@ fn shared_plan(
             Ok(())
         })?;
     }
-    let output_topology = topology::view::create_validated_owned(
+    let output_topology = topology::view::create_validated_shared(
         output_points,
         vertex_points,
-        primitive_offsets,
+        primitive_offsets.into(),
         primitive_kinds,
     );
     let output_index = if geometry::edge_groups(value).is_empty() {
@@ -426,11 +426,11 @@ fn independent_plan(
             Ok(())
         })?;
     }
-    let output_topology = topology::view::create_validated_owned(
+    let output_topology = topology::view::create_validated_shared(
         output_points,
         vertex_points,
-        primitive_offsets,
-        view.primitive_kinds.to_vec(),
+        primitive_offsets.into(),
+        view.primitive_kinds.clone(),
     );
     let output_index = if geometry::edge_groups(value).is_empty() {
         None
