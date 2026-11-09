@@ -49,15 +49,9 @@ impl b::DriverResource for Faulty<dyn b::DriverResource> {
     }
 }
 impl b::DriverMapping for Faulty<dyn b::DriverMapping> {
-    forward! { readback() -> b::OwnedReadback; invalidate(length: usize) -> Result<(), E>; }
-    fn view(&self) -> Option<b::Floats> { bump(&self.f.views); self.inner.view() }
-    fn release_view(&self) { bump(&self.f.releases); self.inner.release_view() }
-    fn flush(&self, length: usize) -> Result<(), E> {
-        if self.size >= 4096 {
-            bump(&self.f.inputs);
-            let result = self.inner.flush(length);
-            if self.f.input.get() { Err(injected("injected partial input upload")) } else { result }
-        } else { self.inner.flush(length) }
+    fn readback(&self) -> b::OwnedReadback {
+        bump(&self.f.views);
+        self.inner.readback()
     }
 }
 impl b::DriverPipeline for Faulty<dyn b::DriverPipeline> {

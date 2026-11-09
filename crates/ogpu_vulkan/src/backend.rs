@@ -260,12 +260,10 @@ fn buffer_read_into(op: &str, entry: &BufferEntry, offset: i64, destination: &mu
     entry.buffer.borrow().read(offset as u64, &mut destination[at..at + length]).map_err(|failure| of_vk(op, failure))
 }
 
-/// A registered buffer. A mapped one also owns its host view, dropped with it.
 struct BufferResource {
     dev: Rc<Dev>,
     id: Token,
     op: &'static str,
-    view: Option<Rc<RefCell<Option<Floats>>>>,
 }
 
 impl DriverResource for BufferResource {
@@ -290,9 +288,6 @@ impl DriverResource for BufferResource {
         buffer_read_into(self.op, &entry, offset, destination, at, length)
     }
     fn destroy(&self) -> Result<(), Error> {
-        if let Some(view) = &self.view {
-            *view.borrow_mut() = None;
-        }
         self.dev.buffers.borrow_mut().remove(&self.id);
         live_add(-1);
         Ok(())
@@ -304,7 +299,7 @@ fn register_buffer(dev: &Rc<Dev>, op: &'static str, created: Result<vk::Buffer, 
     live_add(1);
     let id = dev.token();
     dev.buffers.borrow_mut().insert(id, Rc::new(BufferEntry { buffer: RefCell::new(native), size }));
-    Ok(BufferResource { dev: dev.clone(), id, op, view: None })
+    Ok(BufferResource { dev: dev.clone(), id, op })
 }
 
 /// Both kinds are device-local: a Shared buffer in host memory is read by kernels over PCIe, 100x
@@ -326,79 +321,28 @@ fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -
     Ok(Box::new(resource))
 }
 
-fn floats_to_bytes(floats: &[f32], length: usize) -> Vec<u8> {
-    let mut bytes: Vec<u8> = floats.iter().flat_map(|value| value.to_le_bytes()).collect();
-    bytes.truncate(length);
-    bytes
-}
-
 const MAPPED_OP: &str = "Ogpu_vulkan.create_mapped_buffer";
 
-/// The host side of a mapped buffer. The host copy exists only while the host uses it: made on its
-/// first ask, dropped on release and destroy.
 struct Mapping {
-    dev: Rc<Dev>,
-    id: Token,
-    count: usize,
-    view: Rc<RefCell<Option<Floats>>>,
     readback: ogpu_core::backend::OwnedReadback,
-}
-
-impl Mapping {
-    fn make_view(&self) -> Floats {
-        let mut slot = self.view.borrow_mut();
-        slot.get_or_insert_with(|| Rc::new(RefCell::new(vec![0f32; self.count]))).clone()
-    }
 }
 
 impl DriverMapping for Mapping {
     fn readback(&self) -> ogpu_core::backend::OwnedReadback {
         self.readback.clone()
     }
-    fn view(&self) -> Option<Floats> {
-        Some(self.make_view())
-    }
-    fn release_view(&self) {
-        *self.view.borrow_mut() = None
-    }
-    fn flush(&self, length: usize) -> Result<(), Error> {
-        let Some(floats) = self.view.borrow().clone() else {
-            return Err(fail(MAPPED_OP, ErrorKind::InvalidArgument, "no host view was written"));
-        };
-        let entry = self.dev.find_buffer(MAPPED_OP, self.id)?;
-        let bytes = floats_to_bytes(&floats.borrow(), length);
-        entry.buffer.borrow().flush(&bytes).map_err(|failure| of_vk(MAPPED_OP, failure))
-    }
-    fn invalidate(&self, length: usize) -> Result<(), Error> {
-        let floats = self.make_view();
-        let entry = self.dev.find_buffer(MAPPED_OP, self.id)?;
-        let all = floats.borrow().len() * 4;
-        let mut bytes = floats_to_bytes(&floats.borrow(), all);
-        if length > bytes.len() {
-            return Err(fail(MAPPED_OP, ErrorKind::InvalidArgument, "range exceeds the buffer"));
-        }
-        entry.buffer.borrow().invalidate(&mut bytes[..length]).map_err(|failure| of_vk(MAPPED_OP, failure))?;
-        for (value, chunk) in floats.borrow_mut().iter_mut().zip(bytes.chunks_exact(4)) {
-            *value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        }
-        Ok(())
-    }
 }
 
 fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error> {
     let device = dev.device(MAPPED_OP)?;
     let size = descriptor.size;
-    let mut resource = register_buffer(dev, MAPPED_OP, device.buffer(size as u64, vk::BufferKind::DeviceLocal), size)?;
+    let resource = register_buffer(dev, MAPPED_OP, device.buffer(size as u64, vk::BufferKind::DeviceLocal), size)?;
     let id = resource.id;
     if let Err(failure) = dev.find_buffer(MAPPED_OP, id).and_then(|entry| entry.buffer.borrow().zero().map_err(|failure| of_vk(MAPPED_OP, failure))) {
         let _ = resource.destroy();
         return Err(failure);
     }
-    let view: Rc<RefCell<Option<Floats>>> = Rc::new(RefCell::new(None));
-    resource.view = Some(view.clone());
-    // This native clone retains the allocation without retaining any owner-thread OGPU state.
-    // Native staged reads serialize their transfer queue under the device qlock; no OGPU queue,
-    // encoder, SDL operation or mutable backend cache is accessed by the reader.
+  // Native staged reads serialize under the device qlock; readback retains the allocation only.
     let readback_buffer = dev.find_buffer(MAPPED_OP, id)?.buffer.borrow().clone();
     let readback: ogpu_core::backend::OwnedReadback = std::sync::Arc::new(move |offset, length| {
         let offset = u64::try_from(offset).map_err(|_| fail(MAPPED_OP, ErrorKind::InvalidArgument, "negative read offset"))?;
@@ -411,7 +355,7 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
     });
     Ok(DriverMapped {
         mapped_resource: Box::new(resource),
-        mapping: Box::new(Mapping { dev: dev.clone(), id, count: (size / 4) as usize, view, readback }),
+        mapping: Box::new(Mapping { readback }),
     })
 }
 

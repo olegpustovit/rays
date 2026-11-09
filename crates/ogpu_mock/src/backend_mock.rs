@@ -277,15 +277,8 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<MockResource, E
     Ok(MockResource { c: c.clone(), id, kind, bytes })
 }
 
-/// A discrete device's host view: a separate copy, made when asked for and synchronised only by
-/// flush and invalidate, so a caller that skips one reads stale data; a released view turns NaN
-/// and its successor starts NaN, so a caller that keeps one, or reads a new one before an
-/// invalidate, reads NaN.
 struct MockMapping {
     device: Bytes,
-    size: i64,
-    cell: RefCell<Option<Floats>>,
-    released: Cell<bool>,
 }
 
 impl DriverMapping for MockMapping {
@@ -299,47 +292,11 @@ impl DriverMapping for MockMapping {
             Ok(data[offset..end].to_vec())
         })
     }
-    fn view(&self) -> Option<Floats> {
-        let mut slot = self.cell.borrow_mut();
-        if slot.is_none() {
-            let fill = if self.released.get() { f32::NAN } else { 0.0 };
-            *slot = Some(Rc::new(RefCell::new(vec![fill; (self.size / 4) as usize])));
-        }
-        slot.clone()
-    }
-    fn release_view(&self) {
-        self.released.set(true);
-        if let Some(floats) = self.cell.borrow_mut().take() {
-            floats.borrow_mut().fill(f32::NAN);
-        }
-    }
-    fn flush(&self, n: usize) -> Result<(), Error> {
-        match self.cell.borrow().as_ref() {
-            None => Err(fail("Backend_mock.flush", ErrorKind::InvalidArgument, "no host view was written")),
-            Some(floats) => {
-                let floats = floats.borrow();
-                let mut device = self.device.lock().unwrap();
-                for i in 0..n / 4 {
-                    device[4 * i..4 * i + 4].copy_from_slice(&floats[i].to_bits().to_le_bytes());
-                }
-                Ok(())
-            }
-        }
-    }
-    fn invalidate(&self, n: usize) -> Result<(), Error> {
-        let floats = self.view().expect("view");
-        let device = self.device.lock().unwrap();
-        let mut floats = floats.borrow_mut();
-        for i in 0..n / 4 {
-            floats[i] = f32::from_bits(u32::from_le_bytes(device[4 * i..4 * i + 4].try_into().unwrap()));
-        }
-        Ok(())
-    }
 }
 
 fn create_mapped_buffer(c: &Shared, d: &BufferDescriptor) -> Result<DriverMapped, Error> {
     let raw = resource(c, "buffer", d.size)?;
-    let mapping = MockMapping { device: raw.bytes.clone(), size: d.size, cell: RefCell::new(None), released: Cell::new(false) };
+    let mapping = MockMapping { device: raw.bytes.clone() };
     Ok(DriverMapped { mapped_resource: Box::new(raw), mapping: Box::new(mapping) })
 }
 

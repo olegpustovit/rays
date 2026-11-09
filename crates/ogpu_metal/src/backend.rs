@@ -88,7 +88,6 @@ struct MetalBuffer {
     dev: Rc<Dev>,
     value: Buffer,
     id: i64,
-    view: Option<View>,
 }
 
 impl DriverResource for MetalBuffer {
@@ -110,9 +109,6 @@ impl DriverResource for MetalBuffer {
         Ok(())
     }
     fn destroy(&self) -> Result<(), Error> {
-        if let Some(view) = &self.view {
-            *view.borrow_mut() = None;
-        }
         self.value.destroy()?;
         self.dev.t.resources.borrow_mut().remove(&self.id);
         Ok(())
@@ -123,87 +119,35 @@ fn register_buffer(dev: &Rc<Dev>, created: Result<Buffer, Error>) -> Result<Meta
     let value = created?;
     let id = dev.t.token();
     dev.t.resources.borrow_mut().insert(id, Resource::Buffer(value.clone()));
-    Ok(MetalBuffer { dev: dev.clone(), value, id, view: None })
+    Ok(MetalBuffer { dev: dev.clone(), value, id })
 }
 
 fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
     Ok(Box::new(register_buffer(dev, buffer_memory(memory).and_then(|m| buffer::create(&dev.device, m, descriptor)))?))
 }
 
-fn floats_to_bytes(floats: &[f32], length: usize) -> Vec<u8> {
-    let mut bytes: Vec<u8> = floats.iter().flat_map(|value| value.to_le_bytes()).collect();
-    bytes.truncate(length);
-    bytes
-}
-
 const MAPPED_OP: &str = "Ogpu_metal.Backend.create_mapped_buffer";
 
 struct MetalMapping {
-    value: Buffer,
-    device: Device,
-    view: View,
     readback: OwnedReadback,
-    count: usize,
-}
-
-impl MetalMapping {
-    fn make_view(&self) -> Result<Floats, Error> {
-        let mut slot = self.view.borrow_mut();
-        if let Some(view) = slot.as_ref() {
-            return Ok(view.clone());
-        }
-        let bytes = self.value.read_bytes(&self.device, 0, (self.count * 4) as i64)?;
-        let floats: Vec<f32> = bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
-        let view: Floats = Rc::new(RefCell::new(floats));
-        *slot = Some(view.clone());
-        Ok(view)
-    }
 }
 
 impl DriverMapping for MetalMapping {
     fn readback(&self) -> OwnedReadback {
         self.readback.clone()
     }
-    fn view(&self) -> Option<Floats> {
-        self.make_view().ok()
-    }
-    // shared storage on unified memory: the one view stays (as lib/ogpu_metal does) until the buffer is destroyed
-    fn release_view(&self) {}
-    fn flush(&self, length: usize) -> Result<(), Error> {
-        let Some(floats) = self.view.borrow().clone() else {
-            return Err(fail(MAPPED_OP, ErrorKind::InvalidArgument, "no host view was written"));
-        };
-        let bytes = floats_to_bytes(&floats.borrow(), length);
-        self.value.write_bytes(&self.device, 0, &bytes)
-    }
-    fn invalidate(&self, length: usize) -> Result<(), Error> {
-        let floats = self.make_view()?;
-        if length > floats.borrow().len() * 4 {
-            return Err(fail(MAPPED_OP, ErrorKind::InvalidArgument, "range exceeds the buffer"));
-        }
-        let bytes = self.value.read_bytes(&self.device, 0, length as i64)?;
-        for (slot, chunk) in floats.borrow_mut().iter_mut().zip(bytes.chunks_exact(4)) {
-            *slot = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        }
-        Ok(())
-    }
 }
 
-/// A mapped buffer: shared storage, with the host view a copy that `flush` and `invalidate` move
-/// across (the Rust `Floats` is a vector, not the native bytes). ponytail: a true alias needs
-/// `Floats` to be a native view; the copy is made on the first ask and kept until destroy.
 fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error> {
     let value = buffer::create(&dev.device, buffer::Memory::Shared, descriptor)?;
-    let mut resource = register_buffer(dev, Ok(value.clone()))?;
+    let resource = register_buffer(dev, Ok(value.clone()))?;
     let native_readback = value.metal().owned_readback().map_err(|error| of_metal_error(MAPPED_OP, &error))?;
     let readback: OwnedReadback = std::sync::Arc::new(move |offset, length| {
         native_readback(offset, length).map_err(|error| of_metal_error(MAPPED_OP, &error))
     });
-    let view: View = Rc::new(RefCell::new(None));
-    resource.view = Some(view.clone());
     Ok(DriverMapped {
         mapped_resource: Box::new(resource),
-        mapping: Box::new(MetalMapping { value, device: dev.device.clone(), view, readback, count: (descriptor.size / 4) as usize }),
+        mapping: Box::new(MetalMapping { readback }),
     })
 }
 

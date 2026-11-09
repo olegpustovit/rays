@@ -35,13 +35,15 @@ pub trait DriverResource {
     fn destroy(&self) -> Result<(), Error>;
 }
 
-/// The host side of a mapped buffer; the resource it belongs to is a separate `DriverResource`.
+/// Lazy cross-thread read of mapped storage; host view sync lives in `ogpu_core`.
 pub trait DriverMapping {
     fn readback(&self) -> OwnedReadback;
-    fn view(&self) -> Option<Floats>;
-    fn release_view(&self);
-    fn flush(&self, length: usize) -> Result<(), Error>;
-    fn invalidate(&self, length: usize) -> Result<(), Error>;
+}
+
+struct MappedHost {
+    view: RefCell<Option<Floats>>,
+    released: Cell<bool>,
+    float_count: usize,
 }
 
 pub struct DriverMapped {
@@ -341,7 +343,15 @@ struct DeviceInner {
 }
 #[derive(Clone)]
 struct Resource(Rc<ResourceInner>);
-struct ResourceInner { raw: RefCell<Option<Box<dyn DriverResource>>>, mapping: RefCell<Option<Box<dyn DriverMapping>>>, token: Token, handle: ResourceHandle, device: Device, dead: Cell<bool> }
+struct ResourceInner {
+    raw: RefCell<Option<Box<dyn DriverResource>>>,
+    mapping: RefCell<Option<Box<dyn DriverMapping>>>,
+    mapped: RefCell<Option<MappedHost>>,
+    token: Token,
+    handle: ResourceHandle,
+    device: Device,
+    dead: Cell<bool>,
+}
 #[derive(Clone)]
 pub struct Buffer { resource: Resource, buffer_descriptor: BufferDescriptor, memory: Memory }
 #[derive(Clone)]
@@ -463,7 +473,15 @@ fn live(operation: &str, device: &Device) -> Result<(), Error> {
     if device.0.dead.get() { Err(make_error(operation, ErrorKind::StaleHandle, "device is destroyed")) } else { Ok(()) }
 }
 fn make_resource(device: &Device, raw: Box<dyn DriverResource>) -> Resource {
-    Resource(Rc::new(ResourceInner { token: raw.token(), raw: RefCell::new(Some(raw)), mapping: RefCell::new(None), handle: handle::create(&device.0.handle), device: device.clone(), dead: Cell::new(false) }))
+    Resource(Rc::new(ResourceInner {
+        token: raw.token(),
+        raw: RefCell::new(Some(raw)),
+        mapping: RefCell::new(None),
+        mapped: RefCell::new(None),
+        handle: handle::create(&device.0.handle),
+        device: device.clone(),
+        dead: Cell::new(false),
+    }))
 }
 fn resource_check(operation: &str, device: &Device, resource: &Resource) -> Result<(), Error> {
     if resource.0.dead.get() { Err(make_error(operation, ErrorKind::StaleHandle, "resource is destroyed")) }
@@ -520,19 +538,92 @@ pub fn create_mapped_buffer(device: &Device, descriptor: BufferDescriptor) -> Re
     let mapped = device.0.raw().create_mapped_buffer(&descriptor)?;
     let resource = make_resource(device, mapped.mapped_resource);
     *resource.0.mapping.borrow_mut() = Some(mapped.mapping);
+    *resource.0.mapped.borrow_mut() = Some(MappedHost {
+        view: RefCell::new(None),
+        released: Cell::new(false),
+        float_count: (descriptor.size / 4) as usize,
+    });
     device.0.children.set(device.0.children.get() + 1);
     Ok(Buffer { resource, buffer_descriptor: descriptor, memory: Memory::Shared })
 }
 
+fn floats_to_bytes(floats: &[f32], length: usize) -> Vec<u8> {
+    let mut bytes: Vec<u8> = floats.iter().flat_map(|value| value.to_le_bytes()).collect();
+    bytes.truncate(length);
+    bytes
+}
+
+fn open_mapped_view(buffer: &Buffer) -> Result<Floats, Error> {
+    const OP: &str = "Backend.mapped_view";
+    if buffer.resource.0.dead.get() {
+        return Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed"));
+    }
+    {
+        let mut guard = buffer.resource.0.mapped.borrow_mut();
+        let Some(host) = guard.as_mut() else {
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer is not mapped"));
+        };
+        if let Some(view) = host.view.borrow().as_ref() {
+            return Ok(view.clone());
+        }
+    }
+    let (released, float_count) = {
+        let guard = buffer.resource.0.mapped.borrow();
+        let host = guard.as_ref().ok_or_else(|| make_error(OP, ErrorKind::InvalidArgument, "buffer is not mapped"))?;
+        (host.released.get(), host.float_count)
+    };
+    let floats = if released {
+        vec![f32::NAN; float_count]
+    } else {
+        let bytes = read_buffer(buffer, 0, (float_count * 4) as i64)?;
+        bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect()
+    };
+    let view = Rc::new(RefCell::new(floats));
+    {
+        let mut guard = buffer.resource.0.mapped.borrow_mut();
+        let host = guard.as_mut().ok_or_else(|| make_error(OP, ErrorKind::InvalidArgument, "buffer is not mapped"))?;
+        if host.view.borrow().is_none() {
+            *host.view.borrow_mut() = Some(view.clone());
+        } else if let Some(existing) = host.view.borrow().as_ref() {
+            return Ok(existing.clone());
+        }
+    }
+    Ok(view)
+}
+
 fn sync_mapped(buffer: &Buffer, operation: &str, length: i64, invalidate: bool) -> Result<(), Error> {
-    if buffer.resource.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "buffer is destroyed")); }
-    let mapping = buffer.resource.0.mapping.borrow();
-    let Some(mapped) = mapping.as_ref() else { return Err(make_error(operation, ErrorKind::InvalidArgument, "buffer is not mapped")); };
     if length < 0 || length > buffer.buffer_descriptor.size {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer"));
     }
-    let Ok(length) = usize::try_from(length) else { return Err(make_error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer")); };
-    if invalidate { mapped.invalidate(length) } else { mapped.flush(length) }
+    let Ok(length) = usize::try_from(length) else {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer"));
+    };
+    if invalidate {
+        let view = open_mapped_view(buffer)?;
+        if length > view.borrow().len() * 4 {
+            return Err(make_error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer"));
+        }
+        let bytes = read_buffer(buffer, 0, length as i64)?;
+        for (slot, chunk) in view.borrow_mut().iter_mut().zip(bytes.chunks_exact(4)) {
+            *slot = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        }
+        Ok(())
+    } else {
+        let view = {
+            let guard = buffer.resource.0.mapped.borrow();
+            let Some(host) = guard.as_ref() else {
+                return Err(make_error(operation, ErrorKind::InvalidArgument, "buffer is not mapped"));
+            };
+            host.view.borrow().clone()
+        };
+        let Some(view) = view else {
+            return Err(make_error(operation, ErrorKind::InvalidArgument, "no host view was written"));
+        };
+        write_buffer(buffer, 0, &floats_to_bytes(&view.borrow(), length))
+    }
 }
 
 pub fn flush_mapped(buffer: &Buffer, length: i64) -> Result<(), Error> {
@@ -562,13 +653,26 @@ pub fn owned_readback(buffer: &Buffer) -> Result<OwnedReadback, Error> {
     }))
 }
 pub fn mapped_view(buffer: &Buffer) -> Option<Floats> {
-    if buffer.resource.0.dead.get() { None } else { buffer.resource.0.mapping.borrow().as_ref().and_then(|mapping| mapping.view()) }
+    if buffer.resource.0.dead.get() {
+        None
+    } else {
+        open_mapped_view(buffer).ok()
+    }
 }
 pub fn release_mapped_view(buffer: &Buffer) -> Result<(), Error> {
     const OP: &str = "Backend.release_mapped_view";
-    if buffer.resource.0.dead.get() { Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed")) }
-    else if let Some(mapping) = buffer.resource.0.mapping.borrow().as_ref() { mapping.release_view(); Ok(()) }
-    else { Err(make_error(OP, ErrorKind::InvalidArgument, "buffer is not mapped")) }
+    if buffer.resource.0.dead.get() {
+        return Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed"));
+    }
+    let mut guard = buffer.resource.0.mapped.borrow_mut();
+    let Some(host) = guard.as_mut() else {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "buffer is not mapped"));
+    };
+    host.released.set(true);
+    if let Some(view) = host.view.borrow_mut().take() {
+        view.borrow_mut().fill(f32::NAN);
+    }
+    Ok(())
 }
 pub fn buffer_size(buffer: &Buffer) -> i64 { buffer.buffer_descriptor.size }
 
@@ -724,6 +828,7 @@ fn destroy_resource(resource: &Resource) -> Result<(), Error> {
     resource.0.dead.set(true);
     resource.0.raw.borrow_mut().take();
     resource.0.mapping.borrow_mut().take();
+    resource.0.mapped.borrow_mut().take();
     handle::destroy(&resource.0.handle);
     resource.0.device.0.children.set(resource.0.device.0.children.get() - 1);
     Ok(())
@@ -1939,10 +2044,6 @@ mod ownership_tests {
             let allocation = self.allocation.clone();
             Arc::new(move |offset, length| Ok(allocation[offset as usize..offset as usize + length].to_vec()))
         }
-        fn view(&self) -> Option<Floats> { Some(Rc::new(RefCell::new(vec![1.0; 2]))) }
-        fn release_view(&self) {}
-        fn flush(&self, _: usize) -> Result<(), Error> { Ok(()) }
-        fn invalidate(&self, _: usize) -> Result<(), Error> { Ok(()) }
     }
     struct IdleLibrary;
     impl DriverLibrary for IdleLibrary {
@@ -1970,6 +2071,7 @@ mod ownership_tests {
         let allocation = Arc::new(vec![7u8; 8]);
         let allocation_weak = Arc::downgrade(&allocation);
         *resource.0.mapping.borrow_mut() = Some(Box::new(TestMapping { allocation, _view_owner: view_owner }));
+        *resource.0.mapped.borrow_mut() = Some(MappedHost { view: RefCell::new(None), released: Cell::new(false), float_count: 2 });
         let buffer = Buffer { resource, buffer_descriptor: BufferDescriptor { label: None, size: 8, usage: vec![BufferUsage::CopyDst] }, memory: Memory::Shared };
         let clone = buffer.clone();
         let id = buffer_id(&buffer);
