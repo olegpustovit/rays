@@ -2,6 +2,7 @@
 //! with validation fatal on Windows, Metal on macOS) and reports whether a device exists; a test
 //! with none prints "skipped" and returns, as the OCaml suite skips without a display or GPU.
 #![allow(dead_code)]
+#[path = "../../../renderer/tests/common/window.rs"]
 pub mod window;
 
 use ogpu_core::error::{self, ErrorKind};

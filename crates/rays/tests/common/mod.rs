@@ -3,4 +3,5 @@
 #[path = "../../../renderer/tests/common/mod.rs"]
 mod native;
 pub use native::{floats, gpu, release_keepalive, words};
+#[path = "../../../renderer/tests/common/window.rs"]
 pub mod window;

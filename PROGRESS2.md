@@ -15,13 +15,13 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
 | X | 6 | 6 | 0 | 0 |
-| B | 8 | 5 | 0 | 3 |
+| B | 8 | 6 | 0 | 2 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 1 | 0 | 11 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **12** | **0** | **46** |
+| **All** | **58** | **13** | **0** | **45** |
 
 ## Items
 
@@ -36,7 +36,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B1 | B | done | `aaaaf431` — `lisp_sop` always on; `#[doc(hidden)]` hooks; features removed | After cargo t -p rays_editor, cargo build -p rays_bin -v shows flow_sop as Fresh |
 | B2 | B | done | `c2d1c582` — workspace study tests in `editor_document`; no `flow_sop` dev-dep; `cargo t -p flow_sop` ~81s green | Same cases in cargo t -p flow_sop plus -p editor_document |
 | B3 | B | done | `2be4b822` — `check_cli` + `tests/e2e` in `web_export`; `rays_bin` re-exports | cargo t -p web_export --test e2e; gate deps |
-| B4 | B | pending | — | Each crate lists the same case names before and after |
+| B4 | B | done | window runner — `#[path]` → `renderer/tests/common/window.rs`; −4 dupes; runtime/ogpu_metal/runtime_resources re-export | `--list` unchanged on `gpu_sampling`, `gpu_rays_all`, `window_runtime_visibility`, `gpu_ogpu_metal`; `metal` settle hook still local |
 | B5 | B | done | `403aaac4` — `[lib] test = false` on 11 libs + `print_shader`; gate rejects `#[test]` in those libs | Gate shape rule |
 | B6 | B | done | `c10ccba4` — removed `[profile.e2e|gpu|slow]`; trimmed gate phantom crates; nextest comments | cargo t -p rays-t, -p gate; gate deps |
 | B7 | B | pending | — | cargo-timings critical path; gate deps |
@@ -108,6 +108,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 - Artifact [v4](https://artifacts.microapps.space/a/ap6ev04y67bb): execution progress panel, `db` capability, runbook, R11→Z7 note; publish source `artifacts/second-simplification/index.html`.
 - **WaveX1** subagent + integration: X1 code complete; tests `float_min_max_signed_zeros`, `min_max_signed_zero_walker_matches_packed` pass.
 - **Wave X** complete (`f97f3c30`); **B1** `aaaaf431`.
+- **B4** shared `window.rs` harness via `#[path]` (metal `settle` + per-crate test binaries + `test_program` still open).
 - **ScoutD**: D-wave slice schedule below (≤2 agents, distinct primaries).
 - **WaveX5**: `literal_fields` in `editor_inspect.rs`; regression `operator_rows_split_vec2_and_vec4_literals`.
 

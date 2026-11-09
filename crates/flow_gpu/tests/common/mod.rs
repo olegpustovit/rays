@@ -3,6 +3,7 @@
 //! with none prints "skipped" and returns, as the OCaml suite skips without a display or GPU.
 #![allow(dead_code)]
 pub mod test_program;
+#[path = "../../../renderer/tests/common/window.rs"]
 pub mod window;
 
 use flow_ir::core_exec::{self, Packed};
