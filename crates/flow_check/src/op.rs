@@ -280,7 +280,7 @@ pub fn reduce_array(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+
         if operation!=Reduction::Sum&&first==finish{return Err(fail("E_ARRAY_EMPTY","An extremum needs at least one array value."))}
         let mut result=if operation==Reduction::Sum{0.}else{fin(op_name,data[first*width+component])?};
         let start=if operation==Reduction::Sum{first}else{first+1};
-        for i in start..finish{let x=fin(op_name,data[i*width+component])?;result=match operation{Reduction::Sum=>fin(op_name,result+x)?,Reduction::Minimum=>if x<result{x}else if result<x{result}else if x.is_sign_negative(){x}else{result},Reduction::Maximum=>if x>result{x}else if result>x{result}else if result.is_sign_negative(){x}else{result}}}
+        for i in start..finish{let x=fin(op_name,data[i*width+component])?;result=match operation{Reduction::Sum=>fin(op_name,result+x)?,Reduction::Minimum=>packed_ops::float_min(result,x),Reduction::Maximum=>packed_ops::float_max(result,x)}}
         Ok(result)
     };
     if let Some(offsets)=offsets{
@@ -683,24 +683,10 @@ fn unary_math_ops()->Vec<Op>{
     }
     ops
 }
-fn ldexp(value:f64,exponent:i64)->f64{
-    let bits=value.to_bits();let sign=bits&0x8000_0000_0000_0000;let encoded=((bits>>52)&0x7ff) as i32;let fraction=bits&0x000f_ffff_ffff_ffff;
-    if encoded==0x7ff||value==0.{return value}
-    let (significand,base)=if encoded==0{
-        let high=63-fraction.leading_zeros() as i32;let shift=52-high;(fraction<<shift,high-1074)
-    }else{(fraction|(1<<52),encoded-1023)};
-    let target=base as i128+exponent as i128;
-    if target>1023{return f64::from_bits(sign|(0x7ff<<52))}
-    if target>=-1022{return f64::from_bits(sign|(((target+1023) as u64)<<52)|(significand&0x000f_ffff_ffff_ffff))}
-    if target < -1075{return f64::from_bits(sign)}
-    let shift=(-1022-target) as u32;let quotient=significand>>shift;let remainder=significand&((1u64<<shift)-1);let halfway=1u64<<(shift-1);
-    let rounded=quotient+if remainder>halfway||(remainder==halfway&&quotient&1!=0){1}else{0};
-    f64::from_bits(sign|if rounded==(1u64<<52){1u64<<52}else{rounded})
-}
 fn ldexp_op()->Op{
     value_op("ldexp",vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|{
         let exponent=value::to_int("ldexp",num(a.get_arg("b")?)?.trunc())?;
-        Ok(Value::Float(fin("ldexp",ldexp(num(a.get_arg("a")?)?,exponent))?))
+        Ok(Value::Float(fin("ldexp",packed_ops::ldexp(num(a.get_arg("a")?)?,exponent))?))
     }))
 }
 fn special_value_ops()->Vec<Op>{
@@ -709,7 +695,7 @@ fn special_value_ops()->Vec<Op>{
         ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(move |_,_,a|Ok(Value::Float(fin(name,f(num(a.get_arg("a")?)?,num(a.get_arg("b")?)?))?)))));
     }
     ops.push(ldexp_op());
-    for (name,fun) in [("+",(|a:f64,b:f64|a+b) as fn(f64,f64)->f64),("-",|a:f64,b:f64|a-b),("*",|a:f64,b:f64|a*b),("/",float_div),("mod",float_mod),("pow",|a:f64,b:f64|a.abs().powf(b)),("min",f64::min),("max",f64::max)]{ops.push(binary_op(name,fun))}
+    for (name,fun) in [("+",(|a:f64,b:f64|a+b) as fn(f64,f64)->f64),("-",|a:f64,b:f64|a-b),("*",|a:f64,b:f64|a*b),("/",float_div),("mod",float_mod),("pow",|a:f64,b:f64|a.abs().powf(b)),("min",packed_ops::float_min),("max",packed_ops::float_max)]{ops.push(binary_op(name,fun))}
     for (operation,name) in [(packed_ops::Integer::Iadd,"int/add"),(packed_ops::Integer::Isub,"int/sub"),(packed_ops::Integer::Imul,"int/mul"),(packed_ops::Integer::Idiv,"int/div"),(packed_ops::Integer::Imod,"int/mod"),(packed_ops::Integer::Iand,"int/and"),(packed_ops::Integer::Ior,"int/or"),(packed_ops::Integer::Ixor,"int/xor"),(packed_ops::Integer::Ishl,"int/shl"),(packed_ops::Integer::Ishr,"int/shr")]{
         ops.push(value_op(name,vec![("a",Ty::Int),("b",Ty::Int)],vec![],None,vec![],Ty::Int,"Integer",Arc::new(move |_,_,a|Ok(Value::Int(packed_ops::integer_apply(operation,int_of(a.get_arg("a")?)?,int_of(a.get_arg("b")?)?)?)))));
     }

@@ -225,8 +225,16 @@ fn source_column_and_unsupported_producer() {
     }
 }
 
-// Product defect: Maximum over a float array [-0., 0.] returns -0. (flow_check op.rs reduce_array, the
-// width-1 path uses f64::max, whose zero sign is unspecified); OCaml returns +0.
+#[test]
+fn min_max_signed_zero_walker_matches_packed() {
+    for body in ["(min -0. 0.)", "(max 0. -0.)"] {
+        let source = value(body);
+        let compiled = executor_compile(&source, true);
+        let live = live_at(0.);
+        assert!(same(&ok(executor_force(&compiled, true, &live)), &ok(force_reference(&source, &live))), "{body}");
+    }
+}
+
 #[test]
 fn maximum_of_signed_zeros_is_positive_zero() {
     let v2 = Value::Floats(2, Arc::new(vec![3., -0., 1., 0.]));

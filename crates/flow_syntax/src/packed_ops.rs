@@ -77,6 +77,107 @@ pub fn integer_apply(operation: Integer, a: i64, b: i64) -> Result<i64, crate::D
 pub fn comparison_apply(operation: Comparison, a: i64, b: i64) -> bool {
     match operation { Comparison::Ilt => a < b, Comparison::Ile => a <= b, Comparison::Igt => a > b, Comparison::Ige => a >= b, Comparison::Ieq => a == b }
 }
+
+/// Minimum with NaN propagation and −0.0 ordered below +0.0 (IEEE total-order semantics for extrema).
+#[inline]
+pub fn float_min(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x == 0.0 && y == 0.0 {
+        return if x.is_sign_negative() { x } else { y };
+    }
+    if x < y { x } else { y }
+}
+
+/// Maximum with NaN propagation and +0.0 ordered above −0.0.
+#[inline]
+pub fn float_max(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x == 0.0 && y == 0.0 {
+        return if x.is_sign_negative() { y } else { x };
+    }
+    if x > y { x } else { y }
+}
+
+/// `ldexp` with the exponent truncated toward zero (`i64`), matching the host `ldexp` op.
+pub fn ldexp(value: f64, exponent: i64) -> f64 {
+    let bits = value.to_bits();
+    let sign = bits & 0x8000_0000_0000_0000;
+    let encoded = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & 0x000f_ffff_ffff_ffff;
+    if encoded == 0x7ff || value == 0.0 {
+        return value;
+    }
+    let (significand, base) = if encoded == 0 {
+        let high = 63 - fraction.leading_zeros() as i32;
+        let shift = 52 - high;
+        (fraction << shift, high - 1074)
+    } else {
+        (fraction | (1 << 52), encoded - 1023)
+    };
+    let target = base as i128 + exponent as i128;
+    if target > 1023 {
+        return f64::from_bits(sign | (0x7ff << 52));
+    }
+    if target >= -1022 {
+        return f64::from_bits(sign | (((target + 1023) as u64) << 52) | (significand & 0x000f_ffff_ffff_ffff));
+    }
+    if target < -1075 {
+        return f64::from_bits(sign);
+    }
+    let shift = (-1022 - target) as u32;
+    let quotient = significand >> shift;
+    let remainder = significand & ((1u64 << shift) - 1);
+    let halfway = 1u64 << (shift - 1);
+    let rounded = quotient + if remainder > halfway || (remainder == halfway && quotient & 1 != 0) { 1 } else { 0 };
+    f64::from_bits(sign | if rounded == (1u64 << 52) { 1u64 << 52 } else { rounded })
+}
+
+#[inline]
+pub fn binary_apply(op: Binary, x: f64, y: f64) -> f64 {
+    match op {
+        Binary::Add => x + y,
+        Binary::Sub => x - y,
+        Binary::Mul => x * y,
+        Binary::Div => if y == 0.0 { 0.0 } else { x / y },
+        Binary::Mod => if y == 0.0 { 0.0 } else { ((x % y) + y) % y },
+        Binary::Pow => x.abs().powf(y),
+        Binary::Min => float_min(x, y),
+        Binary::Max => float_max(x, y),
+        Binary::Lt => if x < y { 1.0 } else { 0.0 },
+        Binary::Le => if x <= y { 1.0 } else { 0.0 },
+        Binary::Gt => if x > y { 1.0 } else { 0.0 },
+        Binary::Ge => if x >= y { 1.0 } else { 0.0 },
+        Binary::Eq => if x == y { 1.0 } else { 0.0 },
+        Binary::And => if x != 0.0 && y != 0.0 { 1.0 } else { 0.0 },
+        Binary::Or => if x != 0.0 || y != 0.0 { 1.0 } else { 0.0 },
+        Binary::Atan2 => rays_math::libm::atan2(x, y),
+        Binary::Hypot => x.hypot(y),
+        Binary::Ldexp => ldexp(x, y.trunc() as i64),
+    }
+}
+
+#[inline]
+pub fn unary_apply(op: Unary, x: f64) -> f64 {
+    match op {
+        Unary::Sin => rays_math::libm::sin(x),
+        Unary::Cos => rays_math::libm::cos(x),
+        Unary::Sqrt => x.abs().sqrt(),
+        Unary::Abs => x.abs(),
+        Unary::Not => if x == 0.0 { 1.0 } else { 0.0 },
+        Unary::Tan => rays_math::libm::tan(x),
+        Unary::Asin => rays_math::libm::asin(x),
+        Unary::Acos => rays_math::libm::acos(x),
+        Unary::Exp => x.exp(),
+        Unary::Log => x.ln(),
+        Unary::Sign => if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { x },
+        Unary::Rsqrt => 1.0 / x.abs().sqrt(),
+    }
+}
+
 pub fn rand_at(seed: i64, index: i64) -> f64 { rays_math::rand::float_at_int(seed, index) }
 
 pub fn noise_names() -> Vec<String> { NOISE_NAMES.iter().map(|name| (*name).to_owned()).collect() }
@@ -120,5 +221,12 @@ mod tests {
         assert_eq!(integer_apply(Integer::Ishl, 1, 64).unwrap_err().code, "E_RANGE");
         assert!(comparison_apply(Comparison::Ilt, -1, 0));
         assert_eq!(integer_name(Integer::Ixor), "int/xor");
+    }
+    #[test]
+    fn float_min_max_signed_zeros() {
+        assert!(float_min(-0.0, 0.0).is_sign_negative());
+        assert!(float_max(0.0, -0.0).is_sign_positive());
+        assert!(float_min(f64::NAN, 1.0).is_nan());
+        assert!(float_max(1.0, f64::NAN).is_nan());
     }
 }

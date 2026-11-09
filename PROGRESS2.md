@@ -14,20 +14,20 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
-| X | 6 | 0 | 0 | 6 |
+| X | 6 | 1 | 0 | 5 |
 | B | 8 | 0 | 0 | 8 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 0 | 0 | 12 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **0** | **0** | **58** |
+| **All** | **58** | **1** | **0** | **57** |
 
 ## Items
 
 | ID | Wave | Status | Commit / evidence | Regression check |
 |----|------|--------|-------------------|------------------|
-| X1 | X | pending | — | New case: walker equals packed for (min -0. 0.) and (max 0. -0.) |
+| X1 | X | done | `753036dd` — `packed_ops::{float_min,float_max,ldexp,binary_apply,unary_apply}`; walker `min`/`max`/`array/min`/`array/max`; `min_max_signed_zero_walker_matches_packed`, `float_min_max_signed_zeros` | New case: walker equals packed for (min -0. 0.) and (max 0. -0.) |
 | X2 | X | pending | — | test_store: a 2^62 literal decodes as Int |
 | X3 | X | pending | — | A context-dependent failure reports its real code |
 | X4 | X | pending | — | Both surfaces give the same step for the same drag |
@@ -106,3 +106,22 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 - Opened ledger; artifact tracker seeded (58 pending); baseline `e2e4ab02`.
 - Artifact [v4](https://artifacts.microapps.space/a/ap6ev04y67bb): execution progress panel, `db` capability, runbook, R11→Z7 note; publish source `artifacts/second-simplification/index.html`.
+- **WaveX1** subagent + integration: X1 code complete; tests `float_min_max_signed_zeros`, `min_max_signed_zero_walker_matches_packed` pass.
+- Spawned **ScoutD** for D-wave parallel map (pending).
+
+## D-wave parallel map
+
+| ID | Primary crate(s) | Batch | Notes |
+|----|------------------|-------|-------|
+| D1 | rdk_core, rdk_ops, rdk_boolean | 1 | DisjointSet; fuse/dissolve/boolean consumers |
+| D2 | rdk_ops, rdk_boolean, rays_math | 2 | Sorts; boolean goldens |
+| D3 | rdk_geom | 1 | exact_dyadic; lone heavy crate |
+| D4 | rays_math, rdk_* | 2 | float helpers; wide grep surface |
+| D5 | rdk_core, rdk_ops, sop | 1 | support helpers on geometry/group |
+| D6 | rdk_ops | 2 | grain() only; many call sites |
+| D7 | rdk_boolean, rdk_geom | 1 | bounds3_index handoff |
+| D8 | flow_syntax, flow_ir, flow_check | 2 | PRIMITIVES table; shader goldens |
+| D9 | sop, flow_sop | 1 | manifest/sopcat path |
+| D10 | editor_core, rays_editor, sop, param | 2 | int parsers; shares X2 |
+| D11 | editor_core, rays, input | 1 | Frame/panel types |
+| D12 | editor_core, pxui, rays_editor | 2 | settings + text helpers |

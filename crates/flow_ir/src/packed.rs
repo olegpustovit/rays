@@ -126,106 +126,6 @@ pub fn integer_program(t: &T) -> bool {
         || t.sources.iter().any(|(_, term)| is_array_of_int(term))
 }
 
-// OCaml Float.min / Float.max: NaN propagates, and -0. orders below +0..
-fn ocaml_min(x: f64, y: f64) -> f64 {
-    if x.is_nan() || y.is_nan() {
-        return f64::NAN;
-    }
-    if x == 0.0 && y == 0.0 {
-        return if x.is_sign_negative() { x } else { y };
-    }
-    if x < y { x } else { y }
-}
-fn ocaml_max(x: f64, y: f64) -> f64 {
-    if x.is_nan() || y.is_nan() {
-        return f64::NAN;
-    }
-    if x == 0.0 && y == 0.0 {
-        return if x.is_sign_negative() { y } else { x };
-    }
-    if x > y { x } else { y }
-}
-
-// Float.ldexp over the exponent's two's-complement truncation, as flow_check's `ldexp` op.
-fn ldexp(value: f64, exponent: i64) -> f64 {
-    let bits = value.to_bits();
-    let sign = bits & 0x8000_0000_0000_0000;
-    let encoded = ((bits >> 52) & 0x7ff) as i32;
-    let fraction = bits & 0x000f_ffff_ffff_ffff;
-    if encoded == 0x7ff || value == 0.0 {
-        return value;
-    }
-    let (significand, base) = if encoded == 0 {
-        let high = 63 - fraction.leading_zeros() as i32;
-        let shift = 52 - high;
-        (fraction << shift, high - 1074)
-    } else {
-        (fraction | (1 << 52), encoded - 1023)
-    };
-    let target = base as i128 + exponent as i128;
-    if target > 1023 {
-        return f64::from_bits(sign | (0x7ff << 52));
-    }
-    if target >= -1022 {
-        return f64::from_bits(sign | (((target + 1023) as u64) << 52) | (significand & 0x000f_ffff_ffff_ffff));
-    }
-    if target < -1075 {
-        return f64::from_bits(sign);
-    }
-    let shift = (-1022 - target) as u32;
-    let quotient = significand >> shift;
-    let remainder = significand & ((1u64 << shift) - 1);
-    let halfway = 1u64 << (shift - 1);
-    let rounded = quotient + if remainder > halfway || (remainder == halfway && quotient & 1 != 0) { 1 } else { 0 };
-    f64::from_bits(sign | if rounded == (1u64 << 52) { 1u64 << 52 } else { rounded })
-}
-
-#[inline(always)]
-fn binary_apply(op: Binary, x: f64, y: f64) -> f64 {
-    match op {
-        Binary::Add => x + y,
-        Binary::Sub => x - y,
-        Binary::Mul => x * y,
-        Binary::Div => {
-            if y == 0.0 { 0.0 } else { x / y }
-        }
-        Binary::Mod => {
-            if y == 0.0 { 0.0 } else { ((x % y) + y) % y }
-        }
-        Binary::Pow => x.abs().powf(y),
-        Binary::Min => ocaml_min(x, y),
-        Binary::Max => ocaml_max(x, y),
-        Binary::Lt => if x < y { 1.0 } else { 0.0 },
-        Binary::Le => if x <= y { 1.0 } else { 0.0 },
-        Binary::Gt => if x > y { 1.0 } else { 0.0 },
-        Binary::Ge => if x >= y { 1.0 } else { 0.0 },
-        Binary::Eq => if x == y { 1.0 } else { 0.0 },
-        Binary::And => if x != 0.0 && y != 0.0 { 1.0 } else { 0.0 },
-        Binary::Or => if x != 0.0 || y != 0.0 { 1.0 } else { 0.0 },
-        Binary::Atan2 => rays_math::libm::atan2(x, y),
-        Binary::Hypot => x.hypot(y),
-        Binary::Ldexp => ldexp(x, y.trunc() as i64),
-    }
-}
-
-#[inline(always)]
-fn unary_apply(op: Unary, x: f64) -> f64 {
-    match op {
-        Unary::Sin => rays_math::libm::sin(x),
-        Unary::Cos => rays_math::libm::cos(x),
-        Unary::Sqrt => x.abs().sqrt(),
-        Unary::Abs => x.abs(),
-        Unary::Not => if x == 0.0 { 1.0 } else { 0.0 },
-        Unary::Tan => rays_math::libm::tan(x),
-        Unary::Asin => rays_math::libm::asin(x),
-        Unary::Acos => rays_math::libm::acos(x),
-        Unary::Exp => x.exp(),
-        Unary::Log => x.ln(),
-        Unary::Sign => if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { x },
-        Unary::Rsqrt => 1.0 / x.abs().sqrt(),
-    }
-}
-
 // a noise's lacunarity or gain at element `j`; a live one is checked as noise3 checks it
 #[inline(always)]
 fn fractal_at(value: &dyn Fn(i64, usize) -> f64, fractal: LiveFloat, j: usize) -> f64 {
@@ -2014,10 +1914,10 @@ fn texec(
                 Binary::Div => binary_lanes(f, at, a, b, first, last, |x, y| if y == 0.0 { 0.0 } else { x / y })?,
                 _ if compare => {
                     for j in first..last {
-                        f[at + j] = binary_apply(*operation, f[a + j], f[b + j]);
+                        f[at + j] = packed_ops::binary_apply(*operation, f[a + j], f[b + j]);
                     }
                 }
-                _ => binary_lanes(f, at, a, b, first, last, |x, y| binary_apply(*operation, x, y))?,
+                _ => binary_lanes(f, at, a, b, first, last, |x, y| packed_ops::binary_apply(*operation, x, y))?,
             }
         }
         Instruction::Fma(a, b, c) if !banks[*a as usize] && !banks[*b as usize] && !banks[*c as usize] => {
@@ -2067,7 +1967,7 @@ fn texec(
         }
         Instruction::Binary(operation, a, b) => {
             for j in first..last {
-                let v = binary_apply(*operation, tc.numeric(regs, bs, *a as usize, j), tc.numeric(regs, bs, *b as usize, j));
+                let v = packed_ops::binary_apply(*operation, tc.numeric(regs, bs, *a as usize, j), tc.numeric(regs, bs, *b as usize, j));
                 tc.floats[at + j] = finite!(v);
             }
         }
@@ -2100,19 +2000,19 @@ fn texec(
                 // total over finite values
                 Unary::Sqrt | Unary::Abs | Unary::Not => {
                     for j in first..last {
-                        f[at + j] = unary_apply(*operation, f[a + j]);
+                        f[at + j] = packed_ops::unary_apply(*operation, f[a + j]);
                     }
                 }
                 _ => {
                     for j in first..last {
-                        f[at + j] = finite!(unary_apply(*operation, f[a + j]));
+                        f[at + j] = finite!(packed_ops::unary_apply(*operation, f[a + j]));
                     }
                 }
             }
         }
         Instruction::Unary(operation, a) => {
             for j in first..last {
-                let v = unary_apply(*operation, tc.numeric(regs, bs, *a as usize, j));
+                let v = packed_ops::unary_apply(*operation, tc.numeric(regs, bs, *a as usize, j));
                 tc.floats[at + j] = finite!(v);
             }
         }
