@@ -14,7 +14,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
-| X | 6 | 2 | 0 | 4 |
+| X | 6 | 1 | 1 | 4 |
 | B | 8 | 0 | 0 | 8 |
 | A | 4 | 0 | 0 | 4 |
 | D | 12 | 0 | 0 | 12 |
@@ -107,21 +107,33 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 - Opened ledger; artifact tracker seeded (58 pending); baseline `e2e4ab02`.
 - Artifact [v4](https://artifacts.microapps.space/a/ap6ev04y67bb): execution progress panel, `db` capability, runbook, R11→Z7 note; publish source `artifacts/second-simplification/index.html`.
 - **WaveX1** subagent + integration: X1 code complete; tests `float_min_max_signed_zeros`, `min_max_signed_zero_walker_matches_packed` pass.
-- Spawned **ScoutD** for D-wave parallel map (pending).
+- **WaveX2** `dd1656a0`: settings parser (regression green). Caps/sentinels still open on X2 row.
+- **ScoutD**: D-wave slice schedule below (≤2 agents, distinct primaries).
 
 ## D-wave parallel map
 
-| ID | Primary crate(s) | Batch | Notes |
-|----|------------------|-------|-------|
-| D1 | rdk_core, rdk_ops, rdk_boolean | 1 | DisjointSet; fuse/dissolve/boolean consumers |
-| D2 | rdk_ops, rdk_boolean, rays_math | 2 | Sorts; boolean goldens |
-| D3 | rdk_geom | 1 | exact_dyadic; lone heavy crate |
-| D4 | rays_math, rdk_* | 2 | float helpers; wide grep surface |
-| D5 | rdk_core, rdk_ops, sop | 1 | support helpers on geometry/group |
-| D6 | rdk_ops | 2 | grain() only; many call sites |
-| D7 | rdk_boolean, rdk_geom | 1 | bounds3_index handoff |
-| D8 | flow_syntax, flow_ir, flow_check | 2 | PRIMITIVES table; shader goldens |
-| D9 | sop, flow_sop | 1 | manifest/sopcat path |
-| D10 | editor_core, rays_editor, sop, param | 2 | int parsers; shares X2 |
-| D11 | editor_core, rays, input | 1 | Frame/panel types |
-| D12 | editor_core, pxui, rays_editor | 2 | settings + text helpers |
+Batch = building-agent slot when two distinct primary crates run together. `editor_core`, `rdk_core`, `rdk_boolean`: one writer per crate at a time. Slices serial top-to-bottom.
+
+| ID | Primary crate | Batch | Notes |
+|----|---------------|-------|-------|
+| D1 | `rdk_core` | 1 | Slice 3. `support::DisjointSet`; callers in `rdk_ops` / `rdk_boolean`. |
+| D2 | `rdk_ops`, `rdk_boolean` | 2 | Slice 4. After D7. Stable sort; boolean golden regen. |
+| D3 | `rdk_geom` | 1 | Slice 1. Unified exact engine. |
+| D4 | `rays_math` | 1 | Slice 2. Shared float/NaN helpers. |
+| D5 | `rdk_core` | 1 | Slice 4. After D1. Methods on geometry/group/attribute. |
+| D6 | `rdk_core` | 1 | Slice 5. After D5. `support::grain`. |
+| D7 | `rdk_boolean` | 2 | Slice 3. After D3. `bounds3_index`; parallel-equality. |
+| D8 | `flow_ir` | 2 | Slice 1. `PRIMITIVES` + `Instruction`; flow_web goldens. |
+| D9 | `flow_sop` | 2 | Slice 2. `decl::native`; reads `rdk_ops::Params`. |
+| D10 | `rays_editor`, `editor_core` | 2 | Slice 5. After X2 caps. |
+| D11 | `editor_core`, `rays` | 1 | Slice 6. After D10. `Frame` → `input`. |
+| D12 | `editor_core`, `pxui` | 1 | Slice 7. After D10/D11. `flow_syntax` settings + pxui text. |
+
+| Slice | Batch 1 | Batch 2 |
+|------:|---------|---------|
+| 1 | D3 `rdk_geom` | D8 `flow_ir` |
+| 2 | D4 `rays_math` | D9 `flow_sop` |
+| 3 | D1 `rdk_core` | D7 `rdk_boolean` |
+| 4 | D5 `rdk_core` | D2 `rdk_ops` + `rdk_boolean` |
+| 5 | D6 `rdk_core` | D10 `rays_editor` + `editor_core` |
+| 6–7 | D11 → D12 | serial on `editor_core` |
