@@ -886,8 +886,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_core", &["native_layer_token_sys"][..]),
         ("ogpu_mock", &["ogpu_core"][..]),
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
-        ("ogpu_metal", &["ogpu_metal_native", "ogpu_core", "metal", "lru"][..]),
-        ("ogpu_metal_native", &["ogpu_core", "metal", "lru"][..]),
+        ("ogpu_metal", &["ogpu_core", "metal"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys"][..]),
         ("ogpu_native", &["ogpu_metal", "ogpu_vulkan"][..]),
         ("scene_execution_fixtures", &["renderer", "ogpu_core"][..]),
@@ -911,7 +910,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
 
 fn local_workspace_only() -> HashSet<&'static str> {
     HashSet::from([
-        "diagnostic", "sdl3", "editor_document", "rays_editor",
+        "sdl3", "editor_document", "rays_editor",
         "workspace_parity", "ogpu_conformance", "rdk_test_support", "flow_ir_test_support", "golden_fixtures",
     ])
 }
@@ -938,21 +937,21 @@ fn ocaml_leaves_reached(start: &str, allowlist: &HashMap<&'static str, &'static 
 fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let mut rules: HashMap<String, HashSet<String>> = HashMap::new();
     let upper = [
-        "param", "flow", "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop",
+        "param", "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop",
         "flow_native", "rays", "editor_core", "editor_document", "pxui", "pxui_shell", "pxui_graph",
         "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
         "web_export", "rays_editor",
     ];
     let gpu = [
         "sdl3", "metal", "vulkan_sys", "ogpu_core",
-        "ogpu_mock", "ogpu_metal", "ogpu_metal_native", "ogpu_vulkan", "ogpu_native", "runtime",
+        "ogpu_mock", "ogpu_metal", "ogpu_vulkan", "ogpu_native", "runtime",
         "runtime_resources", "renderer",
     ];
     let mut upper_no_gpu = upper.to_vec();
     upper_no_gpu.extend(["runtime", "runtime_resources", "renderer"]);
     let foundational = [
         "cfmt",
-        "diagnostic", "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
+        "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
         "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
         "metal", "vulkan_sys", "ogpu_core",
         "rdk_core",
@@ -964,9 +963,9 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         rules.entry(library.to_owned()).or_default().extend(names.iter().map(|name| (*name).to_owned()));
     };
     for library in ["runtime", "renderer", "rays"] {
-        forbid(library, &["metal", "ogpu_metal_native", "ogpu_metal", "vulkan_sys", "ogpu_vulkan", "ogpu_native"]);
+        forbid(library, &["metal", "ogpu_metal", "vulkan_sys", "ogpu_vulkan", "ogpu_native"]);
     }
-    for library in ["ogpu_metal_native", "ogpu_metal", "vulkan_sys", "ogpu_vulkan"] {
+    for library in ["ogpu_metal", "vulkan_sys", "ogpu_vulkan"] {
         forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
     }
     forbid("runtime", &upper);
@@ -976,7 +975,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "rdk_boolean", "rdk_rays", "rays_pathtracer", "rays_editor",
     ]);
     forbid("flow_shader", &[
-        "runtime", "renderer", "ogpu_mock", "ogpu_metal_native", "ogpu_metal", "ogpu_vulkan", "ogpu_native",
+        "runtime", "renderer", "ogpu_mock", "ogpu_metal", "ogpu_vulkan", "ogpu_native",
         "rays", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
         "sop", "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
@@ -1013,11 +1012,11 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("pxui_shell", &["sop", "pxui_graph", "rays_editor"]);
     forbid("pxui_graph", &["sop", "pxui_shell", "rays_editor"]);
     forbid("rays_pathtracer", &[
-        "metal", "ogpu_metal_native", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
+        "metal", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
         "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
     forbid("rdk_rays", &[
-        "metal", "ogpu_metal_native", "ogpu_metal", "rdk_boolean", "sop", "flow", "editor_core",
+        "metal", "ogpu_metal", "rdk_boolean", "sop", "editor_core",
         "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_pathtracer", "rays_editor",
     ]);
     // Flow is UI-free and GPU-free, but its three crates may reach the OCaml flow's leaves (param, input, diagnostic).
@@ -1029,7 +1028,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         forbid(library, &gpu);
     }
     forbid("scene_execution_fixtures", &[
-        "metal", "ogpu_metal_native", "ogpu_metal", "param", "flow", "flow_ir", "flow_web", "flow_shader",
+        "metal", "ogpu_metal", "param", "flow_ir", "flow_web", "flow_shader",
         "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui",
         "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays",
         "rays_pathtracer", "web_export", "rays_editor",

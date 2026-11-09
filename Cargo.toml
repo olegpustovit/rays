@@ -36,12 +36,3 @@ opt-level = 0
 codegen-units = 16
 lto = "thin"
 debug = "line-tables-only"
-
-[profile.e2e]
-inherits = "dev"
-
-[profile.gpu]
-inherits = "dev"
-
-[profile.slow]
-inherits = "dev"

@@ -530,7 +530,7 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
     let mut target_dir = None;
     let mut test_args = Vec::new();
     let mut ignored = false;
-    // RAYS_SLOW=1 enables the slow tests (AGENTS.md); they get the slow profile's per-test limit.
+    // RAYS_SLOW=1 (AGENTS.md) or `--profile slow` selects the 60s per-test limit without a separate Cargo profile.
     let mut test_timeout =
         if env::var("RAYS_SLOW").is_ok_and(|value| value == "1") { SLOW_TEST_TIMEOUT } else { TEST_TIMEOUT };
 

@@ -1,5 +1,5 @@
 //! libtest never gives a test the process main thread, which SDL requires. A `harness = false`
-//! target runs on it, so this speaks just enough of libtest's protocol for nextest: `--list`
+//! target runs on it, so this speaks just enough of libtest's protocol: `--list`
 //! names the tests, `--exact NAME` runs one, no filter runs all in order.
 pub fn run(tests: &[(&str, fn())]) {
     let args: Vec<String> = std::env::args().skip(1).collect();
