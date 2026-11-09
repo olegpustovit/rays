@@ -19,9 +19,9 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
 | Z | 11 | 0 | 1 | 10 |
-| R | 10 | 6 | 2 | 2 |
+| R | 10 | 7 | 2 | 1 |
 | G | 7 | 0 | 2 | 5 |
-| **All** | **58** | **34** | **6** | **18** |
+| **All** | **58** | **35** | **6** | **17** |
 
 ## Items
 
@@ -40,7 +40,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B5 | B | done | `403aaac4` — `[lib] test = false` on 11 libs + `print_shader`; gate rejects `#[test]` in those libs | Gate shape rule |
 | B6 | B | done | `c10ccba4` `ae022b58` — profiles/comments and retired policies removed; Rust edges/startup roles verified | gate deps green 2.19s; gate 7/7 (2.66s), runner 14/14 (1.11s); production boundary rejection retained |
 | B7 | B | pending | — | cargo-timings critical path; gate deps |
-| B8 | B | active | `3dcb2c3c` — implementation committed; 122 concrete borrowed parameters; full editor run still exceeds cap | all-targets green; smoke4/4 (1.57s), alloc guards3/3 (1.91s); full run timeout60.007s |
+| B8 | B | active | `3dcb2c3c` — 122 concrete borrowed parameters; full-editor retime after R4 still exceeds cap | cargo t -p rays_editor at21eef57a: timeout60.017s after165cases,66.46s wall; focused smoke/alloc pass |
 | A1 | A | done | `8dea3150` — metadata/unused wrappers/bodies/shims deleted, ABI names normalized; net −821 lines | ogpu_metal check 11.60s; Metal suite 33/34, corrected X6 case passes (93bcb897) |
 | A2 | A | done | `1d13c774` — internal visibility + dead modules/wrappers removed; clippy enabled, net −350 lines | workspace all-targets8.53s; rays/rdk_ops307/307 (16.41s), slowest1.310s; scoped clippy1.61s |
 | A3 | A | done | `5c9c9f82` — removed C/build.rs/cc; bounded powi scaling, exact subnormal rounding retained | cargo t -p cfmt -p param -p flow_syntax: 61 passed, 6.31s; slowest 0.150s |
@@ -57,7 +57,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | D10 | D | done | `3457d151` `82ba264f` — std i64/trim/round/min/max; syntax-aware literal-spelling comparison | Boundary/UI/SOP/text checks pass; spelling-focused1/1 and literal qualification1/1 pass |
 | D11 | D | done | `92542f6a` — canonical input Frame/panel types; borrowed routing; ec_frame/converters deleted | All-targets check10.25s; input/core17, commands9, reducer10, layout2, alloc3 pass |
 | D12 | D | done | `98ee157a` — validated Syntax replaces settings Value/codec; preferences read once; shared text helpers | all-targets5.83s; store5, text12, native guide1 pass; i64 save/Unicode regressions |
-| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` `25c98948` `608c3385` — established guards and measured ratchets | Sea51565/2823000; changed subdiv114105, Boolean26695, scatter1402035 allocations; zero/O(1) targets open |
+| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` `25c98948` `608c3385` `21eef57a` — established guards and measured ratchets | Sea51505/2809000; changed subdiv113035, Boolean26695, scatter1378530 allocations; zero/O(1) targets open |
 | Z1 | Z | pending | — | Z0 idle frames at 0 |
 | Z2 | Z | pending | — | Z0; flow_ir and flow_eval suites |
 | Z3 | Z | pending | — | bench_core instructions; warm rebuild ≤ 7.4 s |
@@ -69,14 +69,14 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Z9 | Z | pending | — | Z0 warm-cook guards on subdivide, boolean and scatter |
 | Z10 | Z | pending | — | Z0; per-crate clone count tracked in PROGRESS.md |
 | R1 | R | done | `c1617a45` — shared captures/paths/persistent iteration; consumers borrow; allocation guards lowered | 451 evaluator/IR +40 sequential/parallel +zero-view/native/three-kernel allocation checks pass |
-| R2 | R | done | `25c98948` — immutable parent cache layers; snapshot isolation; iterative destruction; scatter guard lowered | IR346, 10000-layer/drop guard, bench digest c4bbf006c82014c7, workspace all-targets, native/three-kernel guards pass |
+| R2 | R | done | `25c98948` `37321263` — immutable parent cache layers; snapshot isolation; iterative destruction; lexical gate false positives removed | IR346, 10000-layer/drop guard, bench digest c4bbf006c82014c7, workspace all-targets, native/three-kernel guards pass |
 | R3 | R | done | `608c3385` — immutable lexical free-name ranges; global/per-evaluation caches removed; bypass active-input semantics preserved | Flow490, parallel40, zero-allocation reads, lowered idle/sea/three-kernel caps and workspace check pass |
-| R4 | R | active | Owner/lifetime and all operator callers traced; baseline helpers prepared; no production changes yet | Library plus 49 sketches byte-identical |
+| R4 | R | done | `21eef57a` — checker-owned path IDs, shared immutable prelude base, borrowed operator lookup and cached capability fields | 178 byte-exact library/sketch cases; Flow544/SOP425/exports147; native/ratchets and workspace/deps pass; zero new shape findings |
 | R5 | R | done | `8aab3a26` — COW state maps, moved rollback snapshots, integer-pair stamps and typed packed/native image cache fields | Flow492, stateSOP6, native workspace35, allocation13 and sea pass; populated-map guard85/2048/85→1/0/0 allocations |
 | R6 | R | done | `39d6f261` — 243 Result predicates; par_fill and plain zip; ten cancellation atomics and two error Mutex channels removed | CPU558, group12/par_fill3, parallel40, native/sea/warm caps and workspace check pass; serial ABI cost disclosed |
 | R7 | R | done | `85e72ed5` — fourteen repoint paths share offsets/kinds; one validated constructor; polygons_shared deleted | Geometry429/native10, shared-storage identity, idle/sea/three warm guards pass; repoint9.8x faster |
 | R8 | R | active | Full 24-file mutation draft prepared outside worktree; no production installation or builds | All32 current graph cases; nonempty Change buffer ordering; native allocation caps |
-| R9 | R | pending | — | Lower the alloc_budget.rs limits |
+| R9 | R | active | Existing model/history already use Arc; traced deep hot-path copies in reducer helpers; preparation only | Carry existing Arc through helpers; mutate only actual edits; preserve rollback and lower native caps |
 | R10 | R | pending | — | test_prepared_scene3 |
 | G1 | G | active | `29c9efbf` — common validation moved to core; entry checks109→27; 98 immediate closures removed | Local56 pass10.61s; exact-commit Windows29 pass7.008s; native-only semantic migration still requires G2 |
 | G2 | G | active | Crate/type/error consolidation and 20 native test migrations prepared outside worktree; acceleration validation gaps audited | Full native functionality, GPU suites/gates and exact-commit Windows qualification |
@@ -264,3 +264,19 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - Combined current R4 borrowed-Op + R5 observations: basic1356/149687 allocations/B, empty1206/81958, bare1417/96617; sea maximum51501/2808931. Native caps are deliberately not attributed or lowered solely in R5 while R4 is uncommitted; R4 final integration will ratchet the coherent source. R5 commit excludes R4 prototype clone and Constant borrowed-Op hunks.
 - R4 checker/base/ID batch now installs after the root validation handoff; first scoped check passes1.78s. G2 owns the second build slot after R4's coherent check. Root performs ledger/publication work without a third Rust builder. R8 remains preparation-only with actual inventory30by-value mutators,64Pane rebuilds,16with_pane callers and32registered graph tests; paint snapshot and document intent boundary remain required.
 - Artifact **v25** published with the CLI; source byte readback, embedded/tracked seeds and all58live DB records verified. Immediate/live/offline tracker check passes. Snapshot **34done/6active/18pending (58.6% by item count)**. The objective remains active: all original58 requirements, B8 full-run failure,495historical shape violations, zero/O(1) targets and final macOS/Windows qualification remain in scope. This goal turn is **progress**: R3/R5/R6 source and R7 verification completed, exact-commit Windows G1 proof and R4 baselines collected.
+
+### 2026-11-10 — R4 final integration
+
+- R4 initial full qualification:178/178 exact library/sketch snapshots, Flow/check/IR/graph/catalog544cases25.489s, full FlowSOP425nonignored cases47.694s and Shader/Web147cases16.041s pass; frozen ops/sketch/manifest SHA256 unchanged. Native allocation13cases20.715s and sea1.228s pass. R4 stays active until final structural cleanup and tighter-cap reconfirmation commit.
+- Final review removed seven newly introduced R4 structural diagnostics using concrete private checker metadata/IDs, tuple borrowing and direct iteration. Public PackedForm retains its original concrete path surface. Post-cleanup544cases pass45.831s including rebuild (slowest deterministic evaluator2.141s); full remaining qualification is being reconfirmed.
+- **R2 diagnostic correction** `37321263`: private CacheLayer.values renamed to cache at its three definition/read/construction sites, matching Scope.cache. The token-based shape detector had treated unrelated Vec/slice parameters named values as maps; actual cache access uses get, never map iteration. No gate rule or exception changed. The post-cleanup544case run includes scope fork/snapshot/10000-layer guards. Refreshed shape gate is exactly **495preexisting diagnostics**, with zero new R4 classes; dependency gate is green.
+- Root tightened R4 integration guards pending its reconfirmation: basic1356/149687; sea51505/2809000; changed subdivision113035/3452170 and scatter1378530/16269860. Boolean and other ceilings unchanged. No limit raised. These changes remain uncommitted within R4 until their final run passes. G2 source remains held to keep this qualification coherent.
+- R10 renderer hashes/key callers traced read-only; preparation is in /tmp/rays-r10-plan.md. No R10 source changes or builds. R4/G2 remain the two build-slot owners; root will borrow R4's released slot for one B8 full-editor retiming before G2 installs.
+
+- **R4 complete** `21eef57a`:24files,+472/−296 including regressions/ratchets. Private checker-owned path IDs retain their own immutable prelude prefix and local interner, separate from every TermBuilder owner. An Rc-held immutable prelude supplies borrowed base tables; checks store only local writes and preserve counters/order/merge policy. Prelude clones allocate0 (64clones47488→0); warm checks12864→7904allocations, local medians1.748→1.044–1.412ms. No generic overlay framework or new dependency.
+- R4 operator lookup borrows declarations. Existing retained immutable Op indexes cache packed capability and distinct builtin-body policy once; same-name mutated declarations detach/rebuild metadata and invalidate prelude matching. Runtime capability checks read cached fields; raw derivation is confined to construction/golden/prototype tests. Public PackedForm stays concrete; private checker metadata has a separate concrete ID representation. No structural-gate exception was added.
+- Final post-cleanup R4 commands: cargo t on flow_check/flow_eval/flow_ir/flow_graph/flow_sop_catalog —544pass45.831s incl rebuild(slowest deterministic evaluator2.141s); full cargo t -p flow_sop —425nonignoredpass47.163s(slowestscatter~2.7s); flow_shader/flow_web147pass15.710s(slowest1.952s). All178exact before/after library+49sketch snapshot cases pass118.644s aggregate across focused invocations; frozen ops/sketch/manifest hashes unchanged. Final prelude guard1.161s; clone64sample542ns, warm checkmedian1.044ms.
+- Final R4 native idle3pass14.783s inclrebuild(slowest0.375s), measuredbasic1356/149687,empty1206/81958,bare1417/96617. Sea1pass1.588s(case1.202s), maximum51501/2808635 with zero uploads/payloadreads and2.590msclose. Final fullSOP run confirms changed maxima: subdivision113032/3452158, scatter1378524/16269855; Boolean unchanged. Committed caps only decrease: basic1356/149687,sea51505/2809000,subdivision113035/3452170,scatter1378530/16269860. Workspace all-target10.30s/deps pass; shapeexact495preexisting and zero new R4 diagnostics.
+- **B8 retime remains red** at committed21eef57a: /usr/bin/time -p cargo t -p rays_editor —compile5.74s, unchanged whole-run cap fires60.017s, total66.46s wall; runner reports165cases/62.028aggregate seconds. Slowest run_ops2.887s,run_panels2.817s,run_unbound_panels2.691s,run_studio2.595s. No observed assertion failure in the reported prefix proves the remaining suite; B8 stays active. The focused R4 gains do not establish full-editor completion.
+- R4 source/index/runner handed off: G2 may install its complete native consolidation batch; R8 owns the other build slot for baseline/in-place Pane changes after G2 is compile-stable. R9 preparation traces existing Arc ownership and actual reducer copy sites rather than adding a second document wrapper. Root performs publication/read-only R10 preparation with no third Rust builder.
+- Artifact **v26** published with the CLI and verified by byte-identical source, matching seeds and58live records; tracker immediate/live/offline regression passes. Snapshot **35done/6active/17pending (60.3% by item count)**. B8 timeout,495historical shape findings, all zero/O(1) targets and final two-platform qualification remain open.

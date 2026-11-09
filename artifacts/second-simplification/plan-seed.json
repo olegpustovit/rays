@@ -53,7 +53,7 @@
   },
   "B8": {
     "status": "active",
-    "note": "3dcb2c3c \u2014 implementation committed; 122 concrete borrowed parameters; full editor run still exceeds cap"
+    "note": "3dcb2c3c \u2014 122 concrete borrowed parameters; full-editor retime after R4 still exceeds cap"
   },
   "A1": {
     "status": "done",
@@ -121,7 +121,7 @@
   },
   "Z0": {
     "status": "active",
-    "note": "296c35c2 bf116466 c1617a45 25c98948 608c3385 \u2014 established guards and measured ratchets"
+    "note": "296c35c2 bf116466 c1617a45 25c98948 608c3385 21eef57a \u2014 established guards and measured ratchets"
   },
   "Z1": {
     "status": "pending",
@@ -169,15 +169,15 @@
   },
   "R2": {
     "status": "done",
-    "note": "25c98948 \u2014 immutable parent cache layers; snapshot isolation; iterative destruction; scatter guard lowered"
+    "note": "25c98948 37321263 \u2014 immutable parent cache layers; snapshot isolation; iterative destruction; lexical gate false positives removed"
   },
   "R3": {
     "status": "done",
     "note": "608c3385 \u2014 immutable lexical free-name ranges; global/per-evaluation caches removed; bypass active-input semantics preserved"
   },
   "R4": {
-    "status": "active",
-    "note": "Owner/lifetime and all operator callers traced; baseline helpers prepared; no production changes yet"
+    "status": "done",
+    "note": "21eef57a \u2014 checker-owned path IDs, shared immutable prelude base, borrowed operator lookup and cached capability fields"
   },
   "R5": {
     "status": "done",
@@ -196,8 +196,8 @@
     "note": "Full 24-file mutation draft prepared outside worktree; no production installation or builds"
   },
   "R9": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Existing model/history already use Arc; traced deep hot-path copies in reducer helpers; preparation only"
   },
   "R10": {
     "status": "pending",
