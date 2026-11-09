@@ -227,6 +227,10 @@ fn sea_initial_close() {
     assert!(started.elapsed()<std::time::Duration::from_millis(250),"closing waited for the initial sea cook");
 }
 
+// Four warm frames, then four complete million-point frames. Initial observations:
+// 54,446–54,448 allocations / 2,904,464–2,922,176 B; round the new ceiling up once. Never raise.
+const SEA_FRAME_BUDGET: (u64,u64) = (54_450,2_930_000);
+
 fn sea_frames() {
     use rays_editor::{editor,workspace};
     assert!(crate::common::gpu(),"native GPU required");
@@ -238,8 +242,9 @@ fn sea_frames() {
     let mut editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
     println!("sea open {:?}",started.elapsed());
     let mut previous=None;
-    for tick in 1..=6 {
+    for tick in 1..=8 {
         let started=std::time::Instant::now();
+        let allocations=(mem_sys::alloc_count(),mem_sys::alloc_bytes_total());
         let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
         editor=editor::update(editor,&frame);
         assert!(editor.core.cook.error.is_none(),"{:?}",editor.core.cook.error);
@@ -255,16 +260,25 @@ fn sea_frames() {
         assert_eq!(stats.payload_readback_bytes,0);
         assert_eq!(stats.bounds_readback_bytes,tick*24);
         assert_eq!(stats.input_uploaded_bytes,0,"sea generated geometry through a host staging array");
-        if let Some((uploads,buffers))=previous {
+        if let Some((uploads,buffers,pipelines))=previous {
             assert_eq!(stats.input_uploads,uploads,"animation uploaded immutable inputs again");
-            if tick>3 {assert_eq!(stats.buffer_creations,buffers,"steady animation allocated more GPU buffers");}
+            if tick>3 {
+                assert_eq!(stats.buffer_creations,buffers,"steady animation allocated more GPU buffers");
+                assert_eq!(stats.pipeline_compilations,pipelines,"steady animation compiled more shaders");
+            }
         }
-        previous=Some((stats.input_uploads,stats.buffer_creations));
-        println!("sea frame {tick} {:?}: uploaded {} B, payload read {} B, bounds read {} B",started.elapsed(),stats.input_uploaded_bytes,stats.payload_readback_bytes,stats.bounds_readback_bytes);
+        previous=Some((stats.input_uploads,stats.buffer_creations,stats.pipeline_compilations));
         editor=editor::after_present(editor,&frame);
+        if tick>4 {
+            let (count,bytes)=(mem_sys::alloc_count()-allocations.0,mem_sys::alloc_bytes_total()-allocations.1);
+            eprintln!("sea frame {tick}: {count} allocations / {bytes} bytes");
+            assert!(count<=SEA_FRAME_BUDGET.0 && bytes<=SEA_FRAME_BUDGET.1,
+                "sea frame {tick}: {count} allocations / {bytes} bytes exceeds {SEA_FRAME_BUDGET:?}");
+        }
+        println!("sea frame {tick} {:?}: uploaded {} B, payload read {} B, bounds read {} B",started.elapsed(),stats.input_uploaded_bytes,stats.payload_readback_bytes,stats.bounds_readback_bytes);
     }
     Rc::make_mut(&mut Rc::make_mut(&mut editor.core).cook).await_=false;
-    let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:7,tick:7,size:(320,240),pointer:(-100.,-100.),..input::at_time(7./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+    let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:9,tick:9,size:(320,240),pointer:(-100.,-100.),..input::at_time(9./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
     editor=editor::update(editor,&frame);
     println!("sea closing {:?}",rays_editor::cook::status(&editor.core.cook));
     let started=std::time::Instant::now();

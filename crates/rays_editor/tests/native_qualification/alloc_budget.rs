@@ -22,9 +22,9 @@ const FRAMES: i64 = 30;
 // M: chrome box labels format the leaf path in place: empty 1,230 / 82,806; bare 1,456 / 97,970.
 // M: the scene graph is read in place: basic 1,384 / 157,167; empty 1,206 / 81,998; bare 1,417 / 96,657.
 // Never raise.
-const BASIC: (u64, u64) = (1_390, 157_500);
-const EMPTY: (u64, u64) = (1_210, 82_500);
-const BARE: (u64, u64) = (1_420, 97_000);
+const BASIC: (u64, u64) = (1_384, 157_167);
+const EMPTY: (u64, u64) = (1_206, 81_998);
+const BARE: (u64, u64) = (1_417, 96_657);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");
@@ -43,6 +43,8 @@ fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
             pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
         // The native loop mutates its stored model; the owned API can reuse the same state.
         let e = editor::update(editor, &f);
+        assert!(e.context_error.is_none(), "{:?}", e.context_error);
+        assert!(e.core.cook.error.is_none(), "{:?}", e.core.cook.error);
         assert_eq!(e.core.preferences.as_ptr(), identity, "update copied the editor model");
         rays::canvas::render(None, &canvas, &editor::scene(&e, &f)).unwrap();
         let e = editor::after_present(e, &f);
