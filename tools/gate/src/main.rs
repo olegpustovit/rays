@@ -517,7 +517,7 @@ struct Package {
     product: bool,
     deps: Vec<DepSpec>,
     has_binary: bool,
-    has_tests: bool,
+    has_gpu_dev_targets: bool,
 }
 
 #[derive(Default)]
@@ -526,7 +526,8 @@ struct ParsedManifest {
     lib_name: Option<String>,
     lib_unit_tests: bool,
     has_binary: bool,
-    has_test_target: bool,
+    has_gpu_dev_targets: bool,
+    binary_names: Vec<String>,
     deps: Vec<DepSpec>,
     workspace_deps: Vec<DepSpec>,
 }
@@ -681,7 +682,8 @@ fn dependency(section: &[String], key: Option<&str>, value: Option<&str>, line: 
 fn parse_manifest(path: &Path) -> Result<ParsedManifest, String> {
     let source = fs::read_to_string(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     let mut sections: BTreeMap<Vec<String>, HashMap<String, (String, usize)>> = BTreeMap::new();
-    let (mut has_binary, mut has_test_target) = (false, false);
+    let (mut has_binary, mut has_gpu_dev_targets) = (false, false);
+    let mut binary_names = Vec::new();
     let (mut section, mut pending, mut pending_line) = (Vec::new(), None::<(String, String)>, 0usize);
     for (zero_line, raw_line) in source.lines().enumerate() {
         let line_number = zero_line + 1;
@@ -700,8 +702,8 @@ fn parse_manifest(path: &Path) -> Result<ParsedManifest, String> {
         }
         if line.starts_with("[[") && line.ends_with("]]") {
             section = split_toml_path(&line[2..line.len() - 2]);
-            has_binary |= section.first().is_some_and(|part| ["bin", "example", "bench"].contains(&part.as_str()));
-            has_test_target |= section.len() == 1 && section[0] == "test";
+            has_binary |= section.first().is_some_and(|part| part == "bin");
+            has_gpu_dev_targets |= section.first().is_some_and(|part| ["example", "bench"].contains(&part.as_str()));
             continue;
         }
         if line.starts_with('[') && line.ends_with(']') {
@@ -711,6 +713,15 @@ fn parse_manifest(path: &Path) -> Result<ParsedManifest, String> {
         if let Some((key, value)) = line.split_once('=') {
             let key = key.trim().trim_matches(|character| character == '"' || character == '\'').to_owned();
             let value = value.trim().to_owned();
+            if key == "name" {
+                if let Some(name) = toml_string(&value) {
+                    if section == ["test"] {
+                        has_gpu_dev_targets |= name.starts_with("gpu_") || name.starts_with("window_");
+                    } else if section == ["bin"] {
+                        binary_names.push(name);
+                    }
+                }
+            }
             if toml_value_complete(&value) {
                 sections.entry(section.clone()).or_default().insert(key, (value, line_number));
             } else {
@@ -733,7 +744,8 @@ fn parse_manifest(path: &Path) -> Result<ParsedManifest, String> {
         lib_name: field(&["lib"], "name"),
         lib_unit_tests,
         has_binary,
-        has_test_target,
+        has_gpu_dev_targets,
+        binary_names,
         ..ParsedManifest::default()
     };
     for (section, entries) in &sections {
@@ -790,28 +802,27 @@ fn cargo_manifests(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
 fn package_targets(dir: &Path, manifest: &ParsedManifest) -> Result<(bool, bool), String> {
     let mut files = Vec::new();
     rust_sources(dir, &mut files).map_err(|error| format!("cannot scan {}: {error}", dir.display()))?;
-    let mut has_binary = manifest.has_binary || dir.join("src/main.rs").is_file();
-    let mut has_tests = manifest.has_test_target;
+    // print_shader only writes generated source/SPIR-V; ogpu_core supplies shader metadata.
+    // Any additional executable in this crate still needs the ordinary startup check.
+    let shader_printer = manifest.package_name.as_deref() == Some("flow_shader")
+        && manifest.binary_names == ["print_shader"];
+    let mut has_binary = (manifest.has_binary && !shader_printer) || dir.join("src/main.rs").is_file();
+    let mut has_gpu_dev_targets = manifest.has_gpu_dev_targets;
     for file in files {
         let relative = file.strip_prefix(dir).unwrap_or(&file);
         let mut components = relative.components();
         let first = components.next().and_then(|part| part.as_os_str().to_str());
         let second = components.next().and_then(|part| part.as_os_str().to_str());
-        has_binary |= (first == Some("src") && second == Some("bin")) || matches!(first, Some("examples" | "benches"));
-        has_tests |= first == Some("tests");
-        let source = fs::read_to_string(&file).map_err(|error| format!("cannot read {}: {error}", file.display()))?;
-        let tokens = lex(&source);
-        for (index, token) in tokens.iter().enumerate() {
-            if token.text == "#" && tokens.get(index + 1).is_some_and(|next| next.text == "[") {
-                if let Some(end) = matching(&tokens, index + 1, "[", "]") {
-                    has_tests |= tokens[index + 2..end].iter().any(|part| part.text == "test");
-                }
-            }
-        }
+        has_binary |= first == Some("src") && second == Some("bin");
+        has_gpu_dev_targets |= matches!(first, Some("examples" | "benches"));
+        // Same native target convention as rays-t; ordinary unit/e2e tests may use GPU types
+        // without creating a device. Explicit targets are recorded while parsing the manifest.
+        has_gpu_dev_targets |= first == Some("tests") && components.next().is_none()
+            && file.file_stem().and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("gpu_") || name.starts_with("window_"));
     }
-    Ok((has_binary, has_tests))
+    Ok((has_binary, has_gpu_dev_targets))
 }
-
 
 fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
     lib_name.unwrap_or(package_name).replace('-', "_")
@@ -824,9 +835,7 @@ const HELPER_LEAVES: [&str; 1] = ["cfmt"];
 // param: OCaml flow depends on it, so anything reaching flow reaches param.
 const OCAML_LEAVES: [&str; 4] = ["rays_diagnostic", "input", "mem", "param"];
 
-/// Direct edges each crate may name, mirroring the OCaml dune library lists (and `only` in
-/// test/dependency_gate.ml). The Rust flow library is three crates; each takes the OCaml flow edges.
-/// Sys crates are the Rust port's FFI bridges, which OCaml keeps inside its library.
+/// Direct production edges in the Rust architecture. Sys crates own their native ABI bridges.
 fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
     HashMap::from([
         ("cfmt", &[][..]),
@@ -853,19 +862,19 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("rdk_rays", &["rdk_core", "rdk_geom", "rdk_ops", "rays", "rays_math", "param"][..]),
         ("rays", &[
             "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
-            "parallel",
+            "parallel", "ogpu_core",
         ][..]),
         ("runtime", &["sdl3", "ogpu_core", "input"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
         ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
         ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math", "lru"][..]),
-        ("flow_eval", &["flow_syntax", "flow_check", "param", "rays_diagnostic", "input", "rays_math"][..]),
+        ("flow_eval", &["flow_syntax", "flow_check", "param", "rays_diagnostic", "input", "rays_math", "mem_sys"][..]),
         ("flow_graph", &["flow_syntax", "flow_check", "flow_eval", "param"][..]),
         ("flow_ir", &[
             "flow_syntax", "flow_check", "flow_eval", "param", "rays_math", "scene_command", "lru", "parallel",
         ][..]),
-        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu_core"][..]),
+        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu_core", "rays_math"][..]),
         ("flow_gpu", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_shader", "param", "rays_math", "ogpu_core",
             "renderer", "lru", "mem", "parallel",
@@ -876,21 +885,20 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("sop", &["param", "input", "rays_diagnostic", "rays_math", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "lru", "mem", "parallel"][..]),
         ("flow_sop", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "lru", "param", "sop", "rays_diagnostic", "rays_math",
-            "parallel", "rdk_core", "rdk_geom", "rdk_ops",
+            "parallel", "rdk_core", "rdk_geom", "rdk_ops", "flow_sop_catalog",
         ][..]),
+        ("flow_sop_catalog", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "param", "sop", "rays_math"][..]),
         ("flow_native", &[
             "editor_document", "rays", "rays_math", "input", "flow_syntax", "flow_check", "flow_eval",
             "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
-            "parallel", "sop",
+            "parallel", "sop", "flow_shader", "ogpu_core", "rdk_core",
         ][..]),
         ("ogpu_core", &["native_layer_token_sys"][..]),
         ("ogpu_mock", &["ogpu_core"][..]),
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
         ("ogpu_metal", &["ogpu_core", "metal"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys"][..]),
-        ("ogpu_native", &["ogpu_metal", "ogpu_vulkan"][..]),
-        ("scene_execution_fixtures", &["renderer", "ogpu_core"][..]),
-        ("pxui", &["rays", "rays_math", "param", "mem"][..]),
+        ("pxui", &["rays", "rays_math", "param", "mem", "scene_command"][..]),
         ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
         ("pxui_graph", &[
             "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
@@ -898,20 +906,19 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
         ("web_export", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_web", "flow_sop", "editor_document", "input",
-            "param", "scene_command", "sdl3",
+            "param", "scene_command", "sdl3", "flow_shader", "rays_math", "sop",
         ][..]),
         ("rays_pathtracer", &[
             "rays", "ogpu_core", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
-            "runtime_resources", "rays_math",
+            "runtime_resources", "rays_math", "flow_shader",
         ][..]),
-        ("lisp_sop", &["flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "rays_math"][..]),
+        ("rays_bin", &["editor_document", "rays_editor", "web_export", "flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "runtime", "ogpu_core", "ogpu_metal", "ogpu_vulkan"][..]),
     ])
 }
 
 fn local_workspace_only() -> HashSet<&'static str> {
     HashSet::from([
         "sdl3", "editor_document", "rays_editor",
-        "workspace_parity", "ogpu_conformance", "rdk_test_support", "flow_ir_test_support", "golden_fixtures",
     ])
 }
 
@@ -940,11 +947,11 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "param", "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop",
         "flow_native", "rays", "editor_core", "editor_document", "pxui", "pxui_shell", "pxui_graph",
         "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
-        "web_export", "rays_editor",
+        "web_export", "rays_editor", "rays_bin", "flow_sop_catalog",
     ];
     let gpu = [
         "sdl3", "metal", "vulkan_sys", "ogpu_core",
-        "ogpu_mock", "ogpu_metal", "ogpu_vulkan", "ogpu_native", "runtime",
+        "ogpu_mock", "ogpu_metal", "ogpu_vulkan", "runtime",
         "runtime_resources", "renderer",
     ];
     let mut upper_no_gpu = upper.to_vec();
@@ -963,7 +970,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         rules.entry(library.to_owned()).or_default().extend(names.iter().map(|name| (*name).to_owned()));
     };
     for library in ["runtime", "renderer", "rays"] {
-        forbid(library, &["metal", "ogpu_metal", "vulkan_sys", "ogpu_vulkan", "ogpu_native"]);
+        forbid(library, &["metal", "ogpu_metal", "vulkan_sys", "ogpu_vulkan"]);
     }
     for library in ["ogpu_metal", "vulkan_sys", "ogpu_vulkan"] {
         forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
@@ -975,7 +982,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "rdk_boolean", "rdk_rays", "rays_pathtracer", "rays_editor",
     ]);
     forbid("flow_shader", &[
-        "runtime", "renderer", "ogpu_mock", "ogpu_metal", "ogpu_vulkan", "ogpu_native",
+        "runtime", "renderer", "ogpu_mock", "ogpu_metal", "ogpu_vulkan",
         "rays", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
         "sop", "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
@@ -989,7 +996,6 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     ]);
     forbid("flow_web", &gpu);
     forbid("web_export", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
-    forbid("lisp_sop", &["editor_document", "rays", "runtime", "pxui", "rays_editor"]);
     forbid("rays", &[
         "pxui", "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean",
         "rdk_rays", "rays_pathtracer", "rays_editor",
@@ -1027,12 +1033,10 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         ]);
         forbid(library, &gpu);
     }
-    forbid("scene_execution_fixtures", &[
-        "metal", "ogpu_metal", "param", "flow_ir", "flow_web", "flow_shader",
-        "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui",
-        "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays",
-        "rays_pathtracer", "web_export", "rays_editor",
+    forbid("flow_sop_catalog", &[
+        "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_editor", "rays_bin",
     ]);
+    forbid("flow_sop_catalog", &gpu);
     rules
 }
 
@@ -1070,104 +1074,77 @@ fn target_platform(target: &str) -> Option<&'static str> {
     }
 }
 
-fn ogpu_native_errors(package: &Package, path: &str) -> Vec<String> {
-    let mut errors = Vec::new();
-    let mut apple = 0;
-    let mut windows = 0;
-    for dependency in &package.deps {
-        let name = dependency.package.as_deref().unwrap_or(&dependency.alias).replace('-', "_");
-        let expected = match name.as_str() {
-            "ogpu_metal" => Some(("apple", 0)),
-            "ogpu_vulkan" => Some(("windows", 1)),
-            _ => None,
-        };
-        let Some((expected_platform, counter)) = expected else { continue };
-        if dependency.optional {
-            errors.push(format!("{path}: `ogpu_native` backend edge `{}` is optional and does not select a backend", dependency.alias));
-            continue;
-        }
-        if dependency.kind != "dependencies" {
-            errors.push(format!("{path}: `ogpu_native` backend edge `{}` must be a normal dependency", dependency.alias));
-            continue;
-        }
-        let Some(target) = dependency.target.as_deref() else {
-            errors.push(format!("{path}: `ogpu_native` backend edge `{}` is unconditional; select by target", dependency.alias));
-            continue;
-        };
-        if target_platform(target) != Some(expected_platform) {
-            errors.push(format!("{path}: `ogpu_native` backend edge `{}` targets `{target}`, expected `{expected_platform}`", dependency.alias));
-            continue;
-        }
-        if counter == 0 { apple += 1; } else { windows += 1; }
-    }
-    for (platform, count) in [("apple", apple), ("windows", windows)] {
-        if count != 1 {
-            errors.push(format!("{path}: `ogpu_native` must select exactly one backend for {platform} (found {count})"));
-        }
-    }
-    errors
-}
-
 fn ogpu_selection_errors(
     packages: &[Package],
     graph: &HashMap<String, Vec<String>>,
     direct: &HashMap<String, Vec<String>>,
     workspace: &Path,
 ) -> Vec<String> {
-    let implementations = ["ogpu_metal", "ogpu_vulkan", "ogpu_mock"];
     let mut errors = Vec::new();
-    for package in packages.iter().filter(|package| {
-        package.crate_name != "ogpu_native" && (package.has_binary || package.has_tests)
-    }) {
+    for package in packages {
         let all_selected = direct.get(&package.crate_name).map(Vec::as_slice).unwrap_or_default();
-        for platform in ["apple", "windows"] {
-            let selected: Vec<String> = all_selected.iter().filter(|name| {
-                let declarations: Vec<_> = package.deps.iter().filter(|dep| {
-                    dep.package.as_deref().unwrap_or(&dep.alias) == name.as_str()
-                }).collect();
-                declarations.is_empty() || declarations.iter().any(|dep| {
-                    dep.target.as_deref().and_then(target_platform).is_none_or(|target| target == platform)
-                })
-            }).cloned().collect();
-            let reaches_ogpu = selected.iter().any(|dependency| {
-                dependency == "ogpu_core" || dependency_path(dependency, "ogpu_core", graph).is_some()
-            });
-            if !reaches_ogpu {
+        let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
+        // Production startup cannot be satisfied by a dev dependency. Tests may explicitly
+        // select mock in one target and the platform-native implementation in another.
+        for tests in [false, true] {
+            if !(if tests { package.has_gpu_dev_targets } else { package.has_binary }) {
                 continue;
             }
-            let uses_native = selected.iter().any(|dependency| dependency == "ogpu_native");
-            // An implementation crate's own tests select it by being it.
-            let mut explicit: Vec<&str> = selected.iter().map(String::as_str).filter(|name| implementations.contains(name)).collect();
-            if implementations.contains(&package.crate_name.as_str()) {
-                explicit.push(package.crate_name.as_str());
+            let declarations: Vec<_> = package.deps.iter().filter(|dependency| {
+                dependency.kind == "dependencies" || (tests && dependency.kind == "dev-dependencies")
+            }).collect();
+            for dependency in &declarations {
+                let name = dependency.package.as_deref().unwrap_or(&dependency.alias).replace('-', "_");
+                let expected = match name.as_str() {
+                    "ogpu_metal" => "apple",
+                    "ogpu_vulkan" => "windows",
+                    _ => continue,
+                };
+                if dependency.optional || dependency.target.as_deref().and_then(target_platform) != Some(expected) {
+                    errors.push(format!("{path}: {} backend {} must be nonoptional and target {expected}", package.crate_name, dependency.alias));
+                }
             }
-            let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
-            if uses_native && explicit.is_empty() {
-                continue;
+            for (platform, native) in [("apple", "ogpu_metal"), ("windows", "ogpu_vulkan")] {
+                // An implementation's native tests run only on its own platform.
+                if tests && matches!(package.crate_name.as_str(), "ogpu_metal" | "ogpu_vulkan")
+                    && package.crate_name != native
+                {
+                    continue;
+                }
+                let selected: Vec<_> = all_selected.iter().filter(|name| {
+                    declarations.iter().any(|dependency| {
+                        dependency.package.as_deref().unwrap_or(&dependency.alias).replace('-', "_") == **name
+                            && !dependency.optional
+                            && dependency.target.as_deref().and_then(target_platform).is_none_or(|target| target == platform)
+                    })
+                }).map(String::as_str).collect();
+                let reaches_ogpu = selected.iter().any(|dependency| {
+                    *dependency == "ogpu_core" || dependency_path(dependency, "ogpu_core", graph).is_some()
+                });
+                if !reaches_ogpu {
+                    continue;
+                }
+                let native_count = declarations.iter().filter(|dependency| {
+                    dependency.package.as_deref().unwrap_or(&dependency.alias).replace('-', "_") == native
+                        && !dependency.optional
+                        && dependency.target.as_deref().and_then(target_platform) == Some(platform)
+                }).count() + usize::from(tests && package.crate_name == native);
+                let mock = selected.contains(&"ogpu_mock") || (tests && package.crate_name == "ogpu_mock");
+                if native_count <= 1 && (native_count == 1 || (tests && mock)) && (tests || !mock) {
+                    continue;
+                }
+                let role = if tests { "GPU/window tests or dev executable" } else { "native executable" };
+                errors.push(format!(
+                    "{path}: {role} {} must select one nonoptional {native} {}on {platform}{}",
+                    package.crate_name,
+                    if tests { "" } else { "normal dependency " },
+                    if tests { " (mock may also be selected)" } else { "" },
+                ));
             }
-            if !uses_native && explicit.len() == 1 {
-                continue;
-            }
-            errors.push(format!(
-                "{path}: executable/test crate `{}` reaches `ogpu_core` on {platform}; select `ogpu_native` or exactly one explicit implementation (selected: {})",
-                package.crate_name,
-                if selected.is_empty() { "none".to_owned() } else { selected.join(", ") }
-            ));
         }
     }
     errors
 }
-
-fn ogpu_errors(packages: &[Package], graph: &HashMap<String, Vec<String>>, direct: &HashMap<String, Vec<String>>, workspace: &Path) -> Vec<String> {
-    let mut errors = Vec::new();
-    if let Some(package) = packages.iter().find(|package| package.crate_name == "ogpu_native") {
-        let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
-        errors.extend(ogpu_native_errors(package, &path));
-    }
-    errors.extend(ogpu_selection_errors(packages, graph, direct, workspace));
-    errors
-}
-
 
 fn deps(workspace: &Path) -> Result<Vec<String>, String> {
     let workspace_path = fs::canonicalize(workspace).map_err(|error| format!("cannot locate workspace {}: {error}", workspace.display()))?;
@@ -1189,7 +1166,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
         let relative = manifest_path.strip_prefix(workspace).unwrap_or(&manifest_path).to_string_lossy().replace('\\', "/");
         let is_product = relative.starts_with("crates/") || relative.starts_with("bin/");
         let crate_name = crate_name(package_name, parsed.lib_name.as_deref());
-        let (has_binary, has_tests) = package_targets(manifest_path.parent().unwrap_or(workspace), &parsed)?;
+        let (has_binary, has_gpu_dev_targets) = package_targets(manifest_path.parent().unwrap_or(workspace), &parsed)?;
         let mut dependencies = Vec::new();
         for mut dependency in parsed.deps {
             if dependency.workspace {
@@ -1210,7 +1187,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
             product: is_product,
             deps: dependencies,
             has_binary,
-            has_tests,
+            has_gpu_dev_targets,
         });
     }
 
@@ -1325,22 +1302,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
             }
         }
     }
-    let test_support = [
-        "lisp_sop", "workspace_parity", "ogpu_conformance", "rdk_test_support", "flow_ir_test_support",
-        "golden_fixtures", "scene_execution_fixtures",
-    ];
-    for package in packages.iter().filter(|package| package.product && !test_support.contains(&package.crate_name.as_str())) {
-        for support in test_support {
-            if let Some(path) = dependency_path(&package.crate_name, support, &graph) {
-                errors.push(format!(
-                    "dependency boundary: product crate `{}` must not reach test-only `{support}` (via {})",
-                    package.crate_name,
-                    path.join(" -> ")
-                ));
-            }
-        }
-    }
-    errors.extend(ogpu_errors(&packages, &runtime_graph, &selection_direct, workspace));
+    errors.extend(ogpu_selection_errors(&packages, &runtime_graph, &selection_direct, workspace));
     errors.sort();
     Ok(errors)
 }
@@ -1389,13 +1351,12 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{assignment_fields, dependency_path, deps, ogpu_native_errors, ogpu_selection_errors, shape_source, target_platform, toml_string, DepSpec, Package};
+    use super::{assignment_fields, dependency_path, deps, ogpu_selection_errors, shape_source, target_platform, toml_string, DepSpec, Package};
     use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[test]
     #[test]
     fn lib_unit_tests_disabled_includes_integration_only_libs() {
         let workspace = std::env::current_dir().expect("cwd");
@@ -1539,6 +1500,21 @@ mod tests {
         )
         .unwrap();
         let cc_build_edge = deps(&root);
+        for package in ["flow_ir", "pxui", "ogpu_metal"] {
+            fs::create_dir_all(root.join(format!("crates/{package}/src"))).unwrap();
+            fs::write(root.join(format!("crates/{package}/Cargo.toml")), format!("[package]\nname = \"{package}\"\n")).unwrap();
+            fs::write(root.join(format!("crates/{package}/src/lib.rs")), "").unwrap();
+        }
+        fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n[dependencies]\npxui = { path = \"../pxui\" }\n").unwrap();
+        fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../ogpu_metal\" }\n").unwrap();
+        let boundaries = deps(&root).unwrap();
+        assert!(boundaries.iter().any(|issue| issue.contains("flow_ir must not reach") && issue.contains("pxui")));
+        assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("ogpu_metal")));
+        for package in ["flow_ir", "rays"] {
+            let path = root.join(format!("crates/{package}/Cargo.toml"));
+            fs::write(&path, fs::read_to_string(&path).unwrap().replace("[dependencies]", "[dev-dependencies]")).unwrap();
+        }
+        assert!(deps(&root).unwrap().is_empty(), "dev-only tests do not change production boundaries");
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(allowed.unwrap(), Vec::<String>::new());
         let sdl_edge = sdl_edge.unwrap();
@@ -1556,76 +1532,93 @@ mod tests {
             .any(|issue| issue.contains("external dependency `cc`")));
     }
 
-    #[test]
-    fn ogpu_native_requires_one_target_backend_per_platform() {
-        let backend = |alias: &str, target: &str| DepSpec {
-            alias: alias.to_owned(),
-            package: None,
-            path: Some("../backend".to_owned()),
-            workspace: false,
-            optional: false,
-            target: Some(target.to_owned()),
-            line: 1,
-            kind: "dependencies".to_owned(),
-        };
-        let package = Package {
-            manifest: PathBuf::from("crates/ogpu_native/Cargo.toml"),
-            package_name: "ogpu_native".to_owned(),
-            crate_name: "ogpu_native".to_owned(),
-            product: true,
-            deps: vec![
-                backend("ogpu_metal", "cfg(target_vendor = \"apple\")"),
-                backend("ogpu_vulkan", "cfg(windows)"),
-            ],
-            has_binary: false,
-            has_tests: false,
-        };
-        assert_eq!(target_platform("cfg(target_os = \"windows\")"), Some("windows"));
-        assert!(ogpu_native_errors(&package, "crates/ogpu_native/Cargo.toml").is_empty());
-        let mut unconditional = package.clone();
-        unconditional.deps[0].target = None;
-        assert!(ogpu_native_errors(&unconditional, "crates/ogpu_native/Cargo.toml")
-            .iter().any(|issue| issue.contains("unconditional")));
-    }
 
     #[test]
-    fn ogpu_consumers_select_a_backend() {
-        let app = Package {
-            manifest: PathBuf::from("crates/rays_bin/Cargo.toml"),
-            package_name: "rays".to_owned(),
-            crate_name: "rays".to_owned(),
-            product: true,
-            deps: Vec::new(),
-            has_binary: true,
-            has_tests: false,
+    fn backend_selection_distinguishes_cpu_tests_dev_targets_and_native_startup() {
+        let dependency = |name: &str, kind: &str, target: Option<&str>| DepSpec {
+            alias: name.into(), kind: kind.into(), target: target.map(str::to_owned), ..Default::default()
         };
-        let graph = HashMap::from([("rays".to_owned(), vec!["ogpu_core".to_owned()])]);
-        let missing = HashMap::from([("rays".to_owned(), vec!["ogpu_core".to_owned()])]);
-        assert!(!ogpu_selection_errors(&[app.clone()], &graph, &missing, Path::new("rs")).is_empty());
-        let selected = HashMap::from([("rays".to_owned(), vec!["ogpu_core".to_owned(), "ogpu_native".to_owned()])]);
-        assert!(ogpu_selection_errors(&[app], &graph, &selected, Path::new("rs")).is_empty());
-    }
-
-    #[test]
-    fn ogpu_selection_checks_each_platform_without_merging_backend_edges() {
+        let core = dependency("ogpu_core", "dependencies", None);
+        let metal = dependency("ogpu_metal", "dependencies", Some("cfg(target_os = \"macos\")"));
+        let vulkan = dependency("ogpu_vulkan", "dependencies", Some("cfg(windows)"));
+        let mock = dependency("ogpu_mock", "dev-dependencies", None);
         let mut app = Package {
             manifest: PathBuf::from("crates/app/Cargo.toml"),
             package_name: "app".into(), crate_name: "app".into(), product: true,
-            deps: vec![
-                DepSpec { alias: "ogpu_metal".into(), target: Some("cfg(target_os = \"macos\")".into()), ..Default::default() },
-                DepSpec { alias: "ogpu_vulkan".into(), target: Some("cfg(windows)".into()), ..Default::default() },
-            ],
-            has_binary: true, has_tests: false,
+            deps: vec![core.clone(), metal.clone(), vulkan.clone()],
+            has_binary: true, has_gpu_dev_targets: false,
         };
-        let graph = HashMap::new();
-        let selected = HashMap::from([("app".into(), vec!["ogpu_core".into(), "ogpu_metal".into(), "ogpu_vulkan".into()])]);
-        assert!(ogpu_selection_errors(&[app.clone()], &graph, &selected, Path::new("rs")).is_empty());
+        let graph = HashMap::from([
+            ("ogpu_metal".into(), vec!["ogpu_core".into()]),
+            ("ogpu_vulkan".into(), vec!["ogpu_core".into()]),
+            ("ogpu_mock".into(), vec!["ogpu_core".into()]),
+        ]);
+        let check = |package: &Package| {
+            let selected = HashMap::from([("app".into(), package.deps.iter().map(|d| d.alias.clone()).collect())]);
+            ogpu_selection_errors(&[package.clone()], &graph, &selected, Path::new("rs"))
+        };
+        assert!(check(&app).is_empty(), "normal target-specific native startup");
+        let valid = app.clone();
+        app.deps = vec![core.clone()];
+        assert_eq!(check(&app).len(), 2, "each platform needs its backend");
+        app.has_binary = false;
+        assert!(check(&app).is_empty(), "CPU unit/e2e tests may link portable GPU types");
+        app.has_gpu_dev_targets = true;
+        assert_eq!(check(&app).len(), 2, "GPU targets still require an implementation");
+        app.deps.push(mock.clone());
+        assert!(check(&app).is_empty(), "mock-only GPU contract tests");
+        for mut native in [metal.clone(), vulkan.clone()] {
+            native.kind = "dev-dependencies".into();
+            app.deps.push(native);
+        }
+        assert!(check(&app).is_empty(), "examples and tests may select mock and one platform-native backend");
+        app.has_binary = true;
+        assert_eq!(check(&app).len(), 2, "dev dependencies cannot satisfy production startup");
+        app = valid.clone();
+        app.has_gpu_dev_targets = true;
+        app.deps.push(mock.clone());
+        assert!(check(&app).is_empty(), "test mock does not change production selection");
+        app = valid.clone();
+        app.deps[1].optional = true;
+        assert!(!check(&app).is_empty(), "optional native edge");
+        app = valid.clone();
+        app.deps.push(metal.clone());
+        assert!(!check(&app).is_empty(), "duplicate native edges");
+        app = valid.clone();
+        app.deps[1].target = Some("cfg(windows)".into());
+        assert!(!check(&app).is_empty(), "wrong platform");
+        app = valid.clone();
         app.deps[1].target = None;
-        let errors = ogpu_selection_errors(&[app.clone()], &graph, &selected, Path::new("rs"));
-        assert_eq!(errors.len(), 1);
-        assert!(errors[0].contains("on apple"), "{errors:?}");
-        app.deps[1].target = Some("cfg(target_os = \"macos\")".into());
-        let errors = ogpu_selection_errors(&[app], &graph, &selected, Path::new("rs"));
-        assert_eq!(errors.len(), 2, "duplicate Apple backend and missing Windows backend: {errors:?}");
+        assert!(!check(&app).is_empty(), "unconditional native edge");
+        app = valid.clone();
+        app.deps[1].kind = "build-dependencies".into();
+        assert!(!check(&app).is_empty(), "build dependency is not a runtime backend");
+        app = valid;
+        app.deps.push(DepSpec { kind: "dependencies".into(), ..mock });
+        assert!(!check(&app).is_empty(), "native applications cannot select the mock backend");
+        assert_eq!(target_platform("cfg(target_os = \"windows\")"), Some("windows"));
+    }
+
+    #[test]
+    fn target_roles_keep_cpu_shader_printer_and_dev_examples_out_of_native_binaries() {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!("gate-targets-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        fs::create_dir_all(root.join("src")).unwrap();
+        let manifest = root.join("Cargo.toml");
+        fs::write(&manifest, "[package]\nname = \"flow_shader\"\n[[bin]]\nname = \"print_shader\"\npath = \"src/print_shader.rs\"\n").unwrap();
+        fs::write(root.join("src/print_shader.rs"), "fn main() {}").unwrap();
+        let roles = || super::package_targets(&root, &super::parse_manifest(&manifest).unwrap()).unwrap();
+        assert_eq!(roles(), (false, false), "code generation needs no driver");
+        fs::write(root.join("src/lib.rs"), "#[test] fn cpu_metadata_test() {}").unwrap();
+        assert_eq!(roles(), (false, false), "ordinary CPU tests do not initialize GPU");
+        fs::create_dir_all(root.join("examples")).unwrap();
+        fs::write(root.join("examples/orbit.rs"), "fn main() {}").unwrap();
+        assert_eq!(roles(), (false, true), "Cargo examples use dev dependencies");
+        fs::remove_dir_all(root.join("examples")).unwrap();
+        fs::write(&manifest, "[package]\nname = \"flow_shader\"\n[[bin]]\nname = \"print_shader\"\n[[bin]]\nname = \"app\"\n").unwrap();
+        assert_eq!(roles(), (true, false), "additional binaries retain strict startup checks");
+        fs::write(&manifest, "[package]\nname = \"app\"\n[[test]]\nname = \"gpu_first\"\n[[test]]\nname = \"cpu_last\"\n").unwrap();
+        assert_eq!(roles(), (false, true), "all explicit targets count, not just the last table");
+        fs::remove_dir_all(&root).unwrap();
     }
 }
