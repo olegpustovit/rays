@@ -23,8 +23,9 @@ const FRAMES: i64 = 30;
 // M: the scene graph is read in place: basic 1,384 / 157,167; empty 1,206 / 81,998; bare 1,417 / 96,657.
 // R3/R7 and G1: shared immutable data and GPU metadata: basic 1,382 / 157,055;
 // empty 1,206 / 81,958; bare 1,417 / 96,617.
+// R4/R5: shared prelude/operator/state storage: basic 1,356 / 149,687.
 // Never raise.
-const BASIC: (u64, u64) = (1_382, 157_055);
+const BASIC: (u64, u64) = (1_356, 149_687);
 const EMPTY: (u64, u64) = (1_206, 81_958);
 const BARE: (u64, u64) = (1_417, 96_617);
 

@@ -1,5 +1,5 @@
 use crate::{catalog, defnode, op, port_type};
-use crate::term_arena::{self as packed, Draft, Node as PackedNode, PathId, SyntaxId, TermBuilder};
+use crate::term_arena::{self as packed, Draft, Node as PackedNode, SyntaxId, TermBuilder};
 use flow_syntax::{context, lisp, macros, syntax::{self, Node as SNode, Syntax}, ty::{self, FnSignature, Ty}, value::Value};
 use param::{self, FieldView, KindView};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
@@ -32,6 +32,8 @@ pub struct Graph { pub name:String, pub context:Context, pub inputs:Vec<(String,
 pub struct NodeDefinition { pub kind:catalog::Kind, pub slots:Vec<catalog::Slot>, pub keyword_inputs:Vec<String>, pub fields:Vec<FieldView>, pub label:String, pub category:Vec<String>, pub description:Option<String>, pub operation:String, pub version:i64, pub body:Graph, pub validations:Vec<(Term,String,String)>, pub normalizers:Vec<(String,Term)> }
 #[derive(Clone, Debug, PartialEq)]
 pub enum PackedForm { Candidate(Arc<Paths>), Refused(Vec<Diagnostic>) }
+#[derive(Clone)]
+enum CheckPackedForm { Candidate(Arc<BTreeSet<CheckPath>>), Refused(Vec<Diagnostic>) }
 #[derive(Clone)]
 pub struct Workspace {
     pub name:String, pub graphs:Arc<Vec<Graph>>, pub defs:Arc<Vec<Graph>>, pub nodes:Arc<Vec<Arc<NodeDefinition>>>, pub macros:Arc<Vec<Syntax>>, pub source:Arc<Vec<Syntax>>,
@@ -158,14 +160,15 @@ impl Memory {
 pub struct OpSignature { pub pos:Vec<(String,Ty)>,pub opt:Vec<(String,Ty)>,pub rest:Option<(String,Ty)>,pub kw:Vec<(String,Ty)> }
 pub type op_signature = OpSignature;
 #[derive(Clone)]
-pub struct Prelude { checker: Checker }
+pub struct Prelude { checker: Rc<Checker> }
+pub fn prelude_ops_match(prelude: &Prelude, ops: &[op::Op]) -> bool { op::same_declarations(&prelude.checker.ops, ops) }
 pub const MAX_ITERATIONS:usize=4096;
 pub const BODY_CONTEXT_OPS:&[&str]=&["sop/context_seed","sop/provenance_base","sop/context_frame","sop/context_time"];
 const SPECIAL:&[&str]=&["workspace","graph","defn","defnode","defmacro","let*","ref","for","fold","scan","sum","state","if","with_error","error_rows","values","fn","cond","case","list","concat","str","get","assoc","map","filter","reduce","sort-by","iterate","quote","quasiquote","unquote","unquote-splicing"];
 pub fn special_forms()-> &'static [&'static str] { SPECIAL }
 pub fn context_name(ctx:&Context)->String { context::name(*ctx).to_owned() }
 pub fn max_iterations()->usize { MAX_ITERATIONS }
-pub fn value_ops()->Vec<String> { op::of_context(&[],&context::value()).into_iter().map(|o|o.name.clone()).collect() }
+pub fn value_ops()->Vec<String> { op::all().iter().filter(|o|o.ctx==context::value()).map(|o|o.name.clone()).collect() }
 pub fn op_signature(ops:&[op::Op],ctx:&Context,name:&str)->Option<OpSignature>{op::find(ops,name,ctx).map(|o|OpSignature{pos:o.signature.pos.clone(),opt:o.signature.opt.clone(),rest:o.signature.rest.clone(),kw:o.signature.kw.clone()})}
 pub fn op_choices(ops:&[op::Op],name:&str,argument:&str)->Vec<String>{op::find(ops,name,&context::value()).and_then(|o|o.choices.iter().find(|(n,_)|n==argument).map(|(_,v)|v.clone())).unwrap_or_default()}
 pub fn name_taken(name:&str)->bool { SPECIAL.contains(&name) || flow_syntax::symbol::reserved(name) || ty::names().iter().any(|(n,_)|n==name) || op::find(&[],name,&context::value()).is_some() }
@@ -263,12 +266,6 @@ fn path_text(path: &[String]) -> String {
     path.join("/")
 }
 
-fn marker(path: &[String], name: &str) -> Path {
-    let mut result = path.to_vec();
-    result.push(name.to_owned());
-    result
-}
-
 fn num_param(source: &str) -> Option<param::Value> {
     let number = syntax::number_value(source)?;
     if !source.contains('.') && !source.contains('e') && !source.contains('E') {
@@ -354,8 +351,8 @@ fn bypass_input_id(terms: &TermBuilder, term: TermId) -> Option<TermId> {
     }
 }
 
-fn packed_body(ops: &[op::Op], terms: &TermBuilder, term: TermId) -> bool {
-    let packed = |name: &str| op::find(ops, name, &context::value()).and_then(|operator| op::packed_kind(&operator));
+fn packed_body(ops: &Arc<Vec<op::Op>>, terms: &TermBuilder, term: TermId) -> bool {
+    let packed = |name: &str| op::find_checked(ops, name, &context::value()).and_then(|(_, metadata)| metadata.packed_kind);
     let body = |term: TermId| packed_body(ops, terms, term);
     match terms.node(term) {
         PackedNode::Lit(id) => matches!(terms.literal(id), packed::Literal::Int(_) | packed::Literal::Float(_) | packed::Literal::Bool(_)),
@@ -441,9 +438,9 @@ struct Info {
     callable: Option<Rc<Callable>>,
     vary: BTreeSet<usize>,
     groups: BTreeSet<String>,
-    packed: Paths,
+    packed: BTreeSet<CheckPath>,
     approx: bool,
-    approx_sources: Paths,
+    approx_sources: BTreeSet<CheckPath>,
     state_dep: bool,
     list_fields: Vec<Vec<String>>,
 }
@@ -458,9 +455,9 @@ impl Info {
             callable: None,
             vary: BTreeSet::new(),
             groups: BTreeSet::new(),
-            packed: Paths::new(),
+            packed: BTreeSet::new(),
             approx: false,
-            approx_sources: Paths::new(),
+            approx_sources: BTreeSet::new(),
             state_dep: false,
             list_fields: Vec::new(),
         }
@@ -500,25 +497,25 @@ impl Info {
     }
 }
 
-/// Lexical bindings in stack order; each layer is keyed by an interned graph path.
+/// Lexical bindings in stack order.
 #[derive(Clone, Default)]
 struct ScopeStack {
-    layers: Rc<Vec<(PathId, Rc<BTreeMap<String, Info>>)>>,
+    layers: Rc<Vec<Rc<BTreeMap<String, Info>>>>,
 }
 impl ScopeStack {
-    fn push(&self, path: PathId) -> Self {
+    fn push(&self) -> Self {
         let mut layers = self.layers.as_ref().clone();
-        layers.push((path, Rc::new(BTreeMap::new())));
+        layers.push(Rc::new(BTreeMap::new()));
         Self { layers: Rc::new(layers) }
     }
-    fn from_map(path: PathId, bindings: BTreeMap<String, Info>) -> Self {
-        Self { layers: Rc::new(vec![(path, Rc::new(bindings))]) }
+    fn from_map(bindings: BTreeMap<String, Info>) -> Self {
+        Self { layers: Rc::new(vec![Rc::new(bindings)]) }
     }
     fn snapshot(&self) -> Self {
         self.clone()
     }
     fn get(&self, name: &str) -> Option<&Info> {
-        for (_, map) in self.layers.iter().rev() {
+        for map in self.layers.iter().rev() {
             if let Some(value) = map.get(name) {
                 return Some(value);
             }
@@ -529,21 +526,21 @@ impl ScopeStack {
         self.get(name).is_some()
     }
     fn is_empty(&self) -> bool {
-        self.layers.is_empty() || self.layers.iter().all(|(_, map)| map.is_empty())
+        self.layers.is_empty() || self.layers.iter().all(|map| map.is_empty())
     }
     fn binding_names(&self) -> Vec<String> {
         let mut names = BTreeSet::new();
-        for (_, map) in &*self.layers {
+        for map in &*self.layers {
             names.extend(map.keys().cloned());
         }
         names.into_iter().collect()
     }
-    fn top_mut(&mut self, path: PathId) -> &mut BTreeMap<String, Info> {
+    fn top_mut(&mut self) -> &mut BTreeMap<String, Info> {
         let layers = Rc::make_mut(&mut self.layers);
         if layers.is_empty() {
-            layers.push((path, Rc::new(BTreeMap::new())));
+            layers.push(Rc::new(BTreeMap::new()));
         }
-        let (_, map) = layers.last_mut().expect("scope stack layer");
+        let map = layers.last_mut().expect("scope stack layer");
         Rc::make_mut(map)
     }
 }
@@ -551,14 +548,14 @@ impl ScopeStack {
 #[derive(Clone)]
 enum Callable{Local(Rc<Closure>),Def(String),Op(String),Kind(catalog::Kind)}
 #[derive(Clone)]
-struct Closure{params:Vec<(Syntax,Option<Ty>)>,body:Syntax,env:ScopeStack,ctx:Context,path:Path,name:String}
+struct Closure{params:Vec<(Syntax,Option<Ty>)>,body:Syntax,env:ScopeStack,ctx:Context,path:CheckPath,name:String}
 #[derive(Clone)]
 struct Sig{name:String,ctx:Context,params:Vec<(String,Ty,Option<Syntax>)>,body:Syntax,form:Syntax}
 #[derive(Clone)]
-struct Cx{env:ScopeStack,ctx:Context,path:Path,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
+struct Cx{env:ScopeStack,ctx:Context,path:CheckPath,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
 impl Cx {
     /// A clone at another path, without copying the path it replaces.
-    fn with_path(&self, path: Path) -> Cx {
+    fn with_path(&self, path: CheckPath) -> Cx {
         Cx { env: self.env.clone(), ctx: self.ctx.clone(), path, scope: self.scope.clone(), stack: self.stack.clone(), ..*self }
     }
 }
@@ -574,17 +571,23 @@ struct Arg{key:Option<String>,form:Syntax,term:TermId,info:Info}
 struct CallMemo<T> { env: Vec<Info>, probes: Vec<String>, reach: Option<usize>, steps: usize, term: T, value: Info, closure: Option<Rc<Closure>> }
 type CallMemos<T> = BTreeMap<String, Vec<CallMemo<T>>>;
 
+/// Paths belong to the checker (including its immutable prelude prefix), never a swapped TermBuilder.
+type CheckPath = usize;
+
 struct Checker {
+    base: Option<Rc<Checker>>,
+    paths: Vec<Arc<[String]>>,
+    path_index: flow_syntax::arena::FastMap<Arc<[String]>, CheckPath>,
     terms: TermBuilder,
-    catalog: catalog::Catalog,
-    ops: Vec<op::Op>,
+    catalog: Rc<catalog::Catalog>,
+    ops: Arc<Vec<op::Op>>,
     library: bool,
     call_sites: bool,
     diags: Vec<Diagnostic>,
-    live: Paths,
-    invariant: Paths,
-    packed: BTreeMap<Path, PackedForm>,
-    roots: Vec<(Syntax, Path)>,
+    live: BTreeSet<CheckPath>,
+    invariant: BTreeSet<CheckPath>,
+    packed: BTreeMap<CheckPath, CheckPackedForm>,
+    roots: Vec<(Syntax, CheckPath)>,
     defs: BTreeMap<String, Sig>,
     graphs: BTreeMap<String, Sig>,
     macros: BTreeMap<String, Syntax>,
@@ -595,8 +598,8 @@ struct Checker {
     ginfo: BTreeMap<String, Info>,
     def_terms: BTreeMap<String, Graph>,
     kind_fns: BTreeMap<String, (String, Context, Vec<catalog::Slot>)>,
-    inline: BTreeMap<Path, usize>,
-    input_paths: BTreeMap<Path, BTreeMap<(i64, String), Path>>,
+    inline: BTreeMap<CheckPath, usize>,
+    input_paths: BTreeMap<CheckPath, BTreeMap<(i64, String), CheckPath>>,
     checked_defs: BTreeSet<String>,
     graph_order: Vec<String>,
     def_order: Vec<String>,
@@ -623,29 +626,13 @@ struct Checker {
     probes: Vec<String>,
 }
 
-impl Clone for Checker {
-    fn clone(&self) -> Self {
-        Self { terms: TermBuilder::new(), catalog: self.catalog.clone(), ops: self.ops.clone(),
-            library: self.library, call_sites: self.call_sites, diags: self.diags.clone(), live: self.live.clone(),
-            invariant: self.invariant.clone(), packed: self.packed.clone(), roots: self.roots.clone(),
-            defs: self.defs.clone(), graphs: self.graphs.clone(), macros: self.macros.clone(), macro_forms: self.macro_forms.clone(),
-            node_defs: self.node_defs.clone(), nodes: self.nodes.clone(), graph_terms: self.graph_terms.clone(),
-            ginfo: self.ginfo.clone(), def_terms: self.def_terms.clone(), kind_fns: self.kind_fns.clone(),
-            inline: self.inline.clone(), input_paths: self.input_paths.clone(), checked_defs: self.checked_defs.clone(),
-            graph_order: self.graph_order.clone(), def_order: self.def_order.clone(), node_order: self.node_order.clone(),
-            declared_names: self.declared_names.clone(), steps: self.steps, count: self.count, children: self.children,
-            zone_id: self.zone_id, graph_stack: self.graph_stack.clone(), calls: BTreeMap::new(), kept: BTreeMap::new(),
-            inherited: self.inherited.clone(), events: self.events,
-            depth_seen: None, probes: Vec::new() }
-    }
-}
-
 impl Checker {
-    fn new(catalog: catalog::Catalog, ops: &[op::Op], library: bool, call_sites: bool) -> Self {
+    fn new(catalog: Rc<catalog::Catalog>, ops: Arc<Vec<op::Op>>, library: bool, call_sites: bool) -> Self {
         Self {
+            base: None, paths: Vec::new(), path_index: Default::default(),
             terms: TermBuilder::new(),
             catalog,
-            ops: ops.to_vec(),
+            ops,
             library,
             call_sites,
             diags: Vec::new(),
@@ -683,57 +670,99 @@ impl Checker {
             probes: Vec::new(),
         }
     }
+    fn fork(base: Rc<Checker>) -> Self {
+        let mut checker = Self::new(base.catalog.clone(), base.ops.clone(), base.library, base.call_sites);
+        checker.diags = base.diags.clone();
+        checker.steps = base.steps; checker.count = base.count; checker.children = base.children;
+        checker.zone_id = base.zone_id; checker.events = base.events;
+        checker.inherited = base.inherited.clone();
+        checker.base = Some(base);
+        checker
+    }
+    fn path_names(&self, path: CheckPath) -> &Arc<[String]> {
+        let prefix = self.base.as_ref().map_or(0, |base| base.paths.len());
+        if path < prefix { &self.base.as_ref().unwrap().paths[path] } else { &self.paths[path - prefix] }
+    }
+    fn path(&mut self, names: Vec<String>) -> CheckPath {
+        if let Some(id) = self.path_index.get(names.as_slice()) { return *id; }
+        if let Some(id) = self.base.as_ref().and_then(|base| base.path_index.get(names.as_slice())) { return *id; }
+        let id = self.base.as_ref().map_or(0, |base| base.paths.len()) + self.paths.len();
+        let names: Arc<[String]> = names.into();
+        self.paths.push(names.clone()); self.path_index.insert(names, id); id
+    }
+    fn child_path(&mut self, parent: CheckPath, name: String) -> CheckPath {
+        let mut names = self.path_names(parent).to_vec(); names.push(name); self.path(names)
+    }
+    fn packed_update(&mut self, path: CheckPath, next: CheckPackedForm) {
+        let old = self.packed.get(&path).or_else(|| self.base.as_ref()?.packed.get(&path)).cloned();
+        let merged=match old { Some(old)=>Self::merge_packed(old,next), None=>next };
+        self.packed.insert(path, merged);
+    }
+    fn defs_get(&self, name: &str) -> Option<&Sig> { self.defs.get(name).or_else(|| self.base.as_ref()?.defs.get(name)) }
+    fn graphs_get(&self, name: &str) -> Option<&Sig> { self.graphs.get(name).or_else(|| self.base.as_ref()?.graphs.get(name)) }
+    fn node_defs_get(&self, name: &str) -> Option<&defnode::Defnode> { self.node_defs.get(name).or_else(|| self.base.as_ref()?.node_defs.get(name)) }
+    fn ginfo_get(&self, name: &str) -> Option<&Info> { self.ginfo.get(name).or_else(|| self.base.as_ref()?.ginfo.get(name)) }
+    fn def_terms_get(&self, name: &str) -> Option<&Graph> { self.def_terms.get(name).or_else(|| self.base.as_ref()?.def_terms.get(name)) }
+    fn macros_contains(&self, name: &str) -> bool { self.macros.contains_key(name) || self.base.as_ref().is_some_and(|base| base.macros.contains_key(name)) }
+    fn declared_names_contains(&self, name: &str) -> bool { self.declared_names.contains(name) || self.base.as_ref().is_some_and(|base| base.declared_names.contains(name)) }
+    fn checked_defs_contains(&self, name: &str) -> bool { self.checked_defs.contains(name) || self.base.as_ref().is_some_and(|base| base.checked_defs.contains(name)) }
  fn make_term(&mut self, form: &Syntax, ty: Ty, node: Draft) -> TermId {
      let form = self.terms.import_form(form);
      self.terms.push(None, &ty, form, node)
  }
- fn set_path(&mut self, term: TermId, path: Path) -> TermId { self.terms.with_path(term, Some(&path)) }
+ fn set_path(&mut self, term: TermId, path: CheckPath) -> TermId { let path=self.path_names(path).clone(); self.terms.with_path(term, Some(&path)) }
  fn term_form(&self, term: TermId) -> &Syntax { self.terms.source_form(term).expect("checked term source form") }
  fn add(&mut self,sev:Severity,form:&Syntax,code:&str,msg:String){add_to(&mut self.diags,sev,form,code,msg)}
  fn error(&mut self,f:&Syntax,c:&str,m:&str){self.add(Severity::ErrorSeverity,f,c,m.to_owned())}
  fn warn(&mut self,f:&Syntax,c:&str,m:&str){self.add(Severity::Warning,f,c,m.to_owned())}
  fn warn_owned(&mut self,f:&Syntax,c:&str,m:String){self.add(Severity::Warning,f,c,m)}
- fn inline_path(&mut self,cx:&Cx,seg:&str)->Path{self.events+=1;let mut key=cx.path.clone();key.push(seg.to_owned());let n=*self.inline.get(&key).unwrap_or(&0);self.inline.insert(key.clone(),n+1);if n==0{key}else{let mut p=cx.path.clone();p.push(format!("{seg}~{n}"));p}}
- fn merge_packed(old: PackedForm, next: PackedForm) -> PackedForm {
+ fn inline_path(&mut self,cx:&Cx,seg:&str)->CheckPath {
+     self.events+=1;
+     let key=self.child_path(cx.path,seg.to_owned());
+     let n=self.inline.get(&key).or_else(||self.base.as_ref()?.inline.get(&key)).copied().unwrap_or(0);
+     self.inline.insert(key,n+1);
+     if n==0 {key} else {self.child_path(cx.path,format!("{seg}~{n}"))}
+ }
+ fn merge_packed(old: CheckPackedForm, next: CheckPackedForm) -> CheckPackedForm {
      match (old, next) {
-         (PackedForm::Candidate(mut left), PackedForm::Candidate(right)) => {
+         (CheckPackedForm::Candidate(mut left), CheckPackedForm::Candidate(right)) => {
              if !right.is_subset(&left) { Arc::make_mut(&mut left).extend(right.iter().cloned()); }
-             PackedForm::Candidate(left)
+             CheckPackedForm::Candidate(left)
          }
-         (PackedForm::Refused(mut left), PackedForm::Refused(right)) => {
+         (CheckPackedForm::Refused(mut left), CheckPackedForm::Refused(right)) => {
              for diagnostic in right {
                  if !left.iter().any(|old| old.code == diagnostic.code && old.span == diagnostic.span && old.message == diagnostic.message) {
                      left.push(diagnostic);
                  }
              }
-             PackedForm::Refused(left)
+             CheckPackedForm::Refused(left)
          }
-         (refusal @ PackedForm::Refused(_), _) => refusal,
-         (candidate @ PackedForm::Candidate(_), PackedForm::Refused(_)) => candidate,
+         (refusal @ CheckPackedForm::Refused(_), _) => refusal,
+         (candidate @ CheckPackedForm::Candidate(_), CheckPackedForm::Refused(_)) => candidate,
      }
  }
 
- fn mark(&mut self, path: Path, value: &Info) {
+ fn mark(&mut self, path: CheckPath, value: &Info) {
      if value.live {
          self.live.insert(path.clone());
      }
      if !value.packed.is_empty() {
-         let next = PackedForm::Candidate(Arc::new(value.packed.clone()));
-         self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
+         let next = CheckPackedForm::Candidate(Arc::new(value.packed.clone()));
+         self.packed_update(path, next);
      }
  }
 
- fn add_root(&mut self, form: &Syntax, path: Path, refusal: Option<Diagnostic>) {
-     if !self.roots.iter().any(|(old, owner)| old.id == form.id && owner == &path) {
+ fn add_root(&mut self, form: &Syntax, path: CheckPath, refusal: Option<Diagnostic>) {
+     if !self.base.iter().flat_map(|base|base.roots.iter()).chain(self.roots.iter()).any(|(old, owner)| old.id == form.id && owner == &path) {
          self.roots.push((form.clone(), path.clone()));
      }
      let next = match refusal {
-         Some(reason) => PackedForm::Refused(vec![reason]),
-         None => PackedForm::Candidate(Arc::new([path.clone()].into_iter().collect())),
+         Some(reason) => CheckPackedForm::Refused(vec![reason]),
+         None => CheckPackedForm::Candidate(Arc::new([path.clone()].into_iter().collect())),
      };
-     self.packed.entry(path.clone()).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
-     let producer = PackedForm::Candidate(Arc::new([path.clone()].into_iter().collect()));
-     self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), producer.clone())).or_insert(producer);
+     self.packed_update(path.clone(), next);
+     let producer = CheckPackedForm::Candidate(Arc::new([path.clone()].into_iter().collect()));
+     self.packed_update(path, producer);
  }
 
  fn fail_term(&mut self, form: &Syntax, code: &str, message: &str) -> (TermId, Info) {
@@ -747,8 +776,8 @@ impl Checker {
          sources.insert(cx.path.clone());
      }
      if !sources.is_empty() {
-         let producers = sources.iter().map(|path| path_text(path)).collect::<Vec<_>>().join(", ");
-         self.error(form, "E_APPROX_SINK", &format!("Approximate values require (exact x) before catalog calls, exports, state or cache keys. Producer: {producers}; sink: {} ({sink}).", path_text(&cx.path)));
+         let producers = sources.iter().map(|path| self.path_names(*path).to_vec()).collect::<Paths>().iter().map(|path|path_text(path)).collect::<Vec<_>>().join(", ");
+         self.error(form, "E_APPROX_SINK", &format!("Approximate values require (exact x) before catalog calls, exports, state or cache keys. Producer: {producers}; sink: {} ({sink}).", path_text(self.path_names(cx.path))));
      }
  }
 
@@ -815,7 +844,7 @@ impl Checker {
          value.ty = checked.ty;
          return (branch, value);
      }
-     if SPECIAL.contains(&head) || self.macros.contains_key(head) {
+     if SPECIAL.contains(&head) || self.macros_contains(head) {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {head}: only operator and function calls pass an input through."));
      }
      let args = &items[1..];
@@ -916,17 +945,19 @@ impl Checker {
  fn no_fn(&mut self,f:&Syntax,t:&Ty,what:&str){if ty::has_fn(t){self.error(f,"E_FN_ESCAPES",&format!("{what} is a function; a function value cannot be stored or returned (E_FN_ESCAPES). Call it where it is bound."))}}
  fn input(&mut self, cx: &Cx, form: &Syntax, key: &str) -> (TermId, Info) {
      let head = syntax::head(form).unwrap_or("");
-     if !head.contains('/') && !self.macros.contains_key(head) && !opaque_head(head) {
+     if !head.contains('/') && !self.macros_contains(head) && !opaque_head(head) {
          return self.infer(cx, form);
      }
      let memo = (form.id, key.to_owned());
-     let path = if let Some(path) = self.input_paths.get(&cx.path).and_then(|paths| paths.get(&memo)) {
+     let path = if let Some(path) = self.input_paths.get(&cx.path).and_then(|paths| paths.get(&memo)).or_else(|| self.base.as_ref()?.input_paths.get(&cx.path)?.get(&memo)) {
          path.clone()
      } else {
-         let mut stem = cx.path.clone();
+         let mut stem = self.path_names(cx.path).to_vec();
          let leaf = stem.pop().unwrap_or_else(|| "@result".into());
          stem.push(format!("{leaf}#{key}"));
-         let count = self.inline.entry(stem.clone()).or_insert(0);
+         let stem_id = self.path(stem.clone());
+         let previous = self.base.as_ref().and_then(|base| base.inline.get(&stem_id)).copied().unwrap_or(0);
+         let count = self.inline.entry(stem_id).or_insert(previous);
          let path = if *count == 0 {
              stem
          } else {
@@ -937,6 +968,7 @@ impl Checker {
              unique
          };
          *count += 1;
+         let path = self.path(path);
          self.input_paths.entry(cx.path.clone()).or_default().insert(memo, path.clone());
          path
      };
@@ -955,15 +987,17 @@ impl Checker {
  }
  fn bind(&mut self, cx: &Cx, pattern: &Syntax, value: Info, marker_text: &str, env: &mut BTreeMap<String, Info>) {
      if !matches!(&pattern.node, SNode::Sym(_)) {
-         let mut path = cx.path.clone();
+         let mut path = self.path_names(cx.path).to_vec();
          path.push(format!("{marker_text}{}", Self::pattern_key(pattern)));
+         let path=self.path(path);
          self.mark(path, &value);
      }
      match &pattern.node {
          SNode::Sym(name) => {
              let name = pattern.name(*name).to_owned();
-             let mut path = cx.path.clone();
+             let mut path = self.path_names(cx.path).to_vec();
              path.push(format!("{marker_text}{name}"));
+             let path=self.path(path);
              self.mark(path, &value);
              env.insert(name.clone(), value);
          }
@@ -1091,7 +1125,7 @@ impl Checker {
  }
 
  fn path_term(&mut self,cx:&Cx,f:&Syntax,term:TermId,v:Info)->(TermId,Info){let t=self.set_path(term,cx.path.clone());self.mark(cx.path.clone(),&v);(t,v)}
- fn binding(&mut self, cx: &Cx, x: &Syntax, id: Path) -> (TermId, Info) {
+ fn binding(&mut self, cx: &Cx, x: &Syntax, id: CheckPath) -> (TermId, Info) {
      let inner = cx.with_path(id.clone());
      let head = match x.node {
          SNode::List(range) if x.meta().is_empty() => {
@@ -1113,8 +1147,8 @@ impl Checker {
      term = self.set_path(term, id);
      (term, value)
  }
- fn result_in(&mut self, cx: &Cx, form: &Syntax, base: &Path) -> (TermId, Info) {
-     let path = marker(base, "@result");
+ fn result_in(&mut self, cx: &Cx, form: &Syntax, base: &CheckPath) -> (TermId, Info) {
+     let path = self.child_path(*base, "@result".into());
      let (term, value) = self.binding(cx, form, path);
      self.no_fn(form, &value.ty, &format!("The result of {}", cx.scope));
      (term, value)
@@ -1128,30 +1162,31 @@ impl Checker {
              return self.let_scope(cx, form, &items[1..], cx.path.clone());
          }
      }
-     let path = marker(&cx.path, "@result");
+     let path = self.child_path(cx.path, "@result".into());
      let (term, value) = self.binding(cx, form, path);
      self.no_fn(form, &value.ty, &format!("The result of {}", cx.scope));
      (term, value)
  }
 
  fn branch_test(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (TermId, Info) {
-     let mut path = cx.path.clone();
+     let mut path = self.path_names(cx.path).to_vec();
      if let Some(last) = path.pop() {
          path.push(format!("{last}#{key}"));
      } else {
          path.push(format!("@result#{key}"));
      }
-     self.binding(cx, form, path)
+     {let path=self.path(path);self.binding(cx, form, path)}
  }
 
  fn branch(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (TermId, Info) {
-     let mut path = cx.path.clone();
+     let mut path = self.path_names(cx.path).to_vec();
      if let Some(last) = path.pop() {
          path.push(format!("{last}#{key}"));
      } else {
          path.push(format!("@result#{key}"));
      }
-     let inner = cx.with_path(path.clone());
+     let path = self.path(path);
+     let inner = cx.with_path(path);
      let (mut term, value) = self.body(&inner, form);
      if syntax::head(form) != Some("let*") {
          term = self.make_term(form, value.ty.clone(), Draft::Let(Vec::new(), term));
@@ -1166,19 +1201,18 @@ impl Checker {
    "quote"|"quasiquote"|"unquote"|"unquote-splicing"=>self.fail_term(f,"E_QUOTE",&format!("{name} belongs in a defmacro template (`…).")),"workspace"|"graph"|"defn"|"defnode"|"defmacro"=>self.fail_term(f,"E_FORM",&format!("{name} is a top-level form of a workspace.")),
    _=>self.call_named(cx,f,name,args)
  }}
- fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[SyntaxId],base:Path)->(TermId,Info){
+ fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[SyntaxId],base:CheckPath)->(TermId,Info){
      if args.len()!=2{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}
      let bindings=f.child(args[0]);
      let SNode::Vec(bs)=bindings.node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};
      let bs=bindings.range(bs);
      if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}
-     let base_id = self.terms.path(&base);
-     let mut env = cx.env.push(base_id);
+     let mut env = cx.env.push();
      let mut out=Vec::new();let mut seen=BTreeSet::new();
      for pair in bs.chunks_exact(2){
          let p=&f.child(pair[0]);let expr=&f.child(pair[1]);
          if !self.check_pattern(cx,p,&mut seen,&env,"let*"){continue}
-         let mut path=base.clone();path.push(Self::pattern_key(p));
+         let path=self.child_path(base,Self::pattern_key(p));
          let mut inner=cx.with_path(path.clone());inner.env=env.snapshot();inner.zbody=false;
          let(t,v)=if expr.meta().is_empty()&&matches!(p.node,SNode::Sym(_))&&syntax::head(expr)==Some("fn"){
              let args=expr.children();
@@ -1186,7 +1220,7 @@ impl Checker {
          }else{self.binding(&inner,expr,path.clone())};
          let t=self.set_path(t,path.clone());self.mark(path.clone(),&v);
          if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}
-         {let bcx=cx.with_path(base.clone());self.bind(&bcx,p,v.clone(),"",env.top_mut(base_id));}
+         {let bcx=cx.with_path(base.clone());self.bind(&bcx,p,v.clone(),"",env.top_mut());}
          out.push((Self::pattern(p),t));
      }
      let mut inner=cx.clone();inner.env=env.snapshot();inner.zbody=false;
@@ -1374,7 +1408,7 @@ impl Checker {
      let ty = result_ty.unwrap_or(Ty::Any);
      let default = default.unwrap_or_else(|| self.make_term(form, Ty::Any, Draft::Nil));
      if test_live && shape_ty(&ty) {
-         self.error(form, "E_TIME_BRANCH", &format!("A branch in {} picks between shapes by t. The network keeps its shape while playing; pick a value instead.", path_text(&cx.path)));
+         self.error(form, "E_TIME_BRANCH", &format!("A branch in {} picks between shapes by t. The network keeps its shape while playing; pick a value instead.", path_text(self.path_names(cx.path))));
      }
      let mut value = Info::derive(ty.clone(), &values);
      let mut lf = values.iter().flat_map(|value| value.list_fields.iter().cloned()).collect::<Vec<_>>();
@@ -1393,7 +1427,7 @@ impl Checker {
      };
      (self.make_term(form, ty, node), value)
  }
- fn state(&mut self, cx: &Cx, form: &Syntax, args: &[SyntaxId], at: Option<Path>) -> (TermId, Info) {
+ fn state(&mut self, cx: &Cx, form: &Syntax, args: &[SyntaxId], at: Option<CheckPath>) -> (TermId, Info) {
      if args.len() != 2 {
          return self.fail_term(form, "E_STATE", "state is (state [s init] step).");
      }
@@ -1427,9 +1461,8 @@ impl Checker {
      init_value.state_dep = true;
      init_value.list_fields = seed_list_fields.clone();
      init_value.live_len = seed_list_fields.iter().any(Vec::is_empty);
-     let zone_id = self.terms.path(&zone);
-     let mut env = cx.env.push(zone_id);
-     self.bind(cx, pattern, init_value.clone(), ":", env.top_mut(zone_id));
+     let mut env = cx.env.push();
+     self.bind(cx, pattern, init_value.clone(), ":", env.top_mut());
      let mut inner = cx.with_path(zone.clone());
      inner.env = env.snapshot();
      let (step, step_value) = self.body(&inner, &form.child(args[1]));
@@ -1453,12 +1486,12 @@ impl Checker {
              binder: Self::pattern(pattern),
              init: init,
              step: step,
-             zone,
+             zone: self.path_names(zone).to_vec(),
          }),
          value,
      )
  }
- fn zone(&mut self, cx: &Cx, form: &Syntax, name: &str, args: &[SyntaxId], at: Option<Path>) -> (TermId, Info) {
+ fn zone(&mut self, cx: &Cx, form: &Syntax, name: &str, args: &[SyntaxId], at: Option<CheckPath>) -> (TermId, Info) {
      let kind = match name { "for" => LoopKind::For, "fold" => LoopKind::Fold, "scan" => LoopKind::Scan, _ => LoopKind::Sum };
      let is_acc = matches!(kind, LoopKind::Fold | LoopKind::Scan);
      let vector = |id: SyntaxId| match form.arena().row(id).node {
@@ -1512,19 +1545,18 @@ impl Checker {
          self.no_fn(&form.child(accs[1]), &v.ty, &format!("The {name} accumulator"));
          Some((form.child(accs[0]), t, v))
      } else { None };
-     let last = id.last().cloned().unwrap_or_else(|| name.to_owned());
+     let last = self.path_names(id).last().cloned().unwrap_or_else(|| name.to_owned());
      let zcx = cx.with_path(id.clone());
      let acc_live0 = init.as_ref().is_some_and(|(_, _, v)| v.live);
      let mut run_live = acc_live0;
-     let zone_path_id = self.terms.path(&id);
      let (clauses, lens, outer, bt, bv) = loop {
-         let mut env = cx.env.push(zone_path_id);
+         let mut env = cx.env.push();
          if let Some((p, _, iv)) = &init {
              let mut seed = iv.clone();
              seed.live = run_live;
              seed.vary.insert(zid);
              seed.live_len = false;
-             self.bind(&zcx, p, seed, ":", env.top_mut(zone_path_id));
+             self.bind(&zcx, p, seed, ":", env.top_mut());
          }
          let mut clauses = Vec::new();
          let mut lens = Vec::new();
@@ -1553,7 +1585,7 @@ impl Checker {
              part.len = None;
              part.callable = None;
              part.vary.insert(zid);
-             self.bind(&zcx, p, part, ":", env.top_mut(zone_path_id));
+             self.bind(&zcx, p, part, ":", env.top_mut());
              clauses.push((Self::pattern(p), ct));
              lens.push(cv.len);
              outer.push(cv);
@@ -1581,7 +1613,7 @@ impl Checker {
      let acc_ty = acc_ty.map(|at| ty::join(&at, self.terms.ty(bt)).unwrap_or(at));
      let packed = clauses.iter().any(|(_, t)| matches!(self.terms.ty(*t), Ty::Array(_)));
      let result_ty = match (kind, &acc_ty) { (LoopKind::Fold, Some(t)) => t.clone(), _ => self.terms.ty(bt).clone() };
-     let cooked_fold = kind == LoopKind::Fold && cx.ctx == context::sop() && geometry_accumulator(&result_ty) && cx.stack.iter().any(|n| self.node_defs.contains_key(n));
+     let cooked_fold = kind == LoopKind::Fold && cx.ctx == context::sop() && geometry_accumulator(&result_ty) && cx.stack.iter().any(|n| self.node_defs_get(n).is_some());
      if packed && shape_ty(&result_ty) && !cooked_fold {
          self.error(form, "E_ARRAY_TYPE", "Packed-array loops produce data; their length cannot create graph nodes.");
      }
@@ -1632,22 +1664,23 @@ impl Checker {
      self.link_body(bt, &id);
      value.packed = [id.clone()].into_iter().collect();
      let accs_ir = init.as_ref().map(|(p, t, _)| vec![(Self::pattern(p), *t)]).unwrap_or_default();
-     (self.make_term(form, ty, Draft::Loop { kind, accs: accs_ir, clauses, skip, body: bt, zone: id }), value)
+     (self.make_term(form, ty, Draft::Loop { kind, accs: accs_ir, clauses, skip, body: bt, zone: self.path_names(id).to_vec() }), value)
  }
- fn link_body(&mut self, term: TermId, producer: &Path) {
+ fn link_body(&mut self, term: TermId, producer: &CheckPath) {
      let node = self.terms.node(term);
      match node {
          PackedNode::Hof(_) | PackedNode::Loop(_) | PackedNode::Fn(_) => return,
          PackedNode::Op(id)
-             if op::find(&self.ops, self.terms.name(self.terms.op(id).op), &context::value())
-                 .and_then(|operator| op::packed_kind(&operator))
+             if op::find_checked(&self.ops, self.terms.name(self.terms.op(id).op), &context::value())
+                 .and_then(|(_, metadata)| metadata.packed_kind)
                  == Some(op::PackedKind::Exact) => return,
          _ => (),
      }
      if let Some(path) = self.terms.row(term).path {
-         let path = self.terms.path_names(path).iter().map(|&name| self.terms.name(name).to_owned()).collect();
-         let next = PackedForm::Candidate(Arc::new([producer.clone()].into_iter().collect()));
-         self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
+         let path = self.terms.path_names(path).iter().map(|&name| self.terms.name(name).to_owned()).collect::<Vec<_>>();
+         let path = self.path(path);
+         let next = CheckPackedForm::Candidate(Arc::new([producer.clone()].into_iter().collect()));
+         self.packed_update(path, next);
      }
      if matches!(node, PackedNode::Vec(_) | PackedNode::Get(_) | PackedNode::Bypass(_) | PackedNode::Expanded(_)
          | PackedNode::Op(_) | PackedNode::Let(_) | PackedNode::WithError(_) | PackedNode::ErrorRows(_)
@@ -1658,14 +1691,13 @@ impl Checker {
          }
      }
  }
- fn make_fn(&mut self, cx: &Cx, f: &Syntax, args: &[SyntaxId], name: &str, at: Option<Path>) -> (TermId, Info) {
+ fn make_fn(&mut self, cx: &Cx, f: &Syntax, args: &[SyntaxId], name: &str, at: Option<CheckPath>) -> (TermId, Info) {
      if args.len() != 2 { return self.fail_term(f, "E_FN", "fn is (fn [params] body)."); }
      let SNode::Vec(ps) = f.arena().row(args[0]).node else { return self.fail_term(f, "E_FN", "fn is (fn [params] body)."); };
      let path = at.unwrap_or_else(|| self.inline_path(cx, "~fn"));
      let bcx = cx.with_path(path.clone());
      let mut params = Vec::new();
-     let fn_scope = self.terms.path(&path);
-     let mut env = cx.env.push(fn_scope);
+     let mut env = cx.env.push();
      let mut seen = BTreeSet::new();
      for &id in f.range(ps) {
          let p = f.child(id);
@@ -1680,7 +1712,7 @@ impl Checker {
          }
          if !self.check_pattern(cx, &pat, &mut seen, &env, "fn") { continue; }
          params.push((pat.clone(), annot.clone()));
-         self.bind(&bcx, &pat, Info::leaf(annot.unwrap_or(Ty::Any)), ":", env.top_mut(fn_scope));
+         self.bind(&bcx, &pat, Info::leaf(annot.unwrap_or(Ty::Any)), ":", env.top_mut());
      }
      let mut inner = cx.with_path(path.clone());
      inner.env = env.snapshot();
@@ -1695,13 +1727,13 @@ impl Checker {
      value.live = bv.live;
      value.state_dep = bv.state_dep;
      value.callable = Some(callable);
-     (self.make_term(f, Ty::Fn(None), Draft::Fn { params: ir_params, body: bt, zone: path, capture: None }), value)
+     (self.make_term(f, Ty::Fn(None), Draft::Fn { params: ir_params, body: bt, zone: self.path_names(path).to_vec(), capture: None }), value)
  }
  fn fn_value(&mut self, cx: &Cx, form: &Syntax, what: &str) -> (TermId, Info) {
      if let SNode::Sym(name) = form.node {
          let name = form.name(name);
          if !cx.env.contains_key(name) && !name.contains('.') && !SPECIAL.contains(&name) {
-             if self.defs.contains_key(name) {
+             if self.defs_get(name).is_some() {
                  if self.call_sites {
                      self.check_def_body(name, true);
                  }
@@ -1709,7 +1741,8 @@ impl Checker {
                  value.callable = Some(Rc::new(Callable::Def(name.to_owned())));
                  return (self.make_term(form, Ty::Fn(None), Draft::FnRef(name.to_owned())), value);
              }
-             if let Some(operator) = op::find(&self.ops, name, &cx.ctx) {
+             let ops = self.ops.clone();
+             if let Some(operator) = op::find_indexed(&ops, name, &cx.ctx) {
                  let mut value = Info::leaf(Ty::Fn(None));
                  value.callable = Some(Rc::new(Callable::Op(name.to_owned())));
                  return (self.make_term(form, Ty::Fn(None), Draft::FnRef(operator.name.clone())), value);
@@ -1720,7 +1753,7 @@ impl Checker {
                  value.callable = Some(Rc::new(Callable::Kind(kind)));
                  return (self.make_term(form, Ty::Fn(None), Draft::FnRef(name.to_owned())), value);
              }
-             if self.macros.contains_key(name) {
+             if self.macros_contains(name) {
                  self.error(form, "E_MACRO_AS_VALUE", &format!("{name} is a macro; a macro is not a function value. Wrap it: (fn [a] ({name} a))."));
                  return self.fail_term_no_diag(form);
              }
@@ -1736,8 +1769,7 @@ impl Checker {
      if args.len()!=c.params.len(){return self.fail_term(f,"E_ARITY",&format!("{} takes {} argument{}; got {}.",c.name,c.params.len(),if c.params.len()==1{""}else{"s"},args.len()))}
      self.depth_seen=Some(self.depth_seen.map_or(cx.depth,|d|d.max(cx.depth)));
      if cx.depth>64{self.events+=1;return self.fail_term(f,"E_DEPTH","Call depth exceeds 64.")}
-     let call_scope = self.terms.path(&c.path);
-     let mut env = c.env.push(call_scope);
+     let mut env = c.env.push();
      let pcx=cx.with_path(c.path.clone());
      for ((pattern,annotation),arg) in c.params.iter().zip(args){
          let mut value=arg.info.clone();
@@ -1745,7 +1777,7 @@ impl Checker {
              if !ty::fits(&value.ty,want){self.error(&arg.form,"E_TYPE",&format!("{} {}: expected {}, got {}.",c.name,Self::pattern_key(pattern),show(want),show(&value.ty)))}
              value.ty=ty::coerce(&value.ty,want);
          }
-         self.bind(&pcx,pattern,value,":",env.top_mut(call_scope));
+         self.bind(&pcx,pattern,value,":",env.top_mut());
      }
      let mut inner=cx.clone();
      inner.env=env.snapshot();
@@ -1769,7 +1801,7 @@ impl Checker {
      match value.callable.as_deref(){
          Some(Callable::Local(closure))=>self.call_closure(cx,f,closure,args,Some(closure)),
          Some(Callable::Def(name))=>self.apply_def(cx,f,name,args),
-         Some(Callable::Op(name))=>match op::find(&self.ops,name,&cx.ctx){Some(operator)=>self.apply_op(cx,f,&operator,args,Vec::new()),None=>self.fail_term(f,"E_UNKNOWN_KIND","Unknown operator.")},
+         Some(Callable::Op(name))=>{let ops=self.ops.clone();match op::find_checked(&ops,name,&cx.ctx){Some(operator)=>self.apply_op(cx,f,operator,args,Vec::new()),None=>self.fail_term(f,"E_UNKNOWN_KIND","Unknown operator.")}},
          Some(Callable::Kind(kind))=>self.apply_kind(cx,f,kind,args),
          None=>{
              let result=match &value.ty{
@@ -1875,8 +1907,8 @@ impl Checker {
          };
          return (self.make_term(form, rv.ty.clone(), Draft::CallFn { fn_name: name.to_owned(), args: args.iter().map(|a| a.term).collect(), body }), rv);
      }
-     if self.macros.contains_key(name) {
-         let definitions = self.macro_forms.clone();
+     if self.macros_contains(name) {
+         let definitions = self.base.iter().flat_map(|base| base.macro_forms.iter()).chain(self.macro_forms.iter()).cloned().collect::<Vec<_>>();
          return match macros::expand(&definitions, form) {
              Ok(expanded) => {
                  let (term, value) = self.infer(cx, &expanded);
@@ -1888,7 +1920,7 @@ impl Checker {
              }
          };
      }
-     if let Some(definition) = self.defs.get(name).cloned() {
+     if let Some(definition) = self.defs_get(name).cloned() {
          let fn_slot = |position: Option<usize>, key: Option<&str>| {
              let parameter = if let Some(index) = position {
                  definition.params.get(index)
@@ -1900,7 +1932,8 @@ impl Checker {
          let args = self.args_of(cx, form, forms, None, &fn_slot);
          return self.apply_sig(cx, form, &definition, &args);
      }
-     if let Some(operator) = op::find(&self.ops, name, &cx.ctx) {
+     let ops = self.ops.clone();
+     if let Some((operator, metadata)) = op::find_checked(&ops, name, &cx.ctx) {
          if operator.name == "scene/merge" {
              let mut skip = Vec::new();
              let mut args_form = Vec::new();
@@ -1919,7 +1952,7 @@ impl Checker {
                  }
              }
              let args = self.args_of(cx, form, &args_form, None, &|_, _| false);
-             return self.apply_op(cx, form, &operator, &args, skip);
+             return self.apply_op(cx, form, (operator, metadata), &args, skip);
          }
          let slots = operator.signature.pos.iter().chain(&operator.signature.opt).cloned().collect::<Vec<_>>();
          let keywords = operator.signature.kw.clone();
@@ -1932,7 +1965,7 @@ impl Checker {
              ty.is_some_and(|ty| matches!(ty, Ty::Fn(_)))
          };
          let args = self.args_of(cx, form, forms, Some(name), &fn_slot);
-         return self.apply_op(cx, form, &operator, &args, Vec::new());
+         return self.apply_op(cx, form, (operator, metadata), &args, Vec::new());
      }
      match catalog::resolve_kind(&self.catalog, &cx.ctx, name) {
          Ok(kind) => {
@@ -1960,7 +1993,7 @@ impl Checker {
          }
      }
  }
- fn apply_def(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[Arg])->(TermId,Info){let Some(d)=self.defs.get(name).cloned()else{return self.fail_term(f,"E_UNKNOWN_KIND","Unknown definition.")};self.apply_sig(cx,f,&d,args)}
+ fn apply_def(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[Arg])->(TermId,Info){let Some(d)=self.defs_get(name).cloned()else{return self.fail_term(f,"E_UNKNOWN_KIND","Unknown definition.")};self.apply_sig(cx,f,&d,args)}
  fn apply_sig(&mut self, cx: &Cx, f: &Syntax, d: &Sig, args: &[Arg]) -> (TermId, Info) {
      if d.ctx != cx.ctx && d.ctx != context::value() {
          return self.fail_term(f, "E_WRONG_CONTEXT", &format!("{} belongs to {}; it cannot run in {}.", d.name, context_name(&d.ctx), context_name(&cx.ctx)));
@@ -1991,7 +2024,7 @@ impl Checker {
              (a.term, value)
          } else if let Some(default) = default {
              let dcx = Cx {
-                 env: ScopeStack::default(), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name), format!(":{n}")],
+                 env: ScopeStack::default(), ctx: d.ctx.clone(), path: self.path(vec![format!("def:{}", d.name), format!(":{n}")]),
                  scope: format!("ƒ {}", d.name), in_def: true, stack: vec![d.name.clone()], depth: 0, zone: None, zbody: false,
              };
              let (term, value) = self.infer(&dcx, default);
@@ -2010,9 +2043,8 @@ impl Checker {
          }
      }
      let key = d.params.iter().map(|(n, _, _)| env[n].clone()).collect();
-     let def_scope = self.terms.path(&vec![format!("def:{}", d.name)]);
      let mut inner = Cx {
-         env: ScopeStack::from_map(def_scope, env), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name)], scope: format!("ƒ {}", d.name),
+         env: ScopeStack::from_map(env), ctx: d.ctx.clone(), path: self.path(vec![format!("def:{}", d.name)]), scope: format!("ƒ {}", d.name),
          in_def: true, stack: cx.stack.clone(), depth: cx.depth + 1, zone: None, zbody: false,
      };
      inner.stack.push(d.name.clone());
@@ -2085,7 +2117,7 @@ impl Checker {
      }
      (arena, roots, forms)
  }
- fn apply_op(&mut self, cx: &Cx, form: &Syntax, operator: &op::Op, arguments: &[Arg], skip: Vec<Vec<usize>>) -> (TermId, Info) {
+ fn apply_op(&mut self, cx: &Cx, form: &Syntax, (operator, metadata): (&op::Op, op::OpMetadata), arguments: &[Arg], skip: Vec<Vec<usize>>) -> (TermId, Info) {
      if BODY_CONTEXT_OPS.contains(&operator.name.as_str()) && !cx.in_def {
          self.error(form, "E_NODE_CONTEXT", "Context seed, frame and provenance base are available inside a defnode body.");
      }
@@ -2241,7 +2273,7 @@ impl Checker {
          "linspace" if positional.len() == 3 => literal_int(2).and_then(|count| usize::try_from(count.max(0)).ok()),
          _ => None,
      };
-     let capability = op::packed_kind(operator);
+     let capability = metadata.packed_kind;
      info.approx = match capability {
          Some(op::PackedKind::Binary(_) | op::PackedKind::Unary(_) | op::PackedKind::Length | op::PackedKind::Noise3 | op::PackedKind::Fma) => values.iter().any(|value| value.approx),
          _ => false,
@@ -2261,9 +2293,10 @@ impl Checker {
          for argument in &args {
              if let PackedNode::Fn(id) = self.terms.node(argument.term) {
                  let function = *self.terms.function(id);
-                 let zone = self.terms.path_names(function.zone).iter().map(|&name| self.terms.name(name).to_owned()).collect();
+                 let zone = self.terms.path_names(function.zone).iter().map(|&name| self.terms.name(name).to_owned()).collect::<Vec<_>>();
+                 let zone = self.path(zone);
                  self.link_body(function.body, &cx.path);
-                 self.packed.entry(zone).and_modify(|old| *old = Self::merge_packed(old.clone(), PackedForm::Candidate(Arc::new([cx.path.clone()].into_iter().collect())))).or_insert_with(|| PackedForm::Candidate(Arc::new([cx.path.clone()].into_iter().collect())));
+                 self.packed_update(zone, CheckPackedForm::Candidate(Arc::new([cx.path].into_iter().collect())));
              }
          }
          info.packed.insert(cx.path.clone());
@@ -2274,6 +2307,7 @@ impl Checker {
  fn literal_checks(&mut self, form: &Syntax, operator: &op::Op, args: &[Cow<'_, Arg>]) {
      let positional = args.iter().filter(|argument| argument.key.is_none()).collect::<Vec<_>>();
      let terms = &self.terms;
+     let (graphs, defs, base) = (&self.graphs, &self.defs, self.base.as_deref());
      let mut error = |form: &Syntax, code: &str, message: &str| add_to(&mut self.diags, Severity::ErrorSeverity, form, code, message.to_owned());
      let literal = |argument: &Arg| {
          let mut term = argument.term;
@@ -2368,8 +2402,8 @@ impl Checker {
          }
          "ui/graph" => if let Some(argument) = positional.first() {
              if let Some(name) = text(argument) {
-                 let valid = self.graphs.contains_key(name)
-                     || name.strip_prefix("def:").is_some_and(|name| self.defs.contains_key(name));
+                 let valid = graphs.contains_key(name) || base.is_some_and(|base|base.graphs.contains_key(name))
+                     || name.strip_prefix("def:").is_some_and(|name| defs.contains_key(name) || base.is_some_and(|base|base.defs.contains_key(name)));
                  if !valid {
                      error(&argument.form, "E_UNKNOWN_GRAPH", &format!("Unknown graph: {name}."));
                  }
@@ -2408,14 +2442,14 @@ impl Checker {
      };
      let mut closure = match callable.as_ref() {
          Callable::Local(closure) => Some((**closure).clone()),
-         Callable::Def(name) => self.defs.get(name).map(|definition| Closure {
+         Callable::Def(name) => self.defs_get(name).cloned().map(|definition| Closure {
              params: definition.params.iter().map(|(name, ty, _)| {
                 (syntax::make(syntax::Draft::Sym(name.clone())), Some(ty.clone()))
              }).collect(),
              body: definition.body.clone(),
              env: ScopeStack::default(),
              ctx: definition.ctx.clone(),
-             path: vec![format!("def:{name}")],
+             path: self.path(vec![format!("def:{name}")]),
              name: name.clone(),
          }),
          _ => None,
@@ -2469,7 +2503,7 @@ impl Checker {
         term: self.make_term(&source_form, ty, Draft::Fn {
             params,
             body,
-            zone,
+            zone: self.path_names(zone).to_vec(),
             capture: Some(argument.term),
         }),
          info,
@@ -2645,9 +2679,9 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
      value.approx_sources.clear();
     (self.make_term(form, out, Draft::Call { kind: kind.qualified.clone(), ctx: kind.context.clone(), args: named }), value)
  }
- fn link_path(&mut self, path: Path, producer: &Path) {
-     let next = PackedForm::Candidate(Arc::new([producer.clone()].into_iter().collect()));
-     self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
+ fn link_path(&mut self, path: CheckPath, producer: &CheckPath) {
+     let next = CheckPackedForm::Candidate(Arc::new([producer.clone()].into_iter().collect()));
+     self.packed_update(path, next);
  }
 fn value_arg(&mut self, x: &Syntax, v: &Info) -> Arg {
     Arg { key: None, form: x.clone(), term: self.make_term(x, v.ty.clone(), Draft::RefBinding("_".into(), Vec::new())), info: v.clone() }
@@ -2749,7 +2783,7 @@ fn hof(&mut self, cx: &Cx, x: &Syntax, name: &str, forms: &[packed::SyntaxId]) -
     let eligible = packed_body(&self.ops, &self.terms, specialized);
      let params: Option<Vec<(Syntax, Option<Ty>)>> = match fv.callable.as_deref() {
          Some(Callable::Local(c)) => Some(c.params.clone()),
-        Some(Callable::Def(def)) => self.defs.get(def).map(|d| d.params.iter().map(|(pn, pty, _)| (syntax::make(syntax::Draft::Sym(pn.clone())), Some(pty.clone()))).collect()),
+        Some(Callable::Def(def)) => self.defs_get(def).map(|d| d.params.iter().map(|(pn, pty, _)| (syntax::make(syntax::Draft::Sym(pn.clone())), Some(pty.clone()))).collect()),
          _ => None,
      };
      let inputs_fit = params.as_ref().is_none_or(|params| {
@@ -2788,7 +2822,7 @@ fn hof(&mut self, cx: &Cx, x: &Syntax, name: &str, forms: &[packed::SyntaxId]) -
     self.link_body(specialized, &cx.path);
      match fv.callable.as_deref() {
          Some(Callable::Local(c)) => { let cid = c.path.clone(); self.link_path(cid, &cx.path); }
-         Some(Callable::Def(def)) => self.link_path(vec![format!("def:{def}")], &cx.path),
+         Some(Callable::Def(def)) => {let path=self.path(vec![format!("def:{def}")]);self.link_path(path, &cx.path)},
          _ => (),
      }
      v.live_len = live_len;
@@ -2844,7 +2878,7 @@ fn iterate(&mut self, cx: &Cx, f: &Syntax, forms: &[packed::SyntaxId]) -> (TermI
     self.link_body(specialized, &cx.path);
      match fv.callable.as_deref() {
          Some(Callable::Local(c)) => { let cid = c.path.clone(); self.link_path(cid, &cx.path); }
-         Some(Callable::Def(def)) => self.link_path(vec![format!("def:{def}")], &cx.path),
+         Some(Callable::Def(def)) => {let path=self.path(vec![format!("def:{def}")]);self.link_path(path, &cx.path)},
          _ => (),
      }
      let mut terms = vec![ft, it, nt];
@@ -2864,7 +2898,7 @@ fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[packed::SyntaxId]) -> (Term
     let first = x.child(*first);
     let SNode::Sym(g) = first.node else { return self.fail_term(x, "E_ARGS", "ref takes a graph name, then :input value pairs.") };
     let g = first.name(g);
-    let Some(sg) = self.graphs.get(g).cloned() else { return self.fail_term(&first, "E_UNKNOWN_GRAPH", &format!("Unknown graph reference: {g}.")) };
+    let Some(sg) = self.graphs_get(g).cloned() else { return self.fail_term(&first, "E_UNKNOWN_GRAPH", &format!("Unknown graph reference: {g}.")) };
      if cx.in_def { return self.fail_term(x, "E_REF_IN_DEF", "Reusable functions cannot capture project graphs; add an explicit parameter."); }
      let gv = self.graph_info(x, g);
     let mut overrides: Vec<(String, TermId)> = Vec::new();
@@ -2948,8 +2982,8 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
     (self.make_term(f,out.clone(),Draft::ErrorRows{rows,policy,mapper}),Info::derive(out,&[rv,mv]))
  }
  fn graph_info(&mut self, x: &Syntax, name: &str) -> Info {
-     if let Some(v) = self.ginfo.get(name) { return v.clone(); }
-     let Some(sg) = self.graphs.get(name).cloned() else { return Info::leaf(Ty::Any) };
+     if let Some(v) = self.ginfo_get(name) { return v.clone(); }
+     let Some(sg) = self.graphs_get(name).cloned() else { return Info::leaf(Ty::Any) };
      if self.graph_stack.iter().any(|entry| entry == name) {
          let mut cycle = self.graph_stack.clone();
          cycle.push(name.to_owned());
@@ -2961,9 +2995,8 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
      let outer_calls = std::mem::take(&mut self.calls);
      let graph_form = self.terms.import_form(&sg.form);
      self.graph_stack.push(name.to_owned());
-     let cx0 = Cx { env: ScopeStack::default(), ctx: sg.ctx, path: vec![name.to_owned()], scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
-     let graph_scope = self.terms.path(&[name.to_owned()]);
-     let mut env = ScopeStack::default().push(graph_scope);
+     let cx0 = Cx { env: ScopeStack::default(), ctx: sg.ctx, path: self.path(vec![name.to_owned()]), scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
+     let mut env = ScopeStack::default().push();
      let mut inputs = Vec::new();
      for (n, t, df) in &sg.params {
          let mut cx = cx0.clone();
@@ -2983,8 +3016,9 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
          v.state_dep = dv.state_dep;
          v.packed = dv.packed.clone();
          v.approx_sources = dv.approx_sources.clone();
-         self.mark(vec![name.to_owned(), format!(":{n}")], &v);
-         env.top_mut(graph_scope).insert(n.clone(), v);
+         let input_path=self.path(vec![name.to_owned(), format!(":{n}")]);
+         self.mark(input_path, &v);
+         env.top_mut().insert(n.clone(), v);
          inputs.push((n.clone(), t.clone(), dt));
      }
      let mut cx = cx0.clone();
@@ -3026,9 +3060,9 @@ impl Checker {
         self.reserved(name)
             || ty::names().iter().any(|(n, _)| n == name)
             || name == "fn"
-            || self.declared_names.contains(name)
+            || self.declared_names_contains(name)
             || (head || !macros::valid_name(name))
-                && (context::all().iter().any(|c| op::find(&self.ops, name, c).is_some())
+                && (context::all().iter().any(|c| op::find_indexed(&self.ops, name, c).is_some())
                     || match catalog::resolve_kind(&self.catalog, &context::sop(), name) {
                         Ok(_) => true,
                         Err((code, _)) => code == "E_WRONG_CONTEXT" || code == "E_AMBIGUOUS",
@@ -3121,23 +3155,22 @@ impl Checker {
     }
 
     fn check_def_body(&mut self, name: &str, own: bool) {
-        if own && !self.checked_defs.insert(name.to_owned()) {
+        if own && (self.checked_defs_contains(name) || !self.checked_defs.insert(name.to_owned())) {
             return;
         }
-        let Some(definition) = self.defs.get(name).cloned() else { return };
+        let Some(definition) = self.defs_get(name).cloned() else { return };
         self.events += 1;
         let outer_terms = std::mem::take(&mut self.terms);
         let outer_calls = std::mem::take(&mut self.calls);
         let graph_form = self.terms.import_form(&definition.form);
-        let def_scope = self.terms.path(&vec![format!("def:{name}")]);
-        let mut env = ScopeStack::default().push(def_scope);
+        let mut env = ScopeStack::default().push();
         let mut inputs = Vec::new();
         for (input, want, default) in &definition.params {
             let value = if let Some(default) = default {
                 let cx = Cx {
                     env: ScopeStack::default(),
                     ctx: definition.ctx.clone(),
-                    path: vec![format!("def:{name}"), format!(":{input}")],
+                    path: self.path(vec![format!("def:{name}"), format!(":{input}")]),
                     scope: format!("ƒ {name}"),
                     in_def: true,
                     stack: vec![name.to_owned()],
@@ -3153,13 +3186,13 @@ impl Checker {
             } else {
                 None
             };
-            env.top_mut(def_scope).insert(input.clone(), Info::leaf(want.clone()));
+            env.top_mut().insert(input.clone(), Info::leaf(want.clone()));
             inputs.push((input.clone(), want.clone(), value));
         }
         let cx = Cx {
             env: env.snapshot(),
             ctx: definition.ctx.clone(),
-            path: vec![format!("def:{name}")],
+            path: self.path(vec![format!("def:{name}")]),
             scope: format!("ƒ {name}"),
             in_def: true,
             stack: vec![name.to_owned()],
@@ -3218,7 +3251,7 @@ impl Checker {
                 }
                 PackedNode::Op(id) => {
                     let name = self.terms.name(self.terms.op(id).op);
-                    let operator = op::find(&self.ops, name, &cx.ctx);
+                    let operator = op::find_indexed(&self.ops, name, &cx.ctx);
                     !operator.as_ref().is_some_and(|operator| {
                         if mapper {
                             operator.ctx == context::value() && !operator.live && !BODY_CONTEXT_OPS.contains(&operator.name.as_str())
@@ -3265,11 +3298,11 @@ impl Checker {
         if !visited.insert(name.to_owned()) {
             return;
         }
-        if let Some(definition) = self.def_terms.get(name) {
-            todo.push(self.terms.import(&definition.body));
+        if let Some(body) = self.def_terms_get(name).map(|definition|definition.body.clone()) {
+            todo.push(self.terms.import(&body));
             return;
         }
-        let operator = op::find(&self.ops, name, &cx.ctx);
+        let operator = op::find_indexed(&self.ops, name, &cx.ctx);
         if operator.is_some_and(|operator| {
             operator.ctx == context::value()
                 && (!mapper || !operator.live)
@@ -3281,19 +3314,19 @@ impl Checker {
     }
 
     fn check_node_cycles(&mut self) {
-        let definitions = self.nodes.iter().enumerate().map(|(index, node)| (node.kind.qualified.clone(), index)).collect::<BTreeMap<_, _>>();
+        let definitions = self.base.iter().flat_map(|base|base.nodes.iter()).chain(self.nodes.iter()).map(|node| (node.kind.qualified.clone(), node.clone())).collect::<BTreeMap<_, _>>();
         fn visit(
             checker: &mut Checker,
             name: &str,
             stack: &mut Vec<String>,
             visited: &mut BTreeSet<String>,
-            definitions: &BTreeMap<String, usize>,
+            definitions: &BTreeMap<String, Arc<NodeDefinition>>,
         ) {
             if let Some(position) = stack.iter().position(|entry| entry == name) {
-                if let Some(&index) = definitions.get(name) {
+                if let Some(node) = definitions.get(name) {
                     let mut cycle = stack[position..].to_vec();
                     cycle.push(name.to_owned());
-                    let form = checker.nodes[index].body.form.clone();
+                    let form = node.body.form.clone();
                     checker.error(&form, "E_RECURSION", &format!("Recursive node call: {}.", cycle.join(" → ")));
                 }
                 return;
@@ -3301,9 +3334,9 @@ impl Checker {
             if !visited.insert(name.to_owned()) {
                 return;
             }
-            let Some(&index) = definitions.get(name) else { return };
+            let Some(node) = definitions.get(name) else { return };
             stack.push(name.to_owned());
-            for called in kind_calls(&checker.nodes[index].body.body) {
+            for called in kind_calls(&node.body.body) {
                 if definitions.contains_key(&called) {
                     visit(checker, &called, stack, visited, definitions);
                 }
@@ -3311,7 +3344,7 @@ impl Checker {
             stack.pop();
         }
         let mut visited = BTreeSet::new();
-        for name in self.node_order.clone() {
+        for name in self.base.iter().flat_map(|base|base.node_order.iter()).chain(self.node_order.iter()).cloned().collect::<Vec<_>>() {
             visit(self, &name, &mut Vec::new(), &mut visited, &definitions);
         }
     }
@@ -3342,8 +3375,8 @@ impl Checker {
             }
             let valid = if head == "defnode" { defnode::valid_name(name) } else { macros::valid_name(name) };
             let duplicate_kind = head == "defnode" && self.catalog.kinds.iter().any(|kind| kind.qualified == name);
-            let operator_name = op::all().iter().chain(&self.ops).any(|operator| operator.ctx == context::value() && operator.name == name);
-            let already_declared = self.declared_names.contains(name);
+            let operator_name = op::all().iter().chain(self.ops.iter()).any(|operator| operator.ctx == context::value() && operator.name == name);
+            let already_declared = self.declared_names_contains(name);
             if !valid || self.reserved(name) || !seen.insert(name.to_owned()) || already_declared || duplicate_kind || operator_name {
                 self.error(form, "E_NAME", &format!("Invalid, reserved or duplicate name: {name}."));
                 continue;
@@ -3359,7 +3392,7 @@ impl Checker {
             match defnode::parse(form) {
                 Ok(definition) => {
                     if !self.catalog.kinds.iter().any(|kind| kind.qualified == definition.kind.qualified) {
-                        self.catalog.kinds.push(definition.kind.clone());
+                        Rc::make_mut(&mut self.catalog).kinds.push(definition.kind.clone());
                     }
                     self.node_defs.insert(name.clone(), definition);
                     self.node_order.push(name.clone());
@@ -3401,17 +3434,16 @@ impl Checker {
         }
 
         for name in node_names {
-            let Some(definition) = self.node_defs.get(&name).cloned() else { continue };
+            let Some(definition) = self.node_defs_get(&name).cloned() else { continue };
             self.events += 1;
             let outer_terms = std::mem::take(&mut self.terms);
             let outer_calls = std::mem::take(&mut self.calls);
             let graph_form = self.terms.import_form(&definition.form);
-            let node_scope = self.terms.path(&vec![format!("node:{name}")]);
-            let bindings = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect::<BTreeMap<_, _>>();
+                   let bindings = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect::<BTreeMap<_, _>>();
             let base = Cx {
-                env: ScopeStack::from_map(node_scope, bindings),
+                env: ScopeStack::from_map(bindings),
                 ctx: context::sop(),
-                path: vec![format!("node:{name}")],
+                path: self.path(vec![format!("node:{name}")]),
                 scope: name.clone(),
                 in_def: true,
                 stack: vec![name.clone()],
@@ -3424,7 +3456,7 @@ impl Checker {
                 let term = default.as_ref().map(|form| {
                     let mut cx = base.clone();
                     cx.env = ScopeStack::default();
-                    cx.path.push(format!(":{input}"));
+                    cx.path=self.child_path(cx.path,format!(":{input}"));
                     let (term, value) = self.infer(&cx, form);
                     if !ty::fits(&value.ty, input_ty) {
                         self.error(form, "E_TYPE", &format!("Invalid default for {input}."));
@@ -3496,12 +3528,12 @@ impl Checker {
         }
         self.check_node_cycles();
         for name in &graph_names {
-            if let Some(signature) = self.graphs.get(name) {
+            if let Some(signature) = self.graphs_get(name) {
                 let form = signature.form.clone();
                 self.graph_info(&form, name);
             }
         }
-        (graph_names, self.def_order.clone())
+        (graph_names, self.base.iter().flat_map(|base| base.def_order.iter()).chain(self.def_order.iter()).cloned().collect())
     }
 }
 
@@ -3598,12 +3630,12 @@ pub fn prelude(
     catalog: &catalog::Catalog,
     forms: &[Syntax],
 ) -> Prelude {
-    let mut checker = Checker::new(catalog.clone(), ops, library, call_sites);
+    let mut checker = Checker::new(Rc::new(catalog.clone()), Arc::new(ops.to_vec()), library, call_sites);
     checker.children = forms.len();
     checker.phase(forms.iter().cloned());
     checker.count += forms.len();
     checker.inherited = Rc::new(std::mem::take(&mut checker.kept));
-    Prelude { checker }
+    Prelude { checker: Rc::new(checker) }
 }
 
 pub fn check(
@@ -3619,13 +3651,13 @@ pub fn check(
         return (None, vec![problem]);
     }
     let mut checker = if let Some(prelude) = prelude {
-        let mut checker = prelude.checker.clone();
-        checker.ops = ops.to_vec();
+        let mut checker = Checker::fork(prelude.checker.clone());
+        checker.ops = if op::same_declarations(&checker.ops, ops) { checker.ops.clone() } else { Arc::new(ops.to_vec()) };
         checker.library = library;
         checker.call_sites = call_sites;
         checker
     } else {
-        Checker::new(catalog.clone(), ops, library, call_sites)
+        Checker::new(Rc::new(catalog.clone()), Arc::new(ops.to_vec()), library, call_sites)
     };
     let workspace_form = match forms {
         [] => return (None, vec![err("E_NO_WORKSPACE", "Expected (workspace name …).".into(), None)]),
@@ -3657,7 +3689,7 @@ pub fn check(
         checker.error(workspace_form, "E_NO_GRAPH", "A workspace needs at least one graph.");
     }
     let mut diagnostics = Vec::new();
-    for problem in checker.diags {
+    for problem in std::mem::take(&mut checker.diags) {
         if !diagnostics.iter().any(|old: &Diagnostic| {
             old.code == problem.code && old.span == problem.span && old.message == problem.message
         }) {
@@ -3667,7 +3699,20 @@ pub fn check(
     if diagnostics.iter().any(|problem| problem.severity == Severity::ErrorSeverity) {
         return (None, diagnostics);
     }
-    let packed = checker.packed.into_iter().collect::<Vec<_>>();
+    let base = checker.base.as_deref();
+    let packed = base.into_iter().flat_map(|base| base.packed.iter()).chain(checker.packed.iter()).map(|(path, form)| {
+        let form = match form {
+            CheckPackedForm::Candidate(paths) => PackedForm::Candidate(Arc::new(paths.iter().map(|path|checker.path_names(*path).to_vec()).collect())),
+            CheckPackedForm::Refused(diagnostics) => PackedForm::Refused(diagnostics.clone()),
+        };
+        (checker.path_names(*path).to_vec(), form)
+    }).collect::<BTreeMap<_,_>>().into_iter().collect::<Vec<_>>();
+    let live = base.into_iter().flat_map(|base|base.live.iter()).chain(checker.live.iter()).map(|path|checker.path_names(*path).to_vec()).collect();
+    let invariant = base.into_iter().flat_map(|base|base.invariant.iter()).chain(checker.invariant.iter()).map(|path|checker.path_names(*path).to_vec()).collect();
+    let mut packed_roots = base.into_iter().flat_map(|base|base.roots.iter()).chain(checker.roots.iter()).map(|(form,path)|(form.clone(),checker.path_names(*path).to_vec())).collect::<Vec<_>>();
+    let nodes=base.into_iter().flat_map(|base|base.nodes.iter()).chain(checker.nodes.iter()).cloned().collect::<Vec<_>>().into();
+    let macros=base.into_iter().flat_map(|base|base.macro_forms.iter()).chain(checker.macro_forms.iter()).cloned().collect::<Vec<_>>().into();
+    let kind_fns=base.into_iter().flat_map(|base|base.kind_fns.iter()).chain(checker.kind_fns.iter()).map(|(name,kind)|(name.clone(),kind.clone())).collect::<BTreeMap<_,_>>().into_iter().collect();
     let approx_reasons: Vec<_> = packed.iter().map(|(path, form)| {
         let reasons = match form {
             PackedForm::Refused(reasons) => reasons.clone(),
@@ -3675,22 +3720,21 @@ pub fn check(
         };
         (path.clone(), reasons)
     }).collect();
-    let mut packed_roots = checker.roots;
     packed_roots.sort_by(|(a, p),(b, q)| p.cmp(q).then(a.id.cmp(&b.id)));
     let workspace = Workspace {
         name: name.to_owned(),
-        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.remove(name)).collect::<Vec<_>>().into(),
-        defs: def_names.iter().filter_map(|name| checker.def_terms.remove(name)).collect::<Vec<_>>().into(),
-        nodes: checker.nodes.into(),
-        macros: checker.macro_forms.into(),
+        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.remove(name).or_else(||checker.base.as_ref()?.graph_terms.get(name).cloned())).collect::<Vec<_>>().into(),
+        defs: def_names.iter().filter_map(|name| checker.def_terms.remove(name).or_else(||checker.base.as_ref()?.def_terms.get(name).cloned())).collect::<Vec<_>>().into(),
+        nodes,
+        macros,
         source: forms.to_vec().into(),
-        live: checker.live,
-        invariant: checker.invariant,
+        live,
+        invariant,
         approx: Paths::new(),
         packed: packed.into(),
         packed_roots,
         approx_reasons: approx_reasons.into(),
-        kind_fns: checker.kind_fns.into_iter().collect(),
+        kind_fns,
         ops: checker.ops.into(),
     };
     (Some(workspace), diagnostics)
@@ -3698,6 +3742,25 @@ pub fn check(
 #[cfg(test)]
 mod memory_tests {
     use super::*;
+
+    #[test]
+    fn checker_paths_keep_their_owner_when_term_builders_change() {
+        let mut base = Checker::new(Rc::new(catalog::Catalog { version: 0, kinds: Vec::new() }), Arc::new(Vec::new()), false, false);
+        let inherited = base.path(vec!["base".into()]);
+        let base = Rc::new(base);
+        let mut left = Checker::fork(base.clone());
+        let mut right = Checker::fork(base.clone());
+        let l = left.path(vec!["left".into()]);
+        let r = right.path(vec!["right".into()]);
+        assert_eq!(l, r, "local indices can coincide in independent owners");
+        left.terms = TermBuilder::new();
+        left.terms.path(&["unrelated builder path".into()]);
+        assert_eq!(&**left.path_names(l), &["left"]);
+        assert_eq!(&**right.path_names(r), &["right"]);
+        assert_eq!(left.path(vec!["base".into()]), inherited);
+        assert_eq!(base.paths.len(), 1, "a fork cannot grow the cached prelude");
+        assert_eq!(left.paths.len(), 1, "inherited paths are shared, not copied");
+    }
 
     #[test]
     fn workspace_and_prelude_resolve_ids_in_their_own_syntax_arenas() {
@@ -3762,15 +3825,16 @@ mod memory_tests {
                 assert!(Arc::ptr_eq(original, copy), "cloning prelude entries shares producer paths");
             }
         }
-        let producers = before.iter().find_map(|(_, form)| match form { PackedForm::Candidate(paths) => Some(paths), _ => None }).unwrap();
-        let mut candidate = PackedForm::Candidate(producers.clone());
-        candidate = Checker::merge_packed(candidate, PackedForm::Candidate(producers.clone()));
-        let PackedForm::Candidate(shared) = &candidate else { unreachable!() };
+        assert!(before.iter().any(|(_, form)| matches!(form, PackedForm::Candidate(_))), "the fixture has public producer paths");
+        let producers = &Arc::new([0usize].into_iter().collect::<BTreeSet<CheckPath>>());
+        let mut candidate = CheckPackedForm::Candidate(producers.clone());
+        candidate = Checker::merge_packed(candidate, CheckPackedForm::Candidate(producers.clone()));
+        let CheckPackedForm::Candidate(shared) = &candidate else { unreachable!() };
         assert!(Arc::ptr_eq(producers, shared));
         let original = producers.as_ref().clone();
-        candidate = Checker::merge_packed(candidate, PackedForm::Candidate(Arc::new([vec!["extra".into()]].into_iter().collect())));
-        let PackedForm::Candidate(merged) = candidate else { unreachable!() };
-        assert!(merged.contains(&vec!["extra".into()]));
+        candidate = Checker::merge_packed(candidate, CheckPackedForm::Candidate(Arc::new([1usize].into_iter().collect())));
+        let CheckPackedForm::Candidate(merged) = candidate else { unreachable!() };
+        assert!(merged.contains(&1usize));
         assert!(original.is_subset(&merged));
         assert_eq!(producers.as_ref(), &original, "merging leaves cached producer sets intact");
         Arc::make_mut(&mut edited.packed).clear();

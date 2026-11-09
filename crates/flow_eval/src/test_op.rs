@@ -85,7 +85,7 @@ fn check(o: &Op, args: &[(String, Value)]) -> Value {
     }
     result
 }
-fn find(name: &str, c: context::Context) -> Op { op::find(&[], name, &c).unwrap_or_else(|| panic!("no op {name}")) }
+fn find(name: &str, c: context::Context) -> Op { op::find(&[], name, &c).unwrap_or_else(|| panic!("no op {name}")).clone() }
 fn apply(name: &str, args: &[(String, Value)]) -> Value { check(&find(name, context::value()), args) }
 fn rejects_code(name: &str, args: &[(String, Value)], code: &str) {
     let o = find(name, context::value());
@@ -118,7 +118,7 @@ fn every_operator_shape_and_arithmetic() {
     }
     for o in op::all().iter().filter(|o| !o.name.starts_with("gpu/")) {
         assert_eq!(op::find(&[], &o.name, &o.ctx).unwrap().name, o.name);
-        assert_eq!(op::packed_kind(o).is_some(), o.ctx == context::value() && o.shape == Shape::Scalar, "{}", o.name);
+        assert_eq!(op::derive_packed_kind(o).is_some(), o.ctx == context::value() && o.shape == Shape::Scalar, "{}", o.name);
         let s = &o.signature;
         let base: Vec<(String, Value)> = s.pos.iter().map(|(n, ty)| (n.clone(), match (o.name.as_str(), n.as_str()) {
             ("array/scatter_add", "indices") | ("array/compact", "mask") => ia(&[0, 1]),
@@ -169,7 +169,7 @@ fn contexts_checks_and_custom_kinds() {
     for ctx in context::all() { for o in op::of_context(&[], &ctx) { assert!(o.ctx == ctx || o.ctx == context::value()); } }
     assert_eq!(find("rand", context::scene()).name, "value/rand");
     let mut sine = find("sin", context::value()); sine.category = "Copied".into();
-    assert!(op::packed_kind(&sine).is_none());
+    assert!(op::derive_packed_kind(&sine).is_none());
     let rejects = |name: &str, args: Vec<(String, Value)>| match (find(name, context::editor()).check)(&args) {
         Err(d) if d.code == "E_RANGE" => (), other => panic!("{name}: {other:?}"),
     };

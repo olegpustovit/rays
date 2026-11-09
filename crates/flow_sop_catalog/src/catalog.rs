@@ -514,16 +514,12 @@ fn is_embedded(supplied: &[Syntax]) -> bool {
         std::ptr::eq(supplied.as_ptr(), embedded.as_ptr()) && supplied.len() == embedded.len())
 }
 
-type PreludeKey = (Vec<String>, bool, Catalog, Vec<i64>);
+type PreludeKey = (bool, Catalog, Vec<i64>);
 
 thread_local! {
     // ponytail: per-thread cache of eight preludes, most recent first (OCaml kept one global list).
     static PRELUDES: RefCell<Vec<(PreludeKey, Rc<(Catalog, Prelude)>)>> = const { RefCell::new(Vec::new()) };
     static PRELUDE_CHECKS: Cell<usize> = const { Cell::new(0) };
-}
-
-fn op_names(ops: &[Op]) -> Vec<String> {
-    ops.iter().map(|op| op.name.clone()).collect()
 }
 
 /// The embedded library is fixed, so its checked definitions are kept between workspace checks,
@@ -550,10 +546,9 @@ fn prelude_cached(
         }));
         owner
     });
-    let key: PreludeKey = (op_names(ops), library, catalog.clone(), positions.to_vec());
     let hit = PRELUDES.with(|cache| {
         let mut cache = cache.borrow_mut();
-        let found = cache.iter().position(|(k, _)| *k == key);
+        let found = cache.iter().position(|((flag, previous, kept), value)| *flag == library && previous == catalog && kept == positions && workspace::prelude_ops_match(&value.1, ops));
         found.map(|i| {
             let entry = cache.remove(i);
             let value = entry.1.clone();
@@ -568,7 +563,7 @@ fn prelude_cached(
     let value = Rc::new(make());
     PRELUDES.with(|cache| {
         let mut cache = cache.borrow_mut();
-        cache.insert(0, (key, value.clone()));
+        cache.insert(0, ((library, catalog.clone(), positions.to_vec()), value.clone()));
         cache.truncate(8);
     });
     value
@@ -906,6 +901,22 @@ mod tests {
         option_env!("RAYS_NODES_DIR")
             .unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/flow_sop/nodes"))
             .to_owned()
+    }
+
+    #[test]
+    fn prelude_cache_distinguishes_mutated_operator_callbacks() {
+        let catalog = Catalog { version: 0, kinds: Vec::new() };
+        let mut declaration = flow_check::op::find(&[], "sin", &flow_syntax::context::value()).unwrap().clone();
+        declaration.name = "custom".into();
+        let retain = |ops: &[Op]| prelude_cached(ops, false, &catalog, &[991], &|| {
+            (catalog.clone(), workspace::prelude(ops, false, false, &catalog, &[]))
+        });
+        let first = retain(std::slice::from_ref(&declaration));
+        assert!(Rc::ptr_eq(&first, &retain(std::slice::from_ref(&declaration))));
+        declaration.out = Arc::new(|_| Ok(flow_syntax::ty::Ty::Int));
+        let second = retain(std::slice::from_ref(&declaration));
+        assert!(!Rc::ptr_eq(&first, &second));
+        assert!(Rc::ptr_eq(&second, &retain(std::slice::from_ref(&declaration))));
     }
 
     #[test]

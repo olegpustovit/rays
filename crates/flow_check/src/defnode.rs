@@ -490,7 +490,7 @@ mod test_defnode {
     #[test]
     fn context_seed_operator_is_refused_inside_node_bodies() {
         let c = catalog();
-        let mut seed = op::find(&[], "length", &context::value()).unwrap();
+        let mut seed = op::find(&[], "length", &context::value()).unwrap().clone();
         seed.name = "sop/context_seed".into();
         seed.signature = op::Signature { pos: vec![("namespace".into(), Ty::Text)], opt: vec![], rest: None, kw: vec![] };
         seed.out = std::sync::Arc::new(|_| Ok(Ty::Int));

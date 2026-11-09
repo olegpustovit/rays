@@ -226,7 +226,7 @@ pub fn lower_strict(r: ResidualId) -> Result<c::Program, String> {
 // ---- core_fixtures.ml
 
 pub fn offset_op() -> Op {
-    let mut o = op::find(&[], "+", &context::value()).expect("+ op");
+    let mut o = op::find(&[], "+", &context::value()).expect("+ op").clone();
     o.name = "test/offset".into();
     o.signature = Signature { pos: vec![("value".into(), Ty::Float)], opt: vec![], rest: None, kw: vec![("offset".into(), Ty::Float)] };
     o

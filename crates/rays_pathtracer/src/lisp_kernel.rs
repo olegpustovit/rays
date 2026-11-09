@@ -99,7 +99,7 @@ pub fn tables() -> Vec<(&'static str, Ty)> {
 }
 
 fn placeholder_op(name: &str, ty: Ty) -> Op {
-    let mut o = op::find(&[], "noise3", &context::value()).expect("noise3");
+    let mut o = op::find(&[], "noise3", &context::value()).expect("noise3").clone();
     let full = format!("pt/{name}");
     o.name = full.clone();
     o.packed_extension = None;

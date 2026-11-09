@@ -12,7 +12,7 @@ fn same_graph_keys_on_the_shared_ops() {
     // no ops on both sides: OCaml's `[]` is one value, so the graphs are the same
     assert!(p::same_graph(&check(&src), &check(&src), "g"));
     // the editor's ops: one list, checked into the base workspace
-    let mut user = flow_check::op::find(&[], "array/float", &flow_syntax::context::value()).unwrap();
+    let mut user = flow_check::op::find(&[], "array/float", &flow_syntax::context::value()).unwrap().clone();
     user.name = "test/float".into();
     let ops = Arc::new(vec![user]);
     let base = match flow_check::workspace::check(&ops, false, false, None, &catalog(), &src) {

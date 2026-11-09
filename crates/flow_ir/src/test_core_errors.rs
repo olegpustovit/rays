@@ -255,7 +255,7 @@ fn a_failure_after_a_state_write_restores_the_plane() {
 }
 
 fn opaque_op() -> op::Op {
-    let mut o = op::find(&[], "frame/dt", &context::value()).expect("frame/dt");
+    let mut o = op::find(&[], "frame/dt", &context::value()).expect("frame/dt").clone();
     o.name = "test/opaque".into();
     o.live = true;
     o.arithmetic = None;

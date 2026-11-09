@@ -3257,7 +3257,7 @@ mod tests {
         let (qualified, _, _) = qualify(None, gpu::default(), &state);
         // a state value is a uniform the host steps with its own state each frame
         assert!(qualified.approx.contains(&path));
-        let mut counterfeit = flow_check::op::find(&[], "image/map", &context::image()).expect("image/map");
+        let mut counterfeit = flow_check::op::find(&[], "image/map", &context::image()).expect("image/map").clone();
         counterfeit.category = "Counterfeit image map".into();
         let mut counterfeited = shared.clone();
         Arc::make_mut(&mut counterfeited.ops).insert(0, counterfeit);
@@ -3515,7 +3515,7 @@ mod tests {
         let v = mapped_value(Vec::new(), "(map (fn [p] (noise3 (* p (pow t 1000000)))) (array/vec3 2051 [1 2 3]))");
         let live = input::at_time(7.0);
         assert!(same(&forced(&compiled(&v), &live), &e::host::force_reference(&v, &live, None, None, None)));
-        let mut custom = flow_check::op::find(&[], "noise3", &context::value()).expect("noise3");
+        let mut custom = flow_check::op::find(&[], "noise3", &context::value()).expect("noise3").clone();
         custom.name = "toy_noise3".into();
         custom.packed_extension = None;
         custom.body = Arc::new(|_, _, _| Ok(Value::Float(0.125)));

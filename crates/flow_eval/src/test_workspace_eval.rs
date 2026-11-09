@@ -378,7 +378,7 @@ fn residuals_force_by_time_body() {
 fn named_arguments_and_residual_capture() {
     for count in [16usize, 17] {
         let fields: Vec<(String, Ty)> = (0..count).map(|i| (format!("slot{i}"), Ty::Float)).collect();
-        let mut operator = op::find(&[], "sin", &flow_syntax::context::value()).unwrap();
+        let mut operator = op::find(&[], "sin", &flow_syntax::context::value()).unwrap().clone();
         operator.name = "test/slots".into();
         operator.signature = op::Signature { pos: fields.clone(), opt: vec![], rest: None, kw: vec![] };
         operator.out = std::sync::Arc::new(|_| Ok(Ty::Float));

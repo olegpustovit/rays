@@ -1839,7 +1839,7 @@ fn write_planes(
 
 #[derive(Clone)]
 struct Constant {
-    op: op::Op,
+    op: &'static op::Op,
     count: executor::Program,
     value: Option<executor::Program>,
 }

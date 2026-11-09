@@ -194,7 +194,7 @@ pub(crate) fn same_op(a: &op::Op, b: &op::Op) -> bool {
 
 fn canonical_operator(residual: ResidualId, name: &str) -> bool {
     let extra = residual::residual_ops(residual);
-    match (op::find(&extra, name, &context::value()), op::find(&[], name, &context::value())) {
+    match (op::find_indexed(&extra, name, &context::value()), op::find(&[], name, &context::value())) {
         (Some(actual), Some(builtin)) => same_op(&actual, &builtin),
         _ => false,
     }
@@ -411,8 +411,8 @@ fn function_body<'b>(
         },
         Node::FnRef(name) if f.name(name) == "+" && reduction.is_some() => {
             let extra = residual::residual_ops(residual);
-            match op::find(&extra, "+", &context::value()) {
-                Some(declaration) if op::packed_kind(&declaration) == Some(PackedKind::Binary(Binary::Add)) => {
+            match op::find_checked(&extra, "+", &context::value()) {
+                Some((declaration, metadata)) if metadata.packed_kind == Some(PackedKind::Binary(Binary::Add)) => {
                     let (seed, source) = reduction.unwrap();
                     let item_ty = match source.ty() {
                         Ty::Array(ty) => (**ty).clone(),
@@ -1074,8 +1074,8 @@ impl Lower {
     #[allow(clippy::too_many_lines)]
     fn operation(&mut self, env: &Env, t: &Term, op_name: &str, args: &[Field]) -> Res<Expression> {
         let extra = residual::residual_ops(self.residual);
-        let declaration = match op::find(&extra, op_name, &context::value()) {
-            Some(o) => match op::packed_kind(&o) {
+        let declaration = match op::find_checked(&extra, op_name, &context::value()) {
+            Some((o, metadata)) => match metadata.packed_kind {
                 Some(kind) => (o, kind),
                 None => {
                     return Err(refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is not a canonical scalar declaration or validated packed intrinsic.", op_name)));
@@ -1645,9 +1645,9 @@ impl Lower {
                     _ => self.expression(env, &t.child(args[1].term))?,
                 };
                 let extra = residual::residual_ops(self.residual);
-                let declaration = op::find(&extra, op_name, &context::value()).ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is unavailable.", op_name)))?;
-                let kind = op::packed_kind(&declaration).ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is not a canonical scalar declaration.", op_name)))?;
-                self.operation_value(t, op_name, args, &declaration, kind, &[first, second])
+                let (declaration, metadata) = op::find_checked(&extra, op_name, &context::value()).ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is unavailable.", op_name)))?;
+                let kind = metadata.packed_kind.ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is not a canonical scalar declaration.", op_name)))?;
+                self.operation_value(t, op_name, args, declaration, kind, &[first, second])
             }
             Node::Op(id) => self.operation(env, t, t.name(arena.op(id).op), arena.fields(arena.op(id).args)),
             Node::Expanded(id) => self.expression(env, &t.child(arena.expanded(id).body)),
@@ -1913,7 +1913,7 @@ impl Lower {
 
     fn constant_only(&self, name: &str) -> bool {
         let extra = residual::residual_ops(self.residual);
-        op::find(&extra, name, &context::value()).and_then(|o| op::packed_kind(&o)) == Some(PackedKind::ConstantOnly)
+        op::find_checked(&extra, name, &context::value()).and_then(|(_, metadata)| metadata.packed_kind) == Some(PackedKind::ConstantOnly)
     }
 
     fn select(&mut self, t: &Term, ty: &Ty, condition: i64, yes: &Expression, no: &Expression) -> Res<Expression> {

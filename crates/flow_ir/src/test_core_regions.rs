@@ -193,7 +193,7 @@ fn check(times: &[f64], region: bool, name: &str, body: &str) {
 // A workspace operator that reuses a shipped expansion's name keeps its own body: core declines it.
 #[test]
 fn a_custom_operator_with_a_shipped_name_is_declined_by_core() {
-    let mut custom: Op = op::find(&[], "noise3", &context::value()).expect("noise3");
+    let mut custom: Op = op::find(&[], "noise3", &context::value()).expect("noise3").clone();
     custom.name = "toy_noise3".into();
     custom.packed_extension = None;
     custom.body = Arc::new(|_, _, _| Ok(Value::Float(0.125)));

@@ -272,7 +272,7 @@ fn strict_uniform_reductions() {
 }
 
 fn custom_op() -> Op {
-    let mut o = op::find(&[], "+", &flow_syntax::context::value()).unwrap();
+    let mut o = op::find(&[], "+", &flow_syntax::context::value()).unwrap().clone();
     o.arithmetic = None;
     o.body = Arc::new(|_, _, args| match &args[..] {
         [(_, a), (_, b)] => Ok(Value::Float(v::num(a)? - v::num(b)?)),

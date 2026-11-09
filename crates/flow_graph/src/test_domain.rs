@@ -374,7 +374,7 @@ fn integer_arrays() {
         let workspace = check(&source);
         let card = card(&workspace, &["g", "tested"]);
         assert!(card.head == name && card.ty == array_of(Ty::Int));
-        let signature = op::find(&[], name, &context::value()).unwrap().signature;
+        let signature = &op::find(&[], name, &context::value()).unwrap().signature;
         assert_eq!(signature.pos, vec![(if name == "array/compact" { "mask" } else { "array" }.to_owned(), array_of(Ty::Int))]);
         assert_eq!(result(&workspace, 0.0), int_array(&expected));
         let (changed, checked) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(0), parse(edited_argument).remove(0))).unwrap();
@@ -399,7 +399,7 @@ fn ordering_arrays() {
         if name == "array/grade" {
             assert!(card.rows.iter().any(|row| row.key == ArgKey::Kw("descending".into()) && row.ty == Some(Ty::Bool)));
         }
-        let signature = op::find(&[], name, &context::value()).unwrap().signature;
+        let signature = &op::find(&[], name, &context::value()).unwrap().signature;
         let want = if name == "array/grade" {
             vec![("keys".to_owned(), array_of(Ty::Any))]
         } else {

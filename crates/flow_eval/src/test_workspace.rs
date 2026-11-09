@@ -911,3 +911,43 @@ fn sketch_checks_match_the_ocaml_oracle() {
         }
     }
 }
+
+#[test]
+fn prelude_forks_share_storage_and_keep_paths_in_their_owner() {
+    use std::time::Instant;
+    let catalog = Catalog { version: 0, kinds: Vec::new() };
+    let declarations = (0..64).map(|i| format!("(defn helper{i} :context value [(x : float)] (+ x {i}.0))")).collect::<String>();
+    let forms = parse(&declarations);
+    let prelude = W::prelude(&[], false, false, &catalog, &forms);
+    let workspace = parse("(workspace example (graph z :context value (let* [x (helper0 2.0)] (+ x t))) (graph a :context value (helper1 3.0)))");
+    let check = || {
+        let (checked, diagnostics) = W::check(&[], false, false, Some(&prelude), &catalog, &workspace);
+        let checked = checked.unwrap_or_else(|| panic!("{diagnostics:?}"));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(checked.graphs.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["z", "a"]);
+        checked
+    };
+    let fingerprint = |checked: &W::Workspace| format!("{:?}|{:?}|{:?}|{:?}|{:?}", checked.graphs, checked.defs, checked.live, checked.packed, checked.packed_roots);
+    let expected = fingerprint(&check());
+    std::hint::black_box(prelude.clone());
+    let allocations = mem_sys::alloc_count();
+    let started = Instant::now();
+    for _ in 0..64 { std::hint::black_box(prelude.clone()); }
+    let elapsed = started.elapsed();
+    let allocations = mem_sys::alloc_count() - allocations;
+    println!("64 prelude clones: {allocations} allocations / {elapsed:?}");
+    assert_eq!(allocations, 0, "cloning a frozen prelude shares its checked base");
+    let mut timings = Vec::new();
+    let mut allocation_samples = Vec::new();
+    for _ in 0..7 {
+        let allocations = mem_sys::alloc_count();
+        let started = Instant::now();
+        for _ in 0..8 { std::hint::black_box(check()); }
+        timings.push(started.elapsed().as_nanos());
+        allocation_samples.push(mem_sys::alloc_count() - allocations);
+    }
+    timings.sort_unstable();
+    allocation_samples.sort_unstable();
+    println!("8 warm cached checks: median {} ns / {} allocations", timings[3], allocation_samples[3]);
+    assert_eq!(fingerprint(&check()), expected, "checking again changed prelude paths or ordering");
+}

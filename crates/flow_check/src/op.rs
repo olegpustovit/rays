@@ -161,23 +161,72 @@ pub fn find_ref<'a>(extra:&'a [Op],name:&str,context:&Context)->Option<&'a Op>{
     let lookup=|key:&str|extra.iter().find(|op|op.name==key).or_else(||builtin_index().get(key).map(|i|&all()[*i]));
     lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
 }
-// `find_ref` over a shared op table, with a first-wins name index kept per thread (the table is held, so its address cannot be reused).
-pub fn find_indexed<'a>(extra:&'a Arc<Vec<Op>>,name:&str,context:&Context)->Option<&'a Op>{
-    thread_local!{ static INDEX:std::cell::RefCell<Vec<(Arc<Vec<Op>>,Arc<std::collections::HashMap<String,usize>>)>>=std::cell::RefCell::new(Vec::new()); }
-    let index=INDEX.with(|cache|{
-        let mut cache=cache.borrow_mut();
-        if let Some((_,index))=cache.iter().find(|(table,_)|Arc::ptr_eq(table,extra)){return index.clone();}
-        let mut map=std::collections::HashMap::new();
-        for (i,op) in extra.iter().enumerate(){map.entry(op.name.clone()).or_insert(i);}
-        let index=Arc::new(map);
-        if cache.len()>=8{cache.remove(0);}
-        cache.push((extra.clone(),index.clone()));
+#[derive(Clone)]
+pub struct OpMetadata {
+    pub packed_kind: Option<PackedKind>,
+    pub builtin_body: bool,
+}
+struct OpIndex {
+    names: std::collections::HashMap<String, usize>,
+    metadata: Vec<OpMetadata>,
+}
+/// Compare retained declarations without allocating a second fingerprint table.
+/// Callback identity matters: the same name may have a different user implementation.
+pub fn same_declarations(left: &[Op], right: &[Op]) -> bool {
+    left.len() == right.len() && left.iter().zip(right).all(|(a,b)| same_op(a,b)
+        && match (&a.out_args,&b.out_args) { (Some(a),Some(b)) => Arc::ptr_eq(a,b), (None,None) => true, _ => false }
+        && match (&a.arithmetic,&b.arithmetic) { (Some(a),Some(b)) => Arc::ptr_eq(&a.apply,&b.apply), (None,None) => true, _ => false })
+}
+// Construction-only: called while creating a retained immutable table index.
+// Keep the existing full declaration equality and noise extension validation unchanged.
+pub fn derive_packed_kind(op: &Op) -> Option<PackedKind> {
+    if op.ctx != context::value() || op.shape != Shape::Scalar { return None; }
+    if let Some(&index) = builtin_index().get(op.name.as_str()) {
+        if same_op(&all()[index], op) { return builtin_packed_kind(op); }
+    }
+    valid_noise_extension(op).then_some(PackedKind::Noise3)
+}
+fn index_ops(ops: &[Op]) -> OpIndex {
+    let mut names = std::collections::HashMap::new();
+    let metadata = ops.iter().enumerate().map(|(index, op)| {
+        names.entry(op.name.clone()).or_insert(index); // First extra declaration wins, as before.
+        let builtin_body = builtin_index().get(op.name.as_str())
+            .is_some_and(|&index| Arc::ptr_eq(&all()[index].body, &op.body));
+        OpMetadata { packed_kind: derive_packed_kind(op), builtin_body }
+    }).collect();
+    OpIndex { names, metadata }
+}
+pub fn find_checked<'a>(extra: &'a Arc<Vec<Op>>, name: &str, within: &Context) -> Option<(&'a Op, OpMetadata)> {
+    thread_local! {
+        static INDEX: std::cell::RefCell<Vec<(Arc<Vec<Op>>, Arc<OpIndex>)>> = std::cell::RefCell::new(Vec::new());
+    }
+    static BUILTIN_METADATA: LazyLock<Vec<OpMetadata>> = LazyLock::new(|| all().iter().map(|op| OpMetadata {
+        packed_kind: if op.ctx == context::value() && op.shape == Shape::Scalar { builtin_packed_kind(op) } else { None },
+        builtin_body: true,
+    }).collect());
+    let index = INDEX.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((_, index)) = cache.iter().find(|(table, _)| Arc::ptr_eq(table, extra)) { return index.clone(); }
+        let index = Arc::new(index_ops(extra));
+        if cache.len() >= 8 { cache.remove(0); }
+        cache.push((extra.clone(), index.clone()));
         index
     });
-    let lookup=|key:&str|index.get(key).map(|i|&extra[*i]).or_else(||builtin_index().get(key).map(|i|&all()[*i]));
-    lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
+    let lookup = |key: &str| {
+        if let Some(&i) = index.names.get(key) {
+            let metadata = &index.metadata[i];
+            Some((&extra[i], metadata.clone()))
+        } else {
+            builtin_index().get(key).map(|&i| {
+                let metadata = &BUILTIN_METADATA[i];
+                (&all()[i], metadata.clone())
+            })
+        }
+    };
+    lookup(name).or_else(|| lookup(&format!("value/{name}"))).or_else(|| lookup(&format!("{}/{name}", context::name(*within))))
 }
-pub fn find(extra:&[Op],name:&str,context:&Context)->Option<Op>{ find_ref(extra,name,context).cloned() }
+pub fn find_indexed<'a>(extra:&'a Arc<Vec<Op>>,name:&str,context:&Context)->Option<&'a Op>{ find_checked(extra,name,context).map(|(op,_)| op) }
+pub fn find<'a>(extra:&'a [Op],name:&str,context:&Context)->Option<&'a Op>{ find_ref(extra,name,context) }
 pub fn of_context(extra:&[Op],context:&Context)->Vec<Op>{
     let mut ops=Vec::new();
     if *context!=context::value(){for op in all(){if op.ctx==*context{ops.push(op.clone())}}for op in extra{if op.ctx==*context{ops.push(op.clone())}}}
@@ -197,6 +246,7 @@ pub fn validate(extra:&[Op])->Option<Diagnostic>{
     } None
 }
 fn valid_noise_extension(op:&Op)->bool {
+    if op.packed_extension != Some(PackedKind::Noise3) || op.name != "noise3" { return false; }
     let wanted=pairs(vec![("gain",Ty::Float),("lacunarity",Ty::Float),("octaves",Ty::Int),("seed",Ty::Int)]);
     op.packed_extension==Some(PackedKind::Noise3)&&op.name=="noise3"&&op.ctx==context::value()&&op.shape==Shape::Scalar&&!op.live&&!op.any_num&&op.arithmetic.is_none()&&op.out_args.is_none()&&op.signature.pos==pairs(vec![("position",Ty::Vec3)])&&op.signature.opt.is_empty()&&op.signature.rest.is_none()&&op.signature.kw.len()==wanted.len()&&wanted.iter().all(|item|op.signature.kw.contains(item))&&matches!((op.out)(&[Ty::Vec3]),Ok(Ty::Float))
 }
@@ -225,11 +275,6 @@ fn builtin_packed_kind(op:&Op)->Option<PackedKind>{
 
 // OCaml compares physically; a clone shares every Arc, so equal fields and the same closures are the same declaration.
 fn same_op(a:&Op,b:&Op)->bool{a.name==b.name&&a.ctx==b.ctx&&a.signature==b.signature&&a.any_num==b.any_num&&a.choices==b.choices&&a.shape==b.shape&&a.live==b.live&&a.category==b.category&&Arc::ptr_eq(&a.out,&b.out)&&Arc::ptr_eq(&a.check,&b.check)&&Arc::ptr_eq(&a.body,&b.body)&&a.out_args.is_some()==b.out_args.is_some()&&a.packed_extension==b.packed_extension&&a.arithmetic.is_some()==b.arithmetic.is_some()}
-pub fn packed_kind(op:&Op)->Option<PackedKind>{
-    if op.ctx!=context::value()||op.shape!=Shape::Scalar{return None}
-    if let Some(b)=all().iter().find(|b|b.name==op.name){if same_op(b,op){return builtin_packed_kind(op)}}
-    if valid_noise_extension(op){Some(PackedKind::Noise3)}else{None}
-}
 use crate::ray_host;
 
 pub fn max_iterations() -> usize { MAX_ITERATIONS }
@@ -910,6 +955,25 @@ pub fn arith(name:&str)->Option<Arithmetic>{builtin_index().get(name).and_then(|
 
 #[cfg(test)]
 mod tests{
+    #[test]
+    fn indexed_capabilities_follow_the_immutable_declaration() {
+        let mut table = Arc::new(vec![find(&[], "sin", &context::value()).unwrap().clone()]);
+        fn lookup(table: &Arc<Vec<Op>>) -> (&Op, OpMetadata) { find_checked(table, "sin", &context::value()).unwrap() }
+        assert!(lookup(&table).1.packed_kind.is_some());
+        assert!(lookup(&table).1.builtin_body);
+        assert!(Arc::strong_count(&table) > 1, "the index retains its immutable owner");
+        let original = table.clone();
+        Arc::make_mut(&mut table)[0].category.push_str(" edited");
+        assert!(lookup(&table).1.packed_kind.is_none());
+        assert!(lookup(&table).1.builtin_body, "body identity has its own weaker policy");
+        assert!(lookup(&original).1.packed_kind.is_some());
+        Arc::make_mut(&mut table)[0].body = Arc::new(|_, _, _| Ok(Value::Float(17.)));
+        assert!(!lookup(&table).1.builtin_body);
+        assert!(!same_declarations(&original, &table));
+        let duplicates = Arc::new(vec![original[0].clone(), table[0].clone()]);
+        assert!(lookup(&duplicates).1.packed_kind.is_some(), "the first extra declaration wins");
+    }
+
     use super::*;
 
     #[test]
@@ -949,7 +1013,7 @@ mod ocaml_table {
             out.push_str(&format!("{}|{}|{}|{}|pos={}|opt={}|rest={}|kw={}|choices={}|any={}|live={}|ar={}|pk={}\n",o.name,context::name(o.ctx),o.category,
                 match o.shape{Shape::Scalar=>"scalar".to_owned(),Shape::Struct{splice}=>format!("struct{}",splice)},sg(&o.signature.pos),sg(&o.signature.opt),
                 match &o.signature.rest{None=>"-".to_owned(),Some((n,t))=>format!("{}:{}",n,ty::to_string(t))},sg(&o.signature.kw),
-                o.choices.iter().map(|(n,c)|format!("{}={}",n,c.join("/"))).collect::<Vec<_>>().join(";"),o.any_num,o.live,o.arithmetic.is_some(),packed_kind(o).is_some()));
+                o.choices.iter().map(|(n,c)|format!("{}={}",n,c.join("/"))).collect::<Vec<_>>().join(";"),o.any_num,o.live,o.arithmetic.is_some(),derive_packed_kind(o).is_some()));
         }
         let golden=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/golden/ops.txt")).unwrap().replace("\r\n","\n");
         assert!(out==golden,"operator declarations differ from golden/ops.txt");

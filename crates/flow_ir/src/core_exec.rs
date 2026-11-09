@@ -436,7 +436,7 @@ fn seal(st: &State, n: i64) {
 }
 
 /// Resolved once per prepared program, not per executed statement.
-fn operator(name: &str) -> Result<Op, Diagnostic> {
+fn operator(name: &str) -> Result<&'static Op, Diagnostic> {
     op::find(&[], name, &context::value()).ok_or_else(|| v::fail("E_CORE", &format!("Unsupported core primitive: {name}")))
 }
 
@@ -448,10 +448,10 @@ fn apply_op(operation: &Op, st: &State, args: &[(String, Value)]) -> Result<Valu
 }
 
 /// A lazily resolved operator, shared by the closures built for one call site.
-fn lazy_operator(name: String) -> Arc<(String, OnceLock<Result<Op, Diagnostic>>)> {
+fn lazy_operator(name: String) -> Arc<(String, OnceLock<Result<&'static Op, Diagnostic>>)> {
     Arc::new((name, OnceLock::new()))
 }
-fn resolved(cell: &(String, OnceLock<Result<Op, Diagnostic>>)) -> Result<&Op, Diagnostic> {
+fn resolved(cell: &(String, OnceLock<Result<&'static Op, Diagnostic>>)) -> Result<&'static Op, Diagnostic> {
     match cell.1.get_or_init(|| operator(&cell.0)) {
         Ok(operation) => Ok(operation),
         Err(d) => Err(d.clone()),

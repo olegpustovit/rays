@@ -4940,7 +4940,7 @@ mod ownership_tests {
         let body = terms.push(None, &Ty::Float, form, Draft::Op { op: "probe".into(), args: Vec::new(), skip: Vec::new() });
         defs[0].body = terms.freeze().handle(body);
         defs[1].body = defs[0].body.clone();
-        let mut quiet = op::find(&[], "pointer/x", &context::value()).unwrap();
+        let mut quiet = op::find(&[], "pointer/x", &context::value()).unwrap().clone();
         quiet.name = "sop/probe".into();
         quiet.ctx = context::sop();
         quiet.live = false;

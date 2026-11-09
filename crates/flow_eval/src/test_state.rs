@@ -186,7 +186,7 @@ fn exact_images_cannot_be_state() {
     // reads it, and the step before it reaches next.
     for wrap in 0..4 {
         let calls = Arc::new(AtomicI64::new(0));
-        let mut operator: Op = op::find(&[], "sin", &context::value()).unwrap();
+        let mut operator: Op = op::find(&[], "sin", &context::value()).unwrap().clone();
         operator.name = "test/opaque".into();
         operator.signature = op::Signature { pos: vec![("resource".into(), ty::Ty::Bool)], opt: vec![], rest: None, kw: vec![] };
         operator.out = Arc::new(|_| Ok(ty::Ty::Any));

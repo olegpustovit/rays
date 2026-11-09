@@ -171,10 +171,6 @@ impl Scope {
     }
 }
 
-fn shipped(o: &op::Op) -> bool {
-    op::all().iter().any(|s| s.name == o.name && Arc::ptr_eq(&s.body, &o.body))
-}
-
 fn packed_candidate(x: &Term) -> (bool, bool) {
     fn text_array(ty: &Ty) -> bool { matches!(ty, Ty::Array(inner) if **inner == Ty::Text) }
     fn geometry_accumulator(ty: &Ty) -> bool {
@@ -440,10 +436,6 @@ impl Lowerer {
             self.root_ops = Some(E::residual::residual_ops(root));
         }
         Ok(self.root_ops.clone().unwrap())
-    }
-    fn find_op(&mut self, name: &str) -> R<Option<op::Op>> {
-        let ops = self.ops()?;
-        Ok(op::find(&ops, name, &context::value()))
     }
     fn view(&self, r: ResidualId) -> R<E::residual::View> { Ok(E::residual::residual_view(r)?) }
 
@@ -1911,8 +1903,9 @@ impl Lowerer {
                 if E::residual::residual_definition(root, name).is_some() {
                     return self.definition(borrow, s, &source, name, specialized, values);
                 }
-                let o = match self.find_op(name)? {
-                    Some(o) if o.ctx == context::value() && o.shape == op::Shape::Scalar && shipped(&o) => o,
+                let ops = self.ops()?;
+                let o = match op::find_checked(&ops, name, &context::value()) {
+                    Some((o, metadata)) if o.ctx == context::value() && o.shape == op::Shape::Scalar && metadata.builtin_body => o,
                     _ => return Err(refusal(name)),
                 };
                 let names: Vec<String> = o.signature.pos.iter().chain(o.signature.opt.iter()).map(|(n, _)| n.clone()).collect();
@@ -1986,7 +1979,8 @@ impl Lowerer {
     }
 
     fn op_term(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, x: &Term, name: &str, args: &[A::Field]) -> R<Lowered> {
-        let o = match self.find_op(name)? { Some(o) => o, None => return Err(refusal(name)) };
+        let ops = self.ops()?;
+        let (o, metadata) = match op::find_checked(&ops, name, &context::value()) { Some(pair) => pair, None => return Err(refusal(name)) };
         let mut largs: Vec<(String, Lowered)> = Vec::new();
         for field in args {
             let t = &x.child(field.term);
@@ -2000,7 +1994,7 @@ impl Lowerer {
                 _ => false,
             }
         }
-        let prototype: Option<Value> = if o.live || (shipped(&o) && large_array_constructor(name, &largs)) { None } else {
+        let prototype: Option<Value> = if o.live || (metadata.builtin_body && large_array_constructor(name, &largs)) { None } else {
             let proto: Vec<(String, Value)> = largs.iter().enumerate().map(|(i, (n, value))| {
                 (n.clone(), match value {
                     Known(v) => v.clone(),
@@ -2021,7 +2015,7 @@ impl Lowerer {
                 return if borrow { self.descriptor(s, source, &value) } else { Ok(value) };
             }
         }
-        if o.ctx != context::value() || o.shape != op::Shape::Scalar || !shipped(&o) { return Err(refusal(name)); }
+        if o.ctx != context::value() || o.shape != op::Shape::Scalar || !metadata.builtin_body { return Err(refusal(name)); }
         // Diagnostic stores UTF-8 strings: folding byte Text would replace it with a quoted repr.
         // Keep the original operands so backends with byte-preserving Text can raise them directly.
         if name == "error" && largs.iter().any(|(_, v)| matches!(v, Known(Value::Text(bytes)) if std::str::from_utf8(bytes).is_err())) {
@@ -2387,8 +2381,9 @@ impl Lowerer {
                 let node = arena.op(id);
                 let op = value.name(node.op);
                 if op == "value/rand" { return Ok(false); }
-                match self.find_op(op)? {
-                    Some(o) if shipped(&o) => {}
+                let ops = self.ops()?;
+                match op::find_checked(&ops, op, &context::value()) {
+                    Some((_, metadata)) if metadata.builtin_body => {}
                     _ => return Ok(false),
                 }
                 for field in arena.fields(node.args) { if !self.invariant(&value.child(field.term))? { return Ok(false); } }
@@ -3280,7 +3275,7 @@ mod tests {
             arithmetic: None,
             packed_extension: None,
             body: Arc::new(move |_, _, _| Ok(Value::Deferred(ty.clone(), id))),
-            ..base
+            ..base.clone()
         }
     }
 
@@ -3388,7 +3383,7 @@ mod tests {
             arithmetic: None,
             packed_extension: None,
             body: Arc::new(|_, _, args| Ok(source_value("test/storage", ty::geometry(), args.to_vec()))),
-            ..base
+            ..base.clone()
         };
         let program = |body: &str| -> C::Program {
             let ws = check_with(&[storage.clone()], &format!("(workspace constants (graph g :context value (let* [tested {body}] 0.)))"));
