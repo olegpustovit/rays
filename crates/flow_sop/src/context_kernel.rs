@@ -29,10 +29,11 @@ fn remove_pattern(term: &Term, pattern: PatternId, bindings: &[(String, Value)])
     }
     bindings.iter().filter(|(name, _)| !binds(term, pattern, name)).cloned().collect()
 }
-struct Scan {
-
+struct Scan<'a> {
     found: RefCell<Vec<String>>,
     fuel: Cell<i64>,
+    /// The first helper of each name: a call looks its definition up once per call node.
+    helpers: std::collections::HashMap<&'a str, &'a Graph>,
 }
 
 fn literal(t: &Term) -> Option<Value> {
@@ -59,7 +60,13 @@ fn local_inputs(scan: &Scan, defs: &[Graph], helper: &Graph, owner: &Term, args:
     }).collect()
 }
 
-impl Scan {
+impl<'a> Scan<'a> {
+    fn new(defs: &'a [Graph]) -> Self {
+        let mut helpers = std::collections::HashMap::new();
+        for def in defs { helpers.entry(def.name.as_str()).or_insert(def); }
+        Scan { found: RefCell::new(Vec::new()), fuel: Cell::new(4096), helpers }
+    }
+
     fn known(&self, defs: &[Graph], bindings: &[(String, Value)], t: &Term) -> Option<Value> {
         if let Some(value) = literal(t) {
             return Some(value);
@@ -72,7 +79,7 @@ impl Scan {
             Node::CallFn(id) if self.fuel.get() > 0 => {
                 self.fuel.set(self.fuel.get() - 1);
                 let call = t.arena().call_fn(id);
-                let helper = defs.iter().find(|d| d.name == t.name(call.name))?;
+                let helper = *self.helpers.get(t.name(call.name))?;
                 let local = local_inputs(self, defs, helper, t, t.arena().term_ids(call.args), bindings);
                 if local.iter().any(Option::is_none) { return None; }
                 let local: Bindings = local.into_iter().flatten().collect();
@@ -126,7 +133,7 @@ impl Scan {
             }
             Node::CallFn(id) => {
                 let call = body.arena().call_fn(id);
-                if let Some(helper) = defs.iter().find(|d| d.name == body.name(call.name)) {
+                if let Some(&helper) = self.helpers.get(body.name(call.name)) {
                     let local: Bindings = local_inputs(self, defs, helper, body, body.arena().term_ids(call.args), bindings).into_iter().flatten().collect();
                     match call.body {
                         Some(id) => self.scan(defs, &local, &body.child(id), graph),
@@ -147,7 +154,7 @@ impl Scan {
                 return;
             }
             Node::FnRef(name) => {
-                if let Some(helper) = defs.iter().find(|d| d.name == body.name(name)) { self.scan(defs, &[], &helper.body, graph); }
+                if let Some(&helper) = self.helpers.get(body.name(name)) { self.scan(defs, &[], &helper.body, graph); }
             }
             Node::Let(id) => {
                 let let_node = body.arena().let_node(id);
@@ -201,7 +208,7 @@ pub fn context_ops_reached(inputs: &[(String, Value)], defs: &[Graph], graph: &G
         .iter()
         .filter_map(|(name, _, default)| default.as_ref().and_then(literal).map(|v| (name.clone(), v)))
         .collect();
-    let scan = Scan { found: RefCell::new(Vec::new()), fuel: Cell::new(4096) };
+    let scan = Scan::new(defs);
     let bindings: Bindings = inputs.iter().cloned().chain(defaults).collect();
     scan.scan(defs, &bindings, &graph.body, graph);
     for (_, _, default) in &graph.inputs {

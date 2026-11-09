@@ -1752,30 +1752,39 @@ pub fn build_call(
     let reached_has = |def: &WGraph| reached.iter().any(|r| std::ptr::eq(*r, def));
     let mut graphs = vec![body.clone()];
     graphs.extend(validations.iter().cloned());
-    let library = Workspace {
-        graphs: graphs.into(),
-        defs: checked.defs.iter().zip(env.def_context_use().iter())
-            .filter_map(|(def, uses)| if !reached_has(def) { None } else { Some(if *uses { ck::specialize(None, context, label, def).unwrap_or_else(|_| def.clone()) } else { def.clone() }) })
-            .collect::<Vec<_>>().into(),
-        nodes: checked.nodes.iter().filter(|d| d.kind.qualified != definition.kind.qualified).cloned().collect::<Vec<_>>().into(),
-        ..checked.clone()
-    };
+    let defs: Vec<WGraph> = checked.defs.iter().zip(env.def_context_use().iter())
+        .filter_map(|(def, uses)| if !reached_has(def) { None } else { Some(if *uses { ck::specialize(None, context, label, def).unwrap_or_else(|_| def.clone()) } else { def.clone() }) })
+        .collect();
     // The catalog's packed sites of helpers this body does not reach can never be observed here; a
     // qualification still gave each one a pending refusal (38,740 sites per edit in a full catalog).
-    let reached_names: std::collections::HashSet<&str> = library.defs.iter().map(|d| d.name.as_str()).collect();
+    let reached_names: std::collections::HashSet<&str> = defs.iter().map(|d| d.name.as_str()).collect();
     // another kind's body cooks as its own node (`lower_default`), never inline in this one
     let own_body = format!("node:{}", definition.kind.qualified);
-    let reached_owner = |path: &W::Path| {
-        path.first().is_none_or(|owner| match (owner.strip_prefix("def:"), owner.starts_with("node:")) {
+    let reached = |owner: Option<&String>| {
+        owner.is_none_or(|owner| match (owner.strip_prefix("def:"), owner.starts_with("node:")) {
             (Some(name), _) => reached_names.contains(name),
             (None, true) => *owner == own_body,
             (None, false) => true,
         })
     };
+    let packed = env.packed_by_owner(&reached).into();
+    let packed_roots = checked.packed_roots.iter().filter(|(_, path)| reached(path.first())).cloned().collect();
+    // field by field: `..checked.clone()` would copy every catalog packed root first
     let library = Workspace {
-        packed: library.packed.iter().filter(|(path, _)| reached_owner(path)).cloned().collect::<Vec<_>>().into(),
-        packed_roots: library.packed_roots.iter().filter(|(_, path)| reached_owner(path)).cloned().collect(),
-        ..library.clone()
+        name: checked.name.clone(),
+        graphs: graphs.into(),
+        defs: defs.into(),
+        nodes: checked.nodes.iter().filter(|d| d.kind.qualified != definition.kind.qualified).cloned().collect::<Vec<_>>().into(),
+        macros: checked.macros.clone(),
+        source: checked.source.clone(),
+        live: checked.live.clone(),
+        invariant: checked.invariant.clone(),
+        approx: checked.approx.clone(),
+        packed,
+        packed_roots,
+        approx_reasons: checked.approx_reasons.clone(),
+        kind_fns: checked.kind_fns.clone(),
+        ops: checked.ops.clone(),
     };
     let overrides: Vec<(String, Vec<(String, Value)>)> = library
         .graphs
@@ -2427,6 +2436,8 @@ pub struct CallEnvShared {
     factories: Vec<Factory>,
     o: Options,
     def_context_use: OnceLock<Arc<Vec<bool>>>,
+    /// `checked.packed` positions by their path's owner (first segment; `None` for the root).
+    packed_owners: OnceLock<BTreeMap<Option<String>, Vec<usize>>>,
 }
 
 impl CookServices {
@@ -3697,6 +3708,18 @@ impl CallEnvShared {
     fn def_context_use(&self) -> Arc<Vec<bool>> {
         self.def_context_use.get_or_init(|| Arc::new(self.checked.defs.iter().map(ck::uses_context).collect())).clone()
     }
+
+    /// `checked.packed` in order, kept by owner: a body visits its owners, not every catalog site.
+    fn packed_by_owner(&self, keep: &dyn Fn(Option<&String>) -> bool) -> Vec<(W::Path, W::PackedForm)> {
+        let owners = self.packed_owners.get_or_init(|| {
+            let mut owners: BTreeMap<Option<String>, Vec<usize>> = BTreeMap::new();
+            for (i, (path, _)) in self.checked.packed.iter().enumerate() { owners.entry(path.first().cloned()).or_default().push(i); }
+            owners
+        });
+        let mut kept: Vec<usize> = owners.iter().filter(|(owner, _)| keep(owner.as_ref())).flat_map(|(_, at)| at.iter().copied()).collect();
+        kept.sort_unstable();
+        kept.into_iter().map(|i| self.checked.packed[i].clone()).collect()
+    }
 }
 
 /// A card's canonical parameters as the values of its schema's fields.
@@ -4815,7 +4838,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
     };
     let nodes = plan.nodes.iter().map(|n| failed_card_as_call(n, &plan, &checked)).collect();
     let plan = Plan { id: E::fresh_plan_id(), nodes, ..plan };
-    let shared = Arc::new(CallEnvShared { id: { static NEXT: AtomicU64 = AtomicU64::new(1); NEXT.fetch_add(1, Ordering::Relaxed) }, checked: checked.clone(), factories: factories.clone(), o: o.clone(), def_context_use: OnceLock::new() });
+    let shared = Arc::new(CallEnvShared { id: { static NEXT: AtomicU64 = AtomicU64::new(1); NEXT.fetch_add(1, Ordering::Relaxed) }, checked: checked.clone(), factories: factories.clone(), o: o.clone(), def_context_use: OnceLock::new(), packed_owners: OnceLock::new() });
     let lisp_factories: Vec<Factory> = (0..checked.nodes.len()).map(|index| lisp_factory(&shared, &kernel_source, None, &[], None, index)).collect();
     let templ = template_flags(&plan.nodes);
     let sites = o.sites.clone();
