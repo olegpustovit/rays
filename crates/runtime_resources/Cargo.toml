@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "runtime_resources"
 version.workspace = true
 edition.workspace = true
@@ -14,11 +15,6 @@ ogpu_core = { path = "../ogpu_core" }
 [dev-dependencies]
 ogpu_mock = { path = "../ogpu_mock" }
 
-# These tests need the SDL main thread, which libtest never gives a test: their own main runs them.
 [[test]]
-name = "window_runtime_resources"
-harness = false
-
-[[test]]
-name = "window_gpu_image"
+name = "window_all"
 harness = false

@@ -1,7 +1,7 @@
 //! Port of test_image_sink.ml. Faults and command observations wrap the selected native driver;
 //! compute and raster commands still execute on the real GPU. Rust's !Send handles enforce the
 //! oracle's owner-thread restrictions at compile time rather than transporting Rc across threads.
-mod common;
+use crate::common;
 use common::test_program as tp;
 use flow_gpu::{image_sink as s, pipelines, run};
 use flow_ir::packed::host as phost;
@@ -267,4 +267,4 @@ fn image_sink_transactions() {
     assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before);
     assert_eq!(st.pipelines.get(), 0);
 }
-fn main() { common::window::run(&[("image_sink_transactions", image_sink_transactions)]); }
+pub const CASES: &[(&str, fn())] = &[("image_sink_transactions", image_sink_transactions)];

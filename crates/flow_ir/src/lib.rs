@@ -37,4 +37,5 @@ mod region_snapshot;
 #[cfg(test)] mod test_with_error;
 #[cfg(test)] mod test_core_marks;
 #[cfg(test)] mod test_region_snapshot;
-#[cfg(test)] mod test_support;
+#[doc(hidden)]
+pub mod test_support;

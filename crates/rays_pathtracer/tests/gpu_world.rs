@@ -4,7 +4,7 @@
 //! `mirror` (each its own process, each under 5 s). Samples per pixel are unchanged, but a tracer takes 16
 //! of them per `render` instead of 1 (OCaml: spp 1 and as many frames), so the GPU round trips shrink 16x;
 //! `bench_world` (a convergence probe, not in runtest) is not ported.
-mod common;
+use crate::common;
 use common::pt::{self, get, mean_red, pixels, rgb, rmse};
 use rays::world as w;
 use rays_math::vec3;
@@ -194,6 +194,4 @@ fn mirror() {
     println!("pathtracer World: reflected rect and teardown checked");
 }
 
-fn main() {
-    common::window::run(&[("furnace_mis", furnace_mis), ("backgrounds", backgrounds), ("mirror", mirror)]);
-}
+pub const CASES: &[(&str, fn())] = &[("furnace_mis", furnace_mis), ("backgrounds", backgrounds), ("mirror", mirror)];

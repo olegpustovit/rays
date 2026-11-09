@@ -6,7 +6,7 @@
 //! - resolutions and sample counts are shrunk to stay under the 5 s budget (noted per case);
 //! - `exact_m1` (byte-for-byte digests of two frames recorded on an Apple M1) is not ported: the digests
 //!   are of the OCaml/RDK geometry, which these generators do not reproduce.
-mod common;
+use crate::common;
 use common::meshes;
 use common::pt::{self, frame, frames, get, pixels, rgb};
 use rays_math::{mat4, vec3};
@@ -394,8 +394,7 @@ fn strands() {
     println!("pathtracer: strands ok");
 }
 
-fn main() {
-    common::window::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("lit", lit),
         ("lens", lens),
         ("instanced", instanced),
@@ -405,5 +404,4 @@ fn main() {
         ("sphere_furnace", sphere_furnace),
         ("materials_motion", materials_motion),
         ("strands", strands),
-    ]);
-}
+    ];

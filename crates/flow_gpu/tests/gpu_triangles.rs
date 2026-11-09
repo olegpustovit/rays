@@ -2,7 +2,7 @@
 //! order (winding, projection, concavity, partial groups, two-pass reduction) and fall back
 //! conservatively (`E_GPU_DISPLAY_TRIANGLES`); the host wrapper reuses its display storage and
 //! counts only validation bytes; display normals of the result point at +z.
-mod common;
+use crate::common;
 use flow_gpu::{host, pipelines, run};
 use ogpu_core::backend as b;
 use ogpu_core::types::{BufferDescriptor, BufferUsage};
@@ -215,6 +215,4 @@ fn refusals() {
     pipelines::close(&pipes);
 }
 
-fn main() {
-    common::window::run(&[("hosted", hosted), ("orientations", orientations), ("groups", groups), ("refusals", refusals)]);
-}
+pub const CASES: &[(&str, fn())] = &[("hosted", hosted), ("orientations", orientations), ("groups", groups), ("refusals", refusals)];

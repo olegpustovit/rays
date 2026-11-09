@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "pxui"
 version.workspace = true
 edition.workspace = true
@@ -34,9 +35,5 @@ ogpu_vulkan = { path = "../ogpu_vulkan" }
 ogpu_metal = { path = "../ogpu_metal" }
 
 [[test]]
-name = "gpu_pxui_parity"
-harness = false
-
-[[test]]
-name = "window_pxui_ui"
+name = "window_all"
 harness = false

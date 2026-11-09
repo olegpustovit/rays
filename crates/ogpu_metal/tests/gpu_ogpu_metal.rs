@@ -4,7 +4,7 @@
 // ends with the process-wide Metal handle count where it began. The MSL is the OCaml suite's, dumped to
 // fixtures/shaders/ogpu_metal/conformance/*.metal. Metal calls need the main thread: a harness = false
 // target (common::run) runs the tests on it.
-mod common;
+use crate::common;
 use ogpu_metal::{backend, impl_};
 use ogpu_core::{
     acceleration::InstanceKind,
@@ -1492,14 +1492,9 @@ fn render(device: &Device) {
     be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
 }
 
-fn main() {
-    if !cfg!(target_os = "macos") {
-        return; // Metal exists only on macOS
-    }
-    common::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("gpu_implementation_tag_and_handles", gpu_implementation_tag_and_handles),
         ("gpu_conformance_transfer_and_compute", gpu_conformance_transfer_and_compute),
         ("gpu_conformance_ray_tracing", gpu_conformance_ray_tracing),
         ("gpu_conformance_render", gpu_conformance_render),
-    ]);
-}
+    ];

@@ -3,7 +3,7 @@
 //! int32 arithmetic, gathers), selected and untaken integer errors, empty dispatches, fused
 //! outputs, refusals, and a drawing's region read back through `Executor::region_readback`.
 //! Resident-fold, resident-value and counted compaction scenarios live in `gpu_resident.rs`.
-mod common;
+use crate::common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
 use flow_ir::flow_ir::{executor, gpu};
@@ -11,6 +11,9 @@ use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::value::{self, Value};
 use std::sync::Arc;
+
+/// INT64_CHECKS at a fast kernel's width: its Int registers are 32 bits and wrap.
+const INT32_CHECKS: &str = "(let* [n (int/add (int x) (frame/index))\n  d (int/add (int/mod n 4) 1) even (int/mul d 2)\n  low (int/shl 1 (int/add 31 (int/mod n 1)))]\n  [(if (int/lt (int/add 2147483647 d) 0) 1. 0.)\n   (if (int/eq (int/mul 2147483647 even) (int/sub 0 even)) 1. 0.)\n   (if (int/eq (int/shr (int/sub 0 d) 31) 1) 1. 0.)\n   (if (and (int/lt (abs low) 0) (int/eq (int/div low -1) low)) 1. 0.)])";
 
 fn array(v: &Value) -> Vec<f64> {
     match v {
@@ -124,7 +127,7 @@ fn fixtures() {
 /// 32-bit form on the device, whose fast Int registers are 32 bits
 fn carried() {
     let Some((lease, pipes)) = start() else { return };
-    let int32 = tp::compile(&format!("(map (fn [x] (iterate 1 [t 0. 0. 0.] (fn [unused] {}))) (array/range 512))", tp::INT32_CHECKS));
+    let int32 = tp::compile(&format!("(map (fn [x] (iterate 1 [t 0. 0. 0.] (fn [unused] {}))) (array/range 512))", INT32_CHECKS));
     let r = runner(&lease, &pipes, &int32, true);
     let actual = array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &prepare(&int32, true, 1.0))), None)));
     assert!(actual.len() == 2048 && actual.iter().all(|v| *v == 1.0), "32-bit Int checks on the device");
@@ -362,6 +365,4 @@ fn guarded_gather() {
     run::close(&r,false);ogpu_core::backend::destroy_buffer(&table).unwrap();pipelines::close(&pipes);
 }
 
-fn main() {
-    common::window::run(&[("guarded_gather",guarded_gather),("specialized_captures", specialized_captures), ("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)]);
-}
+pub const CASES: &[(&str, fn())] = &[("guarded_gather",guarded_gather),("specialized_captures", specialized_captures), ("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)];

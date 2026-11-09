@@ -50,46 +50,49 @@ fn renderer(names: &[&str], count: usize) {
     assert_eq!(compared.len(), count);
 }
 
-#[test]
-fn renderer_marks_and_ui_match_the_ocaml_printer() {
+pub fn renderer_marks_and_ui_match_the_ocaml_printer() {
     renderer(&["marks", "ui", "geometry", "quad"], 12);
 }
 
-#[test]
-fn renderer_image_matches_the_ocaml_printer() {
+pub fn renderer_image_matches_the_ocaml_printer() {
     // image_rgba8.metal was not captured: the two SPIR-V stages only
     renderer(&["image_rgba8"], 2);
 }
 
-#[test]
-fn renderer_scene3_matches_the_ocaml_printer() {
+pub fn renderer_scene3_matches_the_ocaml_printer() {
     renderer(&["scene3", "scene3_points"], 6);
 }
 
-#[test]
-fn renderer_scene3_textured_matches_the_ocaml_printer() {
+pub fn renderer_scene3_textured_matches_the_ocaml_printer() {
     renderer(&["scene3_textured"], 3);
 }
 
-#[test]
-fn renderer_scene3_sun_depth_matches_the_ocaml_printer() {
+pub fn renderer_scene3_sun_depth_matches_the_ocaml_printer() {
     renderer(&["scene3_sun_depth"], 3);
 }
 
-#[test]
-fn renderer_scene3_world_matches_the_ocaml_printer() {
+pub fn renderer_scene3_world_matches_the_ocaml_printer() {
     renderer(&["scene3_world"], 3);
 }
 
-#[test]
-fn ogpu_metal_present_matches_the_ocaml_printer() {
+pub fn ogpu_metal_present_matches_the_ocaml_printer() {
     // only present.metal was captured (the SPIR-V presenter is not a golden)
     let compared = compare("ogpu_metal", "ogpu_metal", "ogpu_metal", &["present.vert.spv", "present.frag.spv"]);
     assert_eq!(compared, vec!["present.metal".to_owned()]);
 }
 
-#[test]
-fn flow_gpu_shaders_match_the_ocaml_printer() {
+pub fn flow_gpu_shaders_match_the_ocaml_printer() {
     let compared = compare("flow_gpu", "flow_gpu", "flow_gpu", &[]);
     assert_eq!(compared.len(), 28);
 }
+
+pub const CASES: &[(&str, fn())] = &[
+    ("renderer_marks_and_ui_match_the_ocaml_printer", renderer_marks_and_ui_match_the_ocaml_printer),
+    ("renderer_image_matches_the_ocaml_printer", renderer_image_matches_the_ocaml_printer),
+    ("renderer_scene3_matches_the_ocaml_printer", renderer_scene3_matches_the_ocaml_printer),
+    ("renderer_scene3_textured_matches_the_ocaml_printer", renderer_scene3_textured_matches_the_ocaml_printer),
+    ("renderer_scene3_sun_depth_matches_the_ocaml_printer", renderer_scene3_sun_depth_matches_the_ocaml_printer),
+    ("renderer_scene3_world_matches_the_ocaml_printer", renderer_scene3_world_matches_the_ocaml_printer),
+    ("ogpu_metal_present_matches_the_ocaml_printer", ogpu_metal_present_matches_the_ocaml_printer),
+    ("flow_gpu_shaders_match_the_ocaml_printer", flow_gpu_shaders_match_the_ocaml_printer),
+];

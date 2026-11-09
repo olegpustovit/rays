@@ -1,6 +1,6 @@
 //! lib/flow_sop/test_mesh_resident.ml: all 42 attempts, exact topology/readback/ownership oracles.
 //! Arc-backed placeholders are immutable; exact publication/readback checks detect accidental host reads.
-mod common;
+use crate::common;
 use flow_gpu::{host as h,run};
 use common::{Observe,Seen};
 use flow_ir::{flow_ir::gpu,core_exec,packed};
@@ -127,4 +127,4 @@ fn static_topology_stays_resident() {
     session::close(&mut session);
     h::close(&host);
 }
-fn main(){common::window::run(&[("static_topology_stays_resident",static_topology_stays_resident),("valid_01",valid_01),("valid_02",valid_02),("valid_03",valid_03),("valid_04",valid_04),("valid_05",valid_05),("valid_06",valid_06),("valid_07",valid_07),("valid_08",valid_08),("valid_09",valid_09),("valid_10",valid_10),("valid_11",valid_11),("valid_12",valid_12),("valid_13",valid_13),("valid_14",valid_14),("valid_15",valid_15),("valid_16",valid_16),("valid_17",valid_17),("valid_18",valid_18),("valid_19",valid_19),("valid_20",valid_20),("vertex",vertex),("negative",negative),("missing",missing),("start",start),("terminal",terminal),("order",order),("minimum",minimum),("length",length),("kind",kind),("dynamic",dynamic),("cpu",cpu),("cancel",cancel),("host",host),("host_twice",host_twice),("host_cpu",host_cpu),("host_cancel",host_cancel),("host_vertex",host_vertex),("host_points",host_points),("host_negative",host_negative),("host_dynamic",host_dynamic),("overflow",overflow),("host_overflow",host_overflow)]);}
+pub const CASES: &[(&str, fn())] = &[("static_topology_stays_resident",static_topology_stays_resident),("valid_01",valid_01),("valid_02",valid_02),("valid_03",valid_03),("valid_04",valid_04),("valid_05",valid_05),("valid_06",valid_06),("valid_07",valid_07),("valid_08",valid_08),("valid_09",valid_09),("valid_10",valid_10),("valid_11",valid_11),("valid_12",valid_12),("valid_13",valid_13),("valid_14",valid_14),("valid_15",valid_15),("valid_16",valid_16),("valid_17",valid_17),("valid_18",valid_18),("valid_19",valid_19),("valid_20",valid_20),("vertex",vertex),("negative",negative),("missing",missing),("start",start),("terminal",terminal),("order",order),("minimum",minimum),("length",length),("kind",kind),("dynamic",dynamic),("cpu",cpu),("cancel",cancel),("host",host),("host_twice",host_twice),("host_cpu",host_cpu),("host_cancel",host_cancel),("host_vertex",host_vertex),("host_points",host_points),("host_negative",host_negative),("host_dynamic",host_dynamic),("overflow",overflow),("host_overflow",host_overflow)];

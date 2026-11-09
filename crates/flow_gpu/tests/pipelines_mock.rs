@@ -1,7 +1,7 @@
 //! Port of lib/flow_gpu/test_pipelines.ml: shared kernel sources compile once, the cache holds 64
 //! pipelines and releases the evicted, `close` is idempotent and a closed cache refuses. The
 //! portable mock cannot execute compute: this driver adds owned pipeline handles only.
-mod common;
+use crate::common;
 use common::test_program as tp;
 use flow_gpu::pipelines;
 use flow_shader::emit;
@@ -70,7 +70,6 @@ impl Driver for Wrap {
     }
 }
 
-#[test]
 fn pipeline_ownership_on_mock() {
     ogpu_core::impl_::select(ogpu_mock::impl_::implementation());
     let (base, _control) = ogpu_mock::backend_mock::create();
@@ -100,3 +99,7 @@ fn pipeline_ownership_on_mock() {
     assert_eq!(ogpu_core::impl_::live_handles().unwrap_or(0), 0);
     assert_eq!(live.get(), 0);
 }
+
+pub const CASES: &[(&str, fn())] = &[
+    ("pipeline_ownership_on_mock", pipeline_ownership_on_mock),
+];

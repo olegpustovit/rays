@@ -2,7 +2,7 @@
 // test_resources_audio.ml. They run on the process main thread (see common/mod.rs).
 // Not ported: the `Gc.allocated_bytes` / `Gc.quick_stat` ceilings, which measure OCaml's heap;
 // the storage hand-over they guard is checked by snapshot lifetime and pixels instead.
-mod common;
+use crate::common;
 use ogpu_core::error::ErrorKind;
 use runtime_resources::*;
 
@@ -409,8 +409,7 @@ fn assets() {
     assets::destroy(&mut assets).unwrap();
 }
 
-fn main() {
-    common::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("atomic_file_writes", atomic_file_writes),
         ("image_and_canvas", image_and_canvas),
         ("capture_shares_storage_until_write", capture_shares_storage_until_write),
@@ -418,5 +417,4 @@ fn main() {
         ("font", font),
         ("audio", audio),
         ("assets", assets),
-    ]);
-}
+    ];

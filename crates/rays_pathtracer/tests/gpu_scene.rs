@@ -4,7 +4,7 @@
 //! each under 5 s warm). Geometry comes from tests/common/meshes.rs. The 2001-instance timing keeps its
 //! sizes but takes the median of 3 runs instead of 8; `bench` (1200x1560 frame cost) is not in runtest and
 //! not ported.
-mod common;
+use crate::common;
 use common::meshes;
 use common::pt::{self, frames, get, pixels, rgb};
 use rays_math::{mat4, vec3};
@@ -346,6 +346,4 @@ fn light_of() {
     p::destroy(&mut tracer);
 }
 
-fn main() {
-    common::window::run(&[("live_updates", live_updates), ("scene_mesh", scene_mesh), ("timing", timing), ("mixed_spheres", mixed_spheres), ("light_of", light_of)]);
-}
+pub const CASES: &[(&str, fn())] = &[("live_updates", live_updates), ("scene_mesh", scene_mesh), ("timing", timing), ("mixed_spheres", mixed_spheres), ("light_of", light_of)];

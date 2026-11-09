@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "flow_shader"
 version.workspace = true
 edition.workspace = true
@@ -22,3 +23,7 @@ flow_ir = { path = "../flow_ir" }
 ogpu_core = { path = "../ogpu_core" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }
+
+[[test]]
+name = "shader"
+harness = false

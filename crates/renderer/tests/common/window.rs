@@ -31,3 +31,26 @@ pub fn run(tests: &[(&str, fn())]) {
     }
     super::release_keepalive();
 }
+
+/// Keep existing case names, adding their former target only when names collide.
+pub fn group_cases(groups: &[(&str, &[(&str, fn())])]) -> Vec<(String, fn())> {
+    let mut counts = std::collections::HashMap::new();
+    for (_, tests) in groups {
+        for (name, _) in *tests {
+            *counts.entry(*name).or_insert(0) += 1;
+        }
+    }
+    let mut cases: Vec<(String, fn())> = Vec::new();
+    for (group, tests) in groups {
+        for (name, test) in *tests {
+            cases.push((if counts[name] > 1 { format!("{group}::{name}") } else { (*name).to_owned() }, *test));
+        }
+    }
+    cases
+}
+
+pub fn run_groups(groups: &[(&str, &[(&str, fn())])]) {
+    let cases = group_cases(groups);
+    let cases: Vec<(&str, fn())> = cases.iter().map(|(name, test)| (name.as_str(), *test)).collect();
+    run(&cases);
+}

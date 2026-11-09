@@ -165,7 +165,7 @@ pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
         ),
         (
             "iterate-fused-integer",
-            format!("(map (fn [y] (float (iterate 3 y\n        (fn [a] (int/xor a (frame/index))))))\n      (map (fn [x] (iterate 2 (int/add (int x) (frame/index))\n        (fn [a] (int/add a 4611686018427387903)))) (array/range {count})))"),
+            format!("(map (fn [y] (float (iterate 3 y\n        (fn [a] (int/xor a (frame/index))))))\n      (map (fn [x] (iterate 2 (int/add (int x) (frame/index))\n        (fn [a] (int/add a 9223372036854775807)))) (array/range {count})))"),
         ),
     ];
     out.extend(fused.into_iter().map(|(n, b)| (n.to_string(), compile(&b))));

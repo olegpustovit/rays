@@ -4,7 +4,7 @@
 //! vertex and instance motion, strands as native curves or swept-AABB capsule candidates). Without
 //! `ray_tracing_motion` the static kernel over the shutter-midpoint scene matches the CPU at 0.5.
 //! The OCaml grid generator is replaced by the same two triangles built by hand (prim = triangle).
-mod common;
+use crate::common;
 use common::test_program as tp;
 use flow_gpu::{pipelines, run};
 use flow_ir::packed::{self, host as phost};
@@ -247,6 +247,4 @@ fn instanced() {
     flow_sop::trace_scene::unregister(11);
 }
 
-fn main() {
-    common::window::run(&[("flat", flat), ("stranded", stranded), ("instanced", instanced)]);
-}
+pub const CASES: &[(&str, fn())] = &[("flat", flat), ("stranded", stranded), ("instanced", instanced)];

@@ -4,7 +4,7 @@
 //! 727–801 -> counted; 803–874 -> compaction; 876–966 -> host_counters.
 //! The owner-only wrong-domain Host.stats call is excluded by Host's checked !Send type;
 //! no owner handles are migrated. All remaining source runtime assertions run on native OGPU.
-mod common;
+use crate::common;
 use common::{test_program as tp, Observe, Seen};
 use flow_gpu::{host, pipelines, run};
 use flow_ir::{core_draw, core_exec as c, core_ir, core_lower, packed::host as phost};
@@ -428,6 +428,4 @@ fn resident_scenarios() {
     common::release_keepalive();
     assert_eq!(ogpu_core::impl_::live_handles().expect("native handles"), baseline);
 }
-fn main() {
-    common::window::run(&[("resident_state", resident_state), ("resident_unfold", resident_unfold), ("resident_scenarios", resident_scenarios)]);
-}
+pub const CASES: &[(&str, fn())] = &[("resident_state", resident_state), ("resident_unfold", resident_unfold), ("resident_scenarios", resident_scenarios)];

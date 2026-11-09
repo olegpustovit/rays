@@ -2,6 +2,8 @@
 //! lib/pxui test_ui, test_input, test_keyboard and test_table.
 #[path = "../../rays/tests/common/mod.rs"]
 mod common;
+#[path = "cases/gpu_parity.rs"]
+mod gpu_parity;
 #[path = "cases/small.rs"]
 mod small;
 #[path = "cases/steps.rs"]
@@ -25,5 +27,6 @@ fn main() {
     cases.extend_from_slice(ui_a::CASES);
     cases.extend_from_slice(ui_b::CASES);
     cases.extend_from_slice(ui_c::CASES);
+    cases.extend_from_slice(gpu_parity::CASES);
     common::window::run(&cases);
 }

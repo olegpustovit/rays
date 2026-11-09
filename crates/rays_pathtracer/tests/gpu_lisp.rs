@@ -6,7 +6,7 @@
 //! pressure). The dome scene also runs as a one-object scene_mesh (an instance structure), as the editor
 //! traces it. Cases: `library`, `cache`, `dome`, `dome_instanced`, `world`. PT_W / PT_H / PT_FRAMES override
 //! the 16 x 12 x 2 defaults (OCaml: 4 frames; the oracle evaluates every frame) as in OCaml; `PT_BENCH` (a GPU-time print) is not ported.
-mod common;
+use crate::common;
 use common::pt::{self, get, rgb};
 use flow_check::ray_host::{self, Hit};
 use rays::world as w;
@@ -225,6 +225,4 @@ fn world_case() {
     scenario("world", false, Some(&baked()));
 }
 
-fn main() {
-    common::window::run(&[("library", library), ("cache", cache), ("dome", dome_case), ("dome_instanced", dome_instanced), ("world", world_case)]);
-}
+pub const CASES: &[(&str, fn())] = &[("library", library), ("cache", cache), ("dome", dome_case), ("dome_instanced", dome_instanced), ("world", world_case)];

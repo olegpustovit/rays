@@ -2,7 +2,7 @@
 // capabilities,sampler_pixels}.ml and test_pipeline_argument_buffer.ml: the native modules and the driver
 // record on the real Metal device. Direct native module handles follow their last Rust owner; core
 // wrappers release driver payloads at logical destroy, even when dead wrappers remain in scope.
-mod common;
+use crate::common;
 use ogpu_core::{
     backend::{self as be, DriverAccelDescriptor, DriverGeometry, Token},
     binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage},
@@ -559,11 +559,7 @@ fn gpu_sampler_pixels() {
     println!("ogpu_metal sampler pixels: nearest/linear clamp/repeat/mirror/mip exact, zero delta");
 }
 
-fn main() {
-    if !cfg!(target_os = "macos") {
-        return; // Metal exists only on macOS
-    }
-    common::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("gpu_device_error", gpu_device_error),
         ("gpu_foundation", gpu_foundation),
         ("gpu_texture", gpu_texture),
@@ -574,5 +570,4 @@ fn main() {
         ("gpu_sampler_pixels", gpu_sampler_pixels),
         ("gpu_destroy_releases_retained_driver_payloads", gpu_destroy_releases_retained_driver_payloads),
         ("gpu_destroy_preserves_only_escaped_owned_readback", gpu_destroy_preserves_only_escaped_owned_readback),
-    ]);
-}
+    ];

@@ -3,7 +3,7 @@
 //! probe luminance and in where the brightest highlight sits. Qualification in OCaml (it converges 1024
 //! samples per preset); shrunk here to 256 samples at 128x64 (64 frames of 4) so one preset-set run fits a
 //! test, with the OCaml thresholds unchanged. Probes are tests/common/meshes.rs spheres.
-mod common;
+use crate::common;
 use common::meshes;
 use common::pt::{self, get, rgb};
 use rays::{camera, canvas, material, scene, scene3, world};
@@ -150,6 +150,4 @@ fn parity() {
     println!("raster/path tracer parity: all rendered presets within bounds");
 }
 
-fn main() {
-    common::window::run(&[("parity", parity)]);
-}
+pub const CASES: &[(&str, fn())] = &[("parity", parity)];

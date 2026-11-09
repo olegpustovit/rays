@@ -1,6 +1,6 @@
 //! Port of lib/rays_pathtracer/test_gpu_film.ml: the traced film is published as a GPU texture, byte
 //! for byte the standalone render, sampled by Canvas, released and resized, with zero live-handle delta.
-mod common;
+use crate::common;
 use common::meshes;
 use common::pt::{self, get, rgb};
 use rays_math::vec3;
@@ -107,6 +107,4 @@ fn film() {
     println!("GPU film: exact standalone/shared/Canvas bytes, direct texture, readback, zero live delta");
 }
 
-fn main() {
-    common::window::run(&[("film", film)]);
-}
+pub const CASES: &[(&str, fn())] = &[("film", film)];

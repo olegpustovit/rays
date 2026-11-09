@@ -2,7 +2,6 @@
 //! prints deterministically, shares the Metal kernel's bindings and layout, and matches the digest
 //! goldens byte for byte (size and MD5 of the module): exact kernels crates/flow_gpu/goldens/spirv.sexp,
 //! fast ones tests/spirv_fast.sexp.
-mod support;
 use flow_ir::kernel_layout;
 use flow_shader::emit::{self, Curves};
 use rays_math::hash::md5_hex;
@@ -10,7 +9,7 @@ use flow_shader::spirv;
 use ogpu_core::shader;
 use std::collections::HashMap;
 use std::fs;
-use support as tp;
+use flow_ir::test_support as tp;
 
 fn cases() -> Vec<(String, flow_ir::packed::T)> {
     let mut out: Vec<(String, flow_ir::packed::T)> = [
@@ -32,7 +31,7 @@ fn cases() -> Vec<(String, flow_ir::packed::T)> {
         .iter()
         .map(|(n, s)| (n.to_string(), tp::compile(s))),
     );
-    out.extend(tp::vector_fixtures(16).into_iter().map(|(n, p)| (n.to_string(), p)));
+    out.extend(tp::vector_fixtures(None, 16).into_iter().map(|(n, p)| (n.to_string(), p)));
     out
 }
 
@@ -147,21 +146,18 @@ fn check_all(cases: Vec<(String, flow_ir::packed::T)>, fast: bool) {
     }
 }
 
-#[test]
-fn exact_kernels_match_the_digest_goldens() {
+pub fn exact_kernels_match_the_digest_goldens() {
     check_all(cases(), false);
 }
 
-#[test]
-fn fast_kernels_match_the_digest_goldens() {
+pub fn fast_kernels_match_the_digest_goldens() {
     let (sources, carried): (Vec<_>, Vec<_>) = fast_cases().into_iter().partition(|(n, _)| n.starts_with("fast_"));
     let mut all = sources;
     all.extend(carried);
     check_all(all, true);
 }
 
-#[test]
-fn moving_scenes_and_unfolded_kernels_print() {
+pub fn moving_scenes_and_unfolded_kernels_print() {
     let find = |name: &str| fast_sources().into_iter().find(|(n, _)| n == name).map(|(_, s)| tp::compile(&s)).unwrap();
     // moving scenes compile to candidate-AABB ray queries instead of a static fallback
     let moving = spirv::kernel(&spirv::Options { fast: true, motion: true, ..spirv::Options::default() }, &find("fast_trace")).unwrap();
@@ -177,3 +173,9 @@ fn moving_scenes_and_unfolded_kernels_print() {
     assert_eq!(&unfolded.bytes[0..4], &0x07230203u32.to_le_bytes());
     assert!(shader::validate_bindings(&unfolded.interface).is_ok());
 }
+
+pub const CASES: &[(&str, fn())] = &[
+    ("exact_kernels_match_the_digest_goldens", exact_kernels_match_the_digest_goldens),
+    ("fast_kernels_match_the_digest_goldens", fast_kernels_match_the_digest_goldens),
+    ("moving_scenes_and_unfolded_kernels_print", moving_scenes_and_unfolded_kernels_print),
+];

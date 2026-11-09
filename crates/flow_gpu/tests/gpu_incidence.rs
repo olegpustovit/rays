@@ -1,5 +1,5 @@
 //! GPU-only construction of deterministic incidence/fan tables and packed coordinate planes.
-mod common;
+use crate::common;
 use flow_gpu::{pipelines, run};
 use flow_ir::flow_ir::executor;
 use flow_ir::flow_ir::gpu::Residency as _;
@@ -118,4 +118,4 @@ fn constant_arrays() {
     scope.executor().close();
     flow_gpu::host::close(&host);
 }
-fn main() { common::window::run(&[("incidence", incidence), ("planes", planes), ("constant_arrays", constant_arrays)]); }
+pub const CASES: &[(&str, fn())] = &[("incidence", incidence), ("planes", planes), ("constant_arrays", constant_arrays)];

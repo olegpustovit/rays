@@ -3,7 +3,7 @@
 //! validation on the device and GPU-origin streams.
 //!
 //! Settled holders materialise from four worker domains without their owner pumping requests.
-mod common;
+use crate::common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
 use flow_ir::flow_ir::{executor, gpu};
@@ -585,8 +585,7 @@ fn resident_inputs() {
     pipelines::close(&pipes);
 }
 
-fn main() {
-    common::window::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("compaction_cases", compaction_cases),
         ("resident_values", resident_values),
         ("kinds_of_values", kinds_of_values),
@@ -595,5 +594,4 @@ fn main() {
         ("outputs", outputs),
         ("scalars_and_ranges", scalars_and_ranges),
         ("resident_inputs", resident_inputs),
-    ]);
-}
+    ];

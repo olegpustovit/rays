@@ -2,7 +2,7 @@
 //! retained image/mesh consumers, expiry, resize and borrowed ownership. The native fixture
 //! selects the installed Vulkan/Metal implementation; no mock executes a producer or consumer.
 //! Owner-only Rc values are !Send, so Rust rejects the oracle's wrong-domain transfers statically.
-mod common;
+use crate::common;
 use common::test_program as tp;
 use flow_gpu::{host, image_sink as s, pipelines, run};
 use flow_ir::flow_ir::{executor as ex, gpu};
@@ -389,6 +389,4 @@ fn resident_consumers() {
     common::release_keepalive();
     assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before);
 }
-fn main() {
-    common::window::run(&[("native_pixel_parity", native_pixel_parity), ("qualified_publication", qualified_publication), ("resident_consumers", resident_consumers)]);
-}
+pub const CASES: &[(&str, fn())] = &[("native_pixel_parity", native_pixel_parity), ("qualified_publication", qualified_publication), ("resident_consumers", resident_consumers)];

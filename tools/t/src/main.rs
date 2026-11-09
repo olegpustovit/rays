@@ -37,6 +37,7 @@ struct Args {
     target_dir: Option<PathBuf>,
     test_args: Vec<OsString>,
     ignored: bool,
+    list: bool,
     test_timeout: Duration,
 }
 
@@ -327,6 +328,10 @@ fn run_tests(
             tests.retain(|test| !ignored_tests.contains(test));
         }
         for test in tests {
+            if args.list {
+                println!("{}::{test}: test", executable.crate_name);
+                continue;
+            }
             let case = TestCase {
                 order,
                 executable: executable.path.clone(),
@@ -530,6 +535,7 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
     let mut target_dir = None;
     let mut test_args = Vec::new();
     let mut ignored = false;
+    let mut list = false;
     // RAYS_SLOW=1 (AGENTS.md) or `--profile slow` selects the 60s per-test limit without a separate Cargo profile.
     let mut test_timeout =
         if env::var("RAYS_SLOW").is_ok_and(|value| value == "1") { SLOW_TEST_TIMEOUT } else { TEST_TIMEOUT };
@@ -552,6 +558,10 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                 test_args.push(harness_arg);
             }
             break;
+        }
+        if text == "--list" {
+            list = true;
+            continue;
         }
 
         let (option, inline_value) = if text.starts_with('-') {
@@ -643,7 +653,7 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
         }
     }
 
-    Ok(Args { cargo, filter, target_dir, test_args, ignored, test_timeout })
+    Ok(Args { cargo, filter, target_dir, test_args, ignored, list, test_timeout })
 }
 
 fn default_target_dir() -> PathBuf {
@@ -1033,8 +1043,26 @@ fn report_timeout(elapsed: Duration, operation: &str) -> i32 {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
+#[path = "../../../crates/renderer/tests/common/window.rs"]
+mod native_test_runner;
+#[cfg(test)]
+fn release_keepalive() {}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_groups_keep_cases_and_disambiguate_collisions() {
+        fn case() {}
+        let cases = native_test_runner::group_cases(&[
+            ("first", &[("unique", case), ("same", case)]),
+            ("second", &[("same", case)]),
+        ]);
+        assert_eq!(cases.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            ["unique", "first::same", "second::same"]);
+    }
+
     static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     fn temp_path(label: &str) -> std::path::PathBuf {
@@ -1102,6 +1130,7 @@ mod tests {
     fn accepts_supported_target_and_harness_flags_only() {
         let parsed = parse_args(
             [
+                OsString::from("--list"),
                 OsString::from("--target"),
                 OsString::from("x86_64-unknown-linux-gnu"),
                 OsString::from("--"),
@@ -1119,6 +1148,7 @@ mod tests {
             ]
         );
         assert!(parsed.ignored);
+        assert!(parsed.list);
         assert_eq!(
             parsed.test_args,
             vec![OsString::from("--nocapture"), OsString::from("--ignored")]

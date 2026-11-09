@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "ogpu_metal"
 version.workspace = true
 edition.workspace = true
@@ -14,13 +15,6 @@ test = false
 ogpu_core = { path = "../ogpu_core" }
 metal = { path = "../metal" }
 
-# Metal handles are main-thread only and the tests count process-wide handles: their own main runs them.
 [[test]]
-name = "gpu_ogpu_metal"
-path = "tests/gpu_ogpu_metal.rs"
-harness = false
-
-[[test]]
-name = "gpu_ogpu_metal_native"
-path = "tests/gpu_ogpu_metal_native.rs"
+name = "gpu_all"
 harness = false

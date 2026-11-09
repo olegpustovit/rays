@@ -3,7 +3,7 @@
 //! the image sink, ties to even. resolve: `resolve_preview.rays` on the GPU matches the same
 //! arithmetic written out on the host. helpers: `pathtrace_helpers.rays` kernels on the GPU match
 //! the CPU within float32 tolerance; the CPU also matches independent host arithmetic.
-mod common;
+use crate::common;
 #[path = "common/pathtrace_reference.rs"]
 mod reference_math;
 #[path = "common/helpers_reference.rs"]
@@ -193,6 +193,4 @@ fn helpers() {
     pipelines::close(&pipes);
 }
 
-fn main() {
-    common::window::run(&[("film", film), ("resolve", resolve), ("helpers", helpers)]);
-}
+pub const CASES: &[(&str, fn())] = &[("film", film), ("resolve", resolve), ("helpers", helpers)];

@@ -1,6 +1,5 @@
 //! Port of lib/flow_gpu/test_raster.ml: validate every build-time printed SPIR-V module.
 use std::{path::Path, process::{Command, Stdio}};
-#[test]
 fn printed_spirv_is_valid() {
     let validator = Command::new("spirv-val").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
     if !validator {
@@ -19,3 +18,7 @@ fn printed_spirv_is_valid() {
     }
     println!("raster: printed SPIR-V spirv-val valid");
 }
+
+pub const CASES: &[(&str, fn())] = &[
+    ("printed_spirv_is_valid", printed_spirv_is_valid),
+];

@@ -1,7 +1,7 @@
 // Port of test_gpu_image.ml over ogpu_mock: storage-free publication, checked source lifetime and
 // resize, CPU transitions, leases, domain and borrowed ownership. The `Gc.allocated_bytes`
 // ceilings are not ported (they measure the OCaml heap); zero CPU storage is checked separately.
-mod common;
+use crate::common;
 use ogpu_core::backend::{self as b, Driver, DriverDevice, DriverResource, Texture};
 use ogpu_core::error::{self, ErrorKind};
 use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
@@ -200,6 +200,4 @@ fn gpu_image() {
     assert_eq!(ogpu_mock::impl_::live_handles(), 0);
 }
 
-fn main() {
-    common::run(&[("gpu_image", gpu_image)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_image", gpu_image)];

@@ -1,6 +1,6 @@
 //! Native port of lib/flow_gpu/test_run_lifetime.ml.
 //! Run, Output and Pipelines are !Send: Rust excludes the OCaml wrong-domain owner moves.
-mod common;
+use crate::common;
 use common::test_program as tp;
 use flow_gpu::{pipelines, run};
 use flow_ir::{flow_ir::gpu, packed::{self, host as phost}};
@@ -372,8 +372,7 @@ fn reduced_bounds_cover_every_point() {
         }
     });
 }
-fn main() {
-    common::window::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("failed_commands_and_uploads", failed_commands_and_uploads),
         ("retired_holders_and_discard", retired_holders_and_discard),
         ("clobber_and_idle_ageing", clobber_and_idle_ageing),
@@ -383,5 +382,4 @@ fn main() {
         ("failed_table_upload_retries", failed_table_upload_retries),
         ("bounds_and_foreign_owned_readback", bounds_and_foreign_owned_readback),
         ("reduced_bounds_cover_every_point", reduced_bounds_cover_every_point),
-    ]);
-}
+    ];

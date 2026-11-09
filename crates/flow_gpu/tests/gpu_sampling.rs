@@ -1,5 +1,5 @@
 //! Port of lib/flow_gpu/test_sampling.ml: independent CPU arithmetic and native GPU parity.
-mod common;
+use crate::common;
 #[path = "common/pathtrace_reference.rs"]
 mod reference_math;
 use reference_math::*;
@@ -81,4 +81,4 @@ fn sampling() {
     }
     pipelines::close(&pipes);
 }
-fn main() { common::window::run(&[("sampling",sampling)]); }
+pub const CASES: &[(&str, fn())] = &[("sampling",sampling)];
