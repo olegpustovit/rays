@@ -32,7 +32,7 @@ fn golden_run(file: &str) {
     let key = file.replace('/', "__");
     let started = std::time::Instant::now();
     let lower = std::env::var("RAYS_SLOW").is_ok_and(|v| v == "1") && !UNLOWERED.contains(&file);
-    let (printed, code, out) = rays_bin::check_fmt(file, lower);
+    let (printed, code, out) = web_export::check_fmt(file, lower);
     if let Ok(p) = std::env::var("E2E_LOG") {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p).unwrap();
@@ -272,7 +272,7 @@ fn web_basic() {
         .spawn(|| {
             std::env::set_current_dir(root()).unwrap();
             let out = std::env::temp_dir().join(format!("rays_bin_web_{}", std::process::id()));
-            rays_bin::web("sketches/basic.rays", &out.to_string_lossy()).unwrap();
+            web_export::web("sketches/basic.rays", &out.to_string_lossy()).unwrap();
             let golden = root().join("fixtures/web_export/basic");
             let mut n = 0;
             for e in std::fs::read_dir(&golden).unwrap() {
