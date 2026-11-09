@@ -143,7 +143,7 @@ fn float(x: f64) -> Lowered { Known(Value::Float(x)) }
 fn boolean(b: bool) -> Lowered { Known(Value::Bool(b)) }
 
 /// Completed cache layers are shared by a scope and its children.
-struct CacheLayer { values: HashMap<CacheKey, Lowered>, parent: Option<Arc<CacheLayer>> }
+struct CacheLayer { cache: HashMap<CacheKey, Lowered>, parent: Option<Arc<CacheLayer>> }
 impl Drop for CacheLayer {
     fn drop(&mut self) {
         let mut parent = self.parent.take();
@@ -158,14 +158,14 @@ impl Scope {
         if let Some(value) = self.cache.get(key) { return Some(value); }
         let mut parent = self.parent.as_deref();
         while let Some(layer) = parent {
-            if let Some(value) = layer.values.get(key) { return Some(value); }
+            if let Some(value) = layer.cache.get(key) { return Some(value); }
             parent = layer.parent.as_deref();
         }
         None
     }
     fn fork(&mut self) -> Scope {
         if !self.cache.is_empty() {
-            self.parent = Some(Arc::new(CacheLayer { values: std::mem::take(&mut self.cache), parent: self.parent.take() }));
+            self.parent = Some(Arc::new(CacheLayer { cache: std::mem::take(&mut self.cache), parent: self.parent.take() }));
         }
         Scope { st: Vec::new(), cache: HashMap::new(), parent: self.parent.clone() }
     }
