@@ -779,10 +779,14 @@ mod tests {
     #[test]
     fn invalid_arguments_precede_cancellation() {
         let geometry_value = triangle();
-        let token = cancel::create();
-        cancel::cancel(&token);
-        let error = run(&params(Some(token), Some(0)), &geometry_value).err().unwrap();
-        assert_eq!(error::code(&error), Code::InvalidTopology);
+        for grain in [0, -1] {
+            let token = cancel::create();
+            cancel::cancel(&token);
+            let error = run(&params(Some(token), Some(grain)), &geometry_value).err().unwrap();
+            assert_eq!(error::code(&error), Code::InvalidArgument);
+            assert_eq!(error::operation(&error), OPERATION);
+            assert_eq!(error::message(&error), format!("{OPERATION}: grain must be positive"));
+        }
 
         let token = cancel::create();
         cancel::cancel(&token);
