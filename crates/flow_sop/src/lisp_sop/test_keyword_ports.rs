@@ -23,7 +23,7 @@ fn root(l:&lower::T)->node::T{let g=&l.graphs[0];edit::compile_node(&g.network.g
 fn points(s:&mut session::T,domains:i64,time:f64,n:&node::T)->Vec<(f64,f64,f64)>{let c=ctx::create(ctx::Options{domains:Some(domains),time:Some(time),..Default::default()}).unwrap();let g=cook(s,&c,n);(0..rdk_core::geometry::point_count(&g)).map(|i|rdk_core::packed::float3::get(rdk_core::geometry::positions(&g),i).unwrap()).collect()}
 #[test]
 fn keyword_manifest_defaults_projection_checked_gestures(){
-    let fs=factories();let cat=catalog::of_factories(manifest::VERSION,&[],None,&fs).unwrap();let(text,_)=manifest::generate(&[],None,&fs).unwrap();let(loaded,_)=flow_check::catalog::catalog_of_manifest(&text).unwrap();assert_eq!(cat,loaded);
+    let fs=factories();let cat=catalog::of_factories(manifest::VERSION,&[],Some(&[]),&fs).unwrap();let(text,_)=manifest::generate(&[],Some(&[]),&fs).unwrap();let(loaded,_)=flow_check::catalog::catalog_of_manifest(&text).unwrap();assert_eq!(cat,loaded);
     let forms=parse("(workspace w (graph g :context sop (let* [arg0 1] nil)))");let kind=&cat.kinds[0];
     let mut default="(sop/test_field".to_owned();for parameter in &kind.parameters{let ty=match &parameter.ty{Some(flow_check::port_type::PortType::Fn(sig))=>Ty::Fn(Some(Box::new(sig.clone()))),Some(flow_check::port_type::PortType::Image)=>flow_syntax::ty::image(),_=>panic!("typed keyword")};let fresh=|base:&str|e::fresh_name(&forms,"g",base);let expression=e::default_for(&ty,&parameter.name,Some(&fresh)).unwrap();default.push_str(&format!(" :{} {}",parameter.name,flow_syntax::lisp::flat(&expression)));}default.push(')');
     let checker=|c:&flow_check::catalog::Catalog,fs:&[syntax::Syntax]|catalog::check_workspace(operators::all(),false,None,c,fs);

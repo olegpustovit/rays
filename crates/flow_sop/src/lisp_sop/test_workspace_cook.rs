@@ -198,7 +198,7 @@ fn optional_rest() {
     let mut all = vec![rest_fixture()];
     all.extend(factories());
     let cat = catalog_of(&all);
-    let (manifest, _) = crate::manifest::generate(&[], None, &all).unwrap_or_else(|d| panic!("{}", diag(d)));
+    let (manifest, _) = crate::manifest::generate(&[], Some(&[]), &all).unwrap_or_else(|d| panic!("{}", diag(d)));
     let manifest_catalog = flow_check::catalog::catalog_of_manifest(&manifest).unwrap_or_else(|d| panic!("{}", diag(d))).0;
     let fixture = manifest_catalog.kinds.iter().find(|k| k.qualified == "sop/rest_fixture");
     assert!(fixture.is_some_and(|k| k.slots.iter().any(|slot| slot.rest && !slot.required)), "optional rest survives manifest serialization");
@@ -380,8 +380,10 @@ fn same_evaluation(left: &flow_eval::State, right: &flow_eval::State, live: &inp
         && pairs_same(left, right, live, &a.results, &b.results)
 }
 
-fn check_fixture(name: &str, extra: bool) -> usize {
-    let _ = extra;
+/// Both lowerings of fixture `name`; `compare` checks their evaluations against the reference
+/// over time, `cook` cooks every graph at 1 and 3 domains (the cooked count, 0 when skipped).
+/// The larger fixtures run the two halves as separate cases to stay inside the case budget.
+fn check_fixture(name: &str, compare: bool, cook: bool) -> usize {
     let lowered = lower_case(name);
     let cat = catalog_of(&factories());
     let forms = parse(&case_text(name));
@@ -402,19 +404,21 @@ fn check_fixture(name: &str, extra: bool) -> usize {
         from_checked.plan.nodes.len() == from_checked.evaluated.plan.nodes.len() && from_checked.states == from_checked.evaluated.states,
         "{name}: lowering did not retain its evaluation"
     );
-    let reference = flow_eval::static_eval(&checked).unwrap_or_else(|d| panic!("{}", diag(d)));
-    let (left, right) = (flow_eval::create_state(), flow_eval::create_state());
-    for (frame, time) in [0.0, 0.125, 1.25, 7.0].into_iter().enumerate() {
-        let live = input::Frame { frame: frame as i64, ..input::at_time(time) };
-        let (a, b) = (&*lowered.evaluated, &*from_checked.evaluated);
-        let records_same = a.records.len() == b.records.len() && a.records.iter().zip(&b.records).all(|((p, x), (q, y))| p == q && pairs_same(&left, &right, &live, x, y));
-        assert!(
-            same_evaluation(&left, &right, &live, a, b) && same_evaluation(&left, &right, &live, &reference, b) && records_same,
-            "{name}: checked/source lowering differ at {time}"
-        );
+    if compare {
+        let reference = flow_eval::static_eval(&checked).unwrap_or_else(|d| panic!("{}", diag(d)));
+        let (left, right) = (flow_eval::create_state(), flow_eval::create_state());
+        for (frame, time) in [0.0, 0.125, 1.25, 7.0].into_iter().enumerate() {
+            let live = input::Frame { frame: frame as i64, ..input::at_time(time) };
+            let (a, b) = (&*lowered.evaluated, &*from_checked.evaluated);
+            let records_same = a.records.len() == b.records.len() && a.records.iter().zip(&b.records).all(|((p, x), (q, y))| p == q && pairs_same(&left, &right, &live, x, y));
+            assert!(
+                same_evaluation(&left, &right, &live, a, b) && same_evaluation(&left, &right, &live, &reference, b) && records_same,
+                "{name}: checked/source lowering differ at {time}"
+            );
+        }
     }
     let mut cooked = 0;
-    for graph in &lowered.graphs {
+    for graph in lowered.graphs.iter().filter(|_| cook) {
         match (cook_graph(1, graph), cook_graph(3, graph)) {
             (None, None) => {}
             (Some(a), Some(b)) => {
@@ -435,29 +439,39 @@ fn check_fixture(name: &str, extra: bool) -> usize {
 
 #[test]
 fn kit_fixture_lowers_and_cooks_the_same_at_1_and_3_domains() {
-    check_fixture("kit", false);
+    check_fixture("kit", true, true);
 }
 
 #[test]
 
 fn tree_fixture_lowers_and_cooks() {
-    assert!(check_fixture("tree", false) >= 1, "tree cooked no graph");
+    assert!(check_fixture("tree", true, true) >= 1, "tree cooked no graph");
 }
 
 #[test]
 fn tunnel_fixture_lowers_and_cooks() {
-    assert!(check_fixture("tunnel", false) >= 1, "tunnel cooked no graph");
+    assert!(check_fixture("tunnel", true, true) >= 1, "tunnel cooked no graph");
 }
 
 #[test]
-fn wave_fixture_lowers_and_cooks() {
-    assert!(check_fixture("wave", false) >= 1, "wave cooked no graph");
+fn wave_fixture_lowers() {
+    check_fixture("wave", true, false);
+}
+
+#[test]
+fn wave_fixture_cooks() {
+    assert!(check_fixture("wave", false, true) >= 1, "wave cooked no graph");
 }
 
 #[test]
 
-fn variations_fixture_lowers_and_cooks() {
-    check_fixture("variations", true);
+fn variations_fixture_lowers() {
+    check_fixture("variations", true, false);
+}
+
+#[test]
+fn variations_fixture_cooks() {
+    check_fixture("variations", false, true);
 }
 
 #[test]
