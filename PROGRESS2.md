@@ -15,13 +15,13 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
 | X | 6 | 6 | 0 | 0 |
-| B | 8 | 6 | 0 | 2 |
-| A | 4 | 0 | 0 | 4 |
+| B | 8 | 5 | 1 | 2 |
+| A | 4 | 3 | 1 | 0 |
 | D | 12 | 1 | 0 | 11 |
 | Z | 11 | 0 | 0 | 11 |
 | R | 10 | 0 | 0 | 10 |
 | G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **13** | **0** | **45** |
+| **All** | **58** | **15** | **2** | **41** |
 
 ## Items
 
@@ -32,19 +32,19 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | X3 | X | done | `63d191b0` — `Build` → `R<node::T>`; `per_context` uses `?`; `authored_body_errors_cook_lazily` | A context-dependent failure reports its real code |
 | X4 | X | done | `ee88ca64` — `param::number::int_scrub_delta` shared with `pxui::scrubbed` | Both surfaces give the same step for the same drag |
 | X5 | X | done | `cc2c7bcc` — `literal_fields`; `operator_rows_split_vec2_and_vec4_literals` | test_editor_inspect covers vec2 and vec4 operator rows |
-| X6 | X | done | `f97f3c30` — `MappedHost` in `ogpu_core`; `DriverMapping` = `readback` only | ogpu_mock: after a release, the view reads back again |
+| X6 | X | done | `f97f3c30` `93bcb897` — shared MappedHost; native release contract + spec corrected | core/mock 21 passed 2.50s; Metal transfer_and_compute 0.279s; released view invalid, successor re-reads |
 | B1 | B | done | `aaaaf431` — `lisp_sop` always on; `#[doc(hidden)]` hooks; features removed | After cargo t -p rays_editor, cargo build -p rays_bin -v shows flow_sop as Fresh |
 | B2 | B | done | `c2d1c582` — workspace study tests in `editor_document`; no `flow_sop` dev-dep; `cargo t -p flow_sop` ~81s green | Same cases in cargo t -p flow_sop plus -p editor_document |
 | B3 | B | done | `2be4b822` — `check_cli` + `tests/e2e` in `web_export`; `rays_bin` re-exports | cargo t -p web_export --test e2e; gate deps |
-| B4 | B | done | window runner — `#[path]` → `renderer/tests/common/window.rs`; −4 dupes; runtime/ogpu_metal/runtime_resources re-export | `--list` unchanged on `gpu_sampling`, `gpu_rays_all`, `window_runtime_visibility`, `gpu_ogpu_metal`; `metal` settle hook still local |
+| B4 | B | active | `1e8b775e` shares window runner; reopened: one harness=false binary/crate + fixture dedup still required | Case inventory before/after; focused native checks |
 | B5 | B | done | `403aaac4` — `[lib] test = false` on 11 libs + `print_shader`; gate rejects `#[test]` in those libs | Gate shape rule |
 | B6 | B | done | `c10ccba4` — removed `[profile.e2e|gpu|slow]`; trimmed gate phantom crates; nextest comments | cargo t -p rays-t, -p gate; gate deps |
 | B7 | B | pending | — | cargo-timings critical path; gate deps |
 | B8 | B | pending | — | cargo t -p rays_editor |
-| A1 | A | pending | — | cargo check -p ogpu_metal |
-| A2 | A | pending | — | cargo check --workspace --all-targets |
-| A3 | A | pending | — | A cfmt test over hex, subnormal, 1., .5, +inf and underscore literals |
-| A4 | A | pending | — | cargo check --workspace --all-targets |
+| A1 | A | done | `8dea3150` — metadata/unused wrappers/bodies/shims deleted, ABI names normalized; net −821 lines | ogpu_metal check 11.60s; Metal suite 33/34, corrected X6 case passes (93bcb897) |
+| A2 | A | active | Agent tracing external rdk_ops/rays APIs before narrowing visibility | cargo check --workspace --all-targets |
+| A3 | A | done | `5c9c9f82` — removed C/build.rs/cc; bounded powi scaling, exact subnormal rounding retained | cargo t -p cfmt -p param -p flow_syntax: 61 passed, 6.31s; slowest 0.150s |
+| A4 | A | done | `a013679f` — dead stubs/wrappers/Exp removed; derived Change/Op equality; choice callback removed | all-targets check 6.31s; param/pxui_graph 46 passed; flow_ir/flow_web 465 passed, 30.88s, slowest 1.872s |
 | D1 | D | pending | — | rdk_ops dissolve, rdk_boolean |
 | D2 | D | pending | — | rdk_ops fuse, rdk_boolean |
 | D3 | D | pending | — | rdk_geom exact, implicit_point |
@@ -139,3 +139,14 @@ Batch = building-agent slot when two distinct primary crates run together. `edit
 | 4 | D5 `rdk_core` | D2 `rdk_ops` + `rdk_boolean` |
 | 5 | D6 `rdk_core` | D10 `rays_editor` + `editor_core` |
 | 6–7 | D11 → D12 | serial on `editor_core` |
+
+### Continuation — evidence audit and wave A
+
+- Previous turn classified **progress**: B4 shared runner commit exists. Revalidated clean worktree and artifact v15 before edits.
+- Reopened **B4**: the prior done marker covered only the shared runner. Consolidated binaries and shared `test_support` are still required by the original artifact.
+- **A1** `8dea3150`: metadata and actual unused native wrappers removed; retained both wrappers used internally by metal_sys. `cargo check -p ogpu_metal` passed (11.60s). Native run 33/34 passed (12.53s); stale X6 assertion remained visible.
+- **X6 follow-up** `93bcb897`: native test now checks the shared released-view contract, new view identity, invalidation and repeated cached lookup. Metal case passed (16.76s including lock, case 0.279s); core/mock 21/21 passed (2.50s, slowest 0.031s). Spec corrected in the same commit.
+- **A3** `5c9c9f82`: C fallback/build/cc removed. Regression covers hex, subnormal, `1.`, `.5`, `+inf`, underscores, signed zero/extreme exponents and all normal binary exponents. Consumer check: 61/61 passed, 6.31s, slowest 0.150s.
+- **A4** implementation ready. Workspace all-targets check passed (6.31s), param/pxui_graph 46/46 passed (50.62s including changed-chain rebuild; case time 6.732s, slowest `bench_scope_big` 0.910s). New `change_equality` guard measures 0 allocations. Additional Flow regression checks running before commit.
+- Artifact tracker audit found invalid odd-segment DB paths (`plan/items/<id>`) and a nonexistent `exists()` method. Repair uses valid `plan/<id>` documents and one collection query, with the published snapshot rendered immediately. DB writes are verified by CLI reads.
+- **A4 complete** `a013679f`: Flow regression 465/465 passed in 30.88s (slowest `flow_web::test_region_arguments::all_byte_text_argument` 1.872s); no assertion/deadline changes.
