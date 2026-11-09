@@ -29,7 +29,7 @@ fn document(text:&str,gpu:&gpu::Config)->document::T {
 pub(super) fn child()->bool {
     let Some(path)=std::env::var_os("RAYS_NATIVE_SCRUB_INPUT") else {return false};
     assert!(crate::common::gpu(),"native GPU required");let source=std::fs::read_to_string(path).unwrap();let gpu=wg::create(None);wg::qualification(&gpu);
-    wg::with_backend(&gpu,true,&mut |config|std::fs::write(std::env::var_os("RAYS_NATIVE_SCRUB_OUTPUT").expect("child output path"),cook_doc(&document(&source,config))).unwrap());wg::close(&gpu);true
+    wg::with_backend(&gpu,true,&mut |config|std::fs::write(std::env::var_os("RAYS_NATIVE_SCRUB_OUTPUT").expect("child output path"),cook_doc(&document(&source,config))).unwrap());wg::close(&gpu);crate::common::release_keepalive();true
 }
 pub(super) fn run() {
     assert!(crate::common::gpu(),"native GPU required");let catalog=rays_editor::workspace_catalog(None).unwrap();let n=side();
