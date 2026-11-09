@@ -44,7 +44,7 @@ pub fn open_level(value: &mut EditorModel, level: Level) {
     };
     value.map_view = world;
     value.tree = tree::create();
-    with_pane(value, &|pane| graph_pane { at: level, shown: None, picked: selection::empty(), ..pane.clone() });
+    { let pane = pane_mut(value); pane.at = level; pane.shown = None; pane.picked = selection::empty(); };
 }
 
 /// The geometry objects to cook: visible ones, each with its network.

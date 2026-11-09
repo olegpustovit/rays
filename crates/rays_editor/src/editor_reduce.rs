@@ -85,10 +85,11 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut Edi
         if graph_name(&(&*v).into()).as_deref() == Some(graph.as_str()) && pane_laid(&(&*v).into()).is_some_and(|k| &k.graph == graph) {
             v.select_later = Vec::new();
             let node = node.clone();
-            with_pane(v, &|pane| graph_pane {
-                view: scope_commands::run_command(scope::select(vec![node.clone()], pane.view.clone()), scope::Command::Frame_selection).0,
-                ..pane.clone()
-            });
+            {
+                let view = &mut pane_mut(v).view;
+                scope::select(vec![node], view);
+                scope_commands::run_command(view, scope::Command::Frame_selection, &mut Vec::new());
+            };
         }
     }
     if let Some((graph, _)) = &outlined {
@@ -1176,17 +1177,18 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         tree::Intent::Select(ids) if ids.len() == 1 => Some(ids[0]),
         _ => None,
     });
-    let picked_view = if added.is_empty() {
+    let mut picked_view = result.scope_view.clone();
+    if added.is_empty() {
         // A row of a geometry object's list selects its source node in the old pane.
         match picked_row {
             Some(id) if matches!(pane_level(&value.into()), Level::Inside(oid) if kind(value, oid).as_deref() == Some("geometry")) => match node_path(&value.into(), id) {
-                Some(path) => scope::select(vec![path], result.scope_view.clone()),
-                None => result.scope_view.clone(),
+                Some(path) => scope::select(vec![path], &mut picked_view),
+                None => {},
             },
-            _ => result.scope_view.clone(),
+            _ => {},
         }
     } else {
-        scope::select(added.clone(), result.scope_view.clone())
+        scope::select(added.clone(), &mut picked_view)
     };
     let value2 = owned;
     value2.timeline_frames = timeline_frames;
@@ -1247,9 +1249,9 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             let back_level = document::resolve_level(&doc, *back_level);
             let rest = rest.to_vec();
             let pane_graph = pane_graph.clone();
-            with_pane(value2, &|pane| graph_pane { route: rest.clone(), ..pane.clone() });
+            pane_mut(value2).route = rest.clone();
             open_level(value2, back_level);
-            with_pane(value2, &|pane| graph_pane { shown: pane_graph.clone(), ..pane.clone() });
+            pane_mut(value2).shown = pane_graph.clone();
         }
     }
     if let Some(graph) = &followed {
@@ -1261,11 +1263,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     // a renamed graph keeps being the one shown, and the one [u] returns to
     if let Some((old, now)) = &renamed {
         let name = |g: &Option<String>| g.as_ref().map(|g| if g == old { now.clone() } else { g.clone() });
-        with_pane(value2, &|pane| graph_pane {
-            shown: name(&pane.shown),
-            route: pane.route.iter().map(|(level, g)| (*level, name(g))).collect(),
-            ..pane.clone()
-        });
+        { let pane = pane_mut(value2); pane.shown = name(&pane.shown); pane.route = pane.route.iter().map(|(level, g)| (*level, name(g))).collect(); };
     }
     let outlined = outline_step(&created, &result, value2);
     if let Some(prompt_intent::Find_node(path)) = &result.prompt_intent {

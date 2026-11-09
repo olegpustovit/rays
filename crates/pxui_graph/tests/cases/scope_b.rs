@@ -59,7 +59,7 @@ fn scope_curve() {
     let (rx, ry) = scope::inspect::row_center(&view, &path(&["g", "a"]), k).expect("row center");
     let at = (rx as i64, ry as i64);
     let (hovered, _) = scope_step(&mut ui, view, &frame_ev(at, vec![mouse_move(at)]));
-    let (_, ch) = scope::run_command(hovered, Command::Delete);
+    let (_, ch) = { let mut r8_view = hovered; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) };
     check(
         matches!(ch.as_slice(), [Change::Syntax_edit(e::Op::Disconnect { node, key: e::ArgKey::Cell(1), fallback: Some(_) })] if *node == path(&["g", "a#0"])),
         "Delete over a vector row with a wired cell is not a Disconnect of that cell",
@@ -234,18 +234,18 @@ fn scope_gestures_1() {
     let (view, changes) = g::type_text(&mut ui, view, "core");
     check(changes.contains(&syn(e::Op::Rename { node: heart.clone(), to_: "core".into() })), "typing a name did not become Rename");
     check(!scope::editing(&view), "the name field stayed open after Enter");
-    let (view, changes) = scope::run_command(scope::select(vec![heart.clone()], view), Command::Edit_name);
+    let (view, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![heart.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Edit_name, &mut r8_changes); (r8_view, r8_changes) };
     check(changes.is_empty() && scope::editing(&view), "F2 did not open the name field");
     let view = g::settled(&mut ui, view);
     let (view, changes) = scope_step(&mut ui, view, &g::frame((0, 0), vec![], vec![Event::Text_input("two words".into()), Event::Key_pressed(Key::Enter)]));
     check(!changes.iter().any(|c| matches!(c, Change::Syntax_edit(e::Op::Rename { .. }))), "a name with a space was accepted");
     let view = scope_step(&mut ui, view, &g::frame((0, 0), vec![], vec![Event::Key_pressed(Key::Escape)])).0;
     check(!scope::editing(&view), "Escape left the name field open");
-    let (_, changes) = scope::run_command(scope::select(vec![], view.clone()), Command::Edit_name);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Edit_name, &mut r8_changes); (r8_view, r8_changes) };
     check(matches!(changes.as_slice(), [Change::Notice(_)]), "F2 with nothing selected");
     // a graph input's default: double-click its tile, type a form
     let petals = path(&["flower", ":petals"]);
-    let view = g::settled(&mut ui, scope::clear_selection(view));
+    let view = g::settled(&mut ui, { let mut r8_view = view; scope::clear_selection(&mut r8_view); r8_view });
     let (x, y, _, _) = g::center_of(&view, &petals);
     let (view, _) = g::double_click(&mut ui, view, (x as i64 + 60, y as i64 + 12));
     check(scope::editing(&view), "a double-click on a graph input did not open its default");
@@ -346,8 +346,8 @@ fn scope_gestures_2() {
     let w = load_workspace("bloom");
     let heart = g::heart();
     // the selection commands and their requests
-    let view = g::settled(&mut ui, scope::select(vec![heart.clone()], g::scope_view(&w, "flower").0));
-    let only = |c: Command| scope::run_command(view.clone(), c).1;
+    let view = g::settled(&mut ui, { let mut r8_view = g::scope_view(&w, "flower").0; scope::select(vec![heart.clone()], &mut r8_view); r8_view });
+    let only = |c: Command| { let mut r8_view = view.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, c, &mut r8_changes); (r8_view, r8_changes) }.1;
     let h = || vec![heart.clone()];
     check(only(Command::Fold_into) == vec![syn(e::Op::FoldInto { node: heart.clone() })], "f: Fold_into");
     check(only(Command::Hoist) == vec![syn(e::Op::Hoist { node: heart.clone() })], "h: Hoist");
@@ -374,7 +374,7 @@ fn scope_gestures_2() {
     check(scope::scope_point(&view, &path(&["nosuch"]), 0.0, 0.0).is_none(), "an unknown scope has no point");
     // fold and unfold: the keys, and the right-click menu's rows
     let result = path(&["flower", "result"]);
-    match scope::run_command(scope::select(vec![result.clone()], view.clone()), Command::Unfold).1.as_slice() {
+    match { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![result.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Unfold, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice() {
         [Change::Syntax_edit(e::Op::Unfold { node, sub, .. })] if *node == result && sub.is_empty() => {}
         _ => fail("Shift-U on a call with an inline call did not become Unfold"),
     }
@@ -390,16 +390,16 @@ fn scope_gestures_2() {
     let (_, requested) = scope_step(&mut ui, view.clone(), &g::frame(empty, vec![], vec![mouse_move(empty), mouse_press(MouseButton::RightButton, empty), mouse_release(MouseButton::RightButton, empty)]));
     check(requested.contains(&Change::Menu_requested(2900.0, 1900.0)), "a right-click on empty canvas did not ask for the add menu");
     check(only(Command::Display) == vec![Change::Display_set(heart.clone())], "v: a geometry node is shown in the viewport");
-    match scope::run_command(scope::select(vec![path(&["flower", "petals"])], view.clone()), Command::Display).1.as_slice() {
+    match { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![path(&["flower", "petals"])], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Display, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice() {
         [Change::Notice(_)] => {}
         _ => fail("v on a number did not say only geometry can be viewed"),
     }
-    check(matches!(scope::run_command(scope::select(vec![], view.clone()), Command::Duplicate).1.as_slice(), [Change::Notice(_)]), "Command-D with nothing selected did not say so");
+    check(matches!({ let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Duplicate, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice(), [Change::Notice(_)]), "Command-D with nothing selected did not say so");
     // the viewed node carries the VIEW mark; the key bindings are the Command table's
     let mut o = ScopeOpts::default();
     o.display = Some(heart.clone());
     let sc = Rc::new(p::of_graph(&scope_catalog(), &w, "flower").expect("scope"));
-    let _viewed = scope::with_scope(o, "flower", sc, view.clone());
+    let _viewed = { let mut r8_view = view.clone(); scope::with_scope(o, "flower", sc, &mut r8_view); r8_view };
     for (id, modifier) in [("scope.duplicate", Key::Meta), ("scope.duplicate", Key::Ctrl), ("scope.display", Key::Shift)] {
         let mods = if id == "scope.display" { vec![] } else { vec![modifier] };
         let ch = if id == "scope.display" { 'v' } else { 'd' };

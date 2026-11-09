@@ -79,7 +79,7 @@ fn run_readable() {
     let (view, _) = scope_step(&mut ui, view, &frame0());
     check(scope::inspect::chain(&view).is_none(), "a chain was lit with nothing selected");
     check(scope::inspect::tagged_wires(&view) == 0, "a short graph drew a tag");
-    let view = scope::select(vec![path(&["g", "b"])], view);
+    let view = { let mut r8_view = view; scope::select(vec![path(&["g", "b"])], &mut r8_view); r8_view };
     match scope::inspect::chain(&view) {
         Some((up, down)) => {
             let has = |l: &Vec<Vec<String>>, n: &str| l.contains(&path(&["g", n]));
@@ -93,15 +93,15 @@ fn run_readable() {
     let (far, _) = scope_view(opts, &ws, "g");
     let (far, _) = scope_step(&mut ui, far, &frame0());
     check(scope::inspect::tagged_wires(&far) >= 1, "a wire four thousand points long was not a tag");
-    let lit = scope::select(vec![path(&["g", "a"])], far.clone());
+    let lit = { let mut r8_view = far.clone(); scope::select(vec![path(&["g", "a"])], &mut r8_view); r8_view };
     check(scope::inspect::tagged_wires(&lit) == 0, "selecting the source did not show the real wire");
-    let (off, _) = scope::run_command(far, scope::Command::Toggle_tags);
+    let (off, _) = { let mut r8_view = far; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::Toggle_tags, &mut r8_changes); (r8_view, r8_changes) };
     check(scope::inspect::tagged_wires(&off) == 0, "the tags toggle left a tag");
     // Unfold all: one Unfold per call written in a row of the card
     let ws = checked("(workspace u (graph g :context sop (let* [a (sop/merge (sop/box) (sop/box))] a)))");
     let (view, _) = scope_view(ScopeOpts::default(), &ws, "g");
     let (view, _) = scope_step(&mut ui, view, &frame0());
-    let (_, changes) = scope::run_command(scope::select(vec![path(&["g", "a"])], view), scope::Command::Unfold_all);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![path(&["g", "a"])], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::Unfold_all, &mut r8_changes); (r8_view, r8_changes) };
     let unfolds = changes.iter().filter(|c| matches!(c, scope::Change::Syntax_edit(e::Op::Unfold { .. }))).count();
     check(unfolds >= 2, "Unfold all did not unfold every call of the card");
 }
@@ -122,24 +122,48 @@ fn bench_scope_big() {
         }
     };
     time("2001 nodes: with_scope", if verbose { 5 } else { 1 }, &mut || {
-        let _ = scope::with_scope(ScopeOpts::default(), "g", sc.clone(), scope::create(Some(1000), Some(700)));
+        let _ = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(ScopeOpts::default(), "g", sc.clone(), &mut r8_view); r8_view };
     });
-    let mut view = scope::with_scope(ScopeOpts::default(), "g", sc.clone(), scope::create(Some(1000), Some(700)));
+    let mut view = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(ScopeOpts::default(), "g", sc.clone(), &mut r8_view); r8_view };
     for _ in 0..5 {
         view = in_frame(&mut ui, &frame0(), view).0;
     }
     let again = view.clone();
     time("2001 nodes: with_scope again", if verbose { 20 } else { 1 }, &mut || {
-        let _ = scope::with_scope(ScopeOpts::default(), "g", sc.clone(), again.clone());
+        let _ = { let mut r8_view = again.clone(); scope::with_scope(ScopeOpts::default(), "g", sc.clone(), &mut r8_view); r8_view };
     });
     time("2001 nodes: frame", if verbose { 100 } else { 1 }, &mut || {
         view = in_frame(&mut ui, &frame0(), view.clone()).0;
     });
     let pv = view.clone();
     time("2001 nodes: Point_all", if verbose { 5 } else { 1 }, &mut || {
-        let _ = scope::run_command(pv.clone(), scope::Command::Point_all);
+        let _ = { let mut r8_view = pv.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::Point_all, &mut r8_changes); (r8_view, r8_changes) };
     });
     check(scope::inspect::wire_count(&view) > 0, "the big scope has no wires");
+}
+
+fn scope_mutation_keeps_prior_changes_and_defers_syntax_edits() {
+    use input::Key;
+    use pxui_graph::scope_commands::step_hints;
+    use pxui_graph::scope_state::{Change, Command};
+    let projection = Rc::new(scope_of("(workspace w (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform b)] c)))"));
+    let mut view = scope::create(Some(1000), Some(700));
+    scope::with_scope(ScopeOpts::default(), "g", projection.clone(), &mut view);
+    scope::select(vec![path(&["g", "a"])], &mut view);
+    let prefix = Change::Notice("earlier intent".into());
+    let mut changes = vec![prefix.clone()];
+    scope::run_command(&mut view, Command::Show_hints, &mut changes);
+    assert_eq!(changes, vec![prefix.clone()]);
+    step_hints(&mut view, &[], false, &mut changes);
+    let target = view.hinting.as_ref().unwrap().targets.iter().find(|target| target.key.is_some()).unwrap().clone();
+    let keys: Vec<Key> = target.label.chars().map(Key::KeyChar).collect();
+    step_hints(&mut view, &keys, false, &mut changes);
+    assert_eq!(changes, vec![prefix, Change::Syntax_edit(e::Op::Connect {
+        node: target.node, key: target.key.unwrap(), src: "a".into(), iter: false,
+    })]);
+    assert!(view.hinting.is_none());
+    assert!(Rc::ptr_eq(view.scope.as_ref().unwrap(), &projection), "a graph handler applied its syntax intent");
+    assert_eq!(scope::selected(&view), vec![path(&["g", "a"])]);
 }
 
 fn change_equality() {
@@ -153,4 +177,4 @@ fn change_equality() {
     assert_eq!(mem_sys::local_alloc_count(), 0, "change equality allocates");
 }
 
-pub const CASES: &[(&str, fn())] = &[("change_equality", change_equality), ("run_sticky", run_sticky), ("run_readable", run_readable), ("bench_scope_big", bench_scope_big)];
+pub const CASES: &[(&str, fn())] = &[("scope_mutation_keeps_prior_changes_and_defers_syntax_edits", scope_mutation_keeps_prior_changes_and_defers_syntax_edits), ("change_equality", change_equality), ("run_sticky", run_sticky), ("run_readable", run_readable), ("bench_scope_big", bench_scope_big)];

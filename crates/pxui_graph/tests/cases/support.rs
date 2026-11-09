@@ -93,13 +93,12 @@ pub fn load_workspace(name: &str) -> Workspace {
 }
 
 /// Run `f` over the pane inside one `Ui::frame` (the frame's closure returns nothing).
-pub fn in_frame(ui: &mut Ui, fr: &rframe::Frame, view: Pane) -> (Pane, Vec<Change>) {
-    let mut cell = Some(view);
-    let mut out: Option<(Pane, Vec<Change>)> = None;
+pub fn in_frame(ui: &mut Ui, fr: &rframe::Frame, mut view: Pane) -> (Pane, Vec<Change>) {
+    let mut changes = Vec::new();
     ui.frame(fr, &mut |ui: &mut Ui| {
-        out = Some(scope::update(&[], cell.take().expect("view"), ui, fr));
+        scope::update(&[], &mut view, ui, fr, &mut changes);
     });
-    out.expect("frame")
+    (view, changes)
 }
 
 /// `scope_step`: the layout settles in a frame without events, then the frame runs.
@@ -119,8 +118,8 @@ pub fn recorded(workspace: &Workspace) -> Rc<RefCell<Probe>> {
 pub fn scope_view(opts: ScopeOpts, workspace: &Workspace, graph: &str) -> (Pane, Rc<p::Scope>) {
     let sc = Rc::new(p::of_graph(&scope_catalog(), workspace, graph).unwrap_or_else(|e| panic!("{e}")));
     let view = scope::create(Some(1000), Some(700));
-    let view = scope::with_scope(opts, graph, sc.clone(), view);
-    let view = scope::with_records(recorded(workspace), view);
+    let view = { let mut r8_view = view; scope::with_scope(opts, graph, sc.clone(), &mut r8_view); r8_view };
+    let view = { let mut r8_view = view; scope::with_records(recorded(workspace), &mut r8_view); r8_view };
     (view, sc)
 }
 
@@ -207,8 +206,8 @@ pub mod g {
     pub fn scope_view(workspace: &Workspace, graph: &str) -> (Pane, Rc<p::Scope>) {
         let sc = Rc::new(p::of_graph(&scope_catalog(), workspace, graph).unwrap_or_else(|e| panic!("{e}")));
         let view = scope::create(Some(3000), Some(2000));
-        let view = scope::with_scope(ScopeOpts::default(), graph, sc.clone(), view);
-        let view = scope::with_records(recorded(workspace), view);
+        let view = { let mut r8_view = view; scope::with_scope(ScopeOpts::default(), graph, sc.clone(), &mut r8_view); r8_view };
+        let view = { let mut r8_view = view; scope::with_records(recorded(workspace), &mut r8_view); r8_view };
         (view, sc)
     }
 

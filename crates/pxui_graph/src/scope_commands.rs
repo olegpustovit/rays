@@ -410,8 +410,8 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
     }
 }
 
-fn frame_selection(t: Pane) -> Pane {
-    let boxes: Vec<(f64, f64, f64, f64)> = st::selected(&t).iter().filter_map(|q| st::box_at(&t, q)).collect();
+fn frame_selection(t: &mut Pane) {
+    let boxes: Vec<(f64, f64, f64, f64)> = st::selected(t).iter().filter_map(|q| st::box_at(t, q)).collect();
     if boxes.is_empty() {
         return st::frame_all(t);
     }
@@ -424,7 +424,7 @@ fn frame_selection(t: Pane) -> Pane {
     let zoom = 0.25f64.max(1.5f64.min(((t.width as f64 - 40.0) / wd).min((t.height as f64 - 40.0) / ht)));
     let pan_x = ((t.width as f64 - (wd * zoom)) / 2.0) - (x0 * zoom);
     let pan_y = ((t.height as f64 - (ht * zoom)) / 2.0) - (y0 * zoom);
-    Pane { zoom, pan_x, pan_y, ..t }
+    (t.zoom, t.pan_x, t.pan_y) = (zoom, pan_x, pan_y);
 }
 
 // ---- levels (flow.md 6.4) ----
@@ -449,13 +449,14 @@ fn levelled(t: &Pane, path: &[String]) -> Option<Level> {
     t.item_at(path).and_then(|(pl, _, _)| level_of(pl))
 }
 
-fn level_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
+fn level_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
     let chosen: Vec<(Path, Level)> = match command {
         Command::Open_all | Command::Point_all => t.geo.items.iter().filter_map(|(pl, _, _)| level_of(pl).map(|l| (pl.path.clone(), l))).collect(),
-        _ => st::selected(&t).into_iter().filter_map(|q| levelled(&t, &q).map(|l| (q, l))).collect(),
+        _ => st::selected(t).into_iter().filter_map(|q| levelled(t, &q).map(|l| (q, l))).collect(),
     };
     if chosen.is_empty() {
-        return (t, vec![Change::Notice("Select a card to change its level".to_owned())]);
+        emit.push(Change::Notice("Select a card to change its level".to_owned()));
+        return;
     }
     // by path: every node may be chosen, so no list is searched per node
     let mut before: HashMap<Path, Level> = HashMap::new();
@@ -487,7 +488,8 @@ fn level_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
             }
         }
     };
-    (Pane { back, ..t }, vec![Change::Level_set(changes)])
+    t.back = back;
+    emit.push(Change::Level_set(changes));
 }
 
 // ---- letter hints (flow.md 7.5): [w] labels every input the selected output can connect to ----
@@ -543,15 +545,16 @@ fn upstream_of(t: &Pane, src: &p::Node) -> HashSet<Path> {
     seen
 }
 
-fn start_hints(t: Pane) -> (Pane, Vec<Change>) {
-    let sel = st::selected_nodes(&t);
+fn start_hints(t: &mut Pane, emit: &mut Vec<Change>) {
+    let sel = st::selected_nodes(t);
     if sel.len() != 1 || sel[0].zone.is_some() || sel[0].synthetic {
-        return (t, vec![Change::Notice("Select one node to connect from".to_owned())]);
+        emit.push(Change::Notice("Select one node to connect from".to_owned()));
+        return;
     }
     let src = &sel[0];
-    let up = upstream_of(&t, src);
+    let up = upstream_of(t, src);
     let scope = scope_of_path(&src.path);
-    let (sx, sy) = st::box_at(&t, &src.path).map(|(x, y, _, _)| (x, y)).unwrap_or((0.0, 0.0));
+    let (sx, sy) = st::box_at(t, &src.path).map(|(x, y, _, _)| (x, y)).unwrap_or((0.0, 0.0));
     let mut candidates: Vec<(p::Node, (f64, f64), Vec<p::Row>)> = Vec::new();
     for (pl, ax, ay) in t.geo.items.iter() {
         if let p::Item::Item(n) = &pl.item {
@@ -583,24 +586,26 @@ fn start_hints(t: Pane) -> (Pane, Vec<Change>) {
         })
         .collect();
     if targets.is_empty() {
-        return (t, vec![Change::Notice("Nothing the selected output can connect to".to_owned())]);
+        emit.push(Change::Notice("Nothing the selected output can connect to".to_owned()));
+        return;
     }
     let hinting = Some(Hinting { src: src.name.clone(), src_ty: src.ty.clone(), typed: String::new(), targets, stage: None, armed: false });
-    (Pane { hinting, ..t }, Vec::new())
+    t.hinting = hinting;
 }
 
 /// A letter, Backspace or Escape while hints are up.
-pub fn step_hints(t: Pane, pressed: &[Key], clicked: bool) -> (Pane, Vec<Change>) {
+pub fn step_hints(t: &mut Pane, pressed: &[Key], clicked: bool, emit: &mut Vec<Change>) {
     let h = match t.hinting.clone() {
-        None => return (t, Vec::new()),
+        None => return,
         Some(h) => h,
     };
     if !h.armed {
         // the key that began it
-        return (Pane { hinting: Some(Hinting { armed: true, ..h }), ..t }, Vec::new());
+        t.hinting = Some(Hinting { armed: true, ..h });
+        return;
     }
     let mut h_ref = h;
-    let mut out: Vec<Change> = Vec::new();
+    let first = emit.len();
     let mut cancel = clicked;
     for k in pressed {
         match k {
@@ -616,19 +621,19 @@ pub fn step_hints(t: Pane, pressed: &[Key], clicked: bool) -> (Pane, Vec<Change>
                     cancel = true;
                 }
             }
-            Key::KeyChar(c) if HINT_ALPHABET.contains(c.to_ascii_lowercase()) && out.is_empty() => {
+            Key::KeyChar(c) if HINT_ALPHABET.contains(c.to_ascii_lowercase()) && emit.len() == first => {
                 let h = h_ref.clone();
                 let typed = format!("{}{}", h.typed, c.to_ascii_lowercase());
                 let live: Vec<&HintTarget> = h.targets.iter().filter(|tg| tg.label.starts_with(&typed)).collect();
                 let found = live.iter().find(|tg| tg.label == typed).map(|tg| (*tg).clone());
                 match found {
                     Some(HintTarget { node, key: Some(key), .. }) => {
-                        out = edit(Op::Connect { node, key, src: h.src.clone(), iter: false });
+                        emit.push(Change::Syntax_edit(Op::Connect { node, key, src: h.src.clone(), iter: false }));
                         cancel = true;
                     }
                     Some(HintTarget { node, key: None, .. }) if h.stage.is_none() => {
                         // a node with several inputs: its inputs get letters of their own
-                        let n = match st::node_of(&t, &node) {
+                        let n = match st::node_of(t, &node) {
                             Some(n) => n,
                             None => continue,
                         };
@@ -639,7 +644,7 @@ pub fn step_hints(t: Pane, pressed: &[Key], clicked: bool) -> (Pane, Vec<Change>
                             .filter(|(_, r)| matches!(&r.ty, Some(ty) if r.socket && r.kind != p::RowKind::Add && ty::fits(&h.src_ty, ty)))
                             .collect();
                         let labels = hint_labels(rows.len());
-                        let (ax, ay) = st::box_at(&t, &node).map(|(x, y, _, _)| (x, y)).unwrap_or((0.0, 0.0));
+                        let (ax, ay) = st::box_at(t, &node).map(|(x, y, _, _)| (x, y)).unwrap_or((0.0, 0.0));
                         let lines = match t.item_at(&node) {
                             Some((pl, _, _)) => line_of_row(&pl.lines),
                             None => HashMap::new(),
@@ -671,52 +676,56 @@ pub fn step_hints(t: Pane, pressed: &[Key], clicked: bool) -> (Pane, Vec<Change>
             _ => {}
         }
     }
-    if cancel { (Pane { hinting: None, ..t }, out) } else { (Pane { hinting: Some(h_ref), ..t }, out) }
+    t.hinting = if cancel { None } else { Some(h_ref) };
 }
 
-pub fn run_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
+pub fn run_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
     match command {
-        Command::Frame_all => (st::frame_all(t), Vec::new()),
-        Command::Tidy => (st::tidy(t), Vec::new()),
+        Command::Frame_all => st::frame_all(t),
+        Command::Tidy => st::tidy(t),
         Command::Toggle_tags => {
             let msg = if t.tags { "wire tags off" } else { "wire tags on" };
             let tags = !t.tags;
-            (Pane { tags, ..t }, vec![Change::Notice(msg.to_owned())])
+            t.tags = tags;
+            emit.push(Change::Notice(msg.to_owned()));
         }
-        Command::Open_level | Command::Point_level | Command::Open_all | Command::Point_all => level_command(t, command),
-        Command::Show_hints => start_hints(t),
-        Command::Frame_selection => (frame_selection(t), Vec::new()),
+        Command::Open_level | Command::Point_level | Command::Open_all | Command::Point_all => level_command(t, command, emit),
+        Command::Show_hints => start_hints(t, emit),
+        Command::Frame_selection => frame_selection(t),
         Command::Edit_name => {
-            let sel = st::selected(&t);
+            let sel = st::selected(t);
             if let [path] = sel.as_slice() {
-                if matches!(st::node_of(&t, path), Some(n) if !n.synthetic) {
-                    return (Pane { editing: Some(Editing::Name(path.clone())), ..t }, Vec::new());
+                if matches!(st::node_of(t, path), Some(n) if !n.synthetic) {
+                    t.editing = Some(Editing::Name(path.clone()));
+                    return;
                 }
-                if input_of(&t, path).is_some() {
-                    return (Pane { editing: Some(Editing::Default(path.clone())), ..t }, Vec::new());
+                if input_of(t, path).is_some() {
+                    t.editing = Some(Editing::Default(path.clone()));
+                    return;
                 }
             }
-            (t, vec![Change::Notice("Select one node or graph input to edit".to_owned())])
+            emit.push(Change::Notice("Select one node or graph input to edit".to_owned()));
         }
-        Command::Make_frame => match new_frame(&t) {
+        Command::Make_frame => match new_frame(t) {
             Some((scope, frame)) => {
                 let mut frames = t.saved.frames(&scope);
                 frames.push(frame);
-                (t, vec![Change::Frames_set { scope, frames }])
+                emit.push(Change::Frames_set { scope, frames });
             }
-            None => (t, vec![Change::Notice("Select nodes to frame".to_owned())]),
+            None => emit.push(Change::Notice("Select nodes to frame".to_owned())),
         },
         Command::Walk(direction) => {
             let center = |pl: &p::Placed, ax: f64, ay: f64| (ax + (pl.w / 2.0), ay + (pl.h / 2.0));
-            let sel = st::selected(&t);
+            let sel = st::selected(t);
             let current = sel.first().and_then(|q| t.item_at(q)).cloned();
             match current {
                 None => match t.geo.items.first() {
                     Some((pl, _, _)) => {
                         let path = pl.path.clone();
-                        (st::select(vec![path.clone()], t), vec![Change::Selected(vec![path])])
+                        st::select(vec![path.clone()], t);
+                        emit.push(Change::Selected(vec![path]));
                     }
-                    None => (t, Vec::new()),
+                    None => {},
                 },
                 Some((cp, cx, cy)) => {
                     let (ox, oy) = center(&cp, cx, cy);
@@ -744,15 +753,16 @@ pub fn run_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
                         }
                     }
                     match best {
-                        Some((_, path)) => (st::select(vec![path.clone()], t), vec![Change::Selected(vec![path])]),
-                        None => (t, Vec::new()),
+                        Some((_, path)) => { st::select(vec![path.clone()], t);
+                        emit.push(Change::Selected(vec![path])); },
+                        None => {},
                     }
                 }
             }
         }
         _ => {
-            let changes = action_changes(&t, command);
-            (t, changes)
+            let changes = action_changes(t, command);
+            emit.extend(changes);
         }
     }
 }

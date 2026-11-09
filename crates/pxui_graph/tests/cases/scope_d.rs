@@ -28,8 +28,8 @@ fn view_with(opts: ScopeOpts, inputs: Option<Inputs>, w: &flow_check::workspace:
     let sc = Rc::new(p::of_graph(&scope_catalog(), w, graph).expect("graph"));
     let eval = flow_eval::r#static(w, true, inputs.as_deref()).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let rec = Rc::new(RefCell::new(probe::make(&eval, probe::Options::default())));
-    let view = scope::with_scope(opts, graph, sc.clone(), scope::create(Some(1000), Some(700)));
-    (scope::with_records(rec, view), sc)
+    let view = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(opts, graph, sc.clone(), &mut r8_view); r8_view };
+    ({ let mut r8_view = view; scope::with_records(rec, &mut r8_view); r8_view }, sc)
 }
 
 fn conditional_arms() {
@@ -37,17 +37,17 @@ fn conditional_arms() {
     let conditional = checked("(workspace branches (graph g :context value (let* [x (cond false (+ 1 2) true (* 3 4) :else 5)] x)))");
     // the arm's formula opened, so it is a card of its own
     let sc = Rc::new(p::of_graph_with(&|_| false, &scope_catalog(), &conditional, "g").expect("g"));
-    let view = scope::with_scope(ScopeOpts::default(), "g", sc.clone(), scope::create(Some(1000), Some(700)));
-    let view = scope::with_records(recorded(&conditional), view);
+    let view = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(ScopeOpts::default(), "g", sc.clone(), &mut r8_view); r8_view };
+    let view = { let mut r8_view = view; scope::with_records(recorded(&conditional), &mut r8_view); r8_view };
     let (view, _) = scope_step(&mut ui, view, &frame0());
     let arm = path(&["g", "x#then~2"]);
     let x = path(&["g", "x"]);
     check(scope::inspect::selector(&view, &arm).is_none(), "conditional arm incorrectly has an iteration selector");
-    let (_, changes) = scope::run_command(scope::select(vec![arm.clone()], view.clone()), Command::Add_arm);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![arm.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Add_arm, &mut r8_changes); (r8_view, r8_changes) };
     check(changes.contains(&Change::Syntax_edit(Op::AddArm { node: x.clone(), after: 1 })), "arm Add uses wrong holder/index");
-    let (_, changes) = scope::run_command(scope::select(vec![arm.clone()], view.clone()), Command::Delete_arm);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![arm.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete_arm, &mut r8_changes); (r8_view, r8_changes) };
     check(changes.contains(&Change::Syntax_edit(Op::DeleteArm { node: x.clone(), index: 1 })), "arm Delete uses wrong index");
-    let (_, changes) = scope::run_command(scope::select(vec![arm.clone()], view.clone()), Command::Unfold);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![arm.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Unfold, &mut r8_changes); (r8_view, r8_changes) };
     check(changes.contains(&Change::Syntax_edit(Op::Unfold { node: x.clone(), key: ArgKey::Arm(1), sub: Vec::new() })), "arm unfold did not address conditional body");
     let (view, _) = scope_step(&mut ui, scope_view(ScopeOpts::default(), &conditional, "g").0, &frame0());
     let (bx, by, _, _) = scope::inspect::box_of(&view, &x).expect("box");
@@ -64,12 +64,7 @@ fn conditional_arms() {
         }
     }
     check(found, "conditional right-click Add arm did not emit edit");
-    let imported = scope::with_scope(
-        saved_opts(TestSaved { imported: Some("lib.rays".to_owned()), ..Default::default() }),
-        "import",
-        Rc::new(p::of_graph(&scope_catalog(), &conditional, "g").expect("g")),
-        view,
-    );
+    let imported = { let mut r8_view = view; scope::with_scope(saved_opts(TestSaved { imported: Some("lib.rays".to_owned()), ..Default::default() }), "import", Rc::new(p::of_graph(&scope_catalog(), &conditional, "g").expect("g")), &mut r8_view); r8_view };
     let (imported, _) = scope_step(&mut ui, imported, &frame0());
     let (menu, _) = scope_step(&mut ui, imported, &frame_ev(at, right_click(at)));
     let (menu, _) = scope_step(&mut ui, menu, &frame_ev(at, Vec::new()));
@@ -114,13 +109,13 @@ fn selector_steps() {
     let (_, changes) = scope_click(&mut ui, view.clone(), rect_center(prev));
     check(changes.contains(&Change::Probe_set { zone: zone.clone(), index: 4 }), "the previous button did not step the probe");
     // one stepper pins the iteration of every zone when nothing is selected
-    let (_, pinned) = scope::run_command(view.clone(), Command::Probe_step(1));
+    let (_, pinned) = { let mut r8_view = view.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Probe_step(1), &mut r8_changes); (r8_view, r8_changes) };
     check(pinned.contains(&Change::Probe_set { zone: zone.clone(), index: 6 }), "[ ] with nothing selected did not step every zone");
     let inline = checked("(workspace w (graph g :context value (let* [ys (map (fn [(x : float)] (+ x 2.0)) (array/float 10003 1.0))] (array/count ys))))");
     let (inline_view, _) = scope_view(saved_opts(TestSaved { probe: vec![(path(&["g", "ys#0"]), 9999)], ..Default::default() }), &inline, "g");
     let (inline_view, _) = scope_step(&mut ui, inline_view, &frame0());
     let inline_zone = path(&["g", "ys#0"]);
-    let (_, inline_keys) = scope::run_command(scope::select(vec![inline_zone.clone()], inline_view.clone()), Command::Probe_step(1));
+    let (_, inline_keys) = { let mut r8_view = { let mut r8_view = inline_view.clone(); scope::select(vec![inline_zone.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Probe_step(1), &mut r8_changes); (r8_view, r8_changes) };
     check(inline_keys.contains(&Change::Probe_set { zone: inline_zone.clone(), index: 10000 }), "inline function keyboard selector did not step beyond the recording cap");
     let (_, _, inline_next) = scope::inspect::selector(&inline_view, &inline_zone).expect("selector");
     let (ix, iy, iw, ih) = inline_next;
@@ -188,7 +183,7 @@ fn drawn_iterations() {
         }
     };
     let a = paint_hash(&mut ui, base.clone());
-    let b = paint_hash(&mut ui, scope::with_records(reports, base));
+    let b = paint_hash(&mut ui, { let mut r8_view = base; scope::with_records(reports, &mut r8_view); r8_view });
     check(a != b, "execution badges did not change the graph's paint");
     let z3 = zone.clone();
     let (collapsed_view, _) = scope_view(saved_opts(TestSaved { collapsed: vec![z3.clone()], ..Default::default() }), &w, "sunflower");
@@ -220,12 +215,12 @@ fn wire_and_delete() {
     );
     // delete: the selected node
     let (view, _) = scope_click(&mut ui, view, start);
-    let view = scope::select(vec![heart.clone()], view);
-    let (_, changes) = scope::run_command(view.clone(), Command::Delete);
+    let view = { let mut r8_view = view; scope::select(vec![heart.clone()], &mut r8_view); r8_view };
+    let (_, changes) = { let mut r8_view = view.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) };
     check(changes == vec![Change::Syntax_edit(Op::DeleteNodes { nodes: vec![heart.clone()] })], "Delete did not become Delete_nodes");
     // wire selection and deletion
     check(scope::inspect::wire_count(&view) > 0, "there are wires in the graph");
-    let view0 = scope::select(vec![heart.clone()], view);
+    let view0 = { let mut r8_view = view; scope::select(vec![heart.clone()], &mut r8_view); r8_view };
     check(scope::selected(&view0) == vec![heart.clone()], "heart is selected");
     // some wire of the graph (not under a card) is hit at its longest segment's middle
     let mut view = view0.clone();
@@ -238,7 +233,7 @@ fn wire_and_delete() {
     }
     check(scope::selected_wire(&view).is_some(), "clicking wire selected it");
     check(scope::selected(&view).is_empty(), "clicking wire cleared node selection");
-    let (_, changes) = scope::run_command(view.clone(), Command::Delete);
+    let (_, changes) = { let mut r8_view = view.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) };
     check(matches!(changes.as_slice(), [Change::Syntax_edit(Op::Disconnect { .. })]), "Delete on selected wire emitted Disconnect");
     // a right-click on a node makes the nodes the selection again: Delete then removes the node
     let (hx, hy, _, _) = scope::inspect::box_of(&view, &heart).expect("box");
@@ -246,7 +241,7 @@ fn wire_and_delete() {
     let (menu, changes) = scope_step(&mut ui, view.clone(), &frame_ev(at, right_click(at)));
     check(changes.contains(&Change::Selected(vec![heart.clone()])), "a right-click on a node did not emit Selected");
     check(
-        scope::run_command(menu, Command::Delete).1.contains(&Change::Syntax_edit(Op::DeleteNodes { nodes: vec![heart.clone()] })),
+        { let mut r8_view = menu; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) }.1.contains(&Change::Syntax_edit(Op::DeleteNodes { nodes: vec![heart.clone()] })),
         "Delete after a right-click on a node removed the wire selected before",
     );
     // keys and menu: every key command maps to a request
@@ -254,7 +249,7 @@ fn wire_and_delete() {
     for name in ["delete", "fold", "unfold", "hoist", "bypass", "repeat", "iterate", "function", "collapse", "probe-prev", "probe-next", "frame-all", "walk.left"] {
         check(bindings.iter().any(|(c, _)| c.id == format!("scope.{}", name)), &format!("no key for {}", name));
     }
-    let (_, changes) = scope::run_command(scope::select(vec![heart.clone()], view), Command::Bypass);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![heart.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Bypass, &mut r8_changes); (r8_view, r8_changes) };
     check(changes == vec![Change::Syntax_edit(Op::ToggleBypass { node: heart })], "Bypass");
 }
 
@@ -271,7 +266,7 @@ fn loop_wire() {
     check(scope::inspect::highlighted_connections(&hovered).len() == 1, "a wire inside a loop is not hovered");
     let (picked, _) = scope_click(&mut ui, lview, mid);
     check(
-        matches!(scope::run_command(picked, Command::Delete).1.first(), Some(Change::Syntax_edit(Op::Disconnect { node, .. })) if *node == inner),
+        matches!({ let mut r8_view = picked; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) }.1.first(), Some(Change::Syntax_edit(Op::Disconnect { node, .. })) if *node == inner),
         "a wire inside a loop is not selected by a click",
     );
 }
@@ -323,13 +318,13 @@ fn macro_lens() {
     let (view, _) = scope_click(&mut ui, view, ipt(t));
     check(scope::inspect::macro_step(&view, &outer).is_none(), "the toggle closes the panel");
     // bypass is the b key (and the context menu): the same request, and a card with nothing to pass through has none
-    let (_, changes) = scope::run_command(scope::select(vec![soft.clone()], view.clone()), Command::Bypass);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![soft.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Bypass, &mut r8_changes); (r8_view, r8_changes) };
     check(changes.contains(&Change::Syntax_edit(Op::ToggleBypass { node: soft.clone() })), "the b key did not become Toggle_bypass");
     check(p::find(&sc, &soft).expect("soft").bypass, "soft is authored bypassed");
     // m asks the host for the make-macro dialog over the selection
-    let (_, changes) = scope::run_command(scope::select(vec![soft.clone()], view.clone()), Command::Make_macro);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![soft.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Make_macro, &mut r8_changes); (r8_view, r8_changes) };
     check(changes == vec![Change::Macro_requested(vec![soft])], "m did not request the dialog");
-    let (_, changes) = scope::run_command(scope::select(Vec::new(), view), Command::Make_macro);
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(Vec::new(), &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Make_macro, &mut r8_changes); (r8_view, r8_changes) };
     check(matches!(changes.as_slice(), [Change::Notice(_)]), "m with nothing selected");
 }
 

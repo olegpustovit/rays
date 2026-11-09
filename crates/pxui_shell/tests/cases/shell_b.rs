@@ -166,14 +166,15 @@ fn center(k: i64) -> (f64, f64) {
     (200.0, 24.0 + (24.0 * k as f64) + 12.0)
 }
 
-fn step(ui: &mut Ui, t: T::Tree, mouse: (f64, f64), events: Vec<Event>, rows: &[Row]) -> (T::Tree, Vec<Intent>) {
+fn step(ui: &mut Ui, mut tree: T::Tree, mouse: (f64, f64), events: Vec<Event>, rows: &[Row]) -> (T::Tree, Vec<Intent>) {
     let f = fr((400, 300), mouse, events);
-    let mut taken = Some(t);
-    let mut out = None;
+    let prefix = Intent::Delete(vec![i64::MIN]);
+    let mut intents = vec![prefix.clone()];
     ui.frame(&f, &mut |ui| {
-        out = Some(T::update(taken.take().unwrap(), ui, &f, (0, 0, 400, 300), "", &["vis".to_string()], rows, &[]));
+        T::update(&mut tree, ui, &f, (0, 0, 400, 300), "", &["vis".to_string()], rows, &[], &mut intents);
     });
-    out.unwrap()
+    assert_eq!(intents.remove(0), prefix, "tree update replaced earlier intents");
+    (tree, intents)
 }
 
 fn tree_gesture(ui: &mut Ui, t: T::Tree, from: (f64, f64), to: (f64, f64), rows: &[Row]) -> (T::Tree, Vec<Intent>) {
@@ -195,7 +196,7 @@ pub fn window_shell_tree_pointer_gestures() {
     // Tree: pointer gestures (dead zone, before/inside/after drops, toggle paint, double-click).
     let rows = vec![row(1, 0, "a"), row(2, 1, "b"), row(3, 1, "c"), row(4, 0, "d")];
     let mut ui = new_ui();
-    let run = |t: T::Tree, c: Command| T::run_command(t, &rows, &[], c);
+    let run = |t: T::Tree, c: Command| { let mut r8_tree = t; let mut r8_intents = Vec::new(); T::run_command(&mut r8_tree, &rows, &[], c, &mut r8_intents); (r8_tree, r8_intents) };
     let moves = |intents: Vec<Intent>| -> Vec<Intent> { intents.into_iter().filter(|i| matches!(i, Intent::Move { .. })).collect() };
     let chevron = (13.0, center(0).1);
     let (t, _) = step(&mut ui, T::create(), (0.0, 0.0), vec![], &rows);
@@ -260,7 +261,7 @@ pub fn window_shell_tree_scroll_and_sticky() {
             let mut taken = Some(t);
             let mut out = None;
             ui.frame(&f, &mut |ui| {
-                out = Some(T::update(taken.take().unwrap(), ui, &base(), (0, 0, 400, 96), "", &[], rows, &[]));
+                out = Some({ let mut r8_tree = taken.take().unwrap(); let mut r8_intents = Vec::new(); T::update(&mut r8_tree, ui, &base(), (0, 0, 400, 96), "", &[], rows, &[], &mut r8_intents); (r8_tree, r8_intents) });
             });
             out.unwrap()
         };

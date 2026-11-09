@@ -278,7 +278,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     let mut value = value;
     follow_graph(&mut value, &focus, on.as_deref());
     let views = graph_path(&(&value).into()).map(|p| start_views(&value.doc, level, &p)).unwrap_or_else(level_map_empty);
-    with_pane(&mut value, &|pane| graph_pane { views: views.clone(), ..pane.clone() });
+    pane_mut(&mut value).views = views.clone();
     let hosts = panel_hosts(&(&value).into());
     follow_hosts(&mut value, on.as_ref(), &hosts);
     follow_start(&mut value);

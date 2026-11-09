@@ -101,10 +101,10 @@ fn scope_levels_a() {
     let node_c = p::find(&sc, &c).unwrap();
     check(node_c.rows.iter().any(|r| r.head), "the first geometry slot is not the header's");
     // o opens the selection one level and pins it; p points it, again goes back
-    let sel = scope::select(vec![a.clone()], view.clone());
-    let (_, changes) = scope::run_command(sel.clone(), Command::Open_level);
+    let sel = { let mut r8_view = view.clone(); scope::select(vec![a.clone()], &mut r8_view); r8_view };
+    let (_, changes) = { let mut r8_view = sel.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Open_level, &mut r8_changes); (r8_view, r8_changes) };
     check(changes == vec![Change::Level_set(vec![(a.clone(), Some(Level::Full), true)])], "o is not Level_set full, pinned");
-    let (_pointed, changes) = scope::run_command(sel, Command::Point_level);
+    let (_pointed, changes) = { let mut r8_view = sel; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Point_level, &mut r8_changes); (r8_view, r8_changes) };
     check(changes == vec![Change::Level_set(vec![(a.clone(), Some(Level::Point), false)])], "p is not Level_set point");
     let a2 = a.clone();
     let o = saved_opts(TestSaved { at: vec![(a.clone(), (24.0, 24.0))], level: vec![(a2, (Level::Point, false))], ..Default::default() });
@@ -112,7 +112,7 @@ fn scope_levels_a() {
     let (pview, _) = scope_step(&mut ui, pview, &frame0());
     let (_, _, pw, ph) = scope::inspect::box_of(&pview, &a).unwrap();
     check(ph == p::POINT_SIZE * scope::zoom(&pview) && pw < 100.0 * scope::zoom(&pview), "a point is the 14-point disc and its name");
-    let (_back, changes) = scope::run_command(scope::select(vec![a.clone()], pview), Command::Point_level);
+    let (_back, changes) = { let mut r8_view = { let mut r8_view = pview; scope::select(vec![a.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Point_level, &mut r8_changes); (r8_view, r8_changes) };
     check(matches!(changes.as_slice(), [Change::Level_set(l)] if l.len() == 1 && l[0].0 == a && l[0].1.is_none() && !l[0].2), "p on a point does not go back to the card");
     // the header's in-port takes a wire: dropped anywhere on the header it is Connect on the first slot
     let (sx, sy) = scope::inspect::output_socket(&view, &b).unwrap();
@@ -183,14 +183,13 @@ fn scope_levels_b() {
     }
 }
 
-fn one_frame(ui: &mut Ui, key: Key, v: Pane) -> (Pane, Vec<Change>) {
+fn one_frame(ui: &mut Ui, key: Key, mut view: Pane) -> (Pane, Vec<Change>) {
     let f = frame((0, 0), vec![key.clone()], vec![]);
-    let mut cell = Some(v);
-    let mut out = None;
+    let mut changes = Vec::new();
     ui.frame(&f, &mut |ui: &mut Ui| {
-        out = Some(scope::update(&[key.clone()], cell.take().expect("view"), ui, &f));
+        scope::update(&[key.clone()], &mut view, ui, &f, &mut changes);
     });
-    out.expect("frame")
+    (view, changes)
 }
 
 fn scope_levels_c() {
@@ -198,7 +197,7 @@ fn scope_levels_c() {
     let (_, view, sc) = levels_fixture(&mut ui);
     let b = path(&["g", "b"]);
     // f: letter hints; a letter connects the selected output
-    let (hint_view, notices) = scope::run_command(scope::select(vec![b.clone()], view), Command::Show_hints);
+    let (hint_view, notices) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![b.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Show_hints, &mut r8_changes); (r8_view, r8_changes) };
     check(notices.is_empty() && scope::editing(&hint_view), "f did not start the hints");
     let (hint_view, _) = scope_step(&mut ui, hint_view, &frame0());
     // one frame with the key down: scope_step's settle frame would take the press
@@ -208,10 +207,10 @@ fn scope_levels_c() {
     let (esc, _) = one_frame(&mut ui, Key::Escape, hint_view.clone());
     check(!scope::editing(&esc), "Escape did not end the hints");
     // a reloaded document ends them: their targets name nodes of the scope they were made over
-    check(scope::editing(&scope::with_scope(ScopeOpts::default(), "g", sc, hint_view.clone())), "the same scope ended the hints");
+    check(scope::editing(&{ let mut r8_view = hint_view.clone(); scope::with_scope(ScopeOpts::default(), "g", sc, &mut r8_view); r8_view }), "the same scope ended the hints");
     let reloaded = checked("(workspace w (graph g :context sop (sop/box)))");
     let rs = Rc::new(p::of_graph(&scope_catalog(), &reloaded, "g").unwrap());
-    check(!scope::editing(&scope::with_scope(ScopeOpts::default(), "g", rs, hint_view)), "a new scope kept the letter hints");
+    check(!scope::editing(&{ let mut r8_view = hint_view; scope::with_scope(ScopeOpts::default(), "g", rs, &mut r8_view); r8_view }), "a new scope kept the letter hints");
     // f frames the selection (all with none); the hints are on w
     let key_of = |action: Command| scope_commands::bindings().into_iter().find(|c| c.1 == action).and_then(|c| c.0.trigger);
     check(matches!(key_of(Command::Frame_selection), Some(Trigger::Chord(Key::KeyChar('f'), k)) if k.is_empty()), "f does not frame the selection");
@@ -226,7 +225,7 @@ fn scope_levels_c() {
     let (lview, lscope) = scope_view(ScopeOpts::default(), &lw, "g");
     let (lview, _) = scope_step(&mut ui, lview, &frame0());
     let inner = path(&["g", "copies", "@result"]);
-    check(scope::run_command(scope::select(vec![inner.clone()], lview.clone()), Command::Display).1 == vec![Change::Display_set(inner)], "v refused a node inside a loop");
+    check({ let mut r8_view = { let mut r8_view = lview.clone(); scope::select(vec![inner.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Display, &mut r8_changes); (r8_view, r8_changes) }.1 == vec![Change::Display_set(inner)], "v refused a node inside a loop");
     // a row wired from a node nothing else reads has a fold button; a click folds that node into the row.
     // A row wired from a graph input has none.
     let sphere = path(&["g", "a"]);
@@ -243,7 +242,7 @@ fn scope_levels_c() {
     let (rx, ry) = scope::inspect::row_center(&lview, &sphere, row("radius")).unwrap();
     let at = (rx as i64, ry as i64);
     let (hovered, _) = scope_step(&mut ui, lview, &frame_ev(at, vec![mouse_move(at)]));
-    match scope::run_command(hovered, Command::Delete).1.as_slice() {
+    match { let mut r8_view = hovered; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice() {
         [Change::Syntax_edit(Op::Disconnect { node, key: ArgKey::Kw(k), fallback: Some(f) })] if k == "radius" => {
             let flat = flow_syntax::lisp::flat(f);
             check(*node == sphere && flat == "0.4", &format!("the wire taken off radius did not keep its last value: {flat}"));
@@ -278,7 +277,7 @@ fn scope_connection_hover() {
     let midpoint = (((ax + bx) / 2.0) as i64, ((ay + by) / 2.0) as i64);
     let (selected, _) = scope_click(&mut ui, view, midpoint);
     check(
-        matches!(scope::run_command(selected, Command::Delete).1.as_slice(), [Change::Syntax_edit(Op::Disconnect { node, key: ArgKey::Pos(0), .. })] if *node == path(&["g", "c"])),
+        matches!({ let mut r8_view = selected; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice(), [Change::Syntax_edit(Op::Disconnect { node, key: ArgKey::Pos(0), .. })] if *node == path(&["g", "c"])),
         "a press on the wire did not preserve its disconnect target",
     );
     let ws = checked("(workspace capture (graph g :context sop (let* [a (sop/box) copies (for [i (range 2)] (sop/transform a :translate [i 0 0]))] (sop/merge copies))))");
@@ -297,7 +296,7 @@ fn scope_connection_hover() {
 /// 2,001-node graph allocates a small constant, and the level keys answer for every node at once.
 fn scope_idle_frame() {
     let mut ui = new_ui();
-    let mut cur = Some(scope::with_scope(ScopeOpts::default(), "g", Rc::new(big_scope(2001)), scope::create(Some(16), Some(16))));
+    let mut cur = Some({ let mut r8_view = scope::create(Some(16), Some(16)); scope::with_scope(ScopeOpts::default(), "g", Rc::new(big_scope(2001)), &mut r8_view); r8_view });
     let step = |ui: &mut Ui, view: &mut Option<Pane>| {
         let v = view.take().unwrap();
         *view = Some(in_frame(ui, &frame0(), v).0);
@@ -314,7 +313,7 @@ fn scope_idle_frame() {
     check(scope::stats(&view).nodes >= 2001, "the big graph is not laid out");
     check(per_frame < 500_000.0, &format!("an idle frame with nothing in view allocates {:.0} bytes", per_frame));
     check(
-        matches!(scope::run_command(view, Command::Point_all).1.as_slice(), [Change::Level_set(l)] if l.len() == 2001 && l.iter().all(|(_, level, _)| *level == Some(Level::Point))),
+        matches!({ let mut r8_view = view; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Point_all, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice(), [Change::Level_set(l)] if l.len() == 2001 && l.iter().all(|(_, level, _)| *level == Some(Level::Point))),
         "Point_all did not point every node",
     );
 }
@@ -332,12 +331,12 @@ fn scope_suspend() {
     held.input.buttons = vec![MouseButton::RightButton];
     let (panning, _) = scope_step(&mut ui, view, &held);
     check(scope::inspect::grabbed(&panning), "a right-button press on the canvas did not begin a pan");
-    let (naming, _) = scope::run_command(scope::select(vec![path(&["flower", "heart"])], panning), Command::Edit_name);
+    let (naming, _) = { let mut r8_view = { let mut r8_view = panning; scope::select(vec![path(&["flower", "heart"])], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Edit_name, &mut r8_changes); (r8_view, r8_changes) };
     check(scope::editing(&naming) && scope::inspect::grabbed(&naming), "the name field did not open during the pan");
-    let idle = scope::suspend(naming);
+    let idle = { let mut r8_view = naming; scope::suspend(&mut r8_view); r8_view };
     check(!scope::inspect::grabbed(&idle) && !scope::editing(&idle), "suspend left the grab or the field");
     // suspending an idle pane makes no new value: the sharing (layout) and the open state are unchanged
-    let again = scope::suspend(idle.clone());
+    let again = { let mut r8_view = idle.clone(); scope::suspend(&mut r8_view); r8_view };
     check(Rc::ptr_eq(&again.layout, &idle.layout) && again.drag.is_none() && again.context.is_none() && again.highlighted.is_empty(), "suspending an idle pane made a new value");
     // drawn again as the button comes up: no grab, no field, no edit
     let (after, mut changes) = scope_step(&mut ui, idle, &frame_ev(empty, vec![mouse_release(MouseButton::RightButton, empty)]));
@@ -427,7 +426,7 @@ fn scope_carry() {
     let (view, changes) = scope_step(&mut ui, view, &frame_ev(over, vec![mouse_release(MouseButton::LeftButton, over)]));
     check(drops(&changes).is_empty(), "the release after a put reported a drop");
     // the marks of a carry paint without changing what the pane reports
-    let marked = scope::with_carry(vec![(heart.clone(), "a".to_owned())], Some((heart, true)), view);
+    let marked = { let mut r8_view = view; scope::with_carry(vec![(heart.clone(), "a".to_owned())], Some((heart, true)), &mut r8_view); r8_view };
     let _ = scope_step(&mut ui, marked, &frame0());
 }
 
@@ -440,13 +439,13 @@ fn scope_ghost_values() {
     let sc = Rc::new(p::of_graph(&scope_catalog(), &w, "g").unwrap());
     let view = |index: i64| {
         let o = saved_opts(TestSaved { probe: sc.nodes.iter().filter(|n| n.zone.is_some()).map(|n| (n.path.clone(), index)).collect(), ..Default::default() });
-        let v = scope::with_scope(o, "g", sc.clone(), scope::create(Some(1000), Some(700)));
-        scope::with_records(recorded(&w), v)
+        let v = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(o, "g", sc.clone(), &mut r8_view); r8_view };
+        { let mut r8_view = v; scope::with_records(recorded(&w), &mut r8_view); r8_view }
     };
     let ghost = |ui: &mut Ui, index: i64, q: &[&str]| scope::inspect::ghost(&scope_step(ui, view(index), &frame0()).0, &path(q));
     check(ghost(&mut ui, 0, &["g", "k"]) == Some("6".to_owned()), "a card below Full showed no value beside its out-port");
     check(ghost(&mut ui, 0, &["g", "ys", "b"]) == Some("1".to_owned()) && ghost(&mut ui, 3, &["g", "ys", "b"]) == Some("19".to_owned()), "the ghost value did not follow the pinned iteration");
-    let bare = scope::with_scope(ScopeOpts::default(), "g", sc.clone(), scope::create(Some(1000), Some(700)));
+    let bare = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(ScopeOpts::default(), "g", sc.clone(), &mut r8_view); r8_view };
     check(scope::inspect::ghost(&scope_step(&mut ui, bare, &frame0()).0, &path(&["g", "k"])).is_none(), "a ghost value without records");
 }
 

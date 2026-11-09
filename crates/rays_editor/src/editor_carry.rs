@@ -166,7 +166,7 @@ pub fn carry_cancel(value: &mut EditorModel, c: &carry, notice: (notice_kind, St
     value.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
     value.doc = doc;
     value.notice = Some(notice);
-    with_pane(value, &|pane| graph_pane { at: level, ..pane.clone() });
+    pane_mut(value).at = level;
 }
 
 pub fn carry_commit(value: &mut EditorModel, c: &carry, doc: &Arc<Document>, what: &str) {
@@ -309,6 +309,6 @@ pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a fra
     value.lisp_vocab = vocabulary_for(value, &shown);
     value.workspace = unrestore(&value.doc, &shown, value.workspace.clone());
     value.doc = shown;
-    with_pane(value, &|pane| graph_pane { at: level, ..pane.clone() });
+    pane_mut(value).at = level;
     (taken, true)
 }

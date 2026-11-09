@@ -276,7 +276,7 @@ pub fn font_of(zoom: f64) -> i64 {
     5.max((13.0 * zoom).round() as i64)
 }
 
-pub fn regeo(t: Pane, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[String]) -> (f64, f64)) -> Pane {
+pub fn regeo(t: &mut Pane, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[String]) -> (f64, f64)) {
     let fs = font_of(t.zoom);
     let measured = t.measured.clone();
     let zoom = t.zoom;
@@ -294,7 +294,7 @@ pub fn regeo(t: Pane, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[Str
         layout,
         shift,
     );
-    Pane { geo_fs: fs, geo, geo_cold: cold.get(), ..t }
+    (t.geo_fs, t.geo, t.geo_cold) = (fs, geo, cold.get());
 }
 
 pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
@@ -405,36 +405,37 @@ pub fn tagged(t: &Pane, wi: &Wire) -> bool {
     t.tags && wi.target.is_some() && (wi.b.0 - wi.a.0).abs() > w::TAG_SPAN && !matches!(chains_of(t), Some(c) if wire_lit(&c, wi))
 }
 
-pub fn with_bounds(x: i64, y: i64, width: i64, height: i64, t: Pane) -> Pane {
-    if t.x == x && t.y == y && t.width == width && t.height == height { t } else { Pane { x, y, width, height, ..t } }
+pub fn with_bounds(x: i64, y: i64, width: i64, height: i64, t: &mut Pane) {
+    (t.x, t.y, t.width, t.height) = (x, y, width, height);
 }
 
 /// The pane is not drawn this frame: nothing it began stays open, and the pointer is given back.
-pub fn suspend(t: Pane) -> Pane {
+pub fn suspend(t: &mut Pane) {
     if t.panning_grab {
         let _ = rays::sketch::set_relative_mouse(false);
     }
-    if t.editing.is_none() && t.hinting.is_none() && t.drag.is_none() && t.context.is_none() && !t.panning_grab && t.highlighted.is_empty() {
-        t
-    } else {
-        Pane { editing: None, hinting: None, drag: None, context: None, highlighted: Vec::new(), panning_grab: false, ..t }
-    }
+    t.editing = None;
+    t.hinting = None;
+    t.drag = None;
+    t.context = None;
+    t.highlighted = Vec::new();
+    t.panning_grab = false;
 }
 
-pub fn with_guide(guide: bool, t: Pane) -> Pane {
-    if t.guide == guide { t } else { Pane { guide, ..t } }
+pub fn with_guide(guide: bool, t: &mut Pane) {
+    t.guide = guide;
 }
 
-pub fn with_theme(theme: Theme, t: Pane) -> Pane {
-    if t.theme == theme { t } else { Pane { theme, ..t } }
+pub fn with_theme(theme: Theme, t: &mut Pane) {
+    t.theme = theme;
 }
 
-pub fn with_failed(failed: Vec<(Path, String)>, t: Pane) -> Pane {
-    if t.failed == failed { t } else { Pane { failed, ..t } }
+pub fn with_failed(failed: Vec<(Path, String)>, t: &mut Pane) {
+    if t.failed != failed { t.failed = failed; }
 }
 
-pub fn with_carry(lit: Vec<(Path, String)>, hot: Option<(Path, bool)>, t: Pane) -> Pane {
-    if t.carry_lit == lit && t.carry_hot == hot { t } else { Pane { carry_lit: lit, carry_hot: hot, ..t } }
+pub fn with_carry(lit: Vec<(Path, String)>, hot: Option<(Path, bool)>, t: &mut Pane) {
+    if t.carry_lit != lit || t.carry_hot != hot { t.carry_lit = lit; t.carry_hot = hot; }
 }
 
 pub fn selected(t: &Pane) -> Vec<Path> {
@@ -445,12 +446,14 @@ pub fn editing(t: &Pane) -> bool {
     t.editing.is_some() || t.hinting.is_some()
 }
 
-pub fn select(paths: Vec<Path>, t: Pane) -> Pane {
-    Pane { selected: paths.into_iter().collect(), selected_wire: None, ..t }
+pub fn select(paths: Vec<Path>, t: &mut Pane) {
+    t.selected = paths.into_iter().collect();
+    t.selected_wire = None;
 }
 
-pub fn clear_selection(t: Pane) -> Pane {
-    if t.selected.is_empty() && t.selected_wire.is_none() { t } else { Pane { selected: PathSet::new(), selected_wire: None, ..t } }
+pub fn clear_selection(t: &mut Pane) {
+    t.selected.clear();
+    t.selected_wire = None;
 }
 
 pub fn stats(t: &Pane) -> Stats {
@@ -484,9 +487,9 @@ pub fn count_scope(s: &p::Scope) -> (i64, i64, i64) {
     (n, z, r)
 }
 
-pub fn frame_all(t: Pane) -> Pane {
+pub fn frame_all(t: &mut Pane) {
     if t.layout.placed.is_empty() {
-        return t;
+        return;
     }
     let wd = 1.0f64.max(t.layout.w);
     let ht = 1.0f64.max(t.layout.h);
@@ -494,7 +497,7 @@ pub fn frame_all(t: Pane) -> Pane {
     // whole points, so the hairlines of the cards land on pixels
     let pan_x = ((t.width as f64 - (wd * zoom)) / 2.0).round();
     let pan_y = 8.0f64.max((t.height as f64 - (ht * zoom)) / 2.0).round();
-    Pane { zoom, pan_x, pan_y, ..t }
+    (t.zoom, t.pan_x, t.pan_y) = (zoom, pan_x, pan_y);
 }
 
 pub fn count_of(t: &Pane, path: &[String]) -> i64 {
@@ -502,13 +505,13 @@ pub fn count_of(t: &Pane, path: &[String]) -> i64 {
 }
 
 /// The iteration counts follow the scope, the probes and what was recorded.
-pub fn refresh(t: Pane) -> Pane {
+pub fn refresh(t: &mut Pane) {
     match (&t.scope, &t.records) {
         (Some(scope), Some(records)) => {
             let counts: HashMap<Path, i64> = records.borrow_mut().counts(scope, &|path: &[String]| t.saved.probe(path)).into_iter().collect();
-            Pane { counts: Rc::new(counts), ..t }
+            t.counts = Rc::new(counts);
         }
-        _ => Pane { counts: Rc::new(HashMap::new()), ..t },
+        _ => { t.counts = Rc::new(HashMap::new()); },
     }
 }
 
@@ -661,7 +664,7 @@ impl Default for ScopeOpts {
     }
 }
 
-pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, mut t: Pane) -> Pane {
+pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: &mut Pane) {
     let ScopeOpts { saved, display, layouts } = o;
     let scope: Rc<p::Scope> = if layouts.is_empty() {
         scope
@@ -685,9 +688,9 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, mut t: Pane) -> 
     // letter hints, an open context menu and the hover name nodes and wires of the scope they were made over
     let same = matches!(&t.scope, Some(previous) if Rc::ptr_eq(previous, &scope));
     if !same {
-        t = Pane { hinting: None, context: None, highlighted: Vec::new(), ..t };
+        (t.hinting, t.context, t.highlighted) = (None, None, Vec::new());
     }
-    let layout = lay(&t, &saved, key == t.key, &scope);
+    let layout = lay(t, &saved, key == t.key, &scope);
     let earlier: Vec<Placed> = if key == t.key { t.layout.placed.clone() } else { Vec::new() };
     let (n, z, r) = count_scope(&scope);
     let stats = Stats { nodes: n, zones: z, rows: r, ..t.stats };
@@ -695,8 +698,8 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, mut t: Pane) -> 
     let folds = Rc::new(fold_sources(&scope));
     let switches = switch_nodes(&scope);
     let layout = Rc::new(layout);
-    let mut t = Pane { scope: Some(scope.clone()), saved, display, layout: layout.clone(), switches, chains, folds, stats, ..t };
-    t = regeo(t, &scope, &layout, &no_shift);
+    (t.scope, t.saved, t.display, t.layout, t.switches, t.chains, t.folds, t.stats) = (Some(scope.clone()), saved, display, layout.clone(), switches, chains, folds, stats);
+    regeo(t, &scope, &layout, &no_shift);
     // a card an edit added (an unfolded call lands a column left of its owner) that falls outside the view
     // brings the pane to it, nothing else moves
     if !(earlier.is_empty() || layout.placed.len() <= earlier.len() || t.width == 0) {
@@ -715,11 +718,11 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, mut t: Pane) -> 
             };
             let pan_x = fit(t.pan_x, t.width as f64, b.x, b.x + b.w);
             let pan_y = fit(t.pan_y, t.height as f64, b.y, b.y + b.h);
-            t = Pane { pan_x, pan_y, ..t };
+            (t.pan_x, t.pan_y) = (pan_x, pan_y);
         }
     }
     // an edit that removed or moved a node drops it from the selection
-    t = refresh(t);
+    refresh(t);
     let kept: PathSet = t
         .selected
         .iter()
@@ -747,42 +750,40 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, mut t: Pane) -> 
         }
     }
     if key != t.key {
-        let t2 = suspend(t);
-        Pane { key: key.to_owned(), framed: false, selected: PathSet::new(), selected_wire: None, ..t2 }
-    } else {
-        t
+        suspend(t);
+        t.key = key.to_owned();
+        t.framed = false;
+        t.selected.clear();
+        t.selected_wire = None;
     }
 }
 
 /// The panel of a macro call opened or stepped: its card changes size; `sticky = false` (Tidy) puts every
 /// card back to the computed layout, dragged ones too.
-pub fn relayout(sticky: Option<bool>, t: Pane) -> Pane {
-    match t.scope.clone() {
-        None => t,
-        Some(scope) => {
-            let layout = lay(&t, &t.saved, sticky.unwrap_or(true), &scope);
-            let layout = Rc::new(layout);
-            regeo(Pane { layout: layout.clone(), ..t }, &scope, &layout, &no_shift)
-        }
+pub fn relayout(sticky: Option<bool>, t: &mut Pane) {
+    if let Some(scope) = t.scope.clone() {
+        let layout = Rc::new(lay(t, &t.saved, sticky.unwrap_or(true), &scope));
+        t.layout = layout.clone();
+        regeo(t, &scope, &layout, &no_shift);
     }
 }
 
-pub fn tidy(t: Pane) -> Pane {
+pub fn tidy(t: &mut Pane) {
     relayout(Some(false), t)
 }
 
-pub fn with_display(display: Option<Path>, t: Pane) -> Pane {
-    if display == t.display { t } else { Pane { display, ..t } }
+pub fn with_display(display: Option<Path>, t: &mut Pane) {
+    t.display = display;
 }
 
-pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: Pane) -> Pane {
+pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: &mut Pane) {
     let scope = match t.scope.clone() {
-        None => return t,
+        None => return,
         Some(s) => s,
     };
     let changes: Vec<(Path, ArgKey, S)> = changes.iter().filter(|(pth, _, _)| t.geo.slot.contains_key(pth)).cloned().collect();
     if changes.is_empty() {
-        return t;
+        return;
     }
     let scope = Rc::new(p::with_arguments(&changes, &scope));
     let mut nodes: HashMap<Path, p::Node> = HashMap::new();
@@ -830,14 +831,16 @@ pub fn with_arguments(changes: &[(Path, ArgKey, S)], t: Pane) -> Pane {
     let layout = patch_layout(&t.layout, &nodes, &mut places);
     let items: Vec<w::Item3> = t.geo.items.iter().map(|(pl, x, y)| (places.get(&pl.path).cloned().unwrap_or_else(|| pl.clone()), *x, *y)).collect();
     let geo = Geo { items: Rc::new(items), ..t.geo.clone() };
-    Pane { scope: Some(scope), layout: Rc::new(layout), geo, ..t }
+    (t.scope, t.layout, t.geo) = (Some(scope), Rc::new(layout), geo);
 }
 
-pub fn with_records(records: Rc<RefCell<Probe>>, t: Pane) -> Pane {
-    match &t.records {
-        Some(previous) if previous.borrow().same_eval(&records.borrow()) => Pane { records: Some(records), ..t },
-        Some(_) => refresh(Pane { records: Some(records), ..t }),
-        None => relayout(None, refresh(Pane { records: Some(records), ..t })),
+pub fn with_records(records: Rc<RefCell<Probe>>, t: &mut Pane) {
+    let first = t.records.is_none();
+    let same = t.records.as_ref().is_some_and(|previous| previous.borrow().same_eval(&records.borrow()));
+    t.records = Some(records);
+    if !same {
+        refresh(t);
+        if first { relayout(None, t); }
     }
 }
 

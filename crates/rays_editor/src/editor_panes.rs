@@ -256,7 +256,7 @@ pub fn follow_start(value: &mut EditorModel) {
             _ => Graph_view,
         };
         if panel_map::key(&value.panes).as_ref() == Some(&key) {
-            with_pane(value, &|pane| graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane.clone() });
+            { let pane = pane_mut(value); pane.views = level_map_add(pane.views.clone(), pane.at, view); };
         } else if let Some((path, _)) = path_of(&*value, &key) {
             let pane = pane_at(&(&*value).into(), (&key, &path)).into_owned();
             let pane = graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane };
@@ -369,11 +369,11 @@ pub fn panels_line<'a>(value: &ModelView<'a>) -> String {
 
 /// Follow a reference: the pane shows `graph`, and `u` comes back to what it showed.
 pub fn remember(value: &mut EditorModel) {
-    with_pane(value, &|pane| {
-        let mut route = vec![(pane.at, pane.shown.clone())];
-        route.extend(pane.route.iter().take(31).cloned());
-        graph_pane { route, ..pane.clone() }
-    });
+    {
+        let pane = pane_mut(value);
+        pane.route.truncate(31);
+        pane.route.insert(0, (pane.at, pane.shown.clone()));
+    };
 }
 
 pub fn go(value: &mut EditorModel, graph: &str) {
@@ -574,14 +574,14 @@ pub fn draw_list_panes<'a>(
         };
         let selected_now: Vec<i64> = if mine { selected() } else { selection::selected_nodes(pane_selection(&pane)).to_vec() };
         let title = title_of(&pane);
-        let draw = |ui: &mut Ui, state: tree::Tree| -> (tree::Tree, Vec<tree::Intent>) {
-            let mut result = None;
+        let draw = |ui: &mut Ui, mut state: tree::Tree| -> (tree::Tree, Vec<tree::Intent>) {
+            let mut emitted = Vec::new();
             on_sheet(ui, leaf.floating, &mut |ui| {
                 ui.within(&root, &mut |ui| {
-                    result = Some(tree::update(state.clone(), ui, shortcut_frame, leaf.body, &title, &columns_now, &rows_now, &selected_now));
+                    tree::update(&mut state, ui, shortcut_frame, leaf.body, &title, &columns_now, &rows_now, &selected_now, &mut emitted);
                 });
             });
-            result.expect("tree drawn")
+            (state, emitted)
         };
         if Some(key) == value.list_at.as_ref() {
             let (t_, emitted) = draw(ui, tree_state.clone());
@@ -714,25 +714,21 @@ pub fn draw_other_graph_panes<'a>(
     let mut out = Vec::new();
     for (key, path) in other_panes {
         let pane = as_pane(value, (key, path));
-        let active = pane.pane.clone();
+        let mut active = pane.pane.clone();
         match roots.iter().find(|(leaf, _)| leaf.path == *path) {
             Some((leaf, hosted)) if leaf.body.3 > 0 => {
                 let (x, y, width, height) = leaf.body;
-                let view = if stored_projection(&pane) == Graph_view && graph_name(&pane).is_some() {
-                    let mut result = None;
+                if stored_projection(&pane) == Graph_view && graph_name(&pane).is_some() {
                     ui.within(hosted, &mut |ui| {
                         let theme = ui.theme();
                         let theme = if leaf.floating { sheet_theme(&theme) } else { theme };
-                        let v = scope::with_guide(false, pane_view(&pane).clone());
-                        let v = scope::with_theme(theme, v);
-                        let v = scope::with_bounds(x, y, width.max(1), height.max(1), v);
-                        result = Some(pxui_graph::scope_pane::update(&pressed_keys(value, shortcut_frame), v, ui, shortcut_frame).0);
+                        scope::with_guide(false, &mut active.view);
+                        scope::with_theme(theme, &mut active.view);
+                        scope::with_bounds(x, y, width.max(1), height.max(1), &mut active.view);
+                        pxui_graph::scope_pane::update(&pressed_keys(value, shortcut_frame), &mut active.view, ui, shortcut_frame, &mut Vec::new());
                     });
-                    result.expect("pane updated")
-                } else {
-                    pane_view(&pane).clone()
-                };
-                out.push((key.clone(), graph_pane { view, ..active }));
+                }
+                out.push((key.clone(), active));
             }
             _ => out.push((key.clone(), active)),
         }
@@ -819,8 +815,8 @@ pub fn draw_graph_header<'a>(
     (tool_action, view_action, view_pick)
 }
 
-/// What the graph pane gave back: its body bounds, the pane, its changes, the menu and the pick.
-pub type Graph_pane_result = (layout::Bounds, scope::Pane, Vec<scope::Change>, Option<node_menu::Menu>, Option<String>);
+/// What the graph pane gave back: its body bounds, the menu and the pick.
+pub type Graph_pane_result = (layout::Bounds, Option<node_menu::Menu>, Option<String>);
 
 /// Draw the graph pane and its node menu. `open_menu` opens the menu at a point, for the pane's view.
 #[allow(clippy::too_many_arguments)]
@@ -829,7 +825,7 @@ pub fn draw_graph_pane<'a>(
     frame_: &frame::Frame,
     value: &ModelView<'a>,
     shortcut_frame: &frame::Frame,
-    scope_view: scope::Pane,
+    scope_view: &mut scope::Pane,
     scope_active: bool,
     guide: bool,
     carry_lit: Vec<(Vec<String>, String)>,
@@ -839,46 +835,41 @@ pub fn draw_graph_pane<'a>(
     workspace: &shell,
     menu: Option<node_menu::Menu>,
     open_menu: &dyn Fn(Option<&scope::Pane>, &ModelView<'a>, (i64, i64)) -> Option<node_menu::Menu>,
+    scope_frame_changes: &mut Vec<scope::Change>,
 ) -> Graph_pane_result {
     let graph_body = match graph_host {
         Some(leaf) => leaf.body,
         None => (0, 0, 0, 0),
     };
     let (gx, gy, gw, gh) = graph_body;
-    let mut scope_view = scope_view;
-    let mut scope_frame_changes = Vec::new();
+    let first = scope_frame_changes.len();
     if !scope_active {
-        scope_view = scope::suspend(scope_view);
+        scope::suspend(scope_view);
     } else {
         let failed = failed_nodes(value);
         let pressed = pressed_keys(value, shortcut_frame);
-        let mut result = None;
-        let start = scope_view.clone();
         ui.within(graph_root, &mut |ui| {
             let theme = ui.theme();
             let theme = match graph_host {
                 Some(leaf) if leaf.floating => sheet_theme(&theme),
                 _ => theme,
             };
-            let v = scope::with_guide(guide, start.clone());
-            let v = scope::with_failed(failed.clone(), v);
-            let v = scope::with_theme(theme, v);
-            let v = scope::with_bounds(gx, gy, gw.max(1), gh.max(1), v);
-            let v = scope::with_carry(carry_lit.clone(), carry_hot.clone(), v);
-            result = Some(pxui_graph::scope_pane::update(&pressed, v, ui, shortcut_frame));
+            scope::with_guide(guide, scope_view);
+            scope::with_failed(failed.clone(), scope_view);
+            scope::with_theme(theme, scope_view);
+            scope::with_bounds(gx, gy, gw.max(1), gh.max(1), scope_view);
+            scope::with_carry(carry_lit.clone(), carry_hot.clone(), scope_view);
+            pxui_graph::scope_pane::update(&pressed, scope_view, ui, shortcut_frame, scope_frame_changes);
         });
-        let (v, changes) = result.expect("scope updated");
-        scope_view = v;
-        scope_frame_changes = changes;
     }
     let mut menu = menu;
     if menu.is_none() {
-        let at = scope_frame_changes.iter().find_map(|c| match c {
+        let at = scope_frame_changes[first..].iter().find_map(|c| match c {
             scope::Change::Menu_requested(x, y) => Some((*x as i64, *y as i64)),
             _ => None,
         });
         if let Some(at) = at {
-            menu = open_menu(Some(&scope_view), value, at);
+            menu = open_menu(Some(scope_view), value, at);
         }
     }
     let mut menu_pick = None;
@@ -892,7 +883,7 @@ pub fn draw_graph_pane<'a>(
         menu = next;
         menu_pick = picked;
     }
-    (graph_body, scope_view, scope_frame_changes, menu, menu_pick)
+    (graph_body, menu, menu_pick)
 }
 
 /// The timeline panes' bars and the strip's context menu: the playback intents and the layout ones.

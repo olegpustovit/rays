@@ -844,9 +844,7 @@ pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox, tiles: &[Tile]) -> Opt
     })
 }
 
-pub fn context_step(t: Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &Signal) -> (Pane, Vec<Change>) {
-    let mut emit: Vec<Change> = Vec::new();
-    let mut t = t;
+pub fn context_step(t: &mut Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &Signal, emit: &mut Vec<Change>) {
     // the context menu
     if t.context.is_none() {
         let mut found: Option<((f64, f64), Path)> = None;
@@ -862,7 +860,7 @@ pub fn context_step(t: Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &Signal
             if selected != t.selected {
                 emit.push(Change::Selected(selected.iter().cloned().collect()));
             }
-            t = Pane { context: Some(((x, y), path)), selected, selected_wire: None, ..t };
+            (t.context, t.selected, t.selected_wire) = (Some(((x, y), path)), selected, None);
         }
     }
     if t.context.is_none() && context_clicked(canvas_signal) {
@@ -870,20 +868,19 @@ pub fn context_step(t: Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &Signal
         emit.push(Change::Menu_requested(x, y));
     }
     if let Some((at, path)) = t.context.clone() {
-        let items = context_items(&t, &path);
+        let items = context_items(t, &path);
         match ui.context_menu(at, &MenuOpts::default(), "pxui-scope-context", &items) {
             MenuResult::Open => {}
-            MenuResult::Dismiss => t = Pane { context: None, ..t },
+            MenuResult::Dismiss => { t.context = None; },
             MenuResult::Pick(i) => {
                 match t.saved.imported(&path) {
                     Some(file) => emit.push(Change::Open_import(file)),
-                    None => emit.extend(action_changes(&t, context_command(i))),
+                    None => emit.extend(action_changes(t, context_command(i))),
                 }
-                t = Pane { context: None, ..t };
+                t.context = None;
             }
         }
     }
-    (t, emit)
 }
 
 /// Whether a tile's pointer is on it (a zone's tile covers its body).
@@ -893,7 +890,7 @@ fn tile_hovered(ui: &mut Ui, tl: &Tile) -> bool {
 
 /// A wire let go: on an input row it connects; on empty canvas it opens the add menu after its source
 /// (pulled off an existing wire, the host inserts the new node on the selected wire).
-pub fn finish_wire(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &mut Vec<Change>, tiles: &[Tile], w: &Wiring, src_path: &Path, release_point: (f64, f64)) -> Pane {
+pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &mut Vec<Change>, tiles: &[Tile], w: &Wiring, src_path: &Path, release_point: (f64, f64)) {
     let mut target: Option<(Path, ArgKey)> = None;
     for tl in tiles {
         if !tile_hovered(ui, tl) {
@@ -901,8 +898,8 @@ pub fn finish_wire(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &mut V
         }
         let (tp, tax, tay) = &t.geo.items[tl.slot];
         let (mx, my) = mouse;
-        let gx = (mx - sx(&t, 0.0)) / z;
-        let gy = (my - sy(&t, 0.0)) / z;
+        let gx = (mx - sx(t, 0.0)) / z;
+        let gy = (my - sy(t, 0.0)) / z;
         let lx = gx - tax;
         let ly = gy - tay;
         let found: Option<(Path, ArgKey)> = match &tp.item {
@@ -969,7 +966,7 @@ pub fn finish_wire(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &mut V
     let on_canvas = target.is_none() && src_path.last() == Some(&w.src) && !any_hover;
     // an Alt-drag moves the wire: it comes off the inputs it was lifted from
     let lifted: Vec<(Path, ArgKey)> = w.lift.iter().filter(|i| Some((*i).clone()) != target).cloned().collect();
-    let off = unwire_at(&t, &lifted);
+    let off = unwire_at(t, &lifted);
     match &target {
         Some((node, key)) => {
             emit.push(Change::Syntax_edit(e::Op::Connect { node: node.clone(), key: key.clone(), src: w.src.clone(), iter: w.iter }));
@@ -990,12 +987,10 @@ pub fn finish_wire(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &mut V
         None => emit.push(Change::Notice("Drop the wire on an input row".to_owned())),
     }
     let selected = if on_canvas { std::iter::once(src_path.clone()).collect() } else { t.selected.clone() };
-    Pane { drag: None, selected, ..t }
+    (t.drag, t.selected) = (None, selected);
 }
 
-pub fn wire_pull(t: Pane, ui: &mut Ui, ctx: &Ctx, z: f64, mouse: (f64, f64), tiles: &[Tile], wires_in_view: &[usize]) -> (Pane, Vec<Change>) {
-    let mut emit: Vec<Change> = Vec::new();
-    let mut t = t;
+pub fn wire_pull(t: &mut Pane, ui: &mut Ui, ctx: &Ctx, z: f64, mouse: (f64, f64), tiles: &[Tile], wires_in_view: &[usize], emit: &mut Vec<Change>) {
     // a wire pulled past 6 points is a new wire from its source: the same drag as from the out-port
     if t.drag.is_none() && t.context.is_none() {
         let mut found: Option<(usize, Path, Vec<(Path, ArgKey)>)> = None;
@@ -1017,14 +1012,14 @@ pub fn wire_pull(t: Pane, ui: &mut Ui, ctx: &Ctx, z: f64, mouse: (f64, f64), til
         if let Some((i, from, lift)) = found {
             let wi = &t.geo.wires[i];
             let src_ty = wi.ty.clone();
-            let fromp = (sx(&t, wi.a.0), sy(&t, wi.a.1));
+            let fromp = (sx(t, wi.a.0), sy(t, wi.a.1));
             let src = match t.item_at(&from).map(|(pl, _, _)| &pl.item) {
                 Some(Item::Item(n)) if n.zone.is_none() && n.binds.len() == 1 && n.binds[0] == n.name => Some(n.name.clone()),
                 Some(Item::Input(inp)) => Some(inp.name.clone()),
                 _ => None,
             };
             if let Some(src) = src {
-                t = Pane { drag: Some(Drag::Wiring(Wiring { src, ty: src_ty, iter: false, from: fromp, lift })), ..t };
+                { t.drag = Some(Drag::Wiring(Wiring { src, ty: src_ty, iter: false, from: fromp, lift })); };
             }
         }
     }
@@ -1053,18 +1048,15 @@ pub fn wire_pull(t: Pane, ui: &mut Ui, ctx: &Ctx, z: f64, mouse: (f64, f64), til
             }
             if let Some((i, release_point)) = from_wire {
                 let src_path = t.geo.wires[i].from.clone().unwrap_or_default();
-                t = finish_wire(t, ui, z, mouse, &mut emit, tiles, &wg, &src_path, release_point);
+                finish_wire(t, ui, z, mouse, emit, tiles, &wg, &src_path, release_point);
             }
         }
     }
-    (t, emit)
 }
 
-pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile]) -> (Pane, Vec<Change>, Vec<(Path, i64)>, bool) {
+pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile], emit: &mut Vec<Change>) -> (Vec<(Path, i64)>, bool) {
     let mut lens_next: Vec<(Path, i64)> = t.lens.clone();
     let mut lens_changed = false;
-    let mut emit: Vec<Change> = Vec::new();
-    let mut t = t;
     // tile presses select and start a move; sockets start a wire
     for tl in tiles {
         let geo = t.geo.clone();
@@ -1077,7 +1069,7 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
             Change::Selected(paths) => Some(paths.clone()),
             _ => None,
         }) {
-            t = select(paths, t);
+            select(paths, t);
         }
         if s.pressed && left_button(s) && t.context.is_none() {
             let additive = ui.press_keys(&tl.tile).contains(&Key::Shift);
@@ -1094,13 +1086,13 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
             };
             emit.push(Change::Selected(selected.iter().cloned().collect()));
             let paths = parents_removed(&selected.iter().cloned().collect::<Vec<_>>());
-            t = Pane { selected, selected_wire: None, drag: Some(Drag::Moving { paths, dx: 0.0, dy: 0.0, moved: false }), ..t };
+            { (t.selected, t.selected_wire, t.drag) = (selected, None, Some(Drag::Moving { paths, dx: 0.0, dy: 0.0, moved: false })); };
         }
         if s.double_clicked && left_button(s) && t.context.is_none() && t.editing.is_none() {
             let (_, top, _, _) = ui.rect(&tl.tile);
             match &pl.item {
                 Item::Item(n) if !n.synthetic && s.press_point.1 < top + (p::HEAD_HEIGHT * z) => {
-                    t = Pane { editing: Some(Editing::Name(pl.path.clone())), ..t };
+                    t.editing = Some(Editing::Name(pl.path.clone()));
                 }
                 // a folded function or loop opens in place; anything else follows what it references
                 Item::Item(n) if n.zone.is_some() && t.saved.collapsed(&pl.path) => {
@@ -1110,7 +1102,7 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
                     emit.push(Change::Activated(pl.path.clone()));
                 }
                 Item::Input(_) => {
-                    t = Pane { editing: Some(Editing::Default(pl.path.clone())), ..t };
+                    t.editing = Some(Editing::Default(pl.path.clone()));
                 }
                 _ => {}
             }
@@ -1120,16 +1112,16 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
                 let (ddx, ddy) = s.drag;
                 let ndx = dx + (ddx / z);
                 let ndy = dy + (ddy / z);
-                t = Pane { drag: Some(Drag::Moving { paths, dx: ndx, dy: ndy, moved: moved || ndx.hypot(ndy) > 3.0 / z }), ..t };
+                { t.drag = Some(Drag::Moving { paths, dx: ndx, dy: ndy, moved: moved || ndx.hypot(ndy) > 3.0 / z }); };
             }
         }
         if let Some(Drag::Moving { paths, dx, dy, moved }) = t.drag.clone() {
             if s.released && left_button(s) {
                 if moved {
-                    let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(&t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
+                    let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + dx), p::snap(ry + dy)))).collect();
                     emit.push(Change::Moved(mv));
                 }
-                t = Pane { drag: None, ..t };
+                t.drag = None;
             }
         }
         // zone controls
@@ -1157,14 +1149,14 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
                         lens_next.insert(0, (n.path.clone(), *i));
                     }
                     Tap::Step(d) if bs.clicked => {
-                        let count = count_of(&t, &n.path);
+                        let count = count_of(t, &n.path);
                         let index = 0.max((count - 1).min(t.saved.probe(&n.path) + d));
                         if count > 0 && index != t.saved.probe(&n.path) {
                             emit.push(Change::Probe_set { zone: n.path.clone(), index });
                         }
                     }
                     Tap::Track if bs.pressed || bs.held => {
-                        let count = count_of(&t, &n.path);
+                        let count = count_of(t, &n.path);
                         let (x, _, wd, _) = ui.rect(b);
                         if count > 0 && wd > 0.0 {
                             let px = if bs.released { bs.release_point.0 } else { bs.pointer.0 };
@@ -1181,7 +1173,7 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
         for (b, del) in &sub.dels {
             if ui.signal(b).clicked {
                 let ops: Vec<e::Op> = match (del, &pl.item) {
-                    (Del::Unwire(i), Item::Item(n)) => unwire(&t, n, &n.rows[*i]),
+                    (Del::Unwire(i), Item::Item(n)) => unwire(t, n, &n.rows[*i]),
                     (Del::Disconnect(key), Item::Item(n)) => vec![e::Op::Disconnect { node: n.path.clone(), key: key.clone(), fallback: None }],
                     _ => Vec::new(),
                 };
@@ -1216,25 +1208,23 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
                     acc
                 };
                 let (x, y, wd, h) = ui.rect(b);
-                t = Pane { drag: Some(Drag::Wiring(Wiring { src: src.clone(), ty: ty.clone(), iter, from: (x + (wd / 2.0), y + (h / 2.0)), lift })), ..t };
+                { t.drag = Some(Drag::Wiring(Wiring { src: src.clone(), ty: ty.clone(), iter, from: (x + (wd / 2.0), y + (h / 2.0)), lift })); };
             }
             if bs.released && left_button(&bs) {
                 match t.drag.clone() {
                     Some(Drag::Wiring(wg)) => {
-                        t = finish_wire(t, ui, z, mouse, &mut emit, tiles, &wg, &pl.path, bs.release_point);
+                        finish_wire(t, ui, z, mouse, emit, tiles, &wg, &pl.path, bs.release_point);
                     }
-                    _ => t = Pane { drag: None, ..t },
+                    _ => { t.drag = None; },
                 }
             }
         }
     }
-    (t, emit, lens_next, lens_changed)
+    (lens_next, lens_changed)
 }
 
 /// The pointer: pan, a press on a wire or the canvas, the rubber band.
-pub fn pointer_step(t: Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, canvas_signal: &Signal, tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize]) -> (Pane, Vec<Change>) {
-    let mut emit: Vec<Change> = Vec::new();
-    let mut t = t;
+pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox, canvas_signal: &Signal, tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize], emit: &mut Vec<Change>) {
     let non_left = |sg: &Signal| sg.button != Some(MouseButton::LeftButton) && sg.button.is_some();
     let non_left_pressed = |sg: &Signal| sg.pressed && non_left(sg);
     let non_left_held = |sg: &Signal| sg.held && non_left(sg);
@@ -1255,14 +1245,14 @@ pub fn pointer_step(t: Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox,
     if panning_grab != t.panning_grab {
         let _ = rays::sketch::set_relative_mouse(panning_grab);
     }
-    t = Pane { panning_grab, ..t };
+    t.panning_grab = panning_grab;
     if panning {
         let (dx, dy) = if canvas_signal.held || canvas_signal.released {
             canvas_signal.drag
         } else {
             tiles.iter().fold((0.0, 0.0), |(dx, dy), tl| (dx + tl.sig.drag.0, dy + tl.sig.drag.1))
         };
-        t = Pane { pan_x: t.pan_x + dx, pan_y: t.pan_y + dy, ..t };
+        (t.pan_x, t.pan_y) = (t.pan_x + dx, t.pan_y + dy);
     }
     let tile_pressed = tiles.iter().any(|tl| tl.sig.pressed);
     let mut wire_pressed: Option<usize> = None;
@@ -1282,7 +1272,7 @@ pub fn pointer_step(t: Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox,
             emit.push(Change::Selected(Vec::new()));
         }
         let target = t.geo.wires[i].target.clone();
-        t = Pane { selected: PathSet::new(), selected_wire: target, ..t };
+        (t.selected, t.selected_wire) = (PathSet::new(), target);
     }
     if canvas_signal.pressed && left_button(canvas_signal) && t.context.is_none() && !tile_pressed && wire_pressed.is_none() {
         let additive = ui.press_keys(canvas).contains(&Key::Shift);
@@ -1290,7 +1280,7 @@ pub fn pointer_step(t: Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox,
             emit.push(Change::Selected(Vec::new()));
         }
         let base = if additive { t.selected.clone() } else { PathSet::new() };
-        t = Pane { selected: base.clone(), selected_wire: None, drag: Some(Drag::Marquee { base }), ..t };
+        { (t.selected, t.selected_wire, t.drag) = (base.clone(), None, Some(Drag::Marquee { base })); };
     }
     // the rubber band selects the nodes of one scope it touches
     if let Some(Drag::Marquee { base }) = t.drag.clone() {
@@ -1299,15 +1289,14 @@ pub fn pointer_step(t: Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &UiBox,
             let (x0, y0) = canvas_signal.press_point;
             let rw = (px - x0).abs();
             let rh = (py - y0).abs();
-            let selected: PathSet = if rw < 3.0 && rh < 3.0 { base.clone() } else { base.union(&marquee_hits(&t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
+            let selected: PathSet = if rw < 3.0 && rh < 3.0 { base.clone() } else { base.union(&marquee_hits(t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
             if selected != t.selected {
                 emit.push(Change::Selected(selected.iter().cloned().collect()));
             }
             let drag = if canvas_signal.released { None } else { t.drag.clone() };
-            t = Pane { selected, drag, ..t };
+            (t.selected, t.drag) = (selected, drag);
         }
     }
-    (t, emit)
 }
 
 pub struct Hover {
@@ -1317,15 +1306,15 @@ pub struct Hover {
     pub i: usize,
 }
 
-pub fn hover_step(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize]) -> (Pane, Option<Hover>) {
+pub fn hover_step(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile], ctx: &Ctx, wires_in_view: &[usize]) -> Option<Hover> {
     // hovered row and chip expansion
     let mut hover: Option<Hover> = None;
     for tl in tiles {
         let (pl, ax, ay) = &t.geo.items[tl.slot];
         if let Item::Item(n) = &pl.item {
             if n.zone.is_none() && ui.hovered_within(&tl.tile) {
-                let px = (mouse.0 - sx(&t, *ax)) / z;
-                let py = (mouse.1 - sy(&t, *ay)) / z;
+                let px = (mouse.0 - sx(t, *ax)) / z;
+                let py = (mouse.1 - sy(t, *ay)) / z;
                 match row_at(14.0, pl, n, pl.shown, px, py) {
                     Some(i) if i < n.rows.len() => {
                         hover = Some(Hover { slot: tl.slot, ax: *ax, ay: *ay, i });
@@ -1369,7 +1358,7 @@ pub fn hover_step(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile
     let same_port = |point: (f64, f64)| -> bool {
         match hovered_port {
             None => false,
-            Some((x, y)) => (sx(&t, point.0) - x).abs() <= (1.5 * z) + 0.5 && (sy(&t, point.1) - y).abs() <= (1.5 * z) + 0.5,
+            Some((x, y)) => (sx(t, point.0) - x).abs() <= (1.5 * z) + 0.5 && (sy(t, point.1) - y).abs() <= (1.5 * z) + 0.5,
         }
     };
     let mut highlighted: Vec<Wire> = Vec::new();
@@ -1386,12 +1375,11 @@ pub fn hover_step(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[Tile
             highlighted.insert(0, wi.clone());
         }
     }
-    (Pane { hovered_row, highlighted, ..t }, hover)
+    (t.hovered_row, t.highlighted) = (hovered_row, highlighted);
+    hover
 }
 
-pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) -> (Pane, Vec<Change>) {
-    let mut emit: Vec<Change> = Vec::new();
-    let mut t = t;
+pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox, emit: &mut Vec<Change>) {
     // frames: a title strip, a delete cross and a resize corner, over the tiles (a zone's tile covers its
     // whole body) and clear of the nodes, which keep 12 points inside the frame
     struct FrameBox {
@@ -1407,12 +1395,12 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
     let saved = ui.enter(canvas);
     for (scope, (ox, oy)) in t.geo.origins.iter() {
         for (i, (title, (fx, fy), (fw, fh))) in t.saved.frames(scope).iter().enumerate() {
-            let x = sx(&t, ox + fx);
-            let y = sy(&t, oy + fy);
+            let x = sx(t, ox + fx);
+            let y = sy(t, oy + fy);
             let wd = fw * z;
             let h = fh * z;
             let mk = |ui: &mut Ui, k: &str, pos: (f64, f64), size: (f64, f64)| {
-                box_in(ui, CLICKABLE, size.0, size.1, local(&t, pos), &format!("fr:{}:{}:{}", scope.join("/"), i, k))
+                box_in(ui, CLICKABLE, size.0, size.1, local(t, pos), &format!("fr:{}:{}:{}", scope.join("/"), i, k))
             };
             let tb = mk(ui, "t", (x, y), ((wd - 20.0).max(8.0), 18.0 * z));
             let xb = mk(ui, "x", (x + wd - 18.0, y + 2.0), (16.0, 16.0));
@@ -1432,7 +1420,7 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
                 let saved = ui.enter(canvas);
                 let all2 = all.clone();
                 let scope2 = scope.clone();
-                let ch = edit_field(ctx, ui, local(&t, (x + 4.0, y + 2.0)), (wd - 24.0).max(40.0), 16.0 * z, &format!("frt{}", i), &title, &|s: &str| !s.is_empty() && !s.contains('"'), &move |v| {
+                let ch = edit_field(ctx, ui, local(t, (x + 4.0, y + 2.0)), (wd - 24.0).max(40.0), 16.0 * z, &format!("frt{}", i), &title, &|s: &str| !s.is_empty() && !s.contains('"'), &move |v| {
                     Change::Frames_set {
                         scope: scope2.clone(),
                         frames: all2.iter().enumerate().map(|(j, f)| if j == i { (v.clone(), f.1, f.2) } else { f.clone() }).collect(),
@@ -1445,9 +1433,9 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
         if xs.clicked {
             emit.push(Change::Frames_set { scope: scope.clone(), frames: all.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, f)| f.clone()).collect() });
         } else if ts.double_clicked && t.editing.is_none() {
-            t = Pane { drag: None, editing: Some(Editing::Title(scope.clone(), i as i64)), ..t };
+            (t.drag, t.editing) = (None, Some(Editing::Title(scope.clone(), i as i64)));
         } else if rs.pressed && left_button(&rs) {
-            t = Pane { drag: Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: 0.0, dh: 0.0 }), ..t };
+            { t.drag = Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: 0.0, dh: 0.0 }); };
         } else {
             match t.drag.clone() {
                 None if ts.held && left_button(&ts) && t.editing.is_none() && (ts.pointer.0 - ts.press_point.0).hypot(ts.pointer.1 - ts.press_point.1) > 3.0 => {
@@ -1457,7 +1445,7 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
                     let (_, (fx, fy), (fw, fh)) = t.saved.frames(&scope)[i].clone();
                     let inside = |path: &Path| -> bool {
                         scope_of_path(path) == scope
-                            && match box_at(&t, path) {
+                            && match box_at(t, path) {
                                 Some((bx, by, bw, bh)) => {
                                     let cx = bx + (bw / 2.0);
                                     let cy = by + (bh / 2.0);
@@ -1474,35 +1462,34 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
                     }
                     let dx = (ts.pointer.0 - ts.press_point.0) / z;
                     let dy = (ts.pointer.1 - ts.press_point.1) / z;
-                    t = Pane { drag: Some(Drag::Carrying { scope: scope.clone(), index: i as i64, paths, dx, dy }), ..t };
+                    { t.drag = Some(Drag::Carrying { scope: scope.clone(), index: i as i64, paths, dx, dy }); };
                 }
                 Some(Drag::Carrying { scope: cs, index, paths, dx, dy }) if cs == scope && index == i as i64 && (ts.held || ts.released) => {
                     let (ddx, ddy) = ts.drag;
                     let ndx = dx + (ddx / z);
                     let ndy = dy + (ddy / z);
-                    t = Pane { drag: Some(Drag::Carrying { scope: cs.clone(), index, paths: paths.clone(), dx: ndx, dy: ndy }), ..t };
+                    { t.drag = Some(Drag::Carrying { scope: cs.clone(), index, paths: paths.clone(), dx: ndx, dy: ndy }); };
                     if ts.released {
                         if ndx.hypot(ndy) > 3.0 / z {
-                            let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(&t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + ndx), p::snap(ry + ndy)))).collect();
+                            let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + ndx), p::snap(ry + ndy)))).collect();
                             emit.push(Change::Moved(mv));
-                            emit.push(Change::Frames_set { scope: scope.clone(), frames: frame_list(&t, &scope) });
+                            emit.push(Change::Frames_set { scope: scope.clone(), frames: frame_list(t, &scope) });
                         }
-                        t = Pane { drag: None, ..t };
+                        t.drag = None;
                     }
                 }
                 Some(Drag::Sizing { scope: ss, index, dw, dh }) if ss == scope && index == i as i64 && (rs.held || rs.released) => {
                     let (dx, dy) = rs.drag;
-                    t = Pane { drag: Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: dw + (dx / z), dh: dh + (dy / z) }), ..t };
+                    { t.drag = Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: dw + (dx / z), dh: dh + (dy / z) }); };
                     if rs.released {
-                        emit.push(Change::Frames_set { scope: scope.clone(), frames: frame_list(&t, &scope) });
-                        t = Pane { drag: None, ..t };
+                        emit.push(Change::Frames_set { scope: scope.clone(), frames: frame_list(t, &scope) });
+                        t.drag = None;
                     }
                 }
                 _ => {}
             }
         }
     }
-    (t, emit)
 }
 
 /// Measure with the UI's fonts, remembering the width for the pane's outside-a-frame queries.
@@ -1784,23 +1771,18 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
     (drawn_items, drawn_zones)
 }
 
-pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (Pane, Vec<Change>) {
+pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, changes: &mut Vec<Change>) {
     // the first view shows the whole graph, at zoom 1 when it fits (Home frames everything)
-    let mut t = if t.framed {
-        t
-    } else {
-        let t = frame_all(t);
-        Pane { framed: true, ..t }
-    };
-    let mut changes: Vec<Change> = Vec::new();
+    if !t.framed {
+        frame_all(t);
+        t.framed = true;
+    }
     let canvas = ui.box_(
         "pxui-scope",
         BoxOpts::default().flags(CLICKABLE | SCROLL | CLIP | BLOCKING).w(Size::Px(t.width as f64)).h(Size::Px(t.height as f64)).at((t.x as f64, t.y as f64)),
     );
     let canvas_signal = ui.signal(&canvas);
-    let (t2, hint_changes) = step_hints(t, pressed, canvas_signal.subtree_press.is_some());
-    t = t2;
-    changes.extend(hint_changes);
+    step_hints(t, pressed, canvas_signal.subtree_press.is_some(), changes);
     // the grid, zones and wires paint in a child, so the canvas's clip holds them too
     let saved = ui.enter(&canvas);
     let layer = ui.box_("pxui-scope-layer", BoxOpts::default().w(Size::Px(t.width as f64)).h(Size::Px(t.height as f64)).at((0.0, 0.0)));
@@ -1815,7 +1797,7 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
             let k = zoom / t.zoom;
             let pan_x = mx - t.x as f64 - ((mx - t.x as f64 - t.pan_x) * k);
             let pan_y = my - t.y as f64 - ((my - t.y as f64 - t.pan_y) * k);
-            t = Pane { zoom, pan_x, pan_y, ..t };
+            (t.zoom, t.pan_x, t.pan_y) = (zoom, pan_x, pan_y);
         }
     }
     // a point's box is as wide as its name, drawn at the zoom's font
@@ -1825,12 +1807,12 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
             let points: Vec<String> = t.geo.items.iter().filter(|(pl, _, _)| pl.shown == Level::Point).map(|(pl, _, _)| point_name(pl)).collect();
             if !points.is_empty() {
                 for name in &points {
-                    measure_ui(ui, &t, fs0, name);
+                    measure_ui(ui, t, fs0, name);
                 }
                 let layout = t.layout.clone();
-                t = regeo(t, &scope, &layout, &no_shift);
+                regeo(t, &scope, &layout, &no_shift);
             } else {
-                t = Pane { geo_fs: fs0, geo_cold: false, ..t };
+                (t.geo_fs, t.geo_cold) = (fs0, false);
             }
         }
     }
@@ -1840,12 +1822,12 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
             Some(Drag::Moving { paths, dx, dy, moved }) if moved => {
                 let moving: PathSet = paths.into_iter().collect();
                 let layout = t.layout.clone();
-                t = regeo(t, &scope, &layout, &|q: &[String]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
+                regeo(t, &scope, &layout, &|q: &[String]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
             }
             Some(Drag::Carrying { paths, dx, dy, .. }) if dx.hypot(dy) > 0.0 => {
                 let moving: PathSet = paths.into_iter().collect();
                 let layout = t.layout.clone();
-                t = regeo(t, &scope, &layout, &|q: &[String]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
+                regeo(t, &scope, &layout, &|q: &[String]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
             }
             _ => {}
         }
@@ -1858,19 +1840,19 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
     let in_view = |t: &Pane, margin: f64| -> (f64, f64, f64, f64) {
         ((-t.pan_x - margin) / z, (-t.pan_y - margin) / z, (t.width as f64 - t.pan_x + margin) / z, (t.height as f64 - t.pan_y + margin) / z)
     };
-    let visible: Vec<usize> = index_query(&t.geo.tiles, in_view(&t, 20.0))
+    let visible: Vec<usize> = index_query(&t.geo.tiles, in_view(t, 20.0))
         .into_iter()
         .filter(|&i| {
             let (pl, ax, ay) = &t.geo.items[i];
-            let x = sx(&t, *ax) - 20.0;
-            let y = sy(&t, *ay) - 20.0;
+            let x = sx(t, *ax) - 20.0;
+            let y = sy(t, *ay) - 20.0;
             let wd = (pl.w * z) + 40.0;
             let h = (pl.h * z) + 40.0;
             let (vx, vy, vw, vh) = viewport;
             x < vx + vw && x + wd > vx && y < vy + vh && y + h > vy
         })
         .collect();
-    let wires_in_view = index_query(&t.geo.reach, in_view(&t, 4.0));
+    let wires_in_view = index_query(&t.geo.reach, in_view(t, 4.0));
     let zones: Vec<usize> = visible
         .iter()
         .copied()
@@ -1883,11 +1865,11 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
     // Segment rectangles live in the shared hit tree, behind the cards; ports built below take hover
     // precedence. A segment is cut to `clip` (pane points) first, so what is out of view costs one clip;
     // a diagonal is then a run of 16-point boxes.
-    let chain = chains_of(&t);
+    let chain = chains_of(t);
     let mut ctx = Ctx { wire_hits: HashMap::new(), finished: false, opened: None, fs };
     let saved = ui.enter(&canvas);
     for &i in &wires_in_view {
-        wire_boxes(&mut ctx, &t, ui, (0.0, 0.0), "wire", (0.0, 0.0, t.width as f64, t.height as f64), i);
+        wire_boxes(&mut ctx, t, ui, (0.0, 0.0), "wire", (0.0, 0.0, t.width as f64, t.height as f64), i);
     }
     ui.leave(saved);
     // footers: only for what is in view, and not when too small to read
@@ -1898,7 +1880,7 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
                 let (pl, _, _) = &t.geo.items[i];
                 if let Item::Item(n) = &pl.item {
                     if if n.zone.is_some() { pl.collapsed } else { true } {
-                        footers.insert(n.path.clone(), footer_of(&t, records, n));
+                        footers.insert(n.path.clone(), footer_of(t, records, n));
                     }
                 }
             }
@@ -1908,45 +1890,30 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
     let saved = ui.enter(&canvas);
     let mut tiles: Vec<Tile> = Vec::new();
     for &i in &visible {
-        tiles.push(build_tile(&mut ctx, &t, ui, z, fs, i));
+        tiles.push(build_tile(&mut ctx, t, ui, z, fs, i));
     }
     ui.leave(saved);
     if ctx.finished {
-        t = Pane { editing: None, ..t };
+        t.editing = None;
     }
-    if let Some(c) = drop_change(&t, ui, &canvas, &tiles) {
+    if let Some(c) = drop_change(t, ui, &canvas, &tiles) {
         changes.push(c);
     }
-    let (t2, frame_changes) = frames_step(t, ui, &mut ctx, z, &canvas);
-    t = t2;
-    changes.extend(frame_changes);
-    if ctx.finished {
-        t = Pane { editing: None, ..t };
-    }
-    if let Some(editing) = ctx.opened.take() {
-        t = Pane { editing: Some(editing), ..t };
-    }
-    let (t2, hover) = hover_step(t, ui, z, mouse, &tiles, &ctx, &wires_in_view);
-    t = t2;
-    let (t2, pointer_changes) = pointer_step(t, ui, frame, &canvas, &canvas_signal, &tiles, &ctx, &wires_in_view);
-    t = t2;
-    changes.extend(pointer_changes);
-    let (t2, pull_changes) = wire_pull(t, ui, &ctx, z, mouse, &tiles, &wires_in_view);
-    t = t2;
-    let (t2, gesture_changes, lens_next, lens_changed) = tile_gestures(t, ui, z, mouse, &tiles);
-    t = t2;
-    let (t2, context_changes) = context_step(t, ui, &tiles, &canvas_signal);
-    t = t2;
-    changes.extend(pull_changes);
-    changes.extend(gesture_changes);
-    changes.extend(context_changes);
-    let (drawn_items, drawn_zones) = paint_frame(&t, ui, z, fs, &layer, &canvas, &canvas_signal, &tiles, &zones, &wires_in_view, &footers, &chain, mouse, &hover);
-    t = Pane { stats: Stats { drawn_items, drawn_zones, ..t.stats }, ..t };
+    frames_step(t, ui, &mut ctx, z, &canvas, changes);
+    if ctx.finished { t.editing = None; }
+    if let Some(editing) = ctx.opened.take() { t.editing = Some(editing); }
+    let hover = hover_step(t, ui, z, mouse, &tiles, &ctx, &wires_in_view);
+    pointer_step(t, ui, frame, &canvas, &canvas_signal, &tiles, &ctx, &wires_in_view, changes);
+    wire_pull(t, ui, &ctx, z, mouse, &tiles, &wires_in_view, changes);
+    let (lens_next, lens_changed) = tile_gestures(t, ui, z, mouse, &tiles, changes);
+    context_step(t, ui, &tiles, &canvas_signal, changes);
+    let (drawn_items, drawn_zones) = paint_frame(t, ui, z, fs, &layer, &canvas, &canvas_signal, &tiles, &zones, &wires_in_view, &footers, &chain, mouse, &hover);
+    { t.stats = Stats { drawn_items, drawn_zones, ..t.stats }; };
     // an opened or stepped expansion panel changes its card's size: lay out again for the next frame
     if lens_changed {
-        t = relayout(None, Pane { lens: lens_next, ..t });
+        t.lens = lens_next;
+        relayout(None, t);
     }
-    (t, changes)
 }
 
 #[doc(hidden)]

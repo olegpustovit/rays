@@ -618,13 +618,9 @@ pub fn pane_level<'a>(value: &ModelView<'a>) -> Level {
 pub fn pane_selection<'a>(value: &ModelView<'a>) -> &'a selection::Selection {
     value.selection
 }
-/// The pane in use, to edit a field in place (`with_pane` rebuilds it whole).
+/// The pane in use, to edit its view state in place.
 pub fn pane_mut(value: &mut EditorModel) -> &mut graph_pane {
     panel_map::active_mut(&mut value.panes)
-}
-pub fn with_pane(value: &mut EditorModel, f: &dyn Fn(&graph_pane) -> graph_pane) {
-    let pane = panel_map::active_mut(&mut value.panes);
-    *pane = f(pane);
 }
 pub fn set_selection(value: &mut EditorModel, picked: selection::Selection) {
     panel_map::active_mut(&mut value.panes).picked = picked;

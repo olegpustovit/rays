@@ -353,7 +353,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
                 match flow_catalog(&*value).map(|catalog| fproj::of_graph(&catalog, &workspace.ws.checked, &root)) {
                     Some(Ok(found)) => {
                         let shown = root.clone();
-                        with_pane(value, &|pane| graph_pane { shown: Some(shown.clone()), ..pane.clone() });
+                        pane_mut(value).shown = Some(shown.clone());
                         Rc::new(found)
                     }
                     _ => scope,
@@ -372,13 +372,13 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
                     let in_pane = root == laid_graph(&*value);
                     value.probes = probes;
                     value.select_later = if in_pane { Vec::new() } else { vec![shown.clone()] };
-                    with_pane(value, &|pane| if in_pane { graph_pane { view: pxui_graph::scope_state::select(vec![shown.clone()], pane.view.clone()), ..pane.clone() } } else { pane.clone() });
+                    if in_pane { pxui_graph::scope_state::select(vec![shown.clone()], &mut pane_mut(value).view); };
                 }
                 None => {},
             }
         }
         None => {
-            with_pane(value, &|pane| graph_pane { view: pxui_graph::scope_state::clear_selection(pane.view.clone()), ..pane.clone() });
+            pxui_graph::scope_state::clear_selection(&mut pane_mut(value).view);
         },
     }
 }

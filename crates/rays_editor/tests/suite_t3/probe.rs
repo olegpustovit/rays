@@ -223,8 +223,8 @@ pub fn selection() {
     let w = load("sunflower");
     let (view, sc) = scope_view(ScopeOpts::default(), &w, "sunflower");
     let turn = path(&["sunflower", "seeds_each", "turn"]);
-    let view = scope::select(vec![turn.clone(), path(&["sunflower", "gone"])], view);
-    let view = scope::with_scope(ScopeOpts::default(), "sunflower", sc, view);
+    let view = { let mut r8_view = view; scope::select(vec![turn.clone(), path(&["sunflower", "gone"])], &mut r8_view); r8_view };
+    let view = { let mut r8_view = view; scope::with_scope(ScopeOpts::default(), "sunflower", sc, &mut r8_view); r8_view };
     check(scope::selected(&view) == vec![turn], "the selection kept a path that no longer exists");
 }
 
@@ -424,6 +424,6 @@ pub fn run() {
 /// `Test_support.Graph_pane.scope_view` over the editor's catalog.
 fn scope_view(opts: ScopeOpts, w: &Workspace, graph: &str) -> (pxui_graph::scope_state::Pane, Rc<p::Scope>) {
     let sc = Rc::new(scope_of(w, graph));
-    let view = scope::with_scope(opts, graph, sc.clone(), scope::create(Some(1000), Some(700)));
-    (scope::with_records(pg::recorded(w), view), sc)
+    let view = { let mut r8_view = scope::create(Some(1000), Some(700)); scope::with_scope(opts, graph, sc.clone(), &mut r8_view); r8_view };
+    ({ let mut r8_view = view; scope::with_records(pg::recorded(w), &mut r8_view); r8_view }, sc)
 }

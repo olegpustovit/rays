@@ -270,8 +270,8 @@ pub fn sync_scope(value: &mut EditorModel) {
                 .expect("the pane's graph is checked"),
         ),
     };
-    let scope_view = if !moved {
-        scope::with_arguments(&edits, pane_view(&(&*value).into()).clone())
+    if !moved {
+        scope::with_arguments(&edits, &mut pane_mut(value).view);
     } else {
         let display = viewed_path(&(&*value).into(), &scope_proj);
         let layouts: Vec<String> = match &value.doc.shell {
@@ -283,7 +283,7 @@ pub fn sync_scope(value: &mut EditorModel) {
         let saved = Rc::new(DocSaved { layout: ws.layout.clone(), probes: value.probes.clone(), imports: ws.imports.clone() });
         let opts = scope::ScopeOpts { saved, display, layouts };
         let _phase = phase_timer::measure("layout");
-        scope::with_scope(opts, &name, scope_proj.clone(), pane_view(&(&*value).into()).clone())
+        scope::with_scope(opts, &name, scope_proj.clone(), &mut pane_mut(value).view);
     };
     // Probe snapshots need the published facts, not the previous cook's compiled graphs and their arrays.
     let owner = node_owner_of(&(&*value).into());
@@ -298,11 +298,10 @@ pub fn sync_scope(value: &mut EditorModel) {
         })
     };
     // a pick in another graph's geometry asked for its node to be selected here
-    let (scope_view, select_later) = if !value.select_later.is_empty() && value.select_later.iter().all(|pth| pth.first() == Some(&name)) {
-        (scope::select(value.select_later.clone(), scope_view), Vec::new())
-    } else {
-        (scope_view, value.select_later.clone())
-    };
+    if !value.select_later.is_empty() && value.select_later.iter().all(|pth| pth.first() == Some(&name)) {
+        let paths = std::mem::take(&mut value.select_later);
+        scope::select(paths, &mut pane_mut(value).view);
+    }
     let element: Rc<dyn Fn(&[String], i64) -> Option<Vec<(String, Value)>>> = {
         let lowered = lowered.clone();
         Rc::new(move |zone: &[String], k: i64| lower::zone_element(&lowered, &zone.to_vec(), k).map(|(n, (x, y, z))| vec![(n, Value::Vec3(x, y, z))]))
@@ -369,10 +368,9 @@ pub fn sync_scope(value: &mut EditorModel) {
         };
         Some(Rc::new(RefCell::new(probe::make(&evaluated, options))))
     };
-    let scope_view = match &records {
-        Some(records) if fresh || moved => scope::with_records(records.clone(), scope_view),
-        _ => scope_view,
-    };
+    if let Some(records) = &records {
+        if fresh || moved { scope::with_records(records.clone(), &mut pane_mut(value).view); }
+    }
     let targets: Vec<(Path, (i64, i64))> = match (&records, &previous) {
         (Some(_), Some(k))
             if !moved
@@ -395,7 +393,6 @@ pub fn sync_scope(value: &mut EditorModel) {
         }
         (None, _) => Vec::new(),
     };
-    value.select_later = select_later;
     let key = scope_key {
         ws: ws.clone(),
         probe_map: value.probes.clone(),
@@ -412,7 +409,7 @@ pub fn sync_scope(value: &mut EditorModel) {
         gap,
         fresh_last: fresh,
     };
-    with_pane(value, &|pane| graph_pane { view: scope_view.clone(), laid: Some(Rc::new(key.clone())), ..pane.clone() });
+    pane_mut(value).laid = Some(Rc::new(key));
 }
 
 fn node_owner<'a>(value: &ModelView<'a>, node_id: i64) -> Option<i64> {

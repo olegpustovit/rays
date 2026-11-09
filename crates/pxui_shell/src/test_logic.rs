@@ -14,7 +14,7 @@ fn row(id: i64, depth: i64, label: &str) -> Row {
 #[test]
 fn tree_keys_through_run_command() {
     let rows = vec![row(1, 0, "a"), row(2, 1, "b"), row(3, 1, "c"), row(4, 0, "d")];
-    let run = |t: T::Tree, c: Command| T::run_command(t, &rows, &[], c);
+    let run = |t: T::Tree, c: Command| { let mut r8_tree = t; let mut r8_intents = Vec::new(); T::run_command(&mut r8_tree, &rows, &[], c, &mut r8_intents); (r8_tree, r8_intents) };
     let expect = |name: &str, got: Vec<Intent>, want: Vec<Intent>| assert_eq!(got, want, "tree: {name}");
     let (t, intents) = run(T::create(), Command::Down);
     expect("Down from nothing selects the first row", intents, vec![Intent::Select(vec![1])]);
@@ -35,7 +35,7 @@ fn tree_keys_through_run_command() {
     expect("Right on an open parent goes to its first child", intents, vec![Intent::Select(vec![2])]);
     let (_, intents) = run(t.clone(), Command::Last);
     expect("End selects the last row", intents, vec![Intent::Select(vec![4])]);
-    let (_, intents) = T::run_command(t.clone(), &rows, &[2, 3], Command::Indent_rows);
+    let (_, intents) = { let mut r8_tree = t.clone(); let mut r8_intents = Vec::new(); T::run_command(&mut r8_tree, &rows, &[2, 3], Command::Indent_rows, &mut r8_intents); (r8_tree, r8_intents) };
     expect("Tab reparents the selection", intents, vec![Intent::Indent(vec![2, 3])]);
     let (_, intents) = run(t.clone(), Command::Outdent_rows);
     expect("Shift-Tab outdents the focus", intents, vec![Intent::Outdent(vec![2])]);
@@ -47,6 +47,13 @@ fn tree_keys_through_run_command() {
     expect("the enter key activates", intents, vec![Intent::Activate(2)]);
     let (filtering, _) = run(t, Command::Filter);
     assert!(T::editing(&filtering), "/ opens the filter");
+    let mut tree = T::create();
+    let prefix = Intent::Delete(vec![99]);
+    let mut changes = vec![prefix.clone()];
+    T::run_command(&mut tree, &rows, &[], Command::Down, &mut changes);
+    T::run_command(&mut tree, &rows, &[], Command::Down, &mut changes);
+    assert_eq!(changes, vec![prefix, Intent::Select(vec![1]), Intent::Select(vec![2])]);
+
 }
 
 #[test]

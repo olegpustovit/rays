@@ -101,9 +101,8 @@ pub fn create() -> Tree {
 }
 
 /// Scroll the focused row into view on the next update.
-pub fn reveal(mut t: Tree) -> Tree {
+pub fn reveal(t: &mut Tree) {
     t.reveal = true;
-    t
 }
 
 pub fn focused(t: &Tree) -> Option<i64> {
@@ -216,12 +215,11 @@ fn cons(id: i64, rest: Vec<i64>) -> Vec<i64> {
     out
 }
 
-pub fn run_command(t: Tree, rows: &[Row], selected: &[i64], command: Command) -> (Tree, Vec<Intent>) {
-    let mut t = t;
-    let shown = visible(&t, rows);
+pub fn run_command(t: &mut Tree, rows: &[Row], selected: &[i64], command: Command, emit: &mut Vec<Intent>) {
+    let shown = visible(t, rows);
     let count = shown.len();
     if count == 0 {
-        return (t, Vec::new());
+        return;
     }
     let at = |k: usize| &rows[shown[k]];
     let current = t.focus.and_then(|f| position(rows, &shown, f));
@@ -244,14 +242,14 @@ pub fn run_command(t: Tree, rows: &[Row], selected: &[i64], command: Command) ->
     };
     let cur = current.map(|k| k as i64);
     let intents = match (command, cur) {
-        (Command::Up, Some(k)) => mv(&mut t, k - 1),
-        (Command::Down, Some(k)) => mv(&mut t, k + 1),
-        (Command::Up | Command::Extend_up, None) => mv(&mut t, count as i64 - 1),
-        (Command::Down | Command::Extend_down, None) => mv(&mut t, 0),
-        (Command::First, _) => mv(&mut t, 0),
-        (Command::Last, _) => mv(&mut t, count as i64 - 1),
-        (Command::Extend_up, Some(k)) => extend(&mut t, k - 1),
-        (Command::Extend_down, Some(k)) => extend(&mut t, k + 1),
+        (Command::Up, Some(k)) => mv(t, k - 1),
+        (Command::Down, Some(k)) => mv(t, k + 1),
+        (Command::Up | Command::Extend_up, None) => mv(t, count as i64 - 1),
+        (Command::Down | Command::Extend_down, None) => mv(t, 0),
+        (Command::First, _) => mv(t, 0),
+        (Command::Last, _) => mv(t, count as i64 - 1),
+        (Command::Extend_up, Some(k)) => extend(t, k - 1),
+        (Command::Extend_down, Some(k)) => extend(t, k + 1),
         (Command::Collapse, Some(k)) => {
             let k = k as usize;
             let index = shown[k];
@@ -266,7 +264,7 @@ pub fn run_command(t: Tree, rows: &[Row], selected: &[i64], command: Command) ->
                     }
                 }
                 match parent {
-                    Some(p) => mv(&mut t, p as i64),
+                    Some(p) => mv(t, p as i64),
                     None => Vec::new(),
                 }
             }
@@ -278,7 +276,7 @@ pub fn run_command(t: Tree, rows: &[Row], selected: &[i64], command: Command) ->
                 t.folded.remove(&rows[index].id);
                 Vec::new()
             } else if has_children(rows, index) {
-                mv(&mut t, k as i64 + 1)
+                mv(t, k as i64 + 1)
             } else {
                 Vec::new()
             }
@@ -306,7 +304,7 @@ pub fn run_command(t: Tree, rows: &[Row], selected: &[i64], command: Command) ->
         (Command::Activate_row, Some(k)) => vec![Intent::Activate(at(k as usize).id)],
         (Command::Collapse | Command::Expand | Command::Rename_row | Command::Hide | Command::Activate_row, _) => Vec::new(),
     };
-    (t, intents)
+    emit.extend(intents);
 }
 
 /// a 12-point flag and its 8-point gap
@@ -348,12 +346,11 @@ fn drop_of(offset: f64) -> DropAt {
 /// The row list, its toggle columns, and the filter and rename prompts, built inside `Ui::frame`.
 /// One box takes every pointer gesture; rows are found from the pointer, so only the visible
 /// slice is painted. `title` leads the header, e.g. the level's breadcrumb.
-pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i64, i64), title: &str, columns: &[String], rows: &[Row], selected: &[i64]) -> (Tree, Vec<Intent>) {
-    let mut t = t;
+pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i64, i64), title: &str, columns: &[String], rows: &[Row], selected: &[i64], intents: &mut Vec<Intent>) {
     let theme = ui.theme();
     let height = ui.row_height() as f64;
     let (x, y, w, h) = (bounds.0 as f64, bounds.1 as f64, bounds.2 as f64, bounds.3 as f64);
-    let shown = visible(&t, rows);
+    let shown = visible(t, rows);
     let count = shown.len();
     let at = |k: usize| &rows[shown[k]];
     let top = y + height;
@@ -405,13 +402,14 @@ pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i6
     let left = signal.button == Some(MouseButton::LeftButton);
     let press_keys = ui.press_keys(&boxed);
     let modifier = |key: Key| press_keys.contains(&key);
-    let mut intents: Vec<Intent> = Vec::new();
+    let first = intents.len();
     // Presses: select, start a row drag or a toggle paint.
     if signal.pressed && left {
         match row_at(signal.press_point.1) {
             None => {
                 t.drag = None;
-                intents = vec![Intent::Select(Vec::new())];
+                intents.truncate(first);
+                intents.push(Intent::Select(Vec::new()));
             }
             Some(k) => {
                 let row = at(k);
@@ -430,7 +428,8 @@ pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i6
                             let value = !flag(k, column);
                             let ids = if is_selected(row.id) { selected.to_vec() } else { vec![row.id] };
                             t.drag = Some(Drag::Paint { column, value, painted: ids.clone() });
-                            intents = vec![Intent::Flag { ids, column, value }];
+                            intents.truncate(first);
+                            intents.push(Intent::Flag { ids, column, value });
                         }
                         _ => {
                             let selection = if modifier(Key::Shift) {
@@ -448,7 +447,8 @@ pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i6
                                 t.anchor = Some(row.id);
                             }
                             t.drag = if row.ghost { None } else { Some(Drag::Rows { ids: selection.clone(), moved: false }) };
-                            intents = vec![Intent::Select(selection)];
+                            intents.truncate(first);
+                            intents.push(Intent::Select(selection));
                         }
                     }
                 }
@@ -725,5 +725,4 @@ pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i6
         }
     }
     t.reveal = false;
-    (t, intents)
 }

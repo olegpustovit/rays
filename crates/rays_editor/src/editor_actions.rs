@@ -27,7 +27,7 @@ pub type Applied = (shell, selection::Selection, tree::Tree, timeline::Timeline,
 
 /// Leader actions owned by the workspace; the environment handles the rest from `update.actions`.
 pub fn apply_action(value: &EditorModel, state: Applied, action: &action) -> Applied {
-    let (workspace, selection, tree, timeline, changes) = state;
+    let (workspace, selection, mut tree, timeline, changes) = state;
     let timeline_step = |workspace: shell, selection, tree, timeline: timeline::Timeline, mut changes: Vec<timeline::Change>, step: fn(&timeline::Timeline) -> (timeline::Timeline, Vec<timeline::Change>)| {
         let (timeline, more) = step(&timeline);
         changes.extend(more);
@@ -52,7 +52,7 @@ pub fn apply_action(value: &EditorModel, state: Applied, action: &action) -> App
         action::Reset => timeline_step(workspace, selection, tree, timeline, changes, timeline::reset),
         action::Stop => timeline_step(workspace, selection, tree, timeline, changes, timeline::stop),
         action::Add_node => (expand(Panel::Graph, workspace), selection, tree, timeline, changes),
-        action::Frame_tile if crate::editor_panes::projection_of(&value.into()) == List_view => (workspace, selection, tree::reveal(tree), timeline, changes),
+        action::Frame_tile if crate::editor_panes::projection_of(&value.into()) == List_view => { tree::reveal(&mut tree); (workspace, selection, tree, timeline, changes) },
         action::World_play if timeline::mode(&timeline) != timeline::Mode::Playing => timeline_step(workspace, selection, tree, timeline, changes, timeline::toggle_pause),
         _ => (workspace, selection, tree, timeline, changes),
     }

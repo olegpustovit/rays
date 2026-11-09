@@ -138,13 +138,14 @@ pub fn select_source(value: &mut EditorModel, path: &[String]) {
     if found {
         if scope::selected(pane_view(&(&*value).into())) != vec![path.to_vec()] {
             value.select_later.clear();
-            with_pane(value, &|pane| {
-                let selected = scope::select(vec![path.to_vec()], pane.view.clone());
-                graph_pane { view: scope_commands::run_command(selected, scope::Command::Frame_selection).0, ..pane.clone() }
-            });
+            {
+                let view = &mut pane_mut(value).view;
+                scope::select(vec![path.to_vec()], view);
+                scope_commands::run_command(view, scope::Command::Frame_selection, &mut Vec::new());
+            };
         }
     } else {
-        with_pane(value, &|pane| graph_pane { view: scope::select(Vec::new(), pane.view.clone()), ..pane.clone() });
+        scope::select(Vec::new(), &mut pane_mut(value).view);
     }
 }
 

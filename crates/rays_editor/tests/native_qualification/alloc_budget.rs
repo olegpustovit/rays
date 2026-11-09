@@ -24,9 +24,10 @@ const FRAMES: i64 = 30;
 // R3/R7 and G1: shared immutable data and GPU metadata: basic 1,382 / 157,055;
 // empty 1,206 / 81,958; bare 1,417 / 96,617.
 // R4/R5: shared prelude/operator/state storage: basic 1,356 / 149,687.
+// R8: mutate pane view state in place: empty 1,198 / 81,820.
 // Never raise.
 const BASIC: (u64, u64) = (1_356, 149_687);
-const EMPTY: (u64, u64) = (1_206, 81_958);
+const EMPTY: (u64, u64) = (1_198, 81_820);
 const BARE: (u64, u64) = (1_417, 96_617);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {

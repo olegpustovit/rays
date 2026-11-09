@@ -1037,11 +1037,9 @@ pub fn update_frame(
     for a in &actions {
         match a {
             action::Scope_command(command) if scope_active => {
-                let (view, emitted) = pxui_graph::scope_commands::run_command(scope_view, command.clone());
-                scope_view = view;
-                scope_command_changes.extend(emitted);
+                pxui_graph::scope_commands::run_command(&mut scope_view, command.clone(), &mut scope_command_changes);
             }
-            action::Open_camera => scope_view = scope::clear_selection(scope_view),
+            action::Open_camera => scope::clear_selection(&mut scope_view),
             _ => {}
         }
     }
@@ -1074,9 +1072,7 @@ pub fn update_frame(
         match a {
             action::List_command(tree::Command::Activate_row) => {}
             action::List_command(command) if graph_shown => {
-                let (t2, emitted) = tree::run_command(tree_value, &rows_, &selected(), command.clone());
-                tree_value = t2;
-                list_intents.extend(emitted);
+                tree::run_command(&mut tree_value, &rows_, &selected(), command.clone(), &mut list_intents);
             }
             _ => {}
         }
@@ -1221,7 +1217,9 @@ pub fn update_frame(
             };
             let active = active_view(&vw, &g);
             let view_root = draw_viewport_pane(ui, &(&*value).into(), probe_caption(&vw), &roots, active.as_ref(), &none_root);
-            let (graph_body, scope_view2, scope_frame_changes, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, scope_view.clone(), scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu);
+            let mut scope_view2 = scope_view.clone();
+            let mut scope_changes = scope_command_changes.clone();
+            let (graph_body, menu2, menu_pick) = draw_graph_pane(ui, frame_, &(&*value).into(), &shortcut_frame, &mut scope_view2, scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu, &mut scope_changes);
             // Each pane builder returns only its frame intents and updated pane-local state.
             let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &(&*value).into(), &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), &rows_, &columns, &host_rows, &selected, tree_value.clone(), list_intents.clone(), value.locals.clone());
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &*value, &root_at, &header_slots, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
@@ -1229,8 +1227,6 @@ pub fn update_frame(
             let locals = draw_spreadsheet_panes(ui, &(&*value).into(), &of_kind(&Panel::Spreadsheet), locals);
             let graph_panes = draw_other_graph_panes(ui, &shortcut_frame, &(&*value).into(), &other_panes, &roots);
             let _ = text2;
-            let mut scope_changes = scope_command_changes.clone();
-            scope_changes.extend(scope_frame_changes);
             let mut changes = pane_changes(&(&*value).into(), &vw, command_changes.clone(), &scope_changes, &menu_pick, &outline_intents);
             // a layout row and the add button are commands: they run like a toolbar click
             let mut outline_action: Option<action> = None;
