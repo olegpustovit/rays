@@ -114,15 +114,15 @@ pub(crate) unsafe fn snapshot(raw_type: *mut c_void) -> Result<Option<ReflectedT
     {
         let mut output = std::ptr::null_mut();
         let mut message = std::ptr::null();
-        let status = unsafe { caml_rays_metal_reflection_snapshot(raw_type, &mut output, &mut message) };
+        let status = unsafe { rays_metal_reflection_snapshot(raw_type, &mut output, &mut message) };
         if status != 0 {
-            unsafe { caml_rays_metal_reflection_free(output); }
+            unsafe { rays_metal_reflection_free(output); }
             return Err(unsafe { Error::from_native(status, message) });
         }
         if output.is_null() { return Err(Error::InvalidHandle); }
         let mut remaining = MAX_MEMBERS;
         let result = unsafe { parse(output, 0, &mut remaining) };
-        unsafe { caml_rays_metal_reflection_free(output); }
+        unsafe { rays_metal_reflection_free(output); }
         result.map(Some)
     }
     #[cfg(not(target_vendor = "apple"))]
@@ -131,6 +131,6 @@ pub(crate) unsafe fn snapshot(raw_type: *mut c_void) -> Result<Option<ReflectedT
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
-    fn caml_rays_metal_reflection_snapshot(raw_type: *mut c_void, output: *mut *mut RawReflectionNode, message: *mut *const std::ffi::c_char) -> i32;
-    fn caml_rays_metal_reflection_free(node: *mut RawReflectionNode);
+    fn rays_metal_reflection_snapshot(raw_type: *mut c_void, output: *mut *mut RawReflectionNode, message: *mut *const std::ffi::c_char) -> i32;
+    fn rays_metal_reflection_free(node: *mut RawReflectionNode);
 }

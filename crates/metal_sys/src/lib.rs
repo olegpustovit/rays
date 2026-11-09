@@ -265,7 +265,7 @@ pub mod native {
         {
             let mut message: *const c_char = std::ptr::null();
             let (x, y, z, width, height, depth) = region;
-            let status = unsafe { rays_metal_texture_read_into(texture.as_native_ptr()?, destination.as_mut_ptr(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
+            let status = unsafe { rays_metal_texture_read(texture.as_native_ptr()?, destination.as_mut_ptr(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
             if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -281,7 +281,7 @@ pub mod native {
         {
             let mut message: *const c_char = std::ptr::null();
             let (x, y, z, width, height, depth) = region;
-            let status = unsafe { rays_metal_texture_read_bytes(texture.as_native_ptr()?, bytes.as_mut_ptr(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
+            let status = unsafe { rays_metal_texture_read(texture.as_native_ptr()?, bytes.as_mut_ptr(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
             if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -331,7 +331,7 @@ pub mod native {
         #[cfg(target_vendor = "apple")]
         {
             let mut message: *const c_char = std::ptr::null();
-            let status = unsafe { rays_metal_compute35_bytes_plain(encoder.as_native_ptr()?, bytes.as_ptr(), bytes.len(), index, &mut message) };
+            let status = unsafe { rays_metal_compute_encoder_set_bytes(encoder.as_native_ptr()?, bytes.as_ptr(), bytes.len(), index, &mut message) };
             if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -344,7 +344,7 @@ pub mod native {
         {
             let pointers = structures.iter().map(Handle::as_native_ptr).collect::<Result<Vec<_>, _>>()?;
             let mut message: *const c_char = std::ptr::null();
-            let status = unsafe { rays_metal_compute35_accelerations(encoder.as_native_ptr()?, pointers.as_ptr() as *mut *mut NativeHandle, pointers.len(), &mut message) };
+            let status = unsafe { rays_metal_compute_encoder_use_accelerations(encoder.as_native_ptr()?, pointers.as_ptr() as *mut *mut NativeHandle, pointers.len(), &mut message) };
             if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -357,7 +357,7 @@ pub mod native {
         #[cfg(target_vendor = "apple")]
         {
             let mut message: *const c_char = std::ptr::null();
-            let status = unsafe { raw_buffer_write(buffer.as_native_ptr()?, offset, bytes.as_ptr(), 0, bytes.len(), &mut message) };
+            let status = unsafe { rays_metal_buffer_copy(buffer.as_native_ptr()?, offset, bytes.as_ptr().cast_mut(), bytes.len(), 1, &mut message) };
             if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -369,7 +369,7 @@ pub mod native {
         #[cfg(target_vendor = "apple")]
         {
             let mut message: *const c_char = std::ptr::null();
-            let status = unsafe { raw_buffer_read(buffer.as_native_ptr()?, offset, length, bytes.as_mut_ptr(), &mut message) };
+            let status = unsafe { rays_metal_buffer_copy(buffer.as_native_ptr()?, offset, bytes.as_mut_ptr(), length, 0, &mut message) };
             if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -444,47 +444,25 @@ pub mod native {
 
     #[cfg(target_vendor = "apple")]
     unsafe extern "C" {
-        #[link_name = "caml_rays_metal_default_device"]
         fn rays_metal_default_device(output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_is_main_thread"]
         fn rays_metal_is_main_thread() -> i32;
-        #[link_name = "caml_rays_metal_buffer_write"]
-        fn raw_buffer_write(buffer: *mut NativeHandle, destination_offset: u64, bytes: *const u8, source_offset: usize, length: usize, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_buffer_read"]
-        fn raw_buffer_read(buffer: *mut NativeHandle, offset: u64, length: usize, destination: *mut u8, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_buffer_readback"]
+        fn rays_metal_buffer_copy(buffer: *mut NativeHandle, offset: u64, bytes: *mut u8, length: usize, write: u8, message: *mut *const c_char) -> i32;
+        #[link_name = "rays_metal_buffer_readback"]
         fn raw_buffer_readback(buffer: *mut NativeHandle, pointer: *mut *mut u8, length: *mut u64, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_buffer_create_mapped"]
         fn rays_metal_buffer_create_mapped(device: *mut NativeHandle, length: u64, options: i64, output: *mut *mut NativeHandle, mapping: *mut *mut f32, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_texture_create"]
         fn rays_metal_texture_create(device: *mut NativeHandle, descriptor: *const TextureDescriptor, label: *const c_char, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_texture_info"]
         fn rays_metal_texture_info(texture: *mut NativeHandle, output: *mut i64, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_texture_read_into"]
-        fn rays_metal_texture_read_into(texture: *mut NativeHandle, destination: *mut u8, bytes_per_row: usize, bytes_per_image: usize, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64, mip_level: u64, slice: u64, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_texture_read"]
-        fn rays_metal_texture_read_bytes(texture: *mut NativeHandle, destination: *mut u8, bytes_per_row: usize, bytes_per_image: usize, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64, mip_level: u64, slice: u64, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_command_buffer_wait"]
+        fn rays_metal_texture_read(texture: *mut NativeHandle, destination: *mut u8, bytes_per_row: usize, bytes_per_image: usize, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64, mip_level: u64, slice: u64, message: *mut *const c_char) -> i32;
         fn rays_metal_command_buffer_wait(buffer: *mut NativeHandle, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_command_buffer_error"]
         fn rays_metal_command_buffer_error(buffer: *mut NativeHandle, output: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_presentation_command_snapshot"]
         fn rays_metal_presentation_command_snapshot(buffer: *mut NativeHandle, output: *mut CommandBufferDiagnostics, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_compute35_bytes_plain"]
-        fn rays_metal_compute35_bytes_plain(encoder: *mut NativeHandle, bytes: *const u8, length: usize, index: u64, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_compute35_accelerations"]
-        fn rays_metal_compute35_accelerations(encoder: *mut NativeHandle, structures: *mut *mut NativeHandle, count: usize, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_library_compile"]
+        fn rays_metal_compute_encoder_set_bytes(encoder: *mut NativeHandle, bytes: *const u8, length: usize, index: u64, message: *mut *const c_char) -> i32;
+        fn rays_metal_compute_encoder_use_accelerations(encoder: *mut NativeHandle, structures: *mut *mut NativeHandle, count: usize, message: *mut *const c_char) -> i32;
         fn rays_metal_library_compile(device: *mut NativeHandle, source: *const c_char, label: *const c_char, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_library_function_names"]
         fn rays_metal_library_function_names(library: *mut NativeHandle, output: *mut *mut c_char, length: *mut usize, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_free_bytes"]
         fn rays_metal_free_bytes(bytes: *mut c_char);
-        #[link_name = "caml_rays_metal_function_find"]
         fn rays_metal_function_find(library: *mut NativeHandle, name: *const c_char, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_function_specialize"]
         fn rays_metal_function_specialize(library: *mut NativeHandle, name: *const c_char, constants: *const RawFunctionConstant, count: usize, label: *const c_char, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
-        #[link_name = "caml_rays_metal_device_supports_sampler_reduction"]
         fn rays_metal_device_supports_sampler_reduction(device: *mut NativeHandle, output: *mut u8, message: *mut *const c_char) -> i32;
     }
 }

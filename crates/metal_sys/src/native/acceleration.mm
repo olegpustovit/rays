@@ -403,7 +403,7 @@ static MTLAccelerationStructureDescriptor *rays_accel_descriptor(
   return nil;
 }
 
-extern "C" int32_t caml_rays_metal_acceleration_descriptor_sizes(
+extern "C" int32_t rays_metal_acceleration_descriptor_sizes(
     MetalHandle *device_handle, const RaysAccelBuildDescriptor *raw_descriptor,
     RaysAccelSizes *output, const char **message) {
   if (message != nullptr) *message = nullptr;
@@ -439,7 +439,7 @@ extern "C" int32_t caml_rays_metal_acceleration_descriptor_sizes(
   return rays_metal_set_unavailable(message, "acceleration structures require macOS 11");
 }
 
-extern "C" int32_t caml_rays_metal_acceleration_encoder_build(
+extern "C" int32_t rays_metal_acceleration_encoder_build(
     MetalHandle *encoder_handle, MetalHandle *destination_handle,
     const RaysAccelBuildDescriptor *raw_descriptor, MetalHandle *scratch_handle,
     uint64_t scratch_offset, uint8_t refit, const char **message) {
@@ -490,7 +490,7 @@ extern "C" int32_t caml_rays_metal_acceleration_encoder_build(
   return rays_metal_set_unavailable(message, "acceleration structures require macOS 11");
 }
 
-extern "C" int32_t caml_rays_metal_acceleration_encoder_write_size(
+extern "C" int32_t rays_metal_acceleration_encoder_write_size(
     MetalHandle *encoder_handle, MetalHandle *structure_handle,
     MetalHandle *buffer_handle, uint64_t offset, int64_t size_data_type,
     const char **message) {
@@ -525,7 +525,7 @@ extern "C" int32_t caml_rays_metal_acceleration_encoder_write_size(
   return rays_metal_set_unavailable(message, "acceleration structures require macOS 11");
 }
 
-extern "C" int32_t caml_rays_metal_acceleration_instance_layout(
+extern "C" int32_t rays_metal_acceleration_instance_layout(
     int32_t kind, RaysAccelInstanceLayout *output, const char **message) {
   if (message != nullptr) *message = nullptr;
   if (output == nullptr) return rays_metal_set_error(message, "null instance layout output");

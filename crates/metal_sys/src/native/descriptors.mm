@@ -27,7 +27,7 @@ struct RaysDepthStencilDescriptor {
   uint8_t has_back_face_stencil;
 };
 
-extern "C" int32_t caml_rays_metal_sampler_create(MetalHandle *device_handle,
+extern "C" int32_t rays_metal_sampler_create(MetalHandle *device_handle,
     const RaysSamplerDescriptor *s, const char *raw_label, MetalHandle **output,
     const char **message) {
   if (message) *message = nullptr;
@@ -76,7 +76,7 @@ extern "C" int32_t caml_rays_metal_sampler_create(MetalHandle *device_handle,
   }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
 }
 
-extern "C" int32_t caml_rays_metal_depth_stencil_create(MetalHandle *device_handle,
+extern "C" int32_t rays_metal_depth_stencil_create(MetalHandle *device_handle,
     const RaysDepthStencilDescriptor *s, const char *raw_label, MetalHandle **output,
     const char **message) {
   if (message) *message = nullptr; if (output) *output = nullptr;
@@ -109,7 +109,7 @@ extern "C" int32_t caml_rays_metal_depth_stencil_create(MetalHandle *device_hand
   }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
 }
 
-extern "C" int32_t caml_rays_metal_render_pass_descriptor_set_sizes(MetalHandle *pass_handle,
+extern "C" int32_t rays_metal_render_pass_descriptor_set_sizes(MetalHandle *pass_handle,
     int64_t width, int64_t height, int64_t array_length, int64_t sample_count,
     const char **message) {
   if (message) *message = nullptr;
@@ -123,7 +123,7 @@ extern "C" int32_t caml_rays_metal_render_pass_descriptor_set_sizes(MetalHandle 
     return 0;
   }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
 }
-extern "C" int32_t caml_rays_metal_render_pass_descriptor_set_attachments(MetalHandle *pass_handle, MetalHandle *color_handle,
+extern "C" int32_t rays_metal_render_pass_descriptor_set_attachments(MetalHandle *pass_handle, MetalHandle *color_handle,
     MetalHandle *depth_handle, MetalHandle *stencil_handle, MetalHandle *visibility_handle,
     const double *clear, const char **message) {
   if (message) *message = nullptr;
@@ -168,18 +168,18 @@ extern "C" int32_t rays_metal_render_pass_set_actions(MetalHandle *pass_handle, 
     return 0;
   }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
 }
-extern "C" int32_t caml_rays_metal_render_pass_color_store_action(MetalHandle *pass, int32_t action, const char **message) {
+extern "C" int32_t rays_metal_render_pass_color_store_action(MetalHandle *pass, int32_t action, const char **message) {
   return rays_metal_render_pass_set_actions(pass, -1, action, -1, -1, -1.0, -1, -1, UINT32_MAX, message);
 }
-extern "C" int32_t caml_rays_metal_render_pass_color_load_action(MetalHandle *pass, int32_t action, const char **message) {
+extern "C" int32_t rays_metal_render_pass_color_load_action(MetalHandle *pass, int32_t action, const char **message) {
   return rays_metal_render_pass_set_actions(pass, action, -1, -1, -1, -1.0, -1, -1, UINT32_MAX, message);
 }
-extern "C" int32_t caml_rays_metal_render_pass_depth_stencil_actions(MetalHandle *pass, int32_t depth_load, int32_t depth_store, double clear_depth, int32_t stencil_load, int32_t stencil_store, uint32_t clear_stencil, const char **message) {
+extern "C" int32_t rays_metal_render_pass_depth_stencil_actions(MetalHandle *pass, int32_t depth_load, int32_t depth_store, double clear_depth, int32_t stencil_load, int32_t stencil_store, uint32_t clear_stencil, const char **message) {
   return rays_metal_render_pass_set_actions(pass, -1, -1, depth_load, depth_store, clear_depth, stencil_load, stencil_store, clear_stencil, message);
 }
 
 // ogpu_metal: the multisample resolve target of colour attachment 0 (nullptr clears it).
-extern "C" int32_t caml_rays_metal_render_pass_set_resolve(MetalHandle *pass_handle, MetalHandle *texture_handle, const char **message) {
+extern "C" int32_t rays_metal_render_pass_set_resolve(MetalHandle *pass_handle, MetalHandle *texture_handle, const char **message) {
   if (message) *message = nullptr;
   @try { @autoreleasepool {
     MTLRenderPassDescriptor *pass = (__bridge MTLRenderPassDescriptor *)rays_metal_handle_object(pass_handle, KIND_RENDER_PASS_DESCRIPTOR);

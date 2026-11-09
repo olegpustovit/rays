@@ -10,14 +10,14 @@ use std::ptr::{null, null_mut};
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
-    #[link_name = "caml_rays_metal_layer_adopt_borrowed"]
+    #[link_name = "rays_metal_layer_adopt_borrowed"]
     fn layer_adopt_borrowed(
         device: *mut NativeHandle,
         layer: *mut c_void,
         output: *mut *mut NativeHandle,
         message: *mut *const c_char,
     ) -> i32;
-    #[link_name = "caml_rays_metal_layer_configure"]
+    #[link_name = "rays_metal_layer_configure"]
     fn layer_configure(
         layer: *mut NativeHandle,
         width: u64,
@@ -30,7 +30,7 @@ unsafe extern "C" {
         presents_with_transaction: u8,
         message: *mut *const c_char,
     ) -> i32;
-    #[link_name = "caml_rays_metal_drawable_texture"]
+    #[link_name = "rays_metal_drawable_texture"]
     fn raw_drawable_texture(
         drawable: *mut NativeHandle,
         output: *mut *mut NativeHandle,

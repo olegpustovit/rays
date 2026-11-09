@@ -194,7 +194,7 @@ static bool copy_bindings(NSArray<id<MTLBinding>> *source,
   return true;
 }
 
-extern "C" int32_t caml_rays_metal_compute_pipeline_create_descriptor(
+extern "C" int32_t rays_metal_compute_pipeline_create_descriptor(
     MetalHandle *device_handle, MetalHandle *function_handle, const char *raw_label,
     uint8_t wants_reflection, MetalHandle **output, RaysMetalPipelineBinding **bindings,
     size_t *binding_count, const char **message) {
@@ -265,7 +265,7 @@ extern "C" int32_t caml_rays_metal_compute_pipeline_create_descriptor(
   }
 }
 
-extern "C" int32_t caml_rays_metal_compiler_create(
+extern "C" int32_t rays_metal_compiler_create(
     MetalHandle *device_handle, MetalHandle **output, const char **message) {
   if (message) *message = nullptr;
   if (output) *output = nullptr;
@@ -296,7 +296,7 @@ extern "C" int32_t caml_rays_metal_compiler_create(
   }
 }
 
-extern "C" int32_t caml_rays_metal_compiler_create_render_pipeline(
+extern "C" int32_t rays_metal_compiler_create_render_pipeline(
     MetalHandle *compiler_handle, MetalHandle *library_handle,
     const char *raw_label, const char *raw_vertex, const char *raw_fragment,
     uint8_t reflection, uint64_t raw_sample_count,
@@ -400,7 +400,7 @@ extern "C" int32_t caml_rays_metal_compiler_create_render_pipeline(
   }
 }
 
-extern "C" int32_t caml_rays_metal_render_pipeline_reflection(
+extern "C" int32_t rays_metal_render_pipeline_reflection(
     MetalHandle *pipeline_handle, RaysMetalPipelineBinding **vertex,
     size_t *vertex_count, RaysMetalPipelineBinding **fragment,
     size_t *fragment_count, const char **message) {
@@ -445,13 +445,13 @@ extern "C" int32_t caml_rays_metal_render_pipeline_reflection(
   }
 }
 
-extern "C" void caml_rays_metal_pipeline_reflection_free(
+extern "C" void rays_metal_pipeline_reflection_free(
     RaysMetalPipelineBinding *bindings, size_t count) {
   if (bindings == nullptr) return;
   free_pipeline_bindings(bindings, count);
 }
 
-extern "C" int32_t caml_rays_metal_blit_encoder_copy_buffer_to_texture(
+extern "C" int32_t rays_metal_blit_encoder_copy_buffer_to_texture(
     MetalHandle *encoder_handle, MetalHandle *source_handle,
     uint64_t source_offset, uint64_t source_bytes_per_row,
     uint64_t source_bytes_per_image, MetalHandle *destination_handle,
@@ -537,7 +537,7 @@ extern "C" int32_t caml_rays_metal_blit_encoder_copy_buffer_to_texture(
     return rays_metal_set_error(message, exception.reason.UTF8String);
   }
 }
-extern "C" int32_t caml_rays_metal_render_encoder_use_resources(
+extern "C" int32_t rays_metal_render_encoder_use_resources(
     MetalHandle *encoder_handle, const RaysMetalRenderResource *resources,
     size_t count, int32_t raw_usage, int32_t raw_stages,
     const char **message) {

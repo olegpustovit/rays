@@ -16,13 +16,13 @@ pub struct DepthStencilDescriptor { pub depth_compare_function:i32, pub depth_wr
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
- #[link_name="caml_rays_metal_sampler_create"] fn raw_sampler(device:*mut NativeHandle, descriptor:*const SamplerDescriptor, label:*const c_char, output:*mut *mut NativeHandle, message:*mut *const c_char)->i32;
- #[link_name="caml_rays_metal_depth_stencil_create"] fn raw_depth(device:*mut NativeHandle, descriptor:*const DepthStencilDescriptor, label:*const c_char, output:*mut *mut NativeHandle, message:*mut *const c_char)->i32;
- #[link_name="caml_rays_metal_render_pass_descriptor_set_sizes"] fn raw_sizes(pass:*mut NativeHandle,width:i64,height:i64,array_length:i64,samples:i64,message:*mut *const c_char)->i32;
- #[link_name="caml_rays_metal_render_pass_descriptor_set_attachments"] fn raw_attachments(pass:*mut NativeHandle,color:*mut NativeHandle,depth:*mut NativeHandle,stencil:*mut NativeHandle,visibility:*mut NativeHandle,clear:*const f64,message:*mut *const c_char)->i32;
- #[link_name="caml_rays_metal_render_pass_color_store_action"] fn raw_color_store(pass:*mut NativeHandle,action:i32,message:*mut *const c_char)->i32;
- #[link_name="caml_rays_metal_render_pass_color_load_action"] fn raw_color_load(pass:*mut NativeHandle,action:i32,message:*mut *const c_char)->i32;
- #[link_name="caml_rays_metal_render_pass_depth_stencil_actions"] fn raw_depth_stencil_actions(pass:*mut NativeHandle,depth_load:i32,depth_store:i32,clear_depth:f64,stencil_load:i32,stencil_store:i32,clear_stencil:u32,message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_sampler_create"] fn raw_sampler(device:*mut NativeHandle, descriptor:*const SamplerDescriptor, label:*const c_char, output:*mut *mut NativeHandle, message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_depth_stencil_create"] fn raw_depth(device:*mut NativeHandle, descriptor:*const DepthStencilDescriptor, label:*const c_char, output:*mut *mut NativeHandle, message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_render_pass_descriptor_set_sizes"] fn raw_sizes(pass:*mut NativeHandle,width:i64,height:i64,array_length:i64,samples:i64,message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_render_pass_descriptor_set_attachments"] fn raw_attachments(pass:*mut NativeHandle,color:*mut NativeHandle,depth:*mut NativeHandle,stencil:*mut NativeHandle,visibility:*mut NativeHandle,clear:*const f64,message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_render_pass_color_store_action"] fn raw_color_store(pass:*mut NativeHandle,action:i32,message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_render_pass_color_load_action"] fn raw_color_load(pass:*mut NativeHandle,action:i32,message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_render_pass_depth_stencil_actions"] fn raw_depth_stencil_actions(pass:*mut NativeHandle,depth_load:i32,depth_store:i32,clear_depth:f64,stencil_load:i32,stencil_store:i32,clear_stencil:u32,message:*mut *const c_char)->i32;
 }
 #[cfg(target_vendor="apple")]
 unsafe fn finish(status:i32, output:*mut NativeHandle, message:*const c_char)->Result<Handle,Error>{ if status!=0 { return Err(unsafe{Error::from_native(status,message)}); } unsafe{Handle::from_native(output)} }
@@ -61,8 +61,8 @@ pub fn set_depth_stencil_actions(pass:&Handle,dl:i32,ds:i32,cd:f64,sl:i32,ss:i32
 
 // ogpu_metal: the resolve target of colour attachment 0.
 #[cfg(target_vendor="apple")]
-unsafe extern "C" { fn caml_rays_metal_render_pass_set_resolve(pass:*mut NativeHandle,texture:*mut NativeHandle,message:*mut *const c_char)->i32; }
+unsafe extern "C" { fn rays_metal_render_pass_set_resolve(pass:*mut NativeHandle,texture:*mut NativeHandle,message:*mut *const c_char)->i32; }
 pub fn set_render_pass_resolve(pass:&Handle,texture:Option<&Handle>)->Result<(),Error>{
- #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{caml_rays_metal_render_pass_set_resolve(pass.as_native_ptr()?,match texture{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
+ #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{rays_metal_render_pass_set_resolve(pass.as_native_ptr()?,match texture{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
  #[cfg(not(target_vendor="apple"))] {let _=(pass,texture);Err(Error::Unavailable)}
 }

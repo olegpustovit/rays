@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <limits>
 
-extern "C" int32_t caml_rays_metal_layer_adopt_borrowed(
+extern "C" int32_t rays_metal_layer_adopt_borrowed(
     MetalHandle *device_handle, void *borrowed_layer, MetalHandle **output,
     const char **message) {
   if (message != nullptr) *message = nullptr;
@@ -37,7 +37,7 @@ extern "C" int32_t caml_rays_metal_layer_adopt_borrowed(
   }
 }
 
-extern "C" int32_t caml_rays_metal_layer_configure(
+extern "C" int32_t rays_metal_layer_configure(
     MetalHandle *layer_handle, uint64_t width, uint64_t height, int64_t format,
     uint8_t framebuffer_only, uint64_t maximum_drawables, uint8_t allows_timeout,
     uint8_t display_sync, uint8_t presents_with_transaction,
@@ -75,7 +75,7 @@ extern "C" int32_t caml_rays_metal_layer_configure(
   }
 }
 
-extern "C" int32_t caml_rays_metal_drawable_texture(
+extern "C" int32_t rays_metal_drawable_texture(
     MetalHandle *drawable_handle, MetalHandle **output, uint64_t *width,
     uint64_t *height, int64_t *format, const char **message) {
   if (message != nullptr) *message = nullptr;

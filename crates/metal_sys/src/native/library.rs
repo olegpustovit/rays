@@ -19,7 +19,7 @@ pub fn argument_encoder_snapshot(handle: &Handle) -> Result<(Option<String>, u64
         if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
         let label = if label.is_null() { None } else {
             let value = unsafe { CStr::from_ptr(label) }.to_string_lossy().into_owned();
-            unsafe { caml_rays_metal_free_bytes(label); }
+            unsafe { rays_metal_free_bytes(label); }
             Some(value)
         };
         Ok((label, length, alignment, device_id))
@@ -68,22 +68,19 @@ pub fn argument_encoder_single(
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
-    #[link_name = "caml_rays_metal_argument_encoder_snapshot"]
     fn rays_metal_argument_encoder_snapshot(
         encoder: *mut NativeHandle, label: *mut *mut std::ffi::c_char, encoded_length: *mut u64,
         alignment: *mut u64, device_registry_id: *mut u64, message: *mut *const std::ffi::c_char,
     ) -> i32;
-    #[link_name = "caml_rays_metal_argument_encoder_set_buffer"]
     fn rays_metal_argument_encoder_set_buffer(
         encoder: *mut NativeHandle, buffer: *mut NativeHandle, offset: i64, start_offset: i64,
         array_element: i64, message: *mut *const std::ffi::c_char,
     ) -> i32;
-    #[link_name = "caml_rays_metal_argument_encoder_single"]
     fn rays_metal_argument_encoder_single(
         encoder: *mut NativeHandle, tag: i32, resource: *mut NativeHandle, offset: i64, index: i64,
         message: *mut *const std::ffi::c_char,
     ) -> i32;
-    fn caml_rays_metal_free_bytes(bytes: *mut std::ffi::c_char);
+    fn rays_metal_free_bytes(bytes: *mut std::ffi::c_char);
 }
 
 /// A background compile of a library and its entry's compute pipeline (`library_warm`), which
@@ -94,7 +91,7 @@ impl Warm {
     /// None while compiling, then whether it compiled.
     pub fn state(&self) -> Option<bool> {
         #[cfg(target_vendor = "apple")]
-        { match unsafe { caml_rays_metal_warm_state(self.0) } { 0 => None, state => Some(state == 1) } }
+        { match unsafe { rays_metal_warm_state(self.0) } { 0 => None, state => Some(state == 1) } }
         #[cfg(not(target_vendor = "apple"))]
         { Some(false) }
     }
@@ -103,7 +100,7 @@ impl Warm {
 impl Drop for Warm {
     fn drop(&mut self) {
         #[cfg(target_vendor = "apple")]
-        unsafe { caml_rays_metal_warm_release(self.0) }
+        unsafe { rays_metal_warm_release(self.0) }
     }
 }
 
@@ -115,7 +112,7 @@ pub fn library_warm(device: &Handle, source: &str, entry: &str) -> Result<Warm, 
         let entry = CString::new(entry).map_err(|_| Error::InvalidArgument("Metal entry may not contain NUL"))?;
         let mut output = std::ptr::null_mut();
         let mut message: *const c_char = std::ptr::null();
-        let status = unsafe { caml_rays_metal_library_warm(device.as_native_ptr()?, source.as_ptr(), entry.as_ptr(), &mut output, &mut message) };
+        let status = unsafe { rays_metal_library_warm(device.as_native_ptr()?, source.as_ptr(), entry.as_ptr(), &mut output, &mut message) };
         if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
         Ok(Warm(output))
     }
@@ -125,7 +122,7 @@ pub fn library_warm(device: &Handle, source: &str, entry: &str) -> Result<Warm, 
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
-    fn caml_rays_metal_library_warm(device: *mut NativeHandle, source: *const std::ffi::c_char, entry: *const std::ffi::c_char, output: *mut *mut std::ffi::c_void, message: *mut *const std::ffi::c_char) -> i32;
-    fn caml_rays_metal_warm_state(warm: *mut std::ffi::c_void) -> i32;
-    fn caml_rays_metal_warm_release(warm: *mut std::ffi::c_void);
+    fn rays_metal_library_warm(device: *mut NativeHandle, source: *const std::ffi::c_char, entry: *const std::ffi::c_char, output: *mut *mut std::ffi::c_void, message: *mut *const std::ffi::c_char) -> i32;
+    fn rays_metal_warm_state(warm: *mut std::ffi::c_void) -> i32;
+    fn rays_metal_warm_release(warm: *mut std::ffi::c_void);
 }

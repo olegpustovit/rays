@@ -35,7 +35,7 @@ pub fn render_encoder_use_resources(
         }).collect::<Result<Vec<_>, Error>>()?;
         let mut message = std::ptr::null();
         let status = unsafe {
-            caml_rays_metal_render_encoder_use_resources(
+            rays_metal_render_encoder_use_resources(
                 encoder.as_native_ptr()?, resources.as_ptr(), resources.len(), usage, stages, &mut message,
             )
         };
@@ -47,7 +47,7 @@ pub fn render_encoder_use_resources(
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
-    fn caml_rays_metal_render_encoder_use_resources(
+    fn rays_metal_render_encoder_use_resources(
         encoder: *mut NativeHandle, resources: *const RawResource, count: usize,
         usage: i32, stages: i32, message: *mut *const c_char,
     ) -> i32;
@@ -104,7 +104,7 @@ pub fn create_compiler(device: &Handle) -> Result<Handle, Error> {
     {
         let mut output = std::ptr::null_mut();
         let mut message = std::ptr::null();
-        let status = unsafe { caml_rays_metal_compiler_create(device.as_native_ptr()?, &mut output, &mut message) };
+        let status = unsafe { rays_metal_compiler_create(device.as_native_ptr()?, &mut output, &mut message) };
         if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
         unsafe { Handle::from_native(output) }
     }
@@ -126,18 +126,18 @@ pub fn create_compute_pipeline(
         let mut count = 0usize;
         let mut message = std::ptr::null();
         let status = unsafe {
-            caml_rays_metal_compute_pipeline_create_descriptor(
+            rays_metal_compute_pipeline_create_descriptor(
                 device.as_native_ptr()?, function.as_native_ptr()?,
                 label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
                 u8::from(reflection), &mut output, &mut bindings, &mut count, &mut message,
             )
         };
         if status != 0 {
-            unsafe { caml_rays_metal_pipeline_reflection_free(bindings, count); }
+            unsafe { rays_metal_pipeline_reflection_free(bindings, count); }
             return Err(unsafe { Error::from_native(status, message) });
         }
         let result = unsafe { (Handle::from_native(output), bindings_from_raw(bindings, count)) };
-        unsafe { caml_rays_metal_pipeline_reflection_free(bindings, count); }
+        unsafe { rays_metal_pipeline_reflection_free(bindings, count); }
         Ok((result.0?, result.1?))
     }
     #[cfg(not(target_vendor = "apple"))]
@@ -165,7 +165,7 @@ pub fn create_render_pipeline(
         let mut output = std::ptr::null_mut();
         let mut message = std::ptr::null();
         let status = unsafe {
-            caml_rays_metal_compiler_create_render_pipeline(
+            rays_metal_compiler_create_render_pipeline(
                 compiler.as_native_ptr()?, library.as_native_ptr()?,
                 label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
                 vertex.as_ptr(), fragment.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
@@ -195,13 +195,13 @@ pub fn render_pipeline_reflection(pipeline: &Handle) -> Result<(Vec<Binding>, Ve
         let mut fragment_count = 0usize;
         let mut message = std::ptr::null();
         let status = unsafe {
-            caml_rays_metal_render_pipeline_reflection(
+            rays_metal_render_pipeline_reflection(
                 pipeline.as_native_ptr()?, &mut vertex, &mut vertex_count, &mut fragment, &mut fragment_count, &mut message,
             )
         };
         if status != 0 {
-            unsafe { caml_rays_metal_pipeline_reflection_free(vertex, vertex_count); }
-            unsafe { caml_rays_metal_pipeline_reflection_free(fragment, fragment_count); }
+            unsafe { rays_metal_pipeline_reflection_free(vertex, vertex_count); }
+            unsafe { rays_metal_pipeline_reflection_free(fragment, fragment_count); }
             return Err(unsafe { Error::from_native(status, message) });
         }
         let result = unsafe {
@@ -210,8 +210,8 @@ pub fn render_pipeline_reflection(pipeline: &Handle) -> Result<(Vec<Binding>, Ve
             vertex.and_then(|vertex| fragment.map(|fragment| (vertex, fragment)))
         };
         unsafe {
-            caml_rays_metal_pipeline_reflection_free(vertex, vertex_count);
-            caml_rays_metal_pipeline_reflection_free(fragment, fragment_count);
+            rays_metal_pipeline_reflection_free(vertex, vertex_count);
+            rays_metal_pipeline_reflection_free(fragment, fragment_count);
         }
         result
     }
@@ -250,7 +250,7 @@ pub fn copy_buffer_to_texture(
     {
         let mut message = std::ptr::null();
         let status = unsafe {
-            caml_rays_metal_blit_encoder_copy_buffer_to_texture(
+            rays_metal_blit_encoder_copy_buffer_to_texture(
                 encoder.as_native_ptr()?, source.as_native_ptr()?, source_offset, source_bytes_per_row,
                 source_bytes_per_image, destination.as_native_ptr()?, destination_slice, destination_level,
                 origin.0, origin.1, origin.2, size.0, size.1, size.2, &mut message,
@@ -264,24 +264,24 @@ pub fn copy_buffer_to_texture(
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
-    fn caml_rays_metal_compute_pipeline_create_descriptor(
+    fn rays_metal_compute_pipeline_create_descriptor(
         device: *mut NativeHandle, function: *mut NativeHandle, label: *const c_char,
         reflection: u8, output: *mut *mut NativeHandle, bindings: *mut *mut RawBinding,
         binding_count: *mut usize, message: *mut *const c_char,
     ) -> i32;
-    fn caml_rays_metal_compiler_create(device: *mut NativeHandle, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
-    fn caml_rays_metal_compiler_create_render_pipeline(
+    fn rays_metal_compiler_create(device: *mut NativeHandle, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
+    fn rays_metal_compiler_create_render_pipeline(
         compiler: *mut NativeHandle, library: *mut NativeHandle, label: *const c_char, vertex: *const c_char,
         fragment: *const c_char, reflection: u8, sample_count: u64, color_attachments: *const ColorAttachment,
         color_attachment_count: usize, primitive_topology: i32, support_indirect_command_buffers: u8,
         output: *mut *mut NativeHandle, message: *mut *const c_char,
     ) -> i32;
-    fn caml_rays_metal_render_pipeline_reflection(
+    fn rays_metal_render_pipeline_reflection(
         pipeline: *mut NativeHandle, vertex: *mut *mut RawBinding, vertex_count: *mut usize,
         fragment: *mut *mut RawBinding, fragment_count: *mut usize, message: *mut *const c_char,
     ) -> i32;
-    fn caml_rays_metal_pipeline_reflection_free(bindings: *mut RawBinding, count: usize);
-    fn caml_rays_metal_blit_encoder_copy_buffer_to_texture(
+    fn rays_metal_pipeline_reflection_free(bindings: *mut RawBinding, count: usize);
+    fn rays_metal_blit_encoder_copy_buffer_to_texture(
         encoder: *mut NativeHandle, source: *mut NativeHandle, source_offset: u64, source_bytes_per_row: u64,
         source_bytes_per_image: u64, destination: *mut NativeHandle, destination_slice: u64,
         destination_level: u64, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64,

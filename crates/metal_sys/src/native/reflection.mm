@@ -208,7 +208,7 @@ static bool copy_type(MTLType *source, size_t depth, size_t *remaining_members,
   return true;
 }
 
-extern "C" int32_t caml_rays_metal_reflection_snapshot(
+extern "C" int32_t rays_metal_reflection_snapshot(
     void *raw_type, void **output, const char **message) {
   if (message) *message = nullptr;
   if (output) *output = nullptr;
@@ -232,6 +232,6 @@ extern "C" int32_t caml_rays_metal_reflection_snapshot(
   }
 }
 
-extern "C" void caml_rays_metal_reflection_free(void *raw_node) {
+extern "C" void rays_metal_reflection_free(void *raw_node) {
   free_node(static_cast<RaysMetalReflectionNode *>(raw_node));
 }

@@ -6,7 +6,7 @@
 #include <memory>
 #include <new>
 
-extern "C" void caml_rays_metal_free_bytes(char *bytes);
+extern "C" void rays_metal_free_bytes(char *bytes);
 
 static uint64_t argument_resource_device(id object, int32_t tag) {
     switch (tag) {
@@ -22,7 +22,7 @@ static uint64_t argument_resource_device(id object, int32_t tag) {
     }
 }
 
-extern "C" int32_t caml_rays_metal_argument_encoder_snapshot(
+extern "C" int32_t rays_metal_argument_encoder_snapshot(
     MetalHandle *handle, char **label, uint64_t *encoded_length, uint64_t *alignment,
     uint64_t *device_registry_id, const char **message) {
     if (message) *message = nullptr;
@@ -50,7 +50,7 @@ extern "C" int32_t caml_rays_metal_argument_encoder_snapshot(
     }
 }
 
-extern "C" int32_t caml_rays_metal_argument_encoder_set_buffer(
+extern "C" int32_t rays_metal_argument_encoder_set_buffer(
     MetalHandle *encoder_handle, MetalHandle *buffer_handle, int64_t offset, int64_t start_offset,
     int64_t array_element, const char **message) {
     if (message) *message = nullptr;
@@ -73,7 +73,7 @@ extern "C" int32_t caml_rays_metal_argument_encoder_set_buffer(
     }
 }
 
-extern "C" int32_t caml_rays_metal_argument_encoder_single(
+extern "C" int32_t rays_metal_argument_encoder_single(
     MetalHandle *encoder_handle, int32_t tag, MetalHandle *resource_handle, int64_t offset,
     int64_t index, const char **message) {
     if (message) *message = nullptr;
@@ -119,7 +119,7 @@ extern "C" int32_t caml_rays_metal_argument_encoder_single(
 // cache. Nothing compiled is kept; `state` reads 0 while compiling, 1 once ready, 2 on failure.
 struct RaysMetalWarm { std::atomic<int32_t> state{0}; };
 
-extern "C" int32_t caml_rays_metal_library_warm(
+extern "C" int32_t rays_metal_library_warm(
     MetalHandle *device_handle, const char *source_bytes, const char *entry_bytes,
     void **output, const char **message) {
   if (message) *message = nullptr;
@@ -158,10 +158,10 @@ extern "C" int32_t caml_rays_metal_library_warm(
   }
 }
 
-extern "C" int32_t caml_rays_metal_warm_state(void *warm) {
+extern "C" int32_t rays_metal_warm_state(void *warm) {
   return (*static_cast<std::shared_ptr<RaysMetalWarm> *>(warm))->state.load();
 }
 
-extern "C" void caml_rays_metal_warm_release(void *warm) {
+extern "C" void rays_metal_warm_release(void *warm) {
   delete static_cast<std::shared_ptr<RaysMetalWarm> *>(warm);
 }

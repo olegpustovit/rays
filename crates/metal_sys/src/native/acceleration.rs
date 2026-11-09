@@ -475,13 +475,13 @@ fn prepare_descriptor(descriptor: &Descriptor) -> Result<PreparedDescriptor, Err
 
 #[cfg(target_vendor = "apple")]
 unsafe extern "C" {
-    fn caml_rays_metal_acceleration_descriptor_sizes(
+    fn rays_metal_acceleration_descriptor_sizes(
         device: *mut NativeHandle,
         descriptor: *const RawBuildDescriptor,
         output: *mut RawSizes,
         message: *mut *const c_char,
     ) -> i32;
-    fn caml_rays_metal_acceleration_encoder_build(
+    fn rays_metal_acceleration_encoder_build(
         encoder: *mut NativeHandle,
         destination: *mut NativeHandle,
         descriptor: *const RawBuildDescriptor,
@@ -490,7 +490,7 @@ unsafe extern "C" {
         refit: u8,
         message: *mut *const c_char,
     ) -> i32;
-    fn caml_rays_metal_acceleration_encoder_write_size(
+    fn rays_metal_acceleration_encoder_write_size(
         encoder: *mut NativeHandle,
         structure: *mut NativeHandle,
         buffer: *mut NativeHandle,
@@ -498,7 +498,7 @@ unsafe extern "C" {
         size_data_type: i64,
         message: *mut *const c_char,
     ) -> i32;
-    fn caml_rays_metal_acceleration_instance_layout(
+    fn rays_metal_acceleration_instance_layout(
         kind: i32,
         output: *mut RawInstanceLayout,
         message: *mut *const c_char,
@@ -513,7 +513,7 @@ pub fn descriptor_sizes(device: &Handle, descriptor: &Descriptor) -> Result<Size
         let mut output = RawSizes::default();
         let mut message = std::ptr::null();
         let status = unsafe {
-            caml_rays_metal_acceleration_descriptor_sizes(
+            rays_metal_acceleration_descriptor_sizes(
                 device.as_native_ptr()?,
                 &raw,
                 &mut output,
@@ -550,7 +550,7 @@ pub fn encoder_build(
     {
         let mut message = std::ptr::null();
         let status = unsafe {
-            caml_rays_metal_acceleration_encoder_build(
+            rays_metal_acceleration_encoder_build(
                 encoder.as_native_ptr()?,
                 destination.as_native_ptr()?,
                 &raw,
@@ -585,7 +585,7 @@ pub fn encoder_write_compacted_size(
         let mut message = std::ptr::null();
         let data_type = if uint64 { 0x55 } else { 0x21 };
         let status = unsafe {
-            caml_rays_metal_acceleration_encoder_write_size(
+            rays_metal_acceleration_encoder_write_size(
                 encoder.as_native_ptr()?,
                 structure.as_native_ptr()?,
                 buffer.as_native_ptr()?,
@@ -612,7 +612,7 @@ pub fn instance_layout(kind: i32) -> Result<[i64; 12], Error> {
     {
         let mut output = RawInstanceLayout::default();
         let mut message = std::ptr::null();
-        let status = unsafe { caml_rays_metal_acceleration_instance_layout(kind, &mut output, &mut message) };
+        let status = unsafe { rays_metal_acceleration_instance_layout(kind, &mut output, &mut message) };
         if status == 0 {
             Ok(output.values)
         } else {

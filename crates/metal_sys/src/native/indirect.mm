@@ -25,7 +25,7 @@ struct RaysIndirectCommandBufferDescriptor {
     uint8_t support_color_attachment_mapping;
 };
 
-extern "C" int32_t caml_rays_metal_indirect_command_buffer_create(
+extern "C" int32_t rays_metal_indirect_command_buffer_create(
     MetalHandle *device_handle, const RaysIndirectCommandBufferDescriptor *source,
     uint64_t raw_count, int64_t raw_options, MetalHandle **out, const char **message) {
     if (@available(macOS 10.14, *)) { } else return rays_metal_set_unavailable(message, "indirect command buffers require macOS 10.14 or newer");
@@ -80,7 +80,7 @@ extern "C" int32_t caml_rays_metal_indirect_command_buffer_create(
     }
 }
 
-extern "C" int32_t caml_rays_metal_indirect_render_draw_indexed(
+extern "C" int32_t rays_metal_indirect_render_draw_indexed(
     MetalHandle *command_handle, int32_t primitive, uint64_t index_count, int32_t index_type,
     MetalHandle *index_buffer_handle, uint64_t index_offset, uint64_t instance_count,
     int64_t base_vertex, uint64_t base_instance, uint64_t device_registry_id, const char **message) {
@@ -118,7 +118,7 @@ extern "C" int32_t caml_rays_metal_indirect_render_draw_indexed(
 }
 
 // ogpu_metal: executeCommandsInBuffer:withRange: on a render encoder.
-extern "C" int32_t caml_rays_metal_render_encoder_execute_icb_range(MetalHandle *encoder_handle, MetalHandle *icb_handle, uint64_t location, uint64_t length, const char **message) {
+extern "C" int32_t rays_metal_render_encoder_execute_icb_range(MetalHandle *encoder_handle, MetalHandle *icb_handle, uint64_t location, uint64_t length, const char **message) {
   if (message) *message = nullptr;
   @try { @autoreleasepool {
     id<MTLRenderCommandEncoder> encoder = (__bridge id<MTLRenderCommandEncoder>)rays_metal_handle_object(encoder_handle, KIND_RENDER_ENCODER);
