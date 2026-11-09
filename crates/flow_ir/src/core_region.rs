@@ -164,7 +164,7 @@ fn integer_work(instruction: &I) -> bool {
 
 fn paths(view: &residual::View, sites: &mut Vec<(i64, Path, Vec<i64>)>, t: &Term) {
     if let Some(path) = t.path() {
-        sites.push((view.instance, path.iter().map(|name| t.name(*name).to_owned()).collect(), view.iter.clone()));
+        sites.push((view.instance, path.iter().map(|name| t.name(*name).to_owned()).collect(), view.iter.to_vec()));
     }
     match t.node {
         Node::Bypass(call) => { if let Some(input) = W::bypass_input(&t.child(call)) { paths(view, sites, &input); } }
@@ -2133,7 +2133,8 @@ pub fn lower(fusion: bool, dynamic: bool, count_source: &CountSource, residual: 
 }
 
 fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term) -> Res<RegionT> {
-    let mut view = residual::residual_view(residual)?;
+    let view = residual::residual_view(residual)?;
+    let mut captures = view.owned_bindings();
     let refuse = |code: &str, message: &str| -> Stop { refusal(term, code, message) };
     let result_ty = term.ty().clone();
     let arena = term.arena();
@@ -2142,14 +2143,14 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         match term.node {
             Node::Hof(id) if arena.hof(id).kind == HofKind::Map && !arena.term_ids(arena.hof(id).args).is_empty() => {
                 let parts = arena.term_ids(arena.hof(id).args);
-                let (params, body, bindings) = function_body(residual, &view.bindings, &result_ty, None, &term.child(parts[0]))?;
+                let (params, body, bindings) = function_body(residual, &captures, &result_ty, None, &term.child(parts[0]))?;
                 (params, None, body, &parts[1..], bindings, Iteration::Zip, RegionResult::Collect, Vec::new())
             }
             Node::Hof(id) if arena.hof(id).kind == HofKind::Reduce && arena.term_ids(arena.hof(id).args).len() == 3 => {
                 let parts = arena.term_ids(arena.hof(id).args);
                 let seed = term.child(parts[1]);
                 let source = term.child(parts[2]);
-                let (mut params, body, bindings) = function_body(residual, &view.bindings, &result_ty, Some((&seed, &source)), &term.child(parts[0]))?;
+                let (mut params, body, bindings) = function_body(residual, &captures, &result_ty, Some((&seed, &source)), &term.child(parts[0]))?;
                 if params.is_empty() { return Err(refuse("E_PACKED_FORM", "Packed reduce requires an accumulator parameter.")); }
                 let acc = params.remove(0);
                 (params, Some(acc), body, &parts[2..], bindings, Iteration::Zip, RegionResult::Accumulate(std::sync::Arc::new(seed), false), Vec::new())
@@ -2169,7 +2170,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                     accumulator,
                     term.child(node.body),
                     &term.children()[accs.len()..accs.len() + clauses.len()],
-                    Cow::Borrowed(view.bindings.as_slice()),
+                    Cow::Borrowed(captures.as_slice()),
                     Iteration::Product,
                     result,
                     arena.skip(node.skip).iter().map(|&range| arena.indices(range).to_vec()).collect(),
@@ -2185,12 +2186,12 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                 let body = builder.rebuild(&source, Draft::RefBinding("@item".to_owned(), Vec::new()));
                 let body = builder.with_type(body, &ty);
                 let body = builder.freeze().handle(body);
-                (vec![(Pattern::Name("@item".to_owned()), None)], None, body, term.children(), Cow::Borrowed(view.bindings.as_slice()), Iteration::Zip, RegionResult::Sum(true), Vec::new())
+                (vec![(Pattern::Name("@item".to_owned()), None)], None, body, term.children(), Cow::Borrowed(captures.as_slice()), Iteration::Zip, RegionResult::Sum(true), Vec::new())
             }
             _ => return Err(refuse("E_PACKED_FORM", "Packed kernels require map, reduce, a numeric loop or array/sum.")),
         };
     let bindings = match bindings {
-        Cow::Borrowed(_) => std::mem::take(&mut view.bindings),
+        Cow::Borrowed(_) => std::mem::take(&mut captures),
         Cow::Owned(bindings) => bindings,
     };
     let binding_fn: Option<String> = match term.node {
@@ -2327,8 +2328,8 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         Err(Stop::Unsupported) => return Err(refuse("E_PACKED_LIMIT", "Packed product source count exceeds the integer limit.")),
         Err(other) => return Err(other),
     };
-    let site = term.path().map(|ids| ids.iter().map(|&id| term.name(id).to_owned()).collect()).unwrap_or_else(|| view.site.clone());
-    let mut sites: Vec<(i64, Path, Vec<i64>)> = vec![(view.instance, site, view.iter.clone())];
+    let site = term.path().map(|ids| ids.iter().map(|&id| term.name(id).to_owned()).collect()).unwrap_or_else(|| view.site.as_ref().clone());
+    let mut sites: Vec<(i64, Path, Vec<i64>)> = vec![(view.instance, site, view.iter.to_vec())];
     paths(&view, &mut sites, &body);
     if let Node::Hof(id) = term.node {
         if let Some(&id) = arena.term_ids(arena.hof(id).args).first() {
@@ -2336,14 +2337,14 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             match function.node {
                 Node::Fn(id) => {
                     let zone = arena.path(arena.function(id).zone).iter().map(|&id| term.name(id).to_owned()).collect();
-                    sites.push((view.instance, zone, view.iter.clone()));
+                    sites.push((view.instance, zone, view.iter.to_vec()));
                 }
                 Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
                     if let Some(Value::Fn(f)) = residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
                         if let Some((_, body)) = residual::function_body(f) {
                             if let Some(p) = body.path() {
                                 let keep = p.len().saturating_sub(1);
-                                sites.push((view.instance, p[..keep.min(p.len())].iter().map(|&id| body.name(id).to_owned()).collect(), view.iter.clone()));
+                                sites.push((view.instance, p[..keep.min(p.len())].iter().map(|&id| body.name(id).to_owned()).collect(), view.iter.to_vec()));
                             }
                         }
                     }
@@ -2352,7 +2353,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             }
         }
     }
-    let skip = iteration_skips(&view.iter, &skip);
+    let skip = iteration_skips(&view.iter.to_vec(), &skip);
     let code = finish_loops(&lower.loop_finishes, std::mem::take(&mut lower.code));
     let code: Vec<I> = if code.iter().any(integer_work) {
         code
@@ -2422,8 +2423,8 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
                     Ok(Value::Fn(function)) if residual::function_body(function).map(|(_, body)| body == *t.body).unwrap_or(false) => Ok(residual::function_bindings(function)),
                     _ => Err(Stop::Unsupported),
                 },
-                (None, None) => Ok(view.bindings),
-                (None, Some(name)) => match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
+                (None, None) => Ok(view.owned_bindings()),
+                (None, Some(name)) => match view.bindings.iter().find(|(n, _)| n.as_ref() == name.as_str()).map(|(_, v)| v) {
                     Some(Value::Fn(f)) if residual::function_body(*f).map(|(_, body)| body == *t.body).unwrap_or(false) => Ok(residual::function_bindings(*f)),
                     _ => Err(Stop::Unsupported),
                 },

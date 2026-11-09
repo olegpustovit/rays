@@ -403,11 +403,11 @@ fn named_arguments_and_residual_capture() {
     let bindings = (0..20).map(|i| format!("b{i} {i}.0")).collect::<Vec<_>>().join(" ");
     let ws = check(&value(&format!("(let* [{bindings}] (+ (+ b3 b17) t))")));
     let Value::Residual(residual) = result(&static_ws(&ws), "g") else { panic!() };
-    assert_eq!(residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["b17", "b3"]);
+    assert_eq!(residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>(), vec!["b17", "b3"]);
     assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Float(22.)));
     let ws = check(&value("(let* [outer 7.0 unused 99.0 mapped (map (fn [x] (+ x (+ outer t))) (array/range 2))] 0.0)"));
     let Value::Residual(residual) = static_rec(&ws).records.iter().find(|(q, _)| *q == p(&["g", "mapped"])).unwrap().1[0].1.clone() else { panic!() };
-    assert_eq!(residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["outer"]);
+    assert_eq!(residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>(), vec!["outer"]);
     assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Floats(1, std::sync::Arc::new(vec![9., 10.]))));
     let ws = check(&value("(let* [outside 7.0 unused 8.0] (let* [local (+ outside t) f (fn [x] (+ x (+ local outside))) mapped (map f (list 1.0 2.0))] 0.0))"));
     let root = &ws.graphs[0].body;

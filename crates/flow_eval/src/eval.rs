@@ -505,13 +505,13 @@ impl Route {
 // the iteration path of a call or loop pass, newest index first and shared between the contexts that extend it (plan M15):
 // extending it is one node, not a copy of the whole path
 #[derive(Clone, Default)]
-struct Iter(Option<Arc<IterNode>>);
+pub struct Iter(Option<Arc<IterNode>>);
 struct IterNode { index: i64, len: usize, up: Iter }
 impl Iter {
-    fn len(&self) -> usize { self.0.as_ref().map_or(0, |node| node.len) }
+    pub fn len(&self) -> usize { self.0.as_ref().map_or(0, |node| node.len) }
     fn push(&self, index: i64) -> Iter { Iter(Some(Arc::new(IterNode { index, len: self.len() + 1, up: self.clone() }))) }
     fn from_slice(indices: &[i64]) -> Iter { indices.iter().fold(Iter::default(), |up, index| up.push(*index)) }
-    fn to_vec(&self) -> Vec<i64> {
+    pub fn to_vec(&self) -> Vec<i64> {
         let mut out = Vec::with_capacity(self.len());
         let mut at = &self.0;
         while let Some(node) = at { out.push(node.index); at = &node.up.0; }
@@ -529,6 +529,11 @@ impl Iter {
         }
     }
 }
+impl std::fmt::Debug for Iter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { std::fmt::Debug::fmt(&self.to_vec(), f) }
+}
+impl PartialEq for Iter { fn eq(&self, other: &Self) -> bool { self.same(other) } }
+impl Eq for Iter {}
 #[derive(Clone)]
 struct ExecCtx { arena: i64, inst: i64, prefix: Arc<Path>, base: Arc<Path>, route: Route, site: Arc<Path>, iter: Iter, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<Arc<str>> }
 // A scope: the captured bindings it starts from, and the names bound since, newest first (a bind is one node, not a map copy).
@@ -3291,11 +3296,18 @@ fn replace_eval_value(evaluated: &mut Eval, original: &Value, replacement: &Valu
 }
 pub mod residual {
     use super::*;
+    pub use super::Iter;
     #[derive(Clone, Debug)]
     pub struct View {
-        pub term: Arc<Term>, pub bindings: Vec<(String, Value)>, pub site: Path, pub owner: Path,
-        pub iter: Vec<i64>, pub instance: i64, pub prefix: Path, pub previous: bool,
+        pub term: Arc<Term>, pub bindings: Arc<[(Arc<str>, Value)]>, pub site: Arc<Path>, pub owner: Arc<Path>,
+        pub iter: Iter, pub instance: i64, pub prefix: Arc<Path>, pub previous: bool,
         pub host: bool, pub geometry: bool, pub context: Context,
+    }
+    impl View {
+        /// An owned environment for callers that need to change bindings or retain string keys.
+        pub fn owned_bindings(&self) -> Vec<(String, Value)> {
+            self.bindings.iter().map(|(name, value)| (name.to_string(), value.clone())).collect()
+        }
     }
     pub type ResidualView = View;
     pub fn handle(handlers: ResidualHandlers, run: &mut dyn FnMut() -> Result<Eval, Diagnostic>) -> Result<Eval, Diagnostic> {
@@ -3347,9 +3359,9 @@ pub mod residual {
         let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");
         let residual = own_res(arena, &id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
         Ok(View {
-            term: residual.term.clone(), bindings: residual.env.iter().map(|(name, value)| (name.to_string(), value.clone())).collect(), site: site(&residual.ctx),
-            owner: (*residual.ctx.base).clone(), iter: residual.ctx.iter.to_vec(), instance: residual.ctx.inst,
-            prefix: (*residual.ctx.prefix).clone(), previous: residual.previous, host: residual.ctx.host,
+            term: residual.term.clone(), bindings: residual.env.clone(), site: residual.ctx.site.clone(),
+            owner: residual.ctx.base.clone(), iter: residual.ctx.iter.clone(), instance: residual.ctx.inst,
+            prefix: residual.ctx.prefix.clone(), previous: residual.previous, host: residual.ctx.host,
             geometry: residual.ctx.geometry, context: residual.ctx.context.clone(),
         })
     }
@@ -3768,6 +3780,45 @@ pub fn live_kernels_get() -> Arc<dyn Fn(&[Node]) -> bool + Send + Sync> { LIVE_K
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn residual_views_share_captures_paths_and_iteration_without_allocating() {
+        use crate::test_workspace_eval::{check, result};
+        let evaluated = static_eval(&check("(workspace w (graph g :context value (let* [config {:gain 7.0 :label \"shared\"}] (+ config.gain t))))")).unwrap();
+        let Value::Residual(id) = result(&evaluated, "g") else { panic!("residual") };
+        let slot = arena_for_residual(&id).unwrap();
+        {
+            let mut cell = held(&slot);
+            let residual = cell.as_mut().unwrap().residuals.get_mut(&id).unwrap();
+            residual.ctx.prefix = Arc::new(vec!["outer".into()]);
+            residual.ctx.base = Arc::new(vec!["g".into()]);
+            residual.ctx.site = Arc::new(vec!["outer".into(), "g".into(), "value".into()]);
+            residual.ctx.iter = Iter::from_slice(&[3, 5, 8]);
+        }
+        let view = residual::residual_view(id).unwrap();
+        assert!(!view.bindings.is_empty());
+        let second = residual::residual_view(id).unwrap();
+        assert!(Arc::ptr_eq(&view.bindings, &second.bindings));
+        assert!(Arc::ptr_eq(&view.site, &second.site));
+        assert!(Arc::ptr_eq(&view.owner, &second.owner));
+        assert!(Arc::ptr_eq(&view.prefix, &second.prefix));
+        assert!(Arc::ptr_eq(view.iter.0.as_ref().unwrap(), second.iter.0.as_ref().unwrap()));
+        assert_eq!(view.site.as_slice(), ["outer", "g", "value"]);
+        assert_eq!(view.owner.as_slice(), ["g"]);
+        assert_eq!(view.prefix.as_slice(), ["outer"]);
+        assert_eq!(view.iter.to_vec(), [3, 5, 8]);
+        mem_sys::local_reset();
+        let started = std::time::Instant::now();
+        for _ in 0..1024 { std::hint::black_box(residual::residual_view(id).unwrap()); }
+        let allocations = mem_sys::local_alloc_count();
+        eprintln!("1024 residual views: {allocations} allocations / {:?}", started.elapsed());
+        assert_eq!(allocations, 0, "reading retained immutable context must share its storage");
+        drop(evaluated);
+        RECENT_ARENAS.with(|recent| recent.borrow_mut().retain(|retained| !Arc::ptr_eq(retained, &slot)));
+        drop(slot);
+        assert_eq!(residual::residual_view(id).unwrap_err().code, "E_RESIDUAL_ID");
+        assert_eq!(view.iter.to_vec(), [3, 5, 8], "a snapshot survives its evaluation");
+    }
 
     #[test]
     fn inline_relocation_shares_unchanged_environments_and_rewrites_nested_ids() {

@@ -120,12 +120,12 @@ fn field_of(value: Option<Value>, field: &str) -> Option<Value> {
 }
 
 /// The captured value a term names (`captured` / `lookup` of the OCaml).
-fn lookup(bindings: &[(String, Value)], term: &Term) -> Option<Value> {
+fn lookup(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term) -> Option<Value> {
     match term.node {
         TNode::Text(id) => Some(Value::Text(term.arena().bytes(id).to_vec())),
         TNode::RefBinding(id) => {
             let binding = term.arena().ref_binding(id);
-            let mut value = assoc(bindings, term.name(binding.name)).cloned();
+            let mut value = bindings(term.name(binding.name));
             for &field in term.arena().name_ids(binding.fields) {
                 value = field_of(value, term.name(field));
             }
@@ -142,7 +142,7 @@ fn lookup(bindings: &[(String, Value)], term: &Term) -> Option<Value> {
 }
 
 /// `captured`: like `lookup` but a literal `Text` term is not a capture.
-pub fn captured(bindings: &[(String, Value)], term: &Term) -> Option<Value> {
+pub fn captured(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term) -> Option<Value> {
     match term.node {
         TNode::RefBinding(_) => lookup(bindings, term),
         TNode::Get(id) => {
@@ -161,13 +161,13 @@ struct Reads {
     opaque: bool,
 }
 
-fn arg_geometry(bindings: &[(String, Value)], term: &Term, args: flow_check::term_arena::RangeId) -> Option<i64> {
+fn arg_geometry(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term, args: flow_check::term_arena::RangeId) -> Option<i64> {
     term.arena().fields(args).iter().find(|field| term.name(field.name) == "geometry")
         .and_then(|field| lookup(bindings, &term.child(field.term))).as_ref().and_then(geometry_id)
 }
 
-fn checked_reads(bindings: &[(String, Value)], term: &Term, st: &mut Reads) -> Vec<i64> {
-    fn scan(bindings: &[(String, Value)], term: &Term, st: &mut Reads, safe: &mut Vec<i64>, unsafe_: &mut Vec<i64>) {
+fn checked_reads(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term, st: &mut Reads) -> Vec<i64> {
+    fn scan(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term, st: &mut Reads, safe: &mut Vec<i64>, unsafe_: &mut Vec<i64>) {
         match term.node {
             TNode::Op(id) => {
                 let op = term.arena().op(id);
@@ -236,8 +236,8 @@ fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
         Value::Residual(r) => {
             if st.seen.residuals.insert(r.0) {
                 if let Ok(view) = E::residual::residual_view(*r) {
-                    let safe = checked_reads(&view.bindings, &view.term, st);
-                    for (_, v) in &view.bindings {
+                    let safe = checked_reads(&|name| view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v.clone()), &view.term, st);
+                    for (_, v) in view.bindings.iter() {
                         visit_reads(&safe, v, st);
                     }
                 }
@@ -251,7 +251,7 @@ fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
                         st.opaque = true;
                         Vec::new()
                     }
-                    Some((_, body)) => checked_reads(&bindings, &body, st),
+                    Some((_, body)) => checked_reads(&|name| assoc(&bindings, name).cloned(), &body, st),
                 };
                 for (_, v) in &bindings {
                     visit_reads(&safe, v, st);
@@ -739,7 +739,7 @@ impl Specializer<'_> {
                 let done = match E::residual::residual_view(*r) {
                     Err(_) => (value.clone(), false),
                     Ok(view) => {
-                        let mapped: Vec<(String, (Value, bool))> = view.bindings.iter().map(|(n, v)| (n.clone(), self.map(v))).collect();
+                        let mapped: Vec<(String, (Value, bool))> = view.bindings.iter().map(|(n, v)| (n.to_string(), self.map(v))).collect();
                         if mapped.iter().all(|(_, (_, changed))| !changed) {
                             (value.clone(), false)
                         } else {
@@ -1516,7 +1516,7 @@ fn origin_of(by_source: &[(i64, i64)], id: i64) -> Option<i64> {
     by_source.iter().find(|(k, _)| *k == id).map(|(_, o)| *o)
 }
 
-fn captured_args(bindings: &[(String, Value)], term: &Term, args: flow_check::term_arena::RangeId) -> Vec<(String, Value)> {
+fn captured_args(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term, args: flow_check::term_arena::RangeId) -> Vec<(String, Value)> {
     term.arena().fields(args).iter().filter_map(|field| captured(bindings, &term.child(field.term)).map(|v| (term.name(field.name).to_owned(), v))).collect()
 }
 
@@ -1540,7 +1540,8 @@ fn owner_origin(by_source: &[(i64, i64)], id: i64, parts: &[&str]) -> Option<Ori
 }
 
 fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
-    let bindings = E::residual::residual_bindings(residual)?;
+    let view = E::residual::residual_view(residual).ok()?;
+    let bindings = |name: &str| view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v.clone());
     let topology_component: Option<(String, Vec<(String, Value)>)> = match term.node {
         TNode::Get(id) if {
             let inner = term.child(term.arena().get(id).value);
@@ -1559,7 +1560,8 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
     // a fill of one value per point ([array/int (sop/count g :points) v]) or its index
     // ([array/range (sop/count g :points)]) counts g's points
     fn filled(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
-        let bindings = E::residual::residual_bindings(residual)?;
+        let view = E::residual::residual_view(residual).ok()?;
+        let bindings = |name: &str| view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v.clone());
         match term.node {
             TNode::Op(id) if ["array/int", "array/float", "array/vec2", "array/vec3", "array/vec4", "array/range"].contains(&term.name(term.arena().op(id).op)) => {
                 match term.arena().fields(term.arena().op(id).args).iter().find(|field| term.name(field.name) == "count").and_then(|field| captured(&bindings, &term.child(field.term))) {
@@ -1715,7 +1717,7 @@ fn borrowed_value(geometry: &GeometryLookup, value: &Value) -> Result<Option<Vec
 
 fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &Term) -> Result<Option<Vec<Column>>, Diagnostic> {
     let Ok(view) = E::residual::residual_view(residual) else { return Ok(None) };
-    let bindings = view.bindings;
+    let bindings = |name: &str| view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v.clone());
     match term.node {
         TNode::Op(id) if term.name(term.arena().op(id).op) == "sop/attr" => {
             let args = term.arena().fields(term.arena().op(id).args);
@@ -1852,7 +1854,8 @@ fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
                 term.name(op.op) == "exact" && args.len() == 1 && term.name(args[0].name) == "value"
             } => find(constructors, kind, seen, residual, &term.child(term.arena().fields(term.arena().op(id).args)[0].term)),
             TNode::RefBinding(..) | TNode::Get(..) => {
-                let bindings = E::residual::residual_bindings(residual)?;
+                let view = E::residual::residual_view(residual).ok()?;
+                let bindings = |name: &str| view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v.clone());
                 match captured(&bindings, term) {
                     Some(Value::Residual(nested)) if !seen.contains(&nested.0) => {
                         seen.push(nested.0);

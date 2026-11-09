@@ -46,7 +46,7 @@ fn storage(values: &[Value]) -> i64 {
             v @ (Value::Record(_) | Value::Struct(_)) => fields(seen, v.geo_fields().unwrap()),
             Value::Fn(f) if seen.functions.insert(*f) => fields(seen, &e::residual::function_bindings(*f)),
             Value::Residual(r) if seen.residuals.insert(*r) => match e::residual::residual_view(*r) {
-                Ok(view) => fields(seen, &view.bindings),
+                Ok(view) => view.bindings.iter().fold(0, |bytes, (_, x)| add_bytes(bytes, visit(seen, x))),
                 Err(_) => 0,
             },
             _ => 0,

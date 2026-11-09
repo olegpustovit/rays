@@ -1281,7 +1281,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
     let mut sources: Vec<String> = Vec::new();
     for (residual, term) in r.sources.iter() {
         let view = E::residual::residual_view(*residual)?;
-        let bound = E::residual::with_bindings(*residual, term, &view.bindings)?;
+        let bound = E::residual::with_bindings(*residual, term, &view.owned_bindings())?;
         let program = match core_lower::lower(None, None, true, None, None, bound) {
             Ok(p) => p,
             Err(form) => return Err(refuse(&format!("Region input preparation: {form}"))),
@@ -1292,11 +1292,11 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
     for value in r.uniforms.iter() {
         let view = E::residual::residual_view(r.residual)?;
         let source = C::Source {
-            site: view.site.clone(),
-            owner: view.owner.clone(),
+            site: view.site.as_ref().clone(),
+            owner: view.owner.as_ref().clone(),
             instance: view.instance,
-            prefix: view.prefix.clone(),
-            iter: view.iter.iter().map(|i| Iteration::Static_index(*i)).collect(),
+            prefix: view.prefix.as_ref().clone(),
+            iter: view.iter.to_vec().into_iter().map(Iteration::Static_index).collect(),
             span: Some(view.term.form().span.clone()),
         };
         let mut result: i64 = -1;

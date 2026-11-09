@@ -72,7 +72,7 @@ fn source_count(declarations: &str, body: &str) -> (RegionT, flow_syntax::value:
     let p = ts::compile_with(None, true, declarations, &format!("(map (fn [(i : int)] (int/add i 7)) (array/range {body} :type int))"));
     let (residual, term) = p.sources[0].clone();
     let view = E::residual::residual_view(residual).unwrap();
-    let input = ok(E::residual::with_bindings(residual, &term, &view.bindings));
+    let input = ok(E::residual::with_bindings(residual, &term, &view.owned_bindings()));
     let rebuilt = R::rebuild(&p, R::Rebuild { sources: Some(vec![(input, term)]), count: Some(None), origin: Some(None), ..Default::default() }).unwrap_or_else(|ds| panic!("{}", ts::show_ds(&ds)));
     (rebuilt, input)
 }

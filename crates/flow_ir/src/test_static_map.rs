@@ -275,7 +275,7 @@ fn inconsistent_gather_type_is_refused() {
         }
     })[0];
     let term = builder.freeze().handle(term);
-    let rid = ok(e::residual::with_bindings(residual_id, &term, &view.bindings));
+    let rid = ok(e::residual::with_bindings(residual_id, &term, &view.owned_bindings()));
     match compile_region_term(rid, &term) {
         Err(ds) if ds.len() == 1 => {
             let diagnostic = &ds[0];

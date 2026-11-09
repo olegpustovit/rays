@@ -569,10 +569,10 @@ impl Lowerer {
     fn source_of_view(&self, view: &E::residual::View) -> C::Source {
         C::Source {
             site: view.site.iter().skip(view.prefix.len()).cloned().collect(),
-            owner: view.owner.clone(),
+            owner: view.owner.as_ref().clone(),
             instance: view.instance,
-            prefix: view.prefix.clone(),
-            iter: view.iter.iter().map(|n| C::Iteration::Static_index(*n)).collect(),
+            prefix: view.prefix.as_ref().clone(),
+            iter: view.iter.to_vec().into_iter().map(C::Iteration::Static_index).collect(),
             span: None,
         }
     }
@@ -1052,18 +1052,18 @@ impl Lowerer {
         result
     }
 
-    fn residual_body(&mut self, s: &mut Scope, r: ResidualId, mut view: E::residual::View, key: CacheKey) -> R<Lowered> {
+    fn residual_body(&mut self, s: &mut Scope, r: ResidualId, view: E::residual::View, key: CacheKey) -> R<Lowered> {
         let _phase = flow_syntax::phase_timer::measure("core.residual_body");
         let source = self.source_of_view(&view);
         // Draws and SOP cooks lower captured arrays as explicit producers, so compacted
         // counts and the regions consuming them share their Core locals.
         let captured_arrays = (self.initial.is_some() || self.has_draw || sop_cook(r))
-            && E::residual::free_names(&view.term).iter().any(|name| view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| holds_array_residual(v)).unwrap_or(false));
+            && E::residual::free_names(&view.term).iter().any(|name| view.bindings.iter().find(|(n, _)| n.as_ref() == name.as_str()).map(|(_, v)| holds_array_residual(v)).unwrap_or(false));
         let packed = if view.previous || captured_arrays { None } else { self.packed_region(r, &view) };
         let value = if let Some(region) = packed {
             self.region(s, Vec::new(), region, &view)
         } else {
-            let env: Env = std::mem::take(&mut view.bindings).into_iter().map(|(n, v)| (n, Known(v))).collect();
+            let env: Env = view.owned_bindings().into_iter().map(|(n, v)| (n, Known(v))).collect();
             if view.previous {
                 let mut src = source;
                 src.span = Some(view.term.form().span.clone());
@@ -3437,7 +3437,7 @@ mod tests {
         let evaluation = E::static_eval(&checked("(let* [s (+ t 1.)] (+ s 1.))")).expect("static");
         let Value::Residual(r) = result_g(&evaluation) else { panic!("residual") };
         let view = E::residual::residual_view(r).unwrap();
-        let Some((_, Value::Residual(inner))) = view.bindings.iter().find(|(n, _)| n == "s").cloned() else { panic!("inner") };
+        let Some((_, Value::Residual(inner))) = view.bindings.iter().find(|(n, _)| n.as_ref() == "s").cloned() else { panic!("inner") };
         let r = E::residual::with_bindings(r, &view.term, &[("s".to_owned(), source_value("test/source", Ty::Float, vec![("value".into(), Value::Residual(inner))]))]).unwrap();
         let program = lowered(r);
         let mut host = false;

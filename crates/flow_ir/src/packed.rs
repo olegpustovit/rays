@@ -2903,12 +2903,16 @@ fn same_bindings(a: &[(String, Value)], b: &[(String, Value)]) -> bool {
     a.len() == b.len() && a.iter().zip(b.iter()).all(|((n, x), (m, y))| n == m && same_value(x, y))
 }
 
+fn same_captures(a: &[(Arc<str>, Value)], b: &[(Arc<str>, Value)]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|((n, x), (m, y))| n == m && same_value(x, y))
+}
+
 fn same_context(view: &RView, other: &RView) -> bool {
     view.instance == other.instance
         && view.site == other.site
         && view.prefix == other.prefix
         && view.owner == other.owner
-        && same_bindings(&view.bindings, &other.bindings)
+        && same_captures(&view.bindings, &other.bindings)
 }
 
 fn same_resolve(a: &Option<Resolve>, b: &Option<Resolve>) -> bool {
@@ -2934,7 +2938,7 @@ fn same_residual(a: ResidualId, b: ResidualId) -> bool {
         && x.owner == y.owner
         && x.host == y.host
         && x.geometry == y.geometry
-        && same_bindings(&x.bindings, &y.bindings)
+        && same_captures(&x.bindings, &y.bindings)
 }
 
 fn scope_enter(run: &Run) -> bool {
@@ -3085,7 +3089,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
         Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => {
             let name = term.name(term.arena().ref_binding(*id).name);
             let view = E::residual::residual_view(residual)?;
-            match view.bindings.iter().find(|(n, _)| n == name) {
+            match view.bindings.iter().find(|(n, _)| n.as_ref() == name) {
                 Some((_, Value::Residual(r))) => {
                     let inner = E::residual::residual_view(*r)?;
                     Some((*r, inner.term))
@@ -3430,8 +3434,8 @@ pub mod host {
         fn residual(r: ResidualId, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<(i64, i64)>) -> Result<(), Diagnostic> {
             let id = (r.1, r.0);
             if visited.insert(id) {
-                for (_, v) in E::residual::residual_view(r)?.bindings {
-                    value(&v, types, visited)?;
+                for (_, v) in E::residual::residual_view(r)?.bindings.iter() {
+                    value(v, types, visited)?;
                 }
             }
             Ok(())
@@ -4061,8 +4065,8 @@ pub mod host {
                 return Ok(v.clone());
             }
             let view = E::residual::residual_view(residual)?;
-            let bindings: Vec<(String, Value)> = view.bindings.iter().map(|(n, v)| (n.clone(), binding_of_value(pv, resolve, made, v))).collect();
-            let residual = if same_bindings(&view.bindings, &bindings) { residual } else { E::residual::with_bindings(residual, &view.term, &bindings)? };
+            let bindings: Vec<(String, Value)> = view.bindings.iter().map(|(n, v)| (n.to_string(), binding_of_value(pv, resolve, made, v))).collect();
+            let residual = if view.bindings.len() == bindings.len() && view.bindings.iter().zip(&bindings).all(|((n, x), (m, y))| n.as_ref() == m && same_value(x, y)) { residual } else { E::residual::with_bindings(residual, &view.term, &bindings)? };
             let value = pv_evaluate_with(pv, resolve, residual, &view.term)?;
             made.borrow_mut().insert(id, value.clone());
             Ok(value)

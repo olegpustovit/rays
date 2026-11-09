@@ -666,7 +666,7 @@ fn size_dependencies(plan: &e::Plan, root: i64) -> (bool, bool) {
             Value::Residual(r) if !w.residuals.contains(&r.0) => {
                 w.residuals.insert(r.0);
                 if let Ok(view) = e::residual::residual_view(*r) {
-                    for (_, x) in &view.bindings {
+                    for (_, x) in view.bindings.iter() {
                         visit(w, x);
                     }
                 }
@@ -715,7 +715,7 @@ fn image_dependencies(plan: &e::Plan, root: i64) -> (Vec<i64>, (bool, deps::T)) 
             Value::Residual(r) if !w.residuals.contains(&r.0) => {
                 w.residuals.insert(r.0);
                 if let Ok(view) = e::residual::residual_view(*r) {
-                    for (_, x) in &view.bindings {
+                    for (_, x) in view.bindings.iter() {
                         visit(w, x);
                     }
                 }

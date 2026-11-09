@@ -21,7 +21,7 @@ fn functions(v: &Value) -> Value {
             ("captures".into(), functions(&Value::Record(E::residual::function_bindings(*f)))),
         ]),
         Value::Residual(r) => match E::residual::residual_view(*r) {
-            Ok(view) => Value::Record(vec![("residual".into(), Value::Text(lisp::flat(&view.term.form()).into_bytes())), ("bindings".into(), functions(&Value::Record(view.bindings.clone())))]),
+            Ok(view) => Value::Record(vec![("residual".into(), Value::Text(lisp::flat(&view.term.form()).into_bytes())), ("bindings".into(), Value::Record(view.bindings.iter().map(|(name, value)| (name.to_string(), functions(value))).collect()))]),
             Err(_) => v.clone(),
         },
         Value::List(xs) => Value::List(std::sync::Arc::new(xs.iter().map(functions).collect())),

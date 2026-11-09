@@ -681,7 +681,7 @@ pub mod chain {
         match value {
             Value::Residual(r) => {
                 let view = E::residual::residual_view(*r).ok()?;
-                Some((view.site.clone(), view.iter.clone()))
+                Some((view.site.as_ref().clone(), view.iter.to_vec()))
             }
             Value::Record(fields) => fields.iter().rev().find_map(|(_, v)| site_of(v)),
             _ => None,
@@ -2011,7 +2011,7 @@ fn cooked_sources(value: &Value) -> Vec<i64> {
             Value::Residual(r) => {
                 if residuals.insert(E::residual::residual_id(*r)) {
                     if let Ok(view) = E::residual::residual_view(*r) {
-                        for (_, b) in &view.bindings {
+                        for (_, b) in view.bindings.iter() {
                             visit(b, residuals, functions, ids);
                         }
                     }
@@ -4754,7 +4754,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
         let origins = image_origins.clone();
         Arc::new(move |producer: Option<W::Path>, residual: ResidualId| {
             let Ok(view) = E::residual::residual_view(residual) else { return };
-            let key = (view.instance, view.site.clone(), view.iter.clone());
+            let key = (view.instance, view.site.as_ref().clone(), view.iter.to_vec());
             let mut origins = origins.lock().unwrap();
             let origin = match origins.get(&key) {
                 None => producer,

@@ -49,7 +49,7 @@ fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     let view = residual::residual_view(root).unwrap();
     let flow_check::workspace::Node::State(id) = view.term.node else { panic!("state term") };
     let arena = view.term.arena();
-    let mut path = view.prefix.clone();
+    let mut path = view.prefix.as_ref().clone();
     path.extend(arena.path(arena.state(id).zone).iter().map(|id| view.term.name(*id).to_owned()));
     let state = create_state();
     let reads = Arc::new(AtomicI64::new(0));
@@ -61,11 +61,11 @@ fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     })).unwrap();
     let live = at(0., 0, 0);
     residual::bind_live(root, &live, Some(&state)).unwrap();
-    let read = || residual::state_read(root, view.instance, path.clone(), view.iter.clone(), false, &|| data.clone()).unwrap();
+    let read = || residual::state_read(root, view.instance, path.clone(), view.iter.to_vec(), false, &|| data.clone()).unwrap();
     assert!(device::held_by_device(&read()));
-    let stored = residual::state_write(root, view.instance, path.clone(), view.iter.clone(), false, data).unwrap();
+    let stored = residual::state_write(root, view.instance, path.clone(), view.iter.to_vec(), false, data).unwrap();
     assert!(device::held_by_device(&stored));
-    assert!(device::held_by_device(&residual::state_peek(root, view.instance, path.clone(), view.iter.clone(), false).unwrap()));
+    assert!(device::held_by_device(&residual::state_peek(root, view.instance, path.clone(), view.iter.to_vec(), false).unwrap()));
     assert_eq!(reads.load(O::SeqCst), 0);
     assert_eq!(host::force_reference(&Value::Residual(root), &live, Some(&state), None, None).unwrap(), Value::Floats(1, Arc::new(vec![2., 3., 4.])));
     assert!(reads.load(O::SeqCst) > 0);

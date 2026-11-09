@@ -842,8 +842,8 @@ fn plain_value(value: &Value) -> bool {
 /// has no value key, so a view holding one is never matched.
 fn acceptance_key(view: &e::residual::View) -> Option<String> {
     if !view.bindings.iter().all(|(_, x)| plain_value(x)) { return None; }
-    let iter: Vec<i64> = match view.term.node { w::Node::Hof(..) => Vec::new(), _ => view.iter.clone() };
-    let bindings: Vec<(String, Vec<u8>)> = view.bindings.iter().map(|(n, x)| (n.clone(), v::key_of(&|r| r.0, x))).collect();
+    let iter: Vec<i64> = match view.term.node { w::Node::Hof(..) => Vec::new(), _ => view.iter.to_vec() };
+    let bindings: Vec<(String, Vec<u8>)> = view.bindings.iter().map(|(n, x)| (n.to_string(), v::key_of(&|r| r.0, x))).collect();
     Some(format!(
         "{:?}",
         (
@@ -883,7 +883,7 @@ impl Qualifier {
             .t
             .index
             .get(&form.id)
-            .and_then(|v| v.iter().find(|(key, owner, _)| key_same(key, form) && *owner == view.owner))
+            .and_then(|v| v.iter().find(|(key, owner, _)| key_same(key, form) && owner.as_slice() == view.owner.as_slice()))
             .map(|(_, _, p)| p.clone())
             .unwrap_or_default();
         let producer: Option<Path> = if producers.len() == 1 { producers.iter().next().cloned() } else { None };
@@ -917,7 +917,7 @@ impl Qualifier {
                         Some(field) => {
                             let mapped = e::residual::eval_term(residual, &arena.handle(field.term), &input::at_time(0.0), None, None, None).and_then(|x| match x {
                                 Value::Fn(function) => e::host::map_function(
-                                    Some((view.instance, view.site.clone(), view.iter.clone())),
+                                    Some((view.instance, view.site.as_ref().clone(), view.iter.to_vec())),
                                     Some(path.clone()),
                                     &flow_syntax::ty::FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 },
                                     function,
@@ -969,7 +969,7 @@ impl Qualifier {
                             d.message,
                             path.join("/"),
                             view.instance,
-                            view.iter.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+                            view.iter.to_vec().iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
                         ),
                         ..d
                     })
@@ -1454,7 +1454,7 @@ pub mod executor {
                     self.validated.insert((r.1, r.0), ());
                     if !self.inline.contains_key(&(r.1, r.0)) { self.validate_residual(*r)?; }
                     let view = e::residual::residual_view(*r)?;
-                    for (_, x) in &view.bindings { self.validate_value(x)?; }
+                    for (_, x) in view.bindings.iter() { self.validate_value(x)?; }
                     Ok(())
                 }
                 Value::List(xs) => {
@@ -1643,7 +1643,7 @@ pub mod executor {
             let run = self.clone();
             Arc::new(move |residual, term| {
                 let view = e::residual::residual_view(residual)?;
-                let residual = if *view.term == *term { residual } else { e::residual::with_bindings(residual, term, &view.bindings)? };
+                let residual = if *view.term == *term { residual } else { e::residual::with_bindings(residual, term, &view.owned_bindings())? };
                 run.walk(&Value::Residual(residual))
             })
         }
@@ -1906,9 +1906,9 @@ pub mod executor {
                         Ok(view) => {
                             let sites = match packed_root(program) {
                                 Some(p) => packed::provenance(&p),
-                                None => vec![(view.instance, view.site.clone(), view.iter.clone())],
+                                None => vec![(view.instance, view.site.as_ref().clone(), view.iter.to_vec())],
                             };
-                            ((view.site, view.iter), sites)
+                            ((view.site.as_ref().clone(), view.iter.to_vec()), sites)
                         }
                         Err(_) => ((vec!["@value".to_owned()], Vec::new()), Vec::new()),
                     },
@@ -2205,7 +2205,7 @@ pub mod executor {
                     match term.node {
                         Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
                             let view = e::residual::residual_view(residual)?;
-                            match view.bindings.iter().find(|(n, _)| n == term.name(arena.ref_binding(id).name)) {
+                            match view.bindings.iter().find(|(n, _)| n.as_ref() == term.name(arena.ref_binding(id).name)) {
                                 Some((_, Value::Residual(r))) => {
                                     let rv = e::residual::residual_view(*r)?;
                                     find(ranges, *r, &rv.term)
@@ -2415,7 +2415,7 @@ pub mod executor {
         if gpu.backend.is_none() {
             fn site(value: &Value) -> Option<Id> {
                 match value {
-                    Value::Residual(r) => e::residual::residual_view(*r).ok().map(|view| (view.site, view.iter)),
+                    Value::Residual(r) => e::residual::residual_view(*r).ok().map(|view| (view.site.as_ref().clone(), view.iter.to_vec())),
                     Value::Record(fields) => fields.iter().rev().find_map(|(_, x)| site(x)),
                     _ => None,
                 }
@@ -2878,7 +2878,7 @@ mod tests {
         }
         let fs = fields(view.term.arena(), view.term.row_id()).expect("record fields");
         let value = Value::Record(
-            fs.iter().map(|(name, term)| (name.clone(), Value::Residual(ok(e::residual::with_bindings(*root, term, &view.bindings))))).collect(),
+            fs.iter().map(|(name, term)| (name.clone(), Value::Residual(ok(e::residual::with_bindings(*root, term, &view.owned_bindings()))))).collect(),
         );
         let program = ok(executor::compile(&value, &executor::CompileOptions::default()));
         let live = input::at_time(5001.0);
@@ -3206,11 +3206,11 @@ mod tests {
                             let o = packed::CompileOptions { fusion, ..packed::CompileOptions::default() };
                             if let Ok(compiled) = packed::compile_result(&o, residual, &view.term) {
                                 if packed::gpu_refusals(false, false, &compiled).is_empty() {
-                                    assert_eq!(packed::site(&compiled), (view.instance, producer.clone().unwrap(), view.iter.clone()));
+                                    assert_eq!(packed::site(&compiled), (view.instance, producer.clone().unwrap(), view.iter.to_vec()));
                                 }
                             }
                         }
-                        seen.lock().unwrap().push((producer, view.site.clone()));
+                        seen.lock().unwrap().push((producer, view.site.as_ref().clone()));
                     }
                 })),
                 ..Default::default()
@@ -3357,7 +3357,7 @@ mod tests {
                 let view = e::residual::residual_view(*r).unwrap();
                 core_lower::lower(None, None, false, None, None, *r).map(|core| !core.regions.is_empty()).unwrap_or(false)
                     || packed_child_region(*r, &view.term)
-                    || has_fields(&view.bindings)
+                    || view.bindings.iter().any(|(_, x)| has_region(x))
             }
             Value::List(xs) => xs.iter().any(has_region),
             v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => has_fields(v.geo_fields().unwrap()),

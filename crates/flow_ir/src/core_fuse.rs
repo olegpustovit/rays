@@ -157,7 +157,7 @@ fn source_region(through_exact: bool, dynamic: bool, count_source: &CountSource,
         Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
             let name = term.name(arena.ref_binding(id).name);
             let view = residual::residual_view(residual).ok()?;
-            match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
+            match view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v) {
                 Some(Value::Residual(r)) => {
                     let inner = residual::residual_view(*r).ok()?;
                     source_region(through_exact, dynamic, count_source, *r, &inner.term)
@@ -265,7 +265,7 @@ fn resolved(residual: ResidualId, term: &Term) -> Resolved {
         if term.arena().name_ids(binding.fields).is_empty() {
             let name = term.name(binding.name);
             if let Ok(view) = residual::residual_view(residual) {
-                match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()) {
+                match view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v.clone()) {
                     Some(Value::Residual(r)) => {
                         if let Ok(inner) = residual::residual_view(r) { return resolved(r, &inner.term); }
                     }
