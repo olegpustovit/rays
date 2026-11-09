@@ -192,8 +192,8 @@
     "note": "85e72ed5 \u2014 fourteen repoint paths share offsets/kinds; one validated constructor; polygons_shared deleted"
   },
   "R8": {
-    "status": "active",
-    "note": "Full 24-file mutation draft prepared outside worktree; no production installation or builds"
+    "status": "done",
+    "note": "70a05621 \u2014 thirty mutable Pane operations, all64 Pane rebuilds/with_pane removed; three mutable Tree operations"
   },
   "R9": {
     "status": "active",
@@ -209,7 +209,7 @@
   },
   "G2": {
     "status": "active",
-    "note": "Crate/type/error consolidation and 20 native test migrations prepared outside worktree; acceleration validation gaps audited"
+    "note": "9556c305 \u2014 metal crate removed; native work/tests moved into ogpu_metal; shared types and typed errors; exact Windows run pending"
   },
   "G3": {
     "status": "pending",
