@@ -19,9 +19,9 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
 | Z | 11 | 0 | 1 | 10 |
-| R | 10 | 2 | 3 | 5 |
+| R | 10 | 4 | 2 | 4 |
 | G | 7 | 0 | 1 | 6 |
-| **All** | **58** | **30** | **6** | **22** |
+| **All** | **58** | **32** | **5** | **21** |
 
 ## Items
 
@@ -57,7 +57,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | D10 | D | done | `3457d151` `82ba264f` — std i64/trim/round/min/max; syntax-aware literal-spelling comparison | Boundary/UI/SOP/text checks pass; spelling-focused1/1 and literal qualification1/1 pass |
 | D11 | D | done | `92542f6a` — canonical input Frame/panel types; borrowed routing; ec_frame/converters deleted | All-targets check10.25s; input/core17, commands9, reducer10, layout2, alloc3 pass |
 | D12 | D | done | `98ee157a` — validated Syntax replaces settings Value/codec; preferences read once; shared text helpers | all-targets5.83s; store5, text12, native guide1 pass; i64 save/Unicode regressions |
-| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` `25c98948` — established guards and measured ratchets | Sea51700/2840000; changed subdiv115325, Boolean26695, scatter1433020 allocations; zero/O(1) targets open |
+| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` `25c98948` `608c3385` — established guards and measured ratchets | Sea51565/2823000; changed subdiv114105, Boolean26695, scatter1402035 allocations; zero/O(1) targets open |
 | Z1 | Z | pending | — | Z0 idle frames at 0 |
 | Z2 | Z | pending | — | Z0; flow_ir and flow_eval suites |
 | Z3 | Z | pending | — | bench_core instructions; warm rebuild ≤ 7.4 s |
@@ -70,15 +70,15 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Z10 | Z | pending | — | Z0; per-crate clone count tracked in PROGRESS.md |
 | R1 | R | done | `c1617a45` — shared captures/paths/persistent iteration; consumers borrow; allocation guards lowered | 451 evaluator/IR +40 sequential/parallel +zero-view/native/three-kernel allocation checks pass |
 | R2 | R | done | `25c98948` — immutable parent cache layers; snapshot isolation; iterative destruction; scatter guard lowered | IR346, 10000-layer/drop guard, bench digest c4bbf006c82014c7, workspace all-targets, native/three-kernel guards pass |
-| R3 | R | active | Immutable-term free-name construction and all capture callers traced; preparation only | Sorted string capture order and sequential/parallel equality; remove runtime free-name caches |
-| R4 | R | pending | — | Library plus 49 sketches byte-identical |
+| R3 | R | done | `608c3385` — immutable lexical free-name ranges; global/per-evaluation caches removed; bypass active-input semantics preserved | Flow490, parallel40, zero-allocation reads, lowered idle/sea/three-kernel caps and workspace check pass |
+| R4 | R | active | Owner/lifetime and all operator callers traced; baseline helpers prepared; no production changes yet | Library plus 49 sketches byte-identical |
 | R5 | R | pending | — | flow_eval state |
-| R6 | R | active | 243 init callers and error/cancellation side channels traced; result predicates and par_fill patch in preparation | Group/edge-group and FlowSOP parallel equality; error priority and warm allocation caps preserved |
-| R7 | R | active | Fourteen layout-copy sites traced; shared offset/kind constructor and alias deletion underway | owned_planes_reuse; geometry signatures and topology identity |
+| R6 | R | active | Result predicates and par_fill installed across 243 constructor calls; group12 and par_fill3 guards pass | Shared parallel40 pass; full CPU/native qualification and paired timing pending |
+| R7 | R | done | `85e72ed5` — fourteen repoint paths share offsets/kinds; one validated constructor; polygons_shared deleted | Geometry429/native10, shared-storage identity, idle/sea/three warm guards pass; repoint9.8x faster |
 | R8 | R | pending | — | pxui_graph (31 cases); alloc_budget |
 | R9 | R | pending | — | Lower the alloc_budget.rs limits |
 | R10 | R | pending | — | test_prepared_scene3 |
-| G1 | G | active | Windows baseline28 GPU cases pass; core validation batch underway; thread/drain and caller migration pending | Destroyed-handle/wrong-thread regressions; macOS Metal and exact-commit Windows Vulkan parity |
+| G1 | G | active | `29c9efbf` — common validation moved to core; entry checks109→27; 98 immediate closures removed | Local56 pass10.61s; exact-commit Windows29 pass7.008s; native-only semantic migration still requires G2 |
 | G2 | G | pending | — | Move metal/tests/gpu_metal.rs into ogpu_metal |
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
@@ -113,7 +113,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 ## D-wave parallel map
 
-The D wave is complete. At most two agents build concurrently. Current build slots: R7 and G1. Root prepares R3; R6 prepares/rebases its callback migration after R7.
+The D wave is complete. At most two agents build concurrently. Current build slots are explicitly handed off between root shared validation, R6 qualification and G1 Windows qualification. R4 prepares without building.
 
 | ID | Primary crate | State |
 |----|---------------|-------|
@@ -237,3 +237,15 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - Next source owners: G1 GPU validation/layering; R7 topology layout sharing; R6 prepares group callback migration after R7; root prepares R3 immutable free names. Only G1/R7 build at this boundary. All58 requirements remain; B8 full-run timeout, preexisting shape violations, zero allocation/O(1) scratch and final qualification stay open.
 - Artifact **v22** published and verified by byte-identical source readback plus all58 live database documents. Embedded/tracked seeds agree and tracker immediate/live/offline regression passes. Snapshot **30 done / 6 active / 22 pending (51.7% by item count)**.
 - R7 source committed `85e72ed5`, still **active** pending idle/sea/scatter ratchet checks on coherent G1 source. Shared-layout regression and actual repoint sample pass (192667→19628 ns for64×4096 triangles,9.8x). Geometry429 cases pass14.59 s, native rdk_rays10 pass6.20 s, warm Boolean/subdivision pass existing caps. R6 production installation stays held through the remaining measurements.
+
+
+### Continuation — R3/R7 final proof and R6/G1 integration
+
+- Previous status-only turn classified **no progress**. Revalidated the current tree, source commits and exact live test handles, then resumed the shared regression boundary. Full58-item objective unchanged.
+- **R7 complete** `85e72ed5`: geometry429 cases pass14.59s (slowest1.207s), native rdk_rays10 pass6.20s; shared offset/kind Arc identity and fresh topology identity retained. Repoint64×4096 triangles192667→19628ns (9.8x). Final idle3 pass27.32s including24.96s compile (slowest0.399s); sea1 pass1.46s (case1.043s); warm kernels3 pass14.87s (scatter2.659s, subdivision2.369s). These runs include R3 immutable names and stable G1 layout correction; newly lowered ceilings are being reconfirmed with R6.
+- **R3 implementation**: immutable lexical NameId ranges built once at TermArena freeze replace the global cache/mutex, per-evaluation cache and repeated string interning. Sequential let/loop binders, function captures/parameters, state and call-function names preserve lexical semantics. Review found bypass must select only its active authored first input; new regression fails before the shared bypass-input correction and passes after it, including keyword-before-positional and inactive function cases.
+- R3 direct zero-allocation guard: old1024 reads3072 allocations/141.333µs; new0 allocations/3.209µs. Sample32evaluations6197→5619 allocations,320223→306240 peakB; checking25.888→24.265ms. Samples are local debug measurements, not an end-to-end frame claim. Final Flow check/eval/IR490cases pass14.52s wall (slowest deterministic evaluator2.209s). Shared R3/R6 FlowSOP parallel_exact40cases pass43.19s wall (runner42.630s; slowest light_022.603s). No goldens, deadlines or limits raised.
+- **G1 source stage** `29c9efbf`:20files net−234lines; common slot/shape/pipeline/target/command validation moved to core; Metal explicit entry/drain109→27,98 immediate closures removed. Local56cases pass10.61s wall (slowest native library0.341s); scoped all-target check1.06s. Trusted Windows checkout is clean at exact29c9efbf; scoped pinnedGNU check0.757s and fatal-validation Vulkan/core/mock29cases pass7.008s (slowest raytrace0.443s). Native transfer/render/raytrace execute without adapter skips; teardown asserts zero handles/messages. G1 remains incomplete because native-only semantic APIs still require the G2 migration; ownership/submission counters remain for G4.
+- **R3 complete** `608c3385`: final workspace all-target check9.20s passes; shared parallel40 proof above and latest native/geometry guards cover coherent R3+R6+G1 source. Idle3 pass15.27s then tightened byte limits confirmed3/3 in4.56s (slowest0.378s): basic1382/157055, empty1206/81958, bare1417/96617 allocations/B per frame. Sea passes1.68s wall (case1.171s), maximum51561/2822715 with all residency/zero-upload/bounded-close invariants; cap lowered to51565/2823000. Three warm cooks pass3.03s (scatter2.671s, subdivide2.392s, Boolean0.393s); changed caps lowered to subdivision114105/3452650 and scatter1402035/16429860, Boolean26695/926350 unchanged. No cap raised.
+- Source/index boundaries remain separate: R3 commit contains only root's guard hunk in flow_sop/test_alloc_budget; R6's Result predicate callback remains in its own diff. R4 begins exact baseline capture before checker/operator changes; G2 implementation prepares outside the worktree until its build slot is available.
+- Artifact **v23** published with the CLI and verified by byte-identical source readback, matching embedded/tracked seeds and all58 live database documents. Tracker immediate/live/offline regression passes. Snapshot **32done/5active/21pending (55.2% by item count)**. All original requirements remain; B8 timeout,495historical shape violations, zero/O(1) end state and final full qualification stay open.
