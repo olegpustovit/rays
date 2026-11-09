@@ -3,6 +3,7 @@
 //! The OCaml lowering context is shared by cook closures; its prepared-factory cache stays outside
 //! that context so returned nodes own their cook dependencies without owning themselves.
 //! OCaml exceptions (`Diagnostic.Error`) are `Result`s.
+use std::fmt::Write as _;
 use crate::{
     attribute_kernel as ak, attribute_metadata as am, catalog, context_kernel as ck, curve,
     encoded_parameters as ep, function_kernel as fk, group_kernel as gk, lisp_node as ln, network,
@@ -1041,7 +1042,7 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
         parameters.push_str(&key_text(&data));
     }
     if let Some(state) = &opts.state {
-        parameters.push_str(&E::state_stamp(state));
+        write!(parameters, "{}", E::state_stamp(state)).unwrap();
     }
     if let Some(fields) = &opts.elems {
         parameters.push_str(&key_text(&Value::Record(fields.clone())));
@@ -1455,14 +1456,8 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], source
     if env.strict_body && o.check.unwrap_or(true) {
         program.clone()?;
     }
-    let parameters = format!(
-        "{}{}:{}{}{}",
-        (env.kernel_source)(),
-        owner_name,
-        name,
-        key_text(&values),
-        o.state.as_ref().map_or(String::new(), E::state_stamp)
-    );
+    let mut parameters = format!("{}{}:{}{}", (env.kernel_source)(), owner_name, name, key_text(&values));
+    if let Some(state) = &o.state { write!(parameters, "{}", E::state_stamp(state)).unwrap(); }
     let (env_c, o_c, args_c, sources_c) = (env.clone(), o.clone(), args.to_vec(), sources.to_vec());
     let n = build::make_geometry(
         build::Args {
@@ -4191,7 +4186,8 @@ impl ZoneCook {
 
     /// The zone node of a lowered graph: it cooks `z.root` once per element.
     fn make_zone(self: &Arc<Self>, state: Option<State>, outer: Vec<(String, Value)>, z: &Zinfo, inputs: Vec<node::T>) -> node::T {
-        let mut stamp = state.as_ref().map_or(String::new(), E::state_stamp);
+        let mut stamp = String::new();
+        if let Some(state) = &state { write!(stamp, "{}", E::state_stamp(state)).unwrap(); }
         if let Some(choice) = &z.preview {
             stamp.push_str(&format!(";preview={}", digest(&format!("{choice:?}"))));
         }

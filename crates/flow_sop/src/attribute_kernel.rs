@@ -1,6 +1,7 @@
 //! Port of lib/flow_sop/attribute_kernel.ml: cook-time connection between immutable geometry and
 //! packed Flow data, and the attribute write node. The OCaml mention of Lower (fold_writes) is only
 //! a comment, so no forward hook is needed: Lower calls this module, never the reverse.
+use std::io::Write as _;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -2427,7 +2428,7 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
         parameters.extend(key(&Value::Record(elems.clone())));
     }
     if let Some(state) = &o.state {
-        parameters.extend(E::state_stamp(state).into_bytes());
+        write!(parameters, "{}", E::state_stamp(state)).unwrap();
     }
     let deps = dependencies(&match &o.guard {
         None => data.clone(),

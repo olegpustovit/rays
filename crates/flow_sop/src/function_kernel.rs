@@ -1,5 +1,6 @@
 //! Port of lib/flow_sop/function_kernel.ml(i): language-owned compiled bulk functions behind the Sop
 //! payload boundary.
+use std::io::Write as _;
 use crate::attribute_kernel;
 use flow_eval as e;
 use flow_ir::flow_ir::executor;
@@ -79,7 +80,7 @@ pub fn node(
         parameters.extend(value::key_of(&|r: ResidualId| r.0, &Value::Record(bindings.to_vec())));
     }
     if let Some(state) = state {
-        parameters.extend_from_slice(e::state_stamp(state).as_bytes());
+        write!(parameters, "{}", e::state_stamp(state)).unwrap();
     }
     let (signature, sources_owned, state, elems_owned) = (signature.clone(), sources.to_vec(), state.cloned(), elems.map(|e| e.to_vec()));
     let function_value = Value::Fn(function);

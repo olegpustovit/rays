@@ -1,5 +1,6 @@
 //! Port of lib/flow_sop/image_kernel.ml(i): packed pixel functions; procedural images never depend
 //! on the Flow compiler.
+use std::io::Write as _;
 use crate::attribute_kernel;
 use flow_check::workspace::{Path, Paths};
 use flow_eval as e;
@@ -114,7 +115,7 @@ pub fn with_inputs(t: &T, inputs: &[node::T]) -> Result<T, Diagnostic> {
 pub fn node(state: Option<&e::State>, t: &T) -> node::T {
     let mut parameters = format!("{}:{}:{}", t.identity, t.width, t.height).into_bytes();
     if let Some(state) = state {
-        parameters.extend_from_slice(e::state_stamp(state).as_bytes());
+        write!(parameters, "{}", e::state_stamp(state)).unwrap();
     }
     let (sources, packed, width, height) = (t.sources.clone(), t.packed.clone(), t.width, t.height);
     let state = state.cloned();

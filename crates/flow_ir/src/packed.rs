@@ -2871,7 +2871,7 @@ type RView = E::residual::View;
 struct ScopeData {
     resolve: Option<Resolve>,
     live: Live,
-    state_stamp: String,
+    state_stamp: E::StateStamp,
     strict: bool,
     depth: usize,
     entries: Vec<(ResidualId, Arc<Term>, Value)>,

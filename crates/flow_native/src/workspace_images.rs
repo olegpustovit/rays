@@ -53,7 +53,7 @@ struct Source {
     cone: network::Network,
     id: i64,
     lane: Rc<value_lane::Lane>,
-    state_stamp: String,
+    state_stamp: e::StateStamp,
     live: Frame,
     geometry: Option<edit_graph::T>,
     compiled: Option<edit_graph::Compiled>,
@@ -79,7 +79,7 @@ type RequestRef = Rc<RefCell<Request>>;
 struct Stamp {
     serial: i64,
     frame: Frame,
-    state_stamp: String,
+    state_stamp: Option<e::StateStamp>,
     sources: Vec<(i64, i64)>,
 }
 
@@ -447,7 +447,7 @@ fn prepare_source(d: &Data, gpu: Option<&G::Config>, request: &RequestRef, state
                 cone,
                 id: root,
                 lane: Rc::new(value_lane::create(Some(e::fork_state(state)))),
-                state_stamp: state_stamp.clone(),
+                state_stamp,
                 live: live.clone(),
                 geometry: None,
                 compiled: None,
@@ -746,7 +746,7 @@ fn current(d: &Data, sources: &[(i64, i64)], state: &e::State, live: &Frame, pid
         }
         _ => true,
     };
-    prepared && old.sources == sources && (reads == deps::STATIC || (!context::input_changed(reads, &old.frame, live) && old.state_stamp == if stateful { e::state_stamp(state) } else { String::new() }))
+    prepared && old.sources == sources && (reads == deps::STATIC || (!context::input_changed(reads, &old.frame, live) && old.state_stamp == stateful.then(|| e::state_stamp(state))))
 }
 
 /// Binds the lowering the next resolutions read their sources from (the plan it was lowered for).
@@ -1064,7 +1064,7 @@ fn resolve_exact(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, plan: &e::Plan,
                     Ok(image_)
                 })?;
                 let payload = payload.borrow_mut().take().expect("payload");
-                let stamp = Rc::new(Stamp { serial: d.serial.get(), frame: ctx.live.clone(), state_stamp: String::new(), sources: Vec::new() });
+                let stamp = Rc::new(Stamp { serial: d.serial.get(), frame: ctx.live.clone(), state_stamp: None, sources: Vec::new() });
                 let entry = Rc::new(RefCell::new(Entry {
                     key: key.clone(),
                     plan_serial: -1,
@@ -1118,7 +1118,7 @@ fn resolve_producer(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: boo
     };
     let (stateful, _) = d.freshness.borrow()[id as usize];
     let previous = d.entries.borrow_mut().find_opt(&key);
-    let state_stamp = if stateful { e::state_stamp(state) } else { String::new() };
+    let state_stamp = stateful.then(|| e::state_stamp(state));
     let stamp = Rc::new(Stamp { serial: d.serial.get(), frame: live.clone(), state_stamp, sources: source_stamp.clone() });
     let valid = |s: &Stamp| current(d, &source_stamp, state, live, pid, node, s);
     if let Some(entry) = &previous {

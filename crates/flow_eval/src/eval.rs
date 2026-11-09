@@ -347,12 +347,32 @@ struct StateKey { instance: i64, path: Path, iter: Vec<i64> }
 // instance, then path, then iter: the OCaml compare of the key tuple
 impl Ord for StateKey { fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.instance.cmp(&other.instance).then_with(|| self.path.cmp(&other.path)).then_with(|| self.iter.cmp(&other.iter)) } }
 impl PartialOrd for StateKey { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
-#[derive(Clone, Debug, Default)]
-struct StatePlane { source: String, frame: Option<i64>, before: BTreeMap<StateKey, Value>, next: BTreeMap<StateKey, Value>, epoch: i64 }
+// ponytail: a write copies a shared map; use persistent maps if changed-state copying dominates.
+#[derive(Clone, Debug)]
+struct StatePlane { source: String, frame: Option<i64>, before: Shared<BTreeMap<StateKey, Value>>, next: Shared<BTreeMap<StateKey, Value>>, epoch: i64 }
+fn empty_state_map() -> Shared<BTreeMap<StateKey, Value>> {
+    static EMPTY: LazyLock<Arc<BTreeMap<StateKey, Value>>> = LazyLock::new(|| Arc::new(BTreeMap::new()));
+    Shared(EMPTY.clone())
+}
+impl Default for StatePlane {
+    fn default() -> Self { Self { source: String::new(), frame: None, before: empty_state_map(), next: empty_state_map(), epoch: 0 } }
+}
 #[derive(Clone, Debug, Default)]
 pub struct State { inner: Arc<Mutex<StateData>> }
-#[derive(Clone, Debug, Default)]
-struct StateData { source: String, frame: Option<i64>, before: BTreeMap<StateKey, Value>, next: BTreeMap<StateKey, Value>, host: Option<StatePlane>, epoch: i64 }
+#[derive(Clone, Debug)]
+struct StateData { source: String, frame: Option<i64>, before: Shared<BTreeMap<StateKey, Value>>, next: Shared<BTreeMap<StateKey, Value>>, host: Option<StatePlane>, epoch: i64 }
+impl Default for StateData {
+    fn default() -> Self { Self { source: String::new(), frame: None, before: empty_state_map(), next: empty_state_map(), host: None, epoch: 0 } }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StateStamp(i64, Option<i64>);
+impl std::fmt::Display for StateStamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)?;
+        if let Some(host) = self.1 { write!(f, ":{host}")?; }
+        Ok(())
+    }
+}
 static STATE_EPOCH: AtomicI64 = AtomicI64::new(1);
 static NEXT_ARENA: AtomicI64 = AtomicI64::new(1);
 static NEXT_FID: AtomicI64 = AtomicI64::new(1);
@@ -427,6 +447,7 @@ struct ResidualData { term: Arc<Term>, env: Captured, ctx: ExecCtx, previous: bo
 #[derive(Clone)]
 struct GraphCell { instance: i64, graph: String, default: bool, inputs: Vec<(String,Value)>, result: Value }
 // Copy-on-write cell: a probe worker copies an Arena in O(fields); a write unshares only while such a copy is alive.
+#[derive(Debug)]
 struct Shared<T>(Arc<T>);
 impl<T> Shared<T> { fn new(value: T) -> Self { Shared(Arc::new(value)) } }
 impl<T> Clone for Shared<T> { fn clone(&self) -> Self { Shared(self.0.clone()) } }
@@ -2090,13 +2111,14 @@ fn begin_frame(state: &mut StateData, source: &str, frame: i64) {
     if state.source != source || state.frame.is_some_and(|old| frame < old) {
         state.source = source.into();
         state.frame = None;
-        state.before.clear();
-        state.next.clear();
+        state.before = empty_state_map();
+        state.next = empty_state_map();
         state.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
     if state.frame != Some(frame) {
-        let newer = std::mem::take(&mut state.next);
-        state.before.extend(newer);
+        let newer = std::mem::replace(&mut state.next, empty_state_map());
+        if state.before.is_empty() { state.before = newer; }
+        else if !newer.is_empty() { state.before.extend(Arc::unwrap_or_clone(newer.0)); }
         state.frame = Some(frame);
     }
 }
@@ -2104,13 +2126,14 @@ fn begin_host_frame(state: &mut StatePlane, source: &str, frame: i64) {
     if state.source != source || state.frame.is_some_and(|old| frame < old) {
         state.source = source.into();
         state.frame = None;
-        state.before.clear();
-        state.next.clear();
+        state.before = empty_state_map();
+        state.next = empty_state_map();
         state.epoch = STATE_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
     if state.frame != Some(frame) {
-        let newer = std::mem::take(&mut state.next);
-        state.before.extend(newer);
+        let newer = std::mem::replace(&mut state.next, empty_state_map());
+        if state.before.is_empty() { state.before = newer; }
+        else if !newer.is_empty() { state.before.extend(Arc::unwrap_or_clone(newer.0)); }
         state.frame = Some(frame);
     }
 }
@@ -2668,12 +2691,13 @@ pub fn static_with_requests(budget: Option<usize>, record: bool, inputs: Option<
 }
 
 pub fn create_state()->State{State::default()}
-pub fn reset_state(state:&State,host_state:bool){let mut s=state.inner.lock().unwrap();s.source.clear();s.frame=None;s.before.clear();s.next.clear();s.epoch=STATE_EPOCH.fetch_add(1,Ordering::Relaxed);if host_state{s.host=None}}
-pub fn fork_state(state:&State)->State{let s=state.inner.lock().unwrap().clone();State{inner:Arc::new(Mutex::new(s))}}
-pub fn state_stamp(state:&State)->String{let s=state.inner.lock().unwrap();format!("{}{}",s.epoch,s.host.as_ref().map_or(String::new(),|x|format!(":{}",x.epoch)))}
-fn restore_state(state:&State,saved:&State){*state.inner.lock().unwrap()=saved.inner.lock().unwrap().clone()}
+pub fn reset_state(state:&State,host_state:bool){let mut s=state.inner.lock().unwrap();s.source.clear();s.frame=None;s.before=empty_state_map();s.next=empty_state_map();s.epoch=STATE_EPOCH.fetch_add(1,Ordering::Relaxed);if host_state{s.host=None}}
+fn save_state(state:&State)->StateData{state.inner.lock().unwrap().clone()}
+pub fn fork_state(state:&State)->State{State{inner:Arc::new(Mutex::new(save_state(state)))}}
+pub fn state_stamp(state:&State)->StateStamp{let s=state.inner.lock().unwrap();StateStamp(s.epoch,s.host.as_ref().map(|x|x.epoch))}
+fn restore_state(state:&State,saved:StateData){let replaced=std::mem::replace(&mut *state.inner.lock().unwrap(),saved);drop(replaced)}
 pub fn state_values(state:&State)->Vec<Value>{let state=state.inner.lock().unwrap();let mut values=state.before.values().chain(state.next.values()).cloned().collect::<Vec<_>>();if let Some(host)=&state.host{values.extend(host.before.values().chain(host.next.values()).cloned());}values}
-pub fn transaction(state:&State,f:&mut dyn FnMut()->Result<(),Diagnostic>)->Result<(),Diagnostic>{let saved=fork_state(state);let result=f();if result.is_err(){*state.inner.lock().unwrap()=saved.inner.lock().unwrap().clone()}result}
+pub fn transaction(state:&State,f:&mut dyn FnMut()->Result<(),Diagnostic>)->Result<(),Diagnostic>{let saved=save_state(state);let result=f();if result.is_err(){restore_state(state,saved)}result}
 
 pub fn force(value:&Value,live:&Frame,state:Option<&State>)->Result<Value,Diagnostic>{force_with(value,live,state,None,None)}
 type ResolveFn = Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>;
@@ -2703,10 +2727,10 @@ pub fn force_with(value: &Value, live: &Frame, state: Option<&State>, elems: Opt
         }
     }
     let owned = state.cloned().unwrap_or_default();
-    let saved = fork_state(&owned);
+    let saved = save_state(&owned);
     fail_frame(live)?;
     let result = force_general(value, live, Some(&owned), elems, resolve);
-    if result.is_err() { restore_state(&owned, &saved); }
+    if result.is_err() { restore_state(&owned, saved); }
     result
 }
 fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<ResolveFn>) -> Result<Value, Diagnostic> {
@@ -2784,9 +2808,9 @@ pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Res
     arena.step_count = 0;
     arena.fn_calls.clear();
     arena.memo.clear();
-    let saved = arena.state.as_ref().map(fork_state);
+    let saved = arena.state.as_ref().map(save_state);
     let result = execute_residual(&mut arena, id);
-    if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved.as_ref()) { restore_state(state, saved); } }
+    if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved) { restore_state(state, saved); } }
     arena.state = previous;
     restore_live(&mut arena, saved_live);
     result
@@ -2795,7 +2819,7 @@ pub fn run(workspace: &Workspace, record: bool, inputs: Option<&[(String, Vec<(S
     let mut result = static_with(workspace, record, inputs, None)?;
     let frame = live.cloned().unwrap_or_else(|| input::at_time(time));
     let state = state.cloned().unwrap_or_default();
-    let saved = fork_state(&state);
+    let saved = save_state(&state);
     let evaluated: Result<Eval, Diagnostic> = (|| {
         for (_, value) in &mut result.results { *value = force(value, &frame, Some(&state))?; }
         for node in &mut result.plan.nodes { for (_, value) in &mut node.args { *value = force(value, &frame, Some(&state))?; } }
@@ -2807,7 +2831,7 @@ pub fn run(workspace: &Workspace, record: bool, inputs: Option<&[(String, Vec<(S
         for value in &mut result.states { *value = force(value, &frame, Some(&state))?; }
         Ok(result)
     })();
-    if evaluated.is_err() { *state.inner.lock().unwrap() = saved.inner.lock().unwrap().clone(); }
+    if evaluated.is_err() { restore_state(&state, saved); }
     evaluated
 }
 
@@ -3342,8 +3366,8 @@ pub mod residual {
     pub fn checkpoint(id: ResidualId) -> Result<Box<dyn Fn()>, Diagnostic> {
         let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
         let state = peek(&arena, |arena| arena.state.clone()).ok_or_else(|| error("E_STATE", "State is not available."))?;
-        let saved = fork_state(&state);
-        Ok(Box::new(move || { *state.inner.lock().unwrap() = saved.inner.lock().unwrap().clone(); }))
+        let saved = save_state(&state);
+        Ok(Box::new(move || { restore_state(&state, saved.clone()); }))
     }
     pub fn rerun(id: ResidualId, on_walk: Option<&dyn Fn()>) -> Result<Value, Diagnostic> {
         if let Some(on_walk) = on_walk { on_walk(); }
@@ -3428,11 +3452,11 @@ pub mod residual {
         arena.step_count = 0;
         arena.fn_calls.clear();
         arena.memo.clear();
-        let saved = arena.state.as_ref().map(fork_state);
+        let saved = arena.state.as_ref().map(save_state);
         let result = eval_concrete(&mut arena, &residual.ctx, &Env::of(residual.env), term);
         // a term evaluated at its own frame (a compile-time capture) must not move the frame a bound live walk is on
         if prior_time.is_some() { arena.time = prior_time; }
-        if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved.as_ref()) { restore_state(state, saved); } }
+        if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved) { restore_state(state, saved); } }
         arena.state = previous;
         restore_live(&mut arena, saved_live);
         result
@@ -3704,6 +3728,105 @@ pub fn live_kernels_get() -> Arc<dyn Fn(&[Node]) -> bool + Send + Sync> { LIVE_K
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_snapshots_share_maps_and_rollback_without_copying_them() {
+        let state = create_state();
+        {
+            let mut data = state.inner.lock().unwrap();
+            for i in 0..128 {
+                let key = StateKey { instance: i, path: vec![], iter: vec![] };
+                data.before.insert(key.clone(), Value::Int(i));
+                data.next.insert(key, Value::Int(i + 1));
+            }
+            data.host = Some(StatePlane::default());
+            let host = data.host.as_mut().unwrap();
+            for i in 0..128 {
+                let key = StateKey { instance: i, path: vec![], iter: vec![] };
+                host.before.insert(key.clone(), Value::Int(i + 2));
+                host.next.insert(key, Value::Int(i + 3));
+            }
+        }
+        mem_sys::local_reset();
+        let saved = fork_state(&state);
+        let fork_allocations = mem_sys::local_alloc_count();
+        mem_sys::local_reset();
+        for _ in 0..1024 { std::hint::black_box(state_stamp(&state)); }
+        let stamp_allocations = mem_sys::local_alloc_count();
+        mem_sys::local_reset();
+        transaction(&state, &mut || Ok(())).unwrap();
+        let transaction_allocations = mem_sys::local_alloc_count();
+        eprintln!("state fork {fork_allocations} allocations; 1024 stamps {stamp_allocations}; read-only transaction {transaction_allocations}");
+        assert!(fork_allocations <= 1, "fork must share all four map payloads");
+        assert_eq!(stamp_allocations, 0, "a comparison stamp is an integer pair");
+        assert_eq!(transaction_allocations, 0, "a read-only transaction only saves shared map handles");
+
+        let key = StateKey { instance: 0, path: vec![], iter: vec![] };
+        let before = state_stamp(&state);
+        let failed = transaction(&state, &mut || {
+            let mut data = state.inner.lock().unwrap();
+            data.before.clear();
+            data.next.insert(key.clone(), Value::Int(99));
+            data.source = "changed".into(); data.frame = Some(4); data.epoch = 100;
+            let host = data.host.as_mut().unwrap();
+            host.before.clear(); host.next.insert(key.clone(), Value::Int(100));
+            host.source = "host changed".into(); host.frame = Some(5); host.epoch = 101;
+            Err(error("E_TEST_STATE", "rollback"))
+        });
+        assert_eq!(failed.unwrap_err().code, "E_TEST_STATE");
+        assert_eq!(state_stamp(&state), before);
+        {
+            let data = state.inner.lock().unwrap();
+            assert_eq!((data.source.as_str(), data.frame), ("", None));
+            assert_eq!(data.before.len(), 128);
+            assert_eq!(data.next.get(&key), Some(&Value::Int(1)));
+            let host = data.host.as_ref().unwrap();
+            assert_eq!((host.source.as_str(), host.frame), ("", None));
+            assert_eq!(host.before.len(), 128);
+            assert_eq!(host.next.get(&key), Some(&Value::Int(3)));
+        }
+        transaction(&state, &mut || {
+            state.inner.lock().unwrap().next.insert(key.clone(), Value::Int(9));
+            let inner = transaction(&state, &mut || {
+                state.inner.lock().unwrap().next.insert(key.clone(), Value::Int(10));
+                Err(error("E_TEST_STATE", "inner rollback"))
+            });
+            assert!(inner.is_err());
+            assert_eq!(state.inner.lock().unwrap().next.get(&key), Some(&Value::Int(9)));
+            Ok(())
+        }).unwrap();
+        assert_eq!(state.inner.lock().unwrap().next.get(&key), Some(&Value::Int(9)));
+        assert_eq!(saved.inner.lock().unwrap().next.get(&key), Some(&Value::Int(1)));
+        assert_eq!(format!("{}", state_stamp(&state)), "0:0");
+        assert_ne!(state_stamp(&state), state_stamp(&create_state()));
+        let readonly = fork_state(&state);
+        {
+            let mut data = readonly.inner.lock().unwrap();
+            data.next = empty_state_map(); data.frame = Some(0);
+        }
+        let retained = save_state(&readonly);
+        mem_sys::local_reset();
+        begin_frame(&mut readonly.inner.lock().unwrap(), "", 1);
+        let advance_allocations = mem_sys::local_alloc_count();
+        assert_eq!(advance_allocations, 0, "an empty update must not copy the shared previous map");
+        assert_eq!(retained.before.len(), 128);
+
+        let checked = crate::test_workspace_eval::check("(workspace checkpoint (graph g :context value (state [s 0.0] (+ s 1.0))))");
+        let evaluated = static_eval(&checked).unwrap();
+        let value = crate::test_workspace_eval::result(&evaluated, "g");
+        let Value::Residual(id) = value else { panic!("state residual") };
+        let internal = peek(&arena_for_residual(&id).unwrap(), |arena| arena.state.clone().unwrap());
+        let initial = state_stamp(&internal);
+        let checkpoint = residual::checkpoint(id).unwrap();
+        for frame in [1, 2] {
+            let live = Frame { frame, tick: frame, ..input::at_time(frame as f64) };
+            assert_eq!(force(&Value::Residual(id), &live, Some(&internal)).unwrap(), Value::Float(1.0));
+            assert_ne!(state_stamp(&internal), initial);
+            checkpoint();
+            assert_eq!(state_stamp(&internal), initial);
+            assert!(state_values(&internal).is_empty());
+        }
+    }
 
     #[test]
     fn immutable_free_names_are_shared_across_evaluations_without_allocating() {
