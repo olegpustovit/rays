@@ -1,15 +1,14 @@
 //! Port of lib/rdk/geom/exact/exact_dyadic.ml: exact dyadic arithmetic for binary64 predicate
-//! fallback. Magnitudes are little-endian base-2^30 limbs. `Invalid_argument` becomes a panic.
+//! fallback. Magnitudes are little-endian base-2^64 limbs. `Invalid_argument` becomes a panic.
 use std::cell::RefCell;
 
-const LIMB_BITS: i64 = 30;
-const LIMB_BASE: i64 = 1 << LIMB_BITS;
-const LIMB_MASK: i64 = LIMB_BASE - 1;
+const LIMB_BITS: i64 = 64;
+const LIMB_BASE: f64 = 18_446_744_073_709_551_616.;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct T {
     negative: bool,
-    magnitude: Vec<i64>,
+    magnitude: Vec<u64>,
     exponent: i64,
 }
 
@@ -21,205 +20,41 @@ pub fn is_zero(value: &T) -> bool {
     value.magnitude.is_empty()
 }
 
-fn trim(mut magnitude: Vec<i64>) -> Vec<i64> {
-    let mut length = magnitude.len();
-    while length > 0 && magnitude[length - 1] == 0 {
-        length -= 1;
-    }
-    magnitude.truncate(length);
-    magnitude
-}
-
-fn of_magnitude(negative: bool, exponent: i64, magnitude: Vec<i64>) -> T {
-    let magnitude = trim(magnitude);
-    if magnitude.is_empty() {
-        zero()
+fn float_parts(value: f64) -> (bool, u64, i64) {
+    assert!(value.is_finite(), "Rdk exact arithmetic: values must be finite");
+    let bits = value.to_bits();
+    let negative = bits >> 63 != 0;
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let fraction = bits & 0x000f_ffff_ffff_ffff;
+    if exponent == 0 {
+        (negative, fraction, -1074)
     } else {
-        T { negative, magnitude, exponent }
-    }
-}
-
-fn magnitude_of_int64(value: i64) -> Vec<i64> {
-    if value == 0 {
-        Vec::new()
-    } else {
-        let low = value & LIMB_MASK;
-        let high = ((value as u64) >> LIMB_BITS) as i64;
-        if high == 0 { vec![low] } else { vec![low, high] }
+        (negative, fraction | (1 << 52), exponent - 1023 - 52)
     }
 }
 
 pub fn of_float(value: f64) -> T {
-    if !value.is_finite() {
-        unreachable!("Rdk exact arithmetic: values must be finite");
-    }
-    let bits = value.to_bits();
-    let negative = (bits as i64) < 0;
-    let absolute = bits & 0x7fff_ffff_ffff_ffff;
-    let encoded_exponent = (absolute >> 52) as i64;
-    let fraction = (absolute & 0x000f_ffff_ffff_ffff) as i64;
-    if encoded_exponent == 0 {
-        if fraction == 0 {
-            zero()
-        } else {
-            T { negative, magnitude: magnitude_of_int64(fraction), exponent: -1074 }
-        }
-    } else {
-        T {
-            negative,
-            magnitude: magnitude_of_int64(fraction | (1i64 << 52)),
-            exponent: encoded_exponent - 1023 - 52,
-        }
-    }
-}
-
-fn shift_left(magnitude: &[i64], shift: i64) -> Vec<i64> {
-    if shift == 0 || magnitude.is_empty() {
-        return magnitude.to_vec();
-    }
-    let words = (shift / LIMB_BITS) as usize;
-    let bits = shift % LIMB_BITS;
-    let extra = if bits == 0 { 0 } else { 1 };
-    let mut output = vec![0i64; magnitude.len() + words + extra];
-    if bits == 0 {
-        output[words..words + magnitude.len()].copy_from_slice(magnitude);
-    } else {
-        let mut carry = 0i64;
-        for (index, limb) in magnitude.iter().enumerate() {
-            let value = (limb << bits) | carry;
-            output[words + index] = value & LIMB_MASK;
-            carry = ((value as u64) >> LIMB_BITS) as i64;
-        }
-        output[magnitude.len() + words] = carry;
-    }
-    trim(output)
-}
-
-fn compare_magnitude(left: &[i64], right: &[i64]) -> i64 {
-    if left.len() != right.len() {
-        return if left.len() < right.len() { -1 } else { 1 };
-    }
-    let mut index = left.len();
-    while index > 0 {
-        index -= 1;
-        if left[index] != right[index] {
-            return if left[index] < right[index] { -1 } else { 1 };
-        }
-    }
-    0
-}
-
-fn add_magnitude(left: &[i64], right: &[i64]) -> Vec<i64> {
-    let count = left.len().max(right.len());
-    let mut output = vec![0i64; count + 1];
-    let mut carry = 0i64;
-    for index in 0..count {
-        let a = if index < left.len() { left[index] } else { 0 };
-        let b = if index < right.len() { right[index] } else { 0 };
-        let value = a + b + carry;
-        output[index] = value & LIMB_MASK;
-        carry = value >> LIMB_BITS;
-    }
-    output[count] = carry;
-    trim(output)
-}
-
-fn subtract_magnitude(left: &[i64], right: &[i64]) -> Vec<i64> {
-    let mut output = vec![0i64; left.len()];
-    let mut borrow = 0i64;
-    for index in 0..left.len() {
-        let subtrahend = (if index < right.len() { right[index] } else { 0 }) + borrow;
-        let value = left[index] - subtrahend;
-        if value < 0 {
-            output[index] = value + LIMB_BASE;
-            borrow = 1;
-        } else {
-            output[index] = value;
-            borrow = 0;
-        }
-    }
-    assert!(borrow == 0);
-    trim(output)
+    let (negative, magnitude, exponent) = float_parts(value);
+    if magnitude == 0 { zero() } else { T { negative, magnitude: vec![magnitude], exponent } }
 }
 
 pub fn add(left: &T, right: &T) -> T {
-    if is_zero(left) {
-        right.clone()
-    } else if is_zero(right) {
-        left.clone()
-    } else {
-        let exponent = left.exponent.min(right.exponent);
-        let left_magnitude = shift_left(&left.magnitude, left.exponent - exponent);
-        let right_magnitude = shift_left(&right.magnitude, right.exponent - exponent);
-        if left.negative == right.negative {
-            of_magnitude(left.negative, exponent, add_magnitude(&left_magnitude, &right_magnitude))
-        } else {
-            let comparison = compare_magnitude(&left_magnitude, &right_magnitude);
-            if comparison == 0 {
-                zero()
-            } else if comparison > 0 {
-                of_magnitude(
-                    left.negative,
-                    exponent,
-                    subtract_magnitude(&left_magnitude, &right_magnitude),
-                )
-            } else {
-                of_magnitude(
-                    right.negative,
-                    exponent,
-                    subtract_magnitude(&right_magnitude, &left_magnitude),
-                )
-            }
-        }
-    }
-}
-
-pub fn negate(value: &T) -> T {
-    if is_zero(value) {
-        value.clone()
-    } else {
-        T { negative: !value.negative, ..value.clone() }
-    }
+    let scope = scratch::Scope::new();
+    scope.export(scope.add(&scope.of_exact(left), &scope.of_exact(right)))
 }
 
 pub fn subtract(left: &T, right: &T) -> T {
-    add(left, &negate(right))
-}
-
-fn multiply_magnitude(left: &[i64], right: &[i64]) -> Vec<i64> {
-    if left.is_empty() || right.is_empty() {
-        return Vec::new();
-    }
-    let mut output = vec![0i64; left.len() + right.len()];
-    for left_index in 0..left.len() {
-        let mut carry = 0i64;
-        for right_index in 0..right.len() {
-            let output_index = left_index + right_index;
-            let value = left[left_index] * right[right_index] + output[output_index] + carry;
-            output[output_index] = value & LIMB_MASK;
-            carry = ((value as u64) >> LIMB_BITS) as i64;
-        }
-        let mut output_index = left_index + right.len();
-        while carry != 0 {
-            let value = output[output_index] + carry;
-            output[output_index] = value & LIMB_MASK;
-            carry = ((value as u64) >> LIMB_BITS) as i64;
-            output_index += 1;
-        }
-    }
-    trim(output)
+    let scope = scratch::Scope::new();
+    scope.export(scope.subtract(&scope.of_exact(left), &scope.of_exact(right)))
 }
 
 pub fn multiply(left: &T, right: &T) -> T {
-    if is_zero(left) || is_zero(right) {
-        zero()
-    } else {
-        of_magnitude(
-            left.negative != right.negative,
-            left.exponent + right.exponent,
-            multiply_magnitude(&left.magnitude, &right.magnitude),
-        )
-    }
+    let scope = scratch::Scope::new();
+    scope.export(scope.multiply(&scope.of_exact(left), &scope.of_exact(right)))
+}
+
+pub fn negate(value: &T) -> T {
+    T { negative: !value.negative && !is_zero(value), ..value.clone() }
 }
 
 /// Return -1, 0, or 1.
@@ -233,24 +68,25 @@ pub fn compare_zero(value: &T) -> i64 {
     }
 }
 
-/// `value = mantissa * 2 ** exponent` approximately; mantissa magnitude in [0.5, 1) for nonzero.
+/// `value = mantissa * 2 ** exponent` approximately; the mantissa is scaled by a whole number of limbs.
 /// Only for spatial acceleration and final materialization, never for combinatorial decisions.
-pub fn to_scaled_float(value: &T) -> (f64, i64) {
-    if is_zero(value) {
-        return (0., 0);
-    }
-    let count = value.magnitude.len();
+fn scaled_mantissa(negative: bool, magnitude: &[u64]) -> f64 {
+    let count = magnitude.len();
     let first = count.saturating_sub(4);
     let mut accumulator = 0.;
     let mut scale = 1. / LIMB_BASE as f64;
     let mut index = count;
     while index > first {
         index -= 1;
-        accumulator += value.magnitude[index] as f64 * scale;
+        accumulator += magnitude[index] as f64 * scale;
         scale /= LIMB_BASE as f64;
     }
-    let mantissa = if value.negative { -accumulator } else { accumulator };
-    (mantissa, value.exponent + count as i64 * LIMB_BITS)
+    let mantissa = if negative { -accumulator } else { accumulator };
+    mantissa
+}
+
+pub fn to_scaled_float(value: &T) -> (f64, i64) {
+    (scaled_mantissa(value.negative, &value.magnitude), value.exponent + value.magnitude.len() as i64 * LIMB_BITS)
 }
 
 /// Certified outward-rounded `(lower, upper, exponent)`, both scaled by `2 ** exponent`.
@@ -325,10 +161,11 @@ pub mod scratch {
     use super::*;
 
     /// Index of a value in the arena.
-    type V = usize;
+    pub(crate) type V = usize;
 
+    #[derive(Default)]
     pub struct Arena {
-        limbs: Vec<i64>,
+        limbs: Vec<u64>,
         limb_count: usize,
         negative: Vec<bool>,
         exponents: Vec<i64>,
@@ -363,6 +200,36 @@ pub mod scratch {
 
     fn release(arena: Arena) {
         POOL.with(|pool| pool.borrow_mut().push(arena));
+    }
+
+
+    /// Construction temporaries share the predicate engine. Only exported persistent
+    /// homogeneous coordinates allocate owned storage; intermediate values stay in the arena.
+    pub(crate) struct Scope(RefCell<Arena>);
+
+    impl Scope {
+        pub(crate) fn new() -> Self { Self(RefCell::new(acquire())) }
+        pub(crate) fn of_float(&self, value: f64) -> V { self.0.borrow_mut().of_float(value) }
+        pub(crate) fn of_exact(&self, value: &T) -> V { self.0.borrow_mut().of_exact(value) }
+        pub(crate) fn add(&self, left: &V, right: &V) -> V { self.0.borrow_mut().add(*left, *right) }
+        pub(crate) fn subtract(&self, left: &V, right: &V) -> V { self.0.borrow_mut().subtract(*left, *right) }
+        pub(crate) fn multiply(&self, left: &V, right: &V) -> V { self.0.borrow_mut().multiply(*left, *right) }
+        pub(crate) fn negate(&self, value: &V) -> V { self.0.borrow_mut().negate(*value) }
+        pub(crate) fn is_zero(&self, value: &V) -> bool { self.0.borrow().is_zero(*value) }
+        pub(crate) fn compare_zero(&self, value: &V) -> i64 { self.0.borrow().compare_zero(*value) }
+        pub(crate) fn export(&self, value: V) -> T {
+            let arena = self.0.borrow();
+            let offset = arena.offsets[value];
+            T {
+                negative: arena.negative[value],
+                exponent: arena.exponents[value],
+                magnitude: arena.limbs[offset..offset + arena.lengths[value]].to_vec(),
+            }
+        }
+    }
+
+    impl Drop for Scope {
+        fn drop(&mut self) { release(std::mem::take(self.0.get_mut())); }
     }
 
     impl Arena {
@@ -415,28 +282,13 @@ pub mod scratch {
         }
 
         fn of_float(&mut self, number: f64) -> V {
-            let bits = number.to_bits();
-            let negative = (bits as i64) < 0;
-            let absolute = bits & 0x7fff_ffff_ffff_ffff;
-            let encoded_exponent = (absolute >> 52) as i64;
-            let fraction = (absolute & 0x000f_ffff_ffff_ffff) as i64;
-            let (magnitude, exponent) = if encoded_exponent == 0 {
-                (fraction, -1074)
-            } else {
-                (fraction | (1i64 << 52), encoded_exponent - 1023 - 52)
-            };
+            let (negative, magnitude, exponent) = float_parts(number);
             if magnitude == 0 {
                 self.zero_value()
             } else {
-                let low = magnitude & LIMB_MASK;
-                let high = ((magnitude as u64) >> LIMB_BITS) as i64;
-                let length = if high == 0 { 1 } else { 2 };
-                let offset = self.reserve_limbs(length);
-                self.limbs[offset] = low;
-                if length == 2 {
-                    self.limbs[offset + 1] = high;
-                }
-                self.value(negative, exponent, offset, length)
+                let offset = self.reserve_limbs(1);
+                self.limbs[offset] = magnitude;
+                self.value(negative, exponent, offset, 1)
             }
         }
 
@@ -465,9 +317,9 @@ pub mod scratch {
             self.value(negative, exponent, offset, length)
         }
 
-        fn shifted_limb(&self, number: V, shift: usize, index: usize) -> i64 {
-            let word_shift = (shift / 30) as i64;
-            let bit_shift = (shift % 30) as i64;
+        fn shifted_limb(&self, number: V, shift: usize, index: usize) -> u64 {
+            let word_shift = (shift / 64) as i64;
+            let bit_shift = (shift % 64) as i64;
             let source = index as i64 - word_shift;
             let length = self.lengths[number] as i64;
             let offset = self.offsets[number];
@@ -488,7 +340,7 @@ pub mod scratch {
                 } else {
                     0
                 };
-                (low | carry) & LIMB_MASK
+                low | carry
             }
         }
 
@@ -497,8 +349,8 @@ pub mod scratch {
             if length == 0 {
                 0
             } else {
-                let words = shift / 30;
-                let bits = (shift % 30) as i64;
+                let words = shift / 64;
+                let bits = (shift % 64) as i64;
                 let extra = if bits == 0 {
                     0
                 } else {
@@ -541,15 +393,14 @@ pub mod scratch {
                 if self.negative[left] == self.negative[right] {
                     let count = left_length.max(right_length);
                     let offset = self.reserve_limbs(count + 1);
-                    let mut carry = 0i64;
+                    let mut carry = 0u128;
                     for index in 0..count {
-                        let sum = self.shifted_limb(left, left_shift, index)
-                            + self.shifted_limb(right, right_shift, index)
-                            + carry;
-                        self.limbs[offset + index] = sum & LIMB_MASK;
+                        let sum = self.shifted_limb(left, left_shift, index) as u128
+                            + self.shifted_limb(right, right_shift, index) as u128 + carry;
+                        self.limbs[offset + index] = sum as u64;
                         carry = sum >> LIMB_BITS;
                     }
-                    self.limbs[offset + count] = carry;
+                    self.limbs[offset + count] = carry as u64;
                     let negative = self.negative[left];
                     let length = if carry == 0 { count } else { count + 1 };
                     self.value(negative, exponent, offset, length)
@@ -566,18 +417,13 @@ pub mod scratch {
                             };
                         let count = self.shifted_length(larger, larger_shift);
                         let offset = self.reserve_limbs(count);
-                        let mut borrow = 0i64;
+                        let mut borrow = 0;
                         for index in 0..count {
-                            let difference = self.shifted_limb(larger, larger_shift, index)
-                                - self.shifted_limb(smaller, smaller_shift, index)
-                                - borrow;
-                            if difference < 0 {
-                                self.limbs[offset + index] = difference + LIMB_BASE;
-                                borrow = 1;
-                            } else {
-                                self.limbs[offset + index] = difference;
-                                borrow = 0;
-                            }
+                            let (difference, first_borrow) = self.shifted_limb(larger, larger_shift, index)
+                                .overflowing_sub(self.shifted_limb(smaller, smaller_shift, index));
+                            let (difference, second_borrow) = difference.overflowing_sub(borrow);
+                            self.limbs[offset + index] = difference;
+                            borrow = u64::from(first_borrow || second_borrow);
                         }
                         assert!(borrow == 0);
                         let length = self.trim(offset, count);
@@ -604,23 +450,16 @@ pub mod scratch {
             let left_offset = self.offsets[left];
             let right_offset = self.offsets[right];
             for left_index in 0..left_length {
-                let mut carry = 0i64;
+                let mut carry = 0u128;
                 for right_index in 0..right_length {
                     let output_index = offset + left_index + right_index;
-                    let product = self.limbs[left_offset + left_index]
-                        * self.limbs[right_offset + right_index]
-                        + self.limbs[output_index]
-                        + carry;
-                    self.limbs[output_index] = product & LIMB_MASK;
-                    carry = ((product as u64) >> LIMB_BITS) as i64;
+                    let product = self.limbs[left_offset + left_index] as u128
+                        * self.limbs[right_offset + right_index] as u128
+                        + self.limbs[output_index] as u128 + carry;
+                    self.limbs[output_index] = product as u64;
+                    carry = product >> LIMB_BITS;
                 }
-                let mut output_index = offset + left_index + right_length;
-                while carry != 0 {
-                    let sum = self.limbs[output_index] + carry;
-                    self.limbs[output_index] = sum & LIMB_MASK;
-                    carry = ((sum as u64) >> LIMB_BITS) as i64;
-                    output_index += 1;
-                }
+                self.limbs[offset + left_index + right_length] = carry as u64;
             }
             let negative = self.negative[left] != self.negative[right];
             let exponent = self.exponents[left] + self.exponents[right];
@@ -687,21 +526,8 @@ pub mod scratch {
         }
 
         fn scaled_mantissa(&self, number: V) -> f64 {
-            let count = self.lengths[number];
-            if count == 0 {
-                return 0.;
-            }
-            let first = count.saturating_sub(4);
             let offset = self.offsets[number];
-            let mut accumulator = 0.;
-            let mut scale = 1. / LIMB_BASE as f64;
-            let mut index = count;
-            while index > first {
-                index -= 1;
-                accumulator += self.limbs[offset + index] as f64 * scale;
-                scale /= LIMB_BASE as f64;
-            }
-            if self.negative[number] { -accumulator } else { accumulator }
+            super::scaled_mantissa(self.negative[number], &self.limbs[offset..offset + self.lengths[number]])
         }
 
         fn scaled_exponent(&self, number: V) -> i64 {
@@ -1420,5 +1246,62 @@ pub mod scratch {
         let result = ar.compare_zero(difference);
         release(ar);
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_64_bit_carries_borrows_products_and_intervals() {
+        let integer = |value: i128| T {
+            negative: value < 0,
+            magnitude: if value == 0 { Vec::new() } else { vec![value.unsigned_abs() as u64] },
+            exponent: 0,
+        };
+        let value = |number: &T| {
+            assert_eq!(number.exponent, 0);
+            let magnitude = number.magnitude.iter().rev().fold(0u128, |acc, limb| (acc << 64) | *limb as u128);
+            if number.negative { -(magnitude as i128) } else { magnitude as i128 }
+        };
+        for index in 0..2_000u64 {
+            let left = index.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1) as i64 as i128;
+            let right = index.wrapping_mul(1_442_695_040_888_963_407).wrapping_add(97) as i64 as i128;
+            let (a, b) = (integer(left), integer(right));
+            assert_eq!(value(&add(&a, &b)), left + right);
+            assert_eq!(value(&subtract(&a, &b)), left - right);
+            assert_eq!(value(&multiply(&a, &b)), left * right);
+        }
+        let maximum = T { negative: false, magnitude: vec![u64::MAX], exponent: 0 };
+        assert_eq!(add(&maximum, &maximum).magnitude, [u64::MAX - 1, 1]);
+        let wide = T { negative: false, magnitude: vec![u64::MAX, u64::MAX], exponent: 0 };
+        assert_eq!(multiply(&wide, &wide).magnitude, [1, 0, u64::MAX - 1, u64::MAX]);
+        let power = T { negative: false, magnitude: vec![0, 0, 1], exponent: 0 };
+        assert_eq!(subtract(&power, &integer(1)).magnitude, wide.magnitude);
+        assert!(is_zero(&subtract(&power, &power)));
+        for index in 0..256u64 {
+            let coordinate = |salt: u64| {
+                let bits = index.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(salt);
+                of_float(f64::from_bits((bits & 0x800f_ffff_ffff_ffff) | ((bits % 2047) << 52)))
+            };
+            let exact = add(&multiply(&coordinate(97), &coordinate(65_537)), &coordinate(1_000_003));
+            let (lower, upper, exponent) = to_scaled_interval(&exact);
+            let mut lower = of_float(lower);
+            let mut upper = of_float(upper);
+            lower.exponent += exponent;
+            upper.exponent += exponent;
+            assert!(compare_zero(&subtract(&lower, &exact)) <= 0, "certified lower bound");
+            assert!(compare_zero(&subtract(&upper, &exact)) >= 0, "certified upper bound");
+        }
+        for exponent in [-1074, -1022, -53, 0, 53, 700, 1023] {
+            for significand in [1., -1., 1.5, -1.5] {
+                let number = ldexp(significand, exponent);
+                if !number.is_finite() { continue; }
+                let exact = of_float(number);
+                let (lower, upper, scale) = to_scaled_interval(&exact);
+                assert!(ldexp(lower, scale) <= number && number <= ldexp(upper, scale));
+            }
+        }
     }
 }

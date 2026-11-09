@@ -146,42 +146,66 @@ pub fn source_coordinate(source: &Source, point: i64) -> (f64, f64, f64) {
     (source.data.x[p], source.data.y[p], source.data.z[p])
 }
 
-type Triple = (exact::T, exact::T, exact::T);
+type Triple = (scratch::V, scratch::V, scratch::V);
 
-fn exact_at(source: &Source, index: i64) -> Triple {
+fn exact_at(scope: &scratch::Scope, source: &Source, index: i64) -> Triple {
     let i = index as usize;
     (
-        exact::of_float(source.data.x[i]),
-        exact::of_float(source.data.y[i]),
-        exact::of_float(source.data.z[i]),
+        scope.of_float(source.data.x[i]),
+        scope.of_float(source.data.y[i]),
+        scope.of_float(source.data.z[i]),
     )
 }
 
-fn add3(a: &Triple, b: &Triple) -> Triple {
-    (exact::add(&a.0, &b.0), exact::add(&a.1, &b.1), exact::add(&a.2, &b.2))
-}
-
-fn subtract3(a: &Triple, b: &Triple) -> Triple {
-    (exact::subtract(&a.0, &b.0), exact::subtract(&a.1, &b.1), exact::subtract(&a.2, &b.2))
-}
-
-fn scale3(scalar: &exact::T, v: &Triple) -> Triple {
-    (exact::multiply(scalar, &v.0), exact::multiply(scalar, &v.1), exact::multiply(scalar, &v.2))
-}
-
-fn dot(a: &Triple, b: &Triple) -> exact::T {
-    exact::add(
-        &exact::add(&exact::multiply(&a.0, &b.0), &exact::multiply(&a.1, &b.1)),
-        &exact::multiply(&a.2, &b.2),
-    )
-}
-
-fn cross(a: &Triple, b: &Triple) -> Triple {
+fn add3(scope: &scratch::Scope, a: &Triple, b: &Triple) -> Triple {
     (
-        exact::subtract(&exact::multiply(&a.1, &b.2), &exact::multiply(&a.2, &b.1)),
-        exact::subtract(&exact::multiply(&a.2, &b.0), &exact::multiply(&a.0, &b.2)),
-        exact::subtract(&exact::multiply(&a.0, &b.1), &exact::multiply(&a.1, &b.0)),
+        scope.add(&a.0, &b.0),
+        scope.add(&a.1, &b.1),
+        scope.add(&a.2, &b.2),
     )
+}
+
+fn subtract3(scope: &scratch::Scope, a: &Triple, b: &Triple) -> Triple {
+    (
+        scope.subtract(&a.0, &b.0),
+        scope.subtract(&a.1, &b.1),
+        scope.subtract(&a.2, &b.2),
+    )
+}
+
+fn scale3(scope: &scratch::Scope, scalar: &scratch::V, v: &Triple) -> Triple {
+    (
+        scope.multiply(scalar, &v.0),
+        scope.multiply(scalar, &v.1),
+        scope.multiply(scalar, &v.2),
+    )
+}
+
+fn dot(scope: &scratch::Scope, a: &Triple, b: &Triple) -> scratch::V {
+    scope.add(
+        &scope.add(&scope.multiply(&a.0, &b.0), &scope.multiply(&a.1, &b.1)),
+        &scope.multiply(&a.2, &b.2),
+    )
+}
+
+fn cross(scope: &scratch::Scope, a: &Triple, b: &Triple) -> Triple {
+    (
+        scope.subtract(&scope.multiply(&a.1, &b.2), &scope.multiply(&a.2, &b.1)),
+        scope.subtract(&scope.multiply(&a.2, &b.0), &scope.multiply(&a.0, &b.2)),
+        scope.subtract(&scope.multiply(&a.0, &b.1), &scope.multiply(&a.1, &b.0)),
+    )
+}
+
+fn owned(scope: &scratch::Scope, mut coordinates: [scratch::V; 4]) -> Homogeneous {
+    if scope.compare_zero(&coordinates[3]) < 0 {
+        coordinates = coordinates.map(|value| scope.negate(&value));
+    }
+    let [hx, hy, hz, hw] = coordinates.map(|value| scope.export(value));
+    Homogeneous { hx, hy, hz, hw }
+}
+
+fn imported(scope: &scratch::Scope, point: &Homogeneous) -> [scratch::V; 4] {
+    [&point.hx, &point.hy, &point.hz, &point.hw].map(|value| scope.of_exact(value))
 }
 
 fn normalize(point: Homogeneous) -> Homogeneous {
@@ -521,7 +545,13 @@ pub fn line_plane(
     if let Some(index) = first_invalid(source, &[line_start, line_end, plane_a, plane_b, plane_c]) {
         return Err(Error::IndexOutOfBounds(index));
     }
-    let construction = Construction::LinePlane { line_start, line_end, plane_a, plane_b, plane_c };
+    let construction = Construction::LinePlane {
+        line_start,
+        line_end,
+        plane_a,
+        plane_b,
+        plane_c,
+    };
     if let Some(point) = try_line_plane_deferred(
         source,
         construction.clone(),
@@ -533,28 +563,51 @@ pub fn line_plane(
     ) {
         return Ok(point);
     }
-    let p = exact_at(source, line_start);
-    let q = exact_at(source, line_end);
-    let r = exact_at(source, plane_a);
-    let s = exact_at(source, plane_b);
-    let plane_t = exact_at(source, plane_c);
-    let direction = subtract3(&q, &p);
-    let normal = cross(&subtract3(&s, &r), &subtract3(&plane_t, &r));
-    let hw = dot(&normal, &direction);
-    if exact::is_zero(&hw) {
-        return Err(Error::ParallelLineAndPlane);
-    }
-    let line_parameter_numerator = dot(&normal, &subtract3(&r, &p));
-    let (hx, hy, hz) =
-        add3(&scale3(&hw, &p), &scale3(&line_parameter_numerator, &direction));
-    make(source, construction, Homogeneous { hx, hy, hz, hw })
+    make(
+        source,
+        construction,
+        line_plane_homogeneous(source, line_start, line_end, plane_a, plane_b, plane_c)?,
+    )
 }
 
-fn projected(projection: Projection, v: &Triple) -> (exact::T, exact::T) {
+fn line_plane_homogeneous(
+    source: &Source,
+    line_start: i64,
+    line_end: i64,
+    plane_a: i64,
+    plane_b: i64,
+    plane_c: i64,
+) -> Result<Homogeneous, Error> {
+    let scope = &scratch::Scope::new();
+    let p = exact_at(scope, source, line_start);
+    let q = exact_at(scope, source, line_end);
+    let r = exact_at(scope, source, plane_a);
+    let s = exact_at(scope, source, plane_b);
+    let plane_t = exact_at(scope, source, plane_c);
+    let direction = subtract3(scope, &q, &p);
+    let normal = cross(
+        scope,
+        &subtract3(scope, &s, &r),
+        &subtract3(scope, &plane_t, &r),
+    );
+    let hw = dot(scope, &normal, &direction);
+    if scope.is_zero(&hw) {
+        return Err(Error::ParallelLineAndPlane);
+    }
+    let line_parameter_numerator = dot(scope, &normal, &subtract3(scope, &r, &p));
+    let (hx, hy, hz) = add3(
+        scope,
+        &scale3(scope, &hw, &p),
+        &scale3(scope, &line_parameter_numerator, &direction),
+    );
+    Ok(owned(scope, [hx, hy, hz, hw]))
+}
+
+fn projected(projection: Projection, v: &Triple) -> (scratch::V, scratch::V) {
     match projection {
-        Projection::XY => (v.0.clone(), v.1.clone()),
-        Projection::YZ => (v.1.clone(), v.2.clone()),
-        Projection::ZX => (v.2.clone(), v.0.clone()),
+        Projection::XY => (v.0, v.1),
+        Projection::YZ => (v.1, v.2),
+        Projection::ZX => (v.2, v.0),
     }
 }
 
@@ -566,22 +619,27 @@ fn line_line_homogeneous(
     second_start: i64,
     second_end: i64,
 ) -> Result<Homogeneous, Error> {
-    let p = exact_at(source, first_start);
-    let q = exact_at(source, first_end);
-    let r = exact_at(source, second_start);
-    let s = exact_at(source, second_end);
-    let direction = subtract3(&q, &p);
-    let other_direction = subtract3(&s, &r);
+    let scope = &scratch::Scope::new();
+    let p = exact_at(scope, source, first_start);
+    let q = exact_at(scope, source, first_end);
+    let r = exact_at(scope, source, second_start);
+    let s = exact_at(scope, source, second_end);
+    let direction = subtract3(scope, &q, &p);
+    let other_direction = subtract3(scope, &s, &r);
     let (dx, dy) = projected(projection, &direction);
     let (ox, oy) = projected(projection, &other_direction);
-    let (rx, ry) = projected(projection, &subtract3(&r, &p));
-    let hw = exact::subtract(&exact::multiply(&dx, &oy), &exact::multiply(&dy, &ox));
-    if exact::is_zero(&hw) {
+    let (rx, ry) = projected(projection, &subtract3(scope, &r, &p));
+    let hw = scope.subtract(&scope.multiply(&dx, &oy), &scope.multiply(&dy, &ox));
+    if scope.is_zero(&hw) {
         Err(Error::ParallelLines)
     } else {
-        let parameter = exact::subtract(&exact::multiply(&rx, &oy), &exact::multiply(&ry, &ox));
-        let (hx, hy, hz) = add3(&scale3(&hw, &p), &scale3(&parameter, &direction));
-        Ok(normalize(Homogeneous { hx, hy, hz, hw }))
+        let parameter = scope.subtract(&scope.multiply(&rx, &oy), &scope.multiply(&ry, &ox));
+        let (hx, hy, hz) = add3(
+            scope,
+            &scale3(scope, &hw, &p),
+            &scale3(scope, &parameter, &direction),
+        );
+        Ok(owned(scope, [hx, hy, hz, hw]))
     }
 }
 
@@ -688,35 +746,39 @@ pub fn line_line(
     make(source, construction, homogeneous)
 }
 
-fn plane(source: &Source, a: i64, b: i64, c: i64) -> (Triple, exact::T) {
-    let p = exact_at(source, a);
-    let normal = cross(&subtract3(&exact_at(source, b), &p), &subtract3(&exact_at(source, c), &p));
-    let constant = dot(&normal, &p);
+fn plane(scope: &scratch::Scope, source: &Source, a: i64, b: i64, c: i64) -> (Triple, scratch::V) {
+    let p = exact_at(scope, source, a);
+    let normal = cross(
+        scope,
+        &subtract3(scope, &exact_at(scope, source, b), &p),
+        &subtract3(scope, &exact_at(scope, source, c), &p),
+    );
+    let constant = dot(scope, &normal, &p);
     (normal, constant)
 }
 
-fn triple_plane_homogeneous(
-    source: &Source,
-    planes: [i64; 9],
-) -> Option<Homogeneous> {
-    let (first_normal, first_constant) = plane(source, planes[0], planes[1], planes[2]);
-    let (second_normal, second_constant) = plane(source, planes[3], planes[4], planes[5]);
-    let (third_normal, third_constant) = plane(source, planes[6], planes[7], planes[8]);
-    let second_cross_third = cross(&second_normal, &third_normal);
-    let third_cross_first = cross(&third_normal, &first_normal);
-    let first_cross_second = cross(&first_normal, &second_normal);
-    let hw = dot(&first_normal, &second_cross_third);
-    if exact::is_zero(&hw) {
+fn triple_plane_homogeneous(source: &Source, planes: [i64; 9]) -> Option<Homogeneous> {
+    let scope = &scratch::Scope::new();
+    let (first_normal, first_constant) = plane(scope, source, planes[0], planes[1], planes[2]);
+    let (second_normal, second_constant) = plane(scope, source, planes[3], planes[4], planes[5]);
+    let (third_normal, third_constant) = plane(scope, source, planes[6], planes[7], planes[8]);
+    let second_cross_third = cross(scope, &second_normal, &third_normal);
+    let third_cross_first = cross(scope, &third_normal, &first_normal);
+    let first_cross_second = cross(scope, &first_normal, &second_normal);
+    let hw = dot(scope, &first_normal, &second_cross_third);
+    if scope.is_zero(&hw) {
         return None;
     }
     let (hx, hy, hz) = add3(
+        scope,
         &add3(
-            &scale3(&first_constant, &second_cross_third),
-            &scale3(&second_constant, &third_cross_first),
+            scope,
+            &scale3(scope, &first_constant, &second_cross_third),
+            &scale3(scope, &second_constant, &third_cross_first),
         ),
-        &scale3(&third_constant, &first_cross_second),
+        &scale3(scope, &third_constant, &first_cross_second),
     );
-    Some(Homogeneous { hx, hy, hz, hw })
+    Some(owned(scope, [hx, hy, hz, hw]))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -758,57 +820,60 @@ pub fn triple_plane(
 
 #[derive(Clone)]
 struct Rational {
-    numerator: exact::T,
-    denominator: exact::T,
+    numerator: scratch::V,
+    denominator: scratch::V,
 }
 
-fn rational_add(left: &Rational, right: &Rational) -> Rational {
+fn rational_add(scope: &scratch::Scope, left: &Rational, right: &Rational) -> Rational {
     Rational {
-        numerator: exact::add(
-            &exact::multiply(&left.numerator, &right.denominator),
-            &exact::multiply(&right.numerator, &left.denominator),
+        numerator: scope.add(
+            &scope.multiply(&left.numerator, &right.denominator),
+            &scope.multiply(&right.numerator, &left.denominator),
         ),
-        denominator: exact::multiply(&left.denominator, &right.denominator),
+        denominator: scope.multiply(&left.denominator, &right.denominator),
     }
 }
 
-fn rational_subtract(left: &Rational, right: &Rational) -> Rational {
+fn rational_subtract(scope: &scratch::Scope, left: &Rational, right: &Rational) -> Rational {
     Rational {
-        numerator: exact::subtract(
-            &exact::multiply(&left.numerator, &right.denominator),
-            &exact::multiply(&right.numerator, &left.denominator),
+        numerator: scope.subtract(
+            &scope.multiply(&left.numerator, &right.denominator),
+            &scope.multiply(&right.numerator, &left.denominator),
         ),
-        denominator: exact::multiply(&left.denominator, &right.denominator),
+        denominator: scope.multiply(&left.denominator, &right.denominator),
     }
 }
 
-fn rational_multiply(left: &Rational, right: &Rational) -> Rational {
+fn rational_multiply(scope: &scratch::Scope, left: &Rational, right: &Rational) -> Rational {
     Rational {
-        numerator: exact::multiply(&left.numerator, &right.numerator),
-        denominator: exact::multiply(&left.denominator, &right.denominator),
+        numerator: scope.multiply(&left.numerator, &right.numerator),
+        denominator: scope.multiply(&left.denominator, &right.denominator),
     }
 }
 
-fn rational_divide(left: &Rational, right: &Rational) -> Rational {
+fn rational_divide(scope: &scratch::Scope, left: &Rational, right: &Rational) -> Rational {
     Rational {
-        numerator: exact::multiply(&left.numerator, &right.denominator),
-        denominator: exact::multiply(&left.denominator, &right.numerator),
+        numerator: scope.multiply(&left.numerator, &right.denominator),
+        denominator: scope.multiply(&left.denominator, &right.numerator),
     }
 }
 
-fn rational_scale(value: &Rational, scalar: &exact::T) -> Rational {
+fn rational_scale(scope: &scratch::Scope, value: &Rational, scalar: &scratch::V) -> Rational {
     Rational {
-        numerator: exact::multiply(&value.numerator, scalar),
-        denominator: value.denominator.clone(),
+        numerator: scope.multiply(&value.numerator, scalar),
+        denominator: value.denominator,
     }
 }
 
-fn rational_integer(value: i64) -> Rational {
-    Rational { numerator: exact::of_float(value as f64), denominator: exact::of_float(1.) }
+fn rational_integer(scope: &scratch::Scope, value: i64) -> Rational {
+    Rational {
+        numerator: scope.of_float(value as f64),
+        denominator: scope.of_float(1.),
+    }
 }
 
-fn rational_square(value: &Rational) -> Rational {
-    rational_multiply(value, value)
+fn rational_square(scope: &scratch::Scope, value: &Rational) -> Rational {
+    rational_multiply(scope, value, value)
 }
 
 fn circumcenter_homogeneous(
@@ -816,9 +881,10 @@ fn circumcenter_homogeneous(
     second: &Homogeneous,
     third: &Homogeneous,
 ) -> Result<Homogeneous, Error> {
+    let scope = &scratch::Scope::new();
     let of = |point: &Homogeneous, component: &exact::T| Rational {
-        numerator: component.clone(),
-        denominator: point.hw.clone(),
+        numerator: scope.of_exact(component),
+        denominator: scope.of_exact(&point.hw),
     };
     let ax = of(first, &first.hx);
     let ay = of(first, &first.hy);
@@ -829,61 +895,91 @@ fn circumcenter_homogeneous(
     let cx = of(third, &third.hx);
     let cy = of(third, &third.hy);
     let _cz = of(third, &third.hz);
-    let norm = |x: &Rational, y: &Rational| rational_add(&rational_square(x), &rational_square(y));
+    let norm = |x: &Rational, y: &Rational| {
+        rational_add(
+            scope,
+            &rational_square(scope, x),
+            &rational_square(scope, y),
+        )
+    };
     let an = norm(&ax, &ay);
     let bn = norm(&bx, &by);
     let cn = norm(&cx, &cy);
     let denominator = rational_scale(
+        scope,
         &rational_add(
+            scope,
             &rational_add(
-                &rational_multiply(&ax, &rational_subtract(&by, &cy)),
-                &rational_multiply(&bx, &rational_subtract(&cy, &ay)),
+                scope,
+                &rational_multiply(scope, &ax, &rational_subtract(scope, &by, &cy)),
+                &rational_multiply(scope, &bx, &rational_subtract(scope, &cy, &ay)),
             ),
-            &rational_multiply(&cx, &rational_subtract(&ay, &by)),
+            &rational_multiply(scope, &cx, &rational_subtract(scope, &ay, &by)),
         ),
-        &exact::of_float(2.),
+        &scope.of_float(2.),
     );
-    if exact::is_zero(&denominator.numerator) {
+    if scope.is_zero(&denominator.numerator) {
         return Err(Error::DegenerateTriangle);
     }
     let ux = rational_divide(
+        scope,
         &rational_add(
+            scope,
             &rational_add(
-                &rational_multiply(&an, &rational_subtract(&by, &cy)),
-                &rational_multiply(&bn, &rational_subtract(&cy, &ay)),
+                scope,
+                &rational_multiply(scope, &an, &rational_subtract(scope, &by, &cy)),
+                &rational_multiply(scope, &bn, &rational_subtract(scope, &cy, &ay)),
             ),
-            &rational_multiply(&cn, &rational_subtract(&ay, &by)),
+            &rational_multiply(scope, &cn, &rational_subtract(scope, &ay, &by)),
         ),
         &denominator,
     );
     let uy = rational_divide(
+        scope,
         &rational_add(
+            scope,
             &rational_add(
-                &rational_multiply(&an, &rational_subtract(&cx, &bx)),
-                &rational_multiply(&bn, &rational_subtract(&ax, &cx)),
+                scope,
+                &rational_multiply(scope, &an, &rational_subtract(scope, &cx, &bx)),
+                &rational_multiply(scope, &bn, &rational_subtract(scope, &ax, &cx)),
             ),
-            &rational_multiply(&cn, &rational_subtract(&bx, &ax)),
+            &rational_multiply(scope, &cn, &rational_subtract(scope, &bx, &ax)),
         ),
         &denominator,
     );
     let uz = rational_divide(
-        &rational_add(&rational_add(&az, &bz), &of(third, &third.hz)),
-        &rational_integer(3),
+        scope,
+        &rational_add(scope, &rational_add(scope, &az, &bz), &of(third, &third.hz)),
+        &rational_integer(scope, 3),
     );
-    let xy_denominator = exact::multiply(&ux.denominator, &uy.denominator);
-    Ok(normalize(Homogeneous {
-        hx: exact::multiply(&ux.numerator, &exact::multiply(&uy.denominator, &uz.denominator)),
-        hy: exact::multiply(&uy.numerator, &exact::multiply(&ux.denominator, &uz.denominator)),
-        hz: exact::multiply(&uz.numerator, &xy_denominator),
-        hw: exact::multiply(&xy_denominator, &uz.denominator),
-    }))
+    let xy_denominator = scope.multiply(&ux.denominator, &uy.denominator);
+    Ok(owned(
+        scope,
+        [
+            scope.multiply(
+                &ux.numerator,
+                &scope.multiply(&uy.denominator, &uz.denominator),
+            ),
+            scope.multiply(
+                &uy.numerator,
+                &scope.multiply(&ux.denominator, &uz.denominator),
+            ),
+            scope.multiply(&uz.numerator, &xy_denominator),
+            scope.multiply(&xy_denominator, &uz.denominator),
+        ],
+    ))
 }
 
 fn compute_homogeneous(source: &Source, construction: &Construction) -> Homogeneous {
     match construction {
         Construction::Explicit(index) => {
-            let (hx, hy, hz) = exact_at(source, *index);
-            Homogeneous { hx, hy, hz, hw: exact::of_float(1.) }
+            let i = *index as usize;
+            Homogeneous {
+                hx: exact::of_float(source.data.x[i]),
+                hy: exact::of_float(source.data.y[i]),
+                hz: exact::of_float(source.data.z[i]),
+                hw: exact::of_float(1.),
+            }
         }
         Construction::Rounded { x, y, z } => Homogeneous {
             hx: exact::of_float(*x),
@@ -891,22 +987,21 @@ fn compute_homogeneous(source: &Source, construction: &Construction) -> Homogene
             hz: exact::of_float(*z),
             hw: exact::of_float(1.),
         },
-        Construction::LinePlane { line_start, line_end, plane_a, plane_b, plane_c } => {
-            let p = exact_at(source, *line_start);
-            let q = exact_at(source, *line_end);
-            let r = exact_at(source, *plane_a);
-            let s = exact_at(source, *plane_b);
-            let plane_t = exact_at(source, *plane_c);
-            let direction = subtract3(&q, &p);
-            let normal = cross(&subtract3(&s, &r), &subtract3(&plane_t, &r));
-            let hw = dot(&normal, &direction);
-            assert!(!exact::is_zero(&hw));
-            let line_parameter_numerator = dot(&normal, &subtract3(&r, &p));
-            let (hx, hy, hz) =
-                add3(&scale3(&hw, &p), &scale3(&line_parameter_numerator, &direction));
-            normalize(Homogeneous { hx, hy, hz, hw })
-        }
-        Construction::LineLine { projection, first_start, first_end, second_start, second_end } => {
+        Construction::LinePlane {
+            line_start,
+            line_end,
+            plane_a,
+            plane_b,
+            plane_c,
+        } => line_plane_homogeneous(source, *line_start, *line_end, *plane_a, *plane_b, *plane_c)
+            .expect("intersecting line and plane"),
+        Construction::LineLine {
+            projection,
+            first_start,
+            first_end,
+            second_start,
+            second_end,
+        } => {
             match line_line_homogeneous(
                 source,
                 *projection,
@@ -939,48 +1034,72 @@ fn compute_homogeneous(source: &Source, construction: &Construction) -> Homogene
         Construction::Midpoint { first, second } => {
             let first = exact_homogeneous(first);
             let second = exact_homogeneous(second);
-            normalize(Homogeneous {
-                hx: exact::add(
-                    &exact::multiply(&first.hx, &second.hw),
-                    &exact::multiply(&second.hx, &first.hw),
-                ),
-                hy: exact::add(
-                    &exact::multiply(&first.hy, &second.hw),
-                    &exact::multiply(&second.hy, &first.hw),
-                ),
-                hz: exact::add(
-                    &exact::multiply(&first.hz, &second.hw),
-                    &exact::multiply(&second.hz, &first.hw),
-                ),
-                hw: exact::multiply(&exact::of_float(2.), &exact::multiply(&first.hw, &second.hw)),
-            })
+            let scope = &scratch::Scope::new();
+            let first = imported(scope, first);
+            let second = imported(scope, second);
+            owned(
+                scope,
+                [
+                    scope.add(
+                        &scope.multiply(&first[0], &second[3]),
+                        &scope.multiply(&second[0], &first[3]),
+                    ),
+                    scope.add(
+                        &scope.multiply(&first[1], &second[3]),
+                        &scope.multiply(&second[1], &first[3]),
+                    ),
+                    scope.add(
+                        &scope.multiply(&first[2], &second[3]),
+                        &scope.multiply(&second[2], &first[3]),
+                    ),
+                    scope.multiply(&scope.of_float(2.), &scope.multiply(&first[3], &second[3])),
+                ],
+            )
         }
-        Construction::Centroid3 { first, second, third } => {
+        Construction::Centroid3 {
+            first,
+            second,
+            third,
+        } => {
             let first = exact_homogeneous(first);
             let second = exact_homogeneous(second);
             let third = exact_homogeneous(third);
-            let second_third = exact::multiply(&second.hw, &third.hw);
-            let first_third = exact::multiply(&first.hw, &third.hw);
-            let first_second = exact::multiply(&first.hw, &second.hw);
-            let component = |first_component: &exact::T,
-                             second_component: &exact::T,
-                             third_component: &exact::T| {
-                exact::add(
-                    &exact::add(
-                        &exact::multiply(first_component, &second_third),
-                        &exact::multiply(second_component, &first_third),
+            let scope = &scratch::Scope::new();
+            let first = imported(scope, first);
+            let second = imported(scope, second);
+            let third = imported(scope, third);
+            let second_third = scope.multiply(&second[3], &third[3]);
+            let first_third = scope.multiply(&first[3], &third[3]);
+            let first_second = scope.multiply(&first[3], &second[3]);
+            let component = |first_component: &scratch::V,
+                             second_component: &scratch::V,
+                             third_component: &scratch::V| {
+                scope.add(
+                    &scope.add(
+                        &scope.multiply(first_component, &second_third),
+                        &scope.multiply(second_component, &first_third),
                     ),
-                    &exact::multiply(third_component, &first_second),
+                    &scope.multiply(third_component, &first_second),
                 )
             };
-            normalize(Homogeneous {
-                hx: component(&first.hx, &second.hx, &third.hx),
-                hy: component(&first.hy, &second.hy, &third.hy),
-                hz: component(&first.hz, &second.hz, &third.hz),
-                hw: exact::multiply(&exact::of_float(3.), &exact::multiply(&first.hw, &second_third)),
-            })
+            owned(
+                scope,
+                [
+                    component(&first[0], &second[0], &third[0]),
+                    component(&first[1], &second[1], &third[1]),
+                    component(&first[2], &second[2], &third[2]),
+                    scope.multiply(
+                        &scope.of_float(3.),
+                        &scope.multiply(&first[3], &second_third),
+                    ),
+                ],
+            )
         }
-        Construction::Circumcenter2Xy { first, second, third } => {
+        Construction::Circumcenter2Xy {
+            first,
+            second,
+            third,
+        } => {
             match circumcenter_homogeneous(
                 exact_homogeneous(first),
                 exact_homogeneous(second),
@@ -1065,18 +1184,25 @@ pub fn diametral_dot_xy(first: &T, second: &T, point: &T) -> Sign {
     let first = exact_homogeneous(first);
     let second = exact_homogeneous(second);
     let point = exact_homogeneous(point);
+    let scope = &scratch::Scope::new();
     let difference = |axis: usize, endpoint: &Homogeneous| {
-        exact::subtract(
-            &exact::multiply(component(point, axis), &endpoint.hw),
-            &exact::multiply(component(endpoint, axis), &point.hw),
+        scope.subtract(
+            &scope.multiply(
+                &scope.of_exact(component(point, axis)),
+                &scope.of_exact(&endpoint.hw),
+            ),
+            &scope.multiply(
+                &scope.of_exact(component(endpoint, axis)),
+                &scope.of_exact(&point.hw),
+            ),
         )
     };
     let pfx = difference(0, first);
     let pfy = difference(1, first);
     let psx = difference(0, second);
     let psy = difference(1, second);
-    let value = exact::add(&exact::multiply(&pfx, &psx), &exact::multiply(&pfy, &psy));
-    sign_of_comparison(exact::compare_zero(&value))
+    let value = scope.add(&scope.multiply(&pfx, &psx), &scope.multiply(&pfy, &psy));
+    sign_of_comparison(scope.compare_zero(&value))
 }
 
 fn compare_axis(axis: usize, left: &T, right: &T) -> i64 {
@@ -1931,4 +2057,60 @@ mod tests {
         let w = barycentric_source_triangle(&s, 0, 1, 9, &lpi);
         assert!((w.0 - 0.5).abs() < 1e-14 && (w.1 - 0.5).abs() < 1e-14 && w.2.abs() < 1e-14);
     }
+    /// Run with RAYS_EXACT_BENCH_ITERATIONS=512 for the same debug-profile timing workload.
+    #[test]
+    fn exact_d3_benchmark_and_construction_regression() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        let iterations = std::env::var("RAYS_EXACT_BENCH_ITERATIONS")
+            .map(|value| value.parse::<usize>().unwrap()).unwrap_or(16);
+        let cases: Vec<[f64; 12]> = (0..48u64).map(|i| std::array::from_fn(|j| {
+            let bits = (i * 1_664_525 + j as u64 * 1_013_904_223 + 97).wrapping_mul(6_364_136_223_846_793_005);
+            let exponent = [1, 100, 600, 1000, 1400, 2046][(bits >> 16) as usize % 6];
+            f64::from_bits((bits & 0x800f_ffff_ffff_ffff) | (exponent << 52))
+        })).collect();
+        let signs = |v: &[f64; 12]| [
+            scratch::orient3d(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11]),
+            scratch::incircle(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]),
+        ];
+        let expected: Vec<_> = cases.iter().map(signs).collect();
+        let bytes: Vec<_> = expected.iter().flatten().map(|sign| (sign + 1) as u8).collect();
+        assert_eq!(rays_math::hash::md5_hex(&bytes), "351d2fc1d4d1c92afde379899b06cff1");
+        let parallel_signs = std::sync::Mutex::new(vec![[0; 2]; cases.len()]);
+        parallel::run_unit(Some(4), &|| {
+            parallel::for_(8, 0, cases.len() as i64 - 1, &|index| {
+                parallel_signs.lock().unwrap()[index as usize] = signs(&cases[index as usize]);
+                Ok(())
+            })
+        }).unwrap();
+        assert_eq!(parallel_signs.into_inner().unwrap(), expected, "exact signs are domain-independent");
+        let source = fixture();
+        let first = explicit(&source, 0).unwrap();
+        let second = explicit(&source, 1).unwrap();
+        let third = explicit(&source, 17).unwrap();
+        let inputs = [exact_homogeneous(&first), exact_homogeneous(&second), exact_homogeneous(&third)];
+        let mut predicate_us = Vec::new();
+        let mut construction_us = Vec::new();
+        for _ in 0..5 {
+            let started = Instant::now();
+            for i in 0..iterations {
+                let index = i % cases.len();
+                assert_eq!(signs(black_box(&cases[index])), expected[index]);
+            }
+            predicate_us.push(started.elapsed().as_micros());
+            let started = Instant::now();
+            for _ in 0..iterations {
+                let center = circumcenter_homogeneous(black_box(inputs[0]), inputs[1], inputs[2]).unwrap();
+                assert_eq!(approximate_ratio(&center.hx, &center.hw), 1.);
+                assert_eq!(approximate_ratio(&center.hy, &center.hw), 1.);
+                assert_eq!(approximate_ratio(&center.hz, &center.hw), 0.);
+                black_box(center);
+            }
+            construction_us.push(started.elapsed().as_micros());
+        }
+        predicate_us.sort_unstable();
+        construction_us.sort_unstable();
+        println!("D3 debug medians ({iterations} iterations): exact orient3d+incircle {} us; implicit circumcenter {} us", predicate_us[2], construction_us[2]);
+    }
+
 }

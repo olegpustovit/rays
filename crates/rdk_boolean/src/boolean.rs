@@ -622,6 +622,41 @@ mod tests {
     }
 
     // test_solid_products
+    // Frozen with the 30-bit engine before the shared 64-bit arithmetic change.
+    #[test]
+    fn exact_arithmetic_preserves_boolean_payload_bits() {
+        let left = with_point_weight(1., &tetra((0., 0., 0.), 2.));
+        let right = with_point_weight(2., &tetra((0.5, 0.2, 0.2), 2.));
+        let mut bytes = Vec::new();
+        let mut append = |words: Vec<u64>| {
+            bytes.extend_from_slice(&(words.len() as u64).to_le_bytes());
+            for word in words { bytes.extend_from_slice(&word.to_le_bytes()); }
+        };
+        for operation in [Operation::Union, Operation::Intersection, Operation::Difference,
+            Operation::ReverseDifference, Operation::Xor, Operation::Shatter] {
+            let mut params = front(right.clone());
+            params.operation = operation;
+            let output = run(&params, &left).unwrap();
+            let (x, y, z, points, offsets, kinds) = signature(&output);
+            for plane in [x, y, z] { append(plane.into_iter().map(f64::to_bits).collect()); }
+            for indices in [points, offsets] { append(indices.into_iter().map(|v| v as u64).collect()); }
+            append(kinds.into_iter().map(u64::from).collect());
+            for owner in [attribute::Owner::Point, attribute::Owner::Vertex] {
+                let weight = geometry::find_attribute(owner, "weight", &output);
+                append(match weight.map(|item| attribute::storage(&item).unwrap()) {
+                    None => Vec::new(),
+                    Some(attribute::Storage::Float(values)) => values.iter().map(|v| v.to_bits()).collect(),
+                    _ => panic!("weight must remain scalar float"),
+                });
+            }
+            for name in ["boolean_left", "boolean_overlap", "boolean_right"] {
+                append(geometry::find_group(group::Owner::Primitive, name, &output)
+                    .map(|_| group_flags(name, &output).into_iter().map(u64::from).collect()).unwrap_or_default());
+            }
+        }
+        assert_eq!(rays_math::hash::md5_hex(&bytes), "b174629eacddb5690a6c56d966aadf2b");
+    }
+
     #[test]
     fn solid_products() {
         let left = tetra((0., 0., 0.), 2.);
