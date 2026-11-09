@@ -1,3 +1,4 @@
+pub use metal_sys::native::reflection::{Member, ReflectedType};
 use std::any::Any;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -7,25 +8,6 @@ pub struct Limits {
 }
 
 pub const DEFAULT_LIMITS: Limits = Limits { max_depth: 32, max_members: 65_536 };
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ReflectedType {
-    Scalar(i64),
-    Array { data_type: i64, length: i64, stride: i64, argument_index_stride: i64, element: Option<Box<Self>> },
-    Pointer { data_type: i64, access: i64, alignment: i64, data_size: i64, element_is_argument_buffer: bool, element: Option<Box<Self>> },
-    Struct(Vec<Member>),
-    TextureReference { data_type: i64, access: i64, texture_type: i64, depth: bool },
-    TensorReference { data_type: i64, access: i64, tensor_data_type: i64, index_type: i64, dimensions: Option<Vec<i64>> },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Member {
-    pub name: String,
-    pub offset: i64,
-    pub argument_index: i64,
-    pub data_type: i64,
-    pub reflected_type: Option<Box<ReflectedType>>,
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Argument {

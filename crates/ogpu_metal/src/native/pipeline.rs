@@ -1,13 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::metal::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, DeviceFamily, Error, ErrorKind, Lifetime, Texture, TextureKind, TextureRegion};
-use crate::metal_format::Format;
-use crate::metal_raw_types::{Metal4RenderColorAttachmentDescriptor, Metal4RenderDescriptor};
-use crate::{descriptors::{DepthStencil, RenderPassDescriptor, Sampler}, library::Library};
+use crate::native::resource::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, DeviceFamily, Error, ErrorKind, Lifetime, Texture, TextureKind, TextureRegion};
+use ogpu_core::types::TextureFormat as Format;
+use crate::native::{descriptors::{DepthStencil, RenderPassDescriptor, Sampler}, library::Library};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PrimitiveTopology { Point, Line, Triangle }
+pub use ogpu_core::render_pass::Primitive as PrimitiveTopology;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlendState { Disabled, Enabled }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,7 +58,7 @@ impl Default for RenderPipelineOptions {
     fn default() -> Self {
         Self {
             label: None, fragment: None, reflection: false, raster_sample_count: 1,
-            color_formats: None, color_attachments: None, primitive_topology: PrimitiveTopology::Triangle,
+            color_formats: None, color_attachments: None, primitive_topology: PrimitiveTopology::TriangleList,
             support_indirect_command_buffers: false,
         }
     }
@@ -92,7 +90,7 @@ pub struct ShaderBinding {
     pub used: bool,
     pub argument: bool,
     pub kind: BindingKind,
-    pub reflection: Option<crate::reflection::ReflectedType>,
+    pub reflection: Option<metal_sys::native::reflection::ReflectedType>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderPipelineReflection {
@@ -120,7 +118,7 @@ pub(crate) fn map_binding(binding: metal_sys::native::pipeline::Binding) -> Shad
         name: binding.name, index: binding.index,
         access: match binding.access { 0 => BindingAccess::ReadOnly, 1 => BindingAccess::ReadWrite, 2 => BindingAccess::WriteOnly, value => BindingAccess::Unknown(value) },
         used: binding.used, argument: binding.argument, kind,
-        reflection: binding.reflected_type.map(crate::reflection::from_native),
+        reflection: binding.reflected_type,
     }
 }
 fn map_reflection((vertex, fragment): (Vec<metal_sys::native::pipeline::Binding>, Vec<metal_sys::native::pipeline::Binding>)) -> RenderPipelineReflection {
@@ -152,7 +150,7 @@ impl Compiler {
         enter_main(OP)?;
         self.0.lifetime.ensure_live(OP)?;
         library.lifetime().ensure_live(OP)?;
-        if !self.0.device.same(library.device()) { return Err(error(OP, ErrorKind::DeviceMismatch, "compiler and library belong to different devices")); }
+        if !self.0.device.same(library.device()) { return Err(error(OP, ErrorKind::CrossDevice, "compiler and library belong to different devices")); }
         if vertex.is_empty() || vertex.as_bytes().contains(&0) { return Err(error(OP, ErrorKind::InvalidArgument, "vertex function name must be nonempty and contain no NUL byte")); }
         if let Some(fragment) = &options.fragment {
             if fragment.is_empty() || fragment.as_bytes().contains(&0) { return Err(error(OP, ErrorKind::InvalidArgument, "fragment function name must be nonempty and contain no NUL byte")); }
@@ -172,15 +170,15 @@ impl Compiler {
         if color_attachments.is_empty() || color_attachments.len() > 8 {
             return Err(error(OP, ErrorKind::InvalidArgument, "render color attachments must match rasterization and not exceed eight"));
         }
-        if color_attachments.iter().any(|attachment| attachment.format.is_depth_or_stencil()) { return Err(error(OP, ErrorKind::InvalidArgument, "render color attachments require color pixel formats")); }
+        if color_attachments.iter().any(|attachment| attachment.format == Format::Depth32Float) { return Err(error(OP, ErrorKind::InvalidArgument, "render color attachments require color pixel formats")); }
         if color_attachments.iter().any(|attachment| attachment.write_mask.iter().copied().collect::<std::collections::HashSet<_>>().len() != attachment.write_mask.len()) { return Err(error(OP, ErrorKind::InvalidArgument, "render color-write masks contain duplicate channels")); }
         if options.raster_sample_count == 0 { return Err(error(OP, ErrorKind::InvalidArgument, "render raster sample count must be positive")); }
         if !self.0.device.supports_texture_sample_count(options.raster_sample_count)? { return Err(error(OP, ErrorKind::Unsupported, "the Metal device does not support the render sample count")); }
         let sample_count = u64::try_from(options.raster_sample_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "render sample count exceeds native bounds"))?;
         let native_sample_count = i64::try_from(sample_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "render sample count exceeds descriptor bounds"))?;
         let raw_colors = color_attachments.drain(..).map(|attachment| {
-            Metal4RenderColorAttachmentDescriptor {
-                pixel_format: attachment.format.code() as i32,
+            metal_sys::native::pipeline::ColorAttachment {
+                pixel_format: crate::native::resource::pixel_format_code(attachment.format) as i32,
                 blending_state: match attachment.blending { BlendState::Disabled => 0, BlendState::Enabled => 1 },
                 source_rgb_blend_factor: blend_factor_code(attachment.source_rgb),
                 destination_rgb_blend_factor: blend_factor_code(attachment.destination_rgb),
@@ -191,28 +189,11 @@ impl Compiler {
                 write_mask: attachment.write_mask.iter().copied().fold(0, |bits, value| bits | color_write_bit(value)),
             }
         }).collect::<Vec<_>>();
-        let descriptor = Metal4RenderDescriptor {
-            label: options.label.clone(), library: library.raw().clone(), vertex_function: vertex.to_owned(),
-            fragment_function: options.fragment.clone(), reflection: options.reflection,
-            raster_sample_count: native_sample_count, color_attachments: raw_colors.clone(),
-            rasterization_enabled: true,
-            primitive_topology: match options.primitive_topology { PrimitiveTopology::Point => 1, PrimitiveTopology::Line => 2, PrimitiveTopology::Triangle => 3 },
-            support_indirect_commands: options.support_indirect_command_buffers, lookup_archives: Vec::new(),
-            vertex_descriptor: None, support_vertex_binary_linking: false, support_fragment_binary_linking: false,
-            vertex_dynamic_linking: None, fragment_dynamic_linking: None, vertex_static_linking: None, fragment_static_linking: None,
-            alpha_to_coverage: false, alpha_to_one: false, max_vertex_amplification_count: 1, color_attachment_mapping: 0,
-        };
-        let raw_colors = raw_colors.iter().map(|attachment| metal_sys::native::pipeline::ColorAttachment {
-            pixel_format: attachment.pixel_format, blending_state: attachment.blending_state,
-            source_rgb_blend_factor: attachment.source_rgb_blend_factor, destination_rgb_blend_factor: attachment.destination_rgb_blend_factor,
-            rgb_blend_operation: attachment.rgb_blend_operation, source_alpha_blend_factor: attachment.source_alpha_blend_factor,
-            destination_alpha_blend_factor: attachment.destination_alpha_blend_factor, alpha_blend_operation: attachment.alpha_blend_operation,
-            write_mask: attachment.write_mask,
-        }).collect::<Vec<_>>();
+        let topology = match options.primitive_topology { PrimitiveTopology::PointList => 1, PrimitiveTopology::LineList | PrimitiveTopology::LineStrip => 2, PrimitiveTopology::TriangleList | PrimitiveTopology::TriangleStrip => 3 };
         let (raw, reflection) = metal_sys::native::pipeline::create_render_pipeline(
-            &self.0.raw, &descriptor.library, descriptor.label.as_deref(), &descriptor.vertex_function,
-            descriptor.fragment_function.as_deref(), descriptor.reflection, descriptor.raster_sample_count as u64,
-            &raw_colors, descriptor.primitive_topology, descriptor.support_indirect_commands,
+            &self.0.raw, library.raw(), options.label.as_deref(), vertex,
+            options.fragment.as_deref(), options.reflection, native_sample_count as u64,
+            &raw_colors, topology, options.support_indirect_command_buffers,
         ).map_err(|failure| sys_error(OP, failure))?;
         self.0.device.attach_child(OP)?;
         Ok(RenderPipeline(Arc::new(RenderPipelineInner {
@@ -281,18 +262,13 @@ impl RenderPipeline {
 pub struct Viewport { pub x: f64, pub y: f64, pub width: f64, pub height: f64, pub znear: f64, pub zfar: f64 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Scissor { pub x: usize, pub y: usize, pub width: usize, pub height: usize }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CullMode { None, Front, Back }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Winding { Clockwise, CounterClockwise }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Primitive { Point, Line, LineStrip, Triangle, TriangleStrip }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IndexType { Uint16, Uint32 }
+pub use ogpu_core::render_pass::Cull as CullMode;
+pub use ogpu_core::backend::Winding;
+pub use ogpu_core::render_pass::Primitive;
+pub use ogpu_core::render_pass::IndexType;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceUsage { Read, Write, Sample }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RenderStage { Vertex, Fragment }
+pub use ogpu_core::backend::ShaderStage as RenderStage;
 #[derive(Clone)]
 pub enum RenderResource { Buffer(Buffer), Texture(Texture) }
 
@@ -324,7 +300,7 @@ impl RenderEncoder {
         enter_main(OP)?;
         command_buffer.ensure_recording(OP)?;
         pass.ensure_live(OP)?;
-        if !command_buffer.device().same(pass.device()) { return Err(error(OP, ErrorKind::DeviceMismatch, "render pass belongs to another device")); }
+        if !command_buffer.device().same(pass.device()) { return Err(error(OP, ErrorKind::CrossDevice, "render pass belongs to another device")); }
         let color_target = pass.color_attachment();
         let depth_target = pass.depth_attachment();
         let stencil_target = pass.stencil_attachment();
@@ -401,7 +377,7 @@ impl RenderEncoder {
     }
     pub fn set_cull_mode(&self, mode: CullMode) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.set_cull_mode";
-        let code = match mode { CullMode::None => 0, CullMode::Front => 1, CullMode::Back => 2 }; metal_sys::registry::render_encoder_set_cull_mode(&self.0.raw, code).map_err(|failure| sys_error(OP, failure))
+        let code = match mode { CullMode::CullNone => 0, CullMode::CullFront => 1, CullMode::CullBack => 2 }; metal_sys::registry::render_encoder_set_cull_mode(&self.0.raw, code).map_err(|failure| sys_error(OP, failure))
     }
     pub fn set_winding(&self, winding: Winding) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.set_winding";
@@ -421,7 +397,7 @@ impl RenderEncoder {
                 RenderResource::Texture(value) => (1, value.raw(), value.lifetime(), value.device()),
             };
             lifetime.ensure_live(OP)?;
-            if !device.same(resource_device) { return Err(error(OP, ErrorKind::DeviceMismatch, "render resource belongs to another device")); }
+            if !device.same(resource_device) { return Err(error(OP, ErrorKind::CrossDevice, "render resource belongs to another device")); }
             if raw_resources.iter().any(|(_, previous): &(i32, &metal_sys::Handle)| raw.same(previous)) {
                 return Err(error(OP, ErrorKind::InvalidArgument, "render resources contain duplicates"));
             }
@@ -446,7 +422,7 @@ impl RenderEncoder {
         let primitive = primitive_code(primitive);
         metal_sys::registry::render_encoder_draw_primitives(&self.0.raw, primitive, first, count, instances).map_err(|failure| sys_error(OP, failure))
     }
-    pub fn draw_triangles(&self, first: usize, count: usize) -> Result<(), Error> { self.draw_primitives(Primitive::Triangle, first, count, 1) }
+    pub fn draw_triangles(&self, first: usize, count: usize) -> Result<(), Error> { self.draw_primitives(Primitive::TriangleList, first, count, 1) }
     pub fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, index_buffer: &Buffer, index_offset: u64, index_count: u64, instance_count: Option<u64>) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.draw_indexed";
         let instances = instance_count.unwrap_or(1);
@@ -476,10 +452,9 @@ impl RenderEncoder {
         Ok(())
     }
     pub fn destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
-    pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
 }
-fn primitive_code(value: Primitive) -> i64 {
-    match value { Primitive::Point => 0, Primitive::Line => 1, Primitive::LineStrip => 2, Primitive::Triangle => 3, Primitive::TriangleStrip => 4 }
+pub(crate) fn primitive_code(value: Primitive) -> i64 {
+    match value { Primitive::PointList => 0, Primitive::LineList => 1, Primitive::LineStrip => 2, Primitive::TriangleList => 3, Primitive::TriangleStrip => 4 }
 }
 
 struct BlitEncoderInner { raw: metal_sys::Handle, lifetime: Lifetime, command_buffer: CommandBuffer, ended: AtomicBool }
@@ -518,24 +493,19 @@ impl BlitEncoder {
         if region.x > width || region.width > width - region.x || region.y > height || region.height > height - region.y || region.z > depth || region.depth > depth - region.z {
             return Err(error(OP, ErrorKind::InvalidArgument, "blit destination region exceeds the selected mip level"));
         }
-        let layout = descriptor.format.layout();
-        let aligned = |origin: usize, extent: usize, limit: usize, block: usize| origin % block == 0 && (extent % block == 0 || origin + extent == limit);
-        if !aligned(region.x, region.width, width, layout.block_width) || !aligned(region.y, region.height, height, layout.block_height) {
-            return Err(error(OP, ErrorKind::InvalidArgument, "blit destination region is not format-block aligned"));
-        }
-        let blocks = |value: usize, block: usize| 1 + (value - 1) / block;
-        let minimum_row = blocks(region.width, layout.block_width).checked_mul(layout.bytes_per_block).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "blit row size overflows"))?;
-        if source_bytes_per_row < minimum_row || source_bytes_per_row % layout.bytes_per_block != 0 || source_bytes_per_image == 0 {
+        let texel_bytes = ogpu_core::types::texel_bytes(descriptor.format) as usize;
+        let minimum_row = region.width.checked_mul(texel_bytes).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "blit row size overflows"))?;
+        if source_bytes_per_row < minimum_row || source_bytes_per_row % texel_bytes != 0 || source_bytes_per_image == 0 {
             return Err(error(OP, ErrorKind::InvalidArgument, "blit source row pitch is too small, zero, or not block-aligned"));
         }
-        let minimum_image = source_bytes_per_row.checked_mul(blocks(region.height, layout.block_height)).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "blit image size overflows"))?;
+        let minimum_image = source_bytes_per_row.checked_mul(region.height).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "blit image size overflows"))?;
         if source_bytes_per_image < minimum_image { return Err(error(OP, ErrorKind::InvalidArgument, "blit source image pitch is smaller than its rows")); }
         let total = (source_bytes_per_image as u128) * (region.depth as u128);
         if total > u64::MAX as u128 || source_offset > source.length() || total as u64 > source.length() - source_offset {
             return Err(error(OP, ErrorKind::InvalidArgument, "blit source range exceeds the buffer"));
         }
         if !self.0.command_buffer.device().same(source.device()) || !self.0.command_buffer.device().same(destination.device()) {
-            return Err(error(OP, ErrorKind::DeviceMismatch, "blit resources belong to another device"));
+            return Err(error(OP, ErrorKind::CrossDevice, "blit resources belong to another device"));
         }
         let usize_to_u64 = |value: usize| u64::try_from(value).map_err(|_| error(OP, ErrorKind::InvalidArgument, "blit argument exceeds native bounds"));
         let origin = (usize_to_u64(region.x)?, usize_to_u64(region.y)?, usize_to_u64(region.z)?);
@@ -554,7 +524,7 @@ impl BlitEncoder {
     }
 }
 
-fn texture_slices(descriptor: &crate::metal::TextureDescriptor) -> Option<usize> {
+fn texture_slices(descriptor: &crate::native::resource::TextureDescriptor) -> Option<usize> {
     match descriptor.kind {
         TextureKind::Texture1dArray | TextureKind::Texture2dArray | TextureKind::Texture2dMultisampleArray => Some(descriptor.array_length),
         TextureKind::TextureCube => Some(6),
@@ -565,7 +535,7 @@ fn texture_slices(descriptor: &crate::metal::TextureDescriptor) -> Option<usize>
 
 // ogpu_metal: executing a range of an indirect command buffer.
 impl RenderEncoder {
-    pub fn execute_indirect_commands(&self, commands: &crate::indirect::IndirectCommandBuffer, location: usize, length: usize) -> Result<(), Error> {
+    pub fn execute_indirect_commands(&self, commands: &crate::native::indirect::IndirectCommandBuffer, location: usize, length: usize) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.execute_indirect_commands";
         metal_sys::native::indirect::execute_icb_range(&self.0.raw, commands.raw(), location as u64, length as u64).map_err(|failure| sys_error(OP, failure))?;
         self.0.command_buffer.retain_indirect(commands);

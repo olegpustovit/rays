@@ -1,12 +1,13 @@
 //! Ogpu_metal.Backend: OGPU's driver traits over the Metal modules. Tokens name native objects;
 //! the checks live in `ogpu_core::backend`, as for Vulkan.
+use crate::native;
 use crate::{
     acceleration::{self, Acceleration},
     blit_encoder, buffer,
     buffer::Buffer,
     command_control::{CommandContext, IcbEntry, OpenEncoder, Resource, Tables},
     compute_encoder,
-    device::{fail, of_metal_error, Device},
+    device::{fail, Device},
     library::{self, Library},
     pipeline::{self, Native, Pipeline},
     queue::{self, Cleanup, Queue},
@@ -19,7 +20,7 @@ use ogpu_core::{
         AccelSizes, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame, DriverIcb,
         DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue, DriverRenderEncoder, DriverRenderTarget,
-        DriverResource, DriverSampler, DriverSurface, Floats, GpuTiming, InstanceKind, OwnedReadback, Receipt,
+        DriverResource, DriverSampler, DriverSurface, GpuTiming, InstanceKind, OwnedReadback, Receipt,
         RenderPipelineOptions, ShaderStage, Token,
     },
     caps::Caps,
@@ -54,11 +55,11 @@ impl Dev {
     fn take_cleanup_error(&self) -> Option<Error> {
         self.cleanup_error.borrow_mut().take()
     }
-    fn record_cleanup(&self, failure: Option<metal::Error>) {
+    fn record_cleanup(&self, failure: Option<native::Error>) {
         if let Some(e) = failure {
             let mut slot = self.cleanup_error.borrow_mut();
             if slot.is_none() {
-                *slot = Some(of_metal_error("Ogpu_metal.Backend.cleanup", &e));
+                *slot = Some(e);
             }
         }
     }
@@ -82,7 +83,6 @@ fn buffer_memory(memory: Memory) -> Result<buffer::Memory, Error> {
 }
 
 /// The host view a mapped buffer made on first ask; its buffer clears it on destroy.
-type View = Rc<RefCell<Option<Floats>>>;
 
 struct MetalBuffer {
     dev: Rc<Dev>,
@@ -126,7 +126,6 @@ fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -
     Ok(Box::new(register_buffer(dev, buffer_memory(memory).and_then(|m| buffer::create(&dev.device, m, descriptor)))?))
 }
 
-const MAPPED_OP: &str = "Ogpu_metal.Backend.create_mapped_buffer";
 
 struct MetalMapping {
     readback: OwnedReadback,
@@ -141,9 +140,9 @@ impl DriverMapping for MetalMapping {
 fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error> {
     let value = buffer::create(&dev.device, buffer::Memory::Shared, descriptor)?;
     let resource = register_buffer(dev, Ok(value.clone()))?;
-    let native_readback = value.metal().owned_readback().map_err(|error| of_metal_error(MAPPED_OP, &error))?;
+    let native_readback = value.metal().owned_readback()?;
     let readback: OwnedReadback = std::sync::Arc::new(move |offset, length| {
-        native_readback(offset, length).map_err(|error| of_metal_error(MAPPED_OP, &error))
+        native_readback(offset, length)
     });
     Ok(DriverMapped {
         mapped_resource: Box::new(resource),
@@ -271,7 +270,7 @@ fn create_library(dev: &Rc<Dev>, shader: &Shader) -> Result<Box<dyn DriverLibrar
 fn warm_library(dev: &Rc<Dev>, shader: &Shader) -> Option<ogpu_core::backend::Warm> {
     let source = std::str::from_utf8(ogpu_core::shader::bytes(shader)).ok()?;
     let entry = &ogpu_core::shader::entry_points(shader).first()?.name;
-    let warm = metal::Library::warm(dev.device.metal(), source, entry).ok()?;
+    let warm = native::Library::warm(dev.device.metal(), source, entry).ok()?;
     Some(Box::new(move || warm.state()))
 }
 
@@ -327,25 +326,8 @@ fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<Box
 }
 
 fn instance_layout(kind: InstanceKind) -> Vec<i64> {
-    let kind = match kind {
-        InstanceKind::UserIdInstances => metal::acceleration::InstanceKind::UserIdInstances,
-        InstanceKind::MotionInstances => metal::acceleration::InstanceKind::MotionInstances,
-    };
-    let layout = metal::acceleration::BuildDescriptor::instance_layout(kind).expect("Metal instance layout");
-    vec![
-        layout.size as i64,
-        layout.transform,
-        layout.options,
-        layout.mask,
-        layout.structure_index,
-        layout.user_id,
-        layout.transforms_start,
-        layout.transforms_count,
-        layout.start_border_offset,
-        layout.end_border_offset,
-        layout.start_time_offset,
-        layout.end_time_offset,
-    ]
+    let kind = match kind { InstanceKind::UserIdInstances => 1, InstanceKind::MotionInstances => 2 };
+    metal_sys::native::acceleration::instance_layout(kind).expect("Metal instance layout").to_vec()
 }
 
 struct MetalSampler {
@@ -373,21 +355,8 @@ fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> Result<Box<d
 }
 
 fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descriptor: &RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error> {
-    let topology = match options.topology {
-        Primitive::PointList => metal::pipeline::PrimitiveTopology::Point,
-        _ => metal::pipeline::PrimitiveTopology::Triangle,
-    };
-    let pipeline = pipeline::create_render_owned(options.indirect, topology, options.blend, &dev.device, descriptor)?;
+    let pipeline = pipeline::create_render_owned(options.indirect, options.topology, options.blend, &dev.device, descriptor)?;
     own_pipeline(dev, pipeline)
-}
-
-fn icb_primitive(value: Primitive) -> metal::indirect::Primitive {
-    match value {
-        Primitive::PointList => metal::indirect::Primitive::Point,
-        Primitive::LineList => metal::indirect::Primitive::Line,
-        Primitive::TriangleList => metal::indirect::Primitive::Triangle,
-        Primitive::TriangleStrip => metal::indirect::Primitive::TriangleStrip,
-    }
 }
 
 const ICB_OP: &str = "Ogpu_metal.Backend.create_icb";
@@ -399,12 +368,12 @@ struct MetalIcb {
 }
 
 impl MetalIcb {
-    fn command(&self, index: i64) -> Result<metal::RenderCommand, Error> {
+    fn command(&self, index: i64) -> Result<native::RenderCommand, Error> {
         let index = index as usize;
         if let Some(Some(c)) = self.entry.commands.borrow().get(index) {
             return Ok(c.clone());
         }
-        let c = metal::RenderCommand::at(&self.entry.icb, index).map_err(|value| of_metal_error(ICB_OP, &value))?;
+        let c = native::RenderCommand::at(&self.entry.icb, index)?;
         self.entry.commands.borrow_mut()[index] = Some(c.clone());
         Ok(c)
     }
@@ -427,7 +396,7 @@ impl DriverIcb for MetalIcb {
         };
         match pipeline.native() {
             Native::Compute(_) => Err(fail(ICB_OP, ErrorKind::InvalidArgument, "compute pipeline cannot draw")),
-            Native::Render(native) => self.command(index)?.set_pipeline(native).map_err(|value| of_metal_error(ICB_OP, &value)),
+            Native::Render(native) => self.command(index)?.set_pipeline(native),
         }
     }
     fn icb_set_buffer(&self, index: i64, stage: ShaderStage, slot: i64, offset: i64, token: Token) -> Result<(), Error> {
@@ -436,25 +405,22 @@ impl DriverIcb for MetalIcb {
         match stage {
             ShaderStage::Vertex => command.set_vertex_buffer(slot as usize, offset as u64, buffer.metal()),
             ShaderStage::Fragment => command.set_fragment_buffer(slot as usize, offset as u64, buffer.metal()),
-        }.map_err(|value| of_metal_error(ICB_OP, &value))
+        }
     }
     fn icb_draw(&self, index: i64, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
-        self.command(index)?.draw_primitives(icb_primitive(primitive), first as usize, count as usize, Some(instances as usize)).map_err(|value| of_metal_error(ICB_OP, &value))
+        self.command(index)?.draw_primitives(primitive, first as usize, count as usize, Some(instances as usize))
     }
     fn icb_draw_indexed(&self, index: i64, primitive: Primitive, index_type: IndexType, token: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
         let command = self.command(index)?;
         let index_buffer = self.find_buffer(token)?;
         command.draw_indexed(
-            icb_primitive(primitive),
-            match index_type {
-                IndexType::Uint16 => metal::indirect::IndexType::Uint16,
-                IndexType::Uint32 => metal::indirect::IndexType::Uint32,
-            },
+            primitive,
+            index_type,
             index_buffer.metal(),
             offset as u64,
             count as u64,
             Some(instances as u64),
-        ).map_err(|value| of_metal_error(ICB_OP, &value))
+        )
     }
     fn destroy_icb(&self) -> Result<(), Error> {
         for slot in self.entry.commands.borrow_mut().iter_mut() {
@@ -462,19 +428,19 @@ impl DriverIcb for MetalIcb {
                 let _ = command.destroy();
             }
         }
-        self.entry.icb.destroy().map_err(|value| of_metal_error(ICB_OP, &value))?;
+        self.entry.icb.destroy()?;
         self.dev.t.icbs.borrow_mut().remove(&self.id);
         Ok(())
     }
 }
 
 fn create_icb(dev: &Rc<Dev>, max_commands: i64) -> Result<Box<dyn DriverIcb>, Error> {
-    let mut descriptor = metal::IndirectCommandBuffer::descriptor(vec![metal::indirect::CommandType::IndirectDraw, metal::indirect::CommandType::IndirectDrawIndexed]);
+    let mut descriptor = native::IndirectCommandBuffer::descriptor(vec![native::indirect::CommandType::IndirectDraw, native::indirect::CommandType::IndirectDrawIndexed]);
     descriptor.inherit_buffers = false;
     descriptor.inherit_pipeline_state = false;
     descriptor.max_vertex_buffer_bind_count = 8;
     descriptor.max_fragment_buffer_bind_count = 8;
-    let icb = metal::IndirectCommandBuffer::create(dev.device.metal(), max_commands as usize, &descriptor).map_err(|value| of_metal_error(ICB_OP, &value))?;
+    let icb = native::IndirectCommandBuffer::create(dev.device.metal(), max_commands as usize, &descriptor)?;
     let id = dev.t.token();
     let entry = Rc::new(IcbEntry { icb, commands: RefCell::new(vec![None; max_commands as usize]) });
     dev.t.icbs.borrow_mut().insert(id, entry.clone());
@@ -487,7 +453,7 @@ struct MetalArgument {
     dev: Rc<Dev>,
     pipeline: Pipeline,
     index: i64,
-    encoder: RefCell<metal::ShaderArgumentEncoder>,
+    encoder: RefCell<native::ShaderArgumentEncoder>,
     length: i64,
     alignment: i64,
 }
@@ -495,7 +461,7 @@ struct MetalArgument {
 impl MetalArgument {
     /// A Metal argument encoder keeps its last-set resources alive; encode each slice through a
     /// short-lived encoder so evicted textures can be released.
-    fn encode(&self, buffer: Token, offset: i64, resource: metal::ShaderArgumentResource, slot: i64) -> Result<(), Error> {
+    fn encode(&self, buffer: Token, offset: i64, resource: native::ShaderArgumentResource, slot: i64) -> Result<(), Error> {
         let Some(Resource::Buffer(buffer)) = self.dev.t.resource(buffer) else {
             return Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "buffer graph is incomplete"));
         };
@@ -504,7 +470,7 @@ impl MetalArgument {
             .set_argument_buffer(buffer.metal(), offset as u64)
             .and_then(|()| scratch.set(slot as u64, resource));
         let _ = scratch.destroy();
-        done.map_err(|value| of_metal_error(ARGUMENT_OP, &value))
+        done
     }
 }
 
@@ -517,18 +483,18 @@ impl DriverArgument for MetalArgument {
     }
     fn argument_texture(&self, buffer: Token, offset: i64, slot: i64, texture: Token) -> Result<(), Error> {
         match self.dev.t.resource(texture) {
-            Some(Resource::Texture(texture)) => self.encode(buffer, offset, metal::ShaderArgumentResource::Texture(texture.metal().clone()), slot),
+            Some(Resource::Texture(texture)) => self.encode(buffer, offset, native::ShaderArgumentResource::Texture(texture.metal().clone()), slot),
             _ => Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }
     }
     fn argument_sampler(&self, buffer: Token, offset: i64, slot: i64, sampler: Token) -> Result<(), Error> {
         match self.dev.t.samplers.borrow().get(&sampler) {
-            Some(sampler) => self.encode(buffer, offset, metal::ShaderArgumentResource::Sampler(sampler.metal().clone()), slot),
+            Some(sampler) => self.encode(buffer, offset, native::ShaderArgumentResource::Sampler(sampler.metal().clone()), slot),
             None => Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "sampler graph is incomplete")),
         }
     }
     fn destroy_argument(&self) -> Result<(), Error> {
-        self.encoder.borrow_mut().destroy().map_err(|value| of_metal_error(ARGUMENT_OP, &value))
+        self.encoder.borrow_mut().destroy()
     }
 }
 
@@ -552,11 +518,11 @@ fn run_all(retained: &RefCell<Vec<Cleanup>>) {
 
 struct AccelRecorder {
     context: Rc<CommandContext>,
-    encoder: metal::AccelerationEncoder,
+    encoder: native::AccelerationEncoder,
 }
 
 fn accel_encoder(context: &Rc<CommandContext>) -> Result<Box<dyn DriverAccelEncoder>, Error> {
-    let encoder = metal::AccelerationEncoder::create(&context.native).map_err(|value| of_metal_error(context.operation, &value))?;
+    let encoder = native::AccelerationEncoder::create(&context.native)?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Accel(encoder.clone()));
     Ok(Box::new(AccelRecorder { context: context.clone(), encoder }))
 }
@@ -568,14 +534,14 @@ impl DriverAccelEncoder for AccelRecorder {
         let scratch = c.find_buffer(scratch)?;
         c.keep_accel(&structure)?;
         c.keep_buffer(&scratch)?;
-        structure.encode_build(&self.encoder, &c.device, &scratch, scratch_offset)
+        structure.encode_build(&self.encoder, &scratch, scratch_offset)
     }
     fn compact(&self, src: Token, dst: Token) -> Result<(), Error> {
         let c = &self.context;
         let (src, dst) = (c.find_accel(src)?, c.find_accel(dst)?);
         c.keep_accel(&src)?;
         c.keep_accel(&dst)?;
-        Acceleration::encode_compact(&self.encoder, &c.device, &src, &dst)
+        Acceleration::encode_compact(&self.encoder, &src, &dst)
     }
     fn write_compacted_size(&self, token: Token, dst: Token, offset: i64) -> Result<(), Error> {
         let c = &self.context;
@@ -583,7 +549,7 @@ impl DriverAccelEncoder for AccelRecorder {
         let destination = c.find_buffer(dst)?;
         c.keep_accel(&structure)?;
         c.keep_buffer(&destination)?;
-        structure.encode_compacted_size(&self.encoder, &c.device, &destination, offset)
+        structure.encode_compacted_size(&self.encoder, &destination, offset)
     }
     fn refit(&self, token: Token, descriptor: &DriverAccelDescriptor, scratch: Token, scratch_offset: i64) -> Result<(), Error> {
         let c = &self.context;
@@ -600,7 +566,7 @@ impl DriverAccelEncoder for AccelRecorder {
     }
     fn end_accel(&self) -> Result<(), Error> {
         *self.context.open_encoder.borrow_mut() = None;
-        self.encoder.end_encoding().map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.end_encoding()
     }
 }
 
@@ -670,13 +636,13 @@ impl DriverCommands for MetalCommands {
             open.end();
         }
         run_all(&context.retained);
-        context.native.destroy().map_err(|value| of_metal_error(context.operation, &value))
+        context.native.destroy()
     }
 }
 
 fn begin_commands(dev: &Rc<Dev>, queue: &Queue, active: &Rc<Vec<PendingPresentation>>) -> Result<Box<dyn DriverCommands>, Error> {
     let operation = "Ogpu_metal.Backend.begin_commands";
-    let native = metal::CommandBuffer::create(queue.metal()).map_err(|value| of_metal_error(operation, &value))?;
+    let native = native::CommandBuffer::create(queue.metal())?;
     let context = Rc::new(CommandContext {
         operation,
         device: dev.device.clone(),
@@ -794,13 +760,13 @@ fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> Result<Box<dy
     let Some(token) = &configuration.layer else {
         return Err(fail(OP, ErrorKind::Unsupported, "surface needs a native layer token"));
     };
-    let layer = metal::Surface::adopt_borrowed(
+    let layer = native::Surface::adopt_borrowed(
             dev.device.metal(),
             token,
             token.owner_id(),
             token.generation(),
-            metal::surface::Configuration::default(configuration.physical_width as usize, configuration.physical_height as usize),
-        ).map_err(|value| of_metal_error(OP, &value))?;
+            native::surface::Configuration::default(configuration.physical_width as usize, configuration.physical_height as usize),
+        )?;
     let value = surface::create(&dev.device, layer, configuration)?;
     Ok(Box::new(MetalSurface { dev: dev.clone(), value }))
 }
@@ -824,7 +790,7 @@ fn destroy_device(dev: &Rc<Dev>) -> Result<(), Error> {
     }
 }
 
-fn metal_size(device: &Device, project: fn(&metal::DeviceInfo) -> u64) -> i64 {
+fn metal_size(device: &Device, project: fn(&native::DeviceInfo) -> u64) -> i64 {
     match device.metal().info() {
         Ok(info) => project(&info) as i64,
         Err(_) => 0,
@@ -942,7 +908,7 @@ pub fn create() -> Box<dyn Driver> {
 
 /// Native handles still alive on this thread (the release queue drained first).
 pub fn live_handles() -> i64 {
-    match (metal::release_queue::drain(), metal::release_queue::stats()) {
+    match (native::release_queue::drain(), native::release_queue::stats()) {
         (Ok(_), Ok(stats)) => stats.live_handles as i64,
         _ => unreachable!("the release queue answers on the thread that owns the Metal handles"),
     }

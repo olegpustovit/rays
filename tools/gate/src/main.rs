@@ -864,8 +864,6 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("sdl3_sys", &["native_layer_token_sys"][..]),
         ("metal_sys", &[][..]),
         ("vulkan_sys", &[][..]),
-        // OCaml metal: threads, native_layer_token (merged into native_layer_token_sys::portable).
-        ("metal", &["metal_sys", "native_layer_token_sys"][..]),
         ("rdk_core", &["mem", "parallel", "rays_math"][..]),
         ("rdk_geom", &["rdk_core", "rays_math", "parallel"][..]),
         ("rdk_ops", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
@@ -907,7 +905,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_core", &["native_layer_token_sys"][..]),
         ("ogpu_mock", &["ogpu_core"][..]),
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
-        ("ogpu_metal", &["ogpu_core", "metal"][..]),
+        ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem", "scene_command"][..]),
         ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
@@ -961,7 +959,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "web_export", "rays_editor", "rays_bin", "flow_sop_catalog",
     ];
     let gpu = [
-        "sdl3", "metal", "vulkan_sys", "ogpu_core",
+        "sdl3", "metal_sys", "vulkan_sys", "ogpu_core",
         "ogpu_mock", "ogpu_metal", "ogpu_vulkan", "runtime",
         "runtime_resources", "renderer",
     ];
@@ -971,7 +969,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "cfmt",
         "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
         "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
-        "metal", "vulkan_sys", "ogpu_core",
+        "metal_sys", "vulkan_sys", "ogpu_core",
         "rdk_core",
     ];
     for library in foundational {
@@ -981,7 +979,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         rules.entry(library.to_owned()).or_default().extend(names.iter().map(|name| (*name).to_owned()));
     };
     for library in ["runtime", "renderer", "rays"] {
-        forbid(library, &["metal", "ogpu_metal", "vulkan_sys", "ogpu_vulkan"]);
+        forbid(library, &["metal_sys", "ogpu_metal", "vulkan_sys", "ogpu_vulkan"]);
     }
     for library in ["ogpu_metal", "vulkan_sys", "ogpu_vulkan"] {
         forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
@@ -1029,11 +1027,11 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("pxui_shell", &["sop", "pxui_graph", "rays_editor"]);
     forbid("pxui_graph", &["sop", "pxui_shell", "rays_editor"]);
     forbid("rays_pathtracer", &[
-        "metal", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
+        "metal_sys", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
         "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
     forbid("rdk_rays", &[
-        "metal", "ogpu_metal", "rdk_boolean", "sop", "editor_core",
+        "metal_sys", "ogpu_metal", "rdk_boolean", "sop", "editor_core",
         "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_pathtracer", "rays_editor",
     ]);
     // Flow is UI-free and GPU-free, but its three crates may reach the OCaml flow's leaves (param, input, diagnostic).
@@ -1530,16 +1528,17 @@ mod tests {
         )
         .unwrap();
         let cc_build_edge = deps(&root);
-        for package in ["flow_ir", "pxui", "ogpu_metal"] {
+        for package in ["flow_ir", "pxui", "ogpu_metal", "metal_sys"] {
             fs::create_dir_all(root.join(format!("crates/{package}/src"))).unwrap();
             fs::write(root.join(format!("crates/{package}/Cargo.toml")), format!("[package]\nname = \"{package}\"\n")).unwrap();
             fs::write(root.join(format!("crates/{package}/src/lib.rs")), "").unwrap();
         }
         fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n[dependencies]\npxui = { path = \"../pxui\" }\n").unwrap();
-        fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../ogpu_metal\" }\n").unwrap();
+        fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../ogpu_metal\" }\nmetal_sys = { path = \"../metal_sys\" }\n").unwrap();
         let boundaries = deps(&root).unwrap();
         assert!(boundaries.iter().any(|issue| issue.contains("flow_ir must not reach") && issue.contains("pxui")));
         assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("ogpu_metal")));
+        assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("metal_sys")));
         for package in ["flow_ir", "rays"] {
             let path = root.join(format!("crates/{package}/Cargo.toml"));
             fs::write(&path, fs::read_to_string(&path).unwrap().replace("[dependencies]", "[dev-dependencies]")).unwrap();

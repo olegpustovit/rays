@@ -45,6 +45,7 @@ pub enum Primitive {
     LineList,
     TriangleList,
     TriangleStrip,
+    LineStrip,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

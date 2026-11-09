@@ -1,16 +1,17 @@
 //! Ogpu_metal.Command_control: what the encoders share while one command buffer records, and the
 //! token tables of the device behind them.
+use crate::native;
 use ogpu_core::error::Error;
 use crate::{
     acceleration::Acceleration,
     buffer::Buffer,
-    device::{fail, of_metal_error, Device},
+    device::{fail, Device},
     pipeline::Pipeline,
     queue::Cleanup,
     sampler::Sampler,
     texture::Texture,
 };
-use metal::{CompareFunction, DepthStencil, DepthStencilDescriptor};
+use crate::native::{DepthStencil, DepthStencilDescriptor};
 use ogpu_core::{
     backend::DepthState,
     error::ErrorKind,
@@ -29,8 +30,8 @@ pub enum Resource {
 }
 
 pub struct IcbEntry {
-    pub icb: metal::IndirectCommandBuffer,
-    pub commands: RefCell<Vec<Option<metal::RenderCommand>>>,
+    pub icb: native::IndirectCommandBuffer,
+    pub commands: RefCell<Vec<Option<native::RenderCommand>>>,
 }
 
 /// The token tables of one device.
@@ -76,12 +77,12 @@ impl Tables {
         for depth_compare in [Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always] {
             for depth_write in [false, true] {
                 let descriptor = DepthStencilDescriptor {
-                    depth_compare: metal_compare(depth_compare),
+                    depth_compare: depth_compare,
                     depth_write,
                     label: Some("ogpu-metal-depth-state".to_owned()),
                     ..DepthStencilDescriptor::default()
                 };
-                let native = DepthStencil::create(device.metal(), descriptor).map_err(|e| of_metal_error("Ogpu_metal.Backend.create_device", &e))?;
+                let native = DepthStencil::create(device.metal(), descriptor)?;
                 states.push((DepthState { depth_compare, depth_write }, native));
             }
         }
@@ -102,25 +103,12 @@ impl Default for Tables {
     }
 }
 
-fn metal_compare(value: Comparison) -> CompareFunction {
-    match value {
-        Comparison::Never => CompareFunction::Never,
-        Comparison::Less => CompareFunction::Less,
-        Comparison::Equal => CompareFunction::Equal,
-        Comparison::LessEqual => CompareFunction::LessEqual,
-        Comparison::Greater => CompareFunction::Greater,
-        Comparison::NotEqual => CompareFunction::NotEqual,
-        Comparison::GreaterEqual => CompareFunction::GreaterEqual,
-        Comparison::Always => CompareFunction::Always,
-    }
-}
-
 /// The encoder a recording command buffer has open; `abandon` ends it.
 pub enum OpenEncoder {
-    Compute(metal::ComputeEncoder),
-    Accel(metal::AccelerationEncoder),
-    Blit(metal::BlitEncoder),
-    Render(metal::RenderEncoder, metal::RenderPassDescriptor),
+    Compute(native::ComputeEncoder),
+    Accel(native::AccelerationEncoder),
+    Blit(native::BlitEncoder),
+    Render(native::RenderEncoder, native::RenderPassDescriptor),
 }
 
 impl OpenEncoder {
@@ -142,7 +130,7 @@ impl OpenEncoder {
 pub struct CommandContext {
     pub operation: &'static str,
     pub device: Device,
-    pub native: metal::CommandBuffer,
+    pub native: native::CommandBuffer,
     pub tables: Rc<Tables>,
     pub commands_token: i64,
     pub open_encoder: RefCell<Option<OpenEncoder>>,
@@ -223,7 +211,7 @@ impl CommandContext {
         self.tables.samplers.borrow().get(&token).cloned()
     }
 
-    pub fn icb(&self, token: i64) -> Option<metal::IndirectCommandBuffer> {
+    pub fn icb(&self, token: i64) -> Option<native::IndirectCommandBuffer> {
         self.tables.icbs.borrow().get(&token).map(|entry| entry.icb.clone())
     }
 

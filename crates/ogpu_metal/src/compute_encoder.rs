@@ -1,8 +1,9 @@
 //! Ogpu_metal.Compute_encoder: the driver's compute encoder over a Metal compute encoder.
+use crate::native;
 use ogpu_core::error::Error;
 use crate::{
     command_control::{CommandContext, OpenEncoder, Resource},
-    device::{fail, of_metal_error},
+    device::{fail},
     pipeline::Native,
 };
 use ogpu_core::{backend::{DriverComputeEncoder, Token}, error::ErrorKind};
@@ -14,11 +15,11 @@ fn size(t: (i64, i64, i64)) -> (usize, usize, usize) {
 
 struct Compute {
     context: Rc<CommandContext>,
-    encoder: metal::ComputeEncoder,
+    encoder: native::ComputeEncoder,
 }
 
 pub fn create(context: &Rc<CommandContext>) -> Result<Box<dyn DriverComputeEncoder>, Error> {
-    let encoder = metal::ComputeEncoder::create(&context.native).map_err(|value| of_metal_error(context.operation, &value))?;
+    let encoder = native::ComputeEncoder::create(&context.native)?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Compute(encoder.clone()));
     Ok(Box::new(Compute { context: context.clone(), encoder }))
 }
@@ -34,7 +35,7 @@ impl DriverComputeEncoder for Compute {
             Native::Compute(compute) => {
                 let p = pipeline.clone();
                 c.keep(pipeline.retain_submission(), Box::new(move || p.release_submission()))?;
-                self.encoder.set_pipeline(compute).map_err(|value| of_metal_error(c.operation, &value))
+                self.encoder.set_pipeline(compute)
             }
         }
     }
@@ -43,11 +44,11 @@ impl DriverComputeEncoder for Compute {
         let c = &self.context;
         let buffer = c.find_buffer(token)?;
         c.keep_buffer(&buffer)?;
-        self.encoder.set_buffer(index as usize, offset as u64, buffer.metal()).map_err(|value| of_metal_error(c.operation, &value))
+        self.encoder.set_buffer(index as usize, offset as u64, buffer.metal())
     }
 
     fn set_bytes(&self, index: i64, bytes: &[u8]) -> Result<(), Error> {
-        self.encoder.set_bytes(index as usize, bytes).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.set_bytes(index as usize, bytes)
     }
 
     fn set_texture(&self, index: i64, token: Token) -> Result<(), Error> {
@@ -55,7 +56,7 @@ impl DriverComputeEncoder for Compute {
         match c.resource(token) {
             Some(Resource::Texture(texture)) => {
                 c.keep_texture(&texture)?;
-                self.encoder.set_texture(index as usize, texture.metal()).map_err(|value| of_metal_error(c.operation, &value))
+                self.encoder.set_texture(index as usize, texture.metal())
             }
             _ => Err(fail(c.operation, ErrorKind::InvalidArgument, "texture graph is incomplete")),
         }
@@ -65,18 +66,18 @@ impl DriverComputeEncoder for Compute {
         let c = &self.context;
         let structure = c.find_accel(token)?;
         c.keep_accel(&structure)?;
-        self.encoder.set_acceleration_structure(index as usize, Some(structure.metal())).map_err(|value| of_metal_error(c.operation, &value))
+        self.encoder.set_acceleration_structure(index as usize, Some(structure.metal()))
     }
 
     fn dispatch_threads(&self, threads: (i64, i64, i64), threadgroup: (i64, i64, i64)) -> Result<(), Error> {
-        self.encoder.dispatch_threads(size(threads), size(threadgroup)).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.dispatch_threads(size(threads), size(threadgroup))
     }
 
     fn dispatch_indirect(&self, token: Token, offset: i64, threadgroup: (i64, i64, i64)) -> Result<(), Error> {
         let c = &self.context;
         let buffer = c.find_buffer(token)?;
         c.keep_buffer(&buffer)?;
-        self.encoder.dispatch_threadgroups_indirect(buffer.metal(), offset as u64, size(threadgroup)).map_err(|value| of_metal_error(c.operation, &value))
+        self.encoder.dispatch_threadgroups_indirect(buffer.metal(), offset as u64, size(threadgroup))
     }
 
     fn compute_use_accels(&self, tokens: &[Token]) -> Result<(), Error> {
@@ -90,12 +91,12 @@ impl DriverComputeEncoder for Compute {
         if structures.is_empty() {
             Ok(())
         } else {
-            self.encoder.use_acceleration_structures(&structures).map_err(|value| of_metal_error(c.operation, &value))
+            self.encoder.use_acceleration_structures(&structures)
         }
     }
 
     fn end_compute(&self) -> Result<(), Error> {
         *self.context.open_encoder.borrow_mut() = None;
-        self.encoder.end_encoding().map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.end_encoding()
     }
 }

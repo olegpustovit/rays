@@ -1,5 +1,5 @@
-use crate::metal::{enter_main, error, sys_error, CommandBuffer, Device, Error, ErrorKind, Lifetime, PresentTime, Texture};
-use crate::metal_format::Format;
+use crate::native::resource::{enter_main, error, sys_error, CommandBuffer, Device, Error, ErrorKind, Lifetime, PresentTime, Texture};
+use ogpu_core::types::TextureFormat as Format;
 use native_layer_token_sys::portable::Token;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -77,7 +77,7 @@ impl Surface {
         device.ensure_live(operation)?;
         configuration.validate(operation)?;
         let layer = token.borrow_raw(owner_id, generation).ok_or_else(|| {
-            error(operation, ErrorKind::Destroyed, "native layer token is stale or belongs to another owner")
+            error(operation, ErrorKind::StaleHandle, "native layer token is stale or belongs to another owner")
         })?;
         let raw = metal_sys::native::surface::adopt_borrowed_layer(device.raw(), layer).map_err(|failure| sys_error(operation, failure))?;
         if let Err(failure) = configure_raw(&raw, configuration).map_err(|failure| sys_error(operation, failure)) {
@@ -204,7 +204,6 @@ impl Drawable {
     }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn device(&self) -> &Device { &self.0.surface.device }
-    pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
     pub(crate) fn dependent_counter(&self) -> Arc<AtomicUsize> {
         self.0.lifetime.dependent_counter()
     }
@@ -226,7 +225,7 @@ fn configure_raw(layer: &metal_sys::Handle, configuration: Configuration) -> Res
         layer,
         width,
         height,
-        configuration.format.code() as i64,
+        crate::native::resource::pixel_format_code(configuration.format) as i64,
         configuration.framebuffer_only,
         maximum_drawables,
         configuration.allows_timeout,

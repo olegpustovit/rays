@@ -1,5 +1,5 @@
 //! Ogpu_metal.Device: one Metal device with its OGPU capability profile and live-resource count.
-use metal::ErrorKind as MetalKind;
+use crate::native;
 use ogpu_core::{
     caps::{self, Caps, Limits},
     error::{self, Error, ErrorKind},
@@ -12,7 +12,7 @@ pub fn fail(operation: &str, kind: ErrorKind, message: &str) -> Error {
 }
 
 struct DeviceInner {
-    metal: metal::Device,
+    metal: native::Device,
     handle: handle::Device,
     profile: Caps,
     generation: Cell<i64>,
@@ -22,37 +22,14 @@ struct DeviceInner {
 #[derive(Clone)]
 pub struct Device(Rc<DeviceInner>);
 
-pub fn error_kind(operation: &str, source: &str, kind: MetalKind) -> ErrorKind {
-    match kind {
-        MetalKind::InvalidArgument => ErrorKind::InvalidArgument,
-        MetalKind::InvalidState | MetalKind::ParentHasDependents => ErrorKind::InvalidState,
-        MetalKind::Destroyed => ErrorKind::StaleHandle,
-        MetalKind::DeviceMismatch => ErrorKind::CrossDevice,
-        MetalKind::Unsupported => ErrorKind::Unsupported,
-        MetalKind::NativeError
-            if operation == "Ogpu_metal.Device.system_default" && source == "Metal.Device.system_default" =>
-        {
-            ErrorKind::NoAdapter
-        }
-        MetalKind::NativeError | MetalKind::WrongDomain => ErrorKind::DeviceLost,
-    }
-}
-
-pub fn of_metal_error(operation: &str, value: &metal::Error) -> Error {
-    error::make(operation, error_kind(operation, &value.operation, value.kind), &value.message)
-}
-
-/// `Result.map_error (of_metal_error ~operation)`.
-
 impl Device {
     pub fn system_default() -> Result<Device, Error> {
-        let operation = "Ogpu_metal.Device.system_default";
-        let metal = metal::Device::system_default().map_err(|value| of_metal_error(operation, &value))?;
+        let metal = native::Device::system_default()?;
         let info = match metal.info() {
             Ok(info) => info,
             Err(value) => {
                 let _ = metal.destroy();
-                return Err(of_metal_error(operation, &value));
+                return Err(value);
             }
         };
         let mut max_sample_count = 1;
@@ -62,15 +39,15 @@ impl Device {
                 Ok(false) => {}
                 Err(value) => {
                     let _ = metal.destroy();
-                    return Err(of_metal_error(operation, &value));
+                    return Err(value);
                 }
             }
         }
-        let family = |f: metal::DeviceFamily| matches!(metal.supports_family(f), Ok(true));
+        let family = |f: native::DeviceFamily| matches!(metal.supports_family(f), Ok(true));
         // Curve primitives intersect only on Apple GPU family 9 and later.
-        let curves = family(metal::DeviceFamily::Apple9);
+        let curves = family(native::DeviceFamily::Apple9);
         // tile memory: every Apple family
-        let tiled = family(metal::DeviceFamily::Apple7);
+        let tiled = family(native::DeviceFamily::Apple7);
         let capabilities = Caps {
             limits: Limits {
                 max_buffer_size: info.max_buffer_length as i64,
@@ -120,14 +97,14 @@ impl Device {
         } else if self.0.live_resources.get() != 0 {
             Err(fail(operation, ErrorKind::InvalidState, "device still owns live resources"))
         } else {
-            self.0.metal.destroy().map_err(|value| of_metal_error(operation, &value))?;
+            self.0.metal.destroy()?;
             handle::destroy_device(&self.0.handle);
             self.0.generation.set(self.0.generation.get().wrapping_add(1));
             Ok(())
         }
     }
 
-    pub fn metal(&self) -> &metal::Device {
+    pub fn metal(&self) -> &native::Device {
         &self.0.metal
     }
     pub fn handle(&self) -> &handle::Device {

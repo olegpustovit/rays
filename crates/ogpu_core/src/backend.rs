@@ -1163,9 +1163,13 @@ pub fn create_accel(device: &Device, descriptor: AccelDescriptor, refit: bool) -
     }
     let motion_valid = match &descriptor {
         AccelDescriptor::MotionBlas { motion, .. } =>
-            motion.keyframes >= 2 && motion.start_time.is_finite() && motion.end_time.is_finite() && motion.start_time < motion.end_time,
+            motion.keyframes >= 2 && motion.start_time.is_finite() && motion.end_time.is_finite()
+                && (motion.start_time as f32).is_finite() && (motion.end_time as f32).is_finite()
+                && (motion.start_time as f32) < (motion.end_time as f32),
         AccelDescriptor::TlasOf { kind: InstanceKind::MotionInstances, motion_transforms: None, .. } => false,
-        AccelDescriptor::TlasOf { motion_transforms: Some((_, offset, count)), .. } => *offset >= 0 && *count > 0,
+        AccelDescriptor::TlasOf { motion_transforms: Some((buffer, offset, count)), .. } =>
+            *offset >= 0 && *count > 0 && count.checked_mul(48).and_then(|bytes| offset.checked_add(bytes))
+                .is_some_and(|end| end <= buffer.buffer_descriptor.size),
         _ => true,
     };
     if !motion_valid { return Err(make_error(OP, ErrorKind::InvalidArgument, "motion keyframes, time range, or transform range is invalid")); }
@@ -1498,9 +1502,6 @@ pub fn create_render_pipeline(
     require(OP, device, Feature::RenderPipeline)?;
     pipeline::create_render(&device.0.capabilities, descriptor)?;
     let topology = topology.unwrap_or(Primitive::TriangleList);
-    if topology != Primitive::TriangleList && topology != Primitive::PointList {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "pipeline topology class must be triangles or points"));
-    }
     let indirect = indirect.unwrap_or(false);
     let options = RenderPipelineOptions { blend: blend.unwrap_or(Blend::Replace), topology, indirect };
     let raw = device.0.raw().create_render_pipeline(options, descriptor)?;
@@ -1550,6 +1551,9 @@ fn valid_draw(operation: &str, primitive: Primitive, first: i64, count: i64, ins
     if primitive == Primitive::TriangleList && count % 3 != 0 {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "triangle-list vertex count is not divisible by three"));
     }
+    if primitive == Primitive::LineStrip && count < 2 {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "line strips need at least two vertices"));
+    }
     if primitive == Primitive::LineList && count % 2 != 0 {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "line-list vertex count is not divisible by two"));
     }
@@ -1571,6 +1575,9 @@ fn valid_indexed(
     }
     if primitive == Primitive::TriangleList && count % 3 != 0 {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "triangle-list index count is not divisible by three"));
+    }
+    if primitive == Primitive::LineStrip && count < 2 {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "line strips need at least two vertices"));
     }
     if primitive == Primitive::LineList && count % 2 != 0 {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "line-list index count is not divisible by two"));
@@ -2098,6 +2105,8 @@ mod ownership_tests {
             assert_eq!(std::mem::size_of::<ComputeInner>(), 40);
             assert_eq!(std::mem::size_of::<RenderInner>(), 40);
         }
+        assert!(valid_draw("test", Primitive::LineStrip, 0, 1, 1).is_err());
+        valid_draw("test", Primitive::LineStrip, 0, 2, 1).unwrap();
         let device = device();
         let payload = || Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) };
         let queue = Queue(Rc::new(RefCell::new(QueueInner {
@@ -2186,6 +2195,37 @@ mod ownership_tests {
             pipeline(PipelineShape::Vertex, Some((pipeline::ColorFormat::Rgba8Unorm, 4)), false),
             compute,
         ] { reject(ErrorKind::InvalidArgument, render_compatible("test", &pass, &wrong)); }
+    }
+
+    #[test]
+    fn acceleration_geometry_is_checked_before_native_descriptor_creation() {
+        let mut device = device();
+        let caps = &mut Rc::get_mut(&mut device.0).unwrap().capabilities;
+        caps.ray_tracing = true;
+        caps.ray_tracing_motion = true;
+        let buffer = Buffer {
+            resource: make_resource(&device, Box::new(Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) })),
+            memory: Memory::Shared,
+            buffer_descriptor: BufferDescriptor { label: None, size: 36, usage: vec![BufferUsage::Storage] },
+        };
+        let invalid = AccelDescriptor::Blas { geometries: vec![Geometry::Triangles { vertices: buffer.clone(), offset: 0, length: 36, vertex_stride: 12, vertex_count: 6 }] };
+        let error = create_accel(&device, invalid, false).err().expect("oversized triangle rejected before native entry");
+        assert_eq!(error.kind, ErrorKind::InvalidArgument);
+        assert_eq!(error.operation, "Ogpu.Acceleration.validate_elements");
+        for (start_time, end_time) in [(f64::MAX / 2., f64::MAX), (1., 1. + f64::EPSILON)] {
+            let descriptor = AccelDescriptor::MotionBlas { geometries: Vec::new(), motion: Motion { keyframes: 2, start_time, end_time, start_border: Border::Clamp, end_border: Border::Clamp } };
+            let error = create_accel(&device, descriptor, false).err().expect("narrowed motion time rejected");
+            assert_eq!(error.kind, ErrorKind::InvalidArgument);
+            assert_eq!(error.operation, "Backend.create_accel");
+            assert_eq!(error.message, "motion keyframes, time range, or transform range is invalid");
+        }
+        let range = |length| BufferRange { buffer: buffer.resource.0.handle.clone(), buffer_size: 36, offset: 0, length };
+        let curve = PortableDescriptor::Blas { geometries: vec![AccelGeometry::Curves {
+            control_points: vec![range(24)], control_stride: 12, control_point_count: 2,
+            radii: vec![range(8)], radius_stride: 4, indices: range(4), segment_count: 1, control_points_per_segment: 2,
+        }], motion_keyframes: None };
+        let curve = acceleration::create(&device.0.handle, true, false, curve).expect("one index per curve segment");
+        acceleration::destroy(&curve);
     }
 
     struct TestMapping { allocation: Arc<Vec<u8>>, _view_owner: Rc<()> }

@@ -1,6 +1,7 @@
 //! Ogpu_metal.Texture
-use crate::device::{fail, of_metal_error, Device};
-use metal::{StorageMode, TextureKind, TextureRegion, TextureUsage as MetalUsage};
+use crate::native;
+use crate::device::{fail, Device};
+use crate::native::{StorageMode, TextureKind, TextureRegion, TextureUsage as MetalUsage};
 use ogpu_core::{
     error::Error,
     error::ErrorKind,
@@ -11,7 +12,7 @@ use ogpu_core::{
 use std::{cell::Cell, rc::Rc};
 
 struct TextureInner {
-    metal: metal::Texture,
+    metal: native::Texture,
     handle: ResourceHandle,
     device: Device,
     descriptor: TextureDescriptor,
@@ -24,27 +25,6 @@ struct TextureInner {
 
 #[derive(Clone)]
 pub struct Texture(Rc<TextureInner>);
-
-fn metal_format(format: TextureFormat) -> metal::metal_format::Format {
-    match format {
-        TextureFormat::R8Unorm => metal::metal_format::Format::R8Unorm,
-        TextureFormat::Rgba8Unorm => metal::metal_format::Format::Rgba8Unorm,
-        TextureFormat::Bgra8Unorm => metal::metal_format::Format::Bgra8Unorm,
-        TextureFormat::Bgra8UnormSrgb => metal::metal_format::Format::Bgra8UnormSrgb,
-        TextureFormat::Rgba16Float => metal::metal_format::Format::Rgba16Float,
-        TextureFormat::Rgba32Float => metal::metal_format::Format::Rgba32Float,
-        TextureFormat::Depth32Float => metal::metal_format::Format::Depth32Float,
-    }
-}
-
-fn bytes_per_pixel(format: TextureFormat) -> i64 {
-    match format {
-        TextureFormat::R8Unorm => 1,
-        TextureFormat::Rgba8Unorm | TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb | TextureFormat::Depth32Float => 4,
-        TextureFormat::Rgba16Float => 8,
-        TextureFormat::Rgba32Float => 16,
-    }
-}
 
 fn validate_descriptor(value: &TextureDescriptor, format: TextureFormat) -> Result<(), Error> {
     let operation = "Ogpu_metal.Texture.create";
@@ -84,7 +64,7 @@ fn usage(values: &[TextureUsage]) -> Vec<MetalUsage> {
 }
 
 /// The validated native descriptor for an OGPU texture.
-fn native_descriptor(operation: &str, device: &Device, memory: Memory, format: TextureFormat, descriptor: &TextureDescriptor) -> Result<metal::TextureDescriptor, Error> {
+fn native_descriptor(operation: &str, device: &Device, memory: Memory, format: TextureFormat, descriptor: &TextureDescriptor) -> Result<native::TextureDescriptor, Error> {
     if device.destroyed() {
         return Err(fail(operation, ErrorKind::StaleHandle, "device is destroyed"));
     }
@@ -106,8 +86,8 @@ fn native_descriptor(operation: &str, device: &Device, memory: Memory, format: T
         Memory::Shared => StorageMode::Shared,
         Memory::Memoryless => StorageMode::Memoryless,
     };
-    let mut base = metal::TextureDescriptor::descriptor_2d(
-        metal_format(format),
+    let mut base = native::TextureDescriptor::descriptor_2d(
+        format,
         descriptor.width as usize,
         descriptor.height as usize,
         storage,
@@ -130,7 +110,7 @@ fn native_descriptor(operation: &str, device: &Device, memory: Memory, format: T
 pub fn create(device: &Device, memory: Memory, format: TextureFormat, descriptor: &TextureDescriptor) -> Result<Texture, Error> {
     let operation = "Ogpu_metal.Texture.create";
     let native = native_descriptor(operation, device, memory, format, descriptor)?;
-    let metal = metal::Texture::create(device.metal(), native).map_err(|value| of_metal_error(operation, &value))?;
+    let metal = native::Texture::create(device.metal(), native)?;
     device.attach_resource();
     Ok(Texture(Rc::new(TextureInner {
         metal,
@@ -167,7 +147,7 @@ impl Texture {
         }
         let width = (self.0.descriptor.width >> mip_level).max(1);
         let height = (self.0.descriptor.height >> mip_level).max(1);
-        let minimum = width * bytes_per_pixel(self.0.format);
+        let minimum = width * ogpu_core::types::texel_bytes(self.0.format);
         if bytes_per_row < minimum || bytes_per_row > i64::MAX / height {
             return Err(fail(operation, ErrorKind::InvalidArgument, "bytes_per_row is invalid"));
         }
@@ -184,7 +164,7 @@ impl Texture {
                 0,
                 bytes_per_row as usize,
                 (bytes_per_row * height) as usize,
-            ).map_err(|value| of_metal_error(operation, &value))
+            )
         
     }
 
@@ -203,12 +183,11 @@ impl Texture {
                 bytes_per_row as usize,
                 required as usize,
                 destination,
-            ).map_err(|value| of_metal_error(operation, &value))
+            )
         
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        let operation = "Ogpu_metal.Texture.destroy";
         if self.destroyed() {
             Ok(())
         } else if self.0.submission_uses.get() > 0 {
@@ -216,14 +195,14 @@ impl Texture {
             self.0.destroy_requested.set(true);
             Ok(())
         } else {
-            self.0.metal.destroy().map_err(|value| of_metal_error(operation, &value))?;
+            self.0.metal.destroy()?;
             handle::destroy(&self.0.handle);
             self.0.device.detach_resource();
             Ok(())
         }
     }
 
-    pub fn metal(&self) -> &metal::Texture {
+    pub fn metal(&self) -> &native::Texture {
         &self.0.metal
     }
 

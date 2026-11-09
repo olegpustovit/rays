@@ -1,8 +1,9 @@
 //! Ogpu_metal.Surface: a CAMetalLayer-backed surface, its acquired frames and the bounded
 //! presentation slots that keep a presented source alive until its epoch completes.
+use crate::native;
 use ogpu_core::error::Error;
 use crate::{
-    device::{fail, of_metal_error, Device},
+    device::{fail, Device},
     presentation::{self, Presentation},
     texture::Texture,
 };
@@ -27,8 +28,8 @@ enum FrameState {
 struct FrameInner {
     surface_serial: i64,
     portable: portable_surface::Frame,
-    drawable: metal::Drawable,
-    texture: metal::Texture,
+    drawable: native::Drawable,
+    texture: native::Texture,
     generation: i64,
     state: Cell<FrameState>,
 }
@@ -39,7 +40,7 @@ pub struct Frame(Rc<FrameInner>);
 struct SurfaceInner {
     serial: i64,
     device: Device,
-    layer: metal::Surface,
+    layer: native::Surface,
     portable: portable_surface::Surface,
     presentation: Presentation,
     readable_drawables_for_test: bool,
@@ -75,14 +76,14 @@ thread_local! {
     static NEXT_SERIAL: Cell<i64> = const { Cell::new(1) };
 }
 
-fn metal_config(readable_drawables_for_test: bool, value: &Configuration) -> Result<metal::surface::Configuration, Error> {
+fn metal_config(readable_drawables_for_test: bool, value: &Configuration) -> Result<native::surface::Configuration, Error> {
     let format = match value.format {
-        Format::Bgra8Unorm => metal::metal_format::Format::Bgra8Unorm,
+        Format::Bgra8Unorm => native::Format::Bgra8Unorm,
         Format::Rgba8Unorm => {
             return Err(fail("Ogpu_metal.Surface.configure", ErrorKind::InvalidArgument, "CAMetalLayer does not expose RGBA8 drawable format"));
         }
     };
-    Ok(metal::surface::Configuration {
+    Ok(native::surface::Configuration {
         width: value.physical_width as usize,
         height: value.physical_height as usize,
         format,
@@ -94,11 +95,11 @@ fn metal_config(readable_drawables_for_test: bool, value: &Configuration) -> Res
     })
 }
 
-pub fn create(device: &Device, layer: metal::Surface, config: &Configuration) -> Result<Surface, Error> {
+pub fn create(device: &Device, layer: native::Surface, config: &Configuration) -> Result<Surface, Error> {
     create_common(false, device, layer, config)
 }
 
-fn create_common(readable_drawables_for_test: bool, device: &Device, layer: metal::Surface, config: &Configuration) -> Result<Surface, Error> {
+fn create_common(readable_drawables_for_test: bool, device: &Device, layer: native::Surface, config: &Configuration) -> Result<Surface, Error> {
     let op = "Ogpu_metal.Surface.create";
     if device.destroyed() {
         return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
@@ -124,7 +125,7 @@ fn create_common(readable_drawables_for_test: bool, device: &Device, layer: meta
     if let Err(e) = layer.configure(native) {
         presentation.destroy();
         portable_surface::destroy(&portable);
-        return Err(of_metal_error(op, &e));
+        return Err(e);
     }
     device.attach_resource();
     Ok(Surface(Rc::new(SurfaceInner {
@@ -202,7 +203,7 @@ impl Surface {
         // preflight the portable state with a probe
         let probe = portable_surface::create(self.0.device.handle(), config.clone())?;
         portable_surface::destroy(&probe);
-        self.0.layer.configure(native).map_err(|value| of_metal_error(op, &value))?;
+        self.0.layer.configure(native)?;
         self.stale_frames();
         portable_surface::configure(&self.0.portable, config.clone())
     }
@@ -221,7 +222,7 @@ impl Surface {
         let drawable = match self.0.layer.acquire() {
             Err(e) => {
                 let _ = portable_surface::discard(&self.0.portable, &portable);
-                return Err(of_metal_error(op, &e));
+                return Err(e);
             }
             Ok(Err(_)) => {
                 let _ = portable_surface::discard(&self.0.portable, &portable);
@@ -234,7 +235,7 @@ impl Surface {
             Err(e) => {
                 let _ = drawable.destroy();
                 let _ = portable_surface::discard(&self.0.portable, &portable);
-                return Err(of_metal_error(op, &e));
+                return Err(e);
             }
         };
         let frame = Frame(Rc::new(FrameInner {
@@ -329,7 +330,7 @@ impl PendingPresentation {
     }
 
     /// Encodes the blit and the drawable's presentation into `commands`.
-    pub fn presentation_encoder(&self, commands: &metal::CommandBuffer) -> Result<(), Error> {
+    pub fn presentation_encoder(&self, commands: &native::CommandBuffer) -> Result<(), Error> {
         match (self.active.get(), self.payload.borrow().as_ref()) {
             (true, Some(p)) => p.owner.0.presentation.encode(commands, Some(&p.frame.0.drawable), p.source.metal(), &p.frame.0.texture),
             _ => Err(fail("Ogpu_metal.Surface.encode_present", ErrorKind::InvalidState, "presentation slot is not prepared")),

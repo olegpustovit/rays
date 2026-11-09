@@ -801,7 +801,7 @@ struct rv_depth_attachment { void *texture; int32_t load, store; double clear; }
 struct rv_rect { int32_t x, y, width, height; };
 struct rv_size { uint32_t width, height; };
 static const VkAttachmentLoadOp rv_load_ops[] = {VK_ATTACHMENT_LOAD_OP_LOAD,VK_ATTACHMENT_LOAD_OP_CLEAR,VK_ATTACHMENT_LOAD_OP_DONT_CARE};
-static const VkPrimitiveTopology rv_topologies[] = {VK_PRIMITIVE_TOPOLOGY_POINT_LIST,VK_PRIMITIVE_TOPOLOGY_LINE_LIST,VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP};
+static const VkPrimitiveTopology rv_topologies[] = {VK_PRIMITIVE_TOPOLOGY_POINT_LIST,VK_PRIMITIVE_TOPOLOGY_LINE_LIST,VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,VK_PRIMITIVE_TOPOLOGY_LINE_STRIP};
 static float rv_clear_component(const Texture *t, double v) {
   bool unorm8 = t->format == VK_FORMAT_R8G8B8A8_UNORM || t->format == VK_FORMAT_B8G8R8A8_UNORM || t->format == VK_FORMAT_R8_UNORM;
   if (!unorm8) return static_cast<float>(v); double c = std::clamp(v, 0.0, 1.0); return static_cast<float>(std::floor(c * 255.0 + 0.5) / 255.0);
@@ -849,7 +849,7 @@ int32_t rv_render_depth(void *commands, int32_t compare, bool write) {
   vkCmdSetDepthTestEnable(cb,compare >= 0); vkCmdSetDepthWriteEnable(cb,compare >= 0 && write); if (compare >= 0) vkCmdSetDepthCompareOp(cb,ops[compare]); return VK_SUCCESS;
 }
 int32_t rv_render_draw(void *commands, int32_t primitive, uint32_t first, uint32_t count, uint32_t instances) {
-  if (primitive < 0 || primitive > 3) return VK_ERROR_VALIDATION_FAILED_EXT; auto *c = static_cast<Command *>(commands);
+  if (primitive < 0 || primitive > 4) return VK_ERROR_VALIDATION_FAILED_EXT; auto *c = static_cast<Command *>(commands);
   push_descriptors(c); vkCmdSetPrimitiveTopology(c->cb,rv_topologies[primitive]); vkCmdDraw(c->cb,count,instances,first,0); return VK_SUCCESS;
 }
 static void bind_index(Command *c, Buffer *b, uint64_t offset, int32_t type) {
@@ -857,12 +857,12 @@ static void bind_index(Command *c, Buffer *b, uint64_t offset, int32_t type) {
   vkCmdBindIndexBuffer(c->cb,b->buffer,offset,type?VK_INDEX_TYPE_UINT32:VK_INDEX_TYPE_UINT16);
 }
 int32_t rv_render_draw_indexed(void *commands, void *buffer, int32_t primitive, int32_t type, uint64_t offset, uint32_t count, uint32_t instances) {
-  if (primitive < 0 || primitive > 3 || type < 0 || type > 1) return VK_ERROR_VALIDATION_FAILED_EXT; auto *c = static_cast<Command *>(commands);
+  if (primitive < 0 || primitive > 4 || type < 0 || type > 1) return VK_ERROR_VALIDATION_FAILED_EXT; auto *c = static_cast<Command *>(commands);
   push_descriptors(c); vkCmdSetPrimitiveTopology(c->cb,rv_topologies[primitive]); bind_index(c,static_cast<Buffer *>(buffer),offset,type);
   vkCmdDrawIndexed(c->cb,count,instances,0,0,0); return VK_SUCCESS;
 }
 int32_t rv_render_draw_indexed_indirect(void *commands, void *buffer, void *arguments, int32_t primitive, int32_t type, uint64_t offset, uint64_t args_offset) {
-  if (primitive < 0 || primitive > 3 || type < 0 || type > 1) return VK_ERROR_VALIDATION_FAILED_EXT; auto *c = static_cast<Command *>(commands);
+  if (primitive < 0 || primitive > 4 || type < 0 || type > 1) return VK_ERROR_VALIDATION_FAILED_EXT; auto *c = static_cast<Command *>(commands);
   push_descriptors(c); vkCmdSetPrimitiveTopology(c->cb,rv_topologies[primitive]); bind_index(c,static_cast<Buffer *>(buffer),offset,type);
   vkCmdDrawIndexedIndirect(c->cb,static_cast<Buffer *>(arguments)->buffer,args_offset,1,20); return VK_SUCCESS;
 }

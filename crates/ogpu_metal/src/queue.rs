@@ -1,5 +1,6 @@
 //! Ogpu_metal.Queue: one command queue, its frames-in-flight epochs and GPU timings.
-use crate::device::{fail, of_metal_error, Device};
+use crate::native;
+use crate::device::{fail, Device};
 use ogpu_core::error::{Error, ErrorKind};
 use std::{
     cell::{Cell, RefCell},
@@ -11,13 +12,13 @@ pub type Cleanup = Box<dyn FnOnce()>;
 
 struct Pending {
     epoch: i64,
-    command: metal::CommandBuffer,
+    command: native::CommandBuffer,
     cleanup: Vec<Cleanup>,
 }
 
 struct QueueInner {
     device: Device,
-    metal: metal::CommandQueue,
+    metal: native::CommandQueue,
     max_frames: i64,
     next_epoch: Cell<i64>,
     completed: Cell<i64>,
@@ -80,7 +81,7 @@ pub fn create(device: &Device) -> Result<Queue, Error> {
     if device.destroyed() {
         return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
     }
-    let metal = metal::CommandQueue::create(device.metal()).map_err(|value| of_metal_error(op, &value))?;
+    let metal = native::CommandQueue::create(device.metal())?;
     GPU_TIMINGS.with(|table| {
         table
             .borrow_mut()
@@ -103,7 +104,7 @@ pub fn create(device: &Device) -> Result<Queue, Error> {
 }
 
 impl Queue {
-    pub fn metal(&self) -> &metal::CommandQueue {
+    pub fn metal(&self) -> &native::CommandQueue {
         &self.0.metal
     }
 
@@ -144,7 +145,7 @@ impl Queue {
 
     /// Admits an externally encoded, uncommitted native command buffer. On any failure the caller
     /// still owns `native` and `retained`; on success `retained` is emptied into the queue.
-    pub fn submit_native(&self, native: &metal::CommandBuffer, retained: &mut Vec<Cleanup>) -> Result<Receipt, Error> {
+    pub fn submit_native(&self, native: &native::CommandBuffer, retained: &mut Vec<Cleanup>) -> Result<Receipt, Error> {
         let op = "Ogpu_metal.Queue.submit_native";
         let value = &self.0;
         if value.dead.get() {
@@ -155,7 +156,7 @@ impl Queue {
             Err(e) => {
                 value.active.set(value.active.get() - 1);
                 value.next_epoch.set(epoch);
-                Err(of_metal_error(op, &e))
+                Err(e)
             }
             Ok(()) => {
                 value.pending.borrow_mut().push(Pending { epoch, command: native.clone(), cleanup: std::mem::take(retained) });
@@ -178,7 +179,7 @@ impl Queue {
         let mut first_error: Option<Error> = None;
         for pending in ready {
             let outcome = match pending.command.wait_until_completed() {
-                Err(e) => Err(of_metal_error(op, &e)),
+                Err(e) => Err(e),
                 Ok(()) => {
                     if let Ok(d) = pending.command.diagnostics() {
                         if d.gpu_end_time >= d.gpu_start_time {
@@ -226,8 +227,8 @@ impl Queue {
             if pending.epoch > epoch {
                 break;
             }
-            match pending.command.status().map_err(|value| of_metal_error(op, &value))? {
-                metal::CommandBufferStatus::Completed | metal::CommandBufferStatus::Error => {}
+            match pending.command.status()? {
+                native::CommandBufferStatus::Completed | native::CommandBufferStatus::Error => {}
                 _ => return Ok(false),
             }
         }
@@ -243,7 +244,7 @@ impl Queue {
         } else if !value.pending.borrow().is_empty() {
             Err(fail(op, ErrorKind::InvalidState, "queue has commands in flight"))
         } else {
-            value.metal.destroy().map_err(|value| of_metal_error(op, &value))?;
+            value.metal.destroy()?;
             value.dead.set(true);
             GPU_TIMINGS.with(|table| {
                 let mut table = table.borrow_mut();

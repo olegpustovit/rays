@@ -96,10 +96,17 @@ fn validate_range(device: &Device, range: &BufferRange) -> Result<(), Error> {
     }
 }
 
-fn validate_ranges(device: &Device, ranges: &[BufferRange]) -> Result<(), Error> {
-    for range in ranges {
-        validate_range(device, range)?;
-    }
+// BufferRange is the caller's admitted subrange, not merely the whole allocation.
+fn validate_elements(device: &Device, range: &BufferRange, stride: i64, count: i64, element: i64) -> Result<(), Error> {
+    validate_range(device, range)?;
+    let needed = count.checked_sub(1).and_then(|count| count.checked_mul(stride)).and_then(|bytes| bytes.checked_add(element));
+    if count <= 0 || stride < element || needed.is_none_or(|bytes| bytes > range.length) {
+        Err(invalid("Ogpu.Acceleration.validate_elements", "geometry elements exceed the declared buffer range"))
+    } else { Ok(()) }
+}
+
+fn validate_element_ranges(device: &Device, ranges: &[BufferRange], stride: i64, count: i64, element: i64) -> Result<(), Error> {
+    for range in ranges { validate_elements(device, range, stride, count, element)?; }
     Ok(())
 }
 
@@ -125,7 +132,7 @@ fn validate_geometry(device: &Device, motion: Option<i64>, geometry: &Geometry) 
                     "static triangles cannot join a motion structure",
                 ))
             } else {
-                validate_range(device, vertices)
+                validate_elements(device, vertices, *vertex_stride, *vertex_count, 12)
             }
         }
         Geometry::MotionTriangles {
@@ -144,7 +151,7 @@ fn validate_geometry(device: &Device, motion: Option<i64>, geometry: &Geometry) 
                     "keyframe count must match the structure's motion keyframes",
                 ))
             } else {
-                validate_ranges(device, keyframes)
+                validate_element_ranges(device, keyframes, *vertex_stride, *vertex_count, 12)
             }
         }
         Geometry::BoundingBoxes { boxes, stride, count } => {
@@ -159,7 +166,7 @@ fn validate_geometry(device: &Device, motion: Option<i64>, geometry: &Geometry) 
                     "keyframe count must match the structure's motion keyframes",
                 ))
             } else {
-                validate_ranges(device, boxes)
+                validate_element_ranges(device, boxes, *stride, *count, 24)
             }
         }
         Geometry::Curves {
@@ -173,7 +180,9 @@ fn validate_geometry(device: &Device, motion: Option<i64>, geometry: &Geometry) 
             control_points_per_segment,
         } => {
             if *control_stride < 12
+                || *control_stride % 4 != 0
                 || *radius_stride < 4
+                || *radius_stride % 4 != 0
                 || *control_point_count < 2
                 || *segment_count <= 0
                 || *control_points_per_segment < 2
@@ -189,9 +198,10 @@ fn validate_geometry(device: &Device, motion: Option<i64>, geometry: &Geometry) 
                     "keyframe count must match the structure's motion keyframes",
                 ))
             } else {
-                validate_ranges(device, control_points)
-                    .and_then(|()| validate_ranges(device, radii))
-                    .and_then(|()| validate_range(device, indices))
+                validate_element_ranges(device, control_points, *control_stride, *control_point_count, 12)
+                    .and_then(|()| validate_element_ranges(device, radii, *radius_stride, *control_point_count, 4))
+                    // One index names the first control point of each curve segment.
+                    .and_then(|()| validate_elements(device, indices, 4, *segment_count, 4))
             }
         }
     }

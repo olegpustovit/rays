@@ -2,9 +2,8 @@
 // capabilities,sampler_pixels}.ml and test_pipeline_argument_buffer.ml: the native modules and the driver
 // record on the real Metal device. Direct native module handles follow their last Rust owner; core
 // wrappers release driver payloads at logical destroy, even when dead wrappers remain in scope.
-use crate::common;
 use ogpu_core::{
-    backend::{self as be, DriverAccelDescriptor, DriverGeometry, Token},
+    backend as be,
     binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage},
     caps,
     error::{self, Error, ErrorKind},
@@ -17,13 +16,11 @@ use ogpu_core::{
     },
 };
 use ogpu_metal::{
-    acceleration::{self, Acceleration},
     backend,
     buffer::{self, Buffer},
-    device::{self, Device},
-    impl_, library, pipeline, queue, texture,
+    device::Device,
+    impl_, library, pipeline, texture,
 };
-use std::{cell::RefCell, collections::HashMap};
 
 fn die(failure: Error) -> ! {
     panic!("{}", error::to_string(&failure))
@@ -39,8 +36,8 @@ fn expect(kind: ErrorKind, result: Option<Error>) {
 
 /// Native handles alive after the release queue drains.
 fn live() -> usize {
-    metal::release_queue::drain().expect("drain");
-    metal::release_queue::stats().expect("stats").live_handles
+    ogpu_metal::native::release_queue::drain().expect("drain");
+    ogpu_metal::native::release_queue::stats().expect("stats").live_handles
 }
 
 fn buffer_descriptor(size: i64, usage: &[BufferUsage]) -> BufferDescriptor {
@@ -68,24 +65,8 @@ fn empty_layout(device: &Device) -> binding::PipelineLayout {
 
 fn gpu_device_error() {
     let wrong_thread = std::thread::spawn(|| be::create_device(backend::create()).map(|_| ())).join().unwrap();
-    expect(ErrorKind::DeviceLost, wrong_thread.err());
-    let convert = |operation: &str, source: &str, kind: metal::ErrorKind| device::error_kind(operation, source, kind);
-    let source = "Metal.Device.system_default";
-    assert_eq!(convert("Ogpu_metal.Device.system_default", source, metal::ErrorKind::NativeError), ErrorKind::NoAdapter);
-    assert_eq!(convert("Ogpu_metal.Device.system_default", "Metal.Device.registry_id", metal::ErrorKind::NativeError), ErrorKind::DeviceLost);
-    assert_eq!(convert("Ogpu_metal.Device.system_default", "Metal.Buffer.write", metal::ErrorKind::NativeError), ErrorKind::DeviceLost);
-    assert_eq!(convert("Ogpu_metal.Buffer.write", source, metal::ErrorKind::NativeError), ErrorKind::DeviceLost);
-    for (native, expected) in [
-        (metal::ErrorKind::InvalidArgument, ErrorKind::InvalidArgument),
-        (metal::ErrorKind::InvalidState, ErrorKind::InvalidState),
-        (metal::ErrorKind::ParentHasDependents, ErrorKind::InvalidState),
-        (metal::ErrorKind::Destroyed, ErrorKind::StaleHandle),
-        (metal::ErrorKind::DeviceMismatch, ErrorKind::CrossDevice),
-        (metal::ErrorKind::Unsupported, ErrorKind::Unsupported),
-        (metal::ErrorKind::WrongDomain, ErrorKind::DeviceLost),
-    ] {
-        assert_eq!(convert("Ogpu_metal.Device.system_default", source, native), expected);
-    }
+    expect(ErrorKind::WrongDomain, wrong_thread.err());
+
 }
 
 fn gpu_foundation() {
@@ -294,7 +275,7 @@ fn gpu_pipeline() {
         sample_count: 1,
     };
     for blend in [Blend::Replace, Blend::Alpha, Blend::Add, Blend::Multiply, Blend::Screen, Blend::Subtract] {
-        let value = pipeline::create_render_owned(false, metal::pipeline::PrimitiveTopology::Triangle, blend, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+        let value = pipeline::create_render_owned(false, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, blend, &device, &descriptor).unwrap_or_else(|failure| die(failure));
         value.destroy().unwrap_or_else(|failure| die(failure));
     }
     compute.destroy().unwrap_or_else(|failure| die(failure));
@@ -333,9 +314,9 @@ fn gpu_pipeline_argument_buffer() {
         sample_count: 1,
     };
     // Without `indirect` no fragment function is retained for encoders.
-    let direct = pipeline::create_render_owned(false, metal::pipeline::PrimitiveTopology::Triangle, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+    let direct = pipeline::create_render_owned(false, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
     expect(ErrorKind::InvalidState, direct.argument_encoder(1).err());
-    let indirect = pipeline::create_render_owned(true, metal::pipeline::PrimitiveTopology::Triangle, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+    let indirect = pipeline::create_render_owned(true, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
     let mut encoder = indirect.argument_encoder(1).unwrap_or_else(|failure| die(failure));
     assert!(encoder.encoded_length() > 0, "argument encoder length");
     expect(ErrorKind::InvalidArgument, indirect.argument_encoder(u64::MAX).err());
@@ -349,83 +330,60 @@ fn gpu_pipeline_argument_buffer() {
 }
 
 fn gpu_acceleration() {
-    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
-    let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
-    let vertices = buffer::create(&device, buffer::Memory::Shared, &BufferDescriptor { label: Some("triangle".to_owned()), size: 36, usage: vec![BufferUsage::Storage, BufferUsage::Vertex] }).unwrap_or_else(|failure| die(failure));
+    let device = be::create_device(backend::create()).unwrap_or_else(|failure| die(failure));
+    let other = be::create_device(backend::create()).unwrap_or_else(|failure| die(failure));
+    let vertices = be::create_buffer(&device, buffer_descriptor(36, &[BufferUsage::Storage, BufferUsage::Vertex]), None).unwrap_or_else(|failure| die(failure));
     let mut triangle = vec![0u8; 36];
-    for (i, v) in [-1., -1., 0., 1., -1., 0., 0., 1., 0.].iter().enumerate() {
-        put_f32(&mut triangle, i * 4, *v);
-    }
-    vertices.write_bytes(&device, 0, &triangle).unwrap_or_else(|failure| die(failure));
-    let buffers: RefCell<HashMap<Token, Buffer>> = RefCell::new(HashMap::new());
-    let structures: RefCell<HashMap<Token, Acceleration>> = RefCell::new(HashMap::new());
-    buffers.borrow_mut().insert(1, vertices.clone());
-    let resolve_buffer = |token: Token| buffers.borrow().get(&token).cloned().ok_or_else(|| error::make("test", ErrorKind::InvalidArgument, "unknown buffer"));
-    let resolve_structure = |token: Token| structures.borrow().get(&token).cloned().ok_or_else(|| error::make("test", ErrorKind::InvalidArgument, "unknown structure"));
-    let create = |descriptor: &DriverAccelDescriptor| acceleration::create(&device, descriptor, &resolve_buffer, &resolve_structure);
-    let triangles = |vertex_count: i64| DriverGeometry::Triangles { vertices: 1, offset: 0, length: 36, vertex_stride: 12, vertex_count };
-    let blas = |vertex_count: i64, refit: bool| DriverAccelDescriptor::Blas { geometries: vec![triangles(vertex_count)], motion: None, refit };
-    if device.capabilities().ray_tracing {
-        let structure = create(&blas(3, false)).unwrap_or_else(|failure| die(failure));
-        structures.borrow_mut().insert(10, structure.clone());
-        expect(ErrorKind::InvalidArgument, create(&blas(6, false)).err());
-        let scratch = buffer::create(&device, buffer::Memory::DeviceLocal, &BufferDescriptor { label: Some("scratch".to_owned()), size: 1_048_576, usage: vec![BufferUsage::Storage] }).unwrap_or_else(|failure| die(failure));
-        let q = queue::create(&device).unwrap_or_else(|failure| die(failure));
-        let commands = metal::CommandBuffer::create(q.metal()).expect("command buffer");
-        let encoder = metal::AccelerationEncoder::create(&commands).expect("acceleration encoder");
-        expect(ErrorKind::CrossDevice, structure.encode_build(&encoder, &other, &scratch, 0).err());
-        structure.encode_build(&encoder, &device, &scratch, 0).unwrap_or_else(|failure| die(failure));
-        let refittable = create(&blas(3, true)).unwrap_or_else(|failure| die(failure));
-        refittable.encode_build(&encoder, &device, &scratch, 0).unwrap_or_else(|failure| die(failure));
-        expect(ErrorKind::InvalidArgument, refittable.encode_refit(&encoder, &device, &blas(3, true), &resolve_buffer, &scratch, 1_048_832).err());
-        refittable.encode_refit(&encoder, &device, &blas(3, true), &resolve_buffer, &scratch, 0).unwrap_or_else(|failure| die(failure));
-        let instances = buffer::create(&device, buffer::Memory::Shared, &BufferDescriptor { label: Some("instances".to_owned()), size: 68, usage: vec![BufferUsage::Storage] }).unwrap_or_else(|failure| die(failure));
-        buffers.borrow_mut().insert(2, instances.clone());
-        instances.write_bytes(
-            &device,
-            0,
-            &ogpu_core::acceleration::pack_instances(
-                &vec![68, 0, 48, 52, 60, 64, -1, -1, -1, -1, -1, -1],
-                &[(vec![1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0.], 0xFFFF_FFFF, 0, 7)],
-            ),
-        ).unwrap_or_else(|failure| die(failure));
-        let tlas = |structure: Token| DriverAccelDescriptor::Tlas {
-            instances: 2,
-            offset: 0,
-            instance_count: 1,
-            kind: be::InstanceKind::UserIdInstances,
-            structures: vec![structure],
-            motion_transforms: None,
-        };
-        let top = create(&tlas(10)).unwrap_or_else(|failure| die(failure));
-        structures.borrow_mut().insert(11, top.clone());
-        expect(ErrorKind::InvalidArgument, create(&tlas(11)).err());
-        top.encode_build(&encoder, &device, &scratch, 0).unwrap_or_else(|failure| die(failure));
-        let sized = create(&DriverAccelDescriptor::Sized { size: structure.sizes().acceleration_structure_size as i64, template: 10 }).unwrap_or_else(|failure| die(failure));
-        expect(ErrorKind::InvalidState, sized.encode_build(&encoder, &device, &scratch, 0).err());
-        encoder.end_encoding().expect("end encoding");
-        let release_top = top.retain_submission().unwrap_or_else(|failure| die(failure));
-        let release_sized = sized.retain_submission().unwrap_or_else(|failure| die(failure));
-        let receipt = q.submit_native(&commands, &mut vec![release_top, release_sized]).unwrap_or_else(|failure| die(failure));
-        q.wait_through(receipt.epoch).unwrap_or_else(|failure| die(failure));
-        sized.destroy().unwrap_or_else(|failure| die(failure));
-        top.destroy().unwrap_or_else(|failure| die(failure));
-        structure.destroy().unwrap_or_else(|failure| die(failure));
-        refittable.destroy().unwrap_or_else(|failure| die(failure));
-        instances.destroy().unwrap_or_else(|failure| die(failure));
-        scratch.destroy().unwrap_or_else(|failure| die(failure));
-        q.destroy().unwrap_or_else(|failure| die(failure));
-        drop((sized, top, structure, refittable, instances, scratch, q, commands, encoder));
+    for (i, value) in [-1., -1., 0., 1., -1., 0., 0., 1., 0.].iter().enumerate() { put_f32(&mut triangle, i * 4, *value); }
+    be::write_buffer(&vertices, 0, &triangle).unwrap_or_else(|failure| die(failure));
+    let blas = |vertex_count| be::AccelDescriptor::Blas { geometries: vec![be::Geometry::Triangles { vertices: vertices.clone(), offset: 0, length: 36, vertex_stride: 12, vertex_count }] };
+    if be::capabilities(&device).ray_tracing {
+        let structure = be::create_accel(&device, blas(3), false).unwrap_or_else(|failure| die(failure));
+        expect(ErrorKind::InvalidArgument, be::create_accel(&device, blas(6), false).err());
+        let scratch = be::create_buffer(&device, buffer_descriptor(1_048_576, &[BufferUsage::Storage]), Some(Memory::DeviceLocal)).unwrap_or_else(|failure| die(failure));
+        let foreign_scratch = be::create_buffer(&other, buffer_descriptor(1_048_576, &[BufferUsage::Storage]), Some(Memory::DeviceLocal)).unwrap_or_else(|failure| die(failure));
+        let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
+        let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+        let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
+        expect(ErrorKind::CrossDevice, be::build_accel(&encoder, &structure, &foreign_scratch, None).err());
+        be::build_accel(&encoder, &structure, &scratch, None).unwrap_or_else(|failure| die(failure));
+        let refittable = be::create_accel(&device, blas(3), true).unwrap_or_else(|failure| die(failure));
+        be::build_accel(&encoder, &refittable, &scratch, None).unwrap_or_else(|failure| die(failure));
+        expect(ErrorKind::InvalidArgument, be::refit_accel(&encoder, &refittable, blas(3), &scratch, Some(1_048_832)).err());
+        be::refit_accel(&encoder, &refittable, blas(3), &scratch, None).unwrap_or_else(|failure| die(failure));
+        let records = [be::InstanceRecord { instance: be::Instance { transform: vec![1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0.], mask: 0xFFFF_FFFF, structure_index: 0 }, user_id: 7 }];
+        let packed = be::pack_instance_records(&device, &records).unwrap_or_else(|failure| die(failure));
+        let instances = be::create_buffer(&device, buffer_descriptor(packed.len() as i64, &[BufferUsage::Storage]), None).unwrap_or_else(|failure| die(failure));
+        be::write_buffer(&instances, 0, &packed).unwrap_or_else(|failure| die(failure));
+        let tlas = |structure: &be::Accel| be::AccelDescriptor::TlasOf { instances: instances.clone(), offset: 0, instance_count: 1, kind: be::InstanceKind::UserIdInstances, structures: vec![structure.clone()], motion_transforms: None };
+        let top = be::create_accel(&device, tlas(&structure), false).unwrap_or_else(|failure| die(failure));
+        expect(ErrorKind::InvalidArgument, be::create_accel(&device, tlas(&top), false).err());
+        be::build_accel(&encoder, &top, &scratch, None).unwrap_or_else(|failure| die(failure));
+        let sized = be::create_accel(&device, be::AccelDescriptor::Sized { size: be::accel_sizes(&structure).structure_size, template: structure.clone() }, false).unwrap_or_else(|failure| die(failure));
+        expect(ErrorKind::InvalidState, be::build_accel(&encoder, &sized, &scratch, None).err());
+        be::compact_accel(&encoder, &structure, &sized).unwrap_or_else(|failure| die(failure));
+        be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
+        // Submission callbacks own the built structure graph, including its buffers and children,
+        // after logical wrappers are destroyed and before GPU completion.
+        be::destroy_accel(&top).unwrap_or_else(|failure| die(failure));
+        be::destroy_accel(&sized).unwrap_or_else(|failure| die(failure));
+        let receipt = be::commit(&commands).unwrap_or_else(|failure| die(failure));
+        be::complete_through(&queue, receipt.epoch).unwrap_or_else(|failure| die(failure));
+        be::destroy_accel(&structure).unwrap_or_else(|failure| die(failure));
+        be::destroy_accel(&refittable).unwrap_or_else(|failure| die(failure));
+        be::destroy_buffer(&instances).unwrap_or_else(|failure| die(failure));
+        be::destroy_buffer(&scratch).unwrap_or_else(|failure| die(failure));
+        be::destroy_buffer(&foreign_scratch).unwrap_or_else(|failure| die(failure));
+        be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
     } else {
-        expect(ErrorKind::Unsupported, create(&blas(3, false)).err());
+        expect(ErrorKind::Unsupported, be::create_accel(&device, blas(3), false).err());
     }
-    vertices.destroy().unwrap_or_else(|failure| die(failure));
-    device.destroy().unwrap_or_else(|failure| die(failure));
-    other.destroy().unwrap_or_else(|failure| die(failure));
-    drop((structures, buffers, vertices, device, other));
-    assert_eq!(live() + 2, before, "acceleration live-handle delta");
-    println!("ogpu_metal acceleration: generic build for primitives and user-id instances, in-place refit, typed rejections, zero delta ok");
+    be::destroy_buffer(&vertices).unwrap_or_else(|failure| die(failure));
+    be::destroy_device(&device).unwrap_or_else(|failure| die(failure));
+    be::destroy_device(&other).unwrap_or_else(|failure| die(failure));
+    assert_eq!(live(), before, "acceleration live-handle delta");
+    println!("ogpu_metal acceleration: generic primitives and user-id instances, in-place refit, typed core rejections, retained graph until completion, zero delta");
 }
 
 const SAMPLER_SOURCE: &str = "#include <metal_stdlib>

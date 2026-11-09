@@ -293,14 +293,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metal"
-version = "0.1.0"
-dependencies = [
- "metal_sys",
- "native_layer_token_sys",
-]
-
-[[package]]
 name = "metal_sys"
 version = "0.1.0"
 dependencies = [
@@ -322,7 +314,8 @@ dependencies = [
 name = "ogpu_metal"
 version = "0.1.0"
 dependencies = [
- "metal",
+ "metal_sys",
+ "native_layer_token_sys",
  "ogpu_core",
 ]
 

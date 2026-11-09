@@ -1,16 +1,17 @@
 //! Ogpu_metal.Blit_encoder: buffer-to-texture copies.
-use crate::{command_control::{CommandContext, OpenEncoder}, device::of_metal_error};
+use crate::native;
+use crate::{command_control::{CommandContext, OpenEncoder}};
 use ogpu_core::error::Error;
 use ogpu_core::{backend::{DriverBlitEncoder, Token}, types::{Extent, Origin}};
 use std::rc::Rc;
 
 struct Blit {
     context: Rc<CommandContext>,
-    encoder: metal::BlitEncoder,
+    encoder: native::BlitEncoder,
 }
 
 pub fn create(context: &Rc<CommandContext>) -> Result<Box<dyn DriverBlitEncoder>, Error> {
-    let encoder = metal::BlitEncoder::create(&context.native).map_err(|value| of_metal_error(context.operation, &value))?;
+    let encoder = native::BlitEncoder::create(&context.native)?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Blit(encoder.clone()));
     Ok(Box::new(Blit { context: context.clone(), encoder }))
 }
@@ -30,7 +31,7 @@ impl DriverBlitEncoder for Blit {
             destination.metal(),
             0,
             mip as usize,
-            metal::TextureRegion {
+            native::TextureRegion {
                 x: origin.x as usize,
                 y: origin.y as usize,
                 z: origin.z as usize,
@@ -38,11 +39,11 @@ impl DriverBlitEncoder for Blit {
                 height: extent.height as usize,
                 depth: extent.depth as usize,
             },
-        ).map_err(|value| of_metal_error(c.operation, &value))
+        )
     }
 
     fn end_blit(&self) -> Result<(), Error> {
         *self.context.open_encoder.borrow_mut() = None;
-        self.encoder.end_encoding().map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.end_encoding()
     }
 }

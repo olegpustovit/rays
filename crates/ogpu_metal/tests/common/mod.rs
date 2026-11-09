@@ -3,4 +3,3 @@
 pub fn release_keepalive() {}
 #[path = "../../../renderer/tests/common/window.rs"]
 pub mod window;
-pub use window::run;

@@ -2,11 +2,11 @@
 //! curves, motion) built from the driver's token descriptors.
 use crate::{
     buffer::Buffer,
-    device::{fail, of_metal_error, Device},
+    device::{fail, Device},
 };
-use metal::acceleration as ma;
+use crate::native::acceleration as ma;
 use ogpu_core::{
-    backend::{DriverAccelDescriptor, DriverGeometry, DriverKeyframe, InstanceKind, Token},
+    backend::{DriverAccelDescriptor, DriverGeometry, DriverKeyframe, Token},
     error::{Error, ErrorKind},
 };
 use std::{
@@ -31,23 +31,15 @@ pub struct Acceleration(Rc<AccelInner>);
 
 pub type Release = Box<dyn FnOnce()>;
 
-pub fn validate_scratch_plan(buffer_size: i64, offset: i64, required: i64) -> Result<(), Error> {
-    if buffer_size < 0 || offset < 0 || required < 0 || offset % 256 != 0 || offset > buffer_size - required {
-        Err(fail("Ogpu_metal.Acceleration.validate_scratch_plan", ErrorKind::InvalidArgument, "scratch range is invalid or insufficient"))
-    } else {
-        Ok(())
-    }
-}
-
 fn keyframes(frames: &[(Buffer, i64)]) -> Vec<ma::Keyframe> {
-    frames.iter().map(|(buffer, offset)| ma::Keyframe { buffer: buffer.metal().clone(), offset: *offset as u64 }).collect()
+    frames.iter().map(|(buffer, offset)| ma::Keyframe { buffer: buffer.metal().raw().clone(), offset: *offset as u64 }).collect()
 }
 
 fn resolve_frames(tokens: &[DriverKeyframe], resolve: &dyn Fn(Token) -> Result<Buffer, Error>) -> Result<Vec<(Buffer, i64)>, Error> {
     tokens.iter().map(|(token, offset)| resolve(*token).map(|b| (b, *offset))).collect()
 }
 
-/// Metal's `Build` validates every range; the caller already resolved tokens.
+/// Core has validated geometry spans; resolve its tokens and retain the input buffers.
 fn build_geometry(geometry: &DriverGeometry, resolve: &dyn Fn(Token) -> Result<Buffer, Error>) -> Result<(ma::Geometry, Vec<Buffer>), Error> {
     let buffers_of = |frames: &[(Buffer, i64)]| frames.iter().map(|(b, _)| b.clone()).collect::<Vec<_>>();
     match geometry {
@@ -59,7 +51,7 @@ fn build_geometry(geometry: &DriverGeometry, resolve: &dyn Fn(Token) -> Result<B
                     vertex_stride: *vertex_stride as u64,
                     triangle_count: (*vertex_count / 3) as u64,
                     index: None,
-                    common: ma::GeometryCommon::default(),
+                    common: ma::GeometryCommon { opaque: true, allow_duplicate_intersection: false },
                 },
                 vec![vertices],
             ))
@@ -72,7 +64,7 @@ fn build_geometry(geometry: &DriverGeometry, resolve: &dyn Fn(Token) -> Result<B
                     vertex_stride: *vertex_stride as u64,
                     triangle_count: (*vertex_count / 3) as u64,
                     index: None,
-                    common: ma::GeometryCommon::default(),
+                    common: ma::GeometryCommon { opaque: true, allow_duplicate_intersection: false },
                 },
                 buffers_of(&frames),
             ))
@@ -116,22 +108,13 @@ fn build_geometry(geometry: &DriverGeometry, resolve: &dyn Fn(Token) -> Result<B
                     control_point_count: *control_count as u64,
                     radii: keyframes(&radii),
                     radius_stride: *radius_stride as u64,
-                    index: ma::Index { buffer: indices.metal().clone(), offset: *index_offset as u64, uint16: false },
+                    index: ma::Index { buffer: indices.metal().raw().clone(), offset: *index_offset as u64, uint16: false },
                     segment_count: *segment_count as u64,
                     control_points_per_segment: *per_segment as u32,
-                    curve_type: if *curve_type == 0 { ma::CurveType::Round } else { ma::CurveType::Flat },
-                    basis: match *basis {
-                        0 => ma::CurveBasis::Bspline,
-                        1 => ma::CurveBasis::CatmullRom,
-                        2 => ma::CurveBasis::Linear,
-                        _ => ma::CurveBasis::Bezier,
-                    },
-                    end_caps: match *caps {
-                        0 => ma::EndCaps::None,
-                        1 => ma::EndCaps::Disk,
-                        _ => ma::EndCaps::Sphere,
-                    },
-                    common: ma::GeometryCommon::default(),
+                    curve_type: *curve_type as i32,
+                    basis: *basis as i32,
+                    end_caps: *caps as i32,
+                    common: ma::GeometryCommon { opaque: true, allow_duplicate_intersection: false },
                 },
                 buffers,
             ))
@@ -154,20 +137,21 @@ fn primitive_build(operation: &str, device: &Device, descriptor: &DriverAccelDes
                 buffers.extend(bs);
             }
             let motion = motion.as_ref().map(|m| ma::Motion {
-                keyframe_count: m.motion_keyframes as usize,
+                keyframe_count: m.motion_keyframes as u64,
                 start_time: m.motion_start,
                 end_time: m.motion_end,
-                start_border: if m.motion_start_border == 0 { ma::Border::Clamp } else { ma::Border::Vanish },
-                end_border: if m.motion_end_border == 0 { ma::Border::Clamp } else { ma::Border::Vanish },
+                start_border: m.motion_start_border as i32,
+                end_border: m.motion_end_border as i32,
             });
-            let build = ma::BuildDescriptor::primitive(device.metal(), converted, motion, *refit).map_err(|value| of_metal_error(operation, &value))?;
+            let retained = buffers.iter().map(|buffer| buffer.metal().clone()).collect();
+            let build = ma::BuildDescriptor::primitive(device.metal(), converted, motion, *refit, retained)?;
             Ok((build, buffers))
         }
     }
 }
 
-fn allocate(operation: &str, device: &Device, descriptor: Option<ma::BuildDescriptor>, sizes: ma::Sizes, buffers: Vec<Buffer>, structures: Vec<Acceleration>) -> Result<Acceleration, Error> {
-    let metal = ma::AccelerationStructure::create(device.metal(), sizes.acceleration_structure_size).map_err(|value| of_metal_error(operation, &value))?;
+fn allocate(device: &Device, descriptor: Option<ma::BuildDescriptor>, sizes: ma::Sizes, buffers: Vec<Buffer>, structures: Vec<Acceleration>) -> Result<Acceleration, Error> {
+    let metal = ma::AccelerationStructure::create(device.metal(), sizes.acceleration_structure_size)?;
     device.attach_resource();
     Ok(Acceleration(Rc::new(AccelInner {
         device: device.clone(),
@@ -182,12 +166,9 @@ fn allocate(operation: &str, device: &Device, descriptor: Option<ma::BuildDescri
     })))
 }
 
-pub fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(Token) -> Result<Buffer, Error>, resolve_structure: &dyn Fn(Token) -> Result<Acceleration, Error>) -> Result<Acceleration, Error> {
+pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(Token) -> Result<Buffer, Error>, resolve_structure: &dyn Fn(Token) -> Result<Acceleration, Error>) -> Result<Acceleration, Error> {
     let operation = "Ogpu_metal.Acceleration.create";
-    if !device.capabilities().ray_tracing {
-        return Err(fail(operation, ErrorKind::Unsupported, "ray tracing is unavailable on this adapter"));
-    }
-    let sizes_of = |build: &ma::BuildDescriptor| build.sizes(device.metal()).map_err(|value| of_metal_error(operation, &value));
+    let sizes_of = |build: &ma::BuildDescriptor| build.sizes();
     match descriptor {
         DriverAccelDescriptor::Blas { .. } => {
             let (build, buffers) = primitive_build(operation, device, descriptor, resolve_buffer)?;
@@ -196,23 +177,17 @@ pub fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffe
                     let _ = build.destroy();
                     Err(e)
                 }
-                Ok(sizes) => allocate(operation, device, Some(build), sizes, buffers, Vec::new()),
+                Ok(sizes) => allocate(device, Some(build), sizes, buffers, Vec::new()),
             }
         }
         DriverAccelDescriptor::Tlas { instances, offset, instance_count, kind, structures, motion_transforms } => {
             let instances = resolve_buffer(*instances)?;
             let structures = structures.iter().map(|t| resolve_structure(*t)).collect::<Result<Vec<_>, Error>>()?;
-            if structures.iter().any(|s| s.0.descriptor.borrow().as_ref().is_some_and(|d| d.instance_kind().is_some())) {
-                return Err(fail(operation, ErrorKind::InvalidArgument, "instances must reference primitive structures"));
-            }
             let transforms = match motion_transforms {
                 None => None,
                 Some((token, offset, count)) => Some((resolve_buffer(*token)?, *offset, *count)),
             };
-            let kind = match kind {
-                InstanceKind::UserIdInstances => ma::InstanceKind::UserIdInstances,
-                InstanceKind::MotionInstances => ma::InstanceKind::MotionInstances,
-            };
+            let kind = *kind;
             let natives: Vec<ma::AccelerationStructure> = structures.iter().map(|s| s.0.metal.clone()).collect();
             let build = ma::BuildDescriptor::instances(
                     device.metal(),
@@ -222,7 +197,7 @@ pub fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffe
                     kind,
                     transforms.as_ref().map(|(b, o, c)| (b.metal(), *o as u64, *c as u64)),
                     &natives,
-                ).map_err(|value| of_metal_error(operation, &value))?;
+                )?;
             match sizes_of(&build) {
                 Err(e) => {
                     let _ = build.destroy();
@@ -233,29 +208,25 @@ pub fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffe
                     if let Some((b, _, _)) = transforms {
                         buffers.push(b);
                     }
-                    allocate(operation, device, Some(build), sizes, buffers, structures)
+                    allocate(device, Some(build), sizes, buffers, structures)
                 }
             }
         }
         DriverAccelDescriptor::Sized { size, template } => {
             let template = resolve_structure(*template)?;
-            if *size <= 0 {
-                return Err(fail(operation, ErrorKind::InvalidArgument, "structure size must be positive"));
-            }
             let sizes = ma::Sizes { acceleration_structure_size: *size as u64, ..template.0.sizes };
-            allocate(operation, device, None, sizes, template.0.buffers.borrow().clone(), template.0.structures.clone())
+            allocate(device, None, sizes, template.0.buffers.borrow().clone(), template.0.structures.clone())
         }
     }
 }
 
 fn finish_destroy(value: &AccelInner) -> Result<(), Error> {
-    let operation = "Ogpu_metal.Acceleration.destroy";
     let released = match value.descriptor.borrow().as_ref() {
         None => Ok(()),
         Some(d) => d.destroy(),
     };
-    released.map_err(|e| of_metal_error(operation, &e))?;
-    value.metal.destroy().map_err(|e| of_metal_error(operation, &e))?;
+    released?;
+    value.metal.destroy()?;
     value.device.detach_resource();
     Ok(())
 }
@@ -268,42 +239,22 @@ impl Acceleration {
         &self.0.metal
     }
 
-    fn validate(&self, operation: &str, device: &Device) -> Result<(), Error> {
-        if self.0.dead.get() {
-            Err(fail(operation, ErrorKind::StaleHandle, "acceleration structure is destroyed"))
-        } else if device.destroyed() {
-            Err(fail(operation, ErrorKind::StaleHandle, "device is destroyed"))
-        } else if device.id() != self.0.device.id() {
-            Err(fail(operation, ErrorKind::CrossDevice, "acceleration structure belongs to another device"))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn validate_scratch(&self, operation: &str, device: &Device, scratch: &Buffer, scratch_offset: i64, required: u64) -> Result<(), Error> {
-        self.validate(operation, device)?;
-        let descriptor = scratch.descriptor(device)?;
-        validate_scratch_plan(descriptor.size, scratch_offset, required as i64)
-    }
-
-    pub fn encode_build(&self, encoder: &ma::AccelerationEncoder, device: &Device, scratch: &Buffer, scratch_offset: i64) -> Result<(), Error> {
+    pub(crate) fn encode_build(&self, encoder: &ma::AccelerationEncoder, scratch: &Buffer, scratch_offset: i64) -> Result<(), Error> {
         let operation = "Ogpu_metal.Acceleration.encode_build";
-        self.validate_scratch(operation, device, scratch, scratch_offset, self.0.sizes.build_scratch_buffer_size)?;
         match self.0.descriptor.borrow().as_ref() {
             None => Err(fail(operation, ErrorKind::InvalidState, "a sized structure is filled by copy or compaction")),
-            Some(descriptor) => encoder.build_with(&self.0.metal, descriptor, scratch.metal(), scratch_offset as u64).map_err(|value| of_metal_error(operation, &value)),
+            Some(descriptor) => encoder.build_with(&self.0.metal, descriptor, scratch.metal(), scratch_offset as u64),
         }
     }
 
     /// The structure keeps the refit's descriptor (its buffers are the ones a later refit replaces).
-    pub fn encode_refit(&self, encoder: &ma::AccelerationEncoder, device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(Token) -> Result<Buffer, Error>, scratch: &Buffer, scratch_offset: i64) -> Result<(), Error> {
+    pub(crate) fn encode_refit(&self, encoder: &ma::AccelerationEncoder, device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(Token) -> Result<Buffer, Error>, scratch: &Buffer, scratch_offset: i64) -> Result<(), Error> {
         let operation = "Ogpu_metal.Acceleration.encode_refit";
-        self.validate_scratch(operation, device, scratch, scratch_offset, self.0.sizes.refit_scratch_buffer_size)?;
         let (build, buffers) = primitive_build(operation, device, descriptor, resolve_buffer)?;
         match encoder.refit_with(&self.0.metal, &build, scratch.metal(), scratch_offset as u64) {
             Err(e) => {
                 let _ = build.destroy();
-                Err(of_metal_error(operation, &e))
+                Err(e)
             }
             Ok(()) => {
                 if let Some(old) = self.0.descriptor.borrow().as_ref() {
@@ -316,17 +267,12 @@ impl Acceleration {
         }
     }
 
-    pub fn encode_compact(encoder: &ma::AccelerationEncoder, device: &Device, src: &Acceleration, dst: &Acceleration) -> Result<(), Error> {
-        let operation = "Ogpu_metal.Acceleration.encode_compact";
-        src.validate(operation, device)?;
-        dst.validate(operation, device)?;
-        encoder.copy_and_compact(&src.0.metal, &dst.0.metal).map_err(|value| of_metal_error(operation, &value))
+    pub(crate) fn encode_compact(encoder: &ma::AccelerationEncoder, src: &Acceleration, dst: &Acceleration) -> Result<(), Error> {
+        encoder.copy_and_compact(&src.0.metal, &dst.0.metal)
     }
 
-    pub fn encode_compacted_size(&self, encoder: &ma::AccelerationEncoder, device: &Device, destination: &Buffer, offset: i64) -> Result<(), Error> {
-        let operation = "Ogpu_metal.Acceleration.encode_compacted_size";
-        self.validate(operation, device)?;
-        encoder.write_compacted_size_typed(&self.0.metal, destination.metal(), offset as u64, ma::CompactedSizeType::Uint64).map_err(|value| of_metal_error(operation, &value))
+    pub(crate) fn encode_compacted_size(&self, encoder: &ma::AccelerationEncoder, destination: &Buffer, offset: i64) -> Result<(), Error> {
+        encoder.write_compacted_size_typed(&self.0.metal, destination.metal(), offset as u64, ma::CompactedSizeType::Uint64)
     }
 
     pub fn destroy(&self) -> Result<(), Error> {

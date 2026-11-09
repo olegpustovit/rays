@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::metal::{error, sys_error, enter_main, Buffer, Device, Error, ErrorKind, Lifetime};
-use crate::pipeline::RenderPipeline;
+use crate::native::resource::{error, sys_error, enter_main, Buffer, Device, Error, ErrorKind, Lifetime};
+use crate::native::pipeline::RenderPipeline;
 use metal_sys;
 
 const PRIVATE_TRACKED_RESOURCE_OPTIONS: i64 = (2 << 4) | (2 << 8);
@@ -187,11 +187,8 @@ impl Drop for RenderCommandInner {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Primitive { Point, Line, LineStrip, Triangle, TriangleStrip }
-impl Primitive { fn code(self) -> i64 { match self { Self::Point => 0, Self::Line => 1, Self::LineStrip => 2, Self::Triangle => 3, Self::TriangleStrip => 4 } } }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IndexType { Uint16, Uint32 }
+pub use ogpu_core::render_pass::Primitive;
+pub use ogpu_core::render_pass::IndexType;
 
 #[derive(Clone)]
 pub struct RenderCommand(Arc<RenderCommandInner>);
@@ -237,7 +234,7 @@ impl RenderCommand {
         let instance_count = instance_count.unwrap_or(1);
         let type_code = match index_type { IndexType::Uint16 => 0, IndexType::Uint32 => 1 };
         metal_sys::native::draw_indexed(
-            &self.0.raw, primitive.code() as i32, index_count, type_code, index_buffer.raw(), index_offset,
+            &self.0.raw, crate::native::pipeline::primitive_code(primitive) as i32, index_count, type_code, index_buffer.raw(), index_offset,
             instance_count, 0, 0, self.0.parent.device().registry_id(),
         ).map_err(|failure| sys_error(OP, failure))?;
         self.0.parent.retain_buffer(index_buffer);
@@ -250,7 +247,7 @@ impl RenderCommand {
         let start = u64::try_from(vertex_start).map_err(|_| error(OP, ErrorKind::InvalidArgument, "vertex start exceeds native bounds"))?;
         let count = u64::try_from(vertex_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "vertex count exceeds native bounds"))?;
         let instances = u64::try_from(instance_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "instance count exceeds native bounds"))?;
-        metal_sys::registry::indirect_render_command_draw_primitives(&self.0.raw, primitive.code(), start, count, instances, 0).map_err(|failure| sys_error(OP, failure))
+        metal_sys::registry::indirect_render_command_draw_primitives(&self.0.raw, crate::native::pipeline::primitive_code(primitive), start, count, instances, 0).map_err(|failure| sys_error(OP, failure))
     }
 
     pub fn destroy(&self) -> Result<(), Error> {

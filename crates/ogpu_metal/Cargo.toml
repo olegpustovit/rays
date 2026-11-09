@@ -13,7 +13,8 @@ test = false
 # ponytail: no `lru` dependency; metal handles are not Send, so the 64 depth-stencil states are a small local LRU.
 [dependencies]
 ogpu_core = { path = "../ogpu_core" }
-metal = { path = "../metal" }
+metal_sys = { path = "../metal_sys" }
+native_layer_token_sys = { path = "../native_layer_token_sys" }
 
 [[test]]
 name = "gpu_all"

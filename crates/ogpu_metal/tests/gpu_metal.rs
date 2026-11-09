@@ -1,18 +1,18 @@
 // Port of crates/metal/test_metal_{device_safe,device_queue_safe,device_library_safe,command_buffer_safe,
 // blit_safe,compute_pipeline_safe}.ml on the real Metal device. Each case runs in its own process
 // (rays-t passes --exact), as the OCaml suite does, since they count process-wide handles.
-mod common;
-extern crate metal as m;
-use m::metal_format::Format;
+use ogpu_metal::native as m;
+use ogpu_core::error::{self, Error, ErrorKind};
+use m::Format;
 use m::pipeline::{IndexType, Primitive};
-use m::reflection::{shader_data_type, ScalarType, ShaderDataType};
+use crate::native_shader_type::{shader_data_type, ScalarType, ShaderDataType};
 use m::*;
 
-fn die(e: Error) -> ! { panic!("{e}") }
+fn die(e: Error) -> ! { panic!("{}", error::to_string(&e)) }
 fn reject(kind: ErrorKind, result: Option<Error>) {
     match result {
         Some(e) if e.kind == kind => {}
-        Some(e) => panic!("expected {kind:?}, got {e}"),
+        Some(e) => panic!("expected {kind:?}, got {}", error::to_string(&e)),
         None => panic!("operation unexpectedly succeeded, expected {kind:?}"),
     }
 }
@@ -84,7 +84,7 @@ fn gpu_device_safe() {
     buffer.write_bytes(0, &values).unwrap_or_else(|failure| die(failure));
     assert_eq!(buffer.read_bytes(0, 16).unwrap_or_else(|failure| die(failure)), values);
     assert_eq!(buffer.read_bytes(4, 4).unwrap_or_else(|failure| die(failure)), i32_bytes(&[41]), "a buffer range read the wrong offset");
-    reject(ErrorKind::ParentHasDependents, device.destroy().err());
+    reject(ErrorKind::InvalidState, device.destroy().err());
     without_handles("invalid buffer labels", &mut || {
         reject(ErrorKind::InvalidArgument, Buffer::create(&device, 16, StorageMode::Shared, CpuCacheMode::DefaultCache, Some("invalid\0label")).err());
     });
@@ -109,8 +109,8 @@ fn gpu_device_safe() {
     buffer.destroy().unwrap_or_else(|failure| die(failure));
     buffer.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::Destroyed, device.info().err());
-    reject(ErrorKind::Destroyed, Buffer::create(&device, 16, StorageMode::Shared, CpuCacheMode::DefaultCache, None).err());
+    reject(ErrorKind::StaleHandle, device.info().err());
+    reject(ErrorKind::StaleHandle, Buffer::create(&device, 16, StorageMode::Shared, CpuCacheMode::DefaultCache, None).err());
     drop((floats, mapped, buffer, private, configured, device));
     let fin = settle(0);
     assert!(fin.pending == 0 && fin.external_deallocation_mismatches == 0);
@@ -128,11 +128,11 @@ fn gpu_device_library() {
     reject(ErrorKind::InvalidArgument, Library::compile_source(&device, "", None).err());
     reject(ErrorKind::InvalidArgument, Library::compile_source(&device, "kernel void k() {}\0", None).err());
     reject(ErrorKind::InvalidArgument, Library::compile_source(&device, "kernel void k() {}", Some("a\0b")).err());
-    reject(ErrorKind::NativeError, Library::compile_source(&device, "this is not Metal", None).err());
+    reject(ErrorKind::DeviceLost, Library::compile_source(&device, "this is not Metal", None).err());
     let library = Library::compile_source(&device, SOURCE_K, Some("source_library")).unwrap_or_else(|failure| die(failure));
     assert!(Function::find(&library, "missing").is_err(), "a function the library does not define was found");
     let function = Function::find(&library, "k").unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, library.destroy().err());
+    reject(ErrorKind::InvalidState, library.destroy().err());
     function.destroy().unwrap_or_else(|failure| die(failure));
     library.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
@@ -144,7 +144,7 @@ fn gpu_command_buffer() {
     let command = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
     let blit = BlitEncoder::create(&command).unwrap_or_else(|failure| die(failure));
     blit.end_encoding().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, queue.destroy().err());
+    reject(ErrorKind::InvalidState, queue.destroy().err());
     command.commit().unwrap_or_else(|failure| die(failure));
     command.wait_until_completed().unwrap_or_else(|failure| die(failure));
     command.destroy().unwrap_or_else(|failure| die(failure));
@@ -218,7 +218,7 @@ fn gpu_compute_encoder() {
     buffer.write_bytes(0, &i32_bytes(&[0, 10, 20, 30])).unwrap_or_else(|failure| die(failure));
     let arguments = shared(&device, 16);
     arguments.write_bytes(0, &i32_bytes(&[4, 1, 1, 0])).unwrap_or_else(|failure| die(failure));
-    let texture = Texture::create(&device, Texture::descriptor_2d(m::metal_format::Format::Rgba8Unorm, 1, 1, StorageMode::Shared, &[TextureUsage::ShaderRead], None)).unwrap_or_else(|failure| die(failure));
+    let texture = Texture::create(&device, Texture::descriptor_2d(m::Format::Rgba8Unorm, 1, 1, StorageMode::Shared, &[TextureUsage::ShaderRead], None)).unwrap_or_else(|failure| die(failure));
     let command = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = ComputeEncoder::create(&command).unwrap_or_else(|failure| die(failure));
     encoder.set_pipeline(&pipeline).unwrap_or_else(|failure| die(failure));
@@ -229,8 +229,8 @@ fn gpu_compute_encoder() {
     // the same again, its four threadgroups of one read from a buffer
     encoder.dispatch_threadgroups_indirect(&arguments, 0, (1, 1, 1)).unwrap_or_else(|failure| die(failure));
     encoder.end_encoding().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, buffer.destroy().err());
-    reject(ErrorKind::ParentHasDependents, texture.destroy().err());
+    reject(ErrorKind::InvalidState, buffer.destroy().err());
+    reject(ErrorKind::InvalidState, texture.destroy().err());
     command.commit().unwrap_or_else(|failure| die(failure));
     command.wait_until_completed().unwrap_or_else(|failure| die(failure));
     command.destroy().unwrap_or_else(|failure| die(failure));
@@ -302,7 +302,7 @@ fn gpu_resource_bounds() {
         let before = stats();
         match operation() {
             Err(e) if e.kind == ErrorKind::InvalidArgument => {}
-            Err(e) => panic!("{name} returned {e}, expected InvalidArgument"),
+            Err(e) => panic!("{name} returned {}, expected InvalidArgument", error::to_string(&e)),
             Ok(()) => panic!("{name} accepted a malformed range"),
         }
         assert_eq!(before, stats(), "{name} crossed the native boundary");
@@ -324,7 +324,7 @@ fn gpu_resource_bounds() {
 fn gpu_sampler() {
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let descriptor = SamplerDescriptor {
-        min_filter: Filter::Linear, mag_filter: Filter::Linear, mip_filter: MipFilter::Linear, max_anisotropy: 4,
+        min_filter: Filter::Linear, mag_filter: Filter::Linear, mip_filter: MipFilter::LinearMip, max_anisotropy: 4,
         address_s: AddressMode::Repeat, address_t: AddressMode::Repeat, address_r: AddressMode::Repeat,
         lod_max: 3.0, support_argument_buffers: true, label: Some("Metal linear sampler".to_owned()), ..SamplerDescriptor::default()
     };
@@ -333,7 +333,7 @@ fn gpu_sampler() {
     let s = settle(c0.live_handles);
     assert!(s.total_created - c0.total_created == 1 && s.total_released - c0.total_released == 1, "sampler finalization");
     let sampler = Sampler::create(&device, descriptor.clone()).unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, device.destroy().err());
+    reject(ErrorKind::InvalidState, device.destroy().err());
     let plain = Sampler::create(&device, SamplerDescriptor::default()).unwrap_or_else(|failure| die(failure));
     plain.destroy().unwrap_or_else(|failure| die(failure));
     // Reduction modes and LOD bias are an Apple10 feature: made there, refused before any allocation elsewhere.
@@ -347,7 +347,7 @@ fn gpu_sampler() {
             Err(e) if e.kind == ErrorKind::Unsupported => {
                 without_handles("unsupported sampler extensions", &mut || reject(ErrorKind::Unsupported, Sampler::create(&device, advanced.clone()).err()));
             }
-            Err(e) => panic!("{e}"),
+            Err(e) => panic!("{}", error::to_string(&e)),
         }
     }
     without_handles("invalid sampler inputs", &mut || {
@@ -369,7 +369,7 @@ fn gpu_sampler() {
     sampler.destroy().unwrap_or_else(|failure| die(failure));
     sampler.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::Destroyed, Sampler::create(&device, descriptor).err());
+    reject(ErrorKind::StaleHandle, Sampler::create(&device, descriptor).err());
     drop((sampler, plain, unnormalized, device));
     settle(0);
 }
@@ -409,10 +409,10 @@ kernel void read_swizzle(texture2d<float, access::sample> source [[texture(0)]],
 "#;
 
 fn gpu_texture_formats() {
-    use m::metal_format::Format as F;
+    use m::Format as F;
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let formats = [F::R8Unorm, F::Rgba8Unorm, F::Bgra8Unorm, F::Bgra8UnormSrgb, F::Rgba16Float, F::Rgba32Float, F::Depth32Float];
-    let codes: std::collections::HashSet<u32> = formats.iter().map(|format| format.code()).collect();
+    let codes: std::collections::HashSet<u32> = formats.iter().map(|format| m::pixel_format_code(*format)).collect();
     assert_eq!(codes.len(), 7, "Metal/OGPU format inventory drift");
     for format in formats {
         match Texture::create(&device, Texture::descriptor_2d(format, 4, 4, StorageMode::Shared, &[TextureUsage::ShaderRead], None)) {
@@ -420,15 +420,15 @@ fn gpu_texture_formats() {
                 assert_eq!(texture.descriptor().format, format, "Metal changed a retained pixel format");
                 texture.destroy().unwrap_or_else(|failure| die(failure));
             }
-            Err(e) if matches!(e.kind, ErrorKind::NativeError | ErrorKind::Unsupported) => {}
-            Err(e) => panic!("{e}"),
+            Err(e) if matches!(e.kind, ErrorKind::DeviceLost | ErrorKind::Unsupported) => {}
+            Err(e) => panic!("{}", error::to_string(&e)),
         }
     }
     device.destroy().unwrap_or_else(|failure| die(failure));
 }
 
 fn gpu_texture_swizzle_compression() {
-    use m::metal_format::Format as F;
+    use m::Format as F;
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let queue = CommandQueue::create(&device).unwrap_or_else(|failure| die(failure));
     let base_swizzle = Swizzle { red: SwizzleChannel::Red, green: SwizzleChannel::One, blue: SwizzleChannel::One, alpha: SwizzleChannel::Green };
@@ -500,7 +500,7 @@ fn gpu_texture_swizzle_compression() {
 }
 
 fn gpu_texture_transfer_descriptors() {
-    use m::metal_format::Format as F;
+    use m::Format as F;
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let queue = CommandQueue::create(&device).unwrap_or_else(|failure| die(failure));
     let base = Texture::descriptor_2d(F::Rgba8Unorm, 4, 4, StorageMode::Shared, &[TextureUsage::ShaderRead, TextureUsage::PixelFormatView], Some("Metal conformance texture"));
@@ -514,7 +514,7 @@ fn gpu_texture_transfer_descriptors() {
     assert_eq!(texture.descriptor().hazard_tracking, HazardTrackingMode::Tracked, "direct texture resource properties are wrong");
     assert_eq!(texture.descriptor().label.as_deref(), Some("Metal conformance texture"), "texture label did not round-trip");
     assert!(texture.device().same(&device) && !texture.is_destroyed(), "texture identity is wrong");
-    reject(ErrorKind::ParentHasDependents, device.destroy().err());
+    reject(ErrorKind::InvalidState, device.destroy().err());
     // Rows of sixteen bytes carried at a pitch of twenty: the pad never reaches the texture and reads back as zero.
     let mut texture_bytes = vec![0xeeu8; 80];
     for row in 0..4 {
@@ -585,14 +585,14 @@ fn gpu_texture_transfer_descriptors() {
     texture.destroy().unwrap_or_else(|failure| die(failure));
     texture.destroy().unwrap_or_else(|failure| die(failure));
     assert!(texture.is_destroyed(), "destroyed texture remained live");
-    reject(ErrorKind::Destroyed, texture.read_bytes(full, 0, 0, 16, 64).err());
+    reject(ErrorKind::StaleHandle, texture.read_bytes(full, 0, 0, 16, 64).err());
     queue.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
 }
 
 // What the blit refuses, what it holds while encoded, and that a kernel then reads the copied texel.
 fn gpu_texture_blit() {
-    use m::metal_format::Format as F;
+    use m::Format as F;
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let queue = CommandQueue::create(&device).unwrap_or_else(|failure| die(failure));
     let texture = Texture::create(&device, Texture::descriptor_2d(F::R8Unorm, 4, 4, StorageMode::Private, &[TextureUsage::ShaderRead, TextureUsage::ShaderWrite], None)).unwrap_or_else(|failure| die(failure));
@@ -621,11 +621,11 @@ fn gpu_texture_blit() {
         reject(ErrorKind::InvalidArgument, copy(4, 16, &texture, 0, 0, TextureRegion { width: 0, ..region }).err());
     });
     copy(4, 16, &texture, 0, 0, region).unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, staging.destroy().err());
-    reject(ErrorKind::ParentHasDependents, texture.destroy().err());
+    reject(ErrorKind::InvalidState, staging.destroy().err());
+    reject(ErrorKind::InvalidState, texture.destroy().err());
     blit.end_encoding().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::Destroyed, copy(4, 16, &texture, 0, 0, region).err());
-    reject(ErrorKind::Destroyed, blit.end_encoding().err());
+    reject(ErrorKind::StaleHandle, copy(4, 16, &texture, 0, 0, region).err());
+    reject(ErrorKind::StaleHandle, blit.end_encoding().err());
     complete(&commands);
     staging.destroy().unwrap_or_else(|failure| die(failure));
     let library = Library::compile_source(&device, TEXEL_SHADER_SOURCE, None).unwrap_or_else(|failure| die(failure));
@@ -729,8 +729,8 @@ fn run_once(device: &Device, queue: &CommandQueue, function: &Function, initial:
 fn gpu_function_constants() {
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     match Library::compile_source(&device, "not a Metal program", Some("invalid shader diagnostic")) {
-        Err(e) if e.kind == ErrorKind::NativeError && e.message.contains("invalid shader diagnostic") => {}
-        Err(e) => panic!("shader compilation lost its full labeled diagnostic: {e}"),
+        Err(e) if e.kind == ErrorKind::DeviceLost && e.message.contains("invalid shader diagnostic") => {}
+        Err(e) => panic!("shader compilation lost its full labeled diagnostic: {}", error::to_string(&e)),
         Ok(_) => panic!("an invalid shader compiled"),
     }
     let library = Library::compile_source(&device, CONSTANTS_SOURCE, Some("Metal conformance library")).unwrap_or_else(|failure| die(failure));
@@ -749,7 +749,7 @@ fn gpu_function_constants() {
         }
     });
     // A constant of the wrong type is Metal's to refuse.
-    reject(ErrorKind::NativeError, Function::specialize(&library, &[c("increment_amount", FunctionConstantValue::Bool(true))], "specialized_increment").err());
+    reject(ErrorKind::DeviceLost, Function::specialize(&library, &[c("increment_amount", FunctionConstantValue::Bool(true))], "specialized_increment").err());
     let specialized_function = Function::specialize(&library, &[c("increment_amount", FunctionConstantValue::Uint32(7)), c("apply_twice", FunctionConstantValue::Bool(true))], "specialized_increment").unwrap_or_else(|failure| die(failure));
     let scalar_constant_function = Function::specialize(&library, &[
         c("scalar_i8", FunctionConstantValue::Int8(-2)), c("scalar_u8", FunctionConstantValue::Uint8(3)),
@@ -761,12 +761,12 @@ fn gpu_function_constants() {
     ], "scalar_constant_sum").unwrap_or_else(|failure| die(failure));
     let stale_function = Function::find(&library, "increment").unwrap_or_else(|failure| die(failure));
     stale_function.destroy().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::Destroyed, ComputePipeline::create(&stale_function, None, false).err());
-    reject(ErrorKind::Destroyed, stale_function.argument_encoder(0).err());
+    reject(ErrorKind::StaleHandle, ComputePipeline::create(&stale_function, None, false).err());
+    reject(ErrorKind::StaleHandle, stale_function.argument_encoder(0).err());
     without_handles("invalid compute descriptors", &mut || {
         reject(ErrorKind::InvalidArgument, ComputePipeline::create(&specialized_function, Some("invalid\0label"), false).err());
     });
-    reject(ErrorKind::ParentHasDependents, library.destroy().err());
+    reject(ErrorKind::InvalidState, library.destroy().err());
     let pipeline = ComputePipeline::create(&function_, None, false).unwrap_or_else(|failure| die(failure));
     let specialized_pipeline = ComputePipeline::create(&specialized_function, Some("specialized reflected pipeline"), true).unwrap_or_else(|failure| die(failure));
     let scalar_constant_pipeline = ComputePipeline::create(&scalar_constant_function, None, false).unwrap_or_else(|failure| die(failure));
@@ -793,7 +793,7 @@ fn gpu_function_constants() {
     encoder.set_pipeline(&pipeline).unwrap_or_else(|failure| die(failure));
     assert!(buffer.read_bytes(0, 16).unwrap_or_else(|failure| die(failure)) == i32_bytes(&[1, 41, 99, -2]), "compute input changed before command encoding");
     encoder.set_buffer(0, 0, &buffer).unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, buffer.destroy().err());
+    reject(ErrorKind::InvalidState, buffer.destroy().err());
     encoder.dispatch_threads((4, 1, 1), (4, 1, 1)).unwrap_or_else(|failure| die(failure));
     encoder.set_pipeline(&specialized_pipeline).unwrap_or_else(|failure| die(failure));
     encoder.set_buffer(0, 0, &specialized_buffer).unwrap_or_else(|failure| die(failure));
@@ -840,8 +840,8 @@ fn gpu_function_constants() {
     specialized_function.destroy().unwrap_or_else(|failure| die(failure));
     function_.destroy().unwrap_or_else(|failure| die(failure));
     library.destroy().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::Destroyed, Function::find(&library, "increment").err());
-    reject(ErrorKind::Destroyed, Function::specialize(&library, &[c("increment_amount", FunctionConstantValue::Uint32(1))], "specialized_increment").err());
+    reject(ErrorKind::StaleHandle, Function::find(&library, "increment").err());
+    reject(ErrorKind::StaleHandle, Function::specialize(&library, &[c("increment_amount", FunctionConstantValue::Uint32(1))], "specialized_increment").err());
     device.destroy().unwrap_or_else(|failure| die(failure));
 }
 
@@ -893,7 +893,7 @@ fn gpu_render_pipeline() {
     let s = settle(c0.live_handles);
     assert!(s.total_created - c0.total_created == 1 && s.total_released - c0.total_released == 1, "compiler finalization");
     let compiler = Compiler::create(&device).unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, device.destroy().err());
+    reject(ErrorKind::InvalidState, device.destroy().err());
     let library = Library::compile_source(&device, RENDER_SOURCE, None).unwrap_or_else(|failure| die(failure));
     let fragment_options = || RenderPipelineOptions { fragment: Some("prismel_fragment".to_owned()), ..RenderPipelineOptions::default() };
     without_handles("invalid Metal 4 render inputs", &mut || {
@@ -915,12 +915,12 @@ fn gpu_render_pipeline() {
             color_attachments: Some(vec![ColorAttachment { write_mask: vec![ColorWrite::Red, ColorWrite::Red], ..ColorAttachment::new(Format::Bgra8Unorm) }]), ..fragment_options()
         }).err());
         // A stage given a function of another stage is Metal's to refuse.
-        reject(ErrorKind::NativeError, compiler.create_render_pipeline(&library, "prismel_fragment", &fragment_options()).err());
-        reject(ErrorKind::NativeError, compiler.create_render_pipeline(&library, "prismel_vertex", &RenderPipelineOptions { fragment: Some("prismel_vertex".to_owned()), ..RenderPipelineOptions::default() }).err());
-        reject(ErrorKind::NativeError, compiler.create_render_pipeline(&library, "prismel_kernel", &fragment_options()).err());
+        reject(ErrorKind::DeviceLost, compiler.create_render_pipeline(&library, "prismel_fragment", &fragment_options()).err());
+        reject(ErrorKind::DeviceLost, compiler.create_render_pipeline(&library, "prismel_vertex", &RenderPipelineOptions { fragment: Some("prismel_vertex".to_owned()), ..RenderPipelineOptions::default() }).err());
+        reject(ErrorKind::DeviceLost, compiler.create_render_pipeline(&library, "prismel_kernel", &fragment_options()).err());
     });
     let render_pipeline = compiler.create_render_pipeline(&library, "prismel_vertex", &RenderPipelineOptions {
-        label: Some("metal4 reflected render".to_owned()), reflection: true, primitive_topology: PrimitiveTopology::Triangle,
+        label: Some("metal4 reflected render".to_owned()), reflection: true, primitive_topology: PrimitiveTopology::TriangleList,
         support_indirect_command_buffers: true, ..fragment_options()
     }).unwrap_or_else(|failure| die(failure));
     assert!(render_pipeline.supports_indirect_command_buffers().unwrap_or_else(|failure| die(failure)), "a pipeline compiled for indirect command buffers denies it");
@@ -956,7 +956,7 @@ fn gpu_render_pipeline() {
     let commands = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = RenderEncoder::create(&commands, &pass).unwrap_or_else(|failure| die(failure));
     encoder.set_pipeline(&plain_pipeline).unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::ParentHasDependents, plain_pipeline.destroy().err());
+    reject(ErrorKind::InvalidState, plain_pipeline.destroy().err());
     encoder.set_vertex_buffer(0, 0, &offset).unwrap_or_else(|failure| die(failure));
     encoder.set_fragment_buffer(1, 0, &tint).unwrap_or_else(|failure| die(failure));
     encoder.draw_triangles(0, 3).unwrap_or_else(|failure| die(failure));
@@ -965,7 +965,7 @@ fn gpu_render_pipeline() {
     indices.write_bytes(0, &i32_bytes(&[0, 1, 2])).unwrap_or_else(|failure| die(failure));
     let arguments = shared(&device, 24);
     arguments.write_bytes(0, &i32_bytes(&[0, 3, 1, 0, 0, 0])).unwrap_or_else(|failure| die(failure));
-    encoder.draw_indexed_indirect(Primitive::Triangle, IndexType::Uint32, &indices, 0, &arguments, 4).unwrap_or_else(|failure| die(failure));
+    encoder.draw_indexed_indirect(Primitive::TriangleList, IndexType::Uint32, &indices, 0, &arguments, 4).unwrap_or_else(|failure| die(failure));
     encoder.end_encoding().unwrap_or_else(|failure| die(failure));
     complete(&commands);
     arguments.destroy().unwrap_or_else(|failure| die(failure));
@@ -982,12 +982,12 @@ fn gpu_render_pipeline() {
     queue.destroy().unwrap_or_else(|failure| die(failure));
     plain_pipeline.destroy().unwrap_or_else(|failure| die(failure));
     render_pipeline.destroy().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::Destroyed, render_pipeline.supports_indirect_command_buffers().err());
+    reject(ErrorKind::StaleHandle, render_pipeline.supports_indirect_command_buffers().err());
     render_pipeline.destroy().unwrap_or_else(|failure| die(failure));
     // A pipeline outlives the library and compiler that made it.
     let survivor = compiler.create_render_pipeline(&library, "prismel_vertex", &fragment_options()).unwrap_or_else(|failure| die(failure));
     library.destroy().unwrap_or_else(|failure| die(failure));
-    reject(ErrorKind::Destroyed, compiler.create_render_pipeline(&library, "prismel_vertex", &fragment_options()).err());
+    reject(ErrorKind::StaleHandle, compiler.create_render_pipeline(&library, "prismel_vertex", &fragment_options()).err());
     compiler.destroy().unwrap_or_else(|failure| die(failure));
     compiler.destroy().unwrap_or_else(|failure| die(failure));
     survivor.supports_indirect_command_buffers().unwrap_or_else(|failure| die(failure));
@@ -1035,7 +1035,7 @@ fn gpu_render_icb_argument() {
 // is the same after success and after each rejection.
 mod mock_reflection {
     use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-    use m::metal_argument_reflection_snapshot::{Handle as AnyHandle, Kind, Raw};
+    use crate::native_reflection_snapshot::{Handle as AnyHandle, Kind, Raw};
     pub static LIVE: AtomicI64 = AtomicI64::new(0);
     pub static FAIL_MEMBER_NAME: AtomicBool = AtomicBool::new(false);
     #[derive(Clone)]
@@ -1109,9 +1109,9 @@ mod mock_reflection {
 }
 
 fn gpu_argument_reflection_snapshot() {
-    use m::metal_argument_reflection_snapshot::{argument, reflected_type, reflected_type_with_limits, Limits};
-    use m::reflection::ReflectedType;
-    use m::metal_argument_reflection_snapshot::Handle as AnyHandle;
+    use crate::native_reflection_snapshot::{argument, reflected_type, reflected_type_with_limits, Limits};
+    use metal_sys::native::reflection::ReflectedType;
+    use crate::native_reflection_snapshot::Handle as AnyHandle;
     use mock_reflection::{root, Mock, Node, FAIL_MEMBER_NAME, LIVE};
     use std::sync::atomic::Ordering;
     let tree: AnyHandle = Box::new(root(Node::Struct(vec![("position".to_owned(), Node::Array(Box::new(Node::Scalar))), ("normal".to_owned(), Node::Scalar)])));
@@ -1164,9 +1164,7 @@ fn gpu_handle_release_pool() {
     assert!(!stderr.contains("MISSING POOLS"), "native handle release autoreleases outside a pool: {stderr}");
 }
 
-fn main() {
-    if !cfg!(target_os = "macos") { return; } // Metal exists only on macOS
-    common::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("gpu_handle_release_pool", gpu_handle_release_pool),
         ("gpu_owner_only_handles", gpu_owner_only_handles),
         ("gpu_device_safe", gpu_device_safe),
@@ -1187,5 +1185,4 @@ fn main() {
         ("gpu_render_pipeline", gpu_render_pipeline),
         ("gpu_render_icb_argument", gpu_render_icb_argument),
         ("gpu_argument_reflection_snapshot", gpu_argument_reflection_snapshot),
-    ]);
-}
+];

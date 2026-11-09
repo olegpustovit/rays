@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::metal::{error, sys_error, enter_main, validate_text, Device, Error, ErrorKind, Lifetime};
+use crate::native::resource::{error, sys_error, enter_main, validate_text, Device, Error, ErrorKind, Lifetime};
 use metal_sys;
 
 struct LibraryInner {
@@ -153,7 +153,7 @@ impl Function {
                 Err(failure) => return Err(failure),
             };
         if registry_id != self.device().registry_id() {
-            return Err(error(OP, ErrorKind::DeviceMismatch, "argument encoder device disagrees with function"));
+            return Err(error(OP, ErrorKind::CrossDevice, "argument encoder device disagrees with function"));
         }
         self.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
         Ok(ShaderArgumentEncoder {
@@ -211,18 +211,17 @@ impl Function {
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn device(&self) -> &Device { self.0.library.device() }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
-    pub(crate) fn library(&self) -> &Library { &self.0.library }
 }
 #[derive(Clone)]
 pub enum ShaderArgumentResource {
-    Buffer(crate::metal::Buffer),
-    Texture(crate::metal::Texture),
-    Sampler(crate::descriptors::Sampler),
-    AccelerationStructure(crate::acceleration::AccelerationStructure),
-    IndirectCommandBuffer(crate::indirect::IndirectCommandBuffer),
-    RenderPipeline(crate::pipeline::RenderPipeline),
-    ComputePipeline(crate::metal::ComputePipeline),
-    DepthStencil(crate::descriptors::DepthStencil),
+    Buffer(crate::native::resource::Buffer),
+    Texture(crate::native::resource::Texture),
+    Sampler(crate::native::descriptors::Sampler),
+    AccelerationStructure(crate::native::acceleration::AccelerationStructure),
+    IndirectCommandBuffer(crate::native::indirect::IndirectCommandBuffer),
+    RenderPipeline(crate::native::pipeline::RenderPipeline),
+    ComputePipeline(crate::native::resource::ComputePipeline),
+    DepthStencil(crate::native::descriptors::DepthStencil),
 }
 impl ShaderArgumentResource {
     fn raw(&self) -> &metal_sys::Handle {
@@ -283,7 +282,7 @@ impl ShaderArgumentEncoder {
         let index = i64::try_from(index).map_err(|_| error(OP, ErrorKind::InvalidArgument, "argument index exceeds signed 64-bit range"))?;
         resource.lifetime().ensure_live(OP)?;
         if !self.device.same(resource.device()) {
-            return Err(error(OP, ErrorKind::DeviceMismatch, "argument resource belongs to another device"));
+            return Err(error(OP, ErrorKind::CrossDevice, "argument resource belongs to another device"));
         }
         let tag = match &resource {
             ShaderArgumentResource::Buffer(_) => 0,
@@ -305,12 +304,12 @@ impl ShaderArgumentEncoder {
         Ok(())
     }
 
-    pub fn set_argument_buffer(&mut self, buffer: &crate::metal::Buffer, offset: u64) -> Result<(), Error> {
+    pub fn set_argument_buffer(&mut self, buffer: &crate::native::resource::Buffer, offset: u64) -> Result<(), Error> {
         const OP: &str = "Metal.Shader_argument_encoder.set_argument_buffer";
         self.lifetime.ensure_live(OP)?;
         buffer.lifetime().ensure_live(OP)?;
         if !self.device.same(buffer.device()) {
-            return Err(error(OP, ErrorKind::DeviceMismatch, "argument buffer belongs to another device"));
+            return Err(error(OP, ErrorKind::CrossDevice, "argument buffer belongs to another device"));
         }
         if offset > buffer.length() {
             return Err(error(OP, ErrorKind::InvalidArgument, "argument buffer range is invalid"));

@@ -1,5 +1,6 @@
 //! Ogpu_metal.Buffer
-use crate::device::{fail, of_metal_error, Device};
+use crate::native;
+use crate::device::{fail, Device};
 use ogpu_core::{
     error::Error,
     error::ErrorKind,
@@ -21,7 +22,7 @@ pub enum Memory {
 }
 
 struct BufferInner {
-    metal: metal::Buffer,
+    metal: native::Buffer,
     handle: ResourceHandle,
     device: Device,
     descriptor: BufferDescriptor,
@@ -47,7 +48,7 @@ fn validate_memory(descriptor: &BufferDescriptor, memory: Memory) -> Result<(), 
     }
 }
 
-fn wrap(device: &Device, descriptor: &BufferDescriptor, metal: metal::Buffer) -> Buffer {
+fn wrap(device: &Device, descriptor: &BufferDescriptor, metal: native::Buffer) -> Buffer {
     device.attach_resource();
     Buffer(Rc::new(BufferInner {
         metal,
@@ -68,11 +69,11 @@ pub fn create(device: &Device, memory: Memory, descriptor: &BufferDescriptor) ->
     validation::validate_buffer(&device.capabilities(), descriptor)?;
     validate_memory(descriptor, memory)?;
     let (storage, cache) = match memory {
-        Memory::DeviceLocal => (metal::StorageMode::Private, metal::CpuCacheMode::DefaultCache),
-        Memory::Shared | Memory::Readback => (metal::StorageMode::Shared, metal::CpuCacheMode::DefaultCache),
-        Memory::Upload => (metal::StorageMode::Shared, metal::CpuCacheMode::WriteCombined),
+        Memory::DeviceLocal => (native::StorageMode::Private, native::CpuCacheMode::DefaultCache),
+        Memory::Shared | Memory::Readback => (native::StorageMode::Shared, native::CpuCacheMode::DefaultCache),
+        Memory::Upload => (native::StorageMode::Shared, native::CpuCacheMode::WriteCombined),
     };
-    let native = metal::Buffer::create(device.metal(), descriptor.size as u64, storage, cache, descriptor.label.as_deref()).map_err(|value| of_metal_error(operation, &value))?;
+    let native = native::Buffer::create(device.metal(), descriptor.size as u64, storage, cache, descriptor.label.as_deref())?;
     Ok(wrap(device, descriptor, native))
 }
 
@@ -91,17 +92,14 @@ impl Buffer {
     }
 
     pub fn write_bytes(&self, _device: &Device, dst_offset: i64, bytes: &[u8]) -> Result<(), Error> {
-        let operation = "Ogpu_metal.Buffer.write_bytes";
-        self.0.metal.write_bytes(dst_offset as u64, bytes).map_err(|value| of_metal_error(operation, &value))
+        self.0.metal.write_bytes(dst_offset as u64, bytes)
     }
 
     pub fn read_bytes(&self, _device: &Device, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
-        let operation = "Ogpu_metal.Buffer.read_bytes";
-        self.0.metal.read_bytes(offset as u64, length as usize).map_err(|value| of_metal_error(operation, &value))
+        self.0.metal.read_bytes(offset as u64, length as usize)
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        let operation = "Ogpu_metal.Buffer.destroy";
         if self.destroyed() {
             Ok(())
         } else if self.0.submission_uses.get() > 0 {
@@ -109,14 +107,14 @@ impl Buffer {
             self.0.destroy_requested.set(true);
             Ok(())
         } else {
-            self.0.metal.destroy().map_err(|value| of_metal_error(operation, &value))?;
+            self.0.metal.destroy()?;
             handle::destroy(&self.0.handle);
             self.0.device.detach_resource();
             Ok(())
         }
     }
 
-    pub fn metal(&self) -> &metal::Buffer {
+    pub fn metal(&self) -> &native::Buffer {
         &self.0.metal
     }
 

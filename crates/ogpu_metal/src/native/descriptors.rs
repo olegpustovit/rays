@@ -1,17 +1,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::metal::{error, sys_error, enter_main, Device, Error, ErrorKind, Lifetime, Texture};
+use crate::native::resource::{error, sys_error, enter_main, Device, Error, ErrorKind, Lifetime, Texture};
 use metal_sys::native::descriptors as sys;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Filter { Nearest, Linear }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MipFilter { None, Nearest, Linear }
+pub use ogpu_core::types::SamplerFilter as Filter;
+pub use ogpu_core::types::MipFilter;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AddressMode { ClampToEdge, MirrorClampToEdge, Repeat, MirrorRepeat, ClampToZero, ClampToBorder }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CompareFunction { Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always }
+pub use ogpu_core::render_pass::Comparison as CompareFunction;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StencilOperation { Keep, Zero, Replace, IncrementClamp, DecrementClamp, Invert, IncrementWrap, DecrementWrap }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,8 +26,9 @@ pub struct SamplerDescriptor {
     pub support_argument_buffers: bool, pub label: Option<String>,
 }
 impl Default for SamplerDescriptor {
-    fn default() -> Self { Self { min_filter: Filter::Nearest, mag_filter: Filter::Nearest, mip_filter: MipFilter::None, max_anisotropy: 1, address_s: AddressMode::ClampToEdge, address_t: AddressMode::ClampToEdge, address_r: AddressMode::ClampToEdge, border_color: BorderColor::TransparentBlack, reduction_mode: ReductionMode::WeightedAverage, normalized_coordinates: true, lod_min: 0.0, lod_max: f32::MAX, lod_average: false, lod_bias: 0.0, compare_function: CompareFunction::Never, support_argument_buffers: false, label: None } }
+    fn default() -> Self { Self { min_filter: Filter::Nearest, mag_filter: Filter::Nearest, mip_filter: MipFilter::NoMip, max_anisotropy: 1, address_s: AddressMode::ClampToEdge, address_t: AddressMode::ClampToEdge, address_r: AddressMode::ClampToEdge, border_color: BorderColor::TransparentBlack, reduction_mode: ReductionMode::WeightedAverage, normalized_coordinates: true, lod_min: 0.0, lod_max: f32::MAX, lod_average: false, lod_bias: 0.0, compare_function: CompareFunction::Never, support_argument_buffers: false, label: None } }
 }
+fn load_code(value: LoadAction) -> i32 { match value { LoadAction::DontCare => 0, LoadAction::Load => 1, LoadAction::Clear => 2 } }
 fn compare(v: CompareFunction) -> i32 { v as i32 }
 fn filter(v: Filter) -> i32 { v as i32 }
 fn mip(v: MipFilter) -> i32 { v as i32 }
@@ -47,7 +45,7 @@ impl Sampler {
         let op = "Metal.Sampler.create";
         enter_main(op)?; device.ensure_live(op)?;
         if d.max_anisotropy == 0 || d.max_anisotropy > 16 || !d.lod_min.is_finite() || !d.lod_max.is_finite() || !d.lod_bias.is_finite() || d.lod_min < 0.0 || d.lod_max < d.lod_min || d.lod_max > f32::MAX || !(-16.0..=15.999).contains(&d.lod_bias) || d.label.as_deref().is_some_and(|x| x.as_bytes().contains(&0)) { return Err(error(op, ErrorKind::InvalidArgument, "invalid sampler descriptor")); }
-        if !d.normalized_coordinates && (d.address_s != AddressMode::ClampToEdge || d.address_t != AddressMode::ClampToEdge || d.address_r != AddressMode::ClampToEdge || d.mip_filter != MipFilter::None || d.max_anisotropy != 1) { return Err(error(op, ErrorKind::InvalidArgument, "unnormalized coordinates require clamp-to-edge, no mip filter and anisotropy one")); }
+        if !d.normalized_coordinates && (d.address_s != AddressMode::ClampToEdge || d.address_t != AddressMode::ClampToEdge || d.address_r != AddressMode::ClampToEdge || d.mip_filter != MipFilter::NoMip || d.max_anisotropy != 1) { return Err(error(op, ErrorKind::InvalidArgument, "unnormalized coordinates require clamp-to-edge, no mip filter and anisotropy one")); }
         if (d.reduction_mode != ReductionMode::WeightedAverage || d.lod_bias != 0.0) && !device.supports_sampler_reduction()? {
             return Err(error(op, ErrorKind::Unsupported, "sampler reduction modes and LOD bias require macOS 26 and Apple GPU family 10"));
         }
@@ -99,8 +97,7 @@ impl RenderPassInner {
 impl Drop for RenderPassInner { fn drop(&mut self) { self.lifetime.destroyed.store(true, Ordering::Release); self.release_attachments(); self.detach_device(); } }
 #[derive(Clone)]
 pub struct RenderPassDescriptor(Arc<RenderPassInner>);
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LoadAction { DontCare, Load, Clear }
+pub use ogpu_core::render_pass::Load as LoadAction;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StoreAction { DontCare, Store, MultisampleResolve, StoreAndMultisampleResolve }
 impl RenderPassDescriptor {
@@ -114,9 +111,9 @@ impl RenderPassDescriptor {
         let compatible = |t: &Texture| !t.is_destroyed() && t.device().same(&self.0.device) &&
             t.descriptor().width as u64 == self.0.width && t.descriptor().height as u64 == self.0.height &&
             t.descriptor().sample_count as u64 == self.0.samples;
-        let render_target = |t: &Texture| t.descriptor().usage.contains(&crate::metal::TextureUsage::RenderTarget);
-        if !compatible(color) || !render_target(color) || color.descriptor().format.is_depth_or_stencil() ||
-            depth.is_some_and(|x| !compatible(x) || !render_target(x) || x.descriptor().format != crate::metal_format::Format::Depth32Float) ||
+        let render_target = |t: &Texture| t.descriptor().usage.contains(&crate::native::resource::TextureUsage::RenderTarget);
+        if !compatible(color) || !render_target(color) || (color.descriptor().format == ogpu_core::types::TextureFormat::Depth32Float) ||
+            depth.is_some_and(|x| !compatible(x) || !render_target(x) || x.descriptor().format != ogpu_core::types::TextureFormat::Depth32Float) ||
             stencil.is_some() || !clear.iter().all(|v| v.is_finite()) {
             return Err(error(op, ErrorKind::InvalidArgument, "attachment format, usage, geometry, device, or lifetime is incompatible"));
         }
@@ -136,9 +133,9 @@ impl RenderPassDescriptor {
         {
             return Err(error(op, ErrorKind::InvalidArgument, "invalid depth or stencil actions"));
         }
-        sys::set_color_load(&self.0.raw, color_load as i32).map_err(|failure| sys_error(op, failure))?;
+        sys::set_color_load(&self.0.raw, load_code(color_load)).map_err(|failure| sys_error(op, failure))?;
         sys::set_color_store(&self.0.raw, color_store as i32).map_err(|failure| sys_error(op, failure))?;
-        sys::set_depth_stencil_actions(&self.0.raw, depth_load as i32, depth_store as i32, clear_depth, stencil_load as i32, stencil_store as i32, clear_stencil).map_err(|failure| sys_error(op, failure))
+        sys::set_depth_stencil_actions(&self.0.raw, load_code(depth_load), depth_store as i32, clear_depth, load_code(stencil_load), stencil_store as i32, clear_stencil).map_err(|failure| sys_error(op, failure))
     }
     pub fn destroy(&self) -> Result<(), Error> { self.0.lifetime.destroy_parent("Metal.RenderPassDescriptor.destroy")?; self.0.release_attachments(); self.0.detach_device(); Ok(()) }
     pub fn width(&self) -> u64 { self.0.width }
@@ -146,7 +143,7 @@ impl RenderPassDescriptor {
     pub fn sample_count(&self) -> u64 { self.0.samples }
     pub fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub fn device(&self) -> &Device { &self.0.device }
-    pub fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
+    pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
     pub fn ensure_live(&self, operation: &str) -> Result<(), Error> { self.0.lifetime.ensure_live(operation) }
     pub fn color_attachment(&self) -> Option<Texture> { self.0.attachments.lock().unwrap().0.clone() }
     pub fn depth_attachment(&self) -> Option<Texture> { self.0.attachments.lock().unwrap().1.clone() }
@@ -160,12 +157,12 @@ impl RenderPassDescriptor {
         self.ensure_live(op)?;
         if let Some(t) = texture {
             let d = t.descriptor();
-            if t.is_destroyed() { return Err(error(op, ErrorKind::Destroyed, "resolve texture is destroyed")); }
+            if t.is_destroyed() { return Err(error(op, ErrorKind::StaleHandle, "resolve texture is destroyed")); }
             if self.0.samples <= 1 { return Err(error(op, ErrorKind::InvalidArgument, "resolve texture requires a multisample render pass")); }
-            if d.width as u64 != self.0.width || d.height as u64 != self.0.height || d.sample_count != 1 || !d.usage.contains(&crate::metal::TextureUsage::RenderTarget) {
+            if d.width as u64 != self.0.width || d.height as u64 != self.0.height || d.sample_count != 1 || !d.usage.contains(&crate::native::resource::TextureUsage::RenderTarget) {
                 return Err(error(op, ErrorKind::InvalidArgument, "resolve texture dimensions, samples, or usage are incompatible"));
             }
-            if !t.device().same(&self.0.device) { return Err(error(op, ErrorKind::DeviceMismatch, "resolve texture belongs to another device")); }
+            if !t.device().same(&self.0.device) { return Err(error(op, ErrorKind::CrossDevice, "resolve texture belongs to another device")); }
         }
         sys::set_render_pass_resolve(&self.0.raw, texture.map(Texture::raw)).map_err(|failure| sys_error(op, failure))?;
         let mut old = self.0.resolve.lock().unwrap();

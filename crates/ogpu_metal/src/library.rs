@@ -1,5 +1,6 @@
 //! Ogpu_metal.Library: a compiled Metal source library with a count of the pipelines made from it.
-use crate::device::{fail, of_metal_error, Device};
+use crate::native;
+use crate::device::{fail, Device};
 use ogpu_core::{
     error::Error,
     error::ErrorKind,
@@ -9,7 +10,7 @@ use ogpu_core::{
 use std::{cell::Cell, rc::Rc};
 
 struct LibraryInner {
-    metal: metal::Library,
+    metal: native::Library,
     device: Device,
     handle: ResourceHandle,
     pipelines: Cell<i64>,
@@ -19,7 +20,7 @@ struct LibraryInner {
 #[derive(Clone)]
 pub struct Library(Rc<LibraryInner>);
 
-pub fn compile_native(operation: &str, device: &Device, shader_value: &Shader) -> Result<metal::Library, Error> {
+pub fn compile_native(operation: &str, device: &Device, shader_value: &Shader) -> Result<native::Library, Error> {
     if shader::backend(shader_value) != "metal" {
         return Err(fail(operation, ErrorKind::InvalidArgument, "shader backend is not metal"));
     }
@@ -27,7 +28,7 @@ pub fn compile_native(operation: &str, device: &Device, shader_value: &Shader) -
         Ok(text) => text,
         Err(_) => return Err(fail(operation, ErrorKind::InvalidArgument, "shader source is not UTF-8")),
     };
-    metal::Library::compile_source(device.metal(), source, shader::label(shader_value)).map_err(|value| of_metal_error(operation, &value))
+    native::Library::compile_source(device.metal(), source, shader::label(shader_value))
 }
 
 pub fn create(device: &Device, shader_value: &Shader) -> Result<Library, Error> {
@@ -58,7 +59,7 @@ impl Library {
         } else if self.0.pipelines.get() > 0 {
             Err(fail(op, ErrorKind::InvalidState, "library has live pipelines"))
         } else {
-            self.0.metal.destroy().map_err(|value| of_metal_error(op, &value))?;
+            self.0.metal.destroy()?;
             self.0.dead.set(true);
             handle::destroy(&self.0.handle);
             self.0.device.detach_resource();
@@ -66,7 +67,7 @@ impl Library {
         }
     }
 
-    pub fn metal(&self) -> &metal::Library {
+    pub fn metal(&self) -> &native::Library {
         &self.0.metal
     }
     pub fn attach_pipeline(&self) {

@@ -1,13 +1,14 @@
 //! Ogpu_metal.Render_encoder: the driver's render encoder record over a Metal render encoder.
+use crate::native;
 use ogpu_core::error::Error;
 use crate::{
     command_control::{CommandContext, OpenEncoder, Resource},
-    device::{fail, of_metal_error},
+    device::{fail},
     pipeline::Native,
 };
-use metal::{
-    pipeline::{CullMode, IndexType, Primitive, RenderResource, RenderStage, ResourceUsage, Scissor, Viewport, Winding},
-    LoadAction, RenderEncoder, RenderPassDescriptor, StoreAction,
+use crate::native::{
+    pipeline::{RenderResource, RenderStage, ResourceUsage, Scissor, Viewport},
+    RenderEncoder, RenderPassDescriptor, StoreAction,
 };
 use ogpu_core::{
     backend::{DepthState, DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, ShaderStage, Token, Winding as OgpuWinding},
@@ -16,38 +17,6 @@ use ogpu_core::{
 };
 use std::rc::Rc;
 
-fn metal_cull(value: Cull) -> CullMode {
-    match value {
-        Cull::CullNone => CullMode::None,
-        Cull::CullFront => CullMode::Front,
-        Cull::CullBack => CullMode::Back,
-    }
-}
-
-fn metal_primitive(value: OgpuPrimitive) -> Primitive {
-    match value {
-        OgpuPrimitive::PointList => Primitive::Point,
-        OgpuPrimitive::LineList => Primitive::Line,
-        OgpuPrimitive::TriangleList => Primitive::Triangle,
-        OgpuPrimitive::TriangleStrip => Primitive::TriangleStrip,
-    }
-}
-
-fn metal_index(value: OgpuIndex) -> IndexType {
-    match value {
-        OgpuIndex::Uint16 => IndexType::Uint16,
-        OgpuIndex::Uint32 => IndexType::Uint32,
-    }
-}
-
-fn load_action(value: Load) -> LoadAction {
-    match value {
-        Load::DontCare => LoadAction::DontCare,
-        Load::Load => LoadAction::Load,
-        Load::Clear => LoadAction::Clear,
-    }
-}
-
 fn depth_store(value: Store) -> StoreAction {
     match value {
         Store::Store | Store::Resolve => StoreAction::Store,
@@ -55,7 +24,7 @@ fn depth_store(value: Store) -> StoreAction {
     }
 }
 
-fn render_pipeline(context: &CommandContext, token: i64) -> Result<metal::RenderPipeline, Error> {
+fn render_pipeline(context: &CommandContext, token: i64) -> Result<native::RenderPipeline, Error> {
     let Some(pipeline) = context.pipeline(token) else {
         return Err(fail(context.operation, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
     };
@@ -71,7 +40,7 @@ fn render_pipeline(context: &CommandContext, token: i64) -> Result<metal::Render
 
 struct ResolvedDraw {
     token: i64,
-    native: metal::RenderPipeline,
+    native: native::RenderPipeline,
     buffers: Vec<(ShaderStage, i64, crate::buffer::Buffer, i64)>,
     index: Option<(OgpuIndex, crate::buffer::Buffer, i64, i64)>,
 }
@@ -101,25 +70,25 @@ fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[Driver
     let mut previous: Option<i64> = None;
     for (d, r) in draws.iter().zip(resolved.iter()) {
         if previous != Some(r.token) {
-            encoder.set_pipeline(&r.native).map_err(|value| of_metal_error(context.operation, &value))?;
+            encoder.set_pipeline(&r.native)?;
         }
         for (stage, slot, buffer, offset) in &r.buffers {
             match stage {
                 ShaderStage::Vertex => encoder.set_vertex_buffer(*slot as usize, *offset as u64, buffer.metal()),
                 ShaderStage::Fragment => encoder.set_fragment_buffer(*slot as usize, *offset as u64, buffer.metal()),
-            }.map_err(|value| of_metal_error(context.operation, &value))?;
+            }?;
         }
         match &r.index {
-            None => encoder.draw_primitives(metal_primitive(d.batch_primitive), d.batch_vertex_start as usize, d.batch_vertex_count as usize, d.batch_instances as usize),
+            None => encoder.draw_primitives(d.batch_primitive, d.batch_vertex_start as usize, d.batch_vertex_count as usize, d.batch_instances as usize),
             Some((kind, index_buffer, offset, count)) => encoder.draw_indexed(
-                metal_primitive(d.batch_primitive),
-                metal_index(*kind),
+                d.batch_primitive,
+                *kind,
                 index_buffer.metal(),
                 *offset as u64,
                 *count as u64,
                 Some(d.batch_instances as u64),
             ),
-        }.map_err(|value| of_metal_error(context.operation, &value))?;
+        }?;
         previous = Some(r.token);
     }
     Ok(())
@@ -148,10 +117,10 @@ fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i6
         }
     }
     if !buffers.is_empty() {
-        encoder.use_resources(&buffers, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
+        encoder.use_resources(&buffers, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment])?;
     }
     if !textures.is_empty() {
-        encoder.use_resources(&textures, &[ResourceUsage::Sample], &[RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
+        encoder.use_resources(&textures, &[ResourceUsage::Sample], &[RenderStage::Fragment])?;
     }
     Ok(())
 }
@@ -165,7 +134,6 @@ struct Render {
 }
 
 pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> {
-    let operation = context.operation;
     let color = &target.target_colors[0];
     let color_texture = context.find_texture(color.color)?;
     let resolve = match color.color_resolve {
@@ -180,10 +148,10 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
     for texture in resolve.iter().chain(depth.iter()) {
         context.keep_texture(texture)?;
     }
-    let pass = RenderPassDescriptor::create(context.device.metal(), target.target_width as u64, target.target_height as u64, target.target_samples as u64).map_err(|value| of_metal_error(context.operation, &value))?;
-    let fail_pass = |e: metal::Error| {
+    let pass = RenderPassDescriptor::create(context.device.metal(), target.target_width as u64, target.target_height as u64, target.target_samples as u64)?;
+    let fail_pass = |e: native::Error| {
         let _ = pass.destroy();
-        of_metal_error(operation, &e)
+        e
     };
     let (r, g, b, a) = color.color_clear;
     pass.set_attachments(color_texture.metal(), depth.as_ref().map(|d| d.metal()), None, [r, g, b, a]).map_err(&fail_pass)?;
@@ -198,10 +166,10 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
         (Some(_), true) => StoreAction::StoreAndMultisampleResolve,
     };
     let (depth_load, depth_store_action, depth_clear) = match &target.target_depth {
-        None => (LoadAction::Clear, StoreAction::Store, 1.0),
-        Some(d) => (load_action(d.depth_load), depth_store(d.depth_store), d.depth_clear),
+        None => (Load::Clear, StoreAction::Store, 1.0),
+        Some(d) => (d.depth_load, depth_store(d.depth_store), d.depth_clear),
     };
-    pass.set_actions(load_action(color.color_load), color_store, depth_load, depth_store_action, depth_clear, LoadAction::Clear, StoreAction::Store, 0).map_err(&fail_pass)?;
+    pass.set_actions(color.color_load, color_store, depth_load, depth_store_action, depth_clear, Load::Clear, StoreAction::Store, 0).map_err(&fail_pass)?;
     let encoder = RenderEncoder::create(&context.native, &pass).map_err(&fail_pass)?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Render(encoder.clone(), pass.clone()));
     Ok(Box::new(Render { context: context.clone(), encoder, pass, declared: std::cell::RefCell::new(Vec::new()) }))
@@ -210,7 +178,7 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
 impl DriverRenderEncoder for Render {
     fn render_set_pipeline(&self, token: Token) -> Result<(), Error> {
         let native = render_pipeline(&self.context, token)?;
-        self.encoder.set_pipeline(&native).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.set_pipeline(&native)
     }
 
     fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, token: Token) -> Result<(), Error> {
@@ -220,7 +188,7 @@ impl DriverRenderEncoder for Render {
         match stage {
             ShaderStage::Vertex => self.encoder.set_vertex_buffer(index as usize, offset as u64, buffer.metal()),
             ShaderStage::Fragment => self.encoder.set_fragment_buffer(index as usize, offset as u64, buffer.metal()),
-        }.map_err(|value| of_metal_error(c.operation, &value))
+        }
     }
 
     fn set_stage_texture(&self, stage: ShaderStage, index: i64, token: Token) -> Result<(), Error> {
@@ -230,7 +198,7 @@ impl DriverRenderEncoder for Render {
         match stage {
             ShaderStage::Vertex => self.encoder.set_vertex_texture(index as usize, texture.metal()),
             ShaderStage::Fragment => self.encoder.set_fragment_texture(index as usize, texture.metal()),
-        }.map_err(|value| of_metal_error(c.operation, &value))
+        }
     }
 
     fn set_stage_sampler(&self, stage: ShaderStage, index: i64, token: Token) -> Result<(), Error> {
@@ -242,41 +210,38 @@ impl DriverRenderEncoder for Render {
         match stage {
             ShaderStage::Vertex => self.encoder.set_vertex_sampler(index as usize, sampler.metal()),
             ShaderStage::Fragment => self.encoder.set_fragment_sampler(index as usize, sampler.metal()),
-        }.map_err(|value| of_metal_error(c.operation, &value))
+        }
     }
 
     fn set_viewport(&self, rect: Rect) -> Result<(), Error> {
-        self.encoder.set_viewport(Viewport { x: rect.x as f64, y: rect.y as f64, width: rect.width as f64, height: rect.height as f64, znear: 0., zfar: 1. }).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.set_viewport(Viewport { x: rect.x as f64, y: rect.y as f64, width: rect.width as f64, height: rect.height as f64, znear: 0., zfar: 1. })
     }
 
     fn set_scissor(&self, rect: Rect) -> Result<(), Error> {
-        self.encoder.set_scissor(Scissor { x: rect.x as usize, y: rect.y as usize, width: rect.width as usize, height: rect.height as usize }).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.set_scissor(Scissor { x: rect.x as usize, y: rect.y as usize, width: rect.width as usize, height: rect.height as usize })
     }
 
     fn set_cull(&self, cull: Cull) -> Result<(), Error> {
-        self.encoder.set_cull_mode(metal_cull(cull)).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.set_cull_mode(cull)
     }
 
     fn set_winding(&self, winding: OgpuWinding) -> Result<(), Error> {
-        self.encoder.set_winding(match winding {
-            OgpuWinding::Clockwise => Winding::Clockwise,
-            OgpuWinding::CounterClockwise => Winding::CounterClockwise,
-        }).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.set_winding(winding)
     }
 
     fn set_depth_state(&self, state: Option<DepthState>) -> Result<(), Error> {
         let c = &self.context;
         match state {
-            None => self.encoder.set_depth_stencil_state(None).map_err(|value| of_metal_error(c.operation, &value)),
+            None => self.encoder.set_depth_stencil_state(None),
             Some(state) => {
                 let native = c.depth_state(state)?;
-                self.encoder.set_depth_stencil_state(Some(&native)).map_err(|value| of_metal_error(c.operation, &value))
+                self.encoder.set_depth_stencil_state(Some(&native))
             }
         }
     }
 
     fn draw(&self, primitive: OgpuPrimitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
-        self.encoder.draw_primitives(metal_primitive(primitive), first as usize, count as usize, instances as usize).map_err(|value| of_metal_error(self.context.operation, &value))
+        self.encoder.draw_primitives(primitive, first as usize, count as usize, instances as usize)
     }
 
     fn draw_indexed(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, token: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
@@ -284,13 +249,13 @@ impl DriverRenderEncoder for Render {
         let buffer = c.find_buffer(token)?;
         c.keep_buffer(&buffer)?;
         self.encoder.draw_indexed(
-            metal_primitive(primitive),
-            metal_index(index_type),
+            primitive,
+            index_type,
             buffer.metal(),
             offset as u64,
             count as u64,
             if instances == 1 { None } else { Some(instances as u64) },
-        ).map_err(|value| of_metal_error(c.operation, &value))
+        )
     }
 
     fn draw_indexed_indirect(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, token: Token, offset: i64, arguments_token: Token, arguments_offset: i64) -> Result<(), Error> {
@@ -300,13 +265,13 @@ impl DriverRenderEncoder for Render {
         c.keep_buffer(&buffer)?;
         c.keep_buffer(&arguments)?;
         self.encoder.draw_indexed_indirect(
-            metal_primitive(primitive),
-            metal_index(index_type),
+            primitive,
+            index_type,
             buffer.metal(),
             offset as u64,
             arguments.metal(),
             arguments_offset as u64,
-        ).map_err(|value| of_metal_error(c.operation, &value))
+        )
     }
 
     fn draw_batch(&self, draws: &[DriverBatchDraw]) -> Result<(), Error> {
@@ -321,7 +286,7 @@ impl DriverRenderEncoder for Render {
         let c = &self.context;
         match c.icb(token) {
             None => Err(fail(c.operation, ErrorKind::InvalidArgument, "indirect command buffer graph is incomplete")),
-            Some(entry) => self.encoder.execute_indirect_commands(&entry, location as usize, length as usize).map_err(|value| of_metal_error(c.operation, &value)),
+            Some(entry) => self.encoder.execute_indirect_commands(&entry, location as usize, length as usize),
         }
     }
 
@@ -329,6 +294,6 @@ impl DriverRenderEncoder for Render {
         *self.context.open_encoder.borrow_mut() = None;
         let ended = self.encoder.end_encoding();
         let _ = self.pass.destroy();
-        ended.map_err(|value| of_metal_error(self.context.operation, &value))
+        ended
     }
 }

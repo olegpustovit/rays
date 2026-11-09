@@ -121,6 +121,7 @@ fn primitive_index(primitive: Primitive) -> i32 {
     match primitive {
         Primitive::PointList => 0,
         Primitive::LineList => 1,
+        Primitive::LineStrip => 4,
         Primitive::TriangleList => 2,
         Primitive::TriangleStrip => 3,
     }
@@ -530,7 +531,7 @@ fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descrip
     let bindings: Vec<vk::Binding> = interface.iter().map(|&(binding, kind)| vk::Binding { binding, kind: kind as i32 }).collect();
     let topology = match options.topology {
         Primitive::PointList => 0,
-        Primitive::LineList => 1,
+        Primitive::LineList | Primitive::LineStrip => 1,
         Primitive::TriangleList | Primitive::TriangleStrip => 2,
     };
     let color_format = match descriptor.color_format {

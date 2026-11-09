@@ -1,34 +1,23 @@
 use std::any::Any;
 
-use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crate::metal_raw;
+pub use ogpu_core::error::{Error, ErrorKind};
+pub use ogpu_core::types::TextureFormat as Format;
+pub(crate) use ogpu_core::error::make as error;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ErrorKind { NativeError, WrongDomain, Destroyed, ParentHasDependents, InvalidArgument, InvalidState, Unsupported, DeviceMismatch }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Error { pub operation: String, pub kind: ErrorKind, pub message: String }
-impl fmt::Display for Error {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result { write!(formatter, "{}: {}", self.operation, self.message) }
-}
-impl std::error::Error for Error {}
-
-pub(crate) fn error(operation: &str, kind: ErrorKind, message: &str) -> Error {
-    Error { operation: operation.to_owned(), kind, message: message.to_owned() }
-}
 pub(crate) fn sys_error(operation: &str, value: metal_sys::Error) -> Error {
     match value {
         metal_sys::Error::Unavailable => error(operation, ErrorKind::Unsupported, "Metal is unavailable on this platform or OS version"),
         metal_sys::Error::WrongThread => error(operation, ErrorKind::WrongDomain, "Metal handles must be released on the platform main thread"),
         metal_sys::Error::InvalidArgument(message) => error(operation, ErrorKind::InvalidArgument, &message),
         metal_sys::Error::InvalidHandle => error(operation, ErrorKind::InvalidState, "invalid native Metal handle"),
-        metal_sys::Error::Native(message) => error(operation, ErrorKind::NativeError, &message),
+        metal_sys::Error::Native(message) => error(operation, ErrorKind::DeviceLost, &message),
     }
 }
 pub(crate) fn enter_main(operation: &str) -> Result<(), Error> {
-    metal_raw::drain_releases().map_err(|failure| sys_error(operation, failure))?;
+    metal_sys::drain_releases().map_err(|failure| sys_error(operation, failure))?;
     Ok(())
 }
 
@@ -42,12 +31,12 @@ pub(crate) struct Lifetime { pub(crate) destroyed: AtomicBool, pub(crate) depend
 impl Lifetime {
     pub(crate) fn new() -> Self { Self { destroyed: AtomicBool::new(false), dependents: Arc::new(AtomicUsize::new(0)) } }
     pub(crate) fn ensure_live(&self, operation: &str) -> Result<(), Error> {
-        if self.destroyed.load(Ordering::Acquire) { Err(error(operation, ErrorKind::Destroyed, "handle is destroyed")) } else { Ok(()) }
+        if self.destroyed.load(Ordering::Acquire) { Err(error(operation, ErrorKind::StaleHandle, "handle is destroyed")) } else { Ok(()) }
     }
     pub(crate) fn destroy_parent(&self, operation: &str) -> Result<(), Error> {
         if self.destroyed.load(Ordering::Acquire) { return Ok(()); }
         let dependents = self.dependents.load(Ordering::Acquire);
-        if dependents != 0 { return Err(error(operation, ErrorKind::ParentHasDependents, &format!("{dependents} Metal objects still depend on this handle"))); }
+        if dependents != 0 { return Err(error(operation, ErrorKind::InvalidState, &format!("{dependents} Metal objects still depend on this handle"))); }
         self.destroyed.store(true, Ordering::Release);
         Ok(())
     }
@@ -74,8 +63,12 @@ pub struct DeviceInfo {
 impl Device {
     pub fn system_default() -> Result<Self, Error> {
         enter_main("Metal.Device.system_default")?;
-        let raw = metal_raw::default_device().map_err(|failure| sys_error("Metal.Device.system_default", failure))?;
-        let registry_id = metal_raw::device_registry_id(&raw).map_err(|failure| sys_error("Metal.Device.registry_id", failure))?;
+        let raw = metal_sys::native::default_device().map_err(|failure| match failure {
+            metal_sys::Error::Unavailable => error("Metal.Device.system_default", ErrorKind::NoAdapter, "no Metal adapter is available"),
+            metal_sys::Error::Native(message) => error("Metal.Device.system_default", ErrorKind::NoAdapter, &message),
+            other => sys_error("Metal.Device.system_default", other),
+        })?;
+        let registry_id = metal_sys::registry::device_registry_id(&raw).map_err(|failure| sys_error("Metal.Device.registry_id", failure))?;
         Ok(Self(Arc::new(DeviceInner { raw, lifetime: Lifetime::new(), registry_id })))
     }
     pub fn same(&self, other: &Self) -> bool { self.0.registry_id == other.0.registry_id }
@@ -83,7 +76,7 @@ impl Device {
         let operation = "Metal.Device.info";
         self.0.lifetime.ensure_live(operation)?;
         let raw = &self.0.raw;
-        let name = metal_raw::device_name(raw).map_err(|failure| sys_error(operation, failure))?;
+        let name = metal_sys::registry::device_name(raw).map_err(|failure| sys_error(operation, failure))?;
         Ok(DeviceInfo {
             name: if name.is_empty() { "Unnamed Metal device".to_owned() } else { name },
             registry_id: self.0.registry_id,
@@ -104,13 +97,13 @@ impl Device {
         let operation = "Metal.Device.supports_family";
         self.0.lifetime.ensure_live(operation)?;
         let code = match family { DeviceFamily::Apple1 => 1001, DeviceFamily::Apple2 => 1002, DeviceFamily::Apple3 => 1003, DeviceFamily::Apple4 => 1004, DeviceFamily::Apple5 => 1005, DeviceFamily::Apple6 => 1006, DeviceFamily::Apple7 => 1007, DeviceFamily::Apple8 => 1008, DeviceFamily::Apple9 => 1009, DeviceFamily::Apple10 => 1010, DeviceFamily::Mac2 => 2002, DeviceFamily::Common1 => 3001, DeviceFamily::Common2 => 3002, DeviceFamily::Common3 => 3003, DeviceFamily::Metal3 => 5001, DeviceFamily::Metal4 => 5002 };
-        metal_raw::device_supports_family(&self.0.raw, code).map_err(|failure| sys_error(operation, failure))
+        metal_sys::registry::device_supports_family(&self.0.raw, code).map_err(|failure| sys_error(operation, failure))
     }
     pub fn supports_texture_sample_count(&self, sample_count: usize) -> Result<bool, Error> {
         let operation = "Metal.Device.supports_texture_sample_count";
         self.0.lifetime.ensure_live(operation)?;
         if sample_count == 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture sample count must be positive")); }
-        metal_raw::device_supports_sample_count(&self.0.raw, sample_count as u64).map_err(|failure| sys_error(operation, failure))
+        metal_sys::registry::device_supports_texture_sample_count(&self.0.raw, sample_count as u64).map_err(|failure| sys_error(operation, failure))
     }
     pub(crate) fn supports_sampler_reduction(&self) -> Result<bool, Error> {
         let operation = "Metal.Device.supports_sampler_reduction";
@@ -158,13 +151,13 @@ fn storage_code(storage: StorageMode) -> i64 { match storage { StorageMode::Shar
 fn cache_code(cache: CpuCacheMode) -> i64 { match cache { CpuCacheMode::DefaultCache => 0, CpuCacheMode::WriteCombined => 1 } }
 fn verify_buffer(operation: &str, raw: &metal_sys::Handle, length: u64, storage: StorageMode, cache: CpuCacheMode) -> Result<(), Error> {
     let actual = (
-        metal_raw::buffer_length(raw).map_err(|failure| sys_error(operation, failure))?,
-        metal_raw::buffer_storage_mode(raw).map_err(|failure| sys_error(operation, failure))?,
-        metal_raw::buffer_cache_mode(raw).map_err(|failure| sys_error(operation, failure))?,
-        metal_raw::buffer_hazard_tracking(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_sys::registry::buffer_info_length(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_sys::registry::buffer_info_storageMode(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_sys::registry::buffer_info_cpuCacheMode(raw).map_err(|failure| sys_error(operation, failure))?,
+        metal_sys::registry::buffer_info_hazardTrackingMode(raw).map_err(|failure| sys_error(operation, failure))?,
     );
     if actual != (length, storage_code(storage), cache_code(cache), 2) {
-        Err(error(operation, ErrorKind::NativeError, "Metal changed checked buffer properties during creation"))
+        Err(error(operation, ErrorKind::DeviceLost, "Metal changed checked buffer properties during creation"))
     } else { Ok(()) }
 }
 fn options(storage: StorageMode, cache: CpuCacheMode, hazard: HazardTrackingMode) -> i64 {
@@ -180,7 +173,7 @@ impl Buffer {
         if storage == StorageMode::Memoryless { return Err(error(operation, ErrorKind::InvalidArgument, "a buffer cannot be memoryless")); }
         if let Some(label) = label { validate_text(operation, label)?; }
         if length > metal_sys::registry::device_max_buffer_length(device.raw()).map_err(|failure| sys_error(operation, failure))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
-        let raw = metal_raw::buffer_create(device.raw(), length, options(storage, cache, HazardTrackingMode::Default)).map_err(|failure| sys_error(operation, failure))?;
+        let raw = metal_sys::registry::buffer_create(device.raw(), length, options(storage, cache, HazardTrackingMode::Default)).map_err(|failure| sys_error(operation, failure))?;
         verify_buffer(operation, &raw, length, storage, cache)?;
         if let Some(label) = label { metal_sys::registry::set_buffer_label(&raw, label).map_err(|failure| sys_error(operation, failure))?; }
         device.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
@@ -194,8 +187,8 @@ impl Buffer {
         if let Some(label) = label { validate_text(operation, label)?; }
         if length > metal_sys::registry::device_max_buffer_length(device.raw()).map_err(|failure| sys_error(operation, failure))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
         let (raw, mapping) = metal_sys::native::create_mapped_buffer(device.raw(), length, options(StorageMode::Shared, CpuCacheMode::DefaultCache, HazardTrackingMode::Default)).map_err(|failure| sys_error(operation, failure))?;
-        let actual_length = metal_raw::buffer_length(&raw).map_err(|failure| sys_error(operation, failure))?;
-        if actual_length < length { return Err(error(operation, ErrorKind::NativeError, "mapped buffer is shorter than its requested view")); }
+        let actual_length = metal_sys::registry::buffer_info_length(&raw).map_err(|failure| sys_error(operation, failure))?;
+        if actual_length < length { return Err(error(operation, ErrorKind::DeviceLost, "mapped buffer is shorter than its requested view")); }
         verify_buffer(operation, &raw, actual_length, StorageMode::Shared, CpuCacheMode::DefaultCache)?;
         if let Some(label) = label { metal_sys::registry::set_buffer_label(&raw, label).map_err(|failure| sys_error(operation, failure))?; }
         device.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
@@ -244,12 +237,12 @@ fn validate_range(operation: &str, total: u64, offset: u64, length: usize) -> Re
 }
 
 pub mod release_queue {
-    use super::{metal_raw, sys_error, Error};
+    use super::{sys_error, Error};
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     pub struct Stats { pub pending: usize, pub live_handles: usize, pub total_created: u64, pub total_released: u64, pub external_deallocations: u64, pub external_deallocation_mismatches: u64, pub resident_bytes: u64 }
-    pub fn drain() -> Result<usize, Error> { metal_raw::drain_releases().map_err(|failure| sys_error("Metal.Release_queue.drain", failure)) }
+    pub fn drain() -> Result<usize, Error> { metal_sys::drain_releases().map_err(|failure| sys_error("Metal.Release_queue.drain", failure)) }
     pub fn stats() -> Result<Stats, Error> {
-        let stats = metal_raw::handle_stats();
+        let stats = metal_sys::handle_stats();
         Ok(Stats { pending: stats.pending, live_handles: stats.live_handles, total_created: stats.total_created, total_released: stats.total_released, external_deallocations: 0, external_deallocation_mismatches: 0, resident_bytes: 0 })
     }
 }
@@ -269,7 +262,7 @@ impl Swizzle { pub const IDENTITY: Self = Self { red: SwizzleChannel::Red, green
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextureDescriptor {
     pub kind: TextureKind,
-    pub format: crate::metal_format::Format,
+    pub format: ogpu_core::types::TextureFormat,
     pub width: usize,
     pub height: usize,
     pub depth: usize,
@@ -287,7 +280,7 @@ pub struct TextureDescriptor {
 }
 
 impl TextureDescriptor {
-    pub fn descriptor_2d(format: crate::metal_format::Format, width: usize, height: usize, storage: StorageMode, usage: Vec<TextureUsage>, label: Option<String>) -> Self {
+    pub fn descriptor_2d(format: ogpu_core::types::TextureFormat, width: usize, height: usize, storage: StorageMode, usage: Vec<TextureUsage>, label: Option<String>) -> Self {
         Self { kind: TextureKind::Texture2d, format, width, height, depth: 1, mip_levels: 1, sample_count: 1, array_length: 1, storage, cpu_cache: CpuCacheMode::DefaultCache, hazard_tracking: HazardTrackingMode::Default, usage, allow_gpu_optimized_contents: true, compression: CompressionType::Lossless, swizzle: Swizzle::IDENTITY, label }
     }
 }
@@ -303,7 +296,7 @@ pub(crate) struct TextureInner {
     device_attached: AtomicBool,
     drawable_dependents: Option<Arc<AtomicUsize>>,
     drawable_attached: AtomicBool,
-    parent_keepalive: Option<Arc<dyn Any>>,
+    _parent_keepalive: Option<Arc<dyn Any>>,
 }
 impl Drop for TextureInner {
     fn drop(&mut self) {
@@ -373,7 +366,7 @@ fn validate_texture_descriptor(device: &Device, descriptor: &TextureDescriptor) 
 }
 
 impl Texture {
-    pub fn descriptor_2d(format: crate::metal_format::Format, width: usize, height: usize, storage: StorageMode, usage: &[TextureUsage], label: Option<&str>) -> TextureDescriptor {
+    pub fn descriptor_2d(format: ogpu_core::types::TextureFormat, width: usize, height: usize, storage: StorageMode, usage: &[TextureUsage], label: Option<&str>) -> TextureDescriptor {
         TextureDescriptor::descriptor_2d(format, width, height, storage, usage.to_vec(), label.map(str::to_owned))
     }
     pub fn create(device: &Device, descriptor: TextureDescriptor) -> Result<Self, Error> {
@@ -383,7 +376,7 @@ impl Texture {
         validate_texture_descriptor(device, &descriptor)?;
         if descriptor.kind == TextureKind::TextureBuffer { return Err(error(operation, ErrorKind::InvalidArgument, "texture-buffer resources must be created from a buffer")); }
         let raw_descriptor = metal_sys::TextureDescriptor {
-            texture_type: texture_kind_code(descriptor.kind), pixel_format: descriptor.format.code() as i32,
+            texture_type: texture_kind_code(descriptor.kind), pixel_format: pixel_format_code(descriptor.format) as i32,
             width: descriptor.width as u64, height: descriptor.height as u64, depth: descriptor.depth as u64,
             mip_levels: descriptor.mip_levels as u64, sample_count: descriptor.sample_count as u64, array_length: descriptor.array_length as u64,
             storage_mode: match descriptor.storage { StorageMode::Shared => 0, StorageMode::Managed => 1, StorageMode::Private => 2, StorageMode::Memoryless => 3 },
@@ -397,10 +390,10 @@ impl Texture {
         };
         if let Some(label) = descriptor.label.as_deref() { validate_text(operation, label)?; }
         let raw = metal_sys::native::create_texture(device.raw(), &raw_descriptor, descriptor.label.as_deref()).map_err(|failure| sys_error(operation, failure))?;
-        let actual = metal_raw::texture_info(&raw).map_err(|failure| sys_error(operation, failure))?;
+        let actual = metal_sys::native::texture_info(&raw).map_err(|failure| sys_error(operation, failure))?;
         let expected = [
             i64::from(texture_kind_code(descriptor.kind)),
-            i64::from(descriptor.format.code()),
+            i64::from(pixel_format_code(descriptor.format)),
             descriptor.width as i64,
             descriptor.height as i64,
             descriptor.depth as i64,
@@ -422,10 +415,10 @@ impl Texture {
             const FIELDS: [&str; 18] = ["kind", "format", "width", "height", "depth", "mip_levels", "sample_count", "array_length", "usage", "storage", "cpu_cache", "hazard_tracking", "allow_gpu_optimized_contents", "compression", "swizzle_red", "swizzle_green", "swizzle_blue", "swizzle_alpha"];
             let differing = (0..FIELDS.len()).filter(|&index| actual[index] != expected[index])
                 .map(|index| format!("{} expected {} got {}", FIELDS[index], expected[index], actual[index])).collect::<Vec<_>>().join("; ");
-            return Err(error(operation, ErrorKind::NativeError, &format!("Metal changed checked texture properties during creation: {differing}")));
+            return Err(error(operation, ErrorKind::DeviceLost, &format!("Metal changed checked texture properties during creation: {differing}")));
         }
         if metal_sys::registry::texture_is_shareable(&raw).map_err(|failure| sys_error(operation, failure))? {
-            return Err(error(operation, ErrorKind::NativeError, "Metal changed the checked texture sharing mode during creation"));
+            return Err(error(operation, ErrorKind::DeviceLost, "Metal changed the checked texture sharing mode during creation"));
         }
         device.attach_child(operation)?;
         // Metal reports a default hazard mode as tracked (both are checked as 2 above).
@@ -439,7 +432,7 @@ impl Texture {
             device_attached: AtomicBool::new(true),
             drawable_dependents: None,
             drawable_attached: AtomicBool::new(false),
-            parent_keepalive: None,
+            _parent_keepalive: None,
         })))
     }
 
@@ -448,7 +441,7 @@ impl Texture {
         raw: metal_sys::Handle,
         width: u64,
         height: u64,
-        format: crate::metal_format::Format,
+        format: ogpu_core::types::TextureFormat,
         drawable_dependents: Arc<AtomicUsize>,
         parent_keepalive: Arc<dyn Any>,
     ) -> Result<Self, Error> {
@@ -468,7 +461,7 @@ impl Texture {
             device_attached: AtomicBool::new(false),
             drawable_dependents: Some(drawable_dependents),
             drawable_attached: AtomicBool::new(true),
-            parent_keepalive: Some(parent_keepalive),
+            _parent_keepalive: Some(parent_keepalive),
         })))
     }
     pub fn device(&self) -> &Device { &self.0.device }
@@ -499,14 +492,10 @@ impl Texture {
         let height = texture_mip_size(descriptor.height, mip_level);
         let depth = texture_mip_size(descriptor.depth, mip_level);
         if region.x > width || region.width > width-region.x || region.y > height || region.height > height-region.y || region.z > depth || region.depth > depth-region.z { return Err(error(operation, ErrorKind::InvalidArgument, "texture region exceeds the selected mip level")); }
-        let layout = descriptor.format.layout();
-        let aligned = |origin: usize, length: usize, limit: usize, block: usize| origin % block == 0 && (length % block == 0 || origin + length == limit);
-        if !aligned(region.x, region.width, width, layout.block_width) || !aligned(region.y, region.height, height, layout.block_height) { return Err(error(operation, ErrorKind::InvalidArgument, "texture region is not aligned to its format blocks")); }
-        let row_blocks = 1 + (region.width-1)/layout.block_width;
-        let rows = 1 + (region.height-1)/layout.block_height;
-        let min_row = row_blocks.checked_mul(layout.bytes_per_block).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture row size overflow"))?;
-        if bytes_per_row < min_row || bytes_per_row % layout.bytes_per_block != 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture row pitch is too small or not block-aligned")); }
-        let min_image = bytes_per_row.checked_mul(rows).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture image size overflow"))?;
+        let texel_bytes = ogpu_core::types::texel_bytes(descriptor.format) as usize;
+        let min_row = region.width.checked_mul(texel_bytes).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture row size overflow"))?;
+        if bytes_per_row < min_row || bytes_per_row % texel_bytes != 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture row pitch is too small or not block-aligned")); }
+        let min_image = bytes_per_row.checked_mul(region.height).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture image size overflow"))?;
         if bytes_per_image < min_image { return Err(error(operation, ErrorKind::InvalidArgument, "texture image pitch is smaller than its rows")); }
         bytes_per_image.checked_mul(region.depth).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture transfer size overflow"))
     }
@@ -570,12 +559,12 @@ enum RetainedResource {
     Buffer(Buffer),
     Texture(Texture),
     ComputePipeline(ComputePipeline),
-    RenderPipeline(crate::pipeline::RenderPipeline),
-    Sampler(crate::descriptors::Sampler),
-    DepthStencil(crate::descriptors::DepthStencil),
-    AccelerationStructure(crate::acceleration::AccelerationStructure),
-    IndirectCommandBuffer(crate::indirect::IndirectCommandBuffer),
-    Drawable(crate::surface::Drawable),
+    RenderPipeline(crate::native::pipeline::RenderPipeline),
+    Sampler(crate::native::descriptors::Sampler),
+    DepthStencil(crate::native::descriptors::DepthStencil),
+    AccelerationStructure(crate::native::acceleration::AccelerationStructure),
+    IndirectCommandBuffer(crate::native::indirect::IndirectCommandBuffer),
+    Drawable(crate::native::surface::Drawable),
 }
 impl RetainedResource {
     fn raw(&self) -> &metal_sys::Handle {
@@ -683,17 +672,17 @@ impl CommandBuffer {
         self.0.phase.set(CommandPhase::Completed);
         if let Some(message) = metal_sys::native::command_buffer_error(&self.0.raw).map_err(|failure| sys_error(operation, failure))? {
             self.0.phase.set(CommandPhase::Failed);
-            return Err(error(operation, ErrorKind::NativeError, &message));
+            return Err(error(operation, ErrorKind::DeviceLost, &message));
         }
         Ok(())
     }
     pub fn destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
-    pub fn present(&self, drawable: &crate::surface::Drawable, time: PresentTime) -> Result<(), Error> {
+    pub fn present(&self, drawable: &crate::native::surface::Drawable, time: PresentTime) -> Result<(), Error> {
         let operation = "Metal.Command_buffer.present";
         self.ensure_recording(operation)?;
         drawable.ensure_live(operation)?;
         if drawable.is_presentation_scheduled() { return Err(error(operation, ErrorKind::InvalidState, "drawable is already scheduled for presentation")); }
-        if !self.device().same(drawable.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "drawable belongs to another Metal device")); }
+        if !self.device().same(drawable.device()) { return Err(error(operation, ErrorKind::CrossDevice, "drawable belongs to another Metal device")); }
         match time {
             PresentTime::Immediate => metal_sys::registry::command_buffer_present(&self.0.raw, drawable.raw()).map_err(|failure| sys_error(operation, failure)),
             PresentTime::AtTime(time) if time.is_finite() && time >= 0.0 => metal_sys::registry::command_buffer_present_at_time(&self.0.raw, drawable.raw(), time).map_err(|failure| sys_error(operation, failure)),
@@ -704,7 +693,6 @@ impl CommandBuffer {
         self.retain(RetainedResource::Drawable(drawable.clone()));
         Ok(())
     }
-    pub(crate) fn present_drawable(&self, drawable: &crate::surface::Drawable) -> Result<(), Error> { self.present(drawable, PresentTime::Immediate) }
     pub fn destroy(&self) -> Result<(), Error> {
         self.0.lifetime.destroy_parent("Metal.Command_buffer.destroy")?;
         self.0.resources.borrow_mut().clear(); // a destroyed command buffer retains nothing (ogpu_metal abandons uncommitted work this way)
@@ -723,11 +711,11 @@ impl CommandBuffer {
     pub(crate) fn retain_buffer(&self, buffer: &Buffer) { self.retain(RetainedResource::Buffer(buffer.clone())); }
     pub(crate) fn retain_texture(&self, texture: &Texture) { self.retain(RetainedResource::Texture(texture.clone())); }
     pub(crate) fn retain_pipeline(&self, pipeline: &ComputePipeline) { self.retain(RetainedResource::ComputePipeline(pipeline.clone())); }
-    pub(crate) fn retain_render_pipeline(&self, pipeline: &crate::pipeline::RenderPipeline) { self.retain(RetainedResource::RenderPipeline(pipeline.clone())); }
-    pub(crate) fn retain_sampler(&self, sampler: &crate::descriptors::Sampler) { self.retain(RetainedResource::Sampler(sampler.clone())); }
-    pub(crate) fn retain_depth_stencil(&self, state: &crate::descriptors::DepthStencil) { self.retain(RetainedResource::DepthStencil(state.clone())); }
-    pub(crate) fn retain_acceleration(&self, structure: &crate::acceleration::AccelerationStructure) { self.retain(RetainedResource::AccelerationStructure(structure.clone())); }
-    pub(crate) fn retain_indirect(&self, buffer: &crate::indirect::IndirectCommandBuffer) { self.retain(RetainedResource::IndirectCommandBuffer(buffer.clone())); }
+    pub(crate) fn retain_render_pipeline(&self, pipeline: &crate::native::pipeline::RenderPipeline) { self.retain(RetainedResource::RenderPipeline(pipeline.clone())); }
+    pub(crate) fn retain_sampler(&self, sampler: &crate::native::descriptors::Sampler) { self.retain(RetainedResource::Sampler(sampler.clone())); }
+    pub(crate) fn retain_depth_stencil(&self, state: &crate::native::descriptors::DepthStencil) { self.retain(RetainedResource::DepthStencil(state.clone())); }
+    pub(crate) fn retain_acceleration(&self, structure: &crate::native::acceleration::AccelerationStructure) { self.retain(RetainedResource::AccelerationStructure(structure.clone())); }
+    pub(crate) fn retain_indirect(&self, buffer: &crate::native::indirect::IndirectCommandBuffer) { self.retain(RetainedResource::IndirectCommandBuffer(buffer.clone())); }
 }
 
 struct ComputePipelineInner {
@@ -735,7 +723,7 @@ struct ComputePipelineInner {
     lifetime: Lifetime,
     device: Device,
     max_total_threads: usize,
-    bindings: Option<Vec<crate::pipeline::ShaderBinding>>,
+    bindings: Option<Vec<crate::native::pipeline::ShaderBinding>>,
     device_attached: AtomicBool,
 }
 impl Drop for ComputePipelineInner {
@@ -747,7 +735,7 @@ impl Drop for ComputePipelineInner {
 #[derive(Clone)]
 pub struct ComputePipeline(Arc<ComputePipelineInner>);
 impl ComputePipeline {
-    pub fn create(function: &crate::library::Function, label: Option<&str>, reflection: bool) -> Result<Self, Error> {
+    pub fn create(function: &crate::native::library::Function, label: Option<&str>, reflection: bool) -> Result<Self, Error> {
         let operation = "Metal.Compute_pipeline.create";
         enter_main(operation)?;
         function.lifetime().ensure_live(operation)?;
@@ -756,11 +744,11 @@ impl ComputePipeline {
         device.ensure_live(operation)?;
         let (raw, reflected) = metal_sys::native::pipeline::create_compute_pipeline(device.raw(), function.raw(), label, reflection).map_err(|failure| sys_error(operation, failure))?;
         let max_total_threads = usize::try_from(metal_sys::registry::compute_pipeline_max_total_threads(&raw).map_err(|failure| sys_error(operation, failure))?).map_err(|_| error(operation, ErrorKind::InvalidState, "Metal returned an out-of-range thread limit"))?;
-        let bindings = reflection.then(|| reflected.into_iter().map(crate::pipeline::map_binding).collect());
+        let bindings = reflection.then(|| reflected.into_iter().map(crate::native::pipeline::map_binding).collect());
         device.attach_child(operation)?;
         Ok(Self(Arc::new(ComputePipelineInner { raw, lifetime: Lifetime::new(), device: device.clone(), max_total_threads, bindings, device_attached: AtomicBool::new(true) })))
     }
-    pub fn bindings(&self) -> Option<&[crate::pipeline::ShaderBinding]> { self.0.bindings.as_deref() }
+    pub fn bindings(&self) -> Option<&[crate::native::pipeline::ShaderBinding]> { self.0.bindings.as_deref() }
     pub fn max_total_threads(&self) -> usize { self.0.max_total_threads }
     pub fn destroy(&self) -> Result<(), Error> {
         self.0.lifetime.destroy_parent("Metal.Compute_pipeline.destroy")?;
@@ -833,15 +821,20 @@ impl ComputeEncoder {
         }
         Ok(())
     }
-    pub fn set_acceleration_structure(&self, index: usize, structure: Option<&crate::acceleration::AccelerationStructure>) -> Result<(), Error> {
+    pub fn set_acceleration_structure(&self, index: usize, structure: Option<&crate::native::acceleration::AccelerationStructure>) -> Result<(), Error> {
         metal_sys::registry::compute35_acceleration(&self.0.raw, structure.map(|a| a.raw()), index as u64).map_err(|failure| sys_error("Metal.Compute_encoder.set_acceleration_structure", failure))?;
         if let Some(a) = structure { self.0.command_buffer.retain_acceleration(a); }
         Ok(())
     }
-    pub fn use_acceleration_structures(&self, structures: &[crate::acceleration::AccelerationStructure]) -> Result<(), Error> {
+    pub fn use_acceleration_structures(&self, structures: &[crate::native::acceleration::AccelerationStructure]) -> Result<(), Error> {
         let raws: Vec<metal_sys::Handle> = structures.iter().map(|a| a.raw().clone()).collect();
         metal_sys::native::use_accelerations(&self.0.raw, &raws).map_err(|failure| sys_error("Metal.Compute_encoder.use_acceleration_structures", failure))?;
         for a in structures { self.0.command_buffer.retain_acceleration(a); }
         Ok(())
     }
+}
+
+pub fn pixel_format_code(format: Format) -> u32 {
+    match format { Format::R8Unorm => 10, Format::Rgba8Unorm => 70, Format::Bgra8Unorm => 80,
+        Format::Bgra8UnormSrgb => 81, Format::Rgba16Float => 115, Format::Rgba32Float => 125, Format::Depth32Float => 252 }
 }

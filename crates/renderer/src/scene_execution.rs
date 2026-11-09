@@ -786,6 +786,7 @@ pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[
             && ((mesh.primitive == Primitive::PointList) == (entry.family == Scene3Points))
             && match mesh.primitive {
                 Primitive::LineList => mesh.index_count % 2 == 0,
+                Primitive::LineStrip => mesh.index_count >= 2,
                 Primitive::TriangleList => mesh.index_count % 3 == 0,
                 Primitive::PointList | Primitive::TriangleStrip => true,
             }
@@ -1789,6 +1790,7 @@ fn primitive_code(primitive: Primitive) -> &'static str {
     match primitive {
         Primitive::PointList => "P",
         Primitive::LineList => "L",
+        Primitive::LineStrip => "LS",
         Primitive::TriangleList => "T",
         Primitive::TriangleStrip => "S",
     }

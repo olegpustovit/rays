@@ -1203,6 +1203,25 @@ fn gpu_conformance_render() {
         be::write_buffer(&color, 0, &color_bytes(r, g, b, a)).unwrap_or_else(|failure| die(failure));
         be::set_stage_buffer(encoder, ShaderStage::Fragment, 1, None, &color).unwrap_or_else(|failure| die(failure));
     };
+    // Preserve the native line-strip topology when sharing core primitive types.
+    let lines = be::create_render_pipeline(&device, &render_descriptor(&flat_layout, &fragment_flat, "flat_fragment"), None, Some(Primitive::LineStrip), None).unwrap_or_else(|failure| die(failure));
+    clear_target(0., 0., 0., 1.);
+    let mut line_offset = [0u8; 8];
+    put_f32(&mut line_offset, 0, -1.);
+    put_f32(&mut line_offset, 4, -1.);
+    be::write_buffer(&offsets, 0, &line_offset).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = load_pass(&commands);
+    be::set_render_pipeline(&encoder, &lines).unwrap_or_else(|failure| die(failure));
+    be::set_stage_buffer(&encoder, ShaderStage::Vertex, 0, None, &offsets).unwrap_or_else(|failure| die(failure));
+    set_color(&encoder, 1., 0., 0., 1.);
+    be::draw(&encoder, Primitive::LineStrip, 0, 3, None).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    let pixels = be::read_texture(&target, 16).unwrap_or_else(|failure| die(failure));
+    require(pixels.chunks_exact(4).any(|pixel| pixel == [255, 0, 0, 255]), "line strip produced no pixels");
+    be::destroy_pipeline(&lines).unwrap_or_else(|failure| die(failure));
+    be::write_buffer(&offsets, 0, &[0u8; 8]).unwrap_or_else(|failure| die(failure));
     let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = load_pass(&commands);
     refused(

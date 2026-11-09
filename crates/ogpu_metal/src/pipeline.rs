@@ -1,10 +1,11 @@
 //! Ogpu_metal.Pipeline: compute pipelines from a shared library and owned render pipelines.
+use crate::native;
 use ogpu_core::error::Error;
 use crate::{
-    device::{fail, of_metal_error, Device},
+    device::{fail, Device},
     library::{self, Library},
 };
-use metal::{BlendFactor, BlendOperation, BlendState, ColorAttachment, PrimitiveTopology};
+use crate::native::{BlendFactor, BlendOperation, BlendState, ColorAttachment, PrimitiveTopology};
 use ogpu_core::{
     error::ErrorKind,
     handle::{self, ResourceHandle},
@@ -18,15 +19,15 @@ use std::{
 
 #[derive(Clone)]
 pub enum Native {
-    Compute(metal::ComputePipeline),
-    Render(metal::RenderPipeline),
+    Compute(native::ComputePipeline),
+    Render(native::RenderPipeline),
 }
 
 struct PipelineInner {
     native: Native,
-    library: metal::Library,
+    library: native::Library,
     shared_library: Option<Library>,
-    functions: RefCell<Vec<metal::Function>>,
+    functions: RefCell<Vec<native::Function>>,
     handle: ResourceHandle,
     device: Device,
     dead: Cell<bool>,
@@ -38,12 +39,11 @@ struct PipelineInner {
 pub struct Pipeline(Rc<PipelineInner>);
 
 fn finish_destroy(value: &PipelineInner) -> Result<(), Error> {
-    let operation = "Ogpu_metal.Pipeline.destroy";
     match &value.native {
             Native::Compute(x) => x.destroy(),
             Native::Render(x) => x.destroy(),
-        }.map_err(|value| of_metal_error(operation, &value))?;
-    let mut first: Option<metal::Error> = None;
+        }?;
+    let mut first: Option<native::Error> = None;
     for function in value.functions.borrow().iter() {
         if let Err(e) = function.destroy() {
             first.get_or_insert(e);
@@ -58,7 +58,7 @@ fn finish_destroy(value: &PipelineInner) -> Result<(), Error> {
         }
     }
     if let Some(e) = first {
-        return Err(of_metal_error(operation, &e));
+        return Err(e);
     }
     value.device.detach_resource();
     Ok(())
@@ -80,12 +80,12 @@ fn expected_class(kind: BindingKind) -> u8 {
     }
 }
 
-fn reflected_class(value: &metal::ShaderBinding) -> u8 {
+fn reflected_class(value: &native::ShaderBinding) -> u8 {
     match value.kind {
-        metal::BindingKind::Buffer { .. } => BUFFER,
-        metal::BindingKind::Texture { .. } => TEXTURE,
-        metal::BindingKind::Sampler => SAMPLER,
-        metal::BindingKind::PrimitiveAccelerationStructure | metal::BindingKind::InstanceAccelerationStructure => ACCEL,
+        native::BindingKind::Buffer { .. } => BUFFER,
+        native::BindingKind::Texture { .. } => TEXTURE,
+        native::BindingKind::Sampler => SAMPLER,
+        native::BindingKind::PrimitiveAccelerationStructure | native::BindingKind::InstanceAccelerationStructure => ACCEL,
         _ => OTHER,
     }
 }
@@ -107,7 +107,7 @@ fn show(items: &[(i64, u8)]) -> String {
         .join(",")
 }
 
-fn validate_reflection(op: &str, expected: &[Binding], bindings: &[metal::ShaderBinding]) -> Result<(), Error> {
+fn validate_reflection(op: &str, expected: &[Binding], bindings: &[native::ShaderBinding]) -> Result<(), Error> {
     if expected.iter().any(|b| b.group != 0) {
         return Err(fail(op, ErrorKind::InvalidArgument, "Metal foundation maps only bind group zero"));
     }
@@ -129,17 +129,17 @@ fn validate_reflection(op: &str, expected: &[Binding], bindings: &[metal::Shader
     Ok(())
 }
 
-fn metal_constants(constants: &[(String, ConstantValue)]) -> Vec<(String, metal::FunctionConstantValue)> {
+fn metal_constants(constants: &[(String, ConstantValue)]) -> Vec<(String, native::FunctionConstantValue)> {
     constants
         .iter()
         .map(|(name, value)| {
             (
                 name.clone(),
                 match *value {
-                    ConstantValue::Bool(v) => metal::FunctionConstantValue::Bool(v),
-                    ConstantValue::Int32(v) => metal::FunctionConstantValue::Int32(v),
-                    ConstantValue::Uint32(v) => metal::FunctionConstantValue::Uint32((v as i64) & 0xffff_ffff),
-                    ConstantValue::Float32(v) => metal::FunctionConstantValue::Float32(v),
+                    ConstantValue::Bool(v) => native::FunctionConstantValue::Bool(v),
+                    ConstantValue::Int32(v) => native::FunctionConstantValue::Int32(v),
+                    ConstantValue::Uint32(v) => native::FunctionConstantValue::Uint32((v as i64) & 0xffff_ffff),
+                    ConstantValue::Float32(v) => native::FunctionConstantValue::Float32(v),
                 },
             )
         })
@@ -151,16 +151,16 @@ pub fn create_compute_from_library(device: &Device, library_value: &Library, ent
     library_value.validate(device)?;
     let native = library_value.metal();
     let found = if constants.is_empty() {
-        metal::Function::find(native, entry)
+        native::Function::find(native, entry)
     } else {
-        metal::Function::specialize(native, &metal_constants(constants), entry)
+        native::Function::specialize(native, &metal_constants(constants), entry)
     };
-    let function = found.map_err(|value| of_metal_error(op, &value))?;
-    let pipeline_value = match metal::ComputePipeline::create(&function, Some(entry), true) {
+    let function = found?;
+    let pipeline_value = match native::ComputePipeline::create(&function, Some(entry), true) {
         Ok(p) => p,
         Err(e) => {
             let _ = function.destroy();
-            return Err(of_metal_error(op, &e));
+            return Err(e);
         }
     };
     let declared = shader::create(shader::Descriptor {
@@ -191,7 +191,7 @@ pub fn create_compute_from_library(device: &Device, library_value: &Library, ent
     })))
 }
 
-fn attachment(blend: Blend, format: metal::metal_format::Format) -> ColorAttachment {
+fn attachment(blend: Blend, format: native::Format) -> ColorAttachment {
     let mut a = ColorAttachment::new(format);
     let mut set = |source_rgb, destination_rgb, source_alpha, destination_alpha| {
         a.blending = BlendState::Enabled;
@@ -217,17 +217,17 @@ fn attachment(blend: Blend, format: metal::metal_format::Format) -> ColorAttachm
 fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blend, op: &str, device: &Device, descriptor: &RenderDescriptor) -> Result<Pipeline, Error> {
     let library_value = library::compile_native(op, device, &descriptor.vertex)?;
     let color = match descriptor.color_format {
-        ColorFormat::Rgba8Unorm => metal::metal_format::Format::Rgba8Unorm,
-        ColorFormat::Bgra8Unorm => metal::metal_format::Format::Bgra8Unorm,
+        ColorFormat::Rgba8Unorm => native::Format::Rgba8Unorm,
+        ColorFormat::Bgra8Unorm => native::Format::Bgra8Unorm,
     };
-    let compiler = match metal::Compiler::create(device.metal()) {
+    let compiler = match native::Compiler::create(device.metal()) {
         Ok(c) => c,
         Err(e) => {
             let _ = library_value.destroy();
-            return Err(of_metal_error(op, &e));
+            return Err(e);
         }
     };
-    let options = metal::RenderPipelineOptions {
+    let options = native::RenderPipelineOptions {
         label: descriptor.label.clone(),
         fragment: descriptor.fragment.as_ref().map(|_| descriptor.fragment_entry.clone().expect("fragment entry")),
         reflection: true,
@@ -235,7 +235,7 @@ fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blen
         color_attachments: Some(vec![attachment(blend, color)]),
         primitive_topology: topology,
         support_indirect_command_buffers: support_indirect,
-        ..metal::RenderPipelineOptions::default()
+        ..native::RenderPipelineOptions::default()
     };
     let created = compiler.create_render_pipeline(&library_value, &descriptor.vertex_entry, &options);
     let _ = compiler.destroy();
@@ -243,10 +243,10 @@ fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blen
         Ok(p) => p,
         Err(e) => {
             let _ = library_value.destroy();
-            return Err(of_metal_error(op, &e));
+            return Err(e);
         }
     };
-    let vertex_bindings: Vec<metal::ShaderBinding> = pipeline_value.reflection().map(|r| r.vertex_bindings.clone()).unwrap_or_default();
+    let vertex_bindings: Vec<native::ShaderBinding> = pipeline_value.reflection().map(|r| r.vertex_bindings.clone()).unwrap_or_default();
     if let Err(e) = validate_reflection(op, shader::bindings(&descriptor.vertex), &vertex_bindings) {
         let _ = pipeline_value.destroy();
         let _ = library_value.destroy();
@@ -282,16 +282,16 @@ pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: B
         (Native::Render(native), Some(entry)) => match native.supports_indirect_command_buffers() {
             Err(e) => {
                 let _ = value.destroy();
-                Err(of_metal_error(op, &e))
+                Err(e)
             }
             Ok(false) => {
                 let _ = value.destroy();
                 Err(fail(op, ErrorKind::Unsupported, "native pipeline does not support indirect commands"))
             }
-            Ok(true) => match metal::Function::find(&value.0.library, entry) {
+            Ok(true) => match native::Function::find(&value.0.library, entry) {
                 Err(e) => {
                     let _ = value.destroy();
-                    Err(of_metal_error(op, &e))
+                    Err(e)
                 }
                 Ok(function) => {
                     value.0.functions.borrow_mut().push(function);
@@ -325,7 +325,7 @@ impl Pipeline {
         &self.0.native
     }
 
-    pub fn argument_encoder(&self, buffer_index: u64) -> Result<metal::ShaderArgumentEncoder, Error> {
+    pub fn argument_encoder(&self, buffer_index: u64) -> Result<native::ShaderArgumentEncoder, Error> {
         let operation = "Ogpu_metal.Pipeline.argument_encoder";
         // Metal asserts (and aborts) on an index that is no buffer slot; the Rust binding does not range-check it.
         if buffer_index >= 31 {
@@ -335,7 +335,7 @@ impl Pipeline {
             (Native::Render(_), Some(function)) => function.clone(),
             _ => return Err(fail(operation, ErrorKind::InvalidState, "fragment function was not retained")),
         };
-        function.argument_encoder(buffer_index).map_err(|value| of_metal_error(operation, &value))
+        function.argument_encoder(buffer_index)
     }
 
     pub fn retain_submission(&self) -> Result<(), Error> {
