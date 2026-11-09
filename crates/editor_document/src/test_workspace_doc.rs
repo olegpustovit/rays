@@ -331,6 +331,23 @@ fn part_contexts() {
 }
 
 #[test]
+fn literal_spelling_changes() {
+    let catalog = catalog();
+    let base = of_text(&catalog, None, STILL);
+    let edit = |doc: &doc::T, text| doc::edit(&catalog, doc, &Op::SetArg {
+        node: p(&["g", "a"]), key: ArgKey::Kw("radius".into()), sub: vec![], value: parse_one(text),
+    }).unwrap();
+    let first = edit(&base, "0.6");
+    let spelling = edit(&first, "0.60");
+    let changes = doc::literal_changes(&first, &spelling).unwrap();
+    assert_eq!(changes.len(), 1, "spelling-only edits must reach the pane");
+    let expr = &changes[0].expr;
+    let Node::Num(token) = expr.node else { panic!("expected numeric spelling") };
+    assert_eq!(expr.name(token), "0.60");
+    assert!(doc::literal_changes(&spelling, &edit(&spelling, "0.60")).unwrap().is_empty());
+}
+
+#[test]
 #[ignore = "slow: each lowering costs ~200 ms in a debug build (flow_eval::Host::static_with_requests); run with RAYS_SLOW=1"]
 fn part_literals() {
     use crate::literal_edit;

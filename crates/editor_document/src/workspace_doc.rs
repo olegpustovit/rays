@@ -106,7 +106,7 @@ pub fn literal_changes(previous: &T, next: &T) -> Option<Vec<Change>> {
     let mut edits: Vec<Change> = Vec::new();
     for key in keys {
         match (before.get(key), literal.edits.get(key)) {
-            (Some(old), Some(change)) if old.after == change.after && old.expr.node == change.expr.node => {}
+            (Some(old), Some(change)) if old.after == change.after && s::equal(&old.expr, &change.expr) => {}
             (old, Some(change)) => {
                 edits.push(Change { before: old.map_or_else(|| change.before.clone(), |o| o.after.clone()), ..change.clone() });
             }
