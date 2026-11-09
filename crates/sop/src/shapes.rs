@@ -115,46 +115,46 @@ pub mod switch {
 
 // ---------------------------------------------------------------- shared helpers for the nodes below
 
-/// Borrowed positional reader over a schema-normalised value slice.
-struct Reader<'a> {
-    values: &'a [Value],
+/// Positional reader over a schema-normalised value slice.
+struct Reader {
+    values: Vec<Value>,
     at: usize,
 }
 
-impl<'a> Reader<'a> {
-    fn new(values: &'a [Value]) -> Reader<'a> {
-        Reader { values, at: 0 }
+impl Reader {
+    fn new(values: &[Value]) -> Reader {
+        Reader { values: values.to_vec(), at: 0 }
     }
-    fn next(&mut self) -> &'a Value {
+    fn next(&mut self) -> Value {
         self.at += 1;
-        &self.values[self.at - 1]
+        self.values[self.at - 1].clone()
     }
     fn float(&mut self) -> f64 {
         match self.next() {
-            Value::Float(f) => *f,
+            Value::Float(f) => f,
             _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn int(&mut self) -> i64 {
         match self.next() {
-            Value::Int(i) => *i,
+            Value::Int(i) => i,
             _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn bool(&mut self) -> bool {
         match self.next() {
-            Value::Bool(b) => *b,
+            Value::Bool(b) => b,
             _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn text(&mut self) -> String {
         match self.next() {
-            Value::Text(t) => String::from_utf8_lossy(t).into_owned(),
+            Value::Text(t) => String::from_utf8_lossy(&t).into_owned(),
             _ => unreachable!("parameter record has the wrong shape"),
         }
     }
     fn choice<T: Clone>(&mut self, table: &support::Choice<T>) -> T {
-        table.of(self.next())
+        table.of(&self.next())
     }
 }
 
@@ -309,7 +309,7 @@ pub mod clip {
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
         let mut r = Reader::new(values);
-        let p_group_owner = support::ELEMENT_OWNER.of(r.next());
+        let p_group_owner = support::ELEMENT_OWNER.of(&r.next());
         let p_group = r.text();
         let p_keep = r.choice(&KEEP);
         let p_snapping_tolerance = r.float();
@@ -696,13 +696,13 @@ pub mod soft_transform {
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
         let mut r = Reader::new(values);
-        let p_group_owner = support::ELEMENT_OWNER.of(r.next());
+        let p_group_owner = support::ELEMENT_OWNER.of(&r.next());
         let p_group = r.text();
         r.at += 22;
         let p_metric = r.choice(&METRIC);
         let p_metric_attribute = r.text();
         let p_apply_rolloff = r.bool();
-        let p_falloff = support::SOFT_FALLOFF.of(r.next());
+        let p_falloff = support::SOFT_FALLOFF.of(&r.next());
         let p_radius = r.float();
         let p_falloff_attribute = r.text();
         let p_recompute_normals = r.bool();
@@ -964,7 +964,7 @@ pub mod ray {
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
         let mut r = Reader::new(values);
-        let p_group_owner = support::ELEMENT_OWNER.of(r.next());
+        let p_group_owner = support::ELEMENT_OWNER.of(&r.next());
         let p_group = r.text();
         let p_collision_group = r.text();
         let p_method = r.choice(&METHOD);
