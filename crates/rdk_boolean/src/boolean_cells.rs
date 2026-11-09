@@ -1,13 +1,11 @@
 //! Port of lib/rdk/boolean/boolean_cells.ml: exact-axis shell winding classification for a
-//! Weiler complex. `Parallel.both` of the two component builds runs sequentially (the result is
-//! identical); BVH query scratch is local to each query so queries share no mutable state.
+//! Weiler complex. Operand component builds share the worker pool; each BVH query owns its scratch.
 use rdk_core::support::DisjointSet;
-use rays_math::float::compare as float_compare;
-use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
 use rdk_core::{cancel, error};
 use rdk_core::error::Code;
+use rdk_geom::bounds3_index;
 use rdk_geom::implicit_point::{self, AxisRayTriangle, SymbolicRayTriangle};
 use rdk_geom::point_grid::{float_max, float_min};
 use rdk_geom::predicates::Sign;
@@ -40,13 +38,7 @@ struct Components {
     max_x: Vec<f64>,
     max_y: Vec<f64>,
     max_z: Vec<f64>,
-    order: Vec<i64>,
-    tree_min_x: Vec<f64>,
-    tree_min_y: Vec<f64>,
-    tree_min_z: Vec<f64>,
-    tree_max_x: Vec<f64>,
-    tree_max_y: Vec<f64>,
-    tree_max_z: Vec<f64>,
+    tree: bounds3_index::T,
 }
 
 enum Fail {
@@ -117,116 +109,33 @@ fn center(lower: f64, upper: f64) -> f64 {
     lower * 0.5 + upper * 0.5
 }
 
-struct Tree {
-    order: Vec<i64>,
-    min_x: Vec<f64>,
-    min_y: Vec<f64>,
-    min_z: Vec<f64>,
-    max_x: Vec<f64>,
-    max_y: Vec<f64>,
-    max_z: Vec<f64>,
-}
-
-fn include_node(tree: &mut Tree, parent: usize, child: usize) {
-    tree.min_x[parent] = float_min(tree.min_x[parent], tree.min_x[child]);
-    tree.min_y[parent] = float_min(tree.min_y[parent], tree.min_y[child]);
-    tree.min_z[parent] = float_min(tree.min_z[parent], tree.min_z[child]);
-    tree.max_x[parent] = float_max(tree.max_x[parent], tree.max_x[child]);
-    tree.max_y[parent] = float_max(tree.max_y[parent], tree.max_y[child]);
-    tree.max_z[parent] = float_max(tree.max_z[parent], tree.max_z[child]);
-}
-
-fn build_subtree(
-    tree: &mut Tree,
-    built: &mut i64,
-    cancel_value: Option<&cancel::T>,
-    bounds: &[&[f64]; 6],
-    first: i64,
-    last: i64,
-) -> Result<(), Fail> {
-    if first > last {
-        return Ok(());
-    }
-    *built += 1;
-    cancel::poll(cancel_value, *built, 4095)?;
-    let middle = first + (last - first) / 2;
-    let m = middle as usize;
-    let component = tree.order[m] as usize;
-    tree.min_x[m] = bounds[0][component];
-    tree.min_y[m] = bounds[1][component];
-    tree.min_z[m] = bounds[2][component];
-    tree.max_x[m] = bounds[3][component];
-    tree.max_y[m] = bounds[4][component];
-    tree.max_z[m] = bounds[5][component];
-    if first < middle {
-        build_subtree(tree, built, cancel_value, bounds, first, middle - 1)?;
-        include_node(tree, m, (first + (middle - 1 - first) / 2) as usize);
-    }
-    if middle < last {
-        build_subtree(tree, built, cancel_value, bounds, middle + 1, last)?;
-        include_node(tree, m, (middle + 1 + (last - (middle + 1)) / 2) as usize);
-    }
-    Ok(())
-}
-
 fn build_component_tree(
     cancel_value: Option<&cancel::T>,
     bounds: &[&[f64]; 6],
-) -> Result<Tree, Fail> {
-    let [min_x, min_y, min_z, max_x, max_y, max_z] = *bounds;
-    let count = min_x.len();
-    let mut order: Vec<i64> = (0..count as i64).collect();
-    if count > 1 {
-        let span = |lower: &[f64], upper: &[f64]| -> Result<f64, Fail> {
-            let mut minimum = f64::INFINITY;
-            let mut maximum = f64::NEG_INFINITY;
-            for component in 0..count {
-                cancel::poll(cancel_value, component as i64, 4095)?;
-                let value = center(lower[component], upper[component]);
-                minimum = float_min(minimum, value);
-                maximum = float_max(maximum, value);
-            }
-            Ok(maximum - minimum)
-        };
-        let mut spans =
-            [(span(min_x, max_x)?, 0_i64), (span(min_y, max_y)?, 1), (span(min_z, max_z)?, 2)];
-        spans.sort_by(|left, right| float_compare(right.0, left.0).then(left.1.cmp(&right.1)));
-        let axis = spans[0].1;
-        let (lower, upper) = if axis == 0 {
-            (min_x, max_x)
-        } else if axis == 1 {
-            (min_y, max_y)
-        } else {
-            (min_z, max_z)
-        };
-        let comparisons = Cell::new(0_i64);
-        let failure: RefCell<Option<error::T>> = RefCell::new(None);
-        order.sort_by(|&left, &right| {
-            comparisons.set(comparisons.get() + 1);
-            if let Err(bad) = cancel::poll(cancel_value, comparisons.get(), 4095) {
-                failure.borrow_mut().get_or_insert(bad);
-            }
-            float_compare(
-                center(lower[left as usize], upper[left as usize]),
-                center(lower[right as usize], upper[right as usize]),
-            )
-            .then(left.cmp(&right))
-        });
-        if let Some(bad) = failure.into_inner() {
-            return Err(bad.into());
+) -> Result<bounds3_index::T, Fail> {
+    cancel::check_opt(cancel_value)?;
+    let count = bounds[0].len();
+    let mut centroid: [Vec<f64>; 3] = std::array::from_fn(|_| Vec::with_capacity(count));
+    for component in 0..count {
+        cancel::poll(cancel_value, component as i64, 4095)?;
+        for axis in 0..3 {
+            centroid[axis].push(center(bounds[axis][component], bounds[axis + 3][component]));
         }
     }
-    let mut tree = Tree {
-        order,
-        min_x: vec![f64::INFINITY; count],
-        min_y: vec![f64::INFINITY; count],
-        min_z: vec![f64::INFINITY; count],
-        max_x: vec![f64::NEG_INFINITY; count],
-        max_y: vec![f64::NEG_INFINITY; count],
-        max_z: vec![f64::NEG_INFINITY; count],
-    };
-    let mut built = 0_i64;
-    build_subtree(&mut tree, &mut built, cancel_value, bounds, 0, count as i64 - 1)?;
+    let tree = bounds3_index::create(
+        cancel_value,
+        None,
+        16_384,
+        &centroid[0],
+        &centroid[1],
+        &centroid[2],
+        bounds[0],
+        bounds[1],
+        bounds[2],
+        bounds[3],
+        bounds[4],
+        bounds[5],
+    )?;
     cancel::check_opt(cancel_value)?;
     Ok(tree)
 }
@@ -335,55 +244,62 @@ fn build_components(
         max_x,
         max_y,
         max_z,
-        order: tree.order,
-        tree_min_x: tree.min_x,
-        tree_min_y: tree.min_y,
-        tree_min_z: tree.min_z,
-        tree_max_x: tree.max_x,
-        tree_max_y: tree.max_y,
-        tree_max_z: tree.max_z,
+        tree,
     })
 }
 
-/// Candidate components whose box meets the query's certified bounds, in OCaml's traversal order.
-fn query_components_indexed(components: &Components, query: &implicit_point::T) -> Vec<i64> {
+/// Candidate component IDs whose boxes meet the query's certified bounds, in ascending order.
+fn query_components_indexed(
+    cancel_value: Option<&cancel::T>,
+    components: &Components,
+    query: &implicit_point::T,
+) -> Result<Vec<i64>, Fail> {
+    cancel::check_opt(cancel_value)?;
     let ((x_lower, x_upper), (y_lower, y_upper), (z_lower, z_upper)) =
         implicit_point::bounds(query);
+    let tree = &components.tree;
     let mut found = Vec::new();
-    let mut stack: Vec<(i64, i64)> = Vec::new();
-    if !components.order.is_empty() {
-        stack.push((0, components.order.len() as i64 - 1));
-    }
-    while let Some((first, last)) = stack.pop() {
-        let middle = first + (last - first) / 2;
-        let m = middle as usize;
-        if components.tree_max_x[m] >= x_lower
-            && components.tree_min_x[m] <= x_upper
-            && components.tree_max_y[m] >= y_lower
-            && components.tree_min_y[m] <= y_upper
-            && components.tree_max_z[m] >= z_lower
-            && components.tree_min_z[m] <= z_upper
+    // Median splits bound pending siblings by the bit width of the item count.
+    let mut stack = [0usize; usize::BITS as usize];
+    let mut pending = usize::from(!tree.order.is_empty());
+    let mut visited = 0;
+    while pending > 0 {
+        pending -= 1;
+        let node = stack[pending];
+        cancel::poll(cancel_value, visited, 4095)?;
+        visited += 1;
+        if !(tree.max_x[node] >= x_lower
+            && tree.min_x[node] <= x_upper
+            && tree.max_y[node] >= y_lower
+            && tree.min_y[node] <= y_upper
+            && tree.max_z[node] >= z_lower
+            && tree.min_z[node] <= z_upper)
         {
-            let component = components.order[m];
-            let k = component as usize;
-            if components.max_x[k] >= x_lower
-                && components.min_x[k] <= x_upper
-                && components.max_y[k] >= y_lower
-                && components.min_y[k] <= y_upper
-                && components.max_z[k] >= z_lower
-                && components.min_z[k] <= z_upper
-            {
-                found.push(component);
-            }
-            if middle < last {
-                stack.push((middle + 1, last));
-            }
-            if first < middle {
-                stack.push((first, middle - 1));
+            continue;
+        }
+        if tree.count[node] == 0 {
+            stack[pending] = tree.right[node] as usize;
+            stack[pending + 1] = tree.left[node] as usize;
+            pending += 2;
+        } else {
+            for slot in tree.first[node]..tree.first[node] + tree.count[node] {
+                let component = tree.order[slot as usize];
+                let k = component as usize;
+                if components.max_x[k] >= x_lower
+                    && components.min_x[k] <= x_upper
+                    && components.max_y[k] >= y_lower
+                    && components.min_y[k] <= y_upper
+                    && components.max_z[k] >= z_lower
+                    && components.min_z[k] <= z_upper
+                {
+                    found.push(component);
+                }
             }
         }
     }
-    found
+    found.sort_unstable();
+    cancel::check_opt(cancel_value)?;
+    Ok(found)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -401,7 +317,7 @@ fn classify_operand(
     let axis = axis_index(axis);
     let mut winding = 0_i64;
     let mut ambiguous = false;
-    for component in query_components_indexed(components, query) {
+    for component in query_components_indexed(cancel_value, components, query)? {
         let component = component as usize;
         for slot in components.offsets[component]..components.offsets[component + 1] {
             let face = components.triangles[slot as usize];
@@ -447,7 +363,7 @@ fn classify_operand_symbolic(
     let mut winding = 0_i64;
     let mut boundary = -1_i64;
     let mut degenerate = -1_i64;
-    for component in query_components_indexed(components, query) {
+    for component in query_components_indexed(cancel_value, components, query)? {
         let component = component as usize;
         for slot in components.offsets[component]..components.offsets[component + 1] {
             let face = components.triangles[slot as usize];
@@ -952,6 +868,96 @@ mod tests {
             signature_at(1, &left, &right) == signature_at(4, &left, &right),
             "component index scale result differs between domain counts"
         );
+    }
+
+    #[test]
+    fn component_index_matches_linear_scan() {
+        let mut points = Vec::new();
+        let mut faces = Vec::new();
+        for item in 0..64 {
+            let first = points.len() as i64;
+            let (x, y, z) = (
+                ((item * 17) % 64) as f64,
+                (item % 3) as f64,
+                (item % 5) as f64,
+            );
+            let size = 4. + (item % 3) as f64;
+            points.extend([
+                (x, y, z),
+                (x + size, y, z),
+                (x, y + size, z),
+                (x, y, z + size),
+            ]);
+            faces.extend(LOCAL.iter().map(|corner| first + corner));
+        }
+        let constraints = boolean_constraints::build(
+            &boolean_constraints::params(1),
+            &geom(&points, &faces),
+            &geom(&[], &[]),
+        )
+        .unwrap();
+        let components = build_components(None, &constraints, Side::Left)
+            .map_err(finish_fail)
+            .unwrap();
+        assert_eq!(components.offsets.len(), 65);
+        let mut queries = vec![(-1., 0., 0.), (0., 0., 0.), (4., 0., 0.), (100., 0., 0.)];
+        queries.extend((0..128).map(|i| ((i * 37 % 70) as f64, (i % 7) as f64, (i % 9) as f64)));
+        for (x, y, z) in queries {
+            let source = implicit_point::source(vec![x, x.next_up()], vec![y; 2], vec![z; 2]).unwrap();
+            let a = implicit_point::explicit(&source, 0).unwrap();
+            let b = implicit_point::explicit(&source, 1).unwrap();
+            for query in [a.clone(), implicit_point::midpoint(&a, &b).unwrap()] {
+                let ((xl, xu), (yl, yu), (zl, zu)) = implicit_point::bounds(&query);
+                let expected: Vec<_> = (0..64)
+                    .filter(|&k| {
+                        components.max_x[k] >= xl
+                            && components.min_x[k] <= xu
+                            && components.max_y[k] >= yl
+                            && components.min_y[k] <= yu
+                            && components.max_z[k] >= zl
+                            && components.min_z[k] <= zu
+                    })
+                    .map(|k| k as i64)
+                    .collect();
+                let indexed = query_components_indexed(None, &components, &query)
+                    .map_err(finish_fail)
+                    .unwrap();
+                assert_eq!(
+                    indexed, expected,
+                    "inclusive certified bounds match a linear scan"
+                );
+            }
+        }
+        let token = cancel::create();
+        cancel::cancel(&token);
+        let empty_components = build_components(None, &constraints, Side::Right)
+            .map_err(finish_fail)
+            .unwrap();
+        let source = implicit_point::source(vec![100.], vec![0.], vec![0.]).unwrap();
+        let query = implicit_point::explicit(&source, 0).unwrap();
+        for index in [&components, &empty_components] {
+            let failure = query_components_indexed(Some(&token), index, &query)
+                .map_err(finish_fail)
+                .unwrap_err();
+            assert_eq!(error::code(&failure), Code::Cancelled);
+        }
+        let empty: &[f64] = &[];
+        for bounds in [
+            [empty; 6],
+            [
+                &components.min_x[..],
+                &components.min_y,
+                &components.min_z,
+                &components.max_x,
+                &components.max_y,
+                &components.max_z,
+            ],
+        ] {
+            match build_component_tree(Some(&token), &bounds) {
+                Err(failure) => assert_eq!(error::code(&finish_fail(failure)), Code::Cancelled),
+                Ok(_) => panic!("cancelled component index built"),
+            }
+        }
     }
 
     #[test]
