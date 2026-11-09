@@ -102,14 +102,14 @@ pub fn sync_views(value: &mut EditorModel) {
 
 /// A node asked to be viewed: the preview of the object that owns it, else the canvas's.
 pub fn view_node(value: &mut EditorModel, path: &[String]) {
-    let Some(key) = pane_laid(&*value).cloned() else { return };
+    let Some(key) = pane_laid(&(&*value).into()).cloned() else { return };
     let chain = probe::chains(&key.scope).get(path).cloned().unwrap_or_default();
     let probes = probes_for(&*value, &chain);
     let node = key.records.as_ref().and_then(|records| records.borrow().plan_node(None, path, &probes));
     let lowered = value.doc.workspace.lowered.clone();
     let owner = node.and_then(|node| {
         let owns = |id: i64| value.doc.networks.get(&id).and_then(|network| (lowered.preview)(node, &probes, &network.graph)).is_some();
-        match pane_level(&*value) {
+        match pane_level(&(&*value).into()) {
             Level::Inside(id) if owns(id) => Some(id),
             _ => value.doc.networks.keys().copied().find(|id| owns(*id)),
         }
@@ -174,18 +174,18 @@ impl scope::Saved for DocSaved {
 /// or a frame.
 pub fn sync_scope(value: &mut EditorModel) {
     sync_views(value);
-    if let Some(display) = pane_laid(&*value).map(|key| viewed_path(&*value, &key.scope)) {
+    if let Some(display) = pane_laid(&(&*value).into()).map(|key| viewed_path(&(&*value).into(), &key.scope)) {
         let view = &mut crate::panel_map::active_mut(&mut value.panes).view;
         if view.display != display {
             view.display = display;
         }
     }
-    let Some(name) = graph_name(&*value) else { return };
+    let Some(name) = graph_name(&(&*value).into()) else { return };
     let Some(catalog) = flow_catalog(&*value) else { return };
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
-    let previous: Option<Rc<scope_key>> = pane(&*value).laid.clone();
+    let previous: Option<Rc<scope_key>> = pane(&(&*value).into()).laid.clone();
     let arguments: Option<Vec<editor_document::literal_edit::Change>> = previous.as_ref().and_then(|k| {
         if k.graph != name || k.ws.layout.collapsed != ws.layout.collapsed {
             None
@@ -271,9 +271,9 @@ pub fn sync_scope(value: &mut EditorModel) {
         ),
     };
     let scope_view = if !moved {
-        scope::with_arguments(&edits, pane_view(&*value).clone())
+        scope::with_arguments(&edits, pane_view(&(&*value).into()).clone())
     } else {
-        let display = viewed_path(&*value, &scope_proj);
+        let display = viewed_path(&(&*value).into(), &scope_proj);
         let layouts: Vec<String> = match &value.doc.shell {
             Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name) == Some(name.clone()) => {
                 layouts(&*value).into_iter().map(|(n, _)| n).collect()
@@ -283,10 +283,10 @@ pub fn sync_scope(value: &mut EditorModel) {
         let saved = Rc::new(DocSaved { layout: ws.layout.clone(), probes: value.probes.clone(), imports: ws.imports.clone() });
         let opts = scope::ScopeOpts { saved, display, layouts };
         let _phase = phase_timer::measure("layout");
-        scope::with_scope(opts, &name, scope_proj.clone(), pane_view(&*value).clone())
+        scope::with_scope(opts, &name, scope_proj.clone(), pane_view(&(&*value).into()).clone())
     };
     // Probe snapshots need the published facts, not the previous cook's compiled graphs and their arrays.
-    let owner = node_owner_of(&*value);
+    let owner = node_owner_of(&(&*value).into());
     let summaries = value.cook.summaries.clone();
     let sources = value.cook.sources.clone();
     let geometry: Rc<dyn Fn(i64) -> Option<probe::Geometry>> = {
@@ -389,7 +389,7 @@ pub fn sync_scope(value: &mut EditorModel) {
                 .into_iter()
                 .filter_map(|(path, id)| {
                     let node_id = *lowered.compiled.get(&id)?;
-                    node_owner(&*value, node_id).map(|object_id| (path, (object_id, node_id)))
+                    node_owner(&(&*value).into(), node_id).map(|object_id| (path, (object_id, node_id)))
                 })
                 .collect()
         }
@@ -415,8 +415,7 @@ pub fn sync_scope(value: &mut EditorModel) {
     with_pane(value, &|pane| graph_pane { view: scope_view.clone(), laid: Some(Rc::new(key.clone())), ..pane.clone() });
 }
 
-fn node_owner<'a>(value: impl Into<ModelView<'a>>, node_id: i64) -> Option<i64> {
-    let value = &value.into();
+fn node_owner<'a>(value: &ModelView<'a>, node_id: i64) -> Option<i64> {
     crate::editor_inspect::node_owner(value, node_id)
 }
 
@@ -425,8 +424,7 @@ fn node_owner<'a>(value: impl Into<ModelView<'a>>, node_id: i64) -> Option<i64> 
 /// else one made for the inspector alone (ponytail: laid out again each frame the inspector shows
 /// such an object; the scene graphs are small). `None` for what the text does not bind by name
 /// (a host object, a loop's copy, an inline call): those keep the derived-node sheet.
-pub fn scene_target<'a>(value: impl Into<ModelView<'a>>, id: i64) -> Option<(scope_key, Path)> {
-    let value = &value.into();
+pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(scope_key, Path)> {
     let homes = &value.doc.homes;
     let list = match pane_level(value) {
         Level::Scene => &homes.objects,

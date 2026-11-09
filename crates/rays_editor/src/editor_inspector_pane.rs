@@ -203,8 +203,7 @@ pub fn inspect_panel<'a>(
 
 /// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls
 /// offer a carried payload (the material one): the inspector reports each choice control it builds.
-fn workspace_inspector_with_drops<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, width: f64, path: &[String], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
-    let value = &value.into();
+fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, path: &[String], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
     let place_path = path.to_vec();
     let drops_in = drops.clone();
     // the callback needs the Ui to read the drop target: collect the boxes, ask after
@@ -225,8 +224,7 @@ fn workspace_inspector_with_drops<'a>(value: impl Into<ModelView<'a>>, ui: &mut 
 
 /// The sheet of a scene object or World layer the text does not bind by name: its fields, with
 /// the name edited in place.
-fn object_inspector<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, document: &kind_graph::T, node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<change> {
-    let value = &value.into();
+fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &kind_graph::T, node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<change> {
     let (fields, label, kind_) = match kind_graph::find(document, node_id) {
         Some(node) => (kind_graph::fields(&node), node.label.clone(), node.kind.clone()),
         None => (Vec::new(), format!("#{node_id}"), "unknown".to_owned()),

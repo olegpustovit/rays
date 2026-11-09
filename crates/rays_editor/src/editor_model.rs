@@ -582,10 +582,6 @@ impl<'a> From<&'a Rc<EditorModel>> for ModelView<'a> {
     fn from(model: &'a Rc<EditorModel>) -> Self { Self::from(model.as_ref()) }
 }
 
-impl<'a> From<&ModelView<'a>> for ModelView<'a> {
-    fn from(view: &ModelView<'a>) -> Self { *view }
-}
-
 impl std::ops::Deref for ModelView<'_> {
     type Target = EditorModel;
     fn deref(&self) -> &Self::Target { self.model }
@@ -594,40 +590,32 @@ impl std::ops::Deref for ModelView<'_> {
 // ---- the pane in use ----
 
 /// The pane in use: the focused graph panel's own canvas, level and selection.
-pub fn pane<'a>(value: impl Into<ModelView<'a>>) -> &'a graph_pane {
-    let value = &value.into();
+pub fn pane<'a>(value: &ModelView<'a>) -> &'a graph_pane {
     value.pane
 }
 /// the workspace document's graph pane
-pub fn pane_view<'a>(value: impl Into<ModelView<'a>>) -> &'a scope::Pane {
-    let value = &value.into();
+pub fn pane_view<'a>(value: &ModelView<'a>) -> &'a scope::Pane {
     &pane(value).view
 }
 /// what it was last laid out from
-pub fn pane_laid<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a scope_key> {
-    let value = &value.into();
+pub fn pane_laid<'a>(value: &ModelView<'a>) -> Option<&'a scope_key> {
     pane(value).laid.as_deref()
 }
 /// a scene, world or settings graph shown instead of the level's own
-pub fn pane_shown<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a String> {
-    let value = &value.into();
+pub fn pane_shown<'a>(value: &ModelView<'a>) -> Option<&'a String> {
     pane(value).shown.as_ref()
 }
 /// where `u` returns to: level and pane graph, latest first
-pub fn pane_route<'a>(value: impl Into<ModelView<'a>>) -> &'a [(Level, Option<String>)] {
-    let value = &value.into();
+pub fn pane_route<'a>(value: &ModelView<'a>) -> &'a [(Level, Option<String>)] {
     &pane(value).route
 }
-pub fn pane_views<'a>(value: impl Into<ModelView<'a>>) -> &'a Level_map {
-    let value = &value.into();
+pub fn pane_views<'a>(value: &ModelView<'a>) -> &'a Level_map {
     &pane(value).views
 }
-pub fn pane_level<'a>(value: impl Into<ModelView<'a>>) -> Level {
-    let value = &value.into();
+pub fn pane_level<'a>(value: &ModelView<'a>) -> Level {
     pane(value).at
 }
-pub fn pane_selection<'a>(value: impl Into<ModelView<'a>>) -> &'a selection::Selection {
-    let value = &value.into();
+pub fn pane_selection<'a>(value: &ModelView<'a>) -> &'a selection::Selection {
     value.selection
 }
 /// The pane in use, to edit a field in place (`with_pane` rebuilds it whole).

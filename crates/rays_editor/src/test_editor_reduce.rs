@@ -60,8 +60,8 @@ fn actions_routing_and_labels() {
     big_stack(|| {
         let value = model();
         // not in the World: its keys are not routed; no layouts: the digit commands are left out
-        assert!(!in_world(&value));
-        let keymap = routed(&value);
+        assert!(!in_world(&(&value).into()));
+        let keymap = routed(&(&value).into());
         assert!(keymap.iter().all(|c| !matches!(action_of(c), action::World_emit | action::World_reseed | action::World_time(_) | action::World_play | action::World_preset(_) | action::Layout_switch(_))));
         // the graph panel is in the default tree: the node menu key is routed, and so is frame-camera
         assert!(keymap.iter().any(|c| matches!(action_of(c), action::Add_node)));
@@ -88,7 +88,7 @@ fn actions_routing_and_labels() {
         assert_ne!(timeline::mode(&stepped), timeline::mode(&value.timeline));
 
         // World keys outside a World edit nothing
-        let (doc, label, edits) = world_keys(&value, &value.doc, &selection::empty(), &[action::World_emit]);
+        let (doc, label, edits) = world_keys(&(&value).into(), &value.doc, &selection::empty(), &[action::World_emit]);
         assert!(label.is_none() && edits.is_empty());
         assert!(editor_document::document::scene_graph(&doc).len() == editor_document::document::scene_graph(&value.doc).len());
         editor_host_close(&value);
@@ -119,11 +119,11 @@ fn reducer_idle_undo_and_gestures() {
         // a syntax gesture is written to the text, one history entry named by the op
         let expr = syntax::parse("(sop/box)").expect("parse").remove(0);
         let op = Op::AddNode { scope: vec!["g".to_string()], name: "second".to_string(), expr };
-        let mut result = idle_result(&value, selection::empty());
+        let mut result = idle_result(&(&value).into(), selection::empty());
         result.changes = vec![change::Syntax_edit(op)];
         let mut owned = value.clone();
         let identity = owned.preferences.as_ptr();
-        let out = reduce(None, None, idle_input(&owned, &[], &frame0), &mut owned, result);
+        let out = reduce(None, None, idle_input(&(&owned).into(), &[], &frame0), &mut owned, result);
         assert_eq!(owned.preferences.as_ptr(), identity, "reducer copied its owned model");
         assert!(!Arc::ptr_eq(&owned.doc, &value.doc));
         assert_eq!(history::depth(&owned.history), 1);
@@ -146,10 +146,10 @@ fn reducer_idle_undo_and_gestures() {
         assert!(editor_document::preset::text(&forth.doc).unwrap().contains("second"));
 
         // a refused gesture leaves the document and says why
-        let mut result = idle_result(&value, selection::empty());
+        let mut result = idle_result(&(&value).into(), selection::empty());
         result.changes = vec![change::Syntax_edit(Op::RemoveGraph { name: "missing".to_string() })];
         let mut refused = value.clone();
-        reduce(None, None, idle_input(&value, &[], &frame0), &mut refused, result);
+        reduce(None, None, idle_input(&(&value).into(), &[], &frame0), &mut refused, result);
         assert!(Arc::ptr_eq(&refused.doc, &value.doc));
         assert!(refused.edit_error.is_some());
         editor_host_close(&value);
@@ -162,25 +162,25 @@ fn reducer_gesture_keys_layout_and_prompts() {
         let value = model();
         let held = frame_at(0.0, vec![MouseButton::LeftButton], vec![]);
         let free = frame_at(0.0, vec![], vec![]);
-        let mut result = idle_result(&value, selection::empty());
+        let mut result = idle_result(&(&value).into(), selection::empty());
         // a scrub is one gesture key while the button is down, none when it is not
         result.changes = vec![change::Set_parameter { node: 4, path: "size".to_string(), value: Value::Float(2.0) }];
-        assert_eq!(gesture_key(&value, &held, false, false, &None, &result).as_deref(), Some("graph.scrub:scene:4:size"));
-        assert_eq!(gesture_key(&value, &free, false, false, &None, &result), None);
-        assert_eq!(gesture_key(&value, &held, true, false, &None, &result), None);
+        assert_eq!(gesture_key(&(&value).into(), &held, false, false, &None, &result).as_deref(), Some("graph.scrub:scene:4:size"));
+        assert_eq!(gesture_key(&(&value).into(), &free, false, false, &None, &result), None);
+        assert_eq!(gesture_key(&(&value).into(), &held, true, false, &None, &result), None);
         // a settings stroke without a graph change is keyed by its names
         result.changes = Vec::new();
         result.settings_changes = vec![("fov".to_string(), Value::Float(1.0))];
-        assert_eq!(gesture_key(&value, &held, false, false, &None, &result).as_deref(), Some("settings/scene/-1/fov"));
+        assert_eq!(gesture_key(&(&value).into(), &held, false, false, &None, &result).as_deref(), Some("settings/scene/-1/fov"));
 
         // a moved card is a layout edit with the label of the gesture
-        let mut result = idle_result(&value, selection::empty());
+        let mut result = idle_result(&(&value).into(), selection::empty());
         result.scope_changes = vec![scope::Change::Moved(vec![(vec!["g".to_string(), "a".to_string()], 10.0, 20.0)])];
         let (next, result, _) = editor_reduce::layout_gestures(&value, false, &[], (*value.doc).clone(), result.clone(), &result.scope_changes.clone());
         assert_eq!(result.label, "Move");
         assert_eq!(next.workspace.ws.layout.at.get(&vec!["g".to_string(), "a".to_string()]), Some(&(10.0, 20.0)));
         // a zone collapsed is stored, a probe is view state only
-        let mut result = idle_result(&value, selection::empty());
+        let mut result = idle_result(&(&value).into(), selection::empty());
         result.scope_changes = vec![scope::Change::Zone_collapsed { zone: vec!["g".to_string(), "z".to_string()], collapsed: true }, scope::Change::Probe_set { zone: vec!["g".to_string(), "z".to_string()], index: 3 }];
         let (next, result, probes) = editor_reduce::layout_gestures(&value, false, &[], (*value.doc).clone(), result.clone(), &result.scope_changes.clone());
         assert_eq!(result.label, "Collapse zone");
@@ -192,7 +192,7 @@ fn reducer_gesture_keys_layout_and_prompts() {
         let mut value = value;
         value.presets = dir.to_string_lossy().to_string();
         let view = |_: Option<&Panel_result>| syntax::make(syntax::Draft::Map(Vec::new()));
-        let mut result = idle_result(&value, selection::empty());
+        let mut result = idle_result(&(&value).into(), selection::empty());
         result.prompt_intent = Some(prompt_intent::Save_preset_file("probe".to_string()));
         let (_, notice, loaded) = editor_reduce::prompt_step(&value, &view, &result);
         assert!(loaded.is_none());
@@ -223,9 +223,9 @@ fn frame_helpers() {
         let mut value = value;
         value.status_fps_at = 0.0;
         let early = frame_at(0.5, vec![], vec![]);
-        assert_eq!(editor_frame::fps_sample(&value, &early), (value.status_fps, value.status_fps_at));
+        assert_eq!(editor_frame::fps_sample(&(&value).into(), &early), (value.status_fps, value.status_fps_at));
         let later = frame_at(1.5, vec![], vec![]);
-        assert_eq!(editor_frame::fps_sample(&value, &later), (Some(60), 1.5));
+        assert_eq!(editor_frame::fps_sample(&(&value).into(), &later), (Some(60), 1.5));
         // a hidden pane set leaves the list and frame-camera keys out
         let all = editor_commands::keymap().to_vec();
         let live = editor_frame::live_keymap(false, std::rc::Rc::new(all.clone()));
@@ -236,13 +236,13 @@ fn frame_helpers() {
         assert_eq!(editor_frame::carry_marks(&value), (Vec::new(), None));
         // the hud shows the leader's pending prefix
         let pending = router::State::Pending("o".to_string());
-        let hud = editor_frame::hud_of(&value, &pending, &early, &[]).expect("hud");
+        let hud = editor_frame::hud_of(&(&value).into(), &pending, &early, &[]).expect("hud");
         assert_eq!(hud.0, "/ o \u{b7} leader");
         assert_eq!(hud.1, 2.0);
         // Level is still the scene
-        assert_eq!(pane_level(&value), Level::Scene);
+        assert_eq!(pane_level(&(&value).into()), Level::Scene);
         // the reducer's idle input mirrors the model
-        let input: Frame_input = idle_input(&value, &[action::Undo], &early);
+        let input: Frame_input = idle_input(&(&value).into(), &[action::Undo], &early);
         assert_eq!(input.actions, vec![action::Undo]);
         assert!(!input.carrying);
         editor_host_close(&value);
@@ -359,21 +359,21 @@ fn text_installs_scrubs_and_navigation_mutate_the_model() {
             assert!(!editor_text::has_draft(None, &value));
         }
         editor_text::select_source(&mut value, &path);
-        assert_eq!(scope::selected(pane_view(&value)), vec![path.clone()]);
+        assert_eq!(scope::selected(pane_view(&(&value).into())), vec![path.clone()]);
         value.text.target = Some(path.clone());
         let key = vec!["other-text".into()];
         let mut local = editor_panes::local_of(&value.locals, &key);
         local.code.target = Some(path.clone());
         value.locals.push((key.clone(), local));
         value.select_later = vec![path.clone()];
-        let previous = pane(&value).clone();
+        let previous = pane(&(&value).into()).clone();
         for missing in [vec!["g".into(), "missing".into()], vec!["missing".into(), "box".into()]] {
             editor_text::select_source(&mut value, &missing);
             assert_eq!(value.preferences.as_ptr(), identity);
-            assert_eq!(pane(&value).shown, previous.shown);
-            assert_eq!(pane_route(&value), previous.route);
-            assert!(Rc::ptr_eq(pane(&value).laid.as_ref().unwrap(), previous.laid.as_ref().unwrap()));
-            assert_eq!(scope::selected(pane_view(&value)), vec![path.clone()]);
+            assert_eq!(pane(&(&value).into()).shown, previous.shown);
+            assert_eq!(pane_route(&(&value).into()), previous.route);
+            assert!(Rc::ptr_eq(pane(&(&value).into()).laid.as_ref().unwrap(), previous.laid.as_ref().unwrap()));
+            assert_eq!(scope::selected(pane_view(&(&value).into())), vec![path.clone()]);
             assert_eq!(value.select_later, vec![path.clone()]);
             assert_eq!(value.text.target, Some(path.clone()));
             assert_eq!(editor_panes::local_of(&value.locals, &key).code.target, Some(path.clone()));
@@ -401,22 +401,22 @@ fn route_labels_borrow_model_state() {
         active.route = vec![(Level::Scene, Some("g".into())); 2];
         let key = vec!["inactive".into()];
         let path = vec![1];
-        let mut inactive = pane(&value).clone();
+        let mut inactive = pane(&(&value).into()).clone();
         inactive.at = Level::Inside(i64::MAX);
         inactive.picked = selection::select(7);
         crate::panel_map::set(&mut value.panes, &key, inactive);
         {
-            let resolved = crate::editor_shell::pane_at(&value, (&key, &path));
+            let resolved = crate::editor_shell::pane_at(&(&value).into(), (&key, &path));
             assert!(matches!(resolved, std::borrow::Cow::Owned(_)));
             assert_eq!(resolved.at, Level::Scene);
             assert!(selection::selected(&resolved.picked).is_none());
             assert_eq!(crate::panel_map::find(&value.panes, &key).unwrap().at, Level::Inside(i64::MAX));
-            let active = crate::editor_shell::pane_at(&value, (&vec!["active".into()], &vec![0]));
+            let active = crate::editor_shell::pane_at(&(&value).into(), (&vec!["active".into()], &vec![0]));
             assert!(matches!(active, std::borrow::Cow::Borrowed(_)));
-            assert!(std::ptr::eq(active.as_ref(), pane(&value)));
+            assert!(std::ptr::eq(active.as_ref(), pane(&(&value).into())));
         }
         mem_sys::local_reset();
-        let route = crate::editor_panes::route(&value);
+        let route = crate::editor_panes::route(&(&value).into());
         let peak = mem_sys::local_peak_bytes();
         eprintln!("route labels: {peak} peak bytes");
         assert_eq!(route, "g > g > g");
@@ -438,11 +438,11 @@ fn carry_view_reads_the_original_document() {
         assert!(value.text.doc_errors.found.is_empty());
         crate::panel_map::active_mut(&mut value.panes).shown = Some("shards".into());
         let path = vec!["shards".into(), "m".into()];
-        assert!(editor_panes::follow_target(&value, Some(&path)).is_none());
+        assert!(editor_panes::follow_target(&(&value).into(), Some(&path)).is_none());
         let view = ModelView { doc: &original, ..ModelView::from(&value) };
         assert!(std::ptr::eq(view.model, &value));
-        assert_eq!(editor_panes::graph_name(view).as_deref(), Some("shards"));
-        assert_eq!(editor_panes::follow_target(view, Some(&path)).as_deref(), Some("cobalt"));
+        assert_eq!(editor_panes::graph_name(&view).as_deref(), Some("shards"));
+        assert_eq!(editor_panes::follow_target(&view, Some(&path)).as_deref(), Some("cobalt"));
         assert!(Arc::ptr_eq(&value.doc, &ModelView::from(&value).doc));
         editor_host_close(&value);
     });
@@ -454,26 +454,26 @@ fn frame_views_borrow_the_owned_model() {
         use crate::{editor_panes, editor_shell, panel_map};
         let mut value = model();
         value.preferences = "x".repeat(1_000_000);
-        let mut other = pane(&value).clone();
+        let mut other = pane(&(&value).into()).clone();
         other.shown = Some("g".into());
         other.picked = selection::select(7);
         let key = vec!["other".into()];
         panel_map::set(&mut value.panes, &key, other);
         {
-            let view = editor_shell::as_pane(&value, (&key, &vec![1]));
+            let view = editor_shell::as_pane(&(&value).into(), (&key, &vec![1]));
             assert!(std::ptr::eq(view.model, &value));
-            assert!(std::ptr::eq(pane(view), panel_map::find(&value.panes, &key).unwrap()));
-            assert_eq!(editor_panes::graph_name(view).as_deref(), Some("g"));
-            assert_eq!(selection::selected(pane_selection(view)), Some(7));
-            assert!(selection::selected(pane_selection(&value)).is_none());
+            assert!(std::ptr::eq(pane(&view), panel_map::find(&value.panes, &key).unwrap()));
+            assert_eq!(editor_panes::graph_name(&view).as_deref(), Some("g"));
+            assert_eq!(selection::selected(pane_selection(&view)), Some(7));
+            assert!(selection::selected(pane_selection(&(&value).into())).is_none());
             let mut workspace = value.workspace.clone();
             workspace.hidden.push(Panel::Graph);
             let focus = Panel::Lisp;
             let viewed = ModelView { workspace: &workspace, focus: &focus, ..view };
-            assert!(editor_panes::texting(viewed));
-            assert!(!editor_panes::listing(viewed));
-            assert!(!editor_shell::has_panel(viewed, &Panel::Graph));
-            assert!(editor_shell::has_panel(&value, &Panel::Graph));
+            assert!(editor_panes::texting(&viewed));
+            assert!(!editor_panes::listing(&viewed));
+            assert!(!editor_shell::has_panel(&viewed, &Panel::Graph));
+            assert!(editor_shell::has_panel(&(&value).into(), &Panel::Graph));
         }
         let frame = frame_at(0.0, vec![], vec![]);
         let camera = |_: &mut pxui::ui::Ui| -> Panel_result { Rc::new(()) };

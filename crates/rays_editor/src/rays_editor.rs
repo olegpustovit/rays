@@ -156,7 +156,7 @@ pub mod editor {
 
         /// The status strip's text: a cook or edit error reads "Cook rejected: ..." in it.
         pub fn status_text(value: &Editor) -> String {
-            editor_status::status_text(&value.core, false)
+            editor_status::status_text(&(&value.core).into(), false)
         }
 
         /// The frame facts the sketch read last frame: the pointer only while it is the picture's.
@@ -166,7 +166,7 @@ pub mod editor {
 
         /// The node the inspector shows for the selection, when it is exactly one.
         pub fn inspector_subject(value: &Editor) -> Option<Vec<String>> {
-            editor_panels::inspector_subject(&value.core)
+            editor_panels::inspector_subject(&(&value.core).into())
         }
 
         /// The `Set_graph` a "New graph" of this context name (`sop`, `scene`, ...) writes.
@@ -374,7 +374,7 @@ pub mod reduce {
 
     pub fn spreadsheet(editor: &editor::Editor, path: &[usize]) -> (i64, Option<rdk_rays::geometry_view::T>) {
         let key = editor_shell::panel_key(&editor.core.doc, path);
-        let pane = editor_panes::shown_as(&editor.core, (&key, &path.to_vec(), &Panel::Spreadsheet));
+        let pane = editor_panes::shown_as(&(&editor.core).into(), (&key, &path.to_vec(), &Panel::Spreadsheet));
         (editor_panes::local_of(&editor.core.locals, &key).sheet_owner, editor_inspect::spreadsheet_source(&pane).cloned())
     }
 

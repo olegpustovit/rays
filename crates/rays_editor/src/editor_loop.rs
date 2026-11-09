@@ -90,7 +90,7 @@ fn host_images(value: &LoopModel) -> workspace_images::WorkspaceImages {
 pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: &input::Frame, raw_frame: &frame::Frame, core: &m::EditorModel, control: &V::control) -> (Vec<(String, canvas_picture)>, Option<String>) {
     let mut pictures: Vec<(String, canvas_picture)> = Vec::new();
     let mut error = context_error;
-    let geometry = editor_shell::geometry(core, &core.workspace, raw_frame);
+    let geometry = editor_shell::geometry(&core.into(), &core.workspace, raw_frame);
     let images = host_images(value);
     let gpu_t = host_gpu(value);
     for leaf in &geometry.leaves {
@@ -212,10 +212,10 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
             errors.push(rays_diagnostic::to_string(&diagnostic));
         }
     };
-    if let Some(laid) = m::pane_laid(&value.core) {
+    if let Some(laid) = m::pane_laid(&(&value.core).into()) {
         if let Some(records) = &laid.records {
             let chains = probe::chains(&laid.scope);
-            for path in pxui_graph::scope_state::selected(m::pane_view(&value.core)) {
+            for path in pxui_graph::scope_state::selected(m::pane_view(&(&value.core).into())) {
                 let probes: Vec<i64> = chains.get(&path).cloned().unwrap_or_default().iter().map(|zone| value.core.probes.get(zone).copied().unwrap_or(0)).collect();
                 let summary = records.borrow_mut().at(&path, &probes);
                 match summary {
@@ -239,7 +239,7 @@ pub fn world_drag_frame(value: &mut LoopModel, before: (Level, bool, &[Key], &[(
     let (previous_level, previous_map, held_keys, pane_keys) = before;
     let seal = |core: &mut m::EditorModel| { core.history = history::seal(false, core.history.clone()); };
     let world_drag = if loaded
-        || m::pane_level(&value.core) != previous_level
+        || m::pane_level(&(&value.core).into()) != previous_level
         || value.core.map_view != previous_map
         || actions.iter().any(|a| matches!(a, action::Undo | action::Redo | action::Hide_ui))
     { None } else { value.world_drag.clone() };
@@ -307,7 +307,7 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::extra, vie
             if film == *bounds || key == "@hidden" { None } else { Some((key.clone(), film)) }
         })
         .collect();
-    core.selected_box = editor_list::selected_bounds(&*core).and_then(|(world, box_, name)| {
+    core.selected_box = editor_list::selected_bounds(&(&*core).into()).and_then(|(world, box_, name)| {
         let key = focus_key_of(viewing);
         bodies.iter().find(|(k, _)| *k == key).and_then(|(_, bounds)| {
             let view_ = camera_for(viewing, camera, cameras, extra, pending, &key);
@@ -368,7 +368,7 @@ pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::camera,
     // a payload carried over a viewport: the surface under the pointer is the place
     if let Some(key) = editor_host::carry_viewport(&core) {
         if !core.map_view {
-            if let Some((_, bounds)) = editor_shell::view_bodies(&*core, raw_frame).into_iter().find(|(k, _)| *k == key) {
+            if let Some((_, bounds)) = editor_shell::view_bodies(&(&*core).into(), raw_frame).into_iter().find(|(k, _)| *k == key) {
                 let film = V::film(extra, &look_key_of(&focused.viewing, &key), bounds);
                 let (_, _, w, h) = film;
                 if w > 0 && h > 0 {
@@ -426,7 +426,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         // a handle is where the picture shows its point: in the view's film, not its pane
         V::handles(ui, selected, &handles_scene, &space, &handles_view, &handles_extra, V::film(&handles_extra, &handles_key, bounds))
     };
-    let before_level = m::pane_level(&value.core);
+    let before_level = m::pane_level(&(&value.core).into());
     let before_map = value.core.map_view;
     let before_keys = value.core.held_keys.clone();
     let before_panes = value.core.pane_keys.clone();
@@ -477,9 +477,9 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     open_dialog(value, &mut update_, &frame.input.events);
     open_import(value, &mut update_);
     reload_source(value, &mut update_, frame.input.t);
-    let geometry = editor_shell::geometry(&value.core, &value.core.workspace, &frame);
+    let geometry = editor_shell::geometry(&(&value.core).into(), &value.core.workspace, &frame);
     let focused = follow_focus_in(&value, &value.core, &geometry);
-    let panes = editor_shell::panes_in(&value.core, &geometry);
+    let panes = editor_shell::panes_in(&(&value.core).into(), &geometry);
     let panel_out: Option<Rc<V::panel_out>> = update_.panel.take().and_then(|p| Rc::downcast::<V::panel_out>(p).ok());
     let (control, camera, requests, extra, inspected) = match panel_out {
         Some(p) => {
@@ -577,7 +577,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let context_error = if composed_.errors.is_empty() { context_error } else { Some(composed_.errors.join("; ")) };
     let rendered = composed_.rendered.clone();
     let views = composed_.views.clone();
-    let bodies: Vec<(String, Bounds)> = if V::ui_visible(&control) { editor_shell::view_bodies(&value.core, &raw_frame) } else { vec![("@hidden".to_string(), (0, 0, raw_frame.input.size.0, raw_frame.input.size.1))] };
+    let bodies: Vec<(String, Bounds)> = if V::ui_visible(&control) { editor_shell::view_bodies(&(&value.core).into(), &raw_frame) } else { vec![("@hidden".to_string(), (0, 0, raw_frame.input.size.0, raw_frame.input.size.1))] };
     let pending = value.pending_render.is_some();
     let focused_rendered = focused_image_of(&focused.viewing, &views, &rendered);
     let render_views: Vec<(String, Bounds, rays::camera::Camera, rays::scene3::Scene3)> = bodies
@@ -657,8 +657,8 @@ pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
         } else {
             V::guides(
                 &editor_inspect::scene(&value.core),
-                editor_list::selected_node(&value.core).as_ref(),
-                &editor_list::space(&value.core),
+                editor_list::selected_node(&(&value.core).into()).as_ref(),
+                &editor_list::space(&(&value.core).into()),
                 &view_camera(value),
                 &value.extra,
                 bounds,
@@ -886,31 +886,31 @@ pub fn state_text(value: &LoopModel) -> String {
     let core = &value.core;
     let hist = &core.history;
     let mut editor = String::new();
-    let selected = match editor_list::selected_node(core) {
+    let selected = match editor_list::selected_node(&core.into()) {
         Some(node) => format!("{} (#{}, {})", node.label, node.id, node.kind),
         None => "none".to_string(),
     };
     let scope_selected = {
-        let paths = pxui_graph::scope_state::selected(m::pane_view(core));
+        let paths = pxui_graph::scope_state::selected(m::pane_view(&core.into()));
         if paths.is_empty() { "-".to_string() } else { paths.iter().map(|p| p.join("/")).collect::<Vec<_>>().join(", ") }
     };
     let or_dash = |o: &Option<String>| o.clone().unwrap_or_else(|| "-".to_string());
     editor.push_str(&format!(
         "level: {}\nprojection: {}\npane graph: {}\ngraph panels: {}\nwindows: {}\npanels: {}\nroute: {}\ntext: {}\nmap view: {}\ngraph pan: {}\nguide: {}\nkey hud: {}\nselected: {}\nscope selected: {}\nfocus: {}\nprompt: {}\nundo: {} ({} entries)\nredo: {}\ncook: {}\nedit error: {}\nrenderer: {}\nlive scene: {}\nautosave: {}\nload document.rays with / b (workspace documents only) after copying it to {}\n",
-        editor_status::level_name(core),
-        match editor_panes::projection_of(core) {
+        editor_status::level_name(&core.into()),
+        match editor_panes::projection_of(&core.into()) {
             m::projection::List_view => "list",
             m::projection::Graph_view => "graph",
             m::projection::Text_view => "text",
         },
-        or_dash(&editor_panes::graph_name(core)),
-        editor_panes::graph_panels(core),
-        editor_panes::windows(core),
-        editor_panes::panels_line(core),
-        editor_panes::route(core),
+        or_dash(&editor_panes::graph_name(&core.into())),
+        editor_panes::graph_panels(&core.into()),
+        editor_panes::windows(&core.into()),
+        editor_panes::panels_line(&core.into()),
+        editor_panes::route(&core.into()),
         text_pane::summary(&core.text),
         core.map_view,
-        pxui_graph::scope_frame::inspect::grabbed(m::pane_view(core)),
+        pxui_graph::scope_frame::inspect::grabbed(m::pane_view(&core.into())),
         core.guide,
         core.hud.as_ref().map(|(h, _)| h.clone()).unwrap_or_else(|| "-".to_string()),
         selected,
@@ -920,7 +920,7 @@ pub fn state_text(value: &LoopModel) -> String {
         history::label(hist),
         history::depth(hist),
         history::redo_label(hist).unwrap_or("-"),
-        editor_status::status_text(core, false),
+        editor_status::status_text(&core.into(), false),
         or_dash(&core.edit_error),
         or_dash(&V::render_status(&value.extra)),
         or_dash(&value.context_error),

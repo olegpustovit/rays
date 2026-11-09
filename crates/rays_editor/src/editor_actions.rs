@@ -52,7 +52,7 @@ pub fn apply_action(value: &EditorModel, state: Applied, action: &action) -> App
         action::Reset => timeline_step(workspace, selection, tree, timeline, changes, timeline::reset),
         action::Stop => timeline_step(workspace, selection, tree, timeline, changes, timeline::stop),
         action::Add_node => (expand(Panel::Graph, workspace), selection, tree, timeline, changes),
-        action::Frame_tile if crate::editor_panes::projection_of(value) == List_view => (workspace, selection, tree::reveal(tree), timeline, changes),
+        action::Frame_tile if crate::editor_panes::projection_of(&value.into()) == List_view => (workspace, selection, tree::reveal(tree), timeline, changes),
         action::World_play if timeline::mode(&timeline) != timeline::Mode::Playing => timeline_step(workspace, selection, tree, timeline, changes, timeline::toggle_pause),
         _ => (workspace, selection, tree, timeline, changes),
     }
@@ -77,8 +77,7 @@ pub fn intent_label(c: &change) -> Option<String> {
     }
 }
 
-pub fn in_world<'a>(value: impl Into<ModelView<'a>>) -> bool {
-    let value = &value.into();
+pub fn in_world<'a>(value: &ModelView<'a>) -> bool {
     match pane_level(value) {
         Level::Inside(id) => kind(value, id).as_deref() == Some("world"),
         Level::Scene => false,
@@ -87,8 +86,7 @@ pub fn in_world<'a>(value: impl Into<ModelView<'a>>) -> bool {
 
 /// World keys: edit the selected layer, or the World node in the scene. Returns the derived
 /// document, the last label and the edits the text can write.
-pub fn world_keys<'a>(value: impl Into<ModelView<'a>>, doc: &Document, selection: &selection::Selection, actions: &[action]) -> (Document, Option<String>, Vec<(Level, Edit)>) {
-    let value = &value.into();
+pub fn world_keys<'a>(value: &ModelView<'a>, doc: &Document, selection: &selection::Selection, actions: &[action]) -> (Document, Option<String>, Vec<(Level, Edit)>) {
     let world_id = match pane_level(value) {
         Level::Inside(id) => Some(id),
         Level::Scene => None,
@@ -222,8 +220,7 @@ struct Routing {
 
 /// Commands that only mean something on this level and projection; the last frame's list while
 /// its facts hold.
-pub fn routed<'a>(value: impl Into<ModelView<'a>>) -> Rc<Vec<editor_commands::Command>> {
-    let value = &value.into();
+pub fn routed<'a>(value: &ModelView<'a>) -> Rc<Vec<editor_commands::Command>> {
     let leaves = panels::leaves(&shell_tree(value, &value.workspace));
     let (listing, texting) = (listing(value), texting(value));
     let r = Routing {

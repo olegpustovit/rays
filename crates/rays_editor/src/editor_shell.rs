@@ -122,8 +122,7 @@ fn key_is(key: &[String], (graph, tail): &(&str, KeyTail)) -> bool {
     }
 }
 
-pub fn panel_state<'a>(value: impl Into<ModelView<'a>>, path: &[usize]) -> panels::State {
-    let value = &value.into();
+pub fn panel_state<'a>(value: &ModelView<'a>, path: &[usize]) -> panels::State {
     // ponytail: linear scan of the saved panel states (a handful); key the map by borrowed parts if it grows
     let saved = |key: &(&str, KeyTail)| value.doc.workspace.ws.layout.panels.iter().find(|(k, _)| key_is(k, key)).map(|(_, s)| *s);
     let state = if value.workspace.restored {
@@ -160,8 +159,7 @@ pub fn unrestore(before: &Document, after: &Document, mut shell: shell) -> shell
 }
 
 /// the host bar above the panels: a document with an editor graph has one
-pub fn shell_hidden<'a>(value: impl Into<ModelView<'a>>, shell: &shell) -> Vec<Panel> {
-    let value = &value.into();
+pub fn shell_hidden<'a>(value: &ModelView<'a>, shell: &shell) -> Vec<Panel> {
     if shell.restored {
         shell.hidden.clone()
     } else if panel_state(value, &[HOST_BAR]).collapsed && !panels::each_leaf(&shell_tree(value, shell), &mut |_, p| *p == Panel::Timeline) {
@@ -171,36 +169,31 @@ pub fn shell_hidden<'a>(value: impl Into<ModelView<'a>>, shell: &shell) -> Vec<P
     }
 }
 
-pub fn geometry<'a>(value: impl Into<ModelView<'a>>, shell: &shell, frame: &frame::Frame) -> layout::Geometry {
-    let value = &value.into();
+pub fn geometry<'a>(value: &ModelView<'a>, shell: &shell, frame: &frame::Frame) -> layout::Geometry {
     let state = |path: &[usize]| panel_state(value, path);
     let hidden = shell_hidden(value, shell);
     layout::geometry(Some(&state), Some(&hidden), &shell_tree(value, shell), frame)
 }
 
-pub fn has_panel<'a>(value: impl Into<ModelView<'a>>, panel: &Panel) -> bool {
-    let value = &value.into();
+pub fn has_panel<'a>(value: &ModelView<'a>, panel: &Panel) -> bool {
     visible(&value.workspace, panel)
         && panels::each_leaf(&shell_tree(value, &value.workspace), &mut |path, p| p == panel && !panel_state(value, path).collapsed)
 }
 
 /// The viewport that keyboard focus and the camera follow: the focused one, else the first.
-pub fn active_view<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) -> Option<layout::Leaf> {
-    let value = &value.into();
+pub fn active_view<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> Option<layout::Leaf> {
     match &value.focus {
         Panel::View(_) if layout::find(g, &value.focus).is_some() => layout::find(g, &value.focus),
         _ => layout::first_view(g),
     }
 }
 
-pub fn panes<'a>(value: impl Into<ModelView<'a>>, frame: &frame::Frame) -> layout::Panes {
-    let value = &value.into();
+pub fn panes<'a>(value: &ModelView<'a>, frame: &frame::Frame) -> layout::Panes {
     panes_in(value, &geometry(value, &value.workspace, frame))
 }
 
 /// `panes` of a geometry already laid out.
-pub fn panes_in<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) -> layout::Panes {
-    let value = &value.into();
+pub fn panes_in<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> layout::Panes {
     let panes = layout::panes(g);
     match active_view(value, g) {
         Some(leaf) => layout::Panes { view: leaf.body, ..panes },
@@ -209,14 +202,12 @@ pub fn panes_in<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) -> la
 }
 
 /// The viewports on screen and the bodies they are drawn in.
-pub fn view_bodies<'a>(value: impl Into<ModelView<'a>>, frame: &frame::Frame) -> Vec<(String, layout::Bounds)> {
-    let value = &value.into();
+pub fn view_bodies<'a>(value: &ModelView<'a>, frame: &frame::Frame) -> Vec<(String, layout::Bounds)> {
     view_bodies_in(value, &geometry(value, &value.workspace, frame))
 }
 
 /// `view_bodies` of a geometry already laid out.
-pub fn view_bodies_in<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) -> Vec<(String, layout::Bounds)> {
-    let value = &value.into();
+pub fn view_bodies_in<'a>(value: &ModelView<'a>, g: &layout::Geometry) -> Vec<(String, layout::Bounds)> {
     g.leaves
         .iter()
         .filter_map(|leaf| match &leaf.panel {
@@ -226,8 +217,7 @@ pub fn view_bodies_in<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry)
         .collect()
 }
 
-pub fn view_visible<'a>(value: impl Into<ModelView<'a>>) -> bool {
-    let value = &value.into();
+pub fn view_visible<'a>(value: &ModelView<'a>) -> bool {
     panels::each_leaf(&shell_tree(value, &value.workspace), &mut |path, p| match p {
         Panel::View(_) => visible(&value.workspace, p) && !panel_state(value, path).collapsed,
         _ => false,
@@ -237,15 +227,13 @@ pub fn view_visible<'a>(value: impl Into<ModelView<'a>>) -> bool {
 // ---- graph panels: each [ui/graph] leaf is a pane of its own ----
 
 /// The graph leaves of the tree shown, by panel key: walked once a frame (`follow_graph`).
-pub fn graph_leaves<'a>(value: impl Into<ModelView<'a>>) -> Vec<(Vec<String>, layout::Path)> {
-    let value = &value.into();
+pub fn graph_leaves<'a>(value: &ModelView<'a>) -> Vec<(Vec<String>, layout::Path)> {
     panels::leaves(&shell_tree(value, &value.workspace)).into_iter().filter(|(_, p)| *p == Panel::Graph).map(|(path, _)| (panel_key(&value.doc, &path), path)).collect()
 }
 
 /// The leaf of the pane in use: where its panel was last seen when that is still its leaf (no
 /// walk: this is read many times a frame), else found again, else the first graph leaf.
-pub fn graph_path<'a>(value: impl Into<ModelView<'a>>) -> Option<layout::Path> {
-    let value = value.into();
+pub fn graph_path<'a>(value: &ModelView<'a>) -> Option<layout::Path> {
     if value.key == panel_map::key_ref(&value.model.panes) {
         if let (Some(key), Some(path)) = (value.key, panel_map::leaf(&value.model.panes)) {
             let tree = shell_tree(&value, &value.workspace);
@@ -283,8 +271,7 @@ fn new_pane(doc: &Document, at: Level, path: &[usize]) -> graph_pane {
 }
 
 /// The pane's graph state, borrowed unless it is new or its level disappeared.
-pub fn pane_at<'a>(value: impl Into<ModelView<'a>>, (key, path): (&Vec<String>, &layout::Path)) -> Cow<'a, graph_pane> {
-    let value = value.into();
+pub fn pane_at<'a>(value: &ModelView<'a>, (key, path): (&Vec<String>, &layout::Path)) -> Cow<'a, graph_pane> {
     if value.key == Some(key) { return Cow::Borrowed(value.pane); }
     let mut pane = match panel_map::find(&value.model.panes, key) {
         Some(pane) => Cow::Borrowed(pane),
@@ -300,11 +287,10 @@ pub fn pane_at<'a>(value: impl Into<ModelView<'a>>, (key, path): (&Vec<String>, 
 }
 
 /// The graph panel's synchronized state, borrowed from the frame's model.
-pub fn as_pane<'a>(value: impl Into<ModelView<'a>>, (key, _path): (&Vec<String>, &layout::Path)) -> ModelView<'a> {
-    let value = value.into();
-    if value.key == Some(key) { return value; }
+pub fn as_pane<'a>(value: &ModelView<'a>, (key, _path): (&Vec<String>, &layout::Path)) -> ModelView<'a> {
+    if value.key == Some(key) { return *value; }
     let (key, pane) = panel_map::entry(&value.model.panes, key).expect("graph panes are synchronized before frame construction");
-    ModelView { pane, key: Some(key), selection: &pane.picked, ..value }
+    ModelView { pane, key: Some(key), selection: &pane.picked, ..*value }
 }
 
 /// `as_pane` of a model owned: no copy.
@@ -312,7 +298,7 @@ pub fn with_pane_in_use(value: &mut EditorModel, (key, path): (&Vec<String>, &la
     if panel_map::key(&value.panes).as_ref() == Some(key) {
         return;
     }
-    let level = pane_level(&*value);
+    let level = pane_level(&(&*value).into());
     let doc = value.doc.clone();
     panel_map::activate(&mut value.panes, key, &|| new_pane(&doc, level, path));
     panel_map::set_leaf(&mut value.panes, Some(path.clone()));
@@ -325,8 +311,7 @@ pub fn with_pane_in_use(value: &mut EditorModel, (key, path): (&Vec<String>, &la
 }
 
 /// The graph leaf an inspector, list or lisp leaf is tied to by `:of`.
-pub fn tied<'a>(value: impl Into<ModelView<'a>>, path: &[usize]) -> Option<(Vec<String>, layout::Path)> {
-    let value = &value.into();
+pub fn tied<'a>(value: &ModelView<'a>, path: &[usize]) -> Option<(Vec<String>, layout::Path)> {
     if value.workspace.restored {
         return None;
     }
@@ -336,13 +321,13 @@ pub fn tied<'a>(value: impl Into<ModelView<'a>>, path: &[usize]) -> Option<(Vec<
 /// The pane in use follows the focus: the focused graph leaf, else the one it was, else the first
 /// one open.  The pane left keeps its canvas, selection, graph and route.
 pub fn follow_graph(value: &mut EditorModel, focus: &Panel, focus_path: Option<&[usize]>) {
-    let all = graph_leaves(&*value);
+    let all = graph_leaves(&(&*value).into());
     let at = panel_map::key(&value.panes).and_then(|key| all.iter().find(|(k, _)| *k == key).map(|(_, p)| p.clone()));
     panel_map::set_leaf(&mut value.panes, at);
-    let leaves: Vec<(Vec<String>, layout::Path)> = all.iter().filter(|(_, path)| !panel_state(&*value, path).collapsed).cloned().collect();
+    let leaves: Vec<(Vec<String>, layout::Path)> = all.iter().filter(|(_, path)| !panel_state(&(&*value).into(), path).collapsed).cloned().collect();
     // the focused graph leaf, or the one the focused leaf is tied to: its edits land there
     let focused = focus_path.and_then(|path| {
-        let path = if *focus == Panel::Graph { Some(path.to_vec()) } else { tied(&*value, path).map(|(_, p)| p) };
+        let path = if *focus == Panel::Graph { Some(path.to_vec()) } else { tied(&(&*value).into(), path).map(|(_, p)| p) };
         path.and_then(|path| leaves.iter().find(|(_, p)| *p == path).cloned())
     });
     let current = panel_map::key(&value.panes);

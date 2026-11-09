@@ -72,7 +72,7 @@ pub fn wrap_degrees(value: f64) -> f64 {
 
 pub fn world_operation(core: &EditorModel, area: Bounds, point: (f64, f64), shift: bool) -> Option<world_operation> {
     match editor_host::world_id(core) {
-        Some(world) if core.map_view && map_uv(area, point).is_some() => match editor_list::selected_node(core) {
+        Some(world) if core.map_view && map_uv(area, point).is_some() => match editor_list::selected_node(&core.into()) {
             Some(node) if node.fields.iter().any(|f| f.name == "azimuth") => Some(world_operation::Move_layer(world, node.id)),
             Some(node) if node.kind == "sun" => Some(world_operation::Move_sun(world)),
             _ => None,

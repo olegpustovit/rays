@@ -301,15 +301,15 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
 // ---- accessors ----
 
 pub fn document(value: &LoopModel) -> kg::T {
-    editor_inspect::objects(&value.core)
+    editor_inspect::objects(&(&value.core).into())
 }
 
 pub fn network(value: &LoopModel) -> Option<sop::edit_graph::T> {
-    editor_inspect::network(&value.core).map(|n| n.graph.geometry.clone())
+    editor_inspect::network(&(&value.core).into()).map(|n| n.graph.geometry.clone())
 }
 
 pub fn prepared(value: &LoopModel) -> Option<rdk_core::geometry::T> {
-    editor_list::prepared(&value.core).map(|p| p.geometry.clone())
+    editor_list::prepared(&(&value.core).into()).map(|p| p.geometry.clone())
 }
 
 pub fn camera(value: &LoopModel) -> V::camera {
@@ -322,13 +322,13 @@ pub fn timeline(value: &LoopModel) -> timeline::Timeline {
     editor_list::timeline(&value.core)
 }
 pub fn selected_node(value: &LoopModel) -> Option<picked> {
-    editor_list::selected_node(&value.core)
+    editor_list::selected_node(&(&value.core).into())
 }
 pub fn displayed_node(value: &LoopModel) -> node::T {
-    editor_list::displayed_node(&value.core)
+    editor_list::displayed_node(&(&value.core).into())
 }
 pub fn panes(value: &LoopModel, frame_: &frame::Frame) -> pxui_shell::layout::Panes {
-    editor_shell::panes(&value.core, frame_)
+    editor_shell::panes(&(&value.core).into(), frame_)
 }
 pub fn can_undo(value: &LoopModel) -> bool {
     crate::editor_history::can_undo(&value.core.history)
@@ -361,7 +361,7 @@ pub fn set_probe(value: LoopModel, zone: &[String], index: i64) -> LoopModel {
 }
 
 pub fn node_box(value: &LoopModel, path: &[String]) -> Option<(i64, i64, i64, i64)> {
-    pxui_graph::scope_frame::inspect::box_of(m::pane_view(&value.core), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
+    pxui_graph::scope_frame::inspect::box_of(m::pane_view(&(&value.core).into()), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
 }
 
 pub fn edit(mut value: LoopModel, op: &fe::Op) -> Result<LoopModel, String> {
@@ -389,7 +389,7 @@ pub fn carry_line(value: &LoopModel) -> Option<String> {
 }
 
 pub fn level(value: &LoopModel) -> Option<String> {
-    match m::pane_level(&value.core) {
+    match m::pane_level(&(&value.core).into()) {
         Level::Scene => None,
         Level::Inside(id) => Some(kg::find(&editor_inspect::scene(&value.core), id).map(|n| n.label).unwrap_or_default()),
     }
@@ -481,7 +481,7 @@ pub struct Focus {
 /// orbit it last had, else from a copy of the one in use. `core` is the model whose panels say
 /// which viewport has the focus.
 pub fn follow_focus(value: &LoopModel, core: &m::EditorModel, frame_: &frame::Frame) -> Focus {
-    follow_focus_in(value, core, &editor_shell::geometry(core, &core.workspace, frame_))
+    follow_focus_in(value, core, &editor_shell::geometry(&core.into(), &core.workspace, frame_))
 }
 
 /// `follow_focus` over a geometry already laid out.
@@ -497,7 +497,7 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &pxui_shell:
     let mut cameras = value.cameras.clone();
     cameras.retain(|(key, _)| keys.contains(key));
     let unchanged = Focus { viewing: value.viewing.clone(), camera: value.camera.clone(), cameras };
-    match editor_shell::active_view(core, &g) {
+    match editor_shell::active_view(&core.into(), &g) {
         Some(leaf) => match leaf.panel {
             Panel::View(key) if Some(&key) != value.viewing.as_ref() => match &value.viewing {
                 None => {
@@ -551,7 +551,7 @@ pub fn focused_image(value: &LoopModel) -> Option<d3::Scene3> {
 }
 
 pub fn film(value: &LoopModel, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
-    let pane = editor_shell::panes(&value.core, frame_).view;
+    let pane = editor_shell::panes(&(&value.core).into(), frame_).view;
     let (x, y, _, _) = pane;
     let (fx, fy, w, h) = V::film(&value.extra, &focus_key(value), pane);
     (fx - x, fy - y, w, h)
@@ -587,7 +587,7 @@ pub fn display_keys(drawn: &Drawn) -> Vec<String> {
 /// Recompose when a cook, the scene, or the World changed. Each object's drawing is reused while
 /// its graph and prepared value are physically the same, so moving an object only re-places it.
 pub fn composition_key(core: &m::EditorModel, scene: &kg::T) -> (kg::T, Level, Vec<(String, Vec<i64>)>) {
-    (scene.clone(), m::pane_level(core), core.doc.shell.as_ref().map(|s| s.views.clone()).unwrap_or_default())
+    (scene.clone(), m::pane_level(&core.into()), core.doc.shell.as_ref().map(|s| s.views.clone()).unwrap_or_default())
 }
 
 /// What `compose` hands back, and whether the drawings (`drawn`) are new ones.
@@ -687,7 +687,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     }
     let waiting = placed.is_empty() && !editor_list::geometry_objects(core).is_empty() && editor_list::pieces(core).is_empty();
     let ghost = |id: i64| -> bool {
-        match m::pane_level(core) {
+        match m::pane_level(&core.into()) {
             Level::Inside(open_id) => editor_inspect::kind(core, open_id).as_deref() == Some("geometry") && id != open_id,
             Level::Scene => false,
         }

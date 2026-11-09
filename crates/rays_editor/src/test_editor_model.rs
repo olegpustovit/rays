@@ -50,8 +50,8 @@ fn creation_shell_list_status() {
     assert!(Arc::ptr_eq(&value.doc, &history::present_arc(&value.history)));
     assert_eq!(history::depth(&value.history), 0);
     assert_eq!(value.file, "w.rays");
-    assert_eq!(pane_level(&value), Level::Scene);
-    assert!(selection::selected(pane_selection(&value)).is_none());
+    assert_eq!(pane_level(&(&value).into()), Level::Scene);
+    assert!(selection::selected(pane_selection(&(&value).into())).is_none());
     assert_eq!(value.focus, panels::main());
     assert!(value.guide || !value.guide);
 
@@ -60,48 +60,48 @@ fn creation_shell_list_status() {
     assert_eq!(*editor_shell::shell_tree(&value, &value.workspace), panels::default());
     assert_eq!(editor_shell::panel_key(&value.doc, &[0]), vec!["@default".to_string(), "@panel".to_string(), "0".to_string()]);
     assert_eq!(editor_shell::panel_key(&value.doc, &[HOST_BAR]).last().map(String::as_str), Some("-1"));
-    assert!(editor_shell::panel_state(&value, &[HOST_BAR]).collapsed);
-    assert!(!editor_shell::panel_state(&value, &[0]).collapsed);
+    assert!(editor_shell::panel_state(&(&value).into(), &[HOST_BAR]).collapsed);
+    assert!(!editor_shell::panel_state(&(&value).into(), &[0]).collapsed);
     let leaves = panels::leaves(&editor_shell::shell_tree(&value, &value.workspace));
     assert_eq!(leaves.len(), 3);
-    assert!(editor_shell::has_panel(&value, &Panel::Graph));
+    assert!(editor_shell::has_panel(&(&value).into(), &Panel::Graph));
     let names = editor_shell::completion_names(&value);
     assert_eq!(names.graphs, vec!["g".to_string()]);
     // the graph leaf is found, and following the focus puts its pane in use
-    let graphs = editor_shell::graph_leaves(&value);
+    let graphs = editor_shell::graph_leaves(&(&value).into());
     assert_eq!(graphs.len(), 1);
-    assert_eq!(editor_shell::graph_path(&value), Some(graphs[0].1.clone()));
+    assert_eq!(editor_shell::graph_path(&(&value).into()), Some(graphs[0].1.clone()));
     let mut followed = value.clone();
     editor_shell::follow_graph(&mut followed, &Panel::Graph, Some(&graphs[0].1));
     assert_eq!(panel_map_key(&followed), Some(graphs[0].0.clone()));
 
     // the list: the scene level lists objects with the visible and render columns
-    let (source, rows) = editor_list::rows(&value);
+    let (source, rows) = editor_list::rows(&(&value).into());
     assert!(matches!(source, row_source::Objects(_)));
     let (shown, columns) = rows();
     assert_eq!(columns, vec!["v".to_string(), "r".to_string()]);
     assert!(!shown.is_empty());
     // a select intent folds into the selection; a rename of a hosted object folds into the graph
     let state = editor_list::tree_state {
-        document: crate::editor_inspect::objects(&value),
+        document: crate::editor_inspect::objects(&(&value).into()),
         selection: selection::clear(),
         tree: tree::create(),
         opened: None,
         label: None,
         rows: shown.clone(),
     };
-    let state = editor_list::apply_tree(&value, state, &Intent::Select(vec![shown[0].id]));
+    let state = editor_list::apply_tree(&(&value).into(), state, &Intent::Select(vec![shown[0].id]));
     assert_eq!(selection::selected(&state.selection), Some(shown[0].id));
-    let state = editor_list::apply_tree(&value, state, &Intent::Activate(shown[0].id));
+    let state = editor_list::apply_tree(&(&value).into(), state, &Intent::Activate(shown[0].id));
     assert_eq!(state.opened, Some(shown[0].id));
 
     // the status line: nothing cooked yet; the scene level's hint
-    let line = editor_status::status_text(&value, false);
+    let line = editor_status::status_text(&(&value).into(), false);
     assert!(line.contains("Waiting for first cook"), "{line}");
     assert!(line.contains("scene"), "{line}");
     assert_eq!(editor_status::prompt_name(&value), "-");
-    assert_eq!(editor_status::level_name(&value), "scene");
-    assert!(editor_status::probe_caption(&value).is_none());
+    assert_eq!(editor_status::level_name(&(&value).into()), "scene");
+    assert!(editor_status::probe_caption(&(&value).into()).is_none());
     editor_host::close(&value);
 }
 
@@ -179,7 +179,7 @@ fn host_entry_points_and_carry_letters() {
     assert!(editor_carry::carry_allowed(&crate::editor_commands::action::Enter));
     assert!(!editor_carry::carry_allowed(&crate::editor_commands::action::Undo));
     // nothing selected and no graph open: there is nothing to pick up, and the message says so
-    let error = editor_carry::carry_payload(&value).err().unwrap_or_default();
+    let error = editor_carry::carry_payload(&(&value).into()).err().unwrap_or_default();
     assert!(error.starts_with("Nothing to pick up"), "{error}");
     // the scene edit of the host leaves no undo entry (`Amend` folds into the present)
     let scene = document::scene_graph(&value.doc);

@@ -134,7 +134,7 @@ fn same_rendered(a: &Option<d3::Scene3>, b: &Option<d3::Scene3>) -> bool {
 /// The fully hidden scene, reused while its inputs are unchanged so the renderer sees the same
 /// `Scene.t`.
 pub fn hidden_entry(background: color::T, rendered: Option<&d3::Scene3>, camera: &rcam::Camera, paint_view: &PaintView, cache: Option<&hidden_scene_cache>, core: &Model, frame_: &frame::Frame) -> hidden_scene_cache {
-    let view_visible = editor_shell::view_visible(core);
+    let view_visible = editor_shell::view_visible(&core.into());
     let rendered_owned = rendered.cloned();
     if let Some(cached) = cache {
         if cached.width == frame_.input.size.0 && cached.height == frame_.input.size.1 && same_rendered(&cached.rendered, &rendered_owned) && cached.camera == *camera && cached.background == background && cached.view_visible == view_visible {
@@ -163,7 +163,7 @@ pub fn compose_view(
     core: &Model,
     frame_: &frame::Frame,
 ) -> Nodes {
-    let view_visible = editor_shell::view_visible(core);
+    let view_visible = editor_shell::view_visible(&core.into());
     let paint_world = |viewport: Bounds| -> Nodes {
         match map {
             Some(image) if view_visible && core.map_view => {
@@ -187,7 +187,7 @@ pub fn compose_view(
             if let Some((_, picture)) = canvases.iter().find(|(k, _)| k == key) {
                 out.extend(picture.scene.iter().cloned());
             }
-            out.extend(editor_host::machinery(core, None, false));
+            out.extend(editor_host::machinery(&core.into(), None, false));
             return out;
         }
     }
@@ -197,11 +197,11 @@ pub fn compose_view(
     if !ui_visible {
         let mut out = vec![scene::clear(background)];
         out.extend(world_nodes(paint_view, "@hidden", camera, focused, view_visible, (0, 0, frame_.input.size.0, frame_.input.size.1)));
-        out.extend(editor_host::machinery(core, None, false));
+        out.extend(editor_host::machinery(&core.into(), None, false));
         return out;
     }
-    let geometry = editor_shell::geometry(core, &core.workspace, frame_);
-    let viewport = editor_shell::panes_in(core, &geometry).view;
+    let geometry = editor_shell::geometry(&core.into(), &core.workspace, frame_);
+    let viewport = editor_shell::panes_in(&core.into(), &geometry).view;
     let guides = if view_visible { guides(viewport) } else { Vec::new() };
     // every viewport shows its own scene instance's image; the map replaces the focused one
     let floating: Vec<(String, Vec<usize>, Bounds)> = geometry
@@ -218,7 +218,7 @@ pub fn compose_view(
     // newest first, as OCaml's prepended lists are
     let mut painted: Vec<Nodes> = Vec::new();
     let mut windows: Vec<(Option<i64>, Nodes)> = Vec::new();
-    for (key, bounds) in editor_shell::view_bodies_in(core, &geometry) {
+    for (key, bounds) in editor_shell::view_bodies_in(&core.into(), &geometry) {
         let image = if bounds == viewport && core.map_view { paint_world(viewport) } else { worlds(paint_view, camera_of, rendered, views, view_visible, &[(key.clone(), bounds)]) };
         match floating.iter().find(|(k, _, _)| *k == key) {
             None => painted.insert(0, image),
@@ -255,6 +255,6 @@ pub fn compose_view(
     let mut out = vec![scene::clear(background)];
     out.extend(order.into_iter().flatten());
     out.extend(guides);
-    out.extend(editor_host::machinery(core, Some(&under), true));
+    out.extend(editor_host::machinery(&core.into(), Some(&under), true));
     out
 }

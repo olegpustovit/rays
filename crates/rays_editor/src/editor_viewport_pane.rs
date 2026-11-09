@@ -126,13 +126,12 @@ fn camera_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, (x, y, w, _h
 #[allow(clippy::too_many_arguments)]
 pub fn draw_viewport_pane<'a>(
     ui: &mut Ui,
-    value: impl Into<ModelView<'a>>,
+    value: &ModelView<'a>,
     caption: Option<String>,
     roots: &[(Leaf, UiBox)],
     active: Option<&Leaf>,
     none_root: &dyn Fn(&mut Ui) -> UiBox,
 ) -> UiBox {
-    let value = &value.into();
     // the iteration the selected node shows, over the viewport's lower left corner
     if let (Some(text), Some(leaf)) = (&caption, active) {
         // a label on the ground, like every readout over the view

@@ -80,8 +80,7 @@ pub fn carry_try(value: &EditorModel, c: &carry, place: &Place) -> carry_preview
 }
 
 /// The key route's letters for the graph the pane shows now (they follow navigation).
-pub fn carry_targets<'a>(value: impl Into<ModelView<'a>>, c: carry) -> carry {
-    let value = &value.into();
+pub fn carry_targets<'a>(value: &ModelView<'a>, c: carry) -> carry {
     let graph = graph_name(value);
     if let Some((for_graph, _)) = &c.targets {
         if *for_graph == graph {
@@ -112,8 +111,7 @@ fn referenced_payload(ws: &w::Workspace, name: &str) -> Option<Result<carry_mod:
 /// What `y` picks up: the open material or SOP graph; else the graph of the selected geometry
 /// object; else the selected camera object (by its binding name); else the graph the pane's
 /// selected node references; else the open scene graph (a viewport shows it).
-pub fn carry_payload<'a>(value: impl Into<ModelView<'a>>) -> Result<carry_mod::Payload, String> {
-    let value = &value.into();
+pub fn carry_payload<'a>(value: &ModelView<'a>) -> Result<carry_mod::Payload, String> {
     let ws = &value.doc.workspace.ws.checked;
     let referenced = |name: &str| referenced_payload(ws, name);
     if let Some(result) = graph_name(value).and_then(|name| referenced(&name)) {
@@ -159,7 +157,7 @@ pub fn carry_payload<'a>(value: impl Into<ModelView<'a>>) -> Result<carry_mod::P
 pub fn carry_cancel(value: &mut EditorModel, c: &carry, notice: (notice_kind, String)) {
     value.ui.borrow_mut().cancel_carry();
     let doc = c.original.clone();
-    let level = document::resolve_level(&doc, pane_level(&*value));
+    let level = document::resolve_level(&doc, pane_level(&(&*value).into()));
     if !Arc::ptr_eq(&doc, &value.doc) {
         cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
     }
@@ -215,7 +213,7 @@ pub fn carry_step(value: &mut EditorModel, text_focus: bool, frame_: &frame::Fra
     let escape = idle && pressed.contains(&Key::Escape);
     let lost = frame_.input.events.iter().any(|e| matches!(e, Event::Focus_lost));
     let typing = !text_focus && idle && value.prompt.is_none() && value.menu.is_none();
-    let c = if c.via == Via::Keys { carry_targets(&*value, c) } else { c };
+    let c = if c.via == Via::Keys { carry_targets(&(&*value).into(), c) } else { c };
     let letters: Vec<(String, Place, String)> = match &c.targets {
         Some((_, targets)) if c.via == Via::Keys && typing => targets.clone(),
         _ => Vec::new(),
@@ -288,7 +286,7 @@ pub fn carry_step(value: &mut EditorModel, text_focus: bool, frame_: &frame::Fra
         Some((Place::Node(path), since)) if frame_.input.t - *since >= carry_rest => {
             // what the original document references, not the preview
             let original = ModelView { doc: &c.original, ..ModelView::from(&*value) };
-            follow_target(original, Some(path.as_slice()))
+            follow_target(&original, Some(path.as_slice()))
         }
         _ => None,
     };
@@ -302,7 +300,7 @@ pub fn carry_step(value: &mut EditorModel, text_focus: bool, frame_: &frame::Fra
         return (taken, false);
     }
     cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&shown.workspace.lowered));
-    let level = document::resolve_level(&shown, pane_level(&*value));
+    let level = document::resolve_level(&shown, pane_level(&(&*value).into()));
     value.lisp_vocab = vocabulary_for(value, &shown);
     value.workspace = unrestore(&value.doc, &shown, value.workspace.clone());
     value.doc = shown;

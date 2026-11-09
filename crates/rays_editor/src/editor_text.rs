@@ -54,7 +54,7 @@ pub fn parameter_gesture(operation: &str, level: Level, id: i64, values: &[(Stri
 /// the open level is re-resolved and the cook told about the new volatile nodes.
 pub fn install(value: &mut EditorModel, doc: Document, label: &str, merge: Merge) {
     let doc = adopt(&value.history, doc);
-    let level = document::resolve_level(&doc, pane_level(&*value));
+    let level = document::resolve_level(&doc, pane_level(&(&*value).into()));
     value.lisp_vocab = vocabulary_for(value, &doc);
     value.workspace = unrestore(&value.doc, &doc, value.workspace.clone());
     value.doc = doc.clone();
@@ -114,13 +114,13 @@ pub fn select_source(value: &mut EditorModel, path: &[String]) {
     }
     // A missing nested path is a no-op. Keep only the pane and caches touched by navigation.
     let previous = (
-        pane(&*value).clone(), value.previews.clone(), value.viewed.clone(),
+        pane(&(&*value).into()).clone(), value.previews.clone(), value.viewed.clone(),
         value.canvas_preview.clone(), value.canvas_viewed.clone(), value.view_key.clone(),
         value.select_later.clone(),
     );
     go(value, graph);
     sync_scope(value);
-    let found = pane_laid(&*value).is_some_and(|k| k.graph == *graph && (fproj::find(&k.scope, path).is_some() || k.scope.inputs.iter().any(|input| input.path == path)));
+    let found = pane_laid(&(&*value).into()).is_some_and(|k| k.graph == *graph && (fproj::find(&k.scope, path).is_some() || k.scope.inputs.iter().any(|input| input.path == path)));
     if !found && path.len() > 1 {
         *crate::panel_map::active_mut(&mut value.panes) = previous.0;
         value.previews = previous.1;
@@ -136,7 +136,7 @@ pub fn select_source(value: &mut EditorModel, path: &[String]) {
         local.code.target = None;
     }
     if found {
-        if scope::selected(pane_view(&*value)) != vec![path.to_vec()] {
+        if scope::selected(pane_view(&(&*value).into())) != vec![path.to_vec()] {
             value.select_later.clear();
             with_pane(value, &|pane| {
                 let selected = scope::select(vec![path.to_vec()], pane.view.clone());

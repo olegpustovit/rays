@@ -82,7 +82,7 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut Edi
     }
     // a node of the graph already shown is selected now; of another graph, once the pane shows it
     if let Some((graph, Some(node))) = &outlined {
-        if graph_name(&*v).as_deref() == Some(graph.as_str()) && pane_laid(&*v).is_some_and(|k| &k.graph == graph) {
+        if graph_name(&(&*v).into()).as_deref() == Some(graph.as_str()) && pane_laid(&(&*v).into()).is_some_and(|k| &k.graph == graph) {
             v.select_later = Vec::new();
             let node = node.clone();
             with_pane(v, &|pane| graph_pane {
@@ -128,8 +128,7 @@ pub fn level_target(followed: Option<String>, has_route: bool, value2: &EditorMo
 }
 
 /// The history key of a gesture still in progress, if the frame's change belongs to one.
-pub fn gesture_key<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::Frame, loaded: bool, world_added: bool, world_label: &Option<String>, result: &frame_result) -> Option<String> {
-    let value = &value.into();
+pub fn gesture_key<'a>(value: &ModelView<'a>, frame_: &frame::Frame, loaded: bool, world_added: bool, world_label: &Option<String>, result: &frame_result) -> Option<String> {
     let dragging = frame::mouse_down(MouseButton::LeftButton, frame_) || frame::has_event(&|e| matches!(e, Event::Pointer_released(MouseButton::LeftButton, _)), frame_);
     if !dragging || loaded || world_added || world_label.is_some() {
         return None;
@@ -298,8 +297,7 @@ type Written = (Document, frame_result, Vec<Path>, Option<String>, Option<(Strin
 /// The frame's changes and gestures written to the document, text first: the first refusal leaves
 /// none applied. Returns the document, the result, the nodes added, a graph made, a graph renamed
 /// and the note the echo shows.
-pub fn write_gestures<'a>(value: impl Into<ModelView<'a>>, loaded: bool, present: &Document, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Document, result: frame_result) -> Written {
-    let value = &value.into();
+pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Document, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Document, result: frame_result) -> Written {
     let (mut next, mut result) = if loaded { (next, result) } else { reconciled(value, present, next, result) };
     // Workspace gestures: one rewrite of the source per gesture, lowered into the document, one
     // history entry named by the op. A frame's gestures land together: the first one refused leaves
@@ -684,7 +682,7 @@ pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::St
 pub fn pick_up(value2: &EditorModel, actions: &[action], frame_: &frame::Frame, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
     match &value2.carry {
         Some(c) => (Some(carry { report, ..c.clone() }), None),
-        None if actions.contains(&action::Pick_up) => match carry_payload(value2) {
+        None if actions.contains(&action::Pick_up) => match carry_payload(&value2.into()) {
             Ok(payload) => {
                 value2.ui.borrow_mut().carry(None, &payload.kind, &payload.value);
                 (
@@ -722,9 +720,9 @@ pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::update_
     };
     let framed = match (&cooked.framed, framing) {
         (Some(Some(b)), Some(id)) => Some(Some(world_bounds(id, b))),
-        (framed, _) if actions.contains(&action::Frame_camera) && pane_level(value2) == Level::Scene => {
+        (framed, _) if actions.contains(&action::Frame_camera) && pane_level(&value2.into()) == Level::Scene => {
             let _ = framed;
-            let view = match active_view(value2, &geometry(value2, &result.workspace, frame_)) {
+            let view = match active_view(&value2.into(), &geometry(&value2.into(), &result.workspace, frame_)) {
                 Some(leaf) => match &leaf.panel {
                     Panel::View(key) if doc.shell.as_ref().is_some_and(|sh| sh.views.iter().any(|(k, _)| k == key)) => View::Only(key.clone()),
                     _ => View::Primary,
@@ -754,13 +752,13 @@ pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::update_
 /// The graph panel's own projection: list and text views are panels of their own now (`/ l`
 /// retypes), so opening a graph is the only thing that changes it.
 pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[action], result: &frame_result, value2: &EditorModel) -> Level_map {
-    let level = pane_level(value2);
-    let views = pane_views(value2).clone();
+    let level = pane_level(&value2.into());
+    let views = pane_views(&value2.into()).clone();
     if result.open_graph.is_some() || outlined.is_some() {
         return level_map_add(views, level, Graph_view);
     }
     match result.view_pick {
-        Some(view) if view != Text_view || graph_name(value2).is_some() => level_map_add(views, level, view),
+        Some(view) if view != Text_view || graph_name(&value2.into()).is_some() => level_map_add(views, level, view),
         Some(_) => views,
         None => {
             let retype = actions.iter().find_map(|a| match a {
@@ -770,7 +768,7 @@ pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[acti
             match retype {
                 Some(Panel::Graph) => level_map_add(views, level, Graph_view),
                 Some(Panel::List) => level_map_add(views, level, List_view),
-                Some(_) if graph_name(value2).is_some() => level_map_add(views, level, Text_view),
+                Some(_) if graph_name(&value2.into()).is_some() => level_map_add(views, level, Text_view),
                 _ => views,
             }
         }
@@ -921,8 +919,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // i on a collapsed function or loop opens it in place, as a double click does
     let mut actions = actions;
-    if let [zone] = scope::selected(pane_view(value)).as_slice() {
-        if actions.contains(&action::Enter) && scope::collapsed_zone(pane_view(value), zone) {
+    if let [zone] = scope::selected(pane_view(&value.into())).as_slice() {
+        if actions.contains(&action::Enter) && scope::collapsed_zone(pane_view(&value.into()), zone) {
             result.scope_changes.push(scope::Change::Zone_collapsed { zone: zone.clone(), collapsed: false });
             actions.retain(|a| *a != action::Enter);
         }
@@ -953,7 +951,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     // The one reduction phase: panes have finished constructing their boxes.
     // the fields of an object the text declares are written to the text (below, with the frame's
     // gestures); only an object the host made is edited as a derived node, for reconcile to adopt
-    let level0 = pane_level(value);
+    let level0 = pane_level(&value.into());
     let in_text = |node: i64| sync::in_text(&value.doc, level0, node);
     let host_changes: Vec<change> = result
         .changes
@@ -964,10 +962,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         })
         .cloned()
         .collect();
-    let (document, edit_error, editor_effects) = host_changes.iter().fold((level_objects(value), value.edit_error.clone(), Effects::default()), |state, c| apply_change(state, c));
+    let (document, edit_error, editor_effects) = host_changes.iter().fold((level_objects(&value.into()), value.edit_error.clone(), Effects::default()), |state, c| apply_change(state, c));
     // what a list or the inspector's name row asks of an object the text has is written to the text
     // (below); the derived network is edited only for the others
-    let mut tree_edits: Vec<Edit> = result.tree_intents.iter().filter_map(|i| tree_edit(value, &rows, i)).collect();
+    let mut tree_edits: Vec<Edit> = result.tree_intents.iter().filter_map(|i| tree_edit(&value.into(), &rows, i)).collect();
     for c in &result.changes {
         if let change::Rename { node, label } = c {
             if in_text(*node) {
@@ -977,7 +975,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     let applied = result.tree_intents.iter().fold(
         tree_state { document, selection: result.selection.clone(), tree: result.tree.clone(), opened: result.opened, label: None, rows: rows.clone() },
-        |state, intent| apply_tree(value, state, intent),
+        |state, intent| apply_tree(&value.into(), state, intent),
     );
     let tree_state { document, selection, tree: tree_value, opened, label: tree_label, .. } = applied;
     let mut edit_error = edit_error;
@@ -1008,7 +1006,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         }
     };
     let node_effects = |effects: Effects| -> Effects {
-        match pane_level(value) {
+        match pane_level(&value.into()) {
             Level::Inside(id) if kind(value, id).as_deref() == Some("geometry") => effects,
             _ => Effects { cook: false, ..effects },
         }
@@ -1023,7 +1021,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         },
     };
     let original_document = document.clone();
-    let result_document_unchanged = kg::same(&document, &level_objects(value));
+    let result_document_unchanged = kg::same(&document, &level_objects(&value.into()));
     result.document = document;
     result.selection = selection;
     result.tree = tree_value;
@@ -1043,16 +1041,16 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         Some(preset) => preset.doc.clone(),
         None => {
             // the host's objects or layers as this frame's derived edits leave them
-            if result_document_unchanged || network_present(value) {
+            if result_document_unchanged || network_present(&value.into()) {
                 (*present).clone()
             } else {
-                let doc = document::with_kinds(&present, pane_level(value), result.document.clone());
-                if pane_level(value) == Level::Scene { document::prune(&doc) } else { doc }
+                let doc = document::with_kinds(&present, pane_level(&value.into()), result.document.clone());
+                if pane_level(&value.into()) == Level::Scene { document::prune(&doc) } else { doc }
             }
         }
     };
     // Enter and row activation share camera selection and look-through.
-    let entered_camera: Option<i64> = if pane_level(value) != Level::Scene || loaded_flag || carrying {
+    let entered_camera: Option<i64> = if pane_level(&value.into()) != Level::Scene || loaded_flag || carrying {
         None
     } else {
         let candidate = match result.opened {
@@ -1073,7 +1071,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
             tree_edits.push(Edit::Camera(Some(id)));
         }
     }
-    let (written, written_result, added, created, renamed, edit_note) = write_gestures(value, loaded_flag, &present, &tree_edits, &in_text, &node_effects, next, result);
+    let (written, written_result, added, created, renamed, edit_note) = write_gestures(&value.into(), loaded_flag, &present, &tree_edits, &in_text, &node_effects, next, result);
     next = written;
     result = written_result;
     // The workspace pane's layout gestures: moving an item and collapsing a zone edit the layout
@@ -1083,7 +1081,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     if let ([path], Some(_), Some(menu)) = (&added[..], &result.menu_pick, &value.menu) {
         let sc = path[..path.len().saturating_sub(1)].to_vec();
         let (mx, my) = pxui_graph::node_menu::position(menu);
-        if let Some((x, y)) = scope::scope_point(pane_view(value), &sc, mx as f64, my as f64) {
+        if let Some((x, y)) = scope::scope_point(pane_view(&value.into()), &sc, mx as f64, my as f64) {
             scope_changes.insert(0, scope::Change::Moved(vec![(path.clone(), x, y)]));
         }
     }
@@ -1093,8 +1091,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let before_world = next.clone();
     // a World key is written to the text (below); only a World the host made is edited here
     let (mut world_label, mut world_edits) = (None, Vec::new());
-    if in_world(value) {
-        let (doc, label, edits) = world_keys(value, &next, &result.selection, &actions);
+    if in_world(&value.into()) {
+        let (doc, label, edits) = world_keys(&value.into(), &next, &result.selection, &actions);
         next = doc;
         world_label = label;
         world_edits = edits;
@@ -1125,7 +1123,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         }
     }
     let input_frame = view_input(value, &result);
-    let gesture = gesture_key(value, &frame_, loaded_flag, world_added, &world_label, &result);
+    let gesture = gesture_key(&value.into(), &frame_, loaded_flag, world_added, &world_label, &result);
     let history_after = if same_document(&next, &present) {
         value.history.clone()
     } else {
@@ -1155,13 +1153,13 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let (history2, doc, undone, notice) = undo_step(value, carrying, &actions, notice, history_after);
     let effects = if undone || loaded_flag || carry_changed { param::union_effects(result.effects, document_edit::cook_effects()) } else { result.effects };
     // The open level must still exist after undo or a preset load.
-    let level = document::resolve_level(&doc, if loaded_flag { Level::Scene } else { pane_level(value) });
+    let level = document::resolve_level(&doc, if loaded_flag { Level::Scene } else { pane_level(&value.into()) });
     let previous_doc = value.doc.clone();
     let previous_cook = value.cook.clone();
-    let previous_level = pane_level(value);
-    let had_route = !pane_route(value).is_empty();
+    let previous_level = pane_level(&value.into());
+    let had_route = !pane_route(&value.into()).is_empty();
     let previous_viewed: Vec<_> = value.viewed.iter().map(|(id, (network, root))| (*id, flow_sop::network::identity(network), *root)).collect();
-    let scope_selection_changed = scope::selected(&result.scope_view) != scope::selected(pane_view(value));
+    let scope_selection_changed = scope::selected(&result.scope_view) != scope::selected(pane_view(&value.into()));
     let vocab = vocabulary_for(value, &doc);
     let workspace = unrestore(&value.doc, &doc, result.workspace.clone());
     // i also follows a reference of the node selected in the pane (a material, an object's graph)
@@ -1170,8 +1168,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         _ => None,
     });
     let followed = match activated {
-        Some(path) => follow_target(value, Some(&path)),
-        None if actions.contains(&action::Enter) => follow_target(value, None).or_else(|| viewport_target(value)),
+        Some(path) => follow_target(&value.into(), Some(&path)),
+        None if actions.contains(&action::Enter) => follow_target(&value.into(), None).or_else(|| viewport_target(&value.into())),
         None => None,
     };
     let picked_row = result.tree_intents.iter().find_map(|i| match i {
@@ -1181,7 +1179,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let picked_view = if added.is_empty() {
         // A row of a geometry object's list selects its source node in the old pane.
         match picked_row {
-            Some(id) if matches!(pane_level(value), Level::Inside(oid) if kind(value, oid).as_deref() == Some("geometry")) => match node_path(value, id) {
+            Some(id) if matches!(pane_level(&value.into()), Level::Inside(oid) if kind(value, oid).as_deref() == Some("geometry")) => match node_path(&value.into(), id) {
                 Some(path) => scope::select(vec![path], result.scope_view.clone()),
                 None => result.scope_view.clone(),
             },
@@ -1201,12 +1199,12 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         selection::empty()
     } else {
         let current = selection::selected_nodes(&result.selection).to_vec();
-        let ids: Vec<i64> = current.iter().copied().filter(|id| lists(&*value2, *id)).collect();
+        let ids: Vec<i64> = current.iter().copied().filter(|id| lists(&(&*value2).into(), *id)).collect();
         if ids == current { result.selection.clone() } else { selection::select_nodes(&ids) }
     };
     let (followed, target) = level_target(followed, had_route, &*value2, level, &doc, &selection, &actions, &result);
     if let Some(id) = result.open_graph {
-        if lists(&*value2, id) {
+        if lists(&(&*value2).into(), id) {
             selection = selection::select(id);
         }
     }
@@ -1232,7 +1230,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         pane.view = picked_view;
     }
     if let Some(level) = target {
-        if level != pane_level(&*value2) {
+        if level != pane_level(&(&*value2).into()) {
             remember(value2);
         }
         open_level(value2, level);
@@ -1243,7 +1241,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         action::Back(k) => n.max(*k),
         _ => n,
     });
-    let route = pane_route(&*value2).to_vec();
+    let route = pane_route(&(&*value2).into()).to_vec();
     if pops > 0 && target.is_none() && followed.is_none() {
         if let Some(((back_level, pane_graph), rest)) = route.get((pops - 1).max(0) as usize..).and_then(|r| r.split_first()) {
             let back_level = document::resolve_level(&doc, *back_level);
@@ -1258,7 +1256,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         go(value2, graph);
     }
     // In the World, / m flips the view pane to the lat-long map.
-    let map_view = if actions.contains(&action::Toggle_map) && in_world(&*value2) { !value2.map_view } else { value2.map_view && in_world(&*value2) };
+    let map_view = if actions.contains(&action::Toggle_map) && in_world(&(&*value2).into()) { !value2.map_view } else { value2.map_view && in_world(&(&*value2).into()) };
     value2.map_view = map_view;
     // a renamed graph keeps being the one shown, and the one [u] returns to
     if let Some((old, now)) = &renamed {
@@ -1317,7 +1315,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     sync_scope(value2);
     let doc = value2.doc.clone();
-    let frame_request: Option<(i64, i64)> = match (result.frame_request, pane_level(&*value2)) {
+    let frame_request: Option<(i64, i64)> = match (result.frame_request, pane_level(&(&*value2).into())) {
         (Some(node), Level::Inside(id)) if kind(&*value2, id).as_deref() == Some("geometry") => Some((id, node)),
         _ => None,
     };
@@ -1327,17 +1325,17 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         let volatile = flow_sop::lower::is_volatile(&doc.workspace.lowered);
         cook::set_volatile(&previous_cook, Arc::new(move |id| volatile(id) || roots.contains(&id)));
     }
-    let probes_wanted: Vec<(i64, i64)> = match pane_laid(&*value2) {
-        Some(k) if scope_name(&*value2).is_some() => {
+    let probes_wanted: Vec<(i64, i64)> = match pane_laid(&(&*value2).into()) {
+        Some(k) if scope_name(&(&*value2).into()).is_some() => {
             // only the footers drawn and the selection are counted, not every node of the graph
-            let view = pane_view(&*value2);
+            let view = pane_view(&(&*value2).into());
             let mut shown = pxui_graph::scope_frame::inspect::footer_paths(view);
             shown.extend(scope::selected(view));
             k.targets.iter().filter_map(|(path, target)| if shown.contains(path) { Some(*target) } else { None }).collect()
         }
         _ => Vec::new(),
     };
-    let (lit, lit_cache) = lit_tags(&*value2);
+    let (lit, lit_cache) = lit_tags(&(&*value2).into());
     let default_pump = || std::thread::sleep(std::time::Duration::from_micros(500));
     let pump_ref: &dyn Fn() = match pump {
         Some(p) => p,
@@ -1385,7 +1383,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     };
     let queued = match &result.prompt_intent {
         Some(prompt_intent::Run_action(a)) => vec![a.clone()],
-        _ if all_ui_visible && actions.contains(&action::Add_node) && !graph_shown && has_panel(&*value2, &Panel::Graph) => vec![action::Add_node],
+        _ if all_ui_visible && actions.contains(&action::Add_node) && !graph_shown && has_panel(&(&*value2).into(), &Panel::Graph) => vec![action::Add_node],
         _ => Vec::new(),
     };
     let notice_at = value2.notice_at;
@@ -1429,8 +1427,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
 }
 
-fn network_present<'a>(value: impl Into<ModelView<'a>>) -> bool {
-    let value = &value.into();
+fn network_present<'a>(value: &ModelView<'a>) -> bool {
     crate::editor_inspect::network(value).is_some()
 }
 
@@ -1461,17 +1458,16 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorM
     }
     let selection = match select {
         Some(ids) => selection::select_nodes(ids),
-        None => pane_selection(&value).clone(),
+        None => pane_selection(&(&value).into()).clone(),
     };
-    let input = idle_input(&value, actions, frame_);
-    let result = idle_result(&value, selection);
+    let input = idle_input(&(&value).into(), actions, frame_);
+    let result = idle_result(&(&value).into(), selection);
     reduce(None, None, input, &mut value, result);
     Ok(value)
 }
 
 /// The frame result of a frame in which no pane asked for anything.
-pub fn idle_result<'a>(value: impl Into<ModelView<'a>>, selection: selection::Selection) -> frame_result {
-    let value = &value.into();
+pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -> frame_result {
     frame_result {
         workspace: value.workspace.clone(),
         focus: value.focus.clone(),
@@ -1514,8 +1510,7 @@ pub fn idle_result<'a>(value: impl Into<ModelView<'a>>, selection: selection::Se
 }
 
 /// The reducer's input for a frame without panes.
-pub fn idle_input<'a>(value: impl Into<ModelView<'a>>, actions: &[action], frame_: &frame::Frame) -> Frame_input {
-    let value = &value.into();
+pub fn idle_input<'a>(value: &ModelView<'a>, actions: &[action], frame_: &frame::Frame) -> Frame_input {
     Frame_input {
         carry_changed: false,
         all_ui_visible: false,

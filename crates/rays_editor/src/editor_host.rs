@@ -82,8 +82,7 @@ pub fn scene_edit(value: &mut EditorModel, mode: scene_mode, active_camera: Opti
     }
 }
 
-pub fn machinery<'a>(value: impl Into<ModelView<'a>>, under: Option<&dyn Fn(i64) -> Vec<ui_scene::node>>, all_ui_visible: bool) -> Vec<ui_scene::node> {
-    let value = &value.into();
+pub fn machinery<'a>(value: &ModelView<'a>, under: Option<&dyn Fn(i64) -> Vec<ui_scene::node>>, all_ui_visible: bool) -> Vec<ui_scene::node> {
     if all_ui_visible || *value.leader != editor_core::router::State::Idle { value.ui.borrow().scene(under) } else { Vec::new() }
 }
 
@@ -248,8 +247,7 @@ pub fn edit_node(value: &mut EditorModel, level: Level, node_id: i64, values: &[
 
 /// The graph of a `shop_materialpath`: the material graph of that name, else the one whose `:name`
 /// it is.
-pub fn material_graph<'a>(value: impl Into<ModelView<'a>>, path: &str) -> Option<String> {
-    let value = &value.into();
+pub fn material_graph<'a>(value: &ModelView<'a>, path: &str) -> Option<String> {
     let ws = &value.doc.workspace.ws;
     let materials: Vec<String> = ws.checked.graphs.iter().filter(|g| g.context == context::material()).map(|g| g.name.clone()).collect();
     if materials.iter().any(|m| m == path) {
@@ -304,7 +302,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
     if alt {
         // Alt-click: the material on that primitive
         return match nearest_by(&placed, origin, direction, &|p, o, d| cook::pick_material(p, o, d).map(|(t, m)| (t, Hit::Material(m)))) {
-            Some((_, Hit::Material(Some(path)), _)) => match material_graph(&*value, &path) {
+            Some((_, Hit::Material(Some(path)), _)) => match material_graph(&(&*value).into(), &path) {
                 Some(graph) => {
                     go(value, &graph);
                 },
@@ -315,8 +313,8 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
             _ => {},
         };
     }
-    let Some(laid) = pane_laid(&*value) else { return };
-    if scope_name(&*value).is_none() {
+    let Some(laid) = pane_laid(&(&*value).into()) else { return };
+    if scope_name(&(&*value).into()).is_none() {
         return;
     }
     let scope = laid.scope.clone();
@@ -348,7 +346,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
             // geometry of another graph (a viewport over another scene instance draws its own
             // objects): the pane shows that graph, the node is selected there once it does
             let root = o.site[0].clone();
-            let laid_graph = |v: &EditorModel| pane_laid(v).map(|k| k.graph.clone()).unwrap_or_else(|| root.clone());
+            let laid_graph = |v: &EditorModel| pane_laid(&v.into()).map(|k| k.graph.clone()).unwrap_or_else(|| root.clone());
             let scope = if root == laid_graph(value) {
                 scope
             } else {
@@ -441,7 +439,7 @@ pub fn carry_over_surface(view: Option<&str>, value: &mut EditorModel, origin: v
     let placed = placed_pieces_of(false, Some(&view), value, &c.settled);
     let nearest = nearest_by(&placed, origin, direction, &|p, o, d| cook::pick_material(p, o, d).map(|(t, m)| (t, Hit::Material(m))));
     let place = match nearest {
-        Some((_, Hit::Material(path), object_)) => Place::Surface { object_, material: path.and_then(|p| material_graph(&*value, &p)) },
+        Some((_, Hit::Material(path), object_)) => Place::Surface { object_, material: path.and_then(|p| material_graph(&(&*value).into(), &p)) },
         _ => {
             // nothing under the pointer: a SOP graph goes to the scene, a material has no place
             let scene_graph = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.context == context::scene()).map(|g| g.name.clone());
