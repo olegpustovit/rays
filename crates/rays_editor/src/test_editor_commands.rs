@@ -64,12 +64,12 @@ fn the_router_runs_the_table() {
     let mut frame = crate::test_timeline::frame_with(0.0, vec![Event::Key_pressed(Key::KeyChar('z'))], vec![]);
     frame.input.keys = vec![Key::Meta];
     let (_, matched, rest) =
-        router::step(&[], Platform::Apple, &refs, &Panel::Graph, false, crate::ec_frame::to(&frame), router::State::Idle);
+        router::step(&[], Platform::Apple, &refs, &Panel::Graph, false, &frame, router::State::Idle);
     assert_eq!(matched.iter().map(|m| c::action_of(m).clone()).collect::<Vec<_>>(), vec![c::action::Undo]);
     assert!(rest.input.events.is_empty());
     // / then s opens the preset save
     let frame = crate::test_timeline::frame_with(0.0, vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('s'))], vec![]);
     let (state, matched, _) =
-        router::step(&[], Platform::Apple, &refs, &Panel::Graph, false, crate::ec_frame::to(&frame), router::State::Idle);
+        router::step(&[], Platform::Apple, &refs, &Panel::Graph, false, &frame, router::State::Idle);
     assert_eq!((state, matched.iter().map(|m| c::action_of(m).clone()).collect::<Vec<_>>()), (router::State::Idle, vec![c::action::Save_preset]));
 }

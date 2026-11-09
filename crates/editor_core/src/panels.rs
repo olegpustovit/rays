@@ -29,6 +29,9 @@ pub enum Size {
     Second(i64),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side { Left, Right, Top, Bottom }
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Panels {
     Leaf(Panel),

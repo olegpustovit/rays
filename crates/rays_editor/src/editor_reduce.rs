@@ -855,14 +855,14 @@ pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline
 
 /// What the frame around the panes hands the reducer.
 #[derive(Clone)]
-pub struct Frame_input {
+pub struct Frame_input<'a> {
     pub carry_changed: bool,
     pub all_ui_visible: bool,
     pub view_state: Rc<dyn Fn(Option<&Panel_result>) -> Syntax>,
     pub carrying: bool,
     pub held_keys: Vec<input::Key>,
     pub leader: router::State,
-    pub frame: frame::Frame,
+    pub frame: &'a frame::Frame,
     pub hud: Option<(String, f64)>,
     pub actions: Vec<action>,
     pub guide: bool,
@@ -887,7 +887,7 @@ fn same_pieces(a: &[cook::piece], b: &[cook::piece]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Rc::ptr_eq(&x.bounds, &y.bounds))
 }
 
-pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: &mut EditorModel, result: frame_result) -> update {
+pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input<'_>, owned: &mut EditorModel, result: frame_result) -> update {
     let value = &*owned;
     let _timer = flow_syntax::phase_timer::measure("reduce");
     let Frame_input {
@@ -1510,7 +1510,7 @@ pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -
 }
 
 /// The reducer's input for a frame without panes.
-pub fn idle_input<'a>(value: &ModelView<'a>, actions: &[action], frame_: &frame::Frame) -> Frame_input {
+pub fn idle_input<'a, 'f>(value: &ModelView<'a>, actions: &[action], frame_: &'f frame::Frame) -> Frame_input<'f> {
     Frame_input {
         carry_changed: false,
         all_ui_visible: false,
@@ -1523,7 +1523,7 @@ pub fn idle_input<'a>(value: &ModelView<'a>, actions: &[action], frame_: &frame:
         carrying: value.carry.is_some(),
         held_keys: value.held_keys.clone(),
         leader: value.leader.clone(),
-        frame: frame_.clone(),
+        frame: frame_,
         hud: value.hud.clone(),
         actions: actions.to_vec(),
         guide: value.guide,

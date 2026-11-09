@@ -272,7 +272,7 @@ fn router_actions(focus: &Panel, events: Vec<Event>) -> Vec<l::action> {
         &refs,
         focus,
         false,
-        rays_editor::ec_frame::to(&frame_at((500., 400.), events, 1)),
+        &frame_at((500., 400.), events, 1),
         router::State::Idle,
     );
     actions.iter().map(|c| l::action_of(c).clone()).collect()
@@ -390,7 +390,7 @@ pub fn keys_and_guide() {
                 &refs,
                 focus,
                 false,
-                rays_editor::ec_frame::to(&frame_at((500., 400.), events.clone(), 1)),
+                &frame_at((500., 400.), events.clone(), 1),
                 router::State::Idle,
             );
             actions.len()
@@ -401,7 +401,7 @@ pub fn keys_and_guide() {
             &refs,
             &Panel::Graph,
             false,
-            rays_editor::ec_frame::to(&frame_at((500., 400.), events.clone(), 1)),
+            &frame_at((500., 400.), events.clone(), 1),
             router::State::Idle,
         );
         let routed: Vec<SC> = actions.iter().map(|c| bindings[table.iter().position(|t| t.id == c.id && t.trigger == c.trigger).expect("a binding")].1.clone()).collect();

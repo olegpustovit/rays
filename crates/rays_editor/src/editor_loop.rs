@@ -5,6 +5,7 @@
 //! checked-term buffers when the immutable document changes; allocator/Arc metadata and other
 //! lowering owners remain outside that accounting.
 #![allow(non_camel_case_types, non_upper_case_globals)]
+use std::borrow::Cow;
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -235,7 +236,7 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
 /// are reduced before sealing its history. Updates the drag and returns the input
 /// with the drag's pointer events taken out, the held modifiers at the end of the frame, and the
 /// pane's press and release for the camera's pointer grab.
-pub fn world_drag_frame(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[action], sent: &frame::Frame, area: Bounds) -> (frame::Frame, Vec<Key>, (bool, bool)) {
+pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[action], sent: &'a frame::Frame, area: Bounds) -> (Cow<'a, frame::Frame>, Vec<Key>, (bool, bool)) {
     let (previous_level, previous_map, held_keys, pane_keys) = before;
     let seal = |core: &mut m::EditorModel| { core.history = history::seal(false, core.history.clone()); };
     let world_drag = if loaded
@@ -275,15 +276,14 @@ pub fn world_drag_frame(value: &mut LoopModel, before: (Level, bool, &[Key], &[(
     value.world_drag = world_drag;
     // the drag's pointer events are the drag's: the camera and picking see a cancelled press
     let input = if !engaged {
-        sent.clone()
+        Cow::Borrowed(sent)
     } else {
-        let mut events: Vec<Event> = sent.input.events.iter().filter(|e| !matches!(e, Event::Pointer_pressed(MouseButton::LeftButton, _) | Event::Pointer_moved(_) | Event::Pointer_released(MouseButton::LeftButton, _))).cloned().collect();
-        events.push(Event::Pointer_cancelled(MouseButton::LeftButton));
-        frame::Frame {
-            input: input::Frame { events, buttons: sent.input.buttons.iter().filter(|b| **b != MouseButton::LeftButton).cloned().collect(), ..sent.input.clone() },
-            mouse_delta: (0., 0.),
-            ..sent.clone()
-        }
+        let mut routed = sent.clone();
+        routed.input.events.retain(|e| !matches!(e, Event::Pointer_pressed(MouseButton::LeftButton, _) | Event::Pointer_moved(_) | Event::Pointer_released(MouseButton::LeftButton, _)));
+        routed.input.events.push(Event::Pointer_cancelled(MouseButton::LeftButton));
+        routed.input.buttons.retain(|button| *button != MouseButton::LeftButton);
+        routed.mouse_delta = (0., 0.);
+        Cow::Owned(routed)
     };
     let grab = match &signal {
         Some(s) => (s.pressed && !engaged, s.released && !engaged),
@@ -411,8 +411,8 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let followed = follow_focus(&value, &value.core, frame_);
     (value.viewing, value.camera, value.cameras) = (followed.viewing, followed.camera, followed.cameras);
     let ui = value.core.ui.clone();
-    let raw_frame = frame_.clone();
-    let (extra, frame) = V::begin_frame(&value.extra, frame_.clone());
+    let raw_frame = frame_;
+    let (extra, frame) = V::begin_frame(&value.extra, frame_);
     let visible = V::ui_visible(&value.control);
     let panel_control = value.control.clone();
     let panel_camera = value.camera.clone();
@@ -525,7 +525,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let area = if visible { panes.view } else { (0, 0, frame.input.size.0, frame.input.size.1) };
     let (input, modifiers, grab) = world_drag_frame(value, (before_level, before_map, &before_keys, &before_panes), update_.loaded_view.is_some(), &update_.actions, &update_.input, area);
     pick_in_views(value, &focused, &camera, &extra, area, &modifiers, &input, &raw_frame);
-    let (camera, extra) = if value.core.map_view { (camera, V::release(&extra)) } else { V::navigate(area, grab, &control, &camera, &extra, &value.core, &raw_frame, &input) };
+    let (camera, extra) = if value.core.map_view { (camera, V::release(&extra)) } else { V::navigate(area, grab, &control, &camera, &extra, &value.core, &input) };
     let (camera, render_status) = match &update_.framed {
         Some(Some((min, max))) => {
             let (_, _, w, h) = panes.view;

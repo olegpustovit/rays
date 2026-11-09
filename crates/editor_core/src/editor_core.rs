@@ -212,6 +212,7 @@ pub mod router {
     use super::keymap::{resolve, shifted, Trigger};
     use crate::frame;
     use input::{Event, Key, Platform};
+    use std::borrow::Cow;
 
     /// Tab cancels leader routing, runs its exact-modifier host binding or passes to UI traversal,
     /// then hands the remaining ordered events to the UI (including a same-frame /).
@@ -258,21 +259,28 @@ pub mod router {
 
     /// In fly mode, keep pointer/window events and pass / to the leader router after ending the
     /// mode. Escape ends fly without opening a shortcut.
-    pub fn fly(mut frame: frame::Frame) -> (bool, frame::Frame) {
-        let exits = frame.input.events.iter().any(|event| {
-            matches!(
-                event,
-                Event::Key_pressed(Key::Escape | Key::Space | Key::KeyChar('/')) | Event::Focus_lost
-            )
+    pub fn fly(frame: &frame::Frame) -> (bool, Cow<'_, frame::Frame>) {
+        let exits = frame.input.events.iter().any(|event| matches!(event,
+            Event::Key_pressed(Key::Escape | Key::Space | Key::KeyChar('/')) | Event::Focus_lost));
+        let consumed = frame.input.events.iter().enumerate().filter_map(|(index, event)| match event {
+            Event::Key_pressed(Key::KeyChar('/')) | Event::Focus_lost => None,
+            Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. } => Some(index),
+            _ => None,
+        }).collect();
+        (exits, without_events(frame, consumed))
+    }
+
+    fn without_events(frame: &frame::Frame, consumed: Vec<usize>) -> Cow<'_, frame::Frame> {
+        if consumed.is_empty() { return Cow::Borrowed(frame); }
+        let mut routed = frame.clone();
+        let mut consumed = consumed.into_iter().peekable();
+        let mut index = 0;
+        routed.input.events.retain(|_| {
+            let keep = consumed.next_if_eq(&index).is_none();
+            index += 1;
+            keep
         });
-        frame.input.events.retain(|event| match event {
-            Event::Key_pressed(Key::KeyChar('/')) | Event::Focus_lost => true,
-            Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. } => {
-                false
-            }
-            _ => true,
-        });
-        (exits, frame)
+        Cow::Owned(routed)
     }
 
     fn modifier(key: Key) -> bool {
@@ -281,13 +289,13 @@ pub mod router {
 
     /// A text field owns the keyboard except the Command/Ctrl chords it has no use for (its own
     /// are select all, copy, cut, paste, undo and redo). Only commands of every pane run.
-    fn text_chords(
+    fn text_chords<'a>(
         platform: Platform,
         keymap: &[&Command],
         focus: &Panel,
         previous_keys: &[Key],
-        mut frame: frame::Frame,
-    ) -> (Vec<Command>, frame::Frame) {
+        frame: &'a frame::Frame,
+    ) -> (Vec<Command>, Cow<'a, frame::Frame>) {
         let global: Vec<&Command> =
             keymap.iter().copied().filter(|command| command.scope.is_none()).collect();
         let owned = |key: Key| match key {
@@ -297,23 +305,22 @@ pub mod router {
         };
         let mut modifiers = input::keys_before(previous_keys, &frame.input.keys, &frame.input.events);
         let mut actions = Vec::new();
-        let mut passed = Vec::new();
-        for event in frame.input.events.iter() {
+        let mut consumed = Vec::new();
+        for (index, event) in frame.input.events.iter().enumerate() {
             modifiers = input::keys_after(&modifiers, event);
             match event {
                 Event::Key_pressed(key)
                     if !owned(*key) && (input::command_held(platform, &modifiers) || *key == Key::F12) =>
                 {
                     match chord(platform, &global, focus, &modifiers, *key) {
-                        Some(command) => actions.push(command),
-                        None => passed.push(event.clone()),
+                        Some(command) => { actions.push(command); consumed.push(index); },
+                        None => {},
                     }
                 }
-                _ => passed.push(event.clone()),
+                _ => {},
             }
         }
-        frame.input.events = passed;
-        (actions, frame)
+        (actions, without_events(frame, consumed))
     }
 
     /// One routing step over the frame's events. Returns the exact matched commands in event
@@ -321,15 +328,18 @@ pub mod router {
     ///
     /// `previous_keys` supplies the previous frame's keys for changed modifiers and focus
     /// cancellation; pass `&[]` when none were held.
-    pub fn step(
+    pub fn step<'a>(
         previous_keys: &[Key],
         platform: Platform,
         keymap: &[&Command],
         focus: &Panel,
         text_focus: bool,
-        mut frame: frame::Frame,
+        frame: &'a frame::Frame,
         state: State,
-    ) -> (State, Vec<Command>, frame::Frame) {
+    ) -> (State, Vec<Command>, Cow<'a, frame::Frame>) {
+        if frame.input.events.is_empty() {
+            return (if text_focus { State::Idle } else { state }, Vec::new(), Cow::Borrowed(frame));
+        }
         if text_focus {
             let (actions, frame) = text_chords(platform, keymap, focus, previous_keys, frame);
             return (State::Idle, actions, frame);
@@ -338,13 +348,13 @@ pub mod router {
         let mut traversing = false;
         let mut state = state;
         let mut actions: Vec<Command> = Vec::new();
-        let mut passed: Vec<Event> = Vec::new();
-        for event in frame.input.events.iter() {
+        let mut consumed = Vec::new();
+        for (index, event) in frame.input.events.iter().enumerate() {
+            let mut pass = false;
             modifiers = input::keys_after(&modifiers, event);
             let command = input::command_held(platform, &modifiers);
             if traversing {
                 state = State::Idle;
-                passed.push(event.clone());
                 continue;
             }
             let idle = state == State::Idle;
@@ -359,7 +369,7 @@ pub mod router {
                     traversing = true;
                     state = State::Idle;
                     match chord(platform, keymap, focus, &modifiers, Key::Tab) {
-                        None => passed.push(event.clone()),
+                        None => pass = true,
                         Some(action) => actions.push(action),
                     }
                 }
@@ -379,7 +389,7 @@ pub mod router {
                     };
                     match typed.or_else(|| chord(platform, keymap, focus, &modifiers, *key)) {
                         Some(action) => actions.push(action),
-                        None => passed.push(event.clone()),
+                        None => pass = true,
                     }
                     state = State::Idle;
                 }
@@ -388,7 +398,7 @@ pub mod router {
                 }
                 _ if idle => {
                     state = State::Idle;
-                    passed.push(event.clone());
+                    pass = true;
                 }
                 Event::Key_pressed(key) if modifier(*key) => {}
                 Event::Key_pressed(Key::KeyChar(character)) => {
@@ -419,12 +429,12 @@ pub mod router {
                 }
                 Event::Focus_lost => {
                     state = State::Idle;
-                    passed.push(event.clone());
+                    pass = true;
                 }
-                _ => passed.push(event.clone()),
+                _ => pass = true,
             }
+            if !pass { consumed.push(index); }
         }
-        frame.input.events = passed;
-        (state, actions, frame)
+        (state, actions, without_events(frame, consumed))
     }
 }

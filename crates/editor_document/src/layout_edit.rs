@@ -13,26 +13,7 @@ type S = SyntaxId;
 pub type Path = w::Path;
 type R<T> = Result<T, Diagnostic>;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Size {
-    Ratio(f64),
-    First(i64),
-    Second(i64),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Axis {
-    H,
-    V,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Side {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
+pub use editor_core::panels::{Axis, Side, Size};
 
 #[derive(Clone, Debug)]
 pub enum Op {

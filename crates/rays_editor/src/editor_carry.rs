@@ -1,6 +1,7 @@
 //! The carry's turn of a frame: the key route, the preview, the put and the cancel. Port of
 //! lib/rays_editor/editor_carry.ml.
 #![allow(non_camel_case_types)]
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use editor_core::router;
@@ -182,7 +183,7 @@ fn first_char(letter: &str) -> char {
 /// The carry's turn of a frame, before the panes build: the keys of the route and the ends of the
 /// gesture, then the preview (the scratch document the panels read), or the put or the restore.
 /// Returns the frame without the keys the carry took, and whether the document shown changed.
-pub fn carry_step(value: &mut EditorModel, text_focus: bool, frame_: &frame::Frame) -> (frame::Frame, bool) {
+pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a frame::Frame) -> (Cow<'a, frame::Frame>, bool) {
     let c = match &value.carry {
         None => {
             let carrying = value.ui.borrow().carrying();
@@ -201,9 +202,9 @@ pub fn carry_step(value: &mut EditorModel, text_focus: bool, frame_: &frame::Fra
                         resting: None,
                         hint: None,
                     });
-                    (frame_.clone(), false)
+                    (Cow::Borrowed(frame_), false)
                 }
-                None => (frame_.clone(), false),
+                None => (Cow::Borrowed(frame_), false),
             };
         }
         Some(c) => c.clone(),
@@ -228,9 +229,13 @@ pub fn carry_step(value: &mut EditorModel, text_focus: bool, frame_: &frame::Fra
     }
     let enter = c.via == Via::Keys && typing && pressed.contains(&Key::Enter);
     let consumed = |key: &Key| -> bool { (idle && *key == Key::Escape) || (c.via == Via::Keys && typing && (*key == Key::Enter || letters.iter().any(|(l, _, _)| Key::KeyChar(first_char(l)) == *key))) };
-    let mut taken = frame_.clone();
-    taken.input.events = frame_.input.events.iter().filter(|e| !matches!(e, Event::Key_pressed(k) | Event::Key_released(k) if consumed(k))).cloned().collect();
-    taken.input.keys = frame_.input.keys.iter().filter(|k| !consumed(k)).cloned().collect();
+    let taken_event = |event: &Event| matches!(event, Event::Key_pressed(key) | Event::Key_released(key) if consumed(key));
+    let mut taken = Cow::Borrowed(frame_);
+    if frame_.input.events.iter().any(taken_event) || frame_.input.keys.iter().any(consumed) {
+        let taken = taken.to_mut();
+        taken.input.events.retain(|event| !taken_event(event));
+        taken.input.keys.retain(|key| !consumed(key));
+    }
     let mut c = c;
     if let Some((_, place, _)) = &letter {
         c.chosen = Some(place.clone());

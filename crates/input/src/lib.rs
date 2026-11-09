@@ -1,3 +1,5 @@
+pub mod frame;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Key {
     KeyChar(char),

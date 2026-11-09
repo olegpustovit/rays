@@ -2,7 +2,6 @@
 pub mod bars;
 pub mod carry;
 pub mod cook;
-pub mod ec_frame;
 pub mod echo;
 pub mod editor_actions;
 pub mod editor_add;

@@ -14,13 +14,7 @@ use rays::frame;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Side {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
+pub use editor_core::panels::Side;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Intent {

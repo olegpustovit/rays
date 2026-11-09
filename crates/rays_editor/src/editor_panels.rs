@@ -339,30 +339,6 @@ fn set_editor_graph(form: s::Syntax) -> change {
     change::Syntax_edit(Op::SetGraph { name: "editor".to_string(), form })
 }
 
-fn to_le_axis(axis: Axis) -> le::Axis {
-    match axis {
-        Axis::H => le::Axis::H,
-        Axis::V => le::Axis::V,
-    }
-}
-
-fn to_le_size(size: panels::Size) -> le::Size {
-    match size {
-        panels::Size::Ratio(r) => le::Size::Ratio(r),
-        panels::Size::First(n) => le::Size::First(n),
-        panels::Size::Second(n) => le::Size::Second(n),
-    }
-}
-
-fn to_le_side(side: Side) -> le::Side {
-    match side {
-        Side::Left => le::Side::Left,
-        Side::Right => le::Side::Right,
-        Side::Top => le::Side::Top,
-        Side::Bottom => le::Side::Bottom,
-    }
-}
-
 /// / [ and / n: the layouts of the switch and the floating windows, each one edit of the editor
 /// graph (written from the layout shown first, when the document has none).
 pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &shell, leaf: Option<&Leaf>, actions: &[action]) -> Vec<change> {
@@ -518,15 +494,15 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
             chrome::Intent::Resize { node, size } => w.live = Some((node.clone(), *size)),
             chrome::Intent::Settled => {
                 if let Some((node, size)) = w.live.take() {
-                    changes.extend(edit(&node, Rc::new(move |node: &Vec<String>| le::Op::SetLayoutSize { node: node.clone(), size: to_le_size(size) })));
+                    changes.extend(edit(&node, Rc::new(move |node: &Vec<String>| le::Op::SetLayoutSize { node: node.clone(), size })));
                 }
             }
             chrome::Intent::Split_panel(path, axis) => {
-                let axis = to_le_axis(*axis);
+                let axis = *axis;
                 changes.extend(with_panel(beside(path), path, Rc::new(move |panel, node| le::Op::SplitPanel { node: node.clone(), axis, ratio: 0.5, panel })));
             }
             chrome::Intent::Split_panel_at(path, axis, ratio, kind) => {
-                let (axis, ratio) = (to_le_axis(*axis), *ratio);
+                let (axis, ratio) = (*axis, *ratio);
                 changes.extend(with_panel(panel_kind(kind), path, Rc::new(move |panel, node| le::Op::SplitPanel { node: node.clone(), axis, ratio, panel })));
             }
             chrome::Intent::Close_panel(path) => changes.extend(edit(path, Rc::new(|node: &Vec<String>| le::Op::ClosePanel { node: node.clone() }))),
@@ -546,7 +522,7 @@ pub fn dock_panels(factories: &[Factory], doc: &Document, source: &layout::Path,
     let loop_message = "These panels are copies made by a loop: move their tile in the editor graph.";
     let (doc, node) = document_edit::panel_node(Some(factories), Some(loop_message), doc, source)?;
     let (doc, target_node) = document_edit::panel_node(Some(factories), Some(loop_message), &doc, target)?;
-    let doc = document_edit::layout_op(Some(factories), &doc, &le::Op::DockPanel { node: node.clone(), target: target_node.clone(), side: to_le_side(side) })?;
+    let doc = document_edit::layout_op(Some(factories), &doc, &le::Op::DockPanel { node: node.clone(), target: target_node.clone(), side })?;
     let copy_pos = if matches!(side, Side::Left | Side::Top) { 3 } else { 2 };
     let copy: Vec<String> = match fe::arg_text(&doc.workspace.ws.source, &target_node, &ArgKey::Pos(copy_pos)) {
         Some(e) => match &e.node {

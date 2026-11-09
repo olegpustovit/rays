@@ -6,7 +6,7 @@ pub mod material;
 pub mod path;
 pub mod texture;
 pub(crate) mod input_state;
-pub mod frame;
+pub use input::frame;
 pub(crate) mod time;
 pub mod clipboard;
 pub mod image;

@@ -6,6 +6,7 @@
 //! ?host_events`) are the trailing parameters of `update`; callbacks that need the `ui` while the
 //! chrome holds it (`groups`, `tools_from`) are answered from tables computed just before.
 #![allow(non_camel_case_types)]
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -957,11 +958,10 @@ pub fn update_frame(
         &keymap_refs,
         &editor_commands::scope(&focus),
         text_focus,
-        crate::ec_frame::to(frame_),
+        frame_,
         value.leader.clone(),
     );
-    let frame_after = crate::ec_frame::apply(frame_, routed);
-    let frame_ = &frame_after;
+    let frame_ = routed.as_ref();
     let hud = hud_of(&(&*value).into(), &leader, frame_, &commands);
     let mut actions: Vec<action> = commands.iter().map(|c| action_of(c).clone()).collect();
     let hud = match hud {
@@ -981,12 +981,13 @@ pub fn update_frame(
     set_text_size(&*value, &actions);
     let steady = if frame_.input.dt > 0.0 && frame_.input.dt == value.last_dt { value.steady + 1 } else { 0 };
     let (status_fps, status_fps_at) = fps_sample(&(&*value).into(), frame_);
-    let shortcut_frame = if text_focus {
-        let mut f = frame_.clone();
-        f.input.events.retain(|e| !matches!(e, Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. }));
-        f
+    let keyboard_event = |event: &Event| matches!(event, Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. });
+    let shortcut_frame = if text_focus && frame_.input.events.iter().any(keyboard_event) {
+        let mut filtered = frame_.clone();
+        filtered.input.events.retain(|event| !keyboard_event(event));
+        Cow::Owned(filtered)
     } else {
-        frame_.clone()
+        Cow::Borrowed(frame_)
     };
     let (timeline_now, timeline_changes) = timeline::update(&value.timeline, &shortcut_frame);
     let (workspace, selection, tree_value, timeline_now, timeline_changes) = actions.iter().fold((value.workspace.clone(), pane_selection(&(&*value).into()).clone(), value.tree.clone(), timeline_now, timeline_changes), |state, a| apply_action(&*value, state, a));
@@ -1427,7 +1428,7 @@ pub fn update_frame(
             carrying,
             held_keys,
             leader,
-            frame: frame_.clone(),
+            frame: frame_,
             hud,
             actions,
             guide,

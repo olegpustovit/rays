@@ -7,6 +7,7 @@
 //! is `CC`; `inspector` callbacks answer `Rc<dyn Any>` (OCaml's `'a`).
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 use std::any::Any;
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use editor_core::panels::{self, Panel};
@@ -482,15 +483,15 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, extra
     (core, extra_)
 }
 
-pub fn begin_frame(extra_: &extra, frame_: frame::Frame) -> (extra, frame::Frame) {
+pub fn begin_frame<'a>(extra_: &extra, frame_: &'a frame::Frame) -> (extra, Cow<'a, frame::Frame>) {
     match extra_.fly {
         None => {
             let lost = frame_.input.events.iter().any(|e| matches!(e, Event::Focus_lost));
-            (if lost { release(extra_) } else { extra_.clone() }, frame_)
+            (if lost { release(extra_) } else { extra_.clone() }, Cow::Borrowed(frame_))
         }
         Some(_) => {
-            let (ended, routed) = router::fly(crate::ec_frame::to(&frame_));
-            (if ended { release(extra_) } else { extra_.clone() }, crate::ec_frame::apply(&frame_, routed))
+            let (ended, routed) = router::fly(frame_);
+            (if ended { release(extra_) } else { extra_.clone() }, routed)
         }
     }
 }
@@ -608,7 +609,7 @@ pub fn on_doc(previous: &document::T, core: &mut Model, camera_: &camera) {
     }
 }
 
-pub fn navigate(area: Bounds, grab: (bool, bool), _control: &control, camera_: &camera, extra_: &extra, core: &Model, raw_frame: &frame::Frame, input: &frame::Frame) -> (camera, extra) {
+pub fn navigate(area: Bounds, grab: (bool, bool), _control: &control, camera_: &camera, extra_: &extra, core: &Model, input: &frame::Frame) -> (camera, extra) {
     let (pressed, released) = grab;
     let active = active_node(core);
     // A fixed render camera owns the view while look-through is enabled.
@@ -617,8 +618,7 @@ pub fn navigate(area: Bounds, grab: (bool, bool), _control: &control, camera_: &
     }
     match extra_.fly {
         Some(speed) => {
-            let merged = frame::Frame { input: input.input.clone(), mouse_delta: input.mouse_delta, ..raw_frame.clone() };
-            match easy_camera::fly(speed, camera_, &merged) {
+            match easy_camera::fly(speed, camera_, input) {
                 Ok((camera_, speed)) => (camera_, extra { fly: Some(speed), ..extra_.clone() }),
                 Err(_) => (camera_.clone(), extra_.clone()),
             }

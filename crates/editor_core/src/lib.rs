@@ -4,7 +4,7 @@
 #![allow(non_camel_case_types)]
 
 pub mod editor_core;
-pub mod frame;
+pub use input::frame;
 pub mod panels;
 pub mod store;
 
