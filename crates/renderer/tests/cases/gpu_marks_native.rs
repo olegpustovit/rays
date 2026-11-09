@@ -257,7 +257,7 @@ fn marks_draw(
         transform_uniforms: Some(new_bytes(affine)),
     };
     let m = Mesh {
-        key: MeshKey::GpuVertices(key),
+        key: MeshKey::GpuVertices { name: Rc::new(key), indices: None },
         vertices: scene_execution::empty_bytes(),
         shared_vertices: None,
         vertex_count: 4 * n,

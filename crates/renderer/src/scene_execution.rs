@@ -171,30 +171,18 @@ pub fn unregister_gpu_vertices(value: &GpuVertices) {
     }
 }
 
-/// A borrowed GPU vertex stream is named apart from every host-owned mesh. A name
-/// ["borrow\nindices"] keeps its host payload (the indices) under [indices], the same while its
-/// topology is, whatever buffer each frame borrows.
+/// GPU vertices and renderer-owned indices have independent identities.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MeshKey {
     Host(String),
-    /// `Gpu_vertices name`: a stream borrowed through `register_gpu_vertices ~key:name`.
-    GpuVertices(String),
-}
-
-fn borrowed(name: &str) -> &str {
-    match name.find('\n') {
-        Some(i) => &name[..i],
-        None => name,
-    }
+    GpuVertices { name: Rc<String>, indices: Option<Rc<String>> },
 }
 
 pub fn mesh_key_string(key: &MeshKey) -> String {
     match key {
         MeshKey::Host(k) => k.clone(),
-        MeshKey::GpuVertices(k) => match k.find('\n') {
-            Some(i) => format!("gpu:indices:{}", &k[i + 1..]),
-            None => format!("gpu:vertices:{}", k),
-        },
+        MeshKey::GpuVertices { indices: Some(indices), .. } => format!("gpu:indices:{indices}"),
+        MeshKey::GpuVertices { name, indices: None } => format!("gpu:vertices:{name}"),
     }
 }
 
@@ -307,14 +295,14 @@ pub struct PreparedScene3 {
 /// A draw names a borrowed stream that was unregistered: it can never be drawn again.
 pub fn borrows_unregistered(owner: &GpuVerticesOwner, prepared: &PreparedScene3) -> bool {
     prepared.entries.iter().any(|entry| match &entry.draw.mesh.key {
-        MeshKey::GpuVertices(name) => !owner.borrow().gpu_vertex_registry.contains_key(borrowed(name)),
+        MeshKey::GpuVertices { name, .. } => !owner.borrow().gpu_vertex_registry.contains_key(name.as_str()),
         MeshKey::Host(_) => false,
     })
 }
 
 struct Cached {
     key: String,
-    payload_hash: String,
+    payload_hash: Option<u128>,
     trusted_source: Option<Mesh>,
     buffer: Buffer,
     index_offset: i64,
@@ -354,7 +342,7 @@ type CachedAuxiliaryRef = Rc<RefCell<CachedAuxiliary>>;
 
 struct CachedTexture {
     key: String,
-    hash: String,
+    hash: Option<u128>,
     shape: String,
     texture: Texture,
     bytes: i64,
@@ -677,9 +665,9 @@ fn resolve_gpu_vertices(value: &SceneExecution, entry: &SampledDraw) -> Result<O
     let mesh = &entry.draw.mesh;
     let name = match &mesh.key {
         MeshKey::Host(_) => return Ok(None),
-        MeshKey::GpuVertices(name) => name,
+        MeshKey::GpuVertices { name, .. } => name,
     };
-    let found = value.gpu_vertices.borrow().gpu_vertex_registry.get(borrowed(name)).cloned();
+    let found = value.gpu_vertices.borrow().gpu_vertex_registry.get(name.as_str()).cloned();
     match found {
         Some(source) if gpu_vertices_valid(&source) => {
             let color_width = match &entry.draw.state.transform_uniforms {
@@ -741,12 +729,12 @@ fn valid_vertex_attributes(entry: &SampledDraw) -> bool {
                 && mesh.vertex_count >= 0
                 && mesh.vertex_count <= MAX_STRING_LENGTH / 24
                 && match &mesh.key {
-                    MeshKey::GpuVertices(_) => mesh.vertex_bytes_len() == 0,
+                    MeshKey::GpuVertices { .. } => mesh.vertex_bytes_len() == 0,
                     MeshKey::Host(_) => mesh.vertex_bytes_len() as i64 == mesh.vertex_count * 24,
                 }
                 && (blen(attributes) as i64 == mesh.vertex_count * 12
                     || match &mesh.key {
-                        MeshKey::GpuVertices(_) => blen(attributes) == 0,
+                        MeshKey::GpuVertices { .. } => blen(attributes) == 0,
                         MeshKey::Host(_) => false,
                     })
         }
@@ -758,7 +746,7 @@ fn valid_index_length(mesh: &Mesh) -> bool {
         && mesh.index_count <= MAX_STRING_LENGTH / 4
         && (blen(&mesh.indices) as i64 == mesh.index_count * 4
             || match &mesh.key {
-                MeshKey::GpuVertices(_) => blen(&mesh.indices) == 0,
+                MeshKey::GpuVertices { .. } => blen(&mesh.indices) == 0,
                 MeshKey::Host(_) => false,
             })
 }
@@ -1019,17 +1007,16 @@ pub fn create(
     }
 }
 
-/// A 128-bit content mix standing in for OCaml's MD5 `Digest`: it only decides whether two byte
-/// strings under one cache key are equal, so no digest value is ever compared across runs.
-fn digest_hex(data: &[u8]) -> String {
-    let (mut a, mut b) = (0xcbf29ce484222325u64, 0x84222325cbf29ce4u64);
-    for &x in data {
-        a ^= x as u64;
-        a = a.wrapping_mul(0x100000001b3);
-        b = b.rotate_left(5) ^ (x as u64);
-        b = b.wrapping_mul(0x9E3779B97F4A7C15);
+const HASH_SEED: u128 = (0xcbf29ce484222325u128 << 64) | 0x84222325cbf29ce4;
+
+/// Length-framed parts keep component boundaries distinct without temporary strings.
+fn digest(hash: u128, data: &[u8]) -> u128 {
+    let (mut a, mut b) = ((hash >> 64) as u64, hash as u64);
+    for x in (data.len() as u64).to_le_bytes().into_iter().chain(data.iter().copied()) {
+        a = (a ^ u64::from(x)).wrapping_mul(0x100000001b3);
+        b = (b.rotate_left(5) ^ u64::from(x)).wrapping_mul(0x9E3779B97F4A7C15);
     }
-    format!("{:016x}{:016x}", a, b)
+    (u128::from(a) << 64) | u128::from(b)
 }
 
 fn source_for_trust(mesh: &Mesh, bytes: i64) -> Option<Mesh> {
@@ -1056,14 +1043,14 @@ fn same_bytes(mesh: &Mesh, source: &Option<Mesh>) -> bool {
     }
 }
 
-fn vertex_hash(mesh: &Mesh) -> String {
+fn vertex_hash(mesh: &Mesh) -> u128 {
     let owned=&mesh.vertices;
     let vertices=mesh.shared_vertices.as_ref().map_or(&owned[..], |bytes| bytes.as_slice());
-    digest_hex(vertices)
+    digest(HASH_SEED, vertices)
 }
 
-fn content_hash(mesh: &Mesh, uniform_bytes: &[u8]) -> String {
-    format!("{}:{}:{}", vertex_hash(mesh), digest_hex(&mesh.indices), digest_hex(uniform_bytes))
+fn content_hash(mesh: &Mesh, uniform_bytes: &[u8]) -> u128 {
+    digest(digest(vertex_hash(mesh), &mesh.indices), uniform_bytes)
 }
 
 fn f32_at(bytes_: &[u8], index: usize) -> f32 {
@@ -1147,8 +1134,8 @@ fn prepare(value: &mut SceneExecution, uniforms: Option<&bytes>, vertex_stable: 
         }
         Some(item) if same_bytes(mesh, &item.borrow().trusted_source) && uniform_bytes == item.borrow().uniform_copy => Ok(item),
         Some(item) => {
-            let hash = item.borrow().payload_hash.clone();
-            if !hash.is_empty() && hash == content_hash(mesh, &uniform_bytes) {
+            let hash = item.borrow().payload_hash;
+            if hash.is_some_and(|hash| hash == content_hash(mesh, &uniform_bytes)) {
                 let size = item.borrow().bytes;
                 item.borrow_mut().trusted_source = source_for_trust(mesh, size);
                 Ok(item)
@@ -1182,7 +1169,7 @@ fn prepare_upload(
     {
         return Err(failure_error("Scene_execution.prepare", ErrorKind::InvalidArgument, "mesh payload or transform uniforms are malformed"));
     }
-    let payload_hash = if vertex_stable { String::new() } else { content_hash(mesh, uniform_bytes) };
+    let payload_hash = if vertex_stable { None } else { Some(content_hash(mesh, uniform_bytes)) };
     let uniform_offset = uniforms.map(|_| (vertices.len() + indices.len()) as i64);
     let uniform_copy: Vec<u8> = uniform_bytes.to_vec();
     let reserved = |item: &CachedRef| scratch_mem_mesh(&value.prepared_scratch, item);
@@ -1523,13 +1510,14 @@ fn image_or_canvas_key(key: &str) -> bool {
     ["canvas:", "image:", "texture:", "text:", "world:"].iter().any(|prefix| key.starts_with(prefix))
 }
 
-fn levels_hash(source: &SampledTexture) -> String {
-    let parts: Vec<String> = source
-        .levels
-        .iter()
-        .map(|level| format!("{}x{}:{}", level.width, level.height, digest_hex(&level.bytes)))
-        .collect();
-    digest_hex(parts.join("|").as_bytes())
+fn levels_hash(source: &SampledTexture) -> u128 {
+    let mut hash = digest(HASH_SEED, &(source.levels.len() as u64).to_le_bytes());
+    for level in source.levels.iter() {
+        hash = digest(hash, &level.width.to_le_bytes());
+        hash = digest(hash, &level.height.to_le_bytes());
+        hash = digest(hash, &level.bytes);
+    }
+    hash
 }
 
 fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source: &SampledTexture) -> Result<CachedTextureRef, Error> {
@@ -1543,7 +1531,7 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
         }
         return Ok(Rc::new(RefCell::new(CachedTexture {
             key: source.key.clone(),
-            hash: String::new(),
+            hash: None,
             shape: String::new(),
             texture: texture.clone(),
             bytes: 0,
@@ -1560,7 +1548,7 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
             item.borrow_mut().used = value.frame;
             Ok(item)
         }
-        Some(item) if key.starts_with("canvas:") => upload_texture(value, defer, source, String::new(), Some(item)),
+        Some(item) if key.starts_with("canvas:") => upload_texture(value, defer, source, None, Some(item)),
         // The immutable levels this slot was uploaded from: no hashing.
         Some(item) if Rc::ptr_eq(&item.borrow().levels, &source.levels) => {
             item.borrow_mut().used = value.frame;
@@ -1568,20 +1556,20 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
         }
         Some(item) => {
             let hash = levels_hash(source);
-            if item.borrow().hash == hash {
+            if item.borrow().hash == Some(hash) {
                 let mut b = item.borrow_mut();
                 b.levels = source.levels.clone();
                 b.used = value.frame;
                 drop(b);
                 Ok(item)
             } else {
-                upload_texture(value, defer, source, hash, None)
+                upload_texture(value, defer, source, Some(hash), None)
             }
         }
         // Image, canvas, texture and text keys carry identity and generation, so their bytes are
         // never hashed; other keys are content-addressed.
         None => {
-            let hash = if image_or_canvas_key(key) { String::new() } else { levels_hash(source) };
+            let hash = if image_or_canvas_key(key) { None } else { Some(levels_hash(source)) };
             upload_texture(value, defer, source, hash, None)
         }
     }
@@ -1591,7 +1579,7 @@ fn upload_texture(
     value: &mut SceneExecution,
     defer: &mut Vec<Deferred>,
     source: &SampledTexture,
-    hash: String,
+    hash: Option<u128>,
     reusable: Option<CachedTextureRef>,
 ) -> Result<CachedTextureRef, Error> {
     if !valid_texture(source) {
@@ -1796,14 +1784,14 @@ fn primitive_code(primitive: Primitive) -> &'static str {
     }
 }
 
-fn mesh_identity(mesh: &Mesh) -> String {
-    format!(
-        "{}:{}:{}:{}",
-        mesh_key_string(&mesh.key),
-        primitive_code(mesh.primitive),
-        vertex_hash(mesh),
-        digest_hex(&mesh.indices)
-    )
+fn mesh_identity(mesh: &Mesh) -> u128 {
+    let hash = match &mesh.key {
+        MeshKey::Host(key) => digest(digest(HASH_SEED, b"host"), key.as_bytes()),
+        MeshKey::GpuVertices { indices: Some(indices), .. } => digest(digest(HASH_SEED, b"gpu:indices"), indices.as_bytes()),
+        MeshKey::GpuVertices { name, indices: None } => digest(digest(HASH_SEED, b"gpu:vertices"), name.as_bytes()),
+    };
+    let hash = digest(hash, primitive_code(mesh.primitive).as_bytes());
+    digest(digest(hash, &vertex_hash(mesh).to_le_bytes()), &mesh.indices)
 }
 
 fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
@@ -1816,7 +1804,7 @@ fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
         })
     };
     let (mut vertex_bytes, mut vertex_count, mut index_count) = (0i64, 0i64, 0i64);
-    let mut identities: Vec<String> = Vec::new();
+    let mut identity = digest(HASH_SEED, &(meshes.len() as u64).to_le_bytes());
     for mesh in meshes {
         let vlen = mesh.vertex_bytes_len() as i64;
         if mesh.vertex_count <= 0
@@ -1836,7 +1824,7 @@ fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
         vertex_bytes += vlen;
         vertex_count += mesh.vertex_count;
         index_count += mesh.index_count;
-        identities.push(mesh_identity(mesh));
+        identity = digest(identity, &mesh_identity(mesh).to_le_bytes());
     }
     let mut vertices = vec![0u8; vertex_bytes as usize];
     let mut indices = vec![0u8; (index_count * 4) as usize];
@@ -1854,9 +1842,8 @@ fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
         vertex_base += mesh.vertex_count;
         index_offset += mesh.index_count as usize * 4;
     }
-    let identity = digest_hex(identities.join("|").as_bytes());
     Ok(Mesh {
-        key: MeshKey::Host(format!("batch:{}", identity)),
+        key: MeshKey::Host(format!("batch:{identity:032x}")),
         vertices: new_bytes(vertices),
         shared_vertices: None,
         vertex_count,
@@ -1934,16 +1921,14 @@ fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
             let meshes: Vec<&Mesh> = entries.iter().map(|entry| &entry.draw.mesh).collect();
             let mesh = combine_meshes(&meshes)?;
             let vertex_attributes = first.vertex_attributes.as_ref().map(|_| {
-                let attributes: Vec<&(String, bytes)> = entries.iter().map(|e| e.vertex_attributes.as_ref().expect("attributes")).collect();
-                let key = format!(
-                    "batch:attributes:{}",
-                    digest_hex(attributes.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join("|").as_bytes())
-                );
+                let mut hash = HASH_SEED;
                 let mut joined: Vec<u8> = Vec::new();
-                for (_, b) in attributes {
-                    joined.extend_from_slice(&b);
+                for entry in entries {
+                    let (key, bytes) = entry.vertex_attributes.as_ref().expect("attributes");
+                    hash = digest(hash, key.as_bytes());
+                    joined.extend_from_slice(bytes);
                 }
-                (key, new_bytes(joined))
+                (format!("batch:attributes:{hash:032x}"), new_bytes(joined))
             });
             let mut merged = (**first).clone();
             merged.vertex_attributes = vertex_attributes;
@@ -3193,7 +3178,7 @@ pub fn submit(
             && mesh.index_count > 0
             && valid_index_length(mesh)
             && (mesh.shared_vertices.is_none() || blen(&mesh.vertices)==0)
-            && (mesh.vertex_bytes_len() + blen(&mesh.indices) > 0 || matches!(mesh.key, MeshKey::GpuVertices(_)))
+            && (mesh.vertex_bytes_len() + blen(&mesh.indices) > 0 || matches!(mesh.key, MeshKey::GpuVertices { .. }))
     };
     let supported = draws.iter().all(|entry| find_pipeline(value, entry.family, entry.blend, entry.samples).is_some());
     let valid = draws.iter().all(|entry| {

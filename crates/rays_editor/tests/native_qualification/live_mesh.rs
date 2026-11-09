@@ -232,8 +232,9 @@ fn sea_initial_close() {
 // R3/R7: observed maxima 51,561 allocations / 2,822,819 B.
 // R4/R5: observed maxima across runs 51,502 / 2,808,931 B. Never raise.
 // R9: observed 51,365 / 2,804,734 B; retain room for the previously observed 808 B variation.
+// R10: observed 51,358 / 2,803,652 B with numeric hashes and typed mesh keys.
 // Z0 still tracks its allocation source; keep this reduced ceiling until that cause is resolved.
-const SEA_FRAME_BUDGET: (u64,u64) = (51_370,2_806_000);
+const SEA_FRAME_BUDGET: (u64,u64) = (51_365,2_805_000);
 
 fn sea_frames() {
     use rays_editor::{editor,workspace};

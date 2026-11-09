@@ -78,7 +78,7 @@ fn prepared_scene3_validation_and_ownership() {
 #[test]
 fn borrowed_vertices_reuse_indices_with_fresh_empty_host_planes() {
     let mut source = entry().draw.mesh;
-    source.key = MeshKey::GpuVertices("particles".into());
+    source.key = MeshKey::GpuVertices { name: Rc::new("particles".into()), indices: None };
     source.vertices = empty_bytes();
     let mut next = source.clone();
     next.vertices = empty_bytes();
@@ -123,5 +123,49 @@ fn published_shapes_retain_immutable_vertices_without_copying() {
     assert_ne!(vertex_hash(&owned.draw.mesh),hash,"owned mesh mutation stopped reaching its source");
     owned.draw.mesh.shared_vertices=Some(Arc::new(vec![0;72]));
     invalid(owned);
-    assert_eq!(std::mem::size_of::<super::Mesh>(),96,"hot mesh owner layout (two fat Rc<[u8]> byte buffers)");
+    assert_eq!(std::mem::size_of::<super::Mesh>(),88,"hot mesh owner layout (two fat Rc<[u8]> byte buffers)");
+}
+
+#[test]
+fn numeric_content_hash_allocates_nothing() {
+    let source = entry();
+    let mesh = &source.draw.mesh;
+    let uniforms = source.draw.state.transform_uniforms.as_ref().unwrap();
+    let start = std::time::Instant::now();
+    mem_sys::local_reset();
+    for _ in 0..1024 {
+        std::hint::black_box(content_hash(mesh, uniforms));
+    }
+    let allocations = mem_sys::local_alloc_count();
+    let elapsed = start.elapsed();
+    eprintln!("R10 content hashes: {allocations} allocations, {elapsed:?}");
+    assert_eq!(allocations, 0);
+}
+
+#[test]
+fn numeric_hash_parts_and_typed_gpu_keys() {
+    assert_eq!(digest(HASH_SEED, b"abc"), 0xc11ab6d2519bc2b29fa85a2c4f783ca6);
+    assert_ne!(digest(digest(HASH_SEED, b"a"), b"bc"), digest(digest(HASH_SEED, b"ab"), b"c"));
+    assert_ne!(digest(HASH_SEED, b"a"), digest(digest(HASH_SEED, b"a"), b""));
+    let name = Rc::new("vertices\nstream".to_owned());
+    let indices = Rc::new("indices\nplane".to_owned());
+    let direct = MeshKey::GpuVertices { name: name.clone(), indices: None };
+    let indexed = MeshKey::GpuVertices { name, indices: Some(indices.clone()) };
+    let next = MeshKey::GpuVertices { name: Rc::new("other\nstream".to_owned()), indices: Some(indices) };
+    assert_eq!(mesh_key_string(&direct), "gpu:vertices:vertices\nstream");
+    assert_eq!(mesh_key_string(&indexed), "gpu:indices:indices\nplane");
+    assert_eq!(mesh_key_string(&indexed), mesh_key_string(&next));
+    assert_ne!(direct, indexed);
+    let mut a = entry().draw.mesh;
+    let expected = content_hash(&a, b"uniform");
+    a.vertices = new_bytes(a.vertices.to_vec());
+    assert_eq!(content_hash(&a, b"uniform"), expected);
+    a.shared_vertices = Some(Arc::new(a.vertices.to_vec()));
+    a.vertices = empty_bytes();
+    assert_eq!(content_hash(&a, b"uniform"), expected);
+    assert_ne!(content_hash(&a, b"changed"), expected);
+    a.indices = new_bytes(vec![1;12]);
+    assert_ne!(content_hash(&a, b"uniform"), expected);
+    assert_eq!(std::mem::size_of::<Mesh>(), 88);
+    eprintln!("R10 cache layouts: mesh={} texture={}", std::mem::size_of::<Cached>(), std::mem::size_of::<CachedTexture>());
 }

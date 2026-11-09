@@ -230,7 +230,7 @@ fn finish(r: resident, color_buffers: Vec<Buffer>) {
 fn device_entry(r: &resident, key: String, uniforms: Vec<u8>, attributes: &str, host_bytes: Vec<u8>) -> SampledDraw {
     let mut e = entry(&r.f, (0, 0, 4, 4), uniforms);
     e.vertex_attributes = Some((attributes.to_owned(), new_bytes(host_bytes)));
-    e.draw.mesh = Mesh { key: MeshKey::GpuVertices(key), vertices: scene_execution::empty_bytes(), indices: scene_execution::empty_bytes(), ..r.f.mesh.clone() };
+    e.draw.mesh = Mesh { key: MeshKey::GpuVertices { name: Rc::new(key), indices: None }, vertices: scene_execution::empty_bytes(), indices: scene_execution::empty_bytes(), ..r.f.mesh.clone() };
     e
 }
 
@@ -555,7 +555,7 @@ fn gpu_borrowed_vertex_encoder_observation() {
         set_u32(&mut records, record * 16 + 8, u32::MAX);
     }
     let producer = upload("observed-ui-producer", &records);
-    let source = se::register_gpu_vertices(&owner, None, None, None, None, None, "observed-ui", &device, &producer, 8, Box::new(|| true)).unwrap();
+    let source = se::register_gpu_vertices(&owner, None, None, None, None, None, "observed\nui", &device, &producer, 8, Box::new(|| true)).unwrap();
     let indices = new_bytes(common::words(&[0,1,2,0,2,3,4,5,6,4,6,7]));
     let texture = Rc::new(se::SampledTexture {
         key: "observed-white".into(),
@@ -566,10 +566,12 @@ fn gpu_borrowed_vertex_encoder_observation() {
     let draw = Rc::new(SampledDraw {
         family: PipelineFamily::Ui, blend: Blend::Alpha, texture: Some(texture), auxiliary: None, vertex_attributes: None, samples: 1,
         draw: GeometryDraw {
-            mesh: Mesh { key: MeshKey::GpuVertices("observed-ui".into()), vertices: se::empty_bytes(), shared_vertices: None, vertex_count: 8, indices, index_count: 12, primitive: Primitive::TriangleList },
+            mesh: Mesh { key: MeshKey::GpuVertices { name: Rc::new("observed\nui".into()), indices: Some(Rc::new("shared\nhost-indices".into())) }, vertices: se::empty_bytes(), shared_vertices: None, vertex_count: 8, indices, index_count: 12, primitive: Primitive::TriangleList },
             state: State { viewport: (0,0,4,4), scissor: (0,0,4,4), cull: Cull::CullNone, depth_compare: Comparison::Always, depth_write: false, depth_load: Load::Load, depth_clear: 1., transform_uniforms: Some(new_bytes(common::floats(&[0.5,0.,-1.,0.,-0.5,1.]))) },
         },
     });
+    let borrowed = se::PreparedScene3 { entries: vec![draw.clone()] };
+    assert!(!se::borrows_unregistered(&owner, &borrowed));
     let prepared = || Some(("observed-borrowed-plan".into(),1));
     assert!(se::submit(prepared(), &mut || {}, None, &mut runtime, std::slice::from_ref(&draw)).unwrap());
     let expected = vec![255;4*256];
@@ -593,9 +595,9 @@ fn gpu_borrowed_vertex_encoder_observation() {
     assert!(se::submit(prepared(), &mut || {}, None, &mut runtime, std::slice::from_ref(&draw)).unwrap());
     assert_eq!(se::replay_prepared_sampled_resources(None,"observed-borrowed-plan",1,&mut runtime).unwrap(),Some((true,1)));
     assert_eq!(se::upload_bytes(&runtime),uploaded);
-    let next_source = se::register_gpu_vertices(&owner, None, None, None, None, None, "observed-ui-next", &device, &producer, 8, Box::new(|| true)).unwrap();
+    let next_source = se::register_gpu_vertices(&owner, None, None, None, None, None, "observed\nui-next", &device, &producer, 8, Box::new(|| true)).unwrap();
     let mut next = (*draw).clone();
-    next.draw.mesh.key = MeshKey::GpuVertices("observed-ui-next".into());
+    next.draw.mesh.key = MeshKey::GpuVertices { name: Rc::new("observed\nui-next".into()), indices: match &draw.draw.mesh.key { MeshKey::GpuVertices { indices, .. } => indices.clone(), _ => unreachable!() } };
     assert!(Rc::ptr_eq(&next.draw.mesh.indices,&draw.draw.mesh.indices));
     assert!(se::submit(Some(("observed-borrowed-plan".into(),2)), &mut || {}, None, &mut runtime, &[Rc::new(next)]).unwrap());
     assert_eq!(se::upload_bytes(&runtime),uploaded);
@@ -631,7 +633,7 @@ fn gpu_borrowed_vertex_encoder_observation() {
     let mut marks = (*draw).clone();
     marks.family = PipelineFamily::Marks;
     marks.texture = None;
-    marks.draw.mesh.key = MeshKey::GpuVertices("observed-marks".into());
+    marks.draw.mesh.key = MeshKey::GpuVertices { name: Rc::new("observed-marks".into()), indices: None };
     seen.borrow_mut().bindings.clear();
     assert!(se::submit(None, &mut || {}, None, &mut runtime, &[Rc::new(marks)]).unwrap());
     check_pixels(&mut runtime);
@@ -643,6 +645,7 @@ fn gpu_borrowed_vertex_encoder_observation() {
     se::unregister_gpu_vertices(&marks_source);
     se::unregister_gpu_vertices(&next_source);
     se::unregister_gpu_vertices(&source);
+    assert!(se::borrows_unregistered(&owner, &borrowed));
     for buffer in buffers.iter().chain(std::iter::once(&producer)) {
         backend::destroy_buffer(buffer).unwrap();
     }

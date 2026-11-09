@@ -149,7 +149,7 @@ struct packed_mesh {
     source: mesh::view::packed_view,
     mode: scene3::render_mode,
     primitive: Primitive,
-    key: String,
+    key: se::MeshKey,
     vertices: bytes,
     indices: bytes,
     vertex_attributes: (String, bytes),
@@ -157,8 +157,8 @@ struct packed_mesh {
     index_count: i64,
     /// no vertex color is translucent
     opaque: bool,
-    /// a device mesh's key and whether it carries normals
-    gpu: Option<(String, bool)>,
+    /// Whether the borrowed device stream carries normals.
+    gpu_normals: Option<bool>,
 }
 
 struct prepared_cache_entry {
@@ -193,7 +193,7 @@ struct device_indices_entry {
     primitive: Primitive,
     indices: bytes,
     index_count: i64,
-    key: String,
+    key: Rc<String>,
 }
 
 static NEXT_RESOURCE_ID: AtomicI64 = AtomicI64::new(1);
@@ -784,7 +784,7 @@ fn prepared_bytes(p: &se::PreparedScene3) -> i64 {
 /// layers (one per viewport); the frame in flight is its pins', not the cache's. Layers of host
 /// meshes are bounded only by the cache.
 pub(crate) fn borrows_device(p: &se::PreparedScene3) -> bool {
-    p.entries.iter().any(|e| matches!(e.draw.mesh.key, se::MeshKey::GpuVertices(_)))
+    p.entries.iter().any(|e| matches!(e.draw.mesh.key, se::MeshKey::GpuVertices { .. }))
 }
 
 fn trim_prepared_cache(list: &mut IdList) {
@@ -989,14 +989,15 @@ fn find_packed(predicate: &dyn Fn(&packed_mesh) -> bool) -> Option<Rc<packed_mes
 /// A device mesh's draw: its indices follow its topology (a triangle mesh's corners, the same
 /// array frame after frame while the topology is; a cloud's count) and its plain attribute
 /// record its count, so they are packed once, and the renderer keeps the indices under their own
-/// key, not per borrow of the positions (Scene_execution's `Gpu_vertices "borrow\nindices"`).
+/// key, independently of the borrowed vertex stream.
 fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, bool)) -> Result<Rc<packed_mesh>, error> {
     let (key, normals) = device;
+    let key = Rc::new(key);
     let source = mesh::view::unread(m);
     let count = mesh::vertex_count(m);
     let points = mode == scene3::render_mode::Vertices || source.mode == mesh::mode::Points;
     let plain = source.colors.is_none() && source.tex_coords.is_none();
-    let native: Option<(Primitive, bytes, i64, String)> = if let Some(index_count) = mesh::view::device_index_count(m) {
+    let native: Option<(Primitive, bytes, i64, Rc<String>)> = if let Some(index_count) = mesh::view::device_index_count(m) {
         Some((Primitive::TriangleList, new_bytes(Vec::new()), index_count, key.clone()))
     } else {
         let found = DEVICE_INDICES.with(|list| {
@@ -1024,7 +1025,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
                     })
                 };
                 made.map(|(primitive, indices)| {
-                    let packed = (primitive, pack_indices(&indices), indices.len() as i64, format!("scene3:device-indices:{}", fresh_resource_id()));
+                    let packed = (primitive, pack_indices(&indices), indices.len() as i64, Rc::new(format!("scene3:device-indices:{}", fresh_resource_id())));
                     DEVICE_INDICES.with(|list| {
                         let mut list = list.borrow_mut();
                         list.insert(
@@ -1053,7 +1054,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
             source: source.clone(),
             mode,
             primitive,
-            key: if mesh::view::device_index_count(m).is_some() { key.clone() } else { format!("{key}\n{indices_key}") },
+            key: se::MeshKey::GpuVertices { name: key.clone(), indices: if mesh::view::device_index_count(m).is_some() { None } else { Some(indices_key) } },
             vertices: new_bytes(Vec::new()),
             indices,
             vertex_attributes: (
@@ -1064,7 +1065,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
             index_count,
             opaque: mesh::view::device_color_width(m) != 4
                 && source.colors.as_ref().is_none_or(|colors| colors.iter().all(|c| c.a == 255)),
-            gpu: Some((key, normals)),
+            gpu_normals: Some(normals),
         })),
         _ => Err(error::Invalid_mesh),
     }
@@ -1145,7 +1146,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed
             let id = fresh_resource_id();
             let (key, indices) = match &reused {
                 Some(packed) => (packed.key.clone(), packed.indices.clone()),
-                None => (format!("scene3:{id}"), pack_indices(&native_indices)),
+                None => (se::MeshKey::Host(format!("scene3:{id}")), pack_indices(&native_indices)),
             };
             let packed = Rc::new(packed_mesh {
                 mesh: m.clone(),
@@ -1159,7 +1160,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed
                 vertex_count: view.vertices.x.len() as i64,
                 index_count: native_indices.len() as i64,
                 opaque: view.colors.as_ref().is_none_or(|colors| colors.iter().all(|c| c.a == 255)),
-                gpu: None,
+                gpu_normals: None,
             });
             if let Some(context) = &cache {
                 let key: Item = Rc::new((m.clone(), mode));
@@ -1255,7 +1256,7 @@ pub(crate) fn prepare(resources: &resources, cam: &camera::Camera, viewport: vie
                         Ok(t) => t,
                     };
                     let mesh_ = se::Mesh {
-                        key: if packed.gpu.is_none() { se::MeshKey::Host(packed.key.clone()) } else { se::MeshKey::GpuVertices(packed.key.clone()) },
+                        key: packed.key.clone(),
                         vertices: packed.vertices.clone(),
                         shared_vertices: None,
                         vertex_count: packed.vertex_count,
@@ -1284,7 +1285,7 @@ pub(crate) fn prepare(resources: &resources, cam: &camera::Camera, viewport: vie
                     };
                     let add = |mut transform_uniforms: Vec<u8>, entries: &mut Vec<Draw>| {
                         // a device mesh's packed positions (word 79) and normals (word 80)
-                        if let Some((_, normals)) = &packed.gpu {
+                        if let Some(normals) = &packed.gpu_normals {
                             put32(&mut transform_uniforms, 79, 1.);
                             put32(&mut transform_uniforms, 80, if *normals { 1. } else { 0. });
                             let width_ = mesh::view::device_color_width(&packed.mesh);

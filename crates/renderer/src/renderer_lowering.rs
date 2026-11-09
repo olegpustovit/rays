@@ -498,7 +498,7 @@ pub fn lower_scene2(
             }
             Command::Shapes(shapes) => {
                 let gpu_key = match resolve_gpu(shapes) {
-                    Ok(key) => key,
+                    Ok(key) => key.map(Rc::new),
                     Err(message) => {
                         failure = Some(message);
                         None
@@ -534,7 +534,7 @@ pub fn lower_scene2(
                         draw: scene_execution::GeometryDraw {
                             mesh: Mesh {
                                 key: match &gpu_key {
-                                    Some(key) => MeshKey::GpuVertices(key.clone()),
+                                    Some(key) => MeshKey::GpuVertices { name: key.clone(), indices: None },
                                     None => MeshKey::Host(format!("shapes:{}", slot_key)),
                                 },
                                 vertices: if gpu_key.is_none() { s.vertices.clone() } else { empty_bytes() },
