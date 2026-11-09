@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rays Second Simplification</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --fg:#1b2230; --muted:#5b6474; --line:#dde1e8;
+  --accent:#2c5f8f; --accent-soft:#e3edf7;
+  --low:#2e7d4f; --med:#a86a12; --high:#b23a3a;
+  --body:"Instrument Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --panel:#1a2029; --fg:#e4e8ef; --muted:#97a1b1; --line:#2c3440;
+  --accent:#7fb0e0; --accent-soft:#1e2c3c; --low:#6cc495; --med:#e0a957; --high:#ec7f7f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --panel:#1a2029; --fg:#e4e8ef; --muted:#97a1b1; --line:#2c3440;
+  --accent:#7fb0e0; --accent-soft:#1e2c3c; --low:#6cc495; --med:#e0a957; --high:#ec7f7f; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 80px}
+main{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:2.1rem;font-weight:700}
+h2{font-size:1.4rem;font-weight:700;padding-bottom:6px;border-bottom:1px solid var(--line)}
+h3{font-size:1.05rem;font-weight:600}
+p{margin:0;max-width:72ch}
+section{display:flex;flex-direction:column;gap:14px}
+.eyebrow{font:500 .75rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.lede{font-size:1.08rem;color:var(--muted)}
+code{font-family:var(--mono);font-size:.84em;background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.stat b{display:block;font:600 1.45rem var(--mono);font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:.85rem}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:860px;font-size:.86rem}
+th,td{text-align:left;vertical-align:top;padding:9px 11px;border-bottom:1px solid var(--line)}
+th{font:500 .7rem var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td:first-child{width:52px}
+.id{font:600 .8rem var(--mono);color:var(--accent);white-space:nowrap}
+.risk{display:inline-block;font:500 .72rem var(--mono);padding:1px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.risk.low{color:var(--low)} .risk.med{color:var(--med)} .risk.high{color:var(--high)}
+.note{border-left:3px solid var(--med);padding:8px 14px;background:var(--panel);border-radius:0 6px 6px 0;max-width:84ch}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.cols>div{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+ul,ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+nav.track{display:flex;flex-wrap:wrap;gap:6px 14px}
+nav.track a{font-size:.88rem;text-decoration:none;color:var(--accent)}
+a{color:var(--accent)}
+.wavehead{display:flex;flex-direction:column;gap:6px}
+.wavehead .meta{color:var(--muted);font-size:.9rem;max-width:84ch}
+
+.tag{display:inline-block;font:500 .72rem var(--mono);padding:1px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.tag.pending{color:var(--muted)} .tag.active{color:var(--med)} .tag.done{color:var(--low)} .tag.skip{color:var(--muted);opacity:.7}
+#progress-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+#progress-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px}
+#progress-grid div b{display:block;font:600 1.35rem var(--mono);font-variant-numeric:tabular-nums}
+#progress-grid div span{font-size:.82rem;color:var(--muted)}
+#progress-table{font-size:.82rem}
+#progress-table td,#progress-table th{padding:6px 8px}
+#progress-note{font-size:.85rem;color:var(--muted);margin:0;max-width:84ch}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+
+<header style="display:flex;flex-direction:column;gap:12px">
+  <div class="eyebrow">Proposal · audit at dev e2e4ab02 · 2026-11-09</div>
+  <h1>Rays second simplification pass</h1>
+  <p class="lede">This is the follow-up to the <a href="https://artifacts.microapps.space/a/2beyggs594gc">first plan</a>, whose 63 items are done. A second audit across all 51 crates found 58 changes. The goal is a Rust engine that is fast, compact and does not allocate in steady state, with no OCaml compatibility left. Finished items from the first plan are not proposed again.</p>
+  <div class="note"><b>Rule for this pass: OCaml compatibility is gone.</b> Nothing has to keep OCaml's sort order, its 63-bit hashes, its float printing or its random seeds. Goldens are Rust-owned snapshots: when a change alters output on purpose, its commit regenerates the affected goldens. They never block a performance change. Four things remain invariant:<ul><li>Lisp semantics as written in <code>specification/</code>; the spec is edited in the same commit when a change alters it.</li><li>Determinism.</li><li>Exact equality between sequential and parallel runs.</li><li>Identical results on macOS and Windows.</li></ul></div>
+  <nav class="track">
+    <a href="#status">Status</a><a href="#progress">Progress</a><a href="#numbers">Numbers</a><a href="#run">Runbook</a><a href="#x">X: bugs</a><a href="#b">B: build graph</a><a href="#a">A: dead code</a><a href="#d">D: duplicates</a><a href="#z">Z: zero alloc and speed</a><a href="#r">R: hot paths</a><a href="#g">G: GPU layering</a><a href="#order">Order</a><a href="#kept">Kept</a>
+  </nav>
+</header>
+
+
+<section id="status">
+  <h2>Status: 58 items open</h2>
+  <p>Follow-up to the <a href="https://artifacts.microapps.space/a/2beyggs594gc">first plan</a> (63/63 on <code>dev</code>). Repository ledger: <code>PROGRESS2.md</code> at the workspace root carries commit evidence; this page mirrors item status from the artifact database when writers update it.</p>
+  <div class="stats" id="status-stats" aria-live="polite">
+    <div class="stat"><b id="stat-done">0</b><span>items done</span></div>
+    <div class="stat"><b id="stat-active">0</b><span>active</span></div>
+    <div class="stat"><b>58</b><span>total</span></div>
+    <div class="stat"><b id="stat-pending">58</b><span>pending</span></div>
+  </div>
+</section>
+
+<section id="progress">
+  <h2>Execution progress</h2>
+  <p id="progress-note">Loading tracker…</p>
+  <div id="progress-panel">
+    <div id="progress-grid" aria-live="polite"></div>
+    <div class="scroll" id="progress-table-wrap" hidden><table id="progress-table"><thead><tr><th>ID</th><th>Wave</th><th>Status</th><th>Commit / note</th></tr></thead><tbody id="progress-tbody"></tbody></table></div>
+  </div>
+</section>
+
+<section id="numbers">
+  <h2>Where things stand</h2>
+  <div class="stats">
+    <div class="stat"><b>5.8–7.4 s</b><span>warm rebuild of <code>rays_bin</code> after a public-API edit in rays_math, flow_ir, rdk_ops or flow_check (measured)</span></div>
+    <div class="stat"><b>~101</b><span>test binaries: 50 library targets (11 contain no tests), 47 <code>tests/*.rs</code>, 4 bins</span></div>
+    <div class="stat"><b>2–3×</b><span>times flow_sop, editor_document, flow_native and rays_editor are built: once for <code>cargo build</code>, again for each test feature combination (13 + 12 flow_sop fingerprints)</span></div>
+    <div class="stat"><b>45 GB</b><span><code>target/debug</code>, with 18 <code>librays_editor</code> and 22 <code>libflow_sop</code> rlibs</span></div>
+    <div class="stat"><b>240 s</b><span>process time for <code>cargo t -p flow_sop</code> on 4 workers, right at the 60 s cap; about 1.4 s of each case is per-process setup</span></div>
+    <div class="stat"><b>1,210 / 1,390</b><span>allocations per idle frame, empty editor / basic.rays (current guard limits). Target: 0</span></div>
+    <div class="stat"><b>1,139</b><span>mentions of OCaml in 379 Rust files, plus about 30 <code>ocaml_*</code> helper functions</span></div>
+    <div class="stat"><b>239 + 119</b><span><code>Arc&lt;dyn Fn&gt;</code> + <code>Box&lt;dyn Fn&gt;</code>; another 118 <code>&amp;dyn Fn</code> parameters called once per element in rdk/sop</span></div>
+    <div class="stat"><b>−10…13k</b><span>estimated net lines removed, plus one crate (<code>metal</code>)</span></div>
+  </div>
+  <p>The edit-and-rebuild loop is already fast. The bigger costs are the same crates being compiled again under different feature sets, too many test binaries to link, and per-call work in the Metal and evaluator hot paths. Line savings come mostly from the Metal layering and from helpers that the port copied into many files.</p>
+  <div class="note"><b>The 63-bit integers are not fully gone.</b> Wave I removed them from the language. They remain in three places:<ul><li>the settings parser, which is a bug (X2);</li><li>OCaml <code>max_int</code>/<code>min_int</code> caps and sentinels in about a dozen runtime places (X2);</li><li>the hash and random functions, through 29 <code>wrap_int63</code> calls. These were kept only to match OCaml seeds; Z5 replaces them.</li></ul></div>
+</section>
+
+<section id="x">
+  <div class="wavehead"><h2>Wave X: bugs the audit found</h2>
+  <p class="meta">Fix these first. Each gets a regression that fails on current <code>dev</code>.</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding and where</th><th>Action</th><th>Lines</th><th>Risk</th><th>Regression check</th></tr></thead>
+    <tbody>
+    <tr><td class="id">X1</td><td>Two engines give different results for min and max of signed zeros. The walker uses <code>f64::min</code>/<code>max</code> (<code>flow_check/src/op.rs:712</code>), which may return either zero. The packed engine's <code>ocaml_min</code>/<code>ocaml_max</code> (<code>flow_ir/src/packed.rs:130-146</code>) always order −0 below +0. <code>ldexp</code> and the unary math functions are also written twice (<code>op.rs:668,686</code>, <code>packed.rs:150,212</code>).</td><td>Move <code>binary_apply</code>, <code>unary_apply</code> and <code>ldexp</code> into <code>flow_syntax::packed_ops</code>, next to the existing <code>integer_apply</code>. Specify IEEE-754 minimum/maximum (−0 below +0, NaN propagates) in the spec, with one implementation that every engine and shader target uses.</td><td class="n">−45</td><td><span class="risk low">low</span></td><td>New case: walker equals packed for <code>(min -0. 0.)</code> and <code>(max 0. -0.)</code></td></tr>
+    <tr><td class="id">X2</td><td>63-bit leftovers. The settings parser (<code>editor_core/src/store.rs:160-174</code>) wraps integers to 63 bits, so a value between 2^62 and 2^63−1 becomes a Float there but an Int in the workspace. OCaml <code>max_int</code>/<code>min_int</code> also remains as caps and sentinels: <code>runtime_resources.rs:21</code>, <code>renderer/side_lru.rs:18</code>, <code>renderer.rs:115</code>, <code>renderer_lowering.rs:230,233</code>, <code>ogpu_metal/queue.rs:170</code>, <code>texture.rs:171</code>, <code>marks_scene.rs:290</code>, <code>workspace_images.rs:575</code>, <code>rdk_ops/clean.rs:16</code>, <code>flow_sop/operators.rs:688,1339</code>, <code>pxui/ui_core.rs:26</code>.</td><td>Parse settings integers with <code>parse::&lt;i64&gt;()</code>, matching the lexer. Replace the caps with <code>i64::MAX</code>/<code>MIN</code> or <code>Option</code>, keeping any cap that is a real resource limit under a correct name. Keep the frozen hashes.</td><td class="n">−60</td><td><span class="risk low">low</span></td><td><code>test_store</code>: a 2^62 literal decodes as Int</td></tr>
+    <tr><td class="id">X3</td><td>Cook-time rebuild failures lose their diagnostic. <code>type Build</code> returns a bare node (<code>flow_sop/src/lower.rs:610</code>), so its callers at <code>:982,1397,1455,2836</code> stash the error in an <code>Arc&lt;Mutex&lt;Option&lt;Diagnostic&gt;&gt;&gt;</code> that nothing reads. The user only sees "E_LOWER failed node".</td><td>Make <code>Build</code> and <code>per_context</code> return <code>R&lt;node::T&gt;</code>, and use <code>make(context)?</code> in the cook closure.</td><td class="n">−50</td><td><span class="risk low">low</span></td><td>A context-dependent failure reports its real code</td></tr>
+    <tr><td class="id">X4</td><td>The same number scrubs at different speeds in two places: one integer step per 5 points in text (<code>pxui/src/ui_text.rs:265</code>), but per 6 points in the inspector (<code>param/src/lib.rs:929</code>).</td><td>Use one scrub function in both places.</td><td class="n">−20</td><td><span class="risk low">low</span></td><td>Both surfaces give the same step for the same drag</td></tr>
+    <tr><td class="id">X5</td><td>The inspector builds fields from a literal in two near-copies that disagree. <code>walk_sub</code> accepts vectors of 2–4 elements; <code>operator_rows</code> accepts exactly 3 and is the only one that checks the Int type (<code>rays_editor/src/editor_inspect.rs:522-597</code>, <code>:997-1068</code>).</td><td>One <code>literal_fields</code> helper, with the vector-length rule chosen explicitly.</td><td class="n">−50</td><td><span class="risk low">low</span></td><td><code>test_editor_inspect</code> covers vec2 and vec4 operator rows</td></tr>
+    <tr><td class="id">X6</td><td>The two backends handle the host view of a mapped buffer differently. Metal fills it from the buffer and never releases it (<code>ogpu_metal/src/backend.rs:133-200</code>). Vulkan zero-fills it and drops it on release (<code>ogpu_vulkan/src/backend.rs:329-385</code>).</td><td>Move the view and <code>flush</code>/<code>invalidate</code> into <code>ogpu_core</code> on top of <code>read</code>/<code>write</code>, so <code>DriverMapping</code> shrinks to <code>readback</code>.</td><td class="n">−130</td><td><span class="risk med">med</span></td><td><code>ogpu_mock</code>: after a release, the view reads back again</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="b">
+  <div class="wavehead"><h2>Wave B: build graph and test links</h2>
+  <p class="meta">These change no behaviour. They give the biggest compile-time win, because the same crates stop being built again for each feature set and test layout.</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding and where</th><th>Action</th><th>Lines</th><th>Risk</th><th>Regression check</th></tr></thead>
+    <tbody>
+    <tr><td class="id">B1</td><td>Two test-only features make Cargo build the editor chain in 2–3 variants. They are <code>flow_sop/test-support</code> (<code>Cargo.toml:32-34</code>, enabled by <code>rays_editor/Cargo.toml:48</code>) and <code>test-hooks</code> in <code>rays_editor</code> (<code>:8,64,72</code>) and <code>pxui_graph</code> (<code>:8,49</code>). Also, <code>cargo t -p rays_editor</code> without the feature silently skips <code>gpu_editor</code> and <code>window_editor_smoke</code>. This partly reverses A5.</td><td>Compile the roughly 670 gated lines unconditionally as <code>#[doc(hidden)] pub</code>, then delete both features and the <code>required-features</code> entries.</td><td class="n">−25</td><td><span class="risk low">low</span></td><td>After <code>cargo t -p rays_editor</code>, <code>cargo build -p rays_bin -v</code> shows flow_sop as Fresh</td></tr>
+    <tr><td class="id">B2</td><td>flow_sop has a dev-dependency on editor_document, which depends on flow_sop. So every <code>cargo t -p flow_sop</code> builds flow_sop, then editor_document, then flow_sop again. The dependency is used only by <code>lisp_sop/test_workspace_cook.rs</code>, <code>test_projection.rs</code> and <code>test_workspace_edit.rs</code>.</td><td>Move those three modules (about 1.9k lines) into editor_document's tests and drop the dev-dependency. That also takes about 24 s of case time off flow_sop's capped run.</td><td class="n">0</td><td><span class="risk low">low</span></td><td>Same cases in <code>cargo t -p flow_sop</code> plus <code>-p editor_document</code></td></tr>
+    <tr><td class="id">B3</td><td>The <code>check</code>/<code>fmt</code>/<code>web</code> e2e test (<code>rays_bin/tests/e2e.rs</code>) uses only the 152-line <code>rays_bin/src/lib.rs</code>. Because it lives in rays_bin, it waits for rays_editor, pxui, the renderer and the GPU backends to build.</td><td>Move <code>lib.rs</code> and <code>e2e.rs</code> into <code>web_export</code>, which already has every needed dependency. <code>main.rs</code> calls it from there.</td><td class="n">0</td><td><span class="risk low">low</span></td><td><code>cargo t -p web_export --test e2e</code>; <code>gate deps</code></td></tr>
+    <tr><td class="id">B4</td><td>There are 47 integration-test binaries: flow_gpu 13, rays_pathtracer 6, renderer 5 (<code>gpu_marks_1x</code>/<code>_2x</code> compile the same module), flow_shader 3, and pxui, ogpu_metal and runtime_resources 2 each. <code>tests/common/window.rs</code> is byte-identical in 5 crates, with 4 more copies of <code>run()</code>. <code>flow_gpu/tests/common/test_program.rs</code> and <code>flow_web/src/core_fixtures.rs</code> are copies of <code>flow_ir::test_support</code>.</td><td>One <code>harness=false</code> binary per crate, the way B3 did for rays_editor. Keep one shared window and runner file, included with <code>#[path]</code>. Expose <code>flow_ir::test_support</code> as a normal <code>#[doc(hidden)]</code> module, not behind a feature (see B1).</td><td class="n">−1,250</td><td><span class="risk low">low</span></td><td>Each crate lists the same case names before and after</td></tr>
+    <tr><td class="id">B5</td><td>11 library targets have no unit tests: flow_shader, mem_sys, metal, metal_sys, ogpu_metal, pxui, pxui_graph, rays_math_sys, rays_pathtracer, runtime_resources and vulkan_sys. The <code>print_shader</code> binary has none either. Each one still links a test binary and runs <code>--list</code>.</td><td>Add <code>[lib] test = false</code>. Add a gate rule that rejects a <code>#[test]</code> in a crate with <code>test = false</code>, so new tests cannot be silently skipped.</td><td class="n">+20</td><td><span class="risk low">low</span></td><td>Gate shape rule</td></tr>
+    <tr><td class="id">B6</td><td>Leftovers: <code>[profile.e2e|gpu|slow]</code> in the root <code>Cargo.toml</code>, where <code>--profile gpu</code> builds a whole separate target tree; "nextest" text in 9 runner files; and gate rules for crates that no longer exist (<code>tools/gate/src/main.rs:858-1002,1044-1080,1299,1518-1545</code>).</td><td>Delete them. <code>RAYS_SLOW=1</code> already covers the slow profile.</td><td class="n">−185</td><td><span class="risk low">low</span></td><td><code>cargo t -p rays-t</code>, <code>-p gate</code>; <code>gate deps</code></td></tr>
+    <tr><td class="id">B7</td><td>rdk_boolean depends on all of rdk_ops but uses only four modules (deletion, dissolve, edge_collapse, fuse_reduce; about 5.4k lines with what they pull in) at <code>boolean_materialization.rs:18</code>. So rdk_boolean (8.2 s cold) cannot start until rdk_ops (17.4 s cold) finishes.</td><td>Move those modules into rdk_geom or a small crate below both, so rdk_ops and rdk_boolean build in parallel. Confirm with cargo-timings first.</td><td class="n">0</td><td><span class="risk med">med</span></td><td>cargo-timings critical path; <code>gate deps</code></td></tr>
+    <tr><td class="id">B8</td><td>122 editor functions take <code>impl Into&lt;ModelView&gt;</code>, so each is compiled up to three times (<code>editor_model.rs:559-592</code>).</td><td>Take <code>&amp;ModelView</code> instead; it is <code>Copy</code>.</td><td class="n">−120</td><td><span class="risk low">low</span></td><td><code>cargo t -p rays_editor</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="a">
+  <div class="wavehead"><h2>Wave A: dead code</h2>
+  <p class="meta">Pure deletion. Making modules private first lets the compiler find dead code that grep cannot.</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding and where</th><th>Action</th><th>Lines</th><th>Risk</th><th>Regression check</th></tr></thead>
+    <tbody>
+    <tr><td class="id">A1</td><td>In <code>metal_sys/src/registry.rs:33-709</code>, the metadata tables (<code>BINDINGS</code>, <code>ENUMS</code>, <code>RECORDS</code>, <code>HANDLE_KINDS</code> and 127 <code>KIND_*</code> constants) have no references. 11 of the 81 FFI wrappers have no callers. 110 entry points still use <code>caml_rays_*</code> names, and 11 of those only forward to the <code>rays_*</code> versions.</td><td>Delete the tables, the unused wrappers with their <code>.mm</code> bodies, and the forwarders. Keep <code>mod record</code>.</td><td class="n">−800</td><td><span class="risk low">low</span></td><td><code>cargo check -p ogpu_metal</code></td></tr>
+    <tr><td class="id">A2</td><td>Every rdk_ops module is <code>pub mod</code>, and 196 of its 299 <code>pub fn</code> are never used outside the crate (67 of 80 in <code>subdivide_refine.rs</code>, 49 of 65 in <code>remesh.rs</code>).</td><td>Make internals <code>pub(crate)</code>, keep the entry points public, then delete whatever <code>dead_code</code> reports. Do the same for <code>rays</code>, with clippy turned back on (<code>rays/src/lib.rs:1</code> allows <code>clippy::all</code>; 76 types still have lowercase OCaml names).</td><td class="n">−300…700</td><td><span class="risk low">low</span></td><td><code>cargo check --workspace --all-targets</code></td></tr>
+    <tr><td class="id">A3</td><td><code>cfmt</code> builds C (<code>cfmt_sys.c</code> with <code>build.rs</code>) for a <code>strtod_l</code> fallback that never runs, because Rust's parser has already accepted every form first. Its only other C call is <code>ldexp</code>. 17 crates depend on cfmt.</td><td>Delete the C file, <code>build.rs</code> and the <code>cc</code> dependency. Implement <code>ldexp</code> as two <code>powi</code> scalings.</td><td class="n">−110</td><td><span class="risk low">low</span></td><td>A cfmt test over hex, subnormal, <code>1.</code>, <code>.5</code>, <code>+inf</code> and underscore literals</td></tr>
+    <tr><td class="id">A4</td><td>Assorted dead code:<ul><li>10 <code>fn _unused</code> stubs that exist only to silence import warnings</li><li><code>flow_sop::flow_manifest</code></li><li>the unreachable <code>Primitive::Exp</code></li><li><code>subdivide_refine::output_child_slot</code>, <code>session::volatile_is</code>, <code>custom::create_args</code></li><li><code>Change</code> equality computed by formatting both values as strings (<code>scope_state.rs:53</code>)</li><li>an <code>equal</code> closure in <code>param</code> that is always <code>a == b</code></li></ul></td><td>Delete them.</td><td class="n">−140</td><td><span class="risk low">low</span></td><td><code>cargo check --workspace --all-targets</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="d">
+  <div class="wavehead"><h2>Wave D: duplicates left by the port</h2>
+  <p class="meta">The port re-created the same helper in each file it translated. Each family becomes one function in the crate that owns the concept. Where copies behave differently on purpose, they keep that behaviour. Unifying them must not change which union-find root wins, which zero sign comes out, or how NaN propagates.</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding and where</th><th>Action</th><th>Lines</th><th>Risk</th><th>Regression check</th></tr></thead>
+    <tbody>
+    <tr><td class="id">D1</td><td>Union-find is written 12 times, with two policies: the smaller index becomes the root, or union by rank (<code>poly_fill.rs:72</code>, <code>dissolve.rs:281</code>, <code>boolean_cells.rs:255</code>, …).</td><td>One <code>DisjointSet</code> in <code>rdk_core::support</code> with <code>union_min</code> and <code>union_rank</code>.</td><td class="n">−250</td><td><span class="risk low">low</span></td><td><code>rdk_ops dissolve</code>, <code>rdk_boolean</code></td></tr>
+    <tr><td class="id">D2</td><td>There are four hand-written heap sorts (<code>fuse_rules.rs:246-356</code> ×3, <code>ray.rs:227</code>), and <code>boolean_face_arrangement.rs:179</code> uses an O(n²) insertion sort.</td><td>Use <code>sort_unstable_by</code> where the order is total, and <code>sort_by</code> for the stable one. <code>ocaml_sort_keyed</code>/<code>ocaml_sort</code> become a stable <code>sort_by_key</code> with an explicit tie key, and the boolean goldens are regenerated.</td><td class="n">−150</td><td><span class="risk low">low</span></td><td><code>rdk_ops fuse</code>, <code>rdk_boolean</code></td></tr>
+    <tr><td class="id">D3</td><td><code>exact_dyadic.rs</code> implements its big-integer arithmetic twice: heap <code>T</code> (16-237) and the arena engine (322-720). Every operation on <code>T</code> allocates.</td><td>One engine: 64-bit limbs with <code>u128</code> products, written into stack or arena scratch space instead of a new <code>Vec</code> per operation. Regenerate the boolean goldens. Expected speedup of exact predicates: 2–4×.</td><td class="n">−300</td><td><span class="risk med">med</span></td><td><code>rdk_geom exact</code>, <code>implicit_point</code></td></tr>
+    <tr><td class="id">D4</td><td>Float helpers are copied many times: <code>float_compare</code> ×8 and <code>fmin</code>/<code>fmax</code> ×12.</td><td>One module in rays_math with a single NaN policy (<code>total_cmp</code> for ordering). Delete <code>ocaml_float_compare</code>, <code>ocaml_min</code>, <code>ocaml_max</code> and <code>ocaml_float_*</code>.</td><td class="n">−120</td><td><span class="risk low">low</span></td><td><code>rdk_geom</code></td></tr>
+    <tr><td class="id">D5</td><td>Small rdk helpers: string quoting ×7, <code>owner_count</code>/<code>owner_name</code> ×7 each, <code>merge_group</code> ×5, <code>blank</code> ×9, and the <code>at_domains</code> test helper ×12.</td><td>Put them on <code>geometry</code>/<code>group</code>/<code>attribute</code> in rdk_core, and add <code>parallel::with_domains</code>.</td><td class="n">−355</td><td><span class="risk low">low</span></td><td><code>rdk_ops poly_</code>, <code>transform</code></td></tr>
+    <tr><td class="id">D6</td><td>"Grain must be positive" is checked 98 times, and <code>unwrap_or(16_384)</code> appears 53 times.</td><td>One <code>support::grain(op, Option&lt;i64&gt;)</code>, still called once per public operation.</td><td class="n">−250</td><td><span class="risk med">med</span></td><td>The 17 grain-0 error tests</td></tr>
+    <tr><td class="id">D7</td><td><code>boolean_cells.rs:134-250,389-428</code> has its own 3D bounding-box tree, sorted with a comparator that polls cancellation through a <code>RefCell</code>.</td><td>Use <code>rdk_geom::bounds3_index</code> and sort the candidates, which keeps the order deterministic.</td><td class="n">−130</td><td><span class="risk med">med</span></td><td><code>rdk_boolean cells</code>, parallel-equality signatures</td></tr>
+    <tr><td class="id">D8</td><td>The op-name table is written four times: <code>packed_ops.rs:35</code>, <code>core_lower.rs:375</code>, <code>core_ir.rs:1169</code> (the reverse direction) and <code>op.rs:203</code>. <code>guarded</code>/<code>unguarded</code> is copied into 5 printers.</td><td>One <code>const PRIMITIVES: &amp;[(&amp;str, Primitive)]</code> for both directions, and one method on <code>Instruction</code>.</td><td class="n">−155</td><td><span class="risk low">low</span></td><td>flow_ir and flow_web goldens byte-identical</td></tr>
+    <tr><td class="id">D9</td><td>The sop crate repeats a pattern per node: 32 <code>Parameters</code> structs, about 574 lines of <code>from_values</code> and 37 copies of <code>decl()</code>/<code>factory()</code>. Each <code>Parameters</code> copies <code>rdk_ops::*::Params</code> field for field, and the spec builders are written three different ways.</td><td>One <code>decl::native(&amp;META, specs, operator)</code>. Read the values straight into the rdk <code>Params</code>. Update <code>sop/PORTING.md</code>.</td><td class="n">−450…700</td><td><span class="risk med">med</span></td><td>manifest golden byte-identical; <code>sopcat_manifest</code></td></tr>
+    <tr><td class="id">D10</td><td>The editor has five integer parsers modelled on OCaml's <code>int_of_string</code> (<code>kit.rs:188</code>, <code>literal_edit.rs:43</code>, <code>store.rs:138</code>, <code>param:970</code>, <code>sop/support.rs:119</code>), plus wrappers <code>ocaml_round</code>, <code>ocaml_float_max/min</code>, <code>ocaml_trim</code> and <code>string_of_float</code>.</td><td>Use <code>parse::&lt;i64&gt;</code> as the lexer does, and the <code>f64</code> methods.</td><td class="n">−180</td><td><span class="risk low">low</span></td><td>Shares the X2 case</td></tr>
+    <tr><td class="id">D11</td><td>Types defined twice:<ul><li>The layout enums: <code>layout_edit.rs:17-35</code> copies <code>editor_core::panels</code>, and <code>Side</code> is in <code>chrome.rs:18</code>.</li><li><code>Frame</code>: <code>editor_core/frame.rs</code> and <code>rays/frame.rs</code>, converted by <code>ec_frame.rs</code>, with each frame's input cloned about 8 times.</li></ul></td><td>One set of panel types. Move <code>Frame</code> into <code>input</code>, pass <code>&amp;Frame</code>, and delete <code>ec_frame.rs</code>.</td><td class="n">−95</td><td><span class="risk low">low</span></td><td><code>editor_core</code>, <code>gpu_editor alloc_budget</code></td></tr>
+    <tr><td class="id">D12</td><td>A separate value type and s-expression codec exist for a two-key settings file, which is read twice at startup (<code>store.rs:103-295</code>). Text helpers are duplicated between the text pane and pxui (<code>text_pane.rs:1496</code> vs <code>ui_text.rs:121</code>), and <code>plural</code> is defined twice.</td><td>Read the two keys with <code>flow_syntax</code>, once. Use the pxui helpers and <code>char_indices</code>.</td><td class="n">−170</td><td><span class="risk low">low</span></td><td><code>test_store</code>, <code>test_text_pane</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="z">
+  <div class="wavehead"><h2>Wave Z: zero steady-state allocation and raw speed</h2>
+  <p class="meta">These items depended on OCaml compatibility, which is no longer required. The target: an idle frame and a warm cook with unchanged inputs allocate nothing. A cook whose inputs changed allocates only for its outputs; its scratch space is reused. The counting allocator in <code>mem_sys</code> already measures this. Z0 turns it into the gate that every other item has to move.</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding and where</th><th>Action</th><th>Lines</th><th>Risk</th><th>Regression check</th></tr></thead>
+    <tbody>
+    <tr><td class="id">Z0</td><td>The allocation guards allow 1,210 to 1,420 allocations per frame (<code>rays_editor/tests/native_qualification/alloc_budget.rs:25-27</code>). The walker, store and subdivide guards in <code>flow_sop/src/test_alloc_budget.rs</code> allow allocations that grow with element count.</td><td>Lower the limits after every R/Z commit, down to the measured value. End state: 0 allocations per idle frame (empty, basic, bare). A warm cook with unchanged inputs allocates 0; a cook with changed inputs allocates a fixed amount independent of element count, except for its own outputs. Add a <code>gpu_sea</code> frame guard.</td><td class="n">+40</td><td><span class="risk low">low</span></td><td>The guards themselves, with limits only ever lowered</td></tr>
+    <tr><td class="id">Z1</td><td>Every frame rebuilds its buffers. There are 4,088 <code>format!</code> calls in library source, many in per-frame UI, scope and profile paths. Draw lists, scene commands, text runs and change lists are new <code>Vec</code>s each frame.</td><td>Give each frame scratch buffers that live on the owner and are cleared, not dropped: <code>clear()</code> keeps capacity. UI labels that vary per frame write into a reused <code>String</code>; stable labels are cached by id. Profile and scope reports are built only when they are displayed.</td><td class="n">±0</td><td><span class="risk med">med</span></td><td>Z0 idle frames at 0</td></tr>
+    <tr><td class="id">Z2</td><td>Strings sit in hot values. <code>Value::Text(Vec&lt;u8&gt;)</code> (399 sites) and <code>Record(Vec&lt;(String, Value)&gt;)</code> (305) copy bytes and field names on every clone. Route paths, checker paths and cache keys are <code>Vec&lt;String&gt;</code> or joined strings.</td><td>Text becomes <code>Arc&lt;[u8]&gt;</code>. Field names and path segments become interned <code>u32</code> symbols from one process-wide interner. Records become a sorted symbol slice with an <code>Arc</code>ed shape. Display is unchanged.</td><td class="n">−200</td><td><span class="risk med">med</span></td><td>Z0; flow_ir and flow_eval suites</td></tr>
+    <tr><td class="id">Z3</td><td>Indirect calls in inner loops. rdk and sop have 118 <code>&amp;dyn Fn</code> parameters called once per point or primitive (group predicates, attribute mappers, <code>parallel_for</code> bodies), and there are 239 <code>Arc&lt;dyn Fn&gt;</code> op closures in the checker and evaluator. The gate limits generic functions per crate, which keeps kernels behind <code>dyn</code>.</td><td>Allow <code>impl Fn</code> generics on a short allowlist of kernel entry points (<code>parallel_for</code>, <code>par_fill</code>, group <code>init</code>, attribute map). Replace op closure tables with an <code>enum</code> and a <code>match</code>. Measure codegen time with cargo-timings and keep a change only if it does not regress the warm rebuild.</td><td class="n">−300</td><td><span class="risk med">med</span></td><td><code>bench_core</code> instructions; warm rebuild ≤ 7.4 s</td></tr>
+    <tr><td class="id">Z4</td><td>Geometry indices are <code>i64</code> everywhere: 2,461 <code>as usize]</code> casts and 494 <code>gi(</code> wrappers. Topology and attribute index arrays are twice the size they need to be. This is M18's deferred change.</td><td>Point, vertex and primitive indices become <code>u32</code>, which halves index memory and bandwidth. Counts are checked once at construction, and geometry above 4G elements gets a typed error. Lisp <code>Int</code> stays <code>i64</code>.</td><td class="n">−1,000</td><td><span class="risk high">high</span></td><td>rdk/sop suites; parallel equality; memory guard</td></tr>
+    <tr><td class="id">Z5</td><td>Hashing and random numbers still emulate OCaml: 29 <code>wrap_int63</code> calls, byte-at-a-time FNV in <code>pxui::ui_core</code> and <code>topology_index</code>, and an OCaml-seeded <code>rays_math::rand</code>.</td><td>One 64-bit hash that processes a word at a time (multiply–xorshift), and one 64-bit generator (SplitMix64 or xoshiro256++). Both stay deterministic on every platform. Regenerate the goldens and update the spec's seed wording.</td><td class="n">−150</td><td><span class="risk med">med</span></td><td>A cross-platform hash and random vector test</td></tr>
+    <tr><td class="id">Z6</td><td>About 30 <code>ocaml_*</code> helpers remain (<code>ocaml_quote</code> ×5, <code>ocaml_min/max</code> ×7, <code>ocaml_trim</code> ×3, <code>ocaml_sort</code>, <code>ocaml_round</code>, <code>ocaml_float</code>, …). There are 1,139 OCaml mentions, and tests such as <code>ocaml_goldens_are_fixed_points</code> and <code>ocaml_float_round_trips_and_keeps_compatibility_fixtures</code> exist only to preserve OCaml behaviour. Code still says "in OCaml's traversal order" and "newest-first list".</td><td>Delete the compatibility tests. Replace each helper with its std equivalent. Print floats with Rust's shortest round-trip formatting, and update the spec. Iterate in natural Rust order wherever the order is not specified.</td><td class="n">−800</td><td><span class="risk med">med</span></td><td><code>grep -ri ocaml crates</code> finds only <code>docs/history</code> references; suites green with regenerated goldens</td></tr>
+    <tr><td class="id">Z7</td><td>Value-dependent lowering, previously R11. <code>flow_sop/src/lower.rs:2846</code> lowers a freshly specialized residual every frame. That costs about 210 ms per frame in debug for nodes driven by time.</td><td>Lower each body once, keyed by term, site and the set of bindings that shape it, and bind the values at cook time. Hash-cons residuals in <code>residual_id</code>, so the same residual gets the same id, and delete the structural <code>same_residual</code> comparison.</td><td class="n">−150</td><td><span class="risk high">high</span></td><td>Orrery frames lower 0 times after warm-up; <code>flow_sop</code> run well under its cap</td></tr>
+    <tr><td class="id">Z8</td><td>Arrays are capped at 2^54−1 elements, OCaml's <code>Sys.max_array_length</code>. The cap is visible to Lisp through <code>array/max_length</code> and <code>E_ARRAY_RANGE</code>, and is checked at 39 sites.</td><td>Use the platform limit: <code>isize::MAX</code> bytes, and a typed out-of-memory error when allocation fails. Update the spec and delete the 39 checks.</td><td class="n">−120</td><td><span class="risk low">low</span></td><td>An oversized array reports a typed error</td></tr>
+    <tr><td class="id">Z9</td><td>Every warm cook allocates its kernel scratch again: exact-arithmetic temporaries, CDT and arrangement work buffers, group bit arrays and attribute windows.</td><td>Keep a reusable scratch pool on each session, sized by high-water mark and released when memory is under pressure. Kernels borrow from it instead of allocating. It stays bounded by the existing memory ledger.</td><td class="n">+80</td><td><span class="risk med">med</span></td><td>Z0 warm-cook guards on subdivide, boolean and scatter</td></tr>
+    <tr><td class="id">Z10</td><td>11,707 <code>.clone()</code> calls in library source. Many are OCaml's immutable-value habit: clone, change one field, return.</td><td>Use clippy's <code>redundant_clone</code> plus a review crate by crate. Pass <code>&amp;mut</code> where a value is only updated (as in R8), and use <code>Arc</code> where it is shared.</td><td class="n">−500</td><td><span class="risk low">low</span></td><td>Z0; per-crate clone count tracked in PROGRESS.md</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="r">
+  <div class="wavehead"><h2>Wave R: hot-path allocations and locks</h2>
+  <p class="meta">These are copies and locks in the evaluator, checker, lowering, editor and RDK. Most are OCaml habits: persistent structures copied whole, values returned by value, a global mutex standing in for a field. Several reduce the open per-frame re-lowering cost of about 210 ms.</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding and where</th><th>Action</th><th>Lines</th><th>Risk</th><th>Regression check</th></tr></thead>
+    <tbody>
+    <tr><td class="id">R1</td><td><code>residual_view</code> (<code>flow_eval/src/eval.rs:3295,3350</code>) takes the global arena lock and deep-copies the bindings and paths. It has 66 callers outside flow_eval, and <code>same_residual</code> builds two views per cache comparison.</td><td>Make the view share the <code>Arc</code>s that <code>ExecCtx</code> already holds.</td><td class="n">−10</td><td><span class="risk low">low</span></td><td>flow_ir; flow_sop sequential/parallel equality</td></tr>
+    <tr><td class="id">R2</td><td><code>core_lower</code> copies a scope's whole cache at each of 13 fork sites (<code>core_lower.rs:149</code>), an OCaml <code>Hashtbl.copy</code> habit.</td><td>Chain each scope to its parent and look up through the chain.</td><td class="n">−5</td><td><span class="risk low">low</span></td><td><code>bench_core</code> digest <code>c4bbf006c82014c7</code> unchanged</td></tr>
+    <tr><td class="id">R3</td><td>Free names are cached three ways for one fact about immutable terms: a global <code>FREE_NAMES_CACHE</code> mutex keyed by term address and cleared on every evaluate, a per-arena cache, and a stamp-plus-interner (<code>eval.rs:362,384,832-922</code>).</td><td>Compute each term's sorted free names once, when the arena is built.</td><td class="n">−70</td><td><span class="risk med">med</span></td><td>Sequential/parallel equality; capture order stays sorted by string</td></tr>
+    <tr><td class="id">R4</td><td>Checker overhead (the open 1.6 s prelude):<ul><li>Paths are <code>Vec&lt;String&gt;</code> (<code>workspace.rs:12</code>), cloned at 53 sites, while <code>TermBuilder</code> already interns them as <code>PathId</code>.</li><li><code>Checker::clone</code> copies about 22 maps on every check (<code>:648</code>).</li><li><code>op::find</code> clones a whole <code>Op</code>, and <code>packed_kind</code> scans linearly (<code>op.rs:209</code>).</li></ul></td><td>Use <code>PathId</code> inside the checker and turn ids back into strings at the output boundary. Put the prelude tables in a shared base. Make <code>packed_kind</code> a field read.</td><td class="n">−145</td><td><span class="risk med">med</span></td><td>Library plus 49 sketches byte-identical</td></tr>
+    <tr><td class="id">R5</td><td>Frame state is copied too much. <code>transaction</code> and <code>fork_state</code> (<code>eval.rs:2742</code>) clone both state maps on every frame and clone the copy again on failure. <code>state_stamp</code> builds a String just to compare it.</td><td>Restore with <code>mem::replace</code>, keep the saved map behind an <code>Arc</code>, and use an integer pair for the stamp.</td><td class="n">−5</td><td><span class="risk low">low</span></td><td><code>flow_eval state</code></td></tr>
+    <tr><td class="id">R6</td><td>Group bit arrays take one <code>Mutex</code> lock per output byte (<code>rdk_core/group.rs:137,259,365</code>, <code>edge_group.rs:135</code>). Group building is RDK's most-called constructor (206 + 52 call sites), and 21 callers report cancellation through a side <code>AtomicBool</code>.</td><td>Use <code>par_fill</code>, a plain zip for <code>combine</code>, and an <code>init</code> whose predicate returns <code>Result&lt;bool&gt;</code>.</td><td class="n">−90</td><td><span class="risk low">low</span></td><td><code>rdk_core group</code>; <code>flow_sop parallel_exact</code></td></tr>
+    <tr><td class="id">R7</td><td>Topology repoints copy offsets and kinds. 14 sites call <code>.to_vec()</code> on arrays that <code>View</code> already holds as <code>Arc</code>s (<code>topology.rs:208,691</code>).</td><td>A constructor that reuses the <code>Arc</code>s. Delete the <code>polygons_shared</code> alias.</td><td class="n">−30</td><td><span class="risk low">low</span></td><td><code>owned_planes_reuse</code></td></tr>
+    <tr><td class="id">R8</td><td>The graph pane is passed by value and rebuilt to change one field. 27 functions take a 40-field <code>Pane</code> and return <code>(Pane, Vec&lt;Change&gt;)</code>; there are 64 <code>..t</code> rebuilds, and <code>with_pane</code> clones at 17 sites. <code>pxui_shell/tree.rs</code> does the same.</td><td>Pass <code>&amp;mut Pane</code> and <code>&amp;mut Vec&lt;Change&gt;</code>. The intent boundary stays the same.</td><td class="n">−150…250</td><td><span class="risk med">med</span></td><td><code>pxui_graph</code> (31 cases); <code>alloc_budget</code></td></tr>
+    <tr><td class="id">R9</td><td>Each idle frame deep-clones the document twice (<code>editor_reduce.rs:1047</code>, <code>:307</code>) and the 40-field frame result once, only so it can roll back.</td><td>Hold the document as <code>Arc&lt;Document&gt;</code> and use <code>make_mut</code> only when an edit applies. Snapshot only when there are changes.</td><td class="n">−10</td><td><span class="risk med">med</span></td><td>Lower the <code>alloc_budget.rs</code> limits</td></tr>
+    <tr><td class="id">R10</td><td>Renderer hashes and mesh keys are strings: byte-at-a-time <code>digest_hex</code>, joined strings, and a <code>MeshKey</code> made of two names split on a newline (<code>scene_execution.rs:178,1022-1066,1797</code>). This is left over from M8.</td><td>Use <code>u128</code> hashes and <code>MeshKey::GpuVertices{name,indices}</code>.</td><td class="n">−40</td><td><span class="risk low">low</span></td><td><code>test_prepared_scene3</code></td></tr>
+        </tbody>
+  </table></div>
+</section>
+
+<section id="g">
+  <div class="wavehead"><h2>Wave G: GPU layering</h2>
+  <p class="meta">The Metal path is about 4× the Vulkan path for the same <code>Driver*</code> traits: 11.8k lines of Rust plus 3.2k of ObjC++, against 2.8k plus 1.6k of C++. One Metal <code>set_buffer</code> is validated in four layers. G1–G4 touch the same driver code, so they go in sequence. Vulkan must be checked on the Windows box after each step.</p></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding and where</th><th>Action</th><th>Lines</th><th>Risk</th><th>Regression check</th></tr></thead>
+    <tbody>
+    <tr><td class="id">G1</td><td>Validation is repeated per call:<ul><li><code>ogpu_core</code> checks slot, liveness and device (<code>backend.rs:1118</code>).</li><li><code>metal</code> calls <code>enter_main</code> 111 times; each call makes two <code>pthread_main_np</code> FFI calls and takes the <code>drain_releases</code> mutex. It also has <code>Lifetime</code> atomics and 98 wrapper closures that run immediately.</li><li><code>ogpu_metal</code> does a table lookup, <code>metal_sys</code> checks the handle kind, and the ObjC++ side checks again.</li></ul></td><td>Validate once, in <code>ogpu_core</code>. Check the main thread and drain releases only at creation, <code>begin_commands</code> and <code>commit</code>.</td><td class="n">−300…500</td><td><span class="risk med">med</span></td><td>Destroyed-handle and wrong-thread cases in <code>gpu_ogpu_metal</code></td></tr>
+    <tr><td class="id">G2</td><td>The <code>metal</code> crate has one consumer. It has 53 enums mirroring <code>ogpu_core</code> types (<code>Primitive</code> and <code>IndexType</code> are each defined twice inside it) and a third error type mapped at 114 sites. Error kinds are chosen by comparing operation strings (<code>ogpu_metal/device.rs:25</code>).</td><td>Merge its real work (descriptors, acceleration, reflection) into <code>ogpu_metal</code>, calling <code>metal_sys</code> with <code>ogpu_core</code> types. Delete the crate.</td><td class="n">−2,000…3,000</td><td><span class="risk high">high</span></td><td>Move <code>metal/tests/gpu_metal.rs</code> into <code>ogpu_metal</code></td></tr>
+    <tr><td class="id">G3</td><td>15 HashMaps (5 Metal, 10 Vulkan) map a token back to an object <code>ogpu_core</code> already holds as <code>Box&lt;dyn Driver*&gt;</code>. Each bind costs a hash lookup and an <code>Rc</code> clone.</td><td>Have the driver traits take <code>&amp;dyn DriverResource</code> and downcast with <code>as_any()</code>.</td><td class="n">−300…400</td><td><span class="risk med">med</span></td><td>ogpu_core/metal gpu tests; Windows ogpu_vulkan</td></tr>
+    <tr><td class="id">G4</td><td>Metal counts in-flight uses by hand (<code>retain_for</code>/<code>release_submission</code>) in five types, with different rules: destroying a sampler in flight is an error, while a buffer's destroy is deferred. Vulkan uses <code>Rc</code> drop instead.</td><td>A <code>Vec&lt;Retained&gt;</code> of <code>Rc</code>s per command buffer, with the deferred destroy in <code>Drop</code>. One rule for all five.</td><td class="n">−150…200</td><td><span class="risk med">med</span></td><td>Destroy-in-flight cases, <code>live_handles</code> delta 0</td></tr>
+    <tr><td class="id">G5</td><td>Queue epochs, the cap of 3 frames in flight and GPU timing are written three times (<code>ogpu_metal/queue.rs:53-130</code>, <code>ogpu_vulkan/backend.rs:1138</code>, <code>ogpu_core/backend.rs:359</code>). Backend selection is a record of closures, and the two <code>impl_.rs</code> files are identical.</td><td>Put epochs, the cap and the timing ring in <code>ogpu_core::Queue</code>. Use <code>select(Box&lt;dyn Driver&gt;)</code>.</td><td class="n">−150…200</td><td><span class="risk med">med</span></td><td>Mock queue tests; a Metal queue case</td></tr>
+    <tr><td class="id">G6</td><td><code>web_export</code> links SDL to decode one image (<code>web_export.rs:794</code>).</td><td>The caller passes the decoder in, so the web target no longer needs SDL.</td><td class="n">−1 dep</td><td><span class="risk low">low</span></td><td><code>cargo t -p web_export</code></td></tr>
+    <tr><td class="id">G7</td><td>The path tracer rebuilds meshes with GPU-generated topology every frame. Refit is gated on <code>!corners.is_empty()</code> (<code>rays_pathtracer.rs:857</code>), and those meshes always have empty corners.</td><td>Reuse the structure when the index <code>buffer_id</code>, index count and a topology generation all match. Buffer ids are never reused, so they serve as the liveness check.</td><td class="n">+30</td><td><span class="risk med">med</span></td><td><code>refits() &gt; 0</code> over 3 frames</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="order">
+  <h2>Order</h2>
+  <ol>
+    <li><b>X1–X5</b> first, each with its regression. X6 goes with G.</li>
+    <li><b>B1, B2, B3, B5, B6</b>: one commit each, no behaviour change. Then measure the switch between <code>cargo build</code> and <code>cargo t</code>, and the flow_sop run time.</li>
+    <li><b>B4</b> crate by crate. Case names must match before and after.</li>
+    <li><b>A1–A4</b>, then <b>B8</b>.</li>
+    <li><b>D1–D12</b> in parallel by crate, at most two building agents at a time.</li>
+    <li><b>Z0</b> right after B, so every later commit lowers a guard.</li>
+    <li><b>R1–R10, then Z1, Z2, Z9 and Z10</b>, to drive idle frames and warm cooks to 0 allocations.</li>
+    <li><b>Z5, Z6 and Z8</b>, which remove OCaml behaviour, each with its spec edit and goldens regenerated in the same commit.</li>
+    <li><b>Z3, Z4 and Z7</b>, the large performance changes, each measured before and after with <code>bench_core</code>, frame times and cargo-timings.</li>
+    <li><b>G1 → G2 → G3 → G4</b> one after another, then G5, X6, G6 and G7. Each step is checked on the Windows box.</li>
+    <li><b>B7</b> after cargo-timings confirms the critical path. <b>R11</b> is documented under <a href="#r11">R11 → Z7</a>.</li>
+  </ol>
+  <p>Every step follows AGENTS.md: a focused <code>cargo t</code>, <code>git diff --check</code>, <code>gate deps</code> for any boundary edit, and one commit per item. When a change alters output on purpose, its commit regenerates the affected goldens and says so in the message. The workspace and native editor qualification runs at the end on both platforms. No deadline is raised and no assertion is weakened.</p>
+</section>
+
+
+<section id="run">
+  <h2>Runbook</h2>
+  <ul>
+    <li>One stage per commit named for its ID (<code>X1</code>, <code>B3</code>, …). While editing: <code>cargo check -p &lt;crate&gt;</code>; then <code>cargo t -p</code> on touched crates and consumers; <code>cargo run -p gate -- deps</code> after boundary edits.</li>
+    <li>Parallel work: at most two building agents on distinct crates (wave D); wave B items are sequential one-commit steps unless noted.</li>
+    <li>Allocation claims: measured with <code>mem_sys</code> guards and real frames; Z0 limits only ever lowered.</li>
+    <li>GPU wave G: check Windows Vulkan after each of G1–G4; keep Metal qualification on macOS.</li>
+    <li>Qualification at the end: full workspace suite and native editor limits on both platforms; no raised deadlines.</li>
+  </ul>
+</section>
+
+<section id="r11">
+  <h2>R11 → Z7 (value-dependent lowering)</h2>
+  <p class="lede" style="font-size:.95rem">The first pass deferred parameter-independent lowering as R11. This pass folds that work into <b>Z7</b>: lower each residual body once keyed by term, site and binding shape; hash-cons <code>residual_id</code>; bind values at cook time. Success: Orrery frames lower 0 times after warm-up; <code>flow_sop</code> stays under its cap. High risk — measure with frame timers before closing.</p>
+</section>
+
+<section id="kept">
+  <h2>Checked and kept</h2>
+  <div class="cols">
+    <div><h3>Pipeline</h3><ul>
+      <li><b>Term → Core → Region:</b> three real tiers, each running something different.</li>
+      <li><b>Shader printers:</b> MSL, WGSL, SPIR-V and JS already share <code>kernel_layout</code>.</li>
+      <li><b>Parser and packed engine:</b> one parser; one CPU engine since D4.</li>
+      
+    </ul></div>
+    <div><h3>Editor</h3><ul>
+      <li><b>Intent enums between pane and document:</b> they are the boundary that keeps UI from mutating the document.</li>
+      <li><b>Splitting rays_editor:</b> a 0.40 s touch-check does not justify it. B1, B8 and R8 recover more.</li>
+      <li><b>Long functions:</b> splitting them removes no code.</li>
+      <li><b>Injected prepare/draw closures:</b> six tests replace them.</li>
+    </ul></div>
+    <div><h3>Runtime and geometry</h3><ul>
+      <li><b>Type erasure in <code>lru</code>/<code>mem</code>, the worker pool, vendored libm:</b> kept on purpose. The vendored libm is what makes results identical across platforms.</li>
+      <li><b><code>scene_command</code> → <code>render_ir</code> → draw:</b> each step does real work.</li>
+      <li><b>Code bloat from generics:</b> not a problem today. Z3 adds generics only at measured kernel entry points.</li>
+      
+    </ul></div>
+  </div>
+  <p class="lede" style="font-size:.9rem">Method: five read-only audits by area (rdk, Flow pipeline, editor/UI, runtime/GPU, flow_sop with the test layout), spot-checked against the source. Rebuild times were measured on the M-series dev box. Other timings come from <code>target/t-times.tsv</code> and cargo-timings. Line estimates come from <code>wc</code> over each duplicate family.</p>
+</section>
+
+</main>
+
+<script type="application/json" id="plan-seed">{"X1": {"status": "pending", "note": ""}, "X2": {"status": "pending", "note": ""}, "X3": {"status": "pending", "note": ""}, "X4": {"status": "pending", "note": ""}, "X5": {"status": "pending", "note": ""}, "X6": {"status": "pending", "note": ""}, "B1": {"status": "pending", "note": ""}, "B2": {"status": "pending", "note": ""}, "B3": {"status": "pending", "note": ""}, "B4": {"status": "pending", "note": ""}, "B5": {"status": "pending", "note": ""}, "B6": {"status": "pending", "note": ""}, "B7": {"status": "pending", "note": ""}, "B8": {"status": "pending", "note": ""}, "A1": {"status": "pending", "note": ""}, "A2": {"status": "pending", "note": ""}, "A3": {"status": "pending", "note": ""}, "A4": {"status": "pending", "note": ""}, "D1": {"status": "pending", "note": ""}, "D2": {"status": "pending", "note": ""}, "D3": {"status": "pending", "note": ""}, "D4": {"status": "pending", "note": ""}, "D5": {"status": "pending", "note": ""}, "D6": {"status": "pending", "note": ""}, "D7": {"status": "pending", "note": ""}, "D8": {"status": "pending", "note": ""}, "D9": {"status": "pending", "note": ""}, "D10": {"status": "pending", "note": ""}, "D11": {"status": "pending", "note": ""}, "D12": {"status": "pending", "note": ""}, "Z0": {"status": "pending", "note": ""}, "Z1": {"status": "pending", "note": ""}, "Z2": {"status": "pending", "note": ""}, "Z3": {"status": "pending", "note": ""}, "Z4": {"status": "pending", "note": ""}, "Z5": {"status": "pending", "note": ""}, "Z6": {"status": "pending", "note": ""}, "Z7": {"status": "pending", "note": ""}, "Z8": {"status": "pending", "note": ""}, "Z9": {"status": "pending", "note": ""}, "Z10": {"status": "pending", "note": ""}, "R1": {"status": "pending", "note": ""}, "R2": {"status": "pending", "note": ""}, "R3": {"status": "pending", "note": ""}, "R4": {"status": "pending", "note": ""}, "R5": {"status": "pending", "note": ""}, "R6": {"status": "pending", "note": ""}, "R7": {"status": "pending", "note": ""}, "R8": {"status": "pending", "note": ""}, "R9": {"status": "pending", "note": ""}, "R10": {"status": "pending", "note": ""}, "G1": {"status": "pending", "note": ""}, "G2": {"status": "pending", "note": ""}, "G3": {"status": "pending", "note": ""}, "G4": {"status": "pending", "note": ""}, "G5": {"status": "pending", "note": ""}, "G6": {"status": "pending", "note": ""}, "G7": {"status": "pending", "note": ""}}</script>
+<script>
+(async function(){
+  const IDS=["X1", "X2", "X3", "X4", "X5", "X6", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "A1", "A2", "A3", "A4", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7", "Z8", "Z9", "Z10", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "G1", "G2", "G3", "G4", "G5", "G6", "G7"];
+  const WAVE=id=>id[0];
+  const WAVES=['X','B','A','D','Z','R','G'];
+  const grid=document.getElementById('progress-grid');
+  const note=document.getElementById('progress-note');
+  const tbody=document.getElementById('progress-tbody');
+  const wrap=document.getElementById('progress-table-wrap');
+  const elDone=document.getElementById('stat-done');
+  const elActive=document.getElementById('stat-active');
+  const elPending=document.getElementById('stat-pending');
+  function render(counts,rows){
+    grid.replaceChildren();
+    WAVES.forEach(w=>{
+      const c=counts[w]||{done:0,active:0,pending:0,skip:0,total:0};
+      const el=document.createElement('div');
+      el.innerHTML='<b>'+c.done+'/'+c.total+'</b><span>Wave '+w+' done</span>';
+      grid.appendChild(el);
+    });
+    const tot=IDS.length;
+    const done=rows.filter(r=>r.status==='done').length;
+    const active=rows.filter(r=>r.status==='active').length;
+    const pending=rows.filter(r=>(r.status||'pending')==='pending').length;
+    if(elDone)elDone.textContent=String(done);
+    if(elActive)elActive.textContent=String(active);
+    if(elPending)elPending.textContent=String(pending);
+    const h2=document.querySelector('#status h2');
+    if(h2)h2.textContent=done===tot?'Status: all '+tot+' items done':(active?'Status: '+done+' done, '+active+' active, '+pending+' open':'Status: '+pending+' items open');
+    note.textContent='Tracker: '+done+' of '+tot+' items done. Evidence closes only after focused tests or measured runs on dev.';
+    tbody.replaceChildren();
+    rows.sort((a,b)=>IDS.indexOf(a.id)-IDS.indexOf(b.id));
+    rows.forEach(r=>{
+      const tr=document.createElement('tr');
+      const st=r.status||'pending';
+      tr.innerHTML='<td class="id">'+r.id+'</td><td>'+WAVE(r.id)+'</td><td><span class="tag '+st+'">'+st+'</span></td><td>'+(r.note?String(r.note).replace(/</g,'&lt;'):'—')+'</td>';
+      tbody.appendChild(tr);
+    });
+    wrap.hidden=false;
+  }
+  function seedRows(){
+    let seed={};
+    try{seed=JSON.parse(document.getElementById('plan-seed').textContent||'{}');}catch(_){}
+    return IDS.map(id=>{
+      const s=seed[id];
+      return s?{id,...s}:{id,status:'pending',note:''};
+    });
+  }
+  const db=await (window.claude&&claude.use)?claude.use('db'):null;
+  let rows=seedRows();
+  if(db){
+    try{
+      rows=[];
+      for(const id of IDS){
+        const snap=await db.doc('plan/items/'+id).get();
+        const base=seedRows().find(r=>r.id===id)||{id,status:'pending',note:''};
+        rows.push(snap.exists()?{...base,...snap.data(),id}:{...base});
+      }
+    }catch(e){rows=seedRows();}
+  }
+  const counts={};
+  rows.forEach(r=>{
+    const w=WAVE(r.id);
+    counts[w]=counts[w]||{done:0,active:0,pending:0,skip:0,total:0};
+    counts[w].total++;
+    const s=r.status||'pending';
+    if(counts[w][s]!==undefined)counts[w][s]++; else counts[w].pending++;
+  });
+  render(counts,rows);
+  if(!db)note.textContent+=' Enable write access and update plan/items/&lt;id&gt; in the artifact db, or edit PROGRESS2.md in the repo.';
+})();
+</script>
+
+</body>
+</html>
