@@ -127,12 +127,12 @@ pub mod editor {
     }
 
     /// Replace the model's core outside a frame (a test's `{ editor with core }`).
-    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
     pub fn with_core(value: Editor, core: editor_model::EditorModel) -> Editor {
         loop_model::with_core(value, core)
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
     pub mod private {
         use super::*;
 
@@ -356,7 +356,7 @@ pub mod editor {
 }
 
 /// The frame reducer without a UI frame: an unstable hook for tests, like `Editor::Private`.
-#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
 pub mod reduce {
     use editor_core::panels::Panel;
     use flow_graph::flow_edit as fe;

@@ -4,9 +4,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[features]
-test-hooks = ["pxui_graph/test-hooks"]
-
 [lib]
 name = "rays_editor"
 path = "src/lib.rs"
@@ -45,7 +42,6 @@ flow_gpu = { path = "../flow_gpu" }
 rdk_ops = { path = "../rdk_ops" }
 ogpu_core = { path = "../ogpu_core" }
 renderer = { path = "../renderer" }
-flow_sop = { path = "../flow_sop", features = ["test-support"] }
 runtime_resources = { path = "../runtime_resources" }
 mem_sys = { path = "../mem_sys" }
 scene_command = { path = "../scene_command" }
@@ -61,12 +57,8 @@ ogpu_metal = { path = "../ogpu_metal" }
 [[test]]
 name = "window_editor_smoke"
 harness = false
-required-features = ["test-hooks"]
-
-
 
 [[test]]
 name = "gpu_editor"
 path = "tests/gpu_editor.rs"
 harness = false
-required-features = ["test-hooks"]

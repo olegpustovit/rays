@@ -28,7 +28,3 @@ mem_sys = { path = "../mem_sys" }
 flow_graph = { path = "../flow_graph" }
 editor_document = { path = "../editor_document" }
 flow_web = { path = "../flow_web" }
-
-[features]
-# exposes lisp_sop (the OCaml Lisp_sop test helper) to integration tests of other crates
-test-support = []

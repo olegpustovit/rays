@@ -1949,7 +1949,7 @@ pub fn update(pressed: &[Key], t: Pane, ui: &mut Ui, frame: &rframe::Frame) -> (
     (t, changes)
 }
 
-#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
 #[path = "scope_frame_inspect_hooks.rs"]
 mod inspect_hooks;
 
@@ -2006,7 +2006,7 @@ pub mod inspect {
         out
     }
 
-    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
     pub use super::inspect_hooks::*;
 }
 
