@@ -209,6 +209,7 @@ struct Crossing {
     x0: f64,
     x1: f64,
     winding: i32,
+    source: u32,
 }
 
 pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Mesh, Error> {
@@ -259,15 +260,16 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
                 let high = a.y.max(b.y);
                 if a.y != b.y && middle >= low && middle < high {
                     let at = |y| a.x + ((y - a.y) * (b.x - a.x) / (b.y - a.y));
-                    edges.push((edges.len(), Crossing { x0: at(y0), x1: at(y1), winding: if b.y > a.y { 1 } else { -1 } }));
+                    let source = u32::try_from(edges.len()).map_err(|_| Error::ComplexityLimit)?;
+                    edges.push(Crossing { x0: at(y0), x1: at(y1), winding: if b.y > a.y { 1 } else { -1 }, source });
                 }
             }
         }
-        edges.sort_by(|(a_index, a), (b_index, b)| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5).then(a_index.cmp(b_index)));
+        edges.sort_by(|a, b| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5).then(a.source.cmp(&b.source)));
         let mut inside = false;
         let mut winding = 0;
         let mut left = None;
-        for (_, edge) in edges {
+        for edge in edges {
             let was_inside = inside;
             match fill_rule {
                 FillRule::EvenOdd => inside = !inside,
@@ -405,4 +407,9 @@ pub fn stroke(
         }
     }
     Ok(Mesh { vertices, indices: indices.into_iter().map(|i| i as i64).collect() })
+}
+
+#[test]
+fn crossing_tie_key_uses_existing_padding() {
+    assert_eq!(std::mem::size_of::<Crossing>(), 24);
 }
