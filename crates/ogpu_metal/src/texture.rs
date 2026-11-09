@@ -168,7 +168,7 @@ impl Texture {
         let width = (self.0.descriptor.width >> mip_level).max(1);
         let height = (self.0.descriptor.height >> mip_level).max(1);
         let minimum = width * bytes_per_pixel(self.0.format);
-        if bytes_per_row < minimum || bytes_per_row > ((1i64 << 62) - 1) / height {
+        if bytes_per_row < minimum || bytes_per_row > i64::MAX / height {
             return Err(fail(operation, ErrorKind::InvalidArgument, "bytes_per_row is invalid"));
         }
         Ok((width, height))

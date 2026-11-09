@@ -112,7 +112,7 @@ static NEXT_GPU_MARKS: AtomicI64 = AtomicI64::new(1);
 
 fn fresh_gpu_marks_id() -> Option<i64> {
     let current = NEXT_GPU_MARKS.fetch_add(1, Ordering::SeqCst);
-    if current >= (1i64 << 62) - 1 { None } else { Some(current) }
+    if current == i64::MAX { None } else { Some(current) }
 }
 
 fn create_gpu_owner() -> GpuOwner {

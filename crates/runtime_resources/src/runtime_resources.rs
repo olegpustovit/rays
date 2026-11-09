@@ -17,8 +17,7 @@ pub type error = ogpu_core::error::Error;
 pub type bytes = Rc<[u8]>;
 
 
-/// OCaml's `max_int` on 64-bit and `Sys.max_string_length`.
-const MAX_INT: i64 = (1 << 62) - 1;
+const MAX_INT: i64 = i64::MAX;
 const MAX_STRING_LENGTH: i64 = 144115188075855863;
 
 pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {

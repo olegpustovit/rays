@@ -572,7 +572,7 @@ fn resolve_capture(d: &Data, request: &RequestRef, live: &Frame, sources: &[(i64
         Value::Floats(3, values) => values.len() as i64 * 8 + 16,
         _ => 0,
     };
-    let bytes = if size > ((1i64 << 62) - 1) - c.bytes { (1i64 << 62) - 1 } else { c.bytes + size };
+    let bytes = if size > i64::MAX - c.bytes { i64::MAX } else { c.bytes + size };
     let mut attributes = c.attributes.clone();
     attributes.insert(0, (name, resolved.clone()));
     let updated = Rc::new(Captured { geometry: c.geometry.clone(), attributes, bytes });

@@ -286,8 +286,7 @@ fn has_device(kind: &Kind) -> bool {
 }
 
 fn int_coordinate(x: f64) -> Result<i64, Diagnostic> {
-    // OCaml's max_int is 2^62 - 1
-    if !x.is_finite() || x >= ((1i64 << 62) - 1) as f64 || x < -((1i64 << 62) as f64) {
+    if !x.is_finite() || x > i64::MAX as f64 || x < i64::MIN as f64 {
         Err(fail("E_DRAW_RANGE", "A drawing coordinate must fit an integer."))
     } else {
         Ok(x as i64)

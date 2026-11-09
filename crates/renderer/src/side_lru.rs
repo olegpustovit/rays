@@ -15,7 +15,7 @@ pub enum TableKey {
     Int(i64),
 }
 
-pub const UNBOUNDED_BYTES: i64 = (1 << 62) - 1;
+pub const UNBOUNDED_BYTES: i64 = i64::MAX;
 pub type Item = Rc<dyn Any>;
 pub type Release<K = TableKey> = Box<dyn Fn(&K, Item)>;
 pub type Equal<K> = Box<dyn Fn(&K, &K) -> bool>;

@@ -167,7 +167,7 @@ impl Queue {
     pub fn wait_through(&self, epoch: i64) -> Result<(), Error> {
         let op = "Ogpu_metal.Queue.wait_through";
         let value = &self.0;
-        if epoch <= self.completed_epoch() || epoch > (1i64 << 62) - 1 {
+        if epoch <= self.completed_epoch() {
             return Err(fail(op, ErrorKind::InvalidArgument, "completion epoch is invalid"));
         }
         let (ready, later): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut *value.pending.borrow_mut()).into_iter().partition(|p| p.epoch <= epoch);

@@ -227,10 +227,10 @@ pub struct Lowering {
 pub fn create() -> Lowering {
     Lowering {
         quad_cache: side_lru::create(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, Box::new(|_, _| {}), 1024),
-        quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), 256),
+        quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), 256),
         out_slots: Vec::new(),
         out_list: Vec::new(),
-        ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
+        ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
         ui_indices_scratch: empty_bytes(),
     }
 }
