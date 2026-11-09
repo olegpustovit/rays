@@ -154,3 +154,25 @@ fn slice_start_max_int() {
         parity(&m(&format!("(array/sum (array/slice data i {count}))"), vec![MAX_INT]));
     }
 }
+
+/// A dynamic compile that no capture steered is the fixed compile: `compile_result` keeps it
+/// without compiling again. One that a capture steered differs.
+#[test]
+fn a_compile_no_capture_steers_is_the_fixed_one() {
+    let none = || packed::CountSource::none();
+    let compiled = |value: &Value, dynamic: bool| {
+        let r = residual(value);
+        let term = e::residual::residual_view(r).unwrap().term;
+        crate::core_region::tracking_dynamic(|| packed::compile_impl(false, true, dynamic, &none(), r, &term))
+    };
+    let shown = |t: &packed::T| format!("{:?} {:?} {:?} {:?} {}", t.code, t.uniforms, t.outputs, t.count, t.stages.len());
+    // `k` is a captured constant: a uniform when dynamic, a literal when fixed
+    for (bindings, body, steered) in [("", "(int/mul i 3)", false), ("k 7", "(int/add i k)", true)] {
+        let value = mapped("(array/range 80 :type int)", bindings, Ty::Int, body, vec![0, 5]);
+        let (dynamic, read) = compiled(&value, true);
+        let (fixed, _) = compiled(&value, false);
+        let (dynamic, fixed) = (dynamic.unwrap_or_else(|ds| panic!("{}", show_ds(&ds))), fixed.unwrap_or_else(|ds| panic!("{}", show_ds(&ds))));
+        assert_eq!(read, steered, "{body}");
+        assert_eq!(shown(&dynamic) == shown(&fixed), !steered, "{body}: {} / {}", shown(&dynamic), shown(&fixed));
+    }
+}

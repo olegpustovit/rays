@@ -490,6 +490,27 @@ fn env_find<'a>(env: &'a Env, name: &str) -> Option<&'a Expression> {
 
 type CaptureKey = (String, Vec<String>, Vec<(i64, bool)>, Vec<i64>);
 
+thread_local! {
+    static DYNAMIC_READ: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `f`'s result, and whether a dynamic compile in it took a path a constant-capture (fixed)
+/// compile would not: when it did not, the fixed compile is the same program.
+pub(crate) fn tracking_dynamic<R>(f: impl FnOnce() -> R) -> (R, bool) {
+    let outer = DYNAMIC_READ.with(|read| read.replace(false));
+    let result = f();
+    let read = DYNAMIC_READ.with(|read| read.replace(outer || read.get()));
+    (result, read)
+}
+
+impl Lower {
+    /// `dynamic`, recorded as read: the caller's path depends on it.
+    fn reads_dynamic(&self) -> bool {
+        if self.dynamic { DYNAMIC_READ.with(|read| read.set(true)); }
+        self.dynamic
+    }
+}
+
 struct Lower {
     residual: ResidualId,
     term: std::sync::Arc<Term>,
@@ -709,7 +730,7 @@ impl Lower {
         if matches!(ty, Ty::Array(_)) { return self.table(at, name, v); }
         let simple = matches!(v, Value::Residual(_) | Value::Source(..) | Value::Int(_) | Value::Text(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..));
         let scalar = matches!(v, Value::Int(_) | Value::Text(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..));
-        if simple && (self.dynamic || flow_eval::is_live(v) || matches!(v, Value::Source(..))) {
+        if simple && (flow_eval::is_live(v) || matches!(v, Value::Source(..)) || self.reads_dynamic()) {
             let ty = match v {
                 Value::Residual(r) => residual_term(*r)?.ty().clone(),
                 other => V::ty_of(other),
@@ -1565,7 +1586,7 @@ impl Lower {
                 if t.name(arena.op(id).op) == "array/count"
                     && *t.ty() == Ty::Int
                     && arena.fields(arena.op(id).args).len() == 1
-                    && !self.dynamic
+                    && !self.reads_dynamic()
                     && self.constant_only("array/count") =>
             {
                 // a table bound in the body (a helper's parameter): its length where captures are constants
@@ -1685,7 +1706,7 @@ impl Lower {
                     Node::Op(id) if t.name(arena.op(id).op) == "range" => None,
                     _ => {
                         let unsupported = || refusal(t, "E_PACKED_FORM", "Unsupported packed body form fold.");
-                        if self.dynamic { return Err(unsupported()); }
+                        if self.reads_dynamic() { return Err(unsupported()); }
                         let table = self.expression(env, &source)?;
                         if !self.is_table(&table) { return Err(unsupported()); }
                         let mut builder = TermBuilder::new();
@@ -1883,7 +1904,7 @@ impl Lower {
 
     /// A table's length when captures are constants (a fixed compile never rebinds them).
     fn table_length(&self, e: &Expression) -> Option<i64> {
-        if self.dynamic || !self.is_table(e) { return None; }
+        if !self.is_table(e) || self.reads_dynamic() { return None; }
         match self.array_values.get(&e.registers[0])? {
             Value::Residual(_) => None,
             v => V::array_length(v).ok().map(|n| n as i64),

@@ -413,7 +413,7 @@ impl Default for CompileOptions {
     }
 }
 
-fn compile_impl(
+pub(crate) fn compile_impl(
     through_exact: bool,
     fusion: bool,
     dynamic: bool,
@@ -457,7 +457,10 @@ pub fn compile_result(options: &CompileOptions, residual: ResidualId, term: &Ter
     // A producer that needs a capture as a constant (a noise seed) is not fused into the uniform
     // program: it stays a separate source, run on the host. When constants fuse more stages, they win
     // (live captures stay uniforms either way).
-    let compiled = match compile_impl(options.through_exact, options.fusion, true, &source, residual, term) {
+    let (dynamic, read) = core_region::tracking_dynamic(|| compile_impl(options.through_exact, options.fusion, true, &source, residual, term));
+    let compiled = match dynamic {
+        // a compile no capture mode steered is also the fixed one: equal stages, so dynamic wins
+        Ok(dynamic) if !read => Ok(dynamic),
         Ok(dynamic) if options.fusion => match fixed() {
             Ok(fixed) if fixed.stages.len() > dynamic.stages.len() => Ok(fixed),
             _ => Ok(dynamic),
