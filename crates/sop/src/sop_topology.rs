@@ -7,7 +7,7 @@ use rays_diagnostic::Diagnostic;
 use rdk_core::{edge_group, geometry, group};
 
 use crate::context;
-use crate::decl::{self, Decl, Meta, Spec};
+use crate::decl::{self, Meta, Spec};
 use crate::edit_graph::Factory;
 use crate::node::{self, build, CookMode, GeometryCooked};
 use crate::support::{self, Choice};
@@ -188,25 +188,6 @@ const POSITION: Choice<Position> = Choice(&[
 pub mod edge_collapse {
     use super::*;
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub connectivity_attribute: String,
-        pub position: Position,
-        pub remove_degenerate_primitives: bool,
-        pub recompute_point_normals: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            connectivity_attribute: vs(values, 1),
-            position: POSITION.of(&values[2]),
-            remove_degenerate_primitives: vb(values, 3),
-            recompute_point_normals: vb(values, 4),
-        }
-    }
-
     pub const META: Meta = Meta {
         key: "edge_collapse",
         label: "Edge Collapse",
@@ -226,9 +207,13 @@ pub mod edge_collapse {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let group = support::optional_text(&p.group);
-        let connectivity_attribute = support::optional_text(&p.connectivity_attribute);
+        let p_group = vs(values, 0);
+        let p_connectivity_attribute = vs(values, 1);
+        let p_position = POSITION.of(&values[2]);
+        let p_remove_degenerate_primitives = vb(values, 3);
+        let p_recompute_point_normals = vb(values, 4);
+        let group = support::optional_text(&p_group);
+        let connectivity_attribute = support::optional_text(&p_connectivity_attribute);
         Ok(make(
             label,
             "edge_collapse",
@@ -244,9 +229,9 @@ pub mod edge_collapse {
                         grain: Some(grain(context)),
                         edges,
                         connectivity_attribute: connectivity_attribute.clone(),
-                        position: Some(p.position),
-                        remove_degenerate_primitives: Some(p.remove_degenerate_primitives),
-                        recompute_point_normals: Some(p.recompute_point_normals),
+                        position: Some(p_position),
+                        remove_degenerate_primitives: Some(p_remove_degenerate_primitives),
+                        recompute_point_normals: Some(p_recompute_point_normals),
                     },
                     geometry,
                 ))
@@ -254,12 +239,8 @@ pub mod edge_collapse {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -279,31 +260,6 @@ pub mod dissolve {
         ("Delete bridge polygons", BridgePolicy::DeleteBridgePolygons),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub operation: Operation,
-        pub bridge_policy: BridgePolicy,
-        pub remove_inline_points: bool,
-        pub collinearity_tolerance: f64,
-        pub remove_unused_points: bool,
-        pub create_boundary_curves: bool,
-        pub recompute_normals: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            operation: OPERATION.of(&values[1]),
-            bridge_policy: BRIDGE.of(&values[2]),
-            remove_inline_points: vb(values, 3),
-            collinearity_tolerance: vf(values, 4),
-            remove_unused_points: vb(values, 5),
-            create_boundary_curves: vb(values, 6),
-            recompute_normals: vb(values, 7),
-        }
-    }
-
     pub const META: Meta = Meta { key: "dissolve", label: "Dissolve", category: "Topology", inputs: 1, ..decl::META };
 
     pub fn specs() -> Vec<Spec> {
@@ -320,8 +276,15 @@ pub mod dissolve {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let group = support::optional_text(&p.group);
+        let p_group = vs(values, 0);
+        let p_operation = OPERATION.of(&values[1]);
+        let p_bridge_policy = BRIDGE.of(&values[2]);
+        let p_remove_inline_points = vb(values, 3);
+        let p_collinearity_tolerance = vf(values, 4);
+        let p_remove_unused_points = vb(values, 5);
+        let p_create_boundary_curves = vb(values, 6);
+        let p_recompute_normals = vb(values, 7);
+        let group = support::optional_text(&p_group);
         Ok(make(
             label,
             "dissolve",
@@ -335,13 +298,13 @@ pub mod dissolve {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         edges,
-                        operation: p.operation,
-                        bridge_policy: p.bridge_policy,
-                        remove_inline_points: p.remove_inline_points,
-                        collinearity_tolerance: p.collinearity_tolerance,
-                        remove_unused_points: p.remove_unused_points,
-                        create_boundary_curves: p.create_boundary_curves,
-                        recompute_normals: p.recompute_normals,
+                        operation: p_operation,
+                        bridge_policy: p_bridge_policy,
+                        remove_inline_points: p_remove_inline_points,
+                        collinearity_tolerance: p_collinearity_tolerance,
+                        remove_unused_points: p_remove_unused_points,
+                        create_boundary_curves: p_create_boundary_curves,
+                        recompute_normals: p_recompute_normals,
                     },
                     &inputs[0],
                 ))
@@ -349,12 +312,8 @@ pub mod dissolve {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -388,12 +347,8 @@ pub mod triangulate {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -407,41 +362,6 @@ pub mod poly_extrude {
         ("Individual elements", Divide::ExtrudeIndividual),
         ("Connected components", Divide::ExtrudeConnectedComponents),
     ]);
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub split_edges: String,
-        pub distance: f64,
-        pub divide: Divide,
-        pub divisions: i64,
-        pub output_front: bool,
-        pub output_back: bool,
-        pub output_side: bool,
-        pub front_group: String,
-        pub back_group: String,
-        pub side_group: String,
-        pub front_boundary_group: String,
-        pub back_boundary_group: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            split_edges: vs(values, 1),
-            distance: vf(values, 2),
-            divide: DIVIDE.of(&values[3]),
-            divisions: vi(values, 4),
-            output_front: vb(values, 5),
-            output_back: vb(values, 6),
-            output_side: vb(values, 7),
-            front_group: vs(values, 8),
-            back_group: vs(values, 9),
-            side_group: vs(values, 10),
-            front_boundary_group: vs(values, 11),
-            back_boundary_group: vs(values, 12),
-        }
-    }
 
     pub const META: Meta = Meta {
         key: "poly_extrude",
@@ -470,16 +390,28 @@ pub mod poly_extrude {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let group = support::optional_text(&p.group);
-        let split_edges = support::optional_text(&p.split_edges);
+        let p_group = vs(values, 0);
+        let p_split_edges = vs(values, 1);
+        let p_distance = vf(values, 2);
+        let p_divide = DIVIDE.of(&values[3]);
+        let p_divisions = vi(values, 4);
+        let p_output_front = vb(values, 5);
+        let p_output_back = vb(values, 6);
+        let p_output_side = vb(values, 7);
+        let p_front_group = vs(values, 8);
+        let p_back_group = vs(values, 9);
+        let p_side_group = vs(values, 10);
+        let p_front_boundary_group = vs(values, 11);
+        let p_back_boundary_group = vs(values, 12);
+        let group = support::optional_text(&p_group);
+        let split_edges = support::optional_text(&p_split_edges);
         let (front_group, back_group, side_group) = (
-            support::optional_text(&p.front_group),
-            support::optional_text(&p.back_group),
-            support::optional_text(&p.side_group),
+            support::optional_text(&p_front_group),
+            support::optional_text(&p_back_group),
+            support::optional_text(&p_side_group),
         );
         let (front_boundary_group, back_boundary_group) =
-            (support::optional_text(&p.front_boundary_group), support::optional_text(&p.back_boundary_group));
+            (support::optional_text(&p_front_boundary_group), support::optional_text(&p_back_boundary_group));
         Ok(make(
             label,
             "poly_extrude",
@@ -497,17 +429,17 @@ pub mod poly_extrude {
                         grain: Some(grain(context)),
                         primitives,
                         split_edges,
-                        divide: p.divide,
-                        divisions: p.divisions,
-                        output_front: p.output_front,
-                        output_back: p.output_back,
-                        output_side: p.output_side,
+                        divide: p_divide,
+                        divisions: p_divisions,
+                        output_front: p_output_front,
+                        output_back: p_output_back,
+                        output_side: p_output_side,
                         front_group: front_group.clone(),
                         back_group: back_group.clone(),
                         side_group: side_group.clone(),
                         front_boundary_group: front_boundary_group.clone(),
                         back_boundary_group: back_boundary_group.clone(),
-                        distance: p.distance,
+                        distance: p_distance,
                     },
                     geometry,
                 ))
@@ -515,12 +447,8 @@ pub mod poly_extrude {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -535,27 +463,6 @@ pub mod poly_fill {
         ("Triangles", Mode::FillTriangles),
         ("Triangle fan", Mode::FillTriangleFan),
     ]);
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub boundary_group: String,
-        pub mode: Mode,
-        pub reverse_patches: bool,
-        pub unique_points: bool,
-        pub update_point_normals: bool,
-        pub patch_group: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            boundary_group: vs(values, 0),
-            mode: MODE.of(&values[1]),
-            reverse_patches: vb(values, 2),
-            unique_points: vb(values, 3),
-            update_point_normals: vb(values, 4),
-            patch_group: vs(values, 5),
-        }
-    }
 
     pub const META: Meta = Meta {
         key: "poly_fill",
@@ -577,9 +484,14 @@ pub mod poly_fill {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let boundary_group = support::optional_text(&p.boundary_group);
-        let patch_group = support::optional_text(&p.patch_group);
+        let p_boundary_group = vs(values, 0);
+        let p_mode = MODE.of(&values[1]);
+        let p_reverse_patches = vb(values, 2);
+        let p_unique_points = vb(values, 3);
+        let p_update_point_normals = vb(values, 4);
+        let p_patch_group = vs(values, 5);
+        let boundary_group = support::optional_text(&p_boundary_group);
+        let patch_group = support::optional_text(&p_patch_group);
         Ok(make(
             label,
             "poly_fill",
@@ -594,10 +506,10 @@ pub mod poly_fill {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         boundary,
-                        mode: p.mode,
-                        reverse_patches: p.reverse_patches,
-                        unique_points: p.unique_points,
-                        update_point_normals: p.update_point_normals,
+                        mode: p_mode,
+                        reverse_patches: p_reverse_patches,
+                        unique_points: p_unique_points,
+                        update_point_normals: p_update_point_normals,
                         patch_group: patch_group.clone(),
                     },
                     geometry,
@@ -606,12 +518,8 @@ pub mod poly_fill {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -620,52 +528,18 @@ pub mod poly_fill {
 pub mod remesh {
     use super::*;
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub target_length: f64,
-        pub iterations: i64,
-        pub smoothing: f64,
-        pub project: bool,
-        pub use_input_points_only: bool,
-        pub hard_point_group: String,
-        pub hard_edge_group: String,
-        pub target_size_attribute: String,
-        pub preserve_uv_seams: bool,
-        pub uv_attribute: String,
-        pub output_hard_edges: String,
-        pub output_mesh_size: String,
-        pub output_quality: String,
-        pub recompute_point_normals: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            target_length: vf(values, 0),
-            iterations: vi(values, 1),
-            smoothing: vf(values, 2),
-            project: vb(values, 3),
-            use_input_points_only: vb(values, 4),
-            hard_point_group: vs(values, 5),
-            hard_edge_group: vs(values, 6),
-            target_size_attribute: vs(values, 7),
-            preserve_uv_seams: vb(values, 8),
-            uv_attribute: vs(values, 9),
-            output_hard_edges: vs(values, 10),
-            output_mesh_size: vs(values, 11),
-            output_quality: vs(values, 12),
-            recompute_point_normals: vb(values, 13),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if p.target_length <= 0. {
+        let p_target_length = vf(values, 0);
+        let p_smoothing = vf(values, 2);
+        let p_preserve_uv_seams = vb(values, 8);
+        let p_uv_attribute = vs(values, 9);
+        if p_target_length <= 0. {
             return refuse("remesh", "target length must be finite and positive");
         }
-        if p.smoothing < 0. || p.smoothing > 1. {
+        if p_smoothing < 0. || p_smoothing > 1. {
             return refuse("remesh", "smoothing must be finite and within [0,1]");
         }
-        if p.preserve_uv_seams && blank(&p.uv_attribute) {
+        if p_preserve_uv_seams && blank(&p_uv_attribute) {
             return refuse("remesh", "empty UV attribute name");
         }
         Ok(())
@@ -700,13 +574,26 @@ pub mod remesh {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let hard_point_group = support::optional_text(&p.hard_point_group);
-        let hard_edge_group = support::optional_text(&p.hard_edge_group);
-        let target_size_attribute = support::optional_text(&p.target_size_attribute);
-        let output_hard_edges = support::optional_text(&p.output_hard_edges);
-        let output_mesh_size = support::optional_text(&p.output_mesh_size);
-        let output_quality = support::optional_text(&p.output_quality);
+        let p_target_length = vf(values, 0);
+        let p_iterations = vi(values, 1);
+        let p_smoothing = vf(values, 2);
+        let p_project = vb(values, 3);
+        let p_use_input_points_only = vb(values, 4);
+        let p_hard_point_group = vs(values, 5);
+        let p_hard_edge_group = vs(values, 6);
+        let p_target_size_attribute = vs(values, 7);
+        let p_preserve_uv_seams = vb(values, 8);
+        let p_uv_attribute = vs(values, 9);
+        let p_output_hard_edges = vs(values, 10);
+        let p_output_mesh_size = vs(values, 11);
+        let p_output_quality = vs(values, 12);
+        let p_recompute_point_normals = vb(values, 13);
+        let hard_point_group = support::optional_text(&p_hard_point_group);
+        let hard_edge_group = support::optional_text(&p_hard_edge_group);
+        let target_size_attribute = support::optional_text(&p_target_size_attribute);
+        let output_hard_edges = support::optional_text(&p_output_hard_edges);
+        let output_mesh_size = support::optional_text(&p_output_mesh_size);
+        let output_quality = support::optional_text(&p_output_quality);
         Ok(make(
             label,
             "remesh",
@@ -721,20 +608,20 @@ pub mod remesh {
                     &rdk_ops::remesh::Params {
                         cancel: cancel(context),
                         grain: grain(context),
-                        iterations: p.iterations,
-                        smoothing: p.smoothing,
-                        project: p.project,
-                        use_input_points_only: p.use_input_points_only,
+                        iterations: p_iterations,
+                        smoothing: p_smoothing,
+                        project: p_project,
+                        use_input_points_only: p_use_input_points_only,
                         hard_points,
                         hard_edges,
                         target_size_attribute: target_size_attribute.clone(),
-                        preserve_uv_seams: p.preserve_uv_seams,
-                        uv_attribute: p.uv_attribute.clone(),
+                        preserve_uv_seams: p_preserve_uv_seams,
+                        uv_attribute: p_uv_attribute.clone(),
                         output_hard_edges: output_hard_edges.clone(),
                         output_mesh_size: output_mesh_size.clone(),
                         output_quality: output_quality.clone(),
-                        recompute_point_normals: p.recompute_point_normals,
-                        target_length: p.target_length,
+                        recompute_point_normals: p_recompute_point_normals,
+                        target_length: p_target_length,
                     },
                     geometry,
                 ))
@@ -742,12 +629,8 @@ pub mod remesh {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -757,27 +640,9 @@ pub mod convex_hull {
     use super::*;
     use rdk_ops::group_ops::Owner;
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group_owner: Owner,
-        pub group: String,
-        pub preserve_point_payload: bool,
-        pub source_point_attribute: String,
-        pub hull_group: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group_owner: support::ELEMENT_OWNER.of(&values[0]),
-            group: vs(values, 1),
-            preserve_point_payload: vb(values, 2),
-            source_point_attribute: vs(values, 3),
-            hull_group: vs(values, 4),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        if from_values(values).source_point_attribute.trim() == "P" {
+        let p_source_point_attribute = vs(values, 3);
+        if p_source_point_attribute.trim() == "P" {
             return refuse("convex_hull", "source point attribute must not be P");
         }
         Ok(())
@@ -803,10 +668,14 @@ pub mod convex_hull {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let selection = support::optional_element_group(p.group_owner, &p.group);
-        let source_point_attribute = support::optional_text(&p.source_point_attribute);
-        let hull_group = support::optional_text(&p.hull_group);
+        let p_group_owner = support::ELEMENT_OWNER.of(&values[0]);
+        let p_group = vs(values, 1);
+        let p_preserve_point_payload = vb(values, 2);
+        let p_source_point_attribute = vs(values, 3);
+        let p_hull_group = vs(values, 4);
+        let selection = support::optional_element_group(p_group_owner, &p_group);
+        let source_point_attribute = support::optional_text(&p_source_point_attribute);
+        let hull_group = support::optional_text(&p_hull_group);
         Ok(make(
             label,
             "convex_hull",
@@ -820,7 +689,7 @@ pub mod convex_hull {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         selection,
-                        preserve_point_payload: p.preserve_point_payload,
+                        preserve_point_payload: p_preserve_point_payload,
                         source_point_attribute: source_point_attribute.clone(),
                         hull_group: hull_group.clone(),
                     },
@@ -830,12 +699,8 @@ pub mod convex_hull {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -851,65 +716,29 @@ pub mod clean {
         ("Auto", CleanOverlap::Auto),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub epsilon_mode: KernelMode,
-        pub epsilon: f64,
-        pub remove_degenerate: bool,
-        pub consolidate_mode: KernelMode,
-        pub consolidate_distance: f64,
-        pub overlaps: CleanOverlap,
-        pub reverse_winding: bool,
-        pub remove_nan_points: bool,
-        pub remove_unused_points: bool,
-        pub delete_unused_groups: bool,
-        pub point_attributes: String,
-        pub vertex_attributes: String,
-        pub primitive_attributes: String,
-        pub detail_attributes: String,
-        pub point_groups: String,
-        pub vertex_groups: String,
-        pub primitive_groups: String,
-        pub edge_groups: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            epsilon_mode: support::KERNEL_MODE.of(&values[0]),
-            epsilon: vf(values, 1),
-            remove_degenerate: vb(values, 2),
-            consolidate_mode: support::KERNEL_MODE.of(&values[3]),
-            consolidate_distance: vf(values, 4),
-            overlaps: OVERLAPS.of(&values[5]),
-            reverse_winding: vb(values, 6),
-            remove_nan_points: vb(values, 7),
-            remove_unused_points: vb(values, 8),
-            delete_unused_groups: vb(values, 9),
-            point_attributes: vs(values, 10),
-            vertex_attributes: vs(values, 11),
-            primitive_attributes: vs(values, 12),
-            detail_attributes: vs(values, 13),
-            point_groups: vs(values, 14),
-            vertex_groups: vs(values, 15),
-            primitive_groups: vs(values, 16),
-            edge_groups: vs(values, 17),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !p.epsilon.is_finite() || p.epsilon < 0. || !p.consolidate_distance.is_finite() || p.consolidate_distance < 0. {
+        let p_epsilon = vf(values, 1);
+        let p_consolidate_distance = vf(values, 4);
+        let p_point_attributes = vs(values, 10);
+        let p_vertex_attributes = vs(values, 11);
+        let p_primitive_attributes = vs(values, 12);
+        let p_detail_attributes = vs(values, 13);
+        let p_point_groups = vs(values, 14);
+        let p_vertex_groups = vs(values, 15);
+        let p_primitive_groups = vs(values, 16);
+        let p_edge_groups = vs(values, 17);
+        if !p_epsilon.is_finite() || p_epsilon < 0. || !p_consolidate_distance.is_finite() || p_consolidate_distance < 0. {
             return refuse("clean", "epsilon and consolidate distance must be finite and nonnegative");
         }
         for pattern in [
-            &p.point_attributes,
-            &p.vertex_attributes,
-            &p.primitive_attributes,
-            &p.detail_attributes,
-            &p.point_groups,
-            &p.vertex_groups,
-            &p.primitive_groups,
-            &p.edge_groups,
+            &p_point_attributes,
+            &p_vertex_attributes,
+            &p_primitive_attributes,
+            &p_detail_attributes,
+            &p_point_groups,
+            &p_vertex_groups,
+            &p_primitive_groups,
+            &p_edge_groups,
         ] {
             if !blank(pattern) {
                 support::validate_parameter_pattern("sop/clean", pattern)?;
@@ -952,25 +781,42 @@ pub mod clean {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let epsilon = if p.epsilon_mode == KernelMode::Auto { 1e-12 } else { p.epsilon };
-        let consolidate_distance = if p.consolidate_mode == KernelMode::Auto { None } else { Some(p.consolidate_distance) };
-        let overlaps = match p.overlaps {
+        let p_epsilon_mode = support::KERNEL_MODE.of(&values[0]);
+        let p_epsilon = vf(values, 1);
+        let p_remove_degenerate = vb(values, 2);
+        let p_consolidate_mode = support::KERNEL_MODE.of(&values[3]);
+        let p_consolidate_distance = vf(values, 4);
+        let p_overlaps = OVERLAPS.of(&values[5]);
+        let p_reverse_winding = vb(values, 6);
+        let p_remove_nan_points = vb(values, 7);
+        let p_remove_unused_points = vb(values, 8);
+        let p_delete_unused_groups = vb(values, 9);
+        let p_point_attributes = vs(values, 10);
+        let p_vertex_attributes = vs(values, 11);
+        let p_primitive_attributes = vs(values, 12);
+        let p_detail_attributes = vs(values, 13);
+        let p_point_groups = vs(values, 14);
+        let p_vertex_groups = vs(values, 15);
+        let p_primitive_groups = vs(values, 16);
+        let p_edge_groups = vs(values, 17);
+        let epsilon = if p_epsilon_mode == KernelMode::Auto { 1e-12 } else { p_epsilon };
+        let consolidate_distance = if p_consolidate_mode == KernelMode::Auto { None } else { Some(p_consolidate_distance) };
+        let overlaps = match p_overlaps {
             CleanOverlap::Auto => None,
             CleanOverlap::KeepFirst => Some(rdk_ops::clean::OverlapPolicy::KeepFirstOverlap),
             CleanOverlap::DeletePairs => Some(rdk_ops::clean::OverlapPolicy::DeleteOverlapPairs),
         };
         let (point_attributes, vertex_attributes, primitive_attributes, detail_attributes) = (
-            support::optional_text(&p.point_attributes),
-            support::optional_text(&p.vertex_attributes),
-            support::optional_text(&p.primitive_attributes),
-            support::optional_text(&p.detail_attributes),
+            support::optional_text(&p_point_attributes),
+            support::optional_text(&p_vertex_attributes),
+            support::optional_text(&p_primitive_attributes),
+            support::optional_text(&p_detail_attributes),
         );
         let (point_groups, vertex_groups, primitive_groups, edge_groups) = (
-            support::optional_text(&p.point_groups),
-            support::optional_text(&p.vertex_groups),
-            support::optional_text(&p.primitive_groups),
-            support::optional_text(&p.edge_groups),
+            support::optional_text(&p_point_groups),
+            support::optional_text(&p_vertex_groups),
+            support::optional_text(&p_primitive_groups),
+            support::optional_text(&p_edge_groups),
         );
         Ok(make(
             label,
@@ -984,13 +830,13 @@ pub mod clean {
                         cancel: cancel(context),
                         grain: grain(context),
                         epsilon,
-                        remove_degenerate: p.remove_degenerate,
+                        remove_degenerate: p_remove_degenerate,
                         consolidate_distance,
                         overlaps,
-                        reverse_winding: p.reverse_winding,
-                        remove_nan_points: p.remove_nan_points,
-                        remove_unused_points: p.remove_unused_points,
-                        delete_unused_groups: p.delete_unused_groups,
+                        reverse_winding: p_reverse_winding,
+                        remove_nan_points: p_remove_nan_points,
+                        remove_unused_points: p_remove_unused_points,
+                        delete_unused_groups: p_delete_unused_groups,
                         point_attributes: point_attributes.clone(),
                         vertex_attributes: vertex_attributes.clone(),
                         primitive_attributes: primitive_attributes.clone(),
@@ -1006,12 +852,8 @@ pub mod clean {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1020,44 +862,19 @@ pub mod clean {
 pub mod join_curves {
     use super::*;
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub picked_ends: String,
-        pub orient_closest: bool,
-        pub connect_closest_ends: bool,
-        pub only_connected: bool,
-        pub use_group_size: bool,
-        pub group_size: i64,
-        pub keep_originals: bool,
-        pub tolerance: f64,
-        pub wrap: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            picked_ends: vs(values, 1),
-            orient_closest: vb(values, 2),
-            connect_closest_ends: vb(values, 3),
-            only_connected: vb(values, 4),
-            use_group_size: vb(values, 5),
-            group_size: vi(values, 6),
-            keep_originals: vb(values, 7),
-            tolerance: vf(values, 8),
-            wrap: vb(values, 9),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if p.group_size < 1 {
+        let p_group = vs(values, 0);
+        let p_picked_ends = vs(values, 1);
+        let p_connect_closest_ends = vb(values, 3);
+        let p_group_size = vi(values, 6);
+        let p_tolerance = vf(values, 8);
+        if p_group_size < 1 {
             return refuse("join_curves", "group size must be positive");
         }
-        if !p.tolerance.is_finite() || p.tolerance < 0. {
+        if !p_tolerance.is_finite() || p_tolerance < 0. {
             return refuse("join_curves", "tolerance must be finite and nonnegative");
         }
-        if support::decode_curve_join_picks(&p.picked_ends)?.is_some() && (!blank(&p.group) || p.connect_closest_ends) {
+        if support::decode_curve_join_picks(&p_picked_ends)?.is_some() && (!blank(&p_group) || p_connect_closest_ends) {
             return refuse("join_curves", "picked ends are mutually exclusive with group and closest ordering");
         }
         Ok(())
@@ -1091,10 +908,19 @@ pub mod join_curves {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let group = support::optional_text(&p.group);
-        let picked_ends = support::decode_curve_join_picks(&p.picked_ends).expect("picked ends were validated");
-        let group_size = if p.use_group_size { Some(p.group_size) } else { None };
+        let p_group = vs(values, 0);
+        let p_picked_ends = vs(values, 1);
+        let p_orient_closest = vb(values, 2);
+        let p_connect_closest_ends = vb(values, 3);
+        let p_only_connected = vb(values, 4);
+        let p_use_group_size = vb(values, 5);
+        let p_group_size = vi(values, 6);
+        let p_keep_originals = vb(values, 7);
+        let p_tolerance = vf(values, 8);
+        let p_wrap = vb(values, 9);
+        let group = support::optional_text(&p_group);
+        let picked_ends = support::decode_curve_join_picks(&p_picked_ends).expect("picked ends were validated");
+        let group_size = if p_use_group_size { Some(p_group_size) } else { None };
         Ok(make(
             label,
             "join_curves",
@@ -1122,13 +948,13 @@ pub mod join_curves {
                         grain: Some(grain(context)),
                         primitives,
                         picked_ends: picked_ends.clone(),
-                        orient_closest: Some(p.orient_closest),
-                        connect_closest_ends: Some(p.connect_closest_ends),
-                        only_connected: Some(p.only_connected),
+                        orient_closest: Some(p_orient_closest),
+                        connect_closest_ends: Some(p_connect_closest_ends),
+                        only_connected: Some(p_only_connected),
                         group_size,
-                        keep_originals: Some(p.keep_originals),
-                        tolerance: Some(p.tolerance),
-                        wrap: Some(p.wrap),
+                        keep_originals: Some(p_keep_originals),
+                        tolerance: Some(p_tolerance),
+                        wrap: Some(p_wrap),
                     },
                     &inputs[0],
                 ))
@@ -1136,12 +962,8 @@ pub mod join_curves {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1152,58 +974,18 @@ pub mod facet {
     use rdk_ops::group_ops::Owner;
     use support::{FacetConsolidation, KernelMode};
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub group_owner: Owner,
-        pub consolidation: FacetConsolidation,
-        pub pre_compute_normals: bool,
-        pub make_normals_unit_length: bool,
-        pub unique_points: bool,
-        pub consolidate_distance: f64,
-        pub consolidate_normals_distance: f64,
-        pub remove_inline_points: bool,
-        pub inline_distance: f64,
-        pub orient_polygons: bool,
-        pub cusp_mode: KernelMode,
-        pub cusp_angle: f64,
-        pub remove_degenerate: bool,
-        pub make_planar: bool,
-        pub post_compute_normals: bool,
-        pub reverse_normals: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            group_owner: support::ELEMENT_OWNER.of(&values[1]),
-            consolidation: support::FACET_CONSOLIDATION.of(&values[2]),
-            pre_compute_normals: vb(values, 3),
-            make_normals_unit_length: vb(values, 4),
-            unique_points: vb(values, 5),
-            consolidate_distance: vf(values, 6),
-            consolidate_normals_distance: vf(values, 7),
-            remove_inline_points: vb(values, 8),
-            inline_distance: vf(values, 9),
-            orient_polygons: vb(values, 10),
-            cusp_mode: support::KERNEL_MODE.of(&values[11]),
-            cusp_angle: vf(values, 12),
-            remove_degenerate: vb(values, 13),
-            make_planar: vb(values, 14),
-            post_compute_normals: vb(values, 15),
-            reverse_normals: vb(values, 16),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if ![p.consolidate_distance, p.consolidate_normals_distance, p.inline_distance, p.cusp_angle].iter().all(|v| v.is_finite()) {
+        let p_consolidate_distance = vf(values, 6);
+        let p_consolidate_normals_distance = vf(values, 7);
+        let p_inline_distance = vf(values, 9);
+        let p_cusp_angle = vf(values, 12);
+        if ![p_consolidate_distance, p_consolidate_normals_distance, p_inline_distance, p_cusp_angle].iter().all(|v| v.is_finite()) {
             return refuse("facet", "distance and angle controls must be finite");
         }
-        if p.consolidate_distance < 0. || p.consolidate_normals_distance < 0. || p.inline_distance < 0. {
+        if p_consolidate_distance < 0. || p_consolidate_normals_distance < 0. || p_inline_distance < 0. {
             return refuse("facet", "distances must be nonnegative");
         }
-        if p.cusp_angle < 0. || p.cusp_angle > std::f64::consts::PI {
+        if p_cusp_angle < 0. || p_cusp_angle > std::f64::consts::PI {
             return refuse("facet", "cusp angle must be within [0, pi]");
         }
         Ok(())
@@ -1248,13 +1030,29 @@ pub mod facet {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let selection = support::optional_element_group(p.group_owner, &p.group);
-        let consolidate_distance = (p.consolidation == FacetConsolidation::Points).then_some(p.consolidate_distance);
+        let p_group = vs(values, 0);
+        let p_group_owner = support::ELEMENT_OWNER.of(&values[1]);
+        let p_consolidation = support::FACET_CONSOLIDATION.of(&values[2]);
+        let p_pre_compute_normals = vb(values, 3);
+        let p_make_normals_unit_length = vb(values, 4);
+        let p_unique_points = vb(values, 5);
+        let p_consolidate_distance = vf(values, 6);
+        let p_consolidate_normals_distance = vf(values, 7);
+        let p_remove_inline_points = vb(values, 8);
+        let p_inline_distance = vf(values, 9);
+        let p_orient_polygons = vb(values, 10);
+        let p_cusp_mode = support::KERNEL_MODE.of(&values[11]);
+        let p_cusp_angle = vf(values, 12);
+        let p_remove_degenerate = vb(values, 13);
+        let p_make_planar = vb(values, 14);
+        let p_post_compute_normals = vb(values, 15);
+        let p_reverse_normals = vb(values, 16);
+        let selection = support::optional_element_group(p_group_owner, &p_group);
+        let consolidate_distance = (p_consolidation == FacetConsolidation::Points).then_some(p_consolidate_distance);
         let consolidate_normals_distance =
-            (p.consolidation == FacetConsolidation::Normals).then_some(p.consolidate_normals_distance);
-        let cusp_angle = match p.cusp_mode {
-            KernelMode::Explicit => Some(p.cusp_angle),
+            (p_consolidation == FacetConsolidation::Normals).then_some(p_consolidate_normals_distance);
+        let cusp_angle = match p_cusp_mode {
+            KernelMode::Explicit => Some(p_cusp_angle),
             KernelMode::Auto => None,
         };
         Ok(make(
@@ -1271,19 +1069,19 @@ pub mod facet {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         selection,
-                        pre_compute_normals: Some(p.pre_compute_normals),
-                        make_normals_unit_length: Some(p.make_normals_unit_length),
-                        unique_points: Some(p.unique_points),
+                        pre_compute_normals: Some(p_pre_compute_normals),
+                        make_normals_unit_length: Some(p_make_normals_unit_length),
+                        unique_points: Some(p_unique_points),
                         consolidate_distance,
                         consolidate_normals_distance,
-                        remove_inline_points: Some(p.remove_inline_points),
-                        inline_distance: Some(p.inline_distance),
-                        orient_polygons: Some(p.orient_polygons),
+                        remove_inline_points: Some(p_remove_inline_points),
+                        inline_distance: Some(p_inline_distance),
+                        orient_polygons: Some(p_orient_polygons),
                         cusp_angle,
-                        remove_degenerate: Some(p.remove_degenerate),
-                        make_planar: Some(p.make_planar),
-                        post_compute_normals: Some(p.post_compute_normals),
-                        reverse_normals: Some(p.reverse_normals),
+                        remove_degenerate: Some(p_remove_degenerate),
+                        make_planar: Some(p_make_planar),
+                        post_compute_normals: Some(p_post_compute_normals),
+                        reverse_normals: Some(p_reverse_normals),
                     },
                     geometry,
                 ))
@@ -1291,12 +1089,8 @@ pub mod facet {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1321,48 +1115,25 @@ pub mod poly_cut {
         ("Attribute change", PolyCutDetection::Change),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub cut_group: String,
-        pub element: Element,
-        pub strategy: Strategy,
-        pub detection: PolyCutDetection,
-        pub attribute: String,
-        pub value: f64,
-        pub threshold: f64,
-        pub keep_closed: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            cut_group: vs(values, 1),
-            element: ELEMENT.of(&values[2]),
-            strategy: STRATEGY.of(&values[3]),
-            detection: DETECTION.of(&values[4]),
-            attribute: vs(values, 5),
-            value: vf(values, 6),
-            threshold: vf(values, 7),
-            keep_closed: vb(values, 8),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !(p.value.is_finite() && p.threshold.is_finite()) {
+        let p_strategy = STRATEGY.of(&values[3]);
+        let p_detection = DETECTION.of(&values[4]);
+        let p_attribute = vs(values, 5);
+        let p_value = vf(values, 6);
+        let p_threshold = vf(values, 7);
+        if !(p_value.is_finite() && p_threshold.is_finite()) {
             return refuse("poly_cut", "detection controls must be finite");
         }
-        if p.threshold < 0. {
+        if p_threshold < 0. {
             return refuse("poly_cut", "threshold must be nonnegative");
         }
-        if p.detection != PolyCutDetection::All && blank(&p.attribute) {
+        if p_detection != PolyCutDetection::All && blank(&p_attribute) {
             return refuse("poly_cut", "attribute must be nonblank");
         }
-        if p.detection == PolyCutDetection::Crossing && p.attribute == "P" {
+        if p_detection == PolyCutDetection::Crossing && p_attribute == "P" {
             return refuse("poly_cut", "crossing requires scalar storage");
         }
-        if p.detection == PolyCutDetection::Change && p.strategy == Strategy::PolyCutCut && p.threshold == 0. {
+        if p_detection == PolyCutDetection::Change && p_strategy == Strategy::PolyCutCut && p_threshold == 0. {
             return refuse("poly_cut", "cut-at-change requires a positive threshold");
         }
         Ok(())
@@ -1392,13 +1163,21 @@ pub mod poly_cut {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let group = support::optional_text(&p.group);
-        let cut_group = support::optional_text(&p.cut_group);
-        let detection = match p.detection {
+        let p_group = vs(values, 0);
+        let p_cut_group = vs(values, 1);
+        let p_element = ELEMENT.of(&values[2]);
+        let p_strategy = STRATEGY.of(&values[3]);
+        let p_detection = DETECTION.of(&values[4]);
+        let p_attribute = vs(values, 5);
+        let p_value = vf(values, 6);
+        let p_threshold = vf(values, 7);
+        let p_keep_closed = vb(values, 8);
+        let group = support::optional_text(&p_group);
+        let cut_group = support::optional_text(&p_cut_group);
+        let detection = match p_detection {
             PolyCutDetection::All => Detection::PolyCutAll,
-            PolyCutDetection::Crossing => Detection::PolyCutCrossing { attribute: p.attribute.clone(), value: p.value },
-            PolyCutDetection::Change => Detection::PolyCutChange { attribute: p.attribute.clone(), threshold: p.threshold },
+            PolyCutDetection::Crossing => Detection::PolyCutCrossing { attribute: p_attribute.clone(), value: p_value },
+            PolyCutDetection::Change => Detection::PolyCutChange { attribute: p_attribute.clone(), threshold: p_threshold },
         };
         Ok(make(
             label,
@@ -1409,7 +1188,7 @@ pub mod poly_cut {
             Arc::new(move |context, inputs| {
                 let geometry = &inputs[0];
                 let primitives = support::resolve_optional_primitive_group("poly_cut", &group, geometry)?;
-                let (cut_points, cut_edges) = match p.element {
+                let (cut_points, cut_edges) = match p_element {
                     Element::PolyCutPoints => {
                         (support::resolve_optional_point_group("poly_cut", &cut_group, geometry)?, None)
                     }
@@ -1424,10 +1203,10 @@ pub mod poly_cut {
                         primitives,
                         cut_points,
                         cut_edges,
-                        element: p.element,
-                        strategy: p.strategy,
+                        element: p_element,
+                        strategy: p_strategy,
                         detection: detection.clone(),
-                        keep_closed: p.keep_closed,
+                        keep_closed: p_keep_closed,
                     },
                     geometry,
                 ))
@@ -1435,12 +1214,8 @@ pub mod poly_cut {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1456,56 +1231,24 @@ pub mod poly_reduce {
         ("Primitive count", PolyReduceTarget::PrimitiveCount),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub hard_point_group: String,
-        pub hard_edge_group: String,
-        pub target_mode: PolyReduceTarget,
-        pub ratio: f64,
-        pub primitive_count: i64,
-        pub preserve_boundary: bool,
-        pub only_original_positions: bool,
-        pub equalize_lengths: f64,
-        pub limit_normal_deviation: bool,
-        pub max_normal_deviation: f64,
-        pub output_group: String,
-        pub recompute_point_normals: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            hard_point_group: vs(values, 1),
-            hard_edge_group: vs(values, 2),
-            target_mode: TARGET.of(&values[3]),
-            ratio: vf(values, 4),
-            primitive_count: vi(values, 5),
-            preserve_boundary: vb(values, 6),
-            only_original_positions: vb(values, 7),
-            equalize_lengths: vf(values, 8),
-            limit_normal_deviation: vb(values, 9),
-            max_normal_deviation: vf(values, 10),
-            output_group: vs(values, 11),
-            recompute_point_normals: vb(values, 12),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !(p.ratio.is_finite() && p.equalize_lengths.is_finite() && p.max_normal_deviation.is_finite()) {
+        let p_ratio = vf(values, 4);
+        let p_primitive_count = vi(values, 5);
+        let p_equalize_lengths = vf(values, 8);
+        let p_max_normal_deviation = vf(values, 10);
+        if !(p_ratio.is_finite() && p_equalize_lengths.is_finite() && p_max_normal_deviation.is_finite()) {
             return refuse("poly_reduce", "controls must be finite");
         }
-        if p.ratio < 0. || p.ratio > 1. {
+        if p_ratio < 0. || p_ratio > 1. {
             return refuse("poly_reduce", "ratio must be in [0, 1]");
         }
-        if p.primitive_count < 0 {
+        if p_primitive_count < 0 {
             return refuse("poly_reduce", "primitive count must be nonnegative");
         }
-        if p.equalize_lengths < 0. {
+        if p_equalize_lengths < 0. {
             return refuse("poly_reduce", "equalize lengths must be nonnegative");
         }
-        if p.max_normal_deviation < 0. || p.max_normal_deviation > std::f64::consts::PI {
+        if p_max_normal_deviation < 0. || p_max_normal_deviation > std::f64::consts::PI {
             return refuse("poly_reduce", "normal deviation must be in [0, pi]");
         }
         Ok(())
@@ -1539,16 +1282,28 @@ pub mod poly_reduce {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let group = support::optional_text(&p.group);
-        let hard_point_group = support::optional_text(&p.hard_point_group);
-        let hard_edge_group = support::optional_text(&p.hard_edge_group);
-        let output_group = support::optional_text(&p.output_group);
-        let target = match p.target_mode {
-            PolyReduceTarget::Ratio => Target::ReduceRatio(p.ratio),
-            PolyReduceTarget::PrimitiveCount => Target::ReducePrimitiveCount(p.primitive_count),
+        let p_group = vs(values, 0);
+        let p_hard_point_group = vs(values, 1);
+        let p_hard_edge_group = vs(values, 2);
+        let p_target_mode = TARGET.of(&values[3]);
+        let p_ratio = vf(values, 4);
+        let p_primitive_count = vi(values, 5);
+        let p_preserve_boundary = vb(values, 6);
+        let p_only_original_positions = vb(values, 7);
+        let p_equalize_lengths = vf(values, 8);
+        let p_limit_normal_deviation = vb(values, 9);
+        let p_max_normal_deviation = vf(values, 10);
+        let p_output_group = vs(values, 11);
+        let p_recompute_point_normals = vb(values, 12);
+        let group = support::optional_text(&p_group);
+        let hard_point_group = support::optional_text(&p_hard_point_group);
+        let hard_edge_group = support::optional_text(&p_hard_edge_group);
+        let output_group = support::optional_text(&p_output_group);
+        let target = match p_target_mode {
+            PolyReduceTarget::Ratio => Target::ReduceRatio(p_ratio),
+            PolyReduceTarget::PrimitiveCount => Target::ReducePrimitiveCount(p_primitive_count),
         };
-        let max_normal_deviation = p.limit_normal_deviation.then_some(p.max_normal_deviation);
+        let max_normal_deviation = p_limit_normal_deviation.then_some(p_max_normal_deviation);
         Ok(make(
             label,
             "poly_reduce",
@@ -1575,12 +1330,12 @@ pub mod poly_reduce {
                         primitives,
                         hard_points,
                         hard_edges,
-                        preserve_boundary: p.preserve_boundary,
-                        only_original_positions: p.only_original_positions,
-                        equalize_lengths: p.equalize_lengths,
+                        preserve_boundary: p_preserve_boundary,
+                        only_original_positions: p_only_original_positions,
+                        equalize_lengths: p_equalize_lengths,
                         max_normal_deviation,
                         output_group: output_group.clone(),
-                        recompute_point_normals: p.recompute_point_normals,
+                        recompute_point_normals: p_recompute_point_normals,
                     },
                     geometry,
                 ))
@@ -1588,12 +1343,8 @@ pub mod poly_reduce {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1628,38 +1379,15 @@ pub mod boolean_seam {
         ("Coincident patches", SeamOutput::CoincidentPatches),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub output: SeamOutput,
-        pub left_treatment: Treatment,
-        pub right_treatment: Treatment,
-        pub resolve_left_self_intersections: bool,
-        pub resolve_right_self_intersections: bool,
-        pub left_self_group: String,
-        pub between_group: String,
-        pub right_self_group: String,
-        pub coincident_group: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            output: OUTPUT.of(&values[0]),
-            left_treatment: TREATMENT.of(&values[1]),
-            right_treatment: TREATMENT.of(&values[2]),
-            resolve_left_self_intersections: vb(values, 3),
-            resolve_right_self_intersections: vb(values, 4),
-            left_self_group: vs(values, 5),
-            between_group: vs(values, 6),
-            right_self_group: vs(values, 7),
-            coincident_group: vs(values, 8),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        let names = match p.output {
-            SeamOutput::SeamCurves => vec![p.left_self_group, p.between_group, p.right_self_group],
-            SeamOutput::CoincidentPatches => vec![p.coincident_group],
+        let p_output = OUTPUT.of(&values[0]);
+        let p_left_self_group = vs(values, 5);
+        let p_between_group = vs(values, 6);
+        let p_right_self_group = vs(values, 7);
+        let p_coincident_group = vs(values, 8);
+        let names = match p_output {
+            SeamOutput::SeamCurves => vec![p_left_self_group, p_between_group, p_right_self_group],
+            SeamOutput::CoincidentPatches => vec![p_coincident_group],
         };
         let names: Vec<String> = names.iter().filter_map(|name| support::optional_text(name)).collect();
         if has_duplicates(&names) {
@@ -1693,12 +1421,20 @@ pub mod boolean_seam {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_output = OUTPUT.of(&values[0]);
+        let p_left_treatment = TREATMENT.of(&values[1]);
+        let p_right_treatment = TREATMENT.of(&values[2]);
+        let p_resolve_left_self_intersections = vb(values, 3);
+        let p_resolve_right_self_intersections = vb(values, 4);
+        let p_left_self_group = vs(values, 5);
+        let p_between_group = vs(values, 6);
+        let p_right_self_group = vs(values, 7);
+        let p_coincident_group = vs(values, 8);
         let (left_self_group, between_group, right_self_group, coincident_group) = (
-            support::optional_text(&p.left_self_group),
-            support::optional_text(&p.between_group),
-            support::optional_text(&p.right_self_group),
-            support::optional_text(&p.coincident_group),
+            support::optional_text(&p_left_self_group),
+            support::optional_text(&p_between_group),
+            support::optional_text(&p_right_self_group),
+            support::optional_text(&p_coincident_group),
         );
         Ok(make(
             label,
@@ -1711,11 +1447,11 @@ pub mod boolean_seam {
                     &rdk_boolean::boolean::SeamParams {
                         cancel: cancel(context),
                         grain: grain(context),
-                        output: p.output,
-                        left_treatment: p.left_treatment,
-                        right_treatment: p.right_treatment,
-                        resolve_left_self_intersections: p.resolve_left_self_intersections,
-                        resolve_right_self_intersections: p.resolve_right_self_intersections,
+                        output: p_output,
+                        left_treatment: p_left_treatment,
+                        right_treatment: p_right_treatment,
+                        resolve_left_self_intersections: p_resolve_left_self_intersections,
+                        resolve_right_self_intersections: p_resolve_right_self_intersections,
                         left_self_group: left_self_group.clone(),
                         between_group: between_group.clone(),
                         right_self_group: right_self_group.clone(),
@@ -1728,12 +1464,8 @@ pub mod boolean_seam {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1749,54 +1481,24 @@ pub mod poly_bevel {
         ("Round", PolyBevelShape::Round),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub shape: PolyBevelShape,
-        pub convexity: f64,
-        pub distance: f64,
-        pub divisions: i64,
-        pub point_scale_attribute: String,
-        pub ignore_flat_angle: f64,
-        pub clamp_overlap: bool,
-        pub edge_group: String,
-        pub corner_group: String,
-        pub offset_group: String,
-        pub recompute_point_normals: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            shape: SHAPE.of(&values[1]),
-            convexity: vf(values, 2),
-            distance: vf(values, 3),
-            divisions: vi(values, 4),
-            point_scale_attribute: vs(values, 5),
-            ignore_flat_angle: vf(values, 6),
-            clamp_overlap: vb(values, 7),
-            edge_group: vs(values, 8),
-            corner_group: vs(values, 9),
-            offset_group: vs(values, 10),
-            recompute_point_normals: vb(values, 11),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if ![p.convexity, p.distance, p.ignore_flat_angle].iter().all(|v| v.is_finite()) {
+        let p_convexity = vf(values, 2);
+        let p_distance = vf(values, 3);
+        let p_divisions = vi(values, 4);
+        let p_ignore_flat_angle = vf(values, 6);
+        if ![p_convexity, p_distance, p_ignore_flat_angle].iter().all(|v| v.is_finite()) {
             return refuse("poly_bevel", "numeric controls must be finite");
         }
-        if p.distance < 0. {
+        if p_distance < 0. {
             return refuse("poly_bevel", "distance must be nonnegative");
         }
-        if p.divisions < 1 {
+        if p_divisions < 1 {
             return refuse("poly_bevel", "divisions must be positive");
         }
-        if p.convexity < -1. || p.convexity > 1. {
+        if p_convexity < -1. || p_convexity > 1. {
             return refuse("poly_bevel", "convexity must be in [-1, 1]");
         }
-        if p.ignore_flat_angle < 0. || p.ignore_flat_angle > std::f64::consts::PI {
+        if p_ignore_flat_angle < 0. || p_ignore_flat_angle > std::f64::consts::PI {
             return refuse("poly_bevel", "flatness angle must be in [0, pi]");
         }
         Ok(())
@@ -1829,19 +1531,30 @@ pub mod poly_bevel {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let shape = match p.shape {
+        let p_group = vs(values, 0);
+        let p_shape = SHAPE.of(&values[1]);
+        let p_convexity = vf(values, 2);
+        let p_distance = vf(values, 3);
+        let p_divisions = vi(values, 4);
+        let p_point_scale_attribute = vs(values, 5);
+        let p_ignore_flat_angle = vf(values, 6);
+        let p_clamp_overlap = vb(values, 7);
+        let p_edge_group = vs(values, 8);
+        let p_corner_group = vs(values, 9);
+        let p_offset_group = vs(values, 10);
+        let p_recompute_point_normals = vb(values, 11);
+        let shape = match p_shape {
             PolyBevelShape::Chamfer => Shape::BevelChamfer,
-            PolyBevelShape::Round => Shape::BevelRound { convexity: p.convexity },
+            PolyBevelShape::Round => Shape::BevelRound { convexity: p_convexity },
         };
-        let group = support::optional_text(&p.group);
-        let point_scale_attribute = support::optional_text(&p.point_scale_attribute);
+        let group = support::optional_text(&p_group);
+        let point_scale_attribute = support::optional_text(&p_point_scale_attribute);
         let (edge_group, corner_group, offset_group) = (
-            support::optional_text(&p.edge_group),
-            support::optional_text(&p.corner_group),
-            support::optional_text(&p.offset_group),
+            support::optional_text(&p_edge_group),
+            support::optional_text(&p_corner_group),
+            support::optional_text(&p_offset_group),
         );
-        let ignore_flat_angle = (p.ignore_flat_angle > 0.).then_some(p.ignore_flat_angle);
+        let ignore_flat_angle = (p_ignore_flat_angle > 0.).then_some(p_ignore_flat_angle);
         Ok(make(
             label,
             "poly_bevel",
@@ -1857,15 +1570,15 @@ pub mod poly_bevel {
                         grain: Some(grain(context)),
                         edges,
                         shape,
-                        divisions: p.divisions,
+                        divisions: p_divisions,
                         point_scale_attribute: point_scale_attribute.clone(),
                         ignore_flat_angle,
-                        clamp_overlap: p.clamp_overlap,
+                        clamp_overlap: p_clamp_overlap,
                         edge_group: edge_group.clone(),
                         corner_group: corner_group.clone(),
                         offset_group: offset_group.clone(),
-                        recompute_point_normals: p.recompute_point_normals,
-                        distance: p.distance,
+                        recompute_point_normals: p_recompute_point_normals,
+                        distance: p_distance,
                     },
                     geometry,
                 ))
@@ -1873,12 +1586,8 @@ pub mod poly_bevel {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1888,47 +1597,21 @@ pub mod boolean_fracture {
     use super::*;
     use rdk_boolean::boolean_solid::Operation;
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub point_conflict: PointConflict,
-        pub assume_flat: bool,
-        pub resolve_cutter_self_intersections: bool,
-        pub detriangulation: Detriangulation,
-        pub require_closed: bool,
-        pub piece_attribute: String,
-        pub point_tolerance: f64,
-        pub tiny_seam_threshold: f64,
-        pub cleanup_max_batches: i64,
-        pub strict_cleanup: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            point_conflict: CONFLICT.of(&values[0]),
-            assume_flat: vb(values, 1),
-            resolve_cutter_self_intersections: vb(values, 2),
-            detriangulation: DETRIANGULATION.of(&values[3]),
-            require_closed: vb(values, 4),
-            piece_attribute: vs(values, 5),
-            point_tolerance: vf(values, 6),
-            tiny_seam_threshold: vf(values, 7),
-            cleanup_max_batches: vi(values, 8),
-            strict_cleanup: vb(values, 9),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !(p.point_tolerance.is_finite() && p.tiny_seam_threshold.is_finite())
-            || p.point_tolerance < 0.
-            || p.tiny_seam_threshold < 0.
+        let p_piece_attribute = vs(values, 5);
+        let p_point_tolerance = vf(values, 6);
+        let p_tiny_seam_threshold = vf(values, 7);
+        let p_cleanup_max_batches = vi(values, 8);
+        if !(p_point_tolerance.is_finite() && p_tiny_seam_threshold.is_finite())
+            || p_point_tolerance < 0.
+            || p_tiny_seam_threshold < 0.
         {
             return refuse("boolean_fracture", "tolerances must be finite and nonnegative");
         }
-        if p.cleanup_max_batches < 1 {
+        if p_cleanup_max_batches < 1 {
             return refuse("boolean_fracture", "cleanup batches must be positive");
         }
-        if blank(&p.piece_attribute) {
+        if blank(&p_piece_attribute) {
             return refuse("boolean_fracture", "piece attribute must be nonblank");
         }
         Ok(())
@@ -1960,7 +1643,16 @@ pub mod boolean_fracture {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_point_conflict = CONFLICT.of(&values[0]);
+        let p_assume_flat = vb(values, 1);
+        let p_resolve_cutter_self_intersections = vb(values, 2);
+        let p_detriangulation = DETRIANGULATION.of(&values[3]);
+        let p_require_closed = vb(values, 4);
+        let p_piece_attribute = vs(values, 5);
+        let p_point_tolerance = vf(values, 6);
+        let p_tiny_seam_threshold = vf(values, 7);
+        let p_cleanup_max_batches = vi(values, 8);
+        let p_strict_cleanup = vb(values, 9);
         Ok(make(
             label,
             "boolean_fracture",
@@ -1976,17 +1668,17 @@ pub mod boolean_fracture {
                         left_treatment: Treatment::Solid,
                         right_treatment: Treatment::Surface,
                         resolve_left_self_intersections: false,
-                        resolve_right_self_intersections: p.resolve_cutter_self_intersections,
-                        point_conflict: p.point_conflict,
-                        point_tolerance: p.point_tolerance,
-                        tiny_seam_threshold: p.tiny_seam_threshold,
-                        cleanup_max_batches: p.cleanup_max_batches,
-                        strict_cleanup: p.strict_cleanup,
+                        resolve_right_self_intersections: p_resolve_cutter_self_intersections,
+                        point_conflict: p_point_conflict,
+                        point_tolerance: p_point_tolerance,
+                        tiny_seam_threshold: p_tiny_seam_threshold,
+                        cleanup_max_batches: p_cleanup_max_batches,
+                        strict_cleanup: p_strict_cleanup,
                         seam_points: rdk_boolean::boolean::SeamPoints::SharedSeamPoints,
-                        detriangulation: p.detriangulation,
-                        assume_flat: p.assume_flat,
-                        require_closed: Some(p.require_closed),
-                        piece_attribute: Some(p.piece_attribute.clone()),
+                        detriangulation: p_detriangulation,
+                        assume_flat: p_assume_flat,
+                        require_closed: Some(p_require_closed),
+                        piece_attribute: Some(p_piece_attribute.clone()),
                         left_piece_group: Some("boolean_left".to_owned()),
                         overlap_piece_group: Some("boolean_overlap".to_owned()),
                         right_piece_group: Some("boolean_right".to_owned()),
@@ -1998,12 +1690,8 @@ pub mod boolean_fracture {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -2012,38 +1700,17 @@ pub mod boolean_fracture {
 pub mod intersection_analysis {
     use super::*;
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub source_group: String,
-        pub collision_group: String,
-        pub tolerance: f64,
-        pub include_coplanar: bool,
-        pub input_attribute: String,
-        pub primitive_attribute: String,
-        pub primitive_uvw_attribute: String,
-        pub point_attribute: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            source_group: vs(values, 0),
-            collision_group: vs(values, 1),
-            tolerance: vf(values, 2),
-            include_coplanar: vb(values, 3),
-            input_attribute: vs(values, 4),
-            primitive_attribute: vs(values, 5),
-            primitive_uvw_attribute: vs(values, 6),
-            point_attribute: vs(values, 7),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !p.tolerance.is_finite() || p.tolerance < 0. {
+        let p_tolerance = vf(values, 2);
+        let p_input_attribute = vs(values, 4);
+        let p_primitive_attribute = vs(values, 5);
+        let p_primitive_uvw_attribute = vs(values, 6);
+        let p_point_attribute = vs(values, 7);
+        if !p_tolerance.is_finite() || p_tolerance < 0. {
             return refuse("intersection_analysis", "tolerance must be finite and nonnegative");
         }
         let names: Vec<String> =
-            [&p.input_attribute, &p.primitive_attribute, &p.primitive_uvw_attribute, &p.point_attribute]
+            [&p_input_attribute, &p_primitive_attribute, &p_primitive_uvw_attribute, &p_point_attribute]
                 .iter()
                 .filter_map(|name| support::optional_text(name))
                 .collect();
@@ -2081,15 +1748,22 @@ pub mod intersection_analysis {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_source_group = vs(values, 0);
+        let p_collision_group = vs(values, 1);
+        let p_tolerance = vf(values, 2);
+        let p_include_coplanar = vb(values, 3);
+        let p_input_attribute = vs(values, 4);
+        let p_primitive_attribute = vs(values, 5);
+        let p_primitive_uvw_attribute = vs(values, 6);
+        let p_point_attribute = vs(values, 7);
         let collision = inputs[1].clone();
-        let source_group = support::optional_text(&p.source_group);
-        let collision_group = if collision.is_some() { support::optional_text(&p.collision_group) } else { None };
+        let source_group = support::optional_text(&p_source_group);
+        let collision_group = if collision.is_some() { support::optional_text(&p_collision_group) } else { None };
         let (input_attribute, primitive_attribute, primitive_uvw_attribute, point_attribute) = (
-            support::optional_text(&p.input_attribute),
-            support::optional_text(&p.primitive_attribute),
-            support::optional_text(&p.primitive_uvw_attribute),
-            support::optional_text(&p.point_attribute),
+            support::optional_text(&p_input_attribute),
+            support::optional_text(&p_primitive_attribute),
+            support::optional_text(&p_primitive_uvw_attribute),
+            support::optional_text(&p_point_attribute),
         );
         let mut nodes = vec![first_input(inputs)];
         nodes.extend(collision);
@@ -2114,8 +1788,8 @@ pub mod intersection_analysis {
                         grain: Some(grain(context)),
                         source_primitives,
                         collision_primitives,
-                        tolerance: p.tolerance,
-                        include_coplanar: p.include_coplanar,
+                        tolerance: p_tolerance,
+                        include_coplanar: p_include_coplanar,
                         input_attribute: input_attribute.clone(),
                         primitive_attribute: primitive_attribute.clone(),
                         primitive_uvw_attribute: primitive_uvw_attribute.clone(),
@@ -2128,12 +1802,8 @@ pub mod intersection_analysis {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -2167,36 +1837,6 @@ pub mod fuse {
         ("Unequal", MatchCondition::UnequalAttributeValues),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub target_group: String,
-        pub targeting: FuseTargeting,
-        pub target_attribute: String,
-        pub using: Using,
-        pub tolerance: f64,
-        pub position: Position,
-        pub weight_attribute: String,
-        pub attributes: DefaultAttributes,
-        pub attribute_rules: Vec<u8>,
-        pub group_rules: Vec<u8>,
-        pub metric: FuseMetric,
-        pub inclusive: bool,
-        pub match_attributes: bool,
-        pub radius_attribute: String,
-        pub match_attribute: String,
-        pub match_condition: MatchCondition,
-        pub match_tolerance: f64,
-        pub modify_target: bool,
-        pub fuse_points: bool,
-        pub keep_fused_points: bool,
-        pub snapped_group: String,
-        pub snapped_destination_attribute: String,
-        pub remove_degenerate_primitives: bool,
-        pub remove_unused_points_from_degenerate_primitives: bool,
-        pub remove_all_unused_points: bool,
-    }
-
     fn bytes(values: &[Value], index: usize) -> Vec<u8> {
         match &values[index] {
             Value::Text(value) => value.clone(),
@@ -2204,64 +1844,45 @@ pub mod fuse {
         }
     }
 
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            target_group: vs(values, 1),
-            targeting: TARGETING.of(&values[2]),
-            target_attribute: vs(values, 3),
-            using: USING.of(&values[4]),
-            tolerance: vf(values, 5),
-            position: POSITION.of(&values[6]),
-            weight_attribute: vs(values, 7),
-            attributes: ATTRIBUTES.of(&values[8]),
-            attribute_rules: bytes(values, 9),
-            group_rules: bytes(values, 10),
-            metric: METRIC.of(&values[11]),
-            inclusive: vb(values, 12),
-            match_attributes: vb(values, 13),
-            radius_attribute: vs(values, 14),
-            match_attribute: vs(values, 15),
-            match_condition: CONDITION.of(&values[16]),
-            match_tolerance: vf(values, 17),
-            modify_target: vb(values, 18),
-            fuse_points: vb(values, 19),
-            keep_fused_points: vb(values, 20),
-            snapped_group: vs(values, 21),
-            snapped_destination_attribute: vs(values, 22),
-            remove_degenerate_primitives: vb(values, 23),
-            remove_unused_points_from_degenerate_primitives: vb(values, 24),
-            remove_all_unused_points: vb(values, 25),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !(p.tolerance.is_finite() && p.match_tolerance.is_finite()) || p.tolerance < 0. || p.match_tolerance < 0. {
+        let p_targeting = TARGETING.of(&values[2]);
+        let p_target_attribute = vs(values, 3);
+        let p_tolerance = vf(values, 5);
+        let p_position = POSITION.of(&values[6]);
+        let p_weight_attribute = vs(values, 7);
+        let p_attribute_rules = bytes(values, 9);
+        let p_group_rules = bytes(values, 10);
+        let p_radius_attribute = vs(values, 14);
+        let p_match_attribute = vs(values, 15);
+        let p_match_condition = CONDITION.of(&values[16]);
+        let p_match_tolerance = vf(values, 17);
+        let p_fuse_points = vb(values, 19);
+        let p_keep_fused_points = vb(values, 20);
+        if !(p_tolerance.is_finite() && p_match_tolerance.is_finite()) || p_tolerance < 0. || p_match_tolerance < 0. {
             return refuse("fuse", "tolerances must be finite and nonnegative");
         }
-        let specified = p.targeting == FuseTargeting::SpecifiedPoints;
-        if specified && blank(&p.target_attribute) {
+        let specified = p_targeting == FuseTargeting::SpecifiedPoints;
+        if specified && blank(&p_target_attribute) {
             return refuse("fuse", "specified targets require an attribute name");
         }
-        if blank(&p.match_attribute) && (p.match_condition != MatchCondition::EqualAttributeValues || p.match_tolerance != 0.) {
+        if blank(&p_match_attribute) && (p_match_condition != MatchCondition::EqualAttributeValues || p_match_tolerance != 0.) {
             return refuse("fuse", "match condition and tolerance require a match attribute");
         }
-        if specified && (!blank(&p.radius_attribute) || !blank(&p.match_attribute)) {
+        if specified && (!blank(&p_radius_attribute) || !blank(&p_match_attribute)) {
             return refuse("fuse", "specified targets do not accept radius or match attributes");
         }
-        if p.keep_fused_points && !p.fuse_points {
+        if p_keep_fused_points && !p_fuse_points {
             return refuse("fuse", "keeping fused points requires fusing points");
         }
         if matches!(
-            p.position,
+            p_position,
             Position::WeightedAverage | Position::WeightedSum | Position::MinimumWeight | Position::MaximumWeight
-        ) && blank(&p.weight_attribute)
+        ) && blank(&p_weight_attribute)
         {
             return refuse("fuse", "weighted position reduction requires a weight attribute");
         }
-        support::decode_fuse_attribute_rules("sop/fuse", &p.attribute_rules)?;
-        support::decode_fuse_group_rules("sop/fuse", &p.group_rules)?;
+        support::decode_fuse_attribute_rules("sop/fuse", &p_attribute_rules)?;
+        support::decode_fuse_group_rules("sop/fuse", &p_group_rules)?;
         Ok(())
     }
 
@@ -2316,24 +1937,49 @@ pub mod fuse {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_group = vs(values, 0);
+        let p_target_group = vs(values, 1);
+        let p_targeting = TARGETING.of(&values[2]);
+        let p_target_attribute = vs(values, 3);
+        let p_using = USING.of(&values[4]);
+        let p_tolerance = vf(values, 5);
+        let p_position = POSITION.of(&values[6]);
+        let p_weight_attribute = vs(values, 7);
+        let p_attributes = ATTRIBUTES.of(&values[8]);
+        let p_attribute_rules = bytes(values, 9);
+        let p_group_rules = bytes(values, 10);
+        let p_metric = METRIC.of(&values[11]);
+        let p_inclusive = vb(values, 12);
+        let p_match_attributes = vb(values, 13);
+        let p_radius_attribute = vs(values, 14);
+        let p_match_attribute = vs(values, 15);
+        let p_match_condition = CONDITION.of(&values[16]);
+        let p_match_tolerance = vf(values, 17);
+        let p_modify_target = vb(values, 18);
+        let p_fuse_points = vb(values, 19);
+        let p_keep_fused_points = vb(values, 20);
+        let p_snapped_group = vs(values, 21);
+        let p_snapped_destination_attribute = vs(values, 22);
+        let p_remove_degenerate_primitives = vb(values, 23);
+        let p_remove_unused_points_from_degenerate_primitives = vb(values, 24);
+        let p_remove_all_unused_points = vb(values, 25);
         let target = inputs[1].clone();
-        if p.modify_target && target.is_some() {
+        if p_modify_target && target.is_some() {
             return Err("sop/fuse: modify target requires a disconnected target input".to_owned());
         }
-        let targeting = match p.targeting {
+        let targeting = match p_targeting {
             FuseTargeting::NearPoints => Targeting::NearPoints,
-            FuseTargeting::SpecifiedPoints => Targeting::SpecifiedPoints(p.target_attribute.clone()),
+            FuseTargeting::SpecifiedPoints => Targeting::SpecifiedPoints(p_target_attribute.clone()),
         };
-        let group = support::optional_text(&p.group);
-        let target_group = support::optional_text(&p.target_group);
-        let weight_attribute = support::optional_text(&p.weight_attribute);
-        let radius_attribute = support::optional_text(&p.radius_attribute);
-        let match_attribute = support::optional_text(&p.match_attribute);
-        let snapped_group = support::optional_text(&p.snapped_group);
-        let snapped_destination_attribute = support::optional_text(&p.snapped_destination_attribute);
-        let attribute_rules = support::decode_fuse_attribute_rules("sop/fuse", &p.attribute_rules).expect("rules were validated");
-        let group_rules = support::decode_fuse_group_rules("sop/fuse", &p.group_rules).expect("rules were validated");
+        let group = support::optional_text(&p_group);
+        let target_group = support::optional_text(&p_target_group);
+        let weight_attribute = support::optional_text(&p_weight_attribute);
+        let radius_attribute = support::optional_text(&p_radius_attribute);
+        let match_attribute = support::optional_text(&p_match_attribute);
+        let snapped_group = support::optional_text(&p_snapped_group);
+        let snapped_destination_attribute = support::optional_text(&p_snapped_destination_attribute);
+        let attribute_rules = support::decode_fuse_attribute_rules("sop/fuse", &p_attribute_rules).expect("rules were validated");
+        let group_rules = support::decode_fuse_group_rules("sop/fuse", &p_group_rules).expect("rules were validated");
         let mut nodes = vec![first_input(inputs)];
         nodes.extend(target);
         Ok(make(
@@ -2353,28 +1999,28 @@ pub mod fuse {
                         selection,
                         target_selection,
                         targeting: targeting.clone(),
-                        using: p.using,
-                        tolerance: p.tolerance,
-                        position: p.position,
+                        using: p_using,
+                        tolerance: p_tolerance,
+                        position: p_position,
                         weight_attribute: weight_attribute.clone(),
-                        attributes: p.attributes,
+                        attributes: p_attributes,
                         attribute_rules: attribute_rules.clone(),
                         group_rules: group_rules.clone(),
-                        metric: p.metric,
-                        inclusive: p.inclusive,
-                        match_attributes: p.match_attributes,
+                        metric: p_metric,
+                        inclusive: p_inclusive,
+                        match_attributes: p_match_attributes,
                         radius_attribute: radius_attribute.clone(),
                         match_attribute: match_attribute.clone(),
-                        match_condition: p.match_condition,
-                        match_tolerance: p.match_tolerance,
-                        modify_target: p.modify_target,
-                        fuse_points: p.fuse_points,
-                        keep_fused_points: p.keep_fused_points,
+                        match_condition: p_match_condition,
+                        match_tolerance: p_match_tolerance,
+                        modify_target: p_modify_target,
+                        fuse_points: p_fuse_points,
+                        keep_fused_points: p_keep_fused_points,
                         snapped_group: snapped_group.clone(),
                         snapped_destination_attribute: snapped_destination_attribute.clone(),
-                        remove_degenerate_primitives: p.remove_degenerate_primitives,
-                        remove_unused_points_from_degenerate_primitives: p.remove_unused_points_from_degenerate_primitives,
-                        remove_all_unused_points: p.remove_all_unused_points,
+                        remove_degenerate_primitives: p_remove_degenerate_primitives,
+                        remove_unused_points_from_degenerate_primitives: p_remove_unused_points_from_degenerate_primitives,
+                        remove_all_unused_points: p_remove_all_unused_points,
                         target: if inputs.len() == 2 { Some(target_geometry.clone()) } else { None },
                     },
                     &inputs[0],
@@ -2383,12 +2029,8 @@ pub mod fuse {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -2437,65 +2079,22 @@ pub mod subdivide_cracks {
         ("Chaikin", CreasingMethod::SubdivideCreasingChaikin),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub group: String,
-        pub scheme: Scheme,
-        pub iterations: i64,
-        pub cracks: SubdivisionCracks,
-        pub crack_bias: f64,
-        pub consistent_topology: bool,
-        pub crease_group: String,
-        pub crease_weight_mode: KernelMode,
-        pub crease_weight: f64,
-        pub generate_resulting_creases: bool,
-        pub resulting_crease_group: String,
-        pub hole_group: String,
-        pub remove_holes: bool,
-        pub boundary_interpolation: BoundaryInterpolation,
-        pub face_varying_interpolation: FaceVaryingInterpolation,
-        pub triangle_policy: TrianglePolicy,
-        pub creasing_method: CreasingMethod,
-        pub treat_curves_as_independent: bool,
-        pub recompute_point_normals: bool,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            group: vs(values, 0),
-            scheme: SCHEME.of(&values[1]),
-            iterations: vi(values, 2),
-            cracks: CRACKS.of(&values[3]),
-            crack_bias: vf(values, 4),
-            consistent_topology: vb(values, 5),
-            crease_group: vs(values, 6),
-            crease_weight_mode: support::KERNEL_MODE.of(&values[7]),
-            crease_weight: vf(values, 8),
-            generate_resulting_creases: vb(values, 9),
-            resulting_crease_group: vs(values, 10),
-            hole_group: vs(values, 11),
-            remove_holes: vb(values, 12),
-            boundary_interpolation: BOUNDARY.of(&values[13]),
-            face_varying_interpolation: FVAR.of(&values[14]),
-            triangle_policy: TRIANGLE.of(&values[15]),
-            creasing_method: CREASING.of(&values[16]),
-            treat_curves_as_independent: vb(values, 17),
-            recompute_point_normals: vb(values, 18),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if p.iterations < 1 {
+        let p_iterations = vi(values, 2);
+        let p_crack_bias = vf(values, 4);
+        let p_crease_weight = vf(values, 8);
+        let p_generate_resulting_creases = vb(values, 9);
+        let p_resulting_crease_group = vs(values, 10);
+        if p_iterations < 1 {
             return refuse("subdivide_cracks", "iterations must be positive");
         }
-        if !p.crack_bias.is_finite() || p.crack_bias < 0. || p.crack_bias > 1. {
+        if !p_crack_bias.is_finite() || p_crack_bias < 0. || p_crack_bias > 1. {
             return refuse("subdivide_cracks", "crack bias must be finite and in [0, 1]");
         }
-        if !p.crease_weight.is_finite() || p.crease_weight < 0. {
+        if !p_crease_weight.is_finite() || p_crease_weight < 0. {
             return refuse("subdivide_cracks", "crease weight must be finite and nonnegative");
         }
-        if !p.generate_resulting_creases && !blank(&p.resulting_crease_group) {
+        if !p_generate_resulting_creases && !blank(&p_resulting_crease_group) {
             return refuse("subdivide_cracks", "resulting crease group requires generated creases");
         }
         Ok(())
@@ -2537,27 +2136,45 @@ pub mod subdivide_cracks {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_group = vs(values, 0);
+        let p_scheme = SCHEME.of(&values[1]);
+        let p_iterations = vi(values, 2);
+        let p_cracks = CRACKS.of(&values[3]);
+        let p_crack_bias = vf(values, 4);
+        let p_consistent_topology = vb(values, 5);
+        let p_crease_group = vs(values, 6);
+        let p_crease_weight_mode = support::KERNEL_MODE.of(&values[7]);
+        let p_crease_weight = vf(values, 8);
+        let p_generate_resulting_creases = vb(values, 9);
+        let p_resulting_crease_group = vs(values, 10);
+        let p_hole_group = vs(values, 11);
+        let p_remove_holes = vb(values, 12);
+        let p_boundary_interpolation = BOUNDARY.of(&values[13]);
+        let p_face_varying_interpolation = FVAR.of(&values[14]);
+        let p_triangle_policy = TRIANGLE.of(&values[15]);
+        let p_creasing_method = CREASING.of(&values[16]);
+        let p_treat_curves_as_independent = vb(values, 17);
+        let p_recompute_point_normals = vb(values, 18);
         let creases = inputs[1].clone();
-        if creases.is_none() && !blank(&p.crease_group) {
+        if creases.is_none() && !blank(&p_crease_group) {
             return Err("sop/subdivide_cracks: crease group requires a crease input".to_owned());
         }
-        let cracks = match p.cracks {
+        let cracks = match p_cracks {
             SubdivisionCracks::DoNotClose => CrackPolicy::SubdivideDoNotClose,
             SubdivisionCracks::PullNoDivision => CrackPolicy::SubdividePullNoEdgeDivision,
-            SubdivisionCracks::PullDivide => CrackPolicy::SubdividePullDivideEdges(p.crack_bias),
-            SubdivisionCracks::PullTriangulate => CrackPolicy::SubdividePullTriangulate(p.crack_bias),
+            SubdivisionCracks::PullDivide => CrackPolicy::SubdividePullDivideEdges(p_crack_bias),
+            SubdivisionCracks::PullTriangulate => CrackPolicy::SubdividePullTriangulate(p_crack_bias),
             SubdivisionCracks::StitchNoDivision => CrackPolicy::SubdivideStitchNoEdgeDivision,
             SubdivisionCracks::StitchDivide => CrackPolicy::SubdivideStitchDivideEdges,
             SubdivisionCracks::StitchTriangulate => CrackPolicy::SubdivideStitchTriangulate,
         };
-        let group = support::optional_text(&p.group);
-        let crease_group = support::optional_text(&p.crease_group);
-        let resulting_crease_group = support::optional_text(&p.resulting_crease_group);
-        let hole_group = support::optional_text(&p.hole_group);
-        let crease_weight = match p.crease_weight_mode {
+        let group = support::optional_text(&p_group);
+        let crease_group = support::optional_text(&p_crease_group);
+        let resulting_crease_group = support::optional_text(&p_resulting_crease_group);
+        let hole_group = support::optional_text(&p_hole_group);
+        let crease_weight = match p_crease_weight_mode {
             KernelMode::Auto => None,
-            KernelMode::Explicit => Some(p.crease_weight),
+            KernelMode::Explicit => Some(p_crease_weight),
         };
         let has_creases = creases.is_some();
         let cook_mode = if has_creases { CookMode::Generic } else { CookMode::DuplicateInput(0) };
@@ -2588,24 +2205,24 @@ pub mod subdivide_cracks {
                     &rdk_ops::subdivide::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
-                        scheme: p.scheme,
-                        iterations: p.iterations,
+                        scheme: p_scheme,
+                        iterations: p_iterations,
                         primitives,
                         cracks,
-                        consistent_topology: p.consistent_topology,
+                        consistent_topology: p_consistent_topology,
                         creases: if has_creases { Some(inputs[1].clone()) } else { None },
                         crease_primitives,
                         crease_weight,
-                        generate_resulting_creases: p.generate_resulting_creases,
+                        generate_resulting_creases: p_generate_resulting_creases,
                         resulting_crease_group: resulting_crease_group.clone(),
                         hole_primitives,
-                        remove_holes: p.remove_holes,
-                        boundary_interpolation: p.boundary_interpolation,
-                        face_varying_interpolation: p.face_varying_interpolation,
-                        triangle_policy: p.triangle_policy,
-                        creasing_method: p.creasing_method,
-                        treat_curves_as_independent: p.treat_curves_as_independent,
-                        recompute_point_normals: p.recompute_point_normals,
+                        remove_holes: p_remove_holes,
+                        boundary_interpolation: p_boundary_interpolation,
+                        face_varying_interpolation: p_face_varying_interpolation,
+                        triangle_policy: p_triangle_policy,
+                        creasing_method: p_creasing_method,
+                        treat_curves_as_independent: p_treat_curves_as_independent,
+                        recompute_point_normals: p_recompute_point_normals,
                     },
                     geometry,
                 ))
@@ -2613,12 +2230,8 @@ pub mod subdivide_cracks {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -2648,67 +2261,30 @@ pub mod boolean {
         ("Allow open", BooleanClosedPolicy::NotRequired),
     ]);
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub operation: Operation,
-        pub left_treatment: Treatment,
-        pub right_treatment: Treatment,
-        pub resolve_left_self_intersections: bool,
-        pub resolve_right_self_intersections: bool,
-        pub point_conflict: PointConflict,
-        pub point_tolerance: f64,
-        pub tiny_seam_threshold: f64,
-        pub cleanup_max_batches: i64,
-        pub strict_cleanup: bool,
-        pub seam_points: SeamPoints,
-        pub detriangulation: Detriangulation,
-        pub assume_flat: bool,
-        pub require_closed: BooleanClosedPolicy,
-        pub piece_attribute: String,
-        pub left_piece_group: String,
-        pub overlap_piece_group: String,
-        pub right_piece_group: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            operation: OPERATION.of(&values[0]),
-            left_treatment: TREATMENT.of(&values[1]),
-            right_treatment: TREATMENT.of(&values[2]),
-            resolve_left_self_intersections: vb(values, 3),
-            resolve_right_self_intersections: vb(values, 4),
-            point_conflict: CONFLICT.of(&values[5]),
-            point_tolerance: vf(values, 6),
-            tiny_seam_threshold: vf(values, 7),
-            cleanup_max_batches: vi(values, 8),
-            strict_cleanup: vb(values, 9),
-            seam_points: SEAM_POINTS.of(&values[10]),
-            detriangulation: DETRIANGULATION.of(&values[11]),
-            assume_flat: vb(values, 12),
-            require_closed: CLOSED.of(&values[13]),
-            piece_attribute: vs(values, 14),
-            left_piece_group: vs(values, 15),
-            overlap_piece_group: vs(values, 16),
-            right_piece_group: vs(values, 17),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !(p.point_tolerance.is_finite() && p.tiny_seam_threshold.is_finite())
-            || p.point_tolerance < 0.
-            || p.tiny_seam_threshold < 0.
+        let p_operation = OPERATION.of(&values[0]);
+        let p_left_treatment = TREATMENT.of(&values[1]);
+        let p_right_treatment = TREATMENT.of(&values[2]);
+        let p_point_tolerance = vf(values, 6);
+        let p_tiny_seam_threshold = vf(values, 7);
+        let p_cleanup_max_batches = vi(values, 8);
+        let p_left_piece_group = vs(values, 15);
+        let p_overlap_piece_group = vs(values, 16);
+        let p_right_piece_group = vs(values, 17);
+        if !(p_point_tolerance.is_finite() && p_tiny_seam_threshold.is_finite())
+            || p_point_tolerance < 0.
+            || p_tiny_seam_threshold < 0.
         {
             return refuse("boolean", "tolerances must be finite and nonnegative");
         }
-        if p.cleanup_max_batches < 1 {
+        if p_cleanup_max_batches < 1 {
             return refuse("boolean", "cleanup batches must be positive");
         }
-        if p.operation == Operation::Shatter {
-            if p.left_treatment != Treatment::Solid || p.right_treatment != Treatment::Solid {
+        if p_operation == Operation::Shatter {
+            if p_left_treatment != Treatment::Solid || p_right_treatment != Treatment::Solid {
                 return refuse("boolean", "shatter requires two solid operands");
             }
-            let names: Vec<String> = [&p.left_piece_group, &p.overlap_piece_group, &p.right_piece_group]
+            let names: Vec<String> = [&p_left_piece_group, &p_overlap_piece_group, &p_right_piece_group]
                 .iter()
                 .filter_map(|name| support::optional_text(name))
                 .collect();
@@ -2753,16 +2329,33 @@ pub mod boolean {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        let require_closed = match p.require_closed {
+        let p_operation = OPERATION.of(&values[0]);
+        let p_left_treatment = TREATMENT.of(&values[1]);
+        let p_right_treatment = TREATMENT.of(&values[2]);
+        let p_resolve_left_self_intersections = vb(values, 3);
+        let p_resolve_right_self_intersections = vb(values, 4);
+        let p_point_conflict = CONFLICT.of(&values[5]);
+        let p_point_tolerance = vf(values, 6);
+        let p_tiny_seam_threshold = vf(values, 7);
+        let p_cleanup_max_batches = vi(values, 8);
+        let p_strict_cleanup = vb(values, 9);
+        let p_seam_points = SEAM_POINTS.of(&values[10]);
+        let p_detriangulation = DETRIANGULATION.of(&values[11]);
+        let p_assume_flat = vb(values, 12);
+        let p_require_closed = CLOSED.of(&values[13]);
+        let p_piece_attribute = vs(values, 14);
+        let p_left_piece_group = vs(values, 15);
+        let p_overlap_piece_group = vs(values, 16);
+        let p_right_piece_group = vs(values, 17);
+        let require_closed = match p_require_closed {
             BooleanClosedPolicy::Default => None,
             BooleanClosedPolicy::Required => Some(true),
             BooleanClosedPolicy::NotRequired => Some(false),
         };
-        let piece_attribute = support::optional_text(&p.piece_attribute);
-        let left_piece_group = support::optional_text(&p.left_piece_group);
-        let overlap_piece_group = support::optional_text(&p.overlap_piece_group);
-        let right_piece_group = support::optional_text(&p.right_piece_group);
+        let piece_attribute = support::optional_text(&p_piece_attribute);
+        let left_piece_group = support::optional_text(&p_left_piece_group);
+        let overlap_piece_group = support::optional_text(&p_overlap_piece_group);
+        let right_piece_group = support::optional_text(&p_right_piece_group);
         Ok(make(
             label,
             "boolean",
@@ -2774,19 +2367,19 @@ pub mod boolean {
                     &rdk_boolean::boolean::Params {
                         cancel: cancel(context),
                         grain: grain(context),
-                        operation: p.operation,
-                        left_treatment: p.left_treatment,
-                        right_treatment: p.right_treatment,
-                        resolve_left_self_intersections: p.resolve_left_self_intersections,
-                        resolve_right_self_intersections: p.resolve_right_self_intersections,
-                        point_conflict: p.point_conflict,
-                        point_tolerance: p.point_tolerance,
-                        tiny_seam_threshold: p.tiny_seam_threshold,
-                        cleanup_max_batches: p.cleanup_max_batches,
-                        strict_cleanup: p.strict_cleanup,
-                        seam_points: p.seam_points,
-                        detriangulation: p.detriangulation,
-                        assume_flat: p.assume_flat,
+                        operation: p_operation,
+                        left_treatment: p_left_treatment,
+                        right_treatment: p_right_treatment,
+                        resolve_left_self_intersections: p_resolve_left_self_intersections,
+                        resolve_right_self_intersections: p_resolve_right_self_intersections,
+                        point_conflict: p_point_conflict,
+                        point_tolerance: p_point_tolerance,
+                        tiny_seam_threshold: p_tiny_seam_threshold,
+                        cleanup_max_batches: p_cleanup_max_batches,
+                        strict_cleanup: p_strict_cleanup,
+                        seam_points: p_seam_points,
+                        detriangulation: p_detriangulation,
+                        assume_flat: p_assume_flat,
                         require_closed,
                         piece_attribute: piece_attribute.clone(),
                         left_piece_group: left_piece_group.clone(),
@@ -2800,12 +2393,8 @@ pub mod boolean {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -2814,38 +2403,9 @@ pub mod boolean {
 pub mod boolean_detect {
     use super::*;
 
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub source_group: String,
-        pub collision_group: String,
-        pub tolerance: f64,
-        pub include_coplanar: bool,
-        pub intersecting_group: String,
-        pub intersections_attribute: String,
-        pub count_attribute: String,
-        pub self_intersecting_group: String,
-        pub self_intersections_attribute: String,
-        pub self_count_attribute: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            source_group: vs(values, 0),
-            collision_group: vs(values, 1),
-            tolerance: vf(values, 2),
-            include_coplanar: vb(values, 3),
-            intersecting_group: vs(values, 4),
-            intersections_attribute: vs(values, 5),
-            count_attribute: vs(values, 6),
-            self_intersecting_group: vs(values, 7),
-            self_intersections_attribute: vs(values, 8),
-            self_count_attribute: vs(values, 9),
-        }
-    }
-
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !p.tolerance.is_finite() || p.tolerance < 0. {
+        let p_tolerance = vf(values, 2);
+        if !p_tolerance.is_finite() || p_tolerance < 0. {
             return refuse("boolean_detect", "tolerance must be finite and nonnegative");
         }
         Ok(())
@@ -2878,18 +2438,27 @@ pub mod boolean_detect {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_source_group = vs(values, 0);
+        let p_collision_group = vs(values, 1);
+        let p_tolerance = vf(values, 2);
+        let p_include_coplanar = vb(values, 3);
+        let p_intersecting_group = vs(values, 4);
+        let p_intersections_attribute = vs(values, 5);
+        let p_count_attribute = vs(values, 6);
+        let p_self_intersecting_group = vs(values, 7);
+        let p_self_intersections_attribute = vs(values, 8);
+        let p_self_count_attribute = vs(values, 9);
         let collision = inputs[1].clone();
         let has_collision = collision.is_some();
         let cross = |name: &str| if has_collision { support::optional_text(name) } else { None };
-        let source_group = support::optional_text(&p.source_group);
-        let collision_group = cross(&p.collision_group);
-        let intersecting_group = cross(&p.intersecting_group);
-        let intersections_attribute = cross(&p.intersections_attribute);
-        let count_attribute = cross(&p.count_attribute);
-        let self_intersecting_group = support::optional_text(&p.self_intersecting_group);
-        let self_intersections_attribute = support::optional_text(&p.self_intersections_attribute);
-        let self_count_attribute = support::optional_text(&p.self_count_attribute);
+        let source_group = support::optional_text(&p_source_group);
+        let collision_group = cross(&p_collision_group);
+        let intersecting_group = cross(&p_intersecting_group);
+        let intersections_attribute = cross(&p_intersections_attribute);
+        let count_attribute = cross(&p_count_attribute);
+        let self_intersecting_group = support::optional_text(&p_self_intersecting_group);
+        let self_intersections_attribute = support::optional_text(&p_self_intersections_attribute);
+        let self_count_attribute = support::optional_text(&p_self_count_attribute);
         let attributes: Vec<String> = [
             &intersections_attribute,
             &count_attribute,
@@ -2933,8 +2502,8 @@ pub mod boolean_detect {
                         grain: grain(context),
                         source_primitives,
                         collision_primitives,
-                        tolerance: p.tolerance,
-                        include_coplanar: p.include_coplanar,
+                        tolerance: p_tolerance,
+                        include_coplanar: p_include_coplanar,
                         intersecting_group: intersecting_group.clone(),
                         intersections_attribute: intersections_attribute.clone(),
                         count_attribute: count_attribute.clone(),
@@ -2949,12 +2518,8 @@ pub mod boolean_detect {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -2973,136 +2538,66 @@ pub mod triangulate_2d {
         ("Custom plane", Triangulate2dProjection::Plane),
         ("Point attribute", Triangulate2dProjection::Attribute),
     ]);
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub point_group: String,
-        pub constraint_edge_group: String,
-        pub constraint_primitive_group: String,
-        pub projection: Triangulate2dProjection,
-        pub plane_origin_x: f64,
-        pub plane_origin_y: f64,
-        pub plane_origin_z: f64,
-        pub plane_normal_x: f64,
-        pub plane_normal_y: f64,
-        pub plane_normal_z: f64,
-        pub point_attribute: String,
-        pub seed: i64,
-        pub split_crossing_constraints: bool,
-        pub flood_from_hull_boundary: bool,
-        pub remove_outside_constraint_polygons: bool,
-        pub silhouette_constraints: bool,
-        pub remove_outside_silhouette: bool,
-        pub ignore_non_constraint_points: bool,
-        pub remove_duplicate_points: bool,
-        pub refine: bool,
-        pub allow_constraint_splitting: bool,
-        pub minimum_angle: f64,
-        pub use_maximum_area: bool,
-        pub maximum_area: f64,
-        pub use_target_edge_length: bool,
-        pub target_edge_length: f64,
-        pub minimum_edge_length: f64,
-        pub maximum_new_points: i64,
-        pub regularization_steps: i64,
-        pub allow_movement_of_interior_input_points: bool,
-        pub preserve_point_payload: bool,
-        pub restore_original_point_positions: bool,
-        pub keep_primitives: bool,
-        pub remove_unused_points: bool,
-        pub recompute_point_normals: bool,
-        pub split_point_group: String,
-        pub refinement_point_group: String,
-        pub triangle_group: String,
-        pub constraint_group: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            point_group: vs(values, 0),
-            constraint_edge_group: vs(values, 1),
-            constraint_primitive_group: vs(values, 2),
-            projection: PROJECTION.of(&values[3]),
-            plane_origin_x: vf(values, 4),
-            plane_origin_y: vf(values, 5),
-            plane_origin_z: vf(values, 6),
-            plane_normal_x: vf(values, 7),
-            plane_normal_y: vf(values, 8),
-            plane_normal_z: vf(values, 9),
-            point_attribute: vs(values, 10),
-            seed: vi(values, 11),
-            split_crossing_constraints: vb(values, 12),
-            flood_from_hull_boundary: vb(values, 13),
-            remove_outside_constraint_polygons: vb(values, 14),
-            silhouette_constraints: vb(values, 15),
-            remove_outside_silhouette: vb(values, 16),
-            ignore_non_constraint_points: vb(values, 17),
-            remove_duplicate_points: vb(values, 18),
-            refine: vb(values, 19),
-            allow_constraint_splitting: vb(values, 20),
-            minimum_angle: vf(values, 21),
-            use_maximum_area: vb(values, 22),
-            maximum_area: vf(values, 23),
-            use_target_edge_length: vb(values, 24),
-            target_edge_length: vf(values, 25),
-            minimum_edge_length: vf(values, 26),
-            maximum_new_points: vi(values, 27),
-            regularization_steps: vi(values, 28),
-            allow_movement_of_interior_input_points: vb(values, 29),
-            preserve_point_payload: vb(values, 30),
-            restore_original_point_positions: vb(values, 31),
-            keep_primitives: vb(values, 32),
-            remove_unused_points: vb(values, 33),
-            recompute_point_normals: vb(values, 34),
-            split_point_group: vs(values, 35),
-            refinement_point_group: vs(values, 36),
-            triangle_group: vs(values, 37),
-            constraint_group: vs(values, 38),
-        }
-    }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
+        let p_projection = PROJECTION.of(&values[3]);
+        let p_plane_origin_x = vf(values, 4);
+        let p_plane_origin_y = vf(values, 5);
+        let p_plane_origin_z = vf(values, 6);
+        let p_plane_normal_x = vf(values, 7);
+        let p_plane_normal_y = vf(values, 8);
+        let p_plane_normal_z = vf(values, 9);
+        let p_point_attribute = vs(values, 10);
+        let p_refine = vb(values, 19);
+        let p_minimum_angle = vf(values, 21);
+        let p_use_maximum_area = vb(values, 22);
+        let p_maximum_area = vf(values, 23);
+        let p_use_target_edge_length = vb(values, 24);
+        let p_target_edge_length = vf(values, 25);
+        let p_minimum_edge_length = vf(values, 26);
+        let p_maximum_new_points = vi(values, 27);
+        let p_regularization_steps = vi(values, 28);
         let numbers = [
-            p.plane_origin_x,
-            p.plane_origin_y,
-            p.plane_origin_z,
-            p.plane_normal_x,
-            p.plane_normal_y,
-            p.plane_normal_z,
-            p.minimum_angle,
-            p.maximum_area,
-            p.target_edge_length,
-            p.minimum_edge_length,
+            p_plane_origin_x,
+            p_plane_origin_y,
+            p_plane_origin_z,
+            p_plane_normal_x,
+            p_plane_normal_y,
+            p_plane_normal_z,
+            p_minimum_angle,
+            p_maximum_area,
+            p_target_edge_length,
+            p_minimum_edge_length,
         ];
         if !numbers.iter().all(|v| v.is_finite()) {
             return refuse("triangulate_2d", "numeric values must be finite");
         }
-        if p.minimum_angle < 0.
-            || p.minimum_edge_length < 0.
-            || p.maximum_area < 0.
-            || p.target_edge_length < 0.
-            || p.maximum_new_points < 0
-            || p.regularization_steps < 0
+        if p_minimum_angle < 0.
+            || p_minimum_edge_length < 0.
+            || p_maximum_area < 0.
+            || p_target_edge_length < 0.
+            || p_maximum_new_points < 0
+            || p_regularization_steps < 0
         {
             return refuse("triangulate_2d", "refinement bounds must be nonnegative");
         }
-        if p.refine && (p.minimum_angle <= 0. || p.minimum_angle >= std::f64::consts::PI / 3.) {
+        if p_refine && (p_minimum_angle <= 0. || p_minimum_angle >= std::f64::consts::PI / 3.) {
             return refuse("triangulate_2d", "minimum angle must lie between zero and pi/3");
         }
-        if p.use_maximum_area && p.maximum_area <= 0. {
+        if p_use_maximum_area && p_maximum_area <= 0. {
             return refuse("triangulate_2d", "maximum area must be positive");
         }
-        if p.use_target_edge_length && p.target_edge_length <= 0. {
+        if p_use_target_edge_length && p_target_edge_length <= 0. {
             return refuse("triangulate_2d", "target edge length must be positive");
         }
-        if p.projection == Triangulate2dProjection::Plane
-            && p.plane_normal_x == 0.
-            && p.plane_normal_y == 0.
-            && p.plane_normal_z == 0.
+        if p_projection == Triangulate2dProjection::Plane
+            && p_plane_normal_x == 0.
+            && p_plane_normal_y == 0.
+            && p_plane_normal_z == 0.
         {
             return refuse("triangulate_2d", "plane normal must be nonzero");
         }
-        if p.projection == Triangulate2dProjection::Attribute && blank(&p.point_attribute) {
+        if p_projection == Triangulate2dProjection::Attribute && blank(&p_point_attribute) {
             return refuse("triangulate_2d", "point attribute must be nonblank");
         }
         Ok(())
@@ -3170,29 +2665,67 @@ pub mod triangulate_2d {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
-        fn projection_of(p: &Parameters) -> Projection {
-        match p.projection {
-            Triangulate2dProjection::BestFit => Projection::BestFit,
-            Triangulate2dProjection::Xy => Projection::PlaneXy,
-            Triangulate2dProjection::Yz => Projection::PlaneYz,
-            Triangulate2dProjection::Zx => Projection::PlaneZx,
-            Triangulate2dProjection::Plane => Projection::Plane {
-                origin: rays_math::vec3::create(p.plane_origin_x, p.plane_origin_y, p.plane_origin_z),
-                normal: rays_math::vec3::create(p.plane_normal_x, p.plane_normal_y, p.plane_normal_z),
-            },
-            Triangulate2dProjection::Attribute => Projection::PointAttribute(p.point_attribute.clone()),
-        }
-        }
-        let maximum_area = p.use_maximum_area.then_some(p.maximum_area);
-        let target_edge_length = p.use_target_edge_length.then_some(p.target_edge_length);
-        let point_group = support::optional_text(&p.point_group);
-        let constraint_edge_group = support::optional_text(&p.constraint_edge_group);
-        let constraint_primitive_group = support::optional_text(&p.constraint_primitive_group);
-        let split_point_group = support::optional_text(&p.split_point_group);
-        let refinement_point_group = support::optional_text(&p.refinement_point_group);
-        let triangle_group = support::optional_text(&p.triangle_group);
-        let constraint_group = support::optional_text(&p.constraint_group);
+        let p_point_group = vs(values, 0);
+        let p_constraint_edge_group = vs(values, 1);
+        let p_constraint_primitive_group = vs(values, 2);
+        let p_projection = PROJECTION.of(&values[3]);
+        let p_plane_origin_x = vf(values, 4);
+        let p_plane_origin_y = vf(values, 5);
+        let p_plane_origin_z = vf(values, 6);
+        let p_plane_normal_x = vf(values, 7);
+        let p_plane_normal_y = vf(values, 8);
+        let p_plane_normal_z = vf(values, 9);
+        let p_point_attribute = vs(values, 10);
+        let p_seed = vi(values, 11);
+        let p_split_crossing_constraints = vb(values, 12);
+        let p_flood_from_hull_boundary = vb(values, 13);
+        let p_remove_outside_constraint_polygons = vb(values, 14);
+        let p_silhouette_constraints = vb(values, 15);
+        let p_remove_outside_silhouette = vb(values, 16);
+        let p_ignore_non_constraint_points = vb(values, 17);
+        let p_remove_duplicate_points = vb(values, 18);
+        let p_refine = vb(values, 19);
+        let p_allow_constraint_splitting = vb(values, 20);
+        let p_minimum_angle = vf(values, 21);
+        let p_use_maximum_area = vb(values, 22);
+        let p_maximum_area = vf(values, 23);
+        let p_use_target_edge_length = vb(values, 24);
+        let p_target_edge_length = vf(values, 25);
+        let p_minimum_edge_length = vf(values, 26);
+        let p_maximum_new_points = vi(values, 27);
+        let p_regularization_steps = vi(values, 28);
+        let p_allow_movement_of_interior_input_points = vb(values, 29);
+        let p_preserve_point_payload = vb(values, 30);
+        let p_restore_original_point_positions = vb(values, 31);
+        let p_keep_primitives = vb(values, 32);
+        let p_remove_unused_points = vb(values, 33);
+        let p_recompute_point_normals = vb(values, 34);
+        let p_split_point_group = vs(values, 35);
+        let p_refinement_point_group = vs(values, 36);
+        let p_triangle_group = vs(values, 37);
+        let p_constraint_group = vs(values, 38);
+        let projection_of = move || -> Projection {
+            match p_projection {
+                Triangulate2dProjection::BestFit => Projection::BestFit,
+                Triangulate2dProjection::Xy => Projection::PlaneXy,
+                Triangulate2dProjection::Yz => Projection::PlaneYz,
+                Triangulate2dProjection::Zx => Projection::PlaneZx,
+                Triangulate2dProjection::Plane => Projection::Plane {
+                    origin: rays_math::vec3::create(p_plane_origin_x, p_plane_origin_y, p_plane_origin_z),
+                    normal: rays_math::vec3::create(p_plane_normal_x, p_plane_normal_y, p_plane_normal_z),
+                },
+                Triangulate2dProjection::Attribute => Projection::PointAttribute(p_point_attribute.clone()),
+            }
+        };
+        let maximum_area = p_use_maximum_area.then_some(p_maximum_area);
+        let target_edge_length = p_use_target_edge_length.then_some(p_target_edge_length);
+        let point_group = support::optional_text(&p_point_group);
+        let constraint_edge_group = support::optional_text(&p_constraint_edge_group);
+        let constraint_primitive_group = support::optional_text(&p_constraint_primitive_group);
+        let split_point_group = support::optional_text(&p_split_point_group);
+        let refinement_point_group = support::optional_text(&p_refinement_point_group);
+        let triangle_group = support::optional_text(&p_triangle_group);
+        let constraint_group = support::optional_text(&p_constraint_group);
         Ok(make(
             label,
             "triangulate_2d",
@@ -3230,33 +2763,33 @@ pub mod triangulate_2d {
                         selection,
                         constraint_edges,
                         constraint_primitives,
-                        projection: projection_of(&p),
-                        seed: p.seed,
-                        split_crossing_constraints: p.split_crossing_constraints,
-                        flood_from_hull_boundary: p.flood_from_hull_boundary,
-                        remove_outside_constraint_polygons: p.remove_outside_constraint_polygons,
-                        silhouette_constraints: p.silhouette_constraints,
-                        remove_outside_silhouette: p.remove_outside_silhouette,
-                        ignore_non_constraint_points: p.ignore_non_constraint_points,
-                        remove_duplicate_points: p.remove_duplicate_points,
-                        refine: p.refine,
-                        allow_constraint_splitting: p.allow_constraint_splitting,
-                        minimum_angle: p.minimum_angle,
+                        projection: projection_of(),
+                        seed: p_seed,
+                        split_crossing_constraints: p_split_crossing_constraints,
+                        flood_from_hull_boundary: p_flood_from_hull_boundary,
+                        remove_outside_constraint_polygons: p_remove_outside_constraint_polygons,
+                        silhouette_constraints: p_silhouette_constraints,
+                        remove_outside_silhouette: p_remove_outside_silhouette,
+                        ignore_non_constraint_points: p_ignore_non_constraint_points,
+                        remove_duplicate_points: p_remove_duplicate_points,
+                        refine: p_refine,
+                        allow_constraint_splitting: p_allow_constraint_splitting,
+                        minimum_angle: p_minimum_angle,
                         maximum_area,
                         target_edge_length,
-                        minimum_edge_length: p.minimum_edge_length,
-                        maximum_new_points: p.maximum_new_points,
-                        regularization_steps: p.regularization_steps,
-                        allow_movement_of_interior_input_points: p.allow_movement_of_interior_input_points,
-                        preserve_point_payload: p.preserve_point_payload,
-                        restore_original_point_positions: p.restore_original_point_positions,
-                        keep_primitives: p.keep_primitives,
+                        minimum_edge_length: p_minimum_edge_length,
+                        maximum_new_points: p_maximum_new_points,
+                        regularization_steps: p_regularization_steps,
+                        allow_movement_of_interior_input_points: p_allow_movement_of_interior_input_points,
+                        preserve_point_payload: p_preserve_point_payload,
+                        restore_original_point_positions: p_restore_original_point_positions,
+                        keep_primitives: p_keep_primitives,
                         split_point_group: split_point_group.clone(),
                         refinement_point_group: refinement_point_group.clone(),
                         triangle_group: triangle_group.clone(),
                         constraint_group: constraint_group.clone(),
-                        remove_unused_points: p.remove_unused_points,
-                        recompute_point_normals: p.recompute_point_normals,
+                        remove_unused_points: p_remove_unused_points,
+                        recompute_point_normals: p_recompute_point_normals,
                     },
                     geometry,
                 ))
@@ -3264,12 +2797,8 @@ pub mod triangulate_2d {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 

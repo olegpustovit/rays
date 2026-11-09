@@ -65,15 +65,10 @@ fn group_transfer_declares_its_schema_and_cooks() {
     assert!(payload::geometry(&out.payload).is_ok());
     let (edited, effects) = node::apply_parameters(&n, &[("distance".to_owned(), Value::Float(2.0))]).unwrap();
     assert!(effects.cook && node::id(&edited) == node::id(&n));
-    let values = groups::group_transfer::to_values(&groups::group_transfer::from_values(&[
-        Value::Bool(true),
-        Value::Text(groups::group_transfer::encode(&groups::default_transfer_rules())),
-        crate::support::GROUP_COPY_CONFLICT.value(&rdk_ops::group_ops::CopyConflict::CopySkip),
-        Value::Bool(false),
-        Value::Float(0.5),
-    ]));
-    assert_eq!(values[4], Value::Float(0.5));
-    assert!(matches!(&values[1], Value::Text(t) if !t.is_empty()));
+    let encoded = groups::group_transfer::encode(&groups::default_transfer_rules());
+    let decoded = groups::group_transfer::decode(&encoded).unwrap();
+    assert_eq!(groups::group_transfer::encode(&decoded), encoded);
+    assert!(!encoded.is_empty());
     crate::session::close(&mut s);
 }
 

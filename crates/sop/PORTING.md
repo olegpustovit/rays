@@ -1,12 +1,14 @@
-# Porting a SOP node (the ppx_rays replacement)
+# Adding a native SOP node
 
-OCaml declares a node as a `parameters` record with `[@sop.*]` field attributes and `[@@sop.node_*]`
-type attributes, then `[@@deriving sop_params, sop_node]` generates `parameters_default`,
-`parameters_schema`, `parameters_build` and `parameters_factory`. There are no proc macros here:
-those four are `decl.rs` (`Meta`, `Spec`, `schema`, `build`, `factory`), and a node file supplies the
-data and the operator. `rs/crates/sop/src/test_manifest.rs` renders every factory in
-`nodes::factories()` in the format of `lib/flow_sop/flow_manifest.sexp` and compares it with that
-file's `(kind "sop/<key>" ...)` block, so a wrong label, slot, field, range or default fails a test.
+A native SOP supplies a `Meta` constant, ordered `Spec` values, and an `operator` function.
+`decl::native(&META, specs(), operator)` builds its factory through the shared schema,
+validation, arity, facts and parameter-edit machinery. Lisp `defnode` bodies remain the public
+implementation for operations already expressible in Rays Lisp.
+
+Native operators read schema-normalised `Value`s directly into the RDK kernel's `Params`.
+Capture scalar values and decode encoded tables when constructing the node; resolve named
+geometry selections and take the current context's cancellation token and grain inside the
+cook closure. There is no intermediate `Parameters` record or conversion pair.
 
 ## Mapping (every ppx attribute has one home)
 
@@ -26,9 +28,9 @@ file's `(kind "sop/<key>" ...)` block, so a wrong label, slot, field, range or d
 | `[@sop.default e]` | the `Value` passed to `spec` (`Value::Bool/Int/Float/Text/Choice`) |
 | `parameters_default` | `decl.schema.default()`; there is no second copy |
 | `type parameters = unit` | `specs()` returns `Vec::new()` |
-| the record | `Parameters` struct + `from_values(&[Value])` (+ `to_values`), field order = `Spec` order |
+| the record | read the schema values directly; field order = `Spec` order |
 | `parameters_build ?schema (fun ~label p a b -> node)` | `operator(label, values, inputs) -> Result<node::T, String>`; `?schema` is `Decl.dynamic_schema` |
-| `parameters_factory build` | `decl::factory(&decl())` |
+| `parameters_factory build` | `decl::native(&META, specs(), operator)` |
 
 Values are positional: `values[i]` is the i-th `Spec`. Strings in `Value::Text` are bytes
 (`Vec<u8>`); `Value::Choice` holds the label.
@@ -44,33 +46,32 @@ Choice parameters over an OCaml variant (support.rs): an enum whose discriminant
 positions, `FOO_LABELS: [&str; N]`, `FOO: [E; N]`, `foo_kind()`, `foo_of_value(&Value) -> E` and
 `foo_value(E) -> Value`. An rdk enum gets the same tables and the same two conversions.
 
-## The recipe, with `groups::group_transfer` (src/groups.rs) as the complete example
+## The recipe
 
-1. Create `pub mod <name>` in the node's file (`shapes.rs`, `sop_topology.rs`, ...), one per OCaml
-   `module X = struct ... end`.
-2. `Parameters`, `from_values`, `to_values` (see `group_transfer`). `from_values` may `expect`: the
-   schema has already validated and normalised the record.
-3. `pub const META: Meta = Meta { key: "...", label: "...", category: "A/B", inputs: N, ..decl::META };`
-4. `pub fn specs() -> Vec<Spec>`: copy the record fields in order; map each attribute with the table.
-5. `pub fn operator(label, values, inputs) -> Result<node::T, String>`: the body of the OCaml
-   `parameters_build` lambda. `Node.Build.make_geometry ?label ~operation ... cook` becomes
-   `build::make_geometry(build::Args { label: Some(label.to_owned()), cook_mode, inputs, ..build::args("op") }, expand, Arc::new(move |node_id, context, inputs| ...))`;
-   clone what the closure needs into it (it must be `Send + Sync`). `cooked g` is
-   `support::cooked(g)`, `structured_rdk_error e` is `support::structured_rdk_error(&e)`, and
-   `Context.cancel_token`/`grain` are `context::cancel_token(context)` (an `Arc<cancel::T>`) /
-   `context::grain(context)`.
-6. `pub fn decl() -> Decl` and `pub fn factory() -> Factory` exactly as in the examples.
-7. Add the factory to `nodes::build_all` at the OCaml position (uncomment its line).
-8. Run `cargo t -p sop`: `test_manifest` compares the new node with the manifest.
+1. Add `pub mod <name>` to the appropriate node file (`shapes.rs`, `sop_topology.rs`, ...).
+2. Define `pub const META: Meta` and `specs() -> Vec<Spec>`. Preserve field order, defaults,
+   labels, ranges, slots, facts and validation callbacks: they are catalog contracts.
+3. Implement `operator(label, values, inputs) -> Result<node::T, String>`. Read only the values
+   it needs, once, and construct the native `Params` inside its cook closure. Required inputs
+   are `Some`; use `decl::connected` for rest inputs. Cook closures must be `Send + Sync`.
+4. Implement `factory() -> Factory { decl::native(&META, specs(), operator) }` and register it
+   in `nodes::build_all` in the catalog's existing order.
+5. Run `cargo t -p sop`, then the affected Flow and editor catalog checks. The manifest must
+   stay byte-identical unless a schema change was intentional.
 
-`shapes::null` is the smallest example (no fields). `shapes::switch` shows optional and rest
-slots, an `input_policy`, a `cook_mode` with an index, and a dynamic schema: `specs(choices)` takes
-the optional choice labels, `schema(values, made_node)` is the `?schema` callback.
+`shapes::null` is the smallest example. `groups::group_transfer` demonstrates a table decoded
+once before cooking. `shapes::switch` keeps a custom `Decl` because its schema depends on the
+connected branches; its optional/rest slots and rebuild path still use `decl::factory`.
+
+Do not move `Meta.validate` into a cook: invalid edits must be rejected before cooking, with
+the same diagnostic. Geometry-dependent group lookup belongs inside the cook so changed
+inputs are resolved again. Decode encoded rules outside the closure and clone their native
+representation only when the kernel needs ownership.
 
 ## Rules the translation keeps
 
 - Node ids, versions and `parameters`/`parameter_key`/`facts_key` bytes are cache identity: keep
-  `~parameters:"..."` strings byte-identical (`Vec<u8>` via `.into_bytes()`).
+  their existing bytes unchanged.
 - Cook closures run on pool threads: no `Rc`/`RefCell`; share with `Arc`.
 - An OCaml exception from a cook (`invalid_arg`) is a `panic!`/`assert!`; a `Result` is a `Result`.
 - Do not add a parameter, default or range that the Lisp node does not have; the manifest is the

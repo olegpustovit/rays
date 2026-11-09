@@ -8,11 +8,11 @@ use rdk_geom::surface_index;
 use rdk_ops::{attribute_ops, transform_ops, uv_ops};
 
 use crate::context::{self, dependencies};
-use crate::decl::{self, Decl, Meta, Spec};
+use crate::decl::{self, Meta, Spec};
 use crate::edit_graph::Factory;
 use crate::node::{self, build, Cooked, CookMode};
 use crate::payload;
-use crate::support::{self, Choice, DistanceRadiusMode, KernelMode, MirrorMethod, MirrorTransform, TransferFalloff, TransferMode};
+use crate::support::{self, Choice, DistanceRadiusMode, KernelMode, MirrorMethod, MirrorTransform, TransferMode};
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -137,12 +137,8 @@ pub mod image_texels {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -150,27 +146,6 @@ pub mod image_texels {
 
 pub mod uv_flatten {
     use super::*;
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub name: String,
-        pub seams: String,
-        pub iterations: i64,
-        pub tolerance: f64,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            name: text(&values[0]),
-            seams: text(&values[1]),
-            iterations: int(&values[2]),
-            tolerance: float(&values[3]),
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![text_value(&p.name), text_value(&p.seams), Value::Int(p.iterations), Value::Float(p.tolerance)]
-    }
 
     pub const META: Meta = Meta {
         key: "uv_flatten",
@@ -196,10 +171,13 @@ pub mod uv_flatten {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_name = text(&values[0]);
+        let p_seams = text(&values[1]);
+        let p_iterations = int(&values[2]);
+        let p_tolerance = float(&values[3]);
         let input = inputs[0].clone().unwrap();
         let (name, seams_name, iterations, tolerance) =
-            (p.name, support::optional_text(&p.seams), p.iterations, p.tolerance);
+            (p_name, support::optional_text(&p_seams), p_iterations, p_tolerance);
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -229,46 +207,13 @@ pub mod uv_flatten {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
 pub mod uv_relax {
     use super::*;
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub name: String,
-        pub seams: String,
-        pub uv_tolerance: f64,
-        pub iterations: i64,
-        pub tolerance: f64,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            name: text(&values[0]),
-            seams: text(&values[1]),
-            uv_tolerance: float(&values[2]),
-            iterations: int(&values[3]),
-            tolerance: float(&values[4]),
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![
-            text_value(&p.name),
-            text_value(&p.seams),
-            Value::Float(p.uv_tolerance),
-            Value::Int(p.iterations),
-            Value::Float(p.tolerance),
-        ]
-    }
 
     pub const META: Meta = Meta {
         key: "uv_relax",
@@ -298,10 +243,14 @@ pub mod uv_relax {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_name = text(&values[0]);
+        let p_seams = text(&values[1]);
+        let p_uv_tolerance = float(&values[2]);
+        let p_iterations = int(&values[3]);
+        let p_tolerance = float(&values[4]);
         let input = inputs[0].clone().unwrap();
         let (name, seams_name, uv_tolerance, iterations, tolerance) =
-            (p.name, support::optional_text(&p.seams), p.uv_tolerance, p.iterations, p.tolerance);
+            (p_name, support::optional_text(&p_seams), p_uv_tolerance, p_iterations, p_tolerance);
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -331,12 +280,8 @@ pub mod uv_relax {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -344,50 +289,6 @@ pub mod uv_relax {
 
 pub mod distance_from_geometry {
     use super::*;
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub affected_owner: rdk_ops::group_ops::Owner,
-        pub affected_group: String,
-        pub reference_owner: rdk_ops::group_ops::Owner,
-        pub reference_group: String,
-        pub reference_kind: transform_ops::DistanceFromGeometryReference,
-        pub falloff: transform_ops::SoftTransformFalloff,
-        pub radius_mode: DistanceRadiusMode,
-        pub radius: f64,
-        pub distance_attribute: String,
-        pub mask_attribute: String,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        Parameters {
-            affected_owner: support::ELEMENT_OWNER.of(&values[0]),
-            affected_group: text(&values[1]),
-            reference_owner: support::ELEMENT_OWNER.of(&values[2]),
-            reference_group: text(&values[3]),
-            reference_kind: REFERENCE.of(&values[4]),
-            falloff: support::SOFT_FALLOFF.of(&values[5]),
-            radius_mode: support::DISTANCE_RADIUS.of(&values[6]),
-            radius: float(&values[7]),
-            distance_attribute: text(&values[8]),
-            mask_attribute: text(&values[9]),
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![
-            support::ELEMENT_OWNER.value(&p.affected_owner),
-            text_value(&p.affected_group),
-            support::ELEMENT_OWNER.value(&p.reference_owner),
-            text_value(&p.reference_group),
-            REFERENCE.value(&p.reference_kind),
-            support::SOFT_FALLOFF.value(&p.falloff),
-            support::DISTANCE_RADIUS.value(&p.radius_mode),
-            Value::Float(p.radius),
-            text_value(&p.distance_attribute),
-            text_value(&p.mask_attribute),
-        ]
-    }
 
     pub const META: Meta = Meta {
         key: "distance_from_geometry",
@@ -468,14 +369,17 @@ pub mod distance_from_geometry {
     }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
-        if !p.radius.is_finite()
-            || p.radius < 0.0
-            || (matches!(p.radius_mode, DistanceRadiusMode::Fixed) && p.radius == 0.0)
+        let p_radius_mode = support::DISTANCE_RADIUS.of(&values[6]);
+        let p_radius = float(&values[7]);
+        let p_distance_attribute = text(&values[8]);
+        let p_mask_attribute = text(&values[9]);
+        if !p_radius.is_finite()
+            || p_radius < 0.0
+            || (matches!(p_radius_mode, DistanceRadiusMode::Fixed) && p_radius == 0.0)
         {
             return Err("sop/distance_from_geometry: fixed radius must be positive and finite".to_owned());
         }
-        let mut names: Vec<String> = [&p.distance_attribute, &p.mask_attribute]
+        let mut names: Vec<String> = [&p_distance_attribute, &p_mask_attribute]
             .into_iter()
             .filter_map(|name| support::optional_text(name))
             .collect();
@@ -489,17 +393,26 @@ pub mod distance_from_geometry {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_affected_owner = support::ELEMENT_OWNER.of(&values[0]);
+        let p_affected_group = text(&values[1]);
+        let p_reference_owner = support::ELEMENT_OWNER.of(&values[2]);
+        let p_reference_group = text(&values[3]);
+        let p_reference_kind = REFERENCE.of(&values[4]);
+        let p_falloff = support::SOFT_FALLOFF.of(&values[5]);
+        let p_radius_mode = support::DISTANCE_RADIUS.of(&values[6]);
+        let p_radius = float(&values[7]);
+        let p_distance_attribute = text(&values[8]);
+        let p_mask_attribute = text(&values[9]);
         let (source, reference) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
-        let affected = support::optional_element_group(p.affected_owner, &p.affected_group);
-        let reference_selection = support::optional_element_group(p.reference_owner, &p.reference_group);
-        let radius = match p.radius_mode {
-            DistanceRadiusMode::Fixed => transform_ops::DistanceAlongRadius::DistanceFixed(p.radius),
+        let affected = support::optional_element_group(p_affected_owner, &p_affected_group);
+        let reference_selection = support::optional_element_group(p_reference_owner, &p_reference_group);
+        let radius = match p_radius_mode {
+            DistanceRadiusMode::Fixed => transform_ops::DistanceAlongRadius::DistanceFixed(p_radius),
             DistanceRadiusMode::Maximum => transform_ops::DistanceAlongRadius::DistanceMaximum,
         };
-        let (reference_kind, falloff) = (p.reference_kind, p.falloff);
-        let distance_attribute = support::optional_text(&p.distance_attribute);
-        let mask_attribute = support::optional_text(&p.mask_attribute);
+        let (reference_kind, falloff) = (p_reference_kind, p_falloff);
+        let distance_attribute = support::optional_text(&p_distance_attribute);
+        let mask_attribute = support::optional_text(&p_mask_attribute);
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -536,12 +449,8 @@ pub mod distance_from_geometry {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -549,98 +458,6 @@ pub mod distance_from_geometry {
 
 pub mod attribute_mirror {
     use super::*;
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub owner: attribute::Owner,
-        pub attributes: String,
-        pub group: String,
-        pub group_use: rdk_ops::attribute_mirror::GroupUse,
-        pub method_: MirrorMethod,
-        pub origin_x: f64,
-        pub origin_y: f64,
-        pub origin_z: f64,
-        pub normal_x: f64,
-        pub normal_y: f64,
-        pub normal_z: f64,
-        pub distance: f64,
-        pub tolerance: f64,
-        pub mapping_attribute: String,
-        pub mapping_destination_group: String,
-        pub transform: MirrorTransform,
-        pub uv_origin_u: f64,
-        pub uv_origin_v: f64,
-        pub uv_direction_u: f64,
-        pub uv_direction_v: f64,
-        pub replace_strings: bool,
-        pub string_search: Vec<u8>,
-        pub string_replacement: Vec<u8>,
-        pub output_mapping: String,
-        pub source_group: String,
-        pub destination_group: String,
-    }
-
-    pub fn from_values(v: &[Value]) -> Parameters {
-        Parameters {
-            owner: support::ELEMENT_ATTRIBUTE_OWNER.of(&v[0]),
-            attributes: text(&v[1]),
-            group: text(&v[2]),
-            group_use: GROUP_USE.of(&v[3]),
-            method_: MIRROR_METHOD.of(&v[4]),
-            origin_x: float(&v[5]),
-            origin_y: float(&v[6]),
-            origin_z: float(&v[7]),
-            normal_x: float(&v[8]),
-            normal_y: float(&v[9]),
-            normal_z: float(&v[10]),
-            distance: float(&v[11]),
-            tolerance: float(&v[12]),
-            mapping_attribute: text(&v[13]),
-            mapping_destination_group: text(&v[14]),
-            transform: MIRROR_TRANSFORM.of(&v[15]),
-            uv_origin_u: float(&v[16]),
-            uv_origin_v: float(&v[17]),
-            uv_direction_u: float(&v[18]),
-            uv_direction_v: float(&v[19]),
-            replace_strings: boolean(&v[20]),
-            string_search: bytes(&v[21]).to_vec(),
-            string_replacement: bytes(&v[22]).to_vec(),
-            output_mapping: text(&v[23]),
-            source_group: text(&v[24]),
-            destination_group: text(&v[25]),
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![
-            support::ATTRIBUTE_OWNER.value(&p.owner),
-            text_value(&p.attributes),
-            text_value(&p.group),
-            GROUP_USE.value(&p.group_use),
-            MIRROR_METHOD.value(&p.method_),
-            Value::Float(p.origin_x),
-            Value::Float(p.origin_y),
-            Value::Float(p.origin_z),
-            Value::Float(p.normal_x),
-            Value::Float(p.normal_y),
-            Value::Float(p.normal_z),
-            Value::Float(p.distance),
-            Value::Float(p.tolerance),
-            text_value(&p.mapping_attribute),
-            text_value(&p.mapping_destination_group),
-            MIRROR_TRANSFORM.value(&p.transform),
-            Value::Float(p.uv_origin_u),
-            Value::Float(p.uv_origin_v),
-            Value::Float(p.uv_direction_u),
-            Value::Float(p.uv_direction_v),
-            Value::Bool(p.replace_strings),
-            Value::Text(p.string_search.clone()),
-            Value::Text(p.string_replacement.clone()),
-            text_value(&p.output_mapping),
-            text_value(&p.source_group),
-            text_value(&p.destination_group),
-        ]
-    }
 
     pub const META: Meta = Meta {
         key: "attribute_mirror",
@@ -773,70 +590,91 @@ pub mod attribute_mirror {
     }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
+        let p_owner = support::ELEMENT_ATTRIBUTE_OWNER.of(&values[0]);
+        let p_attributes = text(&values[1]);
+        let p_method_ = MIRROR_METHOD.of(&values[4]);
+        let p_origin_x = float(&values[5]);
+        let p_origin_y = float(&values[6]);
+        let p_origin_z = float(&values[7]);
+        let p_normal_x = float(&values[8]);
+        let p_normal_y = float(&values[9]);
+        let p_normal_z = float(&values[10]);
+        let p_distance = float(&values[11]);
+        let p_tolerance = float(&values[12]);
+        let p_mapping_attribute = text(&values[13]);
+        let p_mapping_destination_group = text(&values[14]);
+        let p_transform = MIRROR_TRANSFORM.of(&values[15]);
+        let p_uv_origin_u = float(&values[16]);
+        let p_uv_origin_v = float(&values[17]);
+        let p_uv_direction_u = float(&values[18]);
+        let p_uv_direction_v = float(&values[19]);
+        let p_replace_strings = boolean(&values[20]);
+        let p_string_search = bytes(&values[21]).to_vec();
+        let p_source_group = text(&values[24]);
+        let p_destination_group = text(&values[25]);
         let finite = |value: f64| -> Result<(), String> {
             if value.is_finite() { Ok(()) } else { Err("sop/attribute_mirror: controls must be finite".to_owned()) }
         };
         for value in [
-            p.origin_x,
-            p.origin_y,
-            p.origin_z,
-            p.normal_x,
-            p.normal_y,
-            p.normal_z,
-            p.distance,
-            p.tolerance,
-            p.uv_origin_u,
-            p.uv_origin_v,
-            p.uv_direction_u,
-            p.uv_direction_v,
+            p_origin_x,
+            p_origin_y,
+            p_origin_z,
+            p_normal_x,
+            p_normal_y,
+            p_normal_z,
+            p_distance,
+            p_tolerance,
+            p_uv_origin_u,
+            p_uv_origin_v,
+            p_uv_direction_u,
+            p_uv_direction_v,
         ] {
             finite(value)?;
         }
-        if p.distance < 0.0 || p.tolerance < 0.0 || p.tolerance > safe_square_limit() {
+        if p_distance < 0.0 || p_tolerance < 0.0 || p_tolerance > safe_square_limit() {
             return Err("sop/attribute_mirror: invalid distance or tolerance".to_owned());
         }
-        if p.replace_strings && p.string_search.is_empty() {
+        if p_replace_strings && p_string_search.is_empty() {
             return Err("sop/attribute_mirror: empty string search".to_owned());
         }
         if let (Some(source), Some(destination)) =
-            (support::optional_text(&p.source_group), support::optional_text(&p.destination_group))
+            (support::optional_text(&p_source_group), support::optional_text(&p_destination_group))
         {
             if source == destination {
                 return Err("sop/attribute_mirror: source and destination groups must differ".to_owned());
             }
         }
-        if p.transform == MirrorTransform::Uv && p.uv_direction_u == 0.0 && p.uv_direction_v == 0.0 {
+        if p_transform == MirrorTransform::Uv && p_uv_direction_u == 0.0 && p_uv_direction_v == 0.0 {
             return Err("sop/attribute_mirror: UV direction must be non-zero".to_owned());
         }
-        support::validate_parameter_pattern("sop/attribute_mirror: attributes", &p.attributes)?;
-        match p.method_ {
+        support::validate_parameter_pattern("sop/attribute_mirror: attributes", &p_attributes)?;
+        match p_method_ {
             MirrorMethod::Mapping => {
-                if p.mapping_attribute.trim().is_empty() {
+                if p_mapping_attribute.trim().is_empty() {
                     return Err("sop/attribute_mirror: empty mapping attribute".to_owned());
                 }
-                if p.mapping_destination_group.trim().is_empty() {
+                if p_mapping_destination_group.trim().is_empty() {
                     return Err("sop/attribute_mirror: empty mapping destination group".to_owned());
                 }
-                if matches!(p.transform, MirrorTransform::Vector | MirrorTransform::Point) {
+                if matches!(p_transform, MirrorTransform::Vector | MirrorTransform::Point) {
                     return Err("sop/attribute_mirror: vector/point transforms require a plane".to_owned());
                 }
                 Ok(())
             }
             MirrorMethod::Plane => {
-                if p.owner == attribute::Owner::Vertex {
+                if p_owner == attribute::Owner::Vertex {
                     return Err("sop/attribute_mirror: vertex owner requires mapping".to_owned());
                 }
-                let scale = p.normal_x.abs().max(p.normal_y.abs()).max(p.normal_z.abs());
+                let scale = p_normal_x.abs().max(p_normal_y.abs()).max(p_normal_z.abs());
                 if scale == 0.0 {
                     return Err("sop/attribute_mirror: normal must be non-zero".to_owned());
                 }
-                let (x, y, z) = (p.normal_x / scale, p.normal_y / scale, p.normal_z / scale);
+                let (x, y, z) = (p_normal_x / scale, p_normal_y / scale, p_normal_z / scale);
                 let length = (x * x + y * y + z * z).sqrt();
                 for value in [
-                    p.origin_x + p.distance * (x / length),
-                    p.origin_y + p.distance * (y / length),
-                    p.origin_z + p.distance * (z / length),
+                    p_origin_x + p_distance * (x / length),
+                    p_origin_y + p_distance * (y / length),
+                    p_origin_z + p_distance * (z / length),
                 ] {
                     finite(value)?;
                 }
@@ -846,31 +684,56 @@ pub mod attribute_mirror {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_owner = support::ELEMENT_ATTRIBUTE_OWNER.of(&values[0]);
+        let p_attributes = text(&values[1]);
+        let p_group = text(&values[2]);
+        let p_group_use = GROUP_USE.of(&values[3]);
+        let p_method_ = MIRROR_METHOD.of(&values[4]);
+        let p_origin_x = float(&values[5]);
+        let p_origin_y = float(&values[6]);
+        let p_origin_z = float(&values[7]);
+        let p_normal_x = float(&values[8]);
+        let p_normal_y = float(&values[9]);
+        let p_normal_z = float(&values[10]);
+        let p_distance = float(&values[11]);
+        let p_tolerance = float(&values[12]);
+        let p_mapping_attribute = text(&values[13]);
+        let p_mapping_destination_group = text(&values[14]);
+        let p_transform = MIRROR_TRANSFORM.of(&values[15]);
+        let p_uv_origin_u = float(&values[16]);
+        let p_uv_origin_v = float(&values[17]);
+        let p_uv_direction_u = float(&values[18]);
+        let p_uv_direction_v = float(&values[19]);
+        let p_replace_strings = boolean(&values[20]);
+        let p_string_search = bytes(&values[21]).to_vec();
+        let p_string_replacement = bytes(&values[22]).to_vec();
+        let p_output_mapping = text(&values[23]);
+        let p_source_group = text(&values[24]);
+        let p_destination_group = text(&values[25]);
         let input = inputs[0].clone().unwrap();
-        let origin = rays_math::vec3::create(p.origin_x, p.origin_y, p.origin_z);
-        let normal = rays_math::vec3::create(p.normal_x, p.normal_y, p.normal_z);
-        let transform = match p.transform {
+        let origin = rays_math::vec3::create(p_origin_x, p_origin_y, p_origin_z);
+        let normal = rays_math::vec3::create(p_normal_x, p_normal_y, p_normal_z);
+        let transform = match p_transform {
             MirrorTransform::Copy => rdk_ops::attribute_mirror::Transform::MirrorCopy,
             MirrorTransform::Uv => rdk_ops::attribute_mirror::Transform::MirrorUv {
-                origin_u: p.uv_origin_u,
-                origin_v: p.uv_origin_v,
-                direction_u: p.uv_direction_u,
-                direction_v: p.uv_direction_v,
+                origin_u: p_uv_origin_u,
+                origin_v: p_uv_origin_v,
+                direction_u: p_uv_direction_u,
+                direction_v: p_uv_direction_v,
             },
             MirrorTransform::Vector => rdk_ops::attribute_mirror::Transform::MirrorVector,
             MirrorTransform::Point => rdk_ops::attribute_mirror::Transform::MirrorPoint,
         };
-        let group_name = support::optional_text(&p.group);
-        let output_mapping = support::optional_text(&p.output_mapping);
-        let source_group = support::optional_text(&p.source_group);
-        let destination_group = support::optional_text(&p.destination_group);
-        let string_replace = p.replace_strings.then(|| (p.string_search.clone(), p.string_replacement.clone()));
-        let owner = p.owner;
-        let (group_use, method_kind) = (p.group_use, p.method_);
-        let (distance, tolerance) = (p.distance, p.tolerance);
-        let (mapping_attribute, mapping_destination) = (p.mapping_attribute.clone(), p.mapping_destination_group.clone());
-        let attributes = p.attributes.clone();
+        let group_name = support::optional_text(&p_group);
+        let output_mapping = support::optional_text(&p_output_mapping);
+        let source_group = support::optional_text(&p_source_group);
+        let destination_group = support::optional_text(&p_destination_group);
+        let string_replace = p_replace_strings.then(|| (p_string_search.clone(), p_string_replacement.clone()));
+        let owner = p_owner;
+        let (group_use, method_kind) = (p_group_use, p_method_);
+        let (distance, tolerance) = (p_distance, p_tolerance);
+        let (mapping_attribute, mapping_destination) = (p_mapping_attribute.clone(), p_mapping_destination_group.clone());
+        let attributes = p_attributes.clone();
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -933,12 +796,8 @@ pub mod attribute_mirror {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -946,62 +805,6 @@ pub mod attribute_mirror {
 
 pub mod attribute_transfer_all {
     use super::*;
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub point_pattern: String,
-        pub vertex_pattern: String,
-        pub primitive_pattern: String,
-        pub detail_pattern: String,
-        pub mode: TransferMode,
-        pub neighbors: i64,
-        pub power: f64,
-        pub kernel_radius: f64,
-        pub distance_mode: KernelMode,
-        pub max_distance: f64,
-        pub blend_width: f64,
-        pub falloff: TransferFalloff,
-        pub uniform_bias: f64,
-        pub unmatched: rdk_ops::attribute_transfer::Unmatched,
-    }
-
-    pub fn from_values(v: &[Value]) -> Parameters {
-        Parameters {
-            point_pattern: text(&v[0]),
-            vertex_pattern: text(&v[1]),
-            primitive_pattern: text(&v[2]),
-            detail_pattern: text(&v[3]),
-            mode: support::TRANSFER_MODE.of(&v[4]),
-            neighbors: int(&v[5]),
-            power: float(&v[6]),
-            kernel_radius: float(&v[7]),
-            distance_mode: support::KERNEL_MODE.of(&v[8]),
-            max_distance: float(&v[9]),
-            blend_width: float(&v[10]),
-            falloff: support::TRANSFER_FALLOFF.of(&v[11]),
-            uniform_bias: float(&v[12]),
-            unmatched: support::TRANSFER_UNMATCHED.of(&v[13]),
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![
-            text_value(&p.point_pattern),
-            text_value(&p.vertex_pattern),
-            text_value(&p.primitive_pattern),
-            text_value(&p.detail_pattern),
-            support::TRANSFER_MODE.value(&p.mode),
-            Value::Int(p.neighbors),
-            Value::Float(p.power),
-            Value::Float(p.kernel_radius),
-            support::KERNEL_MODE.value(&p.distance_mode),
-            Value::Float(p.max_distance),
-            Value::Float(p.blend_width),
-            support::TRANSFER_FALLOFF.value(&p.falloff),
-            Value::Float(p.uniform_bias),
-            support::TRANSFER_UNMATCHED.value(&p.unmatched),
-        ]
-    }
 
     pub const META: Meta = Meta {
         key: "attribute_transfer_all",
@@ -1071,9 +874,20 @@ pub mod attribute_transfer_all {
     }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
+        let p_point_pattern = text(&values[0]);
+        let p_vertex_pattern = text(&values[1]);
+        let p_primitive_pattern = text(&values[2]);
+        let p_detail_pattern = text(&values[3]);
+        let p_mode = support::TRANSFER_MODE.of(&values[4]);
+        let p_neighbors = int(&values[5]);
+        let p_power = float(&values[6]);
+        let p_kernel_radius = float(&values[7]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
+        let p_max_distance = float(&values[9]);
+        let p_blend_width = float(&values[10]);
+        let p_uniform_bias = float(&values[12]);
         let refuse = |message: &str| Err(format!("sop/attribute_transfer_all: {message}"));
-        let patterns = [&p.point_pattern, &p.vertex_pattern, &p.primitive_pattern, &p.detail_pattern];
+        let patterns = [&p_point_pattern, &p_vertex_pattern, &p_primitive_pattern, &p_detail_pattern];
         if patterns.iter().all(|text| text.trim().is_empty()) {
             return refuse("at least one owner pattern is required");
         }
@@ -1082,49 +896,62 @@ pub mod attribute_transfer_all {
                 support::validate_parameter_pattern("sop/attribute_transfer_all", text)?;
             }
         }
-        if p.neighbors < 1 {
+        if p_neighbors < 1 {
             return refuse("neighbors must be positive");
         }
-        if ![p.power, p.kernel_radius, p.max_distance, p.blend_width, p.uniform_bias].iter().all(|v| v.is_finite()) {
+        if ![p_power, p_kernel_radius, p_max_distance, p_blend_width, p_uniform_bias].iter().all(|v| v.is_finite()) {
             return refuse("sampling controls must be finite");
         }
-        if p.power < 0.0 || (p.mode == TransferMode::Inverse && p.power == 0.0) {
+        if p_power < 0.0 || (p_mode == TransferMode::Inverse && p_power == 0.0) {
             return refuse("invalid inverse power");
         }
         let limit = safe_square_limit();
-        if p.kernel_radius < 0.0
-            || p.kernel_radius > limit
-            || p.max_distance < 0.0
-            || p.max_distance > limit
-            || p.blend_width < 0.0
+        if p_kernel_radius < 0.0
+            || p_kernel_radius > limit
+            || p_max_distance < 0.0
+            || p_max_distance > limit
+            || p_blend_width < 0.0
         {
             return refuse("distances must be nonnegative and safely squarable");
         }
-        if p.uniform_bias < 0.0 || p.uniform_bias > 1.0 {
+        if p_uniform_bias < 0.0 || p_uniform_bias > 1.0 {
             return refuse("uniform bias must be within [0, 1]");
         }
-        if p.distance_mode == KernelMode::Auto && p.blend_width > 0.0 {
+        if p_distance_mode == KernelMode::Auto && p_blend_width > 0.0 {
             return refuse("blend width requires an explicit maximum distance");
         }
-        if p.distance_mode == KernelMode::Explicit && p.max_distance + p.blend_width > limit {
+        if p_distance_mode == KernelMode::Explicit && p_max_distance + p_blend_width > limit {
             return refuse("distance plus blend width must be safely squarable");
         }
         Ok(())
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_point_pattern = text(&values[0]);
+        let p_vertex_pattern = text(&values[1]);
+        let p_primitive_pattern = text(&values[2]);
+        let p_detail_pattern = text(&values[3]);
+        let p_mode = support::TRANSFER_MODE.of(&values[4]);
+        let p_neighbors = int(&values[5]);
+        let p_power = float(&values[6]);
+        let p_kernel_radius = float(&values[7]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
+        let p_max_distance = float(&values[9]);
+        let p_blend_width = float(&values[10]);
+        let p_falloff = support::TRANSFER_FALLOFF.of(&values[11]);
+        let p_uniform_bias = float(&values[12]);
+        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values[13]);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
-        let mode = support::transfer_mode_of(p.mode, p.neighbors, p.power, p.kernel_radius);
-        let falloff = support::transfer_falloff_of(p.falloff, p.uniform_bias);
-        let max_distance = match p.distance_mode {
-            KernelMode::Explicit => Some(p.max_distance),
+        let mode = support::transfer_mode_of(p_mode, p_neighbors, p_power, p_kernel_radius);
+        let falloff = support::transfer_falloff_of(p_falloff, p_uniform_bias);
+        let max_distance = match p_distance_mode {
+            KernelMode::Explicit => Some(p_max_distance),
             KernelMode::Auto => None,
         };
-        let (point_pattern, vertex_pattern) = (support::optional_text(&p.point_pattern), support::optional_text(&p.vertex_pattern));
+        let (point_pattern, vertex_pattern) = (support::optional_text(&p_point_pattern), support::optional_text(&p_vertex_pattern));
         let (primitive_pattern, detail_pattern) =
-            (support::optional_text(&p.primitive_pattern), support::optional_text(&p.detail_pattern));
-        let (blend_width, unmatched) = (p.blend_width, p.unmatched);
+            (support::optional_text(&p_primitive_pattern), support::optional_text(&p_detail_pattern));
+        let (blend_width, unmatched) = (p_blend_width, p_unmatched);
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -1158,12 +985,8 @@ pub mod attribute_transfer_all {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1171,69 +994,6 @@ pub mod attribute_transfer_all {
 
 pub mod attribute_transfer_surface {
     use super::*;
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub target_owner: attribute::Owner,
-        /// The encoded (owner, source, target) table, kept as the schema stores it.
-        pub attributes: Vec<u8>,
-        pub distance_mode: KernelMode,
-        pub max_distance: f64,
-        pub blend_width: f64,
-        pub falloff: TransferFalloff,
-        pub uniform_bias: f64,
-        pub unmatched: rdk_ops::attribute_transfer::Unmatched,
-        pub distance_attribute: String,
-        pub source_group: String,
-        pub source_group_pattern: String,
-        pub source_vertex_group: String,
-        pub source_vertex_group_pattern: String,
-        pub source_vertex_selection: surface_index::VertexSelection,
-        pub target_group: String,
-        pub target_group_pattern: String,
-    }
-
-    pub fn from_values(v: &[Value]) -> Parameters {
-        Parameters {
-            target_owner: support::ATTRIBUTE_OWNER.of(&v[0]),
-            attributes: bytes(&v[1]).to_vec(),
-            distance_mode: support::KERNEL_MODE.of(&v[2]),
-            max_distance: float(&v[3]),
-            blend_width: float(&v[4]),
-            falloff: support::TRANSFER_FALLOFF.of(&v[5]),
-            uniform_bias: float(&v[6]),
-            unmatched: support::TRANSFER_UNMATCHED.of(&v[7]),
-            distance_attribute: text(&v[8]),
-            source_group: text(&v[9]),
-            source_group_pattern: text(&v[10]),
-            source_vertex_group: text(&v[11]),
-            source_vertex_group_pattern: text(&v[12]),
-            source_vertex_selection: VERTEX_SELECTION.of(&v[13]),
-            target_group: text(&v[14]),
-            target_group_pattern: text(&v[15]),
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![
-            support::ATTRIBUTE_OWNER.value(&p.target_owner),
-            Value::Text(p.attributes.clone()),
-            support::KERNEL_MODE.value(&p.distance_mode),
-            Value::Float(p.max_distance),
-            Value::Float(p.blend_width),
-            support::TRANSFER_FALLOFF.value(&p.falloff),
-            Value::Float(p.uniform_bias),
-            support::TRANSFER_UNMATCHED.value(&p.unmatched),
-            text_value(&p.distance_attribute),
-            text_value(&p.source_group),
-            text_value(&p.source_group_pattern),
-            text_value(&p.source_vertex_group),
-            text_value(&p.source_vertex_group_pattern),
-            VERTEX_SELECTION.value(&p.source_vertex_selection),
-            text_value(&p.target_group),
-            text_value(&p.target_group_pattern),
-        ]
-    }
 
     pub const META: Meta = Meta {
         key: "attribute_transfer_surface",
@@ -1328,12 +1088,21 @@ pub mod attribute_transfer_surface {
     }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
+        let p_target_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
+        let p_attributes = bytes(&values[1]).to_vec();
+        let p_distance_mode = support::KERNEL_MODE.of(&values[2]);
+        let p_max_distance = float(&values[3]);
+        let p_blend_width = float(&values[4]);
+        let p_uniform_bias = float(&values[6]);
+        let p_distance_attribute = text(&values[8]);
+        let p_source_group_pattern = text(&values[10]);
+        let p_source_vertex_group_pattern = text(&values[12]);
+        let p_target_group_pattern = text(&values[15]);
         let refuse = |message: &str| Err(format!("sop/attribute_transfer_surface: {message}"));
-        if p.target_owner == attribute::Owner::Detail {
+        if p_target_owner == attribute::Owner::Detail {
             return refuse("detail target is not spatial");
         }
-        let attributes = support::decode_surface_attributes(&p.attributes)?;
+        let attributes = support::decode_surface_attributes(&p_attributes)?;
         let names: Vec<&str> = attributes.iter().map(|attribute| attribute.target_name.as_str()).collect();
         let mut sorted = names.clone();
         sorted.sort();
@@ -1341,32 +1110,32 @@ pub mod attribute_transfer_surface {
         if sorted.len() != names.len() {
             return refuse("target attribute names must be distinct");
         }
-        if p.target_owner == attribute::Owner::Point && names.contains(&"P") {
+        if p_target_owner == attribute::Owner::Point && names.contains(&"P") {
             return refuse("target P is not an ordinary attribute");
         }
-        let distance = support::optional_text(&p.distance_attribute);
+        let distance = support::optional_text(&p_distance_attribute);
         let conflicts = distance.as_deref().is_some_and(|name| names.contains(&name));
-        if (p.target_owner == attribute::Owner::Point && distance.as_deref() == Some("P")) || conflicts {
+        if (p_target_owner == attribute::Owner::Point && distance.as_deref() == Some("P")) || conflicts {
             return refuse("distance output conflicts with attributes");
         }
-        if !(p.max_distance.is_finite() && p.blend_width.is_finite() && p.uniform_bias.is_finite()) {
+        if !(p_max_distance.is_finite() && p_blend_width.is_finite() && p_uniform_bias.is_finite()) {
             return refuse("distance controls must be finite");
         }
-        if p.max_distance < 0.0
-            || p.max_distance > safe_square_limit()
-            || p.blend_width < 0.0
-            || p.uniform_bias < 0.0
-            || p.uniform_bias > 1.0
+        if p_max_distance < 0.0
+            || p_max_distance > safe_square_limit()
+            || p_blend_width < 0.0
+            || p_uniform_bias < 0.0
+            || p_uniform_bias > 1.0
         {
             return refuse("distance controls are out of range");
         }
-        if p.distance_mode == KernelMode::Auto && p.blend_width > 0.0 {
+        if p_distance_mode == KernelMode::Auto && p_blend_width > 0.0 {
             return refuse("blend width requires an explicit maximum distance");
         }
-        if p.distance_mode == KernelMode::Explicit && p.max_distance + p.blend_width > safe_square_limit() {
+        if p_distance_mode == KernelMode::Explicit && p_max_distance + p_blend_width > safe_square_limit() {
             return refuse("distance window exceeds the squared-distance range");
         }
-        for pattern in [&p.source_group_pattern, &p.source_vertex_group_pattern, &p.target_group_pattern] {
+        for pattern in [&p_source_group_pattern, &p_source_vertex_group_pattern, &p_target_group_pattern] {
             if !pattern.trim().is_empty() {
                 support::validate_parameter_pattern("attribute_transfer_surface", pattern)?;
             }
@@ -1375,20 +1144,35 @@ pub mod attribute_transfer_surface {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_target_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
+        let p_attributes = bytes(&values[1]).to_vec();
+        let p_distance_mode = support::KERNEL_MODE.of(&values[2]);
+        let p_max_distance = float(&values[3]);
+        let p_blend_width = float(&values[4]);
+        let p_falloff = support::TRANSFER_FALLOFF.of(&values[5]);
+        let p_uniform_bias = float(&values[6]);
+        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values[7]);
+        let p_distance_attribute = text(&values[8]);
+        let p_source_group = text(&values[9]);
+        let p_source_group_pattern = text(&values[10]);
+        let p_source_vertex_group = text(&values[11]);
+        let p_source_vertex_group_pattern = text(&values[12]);
+        let p_source_vertex_selection = VERTEX_SELECTION.of(&values[13]);
+        let p_target_group = text(&values[14]);
+        let p_target_group_pattern = text(&values[15]);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
-        let attributes = support::decode_surface_attributes(&p.attributes).expect("validated");
-        let target_owner = p.target_owner;
-        let max_distance = match p.distance_mode {
+        let attributes = support::decode_surface_attributes(&p_attributes).expect("validated");
+        let target_owner = p_target_owner;
+        let max_distance = match p_distance_mode {
             KernelMode::Auto => None,
-            KernelMode::Explicit => Some(p.max_distance),
+            KernelMode::Explicit => Some(p_max_distance),
         };
-        let falloff = support::transfer_falloff_of(p.falloff, p.uniform_bias);
-        let distance_attribute = support::optional_text(&p.distance_attribute);
-        let (source_group, source_group_pattern) = support::exact_or_pattern(&p.source_group, &p.source_group_pattern);
+        let falloff = support::transfer_falloff_of(p_falloff, p_uniform_bias);
+        let distance_attribute = support::optional_text(&p_distance_attribute);
+        let (source_group, source_group_pattern) = support::exact_or_pattern(&p_source_group, &p_source_group_pattern);
         let (source_vertex_group, source_vertex_group_pattern) =
-            support::exact_or_pattern(&p.source_vertex_group, &p.source_vertex_group_pattern);
-        let (target_group, target_group_pattern) = support::exact_or_pattern(&p.target_group, &p.target_group_pattern);
+            support::exact_or_pattern(&p_source_vertex_group, &p_source_vertex_group_pattern);
+        let (target_group, target_group_pattern) = support::exact_or_pattern(&p_target_group, &p_target_group_pattern);
         let source_pattern =
             support::compile_transfer_group_pattern("attribute_transfer_surface", "source", &source_group_pattern)
                 .expect("validated");
@@ -1412,7 +1196,7 @@ pub mod attribute_transfer_surface {
             group::Owner::Vertex => "vertex",
             group::Owner::Point => "point",
         };
-        let (blend_width, unmatched, source_vertex_selection) = (p.blend_width, p.unmatched, p.source_vertex_selection);
+        let (blend_width, unmatched, source_vertex_selection) = (p_blend_width, p_unmatched, p_source_vertex_selection);
         
         Ok(build::make_geometry(
             build::Args {
@@ -1482,12 +1266,8 @@ pub mod attribute_transfer_surface {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 
@@ -1505,84 +1285,6 @@ pub mod attribute_transfer {
                 _ => Err("sop/attribute_transfer: exact names need one column per row".to_owned()),
             })
             .collect()
-    }
-
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub owner: attribute::Owner,
-        pub use_names: bool,
-        /// The encoded exact-names table, kept as the schema stores it.
-        pub names: Vec<u8>,
-        pub pattern: String,
-        pub mode: TransferMode,
-        pub neighbors: i64,
-        pub power: f64,
-        pub kernel_radius: f64,
-        pub distance_mode: KernelMode,
-        pub max_distance: f64,
-        pub blend_width: f64,
-        pub falloff: TransferFalloff,
-        pub uniform_bias: f64,
-        pub unmatched: rdk_ops::attribute_transfer::Unmatched,
-        pub source_group: String,
-        pub source_group_pattern: String,
-        pub source_vertex_group: String,
-        pub source_vertex_group_pattern: String,
-        pub source_vertex_selection: surface_index::VertexSelection,
-        pub target_group: String,
-        pub target_group_pattern: String,
-    }
-
-    pub fn from_values(v: &[Value]) -> Parameters {
-        Parameters {
-            owner: support::ATTRIBUTE_OWNER.of(&v[0]),
-            use_names: boolean(&v[1]),
-            names: bytes(&v[2]).to_vec(),
-            pattern: text(&v[3]),
-            mode: support::TRANSFER_MODE.of(&v[4]),
-            neighbors: int(&v[5]),
-            power: float(&v[6]),
-            kernel_radius: float(&v[7]),
-            distance_mode: support::KERNEL_MODE.of(&v[8]),
-            max_distance: float(&v[9]),
-            blend_width: float(&v[10]),
-            falloff: support::TRANSFER_FALLOFF.of(&v[11]),
-            uniform_bias: float(&v[12]),
-            unmatched: support::TRANSFER_UNMATCHED.of(&v[13]),
-            source_group: text(&v[14]),
-            source_group_pattern: text(&v[15]),
-            source_vertex_group: text(&v[16]),
-            source_vertex_group_pattern: text(&v[17]),
-            source_vertex_selection: VERTEX_SELECTION.of(&v[18]),
-            target_group: text(&v[19]),
-            target_group_pattern: text(&v[20]),
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![
-            support::ATTRIBUTE_OWNER.value(&p.owner),
-            Value::Bool(p.use_names),
-            Value::Text(p.names.clone()),
-            text_value(&p.pattern),
-            support::TRANSFER_MODE.value(&p.mode),
-            Value::Int(p.neighbors),
-            Value::Float(p.power),
-            Value::Float(p.kernel_radius),
-            support::KERNEL_MODE.value(&p.distance_mode),
-            Value::Float(p.max_distance),
-            Value::Float(p.blend_width),
-            support::TRANSFER_FALLOFF.value(&p.falloff),
-            Value::Float(p.uniform_bias),
-            support::TRANSFER_UNMATCHED.value(&p.unmatched),
-            text_value(&p.source_group),
-            text_value(&p.source_group_pattern),
-            text_value(&p.source_vertex_group),
-            text_value(&p.source_vertex_group_pattern),
-            VERTEX_SELECTION.value(&p.source_vertex_selection),
-            text_value(&p.target_group),
-            text_value(&p.target_group_pattern),
-        ]
     }
 
     pub const META: Meta = Meta {
@@ -1691,15 +1393,32 @@ pub mod attribute_transfer {
     }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        let p = from_values(values);
+        let p_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
+        let p_use_names = boolean(&values[1]);
+        let p_names = bytes(&values[2]).to_vec();
+        let p_pattern = text(&values[3]);
+        let p_mode = support::TRANSFER_MODE.of(&values[4]);
+        let p_neighbors = int(&values[5]);
+        let p_power = float(&values[6]);
+        let p_kernel_radius = float(&values[7]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
+        let p_max_distance = float(&values[9]);
+        let p_blend_width = float(&values[10]);
+        let p_uniform_bias = float(&values[12]);
+        let p_source_group = text(&values[14]);
+        let p_source_group_pattern = text(&values[15]);
+        let p_source_vertex_group = text(&values[16]);
+        let p_source_vertex_group_pattern = text(&values[17]);
+        let p_target_group = text(&values[19]);
+        let p_target_group_pattern = text(&values[20]);
         let refuse = |message: &str| Err(format!("sop/attribute_transfer: {message}"));
-        if p.use_names {
-            let names = decode_names(&p.names)?;
+        if p_use_names {
+            let names = decode_names(&p_names)?;
             for name in &names {
                 if name.trim().is_empty() {
                     return refuse("empty attribute name");
                 }
-                if p.owner == attribute::Owner::Point && name == "P" {
+                if p_owner == attribute::Owner::Point && name == "P" {
                     return refuse("canonical P cannot be transferred as an ordinary attribute");
                 }
             }
@@ -1710,74 +1429,94 @@ pub mod attribute_transfer {
                 return refuse("duplicate attribute name");
             }
         } else {
-            support::validate_parameter_pattern("sop/attribute_transfer", &p.pattern)?;
+            support::validate_parameter_pattern("sop/attribute_transfer", &p_pattern)?;
         }
-        if p.neighbors < 1 {
+        if p_neighbors < 1 {
             return refuse("neighbors must be positive");
         }
-        if p.power < 0.0 || (p.mode == TransferMode::Inverse && p.power == 0.0) {
+        if p_power < 0.0 || (p_mode == TransferMode::Inverse && p_power == 0.0) {
             return refuse("invalid inverse power");
         }
         let limit = safe_square_limit();
-        if p.kernel_radius < 0.0 || p.kernel_radius > limit || p.max_distance < 0.0 || p.max_distance > limit || p.blend_width < 0.0 {
+        if p_kernel_radius < 0.0 || p_kernel_radius > limit || p_max_distance < 0.0 || p_max_distance > limit || p_blend_width < 0.0 {
             return refuse("distances must be nonnegative and safely squarable");
         }
-        if p.uniform_bias < 0.0 || p.uniform_bias > 1.0 {
+        if p_uniform_bias < 0.0 || p_uniform_bias > 1.0 {
             return refuse("uniform bias must be within [0,1]");
         }
-        if p.distance_mode == KernelMode::Auto && p.blend_width > 0.0 {
+        if p_distance_mode == KernelMode::Auto && p_blend_width > 0.0 {
             return refuse("blend width requires an explicit maximum distance");
         }
-        if p.distance_mode == KernelMode::Explicit && p.max_distance + p.blend_width > limit {
+        if p_distance_mode == KernelMode::Explicit && p_max_distance + p_blend_width > limit {
             return refuse("distance plus blend width must be safely squarable");
         }
-        let (source_group, source_pattern) = support::exact_or_pattern(&p.source_group, &p.source_group_pattern);
+        let (source_group, source_pattern) = support::exact_or_pattern(&p_source_group, &p_source_group_pattern);
         let (vertex_group, vertex_pattern) =
-            support::exact_or_pattern(&p.source_vertex_group, &p.source_vertex_group_pattern);
-        let (target_group, target_pattern) = support::exact_or_pattern(&p.target_group, &p.target_group_pattern);
+            support::exact_or_pattern(&p_source_vertex_group, &p_source_vertex_group_pattern);
+        let (target_group, target_pattern) = support::exact_or_pattern(&p_target_group, &p_target_group_pattern);
         for (name, pattern) in [("source", &source_pattern), ("source vertex", &vertex_pattern), ("target", &target_pattern)] {
             support::compile_transfer_group_pattern("attribute_transfer", name, pattern)?;
         }
-        if p.owner != attribute::Owner::Vertex && (vertex_group.is_some() || vertex_pattern.is_some()) {
+        if p_owner != attribute::Owner::Vertex && (vertex_group.is_some() || vertex_pattern.is_some()) {
             return refuse("source vertex groups require vertex ownership");
         }
-        if p.owner == attribute::Owner::Detail
+        if p_owner == attribute::Owner::Detail
             && (source_group.is_some()
                 || source_pattern.is_some()
                 || target_group.is_some()
                 || target_pattern.is_some()
-                || p.distance_mode != KernelMode::Auto
-                || p.blend_width != 0.0)
+                || p_distance_mode != KernelMode::Auto
+                || p_blend_width != 0.0)
         {
             return refuse("detail transfer does not accept spatial options");
         }
-        if matches!(p.owner, attribute::Owner::Detail | attribute::Owner::Vertex) && p.mode != TransferMode::Nearest {
+        if matches!(p_owner, attribute::Owner::Detail | attribute::Owner::Vertex) && p_mode != TransferMode::Nearest {
             return refuse("this owner supports nearest mode only");
         }
         Ok(())
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let p_owner = support::ATTRIBUTE_OWNER.of(&values[0]);
+        let p_use_names = boolean(&values[1]);
+        let p_names = bytes(&values[2]).to_vec();
+        let p_pattern = text(&values[3]);
+        let p_mode = support::TRANSFER_MODE.of(&values[4]);
+        let p_neighbors = int(&values[5]);
+        let p_power = float(&values[6]);
+        let p_kernel_radius = float(&values[7]);
+        let p_distance_mode = support::KERNEL_MODE.of(&values[8]);
+        let p_max_distance = float(&values[9]);
+        let p_blend_width = float(&values[10]);
+        let p_falloff = support::TRANSFER_FALLOFF.of(&values[11]);
+        let p_uniform_bias = float(&values[12]);
+        let p_unmatched = support::TRANSFER_UNMATCHED.of(&values[13]);
+        let p_source_group = text(&values[14]);
+        let p_source_group_pattern = text(&values[15]);
+        let p_source_vertex_group = text(&values[16]);
+        let p_source_vertex_group_pattern = text(&values[17]);
+        let p_source_vertex_selection = VERTEX_SELECTION.of(&values[18]);
+        let p_target_group = text(&values[19]);
+        let p_target_group_pattern = text(&values[20]);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
-        let owner = p.owner;
-        let source_vertex_selection = p.source_vertex_selection;
-        let (names, pattern) = if p.use_names {
-            (Some(decode_names(&p.names).expect("validated")), None)
+        let owner = p_owner;
+        let source_vertex_selection = p_source_vertex_selection;
+        let (names, pattern) = if p_use_names {
+            (Some(decode_names(&p_names).expect("validated")), None)
         } else {
-            (None, Some(p.pattern.clone()))
+            (None, Some(p_pattern.clone()))
         };
-        let mode = support::transfer_mode_of(p.mode, p.neighbors, p.power, p.kernel_radius);
-        let falloff = support::transfer_falloff_of(p.falloff, p.uniform_bias);
-        let (unmatched, blend_width) = (p.unmatched, p.blend_width);
-        let max_distance = match p.distance_mode {
+        let mode = support::transfer_mode_of(p_mode, p_neighbors, p_power, p_kernel_radius);
+        let falloff = support::transfer_falloff_of(p_falloff, p_uniform_bias);
+        let (unmatched, blend_width) = (p_unmatched, p_blend_width);
+        let max_distance = match p_distance_mode {
             KernelMode::Auto => None,
-            KernelMode::Explicit => Some(p.max_distance),
+            KernelMode::Explicit => Some(p_max_distance),
         };
-        let (source_group, source_group_pattern) = support::exact_or_pattern(&p.source_group, &p.source_group_pattern);
+        let (source_group, source_group_pattern) = support::exact_or_pattern(&p_source_group, &p_source_group_pattern);
         let (source_vertex_group, source_vertex_group_pattern) =
-            support::exact_or_pattern(&p.source_vertex_group, &p.source_vertex_group_pattern);
-        let (target_group, target_group_pattern) = support::exact_or_pattern(&p.target_group, &p.target_group_pattern);
+            support::exact_or_pattern(&p_source_vertex_group, &p_source_vertex_group_pattern);
+        let (target_group, target_group_pattern) = support::exact_or_pattern(&p_target_group, &p_target_group_pattern);
         let source_pattern = support::compile_transfer_group_pattern("attribute_transfer", "source", &source_group_pattern)
             .expect("validated");
         let source_vertex_pattern =
@@ -1901,12 +1640,8 @@ pub mod attribute_transfer {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
 

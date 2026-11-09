@@ -2,15 +2,14 @@
 //! node's parameters and its arity-checked, rebuildable constructor and factory.
 //!
 //! A node declaration is plain data: a `Meta` const (the `[@@sop.node_*]` attributes), a
-//! `Vec<Spec>` (one `[@sop.*]`-annotated record field each), a hand-written `Parameters` struct with
-//! `from_values`, and an `operator` fn. See PORTING.md for the pattern.
+//! `Vec<Spec>` (one `[@sop.*]`-annotated record field each), and an `operator` fn that reads
+//! schema values into the native kernel parameters. See PORTING.md for the pattern.
 use std::sync::Arc;
 
 use param::{Field, Impact, Kind, Schema, Value};
 
 use crate::edit_graph::{self, Factory, InputRequirement};
 use crate::node::{self, build, Elementwise, Facts, Topology};
-use crate::support;
 
 /// `[@@sop.node_facts { ... }]`: the refinement of the conservative facts.
 #[derive(Clone, Copy)]
@@ -276,6 +275,11 @@ pub fn build(decl: &Decl, label: &str, inputs: &[Option<node::T>], values: &[Val
         build(&rebuild_decl, label, &slots, values)
     });
     node::parameterize(schema, values.to_vec(), rebuild, &made)
+}
+
+/// A native node with a static schema; construction and rebuilds share the declaration path.
+pub fn native(meta: &Meta, specs: Vec<Spec>, operator: Operator) -> Factory {
+    factory(&Decl { meta: *meta, schema: schema(meta, specs), operator, dynamic_schema: None })
 }
 
 /// `<t>_factory`: the editor factory of a declaration, built at the default parameter values.

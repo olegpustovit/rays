@@ -5,7 +5,7 @@ use param::Value;
 use rdk_ops::group_ops::{self, CopyConflict, Owner, TransferRule};
 
 use crate::context::{self, dependencies};
-use crate::decl::{self, Decl, Meta, Spec};
+use crate::decl::{self, Meta, Spec};
 use crate::node::{self, build, CookMode};
 use crate::support;
 
@@ -62,41 +62,6 @@ pub mod group_transfer {
         )
     }
 
-    /// The `parameters` record. Field order is the schema's field order.
-    #[derive(Clone, Debug)]
-    pub struct Parameters {
-        pub use_rules: bool,
-        pub rules: Vec<TransferRule>,
-        pub conflict: CopyConflict,
-        pub create_empty: bool,
-        pub distance: f64,
-    }
-
-    pub fn from_values(values: &[Value]) -> Parameters {
-        let (Value::Bool(use_rules), Value::Text(rules), Value::Bool(create_empty), Value::Float(distance)) =
-            (&values[0], &values[1], &values[3], &values[4])
-        else {
-            unreachable!("group_transfer: parameter record has the wrong shape")
-        };
-        Parameters {
-            use_rules: *use_rules,
-            rules: decode(rules).expect("rules were normalized by the schema"),
-            conflict: support::GROUP_COPY_CONFLICT.of(&values[2]),
-            create_empty: *create_empty,
-            distance: *distance,
-        }
-    }
-
-    pub fn to_values(p: &Parameters) -> Vec<Value> {
-        vec![
-            Value::Bool(p.use_rules),
-            Value::Text(encode(&p.rules)),
-            support::GROUP_COPY_CONFLICT.value(&p.conflict),
-            Value::Bool(p.create_empty),
-            Value::Float(p.distance),
-        ]
-    }
-
     pub const META: Meta = Meta {
         key: "group_transfer",
         label: "Group Transfer",
@@ -130,10 +95,15 @@ pub mod group_transfer {
     }
 
     pub fn operator(label: &str, values: &[Value], inputs: &[Option<node::T>]) -> Result<node::T, String> {
-        let p = from_values(values);
+        let (Value::Bool(use_rules), Value::Text(encoded), Value::Bool(create_empty), Value::Float(distance)) =
+            (&values[0], &values[1], &values[3], &values[4])
+        else {
+            unreachable!("group_transfer: parameter record has the wrong shape")
+        };
+        let rules = if *use_rules { decode(encoded).expect("rules were normalized by the schema") } else { default_transfer_rules() };
+        let conflict = support::GROUP_COPY_CONFLICT.of(&values[2]);
+        let (create_empty, distance) = (*create_empty, *distance);
         let (source, target) = (inputs[0].clone().unwrap(), inputs[1].clone().unwrap());
-        let rules = if p.use_rules { p.rules } else { default_transfer_rules() };
-        let (conflict, create_empty, distance) = (p.conflict, p.create_empty, p.distance);
         Ok(build::make_geometry(
             build::Args {
                 label: Some(label.to_owned()),
@@ -161,11 +131,7 @@ pub mod group_transfer {
         ))
     }
 
-    pub fn decl() -> Decl {
-        Decl { meta: META, schema: decl::schema(&META, specs()), operator, dynamic_schema: None }
-    }
-
     pub fn factory() -> crate::edit_graph::Factory {
-        decl::factory(&decl())
+        decl::native(&META, specs(), operator)
     }
 }
