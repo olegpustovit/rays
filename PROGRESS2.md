@@ -50,7 +50,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | D3 | D | pending | — | rdk_geom exact, implicit_point |
 | D4 | D | pending | — | rdk_geom |
 | D5 | D | pending | — | rdk_ops poly_, transform |
-| D6 | D | done | `(pending commit)` — `support::{resolve,check_positive,grain}`; rdk_core/ops/geom/boolean | grain-filtered rdk_ops + `cargo t -p rdk_core` |
+| D6 | D | done | `7ef8286f` — `support::{resolve,check_positive,grain}`; rdk_core/ops/geom/boolean | grain-filtered rdk_ops + `cargo t -p rdk_core` |
 | D7 | D | pending | — | rdk_boolean cells, parallel-equality signatures |
 | D8 | D | pending | — | flow_ir and flow_web goldens byte-identical |
 | D9 | D | pending | — | manifest golden byte-identical; sopcat_manifest |
