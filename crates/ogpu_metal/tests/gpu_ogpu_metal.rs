@@ -260,21 +260,18 @@ fn transfer_and_compute(device: &Device) {
     be::write_buffer(&mapped, 8, &three).unwrap_or_else(|failure| die(failure));
     be::invalidate_mapped(&mapped, 16).unwrap_or_else(|failure| die(failure));
     require(floats.borrow()[2] == 3. && floats.borrow()[1] == 1.5, "an invalidated view lacks the buffer's contents");
-    // released, the host copy of a discrete device goes: a flush has nothing to write, and the next
-    // view is new and holds the device copy once invalidated; unified memory keeps its one view
+    // Releasing a host copy invalidates escaped views on every device. Invalidate reads the
+    // device contents into a new cached view.
     be::release_mapped_view(&mapped).unwrap_or_else(|failure| die(failure));
-    if capabilities.unified_memory {
-        require(Rc::ptr_eq(&be::mapped_view(&mapped).unwrap(), &floats), "a unified view changed on release");
-    } else {
-        refused(be::flush_mapped(&mapped, 16).err(), ErrorKind::InvalidArgument, "a released view was flushed");
-        be::invalidate_mapped(&mapped, 16).unwrap_or_else(|failure| die(failure));
-        let fresh = be::mapped_view(&mapped).unwrap();
-        require(
-            !Rc::ptr_eq(&fresh, &floats) && fresh.borrow()[2] == 3. && fresh.borrow()[1] == 1.5,
-            "a view made by invalidate lacks the buffer's contents",
-        );
-    }
+    require(floats.borrow().iter().all(|value| value.is_nan()), "a released view retained readable values");
+    refused(be::flush_mapped(&mapped, 16).err(), ErrorKind::InvalidArgument, "a released view was flushed");
+    let fresh = be::mapped_view(&mapped).unwrap();
+    require(!Rc::ptr_eq(&fresh, &floats), "release retained the old host view");
+    require(fresh.borrow().iter().all(|value| value.is_nan()), "a released view's successor was valid before invalidate");
+    be::invalidate_mapped(&mapped, 16).unwrap_or_else(|failure| die(failure));
+    require(*fresh.borrow() == [0., 1.5, 3., 0.], "invalidate lost the buffer's contents after release");
     let floats = be::mapped_view(&mapped).unwrap();
+    require(Rc::ptr_eq(&fresh, &floats), "mapped view accessor copied the successor storage");
     refused(be::release_mapped_view(&source).err(), ErrorKind::InvalidArgument, "an unmapped buffer's view was released");
     // a buffer only the device touches: no view until the host asks, then the device copy once invalidated
     let device_only = be::create_mapped_buffer(
@@ -282,9 +279,7 @@ fn transfer_and_compute(device: &Device) {
         buf("device only", 16, &[BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst]),
     ).unwrap_or_else(|failure| die(failure));
     be::write_buffer(&device_only, 8, &three).unwrap_or_else(|failure| die(failure));
-    if !capabilities.unified_memory {
-        refused(be::flush_mapped(&device_only, 16).err(), ErrorKind::InvalidArgument, "a view nobody asked for was flushed");
-    }
+    refused(be::flush_mapped(&device_only, 16).err(), ErrorKind::InvalidArgument, "a view nobody asked for was flushed");
     be::invalidate_mapped(&device_only, 16).unwrap_or_else(|failure| die(failure));
     require(be::mapped_view(&device_only).unwrap().borrow()[2] == 3., "a device-only buffer's first view");
     let owned = be::owned_readback(&device_only).unwrap_or_else(|failure| die(failure));

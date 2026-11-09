@@ -103,9 +103,12 @@ fn mapped_view_is_a_host_copy_synchronised_by_flush_and_invalidate() {
     assert_eq!(backend::read_buffer(&mapped, 0, 4).unwrap(), 1.5f32.to_le_bytes());
     backend::release_mapped_view(&mapped).unwrap();
     assert!(view.borrow()[0].is_nan(), "a kept view turns NaN");
-    assert!(backend::mapped_view(&mapped).unwrap().borrow()[1].is_nan(), "the successor starts NaN");
+    let successor = backend::mapped_view(&mapped).unwrap();
+    assert!(!std::rc::Rc::ptr_eq(&view, &successor), "release drops the cached view");
+    assert!(successor.borrow().iter().all(|value| value.is_nan()), "the successor starts NaN");
     backend::invalidate_mapped(&mapped, 8).unwrap();
     let again = backend::mapped_view(&mapped).unwrap();
+    assert!(std::rc::Rc::ptr_eq(&again, &successor), "invalidate fills the cached successor");
     assert_eq!(again.borrow()[0], 1.5);
     assert_eq!(again.borrow()[1], 0.0);
 }
