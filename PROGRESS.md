@@ -6,7 +6,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Current state (2026-11-09): finished.** All 63 plan items (waves A, B, M, I, C, D) are done on `dev`; see the Summary below and the session log for evidence. Artifact v7 is published with the final status, and its source SHA-256 (`6754cee3…`) matches the repository mirror. Crates went from 67 to 51. Final qualification on the final code: workspace 2,843 cases with no failures; native editor suite 325/325. The follow-ups outside the plan are listed in the last session-log entries and on the artifact.
+**Current state (2026-11-09): finished.** All 63 plan items (waves A, B, M, I, C, D) are done on `dev`; see the Summary below and the session log for evidence. Artifact v8 is published with the final status, and its source SHA-256 (`abbafc85…`) matches the repository mirror. Crates went from 67 to 51. Final qualification on the final code: Mac workspace 2,609 cases exit 0, Mac native editor 325/325; Windows (RTX 2080 Ti, Vulkan) workspace 2,583 cases exit 0, Windows native editor 313/325, with the other 12 passing functionally but over the 5 s budget on that slower machine. The follow-ups outside the plan are listed in the last session-log entries and on the artifact.
 
 ## Summary
 
@@ -135,6 +135,20 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-09: Windows pass (kyiv-win-1, RTX 2080 Ti, Vulkan), commits `bda9754b`..`2104129f`.
+  - `bda9754b`: Windows test harnesses release the shared Vulkan device after a panic and exit 101. Before, a leftover device crashed the process at exit (0xc0000005) and hid the real assertion. Vulkan does not specialize captures (no source to fold), so `specialized_captures` asserts none happen there.
+  - `9a70d41c` + `0269f7f4`: Lisp trig, packed ops, core_exec/core_marks, scene_command path arcs and mat4 rotations use `rays_math::libm`. It is vendored msun/musl sin/cos/tan/asin/acos/atan/atan2 from rust-src (MIT, Sun notices kept), std-only, and bit-identical to the `libm` crate on 3M random inputs. macOS 27 and Windows ucrtbase differ on ~5% of sin/cos and 41% of tan. Goldens reviewed: round stroke indices 35/43 (…715); particles data.bin 742 of 30,000 f64 moved 1-2 ulp, other export files byte-identical. ponytail: exp/log/pow and rdk/editor/world trig still use platform libm.
+  - `db24d045`: the counting allocator touches its thread-local only after `local_reset` (~15 ns per alloc on windows-gnu); flow_sop cases ran 30-40% faster on Windows.
+  - `9a90f1fc` + `dc82511c`: keyword_manifest/optional_rest test one factory instead of checking the whole library (the full manifest stays covered by flow_manifest and the sopcat cases). wave/variations are split into lower and cook cases. combining_general_backbone cooks 1 and 4 domains in separate cases joined by a recorded whole-geometry digest, identical on both machines.
+  - `a529b535` + `2104129f`: editor cases close every editor they create, and the scrub child releases the GPU before exit. These were Windows exit crashes: validation-layer code ran after unload, and a silent child crash caused a 60 s parent timeout.
+  - Results:
+    - Windows `cargo t --workspace`: 2,583 cases, exit 0, 257 s.
+    - Mac `cargo t --workspace`: 2,609, exit 0, 219 s.
+    - Mac native editor suite: 325/325.
+    - Windows native editor suite: 313/325. The 12 others (run_unbound_panels, run_ops, run_panels, image_sop, native_orrery_frames, seven sopcat_*) **all pass functionally** under RAYS_SLOW on Windows (5.4-9.3 s). They exceed the Mac-calibrated 5 s budget because that box is slower at CPU-bound debug work. Processes started over SSH partly run on efficiency cores (optional_rest 5.4 s on P-cores vs 10.8 s on E-cores). run_ops is still 5.08 s at High priority.
+    - sopcat_perturbation (RAYS_SLOW only) passes on the Mac in 47 s but exceeds 60 s on Windows.
+  - Follow-ups: the flow_check library check (~3.4 s per process on the Mac) and value-dependent Lisp lowering are the shared cost behind these Windows timings.
 
 - 2026-11-09: `55d989a8` qual: flow_sop shares light test processes. 98 test_parallel_exact cases become 39 tests (17 grouped `light_*`); 129 manifest goldens become 5; parity 75 -> 21. Each failure still names its section. Full `cargo t -p flow_sop` with default caps passes in 50.5-57.5 s at load 8-14 (472 tests, ~200 s summed).
 - 2026-11-09: **Windows verification** on kyiv-win-1 (RTX 2080 Ti, MSYS2 UCRT64, synced with git bundles and no push).

@@ -66,7 +66,7 @@ nav.track a:hover{border-bottom-color:var(--accent)}
 
 <main>
 <header style="display:flex;flex-direction:column;gap:10px">
-  <div class="eyebrow">Finished · audit at 6802a325 · closed at dev @ 5a575954 · 2026-11-09 · <code>docs/history/port-simplification</code></div>
+  <div class="eyebrow">Finished · audit at 6802a325 · closed at dev @ 2104129f · 2026-11-09 · <code>docs/history/port-simplification</code></div>
   <h1>Rays port simplification</h1>
   <p class="lede">Audit and execution ledger for the 67-crate Rust workspace after the OCaml port. Same capabilities, Lisp semantics, determinism and sequential/parallel equality; smaller surface and faster compile/debug loops. Line counts and build numbers are spot measurements on a shared machine unless a row cites a closing commit.</p>
   <nav class="track" aria-label="Sections">
@@ -84,8 +84,8 @@ nav.track a:hover{border-bottom-color:var(--accent)}
     <div class="stat"><b>139 → 111 G</b><span>bench_core instructions, release (old engine → one engine)</span></div>
     <div class="stat"><b>2.57 → 2.29 ms</b><span>release <code>map</code> of 1M elements</span></div>
     <div class="stat"><b>87 / 52 → 0</b><span>capitalised OCaml modules and <code>t</code> types</span></div>
-    <div class="stat"><b>2,843 / 2,843</b><span>workspace cases passing on the final code, none timed out</span></div>
-    <div class="stat"><b>285 → 325 / 325</b><span>native editor suite passing (was 37 failures)</span></div>
+    <div class="stat"><b>exit 0 / exit 0</b><span>full workspace suite on macOS (Metal, 2,609 cases) and Windows (Vulkan, RTX 2080 Ti, 2,583 cases)</span></div>
+    <div class="stat"><b>325 / 325</b><span>native editor suite on macOS (was 285 with 37 failures). Windows: 313, plus 12 that pass but exceed 5 s on that slower box</span></div>
   </div>
   <h3>Bugs found and fixed</h3>
   <p>Running the full native suite exposed failures that were all present before the plan started: each also fails at the audit baseline <code>11988707</code>. They were fixed anyway:</p>
@@ -101,6 +101,9 @@ nav.track a:hover{border-bottom-color:var(--accent)}
     <li>O(n²) text-array stores and <code>edge_straighten</code> covariance.</li>
     <li>A Lisp node body was lowered three times per build because the build memo keyed fresh stand-in ids. It now builds twice, prepares once, and <code>subdivide</code> builds in 0.48 s instead of 0.80 s.</li>
     <li>Six SPIR-V operand orders followed OCaml's right-to-left order.</li>
+    <li>Lisp trig and path arcs depended on the platform libm. They now use one vendored msun implementation, so macOS and Windows produce identical bits.</li>
+    <li>GPU objects outlived the shared Vulkan device and crashed Windows processes at exit.</li>
+    <li>An example named the Metal backend unconditionally, so it never compiled on Windows.</li>
     <li>Stale goldens and tests.</li>
   </ul>
   <h3>Follow-ups outside the plan</h3>
@@ -109,7 +112,7 @@ nav.track a:hover{border-bottom-color:var(--accent)}
     <li><b><code>flow_check</code> prelude.</b> The check costs about 3.4 s per process. Interned checker paths, or memos per closure signature, would help.</li>
     <li><b><code>cargo t -p flow_sop</code>:</b> all 709 cases pass, but the whole run sits at the 60 s cap (59.9–60.2 s at load 6–7). The next lever is <code>test_parallel_exact</code>, about 95 s summed, where each process re-checks the library.</li>
     <li><b>Path tracer.</b> It rebuilds meshes with device-generated topology every frame. A prototype refit was reverted until it has a liveness check.</li>
-    <li><b>Unverified here.</b> Windows Vulkan execution, and the cross-platform golden decisions (remesh, marks, round stroke), were not checked on Windows hardware.</li>
+    <li><b>Windows timing.</b> On the RTX 2080 Ti box, 12 native editor cases pass but take 5.4–9.3 s against the 5 s budget, which was set on the Mac. Processes started over SSH partly run on efficiency cores. The shared cost is the <code>flow_check</code> library check and Lisp lowering, as above.</li>
   </ul>
 </section>
 
