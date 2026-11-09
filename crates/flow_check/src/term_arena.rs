@@ -301,6 +301,85 @@ impl TermBuilder {
         self.tables.functions.push(function);
         self.push_row(row)
     }
+    /// A fresh copy of `root`'s subtree: the same rows under new identities, sharing immutable
+    /// payload tables. The checker replays a memoised call-site body this way, so call sites never
+    /// share rows (identity-keyed evaluation caches keep one row per site, as before).
+    pub fn copy_tree(&mut self, root: TermId) -> TermId {
+        fn remap<T: Copy>(ranges: &mut Vec<Range>, table: &mut Vec<T>, id: RangeId, f: impl Fn(T) -> T) -> RangeId {
+            let Range { start, len } = ranges[id.0 as usize];
+            if len == 0 { return RangeId(0); }
+            let at = table.len();
+            for i in start..start + len { let value = f(table[i as usize]); table.push(value); }
+            ranges.push(Range { start: index(at), len });
+            RangeId(index(ranges.len() - 1))
+        }
+        let mut map: FastMap<u32, TermId> = FastMap::default();
+        let mut pending = vec![(root, false)];
+        while let Some((id, ready)) = pending.pop() {
+            if map.contains_key(&id.0) { continue; }
+            if !ready {
+                pending.push((id, true));
+                pending.extend(self.children(id).iter().rev().map(|child| (*child, false)));
+                continue;
+            }
+            let mut row = *self.row(id);
+            let m = |term: TermId| map[&term.0];
+            let t = &mut self.tables;
+            let terms = |t: &mut Tables, range| remap(&mut t.ranges, &mut t.terms, range, m);
+            let fields = |t: &mut Tables, range| remap(&mut t.ranges, &mut t.fields, range, |f: Field| Field { term: m(f.term), ..f });
+            let bindings = |t: &mut Tables, range| remap(&mut t.ranges, &mut t.bindings, range, |b: Binding| Binding { term: m(b.term), ..b });
+            fn push<T>(table: &mut Vec<T>, value: T) -> u32 { table.push(value); index(table.len() - 1) }
+            // `own`: the payload range that `push` also uses as the row's child list.
+            let mut own = None;
+            row.node = match row.node {
+                node @ (Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(_) | Node::FnRef(_)) => node,
+                Node::Vec(r) => { let r = terms(t, r); own = Some(r); Node::Vec(r) }
+                Node::ListLit(r) => { let r = terms(t, r); own = Some(r); Node::ListLit(r) }
+                Node::Str(r) => { let r = terms(t, r); own = Some(r); Node::Str(r) }
+                Node::Record(r) => Node::Record(fields(t, r)),
+                Node::Call(i) => { let v = t.calls[i as usize]; let args = fields(t, v.args); Node::Call(push(&mut t.calls, Call { args, ..v })) }
+                Node::Op(i) => { let v = t.ops[i as usize]; let args = fields(t, v.args); Node::Op(push(&mut t.ops, Op { args, ..v })) }
+                Node::CallFn(i) => {
+                    let v = t.call_fns[i as usize];
+                    let args = terms(t, v.args);
+                    if v.body.is_none() { own = Some(args); }
+                    Node::CallFn(push(&mut t.call_fns, CallFn { args, body: v.body.map(m), ..v }))
+                }
+                Node::GraphRef(i) => { let v = t.graphs[i as usize]; let inputs = fields(t, v.inputs); Node::GraphRef(push(&mut t.graphs, GraphRef { inputs, ..v })) }
+                Node::Let(i) => { let v = t.lets[i as usize]; let b = bindings(t, v.bindings); Node::Let(push(&mut t.lets, Let { bindings: b, body: m(v.body) })) }
+                Node::State(i) => { let v = t.states[i as usize]; Node::State(push(&mut t.states, State { init: m(v.init), step: m(v.step), ..v })) }
+                Node::Loop(i) => {
+                    let v = t.loops[i as usize];
+                    let (accs, clauses) = (bindings(t, v.accs), bindings(t, v.clauses));
+                    Node::Loop(push(&mut t.loops, Loop { accs, clauses, body: m(v.body), ..v }))
+                }
+                Node::WithError(i) => { let v = t.pairs[i as usize]; Node::WithError(push(&mut t.pairs, Pair { first: m(v.first), second: m(v.second) })) }
+                Node::ErrorRows(i) => { let v = t.errors[i as usize]; Node::ErrorRows(push(&mut t.errors, ErrorRows { rows: m(v.rows), mapper: m(v.mapper), ..v })) }
+                Node::If(i) => { let v = t.ifs[i as usize]; Node::If(push(&mut t.ifs, If { test: m(v.test), yes: m(v.yes), no: m(v.no) })) }
+                Node::Cond(i) => {
+                    let v = t.conds[i as usize];
+                    let arms = remap(&mut t.ranges, &mut t.arms, v.arms, |a: Arm| Arm { test: m(a.test), body: m(a.body) });
+                    Node::Cond(push(&mut t.conds, Cond { arms, default: m(v.default) }))
+                }
+                Node::Case(i) => {
+                    let v = t.cases[i as usize];
+                    let arms = remap(&mut t.ranges, &mut t.case_arms, v.arms, |a: CaseArm| CaseArm { body: m(a.body), ..a });
+                    Node::Case(push(&mut t.cases, Case { value: m(v.value), arms, default: m(v.default) }))
+                }
+                Node::Fn(i) => { let v = t.functions[i as usize]; Node::Fn(push(&mut t.functions, Function { body: m(v.body), capture: v.capture.map(m), ..v })) }
+                Node::Hof(i) => { let v = t.hofs[i as usize]; let args = terms(t, v.args); own = Some(args); Node::Hof(push(&mut t.hofs, Hof { args, ..v })) }
+                Node::Get(i) => { let v = t.gets[i as usize]; Node::Get(push(&mut t.gets, Get { value: m(v.value), ..v })) }
+                Node::Assoc(i) => { let v = t.assocs[i as usize]; let f = fields(t, v.fields); Node::Assoc(push(&mut t.assocs, Assoc { value: m(v.value), fields: f })) }
+                Node::ListOp(i) => { let v = t.list_ops[i as usize]; let args = terms(t, v.args); own = Some(args); Node::ListOp(push(&mut t.list_ops, ListOp { args, ..v })) }
+                Node::Bypass(child) => Node::Bypass(m(child)),
+                Node::Expanded(i) => { let v = t.expanded[i as usize]; Node::Expanded(push(&mut t.expanded, Expanded { body: m(v.body), ..v })) }
+            };
+            row.children = match own { Some(range) => range, None => terms(t, row.children) };
+            let copy = self.push_row(row);
+            map.insert(id.0, copy);
+        }
+        map[&root.0]
+    }
     fn push_row(&mut self, row: TermRow) -> TermId {
         let id = TermId(index(self.tables.rows.len()));
         self.tables.rows.push(row);
@@ -642,12 +721,21 @@ impl TermBuilder {
 
     /// Seal one graph's roots, discarding checking-only rows and detaching its authored forms.
     pub fn finish(self, roots: &[TermId], forms: &[SyntaxId]) -> (Arc<TermArena>, Vec<TermId>, Vec<SyntaxId>) {
+        let (arena, roots, forms, _) = self.finish_with(roots, forms, &[]);
+        (arena, roots, forms)
+    }
+
+    /// `finish`, also returning each `extra` row the roots reach, sealed with them.
+    pub fn finish_with(self, roots: &[TermId], forms: &[SyntaxId], extra: &[TermId]) -> (Arc<TermArena>, Vec<TermId>, Vec<SyntaxId>, Vec<Option<Term>>) {
         // ponytail: compact once per graph through the importer; compact tables in place if this copy profiles hot.
         let source = self.freeze();
         let mut builder = TermBuilder::new();
         let forms = forms.iter().map(|&id| builder.import_form(&source.syntax.handle(id))).collect();
         let roots = roots.iter().map(|&id| builder.import(&source.handle(id))).collect();
-        (builder.freeze(), roots, forms)
+        let extra: Vec<Option<TermId>> = extra.iter().map(|&id| builder.imported(&source.handle(id))).collect();
+        let arena = builder.freeze();
+        let extra = extra.into_iter().map(|id| id.map(|id| arena.handle(id))).collect();
+        (arena, roots, forms, extra)
     }
 
     pub fn freeze(mut self) -> Arc<TermArena> {

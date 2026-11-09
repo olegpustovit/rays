@@ -489,6 +489,23 @@ impl Info {
         }
     }
 
+    /// Equal for checking: a callable compares by its closure's identity or its name.
+    fn same(&self, other: &Info) -> bool {
+        let callable = match (&self.callable, &other.callable) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b) || match (&**a, &**b) {
+                (Callable::Local(a), Callable::Local(b)) => Rc::ptr_eq(a, b),
+                (Callable::Def(a), Callable::Def(b)) | (Callable::Op(a), Callable::Op(b)) => a == b,
+                (Callable::Kind(a), Callable::Kind(b)) => a == b,
+                _ => false,
+            },
+            _ => false,
+        };
+        callable && self.ty == other.ty && self.live == other.live && self.live_len == other.live_len && self.len == other.len
+            && self.vary == other.vary && self.groups == other.groups && self.packed == other.packed && self.approx == other.approx
+            && self.approx_sources == other.approx_sources && self.state_dep == other.state_dep && self.list_fields == other.list_fields
+    }
+
     fn derive(ty: Ty, values: &[Info]) -> Self {
         let mut result = Self::leaf(ty);
         for value in values {
@@ -570,6 +587,15 @@ impl Cx {
 }
 #[derive(Clone)]
 struct Arg{key:Option<String>,form:Syntax,term:TermId,info:Info}
+/// A `defn` body checked at a call site with these inputs. Repeating the check would add the
+/// same terms (fresh rows), the same idempotent marks and diagnostics, and `steps` more steps,
+/// as long as nothing counted (`Checker::events`) and the call stack and depth agree on what the
+/// body probed: no name in `probes` on the stack, closures `reach` levels deeper within the limit.
+/// `T` is the body: a row of the current builder, or a sealed term once its builder finished.
+/// A closure's memo holds the closure, so its address (in the key) is not reused.
+#[derive(Clone)]
+struct CallMemo<T> { env: Vec<Info>, probes: Vec<String>, reach: Option<usize>, steps: usize, term: T, value: Info, closure: Option<Rc<Closure>> }
+type CallMemos<T> = BTreeMap<String, Vec<CallMemo<T>>>;
 
 struct Checker {
     terms: TermBuilder,
@@ -604,6 +630,20 @@ struct Checker {
     children: usize,
     zone_id: usize,
     graph_stack: Vec<String>,
+    /// Call-site bodies checked into `terms`; taken and restored with it.
+    calls: CallMemos<TermId>,
+    /// Call-site bodies of finished builders, and those the prelude kept for its workspaces.
+    /// ponytail: kept for the checker's (and a cached prelude's) lifetime; bound it if retained
+    /// memory matters.
+    kept: CallMemos<Term>,
+    inherited: Rc<CallMemos<Term>>,
+    /// Counter-driven paths, zone ids, graph references, budget and recursion or depth failures:
+    /// a body that bumps this checks differently when repeated, so it is not memoised.
+    events: usize,
+    /// The deepest closure call and the definitions checked against the stack, since the
+    /// innermost memoised call began.
+    depth_seen: Option<usize>,
+    probes: Vec<String>,
 }
 
 impl Clone for Checker {
@@ -617,7 +657,9 @@ impl Clone for Checker {
             inline: self.inline.clone(), input_paths: self.input_paths.clone(), checked_defs: self.checked_defs.clone(),
             graph_order: self.graph_order.clone(), def_order: self.def_order.clone(), node_order: self.node_order.clone(),
             declared_names: self.declared_names.clone(), steps: self.steps, count: self.count, children: self.children,
-            zone_id: self.zone_id, graph_stack: self.graph_stack.clone() }
+            zone_id: self.zone_id, graph_stack: self.graph_stack.clone(), calls: BTreeMap::new(), kept: BTreeMap::new(),
+            inherited: self.inherited.clone(), events: self.events,
+            depth_seen: None, probes: Vec::new() }
     }
 }
 
@@ -656,6 +698,12 @@ impl Checker {
             children: 0,
             zone_id: 0,
             graph_stack: Vec::new(),
+            calls: BTreeMap::new(),
+            kept: BTreeMap::new(),
+            inherited: Rc::default(),
+            events: 0,
+            depth_seen: None,
+            probes: Vec::new(),
         }
     }
  fn make_term(&mut self, form: &Syntax, ty: Ty, node: Draft) -> TermId {
@@ -668,7 +716,7 @@ impl Checker {
  fn error(&mut self,f:&Syntax,c:&str,m:&str){self.add(Severity::ErrorSeverity,f,c,m.to_owned())}
  fn warn(&mut self,f:&Syntax,c:&str,m:&str){self.add(Severity::Warning,f,c,m.to_owned())}
  fn warn_owned(&mut self,f:&Syntax,c:&str,m:String){self.add(Severity::Warning,f,c,m)}
- fn inline_path(&mut self,cx:&Cx,seg:&str)->Path{let mut key=cx.path.clone();key.push(seg.to_owned());let n=*self.inline.get(&key).unwrap_or(&0);self.inline.insert(key.clone(),n+1);if n==0{key}else{let mut p=cx.path.clone();p.push(format!("{seg}~{n}"));p}}
+ fn inline_path(&mut self,cx:&Cx,seg:&str)->Path{self.events+=1;let mut key=cx.path.clone();key.push(seg.to_owned());let n=*self.inline.get(&key).unwrap_or(&0);self.inline.insert(key.clone(),n+1);if n==0{key}else{let mut p=cx.path.clone();p.push(format!("{seg}~{n}"));p}}
  fn merge_packed(old: PackedForm, next: PackedForm) -> PackedForm {
      match (old, next) {
          (PackedForm::Candidate(mut left), PackedForm::Candidate(right)) => {
@@ -727,9 +775,11 @@ impl Checker {
      }
  }
 
+ fn budget(&self) -> usize { 400_000 * (self.count + self.children).max(1) }
  fn infer(&mut self, cx: &Cx, form: &Syntax) -> (TermId, Info) {
      self.steps += 1;
-     if self.steps > 400_000 * (self.count + self.children).max(1) {
+     if self.steps > self.budget() {
+         self.events += 1;
          return self.fail_term(form, "E_BUDGET", "The workspace is too large to check: call-site typing exceeded its budget. Reduce nested function calls.");
      }
      let mut result = if !form.meta().is_empty() {
@@ -1705,9 +1755,10 @@ impl Checker {
      }
      (term, value)
  }
- fn call_closure(&mut self,cx:&Cx,f:&Syntax,c:&Closure,args:&[Arg])->(TermId,Info){
+ fn call_closure(&mut self,cx:&Cx,f:&Syntax,c:&Closure,args:&[Arg],rc:Option<&Rc<Closure>>)->(TermId,Info){
      if args.len()!=c.params.len(){return self.fail_term(f,"E_ARITY",&format!("{} takes {} argument{}; got {}.",c.name,c.params.len(),if c.params.len()==1{""}else{"s"},args.len()))}
-     if cx.depth>64{return self.fail_term(f,"E_DEPTH","Call depth exceeds 64.")}
+     self.depth_seen=Some(self.depth_seen.map_or(cx.depth,|d|d.max(cx.depth)));
+     if cx.depth>64{self.events+=1;return self.fail_term(f,"E_DEPTH","Call depth exceeds 64.")}
      let call_scope = self.terms.path(&c.path);
      let mut env = c.env.push(call_scope);
      let pcx=cx.with_path(c.path.clone());
@@ -1728,11 +1779,18 @@ impl Checker {
      inner.stack.extend(cx.stack.clone());inner.stack.sort();inner.stack.dedup();
      inner.zone=None;
      inner.zbody=false;
-     self.body(&inner,&c.body)
+     match rc {
+         // the body reads the closure, its inputs, the caller's scope text and node context
+         Some(rc) => {
+             let key = format!("{:p}|{}|{}", Rc::as_ptr(rc), inner.in_def, inner.scope);
+             self.memo_body(key, Some(rc.clone()), args.iter().map(|a| a.info.clone()).collect(), &inner, &c.body)
+         }
+         None => self.body(&inner,&c.body),
+     }
  }
  fn apply_callable(&mut self,cx:&Cx,f:&Syntax,value:&Info,args:&[Arg])->(TermId,Info){
      match value.callable.as_deref(){
-         Some(Callable::Local(closure))=>self.call_closure(cx,f,closure,args),
+         Some(Callable::Local(closure))=>self.call_closure(cx,f,closure,args,Some(closure)),
          Some(Callable::Def(name))=>self.apply_def(cx,f,name,args),
          Some(Callable::Op(name))=>match op::find(&self.ops,name,&cx.ctx){Some(operator)=>self.apply_op(cx,f,&operator,args,Vec::new()),None=>self.fail_term(f,"E_UNKNOWN_KIND","Unknown operator.")},
          Some(Callable::Kind(kind))=>self.apply_kind(cx,f,kind,args),
@@ -1930,7 +1988,9 @@ impl Checker {
      if d.ctx != cx.ctx && d.ctx != context::value() {
          return self.fail_term(f, "E_WRONG_CONTEXT", &format!("{} belongs to {}; it cannot run in {}.", d.name, context_name(&d.ctx), context_name(&cx.ctx)));
      }
+     self.probes.push(d.name.clone());
      if cx.stack.contains(&d.name) {
+         self.events += 1;
          let mut stack = cx.stack.clone();
          stack.push(d.name.clone());
          return self.fail_term(f, "E_RECURSION", &format!("Recursive call: {}. Use fold for repetition.", stack.join(" → ")));
@@ -1972,14 +2032,81 @@ impl Checker {
              if !d.params.iter().any(|(name, _, _)| name == key) { self.error(&a.form, "E_UNKNOWN_PARAM", &format!("{} has no input :{key}.", d.name)); }
          }
      }
+     let key = d.params.iter().map(|(n, _, _)| env[n].clone()).collect();
      let def_scope = self.terms.path(&vec![format!("def:{}", d.name)]);
      let mut inner = Cx {
          env: ScopeStack::from_map(def_scope, env), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name)], scope: format!("ƒ {}", d.name),
          in_def: true, stack: cx.stack.clone(), depth: cx.depth + 1, zone: None, zbody: false,
      };
      inner.stack.push(d.name.clone());
-     let (body, value) = self.body(&inner, &d.body);
+     let (body, value) = self.call_body(d, key, &inner);
      (self.make_term(f, value.ty.clone(), Draft::CallFn { fn_name: d.name.clone(), args: terms, body: Some(body) }), value)
+ }
+ /// `d`'s body under `inner`, whose environment holds `env`: a repeated check of a body that
+ /// already checked identically in this builder copies its terms instead of checking it again.
+ fn call_body(&mut self, d: &Sig, env: Vec<Info>, inner: &Cx) -> (TermId, Info) {
+     self.memo_body(d.name.clone(), None, env, inner, &d.body)
+ }
+ /// `body` under `inner`, memoised as `key` with these inputs (`closure` for a local function).
+ fn memo_body(&mut self, key: String, closure: Option<Rc<Closure>>, env: Vec<Info>, inner: &Cx, body: &Syntax) -> (TermId, Info) {
+     let budget = self.budget();
+     let steps = self.steps;
+     fn find<'a, T>(memos: &'a CallMemos<T>, name: &str, env: &[Info], inner: &Cx, fits: impl Fn(usize) -> bool) -> Option<&'a CallMemo<T>> {
+         memos.get(name)?.iter().find(|m| {
+             m.env.len() == env.len() && m.env.iter().zip(env).all(|(a, b)| a.same(b))
+                 && !m.probes.iter().any(|name| inner.stack.contains(name))
+                 && m.reach.is_none_or(|reach| inner.depth + reach <= 64)
+                 && fits(m.steps)
+         })
+     }
+     let fits = |more: usize| steps + more <= budget;
+     let hit = match find(&self.calls, &key, &env, inner, fits) {
+         Some(m) => Some((self.terms.copy_tree(m.term), m.clone())),
+         None if closure.is_some() => None,
+         None => match find(&self.kept, &key, &env, inner, fits).or_else(|| find(&self.inherited, &key, &env, inner, fits)) {
+             // a sealed body comes back as fresh rows; later hits in this builder copy those
+             Some(m) => {
+                 let term = self.terms.rewrite(&m.term, &mut |_, _, draft| draft);
+                 let m = CallMemo { term, env: m.env.clone(), probes: m.probes.clone(), reach: m.reach, steps: m.steps, value: m.value.clone(), closure: None };
+                 self.calls.entry(key.clone()).or_default().push(m.clone());
+                 Some((term, m))
+             }
+             None => None,
+         },
+     };
+     if let Some((term, m)) = hit {
+         self.steps += m.steps;
+         if let Some(reach) = m.reach { self.depth_seen = Some(self.depth_seen.map_or(inner.depth + reach, |d| d.max(inner.depth + reach))); }
+         self.probes.extend(m.probes);
+         return (term, m.value);
+     }
+     let events = self.events;
+     let outer_seen = self.depth_seen.take();
+     let outer_probes = std::mem::take(&mut self.probes);
+     let (term, value) = self.body(inner, body);
+     let seen = std::mem::replace(&mut self.depth_seen, outer_seen);
+     if let Some(seen) = seen { self.depth_seen = Some(self.depth_seen.map_or(seen, |d| d.max(seen))); }
+     let mut probes = std::mem::replace(&mut self.probes, outer_probes);
+     probes.sort();
+     probes.dedup();
+     self.probes.extend(probes.iter().cloned());
+     if self.events == events {
+         let memo = CallMemo { env, probes, reach: seen.map(|seen| seen.saturating_sub(inner.depth)), steps: self.steps - steps, term, value: value.clone(), closure };
+         self.calls.entry(key).or_default().push(memo);
+     }
+     (term, value)
+ }
+ /// Seal the current builder and return to `outer`, keeping its call-site bodies for later builders.
+ fn finish_terms(&mut self, outer: TermBuilder, outer_calls: CallMemos<TermId>, roots: &[TermId], form: SyntaxId) -> (Arc<packed::TermArena>, Vec<TermId>, Vec<SyntaxId>) {
+     let calls: Vec<(String, CallMemo<TermId>)> = std::mem::replace(&mut self.calls, outer_calls).into_iter()
+         .flat_map(|(name, memos)| memos.into_iter().filter(|m| m.closure.is_none()).map(move |m| (name.clone(), m))).collect();
+     let extra: Vec<TermId> = calls.iter().map(|(_, m)| m.term).collect();
+     let (arena, roots, forms, kept) = std::mem::replace(&mut self.terms, outer).finish_with(roots, &[form], &extra);
+     for ((name, m), term) in calls.into_iter().zip(kept) {
+         let Some(term) = term else { continue };
+         self.kept.entry(name).or_default().push(CallMemo { term, env: m.env, probes: m.probes, reach: m.reach, steps: m.steps, value: m.value, closure: None });
+     }
+     (arena, roots, forms)
  }
  fn apply_op(&mut self, cx: &Cx, form: &Syntax, operator: &op::Op, arguments: &[Arg], skip: Vec<Vec<usize>>) -> (TermId, Info) {
      if BODY_CONTEXT_OPS.contains(&operator.name.as_str()) && !cx.in_def {
@@ -2329,7 +2456,8 @@ impl Checker {
          });
      }
      let (body, value) = if let Some(closure) = closure.as_ref() {
-         self.call_closure(cx, &argument.form, closure, &inputs)
+         let rc = match callable.as_ref() { Callable::Local(rc) => Some(rc), _ => None };
+         self.call_closure(cx, &argument.form, closure, &inputs, rc)
      } else {
          let mut callee = argument.info.clone();
          callee.callable = Some(callable.clone());
@@ -2754,6 +2882,7 @@ fn iterate(&mut self, cx: &Cx, f: &Syntax, forms: &[packed::SyntaxId]) -> (TermI
      false
  }
 fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[packed::SyntaxId]) -> (TermId, Info) {
+    self.events += 1;
     let Some(first) = forms.first() else { return self.fail_term(x, "E_ARGS", "ref takes a graph name, then :input value pairs.") };
     let first = x.child(*first);
     let SNode::Sym(g) = first.node else { return self.fail_term(x, "E_ARGS", "ref takes a graph name, then :input value pairs.") };
@@ -2850,7 +2979,9 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
          self.error(x, "E_GRAPH_CYCLE", &format!("Graph cycle: {}.", cycle.join(" → ")));
          return Info::leaf(context::result(sg.ctx));
      }
+     self.events += 1;
      let outer_terms = std::mem::take(&mut self.terms);
+     let outer_calls = std::mem::take(&mut self.calls);
      let graph_form = self.terms.import_form(&sg.form);
      self.graph_stack.push(name.to_owned());
      let cx0 = Cx { env: ScopeStack::default(), ctx: sg.ctx, path: vec![name.to_owned()], scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
@@ -2889,7 +3020,7 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
      self.graph_stack.pop();
      let mut roots = inputs.iter().filter_map(|(_, _, default)| *default).collect::<Vec<_>>();
      roots.push(bt);
-     let (arena, roots, forms) = std::mem::replace(&mut self.terms, outer_terms).finish(&roots, &[graph_form]);
+     let (arena, roots, forms) = self.finish_terms(outer_terms, outer_calls, &roots, graph_form);
      let mut roots = roots.into_iter();
      let inputs = inputs.into_iter().map(|(name, ty, default)| {
          (name, ty, default.map(|_| arena.handle(roots.next().unwrap())))
@@ -3017,7 +3148,9 @@ impl Checker {
             return;
         }
         let Some(definition) = self.defs.get(name).cloned() else { return };
+        self.events += 1;
         let outer_terms = std::mem::take(&mut self.terms);
+        let outer_calls = std::mem::take(&mut self.calls);
         let graph_form = self.terms.import_form(&definition.form);
         let def_scope = self.terms.path(&vec![format!("def:{name}")]);
         let mut env = ScopeStack::default().push(def_scope);
@@ -3064,7 +3197,7 @@ impl Checker {
         };
         let mut roots = inputs.iter().filter_map(|(_, _, default)| *default).collect::<Vec<_>>();
         roots.push(body);
-        let (arena, roots, forms) = std::mem::replace(&mut self.terms, outer_terms).finish(&roots, &[graph_form]);
+        let (arena, roots, forms) = self.finish_terms(outer_terms, outer_calls, &roots, graph_form);
         let mut roots = roots.into_iter();
         let inputs = inputs.into_iter().map(|(name, ty, default)| {
             (name, ty, default.map(|_| arena.handle(roots.next().unwrap())))
@@ -3292,7 +3425,9 @@ impl Checker {
 
         for name in node_names {
             let Some(definition) = self.node_defs.get(&name).cloned() else { continue };
+            self.events += 1;
             let outer_terms = std::mem::take(&mut self.terms);
+            let outer_calls = std::mem::take(&mut self.calls);
             let graph_form = self.terms.import_form(&definition.form);
             let node_scope = self.terms.path(&vec![format!("node:{name}")]);
             let bindings = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect::<BTreeMap<_, _>>();
@@ -3355,7 +3490,7 @@ impl Checker {
             roots.push(body);
             roots.extend(validations.iter().map(|(term, _, _)| *term));
             roots.extend(normalizers.iter().map(|(_, term)| *term));
-            let (arena, roots, forms) = std::mem::replace(&mut self.terms, outer_terms).finish(&roots, &[graph_form]);
+            let (arena, roots, forms) = self.finish_terms(outer_terms, outer_calls, &roots, graph_form);
             let mut roots = roots.into_iter();
             let inputs = inputs.into_iter().map(|(name, ty, default)| {
                 (name, ty, default.map(|_| arena.handle(roots.next().unwrap())))
@@ -3490,6 +3625,7 @@ pub fn prelude(
     checker.children = forms.len();
     checker.phase(forms.iter().cloned());
     checker.count += forms.len();
+    checker.inherited = Rc::new(std::mem::take(&mut checker.kept));
     Prelude { checker }
 }
 
@@ -3604,6 +3740,32 @@ mod memory_tests {
             assert!(workspace.is_none(), "{source}");
             assert!(diagnostics.iter().any(|d| d.code == "E_WORKSPACE"), "{source}: {diagnostics:?}");
         }
+    }
+
+    #[test]
+    fn repeated_call_sites_check_to_fresh_equal_bodies() {
+        let source = "(workspace w
+          (defn sq :context value [(x : float)] (* x x))
+          (defn bump :context value [(x : float)] (+ 1.0 (let* [y (* x 2.0)] y)))
+          (graph g :context value (+ (+ (sq 1.0) (sq 2.0)) (+ (bump 1.0) (bump 2.0)))))";
+        let catalog = catalog::Catalog { version: 0, kinds: Vec::new() };
+        let (workspace, diagnostics) = check(&[], false, false, None, &catalog, &syntax::parse(source).unwrap());
+        let workspace = workspace.unwrap_or_else(|| panic!("{diagnostics:?}"));
+        let mut bodies: BTreeMap<String, Vec<Term>> = BTreeMap::new();
+        let mut todo = vec![workspace.graphs[0].body.clone()];
+        while let Some(term) = todo.pop() {
+            if let PackedNode::CallFn(id) = term.node {
+                let call = term.arena().call_fn(id);
+                bodies.entry(term.name(call.name).to_owned()).or_default().push(term.child(call.body.unwrap()));
+            }
+            todo.extend(term.children().iter().map(|&child| term.child(child)));
+        }
+        let (sq, bump) = (&bodies["sq"], &bodies["bump"]);
+        // a memoised call-site body comes back as a copy: equal terms, never a shared row
+        assert!(sq.len() == 2 && sq[0] == sq[1] && sq[0].identity() != sq[1].identity());
+        // a body that numbers its inline scopes is checked again, so each call keeps its own path
+        let shown = |term: &Term| format!("{term:?}");
+        assert!(bump.len() == 2 && shown(&bump[0]).contains("~let") && shown(&bump[0]) != shown(&bump[1]), "{}", shown(&bump[1]));
     }
 
     #[test]
