@@ -18,7 +18,6 @@ struct Compute {
 }
 
 pub fn create(context: &Rc<CommandContext>) -> Result<Box<dyn DriverComputeEncoder>, Error> {
-    context.recording()?;
     let encoder = metal::ComputeEncoder::create(&context.native).map_err(|value| of_metal_error(context.operation, &value))?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Compute(encoder.clone()));
     Ok(Box::new(Compute { context: context.clone(), encoder }))

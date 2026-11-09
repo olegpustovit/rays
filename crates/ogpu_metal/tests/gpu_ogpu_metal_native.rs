@@ -67,6 +67,8 @@ fn empty_layout(device: &Device) -> binding::PipelineLayout {
 }
 
 fn gpu_device_error() {
+    let wrong_thread = std::thread::spawn(|| be::create_device(backend::create()).map(|_| ())).join().unwrap();
+    expect(ErrorKind::DeviceLost, wrong_thread.err());
     let convert = |operation: &str, source: &str, kind: metal::ErrorKind| device::error_kind(operation, source, kind);
     let source = "Metal.Device.system_default";
     assert_eq!(convert("Ogpu_metal.Device.system_default", source, metal::ErrorKind::NativeError), ErrorKind::NoAdapter);

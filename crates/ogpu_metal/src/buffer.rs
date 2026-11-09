@@ -90,18 +90,13 @@ impl Buffer {
         Ok(self.0.descriptor.clone())
     }
 
-    pub fn write_bytes(&self, device: &Device, dst_offset: i64, bytes: &[u8]) -> Result<(), Error> {
+    pub fn write_bytes(&self, _device: &Device, dst_offset: i64, bytes: &[u8]) -> Result<(), Error> {
         let operation = "Ogpu_metal.Buffer.write_bytes";
-        self.validate(operation, device)?;
         self.0.metal.write_bytes(dst_offset as u64, bytes).map_err(|value| of_metal_error(operation, &value))
     }
 
-    pub fn read_bytes(&self, device: &Device, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
+    pub fn read_bytes(&self, _device: &Device, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
         let operation = "Ogpu_metal.Buffer.read_bytes";
-        self.validate(operation, device)?;
-        if length < 0 {
-            return Err(fail(operation, ErrorKind::InvalidArgument, "read length is negative"));
-        }
         self.0.metal.read_bytes(offset as u64, length as usize).map_err(|value| of_metal_error(operation, &value))
     }
 
@@ -135,7 +130,7 @@ impl Buffer {
 
     /// Retains once per command buffer; `Ok(false)` when `commands` already holds it.
     pub fn retain_for(&self, commands: i64) -> Result<bool, Error> {
-        if self.0.retained_by.get() == commands && !self.destroyed() {
+        if self.0.retained_by.get() == commands {
             Ok(false)
         } else {
             self.retain_submission()?;

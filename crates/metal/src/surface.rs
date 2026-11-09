@@ -1,4 +1,4 @@
-use crate::metal::{error, sys_error, CommandBuffer, Device, Error, ErrorKind, Lifetime, PresentTime, Texture};
+use crate::metal::{enter_main, error, sys_error, CommandBuffer, Device, Error, ErrorKind, Lifetime, PresentTime, Texture};
 use crate::metal_format::Format;
 use native_layer_token_sys::portable::Token;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -99,7 +99,6 @@ impl Surface {
 
     pub fn configure(&self, configuration: Configuration) -> Result<(), Error> {
         let operation = "Metal.Surface.configure";
-        enter_main(operation)?;
         self.ensure_live(operation)?;
         configuration.validate(operation)?;
         configure_raw(&self.0.raw, configuration).map_err(|failure| sys_error(operation, failure))
@@ -124,7 +123,6 @@ impl Surface {
 
     pub fn destroy(&self) -> Result<(), Error> {
         let operation = "Metal.Surface.destroy";
-        enter_main(operation)?;
         self.0.lifetime.destroy_parent(operation)?;
         if self.0.device_attached.swap(false, Ordering::AcqRel) {
             self.0.device.detach_child();
@@ -186,7 +184,6 @@ impl Drawable {
 
     pub fn destroy(&self) -> Result<(), Error> {
         let operation = "Metal.Drawable.destroy";
-        enter_main(operation)?;
         self.0.lifetime.destroy_parent(operation)?;
         if self.0.surface_attached.swap(false, Ordering::AcqRel) {
             self.0.surface.lifetime.detach();
@@ -237,13 +234,3 @@ fn configure_raw(layer: &metal_sys::Handle, configuration: Configuration) -> Res
         configuration.presents_with_transaction,
     )
 }
-
-fn enter_main(operation: &str) -> Result<(), Error> {
-    if !metal_sys::native::is_main_thread() {
-        return Err(error(operation, ErrorKind::WrongDomain, "Metal calls must run on the platform main thread"));
-    }
-    metal_sys::drain_releases();
-    Ok(())
-}
-
-

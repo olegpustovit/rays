@@ -358,7 +358,7 @@ pub struct Buffer { resource: Resource, buffer_descriptor: BufferDescriptor, mem
 pub struct Texture { resource: Resource, texture_descriptor: TextureDescriptor }
 #[derive(Clone)]
 pub struct Pipeline(Rc<PipelineInner>);
-struct PipelineInner { driver: RefCell<Option<Box<dyn DriverPipeline>>>, token: Token, max_threads: i64, device: Device, library: Option<Library>, indirect: bool, shape: PipelineShape, dead: Cell<bool> }
+struct PipelineInner { driver: RefCell<Option<Box<dyn DriverPipeline>>>, token: Token, max_threads: i64, device: Device, library: Option<Library>, indirect: bool, shape: PipelineShape, render: Option<(pipeline::ColorFormat, i64)>, dead: Cell<bool> }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PipelineShape { Vertex, Compute }
 #[derive(Clone)]
@@ -384,7 +384,7 @@ struct CommandsInner { raw: RefCell<Option<Box<dyn DriverCommands>>>, queue: Que
 enum ActiveEncoder { Compute(Weak<ComputeInner>), Accel(Weak<AccelEncoderInner>), Blit(Weak<BlitInner>), Render(Weak<RenderInner>) }
 #[derive(Clone)]
 pub struct ComputeEncoder(Rc<ComputeInner>);
-struct ComputeInner { raw: RefCell<Option<Box<dyn DriverComputeEncoder>>>, commands: Commands, open: Cell<bool>, pipeline_set: Cell<bool> }
+struct ComputeInner { raw: RefCell<Option<Box<dyn DriverComputeEncoder>>>, commands: Commands, max_threads: Cell<i64> }
 #[derive(Clone)]
 pub struct AccelEncoder(Rc<AccelEncoderInner>);
 struct AccelEncoderInner { raw: RefCell<Option<Box<dyn DriverAccelEncoder>>>, commands: Commands, open: Cell<bool> }
@@ -402,7 +402,7 @@ pub struct Argument(Rc<ArgumentInner>);
 struct ArgumentInner { raw: RefCell<Option<Box<dyn DriverArgument>>>, length: i64, alignment: i64, device: Device, dead: Cell<bool> }
 #[derive(Clone)]
 pub struct RenderEncoder(Rc<RenderInner>);
-struct RenderInner { raw: RefCell<Option<Box<dyn DriverRenderEncoder>>>, commands: Commands, open: Cell<bool>, pipeline_set: Cell<bool>, shape: Cell<PipelineShape> }
+struct RenderInner { raw: RefCell<Option<Box<dyn DriverRenderEncoder>>>, commands: Commands, open: Cell<bool>, pipeline_set: Cell<bool>, indirect: Cell<bool>, target: (TextureFormat, u8) }
 
 // A dead wrapper keeps identity and validation metadata, never driver callbacks/native owners.
 // Access follows the existing liveness/state guards; failed transitions retain the payload.
@@ -495,7 +495,7 @@ fn accel_check(operation: &str, device: &Device, value: &Accel) -> Result<(), Er
 }
 fn require(operation: &str, device: &Device, feature: Feature) -> Result<(), Error> { caps::require(Some(operation), &device.0.capabilities, &feature) }
 fn check_slot(operation: &str, index: i64) -> Result<(), Error> {
-    if !(0..=31).contains(&index) { Err(make_error(operation, ErrorKind::InvalidArgument, "binding slot is out of range")) } else { Ok(()) }
+    if !(0..31).contains(&index) { Err(make_error(operation, ErrorKind::InvalidArgument, "binding slot is out of range")) } else { Ok(()) }
 }
 fn finite(value: f64) -> bool { value.is_finite() && value.abs() <= f32::MAX as f64 }
 fn border_code(border: Border) -> i64 { match border { Border::Clamp => 0, Border::Vanish => 1 } }
@@ -733,16 +733,25 @@ pub fn create_surface(device: &Device, configuration: Configuration) -> Result<S
 }
 pub fn buffer_id(buffer: &Buffer) -> i64 { handle::id(&buffer.resource.0.handle) }
 pub fn texture_id(texture: &Texture) -> i64 { handle::id(&texture.resource.0.handle) }
+fn buffer_range(operation: &str, buffer: &Buffer, offset: i64, length: usize) -> Result<(), Error> {
+    let size = buffer.buffer_descriptor.size;
+    if offset < 0 || offset > size || length as u128 > (size - offset) as u128 {
+        Err(make_error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer"))
+    } else { Ok(()) }
+}
 pub fn write_buffer(buffer: &Buffer, offset: i64, bytes: &[u8]) -> Result<(), Error> {
-    if buffer.resource.0.dead.get() { Err(make_error("Backend.write_buffer", ErrorKind::StaleHandle, "buffer is destroyed")) }
-    else if buffer.memory == Memory::DeviceLocal { Err(make_error("Backend.write_buffer", ErrorKind::Unsupported, "device-local buffers are not host writable")) }
-    else { buffer.resource.0.raw().write(offset, bytes) }
+    const OP: &str = "Backend.write_buffer";
+    if buffer.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed")); }
+    if buffer.memory == Memory::DeviceLocal { return Err(make_error(OP, ErrorKind::Unsupported, "device-local buffers are not host writable")); }
+    buffer_range(OP, buffer, offset, bytes.len())?;
+    buffer.resource.0.raw().write(offset, bytes)
 }
 pub fn read_buffer(buffer: &Buffer, offset: i64, length: i64) -> Result<Vec<u8>, Error> {
-    if buffer.resource.0.dead.get() { return Err(make_error("Backend.read_buffer", ErrorKind::StaleHandle, "buffer is destroyed")); }
-    if buffer.memory == Memory::DeviceLocal { return Err(make_error("Backend.read_buffer", ErrorKind::Unsupported, "device-local buffers are not host readable")); }
-    if length < 0 { return Err(make_error("Backend.read_buffer", ErrorKind::InvalidArgument, "read length is negative")); }
-    let Ok(length) = usize::try_from(length) else { return Err(make_error("Backend.read_buffer", ErrorKind::InvalidArgument, "read length is invalid")); };
+    const OP: &str = "Backend.read_buffer";
+    if buffer.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed")); }
+    if buffer.memory == Memory::DeviceLocal { return Err(make_error(OP, ErrorKind::Unsupported, "device-local buffers are not host readable")); }
+    let Ok(length) = usize::try_from(length) else { return Err(make_error(OP, ErrorKind::InvalidArgument, "read length is invalid")); };
+    buffer_range(OP, buffer, offset, length)?;
     buffer.resource.0.raw().read(offset, length)
 }
 pub fn read_texture(texture: &Texture, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
@@ -920,7 +929,7 @@ pub fn create_compute_pipeline_from(
     device.0.children.set(device.0.children.get() + 1);
     library.0.pipelines.set(library.0.pipelines.get() + 1);
     Ok(Pipeline(Rc::new(PipelineInner {
-        token: raw.pipeline_token(), max_threads: raw.max_threads(), driver: RefCell::new(Some(raw)), device, library: Some(library.clone()), indirect: false, shape: PipelineShape::Compute, dead: Cell::new(false),
+        token: raw.pipeline_token(), max_threads: raw.max_threads(), driver: RefCell::new(Some(raw)), device, library: Some(library.clone()), indirect: false, shape: PipelineShape::Compute, render: None, dead: Cell::new(false),
     })))
 }
 pub fn destroy_library(library: &Library) -> Result<(), Error> {
@@ -1203,12 +1212,13 @@ pub fn compute_encoder(commands: &Commands) -> Result<ComputeEncoder, Error> {
     require(OP, &device, Feature::ComputePipeline)?;
     let raw = commands.0.raw().compute_encoder()?;
     commands.0.state.set(CommandsState::Encoding);
-    let encoder = ComputeEncoder(Rc::new(ComputeInner { raw: RefCell::new(Some(raw)), commands: commands.clone(), open: Cell::new(true), pipeline_set: Cell::new(false) }));
+    let encoder = ComputeEncoder(Rc::new(ComputeInner { raw: RefCell::new(Some(raw)), commands: commands.clone(), max_threads: Cell::new(-1) }));
     *commands.0.encoder.borrow_mut() = Some(ActiveEncoder::Compute(Rc::downgrade(&encoder.0)));
     Ok(encoder)
 }
 fn open_compute(operation: &str, encoder: &ComputeEncoder) -> Result<(), Error> {
-    if encoder.0.open.get() { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "compute encoder is ended")) }
+    // -1 is unbound; end/abandon use MIN. Nonnegative values are native pipeline limits.
+    if encoder.0.max_threads.get() >= -1 { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "compute encoder is ended")) }
 }
 pub fn set_pipeline(encoder: &ComputeEncoder, pipeline: &Pipeline) -> Result<(), Error> {
     const OP: &str = "Backend.set_pipeline";
@@ -1216,8 +1226,11 @@ pub fn set_pipeline(encoder: &ComputeEncoder, pipeline: &Pipeline) -> Result<(),
     if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     let device = commands_device(&encoder.0.commands);
     if !Rc::ptr_eq(&pipeline.0.device.0, &device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device")); }
+    if pipeline.0.shape != PipelineShape::Compute {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "render pipelines cannot be set on a compute encoder"));
+    }
     encoder.0.raw().set_pipeline(pipeline.0.token)?;
-    encoder.0.pipeline_set.set(true);
+    encoder.0.max_threads.set(pipeline.0.max_threads);
     Ok(())
 }
 pub fn set_buffer(encoder: &ComputeEncoder, index: i64, buffer: &Buffer) -> Result<(), Error> {
@@ -1255,31 +1268,42 @@ pub fn set_accel(encoder: &ComputeEncoder, index: i64, accel: &Accel) -> Result<
     encoder.0.raw().set_accel(index, accel.0.token)
 }
 fn positive3(value: (i64, i64, i64)) -> bool { value.0 > 0 && value.1 > 0 && value.2 > 0 }
-pub fn dispatch_threads(encoder: &ComputeEncoder, threads: (i64, i64, i64), threadgroup: (i64, i64, i64)) -> Result<(), Error> {
+fn threadgroup(operation: &str, encoder: &ComputeEncoder, dimensions: (i64, i64, i64)) -> Result<(), Error> {
+    let maximum = encoder.0.max_threads.get();
+    if maximum < 0 { return Err(make_error(operation, ErrorKind::InvalidState, "no compute pipeline is set")); }
+    if !positive3(dimensions) {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "threadgroup dimensions must be positive"));
+    }
+    let count = dimensions.0.checked_mul(dimensions.1).and_then(|n| n.checked_mul(dimensions.2));
+    if count.is_none_or(|count| count > maximum) {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "threadgroup exceeds the pipeline's maximum total thread count"));
+    }
+    Ok(())
+}
+pub fn dispatch_threads(encoder: &ComputeEncoder, threads: (i64, i64, i64), group: (i64, i64, i64)) -> Result<(), Error> {
     const OP: &str = "Backend.dispatch_threads";
     open_compute(OP, encoder)?;
-    if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no compute pipeline is set")); }
-    if !positive3(threads) || !positive3(threadgroup) { return Err(make_error(OP, ErrorKind::InvalidArgument, "dispatch dimensions must be positive")); }
-    encoder.0.raw().dispatch_threads(threads, threadgroup)
+    threadgroup(OP, encoder, group)?;
+    if !positive3(threads) { return Err(make_error(OP, ErrorKind::InvalidArgument, "dispatch dimensions must be positive")); }
+    encoder.0.raw().dispatch_threads(threads, group)
 }
 pub fn dispatch_threadgroups_indirect(
-    encoder: &ComputeEncoder, arguments: &Buffer, offset: i64, threadgroup: (i64, i64, i64),
+    encoder: &ComputeEncoder, arguments: &Buffer, offset: i64, group: (i64, i64, i64),
 ) -> Result<(), Error> {
     const OP: &str = "Backend.dispatch_threadgroups_indirect";
     open_compute(OP, encoder)?;
-    if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no compute pipeline is set")); }
-    if !positive3(threadgroup) { return Err(make_error(OP, ErrorKind::InvalidArgument, "dispatch dimensions must be positive")); }
+    threadgroup(OP, encoder, group)?;
     resource_check(OP, &commands_device(&encoder.0.commands), &arguments.resource)?;
     if offset < 0 || offset % 4 != 0 || offset > arguments.buffer_descriptor.size - 12 {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect arguments range is invalid"));
     }
-    encoder.0.raw().dispatch_indirect(arguments.resource.0.token, offset, threadgroup)
+    encoder.0.raw().dispatch_indirect(arguments.resource.0.token, offset, group)
 }
 pub fn end_compute(encoder: &ComputeEncoder) -> Result<(), Error> {
     const OP: &str = "Backend.end_compute";
     open_compute(OP, encoder)?;
     encoder.0.raw().end_compute()?;
-    encoder.0.open.set(false);
+    encoder.0.max_threads.set(i64::MIN);
     encoder.0.raw.borrow_mut().take();
     encoder.0.commands.0.encoder.borrow_mut().take();
     encoder.0.commands.0.state.set(CommandsState::Recording);
@@ -1414,7 +1438,7 @@ pub fn abandon(commands: &Commands) -> Result<(), Error> {
             commands.0.state.set(CommandsState::Abandoned);
             if let Some(encoder) = commands.0.encoder.borrow_mut().take() {
                 match encoder {
-                    ActiveEncoder::Compute(encoder) => if let Some(encoder) = encoder.upgrade() { encoder.open.set(false); encoder.raw.borrow_mut().take(); },
+                    ActiveEncoder::Compute(encoder) => if let Some(encoder) = encoder.upgrade() { encoder.max_threads.set(i64::MIN); encoder.raw.borrow_mut().take(); },
                     ActiveEncoder::Accel(encoder) => if let Some(encoder) = encoder.upgrade() { encoder.open.set(false); encoder.raw.borrow_mut().take(); },
                     ActiveEncoder::Blit(encoder) => if let Some(encoder) = encoder.upgrade() { encoder.open.set(false); encoder.raw.borrow_mut().take(); },
                     ActiveEncoder::Render(encoder) => if let Some(encoder) = encoder.upgrade() { encoder.open.set(false); encoder.raw.borrow_mut().take(); },
@@ -1482,7 +1506,7 @@ pub fn create_render_pipeline(
     let raw = device.0.raw().create_render_pipeline(options, descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Pipeline(Rc::new(PipelineInner {
-        token: raw.pipeline_token(), max_threads: raw.max_threads(), driver: RefCell::new(Some(raw)), device: device.clone(), library: None, indirect, shape: PipelineShape::Vertex, dead: Cell::new(false),
+        token: raw.pipeline_token(), max_threads: raw.max_threads(), driver: RefCell::new(Some(raw)), device: device.clone(), library: None, indirect, shape: PipelineShape::Vertex, render: Some((descriptor.color_format, descriptor.sample_count)), dead: Cell::new(false),
     })))
 }
 pub fn pipeline_indirect(pipeline: &Pipeline) -> bool { pipeline.0.indirect }
@@ -1506,6 +1530,8 @@ pub fn icb_set_pipeline(icb: &Icb, index: i64, pipeline: &Pipeline) -> Result<()
     check_icb(OP, icb, index)?;
     if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     if !Rc::ptr_eq(&pipeline.0.device.0, &icb.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device")); }
+    if pipeline.0.shape != PipelineShape::Vertex { return Err(make_error(OP, ErrorKind::InvalidArgument, "compute pipelines cannot draw")); }
+    if !pipeline.0.indirect { return Err(make_error(OP, ErrorKind::Unsupported, "pipeline was not compiled for indirect command buffers")); }
     icb.0.raw().icb_set_pipeline(index, pipeline.0.token)
 }
 pub fn icb_set_buffer(
@@ -1604,12 +1630,14 @@ fn argument_target(operation: &str, argument: &Argument, buffer: &Buffer, offset
 pub fn argument_texture(argument: &Argument, buffer: &Buffer, offset: i64, slot: i64, texture: &Texture) -> Result<(), Error> {
     const OP: &str = "Backend.argument_texture";
     argument_target(OP, argument, buffer, offset)?;
+    if slot < 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "argument slot is negative")); }
     resource_check(OP, &argument.0.device, &texture.resource)?;
     argument.0.raw().argument_texture(buffer.resource.0.token, offset, slot, texture.resource.0.token)
 }
 pub fn argument_sampler(argument: &Argument, buffer: &Buffer, offset: i64, slot: i64, sampler: &Sampler) -> Result<(), Error> {
     const OP: &str = "Backend.argument_sampler";
     argument_target(OP, argument, buffer, offset)?;
+    if slot < 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "argument slot is negative")); }
     if sampler.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "sampler is destroyed")); }
     if !Rc::ptr_eq(&sampler.0.device.0, &argument.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "sampler belongs to another device")); }
     argument.0.raw().argument_sampler(buffer.resource.0.token, offset, slot, sampler.0.token)
@@ -1687,12 +1715,26 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     let raw = commands.0.raw().render_encoder(&driver_target)?;
     commands.0.state.set(CommandsState::Encoding);
     let encoder = RenderEncoder(Rc::new(RenderInner {
-        raw: RefCell::new(Some(raw)), commands: commands.clone(), open: Cell::new(true), pipeline_set: Cell::new(false), shape: Cell::new(PipelineShape::Vertex),
+        raw: RefCell::new(Some(raw)), commands: commands.clone(), open: Cell::new(true), pipeline_set: Cell::new(false), indirect: Cell::new(false), target: (color.texture.texture_descriptor.format, samples.ilog2() as u8),
     }));
     *commands.0.encoder.borrow_mut() = Some(ActiveEncoder::Render(Rc::downgrade(&encoder.0)));
     Ok(encoder)
 }
 
+fn render_compatible(operation: &str, encoder: &RenderEncoder, pipeline: &Pipeline) -> Result<(), Error> {
+    let Some((format, samples)) = pipeline.0.render else {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "compute pipelines cannot be set on a render encoder"));
+    };
+    let format = match format {
+        pipeline::ColorFormat::Rgba8Unorm => TextureFormat::Rgba8Unorm,
+        pipeline::ColorFormat::Bgra8Unorm => TextureFormat::Bgra8Unorm,
+    };
+    // Validated sample counts are powers of two; the exponent is exact and fits padding.
+    if (format, samples.ilog2() as u8) != encoder.0.target {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "pipeline color format or sample count differs from the render pass"));
+    }
+    Ok(())
+}
 fn open_render(operation: &str, encoder: &RenderEncoder) -> Result<(), Error> {
     if encoder.0.open.get() { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "render encoder is ended")) }
 }
@@ -1704,12 +1746,10 @@ pub fn set_render_pipeline(encoder: &RenderEncoder, pipeline: &Pipeline) -> Resu
     if !Rc::ptr_eq(&pipeline.0.device.0, &render_device(encoder).0) {
         return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"));
     }
-    if pipeline.0.shape == PipelineShape::Compute {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "compute pipelines cannot be set on a render encoder"));
-    }
+    render_compatible(OP, encoder, pipeline)?;
     encoder.0.raw().render_set_pipeline(pipeline.0.token)?;
     encoder.0.pipeline_set.set(true);
-    encoder.0.shape.set(pipeline.0.shape);
+    encoder.0.indirect.set(pipeline.0.indirect);
     Ok(())
 }
 pub fn set_stage_buffer(
@@ -1774,9 +1814,6 @@ pub fn set_depth_state(encoder: &RenderEncoder, state: Option<DepthState>) -> Re
 }
 fn vertex_pipeline(operation: &str, encoder: &RenderEncoder) -> Result<(), Error> {
     if !encoder.0.pipeline_set.get() { return Err(make_error(operation, ErrorKind::InvalidState, "no render pipeline is set")); }
-    if encoder.0.shape.get() != PipelineShape::Vertex {
-        return Err(make_error(operation, ErrorKind::InvalidState, "vertex draws need a vertex/fragment pipeline"));
-    }
     Ok(())
 }
 pub fn draw(
@@ -1836,6 +1873,7 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
         if !Rc::ptr_eq(&draw.pipeline.0.device.0, &device.0) {
             return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"));
         }
+        render_compatible(OP, encoder, &draw.pipeline)?;
         if n == lowered.len() {
             lowered.push(DriverBatchDraw { batch_pipeline: draw.pipeline.0.token, batch_buffers: Vec::new(), batch_primitive: draw.primitive, batch_index: None, batch_vertex_start: 0, batch_vertex_count: 0, batch_instances: 0 });
         }
@@ -1870,6 +1908,7 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
     LOWERED.with(|l| *l.borrow_mut() = lowered);
     result?;
     encoder.0.pipeline_set.set(true);
+    encoder.0.indirect.set(draws.last().unwrap().pipeline.0.indirect);
     Ok(())
 }
 pub fn use_resources(encoder: &RenderEncoder, resources: &[ResourceUse]) -> Result<(), Error> {
@@ -1889,6 +1928,7 @@ pub fn execute_icb(encoder: &RenderEncoder, icb: &Icb, location: i64, length: i6
     const OP: &str = "Backend.execute_icb";
     open_render(OP, encoder)?;
     if !encoder.0.pipeline_set.get() { return Err(make_error(OP, ErrorKind::InvalidState, "no render pipeline is set")); }
+    if !encoder.0.indirect.get() { return Err(make_error(OP, ErrorKind::Unsupported, "pipeline lacks indirect-command-buffer support")); }
     if icb.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "indirect command buffer is destroyed")); }
     if !Rc::ptr_eq(&icb.0.device.0, &render_device(encoder).0) {
         return Err(make_error(OP, ErrorKind::CrossDevice, "indirect command buffer belongs to another device"));
@@ -2038,6 +2078,116 @@ mod ownership_tests {
         fn commit_present(&self, _: Token, _: DriverFrame) -> Result<Receipt, Error> { unreachable!() }
         fn abandon(&self) -> Result<(), Error> { self.terminal("test.abandon") }
     }
+    // Invalid input must stop at the portable boundary, before a backend sees a token.
+    impl DriverComputeEncoder for Payload {
+        fn set_pipeline(&self, _: Token) -> Result<(), Error> { Ok(()) }
+        fn set_buffer(&self, _: i64, _: i64, _: Token) -> Result<(), Error> { Ok(()) }
+        fn set_bytes(&self, _: i64, _: &[u8]) -> Result<(), Error> { panic!("invalid bytes reached driver") }
+        fn set_texture(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
+        fn set_accel(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
+        fn dispatch_threads(&self, _: (i64, i64, i64), _: (i64, i64, i64)) -> Result<(), Error> { Ok(()) }
+        fn dispatch_indirect(&self, _: Token, _: i64, _: (i64, i64, i64)) -> Result<(), Error> { panic!("invalid indirect dispatch reached driver") }
+        fn compute_use_accels(&self, _: &[Token]) -> Result<(), Error> { unreachable!() }
+        fn end_compute(&self) -> Result<(), Error> { Ok(()) }
+    }
+
+    #[test]
+    fn encoding_arguments_are_validated_before_driver_entry() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(std::mem::size_of::<ComputeInner>(), 40);
+            assert_eq!(std::mem::size_of::<RenderInner>(), 40);
+        }
+        let device = device();
+        let payload = || Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) };
+        let queue = Queue(Rc::new(RefCell::new(QueueInner {
+            raw: RefCell::new(None), device: device.clone(), dead: false, completed_epoch: 0,
+            gpu_timing: GpuTiming { gpu_seconds: 0. },
+        })));
+        let commands = Commands(Rc::new(CommandsInner {
+            raw: RefCell::new(None), queue, state: Cell::new(CommandsState::Encoding), encoder: RefCell::new(None),
+        }));
+        let encoder = ComputeEncoder(Rc::new(ComputeInner {
+            raw: RefCell::new(Some(Box::new(payload()))), commands: commands.clone(), max_threads: Cell::new(-1),
+        }));
+        let pipeline = |shape, render, indirect| Pipeline(Rc::new(PipelineInner {
+            driver: RefCell::new(Some(Box::new(payload()))), token: 5, max_threads: 64, device: device.clone(),
+            library: None, indirect, shape, render, dead: Cell::new(false),
+        }));
+        let compute = pipeline(PipelineShape::Compute, None, false);
+        let render = pipeline(PipelineShape::Vertex, Some((pipeline::ColorFormat::Rgba8Unorm, 1)), false);
+        let buffer = Buffer {
+            resource: make_resource(&device, Box::new(payload())), memory: Memory::Shared,
+            buffer_descriptor: BufferDescriptor { label: None, size: 16, usage: vec![BufferUsage::Storage] },
+        };
+        let reject = |kind, result: Result<(), Error>| assert_eq!(result.unwrap_err().kind, kind);
+        reject(ErrorKind::InvalidState, dispatch_threads(&encoder, (1, 1, 1), (1, 1, 1)));
+        reject(ErrorKind::InvalidArgument, set_pipeline(&encoder, &render));
+        set_pipeline(&encoder, &compute).unwrap();
+        set_buffer(&encoder, 30, &buffer).unwrap();
+        for slot in [-1, 31, 32] { reject(ErrorKind::InvalidArgument, set_buffer(&encoder, slot, &buffer)); }
+        let clone = buffer.clone();
+        buffer.resource.0.dead.set(true);
+        reject(ErrorKind::StaleHandle, set_buffer(&encoder, 0, &clone));
+        buffer.resource.0.dead.set(false);
+        let other = Buffer { resource: make_resource(&self::device(), Box::new(payload())), ..buffer.clone() };
+        reject(ErrorKind::CrossDevice, set_buffer(&encoder, 0, &other));
+        reject(ErrorKind::InvalidArgument, set_bytes(&encoder, 0, &[]));
+        reject(ErrorKind::InvalidArgument, set_bytes(&encoder, 0, &[0; 4097]));
+        for group in [(0, 1, 1), (65, 1, 1), (i64::MAX, 2, 2)] {
+            reject(ErrorKind::InvalidArgument, dispatch_threads(&encoder, (1, 1, 1), group));
+            reject(ErrorKind::InvalidArgument, dispatch_threadgroups_indirect(&encoder, &buffer, 0, group));
+        }
+        reject(ErrorKind::InvalidArgument, dispatch_threads(&encoder, (0, 1, 1), (1, 1, 1)));
+        reject(ErrorKind::InvalidArgument, dispatch_threadgroups_indirect(&encoder, &buffer, 8, (1, 1, 1)));
+        for offset in [-1, 9, i64::MAX] {
+            reject(ErrorKind::InvalidArgument, write_buffer(&buffer, offset, &[1; 8]));
+        }
+        for (offset, length) in [(-1, 1), (0, -1), (15, 2), (0, i64::MAX), (i64::MAX, i64::MAX)] {
+            assert_eq!(read_buffer(&buffer, offset, length).unwrap_err().kind, ErrorKind::InvalidArgument);
+        }
+        let private = Buffer { memory: Memory::DeviceLocal, ..buffer.clone() };
+        reject(ErrorKind::Unsupported, write_buffer(&private, 0, &[1]));
+        assert_eq!(read_buffer(&private, 0, 1).unwrap_err().kind, ErrorKind::Unsupported);
+        clone.resource.0.dead.set(true);
+        reject(ErrorKind::StaleHandle, write_buffer(&clone, 0, &[1]));
+        assert_eq!(read_buffer(&clone, 0, 1).unwrap_err().kind, ErrorKind::StaleHandle);
+        clone.resource.0.dead.set(false);
+        compute.0.dead.set(true); // The already-bound submission retains its native pipeline.
+        dispatch_threads(&encoder, (4, 1, 1), (64, 1, 1)).unwrap();
+        end_compute(&encoder).unwrap();
+        reject(ErrorKind::InvalidState, set_buffer(&encoder, 0, &buffer));
+        let icb = Icb(Rc::new(IcbInner { raw: RefCell::new(None), token: 7, device: device.clone(), capacity: 1, dead: Cell::new(false) }));
+        compute.0.dead.set(false);
+        reject(ErrorKind::InvalidArgument, icb_set_pipeline(&icb, 0, &compute));
+        reject(ErrorKind::Unsupported, icb_set_pipeline(&icb, 0, &render));
+        let pass = RenderEncoder(Rc::new(RenderInner {
+            raw: RefCell::new(None), commands, open: Cell::new(true), pipeline_set: Cell::new(false),
+            indirect: Cell::new(false), target: (TextureFormat::Rgba8Unorm, 0),
+        }));
+        render_compatible("test", &pass, &render).unwrap();
+        reject(ErrorKind::InvalidState, draw(&pass, Primitive::TriangleList, 0, 3, Some(1)));
+        reject(ErrorKind::InvalidArgument, set_stage_buffer(&pass, ShaderStage::Vertex, 0, Some(17), &buffer));
+        pass.0.pipeline_set.set(true);
+        reject(ErrorKind::Unsupported, execute_icb(&pass, &icb, 0, 1));
+        pass.0.indirect.set(true);
+        icb.0.dead.set(true);
+        reject(ErrorKind::StaleHandle, execute_icb(&pass, &icb, 0, 1));
+        icb.0.dead.set(false);
+        reject(ErrorKind::InvalidArgument, execute_icb(&pass, &icb, 1, 1));
+        let argument = Argument(Rc::new(ArgumentInner {
+            raw: RefCell::new(None), length: 0, alignment: 1, device: device.clone(), dead: Cell::new(false),
+        }));
+        let sampler = Sampler(Rc::new(SamplerInner { raw: RefCell::new(None), token: 8, device: device.clone(), dead: Cell::new(false) }));
+        reject(ErrorKind::InvalidArgument, argument_sampler(&argument, &buffer, 0, -1, &sampler));
+
+        for wrong in [
+            pipeline(PipelineShape::Vertex, Some((pipeline::ColorFormat::Bgra8Unorm, 1)), false),
+            pipeline(PipelineShape::Vertex, Some((pipeline::ColorFormat::Rgba8Unorm, 4)), false),
+            compute,
+        ] { reject(ErrorKind::InvalidArgument, render_compatible("test", &pass, &wrong)); }
+    }
+
     struct TestMapping { allocation: Arc<Vec<u8>>, _view_owner: Rc<()> }
     impl DriverMapping for TestMapping {
         fn readback(&self) -> OwnedReadback {
@@ -2109,7 +2259,7 @@ mod ownership_tests {
         let pipeline = Pipeline(Rc::new(PipelineInner {
             driver: RefCell::new(Some(Box::new(Payload { _owner: owner, fail: fail.clone() }))),
             token: 5, max_threads: 64, device: device.clone(), library: Some(library.clone()),
-            indirect: false, shape: PipelineShape::Compute, dead: Cell::new(false),
+            indirect: false, shape: PipelineShape::Compute, render: None, dead: Cell::new(false),
         }));
         device.0.children.set(2);
         assert_eq!(destroy_library(&library).unwrap_err().kind, ErrorKind::InvalidState);

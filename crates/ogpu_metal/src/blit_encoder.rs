@@ -10,7 +10,6 @@ struct Blit {
 }
 
 pub fn create(context: &Rc<CommandContext>) -> Result<Box<dyn DriverBlitEncoder>, Error> {
-    context.recording()?;
     let encoder = metal::BlitEncoder::create(&context.native).map_err(|value| of_metal_error(context.operation, &value))?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Blit(encoder.clone()));
     Ok(Box::new(Blit { context: context.clone(), encoder }))

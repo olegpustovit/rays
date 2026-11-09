@@ -166,7 +166,6 @@ struct Render {
 
 pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> {
     let operation = context.operation;
-    context.recording()?;
     let color = &target.target_colors[0];
     let color_texture = context.find_texture(color.color)?;
     let resolve = match color.color_resolve {

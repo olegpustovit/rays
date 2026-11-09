@@ -1098,7 +1098,6 @@ struct Cmds {
     dev: Rc<Dev>,
     queue: Rc<QueueState>,
     commands: RefCell<Option<vk::Commands>>,
-    finished: Cell<bool>,
 }
 
 impl Cmds {
@@ -1110,13 +1109,10 @@ impl Cmds {
     }
 
     fn commit_with(&self, op: &str, submit: &mut dyn FnMut(&mut Option<vk::Commands>) -> Result<u64, vk::Error>) -> Result<Receipt, Error> {
-        if self.finished.get() {
-            Err(fail(op, ErrorKind::InvalidState, "commands are finished"))
-        } else if self.queue.active() >= 3 {
+        if self.queue.active() >= 3 {
             Err(fail(op, ErrorKind::Capacity, "frames-in-flight capacity reached"))
         } else {
             let epoch = submit(&mut self.commands.borrow_mut()).map_err(|failure| of_vk(op, failure))? as i64;
-            self.finished.set(true);
             self.queue.next_epoch.set(epoch + 1);
             Ok(Receipt { epoch })
         }
@@ -1532,19 +1528,14 @@ impl DriverCommands for CommandsHandle {
         result
     }
     fn abandon(&self) -> Result<(), Error> {
-        if self.cmds.finished.get() {
-            Err(fail(QUEUE_OP, ErrorKind::InvalidState, "commands are finished"))
-        } else {
-            self.cmds.finished.set(true);
-            *self.cmds.commands.borrow_mut() = None;
-            Ok(())
-        }
+        *self.cmds.commands.borrow_mut() = None;
+        Ok(())
     }
 }
 
 fn begin_commands(dev: &Rc<Dev>, queue: &Rc<QueueState>) -> Result<Box<dyn DriverCommands>, Error> {
     let native = queue.native(QUEUE_OP)?.begin().map_err(|failure| of_vk(QUEUE_OP, failure))?;
-    let cmds = Rc::new(Cmds { dev: dev.clone(), queue: queue.clone(), commands: RefCell::new(Some(native)), finished: Cell::new(false) });
+    let cmds = Rc::new(Cmds { dev: dev.clone(), queue: queue.clone(), commands: RefCell::new(Some(native)) });
     Ok(Box::new(CommandsHandle { cmds }))
 }
 

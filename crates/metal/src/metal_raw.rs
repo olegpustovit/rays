@@ -1,7 +1,6 @@
 use metal_sys::{Error, Handle};
 
 pub(crate) fn default_device() -> Result<Handle, Error> { metal_sys::native::default_device() }
-pub(crate) fn is_main_thread() -> bool { metal_sys::native::is_main_thread() }
 pub(crate) fn drain_releases() -> Result<usize, Error> { metal_sys::drain_releases() }
 pub(crate) fn handle_stats() -> metal_sys::HandleStats { metal_sys::handle_stats() }
 

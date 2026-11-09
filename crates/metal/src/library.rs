@@ -24,27 +24,25 @@ pub struct Library(Arc<LibraryInner>);
 impl Library {
     pub fn compile_source(device: &Device, source: &str, label: Option<&str>) -> Result<Self, Error> {
         const OP: &str = "Metal.Library.compile_source";
-        (|| -> Result<_, Error> { enter_main(OP)?;
-            device.lifetime().ensure_live(OP)?;
-            if source.is_empty() { return Err(error(OP, ErrorKind::InvalidArgument, "shader source is empty")); }
-            validate_text(OP, source)?;
-            if let Some(label) = label { validate_text(OP, label)?; }
-            let raw = metal_sys::native::compile_library(device.raw(), source, label).map_err(|failure| sys_error(OP, failure))?;
-            device.lifetime().dependents.fetch_add(1, Ordering::AcqRel);
-            Ok(Self(Arc::new(LibraryInner {
-                raw,
-                lifetime: Lifetime::new(),
-                device: device.clone(),
-                device_attached: AtomicBool::new(true),
-            })))
-        })()
+        enter_main(OP)?;
+        device.lifetime().ensure_live(OP)?;
+        if source.is_empty() { return Err(error(OP, ErrorKind::InvalidArgument, "shader source is empty")); }
+        validate_text(OP, source)?;
+        if let Some(label) = label { validate_text(OP, label)?; }
+        let raw = metal_sys::native::compile_library(device.raw(), source, label).map_err(|failure| sys_error(OP, failure))?;
+        device.lifetime().dependents.fetch_add(1, Ordering::AcqRel);
+        Ok(Self(Arc::new(LibraryInner {
+            raw,
+            lifetime: Lifetime::new(),
+            device: device.clone(),
+            device_attached: AtomicBool::new(true),
+        })))
     }
 
     /// Compiles `source` and `entry`'s compute pipeline in Metal's background, so a later
     /// `compile_source` of the same source is a cache hit; poll the result, drop it any time.
     pub fn warm(device: &Device, source: &str, entry: &str) -> Result<metal_sys::native::library::Warm, Error> {
         const OP: &str = "Metal.Library.warm";
-        enter_main(OP)?;
         device.lifetime().ensure_live(OP)?;
         validate_text(OP, source)?;
         validate_text(OP, entry)?;
@@ -53,20 +51,16 @@ impl Library {
 
     pub fn function_names(&self) -> Result<Vec<String>, Error> {
         const OP: &str = "Metal.Library.function_names";
-        (|| -> Result<_, Error> { enter_main(OP)?;
-            self.0.lifetime.ensure_live(OP)?;
-            metal_sys::native::library_function_names(&self.0.raw).map_err(|failure| sys_error(OP, failure))
-        })()
+        self.0.lifetime.ensure_live(OP)?;
+        metal_sys::native::library_function_names(&self.0.raw).map_err(|failure| sys_error(OP, failure))
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        (|| -> Result<_, Error> { enter_main("Metal.Library.destroy")?;
-            self.0.lifetime.destroy_parent("Metal.Library.destroy")?;
-            if self.0.device_attached.swap(false, Ordering::AcqRel) {
-                self.0.device.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
-            }
-            Ok(())
-        })()
+        self.0.lifetime.destroy_parent("Metal.Library.destroy")?;
+        if self.0.device_attached.swap(false, Ordering::AcqRel) {
+            self.0.device.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
+        }
+        Ok(())
     }
 
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
@@ -150,29 +144,28 @@ impl Function {
 
     pub fn argument_encoder(&self, buffer_index: u64) -> Result<ShaderArgumentEncoder, Error> {
         const OP: &str = "Metal.Function.argument_encoder";
-        (|| -> Result<_, Error> { enter_main(OP)?;
-            self.0.lifetime.ensure_live(OP)?;
-            let raw = metal_sys::registry::shader_function_argument_encoder(&self.0.raw, buffer_index).map_err(|failure| sys_error(OP, failure))?;
-            let (_, encoded_length, alignment, registry_id) =
-                match metal_sys::native::library::argument_encoder_snapshot(&raw).map_err(|failure| sys_error(OP, failure)) {
-                    Ok(snapshot) => snapshot,
-                    Err(failure) => return Err(failure),
-                };
-            if registry_id != self.device().registry_id() {
-                return Err(error(OP, ErrorKind::DeviceMismatch, "argument encoder device disagrees with function"));
-            }
-            self.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
-            Ok(ShaderArgumentEncoder {
-                raw,
-                lifetime: Lifetime::new(),
-                function: self.clone(),
-                device: self.device().clone(),
-                encoded_length,
-                alignment,
-                retained: std::collections::HashMap::new(),
-                function_attached: AtomicBool::new(true),
-            })
-        })()
+        enter_main(OP)?;
+        self.0.lifetime.ensure_live(OP)?;
+        let raw = metal_sys::registry::shader_function_argument_encoder(&self.0.raw, buffer_index).map_err(|failure| sys_error(OP, failure))?;
+        let (_, encoded_length, alignment, registry_id) =
+            match metal_sys::native::library::argument_encoder_snapshot(&raw).map_err(|failure| sys_error(OP, failure)) {
+                Ok(snapshot) => snapshot,
+                Err(failure) => return Err(failure),
+            };
+        if registry_id != self.device().registry_id() {
+            return Err(error(OP, ErrorKind::DeviceMismatch, "argument encoder device disagrees with function"));
+        }
+        self.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
+        Ok(ShaderArgumentEncoder {
+            raw,
+            lifetime: Lifetime::new(),
+            function: self.clone(),
+            device: self.device().clone(),
+            encoded_length,
+            alignment,
+            retained: std::collections::HashMap::new(),
+            function_attached: AtomicBool::new(true),
+        })
     }
 
     fn create(
@@ -181,43 +174,38 @@ impl Function {
         operation: &'static str,
         make: &dyn Fn() -> Result<metal_sys::Handle, Error>,
     ) -> Result<Self, Error> {
-        (|| -> Result<_, Error> { enter_main(operation)?;
-            library.lifetime().ensure_live(operation)?;
-            if name.is_empty() || name.as_bytes().contains(&0) {
-                return Err(error(operation, ErrorKind::InvalidArgument, "function name must be nonempty and contain no NUL byte"));
-            }
-            let raw = make()?;
-            library.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
-            Ok(Self(Arc::new(FunctionInner {
-                raw,
-                lifetime: Lifetime::new(),
-                library: library.clone(),
-                library_attached: AtomicBool::new(true),
-            })))
-        })()
+        enter_main(operation)?;
+        library.lifetime().ensure_live(operation)?;
+        if name.is_empty() || name.as_bytes().contains(&0) {
+            return Err(error(operation, ErrorKind::InvalidArgument, "function name must be nonempty and contain no NUL byte"));
+        }
+        let raw = make()?;
+        library.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
+        Ok(Self(Arc::new(FunctionInner {
+            raw,
+            lifetime: Lifetime::new(),
+            library: library.clone(),
+            library_attached: AtomicBool::new(true),
+        })))
     }
 
     pub fn kind(&self) -> Result<FunctionKind, Error> {
         const OP: &str = "Metal.Function.kind";
-        (|| -> Result<_, Error> { enter_main(OP)?;
-            self.0.lifetime.ensure_live(OP)?;
-            let kind = metal_sys::registry::function_kind(&self.0.raw).map_err(|failure| sys_error(OP, failure))?;
-            Ok(match kind {
-                1 => FunctionKind::Vertex, 2 => FunctionKind::Fragment, 3 => FunctionKind::Kernel,
-                5 => FunctionKind::Visible, 6 => FunctionKind::Intersection, 7 => FunctionKind::Mesh,
-                8 => FunctionKind::Object, code => FunctionKind::Unknown(code),
-            })
-        })()
+        self.0.lifetime.ensure_live(OP)?;
+        let kind = metal_sys::registry::function_kind(&self.0.raw).map_err(|failure| sys_error(OP, failure))?;
+        Ok(match kind {
+            1 => FunctionKind::Vertex, 2 => FunctionKind::Fragment, 3 => FunctionKind::Kernel,
+            5 => FunctionKind::Visible, 6 => FunctionKind::Intersection, 7 => FunctionKind::Mesh,
+            8 => FunctionKind::Object, code => FunctionKind::Unknown(code),
+        })
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        (|| -> Result<_, Error> { enter_main("Metal.Function.destroy")?;
-            self.0.lifetime.destroy_parent("Metal.Function.destroy")?;
-            if self.0.library_attached.swap(false, Ordering::AcqRel) {
-                self.0.library.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel);
-            }
-            Ok(())
-        })()
+        self.0.lifetime.destroy_parent("Metal.Function.destroy")?;
+        if self.0.library_attached.swap(false, Ordering::AcqRel) {
+            self.0.library.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel);
+        }
+        Ok(())
     }
 
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
@@ -291,67 +279,61 @@ impl ShaderArgumentEncoder {
 
     pub fn set(&mut self, index: u64, resource: ShaderArgumentResource) -> Result<(), Error> {
         const OP: &str = "Metal.Shader_argument_encoder.set";
-        (|| -> Result<_, Error> { enter_main(OP)?;
-            self.lifetime.ensure_live(OP)?;
-            let index = i64::try_from(index).map_err(|_| error(OP, ErrorKind::InvalidArgument, "argument index exceeds signed 64-bit range"))?;
-            resource.lifetime().ensure_live(OP)?;
-            if !self.device.same(resource.device()) {
-                return Err(error(OP, ErrorKind::DeviceMismatch, "argument resource belongs to another device"));
+        self.lifetime.ensure_live(OP)?;
+        let index = i64::try_from(index).map_err(|_| error(OP, ErrorKind::InvalidArgument, "argument index exceeds signed 64-bit range"))?;
+        resource.lifetime().ensure_live(OP)?;
+        if !self.device.same(resource.device()) {
+            return Err(error(OP, ErrorKind::DeviceMismatch, "argument resource belongs to another device"));
+        }
+        let tag = match &resource {
+            ShaderArgumentResource::Buffer(_) => 0,
+            ShaderArgumentResource::Texture(_) => 1,
+            ShaderArgumentResource::Sampler(_) => 2,
+            ShaderArgumentResource::AccelerationStructure(_) => 3,
+            ShaderArgumentResource::IndirectCommandBuffer(_) => 4,
+            ShaderArgumentResource::RenderPipeline(_) => 7,
+            ShaderArgumentResource::ComputePipeline(_) => 8,
+            ShaderArgumentResource::DepthStencil(_) => 9,
+        };
+        metal_sys::native::library::argument_encoder_single(&self.raw, tag, resource.raw(), 0, index).map_err(|failure| sys_error(OP, failure))?;
+        if self.retained.get(&index).map_or(true, |old| !old.raw().same(resource.raw())) {
+            if let Some(old) = self.retained.insert(index, resource.clone()) {
+                old.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
             }
-            let tag = match &resource {
-                ShaderArgumentResource::Buffer(_) => 0,
-                ShaderArgumentResource::Texture(_) => 1,
-                ShaderArgumentResource::Sampler(_) => 2,
-                ShaderArgumentResource::AccelerationStructure(_) => 3,
-                ShaderArgumentResource::IndirectCommandBuffer(_) => 4,
-                ShaderArgumentResource::RenderPipeline(_) => 7,
-                ShaderArgumentResource::ComputePipeline(_) => 8,
-                ShaderArgumentResource::DepthStencil(_) => 9,
-            };
-            metal_sys::native::library::argument_encoder_single(&self.raw, tag, resource.raw(), 0, index).map_err(|failure| sys_error(OP, failure))?;
-            if self.retained.get(&index).map_or(true, |old| !old.raw().same(resource.raw())) {
-                if let Some(old) = self.retained.insert(index, resource.clone()) {
-                    old.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
-                }
-                resource.lifetime().dependents.fetch_add(1, Ordering::AcqRel);
-            }
-            Ok(())
-        })()
+            resource.lifetime().dependents.fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(())
     }
 
     pub fn set_argument_buffer(&mut self, buffer: &crate::metal::Buffer, offset: u64) -> Result<(), Error> {
         const OP: &str = "Metal.Shader_argument_encoder.set_argument_buffer";
-        (|| -> Result<_, Error> { enter_main(OP)?;
-            self.lifetime.ensure_live(OP)?;
-            buffer.lifetime().ensure_live(OP)?;
-            if !self.device.same(buffer.device()) {
-                return Err(error(OP, ErrorKind::DeviceMismatch, "argument buffer belongs to another device"));
+        self.lifetime.ensure_live(OP)?;
+        buffer.lifetime().ensure_live(OP)?;
+        if !self.device.same(buffer.device()) {
+            return Err(error(OP, ErrorKind::DeviceMismatch, "argument buffer belongs to another device"));
+        }
+        if offset > buffer.length() {
+            return Err(error(OP, ErrorKind::InvalidArgument, "argument buffer range is invalid"));
+        }
+        let offset = i64::try_from(offset).map_err(|_| error(OP, ErrorKind::InvalidArgument, "argument buffer offset exceeds signed 64-bit range"))?;
+        metal_sys::native::library::argument_encoder_set_buffer(&self.raw, buffer.raw(), offset, 0, 0).map_err(|failure| sys_error(OP, failure))?;
+        let key = -1;
+        if self.retained.get(&key).map_or(true, |old| !old.raw().same(buffer.raw())) {
+            if let Some(old) = self.retained.insert(key, ShaderArgumentResource::Buffer(buffer.clone())) {
+                old.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
             }
-            if offset > buffer.length() {
-                return Err(error(OP, ErrorKind::InvalidArgument, "argument buffer range is invalid"));
-            }
-            let offset = i64::try_from(offset).map_err(|_| error(OP, ErrorKind::InvalidArgument, "argument buffer offset exceeds signed 64-bit range"))?;
-            metal_sys::native::library::argument_encoder_set_buffer(&self.raw, buffer.raw(), offset, 0, 0).map_err(|failure| sys_error(OP, failure))?;
-            let key = -1;
-            if self.retained.get(&key).map_or(true, |old| !old.raw().same(buffer.raw())) {
-                if let Some(old) = self.retained.insert(key, ShaderArgumentResource::Buffer(buffer.clone())) {
-                    old.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
-                }
-                buffer.lifetime().dependents.fetch_add(1, Ordering::AcqRel);
-            }
-            Ok(())
-        })()
+            buffer.lifetime().dependents.fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(())
     }
 
     pub fn destroy(&mut self) -> Result<(), Error> {
-        (|| -> Result<_, Error> { enter_main("Metal.Shader_argument_encoder.destroy")?;
-            self.lifetime.destroy_parent("Metal.Shader_argument_encoder.destroy")?;
-            self.release_retained();
-            if self.function_attached.swap(false, Ordering::AcqRel) {
-                self.function.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
-            }
-            Ok(())
-        })()
+        self.lifetime.destroy_parent("Metal.Shader_argument_encoder.destroy")?;
+        self.release_retained();
+        if self.function_attached.swap(false, Ordering::AcqRel) {
+            self.function.lifetime().dependents.fetch_sub(1, Ordering::AcqRel);
+        }
+        Ok(())
     }
 
     fn release_retained(&mut self) {

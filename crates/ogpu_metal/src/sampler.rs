@@ -115,7 +115,7 @@ impl Sampler {
 
     /// Retains once per command buffer; `Ok(false)` when `commands` already holds it.
     pub fn retain_for(&self, commands: i64) -> Result<bool, Error> {
-        if self.0.retained_by.get() == commands && !self.destroyed() {
+        if self.0.retained_by.get() == commands {
             Ok(false)
         } else {
             self.retain_submission()?;

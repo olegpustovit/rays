@@ -556,7 +556,6 @@ struct AccelRecorder {
 }
 
 fn accel_encoder(context: &Rc<CommandContext>) -> Result<Box<dyn DriverAccelEncoder>, Error> {
-    context.recording()?;
     let encoder = metal::AccelerationEncoder::create(&context.native).map_err(|value| of_metal_error(context.operation, &value))?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Accel(encoder.clone()));
     Ok(Box::new(AccelRecorder { context: context.clone(), encoder }))
@@ -627,22 +626,17 @@ impl DriverCommands for MetalCommands {
     }
     fn commit(&self) -> Result<Receipt, Error> {
         let context = &self.context;
-        context.recording()?;
         let mut retained = std::mem::take(&mut *context.retained.borrow_mut());
         match self.queue.submit_native(&context.native, &mut retained) {
             Err(e) => {
                 *context.retained.borrow_mut() = retained;
                 Err(e)
             }
-            Ok(receipt) => {
-                context.finished.set(true);
-                Ok(Receipt { epoch: receipt.epoch })
-            }
+            Ok(receipt) => Ok(Receipt { epoch: receipt.epoch }),
         }
     }
     fn commit_present(&self, source: Token, frame: DriverFrame) -> Result<Receipt, Error> {
         let context = &self.context;
-        context.recording()?;
         let source = context.find_texture(source)?;
         let Some((surface, native_frame)) = self.dev.acquired_frames.borrow().get(&frame.frame_token).cloned() else {
             return Err(fail(context.operation, ErrorKind::InvalidState, "frame token is stale"));
@@ -663,7 +657,6 @@ impl DriverCommands for MetalCommands {
                 Err(e)
             }
             Ok(receipt) => {
-                context.finished.set(true);
                 pending.commit_present(receipt.epoch);
                 self.dev.acquired_frames.borrow_mut().remove(&frame.frame_token);
                 Ok(Receipt { epoch: receipt.epoch })
@@ -672,12 +665,10 @@ impl DriverCommands for MetalCommands {
     }
     fn abandon(&self) -> Result<(), Error> {
         let context = &self.context;
-        context.recording()?;
         let open = context.open_encoder.borrow_mut().take();
         if let Some(open) = open {
             open.end();
         }
-        context.finished.set(true);
         run_all(&context.retained);
         context.native.destroy().map_err(|value| of_metal_error(context.operation, &value))
     }
@@ -693,7 +684,6 @@ fn begin_commands(dev: &Rc<Dev>, queue: &Queue, active: &Rc<Vec<PendingPresentat
         tables: dev.t.clone(),
         commands_token: dev.t.token(),
         open_encoder: RefCell::new(None),
-        finished: Cell::new(false),
         retained: RefCell::new(Vec::new()),
     });
     Ok(Box::new(MetalCommands { dev: dev.clone(), queue: queue.clone(), active: active.clone(), context }))
@@ -957,4 +947,3 @@ pub fn live_handles() -> i64 {
         _ => unreachable!("the release queue answers on the thread that owns the Metal handles"),
     }
 }
-

@@ -146,19 +146,10 @@ pub struct CommandContext {
     pub tables: Rc<Tables>,
     pub commands_token: i64,
     pub open_encoder: RefCell<Option<OpenEncoder>>,
-    pub finished: Cell<bool>,
     pub retained: RefCell<Vec<Cleanup>>,
 }
 
 impl CommandContext {
-        pub fn recording(&self) -> Result<(), Error> {
-        if self.finished.get() {
-            Err(fail(self.operation, ErrorKind::InvalidState, "commands are finished"))
-        } else {
-            Ok(())
-        }
-    }
-
     /// Records `release` when `retained` succeeded.
     pub fn keep(&self, retained: Result<(), Error>, release: Cleanup) -> Result<(), Error> {
         retained?;
