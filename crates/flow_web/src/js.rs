@@ -722,7 +722,7 @@ fn signature(primitive: &Primitive) -> Option<Vec<&'static str>> {
     Some(match primitive {
         P::Numeric(_) | P::Remainder | P::Integer(_) | P::Integer_compare(_) | P::Equal => vec!["a", "b"],
         P::Math(Unary::Not) => vec!["a"],
-        P::Math(_) | P::Exp | P::Floor | P::Ceil | P::Round | P::Int_convert | P::Float_convert | P::Color_byte(_) => vec!["x"],
+        P::Math(_) | P::Floor | P::Ceil | P::Round | P::Int_convert | P::Float_convert | P::Color_byte(_) => vec!["x"],
         P::Show | P::Truthy | P::Coerce(_) => vec!["value"],
         P::Text_blank | P::Text_trim | P::Text_lower | P::Text_repr => vec!["text"],
         P::Text_table_decode => vec!["text"],

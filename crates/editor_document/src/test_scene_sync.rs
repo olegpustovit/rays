@@ -14,7 +14,7 @@ use crate::scene_sync::{self as sync, Edit};
 use crate::settings;
 use crate::workspace_doc::{self, TextOptions};
 use flow_check::catalog::Catalog;
-use flow_graph::flow_edit::{self as fe, ArgKey, Op};
+use flow_graph::flow_edit::{ArgKey, Op};
 use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::value::Value as E;
 use param::Value;
@@ -142,10 +142,6 @@ fn set_id(doc: &Doc, id: i64, values: &[(String, Value)]) -> Doc {
 
 fn set(doc: &Doc, label: &str, values: &[(String, Value)]) -> Doc {
     set_id(doc, node_id(doc, label), values)
-}
-
-fn without_ids(doc: &Doc, ids: &[i64]) -> Doc {
-    document::prune(&with_scene(doc, kg::remove(ids, &scene(doc))))
 }
 
 fn reconcile(adopt: Option<bool>, before: &Doc, after: &Doc) -> Result<Doc, String> {
@@ -1419,10 +1415,4 @@ fn instances_each_viewport_has_its_root_and_world() {
         .is_err(),
         "two objects parented under each other lowered",
     );
-}
-
-// kept so unused-helper warnings do not hide a port gap
-#[allow(dead_code)]
-fn _unused() {
-    let _ = (without_ids as fn(&Doc, &[i64]) -> Doc, fe::fresh_name as fn(&[Syntax], &str, &str) -> String);
 }

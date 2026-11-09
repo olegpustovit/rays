@@ -2474,11 +2474,6 @@ pub fn child_crease_sharpness(plan: &Plan) -> Option<Vec<f64>> {
     }
 }
 
-pub fn output_child_slot(plan: &Plan, vertex: i64, source_edge: i64) -> Result<i64, error::T> {
-    let topology_view = topology::view::view(&plan.topology)?;
-    output_child_slot_in(plan, &topology_view, vertex, source_edge)
-}
-
 pub fn resulting_crease_attribute(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,

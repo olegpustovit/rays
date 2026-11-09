@@ -200,11 +200,6 @@ fn prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_state() {
     prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives("(state [previous 0.0] (+ previous (frame/dt)))");
 }
 
-#[allow(dead_code)]
-fn _unused() -> (CookMode, fn(&node::T) -> node::T) {
-    (CookMode::Generator, |n| build::with_facts(node::facts(n).clone(), n))
-}
-
 // ---- sections 5 onward ----
 
 use rays_math::{mat4, vec3};

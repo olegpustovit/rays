@@ -3,7 +3,6 @@
 pub use flow_sop_catalog::{catalog, encoded_parameters, network, port};
 pub mod manifest;
 pub mod curve;
-pub mod flow_manifest;
 pub mod lisp_node;
 pub mod trace_scene;
 pub mod graph_kernel;

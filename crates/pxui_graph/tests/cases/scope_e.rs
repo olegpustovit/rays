@@ -142,4 +142,15 @@ fn bench_scope_big() {
     check(scope::inspect::wire_count(&view) > 0, "the big scope has no wires");
 }
 
-pub const CASES: &[(&str, fn())] = &[("run_sticky", run_sticky), ("run_readable", run_readable), ("bench_scope_big", bench_scope_big)];
+fn change_equality() {
+    use pxui_graph::scope_state::Change;
+    let edit = Change::Syntax_edit(e::Op::Rename { node: path(&["g", "a"]), to_: "b".into() });
+    let same = edit.clone();
+    let different = Change::Syntax_edit(e::Op::Rename { node: path(&["g", "a"]), to_: "c".into() });
+    mem_sys::local_reset();
+    assert_eq!(edit, same);
+    assert_ne!(edit, different);
+    assert_eq!(mem_sys::local_alloc_count(), 0, "change equality allocates");
+}
+
+pub const CASES: &[(&str, fn())] = &[("change_equality", change_equality), ("run_sticky", run_sticky), ("run_readable", run_readable), ("bench_scope_big", bench_scope_big)];

@@ -4,9 +4,10 @@ use crate::{catalog, lower, manifest, operators};
 use flow_check::op;
 use flow_syntax::context as fctx;
 use flow_syntax::syntax;
+#[cfg(test)]
+use sop::payload;
 use sop::edit_graph::{self as edit, Factory};
 use sop::node::{self, build, CookMode};
-use sop::payload;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -159,9 +160,6 @@ pub fn vec3(v: &rays_math::vec3::T) -> String {
 pub fn curve_points(points: &[(f64, f64, f64)]) -> String {
     format!("[{}]", points.iter().map(|(x, y, z)| format!("[{} {} {}]", float(*x), float(*y), float(*z))).collect::<Vec<_>>().join(" "))
 }
-
-#[allow(dead_code)]
-fn _unused(_: &payload::T) {}
 
 #[doc(hidden)]
 pub mod support;

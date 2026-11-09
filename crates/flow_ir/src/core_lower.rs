@@ -377,7 +377,6 @@ fn primitive_of_name(name: &str) -> Option<C::Primitive> {
     if let Some(op) = PO::binary(name) { return Some(P::Numeric(op)); }
     if let Some(op) = PO::unary(name) { return Some(P::Math(op)); }
     Some(match name {
-        "exp" => P::Exp,
         "floor" => P::Floor,
         "ceil" => P::Ceil,
         "round" => P::Round,

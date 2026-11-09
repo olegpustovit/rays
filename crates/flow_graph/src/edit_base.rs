@@ -31,7 +31,7 @@ pub enum Loop {
     Filter,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Op {
     SetArg { node: Path, key: ArgKey, sub: Vec<i64>, value: S },
     Connect { node: Path, key: ArgKey, src: String, iter: bool },

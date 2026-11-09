@@ -101,7 +101,6 @@ pub enum Kind {
     Text,
     Choice {
         options: Vec<String>,
-        equal: Box<dyn Fn(&str, &str) -> bool + Send + Sync>,
     },
     IndexChoice(Vec<String>),
     Encoded {
@@ -141,18 +140,8 @@ pub fn text() -> Kind {
 }
 
 pub fn choice(labels: Vec<String>) -> Result<Kind, String> {
-    choice_with(labels, Box::new(|left, right| left == right))
-}
-
-pub fn choice_with(
-    labels: Vec<String>,
-    equal: Box<dyn Fn(&str, &str) -> bool + Send + Sync>,
-) -> Result<Kind, String> {
     validate_choice_labels(&labels)?;
-    Ok(Kind::Choice {
-        options: labels,
-        equal,
-    })
+    Ok(Kind::Choice { options: labels })
 }
 
 pub fn index_choice(labels: Vec<String>) -> Result<Kind, String> {
@@ -203,9 +192,6 @@ impl Kind {
 
     fn equal_value(&self, left: &Value, right: &Value) -> bool {
         match (self, left, right) {
-            (Kind::Choice { equal, .. }, Value::Choice(left), Value::Choice(right)) => {
-                equal(left, right)
-            }
             (Kind::Encoded { equal, .. }, Value::Text(left), Value::Text(right)) => {
                 equal(left, right)
             }
@@ -216,9 +202,9 @@ impl Kind {
 }
 fn display_value(kind: &Kind, value: &Value) -> Result<Value, String> {
     match (kind, value) {
-        (Kind::Choice { options, equal }, Value::Choice(value)) => options
+        (Kind::Choice { options }, Value::Choice(value)) => options
             .iter()
-            .find(|option| equal(option, value))
+            .find(|option| *option == value)
             .cloned()
             .map(Value::Choice)
             .ok_or_else(|| "Param.view: choice value is not an option".to_owned()),
@@ -272,8 +258,8 @@ pub fn normalize_value(kind: &Kind, value: &Value) -> Result<Value, String> {
             let value = range.hard_min.map_or(*value, |low| ocaml_float_max(low, *value));
             Ok(Value::Float(range.hard_max.map_or(value, |high| ocaml_float_min(high, value))))
         }
-        (Kind::Choice { options, equal }, Value::Choice(value)) => {
-            if options.iter().any(|option| equal(option, value)) {
+        (Kind::Choice { options }, Value::Choice(value)) => {
+            if options.iter().any(|option| option == value) {
                 Ok(Value::Choice(value.clone()))
             } else {
                 Err("choice parameter value is not an option".to_owned())
@@ -298,8 +284,8 @@ fn validate_normalizable(kind: &Kind, value: &Value) -> Result<(), String> {
         (Kind::Floating(_), Value::Float(value)) if !value.is_finite() => {
             Err("float parameter must be finite".to_owned())
         }
-        (Kind::Choice { options, equal }, Value::Choice(value))
-            if !options.iter().any(|option| equal(option, value)) =>
+        (Kind::Choice { options }, Value::Choice(value))
+            if !options.iter().any(|option| option == value) =>
         {
             Err("choice parameter value is not an option".to_owned())
         }
@@ -669,10 +655,10 @@ fn append_key_value(out: &mut Vec<u8>, kind: &Kind, value: &Value, name: &str) -
             out.push(b'e');
             append_token(out, &normalize(value)?);
         }
-        (Kind::Choice { options, equal }, Value::Choice(value)) => {
+        (Kind::Choice { options }, Value::Choice(value)) => {
             let label = options
                 .iter()
-                .find(|label| equal(label, value))
+                .find(|label| *label == value)
                 .ok_or_else(|| "Param.view: choice value is not an option".to_owned())?;
             out.push(b'c');
             append_token(out, label.as_bytes());
@@ -702,10 +688,10 @@ fn append_cook_value(out: &mut Vec<u8>, kind: &Kind, value: &Value, name: &str) 
         (Kind::Encoded { normalize, .. }, Value::Text(value)) => {
             out.extend_from_slice(&normalize(value)?);
         }
-        (Kind::Choice { options, equal }, Value::Choice(value)) => {
+        (Kind::Choice { options }, Value::Choice(value)) => {
             let label = options
                 .iter()
-                .find(|label| equal(label, value))
+                .find(|label| *label == value)
                 .ok_or_else(|| "Param.view: choice value is not an option".to_owned())?;
             out.extend(label.bytes().map(|character| match character {
                 b'a'..=b'z' | b'0'..=b'9' => character,
@@ -1418,18 +1404,7 @@ mod tests {
             "tones",
             vec![field_ok(
                 "tone",
-                choice_with(
-                    labels,
-                    Box::new(|left, right| {
-                        let tone = |label: &str| match label {
-                            "Warm" => Some(1),
-                            "Cool" => Some(2),
-                            _ => None,
-                        };
-                        tone(left) == tone(right)
-                    }),
-                )
-                .unwrap(),
+                choice(labels).unwrap(),
                 Value::Choice("Warm".into()),
             )],
         );

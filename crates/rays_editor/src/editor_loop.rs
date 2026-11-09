@@ -1040,6 +1040,3 @@ pub fn run(
     };
     sketch::run_state(Some(config), max_frames, crash_dir, profile, program).map(|_| ())
 }
-
-#[allow(dead_code)]
-fn _unused(_: &Level, _: &EValue) {}

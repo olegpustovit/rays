@@ -29,7 +29,6 @@ use flow_native::workspace_images;
 use flow_syntax::phase_timer::PhaseTimer;
 use flow_syntax::syntax::Syntax;
 use input::{Frame as Input, Platform};
-use param::Effects;
 use rays::frame;
 use rays::image;
 use rays::light;
@@ -763,6 +762,3 @@ pub fn observe_presented(value: &mut LoopModel) {
     }
     value.presenting = None;
 }
-
-#[allow(dead_code)]
-fn _unused(_: &Effects, _: &layout) {}

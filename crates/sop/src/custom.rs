@@ -97,16 +97,6 @@ pub struct CreateArgs {
     pub operation: String,
 }
 
-pub fn create_args(operation: &str) -> CreateArgs {
-    CreateArgs {
-        label: None,
-        version: 1,
-        cook_mode: CookMode::Generic,
-        dependencies: dependencies::STATIC,
-        operation: operation.to_owned(),
-    }
-}
-
 pub fn create(args: CreateArgs, schema: Arc<Schema>, values: Vec<Value>, inputs: Vec<node::T>, cook: Cook) -> Result<node::T, String> {
     let key_schema = Arc::clone(&schema);
     let operation = args.operation.clone();

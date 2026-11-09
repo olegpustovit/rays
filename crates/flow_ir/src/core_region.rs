@@ -2461,6 +2461,3 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
     };
     attempt().ok().flatten()
 }
-
-#[allow(dead_code)]
-fn _unused(_: Stage) {}

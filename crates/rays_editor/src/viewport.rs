@@ -38,7 +38,7 @@ use crate::editor_commands::action;
 use crate::editor_host;
 use crate::editor_inspect;
 use crate::editor_list;
-use crate::editor_model::{self as model, picked, EditorModel as Model, Panel_result};
+use crate::editor_model::{self as model, picked, EditorModel as Model};
 use crate::editor_renderer as renderer;
 
 type Nodes = Vec<scene_node>;
@@ -1282,6 +1282,3 @@ pub fn close(extra_: &extra) {
     renderer::close(&extra_.renderer);
     let _ = release(extra_);
 }
-
-#[allow(dead_code)]
-fn _unused(_: &Panel_result, _: &model::update) {}

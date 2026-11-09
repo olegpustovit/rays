@@ -19,7 +19,7 @@ pub type S = Syntax;
 pub type PathSet = BTreeSet<Path>;
 pub type Frame3 = (String, (f64, f64), (f64, f64));
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Change {
     Syntax_edit(e::Op),
     /// a click on a layout of an editor graph's switch: the host makes it the active one
@@ -48,13 +48,6 @@ pub enum Change {
     Drop_over { path: Path, kind: String, value: String },
     Dropped { path: Path, kind: String, value: String },
     Notice(String),
-}
-
-/// `Op` has no equality: two changes are equal when they print the same.
-impl PartialEq for Change {
-    fn eq(&self, other: &Change) -> bool {
-        format!("{:?}", self) == format!("{:?}", other)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

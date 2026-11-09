@@ -477,11 +477,6 @@ pub fn set_volatile(session: &mut T, predicate: Arc<dyn Fn(i64) -> bool + Send +
     session.slot_bytes.retain(|id, _| keep(*id));
 }
 
-/// Current volatile predicate identity (OCaml `!=` on the closure).
-pub fn volatile_is(session: &T, predicate: &Arc<dyn Fn(i64) -> bool + Send + Sync>) -> bool {
-    Arc::ptr_eq(&session.volatile, predicate)
-}
-
 /// An opaque, unambiguous cache identity: integers are fixed-width binary and every variable-length
 /// string is length-prefixed, so no field boundary can shift.
 fn selective(n: &node::T, inputs: &[payload::T]) -> bool {

@@ -51,7 +51,7 @@ fn field_of(f: &FieldView, normalizers: &[(String, Normalizer)]) -> Field {
             }
         },
         (KindView::Choice(labels), ParamValue::Choice(_)) => {
-            Kind::Choice { options: labels.clone(), equal: Box::new(|a, b| a == b) }
+            Kind::Choice { options: labels.clone() }
         }
         _ => invalid(&f.name),
     };

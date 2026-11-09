@@ -8,7 +8,7 @@
 #![allow(non_camel_case_types, non_snake_case)]
 
 use crate::core_draw;
-use crate::core_ir::{self as c, Draw, Expr, FrameField, Plane, Primitive, Program, Statement, StatementNode};
+use crate::core_ir::{self as c, Expr, FrameField, Plane, Primitive, Program, Statement, StatementNode};
 use crate::core_marks;
 use crate::packed;
 use flow_check::op::{self, Op};
@@ -2625,8 +2625,6 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
     core_marks::finish(st.marks.as_ref().expect("marks"))
 }
 
-#[allow(dead_code)]
-fn _unused(_: &Draw) {}
 
 /// Write element `i` of an unpublished builder in place (a shared array is copied first; the
 /// caller refreshes the builder's aliases).

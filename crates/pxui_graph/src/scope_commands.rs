@@ -1,6 +1,6 @@
 // Port of lib/pxui_graph/scope_commands.ml(i): maps keys and menus to typed requests.
 use crate::scope_state::{self as st, Change, Command, Direction, Drag, Editing, Fr, HintTarget, Hinting, Pane, PathSet};
-use crate::scope_wires::{self as w, fallback, line_of_row, root_name, rows_top};
+use crate::scope_wires::{fallback, line_of_row, root_name, rows_top};
 use editor_core::editor_core::command;
 use editor_core::editor_core::guide_context::GuideContext as Ctx;
 use editor_core::editor_core::keymap::Trigger;
@@ -823,6 +823,3 @@ pub fn bindings() -> Vec<Cmd> {
     }
     v
 }
-
-#[allow(dead_code)]
-fn _unused(_: &w::Geo) {}

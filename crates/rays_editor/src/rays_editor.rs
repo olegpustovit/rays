@@ -29,7 +29,6 @@ pub mod editor {
     use std::any::Any;
     use std::rc::Rc;
 
-    use editor_document::document::T as Document;
     use editor_document::kind_graph as kg;
     use editor_document::objects;
     use editor_document::workspace_doc;
@@ -350,9 +349,6 @@ pub mod editor {
     ) -> Result<(), rays::sketch::error> {
         editor_loop::run(options, max_frames, crash_dir, profile, config, workspace, source, prepare, draw)
     }
-
-    #[allow(dead_code)]
-    fn _unused(_: &Document) {}
 }
 
 /// The frame reducer without a UI frame: an unstable hook for tests, like `Editor::Private`.
