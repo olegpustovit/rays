@@ -77,10 +77,6 @@ fn record_gpu_duration(device: &Device, duration: f64) {
 const DURATION_CAPACITY: usize = 16;
 
 pub fn create(device: &Device) -> Result<Queue, Error> {
-    let op = "Ogpu_metal.Queue.create";
-    if device.destroyed() {
-        return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
-    }
     let metal = native::CommandQueue::create(device.metal())?;
     GPU_TIMINGS.with(|table| {
         table

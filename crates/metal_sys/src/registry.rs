@@ -501,7 +501,7 @@ pub fn buffer_info_hazardTrackingMode(receiver: &Handle) -> Result<i64, Error> {
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_buffer_info_hazardTrackingMode"] fn ffi_rays_metal_buffer_info_hazardTrackingMode(receiver: *mut super::NativeHandle, output: *mut i64, message: *mut *const std::ffi::c_char) -> i32; }
 pub fn set_buffer_label(receiver: &Handle, arg0: &str) -> Result<(), Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
-    let arg0_cstring = CString::new(arg0).map_err(|_| Error::InvalidArgument("Metal strings must not contain NUL"))?;
+    let arg0_cstring = CString::new(arg0).map_err(|_| Error::InvalidArgument("Metal strings must not contain NUL".into()))?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_set_buffer_label(receiver_ptr, arg0_cstring.as_ptr(), &mut message) };
     #[cfg(not(target_vendor = "apple"))] let status = 2;

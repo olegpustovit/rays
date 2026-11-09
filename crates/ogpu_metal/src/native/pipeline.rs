@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::native::resource::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, DeviceFamily, Error, ErrorKind, Lifetime, Texture, TextureKind, TextureRegion};
+use crate::native::resource::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, DeviceFamily, Error, ErrorKind, Lifetime, Texture, TextureRegion};
 use ogpu_core::types::TextureFormat as Format;
 use crate::native::{descriptors::{DepthStencil, RenderPassDescriptor, Sampler}, library::Library};
 
@@ -255,7 +255,6 @@ impl RenderPipeline {
     }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
-    pub(crate) fn device(&self) -> &Device { &self.0.device }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -277,8 +276,6 @@ struct RenderEncoderInner {
     lifetime: Lifetime,
     command_buffer: CommandBuffer,
     pass: RenderPassDescriptor,
-    target_width: u64,
-    target_height: u64,
     ended: AtomicBool,
 }
 impl RenderEncoderInner {
@@ -298,9 +295,6 @@ impl RenderEncoder {
     pub fn create(command_buffer: &CommandBuffer, pass: &RenderPassDescriptor) -> Result<Self, Error> {
         const OP: &str = "Metal.RenderEncoder.create";
         enter_main(OP)?;
-        command_buffer.ensure_recording(OP)?;
-        pass.ensure_live(OP)?;
-        if !command_buffer.device().same(pass.device()) { return Err(error(OP, ErrorKind::CrossDevice, "render pass belongs to another device")); }
         let color_target = pass.color_attachment();
         let depth_target = pass.depth_attachment();
         let stencil_target = pass.stencil_attachment();
@@ -312,10 +306,9 @@ impl RenderEncoder {
         }
         Ok(Self(Arc::new(RenderEncoderInner {
             raw, lifetime: Lifetime::new(), command_buffer: command_buffer.clone(), pass: pass.clone(),
-            target_width: pass.width(), target_height: pass.height(), ended: AtomicBool::new(false),
+            ended: AtomicBool::new(false),
         })))
     }
-    fn ensure_open(&self, operation: &str) -> Result<(), Error> { self.0.lifetime.ensure_live(operation) }
     pub fn set_pipeline(&self, pipeline: &RenderPipeline) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.set_pipeline";
         metal_sys::registry::render_encoder_set_pipeline(&self.0.raw, pipeline.raw()).map_err(|failure| sys_error(OP, failure))?;
@@ -354,24 +347,16 @@ impl RenderEncoder {
     }
     pub fn set_viewport(&self, viewport: Viewport) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.set_viewport";
-        self.ensure_open(OP)?;
-        if ![viewport.x, viewport.y, viewport.width, viewport.height, viewport.znear, viewport.zfar].iter().all(|value| value.is_finite()) || viewport.width <= 0.0 || viewport.height <= 0.0 || viewport.znear < 0.0 || viewport.znear > 1.0 || viewport.zfar < 0.0 || viewport.zfar > 1.0 || viewport.znear > viewport.zfar {
-            return Err(error(OP, ErrorKind::InvalidArgument, "viewport is non-finite, empty, or outside the depth range"));
-        }
         metal_sys::registry::render_encoder_set_viewport(&self.0.raw, metal_sys::registry::record::Mtl_viewport { originX: viewport.x, originY: viewport.y, width: viewport.width, height: viewport.height, znear: viewport.znear, zfar: viewport.zfar }).map_err(|failure| sys_error(OP, failure))
     }
     pub fn set_scissor(&self, scissor: Scissor) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.set_scissor";
-        self.ensure_open(OP)?;
         let (x, y, width, height) = (
             u64::try_from(scissor.x).map_err(|_| error(OP, ErrorKind::InvalidArgument, "scissor exceeds native bounds"))?,
             u64::try_from(scissor.y).map_err(|_| error(OP, ErrorKind::InvalidArgument, "scissor exceeds native bounds"))?,
             u64::try_from(scissor.width).map_err(|_| error(OP, ErrorKind::InvalidArgument, "scissor exceeds native bounds"))?,
             u64::try_from(scissor.height).map_err(|_| error(OP, ErrorKind::InvalidArgument, "scissor exceeds native bounds"))?,
         );
-        if width == 0 || height == 0 || x > self.0.target_width || width > self.0.target_width - x || y > self.0.target_height || height > self.0.target_height - y {
-            return Err(error(OP, ErrorKind::InvalidArgument, "scissor rectangle is outside the render pass"));
-        }
         let record = metal_sys::registry::record::Mtl_scissor_rect { x, y, width, height };
         metal_sys::registry::render_encoder_set_scissor(&self.0.raw, record).map_err(|failure| sys_error(OP, failure))
     }
@@ -385,22 +370,15 @@ impl RenderEncoder {
     }
     pub fn use_resources(&self, resources: &[RenderResource], usage: &[ResourceUsage], stages: &[RenderStage]) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.use_resources";
-        self.ensure_open(OP)?;
         if resources.is_empty() || usage.is_empty() || stages.is_empty() {
             return Err(error(OP, ErrorKind::InvalidArgument, "resources, usage, and stages must be nonempty"));
         }
-        let device = self.0.command_buffer.device();
         let mut raw_resources = Vec::with_capacity(resources.len());
         for resource in resources {
-            let (kind, raw, lifetime, resource_device) = match resource {
-                RenderResource::Buffer(value) => (0, value.raw(), value.lifetime(), value.device()),
-                RenderResource::Texture(value) => (1, value.raw(), value.lifetime(), value.device()),
+            let (kind, raw) = match resource {
+                RenderResource::Buffer(value) => (0, value.raw()),
+                RenderResource::Texture(value) => (1, value.raw()),
             };
-            lifetime.ensure_live(OP)?;
-            if !device.same(resource_device) { return Err(error(OP, ErrorKind::CrossDevice, "render resource belongs to another device")); }
-            if raw_resources.iter().any(|(_, previous): &(i32, &metal_sys::Handle)| raw.same(previous)) {
-                return Err(error(OP, ErrorKind::InvalidArgument, "render resources contain duplicates"));
-            }
             raw_resources.push((kind, raw));
         }
         let usage = usage.iter().fold(0, |bits, value| bits | match value { ResourceUsage::Read => 1, ResourceUsage::Write => 2, ResourceUsage::Sample => 4 });
@@ -474,39 +452,12 @@ impl BlitEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         const OP: &str = "Metal.BlitEncoder.create";
         enter_main(OP)?;
-        command_buffer.ensure_recording(OP)?;
         let raw = metal_sys::registry::command_buffer_blit_encoder(command_buffer.raw()).map_err(|failure| sys_error(OP, failure))?;
         command_buffer.lifetime().attach();
         Ok(Self(Arc::new(BlitEncoderInner { raw, lifetime: Lifetime::new(), command_buffer: command_buffer.clone(), ended: AtomicBool::new(false) })))
     }
     pub fn copy_buffer_to_texture(&self, source: &Buffer, source_offset: u64, source_bytes_per_row: usize, source_bytes_per_image: usize, destination: &Texture, destination_slice: usize, destination_level: usize, region: TextureRegion) -> Result<(), Error> {
         const OP: &str = "Metal.BlitEncoder.copy_buffer_to_texture";
-        self.0.lifetime.ensure_live(OP)?; source.lifetime().ensure_live(OP)?; destination.lifetime().ensure_live(OP)?;
-        let descriptor = destination.descriptor();
-        if descriptor.sample_count != 1 { return Err(error(OP, ErrorKind::Unsupported, "multisample textures do not accept buffer blits")); }
-        let slice_count = texture_slices(descriptor).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "texture slice count overflows"))?;
-        if destination_level >= descriptor.mip_levels { return Err(error(OP, ErrorKind::InvalidArgument, "blit destination mip level is outside the texture")); }
-        if destination_slice >= slice_count { return Err(error(OP, ErrorKind::InvalidArgument, "blit destination slice is outside the texture")); }
-        if region.width == 0 || region.height == 0 || region.depth == 0 { return Err(error(OP, ErrorKind::InvalidArgument, "blit destination region dimensions must be positive")); }
-        let mip = |size: usize| (size >> destination_level.min(usize::BITS as usize - 1)).max(1);
-        let (width, height, depth) = (mip(descriptor.width), mip(descriptor.height), mip(descriptor.depth));
-        if region.x > width || region.width > width - region.x || region.y > height || region.height > height - region.y || region.z > depth || region.depth > depth - region.z {
-            return Err(error(OP, ErrorKind::InvalidArgument, "blit destination region exceeds the selected mip level"));
-        }
-        let texel_bytes = ogpu_core::types::texel_bytes(descriptor.format) as usize;
-        let minimum_row = region.width.checked_mul(texel_bytes).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "blit row size overflows"))?;
-        if source_bytes_per_row < minimum_row || source_bytes_per_row % texel_bytes != 0 || source_bytes_per_image == 0 {
-            return Err(error(OP, ErrorKind::InvalidArgument, "blit source row pitch is too small, zero, or not block-aligned"));
-        }
-        let minimum_image = source_bytes_per_row.checked_mul(region.height).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "blit image size overflows"))?;
-        if source_bytes_per_image < minimum_image { return Err(error(OP, ErrorKind::InvalidArgument, "blit source image pitch is smaller than its rows")); }
-        let total = (source_bytes_per_image as u128) * (region.depth as u128);
-        if total > u64::MAX as u128 || source_offset > source.length() || total as u64 > source.length() - source_offset {
-            return Err(error(OP, ErrorKind::InvalidArgument, "blit source range exceeds the buffer"));
-        }
-        if !self.0.command_buffer.device().same(source.device()) || !self.0.command_buffer.device().same(destination.device()) {
-            return Err(error(OP, ErrorKind::CrossDevice, "blit resources belong to another device"));
-        }
         let usize_to_u64 = |value: usize| u64::try_from(value).map_err(|_| error(OP, ErrorKind::InvalidArgument, "blit argument exceeds native bounds"));
         let origin = (usize_to_u64(region.x)?, usize_to_u64(region.y)?, usize_to_u64(region.z)?);
         let size = (usize_to_u64(region.width)?, usize_to_u64(region.height)?, usize_to_u64(region.depth)?);
@@ -520,16 +471,7 @@ impl BlitEncoder {
     }
     pub fn end_encoding(&self) -> Result<(), Error> {
         const OP: &str = "Metal.BlitEncoder.end_encoding";
-        self.0.lifetime.ensure_live(OP)?; metal_sys::registry::blit_encoder_end(&self.0.raw).map_err(|failure| sys_error(OP, failure))?; self.0.finish(false); Ok(())
-    }
-}
-
-fn texture_slices(descriptor: &crate::native::resource::TextureDescriptor) -> Option<usize> {
-    match descriptor.kind {
-        TextureKind::Texture1dArray | TextureKind::Texture2dArray | TextureKind::Texture2dMultisampleArray => Some(descriptor.array_length),
-        TextureKind::TextureCube => Some(6),
-        TextureKind::TextureCubeArray => descriptor.array_length.checked_mul(6),
-        _ => Some(1),
+        metal_sys::registry::blit_encoder_end(&self.0.raw).map_err(|failure| sys_error(OP, failure))?; self.0.finish(false); Ok(())
     }
 }
 

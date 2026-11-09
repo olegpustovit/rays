@@ -11,6 +11,7 @@ pub(crate) fn sys_error(operation: &str, value: metal_sys::Error) -> Error {
     match value {
         metal_sys::Error::Unavailable => error(operation, ErrorKind::Unsupported, "Metal is unavailable on this platform or OS version"),
         metal_sys::Error::WrongThread => error(operation, ErrorKind::WrongDomain, "Metal handles must be released on the platform main thread"),
+        metal_sys::Error::Unsupported(message) => error(operation, ErrorKind::Unsupported, &message),
         metal_sys::Error::InvalidArgument(message) => error(operation, ErrorKind::InvalidArgument, &message),
         metal_sys::Error::InvalidHandle => error(operation, ErrorKind::InvalidState, "invalid native Metal handle"),
         metal_sys::Error::Native(message) => error(operation, ErrorKind::DeviceLost, &message),
@@ -104,11 +105,6 @@ impl Device {
         self.0.lifetime.ensure_live(operation)?;
         if sample_count == 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture sample count must be positive")); }
         metal_sys::registry::device_supports_texture_sample_count(&self.0.raw, sample_count as u64).map_err(|failure| sys_error(operation, failure))
-    }
-    pub(crate) fn supports_sampler_reduction(&self) -> Result<bool, Error> {
-        let operation = "Metal.Device.supports_sampler_reduction";
-        self.0.lifetime.ensure_live(operation)?;
-        metal_sys::native::supports_sampler_reduction(&self.0.raw).map_err(|failure| sys_error(operation, failure))
     }
     pub fn destroy(&self) -> Result<(), Error> { self.0.lifetime.destroy_parent("Metal.Device.destroy") }
     pub fn is_destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
@@ -228,7 +224,6 @@ impl Buffer {
     }
     pub fn is_destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
-    pub(crate) fn device(&self) -> &Device { &self.0.device }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
 }
 fn validate_range(operation: &str, total: u64, offset: u64, length: usize) -> Result<(), Error> {
@@ -331,6 +326,8 @@ fn texture_slices(descriptor: &TextureDescriptor) -> Option<usize> {
 }
 fn texture_mip_size(size: usize, level: usize) -> usize { (size >> level.min(usize::BITS as usize - 1)).max(1) }
 fn validate_texture_descriptor(device: &Device, descriptor: &TextureDescriptor) -> Result<(), Error> {
+    // Core admits ordinary textures; this native descriptor also exposes arrays, cubes,
+    // swizzles and storage modes, so its complete validation includes shared shape facts.
     let operation = "Metal.Texture.create";
     if descriptor.width == 0 || descriptor.height == 0 || descriptor.depth == 0 || descriptor.mip_levels == 0 || descriptor.sample_count == 0 || descriptor.array_length == 0 {
         return Err(error(operation, ErrorKind::InvalidArgument, "texture dimensions and counts must be positive"));
@@ -482,6 +479,8 @@ impl Texture {
         metal_sys::native::read_texture(&self.0.raw, destination, bytes_per_row, bytes_per_image, (region.x as u64, region.y as u64, region.z as u64, region.width as u64, region.height as u64, region.depth as u64), mip_level as u64, slice as u64).map_err(|failure| sys_error(operation, failure))
     }
     fn validate_transfer(&self, operation: &str, region: TextureRegion, mip_level: usize, slice: usize, bytes_per_row: usize, bytes_per_image: usize) -> Result<usize, Error> {
+        // Unlike core's base-level read, native transfers select arbitrary regions/mips/slices.
+        // Their physical span and storage checks also cover the common base-level case.
         let descriptor = &self.0.descriptor;
         if matches!(descriptor.storage, StorageMode::Private | StorageMode::Memoryless) { return Err(error(operation, ErrorKind::Unsupported, "private textures have no CPU transfer mapping")); }
         if texture_multisample(descriptor.kind) { return Err(error(operation, ErrorKind::Unsupported, "multisample textures do not support CPU transfer")); }
@@ -510,7 +509,7 @@ impl Texture {
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
 }
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 struct CommandQueueInner { raw: metal_sys::Handle, lifetime: Lifetime, device: Device, device_attached: AtomicBool }
 impl Drop for CommandQueueInner {
@@ -552,8 +551,6 @@ pub struct CommandBufferDiagnostics {
     pub kernel_end_time: f64,
     pub retained_references: bool,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CommandPhase { Recording, Submitted, Completed, Failed }
 
 enum RetainedResource {
     Buffer(Buffer),
@@ -601,7 +598,6 @@ struct CommandBufferInner {
     lifetime: Lifetime,
     queue: CommandQueue,
     queue_attached: AtomicBool,
-    phase: Cell<CommandPhase>,
     resources: RefCell<Vec<RetainedResource>>,
 }
 impl Drop for CommandBufferInner {
@@ -621,19 +617,9 @@ impl CommandBuffer {
         queue.0.lifetime.ensure_live(operation)?;
         let raw = metal_sys::registry::command_buffer_create(queue.raw()).map_err(|failure| sys_error(operation, failure))?;
         queue.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
-        Ok(Self(Arc::new(CommandBufferInner { raw, lifetime: Lifetime::new(), queue: queue.clone(), queue_attached: AtomicBool::new(true), phase: Cell::new(CommandPhase::Recording), resources: RefCell::new(Vec::new()) })))
+        Ok(Self(Arc::new(CommandBufferInner { raw, lifetime: Lifetime::new(), queue: queue.clone(), queue_attached: AtomicBool::new(true), resources: RefCell::new(Vec::new()) })))
     }
     pub fn device(&self) -> &Device { self.0.queue.device() }
-    pub(crate) fn ensure_recording(&self, operation: &str) -> Result<(), Error> {
-        self.0.lifetime.ensure_live(operation)?;
-        if self.0.phase.get() != CommandPhase::Recording {
-            return Err(error(operation, ErrorKind::InvalidState, "command buffer is no longer recording"));
-        }
-        if self.0.lifetime.dependents.load(Ordering::Acquire) != 0 {
-            return Err(error(operation, ErrorKind::InvalidState, "command buffer already has an open encoder"));
-        }
-        Ok(())
-    }
 
     pub fn status(&self) -> Result<CommandBufferStatus, Error> {
         let operation = "Metal.Command_buffer.status";
@@ -641,8 +627,8 @@ impl CommandBuffer {
         let status = metal_sys::registry::command_buffer_status(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
         let status = match status { 0 => CommandBufferStatus::NotEnqueued, 1 => CommandBufferStatus::Enqueued, 2 => CommandBufferStatus::Committed, 3 => CommandBufferStatus::Scheduled, 4 => CommandBufferStatus::Completed, 5 => CommandBufferStatus::Error, other => CommandBufferStatus::Unknown(other) };
         match status {
-            CommandBufferStatus::Completed => { self.0.phase.set(CommandPhase::Completed); self.0.resources.borrow_mut().clear(); }
-            CommandBufferStatus::Error => { self.0.phase.set(CommandPhase::Failed); self.0.resources.borrow_mut().clear(); }
+            CommandBufferStatus::Completed => { self.0.resources.borrow_mut().clear(); }
+            CommandBufferStatus::Error => { self.0.resources.borrow_mut().clear(); }
             _ => {}
         }
         Ok(status)
@@ -657,9 +643,8 @@ impl CommandBuffer {
         let operation = "Metal.Command_buffer.commit";
         enter_main(operation)?;
         self.0.lifetime.ensure_live(operation)?;
-        self.ensure_recording(operation)?;
         metal_sys::registry::command_buffer_commit(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
-        self.0.phase.set(CommandPhase::Submitted);
+
         Ok(())
     }
     pub fn wait_until_completed(&self) -> Result<(), Error> {
@@ -669,9 +654,9 @@ impl CommandBuffer {
         if matches!(state, CommandBufferStatus::NotEnqueued | CommandBufferStatus::Enqueued) { return Err(error(operation, ErrorKind::InvalidState, "command buffer has not been committed")); }
         metal_sys::native::wait_command_buffer(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
         self.0.resources.borrow_mut().clear();
-        self.0.phase.set(CommandPhase::Completed);
+
         if let Some(message) = metal_sys::native::command_buffer_error(&self.0.raw).map_err(|failure| sys_error(operation, failure))? {
-            self.0.phase.set(CommandPhase::Failed);
+
             return Err(error(operation, ErrorKind::DeviceLost, &message));
         }
         Ok(())
@@ -679,7 +664,6 @@ impl CommandBuffer {
     pub fn destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
     pub fn present(&self, drawable: &crate::native::surface::Drawable, time: PresentTime) -> Result<(), Error> {
         let operation = "Metal.Command_buffer.present";
-        self.ensure_recording(operation)?;
         drawable.ensure_live(operation)?;
         if drawable.is_presentation_scheduled() { return Err(error(operation, ErrorKind::InvalidState, "drawable is already scheduled for presentation")); }
         if !self.device().same(drawable.device()) { return Err(error(operation, ErrorKind::CrossDevice, "drawable belongs to another Metal device")); }
@@ -757,7 +741,6 @@ impl ComputePipeline {
     }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
-    pub(crate) fn device(&self) -> &Device { &self.0.device }
 }
 
 struct ComputeEncoderInner { raw: metal_sys::Handle, lifetime: Lifetime, command_buffer: CommandBuffer, ended: AtomicBool }
@@ -775,7 +758,6 @@ impl ComputeEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         let operation = "Metal.Compute_encoder.create";
         enter_main(operation)?;
-        command_buffer.ensure_recording(operation)?;
         let raw = metal_sys::registry::command_buffer_compute_encoder(command_buffer.raw()).map_err(|failure| sys_error(operation, failure))?;
         command_buffer.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
         Ok(Self(Arc::new(ComputeEncoderInner { raw, lifetime: Lifetime::new(), command_buffer: command_buffer.clone(), ended: AtomicBool::new(false) })))

@@ -84,21 +84,16 @@ fn state_error(operation: &str, message: &str) -> Error {
     error::make(operation, ErrorKind::InvalidState, message)
 }
 
-fn valid(configuration: &Configuration) -> bool {
-    configuration.logical_width > 0
-        && configuration.logical_height > 0
-        && configuration.physical_width > 0
-        && configuration.physical_height > 0
-        && (1..=3).contains(&configuration.max_acquired)
+pub fn validate_configuration(operation: &str, configuration: &Configuration) -> Result<(), Error> {
+    if configuration.logical_width <= 0 || configuration.logical_height <= 0
+        || configuration.physical_width <= 0 || configuration.physical_height <= 0
+        || !(1..=3).contains(&configuration.max_acquired) {
+        Err(invalid(operation, "surface dimensions/capacity are invalid"))
+    } else { Ok(()) }
 }
 
 pub fn create(device: &Device, configuration: Configuration) -> Result<Surface, Error> {
-    if !valid(&configuration) {
-        return Err(invalid(
-            "Ogpu.Surface.create",
-            "surface dimensions/capacity are invalid",
-        ));
-    }
+    validate_configuration("Ogpu.Surface.create", &configuration)?;
     Ok(Surface(Arc::new(Mutex::new(SurfaceData {
         id: NEXT_SURFACE.fetch_add(1, Ordering::Relaxed),
         device: device.clone(),
@@ -127,12 +122,7 @@ pub fn configure(surface: &Surface, configuration: Configuration) -> Result<(), 
     if surface.dead {
         return Err(state_error("Ogpu.Surface.configure", "surface is destroyed"));
     }
-    if !valid(&configuration) {
-        return Err(invalid(
-            "Ogpu.Surface.configure",
-            "surface dimensions/capacity are invalid",
-        ));
-    }
+    validate_configuration("Ogpu.Surface.configure", &configuration)?;
     invalidate(&mut surface);
     surface.config = configuration;
     Ok(())

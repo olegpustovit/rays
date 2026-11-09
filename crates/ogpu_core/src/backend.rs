@@ -402,7 +402,7 @@ pub struct Argument(Rc<ArgumentInner>);
 struct ArgumentInner { raw: RefCell<Option<Box<dyn DriverArgument>>>, length: i64, alignment: i64, device: Device, dead: Cell<bool> }
 #[derive(Clone)]
 pub struct RenderEncoder(Rc<RenderInner>);
-struct RenderInner { raw: RefCell<Option<Box<dyn DriverRenderEncoder>>>, commands: Commands, open: Cell<bool>, pipeline_set: Cell<bool>, indirect: Cell<bool>, target: (TextureFormat, u8) }
+struct RenderInner { raw: RefCell<Option<Box<dyn DriverRenderEncoder>>>, commands: Commands, open: Cell<bool>, pipeline_set: Cell<bool>, indirect: Cell<bool>, target: (TextureFormat, u8), extent: (i64, i64) }
 
 // A dead wrapper keeps identity and validation metadata, never driver callbacks/native owners.
 // Access follows the existing liveness/state guards; failed transitions retain the payload.
@@ -684,7 +684,7 @@ pub fn create_texture(device: &Device, descriptor: TextureDescriptor) -> Result<
     device.0.children.set(device.0.children.get() + 1);
     Ok(Texture { resource: make_resource(device, raw), texture_descriptor: descriptor })
 }
-pub fn create_depth_texture(device: &Device, descriptor: TextureDescriptor) -> Result<Texture, Error> {
+pub fn create_depth_texture(device: &Device, mut descriptor: TextureDescriptor) -> Result<Texture, Error> {
     const OP: &str = "Backend.create_depth_texture";
     live(OP, device)?;
     crate::validation::validate_texture(&device.0.capabilities, &descriptor)?;
@@ -693,11 +693,12 @@ pub fn create_depth_texture(device: &Device, descriptor: TextureDescriptor) -> R
     {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "depth textures are render-attachment only"));
     }
+    descriptor.format = TextureFormat::Depth32Float;
     let raw = device.0.raw().create_depth_texture(&descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Texture { resource: make_resource(device, raw), texture_descriptor: descriptor })
 }
-pub fn create_memoryless_texture(device: &Device, depth: bool, descriptor: TextureDescriptor) -> Result<Texture, Error> {
+pub fn create_memoryless_texture(device: &Device, depth: bool, mut descriptor: TextureDescriptor) -> Result<Texture, Error> {
     const OP: &str = "Backend.create_memoryless_texture";
     live(OP, device)?;
     require(OP, device, Feature::MemorylessAttachments)?;
@@ -705,6 +706,7 @@ pub fn create_memoryless_texture(device: &Device, depth: bool, descriptor: Textu
     if descriptor.usage.as_slice() != &[TextureUsage::RenderAttachment] {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "memoryless textures are render-attachment only"));
     }
+    if depth { descriptor.format = TextureFormat::Depth32Float; }
     let raw = device.0.raw().create_memoryless_texture(depth, &descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Texture { resource: make_resource(device, raw), texture_descriptor: descriptor })
@@ -722,8 +724,7 @@ pub fn create_queue(device: &Device) -> Result<Queue, Error> {
 pub fn create_surface(device: &Device, configuration: Configuration) -> Result<Surface, Error> {
     const OP: &str = "Backend.create_surface";
     live(OP, device)?;
-    let portable = surface::create(&device.0.handle, configuration.clone())?;
-    surface::destroy(&portable);
+    surface::validate_configuration(OP, &configuration)?;
     let raw = device.0.raw().create_surface(&configuration)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Surface(Rc::new(SurfaceInner {
@@ -754,24 +755,27 @@ pub fn read_buffer(buffer: &Buffer, offset: i64, length: i64) -> Result<Vec<u8>,
     buffer_range(OP, buffer, offset, length)?;
     buffer.resource.0.raw().read(offset, length)
 }
-pub fn read_texture(texture: &Texture, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
-    const OP: &str = "Backend.read_texture";
+fn texture_read_length(operation: &str, texture: &Texture, bytes_per_row: i64) -> Result<usize, Error> {
     let d = &texture.texture_descriptor;
-    if texture.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "texture is destroyed")); }
-    if bytes_per_row <= 0 || d.height < 0 || d.height > i64::MAX / bytes_per_row {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid"));
+    if texture.resource.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "texture is destroyed")); }
+    if d.format == TextureFormat::Depth32Float || d.sample_count != 1 {
+        return Err(make_error(operation, ErrorKind::Unsupported, "depth and multisample textures are not host readable"));
     }
-    let Ok(length) = usize::try_from(bytes_per_row * d.height) else { return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid")); };
+    let texel_bytes = types::texel_bytes(d.format);
+    let minimum = d.width.checked_mul(texel_bytes);
+    if minimum.is_none_or(|minimum| bytes_per_row < minimum) || bytes_per_row % texel_bytes != 0 || d.height <= 0 {
+        return Err(make_error(operation, ErrorKind::InvalidArgument, "row pitch is invalid"));
+    }
+    bytes_per_row.checked_mul(d.height).and_then(|bytes| usize::try_from(bytes).ok())
+        .ok_or_else(|| make_error(operation, ErrorKind::InvalidArgument, "row pitch is invalid"))
+}
+pub fn read_texture(texture: &Texture, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
+    let length = texture_read_length("Backend.read_texture", texture, bytes_per_row)?;
     texture.resource.0.raw().read(0, length)
 }
 pub fn read_texture_into(texture: &Texture, bytes_per_row: i64, destination: &mut [u8]) -> Result<(), Error> {
     const OP: &str = "Backend.read_texture_into";
-    let d = &texture.texture_descriptor;
-    if texture.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "texture is destroyed")); }
-    if bytes_per_row <= 0 || d.height < 0 || d.height > i64::MAX / bytes_per_row {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid"));
-    }
-    let Ok(length) = usize::try_from(bytes_per_row * d.height) else { return Err(make_error(OP, ErrorKind::InvalidArgument, "row pitch is invalid")); };
+    let length = texture_read_length(OP, texture, bytes_per_row)?;
     if destination.len() != length { return Err(make_error(OP, ErrorKind::InvalidArgument, "destination length does not match texture extent")); }
     texture.resource.0.raw().read_into(0, destination, 0, length)
 }
@@ -796,6 +800,7 @@ pub fn configure(surface: &Surface, configuration: Configuration) -> Result<(), 
     const OP: &str = "Backend.configure";
     if surface.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "surface is destroyed")); }
     if surface.0.frames.get() != 0 { return Err(make_error(OP, ErrorKind::InvalidState, "surface has acquired frames")); }
+    crate::surface::validate_configuration(OP, &configuration)?;
     surface.0.raw().configure(&configuration)?;
     *surface.0.configuration.borrow_mut() = configuration;
     Ok(())
@@ -1675,6 +1680,9 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     if target.colors.len() > 1 { return Err(make_error(OP, ErrorKind::Unsupported, "multiple color attachments are not exposed")); }
     let color = &target.colors[0];
     attachment_check(OP, &device, &color.texture)?;
+    if color.texture.texture_descriptor.format == TextureFormat::Depth32Float {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "color attachment has a depth format"));
+    }
     let width = color.texture.texture_descriptor.width;
     let height = color.texture.texture_descriptor.height;
     let samples = color.texture.texture_descriptor.sample_count;
@@ -1688,7 +1696,7 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
             return Err(make_error(OP, ErrorKind::InvalidArgument, "a resolve texture needs a Store or Resolve store action")),
         Some(resolve) => {
             attachment_check(OP, &device, resolve)?;
-            if !same_extent(resolve) || resolve.texture_descriptor.sample_count != 1 {
+            if !same_extent(resolve) || resolve.texture_descriptor.sample_count != 1 || resolve.texture_descriptor.format != color.texture.texture_descriptor.format {
                 return Err(make_error(OP, ErrorKind::InvalidArgument, "resolve texture extent or sample count differs"));
             }
         }
@@ -1696,6 +1704,9 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     }
     if let Some(depth) = &target.depth {
         attachment_check(OP, &device, &depth.depth_texture)?;
+        if depth.depth_texture.texture_descriptor.format != TextureFormat::Depth32Float {
+            return Err(make_error(OP, ErrorKind::InvalidArgument, "depth attachment requires a depth format"));
+        }
         if !same_extent(&depth.depth_texture) || depth.depth_texture.texture_descriptor.sample_count != samples {
             return Err(make_error(OP, ErrorKind::InvalidArgument, "depth attachment extent or sample count differs"));
         }
@@ -1722,7 +1733,7 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
     let raw = commands.0.raw().render_encoder(&driver_target)?;
     commands.0.state.set(CommandsState::Encoding);
     let encoder = RenderEncoder(Rc::new(RenderInner {
-        raw: RefCell::new(Some(raw)), commands: commands.clone(), open: Cell::new(true), pipeline_set: Cell::new(false), indirect: Cell::new(false), target: (color.texture.texture_descriptor.format, samples.ilog2() as u8),
+        raw: RefCell::new(Some(raw)), commands: commands.clone(), open: Cell::new(true), pipeline_set: Cell::new(false), indirect: Cell::new(false), target: (color.texture.texture_descriptor.format, samples.ilog2() as u8), extent: (width, height),
     }));
     *commands.0.encoder.borrow_mut() = Some(ActiveEncoder::Render(Rc::downgrade(&encoder.0)));
     Ok(encoder)
@@ -1805,6 +1816,10 @@ pub fn set_scissor(encoder: &RenderEncoder, rect: Rect) -> Result<(), Error> {
     const OP: &str = "Backend.set_scissor";
     open_render(OP, encoder)?;
     valid_rect(OP, rect)?;
+    let (width, height) = encoder.0.extent;
+    if rect.x > width || rect.width > width - rect.x || rect.y > height || rect.height > height - rect.y {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "scissor rectangle is outside the render pass"));
+    }
     encoder.0.raw().set_scissor(rect)
 }
 pub fn set_cull(encoder: &RenderEncoder, cull: Cull) -> Result<(), Error> {
@@ -1984,7 +1999,8 @@ fn buffer_texture_region(
     if !buffer.buffer_descriptor.usage.contains(&buffer_usage) || !texture.texture_descriptor.usage.contains(&texture_usage) {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "buffer or texture usage does not permit the copy"));
     }
-    if !texture_range(&texture.texture_descriptor, mip, origin, extent)
+    if texture.texture_descriptor.sample_count != 1
+        || !texture_range(&texture.texture_descriptor, mip, origin, extent)
         || !valid_pitches(types::texel_bytes(texture.texture_descriptor.format), extent, row, image)
     {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "texture region or row pitch is invalid"));
@@ -2103,7 +2119,7 @@ mod ownership_tests {
         #[cfg(target_pointer_width = "64")]
         {
             assert_eq!(std::mem::size_of::<ComputeInner>(), 40);
-            assert_eq!(std::mem::size_of::<RenderInner>(), 40);
+            assert_eq!(std::mem::size_of::<RenderInner>(), 56);
         }
         assert!(valid_draw("test", Primitive::LineStrip, 0, 1, 1).is_err());
         valid_draw("test", Primitive::LineStrip, 0, 2, 1).unwrap();
@@ -2172,9 +2188,19 @@ mod ownership_tests {
         reject(ErrorKind::Unsupported, icb_set_pipeline(&icb, 0, &render));
         let pass = RenderEncoder(Rc::new(RenderInner {
             raw: RefCell::new(None), commands, open: Cell::new(true), pipeline_set: Cell::new(false),
-            indirect: Cell::new(false), target: (TextureFormat::Rgba8Unorm, 0),
+            indirect: Cell::new(false), target: (TextureFormat::Rgba8Unorm, 0), extent: (4, 4),
         }));
+        pass.0.commands.0.state.set(CommandsState::Encoding);
         render_compatible("test", &pass, &render).unwrap();
+        let error = set_scissor(&pass, Rect { x: 3, y: 0, width: 2, height: 4 }).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidArgument);
+        assert_eq!(error.operation, "Backend.set_scissor");
+        assert_eq!(error.message, "scissor rectangle is outside the render pass");
+        // Command sequencing rejects before the fake DriverCommands payload is inspected.
+        assert_eq!(blit_encoder(&pass.0.commands).err().unwrap().kind, ErrorKind::InvalidState);
+        assert_eq!(compute_encoder(&pass.0.commands).err().unwrap().kind, ErrorKind::InvalidState);
+        assert_eq!(commit(&pass.0.commands).unwrap_err().kind, ErrorKind::InvalidState);
+
         reject(ErrorKind::InvalidState, draw(&pass, Primitive::TriangleList, 0, 3, Some(1)));
         reject(ErrorKind::InvalidArgument, set_stage_buffer(&pass, ShaderStage::Vertex, 0, Some(17), &buffer));
         pass.0.pipeline_set.set(true);
@@ -2195,6 +2221,42 @@ mod ownership_tests {
             pipeline(PipelineShape::Vertex, Some((pipeline::ColorFormat::Rgba8Unorm, 4)), false),
             compute,
         ] { reject(ErrorKind::InvalidArgument, render_compatible("test", &pass, &wrong)); }
+    }
+
+    #[test]
+    fn texture_and_sampler_arguments_are_checked_before_driver_entry() {
+        let device = device();
+        let texture = Texture {
+            resource: make_resource(&device, Box::new(Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) })),
+            texture_descriptor: TextureDescriptor { label: None, width: 4, height: 4, depth: 1, mip_levels: 1,
+                sample_count: 1, format: TextureFormat::Rgba8Unorm, usage: vec![TextureUsage::RenderAttachment] },
+        };
+        for row in [-1, 0, 15, 17, i64::MAX] {
+            assert_eq!(read_texture(&texture, row).unwrap_err().kind, ErrorKind::InvalidArgument);
+            assert_eq!(read_texture_into(&texture, row, &mut [0; 64]).unwrap_err().kind, ErrorKind::InvalidArgument);
+        }
+        assert_eq!(read_texture(&texture, 16).unwrap(), [7; 64]);
+        let buffer = Buffer { resource: texture.resource.clone(), memory: Memory::Shared,
+            buffer_descriptor: BufferDescriptor { label: None, size: 1024, usage: vec![BufferUsage::CopySrc] } };
+
+        let mut depth = texture.clone();
+        depth.texture_descriptor.format = TextureFormat::Depth32Float;
+        assert_eq!(read_texture(&depth, 16).unwrap_err().kind, ErrorKind::Unsupported);
+        let queue = Queue(Rc::new(RefCell::new(QueueInner { raw: RefCell::new(None), device: device.clone(), dead: false,
+            completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0. } })));
+        let commands = Commands(Rc::new(CommandsInner { raw: RefCell::new(None), queue,
+            state: Cell::new(CommandsState::Recording), encoder: RefCell::new(None) }));
+        let blit = BlitEncoder(Rc::new(BlitInner { raw: RefCell::new(None), commands: commands.clone(), open: Cell::new(false) }));
+        assert_eq!(buffer_to_texture(&blit, &buffer, None, 256, 1024, &texture, None, None, Extent { width: 4, height: 4, depth: 1 }).unwrap_err().kind, ErrorKind::InvalidState);
+        assert_eq!(end_blit(&blit).unwrap_err().kind, ErrorKind::InvalidState);
+        let color = |texture| ColorAttachment { texture, resolve: None, load: Load::Clear, store: Store::Store, clear: (0.,0.,0.,1.) };
+        assert_eq!(render_encoder(&commands, &RenderTarget { colors: vec![color(depth.clone())], depth: None }).err().unwrap().kind, ErrorKind::InvalidArgument);
+        assert_eq!(render_encoder(&commands, &RenderTarget { colors: vec![color(texture.clone())], depth: Some(DepthAttachment {
+            depth_texture: texture, depth_load: Load::Clear, depth_store: Store::Store, depth_clear: 1. }) }).err().unwrap().kind, ErrorKind::InvalidArgument);
+        let sampler = SamplerDescriptor { label: None, min_filter: types::SamplerFilter::Nearest, mag_filter: types::SamplerFilter::Nearest,
+            mip_filter: types::MipFilter::NoMip, address_u: types::AddressMode::ClampToEdge, address_v: types::AddressMode::ClampToEdge,
+            lod_min: 0., lod_max: f64::MAX, max_anisotropy: 1 };
+        assert_eq!(create_sampler(&device, sampler).err().unwrap().kind, ErrorKind::InvalidArgument);
     }
 
     #[test]

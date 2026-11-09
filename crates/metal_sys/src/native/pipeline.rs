@@ -27,7 +27,7 @@ pub fn render_encoder_use_resources(
     usage: i32,
     stages: i32,
 ) -> Result<(), Error> {
-    if resources.is_empty() { return Err(Error::InvalidArgument("render resources must not be empty")); }
+    if resources.is_empty() { return Err(Error::InvalidArgument("render resources must not be empty".into())); }
     #[cfg(target_vendor = "apple")]
     {
         let resources = resources.iter().map(|(kind, handle)| {
@@ -120,7 +120,7 @@ pub fn create_compute_pipeline(
 ) -> Result<(Handle, Vec<Binding>), Error> {
     #[cfg(target_vendor = "apple")]
     {
-        let label = label.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels must not contain NUL"))?;
+        let label = label.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels must not contain NUL".into()))?;
         let mut output = std::ptr::null_mut();
         let mut bindings = std::ptr::null_mut();
         let mut count = 0usize;
@@ -159,9 +159,9 @@ pub fn create_render_pipeline(
 ) -> Result<(Handle, (Vec<Binding>, Vec<Binding>)), Error> {
     #[cfg(target_vendor = "apple")]
     {
-        let label = label.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels must not contain NUL"))?;
-        let vertex = CString::new(vertex).map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL"))?;
-        let fragment = fragment.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL"))?;
+        let label = label.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels must not contain NUL".into()))?;
+        let vertex = CString::new(vertex).map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL".into()))?;
+        let fragment = fragment.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL".into()))?;
         let mut output = std::ptr::null_mut();
         let mut message = std::ptr::null();
         let status = unsafe {

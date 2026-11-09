@@ -200,9 +200,8 @@ impl Surface {
             return Err(fail(op, ErrorKind::InvalidState, "surface has presentations in flight"));
         }
         let native = metal_config(self.0.readable_drawables_for_test, config)?;
-        // preflight the portable state with a probe
-        let probe = portable_surface::create(self.0.device.handle(), config.clone())?;
-        portable_surface::destroy(&probe);
+        // Preflight before changing the native layer or its live frames.
+        portable_surface::validate_configuration(op, config)?;
         self.0.layer.configure(native)?;
         self.stale_frames();
         portable_surface::configure(&self.0.portable, config.clone())
@@ -309,9 +308,8 @@ impl PendingPresentation {
             return Err(fail(op, ErrorKind::Capacity, "bounded presentation slot is already in use"));
         }
         surface.validate(op, frame)?;
-        let device = &surface.0.device;
-        let descriptor = source.descriptor(device)?;
-        let format = source.format(device)?;
+        let descriptor = source.descriptor();
+        let format = descriptor.format;
         if format != TextureFormat::Rgba8Unorm {
             return Err(fail(op, ErrorKind::InvalidArgument, "presentation source must use RGBA8 format"));
         }

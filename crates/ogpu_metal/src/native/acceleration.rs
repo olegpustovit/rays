@@ -65,9 +65,6 @@ impl AccelerationStructure {
     pub(crate) fn lifetime(&self) -> &Lifetime {
         &self.0.lifetime
     }
-    pub(crate) fn device(&self) -> &Device {
-        &self.0.device
-    }
 }
 
 pub use metal_sys::native::acceleration::{Geometry, Keyframe, IndexBuffer as Index, GeometryCommon, Motion, Sizes};
@@ -158,7 +155,6 @@ impl AccelerationEncoder {
     pub fn create(command_buffer: &CommandBuffer) -> Result<Self, Error> {
         const OP: &str = "Metal.Acceleration_encoder.create";
         enter_main(OP)?;
-        command_buffer.ensure_recording(OP)?;
         let raw = metal_sys::registry::command_buffer_acceleration_encoder(command_buffer.raw()).map_err(|failure| sys_error(OP, failure))?;
         command_buffer.lifetime().attach();
         Ok(Self(Arc::new(AccelerationEncoderInner {

@@ -43,14 +43,14 @@ pub struct CommandBufferDiagnostics {
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Error { Unavailable, WrongThread, Native(String), InvalidArgument(&'static str), InvalidHandle }
+pub enum Error { Unavailable, WrongThread, Native(String), Unsupported(String), InvalidArgument(std::borrow::Cow<'static, str>), InvalidHandle }
 
 impl Error {
     pub(crate) unsafe fn from_native(status: i32, message: *const c_char) -> Self {
         if status == 2 { return Self::Unavailable; }
         let text = if message.is_null() { "Metal operation failed".to_owned() }
         else { unsafe { CStr::from_ptr(message) }.to_string_lossy().into_owned() };
-        Self::Native(text)
+        match status { 3 => Self::InvalidArgument(text.into()), 4 => Self::Unsupported(text), _ => Self::Native(text) }
     }
 }
 
@@ -164,8 +164,8 @@ pub mod native {
     pub fn compile_library(device: &Handle, source: &str, label: Option<&str>) -> Result<Handle, Error> {
         #[cfg(target_vendor = "apple")]
         {
-            let source = std::ffi::CString::new(source).map_err(|_| Error::InvalidArgument("Metal source may not contain NUL"))?;
-            let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels may not contain NUL"))?;
+            let source = std::ffi::CString::new(source).map_err(|_| Error::InvalidArgument("Metal source may not contain NUL".into()))?;
+            let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels may not contain NUL".into()))?;
             let label = label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr());
             let mut output = std::ptr::null_mut();
             let mut message: *const c_char = std::ptr::null();
@@ -199,7 +199,7 @@ pub mod native {
     pub fn find_function(library: &Handle, name: &str) -> Result<Handle, Error> {
         #[cfg(target_vendor = "apple")]
         {
-            let name = std::ffi::CString::new(name).map_err(|_| Error::InvalidArgument("Metal names may not contain NUL"))?;
+            let name = std::ffi::CString::new(name).map_err(|_| Error::InvalidArgument("Metal names may not contain NUL".into()))?;
             let mut output = std::ptr::null_mut();
             let mut message: *const c_char = std::ptr::null();
             let status = unsafe { rays_metal_function_find(library.as_native_ptr()?, name.as_ptr(), &mut output, &mut message) };
@@ -213,10 +213,10 @@ pub mod native {
     pub fn specialize_function(library: &Handle, name: &str, constants: &[(String, i32, i64, f64)], label: Option<&str>) -> Result<Handle, Error> {
         #[cfg(target_vendor = "apple")]
         {
-            let name = std::ffi::CString::new(name).map_err(|_| Error::InvalidArgument("Metal names may not contain NUL"))?;
-            let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels may not contain NUL"))?;
+            let name = std::ffi::CString::new(name).map_err(|_| Error::InvalidArgument("Metal names may not contain NUL".into()))?;
+            let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels may not contain NUL".into()))?;
             let label_pointer = label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr());
-            let names = constants.iter().map(|item| std::ffi::CString::new(item.0.as_str()).map_err(|_| Error::InvalidArgument("function-constant names may not contain NUL"))).collect::<Result<Vec<_>, _>>()?;
+            let names = constants.iter().map(|item| std::ffi::CString::new(item.0.as_str()).map_err(|_| Error::InvalidArgument("function-constant names may not contain NUL".into()))).collect::<Result<Vec<_>, _>>()?;
             let raw = constants.iter().zip(&names).map(|(value, name)| RawFunctionConstant { name: name.as_ptr(), tag: value.1, integral: value.2, floating: value.3 }).collect::<Vec<_>>();
             let mut output = std::ptr::null_mut();
             let mut message: *const c_char = std::ptr::null();
@@ -233,7 +233,7 @@ pub mod native {
     pub fn create_texture(device: &Handle, descriptor: &TextureDescriptor, label: Option<&str>) -> Result<Handle, Error> {
         #[cfg(target_vendor = "apple")]
         {
-            let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal strings must not contain NUL"))?;
+            let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal strings must not contain NUL".into()))?;
             let label_pointer = label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr());
             let mut output = std::ptr::null_mut();
             let mut message: *const c_char = std::ptr::null();
@@ -339,7 +339,7 @@ pub mod native {
     }
 
     pub fn use_accelerations(encoder: &Handle, structures: &[Handle]) -> Result<(), Error> {
-        if structures.is_empty() { return Err(Error::InvalidArgument("acceleration structure list must not be empty")); }
+        if structures.is_empty() { return Err(Error::InvalidArgument("acceleration structure list must not be empty".into())); }
         #[cfg(target_vendor = "apple")]
         {
             let pointers = structures.iter().map(Handle::as_native_ptr).collect::<Result<Vec<_>, _>>()?;
@@ -387,7 +387,7 @@ pub mod native {
             if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
             let handle = unsafe { Handle::from_native(output)? };
             let pointer = NonNull::new(mapping).ok_or(Error::InvalidHandle)?;
-            let values = usize::try_from(length / 4).map_err(|_| Error::InvalidArgument("mapped buffer is too large"))?;
+            let values = usize::try_from(length / 4).map_err(|_| Error::InvalidArgument("mapped buffer is too large".into()))?;
             let mapping = MappedBuffer { handle: handle.clone(), pointer, values };
             Ok((handle, mapping))
         }
@@ -418,9 +418,9 @@ pub mod native {
     unsafe impl Sync for SharedBufferReadback {}
     impl SharedBufferReadback {
         pub fn read(&self, offset: u64, length: usize) -> Result<Vec<u8>, Error> {
-            let offset = usize::try_from(offset).map_err(|_| Error::InvalidArgument("readback offset exceeds address space"))?;
+            let offset = usize::try_from(offset).map_err(|_| Error::InvalidArgument("readback offset exceeds address space".into()))?;
             if offset > self.length || length > self.length - offset {
-                return Err(Error::InvalidArgument("readback range exceeds buffer"));
+                return Err(Error::InvalidArgument("readback range exceeds buffer".into()));
             }
             Ok(unsafe { slice::from_raw_parts(self.pointer.as_ptr().add(offset), length) }.to_vec())
         }
@@ -435,7 +435,7 @@ pub mod native {
             let status = unsafe { raw_buffer_readback(buffer.as_native_ptr()?, &mut pointer, &mut length, &mut message) };
             if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
             let pointer = NonNull::new(pointer).ok_or(Error::InvalidHandle)?;
-            let length = usize::try_from(length).map_err(|_| Error::InvalidArgument("readback allocation exceeds address space"))?;
+            let length = usize::try_from(length).map_err(|_| Error::InvalidArgument("readback allocation exceeds address space".into()))?;
             Ok(SharedBufferReadback { _handle: buffer.clone(), pointer, length })
         }
         #[cfg(not(target_vendor = "apple"))]

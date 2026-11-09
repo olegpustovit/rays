@@ -160,7 +160,7 @@ impl Function {
             raw,
             lifetime: Lifetime::new(),
             function: self.clone(),
-            device: self.device().clone(),
+            _device: self.device().clone(),
             encoded_length,
             alignment,
             retained: std::collections::HashMap::new(),
@@ -248,25 +248,14 @@ impl ShaderArgumentResource {
             Self::DepthStencil(value) => value.lifetime(),
         }
     }
-    fn device(&self) -> &Device {
-        match self {
-            Self::Buffer(value) => value.device(),
-            Self::Texture(value) => value.device(),
-            Self::Sampler(value) => value.device(),
-            Self::AccelerationStructure(value) => value.device(),
-            Self::IndirectCommandBuffer(value) => value.device(),
-            Self::RenderPipeline(value) => value.device(),
-            Self::ComputePipeline(value) => value.device(),
-            Self::DepthStencil(value) => value.device(),
-        }
-    }
+
 }
 
 pub struct ShaderArgumentEncoder {
     raw: metal_sys::Handle,
     lifetime: Lifetime,
     function: Function,
-    device: Device,
+    _device: Device,
     encoded_length: u64,
     alignment: u64,
     retained: std::collections::HashMap<i64, ShaderArgumentResource>,
@@ -278,12 +267,7 @@ impl ShaderArgumentEncoder {
 
     pub fn set(&mut self, index: u64, resource: ShaderArgumentResource) -> Result<(), Error> {
         const OP: &str = "Metal.Shader_argument_encoder.set";
-        self.lifetime.ensure_live(OP)?;
         let index = i64::try_from(index).map_err(|_| error(OP, ErrorKind::InvalidArgument, "argument index exceeds signed 64-bit range"))?;
-        resource.lifetime().ensure_live(OP)?;
-        if !self.device.same(resource.device()) {
-            return Err(error(OP, ErrorKind::CrossDevice, "argument resource belongs to another device"));
-        }
         let tag = match &resource {
             ShaderArgumentResource::Buffer(_) => 0,
             ShaderArgumentResource::Texture(_) => 1,
@@ -306,14 +290,6 @@ impl ShaderArgumentEncoder {
 
     pub fn set_argument_buffer(&mut self, buffer: &crate::native::resource::Buffer, offset: u64) -> Result<(), Error> {
         const OP: &str = "Metal.Shader_argument_encoder.set_argument_buffer";
-        self.lifetime.ensure_live(OP)?;
-        buffer.lifetime().ensure_live(OP)?;
-        if !self.device.same(buffer.device()) {
-            return Err(error(OP, ErrorKind::CrossDevice, "argument buffer belongs to another device"));
-        }
-        if offset > buffer.length() {
-            return Err(error(OP, ErrorKind::InvalidArgument, "argument buffer range is invalid"));
-        }
         let offset = i64::try_from(offset).map_err(|_| error(OP, ErrorKind::InvalidArgument, "argument buffer offset exceeds signed 64-bit range"))?;
         metal_sys::native::library::argument_encoder_set_buffer(&self.raw, buffer.raw(), offset, 0, 0).map_err(|failure| sys_error(OP, failure))?;
         let key = -1;

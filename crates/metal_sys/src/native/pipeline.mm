@@ -461,7 +461,7 @@ extern "C" int32_t rays_metal_blit_encoder_copy_buffer_to_texture(
   if (message) *message = nullptr;
   if (source_bytes_per_row == 0 || source_bytes_per_image == 0 || width == 0 ||
       height == 0 || depth == 0)
-    return rays_metal_set_error(message, "invalid buffer-to-texture blit dimensions or pitch");
+    return rays_metal_set_invalid_argument(message, "invalid buffer-to-texture blit dimensions or pitch");
   @try {
     @autoreleasepool {
       id<MTLBlitCommandEncoder> encoder = (__bridge id<MTLBlitCommandEncoder>)
@@ -481,7 +481,7 @@ extern "C" int32_t rays_metal_blit_encoder_copy_buffer_to_texture(
           height > std::numeric_limits<NSUInteger>::max() || depth > std::numeric_limits<NSUInteger>::max() ||
           source_bytes_per_row > std::numeric_limits<NSUInteger>::max() ||
           source_bytes_per_image > std::numeric_limits<NSUInteger>::max())
-        return rays_metal_set_error(message, "buffer-to-texture blit handles or range are invalid");
+        return rays_metal_set_invalid_argument(message, "buffer-to-texture blit handles or range are invalid");
       const NSUInteger copy_width = static_cast<NSUInteger>(width);
       const NSUInteger copy_height = static_cast<NSUInteger>(height);
       const NSUInteger copy_depth = static_cast<NSUInteger>(depth);
@@ -505,7 +505,7 @@ extern "C" int32_t rays_metal_blit_encoder_copy_buffer_to_texture(
       case MTLPixelFormatDepth32Float: bytes_per_block = 4; break;
       case MTLPixelFormatRGBA16Float: bytes_per_block = 8; break;
       case MTLPixelFormatRGBA32Float: bytes_per_block = 16; break;
-      default: return rays_metal_set_error(message, "buffer-to-texture blit format is unsupported by the binding");
+      default: return rays_metal_set_invalid_argument(message, "buffer-to-texture blit format is unsupported by the binding");
       }
       const NSUInteger row_blocks = copy_width / block_width + (copy_width % block_width != 0);
       const NSUInteger image_rows = copy_height / block_height + (copy_height % block_height != 0);
@@ -518,10 +518,10 @@ extern "C" int32_t rays_metal_blit_encoder_copy_buffer_to_texture(
           image_rows != 0 && row_pitch > std::numeric_limits<NSUInteger>::max() / image_rows ||
           image_pitch < row_pitch * image_rows ||
           copy_depth != 0 && image_pitch > std::numeric_limits<NSUInteger>::max() / copy_depth)
-        return rays_metal_set_error(message, "buffer-to-texture blit range or row pitch is invalid");
+        return rays_metal_set_invalid_argument(message, "buffer-to-texture blit range or row pitch is invalid");
       const NSUInteger required = image_pitch * copy_depth;
       if (required > source.length - source_offset)
-        return rays_metal_set_error(message, "buffer-to-texture blit exceeds the source buffer");
+        return rays_metal_set_invalid_argument(message, "buffer-to-texture blit exceeds the source buffer");
       [encoder copyFromBuffer:source
                  sourceOffset:static_cast<NSUInteger>(source_offset)
             sourceBytesPerRow:row_pitch

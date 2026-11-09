@@ -78,7 +78,7 @@ unsafe fn parse(node: *mut RawReflectionNode, depth: usize, remaining: &mut usiz
             element: if node.element.is_null() { None } else { Some(Box::new(unsafe { parse(node.element, depth + 1, remaining) }?)) },
         }),
         3 => {
-            if node.member_count > *remaining || (node.member_count != 0 && node.members.is_null()) { return Err(Error::InvalidArgument("Metal reflection exceeds member limits")); }
+            if node.member_count > *remaining || (node.member_count != 0 && node.members.is_null()) { return Err(Error::InvalidArgument("Metal reflection exceeds member limits".into())); }
             *remaining -= node.member_count;
             let mut output = Vec::with_capacity(node.member_count);
             if node.member_count != 0 {
@@ -97,7 +97,7 @@ unsafe fn parse(node: *mut RawReflectionNode, depth: usize, remaining: &mut usiz
                 if !node.dimensions.is_null() || node.dimension_count != 0 { return Err(Error::InvalidHandle); }
                 Ok(ReflectedType::TensorReference { data_type: node.data_type, access: node.access, tensor_data_type: node.tensor_data_type, index_type: node.index_type, dimensions: None })
             } else {
-                if node.dimension_count > MAX_MEMBERS || (node.dimension_count != 0 && node.dimensions.is_null()) { return Err(Error::InvalidArgument("Metal tensor reflection exceeds dimension limits")); }
+                if node.dimension_count > MAX_MEMBERS || (node.dimension_count != 0 && node.dimensions.is_null()) { return Err(Error::InvalidArgument("Metal tensor reflection exceeds dimension limits".into())); }
                 let dimensions = if node.dimension_count == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(node.dimensions, node.dimension_count) }.to_vec() };
                 Ok(ReflectedType::TensorReference { data_type: node.data_type, access: node.access, tensor_data_type: node.tensor_data_type, index_type: node.index_type, dimensions: Some(dimensions) })
             }

@@ -30,19 +30,6 @@ fn address(value: AddressMode) -> native::AddressMode {
 }
 
 pub fn create(device: &Device, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
-    let operation = "Ogpu_metal.Sampler.create";
-    if device.destroyed() {
-        return Err(fail(operation, ErrorKind::StaleHandle, "device is destroyed"));
-    }
-    if descriptor.max_anisotropy < 1
-        || descriptor.max_anisotropy > 16
-        || !descriptor.lod_min.is_finite()
-        || !descriptor.lod_max.is_finite()
-        || descriptor.lod_min < 0.
-        || descriptor.lod_max < descriptor.lod_min
-    {
-        return Err(fail(operation, ErrorKind::InvalidArgument, "sampler limits are invalid"));
-    }
     let native = native::SamplerDescriptor {
         min_filter: descriptor.min_filter,
         mag_filter: descriptor.mag_filter,

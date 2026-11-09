@@ -19,7 +19,7 @@ use ogpu_metal::{
     backend,
     buffer::{self, Buffer},
     device::Device,
-    impl_, library, pipeline, texture,
+    impl_, library, pipeline,
 };
 
 fn die(failure: Error) -> ! {
@@ -108,36 +108,35 @@ fn gpu_foundation() {
 }
 
 fn gpu_texture() {
-    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
-    let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
+    let device = be::create_device(backend::create()).unwrap_or_else(|failure| die(failure));
+    let other = be::create_device(backend::create()).unwrap_or_else(|failure| die(failure));
     let descriptor = TextureDescriptor {
-        label: Some("ogpu-metal-texture".to_owned()),
-        width: 4,
-        height: 4,
-        depth: 1,
-        mip_levels: 1,
-        sample_count: 1,
-        format: TextureFormat::Rgba8Unorm,
-        usage: vec![TextureUsage::TextureBinding, TextureUsage::TextureCopySrc, TextureUsage::TextureCopyDst],
+        label: Some("ogpu-metal-texture".to_owned()), width: 4, height: 4, depth: 1, mip_levels: 1,
+        sample_count: 1, format: TextureFormat::Rgba8Unorm,
+        usage: vec![TextureUsage::TextureBinding, TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc, TextureUsage::TextureCopyDst],
     };
-    let invalid = TextureDescriptor { mip_levels: 8, ..descriptor.clone() };
-    expect(ErrorKind::InvalidArgument, texture::create(&device, Memory::Shared, TextureFormat::Rgba8Unorm, &invalid).err());
-    let value = texture::create(&device, Memory::Shared, TextureFormat::Rgba8Unorm, &descriptor).unwrap_or_else(|failure| die(failure));
-    let bytes = value.read_bytes(&device, 0, 16).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidArgument, be::create_texture(&device, TextureDescriptor { mip_levels: 8, ..descriptor.clone() }).err());
+    let value = be::create_texture(&device, descriptor).unwrap_or_else(|failure| die(failure));
+    let bytes = be::read_texture(&value, 16).unwrap_or_else(|failure| die(failure));
     assert_eq!(bytes.len(), 64, "texture readback length");
     let mut direct = vec![0xffu8; 64];
-    value.read_bytes_into(&device, 0, 16, &mut direct).unwrap_or_else(|failure| die(failure));
+    be::read_texture_into(&value, 16, &mut direct).unwrap_or_else(|failure| die(failure));
     assert_eq!(direct, bytes, "texture direct read-into mismatch");
-    expect(ErrorKind::InvalidArgument, value.read_bytes_into(&device, 0, 16, &mut [0u8; 63]).err());
-    expect(ErrorKind::CrossDevice, value.descriptor(&other).err());
-    expect(ErrorKind::InvalidState, device.destroy().err());
-    value.destroy().unwrap_or_else(|failure| die(failure));
-    device.destroy().unwrap_or_else(|failure| die(failure));
-    other.destroy().unwrap_or_else(|failure| die(failure));
-    drop((value, device, other));
-    assert_eq!(live() + 2, before, "texture live-handle delta");
-    println!("ogpu_metal texture: both host read paths agree, typed rejections, zero live-handle delta");
+    expect(ErrorKind::InvalidArgument, be::read_texture_into(&value, 16, &mut [0u8; 63]).err());
+    let queue = be::create_queue(&other).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::CrossDevice, be::render_encoder(&commands, &be::RenderTarget { colors: vec![be::ColorAttachment {
+        texture: value.clone(), resolve: None, load: Load::Clear, store: Store::Store, clear: (0.,0.,0.,1.) }], depth: None }).err());
+    be::abandon(&commands).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, be::destroy_device(&device).err());
+    be::destroy_texture(&value).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::StaleHandle, be::read_texture(&value, 16).err());
+    be::destroy_device(&device).unwrap_or_else(|failure| die(failure));
+    be::destroy_device(&other).unwrap_or_else(|failure| die(failure));
+    assert_eq!(live(), before, "texture live-handle delta");
+    println!("ogpu_metal texture: both host read paths agree, core rejections, zero live-handle delta");
 }
 
 fn gpu_capabilities() {

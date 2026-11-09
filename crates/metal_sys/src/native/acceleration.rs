@@ -227,12 +227,12 @@ fn prepare_descriptor(descriptor: &Descriptor) -> Result<PreparedDescriptor, Err
     match descriptor {
         Descriptor::Primitive(value) => {
             if value.geometries.is_empty() {
-                return Err(Error::InvalidArgument("primitive descriptor requires geometry"));
+                return Err(Error::InvalidArgument("primitive descriptor requires geometry".into()));
             }
             let expected = match value.motion {
                 Some(motion) if motion.keyframe_count >= 2 => usize::try_from(motion.keyframe_count)
-                    .map_err(|_| Error::InvalidArgument("motion keyframe count exceeds native bounds"))?,
-                Some(_) => return Err(Error::InvalidArgument("motion requires at least two keyframes")),
+                    .map_err(|_| Error::InvalidArgument("motion keyframe count exceeds native bounds".into()))?,
+                Some(_) => return Err(Error::InvalidArgument("motion requires at least two keyframes".into())),
                 None => 1,
             };
             for geometry in &value.geometries {
@@ -244,7 +244,7 @@ fn prepare_descriptor(descriptor: &Descriptor) -> Result<PreparedDescriptor, Err
                     }
                 };
                 if primary != expected || secondary.is_some_and(|count| count != expected) {
-                    return Err(Error::InvalidArgument("acceleration geometry keyframe counts do not match the descriptor"));
+                    return Err(Error::InvalidArgument("acceleration geometry keyframe counts do not match the descriptor".into()));
                 }
             }
             let mut prepared = PreparedDescriptor {
@@ -425,7 +425,7 @@ fn prepare_descriptor(descriptor: &Descriptor) -> Result<PreparedDescriptor, Err
         }
         Descriptor::Instances(value) => {
             if value.structures.is_empty() {
-                return Err(Error::InvalidArgument("instance descriptor requires structures"));
+                return Err(Error::InvalidArgument("instance descriptor requires structures".into()));
             }
             let buffer = value.buffer.as_native_ptr()?;
             let mut prepared = PreparedDescriptor {

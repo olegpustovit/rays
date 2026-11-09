@@ -3,6 +3,7 @@
 #include <QuartzCore/CAMetalLayer.h>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <string>
 #include <new>
 #include <type_traits>
@@ -755,6 +756,11 @@ extern "C" int32_t rays_metal_render_depth_stencil(MetalHandle *receiver, MetalH
 }
 extern "C" int32_t rays_metal_render_encoder_set_viewport(MetalHandle *receiver, MTLViewport arg0, const char **message) {
   if (message) *message = nullptr;
+  if (!std::isfinite(arg0.originX) || !std::isfinite(arg0.originY) || !std::isfinite(arg0.width) ||
+      !std::isfinite(arg0.height) || !std::isfinite(arg0.znear) || !std::isfinite(arg0.zfar) ||
+      arg0.width <= 0 || arg0.height <= 0 || arg0.znear < 0 || arg0.znear > 1 ||
+      arg0.zfar < 0 || arg0.zfar > 1 || arg0.znear > arg0.zfar)
+    return rays_metal_set_invalid_argument(message, "viewport is non-finite, empty, or outside the depth range");
   @try {
     @autoreleasepool {
       id<MTLRenderCommandEncoder> object = checked_object(receiver, KIND_RENDER_ENCODER);

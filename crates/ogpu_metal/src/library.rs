@@ -33,9 +33,6 @@ pub fn compile_native(operation: &str, device: &Device, shader_value: &Shader) -
 
 pub fn create(device: &Device, shader_value: &Shader) -> Result<Library, Error> {
     let op = "Ogpu_metal.Library.create";
-    if device.destroyed() {
-        return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
-    }
     let metal = compile_native(op, device, shader_value)?;
     device.attach_resource();
     Ok(Library(Rc::new(LibraryInner {
@@ -48,10 +45,6 @@ pub fn create(device: &Device, shader_value: &Shader) -> Result<Library, Error> 
 }
 
 impl Library {
-    pub fn validate(&self, device: &Device) -> Result<(), Error> {
-        handle::validate_for("Ogpu_metal.Library.validate", device.handle(), &self.0.handle)
-    }
-
     pub fn destroy(&self) -> Result<(), Error> {
         let op = "Ogpu_metal.Library.destroy";
         if self.0.dead.get() {

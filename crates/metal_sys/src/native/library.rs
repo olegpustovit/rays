@@ -108,8 +108,8 @@ pub fn library_warm(device: &Handle, source: &str, entry: &str) -> Result<Warm, 
     #[cfg(target_vendor = "apple")]
     {
         use std::ffi::{c_char, CString};
-        let source = CString::new(source).map_err(|_| Error::InvalidArgument("Metal source may not contain NUL"))?;
-        let entry = CString::new(entry).map_err(|_| Error::InvalidArgument("Metal entry may not contain NUL"))?;
+        let source = CString::new(source).map_err(|_| Error::InvalidArgument("Metal source may not contain NUL".into()))?;
+        let entry = CString::new(entry).map_err(|_| Error::InvalidArgument("Metal entry may not contain NUL".into()))?;
         let mut output = std::ptr::null_mut();
         let mut message: *const c_char = std::ptr::null();
         let status = unsafe { rays_metal_library_warm(device.as_native_ptr()?, source.as_ptr(), entry.as_ptr(), &mut output, &mut message) };

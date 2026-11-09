@@ -26,7 +26,7 @@ unsafe extern "C" {
 }
 #[cfg(target_vendor="apple")]
 unsafe fn finish(status:i32, output:*mut NativeHandle, message:*const c_char)->Result<Handle,Error>{ if status!=0 { return Err(unsafe{Error::from_native(status,message)}); } unsafe{Handle::from_native(output)} }
-fn label(value:Option<&str>)->Result<Option<std::ffi::CString>,Error>{ value.map(std::ffi::CString::new).transpose().map_err(|_|Error::InvalidArgument("Metal labels may not contain NUL")) }
+fn label(value:Option<&str>)->Result<Option<std::ffi::CString>,Error>{ value.map(std::ffi::CString::new).transpose().map_err(|_|Error::InvalidArgument("Metal labels may not contain NUL".into())) }
 pub fn create_sampler(device:&Handle,descriptor:&SamplerDescriptor,name:Option<&str>)->Result<Handle,Error>{
  #[cfg(target_vendor="apple")] { let name=label(name)?; let mut out=std::ptr::null_mut();let mut msg=std::ptr::null();let status=unsafe{raw_sampler(device.as_native_ptr()?,descriptor,name.as_ref().map_or(std::ptr::null(),|x|x.as_ptr()),&mut out,&mut msg)};unsafe{finish(status,out,msg)} }
  #[cfg(not(target_vendor="apple"))] {let _=(device,descriptor,name);Err(Error::Unavailable)}
@@ -40,8 +40,8 @@ pub fn create_render_pass()->Result<Handle,Error>{
  #[cfg(not(target_vendor="apple"))] {Err(Error::Unavailable)}
 }
 pub fn set_render_pass_sizes(pass:&Handle,width:u64,height:u64,samples:u64)->Result<(),Error>{
- if width==0||height==0||samples==0{return Err(Error::InvalidArgument("render pass sizes must be positive"));}
- #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{raw_sizes(pass.as_native_ptr()?,i64::try_from(width).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds"))?,i64::try_from(height).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds"))?,1,i64::try_from(samples).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds"))?,&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
+ if width==0||height==0||samples==0{return Err(Error::InvalidArgument("render pass sizes must be positive".into()));}
+ #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{raw_sizes(pass.as_native_ptr()?,i64::try_from(width).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds".into()))?,i64::try_from(height).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds".into()))?,1,i64::try_from(samples).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds".into()))?,&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
  #[cfg(not(target_vendor="apple"))] {let _=(pass,width,height,samples);Err(Error::Unavailable)}
 }
 pub fn set_render_pass_attachments(pass:&Handle,color:&Handle,depth:Option<&Handle>,stencil:Option<&Handle>,clear:[f64;4])->Result<(),Error>{

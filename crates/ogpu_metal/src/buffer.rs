@@ -6,7 +6,6 @@ use ogpu_core::{
     error::ErrorKind,
     handle::{self, ResourceHandle},
     types::{BufferDescriptor, BufferUsage},
-    validation,
 };
 use std::{
     cell::Cell,
@@ -62,11 +61,6 @@ fn wrap(device: &Device, descriptor: &BufferDescriptor, metal: native::Buffer) -
 }
 
 pub fn create(device: &Device, memory: Memory, descriptor: &BufferDescriptor) -> Result<Buffer, Error> {
-    let operation = "Ogpu_metal.Buffer.create";
-    if device.destroyed() {
-        return Err(fail(operation, ErrorKind::StaleHandle, "device is destroyed"));
-    }
-    validation::validate_buffer(&device.capabilities(), descriptor)?;
     validate_memory(descriptor, memory)?;
     let (storage, cache) = match memory {
         Memory::DeviceLocal => (native::StorageMode::Private, native::CpuCacheMode::DefaultCache),

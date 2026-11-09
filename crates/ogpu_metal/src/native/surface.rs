@@ -218,9 +218,9 @@ fn ensure_surface_live(surface: &SurfaceInner, operation: &str) -> Result<(), Er
 }
 
 fn configure_raw(layer: &metal_sys::Handle, configuration: Configuration) -> Result<(), metal_sys::Error> {
-    let width = u64::try_from(configuration.width).map_err(|_| metal_sys::Error::InvalidArgument("drawable width is too large"))?;
-    let height = u64::try_from(configuration.height).map_err(|_| metal_sys::Error::InvalidArgument("drawable height is too large"))?;
-    let maximum_drawables = u64::try_from(configuration.maximum_drawables).map_err(|_| metal_sys::Error::InvalidArgument("maximum drawable count is too large"))?;
+    let width = u64::try_from(configuration.width).map_err(|_| metal_sys::Error::InvalidArgument("drawable width is too large".into()))?;
+    let height = u64::try_from(configuration.height).map_err(|_| metal_sys::Error::InvalidArgument("drawable height is too large".into()))?;
+    let maximum_drawables = u64::try_from(configuration.maximum_drawables).map_err(|_| metal_sys::Error::InvalidArgument("maximum drawable count is too large".into()))?;
     metal_sys::native::surface::configure_layer(
         layer,
         width,

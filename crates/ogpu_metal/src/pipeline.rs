@@ -9,7 +9,7 @@ use crate::native::{BlendFactor, BlendOperation, BlendState, ColorAttachment, Pr
 use ogpu_core::{
     error::ErrorKind,
     handle::{self, ResourceHandle},
-    pipeline::{self, Blend, ColorFormat, RenderDescriptor},
+    pipeline::{Blend, ColorFormat, RenderDescriptor},
     shader::{self, Binding, BindingKind, ConstantValue, EntryPoint, Stage},
 };
 use std::{
@@ -148,7 +148,6 @@ fn metal_constants(constants: &[(String, ConstantValue)]) -> Vec<(String, native
 
 pub fn create_compute_from_library(device: &Device, library_value: &Library, entry: &str, constants: &[(String, ConstantValue)], interface: &[Binding]) -> Result<Pipeline, Error> {
     let op = "Ogpu_metal.Pipeline.create_compute_from_library";
-    library_value.validate(device)?;
     let native = library_value.metal();
     let found = if constants.is_empty() {
         native::Function::find(native, entry)
@@ -270,10 +269,6 @@ fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blen
 /// function is retained for argument encoders and indirect command buffers.
 pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: Blend, device: &Device, descriptor: &RenderDescriptor) -> Result<Pipeline, Error> {
     let op = "Ogpu_metal.Pipeline.create_render_owned";
-    if device.destroyed() {
-        return Err(fail(op, ErrorKind::StaleHandle, "device is destroyed"));
-    }
-    pipeline::create_render(&device.capabilities(), descriptor)?;
     let value = build_render(indirect, topology, blend, op, device, descriptor)?;
     if !indirect {
         return Ok(value);

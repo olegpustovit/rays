@@ -40,15 +40,17 @@ extern "C" int32_t rays_metal_sampler_create(MetalHandle *device_handle,
       s->compare_function < 0 || s->compare_function > 7 || !std::isfinite(s->lod_min) ||
       !std::isfinite(s->lod_max) || !std::isfinite(s->lod_bias) || s->lod_min < 0 ||
       s->lod_max < s->lod_min || s->lod_bias < -16 || s->lod_bias > 15.999f)
-    return rays_metal_set_error(message, "invalid sampler descriptor");
+    return rays_metal_set_invalid_argument(message, "invalid sampler descriptor");
   @try { @autoreleasepool {
     id<MTLDevice> device = (__bridge id<MTLDevice>)rays_metal_handle_object(device_handle, KIND_DEVICE);
     if (device == nil) return rays_metal_set_error(message, "invalid Metal device handle");
     if ((!s->normalized_coordinates && (s->address_s != 0 || s->address_t != 0 || s->address_r != 0 || s->mip_filter != 0 || s->max_anisotropy != 1)))
-      return rays_metal_set_error(message, "unnormalized coordinates require clamp-to-edge, no mip filter and anisotropy one");
-    if (@available(macOS 26.0, *)) {
-    } else if (s->reduction_mode != 0 || s->lod_bias != 0) {
-      return rays_metal_set_unavailable(message, "sampler reduction and LOD bias require macOS 26 or newer");
+      return rays_metal_set_invalid_argument(message, "unnormalized coordinates require clamp-to-edge, no mip filter and anisotropy one");
+    if (s->reduction_mode != 0 || s->lod_bias != 0) {
+      uint8_t supported = 0;
+      const int32_t status = rays_metal_device_supports_sampler_reduction(device_handle, &supported, message);
+      if (status != 0) return status;
+      if (!supported) return rays_metal_set_unsupported(message, "sampler reduction modes and LOD bias require macOS 26 and Apple GPU family 10");
     }
     MTLSamplerDescriptor *descriptor = [[MTLSamplerDescriptor alloc] init];
     descriptor.minFilter = static_cast<MTLSamplerMinMagFilter>(s->min_filter);
@@ -153,7 +155,7 @@ extern "C" int32_t rays_metal_render_pass_set_actions(MetalHandle *pass_handle, 
   if (message) *message = nullptr;
   // -1 (and clear_depth -1.0, clear_stencil UINT32_MAX) leave that field as it is: the single-attachment wrappers below must not reset the others.
   const bool keep_depth = clear_depth == -1.0, keep_stencil = clear_stencil == UINT32_MAX;
-  if (color_load < -1 || color_load > 2 || color_store < -1 || color_store > 3 || depth_load < -1 || depth_load > 2 || depth_store < -1 || depth_store > 1 || stencil_load < -1 || stencil_load > 2 || stencil_store < -1 || stencil_store > 1 || (!keep_depth && (!std::isfinite(clear_depth) || clear_depth < 0 || clear_depth > 1)) || (!keep_stencil && clear_stencil > 255)) return rays_metal_set_error(message, "invalid render-pass actions");
+  if (color_load < -1 || color_load > 2 || color_store < -1 || color_store > 3 || depth_load < -1 || depth_load > 2 || depth_store < -1 || depth_store > 1 || stencil_load < -1 || stencil_load > 2 || stencil_store < -1 || stencil_store > 1 || (!keep_depth && (!std::isfinite(clear_depth) || clear_depth < 0 || clear_depth > 1)) || (!keep_stencil && clear_stencil > 255)) return rays_metal_set_invalid_argument(message, "invalid render-pass actions");
   @try { @autoreleasepool {
     MTLRenderPassDescriptor *pass = (__bridge MTLRenderPassDescriptor *)rays_metal_handle_object(pass_handle, KIND_RENDER_PASS_DESCRIPTOR);
     if (!pass) return rays_metal_set_error(message, "invalid render-pass handle");
@@ -175,6 +177,8 @@ extern "C" int32_t rays_metal_render_pass_color_load_action(MetalHandle *pass, i
   return rays_metal_render_pass_set_actions(pass, action, -1, -1, -1, -1.0, -1, -1, UINT32_MAX, message);
 }
 extern "C" int32_t rays_metal_render_pass_depth_stencil_actions(MetalHandle *pass, int32_t depth_load, int32_t depth_store, double clear_depth, int32_t stencil_load, int32_t stencil_store, uint32_t clear_stencil, const char **message) {
+  if (clear_depth == -1.0 || clear_stencil == UINT32_MAX)
+    return rays_metal_set_invalid_argument(message, "explicit depth/stencil clear cannot use a keep sentinel");
   return rays_metal_render_pass_set_actions(pass, -1, -1, depth_load, depth_store, clear_depth, stencil_load, stencil_store, clear_stencil, message);
 }
 

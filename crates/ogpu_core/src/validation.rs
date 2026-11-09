@@ -90,6 +90,13 @@ pub fn validate_texture_shape(
     }
 }
 
+fn validate_texture_usage(operation: &str, usage: &[TextureUsage], samples: i64, mips: i64, depth: i64) -> Result<(), Error> {
+    if samples > 1 && (mips != 1 || depth != 1 || usage != [TextureUsage::RenderAttachment]) {
+        return Err(invalid(operation, "multisample textures require one attachment-only mip and depth slice"));
+    }
+    Ok(())
+}
+
 pub fn validate_texture_profile(capabilities: &Caps, profile: &TextureProfile) -> Result<(), Error> {
     let operation = "Ogpu.Validation.validate_texture_profile";
     let limits = capabilities.limits;
@@ -107,17 +114,7 @@ pub fn validate_texture_profile(capabilities: &Caps, profile: &TextureProfile) -
     if profile.usage.windows(2).any(|pair| pair[0] as u8 >= pair[1] as u8) {
         return Err(invalid(operation, "texture usage must be sorted and unique"));
     }
-    if profile.sample_count > 1
-        && (profile.mip_levels != 1
-            || profile.depth != 1
-            || profile.usage.len() != 1
-            || profile.usage[0] != TextureUsage::RenderAttachment)
-    {
-        return Err(invalid(
-            operation,
-            "multisample textures require one attachment-only mip and depth slice",
-        ));
-    }
+    validate_texture_usage(operation, &profile.usage, profile.sample_count, profile.mip_levels, profile.depth)?;
     if profile.storage == Memory::Shared && profile.sample_count > 1 {
         return Err(invalid(operation, "shared multisample textures are unsupported"));
     }
@@ -151,6 +148,10 @@ pub fn validate_texture(capabilities: &Caps, descriptor: &TextureDescriptor) -> 
         descriptor.sample_count,
         descriptor.usage.len() as i64,
     )?;
+    if descriptor.usage.iter().enumerate().any(|(i, usage)| descriptor.usage[..i].contains(usage)) {
+        return Err(invalid(operation, "texture usage contains duplicates"));
+    }
+    validate_texture_usage(operation, &descriptor.usage, descriptor.sample_count, descriptor.mip_levels, descriptor.depth)?;
     if matches!(
         descriptor.format,
         TextureFormat::R8Unorm
@@ -181,6 +182,8 @@ pub fn validate_sampler(descriptor: &SamplerDescriptor) -> Result<(), Error> {
     validate_label(operation, descriptor.label.as_deref())?;
     if !descriptor.lod_min.is_finite()
         || !descriptor.lod_max.is_finite()
+        || !(descriptor.lod_min as f32).is_finite()
+        || !(descriptor.lod_max as f32).is_finite()
         || descriptor.lod_min < 0.0
         || descriptor.lod_max < descriptor.lod_min
         || descriptor.max_anisotropy < 1

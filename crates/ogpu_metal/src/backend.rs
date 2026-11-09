@@ -176,7 +176,7 @@ impl DriverResource for MetalTexture {
         } else if offset != 0 || height <= 0 || (length as i64) % height != 0 {
             Err(fail("Ogpu_metal.Backend.texture.read", ErrorKind::InvalidArgument, "texture read range is invalid"))
         } else {
-            self.value.read_bytes(&self.dev.device, 0, length as i64 / height)
+            self.value.read_bytes(length as i64 / height)
         }
     }
     fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error> {
@@ -186,7 +186,7 @@ impl DriverResource for MetalTexture {
         } else if offset != 0 || destination_offset != 0 || length != destination.len() || height <= 0 || (length as i64) % height != 0 {
             Err(fail("Ogpu_metal.Backend.texture.read_into", ErrorKind::InvalidArgument, "destination must exactly match the texture read range"))
         } else {
-            self.value.read_bytes_into(&self.dev.device, 0, length as i64 / height, destination)
+            self.value.read_bytes_into(length as i64 / height, destination)
         }
     }
     fn destroy(&self) -> Result<(), Error> {
