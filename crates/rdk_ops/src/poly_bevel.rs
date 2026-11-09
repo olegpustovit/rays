@@ -1,3 +1,4 @@
+use rays_math::float::{min as omin, max as omax};
 use std::sync::Arc;
 
 use rdk_core::support::Windows;
@@ -72,15 +73,6 @@ fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
         Some(name) if blank(name) => Err(fail(format!("{PREFIX}: {label} group name must not be empty"))),
         _ => Ok(()),
     }
-}
-
-/// Stdlib `min`/`max` on floats (NaN falls through to the second argument).
-fn omin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-
-fn omax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
 }
 
 fn length3(x: f64, y: f64, z: f64) -> f64 {

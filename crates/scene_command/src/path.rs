@@ -1,3 +1,4 @@
+use rays_math::float::{max as float_max, compare as compare_float};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
     pub x: f64,
@@ -74,11 +75,6 @@ fn finite(p: Point) -> bool {
 
 fn midpoint(a: Point, b: Point) -> Point {
     Point { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 }
-}
-
-/// OCaml Stdlib `max` (NaN-propagating as written in the source, unlike `f64::max`).
-fn ocaml_max(x: f64, y: f64) -> f64 {
-    if x >= y { x } else { y }
 }
 
 /// OCaml `Array.sort` (heap sort, not stable), reproduced step for step so that
@@ -195,7 +191,7 @@ fn cubic(
     tolerance_squared: f64,
 ) -> Result<(), Error> {
     if depth == 24
-        || ocaml_max(distance_to_line_squared(c1, a, b), distance_to_line_squared(c2, a, b))
+        || float_max(distance_to_line_squared(c1, a, b), distance_to_line_squared(c2, a, b))
             <= tolerance_squared
     {
         return add_point(output, b);
@@ -278,15 +274,6 @@ struct Crossing {
     x1: f64,
     winding: i32,
 }
-fn compare_float(a: f64, b: f64) -> std::cmp::Ordering {
-    match (a.is_nan(), b.is_nan()) {
-        (true, true) => std::cmp::Ordering::Equal,
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        (false, false) => if a < b { std::cmp::Ordering::Less } else if a > b { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal },
-    }
-}
-
 
 pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Mesh, Error> {
     let mut open_contour = false;

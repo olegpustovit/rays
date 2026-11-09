@@ -3,7 +3,6 @@
 //! Construction uses an in-place median partition, skips globally flat axes, and stores one packed
 //! point-index permutation plus at most three active axis codes. Queries are deterministic: equal
 //! distances are ordered by the original point index.
-use std::cmp::Ordering;
 use std::sync::Mutex;
 
 use rdk_core::{cancel, error, group, packed, support};
@@ -88,7 +87,7 @@ pub fn create(
     // Widest axis first; ties by axis number. Only axes with a positive span are active.
     let mut ranked = [(max[0] - min[0], 0_i64), (max[1] - min[1], 1), (max[2] - min[2], 2)];
     ranked.sort_by(|left, right| {
-        right.0.partial_cmp(&left.0).unwrap_or(Ordering::Equal).then(left.1.cmp(&right.1))
+        right.0.total_cmp(&left.0).then(left.1.cmp(&right.1))
     });
     let active = ranked.iter().filter(|(span, _)| *span > 0.0).count();
     let axes: Vec<i64> = if active == 0 {

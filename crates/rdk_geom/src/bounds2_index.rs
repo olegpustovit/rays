@@ -1,4 +1,5 @@
 //! Packed immutable BVH over two-dimensional closed bounds.
+use rays_math::float::{min as omin, max as omax};
 use rdk_core::{cancel, error, support};
 use rdk_core::error::Code;
 
@@ -22,14 +23,6 @@ pub struct T {
 
 fn invalid(operation: &str, message: &str) -> error::T {
     error::new(operation, Code::InvalidArgument, message.to_owned())
-}
-
-fn omin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-
-fn omax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
 }
 
 pub fn midpoint(lower: f64, upper: f64) -> f64 {

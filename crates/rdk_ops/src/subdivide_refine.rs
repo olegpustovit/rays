@@ -1,5 +1,6 @@
 //! Port of lib/rdk/ops/mesh/subdivide_refine.ml: stencil plans, creases, face-varying refinement,
 //! attribute/group remapping and local-part combination for polygon subdivision.
+pub(crate) use rays_math::float::{min as fmin, max as fmax};
 use std::sync::Arc;
 use rays_math::text_array::TextArray;
 use rdk_core::attribute::{self, Owner, Storage};
@@ -106,16 +107,6 @@ pub(crate) fn gf(values: &[f64], index: i64) -> f64 {
 
 pub(crate) fn gu(values: &[u8], index: i64) -> u8 {
     values[index as usize]
-}
-
-/// Stdlib `max` on floats: `if a >= b then a else b`.
-pub(crate) fn fmax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
-}
-
-/// Stdlib `min` on floats: `if a <= b then a else b`.
-pub(crate) fn fmin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
 }
 
 /// The `?grain` argument: positive, default 16 384.

@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+pub use rays_math::float::{min as float_min, max as float_max};
 use crate::{ty::Ty, value, Diagnostic};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,30 +249,6 @@ pub fn integer_apply(operation: Integer, a: i64, b: i64) -> Result<i64, crate::D
 #[inline]
 pub fn comparison_apply(operation: Comparison, a: i64, b: i64) -> bool {
     match operation { Comparison::Ilt => a < b, Comparison::Ile => a <= b, Comparison::Igt => a > b, Comparison::Ige => a >= b, Comparison::Ieq => a == b }
-}
-
-/// Minimum with NaN propagation and −0.0 ordered below +0.0 (IEEE total-order semantics for extrema).
-#[inline]
-pub fn float_min(x: f64, y: f64) -> f64 {
-    if x.is_nan() || y.is_nan() {
-        return f64::NAN;
-    }
-    if x == 0.0 && y == 0.0 {
-        return if x.is_sign_negative() { x } else { y };
-    }
-    if x < y { x } else { y }
-}
-
-/// Maximum with NaN propagation and +0.0 ordered above −0.0.
-#[inline]
-pub fn float_max(x: f64, y: f64) -> f64 {
-    if x.is_nan() || y.is_nan() {
-        return f64::NAN;
-    }
-    if x == 0.0 && y == 0.0 {
-        return if x.is_sign_negative() { y } else { x };
-    }
-    if x > y { x } else { y }
 }
 
 /// `ldexp` with the exponent truncated toward zero (`i64`), matching the host `ldexp` op.

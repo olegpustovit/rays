@@ -3,6 +3,7 @@
 //! OCaml exceptions (`Cancelled`, `Invalid_argument`) become `Err` values: `inv` marks an
 //! `Invalid_argument` with the reserved code `invalid_argument` and `guard` turns it (and every
 //! cancellation) into the stable diagnostic each OCaml `try ... with` produced.
+use rays_math::float::{min as omin, max as omax, compare as float_compare};
 use std::cmp::Ordering;
 use std::sync::atomic::{AtomicI64, AtomicU8, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
@@ -66,28 +67,6 @@ fn cx(cancel: Option<&Arc<cancel::T>>) -> Option<&cancel::T> {
 
 fn u(index: i64) -> usize {
     index as usize
-}
-
-fn omin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-
-fn omax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
-}
-
-fn float_compare(a: f64, b: f64) -> Ordering {
-    if a < b {
-        Ordering::Less
-    } else if a > b {
-        Ordering::Greater
-    } else if a == b {
-        Ordering::Equal
-    } else if a.is_nan() {
-        if b.is_nan() { Ordering::Equal } else { Ordering::Less }
-    } else {
-        Ordering::Greater
-    }
 }
 
 fn is_nonzero(sign: Sign) -> bool {

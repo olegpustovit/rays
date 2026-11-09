@@ -1,6 +1,7 @@
 //! Port of lib/rdk/geom/exact/implicit_point.ml: exact homogeneous points used by
 //! mesh-arrangement kernels. `Invalid_argument` becomes a panic; indices are `i64`.
 //! The float filters keep OCaml's exact operation order (no FMA contraction).
+use rays_math::float::{min as float_min, max as float_max};
 use crate::exact_dyadic as exact;
 use crate::exact_dyadic::ldexp;
 use crate::exact_dyadic::scratch;
@@ -240,14 +241,6 @@ fn downward(value: f64) -> f64 {
 
 fn upward(value: f64) -> f64 {
     value.next_up()
-}
-
-fn float_min(left: f64, right: f64) -> f64 {
-    if left <= right { left } else { right }
-}
-
-fn float_max(left: f64, right: f64) -> f64 {
-    if left >= right { left } else { right }
 }
 
 fn ratio_interval(numerator: &exact::T, denominator: &exact::T) -> (f64, f64) {

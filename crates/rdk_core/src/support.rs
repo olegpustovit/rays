@@ -280,15 +280,7 @@ impl Drop for IdentityCache {
 fn compare(keys: &[f64], left: i64, right: i64) -> Ordering {
     let left_key = keys[usize::try_from(left).expect("nonnegative selection index")];
     let right_key = keys[usize::try_from(right).expect("nonnegative selection index")];
-    match (left_key.is_nan(), right_key.is_nan()) {
-        (true, true) => left.cmp(&right),
-        (true, false) => Ordering::Less,
-        (false, true) => Ordering::Greater,
-        (false, false) => left_key
-            .partial_cmp(&right_key)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| left.cmp(&right)),
-    }
+    rays_math::float::compare(left_key, right_key).then_with(|| left.cmp(&right))
 }
 
 fn median_pivot(keys: &[f64], order: &[i64], first: i64, middle: i64, last: i64) -> i64 {

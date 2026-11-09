@@ -359,7 +359,7 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f64, f64, f64, 
             // a tip that would sit on a rectangle of `avoid` (a graph card) moves up above it
             let left = (x + 12) as f64;
             let mut sorted: Vec<(f64, f64, f64, f64)> = avoid.to_vec();
-            sorted.sort_by(|(_, a, _, _), (_, b, _, _)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            sorted.sort_by(|(_, a, _, _), (_, b, _, _)| b.total_cmp(a));
             let mut top = top;
             for (ax, ay, aw, ah) in sorted {
                 if left < ax + aw && ax < left + w && top < ay + ah && ay < top + 24.0 {

@@ -1,6 +1,7 @@
 //! Packed deterministic unconstrained Delaunay triangulation in two dimensions.
 //!
 //! Combinatorial decisions use exact binary64 predicates; no epsilon participates in topology.
+use rays_math::float::compare as float_compare;
 use std::cmp::Ordering;
 
 use rays_math::rand;
@@ -9,7 +10,6 @@ use rdk_core::error::Code;
 
 use crate::exact_dyadic;
 use crate::predicates::{self, Sign};
-
 
 pub struct T {
     source_count: i64,
@@ -171,28 +171,14 @@ fn replace_neighbor_edge(
     Ok(())
 }
 
-/// OCaml `Float.compare`.
-fn float_compare(a: f64, b: f64) -> Ordering {
-    if a < b {
-        Ordering::Less
-    } else if a > b {
-        Ordering::Greater
-    } else if a == b {
-        Ordering::Equal
-    } else if a.is_nan() {
-        if b.is_nan() { Ordering::Equal } else { Ordering::Less }
-    } else {
-        Ordering::Greater
-    }
-}
-
 fn compare_source_position(x: &[f64], y: &[f64], left: i64, right: i64) -> Ordering {
     let (l, r) = (left as usize, right as usize);
-    let comparison = float_compare(x[l], x[r]);
+    // Numeric duplicate positions include both signed zeros; keep those keys adjacent.
+    let comparison = float_compare(0. + x[l], 0. + x[r]);
     if comparison != Ordering::Equal {
         return comparison;
     }
-    let comparison = float_compare(y[l], y[r]);
+    let comparison = float_compare(0. + y[l], 0. + y[r]);
     if comparison != Ordering::Equal {
         return comparison;
     }
@@ -281,7 +267,6 @@ fn frexp_exponent(value: f64) -> i64 {
     }
     biased - 1022
 }
-
 
 fn sign_int(sign: Sign) -> i64 {
     match sign {
@@ -683,5 +668,9 @@ mod tests {
         assert_eq!(source_unique(&t, 4).unwrap(), source_unique(&t, 2).unwrap());
         assert_eq!(unique_source(&t, source_unique(&t, 4).unwrap()).unwrap(), 2);
         assert!(source_unique(&t, 5).is_err());
+        let mixed_zeros = build(None, None, &[-0., 0., -0., 1.], &[0., 0., 1., 0.]).unwrap();
+        assert_eq!(mixed_zeros.triangle_points.len(), 3);
+        assert_eq!(source_unique(&mixed_zeros, 0).unwrap(), source_unique(&mixed_zeros, 1).unwrap());
+        assert_eq!(unique_source(&mixed_zeros, source_unique(&mixed_zeros, 0).unwrap()).unwrap(), 0);
     }
 }

@@ -1,4 +1,5 @@
 //! Deterministic triangulation of one simple outer contour with simple holes.
+use rays_math::float::{min as float_min, max as float_max, compare as float_compare};
 use rdk_core::{cancel, error, polygon_triangulation};
 
 const EPSILON: f64 = 1e-12;
@@ -16,44 +17,6 @@ impl From<error::T> for Stop {
 
 fn fail(message: &str) -> Stop {
     Stop::Fail(message.to_owned())
-}
-
-/// OCaml `Float.min`.
-fn float_min(x: f64, y: f64) -> f64 {
-    if y > x || (!y.is_sign_negative() && x.is_sign_negative()) {
-        if y.is_nan() { y } else { x }
-    } else if x.is_nan() {
-        x
-    } else {
-        y
-    }
-}
-
-/// OCaml `Float.max`.
-fn float_max(x: f64, y: f64) -> f64 {
-    if y > x || (!y.is_sign_negative() && x.is_sign_negative()) {
-        if x.is_nan() { x } else { y }
-    } else if y.is_nan() {
-        y
-    } else {
-        x
-    }
-}
-
-/// OCaml `Float.compare` (nan equals itself and sorts first).
-fn float_compare(a: f64, b: f64) -> std::cmp::Ordering {
-    use std::cmp::Ordering::*;
-    if a < b {
-        Less
-    } else if a > b {
-        Greater
-    } else if a == b {
-        Equal
-    } else if a.is_nan() {
-        if b.is_nan() { Equal } else { Less }
-    } else {
-        Greater
-    }
 }
 
 fn cross(x: &[f64], y: &[f64], a: i64, b: i64, c: i64) -> f64 {

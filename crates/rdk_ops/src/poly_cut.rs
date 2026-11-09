@@ -3,6 +3,7 @@
 //!
 //! OCaml wraps `cut` in `Error.guard ~operation:"poly_cut" ~code:"invalid_poly_cut"`: a failure has
 //! those fields and the OCaml message, a cancellation has code `cancelled`.
+use rays_math::float::max as omax;
 use std::sync::Arc;
 
 use rdk_core::{
@@ -64,11 +65,6 @@ fn kind_of(code: u8) -> topology::PrimitiveKind {
         1 => topology::PrimitiveKind::OpenPolyline,
         _ => topology::PrimitiveKind::ClosedPolyline,
     }
-}
-
-/// `Stdlib.max` on floats.
-fn omax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
 }
 
 fn selected(selection: Option<&group::T>, index: i64) -> bool {

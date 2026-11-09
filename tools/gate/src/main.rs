@@ -897,7 +897,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_mock", &["ogpu_core"][..]),
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
         ("ogpu_metal", &["ogpu_core", "metal"][..]),
-        ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys"][..]),
+        ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem", "scene_command"][..]),
         ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
         ("pxui_graph", &[

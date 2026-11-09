@@ -1,6 +1,7 @@
 //! Port of lib/rdk/boolean/boolean_face_arrangement.ml: exact planar splitting of one face's
 //! non-coplanar Boolean constraints.
 #![allow(non_snake_case)]
+use rays_math::float::{min as fmin, max as fmax, compare as fcmp};
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -162,18 +163,6 @@ fn between(first: &implicit_point::T, point: &implicit_point::T, second: &implic
     } else {
         compare(second, point) <= 0 && compare(point, first) <= 0
     }
-}
-
-// Stdlib.min / Stdlib.max on finite floats, tie to the first argument.
-fn fmin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-fn fmax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
-}
-
-fn fcmp(a: f64, b: f64) -> std::cmp::Ordering {
-    a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
 }
 
 fn sort_range(values: &mut [i64], first: usize, last: usize, compare: &dyn Fn(i64, i64) -> i64) {

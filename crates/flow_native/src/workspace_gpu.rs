@@ -283,7 +283,7 @@ fn owner(d: &Data) -> Result<(x::Gpu, h::T), Diagnostic> {
 }
 
 fn median3(mut runs: Vec<f64>) -> f64 {
-    runs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    runs.sort_by(|a, b| a.total_cmp(b));
     runs[1]
 }
 

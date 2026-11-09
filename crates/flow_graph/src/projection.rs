@@ -2074,7 +2074,7 @@ pub fn layout(o: &LayoutOptions, sc: &Scope) -> Layout {
         // a card that grew (a footer, a level) pushes the one it now covers down, and that one the next; never a dragged one
         let mut ord: Vec<usize> = (0..n).collect();
         ord.sort_by(|a, b| {
-            boxes[*a].y.partial_cmp(&boxes[*b].y).unwrap_or(std::cmp::Ordering::Equal).then(boxes[*a].x.partial_cmp(&boxes[*b].x).unwrap_or(std::cmp::Ordering::Equal))
+            boxes[*a].y.total_cmp(&boxes[*b].y).then(boxes[*a].x.total_cmp(&boxes[*b].x))
         });
         let mut grew: Vec<bool> = boxes.iter().map(|b| match (o.prev)(&b.path) { Some((_, _, pw, ph)) => pw != b.w || ph != b.h, None => false }).collect();
         let mut seen: Vec<bool> = vec![false; n];

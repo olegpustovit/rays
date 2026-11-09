@@ -1,6 +1,7 @@
 //! Port of lib/editor_core/panels.ml: the shell as data, a tree of panels. Pure and
 //! presentation-free.
 
+use flow_syntax::packed_ops::{float_min, float_max};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Panel {
     View(String),
@@ -147,27 +148,6 @@ pub fn at_ref<'a>(path: &[usize], tree: &'a Panels) -> Option<&'a Panels> {
 /// Owned copy of the subtree at `path` (prefer [`at_ref`] on hot paths).
 pub fn at(path: &[usize], tree: &Panels) -> Option<Panels> {
     at_ref(path, tree).cloned()
-}
-
-// OCaml's Float.min and Float.max propagate NaN; f64::min and f64::max do not.
-fn float_min(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        f64::NAN
-    } else if a < b {
-        a
-    } else {
-        b
-    }
-}
-
-fn float_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        f64::NAN
-    } else if a > b {
-        a
-    } else {
-        b
-    }
 }
 
 /// A ratio within 0.1-0.9, a fixed side of at least one point.

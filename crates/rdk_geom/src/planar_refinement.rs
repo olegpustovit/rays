@@ -2,6 +2,7 @@
 //!
 //! `Invalid_argument` sites that OCaml's top-level handler turns into `Error msg` are validated
 //! up front or returned as `Err(msg)`; nothing here relies on a panic.
+use rays_math::float::{min as omin, max as omax};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -15,7 +16,6 @@ use crate::predicates::Sign;
 
 const MASK63: u64 = (1u64 << 63) - 1;
 const MAX_INT: i64 = (1 << 62) - 1;
-
 
 pub struct T {
     initial_point_count: i64,
@@ -107,14 +107,6 @@ pub mod view {
     pub fn approximate_y(value: &T) -> &[f64] {
         &value.y
     }
-}
-
-fn omin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-
-fn omax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
 }
 
 fn to_ordering(value: i64) -> Ordering {

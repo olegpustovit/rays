@@ -447,7 +447,7 @@ fn route(items: &Items, a: (f64, f64), b: (f64, f64), from: &Option<Path>, into:
             blockers.push(boxr);
         }
     }
-    blockers.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+    blockers.sort_by(|x, y| x.0.total_cmp(&y.0));
     // cards stacked in the same columns are one obstacle
     let mut merged: Vec<(f64, f64, f64, f64)> = Vec::new();
     for (cx, cy, w, h) in blockers {

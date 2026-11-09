@@ -1,4 +1,5 @@
 //! Named group metadata (rename, delete, transfer) over one local group store.
+use rays_math::float::compare as float_compare;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -172,7 +173,6 @@ pub struct TransferParams {
     pub source: geometry::T,
     pub target: geometry::T,
 }
-
 
 fn owner_name(owner: Owner) -> &'static str {
     match owner {
@@ -509,10 +509,6 @@ fn target_owner_count(
             geometry::topology(geometry_value),
         )?),
     })
-}
-
-fn float_compare(left: f64, right: f64) -> std::cmp::Ordering {
-    left.partial_cmp(&right).unwrap_or_else(|| left.is_nan().cmp(&right.is_nan()).reverse())
 }
 
 fn copied_selection(

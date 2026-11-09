@@ -1,3 +1,4 @@
+use rays_math::float::compare as float_compare;
 use std::sync::Arc;
 use std::collections::HashMap;
 
@@ -203,21 +204,6 @@ pub(crate) fn select_string(source: &TextArray, mapping: &[i64]) -> TextArray {
     source.gather(mapping.iter().map(|&index| index as usize))
 }
 
-/// OCaml Float.compare: nan equals itself and sorts before every other float.
-pub(crate) fn float_compare(a: f64, b: f64) -> i64 {
-    if a < b {
-        -1
-    } else if a > b {
-        1
-    } else if a == b {
-        0
-    } else if a.is_nan() {
-        if b.is_nan() { 0 } else { -1 }
-    } else {
-        1
-    }
-}
-
 fn int_compare(a: i64, b: i64) -> i64 {
     if a < b { -1 } else if a > b { 1 } else { 0 }
 }
@@ -225,7 +211,7 @@ fn int_compare(a: i64, b: i64) -> i64 {
 /// Order two slots by value, then by point index.
 pub(crate) fn compare_float_entry(values: &[f64], points: &[i64], left: usize, right: usize) -> i64 {
     let compared = float_compare(values[left], values[right]);
-    if compared != 0 { compared } else { int_compare(points[left], points[right]) }
+    if !compared.is_eq() { compared as i64 } else { int_compare(points[left], points[right]) }
 }
 
 fn compare_int_entry(values: &[i64], points: &[i64], left: usize, right: usize) -> i64 {
@@ -376,11 +362,13 @@ fn sorted_float(
             let mut best_value = values[first];
             let mut run_first = first;
             for slot in first + 1..=last {
-                if slot == last || float_compare(values[slot], values[run_first]) != 0 {
+                if slot == last || values[slot] != values[run_first] {
                     let count = slot - run_first;
                     if count > best_count {
                         best_count = count;
-                        best_value = values[run_first];
+                        // Numeric modes merge signed zeros and retain the least source point.
+                        let representative = (run_first..slot).min_by_key(|&i| points[i]).unwrap();
+                        best_value = values[representative];
                     }
                     run_first = slot;
                 }
@@ -1491,16 +1479,39 @@ mod tests {
     }
 
     #[test]
-    fn float_ordering_matches_ocaml_compare() {
-        assert_eq!(float_compare(f64::NAN, f64::NAN), 0);
-        assert_eq!(float_compare(f64::NAN, 1.0), -1);
-        assert_eq!(float_compare(1.0, f64::NAN), 1);
-        assert_eq!(float_compare(-0.0, 0.0), 0);
+    fn float_ordering_uses_total_order_and_preserves_numeric_modes() {
+        use std::cmp::Ordering::*;
+        assert_eq!(float_compare(f64::NAN, f64::NAN), Equal);
+        assert_eq!(float_compare(f64::NAN, 1.0), Greater);
+        assert_eq!(float_compare(1.0, f64::NAN), Less);
+        assert_eq!(float_compare(-0.0, 0.0), Less);
+        let mode = sorted_float(None, 1, &clusters(), &[0., -0., 10., 1.], AttributeMethod::Mode).unwrap();
+        assert_eq!(mode[0].to_bits(), 0f64.to_bits(), "signed zero modes retain the first source sign");
         let mut values = vec![3.0, 1.0, 2.0, 1.0];
         let mut points = vec![3, 2, 1, 0];
         sort_range_f64(&mut values, &mut points, 0, 4);
         assert_eq!(values, vec![1.0, 1.0, 2.0, 3.0]);
         assert_eq!(points, vec![0, 2, 1, 3], "ties order by point index");
+        if std::env::var_os("RAYS_FLOAT_SORT_BENCH").is_some() {
+            let input: Vec<_> = (0..16_384u64).map(|i| {
+                let bits = i.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(97);
+                f64::from_bits((bits & 0x800f_ffff_ffff_ffff) | (((bits >> 16) % 2047) << 52))
+            }).collect();
+            let mut samples = Vec::new();
+            for _ in 0..5 {
+                let started = std::time::Instant::now();
+                for _ in 0..8 {
+                    let mut values = input.clone();
+                    let mut points: Vec<_> = (0..values.len() as i64).collect();
+                    sort_range_f64(&mut values, &mut points, 0, input.len());
+                    assert!(values.windows(2).all(|v| v[0] <= v[1]));
+                    std::hint::black_box((values, points));
+                }
+                samples.push(started.elapsed().as_micros());
+            }
+            samples.sort_unstable();
+            println!("D4 debug median (8 sorts of 16384 finite values): {} us", samples[2]);
+        }
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Port of lib/rdk/ops/mesh/remesh.ml: incremental isotropic remeshing (split, collapse, flip,
 //! smooth, project) over one local mutable triangle structure per iteration.
+use rays_math::float::max as float_max;
 use std::sync::Arc;
 
 use rdk_core::attribute::{self, Owner, Storage};
@@ -12,7 +13,6 @@ use rdk_core::support::Windows;
 use crate::subdivide_refine::{
     collect_edge_members, fmin, gf, gi,
 };
-
 
 const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
 
@@ -1231,10 +1231,6 @@ pub(crate) fn sort_candidates(bits: &mut [u64], keys: &mut [i64], count: usize) 
     pass(&mut counts, count, &scratch_bits, &scratch_keys, bits, keys, 16);
     pass(&mut counts, count, bits, keys, &mut scratch_bits, &mut scratch_keys, 32);
     pass(&mut counts, count, &scratch_bits, &scratch_keys, bits, keys, 48);
-}
-
-fn float_max(a: f64, b: f64) -> f64 {
-    rdk_geom::point_grid::float_max(a, b)
 }
 
 /// The triangle keeps a non-degenerate normal on the old side after `a` and `b` move to the

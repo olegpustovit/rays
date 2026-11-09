@@ -2,6 +2,7 @@
 //!
 //! Exact predicates own every affine, visibility, and horizon decision. Floating-point face
 //! distance is used only to choose a legal pivot from an already exactly classified outside set.
+use rays_math::float::compare as fcmp;
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{self, AtomicI64};
@@ -16,7 +17,6 @@ use rdk_geom::predicates::{self, Sign};
 
 const OPERATION: &str = "Rdk_mesh.Convex_hull.convex_hull";
 const GUARD_OPERATION: &str = "convex_hull";
-
 
 #[derive(Default)]
 pub struct Params {
@@ -51,17 +51,6 @@ fn norm(value: error::T) -> error::T {
         error::cancelled(GUARD_OPERATION)
     } else {
         value
-    }
-}
-
-fn fcmp(a: f64, b: f64) -> Ordering {
-    match a.partial_cmp(&b) {
-        Some(order) => order,
-        None => match (a.is_nan(), b.is_nan()) {
-            (true, true) => Ordering::Equal,
-            (true, false) => Ordering::Less,
-            _ => Ordering::Greater,
-        },
     }
 }
 

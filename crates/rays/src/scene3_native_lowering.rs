@@ -1,5 +1,6 @@
 //! Native lowering of `Scene3` views: packed meshes, Blinn-Phong and World uniforms, instance
 //! batches and the prepared-layer caches the renderer draws from.
+use rays_math::float::compare as float_compare;
 use crate::camera;
 use crate::idlist::{self, IdList, Item};
 use crate::light;
@@ -463,15 +464,6 @@ fn sun_fit(scene: &scene3::Scene3, sun: &world::sun) -> Result<Option<(mat4::T, 
     Ok(fit)
 }
 
-fn ocaml_float_compare(a: f64, b: f64) -> std::cmp::Ordering {
-    match (a.is_nan(), b.is_nan()) {
-        (true, true) => std::cmp::Ordering::Equal,
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
-    }
-}
-
 /// Word layout: see `source_scene3_world` in the runtime.
 fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> {
     let key: Item = Rc::new((world_identity(baked), sun.as_ref().map(|s| s.1.clone())));
@@ -520,7 +512,7 @@ fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> 
     };
     let id = fresh_resource_id();
     let mut lights = baked.lights.clone();
-    lights.sort_by(|a, b| ocaml_float_compare(power(b), power(a)));
+    lights.sort_by(|a, b| float_compare(power(b), power(a)));
     let camera_map = Rc::new(maps.camera.clone());
     let w = Rc::new(world_ {
         baked: baked.clone(),

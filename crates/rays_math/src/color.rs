@@ -1,3 +1,4 @@
+use crate::float::{min as float_min, max as float_max};
 use crate::hash::wrap_int63;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,9 +63,7 @@ pub fn hex(value: &str) -> Result<T, String> {
 
 pub fn hex_exn(value: &str) -> Result<T, String> { hex(value) }
 
-fn ocaml_min(a: f64, b: f64) -> f64 { if a <= b { a } else { b } }
-fn ocaml_max(a: f64, b: f64) -> f64 { if a >= b { a } else { b } }
-fn clamp_unit(value: f64) -> f64 { ocaml_max(0.0, ocaml_min(1.0, value)) }
+fn clamp_unit(value: f64) -> f64 { float_max(0.0, float_min(1.0, value)) }
 
 fn wrap_hue(hue: f64) -> f64 {
     let wrapped = hue % 360.0;
@@ -176,7 +175,7 @@ pub fn with_alpha(color: T, alpha: i64) -> T { T { a: clamp_byte(alpha), ..color
 pub fn to_tuple(color: T) -> (i64, i64, i64, i64) { (color.r, color.g, color.b, color.a) }
 
 pub fn blend(c1: T, c2: T, pct: f64) -> T {
-    let pct = ocaml_max(0.0, ocaml_min(1.0, pct));
+    let pct = float_max(0.0, float_min(1.0, pct));
     let inv_pct = 1.0 - pct;
     T {
         r: ((c1.r as f64 * inv_pct) + (c2.r as f64 * pct) + 0.5) as i64,

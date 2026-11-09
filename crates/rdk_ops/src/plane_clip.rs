@@ -582,8 +582,7 @@ impl Ctx {
         let mut order: Vec<usize> = (0..endpoint_count).collect();
         order.sort_by(|&left, &right| {
             coordinate[left]
-                .partial_cmp(&coordinate[right])
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .total_cmp(&coordinate[right])
                 .then(endpoint_token[left].cmp(&endpoint_token[right]))
                 .then(endpoint_start[left].cmp(&endpoint_start[right]))
         });
@@ -1206,12 +1205,10 @@ fn trace_caps(
     let mut edge_order: Vec<usize> = (0..edge_count).collect();
     edge_order.sort_by(|&left, &right| {
         edge_min_x[left]
-            .partial_cmp(&edge_min_x[right])
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&edge_min_x[right])
             .then(
                 edge_min_y[left]
-                    .partial_cmp(&edge_min_y[right])
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                    .total_cmp(&edge_min_y[right]),
             )
             .then(left.cmp(&right))
     });

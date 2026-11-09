@@ -1,4 +1,5 @@
 //! Exact arrangement of projected planar constraint segments.
+use rays_math::float::{min as omin, max as omax, compare as float_compare};
 use std::cmp::Ordering;
 use std::sync::Mutex;
 use std::sync::Arc;
@@ -9,7 +10,6 @@ use rdk_core::error::Code;
 use crate::bounds2_index;
 use crate::implicit_point::{self, Projection};
 use crate::predicates::{self, Sign};
-
 
 pub struct T {
     source_count: i64,
@@ -149,29 +149,6 @@ fn opposite(left: Sign, right: Sign) -> bool {
         (left, right),
         (Sign::Negative, Sign::Positive) | (Sign::Positive, Sign::Negative)
     )
-}
-
-fn omin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-
-fn omax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
-}
-
-/// OCaml `Float.compare` as -1/0/1.
-fn float_compare(a: f64, b: f64) -> i64 {
-    if a < b {
-        -1
-    } else if a > b {
-        1
-    } else if a == b {
-        0
-    } else if a.is_nan() {
-        if b.is_nan() { 0 } else { -1 }
-    } else {
-        1
-    }
 }
 
 fn to_ordering(value: i64) -> Ordering {
@@ -629,16 +606,17 @@ fn run(
             let a = first[segment] as usize;
             let b = second[segment] as usize;
             let by_x = (x[b] - x[a]).abs() >= (y[b] - y[a]).abs();
+            // Exact coordinates identify both signed zeros, including implicit split points.
             let direction = if by_x {
-                float_compare(x[a], x[b])
+                float_compare(0. + x[a], 0. + x[b]) as i64
             } else {
-                float_compare(y[a], y[b])
+                float_compare(0. + y[a], 0. + y[b]) as i64
             };
             let compared = if lp < sc && rp < sc {
                 if by_x {
-                    float_compare(x[lp as usize], x[rp as usize])
+                    float_compare(0. + x[lp as usize], 0. + x[rp as usize]) as i64
                 } else {
-                    float_compare(y[lp as usize], y[rp as usize])
+                    float_compare(0. + y[lp as usize], 0. + y[rp as usize]) as i64
                 }
             } else if by_x {
                 implicit_point::compare_x(obj(lp), obj(rp))

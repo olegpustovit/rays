@@ -106,7 +106,7 @@ pub fn list(directory: &str) -> Vec<(String, f64)> {
             Some((stem, mtime))
         })
         .collect();
-    out.sort_by(|(a, at), (b, bt)| bt.partial_cmp(at).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.as_bytes().cmp(b.as_bytes())));
+    out.sort_by(|(a, at), (b, bt)| bt.total_cmp(at).then_with(|| a.as_bytes().cmp(b.as_bytes())));
     out
 }
 

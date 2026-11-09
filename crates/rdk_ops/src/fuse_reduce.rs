@@ -4,7 +4,7 @@ use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 
 use crate::fuse_rules::{
-    self, average_float, compare_float_entry, expand_f64, float_compare, select_f64, sort_range_f64,
+    self, average_float, compare_float_entry, expand_f64, select_f64, sort_range_f64,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,13 +79,15 @@ fn sorted_reduction(
             let mut best_value = values[first];
             let mut run_first = first;
             for slot in first + 1..=last {
-                if slot == last || float_compare(values[slot], values[run_first]) != 0 {
+                if slot == last || values[slot] != values[run_first] {
                     let count = slot - run_first;
-                    let point = points[run_first];
+                    // Numeric modes merge signed zeros and retain the least source point.
+                    let representative = (run_first..slot).min_by_key(|&i| points[i]).unwrap();
+                    let point = points[representative];
                     if count > best_count || (count == best_count && point < best_first_point) {
                         best_count = count;
                         best_first_point = point;
-                        best_value = values[run_first];
+                        best_value = values[representative];
                     }
                     run_first = slot;
                 }
@@ -433,6 +435,9 @@ mod tests {
         // Neither compact nor rewired leaves the topology value shared.
         let flat = apply(None, &params(Position::Maximum, false, false), &clusters(), &source).unwrap();
         assert_eq!(topology::data_id(geometry::topology(&flat)), topology::data_id(geometry::topology(&source)));
+        let zero_source = geom(&[0., -0., 10., 1.], &[0.; 4], &[0.; 4], &[], &[0], None);
+        let mode = apply(None, &params(Position::Mode, true, true), &clusters(), &zero_source).unwrap();
+        assert_eq!(positions(&mode).0[0].to_bits(), 0f64.to_bits());
     }
 
     #[test]

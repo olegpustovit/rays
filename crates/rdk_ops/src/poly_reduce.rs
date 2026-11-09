@@ -476,7 +476,7 @@ fn plan_round(
     })?;
     let mut order: Vec<usize> = (0..edge_count).collect();
     order.sort_by(|&left, &right| {
-        costs[left].partial_cmp(&costs[right]).unwrap_or(std::cmp::Ordering::Equal).then(left.cmp(&right))
+        costs[left].total_cmp(&costs[right]).then(left.cmp(&right))
     });
     let mut stamps = Stamps { neighbor: vec![0; point_count], primitive: vec![0; primitive_count], stamp: 0 };
     let mut selected = vec![0u8; edge_count.div_ceil(8)];

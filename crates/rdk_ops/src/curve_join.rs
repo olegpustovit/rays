@@ -3,6 +3,7 @@
 //! OCaml returns `(Geometry.t, string) result` and lets `Cancel.Cancelled` escape; here a failure is
 //! an `error::T` with operation `Curve_join.join`, code `invalid_parameter` and the OCaml message,
 //! and a cancellation keeps code `cancelled`.
+use rays_math::float::compare as float_compare;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -99,21 +100,6 @@ struct EndpointTree {
 fn robust_distance_xyz(ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64) -> f64 {
     let (dx, dy, dz) = (ax - bx, ay - by, az - bz);
     dx.hypot(dy).hypot(dz)
-}
-
-/// OCaml `Float.compare`: NaN equals itself and sorts below every other float.
-fn float_compare(a: f64, b: f64) -> Ordering {
-    if a < b {
-        Ordering::Less
-    } else if a > b {
-        Ordering::Greater
-    } else if a == b {
-        Ordering::Equal
-    } else if a.is_nan() {
-        if b.is_nan() { Ordering::Equal } else { Ordering::Less }
-    } else {
-        Ordering::Greater
-    }
 }
 
 impl EndpointTree {

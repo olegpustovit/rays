@@ -571,7 +571,7 @@ fn start_hints(t: Pane) -> (Pane, Vec<Change>) {
             }
         }
     }
-    candidates.sort_by(|(_, (ax, ay), _), (_, (bx, by), _)| (ax - sx).hypot(ay - sy).partial_cmp(&(bx - sx).hypot(by - sy)).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|(_, (ax, ay), _), (_, (bx, by), _)| (ax - sx).hypot(ay - sy).total_cmp(&(bx - sx).hypot(by - sy)));
     candidates.truncate(676);
     let labels = hint_labels(candidates.len());
     let targets: Vec<HintTarget> = labels

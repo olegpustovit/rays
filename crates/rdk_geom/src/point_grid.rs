@@ -1,6 +1,7 @@
 //! Open-addressing uniform grid over integer cells; each cell heads a linked list of points, newest
 //! first. Callers may reuse the cell arrays as scratch once the grid is no longer queried.
 
+pub use rays_math::float::{min as float_min, max as float_max};
 pub struct T {
     pub cell_x: Vec<i64>,
     pub cell_y: Vec<i64>,
@@ -124,28 +125,6 @@ mod tests {
         assert_eq!(float_cell(0.0), 0);
         assert_eq!(float_cell(-0.0), 0);
         assert_ne!(float_cell(1.0), float_cell(2.0));
-    }
-}
-
-/// OCaml's `Float.min`: propagates NaN and orders -0 below +0.
-pub fn float_min(x: f64, y: f64) -> f64 {
-    if y > x || (!y.is_sign_negative() && x.is_sign_negative()) {
-        if y.is_nan() { y } else { x }
-    } else if x.is_nan() {
-        x
-    } else {
-        y
-    }
-}
-
-/// OCaml's `Float.max`: propagates NaN and orders +0 above -0.
-pub fn float_max(x: f64, y: f64) -> f64 {
-    if y > x || (!y.is_sign_negative() && x.is_sign_negative()) {
-        if x.is_nan() { x } else { y }
-    } else if y.is_nan() {
-        y
-    } else {
-        x
     }
 }
 

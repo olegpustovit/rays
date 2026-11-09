@@ -1,6 +1,7 @@
 //! Port of lib/rdk/boolean/boolean_face_cdt.ml: deterministic exact-predicate constrained
 //! Delaunay refinement of one face (adapter over `Planar_cdt`).
 #![allow(non_snake_case)]
+use rays_math::float::{min as fmin, max as fmax};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -176,14 +177,6 @@ fn global_point_tokens(
         }
     }
     tokens
-}
-
-// Stdlib.min / Stdlib.max on finite floats, tie to the first argument.
-fn fmin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-fn fmax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
 }
 
 /// Boolean arrangements and the general planar CDT share the same exact PSLG contract. This

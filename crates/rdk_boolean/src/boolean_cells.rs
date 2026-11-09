@@ -1,8 +1,8 @@
 //! Port of lib/rdk/boolean/boolean_cells.ml: exact-axis shell winding classification for a
 //! Weiler complex. `Parallel.both` of the two component builds runs sequentially (the result is
 //! identical); BVH query scratch is local to each query so queries share no mutable state.
+use rays_math::float::compare as float_compare;
 use std::cell::{Cell, RefCell};
-use std::cmp::Ordering;
 use std::sync::{Arc, Mutex};
 
 use rdk_core::{cancel, error};
@@ -109,21 +109,6 @@ fn checked_add(left: i64, right: i64) -> Result<i64, Fail> {
     match left.checked_add(right) {
         Some(value) => Ok(value),
         None => Err(invalid_fail("Boolean winding integer overflow")),
-    }
-}
-
-/// OCaml `Float.compare` (NaN equals itself and sorts first; -0 equals +0).
-fn float_compare(left: f64, right: f64) -> Ordering {
-    if left < right {
-        Ordering::Less
-    } else if left > right {
-        Ordering::Greater
-    } else if left == right || (left.is_nan() && right.is_nan()) {
-        Ordering::Equal
-    } else if left.is_nan() {
-        Ordering::Less
-    } else {
-        Ordering::Greater
     }
 }
 

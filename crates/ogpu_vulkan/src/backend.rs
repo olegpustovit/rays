@@ -1,5 +1,6 @@
 //! OGPU's driver records over the Vulkan bridge. Tokens name native objects; the checks live in
 //! `ogpu_core::backend`, as for Metal.
+use rays_math::float::{min as omin, max as omax};
 use ogpu_core::{
     backend::{
         DepthState, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
@@ -178,14 +179,6 @@ fn validation_mode() -> (bool, bool) {
         Ok("on") => (true, false),
         _ => (false, false),
     }
-}
-
-/// Stdlib.min / Stdlib.max on floats (unspecified for nan, as there).
-fn omin(a: f64, b: f64) -> f64 {
-    if a <= b { a } else { b }
-}
-fn omax(a: f64, b: f64) -> f64 {
-    if a >= b { a } else { b }
 }
 
 struct Dev {

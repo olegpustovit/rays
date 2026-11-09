@@ -53,14 +53,18 @@ fn path_commands_accessor_exposes_close() {
 }
 
 #[test]
-fn shape_float_edges_match_ocaml_nan_rules() {
+fn shape_float_edges_propagate_nan() {
     assert_eq!(
         shape2::line((0.0, 0.0), (2.0, 2.0), f64::NAN, 1),
         Err("Shape2 stroke".to_owned())
     );
-    let nan_radius = shape2::rounded_rect(10.0, 8.0, f64::NAN, Some(1), None).unwrap();
+    assert_eq!(
+        shape2::rounded_rect(10.0, 8.0, f64::NAN, Some(1), None),
+        Err("Shape2 fill".to_owned())
+    );
+    let capped_radius = shape2::rounded_rect(10.0, 8.0, 10.0, Some(1), None).unwrap();
     let max_radius = shape2::rounded_rect(10.0, 8.0, 4.0, Some(1), None).unwrap();
-    assert_eq!(nan_radius, max_radius);
+    assert_eq!(capped_radius, max_radius);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 pub mod clock;
 pub mod color;
 pub mod fma;
+pub mod float;
 pub mod hash;
 pub mod mat4;
 pub mod noise;
