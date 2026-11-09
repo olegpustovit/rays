@@ -522,7 +522,7 @@ fn deeply_nested_scalar_body_compiles_on_default_stack() {
     let mut expected = 0.25_f64;
     for _ in 0..48 {
         body = format!("(sin {body})");
-        expected = expected.sin();
+        expected = rays_math::libm::sin(expected);
     }
     let program = ts::compile(&format!("(map (fn [x] {body}) (array/range 1))"));
     assert_eq!(

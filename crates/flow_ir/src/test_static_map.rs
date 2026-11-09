@@ -120,7 +120,7 @@ fn kernel_makes_the_elements_past_the_head() {
     let profile = profile::create(clock_zero());
     let fast = ok(profile::sample(&profile, &mut || fast_static(&ws)));
     match result_of(&fast, "g") {
-        Value::Floats(3, d) => assert!(d.len() == 60000 && d[3 * 19999] == 19999f64.sin()),
+        Value::Floats(3, d) => assert!(d.len() == 60000 && d[3 * 19999] == rays_math::libm::sin(19999.0)),
         _ => panic!("a vec3 array"),
     }
     let maps = profile::static_maps(&profile);
