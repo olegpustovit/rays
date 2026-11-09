@@ -17,11 +17,11 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | X | 6 | 6 | 0 | 0 |
 | B | 8 | 6 | 1 | 1 |
 | A | 4 | 4 | 0 | 0 |
-| D | 12 | 8 | 3 | 1 |
+| D | 12 | 10 | 2 | 0 |
 | Z | 11 | 0 | 1 | 10 |
-| R | 10 | 0 | 0 | 10 |
-| G | 7 | 0 | 0 | 7 |
-| **All** | **58** | **24** | **5** | **29** |
+| R | 10 | 1 | 1 | 8 |
+| G | 7 | 0 | 1 | 6 |
+| **All** | **58** | **27** | **6** | **25** |
 
 ## Items
 
@@ -45,19 +45,19 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | A2 | A | done | `1d13c774` — internal visibility + dead modules/wrappers removed; clippy enabled, net −350 lines | workspace all-targets8.53s; rays/rdk_ops307/307 (16.41s), slowest1.310s; scoped clippy1.61s |
 | A3 | A | done | `5c9c9f82` — removed C/build.rs/cc; bounded powi scaling, exact subnormal rounding retained | cargo t -p cfmt -p param -p flow_syntax: 61 passed, 6.31s; slowest 0.150s |
 | A4 | A | done | `a013679f` — dead stubs/wrappers/Exp removed; derived Change/Op equality; choice callback removed | all-targets check 6.31s; param/pxui_graph 46 passed; flow_ir/flow_web 465 passed, 30.88s, slowest 1.872s |
-| D1 | D | active | Agent consolidating13 UF engines; min/rank/tie/mask semantics preserved; baseline captured | dissolve300x220 exact1/4 and frozen Boolean payload baseline pass |
-| D2 | D | pending | — | rdk_ops fuse, rdk_boolean |
+| D1 | D | done | `d42f55e4` — 13 geometry union-find engines use support::DisjointSet; min/rank/tie/mask semantics preserved; net −271 lines | 481 unique touched cases pass; frozen Boolean payload and dissolve 1/4-domain equality unchanged; warm guards pass |
+| D2 | D | active | Std-sort patch prepared with explicit original tie keys; baseline and old/new timings next after D5 stable batch | rdk_ops fuse/ray; Boolean/path exact goldens and stable tie order |
 | D3 | D | done | `caf6359f` — one 64-bit/u128 exact engine; arena temporaries, persistent outputs only | geom60 and Boolean74 plus frozen snapshot pass; predicates3.96x and circumcenter3.45x faster |
 | D4 | D | done | `029244f0` — canonical rays_math float extrema/total ordering; numeric equivalence preserved | 580 CPU cases covered with2 focused assertion repairs; native/UI pass; sort1.44x faster |
-| D5 | D | active | Read/prep only until D1 releases core; quoting/owner/group semantics traced | rdk_ops poly_, transform |
+| D5 | D | active | Shared owner/count/group/quote batch installed; canonical domain helper and narrow gate exception; consumer checks running | Exact quote/owner/count/merge/domain regressions; affected consumers |
 | D6 | D | done | `7ef8286f` `5279bbd3` — shared grain validation; strict canonical grain diagnostics before cancellation | grain-filtered ops/core; normal_ops grain0/-1 InvalidArgument and valid-grain Cancelled pass |
-| D7 | D | active | Read/prep only until D1 releases Boolean UF files; shared bounds index and sorted candidates planned | Boolean cells; frozen payload/domain signatures |
+| D7 | D | done | `861fcfef` — shared bounds3 index, sorted candidates, inclusive filtering and bounded stack scratch | Boolean76, shared-index equality, frozen payload/cancellation pass; paired runtime97–100% of old; warm guard passes |
 | D8 | D | done | `095418dc` — shared primitive table and Instruction guard methods; 91 lowering primitives unchanged | Flow573/573 pass27.59s; 114 golden files byte-identical; native Metal fixtures and loops pass |
 | D9 | D | done | `788ac0ca` `a488c2a2` —32 Parameters/36 static Decl wrappers removed; original Reader retained to avoid new shape violation | SOP54, Flow manifest, native catalog and exhaustive qualification pass; manifest unchanged |
 | D10 | D | done | `3457d151` `82ba264f` — std i64/trim/round/min/max; syntax-aware literal-spelling comparison | Boundary/UI/SOP/text checks pass; spelling-focused1/1 and literal qualification1/1 pass |
 | D11 | D | done | `92542f6a` — canonical input Frame/panel types; borrowed routing; ec_frame/converters deleted | All-targets check10.25s; input/core17, commands9, reducer10, layout2, alloc3 pass |
 | D12 | D | done | `98ee157a` — validated Syntax replaces settings Value/codec; preferences read once; shared text helpers | all-targets5.83s; store5, text12, native guide1 pass; i64 save/Unicode regressions |
-| Z0 | Z | active | `296c35c2` `bf116466` — tightened native caps; full sea and3 warm-kernel guards pass | Zero idle/unchanged allocations and size-independent changed scratch remain open |
+| Z0 | Z | active | `296c35c2` `bf116466` `c1617a45` — native/sea/warm-kernel guards established and ratcheted | Sea cap51700/2840000; changed subdiv115325, Boolean26695, scatter1447250 allocations; zero/O(1) targets open |
 | Z1 | Z | pending | — | Z0 idle frames at 0 |
 | Z2 | Z | pending | — | Z0; flow_ir and flow_eval suites |
 | Z3 | Z | pending | — | bench_core instructions; warm rebuild ≤ 7.4 s |
@@ -68,8 +68,8 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Z8 | Z | pending | — | An oversized array reports a typed error |
 | Z9 | Z | pending | — | Z0 warm-cook guards on subdivide, boolean and scatter |
 | Z10 | Z | pending | — | Z0; per-crate clone count tracked in PROGRESS.md |
-| R1 | R | pending | — | flow_ir; flow_sop sequential/parallel equality |
-| R2 | R | pending | — | bench_core digest c4bbf006c82014c7 unchanged |
+| R1 | R | done | `c1617a45` — shared captures/paths/persistent iteration; consumers borrow; allocation guards lowered | 451 evaluator/IR +40 sequential/parallel +zero-view/native/three-kernel allocation checks pass |
+| R2 | R | active | Scope-cache callers traced; parent-chain implementation and baseline preparation | bench_core digest c4bbf006c82014c7 unchanged; scope inheritance/isolation/allocation guard |
 | R3 | R | pending | — | Sequential/parallel equality; capture order stays sorted by string |
 | R4 | R | pending | — | Library plus 49 sketches byte-identical |
 | R5 | R | pending | — | flow_eval state |
@@ -78,14 +78,13 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | R8 | R | pending | — | pxui_graph (31 cases); alloc_budget |
 | R9 | R | pending | — | Lower the alloc_budget.rs limits |
 | R10 | R | pending | — | test_prepared_scene3 |
-| G1 | G | pending | — | Destroyed-handle and wrong-thread cases in gpu_ogpu_metal |
+| G1 | G | active | Call-chain and native safety baseline preparation; production unchanged | Destroyed-handle/wrong-thread cases; main-thread/release-drain boundaries; Windows evidence |
 | G2 | G | pending | — | Move metal/tests/gpu_metal.rs into ogpu_metal |
 | G3 | G | pending | — | ogpu_core/metal gpu tests; Windows ogpu_vulkan |
 | G4 | G | pending | — | Destroy-in-flight cases, live_handles delta 0 |
 | G5 | G | pending | — | Mock queue tests; a Metal queue case |
 | G6 | G | pending | — | cargo t -p web_export |
 | G7 | G | pending | — | refits() &gt; 0 over 3 frames |
-
 ## Order
 
 1. **X1–X5** first, each with its regression; **X6** with wave G.
@@ -114,22 +113,22 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 
 ## D-wave parallel map
 
-Batch = building-agent slot when two distinct primary crates run together. `editor_core`, `rdk_core`, `rdk_boolean`: one writer per crate at a time. Slices serial top-to-bottom.
+At most two agents build concurrently. Core/ops owner: D5; Boolean owner: D7; Flow owner: root (R1). D2 prepares without building until overlapping owners release their files.
 
-| ID | Primary crate | Batch | Notes |
-|----|---------------|-------|-------|
-| D1 | D | active | Agent consolidating13 UF engines; min/rank/tie/mask semantics preserved; baseline captured | dissolve300x220 exact1/4 and frozen Boolean payload baseline pass |
-| D2 | `rdk_ops`, `rdk_boolean` | 2 | Slice 4. After D7. Stable sort; boolean golden regen. |
-| D3 | `rdk_geom` | 1 | Slice 1. Unified exact engine. |
-| D4 | D | done | `029244f0` — canonical rays_math float extrema/total ordering; numeric equivalence preserved | 580 CPU cases covered with2 focused assertion repairs; native/UI pass; sort1.44x faster |
-| D5 | D | active | Read/prep only until D1 releases core; quoting/owner/group semantics traced | rdk_ops poly_, transform |
-| D6 | D | done | `7ef8286f` `5279bbd3` — shared grain validation; strict canonical grain diagnostics before cancellation | grain-filtered ops/core; normal_ops grain0/-1 InvalidArgument and valid-grain Cancelled pass |
-| D7 | D | active | Read/prep only until D1 releases Boolean UF files; shared bounds index and sorted candidates planned | Boolean cells; frozen payload/domain signatures |
-| D8 | `flow_ir` | 2 | Slice 1. `PRIMITIVES` + `Instruction`; flow_web goldens. |
-| D9 | D | done | `788ac0ca` `a488c2a2` —32 Parameters/36 static Decl wrappers removed; original Reader retained to avoid new shape violation | SOP54, Flow manifest, native catalog and exhaustive qualification pass; manifest unchanged |
-| D10 | D | done | `3457d151` `82ba264f` — std i64/trim/round/min/max; syntax-aware literal-spelling comparison | Boundary/UI/SOP/text checks pass; spelling-focused1/1 and literal qualification1/1 pass |
-| D11 | D | done | `92542f6a` — canonical input Frame/panel types; borrowed routing; ec_frame/converters deleted | All-targets check10.25s; input/core17, commands9, reducer10, layout2, alloc3 pass |
-| D12 | D | done | `98ee157a` — validated Syntax replaces settings Value/codec; preferences read once; shared text helpers | all-targets5.83s; store5, text12, native guide1 pass; i64 save/Unicode regressions |
+| ID | Primary crate | State |
+|----|---------------|-------|
+| D1 | `rdk_core`, geometry consumers | Complete: `d42f55e4` |
+| D2 | `rdk_ops`, `rdk_boolean`, path | Baseline preparation; after D5/D7 source batches |
+| D3 | `rdk_geom` | Complete: `caf6359f` |
+| D4 | `rays_math` | Complete: `029244f0` |
+| D5 | `rdk_core`, `rdk_ops` | Shared API batch installed; checks running |
+| D6 | `rdk_core`, consumers | Complete: `7ef8286f`, `5279bbd3` |
+| D7 | `rdk_boolean` | Complete: `861fcfef` |
+| D8 | `flow_ir` | Complete: `095418dc` |
+| D9 | `flow_sop` | Complete: `788ac0ca`, `a488c2a2` |
+| D10 | `rays_editor`, `editor_document` | Complete: `3457d151`, `82ba264f` |
+| D11 | `input`, `editor_core` | Complete: `92542f6a` |
+| D12 | `editor_core`, text | Complete: `98ee157a` |
 
 | Slice | Batch 1 | Batch 2 |
 |------:|---------|---------|
@@ -210,3 +209,17 @@ Batch = building-agent slot when two distinct primary crates run together. `edit
 - Final stable-boundary `cargo check --workspace --all-targets` passes11.69s wall (11.57s Cargo), before D1 production replacement. No profile/RUSTFLAGS/cache changes. D1 baseline: min/rank helper medians633959/498167ns over65,536items; dissolve300×220 exact1/4domains passes, and frozen six-operation Boolean digest remains `b174629eacddb5690a6c56d966aadf2b`. D5/D7 prepare in temporary files while D1 owns shared UF source; no third building agent.
 
 - Artifact **v20** published and source/database readback verified:24done/5active/29pending (**41.4% by item count**). Tracker fallback/live/offline regression passes. No scope removed; B8 full-run timeout, pre-existing shape violations, zero-allocation end state and final Windows/native qualification remain open.
+
+### Continuation — D1 and shared residual views
+
+- Previous status-only turn classified **no progress**; revalidated committed D1 and current source, then resumed the unfinished R1 implementation. No blocker prevents progress.
+- **D1 complete** `d42f55e4`: all 13 geometry union-find implementations now use `rdk_core::support::DisjointSet`, preserving minimum-root, rank, equal-rank tie, masked and direct-link behavior. Net −271 lines; 481 unique touched cases pass. The Flow IR alias-equivalence set stays local because its dependency boundary excludes geometry.
+- D1 measurements: old min/rank at 65,536 items 633959/498167 ns; paired old/shared runs at 262,144 stay within about 5%. Final shared medians 1.945/1.596 ms. Rank storage changes i64 → u8 (7 bytes saved per vertex). Frozen Boolean digest unchanged; exact dissolve 300×220 in 1/4 domains passes. Warm Boolean and subdivide guards retain their established limits.
+- **R1 active**: shared Arc captures/paths and the existing persistent iteration chain replace deep copies. Regression includes nested captured data, nonempty paths and iteration, shared-storage identity, expired-evaluation error and retained snapshot validity. The new zero-allocation assertion fails against the previous implementation (15,360 allocations for 1,024 reads) and passes after the change (0 allocations; observed 57.208 µs). Focused command passes in 8.36 s including rebuild; case 0.058 s. A first lifecycle assertion exposed the existing recent-arena retention queue; the test now releases its own queue entry before checking expiration. Production retention is unchanged.
+- R1 evaluator/IR regression: `cargo t -p flow_eval -p flow_ir` passes all 451 selected cases in 25.71 s wall; slowest deterministic multi-thread evaluator case 1.935 s, followed by driven bounds 1.041 s and array composition 0.920 s.
+- **D7 complete** `861fcfef`: shared bounds3 index replaces the private cells builder and RefCell comparator; sorted candidate IDs preserve deterministic boundary behavior. Linear certified-bounds oracle, cancellation, all 76 Boolean cases and frozen six-operation payload pass (3.90 s wall, slowest 0.080 s). Shared bounds-index equality check passes. Initial separate timing samples suggested a regression; nine alternating paired same-process medians show shared cells at 97–100% of legacy runtime. No speedup claim. A warm guard caught 18 extra allocations; replacing per-query heap traversal scratch with a depth-bounded stack removes that regression.
+- **R1 complete** `c1617a45`: full workspace all-target check passes in 2.66 s; dependency gate passes in 0.83 s. Shape remains at **497 preexisting violations**, with no new diagnostic class introduced. FlowSOP sequential/parallel suite: 40 cases pass in 40.34 s wall; slowest `light_03` 2.875 s.
+- R1/Z0 ratchet: native basic/empty/bare remain exactly 1384/157167, 1206/81998, 1417/96657 allocations/bytes per frame (3 cases pass, 16.38 s including rebuild; slowest 0.403 s). Sea observed maximum is 51,698 allocations / 2,835,442 B, down from 54,448 / 2,922,176 B; new cap **51,700 / 2,840,000**, confirmed by a second run (6.63 s wall, case 1.000 s). Million-point/1,996,002-triangle resident output, zero payload reads/staging, buffer/pipeline plateau and bounded async close assertions all remain.
+- Three warm-kernel guards pass with lowered caps in 9.72 s wall (slowest scatter 2.719 s, subdivide 2.469 s, Boolean 0.375 s). Unchanged hits remain subdivide18/3752, Boolean25/4426, scatter18/5359. Across the three sizes, changed allocations now subdivide103471→107931→115321 (previous139383→143843→151233), Boolean2407→7252→26693 (D1 baseline2391→7242→26707), scatter1436323→1437821→1447246 (previous1601563→1603061→1612486). New changed caps: **115325/3453750**, **26695/926350**, **1447250/16451200** allocations/scratch-peak bytes; scatter hit peak cap lowered5400→5360. Rounding covers observed key-length variation; every previous cap only decreases. Scratch peaks still grow with fixture size, so Z0/Z9 remain open.
+- D5 and D2 own the next two build slots; root prepares R2 without building. G1 prepares call-chain/safety evidence without source edits/builds. Full scope, original deadlines and final macOS/Windows qualification remain unchanged.
+- Artifact **v21** published with the CLI; source byte readback and all 58 database documents match the ledger. Tracked seed JSON is now synchronized with the embedded seed. Tracker fallback/live/offline regression passes. Snapshot: **27 done / 6 active / 25 pending (46.6% by item count)**.
