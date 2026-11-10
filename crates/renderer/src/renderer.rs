@@ -306,7 +306,8 @@ pub const ZERO_STATS: Stats = Stats {
 };
 
 pub struct RendererData {
-    runtime: RefCell<runtime::Runtime>,
+    /// the target the owner gave us; the owner destroys it, after the renderer
+    runtime: runtime::Target,
     shared_device_lease: bool,
     owns_device_lease: bool,
     gpu_owner: GpuOwner,
@@ -493,10 +494,10 @@ fn valid_configuration(operation: &str, configuration_: &Configuration) -> Resul
     }
 }
 
-fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_: GpuOwner, runtime_: runtime::Runtime, renderer: scene_execution::SceneExecution) -> Renderer {
-    let facts = runtime::frame_facts(&runtime_);
+fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_: GpuOwner, runtime_: runtime::Target, renderer: scene_execution::SceneExecution) -> Renderer {
+    let facts = runtime::frame_facts(&runtime_.borrow());
     Renderer(Rc::new(RendererData {
-        runtime: RefCell::new(runtime_),
+        runtime: runtime_,
         renderer: RefCell::new(renderer),
         gpu_owner: gpu_owner_,
         renderer_facts: Cell::new(facts),
@@ -531,44 +532,18 @@ fn backend_name() -> Result<String, Error> {
     ogpu_core::impl_::backend()
 }
 
-pub fn create(configuration_: &Configuration) -> Result<Renderer, Error> {
+/// A presenting execution drawing to `target`, a window its owner opened (`runtime::open_window`)
+/// and keeps: destroy the renderer first, then the target.
+pub fn create(configuration_: &Configuration, target: &runtime::Target) -> Result<Renderer, Error> {
     let operation = "Renderer.create";
     valid_configuration(operation, configuration_)?;
-    let mut runtime_ = runtime::create(
-        Some(configuration_.vsync),
-        Some(false),
-        Some(configuration_.high_density),
-        Some(&configuration_.title),
-        configuration_.logical_width,
-        configuration_.logical_height,
-    )?;
-    if let Err(e) = runtime::set_resizable(&mut runtime_, true) {
-        let _ = runtime::destroy(&mut runtime_);
-        return Err(e);
-    }
-    let surface = match runtime::surface_configuration(&mut runtime_) {
-        Ok(surface) => surface,
-        Err(e) => {
-            let _ = runtime::destroy(&mut runtime_);
-            return Err(e);
-        }
-    };
+    let surface = runtime::surface_configuration(&mut target.borrow_mut())?;
     let gpu_owner_ = create_gpu_owner();
-    let renderer = (|| -> Result<scene_execution::SceneExecution, Error> {
-        let driver = ogpu_core::impl_::create_driver()?;
-        renderer_pipeline::create_renderer(&backend_name()?, None, Some(gpu_owner_.scene_vertices.clone()), false, driver, &surface)
-    })();
-    match renderer {
-        Err(e) => {
-            let _ = runtime::destroy(&mut runtime_);
-            Err(e)
-        }
-        Ok(renderer) => {
-            let value = finish_create(false, false, gpu_owner_, runtime_, renderer);
-            ACTIVE_WINDOW.with(|cell| *cell.borrow_mut() = Some(value.clone()));
-            Ok(value)
-        }
-    }
+    let driver = ogpu_core::impl_::create_driver()?;
+    let renderer = renderer_pipeline::create_renderer(&backend_name()?, None, Some(gpu_owner_.scene_vertices.clone()), false, driver, &surface)?;
+    let value = finish_create(false, false, gpu_owner_, target.clone(), renderer);
+    ACTIVE_WINDOW.with(|cell| *cell.borrow_mut() = Some(value.clone()));
+    Ok(value)
 }
 
 /// A true layerless native target. It owns one long-lived device and pipeline coordinator until
@@ -607,7 +582,7 @@ pub fn create_offscreen(configuration_: &Configuration) -> Result<Renderer, Erro
             release_device(lease_shared, &gpu_owner_);
             Err(e)
         }
-        Ok(renderer) => Ok(finish_create(lease_shared, true, gpu_owner_, runtime_, renderer)),
+        Ok(renderer) => Ok(finish_create(lease_shared, true, gpu_owner_, Rc::new(RefCell::new(runtime_)), renderer)),
     }
 }
 
@@ -1486,15 +1461,13 @@ pub fn destroy(value: &Renderer) -> Result<(), Error> {
             }
     });
     let core = scene_execution::destroy(&mut value.0.renderer.borrow_mut());
-    let shell = runtime::destroy(&mut value.0.runtime.borrow_mut());
     if value.0.owns_device_lease {
         release_device(value.0.shared_device_lease, &value.0.gpu_owner);
     }
-    match (assets, core, shell) {
-        (Err(e), _, _) => Err(resource_error_value("Renderer.destroy", &e)),
-        (Ok(()), Err(e), _) => Err(e),
-        (Ok(()), Ok(()), Err(e)) => Err(e),
-        (Ok(()), Ok(()), Ok(())) => Ok(()),
+    match (assets, core) {
+        (Err(e), _) => Err(resource_error_value("Renderer.destroy", &e)),
+        (Ok(()), Err(e)) => Err(e),
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 
@@ -1722,7 +1695,7 @@ pub mod native {
                 let _ = runtime::destroy(&mut runtime_);
                 Err(e)
             }
-            Ok(renderer) => Ok(finish_create(false, false, gpu_.0.owner.clone(), runtime_, renderer)),
+            Ok(renderer) => Ok(finish_create(false, false, gpu_.0.owner.clone(), Rc::new(RefCell::new(runtime_)), renderer)),
         }
     }
 

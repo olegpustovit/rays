@@ -52,13 +52,22 @@ fn window_scene3_lighting() {
     if !common::gpu() {
         return;
     }
-    let runtime: Renderer = match renderer::create(&renderer::Configuration {
+    let cfg = renderer::Configuration {
         logical_width: 4,
         logical_height: 4,
         drawable_width: 4,
         drawable_height: 4,
         ..renderer::default_configuration()
-    }) {
+    };
+    let target = match runtime::open_window(&cfg.title, cfg.logical_width, cfg.logical_height, cfg.vsync, cfg.high_density) {
+        Ok(target) => target,
+        Err(e) => {
+            println!("RAYS_TEST_SKIP: renderer Scene3 lighting: skipped (no window: {})", ogpu_core::error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+            return;
+        }
+    };
+    let runtime: Renderer = match renderer::create(&cfg, &target) {
         Ok(r) => r,
         Err(_) => {
             println!("RAYS_TEST_SKIP: renderer Scene3 lighting: skipped");
@@ -184,6 +193,7 @@ fn window_scene3_lighting() {
         _ => panic!("65-light uniforms were not rejected before upload"),
     }
     renderer::destroy(&runtime).unwrap();
+    runtime::destroy(&mut target.borrow_mut()).unwrap();
     println!("runtime Scene3 lighting: ambient/directional frames1/2/60/600");
 }
 

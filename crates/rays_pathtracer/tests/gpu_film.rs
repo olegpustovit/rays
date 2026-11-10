@@ -30,7 +30,8 @@ fn film() {
     assert_eq!(expected.len(), 48 * 32 * 4);
     assert_eq!(pt::live_handles(), baseline);
     let config = renderer::renderer::Configuration { logical_width: 48, logical_height: 32, drawable_width: 48, drawable_height: 32, title: "GPU film test".to_string(), ..renderer::renderer::default_configuration() };
-    let coordinator = renderer::renderer::create(&config).unwrap_or_else(|e| panic!("{}", ogpu_core::error::to_string(&e)));
+    let target = runtime::open_window(&config.title, config.logical_width, config.logical_height, config.vsync, config.high_density).unwrap_or_else(|e| panic!("{}", ogpu_core::error::to_string(&e)));
+    let coordinator = renderer::renderer::create(&config, &target).unwrap_or_else(|e| panic!("{}", ogpu_core::error::to_string(&e)));
     // A live shared lease keeps the window's device alive.
     let lease = renderer::renderer::acquire_gpu().unwrap();
     assert!(renderer::renderer::gpu_shared(&lease));
@@ -100,6 +101,7 @@ fn film() {
     p::destroy(&mut tracer);
     drop(tracer);
     renderer::renderer::destroy(&coordinator).unwrap_or_else(|e| panic!("{}", ogpu_core::error::to_string(&e)));
+    runtime::destroy(&mut target.borrow_mut()).unwrap();
     drop(coordinator);
     drop(texture);
     drop(image);

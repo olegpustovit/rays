@@ -11,7 +11,15 @@ fn window_runtime_render() {
     let before = ogpu_core::impl_::live_handles().unwrap();
     // Exercise all 300 frames without waiting for the display's refresh clock.
     let cfg = renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() };
-    let value = match renderer::create(&cfg) {
+    let target = match runtime::open_window(&cfg.title, cfg.logical_width, cfg.logical_height, cfg.vsync, cfg.high_density) {
+        Ok(target) => target,
+        Err(e) => {
+            println!("RAYS_TEST_SKIP: renderer: skipped (no window: {})", ogpu_core::error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
+            return;
+        }
+    };
+    let value = match renderer::create(&cfg, &target) {
         Ok(value) => value,
         Err(e) => {
             println!("RAYS_TEST_SKIP: renderer: skipped (no window/native device: {})", ogpu_core::error::to_string(&e));
@@ -74,6 +82,7 @@ fn window_runtime_render() {
     pump();
     assert!(renderer::draw(None, &value, &[prepared(resized_state)]).unwrap(), "resized runtime frame was not presented");
     renderer::destroy(&value).unwrap();
+    runtime::destroy(&mut target.borrow_mut()).unwrap();
     assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before, "renderer native live-handle delta");
     let _ = scene_execution::empty_bytes;
     println!("renderer: {} frames 1/2/60/300 and resize, zero delta", ogpu_core::impl_::backend().unwrap());

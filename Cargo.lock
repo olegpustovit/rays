@@ -683,6 +683,7 @@ dependencies = [
  "rays_diagnostic",
  "rays_math",
  "renderer",
+ "runtime",
  "runtime_resources",
 ]
 

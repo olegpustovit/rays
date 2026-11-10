@@ -1,6 +1,7 @@
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::surface;
 use pxui_sdl::{Extent, Window};
+use std::{cell::RefCell, rc::Rc};
 
 pub use pxui_sdl::{change_flag, clipboard_get_text, clipboard_set_text, CursorShape, DialogFilter, DialogKind};
 
@@ -32,6 +33,19 @@ pub struct Runtime {
     facts: FrameFacts,
     presentation: Option<PresentationFacts>,
     dead: bool,
+}
+
+/// A target shared between its owner (who opens and destroys it) and the renderer that draws to it.
+pub type Target = Rc<RefCell<Runtime>>;
+
+/// A visible, resizable window target for the caller to own.
+pub fn open_window(title: &str, width: i64, height: i64, vsync: bool, high_density: bool) -> Result<Target, Error> {
+    let mut runtime = create(Some(vsync), Some(false), Some(high_density), Some(title), width, height)?;
+    if let Err(e) = set_resizable(&mut runtime, true) {
+        let _ = destroy(&mut runtime);
+        return Err(e);
+    }
+    Ok(Rc::new(RefCell::new(runtime)))
 }
 
 fn stale_error(operation: &str) -> Error {
