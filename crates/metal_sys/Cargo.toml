@@ -17,3 +17,6 @@ cc = "1"
 [[test]]
 name = "build_config"
 path = "build_config.rs"
+
+[lints]
+workspace = true
