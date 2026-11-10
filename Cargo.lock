@@ -538,6 +538,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pxui_wayland"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "input",
+ "native_layer_token_sys",
+ "ogpu_core",
+ "ogpu_vulkan",
+ "pxui_render",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"

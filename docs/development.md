@@ -178,7 +178,14 @@ test. The tests also need `glslangValidator`, `spirv-link` and the validation la
 export PATH=~/vk/root/usr/bin:$PATH LD_LIBRARY_PATH=~/vk/root/usr/lib/x86_64-linux-gnu
 export VK_ADD_LAYER_PATH=~/vk/root/usr/share/vulkan/explicit_layer.d
 export XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir WAYLAND_DISPLAY=wayland-0   # WSLg, for the Wayland smoke test
-cargo t -p ogpu_vulkan && cargo t -p pxui_render
+cargo t -p ogpu_vulkan && cargo t -p pxui_render && cargo t -p pxui_wayland
 ```
 
 A changed `PATH` reruns the shader build step. Build in the Linux filesystem, not under `/mnt/c`.
+
+`pxui_wayland` (the Wayland window host) links `libwayland-client` and `libxkbcommon` (`libwayland-dev`,
+`libxkbcommon-dev`). Its protocol glue is checked in under `crates/pxui_wayland/protocol`; regenerating it needs
+`wayland-scanner` and the `wayland-protocols` XML (`apt-get download wayland-protocols`, `dpkg -x` into `~/vk/root`).
+Its window test skips without `WAYLAND_DISPLAY`. WSLg's compositor offers `wl_data_device` and `wp_viewporter` but no
+fractional scale, cursor shape, xdg-decoration or text-input-v3, so those paths need another compositor to exercise.
+`cargo run -p pxui_wayland --example window` runs the host loop.

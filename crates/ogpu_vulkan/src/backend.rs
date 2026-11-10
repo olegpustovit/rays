@@ -1565,6 +1565,13 @@ fn immediate(configuration: &Configuration) -> bool {
     configuration.present_mode == PresentMode::Immediate
 }
 
+/// A Wayland surface reports no size: the swapchain takes the configuration's drawable size. Windows reports one.
+fn wayland_extent(surface: &mut vk::Surface, configuration: &Configuration) {
+    if cfg!(target_os = "linux") {
+        surface.set_extent(configuration.physical_width as u32, configuration.physical_height as u32);
+    }
+}
+
 fn surface_stale() -> Error {
     error::make(SURFACE_OP, ErrorKind::StaleHandle, "surface is destroyed")
 }
@@ -1576,7 +1583,10 @@ struct SurfaceHandle {
 impl DriverSurface for SurfaceHandle {
     fn configure(&self, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<(), Error> {
         match self.cell.borrow_mut().as_mut() {
-            Some(surface) => surface.configure(immediate(configuration)).map_err(|failure| of_vk(SURFACE_OP, failure)),
+            Some(surface) => {
+                wayland_extent(surface, configuration);
+                surface.configure(immediate(configuration)).map_err(|failure| of_vk(SURFACE_OP, failure))
+            }
             None => Err(surface_stale()),
         }
     }
@@ -1616,7 +1626,8 @@ fn create_surface(dev: &Rc<Dev>, configuration: &ogpu_core::surface::AdmittedCon
         return Err(fail(SURFACE_OP, ErrorKind::Unsupported, "surface needs a native layer token"));
     };
     let device = dev.device(SURFACE_OP)?;
-    let native = device.surface(layer, layer.owner_id(), layer.generation(), immediate(configuration)).map_err(|failure| of_vk(SURFACE_OP, failure))?;
+    let mut native = device.surface(layer, layer.owner_id(), layer.generation(), immediate(configuration)).map_err(|failure| of_vk(SURFACE_OP, failure))?;
+    wayland_extent(&mut native, configuration);
     live_add(1);
     Ok(Box::new(SurfaceHandle { cell: Rc::new(RefCell::new(Some(native))) }))
 }

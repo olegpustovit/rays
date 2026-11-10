@@ -1,0 +1,27 @@
+[package]
+name = "pxui_wayland"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The Wayland window host: a leaf that reaches only the input types and the native layer token.
+[dependencies]
+input = { path = "../input" }
+native_layer_token_sys = { path = "../native_layer_token_sys" }
+
+[build-dependencies]
+cc = "1"
+
+# The compositor test and the example draw with the UI painter on Vulkan.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+ogpu_core = { path = "../ogpu_core" }
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+pxui_render = { path = "../pxui_render" }
+
+[[test]]
+name = "window_pxui_wayland"
+path = "tests/window_pxui_wayland.rs"
+harness = false
+
+[lints]
+workspace = true
