@@ -18,10 +18,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B | 8 | 7 | 1 | 0 |
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
-| Z | 11 | 3 | 3 | 5 |
+| Z | 11 | 3 | 4 | 4 |
 | R | 10 | 10 | 0 | 0 |
 | G | 7 | 1 | 2 | 4 |
-| **All** | **58** | **43** | **6** | **9** |
+| **All** | **58** | **43** | **7** | **8** |
 
 ## Items
 
@@ -64,7 +64,7 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Z4 | Z | pending | — | rdk/sop suites; parallel equality; memory guard |
 | Z5 | Z | active | `9ec77825` `0e3d83a9` `b032690c` `1cb47792` — full64 hash/SplitMix64 and unambiguous segment framing; strict scratch regression corrected | CPU/Flow/SOP/Shader/Web/native vectors and exports pass; exact Windows stage qualification remains |
 | Z6 | Z | done | `9deaa70d` — native float formatting/parsing, shared byte quoting, Unicode metadata, full-width values and typed provenance; retired compatibility removed | Flow505, SOP484, Web/Shader149, exports226, GPU94, Doc/Graph128, geometry521 and UI/native affected checks qualify; exact goldens/caps/gates verified |
-| Z7 | Z | pending | — | Orrery frames lower 0 times after warm-up; flow_sop run well under its cap |
+| Z7 | Z | active | Baseline at `9deaa70d`: actual warmed Orrery567lower calls; zero-call guard fails before implementation | Original12animated/30idle checks preserved; body-shape binding/residual interning and actual0-call proof remain |
 | Z8 | Z | done | `2c8ea1de` — platform-byte capacities, fallible bulk/COW/native owners and exact JS counts; intentional fixtures/spec refreshed | Foundations572, SOP493, geometry495, Web/Shader/Graph186, exports226, FlowGPU94, native/current strict frames and unchanged shape/deps pass |
 | Z9 | Z | pending | — | Z0 warm-cook guards on subdivide, boolean and scatter |
 | Z10 | Z | pending | — | Z0; per-crate clone count tracked in PROGRESS.md |
@@ -500,3 +500,41 @@ The D wave is complete. At most two agents build concurrently. Current build slo
 - **Z6 DONE** `9deaa70dd83358a42076fa3019956f443e37fb6a`:576physical owned paths committed as573Git files after3 detected history renames,+3201/−5620. Root compared the exact committed no-rename path set with the frozen manifest and verified no extras/index empty; only its progress ledger remained dirty. Source/helper semantics, spec, intentional owned fixtures and archived provenance ship together. Full evidence is `/tmp/rays-z6-evidence.md`; all required current-source Mac checks and strict causal audits are qualified as recorded above. No global Windows success, zero allocation/O(1) achievement or full58-item completion is claimed.
 - Next authorized work is full Z7 from9deaa70d: actual warmed animated Orrery lower-call/frame-time and warm-build baseline first, then body preparation keyed by term/site/binding shape, cook-time value binding and correct residual hash-consing. Existing12animated/30idle assertions and frames stay unchanged. G1 advanced immutable admission remains separately active and outside the worktree until its complete caller migration is ready and the brief baseline window ends.
 - Artifactv39 published:43done/6active/9pending (**74.1%**). Downloaded HTML is byte-identical to the tracked source; all58 live DB entries equal embedded/tracked seeds. Tracker immediate/live/offline regression and diff check pass. This goal turn is progress through committed and qualified full Z6, exact independent fixture proofs and the next Z7 baseline handoff. The original58-item objective remains active.
+
+### Z7 actual baseline — prepared lowering and residual identity
+
+- Z7 is ACTIVE from real execution at9deaa70d. Instrumented Orrery passes7.04s wall (runner6.521s,case2.666s), retaining all12animated/30idle geometry, pixels, document and lifetime assertions. Actual phase profiling observes52lower calls on the first frame and51or54thereafter,567calls over warmed animated frames2–12; the thread-local hook demonstrably sees real lowering.
+- Warmed frame wall median171.657ms (min169.903,max182.651ms); exclusive lower-phase median1.541ms. Nested checker/static/preparation work dominates the total; this is not a claim that exclusive IR lowering alone costs210ms. The new zero-call regression fails before implementation (actual exit101,7.10s wall,case2.830s) on567!=0 after all original assertions and teardown. Temporary instrumentation is restored exactly; runnable guard patch `/tmp/rays-z7-orrery-zero-regression.patch` is retained for implementation.
+- bench_core baseline digestc4bbf006c82014c7 matches both domains; measured medians0.0205/0.0112ms. Quiescent warm checks and normal cargo-timings capture continue before source changes. G1 remains outside the worktree during this brief baseline window; full Z7 still requires correct body/binding-shape preparation, cook-time values, residual hash-consing and deletion of structural same_residual after identity semantics are proven.
+
+- Z7 quiescent warm baseline: touching unchanged `crates/flow_eval/src/lib.rs` then `cargo check -p flow_eval -p flow_sop --all-targets` exits0 in1.889936/1.187305/1.207612s, median1.207612s. `cargo build -p flow_sop --timings` after the same touch exits0 in2.80s wall/2.72s Cargo; normal report `target/cargo-timings/cargo-timing-20261110T043820996Z-b8ed1833788bbbb9.html`. Actual baseline/zero-regression command is `cargo t -p rays_editor --test gpu_editor native_orrery_frames`; `cargo run -p flow_ir --example bench_core -- 'map 1,024'` verifies both domain digests. No other Rust compiler/source mutation ran during paired baseline capture; no private target or flags/profile override.
+- Caller trace confirms animated radius/center updates also reach `value_lane::resolve`→apply_geometry→custom operator→build_body without context facts; deleting the context stamp alone cannot meet Z7. Existing context labeling and residual live/import/remap mutation paths need correct shared identity handling. G1's complete advanced caller patch is now prepared outside the worktree, rebasing against9deaa70d; source/build coordination resumes after the quiescent window.
+
+### Z6 reproducible qualification commands
+
+All commands use the normal shared target and `cargo t`, without RAYS_SLOW/deadline/profile overrides. Rows with an initial failure preserve that failure and identify the affected final rerun; the union qualifies the unchanged remaining cases. Fixture generation was a separate capture stage; all listed final runs use read-only assertions.
+
+| Command | Executed cases / result | Wall |
+|---|---|---:|
+| `cargo t -p param -p cfmt -p flow_syntax` | 62pass | 3.69s |
+| `cargo t -p flow_check -p flow_eval -p flow_ir` | 505pass, slowest determinism2.584s | 12.48s |
+| `cargo t -p scene_command -p rdk_core -p rdk_geom -p rdk_ops -p rdk_boolean` | initial516/521pass; five fixture/Unicode cases repaired | 33.95s |
+| `cargo t -p scene_command -p rdk_core` | affected114pass, slowest marks refusals0.089s | 2.96s |
+| `cargo t -p editor_core -p editor_document -p flow_graph` | 128pass, slowest wavecook1.702s | 25.61s |
+| `cargo t -p pxui -p pxui_graph -p pxui_shell` | initial97/98pass; scrub spelling repaired | 26.21s |
+| `cargo t -p pxui_shell --lib` | affected15pass, slowest layout0.060s | 1.91s |
+| `cargo t -p rays_editor --lib` | 67pass, slowest paste0.204s | 12.45s |
+| `cargo t -p flow_web -p flow_shader` | 149pass, slowest all-byte codec1.759s | 13.92s |
+| `cargo t -p flow_sop -p sop` | 484pass, warm kernel guards unchanged | 41.20s |
+| `cargo t -p web_export` | 226pass, slowest sop_gallery1.009s | 12.48s |
+| `cargo t -p flow_gpu` | 94pass, slowest resident0.577s | 33.37s |
+| `cargo t -p renderer -p runtime_resources -p rays -p rays_pathtracer` | initial124/125pass; deferred-release measurement isolated and corrected | 51.99s |
+| `cargo t -p rays_pathtracer --test gpu_all film` | final1pass, strict release/pixels/lifetimes, case0.876s | 3.10s |
+| `cargo t -p rays_editor --test gpu_editor alloc_budget_` | 4pass, slowest basic0.370s | 12.48s |
+| `cargo t -p rays_editor --test gpu_editor native_sea_frames` | 1pass, case1.178s | 1.68s |
+| `cargo check --workspace --all-targets` | pass (overlapping compile; not a benchmark) | 13.62s |
+| `cargo run -p gate -- deps` | pass | 0.19s |
+| `cargo run -p gate -- shape` | historical exit1;493→492,zero additions | 0.76s |
+
+`git diff --check` and all causal fixture scripts pass. Capture-only temporary writers/dump hooks were restored before final tests and the source commit; ignored/filtered tests are excluded from every executed count above. Full command/capture details are in `/tmp/rays-z6-evidence.md`; Z7 exact baseline provenance is `/tmp/rays-z7-baseline-evidence.md`.
+- Artifactv40 published and verified:43done/7active/8pending, exact downloaded HTML and all58 live/embedded/tracked records equal. Tracker immediate/live/offline regression and diff check pass. Fresh Windows peer read remains offline, LastSeen00:46:16.1Z; no remote writes. Full goal stays active.

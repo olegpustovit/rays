@@ -148,8 +148,8 @@
     "note": "9deaa70d \u2014 native float formatting/parsing, shared byte quoting, Unicode metadata, full-width values and typed provenance; retired compatibility removed"
   },
   "Z7": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Baseline at 9deaa70d: actual warmed Orrery567lower calls; zero-call guard fails before implementation"
   },
   "Z8": {
     "status": "done",
