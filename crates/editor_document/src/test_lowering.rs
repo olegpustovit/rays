@@ -236,8 +236,8 @@ fn parse1(text: &str) -> s::Syntax {
     s::parse(text).expect("parse").remove(0)
 }
 
-fn plan_key(doc: &document::T) -> Vec<(String, Vec<String>, Vec<i64>, String)> {
-    doc.workspace.lowered.plan.nodes.iter().map(|n| (n.kind.clone(), n.site.clone(), n.iter.clone(), flow_eval::structure(&flow_syntax::value::Value::Record(n.args.clone())))).collect()
+fn plan_key(doc: &document::T) -> Vec<(String, flow_check::workspace::Path, Vec<i64>, String)> {
+    doc.workspace.lowered.plan.nodes.iter().map(|n| (n.kind.clone(), n.site.clone(), n.iter.clone(), flow_eval::structure(&flow_syntax::value::Value::Record(n.args.clone().into())))).collect()
 }
 
 fn fast_catalog() -> Catalog {
@@ -269,7 +269,7 @@ fn sketch(file: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-fn scrubs(file: &str, steps: &[(Vec<String>, &str, Vec<i64>, &str)]) {
+fn scrubs(file: &str, steps: &[(flow_check::workspace::Path, &str, Vec<i64>, &str)]) {
     let mut doc = lower(None, &ws_of_text(&sketch(file)));
     for (node, key, sub, value) in steps {
         let op = Op::SetArg { node: node.clone(), key: ArgKey::Kw((*key).to_owned()), sub: sub.clone(), value: parse1(value) };
@@ -283,8 +283,8 @@ fn scrubs(file: &str, steps: &[(Vec<String>, &str, Vec<i64>, &str)]) {
     }
 }
 
-fn names(v: &[&str]) -> Vec<String> {
-    v.iter().map(|x| (*x).to_owned()).collect()
+fn names(v: &[&str]) -> flow_check::workspace::Path {
+    v.iter().map(|x| (*x).into()).collect()
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn fast_path_inline_scrubs_gpu_sea() {
             (waves.clone(), "seed", vec![], "9"),
             // a literal inside a live argument
             (waves.clone(), "lacunarity", vec![1], "2.25"),
-            (vec!["sea".to_owned(), fe::nested_leaf("waves", &ArgKey::Pos(0)).expect("nested leaf")], "width", vec![], "7.5"),
+            (vec!["sea".into(), fe::nested_leaf("waves", &ArgKey::Pos(0)).expect("nested leaf").into()], "width", vec![], "7.5"),
         ],
     );
 }

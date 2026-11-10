@@ -8,6 +8,7 @@
 //! `Region::T` fields are all `pub` for reading; build one only through `make`/`rebuild`.
 #![allow(non_camel_case_types, non_snake_case)]
 
+use flow_syntax::symbol::Symbol;
 use flow_check::workspace::{DiagnosticPolicy, Path, Term};
 use flow_syntax::packed_ops;
 pub use flow_syntax::packed_ops::{ByteMode, Comparison, Integer, Primitive, primitive_name};
@@ -25,7 +26,7 @@ pub enum Literal {
     Text(Arc<[u8]>),
     Vector(Vec<f64>),
     List(Vec<Literal>),
-    Record(Vec<(String, Literal)>),
+    Record(Vec<(Symbol, Literal)>),
     Array { width: i64, data: Arc<Vec<f64>> },
     Int_array(Arc<Vec<i64>>),
     Text_array(Arc<rays_math::text_array::TextArray>),
@@ -44,14 +45,14 @@ pub enum Expr {
     /// Immutable closure-free host source, materialized only when this expression executes.
     Source(Value),
     /// Construct a typed host source from computed arguments.
-    Host_source { name: String, ty: Ty, args: Vec<(String, i64)> },
+    Host_source { name: String, ty: Ty, args: Vec<(Symbol, i64)> },
     /// Immutable host-array query retained for a cooked storage consumer.
-    Source_descriptor { name: String, ty: Ty, args: Vec<(String, i64)> },
-    Prim(Primitive, Vec<(String, i64)>),
+    Source_descriptor { name: String, ty: Ty, args: Vec<(Symbol, i64)> },
+    Prim(Primitive, Vec<(Symbol, i64)>),
     Vec(Vec<i64>),
-    Fields(Vec<(String, i64)>),
+    Fields(Vec<(Symbol, i64)>),
     Items(Vec<i64>),
-    Field(i64, String),
+    Field(i64, Symbol),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,11 +81,11 @@ pub enum Draw {
     Background(i64),
     Point { at: i64, ink: i64 },
     /// One mark; the arguments are the operator's own input names.
-    Mark { mark: Mark, args: Vec<(String, i64)> },
+    Mark { mark: Mark, args: Vec<(Symbol, i64)> },
     /// A mark set; the count is that of `positions` (of `from` for lines).
-    Batch { mark: Mark, args: Vec<(String, i64)> },
+    Batch { mark: Mark, args: Vec<(Symbol, i64)> },
     Points { positions: i64, ink: i64 },
-    Path { path: PathKind, args: Vec<(String, i64)> },
+    Path { path: PathKind, args: Vec<(Symbol, i64)> },
     Text_run { at: i64, text: i64, ink: i64, size: i64 },
     Image { source: (Ty, i64), at: i64, scale: i64, angle: i64 },
     Push(Transform, i64),
@@ -370,7 +371,7 @@ pub mod region {
         pub sources: Sources,
         pub widths: Arc<Vec<i64>>,
         pub uniforms: Vec<Value>,
-        pub uniform_names: Arc<Vec<(String, Vec<String>)>>,
+        pub uniform_names: Arc<Vec<(Symbol, Vec<Symbol>)>>,
         pub code: Arc<Vec<Instruction>>,
         pub dependent: Arc<OnceLock<Vec<bool>>>,
         /// component registers of each output; `Collect` regions only may have several
@@ -397,7 +398,7 @@ pub mod region {
         pub sources: Sources,
         pub widths: Vec<i64>,
         pub uniforms: Vec<Value>,
-        pub uniform_names: Vec<(String, Vec<String>)>,
+        pub uniform_names: Vec<(Symbol, Vec<Symbol>)>,
         pub code: Vec<Instruction>,
         pub outputs: Vec<Vec<i64>>,
         pub count: Option<i64>,
@@ -422,7 +423,7 @@ pub mod region {
         pub sources: Option<Sources>,
         pub widths: Option<Vec<i64>>,
         pub uniforms: Option<Vec<Value>>,
-        pub uniform_names: Option<Vec<(String, Vec<String>)>>,
+        pub uniform_names: Option<Vec<(Symbol, Vec<Symbol>)>>,
         pub code: Option<Vec<Instruction>>,
         pub outputs: Option<Vec<Vec<i64>>>,
         pub count: Option<Option<i64>>,
@@ -1027,7 +1028,7 @@ pub struct Program {
 
 /// Local operands read directly by one statement, in operand order.
 pub fn reads(s: &Statement) -> Vec<i64> {
-    fn pairs(args: &[(String, i64)]) -> Vec<i64> { args.iter().map(|(_, n)| *n).collect() }
+    fn pairs(args: &[(Symbol, i64)]) -> Vec<i64> { args.iter().map(|(_, n)| *n).collect() }
     fn expr(e: &Expr) -> Vec<i64> {
         match e {
             Expr::Constant(_) | Expr::Call_index(_) | Expr::Frame(_) | Expr::Source(_) => Vec::new(),
@@ -1153,7 +1154,7 @@ pub fn value_of_literal(literal: &Literal) -> Value {
             _ => panic!("Core.value_of_literal: width"),
         },
         Literal::List(xs) => Value::List(Arc::new(xs.iter().map(value_of_literal).collect())),
-        Literal::Record(xs) => Value::Record(xs.iter().map(|(n, v)| (n.clone(), value_of_literal(v))).collect()),
+        Literal::Record(xs) => Value::Record(xs.iter().map(|(n, v)| (n.clone(), value_of_literal(v))).collect::<Vec<_>>().into()),
         Literal::Int_array(data) => Value::Int_array(data.clone()),
         Literal::Text_array(data) => Value::Text_array(data.clone()),
         Literal::Array { width: width @ 1..=4, data } => Value::Floats(*width as usize, data.clone()),
@@ -1208,7 +1209,7 @@ pub fn pp(p: &Program) -> String {
             render(o, i);
         }
     }
-    fn named_locals(o: &mut String, xs: &[(String, i64)]) {
+    fn named_locals(o: &mut String, xs: &[(Symbol, i64)]) {
         separated(o, xs.len(), &|o, i| { o.push_str(&quoted(xs[i].0.as_bytes())); o.push(':'); local(o, xs[i].1); });
     }
     fn literal(o: &mut String, l: &Literal) {
@@ -1273,7 +1274,7 @@ pub fn pp(p: &Program) -> String {
             Expr::Field(n, name) => { local(o, *n); o.push_str(&format!(".{}", quoted(name.as_bytes()))); }
         }
     }
-    fn args_line(o: &mut String, args: &[(String, i64)]) {
+    fn args_line(o: &mut String, args: &[(Symbol, i64)]) {
         for (name, n) in args { o.push_str(&format!(" {}=", name)); local(o, *n); }
     }
     fn draw(o: &mut String, d: &Draw) {
@@ -1305,7 +1306,7 @@ pub fn pp(p: &Program) -> String {
             Draw::Pop => o.push_str("pop"),
         }
     }
-    fn path(o: &mut String, xs: &[String]) {
+    fn path(o: &mut String, xs: &[Symbol]) {
         o.push('[');
         separated(o, xs.len(), &|o, i| o.push_str(&quoted(xs[i].as_bytes())));
         o.push(']');
@@ -1591,7 +1592,7 @@ mod tests {
 
     #[test]
     fn literal_round_trip() {
-        let v = Value::Record(vec![("a".into(), Value::Vec3(1.0, 2.0, 3.0)), ("b".into(), Value::List(Arc::new(vec![Value::Int(1)])))]);
+        let v = Value::Record(vec![("a".into(), Value::Vec3(1.0, 2.0, 3.0)), ("b".into(), Value::List(Arc::new(vec![Value::Int(1)])))].into());
         assert_eq!(value_of_literal(&literal_of_value(&v).unwrap()), v);
         assert!(literal_of_value(&Value::Fn(value::FnId(0, 0))).is_none());
         // Text is arbitrary bytes. Param, checked literals and IR reads share their frozen payload.

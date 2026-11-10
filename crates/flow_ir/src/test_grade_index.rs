@@ -1,4 +1,5 @@
 // Port of lib/flow_ir/test_grade_index.ml.
+use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::test_support::*;
 use flow_eval as e;
@@ -228,12 +229,12 @@ fn unsupported_and_dynamic_programs_refuse() {
 fn declarations() -> &'static str {
     "[(keys : (array int) (array/int 0)) (queries : (array int) (array/int 0))]"
 }
-fn inputs() -> Vec<(String, Vec<(String, Value)>)> {
+fn inputs() -> Vec<(String, Vec<(Symbol, Value)>)> {
     vec![(
         "g".to_string(),
         vec![
-            ("keys".to_string(), source_value("fixture/keys", Ty::Array(Box::new(Ty::Int)), vec![])),
-            ("queries".to_string(), source_value("fixture/queries", Ty::Array(Box::new(Ty::Int)), vec![])),
+            ("keys".into(), source_value("fixture/keys", Ty::Array(Box::new(Ty::Int)), vec![].into())),
+            ("queries".into(), source_value("fixture/queries", Ty::Array(Box::new(Ty::Int)), vec![].into())),
         ],
     )]
 }
@@ -242,8 +243,8 @@ fn dynamic(body: &str) -> Value {
 }
 fn count_source() -> crate::core_ir::region::CountSource {
     crate::core_ir::region::CountSource::new(Arc::new(|_, term| match &term.node {
-        flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "keys" => Some((vec!["fixture".to_string(), "keys".to_string()], vec![])),
-        flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "queries" => Some((vec!["fixture".to_string(), "queries".to_string()], vec![])),
+        flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "keys" => Some((vec!["fixture".into(), "keys".into()], vec![])),
+        flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "queries" => Some((vec!["fixture".into(), "queries".into()], vec![])),
         _ => None,
     }))
 }

@@ -128,7 +128,7 @@ pub fn run_lisp_inspector() {
     let m = (450., 300.);
     r.step(m, vec![]);
     r.step(m, vec![]);
-    check(editor::private::inspector_subject(&r.e) == Some(vec!["g".to_string(), "card".to_string()]), "Lisp card did not reach the inspector");
+    check(editor::private::inspector_subject(&r.e) == Some(vec!["g".into(), "card".into()]), "Lisp card did not reach the inspector");
     let (ix, iy, _, _) = r.panes().inspector;
     let at = |x: i64| ((ix + 200 + x) as f64, (iy + 186) as f64);
     r.stepb(&[LB], at(0), vec![Event::Pointer_pressed(LB, at(0))]);
@@ -211,7 +211,7 @@ pub fn run_open_defn() {
     r.step(p, vec![]);
     r.step(p, vec![key(Key::KeyChar('i'))]);
     r.step(p, vec![]);
-    check(editor::workspace(&r.e).layout.collapsed.get(&vec!["g".to_string(), "a#0".to_string()]) == Some(&false), "i on a collapsed function did not open it");
+    check(editor::workspace(&r.e).layout.collapsed.get(&vec!["g".into(), "a#0".into()]) == Some(&false), "i on a collapsed function did not open it");
     r.close();
 }
 

@@ -10,6 +10,7 @@
 //! networks use `network::ptr_eq`, SOP graphs and nodes their `ptr_eq`, settings `same_values`.
 //! `Document::Workspace::fast` is computed eagerly (OCaml `lazy`): it reads the settings graph
 //! once with the lowering.
+use flow_syntax::symbol::Symbol;
 use crate::document::{self, Home, ViewRoot, ViewWorld};
 use crate::kind_graph as kg;
 use crate::kinds::{ports, scene_kinds, window_default, window_of_values, window_schema, world_kinds, Window};
@@ -28,7 +29,7 @@ use flow_sop_catalog::network as net;
 use flow_sop_catalog::port;
 use flow_syntax::context::{self, Context};
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{Value as E, struct_value};
+use flow_syntax::value::{Record, Value as E, struct_value};
 use param::Value as PV;
 use rays::camera as rcamera;
 use rays_diagnostic::Diagnostic;
@@ -60,7 +61,7 @@ pub struct Options {
 const SLOT_NAMES: [&str; 10] = ["geometry", "texture", "layers", "below", "name", "parent", "active", "world", "scene", "camera"];
 
 /// The field changes a struct's keywords make, checked against the schema's bounds.
-fn changes(qualified: &str, args: &[(String, E)]) -> R<Vec<(String, PV)>> {
+fn changes(qualified: &str, args: &Record) -> R<Vec<(String, PV)>> {
     let ports = ports(qualified);
     let mut acc = Vec::new();
     for (key, value) in args {
@@ -73,9 +74,9 @@ fn changes(qualified: &str, args: &[(String, E)]) -> R<Vec<(String, PV)>> {
     Ok(acc)
 }
 
-fn label_arg(args: &[(String, E)]) -> Option<String> {
-    match args.iter().find(|(n, _)| n == "name") {
-        Some((_, E::Text(s))) if !s.is_empty() => Some(String::from_utf8_lossy(s).into_owned()),
+fn label_arg(args: &Record) -> Option<String> {
+    match args.get_str("name") {
+        Some(E::Text(s)) if !s.is_empty() => Some(String::from_utf8_lossy(s).into_owned()),
         _ => None,
     }
 }
@@ -179,7 +180,7 @@ pub fn fast(doc: &document::T) -> bool {
 #[derive(Clone)]
 struct Call {
     kind: String,
-    args: Vec<(String, E)>,
+    args: Record,
     home: Home,
     /// The graph a `(ref g)` argument names, for `scene/world`.
     via: Option<String>,
@@ -220,7 +221,7 @@ fn loose(want: Want, below: Below, v: &E) -> Vec<Call> {
 
 /// The home of a call in a loop body, as a copy: the template's path goes relative to the loop, a
 /// call written inside another call of the body keeps that nesting, a loop in a loop nests.
-fn copy(zone: &[String], loop_: &Home, index: i64, home: Home) -> Home {
+fn copy(zone: &[Symbol], loop_: &Home, index: i64, home: Home) -> Home {
     match home {
         Home::BoundAt(p) if p.len() > zone.len() && p[..zone.len()] == *zone => Home::Copy { loop_: Box::new(loop_.clone()), rel: p[zone.len()..].to_vec(), index },
         Home::InlineIn(h, k) => Home::InlineIn(Box::new(copy(zone, loop_, index, *h)), k),
@@ -299,7 +300,7 @@ fn referenced(env: &Env, t: &Term) -> Option<String> {
 fn walk(want: Want, below: Below, iter: &[usize], env: &Env, place: Option<(Home, ArgKey)>, t: &Term, v: &E) -> Vec<Call> {
     let arena = t.arena();
     let home = || match (t.path(), &place) {
-        (Some(path), _) => Home::BoundAt(path.iter().map(|name| t.name(*name).to_owned()).collect()),
+        (Some(path), _) => Home::BoundAt(path.iter().map(|name| t.symbol(*name)).collect()),
         (None, Some((parent, key))) => Home::InlineIn(Box::new(parent.clone()), key.clone()),
         (None, None) => Home::Looped,
     };
@@ -355,7 +356,7 @@ fn walk(want: Want, below: Below, iter: &[usize], env: &Env, place: Option<(Home
                 let value = if looped {
                     E::List(Arc::new(vargs.iter().skip(at).take(n).map(|(_, v)| v.clone()).collect()))
                 } else {
-                    match vargs.get(at) {
+                    match vargs.field_at(at) {
                         Some((_, v)) => v.clone(),
                         None => { at += n; continue; }
                     }
@@ -369,7 +370,7 @@ fn walk(want: Want, below: Below, iter: &[usize], env: &Env, place: Option<(Home
             let node = arena.loop_node(id);
             let loop_ = home();
             let real = real_indices(arena, arena.skip(node.skip), iter, xs.len());
-            let zone: Vec<String> = arena.path(node.zone).iter().map(|name| arena.name(*name).to_owned()).collect();
+            let zone: flow_check::workspace::Path = arena.path(node.zone).iter().map(|name| arena.symbol(*name)).collect();
             let mut out = Vec::new();
             for (pos, x) in xs.iter().enumerate() {
                 let i = real[pos];
@@ -463,16 +464,16 @@ fn world_kind(qualified: &str) -> kg::Kind {
     world_table().iter().find(|(k, _)| k == qualified).map(|(_, k)| k.clone()).unwrap_or_else(|| panic!("no world kind {qualified}"))
 }
 
-fn forced_args(forced: E) -> Vec<(String, E)> {
+fn forced_args(forced: E) -> Record {
     match forced {
-        E::Struct(g) => g.fields,
-        _ => Vec::new(),
+        E::Struct(g) => g.fields.clone(),
+        _ => Record::default(),
     }
 }
 
 fn item_of(lowered: &lower_mod::T, call: &Call) -> R<Item> {
     let Call { kind, args, home, via } = call;
-    let dynamic: Vec<&(String, E)> = args.iter().filter(|(key, value)| live_light_field(kind, key) && flow_eval::is_live(value)).collect();
+    let dynamic: Vec<&(Symbol, E)> = args.iter().filter(|(key, value)| live_light_field(kind, key) && flow_eval::is_live(value)).collect();
     // OCaml folds from the right: the first error from the right wins
     let mut dyn_params: Vec<(port::Parameter, E)> = Vec::new();
     let kind_ports = ports(kind);
@@ -545,8 +546,8 @@ fn root_of(all: &[Call]) -> R<Root> {
     match all.iter().find(|c| c.kind == "scene/root") {
         None => Ok(Root { params: root::default(), root_home: None, camera: None }),
         Some(call) => {
-            let own: Vec<(String, E)> = call.args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
-            let forced = force0(&struct_value("scene/root", ty::scene(), own))?;
+            let own: Vec<(Symbol, E)> = call.args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
+            let forced = force0(&struct_value("scene/root", ty::scene(), own.into()))?;
             let values = changes("scene/root", &forced_args(forced))?;
             let params = root_params(&values)?;
             let others: Vec<&Call> = all.iter().filter(|c| c.kind != "scene/root").collect();
@@ -726,8 +727,8 @@ pub fn instance_root(value: &E) -> Option<ViewRoot> {
     match value {
         E::Struct(g) if g.name == "scene/root" => {
             let args = &g.fields;
-            let own: Vec<(String, E)> = args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
-            match force0(&struct_value("scene/root", ty::scene(), own)) {
+            let own: Vec<(Symbol, E)> = args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
+            match force0(&struct_value("scene/root", ty::scene(), own.into())) {
                 Ok(E::Struct(forced)) => match changes("scene/root", &forced.fields) {
                     Ok(values) => root_params(&values).ok().map(|params| ViewRoot { params, camera: instance_camera(args.iter().find(|(n, _)| n == "camera").map(|(_, v)| v)) }),
                     Err(_) => None,

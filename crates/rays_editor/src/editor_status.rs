@@ -1,6 +1,7 @@
 //! The status strip: the line it says, the open dialog's name for a crash report, the probe
 //! caption. Port of lib/rays_editor/editor_status.ml.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use editor_core::guide_context;
 use editor_core::keymap;
 use editor_core::panels::Panel;
@@ -149,7 +150,7 @@ pub fn probe_caption<'a>(value: &ModelView<'a>) -> Option<String> {
     if graph_name(value).as_ref() != Some(&laid.graph) {
         return None;
     }
-    let probe_of = |p: &[String]| value.probes.get(p).copied().unwrap_or(0);
+    let probe_of = |p: &[Symbol]| value.probes.get(p).copied().unwrap_or(0);
     let zones: Vec<fproj::Node> = fproj::zones(&laid.scope).into_iter().filter(|n| n.zone.as_ref().is_some_and(|z| z.kind != ZoneKind::Let)).collect();
     let own = zones.iter().find(|n| n.path == *path);
     let zone = match own {
@@ -161,7 +162,7 @@ pub fn probe_caption<'a>(value: &ModelView<'a>) -> Option<String> {
     }?;
     let counts = records.borrow_mut().counts(&laid.scope, &probe_of);
     let count = counts.iter().find(|(z, _)| *z == zone).map(|(_, c)| *c)?;
-    Some(format!("{} \u{b7} iteration {} of {}", zone.last().cloned().unwrap_or_default(), probe_of(&zone) + 1, count))
+    Some(format!("{} \u{b7} iteration {} of {}", zone.last().map_or("", |name| name.as_str()), probe_of(&zone) + 1, count))
 }
 
 /// The status strip under the view: kit text on the ground, under a hairline.
@@ -211,7 +212,7 @@ pub fn status_box<'a>(value: &ModelView<'a>, ui: &mut Ui, frame: &frame::Frame, 
         _ => {
             let paths = inspector_paths(scope::selected(pane_view(value)));
             match paths.len() {
-                1 => paths[0].last().cloned(),
+                1 => paths[0].last().map(ToString::to_string),
                 0 => None,
                 n => Some(format!("{n} selected")),
             }

@@ -2,6 +2,7 @@
 //! probes or the graph changed (`sync_scope`), the probe previews it shows (`sync_views`), and the
 //! inspector's subject for a scene object or World layer (`scene_target`). Bundle C.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -31,10 +32,10 @@ use crate::editor_shell::*;
 use crate::timeline;
 
 type S = Syntax;
-type Path = Vec<String>;
+type Path = flow_check::workspace::Path;
 
 /// The plan node of a drawing or image at `path`, with its type.
-pub fn picture_node(records: &Rc<RefCell<Probe>>, path: &[String], probes: &[i64]) -> Option<(Ty, i64)> {
+pub fn picture_node(records: &Rc<RefCell<Probe>>, path: &[Symbol], probes: &[i64]) -> Option<(Ty, i64)> {
     [ty::drawing(), ty::image()].into_iter().find_map(|t_| records.borrow().plan_node(Some(&t_), path, probes).map(|id| (t_, id)))
 }
 
@@ -66,7 +67,7 @@ pub fn sync_views(value: &mut EditorModel) {
     let dynamic_lowered = lowered.clone();
     let options = Options {
         clock: Some(value.clock.clone()),
-        dynamic: Some(Rc::new(move |site: &[String]| lower::zone_count(&dynamic_lowered, &site.to_vec()))),
+        dynamic: Some(Rc::new(move |site: &[Symbol]| lower::zone_count(&dynamic_lowered, &site.to_vec()))),
         ..Default::default()
     };
     let records = Rc::new(RefCell::new(probe::make(&lowered.evaluated, options)));
@@ -101,7 +102,7 @@ pub fn sync_views(value: &mut EditorModel) {
 }
 
 /// A node asked to be viewed: the preview of the object that owns it, else the canvas's.
-pub fn view_node(value: &mut EditorModel, path: &[String]) {
+pub fn view_node(value: &mut EditorModel, path: &[Symbol]) {
     let Some(key) = pane_laid(&(&*value).into()).cloned() else { return };
     let chain = probe::chains(&key.scope).get(path).cloned().unwrap_or_default();
     let probes = probes_for(&*value, &chain);
@@ -141,29 +142,29 @@ struct DocSaved {
 }
 
 impl scope::Saved for DocSaved {
-    fn at(&self, path: &[String]) -> Option<(f64, f64)> {
+    fn at(&self, path: &[Symbol]) -> Option<(f64, f64)> {
         self.layout.at.get(path).copied()
     }
-    fn level(&self, path: &[String]) -> Option<(p::Level, bool)> {
+    fn level(&self, path: &[Symbol]) -> Option<(p::Level, bool)> {
         match (self.layout.level.get(path), self.layout.pinned.get(path)) {
             (None, None) => None,
             (level, pinned) => Some((level.copied().unwrap_or(p::Level::Card), pinned.copied().unwrap_or(false))),
         }
     }
-    fn pin(&self, path: &[String], label: &str) -> Option<bool> {
+    fn pin(&self, path: &[Symbol], label: &str) -> Option<bool> {
         self.layout.rows.get(path).and_then(|m| m.get(label)).copied()
     }
     // a function or loop starts open, its body in view: c folds it
-    fn collapsed(&self, path: &[String]) -> bool {
+    fn collapsed(&self, path: &[Symbol]) -> bool {
         self.layout.collapsed.get(path) == Some(&true)
     }
-    fn probe(&self, path: &[String]) -> i64 {
+    fn probe(&self, path: &[Symbol]) -> i64 {
         self.probes.get(path).copied().unwrap_or(0)
     }
-    fn frames(&self, path: &[String]) -> Vec<scope::Frame3> {
+    fn frames(&self, path: &[Symbol]) -> Vec<scope::Frame3> {
         self.layout.frames.get(path).map(|fs| fs.iter().map(|f| (f.title.clone(), f.at, f.size)).collect()).unwrap_or_default()
     }
-    fn imported(&self, path: &[String]) -> Option<String> {
+    fn imported(&self, path: &[Symbol]) -> Option<String> {
         workspace_doc::imported_file(&self.imports, path)
     }
 }
@@ -266,7 +267,7 @@ pub fn sync_scope(value: &mut EditorModel) {
             }
         }
         _ => Rc::new(
-            p::of_graph_with(&|path: &[String]| folded_ws.layout.collapsed.get(path) != Some(&false), &catalog, &ws.checked, &name)
+            p::of_graph_with(&|path: &[Symbol]| folded_ws.layout.collapsed.get(path) != Some(&false), &catalog, &ws.checked, &name)
                 .expect("the pane's graph is checked"),
         ),
     };
@@ -298,13 +299,13 @@ pub fn sync_scope(value: &mut EditorModel) {
         })
     };
     // a pick in another graph's geometry asked for its node to be selected here
-    if !value.select_later.is_empty() && value.select_later.iter().all(|pth| pth.first() == Some(&name)) {
+    if !value.select_later.is_empty() && value.select_later.iter().all(|pth| pth.first().is_some_and(|part| part.as_str() == name)) {
         let paths = std::mem::take(&mut value.select_later);
         scope::select(paths, &mut pane_mut(value).view);
     }
-    let element: Rc<dyn Fn(&[String], i64) -> Option<Vec<(String, Value)>>> = {
+    let element: Rc<dyn Fn(&[Symbol], i64) -> Option<Vec<(Symbol, Value)>>> = {
         let lowered = lowered.clone();
-        Rc::new(move |zone: &[String], k: i64| lower::zone_element(&lowered, &zone.to_vec(), k).map(|(n, (x, y, z))| vec![(n, Value::Vec3(x, y, z))]))
+        Rc::new(move |zone: &[Symbol], k: i64| lower::zone_element(&lowered, &zone.to_vec(), k).map(|(n, (x, y, z))| vec![(n, Value::Vec3(x, y, z))]))
     };
     let resolve: probe::ResolveFn = {
         let (lowered, owner, sources) = (lowered.clone(), owner.clone(), sources.clone());
@@ -316,9 +317,9 @@ pub fn sync_scope(value: &mut EditorModel) {
         Arc::new(move |v: &Value| attribute_kernel::resolve(None, &lookup, v))
     };
     let instance: Option<i64> = lowered.plan.instances.iter().position(|i| i.graph == name && i.default).map(|i| i as i64);
-    let execution: Rc<dyn Fn(&[String], &[i64]) -> Option<probe::Execution>> = {
+    let execution: Rc<dyn Fn(&[Symbol], &[i64]) -> Option<probe::Execution>> = {
         let executions = executions.clone();
-        Rc::new(move |path: &[String], probes: &[i64]| probe_run::find(&executions, instance, path, probes))
+        Rc::new(move |path: &[Symbol], probes: &[i64]| probe_run::find(&executions, instance, path, probes))
     };
     let force = match &previous {
         Some(k) if k.evaluated.as_ref().map_or(false, |e| Arc::ptr_eq(e, &evaluated)) => k.force.clone(),
@@ -335,9 +336,9 @@ pub fn sync_scope(value: &mut EditorModel) {
     } else {
         let live_frame = time.clone().unwrap_or_else(|| input::at_time(0.0));
         let field_state = value.cook.state.clone();
-        let bulk_calls: Rc<dyn Fn(&[String], &[i64]) -> Vec<probe::Bulk>> = {
+        let bulk_calls: Rc<dyn Fn(&[Symbol], &[i64]) -> Vec<probe::Bulk>> = {
             let (lowered, resolve, state, live) = (lowered.clone(), resolve.clone(), field_state.clone(), live_frame.clone());
-            Rc::new(move |zone: &[String], outer: &[i64]| {
+            Rc::new(move |zone: &[Symbol], outer: &[i64]| {
                 lower::field_calls(Some(&state), &live, resolve.clone(), &lowered, &zone.to_vec(), outer)
                     .into_iter()
                     .map(|(offset, count, f)| (offset, count, Rc::new(move |i: i64| f(i)) as Rc<dyn Fn(i64) -> Result<probe::Records, rays_diagnostic::Diagnostic>>))
@@ -348,9 +349,9 @@ pub fn sync_scope(value: &mut EditorModel) {
             let plan = lowered.plan.clone();
             Rc::new(move |node: i64| lower::image_metadata(&plan, node))
         };
-        let dynamic: Rc<dyn Fn(&[String]) -> Option<i64>> = {
+        let dynamic: Rc<dyn Fn(&[Symbol]) -> Option<i64>> = {
             let lowered = lowered.clone();
-            Rc::new(move |site: &[String]| lower::zone_count(&lowered, &site.to_vec()))
+            Rc::new(move |site: &[Symbol]| lower::zone_count(&lowered, &site.to_vec()))
         };
         let options = Options {
             clock: Some(value.clock.clone()),
@@ -383,7 +384,7 @@ pub fn sync_scope(value: &mut EditorModel) {
             let probes = value.probes.clone();
             records
                 .borrow()
-                .geometry_targets(&scope_proj, &move |path: &[String]| probes.get(path).copied().unwrap_or(0))
+                .geometry_targets(&scope_proj, &move |path: &[Symbol]| probes.get(path).copied().unwrap_or(0))
                 .into_iter()
                 .filter_map(|(path, id)| {
                     let node_id = *lowered.compiled.get(&id)?;
@@ -431,7 +432,7 @@ pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(scope_key, Pa
     let catalog = flow_catalog(value);
     match (home, catalog) {
         (Some(Home::BoundAt(path)), Some(catalog)) if path.len() >= 2 => {
-            let graph = path[0].clone();
+            let graph = path[0].to_string();
             let laid = match pane_laid(value) {
                 Some(k) if k.graph == graph => k.clone(),
                 _ => {
@@ -439,7 +440,7 @@ pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(scope_key, Pa
                     let evaluated = value.doc.workspace.lowered.evaluated.clone();
                     let options = Options { clock: Some(value.clock.clone()), state: Some(value.cook.state.clone()), ..Default::default() };
                     let collapsed = ws.layout.collapsed.clone();
-                    let scope_proj = p::of_graph_with(&|p_: &[String]| collapsed.get(p_) != Some(&false), &catalog, &ws.checked, &graph).ok()?;
+                    let scope_proj = p::of_graph_with(&|p_: &[Symbol]| collapsed.get(p_) != Some(&false), &catalog, &ws.checked, &graph).ok()?;
                     scope_key {
                         ws,
                         probe_map: value.probes.clone(),

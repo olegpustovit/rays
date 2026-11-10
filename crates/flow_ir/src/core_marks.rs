@@ -3,6 +3,7 @@
 //! table encodes the same picture. Errors are `Result<_, Diagnostic>` (OCaml `V.fail`).
 //! Not_found of `Buffers.find` / `Buffers.device` is `None`; a Shape2 tessellation failure
 //! (OCaml `invalid_arg`) is an `E_DRAW_RANGE` diagnostic.
+use flow_syntax::symbol::Symbol;
 use crate::core_ir::{Draw, Mark, PathKind, Transform};
 use flow_check::op::drawing_color;
 use flow_syntax::ty::Ty;
@@ -194,11 +195,11 @@ fn colour_attr(sink: &Sink, count: i64, value: &Value) -> Result<ColorAttr, Diag
     }
 }
 
-fn assoc<'a>(args: &'a [(String, &'a Value)], key: &str) -> Option<&'a Value> {
+fn assoc<'a>(args: &'a [(Symbol, &'a Value)], key: &str) -> Option<&'a Value> {
     args.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
 }
 
-fn check_colors(count: i64, args: &[(String, &Value)]) -> Result<(), Diagnostic> {
+fn check_colors(count: i64, args: &[(Symbol, &Value)]) -> Result<(), Diagnostic> {
     for key in ["fill", "stroke", "color"] {
         if let Some(Value::Floats(3, xs)) = assoc(args, key) {
             if xs.len() as i64 != 3 * count {
@@ -239,7 +240,7 @@ fn points_attr(sink: &mut Sink, value: &Value) -> Result<(i64, PairAttr), Diagno
     }
 }
 
-fn resolve_args<'a>(args: &[(String, i64)], values: &'a [Value]) -> Vec<(String, &'a Value)> {
+fn resolve_args<'a>(args: &[(Symbol, i64)], values: &'a [Value]) -> Vec<(Symbol, &'a Value)> {
     args.iter().map(|(k, i)| (k.clone(), &values[*i as usize])).collect()
 }
 
@@ -247,7 +248,7 @@ fn length_error(message: &str) -> Diagnostic {
     v::fail("E_DRAW_LENGTH", message)
 }
 
-fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(String, i64)], values: &[Value]) -> Result<(), Diagnostic> {
+fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(Symbol, i64)], values: &[Value]) -> Result<(), Diagnostic> {
     let args = resolve_args(raw, values);
     let arg = |key: &str| -> Result<&Value, Diagnostic> {
         assoc(&args, key).ok_or_else(|| v::failf("E_DRAW_INPUT", &format!("draw needs {}.", key)))
@@ -357,7 +358,7 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(String, i64)], values:
     }
 }
 
-fn path(sink: &mut Sink, kind: PathKind, raw: &[(String, i64)], values: &[Value]) -> Result<(), Diagnostic> {
+fn path(sink: &mut Sink, kind: PathKind, raw: &[(Symbol, i64)], values: &[Value]) -> Result<(), Diagnostic> {
     let args = resolve_args(raw, values);
     let arg = |key: &str| assoc(&args, key).expect("Not_found");
     let opt = |key: &str| -> Result<Option<i32>, Diagnostic> {
@@ -490,7 +491,7 @@ mod tests {
         compile(&draw)(&values, &mut s)?;
         finish(&s)
     }
-    fn args(names: &[&str]) -> Vec<(String, i64)> { names.iter().enumerate().map(|(i, n)| ((*n).to_owned(), i as i64)).collect() }
+    fn args(names: &[&str]) -> Vec<(Symbol, i64)> { names.iter().enumerate().map(|(i, n)| ((*n).into(), i as i64)).collect() }
 
     #[test]
     fn background_fills_the_canvas() {

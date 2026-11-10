@@ -1,4 +1,5 @@
 // Port of lib/pxui_graph/scope_commands.ml(i): maps keys and menus to typed requests.
+use flow_syntax::symbol::Symbol;
 use crate::scope_state::{self as st, Change, Command, Direction, Drag, Editing, Fr, HintTarget, Hinting, Pane, PathSet};
 use crate::scope_wires::{fallback, line_of_row, root_name, rows_top};
 use editor_core::editor_core::command;
@@ -20,14 +21,14 @@ use std::collections::{HashMap, HashSet};
 
 pub type S = Syntax;
 
-fn drop_last(q: &[String]) -> Vec<String> {
+fn drop_last(q: &[Symbol]) -> Path {
     if q.is_empty() { Vec::new() } else { q[..q.len() - 1].to_vec() }
 }
 
 pub fn parents_removed(paths: &[Path]) -> Vec<Path> {
     let set: PathSet = paths.iter().cloned().collect();
     // a path above this one is among them
-    fn under(q: &[String], set: &PathSet) -> bool {
+    fn under(q: &[Symbol], set: &PathSet) -> bool {
         if q.len() <= 1 {
             return false;
         }
@@ -55,15 +56,15 @@ fn inline_rail(n: &p::Node) -> Option<&p::RailRow> {
 }
 
 /// An open expression folds from its outermost call.
-fn outer_expr(t: &Pane, path: &[String]) -> Path {
-    let up = |q: &[String]| -> Vec<String> {
+fn outer_expr(t: &Pane, path: &[Symbol]) -> Path {
+    let up = |q: &[Symbol]| -> Path {
         match q.split_last() {
             Some((l, r)) => {
                 let mut v = r.to_vec();
                 v.push(match l.rfind('#') {
                     Some(i) => l[..i].to_owned(),
-                    None => l.clone(),
-                });
+                    None => l.to_string(),
+                }.into());
                 v
             }
             None => Vec::new(),
@@ -93,7 +94,7 @@ fn last_value(t: &Pane, n: &p::Node, r: &p::Row) -> Option<S> {
         return None;
     }
     let mut path = drop_last(&n.path);
-    path.push(srcs[0].clone());
+    path.push(srcs[0].clone().into());
     let at = records.borrow_mut().at(&path, &[]);
     use flow_syntax::arena::{Draft, SyntaxBuilder};
     let mut builder = SyntaxBuilder::new();
@@ -164,12 +165,12 @@ pub fn unwire_at(t: &Pane, inputs: &[(Path, ArgKey)]) -> Vec<Op> {
 
 // ---------------------------------------------------------------- frames
 
-pub fn scope_of_path(path: &[String]) -> Vec<String> {
+pub fn scope_of_path(path: &[Symbol]) -> Path {
     drop_last(path)
 }
 
 /// A frame's size while its corner is dragged.
-pub fn frame_list(t: &Pane, scope: &[String]) -> Vec<Fr> {
+pub fn frame_list(t: &Pane, scope: &[Symbol]) -> Vec<Fr> {
     let frames = t.saved.frames(scope);
     match &t.drag {
         Some(Drag::Sizing { scope: sc, index, dw, dh }) if sc.as_slice() == scope => frames
@@ -200,7 +201,7 @@ fn new_frame(t: &Pane) -> Option<(Path, Fr)> {
     Some((scope, ("frame".to_owned(), (x0 - 12.0 - ox, y0 - 24.0 - oy), (x1 - x0 + 24.0, y1 - y0 + 36.0))))
 }
 
-pub fn input_of(t: &Pane, path: &[String]) -> Option<p::Input> {
+pub fn input_of(t: &Pane, path: &[Symbol]) -> Option<p::Input> {
     t.scope.as_ref().and_then(|sc| sc.inputs.iter().find(|i| i.path.as_slice() == path).cloned())
 }
 
@@ -222,7 +223,7 @@ pub fn conditional_target(n: &p::Node) -> (Path, i64) {
         if let Some((holder, keys)) = e::leaf_keys(leaf) {
             if let [ArgKey::Arm(index)] = keys.as_slice() {
                 let mut v = outer.to_vec();
-                v.push(holder);
+                v.push(holder.into());
                 return (v, *index);
             }
         }
@@ -234,7 +235,7 @@ fn edit(op: Op) -> Vec<Change> {
     vec![Change::Syntax_edit(op)]
 }
 
-fn row_of(t: &Pane, path: &[String], key: &ArgKey) -> Option<(p::Node, p::Row)> {
+fn row_of(t: &Pane, path: &[Symbol], key: &ArgKey) -> Option<(p::Node, p::Row)> {
     st::node_of(t, path).and_then(|n| n.rows.iter().find(|r| r.key == *key).cloned().map(|r| (n, r)))
 }
 
@@ -445,7 +446,7 @@ fn level_of(pl: &p::Placed) -> Option<Level> {
     }
 }
 
-fn levelled(t: &Pane, path: &[String]) -> Option<Level> {
+fn levelled(t: &Pane, path: &[Symbol]) -> Option<Level> {
     t.item_at(path).and_then(|(pl, _, _)| level_of(pl))
 }
 

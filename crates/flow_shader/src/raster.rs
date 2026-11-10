@@ -274,7 +274,7 @@ pub fn spirv(declarations: &str, vertex: &str, fragment: &str) -> Result<(Vec<u8
     };
     let mut inputs = Vec::new();
     for (name, ty) in f.params.iter().filter(|p| !is_buffer(p)) {
-        match varyings.iter().find(|(k, _)| v.leaves[*k].path.last() == Some(name)) {
+        match varyings.iter().find(|(k, _)| v.leaves[*k].path.last().map(|field| field.as_str()) == Some(name.as_str())) {
             Some((k, location)) => inputs.push((*location, width(ty), v.leaves[*k].flat)),
             None => return fail(&format!("{fragment}: no varying {name}")),
         }
@@ -452,7 +452,7 @@ pub fn stages(declarations: &str, vertex: &str, fragment: &str) -> Result<(Data,
             })
             .collect(),
         elements: s.params.iter().filter(|p| !is_buffer(p)).map(|(n, _)| n.clone()).collect(),
-        outputs: s.leaves.iter().map(|leaf| (leaf.path.last().cloned().unwrap_or_else(|| "color".to_owned()), leaf.ty.clone(), leaf.flat)).collect(),
+        outputs: s.leaves.iter().map(|leaf| (leaf.path.last().map_or_else(|| "color".to_owned(), ToString::to_string), leaf.ty.clone(), leaf.flat)).collect(),
     };
     let (v, f) = pipeline(declarations, vertex, fragment)?;
     Ok((data(&v), data(&f)))

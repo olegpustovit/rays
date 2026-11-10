@@ -2,6 +2,7 @@
 //! it shows: the node selected in the graph pane, a scene object or World layer, the settings and
 //! camera panel when nothing is selected. Bundle C.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -64,7 +65,7 @@ pub fn inspect_panel<'a>(
     };
     let lowered_level = in_geometry_level(level);
     // a row of a geometry object's list selects its node in the pane: the inspector follows it
-    let scope_selected: Vec<Vec<String>> = if pane_laid(value).map_or(false, |k| Some(&k.graph) == graph_name(value).as_ref()) || (lowered_level && pane_laid(value).is_some()) {
+    let scope_selected: Vec<flow_check::workspace::Path> = if pane_laid(value).map_or(false, |k| Some(&k.graph) == graph_name(value).as_ref()) || (lowered_level && pane_laid(value).is_some()) {
         inspector_paths(scope::selected(scope_view))
     } else {
         Vec::new()
@@ -92,7 +93,7 @@ pub fn inspect_panel<'a>(
                         let drops: Rc<RefCell<Vec<(carry::Place, bool)>>> = Rc::new(RefCell::new(Vec::new()));
                         let mut inspected = (vec![], vec![]);
                         inspector_panel(window, ui, bounds, &mut |ui| {
-                            let follows = |pth: &[String]| follow_target(value, Some(pth));
+                            let follows = |pth: &[Symbol]| follow_target(value, Some(pth));
                             let opts = InspectorOpts { image, laid: None, window, on_choice: None, resized, follows: &follows };
                             inspected = workspace_inspector_with_drops(value, ui, width, path, &opts, &drops);
                         });
@@ -173,7 +174,7 @@ pub fn inspect_panel<'a>(
                 let mut inspected: Inspected = (vec![], vec![]);
                 inspector_panel(window, ui, bounds, &mut |ui| match node_path(value, node_id) {
                     Some(path) => {
-                        let follows = |pth: &[String]| follow_target(value, Some(pth));
+                        let follows = |pth: &[Symbol]| follow_target(value, Some(pth));
                         let opts = InspectorOpts { image, laid: None, window, on_choice: None, resized, follows: &follows };
                         inspected = workspace_inspector(value, ui, width, &path, &opts);
                     }
@@ -185,7 +186,7 @@ pub fn inspect_panel<'a>(
                 // projection of its graph (the pane's own, or one made for the sheet)
                 let mut inspected: Inspected = (vec![], vec![]);
                 inspector_panel(window, ui, bounds, &mut |ui| {
-                    let follows = |pth: &[String]| follow_target(value, Some(pth));
+                    let follows = |pth: &[Symbol]| follow_target(value, Some(pth));
                     let opts = InspectorOpts { image, laid: Some(laid.clone()), window, on_choice: None, resized, follows: &follows };
                     inspected = workspace_inspector(value, ui, width, &path, &opts);
                 });
@@ -203,7 +204,7 @@ pub fn inspect_panel<'a>(
 
 /// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls
 /// offer a carried payload (the material one): the inspector reports each choice control it builds.
-fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, path: &[String], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
+fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, path: &[Symbol], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
     let place_path = path.to_vec();
     let drops_in = drops.clone();
     // the callback needs the Ui to read the drop target: collect the boxes, ask after

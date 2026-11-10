@@ -8,6 +8,7 @@
 //!
 //! Rust notes: the tracer is a plain struct mutated through `&mut t`; OCaml optional arguments are an options
 //! struct (`create_options`) or `Option` parameters; `move` is `r#move`.
+use flow_syntax::symbol::Symbol;
 use crate::frame_data::{self, allocate_film, camera_fov, color_tuple, destroy_film, Film, gpu_err, put_u32};
 use crate::lisp_kernel;
 use crate::mesh_build::{advance_build, destroy_gpu, discard_build, finish_build, GpuMesh, MeshBuild, mesh_shape, shared, Stage, submit_instances, table_buffers, upload_tables, wait, DeviceGpu};
@@ -1734,7 +1735,7 @@ pub mod private {
             }
         };
         let words: Vec<(String, Vec<f64>)> = values.iter().map(|(n, w)| (n.to_string(), w.clone())).collect();
-        let tables_: Vec<(String, Value)> = types.iter().map(|(n, _)| (n.to_string(), value(n))).collect();
+        let tables_: Vec<(Symbol, Value)> = types.iter().map(|(n, _)| (flow_syntax::symbol::intern(n), value(n))).collect();
         let pixels = Value::Int_array(std::sync::Arc::new((0..n).collect()));
         match lisp_kernel::cpu(&kernels, words, tables_, pixels, "trace")? {
             Value::Floats(4, v) => Ok((*v).clone()),

@@ -1,5 +1,6 @@
 // Port of lib/flow_ir/test_reductions.ml. The `--bench` block is not ported (a timing harness,
 // not an assertion).
+use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::packed;
 use crate::test_support::*;
@@ -33,7 +34,7 @@ fn reject(code: &str, r: Result<Value, Diagnostic>) {
     }
 }
 
-fn value_with(declarations: &str, inputs: Option<&[(String, Vec<(String, Value)>)]>, body: &str) -> Value {
+fn value_with(declarations: &str, inputs: Option<&[(String, Vec<(Symbol, Value)>)]>, body: &str) -> Value {
     let source = format!("(workspace w (graph g :context host {declarations} (if (> t -1000.) {body} {body})))");
     let forms = ok(syntax::parse(&source));
     let workspace = match w::check(&[], false, false, None, &catalog(), &forms) {
@@ -196,7 +197,7 @@ fn bound_arguments_release_arrays_with_the_last_region_clone() {
 fn source_column_and_unsupported_producer() {
     let source = value_with(
         "[(data : (array float) (array/float 0))]",
-        Some(&[("g".to_string(), vec![("data".to_string(), source_value("fixture/column", Ty::Array(Box::new(Ty::Float)), vec![]))])]),
+        Some(&[("g".into(), vec![("data".into(), source_value("fixture/column", Ty::Array(Box::new(Ty::Float)), vec![].into()))])]),
         "(let* [minimum (array/min data) sample {:nested {:column data :bias minimum}}\n      shift (fn [x] (+ x sample.nested.bias))] (map shift sample.nested.column))",
     );
     let compiled = executor_compile(&source, true);

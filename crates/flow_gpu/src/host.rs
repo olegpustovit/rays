@@ -1329,7 +1329,7 @@ impl Scope {
     /// `packed` is the region with its arguments unbound (`args` are them)
     fn off(&self, packed: &Packed, reason: &str) -> Option<Value> {
         let (_, path, _) = flow_ir::packed::site(packed);
-        flow_ir::fallback::note(&path.join("/"), reason);
+        flow_ir::fallback::note(&flow_syntax::symbol::join_path(&path, "/"), reason);
         None
     }
 

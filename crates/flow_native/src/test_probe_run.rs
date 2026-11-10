@@ -4,11 +4,11 @@ use crate::probe_run;
 use flow_ir::flow_ir::{Execution, Tier};
 use flow_syntax::value::Value;
 
-fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| (*s).to_owned()).collect()
+fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|s| (*s).into()).collect()
 }
 
-fn report(owner: &[&str], sites: Vec<(i64, Vec<String>, Vec<i64>)>, tier: Tier) -> Execution {
+fn report(owner: &[&str], sites: Vec<(i64, flow_check::workspace::Path, Vec<i64>)>, tier: Tier) -> Execution {
     Execution { owner: (path(owner), Vec::new()), sites, tier, seconds: 0.5 }
 }
 

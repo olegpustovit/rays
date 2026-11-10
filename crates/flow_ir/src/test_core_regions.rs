@@ -161,7 +161,7 @@ fn check(times: &[f64], region: bool, name: &str, body: &str) {
     let source = format!("(workspace w (graph g :context value (let* [tested {tested}] 0.)))");
     let ws = ts::check_workspace(&source);
     let evaluation = ok(E::r#static(&ws, true, None));
-    let path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     let value = evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1.clone();
     let Value::Residual(r) = &value else { panic!("{name}: expected residual") };
     let core = core_lower::lower(None, None, false, None, None, *r).unwrap_or_else(|n| panic!("{name}: refused {n}"));
@@ -203,7 +203,7 @@ fn a_custom_operator_with_a_shipped_name_is_declined_by_core() {
         (_, ds) => panic!("{}", ts::show_ds(&ds)),
     };
     let evaluation = ok(E::r#static(&ws, true, None));
-    let path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     match &evaluation.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1 {
         Value::Residual(r) => assert_eq!(core_lower::lower(None, None, false, None, None, *r).err().as_deref(), Some("toy_noise3")),
         _ => panic!("expected residual"),

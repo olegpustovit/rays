@@ -1,4 +1,4 @@
-use crate::{packed_ops, ty::{self, Ty}};
+use crate::{packed_ops, symbol::{self, Symbol}, ty::{self, Ty}};
 use rays_diagnostic::{Diagnostic, Severity};
 use rays_math::text_array::TextArray;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
@@ -22,12 +22,134 @@ macro_rules! by_id {
 by_id!(FnId);
 by_id!(ResidualId);
 
-/// Struct/Source payload; boxed so `Value` stays 40 bytes (plan M14).
+// Sorted value storage is private. Public iteration follows authored order through the shared shape.
+struct RecordShape {
+    authored: Box<[(Symbol, u32)]>,
+}
+struct Shapes {
+    slots: [std::sync::Weak<RecordShape>; 128],
+    next: usize,
+}
+// ponytail: 128 weak hot shapes; index this bounded ring if shape lookup dominates a profile.
+static SHAPES: LazyLock<std::sync::Mutex<Shapes>> = LazyLock::new(|| std::sync::Mutex::new(Shapes {
+    slots: std::array::from_fn(|_| std::sync::Weak::new()), next: 0,
+}));
+
+fn record_shape(fields: &[(Symbol, Value)]) -> Arc<RecordShape> {
+    let mut shapes = SHAPES.lock().unwrap_or_else(|e| e.into_inner());
+    for slot in &shapes.slots {
+        if let Some(shape) = slot.upgrade() {
+            if shape.authored.len() == fields.len() && shape.authored.iter().zip(fields).all(|((name, _), field)| *name == field.0) {
+                return shape;
+            }
+        }
+    }
+    let mut indices: Vec<usize> = (0..fields.len()).collect();
+    indices.sort_unstable_by_key(|&ordinal| (fields[ordinal].0.id(), ordinal));
+    let mut authored: Vec<(Symbol, u32)> = fields.iter().map(|(name, _)| (*name, 0)).collect();
+    for (sorted, ordinal) in indices.into_iter().enumerate() {
+        authored[ordinal].1 = u32::try_from(sorted).expect("record field limit exceeded");
+    }
+    let shape = Arc::new(RecordShape { authored: authored.into_boxed_slice() });
+    let next = shapes.next;
+    shapes.slots[next] = Arc::downgrade(&shape);
+    shapes.next = (next + 1) % shapes.slots.len();
+    shape
+}
+
+#[derive(Clone)]
+pub struct Record {
+    fields: Arc<[(Symbol, Value)]>,
+    shape: Arc<RecordShape>,
+}
+impl Record {
+    pub fn new(mut fields: Vec<(Symbol, Value)>) -> Self {
+        static EMPTY: LazyLock<Record> = LazyLock::new(|| Record {
+            fields: Arc::from([]), shape: Arc::new(RecordShape { authored: Box::new([]) }),
+        });
+        if fields.is_empty() { return EMPTY.clone(); }
+        let shape = record_shape(&fields);
+        // Stable sorting preserves first-match duplicate semantics at host construction boundaries.
+        fields.sort_by_key(|(name, _)| name.id());
+        Self { fields: fields.into(), shape }
+    }
+    pub fn len(&self) -> usize { self.fields.len() }
+    pub fn is_empty(&self) -> bool { self.fields.is_empty() }
+    pub fn iter(&self) -> std::iter::Map<
+        std::iter::Zip<std::iter::RepeatN<&[(Symbol, Value)]>, std::slice::Iter<'_, (Symbol, u32)>>,
+        for<'a> fn((&'a [(Symbol, Value)], &'a (Symbol, u32))) -> &'a (Symbol, Value),
+    > {
+        std::iter::repeat_n(self.fields.as_ref(), self.len()).zip(self.shape.authored.iter()).map(record_field)
+    }
+    pub fn get(&self, name: Symbol) -> Option<&Value> {
+        let at = self.fields.partition_point(|(key, _)| key.id() < name.id());
+        self.fields.get(at).filter(|(key, _)| *key == name).map(|(_, value)| value)
+    }
+    pub fn get_str(&self, name: &str) -> Option<&Value> { symbol::find(name).and_then(|name| self.get(name)) }
+    pub fn field_at(&self, index: usize) -> Option<&(Symbol, Value)> {
+        self.shape.authored.get(index).map(|(_, sorted)| &self.fields[*sorted as usize])
+    }
+    pub fn insert(&mut self, index: usize, field: (Symbol, Value)) {
+        let mut fields: Vec<_> = self.iter().cloned().collect();
+        fields.insert(index, field);
+        *self = Self::new(fields);
+    }
+    /// Returns whether this field owner is new to the report; shape owners are deduplicated too.
+    pub fn attribute(&self, memory: &mut crate::syntax::Memory) -> bool {
+        let fresh = memory.allocation(self.fields.as_ptr(), std::mem::size_of_val(&*self.fields) + 2 * std::mem::size_of::<usize>());
+        if memory.allocation(Arc::as_ptr(&self.shape), std::mem::size_of::<RecordShape>() + 2 * std::mem::size_of::<usize>()) {
+            memory.allocation(self.shape.authored.as_ptr(), std::mem::size_of_val(&*self.shape.authored));
+        }
+        fresh
+    }
+    pub fn set(&mut self, name: Symbol, value: Value) {
+        let at = self.fields.partition_point(|(key, _)| key.id() < name.id());
+        if self.fields.get(at).is_some_and(|(key, _)| *key == name) {
+            Arc::make_mut(&mut self.fields)[at].1 = value;
+        } else {
+            let mut fields: Vec<_> = self.iter().cloned().collect();
+            fields.push((name, value));
+            *self = Self::new(fields);
+        }
+    }
+}
+// The standard iterator pairs sorted storage with authored shape order without allocating.
+fn record_field<'a>((fields, (_, sorted)): (&'a [(Symbol, Value)], &'a (Symbol, u32))) -> &'a (Symbol, Value) {
+    &fields[*sorted as usize]
+}
+impl std::fmt::Debug for Record {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_list().entries(self.iter()).finish() }
+}
+impl PartialEq for Record { fn eq(&self, other: &Self) -> bool { self.iter().eq(other.iter()) } }
+impl IntoIterator for Record {
+    type Item = (Symbol, Value);
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    fn into_iter(self) -> Self::IntoIter { self.iter().cloned().collect::<Vec<_>>().into_iter() }
+}
+impl<'a> IntoIterator for &'a Record {
+    type Item = &'a (Symbol, Value);
+    type IntoIter = std::iter::Map<
+        std::iter::Zip<std::iter::RepeatN<&'a [(Symbol, Value)]>, std::slice::Iter<'a, (Symbol, u32)>>,
+        for<'b> fn((&'b [(Symbol, Value)], &'b (Symbol, u32))) -> &'b (Symbol, Value),
+    >;
+    fn into_iter(self) -> Self::IntoIter { self.iter() }
+}
+
+impl Default for Record { fn default() -> Self { Self::new(Vec::new()) } }
+impl From<Vec<(Symbol, Value)>> for Record {
+    fn from(fields: Vec<(Symbol, Value)>) -> Self { Self::new(fields) }
+}
+impl std::ops::Index<usize> for Record {
+    type Output = (Symbol, Value);
+    fn index(&self, index: usize) -> &Self::Output { &self.fields[self.shape.authored[index].1 as usize] }
+}
+
+/// Immutable Struct/Source payload; shared so cloning a Value never copies its fields.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeoPayload {
     pub name: String,
     pub ty: Ty,
-    pub fields: Vec<(String, Value)>,
+    pub fields: Record,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,27 +166,27 @@ pub enum Value {
     Text_array(Arc<TextArray>),
     /// Packed float/vector rows; width is 1..=4 and storage must contain complete rows.
     Floats(usize, Arc<Vec<f64>>),
-    Record(Vec<(String, Value)>),
+    Record(Record),
     Deferred(Ty, i64),
     No_geo,
-    Struct(Box<GeoPayload>),
-    Source(Box<GeoPayload>),
+    Struct(Arc<GeoPayload>),
+    Source(Arc<GeoPayload>),
     Fn(FnId),
     Residual(ResidualId),
 }
 
 pub type T = Value;
 
-pub fn struct_value(name: impl Into<String>, ty: Ty, fields: Vec<(String, Value)>) -> Value {
-    Value::Struct(Box::new(GeoPayload { name: name.into(), ty, fields }))
+pub fn struct_value(name: impl Into<String>, ty: Ty, fields: Record) -> Value {
+    Value::Struct(Arc::new(GeoPayload { name: name.into(), ty, fields }))
 }
-pub fn source_value(name: impl Into<String>, ty: Ty, fields: Vec<(String, Value)>) -> Value {
-    Value::Source(Box::new(GeoPayload { name: name.into(), ty, fields }))
+pub fn source_value(name: impl Into<String>, ty: Ty, fields: Record) -> Value {
+    Value::Source(Arc::new(GeoPayload { name: name.into(), ty, fields }))
 }
 
 impl Value {
     /// Record-like fields for Record / Struct / Source (plan M14).
-    pub fn geo_fields(&self) -> Option<&[(String, Value)]> {
+    pub fn geo_fields(&self) -> Option<&Record> {
         match self {
             Value::Record(fields) => Some(fields),
             Value::Struct(g) | Value::Source(g) => Some(&g.fields),
@@ -196,7 +318,7 @@ pub fn coerce_to(want: &Ty, value: &Value) -> Result<Value, Diagnostic> {
         (Ty::Array(element), Value::Int_array(values)) if **element == Ty::Float => Ok(Value::Floats(1, Arc::new(values.iter().map(|value| *value as f64).collect()))),
         (Ty::Record(wanted), Value::Record(fields)) => Ok(Value::Record(fields.iter().map(|(name, value)| {
             Ok((name.clone(), wanted.iter().find(|(field, _)| field == name).map_or_else(|| Ok(value.clone()), |(_, want)| coerce_to(want, value))?))
-        }).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        }).collect::<Result<Vec<_>, Diagnostic>>()?.into())),
         _ => Ok(value.clone()),
     }
 }
@@ -597,7 +719,7 @@ fn error_payload(diagnostic: &Diagnostic) -> Value {
         ("code".into(), Value::Text(diagnostic.code.as_bytes().into())),
         ("message".into(), Value::Text(diagnostic.message.as_bytes().into())),
         ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.clone().into())).collect()))),
-    ])
+    ].into())
 }
 pub fn with_error(protected: &dyn Fn() -> Result<Value, Diagnostic>, map: &dyn Fn(Value) -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
     let original = match protected() { Ok(value) => return Ok(value), Err(error) => error };
@@ -666,6 +788,56 @@ pub fn diagnose_rows(select: &dyn Fn(&Value, i64) -> i64, map: &dyn Fn(Value) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shared_sorted_records_preserve_authored_order_and_first_duplicate() {
+        let binary: Arc<[u8]> = (0..65536).map(|i| [0, 255, 65, 128][i % 4]).collect();
+        let z = symbol::intern("z");
+        let a = symbol::intern("a");
+        let same = symbol::intern("same");
+        let original = Record::new(vec![
+            (z, Value::Text(binary)),
+            (a, Value::Record(vec![(same, Value::Int(7))].into())),
+            (z, Value::Bool(true)),
+        ]);
+        assert!(original.fields.windows(2).all(|pair| pair[0].0.id() <= pair[1].0.id()));
+        assert!(matches!(original.get(z), Some(Value::Text(_))), "first duplicate wins");
+        assert_eq!(original.iter().map(|(name, _)| *name).collect::<Vec<_>>(), [z, a, z]);
+        assert_eq!(original.field_at(2), Some(&(z, Value::Bool(true))));
+        assert_eq!(original.field_at(3), None);
+        assert_eq!(original.iter().rev().map(|(name, _)| *name).collect::<Vec<_>>(), [z, a, z]);
+        let value = Value::Record(original.clone());
+        assert_eq!(rays_math::hash::md5_hex(&key_of(&|_| 0, &value)), "8e640fe7beef4e570ef5815a2b15d1c6");
+        assert_eq!(rays_math::hash::md5_hex(&show_with(&Clone::clone, &value)), "eddfe8c787c4a0f3c4f3c5f7a9c3f6f1");
+        assert_eq!(std::mem::size_of::<Value>(), 40);
+        let mut cloned = original.clone();
+        assert!(Arc::ptr_eq(&original.fields, &cloned.fields));
+        assert!(Arc::ptr_eq(&original.shape, &cloned.shape));
+        cloned.set(z, Value::Int(9));
+        assert_eq!(cloned.get(z), Some(&Value::Int(9)));
+        assert!(matches!(original.get(z), Some(Value::Text(_))), "COW preserves the retained snapshot");
+        assert!(Arc::ptr_eq(&original.shape, &cloned.shape), "value-only edits retain the shape");
+        assert_eq!(cloned[2], (z, Value::Bool(true)), "assoc replaces only the first duplicate");
+        let fresh = symbol::intern("z2_appended_field");
+        cloned.set(fresh, Value::Int(10));
+        assert_eq!(cloned[3], (fresh, Value::Int(10)));
+        cloned.insert(0, (z, Value::Int(11)));
+        assert_eq!(cloned.get(z), Some(&Value::Int(11)));
+        let threaded = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8).map(|_| scope.spawn(|| Record::new(vec![
+                (z, Value::Int(1)), (a, Value::Int(2)), (z, Value::Int(3)),
+            ]))).collect();
+            handles.into_iter().map(|handle| handle.join().unwrap()).collect::<Vec<_>>()
+        });
+        assert!(threaded.iter().all(|other| Arc::ptr_eq(&original.shape, &other.shape)));
+        let mut memory = crate::syntax::Memory::default();
+        assert!(original.attribute(&mut memory));
+        let before = memory.bytes();
+        assert!(!original.clone().attribute(&mut memory));
+        assert_eq!(memory.bytes(), before);
+        assert_eq!(original.get_str("z2_not_an_interned_field"), None);
+        assert_eq!(symbol::find("z2_not_an_interned_field"), None);
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -716,7 +888,7 @@ mod tests {
         assert_eq!(array_init(&Ty::Bool, 1, &|_| Value::Bool(true)).unwrap_err().code, "E_ARRAY_TYPE");
         assert_eq!(arith("+", &|a, b| a + b, &Value::Int(2), &Value::Int(3)).unwrap(), Value::Int(5));
         assert_eq!(arith("+", &|a, b| a + b, &Value::Vec3(1.0, 2.0, 3.0), &Value::Int(1)).unwrap(), Value::Vec3(2.0, 3.0, 4.0));
-        let frame = Value::Record(vec![("dt".into(), Value::Float(0.125)), ("index".into(), Value::Int(24))]);
+        let frame = Value::Record(vec![("dt".into(), Value::Float(0.125)), ("index".into(), Value::Int(24))].into());
         assert_eq!(ty_of(&frame), Ty::Record(vec![("dt".into(), Ty::Float), ("index".into(), Ty::Int)]));
         validate(&frame).unwrap();
         let state = Value::List(Arc::new(vec![Value::Float(1.0), packed.clone()]));
@@ -742,7 +914,7 @@ mod tests {
         expected_array_key.extend(0_u8..=255);
         expected_array_key.push(b']');
         assert_eq!(key_of(&|id| id.0, &byte_array), expected_array_key);
-        let source = source_value("texts", Ty::Array(Box::new(Ty::Text)), vec![("values".into(), array.clone())]);
+        let source = source_value("texts", Ty::Array(Box::new(Ty::Text)), vec![("values".into(), array.clone())].into());
         assert_eq!(ty_of(&source), Ty::Array(Box::new(Ty::Text)));
         assert_ne!(key_of(&|id| id.0, &source), key_of(&|id| id.0, &array));
         assert_eq!(general(1e-5), "1e-05");
@@ -857,7 +1029,7 @@ mod tests {
             ("code".into(), Value::Text(b"E_MAPPED".as_slice().into())),
             ("message".into(), Value::Text(b"mapped".as_slice().into())),
             ("cause".into(), Value::List(Arc::new(vec![]))),
-        ]))).unwrap_err();
+        ].into()))).unwrap_err();
         assert_eq!(mapped.code, "E_MAPPED");
         assert_eq!(mapped.message, "mapped");
         let malformed = with_error(&|| Err(original.clone()), &|_| Ok(Value::Int(0))).unwrap_err();

@@ -4,6 +4,7 @@
 //
 // Not ported (and why): the 200,000-element wall-clock bound and the Gc.allocated_bytes marginal cost (OCaml heap measurement); the kernel claim is asserted from the profile tier instead.
 // Sizes: OCaml used 20000/9000 element maps; 5000/4500 still cross the 4,096 walked head.
+use flow_syntax::symbol::Symbol;
 use crate::core_exec;
 use crate::core_ir::{Expr, StatementNode};
 use crate::core_lower;
@@ -328,7 +329,7 @@ fn trusted_replay_verifies_bits() {
     for k in [0, 4095, 4096, 4100, 4101, 8196, 8201] {
         let a = eager_probe.at(&path, &[k]);
         let b = replay_probe.at(&path, &[k]);
-        assert!(a == b && b.is_some(), "replay probe differs or is absent at call {k} ({})", path.join("/"));
+        assert!(a == b && b.is_some(), "replay probe differs or is absent at call {k} ({})", flow_syntax::symbol::join_path(&path, "/"));
     }
     for domains in [1, 8] {
         with_domains(domains, &|| {
@@ -471,12 +472,12 @@ fn sop_deferral() {
     let production = ok(executor::compile(&points, &Default::default()));
     let prepared = prepare(&core);
     let names = ["mask", "faces", "count", "vertices", "points"];
-    let record = |ev: &e::Eval| Value::Record(names.iter().map(|n| (n.to_string(), recorded(ev, n))).collect());
+    let record = |ev: &e::Eval| Value::Record(names.iter().map(|n| ((*n).into(), recorded(ev, n))).collect::<Vec<_>>().into());
     let shared = record(&deferred);
     let shared_core = core_lower::lower(Some(shared.clone()), None, true, None, None, root).unwrap_or_else(|f| panic!("{f}"));
     assert_eq!(shared_core.regions.len(), 2);
-    let fields: Vec<(String, Value)> = ["copied", "pairs", "face_copy", "drop_copy"].iter().map(|n| (n.to_string(), recorded(&deferred, n))).collect();
-    let origin_core = core_lower::lower(Some(Value::Record(fields)), None, true, None, None, root).unwrap_or_else(|f| panic!("{f}"));
+    let fields: Vec<(Symbol, Value)> = ["copied", "pairs", "face_copy", "drop_copy"].iter().map(|n| ((*n).into(), recorded(&deferred, n))).collect();
+    let origin_core = core_lower::lower(Some(Value::Record(fields.into())), None, true, None, None, root).unwrap_or_else(|f| panic!("{f}"));
     let origins = |name: &str| {
         origin_core
             .regions
@@ -553,7 +554,7 @@ fn sop_deferral_preserves_late_diagnostics() {
         Err(actual) => assert!(eq_err(&actual, &expected), "deferred diagnostic expected {} but got {}", rays_diagnostic::to_string(&expected), rays_diagnostic::to_string(&actual)),
         Ok(_) => panic!("deferred late error missing"),
     }
-    let record = Value::Record(vec![("before".into(), Value::Int(17)), ("failed".into(), value)]);
+    let record = Value::Record(vec![("before".into(), Value::Int(17)), ("failed".into(), value)].into());
     let program = executor_compile(&record, true);
     match executor::force(&program, &Default::default(), &live_at(0.)) {
         Err(actual) => assert!(eq_err(&actual, &expected)),

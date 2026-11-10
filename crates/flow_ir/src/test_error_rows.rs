@@ -36,8 +36,8 @@ fn checked(text: &str) -> W::Workspace {
 
 fn evaluate(resolve: Option<ResolveFn>, flags: Value, body: &str) -> Result<Value, Diagnostic> {
     let workspace = checked(&source(body));
-    let evaluation = ok(E::static_with(&workspace, true, Some(&[("g".to_owned(), vec![("flags".to_owned(), flags)])]), None));
-    let path = vec!["g".to_owned(), "tested".to_owned()];
+    let evaluation = ok(E::static_with(&workspace, true, Some(&[("g".into(), vec![("flags".into(), flags)])]), None));
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     let value = evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1.clone();
     let Value::Residual(residual) = &value else { panic!("row diagnosis was eager") };
     let program = ts::lower_strict(*residual).unwrap_or_else(|form| panic!("{form}"));
@@ -55,8 +55,8 @@ fn evaluate(resolve: Option<ResolveFn>, flags: Value, body: &str) -> Result<Valu
 fn resolve(grain: i64, calls: &Arc<AtomicI64>) -> ResolveFn {
     let calls = calls.clone();
     Arc::new(move |value: &Value| match value {
-        Value::Source(g) if g.name == "$core/diagnostic_index" && g.ty == Ty::Int => match g.fields.as_slice() {
-            [(rows_name, rows), (policy_name, Value::Text(policy))] if rows_name == "rows" && policy_name == "policy" => {
+        Value::Source(g) if g.name == "$core/diagnostic_index" && g.ty == Ty::Int => match (g.fields.len(), g.fields.iter().next(), g.fields.iter().nth(1)) {
+            (2, Some((rows_name, rows)), Some((policy_name, Value::Text(policy)))) if rows_name == "rows" && policy_name == "policy" => {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let grain = match policy.as_ref() {
                     b"first" => None,
@@ -183,8 +183,8 @@ mod graph_edits {
         let (forms, workspace) = ok(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: make(Node::Num("1".into())) }));
         let printed = lisp::print(&forms).unwrap().0;
         checked(&printed);
-        let result = ok(E::static_with(&workspace, true, Some(&[("g".to_owned(), vec![("flags".to_owned(), Value::Int_array(Arc::new(vec![])))])]), None));
-        let path = vec!["g".to_owned(), "tested".to_owned()];
+        let result = ok(E::static_with(&workspace, true, Some(&[("g".into(), vec![("flags".into(), Value::Int_array(Arc::new(vec![])))])]), None));
+        let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
         let value = result.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1.clone();
         failure(0, E::host::force_reference(&value, &input::at_time(0.), None, None, None));
         assert!(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path, key: ArgKey::Pos(1), sub: vec![], value: make(Node::Str(b"wrong storage".to_vec())) }).is_err());

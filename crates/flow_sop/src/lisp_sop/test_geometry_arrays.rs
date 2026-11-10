@@ -1,4 +1,5 @@
 //! Assertion map: lib/flow_sop/test_geometry_arrays.ml C1/C4 (both public mesh representations).
+use flow_syntax::symbol::Symbol;
 use super::support::*;
 use crate::{attribute_kernel as ak, catalog, lisp_sop, lower, operators, value_lane};
 use flow_ir::flow_ir::executor;
@@ -21,10 +22,10 @@ fn fixture(which: usize) -> geo::T {
     };
     geo::create(float3::of_owned((0..n).map(|i|i as f64).collect(),(0..n).map(|i|if i%2==0 {-0.0} else {0.25}).collect(),vec![2.0;n]).unwrap(),topology::create_owned(n as i64,vp,po,kinds).unwrap(),None,None,None).unwrap()
 }
-fn fields(g: &geo::T, planes: bool) -> Vec<(String, Value)> {
+fn fields(g: &geo::T, planes: bool) -> Vec<(Symbol, Value)> {
     let t = topology::view::view(geo::topology(g)).unwrap();
     let p = float3::view::view(geo::positions(g)).unwrap();
-    let points = if planes { Value::Record(vec![("x".into(),floats(p.x.to_vec())),("y".into(),floats(p.y.to_vec())),("z".into(),floats(p.z.to_vec()))]) }
+    let points = if planes { Value::Record(vec![("x".into(),floats(p.x.to_vec())),("y".into(),floats(p.y.to_vec())),("z".into(),floats(p.z.to_vec()))].into()) }
         else { Value::Floats(3, Arc::new((0..p.x.len()).flat_map(|i|[p.x[i],p.y[i],p.z[i]]).collect())) };
     vec![("points".into(),points),("vertex_points".into(),ints(t.vertex_points.to_vec())),("primitive_offsets".into(),ints(t.primitive_offsets.to_vec())),("kinds".into(),ints(t.primitive_kinds.iter().map(|i|*i as i64).collect()))]
 }
@@ -34,7 +35,7 @@ fn source_arrays(planes: bool) -> String {
     format!("(workspace arrays (graph g :context sop [(points : {points}) (vertex_points : (array int) (array/int 0)) (primitive_offsets : (array int) (array/int 1)) (kinds : (array int) (array/int 0))] ({op} :points points :vertex_points vertex_points :primitive_offsets primitive_offsets :kinds kinds)))")
 }
 fn compile(l: &lower::T) -> node::T { let g=&l.graphs[0]; edit::compile_node(&g.network.geometry,g.root.unwrap()).unwrap() }
-fn arrays(reference: bool, planes: bool, values: Vec<(String,Value)>) -> node::T {
+fn arrays(reference: bool, planes: bool, values: Vec<(Symbol,Value)>) -> node::T {
     let opts=lower::Options {reference,inputs:Some(vec![("g".into(),values)]),..Default::default()};
     compile(&lower::workspace(None,vec![],opts,&parse(&source_arrays(planes))).unwrap_or_else(|d|panic!("{}",rays_diagnostic::to_string(&d))))
 }
@@ -63,7 +64,7 @@ fn round_trip(which: usize, planes:bool) {
             session::close(&mut s);
         }}
         let actual=cook_once(1,&n);
-        fn mutate(v:&mut Value) { match v {Value::Record(fs)=>for (_,v) in fs {mutate(v)},Value::Int_array(xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99},Value::Floats(1, xs)|Value::Floats(3, xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99.0},_=>()}}
+        fn mutate(v:&mut Value) { match v {Value::Record(fs)=>{let mut fields:Vec<_>=fs.iter().cloned().collect();for (_,v) in &mut fields {mutate(v)}*fs=fields.into()},Value::Int_array(xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99},Value::Floats(1, xs)|Value::Floats(3, xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99.0},_=>()}}
         for (_,v) in &mut input {mutate(v)}
         assert_eq!(geometry_bytes(&actual),before,"mesh borrowed mutable Flow input");
     }
@@ -113,7 +114,7 @@ fn force(g:&geo::T,v:&Value) -> Value {let lookup=lookup(g);flow_eval::host::for
 #[test]
 fn topology_queries_keep_planes_origins_and_immutable_readers() {
     let original=fixture(1);let before=geometry_bytes(&original);let queried=evaluate("(sop/topology geo)");
-    let expected=Value::Record(fields(&original,false).into_iter().skip(1).collect());assert_eq!(force(&original,&queried),expected);
+    let expected=Value::Record(fields(&original,false).into_iter().skip(1).collect::<Vec<_>>().into());assert_eq!(force(&original,&queried),expected);
     let native=topology::view::view(geo::topology(&original)).unwrap();
     let Value::Record(queried_fields)=force(&original,&queried) else {panic!("topology record expected")};
     for (name,plane) in [("vertex_points",&native.vertex_points),("primitive_offsets",&native.primitive_offsets)] {
@@ -145,7 +146,7 @@ fn topology_host_source_really_refuses_web_export() {
     let core=flow_ir::core_lower::lower(None,None,true,None,None,r).unwrap();
     assert_eq!(flow_web::js::frame(&Default::default(),&core).unwrap_err().code,"E_WEB_SOURCE");
 }
-fn replace(mut xs:Vec<(String,Value)>,key:&str,value:Value)->Vec<(String,Value)>{xs.iter_mut().find(|(n,_)|n==key).unwrap().1=value;xs}
+fn replace(mut xs:Vec<(Symbol,Value)>,key:&str,value:Value)->Vec<(Symbol,Value)>{xs.iter_mut().find(|(n,_)|n==key).unwrap().1=value;xs}
 fn errors(planes:bool) {
     let original=fixture(1);let base=fields(&original,planes);
     let cases=vec![
@@ -176,7 +177,7 @@ fn errors(planes:bool) {
 fn unavailable_topology_sources_refuse(){
     let lookup:ak::GeometryLookup=Arc::new(|_|None);
     for g in [Value::No_geo,Value::Deferred(ty::geometry(),7),Value::Deferred(Ty::Float,7)] {
-        let source=source_value("sop/topology", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(),g),("component".into(),Value::Text(b"vertex_points".as_slice().into()))]);
+        let source=source_value("sop/topology", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(),g),("component".into(),Value::Text(b"vertex_points".as_slice().into()))].into());
         assert_eq!(ak::resolve(None,&lookup,&source).unwrap_err().code,"E_DATA_SOURCE");
     }
 }
@@ -200,9 +201,9 @@ fn lazy(planes:bool){
 fn plane_input_finite_count_and_scalar_capacity_boundaries(){
     let original=fixture(1);let base=fields(&original,true);
     for reference in [false,true] {
-        for domains in [1,4,8] {let values=replace(base.clone(),"points",Value::Record(vec![("x".into(),floats(vec![])),("y".into(),floats(vec![0.])),("z".into(),floats(vec![]))]));let n=arrays(reference,true,values);let mut s=new_session(64,64_000_000);assert_eq!(try_cook(&mut s,&context(domains,97),&n).err().unwrap().code,"E_ARRAY_COUNT");session::close(&mut s);}
+        for domains in [1,4,8] {let values=replace(base.clone(),"points",Value::Record(vec![("x".into(),floats(vec![])),("y".into(),floats(vec![0.])),("z".into(),floats(vec![]))].into()));let n=arrays(reference,true,values);let mut s=new_session(64,64_000_000);assert_eq!(try_cook(&mut s,&context(domains,97),&n).err().unwrap().code,"E_ARRAY_COUNT");session::close(&mut s);}
         for axis in ["x","y","z"] {for bad in [f64::NAN,f64::INFINITY,f64::NEG_INFINITY] {
-            let mut values=base.clone();let Value::Record(p)=&mut values[0].1 else{unreachable!()};let Value::Floats(1, xs)=&mut p.iter_mut().find(|(n,_)|n==axis).unwrap().1 else{unreachable!()};Arc::make_mut(xs)[0]=bad;
+            let mut values=base.clone();let Value::Record(p)=&mut values[0].1 else{unreachable!()};let mut plane=p.get_str(axis).unwrap().clone();let Value::Floats(1, xs)=&mut plane else{unreachable!()};Arc::make_mut(xs)[0]=bad;p.set(axis.into(),plane);
             let result=lower::workspace(None,vec![],lower::Options{reference,inputs:Some(vec![("g".into(),values)]),..Default::default()},&parse(&source_arrays(true)));
             assert_eq!(result.err().expect("nonfinite plane input accepted").code,"E_NONFINITE");
         }}
@@ -336,7 +337,7 @@ fn text_attribute_eval_read_write_preserves_every_byte() {
         ("geometry".into(), Value::Deferred(ty::geometry(), 7)),
         ("attribute".into(), Value::Text(b"bytes".as_slice().into())),
         ("type".into(), Value::Text(b"text".as_slice().into())),
-    ]);
+    ].into());
     assert_eq!(ak::resolve(None, &lookup, &source).unwrap(), Value::Text_array(Arc::new(rows.clone().into())));
     let literal = flow_syntax::lisp::quote_string(&bytes);
     let cases = [
@@ -360,11 +361,11 @@ fn text_attribute_eval_read_write_preserves_every_byte() {
 fn attribute_identifiers_refuse_non_utf8() {
     let op = operators::all().into_iter().find(|op| op.name == "sop/with_attr").unwrap();
     for (field, code) in [("attribute", "E_ATTR_NAME"), ("owner", "E_ATTR_OWNER"), ("type", "E_ATTR_TYPE")] {
-        let mut args = vec![("attribute".to_owned(), Value::Text(b"bytes".as_slice().into()))];
+        let mut args = vec![("attribute".into(), Value::Text(b"bytes".as_slice().into()))];
         if field == "attribute" {
             args[0].1 = Value::Text(vec![255].into());
         } else {
-            args.push((field.to_owned(), Value::Text(vec![255].into())));
+            args.push((field.into(), Value::Text(vec![255].into())));
         }
         assert_eq!((op.check)(&args).unwrap_err().code, code);
     }

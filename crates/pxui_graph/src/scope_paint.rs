@@ -1,6 +1,7 @@
 // Port of lib/pxui_graph/scope_paint.ml(i): the kit's cards, wires, zones and footers, drawn through a
 // `Paint`. Painters get only the `Paint` (no `Ui`): text is placed with `Paint::text_top`, the theme is
 // `t.theme`. OCaml optional arguments become option structs (`NodeOpts`, `HeaderOpts`) or `Option`s.
+use flow_syntax::symbol::Symbol;
 use std::borrow::Cow;
 use crate::node_menu;
 use crate::scope_state::{self as st, Fr, Pane};
@@ -40,7 +41,7 @@ fn wired(r: &p::Row) -> bool {
 }
 
 /// ponytail: a private copy of `Scope_commands.frame_list` (the frames of a scope with a drag applied).
-fn frame_list(t: &Pane, scope: &[String]) -> Vec<Fr> {
+fn frame_list(t: &Pane, scope: &[Symbol]) -> Vec<Fr> {
     let frames = t.saved.frames(scope);
     match &t.drag {
         Some(st::Drag::Sizing { scope: s, index, dw, dh }) if s.as_slice() == scope => frames
@@ -640,8 +641,8 @@ pub fn zone_binder(t: &Pane, n: &p::Node, zn: &p::Zone) -> (String, Option<Strin
         None if zn.kind == ZoneKind::Fn && n.path.last().map_or(false, |l| l.contains('#')) => {
             // a function written in a row names its owner: `map -> positions`, not `fn`
             let leaf = n.path.last().unwrap();
-            let mut holder: Vec<String> = n.path[..n.path.len() - 1].to_vec();
-            holder.push(leaf[..leaf.find('#').unwrap()].to_owned());
+            let mut holder = n.path[..n.path.len() - 1].to_vec();
+            holder.push(leaf[..leaf.find('#').unwrap()].into());
             match st::node_of(t, &holder) {
                 Some(h) => (format!("{} -> {}", h.head, p::title(&h)), None),
                 None => (p::title(n), None),
@@ -1339,7 +1340,7 @@ pub fn tag_name(t: &Pane, wi: &Wire) -> String {
         Some(pth) => {
             let n = match st::node_of(t, pth) {
                 Some(n) => p::title(&n),
-                None => pth.last().cloned().unwrap_or_default(),
+                None => pth.last().map_or_else(String::new, ToString::to_string),
             };
             if n.len() > 14 { format!("{}~", &n[..13]) } else { n }
         }
@@ -1471,8 +1472,8 @@ fn zone_taken(t: &Pane, node: &p::Node, zn: &p::Zone) -> bool {
         Some(s) => s,
         None => return false,
     };
-    let mut parent_path: Vec<String> = outer.to_vec();
-    parent_path.push(leaf[..split].to_owned());
+    let mut parent_path: flow_check::workspace::Path = outer.to_vec();
+    parent_path.push(leaf[..split].into());
     let arm = &leaf[split + 1..];
     let parent = match st::node_of(t, &parent_path) {
         Some(p) => p,

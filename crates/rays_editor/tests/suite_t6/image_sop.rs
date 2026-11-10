@@ -55,7 +55,7 @@ pub fn image_sop() {
     assert!(!parsed.kinds.iter().find(|k| k.qualified == "sop/copy_to_points").unwrap().slots.iter().any(|s| s.ty.is_some()));
     let document = load(&catalog, SOURCE);
     let scope = P::of_graph(&catalog, &document.checked, "g").unwrap();
-    let node = P::find(&scope, &["g".to_owned(), "result".to_owned()]).unwrap();
+    let node = P::find(&scope, &["g".into(), "result".into()]).unwrap();
     assert!(node.rows[0].ty == Some(flow_syntax::ty::geometry()) && node.rows[0].head);
     assert!(node.rows[1].ty == Some(flow_syntax::ty::image()) && !node.rows[1].head);
     let wrong = r#"(workspace wrong
@@ -63,7 +63,7 @@ pub fn image_sop() {
     (graph g :context sop (sop/attr_from_image (ref img) (sop/grid))))"#;
     assert!(diagnostics(&catalog, wrong).iter().any(|d| d.code == "E_TYPE"));
     assert!(diagnostics(&catalog, "(workspace missing (graph g :context sop (sop/attr_from_image (sop/grid))))").iter().any(|d| d.code == "E_MISSING_INPUT"));
-    let result = vec!["g".to_owned(), "result".to_owned()];
+    let result: flow_check::workspace::Path = vec!["g".into(), "result".into()];
     let mut builder = S::SyntaxBuilder::new();
     let items = [Draft::Sym("ref".into()), Draft::Sym("img".into())].into_iter()
         .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
@@ -78,7 +78,7 @@ pub fn image_sop() {
     }
     let fallback = S::parse(node.rows[1].default.as_ref().unwrap()).unwrap().remove(0);
     let disconnected = wd::edit(&catalog, &document, &Op::Disconnect { node: result.clone(), key: ArgKey::Pos(1), fallback: Some(fallback) }).unwrap();
-    assert!(P::find(&P::of_graph(&catalog, &disconnected.checked, "g").unwrap(), &["g".to_owned(), "result#1".to_owned()]).is_some());
+    assert!(P::find(&P::of_graph(&catalog, &disconnected.checked, "g").unwrap(), &["g".into(), "result#1".into()]).is_some());
     let lowered = flow_sop::lower::workspace(Some(factories.clone()), kinds::descriptors(), flow_sop::lower::Options::default(), &document.source).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let graph = lowered.graphs.iter().find(|g| g.name == "g" && g.default).unwrap();
     let node = edit_graph::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap();

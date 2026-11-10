@@ -15,9 +15,10 @@ use param::{KindView, Value as PValue};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use flow_syntax::symbol::Symbol;
 
 type S = Syntax;
-pub type Path = Vec<String>;
+pub type Path = flow_check::workspace::Path;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Chip {
@@ -321,7 +322,7 @@ fn info_of(t: &w::Term) -> Info {
                     match arena.pattern(p.pattern) { flow_check::term_arena::PatternNode::Name(n) => arena.name(n).to_owned(), _ => String::new() },
                     p.ty.map(|ty| arena.ty(ty).clone()),
                 )).collect(),
-                zone: arena.path(function.zone).iter().map(|name| arena.name(*name).to_owned()).collect(),
+                zone: arena.path(function.zone).iter().map(|name| arena.symbol(*name)).collect(),
             }
         }
         _ => Slim::Other,
@@ -333,7 +334,7 @@ fn info_of(t: &w::Term) -> Info {
 fn collect(c: &mut Cx, t: &w::Term) {
     let info = info_of(t);
     if let Some(path) = t.path() {
-        let p: Path = path.iter().map(|name| t.name(*name).to_owned()).collect();
+        let p: Path = path.iter().map(|name| t.symbol(*name)).collect();
         match c.term_index.get(&p) {
             Some(i) => c.terms[*i].1 = info.clone(),
             None => {
@@ -796,7 +797,7 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[SyntaxId]) -> Vec<Row> {
                 }
                 if let Some((rn, t)) = &o.rest {
                     for (j, arg) in pos().enumerate().skip(np).map(|(i, arg)| (i - np, arg)) {
-                        let label = if j == 0 { rn.clone() } else { format!("{} {}", rn, j + 1) };
+                        let label = if j == 0 { rn.to_string() } else { format!("{} {}", rn, j + 1) };
                         rows.push(row(c, &label, ArgKey::Pos((np + j) as i64), Some(capture_arg(e, arg))).with_ty(Some(t.clone())).with_kind(RowKind::Rest));
                     }
                     rows.push(add(c, &format!("+ {}", rn), ArgKey::Pos(npos.max(np as i64)), true, Some(t.clone())));
@@ -916,7 +917,7 @@ fn outputs(pat: &Option<S>, ty: &Ty) -> Vec<(String, Ty)> {
         return Vec::new();
     };
     match (&pat.node, ty) {
-        (SNode::Sym(_), Ty::Record(fs)) => fs.clone(),
+        (SNode::Sym(_), Ty::Record(fs)) => fs.iter().map(|(name, ty)| (name.to_string(), ty.clone())).collect(),
         (SNode::Sym(_), _) => Vec::new(),
         (SNode::Vec(_), _) => {
             let t = match ty {
@@ -1012,7 +1013,7 @@ fn rail_of(c: &Cx, kind: ZoneKind, e: &S, t: Option<&Info>, visible: &[String]) 
                                     Some((leaf, scope)) => match leaf.rfind('#') {
                                         Some(i) => {
                                             let mut p = scope.to_vec();
-                                            p.push(leaf[..i].to_owned());
+                                            p.push(leaf[..i].into());
                                             Some(p)
                                         }
                                         None => None,
@@ -1064,7 +1065,7 @@ fn is_vec(e: &S) -> bool {
     matches!(e.node, SNode::Vec(_))
 }
 
-fn scope_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, card_result: bool, visible: &[String], inputs: Vec<Input>, path: &Path, body: &S) -> Scope {
+fn scope_of(c: &Cx, folded: &dyn Fn(&[Symbol]) -> bool, card_result: bool, visible: &[String], inputs: Vec<Input>, path: &Path, body: &S) -> Scope {
     let (binds, res) = match scope_form(body) {
         Some((bs, res)) => (bs, res),
         None => (&[][..], body.clone()),
@@ -1081,7 +1082,7 @@ fn scope_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, card_result: bool, visib
         SNode::List(_) | SNode::Map(_) | SNode::Vec(_) if card_result || !is_vec(&res) => {
             let ns = node_of(c, folded, &vis, false, None, path, None, &res);
             let mut p = path.clone();
-            p.push("@result".to_owned());
+            p.push("@result".into());
             (ScopeResult::Node(p), ns)
         }
         _ => (ScopeResult::Literal(res.clone()), Vec::new()),
@@ -1092,14 +1093,14 @@ fn scope_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, card_result: bool, visib
 
 // the node of a binding (or of the result), after the nodes of the calls nested in its inputs
 #[allow(clippy::too_many_arguments)]
-fn node_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, visible: &[String], expr: bool, nested_leaf: Option<&str>, scope_path: &Path, pat: Option<&S>, e: &S) -> Vec<Node> {
+fn node_of(c: &Cx, folded: &dyn Fn(&[Symbol]) -> bool, visible: &[String], expr: bool, nested_leaf: Option<&str>, scope_path: &Path, pat: Option<&S>, e: &S) -> Vec<Node> {
     let name = match (nested_leaf, pat) {
         (Some(leaf), _) => leaf.to_owned(),
         (None, Some(p)) => eb::pat_key(p),
         (None, None) => "@result".to_owned(),
     };
     let mut p = scope_path.clone();
-    p.push(name.clone());
+    p.push(name.clone().into());
     let term: Option<&Info> = match nested_leaf {
         Some(_) => c.forms.get(&e.id),
         None => c.term_index.get(&p).map(|i| &c.terms[*i].1),
@@ -1242,7 +1243,7 @@ fn node_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, visible: &[String], expr:
 
 fn nested_path(scope_path: &Path, leaf: &str) -> Path {
     let mut p = scope_path.clone();
-    p.push(leaf.to_owned());
+    p.push(leaf.into());
     p
 }
 
@@ -1289,7 +1290,7 @@ pub fn sources(r: &Row) -> Vec<String> {
 /// The target of the wire from cell `i` of the row's vector literal.
 pub fn cell_wire(n: &Node, r: &Row, i: i64) -> (Path, ArgKey, Option<S>) {
     let mut p = n.path[..n.path.len().saturating_sub(1)].to_vec();
-    p.push(eb::nested_leaf(&n.name, &r.key).unwrap_or_default());
+    p.push(eb::nested_leaf(&n.name, &r.key).unwrap_or_default().into());
     let mut builder = flow_syntax::arena::SyntaxBuilder::new();
     let number = builder.intern("0.0");
     let id = builder.push(0, SNode::Num(number), rays_diagnostic::Span { start: 0, finish: 0 }, None);
@@ -1363,13 +1364,13 @@ fn graph_info(g: &w::Graph) -> GraphInfo {
 
 /// The root scope of a graph or, for `"def:name"` or a `defn` name, of a definition. An operator call
 /// written in an input is a card unless `folded` its leaf, and its whole call tree with it.
-pub fn of_graph_with(folded: &dyn Fn(&[String]) -> bool, catalog: &Catalog, workspace: &w::Workspace, name: &str) -> Result<Scope, String> {
+pub fn of_graph_with(folded: &dyn Fn(&[Symbol]) -> bool, catalog: &Catalog, workspace: &w::Workspace, name: &str) -> Result<Scope, String> {
     let _timer = flow_syntax::phase_timer::measure("project");
     let mut kinds: Vec<catalog::Kind> = workspace.nodes.iter().map(|n| n.kind.clone()).collect();
     kinds.extend(catalog.kinds.iter().cloned());
     let catalog = Catalog { version: catalog.version, kinds };
     let g = find_graph(workspace, name).ok_or_else(|| format!("Projection.of_graph: no graph {}", name))?;
-    let root = vec![if workspace.defs.iter().any(|d| std::ptr::eq(d, g)) { format!("def:{}", g.name) } else { g.name.clone() }];
+    let root: Path = vec![if workspace.defs.iter().any(|d| std::ptr::eq(d, g)) { format!("def:{}", g.name).into() } else { g.name.clone().into() }];
     let macros_list = (*workspace.macros).clone();
     let macros: Vec<(String, S)> = macros_list
         .iter()
@@ -1398,7 +1399,7 @@ pub fn of_graph_with(folded: &dyn Fn(&[String]) -> bool, catalog: &Catalog, work
         .iter()
         .map(|(n, ty, d)| {
             let mut path = root.clone();
-            path.push(format!(":{}", n));
+            path.push(format!(":{}", n).into());
             Input { path, name: n.clone(), ty: ty.clone(), default: d.as_ref().map(|t| t.form()) }
         })
         .collect();
@@ -1423,7 +1424,7 @@ pub fn zones(sc: &Scope) -> Vec<Node> {
 }
 
 /// The node at a path, searching zones.
-pub fn find(sc: &Scope, path: &[String]) -> Option<Node> {
+pub fn find(sc: &Scope, path: &[Symbol]) -> Option<Node> {
     for n in &sc.nodes {
         if n.path == path {
             return Some(n.clone());
@@ -1699,14 +1700,14 @@ pub struct LayoutOptions {
     /// reserve a footer row under every card and zone
     pub foot: bool,
     /// overrides a node's position
-    pub at: Rc<dyn Fn(&[String]) -> Option<(f64, f64)>>,
-    pub prev: Rc<dyn Fn(&[String]) -> Option<(f64, f64, f64, f64)>>,
+    pub at: Rc<dyn Fn(&[Symbol]) -> Option<(f64, f64)>>,
+    pub prev: Rc<dyn Fn(&[Symbol]) -> Option<(f64, f64, f64, f64)>>,
     /// folds a zone to its card
-    pub collapsed: Rc<dyn Fn(&[String]) -> bool>,
+    pub collapsed: Rc<dyn Fn(&[Symbol]) -> bool>,
     /// the step of a macro call whose expansion panel is open
-    pub lens: Rc<dyn Fn(&[String]) -> Option<i64>>,
-    pub level: Rc<dyn Fn(&[String]) -> Level>,
-    pub pin: Rc<dyn Fn(&[String], &str) -> Option<bool>>,
+    pub lens: Rc<dyn Fn(&[Symbol]) -> Option<i64>>,
+    pub level: Rc<dyn Fn(&[Symbol]) -> Level>,
+    pub pin: Rc<dyn Fn(&[Symbol], &str) -> Option<bool>>,
     pub inner: bool,
 }
 
@@ -1846,7 +1847,7 @@ pub fn layout(o: &LayoutOptions, sc: &Scope) -> Layout {
     }
     if with_return {
         let mut p = sc.path.clone();
-        p.push("@return".to_owned());
+        p.push("@return".into());
         arr.push(LItem { item: Item::Return, path: p, deps: Vec::new(), names: Vec::new(), head_src: None });
     }
     let count = arr.len();

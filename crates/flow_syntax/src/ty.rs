@@ -1,5 +1,6 @@
 use crate::syntax::{self, Node, Syntax};
 use crate::arena::SyntaxBuilder;
+use crate::symbol::{self, Symbol};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ty {
@@ -14,7 +15,7 @@ pub enum Ty {
     Color,
     List(Box<Ty>),
     Array(Box<Ty>),
-    Record(Vec<(String, Ty)>),
+    Record(Vec<(Symbol, Ty)>),
     Fn(Option<Box<FnSignature>>),
     Any,
 }
@@ -181,7 +182,7 @@ fn parse_fields(source: &str, at: &mut usize) -> Option<Ty> {
     let mut fields = Vec::new();
     loop {
         let colon = source.get(*at..)?.find(':')? + *at;
-        let name = source.get(*at..colon)?.to_owned();
+        let name = symbol::intern(source.get(*at..colon)?);
         *at = colon + 1;
         fields.push((name, parse_type(source, at)?));
         if eat(source, at, "}") { return Some(Ty::Record(fields)); }
@@ -219,9 +220,9 @@ pub fn of_syntax(form: &Syntax) -> Option<Ty> {
             while at < items.len() {
                 let Node::Kw(name) = form.arena().row(items[at]).node else { return None; };
                 let name = form.name(name);
-                if !valid_field_name(name) || fields.iter().any(|(seen, _): &(String, Ty)| seen == name) { return None; }
+                if !valid_field_name(name) || fields.iter().any(|(seen, _): &(Symbol, Ty)| seen == name) { return None; }
                 let value = form.child(*items.get(at + 1)?);
-                fields.push((name.to_owned(), of_syntax(&value)?));
+                fields.push((symbol::intern(name), of_syntax(&value)?));
                 at += 2;
             }
             Some(Ty::Record(fields))

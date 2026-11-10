@@ -41,7 +41,7 @@ pub fn warns(source: &str, code: &str) {
 pub fn quiet(source: &str) {
     match run_src(source) { (Some(_), ds) => assert!(ds.is_empty(), "{source}: {}", show_ds(&ds)), (_, ds) => panic!("{source}{}", show_ds(&ds)) }
 }
-fn p(parts: &[&str]) -> Vec<String> { parts.iter().map(|s| s.to_string()).collect() }
+fn p(parts: &[&str]) -> flow_check::workspace::Path { parts.iter().map(|s| (*s).into()).collect() }
 fn live(ws: &W::Workspace, path: &[&str]) -> bool { ws.live.contains(&p(path)) }
 fn invariant(ws: &W::Workspace, path: &[&str]) -> bool { ws.invariant.contains(&p(path)) }
 fn results_of(e: &Eval, g: &str) -> Value { e.results.iter().find(|(n, _)| n == g).unwrap().1.clone() }
@@ -59,9 +59,9 @@ fn vectors_widen_and_check() {
         let expected = Value::Record(vec![
             ("pair".into(), Value::Vec2(time, 2.)),
             ("quad".into(), Value::Vec4(1., 2., 3., time)),
-            ("moved".into(), Value::Record(vec![("p".into(), Value::Vec2(time + 2., 4.)), ("q".into(), Value::Vec4(2., 4., 6., 2. * time))])),
+            ("moved".into(), Value::Record(vec![("p".into(), Value::Vec2(time + 2., 4.)), ("q".into(), Value::Vec4(2., 4., 6., 2. * time))].into())),
             ("fields".into(), Value::Float(time + 2. + time)),
-        ]);
+        ].into());
         assert!(actual == expected && reference == expected, "{time}");
     }
     for expression in ["(+ [1 2] [1 2 3])", "(* [1 2 3 4] [1 2])", "(- [1 2 3] [1 2 3 4])"] { bad_text(&val(expression), "E_TYPE", "matching vector widths"); }
@@ -218,9 +218,9 @@ fn structure_and_the_typed_ir() {
     assert!(matches!(arena.pattern(bs[0].pattern), flow_check::term_arena::PatternNode::Name(n) if root.name(n) == "a"));
     let bound = root.child(bs[0].term);
     assert!(matches!(bound.node, W::Node::CallFn(id) if root.name(arena.call_fn(id).name) == "f" && arena.term_ids(arena.call_fn(id).args).len() == 1));
-    assert_eq!(bound.path().map(|names| names.iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>()), Some(p(&["g", "a"])));
+    assert_eq!(bound.path().map(|names| names.iter().map(|n| root.symbol(*n)).collect::<Vec<_>>()), Some(p(&["g", "a"])));
     let r = root.child(node.body);
-    assert_eq!(r.path().map(|names| names.iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>()), Some(p(&["g", "@result"])));
+    assert_eq!(r.path().map(|names| names.iter().map(|n| root.symbol(*n)).collect::<Vec<_>>()), Some(p(&["g", "@result"])));
     let W::Node::Op(id) = r.node else { panic!("result is not (+ a expansion)"); };
     let op = arena.op(id);
     let args = arena.fields(op.args);
@@ -526,7 +526,7 @@ fn ir_shapes_notes_and_reporting() {
     let clauses = arena.bindings(node.clauses);
     assert!(node.kind == W::LoopKind::Sum && arena.bindings(node.accs).is_empty() && clauses.len() == 1);
     assert!(matches!(arena.pattern(clauses[0].pattern), flow_check::term_arena::PatternNode::Name(n) if root.name(n) == "i"));
-    assert_eq!(arena.path(node.zone).iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>(), p(&["g", "s"]));
+    assert_eq!(arena.path(node.zone).iter().map(|n| root.symbol(*n)).collect::<Vec<_>>(), p(&["g", "s"]));
     assert!(matches!(root.child(node.body).node, W::Node::CallFn(id) if root.name(arena.call_fn(id).name) == "f" && arena.term_ids(arena.call_fn(id).args).len() == 2));
     let W::Node::Hof(id) = l.node else { panic!("map is not a Hof"); };
     let node = arena.hof(id);
@@ -534,7 +534,7 @@ fn ir_shapes_notes_and_reporting() {
     assert!(node.kind == W::HofKind::Map && ts.len() == 2);
     let W::Node::Fn(id) = root.child(ts[0]).node else { panic!("map function missing"); };
     let function = arena.function(id);
-    assert_eq!(arena.path(function.zone).iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>(), p(&["g", "l#0"]));
+    assert_eq!(arena.path(function.zone).iter().map(|n| root.symbol(*n)).collect::<Vec<_>>(), p(&["g", "l#0"]));
     let params = arena.params(function.params);
     assert!(params.len() == 1 && matches!(arena.pattern(params[0].pattern), flow_check::term_arena::PatternNode::Name(n) if root.name(n) == "k") && params[0].ty.is_none());
     assert!(matches!(c.node, W::Node::Cond(id) if arena.arms(arena.cond(id).arms).len() == 1));
@@ -743,10 +743,10 @@ fn check_cjs_reserved_names_skip_and_t() {
 #[test]
 fn audit_language_cases() {
     let ws = good(&sop("(sop/merge (sop/merge (for [i (range 2)] (sop/box))) (sop/merge (for [j (range 3)] (sop/box))))"));
-    fn walk(t: &W::Term, zones: &mut Vec<Vec<String>>) {
+    fn walk(t: &W::Term, zones: &mut Vec<flow_check::workspace::Path>) {
         let arena = t.arena();
         match t.node {
-            W::Node::Loop(id) => { let node = arena.loop_node(id); zones.push(arena.path(node.zone).iter().map(|n| t.name(*n).to_owned()).collect()); walk(&t.child(node.body), zones); }
+            W::Node::Loop(id) => { let node = arena.loop_node(id); zones.push(arena.path(node.zone).iter().map(|n| t.symbol(*n)).collect()); walk(&t.child(node.body), zones); }
             W::Node::Call(id) => for arg in arena.fields(arena.call(id).args) { walk(&t.child(arg.term), zones); },
             W::Node::Op(id) => for arg in arena.fields(arena.op(id).args) { walk(&t.child(arg.term), zones); },
             _ => (),
@@ -854,7 +854,7 @@ fn sketch_checks_match_the_ocaml_oracle() {
     let mut files = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "rays")).collect::<Vec<_>>();
     files.sort_by_key(|p| p.file_name().unwrap().to_string_lossy().to_lowercase());
     let mut text = String::new();
-    let path_s = |p: &Vec<String>| p.join("/");
+    let path_s = |p: &flow_check::workspace::Path| flow_syntax::symbol::join_path(p, "/");
     for file in files {
         if std::env::var("RAYS_DUMP_CHK").is_ok() { eprintln!("FILE {}", file.file_name().unwrap().to_string_lossy()); }
         text.push_str(&format!("FILE {}\n", file.file_name().unwrap().to_string_lossy()));
@@ -886,7 +886,7 @@ fn sketch_checks_match_the_ocaml_oracle() {
                             Err(d) => text.push_str(&format!("EVAL_ERROR {}\n", rays_diagnostic::to_string(&d))),
                             Ok(e) => {
                                 text.push_str(&format!("PLAN instances={} nodes={}\n", e.plan.instances.len(), e.plan.nodes.len()));
-                                for (i, n) in e.plan.nodes.iter().enumerate().take(400) { text.push_str(&format!("N {} {} {}\n", i, n.kind, n.site.join("/"))); }
+                                for (i, n) in e.plan.nodes.iter().enumerate().take(400) { text.push_str(&format!("N {} {} {}\n", i, n.kind, flow_syntax::symbol::join_path(&n.site, "/"))); }
                                 for (n, v) in &e.results {
                                     let s = String::from_utf8_lossy(&show(v)).into_owned();
                                     let s = if s.len() > 600 { String::from_utf8_lossy(&s.as_bytes()[..600]).into_owned() } else { s };

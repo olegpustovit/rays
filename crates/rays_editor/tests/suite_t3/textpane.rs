@@ -95,7 +95,7 @@ pub fn fn_frames() {
         for _ in 0..4 {
             d.step_at((450., 320.), vec![]);
         }
-        let box_ = editor::node_box(d.e(), &["g".to_string(), "a".to_string()]);
+        let box_ = editor::node_box(d.e(), &["g".into(), "a".into()]);
         d.close();
         box_.map(|(_, _, _, h)| h).unwrap_or_else(|| panic!("the fn frame has no box"))
     };

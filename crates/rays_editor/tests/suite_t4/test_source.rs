@@ -188,7 +188,7 @@ impl Run {
     }
 }
 fn set_arg(path: &[&str], kw: &str, value: S::Draft) -> fe::Op {
-    fe::Op::SetArg { node: path.iter().map(|s| s.to_string()).collect(), key: fe::ArgKey::Kw(kw.into()), sub: vec![], value: S::make(value) }
+    fe::Op::SetArg { node: path.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect(), key: fe::ArgKey::Kw(kw.into()), sub: vec![], value: S::make(value) }
 }
 fn meta(c: char) -> Event {
     Event::Key_pressed(Key::KeyChar(c))
@@ -219,7 +219,7 @@ pub fn editor_flow() {
     r.run_for(1.5);
     assert!(editor::undo_label(r.e()) == history, "Save reloaded its own write");
     // an edit from another editor reloads as one history entry; probes stay by path
-    let zone = vec!["g".to_string(), "zone".to_string()];
+    let zone: flow_check::workspace::Path = vec!["g".into(), "zone".into()];
     let e = r.d.ed.take().unwrap();
     r.replace(editor::set_probe(e, &zone, 3));
     write(&file, &text1);
@@ -244,7 +244,7 @@ pub fn editor_flow() {
     write(&file, &format!("{text1}(layout (node [\"g\" \"@result\"] :at [10 20]) (frame [\"g\"] \"Sphere\" :at [0 0] :size [200 100]))"));
     r.run_for(1.);
     r.step(vec![]);
-    let key = vec!["g".to_string(), "@result".to_string()];
+    let key: flow_check::workspace::Path = vec!["g".into(), "@result".into()];
     let layout = |r: &Run| editor::workspace(r.e()).layout;
     assert!(layout(&r).at.contains_key(&key) && !layout(&r).frames.is_empty(), "the layout form of the file was ignored");
     write(&file, &text1);

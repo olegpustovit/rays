@@ -119,7 +119,7 @@ fn reducer_idle_undo_and_gestures() {
 
         // a syntax gesture is written to the text, one history entry named by the op
         let expr = syntax::parse("(sop/box)").expect("parse").remove(0);
-        let op = Op::AddNode { scope: vec!["g".to_string()], name: "second".to_string(), expr };
+        let op = Op::AddNode { scope: vec!["g".into()], name: "second".to_string(), expr };
         let mut result = idle_result(&(&value).into(), selection::empty());
         result.changes = vec![change::Syntax_edit(op)];
         let mut owned = value.clone();
@@ -149,7 +149,7 @@ fn reducer_idle_undo_and_gestures() {
         // A successful prefix and then a refusal roll the whole gesture batch back.
         let mut result = idle_result(&(&value).into(), selection::empty());
         result.changes = vec![
-            change::Syntax_edit(Op::AddNode { scope: vec!["g".to_string()], name: "rolled_back".to_string(), expr: syntax::parse("(sop/box)").unwrap().remove(0) }),
+            change::Syntax_edit(Op::AddNode { scope: vec!["g".into()], name: "rolled_back".to_string(), expr: syntax::parse("(sop/box)").unwrap().remove(0) }),
             change::Syntax_edit(Op::RemoveGraph { name: "missing".to_string() }),
         ];
         let mut refused = value.clone();
@@ -181,10 +181,10 @@ fn reducer_gesture_keys_layout_and_prompts() {
 
         // a moved card is a layout edit with the label of the gesture
         let mut result = idle_result(&(&value).into(), selection::empty());
-        result.scope_changes = vec![scope::Change::Moved(vec![(vec!["g".to_string(), "a".to_string()], 10.0, 20.0)])];
+        result.scope_changes = vec![scope::Change::Moved(vec![(vec!["g".into(), "a".into()], 10.0, 20.0)])];
         let (next, result, _) = editor_reduce::layout_gestures(&value, false, &[], value.doc.clone(), result.clone(), &result.scope_changes.clone());
         assert_eq!(result.label, "Move");
-        assert_eq!(next.workspace.ws.layout.at.get(&vec!["g".to_string(), "a".to_string()]), Some(&(10.0, 20.0)));
+        assert_eq!(next.workspace.ws.layout.at.get(&vec!["g".into(), "a".into()]), Some(&(10.0, 20.0)));
         let same = next.clone();
         let repeated = result.scope_changes.clone();
         let (next, repeated_result, _) = editor_reduce::layout_gestures(&value, false, &[], next, result.clone(), &repeated);
@@ -192,11 +192,11 @@ fn reducer_gesture_keys_layout_and_prompts() {
         assert_eq!(repeated_result.label, "Move");
         // a zone collapsed is stored, a probe is view state only
         let mut result = idle_result(&(&value).into(), selection::empty());
-        result.scope_changes = vec![scope::Change::Zone_collapsed { zone: vec!["g".to_string(), "z".to_string()], collapsed: true }, scope::Change::Probe_set { zone: vec!["g".to_string(), "z".to_string()], index: 3 }];
+        result.scope_changes = vec![scope::Change::Zone_collapsed { zone: vec!["g".into(), "z".into()], collapsed: true }, scope::Change::Probe_set { zone: vec!["g".into(), "z".into()], index: 3 }];
         let (next, result, probes) = editor_reduce::layout_gestures(&value, false, &[], value.doc.clone(), result.clone(), &result.scope_changes.clone());
         assert_eq!(result.label, "Collapse zone");
-        assert_eq!(next.workspace.ws.layout.collapsed.get(&vec!["g".to_string(), "z".to_string()]), Some(&true));
-        assert_eq!(probes.get(&vec!["g".to_string(), "z".to_string()]), Some(&3));
+        assert_eq!(next.workspace.ws.layout.collapsed.get(&vec!["g".into(), "z".into()]), Some(&true));
+        assert_eq!(probes.get(&vec!["g".into(), "z".into()]), Some(&3));
 
         // prompts: saving a preset writes the file and says so; loading a missing one is refused
         let dir = std::env::temp_dir().join(format!("rays-editor-test-presets-{}", std::process::id()));

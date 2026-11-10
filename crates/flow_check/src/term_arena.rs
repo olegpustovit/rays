@@ -2,6 +2,7 @@ use crate::workspace::{Context, DiagnosticPolicy, HofKind, LoopKind, Pattern};
 use flow_syntax::{arena::{self, FastMap, NamesBuilder, Syntax, SyntaxArena, SyntaxBuilder}, ty::Ty};
 pub use flow_syntax::arena::{NameId, SyntaxId};
 use std::collections::HashMap;
+use flow_syntax::symbol::{self, Symbol};
 use std::sync::Arc;
 
 fn index(value: usize) -> u32 { u32::try_from(value).expect("term arena exceeds u32 storage") }
@@ -92,17 +93,17 @@ pub struct Expanded { pub name: NameId, pub body: TermId }
 /// Construction-only values use local child IDs; no node imports its own recursive subtree.
 pub enum Draft {
     Lit(param::Value), Text(Arc<[u8]>), Nil, Time, Vec(Vec<TermId>), RefBinding(String, Vec<String>),
-    Call { kind: String, ctx: Context, args: Vec<(String, TermId)> },
-    Op { op: String, args: Vec<(String, TermId)>, skip: Vec<Vec<usize>> },
+    Call { kind: String, ctx: Context, args: Vec<(Symbol, TermId)> },
+    Op { op: String, args: Vec<(Symbol, TermId)>, skip: Vec<Vec<usize>> },
     CallFn { fn_name: String, args: Vec<TermId>, body: Option<TermId> }, FnRef(String),
-    GraphRef { graph: String, inputs: Vec<(String, TermId)> }, Let(Vec<(Pattern, TermId)>, TermId),
-    State { binder: Pattern, init: TermId, step: TermId, zone: Vec<String> },
-    Loop { kind: LoopKind, accs: Vec<(Pattern, TermId)>, clauses: Vec<(Pattern, TermId)>, skip: Vec<Vec<usize>>, body: TermId, zone: Vec<String> },
+    GraphRef { graph: String, inputs: Vec<(Symbol, TermId)> }, Let(Vec<(Pattern, TermId)>, TermId),
+    State { binder: Pattern, init: TermId, step: TermId, zone: crate::workspace::Path },
+    Loop { kind: LoopKind, accs: Vec<(Pattern, TermId)>, clauses: Vec<(Pattern, TermId)>, skip: Vec<Vec<usize>>, body: TermId, zone: crate::workspace::Path },
     WithError(TermId, TermId), ErrorRows { rows: TermId, policy: DiagnosticPolicy, mapper: TermId },
     If(TermId, TermId, TermId), Cond(Vec<(TermId, TermId)>, TermId), Case(TermId, Vec<(SyntaxId, TermId)>, TermId),
-    Fn { params: Vec<(Pattern, Option<Ty>)>, body: TermId, zone: Vec<String>, capture: Option<TermId> },
-    Hof(HofKind, Vec<TermId>), ListLit(Vec<TermId>), Record(Vec<(String, TermId)>), Get(TermId, String),
-    Assoc(TermId, Vec<(String, TermId)>), Str(Vec<TermId>), ListOp(String, Vec<TermId>), Bypass(TermId),
+    Fn { params: Vec<(Pattern, Option<Ty>)>, body: TermId, zone: crate::workspace::Path, capture: Option<TermId> },
+    Hof(HofKind, Vec<TermId>), ListLit(Vec<TermId>), Record(Vec<(Symbol, TermId)>), Get(TermId, String),
+    Assoc(TermId, Vec<(Symbol, TermId)>), Str(Vec<TermId>), ListOp(String, Vec<TermId>), Bypass(TermId),
     Expanded { macro_name: String, body: TermId },
 }
 
@@ -121,7 +122,7 @@ struct Tables {
 pub struct TermArena {
     owner: u64,
     tables: Tables,
-    names: Vec<String>,
+    names: Vec<Symbol>,
     free_names: Vec<RangeId>,
     syntax: Arc<SyntaxArena>,
     /// Rows whose subtree passed a caller's structural check (flow_eval's authored-nesting bound,
@@ -143,6 +144,7 @@ impl Term {
     pub fn path(&self) -> Option<&[NameId]> { self.path.map(|path| self.arena.path(path)) }
     pub fn form(&self) -> Syntax { self.arena.syntax.handle(self.form) }
     pub fn name(&self, id: NameId) -> &str { self.arena.name(id) }
+    pub fn symbol(&self, id: NameId) -> Symbol { self.arena.symbol(id) }
     pub fn children(&self) -> &[TermId] { self.arena.children(self.row) }
     pub fn debug_node(&self) -> impl std::fmt::Debug { DebugPart::new(&self.arena, DebugKind::Node(self.node)) }
 }
@@ -164,7 +166,8 @@ impl TermArena {
     }
     pub fn rows(&self) -> &[TermRow] { &self.tables.rows }
     pub fn ty(&self, id: TypeId) -> &Ty { &self.tables.types[id.0 as usize] }
-    pub fn name(&self, id: NameId) -> &str { &self.names[id.0 as usize] }
+    pub fn name(&self, id: NameId) -> &str { self.symbol(id).as_str() }
+    pub fn symbol(&self, id: NameId) -> Symbol { self.names[id.0 as usize] }
     pub fn syntax(&self) -> &Arc<SyntaxArena> { &self.syntax }
     fn bounds(&self, id: RangeId) -> std::ops::Range<usize> {
         let range = self.tables.ranges[id.0 as usize];
@@ -313,8 +316,7 @@ impl TermArena {
             hofs: Hof, gets: Get, assocs: Assoc, list_ops: ListOp, expanded: Expanded,
         }
         checked.allocation(self.free_names.as_ptr(), self.free_names.capacity() * std::mem::size_of::<RangeId>());
-        checked.allocation(self.names.as_ptr(), self.names.capacity() * std::mem::size_of::<String>());
-        for name in &self.names { checked.allocation(name.as_ptr(), name.capacity()); }
+        checked.allocation(self.names.as_ptr(), self.names.capacity() * std::mem::size_of::<Symbol>());
         for bytes in &self.tables.bytes { checked.allocation(bytes.as_ptr(), bytes.len() + 2 * std::mem::size_of::<usize>()); }
         for ty in &self.tables.types { attribute_type(checked, ty); }
         self.syntax.attribute(syntax);
@@ -382,7 +384,7 @@ impl TermBuilder {
         assoc: assocs -> Assoc, list_op: list_ops -> ListOp, expanded: expanded -> Expanded,
     }
     /// Metadata-only rewrites share immutable payload/edge ranges, never copy a subtree.
-    pub fn with_path(&mut self, id: TermId, path: Option<&[String]>) -> TermId {
+    pub fn with_path(&mut self, id: TermId, path: Option<&[Symbol]>) -> TermId {
         let mut row = *self.row(id);
         row.path = path.map(|path| self.path(path));
         self.push_row(row)
@@ -518,7 +520,7 @@ impl TermBuilder {
         self.tables.names.extend_from_slice(names);
         range
     }
-    pub fn path(&mut self, path: &[String]) -> PathId {
+    pub fn path(&mut self, path: &[Symbol]) -> PathId {
         let names: Vec<NameId> = path.iter().map(|name| self.intern(name)).collect();
         if let Some(&id) = self.paths.get(&names) { return id; }
         let range = self.name_range(&names);
@@ -549,7 +551,7 @@ impl TermBuilder {
         self.tables.patterns.push(node);
         id
     }
-    fn fields(&mut self, fields: Vec<(String, TermId)>) -> RangeId {
+    fn fields(&mut self, fields: Vec<(Symbol, TermId)>) -> RangeId {
         let range = self.range(self.tables.fields.len(), fields.len());
         for (name, term) in fields {
             let name = self.intern(&name);
@@ -579,7 +581,7 @@ impl TermBuilder {
         self.tables.bytes.push(bytes);
         id
     }
-    pub fn push(&mut self, path: Option<&[String]>, ty: &Ty, form: SyntaxId, draft: Draft) -> TermId {
+    pub fn push(&mut self, path: Option<&[Symbol]>, ty: &Ty, form: SyntaxId, draft: Draft) -> TermId {
         self.syntax.row(form);
         let mut children = std::mem::take(&mut self.scratch);
         let node = match draft {
@@ -726,7 +728,7 @@ impl TermBuilder {
             }
             let row = source.row(id);
             let draft = self.import_node(source, row.node, None);
-            let path = row.path.map(|id| source.path(id).iter().map(|&name| source.name(name).to_owned()).collect::<Vec<_>>());
+            let path = row.path.map(|id| source.path(id).iter().map(|&name| source.symbol(name)).collect::<Vec<_>>());
             let form = self.import_form(&source.syntax.handle(row.form));
             let imported = self.push(path.as_deref(), source.ty(row.ty), form, draft);
             self.imports.insert(key, imported);
@@ -740,9 +742,9 @@ impl TermBuilder {
         let child = |id: TermId| imports[&(source.owner, id.0)];
         let terms = |range| source.term_ids(range).iter().copied().map(child).collect();
         let names = |range| source.name_ids(range).iter().map(|&id| source.name(id).to_owned()).collect();
-        let fields = |range| source.fields(range).iter().map(|field| (source.name(field.name).to_owned(), child(field.term))).collect();
+        let fields = |range| source.fields(range).iter().map(|field| (source.symbol(field.name), child(field.term))).collect();
         let bindings = |range| source.bindings(range).iter().map(|binding| (source_pattern(source, binding.pattern), child(binding.term))).collect();
-        let path = |id| source.path(id).iter().map(|&name| source.name(name).to_owned()).collect();
+        let path = |id| source.path(id).iter().map(|&name| source.symbol(name)).collect();
         let skip = |range| source.skip(range).iter().map(|&range| source.indices(range).to_vec()).collect();
         match node {
             Node::Lit(id) => Draft::Lit(match source.literal(id) {
@@ -799,7 +801,7 @@ impl TermBuilder {
         })
     }
     pub fn rebuild(&mut self, source: &Term, draft: Draft) -> TermId {
-        let path = source.path().map(|path| path.iter().map(|&name| source.name(name).to_owned()).collect::<Vec<_>>());
+        let path = source.path().map(|path| path.iter().map(|&name| source.symbol(name)).collect::<Vec<_>>());
         let form = self.import_form(&source.form());
         self.push(path.as_deref(), source.ty(), form, draft)
     }
@@ -849,7 +851,7 @@ impl TermBuilder {
         self.tables.rows.shrink_to_fit();
         self.tables.terms.shrink_to_fit();
         let free_names = Vec::with_capacity(self.tables.rows.len());
-        let mut arena = TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze(), free_names, syntax: self.syntax.freeze(), checked: Default::default() };
+        let mut arena = TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze().into_iter().map(symbol::intern_owned).collect(), free_names, syntax: self.syntax.freeze(), checked: Default::default() };
         arena.build_free_names();
         arena.tables.ranges.shrink_to_fit();
         Arc::new(arena)
@@ -871,8 +873,8 @@ fn attribute_type(memory: &mut flow_syntax::syntax::Memory, ty: &Ty) {
             if memory.allocation(element.as_ref() as *const Ty, std::mem::size_of::<Ty>()) { attribute_type(memory, element); }
         }
         Ty::Record(fields) => {
-            if memory.allocation(fields.as_ptr(), fields.capacity() * std::mem::size_of::<(String, Ty)>()) {
-                for (name, ty) in fields { memory.allocation(name.as_ptr(), name.capacity()); attribute_type(memory, ty); }
+            if memory.allocation(fields.as_ptr(), fields.capacity() * std::mem::size_of::<(Symbol, Ty)>()) {
+                for (_, ty) in fields { attribute_type(memory, ty); }
             }
         }
         Ty::Fn(Some(signature)) => {
@@ -1150,6 +1152,20 @@ mod tests {
         let name = syntax.intern("authored");
         let atom = syntax.push(1_i64 << 40, arena::Node::Sym(name), Span { start: 0, finish: 8 }, None);
         syntax.push(-100, arena::Node::Quote(QuoteKind::Plain, atom), Span { start: 0, finish: 8 }, None)
+    }
+
+    #[test]
+    fn local_name_ids_stay_local_after_process_symbols_grow() {
+        for i in 0..2048 { symbol::intern_owned(format!("z2_unrelated_process_name_{i}")); }
+        let mut builder = TermBuilder::new();
+        let form = form(&mut builder);
+        let z = builder.push(None, &Ty::Int, form, Draft::RefBinding("z".into(), Vec::new()));
+        let a = builder.push(None, &Ty::Int, form, Draft::RefBinding("a".into(), Vec::new()));
+        let root = builder.push(None, &Ty::Any, form, Draft::Vec(vec![z, a]));
+        let arena = builder.freeze();
+        let free = arena.free_names(root);
+        assert!(free.iter().all(|name| (name.0 as usize) < arena.names.len()));
+        assert_eq!(free.iter().map(|&name| arena.symbol(name).as_str()).collect::<Vec<_>>(), ["a", "z"]);
     }
 
     #[test]

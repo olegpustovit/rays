@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 pub struct data {
     pub samples: Vec<(String, Rc<RefCell<sample::Sample>>)>,
-    pub images: Vec<(String, image::Image)>,
+    pub images: Vec<(crate::workspace_images::ImageKey, image::Image)>,
     pub audio: Option<Rc<audio::Audio>>,
     pub closed: bool,
     pub samples_created: i64,
@@ -73,7 +73,7 @@ pub fn sample(resources: &WorkspaceResources, key: &str, make: &dyn Fn(&audio::A
 }
 
 /// The image under `key`, made on first use.
-pub fn image(resources: &WorkspaceResources, key: &str, make: &dyn Fn() -> Result<image::Image, String>) -> Result<image::Image, Diagnostic> {
+pub fn image(resources: &WorkspaceResources, key: &crate::workspace_images::ImageKey, make: &dyn Fn() -> Result<image::Image, String>) -> Result<image::Image, Diagnostic> {
     {
         let r = resources.0.borrow();
         if r.closed {

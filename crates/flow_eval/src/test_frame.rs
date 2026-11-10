@@ -17,7 +17,7 @@ fn check(text: &str) -> W::Workspace {
     match check_in(text, "g") { (Some(w), ds) if ds.is_empty() => w, (_, ds) => panic!("{}", show_ds(&ds)) }
 }
 fn recorded(e: &Eval, path: &[&str]) -> Value {
-    let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+    let p: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
     e.records.iter().find(|(q, _)| *q == p).unwrap().1[0].1.clone()
 }
 fn result_g(e: &Eval) -> Value { e.results.iter().find(|(n, _)| n == "g").unwrap().1.clone() }
@@ -37,8 +37,8 @@ fn frame_reads_force_against_the_live_frame() {
     live.buttons = vec![MouseButton::LeftButton];
     live.keys = vec![Key::Space];
     live.events = vec![Event::Key_pressed(Key::Space), Event::Pointer_pressed(MouseButton::LeftButton, (12., 37.))];
-    let f = |n: &str, v: Value| (n.to_owned(), v);
-    let expected = Value::Record(vec![f("x", Value::Float(12.)), f("y", Value::Float(37.)), f("dt", Value::Float(0.125)), f("i", Value::Int(24)), f("w", Value::Int(800)), f("h", Value::Int(600)), f("mouse", Value::Bool(true)), f("right", Value::Bool(false)), f("key", Value::Bool(true)), f("time", Value::Float(3.))]);
+    let f = |n: &str, v: Value| (n.into(), v);
+    let expected = Value::Record(vec![f("x", Value::Float(12.)), f("y", Value::Float(37.)), f("dt", Value::Float(0.125)), f("i", Value::Int(24)), f("w", Value::Int(800)), f("h", Value::Int(600)), f("mouse", Value::Bool(true)), f("right", Value::Bool(false)), f("key", Value::Bool(true)), f("time", Value::Float(3.))].into());
     assert_eq!(force(&value, &live, None), Ok(expected.clone()));
     let mut changed = live.clone();
     changed.pointer = (99., 37.);
@@ -76,7 +76,7 @@ fn frame_reads_force_against_the_live_frame() {
         f("key", t("unknown:4242")),
         f("button", t("x2")),
         f("phase", t("momentum")),
-    ])));
+    ].into())));
     let (_, ds) = check_in("(for [i (range (frame/index))] i)", "g");
     assert!(has_code(&ds, "E_TIME_COUNT"));
 }

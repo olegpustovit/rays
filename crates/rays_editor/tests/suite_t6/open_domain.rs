@@ -61,7 +61,7 @@ fn authored(plan: &flow_eval::Plan) -> usize {
 }
 
 fn set_arg(node: &[&str], key: &str, value: S::Syntax) -> Gesture {
-    Gesture::SetArg { node: node.iter().map(|s| s.to_string()).collect(), key: ArgKey::Kw(key.into()), sub: Vec::new(), value }
+    Gesture::SetArg { node: node.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect(), key: ArgKey::Kw(key.into()), sub: Vec::new(), value }
 }
 
 pub fn open_domain() {
@@ -144,7 +144,7 @@ pub fn open_domain() {
     let mut host = editor::create(editor::Create { presets: Some(presets.to_string_lossy().into_owned()), ..options() }, &workspace, None, editor::prepare_fn(), editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"));
     let step = |host: editor::Editor, events: Vec<Event>| editor::update(host, &frame(events));
     host = step(host, vec![]);
-    assert!(editor::node_box(&host, &["g".to_owned(), "@result".to_owned()]).is_some(), "host omitted custom operator's card");
+    assert!(editor::node_box(&host, &["g".into(), "@result".into()]).is_some(), "host omitted custom operator's card");
     let (x, y, width, height) = editor::panes(&host, &frame(vec![])).graph;
     let point = ((x + width / 2) as f64, (y + height / 2) as f64);
     host = step(host, vec![Event::Pointer_moved(point), Event::Pointer_pressed(MouseButton::LeftButton, point), Event::Pointer_released(MouseButton::LeftButton, point)]);

@@ -7,9 +7,10 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::rc::Rc;
+use flow_syntax::symbol::{self, Symbol};
 
 
-pub type Path = Vec<String>;
+pub type Path = Vec<flow_syntax::symbol::Symbol>;
 pub type Paths = BTreeSet<Path>;
 pub type Context = context::Context;
 
@@ -92,7 +93,7 @@ impl Memory {
                 if self.checked.allocation(element.as_ref() as *const Ty, std::mem::size_of::<Ty>()) { self.ty(element); }
             }
             Ty::Record(fields) => {
-                if self.buffer(fields) { for (name, ty) in fields { self.name(name); self.ty(ty); } }
+                if self.buffer(fields) { for (_, ty) in fields { self.ty(ty); } }
             }
             Ty::Fn(Some(signature)) => {
                 if self.checked.allocation(signature.as_ref() as *const FnSignature, std::mem::size_of::<FnSignature>()) {
@@ -137,7 +138,7 @@ impl Memory {
         self.syntax.shared_forms(&workspace.source);
         self.syntax.shared_forms(&workspace.macros);
         self.buffer(&workspace.packed_roots);
-        for (form, path) in &workspace.packed_roots { self.syntax.add(form); self.names(path); }
+        for (form, path) in &workspace.packed_roots { self.syntax.add(form); self.buffer(path); }
     }
 
     fn graph(&mut self, graph: &Graph) {
@@ -157,7 +158,7 @@ impl Memory {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpSignature { pub pos:Vec<(String,Ty)>,pub opt:Vec<(String,Ty)>,pub rest:Option<(String,Ty)>,pub kw:Vec<(String,Ty)> }
+pub struct OpSignature { pub pos:Vec<(Symbol,Ty)>,pub opt:Vec<(Symbol,Ty)>,pub rest:Option<(Symbol,Ty)>,pub kw:Vec<(Symbol,Ty)> }
 pub type op_signature = OpSignature;
 #[derive(Clone)]
 pub struct Prelude { checker: Rc<Checker> }
@@ -262,8 +263,8 @@ fn cooked(ty: &Ty) -> bool {
 }
 
 
-fn path_text(path: &[String]) -> String {
-    path.join("/")
+fn path_text(path: &[Symbol]) -> String {
+    symbol::join_path(path, "/")
 }
 
 fn num_param(source: &str) -> Option<param::Value> {
@@ -284,7 +285,7 @@ fn opaque_head(name: &str) -> bool {
     .contains(&name)
 }
 
-fn list_fields(ty: &Ty) -> Vec<Vec<String>> {
+fn list_fields(ty: &Ty) -> Vec<Path> {
     match ty {
         Ty::List(_) => vec![Vec::new()],
         Ty::Record(fields) => fields
@@ -442,7 +443,7 @@ struct Info {
     approx: bool,
     approx_sources: BTreeSet<CheckPath>,
     state_dep: bool,
-    list_fields: Vec<Vec<String>>,
+    list_fields: Vec<Path>,
 }
 
 impl Info {
@@ -576,8 +577,8 @@ type CheckPath = usize;
 
 struct Checker {
     base: Option<Rc<Checker>>,
-    paths: Vec<Arc<[String]>>,
-    path_index: flow_syntax::arena::FastMap<Arc<[String]>, CheckPath>,
+    paths: Vec<Arc<[Symbol]>>,
+    path_index: flow_syntax::arena::FastMap<Arc<[Symbol]>, CheckPath>,
     terms: TermBuilder,
     catalog: Rc<catalog::Catalog>,
     ops: Arc<Vec<op::Op>>,
@@ -679,18 +680,18 @@ impl Checker {
         checker.base = Some(base);
         checker
     }
-    fn path_names(&self, path: CheckPath) -> &Arc<[String]> {
+    fn path_names(&self, path: CheckPath) -> &Arc<[Symbol]> {
         let prefix = self.base.as_ref().map_or(0, |base| base.paths.len());
         if path < prefix { &self.base.as_ref().unwrap().paths[path] } else { &self.paths[path - prefix] }
     }
-    fn path(&mut self, names: Vec<String>) -> CheckPath {
+    fn path(&mut self, names: Path) -> CheckPath {
         if let Some(id) = self.path_index.get(names.as_slice()) { return *id; }
         if let Some(id) = self.base.as_ref().and_then(|base| base.path_index.get(names.as_slice())) { return *id; }
         let id = self.base.as_ref().map_or(0, |base| base.paths.len()) + self.paths.len();
-        let names: Arc<[String]> = names.into();
+        let names: Arc<[Symbol]> = names.into();
         self.paths.push(names.clone()); self.path_index.insert(names, id); id
     }
-    fn child_path(&mut self, parent: CheckPath, name: String) -> CheckPath {
+    fn child_path(&mut self, parent: CheckPath, name: Symbol) -> CheckPath {
         let mut names = self.path_names(parent).to_vec(); names.push(name); self.path(names)
     }
     fn packed_update(&mut self, path: CheckPath, next: CheckPackedForm) {
@@ -718,10 +719,10 @@ impl Checker {
  fn warn_owned(&mut self,f:&Syntax,c:&str,m:String){self.add(Severity::Warning,f,c,m)}
  fn inline_path(&mut self,cx:&Cx,seg:&str)->CheckPath {
      self.events+=1;
-     let key=self.child_path(cx.path,seg.to_owned());
+     let key=self.child_path(cx.path,symbol::intern(seg));
      let n=self.inline.get(&key).or_else(||self.base.as_ref()?.inline.get(&key)).copied().unwrap_or(0);
      self.inline.insert(key,n+1);
-     if n==0 {key} else {self.child_path(cx.path,format!("{seg}~{n}"))}
+     if n==0 {key} else {self.child_path(cx.path,format!("{seg}~{n}").into())}
  }
  fn merge_packed(old: CheckPackedForm, next: CheckPackedForm) -> CheckPackedForm {
      match (old, next) {
@@ -875,7 +876,7 @@ impl Checker {
          Ty::Record(fields) => match fields.iter().find(|(field, _)| field == name) {
              Some((_, ty)) => ty.clone(),
              None => {
-                 self.error(form, "E_FIELD", &format!("{base} has no field {name}. Fields: {}.", if fields.is_empty() { "none".into() } else { fields.iter().map(|(field, _)| field.clone()).collect::<Vec<_>>().join(", ") }));
+                 self.error(form, "E_FIELD", &format!("{base} has no field {name}. Fields: {}.", if fields.is_empty() { "none".into() } else { symbol::join_path(&fields.iter().map(|(field, _)| *field).collect::<Vec<_>>(), ", ") }));
                  Ty::Any
              }
          },
@@ -911,7 +912,7 @@ impl Checker {
              valid = false;
              continue;
          };
-         let name = key.name(name).to_owned();
+         let name = symbol::intern(key.name(name));
         if !seen.insert(name.clone()) {
              self.error(key, "E_RECORD", &format!("{what} gives :{name} twice."));
              valid = false;
@@ -919,14 +920,14 @@ impl Checker {
          }
          let (term, value) = self.infer(cx, &form.child(pair[1]));
          self.no_fn(&form.child(pair[1]), &value.ty, &format!("Record field :{name}"));
-         fields.push((name.clone(), self.terms.ty(term).clone()));
-         terms.push((name.clone(), term));
+         fields.push((name.clone().into(), self.terms.ty(term).clone()));
+         terms.push((name, term));
          if value.live_len {
-             list_fields.push(vec![name.clone()]);
+             list_fields.push(vec![name.clone().into()]);
          }
          list_fields.extend(value.list_fields.iter().map(|path| {
              let mut path = path.clone();
-             path.insert(0, name.clone());
+             path.insert(0, name.clone().into());
              path
          }));
          values.push(value);
@@ -954,7 +955,7 @@ impl Checker {
      } else {
          let mut stem = self.path_names(cx.path).to_vec();
          let leaf = stem.pop().unwrap_or_else(|| "@result".into());
-         stem.push(format!("{leaf}#{key}"));
+         stem.push(format!("{leaf}#{key}").into());
          let stem_id = self.path(stem.clone());
          let previous = self.base.as_ref().and_then(|base| base.inline.get(&stem_id)).copied().unwrap_or(0);
          let count = self.inline.entry(stem_id).or_insert(previous);
@@ -963,7 +964,7 @@ impl Checker {
          } else {
              let mut unique = stem;
              if let Some(leaf) = unique.last_mut() {
-                 *leaf = format!("{leaf}~{}", *count);
+                 *leaf = format!("{leaf}~{}", *count).into();
              }
              unique
          };
@@ -988,7 +989,7 @@ impl Checker {
  fn bind(&mut self, cx: &Cx, pattern: &Syntax, value: Info, marker_text: &str, env: &mut BTreeMap<String, Info>) {
      if !matches!(&pattern.node, SNode::Sym(_)) {
          let mut path = self.path_names(cx.path).to_vec();
-         path.push(format!("{marker_text}{}", Self::pattern_key(pattern)));
+         path.push(format!("{marker_text}{}", Self::pattern_key(pattern)).into());
          let path=self.path(path);
          self.mark(path, &value);
      }
@@ -996,7 +997,7 @@ impl Checker {
          SNode::Sym(name) => {
              let name = pattern.name(*name).to_owned();
              let mut path = self.path_names(cx.path).to_vec();
-             path.push(format!("{marker_text}{name}"));
+             path.push(format!("{marker_text}{name}").into());
              let path=self.path(path);
              self.mark(path, &value);
              env.insert(name.clone(), value);
@@ -1171,9 +1172,9 @@ impl Checker {
  fn branch_test(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (TermId, Info) {
      let mut path = self.path_names(cx.path).to_vec();
      if let Some(last) = path.pop() {
-         path.push(format!("{last}#{key}"));
+         path.push(format!("{last}#{key}").into());
      } else {
-         path.push(format!("@result#{key}"));
+         path.push(format!("@result#{key}").into());
      }
      {let path=self.path(path);self.binding(cx, form, path)}
  }
@@ -1181,9 +1182,9 @@ impl Checker {
  fn branch(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (TermId, Info) {
      let mut path = self.path_names(cx.path).to_vec();
      if let Some(last) = path.pop() {
-         path.push(format!("{last}#{key}"));
+         path.push(format!("{last}#{key}").into());
      } else {
-         path.push(format!("@result#{key}"));
+         path.push(format!("@result#{key}").into());
      }
      let path = self.path(path);
      let inner = cx.with_path(path);
@@ -1212,7 +1213,7 @@ impl Checker {
      for pair in bs.chunks_exact(2){
          let p=&f.child(pair[0]);let expr=&f.child(pair[1]);
          if !self.check_pattern(cx,p,&mut seen,&env,"let*"){continue}
-         let path=self.child_path(base,Self::pattern_key(p));
+         let path=self.child_path(base,Self::pattern_key(p).into());
          let mut inner=cx.with_path(path.clone());inner.env=env.snapshot();inner.zbody=false;
          let(t,v)=if expr.meta().is_empty()&&matches!(p.node,SNode::Sym(_))&&syntax::head(expr)==Some("fn"){
              let args=expr.children();
@@ -1255,7 +1256,7 @@ impl Checker {
          Ty::Record(mut fs) => {
              let mut lengths = rv.list_fields.clone();
              let mut vs = vec![rv];
-             let mut updates: Vec<(String, TermId)> = Vec::new();
+             let mut updates: Vec<(Symbol, TermId)> = Vec::new();
              for pair in args[1..].chunks_exact(2) {
                  let (k, value) = (&f.child(pair[0]), &f.child(pair[1]));
                  match &k.node {
@@ -1270,12 +1271,12 @@ impl Checker {
                                      self.error(value, "E_TYPE", &m);
                                  }
                              }
-                             None => fs.push((n.to_owned(), v.ty.clone())),
+                             None => fs.push((n.into(), v.ty.clone())),
                          }
-                         lengths.retain(|p| p.first().map(String::as_str) != Some(n));
+                         lengths.retain(|p| p.first().map(|name| name.as_str()) != Some(n));
                          let fields = if v.live_len { let mut x = vec![Vec::new()]; x.extend(v.list_fields.iter().cloned()); x } else { v.list_fields.clone() };
-                         lengths.extend(fields.into_iter().map(|p| { let mut q = vec![n.to_owned()]; q.extend(p); q }));
-                         updates.push((n.to_owned(), t));
+                         lengths.extend(fields.into_iter().map(|p| { let mut q = vec![symbol::intern(n)]; q.extend(p); q }));
+                         updates.push((symbol::intern(n), t));
                          vs.push(v);
                      }
                      _ => self.error(k, "E_ARGS", &format!("assoc keys are keywords; got {}.", Self::pattern_key(k))),
@@ -1545,7 +1546,7 @@ impl Checker {
          self.no_fn(&form.child(accs[1]), &v.ty, &format!("The {name} accumulator"));
          Some((form.child(accs[0]), t, v))
      } else { None };
-     let last = self.path_names(id).last().cloned().unwrap_or_else(|| name.to_owned());
+     let last = self.path_names(id).last().copied().unwrap_or_else(|| symbol::intern(name));
      let zcx = cx.with_path(id.clone());
      let acc_live0 = init.as_ref().is_some_and(|(_, _, v)| v.live);
      let mut run_live = acc_live0;
@@ -1677,7 +1678,7 @@ impl Checker {
          _ => (),
      }
      if let Some(path) = self.terms.row(term).path {
-         let path = self.terms.path_names(path).iter().map(|&name| self.terms.name(name).to_owned()).collect::<Vec<_>>();
+         let path = self.terms.path_names(path).iter().map(|&name| symbol::intern(self.terms.name(name))).collect::<Path>();
          let path = self.path(path);
          let next = CheckPackedForm::Candidate(Arc::new([producer.clone()].into_iter().collect()));
          self.packed_update(path, next);
@@ -2024,7 +2025,7 @@ impl Checker {
              (a.term, value)
          } else if let Some(default) = default {
              let dcx = Cx {
-                 env: ScopeStack::default(), ctx: d.ctx.clone(), path: self.path(vec![format!("def:{}", d.name), format!(":{n}")]),
+                 env: ScopeStack::default(), ctx: d.ctx.clone(), path: self.path(vec![format!("def:{}", d.name).into(), format!(":{n}").into()]),
                  scope: format!("ƒ {}", d.name), in_def: true, stack: vec![d.name.clone()], depth: 0, zone: None, zbody: false,
              };
              let (term, value) = self.infer(&dcx, default);
@@ -2044,7 +2045,7 @@ impl Checker {
      }
      let key = d.params.iter().map(|(n, _, _)| env[n].clone()).collect();
      let mut inner = Cx {
-         env: ScopeStack::from_map(env), ctx: d.ctx.clone(), path: self.path(vec![format!("def:{}", d.name)]), scope: format!("ƒ {}", d.name),
+         env: ScopeStack::from_map(env), ctx: d.ctx.clone(), path: self.path(vec![format!("def:{}", d.name).into()]), scope: format!("ƒ {}", d.name),
          in_def: true, stack: cx.stack.clone(), depth: cx.depth + 1, zone: None, zbody: false,
      };
      inner.stack.push(d.name.clone());
@@ -2224,7 +2225,7 @@ impl Checker {
              }
              Some((_, want)) => {
                 self.need(argument, &format!("{} :{key}", operator.name), want);
-                 named.push((key.to_owned(), argument.term));
+                 named.push((symbol::intern(key), argument.term));
              }
          }
      }
@@ -2240,7 +2241,7 @@ impl Checker {
              self.error(form, "E_TYPE", &format!("{} needs matching vector widths; got {widths}.", operator.name));
          }
      }
-     let typed = named.iter().map(|(name, term)| (name.clone(), self.terms.ty(*term).clone(), literal_param(&self.terms, *term))).collect::<Vec<_>>();
+     let typed = named.iter().map(|(name, term)| (name.clone().into(), self.terms.ty(*term).clone(), literal_param(&self.terms, *term))).collect::<Vec<_>>();
      let result = match op::result_type(operator, &typed) {
          Ok(ty) => ty,
          Err(mut problem) => {
@@ -2293,7 +2294,7 @@ impl Checker {
          for argument in &args {
              if let PackedNode::Fn(id) = self.terms.node(argument.term) {
                  let function = *self.terms.function(id);
-                 let zone = self.terms.path_names(function.zone).iter().map(|&name| self.terms.name(name).to_owned()).collect::<Vec<_>>();
+                 let zone = self.terms.path_names(function.zone).iter().map(|&name| symbol::intern(self.terms.name(name))).collect::<Path>();
                  let zone = self.path(zone);
                  self.link_body(function.body, &cx.path);
                  self.packed_update(zone, CheckPackedForm::Candidate(Arc::new([cx.path].into_iter().collect())));
@@ -2449,7 +2450,7 @@ impl Checker {
              body: definition.body.clone(),
              env: ScopeStack::default(),
              ctx: definition.ctx.clone(),
-             path: self.path(vec![format!("def:{name}")]),
+             path: self.path(vec![format!("def:{name}").into()]),
              name: name.clone(),
          }),
          _ => None,
@@ -2579,7 +2580,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
      let short = catalog::short(&kind.qualified);
      let nslots = kind.slots.len();
      let plural = |n: usize| if n == 1 { "" } else { "s" };
-    let mut named: Vec<(String, TermId)> = Vec::new();
+    let mut named: Vec<(Symbol, TermId)> = Vec::new();
      let mut seen = BTreeSet::new();
      let mut npos = 0usize;
      let mut writes: Vec<String> = Vec::new();
@@ -2592,7 +2593,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
                  if rest_index.is_some_and(|first| index >= first) {
                      let slot = &kind.slots[rest_index.unwrap()];
                      self.slot_arg(kind, arg, slot, true);
-                     named.push((slot.name.clone(), arg.term.clone()));
+                     named.push((symbol::intern(&slot.name), arg.term.clone()));
                  } else if index >= nslots {
                      self.error(&arg.form, "E_EXTRA_POSITIONAL", &format!("{} takes {} geometry input{}; this one is extra", short, nslots, plural(nslots)));
                  } else {
@@ -2602,7 +2603,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
                      } else {
                          seen.insert(slot.name.clone());
                          self.slot_arg(kind, arg, slot, false);
-                         named.push((slot.name.clone(), arg.term.clone()));
+                         named.push((symbol::intern(&slot.name), arg.term.clone()));
                      }
                  }
              }
@@ -2616,7 +2617,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
                      match (slot, parameter) {
                          (Some(slot), _) => {
                              self.slot_arg(kind, arg, slot, slot.rest);
-                             named.push((name.clone(), arg.term.clone()));
+                             named.push((symbol::intern(name), arg.term.clone()));
                          }
                          (None, Some(parameter)) => {
                              if kind.qualified == "sop/material" && name == "material" && arg.info.ty == ty::material() {
@@ -2633,7 +2634,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
                                      writes.push(group);
                                  }
                              }
-                             named.push((name.clone(), arg.term.clone()));
+                             named.push((symbol::intern(name), arg.term.clone()));
                          }
                          (None, None) => {
                              let names = kind.slots.iter().map(|slot| slot.name.clone()).chain(kind.parameters.iter().map(|parameter| parameter.name.clone())).collect::<Vec<_>>();
@@ -2648,7 +2649,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
      for slot in &kind.slots {
          if slot.required && !slot.rest && !seen.contains(&slot.name) {
              if slot_ty(Some(slot), kind) == ty::geometry() {
-                named.push((slot.name.clone(), self.make_term(form, ty::geometry(), Draft::Nil)));
+                named.push((symbol::intern(&slot.name), self.make_term(form, ty::geometry(), Draft::Nil)));
              } else {
                  self.error(form, "E_MISSING_INPUT", &format!("{} needs its {} input", catalog::short(&kind.qualified), slot.name));
              }
@@ -2669,7 +2670,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
          match kind.outputs.as_slice() {
              [( _, output)] => port_ty(output),
              [] => Ty::Any,
-             outputs => Ty::Record(outputs.iter().map(|(name, port)| (name.clone(), port_ty(port))).collect()),
+             outputs => Ty::Record(outputs.iter().map(|(name, port)| (name.clone().into(), port_ty(port))).collect()),
          }
      };
      let values = args.iter().map(|arg| arg.info.clone()).collect::<Vec<_>>();
@@ -2822,7 +2823,7 @@ fn hof(&mut self, cx: &Cx, x: &Syntax, name: &str, forms: &[packed::SyntaxId]) -
     self.link_body(specialized, &cx.path);
      match fv.callable.as_deref() {
          Some(Callable::Local(c)) => { let cid = c.path.clone(); self.link_path(cid, &cx.path); }
-         Some(Callable::Def(def)) => {let path=self.path(vec![format!("def:{def}")]);self.link_path(path, &cx.path)},
+         Some(Callable::Def(def)) => {let path=self.path(vec![format!("def:{def}").into()]);self.link_path(path, &cx.path)},
          _ => (),
      }
      v.live_len = live_len;
@@ -2878,7 +2879,7 @@ fn iterate(&mut self, cx: &Cx, f: &Syntax, forms: &[packed::SyntaxId]) -> (TermI
     self.link_body(specialized, &cx.path);
      match fv.callable.as_deref() {
          Some(Callable::Local(c)) => { let cid = c.path.clone(); self.link_path(cid, &cx.path); }
-         Some(Callable::Def(def)) => {let path=self.path(vec![format!("def:{def}")]);self.link_path(path, &cx.path)},
+         Some(Callable::Def(def)) => {let path=self.path(vec![format!("def:{def}").into()]);self.link_path(path, &cx.path)},
          _ => (),
      }
      let mut terms = vec![ft, it, nt];
@@ -2901,7 +2902,7 @@ fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[packed::SyntaxId]) -> (Term
     let Some(sg) = self.graphs_get(g).cloned() else { return self.fail_term(&first, "E_UNKNOWN_GRAPH", &format!("Unknown graph reference: {g}.")) };
      if cx.in_def { return self.fail_term(x, "E_REF_IN_DEF", "Reusable functions cannot capture project graphs; add an explicit parameter."); }
      let gv = self.graph_info(x, g);
-    let mut overrides: Vec<(String, TermId)> = Vec::new();
+    let mut overrides: Vec<(Symbol, TermId)> = Vec::new();
      let mut vs = vec![gv.clone()];
      let mut rest = &forms[1..];
      loop {
@@ -2922,7 +2923,7 @@ fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[packed::SyntaxId]) -> (Term
                         self.no_fn(&value, &v.ty, &format!("Input :{k} of {g}"));
                         let arg = self.value_arg(&value, &v);
                          self.need(&arg, &format!(":{k} of {g}"), want);
-                        overrides.push((k.to_owned(), t));
+                        overrides.push((symbol::intern(k), t));
                          vs.push(v);
                      }
                  }
@@ -2995,7 +2996,7 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
      let outer_calls = std::mem::take(&mut self.calls);
      let graph_form = self.terms.import_form(&sg.form);
      self.graph_stack.push(name.to_owned());
-     let cx0 = Cx { env: ScopeStack::default(), ctx: sg.ctx, path: self.path(vec![name.to_owned()]), scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
+     let cx0 = Cx { env: ScopeStack::default(), ctx: sg.ctx, path: self.path(vec![symbol::intern(name)]), scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
      let mut env = ScopeStack::default().push();
      let mut inputs = Vec::new();
      for (n, t, df) in &sg.params {
@@ -3016,7 +3017,7 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
          v.state_dep = dv.state_dep;
          v.packed = dv.packed.clone();
          v.approx_sources = dv.approx_sources.clone();
-         let input_path=self.path(vec![name.to_owned(), format!(":{n}")]);
+         let input_path=self.path(vec![symbol::intern(name), format!(":{n}").into()]);
          self.mark(input_path, &v);
          env.top_mut().insert(n.clone(), v);
          inputs.push((n.clone(), t.clone(), dt));
@@ -3170,7 +3171,7 @@ impl Checker {
                 let cx = Cx {
                     env: ScopeStack::default(),
                     ctx: definition.ctx.clone(),
-                    path: self.path(vec![format!("def:{name}"), format!(":{input}")]),
+                    path: self.path(vec![format!("def:{name}").into(), format!(":{input}").into()]),
                     scope: format!("ƒ {name}"),
                     in_def: true,
                     stack: vec![name.to_owned()],
@@ -3192,7 +3193,7 @@ impl Checker {
         let cx = Cx {
             env: env.snapshot(),
             ctx: definition.ctx.clone(),
-            path: self.path(vec![format!("def:{name}")]),
+            path: self.path(vec![format!("def:{name}").into()]),
             scope: format!("ƒ {name}"),
             in_def: true,
             stack: vec![name.to_owned()],
@@ -3443,7 +3444,7 @@ impl Checker {
             let base = Cx {
                 env: ScopeStack::from_map(bindings),
                 ctx: context::sop(),
-                path: self.path(vec![format!("node:{name}")]),
+                path: self.path(vec![format!("node:{name}").into()]),
                 scope: name.clone(),
                 in_def: true,
                 stack: vec![name.clone()],
@@ -3456,7 +3457,7 @@ impl Checker {
                 let term = default.as_ref().map(|form| {
                     let mut cx = base.clone();
                     cx.env = ScopeStack::default();
-                    cx.path=self.child_path(cx.path,format!(":{input}"));
+                    cx.path=self.child_path(cx.path,format!(":{input}").into());
                     let (term, value) = self.infer(&cx, form);
                     if !ty::fits(&value.ty, input_ty) {
                         self.error(form, "E_TYPE", &format!("Invalid default for {input}."));

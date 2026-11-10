@@ -24,7 +24,7 @@ fn floats(a: Vec<f64>) -> Value {
     Value::Floats(1, Arc::new(a))
 }
 fn rec(fields: Vec<(&str, Value)>) -> Value {
-    Value::Record(fields.into_iter().map(|(n, v)| (n.to_owned(), v)).collect())
+    Value::Record(fields.into_iter().map(|(n, v)| (n.into(), v)).collect::<Vec<_>>().into())
 }
 
 fn fixtures() -> Vec<(&'static str, geo::T)> {
@@ -55,10 +55,10 @@ fn evaluate(geometry: &geo::T, decls: &str, inputs: &[(&str, Value)], body: &str
         (Some(w), d) if d.is_empty() => w,
         (_, d) => panic!("{}", d.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")),
     };
-    let mut named = vec![("geo".to_owned(), Value::Deferred(ty::geometry(), 7))];
-    named.extend(inputs.iter().map(|(n, v)| ((*n).to_owned(), v.clone())));
-    let evaluation = e::static_with(&checked, true, Some(&[("g".to_owned(), named)]), None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    let (_, values) = evaluation.records.iter().find(|(path, _)| path == &vec!["g".to_owned(), "tested".to_owned()]).expect("tested record");
+    let mut named = vec![("geo".into(), Value::Deferred(ty::geometry(), 7))];
+    named.extend(inputs.iter().map(|(n, v)| (flow_syntax::symbol::intern(n), v.clone())));
+    let evaluation = e::static_with(&checked, true, Some(&[("g".into(), named)]), None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let (_, values) = evaluation.records.iter().find(|(path, _)| path.as_slice() == ["g", "tested"]).expect("tested record");
     let value = values[0].1.clone();
     let geometry = geometry.clone();
     let lookup: ak::GeometryLookup = Arc::new(move |id| if id == 7 { Some(geometry.clone()) } else { None });

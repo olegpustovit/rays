@@ -369,7 +369,7 @@ fn capture_cycles() {
     assert_eq!(run(1, true), expected); assert_eq!(run(8, false), expected); assert_eq!(run(8, true), expected); assert_eq!(handles(), before);
 }
 
-fn publish(gpu: &wg::WorkspaceGpu, key: &str, v: &flow_ir::flow_ir::gpu::Value) -> Result<flow_gpu::image_sink::Output, Diagnostic> {
+fn publish(gpu: &wg::WorkspaceGpu, key: &wi::ImageKey, v: &flow_ir::flow_ir::gpu::Value) -> Result<flow_gpu::image_sink::Output, Diagnostic> {
     let mut output = None;
     wg::image(gpu, key, 65, 17, &mut |o| { output = Some(o.clone()); Ok(()) }, v)?;
     Ok(output.unwrap())
@@ -380,6 +380,7 @@ fn gpu_sinks() {
     let before = handles(); let owner = wg::create(None); wg::qualification(&owner);
     let p = lower("(workspace test (graph image :context image (image/map (fn [uv] [uv.x uv.y 0.5 1]))))");
     let n = &p.plan.nodes[0];
+    let key = |slot: &str| wi::ImageKey::Map((n.inst, (vec![slot.into()], n.iter.clone())));
     let function = match &n.args.iter().find(|(k, _)| k == "function").unwrap().1 { Value::Fn(f) => *f, _ => panic!("function") };
     let kernel = ok(flow_sop::image_kernel::prepare(Some((n.inst, n.site.clone(), n.iter.clone())), p.image_sites[0].clone(), Some(p.approx.clone()), 0, 65, 17, function, &[], &[]));
     let program = flow_sop::image_kernel::program(&kernel);
@@ -389,26 +390,26 @@ fn gpu_sinks() {
             Some(flow_ir::flow_ir::executor::Displayed::Gpu(v)) => Some(v), _ => panic!("resident GPU output required")
         };
     });
-    let v = shown.unwrap(); let held = ok(publish(&owner, "held", &v)); let native_handles = handles();
+    let v = shown.unwrap(); let held = ok(publish(&owner, &key("held"), &v)); let native_handles = handles();
     for i in 0..80 {
-        assert!(wg::image(&owner, &format!("bad-shape:{i}"), 65, 18, &mut |_| Ok(()), &v).is_err());
-        assert!(wg::image(&owner, &format!("bad-publication:{i}"), 65, 17, &mut |_| Err(flow_syntax::value::fail("E_TEST", "publication refused")), &v).is_err());
+        assert!(wg::image(&owner, &key(&format!("bad-shape:{i}")), 65, 18, &mut |_| Ok(()), &v).is_err());
+        assert!(wg::image(&owner, &key(&format!("bad-publication:{i}")), 65, 17, &mut |_| Err(flow_syntax::value::fail("E_TEST", "publication refused")), &v).is_err());
         assert!(flow_gpu::image_sink::texture(&held).is_some()); assert_eq!(handles(), native_handles);
     }
     let (host, created, closed, buffers, textures) = wg::image_stats(&owner);
     assert_eq!((created, closed, buffers, textures, host.status_reads, host.readback_bytes), (161, 160, 161, 81, 1, 0));
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = wg::image(&owner, "raised", 65, 17, &mut |_| panic!("publication raised"), &v);
+        let _ = wg::image(&owner, &key("raised"), 65, 17, &mut |_| panic!("publication raised"), &v);
     })).expect_err("publication panic must propagate");
     assert!(panic.downcast_ref::<&str>().is_some_and(|s| *s == "publication raised") || panic.downcast_ref::<String>().is_some_and(|s| s == "publication raised"));
     assert_eq!(handles(), native_handles);
     let (_, created, closed, buffers, textures) = wg::image_stats(&owner);
     assert_eq!((created, closed, buffers, textures), (162, 161, 162, 82));
-    let outputs: Vec<_> = (0..63).map(|i| ok(publish(&owner, &format!("accepted:{i}"), &v))).collect();
-    assert!(publish(&owner, "over-capacity", &v).is_err());
+    let outputs: Vec<_> = (0..63).map(|i| ok(publish(&owner, &key(&format!("accepted:{i}")), &v))).collect();
+    assert!(publish(&owner, &key("over-capacity"), &v).is_err());
     assert!(outputs.iter().all(|o| flow_gpu::image_sink::texture(o).is_some())); assert!(flow_gpu::image_sink::texture(&held).is_some());
-    assert!(wg::image(&owner, "held", 65, 17, &mut |_| Err(flow_syntax::value::fail("E_TEST", "update refused")), &v).is_err());
-    assert!(flow_gpu::image_sink::texture(&held).is_none()); assert!(flow_gpu::image_sink::texture(&ok(publish(&owner, "held", &v))).is_some());
+    assert!(wg::image(&owner, &key("held"), 65, 17, &mut |_| Err(flow_syntax::value::fail("E_TEST", "update refused")), &v).is_err());
+    assert!(flow_gpu::image_sink::texture(&held).is_none()); assert!(flow_gpu::image_sink::texture(&ok(publish(&owner, &key("held"), &v))).is_some());
     let (before_stats, created, closed, buffers, textures) = wg::image_stats(&owner);
     assert_eq!((created, closed, buffers, textures), (225, 161, 225, 145));
     wg::close(&owner); wg::close(&owner);

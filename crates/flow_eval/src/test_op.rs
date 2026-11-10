@@ -1,4 +1,5 @@
 // Port of lib/flow/test_op.ml. Lives in flow_eval because it drives Workspace.check and Eval together.
+use flow_syntax::symbol::Symbol;
 use crate::*;
 use flow_check::{catalog::{Catalog, Kind, Slot}, op::{self, Op, Shape}, ray_host, workspace as W};
 use flow_syntax::value;
@@ -10,19 +11,19 @@ use std::cell::RefCell;
 fn t(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
 fn ia(v: &[i64]) -> Value { Value::Int_array(Arc::new(v.to_vec())) }
 fn fa(v: &[f64]) -> Value { Value::Floats(1, Arc::new(v.to_vec())) }
-fn na(n: &str, v: Value) -> (String, Value) { (n.to_owned(), v) }
+fn na(n: &str, v: Value) -> (Symbol, Value) { (n.into(), v) }
 const MAX_INT: i64 = i64::MAX;
 const MIN_INT: i64 = i64::MIN;
 
 fn nominal(ty: &Ty) -> Option<Value> {
     let n = match ty { Ty::Named(n) => n.as_str(), _ => return None };
     Some(match n {
-        "panel" => value::struct_value("ui/outline", ty::panel(), vec![]),
-        "scene" => value::struct_value("scene/merge", ty::scene(), vec![]),
-        "world" => value::struct_value("world/none", ty::world(), vec![]),
-        "settings" => value::struct_value("settings/config", ty::settings(), vec![]),
-        "editor" => value::struct_value("ui/workspace", ty::editor(), vec![]),
-        "material" => value::struct_value("material/standard", ty::material(), vec![]),
+        "panel" => value::struct_value("ui/outline", ty::panel(), vec![].into()),
+        "scene" => value::struct_value("scene/merge", ty::scene(), vec![].into()),
+        "world" => value::struct_value("world/none", ty::world(), vec![].into()),
+        "settings" => value::struct_value("settings/config", ty::settings(), vec![].into()),
+        "editor" => value::struct_value("ui/workspace", ty::editor(), vec![].into()),
+        "material" => value::struct_value("material/standard", ty::material(), vec![].into()),
         "geometry" => Value::No_geo,
         _ => return None,
     })
@@ -42,7 +43,7 @@ fn sample(name: &str, ty: &Ty) -> Value {
         Ty::Array(e) => value::array_init(e, 2, &|_| sample("", e)).unwrap(),
         Ty::Named(_) => nominal(ty).unwrap_or_else(|| Value::Deferred(ty.clone(), 0)),
         Ty::Any => Value::Float(1.5),
-        Ty::Record(fs) => Value::Record(fs.iter().map(|(n, t)| (n.clone(), sample(n, t))).collect()),
+        Ty::Record(fs) => Value::Record(fs.iter().map(|(n, t)| (n.clone(), sample(n, t))).collect::<Vec<_>>().into()),
         Ty::Fn(_) => Value::Fn(FnId(0, 0)),
     }
 }
@@ -55,12 +56,12 @@ fn literal_of(v: &Value) -> Option<param::Value> {
         _ => None,
     }
 }
-fn no_node(_: &str, _: &[(String, Value)]) -> Result<Value, Diagnostic> { panic!("node callback must not run") }
-fn result_type(o: &Op, args: &[(String, Value)]) -> Result<Ty, Diagnostic> {
+fn no_node(_: &str, _: &[(Symbol, Value)]) -> Result<Value, Diagnostic> { panic!("node callback must not run") }
+fn result_type(o: &Op, args: &[(Symbol, Value)]) -> Result<Ty, Diagnostic> {
     let typed = args.iter().map(|(n, v)| (n.clone(), value::ty_of(v), literal_of(v))).collect::<Vec<_>>();
     op::result_type(o, &typed)
 }
-fn check(o: &Op, args: &[(String, Value)]) -> Value {
+fn check(o: &Op, args: &[(Symbol, Value)]) -> Value {
     if o.name == "error" {
         match (o.body)(&input::at_time(0.), &no_node, args) {
             Ok(_) => panic!("error returned"),
@@ -68,7 +69,7 @@ fn check(o: &Op, args: &[(String, Value)]) -> Value {
         }
     }
     let made = RefCell::new(0i64);
-    let node = |_: &str, a: &[(String, Value)]| -> Result<Value, Diagnostic> {
+    let node = |_: &str, a: &[(Symbol, Value)]| -> Result<Value, Diagnostic> {
         let ty = result_type(o, a)?;
         let mut m = made.borrow_mut();
         let id = *m; *m += 1;
@@ -86,8 +87,8 @@ fn check(o: &Op, args: &[(String, Value)]) -> Value {
     result
 }
 fn find(name: &str, c: context::Context) -> Op { op::find(&[], name, &c).unwrap_or_else(|| panic!("no op {name}")).clone() }
-fn apply(name: &str, args: &[(String, Value)]) -> Value { check(&find(name, context::value()), args) }
-fn rejects_code(name: &str, args: &[(String, Value)], code: &str) {
+fn apply(name: &str, args: &[(Symbol, Value)]) -> Value { check(&find(name, context::value()), args) }
+fn rejects_code(name: &str, args: &[(Symbol, Value)], code: &str) {
     let o = find(name, context::value());
     match (o.body)(&input::at_time(0.), &no_node, args) { Err(d) => assert_eq!(d.code, code, "{name}"), Ok(_) => panic!("accepted {name}") }
 }
@@ -120,7 +121,7 @@ fn every_operator_shape_and_arithmetic() {
         assert_eq!(op::find(&[], &o.name, &o.ctx).unwrap().name, o.name);
         assert_eq!(op::derive_packed_kind(o).is_some(), o.ctx == context::value() && o.shape == Shape::Scalar, "{}", o.name);
         let s = &o.signature;
-        let base: Vec<(String, Value)> = s.pos.iter().map(|(n, ty)| (n.clone(), match (o.name.as_str(), n.as_str()) {
+        let base: Vec<(Symbol, Value)> = s.pos.iter().map(|(n, ty)| (n.clone(), match (o.name.as_str(), n.as_str()) {
             ("array/scatter_add", "indices") | ("array/compact", "mask") => ia(&[0, 1]),
             ("array/index_of", "keys") => ia(&[1, 2]),
             ("array/index_of", "queries") => ia(&[2, 3]),
@@ -170,7 +171,7 @@ fn contexts_checks_and_custom_kinds() {
     assert_eq!(find("rand", context::scene()).name, "value/rand");
     let mut sine = find("sin", context::value()); sine.category = "Copied".into();
     assert!(op::derive_packed_kind(&sine).is_none());
-    let rejects = |name: &str, args: Vec<(String, Value)>| match (find(name, context::editor()).check)(&args) {
+    let rejects = |name: &str, args: Vec<(Symbol, Value)>| match (find(name, context::editor()).check)(&args) {
         Err(d) if d.code == "E_RANGE" => (), other => panic!("{name}: {other:?}"),
     };
     rejects("ui/graph", vec![na("view", t("invalid"))]);
@@ -192,14 +193,14 @@ fn contexts_checks_and_custom_kinds() {
     let (ws, ds) = wcheck(&[], &c1, "(workspace w (graph g :context scene (root)))");
     assert!(ds.is_empty());
     let evaluated = run0(&ws.unwrap());
-    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![]));
+    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![].into()));
     assert_eq!(evaluated.plan.nodes.len(), 0);
     k.slots = vec![Slot { name: "child".into(), required: true, rest: false, ty: None }];
     let c2 = Catalog { version: 1, kinds: vec![k] };
     let (ws, ds) = wcheck(&[], &c2, "(workspace w (graph g :context scene (first (map root (list nil)))))");
     assert!(ds.is_empty());
     let evaluated = run0(&ws.unwrap());
-    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![na("child", Value::No_geo)]));
+    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![na("child", Value::No_geo)].into()));
     assert_eq!(evaluated.plan.nodes.len(), 0);
 }
 
@@ -318,7 +319,7 @@ fn typed_and_source_operators() {
     source.choices = vec![];
     source.out_args = None;
     source.out = Arc::new(|_| Ok(Ty::Bool));
-    source.body = Arc::new(|_, _, _| Ok(value::source_value("test/present", Ty::Bool, vec![])));
+    source.body = Arc::new(|_, _, _| Ok(value::source_value("test/present", Ty::Bool, vec![].into())));
     let sources = vec![source];
     let static_of = |body: &str| result_of(&r#static(&checked(&sources, body), false, None).unwrap(), "g");
     let resolve: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>> = Some(Arc::new(|v| match v {
@@ -348,8 +349,8 @@ fn host_error(cause: &str, code: &str, message: &str) -> Diagnostic {
 fn host_forcing_agrees_with_supplied_state() {
     let live = input::at_time(2.);
     let state = create_state();
-    let marker = value::source_value("test/array", Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))]);
-    let legacy = value::struct_value("test/array", Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))]);
+    let marker = value::source_value("test/array", Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))].into());
+    let legacy = value::struct_value("test/array", Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))].into());
     let data = fa(&[0., -0.]);
     for marker in [marker.clone(), legacy] {
         for supplied in [None, Some(&state)] {
@@ -376,19 +377,19 @@ fn host_forcing_agrees_with_supplied_state() {
     assert!(ds.is_empty());
     let dynamic = result_of(&r#static(&ws.unwrap(), false, None).unwrap(), "g");
     let fields = vec![na("value", dynamic)];
-    let marker = value::source_value("test/nested", Ty::Any, vec![]);
+    let marker = value::source_value("test/nested", Ty::Any, vec![].into());
     let calls = Arc::new(Mutex::new(0));
     let (c, f) = (calls.clone(), fields.clone());
-    let resolve: Resolve = Arc::new(move |_| { *c.lock().unwrap() += 1; Ok(Value::Record(f.clone())) });
-    assert_eq!(host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Record(vec![na("value", Value::Float(3.))])));
+    let resolve: Resolve = Arc::new(move |_| { *c.lock().unwrap() += 1; Ok(Value::Record(f.clone().into())) });
+    assert_eq!(host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Record(vec![na("value", Value::Float(3.))].into())));
     assert_eq!(*calls.lock().unwrap(), 1);
-    let marker = value::source_value("test/live_argument", Ty::Float, fields);
+    let marker = value::source_value("test/live_argument", Ty::Float, fields.into());
     let m2 = marker.clone();
     let resolve: Resolve = Arc::new(move |actual| { assert_eq!(*actual, m2); Ok(Value::Float(7.)) });
     assert_eq!(host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Float(7.)));
-    let descriptor = value::source_value("test/borrowed", Ty::Array(Box::new(Ty::Float)), vec![na("geometry", Value::Deferred(ty::geometry(), 17)), na("owner", t("point"))]);
-    let legacy = value::struct_value("test/borrowed", Ty::Array(Box::new(Ty::Int)), vec![na("count", Value::Int(2))]);
-    let nested = value::source_value("test/write", Ty::Array(Box::new(Ty::Float)), vec![na("values", Value::Record(vec![na("offsets", legacy), na("values", descriptor)]))]);
+    let descriptor = value::source_value("test/borrowed", Ty::Array(Box::new(Ty::Float)), vec![na("geometry", Value::Deferred(ty::geometry(), 17)), na("owner", t("point"))].into());
+    let legacy = value::struct_value("test/borrowed", Ty::Array(Box::new(Ty::Int)), vec![na("count", Value::Int(2))].into());
+    let nested = value::source_value("test/write", Ty::Array(Box::new(Ty::Float)), vec![na("values", Value::Record(vec![na("offsets", legacy), na("values", descriptor)].into()))].into());
     for supplied in [None, Some(&state)] {
         let calls = Arc::new(Mutex::new(0));
         let (c, d, n) = (calls.clone(), data.clone(), nested.clone());
@@ -449,7 +450,8 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
             match (actual, expected) {
                 (Err(a), Err(b)) => assert_eq!(a, b),
                 (Ok(Value::Source(g)), Ok(data)) => {
-                    assert!(matches!(g.fields.as_slice(), [(c, Value::Int(n)), (v, _)] if c == "count" && v == "value" && *n == count));
+                    assert_eq!(g.fields.len(), 2);
+                    assert!(matches!((&g.fields[0], &g.fields[1]), ((c, Value::Int(n)), (v, _)) if c == "count" && v == "value" && *n == count));
                     assert_eq!(g.ty, value::ty_of(&data));
                     if count > 0 { let row = &g.fields[1].1; assert_eq!(*row, value::array_get(&data, 0).unwrap()); }
                 }
@@ -473,7 +475,7 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
         assert_eq!(capture(&|| op::constant_array_descriptor("array/vec4", &args)), expected);
     }
     match op::constant_array_descriptor("array/vec4", &[na("count", Value::Int(0)), na("value", t("unused"))]) {
-        Ok(Value::Source(g)) => assert_eq!(g.fields, vec![na("count", Value::Int(0)), na("value", Value::Vec4(0., 0., 0., 0.))]),
+        Ok(Value::Source(g)) => assert_eq!(g.fields, vec![na("count", Value::Int(0)), na("value", Value::Vec4(0., 0., 0., 0.))].into()),
         other => panic!("{other:?}"),
     }
     for args in [vec![], vec![na("count", Value::Int(1)), na("count", Value::Int(1))], vec![na("count", Value::Int(1)), na("extra", Value::Int(0))]] {
@@ -488,7 +490,7 @@ fn whole_array_primitives() {
         assert!(o.shape == Shape::Scalar && o.ctx == context::value());
     }
     let grade = find("array/grade", context::value());
-    assert!(grade.signature.pos == vec![("keys".to_owned(), Ty::Array(Box::new(Ty::Any)))] && grade.signature.kw == vec![("descending".to_owned(), Ty::Bool)]);
+    assert!(grade.signature.pos == vec![("keys".into(), Ty::Array(Box::new(Ty::Any)))] && grade.signature.kw == vec![("descending".into(), Ty::Bool)]);
     let keys = ia(&[2, 1, 2]);
     assert_eq!(apply("array/grade", &[na("keys", keys.clone())]), ia(&[1, 0, 2]));
     assert_eq!(apply("array/grade", &[na("keys", keys.clone()), na("descending", Value::Bool(false))]), ia(&[1, 0, 2]));

@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(rdk_core::geometry::point_count(&cook(&workspace_node(&[], workspace))), 12, "workspace definitions were not available while lowering");
         let w = "(workspace shared\n    (graph g :context sop (sop/ext_src)))";
         let source = node(&[], "(sop/grid :columns 3 :rows 2)");
-        assert!(node::ptr_eq(&workspace_node(&[("src".to_owned(), source.clone())], w), &source), "workspace external marker was not restored");
+        assert!(node::ptr_eq(&workspace_node(&[("src".into(), source.clone())], w), &source), "workspace external marker was not restored");
         assert_eq!(rdk_core::geometry::point_count(&cook(&node(&[], "(sop/grid :columns 3 :rows 2)"))), 12, "expression helper changed");
     }
 
@@ -248,7 +248,7 @@ mod tests {
         let source = snapshot(&line);
         let w = "(workspace shared
     (graph g :context sop (sop/ext_src)))";
-        assert!(node::ptr_eq(&workspace_node(&[("src".to_owned(), source.clone())], w), &source), "workspace external marker was not restored");
+        assert!(node::ptr_eq(&workspace_node(&[("src".into(), source.clone())], w), &source), "workspace external marker was not restored");
         assert_eq!(rdk_core::geometry::point_count(&cook(&node(&[], "(sop/line :points 4)"))), 4, "expression helper changed");
     }
 

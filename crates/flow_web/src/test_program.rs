@@ -19,7 +19,7 @@ fn checked(declarations: &str, body: &str) -> W::Workspace {
 
 fn recorded(declarations: &str, body: &str) -> Value {
     let evaluation = E::static_with(&checked(declarations, body), true, None, None).expect("static");
-    let path: Path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: Path = vec!["g".into(), "tested".into()];
     evaluation.records.iter().find(|(p, _)| *p == path).expect("tested").1[0].1.clone()
 }
 

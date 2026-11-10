@@ -1,5 +1,6 @@
 // Port of lib/pxui_graph/scope_frame.ml: the graph pane's frame gestures; private state, commands and
 // painting compose here on the shared PXUI handle.
+use flow_syntax::symbol::Symbol;
 use crate::scope_commands::*;
 use crate::scope_paint as sp;
 use crate::scope_state::*;
@@ -134,7 +135,7 @@ pub fn single_form(text: &str) -> Option<s::Syntax> {
     }
 }
 
-pub fn context_items(t: &Pane, path: &[String]) -> Vec<(String, bool)> {
+pub fn context_items(t: &Pane, path: &[Symbol]) -> Vec<(String, bool)> {
     let imported = t.saved.imported(path);
     if let Some(file) = imported {
         return vec![(format!("Open {}", file), true)];
@@ -211,11 +212,11 @@ pub fn unfold_row(n: &p::Node, r: &p::Row) -> Vec<Change> {
         // only an input of a call holds a nested card: a record field or a binding unfolds into a binding
         if matches!(r.key, ArgKey::Pos(_) | ArgKey::Kw(_) | ArgKey::Arm(_)) && e::value_call(ex) {
             let last = n.path.len() - 1;
-            let zone: Vec<String> = n
+            let zone: Path = n
                 .path
                 .iter()
                 .enumerate()
-                .map(|(i, sg)| if i == last { e::nested_leaf(&n.name, &r.key).unwrap_or_else(|_| sg.clone()) } else { sg.clone() })
+                .map(|(i, sg)| if i == last { e::nested_leaf(&n.name, &r.key).map(Into::into).unwrap_or(*sg) } else { sg.clone() })
                 .collect();
             return vec![Change::Zone_collapsed { zone, collapsed: false }];
         }
@@ -555,7 +556,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
     let (pl, ax, ay) = &t.geo.items[slot];
     let (ax, ay) = (*ax, *ay);
     let (bx, by) = (sx(t, ax), sy(t, ay));
-    let key = format!("t:{}", pl.path.join("/"));
+    let key = format!("t:{}", flow_syntax::symbol::join_path(&pl.path, "/"));
     let w = pl.w * z;
     let h = pl.h * z;
     let shown = pl.shown;
@@ -603,7 +604,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     // a value node: its number is a field in the header, at body size
                     let saved = ui.enter(&tile);
                     if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", d.name(*text)) {
-                        fields.push(Change::Syntax_edit(e::Op::SetInputDefault { form: i.path[0].clone(), input: i.name.clone(), value: number_syntax(text2) }));
+                        fields.push(Change::Syntax_edit(e::Op::SetInputDefault { form: i.path[0].to_string(), input: i.name.clone(), value: number_syntax(text2) }));
                     }
                     ui.leave(saved);
                 }
@@ -642,7 +643,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                             subject = unfold_row(n, r);
                         } else if sg.clicked {
                             let mut row = n.path.clone();
-                            row.push(format!(":{}", r.label));
+                            row.push(format!(":{}", r.label).into());
                             subject = vec![Change::Selected(vec![n.path.clone(), row])];
                         }
                     }
@@ -702,7 +703,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                         let mut kk = n.path.len() as i64 - 1;
                         while kk >= 0 {
                             let mut cand: Path = n.path[..kk as usize].to_vec();
-                            cand.push(root.clone());
+                            cand.push(root.clone().into());
                             if node_of(t, &cand).is_some() || input_of(t, &cand).is_some() {
                                 target = Some(cand);
                                 break;
@@ -753,7 +754,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 Some(d) => flow_syntax::lisp::flat(d),
                 None => String::new(),
             };
-            let (form, input) = (i.path[0].clone(), i.name.clone());
+            let (form, input) = (i.path[0].to_string(), i.name.clone());
             editors = edit_field(c, ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, "default", &text, &|v: &str| single_form(v).is_some(), &move |v| {
                 Change::Syntax_edit(e::Op::SetInputDefault { form: form.clone(), input: input.clone(), value: single_form(&v).expect("validated") })
             });
@@ -836,7 +837,7 @@ pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox, tiles: &[Tile]) -> Opt
     }
     let (path, drop) = match found {
         Some((slot, d)) => (t.geo.items[slot].0.path.clone(), d),
-        None => (vec![t.key.clone()], on_canvas),
+        None => (vec![t.key.clone().into()], on_canvas),
     };
     Some(match drop {
         Drop::Hover(pay) => Change::Drop_over { path, kind: pay.kind, value: pay.value },
@@ -905,7 +906,7 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
         let found: Option<(Path, ArgKey)> = match &tp.item {
             Item::Return => t.scope.as_ref().map(|s| {
                 let mut pth = s.path.clone();
-                pth.push("@result".to_owned());
+                pth.push("@result".into());
                 (pth, ArgKey::Whole)
             }),
             Item::Input(_) => None,
@@ -942,7 +943,7 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
                         }
                     } else if lx > tp.w - 24.0 && ly >= p::rail_top(n) {
                         let mut pth = zn.scope.path.clone();
-                        pth.push("@result".to_owned());
+                        pth.push("@result".into());
                         Some((pth, ArgKey::Whole))
                     } else {
                         None
@@ -963,7 +964,7 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
             break;
         }
     }
-    let on_canvas = target.is_none() && src_path.last() == Some(&w.src) && !any_hover;
+    let on_canvas = target.is_none() && src_path.last().is_some_and(|name| name.as_str() == w.src) && !any_hover;
     // an Alt-drag moves the wire: it comes off the inputs it was lifted from
     let lifted: Vec<(Path, ArgKey)> = w.lift.iter().filter(|i| Some((*i).clone()) != target).cloned().collect();
     let off = unwire_at(t, &lifted);
@@ -1400,7 +1401,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
             let wd = fw * z;
             let h = fh * z;
             let mk = |ui: &mut Ui, k: &str, pos: (f64, f64), size: (f64, f64)| {
-                box_in(ui, CLICKABLE, size.0, size.1, local(t, pos), &format!("fr:{}:{}:{}", scope.join("/"), i, k))
+                box_in(ui, CLICKABLE, size.0, size.1, local(t, pos), &format!("fr:{}:{}:{}", flow_syntax::symbol::join_path(&scope, "/"), i, k))
             };
             let tb = mk(ui, "t", (x, y), ((wd - 20.0).max(8.0), 18.0 * z));
             let xb = mk(ui, "x", (x + wd - 18.0, y + 2.0), (16.0, 16.0));
@@ -1822,12 +1823,12 @@ pub fn update(pressed: &[Key], t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame,
             Some(Drag::Moving { paths, dx, dy, moved }) if moved => {
                 let moving: PathSet = paths.into_iter().collect();
                 let layout = t.layout.clone();
-                regeo(t, &scope, &layout, &|q: &[String]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
+                regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
             }
             Some(Drag::Carrying { paths, dx, dy, .. }) if dx.hypot(dy) > 0.0 => {
                 let moving: PathSet = paths.into_iter().collect();
                 let layout = t.layout.clone();
-                regeo(t, &scope, &layout, &|q: &[String]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
+                regeo(t, &scope, &layout, &|q: &[Symbol]| if moving.contains(q) { (dx, dy) } else { (0.0, 0.0) });
             }
             _ => {}
         }
@@ -1933,7 +1934,7 @@ pub mod inspect {
         t.panning_grab
     }
 
-    pub fn box_of(t: &Pane, path: &[String]) -> Option<(f64, f64, f64, f64)> {
+    pub fn box_of(t: &Pane, path: &[Symbol]) -> Option<(f64, f64, f64, f64)> {
         box_at(t, path).map(|(x, y, w, h)| (sx(t, x), sy(t, y), w * t.zoom, h * t.zoom))
     }
 

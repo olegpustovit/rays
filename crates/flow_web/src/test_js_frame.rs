@@ -38,7 +38,7 @@ fn lower_residual(name: &str, v: &Value) -> (ResidualId, C::Program) {
 
 fn tested(name: &str, source: &str) -> (ResidualId, C::Program) {
     let evaluation = ((E::static_with(&check(source), true, None, None))).unwrap_or_else(|d| die(d));
-    let path: Vec<String> = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     let value = evaluation.records.iter().find(|(p, _)| *p == path).expect("tested").1[0].1.clone();
     lower_residual(name, &value)
 }

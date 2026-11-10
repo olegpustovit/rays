@@ -123,12 +123,12 @@ pub fn reconcile(factories: Option<&[Factory]>, adopt: Option<bool>, before: &do
 
 /// The binding of the panel at tree `path` (an assignable node for a gesture): a named panel is
 /// its binding, one written in place is bound first (the call holding it unfolded).
-pub fn panel_node(factories: Option<&[Factory]>, loop_message: Option<&str>, doc: &document::T, path: &panels::Path) -> Result<(document::T, Vec<String>), String> {
+pub fn panel_node(factories: Option<&[Factory]>, loop_message: Option<&str>, doc: &document::T, path: &panels::Path) -> Result<(document::T, flow_check::workspace::Path), String> {
     let loop_message = loop_message.unwrap_or("These panels are copies made by a loop: edit the loop in the editor graph.");
     let graph = workspace_doc::editor_graph(&doc.workspace.ws).map(|g| g.name);
     let origin = doc.shell.as_ref().and_then(|s| s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o.clone()));
     match (graph, origin) {
-        (Some(graph), Some(Origin::Bound(name))) => Ok((doc.clone(), vec![graph, name])),
+        (Some(graph), Some(Origin::Bound(name))) => Ok((doc.clone(), vec![graph.into(), name.into()])),
         (_, Some(Origin::Inline(home, key))) => {
             let (doc, node) = scene_sync::bind_home(factories, doc, &home)?;
             let doc = syntax_edit(factories, &doc, &Op::Unfold { node: node.clone(), key: key.clone(), sub: Vec::new() })?;
@@ -136,7 +136,7 @@ pub fn panel_node(factories: Option<&[Factory]>, loop_message: Option<&str>, doc
                 Some(f) => match f.node {
                     Node::Sym(name) => {
                         let mut path = node[..node.len() - 1].to_vec();
-                        path.push(f.name(name).to_owned());
+                        path.push(f.name(name).into());
                         Ok((doc, path))
                     }
                     _ => Err("The panel could not be named.".to_owned()),

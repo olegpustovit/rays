@@ -75,29 +75,29 @@ fn call(name: &str) -> Syntax {
     b.freeze().handle(id)
 }
 
-fn node(l: &[&str]) -> Vec<String> {
-    let mut out = vec!["g".to_owned()];
-    out.extend(l.iter().map(|x| (*x).to_owned()));
+fn node(l: &[&str]) -> flow_check::workspace::Path {
+    let mut out: flow_check::workspace::Path = vec!["g".into()];
+    out.extend(l.iter().map(|x| flow_syntax::symbol::Symbol::from(*x)));
     out
 }
 
-fn path(l: &[&str]) -> Vec<String> {
-    l.iter().map(|x| (*x).to_owned()).collect()
+fn path(l: &[&str]) -> flow_check::workspace::Path {
+    l.iter().map(|x| (*x).into()).collect()
 }
 
 fn kw(name: &str) -> ArgKey {
     ArgKey::Kw(name.to_owned())
 }
 
-fn set_arg(n: Vec<String>, key: ArgKey, sub: Vec<i64>, value: Syntax) -> Op {
+fn set_arg(n: flow_check::workspace::Path, key: ArgKey, sub: Vec<i64>, value: Syntax) -> Op {
     Op::SetArg { node: n, key, sub, value }
 }
 
-fn connect(n: Vec<String>, key: ArgKey, src: &str, iter: bool) -> Op {
+fn connect(n: flow_check::workspace::Path, key: ArgKey, src: &str, iter: bool) -> Op {
     Op::Connect { node: n, key, src: src.to_owned(), iter }
 }
 
-fn rename(n: Vec<String>, to: &str) -> Op {
+fn rename(n: flow_check::workspace::Path, to: &str) -> Op {
     Op::Rename { node: n, to_: to.to_owned() }
 }
 
@@ -741,9 +741,9 @@ fn part12_the_fixtures_notes_survive_edits_round_trip() {
             }
         }).expect("a graph");
         // a note on the graph and back leaves the text unchanged
-        let noted = e::apply(&catalog(), &forms, &Op::SetNote { node: vec![graph.clone()], text: "edited".into() }).unwrap_or_else(|d| panic!("{name}: {}", rays_diagnostic::to_string(&d)));
+        let noted = e::apply(&catalog(), &forms, &Op::SetNote { node: vec![graph.clone().into()], text: "edited".into() }).unwrap_or_else(|d| panic!("{name}: {}", rays_diagnostic::to_string(&d)));
         assert!(canon(&noted) != canon(&forms), "{name}: note prints");
-        let back = e::apply(&catalog(), &noted, &Op::SetNote { node: vec![graph], text: String::new() }).unwrap_or_else(|d| panic!("{name}: {}", rays_diagnostic::to_string(&d)));
+        let back = e::apply(&catalog(), &noted, &Op::SetNote { node: vec![graph.into()], text: String::new() }).unwrap_or_else(|d| panic!("{name}: {}", rays_diagnostic::to_string(&d)));
         assert!(canon(&back) == canon(&forms), "{name}: note round trip");
     }
     // bloom: rename a graph binding and back; the comments survive

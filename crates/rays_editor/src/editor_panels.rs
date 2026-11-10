@@ -1,6 +1,7 @@
 //! Panels: titles, the navigator's inputs, the focused leaf, layout gestures, docking, and the
 //! clipboard commands. Port of lib/rays_editor/editor_panels.ml.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use std::rc::Rc;
 
 use editor_core::panels::{self, Axis, Panel};
@@ -81,7 +82,7 @@ pub fn panel_title<'a>(value: &ModelView<'a>, leaf: &Leaf) -> String {
                     let title = match pane.laid.as_deref().and_then(|k| fproj::find(&k.scope, path)) {
                         Some(n) => fproj::title(&n),
                         None => {
-                            let last = path.last().cloned().unwrap_or_default();
+                            let last = path.last().map_or_else(String::new, ToString::to_string);
                             match last.strip_prefix(':') {
                                 Some(rest) => rest.to_string(),
                                 None => last,
@@ -134,7 +135,7 @@ fn find_ty(name: &str, sc: &fproj::Scope) -> Option<Ty> {
 /// Make a reusable function from the selected nodes: the names they read from outside are typed
 /// from the graph pane's projection, the context is the result's (a geometry is `sop`, anything
 /// else `value`).
-pub fn defn_change<'a>(value: &ModelView<'a>, paths: &[Vec<String>]) -> change {
+pub fn defn_change<'a>(value: &ModelView<'a>, paths: &[flow_check::workspace::Path]) -> change {
     let ws = &value.doc.workspace.ws;
     let scope_opt = pane_laid(value).map(|k| k.scope.clone());
     match (fe::defn_draft(&ws.source, paths), scope_opt) {
@@ -261,7 +262,7 @@ pub fn navigator_params<'a>(value: &ModelView<'a>) -> navigator::Params {
         active,
         scope: here.map(|k| k.scope.clone()),
         records: here.and_then(|k| k.records.clone()),
-        probes: Rc::new(move |p: &[String]| probes.get(p).copied().unwrap_or(0)),
+        probes: Rc::new(move |p: &[Symbol]| probes.get(p).copied().unwrap_or(0)),
         selected: scope::selected(pane_view(value)),
         chips: evaluated.as_ref().map(|ev| navigator::chips(ev)).unwrap_or_default(),
         notes: evaluated.as_ref().map(|ev| navigator::notes(ev)).unwrap_or_default(),
@@ -399,7 +400,7 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &shell, leaf: Option
     out
 }
 
-type Maker = Rc<dyn Fn(&Vec<String>) -> le::Op>;
+type Maker = Rc<dyn Fn(&flow_check::workspace::Path) -> le::Op>;
 
 pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[chrome::Intent]) -> (shell, Vec<change>) {
     let base = shell_tree(value, &shell { live: None, ..workspace.clone() }).into_owned();
@@ -408,10 +409,10 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
     let edit = |path: &layout::Path, make: Maker| -> Vec<change> {
         match (&editor, shell_doc) {
             (Some(graph), Some(s)) => match s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o) {
-                Some(Origin::Bound(name)) => vec![change::Layout_edit(make(&vec![graph.clone(), name.clone()]))],
+                Some(Origin::Bound(name)) => vec![change::Layout_edit(make(&vec![graph.clone().into(), name.clone().into()]))],
                 Some(Origin::Inline(home, key)) => {
                     let make = make.clone();
-                    vec![change::Layout_inline { home: home.clone(), key: key.clone(), make: Rc::new(move |p: &Vec<String>| make(p)) }]
+                    vec![change::Layout_inline { home: home.clone(), key: key.clone(), make: Rc::new(move |p: &flow_check::workspace::Path| make(p)) }]
                 }
                 Some(Origin::Loop(home, key)) => {
                     // a loop's panels are copies of its one template: retyping edits the template
@@ -419,9 +420,9 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
                         le::Op::SetPanelKind { panel, .. } => vec![change::Layout_inline {
                             home: home.clone(),
                             key: key.clone(),
-                            make: Rc::new(move |p: &Vec<String>| {
+                            make: Rc::new(move |p: &flow_check::workspace::Path| {
                                 let mut node = p.clone();
-                                node.push("@result".to_string());
+                                node.push("@result".into());
                                 le::Op::SetPanelKind { node, panel: panel.clone() }
                             }),
                         }],
@@ -439,16 +440,16 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
                 let scene = scene_name(value);
                 let (text, name_of) = bars::tree_text("editor", &scene, &base);
                 match (s::parse(&text), name_of(path)) {
-                    (Ok(forms), Some(leaf)) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), change::Layout_edit(make(&vec!["editor".to_string(), leaf]))],
+                    (Ok(forms), Some(leaf)) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), change::Layout_edit(make(&vec!["editor".into(), leaf.into()]))],
                     _ => vec![change::Declined("This panel is not part of the layout.".to_string())],
                 }
             }
         }
     };
     // a panel of `kind` for `make`: the form the editor's panel table writes, or why there is none
-    let with_panel = |kind: &str, path: &layout::Path, make: Rc<dyn Fn(s::Syntax, &Vec<String>) -> le::Op>| -> Vec<change> {
+    let with_panel = |kind: &str, path: &layout::Path, make: Rc<dyn Fn(s::Syntax, &flow_check::workspace::Path) -> le::Op>| -> Vec<change> {
         match panel_kinds::expr(&value.doc.workspace.ws.source, kind) {
-            Ok(panel) => edit(path, Rc::new(move |node: &Vec<String>| make(panel.clone(), node))),
+            Ok(panel) => edit(path, Rc::new(move |node: &flow_check::workspace::Path| make(panel.clone(), node))),
             Err(message) => vec![change::Declined(message)],
         }
     };
@@ -494,7 +495,7 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
             chrome::Intent::Resize { node, size } => w.live = Some((node.clone(), *size)),
             chrome::Intent::Settled => {
                 if let Some((node, size)) = w.live.take() {
-                    changes.extend(edit(&node, Rc::new(move |node: &Vec<String>| le::Op::SetLayoutSize { node: node.clone(), size })));
+                    changes.extend(edit(&node, Rc::new(move |node: &flow_check::workspace::Path| le::Op::SetLayoutSize { node: node.clone(), size })));
                 }
             }
             chrome::Intent::Split_panel(path, axis) => {
@@ -505,7 +506,7 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
                 let (axis, ratio) = (*axis, *ratio);
                 changes.extend(with_panel(panel_kind(kind), path, Rc::new(move |panel, node| le::Op::SplitPanel { node: node.clone(), axis, ratio, panel })));
             }
-            chrome::Intent::Close_panel(path) => changes.extend(edit(path, Rc::new(|node: &Vec<String>| le::Op::ClosePanel { node: node.clone() }))),
+            chrome::Intent::Close_panel(path) => changes.extend(edit(path, Rc::new(|node: &flow_check::workspace::Path| le::Op::ClosePanel { node: node.clone() }))),
             chrome::Intent::Retype_panel(path, kind) => {
                 changes.extend(with_panel(panel_kind(kind), path, Rc::new(|panel, node| le::Op::SetPanelKind { node: node.clone(), panel })));
             }
@@ -518,18 +519,18 @@ pub fn dock_panels(factories: &[Factory], doc: &Document, source: &layout::Path,
     let states = &doc.workspace.ws.layout.panels;
     let source_key = panel_key(doc, source);
     let target_key = panel_key(doc, target);
-    let saved = |key: &Vec<String>| states.get(key).copied().unwrap_or_else(panels::default_state);
+    let saved = |key: &flow_check::workspace::Path| states.get(key).copied().unwrap_or_else(panels::default_state);
     let loop_message = "These panels are copies made by a loop: move their tile in the editor graph.";
     let (doc, node) = document_edit::panel_node(Some(factories), Some(loop_message), doc, source)?;
     let (doc, target_node) = document_edit::panel_node(Some(factories), Some(loop_message), &doc, target)?;
     let doc = document_edit::layout_op(Some(factories), &doc, &le::Op::DockPanel { node: node.clone(), target: target_node.clone(), side })?;
     let copy_pos = if matches!(side, Side::Left | Side::Top) { 3 } else { 2 };
-    let copy: Vec<String> = match fe::arg_text(&doc.workspace.ws.source, &target_node, &ArgKey::Pos(copy_pos)) {
+    let copy: flow_check::workspace::Path = match fe::arg_text(&doc.workspace.ws.source, &target_node, &ArgKey::Pos(copy_pos)) {
         Some(e) => match &e.node {
             s::Node::Sym(name) => {
                 let mut c = target_node.clone();
                 c.pop();
-                c.push(e.name(*name).to_owned());
+                c.push(e.name(*name).into());
                 c
             }
             _ => target_node.clone(),
@@ -578,7 +579,7 @@ pub fn apply_change(state: (kg::T, Option<String>, param::Effects), c: &change) 
 
 /// Command-C / X: the selected bindings as Lisp pairs ("name expr" per line) on the clipboard, the
 /// text a let* vector or the Lisp pane takes.
-pub fn copy_bindings(value: &EditorModel, paths: &[Vec<String>]) -> change {
+pub fn copy_bindings(value: &EditorModel, paths: &[flow_check::workspace::Path]) -> change {
     let ws = &value.doc.workspace.ws;
     let mut lines = Vec::new();
     for path in paths {
@@ -587,7 +588,7 @@ pub fn copy_bindings(value: &EditorModel, paths: &[Vec<String>]) -> change {
                 Ok(printed) => printed,
                 Err(error) => return change::Declined(rays_diagnostic::to_string(&error)),
             };
-            lines.push(format!("{} {}", path.last().map_or("", String::as_str), text.trim()));
+            lines.push(format!("{} {}", path.last().map_or("", |name| name.as_str()), text.trim()));
         }
     }
     if lines.is_empty() {
@@ -621,9 +622,9 @@ pub fn paste_bindings<'a>(value: &ModelView<'a>) -> Vec<change> {
     };
     let ws = &value.doc.workspace.ws;
     let selected = scope::selected(pane_view(value));
-    let scope_path: Vec<String> = match selected.as_slice() {
+    let scope_path: flow_check::workspace::Path = match selected.as_slice() {
         [path] if path.len() >= 2 => path[..path.len() - 1].to_vec(),
-        _ => vec![graph.clone()],
+        _ => vec![graph.clone().into()],
     };
     // one gesture: every binding lands or none does
     match text_pane::paste_ops(&ws.source, &graph, &scope_path, &text) {
@@ -634,7 +635,7 @@ pub fn paste_bindings<'a>(value: &ModelView<'a>) -> Vec<change> {
 }
 
 /// The one node the inspector shows for the pane's selection, if exactly one (a test hook)
-pub fn inspector_subject<'a>(value: &ModelView<'a>) -> Option<Vec<String>> {
+pub fn inspector_subject<'a>(value: &ModelView<'a>) -> Option<flow_check::workspace::Path> {
     if pane_laid(value).is_none() {
         return None;
     }

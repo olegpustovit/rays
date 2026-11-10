@@ -6,6 +6,7 @@
 //! them (`FUSED_DELETES`; they commute with writes of other attributes). The earlier write is no
 //! longer cooked, so the maps are one region; folding left to right chains any number of writes. The
 //! intermediate cards are unchanged, for display and probes.
+use flow_syntax::symbol::Symbol;
 use super::*;
 use std::sync::atomic::AtomicBool;
 
@@ -118,14 +119,14 @@ impl Shape {
 
     fn recount(&self, nodes: &[ENode], v: &Value) -> Option<Value> {
         match v {
-            Value::Source(g) | Value::Struct(g) if g.name == "sop/count" => match get(&g.fields, "geometry") {
+            Value::Source(g) | Value::Struct(g) if g.name == "sop/count" => match g.fields.get_str("geometry") {
                 Some(Value::Deferred(gty, x)) if self.root(nodes, *x) != *x => {
-                    let fields: Vec<(String, Value)> = g
+                    let fields: Vec<(Symbol, Value)> = g
                         .fields
                         .iter()
                         .map(|(k, v)| if k == "geometry" { (k.clone(), Value::Deferred(gty.clone(), self.root(nodes, *x))) } else { (k.clone(), v.clone()) })
                         .collect();
-                    Some(if matches!(v, Value::Source(..)) { source_value(g.name.clone(), g.ty.clone(), fields) } else { struct_value(g.name.clone(), g.ty.clone(), fields) })
+                    Some(if matches!(v, Value::Source(..)) { source_value(g.name.clone(), g.ty.clone(), fields.into()) } else { struct_value(g.name.clone(), g.ty.clone(), fields.into()) })
                 }
                 _ => None,
             },
@@ -229,7 +230,7 @@ pub(super) fn fold_mesh_writes(plan: &Plan) -> Plan {
                         && (E::state_dependent(&data) || !writes.iter().any(|(_, _, v)| E::state_dependent(v)))
                     {
                         let mut args = mesh.args.clone();
-                        args.extend(writes.into_iter().map(|(name, kind, values)| (format!("{MESH_ATTRIBUTE_PREFIX}{name}:{kind}"), values)));
+                        args.extend(writes.into_iter().map(|(name, kind, values)| (format!("{MESH_ATTRIBUTE_PREFIX}{name}:{kind}").into(), values)));
                         nodes[id] = ENode { kind: mesh.kind.clone(), args, ..w };
                     }
                 }
@@ -318,7 +319,7 @@ impl Fold {
                 let pat = text_arg(&u.args, "attribute").filter(|pat| pat != name && literal_pattern(pat) && u.args.iter().all(|(k, _)| ["geometry", "attribute", "owner"].contains(&k.as_str())))?;
                 let owner = text_arg(&u.args, "owner").unwrap_or_else(|| "point".into());
                 chain.push(id);
-                dels.push(Value::Record(vec![("owner".into(), Value::Text(owner.into_bytes().into())), ("pattern".into(), Value::Text(pat.into_bytes().into()))]));
+                dels.push(Value::Record(vec![("owner".into(), Value::Text(owner.into_bytes().into())), ("pattern".into(), Value::Text(pat.into_bytes().into()))].into()));
                 id = self.shape.passes(u, id)?;
             } else if self.point_write(u) && !deletes(u).iter().any(|d| pattern(d).as_deref() == Some(name)) {
                 let Some(Value::Deferred(_, base)) = get(&u.args, "geometry") else { return None };
@@ -370,7 +371,7 @@ impl Fold {
     }
 
     /// The arguments write `w` (node `id`) takes when it folds into its chain, or none when it stays.
-    fn folded_args(&self, nodes: &[ENode], w: &ENode, id: i64, fresh: &Fresh) -> R<Option<Vec<(String, Value)>>> {
+    fn folded_args(&self, nodes: &[ENode], w: &ENode, id: i64, fresh: &Fresh) -> R<Option<Vec<(Symbol, Value)>>> {
         let (Some(Value::Deferred(_, g)), Some(name)) = (get(&w.args, "geometry"), text_arg(&w.args, "attribute")) else { return Ok(None) };
         if !self.point_write(w) {
             return Ok(None);
@@ -390,7 +391,7 @@ impl Fold {
         let take = Arc::new(Take { base, chain: chain.clone(), entries, fresh: fresh.clone(), fits: Arc::new(AtomicBool::new(true)) });
         let values = E::host::rewrite_with(get(&w.args, "values").expect("write values"), &|v: &Value| take.value(v), &|| fresh.next(), &{
             let take = take.clone();
-            move |term: &Term, bindings: &[(String, Value)]| take.term(term, bindings)
+            move |term: &Term, bindings: &[(Symbol, Value)]| take.term(term, bindings)
         });
         // this write supersedes the chain's of `name`
         let earlier: Vec<Value> = last(&take.entries, &name).into_iter().map(|(n, k, v)| fused_entry(&n, &k, v)).collect();
@@ -411,7 +412,7 @@ impl Fold {
         if !take.fits.load(Ordering::SeqCst) {
             return Ok(None);
         }
-        let mut args: Vec<(String, Value)> = w
+        let mut args: Vec<(Symbol, Value)> = w
             .args
             .iter()
             .filter_map(|(k, v)| {
@@ -476,8 +477,8 @@ impl Take {
         self.entries.iter().rev().find(|(n, _, _)| n == attribute)
     }
 
-    fn on_base(&self, fields: &[(String, Value)]) -> Vec<(String, Value)> {
-        let mut out = vec![("geometry".to_owned(), Value::Deferred(ty::geometry(), self.base))];
+    fn on_base(&self, fields: &flow_syntax::value::Record) -> Vec<(Symbol, Value)> {
+        let mut out = vec![("geometry".into(), Value::Deferred(ty::geometry(), self.base))];
         out.extend(fields.iter().filter(|(k, _)| k != "geometry").cloned());
         out
     }
@@ -488,12 +489,12 @@ impl Take {
         match v {
             Value::Struct(g) | Value::Source(g) => {
                 let (op, ty, fields) = (&g.name, &g.ty, &g.fields);
-                let chained = matches!(get(fields, "geometry"), Some(Value::Deferred(_, x)) if self.chain.contains(x));
-                let rebuilt = |fields: Vec<(String, Value)>| if matches!(v, Value::Struct(..)) { struct_value(op.clone(), ty.clone(), fields) } else { source_value(op.clone(), ty.clone(), fields) };
+                let chained = matches!(fields.get_str("geometry"), Some(Value::Deferred(_, x)) if self.chain.contains(x));
+                let rebuilt = |fields: Vec<(Symbol, Value)>| if matches!(v, Value::Struct(..)) { struct_value(op.clone(), ty.clone(), fields.into()) } else { source_value(op.clone(), ty.clone(), fields.into()) };
                 if !chained {
                     return None;
                 }
-                match (op.as_str(), get(fields, "attribute")) {
+                match (op.as_str(), fields.get_str("attribute")) {
                     ("sop/attr", Some(Value::Text(a))) => match self.written(&txt(a)) {
                         None => Some(rebuilt(self.on_base(fields))),
                         Some((_, kind, earlier))
@@ -529,8 +530,8 @@ impl Take {
     /// A lazy term that reads the chain itself (`(map f (sop/attr in0 :P))`): its reads of a written
     /// attribute become captures of the values written, and the geometry it captures is the input.
     /// Any other use of the capture refuses.
-    fn term(&self, term: &Term, bindings: &[(String, Value)]) -> Option<(Term, Vec<(String, Value)>)> {
-        let chained: Vec<String> = bindings
+    fn term(&self, term: &Term, bindings: &[(Symbol, Value)]) -> Option<(Term, Vec<(Symbol, Value)>)> {
+        let chained: Vec<Symbol> = bindings
             .iter()
             .filter_map(|b| match b {
                 (name, Value::Deferred(ty, x)) if is_geometry_ty(ty) && self.chain.contains(x) => Some(name.clone()),
@@ -552,8 +553,8 @@ impl Take {
             self.fits.store(false, Ordering::SeqCst);
             return None;
         }
-        let mut bound: Vec<(String, Value)> = chained.iter().map(|name| (name.clone(), Value::Deferred(ty::geometry(), self.base))).collect();
-        bound.extend(scan.extra);
+        let mut bound: Vec<(Symbol, Value)> = chained.iter().map(|name| (name.clone(), Value::Deferred(ty::geometry(), self.base))).collect();
+        bound.extend(scan.extra.into_iter().map(|(name, value)| (name.into(), value)));
         Some((mapped, bound))
     }
 }
@@ -561,9 +562,9 @@ impl Take {
 /// One walk over a term that reads a chain through the captures `chained`.
 struct Scan<'a> {
     take: &'a Take,
-    chained: &'a [String],
+    chained: &'a [Symbol],
     /// the captures standing for the values an earlier write made
-    extra: Vec<(String, Value)>,
+    extra: Vec<(Symbol, Value)>,
     /// the term uses the chain in a way a fold cannot follow
     exit: bool,
     replacements: HashMap<(u64, u32), String>,
@@ -619,7 +620,7 @@ impl Scan<'_> {
                         }) =>
                     {
                         let name = format!("$fold{}", self.extra.len());
-                        self.extra.push((name.clone(), E::host::rewrite_with(earlier, &|_| None, &|| self.take.fresh.next(), &|_, _| None)));
+                        self.extra.push((name.clone().into(), E::host::rewrite_with(earlier, &|_| None, &|| self.take.fresh.next(), &|_, _| None)));
                         self.replacements.insert(t.identity(), name);
                     }
                     _ => self.exit = true,
@@ -656,7 +657,7 @@ impl Scan<'_> {
 }
 
 fn fused_entry(name: &str, kind: &str, values: Value) -> Value {
-    Value::Record(vec![("attribute".into(), Value::Text(name.as_bytes().into())), ("type".into(), Value::Text(kind.as_bytes().into())), ("values".into(), values)])
+    Value::Record(vec![("attribute".into(), Value::Text(name.as_bytes().into())), ("type".into(), Value::Text(kind.as_bytes().into())), ("values".into(), values)].into())
 }
 
 /// whether a write's values map an index (`array/range`); one that reads no attribute too is a

@@ -12,6 +12,7 @@
 //! - The `drawn` textures are never known to be the same ones (`rays::texture` has no identity), so
 //!   a piece with a texture is composed again each frame it has one.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Weak;
@@ -348,7 +349,7 @@ pub fn redo_label(value: &LoopModel) -> Option<String> {
 pub fn workspace(value: &LoopModel) -> workspace_doc::T {
     value.core.doc.workspace.ws.clone()
 }
-pub fn probe(value: &LoopModel, zone: &[String]) -> Option<i64> {
+pub fn probe(value: &LoopModel, zone: &[Symbol]) -> Option<i64> {
     value.core.probes.get(zone).copied()
 }
 
@@ -357,13 +358,13 @@ pub fn with_core(value: LoopModel, core: m::EditorModel) -> LoopModel {
     LoopModel { core: Rc::new(core), rest: None, ..value }
 }
 
-pub fn set_probe(value: LoopModel, zone: &[String], index: i64) -> LoopModel {
+pub fn set_probe(value: LoopModel, zone: &[Symbol], index: i64) -> LoopModel {
     let mut core = (*value.core).clone();
     core.probes.insert(zone.to_vec(), index);
     with_core(value, core)
 }
 
-pub fn node_box(value: &LoopModel, path: &[String]) -> Option<(i64, i64, i64, i64)> {
+pub fn node_box(value: &LoopModel, path: &[Symbol]) -> Option<(i64, i64, i64, i64)> {
     pxui_graph::scope_frame::inspect::box_of(m::pane_view(&(&value.core).into()), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
 }
 

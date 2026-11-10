@@ -89,7 +89,7 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     let uv = rdk_ok(attribute::create_owned("uv", attribute::Owner::Point, attribute::Storage::Float2(uv)));
     let source = lisp_sop::snapshot(&rdk_ok(geo::with_attribute(uv, &g)));
     let image = edit::instantiate(&sop::image_nodes::noise_factory(), &[]).unwrap();
-    let (image, _) = node::apply_parameters(&image, &[("width".to_owned(), param::Value::Int(1)), ("height".to_owned(), param::Value::Int(1))]).unwrap();
+    let (image, _) = node::apply_parameters(&image, &[("width".into(), param::Value::Int(1)), ("height".into(), param::Value::Int(1))]).unwrap();
     let mut evaluator = new_eval_session();
     let mut preserved: Vec<String> = Vec::new();
     let mut verify = |key: String, n: &node::T| {
@@ -111,24 +111,24 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
         verify(edit::factory_key(factory).to_owned(), &n);
     }
     for key in ["transform", "noise_displace", "peak", "bend", "mountain", "normals", "attribute_noise", "attribute_noise_quaternion", "color_by_height"] {
-        let n = lisp_sop::node(&[("source".to_owned(), source.clone())], &format!("(sop/{key} (sop/ext_source))"));
+        let n = lisp_sop::node(&[("source".into(), source.clone())], &format!("(sop/{key} (sop/ext_source))"));
         verify(key.to_owned(), &n);
     }
     for name in ["transform", "soft_transform", "noise_displace", "peak", "bend", "mountain", "normals", "attribute_noise", "attribute_noise_quaternion", "color_by_height"] {
         assert!(preserved.iter().any(|p| p == name), "{name} lacks a Preserved declaration");
     }
-    let with = [("source".to_owned(), source.clone())];
+    let with = [("source".into(), source.clone())];
     let peak = lisp_sop::node(&with, "(sop/peak (sop/ext_source))");
     let noise = lisp_sop::node(&with, "(sop/noise_displace (sop/ext_source))");
     assert!(node::facts(&noise).reads == vec!["P".to_owned()], "Height 2D noise reads unexpected planes");
-    let (noise, _) = node::apply_parameters(&noise, &[("mode".to_owned(), param::Value::Choice("normal_3d".to_owned()))]).unwrap();
+    let (noise, _) = node::apply_parameters(&noise, &[("mode".into(), param::Value::Choice("normal_3d".to_owned()))]).unwrap();
     assert!(node::facts(&noise).reads == vec!["P".to_owned(), "N".to_owned()], "Normal 3D noise facts omit N");
     let one = cook_out(&mut evaluator, 1, &noise);
     let mut cold = new_eval_session();
     let eight = cook_out(&mut cold, 8, &noise);
     assert!(geometry_bytes(&one) == geometry_bytes(&eight), "Normal 3D SOP differs across domains");
     session::close(&mut cold);
-    let (updated, _) = node::apply_parameters(&peak, &[("direction_attribute".to_owned(), param::Value::Text(b"direction".as_slice().into()))]).unwrap();
+    let (updated, _) = node::apply_parameters(&peak, &[("direction_attribute".into(), param::Value::Text(b"direction".as_slice().into()))]).unwrap();
     let reads = &node::facts(&updated).reads;
     assert!(reads.iter().any(|r| r == "direction") && !reads.iter().any(|r| r == "N"), "PPX rebuild retained stale facts");
     session::close(&mut evaluator);
@@ -149,7 +149,7 @@ fn replacing_p_leaves_held_positions_unread() {
     })));
     let g = rdk_ok(geo::create(held, geo::topology(&plain).clone(), None, None, None));
     let source = lisp_sop::snapshot(&g);
-    let n = lisp_sop::node(&[("source".to_owned(), source)], "(sop/with_attr (sop/ext_source) :P (map (fn [i] [i (+ i t) 0]) (array/range 8)))");
+    let n = lisp_sop::node(&[("source".into(), source)], "(sop/with_attr (sop/ext_source) :P (map (fn [i] [i (+ i t) 0]) (array/range 8)))");
     let mut s = new_eval_session();
     let out = cook(&mut s, &ctx(1), &n);
     assert_eq!(rdk_core::packed::float3::get(geo::positions(&out), 3).unwrap().0, 3.0);

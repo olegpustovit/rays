@@ -30,7 +30,7 @@ fn check(condition: bool, message: &str) {
     }
 }
 
-fn lower_with(source: &str, compiled_ids: Option<&lower::PathMap>, sites: Option<&[Vec<String>]>) -> lower::T {
+fn lower_with(source: &str, compiled_ids: Option<&lower::PathMap>, sites: Option<&[flow_check::workspace::Path]>) -> lower::T {
     let forms = flow_syntax::syntax::parse(source).unwrap_or_else(|d| fail(&rays_diagnostic::to_string(&d)));
     let mut options = lower::Options::default();
     if let Some(ids) = compiled_ids {

@@ -308,7 +308,7 @@ pub fn run_wire_gestures() {
     };
     let nested = "(workspace w (graph g :context sop (let* [m (sop/transform (sop/box))] m)))";
     let mut r = started(nested);
-    r.e = reduce::select_path(r.e.clone(), &["g".to_string(), "m#0".to_string()]);
+    r.e = reduce::select_path(r.e.clone(), &["g".into(), "m#0".into()]);
     pick(&mut r, "transform");
     check(
         r.undo_label() == Some("Add node".into()) && !has(&r.source(), "(sop/transform (sop/box))") && has(&r.source(), "(sop/box)") && has(&r.source(), "(sop/transform box)"),
@@ -329,7 +329,7 @@ pub fn run_wire_gestures() {
     r.step(p, vec![ch('i')]);
     r.step(p, vec![]);
     check(editor::level(&r.e) == Some("g".into()), "the graph is open");
-    let bx = |r: &Run, path: &[&str]| editor::node_box(&r.e, &path.iter().map(|s| s.to_string()).collect::<Vec<_>>()).expect("node box");
+    let bx = |r: &Run, path: &[&str]| editor::node_box(&r.e, &path.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect::<Vec<_>>()).expect("node box");
     let (ax, ay, aw, _) = bx(&r, &["g", "a"]);
     let (mx, my, _, _) = bx(&r, &["g", "m"]);
     // the wire runs from a's out-port to m's header in-port

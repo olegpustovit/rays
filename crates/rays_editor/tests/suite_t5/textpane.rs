@@ -223,7 +223,7 @@ pub fn editor_binding() {
     check(env.undo().as_deref() == Some("Edit text") && has(&env.src(), "(sop/merge seeds_each seeds_each)"), &format!("the closure edit was not applied\n{}", env.dump()));
     let before = env.ws();
     let printed_binding = |ws: &wd::T, path: &[&str]| -> Option<String> {
-        let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        let path: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
         T::binding(&ws.source, &path).map(|(_, v)| printed(&[v]))
     };
     let omitted = printed_binding(&original, &["sunflower", "seeds_each"]);
@@ -269,7 +269,7 @@ fn click_events(p: (f64, f64)) -> Vec<Event> {
 
 /// A card's header, where the graph pane put it.
 fn head(e: &editor::Editor, path: &[&str], (dx, dy): (f64, f64)) -> (f64, f64) {
-    let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+    let path: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
     match editor::node_box(e, &path) {
         Some((x, y, w, _)) => (x as f64 + if dx < 0. { w as f64 + dx } else { dx }, y as f64 + dy),
         None => panic!("the card has no box"),
@@ -435,7 +435,7 @@ pub fn editor_literal_scrub() {
         let e = editor::create(editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font, ..options() }, &load(text), None, prepare_empty(), editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"));
         let mut env = Env::new(e);
         env.settle();
-        let (x, y, w, h) = editor::node_box(env.e(), &["g".to_string(), "a".to_string()]).expect("box");
+        let (x, y, w, h) = editor::node_box(env.e(), &["g".into(), "a".into()]).expect("box");
         let point = ((x + w / 2) as f64, (y + 12.min(h / 2)) as f64);
         env.at(point, vec![Event::Pointer_moved(point)]);
         env.at(point, vec![Event::Pointer_pressed(LB, point), Event::Pointer_released(LB, point)]);
@@ -446,7 +446,7 @@ pub fn editor_literal_scrub() {
         env.at(tab_point, vec![Event::Pointer_moved(tab_point)]);
         env.at(tab_point, vec![Event::Pointer_pressed(LB, tab_point), Event::Pointer_released(LB, tab_point)]);
         env.step(vec![]);
-        let g_a = vec!["g".to_string(), "a".to_string()];
+        let g_a: flow_check::workspace::Path = vec!["g".into(), "a".into()];
         let pts = ArgKey::Kw("points".into());
         let shown = T::make_shown(&env.ws().source, "g", Some(&g_a), tab).unwrap();
         let value = fe::arg_text(&shown.source, &g_a, &pts).expect("points");
@@ -635,12 +635,12 @@ pub fn editor_command_click() {
     env.at(name, vec![Event::Pointer_moved(name)]);
     env.at(name, vec![Event::Pointer_pressed(LB, name), Event::Pointer_released(LB, name)]);
     env.step(vec![]);
-    check(editor::private::inspector_subject(env.e()) == Some(vec!["g".to_string(), "@result".to_string()]), "an ordinary click in Document did not select its containing node");
+    check(editor::private::inspector_subject(env.e()) == Some(vec!["g".into(), "@result".into()]), "an ordinary click in Document did not select its containing node");
     env.at_k(&[Key::Meta], name, vec![Event::Pointer_pressed(LB, name), Event::Pointer_released(LB, name)]);
     env.step(vec![]);
     env.step(vec![]);
     check(env.line("scope selected") == "g/a", &format!("a Command-click on a name did not select its binding: {}", env.line("scope selected")));
-    check(editor::private::inspector_subject(env.e()) == Some(vec!["g".to_string(), "a".to_string()]), "the inspector does not show the Command-clicked binding");
+    check(editor::private::inspector_subject(env.e()) == Some(vec!["g".into(), "a".into()]), "the inspector does not show the Command-clicked binding");
     let graph_tab = tab_at(gw < 400, gx + gw - 36, gy, 1);
     env.at(graph_tab, vec![Event::Pointer_moved(graph_tab)]);
     env.at(graph_tab, vec![Event::Pointer_pressed(LB, graph_tab), Event::Pointer_released(LB, graph_tab)]);

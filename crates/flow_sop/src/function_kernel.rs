@@ -1,5 +1,6 @@
 //! Port of lib/flow_sop/function_kernel.ml(i): language-owned compiled bulk functions behind the Sop
 //! payload boundary.
+use flow_syntax::symbol::Symbol;
 use std::io::Write as _;
 use crate::attribute_kernel;
 use flow_eval as e;
@@ -44,7 +45,7 @@ fn storage(values: &[Value]) -> i64 {
             Value::Floats(1..=4, xs) => xs.len() as i64 * 8,
             Value::Text(s) => s.len() as i64,
             Value::List(xs) => xs.iter().fold(0, |bytes, x| add_bytes(bytes, visit(seen, x))),
-            v @ (Value::Record(_) | Value::Struct(_)) => fields(seen, v.geo_fields().unwrap()),
+            v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().fold(0, |bytes, (_, v)| add_bytes(bytes, visit(seen, v))),
             Value::Fn(f) if seen.functions.insert(*f) => fields(seen, &e::residual::function_bindings(*f)),
             Value::Residual(r) if seen.residuals.insert(*r) => match e::residual::residual_view(*r) {
                 Ok(view) => view.bindings.iter().fold(0, |bytes, (_, x)| add_bytes(bytes, visit(seen, x))),
@@ -53,7 +54,7 @@ fn storage(values: &[Value]) -> i64 {
             _ => 0,
         }
     }
-    fn fields(seen: &mut Seen, fs: &[(String, Value)]) -> i64 {
+    fn fields(seen: &mut Seen, fs: &[(Symbol, Value)]) -> i64 {
         fs.iter().fold(0, |bytes, (_, x)| add_bytes(bytes, visit(seen, x)))
     }
     let mut seen = Seen { functions: HashSet::new(), residuals: HashSet::new() };
@@ -66,7 +67,7 @@ fn storage(values: &[Value]) -> i64 {
 pub fn node(
     state: Option<&e::State>,
     reference: bool,
-    elems: Option<&[(String, Value)]>,
+    elems: Option<&[(Symbol, Value)]>,
     identity: i64,
     signature: &FnSignature,
     function: FnId,
@@ -77,7 +78,7 @@ pub fn node(
     // keys can replace it if this becomes measurable.
     let mut parameters = identity.to_string().into_bytes();
     if let Some(bindings) = elems {
-        parameters.extend(value::key_of(&|r: ResidualId| r.0, &Value::Record(bindings.to_vec())));
+        parameters.extend(value::key_of(&|r: ResidualId| r.0, &Value::Record(bindings.to_vec().into())));
     }
     if let Some(state) = state {
         write!(parameters, "{}", e::state_stamp(state)).unwrap();

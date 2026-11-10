@@ -180,7 +180,7 @@ pub struct Data {
     clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     owner: RefCell<Option<(x::Gpu, h::T)>>,
     mark_sets: RefCell<List<i64, x::GpuMarks>>,
-    images: RefCell<List<String, image_sink::T>>,
+    images: RefCell<List<crate::workspace_images::ImageKey, image_sink::T>>,
     image_stats: Rc<RefCell<ImageStats>>,
     closed_host: RefCell<h::Stats>,
     backend: RefCell<Option<Arc<dyn G::Backend>>>,
@@ -871,7 +871,7 @@ pub fn resident(gpu: &G::Config, t_: &WorkspaceGpu) -> Option<drawing::resident>
     Some((h::resident(false, gpu.fast, &host), show))
 }
 
-pub fn image(t_: &WorkspaceGpu, key: &str, width: i64, height: i64, publish: &mut dyn FnMut(&image_sink::Output) -> Result<(), Diagnostic>, value: &G::Value) -> Result<(), Diagnostic> {
+pub fn image(t_: &WorkspaceGpu, key: &crate::workspace_images::ImageKey, width: i64, height: i64, publish: &mut dyn FnMut(&image_sink::Output) -> Result<(), Diagnostic>, value: &G::Value) -> Result<(), Diagnostic> {
     let d = &*t_.0;
     let (gpu, host) = owner(d)?;
     let Some(output) = h::output(&host, value)? else {

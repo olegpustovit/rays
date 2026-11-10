@@ -14,8 +14,8 @@ use rays_editor::editor;
 
 pub type Ed = editor::Editor;
 
-pub fn s(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|x| (*x).to_owned()).collect()
+pub fn s(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|x| (*x).into()).collect()
 }
 
 pub fn diag_text(ds: &[rays_diagnostic::Diagnostic]) -> String {

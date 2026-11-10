@@ -57,12 +57,12 @@ pub fn pane(ws: &w::Workspace) -> p::Scope {
 }
 
 pub fn card(ws: &w::Workspace, path: &[&str]) -> p::Node {
-    let path: Vec<String> = path.iter().map(|x| x.to_string()).collect();
+    let path: flow_check::workspace::Path = path.iter().map(|x| (*x).into()).collect();
     p::find(&pane(ws), &path).unwrap_or_else(|| panic!("no card {:?}", path))
 }
 
-pub fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|x| x.to_string()).collect()
+pub fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|x| (*x).into()).collect()
 }
 
 pub fn text_of(forms: &[Syntax]) -> String {

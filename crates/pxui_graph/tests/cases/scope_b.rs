@@ -73,7 +73,7 @@ fn scope_curve() {
     check(inner.len() >= 2, "the function's body has its cards");
     for n in &inner {
         let (x, y, w, h) = scope::inspect::box_of(&view, &n.path).expect("box");
-        check(x >= zx - 0.5 && y >= zy - 0.5 && x + w <= zx + zw + 0.5 && y + h <= zy + zh + 0.5, &format!("{} leaves its zone", n.path.join("/")));
+        check(x >= zx - 0.5 && y >= zy - 0.5 && x + w <= zx + zw + 0.5 && y + h <= zy + zh + 0.5, &format!("{} leaves its zone", flow_syntax::symbol::join_path(&n.path, "/")));
     }
     // a wire does not run over a card it neither leaves nor enters
     let cards: Vec<(f64, f64, f64, f64)> = sc.nodes.iter().chain(inner.iter()).filter(|n| n.zone.is_none()).filter_map(|n| scope::inspect::box_of(&view, &n.path)).collect();
@@ -115,7 +115,7 @@ fn scope_elbow() {
     let mut ui = new_ui();
     let w = checked("(workspace s (graph g :context value (let* [a (array/range 3) b (map (fn [i] (* i 2.0)) a) c (array/nth b 0)] c)))");
     // c sits 40 points left of its column and b 30 to the right: the elbow still leaves and enters cleanly
-    let o = at_fn(|q: &[String]| {
+    let o = at_fn(|q: &[flow_syntax::symbol::Symbol]| {
         if q == ["g", "c"] {
             Some((-40.0, 250.0))
         } else if q == ["g", "b"] {
@@ -160,7 +160,7 @@ fn scope_spine() {
     );
     // zones are obstacles for a wire that does not enter them: [k] feeds [r], right of the zone
     let w = checked("(workspace s (graph g :context value (let* [k 2.0 ys (map (fn [i] (* i k)) (array/range 3)) r (+ (array/nth ys 0) k)] r)))");
-    let o = at_fn(|q: &[String]| match q.iter().map(|s| s.as_str()).collect::<Vec<_>>().as_slice() {
+    let o = at_fn(|q: &[flow_syntax::symbol::Symbol]| match q.iter().map(|s| s.as_str()).collect::<Vec<_>>().as_slice() {
         ["g", "k"] => Some((0.0, 0.0)),
         ["g", "ys#0"] => Some((300.0, 96.0)),
         ["g", "ys"] => Some((300.0, 336.0)),

@@ -4,6 +4,7 @@
 //! value is the executor's.
 #![allow(non_camel_case_types, non_snake_case)]
 
+use flow_syntax::symbol::Symbol;
 use crate::core_ir as C;
 use crate::core_lower::{self, DrawContext, RegionAllowed};
 use crate::{core_fuse, packed};
@@ -24,7 +25,7 @@ pub fn device_regions(program: &C::Program, width: &dyn Fn(i64) -> Option<i64>) 
     let mut attributes = vec![0i64; n];
     let mut producers = vec![-1i64; n];
     let mut invokes: Vec<(i64, i64)> = Vec::new();
-    let mut batches: Vec<(C::Mark, Vec<(String, i64)>)> = Vec::new();
+    let mut batches: Vec<(C::Mark, Vec<(Symbol, i64)>)> = Vec::new();
     C::iter(
         &mut |statement| {
             for l in C::reads(statement) { uses[l as usize] += 1; }
@@ -243,7 +244,7 @@ pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &d
             let locals = &info[*k as usize].as_ref().unwrap().args;
             let values: Vec<Value> = locals
                 .iter()
-                .map(|local| source_value("$core/argument", program.locals[*local as usize].clone(), vec![("index".into(), Value::Int(indices[local]))]))
+                .map(|local| source_value("$core/argument", program.locals[*local as usize].clone(), vec![("index".into(), Value::Int(indices[local]))].into()))
                 .collect();
             match packed::host::bind_arguments(&program.regions[*k as usize], &values, Some(false)) {
                 Ok(region) => normalized.push(region),
@@ -354,13 +355,13 @@ fn node(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node) -> Result<(), St
         return Ok(());
     }
     // The data inputs, in written order, as drawing.ml forces them.
-    let data: Vec<&(String, Value)> = match n.kind.as_str() {
+    let data: Vec<&(Symbol, Value)> = match n.kind.as_str() {
         "draw/merge" => Vec::new(),
         "draw/translate" | "draw/rotate" | "draw/scale" => n.args.iter().filter(|(k, _)| k != "drawing").collect(),
         "draw/image" => n.args.iter().filter(|(k, _)| k != "image").collect(),
         _ => n.args.iter().collect(),
     };
-    let mut locals: Vec<(String, i64)> = Vec::new();
+    let mut locals: Vec<(Symbol, i64)> = Vec::new();
     for (k, v) in data { locals.push((k.clone(), ctx.value(&source, v)?)); }
     match rule(ctx, plan, n, &source, &locals) {
         Ok(()) => Ok(()),
@@ -369,7 +370,7 @@ fn node(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node) -> Result<(), St
     }
 }
 
-fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Source, locals: &[(String, i64)]) -> Result<(), Stop> {
+fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Source, locals: &[(Symbol, i64)]) -> Result<(), Stop> {
     let white = Value::Vec3(1., 1., 1.);
     let need = |key: &str| -> Result<i64, Stop> {
         locals.iter().find(|(k, _)| k == key).map(|(_, n2)| *n2).ok_or_else(|| Stop::Missing(format!("{} needs {}.", n.kind, key)))
@@ -377,22 +378,22 @@ fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Sour
     let optional = |key: &str| locals.iter().find(|(k, _)| k == key).map(|(_, n2)| *n2);
     let refuse = |name: String| Stop::Refused(name);
     // `default` lowers its constant only when the input is absent
-    fn default(ctx: &mut dyn DrawContext, source: &C::Source, locals: &[(String, i64)], key: &str, v: &Value) -> Result<i64, Stop> {
+    fn default(ctx: &mut dyn DrawContext, source: &C::Source, locals: &[(Symbol, i64)], key: &str, v: &Value) -> Result<i64, Stop> {
         match locals.iter().find(|(k, _)| k == key) {
             Some((_, n)) => Ok(*n),
             None => ctx.value(source, v).map_err(Stop::Refused),
         }
     }
-    fn style(ctx: &mut dyn DrawContext, source: &C::Source, locals: &[(String, i64)], white: &Value) -> Result<Vec<(String, i64)>, Stop> {
+    fn style(ctx: &mut dyn DrawContext, source: &C::Source, locals: &[(Symbol, i64)], white: &Value) -> Result<Vec<(Symbol, i64)>, Stop> {
         let fill = locals.iter().find(|(k, _)| k == "fill").map(|(_, n)| *n);
         let stroke = locals.iter().find(|(k, _)| k == "stroke").map(|(_, n)| *n);
         let fill = if fill.is_none() && stroke.is_none() { Some(ctx.value(source, white).map_err(Stop::Refused)?) } else { fill };
         let mut out = Vec::new();
-        if let Some(n) = fill { out.push(("fill".to_owned(), n)); }
-        if let Some(n) = stroke { out.push(("stroke".to_owned(), n)); }
+        if let Some(n) = fill { out.push(("fill".into(), n)); }
+        if let Some(n) = stroke { out.push(("stroke".into(), n)); }
         Ok(out)
     }
-    fn args(pairs: &[(&str, i64)]) -> Vec<(String, i64)> { pairs.iter().map(|(k, n)| ((*k).to_owned(), *n)).collect() }
+    fn args(pairs: &[(&str, i64)]) -> Vec<(Symbol, i64)> { pairs.iter().map(|(k, n)| ((*k).into(), *n)).collect() }
     let emit = |ctx: &mut dyn DrawContext, d: C::Draw| ctx.emit(source, C::StatementNode::Draw(d));
     let push = |ctx: &mut dyn DrawContext, transform: C::Transform, key: &str| -> Result<(), Stop> {
         let operand = need(key)?;

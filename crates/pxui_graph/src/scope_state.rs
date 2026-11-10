@@ -1,6 +1,7 @@
 // Port of lib/pxui_graph/scope_state.ml(i): the graph pane's immutable view state, layout and culling
 // queries. The pane draws one `Projection::Scope` with its zones, rails, iteration selectors, chips and
 // output rows on the shared PXUI handle and returns typed requests; it never edits.
+use flow_syntax::symbol::Symbol;
 use crate::scope_wires::{self as w, Geo, Wire};
 use flow_check::workspace::Path;
 use flow_graph::edit_tree::ArgKey;
@@ -176,27 +177,27 @@ pub struct Hinting {
 /// frames), the iteration each zone shows, and the imported files that define graphs. The pane only
 /// asks; a host that keeps none of it uses `Nothing`.
 pub trait Saved {
-    fn at(&self, _path: &[String]) -> Option<(f64, f64)> {
+    fn at(&self, _path: &[Symbol]) -> Option<(f64, f64)> {
         None
     }
     /// a node's saved level and whether it is pinned
-    fn level(&self, _path: &[String]) -> Option<(Level, bool)> {
+    fn level(&self, _path: &[Symbol]) -> Option<(Level, bool)> {
         None
     }
     /// a node's row pinned onto (or off) its card, by label
-    fn pin(&self, _path: &[String], _label: &str) -> Option<bool> {
+    fn pin(&self, _path: &[Symbol], _label: &str) -> Option<bool> {
         None
     }
-    fn collapsed(&self, _path: &[String]) -> bool {
+    fn collapsed(&self, _path: &[Symbol]) -> bool {
         false
     }
-    fn probe(&self, _path: &[String]) -> i64 {
+    fn probe(&self, _path: &[Symbol]) -> i64 {
         0
     }
-    fn frames(&self, _path: &[String]) -> Vec<Frame3> {
+    fn frames(&self, _path: &[Symbol]) -> Vec<Frame3> {
         Vec::new()
     }
-    fn imported(&self, _path: &[String]) -> Option<String> {
+    fn imported(&self, _path: &[Symbol]) -> Option<String> {
         None
     }
 }
@@ -276,7 +277,7 @@ pub fn font_of(zoom: f64) -> i64 {
     5.max((13.0 * zoom).round() as i64)
 }
 
-pub fn regeo(t: &mut Pane, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[String]) -> (f64, f64)) {
+pub fn regeo(t: &mut Pane, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[Symbol]) -> (f64, f64)) {
     let fs = font_of(t.zoom);
     let measured = t.measured.clone();
     let zoom = t.zoom;
@@ -466,7 +467,7 @@ pub fn zoom(t: &Pane) -> f64 {
 
 /// A screen point as a position inside `scope`, snapped to the 24-point dot lattice (where a node
 /// added from the menu opened there goes).
-pub fn scope_point(t: &Pane, scope: &[String], mx: f64, my: f64) -> Option<(f64, f64)> {
+pub fn scope_point(t: &Pane, scope: &[Symbol], mx: f64, my: f64) -> Option<(f64, f64)> {
     let (ox, oy) = t.geo.origins.iter().find(|(pth, _)| pth.as_slice() == scope).map(|(_, o)| *o)?;
     Some((p::snap(((mx - t.x as f64 - t.pan_x) / t.zoom) - ox), p::snap(((my - t.y as f64 - t.pan_y) / t.zoom) - oy)))
 }
@@ -500,7 +501,7 @@ pub fn frame_all(t: &mut Pane) {
     (t.zoom, t.pan_x, t.pan_y) = (zoom, pan_x, pan_y);
 }
 
-pub fn count_of(t: &Pane, path: &[String]) -> i64 {
+pub fn count_of(t: &Pane, path: &[Symbol]) -> i64 {
     t.counts.get(path).copied().unwrap_or(0)
 }
 
@@ -508,18 +509,18 @@ pub fn count_of(t: &Pane, path: &[String]) -> i64 {
 pub fn refresh(t: &mut Pane) {
     match (&t.scope, &t.records) {
         (Some(scope), Some(records)) => {
-            let counts: HashMap<Path, i64> = records.borrow_mut().counts(scope, &|path: &[String]| t.saved.probe(path)).into_iter().collect();
+            let counts: HashMap<Path, i64> = records.borrow_mut().counts(scope, &|path: &[Symbol]| t.saved.probe(path)).into_iter().collect();
             t.counts = Rc::new(counts);
         }
         _ => { t.counts = Rc::new(HashMap::new()); },
     }
 }
 
-pub fn no_shift(_: &[String]) -> (f64, f64) {
+pub fn no_shift(_: &[Symbol]) -> (f64, f64) {
     (0.0, 0.0)
 }
 
-pub fn lens_of(t: &Pane, path: &[String]) -> Option<i64> {
+pub fn lens_of(t: &Pane, path: &[Symbol]) -> Option<i64> {
     t.lens.iter().find(|(pth, _)| pth.as_slice() == path).map(|(_, s)| *s)
 }
 
@@ -528,32 +529,32 @@ pub fn lay(t: &Pane, saved: &Rc<dyn Saved>, sticky: bool, scope: &p::Scope) -> p
     // the cards stay where they were (flow.md 6.1): an edit places only the nodes it adds; a card whose
     // saved position was dropped (an undone drag) is a full layout again
     let sticky = sticky && !t.layout.placed.iter().any(|b| t.saved.at(&b.path).is_some() && saved.at(&b.path).is_none());
-    let prev: Rc<dyn Fn(&[String]) -> Option<(f64, f64, f64, f64)>> = if !sticky || t.layout.placed.is_empty() {
+    let prev: Rc<dyn Fn(&[Symbol]) -> Option<(f64, f64, f64, f64)>> = if !sticky || t.layout.placed.is_empty() {
         Rc::new(|_| None)
     } else {
         let mut h: HashMap<Path, (f64, f64, f64, f64)> = HashMap::new();
         for b in &t.layout.placed {
             h.insert(b.path.clone(), (b.x, b.y, b.w, b.h));
         }
-        Rc::new(move |pth: &[String]| h.get(pth).copied())
+        Rc::new(move |pth: &[Symbol]| h.get(pth).copied())
     };
     let lens = t.lens.clone();
     let mut o = p::LayoutOptions::new();
     o.foot = t.records.is_some();
     let s = saved.clone();
-    o.at = Rc::new(move |pth: &[String]| s.at(pth));
+    o.at = Rc::new(move |pth: &[Symbol]| s.at(pth));
     o.prev = prev;
     let s = saved.clone();
-    o.collapsed = Rc::new(move |pth: &[String]| s.collapsed(pth));
-    o.lens = Rc::new(move |pth: &[String]| lens.iter().find(|(x, _)| x.as_slice() == pth).map(|(_, s)| *s));
+    o.collapsed = Rc::new(move |pth: &[Symbol]| s.collapsed(pth));
+    o.lens = Rc::new(move |pth: &[Symbol]| lens.iter().find(|(x, _)| x.as_slice() == pth).map(|(_, s)| *s));
     let s = saved.clone();
-    o.level = Rc::new(move |pth: &[String]| s.level(pth).map_or(Level::Card, |(l, _)| l));
+    o.level = Rc::new(move |pth: &[Symbol]| s.level(pth).map_or(Level::Card, |(l, _)| l));
     let s = saved.clone();
-    o.pin = Rc::new(move |pth: &[String], label: &str| s.pin(pth, label));
+    o.pin = Rc::new(move |pth: &[Symbol], label: &str| s.pin(pth, label));
     p::layout(&o, scope)
 }
 
-fn drop_last(v: &[String]) -> Vec<String> {
+fn drop_last(v: &[Symbol]) -> Path {
     if v.is_empty() { Vec::new() } else { v[..v.len() - 1].to_vec() }
 }
 
@@ -593,14 +594,14 @@ pub fn fold_sources(scope: &p::Scope) -> HashMap<(Path, usize), Path> {
         }
     }
     count(scope, &mut uses, &mut binders);
-    fn binder(binders: &BTreeSet<Path>, sc: &[String], name: &str) -> Option<Path> {
-        let mut sc: Vec<String> = sc.to_vec();
+    fn binder(binders: &BTreeSet<Path>, sc: &[Symbol], name: &str) -> Option<Path> {
+        let mut sc: Path = sc.to_vec();
         loop {
             if sc.is_empty() {
                 return None;
             }
             let mut cand = sc.clone();
-            cand.push(name.to_owned());
+            cand.push(name.into());
             if binders.contains(&cand) {
                 return Some(cand);
             }
@@ -846,26 +847,26 @@ pub fn with_records(records: Rc<RefCell<Probe>>, t: &mut Pane) {
 
 // ------------------------------------------------------------- lookups
 
-pub fn node_of(t: &Pane, path: &[String]) -> Option<p::Node> {
+pub fn node_of(t: &Pane, path: &[Symbol]) -> Option<p::Node> {
     t.scope.as_ref().and_then(|s| p::find(s, path))
 }
 
-pub fn collapsed_zone(t: &Pane, path: &[String]) -> bool {
+pub fn collapsed_zone(t: &Pane, path: &[Symbol]) -> bool {
     t.saved.collapsed(path) && matches!(node_of(t, path), Some(n) if n.zone.is_some())
 }
 
 impl Pane {
-    pub fn item_at(&self, path: &[String]) -> Option<&w::Item3> {
+    pub fn item_at(&self, path: &[Symbol]) -> Option<&w::Item3> {
         self.geo.slot.get(path).map(|i| &self.geo.items[*i])
     }
 }
 
 /// An item's box in graph units, and where it sits inside its scope.
-pub fn box_at(t: &Pane, path: &[String]) -> Option<(f64, f64, f64, f64)> {
+pub fn box_at(t: &Pane, path: &[Symbol]) -> Option<(f64, f64, f64, f64)> {
     t.item_at(path).map(|(pl, ax, ay)| (*ax, *ay, pl.w, pl.h))
 }
 
-pub fn rel_at(t: &Pane, path: &[String]) -> Option<(f64, f64)> {
+pub fn rel_at(t: &Pane, path: &[Symbol]) -> Option<(f64, f64)> {
     t.item_at(path).map(|(pl, _, _)| (pl.x, pl.y))
 }
 

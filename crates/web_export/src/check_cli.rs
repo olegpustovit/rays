@@ -41,7 +41,7 @@ fn check_root(lowered: &flow_sop::lower::T, instance: usize, fallback: Diagnosti
 
 fn check_meshes(lowered: &flow_sop::lower::T) -> Result<(), Diagnostic> {
     for node in &lowered.plan.nodes {
-        if (node.kind == "sop/mesh" || node.kind == "sop/mesh_planes") && !flow_eval::is_live(&flow_eval::Value::Record(node.args.clone())) {
+        if (node.kind == "sop/mesh" || node.kind == "sop/mesh_planes") && !flow_eval::is_live(&flow_eval::Value::Record(node.args.clone().into())) {
             if let Err(d) = flow_sop::topology_kernel::mesh(&node.args) {
                 // On failure the ordinary cook applies authored error mappers and leaves an unused,
                 // unprotected constructor uncooked.

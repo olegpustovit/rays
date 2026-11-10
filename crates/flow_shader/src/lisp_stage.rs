@@ -1,6 +1,7 @@
 //! A Lisp entry compiled as a stage: one Packed program of the entry over its element parameters, an
 //! output per leaf of its result record. Its array parameters are buffers (Raster's bindings).
 //! Port of lib/flow_shader/lisp_stage.ml.
+use flow_syntax::symbol::Symbol;
 use flow_check::catalog::Catalog;
 use flow_check::op::{self, Op, Shape, Signature};
 use flow_check::workspace;
@@ -92,7 +93,7 @@ pub fn is_buffer(p: &(String, Ty)) -> bool {
 /// it sits under `:flat`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Leaf {
-    pub path: Vec<String>,
+    pub path: flow_check::workspace::Path,
     pub ty: Ty,
     pub flat: bool,
 }
@@ -105,13 +106,13 @@ pub struct Stage {
     pub bindings: Vec<(String, i64)>,
 }
 
-fn leaves(flat: bool, path: &[String], ty: &Ty) -> Vec<Leaf> {
+fn leaves(flat: bool, path: &[Symbol], ty: &Ty) -> Vec<Leaf> {
     match ty {
         Ty::Record(fields) => fields
             .iter()
             .flat_map(|(name, ty)| {
                 let mut p = path.to_vec();
-                p.push(name.clone());
+                p.push(name.clone().into());
                 leaves(flat || name == "flat", &p, ty)
             })
             .collect(),
@@ -153,7 +154,7 @@ pub fn compile(shared: &[(String, i64)], declarations: &str, entry: &str) -> Res
                 out: Arc::new(move |_| Ok(out_ty.clone())),
                 shape: Shape::Struct { splice: false },
                 check: Arc::new(|_| Ok(())),
-                body: Arc::new(move |_, _, _| Ok(flow_syntax::value::source_value(body_name.clone(), body_ty.clone(), vec![]))),
+                body: Arc::new(move |_, _, _| Ok(flow_syntax::value::source_value(body_name.clone(), body_ty.clone(), vec![].into()))),
                 ..noise3.clone()
             }
         })

@@ -35,7 +35,7 @@ fn same_result(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) -> 
 
 fn recorded(body: &str) -> Value {
     let evaluation = ok(E::r#static(&workspace(body), true, None));
-    let path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1.clone()
 }
 
@@ -93,7 +93,7 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     assert_eq!(a.0, b.0);
     assert_ne!(a.1, b.1);
     assert!(executor::compile(&good, &options).is_ok());
-    for value in [&bad, &Value::Record(vec![("good".into(), good.clone()), ("bad".into(), bad.clone())])] {
+    for value in [&bad, &Value::Record(vec![("good".into(), good.clone()), ("bad".into(), bad.clone())].into())] {
         match executor::compile(value, &options) {
             Err(d) => assert_eq!(d.code, "E_KERNEL_FORM"),
             Ok(_) => panic!("a different home's cached or visited residual hid the dynamic error"),
@@ -102,7 +102,7 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     assert!(executor::compile(&good, &options).is_ok(), "a refusal in another home must not poison valid compilation");
     let other = rewrite(recorded("(map (fn [x] (* x t)) (array/range 16))"));
     let root = *a;
-    let both = Value::Record(vec![("sum".into(), good), ("product".into(), other)]);
+    let both = Value::Record(vec![("sum".into(), good), ("product".into(), other)].into());
     let program = ok(executor::compile(&both, &options));
     let core = core_lower::lower(Some(both.clone()), None, true, None, None, root).expect("mixed-home core");
     let prepared = core_exec::prepare(&core, false, false, &W::Paths::new(), false);
@@ -140,7 +140,7 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     assert!(diagnostics.is_empty(), "{}", ts::show_ds(&diagnostics));
     let scalar = scalar.unwrap();
     let argument = |index| {
-        let marker = source_value("$core/argument", flow_syntax::ty::Ty::Float, vec![("index".into(), Value::Int(index))]);
+        let marker = source_value("$core/argument", flow_syntax::ty::Ty::Float, vec![("index".into(), Value::Int(index))].into());
         let inputs = vec![("g".into(), vec![("x".into(), marker)])];
         rewrite(ok(E::static_with(&scalar, false, Some(&inputs), None)).results[0].1.clone())
     };

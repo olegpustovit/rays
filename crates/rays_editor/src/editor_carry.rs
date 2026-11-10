@@ -128,7 +128,7 @@ pub fn carry_payload<'a>(value: &ModelView<'a>) -> Result<carry_mod::Payload, St
             return None;
         }
         match value.doc.homes.objects.iter().find(|(i, _)| *i == id) {
-            Some((_, Home::BoundAt(path))) if !path.is_empty() => Some(carry_mod::Payload { kind: "camera".to_string(), value: path[path.len() - 1].clone() }),
+            Some((_, Home::BoundAt(path))) if !path.is_empty() => Some(carry_mod::Payload { kind: "camera".to_string(), value: path[path.len() - 1].to_string() }),
             _ => None,
         }
     };

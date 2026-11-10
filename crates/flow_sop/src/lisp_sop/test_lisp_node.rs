@@ -112,12 +112,12 @@ fn authored_body_errors_cook_lazily() {
                     expect_error(s, domains, &n);
                 }
             });
-            let (healthy, _) = node::apply_parameters(&n, &[("bad".to_owned(), param::Value::Bool(false))]).unwrap();
+            let (healthy, _) = node::apply_parameters(&n, &[("bad".into(), param::Value::Bool(false))]).unwrap();
             if body.starts_with("(if") {
                 with_session(&mut |s| {
                     cook_with(s, 1, 97, 0, &healthy);
                 });
-                let (broken, _) = node::apply_parameters(&healthy, &[("bad".to_owned(), param::Value::Bool(true))]).unwrap();
+                let (broken, _) = node::apply_parameters(&healthy, &[("bad".into(), param::Value::Bool(true))]).unwrap();
                 with_session(&mut |s| expect_error(s, 1, &broken));
             }
         }
@@ -250,7 +250,7 @@ fn materialized_writes_own_storage_expand_instances_and_report_errors() {
                  (sop/with_attr copied :rows rows :type float_array))"#;
     let node_of = |body: &str| {
         lisp_sop::workspace_node(
-            &[("src".to_owned(), input.clone())],
+            &[("src".into(), input.clone())],
             &format!("(workspace direct_write (defnode sop/direct_write [(geo : geometry)] (if (int/gt (sop/count geo :points) 0) {body} geo)) (graph g :context sop (sop/direct_write (sop/ext_src))))"),
         )
     };
@@ -340,7 +340,7 @@ fn a_malformed_cooked_handle_is_refused_by_its_typed_guard() {
             live: false,
             arithmetic: None,
             packed_extension: None,
-            body: Arc::new(move |_, _, _| Ok(flow_syntax::value::source_value("$core/cooked", Ty::Bool, vec![("id".to_owned(), Value::Int(id))]))),
+            body: Arc::new(move |_, _, _| Ok(flow_syntax::value::source_value("$core/cooked", Ty::Bool, vec![("id".into(), Value::Int(id))].into()))),
             ..original.clone()
         };
         for count in [0usize, 1] {
@@ -388,7 +388,7 @@ fn parameter_validation_rejects_without_changing_the_node() {
             &format!("(workspace parameter_error\n      (defnode sop/parameter_error :validate {predicate} :code \"E_PARAM\" :message \"count must be positive\"\n        [(geo : geometry) (count : int 1)] geo)\n      (graph g :context sop (sop/parameter_error (sop/line))))"),
         );
         let previous = node::parameter_key(&n).to_vec();
-        match node::apply_parameters(&n, &[("count".to_owned(), param::Value::Int(0))]) {
+        match node::apply_parameters(&n, &[("count".into(), param::Value::Int(0))]) {
             Err(message) => assert!(message == "count must be positive", "parameter validation error formatting differs"),
             Ok(_) => panic!("invalid parameter edit succeeded"),
         }
@@ -420,7 +420,7 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     let p = rdk_ok(rdk_core::packed::float3::view::view(geo::positions(&original)));
     let shifted = rdk_ok(rdk_core::packed::float3::view::of_owned_exn(p.x.iter().map(|x| x + 2.0).collect(), p.y.iter().map(|y| y + 0.0).collect(), p.z.iter().map(|z| z + 0.0).collect()));
     let expected = geometry_bytes(&rdk_ok(geo::with_positions(shifted, &original)));
-    let n = lisp_sop::workspace_node(&[("src".to_owned(), lisp_sop::snapshot(&original))], SHIFT);
+    let n = lisp_sop::workspace_node(&[("src".into(), lisp_sop::snapshot(&original))], SHIFT);
     for domains in [1i64, 4] {
         for grain in [1i64, 97] {
             with_session(&mut |s| {
@@ -434,7 +434,7 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
 #[test]
 fn a_defnode_keeps_its_operation_inputs_schema_and_cache_identity() {
     let original = lisp_sop::node(&[], "(sop/line :points 3)");
-    let n = lisp_sop::workspace_node(&[("src".to_owned(), original.clone())], SHIFT);
+    let n = lisp_sop::workspace_node(&[("src".into(), original.clone())], SHIFT);
     assert!(node::operation(&n) == "lisp_shift", "defnode must keep its operation");
     assert!(node::inputs(&n).len() == 1, "body leaked into public inputs");
     assert!(field_names(&n) == vec!["distance".to_owned()], "parameter schema was lost");
@@ -446,14 +446,14 @@ fn a_defnode_keeps_its_operation_inputs_schema_and_cache_identity() {
     let (x, y, z) = position(&first, 0);
     assert!(x == ix + 2.0 && y == iy && z == iz, "body did not use authored parameters");
     assert!(same(&cook(&mut s, &context, &n), &first), "unchanged Lisp node missed the cache");
-    let (changed, _) = node::apply_parameters(&n, &[("distance".to_owned(), param::Value::Float(3.0))]).unwrap();
+    let (changed, _) = node::apply_parameters(&n, &[("distance".into(), param::Value::Float(3.0))]).unwrap();
     assert!(node::id(&changed) == node::id(&n), "parameter edit changed logical identity");
     let result = cook(&mut s, &context, &changed);
     assert!(!same(&result, &first), "changed parameter hit old cache");
     assert!(position(&result, 0).0 == ix + 3.0, "parameter edit did not rebuild the Lisp body");
     // edits share one specialized, assembled body; each still reads its own values
     for distance in [2.0, 5.0, 3.0] {
-        let (edited, _) = node::apply_parameters(&changed, &[("distance".to_owned(), param::Value::Float(distance))]).unwrap();
+        let (edited, _) = node::apply_parameters(&changed, &[("distance".into(), param::Value::Float(distance))]).unwrap();
         assert!(position(&cook(&mut s, &context, &edited), 0).0 == ix + distance, "a shared body kept an earlier value");
     }
     session::close(&mut s);
@@ -510,7 +510,7 @@ fn every_control_kind_reaches_the_body_with_exactly_one_miss_per_edit() {
             assert!(node::apply_parameters(&n, &[(name.to_owned(), value)]).is_err(), "{name}: parameter normalization accepted an invalid value");
         }
         // Inspector writes use the native Param clamp; authored Lisp is checked.
-        let (clamped, _) = node::apply_parameters(&n, &[("count".to_owned(), V::Int(0))]).unwrap();
+        let (clamped, _) = node::apply_parameters(&n, &[("count".into(), V::Int(0))]).unwrap();
         let count = node::parameter_fields(&clamped).into_iter().find(|f| f.name == "count").unwrap();
         assert!(count.current == V::Int(1), "integer hard bound differs from native inspector normalization");
     });
@@ -528,7 +528,7 @@ fn node_validation_runs_before_the_body() {
       (sop/line :kind "Points" :points count))
     (graph g :context sop (sop/validated)))"#,
     );
-    match node::apply_parameters(&n, &[("count".to_owned(), param::Value::Int(0))]) {
+    match node::apply_parameters(&n, &[("count".into(), param::Value::Int(0))]) {
         Err(message) => assert!(message.contains("E_POSITIVE"), "body ran before node validation"),
         Ok(_) => panic!("node validation did not reject edited value"),
     }
@@ -571,7 +571,7 @@ fn nested_lisp_calls_keep_parameters_and_leak_no_cache_nodes() {
         let g = cook_with(s, 1, 97, 0, &n);
         assert!(position(&g, 0) == (1.5, 0.0, 0.0), "nested Lisp call lost its parameters");
         let before = session::stats(s);
-        let (n, _) = node::apply_parameters(&n, &[("distance".to_owned(), param::Value::Float(2.5))]).unwrap();
+        let (n, _) = node::apply_parameters(&n, &[("distance".into(), param::Value::Float(2.5))]).unwrap();
         let g = cook_with(s, 1, 97, 0, &n);
         assert!(position(&g, 0) == (2.5, 0.0, 0.0), "nested Lisp parameter edit did not recook");
         assert!(session::stats(s).misses == before.misses + 1, "nested bodies leaked private cache nodes");
@@ -929,7 +929,7 @@ fn deferred_child_cooking_stays_inside_its_authored_error_boundary() {
         Trace { node_id: 88, label: "retained child".to_owned(), operation: "native.retained".to_owned() },
         Trace { node_id: 89, label: "retained input".to_owned(), operation: "native.input".to_owned() },
     ];
-    let mut child_error = rays_diagnostic::error("E_CHILD".to_owned(), "child cook failed".to_owned(), None, None, Some([b"\xff raw ".as_slice(), "日本😀".as_bytes()].concat()), vec!["retained hint".to_owned()], Vec::new());
+    let mut child_error = rays_diagnostic::error("E_CHILD".into(), "child cook failed".to_owned(), None, None, Some([b"\xff raw ".as_slice(), "日本😀".as_bytes()].concat()), vec!["retained hint".to_owned()], Vec::new());
     child_error.trace = retained.clone();
     let counter = calls.clone();
     let failure = child_error.clone();

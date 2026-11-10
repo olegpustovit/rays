@@ -165,7 +165,7 @@ pub mod editor {
         }
 
         /// The node the inspector shows for the selection, when it is exactly one.
-        pub fn inspector_subject(value: &Editor) -> Option<Vec<String>> {
+        pub fn inspector_subject(value: &Editor) -> Option<flow_check::workspace::Path> {
             editor_panels::inspector_subject(&(&value.core).into())
         }
 
@@ -354,6 +354,7 @@ pub mod editor {
 /// The frame reducer without a UI frame: an unstable hook for tests, like `Editor::Private`.
 #[doc(hidden)]
 pub mod reduce {
+    use flow_syntax::symbol::Symbol;
     use editor_core::panels::Panel;
     use flow_graph::flow_edit as fe;
     use rays::frame;
@@ -379,7 +380,7 @@ pub mod reduce {
     }
 
     /// Select the checked lexical path; unstable test/diagnostic hook.
-    pub fn select_path(editor: editor::Editor, path: &[String]) -> editor::Editor {
+    pub fn select_path(editor: editor::Editor, path: &[Symbol]) -> editor::Editor {
         match path.first() {
             Some(graph) => {
                 let mut core = (*editor.core).clone();
@@ -392,7 +393,7 @@ pub mod reduce {
     }
 
     /// `v` on the checked lexical path, as the graph pane requests it; unstable test hook.
-    pub fn view(editor: editor::Editor, path: &[String]) -> editor::Editor {
+    pub fn view(editor: editor::Editor, path: &[Symbol]) -> editor::Editor {
         let mut core = (*editor.core).clone();
         editor_scope::view_node(&mut core, path);
         editor::with_core(editor, core)

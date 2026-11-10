@@ -156,7 +156,7 @@ fn a_seed_read_inside_a_fn_is_scoped_to_the_fn() {
     let cat = ok(catalog::of_factories(1, &[], Some(&nodes), &[]));
     let workspace = checked(catalog::check_workspace(operators::all(), false, None, &cat, &source));
     let definition = workspace.nodes.iter().find(|n| n.kind.qualified == "sop/fn_seed_scope").expect("definition");
-    assert!(context_kernel::depends(None, &[("enabled".to_owned(), Value::Bool(false))], &workspace.defs, &definition.body));
+    assert!(context_kernel::depends(None, &[("enabled".into(), Value::Bool(false))], &workspace.defs, &definition.body));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn context_scans_borrow_helpers_and_keep_labeled_defaults() {
         assert_eq!(unchanged.inputs, graph.inputs);
     }
     let (labeled, inputs) = context_kernel::label_context("borrowed_card", reached[0]);
-    assert_eq!(inputs, vec![("$context0".to_owned(), "sop/context_seed".to_owned())]);
+    assert_eq!(inputs, vec![(flow_syntax::symbol::intern("$context0"), "sop/context_seed".to_owned())]);
     let flow_check::workspace::Node::RefBinding(id) = labeled.body.node else { panic!("A labeled context is a binding reference.") };
     let binding = labeled.body.arena().ref_binding(id);
     assert!(labeled.body.name(binding.name) == "$context0" && labeled.body.arena().name_ids(binding.fields).is_empty());
@@ -240,7 +240,7 @@ fn embedded_fixture_checks_edits_and_round_trips_the_manifest() {
     assert!(workspace.nodes[0].body.form.id > source_graph.id);
     let checker_forms = forms.clone();
     let checker = move |c: &Catalog, s: &[Syntax]| catalog::check_workspace(&[], false, Some(&checker_forms), c, s);
-    let (edited, checked_edit) = ok(flow_graph::flow_edit::apply_checked_with(&[], false, Some(&checker), &cat, &authored, &EditOp::SetNote { node: vec!["g".to_owned(), "@result".to_owned()], text: "kept note".to_owned() }));
+    let (edited, checked_edit) = ok(flow_graph::flow_edit::apply_checked_with(&[], false, Some(&checker), &cat, &authored, &EditOp::SetNote { node: vec!["g".into(), "@result".into()], text: "kept note".to_owned() }));
     assert!(*checked_edit.source == edited);
     assert_eq!(checked_edit.nodes.len(), 1);
     let saved = flow_syntax::lisp::print(&edited).unwrap().0;

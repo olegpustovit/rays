@@ -33,7 +33,7 @@ fn source(ty: &Ty) -> Op {
     };
     o.shape = op::Shape::Struct { splice: false };
     o.check = Arc::new(|_| Ok(()));
-    o.body = Arc::new(move |_, _, _| Ok(source_value("probe/table", out.clone(), vec![])));
+    o.body = Arc::new(move |_, _, _| Ok(source_value("probe/table", out.clone(), vec![].into())));
     o
 }
 
@@ -343,7 +343,7 @@ fn structured_core_changing_arguments_and_rebind() {
     let live = live_at(0.25);
     let table = int_table();
     let ws = composition_checked("[(table : (array int) (array/int 0))]", "(let* [nested {:table table}] (map (fn [i] (int/add (array/nth nested.table (int/mod i 3)) (frame/index))) (array/range 2049 :type int)))");
-    let value = ok(e::r#static(&ws, false, Some(&[("g".to_string(), vec![("table".to_string(), table)])]))).results.iter().find(|(n, _)| n == "g").unwrap().1.clone();
+    let value = ok(e::r#static(&ws, false, Some(&[("g".into(), vec![("table".into(), table)])]))).results.iter().find(|(n, _)| n == "g").unwrap().1.clone();
     let core = executor_compile(&value, true);
     assert_eq!(bits(&ok(executor_force(&core, true, &live))), bits(&ok(force_reference(&value, &live))));
     let changing = recorded(&arr(Ty::Int), "(let* [table (array/int 3 (int/add 9007199254740993 (frame/index))) nested {:table table}] (map (fn [i] (array/nth nested.table (int/mod i 3))) (array/range 2049 :type int)))");
@@ -506,7 +506,7 @@ fn malformed_public_region_input_is_checked_when_selected() {
     let row = builder.push(None, term.ty(), form, flow_check::term_arena::Draft::RefBinding("bad_storage".into(), vec![]));
     let term = builder.freeze().handle(row);
     for count in [1usize, 2049] {
-        let rid = ok(e::residual::with_bindings(rid, &term, &[("bad_storage".to_string(), Value::Floats(1, Arc::new(vec![0.; count])))]));
+        let rid = ok(e::residual::with_bindings(rid, &term, &[("bad_storage".into(), Value::Floats(1, Arc::new(vec![0.; count])))]));
         for selected in [false, true] {
             let rebuild = region::Rebuild {
                 sources: Some(vec![(rid, Arc::new(term.clone()))]),
@@ -604,9 +604,9 @@ fn late_bounds_versus_earlier_table_cause() {
     let closure = make_fn("", &fields, "(fn [(index : int)] (let* [chosen (array/nth data.a index)] (if (int/eq index 1) (array/nth data.b 0) chosen)))");
     let closure = e::host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => Value::Record(vec![
-            ("a".into(), source_value("probe/a", arr(Ty::Text), vec![])),
-            ("b".into(), source_value("probe/b", arr(Ty::Text), vec![])),
-        ]),
+            ("a".into(), source_value("probe/a", arr(Ty::Text), vec![].into())),
+            ("b".into(), source_value("probe/b", arr(Ty::Text), vec![].into())),
+        ].into()),
         other => other.clone(),
     });
     let advancing = recorded(&arr(Ty::Text), "(state [counter 0] (int/add counter 1))");
@@ -1023,14 +1023,14 @@ fn text_select_reference_inside_domains() {
 fn index_error_versus_table_source_errors() {
     let live = live_at(0.25);
     let ordered = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
-    for returned in [Value::Floats(1, Arc::new(vec![1.])), source_value("probe/table", arr(Ty::Int), vec![])] {
+    for returned in [Value::Floats(1, Arc::new(vec![1.])), source_value("probe/table", arr(Ty::Int), vec![].into())] {
         let resolve = ok_value(returned);
         same_error(&force_r(&pk(&ordered), &live, &resolve), &reference_r(&ordered, &live, &resolve));
     }
     let bad = instantiate(None, &arr(Ty::Text), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
     let failing = resolver(|_| Err(data_source_error("E_DATA_SOURCE", "Text source failed", Some("\u{3}"))));
     same_error(&force_r(&pk(&bad), &live, &failing), &reference_r(&bad, &live, &failing));
-    for returned in [Value::Floats(1, Arc::new(vec![0.])), source_value("probe/table", arr(Ty::Text), vec![])] {
+    for returned in [Value::Floats(1, Arc::new(vec![0.])), source_value("probe/table", arr(Ty::Text), vec![].into())] {
         let resolve = ok_value(returned);
         same_error(&force_r(&pk(&bad), &live, &resolve), &reference_r(&bad, &live, &resolve));
     }

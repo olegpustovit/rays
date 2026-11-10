@@ -4,6 +4,7 @@
 //!
 //! The OCaml domain-local storage (`Domain.DLS`) of the cooked inputs and of the pending initial
 //! changes are thread-locals here: a node cooks on one thread, nested bodies on the same one.
+use flow_syntax::symbol::Symbol;
 use flow_eval::Value;
 use param::{Field, FieldView, Kind, KindView, Schema, Value as ParamValue};
 use rays_diagnostic::Diagnostic;
@@ -90,18 +91,18 @@ fn scalar(value: &ParamValue) -> Value {
 }
 
 /// Body arguments of schema values (positional, one per field): vec3 groups and their components.
-pub fn arguments(fields: &[FieldView], values: &[ParamValue]) -> Result<Vec<(String, Value)>, String> {
+pub fn arguments(fields: &[FieldView], values: &[ParamValue]) -> Result<Vec<(Symbol, Value)>, String> {
     let current: Vec<FieldView> = fields
         .iter()
         .zip(values)
         .map(|(f, value)| FieldView { current: value.clone(), ..f.clone() })
         .collect();
     let ports = port::parameters(false, &current).map_err(|d| rays_diagnostic::to_string(&d))?;
-    let mut out: Vec<(String, Value)> = ports
+    let mut out: Vec<(Symbol, Value)> = ports
         .iter()
         .map(|p| {
             (
-                p.path.clone(),
+                p.path.as_str().into(),
                 match port::literal(p) {
                     Literal::Vector(x, y, z) => Value::Vec3(x, y, z),
                     Literal::Scalar(v) => scalar(&v),
@@ -109,7 +110,7 @@ pub fn arguments(fields: &[FieldView], values: &[ParamValue]) -> Result<Vec<(Str
             )
         })
         .collect();
-    out.extend(current.iter().filter(|f| f.vec3.is_some()).map(|f| (f.name.clone(), scalar(&f.current))));
+    out.extend(current.iter().filter(|f| f.vec3.is_some()).map(|f| (f.name.as_str().into(), scalar(&f.current))));
     Ok(out)
 }
 
@@ -136,7 +137,7 @@ pub type Body = Arc<dyn Fn(&context::T) -> Result<node::T, Diagnostic> + Send + 
 pub type Built = (Body, dependencies::T, Facts);
 
 /// `build ~label ~context inputs arguments`: the body of the node for these arguments.
-pub type BuildFn = Arc<dyn Fn(&str, &context::T, &[node::T], &[(String, Value)]) -> Result<Built, String> + Send + Sync>;
+pub type BuildFn = Arc<dyn Fn(&str, &context::T, &[node::T], &[(Symbol, Value)]) -> Result<Built, String> + Send + Sync>;
 
 pub struct NodeOptions {
     pub unbound_function: bool,
@@ -382,10 +383,10 @@ mod tests {
     fn schema_and_arguments_follow_the_fields() {
         let schema = schema("parameters", &[count_field()], &[]);
         assert_eq!(schema.default(), [ParamValue::Int(3)]);
-        let (values, effects) = schema.apply_all(schema.default(), &[("count".to_owned(), ParamValue::Int(99))]).expect("clamps");
+        let (values, effects) = schema.apply_all(schema.default(), &[("count".into(), ParamValue::Int(99))]).expect("clamps");
         assert!(effects.cook);
         assert_eq!(values, [ParamValue::Int(10)]);
-        assert_eq!(arguments(&[count_field()], &values).expect("arguments"), vec![("count".to_owned(), Value::Int(10))]);
+        assert_eq!(arguments(&[count_field()], &values).expect("arguments"), vec![("count".into(), Value::Int(10))]);
     }
 
     #[test]
@@ -393,15 +394,15 @@ mod tests {
         let made = node(&options(false, Vec::new()), build_points(), &[]).expect("node");
         assert_eq!((node::operation(&made), node::version(&made), node::label(&made)), ("test_lisp", 2, "Test Lisp"));
         assert_eq!(rdk_core::geometry::point_count(&cook(&made).expect("cooks")), 3);
-        let (edited, effects) = node::apply_parameters(&made, &[("count".to_owned(), ParamValue::Int(5))]).expect("edit");
+        let (edited, effects) = node::apply_parameters(&made, &[("count".into(), ParamValue::Int(5))]).expect("edit");
         assert!(effects.cook && node::id(&edited) == node::id(&made));
         assert_eq!(rdk_core::geometry::point_count(&cook(&edited).expect("cooks")), 5);
-        assert!(node::apply_parameters(&made, &[("count".to_owned(), ParamValue::Text(b"x".as_slice().into()))]).is_err());
+        assert!(node::apply_parameters(&made, &[("count".into(), ParamValue::Text(b"x".as_slice().into()))]).is_err());
     }
 
     #[test]
     fn initial_changes_are_consumed_by_the_first_node_of_their_operation() {
-        let changes = [("count".to_owned(), ParamValue::Int(7))];
+        let changes = [("count".into(), ParamValue::Int(7))];
         let first = with_initial_changes("test_lisp", &changes, &mut || node(&options(false, Vec::new()), build_points(), &[])).expect("first");
         assert_eq!(node::parameter_fields(&first)[0].current, ParamValue::Int(7));
         let later = node(&options(false, Vec::new()), build_points(), &[]).expect("later");

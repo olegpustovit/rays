@@ -8,6 +8,7 @@
 //! hold an id and find the owner in a thread-local table, so a call from another thread is the
 //! OCaml "must resolve on the initial domain" error. Plans are identified by `plan_id` (the
 //! addresses of their vectors), the OCaml physical equality.
+use flow_syntax::symbol::Symbol;
 use crate::drawing;
 use crate::workspace_gpu;
 use crate::workspace_resources;
@@ -44,7 +45,7 @@ pub fn plan_id(plan: &e::Plan) -> PlanId {
 
 struct Captured {
     geometry: rdk_core::geometry::T,
-    attributes: Vec<(String, Value)>,
+    attributes: Vec<(Symbol, Value)>,
     bytes: i64,
 }
 
@@ -95,8 +96,19 @@ enum TextureSlot {
     Ready(texture::Texture),
 }
 
+/// Exact in-process image identity; file paths remain OS data, while authored sites retain Symbols.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImageKey {
+    Load(String),
+    NoiseLive(i64, i64),
+    Noise(String),
+    Render((i64, flow_ir::flow_ir::Id)),
+    Map((i64, flow_ir::flow_ir::Id)),
+    Exact((i64, flow_ir::flow_ir::Id), (i64, i64, i64, i64, i64)),
+}
+
 struct Entry {
-    key: String,
+    key: ImageKey,
     /// the plan that last asked for it: `reserve` prunes the others
     plan_serial: i64,
     image: Option<image::Image>,
@@ -109,7 +121,7 @@ struct Entry {
 
 type EntryRef = Rc<RefCell<Entry>>;
 
-fn make_entry(key: &str) -> EntryRef {
+fn make_entry(key: &ImageKey) -> EntryRef {
     Rc::new(RefCell::new(Entry { key: key.to_owned(), plan_serial: -1, image: None, cpu: None, texture: None, borrowed: None, display: None, canvas: None }))
 }
 
@@ -118,15 +130,15 @@ fn make_entry(key: &str) -> EntryRef {
 /// asked for.
 struct Entries {
     /// oldest first: (key, entry, touched, bytes)
-    slots: Vec<(String, EntryRef, bool, i64)>,
+    slots: Vec<(ImageKey, EntryRef, bool, i64)>,
 }
 
 impl Entries {
     fn length(&self) -> usize {
         self.slots.len()
     }
-    fn find_opt(&mut self, key: &str) -> Option<EntryRef> {
-        let slot = self.slots.iter_mut().find(|s| s.0 == key)?;
+    fn find_opt(&mut self, key: &ImageKey) -> Option<EntryRef> {
+        let slot = self.slots.iter_mut().find(|s| &s.0 == key)?;
         slot.2 = true;
         Some(slot.1.clone())
     }
@@ -306,10 +318,10 @@ fn release_entry(d: &Data, entry: &EntryRef) {
     e.display = None;
 }
 
-fn entries_add(d: &Data, key: &str, entry: &EntryRef, bytes: i64) {
+fn entries_add(d: &Data, key: &ImageKey, entry: &EntryRef, bytes: i64) {
     let replaced = {
         let mut es = d.entries.borrow_mut();
-        match es.slots.iter().position(|s| s.0 == key) {
+        match es.slots.iter().position(|s| &s.0 == key) {
             Some(at) => {
                 let old = es.slots.remove(at);
                 Some(old.1)
@@ -542,23 +554,19 @@ fn captured(d: &Data, request: &RequestRef, live: &Frame, id: i64, source: &Sour
     Ok(captured)
 }
 
-fn assoc<'a>(args: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
-    args.iter().find(|(k, _)| k == key).map(|(_, x)| x)
-}
-
 fn resolve_capture(d: &Data, request: &RequestRef, live: &Frame, sources: &[(i64, SourceRef)], value: &Value) -> Result<Value, Diagnostic> {
     let Value::Struct(g) = value else { return Err(v::fail("E_DATA_SOURCE", "Unknown packed data source.")) };
     let (name, args) = (&g.name, &g.fields);
     if name != "sop/attr" {
         return Err(v::fail("E_DATA_SOURCE", "Unknown packed data source."));
     }
-    let (Some(Value::Deferred(gty, id)), Some(Value::Text(attr))) = (assoc(args, "geometry"), assoc(args, "attribute")) else {
+    let (Some(Value::Deferred(gty, id)), Some(Value::Text(attr))) = (args.get_str("geometry"), args.get_str("attribute")) else {
         return Err(v::fail("E_ATTR_TYPE", "sop/attr needs geometry and an attribute name."));
     };
     if !ty::is_geometry(gty) {
         return Err(v::fail("E_ATTR_TYPE", "sop/attr needs geometry and an attribute name."));
     }
-    let name = String::from_utf8_lossy(attr).into_owned();
+    let name = flow_syntax::symbol::intern(String::from_utf8_lossy(attr).as_ref());
     let Some((_, source)) = sources.iter().find(|(n, _)| n == id) else { return Err(v::fail("E_DATA_SOURCE", "Attribute source was not prepared.")) };
     let c = captured(d, request, live, *id, source)?;
     if let Some((_, value)) = c.attributes.iter().find(|(n, _)| *n == name) {
@@ -615,8 +623,8 @@ pub fn render_stats(t_: &WorkspaceImages) -> (i64, i64, i64, i64) {
     (d.canvases_created.get(), d.canvases_destroyed.get(), captures, readbacks)
 }
 
-fn authored_key(prefix: &str, node: &e::Node) -> String {
-    format!("{prefix}{:?}", (node.inst, &node.site, &node.iter))
+fn authored_key(node: &e::Node) -> (i64, flow_ir::flow_ir::Id) {
+    (node.inst, (node.site.clone(), node.iter.clone()))
 }
 
 fn invalidate_display(entry: &EntryRef) {
@@ -808,7 +816,7 @@ fn force_texture(slot: &TextureSlot) -> Result<texture::Texture, String> {
     }
 }
 
-fn publish(d: &Data, key: &str, entry: &EntryRef, width: i64, height: i64, source: Rc<dyn Fn() -> Option<ogpu_core::backend::Texture>>) -> Result<(), Diagnostic> {
+fn publish(d: &Data, key: &ImageKey, entry: &EntryRef, width: i64, height: i64, source: Rc<dyn Fn() -> Option<ogpu_core::backend::Texture>>) -> Result<(), Diagnostic> {
     let existing = entry.borrow().image.clone();
     let image_ = match existing {
         None => workspace_resources::image(&d.resources, key, &|| {
@@ -855,7 +863,7 @@ fn prepare(d: &Data, plan: &e::Plan, pid: PlanId) -> Result<(), Diagnostic> {
     let mut programs: Vec<Option<I::Program>> = Vec::with_capacity(plan.nodes.len());
     for n in &plan.nodes {
         if n.ty == ty::image() {
-            programs.push(Some(I::compile(&Value::Record(n.args.clone()), &options)?));
+            programs.push(Some(I::compile(&Value::Record(n.args.clone().into()), &options)?));
         } else {
             programs.push(None);
         }
@@ -899,8 +907,8 @@ struct Ctx {
     pid: PlanId,
 }
 
-fn int_arg(args: &[(String, Value)], key: &str, default: i64) -> Result<i64, Diagnostic> {
-    match assoc(args, key) {
+fn int_arg(args: &v::Record, key: &str, default: i64) -> Result<i64, Diagnostic> {
+    match args.get_str(key) {
         None => Ok(default),
         Some(x) => v::int_of(x),
     }
@@ -987,13 +995,13 @@ fn run_request(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: bool, pl
         if let Value::Deferred(_, id) = value {
             if *id >= 0 && (*id as usize) < plan.nodes.len() {
                 let node = &plan.nodes[*id as usize];
-                let prefix = match node.kind.as_str() {
-                    "image/render" => Some("render:"),
-                    "image/map" => Some("map:"),
+                let key = match node.kind.as_str() {
+                    "image/render" => Some(ImageKey::Render(authored_key(node))),
+                    "image/map" => Some(ImageKey::Map(authored_key(node))),
                     _ => None,
                 };
-                if let Some(prefix) = prefix {
-                    let found = d.entries.borrow_mut().find_opt(&authored_key(prefix, node));
+                if let Some(key) = key {
+                    let found = d.entries.borrow_mut().find_opt(&key);
                     if let Some(entry) = found {
                         invalidate_display(&entry);
                     }
@@ -1011,7 +1019,7 @@ fn resolve_value(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: bool, 
         if *vty == ty::image() && display && *id >= 0 && (*id as usize) < plan.nodes.len() {
             let node = &plan.nodes[*id as usize];
             if node.kind == "image/render" {
-                let found = d.entries.borrow_mut().find_opt(&authored_key("render:", node));
+                let found = d.entries.borrow_mut().find_opt(&ImageKey::Render(authored_key(node)));
                 if let Some(entry) = found {
                     let old = entry.borrow().display.clone();
                     let fresh = old.as_ref().is_some_and(|old| current(d, &old.sources, state, live, pid, node, old));
@@ -1038,14 +1046,14 @@ fn resolve_value(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: bool, 
     resolve_producer(t_, request, ctx, display, plan, node, &args)
 }
 
-fn resolve_exact(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, plan: &e::Plan, node: &e::Node, args: &[(String, Value)]) -> Result<EntryRef, Diagnostic> {
+fn resolve_exact(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, plan: &e::Plan, node: &e::Node, args: &v::Record) -> Result<EntryRef, Diagnostic> {
     let d = &**t_;
-    let child = resolve_with(t_, ctx, true, plan, assoc(args, "value").expect("value"))?;
+    let child = resolve_with(t_, ctx, true, plan, args.get_str("value").expect("value"))?;
     let source = child.borrow().image.clone().expect("child image");
     let (width, height) = image::dimensions(&source);
     let resource = image::resource(&source);
     runtime_resources::image::gpu_snapshot(&resource).map_err(|e| error(&pp_error(&e)))?;
-    let key = format!("{}{:?}", authored_key("exact:", node), (d.serial.get(), image::identity(&source), runtime_resources::image::generation(&resource), width, height));
+    let key = ImageKey::Exact(authored_key(node), (d.serial.get(), image::identity(&source), runtime_resources::image::generation(&resource), width, height));
     let found = d.entries.borrow_mut().find_opt(&key);
     let result = match found {
         Some(entry) => entry,
@@ -1094,7 +1102,7 @@ fn resolve_with(t_: &Rc<Data>, ctx: &Ctx, display: bool, plan: &e::Plan, value: 
     resolve(t_, &Ctx { gpu: None, ..ctx.clone() }, None, display, plan, value)
 }
 
-fn resolve_producer(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: bool, plan: &e::Plan, node: &e::Node, args: &[(String, Value)]) -> Result<EntryRef, Diagnostic> {
+fn resolve_producer(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: bool, plan: &e::Plan, node: &e::Node, args: &v::Record) -> Result<EntryRef, Diagnostic> {
     let d = &**t_;
     let (state, live, pid) = (&ctx.state, &ctx.live, ctx.pid);
     let id = node.id;
@@ -1106,14 +1114,14 @@ fn resolve_producer(t_: &Rc<Data>, request: &RequestRef, ctx: &Ctx, display: boo
     }
     let source_stamp: Vec<(i64, i64)> = sources.iter().map(|(id, s)| (*id, s.borrow().revision)).collect();
     let key = match node.kind.as_str() {
-        "image/load" => match assoc(args, "path") {
-            Some(Value::Text(path)) => format!("load:{}", String::from_utf8_lossy(path)),
+        "image/load" => match args.get_str("path") {
+            Some(Value::Text(path)) => ImageKey::Load(String::from_utf8_lossy(path).into_owned()),
             _ => return Err(error("Image path is text.")),
         },
-        "image/noise" if node.args.iter().any(|(_, x)| e::is_live(x)) => format!("noise:{}:{}", d.serial.get(), id),
-        "image/noise" => format!("noise:{args:?}"),
-        "image/render" => authored_key("render:", node),
-        "image/map" => authored_key("map:", node),
+        "image/noise" if node.args.iter().any(|(_, x)| e::is_live(x)) => ImageKey::NoiseLive(d.serial.get(), id),
+        "image/noise" => ImageKey::Noise(format!("{args:?}")),
+        "image/render" => ImageKey::Render(authored_key(node)),
+        "image/map" => ImageKey::Map(authored_key(node)),
         _ => return Err(error("Unknown image producer.")),
     };
     let (stateful, _) = d.freshness.borrow()[id as usize];
@@ -1158,9 +1166,9 @@ fn compute_entry(
     display: bool,
     plan: &e::Plan,
     node: &e::Node,
-    args: &[(String, Value)],
+    args: &v::Record,
     sources: &[(i64, SourceRef)],
-    key: &str,
+    key: &ImageKey,
     previous: Option<EntryRef>,
     stamp: &Rc<Stamp>,
     valid: &dyn Fn(&Stamp) -> bool,
@@ -1182,7 +1190,7 @@ fn compute_entry(
     if node.kind == "image/map" {
         let width = int_arg(args, "width", 256)?;
         let height = int_arg(args, "height", 256)?;
-        let Some(Value::Fn(function)) = assoc(args, "function") else { return Err(error("Image map needs a pixel function.")) };
+        let Some(Value::Fn(function)) = args.get_str("function") else { return Err(error("Image map needs a pixel function.")) };
         let function = *function;
         let ids = attribute_kernel::sources(&Value::Fn(function));
         let mut inputs: Vec<node::T> = Vec::new();
@@ -1273,7 +1281,7 @@ fn compute_entry(
         if width <= 0 || height <= 0 || width > ((1i64 << 57) - 9) / 4 / height {
             return Err(error("Image dimensions exceed native storage bounds."));
         }
-        let drawing_ = assoc(args, "drawing").expect("drawing").clone();
+        let drawing_ = args.get_str("drawing").expect("drawing").clone();
         let known = d.drawings.borrow()[id as usize].clone();
         let prepared = match known {
             Some(p) => p,
@@ -1376,7 +1384,7 @@ fn compute_entry(
         entry.borrow_mut().display = None;
         let (image_, payload) = match node.kind.as_str() {
             "image/load" => {
-                let path = match assoc(args, "path") {
+                let path = match args.get_str("path") {
                     Some(Value::Text(path)) => String::from_utf8_lossy(path).into_owned(),
                     _ => unreachable!("assert false"),
                 };
@@ -1389,7 +1397,7 @@ fn compute_entry(
                 let source = edit_graph::instantiate(&factory, &[]).map_err(|m| error(&m))?;
                 let mut changes: Vec<(String, param::Value)> = Vec::new();
                 for field in edit_graph::factory_fields(&factory) {
-                    if let Some(x) = assoc(args, &field.name) {
+                    if let Some(x) = args.get_str(&field.name) {
                         changes.push((
                             field.name.clone(),
                             match field.kind {
@@ -1492,4 +1500,3 @@ pub fn close(t_: &WorkspaceImages) {
     d.resolved.borrow_mut().clear();
     OWNERS.with(|o| o.borrow_mut().remove(&d.id));
 }
-

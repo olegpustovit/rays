@@ -44,7 +44,7 @@ fn merge_inputs_carry_provenance_tags() {
         assert!(lower::tags(&l, &origin.site, &origin.iter).contains(tag));
     }
     assert_eq!(lower::origin(&l, 1_000_000), None);
-    assert_eq!(lower::zone_count(&l, &vec!["g".to_owned()]), None);
+    assert_eq!(lower::zone_count(&l, &vec!["g".to_owned().into()]), None);
 }
 
 #[test]

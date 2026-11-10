@@ -7,12 +7,13 @@
 //! (default `packed::force`). Optional OCaml arguments are the fields of [`Options`].
 #![allow(non_camel_case_types, non_snake_case)]
 
+use flow_syntax::symbol::Symbol;
 use crate::core_draw;
 use crate::core_ir::{self as c, Expr, FrameField, Plane, Primitive, Program, Statement, StatementNode};
 use crate::core_marks;
 use crate::packed;
 use flow_check::op::{self, Op};
-use flow_check::workspace::{DiagnosticPolicy, Paths};
+use flow_check::workspace::{DiagnosticPolicy, Path, Paths};
 use flow_eval as e;
 use flow_syntax::context;
 use flow_syntax::ty::Ty;
@@ -70,8 +71,8 @@ pub trait Resident: Send + Sync {
 
 /// Materialise placeholders recursively through records, lists, structs and source arguments.
 pub fn host_value(resident: &dyn Resident, value: &Value) -> Result<Value, Diagnostic> {
-    fn fields(r: &dyn Resident, fs: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
-        fs.iter().map(|(n, x)| Ok((n.clone(), host_value(r, x)?))).collect()
+    fn fields(r: &dyn Resident, fs: &v::Record) -> Result<v::Record, Diagnostic> {
+        Ok(fs.iter().map(|(n, x)| Ok((*n, host_value(r, x)?))).collect::<Result<Vec<_>, Diagnostic>>()?.into())
     }
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
@@ -86,18 +87,18 @@ pub fn host_value(resident: &dyn Resident, value: &Value) -> Result<Value, Diagn
 pub fn fill_constant(resident: &dyn Resident, value: &Value) -> Result<Option<Value>, Diagnostic> {
     let Value::Source(g) = value else { return Ok(None) };
     let Some(operation) = g.name.strip_prefix("$core/constant-array/") else { return Ok(None) };
-    let Value::Source(desc) = op::constant_array_descriptor(operation, &g.fields)? else { unreachable!() };
+    let Value::Source(desc) = op::constant_array_record_descriptor(operation, &g.fields)? else { unreachable!() };
     if g.ty != desc.ty { return Err(v::fail("E_ARRAY_TYPE", "Constant array descriptor has the wrong declared type.")); }
-    match desc.fields.as_slice() {
-        [(a, Value::Int(length)), (b, initial)] if a == "count" && b == "value" => resident.fill(&desc.ty, *length, initial),
+    match (desc.fields.get_str("count"), desc.fields.get_str("value")) {
+        (Some(Value::Int(length)), Some(initial)) => resident.fill(&desc.ty, *length, initial),
         _ => unreachable!("constant_array_descriptor validates the fields"),
     }
 }
 
 /// what a state stores from a resident run: device arrays stay there, the rest is read back
 fn kept_value(resident: &dyn Resident, value: &Value) -> Result<Value, Diagnostic> {
-    fn fields(r: &dyn Resident, fs: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
-        fs.iter().map(|(n, x)| Ok((n.clone(), kept_value(r, x)?))).collect()
+    fn fields(r: &dyn Resident, fs: &v::Record) -> Result<v::Record, Diagnostic> {
+        Ok(fs.iter().map(|(n, x)| Ok((*n, kept_value(r, x)?))).collect::<Result<Vec<_>, Diagnostic>>()?.into())
     }
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
@@ -440,7 +441,7 @@ fn operator(name: &str) -> Result<&'static Op, Diagnostic> {
     op::find(&[], name, &context::value()).ok_or_else(|| v::fail("E_CORE", &format!("Unsupported core primitive: {name}")))
 }
 
-fn apply_op(operation: &Op, st: &State, args: &[(String, Value)]) -> Result<Value, Diagnostic> {
+fn apply_op(operation: &Op, st: &State, args: &[(Symbol, Value)]) -> Result<Value, Diagnostic> {
     let node = |_: &str, _: &op::Args| -> Result<Value, Diagnostic> {
         Err(v::fail("E_CORE", "Core primitives cannot create catalog nodes."))
     };
@@ -458,12 +459,12 @@ fn resolved(cell: &(String, OnceLock<Result<&'static Op, Diagnostic>>)) -> Resul
     }
 }
 
-fn generic_named(name: &str, args: &[(String, i64)]) -> Ex {
+fn generic_named(name: &str, args: &[(Symbol, i64)]) -> Ex {
     let cell = lazy_operator(name.to_owned());
     let args = args.to_vec();
     Arc::new(move |st: &mut State| {
         let operation = resolved(&cell)?;
-        let given: Vec<(String, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
+        let given: Vec<(Symbol, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
         apply_op(operation, st, &given)
     })
 }
@@ -471,8 +472,8 @@ fn generic_named(name: &str, args: &[(String, i64)]) -> Ex {
 /// A local of a plain scalar type never holds a list builder, so it needs no ownership bookkeeping.
 fn plain(ty: &Ty) -> bool { matches!(ty, Ty::Float | Ty::Int | Ty::Bool | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Text) }
 
-fn arg(args: &[(String, i64)], key: &str) -> Option<i64> { args.iter().find(|(n, _)| n == key).map(|(_, i)| *i) }
-fn arg_names(args: &[(String, i64)], names: &[&str]) -> bool {
+fn arg(args: &[(Symbol, i64)], key: &str) -> Option<i64> { args.iter().find(|(n, _)| n == key).map(|(_, i)| *i) }
+fn arg_names(args: &[(Symbol, i64)], names: &[&str]) -> bool {
     args.len() == names.len() && args.iter().zip(names).all(|((n, _), m)| n == m)
 }
 fn text_value(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
@@ -486,19 +487,19 @@ fn rows_parallel() -> Box<dyn Fn(i64, i64, &(dyn Fn(i64) + Send + Sync)) + Send 
     })
 }
 
-fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String, i64)]) -> Ex {
+fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(Symbol, i64)]) -> Ex {
     use flow_syntax::packed_ops::{Binary, Unary};
     let first = args.first().map(|(_, n)| *n).unwrap_or(-1);
     let seal_args = !matches!(operation, Primitive::Sequence_get | Primitive::Sequence_length | Primitive::Sequence_build);
     let sealed: Vec<i64> = args.iter().filter(|(_, n)| !plain(&locals[ix(*n)])).map(|(_, n)| *n).collect();
     let name = c::primitive_name(operation);
-    let args_v: Vec<(String, i64)> = args.to_vec();
+    let args_v: Vec<(Symbol, i64)> = args.to_vec();
     let generic = || -> Ex {
         let cell = lazy_operator(name.to_owned());
         let args = args_v.clone();
         Arc::new(move |st: &mut State| {
             let operation = resolved(&cell)?;
-            let given: Vec<(String, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
+            let given: Vec<(Symbol, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
             apply_op(operation, st, &given)
         })
     };
@@ -674,7 +675,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                 ("g".into(), Value::Int(color.g)),
                 ("b".into(), Value::Int(color.b)),
                 ("a".into(), Value::Int(color.a)),
-            ]))
+            ].into()))
         }),
         Primitive::Color_byte(mode) => {
             let mode = *mode;
@@ -1418,7 +1419,7 @@ fn unfold_shape(program: &Program, loop_: &Statement, body: &[Statement], index:
 // ---------------------------------------------------------------------------------------------
 // prepare.
 
-type SlotKey = Arc<dyn Fn(&State) -> Result<(i64, Vec<String>, Vec<i64>, bool), Diagnostic> + Send + Sync>;
+type SlotKey = Arc<dyn Fn(&State) -> Result<(i64, Path, Vec<i64>, bool), Diagnostic> + Send + Sync>;
 
 struct Ctx {
     program: Arc<Program>,
@@ -1477,7 +1478,7 @@ impl Ctx {
                     let offered = match st.host_source.clone() {
                         None => Ok(None),
                         Some(offer) => {
-                            let fields = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
+                            let fields = args.iter().map(|(n, i)| (*n, st.values[ix(*i)].clone())).collect::<Vec<_>>().into();
                             offer(&source_value(name.clone(), ty.clone(), fields))
                         }
                     };
@@ -1493,7 +1494,7 @@ impl Ctx {
                             Ok(value)
                         }
                         None => {
-                            let mut given: Vec<(String, Value)> = Vec::new();
+                            let mut given: Vec<(Symbol, Value)> = Vec::new();
                             for (n, i) in &args {
                                 let value = st.values[ix(*i)].clone();
                                 given.push((n.clone(), match &st.resident { Some(r) => host_value(&**r, &value)?, None => value }));
@@ -1501,7 +1502,7 @@ impl Ctx {
                             if name == "$core/complete" && ty == flow_syntax::ty::geometry() && given.len() == 1 && given[0].0 == "value" && given[0].1 == Value::No_geo {
                                 Ok(Value::No_geo)
                             } else {
-                                let value = source_value(name.clone(), ty.clone(), given);
+                                let value = source_value(name.clone(), ty.clone(), given.into());
                                 e::host::force_reference(&value, &st.live, None, None, st.resolve.clone())
                             }
                         }
@@ -1511,7 +1512,7 @@ impl Ctx {
             Expr::Source_descriptor { name, ty, args } => {
                 let (name, ty, args) = (name.clone(), ty.clone(), args.clone());
                 Arc::new(move |st| {
-                    let given: Vec<(String, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
+                    let given: Vec<(Symbol, Value)> = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
                     let prefix = "$core/constant-array/";
                     if let Some(operation) = name.strip_prefix(prefix) {
                         let value = op::constant_array_descriptor(operation, &given)?;
@@ -1523,7 +1524,7 @@ impl Ctx {
                         }
                         Ok(value)
                     } else {
-                        Ok(source_value(name.clone(), ty.clone(), given))
+                        Ok(source_value(name.clone(), ty.clone(), given.into()))
                     }
                 })
             }
@@ -1562,7 +1563,7 @@ impl Ctx {
                     if let Some(r) = st.resident.clone() {
                         if st.resident_on {
                             if let Some(name) = constant {
-                                let given: Vec<(String, Value)> = named_args.iter().map(|(name, n)| (name.clone(), st.values[ix(*n)].clone())).collect();
+                                let given: Vec<(Symbol, Value)> = named_args.iter().map(|(name, n)| (name.clone(), st.values[ix(*n)].clone())).collect();
                                 let descriptor = op::constant_array_descriptor(name, &given)?;
                                 if let Some(made) = fill_constant(&*r, &descriptor)? { return Ok(made); }
                             }
@@ -1597,7 +1598,7 @@ impl Ctx {
                                 seal(st, *n);
                                 (name.clone(), st.values[ix(*n)].clone())
                             })
-                            .collect(),
+                            .collect::<Vec<_>>().into(),
                     ))
                 })
             }
@@ -1955,7 +1956,7 @@ impl Ctx {
                                 let source = source_value(
                                     "$core/diagnostic_index",
                                     Ty::Int,
-                                    vec![("rows".into(), value.clone()), ("policy".into(), text_value(policy))],
+                                    vec![("rows".into(), value.clone()), ("policy".into(), text_value(policy))].into(),
                                 );
                                 match resolve(&source) {
                                     Ok(Value::Int(i)) => i,

@@ -7,6 +7,7 @@
 #![allow(dead_code, unused_imports)]
 use flow_eval as E;
 use flow_syntax::value::Value;
+use flow_syntax::symbol::Symbol;
 use flow_syntax::lisp;
 
 use super::super::support::*;
@@ -18,15 +19,15 @@ fn functions(v: &Value) -> Value {
                 Some((params, body)) => format!("{params:?}{}", lisp::flat(&body.form())).into_bytes(),
                 None => b"named".to_vec(),
             }.into())),
-            ("captures".into(), functions(&Value::Record(E::residual::function_bindings(*f)))),
-        ]),
+            ("captures".into(), functions(&Value::Record(E::residual::function_bindings(*f).into()))),
+        ].into()),
         Value::Residual(r) => match E::residual::residual_view(*r) {
-            Ok(view) => Value::Record(vec![("residual".into(), Value::Text(lisp::flat(&view.term.form()).into_bytes().into())), ("bindings".into(), Value::Record(view.bindings.iter().map(|(name, value)| (name.to_string(), functions(value))).collect()))]),
+            Ok(view) => Value::Record(vec![("residual".into(), Value::Text(lisp::flat(&view.term.form()).into_bytes().into())), ("bindings".into(), Value::Record(view.bindings.iter().map(|(name, value)| (*name, functions(value))).collect::<Vec<_>>().into()))].into()),
             Err(_) => v.clone(),
         },
         Value::List(xs) => Value::List(std::sync::Arc::new(xs.iter().map(functions).collect())),
-        Value::Record(fs) => Value::Record(fs.iter().map(|(n, v)| (n.clone(), functions(v))).collect()),
-        Value::Struct(g) => flow_syntax::value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(n, v)| (n.clone(), functions(v))).collect()),
+        Value::Record(fs) => Value::Record(fs.iter().map(|(n, v)| (n.clone(), functions(v))).collect::<Vec<_>>().into()),
+        Value::Struct(g) => flow_syntax::value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(n, v)| (n.clone(), functions(v))).collect::<Vec<_>>().into()),
         other => other.clone(),
     }
 }
@@ -35,7 +36,7 @@ fn key(v: &Value) -> Vec<u8> {
     flow_syntax::value::key_of(&|r| E::residual::residual_id(r), &functions(v))
 }
 
-type Sig = (Vec<String>, Vec<String>, Vec<(String, Vec<u8>)>, Vec<Vec<u8>>, Vec<(Vec<String>, Vec<(Vec<i64>, Vec<u8>)>)>);
+type Sig = (Vec<String>, Vec<String>, Vec<(Symbol, Vec<u8>)>, Vec<Vec<u8>>, Vec<(flow_check::workspace::Path, Vec<(Vec<i64>, Vec<u8>)>)>);
 
 fn signature(e: &E::Eval) -> Sig {
     let nodes = e.plan.nodes.iter().map(|n| format!("{}|{}|{:?}|{:?}|{:?}|{}|{:?}", n.id, n.kind, n.ty, n.site, n.iter, n.inst, n.args.iter().map(|(k, v)| (k.clone(), String::from_utf8_lossy(&key(v)).into_owned())).collect::<Vec<_>>())).collect();

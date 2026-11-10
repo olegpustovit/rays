@@ -4,6 +4,7 @@
 //!
 //! Gap: OCaml tells the recorded values apart by physical identity (`==`); Rust values have none,
 //! so `lower_value` matches the recorded `Source`/`Struct` values structurally.
+use flow_syntax::symbol::Symbol;
 use crate::layout_by_path::Path;
 use flow_check::catalog::{self as fc, Catalog};
 use flow_check::workspace::{self as w, Graph, Node as TNode, Term, Workspace};
@@ -103,8 +104,8 @@ fn find_argument(in_fn: bool, field: &str, id: i64, term: &Term) -> Option<Found
 /// Names a `fn` body reads: a closure may hold the value bound to one of them.
 /// Whether a function body refers to a binding named on `path`: a walk of arena rows that stops
 /// at the first hit and allocates nothing (it runs on every follow-viewport orbit frame).
-fn captures(graphs: &[&Graph], path: &[String]) -> bool {
-    fn go(arena: &TermArena, path: &[String], inside: bool, row: TermId) -> bool {
+fn captures(graphs: &[&Graph], path: &[Symbol]) -> bool {
+    fn go(arena: &TermArena, path: &[Symbol], inside: bool, row: TermId) -> bool {
         let node = arena.row(row).node;
         if let (TNode::RefBinding(id), true) = (node, inside) {
             let name = arena.name(arena.ref_binding(id).name);
@@ -405,8 +406,8 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
         .map(|(_, vs)| vs.iter().map(|(_, v)| v.clone()).collect())
         .unwrap_or_default();
     let mut hit = false;
-    let set = |fs: &[(String, E)]| -> Vec<(String, E)> {
-        fs.iter().map(|(f, x)| if *f == change.field { (f.clone(), change.after.clone()) } else { (f.clone(), x.clone()) }).collect()
+    let set = |fs: &flow_syntax::value::Record| -> flow_syntax::value::Record {
+        fs.iter().map(|(f, x)| if *f == change.field { (f.clone(), change.after.clone()) } else { (*f, x.clone()) }).collect::<Vec<_>>().into()
     };
     fn is_target(targets: &[E], change: &Change, v: &E) -> bool {
         targets.iter().any(|t| t == v)
@@ -417,7 +418,7 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
                 _ => false,
             }
     }
-    fn rw(v: &E, targets: &[E], change: &Change, hit: &mut bool, set: &dyn Fn(&[(String, E)]) -> Vec<(String, E)>) -> E {
+    fn rw(v: &E, targets: &[E], change: &Change, hit: &mut bool, set: &dyn Fn(&flow_syntax::value::Record) -> flow_syntax::value::Record) -> E {
         if is_target(targets, change, v) {
             *hit = true;
             return match v {
@@ -426,7 +427,7 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
                 v => v.clone(),
             };
         }
-        let fields = |fs: &[(String, E)], hit: &mut bool| fs.iter().map(|(f, x)| (f.clone(), rw(x, targets, change, hit, set))).collect::<Vec<_>>();
+        let fields = |fs: &flow_syntax::value::Record, hit: &mut bool| fs.iter().map(|(f, x)| (f.clone(), rw(x, targets, change, hit, set))).collect::<Vec<_>>().into();
         match v {
             E::List(a) => E::List(Arc::new(a.iter().map(|x| rw(x, targets, change, hit, set)).collect())),
             E::Record(fs) => E::Record(fields(fs, hit)),
@@ -436,7 +437,7 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
         }
     }
     let mut rwv = |v: &E, hit: &mut bool| rw(v, &targets, change, hit, &set);
-    let results: Vec<(String, E)> = lowered.evaluated.results.iter().map(|(n, v)| (n.clone(), rwv(v, &mut hit))).collect();
+    let results: Vec<(Symbol, E)> = lowered.evaluated.results.iter().map(|(n, v)| (n.clone(), rwv(v, &mut hit))).collect();
     let records: w::Paths = Default::default();
     let _ = records;
     let records: flow_eval::Records = lowered

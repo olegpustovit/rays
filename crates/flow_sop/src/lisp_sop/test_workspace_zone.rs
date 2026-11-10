@@ -1,6 +1,7 @@
 //! Port of lib/flow_sop/test_workspace_zone.ml (W8): loops over geometry. A Garden-like graph
 //! (scatter, then a for over its points) cooks deterministically at 1 and 3 domains; moving one
 //! point recooks only its element; pieces, keys and provenance.
+use flow_syntax::symbol::Symbol;
 use super::support::*;
 use crate::curve;
 use crate::lisp_sop;
@@ -77,8 +78,8 @@ fn mean_xy(g: &geo::T) -> (f64, f64) {
     (x / n as f64, y / n as f64)
 }
 
-fn path(l: &[&str]) -> Vec<String> {
-    l.iter().map(|x| (*x).to_owned()).collect()
+fn path(l: &[&str]) -> flow_check::workspace::Path {
+    l.iter().map(|x| (*x).into()).collect()
 }
 
 fn graph_with(graph: &lower::Graph, network: Network, root: Option<i64>) -> lower::Graph {
@@ -93,7 +94,7 @@ fn verify(source: &str, site: &[&str], iter: &[i64], choices: &[Vec<i64>], expec
     let mut s = open_session();
     let original = cook_domains(&mut s, 1, &graph);
     let l = lowered.clone();
-    let records = probe::make(&lowered.evaluated, probe::Options { dynamic: Some(Rc::new(move |p: &[String]| lower::zone_count(&l, &p.to_vec()))), ..Default::default() });
+    let records = probe::make(&lowered.evaluated, probe::Options { dynamic: Some(Rc::new(move |p: &[Symbol]| lower::zone_count(&l, &p.to_vec()))), ..Default::default() });
     for (probes, expected_x) in choices.iter().zip(expected_x) {
         assert!(records.plan_node(None, &site, probes) == Some(target.id), "a geometry preview resolves the template at the selected tuple");
         let (network, root) = (lowered.preview)(target.id, probes, &graph.network).expect("a preview");
@@ -105,7 +106,7 @@ fn verify(source: &str, site: &[&str], iter: &[i64], choices: &[Vec<i64>], expec
         let output = cook_domains(&mut s, 1, &viewed);
         assert!(prims(&output) == expected_prims, "a preview contains only the selected element");
         let (x, _) = mean_xy(&output);
-        assert!((x - expected_x).abs() < 1e-6, "preview {} at {probes:?}: expected {expected_x:.1}, got {x:.1}", site.join("/"));
+        assert!((x - expected_x).abs() < 1e-6, "preview {} at {probes:?}: expected {expected_x:.1}, got {x:.1}", flow_syntax::symbol::join_path(&site, "/"));
         assert!(geometry_bytes(&output) == geometry_bytes(&cook_domains(&mut s, 3, &viewed)), "a preview is exact across domains");
     }
     assert!(geometry_bytes(&original) == geometry_bytes(&cook_domains(&mut s, 1, &graph)), "preview cache entries contaminated the authored result");

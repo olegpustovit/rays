@@ -6,6 +6,7 @@
 //! ?host_events`) are the trailing parameters of `update`; callbacks that need the `ui` while the
 //! chrome holds it (`groups`, `tools_from`) are answered from tables computed just before.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -61,8 +62,8 @@ use crate::selection;
 use crate::text_pane;
 use crate::timeline;
 
-type Path = Vec<String>;
-type Key_ = Vec<String>;
+type Path = flow_check::workspace::Path;
+type Key_ = flow_check::workspace::Path;
 
 /// a viewer or a canvas: the panels a sketch's picture is drawn in
 pub fn is_picture(panel: &Panel) -> bool {
@@ -582,10 +583,10 @@ pub fn draw_inspectors<'a>(
     ui: &mut Ui,
 ) -> (Option<Panel_result>, Vec<change>, Vec<(String, Value)>, Vec<scope::Change>, Vec<(carry_mod::Place, bool)>, bool) {
     // the split a card of the editor graph is, sized another way from what it shows now
-    let resized = |node: &[String], how: layout::Way| -> Option<layout_edit::Size> {
+    let resized = |node: &[Symbol], how: layout::Way| -> Option<layout_edit::Size> {
         match (node, &value.doc.shell) {
-            ([graph, name], Some(sh)) if !workspace.restored && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name).as_ref() == Some(graph) => {
-                let path = sh.origins.iter().find_map(|(path, origin)| if *origin == Origin::Bound(name.clone()) { Some(path.clone()) } else { None })?;
+            ([graph, name], Some(sh)) if !workspace.restored && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name).as_deref() == Some(graph.as_str()) => {
+                let path = sh.origins.iter().find_map(|(path, origin)| if *origin == Origin::Bound(name.to_string()) { Some(path.clone()) } else { None })?;
                 let splitter = g.splitters.iter().find(|s| s.node.as_ref() == Some(&path))?;
                 Some(match layout::resized(splitter, how) {
                     panels::Size::Ratio(r) => layout_edit::Size::Ratio(r),
@@ -633,7 +634,7 @@ pub fn carry_marks(value: &EditorModel) -> Marks {
     let path_of = |place: &carry_mod::Place| -> Option<Path> {
         match place {
             carry_mod::Place::Node(p) => Some(p.clone()),
-            carry_mod::Place::Graph(g) => Some(vec![g.clone()]),
+            carry_mod::Place::Graph(g) => Some(vec![g.clone().into()]),
             carry_mod::Place::Object(id) | carry_mod::Place::Surface { object_: id, .. } => match value.doc.homes.objects.iter().find(|(n, _)| n == id) {
                 Some((_, Home::BoundAt(p))) => Some(p.clone()),
                 _ => None,

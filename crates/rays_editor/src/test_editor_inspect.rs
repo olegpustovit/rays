@@ -8,8 +8,8 @@ use flow_syntax::context;
 use flow_syntax::syntax::{self as s, Node as SNode};
 use flow_syntax::ty::Ty;
 
-fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|p| p.to_string()).collect()
+fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|p| (*p).into()).collect()
 }
 
 fn form(text: &str) -> s::Syntax {

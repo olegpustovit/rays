@@ -1,4 +1,5 @@
 //! lib/flow_sop/test_mesh_planes.ml checks(): exact bytes, independent ownership and diagnostic order.
+use flow_syntax::symbol::Symbol;
 use super::support::geometry_bytes;
 use crate::topology_kernel;
 use flow_syntax::value::Value;
@@ -7,12 +8,12 @@ use std::sync::Arc;
 
 fn floats(xs: Vec<f64>) -> Value { Value::Floats(1, Arc::new(xs)) }
 fn ints(xs: Vec<i64>) -> Value { Value::Int_array(Arc::new(xs)) }
-fn fields(n: usize) -> Vec<(String, Value)> {
+fn fields(n: usize) -> Vec<(Symbol, Value)> {
     vec![("x".into(), floats((0..n).map(|i| i as f64).collect())),
          ("y".into(), floats((0..n).map(|i| if i & 1 == 0 { -0.0 } else { f64::from_bits(1) }).collect())),
          ("z".into(), floats(vec![0.125; n]))]
 }
-fn replace(mut xs: Vec<(String, Value)>, key: &str, value: Value) -> Vec<(String, Value)> {
+fn replace(mut xs: Vec<(Symbol, Value)>, key: &str, value: Value) -> Vec<(Symbol, Value)> {
     xs.iter_mut().find(|(name, _)| name == key).unwrap().1 = value;
     xs
 }
@@ -20,7 +21,7 @@ fn bad(value: &Value, number: f64) -> Value {
     let Value::Floats(1, xs) = value else { panic!("float array expected") };
     let mut xs = xs.as_ref().clone(); xs[0] = number; floats(xs)
 }
-fn args(points: Value) -> Vec<(String, Value)> {
+fn args(points: Value) -> Vec<(Symbol, Value)> {
     vec![("points".into(), points), ("vertex_points".into(), ints(vec![])),
          ("primitive_offsets".into(), ints(vec![0])), ("kinds".into(), ints(vec![]))]
 }
@@ -31,7 +32,7 @@ fn ownership(n: usize) {
             let plane = |i: usize| { let Value::Floats(1, xs) = &input[i].1 else { unreachable!() }; xs.as_ref().clone() };
             let expected = geo::create(float3::of_owned(plane(0), plane(1), plane(2)).unwrap(), topology::empty(n as i64).unwrap(), None, None, None).unwrap();
             let before = geometry_bytes(&expected);
-            let actual = topology_kernel::mesh(&args(Value::Record(input.clone()))).unwrap();
+            let actual = topology_kernel::mesh(&args(Value::Record(input.clone().into()))).unwrap();
             assert_eq!(geometry_bytes(&actual), before);
             let output = float3::view::view(geo::positions(&actual)).unwrap();
             for ((_, value), output) in input.iter_mut().zip([&output.x, &output.y, &output.z]) {
@@ -58,19 +59,19 @@ fn mesh_plane_diagnostic_precedence() {
     let count = ("E_ARRAY_COUNT", "Mesh coordinate planes need the same element count.");
     let record = ("E_TOPOLOGY_TYPE", "Mesh planes require exactly x, y and z float arrays.");
     let cases = vec![
-        ("first-plane", args(Value::Record(replace(input.clone(), "x", bad(x, f64::NAN)))), nonfinite),
-        ("second-before-count", args(Value::Record(replace(replace(input.clone(), "z", short.clone()), "y", bad(y, f64::NAN)))), nonfinite),
-        ("third-plane", args(Value::Record(replace(input.clone(), "z", bad(z, f64::INFINITY)))), nonfinite),
-        ("multiple-before-count", args(Value::Record(vec![("z".into(), bad(z, f64::NEG_INFINITY)), ("y".into(), bad(y, f64::NAN)), ("x".into(), short.clone())])), nonfinite),
-        ("finite-count", args(Value::Record(replace(input.clone(), "z", short.clone()))), count),
-        ("malformed-before-finite", args(Value::Record(vec![("x".into(), bad(x,f64::NAN)), ("y".into(), ints(vec![])), ("z".into(), z.clone())])), record),
-        ("missing-field", args(Value::Record(vec![("x".into(),x.clone()),("y".into(),y.clone())])), record),
-        ("duplicate-field", args(Value::Record(vec![("x".into(),bad(x,f64::NAN)),("x".into(),x.clone()),("z".into(),z.clone())])), record),
-        ("outer-storage-before-finite", replace(args(Value::Record(replace(input.clone(),"x",bad(x,f64::NAN)))),"vertex_points",floats(vec![])), ("E_TOPOLOGY_TYPE","Mesh requires vec3 points and integer vertex_points, primitive_offsets and kinds arrays.")),
-        ("finite-before-kind", replace(args(Value::Record(replace(input.clone(),"x",bad(x,f64::NAN)))),"kinds",ints(vec![3])), nonfinite),
-        ("count-before-kind", replace(args(Value::Record(replace(input.clone(),"z",short))),"kinds",ints(vec![3])), count),
-        ("kind-before-topology", replace(args(Value::Record(input.clone())),"kinds",ints(vec![3])), ("E_TOPOLOGY_KIND","Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline).")),
-        ("topology-before-copy", vec![("points".into(),Value::Record(input)),("vertex_points".into(),ints(vec![n as i64])),("primitive_offsets".into(),ints(vec![0,1])),("kinds".into(),ints(vec![1]))], ("E_TOPOLOGY","Topology: vertex references an invalid point")),
+        ("first-plane", args(Value::Record(replace(input.clone(), "x", bad(x, f64::NAN)).into())), nonfinite),
+        ("second-before-count", args(Value::Record(replace(replace(input.clone(), "z", short.clone()), "y", bad(y, f64::NAN)).into())), nonfinite),
+        ("third-plane", args(Value::Record(replace(input.clone(), "z", bad(z, f64::INFINITY)).into())), nonfinite),
+        ("multiple-before-count", args(Value::Record(vec![("z".into(), bad(z, f64::NEG_INFINITY)), ("y".into(), bad(y, f64::NAN)), ("x".into(), short.clone())].into())), nonfinite),
+        ("finite-count", args(Value::Record(replace(input.clone(), "z", short.clone()).into())), count),
+        ("malformed-before-finite", args(Value::Record(vec![("x".into(), bad(x,f64::NAN)), ("y".into(), ints(vec![])), ("z".into(), z.clone())].into())), record),
+        ("missing-field", args(Value::Record(vec![("x".into(),x.clone()),("y".into(),y.clone())].into())), record),
+        ("duplicate-field", args(Value::Record(vec![("x".into(),bad(x,f64::NAN)),("x".into(),x.clone()),("z".into(),z.clone())].into())), record),
+        ("outer-storage-before-finite", replace(args(Value::Record(replace(input.clone(),"x",bad(x,f64::NAN)).into())),"vertex_points",floats(vec![])), ("E_TOPOLOGY_TYPE","Mesh requires vec3 points and integer vertex_points, primitive_offsets and kinds arrays.")),
+        ("finite-before-kind", replace(args(Value::Record(replace(input.clone(),"x",bad(x,f64::NAN)).into())),"kinds",ints(vec![3])), nonfinite),
+        ("count-before-kind", replace(args(Value::Record(replace(input.clone(),"z",short).into())),"kinds",ints(vec![3])), count),
+        ("kind-before-topology", replace(args(Value::Record(input.clone().into())),"kinds",ints(vec![3])), ("E_TOPOLOGY_KIND","Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline).")),
+        ("topology-before-copy", vec![("points".into(),Value::Record(input.into())),("vertex_points".into(),ints(vec![n as i64])),("primitive_offsets".into(),ints(vec![0,1])),("kinds".into(),ints(vec![1]))], ("E_TOPOLOGY","Topology: vertex references an invalid point")),
     ];
     for domains in [1,4,8] {
         parallel::run_unit(Some(domains), &|| {

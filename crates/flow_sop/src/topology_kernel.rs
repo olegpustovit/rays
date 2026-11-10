@@ -1,4 +1,5 @@
 //! Port of lib/flow_sop/topology_kernel.ml(i): the public face of `topology_kernel_impl`.
+use flow_syntax::symbol::Symbol;
 use crate::topology_kernel_impl as imp;
 use flow_ir::flow_ir::gpu::Integers;
 use flow_syntax::value::Value;
@@ -10,7 +11,7 @@ pub fn mesh_points(points: &Value) -> Result<(i64, imp::Positions), Diagnostic> 
     imp::mesh_points(points)
 }
 
-pub fn mesh(args: &[(String, Value)]) -> Result<Geometry, Diagnostic> {
+pub fn mesh(args: &[(Symbol, Value)]) -> Result<Geometry, Diagnostic> {
     imp::mesh(args)
 }
 

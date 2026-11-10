@@ -50,7 +50,7 @@ fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     let flow_check::workspace::Node::State(id) = view.term.node else { panic!("state term") };
     let arena = view.term.arena();
     let mut path = view.prefix.as_ref().clone();
-    path.extend(arena.path(arena.state(id).zone).iter().map(|id| view.term.name(*id).to_owned()));
+    path.extend(arena.path(arena.state(id).zone).iter().map(|id| view.term.symbol(*id)));
     let state = create_state();
     let reads = Arc::new(AtomicI64::new(0));
     let data = Value::Floats(1, Arc::new(vec![0.]));
@@ -98,7 +98,7 @@ fn graph_state_clocks_and_snapshots_agree() {
                 for _ in 0..2 {
                     for (name, residual) in &results {
                         let actual = force_fn(residual, &live, &private_state).unwrap();
-                        let wanted = &expected.iter().find(|(n, _)| n == name).unwrap().1;
+                        let wanted = &expected.iter().find(|(n, _)| *n == name.as_str()).unwrap().1;
                         assert!(actual == *wanted, "Graph state {name} at tick{tick}/frame{frame}: expected {}, got {}", String::from_utf8_lossy(&show(wanted)), String::from_utf8_lossy(&show(&actual)));
                     }
                 }
@@ -196,7 +196,7 @@ fn exact_images_cannot_be_state() {
             c.fetch_add(1, O::SeqCst);
             let resource = value::truthy(&args.iter().find(|(n, _)| n == "resource").unwrap().1)?;
             let v = if resource { Value::Deferred(ty::image(), 0) } else { Value::Int(0) };
-            Ok(match wrap { 0 => v, 1 => Value::List(Arc::new(vec![v])), 2 => Value::Record(vec![("image".into(), v)]), _ => value::struct_value("opaque", ty::Ty::Any, vec![("image".into(), v)]) })
+            Ok(match wrap { 0 => v, 1 => Value::List(Arc::new(vec![v])), 2 => Value::Record(vec![("image".into(), v)].into()), _ => value::struct_value("opaque", ty::Ty::Any, vec![("image".into(), v)].into()) })
         });
         for (seed, step, expected_calls) in [("(test/opaque true)", "(test/opaque false)", 1), ("(test/opaque false)", "(test/opaque true)", 2)] {
             let src = format!("(workspace opaque (graph g :context value (state [s {seed}] {step})))");

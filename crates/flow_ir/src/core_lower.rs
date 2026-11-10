@@ -5,6 +5,7 @@
 //! Locals are numbered in source order.
 #![allow(non_camel_case_types, non_snake_case, clippy::too_many_arguments)]
 
+use flow_syntax::symbol::{self, Symbol};
 use crate::core_ir as C;
 use crate::{fallback, packed};
 use flow_check::op::{self, Reduction};
@@ -100,23 +101,23 @@ fn state_step_nodes(term: &Term) -> HashSet<(u64, u32)> {
 }
 
 fn term_path(term: &Term, path: PathId) -> Path {
-    term.arena().path(path).iter().map(|id| term.name(*id).to_owned()).collect()
+    term.arena().path(path).iter().map(|id| term.symbol(*id)).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum CacheKey { Residual((i64, i64)), Cooked(String, i64), CookedList(Vec<i64>), Frame(u8) }
+enum CacheKey { Residual((i64, i64)), Cooked(Symbol, i64), CookedList(Vec<i64>), Frame(u8) }
 fn frame_key(f: C::FrameField) -> u8 {
     use C::FrameField::*;
     match f { Time => 0, Dt => 1, Index => 2, Tick => 3, Width => 4, Height => 5, Pointer_x => 6, Pointer_y => 7, Input => 8 }
 }
 
-type Env = BTreeMap<String, Lowered>;
+type Env = BTreeMap<Symbol, Lowered>;
 
 #[derive(Clone, Debug)]
 pub enum Lowered {
     Known(Value),
     Computed(i64, Ty),
-    Record_fields(Vec<(String, Lowered)>),
+    Record_fields(Vec<(Symbol, Lowered)>),
     Record_choice(Box<Lowered>, Box<Lowered>, Box<Lowered>),
     Selected(Vec<Lowered>, Box<Lowered>),
     Callable(Callable),
@@ -365,7 +366,7 @@ pub struct Lowerer {
 
 fn statement(id: i64, source: &C::Source, node: C::StatementNode) -> C::Statement { C::Statement { id, source: source.clone(), node } }
 
-fn known_values(args: &[(String, Lowered)]) -> Option<Vec<(String, Value)>> {
+fn known_values(args: &[(Symbol, Lowered)]) -> Option<Vec<(Symbol, Value)>> {
     let mut out = Vec::new();
     for (name, v) in args {
         match v {
@@ -381,7 +382,7 @@ fn storage_argument(ty: &Ty) -> bool {
 }
 
 // Keep size-dependent allocation in Core: the resident executor may generate it on the device.
-fn large_array_constructor(name: &str, args: &[(String, Lowered)]) -> bool {
+fn large_array_constructor(name: &str, args: &[(Symbol, Lowered)]) -> bool {
     matches!(name, "array/range" | "array/int" | "array/float" | "array/vec3" | "array/vec4")
         && args.iter().any(|(n, v)| n == "count" && match v {
             Known(Value::Int(n)) => *n > 4096,
@@ -491,11 +492,11 @@ impl Lowerer {
                 Ok(self.emit_n(s, source, &g.ty, C::Expr::Host_source { name: g.name.clone(), ty: g.ty.clone(), args }))
             }
             Known(Value::Deferred(ty, id)) if ty::is_cooked(ty) => {
-                let key = CacheKey::Cooked(ty::to_string(ty), *id);
+                let key = CacheKey::Cooked(ty::to_string(ty).into(), *id);
                 let value = match s.cached(&key) {
                     Some(v) => v.clone(),
                     None => {
-                        let value = self.emit(s, source, ty, C::Expr::Source(source_value("$core/cooked", ty.clone(), vec![("id".into(), Value::Int(*id))])));
+                        let value = self.emit(s, source, ty, C::Expr::Source(source_value("$core/cooked", ty.clone(), vec![("id".into(), Value::Int(*id))].into())));
                         s.cache.insert(key, value.clone());
                         value
                     }
@@ -563,7 +564,7 @@ impl Lowerer {
         let mut args = args;
         if op == C::Primitive::Sequence_build && geometry_collection(ty) { args.push(("cooked", boolean(true))); }
         let mut lowered = Vec::new();
-        for (name, v) in &args { lowered.push((name.to_string(), self.ensure(s, source, v)?)); }
+        for (name, v) in &args { lowered.push(((*name).into(), self.ensure(s, source, v)?)); }
         Ok(self.emit(s, source, ty, C::Expr::Prim(op, lowered)))
     }
 
@@ -634,7 +635,7 @@ impl Lowerer {
                     Ty::Record(fields) => fields.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone()).unwrap_or_else(|| ty.clone()),
                     _ => ty.clone(),
                 };
-                Ok(self.emit(s, source, &ty, C::Expr::Field(*n, name.to_owned())))
+                Ok(self.emit(s, source, &ty, C::Expr::Field(*n, name.into())))
             }
         }
     }
@@ -823,7 +824,7 @@ impl Lowerer {
             }
             (Known(Value::List(items)), Known(index)) => {
                 let o = op::find(&[], "nth", &context::value()).ok_or_else(|| refusal("nth"))?;
-                let args = vec![("list".to_owned(), Value::List(items.clone())), ("index".to_owned(), index.clone())];
+                let args = vec![("list".into(), Value::List(items.clone())), ("index".into(), index.clone())];
                 match (o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag("nth")), &args) {
                     Ok(v) => self.resolve(s, &Known(v)),
                     Err(d) => {
@@ -876,7 +877,7 @@ impl Lowerer {
         }
     }
 
-    fn record_fields(&mut self, s: &mut Scope, source: &C::Source, value: &Lowered) -> R<Vec<(String, Lowered)>> {
+    fn record_fields(&mut self, s: &mut Scope, source: &C::Source, value: &Lowered) -> R<Vec<(Symbol, Lowered)>> {
         let resolved = self.resolve(s, value)?;
         match &resolved {
             Record_fields(fields) => Ok(fields.clone()),
@@ -896,7 +897,7 @@ impl Lowerer {
     }
 
     fn map_fields(&mut self, s: &mut Scope, source: &C::Source, value: &Lowered,
-                  f: &mut dyn FnMut(&mut Lowerer, &mut Scope, Vec<(String, Lowered)>) -> R<Vec<(String, Lowered)>>) -> R<Lowered> {
+                  f: &mut dyn FnMut(&mut Lowerer, &mut Scope, Vec<(Symbol, Lowered)>) -> R<Vec<(Symbol, Lowered)>>) -> R<Lowered> {
         let resolved = self.resolve(s, value)?;
         match &resolved {
             Selected(items, index) => {
@@ -1012,7 +1013,7 @@ impl Lowerer {
     }
 
     fn join(&mut self, source: &C::Source, condition: i64, ty: &Ty, a: &Lowered, b: &Lowered, yes: &mut Scope, no: &mut Scope) -> R<Lowered> {
-        fn fields(l: &Lowered) -> Option<Vec<(String, Lowered)>> {
+        fn fields(l: &Lowered) -> Option<Vec<(Symbol, Lowered)>> {
             match l {
                 Record_fields(fs) => Some(fs.clone()),
                 Known(Value::Record(fs)) => Some(fs.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect()),
@@ -1147,12 +1148,12 @@ impl Lowerer {
                     Some(i) => i,
                     None => { arguments.push(*id); arguments.len() - 1 }
                 };
-                Ok(source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
+                Ok(source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))].into()))
             }
             Record_fields(fields) => {
                 let mut out = Vec::new();
                 for (name, v) in fields { out.push((name.clone(), self.capture(s, source, parent, static_, sop, arguments, v)?)); }
-                Ok(Value::Record(out))
+                Ok(Value::Record(out.into()))
             }
             Callable(Callable::Closure(cl)) => {
                 let mut bindings = Vec::new();
@@ -1175,7 +1176,7 @@ impl Lowerer {
             let mut bindings = Vec::new();
             for name in &names {
                 if let Some(v) = env.get(name) {
-                    bindings.push((name.clone(), self.capture(s, source, parent, static_, sop, &mut arguments, v)?));
+                    bindings.push((*name, self.capture(s, source, parent, static_, sop, &mut arguments, v)?));
                 }
             }
             let r = E::residual::with_bindings(parent, x, &bindings)?;
@@ -1245,7 +1246,7 @@ impl Lowerer {
         // the costliest fallback there is: an interpreted loop, element by element; reported before
         // a strict lowering refuses it, so the refusal names its reason too
         if let (Some(d), Some(parent)) = (why.as_ref().and_then(|w| w.first()), self.current) {
-            let site = self.view(parent)?.site.join("/");
+            let site = flow_syntax::symbol::join_path(&self.view(parent)?.site, "/");
             fallback::note(&site, &format!("no kernel, interpreted: {}", d.message));
         }
         if numeric_candidate && self.strict { return Err(refusal("packed_kernel")); }
@@ -1268,7 +1269,7 @@ impl Lowerer {
             Node::Nil => Ok(Known(Value::No_geo)),
             Node::Record(range) => (|| -> R<Lowered> {
                 let mut out = Vec::new();
-                for field in arena.fields(range) { out.push((x.name(field.name).to_owned(), self.term(borrow, s, source, env, &x.child(field.term))?)); }
+                for field in arena.fields(range) { out.push((x.symbol(field.name), self.term(borrow, s, source, env, &x.child(field.term))?)); }
                 Ok(Record_fields(out))
             })(),
             Node::ListLit(items) => (|| -> R<Lowered> {
@@ -1276,7 +1277,7 @@ impl Lowerer {
                 if items.len() > 4096 && !geometry_collection(x.ty()) { return Err(refusal("list_limit")); }
                 let mut lowered = Vec::new();
                 for t in items { lowered.push(self.term(false, s, source, env, &x.child(*t))?); }
-                let pairs: Vec<(String, Lowered)> = lowered.iter().map(|v| (String::new(), v.clone())).collect();
+                let pairs: Vec<(Symbol, Lowered)> = lowered.iter().map(|v| ("".into(), v.clone())).collect();
                 match known_values(&pairs) {
                     Some(items) => {
                         let values: Vec<Value> = items.into_iter().map(|(_, v)| v).collect();
@@ -1308,7 +1309,7 @@ impl Lowerer {
                 let mut record = self.term(false, s, source, env, &x.child(assoc.value))?;
                 for field in arena.fields(assoc.fields) {
                     let value = self.term(false, s, source, env, &x.child(field.term))?;
-                    let name = x.name(field.name).to_owned();
+                    let name = x.symbol(field.name);
                     record = self.map_fields(s, source, &record, &mut |l, sc, fields| {
                         match fields.iter().find(|(n, _)| *n == name) {
                             Some((_, old)) => {
@@ -1332,7 +1333,7 @@ impl Lowerer {
                         _ => self.primitive(s, source, &Ty::Text, C::Primitive::Show, vec![("value", value.clone())])?,
                     });
                 }
-                let pairs: Vec<(String, Lowered)> = texts.iter().map(|v| (String::new(), v.clone())).collect();
+                let pairs: Vec<(Symbol, Lowered)> = texts.iter().map(|v| ("".into(), v.clone())).collect();
                 match known_values(&pairs) {
                     Some(texts) => {
                         let mut out = Vec::new();
@@ -1348,7 +1349,7 @@ impl Lowerer {
                 let ts = arena.term_ids(ts);
                 let mut args = Vec::new();
                 for t in ts { args.push(self.term(false, s, source, env, &x.child(*t))?); }
-                let pairs: Vec<(String, Lowered)> = args.iter().map(|v| (String::new(), v.clone())).collect();
+                let pairs: Vec<(Symbol, Lowered)> = args.iter().map(|v| ("".into(), v.clone())).collect();
                 match known_values(&pairs) {
                     Some(values) => {
                         let mut nums = Vec::new();
@@ -1367,7 +1368,7 @@ impl Lowerer {
                 let binding = arena.ref_binding(id);
                 let name = x.name(binding.name);
                 let fields = arena.name_ids(binding.fields);
-                let start = match env.get(name) {
+                let start = match symbol::find(name).and_then(|name| env.get(&name)) {
                     Some(v) => self.resolve(s, v)?,
                     None => return Err(refusal("binding")),
                 };
@@ -1390,11 +1391,11 @@ impl Lowerer {
                 for field in args {
                     let t = x.child(field.term);
                     let v = self.term(storage_argument(t.ty()), s, source, env, &t)?;
-                    lowered.push((x.name(field.name).to_owned(), self.ensure(s, source, &v)?));
+                    lowered.push((x.symbol(field.name), self.ensure(s, source, &v)?));
                 }
                 let mut all = Vec::new();
-                all.push(("$name".to_owned(), self.ensure(s, source, &Known(text(kind)))?));
-                all.push(("$context".to_owned(), self.ensure(s, source, &Known(text(context::name(call.ctx))))?));
+                all.push(("$name".into(), self.ensure(s, source, &Known(text(kind)))?));
+                all.push(("$context".into(), self.ensure(s, source, &Known(text(context::name(call.ctx))))?));
                 all.extend(lowered);
                 Ok(self.emit(s, source, x.ty(), C::Expr::Host_source { name: "$core/catalog".into(), ty: x.ty().clone(), args: all }))
             })(),
@@ -1471,7 +1472,7 @@ impl Lowerer {
                 let body = node.body.map(|id| x.child(id));
                 let mut values = Vec::new();
                 for a in args { values.push(self.term(false, s, source, env, &x.child(*a))?); }
-                let value = match env.get(fn_name) {
+                let value = match symbol::find(fn_name).and_then(|name| env.get(&name)) {
                     Some(f) => {
                         let c = self.as_callable(source, f)?;
                         self.call(borrow, s, source, x.ty(), body.as_ref(), &c, &values)?
@@ -1558,7 +1559,7 @@ impl Lowerer {
                 // The referenced graph's body in its own default instance, as the live walker re-runs it.
                 let root = self.root()?;
                 let g = E::residual::residual_graph(root, graph).ok_or_else(|| refusal("ref"))?;
-                let zone = vec![graph.to_owned()];
+                let zone = vec![graph.into()];
                 let mut src2 = source.clone();
                 src2.instance = E::residual::graph_instance(root, graph).unwrap_or(source.instance);
                 src2.prefix = Vec::new();
@@ -1573,7 +1574,7 @@ impl Lowerer {
                         Some(t) => {
                             let v = self.term(false, s, &src2, &genv, t)?;
                             let v = self.coerce(s, &src2, ty, &v)?;
-                            genv.insert(name.clone(), v);
+                            genv.insert(symbol::intern(name), v);
                         }
                         None => return Err(refusal("ref")),
                     }
@@ -1592,7 +1593,7 @@ impl Lowerer {
                 let node = arena.loop_node(id);
                 let clauses = arena.bindings(node.clauses);
                 let PatternNode::Name(name) = arena.pattern(clauses[0].pattern) else { unreachable!() };
-                let name = x.name(name);
+                let name = x.symbol(name);
                 let items = self.term(false, s, source, env, &x.child(clauses[0].term))?;
                 match &items {
                     Known(Value::List(items)) if items.len() <= 32 => {
@@ -1601,7 +1602,7 @@ impl Lowerer {
                             let mut src2 = source.clone();
                             src2.iter.push(C::Iteration::Static_index(index as i64));
                             let mut e2 = env.clone();
-                            e2.insert(name.to_owned(), Known(item.clone()));
+                            e2.insert(name, Known(item.clone()));
                             values.push(self.term(false, s, &src2, &e2, &x.child(node.body))?);
                         }
                         if values.iter().all(|v| matches!(v, Known(_))) {
@@ -1791,13 +1792,13 @@ impl Lowerer {
     fn bind(&mut self, s: &mut Scope, source: &C::Source, mut env: Env, owner: &Term, pattern: PatternId, value: Lowered) -> R<Env> {
         let arena = owner.arena();
         match arena.pattern(pattern) {
-            PatternNode::Name(name) => { env.insert(owner.name(name).to_owned(), value); Ok(env) }
+            PatternNode::Name(name) => { env.insert(owner.symbol(name), value); Ok(env) }
             PatternNode::Keys(keys) => {
                 let value = self.resolve(s, &value)?;
                 for name in arena.name_ids(keys) {
-                    let name = owner.name(*name);
-                    let f = self.field(s, source, &Ty::Any, &value, name)?;
-                    env.insert(name.to_owned(), f);
+                    let name = owner.symbol(*name);
+                    let f = self.field(s, source, &Ty::Any, &value, name.as_str())?;
+                    env.insert(name, f);
                 }
                 Ok(env)
             }
@@ -1908,7 +1909,7 @@ impl Lowerer {
                     Some((o, metadata)) if o.ctx == context::value() && o.shape == op::Shape::Scalar && metadata.builtin_body => o,
                     _ => return Err(refusal(name)),
                 };
-                let names: Vec<String> = o.signature.pos.iter().chain(o.signature.opt.iter()).map(|(n, _)| n.clone()).collect();
+                let names: Vec<Symbol> = o.signature.pos.iter().chain(o.signature.opt.iter()).map(|(n, _)| *n).collect();
                 let mut args = Vec::new();
                 for (i, v) in values.iter().enumerate() {
                     let n = if i < names.len() { names[i].clone() } else {
@@ -1932,7 +1933,7 @@ impl Lowerer {
         let root = self.root()?;
         let declaration = E::residual::residual_definition(root, name).ok_or_else(|| refusal("call_fn"))?;
         if declaration.inputs.len() != values.len() { return Err(refusal("call_fn")); }
-        let zone = vec![format!("def:{name}")];
+        let zone = vec![format!("def:{name}").into()];
         let mut source = source.clone();
         source.prefix = source.prefix.iter().chain(source.site.iter()).cloned().collect();
         source.site = zone.clone();
@@ -1940,14 +1941,14 @@ impl Lowerer {
         let mut env = Env::new();
         for ((n, ty, _), value) in declaration.inputs.iter().zip(values.iter()) {
             let v = self.coerce(s, &source, ty, value)?;
-            env.insert(n.clone(), v);
+            env.insert(symbol::intern(n), v);
         }
         self.term(borrow, s, &source, &env, specialized.unwrap_or(&declaration.body))
     }
 
-    fn host(&mut self, s: &mut Scope, source: &C::Source, borrow: bool, args: &[(String, Lowered)], v: &Value) -> R<Lowered> {
+    fn host(&mut self, s: &mut Scope, source: &C::Source, borrow: bool, args: &[(Symbol, Lowered)], v: &Value) -> R<Lowered> {
         match v {
-            Value::Source(g) if g.name == "$core/argument" && matches!(g.fields.as_slice(), [(k, Value::Int(_))] if k == "index") => {
+            Value::Source(g) if g.name == "$core/argument" && g.fields.len() == 1 && matches!(g.fields.get_str("index"), Some(Value::Int(_))) => {
                 let Value::Int(index) = &g.fields[0].1 else { unreachable!() };
                 Ok(args[*index as usize].1.clone())
             }
@@ -1981,11 +1982,11 @@ impl Lowerer {
     fn op_term(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, x: &Term, name: &str, args: &[A::Field]) -> R<Lowered> {
         let ops = self.ops()?;
         let (o, metadata) = match op::find_checked(&ops, name, &context::value()) { Some(pair) => pair, None => return Err(refusal(name)) };
-        let mut largs: Vec<(String, Lowered)> = Vec::new();
+        let mut largs: Vec<(Symbol, Lowered)> = Vec::new();
         for field in args {
             let t = &x.child(field.term);
             let v = if ty::is_cooked(x.ty()) && storage_argument(t.ty()) { self.term(true, s, source, env, t)? } else { self.term(false, s, source, env, t)? };
-            largs.push((x.name(field.name).to_owned(), v));
+            largs.push((x.symbol(field.name), v));
         }
         fn data_source(v: &Value) -> bool {
             match v {
@@ -1995,17 +1996,17 @@ impl Lowerer {
             }
         }
         let prototype: Option<Value> = if o.live || (metadata.builtin_body && large_array_constructor(name, &largs)) { None } else {
-            let proto: Vec<(String, Value)> = largs.iter().enumerate().map(|(i, (n, value))| {
+            let proto: Vec<(Symbol, Value)> = largs.iter().enumerate().map(|(i, (n, value))| {
                 (n.clone(), match value {
                     Known(v) => v.clone(),
-                    _ => source_value("$core/argument", self.type_of(value), vec![("index".into(), Value::Int(i as i64))]),
+                    _ => source_value("$core/argument", self.type_of(value), vec![("index".into(), Value::Int(i as i64))].into()),
                 })
             }).collect();
             (o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag(name)), &proto).ok()
         };
         if ty::is_cooked(x.ty()) {
             let mut lowered = Vec::new();
-            lowered.push(("$name".to_owned(), self.ensure(s, source, &Known(text(name)))?));
+            lowered.push(("$name".into(), self.ensure(s, source, &Known(text(name)))?));
             for (n, v) in &largs { lowered.push((n.clone(), self.ensure(s, source, v)?)); }
             return Ok(self.emit(s, source, x.ty(), C::Expr::Host_source { name: "$core/operator".into(), ty: x.ty().clone(), args: lowered }));
         }
@@ -2478,7 +2479,7 @@ impl Lowerer {
 }
 
 impl Lowerer {
-    fn operation(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, name: &str, args: &[(String, Lowered)]) -> R<Lowered> {
+    fn operation(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, name: &str, args: &[(Symbol, Lowered)]) -> R<Lowered> {
         let arg = |key: &str| -> R<Lowered> {
             args.iter().find(|(n, _)| n == key).map(|(_, v)| v.clone()).ok_or_else(|| Stop::Diag(V::fail("E_INTERNAL", "Not_found")))
         };
@@ -2673,7 +2674,7 @@ impl Lowerer {
         self.vec(s, source, &components)
     }
 
-    fn sequence_operation(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, name: &str, args: &[(String, Lowered)]) -> R<Lowered> {
+    fn sequence_operation(&mut self, s: &mut Scope, source: &C::Source, ty: &Ty, name: &str, args: &[(Symbol, Lowered)]) -> R<Lowered> {
         let arg = |key: &str| -> R<Lowered> {
             args.iter().find(|(n, _)| n == key).map(|(_, v)| v.clone()).ok_or_else(|| Stop::Diag(V::fail("E_INTERNAL", "Not_found")))
         };
@@ -2826,7 +2827,7 @@ impl Lowerer {
         }
     }
 
-    fn color_operation(&mut self, s: &mut Scope, source: &C::Source, _ty: &Ty, name: &str, args: &[(String, Lowered)]) -> R<Lowered> {
+    fn color_operation(&mut self, s: &mut Scope, source: &C::Source, _ty: &Ty, name: &str, args: &[(Symbol, Lowered)]) -> R<Lowered> {
         let arg = |key: &str| -> R<Lowered> {
             args.iter().find(|(n, _)| n == key).map(|(_, v)| v.clone()).ok_or_else(|| Stop::Diag(V::fail("E_INTERNAL", "Not_found")))
         };
@@ -2998,8 +2999,8 @@ fn argument_index(residual: ResidualId, term: &Term) -> Option<i64> {
 }
 fn argument_value(v: &Value) -> Option<i64> {
     match v {
-        Value::Source(g) if g.name == "$core/argument" => match g.fields.as_slice() {
-            [(k, Value::Int(index))] if k == "index" => Some(*index),
+        Value::Source(g) if g.name == "$core/argument" => match (g.fields.len(), g.fields.get_str("index")) {
+            (1, Some(Value::Int(index))) => Some(*index),
             _ => None,
         },
         Value::Residual(r) => argument_index(*r, E::residual::residual_term(*r)?.as_ref()),
@@ -3016,9 +3017,9 @@ fn count_origins(program: C::Program) -> C::Program {
     let mut origins: Vec<Option<C::region::Origin>> = vec![None; n];
     C::iter(&mut |st| for l in C::writes(st) { writes[l as usize] += 1; }, &program.body);
     let identity = |kind: &str, local: i64| -> Option<C::region::Origin> {
-        Some((vec!["@core-count".to_owned(), scope.to_string(), kind.to_owned(), local.to_string()], Vec::new()))
+        Some((vec!["@core-count".into(), scope.to_string().into(), kind.into(), local.to_string().into()], Vec::new()))
     };
-    let count = |args: &[(String, i64)], writes: &[i64]| -> Option<C::region::Origin> {
+    let count = |args: &[(Symbol, i64)], writes: &[i64]| -> Option<C::region::Origin> {
         args.iter().find(|(n, _)| n == "count").and_then(|(_, local)| if writes[*local as usize] == 1 { identity("scalar", *local) } else { None })
     };
     let mut regions = program.regions.clone();
@@ -3090,7 +3091,7 @@ mod tests {
     fn scope_forks_share_values_and_keep_their_snapshot() {
         let key = CacheKey::Residual((7, 3));
         let mut parent = Scope::fresh();
-        parent.cache.insert(key.clone(), Known(Value::Record(vec![("data".into(), Value::Text(vec![b'x'; 4096].into()))])));
+        parent.cache.insert(key.clone(), Known(Value::Record(vec![("data".into(), Value::Text(vec![b'x'; 4096].into()))].into())));
         let original = parent.cached(&key).unwrap() as *const Lowered;
         let mut child = parent.fork();
         assert!(std::ptr::eq(child.cached(&key).unwrap(), original), "fork must share cached values");
@@ -3288,7 +3289,7 @@ mod tests {
     }
 
     fn recorded(e: &E::Eval, path: &[&str]) -> Value {
-        let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        let p: Path = path.iter().map(|s| (*s).into()).collect();
         e.records.iter().find(|(q, _)| *q == p).expect("record").1[0].1.clone()
     }
 
@@ -3300,11 +3301,11 @@ mod tests {
         let compiled = |body: &str| -> core_exec::Prepared {
             let ws = check_with(&ops, &format!(
                 "(workspace handles (graph g :context value [(selected : bool false) (geo : geometry (handle_geometry)) (img : image (handle_image)) (bad : geometry (handle_geometry))] (let* [tested (if selected {body} {body})] 0.)))"));
-            let inputs = vec![("g".to_owned(), vec![
-                ("selected".to_owned(), source_value("test/selected", Ty::Bool, vec![])),
-                ("geo".to_owned(), Value::Deferred(geometry.clone(), 11)),
-                ("img".to_owned(), Value::Deferred(image.clone(), 11)),
-                ("bad".to_owned(), Value::Deferred(geometry.clone(), 99)),
+            let inputs = vec![("g".into(), vec![
+                ("selected".into(), source_value("test/selected", Ty::Bool, vec![].into())),
+                ("geo".into(), Value::Deferred(geometry.clone(), 11)),
+                ("img".into(), Value::Deferred(image.clone(), 11)),
+                ("bad".into(), Value::Deferred(geometry.clone(), 99)),
             ])];
             let evaluated = E::r#static(&ws, true, Some(&inputs)).expect("static");
             let Value::Residual(r) = recorded(&evaluated, &["g", "tested"]) else { panic!("Expected cooked residual: {body}") };
@@ -3326,7 +3327,7 @@ mod tests {
                 }
                 Value::Source(g) if g.name == "$core/cooked" => {
                     let (ty, f) = (&g.ty, &g.fields);
-                    let Some((_, Value::Int(id))) = f.first() else { panic!("cooked id") };
+                    let Some((_, Value::Int(id))) = f.iter().next() else { panic!("cooked id") };
                     log.lock().unwrap().push((ty.clone(), *id));
                     if (*ty == geometry || *ty == image) && (*id == 11 || (allow_bad && *id == 99)) { Ok(Value::Deferred(ty.clone(), *id)) } else { Err(reason.clone()) }
                 }
@@ -3344,7 +3345,7 @@ mod tests {
                 ("a".into(), Value::Deferred(geometry.clone(), 11)),
                 ("b".into(), Value::Deferred(geometry.clone(), 11)),
                 ("picture".into(), Value::Deferred(image.clone(), 11)),
-            ])));
+            ].into())));
             assert_eq!(count(&calls, &(geometry.clone(), 11)), 1);
             assert_eq!(count(&calls, &(image.clone(), 11)), 1);
             assert_eq!(count(&calls, &(Ty::Bool, 0)), 2);
@@ -3356,7 +3357,7 @@ mod tests {
                 let d = result.expect_err("bad handle");
                 assert!(d.code == reason.code && d.message == reason.message && d.cause == reason.cause);
             } else {
-                assert_eq!(result, Ok(Value::Record(vec![("a".into(), Value::Deferred(geometry.clone(), 11)), ("b".into(), Value::Deferred(geometry.clone(), 11))])));
+                assert_eq!(result, Ok(Value::Record(vec![("a".into(), Value::Deferred(geometry.clone(), 11)), ("b".into(), Value::Deferred(geometry.clone(), 11))].into())));
                 assert!(!calls.contains(&(geometry.clone(), 99)));
             }
         }
@@ -3366,7 +3367,7 @@ mod tests {
             assert_eq!(result, Ok(Value::Record(vec![
                 ("first".into(), Value::Deferred(geometry.clone(), if time > 0. { 11 } else { 99 })),
                 ("after".into(), Value::Deferred(geometry.clone(), 11)),
-            ])));
+            ].into())));
             assert!(calls.contains(&(geometry.clone(), 11)));
         }
     }
@@ -3382,7 +3383,7 @@ mod tests {
             live: false,
             arithmetic: None,
             packed_extension: None,
-            body: Arc::new(|_, _, args| Ok(source_value("test/storage", ty::geometry(), args.to_vec()))),
+            body: Arc::new(|_, _, args| Ok(source_value("test/storage", ty::geometry(), args.to_vec().into()))),
             ..base.clone()
         };
         let program = |body: &str| -> C::Program {
@@ -3421,7 +3422,7 @@ mod tests {
             let (result, received) = run(&only, time);
             assert_eq!(result, Ok(Value::Deferred(ty::geometry(), 1)));
             match received {
-                Some(Value::Source(g)) if matches!(&g.ty, Ty::Array(e) if **e == Ty::Vec4) && matches!(g.fields.as_slice(), [(c, Value::Int(_)), (v, _)] if c == "count" && v == "value") => {
+                Some(Value::Source(g)) if matches!(&g.ty, Ty::Array(e) if **e == Ty::Vec4) && g.fields.len() == 2 && matches!((&g.fields[0], &g.fields[1]), ((c, Value::Int(_)), (v, _)) if c == "count" && v == "value") => {
                     let Value::Int(n) = g.fields[0].1 else { unreachable!() };
                     assert!(g.name == "$core/constant-array/array/vec4" && n == time as i64);
                 }
@@ -3489,7 +3490,7 @@ mod tests {
         let Value::Residual(r) = result_g(&evaluation) else { panic!("residual") };
         let view = E::residual::residual_view(r).unwrap();
         let Some((_, Value::Residual(inner))) = view.bindings.iter().find(|(n, _)| n.as_ref() == "s").cloned() else { panic!("inner") };
-        let r = E::residual::with_bindings(r, &view.term, &[("s".to_owned(), source_value("test/source", Ty::Float, vec![("value".into(), Value::Residual(inner))]))]).unwrap();
+        let r = E::residual::with_bindings(r, &view.term, &[("s".into(), source_value("test/source", Ty::Float, vec![("value".into(), Value::Residual(inner))].into()))]).unwrap();
         let program = lowered(r);
         let mut host = false;
         C::iter(&mut |s| match &s.node {
@@ -3511,6 +3512,6 @@ mod tests {
         assert_eq!(with(Ok(None)), Ok(Value::Float(4.)));
         assert_eq!(with(Ok(Some(Value::Float(8.)))), Ok(Value::Float(9.)));
         assert_eq!(with(Ok(Some(Value::Int(8)))).expect_err("wrong declared type").code, "E_DATA_SOURCE");
-        assert_eq!(with(Ok(Some(source_value("unresolved", Ty::Float, vec![])))).expect_err("unresolved").code, "E_DATA_SOURCE");
+        assert_eq!(with(Ok(Some(source_value("unresolved", Ty::Float, vec![].into())))).expect_err("unresolved").code, "E_DATA_SOURCE");
     }
 }

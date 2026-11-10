@@ -1,5 +1,6 @@
 //! The OCaml `run_scope` (conditional arms, fixture counts, the iteration selector, gestures, the
 //! macro lens), split into cases at its natural boundaries.
+use flow_syntax::symbol::Symbol;
 use crate::support::*;
 use flow_eval::Value;
 use flow_graph::edit_tree::ArgKey;
@@ -21,7 +22,7 @@ fn right_click(at: (i64, i64)) -> Vec<Event> {
     vec![mouse_move(at), mouse_press(MouseButton::RightButton, at), mouse_release(MouseButton::RightButton, at)]
 }
 
-type Inputs = Vec<(String, Vec<(String, Value)>)>;
+type Inputs = Vec<(String, Vec<(Symbol, Value)>)>;
 
 /// `scope_view ?inputs ?probe ?at ?collapsed workspace graph` with the inputs of a recording.
 fn view_with(opts: ScopeOpts, inputs: Option<Inputs>, w: &flow_check::workspace::Workspace, graph: &str) -> (Pane, Rc<p::Scope>) {
@@ -146,7 +147,7 @@ fn drawn_iterations() {
     let w = load_workspace("sunflower");
     let zone = path(&["sunflower", "seeds_each"]);
     // only visible zones draw: 1,000 iterations draw what 3 do
-    let inputs = |n: i64| -> Inputs { vec![("sunflower".to_owned(), vec![("seeds".to_owned(), Value::Int(n))])] };
+    let inputs = |n: i64| -> Inputs { vec![("sunflower".to_owned(), vec![("seeds".into(), Value::Int(n))])] };
     let draw_with = |ui: &mut Ui, n: i64| {
         let (view, _) = view_with(ScopeOpts::default(), Some(inputs(n)), &w, "sunflower");
         let (view, _) = scope_step(ui, view, &frame0());
@@ -160,9 +161,9 @@ fn drawn_iterations() {
     let (base, sc) = view_with(ScopeOpts::default(), Some(inputs(3)), &w, "sunflower");
     let evaluated = flow_eval::r#static(&w, true, Some(&inputs(3))).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let zone2 = zone.clone();
-    let execution = move |q: &[String]| Some(Execution { tier: "CPU".to_owned(), group: zone2.clone(), seconds: if q == zone2.as_slice() { Some(0.002) } else { None } });
+    let execution = move |q: &[flow_syntax::symbol::Symbol]| Some(Execution { tier: "CPU".to_owned(), group: zone2.clone(), seconds: if q == zone2.as_slice() { Some(0.002) } else { None } });
     let ex2 = execution.clone();
-    let reports = Rc::new(RefCell::new(probe::make(&evaluated, probe::Options { execution: Some(Rc::new(move |q: &[String], _: &[i64]| ex2(q))), ..probe::Options::default() })));
+    let reports = Rc::new(RefCell::new(probe::make(&evaluated, probe::Options { execution: Some(Rc::new(move |q: &[flow_syntax::symbol::Symbol], _: &[i64]| ex2(q))), ..probe::Options::default() })));
     let zone_node = p::find(&sc, &zone).expect("zone");
     let footer = reports.borrow_mut().footer(&zone_node, &[]);
     check(footer.execution == execution(&zone), "the footer lost its execution report");

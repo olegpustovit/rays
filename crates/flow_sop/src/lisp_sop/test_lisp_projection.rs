@@ -40,7 +40,7 @@ fn field(name: &str, label: &str, kind: param::Kind, default: f64, vec3: Option<
 fn schema() -> Arc<param::Schema> {
     Arc::new(
         param::schema(
-            "test_card".to_owned(),
+            "test_card".into(),
             vec![
                 field("distance", "Distance", param::floating(-10.0, 10.0, Some(-20.0), Some(20.0)).unwrap(), 0.5, None),
                 field("scale_x", "Scale X", param::floating(0.0, 10.0, None, None).unwrap(), 1.0, Some(("scale", 0))),
@@ -111,11 +111,11 @@ fn normalize(card: &p::Node) -> p::Node {
 }
 
 fn card(cat: &Catalog, workspace: &w::Workspace) -> p::Node {
-    p::find(&p::of_graph(cat, workspace, "g").unwrap(), &["g".to_owned(), "card".to_owned()]).expect("the card")
+    p::find(&p::of_graph(cat, workspace, "g").unwrap(), &["g".into(), "card".into()]).expect("the card")
 }
 
-fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| (*s).to_owned()).collect()
+fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|s| (*s).into()).collect()
 }
 
 fn apply(cat: &Catalog, forms: &[syntax::Syntax], op: Op) -> Result<(Vec<syntax::Syntax>, w::Workspace), rays_diagnostic::Diagnostic> {
@@ -177,7 +177,7 @@ fn a_nested_lisp_node_is_a_card_with_typed_rows() {
     ));
     let workspace = checked(&base, &nested);
     let leaf = e::nested_leaf("@result", &ArgKey::Pos(0)).unwrap();
-    let node_path = vec!["g".to_owned(), leaf];
+    let node_path: w::Path = vec!["g".into(), leaf.into()];
     let projected = p::of_graph(&base, &workspace, "g").unwrap();
     assert_eq!(projected.nodes.len(), 3, "nested Lisp node lacks a graph card");
     let node = p::find(&projected, &node_path).expect("the nested card");

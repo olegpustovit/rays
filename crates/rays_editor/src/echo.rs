@@ -1,11 +1,12 @@
 //! Gesture echo: what an edit wrote, in the words of the text (the status strip prints it, as the
 //! carry's preview line does for a put). An op with no short words has none, and the history label
 //! stands.
+use flow_syntax::symbol::Symbol;
 use flow_graph::flow_edit::{ArgKey, Op};
 use flow_syntax::lisp;
 
-fn path(node: &[String]) -> String {
-    node.join("/")
+fn path(node: &[Symbol]) -> String {
+    flow_syntax::symbol::join_path(&node, "/")
 }
 
 fn shorten(text: &str) -> String {

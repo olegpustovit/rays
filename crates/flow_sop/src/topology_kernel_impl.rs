@@ -1,5 +1,6 @@
 //! Port of lib/flow_sop/topology_kernel_impl.ml: topology data sources over cooked geometry, the
 //! mesh constructor (host and device-resident), `sop/remap` and `sop/concat`.
+use flow_syntax::symbol::Symbol;
 use flow_ir::flow_ir::gpu::{self, Integers, Planes, Residency};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self, Value};
@@ -11,7 +12,7 @@ use rdk_core::{polygon_triangulation, topology_remap as remap_core};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-pub type Args = [(String, Value)];
+pub type Args = [(Symbol, Value)];
 pub type Positions = Box<dyn Fn() -> Result<float3::T, Diagnostic> + Send + Sync>;
 
 fn diag(code: &str, message: &str) -> Diagnostic {
@@ -206,8 +207,8 @@ pub fn triangles(geometry: &Geometry, component: &str) -> Result<Value, Diagnost
 
 /// The union-find of `Analysis.classify_connectivity`: `over` edges labels points, `over` points
 /// labels primitives; a 0/1 mask keeps the labelled elements.
-pub fn components(geometry: &Geometry, args: &Args) -> Result<Value, Diagnostic> {
-    let (owner, group_owner, count) = match arg(args, "over") {
+pub fn components(geometry: &Geometry, args: &flow_syntax::value::Record) -> Result<Value, Diagnostic> {
+    let (owner, group_owner, count) = match args.get_str("over") {
         None => (attribute::Owner::Point, group::Owner::Point, geometry::point_count(geometry)),
         Some(v) if is_text(Some(v), "edges") => {
             (attribute::Owner::Point, group::Owner::Point, geometry::point_count(geometry))
@@ -217,7 +218,7 @@ pub fn components(geometry: &Geometry, args: &Args) -> Result<Value, Diagnostic>
         }
         _ => return fail("E_COMPONENTS_OVER", "Components :over is edges or points."),
     };
-    let selected = match arg(args, "mask") {
+    let selected = match args.get_str("mask") {
         None => None,
         Some(Value::Int_array(mask)) if mask.len() as i64 == count => {
             if mask.iter().any(|bit| *bit != 0 && *bit != 1) {
@@ -235,7 +236,7 @@ pub fn components(geometry: &Geometry, args: &Args) -> Result<Value, Diagnostic>
         Some(_) => return fail("E_COMPONENTS_MASK", "Components mask is an integer array."),
     };
     // `:seams` is a 0/1 edge mask (one entry per `sop/edges` edge): a seam edge joins nothing.
-    let seams = match arg(args, "seams") {
+    let seams = match args.get_str("seams") {
         None => None,
         Some(Value::Int_array(mask)) => {
             let topology = geometry::topology(geometry);
@@ -258,7 +259,7 @@ pub fn components(geometry: &Geometry, args: &Args) -> Result<Value, Diagnostic>
     let points = if owner == attribute::Owner::Point { selected.as_ref() } else { None };
     match analysis::classify_connectivity(primitives, points, seams.as_ref(), owner, geometry) {
         Err(e) => fail("E_COMPONENTS", &error::to_string(&e)),
-        Ok((ids, n)) => match arg(args, "component") {
+        Ok((ids, n)) => match args.get_str("component") {
             Some(v) if is_text(Some(v), "count") => Ok(Value::Int(n)),
             Some(v) if is_text(Some(v), "id") => Ok(ints(ids)),
             _ => fail("E_DATA_SOURCE", "Components source requires id or count."),
@@ -392,8 +393,10 @@ fn kind_of(code: i64) -> topology::PrimitiveKind {
     }
 }
 
-pub fn mesh(args: &Args) -> Result<Geometry, Diagnostic> {
-    match (arg(args, "points"), arg(args, "vertex_points"), arg(args, "primitive_offsets"), arg(args, "kinds")) {
+pub fn mesh(args: &Args) -> Result<Geometry, Diagnostic> { mesh_with(&|name| arg(args, name)) }
+
+pub fn mesh_with<'a>(args: &dyn Fn(&str) -> Option<&'a Value>) -> Result<Geometry, Diagnostic> {
+    match (args("points"), args("vertex_points"), args("primitive_offsets"), args("kinds")) {
         (Some(points), Some(Value::Int_array(vertices)), Some(Value::Int_array(offsets)), Some(Value::Int_array(kinds))) => {
             let (count, positions) = mesh_points(points)?;
             if kinds.iter().any(|kind| *kind < 0 || *kind > 2) {
@@ -577,10 +580,12 @@ fn count_of(scope: &dyn Residency, value: &Value) -> Option<i64> {
 
 /// The device cook of a mesh: `None` leaves it to the host path. `static_key` is the mesh's data
 /// when its topology depends on nothing a frame changes.
-pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &Args) -> Option<Result<Geometry, Diagnostic>> {
-    if let Some(Value::Record(fields)) = arg(args, "points") {
+pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &Args) -> Option<Result<Geometry, Diagnostic>> { mesh_resident_with(static_key, scope, &|name| arg(args, name)) }
+
+pub fn mesh_resident_with<'a>(static_key: Option<&Value>, scope: &dyn Residency, args: &dyn Fn(&str) -> Option<&'a Value>) -> Option<Result<Geometry, Diagnostic>> {
+    if let Some(Value::Record(fields)) = args("points") {
         if fields.len() != 3 { return None; }
-        let planes: Option<Vec<Value>> = ["x", "y", "z"].iter().map(|name| arg(fields, name).filter(|v| matches!(v, Value::Floats(1, _))).cloned()).collect();
+        let planes: Option<Vec<Value>> = ["x", "y", "z"].iter().map(|name| fields.get_str(name).filter(|v| matches!(v, Value::Floats(1, _))).cloned()).collect();
         let planes: [Value; 3] = planes?.try_into().ok()?;
         let mut counts = Vec::new();
         for (_, value) in fields {
@@ -601,11 +606,10 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
             Ok(None) => return None,
             Err(d) => return Some(Err(d)),
         };
-        let args: Vec<_> = args.iter().map(|(n, v)| (n.clone(), if n == "points" { points.clone() } else { v.clone() })).collect();
-        return mesh_resident(static_key, scope, &args);
+        return mesh_resident_with(static_key, scope, &|name| if name == "points" { Some(&points) } else { args(name) });
     }
     let cached = static_key.and_then(find_static);
-    if let (Some((n, topology)), Some(points @ Value::Floats(3, _))) = (&cached, arg(args, "points")) {
+    if let (Some((n, topology)), Some(points @ Value::Floats(3, _))) = (&cached, args("points")) {
         if count_of(scope, points) == Some(*n) {
             let planes = Arc::new(scope.retain_float(points)?);
             let (positions, _) = match positions_of(planes.clone(), *n) {
@@ -626,7 +630,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
         let Some(key) = static_key else { return };
         keep_static(key, point_count, topology);
     };
-    let (points, vertices, offsets, kinds) = (arg(args, "points"), arg(args, "vertex_points"), arg(args, "primitive_offsets"), arg(args, "kinds"));
+    let (points, vertices, offsets, kinds) = (args("points"), args("vertex_points"), args("primitive_offsets"), args("kinds"));
     if let (Some(points @ Value::Floats(3, _)), Some(Value::Int_array(v)), Some(Value::Int_array(o)), Some(Value::Int_array(k))) =
         (points, vertices, offsets, kinds)
     {
@@ -668,10 +672,10 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
         let valid = scope.validate_topology(0, &v, &o, &k, 4294967295)?;
         return Some(valid.and_then(|()| {
             mesh(&[
-                ("points".to_owned(), points.clone()),
-                ("vertex_points".to_owned(), ints(Vec::new())),
-                ("primitive_offsets".to_owned(), ints(vec![0])),
-                ("kinds".to_owned(), ints(Vec::new())),
+                ("points".into(), points.clone()),
+                ("vertex_points".into(), ints(Vec::new())),
+                ("primitive_offsets".into(), ints(vec![0])),
+                ("kinds".into(), ints(Vec::new())),
             ])
         }));
     }
@@ -769,7 +773,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Re
     if !matches!(name, "sop/count" | "sop/edges" | "sop/topology" | "sop/adjacency" | "sop/components" | "sop/triangles" | "sop/fans") {
         return fail("E_DATA_SOURCE", "Unknown topology data source.");
     }
-    let Some(Value::Deferred(ty, id)) = arg(args, "geometry") else {
+    let Some(Value::Deferred(ty, id)) = args.get_str("geometry") else {
         return fail("E_DATA_SOURCE", "Topology source requires cooked geometry.");
     };
     if !ty::is_geometry(ty) {
@@ -778,12 +782,12 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Re
     let Some(geometry) = geometry(*id) else {
         return fail("E_DATA_SOURCE", "Topology source has not been cooked.");
     };
-    let component = match arg(args, "component") {
+    let component = match args.get_str("component") {
         Some(Value::Text(bytes)) => Some(String::from_utf8_lossy(bytes).into_owned()),
         _ => None,
     };
     match name {
-        "sop/count" => match arg(args, "element") {
+        "sop/count" => match args.get_str("element") {
             Some(Value::Text(element)) => count(&geometry, &String::from_utf8_lossy(element)).map(Value::Int),
             _ => fail("E_TOPOLOGY_COUNT", "Count element is points, vertices, primitives or edges."),
         },
@@ -824,7 +828,7 @@ fn check(cancel: Option<&cancel::T>) -> Result<(), Diagnostic> {
     cancel::check_opt(cancel).map_err(|e| diag("E_CANCELLED", &rdk_message(&e)))
 }
 
-fn mapping(cancel: Option<&cancel::T>, args: &Args, name: &str, source_count: i64, target_count: i64) -> Result<Carry, Diagnostic> {
+fn mapping<'a>(cancel: Option<&cancel::T>, args: &dyn Fn(&str) -> Option<&'a Value>, name: &str, source_count: i64, target_count: i64) -> Result<Carry, Diagnostic> {
     let bounded = |label: &str, map: &[i64]| -> Result<(), Diagnostic> {
         if map.len() as i64 != target_count {
             return fail("E_REMAP_COUNT", &format!("Remap {name} map must match target owner count."));
@@ -845,7 +849,7 @@ fn mapping(cancel: Option<&cancel::T>, args: &Args, name: &str, source_count: i6
         "vertices" => "vertex_mix",
         _ => "primitive_mix",
     };
-    match arg(args, name).or_else(|| arg(args, mix)) {
+    match args(name).or_else(|| args(mix)) {
         Some(Value::Int_array(map)) => {
             bounded("", map)?;
             Ok(Carry::Plain(map.clone()))
@@ -901,12 +905,14 @@ fn remap_error(e: &error::T) -> Diagnostic {
 }
 
 /// `sop/remap`: carry source attributes and groups onto the target's elements by index maps.
-pub fn remap(cancel: Option<&cancel::T>, grain: i64, source: &Geometry, target: &Geometry, args: &Args) -> Result<Geometry, Diagnostic> {
+pub fn remap(cancel: Option<&cancel::T>, grain: i64, source: &Geometry, target: &Geometry, args: &Args) -> Result<Geometry, Diagnostic> { remap_with(cancel, grain, source, target, &|name| arg(args, name)) }
+
+pub fn remap_with<'a>(cancel: Option<&cancel::T>, grain: i64, source: &Geometry, target: &Geometry, args: &dyn Fn(&str) -> Option<&'a Value>) -> Result<Geometry, Diagnostic> {
     check(cancel)?;
     if grain <= 0 {
         return fail("E_REMAP", "Remap grain must be positive.");
     }
-    let use_mapped = match arg(args, "positions") {
+    let use_mapped = match args("positions") {
         None => false,
         Some(v) if is_text(Some(v), "target") => false,
         Some(v) if is_text(Some(v), "mapped") => true,
@@ -919,14 +925,13 @@ pub fn remap(cancel: Option<&cancel::T>, grain: i64, source: &Geometry, target: 
     let source_topology = geometry::topology(source);
     let source_edge_groups = geometry::edge_groups(source);
     // Explicit CSR is checked even if there are no source edge groups.
-    let edge_groups = match arg(args, "edges") {
+    let edge_groups = match args("edges") {
         None if source_edge_groups.is_empty() => Vec::new(),
         None if topology::data_id(source_topology) == topology::data_id(target_topology) => source_edge_groups,
         None => return fail("E_REMAP_EDGES", "Remap changed topology requires explicit edge ancestry."),
         Some(Value::Record(fields)) => {
-            let pair = match fields.as_slice() {
-                [(a, Value::Int_array(x)), (b, Value::Int_array(y))] if a == "offsets" && b == "values" => Some((x, y)),
-                [(a, Value::Int_array(y)), (b, Value::Int_array(x))] if a == "values" && b == "offsets" => Some((x, y)),
+            let pair = match (fields.len(), fields.get_str("offsets"), fields.get_str("values")) {
+                (2, Some(Value::Int_array(x)), Some(Value::Int_array(y))) => Some((x, y)),
                 _ => None,
             };
             let Some((offsets, ancestors)) = pair else {
@@ -1008,13 +1013,13 @@ pub fn remap(cancel: Option<&cancel::T>, grain: i64, source: &Geometry, target: 
         }
     };
     // `:lead true`: attributes already on the target come first, ahead of the carried ones.
-    let attributes = match arg(args, "lead") {
+    let attributes = match args("lead") {
         Some(Value::Bool(true)) => geometry::attributes(target).into_iter().chain(attributes).collect(),
         None | Some(Value::Bool(false)) => attributes,
         _ => return fail("E_REMAP_LEAD", "Remap lead is a Boolean."),
     };
     // `:lead_groups true`: the groups and edge groups already on the target come first.
-    let (groups, edge_groups) = match arg(args, "lead_groups") {
+    let (groups, edge_groups) = match args("lead_groups") {
         Some(Value::Bool(true)) => (
             geometry::groups(target).into_iter().chain(groups).collect(),
             geometry::edge_groups(target).into_iter().chain(edge_groups).collect(),
@@ -1029,16 +1034,18 @@ pub fn remap(cancel: Option<&cancel::T>, grain: i64, source: &Geometry, target: 
 }
 
 /// Native `merge` on a list of cooked geometries: the same `Mesh_merge.run_tagged`.
-pub fn concat(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Geometry], args: &Args) -> Result<Geometry, Diagnostic> {
+pub fn concat(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Geometry], args: &Args) -> Result<Geometry, Diagnostic> { concat_with(cancel, grain, sources, &|name| arg(args, name)) }
+
+pub fn concat_with<'a>(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Geometry], args: &dyn Fn(&str) -> Option<&'a Value>) -> Result<Geometry, Diagnostic> {
     let text = |name: &str| -> Result<String, Diagnostic> {
-        match arg(args, name) {
+        match args(name) {
             None => Ok(String::new()),
             Some(Value::Text(bytes)) => Ok(trim(bytes)),
             Some(_) => fail("E_CONCAT_TYPE", &format!("Concat {name} must be text.")),
         }
     };
     let integer = |name: &str, default: i64| -> Result<i64, Diagnostic> {
-        match arg(args, name) {
+        match args(name) {
             None => Ok(default),
             Some(Value::Int(n)) => Ok(*n),
             Some(_) => fail("E_CONCAT_TYPE", &format!("Concat {name} must be an integer.")),
@@ -1114,9 +1121,9 @@ mod tests {
     #[test]
     fn components_count() {
         let g = triangle();
-        let args = vec![("component".to_owned(), text("count"))];
+        let args = vec![("component".into(), text("count"))].into();
         assert_eq!(components(&g, &args).unwrap(), Value::Int(1));
-        let bad = vec![("over".to_owned(), text("faces"))];
+        let bad = vec![("over".into(), text("faces"))].into();
         assert_eq!(components(&g, &bad).err().unwrap().code, "E_COMPONENTS_OVER");
     }
 
@@ -1124,13 +1131,13 @@ mod tests {
     fn remap_identity_and_concat() {
         let g = triangle();
         let args = vec![
-            ("points".to_owned(), ints(vec![0, 1, 2])),
-            ("vertices".to_owned(), ints(vec![0, 1, 2])),
-            ("primitives".to_owned(), ints(vec![0])),
+            ("points".into(), ints(vec![0, 1, 2])),
+            ("vertices".into(), ints(vec![0, 1, 2])),
+            ("primitives".into(), ints(vec![0])),
         ];
         let out = remap(None, 4096, &g, &g, &args).unwrap();
         assert_eq!(geometry::point_count(&out), 3);
-        let bad = vec![("points".to_owned(), ints(vec![0, 1, 5])), ("vertices".to_owned(), ints(vec![0, 1, 2])), ("primitives".to_owned(), ints(vec![0]))];
+        let bad = vec![("points".into(), ints(vec![0, 1, 5])), ("vertices".into(), ints(vec![0, 1, 2])), ("primitives".into(), ints(vec![0]))];
         assert_eq!(remap(None, 4096, &g, &g, &bad).err().unwrap().code, "E_REMAP_INDEX");
         let merged = concat(None, 4096, &[g.clone(), g.clone()], &[]).unwrap();
         assert_eq!(geometry::point_count(&merged), 6);
@@ -1144,10 +1151,10 @@ mod tests {
         let source = source_value(
             "sop/count",
             Ty::Int,
-            vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), text("points"))],
+            vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), text("points"))].into(),
         );
         assert_eq!(resolve(&lookup, &source).unwrap(), Value::Int(3));
-        let missing = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 8))]);
+        let missing = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 8))].into());
         assert_eq!(resolve(&lookup, &missing).err().unwrap().message, "Topology source has not been cooked.");
     }
 }
@@ -1224,7 +1231,7 @@ mod integration {
     }
 
     fn evaluate(geometry: &Geometry, body: &str) -> (Value, flow_ir::core_exec::ResolveFn) {
-        let inputs = vec![("g".to_owned(), vec![("geo".to_owned(), Value::Deferred(ty::geometry(), 7))])];
+        let inputs = vec![("g".into(), vec![("geo".into(), Value::Deferred(ty::geometry(), 7))])];
         let evaluation = flow_ok(flow_eval::static_with(&checked(body), true, Some(&inputs), None));
         let value = evaluation
             .records
@@ -1271,7 +1278,7 @@ mod integration {
             ] {
                 agree(&geometry, &format!("(sop/count geo :{element})"), &Value::Int(expected));
             }
-            let expected = Value::Record(vec![("a".into(), ints(&view.edge_a)), ("b".into(), ints(&view.edge_b))]);
+            let expected = Value::Record(vec![("a".into(), ints(&view.edge_a)), ("b".into(), ints(&view.edge_b))].into());
             agree(&geometry, "(sop/edges geo)", &expected);
             let mut live = input::at_time(0.25);
             live.frame = 3;
@@ -1308,7 +1315,7 @@ mod integration {
                 ("point_edges".into(), ints(&v.point_edges)),
                 ("point_vertex_offsets".into(), ints(&v.point_offsets)),
                 ("point_vertices".into(), ints(&v.point_vertices)),
-            ]);
+            ].into());
             agree(&geometry, "(sop/adjacency geo)", &expected);
             agree(&geometry, "(get (sop/adjacency geo) :edge_a)", &ints(&v.edge_a));
             // sop/fans: the face of each incident corner, as the gather of area normals folds it
@@ -1326,7 +1333,7 @@ mod integration {
         }
         let resolve = |geometry: Value| {
             let lookup = lookup_of(None);
-            attribute_kernel::resolve(None, &lookup, &source_value("sop/adjacency", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), geometry), ("component".into(), text("next_vertex"))]))
+            attribute_kernel::resolve(None, &lookup, &source_value("sop/adjacency", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), geometry), ("component".into(), text("next_vertex"))].into()))
         };
         for geometry in [Value::No_geo, Value::Deferred(ty::geometry(), 7)] {
             assert_eq!(resolve(geometry).err().unwrap().code, "E_DATA_SOURCE");
@@ -1347,7 +1354,7 @@ mod integration {
                     });
                     let (primitives, points) = if owner == attribute::Owner::Primitive { (made.as_ref(), None) } else { (None, made.as_ref()) };
                     let (ids, n) = ok(analysis::classify_connectivity(primitives, points, None, owner, &geometry));
-                    Value::Record(vec![("id".into(), ints(&ids)), ("count".into(), Value::Int(n))])
+                    Value::Record(vec![("id".into(), ints(&ids)), ("count".into(), Value::Int(n))].into())
                 };
                 agree(&geometry, &format!("(sop/components geo :over \"{over}\")"), &classify(None));
                 let all = vec![1; count as usize];
@@ -1381,7 +1388,7 @@ mod integration {
                     let made = mask.map(|mask| ok(group::init(None, group_owner, "m", count, &move |i| Ok(mask[i as usize] == 1))));
                     let (primitives, points) = if owner == attribute::Owner::Primitive { (made.as_ref(), None) } else { (None, made.as_ref()) };
                     let (ids, n) = ok(analysis::classify_connectivity(primitives, points, Some(&seams), owner, &geometry));
-                    Value::Record(vec![("id".into(), ints(&ids)), ("count".into(), Value::Int(n))])
+                    Value::Record(vec![("id".into(), ints(&ids)), ("count".into(), Value::Int(n))].into())
                 };
                 if edges > 0 {
                     agree(&geometry, &format!("(sop/components geo :over \"{over}\" :seams {seam_text})"), &classify(None));
@@ -1440,7 +1447,7 @@ mod integration {
                 ("a".into(), corner(&|r| r.0)),
                 ("b".into(), corner(&|r| r.1)),
                 ("c".into(), corner(&|r| r.2)),
-            ]),
+            ].into()),
         );
     }
 
@@ -1451,17 +1458,17 @@ mod integration {
         };
         let geometry = fixtures().into_iter().find(|(n, _)| *n == "shared-polygons").unwrap().1;
         let handle = |id| Value::Deferred(ty::geometry(), id);
-        let count = |geometry: Value, element: &str| source_value("sop/count", Ty::Int, vec![("geometry".into(), geometry), ("element".into(), text(element))]);
+        let count = |geometry: Value, element: &str| source_value("sop/count", Ty::Int, vec![("geometry".into(), geometry), ("element".into(), text(element))].into());
         refused(lookup_of(None), count(handle(7), "points"), "E_DATA_SOURCE");
         refused(
             lookup_of(None),
-            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), Value::No_geo), ("component".into(), text("a"))]),
+            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), Value::No_geo), ("component".into(), text("a"))].into()),
             "E_DATA_SOURCE",
         );
         refused(lookup_of(Some(geometry.clone())), count(handle(7), "detail"), "E_TOPOLOGY_COUNT");
         refused(
             lookup_of(Some(geometry)),
-            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), handle(7)), ("component".into(), text("unknown"))]),
+            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), handle(7)), ("component".into(), text("unknown"))].into()),
             "E_DATA_SOURCE",
         );
     }

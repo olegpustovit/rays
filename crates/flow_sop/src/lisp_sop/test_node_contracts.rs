@@ -49,7 +49,7 @@ fn capture_once(max_entries: i64, context: &sctx::T, n: &node::T) -> geo::T {
 fn noise_displace_sop_cache_context_seed_dependency_and_relabel_identity() {
     let input = lisp_sop::snapshot(&contract_geometry());
     let plain = noise_node(input, "");
-    let (seeded, _) = node::apply_parameters(&plain, &[("context_seed".to_owned(), param::Value::Bool(true))]).unwrap();
+    let (seeded, _) = node::apply_parameters(&plain, &[("context_seed".into(), param::Value::Bool(true))]).unwrap();
     let mut s = session::create(16, 1_000_000).unwrap();
     let (c42, c999) = (context(1, 42), context(1, 999));
     let first = cook(&mut s, &c42, &plain);

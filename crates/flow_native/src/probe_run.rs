@@ -1,6 +1,7 @@
 //! Port of lib/flow_native/probe_run.ml: what the graph pane's probes run on, kept out of the
 //! editor so it reaches no `flow_ir`. The exact frame/region compiler the canvas uses, and the
 //! profile of its groups read as the footer's "ran on" line.
+use flow_syntax::symbol::Symbol;
 use flow_eval as e;
 use flow_gpu::small_lru::List;
 use flow_graph::probe::{Execution as ProbeExecution, Force};
@@ -60,7 +61,7 @@ pub fn force() -> Force {
     })
 }
 
-fn covers(site: &[String], path: &[String]) -> bool {
+fn covers(site: &[Symbol], path: &[Symbol]) -> bool {
     match (site, path) {
         ([a], [b, ..]) => a == b || b.starts_with(&format!("{a}#")),
         ([a, rest @ ..], [b, tail @ ..]) if a == b => covers(rest, tail),
@@ -77,7 +78,7 @@ fn prefix(xs: &[i64], ys: &[i64]) -> bool {
 }
 
 /// Where the node at a path ran, in the given graph instance at the given iterations.
-pub fn find(reports: &reports, instance: Option<i64>, path: &[String], probes: &[i64]) -> Option<ProbeExecution> {
+pub fn find(reports: &reports, instance: Option<i64>, path: &[Symbol], probes: &[i64]) -> Option<ProbeExecution> {
     let mut best: Option<(i64, &flow_ir::flow_ir::Execution)> = None;
     for report in reports {
         for (origin, site, iter) in &report.sites {

@@ -1,4 +1,5 @@
 // Port of lib/flow_ir/test_scatter.ml. The `--bench` block is not ported.
+use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::test_support::*;
 use flow_check::op::MAX_WOSIZE;
@@ -161,12 +162,12 @@ fn core_and_executor_match_the_reference() {
 fn host_declarations() -> &'static str {
     "[(indices : (array int) (array/int 0)) (data : (array float) (array/float 0))]"
 }
-fn host_inputs() -> Vec<(String, Vec<(String, Value)>)> {
+fn host_inputs() -> Vec<(String, Vec<(Symbol, Value)>)> {
     vec![(
         "g".to_string(),
         vec![
-            ("indices".to_string(), source_value("fixture/indices", Ty::Array(Box::new(Ty::Int)), vec![])),
-            ("data".to_string(), source_value("fixture/values", Ty::Array(Box::new(Ty::Float)), vec![])),
+            ("indices".into(), source_value("fixture/indices", Ty::Array(Box::new(Ty::Int)), vec![].into())),
+            ("data".into(), source_value("fixture/values", Ty::Array(Box::new(Ty::Float)), vec![].into())),
         ],
     )]
 }

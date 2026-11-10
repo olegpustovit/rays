@@ -8,7 +8,7 @@ use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::arena::{Draft, SyntaxBuilder, SyntaxId};
 use std::collections::BTreeMap;
 
-pub type Path = Vec<String>;
+pub type Path = flow_check::workspace::Path;
 pub type PathMap<V> = BTreeMap<Path, V>;
 pub type StringMap<V> = BTreeMap<String, V>;
 
@@ -56,8 +56,8 @@ pub fn remap(f: &dyn Fn(&Path) -> Option<Path>, t: &T) -> T {
         out
     }
     T {
-        editor: t.editor.as_ref().and_then(|name| match f(&vec![name.clone()]) {
-            Some(p) if p.len() == 1 => Some(p[0].clone()),
+        editor: t.editor.as_ref().and_then(|name| match f(&vec![name.clone().into()]) {
+            Some(p) if p.len() == 1 => Some(p[0].to_string()),
             _ => None,
         }),
         panels: keys(f, &t.panels),
@@ -202,7 +202,7 @@ fn read_str(f: &Syntax) -> Result<String, String> {
 
 fn read_path(f: &Syntax) -> Result<Path, String> {
     match &f.node {
-        Node::Vec(range) => f.range(*range).iter().map(|id| read_str(&f.child(*id))).collect(),
+        Node::Vec(range) => f.range(*range).iter().map(|id| read_str(&f.child(*id)).map(Into::into)).collect(),
         _ => fail("expected a path vector".to_owned()),
     }
 }

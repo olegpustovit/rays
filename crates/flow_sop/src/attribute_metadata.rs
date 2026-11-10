@@ -3,6 +3,7 @@
 //!
 //! The OCaml node constructors raise a Flow diagnostic on a bad owner or conflict word; here they
 //! return `Result<node::T, Diagnostic>` (the same diagnostic, as a value).
+use flow_syntax::symbol::Symbol;
 use flow_eval::Value;
 use flow_syntax::lisp;
 use flow_syntax::arena::{Node, SyntaxBuilder};
@@ -484,18 +485,9 @@ pub fn entries(owner: Option<Owner>, component: &str, value: &geometry::T) -> Re
 }
 
 // a method, not a free fn: its output borrows from `self` without a lifetime parameter
-trait Named {
-    fn named(&self, name: &str) -> Option<&Value>;
-}
 
-impl Named for [(String, Value)] {
-    fn named(&self, name: &str) -> Option<&Value> {
-        self.iter().find(|(n, _)| n == name).map(|(_, v)| v)
-    }
-}
-
-fn owner_argument(args: &[(String, Value)]) -> Result<Option<Owner>, Diagnostic> {
-    match args.named("owner") {
+fn owner_argument(args: &flow_syntax::value::Record) -> Result<Option<Owner>, Diagnostic> {
+    match args.get_str("owner") {
         None => Ok(Some(Owner::Point)),
         Some(Value::Text(owner)) => attribute_owner(std::str::from_utf8(owner).map_err(|_| error("E_ATTR_OWNER", "Attribute owner must be UTF-8 text."))?),
         _ => Err(error("E_ATTR_OWNER", "Attribute owner must be text.")),
@@ -512,7 +504,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<geometry::T>, value: &Value) -> 
     if !matches!(operation, "sop/attr_entries" | "sop/attr_type" | "sop/attr_names") {
         return Err(error("E_DATA_SOURCE", "Unknown metadata source."));
     }
-    let id = match args.named("geometry") {
+    let id = match args.get_str("geometry") {
         Some(Value::Deferred(t, id)) if ty::is_geometry(t) => *id,
         _ => return Err(error("E_DATA_SOURCE", "Metadata source requires cooked geometry.")),
     };
@@ -521,7 +513,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<geometry::T>, value: &Value) -> 
     };
     let owner = owner_argument(args)?;
     if operation == "sop/attr_entries" {
-        return match args.named("component") {
+        return match args.get_str("component") {
             Some(Value::Text(component)) => entries(owner, std::str::from_utf8(component).map_err(|_| error("E_ATTR_ENTRIES", "Attribute entry component must be UTF-8 text."))?, &found),
             _ => Err(error("E_ATTR_ENTRIES", "Attribute entry component is name, type or owner.")),
         };
@@ -529,7 +521,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<geometry::T>, value: &Value) -> 
     let Some(owner) = owner else {
         return Err(error("E_ATTR_OWNER", "Metadata queries require one owner."));
     };
-    let argument = args.named(if operation == "sop/attr_type" { "attribute" } else { "pattern" });
+    let argument = args.get_str(if operation == "sop/attr_type" { "attribute" } else { "pattern" });
     match (operation, argument) {
         ("sop/attr_type", Some(Value::Text(name))) => type_of(owner, std::str::from_utf8(name).map_err(|_| error("E_ATTR_NAME", "Attribute name must be UTF-8 text."))?, &found),
         ("sop/attr_names", Some(Value::Text(pattern))) => names(owner, std::str::from_utf8(pattern).map_err(|_| error("E_ATTR_NAME", "Attribute pattern must be UTF-8 text."))?, &found),
@@ -612,9 +604,9 @@ mod tests {
         let found = geometry.clone();
         let lookup = move |id: i64| if id == 7 { Some(found.clone()) } else { None };
         let source = |operation: &str, extra: Vec<(&str, Value)>| {
-            let mut args = vec![("geometry".to_owned(), Value::Deferred(flow_syntax::ty::geometry(), 7))];
-            args.extend(extra.into_iter().map(|(n, v)| (n.to_owned(), v)));
-            flow_syntax::value::source_value(operation, Ty::Any, args)
+            let mut args = vec![("geometry".into(), Value::Deferred(flow_syntax::ty::geometry(), 7))];
+            args.extend(extra.into_iter().map(|(n, v)| (n.into(), v)));
+            flow_syntax::value::source_value(operation, Ty::Any, args.into())
         };
         let text = |s: &str| Value::Text(s.as_bytes().into());
         let attr_type = source("sop/attr_type", vec![("attribute", text("Cd"))]);

@@ -115,13 +115,13 @@ pub fn run() {
     };
     let text = |d: &Driver| workspace_doc::to_text(&editor::workspace(d.e())).unwrap();
     let header = |d: &Driver, path: &[&str]| -> (f64, f64) {
-        let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        let path: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
         let (x, y, w, _) = editor::node_box(d.e(), &path).expect("the node has no box in the graph pane");
         ((x + w / 2) as f64, (y + 10) as f64)
     };
     let undo = |d: &mut Driver| d.bk(&[], &[Key::Meta], (0., 0.), vec![chr('z')]);
     let set = |d: &mut Driver, path: &[&str], n: i64| {
-        let op = fe::Op::SetArg { node: path.iter().map(|s| s.to_string()).collect(), key: fe::ArgKey::Kw("value".into()), sub: vec![], value: S::make(S::Draft::Num(n.to_string())) };
+        let op = fe::Op::SetArg { node: path.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect(), key: fe::ArgKey::Kw("value".into()), sub: vec![], value: S::make(S::Draft::Num(n.to_string())) };
         let ed = d.ed.take().unwrap();
         d.ed = Some(editor::edit(ed, &op).unwrap_or_else(|m| panic!("{m}")));
     };

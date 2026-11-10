@@ -26,7 +26,7 @@ fn quoted(value: &str) -> String {
 }
 
 fn cook(input: &geo::T, expression: &str) -> Result<geo::T, String> {
-    let node = lisp_sop::node(&[("source".to_owned(), lisp_sop::snapshot(input))], expression);
+    let node = lisp_sop::node(&[("source".into(), lisp_sop::snapshot(input))], expression);
     let mut s = session::create(32, 16_000_000).unwrap();
     let run = |s: &mut session::T, domains: i64, grain: i64| -> Result<geo::T, String> {
         let context = sctx::create(ContextOptions { domains: Some(domains), grain: Some(grain), ..Default::default() }).unwrap();
@@ -280,7 +280,7 @@ fn metadata_graph_projection_and_enum_gestures_remain_checked() {
         (_, d) => panic!("{}", d.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")),
     };
     let pane = proj::of_graph(&cat, &checked, "g").unwrap();
-    let path = |binding: &str| vec!["g".to_owned(), binding.to_owned()];
+    let path = |binding: &str| -> flow_check::workspace::Path { vec!["g".into(), binding.into()] };
     for (binding, ty) in [
         ("renamed", ty::geometry()),
         ("swapped", ty::geometry()),

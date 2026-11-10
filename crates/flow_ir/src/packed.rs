@@ -15,6 +15,7 @@ use flow_check::{op, ray_host};
 use flow_eval as E;
 use flow_eval::{Live, State};
 use flow_syntax::context;
+use flow_syntax::symbol::Symbol;
 use flow_syntax::packed_ops::{self, Binary, Conversion, Integer, Unary};
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{self, ResidualId, Value, struct_value};
@@ -399,8 +400,8 @@ pub fn provenance(t: &T) -> Vec<(i64, Path, Vec<i64>)> {
 /// The consuming stage, where the group's single timing belongs.
 pub fn site(t: &T) -> (i64, Path, Vec<i64>) {
     match E::residual::residual_site(t.residual) {
-        Some((instance, site, iter)) => (instance, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or(site), iter),
-        None => (0, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or_default(), Vec::new()),
+        Some((instance, site, iter)) => (instance, t.term.path().map(|ids| ids.iter().map(|&id| t.term.symbol(id)).collect()).unwrap_or(site), iter),
+        None => (0, t.term.path().map(|ids| ids.iter().map(|&id| t.term.symbol(id)).collect()).unwrap_or_default(), Vec::new()),
     }
 }
 
@@ -459,7 +460,7 @@ fn split_parts<'a>(data: &'a mut [f64], bounds: &[usize], width: usize) -> Vec<M
     parts
 }
 
-type NodeArgs = [(String, Value)];
+type NodeArgs = [(Symbol, Value)];
 
 fn unsupported_node(_: &str, _: &NodeArgs) -> Result<Value, Diagnostic> {
     Err(value::fail("$unsupported", "node"))
@@ -1138,7 +1139,7 @@ struct Run {
     t: T,
     live: Live,
     state: State,
-    elems: Option<Vec<(String, Value)>>,
+    elems: Option<Vec<(Symbol, Value)>>,
     resolve: Option<Resolve>,
     measure: Option<Measure>,
     on_walk: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -2899,11 +2900,11 @@ fn same_value(a: &Value, b: &Value) -> bool {
     }
 }
 
-fn same_bindings(a: &[(String, Value)], b: &[(String, Value)]) -> bool {
+fn same_bindings(a: &value::Record, b: &[(Symbol, Value)]) -> bool {
     a.len() == b.len() && a.iter().zip(b.iter()).all(|((n, x), (m, y))| n == m && same_value(x, y))
 }
 
-fn same_captures(a: &[(Arc<str>, Value)], b: &[(Arc<str>, Value)]) -> bool {
+fn same_captures(a: &[(Symbol, Value)], b: &[(Symbol, Value)]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|((n, x), (m, y))| n == m && same_value(x, y))
 }
 
@@ -3168,14 +3169,14 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
             for (name, v) in fields {
                 out.push((name.clone(), force_values(run, v, residual)?));
             }
-            Ok(Value::Record(out))
+            Ok(Value::Record(out.into()))
         }
         Value::Struct(g) => {
             let mut out = Vec::with_capacity(g.fields.len());
             for (field, v) in &g.fields {
                 out.push((field.clone(), force_values(run, v, residual)?));
             }
-            Ok(struct_value(g.name.clone(), g.ty.clone(), out))
+            Ok(struct_value(g.name.clone(), g.ty.clone(), out.into()))
         }
         other => Ok(other.clone()),
     }
@@ -3305,7 +3306,7 @@ fn reference_observed(run: &Run, on_walk: Option<&Arc<dyn Fn() + Send + Sync>>) 
 pub struct ForceOptions {
     pub dispatch: Option<Dispatch>,
     pub state: Option<State>,
-    pub elems: Option<Vec<(String, Value)>>,
+    pub elems: Option<Vec<(Symbol, Value)>>,
     pub resolve: Option<Resolve>,
     pub measure: Option<Measure>,
     pub on_walk: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -3364,7 +3365,7 @@ pub fn force_into(
 }
 
 /// The reference interpreter over the region's own term.
-pub fn reference(t: &T, live: &Live, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<Resolve>) -> Result<Value, Diagnostic> {
+pub fn reference(t: &T, live: &Live, state: Option<&State>, elems: Option<&[(Symbol, Value)]>, resolve: Option<Resolve>) -> Result<Value, Diagnostic> {
     E::residual::eval_term(t.residual, &t.term, live, state, elems, resolve)
 }
 
@@ -3385,8 +3386,8 @@ pub mod host {
 
     fn argument_index(v: &Value) -> Result<Option<(Ty, i64)>, Diagnostic> {
         match v {
-            Value::Source(g) if g.name == "$core/argument" => match g.fields.as_slice() {
-                [(f, Value::Int(index))] if f == "index" => Ok(Some((g.ty.clone(), *index))),
+            Value::Source(g) if g.name == "$core/argument" => match (g.fields.len(), g.fields.get_str("index")) {
+                (1, Some(Value::Int(index))) => Ok(Some((g.ty.clone(), *index))),
                 _ => Err(value::fail("E_CORE_ARGUMENT", "Invalid compiled argument declaration.")),
             },
             _ => Ok(None),
@@ -4065,8 +4066,8 @@ pub mod host {
                 return Ok(v.clone());
             }
             let view = E::residual::residual_view(residual)?;
-            let bindings: Vec<(String, Value)> = view.bindings.iter().map(|(n, v)| (n.to_string(), binding_of_value(pv, resolve, made, v))).collect();
-            let residual = if view.bindings.len() == bindings.len() && view.bindings.iter().zip(&bindings).all(|((n, x), (m, y))| n.as_ref() == m && same_value(x, y)) { residual } else { E::residual::with_bindings(residual, &view.term, &bindings)? };
+            let bindings: Vec<(flow_syntax::symbol::Symbol, Value)> = view.bindings.iter().map(|(n, v)| (*n, binding_of_value(pv, resolve, made, v))).collect();
+            let residual = if view.bindings.len() == bindings.len() && view.bindings.iter().zip(&bindings).all(|((n, x), (m, y))| n == m && same_value(x, y)) { residual } else { E::residual::with_bindings(residual, &view.term, &bindings)? };
             let value = pv_evaluate_with(pv, resolve, residual, &view.term)?;
             made.borrow_mut().insert(id, value.clone());
             Ok(value)
@@ -4075,8 +4076,8 @@ pub mod host {
             match value {
                 Value::Residual(r) if !E::state_dependent(value) => uniform_of(pv, resolve, made, *r).unwrap_or_else(|_| value.clone()),
                 Value::Record(fields) => {
-                    let mapped: Vec<(String, Value)> = fields.iter().map(|(n, v)| (n.clone(), binding_of_value(pv, resolve, made, v))).collect();
-                    if same_bindings(fields, &mapped) { value.clone() } else { Value::Record(mapped) }
+                    let mapped: Vec<(Symbol, Value)> = fields.iter().map(|(n, v)| (n.clone(), binding_of_value(pv, resolve, made, v))).collect();
+                    if same_bindings(fields, &mapped) { value.clone() } else { Value::Record(mapped.into()) }
                 }
                 Value::List(items) => {
                     let mapped: Vec<Value> = items.iter().map(|v| binding_of_value(pv, resolve, made, v)).collect();
@@ -4242,7 +4243,7 @@ mod tests {
 
     fn recorded(body: &str) -> Value {
         let evaluation = E::static_with(&checked(body), true, None, None).expect("static");
-        let path: Path = vec!["g".to_owned(), "tested".to_owned()];
+        let path: Path = vec!["g".into(), "tested".into()];
         evaluation.records.iter().find(|(p, _)| *p == path).expect("tested").1[0].1.clone()
     }
 

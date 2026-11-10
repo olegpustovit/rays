@@ -492,10 +492,10 @@ pub fn complete(names: &Names, imports: &[(String, String)], vocab: &Vocab, text
     // an operator's text argument: after its keyword, or at its place among the positional ones
     if choices.is_empty() {
         if let Some(h) = &enclosing_head {
-            let argument: Option<String> = match &after_kw {
-                Some(kw) => Some(strip(kw)),
+            let argument: Option<flow_syntax::symbol::Symbol> = match &after_kw {
+                Some(kw) => flow_syntax::symbol::find(&strip(kw)),
                 None if present.is_empty() && !prior.is_empty() => {
-                    workspace::op_signature(&vocab.ops, &ws_context(&context), h).and_then(|s| s.pos.get(prior.len() - 1).map(|(n, _)| n.clone()))
+                    workspace::op_signature(&vocab.ops, &ws_context(&context), h).and_then(|s| s.pos.get(prior.len() - 1).map(|(n, _)| *n))
                 }
                 None => None,
             };

@@ -24,7 +24,7 @@ fn residual(inputs: &str, body: &str) -> ResidualId {
         (_, ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")),
     };
     let evaluation = ok(E::static_with(&ws, true, None, None));
-    let path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     match &evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1 {
         Value::Residual(r) => *r,
         _ => panic!("Expected a residual: {body}"),
@@ -65,9 +65,9 @@ fn equal_result(a: &Result<Value, Diagnostic>, b: &Result<Value, Diagnostic>) ->
 #[test]
 fn concrete_values_skip_resolver_and_state() {
     let value = Value::Record(vec![
-        ("values".to_owned(), Value::Int_array(Arc::new(vec![1, 0, 1]))),
-        ("nested".to_owned(), Value::List(Arc::new(vec![Value::Float(-0.0), Value::Text("raw\0é".as_bytes().into())]))),
-    ]);
+        ("values".into(), Value::Int_array(Arc::new(vec![1, 0, 1]))),
+        ("nested".into(), Value::List(Arc::new(vec![Value::Float(-0.0), Value::Text("raw\0é".as_bytes().into())]))),
+    ].into());
     for reference in [false, true] {
         let ticks = Arc::new(AtomicI64::new(0));
         let clock = ticks.clone();

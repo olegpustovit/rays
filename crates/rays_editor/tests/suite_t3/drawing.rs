@@ -116,7 +116,7 @@ pub fn particles() {
     assert!(matches!(&drawing_value, Value::Deferred(flow_syntax::ty::Ty::Named(n), _) if n == "drawing"));
     let catalog = catalog();
     let scope = flow_graph::projection::of_graph(&catalog, &workspace.checked, "picture").unwrap_or_else(|e| panic!("{e}"));
-    let state_card = flow_graph::projection::find(&scope, &["picture".to_string(), "particles".to_string()]).expect("particles card");
+    let state_card = flow_graph::projection::find(&scope, &["picture".into(), "particles".into()]).expect("particles card");
     let zone = state_card.zone.expect("a zone");
     assert!(zone.kind == flow_graph::projection::ZoneKind::State);
     assert!(zone.rail.iter().any(|r| r.role == flow_graph::projection::Role::Acc && r.name == "previous"));
@@ -154,7 +154,7 @@ pub fn editable_folds() {
         (Some(w), _) => w,
         _ => panic!("edited source did not check"),
     };
-    let n = flow_graph::projection::find(&flow_graph::projection::of_graph(&catalog, &w, "picture").unwrap(), &["picture".to_string(), "elapsed".to_string()]).expect("elapsed");
+    let n = flow_graph::projection::find(&flow_graph::projection::of_graph(&catalog, &w, "picture").unwrap(), &["picture".into(), "elapsed".into()]).expect("elapsed");
     assert!(n.zone.expect("zone").kind == flow_graph::projection::ZoneKind::State);
 }
 
@@ -162,14 +162,14 @@ pub fn editable_folds() {
 pub fn host_inputs() {
     let input_text = r##"(workspace inputs (graph g :context draw [(radius : float 5)] (draw/circle [10 10 0] radius :fill "#00ffff")) (graph editor :context editor (ui/workspace (ui/canvas (ref g)))))"##;
     let mut workspace = doc(input_text);
-    workspace.inputs = std::sync::Arc::new(vec![("g".to_string(), vec![("radius".to_string(), Value::Float(9.))])]);
+    workspace.inputs = std::sync::Arc::new(vec![("g".to_string(), vec![("radius".into(), Value::Float(9.))])]);
     let options = editor_document::lowering::Options { factories: Some(sop::nodes::factories()), ..Default::default() };
     let document = ok(editor_document::lowering::of_workspace(&options, &workspace));
     let lower = &document.workspace.lowered;
     assert!(lower.plan.nodes[0].args.iter().find(|(k, _)| k == "radius").map(|(_, v)| v.clone()) == Some(Value::Float(9.)));
     let bad = {
         let mut b = workspace.clone();
-        b.inputs = std::sync::Arc::new(vec![("g".to_string(), vec![("radius".to_string(), Value::Text(b"wrong".as_slice().into()))])]);
+        b.inputs = std::sync::Arc::new(vec![("g".to_string(), vec![("radius".into(), Value::Text(b"wrong".as_slice().into()))])]);
         b
     };
     assert!(editor_document::lowering::of_workspace(&options, &bad).is_err());

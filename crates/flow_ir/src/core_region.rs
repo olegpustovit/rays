@@ -4,6 +4,7 @@
 //! OCaml exceptions: `Unsupported` / `Compile_refused d` / `Diagnostic.Error d` are the variants of
 //! [`Stop`]; `Invalid_argument` (an out-of-bounds register read, `Option.get`) is `Stop::Invalid`.
 //! Registers are numbered in source order: first operand first.
+use flow_syntax::symbol::{self, Symbol};
 use crate::core_ir::region::{
     self as R, CountSource, Instruction as I, Iteration, LiveFloat, LiveInt, Loop, Parts, Projection, RegionResult, Stage,
 };
@@ -43,11 +44,11 @@ type Res<X> = Result<X, Stop>;
 struct Expression {
     registers: Vec<i64>,
     constant: Option<Value>,
-    fields: Vec<(String, Expression)>,
+    fields: Vec<(Symbol, Expression)>,
 }
 fn regs(registers: Vec<i64>) -> Expression { Expression { registers, constant: None, fields: Vec::new() } }
 fn one(register: i64) -> Expression { regs(vec![register]) }
-fn fields_of(fields: Vec<(String, Expression)>) -> Expression { Expression { registers: Vec::new(), constant: None, fields } }
+fn fields_of(fields: Vec<(Symbol, Expression)>) -> Expression { Expression { registers: Vec::new(), constant: None, fields } }
 
 fn diag(span: Option<Span>, code: &str, message: &str) -> Diagnostic {
     rays_diagnostic::error(code.to_owned(), message.to_owned(), span, None, None, Vec::new(), Vec::new())
@@ -164,7 +165,7 @@ fn integer_work(instruction: &I) -> bool {
 
 fn paths(view: &residual::View, sites: &mut Vec<(i64, Path, Vec<i64>)>, t: &Term) {
     if let Some(path) = t.path() {
-        sites.push((view.instance, path.iter().map(|name| t.name(*name).to_owned()).collect(), view.iter.to_vec()));
+        sites.push((view.instance, path.iter().map(|name| t.symbol(*name)).collect(), view.iter.to_vec()));
     }
     match t.node {
         Node::Bypass(call) => { if let Some(input) = W::bypass_input(&t.child(call)) { paths(view, sites, &input); } }
@@ -217,18 +218,18 @@ fn field_residual(r: ResidualId, value: &Value, field: &str) -> Res<Value> {
     };
     let mut builder = flow_check::term_arena::TermBuilder::new();
     let form = builder.import_form(&source.form());
-    let term = builder.push(None, &ty, form, flow_check::term_arena::Draft::RefBinding("$field".to_owned(), vec![field.to_owned()]));
+    let term = builder.push(None, &ty, form, flow_check::term_arena::Draft::RefBinding("$field".into(), vec![field.to_owned()]));
     let term = builder.freeze().handle(term);
-    let bound = residual::with_bindings(r, &term, &[("$field".to_owned(), value.clone())])?;
+    let bound = residual::with_bindings(r, &term, &[("$field".into(), value.clone())])?;
     Ok(Value::Residual(bound))
 }
 
-fn captured_value(bindings: &[(String, Value)], name: &str, fields: &[String]) -> Res<Value> {
+fn captured_value(bindings: &[(Symbol, Value)], name: &str, fields: &[Symbol]) -> Res<Value> {
     let value = bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?;
     field_value(value, fields)
 }
 
-fn field_value(mut value: Value, fields: &[String]) -> Res<Value> {
+fn field_value(mut value: Value, fields: &[Symbol]) -> Res<Value> {
     for field in fields { value = field_step(value, field)?; }
     Ok(value)
 }
@@ -247,7 +248,7 @@ fn field_step(value: Value, field: &str) -> Res<Value> {
 }
 
 type Params = Vec<(Pattern, Option<Ty>)>;
-type Scope = Option<(String, Vec<String>)>;
+type Scope = Option<(Symbol, Vec<Symbol>)>;
 
 fn definition_body(at: &Term, residual: ResidualId, name: &str) -> Res<(Params, Term, Scope)> {
     match residual::residual_definition(residual, name) {
@@ -256,10 +257,10 @@ fn definition_body(at: &Term, residual: ResidualId, name: &str) -> Res<(Params, 
     }
 }
 
-fn helper_body(at: &Term, residual: ResidualId, bindings: &[(String, Value)], function: &str, name: &str, path: &[String]) -> Res<(Params, Term, Scope)> {
+fn helper_body(at: &Term, residual: ResidualId, bindings: &[(Symbol, Value)], function: &str, name: &str, path: &[Symbol]) -> Res<(Params, Term, Scope)> {
     match captured_value(bindings, name, path) {
         Ok(Value::Fn(callable)) => match residual::function_body(callable) {
-            Some((params, body)) => Ok((params, body, Some((name.to_owned(), path.to_vec())))),
+            Some((params, body)) => Ok((params, body, Some((symbol::intern(name), path.to_vec())))),
             None => match residual::function_name(callable) {
                 Some(name) => definition_body(at, residual, &name),
                 None => Err(refusal(at, "E_PACKED_FUNCTION", "Captured helper has no checked body.")),
@@ -377,12 +378,12 @@ fn reads_names(names: &[String], term: &Term) -> bool {
 
 fn function_body<'b>(
     residual: ResidualId,
-    bindings: &'b [(String, Value)],
+    bindings: &'b [(Symbol, Value)],
     result_ty: &Ty,
     reduction: Option<(&Term, &Term)>,
     f: &Term,
-) -> Res<(Params, Term, Cow<'b, [(String, Value)]>)> {
-    let captured_body = |f: &Term| -> Res<(Params, Term, Cow<'b, [(String, Value)]>)> {
+) -> Res<(Params, Term, Cow<'b, [(Symbol, Value)]>)> {
+    let captured_body = |f: &Term| -> Res<(Params, Term, Cow<'b, [(Symbol, Value)]>)> {
         match residual::eval_term(residual, f, &input::at_time(0.0), None, None, None) {
             Ok(Value::Fn(function)) => match residual::function_body(function) {
                 Some((params, body)) => Ok((params, body, Cow::Owned(residual::function_bindings(function)))),
@@ -420,10 +421,10 @@ fn function_body<'b>(
                     };
                     let mut builder = TermBuilder::new();
                     let form = builder.import_form(&f.form());
-                    let a = builder.push(None, seed.ty(), form, Draft::RefBinding("@accumulator".to_owned(), Vec::new()));
-                    let b = builder.push(None, &item_ty, form, Draft::RefBinding("@item".to_owned(), Vec::new()));
-                    let path: Option<Vec<_>> = f.path().map(|ids| ids.iter().map(|&id| f.name(id).to_owned()).collect());
-                    let body = builder.push(path.as_deref(), result_ty, form, Draft::Op { op: declaration.name.clone(), args: vec![("a".to_owned(), a), ("b".to_owned(), b)], skip: Vec::new() });
+                    let a = builder.push(None, seed.ty(), form, Draft::RefBinding("@accumulator".into(), Vec::new()));
+                    let b = builder.push(None, &item_ty, form, Draft::RefBinding("@item".into(), Vec::new()));
+                    let path: Option<Vec<_>> = f.path().map(|ids| ids.iter().map(|&id| f.symbol(id)).collect());
+                    let body = builder.push(path.as_deref(), result_ty, form, Draft::Op { op: declaration.name.clone(), args: vec![("a".into(), a), ("b".into(), b)], skip: Vec::new() });
                     let body = builder.freeze().handle(body);
                     Ok((vec![(Pattern::Name("@accumulator".to_owned()), None), (Pattern::Name("@item".to_owned()), None)], body, Cow::Borrowed(bindings)))
                 }
@@ -483,12 +484,12 @@ fn shape(ty: &Ty, next: &mut dyn FnMut(Ty) -> Res<i64>) -> Res<Expression> {
     }
 }
 
-type Env = Vec<(String, Expression)>;
+type Env = Vec<(Symbol, Expression)>;
 fn env_find<'a>(env: &'a Env, name: &str) -> Option<&'a Expression> {
     env.iter().rev().find(|(n, _)| n == name).map(|(_, e)| e)
 }
 
-type CaptureKey = (String, Vec<String>, Vec<(i64, bool)>, Vec<i64>);
+type CaptureKey = (Symbol, Vec<Symbol>, Vec<(i64, bool)>, Vec<i64>);
 
 thread_local! {
     static DYNAMIC_READ: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -515,10 +516,10 @@ struct Lower {
     residual: ResidualId,
     term: std::sync::Arc<Term>,
     dynamic: bool,
-    bindings: Vec<(String, Value)>,
+    bindings: Vec<(Symbol, Value)>,
     code: Vec<I>,
     uniforms: Vec<Value>,
-    uniform_names: Vec<(String, Vec<String>)>,
+    uniform_names: Vec<(Symbol, Vec<Symbol>)>,
     shared: HashMap<String, i64>,
     loop_finishes: HashMap<i64, i64>,
     control_scope: Vec<i64>,
@@ -528,7 +529,7 @@ struct Lower {
     bottom_registers: Vec<bool>,
     array_registers: HashMap<i64, Ty>,
     array_values: HashMap<i64, Value>,
-    table_uniforms: HashMap<(String, Vec<String>), i64>,
+    table_uniforms: HashMap<(Symbol, Vec<Symbol>), i64>,
     captures: HashMap<CaptureKey, Expression>,
     capture_scope: Scope,
     call_depth: i64,
@@ -583,7 +584,7 @@ impl Lower {
         }
     }
 
-    fn table(&mut self, at: &Term, name: (String, Vec<String>), value: &Value) -> Res<Expression> {
+    fn table(&mut self, at: &Term, name: (Symbol, Vec<Symbol>), value: &Value) -> Res<Expression> {
         let ty = self.array_type(value)?;
         match &ty {
             Ty::Array(e) if matches!(**e, Ty::Int | Ty::Text | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) => {}
@@ -612,7 +613,7 @@ impl Lower {
     fn literal(&mut self, at: &Term, v: &Value) -> Res<Expression> {
         match v {
             Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _) => {
-                self.table(at, (String::new(), Vec::new()), v)
+                self.table(at, ("".into(), Vec::new()), v)
             }
             Value::Record(fs) => {
                 let mut fields = Vec::new();
@@ -710,13 +711,13 @@ impl Lower {
         Ok(regs(registers))
     }
 
-    fn name_text(name: &(String, Vec<String>)) -> String {
+    fn name_text(name: &(Symbol, Vec<Symbol>)) -> String {
         let mut parts = vec![name.0.clone()];
         parts.extend(name.1.iter().cloned());
-        parts.join(".")
+        symbol::join_path(&parts, ".")
     }
 
-    fn uniform(&mut self, at: &Term, name: (String, Vec<String>), v: &Value) -> Res<Expression> {
+    fn uniform(&mut self, at: &Term, name: (Symbol, Vec<Symbol>), v: &Value) -> Res<Expression> {
         let ty = self.array_type(v)?;
         if let Value::List(_) = v {
             return match packed_list(v) {
@@ -764,28 +765,28 @@ impl Lower {
         }
     }
 
-    fn capture_path(&self, owner: &Term, name: &str, fields: &[flow_syntax::arena::NameId]) -> (String, Vec<String>) {
+    fn capture_path(&self, owner: &Term, name: Symbol, fields: &[flow_syntax::arena::NameId]) -> (Symbol, Vec<Symbol>) {
         match &self.capture_scope {
-            None => (name.to_owned(), fields.iter().map(|&id| owner.name(id).to_owned()).collect()),
+            None => (name, fields.iter().map(|&id| owner.symbol(id)).collect()),
             Some((root, path)) => {
                 let mut p = path.clone();
-                p.push(name.to_owned());
-                p.extend(fields.iter().map(|&id| owner.name(id).to_owned()));
+                p.push(name);
+                p.extend(fields.iter().map(|&id| owner.symbol(id)));
                 (root.clone(), p)
             }
         }
     }
 
-    fn capture(&mut self, at: &Term, name: &str, fields: &[String]) -> Res<Expression> {
-        let key: CaptureKey = (name.to_owned(), fields.to_vec(), self.guards.clone(), self.control_scope.clone());
+    fn capture(&mut self, at: &Term, name: Symbol, fields: &[Symbol]) -> Res<Expression> {
+        let key: CaptureKey = (name, fields.to_vec(), self.guards.clone(), self.control_scope.clone());
         if let Some(e) = self.captures.get(&key) { return Ok(e.clone()); }
-        let value = match captured_value(&self.bindings, name, fields) {
+        let value = match captured_value(&self.bindings, name.as_str(), fields) {
             Ok(v) => v,
             Err(Stop::Unsupported) => {
                 return Err(refusal(at, "E_PACKED_CAPTURE", &format!("Captured binding or field {} is unavailable.", {
-                    let mut p = vec![name.to_owned()];
+                    let mut p = vec![name];
                     p.extend(fields.iter().cloned());
-                    p.join(".")
+                    symbol::join_path(&p, ".")
                 })))
             }
             Err(other) => return Err(other),
@@ -795,7 +796,7 @@ impl Lower {
                 let mut out = Vec::new();
                 for (key, _) in fs {
                     let mut f = fields.to_vec();
-                    f.push(key.clone());
+                    f.push(key.clone().into());
                     out.push((key.clone(), self.capture(at, name, &f)?));
                 }
                 fields_of(out)
@@ -807,23 +808,23 @@ impl Lower {
                         let mut out = Vec::new();
                         for (key, _) in &fs {
                             let mut f = fields.to_vec();
-                            f.push(key.clone());
+                            f.push(key.clone().into());
                             out.push((key.clone(), self.capture(at, name, &f)?));
                         }
                         fields_of(out)
                     }
-                    _ => self.uniform(at, (name.to_owned(), fields.to_vec()), &value)?,
+                    _ => self.uniform(at, (name, fields.to_vec()), &value)?,
                 }
             }
-            _ => self.uniform(at, (name.to_owned(), fields.to_vec()), &value)?,
+            _ => self.uniform(at, (name, fields.to_vec()), &value)?,
         };
         self.captures.insert(key, e.clone());
         Ok(e)
     }
 
-    fn captured(&mut self, at: &Term, name: &str, fields: &[flow_syntax::arena::NameId]) -> Res<Expression> {
+    fn captured(&mut self, at: &Term, name: Symbol, fields: &[flow_syntax::arena::NameId]) -> Res<Expression> {
         let (name, fields) = self.capture_path(at, name, fields);
-        self.capture(at, &name, &fields)
+        self.capture(at, name, &fields)
     }
 
     fn invariant_value(&mut self, at: &Term) -> Res<Expression> {
@@ -835,7 +836,7 @@ impl Lower {
             },
         };
         let bound = residual::with_bindings(self.residual, at, &bindings)?;
-        self.uniform(at, (String::new(), Vec::new()), &Value::Residual(bound))
+        self.uniform(at, ("".into(), Vec::new()), &Value::Residual(bound))
     }
 
     fn component(&self, e: &Expression, i: usize) -> Res<i64> {
@@ -944,7 +945,7 @@ impl Lower {
             match pattern {
                 Pattern::Name(name) => {
                     let bound = match ty { Some(ty) => self.coerce(at, ty, value)?, None => value.clone() };
-                    env.push((name.clone(), bound));
+                    env.push((symbol::intern(name), bound));
                 }
                 _ => return Err(refusal(at, "E_PACKED_FORM", "Packed helper parameters require name patterns.")),
             }
@@ -1095,7 +1096,7 @@ impl Lower {
     #[inline(never)]
     fn operation_value(&mut self, t: &Term, op_name: &str, args: &[Field], declaration: &op::Op, kind: PackedKind, expressions: &[Expression]) -> Res<Expression> {
         if expressions.iter().all(|e| e.constant.is_some()) && !declaration.live {
-            let folded_args: Vec<(String, Value)> = args.iter().zip(expressions.iter()).map(|(field, e)| (t.name(field.name).to_owned(), e.constant.clone().unwrap())).collect();
+            let folded_args: Vec<(Symbol, Value)> = args.iter().zip(expressions.iter()).map(|(field, e)| (t.symbol(field.name), e.constant.clone().unwrap())).collect();
             let refused: RefCell<Option<Diagnostic>> = RefCell::new(None);
             let node = |name: &str, _: &op::Args| -> Result<Value, Diagnostic> {
                 let d = diag(Some(t.form().span.clone()), "E_PACKED_CONSTANT", &format!("Constant operator {} attempted to create node {}.", op_name, name));
@@ -1140,7 +1141,7 @@ impl Lower {
                 };
                 let value = instruction(self, Projection::Value)?;
                 let valid = instruction(self, Projection::Valid)?;
-                Ok(fields_of(vec![("value".to_owned(), value), ("valid".to_owned(), valid)]))
+                Ok(fields_of(vec![("value".into(), value), ("valid".into(), valid)]))
             }
             _ => self.arithmetic(t, op_name, declaration, &kind, expressions, args),
         }
@@ -1163,13 +1164,13 @@ impl Lower {
         let hit = at(self, 7)?;
         let instance = conv(self, 8)?;
         Ok(fields_of(vec![
-            ("t".to_owned(), t0),
-            ("prim".to_owned(), prim),
-            ("u".to_owned(), u),
-            ("v".to_owned(), v),
-            ("normal".to_owned(), normal),
-            ("hit".to_owned(), hit),
-            ("instance".to_owned(), instance),
+            ("t".into(), t0),
+            ("prim".into(), prim),
+            ("u".into(), u),
+            ("v".into(), v),
+            ("normal".into(), normal),
+            ("hit".into(), hit),
+            ("instance".into(), instance),
         ]))
     }
 
@@ -1279,7 +1280,7 @@ impl Lower {
                 let mut fields = Vec::new();
                 for (k, name) in names.iter().enumerate() {
                     let s = if curves { Stage::Trace_curves(k as i64) } else { Stage::Trace_triangles(k as i64) };
-                    fields.push(((*name).to_owned(), stage(self, s)?));
+                    fields.push(((*name).into(), stage(self, s)?));
                 }
                 Ok(fields_of(fields))
             }
@@ -1293,7 +1294,7 @@ impl Lower {
             "gpu/group-scan" => {
                 let before = stage(self, Stage::Group_scan(0))?;
                 let total = stage(self, Stage::Group_scan(1))?;
-                Ok(fields_of(vec![("before".to_owned(), before), ("total".to_owned(), total)]))
+                Ok(fields_of(vec![("before".into(), before), ("total".into(), total)]))
             }
             "gpu/store" | "gpu/store-int" => stage(self, Stage::Store),
             "gpu/scene-sphere" | "gpu/scene-strand" => {
@@ -1351,25 +1352,25 @@ impl Lower {
                 // a live octave count is an Int register, a live lacunarity or gain a float register
                 // (uniforms: the kernel stays one compiled program), checked where the noise runs; the
                 // seed picks a table, so it is constant
-                let mut live: Vec<(String, i64)> = Vec::new();
-                let mut configuration: Vec<(String, Value)> = Vec::new();
+                let mut live: Vec<(Symbol, i64)> = Vec::new();
+                let mut configuration: Vec<(Symbol, Value)> = Vec::new();
                 for (arg, expression) in args.iter().skip(1).zip(rest.iter()) {
                     let name = t.name(arg.name);
                     let value = match &expression.constant {
                         Some(value) => value.clone(),
                         None if name == "octaves" => {
                             let r = reg(&self.as_int(expression)?, 0)?;
-                            live.push((name.to_owned(), r));
+                            live.push((t.symbol(arg.name), r));
                             Value::Int(1)
                         }
                         None if name == "lacunarity" || name == "gain" => {
                             let r = reg(&self.as_float(expression)?, 0)?;
-                            live.push((name.to_owned(), r));
+                            live.push((t.symbol(arg.name), r));
                             Value::Float(if name == "lacunarity" { 2.0 } else { 0.5 })
                         }
                         None => return Err(refusal(t, "E_PACKED_CONSTANT", &format!("Noise configuration {} must be constant.", name))),
                     };
-                    configuration.push((name.to_owned(), value));
+                    configuration.push((t.symbol(arg.name), value));
                 }
                 let (seed, octaves, lacunarity, gain) = match op::noise_settings(&configuration) {
                     Ok(settings) => settings,
@@ -1512,14 +1513,14 @@ impl Lower {
                 None => {
                     // A record may contain a deferred vector. Bind that vector as a uniform before
                     // projecting its component.
-                    let (cname, cfields) = self.capture_path(t, name, fields);
+                    let (cname, cfields) = self.capture_path(t, t.symbol(binding.name), fields);
                     let direct = captured_value(&self.bindings, &cname, &cfields).is_ok();
                     if direct {
-                        self.captured(t, name, fields)
+                        self.captured(t, t.symbol(binding.name), fields)
                     } else {
                         match fields.split_last() {
                             Some((component, prefix)) => {
-                                let base = self.captured(t, name, prefix)?;
+                                let base = self.captured(t, t.symbol(binding.name), prefix)?;
                                 field(t, &base, t.name(*component))
                             }
                             None => Err(refusal(t, "E_PACKED_CAPTURE", &format!("Captured binding {} is unavailable.", name))),
@@ -1542,15 +1543,15 @@ impl Lower {
             }
             Node::Record(fs) => {
                 let mut out = Vec::new();
-                for field in arena.fields(fs) { out.push((t.name(field.name).to_owned(), self.expression(env, &t.child(field.term))?)); }
+                for field in arena.fields(fs) { out.push((t.symbol(field.name), self.expression(env, &t.child(field.term))?)); }
                 Ok(fields_of(out))
             }
             Node::Assoc(id) => {
                 let assoc = arena.assoc(id);
                 let value = self.expression(env, &t.child(assoc.value))?;
                 let mut ups = Vec::new();
-                for field in arena.fields(assoc.fields) { ups.push((t.name(field.name).to_owned(), self.expression(env, &t.child(field.term))?)); }
-                let mut fields: Vec<(String, Expression)> = value
+                for field in arena.fields(assoc.fields) { ups.push((t.symbol(field.name), self.expression(env, &t.child(field.term))?)); }
+                let mut fields: Vec<(Symbol, Expression)> = value
                     .fields
                     .iter()
                     .map(|(name, old)| (name.clone(), ups.iter().find(|(n, _)| n == name).map(|(_, e)| e.clone()).unwrap_or_else(|| old.clone())))
@@ -1715,14 +1716,14 @@ impl Lower {
                             Some(length) => Err(length),
                             None if !residual::free_names(&source).iter().any(|n| env_find(env, n).is_some()) && self.constant_only("array/count") => {
                                 let array = builder.import(&source);
-                                Ok(builder.push(None, &Ty::Int, form, Draft::Op { op: "array/count".to_owned(), args: vec![("array".to_owned(), array)], skip: Vec::new() }))
+                                Ok(builder.push(None, &Ty::Int, form, Draft::Op { op: "array/count".to_owned(), args: vec![("array".into(), array)], skip: Vec::new() }))
                             }
                             None => return Err(unsupported()),
                         };
-                        let array = builder.push(None, source.ty(), form, Draft::RefBinding("@fold_array".to_owned(), Vec::new()));
-                        let index = builder.push(None, &Ty::Int, form, Draft::RefBinding("@fold_index".to_owned(), Vec::new()));
+                        let array = builder.push(None, source.ty(), form, Draft::RefBinding("@fold_array".into(), Vec::new()));
+                        let index = builder.push(None, &Ty::Int, form, Draft::RefBinding("@fold_index".into(), Vec::new()));
                         let item_ty = ty::elem(source.ty()).ok_or_else(|| invalid("option is None"))?;
-                        let nth = builder.push(None, &item_ty, form, Draft::Op { op: "array/nth".to_owned(), args: vec![("array".to_owned(), array), ("index".to_owned(), index)], skip: Vec::new() });
+                        let nth = builder.push(None, &item_ty, form, Draft::Op { op: "array/nth".to_owned(), args: vec![("array".into(), array), ("index".into(), index)], skip: Vec::new() });
                         let arena = builder.freeze();
                         Some((length.map(|count| arena.handle(count)), table, arena.handle(nth)))
                     }
@@ -1748,14 +1749,14 @@ impl Lower {
                 self.carried_loop(&ty, control, &mut |me, header, carried| {
                     let index = one(header);
                     let mut env2 = env.clone();
-                    env2.push((t.name(accumulator).to_owned(), carried.clone()));
+                    env2.push((t.symbol(accumulator), carried.clone()));
                     match &element {
-                        None => env2.push((t.name(index_name).to_owned(), index)),
+                        None => env2.push((t.symbol(index_name), index)),
                         Some((_, table, nth)) => {
-                            env2.push(("@fold_array".to_owned(), table.clone()));
-                            env2.push(("@fold_index".to_owned(), index));
+                            env2.push(("@fold_array".into(), table.clone()));
+                            env2.push(("@fold_index".into(), index));
                             let item = me.expression(&env2, nth)?;
-                            env2.push((t.name(index_name).to_owned(), item));
+                            env2.push((t.symbol(index_name), item));
                         }
                     }
                     // `(index_name, index) :: (accumulator, carried) :: env`: index_name shadows
@@ -1806,9 +1807,9 @@ impl Lower {
             Node::Case(id) => {
                 fn boolean(builder: &mut TermBuilder, value: TermId) -> TermId {
                     let row = *builder.row(value);
-                    let path: Option<Vec<_>> = row.path.map(|id| builder.path_names(id).iter().map(|&id| builder.name(id).to_owned()).collect());
-                    let inner = builder.push(path.as_deref(), &Ty::Bool, row.form, Draft::Op { op: "not".to_owned(), args: vec![("x".to_owned(), value)], skip: Vec::new() });
-                    builder.push(path.as_deref(), &Ty::Bool, row.form, Draft::Op { op: "not".to_owned(), args: vec![("x".to_owned(), inner)], skip: Vec::new() })
+                    let path: Option<Vec<_>> = row.path.map(|id| builder.path_names(id).iter().map(|&id| symbol::intern(builder.name(id))).collect());
+                    let inner = builder.push(path.as_deref(), &Ty::Bool, row.form, Draft::Op { op: "not".to_owned(), args: vec![("x".into(), value)], skip: Vec::new() });
+                    builder.push(path.as_deref(), &Ty::Bool, row.form, Draft::Op { op: "not".to_owned(), args: vec![("x".into(), inner)], skip: Vec::new() })
                 }
                 let case = arena.case(id);
                 let scrutinee = t.child(case.value);
@@ -1826,7 +1827,7 @@ impl Lower {
                     let right = builder.push(None, &ty, form, Draft::Lit(value));
                     let left = builder.import(&scrutinee);
                     let (left, right) = if *scrutinee.ty() == Ty::Bool || ty == Ty::Bool { (boolean(&mut builder, left), boolean(&mut builder, right)) } else { (left, right) };
-                    let condition = builder.rebuild(t, Draft::Op { op: "=".to_owned(), args: vec![("a".to_owned(), left), ("b".to_owned(), right)], skip: Vec::new() });
+                    let condition = builder.rebuild(t, Draft::Op { op: "=".to_owned(), args: vec![("a".into(), left), ("b".into(), right)], skip: Vec::new() });
                     let condition = builder.with_type(condition, &Ty::Bool);
                     let yes = builder.import(&t.child(arm.body));
                     folded = builder.rebuild(t, Draft::If(condition, yes, folded));
@@ -1871,7 +1872,7 @@ impl Lower {
                 if self.call_depth >= 64 { return Err(refusal(t, "E_PACKED_LIMIT", "Packed helper call depth exceeds 64.")); }
                 let mut values = Vec::new();
                 for &id in arena.term_ids(call.args) { values.push(self.expression(env, &t.child(id))?); }
-                let (cname, cpath) = self.capture_path(t, fn_name, &[]);
+                let (cname, cpath) = self.capture_path(t, t.symbol(call.name), &[]);
                 let (params, body, scope) = helper_body(t, self.residual, &self.bindings, fn_name, &cname, &cpath)?;
                 let env2 = self.bind_parameters(t, &params, &values, &Vec::new())?;
                 let previous = self.capture_scope.clone();
@@ -1891,7 +1892,7 @@ impl Lower {
                     match arena.pattern(binding.pattern) {
                         PatternNode::Name(n) => {
                             let e = self.expression(&env2, &term)?;
-                            env2.push((t.name(n).to_owned(), e));
+                            env2.push((t.symbol(n), e));
                         }
                         _ => return Err(refusal(&term, "E_PACKED_FORM", "Packed let bindings require name patterns.")),
                     }
@@ -2018,14 +2019,14 @@ impl Lower {
                 let n = count(self, &find("count")?)?;
                 let prepared = reg(&table, 0)?;
                 let mut builder = TermBuilder::new();
-                let input = builder.rebuild(source, Draft::RefBinding("$inner-sum-table".to_owned(), Vec::new()));
+                let input = builder.rebuild(source, Draft::RefBinding("$inner-sum-table".into(), Vec::new()));
                 let input = builder.with_type(input, &array_of(ty.clone()));
-                let length_term = builder.rebuild(source, Draft::Op { op: "array/count".to_owned(), args: vec![("array".to_owned(), input)], skip: Vec::new() });
+                let length_term = builder.rebuild(source, Draft::Op { op: "array/count".to_owned(), args: vec![("array".into(), input)], skip: Vec::new() });
                 let length_term = builder.with_type(length_term, &Ty::Int);
                 let length_term = builder.freeze().handle(length_term);
                 let table_value = self.array_values.get(&prepared).cloned().ok_or_else(|| invalid("Not_found"))?;
-                let bound = residual::with_bindings(self.residual, &length_term, &[("$inner-sum-table".to_owned(), table_value)])?;
-                let uniform = self.uniform(source, (String::new(), Vec::new()), &Value::Residual(bound))?;
+                let bound = residual::with_bindings(self.residual, &length_term, &[("$inner-sum-table".into(), table_value)])?;
+                let uniform = self.uniform(source, ("".into(), Vec::new()), &Value::Residual(bound))?;
                 let length = reg(&self.as_int(&uniform)?, 0)?;
                 let constant = |me: &mut Lower, n: i64| me.emit(I::Int_const(n));
                 // require condition message value
@@ -2095,7 +2096,7 @@ impl Lower {
             match f.node {
                 Node::RefBinding(id) => {
                     let binding = f.arena().ref_binding(id);
-                    Some(me.capture_path(f, f.name(binding.name), f.arena().name_ids(binding.fields)))
+                    Some(me.capture_path(f, f.symbol(binding.name), f.arena().name_ids(binding.fields)))
                 }
                 Node::Fn(id) if f.arena().function(id).capture.is_some() => scope(me, &f.child(f.arena().function(id).capture.unwrap())),
                 Node::FnRef(_) => None,
@@ -2139,7 +2140,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
     let result_ty = term.ty().clone();
     let arena = term.arena();
     // params, accumulator, body, borrowed source IDs, bindings, iteration, result, skip
-    let (params, accumulator, body, sources, bindings, iteration, result, skip): (Params, Option<(Pattern, Option<Ty>)>, Term, &[TermId], Cow<'_, [(String, Value)]>, Iteration, RegionResult, Vec<Vec<usize>>) =
+    let (params, accumulator, body, sources, bindings, iteration, result, skip): (Params, Option<(Pattern, Option<Ty>)>, Term, &[TermId], Cow<'_, [(Symbol, Value)]>, Iteration, RegionResult, Vec<Vec<usize>>) =
         match term.node {
             Node::Hof(id) if arena.hof(id).kind == HofKind::Map && !arena.term_ids(arena.hof(id).args).is_empty() => {
                 let parts = arena.term_ids(arena.hof(id).args);
@@ -2183,7 +2184,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                     _ => return Err(refusal(&source, "E_PACKED_TYPE", &format!("array/sum source is {}, not an array.", ty::to_string(source.ty())))),
                 };
                 let mut builder = TermBuilder::new();
-                let body = builder.rebuild(&source, Draft::RefBinding("@item".to_owned(), Vec::new()));
+                let body = builder.rebuild(&source, Draft::RefBinding("@item".into(), Vec::new()));
                 let body = builder.with_type(body, &ty);
                 let body = builder.freeze().handle(body);
                 (vec![(Pattern::Name("@item".to_owned()), None)], None, body, term.children(), Cow::Borrowed(captures.as_slice()), Iteration::Zip, RegionResult::Sum(true), Vec::new())
@@ -2251,7 +2252,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                 let source = term.child(sources[i]);
                 let element = ty::elem(source.ty()).ok_or_else(|| invalid("option is None"))?;
                 if annotation.is_none() || annotation.as_ref() == Some(&element) {
-                    env.push((name.clone(), lower.input(i, widths[i], source.ty())?));
+                    env.push((symbol::intern(name), lower.input(i, widths[i], source.ty())?));
                 } else {
                     return Err(refuse(
                         "E_PACKED_TYPE",
@@ -2291,7 +2292,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             for i in 0..width {
                 registers.push(lower.emit(if integer { I::Int_accumulator } else { I::Accumulator(i) })?);
             }
-            env.push((name.clone(), regs(registers)));
+            env.push((symbol::intern(name), regs(registers)));
         }
         (None, _) => {}
         _ => return Err(refuse("E_PACKED_FORM", "Packed accumulator requires a name pattern.")),
@@ -2328,7 +2329,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         Err(Stop::Unsupported) => return Err(refuse("E_PACKED_LIMIT", "Packed product source count exceeds the integer limit.")),
         Err(other) => return Err(other),
     };
-    let site = term.path().map(|ids| ids.iter().map(|&id| term.name(id).to_owned()).collect()).unwrap_or_else(|| view.site.as_ref().clone());
+    let site = term.path().map(|ids| ids.iter().map(|&id| term.symbol(id)).collect()).unwrap_or_else(|| view.site.as_ref().clone());
     let mut sites: Vec<(i64, Path, Vec<i64>)> = vec![(view.instance, site, view.iter.to_vec())];
     paths(&view, &mut sites, &body);
     if let Node::Hof(id) = term.node {
@@ -2336,7 +2337,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             let function = term.child(id);
             match function.node {
                 Node::Fn(id) => {
-                    let zone = arena.path(arena.function(id).zone).iter().map(|&id| term.name(id).to_owned()).collect();
+                    let zone = arena.path(arena.function(id).zone).iter().map(|&id| term.symbol(id)).collect();
                     sites.push((view.instance, zone, view.iter.to_vec()));
                 }
                 Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
@@ -2344,7 +2345,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                         if let Some((_, body)) = residual::function_body(f) {
                             if let Some(p) = body.path() {
                                 let keep = p.len().saturating_sub(1);
-                                sites.push((view.instance, p[..keep.min(p.len())].iter().map(|&id| body.name(id).to_owned()).collect(), view.iter.to_vec()));
+                                sites.push((view.instance, p[..keep.min(p.len())].iter().map(|&id| body.symbol(id)).collect(), view.iter.to_vec()));
                             }
                         }
                     }
@@ -2416,7 +2417,7 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
             }),
             _ => None,
         };
-        let bindings_of = |residual: ResidualId| -> Res<Vec<(String, Value)>> {
+        let bindings_of = |residual: ResidualId| -> Res<Vec<(Symbol, Value)>> {
             let view = residual::residual_view(residual)?;
             match (&captured, &t.binding_fn) {
                 (Some(f), _) => match residual::eval_term(residual, f, &input::at_time(0.0), None, None, None) {
@@ -2431,7 +2432,7 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
             }
         };
         let bindings = bindings_of(residual)?;
-        let mut previous: Option<Vec<(String, Value)>> = None;
+        let mut previous: Option<Vec<(Symbol, Value)>> = None;
         let mut uniforms = Vec::new();
         for (i, (name, fields)) in t.uniform_names.iter().enumerate() {
             if name.is_empty() {

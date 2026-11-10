@@ -36,8 +36,8 @@ fn widths(scene: &[rays::scene::node]) -> Vec<f64> {
     image_sizes(scene).into_iter().map(|(w, _)| w).collect()
 }
 
-pub fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| s.to_string()).collect()
+pub fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|s| (*s).into()).collect()
 }
 
 /// v on a drawing or image node shows it in the canvas panes; v again restores their pictures

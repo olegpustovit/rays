@@ -2,6 +2,7 @@
 //! `graph/shortest_paths`, `graph/forest`, `graph/color` and `graph/chains` resolve from their
 //! array arguments alone, with owned results, and never read geometry. The adjacency arrives as
 //! the record `sop/adjacency` returns (or a CSR row record for colouring).
+use flow_syntax::symbol::Symbol;
 use flow_eval::Value;
 use rays_diagnostic::Diagnostic;
 use rdk_core::error as rdk_error;
@@ -14,29 +15,15 @@ use std::sync::Arc;
 use crate::port::error as refuse;
 
 // methods, not free fns: an output borrows from `self` without a lifetime parameter
-trait Named {
-    fn named(&self, name: &str) -> Option<&Value>;
-    fn has(&self, name: &str) -> bool;
-}
 
-impl Named for [(String, Value)] {
-    fn named(&self, name: &str) -> Option<&Value> {
-        self.iter().find(|(n, _)| n == name).map(|(_, v)| v)
-    }
-
-    fn has(&self, name: &str) -> bool {
-        self.iter().any(|(n, _)| n == name)
-    }
-}
-
-fn int_array(record: &[(String, Value)], name: &str) -> Result<Arc<Vec<i64>>, Diagnostic> {
-    match record.named(name) {
+fn int_array(record: &flow_syntax::value::Record, name: &str) -> Result<Arc<Vec<i64>>, Diagnostic> {
+    match record.get_str(name) {
         Some(Value::Int_array(values)) => Ok(values.clone()),
         _ => Err(refuse("E_GRAPH_ADJACENCY", &format!("Graph adjacency needs the integer array {name}."))),
     }
 }
 
-fn record(value: Option<&Value>) -> Result<&[(String, Value)], Diagnostic> {
+fn record(value: Option<&Value>) -> Result<&flow_syntax::value::Record, Diagnostic> {
     match value {
         Some(Value::Record(fields)) => Ok(fields),
         _ => Err(refuse("E_GRAPH_ADJACENCY", "Graph adjacency must be a record of integer arrays.")),
@@ -111,8 +98,8 @@ fn binary_mask(per: &str, label: &str, count: usize, value: Option<&Value>) -> R
     }
 }
 
-fn flag(name: &str, args: &[(String, Value)]) -> Result<bool, Diagnostic> {
-    match args.named(name) {
+fn flag(name: &str, args: &flow_syntax::value::Record) -> Result<bool, Diagnostic> {
+    match args.get_str(name) {
         None => Ok(false),
         Some(Value::Bool(value)) => Ok(*value),
         Some(_) => Err(refuse("E_GRAPH_OPTION", &format!("Graph {name} is a boolean."))),
@@ -148,17 +135,17 @@ fn shared_floats(values: &[f64]) -> Arc<Vec<f64>> {
 }
 
 /// `(distance, parent, path, order)`.
-fn shortest_paths(args: &[(String, Value)]) -> Result<(Vec<f64>, Vec<i64>, Vec<i64>, Vec<i64>), Diagnostic> {
+fn shortest_paths(args: &flow_syntax::value::Record) -> Result<(Vec<f64>, Vec<i64>, Vec<i64>, Vec<i64>), Diagnostic> {
     let PointGraph { points, edges, point_edge_offsets, point_edges, edge_a, edge_b } =
-        point_graph(args.named("adjacency"))?;
-    let lengths = match args.named("lengths") {
+        point_graph(args.get_str("adjacency"))?;
+    let lengths = match args.get_str("lengths") {
         Some(Value::Floats(1, lengths)) if lengths.len() == edges => lengths.clone(),
         _ => return Err(refuse("E_GRAPH_LENGTH", "Graph lengths is a float array with one entry per edge.")),
     };
     if lengths.iter().any(|length| !(*length >= 0.0)) {
         return Err(refuse("E_GRAPH_LENGTH", "Graph lengths must not be negative."));
     }
-    let roots = match args.named("roots") {
+    let roots = match args.get_str("roots") {
         Some(Value::Int_array(roots)) => roots.clone(),
         _ => return Err(refuse("E_GRAPH_ROOT", "Graph roots is an integer array of point indices.")),
     };
@@ -166,36 +153,36 @@ fn shortest_paths(args: &[(String, Value)]) -> Result<(Vec<f64>, Vec<i64>, Vec<i
         return Err(refuse("E_GRAPH_ROOT", "Graph root is not a point index."));
     }
     let hops = flag("hops", args)?;
-    let lowest = match args.named("ties") {
+    let lowest = match args.get_str("ties") {
         None => false,
         Some(Value::Text(t)) if t.as_ref() == b"first" => false,
         Some(Value::Text(t)) if t.as_ref() == b"lowest" => true,
         Some(_) => return Err(refuse("E_GRAPH_OPTION", "Graph ties is first or lowest.")),
     };
-    let target = match args.named("target") {
+    let target = match args.get_str("target") {
         None => -1,
         Some(Value::Int(target)) if *target >= 0 && *target < points as i64 => *target,
         Some(_) => return Err(refuse("E_GRAPH_TARGET", "Graph target is a point index.")),
     };
-    let masked = args.has("blocked_points") || args.has("blocked_edges");
+    let masked = args.get_str("blocked_points").is_some() || args.get_str("blocked_edges").is_some();
     if !hops && !lowest && masked {
         return Err(refuse("E_GRAPH_OPTION", "Graph blocked_points and blocked_edges need :hops true or :ties \"lowest\"."));
     }
-    if (hops || lowest) && args.has("radius") {
+    if (hops || lowest) && args.get_str("radius").is_some() {
         return Err(refuse("E_GRAPH_RADIUS", "Graph radius does not combine with :hops true or :ties \"lowest\"."));
     }
     if hops && lowest {
         return Err(refuse("E_GRAPH_OPTION", "Graph :hops true does not combine with :ties \"lowest\"."));
     }
-    if lowest && args.has("blocked_points") {
+    if lowest && args.get_str("blocked_points").is_some() {
         return Err(refuse("E_GRAPH_OPTION", "Graph :ties \"lowest\" takes blocked_edges only."));
     }
-    let blocked_edge: Option<Arc<Vec<i64>>> = match args.named("blocked_edges") {
+    let blocked_edge: Option<Arc<Vec<i64>>> = match args.get_str("blocked_edges") {
         None => None,
         Some(mask) => Some(binary_mask("edge", "Graph blocked_edges", edges, Some(mask))?),
     };
     if hops {
-        let blocked_point: Option<Arc<Vec<i64>>> = match args.named("blocked_points") {
+        let blocked_point: Option<Arc<Vec<i64>>> = match args.get_str("blocked_points") {
             None => None,
             Some(mask) => Some(binary_mask("point", "Graph blocked_points", points, Some(mask))?),
         };
@@ -245,7 +232,7 @@ fn shortest_paths(args: &[(String, Value)]) -> Result<(Vec<f64>, Vec<i64>, Vec<i
         let path = tree_path(&parent, &|point| forest.distance[point as usize] < f64::INFINITY, target);
         return Ok((distance, parent, path, forest.order[..forest.order_count as usize].to_vec()));
     }
-    let radius = match args.named("radius") {
+    let radius = match args.get_str("radius") {
         None => f64::INFINITY,
         Some(Value::Float(radius)) if *radius >= 0.0 => *radius,
         Some(_) => return Err(refuse("E_GRAPH_RADIUS", "Graph radius is a non-negative float.")),
@@ -268,13 +255,13 @@ fn shortest_paths(args: &[(String, Value)]) -> Result<(Vec<f64>, Vec<i64>, Vec<i
 }
 
 /// `(order, depth, root, child_offsets, children)`.
-fn forest(args: &[(String, Value)]) -> Result<(Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>), Diagnostic> {
-    let parents = match args.named("parents") {
+fn forest(args: &flow_syntax::value::Record) -> Result<(Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>), Diagnostic> {
+    let parents = match args.get_str("parents") {
         Some(Value::Int_array(parents)) => parents.clone(),
         _ => return Err(refuse("E_GRAPH_PARENT", "Graph parents is an integer array with one entry per point.")),
     };
     let points = parents.len();
-    let selected: Option<Arc<Vec<i64>>> = match args.named("mask") {
+    let selected: Option<Arc<Vec<i64>>> = match args.get_str("mask") {
         None => None,
         Some(mask) => Some(binary_mask("point", "Graph forest mask", points, Some(mask))?),
     };
@@ -293,8 +280,8 @@ fn forest(args: &[(String, Value)]) -> Result<(Vec<i64>, Vec<i64>, Vec<i64>, Vec
     Ok((scanned.order[..scanned.order_count as usize].to_vec(), depth, root, scanned.child_offsets, scanned.children))
 }
 
-fn color(args: &[(String, Value)]) -> Result<(Vec<i64>, i64), Diagnostic> {
-    let fields = record(args.named("adjacency"))?;
+fn color(args: &flow_syntax::value::Record) -> Result<(Vec<i64>, i64), Diagnostic> {
+    let fields = record(args.get_str("adjacency"))?;
     let offsets = int_array(fields, "offsets")?;
     let neighbors = int_array(fields, "values")?;
     if offsets.is_empty() {
@@ -302,7 +289,7 @@ fn color(args: &[(String, Value)]) -> Result<(Vec<i64>, i64), Diagnostic> {
     }
     let nodes = offsets.len() - 1;
     check_rows("Graph adjacency", nodes, nodes, &offsets, &neighbors)?;
-    let order = match args.named("order") {
+    let order = match args.get_str("order") {
         Some(Value::Int_array(order)) => order.clone(),
         _ => return Err(refuse("E_GRAPH_ORDER", "Graph order is an integer array of node indices.")),
     };
@@ -321,9 +308,9 @@ fn color(args: &[(String, Value)]) -> Result<(Vec<i64>, i64), Diagnostic> {
     Ok((colors, count))
 }
 
-fn chains(args: &[(String, Value)]) -> Result<(Vec<i64>, Vec<i64>, Vec<i64>), Diagnostic> {
-    let graph = point_graph(args.named("adjacency"))?;
-    let selected: Arc<Option<Arc<Vec<i64>>>> = Arc::new(match args.named("mask") {
+fn chains(args: &flow_syntax::value::Record) -> Result<(Vec<i64>, Vec<i64>, Vec<i64>), Diagnostic> {
+    let graph = point_graph(args.get_str("adjacency"))?;
+    let selected: Arc<Option<Arc<Vec<i64>>>> = Arc::new(match args.get_str("mask") {
         None => None,
         mask => Some(binary_mask("edge", "Graph chains mask", graph.edges, mask)?),
     });
@@ -345,7 +332,7 @@ pub fn resolve(value: &Value) -> Result<Value, Diagnostic> {
         return Err(refuse("E_DATA_SOURCE", "Unknown graph data source."));
     };
     let (name, args) = (&g.name, &g.fields);
-    let component = match args.named("component") {
+    let component = match args.get_str("component") {
         Some(Value::Text(component)) => String::from_utf8_lossy(component).into_owned(),
         _ => return Err(refuse("E_DATA_SOURCE", "Graph source requires a component.")),
     };
@@ -397,43 +384,43 @@ pub fn resolve(value: &Value) -> Result<Value, Diagnostic> {
 mod tests {
     use super::*;
 
-    fn source(name: &str, component: &str, mut args: Vec<(String, Value)>) -> Value {
-        args.push(("component".to_owned(), Value::Text(component.as_bytes().into())));
-        flow_syntax::value::source_value(name, flow_syntax::ty::Ty::Any, args)
+    fn source(name: &str, component: &str, mut args: Vec<(Symbol, Value)>) -> Value {
+        args.push(("component".into(), Value::Text(component.as_bytes().into())));
+        flow_syntax::value::source_value(name, flow_syntax::ty::Ty::Any, args.into())
     }
 
     fn path_adjacency() -> Value {
         // 0 - 1 - 2, edges (0,1) and (1,2)
         let ints = |v: &[i64]| Value::Int_array(Arc::new(v.to_vec()));
         Value::Record(vec![
-            ("point_edge_offsets".to_owned(), ints(&[0, 1, 3, 4])),
-            ("point_edges".to_owned(), ints(&[0, 0, 1, 1])),
-            ("edge_a".to_owned(), ints(&[0, 1])),
-            ("edge_b".to_owned(), ints(&[1, 2])),
-        ])
+            ("point_edge_offsets".into(), ints(&[0, 1, 3, 4])),
+            ("point_edges".into(), ints(&[0, 0, 1, 1])),
+            ("edge_a".into(), ints(&[0, 1])),
+            ("edge_b".into(), ints(&[1, 2])),
+        ].into())
     }
 
     #[test]
     fn shortest_paths_on_a_path_graph() {
         let args = vec![
-            ("adjacency".to_owned(), path_adjacency()),
-            ("lengths".to_owned(), Value::Floats(1, Arc::new(vec![1.0, 2.0]))),
-            ("roots".to_owned(), Value::Int_array(Arc::new(vec![0]))),
-            ("target".to_owned(), Value::Int(2)),
+            ("adjacency".into(), path_adjacency()),
+            ("lengths".into(), Value::Floats(1, Arc::new(vec![1.0, 2.0]))),
+            ("roots".into(), Value::Int_array(Arc::new(vec![0]))),
+            ("target".into(), Value::Int(2)),
         ];
         let distance = resolve(&source("graph/shortest_paths", "distance", args.clone())).expect("distance");
         assert_eq!(distance, Value::Floats(1, Arc::new(vec![0.0, 1.0, 3.0])));
         let path = resolve(&source("graph/shortest_paths", "path", args.clone())).expect("path");
         assert_eq!(path, Value::Int_array(Arc::new(vec![0, 1, 2])));
         let mut hopped = args.clone();
-        hopped.push(("hops".to_owned(), Value::Bool(true)));
+        hopped.push(("hops".into(), Value::Bool(true)));
         let order = resolve(&source("graph/shortest_paths", "order", hopped)).expect("order");
         assert_eq!(order, Value::Int_array(Arc::new(vec![0, 1, 2])));
     }
 
     #[test]
     fn refusals_name_their_codes() {
-        let bad = source("graph/shortest_paths", "distance", vec![("adjacency".to_owned(), Value::No_geo)]);
+        let bad = source("graph/shortest_paths", "distance", vec![("adjacency".into(), Value::No_geo)]);
         assert_eq!(resolve(&bad).unwrap_err().code, "E_GRAPH_ADJACENCY");
         let unknown = source("graph/nowhere", "x", Vec::new());
         assert_eq!(resolve(&unknown).unwrap_err().code, "E_DATA_SOURCE");
@@ -443,11 +430,11 @@ mod tests {
     #[test]
     fn colouring_and_chains() {
         let ints = |v: &[i64]| Value::Int_array(Arc::new(v.to_vec()));
-        let adjacency = Value::Record(vec![("offsets".to_owned(), ints(&[0, 1, 3, 4])), ("values".to_owned(), ints(&[1, 0, 2, 1]))]);
-        let args = vec![("adjacency".to_owned(), adjacency), ("order".to_owned(), ints(&[0, 1, 2]))];
+        let adjacency = Value::Record(vec![("offsets".into(), ints(&[0, 1, 3, 4])), ("values".into(), ints(&[1, 0, 2, 1]))].into());
+        let args = vec![("adjacency".into(), adjacency), ("order".into(), ints(&[0, 1, 2]))];
         assert_eq!(resolve(&source("graph/color", "count", args.clone())).expect("count"), Value::Int(2));
         assert_eq!(resolve(&source("graph/color", "color", args)).expect("color"), ints(&[0, 1, 0]));
-        let chain = vec![("adjacency".to_owned(), path_adjacency())];
+        let chain = vec![("adjacency".into(), path_adjacency())];
         let values = resolve(&source("graph/chains", "values", chain.clone())).expect("values");
         assert_eq!(values, ints(&[0, 1, 2]));
     }

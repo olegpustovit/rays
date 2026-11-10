@@ -3,6 +3,7 @@
 //! The OCaml lowering context is shared by cook closures; its prepared-factory cache stays outside
 //! that context so returned nodes own their cook dependencies without owning themselves.
 //! OCaml exceptions (`Diagnostic.Error`) are `Result`s.
+use flow_syntax::symbol::Symbol;
 use std::fmt::Write as _;
 use crate::{
     attribute_kernel as ak, attribute_metadata as am, catalog, context_kernel as ck, curve,
@@ -71,7 +72,7 @@ pub struct Zone {
     pub body_site: W::Path,
     pub base: i64,
     pub count: Arc<AtomicI64>,
-    pub ekey: Option<String>,
+    pub ekey: Option<Symbol>,
     pub positions: Arc<Mutex<Arc<Vec<(f64, f64, f64)>>>>,
 }
 
@@ -144,19 +145,19 @@ fn key_text(v: &Value) -> String {
 fn txt(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
-fn text_arg(args: &[(String, Value)], key: &str) -> Option<String> {
+fn text_arg(args: &[(Symbol, Value)], key: &str) -> Option<String> {
     match get(args, key) {
         Some(Value::Text(t)) => Some(txt(t)),
         _ => None,
     }
 }
-fn get<'a>(args: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
+fn get<'a>(args: &'a [(Symbol, Value)], key: &str) -> Option<&'a Value> {
     args.iter().find(|(k, _)| k == key).map(|(_, v)| v)
 }
-fn has(args: &[(String, Value)], key: &str) -> bool {
+fn has(args: &[(Symbol, Value)], key: &str) -> bool {
     args.iter().any(|(k, _)| k == key)
 }
-fn without(args: &[(String, Value)], key: &str) -> Vec<(String, Value)> {
+fn without(args: &[(Symbol, Value)], key: &str) -> Vec<(Symbol, Value)> {
     args.iter().filter(|(k, _)| k != key).cloned().collect()
 }
 fn is_geometry_ty(t: &Ty) -> bool {
@@ -247,7 +248,7 @@ pub struct Zinfo {
     pub reads: deps_mod::T,
     pub stateful: bool,
     pub captures: Vec<i64>,
-    pub ekey: Option<String>,
+    pub ekey: Option<Symbol>,
     pub kind: szone::Kind,
     pub key: Option<String>,
     pub base: i64,
@@ -321,7 +322,7 @@ pub fn changes(parameter: &port::Parameter, value: &Value) -> R<Vec<(String, par
 }
 
 /// sop/material takes a material value as its fields.
-fn material_args(kind: &str, args: Vec<(String, Value)>) -> Vec<(String, Value)> {
+fn material_args(kind: &str, args: Vec<(Symbol, Value)>) -> Vec<(Symbol, Value)> {
     if kind != "sop/material" {
         return args;
     }
@@ -330,7 +331,7 @@ fn material_args(kind: &str, args: Vec<(String, Value)>) -> Vec<(String, Value)>
         match &arg {
             (name, Value::Struct(g)) if name == "material" && g.name == "material/standard" => {
                 let fields = &g.fields;
-                let field = |n: &str, default: Value| get(fields, n).cloned().unwrap_or(default);
+                let field = |n: &str, default: Value| fields.get_str(n).cloned().unwrap_or(default);
                 out.push(("material".into(), field("name", Value::Text(Vec::new().into()))));
                 out.push(("color".into(), field("color", Value::Vec3(1., 1., 1.))));
                 out.push(("roughness".into(), field("roughness", Value::Float(0.4))));
@@ -391,7 +392,7 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
     // Encoded defaults run checked Lisp while a schema is built; preserve those calls' ids/order.
     let schema = normalizers.is_empty().then(|| ln::schema("parameters", &fields, &normalizers));
     let parameters = port::parameters(false, &fields);
-    let canonicalize: E::InlineParameterCanonicalizer = Arc::new(move |vals: &[(String, Value)]| {
+    let canonicalize: E::InlineParameterCanonicalizer = Arc::new(move |vals: &[(Symbol, Value)]| {
         let normalized_schema;
         let schema = match &schema {
             Some(schema) => schema,
@@ -404,12 +405,12 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
         let vals = material_args(&qualified, vals.to_vec());
         let (live, vals): (Vec<_>, Vec<_>) = vals.into_iter().partition(|(_, v)| E::is_live(v));
         // a live vec3 group is its three components, each a program input of its field
-        let mut grouped: Vec<(String, Value)> = Vec::new();
+        let mut grouped: Vec<(Symbol, Value)> = Vec::new();
         for (name, value) in live {
             let components: Vec<(i64, String)> = fields
                 .iter()
                 .filter_map(|f| match &f.vec3 {
-                    Some((group, axis)) if *group == name => Some((*axis, f.name.clone())),
+                    Some((group, axis)) if name == *group => Some((*axis, f.name.clone())),
                     _ => None,
                 })
                 .collect();
@@ -422,7 +423,7 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                         let form = builder.import_form(&view.term.form());
                         let term = builder.push(None, &Ty::Float, form, Draft::RefBinding("$vec3".into(), vec![["x", "y", "z"][axis as usize].to_owned()]));
                         let term = builder.freeze().handle(term);
-                        E::residual::with_bindings(*r, &term, &[("$vec3".to_owned(), value.clone())]).ok().map(Value::Residual)
+                        E::residual::with_bindings(*r, &term, &[("$vec3".into(), value.clone())]).ok().map(Value::Residual)
                     }
                     _ => None,
                 }
@@ -433,7 +434,7 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                 let parts: Vec<(String, Option<Value>)> = components.iter().map(|(axis, field)| (field.clone(), component(*axis))).collect();
                 if parts.iter().all(|(_, v)| v.is_some()) {
                     grouped.push((name, value.clone()));
-                    grouped.extend(parts.into_iter().map(|(f, v)| (f, v.unwrap())));
+                    grouped.extend(parts.into_iter().map(|(f, v)| (f.into(), v.unwrap())));
                 } else {
                     grouped.push((name, value));
                 }
@@ -441,13 +442,13 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
         }
         let mut live = grouped;
         // a live Int with hard bounds is clamped in the program, as the node's parameters clamp it
-        let mut clamped: Vec<String> = Vec::new();
+        let mut clamped: Vec<Symbol> = Vec::new();
         let mut next_live = Vec::new();
         for (name, value) in live.drain(..) {
-            let field = fields.iter().find(|f| f.name == name);
+            let field = fields.iter().find(|f| name == f.name);
             match (field.map(|f| &f.kind), &value) {
                 (Some(param::KindView::Integer(range)), Value::Residual(r))
-                    if (range.hard_min.is_some() || range.hard_max.is_some()) && !normalizers.iter().any(|(n, _)| *n == name) =>
+                    if (range.hard_min.is_some() || range.hard_max.is_some()) && !normalizers.iter().any(|(n, _)| name == *n) =>
                 {
                     let mut builder = TermBuilder::new();
                     let form = builder.import_form(&E::residual::residual_view(*r)?.term.form());
@@ -459,9 +460,9 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                             bounded = builder.push(None, &Ty::Int, form, Draft::If(test, literal, bounded));
                         }
                     }
-                    clamped.push(name.clone());
+                    clamped.push(name);
                     let bounded = builder.freeze().handle(bounded);
-                    let r2 = E::residual::with_bindings(*r, &bounded, &[("$int".to_owned(), value.clone())])?;
+                    let r2 = E::residual::with_bindings(*r, &bounded, &[("$int".into(), value.clone())])?;
                     next_live.push((name, Value::Residual(r2)));
                 }
                 _ => next_live.push((name, value)),
@@ -475,12 +476,12 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
             }
         }
         // a live argument is passed as it is, a program input: its field must have nothing to canonicalize
-        let raw = |(name, _): &(String, Value)| -> bool {
-            match fields.iter().find(|f| f.name == *name) {
-                None if fields.iter().any(|f| live.iter().any(|(n, _)| *n == f.name) && f.vec3.is_some() && f.vec3.as_ref().map(|v| &v.0) == Some(name)) => true,
-                None => !fields.iter().any(|f| f.vec3.is_some() && f.vec3.as_ref().map(|v| &v.0) == Some(name)),
+        let raw = |(name, _): &(Symbol, Value)| -> bool {
+            match fields.iter().find(|f| *name == f.name) {
+                None if fields.iter().any(|f| live.iter().any(|(n, _)| *n == f.name) && f.vec3.is_some() && f.vec3.as_ref().map(|v| v.0.as_str()) == Some(name.as_str())) => true,
+                None => !fields.iter().any(|f| f.vec3.is_some() && f.vec3.as_ref().map(|v| v.0.as_str()) == Some(name.as_str())),
                 Some(f) => {
-                    !normalizers.iter().any(|(n, _)| n == name)
+                    !normalizers.iter().any(|(n, _)| *name == *n)
                         && match &f.kind {
                             param::KindView::Toggle => true,
                             param::KindView::Integer(_) if clamped.contains(name) => true,
@@ -494,12 +495,12 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
         if !live.iter().all(raw) {
             return Ok(None);
         }
-        let live_names: Vec<String> = live.iter().map(|(n, _)| n.clone()).collect();
+        let live_names: Vec<Symbol> = live.iter().map(|(n, _)| n.clone()).collect();
         let (values, _) = schema.apply_all(schema.default(), &changes).map_err(|m| fail("E_LOWER", &m))?;
         let arguments = ln::arguments(&fields, &values).map_err(|m| fail("E_LOWER", &m))?;
         // a context input the call does not reach is bound to a placeholder, so no kernel captures its source
         let reached = if context_inputs.is_empty() { Vec::new() } else { ck::context_ops_reached(&arguments, &defs, original_body.as_ref().expect("context inputs keep the body")) };
-        let mut out: Vec<(String, Value)> = arguments.into_iter().filter(|(n, _)| !live_names.contains(n)).collect();
+        let mut out: Vec<(Symbol, Value)> = arguments.into_iter().filter(|(n, _)| !live_names.contains(n)).collect();
         out.extend(live);
         out.extend(context_inputs.iter().filter(|(_, op)| !reached.contains(op)).map(|(n, _)| (n.clone(), Value::Int(0))));
         Ok(Some(out))
@@ -518,7 +519,7 @@ fn is_zone(kind: &str) -> bool {
     ops::lowering(kind) == Some(ops::Lowering::Zone)
 }
 
-fn metadata_factory(operation: &str, args: &[(String, Value)], sources: &[i64]) -> R<Factory> {
+fn metadata_factory(operation: &str, args: &[(Symbol, Value)], sources: &[i64]) -> R<Factory> {
     let text = |name: &str, default: &str| -> R<String> {
         match get(args, name) {
             None => Ok(default.to_owned()),
@@ -588,8 +589,8 @@ fn geometry_arrays_label(kind: &str) -> &'static str {
         _ => "Mesh",
     }
 }
-fn geometry_arrays_data(args: &[(String, Value)]) -> Value {
-    Value::Record(args.iter().filter(|(n, _)| !["source", "target", "sources", "geometry"].contains(&n.as_str())).cloned().collect())
+fn geometry_arrays_data(args: &[(Symbol, Value)]) -> Value {
+    Value::Record(args.iter().filter(|(n, _)| !["source", "target", "sources", "geometry"].contains(&n.as_str())).cloned().collect::<Vec<_>>().into())
 }
 
 /// A kernel over data that reads its cook context is built per context from the specialized
@@ -716,7 +717,7 @@ pub mod chain {
         if gpu.policy == gpu::Policy::Qualification {
             return unplaced(Route::Device);
         }
-        let site = format!("{}#{}", owner.0.join("/"), owner.1.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","));
+        let site = owner.clone();
         let report = {
             let (profile, owner, readers) = (profile.clone(), owner.clone(), readers);
             move |points: Option<i64>, reason: PlacementReason, cpu_seconds: Option<f64>, device_seconds: Option<f64>| {
@@ -864,7 +865,7 @@ pub mod chain {
 /// The point attributes `fold_mesh_writes` folded into a mesh's record, in write order.
 pub const MESH_ATTRIBUTE_PREFIX: &str = "$attr:";
 
-fn mesh_attributes(fields: &[(String, Value)]) -> Vec<(String, String, Value)> {
+fn mesh_attributes(fields: &flow_syntax::value::Record) -> Vec<(String, String, Value)> {
     fields
         .iter()
         .filter_map(|(key, value)| {
@@ -880,7 +881,7 @@ fn mesh_attributes(fields: &[(String, Value)]) -> Vec<(String, String, Value)> {
         .collect()
 }
 
-fn mesh_host_attributes(grain: i64, fields: &[(String, Value)], geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
+fn mesh_host_attributes(grain: i64, fields: &flow_syntax::value::Record, geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
     let mut geometry = geometry;
     for (name, kind, values) in mesh_attributes(fields) {
         geometry = ak::write(grain, rdk_core::attribute::Owner::Point, &kind, &name, &values, &geometry)?;
@@ -890,7 +891,7 @@ fn mesh_host_attributes(grain: i64, fields: &[(String, Value)], geometry: rdk_co
 
 /// On the device each attribute keeps its buffer. A stream that is not resident, or whose count is
 /// not the mesh's, takes the host writer, which reports the count error as a CPU cook does.
-fn mesh_resident_attributes(grain: i64, scope: &dyn gpu::Residency, fields: &[(String, Value)], geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
+fn mesh_resident_attributes(grain: i64, scope: &dyn gpu::Residency, fields: &flow_syntax::value::Record, geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
     let points = rdk_core::geometry::point_count(&geometry);
     let mut current = geometry.clone();
     let mut result: R<()> = Ok(());
@@ -920,7 +921,7 @@ fn mesh_resident_attributes(grain: i64, scope: &dyn gpu::Residency, fields: &[(S
 }
 
 /// A stateful mesh's arguments and inputs: the arguments by content, the input nodes by identity.
-struct StatefulKey(Vec<(String, Value)>, Vec<node::T>);
+struct StatefulKey(flow_syntax::value::Record, Vec<node::T>);
 
 impl PartialEq for StatefulKey {
     fn eq(&self, other: &Self) -> bool {
@@ -956,25 +957,25 @@ pub struct NodeOpts {
     pub check: Option<bool>,
     pub host: bool,
     pub state: Option<State>,
-    pub elems: Option<Vec<(String, Value)>>,
+    pub elems: Option<Vec<(Symbol, Value)>>,
 }
 
-fn static_topology_of(operation: &str, args: &[(String, Value)]) -> bool {
+fn static_topology_of(operation: &str, args: &flow_syntax::value::Record) -> bool {
     operation == "sop/mesh"
-        && ["vertex_points", "primitive_offsets", "kinds"].iter().all(|name| match get(args, name) {
+        && ["vertex_points", "primitive_offsets", "kinds"].iter().all(|name| match args.get_str(name) {
             Some(v) => !(E::frame_dependent(v) || E::state_dependent(v)),
             None => false,
         })
 }
 
-pub fn geometry_arrays_node(env: &KernelEnv, opts: &NodeOpts, operation: &str, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+pub fn geometry_arrays_node(env: &KernelEnv, opts: &NodeOpts, operation: &str, args: &[(Symbol, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
     let operation = operation.to_owned();
     let (env_c, opts_c, sources_c, inputs_c) = (env.clone(), opts.clone(), sources.to_vec(), inputs.to_vec());
     let args_all = args.to_vec();
     per_context(
-        &Value::Record(args.to_vec()),
+        &Value::Record(args.to_vec().into()),
         Arc::new(move |specialize: &dyn Fn(&Value) -> Value| {
-            let args = match specialize(&Value::Record(args_all.clone())) {
+            let args = match specialize(&Value::Record(args_all.clone().into())) {
                 Value::Record(a) => a,
                 _ => unreachable!("a record specializes to a record"),
             };
@@ -983,10 +984,10 @@ pub fn geometry_arrays_node(env: &KernelEnv, opts: &NodeOpts, operation: &str, a
     )
 }
 
-fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, args: &flow_syntax::value::Record, sources: &[i64], inputs: &[node::T]) -> R<node::T> {
     let _phase = flow_syntax::phase_timer::measure("lower.geometry_programs");
     let check = opts.check.unwrap_or(true);
-    let data = geometry_arrays_data(args);
+    let data = Value::Record(args.iter().filter(|(n, _)| !["source", "target", "sources", "geometry"].contains(&n.as_str())).cloned().collect::<Vec<_>>().into());
     let prepare = {
         let (env, sources, inputs) = (env.clone(), sources.to_vec(), inputs.to_vec());
         move |data: &Value| ak::prepare(Some(env.profile.clone()), env.strict_body, Some(env.approx.clone()), Some(Sink::Sop_input), &sources, &inputs, data)
@@ -999,7 +1000,7 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
         let first = prepare(&data);
         let points = match &data {
             Value::Record(fields) => prepare(&Value::Record(
-                fields.iter().filter(|(n, _)| !["vertex_points", "primitive_offsets", "kinds"].contains(&n.as_str())).cloned().collect(),
+                fields.iter().filter(|(n, _)| !["vertex_points", "primitive_offsets", "kinds"].contains(&n.as_str())).cloned().collect::<Vec<_>>().into(),
             )),
             _ => prepare(&data),
         };
@@ -1011,7 +1012,7 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
     let (program, points_program) = if opts.state.is_none() {
         make_programs()
     } else {
-        let key = StatefulKey(args.to_vec(), inputs.to_vec());
+        let key = StatefulKey(args.clone(), inputs.to_vec());
         match STATEFUL_PROGRAMS.get(&key) {
             Some(programs) => (*programs).clone(),
             None => STATEFUL_PROGRAMS.insert(key, make_programs()).as_ref().clone(),
@@ -1036,10 +1037,10 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
         write!(parameters, "{}", E::state_stamp(state)).unwrap();
     }
     if let Some(fields) = &opts.elems {
-        parameters.push_str(&key_text(&Value::Record(fields.clone())));
+        parameters.push_str(&key_text(&Value::Record(fields.clone().into())));
     }
     let generic = ["sop/remap", "sop/concat", "sop/with_planes"].contains(&operation);
-    let (env_k, opts_k, args_k, sources_k, operation_k, data_k) = (env.clone(), opts.clone(), args.to_vec(), sources.to_vec(), operation.to_owned(), data.clone());
+    let (env_k, opts_k, args_k, sources_k, operation_k, data_k) = (env.clone(), opts.clone(), args.clone(), sources.to_vec(), operation.to_owned(), data.clone());
     let n = build::make_geometry(
         build::Args {
             label: Some(geometry_arrays_label(operation).to_owned()),
@@ -1069,7 +1070,7 @@ fn mesh_cook(
     env: &KernelEnv,
     opts: &NodeOpts,
     operation: &str,
-    args: &[(String, Value)],
+    args: &flow_syntax::value::Record,
     sources: &[i64],
     data: &Value,
     static_topology: bool,
@@ -1086,7 +1087,7 @@ fn mesh_cook(
         chain::place(
             &env.gpu,
             &env.profile,
-            chain::site_of(&Value::Record(args.to_vec())).unwrap_or((vec![operation.to_owned()], Vec::new())),
+            chain::site_of(&Value::Record(args.clone())).unwrap_or((vec![operation.into()], Vec::new())),
             sctx::cpu_consumers(context, node_id),
         )
     } else {
@@ -1101,7 +1102,7 @@ fn mesh_cook(
         }
         // keyed by its vertices' value: the same while the node's arguments are, across a
         // stateful node's per-frame rebuilds too
-        let topology_key = get(args, "vertex_points").cloned().unwrap_or_else(|| data.clone());
+        let topology_key = args.get_str("vertex_points").cloned().unwrap_or_else(|| data.clone());
         let cached = static_topology && device && tki::static_cached(&topology_key);
         let program: executor::Program = if cached { points_program.get().cloned().unwrap_or_else(|| program.clone())? } else { program.clone()? };
         let force = |resident: Option<Arc<dyn flow_ir::core_exec::Resident>>| -> R<Value> {
@@ -1129,10 +1130,10 @@ fn mesh_cook(
                                 return error();
                             }
                             let static_key = if static_topology { Some(&topology_key) } else { None };
-                            let result = match tki::mesh_resident(static_key, &*scope, &fields) {
+                            let result = match tki::mesh_resident_with(static_key, &*scope, &|name| fields.get_str(name)) {
                                 Some(r) => r,
                                 None => {
-                                    let host: R<Vec<(String, Value)>> =
+                                    let host: R<Vec<(Symbol, Value)>> =
                                         fields.iter().map(|(k, v)| Ok((k.clone(), flow_ir::core_exec::host_value(scope.executor().as_ref(), v)?))).collect();
                                     tk::mesh(&host?)
                                 }
@@ -1161,7 +1162,7 @@ fn mesh_cook(
                         return error();
                     }
                     let result = if operation == "sop/with_planes" {
-                        match get(args, "geometry") {
+                        match args.get_str("geometry") {
                             Some(Value::Deferred(t, id)) if is_geometry_ty(t) && geometry(*id).is_some() => {
                                 ak::with_planes(sctx::grain(context), &geometry(*id).unwrap(), &fields)
                             }
@@ -1182,16 +1183,16 @@ fn mesh_cook(
                             }
                             Ok(out)
                         };
-                        match get(args, "sources") {
+                        match args.get_str("sources") {
                             Some(Value::List(values)) => collect(values)
-                                .and_then(|sources| tki::concat(Some(sctx::cancel_token(context).clone()), sctx::grain(context), &sources, &fields)),
+                                .and_then(|sources| tki::concat_with(Some(sctx::cancel_token(context).clone()), sctx::grain(context), &sources, &|name| fields.get_str(name))),
                             _ => Err(fail("E_CONCAT_TYPE", "Concat sources must be a geometry list.")),
                         }
                     } else if operation != "sop/remap" {
-                        tk::mesh(&fields).and_then(|g| mesh_host_attributes(sctx::grain(context), &fields, g))
+                        tki::mesh_with(&|name| fields.get_str(name)).and_then(|g| mesh_host_attributes(sctx::grain(context), &fields, g))
                     } else {
                         let cooked_of = |name: &str| -> R<rdk_core::geometry::T> {
-                            match get(args, name) {
+                            match args.get_str(name) {
                                 Some(Value::Deferred(t, id)) if is_geometry_ty(t) => {
                                     geometry(*id).ok_or_else(|| fail("E_DATA_SOURCE", "Remap needs two cooked geometries."))
                                 }
@@ -1199,7 +1200,7 @@ fn mesh_cook(
                             }
                         };
                         cooked_of("source").and_then(|source| {
-                            cooked_of("target").and_then(|target| tki::remap(Some(&**sctx::cancel_token(context)), sctx::grain(context), &source, &target, &fields))
+                            cooked_of("target").and_then(|target| tki::remap_with(Some(&**sctx::cancel_token(context)), sctx::grain(context), &source, &target, &|name| fields.get_str(name)))
                         })
                     };
                     result.and_then(|g| if cancelled() { error() } else { Ok(g) })
@@ -1233,7 +1234,7 @@ fn mesh_cook(
     result.map(|geometry| node::GeometryCooked { geometry, instances: None })
 }
 
-fn attribute_options(args: &[(String, Value)]) -> R<(rdk_core::attribute::Owner, String)> {
+fn attribute_options(args: &[(Symbol, Value)]) -> R<(rdk_core::attribute::Owner, String)> {
     let text = |key: &str, default: &str, code: &str| -> R<String> {
         match get(args, key) {
             None => Ok(default.to_owned()),
@@ -1247,8 +1248,8 @@ fn attribute_options(args: &[(String, Value)]) -> R<(rdk_core::attribute::Owner,
     Ok((owner, kind))
 }
 
-fn group_data(args: &[(String, Value)]) -> Value {
-    Value::Record(args.iter().filter(|(n, _)| n == "values" || n == "order").cloned().collect())
+fn group_data(args: &[(Symbol, Value)]) -> Value {
+    Value::Record(args.iter().filter(|(n, _)| n == "values" || n == "order").cloned().collect::<Vec<_>>().into())
 }
 
 /// the arguments `fold_writes` adds to a write it fuses
@@ -1258,7 +1259,7 @@ pub const FUSED_CHAIN: &str = "$chain";
 pub const FUSED_GUARDS: &str = "$guards";
 
 /// A card's deferred checks: a write folded through the card checks them as it cooks.
-fn guards_of(key: &str, args: &[(String, Value)]) -> Vec<Value> {
+fn guards_of(key: &str, args: &[(Symbol, Value)]) -> Vec<Value> {
     match get(args, key) {
         Some(Value::List(guards)) => (**guards).clone(),
         _ => Vec::new(),
@@ -1324,12 +1325,12 @@ fn guarded(guards: Vec<Value>, n: node::T) -> node::T {
     build::with_facts(node::facts(&n).clone(), &build::with_input_use(node::input_use(&n), &wrapped))
 }
 
-fn attribute_data(args: &[(String, Value)]) -> Value {
+fn attribute_data(args: &[(Symbol, Value)]) -> Value {
     let data = ["selection", "default", "when", FUSED_WRITES];
     if !data.iter().any(|k| has(args, k)) {
         return get(args, "values").cloned().expect("a write has values");
     }
-    Value::Record(args.iter().filter(|(n, _)| n == "values" || data.contains(&n.as_str())).cloned().collect())
+    Value::Record(args.iter().filter(|(n, _)| n == "values" || data.contains(&n.as_str())).cloned().collect::<Vec<_>>().into())
 }
 
 fn kernel_data(n: &ENode) -> Option<Value> {
@@ -1349,7 +1350,7 @@ fn is_resource(n: &ENode) -> bool {
 pub struct AttrOpts {
     pub check: Option<bool>,
     pub state: Option<State>,
-    pub elems: Option<Vec<(String, Value)>>,
+    pub elems: Option<Vec<(Symbol, Value)>>,
     pub selection: Option<Value>,
     pub default: Option<Value>,
     pub guard: Option<Value>,
@@ -1360,9 +1361,9 @@ pub struct AttrOpts {
 }
 
 pub fn attribute_node(env: &KernelEnv, o: &AttrOpts, name: &str, values: &Value, sources: &[i64], inputs: &[node::T]) -> R<node::T> {
-    let mut fields = vec![("values".to_owned(), values.clone())];
+    let mut fields = vec![("values".into(), values.clone())];
     for (i, (_, _, v)) in o.prior.iter().enumerate() {
-        fields.push((format!("prior{i}"), v.clone()));
+        fields.push((format!("prior{i}").into(), v.clone()));
     }
     if let Some(v) = &o.selection {
         fields.push(("selection".into(), v.clone()));
@@ -1373,7 +1374,7 @@ pub fn attribute_node(env: &KernelEnv, o: &AttrOpts, name: &str, values: &Value,
     if let Some(v) = &o.guard {
         fields.push(("when".into(), v.clone()));
     }
-    let data = Value::Record(fields);
+    let data = Value::Record(fields.into());
     let (env_c, o_c, name_c, values_c, sources_c, inputs_c) = (env.clone(), o.clone(), name.to_owned(), values.clone(), sources.to_vec(), inputs.to_vec());
     per_context(
         &data,
@@ -1417,12 +1418,12 @@ pub fn attribute_node(env: &KernelEnv, o: &AttrOpts, name: &str, values: &Value,
     )
 }
 
-pub fn group_node(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+pub fn group_node(env: &KernelEnv, o: &NodeOpts, args: &[(Symbol, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
     let (env_c, o_c, args_c, sources_c, inputs_c) = (env.clone(), o.clone(), args.to_vec(), sources.to_vec(), inputs.to_vec());
     per_context(
-        &Value::Record(args.to_vec()),
+        &Value::Record(args.to_vec().into()),
         Arc::new(move |specialize: &dyn Fn(&Value) -> Value| {
-            let args = match specialize(&Value::Record(args_c.clone())) {
+            let args = match specialize(&Value::Record(args_c.clone().into())) {
                 Value::Record(a) => a,
                 _ => unreachable!("a record specializes to a record"),
             };
@@ -1431,9 +1432,9 @@ pub fn group_node(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], sourc
     )
 }
 
-fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &flow_syntax::value::Record, sources: &[i64], inputs: &[node::T]) -> R<node::T> {
     let text = |key: &str, default: &str| -> R<String> {
-        match get(args, key) {
+        match args.get_str(key) {
             None => Ok(default.to_owned()),
             Some(Value::Text(t)) => Ok(txt(t)),
             _ => Err(fail("E_GROUP_TYPE", &format!("Group {key} must be static text"))),
@@ -1442,14 +1443,14 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], source
     let owner_name = text("owner", "point")?;
     let name = text("name", "")?;
     let owner = gk::owner(&owner_name)?;
-    let values = group_data(args);
+    let values = Value::Record(args.iter().filter(|(n, _)| n == "values" || n == "order").cloned().collect::<Vec<_>>().into());
     let program = ak::prepare(Some(env.profile.clone()), env.strict_body, None, None, sources, inputs, &values);
     if env.strict_body && o.check.unwrap_or(true) {
         program.clone()?;
     }
     let mut parameters = format!("{}{}:{}{}", (env.kernel_source)(), owner_name, name, key_text(&values));
     if let Some(state) = &o.state { write!(parameters, "{}", E::state_stamp(state)).unwrap(); }
-    let (env_c, o_c, args_c, sources_c) = (env.clone(), o.clone(), args.to_vec(), sources.to_vec());
+    let (env_c, o_c, args_c, sources_c) = (env.clone(), o.clone(), args.clone(), sources.to_vec());
     let n = build::make_geometry(
         build::Args {
             label: Some(format!("Write group {name}")),
@@ -1461,7 +1462,7 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], source
         },
         None,
         Arc::new(move |_, context, geometries| {
-            let result = if geometries.is_empty() || get(&args_c, "geometry") == Some(&Value::No_geo) {
+            let result = if geometries.is_empty() || args_c.get_str("geometry") == Some(&Value::No_geo) {
                 Err(fail("E_DATA_SOURCE", "Group write needs geometry."))
             } else if sctx::cancelled(context) {
                 Err(fail("E_CANCELLED", "Group kernel cancelled."))
@@ -1482,17 +1483,17 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], source
                     )?;
                     match forced {
                         Value::Record(fields) => {
-                            let order: R<Option<Vec<i64>>> = match get(&fields, "order") {
+                            let order: R<Option<Vec<i64>>> = match fields.get_str("order") {
                                 None => Ok(None),
                                 Some(Value::Int_array(order)) => Ok(Some((**order).clone())),
-                                Some(Value::Record(f)) => match (get(f, "ordered"), get(f, "indices")) {
+                                Some(Value::Record(f)) => match (f.get_str("ordered"), f.get_str("indices")) {
                                     (Some(Value::Bool(ordered)), Some(Value::Int_array(indices))) => Ok(if *ordered { Some((**indices).clone()) } else { None }),
                                     _ => Err(fail("E_GROUP_ORDER", "Group order requires an integer array or an ordered/indices record.")),
                                 },
                                 _ => Err(fail("E_GROUP_ORDER", "Group order requires an integer array or an ordered/indices record.")),
                             };
                             let order = order?;
-                            match get(&fields, "values") {
+                            match fields.get_str("values") {
                                 Some(Value::Int_array(mask)) => gk::write(order.as_deref(), owner, &name, mask, &geometries[0]),
                                 _ => Err(fail("E_GROUP_MASK", "Group mask requires an integer array.")),
                             }
@@ -1511,7 +1512,7 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &[(String, Value)], source
 type BodyResult = (Arc<dyn Fn(&sctx::T) -> R<node::T> + Send + Sync>, deps_mod::T, Facts);
 
 /// An evaluated body error belongs to cooking: the node keeps its inputs and declared facts.
-fn lisp_body_failed(checked: &Workspace, definition: &NodeDefinition, inputs: &[node::T], parameters: &[(String, Value)], diagnostic: Diagnostic) -> BodyResult {
+fn lisp_body_failed(checked: &Workspace, definition: &NodeDefinition, inputs: &[node::T], parameters: &[(Symbol, Value)], diagnostic: Diagnostic) -> BodyResult {
     let mut dependencies = deps_mod::STATIC;
     for (op, fact) in [("sop/context_seed", deps_mod::Fact::Seed), ("sop/context_frame", deps_mod::Fact::Frame), ("sop/context_time", deps_mod::Fact::Time)] {
         if ck::depends(Some(op), parameters, &checked.defs, &definition.body) {
@@ -1540,12 +1541,12 @@ pub fn build_call(
     env: &CallEnvShared,
     provenance: Option<i64>,
     definition: &NodeDefinition,
-    functions: &[(String, Value)],
+    functions: &[(Symbol, Value)],
     bindings: &[(String, Vec<usize>)],
     label: &str,
     context: &sctx::T,
     inputs: &[node::T],
-    parameters: &[(String, Value)],
+    parameters: &[(Symbol, Value)],
 ) -> Result<BodyResult, String> {
     let checked: &Workspace = &env.checked;
     let make_capture_factories = |aliases: &[(usize, Vec<(i64, i64)>)]| -> Vec<(String, Factory)> {
@@ -1590,7 +1591,7 @@ pub fn build_call(
     let mut forwarded: Vec<(String, FnId, usize)> = Vec::new();
     for (name, value) in functions {
         let fns = function_elements(value);
-        let indices = bindings.iter().find(|(n, _)| n == name).map(|(_, i)| i.clone()).unwrap_or_default();
+        let indices = bindings.iter().find(|(n, _)| *name == *n).map(|(_, i)| i.clone()).unwrap_or_default();
         if fns.len() != indices.len() {
             return Err("E_LOWER: Callable slots do not match their cooked inputs".to_owned());
         }
@@ -1670,18 +1671,18 @@ pub fn build_call(
         let arena = builder.freeze();
         body.body = arena.handle(body_id);
         body.form = arena.syntax().handle(graph_form);
-        body.inputs = new_inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect();
+        body.inputs = new_inputs.into_iter().map(|(name, ty, default)| (name.as_str().to_owned(), ty, default.map(|id| arena.handle(id)))).collect();
         Ok(body)
     };
-    type AssembledKey = (String, (u64, u32), (u64, u32), Vec<(String, String, Option<(u64, u32)>)>, Vec<(String, Vec<usize>)>);
+    type AssembledKey = (Symbol, (u64, u32), (u64, u32), Vec<(Symbol, Symbol, Option<(u64, u32)>)>, Vec<(Symbol, Vec<usize>)>);
     static ASSEMBLED: LazyLock<lru::Memo<AssembledKey, WGraph>> = LazyLock::new(|| lru::Memo::new("flow_sop.assembled_bodies", 256));
     let body = if forwarded.is_empty() {
         let key: AssembledKey = (
-            specialized.name.clone(),
+            flow_syntax::symbol::intern(&specialized.name),
             specialized.body.identity(),
             specialized.form.identity(),
-            specialized.inputs.iter().map(|(name, ty, default)| (name.clone(), ty::to_string(ty), default.as_ref().map(|t| t.identity()))).collect(),
-            bindings.to_vec(),
+            specialized.inputs.iter().map(|(name, ty, default)| (flow_syntax::symbol::intern(name), flow_syntax::symbol::intern_owned(ty::to_string(ty)), default.as_ref().map(|t| t.identity()))).collect(),
+            bindings.iter().map(|(name, slots)| (flow_syntax::symbol::intern(name), slots.clone())).collect(),
         );
         match ASSEMBLED.get(&key) {
             Some(hit) => (*hit).clone(),
@@ -1709,10 +1710,10 @@ pub fn build_call(
     let reached_names: std::collections::HashSet<&str> = defs.iter().map(|d| d.name.as_str()).collect();
     // another kind's body cooks as its own node (`lower_default`), never inline in this one
     let own_body = format!("node:{}", definition.kind.qualified);
-    let reached = |owner: Option<&String>| {
+    let reached = |owner: Option<&Symbol>| {
         owner.is_none_or(|owner| match (owner.strip_prefix("def:"), owner.starts_with("node:")) {
             (Some(name), _) => reached_names.contains(name),
-            (None, true) => *owner == own_body,
+            (None, true) => owner.as_str() == own_body,
             (None, false) => true,
         })
     };
@@ -1735,10 +1736,10 @@ pub fn build_call(
         kind_fns: checked.kind_fns.clone(),
         ops: checked.ops.clone(),
     };
-    let overrides: Vec<(String, Vec<(String, Value)>)> = library
+    let overrides: Vec<(String, Vec<(Symbol, Value)>)> = library
         .graphs
         .iter()
-        .map(|g| (g.name.clone(), parameters.iter().chain(functions.iter()).filter(|(name, _)| g.inputs.iter().any(|(input, _, _)| input == name)).cloned().collect()))
+        .map(|g| (g.name.clone(), parameters.iter().chain(functions.iter()).filter(|(name, _)| g.inputs.iter().any(|(input, _, _)| *name == *input)).cloned().collect()))
         .collect();
     let invalid_parameter = |code: &str, message: &str| -> String { if code == "E_PARAM" { message.to_owned() } else { format!("{code}: {message}") } };
     let validated = E::r#static(&Workspace { graphs: validations.clone().into(), ..library.clone() }, false, Some(&overrides[1..]));
@@ -1773,7 +1774,7 @@ pub fn build_call(
                 let sources = sources?;
                 remapped.push((name.clone(), E::host::remap_function_geometry(&sources, *f), marker(name)?, *index, sources));
             }
-            let functions2: Vec<(String, Value)> = functions
+            let functions2: Vec<(Symbol, Value)> = functions
                 .iter()
                 .map(|(name, value)| {
                     let remap = |offset: usize, f: FnId| -> Value {
@@ -1791,8 +1792,8 @@ pub fn build_call(
                     (name.clone(), v)
                 })
                 .collect();
-            let selected: Vec<(String, Value)> =
-                parameters.iter().chain(functions2.iter()).filter(|(name, _)| body.inputs.iter().any(|(input, _, _)| input == name)).cloned().collect();
+            let selected: Vec<(Symbol, Value)> =
+                parameters.iter().chain(functions2.iter()).filter(|(name, _)| body.inputs.iter().any(|(input, _, _)| *name == *input)).cloned().collect();
             (
                 (body.name.clone(), selected),
                 remapped.iter().map(|(_, f, source, _, _)| (*f, *source)).collect(),
@@ -1807,7 +1808,7 @@ pub fn build_call(
         let graph_form = builder.import_form(&body.form);
         let mut call_args = Vec::new();
         for (name, ty, _) in &definition.body.inputs {
-            let value = match definition.fields.iter().find_map(|f| if f.name == *name { f.vec3.clone() } else { None }) {
+            let value = match definition.fields.iter().find_map(|f| if *name == f.name { f.vec3.clone() } else { None }) {
                 None => Some((name.clone(), builder.push(None, ty, blank, Draft::RefBinding(name.clone(), Vec::new())))),
                 Some((group, 0)) => {
                     let components = (0..3).map(|i| {
@@ -1818,7 +1819,7 @@ pub fn build_call(
                 }
                 Some(_) => None,
             };
-            if let Some(value) = value { call_args.push(value); }
+            if let Some((name, value)) = value { call_args.push((name.into(), value)); }
         }
         let call_id = builder.push(None, &ty::geometry(), blank, Draft::Call { kind: definition.kind.qualified.clone(), ctx: fctx::sop(), args: call_args });
         // the cooked node inputs, not the graph's parameter inputs shadowed below
@@ -1829,7 +1830,7 @@ pub fn build_call(
             body: arena.handle(call_id),
             name: body.name.clone(),
             context: body.context,
-            inputs: inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect(),
+            inputs: inputs.into_iter().map(|(name, ty, default)| (name.as_str().to_owned(), ty, default.map(|id| arena.handle(id)))).collect(),
             form: arena.syntax().handle(graph_form),
         };
         let mut call_factories: Vec<Factory> = capture_factories.iter().map(|(_, f)| f.clone()).collect();
@@ -1973,7 +1974,7 @@ pub fn observe_display(gpu: &gpu::Config, geometry: &rdk_core::geometry::T, seco
     chain::observe_display(gpu, geometry, seconds)
 }
 
-fn geo_of(args: &[(String, Value)]) -> Vec<i64> {
+fn geo_of(args: &[(Symbol, Value)]) -> Vec<i64> {
     fn sources(v: &Value, out: &mut Vec<i64>) {
         match v {
             Value::Deferred(t, j) if ty::is_cooked(t) => out.push(*j),
@@ -2140,18 +2141,18 @@ fn static_source_of(node: &dyn Fn(i64) -> Option<ENode>, value: &Value) -> Optio
         return None;
     }
     let text = |key: &str, default: &str| -> Option<String> {
-        match get(args, key) {
+        match args.get_str(key) {
             None => Some(default.to_owned()),
             Some(Value::Text(t)) => Some(txt(t)),
             Some(_) => None,
         }
     };
-    let kind: Option<Option<String>> = match get(args, "type") {
+    let kind: Option<Option<String>> = match args.get_str("type") {
         None => Some(None),
         Some(Value::Text(k)) if KINDS.contains(&txt(k).as_str()) => Some(Some(txt(k))),
         Some(_) => None,
     };
-    match (get(args, "geometry"), text("attribute", ""), text("owner", "point"), kind) {
+    match (args.get_str("geometry"), text("attribute", ""), text("owner", "point"), kind) {
         (Some(Value::Deferred(t, id)), Some(name), Some(owner), Some(kind)) if is_geometry_ty(t) && !name.is_empty() && OWNERS.contains(&owner.as_str()) => {
             let answer = static_attributes(node, *id).into_iter().find_map(|s| match s {
                 Static::Write(o, n, k) if o == owner && n == name => Some(Some(kind.is_none() || kind.as_deref() == Some(k.as_str()))),
@@ -2191,7 +2192,7 @@ pub fn install_hooks() {
     });
 }
 
-fn fused_entries(args: &[(String, Value)]) -> R<Vec<(String, String, Value)>> {
+fn fused_entries(args: &[(Symbol, Value)]) -> R<Vec<(String, String, Value)>> {
     match get(args, FUSED_WRITES) {
         Some(Value::List(entries)) => entries
             .iter()
@@ -2271,7 +2272,7 @@ pub struct Options {
     pub on_profile: Option<OnProfile>,
     pub compiled_ids: PathMap,
     pub sites: Vec<W::Path>,
-    pub inputs: Option<Vec<(String, Vec<(String, Value)>)>>,
+    pub inputs: Option<Vec<(String, Vec<(Symbol, Value)>)>>,
     /// The Lisp-node environment (`CallEnvShared::id`) whose body this lowering builds; 0 otherwise.
     pub body_of: u64,
 }
@@ -2386,7 +2387,7 @@ pub struct CallEnvShared {
     o: Options,
     def_context_use: OnceLock<Arc<Vec<bool>>>,
     /// `checked.packed` positions by their path's owner (first segment; `None` for the root).
-    packed_owners: OnceLock<BTreeMap<Option<String>, Vec<usize>>>,
+    packed_owners: OnceLock<BTreeMap<Option<Symbol>, Vec<usize>>>,
 }
 
 impl CookServices {
@@ -2436,7 +2437,7 @@ impl CookServices {
                             digest(&format!("{}{}", declaration_key(&checked2, &definition2), key))
                         }));
                         let mut site = n.site.clone();
-                        site.push(format!("node:{kind}"));
+                        site.push(format!("node:{kind}").into());
                         table.entry(site).or_default().push((n.iter.clone(), source));
                     }
                 }
@@ -2472,7 +2473,7 @@ impl CookServices {
                 let site: Option<W::Path> = match get(&n.args, "kind") {
                     Some(Value::Text(kind)) if n.kind == E::card_kind() => {
                         let mut s = n.site.clone();
-                        s.push(format!("node:{}", txt(kind)));
+                        s.push(format!("node:{}", txt(kind)).into());
                         Some(s)
                     }
                     _ => {
@@ -2502,7 +2503,7 @@ impl CookServices {
     /// for it. The key is what the build reads: the card's key, the data's structure, and of each
     /// input its id and the facts along its pass-throughs; a node built for a device is taken only
     /// for that device.
-    fn reuse(&self, node: Option<&ENode>, state: &Option<State>, elems: &Option<Vec<(String, Value)>>, what: &str, data: &Value, inputs: &[node::T], build_fn: &dyn Fn() -> R<node::T>) -> R<node::T> {
+    fn reuse(&self, node: Option<&ENode>, state: &Option<State>, elems: &Option<Vec<(Symbol, Value)>>, what: &str, data: &Value, inputs: &[node::T], build_fn: &dyn Fn() -> R<node::T>) -> R<node::T> {
         fn input_key(body_of: u64, input: &node::T) -> String {
             let facts = node::facts(input);
             let inputs = build::input_array(input);
@@ -2564,17 +2565,17 @@ impl CookServices {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn arrays_node(&self, node: Option<&ENode>, strict: Option<bool>, host: bool, state: Option<State>, elems: Option<Vec<(String, Value)>>, operation: &str, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+    fn arrays_node(&self, node: Option<&ENode>, strict: Option<bool>, host: bool, state: Option<State>, elems: Option<Vec<(Symbol, Value)>>, operation: &str, args: &[(Symbol, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
         let strict_param = strict.unwrap_or(self.o.strict_body);
         let what = format!("arrays {operation}{}", if host { "true" } else { "" });
         let env = self.kenv(node, strict_param);
         let opts = NodeOpts { check: Some(strict_param), host, state: state.clone(), elems: elems.clone() };
-        self.reuse(node, &state, &elems, &what, &Value::Record(args.to_vec()), inputs, &|| geometry_arrays_node(&env, &opts, operation, args, sources, inputs))
+        self.reuse(node, &state, &elems, &what, &Value::Record(args.to_vec().into()), inputs, &|| geometry_arrays_node(&env, &opts, operation, args, sources, inputs))
     }
 
     #[allow(clippy::too_many_arguments)]
     fn attr_node(&self, node: Option<&ENode>, mut o: AttrOpts, name: &str, values: &Value, sources: &[i64], inputs: &[node::T]) -> R<node::T> {
-        let mut fields = vec![("values".to_owned(), values.clone())];
+        let mut fields = vec![("values".into(), values.clone())];
         for (_, _, v) in &o.prior {
             fields.push(("prior".into(), v.clone()));
         }
@@ -2587,7 +2588,7 @@ impl CookServices {
         if let Some(v) = &o.default {
             fields.push(("default".into(), v.clone()));
         }
-        let data = Value::Record(fields);
+        let data = Value::Record(fields.into());
         let guards = node.map(|n| guards_of(FUSED_GUARDS, &n.args)).unwrap_or_default();
         let owner = o.owner.unwrap_or(rdk_core::attribute::Owner::Point);
         let kind = o.kind.clone().unwrap_or_else(|| "vec3".into());
@@ -2607,10 +2608,10 @@ impl CookServices {
         Ok(guarded(guards, built))
     }
 
-    fn grp_node(&self, node: Option<&ENode>, state: Option<State>, elems: Option<Vec<(String, Value)>>, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+    fn grp_node(&self, node: Option<&ENode>, state: Option<State>, elems: Option<Vec<(Symbol, Value)>>, args: &[(Symbol, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
         let env = self.kenv(node, self.o.strict_body);
         let opts = NodeOpts { check: Some(self.o.strict_body), host: false, state: state.clone(), elems: elems.clone() };
-        self.reuse(node, &state, &elems, "group", &Value::Record(args.to_vec()), inputs, &|| group_node(&env, &opts, args, sources, inputs))
+        self.reuse(node, &state, &elems, "group", &Value::Record(args.to_vec().into()), inputs, &|| group_node(&env, &opts, args, sources, inputs))
     }
 
     fn external_kernel(&self, f: FnId) -> Option<i64> {
@@ -2661,7 +2662,7 @@ impl CookServices {
             out.extend(ak::sources(&geometry_arrays_data(&n.args)).into_iter().filter(|id| !direct.contains(id)));
             Ok(out)
         } else if n.kind == "sop/delete_attr" && has(&n.args, "when") {
-            let direct = geo_of(&[("geometry".to_owned(), get(&n.args, "geometry").cloned().expect("geometry"))]);
+            let direct = geo_of(&[("geometry".into(), get(&n.args, "geometry").cloned().expect("geometry"))]);
             let mut out = direct.clone();
             out.extend(ak::sources(get(&n.args, "when").expect("when")).into_iter().filter(|id| !direct.contains(id)));
             Ok(out)
@@ -2719,7 +2720,7 @@ impl CookServices {
             Ok(())
         }
         visit(self, root, lo, hi, &mut seen, &mut caps)?;
-        let ekey = text_arg(&n.args, "element");
+        let ekey = text_arg(&n.args, "element").map(flow_syntax::symbol::intern_owned);
         let live = (lo..hi).any(|id| self.plan.nodes[id as usize].args.iter().any(|(_, v)| E::frame_dependent(v)));
         let mut reads = deps_mod::STATIC;
         for id in lo..hi {
@@ -2765,7 +2766,7 @@ impl CookServices {
     }
 
     /// The editor's provenance: a merge tags its input i with base + i.
-    fn tag_sources(&self, cid: i64, args: &[(String, Value)]) -> i64 {
+    fn tag_sources(&self, cid: i64, args: &[(Symbol, Value)]) -> i64 {
         let sources = geo_of(args);
         let base = self.tags.load(Ordering::SeqCst);
         self.tags.store(base + sources.len() as i64, Ordering::SeqCst);
@@ -3022,7 +3023,7 @@ impl HostRun {
         Arc::new(move |v: &Value| run.resolve(v))
     }
 
-    fn force_args(self: &Arc<Self>, keep_constant: bool, args: &[(String, Value)]) -> R<Vec<(String, Value)>> {
+    fn force_args(self: &Arc<Self>, keep_constant: bool, args: &[(Symbol, Value)]) -> R<Vec<(Symbol, Value)>> {
         args.iter()
             .map(|(name, value)| {
                 let forced = if Self::deferred(value) && !(keep_constant && name == "values" && Self::constant(value)) {
@@ -3045,7 +3046,7 @@ impl HostRun {
 
     /// sop/mesh, sop/mesh_planes and sop/remap build their node directly from the evaluated
     /// arguments: the former synthetic one-node workspace was checked, evaluated and lowered per call.
-    fn host_geometry_arrays(self: &Arc<Self>, lowerer: &HostLowering, ty: Ty, name: &str, args: &[(String, Value)]) -> R<Value> {
+    fn host_geometry_arrays(self: &Arc<Self>, lowerer: &HostLowering, ty: Ty, name: &str, args: &[(Symbol, Value)]) -> R<Value> {
         let op = flow_check::op::find(&self.env.checked.ops, name, &fctx::sop()).ok_or_else(|| data_source("A host call has no checked operator."))?;
         (op.check)(args)?;
         let scalar = |v: &Value| -> Option<param::Value> {
@@ -3079,7 +3080,7 @@ impl HostRun {
         Ok(self.register_node(ty, n))
     }
 
-    fn call(self: &Arc<Self>, lowerer: &HostLowering, ty: Ty, catalog: bool, name: &str, args: Vec<(String, Value)>) -> R<Value> {
+    fn call(self: &Arc<Self>, lowerer: &HostLowering, ty: Ty, catalog: bool, name: &str, args: Vec<(Symbol, Value)>) -> R<Value> {
         let checked = &self.env.checked;
         if catalog && !checked.nodes.iter().any(|n| n.kind.qualified == name) && !self.env.factories.iter().any(|f| format!("sop/{}", edit::factory_key(f)) == name) {
             return Err(data_source("A host call has no checked catalog kind."));
@@ -3092,7 +3093,7 @@ impl HostRun {
         } else {
             match get(&args, "when") {
                 None => None,
-                Some(guard) => match self.force_args(false, &[("when".to_owned(), guard.clone())])?.as_slice() {
+                Some(guard) => match self.force_args(false, &[("when".into(), guard.clone())])?.as_slice() {
                     [(_, Value::Bool(b))] => Some(*b),
                     _ => return Err(fail("E_ATTR_TYPE", &format!("{name} :when must be a bool"))),
                 },
@@ -3160,7 +3161,7 @@ impl HostRun {
                             if !selected && ["vec2", "vec3", "vec4"].contains(&kind.as_str()) {
                                 !E::is_live(values)
                             } else {
-                                matches!((get(fields, "offsets"), get(fields, "values")), (Some(Value::Int_array(_)), Some(Value::Floats(1, _) | Value::Int_array(_))))
+                                matches!((fields.get_str("offsets"), fields.get_str("values")), (Some(Value::Int_array(_)), Some(Value::Floats(1, _) | Value::Int_array(_))))
                             }
                         }
                         _ => false,
@@ -3218,7 +3219,7 @@ impl HostRun {
         let mut builder = TermBuilder::new();
         let form = builder.import_form(&empty_form());
         let mut capture_factories: Vec<Factory> = Vec::new();
-        let mut overrides: Vec<(String, Value)> = Vec::new();
+        let mut overrides: Vec<(Symbol, Value)> = Vec::new();
         let mut inputs = Vec::new();
         for (n, value) in &args {
             let vty = flow_syntax::value::ty_of(value);
@@ -3228,11 +3229,11 @@ impl HostRun {
             }
             inputs.push((n.clone(), vty, default));
         }
-        let call_args = inputs.iter().map(|(n, ty, _)| (n.clone(), builder.push(None, ty, form, Draft::RefBinding(n.clone(), Vec::new())))).collect();
+        let call_args = inputs.iter().map(|(n, ty, _)| (n.clone(), builder.push(None, ty, form, Draft::RefBinding(n.as_str().to_owned(), Vec::new())))).collect();
         let node = if catalog { Draft::Call { kind: name.to_owned(), ctx: call_context, args: call_args } } else { Draft::Op { op: name.to_owned(), args: call_args, skip: Vec::new() } };
         let body = builder.push(None, &ty, form, node);
         let arena = builder.freeze();
-        let inputs = inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect();
+        let inputs = inputs.into_iter().map(|(name, ty, default)| (name.as_str().to_owned(), ty, default.map(|id| arena.handle(id)))).collect();
         let graph = WGraph { name: "lisp_host_call".into(), context: fctx::sop(), inputs, body: arena.handle(body), form: arena.syntax().handle(form) };
         // an operator call with no function argument needs none of the library: qualifying it would
         // walk every definition per call
@@ -3292,12 +3293,12 @@ impl HostRun {
                     }
                 }
                 Value::Source(g) if g.name == "$core/diagnostic_index" => Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs typed rows and policy.")),
-                Value::Source(g) if g.name == "$core/complete" => { let (ty, args) = (&g.ty, &g.fields); match args.as_slice() {
-                    [(k, Value::Deferred(actual, id))] if k == "value" && actual == ty && ty::is_cooked(ty) => {
+                Value::Source(g) if g.name == "$core/complete" => { let (ty, args) = (&g.ty, &g.fields); match (args.len(), args.get_str("value")) {
+                    (1, Some(Value::Deferred(actual, id))) if actual == ty && ty::is_cooked(ty) => {
                         self.snapshot(ty, *id)?;
                         Ok(Value::Deferred(ty.clone(), *id))
                     }
-                    [(k, Value::No_geo)] if k == "value" && is_geometry_ty(ty) => Ok(Value::No_geo),
+                    (1, Some(Value::No_geo)) if is_geometry_ty(ty) => Ok(Value::No_geo),
                     _ => Err(data_source("Protected completion needs one matching cooked handle.")),
                 } },
                 Value::Source(g) if g.name == "$core/cooked" && g.fields.len() == 1 && g.fields[0].0 == "id" => match &g.fields[0].1 {
@@ -3312,9 +3313,9 @@ impl HostRun {
                     if !ty::is_cooked(ty) {
                         return Err(data_source("Host calls return a declared cooked type."));
                     }
-                    match get(args, "$name") {
+                    match args.get_str("$name") {
                         Some(Value::Text(name)) => {
-                            let rest: Vec<(String, Value)> = args.iter().filter(|(n, _)| n != "$name" && n != "$context").cloned().collect();
+                            let rest: Vec<(Symbol, Value)> = args.iter().filter(|(n, _)| n != "$name" && n != "$context").cloned().collect();
                             self.call(&self.lowering(), ty.clone(), kind == "$core/catalog", &txt(name), rest)
                         }
                         _ => Err(data_source("A host call needs its checked kind.")),
@@ -3350,7 +3351,7 @@ impl HostRun {
 }
 
 struct HostLowering {
-    arrays: Box<dyn Fn(&str, &[(String, Value)], &[i64], &[node::T]) -> R<node::T>>,
+    arrays: Box<dyn Fn(&str, &[(Symbol, Value)], &[i64], &[node::T]) -> R<node::T>>,
 }
 
 fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &[payload::T]) -> R<node::Cooked> {
@@ -3383,9 +3384,9 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
             let (run, scope) = (run.clone(), scope.clone());
             move |value: &Value| -> R<Option<Value>> {
                 match value {
-                    Value::Source(g) if g.name == "$core/operator" && is_geometry_ty(&g.ty) && get(&g.fields, "$name") == Some(&Value::Text(b"sop/mesh".as_slice().into())) => {
+                    Value::Source(g) if g.name == "$core/operator" && is_geometry_ty(&g.ty) && g.fields.get_str("$name") == Some(&Value::Text(b"sop/mesh".as_slice().into())) => {
                         let (ty, args) = (&g.ty, &g.fields);
-                        let points = match get(args, "points") {
+                        let points = match args.get_str("points") {
                             Some(p) => scope_count(&**scope, p)?,
                             None => None,
                         };
@@ -3394,7 +3395,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
                         } else if sctx::cancelled(&run.context) {
                             Err(fail("E_CANCELLED", "Mesh kernel cancelled."))
                         } else {
-                            match tki::mesh_resident(None, &**scope, args) {
+                            match tki::mesh_resident_with(None, &**scope, &|name| args.get_str(name)) {
                                 None => Ok(None),
                                 Some(result) => {
                                     let geometry = result?;
@@ -3495,7 +3496,7 @@ fn kind_key(qualified: &str) -> String {
 
 /// The factory of a checked Lisp declaration. `functions` are the call's function arguments;
 /// `error` is an evaluation error of the call's own parameters, reported when it cooks.
-fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option<Diagnostic>, functions: &[(String, Value)], provenance: Option<i64>, definition_index: usize) -> Factory {
+fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option<Diagnostic>, functions: &[(Symbol, Value)], provenance: Option<i64>, definition_index: usize) -> Factory {
     let _phase = flow_syntax::phase_timer::measure("lower.lisp_factory");
     let checked = shared.checked.clone();
     let definition = &checked.nodes[definition_index];
@@ -3506,21 +3507,21 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
             cached_digest(&checked, std::slice::from_ref(definition), &|| ck::declaration_source(&checked, definition))
         }))
     };
-    let functions: Vec<(String, Value)> = definition
+    let functions: Vec<(Symbol, Value)> = definition
         .slots
         .iter()
         .filter_map(|slot: &Slot| {
             let values: Vec<Value> = functions.iter().filter(|(name, _)| *name == slot.name).flat_map(|(_, v)| function_elements(v)).map(Value::Fn).collect();
             match values.len() {
                 0 => None,
-                1 if !slot.rest => Some((slot.name.clone(), values[0].clone())),
-                _ => Some((slot.name.clone(), Value::List(Arc::new(values)))),
+                1 if !slot.rest => Some((slot.name.as_str().into(), values[0].clone())),
+                _ => Some((slot.name.as_str().into(), Value::List(Arc::new(values)))),
             }
         })
         .collect();
     let roots = E::roots(functions.iter().map(|(_, value)| value));
     let key = kind_key(&definition.kind.qualified);
-    let errored: Arc<Mutex<Option<Vec<(String, Value)>>>> = Arc::new(Mutex::new(None));
+    let errored: Arc<Mutex<Option<Vec<(Symbol, Value)>>>> = Arc::new(Mutex::new(None));
     let category: Vec<String> = if definition.category.is_empty() { vec!["Custom".into()] } else { definition.category.clone() };
     let (shared_c, functions_c, kernel_source_c, key_c) = (shared.clone(), functions.clone(), kernel_source.clone(), key.clone());
     let construct = move |inputs: &[Option<node::T>]| -> Result<node::T, String> {
@@ -3568,7 +3569,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
         );
         let (shared, functions2, bindings2, error2, errored2) = (shared_c.clone(), functions_c.clone(), bindings, error.clone(), errored.clone());
         let roots = roots.clone();
-        let build_body: ln::BuildFn = Arc::new(move |label: &str, context: &sctx::T, inputs: &[node::T], parameters: &[(String, Value)]| {
+        let build_body: ln::BuildFn = Arc::new(move |label: &str, context: &sctx::T, inputs: &[node::T], parameters: &[(Symbol, Value)]| {
             let _roots = &roots;
             let definition2 = &shared.checked.nodes[definition_index];
             let failed = match (&error2, &*errored2.lock().unwrap()) {
@@ -3629,7 +3630,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
 
 impl CallEnvShared {
     /// One lowering of a Lisp-node body over its parameters, slots and forwarded captures.
-    fn lower_call(&self, provenance: Option<i64>, kernel_bindings: Vec<(FnId, i64)>, factories: Vec<Factory>, inputs: Vec<(String, Vec<(String, Value)>)>, checked: Workspace) -> R<T> {
+    fn lower_call(&self, provenance: Option<i64>, kernel_bindings: Vec<(FnId, i64)>, factories: Vec<Factory>, inputs: Vec<(String, Vec<(Symbol, Value)>)>, checked: Workspace) -> R<T> {
         let o = &self.o;
         lower_checked(
             factories,
@@ -3644,9 +3645,9 @@ impl CallEnvShared {
     }
 
     /// `checked.packed` in order, kept by owner: a body visits its owners, not every catalog site.
-    fn packed_by_owner(&self, keep: &dyn Fn(Option<&String>) -> bool) -> Vec<(W::Path, W::PackedForm)> {
+    fn packed_by_owner(&self, keep: &dyn Fn(Option<&Symbol>) -> bool) -> Vec<(W::Path, W::PackedForm)> {
         let owners = self.packed_owners.get_or_init(|| {
-            let mut owners: BTreeMap<Option<String>, Vec<usize>> = BTreeMap::new();
+            let mut owners: BTreeMap<Option<Symbol>, Vec<usize>> = BTreeMap::new();
             for (i, (path, _)) in self.checked.packed.iter().enumerate() { owners.entry(path.first().cloned()).or_default().push(i); }
             owners
         });
@@ -3657,20 +3658,18 @@ impl CallEnvShared {
 }
 
 /// A card's canonical parameters as the values of its schema's fields.
-fn card_values(fields: &[param::FieldView], defaults: &[(String, param::Value)], parameters: &[(String, Value)]) -> Vec<(String, param::Value)> {
-    // a vec3 group's argument is one vec3
-    let mut parameters = parameters.to_vec();
-    for f in fields {
-        if let Some((group, i)) = &f.vec3 {
-            if let Some(Value::Vec3(x, y, z)) = get(&parameters.clone(), group) {
-                parameters.push((f.name.clone(), Value::Float([*x, *y, *z][*i as usize])));
-            }
-        }
-    }
+fn card_values(fields: &[param::FieldView], defaults: &[(String, param::Value)], parameters: &flow_syntax::value::Record) -> Vec<(String, param::Value)> {
     defaults
         .iter()
         .map(|(name, default)| {
-            let v = match (get(&parameters, name), default) {
+            let expanded = fields.iter().find(|field| field.name == *name).and_then(|field| {
+                let (group, axis) = field.vec3.as_ref()?;
+                match parameters.get_str(group) {
+                    Some(Value::Vec3(x, y, z)) => Some(Value::Float([*x, *y, *z][*axis as usize])),
+                    _ => None,
+                }
+            });
+            let v = match (parameters.get_str(name).or(expanded.as_ref()), default) {
                 (Some(Value::Bool(b)), _) => param::Value::Bool(*b),
                 (Some(Value::Int(n)), _) => param::Value::Int(*n),
                 (Some(Value::Float(f)), _) => param::Value::Float(*f),
@@ -3698,7 +3697,7 @@ impl CookServices {
     }
 
 
-    fn curve_points(args: &[(String, Value)]) -> R<Vec<(f64, f64, f64)>> {
+    fn curve_points(args: &[(Symbol, Value)]) -> R<Vec<(f64, f64, f64)>> {
         match get(args, "points") {
             Some(Value::List(values)) => values
                 .iter()
@@ -3711,9 +3710,9 @@ impl CookServices {
         }
     }
 
-    fn lower_default(&self, tag_base: Option<i64>, node: &ENode, args: &[(String, Value)], cid: i64) -> R<Prepared> {
+    fn lower_default(&self, tag_base: Option<i64>, node: &ENode, args: &[(Symbol, Value)], cid: i64) -> R<Prepared> {
         let kind = node.kind.clone();
-        let args: Vec<(String, Value)> = if kind == "image/noise" { args.iter().map(|(n, v)| (if n == "freq" { "frequency".to_owned() } else { n.clone() }, v.clone())).collect() } else { args.to_vec() };
+        let args: Vec<(Symbol, Value)> = if kind == "image/noise" { args.iter().map(|(n, v)| (if n == "freq" { "frequency".into() } else { *n }, v.clone())).collect() } else { args.to_vec() };
         let key = match kind.split('/').collect::<Vec<_>>().as_slice() {
             ["sop", key] => (*key).to_owned(),
             ["image", "noise"] => "image_noise".to_owned(),
@@ -3723,7 +3722,7 @@ impl CookServices {
             sop::image_nodes::noise_factory()
         } else {
             match self.checked.nodes.iter().position(|d| d.kind.qualified == kind) {
-                Some(_) if self.o.defer_body_errors && node.error.is_none() && self.checked.graphs.iter().any(|g| node.site == vec![g.name.clone(), "@result".to_owned()]) => {
+                Some(_) if self.o.defer_body_errors && node.error.is_none() && self.checked.graphs.iter().any(|g| node.site.as_slice() == [flow_syntax::symbol::intern(&g.name), flow_syntax::symbol::intern("@result")]) => {
                     // a node's own cook is one inlined call: that call staying a node would cook the same lowering again
                     return Err(fail("E_LOWER", &format!("{kind} does not inline in its own cook")));
                 }
@@ -3761,7 +3760,7 @@ impl CookServices {
                         _ => return Err(fail("E_LOWER", &format!("Input {name} does not declare a function signature"))),
                     };
                     let mut site = node.site.clone();
-                    site.push(format!("~kernel:{name}:{index}"));
+                    site.push(format!("~kernel:{name}:{index}").into());
                     let cid = self.compiled_id(&ENode { site, ..node.clone() });
                     kernels.push(KernelInput { index, cid, signature, fun: f, identity: build::fresh_id(), sources: ak::sources(&Value::Fn(f)) });
                 }
@@ -3791,7 +3790,7 @@ impl CookServices {
             Ok(())
         }
         for (name, value) in &args {
-            match (names.iter().position(|n| n == name), value) {
+            match (names.iter().position(|n| *name == *n), value) {
                 (Some(index), value) if Some(index) == rest => add_rest(name, value, &mut next_rest, &mut arity, &mut slots, &mut kernels, rest.unwrap(), &mut add_function)?,
                 (Some(_), Value::No_geo) => {}
                 (Some(index), Value::Deferred(ty, id)) if ty::is_cooked(ty) => slots.push((index, *id)),
@@ -3813,7 +3812,7 @@ impl CookServices {
 
     /// An inlined card's marker: a pass-through of the body's result, or the structural node of a
     /// body whose geometry is decided by cooked data.
-    fn lower_card(self: &Arc<Self>, node: &ENode, args: &[(String, Value)], cid: i64) -> R<Prepared> {
+    fn lower_card(self: &Arc<Self>, node: &ENode, args: &[(Symbol, Value)], cid: i64) -> R<Prepared> {
         let kind = match get(args, "kind") {
             Some(Value::Text(k)) => txt(k),
             _ => String::new(),
@@ -3922,10 +3921,10 @@ impl Lowerer {
             self.concat_tags.lock().unwrap().insert((node.site.clone(), node.iter.clone()), base);
             node.args = node.args.iter().map(|(k, v)| if k == "tag_base" && matches!(v, Value::Int(n) if *n == ops::PROVENANCE_SENTINEL) { (k.clone(), Value::Int(base)) } else { (k.clone(), v.clone()) }).collect();
         }
-        let live: Vec<(String, Value)> = node.args.iter().filter(|(_, v)| E::is_live(v)).cloned().collect();
+        let live: Vec<(Symbol, Value)> = node.args.iter().filter(|(_, v)| E::is_live(v)).cloned().collect();
         let resource = is_resource(&node);
         // a template node keeps its live arguments: each element forces them
-        let args: Vec<(String, Value)> = if template || kernel_data(&node).is_some() || resource || node.kind == E::card_kind() || (node.kind == "sop/delete_attr" && has(&node.args, "when")) {
+        let args: Vec<(Symbol, Value)> = if template || kernel_data(&node).is_some() || resource || node.kind == E::card_kind() || (node.kind == "sop/delete_attr" && has(&node.args, "when")) {
             node.args.clone()
         } else {
             node.args.iter().map(|(n, v)| Ok((n.clone(), at_zero(v)?))).collect::<R<Vec<_>>>()?
@@ -3939,9 +3938,9 @@ impl Lowerer {
             let parameters = self.parameters(&p.factory)?;
             let mut pending = self.pending.lock().unwrap();
             for (field, value) in live {
-                let field = if node.kind == "image/noise" && field == "freq" { "frequency".to_owned() } else { field };
-                if parameters.iter().any(|parameter| parameter.path == field) {
-                    pending.insert(0, Pending { node: cid, field, value });
+                let field = if node.kind == "image/noise" && field == "freq" { "frequency".into() } else { field };
+                if parameters.iter().any(|parameter| field == parameter.path) {
+                    pending.insert(0, Pending { node: cid, field: field.as_str().to_owned(), value });
                 }
             }
         }
@@ -3949,7 +3948,7 @@ impl Lowerer {
         Ok(p)
     }
 
-    fn lower_native(self: &Arc<Self>, kind: Kind, node: &ENode, args: &[(String, Value)], cid: i64) -> R<Prepared> {
+    fn lower_native(self: &Arc<Self>, kind: Kind, node: &ENode, args: &[(Symbol, Value)], cid: i64) -> R<Prepared> {
         let plain = |factory: Factory, sources: &[i64]| Prepared { cid, factory, arity: sources.len(), changes: Vec::new(), dynamic: Vec::new(), zone: None, kernels: Vec::new(), slots: sources.iter().enumerate().map(|(i, s)| (i, *s)).collect() };
         match kind {
             Kind::Card => self.services.lower_card(node, args, cid),
@@ -4003,7 +4002,7 @@ impl Lowerer {
                     _ => Vec::new(),
                 };
                 let prior = fused_entries(args)?;
-                let args: Vec<(String, Value)> = args.iter().filter(|(k, _)| ![FUSED_WRITES, FUSED_DELETES, FUSED_CHAIN].contains(&k.as_str())).cloned().collect();
+                let args: Vec<(Symbol, Value)> = args.iter().filter(|(k, _)| ![FUSED_WRITES, FUSED_DELETES, FUSED_CHAIN].contains(&k.as_str())).cloned().collect();
                 let (owner, kind) = attribute_options(&args)?;
                 let name = match get(&args, "attribute") {
                     Some(Value::Text(n)) => txt(n),
@@ -4091,7 +4090,7 @@ impl Lowerer {
             }
             Kind::Curve => {
                 let mut dynamic: Vec<Dynamic> = Vec::new();
-                let encode = |points: &[(String, Value)]| -> R<Vec<(String, param::Value)>> {
+                let encode = |points: &[(Symbol, Value)]| -> R<Vec<(String, param::Value)>> {
                     Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(points)?).into_bytes().into()))])
                 };
                 let closed = match get(args, "closed") {
@@ -4108,7 +4107,7 @@ impl Lowerer {
                 changes.extend(filled);
                 match get(args, "points") {
                     Some(points) if E::is_live(points) => {
-                        dynamic.push((points.clone(), Arc::new(move |v: &Value| Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(&[("points".to_owned(), v.clone())])?).into_bytes().into()))]))));
+                        dynamic.push((points.clone(), Arc::new(move |v: &Value| Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(&[("points".into(), v.clone())])?).into_bytes().into()))]))));
                     }
                     _ => changes.extend(encode(args)?),
                 }
@@ -4163,7 +4162,7 @@ impl CookServices {
         }
     }
     /// A kernel node of a function-valued input.
-    fn kernel_node(&self, state: Option<State>, elems: Option<Vec<(String, Value)>>, k: &KernelInput, inputs: &[node::T]) -> R<node::T> {
+    fn kernel_node(&self, state: Option<State>, elems: Option<Vec<(Symbol, Value)>>, k: &KernelInput, inputs: &[node::T]) -> R<node::T> {
         let n = fk::node(state.as_ref(), self.o.reference, elems.as_deref(), k.identity, &k.signature, k.fun, &k.sources, inputs.to_vec());
         edit_r(build::restore_id(k.cid, &n))
     }
@@ -4176,7 +4175,7 @@ impl ZoneCook {
     }
 
     /// The zone node of a lowered graph: it cooks `z.root` once per element.
-    fn make_zone(self: &Arc<Self>, state: Option<State>, outer: Vec<(String, Value)>, z: &Zinfo, inputs: Vec<node::T>) -> node::T {
+    fn make_zone(self: &Arc<Self>, state: Option<State>, outer: Vec<(Symbol, Value)>, z: &Zinfo, inputs: Vec<node::T>) -> node::T {
         let mut stamp = String::new();
         if let Some(state) = &state { write!(stamp, "{}", E::state_stamp(state)).unwrap(); }
         if let Some(choice) = &z.preview {
@@ -4245,12 +4244,12 @@ impl ZoneCook {
 
 
     /// One element's copy of the template, over the zone's own inputs.
-    fn instantiate(self: &Arc<Self>, state: Option<State>, outer: Vec<(String, Value)>, live: Frame, z: &Zinfo, inputs: &[node::T]) -> szone::ElementBody {
+    fn instantiate(self: &Arc<Self>, state: Option<State>, outer: Vec<(Symbol, Value)>, live: Frame, z: &Zinfo, inputs: &[node::T]) -> szone::ElementBody {
         let this = self.clone();
         let z = z.clone();
         let build_one = {
             let (this, z, state, live) = (this.clone(), z.clone(), state.clone(), live.clone());
-            move |outer: &[(String, Value)], bound: &mut HashMap<i64, node::T>, id: i64| -> R<()> {
+            move |outer: &[(Symbol, Value)], bound: &mut HashMap<i64, node::T>, id: i64| -> R<()> {
                 let n = this.plan.nodes[id as usize].clone();
                 let p = this.prepare(&n)?;
                 let mut options: Vec<Option<node::T>> = Vec::with_capacity(p.arity);
@@ -4684,11 +4683,11 @@ impl Lowerer {
                 }
             };
             let rest: Vec<String> = self.lisp_definition(&kind).map(|d| d.slots.iter().filter(|s| s.rest).map(|s| s.name.clone()).collect()).unwrap_or_default();
-            let mut args: Vec<(String, Value)> = slots
+            let mut args: Vec<(Symbol, Value)> = slots
                 .iter()
                 .filter_map(|(name, ids)| match ids {
                     Value::List(ids) if ids.is_empty() => None,
-                    Value::List(ids) if ids.len() == 1 && !rest.contains(name) => Some((name.clone(), slot_value(&ids[0]))),
+                    Value::List(ids) if ids.len() == 1 && !rest.iter().any(|n| *name == *n) => Some((name.clone(), slot_value(&ids[0]))),
                     Value::List(ids) => Some((name.clone(), Value::List(Arc::new(ids.iter().map(slot_value).collect())))),
                     _ => None,
                 })
@@ -4696,7 +4695,7 @@ impl Lowerer {
             args.extend(n.args.iter().filter(|(name, _)| !["value", "kind", "parameters", "slots"].contains(&name.as_str())).cloned());
             let tag_base = {
                 let mut card = n.site.clone();
-                card.push(format!("node:{kind}"));
+                card.push(format!("node:{kind}").into());
                 let mut found = None;
                 for ((site, iter), base) in self.concat_tags.lock().unwrap().iter() {
                     if *iter == n.iter && site.len() > card.len() && site[..card.len()] == card[..] {
@@ -4707,7 +4706,7 @@ impl Lowerer {
             };
             // its own site: the call's kernels must not take the ids of the body's
             let mut site = n.site.clone();
-            site.push("~factory".to_owned());
+            site.push("~factory".to_owned().into());
             let p = self.lower_default(tag_base, &ENode { kind: kind.clone(), args: args.clone(), site, ..n.clone() }, &args, cid)?;
             let changes = match self.lisp_definition(&kind) {
                 Some(d) => card_values(&d.fields, &schema_defaults(&ln::schema("parameters", &d.fields, &ep::for_node(&self.checked, &d))), parameters),
@@ -5009,7 +5008,7 @@ pub fn zone_count(lowered: &T, site: &W::Path) -> Option<i64> {
     lowered.zones.iter().find_map(|z| if z.site == *site && z.count.load(Ordering::SeqCst) >= 0 { Some(z.count.load(Ordering::SeqCst)) } else { None })
 }
 
-pub fn zone_element(lowered: &T, site: &W::Path, k: i64) -> Option<(String, (f64, f64, f64))> {
+pub fn zone_element(lowered: &T, site: &W::Path, k: i64) -> Option<(Symbol, (f64, f64, f64))> {
     lowered.zones.iter().find_map(|z| {
         if z.site != *site {
             return None;
@@ -5027,7 +5026,7 @@ pub type FieldCall = (i64, i64, Arc<dyn Fn(i64) -> R<Vec<(W::Path, Vec<(Vec<i64>
 pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_exec::ResolveFn, lowered: &T, zone: &W::Path, outer: &[i64]) -> Vec<FieldCall> {
     let state = state.map(E::fork_state);
     let defaults: Vec<param::FieldView> = lowered.factories.iter().find(|f| edit::factory_key(f) == "iso_surface").map(|f| edit::factory_fields(f).to_vec()).unwrap_or_default();
-    let vector = |args: &[(String, Value)], name: &str| -> Option<(f64, f64, f64)> {
+    let vector = |args: &[(Symbol, Value)], name: &str| -> Option<(f64, f64, f64)> {
         match get(args, name) {
             Some(value) => match E::host::force_reference(value, live, state.as_ref(), None, Some(resolve.clone())) {
                 Ok(Value::Vec3(x, y, z)) => Some((x, y, z)),
@@ -5047,7 +5046,7 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
     let mut offset: i64 = 0;
     let mut out: Vec<FieldCall> = Vec::new();
     for node in &lowered.plan.nodes {
-        let args: Option<Vec<(String, Value)>> = if node.kind == E::card_kind() && get(&node.args, "kind") == Some(&Value::Text(b"sop/iso_surface".as_slice().into())) {
+        let args: Option<Vec<(Symbol, Value)>> = if node.kind == E::card_kind() && get(&node.args, "kind") == Some(&Value::Text(b"sop/iso_surface".as_slice().into())) {
             match get(&node.args, "parameters") {
                 Some(Value::Record(parameters)) => Some(node.args.iter().chain(parameters.iter()).cloned().collect()),
                 _ => None,
@@ -5121,11 +5120,11 @@ fn failed_card_as_call(n: &ENode, plan: &Plan, checked: &Workspace) -> ENode {
             _ => Value::No_geo,
         }
     };
-    let mut args: Vec<(String, Value)> = slots
+    let mut args: Vec<(Symbol, Value)> = slots
         .iter()
         .filter_map(|(name, ids)| match ids {
             Value::List(ids) if ids.is_empty() => None,
-            Value::List(ids) if ids.len() == 1 && !rest.contains(name) => Some((name.clone(), slot_value(&ids[0]))),
+            Value::List(ids) if ids.len() == 1 && !rest.iter().any(|n| *name == *n) => Some((name.clone(), slot_value(&ids[0]))),
             Value::List(ids) => Some((name.clone(), Value::List(Arc::new(ids.iter().map(slot_value).collect())))),
             _ => None,
         })

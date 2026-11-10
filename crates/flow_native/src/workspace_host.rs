@@ -1,6 +1,7 @@
 //! Port of lib/flow_native/workspace_host.ml: the host effects a workspace's `effects` list asks
 //! for (quit, save a PNG, play a sample, open a file dialog), their rising-edge bookkeeping and the
 //! resources the workspace owns.
+use flow_syntax::symbol::Symbol;
 use crate::workspace_gpu;
 use crate::workspace_images;
 use crate::workspace_resources;
@@ -70,7 +71,7 @@ pub fn take_events(host: &mut WorkspaceHost) -> Vec<Event> {
     events
 }
 
-fn assoc<'a>(args: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
+fn assoc<'a>(args: &'a [(Symbol, Value)], key: &str) -> Option<&'a Value> {
     args.iter().find(|(k, _)| k == key).map(|(_, x)| x)
 }
 
@@ -86,7 +87,7 @@ pub fn effects(workspace: &workspace_doc::T, plan: &e::Plan) -> Option<Value> {
     let graph = workspace_doc::editor_graph(workspace)?;
     let instance = plan.instances.iter().find(|i| i.default && i.graph == graph.name)?;
     match &instance.result {
-        Value::Struct(g) if g.name == "ui/workspace" => assoc(&g.fields, "effects").cloned(),
+        Value::Struct(g) if g.name == "ui/workspace" => g.fields.get_str("effects").cloned(),
         _ => None,
     }
 }
@@ -97,7 +98,7 @@ pub fn prepare(plan: &e::Plan, effects: &Value) -> Result<prepared, Diagnostic> 
     let mut args = Vec::with_capacity(plan.nodes.len());
     for node in &plan.nodes {
         if node.ty == effect_ty() || node.ty == sample_ty() {
-            args.push(Some(I::compile(&Value::Record(node.args.clone()), &options)?));
+            args.push(Some(I::compile(&Value::Record(node.args.clone().into()), &options)?));
         } else {
             args.push(None);
         }
@@ -110,7 +111,7 @@ pub struct request {
     pub id: i64,
     pub when_: bool,
     pub kind: String,
-    pub args: Vec<(String, Value)>,
+    pub args: v::Record,
 }
 
 fn force(program: &I::Program, state: &e::State, reference: bool, live: &Frame) -> Result<Value, Diagnostic> {
@@ -128,7 +129,7 @@ fn collect(plan: &e::Plan, prepared: &prepared, state: &e::State, reference: boo
         Value::Deferred(ty, id) if *ty == effect_ty() && *id >= 0 && (*id as usize) < plan.nodes.len() => {
             let forced = force(prepared.args[*id as usize].as_ref().expect("effect program"), state, reference, live)?;
             let Value::Record(args) = forced else { unreachable!("assert false") };
-            let when_ = v::truthy(assoc(&args, "when").expect("when"))?;
+            let when_ = v::truthy(args.get_str("when").expect("when"))?;
             out.push(request { id: *id, when_, kind: plan.nodes[*id as usize].kind.clone(), args });
             Ok(())
         }
@@ -177,13 +178,13 @@ fn sample(host: &WorkspaceHost, state: &e::State, live: &Frame, value: &Value) -
             let forced = force(prepared.args[*id as usize].as_ref().expect("sample program"), state, false, live)?;
             let Value::Record(args) = forced else { unreachable!("assert false") };
             let text_of = |key: &str, default: &str| -> Result<String, Diagnostic> {
-                match assoc(&args, key) {
+                match args.get_str(key) {
                     None => Ok(default.to_owned()),
                     Some(Value::Text(t)) => Ok(String::from_utf8_lossy(t).into_owned()),
                     _ => Err(v::fail("E_TYPE", "A resource path or waveform is text.")),
                 }
             };
-            let number = |key: &str, default: f64| -> Result<f64, Diagnostic> { assoc(&args, key).map_or(Ok(default), v::num) };
+            let number = |key: &str, default: f64| -> Result<f64, Diagnostic> { args.get_str(key).map_or(Ok(default), v::num) };
             match prepared.plan.nodes[*id as usize].kind.as_str() {
                 "audio/load" => {
                     let path = text_of("path", "")?;
@@ -213,7 +214,7 @@ fn sample(host: &WorkspaceHost, state: &e::State, live: &Frame, value: &Value) -
 fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &[request]) -> Result<(), Diagnostic> {
     for r in requests {
         host.fired += 1;
-        let arg = |name: &str| assoc(&r.args, name).expect("effect argument");
+        let arg = |name: &str| r.args.get_str(name).expect("effect argument");
         if host.deterministic && (r.kind == "host/quit" || r.kind == "host/dialog") {
             return Err(v::fail("E_EFFECT_EXPORT", "Quit and file dialogs are unavailable in fixed-step runs."));
         }
@@ -227,8 +228,8 @@ fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &
             "host/play" => {
                 let sample_ = sample(host, state, live, arg("sample"))?;
                 let audio = host.resources.0.borrow().audio.clone().expect("audio");
-                let volume = assoc(&r.args, "volume").map(v::num).transpose()?;
-                let loops = assoc(&r.args, "loops").map(v::int_of).transpose()?;
+                let volume = r.args.get_str("volume").map(v::num).transpose()?;
+                let loops = r.args.get_str("loops").map(v::int_of).transpose()?;
                 sample::play(&audio, loops, volume, &sample_.borrow()).map_err(|m| v::fail("E_AUDIO", &m))?;
             }
             "host/dialog" => {
@@ -239,13 +240,13 @@ fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &
                     "open_folder" => sketch::dialog::Open_folder,
                     _ => return Err(v::fail("E_EFFECT", "Unknown file dialog kind.")),
                 };
-                let filters: Option<Vec<(String, Vec<String>)>> = match assoc(&r.args, "filters") {
+                let filters: Option<Vec<(String, Vec<String>)>> = match r.args.get_str("filters") {
                     None => None,
                     Some(Value::List(entries)) => {
                         let mut out = Vec::new();
                         for entry in entries.iter() {
                             out.push(match entry {
-                                Value::Record(fields) => match (assoc(fields, "label"), assoc(fields, "extensions")) {
+                                Value::Record(fields) => match (fields.get_str("label"), fields.get_str("extensions")) {
                                     (Some(Value::Text(label)), Some(Value::List(extensions))) => {
                                         (String::from_utf8_lossy(label).into_owned(), extensions.iter().map(text).collect::<Result<Vec<_>, _>>()?)
                                     }
@@ -264,7 +265,7 @@ fn perform(host: &mut WorkspaceHost, state: &e::State, live: &Frame, requests: &
                     }
                     Some(_) => return Err(v::fail("E_EFFECT", "Dialog filters are a list.")),
                 };
-                let default_location = assoc(&r.args, "default").map(text).transpose()?;
+                let default_location = r.args.get_str("default").map(text).transpose()?;
                 let id = sketch::show_file_dialog(filters.as_deref(), default_location.as_deref(), kind).map_err(|m| v::fail("E_EFFECT", &m))?;
                 host.pending_events.insert(0, Event::Dialog_opened(id));
             }
@@ -321,7 +322,7 @@ pub fn export_update(host: &mut WorkspaceHost, state: &e::State, live: &Frame, w
     }
     for r in &requests {
         if r.kind == "host/save_png" {
-            match assoc(&r.args, "path") {
+            match r.args.get_str("path") {
                 Some(Value::Text(path)) => host.pending_saves.insert(0, String::from_utf8_lossy(path).into_owned()),
                 _ => return Err(v::fail("E_TYPE", "A PNG path is text.")),
             }

@@ -54,7 +54,7 @@ use crate::selection;
 use crate::text_pane;
 use crate::timeline;
 
-type Path = Vec<String>;
+type Path = flow_check::workspace::Path;
 
 fn basename(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
@@ -138,8 +138,8 @@ pub fn gesture_key<'a>(value: &ModelView<'a>, frame_: &frame::Frame, loaded: boo
         change::Set_parameter { node, path, .. } => Some(format!("graph.scrub:{}:{}:{}", level_key(pane_level(value)), node, path)),
         change::Syntax_edit(op) => fe::gesture(op),
         change::Layout_edit(op) => layout_edit::gesture(op).map(|g| g.to_string()),
-        change::Panel_state(path, _) => Some(format!("panel:{}", panel_key(&value.doc, path).join("/"))),
-        change::Dock_panels(path, _, _) => Some(format!("panel:{}", panel_key(&value.doc, path).join("/"))),
+        change::Panel_state(path, _) => Some(format!("panel:{}", flow_syntax::symbol::join_path(&panel_key(&value.doc, path), "/"))),
+        change::Dock_panels(path, _, _) => Some(format!("panel:{}", flow_syntax::symbol::join_path(&panel_key(&value.doc, path), "/"))),
         _ => None,
     });
     if found.is_some() {
@@ -258,7 +258,7 @@ fn inline_gesture(value: &EditorModel, next: &Document, home: &Home, key: &ArgKe
         Some(syntax) => match &syntax.node {
             SNode::Sym(name) => {
                 let mut path = node[..node.len() - 1].to_vec();
-                path.push(syntax.name(*name).to_owned());
+                path.push(syntax.name(*name).into());
                 apply(&doc, &path)
             }
             _ => Err("The panel could not be named.".to_string()),
@@ -363,10 +363,10 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                                 match (leaf, fe::arg_text(&doc.workspace.ws.source, node, key)) {
                                     (Ok(leaf), Some(e)) if fe::value_call(&e) => {
                                         let mut from = sp.clone();
-                                        from.push(src.clone());
+                                        from.push(src.clone().into());
                                         let at = next.workspace.ws.layout.at.get(&from).copied();
                                         let mut to = sp.clone();
-                                        to.push(leaf);
+                                        to.push(leaf.into());
                                         document_edit::layout_edit(&doc, &|l| {
                                             let mut l = l.clone();
                                             l.collapsed.insert(to.clone(), false);
@@ -384,7 +384,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                         match op {
                             Op::AddNode { scope: sc, name, .. } => {
                                 let mut p = sc.clone();
-                                p.push(name.clone());
+                                p.push(name.clone().into());
                                 g.added = vec![p];
                             }
                             Op::RenameGraph { name, to_ } => g.renamed = Some((name.clone(), to_.clone())),
@@ -414,7 +414,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                             match op {
                                 Op::AddNode { scope: sc, name, .. } => {
                                     let mut p = sc.clone();
-                                    p.push(name.clone());
+                                    p.push(name.clone().into());
                                     g.added = vec![p];
                                 }
                                 Op::SetGraph { name, .. } if label == "New material" || label == "New graph" => g.created = Some(name.clone()),
@@ -599,7 +599,7 @@ pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::St
         return None;
     }
     let place_of_path = |path: &Path| -> carry_mod::Place {
-        if path.len() == 1 { carry_mod::Place::Graph(path[0].clone()) } else { carry_mod::Place::Node(path.clone()) }
+        if path.len() == 1 { carry_mod::Place::Graph(path[0].to_string()) } else { carry_mod::Place::Node(path.clone()) }
     };
     let mut found: Vec<(carry_mod::Place, bool)> = Vec::new();
     for c in &result.scope_changes {
@@ -1240,7 +1240,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     if selection_changed {
         text.target = None;
     }
-    let locals: Vec<(Vec<String>, local)> = if selection_changed {
+    let locals: Vec<(crate::panel_map::Key, local)> = if selection_changed {
         result
             .locals
             .iter()

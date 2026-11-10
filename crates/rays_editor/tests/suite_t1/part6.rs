@@ -120,7 +120,7 @@ pub fn run_panels() {
     expect_error("an :of that is not a binding", &with_editor("    (ui/workspace (ui/split \"vertical\" (ui/graph) (ui/list :of (ui/graph))))"), "E_PANEL_OF");
     expect_error("an :of outside the layout shown", &with_editor("    (let* [g (ui/graph) h (ui/graph)] (ui/workspace (ui/split \"vertical\" h (ui/lisp :of g))))"), "E_PANEL_OF");
     let scope = flow_graph::projection::of_graph(&catalog(), &of_text(&with_editor(tied)).checked, "editor").expect("scope");
-    let rows = match flow_graph::projection::find(&scope, &["editor".to_string(), "ia".to_string()]) {
+    let rows = match flow_graph::projection::find(&scope, &["editor".into(), "ia".into()]) {
         Some(n) => n.rows.iter().map(|r| r.label.clone()).collect::<Vec<_>>(),
         None => fail("no card ia"),
     };

@@ -79,7 +79,7 @@ fn a_deleted_node_dissolves_into_its_readers() {
 #[test]
 fn local_fn_refusals() {
     // l: a function of a node that reads nothing, or of a local function call, is refused
-    let refused = |src: &[Syntax], nodes: Vec<Vec<String>>| apply_checked(&catalog(), src, &Op::MakeLocalFn { nodes }).is_err();
+    let refused = |src: &[Syntax], nodes: Vec<flow_check::workspace::Path>| apply_checked(&catalog(), src, &Op::MakeLocalFn { nodes }).is_err();
     assert!(refused(&source("[a (+ 1.0 2.0)] a"), vec![path(&["g", "a"])]));
     let made = edit(&source("[a 1.0 b (+ a 2.0)] b"), Op::MakeLocalFn { nodes: vec![path(&["g", "b"])] });
     assert!(has(&text_of(&made), "b_fn (fn [in_a]") && has(&text_of(&made), "b (b_fn a)"));

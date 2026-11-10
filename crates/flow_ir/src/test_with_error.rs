@@ -37,7 +37,7 @@ fn residual(body: &str) -> ResidualId {
     let workspace = check(&source(&format!("(with_error {body} {MAPPER})")));
     let evaluation = ok(E::static_with(&workspace, true, None, None));
     assert_eq!(evaluation.plan.nodes.len(), 0);
-    let path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     match &evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1 {
         Value::Residual(r) => *r,
         _ => panic!("with_error was evaluated eagerly"),
@@ -203,7 +203,7 @@ fn diagnostic_envelopes_are_lossless() {
             ("code".into(), Value::Text(b"E_NEW".as_slice().into())),
             ("message".into(), Value::Text(b"new".as_slice().into())),
             ("cause".into(), Value::List(Arc::new(vec![Value::Text(b"a".as_slice().into()), Value::Text(b"b".as_slice().into())]))),
-        ]))
+        ].into()))
     }) {
         Err(actual) => assert!(actual.code == "E_DIAGNOSTIC_MAP" && actual.trace == original.trace && actual.hints == original.hints && actual.cause == original.cause),
         Ok(_) => panic!("expected an error"),
@@ -233,7 +233,7 @@ mod graph_edits {
         assert_eq!(card.head, "array/float");
         let (forms, checked) = ok(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: make(Node::Num("4.0".into())) }));
         let evaluation = ok(E::run(&checked, true, None, None, None, 0.));
-        let path = vec!["g".to_owned(), "tested".to_owned()];
+        let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
         assert!(evaluation.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1 == Value::Floats(1, Arc::new(vec![4., 4.])));
         let forms_again = ok(syntax::parse(&lisp::print(&forms).unwrap().0));
         let (_, ds) = W::check(&[], false, false, None, &catalog(), &forms_again);

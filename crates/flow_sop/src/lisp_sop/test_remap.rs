@@ -2,6 +2,7 @@
 //! the reference and CPU tiers, domains and grains.
 //!
 //! Text fixtures retain the original invalid 0xff byte and embedded NUL without Unicode substitution.
+use flow_syntax::symbol::Symbol;
 use super::support::*;
 use super::test_group_kernel::{flow_ok, ok};
 use crate::{catalog, lisp_sop, lower, operators};
@@ -21,7 +22,7 @@ use sop::node::{self, build, CookMode};
 use sop::{context as sctx, payload, session};
 use std::sync::Arc;
 
-type Args = Vec<(String, Value)>;
+type Args = Vec<(Symbol, Value)>;
 
 fn grains() -> Vec<i64> { vec![1, 97, 4096] }
 fn domains_list() -> Vec<i64> { vec![1, 4, 8] }
@@ -149,7 +150,7 @@ fn source_text(edge: bool, body: &str) -> String {
 }
 
 fn compile_result(reference: bool, edge: bool, body: &str, src: &geo::T, dst: &geo::T, args: &Args) -> Result<node::T, String> {
-    let options = lower::Options { reference, inputs: Some(vec![("g".to_owned(), args.clone())]), ..lower::Options::default() };
+    let options = lower::Options { reference, inputs: Some(vec![("g".into(), args.clone())]), ..lower::Options::default() };
     let lowered = lower::workspace(Some(factories(src, dst)), Vec::new(), options, &parse(&source_text(edge, body))).map_err(|d| rays_diagnostic::to_string(&d))?;
     let graph = lowered.graphs[0].clone();
     edit::compile_node(&graph.network.geometry, graph.root.unwrap())
@@ -189,7 +190,7 @@ fn args(p: &[i64], v: &[i64], prim: &[i64], offsets: &[i64], values: &[i64], pol
         ("vertices".into(), ints(v)),
         ("primitives".into(), ints(prim)),
         ("positions".into(), Value::Text(policy.as_bytes().into())),
-        ("edge_map".into(), Value::Record(vec![("offsets".into(), ints(offsets)), ("values".into(), ints(values))])),
+        ("edge_map".into(), Value::Record(vec![("offsets".into(), ints(offsets)), ("values".into(), ints(values))].into())),
     ]
 }
 
@@ -430,7 +431,7 @@ fn malformed_arguments_get_typed_codes_and_cancellation_is_honoured() {
         ("points", ints(&[-2, 1, 2]), "E_REMAP_INDEX"),
         ("vertices", ints(&[0, 1, 9]), "E_REMAP_INDEX"),
         ("primitives", ints(&[1]), "E_REMAP_INDEX"),
-        ("edge_map", Value::Record(vec![("offsets".into(), ints(&[0, 2, 1, 3])), ("values".into(), ints(&[0, 1, 2]))]), "E_REMAP_EDGES"),
+        ("edge_map", Value::Record(vec![("offsets".into(), ints(&[0, 2, 1, 3])), ("values".into(), ints(&[0, 1, 2]))].into()), "E_REMAP_EDGES"),
     ] {
         match run(&compile(&src, &dst, &replace(&valid, key, value))) {
             Err(d) => assert!(d.code == code, "remap typed validation code changed: {} is not {code}", d.code),
@@ -543,7 +544,7 @@ fn outputs_are_owned_untaken_branches_are_not_evaluated_and_live_maps_follow_tim
     }
     let body = r#"(let* [chosen (if (< t 1.0) points (exact (map (fn [(i : int)] (int/mod (int/add i 1) 3)) points)))]
     (sop/remap source target :points chosen :vertices vertices :primitives primitives :edges edge_map :positions "mapped"))"#;
-    let options = lower::Options { inputs: Some(vec![("g".to_owned(), inputs.clone())]), ..lower::Options::default() };
+    let options = lower::Options { inputs: Some(vec![("g".into(), inputs.clone())]), ..lower::Options::default() };
     let lowered = flow_ok(lower::workspace(Some(factories(&src, &dst)), Vec::new(), options, &parse(&source_text(true, body))));
     let graph = lowered.graphs[0].clone();
     let mut s = session::create(32, 64_000_000).unwrap();
@@ -667,7 +668,7 @@ fn changing_any_semantic_input_misses_the_cache() {
         (src.clone(), dst.clone(), replace(&base, "points", ints(&[1, 2, 0]))),
         (src.clone(), dst.clone(), replace(&base, "vertices", ints(&[1, 2, 0]))),
         (src.clone(), dst.clone(), replace(&base, "positions", Value::Text(b"mapped".as_slice().into()))),
-        (src.clone(), dst.clone(), replace(&base, "edge_map", Value::Record(vec![("offsets".into(), ints(&[0, 1, 2, 3])), ("values".into(), ints(&[2, 1, 0]))]))),
+        (src.clone(), dst.clone(), replace(&base, "edge_map", Value::Record(vec![("offsets".into(), ints(&[0, 1, 2, 3])), ("values".into(), ints(&[2, 1, 0]))].into()))),
         (src.clone(), target_p, base.clone()),
         (src.clone(), target_topology, base.clone()),
         (source_order, dst.clone(), base.clone()),
@@ -792,7 +793,7 @@ fn mix_args(pc: &Mix, vc: &Mix, rc: &Mix, policy: &str, offsets: &[i64], ancesto
         ("rb".into(), ints(&rc.1)),
         ("rt".into(), floats(&rc.2)),
         ("positions".into(), Value::Text(policy.as_bytes().into())),
-        ("edge_map".into(), Value::Record(vec![("offsets".into(), ints(offsets)), ("values".into(), ints(ancestors))])),
+        ("edge_map".into(), Value::Record(vec![("offsets".into(), ints(offsets)), ("values".into(), ints(ancestors))].into())),
     ]
 }
 

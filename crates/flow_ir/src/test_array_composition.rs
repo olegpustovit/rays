@@ -3,6 +3,7 @@
 // compiled/Core checks use 0/1/13/2049 (still crossing two 1024-lane blocks) to fit the 5 s debug budget.
 // Not ported: the in-place `mutate` of results (OCaml arrays are mutable); the Rust equivalent is
 // that a result never shares its source's Arc storage and the sources compare equal afterwards.
+use flow_syntax::symbol::Symbol;
 use crate::core_ir::region::Instruction;
 use crate::flow_ir::executor;
 use crate::packed;
@@ -83,7 +84,7 @@ fn shares_storage(a: &Value, b: &Value) -> bool {
 fn instantiated(ty: &Ty, table: Value, body: &str, indices: Vec<i64>) -> Value {
     let declarations = format!("[(data : (array {}) {})]", ty::to_string(ty), constant(ty, "0"));
     let workspace = composition_checked(&declarations, &format!("(let* [tested (fn [(i : int)] {body})] 0.)"));
-    let evaluation = ok(e::r#static(&workspace, true, Some(&[("g".to_string(), vec![("data".to_string(), table)])])));
+    let evaluation = ok(e::r#static(&workspace, true, Some(&[("g".into(), vec![("data".into(), table)])])));
     let (_, records) = evaluation.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = match &records[0].1 {
         Value::Fn(f) => *f,
@@ -209,8 +210,8 @@ fn programs_error_cases() {
     composition_programs(&|n| names.iter().any(|x| x == n));
 }
 
-fn table_inputs(array_ty: &Ty) -> Vec<(String, Vec<(String, Value)>)> {
-    vec![("g".to_string(), vec![("data".to_string(), source_value("fixture/table", array_ty.clone(), vec![]))])]
+fn table_inputs(array_ty: &Ty) -> Vec<(String, Vec<(Symbol, Value)>)> {
+    vec![("g".into(), vec![("data".into(), source_value("fixture/table", array_ty.clone(), vec![].into()))])]
 }
 
 /// Invariant tables may capture live host data; no prepared array survives a force. Source
@@ -273,7 +274,7 @@ fn source_checks(ty: Ty) {
         let r = residual(&value);
         for fusion in [false, true] {
             let p = ok_ds(compile_region(r, fusion, Some(data_count_source())));
-            let origin = if source == "data" && fusion { Some((vec!["fixture".to_string(), "data".to_string()], vec![])) } else { None };
+            let origin = if source == "data" && fusion { Some((vec!["fixture".into(), "data".into()], vec![])) } else { None };
             assert_eq!(crate::packed::count_origin(&p), origin, "{source} fusion={fusion}");
             *current.lock().unwrap() = sample(&ty, 13);
             let live = live_at(0.25);
@@ -309,7 +310,7 @@ fn argument_errors_precede_the_table() {
         "(let* [unused (array/concat data data)] (error \"E_INDEX\" \"after alias\"))",
         "(if (int/lt i 0) (array/nth (array/concat data data) 0) i)",
     ] {
-        let value = instantiated(&Ty::Int, source_value("fixture/order", Ty::Array(Box::new(Ty::Int)), vec![]), body, vec![0, 1, 2]);
+        let value = instantiated(&Ty::Int, source_value("fixture/order", Ty::Array(Box::new(Ty::Int)), vec![].into()), body, vec![0, 1, 2]);
         let p = ok_ds(compile_region(residual(&value), true, None));
         let calls = Arc::new(Mutex::new(0));
         let resolve: ResolveArc = {

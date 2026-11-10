@@ -15,8 +15,8 @@ fn selection_is_sorted_unique_with_the_first_primary() {
     assert_eq!(sel::select_nodes(&[]), sel::clear());
 }
 
-fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|p| p.to_string()).collect()
+fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|p| (*p).into()).collect()
 }
 
 fn value(text: &str) -> s::Syntax {

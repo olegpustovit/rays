@@ -1,4 +1,5 @@
 // Port of lib/flow_graph/test_domain.ml: each OCaml `let () = ...` block is one #[test].
+use flow_syntax::symbol::Symbol;
 use crate::edit_base::ArgKey;
 use crate::flow_edit::{apply_checked, default_for, remap, Op};
 use crate::probe::{self, Options, Summary};
@@ -20,7 +21,7 @@ const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
 fn num(n: &str) -> s::Syntax {
     s::make(s::Draft::Num(n.into()))
 }
-fn set_arg(node: &[String], key: ArgKey, v: s::Syntax) -> Op {
+fn set_arg(node: &[Symbol], key: ArgKey, v: s::Syntax) -> Op {
     Op::SetArg { node: node.to_vec(), key, sub: vec![], value: v }
 }
 fn array_of(t: Ty) -> Ty {
@@ -347,7 +348,7 @@ fn scatter_add_is_typed() {
     let o = op::find(&[], &card.head, &context::value()).unwrap();
     assert_eq!(
         o.signature.pos,
-        vec![("indices".to_owned(), array_of(Ty::Int)), ("values".to_owned(), array_of(Ty::Any)), ("size".to_owned(), Ty::Int)]
+        vec![("indices".into(), array_of(Ty::Int)), ("values".into(), array_of(Ty::Any)), ("size".into(), Ty::Int)]
     );
     let (edited_source, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(2), num("3"))).unwrap();
     assert_eq!(result(&edited, 0.0), Value::Floats(3, Arc::new(vec![3., 6., 9., 0., 0., 0., 0., 0., 0.])));
@@ -375,7 +376,7 @@ fn integer_arrays() {
         let card = card(&workspace, &["g", "tested"]);
         assert!(card.head == name && card.ty == array_of(Ty::Int));
         let signature = &op::find(&[], name, &context::value()).unwrap().signature;
-        assert_eq!(signature.pos, vec![(if name == "array/compact" { "mask" } else { "array" }.to_owned(), array_of(Ty::Int))]);
+        assert_eq!(signature.pos, vec![(if name == "array/compact" { "mask" } else { "array" }.into(), array_of(Ty::Int))]);
         assert_eq!(result(&workspace, 0.0), int_array(&expected));
         let (changed, checked) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(0), parse(edited_argument).remove(0))).unwrap();
         assert_eq!(result(&checked, 0.0), int_array(&edited_expected));
@@ -401,9 +402,9 @@ fn ordering_arrays() {
         }
         let signature = &op::find(&[], name, &context::value()).unwrap().signature;
         let want = if name == "array/grade" {
-            vec![("keys".to_owned(), array_of(Ty::Any))]
+            vec![("keys".into(), array_of(Ty::Any))]
         } else {
-            vec![("keys".to_owned(), array_of(Ty::Any)), ("queries".to_owned(), array_of(Ty::Any))]
+            vec![("keys".into(), array_of(Ty::Any)), ("queries".into(), array_of(Ty::Any))]
         };
         assert_eq!(signature.pos, want);
         assert_eq!(result(&workspace, 0.0), int_array(&expected));

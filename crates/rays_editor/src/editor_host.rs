@@ -256,7 +256,7 @@ pub fn material_graph<'a>(value: &ModelView<'a>, path: &str) -> Option<String> {
     }
     let ev = pane_laid(value)?.evaluated.as_ref()?;
     ev.results.iter().find_map(|(graph, v)| match v {
-        EvalValue::Struct(g) if g.name == "material/standard" && materials.contains(graph) && g.fields.iter().find(|(k, _)| k == "name").map(|(_, v)| v) == Some(&EvalValue::Text(path.as_bytes().into())) => Some(graph.clone()),
+        EvalValue::Struct(g) if g.name == "material/standard" && materials.iter().any(|name| name == graph.as_str()) && g.fields.iter().find(|(k, _)| k == "name").map(|(_, v)| v) == Some(&EvalValue::Text(path.as_bytes().into())) => Some(graph.to_string()),
         _ => None,
     })
 }
@@ -346,7 +346,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
         Some(o) => {
             // geometry of another graph (a viewport over another scene instance draws its own
             // objects): the pane shows that graph, the node is selected there once it does
-            let root = o.site[0].clone();
+            let root = o.site[0].to_string();
             let laid_graph = |v: &EditorModel| pane_laid(&v.into()).map(|k| k.graph.clone()).unwrap_or_else(|| root.clone());
             let scope = if root == laid_graph(value) {
                 scope
@@ -363,7 +363,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
             match probe::chains(&scope).get(&o.site) {
                 Some(chain) => {
                     // the outermost collapsed loop stands for what is inside it
-                    let collapsed = |zone: &Vec<String>| workspace.ws.layout.collapsed.get(zone) == Some(&true);
+                    let collapsed = |zone: &flow_check::workspace::Path| workspace.ws.layout.collapsed.get(zone) == Some(&true);
                     let shown = chain.iter().find(|zone| collapsed(zone)).cloned().unwrap_or_else(|| o.site.clone());
                     let mut probes = value.probes.clone();
                     let indices: Vec<i64> = if chain.len() == o.iter.len() { o.iter.clone() } else { chain.iter().map(|_| 0).collect() };

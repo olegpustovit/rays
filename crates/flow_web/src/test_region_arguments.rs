@@ -206,9 +206,9 @@ fn unused(value: Value, mut program: C::Program) -> C::Program {
     program.regions = program.regions.iter().map(|r| {
         let index = packed::host::argument_types(r).unwrap_or_else(|d| die(d)).len();
         let mut uniforms = r.uniforms.clone();
-        uniforms.push(value::source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]));
+        uniforms.push(value::source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))].into()));
         let mut names = r.uniform_names.as_ref().clone();
-        names.push((String::new(), vec![]));
+        names.push(("".into(), vec![]));
         let r = region::rebuild(r, region::Rebuild { uniforms: Some(uniforms), uniform_names: Some(names), ..Default::default() }).expect("unused declaration");
         let declared = packed::host::argument_types(&r).unwrap_or_else(|d| die(d));
         assert_eq!(declared.len(), index + 1);
@@ -256,7 +256,7 @@ fn float_product_empty_and_nonfinite_capture() {
 fn list(values: Vec<Value>) -> Value { Value::List(Arc::new(values)) }
 fn leaves() -> Value { list(vec![Value::Int(9007199254740993), Value::Float(0.5)]) }
 fn int_array() -> Value { Value::Int_array(Arc::new(vec![1, 2, 3])) }
-fn record(value: Value) -> Value { Value::Record(vec![("leaves".into(), value)]) }
+fn record(value: Value) -> Value { Value::Record(vec![("leaves".into(), value)].into()) }
 
 #[test]
 fn unused_composite_arguments_validate_every_leaf() {
@@ -265,7 +265,7 @@ fn unused_composite_arguments_validate_every_leaf() {
     for value in [
         leaves(),
         list(vec![Value::Text(b"fallback".as_slice().into()), Value::Int(9007199254740993), Value::Float(0.5)]),
-        Value::Record(vec![("leaves".into(), leaves()), ("large".into(), Value::Int((1i64 << 62) - 1))]),
+        Value::Record(vec![("leaves".into(), leaves()), ("large".into(), Value::Int((1i64 << 62) - 1))].into()),
         list(vec![int_array()]), record(list(vec![int_array()])),
         list(vec![Value::Int(9007199254740993), Value::Float(f64::NAN)]),
         record(list(vec![Value::Int(9007199254740993), Value::Float(f64::INFINITY)])),
@@ -324,7 +324,7 @@ fn refused(program: &C::Program, message: Option<&str>) {
 #[test]
 fn capture_preparation_refusals() {
     let (_, table) = compiled(TABLE, true);
-    refused(&replace_table(&table, value::source_value("$host/unavailable", Ty::Array(Box::new(Ty::Float)), vec![])), None);
+    refused(&replace_table(&table, value::source_value("$host/unavailable", Ty::Array(Box::new(Ty::Float)), vec![].into())), None);
     let ws = checked("(workspace capture (graph g :context host [(source : (array float) (array/float 0))] (map (fn [x] (+ x t)) source)))");
     let inputs = vec![("g".into(), vec![("source".into(), Value::Floats(1, Arc::new((0..32769).map(|i| i as f64).collect())))])];
     let evaluation = E::static_with(&ws, false, Some(&inputs), None).unwrap_or_else(|d| die(d));

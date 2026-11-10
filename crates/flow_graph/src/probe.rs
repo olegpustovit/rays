@@ -13,8 +13,9 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use flow_syntax::symbol::{self, Symbol};
 
-pub type Path = Vec<String>;
+pub type Path = flow_check::workspace::Path;
 pub type Records = e::Records;
 pub type ResolveFn = Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>;
 
@@ -53,7 +54,7 @@ pub struct Execution {
     pub seconds: Option<f64>,
 }
 
-pub type Force = Rc<dyn Fn(Option<&State>, Option<&[(String, Value)]>, Option<ResolveFn>, &Value, &Frame) -> Result<Value, Diagnostic>>;
+pub type Force = Rc<dyn Fn(Option<&State>, Option<&[(Symbol, Value)]>, Option<ResolveFn>, &Value, &Frame) -> Result<Value, Diagnostic>>;
 /// `(offset, count, at)`: host-owned domain selectors.
 pub type Bulk = (i64, i64, Rc<dyn Fn(i64) -> Result<Records, Diagnostic>>);
 
@@ -66,12 +67,12 @@ pub struct Options {
     pub time: Option<f64>,
     pub resolve: Option<ResolveFn>,
     pub force: Option<Force>,
-    pub bulk_calls: Option<Rc<dyn Fn(&[String], &[i64]) -> Vec<Bulk>>>,
-    pub execution: Option<Rc<dyn Fn(&[String], &[i64]) -> Option<Execution>>>,
+    pub bulk_calls: Option<Rc<dyn Fn(&[Symbol], &[i64]) -> Vec<Bulk>>>,
+    pub execution: Option<Rc<dyn Fn(&[Symbol], &[i64]) -> Option<Execution>>>,
     pub geometry: Option<Rc<dyn Fn(i64) -> Option<Geometry>>>,
     pub image: Option<Rc<dyn Fn(i64) -> Option<(i64, i64)>>>,
-    pub dynamic: Option<Rc<dyn Fn(&[String]) -> Option<i64>>>,
-    pub element: Option<Rc<dyn Fn(&[String], i64) -> Option<Vec<(String, Value)>>>>,
+    pub dynamic: Option<Rc<dyn Fn(&[Symbol]) -> Option<i64>>>,
+    pub element: Option<Rc<dyn Fn(&[Symbol], i64) -> Option<Vec<(Symbol, Value)>>>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -97,20 +98,20 @@ pub struct Probe {
     force: Force,
     clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
     over: Cell<bool>,
-    execution: Rc<dyn Fn(&[String], &[i64]) -> Option<Execution>>,
+    execution: Rc<dyn Fn(&[Symbol], &[i64]) -> Option<Execution>>,
     live_frame: Option<Frame>,
     state: Option<State>,
     resolve: Option<ResolveFn>,
     maps: HashMap<(Path, Vec<i64>), Vec<Bulk>>,
-    bulk_calls: Rc<dyn Fn(&[String], &[i64]) -> Vec<Bulk>>,
+    bulk_calls: Rc<dyn Fn(&[Symbol], &[i64]) -> Vec<Bulk>>,
     calls: HashMap<(Path, Vec<i64>), Records>,
-    dynamic: Rc<dyn Fn(&[String]) -> Option<i64>>,
+    dynamic: Rc<dyn Fn(&[Symbol]) -> Option<i64>>,
     templates: Vec<Path>,
-    element: Rc<dyn Fn(&[String], i64) -> Option<Vec<(String, Value)>>>,
+    element: Rc<dyn Fn(&[Symbol], i64) -> Option<Vec<(Symbol, Value)>>>,
     geometry: Rc<dyn Fn(i64) -> Option<Geometry>>,
     user_image: Rc<dyn Fn(i64) -> Option<(i64, i64)>>,
     /// per plan node: its arguments and whether it is `image/noise`, for the image kinds only
-    image_nodes: Vec<Option<(bool, Vec<(String, Value)>)>>,
+    image_nodes: Vec<Option<(bool, Vec<(Symbol, Value)>)>>,
     raw: Rc<HashMap<Path, Vec<(Vec<i64>, Value)>>>,
     forced: HashMap<Path, Rc<Vec<(Vec<i64>, Summary)>>>,
     spots: HashMap<(Path, Vec<i64>), Option<Summary>>,
@@ -134,7 +135,7 @@ fn drop_last(l: &[i64]) -> Vec<i64> {
     if l.len() <= 1 { Vec::new() } else { l[..l.len() - 1].to_vec() }
 }
 
-fn drop_last_str(l: &[String]) -> Vec<String> {
+fn drop_last_str(l: &[Symbol]) -> Path {
     if l.len() <= 1 { Vec::new() } else { l[..l.len() - 1].to_vec() }
 }
 
@@ -336,7 +337,7 @@ impl Probe {
     }
 
     /// Host execution metadata without forcing a probe value.
-    pub fn execution(&self, path: &[String], probes: &[i64]) -> Option<Execution> {
+    pub fn execution(&self, path: &[Symbol], probes: &[i64]) -> Option<Execution> {
         (self.execution)(path, probes)
     }
 
@@ -364,7 +365,7 @@ impl Probe {
         self.live_frame.clone().unwrap_or_else(|| input::at_time(0.0))
     }
 
-    fn force_value(&self, state: Option<&State>, elems: Option<&[(String, Value)]>, resolve: Option<ResolveFn>, v: &Value, live: &Frame) -> Result<Value, Diagnostic> {
+    fn force_value(&self, state: Option<&State>, elems: Option<&[(Symbol, Value)]>, resolve: Option<ResolveFn>, v: &Value, live: &Frame) -> Result<Value, Diagnostic> {
         let mut out = None;
         let force = self.force.clone();
         if self.guard(&mut || out = Some(force(state, elems, resolve.clone(), v, live))) {
@@ -427,7 +428,7 @@ impl Probe {
     }
 
     /// The plan node of a geometry value at the probe.
-    pub fn plan_node(&self, ty_: Option<&Ty>, path: &[String], probes: &[i64]) -> Option<i64> {
+    pub fn plan_node(&self, ty_: Option<&Ty>, path: &[Symbol], probes: &[i64]) -> Option<i64> {
         let want = ty_.cloned().unwrap_or_else(ty::geometry);
         let find = |probes: &[i64]| -> Option<i64> {
             self.raw.get(path).and_then(|l| {
@@ -457,7 +458,7 @@ impl Probe {
     }
 
     /// Every recorded value of a path in evaluation order.
-    pub fn records(&mut self, path: &[String]) -> Rc<Vec<(Vec<i64>, Summary)>> {
+    pub fn records(&mut self, path: &[Symbol]) -> Rc<Vec<(Vec<i64>, Summary)>> {
         if let Some(a) = self.forced.get(path) {
             return a.clone();
         }
@@ -470,11 +471,11 @@ impl Probe {
         a
     }
 
-    fn record_count(&self, path: &[String]) -> i64 {
+    fn record_count(&self, path: &[Symbol]) -> i64 {
         self.raw.get(path).map(|l| l.len() as i64).unwrap_or(0)
     }
 
-    fn map_calls(&mut self, zone: &[String], outer: &[i64]) -> Vec<Bulk> {
+    fn map_calls(&mut self, zone: &[Symbol], outer: &[i64]) -> Vec<Bulk> {
         let key = (zone.to_vec(), outer.to_vec());
         if let Some(calls) = self.maps.get(&key) {
             return calls.clone();
@@ -482,14 +483,15 @@ impl Probe {
         let live = self.live_or_zero();
         let mut calls: Vec<Bulk> = Vec::new();
         let mut call_path = zone.to_vec();
-        call_path.push("~calls".to_owned());
+        call_path.push("~calls".into());
         if let Some(l) = self.raw.get(&call_path) {
             for (it, value) in l {
                 if it != outer {
                     continue;
                 }
                 if let Value::Record(fs) = value {
-                    if let [(a, Value::Int(offset)), (b, Value::Residual(call))] = fs.as_slice() {
+                    if fs.len() != 2 { continue; }
+                    if let ((a, Value::Int(offset)), (b, Value::Residual(call))) = (&fs[0], &fs[1]) {
                         if a == "offset" && b == "call" {
                             let mut got: Option<Result<(usize, Box<dyn Fn(usize) -> Result<Records, Diagnostic>>), Diagnostic>> = None;
                             let (state, resolve) = (self.state.clone(), self.resolve.clone());
@@ -534,7 +536,7 @@ impl Probe {
         calls
     }
 
-    fn map_scope(&mut self, path: &[String], probes: &[i64]) -> Option<(Path, Vec<Bulk>)> {
+    fn map_scope(&mut self, path: &[Symbol], probes: &[i64]) -> Option<(Path, Vec<Bulk>)> {
         if probes.is_empty() {
             return None;
         }
@@ -561,7 +563,7 @@ impl Probe {
         }
     }
 
-    fn map_at(&mut self, path: &[String], probes: &[i64]) -> Option<Summary> {
+    fn map_at(&mut self, path: &[Symbol], probes: &[i64]) -> Option<Summary> {
         let (zone, calls) = self.map_scope(path, probes)?;
         let k = *probes.last()?;
         let key = (zone.clone(), probes.to_vec());
@@ -588,7 +590,7 @@ impl Probe {
     }
 
     // the template record of `path` forced for element `k` of the loop over geometry at `zone`
-    fn at_element(&self, path: &[String], zone: &[String], k: i64) -> Option<Summary> {
+    fn at_element(&self, path: &[Symbol], zone: &[Symbol], k: i64) -> Option<Summary> {
         let raw = self.raw.get(path).and_then(|l| l.iter().find_map(|(it, v)| if it.iter().all(|x| *x == 0) { Some(v.clone()) } else { None }));
         match (raw, (self.element)(zone, k)) {
             (Some(raw), Some(elems)) if e::is_live(&raw) => {
@@ -601,13 +603,13 @@ impl Probe {
         }
     }
 
-    fn dynamic_zones(&self, path: &[String]) -> Vec<usize> {
+    fn dynamic_zones(&self, path: &[Symbol]) -> Vec<usize> {
         (1..path.len()).filter(|i| (self.dynamic)(&path[..*i]).is_some()).collect()
     }
 
     // the record with exactly this tuple; inside a loop over geometry the body is one template
     // record (its iteration is 0), which reads the element
-    fn compute_at(&mut self, path: &[String], probes: &[i64]) -> Option<Summary> {
+    fn compute_at(&mut self, path: &[Symbol], probes: &[i64]) -> Option<Summary> {
         if let Some(found) = self.map_at(path, probes) {
             return Some(found);
         }
@@ -619,7 +621,7 @@ impl Probe {
             return None;
         }
         let template = |it: &Vec<i64>| it.len() == probes.len() && it.iter().zip(probes.iter()).all(|(r, p)| r == p || *r == 0);
-        let zone: Vec<String> = path[..zones.iter().copied().fold(0, usize::max)].to_vec();
+        let zone: Path = path[..zones.iter().copied().fold(0, usize::max)].to_vec();
         let raw = self.raw.get(path).and_then(|l| l.iter().find_map(|(it, v)| if template(it) { Some(v.clone()) } else { None }));
         let elems = if probes.is_empty() { None } else { (self.element)(&zone, *probes.last().unwrap()) };
         let fallback = |this: &Probe| -> Option<Summary> {
@@ -637,7 +639,7 @@ impl Probe {
     }
 
     /// Reference value at the selected iteration tuple.
-    pub fn at(&mut self, path: &[String], probes: &[i64]) -> Option<Summary> {
+    pub fn at(&mut self, path: &[Symbol], probes: &[i64]) -> Option<Summary> {
         let key = (path.to_vec(), probes.to_vec());
         match self.spots.get(&key).cloned() {
             Some(Some(Summary::Value(value @ Value::Deferred(Ty::Named(_), _)))) if matches!(&value, Value::Deferred(Ty::Named(n), _) if n == "image") => Some(self.summarize(&value)),
@@ -679,7 +681,7 @@ impl Probe {
         let at_key = |this: &mut Probe, key: &str| -> Option<Summary> {
             let (leaf, outer) = node.path.split_last()?;
             let mut path = outer.to_vec();
-            path.push(format!("{}#{}", leaf, key));
+            path.push(format!("{}#{}", leaf, key).into());
             match this.at(&path, probes) {
                 None => this.missing(node, key, probes),
                 some => some,
@@ -750,7 +752,7 @@ impl Probe {
 
     // the records whose tuple is `outer` followed by one more index, in order; in a loop over
     // geometry the body has one template record, which is forced for each element once the zone cooked
-    fn across(&mut self, path: &[String], outer: &[i64]) -> Rc<Vec<Summary>> {
+    fn across(&mut self, path: &[Symbol], outer: &[i64]) -> Rc<Vec<Summary>> {
         let key = (path.to_vec(), outer.to_vec());
         if let Some(a) = self.across.get(&key) {
             return a.clone();
@@ -761,7 +763,7 @@ impl Probe {
         if !(a.len() > 1 || !outer.is_empty()) {
             let zones = self.dynamic_zones(path);
             if !zones.is_empty() {
-                let zone: Vec<String> = path[..zones.iter().copied().fold(0, usize::max)].to_vec();
+                let zone: Path = path[..zones.iter().copied().fold(0, usize::max)].to_vec();
                 if let Some(count) = (self.dynamic)(&zone) {
                     if count > 1 {
                         let forced: Vec<Option<Summary>> = (0..count).map(|k| self.at_element(path, &zone, k)).collect();
@@ -797,7 +799,7 @@ impl Probe {
         a
     }
 
-    fn series(&mut self, path: &[String], probes: &[i64]) -> Rc<Vec<Summary>> {
+    fn series(&mut self, path: &[Symbol], probes: &[i64]) -> Rc<Vec<Summary>> {
         if probes.is_empty() {
             Rc::new(Vec::new())
         } else {
@@ -807,7 +809,7 @@ impl Probe {
 
     // Where the probed iteration sits in `series`: the iterations a `:skip` left out have no record,
     // so it is the number of recorded ones before it (the probe itself when none is missing).
-    fn position(&mut self, path: &[String], probes: &[i64], len: i64) -> i64 {
+    fn position(&mut self, path: &[Symbol], probes: &[i64], len: i64) -> i64 {
         let n = probes.len() - 1;
         let outer = drop_last(probes);
         let pr = probes[n];
@@ -828,7 +830,7 @@ impl Probe {
     }
 
     /// Iterations (or calls) each zone ran under the probes of the zones around it.
-    pub fn counts(&mut self, sc: &p::Scope, probe: &dyn Fn(&[String]) -> i64) -> Vec<(Path, i64)> {
+    pub fn counts(&mut self, sc: &p::Scope, probe: &dyn Fn(&[Symbol]) -> i64) -> Vec<(Path, i64)> {
         let chain = chains(sc);
         let mut out = Vec::new();
         for n in p::zones(sc) {
@@ -845,7 +847,7 @@ impl Probe {
                         continue;
                     }
                     let mut rp = n.path.clone();
-                    rp.push(format!(":{}", r.names[0]));
+                    rp.push(format!(":{}", r.names[0]).into());
                     let a = self.across(&rp, &outer);
                     if !a.is_empty() {
                         out.push((n.path.clone(), a.len() as i64));
@@ -888,7 +890,7 @@ impl Probe {
         } else {
             arg(n, 0).and_then(|c| {
                 let mut cp = parent.clone();
-                cp.push(c);
+                cp.push(c.into());
                 let cs = self.series(&cp, probes);
                 if cs.is_empty() {
                     None
@@ -903,7 +905,7 @@ impl Probe {
         } else {
             let other = arg(n, 1).and_then(|s| {
                 let mut sp = parent.clone();
-                sp.push(s);
+                sp.push(s.into());
                 self.at(&sp, probes)
             });
             match (&here, other) {
@@ -953,7 +955,7 @@ impl Probe {
         ];
         if let Some(e) = &footer.execution {
             out.push(("tier".to_owned(), e.tier.clone()));
-            out.push(("execution group".to_owned(), e.group.join("/")));
+            out.push(("execution group".to_owned(), symbol::join_path(&e.group, "/")));
             if let Some(seconds) = e.seconds {
                 out.push(("group time".to_owned(), format!("{} ms", cfmt::f(seconds * 1000.0, 3))));
             }
@@ -967,9 +969,9 @@ impl Probe {
     }
 
     /// The plan nodes of every geometry node of the scope at its probes, with the node's path.
-    pub fn geometry_targets(&self, sc: &p::Scope, probe: &dyn Fn(&[String]) -> i64) -> Vec<(Path, i64)> {
+    pub fn geometry_targets(&self, sc: &p::Scope, probe: &dyn Fn(&[Symbol]) -> i64) -> Vec<(Path, i64)> {
         let chain = chains(sc);
-        fn go(this: &Probe, sc: &p::Scope, chain: &HashMap<Path, Vec<Path>>, probe: &dyn Fn(&[String]) -> i64, out: &mut Vec<(Path, i64)>) {
+        fn go(this: &Probe, sc: &p::Scope, chain: &HashMap<Path, Vec<Path>>, probe: &dyn Fn(&[Symbol]) -> i64, out: &mut Vec<(Path, i64)>) {
             for n in &sc.nodes {
                 match &n.zone {
                     Some(z) => go(this, &z.scope, chain, probe, out),

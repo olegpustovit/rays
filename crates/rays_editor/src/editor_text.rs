@@ -3,6 +3,7 @@
 //!
 //! Optional arguments of the OCaml functions are trailing `Option`s.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use std::sync::Arc;
 
 use editor_document::document::{self, Level, T as Document};
@@ -77,7 +78,7 @@ fn at_line_1(mut d: Diagnostic) -> Diagnostic {
 /// Selection patches root bindings into one candidate graph, checked and installed once. Omitted
 /// bindings stay and the shown result cannot change. Without a closure the tab shows the graph
 /// form, replaced whole.
-fn binding_document(value: &EditorModel, path: &[String], text: &str) -> Candidate {
+fn binding_document(value: &EditorModel, path: &[Symbol], text: &str) -> Candidate {
     let ws = &value.doc.workspace.ws;
     match text_pane::graph_op(&ws.source, &path[0], Some(path), text) {
         Err(d) => Err(vec![if d.position.is_none() { at_line_1(d) } else { d }]),
@@ -107,7 +108,7 @@ pub fn scrub_merge() -> Merge {
     Merge::Gesture("text-scrub".to_string())
 }
 
-pub fn select_source(value: &mut EditorModel, path: &[String]) {
+pub fn select_source(value: &mut EditorModel, path: &[Symbol]) {
     let Some(graph) = path.first() else { return };
     if graph.starts_with("macro:") {
         return;
@@ -120,7 +121,7 @@ pub fn select_source(value: &mut EditorModel, path: &[String]) {
     );
     go(value, graph);
     sync_scope(value);
-    let found = pane_laid(&(&*value).into()).is_some_and(|k| k.graph == *graph && (fproj::find(&k.scope, path).is_some() || k.scope.inputs.iter().any(|input| input.path == path)));
+    let found = pane_laid(&(&*value).into()).is_some_and(|k| k.graph == graph.as_str() && (fproj::find(&k.scope, path).is_some() || k.scope.inputs.iter().any(|input| input.path == path)));
     if !found && path.len() > 1 {
         *crate::panel_map::active_mut(&mut value.panes) = previous.0;
         value.previews = previous.1;
@@ -210,7 +211,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
         }
     };
     let whole = |ws: &WorkspaceDoc| workspace_doc::to_text(ws);
-    let checked_binding = |path: &[String], draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Candidate| -> Candidate {
+    let checked_binding = |path: &[Symbol], draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Candidate| -> Candidate {
         match old {
             Some(previous) if !Arc::ptr_eq(&previous.checked, &workspace.checked) => {
                 // Selection can patch a root binding outside the printed upstream closure. Merge
@@ -484,7 +485,7 @@ pub fn apply_text(value: &mut EditorModel, intents: &[Intent]) {
 }
 
 /// The intents of a text pane that is not the one in use fold into its own state.
-pub fn apply_text_at(value: &mut EditorModel, key: &Vec<String>, intents: &[Intent]) {
+pub fn apply_text_at(value: &mut EditorModel, key: &flow_check::workspace::Path, intents: &[Intent]) {
     if intents.is_empty() {
         return;
     }

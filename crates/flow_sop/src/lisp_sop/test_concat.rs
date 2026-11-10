@@ -90,7 +90,7 @@ fn lowered(reference: bool, named: &[(String, geo::T)], extra: &str) -> sop::nod
     factories.extend(sop::nodes::factories());
     let calls = named.iter().map(|(k, _)| format!("(sop/{k})")).collect::<Vec<_>>().join(" ");
     let text = format!("(workspace concat_test (graph g :context sop (sop/concat (list {calls}){extra})))");
-    let options = lower::Options { reference, inputs: Some(vec![("g".to_owned(), Vec::new())]), ..lower::Options::default() };
+    let options = lower::Options { reference, inputs: Some(vec![("g".into(), Vec::new())]), ..lower::Options::default() };
     let l = lower::workspace(Some(factories), Vec::new(), options, &parse(&text)).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let graph = l.graphs[0].clone();
     edit::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap_or_else(|m| panic!("{m}"))

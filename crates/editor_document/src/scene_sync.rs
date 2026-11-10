@@ -35,7 +35,7 @@ use sop::edit_graph::Factory;
 
 type S = Syntax;
 type R<T> = Result<T, String>;
-type Path = Vec<String>;
+type Path = flow_check::workspace::Path;
 type Edits = Vec<(String, Option<S>)>;
 
 /// A derived edit as its caller means it: scene objects at the scene level, World layers inside
@@ -207,7 +207,7 @@ fn bind(st: &mut State, home: &Home) -> R<Path> {
                 Some(form) if matches!(form.node, Node::Sym(_)) && !node.is_empty() => {
                     let mut path = node[..node.len() - 1].to_vec();
                     let Node::Sym(name) = form.node else { unreachable!() };
-                    path.push(form.name(name).to_owned());
+                    path.push(form.name(name).into());
                     st.unfolded.push((template, path.clone()));
                     Ok(path)
                 }
@@ -308,7 +308,7 @@ fn holder(source: &[S], home: &Home) -> Option<(Home, i64)> {
                 while index < args.len() {
                     if index + 1 < args.len() && matches!(form.arena().row(args[index]).node, Node::Kw(_)) { index += 2; }
                     else {
-                        if matches!(form.arena().row(args[index]).node, Node::Sym(symbol) if form.name(symbol) == name) { return Some(positional); }
+                        if matches!(form.arena().row(args[index]).node, Node::Sym(symbol) if form.name(symbol) == name.as_str()) { return Some(positional); }
                         index += 1;
                         positional += 1;
                     }
@@ -328,7 +328,7 @@ fn holder(source: &[S], home: &Home) -> Option<(Home, i64)> {
                 let Node::Sym(name) = body.arena().row(pair[0]).node else { return None };
                 in_merge(&body.child(pair[1])).map(|position| (body.name(name), position))
             }).or_else(|| in_merge(&body.child(result)).map(|position| ("@result", position)));
-            found.map(|(name, position)| (Home::Copy { loop_: loop_.clone(), rel: vec![name.to_owned()], index: *index }, position))
+            found.map(|(name, position)| (Home::Copy { loop_: loop_.clone(), rel: vec![name.into()], index: *index }, position))
         }
         _ => None,
     }
@@ -689,7 +689,7 @@ fn adopt_objects(st: &mut State, doc: &document::T) -> R<()> {
                 let arena = builder.freeze();
                 for ((_, expr), i) in bindings.into_iter().zip(unhomed.iter()) {
                     let name = f::fresh_name(&st.workspace.source, &gr.name, &i.label);
-                    apply(st, Op::AddNode { scope: vec![gr.name.clone()], expr: arena.handle(expr), name })?;
+                    apply(st, Op::AddNode { scope: vec![gr.name.clone().into()], expr: arena.handle(expr), name })?;
                 }
             }
         }
@@ -774,7 +774,7 @@ fn stack_layers(st: &mut State, before: &document::T, wid: i64, graph: &[g::Node
         if reordered {
             let mut bottom_first: Vec<i64> = stack.to_vec();
             bottom_first.reverse();
-            let name = |id: i64| -> R<String> { Ok(path_of(id)?.last().cloned().unwrap_or_default()) };
+            let name = |id: i64| -> R<String> { Ok(path_of(id)?.last().map_or_else(String::new, ToString::to_string)) };
             let mut below: Option<i64> = None;
             for id in &bottom_first {
                 match below {
@@ -787,7 +787,7 @@ fn stack_layers(st: &mut State, before: &document::T, wid: i64, graph: &[g::Node
             match (top, &before.homes.world) {
                 (Some(top), _) if member => match &before.homes.world_graph {
                     // a world graph's result is its top layer
-                    Some(gname) => apply(st, Op::Connect { node: vec![gname.clone(), "@result".to_owned()], key: ArgKey::Whole, src: name(top)?, iter: false })?,
+                    Some(gname) => apply(st, Op::Connect { node: vec![gname.clone().into(), "@result".into()], key: ArgKey::Whole, src: name(top)?, iter: false })?,
                     None => return stop("The World's graph is not named; edit the text."),
                 },
                 (Some(top), Some(home)) => {
@@ -832,7 +832,7 @@ fn adopt_root(st: &mut State, doc: &document::T, root: &root::Parameters) -> R<(
     }
     let expression = list(items, &mut builder);
     let name = f::fresh_name(&st.workspace.source, &scene, "root");
-    apply(st, Op::AddNode { scope: vec![scene], name, expr: builder.freeze().handle(expression) })
+    apply(st, Op::AddNode { scope: vec![scene.into()], name, expr: builder.freeze().handle(expression) })
 }
 
 fn root_write(st: &mut State, before: &document::T, now: &root::Parameters) -> R<()> {
@@ -1211,7 +1211,7 @@ pub fn adopt(factories: Option<&[Factory]>, doc: &document::T) -> R<document::T>
 
 /// The binding that holds a home, made by unfolding what is written in place (several rewrites,
 /// one new document); an error when a loop or an expression made it.
-pub fn bind_home(factories: Option<&[Factory]>, doc: &document::T, home: &Home) -> R<(document::T, Vec<String>)> {
+pub fn bind_home(factories: Option<&[Factory]>, doc: &document::T, home: &Home) -> R<(document::T, Path)> {
     let mut st = state(factories, doc)?;
     let path = bind(&mut st, home)?;
     if !st.changed {
@@ -1267,7 +1267,7 @@ pub fn add_geometry(doc: &document::T, existing: Option<&str>) -> Vec<Op> {
     let mut ops = Vec::new();
     if let Some(form) = new_graph { ops.push(Op::SetGraph { name: graph, form: arena.handle(form) }); }
     let scene = scene_name(workspace);
-    ops.push(Op::AddNode { scope: vec![scene.clone()], name: f::fresh_name(&workspace.source, &scene, "object"), expr: arena.handle(expression) });
+    ops.push(Op::AddNode { scope: vec![scene.clone().into()], name: f::fresh_name(&workspace.source, &scene, "object"), expr: arena.handle(expression) });
     ops
 }
 
@@ -1288,6 +1288,6 @@ pub fn add_world(doc: &document::T) -> R<Vec<Op>> {
     let scene = scene_name(workspace);
     Ok(vec![
         Op::SetGraph { name: gr.clone(), form: arena.handle(graph) },
-        Op::AddNode { scope: vec![scene.clone()], name: f::fresh_name(&workspace.source, &scene, "world"), expr: arena.handle(expression) },
+        Op::AddNode { scope: vec![scene.clone().into()], name: f::fresh_name(&workspace.source, &scene, "world"), expr: arena.handle(expression) },
     ])
 }

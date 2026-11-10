@@ -2,6 +2,7 @@
 //! fixture (nodes, zones, rows, chips), liveness and invariance flags, and the layout.
 //!
 //! Uses the editor's complete kinds catalog, retaining the study's graph and layout projections.
+use flow_syntax::symbol::Symbol;
 use flow_sop::lisp_sop::support::*;
 use flow_sop::{catalog as fcat, port};
 use flow_sop::lisp_sop;
@@ -36,9 +37,9 @@ fn scope(ws: &w::Workspace, g: &str) -> p::Scope {
 }
 
 fn node(ws: &w::Workspace, g: &str, path: &[&str]) -> p::Node {
-    let mut full = vec![g.to_owned()];
-    full.extend(path.iter().map(|x| (*x).to_owned()));
-    p::find(&scope(ws, g), &full).unwrap_or_else(|| panic!("{} is not projected", full.join("/")))
+    let mut full: w::Path = vec![g.into()];
+    full.extend(path.iter().map(|x| Symbol::from(*x)));
+    p::find(&scope(ws, g), &full).unwrap_or_else(|| panic!("{} is not projected", flow_syntax::symbol::join_path(&full, "/")))
 }
 
 fn zone(n: &p::Node) -> p::Zone {
@@ -53,8 +54,8 @@ fn kw(name: &str) -> ArgKey {
     ArgKey::Kw(name.to_owned())
 }
 
-fn sv(l: &[&str]) -> Vec<String> {
-    l.iter().map(|x| (*x).to_owned()).collect()
+fn sv(l: &[&str]) -> w::Path {
+    l.iter().map(|x| (*x).into()).collect()
 }
 
 /// every node, zone and row of a scope, as (nodes, zones, rows)
@@ -234,7 +235,7 @@ fn rows_of_macros_records_folds_and_lets() {
     let window = node(&k, "kit", &["big"]);
     assert!(window.outputs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>() == ["frame", "pane", "area"], "a values result has output rows");
     let pat = node(&k, "kit", &["[left mid right]"]);
-    assert!(pat.outputs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>() == ["left", "mid", "right"] && pat.binds == sv(&["left", "mid", "right"]), "destructuring outputs");
+    assert!(pat.outputs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>() == ["left", "mid", "right"] && pat.binds == ["left", "mid", "right"], "destructuring outputs");
     let tower = node(&k, "kit", &["tower"]);
     let acc = zone(&tower).rail[0].clone();
     assert!(zone(&tower).kind == p::ZoneKind::Fold && acc.role == p::Role::Acc && acc.key == Some(ArgKey::Bv(1, 1)) && zone(&tower).yield_label == "next", "fold accumulator row");
@@ -247,7 +248,7 @@ fn rows_of_macros_records_folds_and_lets() {
     assert!(part.head == "cond" && kinds(&part).contains(&("else".to_owned(), p::RowKind::Arg)), "cond rows");
     // an arm is an input of its conditional: a name there is a wired row, not a zone
     let arms: Vec<Vec<String>> = part.rows.iter().filter(|r| matches!(r.key, ArgKey::Arm(_))).map(p::sources).collect();
-    assert!(arms == vec![sv(&["big"]), sv(&["small"]), sv(&["small"])] && p::find(&scope(&k, "kit"), &sv(&["kit", "tower", "part#then"])).is_none(), "kit cond arms are rows of the cond card");
+    assert!(arms == vec![vec!["big".to_owned()], vec!["small".to_owned()], vec!["small".to_owned()]] && p::find(&scope(&k, "kit"), &sv(&["kit", "tower", "part#then"])).is_none(), "kit cond arms are rows of the cond card");
     let style = zone(&node(&k, "kit", &["style"]));
     assert!(style.kind == p::ZoneKind::Fn && style.yield_label == "return" && style.rail[0].role == p::Role::Param, "a bound fn is a zone with a param rail");
     // let* scopes are zones too
@@ -319,8 +320,8 @@ fn bloom_has_no_live_node() {
 type Boxed = (f64, f64, f64, f64);
 
 /// absolute (x, y, w, h) of every placed item, zones' children included, outer first
-fn place(l: &p::Layout) -> Vec<(Vec<String>, Boxed)> {
-    fn go(ox: f64, oy: f64, l: &p::Layout, out: &mut Vec<(Vec<String>, Boxed)>) {
+fn place(l: &p::Layout) -> Vec<(flow_check::workspace::Path, Boxed)> {
+    fn go(ox: f64, oy: f64, l: &p::Layout, out: &mut Vec<(flow_check::workspace::Path, Boxed)>) {
         for q in &l.placed {
             let (ax, ay) = (ox + q.x, oy + q.y);
             out.push((q.path.clone(), (ax, ay, q.w, q.h)));
@@ -336,8 +337,8 @@ fn place(l: &p::Layout) -> Vec<(Vec<String>, Boxed)> {
     out
 }
 
-fn assoc(places: &[(Vec<String>, Boxed)], path: &[String]) -> Boxed {
-    places.iter().find(|(p, _)| p == path).unwrap_or_else(|| panic!("unplaced {}", path.join("/"))).1
+fn assoc(places: &[(flow_check::workspace::Path, Boxed)], path: &[Symbol]) -> Boxed {
+    places.iter().find(|(p, _)| p == path).unwrap_or_else(|| panic!("unplaced {}", flow_syntax::symbol::join_path(&path, "/"))).1
 }
 
 fn overlaps(a: Boxed, b: Boxed) -> bool {
@@ -351,7 +352,7 @@ fn inside(parent: Boxed, child: Boxed) -> bool {
 fn check_layout(name: &str, l: &p::Layout) {
     for (i, a) in l.placed.iter().enumerate() {
         for b in &l.placed[i + 1..] {
-            assert!(!overlaps((a.x, a.y, a.w, a.h), (b.x, b.y, b.w, b.h)), "{name}: {} overlaps {}", a.path.join("/"), b.path.join("/"));
+            assert!(!overlaps((a.x, a.y, a.w, a.h), (b.x, b.y, b.w, b.h)), "{name}: {} overlaps {}", flow_syntax::symbol::join_path(&a.path, "/"), flow_syntax::symbol::join_path(&b.path, "/"));
         }
     }
     for q in &l.placed {
@@ -381,8 +382,8 @@ fn layout_of(ws: &w::Workspace, name: &str) {
             let zb = assoc(&abs, &z.path);
             for c in &zone(&z).scope.nodes {
                 match abs.iter().find(|(p, _)| *p == c.path) {
-                    Some((_, cb)) => assert!(inside(zb, *cb), "{name}: {} leaves its zone", c.path.join("/")),
-                    None => panic!("unplaced {}", c.path.join("/")),
+                    Some((_, cb)) => assert!(inside(zb, *cb), "{name}: {} leaves its zone", flow_syntax::symbol::join_path(&c.path, "/")),
+                    None => panic!("unplaced {}", flow_syntax::symbol::join_path(&c.path, "/")),
                 }
             }
         }
@@ -406,13 +407,13 @@ fn layout() {
     assert!(!l.placed.iter().any(|q| q.item == p::Item::Return), "no return card for a linked result");
     // a position override moves one node; a collapsed zone is a card
     let h2 = head.clone();
-    let moved = p::layout(&p::LayoutOptions { at: std::rc::Rc::new(move |p: &[String]| if p == h2.as_slice() { Some((500.0, 300.0)) } else { None }), ..opts.clone() }, &sc);
+    let moved = p::layout(&p::LayoutOptions { at: std::rc::Rc::new(move |p: &[Symbol]| if p == h2.as_slice() { Some((500.0, 300.0)) } else { None }), ..opts.clone() }, &sc);
     let (hx, hy, _, _) = assoc(&place(&moved), &head);
     assert!(hx == 500.0 && hy == 300.0, "at overrides the position");
     let z = sv(&["sunflower", "seeds_each"]);
     let open_h = assoc(&place(&l), &z).3;
     let z2 = z.clone();
-    let collapsed = p::layout(&p::LayoutOptions { collapsed: std::rc::Rc::new(move |p: &[String]| p == z2.as_slice()), ..opts.clone() }, &sc);
+    let collapsed = p::layout(&p::LayoutOptions { collapsed: std::rc::Rc::new(move |p: &[Symbol]| p == z2.as_slice()), ..opts.clone() }, &sc);
     let (_, _, cw, ch) = assoc(&place(&collapsed), &z);
     assert!(cw == p::NODE_WIDTH && ch < open_h && place(&collapsed).len() < place(&l).len(), "a collapsed zone is a card without its children");
     // the study's card geometry, on the 24-point grid
@@ -421,8 +422,8 @@ fn layout() {
     // cards and columns sit on the dot lattice; the card's rows are the exposure rule's
     for q in &l.placed {
         match &q.item {
-            p::Item::Item(n) if n.zone.is_none() => assert!(q.x % p::LATTICE == 0.0 && q.y % p::LATTICE == 0.0, "off the lattice: {}", q.path.join("/")),
-            p::Item::Input(_) => assert!(q.x % p::LATTICE == 0.0 && q.y % p::LATTICE == 0.0, "off the lattice: {}", q.path.join("/")),
+            p::Item::Item(n) if n.zone.is_none() => assert!(q.x % p::LATTICE == 0.0 && q.y % p::LATTICE == 0.0, "off the lattice: {}", flow_syntax::symbol::join_path(&q.path, "/")),
+            p::Item::Input(_) => assert!(q.x % p::LATTICE == 0.0 && q.y % p::LATTICE == 0.0, "off the lattice: {}", flow_syntax::symbol::join_path(&q.path, "/")),
             _ => {}
         }
     }

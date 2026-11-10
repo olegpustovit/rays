@@ -1,5 +1,6 @@
 //! test_flow_shader.ml, adapted to the Rust image-kernel API (`image_kernel::prepare` takes the map's function id).
 #![allow(dead_code, unused_imports)]
+use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -39,24 +40,24 @@ pub fn flow_shader() {
     assert!(scope.nodes.len() == 9);
     let panels = ["amber", "comet", "lime", "velvet", "ember", "echoes"];
     for name in panels {
-        assert!(P::find(&scope, &["picture".to_owned(), name.to_owned()]).is_some(), "{name}");
+        assert!(P::find(&scope, &["picture".into(), name.into()]).is_some(), "{name}");
     }
-    let amber = P::find(&scope, &["picture".to_owned(), "amber".to_owned()]).unwrap();
+    let amber = P::find(&scope, &["picture".into(), "amber".into()]).unwrap();
     assert!(amber.macro_.as_deref() == Some("panel") && amber.rows.iter().any(|r| r.kind == P::RowKind::Hole && r.label == "bands"));
     let level = {
         let l = doc.layout.level.clone();
-        Rc::new(move |p: &[String]| l.get(p).copied().unwrap_or(P::Level::Card))
+        Rc::new(move |p: &[Symbol]| l.get(p).copied().unwrap_or(P::Level::Card))
     };
     let collapsed = {
         let c = doc.layout.collapsed.clone();
-        Rc::new(move |p: &[String]| c.get(p).copied().unwrap_or(false))
+        Rc::new(move |p: &[Symbol]| c.get(p).copied().unwrap_or(false))
     };
     let layout = P::layout(&P::LayoutOptions { level, collapsed, ..Default::default() }, &scope);
     assert!(layout.h < 800. && layout.w < 1000., "{}x{}", layout.w, layout.h);
     let evaluated = flow_eval::static_with(&checked, true, None, None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let pr = probe::make(&evaluated, probe::Options::default());
     for name in panels {
-        assert!(pr.plan_node(Some(&flow_syntax::ty::drawing()), &["picture".to_owned(), name.to_owned()], &[]).is_some(), "{name}");
+        assert!(pr.plan_node(Some(&flow_syntax::ty::drawing()), &["picture".into(), name.into()], &[]).is_some(), "{name}");
     }
     let images: Vec<&flow_eval::Node> = evaluated.plan.nodes.iter().filter(|n| n.kind == "image/map").collect();
     let sites: HashSet<_> = images.iter().map(|n| (n.inst, n.site.clone(), n.iter.clone())).collect();

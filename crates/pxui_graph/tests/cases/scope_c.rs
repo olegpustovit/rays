@@ -17,7 +17,7 @@ fn ipt(p: (f64, f64)) -> (i64, i64) {
     (p.0 as i64, p.1 as i64)
 }
 
-fn find_node(nodes: &[p::Node], path: &[String]) -> Option<p::Node> {
+fn find_node(nodes: &[p::Node], path: &[flow_syntax::symbol::Symbol]) -> Option<p::Node> {
     for n in nodes {
         if n.path == path {
             return Some(n.clone());
@@ -44,7 +44,7 @@ fn records(nodes: &[p::Node]) -> Vec<p::Node> {
     out
 }
 
-fn add_row(view: &scope::Pane, sc: &p::Scope, path: &[String]) -> (i64, i64) {
+fn add_row(view: &scope::Pane, sc: &p::Scope, path: &[flow_syntax::symbol::Symbol]) -> (i64, i64) {
     let n = find_node(&sc.nodes, path).expect("node");
     let i = n.rows.iter().position(|r| r.kind == p::RowKind::Add).expect("add row");
     ipt(scope::inspect::row_center(view, path, i).expect("row center"))
@@ -144,7 +144,7 @@ fn scope_gestures_3() {
     let label = eb.rows[ei].label.clone();
     let (x, y) = scope::inspect::expr_chip(&eview, &path(&["g", "b"]), ei).expect("chip");
     let (eview, changes) = g::scope_click(&mut ui, eview, (x as i64, y as i64));
-    let want = vec![path(&["g", "b"]), vec!["g".to_owned(), "b".to_owned(), format!(":{}", label)]];
+    let want = vec![path(&["g", "b"]), vec!["g".into(), "b".into(), format!(":{}", label).into()]];
     check(changes.contains(&Change::Selected(want.clone())), "a click on an expression chip did not select its row");
     check(scope::selected(&eview) == want, "the pane did not keep the row selected beside its card");
 }
@@ -225,7 +225,7 @@ fn scope_gestures_4() {
     let still_box = scope::inspect::box_of(&framed, &heart);
     check(matches!((moved_box, still_box), (Some(m), Some(s0)) if m.0 > s0.0 + 10.0), "the nodes did not travel with the frame while it was dragged");
     let (_, changes) = scope_step(&mut ui, carried, &g::frame(towards, Vec::new(), vec![mouse_release(MouseButton::LeftButton, towards)]));
-    let placed: Vec<&Vec<(Vec<String>, f64, f64)>> = changes.iter().filter_map(|c| if let Change::Moved(m) = c { Some(m) } else { None }).collect();
+    let placed: Vec<&Vec<(flow_check::workspace::Path, f64, f64)>> = changes.iter().filter_map(|c| if let Change::Moved(m) = c { Some(m) } else { None }).collect();
     let fr_at: Vec<(f64, f64)> = changes
         .iter()
         .filter_map(|c| match c {
@@ -263,7 +263,7 @@ fn scope_gestures_4() {
     let b = (x1 as i64, y1 as i64);
     let (view, changes) = drag(&mut ui, view, false, a, b);
     let sel = scope::selected(&view);
-    let covered: Vec<Vec<String>> = sc.nodes.iter().map(|n| n.path.clone()).filter(|q| sel.contains(q)).collect();
+    let covered: Vec<flow_check::workspace::Path> = sc.nodes.iter().map(|n| n.path.clone()).filter(|q| sel.contains(q)).collect();
     check(covered.len() >= 4 && covered.contains(&heart), "a marquee over the graph did not select its nodes");
     check(changes.iter().any(|c| matches!(c, Change::Selected(l) if l.contains(&heart))), "a marquee did not emit Selected");
     let view = g::settled(&mut ui, { let mut r8_view = g::scope_view(&w, "flower").0; scope::select(vec![heart.clone()], &mut r8_view); r8_view });
@@ -285,7 +285,7 @@ fn scope_gestures_4() {
     for level in [p::Level::Card, p::Level::Chip, p::Level::Point] {
         struct Every(p::Level);
         impl pxui_graph::scope_state::Saved for Every {
-            fn level(&self, _: &[String]) -> Option<(p::Level, bool)> {
+            fn level(&self, _: &[flow_syntax::symbol::Symbol]) -> Option<(p::Level, bool)> {
                 Some((self.0, true))
             }
         }

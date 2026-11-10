@@ -28,7 +28,7 @@ fn normalize_error(span: &Syntax, message: &str) -> Diagnostic {
 }
 
 fn evaluate(workspace: &Workspace, graph: &str, form: &Syntax, raw: &[u8]) -> Result<Vec<u8>, Diagnostic> {
-    let inputs = vec![(graph.to_owned(), vec![("raw_value".to_owned(), Value::Text(raw.into()))])];
+    let inputs = vec![(graph.to_owned(), vec![("raw_value".into(), Value::Text(raw.into()))])];
     let result = residual::handle(ResidualHandlers::default(), &mut || {
         host::static_with_requests(None, false, Some(&inputs), workspace)
     })?;
@@ -137,14 +137,14 @@ fn walk_graph(hooks: &Hooks, graph: &Graph) -> Result<Graph, Diagnostic> {
         let table = hooks.nodes.iter().find(|(name, _)| name == &kind).map(|(_, h)| h.as_slice()).unwrap_or(&[]);
         let mut canonical = Vec::with_capacity(args.len());
         for (name, arg) in args {
-            let hook = table.iter().find(|(hook, _)| *hook == name);
+            let hook = table.iter().find(|(hook, _)| name == hook.as_str());
             let arg = match (hook, builder.node(arg)) {
                 (Some((_, normalize)), Node::Text(raw)) => {
                     match normalize(builder.raw_bytes(raw)) {
                         Ok(text) => {
                             let row = *builder.row(arg);
                             let ty = builder.type_by_id(row.ty).clone();
-                            let path: Option<Vec<_>> = row.path.map(|id| builder.path_names(id).iter().map(|&id| builder.name(id).to_owned()).collect());
+                            let path: Option<Vec<_>> = row.path.map(|id| builder.path_names(id).iter().map(|&id| flow_syntax::symbol::intern(builder.name(id))).collect());
                             builder.push(path.as_deref(), &ty, row.form, Draft::Text(text.into()))
                         }
                         Err(mut d) => {

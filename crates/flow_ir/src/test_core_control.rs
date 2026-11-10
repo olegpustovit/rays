@@ -19,7 +19,7 @@ fn checked(source: &str) -> W::Workspace {
 
 fn residual(source: &str) -> ResidualId {
     let evaluation = ok(E::static_with(&checked(source), true, None, None));
-    let path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     match &evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1 {
         Value::Residual(r) => *r,
         _ => panic!("Expected a residual: {source}"),

@@ -22,7 +22,7 @@ fn compile(body: &str, fusion: bool) -> packed::T {
         (_, ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")),
     };
     let evaluation = E::static_with(&workspace, true, None, None).expect("static");
-    let path: flow_check::workspace::Path = vec!["g".to_owned(), "tested".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
     let Value::Residual(residual) = evaluation.records.iter().find(|(p, _)| *p == path).expect("tested").1[0].1.clone() else {
         panic!("kernel did not defer: {body}")
     };

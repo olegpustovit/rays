@@ -4,6 +4,7 @@
 //!
 //! Sharing: OCaml shares the source, the printed text and the span maps; here `Shown` holds them in
 //! `Arc`s and `Printed` is the one lazily printed document behind `applied` / `applied_spans`.
+use flow_syntax::symbol::Symbol;
 use editor_document::literal_edit::Change;
 use editor_document::settings;
 use editor_document::workspace_doc::{self as wd, T as WorkspaceDoc};
@@ -29,7 +30,7 @@ pub enum Tab {
     Graph,
     Document,
 }
-pub type Path = Vec<String>;
+pub type Path = flow_check::workspace::Path;
 
 /// A document printed once, on demand: the text and its span map (`applied` and `applied_spans`
 /// of the OCaml `shown` are two views of one of these).
@@ -306,18 +307,18 @@ fn enter(v: &S) -> (S, bool) {
     (v.clone(), false)
 }
 
-fn append(path: &[String], leaf: &str) -> Path {
+fn append(path: &[Symbol], leaf: &str) -> Path {
     let mut p = path.to_vec();
-    p.push(leaf.to_owned());
+    p.push(leaf.into());
     p
 }
 
 type Found = Option<(Option<S>, S)>;
 
 /// the binding a path names (pattern and expression) below a graph's body
-fn find_binding(cur: &S, names: &[String]) -> Found {
+fn find_binding(cur: &S, names: &[Symbol]) -> Found {
     let (name, rest) = names.split_first()?;
-    let (name, keys) = fe::leaf_keys(name).unwrap_or((name.clone(), Vec::new()));
+    let (name, keys) = fe::leaf_keys(name).unwrap_or((name.to_string(), Vec::new()));
     let found: Found = match scope(cur) {
         Some((_, res)) if name == "@result" => Some((None, cur.child(res))),
         Some((ps, _)) => ps.chunks_exact(2).find(|p| fe::pat_key(&cur.child(p[0])) == name).map(|p| (Some(cur.child(p[0])), cur.child(p[1]))),
@@ -343,7 +344,7 @@ fn find_binding(cur: &S, names: &[String]) -> Found {
 }
 
 /// The binding a path names in the source: its pattern (none for a `@result`) and expression.
-pub fn binding(source: &[S], path: &[String]) -> Found {
+pub fn binding(source: &[S], path: &[Symbol]) -> Found {
     let (graph, names) = path.split_first()?;
     let root = root_form(source, graph)?;
     let body = last(&root)?;
@@ -370,7 +371,7 @@ fn named(forms: &[S]) -> Option<Vec<(String, S)>> {
 /// Pasted text as `Add_node`s of `scope`: `name expr` pairs, or bare expressions named by their
 /// head. Names pair by position and are made free of the graph's and of each other; a pasted
 /// binding that reads an earlier pasted one reads its new name (all renames at once).
-pub fn paste_ops(source: &[S], graph: &str, scope: &[String], text: &str) -> Result<Vec<Op>, String> {
+pub fn paste_ops(source: &[S], graph: &str, scope: &[Symbol], text: &str) -> Result<Vec<Op>, String> {
     let head = |f: &S| -> String {
         match s::head(f) {
             Some(h) => match h.rfind('/') {
@@ -483,7 +484,7 @@ fn holds(spans: &Spans, byte: i64, f: &S) -> bool {
     }
 }
 
-fn nested_at(spans: &Spans, byte: i64, prefix: &[String], leaf: &str, v: &S) -> Path {
+fn nested_at(spans: &Spans, byte: i64, prefix: &[Symbol], leaf: &str, v: &S) -> Path {
     let (body, entered) = enter(v);
     let inner = if entered || scope(v).is_some() { within_at(spans, byte, &append(prefix, leaf), &body) } else { None };
     if let Some(path) = inner {
@@ -498,7 +499,7 @@ fn nested_at(spans: &Spans, byte: i64, prefix: &[String], leaf: &str, v: &S) -> 
     }
 }
 
-fn within_at(spans: &Spans, byte: i64, prefix: &[String], cur: &S) -> Option<Path> {
+fn within_at(spans: &Spans, byte: i64, prefix: &[Symbol], cur: &S) -> Option<Path> {
     match scope(cur) {
         None => {
             if is_list_or_map(cur) && holds(spans, byte, cur) { Some(nested_at(spans, byte, prefix, "@result", cur)) } else { None }
@@ -542,8 +543,8 @@ pub fn binding_at(shown: &Shown, byte: i64) -> Option<Path> {
         }
     };
     found.map(|names| {
-        let mut p = vec![graph];
-        p.extend(names);
+        let mut p: Path = vec![graph.into()];
+        p.extend(names.into_iter().map(Symbol::from));
         p
     })
 }
@@ -577,7 +578,7 @@ fn rail_names(expr: &S) -> Vec<String> {
     }
 }
 
-fn input_of(source: &[S], name: &str, prefix: &[String]) -> Option<Path> {
+fn input_of(source: &[S], name: &str, prefix: &[Symbol]) -> Option<Path> {
     if let [graph] = prefix {
         let root = root_form(source, graph)?;
         let params = root.children().iter().skip(2).find_map(|&id| match root.arena().row(id).node {
@@ -585,13 +586,13 @@ fn input_of(source: &[S], name: &str, prefix: &[String]) -> Option<Path> {
             _ => None,
         })?;
         if params.iter().any(|&id| parameter(&root.child(id)).iter().any(|n| n == name)) {
-            return Some(vec![graph.clone(), format!(":{}", name)]);
+            return Some(vec![*graph, format!(":{}", name).into()]);
         }
     }
     None
 }
 
-fn local_ref(source: &[S], name: &str, prefix: &[String], leaf: &str) -> Option<Path> {
+fn local_ref(source: &[S], name: &str, prefix: &[Symbol], leaf: &str) -> Option<Path> {
     let expr: Option<S> = match prefix {
         [graph] => root_form(source, graph).and_then(|root| last(&root)),
         _ => binding(source, prefix).map(|(_, v)| v),
@@ -628,7 +629,7 @@ fn local_ref(source: &[S], name: &str, prefix: &[String], leaf: &str) -> Option<
 }
 
 /// Resolve a read in its lexical scope, including dotted record outputs.
-pub fn reference_target(source: &[S], from: &[String], name: &str) -> Option<Path> {
+pub fn reference_target(source: &[S], from: &[Symbol], name: &str) -> Option<Path> {
     let name = match name.find('.') {
         Some(i) => &name[..i],
         None => name,
@@ -643,7 +644,7 @@ pub fn reference_target(source: &[S], from: &[String], name: &str) -> Option<Pat
     [format!("def:{}", name), format!("macro:{}", name), name.to_owned()]
         .into_iter()
         .find(|key| root_form(source, key).is_some())
-        .map(|key| vec![key])
+        .map(|key| vec![key.into()])
 }
 
 /// The definition of the symbol at a printed byte, including call heads.
@@ -660,7 +661,7 @@ pub fn definition_at(shown: &Shown, byte: i64) -> Option<Path> {
         arena.children(id).iter().find_map(|&child| symbol(spans, byte, arena, child))
     }
     let name = shown.source.iter().find_map(|f| symbol(&shown.spans, byte, f.arena(), f.row_id()))?;
-    let from = binding_at(shown, byte).unwrap_or_else(|| vec![shown.graph.clone()]);
+    let from = binding_at(shown, byte).unwrap_or_else(|| vec![shown.graph.clone().into()]);
     if let Some((Some(p), _)) = binding(&shown.source, &from)
         && let Some(span) = span_of(&shown.spans, &p)
         && i64::from(span.start) <= byte
@@ -675,7 +676,7 @@ fn span_range(span: &Span) -> (i64, i64) {
     (i64::from(span.start), i64::from(span.finish))
 }
 
-pub fn path_mark(source: &[S], spans: &Spans, path: &[String]) -> Option<(i64, i64)> {
+pub fn path_mark(source: &[S], spans: &Spans, path: &[Symbol]) -> Option<(i64, i64)> {
     match path {
         [graph] => root_form(source, graph).and_then(|root| span_of(spans, &root)).map(span_range),
         [graph, input] if input.starts_with(':') => {
@@ -790,7 +791,7 @@ fn printed_of(f: &S) -> String {
 
 /// Build the complete candidate graph before checking: dependent bindings may change type
 /// together, so checking individual replacements is incorrect.
-fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnostic> {
+fn selection_form(source: &[S], path: &[Symbol], form: &S) -> Result<S, Diagnostic> {
     let shape = || e_edit("Expected the shown (let* [...] name) closure, or the graph form.".to_owned());
     let (graph, top) = match path {
         [graph, top, ..] => (graph, top),
@@ -805,7 +806,7 @@ fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnost
         })
         .collect();
     let invalid = patches.chunks_exact(2).find(|p| match form.arena().row(p[0]).node {
-        Node::Sym(n) => binding(source, &[graph.clone(), form.name(n).to_owned()]).is_none(),
+        Node::Sym(n) => binding(source, &[graph.clone().into(), form.name(n).into()]).is_none(),
         _ => true,
     });
     if let Some(p) = invalid {
@@ -862,7 +863,7 @@ fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnost
 
 /// The `Set_graph` of the graph form a Graph tab holds, or (with `selection`, the shown binding's
 /// path) of the Selection closure patched into the graph; the error of text that is neither.
-pub fn graph_op(source: &[S], graph: &str, selection: Option<&[String]>, text: &str) -> Result<Op, Diagnostic> {
+pub fn graph_op(source: &[S], graph: &str, selection: Option<&[Symbol]>, text: &str) -> Result<Op, Diagnostic> {
     let set = |form: S| Op::SetGraph { name: graph.to_owned(), form };
     let forms = s::parse(text)?;
     match forms.as_slice() {
@@ -888,7 +889,7 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
     };
     let key: Path = match selected {
         Some(path) => path.clone(),
-        None => vec![graph.to_owned()],
+        None => vec![graph.into()],
     };
     Ok(match tab {
         Tab::Document => {
@@ -918,7 +919,7 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
                 applied_spans: printed,
             },
             Some(root) => {
-                let names: &[String] = match selected {
+                let names: &[Symbol] = match selected {
                     Some(p) if !p.is_empty() => &p[1..],
                     _ => &[],
                 };
@@ -1116,7 +1117,7 @@ fn scrub_sub(id: i64, path: &mut Vec<i64>, form: &S) -> Option<Vec<i64>> {
     visit(id, path, form.arena(), form.row_id())
 }
 
-fn scrub_within(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
+fn scrub_within(id: i64, value: &S, path: &[Symbol], form: &S) -> Option<Op> {
     match scope(form) {
         Some((bindings, result)) => {
             for pair in bindings.chunks_exact(2) {
@@ -1130,7 +1131,7 @@ fn scrub_within(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
     }
 }
 
-fn scrub_card(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
+fn scrub_card(id: i64, value: &S, path: &[Symbol], form: &S) -> Option<Op> {
     if scope(form).is_some() || LOOP_HEADS.contains(&s::head(form).unwrap_or("")) {
         let (inner, _) = enter(form);
         if let found @ Some(_) = scrub_within(id, value, path, &inner) {
@@ -1195,7 +1196,7 @@ pub fn scrub_op(shown: &Shown, range: (i64, i64), replacement: &str) -> Option<O
             && let Some(prefix) = root_name(&root)
         {
             if let Some(body) = last(&root)
-                && let found @ Some(_) = scrub_within(id, &value, &[prefix], &body)
+                && let found @ Some(_) = scrub_within(id, &value, &[prefix.into()], &body)
             {
                 return found;
             }
@@ -2117,7 +2118,7 @@ fn editor_area(
         let (text, graphs, shown, emit) = (text.to_owned(), c.names.graphs.clone(), shown.clone(), emit.clone());
         Rc::new(move |byte| {
             let target = match lisp_text::ref_at(&text, byte.max(0) as usize) {
-                Some(name) if graphs.contains(&name) => Some(vec![name]),
+                Some(name) if graphs.contains(&name) => Some(vec![name.into()]),
                 _ => {
                     if text == shown.text {
                         definition_at(&shown, byte)

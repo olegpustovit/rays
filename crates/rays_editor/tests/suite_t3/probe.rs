@@ -1,5 +1,6 @@
 //! Port of lib/rays_editor/test/test_probe.ml (W5: recorded values, footers, iteration counts,
 //! inspector rows and the viewport header text).
+use flow_syntax::symbol::Symbol;
 use super::pg::{self, check};
 use super::support::*;
 use flow_check::workspace::Workspace;
@@ -37,9 +38,9 @@ pub fn scope_of(w: &Workspace, graph: &str) -> p::Scope {
 }
 
 pub fn node_of(w: &Workspace, graph: &str, path: &[&str]) -> p::Node {
-    let mut full = vec![graph.to_string()];
-    full.extend(path.iter().map(|s| s.to_string()));
-    p::find(&scope_of(w, graph), &full).unwrap_or_else(|| panic!("{} is not projected", full.join("/")))
+    let mut full: flow_check::workspace::Path = vec![graph.into()];
+    full.extend(path.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)));
+    p::find(&scope_of(w, graph), &full).unwrap_or_else(|| panic!("{} is not projected", flow_syntax::symbol::join_path(&full, "/")))
 }
 
 fn eval_recorded(w: &Workspace) -> flow_eval::Eval {
@@ -50,8 +51,8 @@ fn recorded(w: &Workspace) -> Probe {
     probe::make(&eval_recorded(w), Options::default())
 }
 
-fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| s.to_string()).collect()
+fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|s| (*s).into()).collect()
 }
 
 pub fn bounds() {
@@ -194,7 +195,7 @@ pub fn nested() {
 /// every zone shows this iteration
 struct FixedProbe(i64);
 impl pxui_graph::scope_state::Saved for FixedProbe {
-    fn probe(&self, _: &[String]) -> i64 {
+    fn probe(&self, _: &[Symbol]) -> i64 {
         self.0
     }
 }
@@ -234,7 +235,7 @@ pub fn geometry_zone() {
     let scope = scope_of(&w, "g");
     let zone = path(&["g", "d"]);
     let z2 = zone.clone();
-    let dynamic: Rc<dyn Fn(&[String]) -> Option<i64>> = Rc::new(move |p| if p == z2.as_slice() { Some(100) } else { None });
+    let dynamic: Rc<dyn Fn(&[Symbol]) -> Option<i64>> = Rc::new(move |p| if p == z2.as_slice() { Some(100) } else { None });
     let eval = eval_recorded(&w);
     let before_cook = probe::make(&eval, Options::default()).counts(&scope, &|_| 0);
     check(before_cook == vec![(zone.clone(), 1)], "template count before a cook");
@@ -253,12 +254,12 @@ pub fn geometry_zone() {
         .nodes
         .iter()
         .find_map(|n| match (n.kind.as_str(), n.args.iter().find(|(k, _)| k == "element")) {
-            ("zone/points", Some((_, Value::Text(k)))) => Some(String::from_utf8_lossy(k).into_owned()),
+            ("zone/points", Some((_, Value::Text(k)))) => Some(flow_syntax::symbol::intern(String::from_utf8_lossy(k).as_ref())),
             _ => None,
         })
         .expect("a zone/points element key");
     let z3 = zone.clone();
-    let element: Rc<dyn Fn(&[String], i64) -> Option<Vec<(String, Value)>>> = Rc::new(move |p, k| if p == z3.as_slice() { Some(vec![(key.clone(), Value::Vec3(k as f64, 0., 0.))]) } else { None });
+    let element: Rc<dyn Fn(&[Symbol], i64) -> Option<Vec<(Symbol, Value)>>> = Rc::new(move |p, k| if p == z3.as_slice() { Some(vec![(key.clone(), Value::Vec3(k as f64, 0., 0.))]) } else { None });
     let mut r = probe::make(&eval, Options { dynamic: Some(dynamic), element: Some(element), ..Default::default() });
     check(r.footer(&q, &[3]).value == "[4 0 0]" && r.footer(&q, &[41]).value == "[42 0 0]", "an element-dependent value is not forced for the probed element");
     // and the inspector's list of iterations has every element's value

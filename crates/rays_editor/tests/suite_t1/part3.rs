@@ -24,8 +24,8 @@ fn panes_graph(e: &editor::Editor) -> i64 {
     editor::panes(e, &idle_frame(0)).graph.2
 }
 
-fn p(a: &[&str]) -> Vec<String> {
-    a.iter().map(|s| s.to_string()).collect()
+fn p(a: &[&str]) -> flow_check::workspace::Path {
+    a.iter().map(|s| (*s).into()).collect()
 }
 
 pub fn run_ops() {

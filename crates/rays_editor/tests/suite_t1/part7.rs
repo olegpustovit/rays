@@ -25,7 +25,7 @@ fn session(text: &str, at: (f64, f64)) -> Run {
     r
 }
 fn set_arg(r: &mut Run, node: &[&str], k: &str, value: Node) {
-    r.e = match editor::edit(r.e.clone(), &Op::SetArg { node: node.iter().map(|s| s.to_string()).collect(), key: ArgKey::Kw(k.into()), sub: vec![], value: s::make(value) }) {
+    r.e = match editor::edit(r.e.clone(), &Op::SetArg { node: node.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect(), key: ArgKey::Kw(k.into()), sub: vec![], value: s::make(value) }) {
         Ok(e) => e,
         Err(m) => fail(&m),
     };
@@ -375,7 +375,7 @@ pub fn run_op_inspector() {
     let authored = r.source();
     click(&mut r, ((ix + 210) as f64, (iy + 210) as f64));
     r.step(m, vec![]);
-    check(r.dump("scope selected") == "g/a" && editor::private::inspector_subject(&r.e) == Some(vec!["g".to_string(), "a".to_string()]), &format!("a wired inspector value did not select its source: {}", r.dump("scope selected")));
+    check(r.dump("scope selected") == "g/a" && editor::private::inspector_subject(&r.e) == Some(vec!["g".into(), "a".into()]), &format!("a wired inspector value did not select its source: {}", r.dump("scope selected")));
     check(r.source() == authored && r.undo_label() == label, "following a wire edited the document");
     r.close();
 }

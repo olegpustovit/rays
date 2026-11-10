@@ -29,8 +29,8 @@ fn diag(d: rays_diagnostic::Diagnostic) -> String {
     rays_diagnostic::to_string(&d)
 }
 
-fn sv(l: &[&str]) -> Vec<String> {
-    l.iter().map(|x| (*x).to_owned()).collect()
+fn sv(l: &[&str]) -> flow_check::workspace::Path {
+    l.iter().map(|x| (*x).into()).collect()
 }
 
 fn merge(nodes: &[node::T]) -> node::T {
@@ -177,7 +177,7 @@ fn skips() {
 fn rest_fixture() -> Factory {
     let mut args = edit::factory_args("rest_fixture", "Rest fixture", &["Test"]);
     args.operation = Some("merge".to_owned());
-    args.slots = Some(sv(&["base", "fixed", "extras"]));
+    args.slots = Some(vec!["base".into(), "fixed".into(), "extras".into()]);
     edit::factory_slots(
         args,
         vec![InputRequirement::Required, InputRequirement::Optional, InputRequirement::OptionalRest],

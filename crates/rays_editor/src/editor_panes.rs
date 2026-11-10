@@ -6,6 +6,7 @@
 //! OCaml signature lists them.
 #![allow(non_camel_case_types)]
 
+use flow_syntax::symbol::Symbol;
 use std::borrow::Cow;
 use std::rc::Rc;
 
@@ -46,7 +47,7 @@ use crate::text_pane;
 use crate::timeline;
 
 type S = Syntax;
-pub type Key = Vec<String>;
+pub type Key = flow_check::workspace::Path;
 
 pub fn stored_projection<'a>(value: &ModelView<'a>) -> projection {
     projection_in(value, pane(value))
@@ -348,7 +349,7 @@ pub fn panels_line<'a>(value: &ModelView<'a>) -> String {
             let name = format!(
                 "{} {}{}",
                 panels::name(panel).to_lowercase(),
-                key.last().cloned().unwrap_or_default(),
+                key.last().map_or("", |name| name.as_str()),
                 if *value.focus == *panel && value.focus_path.as_ref() == Some(path) { "*" } else { "" }
             );
             let own = hosts.iter().find_map(|(k, p_, _, kind)| if *k == key && p_ == path { Some(*kind) } else { None });
@@ -399,10 +400,10 @@ fn reference(ws_graphs: &[flow_check::workspace::Graph], e: &S) -> Option<String
 
 /// What the selected node of the graph pane references: the graph its `(ref name)` names, the
 /// `:material` of a sop/material first (a material node follows to its surface).
-pub fn follow_target<'a>(value: &ModelView<'a>, path: Option<&[String]>) -> Option<String> {
+pub fn follow_target<'a>(value: &ModelView<'a>, path: Option<&[Symbol]>) -> Option<String> {
     let ws = &value.doc.workspace.ws;
     let graphs: &[flow_check::workspace::Graph] = &ws.checked.graphs;
-    let selected: Vec<Vec<String>> = match path {
+    let selected: Vec<Key> = match path {
         Some(p_) => vec![p_.to_vec()],
         None => scope::selected(pane_view(value)),
     };
@@ -484,7 +485,7 @@ pub fn scope_name<'a>(value: &ModelView<'a>) -> Option<String> {
 }
 
 /// The lowered node of the node selected in the graph pane, at the iteration its zones probe.
-pub fn scope_node<'a>(value: &ModelView<'a>) -> Option<(Vec<String>, sop::node::T)> {
+pub fn scope_node<'a>(value: &ModelView<'a>) -> Option<(Key, sop::node::T)> {
     let laid = pane_laid(value)?;
     let records = laid.records.as_ref()?;
     let selected = scope::selected(pane_view(value));
@@ -516,7 +517,7 @@ pub fn lit_tags<'a>(value: &ModelView<'a>) -> (pick::Set, Option<lit_cache>) {
 
 /// The nodes of the pane's graph that the last failed cook names, each with its diagnostic's code
 /// (the pane draws the sheet's failed state on them).
-pub fn failed_nodes<'a>(value: &ModelView<'a>) -> Vec<(Vec<String>, String)> {
+pub fn failed_nodes<'a>(value: &ModelView<'a>) -> Vec<(Key, String)> {
     let failed = cook::failed_node(&value.cook);
     match (failed, pane_laid(value)) {
         (Some((code, node_id)), Some(laid)) if scope_name(value).is_some() && laid.records.is_some() => {
@@ -828,8 +829,8 @@ pub fn draw_graph_pane<'a>(
     scope_view: &mut scope::Pane,
     scope_active: bool,
     guide: bool,
-    carry_lit: Vec<(Vec<String>, String)>,
-    carry_hot: Option<(Vec<String>, bool)>,
+    carry_lit: Vec<(Key, String)>,
+    carry_hot: Option<(Key, bool)>,
     graph_root: &UiBox,
     graph_host: &Option<Leaf>,
     workspace: &shell,

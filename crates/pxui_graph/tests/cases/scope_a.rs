@@ -72,7 +72,7 @@ fn scope_zoom_geometry() {
             for q in &paths {
                 let (x, y, w, h) = scope::inspect::box_of(&view, q).unwrap();
                 let (view2, _) = scope_click(&mut ui, view.clone(), ((x + w / 2.0) as i64, (y + (h / 2.0).min(11.0 * scope::zoom(&view))) as i64));
-                check(scope::selected(&view2) == vec![q.clone()], &format!("a click on {} did not select it", q.join("/")));
+                check(scope::selected(&view2) == vec![q.clone()], &format!("a click on {} did not select it", flow_syntax::symbol::join_path(&q, "/")));
             }
         }
     }

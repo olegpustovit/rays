@@ -65,7 +65,7 @@ fn source(ty: &Ty) -> Op {
     };
     o.shape = op::Shape::Struct { splice: false };
     o.check = Arc::new(|_| Ok(()));
-    o.body = Arc::new(move |_, _, _| Ok(struct_value("probe/data", array.clone(), vec![])));
+    o.body = Arc::new(move |_, _, _| Ok(struct_value("probe/data", array.clone(), vec![].into())));
     o
 }
 
@@ -189,7 +189,7 @@ fn tiny_maps_in_recorded_call_records() {
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = function_of(&records[0].1);
     let call = ok(e::host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Floats(1, Arc::new((0..13).map(|i| i as f64).collect()))]));
-    let value = Value::Record(vec![("offset".into(), Value::Int(0)), ("call".into(), call)]);
+    let value = Value::Record(vec![("offset".into(), Value::Int(0)), ("call".into(), call)].into());
     for strict in [false, true] {
         let program = ok(executor::compile(&value, &executor::CompileOptions { strict, ..Default::default() }));
         for time in [0., 0.25] {

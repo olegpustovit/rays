@@ -137,6 +137,7 @@ fn value_ops() -> &'static HashSet<String> {
 }
 
 pub mod ids {
+use flow_syntax::symbol::Symbol;
 use super::{ArgKey, Path, R, fail, fail_code};
 use flow_check::workspace as w;
 use flow_syntax::{arena::{Draft, Node, SyntaxBuilder, SyntaxId}, syntax::QuoteKind, symbol, ty::{self, Ty}, lisp};
@@ -265,10 +266,10 @@ pub fn holder(leaf: &str) -> R<(String, ArgKey)> {
     Ok((leaf[..i].to_owned(), key))
 }
 
-pub fn split_node(node: &[String]) -> R<(Vec<String>, String)> {
+pub fn split_node(node: &[Symbol]) -> R<(Path, String)> {
     match node {
         [] | [_] => Err(fail("Not a node.")),
-        _ => Ok((node[..node.len() - 1].to_vec(), node[node.len() - 1].clone())),
+        _ => Ok((node[..node.len() - 1].to_vec(), node[node.len() - 1].to_string())),
     }
 }
 
@@ -334,7 +335,7 @@ pub fn valid_name(n: &str) -> bool {
     symbol::valid_name(n)
 }
 
-pub fn scope_path_of(nodes: &[Path]) -> R<Vec<String>> {
+pub fn scope_path_of(nodes: &[Path]) -> R<Path> {
     match nodes.split_first() {
         None => Err(fail("Select the nodes first.")),
         Some((first, rest)) => {
@@ -362,7 +363,7 @@ pub fn starts_with(prefix: &str, h: Option<&str>) -> bool {
     h.is_some_and(|h| h.starts_with(prefix))
 }
 
-pub fn has_prefix(prefix: &[String], p: &[String]) -> bool {
+pub fn has_prefix(prefix: &[Symbol], p: &[Symbol]) -> bool {
     p.len() >= prefix.len() && p[..prefix.len()] == *prefix
 }
 
@@ -729,7 +730,7 @@ fn inside(child: &S, keys: &[ArgKey], name: &str, g: &mut dyn FnMut(&S, &mut Syn
     }
 }
 
-pub fn descend(cur: &S, names: &[String], f: &mut dyn FnMut(&S, &mut SyntaxBuilder) -> R<S>, b: &mut SyntaxBuilder) -> R<S> {
+pub fn descend(cur: &S, names: &[Symbol], f: &mut dyn FnMut(&S, &mut SyntaxBuilder) -> R<S>, b: &mut SyntaxBuilder) -> R<S> {
     let Some((name, rest)) = names.split_first() else {
         return f(cur, b);
     };
@@ -798,7 +799,7 @@ pub fn root_form(src: &[S], seg: &str, b: &SyntaxBuilder) -> R<S> {
         .ok_or_else(|| fail(&format!("No graph or definition {}.", seg)))
 }
 
-pub fn edit_scope(src: &[S], scope_path: &[String], g: &mut dyn FnMut(&S, &mut SyntaxBuilder) -> R<S>, b: &mut SyntaxBuilder) -> R<Vec<S>> {
+pub fn edit_scope(src: &[S], scope_path: &[Symbol], g: &mut dyn FnMut(&S, &mut SyntaxBuilder) -> R<S>, b: &mut SyntaxBuilder) -> R<Vec<S>> {
     match scope_path.split_first() {
         None => Err(fail("No scope.")),
         Some((seg, names)) => with_root(src, seg, &mut |r, b| {
@@ -1125,7 +1126,7 @@ pub fn detach_result(name: &str, below: &Option<S>, root: &S, b: &mut SyntaxBuil
     }
 }
 
-pub fn duplicate_plan(src: &[S], nodes: &[Path], b: &SyntaxBuilder) -> R<(Vec<String>, Vec<(String, String)>)> {
+pub fn duplicate_plan(src: &[S], nodes: &[Path], b: &SyntaxBuilder) -> R<(Path, Vec<(String, String)>)> {
     let sp = scope_path_of(nodes)?;
     let mut used = root_used(src, &sp[0], b);
     let leaves = dedup(&nodes.iter().map(|n| split_node(n).map(|x| x.1)).collect::<R<Vec<_>>>()?);

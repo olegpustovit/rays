@@ -548,19 +548,19 @@ fn adding_by_key() {
     let doc = open_text(TEXT);
     let added = edit(
         &doc,
-        &Op::AddNode { scope: vec!["scene".to_owned()], name: "lamp".to_owned(), expr: call("scene/light", vec![mk(s::Draft::Kw("name".to_owned())), mk(s::Draft::Str(b"lamp".to_vec()))]) },
+        &Op::AddNode { scope: vec!["scene".into()], name: "lamp".to_owned(), expr: call("scene/light", vec![mk(s::Draft::Kw("name".to_owned())), mk(s::Draft::Str(b"lamp".to_vec()))]) },
     );
     check(
         contains(&source(&added), "scene/merge body arm cam side (scene/light :name \"fill\") lamp") || contains(&source(&added), "lamp)"),
         "a new object did not join the scene's merge",
     );
     check(scene(&added).iter().any(|i| i.label == "lamp"), "a new object is not in the scene");
-    let layered = edit(&doc, &Op::AddNode { scope: vec!["world".to_owned()], name: "haze".to_owned(), expr: call("world/gradient", vec![]) });
+    let layered = edit(&doc, &Op::AddNode { scope: vec!["world".into()], name: "haze".to_owned(), expr: call("world/gradient", vec![]) });
     check(layer_labels(&layered) == strs(&["Gradient", "sun", "sky"]), "a new World layer is not on top of the stack");
     same_after_reload(&layered, "added layer");
-    let twice = edit(&added, &Op::DeleteNodes { nodes: vec![vec!["scene".to_owned(), "lamp".to_owned()]] });
+    let twice = edit(&added, &Op::DeleteNodes { nodes: vec![vec!["scene".into(), "lamp".into()]] });
     check(snapshot(&twice) == snapshot(&doc), "deleting what was added did not give the scene back");
-    check(edit_ws(&layered, &Op::DeleteNodes { nodes: vec![vec!["world".to_owned(), "haze".to_owned()]] }).is_ok(), "a World layer could not be deleted by its binding");
+    check(edit_ws(&layered, &Op::DeleteNodes { nodes: vec![vec!["world".into(), "haze".into()]] }).is_ok(), "a World layer could not be deleted by its binding");
 }
 
 // ---- the copies of a loop are one template ----
@@ -790,9 +790,9 @@ fn loop_copy_that_makes_two_objects() {
     );
     check(lamps(&renum).len() == 2, "a merge :skip did not leave two lamps");
     let edit_text = |doc: &Doc, op: &Op| workspace_doc::to_text(&edit_ws(doc, op).unwrap()).unwrap();
-    let after = edit_text(&renum, &Op::DeleteNodes { nodes: vec![vec!["scene".to_owned(), "b".to_owned()]] });
+    let after = edit_text(&renum, &Op::DeleteNodes { nodes: vec![vec!["scene".into(), "b".into()]] });
     check(contains(&after, ":skip [2]"), &format!("deleting an argument did not renumber the skip: {after}"));
-    let after = edit_text(&renum, &Op::DeleteNodes { nodes: vec![vec!["scene".to_owned(), "a".to_owned()]] });
+    let after = edit_text(&renum, &Op::DeleteNodes { nodes: vec![vec!["scene".into(), "a".into()]] });
     check(contains(&after, ":skip [0 2]"), &format!("deleting an earlier argument did not shift the skip: {after}"));
 }
 
@@ -1130,8 +1130,8 @@ fn geometries(doc: &Doc) -> usize {
     objects::ids("geometry", &scene(doc)).len()
 }
 
-fn path(parts: &[&str]) -> Vec<String> {
-    strs(parts)
+fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|part| (*part).into()).collect()
 }
 
 #[test]
@@ -1380,7 +1380,7 @@ fn instances_each_viewport_has_its_root_and_world() {
         ),
         _ => panic!("each viewport over a root has an entry in the document"),
     }
-    check(lowering::instance_root(&flow_syntax::value::struct_value("scene/merge", flow_syntax::ty::scene(), vec![])).is_none(), "a part has no root of its own");
+    check(lowering::instance_root(&flow_syntax::value::struct_value("scene/merge", flow_syntax::ty::scene(), vec![].into())).is_none(), "a part has no root of its own");
     // each viewport draws its own World: the document's scene (a part) has none, the two roots do
     check(objects::ids("world", &scene(&doc)).is_empty(), "the part holds no World");
     match doc.view_worlds.as_slice() {

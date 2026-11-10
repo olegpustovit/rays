@@ -52,7 +52,7 @@ pub fn reset_context_symbol() {
         _ => fail("check"),
     };
     let scope = flow_graph::projection::of_graph_with(&|_| false, &catalog, &w, "g").expect("scope");
-    let n = flow_graph::projection::find(&scope, &["g".to_string(), "s#0".to_string()]).expect("s#0");
+    let n = flow_graph::projection::find(&scope, &["g".into(), "s#0".into()]).expect("s#0");
     let a = n.rows[0].clone();
     let a2 = a.clone();
     let found = rays_editor::editor_inspect::arg_request(&src, &n, &move |_| Some((a2.clone(), Vec::new())), &FlowChange::Reset("@arg:a".to_string()));

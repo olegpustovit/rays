@@ -93,7 +93,7 @@ fn lookup_of(g: Option<geo::T>) -> attribute_kernel::GeometryLookup {
 }
 
 fn group_source(name: &str, args: Vec<(&str, Value)>) -> Value {
-    source_value(name, Ty::Any, [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.to_owned(), v)).collect())
+    source_value(name, Ty::Any, [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.into(), v)).collect::<Vec<_>>().into())
 }
 
 fn query(g: &geo::T, owner: &str, name: &str, component: Option<&str>) -> Value {
@@ -120,7 +120,7 @@ fn checked_in(catalog: &flow_check::catalog::Catalog, source: &str) -> flow_chec
 /// `body` bound as `tested` in a graph whose only input is the geometry `geo`.
 pub(super) fn evaluated(g: &geo::T, body: &str) -> (Value, flow_ir::core_exec::ResolveFn) {
     let checked = checked_in(&catalog0(), &format!("(workspace groups (graph g :context sop [(geo : geometry nil)] (let* [tested {body}] geo)))"));
-    let inputs = vec![("g".to_owned(), vec![("geo".to_owned(), Value::Deferred(ty::geometry(), 7))])];
+    let inputs = vec![("g".into(), vec![("geo".into(), Value::Deferred(ty::geometry(), 7))])];
     let evaluation = flow_ok(flow_eval::static_with(&checked, true, Some(&inputs), None));
     let value = evaluation.records.iter().find(|(path, _)| path == &vec!["g".to_owned(), "tested".to_owned()]).map(|(_, values)| values[0].1.clone()).expect("tested record");
     let lookup = lookup_of(Some(g.clone()));
@@ -163,12 +163,12 @@ fn cook(s: &mut session::T, domains: i64, n: &node::T) -> geo::T {
 }
 
 fn int_array(data: &[i64]) -> String {
-    data.iter().fold("(array/int 0 0)".to_owned(), |array, value| format!("(array/concat {array} (array/int 1 {value}))"))
+    data.iter().fold("(array/int 0 0)".into(), |array, value| format!("(array/concat {array} (array/int 1 {value}))"))
 }
 
 fn write_node(g: &geo::T, owner: &str, mask: &[i64], order: Option<&str>) -> node::T {
     let order = order.map_or(String::new(), |o| format!(" :order {o}"));
-    lisp_sop::node(&[("source".to_owned(), lisp_sop::snapshot(g))], &format!("(sop/with_group (sop/ext_source) {} :name \"selected\" :owner {owner}{order})", int_array(mask)))
+    lisp_sop::node(&[("source".into(), lisp_sop::snapshot(g))], &format!("(sop/with_group (sop/ext_source) {} :name \"selected\" :owner {owner}{order})", int_array(mask)))
 }
 
 #[test]
@@ -196,10 +196,10 @@ fn native_owner_masks(defnode_round_trip: bool) {
                 let output = cook(&mut s, domains, &node);
                 assert!(bytes(&output) == bytes(&expected));
                 exact(&output, &format!("(sop/group geo :name \"selected\" :owner {owner})"), &ints(&mask));
-                exact(&output, &format!("(sop/group_order geo :name \"selected\" :owner {owner})"), &Value::Record(vec![("ordered".into(), Value::Bool(false)), ("indices".into(), ints(&[]))]));
+                exact(&output, &format!("(sop/group_order geo :name \"selected\" :owner {owner})"), &Value::Record(vec![("ordered".into(), Value::Bool(false)), ("indices".into(), ints(&[]))].into()));
                 if defnode_round_trip {
                 let copy = lisp_sop::workspace_node(
-                    &[("source".to_owned(), lisp_sop::snapshot(&output))],
+                    &[("source".into(), lisp_sop::snapshot(&output))],
                     &format!(
                         "(workspace groups (defnode sop/test_mask_roundtrip [(geo : geometry)] (sop/with_group geo (exact (map (fn [(value : int)] value) (sop/group geo :name \"selected\" :owner {owner}))) :name \"selected\" :owner {owner} :order (sop/group_order geo :name \"selected\" :owner {owner}))) (graph g :context sop (sop/test_mask_roundtrip (sop/ext_source))))"
                     ),
@@ -217,9 +217,9 @@ fn native_owner_masks(defnode_round_trip: bool) {
                     for domains in [1i64, 8] {
                         let output = cook(&mut s, domains, &node);
                         assert!(bytes(&output) == bytes(&expected));
-                        exact(&output, &format!("(sop/group_order geo :name \"selected\" :owner {owner})"), &Value::Record(vec![("ordered".into(), Value::Bool(true)), ("indices".into(), ints(&order))]));
+                        exact(&output, &format!("(sop/group_order geo :name \"selected\" :owner {owner})"), &Value::Record(vec![("ordered".into(), Value::Bool(true)), ("indices".into(), ints(&order))].into()));
                         let copy = lisp_sop::node(
-                            &[("source".to_owned(), lisp_sop::snapshot(&output))],
+                            &[("source".into(), lisp_sop::snapshot(&output))],
                             &format!("(let* [geo (sop/ext_source)] (sop/with_group geo (sop/group geo :name \"selected\" :owner {owner}) :name \"selected\" :owner {owner} :order (sop/group_order geo :name \"selected\" :owner {owner})))"),
                         );
                         assert!(bytes(&cook(&mut s, domains, &copy)) == bytes(&output));
@@ -291,8 +291,8 @@ fn wildcard_names_and_refusals() {
     }
 }
 
-fn path(binding: &str) -> Vec<String> {
-    vec!["g".to_owned(), binding.to_owned()]
+fn path(binding: &str) -> flow_check::workspace::Path {
+    vec!["g".into(), binding.into()]
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn captured_geometry_and_group_changes_invalidate_caches() {
     let first = source(&vec![1; n as usize]);
     let second = source(&vec![0; n as usize]);
     let node = lisp_sop::node(
-        &[("target".to_owned(), lisp_sop::snapshot(&geometry)), ("source".to_owned(), lisp_sop::snapshot(&first))],
+        &[("target".into(), lisp_sop::snapshot(&geometry)), ("source".into(), lisp_sop::snapshot(&first))],
         "(sop/with_group (sop/ext_target) (sop/group (sop/ext_source) :name \"selected\") :name \"copy\")",
     );
     assert!(node::inputs(&node).len() == 2);
@@ -406,7 +406,7 @@ fn live_strict_multi_block_masks_preserve_native_bytes() {
     let n = 5001usize;
     let geometry = ok(geo::create(ok(float3::view::of_owned_exn(vec![0.0; n], vec![0.0; n], vec![0.0; n])), ok(topology::empty(n as i64)), None, None, None));
     let node = lisp_sop::workspace_node(
-        &[("source".to_owned(), lisp_sop::snapshot(&geometry))],
+        &[("source".into(), lisp_sop::snapshot(&geometry))],
         r#"(workspace live_groups
     (defnode sop/test_live_group [(geo : geometry)]
       (sop/with_group geo (exact (map (fn [(value : int)] (if (< t 0.5) value 0))
@@ -530,7 +530,7 @@ fn cooked_folds_traverse_inventory() {
     let groups: Vec<group::T> = (0..5001).map(|i| ok(group::init(None, group::Owner::Point, &format!("entry_{i}"), 0, &|_| unreachable!()))).collect();
     let geometry = ok(geo::create(geo::positions(&fixtures()[0]).clone(), ok(topology::empty(0)), None, Some(groups), None));
     let node = lisp_sop::workspace_node(
-        &[("source".to_owned(), lisp_sop::snapshot(&geometry))],
+        &[("source".into(), lisp_sop::snapshot(&geometry))],
         r#"(workspace cooked_inventory
     (defnode sop/cooked_inventory [(geo : geometry)]
       (let* [entries (sop/group_entries geo "*" :owner "point")
@@ -555,7 +555,7 @@ fn cooked_folds_traverse_inventory() {
     // a node that reads the fold's geometry, and a nested fold over a list that depends on the outer step,
     // are deferred with the fold to cook time
     let node = lisp_sop::workspace_node(
-        &[("source".to_owned(), lisp_sop::snapshot(&geometry))],
+        &[("source".into(), lisp_sop::snapshot(&geometry))],
         r#"(workspace cooked_consumer
     (defnode sop/cooked_consumer [(geo : geometry)]
       (let* [outer (fold [state {:geometry geo :seen 0}] [pattern (array/text 1 "entry_1*")]
@@ -630,9 +630,9 @@ fn ordinary_group_byte_masks_preserve_immutable_storage() {
 
 fn promoted_query(g: &geo::T, owner: &str, name: &str) -> Result<Value, Diagnostic> {
     let source = source_value(
-        "sop/group".to_owned(),
+        "sop/group",
         Ty::Array(Box::new(Ty::Int)),
-        vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("owner".into(), text(owner)), ("name".into(), text(name)), ("as_owner".into(), text("point"))],
+        vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("owner".into(), text(owner)), ("name".into(), text(name)), ("as_owner".into(), text("point"))].into(),
     );
     attribute_kernel::resolve(None, &lookup_of(Some(g.clone())), &source)
 }
@@ -757,9 +757,9 @@ fn group_query_promotion_names_and_refusals() {
         ("absent", "vertex", Value::Int(0), "E_GROUP_TYPE"),
     ] {
         let source = source_value(
-            "sop/group".to_owned(),
+            "sop/group",
             Ty::Array(Box::new(Ty::Int)),
-            vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("name".into(), text(name)), ("owner".into(), text(owner)), ("as_owner".into(), target)],
+            vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("name".into(), text(name)), ("owner".into(), text(owner)), ("as_owner".into(), target)].into(),
         );
         match attribute_kernel::resolve(None, &lookup_of(Some(geometry.clone())), &source) {
             Err(d) => assert!(d.code == code, "{} is not {code}", d.code),
@@ -768,9 +768,9 @@ fn group_query_promotion_names_and_refusals() {
     }
     let point_only = native_write(None, Some(group::Owner::Point), "other_owner", &[1; 7], &geometry);
     let source = source_value(
-        "sop/group".to_owned(),
+        "sop/group",
         Ty::Array(Box::new(Ty::Int)),
-        vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("name".into(), text("other_owner")), ("owner".into(), text("vertex")), ("as_owner".into(), text("point"))],
+        vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("name".into(), text("other_owner")), ("owner".into(), text("vertex")), ("as_owner".into(), text("point"))].into(),
     );
     match attribute_kernel::resolve(None, &lookup_of(Some(point_only)), &source) {
         Err(d) => assert!(d.code == "E_GROUP_MISSING"),
@@ -796,7 +796,7 @@ fn promotion_origin_defnodes_cook_the_promoted_mask() {
                 format!("(sop/with_attr geo \"mark\" (exact (map (fn [(p : vec3) (m : int)] m) (sop/attr geo :P) (sop/group geo :name \"promoted\" :owner {owner} :as_owner point))) :type int)")
             };
             let node = lisp_sop::workspace_node(
-                &[("source".to_owned(), lisp_sop::snapshot(&g))],
+                &[("source".into(), lisp_sop::snapshot(&g))],
                 &format!("(workspace promotion_origin (defnode sop/promoted [(geo : geometry)] {body}) (graph g :context sop (sop/promoted (sop/ext_source))))"),
             );
             let mut s = create_session();
@@ -867,13 +867,13 @@ fn promoted_group_descriptors_share_point_fusion_origins() {
             if promoted {
                 args.push(("as_owner", text("point")));
             }
-            let marker = source_value("sop/group", Ty::Array(Box::new(Ty::Int)), [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.to_owned(), v)).collect());
+            let marker = source_value("sop/group", Ty::Array(Box::new(Ty::Int)), [("geometry", Value::Deferred(ty::geometry(), 7))].into_iter().chain(args).map(|(k, v)| (k.into(), v)).collect::<Vec<_>>().into());
             let positions = source_value(
-                "sop/attr".to_owned(),
+                "sop/attr",
                 Ty::Array(Box::new(Ty::Vec3)),
-                vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("attribute".into(), text("P"))],
+                vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("attribute".into(), text("P"))].into(),
             );
-            let evaluation = flow_ok(flow_eval::static_with(&checked, true, Some(&[("g".to_owned(), vec![("p".to_owned(), positions), ("mask".to_owned(), marker)])]), None));
+            let evaluation = flow_ok(flow_eval::static_with(&checked, true, Some(&[("g".into(), vec![("p".into(), positions), ("mask".into(), marker)])]), None));
             let values = evaluation.records.iter().find(|(path, _)| path == &vec!["g".to_owned(), "tested".to_owned()]).map(|(_, v)| v[0].1.clone()).unwrap();
             let program = flow_ok(attribute_kernel::prepare(None, true, None, None, &[7], &[lisp_sop::snapshot(&g)], &values));
             let stages = executor::packed_root(&program).map_or(0, |r| r.stages.len());

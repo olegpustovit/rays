@@ -158,9 +158,9 @@ pub struct local {
 /// The start keywords the editor last followed, by panel key.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct started {
-    pub on: Option<Vec<String>>,
-    pub views: Vec<(Vec<String>, String)>,
-    pub tabs: Vec<(Vec<String>, String)>,
+    pub on: Option<panel_map::Key>,
+    pub views: Vec<(panel_map::Key, String)>,
+    pub tabs: Vec<(panel_map::Key, String)>,
 }
 
 #[derive(Clone)]
@@ -345,10 +345,10 @@ pub struct frame_result {
     pub text_intents: Vec<text_pane::Intent>,
     pub open_graph: Option<i64>,
     pub settings_changes: Vec<(String, Value)>,
-    pub graph_panes: Vec<(Vec<String>, graph_pane)>,
-    pub locals: Vec<(Vec<String>, local)>,
+    pub graph_panes: Vec<(panel_map::Key, graph_pane)>,
+    pub locals: Vec<(panel_map::Key, local)>,
     /// the text panes that are not the one in use: what each showed and asked this frame
-    pub other_texts: Vec<(Vec<String>, text_pane::Shown, Vec<text_pane::Intent>)>,
+    pub other_texts: Vec<(panel_map::Key, text_pane::Shown, Vec<text_pane::Intent>)>,
     pub handle_changes: Option<(i64, Vec<(String, Value)>)>,
     /// a header tool or an outline row that means a command
     pub bar_action: Option<editor_commands::action>,
@@ -525,13 +525,13 @@ pub struct EditorModel {
     /// picked in the palette, run next frame
     pub queued: Vec<editor_commands::action>,
     /// the panel `tree` belongs to: a list panel, or a graph panel in list view
-    pub list_at: Option<Vec<String>>,
+    pub list_at: Option<panel_map::Key>,
     /// the panel `text` belongs to: a lisp panel, or a graph panel in text view
-    pub text_at: Option<Vec<String>>,
+    pub text_at: Option<panel_map::Key>,
     /// the panel `outline` belongs to
-    pub outline_at: Option<Vec<String>>,
+    pub outline_at: Option<panel_map::Key>,
     /// the other panels' own, by panel key
-    pub locals: Vec<(Vec<String>, local)>,
+    pub locals: Vec<(panel_map::Key, local)>,
     pub started: Rc<started>,
     /// the object a framing cook is running for: its bounds come back in its own space
     pub framing: Option<i64>,

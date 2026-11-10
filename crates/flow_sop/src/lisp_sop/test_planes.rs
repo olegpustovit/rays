@@ -54,7 +54,7 @@ fn lowered(reference: bool, src: &geo::T, graphs: &[(&str, String)]) -> Vec<(Str
     let mut factories = vec![edit::factory(edit::factory_args("src", "src", &["Test"]), 0, Arc::new(move |_| Ok(snapshot.clone())))];
     factories.extend(sop::nodes::factories());
     let body: String = graphs.iter().map(|(name, b)| format!("(graph {name} :context sop (let* [src (sop/src)] {b}))")).collect::<Vec<_>>().join("\n");
-    let options = lower::Options { reference, inputs: Some(vec![("g".to_owned(), Vec::new())]), ..lower::Options::default() };
+    let options = lower::Options { reference, inputs: Some(vec![("g".into(), Vec::new())]), ..lower::Options::default() };
     let l = lower::workspace(Some(factories), Vec::new(), options, &parse(&format!("(workspace planes_test\n{body})"))).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     graphs
         .iter()

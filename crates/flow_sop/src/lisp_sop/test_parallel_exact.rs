@@ -78,7 +78,7 @@ fn exact(graph: &node::T) -> geo::T { let one=cook(1,graph); equal(&one,&cook(4,
 fn has(g: &geo::T, owner: Owner, name: &str) -> bool { geo::find_attribute(owner,name,g).is_some() }
 fn group_count(g: &geo::T, owner: group::Owner, name: &str) -> i64 { group::cardinality(&geo::find_group(owner,name,g).expect(name)) }
 fn edges(g: &geo::T, name: &str) -> i64 { edge_group::cardinality(&geo::find_edge_group(name,g).expect(name)) }
-fn chain(source: &node::T, steps: &str) -> node::T { super::node(&[("prev".to_owned(),source.clone())],&format!("(-> (sop/ext_prev) {steps})")) }
+fn chain(source: &node::T, steps: &str) -> node::T { super::node(&[("prev".into(),source.clone())],&format!("(-> (sop/ext_prev) {steps})")) }
 fn bind(bindings: &[(&str,&node::T)], text: &str) -> node::T { super::node(&bindings.iter().map(|(key,value)|(key.to_string(),(*value).clone())).collect::<Vec<_>>(),text) }
 fn indices(source: &node::T, owner: &str, name: &str, values: impl IntoIterator<Item=i64>) -> node::T {
     let values=values.into_iter().map(|value|value.to_string()).collect::<Vec<_>>().join(" ");

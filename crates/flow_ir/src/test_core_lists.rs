@@ -32,7 +32,7 @@ fn show(r: &Result<Value, Diagnostic>) -> String {
 fn records_at(source: &str, name: &str, graph: &str) -> Value {
     let ws = ts::check_workspace(source);
     let evaluation = ok(E::r#static(&ws, true, None));
-    let path = vec![graph.to_owned(), name.to_owned()];
+    let path: flow_check::workspace::Path = vec![graph.into(), name.into()];
     evaluation.records.iter().find(|(p, _)| *p == path).expect("record").1[0].1.clone()
 }
 
@@ -181,7 +181,7 @@ fn captured(ty: &str, body: &str, value: Value) -> ResidualId {
     let source = format!("(workspace captures (graph g :context host [(parts : (list {ty}) {default})] (let* [clock t tested {body}] 0.)))");
     let ws = ts::check_workspace(&source);
     let evaluation = ok(E::r#static(&ws, true, None));
-    let path = vec!["g".to_owned(), "clock".to_owned()];
+    let path: flow_check::workspace::Path = vec!["g".into(), "clock".into()];
     let Value::Residual(r) = evaluation.records.iter().find(|(p, _)| *p == path).expect("clock").1[0].1.clone() else { panic!("Capture context needs a live clock") };
     let body = &ws.graphs[0].body;
     let W::Node::Let(id) = body.node else { panic!("Missing checked capture term") };
@@ -189,7 +189,7 @@ fn captured(ty: &str, body: &str, value: Value) -> ResidualId {
     let term = arena.bindings(arena.let_node(id).bindings).iter().find_map(|binding| {
         matches!(arena.pattern(binding.pattern), flow_check::term_arena::PatternNode::Name(name) if body.name(name) == "tested").then(|| body.child(binding.term))
     }).expect("Missing checked capture term");
-    ok(E::residual::with_bindings(r, &term, &[("parts".to_owned(), value)]))
+    ok(E::residual::with_bindings(r, &term, &[("parts".into(), value)]))
 }
 
 #[test]
@@ -200,14 +200,14 @@ fn known_5001_geometry_map_filter_captures() {
     let n = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 5001 } else { 257 };
     let xs: Vec<Value> = (0..n).map(|i| if i % 11 == 10 { Value::No_geo } else { Value::Deferred(ty::geometry(), if i % 2 == 0 { 17 } else { 23 }) }).collect();
     let resolve: crate::core_exec::ResolveFn = Arc::new(|value: &Value| match value {
-        Value::Source(g) if g.name == "$core/cooked" && g.ty == ty::geometry() => match g.fields.as_slice() {
-            [(_, Value::Int(id))] => Ok(Value::Deferred(g.ty.clone(), *id)),
+        Value::Source(g) if g.name == "$core/cooked" && g.ty == ty::geometry() => match (g.fields.len(), g.fields.iter().next()) {
+            (1, Some((_, Value::Int(id)))) => Ok(Value::Deferred(g.ty.clone(), *id)),
             _ => Err(ts_error(format!("Unexpected capture source: {}", g.name))),
         },
-        Value::Source(g) if g.name == "$core/operator" && g.ty == ty::geometry() && matches!(g.fields.first(), Some((n, Value::Text(t))) if n == "$name" && (t.as_ref() == b"nth" || t.as_ref() == b"first")) => {
-            let Some((_, Value::Text(text))) = g.fields.first() else { unreachable!("matched above") };
+        Value::Source(g) if g.name == "$core/operator" && g.ty == ty::geometry() && matches!(g.fields.iter().next(), Some((n, Value::Text(t))) if n == "$name" && (t.as_ref() == b"nth" || t.as_ref() == b"first")) => {
+            let Some((_, Value::Text(text))) = g.fields.iter().next() else { unreachable!("matched above") };
             let op = op::find(&[], &String::from_utf8_lossy(text), &context::host()).expect("collection op");
-            (op.body)(&input::at_time(0.), &|_, _| panic!("Collection selector unexpectedly constructed a node"), &g.fields[..])
+            (op.body)(&input::at_time(0.), &|_, _| panic!("Collection selector unexpectedly constructed a node"), &g.fields.iter().cloned().collect::<Vec<_>>())
         }
         Value::Source(g) => Err(ts_error(format!("Unexpected capture source: {} : {} {}", g.name, ty::to_string(&g.ty), g.fields.iter().map(|(n, v)| format!("{n}={}", String::from_utf8_lossy(&E::show(v)))).collect::<Vec<_>>().join("; ")))),
         value => Err(ts_error(format!("Unexpected capture value: {}", String::from_utf8_lossy(&E::show(value))))),

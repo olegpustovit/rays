@@ -4,6 +4,7 @@
 //!
 //! The persisted text is the workspace form itself followed by optional `(layout ...)` and
 //! `(settings :name value ...)` forms (only settings that differ from their default).
+use flow_syntax::symbol::Symbol;
 use crate::layout_by_path::{self as lbp, PathMap};
 use crate::layout_edit;
 use crate::literal_edit::{self, Change};
@@ -36,7 +37,7 @@ pub struct Literal {
     pub edits: PathMap<Change>,
 }
 
-pub type Inputs = Vec<(String, Vec<(String, E)>)>;
+pub type Inputs = Vec<(String, Vec<(Symbol, E)>)>;
 
 #[derive(Clone)]
 pub struct T {
@@ -100,7 +101,7 @@ pub fn literal_changes(previous: &T, next: &T) -> Option<Vec<Change>> {
         let old = previous.literal.as_ref()?;
         if Arc::ptr_eq(&old.base, &literal.base) { old.edits.clone() } else { return None }
     };
-    let mut keys: Vec<&Vec<String>> = before.keys().chain(literal.edits.keys()).collect();
+    let mut keys: Vec<&flow_check::workspace::Path> = before.keys().chain(literal.edits.keys()).collect();
     keys.sort();
     keys.dedup();
     let mut edits: Vec<Change> = Vec::new();
@@ -169,7 +170,7 @@ fn second_name(f: &S) -> Option<String> {
     }
 }
 
-pub fn imported_file(imports: &[(String, Vec<S>)], path: &[String]) -> Option<String> {
+pub fn imported_file(imports: &[(String, Vec<S>)], path: &[Symbol]) -> Option<String> {
     let root = path.first()?;
     imports.iter().find_map(|(file, forms)| {
         if forms.iter().any(|f| match second_name(f) {
@@ -288,8 +289,8 @@ fn prune(checked: &Workspace, catalog: &Catalog, layout: &lbp::T) -> lbp::T {
     if lbp::is_empty(layout) {
         return layout.clone();
     }
-    let mut known: HashSet<Vec<String>> = HashSet::new();
-    fn scope(known: &mut HashSet<Vec<String>>, sc: &projection::Scope) {
+    let mut known: HashSet<flow_check::workspace::Path> = HashSet::new();
+    fn scope(known: &mut HashSet<flow_check::workspace::Path>, sc: &projection::Scope) {
         known.insert(sc.path.clone());
         for i in &sc.inputs {
             known.insert(i.path.clone());
@@ -314,8 +315,8 @@ fn prune(checked: &Workspace, catalog: &Catalog, layout: &lbp::T) -> lbp::T {
         }
     }
     // a scope's own pseudo items ([@result], [@panel n]) are keyed under its path
-    let keep = |path: &Vec<String>| -> bool {
-        let mut before: Vec<String> = Vec::new();
+    let keep = |path: &flow_check::workspace::Path| -> bool {
+        let mut before: flow_check::workspace::Path = Vec::new();
         for segment in path {
             if segment.starts_with('@') {
                 return known.contains(&before);
@@ -346,15 +347,15 @@ fn prune_keys(checked: &Workspace, layout: &lbp::T) -> lbp::T {
             .find(|g| g.name == root)
             .or_else(|| checked.defs.iter().find(|g| root == format!("def:{}", g.name) || root == g.name))
     };
-    let exists = |path: &[String]| -> bool {
+    let exists = |path: &[Symbol]| -> bool {
         match path {
             [root] => graph(root).is_some(),
             [root, input] if input.starts_with(':') => graph(root).map_or(false, |g| g.inputs.iter().any(|(name, _, _)| *input == format!(":{name}"))),
             path => flow_edit::arg_text(&checked.source, path, &ArgKey::Whole).is_some(),
         }
     };
-    let keep = |path: &Vec<String>| -> bool {
-        let mut prefix: Vec<String> = Vec::new();
+    let keep = |path: &flow_check::workspace::Path| -> bool {
+        let mut prefix: flow_check::workspace::Path = Vec::new();
         for segment in path {
             if segment.starts_with('@') {
                 return exists(&prefix);
@@ -563,7 +564,7 @@ pub fn to_text(t: &T) -> R<String> {
 /// A checked rewrite as the next document: the layout keys follow `remap`, and are pruned unless
 /// the edit changes no node. The edits a scrub repeats every frame change a value, never which
 /// nodes there are.
-fn commit(t: &T, remap: &dyn Fn(&Vec<String>) -> Option<Vec<String>>, editor_gone: bool, prune: bool, (source, checked): (Vec<S>, Workspace)) -> T {
+fn commit(t: &T, remap: &dyn Fn(&flow_check::workspace::Path) -> Option<flow_check::workspace::Path>, editor_gone: bool, prune: bool, (source, checked): (Vec<S>, Workspace)) -> T {
     let mut layout = lbp::remap(remap, &t.layout);
     if editor_gone {
         layout.editor = None; // the other editor graphs are gone
@@ -589,7 +590,7 @@ fn keep_ops(t: &T, (source, mut checked): (Vec<S>, Workspace)) -> (Vec<S>, Works
 fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
     let key = |change: &Change| {
         let mut k = change.path.clone();
-        k.push(format!("#:{}", change.field));
+        k.push(format!("#:{}", change.field).into());
         k
     };
     match literal_edit::patch(catalog, &t.checked, op) {
@@ -616,7 +617,7 @@ fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
 }
 
 /// `run` on a document whose imported forms the edit neither names nor rewrites.
-fn guarded(t: &T, paths: &[Vec<String>], run: &mut dyn FnMut() -> R<T>) -> R<T> {
+fn guarded(t: &T, paths: &[flow_check::workspace::Path], run: &mut dyn FnMut() -> R<T>) -> R<T> {
     let refusal = |file: &str| Err(diag(None, "E_IMPORTED", &format!("Read-only imported form from {file}.")));
     if let Some(file) = paths.iter().find_map(|p| imported_file(&t.imports, p)) {
         return refusal(&file);
@@ -649,7 +650,7 @@ fn guarded(t: &T, paths: &[Vec<String>], run: &mut dyn FnMut() -> R<T>) -> R<T> 
     }
 }
 
-fn op_paths(op: &Op) -> Vec<Vec<String>> {
+fn op_paths(op: &Op) -> Vec<flow_check::workspace::Path> {
     match op {
         Op::SetArg { node, .. }
         | Op::Connect { node, .. }
@@ -677,8 +678,8 @@ fn op_paths(op: &Op) -> Vec<Vec<String>> {
         | Op::Duplicate { nodes }
         | Op::GroupMerge { nodes, .. } => nodes.clone(),
         Op::AddNode { scope, .. } => vec![scope.clone()],
-        Op::SetInputDefault { form, .. } => vec![vec![form.clone()]],
-        Op::SetGraph { name, .. } | Op::RemoveGraph { name } | Op::RenameGraph { name, .. } => vec![vec![name.clone()]],
+        Op::SetInputDefault { form, .. } => vec![vec![form.clone().into()]],
+        Op::SetGraph { name, .. } | Op::RemoveGraph { name } | Op::RenameGraph { name, .. } => vec![vec![name.clone().into()]],
     }
 }
 

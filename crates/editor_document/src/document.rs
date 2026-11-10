@@ -2,6 +2,7 @@
 //! value: the one thing `Editor_core.History` snapshots. Selection, hover and the open level are
 //! view state and stay outside. The document is a workspace (its text is the authored truth); the
 //! scene, the networks and the shell are what lowering derives from it.
+use flow_syntax::symbol::Symbol;
 use crate::kind_graph::{self as kg};
 use crate::layout_by_path::Path;
 use crate::objects::root;
@@ -48,9 +49,9 @@ pub fn of_geometry(context: Context, graph: &edit_graph::T, displayed: Option<i6
 /// (`["@result"]` or a binding of the body) and which copy this is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Home {
-    BoundAt(Vec<String>),
+    BoundAt(Path),
     InlineIn(Box<Home>, ArgKey),
-    Copy { loop_: Box<Home>, rel: Vec<String>, index: i64 },
+    Copy { loop_: Box<Home>, rel: Path, index: i64 },
     Looped,
 }
 
@@ -228,7 +229,7 @@ pub struct Snapshot {
     pub saved_homes: Homes,
     pub saved_settings: settings::T,
     pub saved_ids: l::PathMap,
-    pub saved_sites: Vec<Vec<String>>,
+    pub saved_sites: Vec<Path>,
 }
 
 pub fn snapshot(value: &T) -> Snapshot {
@@ -535,7 +536,7 @@ pub fn syntax_of(source: &[S], home: &Home) -> Option<S> {
         Home::BoundAt(path) => arg_text(source, path, &ArgKey::Whole),
         Home::InlineIn(parent, key) => syntax_of(source, parent).and_then(|e| arg_of(&e, key)),
         Home::Copy { loop_, rel, .. } => {
-            fn walk(e: &S, steps: &[String]) -> Option<S> {
+            fn walk(e: &S, steps: &[Symbol]) -> Option<S> {
                 match steps.split_first() {
                     None => Some(e.clone()),
                     Some((step, rest)) => {
@@ -546,7 +547,7 @@ pub fn syntax_of(source: &[S], home: &Home) -> Option<S> {
                                 items[2..].last().and_then(|id| walk(&e.child(*id), rest))
                             } else {
                                 e.range(range).chunks_exact(2)
-                                    .find(|pair| matches!(e.arena().row(pair[0]).node, Node::Sym(name) if e.name(name) == step))
+                                    .find(|pair| matches!(e.arena().row(pair[0]).node, Node::Sym(name) if e.name(name) == step.as_str()))
                                     .and_then(|pair| walk(&e.child(pair[1]), rest))
                             }
                         } else if step == "@result" {
@@ -570,7 +571,7 @@ pub fn syntax_of(source: &[S], home: &Home) -> Option<S> {
 /// The nearest named binding around a home: the graph, or the let* binding.
 fn enclosing(home: &Home) -> Option<String> {
     match home {
-        Home::BoundAt(path) => path.iter().rev().find(|n| !n.is_empty() && !n.starts_with('@')).cloned(),
+        Home::BoundAt(path) => path.iter().rev().find(|n| !n.is_empty() && !n.starts_with('@')).map(|name| name.to_string()),
         Home::Copy { loop_, .. } => enclosing(loop_),
         Home::InlineIn(parent, _) => enclosing(parent),
         Home::Looped => None,
@@ -611,7 +612,7 @@ fn line_of(source: &[S], e: &S) -> Result<Option<usize>, Diagnostic> {
 /// form, with its line and the binding around it. A copy is named by the loop that makes it.
 pub fn describe(source: &[S], home: &Home) -> String {
     match home {
-        Home::BoundAt(path) if !path.is_empty() => path[path.len() - 1].clone(),
+        Home::BoundAt(path) if !path.is_empty() => path[path.len() - 1].to_string(),
         Home::Copy { loop_, .. } => describe(source, loop_),
         home => match syntax_of(source, home) {
             None => match enclosing(home) {

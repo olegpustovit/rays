@@ -892,7 +892,7 @@ pub fn state_text(value: &LoopModel) -> String {
     };
     let scope_selected = {
         let paths = pxui_graph::scope_state::selected(m::pane_view(&core.into()));
-        if paths.is_empty() { "-".to_string() } else { paths.iter().map(|p| p.join("/")).collect::<Vec<_>>().join(", ") }
+        if paths.is_empty() { "-".to_string() } else { paths.iter().map(|p| flow_syntax::symbol::join_path(&p, "/")).collect::<Vec<_>>().join(", ") }
     };
     let or_dash = |o: &Option<String>| o.clone().unwrap_or_else(|| "-".to_string());
     editor.push_str(&format!(

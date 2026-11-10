@@ -33,7 +33,7 @@ fn safety_cases() {
     fn reenter(source: &Value) -> Result<Value, rays_diagnostic::Diagnostic> {
         force_with(source, &input::at_time(0.0), None, None, Some(Arc::new(reenter)))
     }
-    let source = value::source_value("recursive-host", Ty::Float, Vec::new());
+    let source = value::source_value("recursive-host", Ty::Float, Vec::new().into());
     assert_eq!(reenter(&source).unwrap_err().code, "E_DEPTH");
     assert_eq!(ok(static_eval(&workspace)).results[0].1, Value::Int(7));
 

@@ -148,7 +148,7 @@ pub fn carry_tests() {
         fail(&format!("the outline has no row {graph}"))
     };
     let tile = |e: &Ed, path: &[&str]| -> (f64, f64) {
-        let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        let path: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
         let (x, y, w, h) = editor::node_box(e.e(), &path).expect("box");
         (x as f64 + w as f64 / 2., y as f64 + h as f64 - 6.)
     };
@@ -452,7 +452,7 @@ pub fn viewport_carry_tests() {
     chk(same_ws(&e.ws(), &ws) && e.undo() == history, "one undo gives it back");
     // a camera object selected
     e.jump("day");
-    let (bx, by, bw, bh) = editor::node_box(e.e(), &["day".to_string(), "side".to_string()]).expect("box");
+    let (bx, by, bw, bh) = editor::node_box(e.e(), &["day".into(), "side".into()]).expect("box");
     let at = (bx as f64 + bw as f64 / 2., by as f64 + bh as f64 - 6.);
     e.step_m(at, vec![Event::Pointer_moved(at)]);
     e.step_m(at, vec![Event::Pointer_pressed(LB, at), Event::Pointer_released(LB, at)]);

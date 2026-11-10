@@ -13,6 +13,7 @@
 //! The on-disk front-end cache (`cache_dir`, in lisp_kernel_cache.rs) stores each kernel's front-end result in
 //! a hand-written binary format (OCaml: Marshal) under the digest of the executable's identity, the kernel's
 //! text and the scene facts.
+use flow_syntax::symbol::Symbol;
 use flow_check::catalog::Catalog;
 use flow_check::op::{self, Op, Shape, Signature};
 use flow_check::workspace as w;
@@ -108,7 +109,7 @@ fn placeholder_op(name: &str, ty: Ty) -> Op {
     o.out = Arc::new(move |_| Ok(out.clone()));
     o.shape = Shape::Struct { splice: false };
     o.check = Arc::new(|_| Ok(()));
-    o.body = Arc::new(move |_, _, _| Ok(source_value(full.clone(), ty.clone(), vec![])));
+    o.body = Arc::new(move |_, _, _| Ok(source_value(full.clone(), ty.clone(), vec![].into())));
     o
 }
 
@@ -640,7 +641,7 @@ pub fn close_gather(g: &Gather) {
 /// The CPU walker's run of kernel `name` over `pixels` (the oracle a device film is checked against):
 /// `words(n)` gives uniform `n` and `value(n)` table `n` as host values. It evaluates its own copy of the
 /// declarations (see the module notes).
-pub fn cpu(t: &T, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, pixels: Value, name: &str) -> Result<Value, String> {
+pub fn cpu(t: &T, words: Vec<(String, Vec<f64>)>, values: Vec<(Symbol, Value)>, pixels: Value, name: &str) -> Result<Value, String> {
     let facts = t.facts.clone();
     let name = name.to_string();
     let checked = t.oracle.borrow().clone();
@@ -653,12 +654,12 @@ pub fn cpu(t: &T, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, 
     result
 }
 
-fn cpu_here(facts: Facts, mut checked: Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, pixels: Value, name: String) -> (Result<Value, String>, Option<w::Workspace>) {
+fn cpu_here(facts: Facts, mut checked: Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(Symbol, Value)>, pixels: Value, name: String) -> (Result<Value, String>, Option<w::Workspace>) {
     let result = cpu_run(&facts, &mut checked, words, values, pixels, &name);
     (result, checked)
 }
 
-fn cpu_run(facts: &Facts, checked: &mut Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, pixels: Value, name: &str) -> Result<Value, String> {
+fn cpu_run(facts: &Facts, checked: &mut Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(Symbol, Value)>, pixels: Value, name: &str) -> Result<Value, String> {
     let words = |n: &str| words.iter().find(|(k, _)| k == n).expect("uniform").1.clone();
     let value = |n: &str| values.iter().find(|(k, _)| k == n).expect("table").1.clone();
     let (fns, _keep) = functions(facts, PREVIEWS.contains(&name), checked)?;

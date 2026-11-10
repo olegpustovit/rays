@@ -1,5 +1,6 @@
 // Port of lib/pxui_graph/scope_wires.ml: the pane's geometry (items, wires, curve sampling) and the
 // bucket indices over tiles and wire bounds.
+use flow_syntax::symbol::Symbol;
 use flow_check::workspace::Path;
 use flow_graph::edit_tree::ArgKey;
 use flow_graph::flow_edit as e;
@@ -393,7 +394,7 @@ struct Walk {
     origins: Vec<(Path, (f64, f64))>,
 }
 
-fn walk(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, shift: &dyn Fn(&[String]) -> (f64, f64), w: &mut Walk, ox: f64, oy: f64, l: &p::Layout) {
+fn walk(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, shift: &dyn Fn(&[Symbol]) -> (f64, f64), w: &mut Walk, ox: f64, oy: f64, l: &p::Layout) {
     for pl in &l.placed {
         let (dx, dy) = shift(&pl.path);
         let ax = ox + pl.x + dx;
@@ -734,7 +735,7 @@ impl CloneLight for Placed {
 /// The geometry of a scope: one item per node at the level it is shown, the wires between ports, and
 /// the indices over them. `shift` moves a placed item by its path (a drag in progress); a zone's
 /// children follow through the origin they are laid out from.
-pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[String]) -> (f64, f64)) -> Geo {
+pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, scope: &p::Scope, layout: &p::Layout, shift: &dyn Fn(&[Symbol]) -> (f64, f64)) -> Geo {
     let mut w = Walk { items: Vec::new(), slot: HashMap::new(), origins: vec![(scope.path.clone(), (0.0, 0.0))] };
     walk(name_w, shown, shift, &mut w, 0.0, 0.0, layout);
     // origins were consed on in OCaml: the latest first
@@ -751,7 +752,7 @@ pub fn compute(name_w: &dyn Fn(&str) -> f64, shown: &dyn Fn(&Placed) -> Level, s
     if !scope.inputs.is_empty() {
         let chain = vec![declared(&items, scope)];
         let mut rpath = scope.path.clone();
-        rpath.push("@return".to_owned());
+        rpath.push("@return".into());
         if let Some((_, ax, ay)) = items.at(&rpath) {
             let source = match &scope.result {
                 ScopeResult::Link(l) => resolve(&chain, l),

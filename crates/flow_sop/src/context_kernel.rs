@@ -1,5 +1,6 @@
 //! Port of lib/flow_sop/context_kernel.ml(i): cook-context constants available to Lisp node bodies
 //! (`sop/context_seed` and friends), and the source digests that key prepared kernels.
+use flow_syntax::symbol::{self, Symbol};
 use crate::operators;
 use flow_check::op;
 use flow_check::workspace::{self as w, Graph, Node, NodeDefinition, Term, Workspace};
@@ -17,23 +18,23 @@ fn is_context_op(name: &str) -> bool {
     w::BODY_CONTEXT_OPS.contains(&name)
 }
 
-type Bindings = Vec<(String, Value)>;
+type Bindings = Vec<(Symbol, Value)>;
 
-fn remove_pattern(term: &Term, pattern: PatternId, bindings: &[(String, Value)]) -> Bindings {
-    fn binds(term: &Term, pattern: PatternId, name: &str) -> bool {
+fn remove_pattern(term: &Term, pattern: PatternId, bindings: &[(Symbol, Value)]) -> Bindings {
+    fn binds(term: &Term, pattern: PatternId, name: Symbol) -> bool {
         match term.arena().pattern(pattern) {
-            PatternNode::Name(id) => term.name(id) == name,
-            PatternNode::Keys(ids) => term.arena().name_ids(ids).iter().any(|&id| term.name(id) == name),
+            PatternNode::Name(id) => term.symbol(id) == name,
+            PatternNode::Keys(ids) => term.arena().name_ids(ids).iter().any(|&id| term.symbol(id) == name),
             PatternNode::Seq(ids) => term.arena().pattern_ids(ids).iter().any(|&id| binds(term, id, name)),
         }
     }
-    bindings.iter().filter(|(name, _)| !binds(term, pattern, name)).cloned().collect()
+    bindings.iter().filter(|(name, _)| !binds(term, pattern, *name)).cloned().collect()
 }
 struct Scan<'a> {
     found: RefCell<Vec<String>>,
     fuel: Cell<i64>,
     /// The first helper of each name: a call looks its definition up once per call node.
-    helpers: std::collections::HashMap<&'a str, &'a Graph>,
+    helpers: std::collections::HashMap<Symbol, &'a Graph>,
 }
 
 fn literal(t: &Term) -> Option<Value> {
@@ -50,36 +51,36 @@ fn literal(t: &Term) -> Option<Value> {
 }
 
 /// The values a helper's inputs take over known arguments (`None` entries for unknown ones).
-fn local_inputs(scan: &Scan, defs: &[Graph], helper: &Graph, owner: &Term, args: &[TermId], bindings: &[(String, Value)]) -> Vec<Option<(String, Value)>> {
+fn local_inputs(scan: &Scan, defs: &[Graph], helper: &Graph, owner: &Term, args: &[TermId], bindings: &[(Symbol, Value)]) -> Vec<Option<(Symbol, Value)>> {
     helper.inputs.iter().enumerate().map(|(i, (name, _, default))| {
         let value = match args.get(i) {
             Some(&argument) => scan.known(defs, bindings, &owner.child(argument)),
             None => default.as_ref().and_then(|d| scan.known(defs, &[], d)),
         };
-        value.map(|value| (name.clone(), value))
+        value.map(|value| (symbol::intern(name), value))
     }).collect()
 }
 
 impl<'a> Scan<'a> {
     fn new(defs: &'a [Graph]) -> Self {
         let mut helpers = std::collections::HashMap::new();
-        for def in defs { helpers.entry(def.name.as_str()).or_insert(def); }
+        for def in defs { helpers.entry(symbol::intern(&def.name)).or_insert(def); }
         Scan { found: RefCell::new(Vec::new()), fuel: Cell::new(4096), helpers }
     }
 
-    fn known(&self, defs: &[Graph], bindings: &[(String, Value)], t: &Term) -> Option<Value> {
+    fn known(&self, defs: &[Graph], bindings: &[(Symbol, Value)], t: &Term) -> Option<Value> {
         if let Some(value) = literal(t) {
             return Some(value);
         }
         match t.node {
             Node::RefBinding(id) if t.arena().name_ids(t.arena().ref_binding(id).fields).is_empty() => {
-                let name = t.name(t.arena().ref_binding(id).name);
-                bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
+                let name = t.symbol(t.arena().ref_binding(id).name);
+                bindings.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone())
             }
             Node::CallFn(id) if self.fuel.get() > 0 => {
                 self.fuel.set(self.fuel.get() - 1);
                 let call = t.arena().call_fn(id);
-                let helper = *self.helpers.get(t.name(call.name))?;
+                let helper = *self.helpers.get(&t.symbol(call.name))?;
                 let local = local_inputs(self, defs, helper, t, t.arena().term_ids(call.args), bindings);
                 if local.iter().any(Option::is_none) { return None; }
                 let local: Bindings = local.into_iter().flatten().collect();
@@ -93,7 +94,7 @@ impl<'a> Scan<'a> {
                 let name = t.name(call.op);
                 let mut values = Vec::with_capacity(t.arena().fields(call.args).len());
                 for field in t.arena().fields(call.args) {
-                    values.push((t.name(field.name).to_owned(), self.known(defs, bindings, &t.child(field.term))?));
+                    values.push((t.symbol(field.name), self.known(defs, bindings, &t.child(field.term))?));
                 }
                 let found = op::find(operators::all(), name, &context::value())?;
                 (found.check)(&values).ok()?;
@@ -105,7 +106,7 @@ impl<'a> Scan<'a> {
         }
     }
 
-    fn scan(&self, defs: &[Graph], bindings: &[(String, Value)], body: &Term, graph: &Graph) {
+    fn scan(&self, defs: &[Graph], bindings: &[(Symbol, Value)], body: &Term, graph: &Graph) {
         match body.node {
             Node::If(id) => {
                 let branch = body.arena().if_node(id);
@@ -133,7 +134,7 @@ impl<'a> Scan<'a> {
             }
             Node::CallFn(id) => {
                 let call = body.arena().call_fn(id);
-                if let Some(&helper) = self.helpers.get(body.name(call.name)) {
+                if let Some(&helper) = self.helpers.get(&body.symbol(call.name)) {
                     let local: Bindings = local_inputs(self, defs, helper, body, body.arena().term_ids(call.args), bindings).into_iter().flatten().collect();
                     match call.body {
                         Some(id) => self.scan(defs, &local, &body.child(id), graph),
@@ -154,7 +155,7 @@ impl<'a> Scan<'a> {
                 return;
             }
             Node::FnRef(name) => {
-                if let Some(&helper) = self.helpers.get(body.name(name)) { self.scan(defs, &[], &helper.body, graph); }
+                if let Some(&helper) = self.helpers.get(&body.symbol(name)) { self.scan(defs, &[], &helper.body, graph); }
             }
             Node::Let(id) => {
                 let let_node = body.arena().let_node(id);
@@ -165,7 +166,7 @@ impl<'a> Scan<'a> {
                     let known = self.known(defs, &local, &value);
                     local = remove_pattern(body, binding.pattern, &local);
                     if let (PatternNode::Name(name), Some(value)) = (body.arena().pattern(binding.pattern), known) {
-                        local.insert(0, (body.name(name).to_owned(), value));
+                        local.insert(0, (body.symbol(name), value));
                     }
                 }
                 self.scan(defs, &local, &body.child(let_node.body), graph);
@@ -202,11 +203,11 @@ impl<'a> Scan<'a> {
 }
 
 /// The context operators a reachable branch names; `depends` is membership.
-pub fn context_ops_reached(inputs: &[(String, Value)], defs: &[Graph], graph: &Graph) -> Vec<String> {
+pub fn context_ops_reached(inputs: &[(Symbol, Value)], defs: &[Graph], graph: &Graph) -> Vec<String> {
     let defaults: Bindings = graph
         .inputs
         .iter()
-        .filter_map(|(name, _, default)| default.as_ref().and_then(literal).map(|v| (name.clone(), v)))
+        .filter_map(|(name, _, default)| default.as_ref().and_then(literal).map(|v| (symbol::intern(name), v)))
         .collect();
     let scan = Scan::new(defs);
     let bindings: Bindings = inputs.iter().cloned().chain(defaults).collect();
@@ -224,7 +225,7 @@ pub fn context_ops_reached(inputs: &[(String, Value)], defs: &[Graph], graph: &G
 
 /// Whether a reachable, unpruned call of the zero-state operator `op` (default `sop/context_seed`)
 /// remains.
-pub fn depends(op: Option<&str>, inputs: &[(String, Value)], defs: &[Graph], graph: &Graph) -> bool {
+pub fn depends(op: Option<&str>, inputs: &[(Symbol, Value)], defs: &[Graph], graph: &Graph) -> bool {
     let op = op.unwrap_or("sop/context_seed");
     context_ops_reached(inputs, defs, graph).iter().any(|name| name == op)
 }
@@ -235,14 +236,14 @@ pub fn specialize(provenance: Option<i64>, context: &sop::context::T, label: &st
     // Term arenas are immutable and their identities never reused: a graph specialized for the same
     // provenance, context facts and label is the same graph (a parameter edit rebuilds a Lisp node
     // body under the default context, frame after frame).
-    type Key = ((String, &'static str, (u64, u32)), (u64, u32), Vec<(String, String, Option<(u64, u32)>)>, i64, i64, i64, u64, String);
+    type Key = ((Symbol, &'static str, (u64, u32)), (u64, u32), Vec<(Symbol, Symbol, Option<(u64, u32)>)>, i64, i64, i64, u64, String);
     static SPECIALIZED: std::sync::LazyLock<lru::Memo<Key, Result<Graph, String>>> = std::sync::LazyLock::new(|| lru::Memo::new("flow_sop.specialized", 256));
     let provenance = provenance.unwrap_or(-1);
     let seed = sop::context::seed(context);
     let key: Key = (
-        (graph.name.clone(), context::name(graph.context), graph.form.identity()),
+        (symbol::intern(&graph.name), context::name(graph.context), graph.form.identity()),
         graph.body.identity(),
-        graph.inputs.iter().map(|(name, ty, default)| (name.clone(), flow_syntax::ty::to_string(ty), default.as_ref().map(Term::identity))).collect(),
+        graph.inputs.iter().map(|(name, ty, default)| (symbol::intern(name), symbol::intern_owned(flow_syntax::ty::to_string(ty)), default.as_ref().map(Term::identity))).collect(),
         provenance,
         seed,
         sop::context::frame(context),
@@ -593,7 +594,7 @@ pub fn reachable_defs<'a, 'g>(workspace: &'a Workspace, roots: impl IntoIterator
 /// card's cook label, is the default of a reserved input the body refers to by name. It evaluates
 /// to a cook-time source, which residuals capture as a binding, never as a term, so a kernel
 /// specializes it per context by its captures alone. Returns the graph and each input's operator.
-pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)>) {
+pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(Symbol, String)>) {
     fn eligible(t: &Term, into: &mut HashSet<(u64, u32)>) -> bool {
         if !into.insert(t.identity()) { return false; }
         let mut context = matches!(t.node, Node::Op(id) if is_context_op(t.name(t.arena().op(id).op)));
@@ -609,7 +610,7 @@ pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)
     let mut context = false;
     for root in &roots { context |= eligible(root, &mut selected); }
     if !context { return (graph.clone(), Vec::new()); }
-    let mut inputs: Vec<(String, String, String, TermId)> = Vec::new();
+    let mut inputs: Vec<(String, Symbol, String, TermId)> = Vec::new();
     let mut builder = TermBuilder::new();
     let ids = builder.rewrite_roots(&roots, &mut |builder, source, draft| {
         if !selected.contains(&source.identity()) { return draft; }
@@ -628,18 +629,18 @@ pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)
         let input = match inputs.iter().find(|(k, ..)| k == &key) {
             Some((_, input, ..)) => input.clone(),
             None => {
-                let input = format!("$context{}", inputs.len());
+                let input = symbol::intern_owned(format!("$context{}", inputs.len()));
                 let form = builder.import_form(&source.form());
                 let text = builder.push(None, &Ty::Text, form, Draft::Text(label.as_bytes().into()));
                 let mut args = args;
-                args.push((operators::context_label().to_owned(), text));
-                let path: Option<Vec<_>> = source.path().map(|ids| ids.iter().map(|&id| source.name(id).to_owned()).collect());
+                args.push((symbol::intern(operators::context_label()), text));
+                let path: Option<Vec<_>> = source.path().map(|ids| ids.iter().map(|&id| source.symbol(id)).collect());
                 let call = builder.push(path.as_deref(), source.ty(), form, Draft::Op { op: name.clone(), args, skip });
                 inputs.push((key, input.clone(), name, call));
                 input
             }
         };
-        Draft::RefBinding(input, Vec::new())
+        Draft::RefBinding(input.to_string(), Vec::new())
     });
     let form = builder.import_form(&graph.form);
     let arena = builder.freeze();
@@ -650,7 +651,7 @@ pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)
         form: arena.syntax().handle(form),
         ..graph.clone()
     };
-    graph.inputs.extend(inputs.iter().map(|(_, name, _, call)| (name.clone(), arena.handle(*call).ty().clone(), Some(arena.handle(*call)))));
+    graph.inputs.extend(inputs.iter().map(|(_, name, _, call)| (name.to_string(), arena.handle(*call).ty().clone(), Some(arena.handle(*call)))));
     let ops = inputs.into_iter().map(|(_, name, op, _)| (name, op)).collect();
     (graph, ops)
 }

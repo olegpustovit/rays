@@ -159,7 +159,7 @@ fn material_on_graph(catalog: &Catalog, doc: &Document, graph: &str, expr: &Synt
     }
     let Some(scope) = scope_of(catalog, doc, graph) else { return Err(format!("There is no graph {graph}")) };
     match &scope.result {
-        p::ScopeResult::Link(name) => match p::find(&scope, &[graph.to_string(), name.clone()]) {
+        p::ScopeResult::Link(name) => match p::find(&scope, &[graph.into(), name.clone().into()]) {
             Some(n) if whole_material(&n) => Ok((
                 vec![Op::SetArg { node: n.path.clone(), key: ArgKey::Kw("material".into()), sub: vec![], value: expr.clone() }],
                 format!(":material (ref {material}) in graph {graph}{}", shared(doc, graph)),
@@ -169,11 +169,11 @@ fn material_on_graph(catalog: &Catalog, doc: &Document, graph: &str, expr: &Synt
                 Ok((
                     vec![
                         Op::AddNode {
-                            scope: vec![graph.to_string()],
+                            scope: vec![graph.into()],
                             name: fresh.clone(),
                             expr: with_argument("sop/material", &name, "material", expr),
                         },
-                        Op::Connect { node: vec![graph.to_string(), "@result".to_string()], key: ArgKey::Whole, src: fresh, iter: false },
+                        Op::Connect { node: vec![graph.into(), "@result".into()], key: ArgKey::Whole, src: fresh, iter: false },
                     ],
                     format!("a sop/material node and :material (ref {material}) in graph {graph}{}", shared(doc, graph)),
                 ))
@@ -266,17 +266,17 @@ fn on_viewport(
                 Some(n) if n.head == "scene/root" => on_root(&n, bound),
                 _ => Err(format!("{scene} returns a scene written in place: name it first, then put the camera")),
             },
-            p::ScopeResult::Link(result) => match p::find(&scope, &[scene.clone(), result.clone()]) {
+            p::ScopeResult::Link(result) => match p::find(&scope, &[scene.clone().into(), result.clone().into()]) {
                 Some(n) if n.head == "scene/root" => on_root(&n, bound),
                 _ => {
                     let fresh = e::fresh_name(&bound.workspace.ws.source, &scene, "root");
                     let ops = vec![
                         Op::AddNode {
-                            scope: vec![scene.clone()],
+                            scope: vec![scene.clone().into()],
                             name: fresh.clone(),
                             expr: with_argument("scene/root", &result, "camera", expr),
                         },
-                        Op::Connect { node: vec![scene.clone(), "@result".to_string()], key: ArgKey::Whole, src: fresh, iter: false },
+                        Op::Connect { node: vec![scene.clone().into(), "@result".into()], key: ArgKey::Whole, src: fresh, iter: false },
                     ];
                     Ok((bound, ops, format!("a scene/root with :camera {name} in graph {scene}")))
                 }
@@ -381,7 +381,7 @@ pub fn plan(factories: Factories, catalog: &Catalog, doc: &Document, payload: &P
             let root = &path[0];
             let node = scope_of(catalog, doc, root).and_then(|scope| p::find(&scope, path));
             let head = node.as_ref().map(|n| n.head.clone()).unwrap_or_default();
-            let here = path.join("/");
+            let here = flow_syntax::symbol::join_path(&path, "/");
             // a scene/geometry node: the SOP graph of the object it makes
             let shown = node
                 .as_ref()

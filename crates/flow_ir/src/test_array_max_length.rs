@@ -1,4 +1,5 @@
 // Port of lib/flow_ir/test_array_max_length.ml.
+use flow_syntax::symbol::Symbol;
 use crate::packed;
 use crate::test_support::*;
 use flow_check::op::{self, MAX_WOSIZE};
@@ -41,8 +42,8 @@ fn is_ds_code(ds: &[rays_diagnostic::Diagnostic], code: &str) -> bool {
 #[test]
 fn op_direct_and_literal_selectors() {
     let op = op::find(&[], "array/max_length", &context::value()).unwrap();
-    let direct = |args: Vec<(String, Value)>| (op.body)(&input::at_time(0.), &|_, _| panic!("node"), &args);
-    assert!(op.signature.pos.is_empty() && op.signature.kw == vec![("type".to_string(), Ty::Text)]);
+    let direct = |args: Vec<(Symbol, Value)>| (op.body)(&input::at_time(0.), &|_, _| panic!("node"), &args);
+    assert!(op.signature.pos.is_empty() && op.signature.kw == vec![("type".into(), Ty::Text)]);
     let m = MAX_WOSIZE as i64;
     assert_eq!(direct(vec![]).unwrap(), Value::Int(m));
     assert_eq!(value("(array/max_length)"), Value::Int(m));

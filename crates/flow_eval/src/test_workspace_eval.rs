@@ -48,14 +48,14 @@ pub fn err(src: &str, code: &str, text: &str) {
 }
 pub fn records(src: &str, time: f64) -> Records { run_rec(&check(src), time).records }
 pub fn recs(rs: &Records, path: &[&str]) -> Vec<(Vec<i64>, Value)> {
-    let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+    let p: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
     rs.iter().find(|(q, _)| *q == p).unwrap_or_else(|| panic!("no records at {}", path.join("/"))).1.clone()
 }
 pub fn first_at(rs: &Records, path: &[&str]) -> Value { recs(rs, path)[0].1.clone() }
 pub fn bound(src: &str, name: &str) -> Value { first_at(&records(src, 0.), &["g", name]) }
 pub trait PlanNodes { fn nodes_of(&self, kind: &str) -> Vec<&Node>; }impl PlanNodes for Eval { fn nodes_of(&self, kind: &str) -> Vec<&Node> { self.plan.nodes.iter().filter(|n| n.kind == kind).collect() } }
 pub fn count_of(r: &Eval, kind: &str) -> usize { r.nodes_of(kind).len() }
-fn p(parts: &[&str]) -> Vec<String> { parts.iter().map(|s| s.to_string()).collect() }
+fn p(parts: &[&str]) -> flow_check::workspace::Path { parts.iter().map(|s| (*s).into()).collect() }
 
 fn walk(f: &mut dyn FnMut(&W::Term), x: &W::Term) {
     f(x);
@@ -70,7 +70,7 @@ fn walk(f: &mut dyn FnMut(&W::Term), x: &W::Term) {
 pub fn ty_at(ws: &W::Workspace, path: &[&str]) -> String {
     let want = Some(p(path));
     let mut found = None;
-    for g in ws.graphs.iter().chain(ws.defs.iter()) { walk(&mut |x| { if x.path().map(|names| names.iter().map(|n| x.name(*n).to_owned()).collect::<Vec<_>>()) == want { found = Some(ty::to_string(x.ty())); } }, &g.body); }
+    for g in ws.graphs.iter().chain(ws.defs.iter()) { walk(&mut |x| { if x.path().map(|names| names.iter().map(|n| x.symbol(*n)).collect::<Vec<_>>()) == want { found = Some(ty::to_string(x.ty())); } }, &g.body); }
     found.unwrap_or_else(|| panic!("no term at {}", path.join("/")))
 }
 
@@ -120,7 +120,7 @@ fn nested_data_and_lazy_selection() {
             Value::Record(fields) => {
                 let label = fields.iter().find(|(n, _)| n == "label").unwrap().1.clone();
                 let rows = fields.iter().find(|(n, _)| n == "rows").unwrap().1.clone();
-                match (label, inner(live, node, &[("rows".to_owned(), rows)])?) {
+                match (label, inner(live, node, &[("rows".into(), rows)])?) {
                     (Value::Text(l), Value::Text(table)) => { let mut output = l.to_vec(); output.extend_from_slice(&table); Ok(Value::Text(output.into())) }
                     _ => panic!(),
                 }
@@ -280,7 +280,7 @@ trait NodeArgs { fn arg_of(&self, k: &str) -> &Value; }impl NodeArgs for Node { 
 
 #[test]
 fn records_values_and_accumulators() {
-    assert_eq!(bound(&value("(let* [r (values :a 1 :b 2.5)] 1)"), "r"), Value::Record(vec![("a".into(), Value::Int(1)), ("b".into(), Value::Float(2.5))]));
+    assert_eq!(bound(&value("(let* [r (values :a 1 :b 2.5)] 1)"), "r"), Value::Record(vec![("a".into(), Value::Int(1)), ("b".into(), Value::Float(2.5))].into()));
     is(&value("(let* [s (fold [{:keys [a b]} {:a 0 :b 1}] [i (range 10)] {:a b :b (+ a b)})] s.a)"), Value::Int(55));
 }
 
@@ -377,7 +377,7 @@ fn residuals_force_by_time_body() {
 #[test]
 fn named_arguments_and_residual_capture() {
     for count in [16usize, 17] {
-        let fields: Vec<(String, Ty)> = (0..count).map(|i| (format!("slot{i}"), Ty::Float)).collect();
+        let fields: Vec<(flow_syntax::symbol::Symbol, Ty)> = (0..count).map(|i| (format!("slot{i}").into(), Ty::Float)).collect();
         let mut operator = op::find(&[], "sin", &flow_syntax::context::value()).unwrap().clone();
         operator.name = "test/slots".into();
         operator.signature = op::Signature { pos: fields.clone(), opt: vec![], rest: None, kw: vec![] };
@@ -456,7 +456,7 @@ fn hash_vectors() {
 #[test]
 fn l3_driven_bounds() {
     let src = |b: &str| format!("(workspace w (graph g :context value [(n : int 100)] {b}))");
-    match static_with(&check(&src("(count (range n))")), false, Some(&[("g".to_owned(), vec![("n".to_owned(), Value::Int(5000))])]), None) {
+    match static_with(&check(&src("(count (range n))")), false, Some(&[("g".to_owned(), vec![("n".into(), Value::Int(5000))])]), None) {
         Err(d) => assert!(d.code == "E_ITER_BOUND" && d.message.contains("range 0‥5000 exceeds 4,096"), "{d:?}"),
         Ok(_) => panic!("ran"),
     }
@@ -483,7 +483,7 @@ fn d3_nonfinite_and_panel_checks() {
     let ed = |b: &str| format!("(workspace w (graph g :context editor [(n : int 3)] (ui/workspace {b})))");
     let tile = ed("(ui/tile (for [i (range n)] (ui/graph)))");
     static_ws(&check(&tile));
-    let with_n = |n: i64| Some(vec![("g".to_owned(), vec![("n".to_owned(), Value::Int(n))])]);
+    let with_n = |n: i64| Some(vec![("g".to_owned(), vec![("n".into(), Value::Int(n))])]);
     for n in [20, 0] {
         match static_with(&check(&tile), false, with_n(n).as_deref(), None) {
             Err(d) => assert!(d.code == "E_RANGE" && d.message.contains("1–16"), "{d:?}"),
@@ -552,9 +552,9 @@ fn l6_l14_accumulators_and_ref_overrides() {
     let ids = merge.args.iter().map(|(_, v)| match v { Value::Deferred(Ty::Named(n), id) if n == "geometry" => *id, o => panic!("merge inputs: {o:?}") }).collect::<Vec<_>>();
     assert!(ids.len() == 4 && ids[0] == ids[3] && ids[1] == ids[2] && ids[0] != ids[1]);
     let ws = check("(workspace w (graph g :context value [(n : float 2)] (* n 3)))");
-    let r = ok(static_with(&ws, false, Some(&[("g".to_owned(), vec![("n".to_owned(), Value::Int(4))])]), None));
+    let r = ok(static_with(&ws, false, Some(&[("g".to_owned(), vec![("n".into(), Value::Int(4))])]), None));
     assert_eq!(result(&r, "g"), Value::Float(12.));
-    assert_eq!(r.plan.instances[0].inputs, vec![("n".to_owned(), Value::Float(4.))]);
+    assert_eq!(r.plan.instances[0].inputs, vec![("n".into(), Value::Float(4.))]);
 }
 
 #[test]
@@ -562,7 +562,7 @@ fn w5_records_are_bounded() {
     let rs = records(&value("(sum [i (range 100)] (sum [j (range 100)] (let* [x (* i j)] x)))"), 0.);
     let longest = rs.iter().map(|(_, l)| l.len()).max().unwrap();
     assert_eq!(longest, 4096);
-    let inner = rs.iter().find(|(q, l)| l.len() == 4096 && q.contains(&"x".to_owned())).unwrap();
+    let inner = rs.iter().find(|(q, l)| l.len() == 4096 && q.iter().any(|name| name == "x")).unwrap();
     assert_eq!(inner.1.len(), 4096);
     let rs = records(&sop("(let* [a (sop/box)] a)"), 0.);
     assert_eq!(first_at(&rs, &["g", "a"]), Value::Deferred(ty::geometry(), 0));
@@ -599,7 +599,7 @@ fn w8_for_over_point_list_is_a_zone_node() {
     let tr = s.nodes_of("sop/transform")[0];
     let p = (tr).arg_of("translate");
     assert!(is_live(p));
-    let key = element_key(&vec!["g".to_owned(), "dots".to_owned()]);
+    let key = element_key(&vec!["g".into(), "dots".into()]);
     match force_with(p, &input::at_time(0.), None, Some(&[(key, Value::Vec3(1., 2., 3.))]), None) {
         Ok(Value::Vec3(x, y, z)) if (x, y, z) == (1., 2., 3.) => (),
         o => panic!("element not bound: {o:?}"),
@@ -820,18 +820,18 @@ fn arc_data(v: &Value) -> std::sync::Arc<Vec<f64>> { match v { Value::Floats(1..
 #[test]
 fn iterate_widens_scalars_and_coerces_record_fields() {
     assert_eq!(g_value(&value("(iterate 3 0 (fn [n] (+ n 0.25)))")), Value::Float(0.75));
-    assert_eq!(g_value("(workspace w (graph g :context host (iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))))"), Value::Record(vec![("n".into(), Value::Int(0))]));
+    assert_eq!(g_value("(workspace w (graph g :context host (iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))))"), Value::Record(vec![("n".into(), Value::Int(0))].into()));
     let ws = check("(workspace w (graph g :context host [(seed : {:n int :data (array float)} {:n 0 :data (array/float 1)})]
         (iterate 2 seed (fn [s] {:n (int/add s.n 1) :data s.data}))))");
-    let data = value::source_value("test/iterate_data", Ty::Array(Box::new(Ty::Float)), vec![]);
-    let inputs = vec![("g".into(), vec![("seed".into(), Value::Record(vec![("n".into(), Value::Int(0)), ("data".into(), data)]))])];
+    let data = value::source_value("test/iterate_data", Ty::Array(Box::new(Ty::Float)), vec![].into());
+    let inputs = vec![("g".into(), vec![("seed".into(), Value::Record(vec![("n".into(), Value::Int(0)), ("data".into(), data)].into()))])];
     let evaluation = ok(static_with(&ws, false, Some(&inputs), None));
     let residual = result(&evaluation, "g");
     assert!(matches!(residual, Value::Residual(_)), "a record accumulator must defer when its updated data needs cooking");
     let data = Value::Floats(1, Arc::new(vec![2.0]));
     let resolved = data.clone();
     let forced = force_with(&residual, &input::at_time(0.0), None, None, Some(Arc::new(move |_| Ok(resolved.clone())))).unwrap();
-    assert_eq!(forced, Value::Record(vec![("n".into(), Value::Int(2)), ("data".into(), data)]));
+    assert_eq!(forced, Value::Record(vec![("n".into(), Value::Int(2)), ("data".into(), data)].into()));
 }
 
 // Regression for shared evaluator state: `iterate` over a packed map must give the same packed result on every run and every thread,

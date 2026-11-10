@@ -203,7 +203,7 @@ pub fn follow_tests() {
     jump(&mut d, "shards");
     check(pane(&d) == "shards" && route(&d) == "scene > shards", &format!("/ j jumps: {}", route(&d)));
     let tile = |d: &Driver, path: &[&str]| -> (f64, f64) {
-        let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        let p: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
         let (bx, by, bw, bh) = editor::node_box(d.e(), &p).expect("node box");
         (bx as f64 + bw as f64 / 2., by as f64 + bh as f64 - 6.)
     };

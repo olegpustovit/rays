@@ -5,6 +5,7 @@
 //! optional arguments of `frame` are `FrameOptions` (callbacks are `Arc<dyn Fn>`); the printer
 //! contexts own their data (no lifetimes).
 use crate::text_literal;
+use flow_syntax::symbol::Symbol;
 use flow_check::workspace::DiagnosticPolicy;
 use flow_eval as E;
 use flow_ir::core_exec;
@@ -803,7 +804,7 @@ impl Context {
 
 fn local(n: i64) -> String { format!("l{n}") }
 
-fn call(primitive: &Primitive, args: &[(String, i64)]) -> Result<String, Diagnostic> {
+fn call(primitive: &Primitive, args: &[(Symbol, i64)]) -> Result<String, Diagnostic> {
     let refuse = |message: String| error("E_WEB_PRIMITIVE", &message);
     let values: Vec<String> = match signature(primitive) {
         None => args.iter().map(|(_, n)| local(*n)).collect(),
@@ -885,7 +886,7 @@ fn expression(ctx: &mut Context, e: &Expr) -> Result<String, Diagnostic> {
     })
 }
 
-fn object_of(args: &[(String, i64)]) -> String { format!("{{{}}}", args.iter().map(|(k, n)| format!("{k}: {}", local(*n))).collect::<Vec<_>>().join(", ")) }
+fn object_of(args: &[(Symbol, i64)]) -> String { format!("{{{}}}", args.iter().map(|(k, n)| format!("{k}: {}", local(*n))).collect::<Vec<_>>().join(", ")) }
 
 fn kind_name(mark: C::Mark) -> &'static str {
     match mark {
@@ -961,8 +962,8 @@ fn draw(ctx: &mut Context, d: &Draw) -> String {
 /// An argument declaration `$core/argument`: its index.
 fn argument_index(v: &Value) -> Option<i64> {
     match v {
-        Value::Source(g) if g.name == "$core/argument" => match g.fields.as_slice() {
-            [(f, Value::Int(i))] if f == "index" => Some(*i),
+        Value::Source(g) if g.name == "$core/argument" => match (g.fields.len(), g.fields.get_str("index")) {
+            (1, Some(Value::Int(i))) => Some(*i),
             _ => None,
         },
         _ => None,

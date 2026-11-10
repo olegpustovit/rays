@@ -1,6 +1,7 @@
 // Port of lib/flow_ir/test_support/{test_program,core_fixtures,array_composition_cases}.ml:
 // the fixtures shared by the flow_ir tests (and the web printer goldens in OCaml).
 #![allow(dead_code)]
+use flow_syntax::symbol::Symbol;
 use crate::core_exec;
 use crate::core_ir as c;
 use crate::core_lower;
@@ -576,7 +577,7 @@ pub fn captured_helper(body: &str) -> flow_syntax::value::FnId {
     let root = residual(&root_eval.results.iter().find(|(n, _)| n == "g").unwrap().1);
     KEEP.with(|k| k.borrow_mut().push(root_eval));
     let view = e::residual::residual_view(root).unwrap();
-    let mut bindings = vec![("helper".to_string(), Value::Fn(helper))];
+    let mut bindings = vec![("helper".into(), Value::Fn(helper))];
     bindings.extend(e::residual::function_bindings(template));
     ok(e::residual::compiled_function(root, view.instance, vec![], vec!["g".into(), "tested".into()], params[1..].to_vec(), tbody, bindings))
 }
@@ -610,7 +611,7 @@ pub type ResolveArc = Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + S
 /// `op.body ~live ~node [(key, value)...]`.
 pub fn call_op(name: &str, args: Vec<(&str, Value)>) -> Result<Value, Diagnostic> {
     let op = op::find(&[], name, &context::value()).unwrap_or_else(|| panic!("no op {name}"));
-    let args: Vec<(String, Value)> = args.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    let args: Vec<(Symbol, Value)> = args.into_iter().map(|(k, v)| (k.into(), v)).collect();
     (op.body)(&input::at_time(0.), &|_, _| panic!("node"), &args)
 }
 pub fn reject(code: &str, r: Result<Value, Diagnostic>) {
@@ -637,14 +638,14 @@ pub fn exec_force(p: &executor::Program, live: &Frame, state: Option<&e::State>,
     executor::force(p, &executor::ForceOptions { strict: true, state: state.cloned(), resolve, ..Default::default() }, live)
 }
 /// A host-context workspace with declared inputs, evaluated with source inputs.
-pub fn dynamic_value(inputs: &[(String, Vec<(String, Value)>)], declarations: &str, body: &str) -> Value {
+pub fn dynamic_value(inputs: &[(String, Vec<(Symbol, Value)>)], declarations: &str, body: &str) -> Value {
     let ws = composition_checked(declarations, body);
     ok(e::r#static(&ws, false, Some(inputs))).results.iter().find(|(n, _)| n == "g").unwrap().1.clone()
 }
 /// A count source naming a `data` binding's origin `["fixture","data"]`.
 pub fn data_count_source() -> c::region::CountSource {
     c::region::CountSource::new(Arc::new(|_, term| match &term.node {
-        w::Node::RefBinding(id) if term.name(term.arena().ref_binding(*id).name) == "data" && term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => Some((vec!["fixture".to_string(), "data".to_string()], vec![])),
+        w::Node::RefBinding(id) if term.name(term.arena().ref_binding(*id).name) == "data" && term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => Some((vec!["fixture".into(), "data".into()], vec![])),
         _ => None,
     }))
 }

@@ -10,7 +10,7 @@ use editor_core::panels::Path;
 
 pub use crate::editor_model::graph_pane as Pane;
 
-pub type Key = Vec<String>;
+pub type Key = flow_check::workspace::Path;
 
 #[derive(Clone)]
 pub struct PanelMap {

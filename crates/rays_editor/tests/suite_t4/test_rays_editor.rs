@@ -140,7 +140,7 @@ fn with_buttons(mut f: frame::Frame, buttons: Vec<input::MouseButton>) -> frame:
     f
 }
 fn node_box(ed: &editor::Editor, path: &[&str]) -> Rect {
-    let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+    let p: flow_check::workspace::Path = path.iter().map(|s| (*s).into()).collect();
     editor::node_box(ed, &p).expect("the node has no box in the graph pane")
 }
 

@@ -1,14 +1,14 @@
 // Test and qualification hooks for graph-pane geometry; compiled only with `test-hooks`.
 use super::*;
 
-pub fn ghost(t: &Pane, path: &[String]) -> Option<String> {
+pub fn ghost(t: &Pane, path: &[Symbol]) -> Option<String> {
     match (&t.records, node_of(t, path), t.item_at(path)) {
         (Some(records), Some(n), Some((pl, _, _))) if n.zone.is_none() && pl.shown != Level::Full => Some(footer_of(t, records, &n).value),
         _ => None,
     }
 }
 
-pub fn macro_step(t: &Pane, path: &[String]) -> Option<i64> {
+pub fn macro_step(t: &Pane, path: &[Symbol]) -> Option<i64> {
     lens_of(t, path)
 }
 
@@ -17,7 +17,7 @@ pub fn highlighted_connections(t: &Pane) -> Vec<((f64, f64), (f64, f64))> {
 }
 
 /// previous button, track, next button, in screen points
-pub fn selector(t: &Pane, path: &[String]) -> Option<((f64, f64, f64, f64), (f64, f64, f64, f64), (f64, f64, f64, f64))> {
+pub fn selector(t: &Pane, path: &[Symbol]) -> Option<((f64, f64, f64, f64), (f64, f64, f64, f64), (f64, f64, f64, f64))> {
     let visible = match node_of(t, path) {
         Some(n) => match &n.zone {
             Some(zn) if matches!(zn.kind, p::ZoneKind::Branch | p::ZoneKind::Let | p::ZoneKind::State) => false,
@@ -39,14 +39,14 @@ pub fn selector(t: &Pane, path: &[String]) -> Option<((f64, f64, f64, f64), (f64
     Some(((x - (4.0 * z), y, 16.0 * z, sh), (x + (12.0 * z), y, sw - (24.0 * z), sh), (x + sw - (12.0 * z), y, 16.0 * z, sh)))
 }
 
-pub fn output_socket(t: &Pane, path: &[String]) -> Option<(f64, f64)> {
+pub fn output_socket(t: &Pane, path: &[Symbol]) -> Option<(f64, f64)> {
     t.item_at(path).map(|(pl, ax, ay)| {
         let (x, y) = out_anchor(pl, *ax, *ay);
         if pl.shown == Level::Point { (sx(t, x), sy(t, y)) } else { (sx(t, x - 1.0), sy(t, y - WIRE_HEAD_Y + sp::PORT_Y)) }
     })
 }
 
-pub fn row_center(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
+pub fn row_center(t: &Pane, path: &[Symbol], i: usize) -> Option<(f64, f64)> {
     match (node_of(t, path), t.item_at(path)) {
         (Some(n), Some((pl, x, y))) => match n.rows.get(i) {
             Some(r) if r.head => Some((sx(t, x + 100.0), sy(t, y + 12.0))),
@@ -57,7 +57,7 @@ pub fn row_center(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
     }
 }
 
-pub fn expr_chip(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
+pub fn expr_chip(t: &Pane, path: &[Symbol], i: usize) -> Option<(f64, f64)> {
     match (node_of(t, path), t.item_at(path)) {
         (Some(n), Some((pl, x, y))) => match (n.rows.get(i), line_of_row(&pl.lines).get(&i)) {
             (Some(r), Some(k)) if matches!(r.chip, p::Chip::Inline { .. }) => {
@@ -70,7 +70,7 @@ pub fn expr_chip(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
     }
 }
 
-pub fn ref_chip(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
+pub fn ref_chip(t: &Pane, path: &[Symbol], i: usize) -> Option<(f64, f64)> {
     match (node_of(t, path), t.item_at(path)) {
         (Some(n), Some((pl, x, y))) => match (n.rows.get(i), line_of_row(&pl.lines).get(&i)) {
             (Some(r), Some(k)) => match &r.chip {
@@ -88,7 +88,7 @@ pub fn ref_chip(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
 }
 
 /// the centre of the fold button of a wired row (`n.rows[i]`); `None` when it has none
-pub fn fold_button(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
+pub fn fold_button(t: &Pane, path: &[Symbol], i: usize) -> Option<(f64, f64)> {
     if !t.folds.contains_key(&(path.to_vec(), i)) {
         return None;
     }
@@ -109,18 +109,18 @@ pub fn fold_button(t: &Pane, path: &[String], i: usize) -> Option<(f64, f64)> {
     }
 }
 
-pub fn tile_point(t: &Pane, path: &[String], d: (f64, f64), size: (f64, f64)) -> Option<(f64, f64)> {
+pub fn tile_point(t: &Pane, path: &[Symbol], d: (f64, f64), size: (f64, f64)) -> Option<(f64, f64)> {
     box_at(t, path).map(|(x, y, _, _)| (sx(t, x) + ((d.0 + (size.0 / 2.0)) * t.zoom), sy(t, y) + ((d.1 + (size.1 / 2.0)) * t.zoom)))
 }
 
-pub fn lens_toggle(t: &Pane, path: &[String]) -> Option<(f64, f64)> {
+pub fn lens_toggle(t: &Pane, path: &[Symbol]) -> Option<(f64, f64)> {
     match (node_of(t, path), box_at(t, path)) {
         (Some(n), Some((_, _, w, _))) if n.lens.is_some() => tile_point(t, path, (w - 22.0, 2.0), (20.0, 20.0)),
         _ => None,
     }
 }
 
-pub fn lens_step_button(t: &Pane, path: &[String], i: i64) -> Option<(f64, f64)> {
+pub fn lens_step_button(t: &Pane, path: &[Symbol], i: i64) -> Option<(f64, f64)> {
     match (node_of(t, path), lens_of(t, path), box_at(t, path)) {
         (Some(n), Some(step), Some((_, _, _, h))) => match &n.lens {
             Some(l) if i <= l.steps.len() as i64 => {
@@ -133,7 +133,7 @@ pub fn lens_step_button(t: &Pane, path: &[String], i: i64) -> Option<(f64, f64)>
     }
 }
 
-pub fn lens_replace(t: &Pane, path: &[String]) -> Option<(f64, f64)> {
+pub fn lens_replace(t: &Pane, path: &[Symbol]) -> Option<(f64, f64)> {
     match (node_of(t, path), lens_of(t, path), box_at(t, path)) {
         (Some(n), Some(step), Some((_, _, _, h))) => match &n.lens {
             Some(l) => {
@@ -149,7 +149,7 @@ pub fn lens_replace(t: &Pane, path: &[String]) -> Option<(f64, f64)> {
 
 /// every port of a plain node at the level it is shown, in screen points: the in end, the out end,
 /// a card's row sockets and named outputs
-pub fn ports(t: &Pane, path: &[String]) -> Vec<(f64, f64)> {
+pub fn ports(t: &Pane, path: &[Symbol]) -> Vec<(f64, f64)> {
     match t.item_at(path) {
         Some((pl, ax, ay)) => {
             let s = |x: f64, y: f64| (sx(t, x), sy(t, y));

@@ -31,10 +31,10 @@ const FRAMES: i64 = 30;
 // Z1/G1/Z5: reuse UI callbacks, labels and renderer buffers with shared hash/ABI changes:
 // basic 1,232 / 141,996; empty 916 / 53,361; bare 1,156 / 69,746.
 // Never raise.
-// Z2 shared immutable Text payloads; idle maxima measured after the text owner migration.
-const BASIC: (u64, u64) = (1_225, 141_513);
-const EMPTY: (u64, u64) = (916, 53_121);
-const BARE: (u64, u64) = (1_156, 69_266);
+// Z2 shared immutable Text, sorted Record fields and Symbol paths; measured idle guard pairs.
+const BASIC: (u64, u64) = (972, 131_161);
+const EMPTY: (u64, u64) = (841, 51_000);
+const BARE: (u64, u64) = (1_090, 67_083);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

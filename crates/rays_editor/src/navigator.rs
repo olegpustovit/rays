@@ -4,6 +4,7 @@
 //! graph unfolded into its loops and bindings, the reusable functions and macros, the active graph's
 //! inputs as sliders and the data flow around it. Pure state and rows; `view` draws inside
 //! `Ui::frame` and returns intents that `Editor_frame` applies after the frame.
+use flow_syntax::symbol::Symbol;
 use std::borrow::Cow;
 use flow_check::workspace::{self as w, Graph, Workspace};
 use flow_graph::probe::{self, Probe};
@@ -23,7 +24,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 type S = Syntax;
-pub type Path = Vec<String>;
+pub type Path = flow_check::workspace::Path;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Intent {
@@ -117,7 +118,7 @@ pub struct Params {
     pub scope: Option<Rc<p::Scope>>,
     pub records: Option<Rc<RefCell<Probe>>>,
     /// the iteration each zone shows
-    pub probes: Rc<dyn Fn(&[String]) -> i64>,
+    pub probes: Rc<dyn Fn(&[Symbol]) -> i64>,
     pub selected: Vec<Path>,
     /// the evaluated colour of each material graph
     pub chips: Vec<(String, Color)>,
@@ -187,9 +188,6 @@ fn byte(f: f64) -> i64 {
     (255.0 * f.min(1.0).max(0.0)).round() as i64
 }
 
-fn field<'a>(fields: &'a [(String, Value)], name: &str) -> Option<&'a Value> {
-    fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
-}
 
 /// The evaluated colour of each material graph (a vector or hex text; white when unset).
 pub fn chips(ev: &flow_eval::Eval) -> Vec<(String, Color)> {
@@ -198,13 +196,13 @@ pub fn chips(ev: &flow_eval::Eval) -> Vec<(String, Color)> {
         .filter_map(|(name, v)| match v {
             Value::Struct(p) if p.name == "material/standard" => {
                 let fields = &p.fields;
-                let colour = match field(fields, "color") {
+                let colour = match fields.get_str("color") {
                     Some(Value::Vec3(r, g, b)) => Some(color::rgb(byte(*r), byte(*g), byte(*b))),
                     Some(Value::Text(hex)) => color::hex(&String::from_utf8_lossy(hex)).ok(),
                     None => Some(color::white()),
                     Some(_) => None,
                 };
-                colour.map(|c| (name.clone(), c))
+                colour.map(|c| (name.as_str().to_owned(), c))
             }
             _ => None,
         })
@@ -216,9 +214,9 @@ pub fn notes(ev: &flow_eval::Eval) -> Vec<(String, String)> {
     ev.results
         .iter()
         .filter_map(|(name, v)| match v {
-            Value::Struct(p) if p.name == "material/standard" => match field(&p.fields, "roughness") {
-                Some(Value::Float(r)) => Some((name.clone(), format!("rough {}", cfmt::g(*r, 2)))),
-                Some(Value::Int(r)) => Some((name.clone(), format!("rough {}", r))),
+            Value::Struct(p) if p.name == "material/standard" => match p.fields.get_str("roughness") {
+                Some(Value::Float(r)) => Some((name.as_str().to_owned(), format!("rough {}", cfmt::g(*r, 2)))),
+                Some(Value::Int(r)) => Some((name.as_str().to_owned(), format!("rough {}", r))),
                 _ => None,
             },
             _ => None,
@@ -1175,7 +1173,7 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
                 match (o.visible, o.render) {
                     (Some(on), _) if flag(0) && !o.inert => intents.push(Intent::Flag { node: path, name: "visible".to_owned(), value: !on }),
                     (_, Some(on)) if flag(1) && !o.inert => intents.push(Intent::Flag { node: path, name: "render".to_owned(), value: !on }),
-                    _ => intents.push(Intent::Open { graph: path[0].clone(), node: Some(path) }),
+                    _ => intents.push(Intent::Open { graph: path[0].to_string(), node: Some(path) }),
                 }
             }
             Some(Row::LayoutRow { index, .. }) => intents.push(Intent::Layout(*index)),

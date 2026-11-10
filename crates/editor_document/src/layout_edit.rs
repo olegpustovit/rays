@@ -352,7 +352,7 @@ loop {
 collapse(&b, &ps, b.res.clone(), builder) }
 
 /// `f ps layout` rewrites the active layout: the switch's active input, else the workspace's tree.
-fn edit_layout(src: &[S], graph: &str, f: &dyn Fn(&[(S, S)], &S, &mut SyntaxBuilder) -> R<S>, builder: &mut SyntaxBuilder) -> R<Vec<S>> { edit_scope(src, &[graph.to_owned()], &mut |sx, builder| {
+fn edit_layout(src: &[S], graph: &str, f: &dyn Fn(&[(S, S)], &S, &mut SyntaxBuilder) -> R<S>, builder: &mut SyntaxBuilder) -> R<Vec<S>> { edit_scope(src, &[graph.into()], &mut |sx, builder| {
     let sc = editor_scope(sx, builder)?;
     match switch_place(&sc, builder)? {
         Some((place, sw)) => {
@@ -499,7 +499,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
         let panel = builder.import(panel);
         edit_scope(src, &sp, &mut |sx, builder| set_node(sx, &leaf, panel, builder), builder)
     }
-    Op::SetLayout { graph, index } => edit_scope(src, &[graph.clone()], &mut |sx, builder| {
+    Op::SetLayout { graph, index } => edit_scope(src, &[graph.clone().into()], &mut |sx, builder| {
         let sc = editor_scope(sx, builder)?;
         match switch_place(&sc, builder)? {
             None => Err(fail("This workspace has one layout and no switch.")),
@@ -513,7 +513,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
     }, builder),
     Op::LayoutNew { graph } => {
         let mut used = root_used(src, graph, builder);
-        edit_scope(src, &[graph.clone()], &mut |sx, builder| {
+        edit_scope(src, &[graph.clone().into()], &mut |sx, builder| {
             let sc = editor_scope(sx, builder)?;
             let (sc, place, sw) = ensure_switch(&sc, &mut used, builder)?;
             let args = args_of(&sw, builder);
@@ -544,7 +544,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             return Err(fail("There is one editor graph and nothing to merge."));
         }
         let mut used = root_used(src, graph, builder);
-        let merged = edit_scope(src, &[graph.clone()], &mut |sx, builder| {
+        let merged = edit_scope(src, &[graph.clone().into()], &mut |sx, builder| {
             let sc = editor_scope(sx, builder)?;
             let (sc, place, mut sw) = ensure_switch(&sc, &mut used, builder)?;
             let mut ps = sc.ps.clone();
@@ -590,7 +590,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             }).collect())
         }, builder)
     }
-    Op::LayoutRemove { graph } => edit_scope(src, &[graph.clone()], &mut |sx, builder| {
+    Op::LayoutRemove { graph } => edit_scope(src, &[graph.clone().into()], &mut |sx, builder| {
         let sc = editor_scope(sx, builder)?;
         match switch_place(&sc, builder)? {
             None => Err(fail("This workspace has one layout and no switch.")),
@@ -670,7 +670,7 @@ pub fn paths(op: &Op) -> Vec<Path> {
         | Op::MergeThenNew { graph }
         | Op::LayoutRemove { graph }
         | Op::LayoutWindow { graph, .. }
-        | Op::LayoutFloat { graph, .. } => vec![vec![graph.clone()]],
+        | Op::LayoutFloat { graph, .. } => vec![vec![graph.clone().into()]],
     }
 }
 

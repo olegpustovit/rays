@@ -14,8 +14,8 @@ use rays_diagnostic::{self as diagnostic, Position, Span};
 
 type S = Syntax;
 
-fn p(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|x| (*x).to_owned()).collect()
+fn p(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|x| (*x).into()).collect()
 }
 
 fn root() -> std::path::PathBuf {
@@ -72,7 +72,7 @@ fn token_scrubs() {
         (sop/transform (sop/uv_sphere :radius 0.6) :uniform_scale 0.7))))"#,
     )
     .unwrap();
-    let cases: Vec<(Vec<String>, ArgKey, Vec<i64>)> = vec![
+    let cases: Vec<(flow_check::workspace::Path, ArgKey, Vec<i64>)> = vec![
         (p(&["g", "a"]), ArgKey::Kw("size".into()), vec![1]),
         (p(&["g", "repeat", "@result"]), ArgKey::Kw("radius".into()), vec![]),
         (p(&["g", "n"]), ArgKey::Whole, vec![]),

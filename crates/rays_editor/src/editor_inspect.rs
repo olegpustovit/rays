@@ -3,6 +3,7 @@
 //! sheet of the node selected in the graph pane). Bundle C; Editor_model and Editor_shell come
 //! from bundle D.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -33,7 +34,7 @@ use crate::navigator;
 use crate::text_pane;
 
 type S = Syntax;
-pub type Path = Vec<String>;
+pub type Path = flow_check::workspace::Path;
 pub use editor_document::document::Level;
 
 fn sym(name: &str) -> S {
@@ -179,7 +180,7 @@ pub fn viewed_path<'a>(value: &ModelView<'a>, scope: &p::Scope) -> Option<Path> 
         return found;
     }
     match &scope.result {
-        p::ScopeResult::Link(target) => Some(vec![scope.path[0].clone(), target.clone()]),
+        p::ScopeResult::Link(target) => Some(vec![scope.path[0], target.clone().into()]),
         p::ScopeResult::Node(path) => Some(path.clone()),
         p::ScopeResult::Literal(_) => None,
     }
@@ -471,7 +472,7 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
 
 /// The iterations the zones around a node of the pane's graph probe, outermost first.
 /// `chains` is `probe::chains` of the scope, made once by the caller (it walks the whole scope).
-pub fn probes_of(value: &Model, chains: &HashMap<Path, Vec<Path>>, path: &[String]) -> Vec<i64> {
+pub fn probes_of(value: &Model, chains: &HashMap<Path, Vec<Path>>, path: &[Symbol]) -> Vec<i64> {
     chains
         .get(path)
         .map(|zones| zones.iter().map(|zone| value.probes.get(zone).copied().unwrap_or(0)).collect())
@@ -479,7 +480,7 @@ pub fn probes_of(value: &Model, chains: &HashMap<Path, Vec<Path>>, path: &[Strin
 }
 
 /// The compiled node a node of the pane's graph lowers to at its probes.
-pub fn compiled_at(value: &Model, chains: &HashMap<Path, Vec<Path>>, records: &Rc<RefCell<Probe>>, path: &[String]) -> Option<i64> {
+pub fn compiled_at(value: &Model, chains: &HashMap<Path, Vec<Path>>, records: &Rc<RefCell<Probe>>, path: &[Symbol]) -> Option<i64> {
     let probes = probes_of(value, chains, path);
     let plan = records.borrow().plan_node(None, path, &probes)?;
     value.doc.workspace.lowered.compiled.get(&plan).copied()
@@ -585,7 +586,7 @@ fn literal_fields(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn walk_sub(row: &p::Row, shown: bool, chain: &[String], depth: i64, sub: &[i64], e: &S, count: &mut i64, out: &mut Vec<Entry>) {
+fn walk_sub(row: &p::Row, shown: bool, chain: &[Symbol], depth: i64, sub: &[i64], e: &S, count: &mut i64, out: &mut Vec<Entry>) {
     if depth >= 4 { return; }
     let Some(h) = s::head(e).map(str::to_owned) else { return; };
     for (i, &id) in e.children().iter().enumerate() {
@@ -597,7 +598,7 @@ fn walk_sub(row: &p::Row, shown: bool, chain: &[String], depth: i64, sub: &[i64]
         sub2.push(i as i64);
         if operator_call(&c) {
             let mut chain2 = chain.to_vec();
-            chain2.push(h.clone());
+            chain2.push(h.clone().into());
             walk_sub(row, shown, &chain2, depth + 1, &sub2, &c, count, out);
             continue;
         }
@@ -748,7 +749,7 @@ pub fn iteration_picks(ui: &mut Ui, footer: &probe::Footer, chain: &[Path], prob
                 "ws-runs",
                 &format!(
                     "Inside {}: runs {} times. {}",
-                    z.last().cloned().unwrap_or_default(),
+                    z.last().map_or("", |name| name.as_str()),
                     footer.runs.unwrap_or(iterations.len() as i64),
                     if n.invariant { "The same every time, so it can move out of the loop." } else { "It changes with the loop variable." }
                 ),
@@ -853,7 +854,7 @@ fn is_literal(e: &S) -> bool {
 pub type Layout_names = Option<(Vec<String>, i64)>;
 
 /// What a drag of a splitter gives: the size to write.
-pub type Resized<'a> = &'a dyn Fn(&[String], pxui_shell::layout::Way) -> Option<le::Size>;
+pub type Resized<'a> = &'a dyn Fn(&[Symbol], pxui_shell::layout::Way) -> Option<le::Size>;
 
 /// The intents the rows' widgets returned, as document changes.
 #[allow(clippy::too_many_arguments)]
@@ -1221,7 +1222,7 @@ pub fn zone_says(ui: &mut Ui, width: f64, zone_text: &Option<(&'static str, fn(&
 }
 
 /// A graph input: its type, and its default as one Lisp form.
-pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, path: &[String]) -> (Vec<change>, Vec<ScopeChange>) {
+pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, path: &[Symbol]) -> (Vec<change>, Vec<ScopeChange>) {
     let Some(input) = scope.inputs.iter().find(|i| i.path == path) else { return (vec![], vec![]) };
     ui.inspector_header("ws-input", Some("input"), None, None, None, &[], None, false, &input.name, &ty::to_string(&input.ty));
     let shown = input.default.as_ref().map(lisp::flat).unwrap_or_default();
@@ -1293,7 +1294,7 @@ pub struct InspectorOpts<'a> {
     pub window: bool,
     pub on_choice: Option<&'a dyn Fn(&str, &UiBox)>,
     pub resized: Resized<'a>,
-    pub follows: &'a dyn Fn(&[String]) -> Option<String>,
+    pub follows: &'a dyn Fn(&[Symbol]) -> Option<String>,
 }
 
 #[derive(Clone)]
@@ -1322,7 +1323,7 @@ fn zone_words(kind: p::ZoneKind) -> (&'static str, fn(&str) -> String) {
 /// catalog parameters of the lowered node at that iteration. An edit is a `SetArg` on the
 /// authored argument; an argument that is not a literal shows its expression and is locked.
 /// Returns the graph requests and the probe moves.
-pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, path: &[String], o: &InspectorOpts) -> Inspected {
+pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, path: &[Symbol], o: &InspectorOpts) -> Inspected {
     let laid = match &o.laid {
         Some(k) => Some(k.clone()),
         None => crate::editor_model::pane_laid(value).cloned(),
@@ -1405,7 +1406,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, p
     let follow = (o.follows)(&n.path);
     // the active camera: the one the scene's root names as its :camera
     let root_node = scope.nodes.iter().find(|m| m.head == "scene/root").cloned();
-    let last_name = n.path.last().cloned().unwrap_or_default();
+    let last_name = n.path.last().map_or("", |name| name.as_str());
     let active_camera = n.head == "scene/camera"
         && match &root_node {
             Some(root) => root.rows.iter().any(|r| r.key == ArgKey::Kw("camera".to_owned()) && r.expr.as_ref().is_some_and(|form| matches!(form.node, SNode::Sym(name) if form.name(name) == last_name))),

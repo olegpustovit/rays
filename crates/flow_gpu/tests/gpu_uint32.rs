@@ -224,8 +224,8 @@ fn kinds_of_values() {
             fn capture(scope: &dyn gpu::Residency, v: &Value) -> Box<dyn Fn() -> Value> {
                 match v {
                     Value::Record(fields) => {
-                        let fields: Vec<(String, Box<dyn Fn() -> Value>)> = fields.iter().map(|(k, v)| (k.clone(), capture(scope, v))).collect();
-                        Box::new(move || Value::Record(fields.iter().map(|(k, make)| (k.clone(), make())).collect()))
+                        let fields: Vec<(flow_syntax::symbol::Symbol, Box<dyn Fn() -> Value>)> = fields.iter().map(|(k, v)| (k.clone(), capture(scope, v))).collect();
+                        Box::new(move || Value::Record(fields.iter().map(|(k, make)| (k.clone(), make())).collect::<Vec<_>>().into()))
                     }
                     Value::Int_array(_) => {
                         let holder = scope.retain_uint32(v).expect("uint32 holder");

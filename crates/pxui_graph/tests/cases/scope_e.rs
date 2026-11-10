@@ -11,15 +11,15 @@ fn scope_of(text: &str) -> p::Scope {
     p::of_graph(&scope_catalog(), &ws, "g").unwrap_or_else(|e| panic!("{e}"))
 }
 
-fn table(l: &p::Layout) -> Vec<(Vec<String>, p::Placed)> {
+fn table(l: &p::Layout) -> Vec<(flow_check::workspace::Path, p::Placed)> {
     l.placed.iter().map(|b| (b.path.clone(), b.clone())).collect()
 }
 
-fn find(t: &[(Vec<String>, p::Placed)], path: &[String]) -> p::Placed {
+fn find(t: &[(flow_check::workspace::Path, p::Placed)], path: &[flow_syntax::symbol::Symbol]) -> p::Placed {
     t.iter().find(|(q, _)| q.as_slice() == path).expect("placed").1.clone()
 }
 
-fn layout_prev(sc: &p::Scope, prev: Rc<dyn Fn(&[String]) -> Option<(f64, f64, f64, f64)>>) -> p::Layout {
+fn layout_prev(sc: &p::Scope, prev: Rc<dyn Fn(&[flow_syntax::symbol::Symbol]) -> Option<(f64, f64, f64, f64)>>) -> p::Layout {
     let mut o = p::LayoutOptions::new();
     o.prev = prev;
     p::layout(&o, sc)
@@ -31,14 +31,14 @@ fn run_sticky() {
     let first = p::layout(&p::LayoutOptions::new(), &before);
     let first_table = table(&first);
     let ft = first_table.clone();
-    let prev: Rc<dyn Fn(&[String]) -> Option<(f64, f64, f64, f64)>> = Rc::new(move |path: &[String]| ft.iter().find(|(q, _)| q.as_slice() == path).map(|(_, b)| (b.x, b.y, b.w, b.h)));
+    let prev: Rc<dyn Fn(&[flow_syntax::symbol::Symbol]) -> Option<(f64, f64, f64, f64)>> = Rc::new(move |path: &[flow_syntax::symbol::Symbol]| ft.iter().find(|(q, _)| q.as_slice() == path).map(|(_, b)| (b.x, b.y, b.w, b.h)));
     let sticky = table(&layout_prev(&after, prev));
     let relaid = table(&p::layout(&p::LayoutOptions::new(), &after));
     for (path, b) in &first_table {
         let s = find(&sticky, path);
         check(s.x == b.x && s.y == b.y, "an edit that added a node moved a card that was there");
     }
-    let pos = |name: &str, l: &[(Vec<String>, p::Placed)]| find(l, &path(&["g", name]));
+    let pos = |name: &str, l: &[(flow_check::workspace::Path, p::Placed)]| find(l, &path(&["g", name]));
     let z = pos("z", &sticky);
     let a = pos("a", &sticky);
     check(z.x < a.x && z.y == a.y, "the new node is not on the row of its consumer, one column left");
@@ -56,12 +56,12 @@ fn run_sticky() {
     check(flow_syntax::lisp::print(&source).unwrap().0 != text, "Move_binding changed no text");
     let first = p::layout(&p::LayoutOptions::new(), &p::of_graph(&scope_catalog(), &ws, "g").unwrap());
     let key = |l: &p::Layout| {
-        let mut v: Vec<(Vec<String>, i64, i64)> = l.placed.iter().map(|b| (b.path.clone(), b.x.to_bits() as i64, b.y.to_bits() as i64)).collect();
+        let mut v: Vec<(flow_check::workspace::Path, i64, i64)> = l.placed.iter().map(|b| (b.path.clone(), b.x.to_bits() as i64, b.y.to_bits() as i64)).collect();
         v.sort();
         v
     };
     let first_for_prev = first.clone();
-    let prev: Rc<dyn Fn(&[String]) -> Option<(f64, f64, f64, f64)>> = Rc::new(move |path: &[String]| first_for_prev.placed.iter().find(|b| b.path.as_slice() == path).map(|b| (b.x, b.y, b.w, b.h)));
+    let prev: Rc<dyn Fn(&[flow_syntax::symbol::Symbol]) -> Option<(f64, f64, f64, f64)>> = Rc::new(move |path: &[flow_syntax::symbol::Symbol]| first_for_prev.placed.iter().find(|b| b.path.as_slice() == path).map(|b| (b.x, b.y, b.w, b.h)));
     let moved = layout_prev(&p::of_graph(&scope_catalog(), &ws2, "g").unwrap(), prev);
     check(key(&first) == key(&moved), "reordering bindings moved a card");
 }
@@ -82,7 +82,7 @@ fn run_readable() {
     let view = { let mut r8_view = view; scope::select(vec![path(&["g", "b"])], &mut r8_view); r8_view };
     match scope::inspect::chain(&view) {
         Some((up, down)) => {
-            let has = |l: &Vec<Vec<String>>, n: &str| l.contains(&path(&["g", n]));
+            let has = |l: &Vec<flow_check::workspace::Path>, n: &str| l.contains(&path(&["g", n]));
             check(has(&up, "a") && has(&up, "b") && !has(&up, "c") && !has(&up, "d"), "upstream of b is not a and b");
             check(has(&down, "b") && has(&down, "c") && has(&down, "e") && !has(&down, "a") && !has(&down, "d"), "downstream of b is not b, c and e");
         }

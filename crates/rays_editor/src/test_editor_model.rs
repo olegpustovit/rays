@@ -59,7 +59,7 @@ fn creation_shell_list_status() {
     assert!(editor_shell::layouts(&value).is_empty());
     assert_eq!(*editor_shell::shell_tree(&value, &value.workspace), panels::default());
     assert_eq!(editor_shell::panel_key(&value.doc, &[0]), vec!["@default".to_string(), "@panel".to_string(), "0".to_string()]);
-    assert_eq!(editor_shell::panel_key(&value.doc, &[HOST_BAR]).last().map(String::as_str), Some("-1"));
+    assert_eq!(editor_shell::panel_key(&value.doc, &[HOST_BAR]).last().map(|name| name.as_str()), Some("-1"));
     assert!(editor_shell::panel_state(&(&value).into(), &[HOST_BAR]).collapsed);
     assert!(!editor_shell::panel_state(&(&value).into(), &[0]).collapsed);
     let leaves = panels::leaves(&editor_shell::shell_tree(&value, &value.workspace));
@@ -105,7 +105,7 @@ fn creation_shell_list_status() {
     editor_host::close(&value);
 }
 
-fn panel_map_key(value: &EditorModel) -> Option<Vec<String>> {
+fn panel_map_key(value: &EditorModel) -> Option<crate::panel_map::Key> {
     crate::panel_map::key(&value.panes)
 }
 

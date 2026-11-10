@@ -3,6 +3,7 @@
 //! when the kind takes a geometry input; the language's forms and "Value" entries are cards with a
 //! small working expression to edit in place. Bundle C.
 #![allow(non_camel_case_types)]
+use flow_syntax::symbol::Symbol;
 use editor_document::document::Level;
 use editor_document::scene_sync;
 use flow_check::op;
@@ -34,12 +35,12 @@ fn parse_one(text: &str) -> S {
 }
 
 /// The binding a selected path ends in, none for a keyword input, a result or a nested call.
-pub fn binding_name(path: &[String]) -> Option<String> {
+pub fn binding_name(path: &[Symbol]) -> Option<String> {
     let last = path.last()?;
     if last.is_empty() || last.starts_with(':') || last.starts_with('@') || last.contains('#') {
         None
     } else {
-        Some(last.clone())
+        Some(last.to_string())
     }
 }
 
@@ -212,7 +213,7 @@ pub fn value_expression(ops: &[op::Op], wire: Option<(String, Ty)>, context: &Co
     }
 }
 
-fn last_of(path: &[String]) -> &str {
+fn last_of(path: &[Symbol]) -> &str {
     path.last().map(|x| x.as_str()).unwrap_or("")
 }
 
@@ -254,7 +255,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
             let mut builder = s::SyntaxBuilder::new();
             let head = builder.push_draft(0, s::Draft::Sym("scene/merge".into()), Default::default(), None);
             let id = builder.push_draft(0, s::Draft::List(vec![head]), Default::default(), None);
-            vec![change::Syntax_edit(fe::Op::AddNode { scope: vec![graph], name, expr: builder.freeze().handle(id) })]
+            vec![change::Syntax_edit(fe::Op::AddNode { scope: vec![graph.into()], name, expr: builder.freeze().handle(id) })]
         };
     }
     let is_value = key.starts_with('=');
@@ -273,7 +274,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
     let laid = crate::editor_model::pane_laid(value);
     // a nested node (a call written in another's input) has no name to read: it gets one first
     // (`Rename` binds it), in the same undo step as the node added after it
-    let hoisted: Option<(Vec<String>, String)> = match (selected.as_slice(), laid) {
+    let hoisted: Option<(flow_check::workspace::Path, String)> = match (selected.as_slice(), laid) {
         ([path], Some(k)) if path.len() >= 2 && last_of(path).contains('#') => p::find(&k.scope, path).map(|n| {
             let base = match n.head.rfind('/') {
                 Some(i) => n.head[i + 1..].to_owned(),
@@ -283,20 +284,20 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
         }),
         _ => None,
     };
-    let binding = |path: &[String]| -> Option<String> {
+    let binding = |path: &[Symbol]| -> Option<String> {
         match &hoisted {
             Some((p_, name)) if p_.as_slice() == path => Some(name.clone()),
             _ => binding_name(path),
         }
     };
-    let (scope_path, input): (Vec<String>, Option<String>) = if (context == context::scene() || context == context::world()) && !is_value {
+    let (scope_path, input): (flow_check::workspace::Path, Option<String>) = if (context == context::scene() || context == context::world()) && !is_value {
         // an object joins the scene's merge and a layer goes on top of the stack: the edit itself does that
-        (vec![graph.clone()], None)
+        (vec![graph.clone().into()], None)
     } else if let [path] = selected.as_slice() {
         if path.len() >= 2 {
             (path[..path.len() - 1].to_vec(), if arity > 0 { binding(path) } else { None })
         } else {
-            (vec![graph.clone()], None)
+            (vec![graph.clone().into()], None)
         }
     } else {
         // nothing selected: a kind with an input reads the graph's result, so the text still
@@ -308,7 +309,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
             },
             None => None,
         };
-        (vec![graph.clone()], if arity > 0 { result } else { None })
+        (vec![graph.clone().into()], if arity > 0 { result } else { None })
     };
     let (expr, base): (S, String) = if is_value {
         let wire: Option<(String, Ty)> = match (selected.as_slice(), laid) {

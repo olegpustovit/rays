@@ -1,6 +1,7 @@
 //! Port of lib/flow_sop/attribute_kernel.ml: cook-time connection between immutable geometry and
 //! packed Flow data, and the attribute write node. The OCaml mention of Lower (fold_writes) is only
 //! a comment, so no forward hook is needed: Lower calls this module, never the reverse.
+use flow_syntax::symbol::Symbol;
 use std::io::Write as _;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,7 +38,7 @@ fn fail(code: &str, message: &str) -> Diagnostic {
 fn err<X>(code: &str, message: &str) -> Result<X, Diagnostic> {
     Err(fail(code, message))
 }
-fn assoc<'a>(fields: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
+fn assoc<'a>(fields: &'a [(Symbol, Value)], key: &str) -> Option<&'a Value> {
     fields.iter().find(|(k, _)| k == key).map(|(_, v)| v)
 }
 fn text_of(value: &Value) -> Option<String> {
@@ -115,7 +116,7 @@ const ATTR_OPS: [&str; 5] = ["sop/attr", "sop/attr_checked", "sop/attr_planes", 
 
 fn field_of(value: Option<Value>, field: &str) -> Option<Value> {
     match value? {
-        v @ (Value::Record(_) | Value::Struct(_)) => assoc(v.geo_fields().unwrap(), field).cloned(),
+        v @ (Value::Record(_) | Value::Struct(_)) => (v.geo_fields().unwrap()).get_str(field).cloned(),
         _ => None,
     }
 }
@@ -207,8 +208,8 @@ fn checked_reads(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term, st: &mut
     safe
 }
 
-fn attr_read(args: &[(String, Value)], st: &mut Reads) {
-    match (assoc(args, "attribute").and_then(text_of), assoc(args, "geometry").and_then(geometry_id)) {
+fn attr_read(args: &V::Record, st: &mut Reads) {
+    match (args.get_str("attribute").and_then(text_of), args.get_str("geometry").and_then(geometry_id)) {
         (Some(name), Some(_)) => st.names.push(name),
         _ => st.opaque = true,
     }
@@ -217,13 +218,13 @@ fn attr_read(args: &[(String, Value)], st: &mut Reads) {
 fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
     match value {
         Value::Source(g) if TOPOLOGY_OPS.contains(&g.name.as_str()) => {
-            if assoc(&g.fields, "geometry").and_then(geometry_id).is_none() {
+            if g.fields.get_str("geometry").and_then(geometry_id).is_none() {
                 st.opaque = true;
             }
         }
         Value::Source(g) if g.name == "sop/attr_names" || g.name == "sop/attr_entries" => {
             st.names.push("*".to_owned());
-            if assoc(&g.fields, "geometry").and_then(geometry_id).is_none() {
+            if g.fields.get_str("geometry").and_then(geometry_id).is_none() {
                 st.opaque = true;
             }
         }
@@ -335,9 +336,9 @@ fn width(kind: &str) -> usize {
     }
 }
 
-fn options(args: &[(String, Value)]) -> Result<(Owner, String), Diagnostic> {
+fn options(owner_value: Option<&Value>, type_value: Option<&Value>) -> Result<(Owner, String), Diagnostic> {
     let text = |key: &str, default: &str, code: &str| -> Result<String, Diagnostic> {
-        match assoc(args, key) {
+        match if key == "owner" { owner_value } else { type_value } {
             None => Ok(default.to_owned()),
             Some(Value::Text(t)) => std::str::from_utf8(t).map(str::to_owned).map_err(|_| fail(code, &format!("Attribute {key} must be UTF-8 text."))),
             _ => err(code, &format!("Attribute {key} must be text.")),
@@ -614,8 +615,8 @@ fn constant_source(value: &Value) -> Option<Result<(String, i64, Value), Diagnos
     let Value::Source(g) = value else { return None };
     let (name, ty, args) = (&g.name, &g.ty, &g.fields);
     let operation = name.strip_prefix("$core/constant-array/")?;
-    Some(match op::constant_array_descriptor(operation, args) {
-        Ok(Value::Source(g)) if g.ty == *ty => match (assoc(&g.fields, "count"), assoc(&g.fields, "value")) {
+    Some(match op::constant_array_record_descriptor(operation, args) {
+        Ok(Value::Source(g)) if g.ty == *ty => match (g.fields.get_str("count"), g.fields.get_str("value")) {
             (Some(Value::Int(count)), Some(value)) => Ok((operation.to_owned(), *count, value.clone())),
             _ => err("E_ARRAY_TYPE", "Malformed constant array descriptor."),
         },
@@ -643,8 +644,8 @@ fn context_value(context: &context::T, value: &Value) -> Option<Value> {
     let (name, args) = (&g.name, &g.fields);
     match name.as_str() {
         "sop/context_seed" => {
-            let text = |key: &str| match assoc(args, key) { None => Some(String::new()), Some(value) => text_of(value) };
-            let salt = match assoc(args, "salt") {
+            let text = |key: &str| match args.get_str(key) { None => Some(String::new()), Some(value) => text_of(value) };
+            let salt = match args.get_str("salt") {
                 Some(Value::Int(n)) => *n,
                 _ => 0,
             };
@@ -737,11 +738,11 @@ impl Specializer<'_> {
                 let done = match E::residual::residual_view(*r) {
                     Err(_) => (value.clone(), false),
                     Ok(view) => {
-                        let mapped: Vec<(String, (Value, bool))> = view.bindings.iter().map(|(n, v)| (n.to_string(), self.map(v))).collect();
+                        let mapped: Vec<(flow_syntax::symbol::Symbol, (Value, bool))> = view.bindings.iter().map(|(n, v)| (*n, self.map(v))).collect();
                         if mapped.iter().all(|(_, (_, changed))| !changed) {
                             (value.clone(), false)
                         } else {
-                            let bindings: Vec<(String, Value)> = mapped.into_iter().map(|(n, (v, _))| (n, v)).collect();
+                            let bindings: Vec<(flow_syntax::symbol::Symbol, Value)> = mapped.into_iter().map(|(n, (v, _))| (n, v)).collect();
                             match E::residual::with_bindings(*r, &view.term, &bindings) {
                                 Ok(id) => (Value::Residual(id), true),
                                 Err(_) => (value.clone(), false),
@@ -788,7 +789,7 @@ impl Specializer<'_> {
             other => (other.clone(), false),
         }
     }
-    fn fields(&self, fs: &[(String, Value)]) -> (Vec<(String, Value)>, bool) {
+    fn fields(&self, fs: &V::Record) -> (V::Record, bool) {
         let mut changed = false;
         let out = fs
             .iter()
@@ -798,7 +799,7 @@ impl Specializer<'_> {
                 (n.clone(), m)
             })
             .collect();
-        (out, changed)
+        (if changed { V::Record::new(out) } else { fs.clone() }, changed)
     }
 }
 
@@ -815,8 +816,8 @@ fn not_cooked<X>() -> Result<X, Diagnostic> {
     err("E_DATA_SOURCE", "Attribute source has not been cooked.")
 }
 
-fn component_sources(args: &[(String, Value)], what: &str) -> Result<(i64, String, String), Diagnostic> {
-    match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of), assoc(args, "component").and_then(text_of)) {
+fn component_sources(args: &V::Record, what: &str) -> Result<(i64, String, String), Diagnostic> {
+    match (args.get_str("geometry").and_then(geometry_id), args.get_str("attribute").and_then(text_of), args.get_str("component").and_then(text_of)) {
         (Some(id), Some(name), Some(component)) => Ok((id, name, component)),
         _ => err("E_ATTR_TYPE", &format!("{what} needs geometry, an attribute name and a component.")),
     }
@@ -832,7 +833,7 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
         Some(result) => {
             let (operation, count, value) = result?;
             let found = op::find(&[], &operation, &fctx::value()).ok_or_else(|| fail("E_ARRAY_TYPE", "Unknown constant array constructor."))?;
-            let args = vec![("count".to_owned(), Value::Int(count)), ("value".to_owned(), value)];
+            let args = vec![("count".into(), Value::Int(count)), ("value".into(), value)];
             (found.body)(&input::at_time(0.0), &|_, _| unreachable!("constant array bodies run no nodes"), &args)
         }
         None => match value {
@@ -840,23 +841,23 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
                 let args = &g.fields;
                 let (id, attribute, component) = component_sources(args, "sop/attr_checked")?;
                 let g = geometry(id).map_or_else(not_cooked, Ok)?;
-                let (owner, kind) = options(args)?;
+                let (owner, kind) = options(args.get_str("owner"), args.get_str("type"))?;
                 read_checked(&component, owner, &kind, &attribute, &g)
             }
             Value::Source(g) if g.name == "sop/attr_planes" => {
                 let args = &g.fields;
                 let (id, attribute, component) = component_sources(args, "sop/attr_planes")?;
                 let g = geometry(id).map_or_else(not_cooked, Ok)?;
-                let (owner, _) = options(args)?;
+                let (owner, _) = options(args.get_str("owner"), args.get_str("type"))?;
                 read_planes(&component, owner, &attribute, &g)
             }
             Value::Struct(g) | Value::Source(g) if g.name == "sop/attr" => {
                 let args = &g.fields;
-                match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of)) {
+                match (args.get_str("geometry").and_then(geometry_id), args.get_str("attribute").and_then(text_of)) {
                     (Some(id), Some(attribute)) => match geometry(id) {
                         Some(g) => {
-                            let (owner, kind) = options(args)?;
-                            let component = assoc(args, "component").map(|value| text_of(value).ok_or_else(|| fail("E_ATTR_TYPE", "Attribute component must be UTF-8 text."))).transpose()?;
+                            let (owner, kind) = options(args.get_str("owner"), args.get_str("type"))?;
+                            let component = args.get_str("component").map(|value| text_of(value).ok_or_else(|| fail("E_ATTR_TYPE", "Attribute component must be UTF-8 text."))).transpose()?;
                             read(component.as_deref(), owner, &kind, &attribute, &g)
                         }
                         None => not_cooked(),
@@ -866,11 +867,11 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
             }
             Value::Source(g) if g.name == "sop/has_attr" => {
                 let args = &g.fields;
-                match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of)) {
+                match (args.get_str("geometry").and_then(geometry_id), args.get_str("attribute").and_then(text_of)) {
                     (Some(id), Some(attribute)) => {
                         let g = geometry(id).map_or_else(not_cooked, Ok)?;
-                        let (owner, _) = options(args)?;
-                        let requested = assoc(args, "type").and_then(text_of);
+                        let (owner, _) = options(args.get_str("owner"), args.get_str("type"))?;
+                        let requested = args.get_str("type").and_then(text_of);
                         Ok(Value::Bool(match attribute_metadata::kind(owner, &attribute, &g) {
                             None => false,
                             Some(kind) => requested.is_none_or(|r| r == kind),
@@ -881,7 +882,7 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
             }
             Value::Source(g) if g.name == "sop/components" => {
                 let args = concrete_args(context, geometry, &g.fields)?;
-                topology_kernel_impl::resolve(&**geometry, &source_value(g.name.clone(), g.ty.clone(), args))
+                topology_kernel_impl::resolve(&**geometry, &source_value(g.name.clone(), g.ty.clone(), args.into()))
             }
             Value::Source(g) if ["sop/count", "sop/edges", "sop/topology", "sop/adjacency", "sop/triangles", "sop/fans"].contains(&g.name.as_str()) => {
                 topology_kernel_impl::resolve(&**geometry, value)
@@ -891,7 +892,7 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
             }
             Value::Source(g) if ["graph/shortest_paths", "graph/forest", "graph/color", "graph/chains"].contains(&g.name.as_str()) => {
                 let args = concrete_args(context, geometry, &g.fields)?;
-                graph_kernel::resolve(&source_value(g.name.clone(), g.ty.clone(), args))
+                graph_kernel::resolve(&source_value(g.name.clone(), g.ty.clone(), args.into()))
             }
             Value::Source(g) if g.name == "$core/cooked" && ty::is_geometry(&g.ty) && g.fields.len() == 1 && g.fields[0].0 == "id" => {
                 // a geometry a lowered program passes to a host source (Core_lower)
@@ -908,7 +909,7 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
 
 /// Array arguments of a pure source may still be host sources (a sop/adjacency record): resolve
 /// them so the algorithm sees concrete arrays.
-fn concrete_args(context: Option<&context::T>, geometry: &GeometryLookup, args: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
+fn concrete_args(context: Option<&context::T>, geometry: &GeometryLookup, args: &V::Record) -> Result<Vec<(Symbol, Value)>, Diagnostic> {
     fn concrete(context: Option<&context::T>, geometry: &GeometryLookup, value: &Value) -> Result<Value, Diagnostic> {
         match value {
             Value::Residual(_) => {
@@ -922,7 +923,7 @@ fn concrete_args(context: Option<&context::T>, geometry: &GeometryLookup, args: 
             Value::Source(..) => concrete(context, geometry, &resolve(context, geometry, value)?),
             Value::Struct(g) if g.name == "sop/attr" => concrete(context, geometry, &resolve(context, geometry, value)?),
             Value::Record(fields) => Ok(Value::Record(
-                fields.iter().map(|(n, v)| Ok((n.clone(), concrete(context, geometry, v)?))).collect::<Result<Vec<_>, Diagnostic>>()?,
+                fields.iter().map(|(n, v)| Ok((n.clone(), concrete(context, geometry, v)?))).collect::<Result<Vec<_>, Diagnostic>>()?.into(),
             )),
             other => Ok(other.clone()),
         }
@@ -1032,14 +1033,14 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<gpu::
 fn resident_read(geometry: &GeometryLookup, value: &Value) -> Option<(Value, i64)> {
     let (Value::Struct(p) | Value::Source(p)) = value else { return None };
     let (name, args) = (&p.name, &p.fields);
-    let id = assoc(args, "geometry").and_then(geometry_id)?;
+    let id = args.get_str("geometry").and_then(geometry_id)?;
     let g = geometry(id)?;
     if name != "sop/attr" {
-        return topology_kernel_impl::resident_source(&g, name, &assoc(args, "component").and_then(text_of)?);
+        return topology_kernel_impl::resident_source(&g, name, &args.get_str("component").and_then(text_of)?);
     }
-    if assoc(args, "component").is_some() { return None; }
-    let attribute_name = assoc(args, "attribute").and_then(text_of)?;
-    let (owner, kind) = options(args).ok()?;
+    if args.get_str("component").is_some() { return None; }
+    let attribute_name = args.get_str("attribute").and_then(text_of)?;
+    let (owner, kind) = options(args.get_str("owner"), args.get_str("type")).ok()?;
     let holder = if owner == Owner::Point && attribute_name == "P" {
         float3::holder(geometry::positions(&g))
     } else {
@@ -1074,18 +1075,18 @@ pub fn resident_color(g: &geometry::T) -> Option<(Arc<Vec<f64>>, usize)> {
     }
 }
 
-fn descriptor(value: &Value) -> Option<(Ty, &Vec<(String, Value)>)> {
+fn descriptor(value: &Value) -> Option<(Ty, &V::Record)> {
     match value {
         Value::Struct(g) | Value::Source(g) if g.name == "sop/attr" => Some((g.ty.clone(), &g.fields)),
         _ => None,
     }
 }
 
-fn borrowed_attr(geometry: GeometryFn, args: &[(String, Value)]) -> Result<(Storage, usize), Diagnostic> {
-    match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of)) {
+fn borrowed_attr(geometry: GeometryFn, args: &V::Record) -> Result<(Storage, usize), Diagnostic> {
+    match (args.get_str("geometry").and_then(geometry_id), args.get_str("attribute").and_then(text_of)) {
         (Some(id), Some(name)) => {
             let g = geometry(id).map_or_else(not_cooked, Ok)?;
-            let (owner, kind) = options(args)?;
+            let (owner, kind) = options(args.get_str("owner"), args.get_str("type"))?;
             let held = typed_storage(owner, &name, &kind, &g)?;
             Ok((held_storage(&held)?.clone(), owner_count(&g, owner)))
         }
@@ -1100,7 +1101,7 @@ fn typed_array_foundation<X>() -> Result<X, Diagnostic> {
 fn borrowed_storage(geometry: GeometryFn, values: &Value) -> Result<Option<(Storage, usize)>, Diagnostic> {
     if let Some((ty, args)) = descriptor(values) {
         let (storage, count) = borrowed_attr(geometry, args)?;
-        let component = assoc(args, "component");
+        let component = args.get_str("component");
         let (storage, count) = match (&storage, component) {
             (Storage::FloatArray(_) | Storage::IntArray(_), None) => return typed_array_foundation(),
             (_, None) => (storage, count),
@@ -1134,16 +1135,15 @@ fn borrowed_storage(geometry: GeometryFn, values: &Value) -> Result<Option<(Stor
     }
     let Value::Record(fields) = values else { return Ok(None) };
     let (Some((offset_ty, offsets)), Some((value_ty, vals))) =
-        (assoc(fields, "offsets").and_then(descriptor), assoc(fields, "values").and_then(descriptor))
+        (fields.get_str("offsets").and_then(descriptor), fields.get_str("values").and_then(descriptor))
     else {
         return Ok(None);
     };
-    let is = |args: &Vec<(String, Value)>, c: &[u8]| matches!(assoc(args, "component"), Some(Value::Text(t)) if t.as_ref() == c);
-    let without = |args: &Vec<(String, Value)>| args.iter().filter(|(k, _)| k != "component").cloned().collect::<Vec<_>>();
-    if !(is(offsets, b"offsets") && is(vals, b"values") && without(offsets) == without(vals)) {
+    let is = |args: &V::Record, c: &[u8]| matches!(args.get_str("component"), Some(Value::Text(t)) if t.as_ref() == c);
+    if !(is(offsets, b"offsets") && is(vals, b"values") && offsets.iter().filter(|(k, _)| k != "component").eq(vals.iter().filter(|(k, _)| k != "component"))) {
         return Ok(None);
     }
-    let (storage, count) = borrowed_attr(geometry, &without(offsets))?;
+    let (storage, count) = borrowed_attr(geometry, offsets)?;
     let actual = match &storage {
         Storage::FloatArray(_) => Some(array_of(Ty::Float)),
         Storage::IntArray(_) => Some(array_of(Ty::Int)),
@@ -1220,7 +1220,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             }
             let planes: Vec<&Arc<Vec<f64>>> = names
                 .iter()
-                .filter_map(|n| match assoc(fields, n) {
+                .filter_map(|n| match fields.get_str(n) {
                     Some(Value::Floats(1, d)) => Some(d),
                     _ => None,
                 })
@@ -1234,7 +1234,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             }
             install_planes(owner, kind, name, planes.into_iter().cloned().collect(), g)
         }
-        ("float_array" | "int_array", Value::Record(fields)) => match (assoc(fields, "offsets"), assoc(fields, "values")) {
+        ("float_array" | "int_array", Value::Record(fields)) => match (fields.get_str("offsets"), fields.get_str("values")) {
             (Some(Value::Int_array(offsets)), Some(values)) => {
                 if offsets.len() != count + 1 {
                     return err("E_ATTR_COUNT", "CSR row count differs from owner count.");
@@ -1306,25 +1306,25 @@ pub fn write(grain: i64, owner: Owner, kind: &str, name: &str, values: &Value, g
 
 /// `[:attribute]`, `[:owner]` and the `[:planes]` record (width and x/y/z/w planes, as
 /// `sop/attr_planes` reads them) with the matching float, vec2, vec3 or vec4 storage.
-pub fn with_planes(grain: i64, g: &geometry::T, fields: &[(String, Value)]) -> Result<geometry::T, Diagnostic> {
-    let Some(name) = assoc(fields, "attribute").and_then(text_of) else {
+pub fn with_planes(grain: i64, g: &geometry::T, fields: &V::Record) -> Result<geometry::T, Diagnostic> {
+    let Some(name) = fields.get_str("attribute").and_then(text_of) else {
         return err("E_ATTR_NAME", "sop/with_planes needs attribute as text.");
     };
-    let owner = options(fields)?.0;
-    match assoc(fields, "planes") {
-        Some(Value::Record(planes)) => match assoc(planes, "width") {
+    let owner = options(fields.get_str("owner"), fields.get_str("type"))?.0;
+    match fields.get_str("planes") {
+        Some(Value::Record(planes)) => match planes.get_str("width") {
             Some(Value::Int(w)) if (1..=4).contains(w) => {
                 let w = *w as usize;
                 let names = &["x", "y", "z", "w"][..w];
                 let kind = ["float", "vec2", "vec3", "vec4"][w - 1];
                 let values = if w == 1 {
-                    assoc(planes, "x").cloned().ok_or_else(|| fail("E_ATTR_TYPE", "sop/with_planes needs a planes record."))?
+                    planes.get_str("x").cloned().ok_or_else(|| fail("E_ATTR_TYPE", "sop/with_planes needs a planes record."))?
                 } else {
                     let mut out = Vec::new();
                     for n in names {
-                        out.push(((*n).to_owned(), assoc(planes, n).cloned().ok_or_else(|| fail("E_ATTR_TYPE", "sop/with_planes needs a planes record."))?));
+                        out.push(((*n).into(), planes.get_str(n).cloned().ok_or_else(|| fail("E_ATTR_TYPE", "sop/with_planes needs a planes record."))?));
                     }
-                    Value::Record(out)
+                    Value::Record(out.into())
                 };
                 write(grain, owner, kind, &name, &values, g)
             }
@@ -1508,21 +1508,21 @@ pub fn materialized_source(source: &node::T) -> node::T {
     build::with_input_use(InputUse::Cpu, &made)
 }
 
-type Origin = (Vec<String>, Vec<i64>);
+type Origin = (flow_check::workspace::Path, Vec<i64>);
 
 fn origin_of(by_source: &[(i64, i64)], id: i64) -> Option<i64> {
     by_source.iter().find(|(k, _)| *k == id).map(|(_, o)| *o)
 }
 
-fn captured_args(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term, args: flow_check::term_arena::RangeId) -> Vec<(String, Value)> {
-    term.arena().fields(args).iter().filter_map(|field| captured(bindings, &term.child(field.term)).map(|v| (term.name(field.name).to_owned(), v))).collect()
+fn captured_args(bindings: &dyn Fn(&str) -> Option<Value>, term: &Term, args: flow_check::term_arena::RangeId) -> Vec<(Symbol, Value)> {
+    term.arena().fields(args).iter().filter_map(|field| captured(bindings, &term.child(field.term)).map(|v| (term.symbol(field.name), v))).collect()
 }
 
-fn promoted<X: Clone>(args: &[(String, X)], target_of: &dyn Fn(&X) -> X) -> Vec<(String, X)> {
+fn promoted<X: Clone>(args: &[(Symbol, X)], target_of: &dyn Fn(&X) -> X) -> Vec<(Symbol, X)> {
     match args.iter().find(|(k, _)| k == "as_owner") {
         None => args.to_vec(),
         Some((_, target)) => {
-            let mut out = vec![("owner".to_owned(), target_of(target))];
+            let mut out = vec![("owner".into(), target_of(target))];
             out.extend(args.iter().filter(|(k, _)| k != "owner").cloned());
             out
         }
@@ -1531,8 +1531,8 @@ fn promoted<X: Clone>(args: &[(String, X)], target_of: &dyn Fn(&X) -> X) -> Vec<
 
 fn owner_origin(by_source: &[(i64, i64)], id: i64, parts: &[&str]) -> Option<Origin> {
     origin_of(by_source, id).map(|o| {
-        let mut p: Vec<String> = parts.iter().map(|s| (*s).to_owned()).collect();
-        p.push(o.to_string());
+        let mut p: flow_check::workspace::Path = parts.iter().map(|s| (*s).into()).collect();
+        p.push(o.to_string().into());
         (p, Vec::new())
     })
 }
@@ -1540,7 +1540,7 @@ fn owner_origin(by_source: &[(i64, i64)], id: i64, parts: &[&str]) -> Option<Ori
 fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
     let view = E::residual::residual_view(residual).ok()?;
     let bindings = |name: &str| view.bindings.iter().find(|(n, _)| n.as_ref() == name).map(|(_, v)| v.clone());
-    let topology_component: Option<(String, Vec<(String, Value)>)> = match term.node {
+    let topology_component: Option<(String, V::Record)> = match term.node {
         TNode::Get(id) if {
             let inner = term.child(term.arena().get(id).value);
             matches!(inner.node, TNode::Op(op) if inner.name(inner.arena().op(op).op) == "sop/topology")
@@ -1548,10 +1548,10 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             let get = term.arena().get(id);
             let inner = term.child(get.value);
             let TNode::Op(op) = inner.node else { unreachable!() };
-            Some((term.name(get.name).to_owned(), captured_args(&bindings, &inner, inner.arena().op(op).args)))
+            Some((term.name(get.name).to_owned(), captured_args(&bindings, &inner, inner.arena().op(op).args).into()))
         }
         _ => match captured(&bindings, term) {
-            Some(Value::Source(g)) if g.name == "sop/topology" => assoc(&g.fields, "component").and_then(text_of).map(|c| (c, g.fields.clone())),
+            Some(Value::Source(g)) if g.name == "sop/topology" => g.fields.get_str("component").and_then(text_of).map(|c| (c, g.fields.clone())),
             _ => None,
         },
     };
@@ -1564,7 +1564,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             TNode::Op(id) if ["array/int", "array/float", "array/vec2", "array/vec3", "array/vec4", "array/range"].contains(&term.name(term.arena().op(id).op)) => {
                 match term.arena().fields(term.arena().op(id).args).iter().find(|field| term.name(field.name) == "count").and_then(|field| captured(&bindings, &term.child(field.term))) {
                     Some(Value::Source(g) | Value::Struct(g)) if g.name == "sop/count" => {
-                        match (assoc(&g.fields, "geometry").and_then(geometry_id), assoc(&g.fields, "element").and_then(text_of)) {
+                        match (g.fields.get_str("geometry").and_then(geometry_id), g.fields.get_str("element").and_then(text_of)) {
                             (Some(id), Some(element)) if element == "points" => owner_origin(by_source, id, &["@sop-owner", "point"]),
                             _ => None,
                         }
@@ -1599,7 +1599,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
         return filled;
     }
     if let Some((component, args)) = topology_component {
-        let id = assoc(&args, "geometry").and_then(geometry_id)?;
+        let id = args.get_str("geometry").and_then(geometry_id)?;
         return match component.as_str() {
             "vertex_points" => owner_origin(by_source, id, &["@sop-owner", "vertex"]),
             "kinds" => owner_origin(by_source, id, &["@sop-owner", "primitive"]),
@@ -1608,7 +1608,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
         };
     }
     let owner_edge = |v: Option<&Option<Value>>| matches!(v, Some(Some(Value::Text(t))) if t.as_ref() == b"edge");
-    let (edge, args): (bool, Option<Vec<(String, Value)>>) = match term.node {
+    let (edge, args): (bool, Option<V::Record>) = match term.node {
         TNode::Get(id) if {
             let get = term.arena().get(id);
             let inner = term.child(get.value);
@@ -1616,14 +1616,14 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
         } => {
             let inner = term.child(term.arena().get(id).value);
             let TNode::Op(op) = inner.node else { unreachable!() };
-            (true, Some(captured_args(&bindings, &inner, inner.arena().op(op).args)))
+            (true, Some(captured_args(&bindings, &inner, inner.arena().op(op).args).into()))
         }
         TNode::Op(id) if matches!(term.name(term.arena().op(id).op), "sop/attr" | "sop/group") => {
             let call = term.arena().op(id);
             let op = term.name(call.op);
-            let resolved: Vec<(String, Option<Value>)> = term.arena().fields(call.args).iter().map(|field| {
+            let resolved: Vec<(Symbol, Option<Value>)> = term.arena().fields(call.args).iter().map(|field| {
                 let t = term.child(field.term);
-                (term.name(field.name).to_owned(), match t.node {
+                (term.symbol(field.name), match t.node {
                     TNode::Text(id) => Some(Value::Text(t.arena().shared_bytes(id))),
                     _ => captured(&bindings, &t),
                 })
@@ -1631,33 +1631,40 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
             let resolved = if op == "sop/group" { promoted(&resolved, &|x: &Option<Value>| x.clone()) } else { resolved };
             let edge = op == "sop/group" && owner_edge(resolved.iter().find(|(k, _)| k == "owner").map(|(_, v)| v));
             let missing = resolved.iter().any(|(n, v)| ["owner", "type", "as_owner"].contains(&n.as_str()) && v.is_none());
-            (edge, if missing { None } else { Some(resolved.into_iter().filter_map(|(n, v)| v.map(|v| (n, v))).collect()) })
+            (edge, if missing { None } else { Some(resolved.into_iter().filter_map(|(n, v)| v.map(|v| (n, v))).collect::<Vec<_>>().into()) })
         }
         _ => match captured(&bindings, term) {
-            Some(Value::Struct(g)) if g.name == "sop/attr" => (false, Some(g.fields)),
-            Some(Value::Source(g)) if g.name == "sop/attr" || g.name == "sop/attr_checked" => (false, Some(g.fields)),
-            Some(Value::Source(g)) if g.name == "sop/edges" => (true, Some(g.fields)),
+            Some(Value::Struct(g)) if g.name == "sop/attr" => (false, Some(g.fields.clone())),
+            Some(Value::Source(g)) if g.name == "sop/attr" || g.name == "sop/attr_checked" => (false, Some(g.fields.clone())),
+            Some(Value::Source(g)) if g.name == "sop/edges" => (true, Some(g.fields.clone())),
             Some(Value::Source(g)) if g.name == "sop/group" => {
-                let args = promoted(&g.fields, &|x: &Value| x.clone());
-                (matches!(assoc(&args, "owner"), Some(Value::Text(t)) if t.as_ref() == b"edge"), Some(args))
+                let args = match g.fields.get_str("as_owner") {
+                    None => g.fields.clone(),
+                    Some(target) => {
+                        let mut fields = vec![("owner".into(), target.clone())];
+                        fields.extend(g.fields.iter().filter(|(key, _)| key != "owner").cloned());
+                        fields.into()
+                    }
+                };
+                (matches!(args.get_str("owner"), Some(Value::Text(t)) if t.as_ref() == b"edge"), Some(args))
             }
             _ => (false, None),
         },
     };
     let args = args?;
-    let id = assoc(&args, "geometry").and_then(geometry_id)?;
+    let id = args.get_str("geometry").and_then(geometry_id)?;
     if edge {
-        return origin_of(by_source, id).map(|o| (vec!["@sop-edges".to_owned(), o.to_string()], Vec::new()));
+        return origin_of(by_source, id).map(|o| (vec!["@sop-edges".into(), o.to_string().into()], Vec::new()));
     }
-    let (owner, kind) = options(&args).ok()?;
+    let (owner, kind) = options(args.get_str("owner"), args.get_str("type")).ok()?;
     if ["float", "int", "vec2", "vec3", "vec4", "text"].contains(&kind.as_str()) {
         owner_origin(by_source, id, &["@sop-owner", owner_name(owner)])
     } else if kind == "float_array" || kind == "int_array" {
-        match assoc(&args, "component") {
+        match args.get_str("component") {
             Some(Value::Text(c)) if c.as_ref() == b"offsets" => owner_origin(by_source, id, &["@sop-csr-offsets", owner_name(owner)]),
             Some(Value::Text(c)) if c.as_ref() == b"values" => {
-                let name = assoc(&args, "attribute").and_then(text_of)?;
-                Some((vec!["@sop-csr-values".into(), owner_name(owner).into(), name, kind.clone(), id.to_string()], Vec::new()))
+                let name = args.get_str("attribute").and_then(text_of)?;
+                Some((vec!["@sop-csr-values".into(), owner_name(owner).into(), name.into(), kind.into(), id.to_string().into()], Vec::new()))
             }
             _ => None,
         }
@@ -1693,11 +1700,11 @@ fn borrowed_value(geometry: &GeometryLookup, value: &Value) -> Result<Option<Vec
     match value {
         Value::Struct(g) | Value::Source(g) if g.name == "sop/attr" => {
             let args = &g.fields;
-            match (assoc(args, "geometry").and_then(geometry_id), assoc(args, "attribute").and_then(text_of)) {
+            match (args.get_str("geometry").and_then(geometry_id), args.get_str("attribute").and_then(text_of)) {
                 (Some(id), Some(name)) => match geometry(id) {
                     None => not_cooked(),
                     Some(g) => {
-                        let (owner, kind) = options(args)?;
+                        let (owner, kind) = options(args.get_str("owner"), args.get_str("type"))?;
                         let held = typed_storage(owner, &name, &kind, &g)?;
                         columns_of(held_storage(&held)?)
                     }
@@ -1733,9 +1740,9 @@ fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &
             }
             match (argument("geometry"), argument("attribute")) {
                 (Some(g), Some(a)) => {
-                    let mut fields = vec![("geometry".to_owned(), g), ("attribute".to_owned(), a)];
-                    fields.extend(["owner", "type"].iter().filter_map(|k| argument(k).map(|v| ((*k).to_owned(), v))));
-                    borrowed_value(geometry, &struct_value("sop/attr", term.ty().clone(), fields))
+                    let mut fields = vec![("geometry".into(), g), ("attribute".into(), a)];
+                    fields.extend(["owner", "type"].iter().filter_map(|k| argument(k).map(|v| ((*k).into(), v))));
+                    borrowed_value(geometry, &struct_value("sop/attr", term.ty().clone(), fields.into()))
                 }
                 _ => Ok(None),
             }
@@ -1755,7 +1762,7 @@ fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &
 #[allow(clippy::too_many_arguments)]
 fn write_planes(
     state: Option<&E::State>,
-    elems: Option<&[(String, Value)]>,
+    elems: Option<&[(Symbol, Value)]>,
     gpu: Option<&gpu::Config>,
     strict: bool,
     resolve: &flow_ir::core_exec::ResolveFn,
@@ -1890,7 +1897,7 @@ fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
 #[allow(clippy::too_many_arguments)]
 fn write_constant(
     state: Option<&E::State>,
-    elems: Option<&[(String, Value)]>,
+    elems: Option<&[(Symbol, Value)]>,
     resolve: &flow_ir::core_exec::ResolveFn,
     owner: Owner,
     kind: &str,
@@ -1902,9 +1909,9 @@ fn write_constant(
     let Some(c) = prepared else { return Ok(None) };
     let options = executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve: Some(resolve.clone()), strict: true, ..Default::default() };
     let count = executor::force(&c.count, &options, live)?;
-    let mut args = vec![("count".to_owned(), count)];
+    let mut args = vec![("count".into(), count)];
     if let Some(program) = &c.value {
-        args.push(("value".to_owned(), executor::force(program, &options, live)?));
+        args.push(("value".into(), executor::force(program, &options, live)?));
     }
     let sample = op::constant_array_descriptor(&c.op.name, &args)?;
     write_constant_source(4096, owner, kind, name, None, None, &sample, target)
@@ -1983,7 +1990,7 @@ pub mod display_sink {
 
     /// Whether a write site with no CPU measurement stays on the device: for its first two priced
     /// cooks, or while the device cannot price it. False: sample the CPU under a budget.
-    pub fn device_first(evidence: &gpu::Evidence, site: &str, device_seconds: Option<f64>) -> bool {
+    pub fn device_first(evidence: &gpu::Evidence, site: &FId, device_seconds: Option<f64>) -> bool {
         if device_seconds.is_none() {
             return true;
         }
@@ -2002,12 +2009,12 @@ pub mod display_sink {
     }
 
     /// The measured seconds of an attribute write site's CPU route at `count` elements.
-    pub fn cpu_write(evidence: &gpu::Evidence, site: &str, count: i64) -> Option<f64> {
+    pub fn cpu_write(evidence: &gpu::Evidence, site: &FId, count: i64) -> Option<f64> {
         with_rates(evidence, |r| priced(r.writes.get(site).map_or(&[][..], |v| v.as_slice()), count))
     }
 
     /// One CPU cook of a write site.
-    pub fn observe_cpu_write(evidence: &gpu::Evidence, site: &str, count: i64, seconds: f64) {
+    pub fn observe_cpu_write(evidence: &gpu::Evidence, site: &FId, count: i64, seconds: f64) {
         if count > 0 {
             with_rates(evidence, |r| {
                 let mut old = r.writes.get(site).cloned().unwrap_or_default();
@@ -2030,7 +2037,7 @@ pub struct NodeOptions {
     pub state: Option<E::State>,
     pub reference: bool,
     pub strict: bool,
-    pub elems: Option<Vec<(String, Value)>>,
+    pub elems: Option<Vec<(Symbol, Value)>>,
     pub profile: Option<Arc<flow_ir::flow_ir::profile::T>>,
     pub approx: flow_check::workspace::Paths,
     /// the cache identity text of the kernel that built the node (`kernel_source`)
@@ -2072,7 +2079,7 @@ struct Kernel {
     state: Option<E::State>,
     reference: bool,
     strict: bool,
-    elems: Option<Vec<(String, Value)>>,
+    elems: Option<Vec<(Symbol, Value)>>,
     gpu: Option<gpu::Config>,
     guard: Option<Value>,
     prior: Vec<(String, String, Value)>,
@@ -2085,13 +2092,9 @@ struct Kernel {
     selected: bool,
     program: Result<executor::Program, Diagnostic>,
     lone_record: Option<Result<executor::Program, Diagnostic>>,
-    owned_fields: Vec<String>,
+    owned_fields: Vec<Symbol>,
     constant: Option<Constant>,
     selected_constant: Option<(Constant, Result<executor::Program, Diagnostic>)>,
-}
-
-fn site_of(id: &FId) -> String {
-    format!("{}#{}", id.0.join("/"), id.1.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
 }
 
 impl Kernel {
@@ -2108,7 +2111,7 @@ impl Kernel {
         };
         let live = context::input(context).clone();
         // the site and count a measured decision asked about, and when it left this cook to the CPU
-        let asked: Arc<Mutex<Option<(Arc<gpu::Evidence>, String, i64)>>> = Arc::new(Mutex::new(None));
+        let asked: Arc<Mutex<Option<(Arc<gpu::Evidence>, FId, i64)>>> = Arc::new(Mutex::new(None));
         let cpu_began: Mutex<Option<f64>> = Mutex::new(None);
         // set when this cook samples the CPU: when that sample has lost, and its cost
         let probe: Arc<Mutex<Option<(f64, f64)>>> = Arc::new(Mutex::new(None));
@@ -2130,8 +2133,8 @@ impl Kernel {
             let guarded = guarded.clone()?;
             let grain = context::grain(context);
             let (owner, kind, name) = (self.owner, self.kind.as_str(), self.name.as_str());
-            let mut writes: Vec<(String, String, String)> = self.prior.iter().enumerate().map(|(i, (n, k, _))| (format!("w{i}"), n.clone(), k.clone())).collect();
-            writes.push(("values".to_owned(), self.name.clone(), self.kind.clone()));
+            let mut writes: Vec<(String, String, String)> = self.prior.iter().enumerate().map(|(i, (n, k, _))| (format!("w{i}").into(), n.clone(), k.clone())).collect();
+            writes.push(("values".into(), self.name.clone(), self.kind.clone()));
             let write = |install: &dyn Fn(&str, &str, &str, &geometry::T) -> Result<geometry::T, Diagnostic>| -> Result<geometry::T, Diagnostic> {
                 let mut g = geometries[0].clone();
                 for (key, n, k) in &writes {
@@ -2142,7 +2145,7 @@ impl Kernel {
             // the record's outputs kept on the device, installed as deferred storage; `None` leaves
             // it to the CPU
             let on_device = |program: &executor::Program| -> Result<Option<geometry::T>, Diagnostic> {
-                let device: Option<Vec<(String, gpu::Planes)>> = if self.reference || self.elems.is_some() || context::device_refused(context, node_id) {
+                let device: Option<Vec<(Symbol, gpu::Planes)>> = if self.reference || self.elems.is_some() || context::device_refused(context, node_id) {
                     None
                 } else {
                     let resident: Option<Arc<dyn Fn(&Value) -> Option<(Value, i64)> + Send + Sync>> = if geometries.iter().all(|g| geometry::releasers(g).is_empty()) {
@@ -2167,7 +2170,7 @@ impl Kernel {
                     let cpu_cost: Option<Arc<dyn Fn(&FId, i64) -> Option<f64> + Send + Sync>> = self.gpu.as_ref().filter(|gpu| gpu.backend.is_some()).map(|gpu| gpu.evidence.clone()).map(|evidence| {
                         let asked = asked.clone();
                         Arc::new(move |owner: &FId, count: i64| {
-                            let site = site_of(owner);
+                            let site = owner.clone();
                             *asked.lock().unwrap() = Some((evidence.clone(), site.clone(), count));
                             display_sink::cpu_write(&evidence, &site, count)
                         }) as Arc<dyn Fn(&FId, i64) -> Option<f64> + Send + Sync>
@@ -2178,7 +2181,7 @@ impl Kernel {
                         let clock = self.clock.clone();
                         let consumers = context::cpu_consumers(context, node_id).unwrap_or(0);
                         Arc::new(move |owner: &FId, count: i64, device_seconds: Option<f64>| {
-                            let site = site_of(owner);
+                            let site = owner.clone();
                             *asked.lock().unwrap() = Some((evidence.clone(), site.clone(), count));
                             // with a declared CPU reader the device route reads back: a write the CPU
                             // is expected to cook faster than the device dispatches measures the CPU first
@@ -2214,7 +2217,7 @@ impl Kernel {
                 };
                 // in flight: the session settles the dispatch before a CPU reader, and recooks this
                 // write on the CPU if its status fails
-                let kept: Vec<(String, Arc<gpu::Planes>)> = fields.into_iter().map(|(k, p)| (k, Arc::new(p))).collect();
+                let kept: Vec<(Symbol, Arc<gpu::Planes>)> = fields.into_iter().map(|(k, p)| (k, Arc::new(p))).collect();
                 if let Some((_, first)) = kept.first() {
                     let first = first.clone();
                     context::defer(context, node_id, Box::new(move || first.settle()));
@@ -2230,7 +2233,7 @@ impl Kernel {
                         let values = match (k, data.len()) {
                             ("int", 1) => Value::Int_array(Arc::new(data[0].iter().map(|x| *x as i64).collect())),
                             (_, 1) => float_array(data.into_iter().next().unwrap()),
-                            _ => Value::Record(Vec::new()),
+                            _ => Value::Record(Vec::new().into()),
                         };
                         write_storage(&[], grain, owner, k, n, &values, g)
                     }
@@ -2262,8 +2265,8 @@ impl Kernel {
                 }
                 return match executor::force(&program, &force_options(), &live)? {
                     Value::Record(fields) => write(&|key, n, k, g| {
-                        let owned: Vec<&str> = if key == "values" { self.owned_fields.iter().map(String::as_str).collect() } else { Vec::new() };
-                        let value = assoc(&fields, key).ok_or_else(|| fail("E_ATTR_TYPE", "A fused write's data must be a record."))?;
+                        let owned: Vec<&str> = if key == "values" { self.owned_fields.iter().map(|name| name.as_str()).collect() } else { Vec::new() };
+                        let value = fields.get_str(key).ok_or_else(|| fail("E_ATTR_TYPE", "A fused write's data must be a record."))?;
                         write_storage(&owned, grain, owner, k, n, value, g)
                     }),
                     _ => err("E_ATTR_TYPE", "A fused write's data must be a record."),
@@ -2275,15 +2278,15 @@ impl Kernel {
                 let fields = match &self.selected_constant {
                     None => force(&program)?,
                     Some((c, rest)) => {
-                        let mut args = vec![("count".to_owned(), force(&c.count)?)];
+                        let mut args = vec![("count".into(), force(&c.count)?)];
                         if let Some(v) = &c.value {
-                            args.push(("value".to_owned(), force(v)?));
+                            args.push(("value".into(), force(v)?));
                         }
                         let count = op::constant_array_descriptor(&c.op.name, &args)?;
                         let rest = rest.clone()?;
                         match force(&rest)? {
                             Value::Record(mut fields) => {
-                                fields.insert(0, ("values".to_owned(), count));
+                                fields.insert(0, ("values".into(), count));
                                 Value::Record(fields)
                             }
                             _ => return err("E_ATTR_TYPE", "Selected write data must be a record."),
@@ -2291,7 +2294,7 @@ impl Kernel {
                     }
                 };
                 let Value::Record(fields) = fields else { return err("E_ATTR_TYPE", "Selected write data must be a record.") };
-                return match (assoc(&fields, "values"), assoc(&fields, "selection"), assoc(&fields, "default")) {
+                return match (fields.get_str("values"), fields.get_str("selection"), fields.get_str("default")) {
                     (Some(values), Some(selection), Some(default)) => {
                         if context::cancelled(context) {
                             cancelled_err()
@@ -2324,7 +2327,7 @@ impl Kernel {
             if context::cancelled(context) {
                 return cancelled_err();
             }
-            let owned: Vec<&str> = self.owned_fields.iter().map(String::as_str).collect();
+            let owned: Vec<&str> = self.owned_fields.iter().map(|name| name.as_str()).collect();
             write_storage(&owned, grain, owner, kind, name, &values, &geometries[0])
         };
         let expired: Arc<dyn Fn() -> bool + Send + Sync> = {
@@ -2367,16 +2370,16 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
     assert!(!(selected && !o.prior.is_empty()), "Attribute_kernel.node: a selected write with prior");
     let data = if !o.prior.is_empty() {
         // a fused chain's writes, one record program: the earlier ones, then this one
-        let mut fields: Vec<(String, Value)> = o.prior.iter().enumerate().map(|(i, (_, _, v))| (format!("w{i}"), v.clone())).collect();
-        fields.push(("values".to_owned(), values.clone()));
-        Value::Record(fields)
+        let mut fields: Vec<(Symbol, Value)> = o.prior.iter().enumerate().map(|(i, (_, _, v))| (format!("w{i}").into(), v.clone())).collect();
+        fields.push(("values".into(), values.clone()));
+        Value::Record(fields.into())
     } else if !selected {
         values.clone()
     } else {
-        let mut fields = vec![("values".to_owned(), values.clone())];
-        fields.extend(o.selection.clone().map(|v| ("selection".to_owned(), v)));
-        fields.extend(o.default.clone().map(|v| ("default".to_owned(), v)));
-        Value::Record(fields)
+        let mut fields = vec![("values".into(), values.clone())];
+        fields.extend(o.selection.clone().map(|v| ("selection".into(), v)));
+        fields.extend(o.default.clone().map(|v| ("default".into(), v)));
+        Value::Record(fields.into())
     };
     let program = prepare(o.profile.clone(), o.strict, Some(o.approx.clone()), Some(Sink::Sop_input), &sources, &inputs, &data);
     // a lone write as a one-field record, for the device (Executor::record_on_device)
@@ -2388,7 +2391,7 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
             Some(Sink::Sop_input),
             &sources,
             &inputs,
-            &Value::Record(vec![("values".to_owned(), values.clone())]),
+            &Value::Record(vec![("values".into(), values.clone())].into()),
         )),
         _ => None,
     };
@@ -2401,7 +2404,7 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
     let selected_constant = match (selected, constant.clone(), &o.selection, &o.default) {
         (true, Some(constructor), Some(selection), Some(default)) => Some((
             constructor,
-            prepare(None, o.strict, None, None, &sources, &inputs, &Value::Record(vec![("selection".to_owned(), selection.clone()), ("default".to_owned(), default.clone())])),
+            prepare(None, o.strict, None, None, &sources, &inputs, &Value::Record(vec![("selection".into(), selection.clone()), ("default".into(), default.clone())].into())),
         )),
         _ => None,
     };
@@ -2422,14 +2425,14 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
         parameters.extend(key(guard));
     }
     if let Some(elems) = &o.elems {
-        parameters.extend(key(&Value::Record(elems.clone())));
+        parameters.extend(key(&Value::Record(elems.clone().into())));
     }
     if let Some(state) = &o.state {
         write!(parameters, "{}", E::state_stamp(state)).unwrap();
     }
     let deps = dependencies(&match &o.guard {
         None => data.clone(),
-        Some(g) => Value::Record(vec![("d".to_owned(), data.clone()), ("w".to_owned(), g.clone())]),
+        Some(g) => Value::Record(vec![("d".into(), data.clone()), ("w".into(), g.clone())].into()),
     });
     let reads_of = if selected {
         let mut r = reads(&data);
@@ -2673,7 +2676,7 @@ use rdk_ops::line_geometry;
     fn csr_writer_finite_scan() {
         let geo = points(1);
         let write = |data: &[f64]| {
-            write(97, Owner::Point, "float_array", "csr", &Value::Record(vec![("offsets".into(), Value::Int_array(Arc::new(vec![0, data.len() as i64]))), ("values".into(), float_array(data.to_vec()))]), &geo)
+            write(97, Owner::Point, "float_array", "csr", &Value::Record(vec![("offsets".into(), Value::Int_array(Arc::new(vec![0, data.len() as i64]))), ("values".into(), float_array(data.to_vec()))].into()), &geo)
         };
         let data = [-0.0, 0.0, f64::MAX];
         let written = write(&data).unwrap();
@@ -2701,7 +2704,7 @@ use rdk_ops::line_geometry;
             Owner::Point,
             "float_array",
             "csr",
-            &Value::Record(vec![("offsets".into(), Value::Int_array(Arc::new(vec![0]))), ("values".into(), float_array(vec![]))]),
+            &Value::Record(vec![("offsets".into(), Value::Int_array(Arc::new(vec![0]))), ("values".into(), float_array(vec![]))].into()),
             &points(0),
         );
         assert!(empty.is_ok());
@@ -2798,7 +2801,7 @@ use rdk_ops::line_geometry;
             ];
             for (kind, fill) in fills {
                 let name = format!("array/{kind}");
-                let args = vec![("count".to_owned(), Value::Int(count as i64)), ("value".to_owned(), fill.clone())];
+                let args = vec![("count".into(), Value::Int(count as i64)), ("value".into(), fill.clone())];
                 let marker = op::constant_array_descriptor(&name, &args).unwrap();
                 if kind == "float" {
                     let selection = Value::Int_array(Arc::new(vec![1; count]));
@@ -2829,16 +2832,16 @@ use rdk_ops::line_geometry;
             }
         }
         for source in [
-            source_value("$core/constant-array/array/vec4", array_of(Ty::Int), vec![("count".into(), Value::Int(1)), ("value".into(), Value::Vec4(0.0, 0.0, 0.0, 0.0))]),
-            source_value("$core/constant-array/array/vec4", array_of(Ty::Vec4), vec![]),
-            source_value("$core/constant-array/missing", array_of(Ty::Float), vec![("count".into(), Value::Int(1))]),
+            source_value("$core/constant-array/array/vec4", array_of(Ty::Int), vec![("count".into(), Value::Int(1)), ("value".into(), Value::Vec4(0.0, 0.0, 0.0, 0.0))].into()),
+            source_value("$core/constant-array/array/vec4", array_of(Ty::Vec4), vec![].into()),
+            source_value("$core/constant-array/missing", array_of(Ty::Float), vec![("count".into(), Value::Int(1))].into()),
         ] {
             assert_eq!(code(resolve(None, &geo, &source)), "E_ARRAY_TYPE");
         }
     }
 
     fn planar_record(planes: &[Vec<f64>]) -> Value {
-        Value::Record(planes.iter().enumerate().map(|(i, d)| (["x", "y", "z", "w"][i].to_owned(), float_array(d.clone()))).collect())
+        Value::Record(planes.iter().enumerate().map(|(i, d)| (["x", "y", "z", "w"][i].into(), float_array(d.clone()))).collect::<Vec<_>>().into())
     }
 
     fn planar_oracle(owner: Owner, name: &str, planes: &[Vec<f64>], original: &geometry::T) -> geometry::T {
@@ -2902,17 +2905,17 @@ use rdk_ops::line_geometry;
                         }
                     };
                     let Value::Record(fields) = &values else { unreachable!() };
-                    let rest: Vec<_> = fields[1..].to_vec();
-                    let mut extra = vec![("extra".to_owned(), float_array(vec![]))];
+                    let rest: Vec<_> = fields.iter().skip(1).cloned().collect();
+                    let mut extra = vec![("extra".into(), float_array(vec![]))];
                     extra.extend(fields.clone());
                     let mut dup = vec![fields[0].clone()];
                     dup.extend(fields.clone());
-                    let mut int_x = vec![("x".to_owned(), Value::Int_array(Arc::new(vec![0; count])))];
-                    int_x.extend(fields[1..].iter().cloned());
-                    let mut vec3_x = vec![("x".to_owned(), Value::Floats(3, Arc::new(vec![])))];
-                    vec3_x.extend(fields[1..].iter().cloned());
+                    let mut int_x = vec![("x".into(), Value::Int_array(Arc::new(vec![0; count])))];
+                    int_x.extend(fields.iter().skip(1).cloned());
+                    let mut vec3_x = vec![("x".into(), Value::Floats(3, Arc::new(vec![])))];
+                    vec3_x.extend(fields.iter().skip(1).cloned());
                     for f in [rest, extra, dup, int_x, vec3_x] {
-                        error(&Value::Record(f), "E_ATTR_TYPE", None);
+                        error(&Value::Record(f.into()), "E_ATTR_TYPE", None);
                     }
                     let mut bad = data.clone();
                     bad[0] = vec![f64::NAN; count + 1];
@@ -2969,18 +2972,18 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let forms = syntax::parse(&source).unwrap();
         let (checked, ds) = W::check(crate::operators::all(), false, false, None, &Catalog { version: 1, kinds: vec![] }, &forms);
         let checked = checked.unwrap_or_else(|| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")));
-        let inputs = vec![("g".to_owned(), vec![("geo".to_owned(), Value::Deferred(ty::geometry(), 7))])];
+        let inputs = vec![("g".into(), vec![("geo".into(), Value::Deferred(ty::geometry(), 7))])];
         let evaluation = E::r#static(&checked, true, Some(&inputs)).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         evaluation.records.iter().find(|(p, _)| p == &vec!["g".to_owned(), "tested".to_owned()]).expect("tested record").1[0].1.clone()
     }
 
     /// OCaml `fields` of a geometry without its points: the topology planes as Flow arrays.
-    fn topology_fields(g: &geometry::T) -> Vec<(String, Value)> {
+    fn topology_fields(g: &geometry::T) -> Vec<(Symbol, Value)> {
         let view = topology::view::view(geometry::topology(g)).unwrap();
         vec![
-            ("vertex_points".to_owned(), Value::Int_array(Arc::new(view.vertex_points.to_vec()))),
-            ("primitive_offsets".to_owned(), Value::Int_array(Arc::new(view.primitive_offsets.to_vec()))),
-            ("kinds".to_owned(), Value::Int_array(Arc::new(view.primitive_kinds.iter().map(|k| i64::from(*k)).collect()))),
+            ("vertex_points".into(), Value::Int_array(Arc::new(view.vertex_points.to_vec()))),
+            ("primitive_offsets".into(), Value::Int_array(Arc::new(view.primitive_offsets.to_vec()))),
+            ("kinds".into(), Value::Int_array(Arc::new(view.primitive_kinds.iter().map(|k| i64::from(*k)).collect()))),
         ]
     }
 
@@ -2997,7 +3000,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let resolve_fn = resolver(original.clone());
         let queried = evaluate("(sop/topology geo)");
         let live = input::at_time(0.0);
-        let expected = Value::Record(topology_fields(&original));
+        let expected = Value::Record(topology_fields(&original).into());
         let result = E::host::force_reference(&queried, &live, None, None, Some(resolve_fn.clone())).unwrap();
         assert_eq!(result, expected, "topology kind codes or plane order differ");
         let before = bits(&original);
@@ -3106,7 +3109,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn missing_geometry_source_is_refused() {
         let lookup: GeometryLookup = Arc::new(|_| None);
         for geometry in [Value::No_geo, Value::Deferred(ty::geometry(), 7), Value::Deferred(Ty::Float, 7)] {
-            let source = source_value("sop/topology", array_of(Ty::Int), vec![("geometry".into(), geometry), ("component".into(), Value::Text(b"vertex_points".as_slice().into()))]);
+            let source = source_value("sop/topology", array_of(Ty::Int), vec![("geometry".into(), geometry), ("component".into(), Value::Text(b"vertex_points".as_slice().into()))].into());
             assert_eq!(code(resolve(None, &lookup, &source)), "E_DATA_SOURCE");
         }
     }
@@ -3121,23 +3124,23 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     }
 
     fn attr_source(name: &str, attribute: &str, extra: &[(&str, Value)]) -> Value {
-        let mut args = vec![("geometry".to_owned(), Value::Deferred(ty::geometry(), 7)), ("attribute".to_owned(), Value::Text(attribute.as_bytes().into()))];
-        args.extend(extra.iter().map(|(k, v)| ((*k).to_owned(), v.clone())));
-        source_value(name, array_of(Ty::Vec3), args)
+        let mut args = vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("attribute".into(), Value::Text(attribute.as_bytes().into()))];
+        args.extend(extra.iter().map(|(k, v)| ((*k).into(), v.clone())));
+        source_value(name, array_of(Ty::Vec3), args.into())
     }
 
     /// `sources` and `reads` of plain source values: named attributes, topology-only readers and
     /// opaque geometry.
     #[test]
     fn sources_and_reads_of_values() {
-        let value = Value::Record(vec![("a".into(), attr_source("sop/attr", "P", &[])), ("b".into(), Value::Deferred(ty::geometry(), 3))]);
+        let value = Value::Record(vec![("a".into(), attr_source("sop/attr", "P", &[])), ("b".into(), Value::Deferred(ty::geometry(), 3))].into());
         assert_eq!(sources(&value), vec![3, 7]);
         assert_eq!(reads(&value), vec!["*".to_owned()], "a bare geometry is opaque");
         let named = Value::List(Arc::new(vec![attr_source("sop/attr", "P", &[]), attr_source("sop/attr_checked", "Cd", &[]), attr_source("sop/attr", "P", &[])]));
         assert_eq!(reads(&named), vec!["Cd".to_owned(), "P".to_owned()]);
-        let topology = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), Value::Text(b"points".as_slice().into()))]);
+        let topology = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), Value::Text(b"points".as_slice().into()))].into());
         assert!(reads(&topology).is_empty(), "topology-only readers read no attribute");
-        let names = source_value("sop/attr_names", array_of(Ty::Text), vec![("geometry".into(), Value::Deferred(ty::geometry(), 7))]);
+        let names = source_value("sop/attr_names", array_of(Ty::Text), vec![("geometry".into(), Value::Deferred(ty::geometry(), 7))].into());
         assert_eq!(reads(&names), vec!["*".to_owned()]);
         assert!(sources(&Value::Int(1)).is_empty());
     }
@@ -3212,14 +3215,14 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn context_sources_specialize() {
         let context = context::create(context::Options { frame: Some(5), time: Some(1.5), seed: Some(42), ..Default::default() }).unwrap();
         let lookup = no_geometry();
-        let source = |name: &str, extra: &[(&str, Value)]| source_value(name, Ty::Float, extra.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect());
+        let source = |name: &str, extra: &[(&str, Value)]| source_value(name, Ty::Float, extra.iter().map(|(k, v)| ((*k).into(), v.clone())).collect::<Vec<_>>().into());
         assert_eq!(resolve(Some(&context), &lookup, &source("sop/context_frame", &[])).unwrap(), Value::Float(5.0));
         assert_eq!(resolve(Some(&context), &lookup, &source("sop/context_time", &[])).unwrap(), Value::Float(1.5));
         let seeded = source("sop/context_seed", &[("namespace", Value::Text(b"n".as_slice().into())), ("salt", Value::Int(3))]);
         let expected = seed_for(3, 42, "n", "");
         assert_eq!(resolve(Some(&context), &lookup, &seeded).unwrap(), Value::Int(expected));
-        let record = Value::Record(vec![("t".into(), source("sop/context_time", &[])), ("k".into(), Value::Int(1))]);
-        assert_eq!(specialize(&context, &record), Value::Record(vec![("t".into(), Value::Float(1.5)), ("k".into(), Value::Int(1))]));
+        let record = Value::Record(vec![("t".into(), source("sop/context_time", &[])), ("k".into(), Value::Int(1))].into());
+        assert_eq!(specialize(&context, &record), Value::Record(vec![("t".into(), Value::Float(1.5)), ("k".into(), Value::Int(1))].into()));
         assert_eq!(context_reads(&record), D::one(D::Fact::Time));
         let forms=flow_syntax::syntax::parse("(workspace w (graph g :context value [(bias : float 0)] (let* [f (fn [(x : float)] (+ x bias))] 0)))").unwrap();
         let (workspace,diagnostics)=W::check(&[],false,false,None,&flow_check::catalog::Catalog {version:1,kinds:vec![]},&forms);
@@ -3249,6 +3252,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     /// device-first cooks per site.
     #[test]
     fn display_sink_prices() {
+        let site: FId = (vec!["site".into()], Vec::new());
         assert_eq!(display_sink::priced(&[(100, 2.0)], 10), None);
         // the two samples nearest 400 are 100 and 1000; the cheaper per-unit rate wins
         assert_eq!(display_sink::priced(&[(100, 3.0), (1000, 2.0), (1_000_000, 0.5)], 400), Some(2.0 * 400.0));
@@ -3260,13 +3264,13 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(display_sink::rates(&backend), (0.01, 0.02));
         display_sink::observe_draw(&backend, 100, 0.5);
         assert_eq!(display_sink::rates(&backend).0, 0.01 + 0.005);
-        assert!(display_sink::device_first(&backend, "site", None));
-        assert!(display_sink::device_first(&backend, "site", Some(1.0)));
-        assert!(display_sink::device_first(&backend, "site", Some(1.0)));
-        assert!(!display_sink::device_first(&backend, "site", Some(1.0)), "the third priced cook samples the CPU");
-        assert_eq!(display_sink::cpu_write(&backend, "site", 10), None);
-        display_sink::observe_cpu_write(&backend, "site", 10, 1.0);
-        display_sink::observe_cpu_write(&backend, "site", 20, 4.0);
-        assert_eq!(display_sink::cpu_write(&backend, "site", 10), Some(1.0));
+        assert!(display_sink::device_first(&backend, &site, None));
+        assert!(display_sink::device_first(&backend, &site, Some(1.0)));
+        assert!(display_sink::device_first(&backend, &site, Some(1.0)));
+        assert!(!display_sink::device_first(&backend, &site, Some(1.0)), "the third priced cook samples the CPU");
+        assert_eq!(display_sink::cpu_write(&backend, &site, 10), None);
+        display_sink::observe_cpu_write(&backend, &site, 10, 1.0);
+        display_sink::observe_cpu_write(&backend, &site, 20, 4.0);
+        assert_eq!(display_sink::cpu_write(&backend, &site, 10), Some(1.0));
     }
 }

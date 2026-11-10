@@ -29,7 +29,7 @@ fn host_value(body: &str, data: Vec<f64>) -> Value {
         (Some(ws), ds) if ds.is_empty() => ws,
         (_, ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join(";")),
     };
-    let inputs = vec![("g".to_owned(), vec![("data".to_owned(), Value::Floats(3, Arc::new(data)))])];
+    let inputs = vec![("g".to_owned(), vec![("data".into(), Value::Floats(3, Arc::new(data)))])];
     let evaluation = ((E::static_with(&ws, false, Some(&inputs), None))).unwrap_or_else(|d| die(d));
     evaluation.results.iter().find(|(n, _)| n == "g").expect("g").1.clone()
 }

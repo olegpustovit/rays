@@ -210,7 +210,7 @@ fn operator_cases(cases: &[(&str, &str)], failures: &mut Vec<String>) -> usize {
         let source = format!("(workspace w (graph g :context value (let* [tested {body}] 0.)))");
         let ws = ts::check_workspace(&source);
         let evaluation = ok(E::r#static(&ws, true, None));
-        let path = vec!["g".to_owned(), "tested".to_owned()];
+        let path: flow_check::workspace::Path = vec!["g".into(), "tested".into()];
         let value = evaluation.records.iter().find(|(p, _)| *p == path).expect("tested record").1[0].1.clone();
         let Value::Residual(r) = &value else { panic!("Not live: {body}") };
         let core = core_lower::lower(None, None, false, None, None, *r).unwrap_or_else(|n| panic!("{name} {body}: refused {n}"));
@@ -267,9 +267,9 @@ fn force_strict(program: &executor::Program, live: &Frame) -> Result<Value, Diag
 #[test]
 fn builtin_integer_boundaries_match_native_i64() {
     let mut cases = vec![
-        ("(abs (int/add -4611686018427387904 (frame/index)))".to_owned(), Value::Int(1 << 62)),
-        ("(abs (int/add -9223372036854775808 (frame/index)))".to_owned(), Value::Int(i64::MIN)),
-        ("(abs (int/add -9223372036854775807 (frame/index)))".to_owned(), Value::Int(i64::MAX)),
+        ("(abs (int/add -4611686018427387904 (frame/index)))".into(), Value::Int(1 << 62)),
+        ("(abs (int/add -9223372036854775808 (frame/index)))".into(), Value::Int(i64::MIN)),
+        ("(abs (int/add -9223372036854775807 (frame/index)))".into(), Value::Int(i64::MAX)),
     ];
     for (token, expected) in [
         ("  +9223372036854775807  ", Some(i64::MAX)), ("-9223372036854775808", Some(i64::MIN)),
@@ -278,7 +278,7 @@ fn builtin_integer_boundaries_match_native_i64() {
     ] {
         cases.push((format!("(text/to_int (if (> t 0.) \"{token}\" \"{token}\"))"), Value::Record(vec![
             ("value".into(), Value::Int(expected.unwrap_or(0))), ("valid".into(), Value::Bool(expected.is_some())),
-        ])));
+        ].into())));
     }
     let live = input::at_time(0.0);
     for (body, expected) in cases {

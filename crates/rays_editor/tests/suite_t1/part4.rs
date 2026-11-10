@@ -212,7 +212,7 @@ pub fn run_panel_states() {
     r.step_full(&[], &[Key::Meta], moved, vec![ch('z')]);
     check(build_ok(&editor::workspace(&r.e)).shell.is_none(), "undoing the first splitter edit did not restore the default shell");
     click(&mut r, (889., 11.));
-    let state = |r: &Run, key: &str| editor::workspace(&r.e).layout.panels.get(&vec!["editor".to_string(), key.to_string()]).copied().unwrap_or_else(panels::default_state);
+    let state = |r: &Run, key: &str| editor::workspace(&r.e).layout.panels.get(&vec!["editor".into(), key.into()]).copied().unwrap_or_else(panels::default_state);
     check(state(&r, "inspector").collapsed && r.undo_label() == Some("Collapse panel".into()) && r.panes().inspector.2 == 0, "collapsing a panel did not persist or remove its body");
     let saved = ws_text(&r);
     check(of_text(&saved).layout.panels == editor::workspace(&r.e).layout.panels, "panel state did not round-trip through Lisp");
@@ -286,7 +286,7 @@ pub fn run_panel_states() {
     r.step(target, vec![]);
     r.step(target, vec![key(Key::KeyChar('/')), key(Key::KeyChar('t'))]);
     r.step(target, vec![]);
-    check(editor::workspace(&r.e).layout.panels.get(&vec!["editor".to_string(), "@panel".to_string(), "-1".to_string()]).is_some_and(|s| !s.collapsed), "the leader timeline toggle was not saved");
+    check(editor::workspace(&r.e).layout.panels.get(&vec!["editor".into(), "@panel".into(), "-1".into()]).is_some_and(|s| !s.collapsed), "the leader timeline toggle was not saved");
     let prepared = editor::prepared(&r.e);
     let same = |r: &Run| match (&editor::prepared(&r.e), &prepared) {
         // physical equality has no Rust identity (Editor::prepared clones): compare the geometry by size

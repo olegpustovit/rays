@@ -1,4 +1,5 @@
 //! Port of lib/flow_sop/operators.ml(i): the SOP workspace host's operator declarations.
+use flow_syntax::symbol::{self, Symbol};
 use crate::{attribute_kernel, attribute_metadata};
 use flow_check::op::{Args, Body, Check, Op, Out, OutArgs, Shape, Signature};
 use flow_syntax::context;
@@ -7,7 +8,7 @@ use flow_syntax::value::{self, Value};
 use rays_diagnostic::Diagnostic;
 use std::sync::{Arc, LazyLock};
 
-type Named = [(String, Ty, Option<param::Value>)];
+type Named = [(Symbol, Ty, Option<param::Value>)];
 
 fn fail<R>(code: &str, message: &str) -> Result<R, Diagnostic> {
     Err(value::fail(code, message))
@@ -18,8 +19,8 @@ fn ar(element: Ty) -> Ty {
 fn rec(fields: &[(&str, Ty)]) -> Ty {
     Ty::Record(pairs(fields))
 }
-fn pairs(fields: &[(&str, Ty)]) -> Vec<(String, Ty)> {
-    fields.iter().map(|(n, t)| ((*n).to_owned(), t.clone())).collect()
+fn pairs(fields: &[(&str, Ty)]) -> Vec<(Symbol, Ty)> {
+    fields.iter().map(|(n, t)| (symbol::intern(n), t.clone())).collect()
 }
 fn sig(pos: &[(&str, Ty)], kw: &[(&str, Ty)]) -> Signature {
     Signature { pos: pairs(pos), opt: Vec::new(), rest: None, kw: pairs(kw) }
@@ -31,7 +32,8 @@ fn text(s: &str) -> Value {
     Value::Text(s.as_bytes().into())
 }
 fn arg<'a>(args: &'a Args, name: &str) -> Option<&'a Value> {
-    args.iter().find(|(key, _)| key == name).map(|(_, v)| v)
+    let name = symbol::find(name)?;
+    args.iter().find(|(key, _)| *key == name).map(|(_, v)| v)
 }
 fn text_arg(args: &Args, name: &str) -> Option<String> {
     match arg(args, name) {
@@ -43,29 +45,30 @@ fn text_arg(args: &Args, name: &str) -> Option<String> {
 fn blank(s: &str) -> bool {
     s.chars().all(|c| matches!(c, ' ' | '\u{c}' | '\n' | '\r' | '\t'))
 }
-fn component_args(args: &Args, component: &str) -> Vec<(String, Value)> {
+fn component_args(args: &Args, component: &str) -> Vec<(Symbol, Value)> {
     let mut all = args.to_vec();
-    all.push(("component".to_owned(), text(component)));
+    all.push(("component".into(), text(component)));
     all
 }
-fn named(args: &Args) -> Vec<(String, Ty, Option<param::Value>)> {
+fn named(args: &Args) -> Vec<(Symbol, Ty, Option<param::Value>)> {
     args.iter()
         .map(|(name, v)| (name.clone(), value::ty_of(v), if let Value::Text(t) = v { Some(param::Value::Text(t.clone())) } else { None }))
         .collect()
 }
-fn find_named<'a>(args: &'a Named, name: &str) -> Option<&'a (String, Ty, Option<param::Value>)> {
-    args.iter().find(|(n, _, _)| n == name)
+fn find_named<'a>(args: &'a Named, name: &str) -> Option<&'a (Symbol, Ty, Option<param::Value>)> {
+    let name = symbol::find(name)?;
+    args.iter().find(|(n, _, _)| *n == name)
 }
 
 /// A body returning one typed source.
 fn source_body(name: &'static str, ty: Ty) -> Body {
-    Arc::new(move |_, _, args| Ok(value::source_value(name.to_owned(), ty.clone(), args.to_vec())))
+    Arc::new(move |_, _, args| Ok(value::source_value(name.to_owned(), ty.clone(), args.to_vec().into())))
 }
 /// A body returning a record of sources, one per component.
-fn record_body(name: &'static str, fields: Vec<(String, Ty)>) -> Body {
+fn record_body(name: &'static str, fields: Vec<(Symbol, Ty)>) -> Body {
     Arc::new(move |_, _, args| {
         Ok(Value::Record(
-            fields.iter().map(|(component, ty)| (component.clone(), value::source_value(name.to_owned(), ty.clone(), component_args(args, component)))).collect(),
+            fields.iter().map(|(component, ty)| (component.clone(), value::source_value(name.to_owned(), ty.clone(), component_args(args, component).into()))).collect::<Vec<_>>().into(),
         ))
     })
 }
@@ -163,12 +166,12 @@ fn attr() -> Op {
                     fields
                         .into_iter()
                         .map(|(name, ty)| {
-                            let component = value::struct_value("sop/attr", ty, component_args(args, &name));
+                            let component = value::struct_value("sop/attr", ty, component_args(args, &name).into());
                             (name, component)
                         })
-                        .collect(),
+                        .collect::<Vec<_>>().into(),
                 )),
-                ty => Ok(value::struct_value("sop/attr", ty, args.to_vec())),
+                ty => Ok(value::struct_value("sop/attr", ty, args.to_vec().into())),
             }
         }),
     }
@@ -200,10 +203,10 @@ fn attr_checked() -> Op {
                 fields
                     .into_iter()
                     .map(|(name, ty)| {
-                        let component = value::source_value("sop/attr_checked", ty, component_args(args, &name));
+                        let component = value::source_value("sop/attr_checked", ty, component_args(args, &name).into());
                         (name, component)
                     })
-                    .collect(),
+                    .collect::<Vec<_>>().into(),
             )),
             _ => unreachable!("checked_attribute_type is a record"),
         }),
@@ -355,8 +358,8 @@ fn count() -> Op {
     }
 }
 
-fn int_fields(names: &[&str]) -> Vec<(String, Ty)> {
-    names.iter().map(|n| ((*n).to_owned(), ar(Ty::Int))).collect()
+fn int_fields(names: &[&str]) -> Vec<(Symbol, Ty)> {
+    names.iter().map(|n| (symbol::intern(n), ar(Ty::Int))).collect()
 }
 
 /// `{edges with name; out; body}`: a record of integer arrays, one source per component.
@@ -407,7 +410,7 @@ fn triangles() -> Op {
 }
 
 fn components() -> Op {
-    let fields = vec![("id".to_owned(), ar(Ty::Int)), ("count".to_owned(), Ty::Int)];
+    let fields = vec![("id".into(), ar(Ty::Int)), ("count".into(), Ty::Int)];
     Op {
         name: "sop/components".into(),
         signature: sig(&[("geometry", ty::geometry())], &[("over", Ty::Text), ("mask", ar(Ty::Int)), ("seams", ar(Ty::Int))]),
@@ -489,20 +492,20 @@ fn mesh_fields() -> Vec<(&'static str, Ty)> {
     ]
 }
 
-fn needs_all(op: &'static str, fields: Vec<String>) -> OutArgs {
+fn needs_all(op: &'static str, fields: Vec<Symbol>) -> OutArgs {
     Arc::new(move |args| {
         for name in &fields {
-            if find_named(args, name).is_none() {
+            if !args.iter().any(|(key, _, _)| key == name) {
                 return fail("E_ARGS", &format!("{op} needs :{name}."));
             }
         }
         Ok(ty::geometry())
     })
 }
-fn requires_all(op: &'static str, fields: Vec<String>) -> Check {
+fn requires_all(op: &'static str, fields: Vec<Symbol>) -> Check {
     Arc::new(move |args| {
         for name in &fields {
-            if arg(args, name).is_none() {
+            if !args.iter().any(|(key, _)| key == name) {
                 return fail("E_ARGS", &format!("{op} needs :{name}."));
             }
         }
@@ -512,7 +515,7 @@ fn requires_all(op: &'static str, fields: Vec<String>) -> Check {
 
 fn mesh() -> Op {
     let fields = mesh_fields();
-    let names: Vec<String> = fields.iter().map(|(n, _)| (*n).to_owned()).collect();
+    let names: Vec<Symbol> = fields.iter().map(|(n, _)| symbol::intern(n)).collect();
     Op {
         name: "sop/mesh".into(),
         signature: sig(&[], &fields),
@@ -532,7 +535,7 @@ fn mesh_planes() -> Op {
     let planes = rec(&[("x", ar(Ty::Float)), ("y", ar(Ty::Float)), ("z", ar(Ty::Float))]);
     let mut fields = mesh_fields();
     fields[0] = ("points", planes);
-    let names: Vec<String> = fields.iter().map(|(n, _)| (*n).to_owned()).collect();
+    let names: Vec<Symbol> = fields.iter().map(|(n, _)| symbol::intern(n)).collect();
     let needs = needs_all("sop/mesh_planes", names.clone());
     Op {
         name: "sop/mesh_planes".into(),
@@ -594,7 +597,7 @@ fn group() -> Op {
     }
 }
 
-fn without_as_owner(choices: &[(String, Vec<String>)]) -> Vec<(String, Vec<String>)> {
+fn without_as_owner(choices: &[(Symbol, Vec<String>)]) -> Vec<(Symbol, Vec<String>)> {
     choices.iter().filter(|(n, _)| n != "as_owner").cloned().collect()
 }
 
@@ -645,7 +648,7 @@ fn group_names() -> Op {
 }
 
 fn group_entries() -> Op {
-    let fields = vec![("owners".to_owned(), ar(Ty::Text)), ("names".to_owned(), ar(Ty::Text))];
+    let fields = vec![("owners".into(), ar(Ty::Text)), ("names".into(), ar(Ty::Text))];
     Op {
         name: "sop/group_entries".into(),
         signature: sig(&[("geometry", ty::geometry()), ("pattern", Ty::Text)], &[("owner", Ty::Text)]),
@@ -704,7 +707,7 @@ fn context_source(what: &'static str) -> Body {
                 "Context frame" => ("sop/context_frame", Ty::Float),
                 _ => ("sop/context_time", Ty::Float),
             };
-            Ok(value::source_value(name.to_owned(), ty, args.to_vec()))
+            Ok(value::source_value(name.to_owned(), ty, args.to_vec().into()))
         }
         _ => fail("E_NODE_CONTEXT", &format!("{what} is available inside a defnode body.")),
     })
@@ -960,7 +963,7 @@ fn attr_entries() -> Op {
     let base = attr_type();
     let mut signature = base.signature.clone();
     signature.pos = pairs(&[("geometry", ty::geometry())]);
-    let fields = vec![("name".to_owned(), ar(Ty::Text)), ("type".to_owned(), ar(Ty::Text)), ("owner".to_owned(), ar(Ty::Text))];
+    let fields = vec![("name".into(), ar(Ty::Text)), ("type".into(), ar(Ty::Text)), ("owner".into(), ar(Ty::Text))];
     Op {
         name: "sop/attr_entries".into(),
         signature,
@@ -1031,7 +1034,7 @@ fn glob_rewrite_set_error() -> Op {
 /// operations also run inside structured cooked loops.
 fn pure_source(ty: Ty, name: &str, args: &Args, run: &dyn Fn() -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
     if args.iter().any(|(_, v)| matches!(v, Value::Source(..) | Value::Residual(_))) {
-        Ok(value::source_value(name.to_owned(), ty, args.to_vec()))
+        Ok(value::source_value(name.to_owned(), ty, args.to_vec().into()))
     } else {
         run()
     }
@@ -1302,9 +1305,9 @@ mod tests {
 
     #[test]
     fn counts_and_checks_refuse_bad_arguments() {
-        let bad = vec![("geometry".to_owned(), Value::No_geo), ("element".to_owned(), text("faces"))];
+        let bad = vec![("geometry".into(), Value::No_geo), ("element".into(), text("faces"))];
         assert_eq!((find("sop/count").check)(&bad).err().unwrap().code, "E_TOPOLOGY_COUNT");
-        let remap = vec![("points".to_owned(), Value::No_geo)];
+        let remap = vec![("points".into(), Value::No_geo)];
         assert_eq!((find("sop/remap").check)(&remap).err().unwrap().message, "sop/remap needs :vertices or :vertex_mix.");
         let mesh = (find("sop/mesh").check)(&[]).err().unwrap();
         assert_eq!(mesh.message, "sop/mesh needs :points.");
@@ -1316,7 +1319,7 @@ mod tests {
         let node: &dyn Fn(&str, &Args) -> Result<Value, Diagnostic> = &|_, _| unreachable!();
         let op = find("sop/context_frame");
         assert_eq!((op.body)(&frame, node, &[]).err().unwrap().code, "E_NODE_CONTEXT");
-        let labelled = vec![(context_label().to_owned(), text("card"))];
+        let labelled = vec![(context_label().into(), text("card"))];
         assert!(matches!((op.body)(&frame, node, &labelled).unwrap(), Value::Source(g) if g.ty == Ty::Float && g.name == "sop/context_frame"));
         let provenance = find("sop/provenance_base");
         assert_eq!((provenance.body)(&frame, node, &labelled).unwrap(), Value::Int(PROVENANCE_SENTINEL));

@@ -11,7 +11,7 @@ use flow_check::term_arena::{PatternNode, TermId};
 use flow_eval::Plan;
 use flow_graph::flow_edit::{arg_of, arg_text, ArgKey};
 use flow_syntax::context;
-use flow_syntax::value::Value as E;
+use flow_syntax::value::{Record, Value as E};
 use rays_diagnostic::Diagnostic;
 
 type R<T> = Result<T, Diagnostic>;
@@ -51,25 +51,25 @@ struct Acc {
     start: Start,
 }
 
-fn flag(name: &str, args: &[(String, E)]) -> bool {
-    args.iter().find(|(n, _)| n == name).map(|(_, v)| v) == Some(&E::Bool(true))
+fn flag(name: &str, args: &Record) -> bool {
+    args.get_str(name) == Some(&E::Bool(true))
 }
 
-fn text(name: &str, args: &[(String, E)]) -> Option<String> {
-    match args.iter().find(|(n, _)| n == name) {
-        Some((_, E::Text(t))) => Some(String::from_utf8_lossy(t).into_owned()),
+fn text(name: &str, args: &Record) -> Option<String> {
+    match args.get_str(name) {
+        Some(E::Text(t)) => Some(String::from_utf8_lossy(t).into_owned()),
         _ => None,
     }
 }
 
-fn arg(name: &str, args: &[(String, E)]) -> R<E> {
-    match args.iter().find(|(n, _)| n == name) {
-        Some((_, v)) => Ok(v.clone()),
+fn arg(name: &str, args: &Record) -> R<E> {
+    match args.get_str(name) {
+        Some(v) => Ok(v.clone()),
         None => Err(diag("E_LOWER", &format!("A panel is missing its {name}."))),
     }
 }
 
-fn leaf(acc: &mut Acc, path: &[usize], args: &[(String, E)], panel: Panel) -> R<panels::Panels> {
+fn leaf(acc: &mut Acc, path: &[usize], args: &Record, panel: Panel) -> R<panels::Panels> {
     if flag("focus", args) && acc.start.focus.is_none() {
         acc.start.focus = Some(path.to_vec());
     }
@@ -236,7 +236,7 @@ impl Found {
 fn walk(f: &mut Found, env: &[(&str, TermId)], place: Option<(Home, ArgKey)>, path: &[usize], t: &Term, v: &E) {
     let arena = t.arena();
     let here = || match (t.path(), &place) {
-        (Some(path), _) => Home::BoundAt(path.iter().map(|name| t.name(*name).to_owned()).collect()),
+        (Some(path), _) => Home::BoundAt(path.iter().map(|name| t.symbol(*name)).collect()),
         (None, Some((parent, key))) => Home::InlineIn(Box::new(parent.clone()), key.clone()),
         (None, None) => Home::Looped,
     };
@@ -309,7 +309,7 @@ fn walk(f: &mut Found, env: &[(&str, TermId)], place: Option<(Home, ArgKey)>, pa
                             let p = child(path, i);
                             let a = t.child(field.term);
                             f.inline(&h, &p, &pos(i), &a);
-                            if let Some((_, va)) = vargs.get(i) {
+                            if let Some((_, va)) = vargs.field_at(i) {
                                 walk(f, env, Some((h.clone(), pos(i))), &p, &a, va);
                             }
                         }
@@ -365,7 +365,7 @@ pub fn editor(workspace: &workspace_doc::T, plan: &Plan) -> R<Option<Editor>> {
     let value = workspace_doc::context_value(false, workspace, plan, context::editor())?;
     match value {
         None => Ok(None),
-        Some(whole @ E::Struct(..)) if matches!(&whole, E::Struct(g) if g.name == "ui/workspace" && g.fields.first().map_or(false, |(n, _)| n == "root")) => {
+        Some(whole @ E::Struct(..)) if matches!(&whole, E::Struct(g) if g.name == "ui/workspace" && g.fields.iter().next().map_or(false, |(n, _)| n == "root")) => {
             let wargs = whole.geo_fields().unwrap();
             let root = &wargs[0].1;
             let (tree, named, start, viewports, canvases, switch) = panel_tree(root)?;
@@ -422,7 +422,7 @@ pub fn editor(workspace: &workspace_doc::T, plan: &Plan) -> R<Option<Editor>> {
                 .filter(|(_, old, _)| viewports.iter().any(|(k, _)| k == old))
                 .map(|(_, old, origin)| {
                     let panel_form = match origin {
-                        Some(Origin::Bound(name)) => arg_text(&workspace.source, &[g.name.clone(), name.clone()], &ArgKey::Whole),
+                        Some(Origin::Bound(name)) => arg_text(&workspace.source, &[g.name.clone().into(), name.clone().into()], &ArgKey::Whole),
                         Some(Origin::Inline(home, arg)) => authored(&workspace.source, home).and_then(|form| arg_of(&form, arg)),
                         Some(Origin::Loop(..)) | None => None,
                     };

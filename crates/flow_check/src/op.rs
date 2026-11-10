@@ -1,3 +1,4 @@
+use flow_syntax::symbol::{self, Symbol};
 use flow_syntax::{context::{self, Context}, packed_ops, ty::{self, Ty}, value::{self, Value}};
 use input::{self, Event, Frame};
 use param;
@@ -6,21 +7,21 @@ use rays_math::text_array::TextArray;
 use std::sync::{Arc, LazyLock, Mutex};
 use flow_syntax::value::int_of;
 
-pub type Args = [(String, Value)];
+pub type Args = [(Symbol, Value)];
 pub type Node = dyn Fn(&str, &Args) -> Result<Value, Diagnostic>;
 pub type Check = Arc<dyn Fn(&Args) -> Result<(), Diagnostic> + Send + Sync>;
 pub type Body = Arc<dyn Fn(&Frame, &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), &Args) -> Result<Value, Diagnostic> + Send + Sync>;
 pub type Out = Arc<dyn Fn(&[Ty]) -> Result<Ty, Diagnostic> + Send + Sync>;
-pub type OutArgs = Arc<dyn Fn(&[(String, Ty, Option<param::Value>)]) -> Result<Ty, Diagnostic> + Send + Sync>;
+pub type OutArgs = Arc<dyn Fn(&[(Symbol, Ty, Option<param::Value>)]) -> Result<Ty, Diagnostic> + Send + Sync>;
 pub type ArithmeticFn = dyn Fn(&Value, &Value) -> Result<Value, Diagnostic> + Send + Sync;
 // ponytail: segmented writes use one short-lived result mutex; replace with disjoint owned chunks only if profiling shows contention.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Signature {
-    pub pos: Vec<(String, Ty)>,
-    pub opt: Vec<(String, Ty)>,
-    pub rest: Option<(String, Ty)>,
-    pub kw: Vec<(String, Ty)>,
+    pub pos: Vec<(Symbol, Ty)>,
+    pub opt: Vec<(Symbol, Ty)>,
+    pub rest: Option<(Symbol, Ty)>,
+    pub kw: Vec<(Symbol, Ty)>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Shape { Scalar, Struct { splice: bool } }
@@ -41,7 +42,7 @@ pub struct Op {
     pub out: Out,
     pub out_args: Option<OutArgs>,
     pub any_num: bool,
-    pub choices: Vec<(String, Vec<String>)>,
+    pub choices: Vec<(Symbol, Vec<String>)>,
     pub shape: Shape,
     pub live: bool,
     pub check: Check,
@@ -73,15 +74,15 @@ trait ArgLookup {
     fn opt_arg(&self, name: &'static str) -> Option<&Value>;
 }
 impl ArgLookup for Args {
-    fn get_arg(&self, name: &'static str) -> Result<&Value, Diagnostic> { self.iter().find(|(n,_)| n == name).map(|(_,v)| v).ok_or_else(|| failf("E_ARITY", format!("Missing operator input {name}."))) }
-    fn opt_arg(&self, name: &'static str) -> Option<&Value> { self.iter().find(|(n,_)| n == name).map(|(_,v)| v) }
+    fn get_arg(&self, name: &'static str) -> Result<&Value, Diagnostic> { self.opt_arg(name).ok_or_else(|| failf("E_ARITY", format!("Missing operator input {name}."))) }
+    fn opt_arg(&self, name: &'static str) -> Option<&Value> { let name = symbol::find(name)?; self.iter().find(|(n,_)| *n == name).map(|(_,v)| v) }
 }
-fn has(args: &Args, name: &str) -> bool { args.iter().any(|(n,_)| n == name) }
+fn has(args: &Args, name: &str) -> bool { symbol::find(name).is_some_and(|name| args.iter().any(|(n,_)| *n == name)) }
 fn named_ty(name: &str) -> Ty { Ty::Named(name.to_owned()) }
 fn arr(ty: Ty) -> Ty { Ty::Array(Box::new(ty)) }
 fn list(ty: Ty) -> Ty { Ty::List(Box::new(ty)) }
 fn rec(fields: Vec<(&str, Ty)>) -> Ty { Ty::Record(fields.into_iter().map(|(n,t)|(n.into(),t)).collect()) }
-fn pairs(fields: Vec<(&str, Ty)>) -> Vec<(String, Ty)> { fields.into_iter().map(|(n,t)|(n.into(),t)).collect() }
+fn pairs(fields: Vec<(&str, Ty)>) -> Vec<(Symbol, Ty)> { fields.into_iter().map(|(n,t)|(n.into(),t)).collect() }
 fn signature(pos: Vec<(&str,Ty)>, opt: Vec<(&str,Ty)>, rest: Option<(&str,Ty)>, kw: Vec<(&str,Ty)>) -> Signature {
     Signature { pos: pairs(pos), opt: pairs(opt), rest: rest.map(|(n,t)|(n.into(),t)), kw: pairs(kw) }
 }
@@ -131,7 +132,7 @@ fn with_defaults(mut op: Op, category: &str) -> Op { op.category=category.into()
 fn output_const(ty: Ty) -> Out { Arc::new(move |_| Ok(ty.clone())) }
 fn range_error(message: &str) -> Diagnostic { fail("E_RANGE", message) }
 trait Literals { fn literal_arg(&self, key: &'static str) -> Option<&param::Value>; }
-impl Literals for [(String,Ty,Option<param::Value>)] {
+impl Literals for [(Symbol,Ty,Option<param::Value>)] {
     fn literal_arg(&self, key: &'static str) -> Option<&param::Value> { self.iter().find(|(n,_,_)| n == key).and_then(|(_,_,v)|v.as_ref()) }
 }
 fn one_of(args: &Args, key: &'static str, what: &str, choices: &[String]) -> Result<(), Diagnostic> {
@@ -152,7 +153,7 @@ pub fn range_length(limit: Option<usize>, lo:i64, hi:i64)->Result<usize,Diagnost
     if length>limit as i128 { return Err(failf("E_ITER_BOUND",format!("range {lo}‥{hi} exceeds {} iterations.", if limit==4096 {"4,096".into()} else {limit.to_string()}))); }
     Ok(if length<=0 {0} else {length as usize})
 }
-pub fn result_type(op:&Op,args:&[(String,Ty,Option<param::Value>)])->Result<Ty,Diagnostic>{
+pub fn result_type(op:&Op,args:&[(Symbol,Ty,Option<param::Value>)])->Result<Ty,Diagnostic>{
     if let Some(out)=&op.out_args { return out(args); }
     let named=|key:&str| op.signature.pos.iter().chain(op.signature.opt.iter()).any(|(n,_)|n==key);
     let ts=args.iter().filter(|(n,_,_)|named(n)).map(|(_,t,_)|t.clone()).collect::<Vec<_>>(); (op.out)(&ts)
@@ -450,7 +451,7 @@ fn frame_value(f:&Frame)->Value{
     Value::Record(vec![
         ("t".into(),Value::Float(f.t)),("dt".into(),Value::Float(f.dt)),("index".into(),Value::Int(f.frame)),("width".into(),Value::Int(f.size.0)),("height".into(),Value::Int(f.size.1)),
         ("pointer".into(),Value::Vec3(f.pointer.0,f.pointer.1,0.)),("buttons".into(),Value::List(Arc::new(f.buttons.iter().map(|b|text(input::button_name(*b))).collect()))),
-        ("keys".into(),Value::List(Arc::new(f.keys.iter().map(|k|text(&input::key_name(*k))).collect()))),("events".into(),Value::List(Arc::new(events)))])
+        ("keys".into(),Value::List(Arc::new(f.keys.iter().map(|k|text(&input::key_name(*k))).collect()))),("events".into(),Value::List(Arc::new(events)))].into())
 }
 fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
     let point=|p:(f64,f64)|Value::Vec3(p.0,p.1,0.);
@@ -476,7 +477,7 @@ fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
         Event::Visibility_changed(_)=>("visibility-changed",vec![]),
         Event::Trackpad_scrolled{delta,phase,time}=>("trackpad-scrolled",vec![("delta",point(*delta)),("phase",text(input::scroll_phase_name(*phase))),("time",Value::Float(*time))]),
     };
-    Value::Record(fields.iter().map(|(name,ty)|((*name).into(),if *name=="kind"{text(kind)}else if let Some((_,v))=values.iter().find(|(n,_)|n==name){v.clone()}else{match ty{Ty::Int=>Value::Int(0),Ty::Float=>Value::Float(0.),Ty::Vec3=>Value::Vec3(0.,0.,0.),Ty::List(_)=>Value::List(Arc::new(vec![])),_=>text("")}})).collect())
+    Value::Record(fields.iter().map(|(name,ty)|((*name).into(),if *name=="kind"{text(kind)}else if let Some((_,v))=values.iter().find(|(n,_)|n==name){v.clone()}else{match ty{Ty::Int=>Value::Int(0),Ty::Float=>Value::Float(0.),Ty::Vec3=>Value::Vec3(0.,0.,0.),Ty::List(_)=>Value::List(Arc::new(vec![])),_=>text("")}})).collect::<Vec<_>>().into())
 }
 fn frame_ops()->Vec<Op>{
     let frame_ty=rec(vec![("t",Ty::Float),("dt",Ty::Float),("index",Ty::Int),("width",Ty::Int),("height",Ty::Int),("pointer",Ty::Vec3),("buttons",list(Ty::Text)),("keys",list(Ty::Text)),("events",list(rec(vec![("kind",Ty::Text),("key",Ty::Text),("button",Ty::Text),("position",Ty::Vec3),("delta",Ty::Vec3),("text",Ty::Text),("start",Ty::Int),("length",Ty::Int),("paths",list(Ty::Text)),("error",Ty::Text),("id",Ty::Int),("width",Ty::Int),("height",Ty::Int),("phase",Ty::Text),("time",Ty::Float),("scale",Ty::Float)])))]);
@@ -527,19 +528,47 @@ fn table_encode(rows:&Value)->Result<Value,Diagnostic>{
 fn text_repr(bytes:&[u8])->Vec<u8>{
     let mut out=vec![b'"'];for &b in bytes{match b{b'"'=>out.extend_from_slice(b"\\\""),b'\\'=>out.extend_from_slice(b"\\\\"),b'\n'=>out.extend_from_slice(b"\\n"),b'\r'=>out.extend_from_slice(b"\\r"),b'\t'=>out.extend_from_slice(b"\\t"),8=>out.extend_from_slice(b"\\b"),0..=31|127..=255=>out.extend_from_slice(format!("\\{b:03}").as_bytes()),_=>out.push(b)}}out.push(b'"');out
 }
-fn array_descriptor(name:&str,args:&Args)->Result<Value,Diagnostic>{
+fn array_descriptor(name:&str,count_value:Option<&Value>,initial:Option<&Value>,valid:bool)->Result<Value,Diagnostic>{
     let (ty,default)=match name{"array/int"=>(Ty::Int,Value::Int(0)),"array/text"=>(Ty::Text,text("")),"array/float"=>(Ty::Float,Value::Float(0.)),"array/vec3"=>(Ty::Vec3,Value::Vec3(0.,0.,0.)),"array/vec4"=>(Ty::Vec4,Value::Vec4(0.,0.,0.,0.)),_=>return Err(fail("E_ARRAY_TYPE","Unknown constant array constructor."))};
-    if args.iter().any(|(k,_)|k!="count"&&k!="value")||args.len()!=args.iter().map(|(k,_)|k).collect::<std::collections::HashSet<_>>().len(){return Err(fail("E_ARRAY_TYPE","Malformed constant array constructor arguments."))}
-    let Some(count_value)=args.opt_arg("count") else{return Err(fail("E_ARRAY_TYPE","Constant array constructor needs count."))};
+    if !valid{return Err(fail("E_ARRAY_TYPE","Malformed constant array constructor arguments."))}
+    let Some(count_value)=count_value else{return Err(fail("E_ARRAY_TYPE","Constant array constructor needs count."))};
     let count=checked_count(name,count_value,MAX_WOSIZE)?;
-    let value=args.opt_arg("value").unwrap_or(&default);
+    let value=initial.unwrap_or(&default);
     let width=match ty{Ty::Vec2=>2,Ty::Vec3=>3,Ty::Vec4=>4,_=>1};
     if matches!(ty,Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4)&&count>MAX_WOSIZE/width{return Err(fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))}
     let made=value::array_init(&ty,count.min(1) as i64,&|_|value.clone())?;
     let sample=if count==0{default}else{value::array_get(&made,0)?};
-    Ok(value::source_value(format!("$core/constant-array/{name}"), arr(ty), vec![("count".into(), Value::Int(count as i64)), ("value".into(), sample)]))
+    Ok(value::source_value(format!("$core/constant-array/{name}"), arr(ty), vec![("count".into(), Value::Int(count as i64)), ("value".into(), sample)].into()))
 }
-pub fn constant_array_descriptor(name:&str,args:&Args)->Result<Value,Diagnostic>{array_descriptor(name,args)}
+pub fn constant_array_descriptor(name:&str,args:&Args)->Result<Value,Diagnostic>{
+    let count=args.opt_arg("count");let initial=args.opt_arg("value");
+    let valid=args.len()==usize::from(count.is_some())+usize::from(initial.is_some())&&args.iter().all(|(name,_)|name=="count"||name=="value");
+    array_descriptor(name,count,initial,valid)
+}
+pub fn constant_array_record_descriptor(name:&str,fields:&value::Record)->Result<Value,Diagnostic>{
+    let count=fields.get_str("count");let initial=fields.get_str("value");
+    let valid=fields.len()==usize::from(count.is_some())+usize::from(initial.is_some())&&fields.iter().all(|(name,_)|name=="count"||name=="value");
+    array_descriptor(name,count,initial,valid)
+}
+#[cfg(test)]
+#[test]
+fn retained_constant_array_descriptor_preserves_validation_and_canonical_fields() {
+    let fields = value::Record::new(vec![("value".into(), Value::Int(7)), ("count".into(), Value::Int(3))]);
+    let Value::Source(source) = constant_array_record_descriptor("array/int", &fields).unwrap() else { panic!("array source") };
+    assert_eq!(source.name, "$core/constant-array/array/int");
+    assert_eq!(source.ty, Ty::Array(Box::new(Ty::Int)));
+    assert_eq!(source.fields.get_str("count"), Some(&Value::Int(3)));
+    assert_eq!(source.fields.get_str("value"), Some(&Value::Int(7)));
+    assert_eq!(source.fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["count", "value"]);
+    for fields in [
+        vec![],
+        vec![("count".into(), Value::Int(3)), ("count".into(), Value::Int(4))],
+        vec![("count".into(), Value::Int(3)), ("value".into(), Value::Int(7)), ("value".into(), Value::Int(8))],
+        vec![("count".into(), Value::Int(3)), ("unknown".into(), Value::Int(7))],
+    ] {
+        assert_eq!(constant_array_record_descriptor("array/int", &fields.into()).unwrap_err().code, "E_ARRAY_TYPE");
+    }
+}
 fn array_limit(element:&str)->Option<usize>{Some(match element{"int"|"text"=>MAX_WOSIZE,"float"=>MAX_WOSIZE,"vec2"=>MAX_WOSIZE/2,"vec3"=>MAX_WOSIZE/3,"vec4"=>MAX_WOSIZE/4,_=>return None})}
 fn array_constructor(ty:Ty,count:usize,fill:&Value)->Result<Value,Diagnostic>{
     let width=match ty{Ty::Vec2=>2,Ty::Vec3=>3,Ty::Vec4=>4,_=>1};
@@ -674,7 +703,7 @@ fn image_ops()->Vec<Op>{
 }
 fn structure_op(name:&str,ctx:Context,pos:Vec<(&str,Ty)>,optv:Vec<(&str,Ty)>,rest:Option<(&str,Ty)>,kw:Vec<(&str,Ty)>,out:Ty,splice:bool,category:&str)->Op{
     let result=if ctx==context::sop(){list(Ty::Any)}else{out.clone()};
-    let owned=name.to_owned();let body:Body=Arc::new(move |_,_,args|Ok(value::struct_value(owned.clone(),result.clone(),args.to_vec())));
+    let owned=name.to_owned();let body:Body=Arc::new(move |_,_,args|Ok(value::struct_value(owned.clone(),result.clone(),args.to_vec().into())));
     let _=category;let mut op=op_with(name,ctx,pos,optv,rest,kw,out,"Math",body);op.shape=Shape::Struct{splice};op
 }
 fn stage_ops()->Vec<Op>{
@@ -699,13 +728,13 @@ fn stage_ops()->Vec<Op>{
         let origin=vec3(args.get_arg("origin")?)?;let dir=vec3(args.get_arg("dir")?)?;
         let input=[origin.0,origin.1,origin.2,dir.0,dir.1,dir.2,fin("scene/trace",num(args.get_arg("tmin")?)?)?,fin("scene/trace",num(args.get_arg("tmax")?)?)?,fin("scene/trace",num(args.get_arg("time")?)?)?];
         let h=ray_host::query(int_of(args.get_arg("scene")?)?,&input)?;
-        Ok(Value::Record(vec![("t".into(),Value::Float(h.t)),("prim".into(),Value::Int(h.prim)),("u".into(),Value::Float(h.u)),("v".into(),Value::Float(h.v)),("normal".into(),Value::Vec3(h.nx,h.ny,h.nz)),("hit".into(),Value::Bool(h.hit)),("instance".into(),Value::Int(h.instance))]))
+        Ok(Value::Record(vec![("t".into(),Value::Float(h.t)),("prim".into(),Value::Int(h.prim)),("u".into(),Value::Float(h.u)),("v".into(),Value::Float(h.v)),("normal".into(),Value::Vec3(h.nx,h.ny,h.nz)),("hit".into(),Value::Bool(h.hit)),("instance".into(),Value::Int(h.instance))].into()))
     });
     let mut trace=value_op("scene/trace",vec![("scene",Ty::Int),("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float),("time",Ty::Float)],vec![],None,vec![],scene_ty,"Scene",body);trace.live=true;ops.insert(0,trace);ops
 }
 // OCaml `=`: structural, left to right; it raises only when it meets two closures, so `(equal? f nil)` is false.
 fn eq_fn(a:&Value,b:&Value)->Option<bool>{
-    let fields=|f:&[(String,Value)],g:&[(String,Value)]|{if f.len()!=g.len(){return Some(false)}for((n,x),(m,y))in f.iter().zip(g){if n!=m{return Some(false)}match eq_fn(x,y){Some(true)=>{}other=>return other}}Some(true)};
+    let fields=|f:&value::Record,g:&value::Record|{if f.len()!=g.len(){return Some(false)}for((n,x),(m,y))in f.iter().zip(g){if n!=m{return Some(false)}match eq_fn(x,y){Some(true)=>{}other=>return other}}Some(true)};
     match(a,b){
         (Value::Fn(_),Value::Fn(_))=>None,
         (Value::List(x),Value::List(y))=>{if x.len()!=y.len(){return Some(false)}for(p,q)in x.iter().zip(y.iter()){match eq_fn(p,q){Some(true)=>{}other=>return other}}Some(true)}
@@ -781,7 +810,7 @@ fn special_value_ops()->Vec<Op>{
     for (name,checked_fma) in [("float/mul_checked",false),("float/fma_checked",true)]{
         let params=if checked_fma{vec![("a",Ty::Float),("b",Ty::Float),("c",Ty::Float)]}else{vec![("a",Ty::Float),("b",Ty::Float)]};
         let out=rec(vec![("value",Ty::Float),("valid",Ty::Bool)]);
-        ops.push(value_op(name,params,vec![],None,vec![],out,"Math",Arc::new(move |_,_,a|{let av=fin(name,num(a.get_arg("a")?)?)?;let bv=fin(name,num(a.get_arg("b")?)?)?;let v=if checked_fma{rays_math::fma::fma(av,bv,fin(name,num(a.get_arg("c")?)?)?)}else{av*bv};let valid=v.is_finite();Ok(Value::Record(vec![("value".into(),Value::Float(if valid{v}else{0.})),("valid".into(),Value::Bool(valid))]))})));
+        ops.push(value_op(name,params,vec![],None,vec![],out,"Math",Arc::new(move |_,_,a|{let av=fin(name,num(a.get_arg("a")?)?)?;let bv=fin(name,num(a.get_arg("b")?)?)?;let v=if checked_fma{rays_math::fma::fma(av,bv,fin(name,num(a.get_arg("c")?)?)?)}else{av*bv};let valid=v.is_finite();Ok(Value::Record(vec![("value".into(),Value::Float(if valid{v}else{0.})),("valid".into(),Value::Bool(valid))].into()))})));
     }
     ops.push(value_op("rand/at",vec![("seed",Ty::Int),("index",Ty::Int)],vec![],None,vec![],Ty::Float,"Random",Arc::new(|_,_,a|Ok(Value::Float(packed_ops::rand_at(int_of(a.get_arg("seed")?)?,int_of(a.get_arg("index")?)?))))));
     ops.push(value_op("dot",vec![("a",Ty::Vec3),("b",Ty::Vec3)],vec![],None,vec![],Ty::Float,"Vector",Arc::new(|_,_,a|{let x=vec3(a.get_arg("a")?)?;let y=vec3(a.get_arg("b")?)?;Ok(Value::Float(fin("dot",x.0*y.0+x.1*y.1+x.2*y.2)?))})));
@@ -808,7 +837,7 @@ fn text_ops()->Vec<Op>{
         let result=if float_result{Ty::Float}else{Ty::Int};
         ops.push(value_op(name,vec![("text",Ty::Text)],vec![],None,vec![],rec(vec![("value",result.clone()),("valid",Ty::Bool)]),"Text",Arc::new(move |_,_,a|{
             let parsed=if float_result{parse_float_token(text_bytes(a.get_arg("text")?)?).map(Value::Float)}else{parse_int_token(text_bytes(a.get_arg("text")?)?).map(Value::Int)};
-            Ok(Value::Record(vec![("value".into(),parsed.clone().unwrap_or(if float_result{Value::Float(0.)}else{Value::Int(0)})),("valid".into(),Value::Bool(parsed.is_some()))]))
+            Ok(Value::Record(vec![("value".into(),parsed.clone().unwrap_or(if float_result{Value::Float(0.)}else{Value::Int(0)})),("valid".into(),Value::Bool(parsed.is_some()))].into()))
         })));
     }
     ops.push(value_op("text/table_decode",vec![("text",Ty::Text)],vec![],None,vec![],list(list(Ty::Text)),"Text",Arc::new(|_,_,a|table_decode(text_bytes(a.get_arg("text")?)?))));
@@ -1005,7 +1034,7 @@ mod tests{
 #[cfg(test)]
 mod ocaml_table {
     use super::*;
-    fn sg(l:&[(String,Ty)])->String{l.iter().map(|(n,t)|format!("{}:{}",n,ty::to_string(t))).collect::<Vec<_>>().join(",")}
+    fn sg(l:&[(Symbol,Ty)])->String{l.iter().map(|(n,t)|format!("{}:{}",n,ty::to_string(t))).collect::<Vec<_>>().join(",")}
     #[test]
     fn declarations_match_the_ocaml_table() {
         let mut out=String::new();

@@ -255,7 +255,7 @@ pub fn run_loop_view() {
     r.step(m, vec![key(Key::Home)]);
     r.step(m, vec![key(Key::KeyChar('i'))]);
     r.step(m, vec![]);
-    let inner: Vec<String> = ["g", "rows", "@result"].iter().map(|s| s.to_string()).collect();
+    let inner: flow_check::workspace::Path = ["g", "rows", "@result"].iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect();
     let (x, y, w, _) = editor::node_box(&r.e, &inner).expect("loop body box");
     click_at(&mut r, ((x + w / 2) as f64, (y + 3) as f64));
     check(r.dump("scope selected") == "g/rows/@result", "the node inside the loop could not be selected");

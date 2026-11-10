@@ -6,6 +6,7 @@
 //! kernel can be shared; "physical equality" of a backend is `Arc::ptr_eq`.
 #![allow(non_camel_case_types, non_snake_case, clippy::too_many_arguments, clippy::type_complexity)]
 
+use flow_syntax::symbol::{self, Symbol};
 use crate::core_exec;
 use crate::core_fuse;
 use crate::core_ir as c;
@@ -191,8 +192,8 @@ pub mod gpu {
 
     #[derive(Default)]
     pub struct Chain {
-        pub sites: HashMap<String, Samples>,
-        pub last: HashMap<String, (i64, i64)>,
+        pub sites: HashMap<Id, Samples>,
+        pub last: HashMap<Id, (i64, i64)>,
     }
 
     /// The measured display sinks: seconds per float the editor spent preparing a host mesh for
@@ -202,9 +203,9 @@ pub mod gpu {
         pub draw: f64,
         pub resident: f64,
         /// per write site, its recent CPU cooks (elements, seconds per element), at most 256 sites
-        pub writes: HashMap<String, Vec<(i64, f64)>>,
+        pub writes: HashMap<Id, Vec<(i64, f64)>>,
         /// per write site, its priced device cooks
-        pub devices: HashMap<String, i64>,
+        pub devices: HashMap<Id, i64>,
     }
 
     impl Default for Display {
@@ -330,7 +331,7 @@ pub mod profile {
     /// Record one decision for its owner, replacing the owner's previous one; `None` uses the
     /// scoped profile of this thread.
     pub fn place(profile: Option<&Arc<T>>, placement: &Placement) {
-        let off = |reason: &str| fallback::note(&placement.owner.0.join("/"), reason);
+        let off = |reason: &str| fallback::note(&flow_syntax::symbol::join_path(&placement.owner.0, "/"), reason);
         match placement.reason {
             PlacementReason::Unsupported_form => off("its form is refused on the device"),
             PlacementReason::Missing_consumer => off("nothing says who reads it"),
@@ -644,7 +645,7 @@ fn static_map(verify: bool, failure: &Arc<Mutex<Option<Diagnostic>>>, residual: 
                     if !same_bits(&reference, &value) {
                         *failure.lock().unwrap() = Some(v::fail(
                             STATIC_VERIFICATION_FAILED,
-                            &format!("Exact static kernel differs from the walker at {}", view.site.join("/")),
+                            &format!("Exact static kernel differs from the walker at {}", flow_syntax::symbol::join_path(&view.site, "/")),
                         ));
                         return None;
                     }
@@ -666,7 +667,7 @@ fn static_map(verify: bool, failure: &Arc<Mutex<Option<Diagnostic>>>, residual: 
 #[derive(Clone, Default)]
 pub struct StaticOptions {
     pub record: bool,
-    pub inputs: Option<Vec<(String, Vec<(String, Value)>)>>,
+    pub inputs: Option<Vec<(String, Vec<(Symbol, Value)>)>>,
     pub replay: bool,
     pub verify: bool,
 }
@@ -697,7 +698,7 @@ pub fn static_(options: &StaticOptions, workspace: &w::Workspace) -> Result<e::E
 #[derive(Clone, Default)]
 pub struct QualifyOptions {
     pub record: bool,
-    pub inputs: Option<Vec<(String, Vec<(String, Value)>)>>,
+    pub inputs: Option<Vec<(String, Vec<(Symbol, Value)>)>>,
     /// Called with the associated authored producer (None for an ambiguous or missing association)
     /// and the actual observed handle.
     pub observe: Option<Arc<dyn Fn(Option<Path>, ResidualId) + Send + Sync>>,
@@ -748,7 +749,7 @@ impl Walker {
         }
         let producer_path = term.path.and_then(|path| producers.iter().find(|candidate| {
             let names = arena.path(path);
-            names.len() == candidate.len() && names.iter().zip(candidate.iter()).all(|(&name, part)| arena.name(name) == part)
+            names.len() == candidate.len() && names.iter().zip(candidate.iter()).all(|(&name, part)| arena.symbol(name) == *part)
         })).cloned();
         let producers: Paths = match producer_path {
             Some(path) => std::iter::once(path).collect(),
@@ -765,7 +766,7 @@ impl Walker {
     fn walk(&mut self, owner: &Path, arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) {
         use w::Node;
         let term = arena.row(id);
-        let path = term.path.map(|path| arena.path(path).iter().map(|&name| arena.name(name).to_owned()).collect());
+        let path = term.path.map(|path| arena.path(path).iter().map(|&name| arena.symbol(name)).collect());
         let owner = path.as_ref().unwrap_or(owner);
         if !self.collect {
             match term.node {
@@ -777,12 +778,12 @@ impl Walker {
         }
         match term.node {
             Node::Loop(loop_id) => {
-                let zone = arena.path(arena.loop_node(loop_id).zone).iter().map(|&name| arena.name(name).to_owned()).collect();
+                let zone = arena.path(arena.loop_node(loop_id).zone).iter().map(|&name| arena.symbol(name)).collect();
                 for &child in arena.children(id) { self.walk(&zone, arena, child); }
             }
             Node::Fn(fn_id) => {
                 let function = arena.function(fn_id);
-                let zone = arena.path(function.zone).iter().map(|&name| arena.name(name).to_owned()).collect();
+                let zone = arena.path(function.zone).iter().map(|&name| arena.symbol(name)).collect();
                 if self.collect { self.callable(&zone, arena, function.body); }
                 if let Some(capture) = function.capture { self.walk(owner, arena, capture); }
                 self.walk(&zone, arena, function.body);
@@ -815,7 +816,7 @@ impl Walker {
             }
             Node::State(state_id) => {
                 let state = arena.state(state_id);
-                let zone = arena.path(state.zone).iter().map(|&name| arena.name(name).to_owned()).collect();
+                let zone = arena.path(state.zone).iter().map(|&name| arena.symbol(name)).collect();
                 self.walk(owner, arena, state.init);
                 self.walk(&zone, arena, state.step);
             }
@@ -840,34 +841,27 @@ fn plain_value(value: &Value) -> bool {
 
 /// A map's iteration tuple only names its sites (a loop's tuple selects its skips), and a closure
 /// has no value key, so a view holding one is never matched.
-fn acceptance_key(view: &e::residual::View) -> Option<String> {
+type AcceptanceKey = (i64, Arc<Path>, Arc<Path>, Vec<i64>, i64, Arc<Path>, (bool, bool, bool, flow_syntax::context::Context), Vec<(Symbol, Vec<u8>)>);
+fn acceptance_key(view: &e::residual::View) -> Option<AcceptanceKey> {
     if !view.bindings.iter().all(|(_, x)| plain_value(x)) { return None; }
     let iter: Vec<i64> = match view.term.node { w::Node::Hof(..) => Vec::new(), _ => view.iter.to_vec() };
-    let bindings: Vec<(String, Vec<u8>)> = view.bindings.iter().map(|(n, x)| (n.to_string(), v::key_of(&|r| r.0, x))).collect();
-    Some(format!(
-        "{:?}",
-        (
-            view.term.arena().syntax().row(view.term.form).id,
-            &view.site,
-            &view.owner,
-            iter,
-            view.instance,
-            &view.prefix,
-            (view.previous, view.host, view.geometry, context::name(view.context)),
-            bindings,
-        )
+    let bindings: Vec<(Symbol, Vec<u8>)> = view.bindings.iter().map(|(n, x)| (*n, v::key_of(&|r| r.0, x))).collect();
+    Some((
+        view.term.arena().syntax().row(view.term.form).id,
+        view.site.clone(), view.owner.clone(), iter, view.instance, view.prefix.clone(),
+        (view.previous, view.host, view.geometry, view.context), bindings,
     ))
 }
 
 fn pending(path: &Path) -> Vec<Diagnostic> {
-    vec![v::fail("E_PACKED_PENDING", &format!("No unambiguous static specialization was observed for producer {}.", path.join("/")))]
+    vec![v::fail("E_PACKED_PENDING", &format!("No unambiguous static specialization was observed for producer {}.", symbol::join_path(path, "/")))]
 }
 
 struct Qualifier {
     t: Tables,
     ops: Arc<Vec<flow_check::op::Op>>,
     gpu: gpu::Config,
-    accepted: Mutex<HashMap<String, Vec<(Path, Arc<Term>)>>>,
+    accepted: Mutex<HashMap<AcceptanceKey, Vec<(Path, Arc<Term>)>>>,
     outcomes: Mutex<HashMap<Path, Vec<Diagnostic>>>,
     observe: Option<Arc<dyn Fn(Option<Path>, ResidualId) + Send + Sync>>,
     packed_sites: Vec<(Path, bool)>,
@@ -967,7 +961,7 @@ impl Qualifier {
                         message: format!(
                             "{} (producer {}, instance {}, tuple [{}])",
                             d.message,
-                            path.join("/"),
+                            symbol::join_path(path, "/"),
                             view.instance,
                             view.iter.to_vec().iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
                         ),
@@ -1067,13 +1061,13 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
         called: HashMap::new(),
         called_seen: HashMap::new(),
     };
-    for graph in workspace.defs.iter() { walker.callable(&vec![format!("def:{}", graph.name)], graph.body.arena(), graph.body.row_id()); }
+    for graph in workspace.defs.iter() { walker.callable(&vec![format!("def:{}", graph.name).into()], graph.body.arena(), graph.body.row_id()); }
     for collect in [true, false] {
         walker.collect = collect;
         walker.called.clear();
         walker.called_seen.clear();
         for (i, graph) in workspace.graphs.iter().chain(workspace.defs.iter()).enumerate() {
-            let owner: Path = if i >= workspace.graphs.len() { vec![format!("def:{}", graph.name)] } else { vec![graph.name.clone()] };
+            let owner: Path = if i >= workspace.graphs.len() { vec![format!("def:{}", graph.name).into()] } else { vec![graph.name.clone().into()] };
             for (_, _, term) in &graph.inputs {
                 if let Some(term) = term { walker.walk(&owner, term.arena(), term.row_id()); }
             }
@@ -1178,7 +1172,7 @@ pub mod executor {
         approx: Paths,
         sink: Option<Sink>,
         gpu_kernel: Mutex<Option<(Arc<dyn gpu::Backend>, bool, Packed, Arc<dyn gpu::Kernel>)>>,
-        record_region: std::sync::OnceLock<Option<(Vec<String>, Packed)>>,
+        record_region: std::sync::OnceLock<Option<(Vec<Symbol>, Packed)>>,
     }
 
     pub type Program = Arc<ProgramData>;
@@ -1358,12 +1352,12 @@ pub mod executor {
                     match e::residual::residual_definition(residual, arena.name(call.name)) {
                         None => child(body),
                         Some(definition) => {
-                            let bindings: Vec<(String, Value)> = definition
+                            let bindings: Vec<(Symbol, Value)> = definition
                                 .inputs
                                 .iter()
                                 .enumerate()
                                 .map(|(index, (name, ty, _))| {
-                                    (name.clone(), source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
+                                    (symbol::intern(name), source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))].into()))
                                 })
                                 .collect();
                             let nested = e::residual::with_bindings(residual, &arena.handle(body), &bindings).ok()?;
@@ -1389,12 +1383,12 @@ pub mod executor {
                                 }) == Some(true)
                         });
                     if eligible {
-                        let bindings: Vec<(String, Value)> = params
+                        let bindings: Vec<(Symbol, Value)> = params
                             .iter()
                             .enumerate()
                             .map(|(index, param)| {
-                                let name = match arena.pattern(param.pattern) { flow_check::term_arena::PatternNode::Name(name) => arena.name(name).to_owned(), _ => unreachable!() };
-                                (name, source_value("$core/argument", param_ty(index).expect("typed").clone(), vec![("index".into(), Value::Int(index as i64))]))
+                                let name = match arena.pattern(param.pattern) { flow_check::term_arena::PatternNode::Name(name) => arena.symbol(name), _ => unreachable!() };
+                                (name, source_value("$core/argument", param_ty(index).expect("typed").clone(), vec![("index".into(), Value::Int(index as i64))].into()))
                             })
                             .collect();
                         let nested = e::residual::with_bindings(residual, &arena.handle(function.body), &bindings).ok()?;
@@ -1510,7 +1504,7 @@ pub mod executor {
     pub fn root_is_packed_or_readback(p: &Program) -> bool { p.packed_root.is_some() }
 
     /// Record fields whose arrays are freshly allocated by an elementwise packed root.
-    pub fn fresh_csr_fields(p: &Program) -> Vec<String> {
+    pub fn fresh_csr_fields(p: &Program) -> Vec<Symbol> {
         match &p.value {
             Value::Record(fields) => fields
                 .iter()
@@ -1550,7 +1544,7 @@ pub mod executor {
     pub struct ForceOptions {
         pub resident: Option<Arc<dyn core_exec::Resident>>,
         pub state: Option<e::State>,
-        pub elems: Option<Vec<(String, Value)>>,
+        pub elems: Option<Vec<(Symbol, Value)>>,
         pub resolve: Option<core_exec::ResolveFn>,
         pub reference: bool,
         pub strict: bool,
@@ -1763,8 +1757,8 @@ pub mod executor {
             }
         }
 
-        fn walk_fields(self: &Arc<Self>, fields: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
-            fields.iter().map(|(n, x)| Ok((n.clone(), self.walk(x)?))).collect()
+        fn walk_fields(self: &Arc<Self>, fields: &v::Record) -> Result<v::Record, Diagnostic> {
+            Ok(fields.iter().map(|(n, x)| Ok((*n, self.walk(x)?))).collect::<Result<Vec<_>, Diagnostic>>()?.into())
         }
     }
 
@@ -1844,7 +1838,7 @@ pub mod executor {
                                         Some(p) => Some(p),
                                         None => match core_lower::lower(Some(program.value.clone()), program.trace.clone(), o.strict, None, None, root) {
                                             Err(name) => {
-                                                let site = e::residual::residual_view(root).map(|v| v.site.join("/")).unwrap_or_default();
+                                                let site = e::residual::residual_view(root).map(|v| flow_syntax::symbol::join_path(&v.site, "/")).unwrap_or_default();
                                                 fallback::note(&site, &format!("record does not lower: {name}"));
                                                 None
                                             }
@@ -1910,9 +1904,9 @@ pub mod executor {
                             };
                             ((view.site.as_ref().clone(), view.iter.to_vec()), sites)
                         }
-                        Err(_) => ((vec!["@value".to_owned()], Vec::new()), Vec::new()),
+                        Err(_) => ((vec!["@value".into()], Vec::new()), Vec::new()),
                     },
-                    _ => ((vec!["@value".to_owned()], Vec::new()), Vec::new()),
+                    _ => ((vec!["@value".into()], Vec::new()), Vec::new()),
                 };
                 let tier = if fell_back {
                     Tier::Interp
@@ -2365,12 +2359,12 @@ pub mod executor {
         }
     }
 
-    fn record_region(program: &Program) -> Option<(Vec<String>, Packed)> {
+    fn record_region(program: &Program) -> Option<(Vec<Symbol>, Packed)> {
         program
             .record_region
             .get_or_init(|| match &program.value {
                 Value::Record(fields) => {
-                    let regions: Vec<(String, Packed)> = fields
+                    let regions: Vec<(Symbol, Packed)> = fields
                         .iter()
                         .filter_map(|(name, value)| {
                             direct_region(&program.trace, true, true, &program.count_source, value)
@@ -2408,7 +2402,7 @@ pub mod executor {
     /// device, in fast precision when the shared measured comparison places it: one dispatch, each
     /// output kept on the device as its planes, by field name, read only when they materialise.
     /// `None` keeps the record on the CPU, also when the device fails.
-    pub fn record_on_device(program: &Program, o: &RecordOptions, live: &Frame) -> Result<Option<Vec<(String, gpu::Planes)>>, Diagnostic> {
+    pub fn record_on_device(program: &Program, o: &RecordOptions, live: &Frame) -> Result<Option<Vec<(Symbol, gpu::Planes)>>, Diagnostic> {
         let gpu = o.gpu.clone().unwrap_or_else(gpu::default);
         if let Some(count) = o.cpu_consumers { assert!(count >= 0, "record_on_device: negative consumers"); }
         if let Some(count) = o.expected_count { assert!(count >= 0, "record_on_device: negative expected count"); }
@@ -2423,7 +2417,7 @@ pub mod executor {
             profile::place(
                 program.profile.as_ref(),
                 &Placement {
-                    owner: site(&program.value).unwrap_or_else(|| (vec!["@value".to_owned()], Vec::new())),
+                    owner: site(&program.value).unwrap_or_else(|| (vec!["@value".into()], Vec::new())),
                     count: o.expected_count,
                     reason: PlacementReason::No_cost_evidence,
                     cpu_seconds: None,
@@ -2512,7 +2506,7 @@ pub mod executor {
                         found
                     }) as Arc<dyn Fn(&Value) -> Option<(Value, i64)> + Send + Sync>
                 });
-                let device = (|| -> Result<Option<Vec<(String, gpu::Planes)>>, Diagnostic> {
+                let device = (|| -> Result<Option<Vec<(Symbol, gpu::Planes)>>, Diagnostic> {
                     let inputs = packed::host::prepare(
                         &merged,
                         &packed::host::PrepareOptions {
@@ -2537,7 +2531,7 @@ pub mod executor {
                         }
                     };
                     let output = kernel.run(&inputs)?;
-                    let mut values: Vec<(String, gpu::Planes)> = Vec::new();
+                    let mut values: Vec<(Symbol, gpu::Planes)> = Vec::new();
                     for (i, name) in names.iter().enumerate() {
                         let planes = kernel.planes(&gpu::Value { output: i as i64, width: merged.outputs[i].len() as i64, ..output.clone() });
                         match planes {
@@ -2773,7 +2767,7 @@ mod tests {
 
     fn materialise(device: &Device, value: &Value) -> Value {
         match value {
-            Value::Record(fields) => Value::Record(fields.iter().map(|(k, x)| (k.clone(), materialise(device, x))).collect()),
+            Value::Record(fields) => Value::Record(fields.iter().map(|(k, x)| (k.clone(), materialise(device, x))).collect::<Vec<_>>().into()),
             other => device.resident.finish(other).unwrap(),
         }
     }
@@ -2870,15 +2864,15 @@ mod tests {
         );
         let Value::Residual(root) = &record else { panic!("residual") };
         let view = ok(e::residual::residual_view(*root));
-        fn fields(arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) -> Option<Vec<(String, Term)>> {
+        fn fields(arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) -> Option<Vec<(Symbol, Term)>> {
             match arena.row(id).node {
-                w::Node::Record(fs) => Some(arena.fields(fs).iter().map(|field| (arena.name(field.name).to_owned(), arena.handle(field.term))).collect()),
+                w::Node::Record(fs) => Some(arena.fields(fs).iter().map(|field| (arena.symbol(field.name), arena.handle(field.term))).collect()),
                 _ => arena.children(id).iter().find_map(|&id| fields(arena, id)),
             }
         }
         let fs = fields(view.term.arena(), view.term.row_id()).expect("record fields");
         let value = Value::Record(
-            fs.iter().map(|(name, term)| (name.clone(), Value::Residual(ok(e::residual::with_bindings(*root, term, &view.owned_bindings()))))).collect(),
+            fs.iter().map(|(name, term)| (name.clone(), Value::Residual(ok(e::residual::with_bindings(*root, term, &view.owned_bindings()))))).collect::<Vec<_>>().into(),
         );
         let program = ok(executor::compile(&value, &executor::CompileOptions::default()));
         let live = input::at_time(5001.0);
@@ -3155,7 +3149,7 @@ mod tests {
         &workspace.approx_reasons.iter().find(|(p, _)| p == path).unwrap_or_else(|| panic!("no reasons for {path:?}")).1
     }
 
-    fn p(parts: &[&str]) -> Path { parts.iter().map(|s| s.to_string()).collect() }
+    fn p(parts: &[&str]) -> Path { parts.iter().map(|s| (*s).into()).collect() }
 
     #[test]
     fn qualifier_body_cache_uses_arena_row_identity() {
@@ -3192,7 +3186,7 @@ mod tests {
     #[test]
     fn image_qualification_authored_sites_and_shared_functions() {
         let observed: Arc<Mutex<Vec<(Option<Path>, Path)>>> = Arc::new(Mutex::new(Vec::new()));
-        let qualify = |inputs: Option<Vec<(String, Vec<(String, Value)>)>>, gpu: gpu::Config, workspace: &w::Workspace| {
+        let qualify = |inputs: Option<Vec<(String, Vec<(Symbol, Value)>)>>, gpu: gpu::Config, workspace: &w::Workspace| {
             observed.lock().unwrap().clear();
             let seen = observed.clone();
             let options = QualifyOptions {
@@ -3248,7 +3242,7 @@ mod tests {
             "(workspace pixels\n    (graph img :context image [(offset : float 2.0)]\n      (let* [picture (image/map (fn [uv] [(+ uv.x offset) uv.y t 1]))] picture))\n    (graph host :context host [(one : float 2.0) (two : float 3.0)]\n      (list (ref img :offset one) (ref img :offset two))))",
         );
         for (one, two, accepted) in [(1e39, 7.0, false), (7.0, 1e39, false), (2.0, 7.0, true)] {
-            let inputs = vec![("host".to_owned(), vec![("one".to_owned(), Value::Float(one)), ("two".to_owned(), Value::Float(two))])];
+            let inputs = vec![("host".into(), vec![("one".into(), Value::Float(one)), ("two".into(), Value::Float(two))])];
             let (qualified, _, _) = qualify(Some(inputs), gpu::default(), &captures);
             assert_eq!(qualified.approx.contains(&path), accepted);
             if !accepted { assert!(reasons_of(&qualified, &path).iter().any(|d| d.code == "E_GPU_FORM")); }
@@ -3351,7 +3345,7 @@ mod tests {
             packed::compile(&packed::CompileOptions::default(), residual, term).is_some()
                 || term.children().iter().any(|&id| packed_child_region(residual, &term.child(id)))
         }
-        fn has_fields(fs: &[(String, Value)]) -> bool { fs.iter().any(|(_, x)| has_region(x)) }
+        fn has_fields(fs: &v::Record) -> bool { fs.iter().any(|(_, x)| has_region(x)) }
         match value {
             Value::Residual(r) => {
                 let view = e::residual::residual_view(*r).unwrap();
@@ -3361,7 +3355,7 @@ mod tests {
             }
             Value::List(xs) => xs.iter().any(has_region),
             v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => has_fields(v.geo_fields().unwrap()),
-            Value::Fn(f) => has_fields(&e::residual::function_bindings(*f)),
+            Value::Fn(f) => e::residual::function_bindings(*f).iter().any(|(_, value)| has_region(value)),
             _ => false,
         }
     }

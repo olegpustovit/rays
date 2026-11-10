@@ -1,5 +1,6 @@
 //! Port of lib/flow_sop/group_kernel.ml(i): cooked immutable group boundary; native RDK owns
 //! membership and order.
+use flow_syntax::symbol::Symbol;
 use crate::attribute_metadata;
 use flow_syntax::ty;
 use flow_syntax::value::Value;
@@ -22,8 +23,8 @@ fn diag(code: &str, message: &str) -> Diagnostic {
 fn fail<R>(code: &str, message: &str) -> Result<R, Diagnostic> {
     Err(diag(code, message))
 }
-fn arg<'a>(args: &'a [(String, Value)], name: &str) -> Option<&'a Value> {
-    args.iter().find(|(key, _)| key == name).map(|(_, value)| value)
+fn arg<'a>(args: &'a flow_syntax::value::Record, name: &str) -> Option<&'a Value> {
+    args.get_str(name)
 }
 fn text_of(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
@@ -126,16 +127,16 @@ fn order(owner: Owner, name: &str, geometry: &Geometry) -> Result<Value, Diagnos
         Owner::Edge => match geometry::find_edge_group(name, geometry) {
             None => missing(name),
             Some(_) => Ok(Value::Record(vec![
-                ("ordered".to_owned(), Value::Bool(false)),
-                ("indices".to_owned(), Value::Int_array(Arc::new(Vec::new()))),
-            ])),
+                ("ordered".into(), Value::Bool(false)),
+                ("indices".into(), Value::Int_array(Arc::new(Vec::new()))),
+            ].into())),
         },
         Owner::Ordinary(owner) => match geometry::find_group(owner, name, geometry) {
             None => missing(name),
             Some(found) => Ok(Value::Record(vec![
-                ("ordered".to_owned(), Value::Bool(group::is_ordered(&found))),
-                ("indices".to_owned(), Value::Int_array(Arc::new(group::ordered_elements(&found).unwrap_or_default()))),
-            ])),
+                ("ordered".into(), Value::Bool(group::is_ordered(&found))),
+                ("indices".into(), Value::Int_array(Arc::new(group::ordered_elements(&found).unwrap_or_default()))),
+            ].into())),
         },
     }
 }
@@ -217,14 +218,14 @@ pub fn write(order: Option<&[i64]>, owner: Owner, name: &str, mask: &[i64], geom
     }
 }
 
-fn metadata_text(args: &[(String, Value)], key: &str) -> Result<String, Diagnostic> {
+fn metadata_text(args: &flow_syntax::value::Record, key: &str) -> Result<String, Diagnostic> {
     match arg(args, key) {
         Some(Value::Text(text)) => Ok(text_of(text)),
         _ => fail("E_METADATA_TEXT", "Metadata names and patterns must be text."),
     }
 }
 
-fn group_text(args: &[(String, Value)], key: &str, default: &str) -> Result<String, Diagnostic> {
+fn group_text(args: &flow_syntax::value::Record, key: &str, default: &str) -> Result<String, Diagnostic> {
     match arg(args, key) {
         None => Ok(default.to_owned()),
         Some(Value::Text(text)) => Ok(text_of(text)),
@@ -232,7 +233,7 @@ fn group_text(args: &[(String, Value)], key: &str, default: &str) -> Result<Stri
     }
 }
 
-fn cooked(args: &[(String, Value)], geometry: &dyn Fn(i64) -> Option<Geometry>) -> Result<Geometry, Diagnostic> {
+fn cooked(args: &flow_syntax::value::Record, geometry: &dyn Fn(i64) -> Option<Geometry>) -> Result<Geometry, Diagnostic> {
     match arg(args, "geometry") {
         Some(Value::Deferred(t, id)) if ty::is_geometry(t) => match geometry(*id) {
             None => fail("E_DATA_SOURCE", "Group source has not been cooked."),

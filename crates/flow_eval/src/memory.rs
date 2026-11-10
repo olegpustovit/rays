@@ -1,5 +1,6 @@
 //! Partial capacity-based accounting of arena values, environments, records and checked storage.
 //! Map nodes, type/diagnostic payloads, callback captures and compiled-code caches stay excluded.
+use flow_syntax::symbol::Symbol;
 use super::*;
 use flow_syntax::syntax::Memory;
 
@@ -19,11 +20,11 @@ impl Storage {
     }
     fn text(&mut self, value: &String) { self.heap.allocation(value.as_ptr(), value.capacity()); }
     fn path(&mut self, path: &Path) {
-        if self.buffer(path) { for name in path { self.text(name); } }
+        self.buffer(path);
     }
     fn term(&mut self, term: &Term) { term.arena().attribute(&mut self.checked, &mut self.syntax); }
-    fn fields(&mut self, fields: &Vec<(String, Value)>) {
-        if self.buffer(fields) { for (name, value) in fields { self.text(name); self.value(value); } }
+    fn fields(&mut self, fields: &Vec<(Symbol, Value)>) {
+        if self.buffer(fields) { for (_, value) in fields { self.value(value); } }
     }
     fn values(&mut self, values: &Vec<Value>) {
         if self.buffer(values) { for value in values { self.value(value); } }
@@ -42,11 +43,13 @@ impl Storage {
                 }
                 Value::List(values) => { if self.shared(values) && self.buffer(values) { pending.extend(values.iter()); } }
                 Value::Struct(g) | Value::Source(g) => {
-                    self.text(&g.name);
-                    if self.buffer(&g.fields) { for (name, value) in &g.fields { self.text(name); pending.push(value); } }
+                    if self.shared(g) {
+                        self.text(&g.name);
+                        if g.fields.attribute(&mut self.heap) { pending.extend(g.fields.iter().map(|(_, value)| value)); }
+                    }
                 }
                 Value::Record(fields) => {
-                    if self.buffer(fields) { for (name, value) in fields { self.text(name); pending.push(value); } }
+                    if fields.attribute(&mut self.heap) { pending.extend(fields.iter().map(|(_, value)| value)); }
                 }
                 _ => (),
             }
@@ -59,9 +62,8 @@ impl Storage {
         while let Some(node) = at { if !self.heap.allocation(Arc::as_ptr(node), std::mem::size_of::<IterNode>()) { break; } at = &node.up.0; }
     }
     fn env(&mut self, env: &Captured) {
-        if self.heap.allocation(Arc::as_ptr(env) as *const u8, std::mem::size_of_val(&**env)) { for (name, value) in env.iter() { self.name(name); self.value(value); } }
+        if self.heap.allocation(Arc::as_ptr(env) as *const u8, std::mem::size_of_val(&**env)) { for (_, value) in env.iter() { self.value(value); } }
     }
-    fn name(&mut self, name: &Arc<str>) { self.heap.allocation(Arc::as_ptr(name) as *const u8, name.len()); }
     fn arena(&mut self, arena: &Arena) {
         self.workspace.workspace(&arena.workspace.0);
         if self.shared(&arena.source_key) { if let Some(key) = arena.source_key.get() { self.text(key); } }
@@ -104,7 +106,6 @@ impl Storage {
         if self.shared(&arena.memo.0) { for value in arena.memo.values() { self.value(value); } }
         if self.shared(&arena.bases.0) { for path in arena.bases.iter() { if self.shared(path) { self.path(path); } } }
         if self.shared(&arena.packed_bases.0) { for path in arena.packed_bases.values() { if self.shared(path) { self.path(path); } } }
-        if self.shared(&arena.names.0) { for name in arena.names.iter() { self.heap.allocation(Arc::as_ptr(name) as *const u8, name.len()); } }
         if self.shared(&arena.arg_pool.0) { for fields in arena.arg_pool.values() { self.fields(fields); } }
         if self.shared(&arena.terms.0) { for (_, term) in arena.terms.values() { if self.shared(term) { self.term(term); } } }
     }
@@ -119,6 +120,7 @@ impl Storage {
 pub fn memory_allocations() -> Vec<(usize, usize)> {
     let slots: Vec<_> = { ARENAS.lock().unwrap_or_else(|e| e.into_inner()).values().filter_map(Weak::upgrade).collect() };
     let mut memory = Storage::default();
+    flow_syntax::symbol::attribute(&mut memory.heap);
     for slot in &slots {
         memory.shared(slot);
         let cell = match slot.cell.try_lock() {

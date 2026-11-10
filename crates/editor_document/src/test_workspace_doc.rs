@@ -57,8 +57,8 @@ fn plain() -> settings::T {
     settings::make(&schema(), vec![Value::Float(0.), Value::Text(b"a".as_slice().into())])
 }
 
-fn p(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|x| (*x).to_owned()).collect()
+fn p(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|x| (*x).into()).collect()
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn part_contexts() {
     let infos = crate::document::scene_graph(&d);
     let ops = |kind: &str| -> Vec<crate::kind_graph::Node> { infos.iter().filter(|i| i.kind == kind).cloned().collect() };
     let labels = |v: &[crate::kind_graph::Node]| v.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
-    assert_eq!(labels(&ops("geometry")), p(&["flower", "accent"]), "the scene graph's geometry objects, by :name");
+    assert_eq!(labels(&ops("geometry")), ["flower", "accent"], "the scene graph's geometry objects, by :name");
     assert!(ops("camera").len() == 1 && ops("light").len() == 1 && ops("world").len() == 1, "camera, light and World come from the workspace");
     assert!(crate::document::validate(&d).is_ok(), "the document validates");
     let accent = ops("geometry")[1].clone();
@@ -325,9 +325,9 @@ fn part_contexts() {
     let none_world = lowering::of_workspace(&lowering::Options { factories: Some(factories()), ..Default::default() }, &of_text(&catalog, None, "(workspace w (graph x :context world (world/sky)))"));
     assert!(matches!(none_world, Ok(ref d) if objects::ids("world", &crate::document::scene_graph(d)).is_empty()), "a world graph no scene/world references is no World");
     let plain_doc = build(None, &of_text(&catalog, None, STILL));
-    assert_eq!(labels(&crate::document::scene_graph(&plain_doc).into_iter().filter(|i| i.kind == "geometry").collect::<Vec<_>>()), p(&["g"]), "no scene graph: one object per sop graph");
+    assert_eq!(labels(&crate::document::scene_graph(&plain_doc).into_iter().filter(|i| i.kind == "geometry").collect::<Vec<_>>()), ["g"], "no scene graph: one object per sop graph");
     let variations = build(None, &of_text(&catalog, None, &case("variations")));
-    assert_eq!(labels(&crate::document::scene_graph(&variations)), p(&["garden", "garden (v1.1.1)", "garden (v1.1.2)", "garden (v1.1.3)"]), "variations scene");
+    assert_eq!(labels(&crate::document::scene_graph(&variations)), ["garden", "garden (v1.1.1)", "garden (v1.1.2)", "garden (v1.1.3)"], "variations scene");
 }
 
 #[test]

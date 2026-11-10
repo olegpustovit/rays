@@ -1,4 +1,5 @@
 // Port of lib/flow_ir/test_compact_scan.ml.
+use flow_syntax::symbol::Symbol;
 use crate::flow_ir::executor;
 use crate::test_support::*;
 use flow_eval as e;
@@ -165,8 +166,8 @@ fn unsupported_producer_and_dynamic_count_refuse() {
     }
 }
 
-fn mask_inputs() -> Vec<(String, Vec<(String, Value)>)> {
-    vec![("g".to_string(), vec![("data".to_string(), source_value("fixture/mask", Ty::Array(Box::new(Ty::Int)), vec![]))])]
+fn mask_inputs() -> Vec<(String, Vec<(Symbol, Value)>)> {
+    vec![("g".into(), vec![("data".into(), source_value("fixture/mask", Ty::Array(Box::new(Ty::Int)), vec![].into()))])]
 }
 fn dynamic(body: &str) -> Value {
     dynamic_value(&mask_inputs(), "[(data : (array int) (array/int 0))]", body)
@@ -188,7 +189,7 @@ fn count_origin_only_for_the_host_array() {
         let r = residual(&value);
         for fusion in [false, true] {
             let p = ok_ds(compile_region(r, fusion, Some(data_count_source())));
-            let expected = if operation == "direct" && fusion { Some((vec!["fixture".to_string(), "data".to_string()], vec![])) } else { None };
+            let expected = if operation == "direct" && fusion { Some((vec!["fixture".into(), "data".into()], vec![])) } else { None };
             assert_eq!(crate::packed::count_origin(&p), expected, "Origin {operation} fusion={fusion}");
             let current = Arc::new(Mutex::new(vec![1, 0, 1]));
             let resolve = resolver(current.clone());

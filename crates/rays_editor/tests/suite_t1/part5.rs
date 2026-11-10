@@ -107,7 +107,7 @@ pub fn run_hide_and_order() {
     r.step(m, vec![]);
     r.step(m, vec![]);
     let click = |r: &mut Run, path: &[&str]| {
-        let (bx, by, bw, bh) = editor::node_box(&r.e, &path.iter().map(|s| s.to_string()).collect::<Vec<_>>()).expect("node box");
+        let (bx, by, bw, bh) = editor::node_box(&r.e, &path.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect::<Vec<_>>()).expect("node box");
         let at = (bx as f64 + bw as f64 / 2., by as f64 + bh as f64 - 6.);
         r.step(at, vec![Event::Pointer_moved(at)]);
         r.step(at, vec![Event::Pointer_pressed(LB, at)]);
@@ -236,7 +236,7 @@ pub fn run_studio() {
     }
     // the keyword rows of the cards are the graph's view of it
     let scope = flow_graph::projection::of_graph(&catalog(), &ws.checked, "editor").expect("scope");
-    let rows = |name: &str| match flow_graph::projection::find(&scope, &["editor".to_string(), name.to_string()]) {
+    let rows = |name: &str| match flow_graph::projection::find(&scope, &["editor".into(), name.into()]) {
         Some(n) => n.rows.iter().map(|r| r.label.clone()).collect::<Vec<_>>(),
         None => fail(&format!("no card {name}")),
     };

@@ -1,5 +1,6 @@
 //! Helpers shared by the pane's cases (the top of the OCaml test_pxui_graph.ml).
 #![allow(dead_code)]
+use flow_syntax::symbol::Symbol;
 use flow_check::catalog::Catalog;
 use flow_check::workspace::Workspace;
 use flow_graph::probe::{self, Probe};
@@ -195,7 +196,7 @@ pub mod g {
         scope_step(ui, view, &frame_ev(point, events))
     }
 
-    pub fn center_of(view: &Pane, path: &[String]) -> (f64, f64, f64, f64) {
+    pub fn center_of(view: &Pane, path: &[Symbol]) -> (f64, f64, f64, f64) {
         scope::inspect::box_of(view, path).expect("box")
     }
 
@@ -211,8 +212,8 @@ pub mod g {
         (view, sc)
     }
 
-    pub fn heart() -> Vec<String> {
-        vec!["flower".to_owned(), "heart".to_owned()]
+    pub fn heart() -> flow_check::workspace::Path {
+        vec!["flower".into(), "heart".into()]
     }
 
     pub fn bloom_view(ui: &mut Ui) -> Pane {
@@ -233,47 +234,47 @@ pub mod g {
 /// What a test's host has saved: positions, levels, probes, frames, folds and imports.
 #[derive(Default)]
 pub struct TestSaved {
-    pub at: Vec<(Vec<String>, (f64, f64))>,
-    pub level: Vec<(Vec<String>, (p::Level, bool))>,
-    pub probe: Vec<(Vec<String>, i64)>,
-    pub frames: Vec<(Vec<String>, Vec<scope_state::Frame3>)>,
-    pub collapsed: Vec<Vec<String>>,
+    pub at: Vec<(flow_check::workspace::Path, (f64, f64))>,
+    pub level: Vec<(flow_check::workspace::Path, (p::Level, bool))>,
+    pub probe: Vec<(flow_check::workspace::Path, i64)>,
+    pub frames: Vec<(flow_check::workspace::Path, Vec<scope_state::Frame3>)>,
+    pub collapsed: Vec<flow_check::workspace::Path>,
     pub imported: Option<String>,
 }
 
-fn find<'a, V>(list: &'a [(Vec<String>, V)], path: &[String]) -> Option<&'a V> {
+fn find<'a, V>(list: &'a [(flow_check::workspace::Path, V)], path: &[Symbol]) -> Option<&'a V> {
     list.iter().find(|(k, _)| k.as_slice() == path).map(|(_, v)| v)
 }
 
 impl scope_state::Saved for TestSaved {
-    fn at(&self, path: &[String]) -> Option<(f64, f64)> {
+    fn at(&self, path: &[Symbol]) -> Option<(f64, f64)> {
         find(&self.at, path).copied()
     }
-    fn level(&self, path: &[String]) -> Option<(p::Level, bool)> {
+    fn level(&self, path: &[Symbol]) -> Option<(p::Level, bool)> {
         find(&self.level, path).copied()
     }
-    fn probe(&self, path: &[String]) -> i64 {
+    fn probe(&self, path: &[Symbol]) -> i64 {
         find(&self.probe, path).copied().unwrap_or(0)
     }
-    fn frames(&self, path: &[String]) -> Vec<scope_state::Frame3> {
+    fn frames(&self, path: &[Symbol]) -> Vec<scope_state::Frame3> {
         find(&self.frames, path).cloned().unwrap_or_default()
     }
-    fn collapsed(&self, path: &[String]) -> bool {
+    fn collapsed(&self, path: &[Symbol]) -> bool {
         self.collapsed.iter().any(|k| k.as_slice() == path)
     }
-    fn imported(&self, _: &[String]) -> Option<String> {
+    fn imported(&self, _: &[Symbol]) -> Option<String> {
         self.imported.clone()
     }
 }
 
 /// A host whose saved positions are a function.
-pub struct AtFn(pub Box<dyn Fn(&[String]) -> Option<(f64, f64)>>);
+pub struct AtFn(pub Box<dyn Fn(&[Symbol]) -> Option<(f64, f64)>>);
 impl scope_state::Saved for AtFn {
-    fn at(&self, path: &[String]) -> Option<(f64, f64)> {
+    fn at(&self, path: &[Symbol]) -> Option<(f64, f64)> {
         (self.0)(path)
     }
 }
-pub fn at_fn(f: impl Fn(&[String]) -> Option<(f64, f64)> + 'static) -> ScopeOpts {
+pub fn at_fn(f: impl Fn(&[Symbol]) -> Option<(f64, f64)> + 'static) -> ScopeOpts {
     ScopeOpts { saved: Rc::new(AtFn(Box::new(f))), ..Default::default() }
 }
 
@@ -281,6 +282,6 @@ pub fn saved_opts(saved: TestSaved) -> ScopeOpts {
     ScopeOpts { saved: Rc::new(saved), ..Default::default() }
 }
 
-pub fn path(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| s.to_string()).collect()
+pub fn path(parts: &[&str]) -> flow_check::workspace::Path {
+    parts.iter().map(|s| (*s).into()).collect()
 }
