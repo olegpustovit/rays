@@ -164,7 +164,7 @@ fn entry_label(entry: &Entry) -> String {
 
 /// Resolve a declaration's color role through the current kit palette.
 pub fn color(theme: &Theme, role: ColorKind) -> Color {
-    let ports = theme::ports(theme);
+    let ports = crate::scope_paint::ports(theme);
     match role {
         ColorKind::Geometry => ports.geometry,
         ColorKind::Float => ports.float,
@@ -182,7 +182,7 @@ pub fn color(theme: &Theme, role: ColorKind) -> Color {
 /// The colour of a type's port: a kind's square here, the ports, squares and wires of the graph pane.
 /// A list is its elements' colour.
 pub fn port_color(theme: &Theme, ty: &Ty) -> Color {
-    let ports = theme::ports(theme);
+    let ports = crate::scope_paint::ports(theme);
     match ty {
         Ty::Named(_) => color(theme, ty::color(ty)),
         Ty::Float => ports.float,

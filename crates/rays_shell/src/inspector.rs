@@ -309,7 +309,7 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
                 display: Some(source[1..].to_string()),
                 lead: Some(("\u{192}".to_string(), cx.ink_2)),
                 trail: live.map(|value| (value, cx.ink_2)),
-                line: Some(theme::ports(&cx.theme).float),
+                line: Some(crate::kit::port_ink(&cx.theme, crate::kit::Port::Float)),
                 ..ValueFieldOpts::default()
             };
             let (text, _) = ui.value_field((control_x, control_y), control_w, 20.0, &opts, &expression, &format!("flow-expression-{path}"), source);

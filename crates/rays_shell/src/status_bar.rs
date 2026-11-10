@@ -79,7 +79,7 @@ fn lead(paint: &mut Paint, (x, y, h): (f64, f64, f64), file: &str, state: State,
         paint.text_c((file_x, ty), theme.foreground, file);
     }
     let fill = match state {
-        State::Ok => theme::ports(&theme).int,
+        State::Ok => crate::kit::port_ink(&theme, crate::kit::Port::Int),
         State::Busy => theme.accent,
         State::Error => theme::invalid(),
     };
@@ -372,7 +372,7 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f64, f64, f64, 
                 let ty = paint.text_top(None, y, h);
                 match kind {
                     TipKind::Info => {
-                        paint.circle((x + 10.0, y + (h / 2.0)), 3.0, Some(theme::ports(&theme).hint), None);
+                        paint.circle((x + 10.0, y + (h / 2.0)), 3.0, Some(crate::kit::port_ink(&theme, crate::kit::Port::Hint)), None);
                         paint.text_c((x + 19.0, ty), theme.foreground, &text);
                     }
                     TipKind::Refusal => paint.text_c((x + 7.0, ty), theme::invalid(), &text),

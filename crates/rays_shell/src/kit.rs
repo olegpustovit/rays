@@ -5,6 +5,25 @@ use pxui::theme;
 use pxui::ui::*;
 use rays_math::color::{self, T as Color};
 
+/// The chrome's three graph inks, the same as `rays_graph::scope_paint::ports` (which the chrome
+/// may not reach): an int port's green for a checked file, a float port's blue for an expression,
+/// the port hint's yellow for a tip.
+pub fn port_ink(theme: &theme::Theme, port: Port) -> Color {
+    let (light, night) = match port {
+        Port::Int => ("#3b7d4e", "#74c28e"),
+        Port::Float => ("#285f77", "#72b3cf"),
+        Port::Hint => ("#f5cf4f", "#f5cf4f"),
+    };
+    color::hex_exn(if theme::dark(theme) { night } else { light }).expect("port ink")
+}
+
+#[derive(Clone, Copy)]
+pub enum Port {
+    Int,
+    Float,
+    Hint,
+}
+
 pub fn text_y(ui: &Ui, y: f64, h: f64) -> f64 {
     ui.text_top(None, y, h)
 }

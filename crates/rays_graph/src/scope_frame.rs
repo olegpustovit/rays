@@ -1710,7 +1710,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
             }
             // a letter of the key route: the hint colour under ink, at the card's top left (-7, -7)
             if let Some(letter) = letter {
-                hint_chip(paint, if *hot == Some(false) { refused } else { theme::ports(&snap.theme).hint }, (*x, *y), letter);
+                hint_chip(paint, if *hot == Some(false) { refused } else { crate::scope_paint::ports(&snap.theme).hint }, (*x, *y), letter);
             }
         }
         // letter hints: a chip per target still matching what was typed, the rest of its letters shown
@@ -1718,7 +1718,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
             for tg in &h.targets {
                 if tg.label.starts_with(&h.typed) {
                     let rest = &tg.label[h.typed.len()..];
-                    hint_chip(paint, theme::ports(&snap.theme).hint, (sx(&snap, tg.pos.0), sy(&snap, tg.pos.1)), rest);
+                    hint_chip(paint, crate::scope_paint::ports(&snap.theme).hint, (sx(&snap, tg.pos.0), sy(&snap, tg.pos.1)), rest);
                 }
             }
         }

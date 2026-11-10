@@ -78,9 +78,14 @@ fn run_menu() {
     // one colour per type, for the menu's squares and the pane's ports: a list is its elements'
     let th = theme::default();
     check(
-        node_menu::port_color(&th, &ty::Ty::List(Box::new(ty::Ty::Float))) == theme::ports(&th).float && node_menu::port_color(&th, &ty::scene()) == theme::ports(&th).output,
+        node_menu::port_color(&th, &ty::Ty::List(Box::new(ty::Ty::Float))) == rays_graph::scope_paint::ports(&th).float && node_menu::port_color(&th, &ty::scene()) == rays_graph::scope_paint::ports(&th).output,
         "a list or a scene is not coloured as the graph pane colours it",
     );
+    // the chrome repeats three port inks it may not import
+    for th in [th, pxui::theme::Theme { panel: rays_math::color::rgb(20, 20, 20), ..th }] {
+        let (ports, ink) = (rays_graph::scope_paint::ports(&th), |p| rays_shell::kit::port_ink(&th, p));
+        check(ink(rays_shell::kit::Port::Int) == ports.int && ink(rays_shell::kit::Port::Float) == ports.float && ink(rays_shell::kit::Port::Hint) == ports.hint, "the chrome's port inks drifted from the graph's");
+    }
     // the visual row window never makes later nodes inaccessible
     let many: Vec<Entry> = (0..15).map(|i| entry(0, &["Utility"], &format!("node_{:02}", i), &format!("Node {:02}", i))).collect();
     let m = opened(&mut ui, many.clone());

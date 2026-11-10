@@ -1,7 +1,6 @@
 //! Native pixel goldens pin kit widgets, overlays and graph zone tokens at the selected display density. Token geometry and every channel are checked.
 use crate::common;
 use input::{Event, Platform};
-use pxui::theme;
 use pxui::ui::*;
 use rays::{canvas, frame, image, scene};
 use rays_math::color;
@@ -128,13 +127,13 @@ fn zones(ui: &mut Ui) {
     let b = ui.box_("zones", BoxOpts::default().w(Size::Px(320.0)).h(Size::Px(390.0)).at((0.0, 0.0)));
     ui.draw(&b, move |paint, _| {
         let list = [
-            theme::zone_for(&t),
-            theme::zone_fold(&t),
-            theme::zone_sum(&t),
-            theme::zone_fn(&t),
-            theme::zone_let(&t),
-            theme::zone_branch(&t, false),
-            theme::zone_branch(&t, true),
+            rays_graph::scope_paint::zone_for(&t),
+            rays_graph::scope_paint::zone_fold(&t),
+            rays_graph::scope_paint::zone_sum(&t),
+            rays_graph::scope_paint::zone_fn(&t),
+            rays_graph::scope_paint::zone_let(&t),
+            rays_graph::scope_paint::zone_branch(&t, false),
+            rays_graph::scope_paint::zone_branch(&t, true),
         ];
         for (i, zone) in list.iter().enumerate() {
             let x = 12.0 + (i % 2) as f64 * 154.0;
@@ -146,7 +145,7 @@ fn zones(ui: &mut Ui) {
                 paint.stroke(x + 0.5, y + 0.5, 141.0, 79.0, zone.edge);
             }
         }
-        let ports = theme::ports(&t);
+        let ports = rays_graph::scope_paint::ports(&t);
         for (i, c) in [ports.text, ports.fn_, ports.record].iter().enumerate() {
             paint.rect(170.0 + i as f64 * 20.0, 200.0, 10.0, 10.0, Some(*c), None);
         }

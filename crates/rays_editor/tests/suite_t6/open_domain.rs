@@ -116,7 +116,7 @@ pub fn open_domain() {
     let replaced = doc(of_text(&[changed], &catalog, text));
     assert!(!P::same_graph(&workspace.checked, &replaced.checked, "g"), "changed declarations reused stale projection");
     let theme = pxui::theme::default();
-    assert!(rays_graph::node_menu::port_color(&theme, &geometry) == pxui::theme::ports(&theme).geometry, "custom operator ignored its built-in result color");
+    assert!(rays_graph::node_menu::port_color(&theme, &geometry) == rays_graph::scope_paint::ports(&theme).geometry, "custom operator ignored its built-in result color");
     let menu = rays_graph::node_menu::create(None, 100, 100, rays_graph::node_menu::of_ops(&ops, &context));
     assert!(rays_graph::node_menu::keys(&menu, "toy") == ["=sop/toy_emit"], "menu omitted custom operator");
     for context in C::all() {

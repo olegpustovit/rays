@@ -22,12 +22,12 @@ type S = Syntax;
 pub fn port_color(theme: &Theme, ty: Option<&Ty>) -> Color {
     match ty {
         Some(ty) => node_menu::port_color(theme, ty),
-        None => theme::ports(theme).output,
+        None => ports(theme).output,
     }
 }
 
-pub fn colors(t: &Pane) -> theme::Ports {
-    theme::ports(&t.theme)
+pub fn colors(t: &Pane) -> Ports {
+    ports(&t.theme)
 }
 
 pub fn ty_color(t: &Pane, ty: Option<&Ty>) -> Color {
@@ -109,21 +109,21 @@ pub fn draw_chevron(paint: &mut Paint, z: f64, at: (f64, f64), direction: Dir4, 
     paint.line(pt(tip), pt(b), color);
 }
 
-pub fn zone_style(theme: &Theme, kind: ZoneKind) -> theme::Zone {
+pub fn zone_style(theme: &Theme, kind: ZoneKind) -> Zone {
     match kind {
-        ZoneKind::For => theme::zone_for(theme),
-        ZoneKind::Fold | ZoneKind::Scan | ZoneKind::State => theme::zone_fold(theme),
-        ZoneKind::Sum => theme::zone_sum(theme),
-        ZoneKind::Fn => theme::zone_fn(theme),
-        ZoneKind::Let => theme::zone_let(theme),
-        ZoneKind::Branch => theme::zone_branch(theme, false),
+        ZoneKind::For => zone_for(theme),
+        ZoneKind::Fold | ZoneKind::Scan | ZoneKind::State => zone_fold(theme),
+        ZoneKind::Sum => zone_sum(theme),
+        ZoneKind::Fn => zone_fn(theme),
+        ZoneKind::Let => zone_let(theme),
+        ZoneKind::Branch => zone_branch(theme, false),
     }
 }
 
 /// The tinted rectangle of an expanded zone: fill and a 1-point edge inside the box.
 pub fn paint_zone(paint: &mut Paint, taken: bool, theme: &Theme, kind: ZoneKind, rect: (f64, f64, f64, f64)) {
     let (x, y, w, h) = rect;
-    let s = if kind == ZoneKind::Branch { theme::zone_branch(theme, taken) } else { zone_style(theme, kind) };
+    let s = if kind == ZoneKind::Branch { zone_branch(theme, taken) } else { zone_style(theme, kind) };
     paint.fill(x, y, w, h, s.fill);
     if s.dashed {
         dashed_frame_in(paint, x, y, w, h, s.edge);
@@ -1487,4 +1487,103 @@ fn zone_taken(t: &Pane, node: &p::Node, zn: &p::Zone) -> bool {
     let chain: Vec<i64> = t.chains.get(&parent.path).map(|c| c.iter().map(|x| t.saved.probe(x)).collect()).unwrap_or_default();
     let r = records.borrow_mut().taken_arm(&parent, &chain) == Some(index);
     r
+}
+
+// ---- the graph's theme tokens: port colours per Lisp type and zone colours
+
+fn theme_hex(value: &str) -> Color {
+    color::hex_exn(value).expect("Theme: bad colour constant")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ports {
+    pub geometry: Color,
+    pub float: Color,
+    pub int: Color,
+    pub vec3: Color,
+    pub bool: Color,
+    pub compound: Color,
+    pub output: Color,
+    pub hint: Color,
+    pub text: Color,
+    pub fn_: Color,
+    pub record: Color,
+}
+
+const PORT_COLORS: [(&str, &str); 6] = [
+    ("#6b50ae", "#a98cf5"),
+    ("#285f77", "#72b3cf"),
+    ("#3b7d4e", "#74c28e"),
+    ("#b0435f", "#f08aa3"),
+    ("#a3407a", "#e88ac0"),
+    ("#4f6a5f", "#9cc2b2"),
+];
+
+pub fn port_hint() -> Color {
+    theme_hex("#f5cf4f")
+}
+
+pub fn ports(theme: &Theme) -> Ports {
+    let night = theme::dark(theme);
+    let pick = |i: usize| {
+        let (light, dark) = PORT_COLORS[i];
+        theme_hex(if night { dark } else { light })
+    };
+    let vec3 = pick(0);
+    Ports {
+        geometry: theme.accent,
+        float: pick(1),
+        int: pick(2),
+        vec3,
+        bool: pick(3),
+        compound: vec3,
+        output: theme.foreground,
+        hint: port_hint(),
+        text: theme::muted(theme),
+        fn_: pick(4),
+        record: pick(5),
+    }
+}
+
+/// Graph zones: a tinted rectangle with a border; `dashed` draws the border as dashes, and a hollow
+/// zone has no fill worth the name. The colours are the study's `--z-*` tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Zone {
+    pub fill: Color,
+    pub edge: Color,
+    pub dashed: bool,
+}
+
+fn zone(theme: &Theme, light: (i64, i64, i64, i64, i64), night: (i64, i64, i64, i64, i64), dashed: bool) -> Zone {
+    let (r, g, b, fill, edge) = if theme::dark(theme) { night } else { light };
+    Zone { fill: color::rgba(r, g, b, fill), edge: color::rgba(r, g, b, edge), dashed }
+}
+
+pub fn zone_for(theme: &Theme) -> Zone {
+    zone(theme, (240, 72, 31, 15, 92), (255, 107, 69, 16, 100), false)
+}
+
+pub fn zone_fold(theme: &Theme) -> Zone {
+    zone(theme, (107, 80, 174, 19, 128), (169, 140, 245, 20, 128), false)
+}
+
+pub fn zone_sum(theme: &Theme) -> Zone {
+    zone(theme, (40, 95, 119, 20, 128), (114, 179, 207, 20, 128), false)
+}
+
+pub fn zone_fn(theme: &Theme) -> Zone {
+    zone(theme, (163, 64, 122, 9, 140), (232, 138, 192, 10, 128), true)
+}
+
+pub fn zone_let(theme: &Theme) -> Zone {
+    zone(theme, (34, 43, 43, 0, 87), (225, 231, 227, 0, 77), true)
+}
+
+pub fn zone_branch(theme: &Theme, taken: bool) -> Zone {
+    zone(
+        theme,
+        (176, 104, 15, if taken { 26 } else { 5 }, if taken { 140 } else { 70 }),
+        (240, 175, 80, if taken { 30 } else { 6 }, if taken { 150 } else { 80 }),
+        false,
+    )
 }

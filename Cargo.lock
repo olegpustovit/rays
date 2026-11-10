@@ -349,6 +349,7 @@ dependencies = [
  "ogpu_vulkan",
  "param",
  "rays",
+ "rays_graph",
  "rays_math",
  "rays_shell",
  "renderer",

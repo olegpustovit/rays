@@ -660,7 +660,7 @@ fn context_color(theme: &Theme, c: Option<Context>) -> Color {
 }
 
 fn type_color(theme: &Theme, t: &Ty) -> Color {
-    let ports = theme::ports(theme);
+    let ports = rays_graph::scope_paint::ports(theme);
     match t {
         Ty::Named(_) => rays_graph::node_menu::color(theme, match ty::color(t) { ColorKind::Output => ColorKind::Compound, c => c }),
         Ty::Float => ports.float,
@@ -882,7 +882,7 @@ fn paint_row(paint: &mut Paint, c: &PaintCtx, k: usize, row: &Row) {
                     for kk in 0..20 {
                         let off = ((kk as f64 + 0.5) * 0.5) - 5.0;
                         let half = 5.0 - off.abs();
-                        paint.fill(cx - half, cy + off - 0.25, 2.0 * half, 0.5, theme::ports(theme).fn_);
+                        paint.fill(cx - half, cy + off - 0.25, 2.0 * half, 0.5, rays_graph::scope_paint::ports(theme).fn_);
                     }
                 }
                 None => square(paint, c, ry, x + 12.0, context_color(theme, *context)),

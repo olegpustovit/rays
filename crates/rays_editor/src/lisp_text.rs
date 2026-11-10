@@ -74,7 +74,7 @@ fn word(text: &str, t: &Token) -> String {
 pub fn colorize_now(theme: &Theme, text: &str) -> Vec<(i64, i64, rays_math::color::T)> {
     // kit rev 3: forms in the float blue, a kind's namespace in the vector purple, keywords in the
     // bool red, numbers green, strings in the record green; brackets and comments recede to ink-3
-    let ports = theme::ports(theme);
+    let ports = rays_graph::scope_paint::ports(theme);
     let quiet = theme::ink_3(theme);
     let lexed = lex(text);
     let tokens = &lexed.0;
