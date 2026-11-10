@@ -23,7 +23,6 @@ pub fn fast_cases() -> Vec<(&'static str, &'static str)> {
             "(map (fn [x] (/ (mod (int/and (+ (int/mul (+ (int x) 1) 1103515245) 12345) 4611686018427387903) 360000) 1000)) (array/range (int/add 4097 (frame/index))))",
         ),
         ("list_gather", "(let* [table (list [1 0 0] [0 1 0] [0 0 1])] (map (fn [x] (+ (nth table (int/mod (int x) 3)) [t 0. 0.])) (array/range 4097)))"),
-        ("list_float_index", "(let* [table (list 0.25 0.5 0.75)] (map (fn [x] (+ (nth table (float (int/mod (int x) 3))) t)) (array/range 4097)))"),
         ("inner_map_sum", "(map (fn [(x : int)] (+ (array/sum (map (fn [(j : int)] (+ x j)) (array/range 3 :type int))) (frame/index))) (array/range 4097 :type int))"),
         (
             "inner_slice_sum",
@@ -65,10 +64,6 @@ pub fn error_cases() -> Vec<(&'static str, &'static str)> {
             "(let* [table (list 1 2 3)] (map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (nth table (int/add 3 (int/mod x 1)))) (float x))) (array/range 16 :type int)))",
         ),
         (
-            "error_list_fraction_selected",
-            "(let* [table (list 1 2 3)] (map (fn [(x : int)] (float (nth table (+ (+ 0.5 (float (int/mod x 1))) (* t 0.))))) (array/range 16 :type int)))",
-        ),
-        (
             "error_shift_selected",
             "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 64 (int/mod (frame/index) 1)))) (float x))) (array/range 16 :type int))",
         ),
@@ -99,6 +94,17 @@ pub fn error_cases() -> Vec<(&'static str, &'static str)> {
         (
             "error_mod_untaken",
             "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/mod x (int/sub (frame/index) (frame/index)))) (float x))) (array/range 16 :type int))",
+        ),
+    ]
+}
+
+/// Fractional indices are rejected by the shared checker before a GPU kernel is constructed.
+pub fn invalid_index_cases() -> [(&'static str, &'static str); 2] {
+    [
+        ("list_float_index", "(let* [table (list 0.25 0.5 0.75)] (map (fn [x] (+ (nth table (float (int/mod (int x) 3))) t)) (array/range 4097)))"),
+        (
+            "error_list_fraction_selected",
+            "(let* [table (list 1 2 3)] (map (fn [(x : int)] (float (nth table (+ (+ 0.5 (float (int/mod x 1))) (* t 0.))))) (array/range 16 :type int)))",
         ),
     ]
 }

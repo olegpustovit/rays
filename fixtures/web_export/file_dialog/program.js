@@ -151,7 +151,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= ["#14161c", Float64Array.of(12, 12, 0), "O: open images   S: save   F: folder   drag a file in   pinch to scale", Float64Array.of(1, 1, 1), 16n, 2n, [], false, Float64Array.of(0, 0, 0), 1, 0n, 0n, 4096n, 0n, "dialog-opened", "dialog ", " opened", "file-dropped", "dropped ", "file-dialog", "", "dialog ", " failed: ", "file-dialog", 0n, "dialog ", " cancelled", "", "", 8n, 0n, 0n, "file-dialog", "", 0n, 0n, 4096n, 0n, "dialog ", ": ", 8n, 0n, 0n, 0n, 0n, 1n, 1n, "file-drag-moved", true, "file-drag-ended", false, "file-drag-moved", "pinched", 4, 0.25, 0n, 0n, 1n, 1n, 80n, 2n, 60n, 0n, 0n, "#5aaaf0", 0n, 10, "#f0b43c", "#00000000", Float64Array.of(12, 200, 0), 1n, 0n, 0n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 218, 0), 1n, 1n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 236, 0), 2n, 2n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 254, 0), 3n, 3n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 272, 0), 4n, 4n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 290, 0), 5n, 5n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 308, 0), 6n, 6n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 326, 0), 7n, 7n, "", Float64Array.of(1, 1, 1), 16n];
+  K ??= ["#14161c", Float64Array.of(12, 12, 0), "O: open images   S: save   F: folder   drag a file in   pinch to scale", Float64Array.of(1, 1, 1), 16n, 2n, [], false, Float64Array.of(0, 0, 0), 1, 0n, 0n, 4096n, 0n, "dialog-opened", "dialog ", " opened", "file-dropped", "dropped ", "file-dialog", "", "dialog ", " failed: ", "file-dialog", 0n, "dialog ", " cancelled", "", "", 8n, 0n, 0n, 8n, 0n, "file-dialog", "", 0n, 0n, 4096n, 0n, "dialog ", ": ", 8n, 0n, 0n, 8n, 0n, 0n, 0n, 1n, 1n, "file-drag-moved", true, "file-drag-ended", false, "file-drag-moved", "pinched", 4, 0.25, 0n, 0n, 1n, 1n, 80n, 2n, 60n, 0n, 0n, "#5aaaf0", 0n, 10, "#f0b43c", "#00000000", Float64Array.of(12, 200, 0), 1n, 0n, 0n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 218, 0), 1n, 1n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 236, 0), 2n, 2n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 254, 0), 3n, 3n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 272, 0), 4n, 4n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 290, 0), 5n, 5n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 308, 0), 6n, 6n, "", Float64Array.of(1, 1, 1), 16n, Float64Array.of(12, 326, 0), 7n, 7n, "", Float64Array.of(1, 1, 1), 16n];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31;
   let l32, l33, l34, l35, l36, l37, l38, l39, l40, l41, l42, l43, l44, l45, l46, l47;
@@ -171,7 +171,7 @@ export function frame(input, state, rt) {
   let l256, l257, l258, l259, l260, l261, l262, l263, l264, l265, l266, l267, l268, l269, l270, l271;
   let l272, l273, l274, l275, l276, l277, l278, l279, l280, l281, l282, l283, l284, l285, l286, l287;
   let l288, l289, l290, l291, l292, l293, l294, l295, l296, l297, l298, l299, l300, l301, l302, l303;
-  let l304, l305, l306, l307, l308, l309, l310, l311, l312, l313;
+  let l304, l305, l306, l307, l308, l309, l310, l311, l312, l313, l314, l315, l316, l317;
   let at = 0;
   try {
     at = 0; l0 = K[0];
@@ -293,353 +293,373 @@ export function frame(input, state, rt) {
             at = 97; l85 = rt.sequence_concat(l83, l84);
             at = 98; l86 = rt.sequence_length(l85);
             at = 99; l87 = K[29];
-            at = 100; l88 = rt.float(l87);
-            at = 101; l89 = rt.coerce("int", l88);
-            at = 102; l90 = K[30];
-            at = 103; l91 = rt.max(l90, l89);
-            at = 104; l92 = rt.min(l91, l86);
-            at = 105; l93 = K[31];
-            at = 106; l94 = rt.sequence_slice(l85, l93, l92);
-            at = 107; l81 = l94;
+            at = 100; l88 = K[30];
+            at = 101; l89 = rt.int_lt(l87, l88);
+            at = 102; if (rt.truthy(l89)) {
+              at = 103; l91 = K[31];
+              at = 104; l90 = l91;
+            } else {
+              at = 105; l92 = K[32];
+              at = 106; l90 = l92;
+            }
+            at = 107; l93 = rt.int_gt(l90, l86);
+            at = 108; if (rt.truthy(l93)) {
+              at = 109; l94 = l86;
+            } else {
+              at = 110; l94 = l90;
+            }
+            at = 111; l95 = K[33];
+            at = 112; l96 = rt.sequence_slice(l85, l95, l94);
+            at = 113; l81 = l96;
           }
-          at = 108; l95 = field(rt, l25, "kind");
-          at = 109; l96 = K[32];
-          at = 110; l97 = rt.equal(l95, l96);
-          at = 111; l98 = field(rt, l25, "error");
-          at = 112; l99 = K[33];
-          at = 113; l100 = rt.equal(l98, l99);
-          at = 114; l101 = rt.and(l97, l100);
-          at = 115; if (rt.truthy(l101)) {
-            at = 116; l103 = l81;
-            at = 117; l104 = K[34];
-            at = 118; l105 = l104;
-            at = 119; l106 = K[35];
-            at = 120; l107 = l106;
-            at = 121; l108 = field(rt, l25, "paths");
-            at = 122; {
-              const s122 = l108, c122 = Array.isArray(s122) ? s122.length : Number(rt.array_count(s122));
-              if (c122 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
-              for (let i122 = 0; i122 < c122; i122++) {
-                l109 = BigInt(i122); l110 = Array.isArray(s122) ? s122[i122] : rt.array_nth(s122, i122);
-                at = 123; l111 = K[36];
-                at = 124; l112 = rt.ge(l105, l111);
-                at = 125; if (rt.truthy(l112)) {
-                  at = 126; l114 = rt.fail("E_ITER_BOUND", "Loop runs more than 4,096 iterations.");
-                  at = 127; l113 = l114;
+          at = 114; l97 = field(rt, l25, "kind");
+          at = 115; l98 = K[34];
+          at = 116; l99 = rt.equal(l97, l98);
+          at = 117; l100 = field(rt, l25, "error");
+          at = 118; l101 = K[35];
+          at = 119; l102 = rt.equal(l100, l101);
+          at = 120; l103 = rt.and(l99, l102);
+          at = 121; if (rt.truthy(l103)) {
+            at = 122; l105 = l81;
+            at = 123; l106 = K[36];
+            at = 124; l107 = l106;
+            at = 125; l108 = K[37];
+            at = 126; l109 = l108;
+            at = 127; l110 = field(rt, l25, "paths");
+            at = 128; {
+              const s128 = l110, c128 = Array.isArray(s128) ? s128.length : Number(rt.array_count(s128));
+              if (c128 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
+              for (let i128 = 0; i128 < c128; i128++) {
+                l111 = BigInt(i128); l112 = Array.isArray(s128) ? s128[i128] : rt.array_nth(s128, i128);
+                at = 129; l113 = K[38];
+                at = 130; l114 = rt.ge(l107, l113);
+                at = 131; if (rt.truthy(l114)) {
+                  at = 132; l116 = rt.fail("E_ITER_BOUND", "Loop runs more than 4,096 iterations.");
+                  at = 133; l115 = l116;
                 } else {
-                  at = 128; l115 = K[37];
-                  at = 129; l113 = l115;
+                  at = 134; l117 = K[39];
+                  at = 135; l115 = l117;
                 }
-                at = 130; l116 = field(rt, l25, "id");
-                at = 131; l117 = rt.show(l116);
-                at = 132; l118 = rt.show(l110);
-                at = 133; l119 = K[38];
-                at = 134; l120 = K[39];
-                at = 135; l121 = rt.text_concat(l119, l117, l120, l118);
-                at = 136; l122 = rt.sequence_concat([l121]);
-                at = 137; l123 = rt.sequence_concat(l122, l103);
-                at = 138; l124 = rt.sequence_length(l123);
-                at = 139; l125 = K[40];
-                at = 140; l126 = rt.float(l125);
-                at = 141; l127 = rt.coerce("int", l126);
-                at = 142; l128 = K[41];
-                at = 143; l129 = rt.max(l128, l127);
-                at = 144; l130 = rt.min(l129, l124);
-                at = 145; l131 = K[42];
-                at = 146; l132 = rt.sequence_slice(l123, l131, l130);
-                at = 147; l133 = rt.sequence_length(l103);
-                at = 148; l134 = K[43];
-                at = 149; l135 = rt.eq(l133, l134);
-                at = 150; if (rt.truthy(l135)) {
-                  at = 151; l136 = l132;
+                at = 136; l118 = field(rt, l25, "id");
+                at = 137; l119 = rt.show(l118);
+                at = 138; l120 = rt.show(l112);
+                at = 139; l121 = K[40];
+                at = 140; l122 = K[41];
+                at = 141; l123 = rt.text_concat(l121, l119, l122, l120);
+                at = 142; l124 = rt.sequence_concat([l123]);
+                at = 143; l125 = rt.sequence_concat(l124, l105);
+                at = 144; l126 = rt.sequence_length(l125);
+                at = 145; l127 = K[42];
+                at = 146; l128 = K[43];
+                at = 147; l129 = rt.int_lt(l127, l128);
+                at = 148; if (rt.truthy(l129)) {
+                  at = 149; l131 = K[44];
+                  at = 150; l130 = l131;
                 } else {
-                  at = 152; l137 = K[44];
-                  at = 153; l138 = rt.sequence_get(l103, l137);
-                  at = 154; l139 = rt.sequence_length(l132);
-                  at = 155; l140 = rt.sequence_build(l139);
-                  at = 156; {
-                    const s156 = l132, c156 = Array.isArray(s156) ? s156.length : Number(rt.array_count(s156));
-                    if (c156 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
-                    for (let i156 = 0; i156 < c156; i156++) {
-                      l141 = BigInt(i156); l142 = Array.isArray(s156) ? s156[i156] : rt.array_nth(s156, i156);
-                      at = 157; store(rt, l140, l141, l142);
+                  at = 151; l132 = K[45];
+                  at = 152; l130 = l132;
+                }
+                at = 153; l133 = rt.int_gt(l130, l126);
+                at = 154; if (rt.truthy(l133)) {
+                  at = 155; l134 = l126;
+                } else {
+                  at = 156; l134 = l130;
+                }
+                at = 157; l135 = K[46];
+                at = 158; l136 = rt.sequence_slice(l125, l135, l134);
+                at = 159; l137 = rt.sequence_length(l105);
+                at = 160; l138 = K[47];
+                at = 161; l139 = rt.eq(l137, l138);
+                at = 162; if (rt.truthy(l139)) {
+                  at = 163; l140 = l136;
+                } else {
+                  at = 164; l141 = K[48];
+                  at = 165; l142 = rt.sequence_get(l105, l141);
+                  at = 166; l143 = rt.sequence_length(l136);
+                  at = 167; l144 = rt.sequence_build(l143);
+                  at = 168; {
+                    const s168 = l136, c168 = Array.isArray(s168) ? s168.length : Number(rt.array_count(s168));
+                    if (c168 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
+                    for (let i168 = 0; i168 < c168; i168++) {
+                      l145 = BigInt(i168); l146 = Array.isArray(s168) ? s168[i168] : rt.array_nth(s168, i168);
+                      at = 169; store(rt, l144, l145, l146);
                     }
                   }
-                  at = 158; l136 = l140;
+                  at = 170; l140 = l144;
                 }
-                at = 159; l103 = l136;
-                at = 160; l143 = K[45];
-                at = 161; l144 = rt.add(l107, l143);
-                at = 162; l107 = l144;
-                at = 163; l145 = K[46];
-                at = 164; l146 = rt.add(l105, l145);
-                at = 165; l105 = l146;
+                at = 171; l105 = l140;
+                at = 172; l147 = K[49];
+                at = 173; l148 = rt.add(l109, l147);
+                at = 174; l109 = l148;
+                at = 175; l149 = K[50];
+                at = 176; l150 = rt.add(l107, l149);
+                at = 177; l107 = l150;
               }
             }
-            at = 166; l102 = l103;
+            at = 178; l104 = l105;
           } else {
-            at = 167; l102 = l81;
+            at = 179; l104 = l81;
           }
-          at = 168; l147 = field(rt, l25, "kind");
-          at = 169; l148 = K[47];
-          at = 170; l149 = rt.equal(l147, l148);
-          at = 171; if (rt.truthy(l149)) {
-            at = 172; l151 = K[48];
-            at = 173; l150 = l151;
+          at = 180; l151 = field(rt, l25, "kind");
+          at = 181; l152 = K[51];
+          at = 182; l153 = rt.equal(l151, l152);
+          at = 183; if (rt.truthy(l153)) {
+            at = 184; l155 = K[52];
+            at = 185; l154 = l155;
           } else {
-            at = 174; l152 = field(rt, l25, "kind");
-            at = 175; l153 = K[49];
-            at = 176; l154 = rt.equal(l152, l153);
-            at = 177; if (rt.truthy(l154)) {
-              at = 178; l156 = K[50];
-              at = 179; l155 = l156;
+            at = 186; l156 = field(rt, l25, "kind");
+            at = 187; l157 = K[53];
+            at = 188; l158 = rt.equal(l156, l157);
+            at = 189; if (rt.truthy(l158)) {
+              at = 190; l160 = K[54];
+              at = 191; l159 = l160;
             } else {
-              at = 180; l157 = field(rt, l17, "dragging");
-              at = 181; l155 = l157;
+              at = 192; l161 = field(rt, l17, "dragging");
+              at = 193; l159 = l161;
             }
-            at = 182; l150 = l155;
+            at = 194; l154 = l159;
           }
-          at = 183; l158 = field(rt, l25, "kind");
-          at = 184; l159 = K[51];
-          at = 185; l160 = rt.equal(l158, l159);
-          at = 186; if (rt.truthy(l160)) {
-            at = 187; l162 = field(rt, l25, "position");
-            at = 188; l161 = l162;
+          at = 195; l162 = field(rt, l25, "kind");
+          at = 196; l163 = K[55];
+          at = 197; l164 = rt.equal(l162, l163);
+          at = 198; if (rt.truthy(l164)) {
+            at = 199; l166 = field(rt, l25, "position");
+            at = 200; l165 = l166;
           } else {
-            at = 189; l163 = field(rt, l17, "position");
-            at = 190; l161 = l163;
+            at = 201; l167 = field(rt, l17, "position");
+            at = 202; l165 = l167;
           }
-          at = 191; l164 = field(rt, l25, "kind");
-          at = 192; l165 = K[52];
-          at = 193; l166 = rt.equal(l164, l165);
-          at = 194; if (rt.truthy(l166)) {
-            at = 195; l168 = field(rt, l17, "zoom");
-            at = 196; l169 = field(rt, l25, "scale");
-            at = 197; l170 = rt.mul(l168, l169);
-            at = 198; l171 = K[53];
-            at = 199; l172 = rt.min(l171, l170);
-            at = 200; l173 = K[54];
-            at = 201; l174 = rt.max(l173, l172);
-            at = 202; l167 = l174;
+          at = 203; l168 = field(rt, l25, "kind");
+          at = 204; l169 = K[56];
+          at = 205; l170 = rt.equal(l168, l169);
+          at = 206; if (rt.truthy(l170)) {
+            at = 207; l172 = field(rt, l17, "zoom");
+            at = 208; l173 = field(rt, l25, "scale");
+            at = 209; l174 = rt.mul(l172, l173);
+            at = 210; l175 = K[57];
+            at = 211; l176 = rt.min(l175, l174);
+            at = 212; l177 = K[58];
+            at = 213; l178 = rt.max(l177, l176);
+            at = 214; l171 = l178;
           } else {
-            at = 203; l175 = field(rt, l17, "zoom");
-            at = 204; l167 = l175;
+            at = 215; l179 = field(rt, l17, "zoom");
+            at = 216; l171 = l179;
           }
-          at = 205; l176 = field(rt, l17, "lines");
-          at = 206; l177 = rt.sequence_length(l176);
-          at = 207; l178 = K[55];
-          at = 208; l179 = rt.eq(l177, l178);
-          at = 209; if (rt.truthy(l179)) {
-            at = 210; l180 = l102;
+          at = 217; l180 = field(rt, l17, "lines");
+          at = 218; l181 = rt.sequence_length(l180);
+          at = 219; l182 = K[59];
+          at = 220; l183 = rt.eq(l181, l182);
+          at = 221; if (rt.truthy(l183)) {
+            at = 222; l184 = l104;
           } else {
-            at = 211; l181 = K[56];
-            at = 212; l182 = rt.sequence_get(l176, l181);
-            at = 213; l183 = rt.sequence_length(l102);
-            at = 214; l184 = rt.sequence_build(l183);
-            at = 215; {
-              const s215 = l102, c215 = Array.isArray(s215) ? s215.length : Number(rt.array_count(s215));
-              if (c215 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
-              for (let i215 = 0; i215 < c215; i215++) {
-                l185 = BigInt(i215); l186 = Array.isArray(s215) ? s215[i215] : rt.array_nth(s215, i215);
-                at = 216; store(rt, l184, l185, l186);
+            at = 223; l185 = K[60];
+            at = 224; l186 = rt.sequence_get(l180, l185);
+            at = 225; l187 = rt.sequence_length(l104);
+            at = 226; l188 = rt.sequence_build(l187);
+            at = 227; {
+              const s227 = l104, c227 = Array.isArray(s227) ? s227.length : Number(rt.array_count(s227));
+              if (c227 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
+              for (let i227 = 0; i227 < c227; i227++) {
+                l189 = BigInt(i227); l190 = Array.isArray(s227) ? s227[i227] : rt.array_nth(s227, i227);
+                at = 228; store(rt, l188, l189, l190);
               }
             }
-            at = 217; l180 = l184;
+            at = 229; l184 = l188;
           }
-          at = 218; l187 = field(rt, l17, "dragging");
-          at = 219; l188 = field(rt, l17, "position");
-          at = 220; l189 = field(rt, l17, "zoom");
-          at = 221; l190 = rt.coerce("float", l189);
-          at = 222; l191 = rt.equal(l189, l190);
-          at = 223; if (rt.truthy(l191)) {
-            at = 224; l193 = rt.coerce("float", l167);
-            at = 225; l192 = l193;
+          at = 230; l191 = field(rt, l17, "dragging");
+          at = 231; l192 = field(rt, l17, "position");
+          at = 232; l193 = field(rt, l17, "zoom");
+          at = 233; l194 = rt.coerce("float", l193);
+          at = 234; l195 = rt.equal(l193, l194);
+          at = 235; if (rt.truthy(l195)) {
+            at = 236; l197 = rt.coerce("float", l171);
+            at = 237; l196 = l197;
           } else {
-            at = 226; l194 = rt.coerce("int", l167);
-            at = 227; l192 = l194;
+            at = 238; l198 = rt.coerce("int", l171);
+            at = 239; l196 = l198;
           }
-          at = 228; l195 = new Map([["lines", l180], ["dragging", l150], ["position", l161], ["zoom", l192]]);
-          at = 229; l17 = l195;
-          at = 230; l196 = K[57];
-          at = 231; l197 = rt.add(l21, l196);
-          at = 232; l21 = l197;
-          at = 233; l198 = K[58];
-          at = 234; l199 = rt.add(l19, l198);
-          at = 235; l19 = l199;
+          at = 240; l199 = new Map([["lines", l184], ["dragging", l154], ["position", l165], ["zoom", l196]]);
+          at = 241; l17 = l199;
+          at = 242; l200 = K[61];
+          at = 243; l201 = rt.add(l21, l200);
+          at = 244; l21 = l201;
+          at = 245; l202 = K[62];
+          at = 246; l203 = rt.add(l19, l202);
+          at = 247; l19 = l203;
         }
       }
-      at = 236; cell(state, 0, "", input.tick).pending = l17;
-      at = 237; l16 = l17;
+      at = 248; cell(state, 0, "", input.tick).pending = l17;
+      at = 249; l16 = l17;
     }
-    at = 238; l200 = field(rt, l16, "zoom");
-    at = 239; l201 = K[59];
-    at = 240; l202 = rt.mul(l201, l200);
-    at = 241; l203 = rt.int(l202);
-    at = 242; l204 = K[60];
-    at = 243; l205 = rt.int_div(l203, l204);
-    at = 244; l206 = rt.sub(l7, l205);
-    at = 245; l207 = K[61];
-    at = 246; l208 = K[62];
-    at = 247; l209 = Float64Array.of(rt.float(l206), rt.float(l207), rt.float(l208));
-    at = 248; l210 = K[63];
-    at = 249; l211 = Float64Array.of(rt.float(l203), rt.float(l203), rt.float(l210));
-    at = 250; l212 = K[64];
-    at = 251; markSet(rt, false, "rect", {at: l209, size: l211, fill: l212});
-    at = 252; l213 = field(rt, l16, "position");
-    at = 253; l214 = field(rt, l213, "x");
-    at = 254; l215 = rt.int(l214);
-    at = 255; l216 = field(rt, l16, "position");
-    at = 256; l217 = field(rt, l216, "y");
-    at = 257; l218 = rt.int(l217);
-    at = 258; l219 = K[65];
-    at = 259; l220 = Float64Array.of(rt.float(l215), rt.float(l218), rt.float(l219));
-    at = 260; l221 = K[66];
-    at = 261; l222 = field(rt, l16, "dragging");
-    at = 262; if (rt.truthy(l222)) {
-      at = 263; l224 = K[67];
-      at = 264; l223 = l224;
+    at = 250; l204 = field(rt, l16, "zoom");
+    at = 251; l205 = K[63];
+    at = 252; l206 = rt.mul(l205, l204);
+    at = 253; l207 = rt.int(l206);
+    at = 254; l208 = K[64];
+    at = 255; l209 = rt.int_div(l207, l208);
+    at = 256; l210 = rt.sub(l7, l209);
+    at = 257; l211 = K[65];
+    at = 258; l212 = K[66];
+    at = 259; l213 = Float64Array.of(rt.float(l210), rt.float(l211), rt.float(l212));
+    at = 260; l214 = K[67];
+    at = 261; l215 = Float64Array.of(rt.float(l207), rt.float(l207), rt.float(l214));
+    at = 262; l216 = K[68];
+    at = 263; markSet(rt, false, "rect", {at: l213, size: l215, fill: l216});
+    at = 264; l217 = field(rt, l16, "position");
+    at = 265; l218 = field(rt, l217, "x");
+    at = 266; l219 = rt.int(l218);
+    at = 267; l220 = field(rt, l16, "position");
+    at = 268; l221 = field(rt, l220, "y");
+    at = 269; l222 = rt.int(l221);
+    at = 270; l223 = K[69];
+    at = 271; l224 = Float64Array.of(rt.float(l219), rt.float(l222), rt.float(l223));
+    at = 272; l225 = K[70];
+    at = 273; l226 = field(rt, l16, "dragging");
+    at = 274; if (rt.truthy(l226)) {
+      at = 275; l228 = K[71];
+      at = 276; l227 = l228;
     } else {
-      at = 265; l225 = K[68];
-      at = 266; l223 = l225;
+      at = 277; l229 = K[72];
+      at = 278; l227 = l229;
     }
-    at = 267; markSet(rt, false, "circle", {at: l220, radius: l221, fill: l223});
-    at = 268; l226 = K[69];
-    at = 269; l227 = field(rt, l16, "lines");
-    at = 270; l228 = rt.sequence_length(l227);
-    at = 271; l229 = rt.sequence_build(l228);
-    { const k272 = [l227, l228], h272 = rt.recall(M, 272, k272);
-    if (h272) [l229, l230, l231, l232, l233, l234] = h272; else {
-      at = 272; {
-        const s272 = l227, c272 = Array.isArray(s272) ? s272.length : Number(rt.array_count(s272));
-        if (c272 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
-        for (let i272 = 0; i272 < c272; i272++) {
-          l230 = BigInt(i272); l231 = Array.isArray(s272) ? s272[i272] : rt.array_nth(s272, i272);
-          at = 273; l232 = K[70];
-          at = 274; l233 = rt.sub(l228, l232);
-          at = 275; l234 = rt.sub(l233, l230);
-          at = 276; store(rt, l229, l234, l231);
+    at = 279; markSet(rt, false, "circle", {at: l224, radius: l225, fill: l227});
+    at = 280; l230 = K[73];
+    at = 281; l231 = field(rt, l16, "lines");
+    at = 282; l232 = rt.sequence_length(l231);
+    at = 283; l233 = rt.sequence_build(l232);
+    { const k284 = [l231, l232], h284 = rt.recall(M, 284, k284);
+    if (h284) [l233, l234, l235, l236, l237, l238] = h284; else {
+      at = 284; {
+        const s284 = l231, c284 = Array.isArray(s284) ? s284.length : Number(rt.array_count(s284));
+        if (c284 > 4096) rt.fail("E_ITER_BOUND", "Core iteration exceeds its bound.");
+        for (let i284 = 0; i284 < c284; i284++) {
+          l234 = BigInt(i284); l235 = Array.isArray(s284) ? s284[i284] : rt.array_nth(s284, i284);
+          at = 285; l236 = K[74];
+          at = 286; l237 = rt.sub(l232, l236);
+          at = 287; l238 = rt.sub(l237, l234);
+          at = 288; store(rt, l233, l238, l235);
         }
       }
-    rt.keep(M, 272, k272, [l229, l230, l231, l232, l233, l234]); } }
-    at = 277; l235 = rt.sequence_length(l229);
-    at = 278; l236 = K[71];
-    at = 279; l237 = rt.lt(l236, l235);
-    at = 280; if (rt.truthy(l237)) {
-      at = 281; l239 = K[72];
-      at = 282; l240 = rt.sequence_get(l229, l239);
-      at = 283; l238 = l240;
+    rt.keep(M, 284, k284, [l233, l234, l235, l236, l237, l238]); } }
+    at = 289; l239 = rt.sequence_length(l233);
+    at = 290; l240 = K[75];
+    at = 291; l241 = rt.lt(l240, l239);
+    at = 292; if (rt.truthy(l241)) {
+      at = 293; l243 = K[76];
+      at = 294; l244 = rt.sequence_get(l233, l243);
+      at = 295; l242 = l244;
     } else {
-      at = 284; l241 = K[73];
-      at = 285; l238 = l241;
+      at = 296; l245 = K[77];
+      at = 297; l242 = l245;
     }
-    at = 286; l242 = K[74];
-    at = 287; l243 = K[75];
-    at = 288; if (typeof l238 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l238 !== "") { const [x, y] = point(rt, l226); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l243)), color: ink(rt, l242), text: l238}); }
-    at = 289; l244 = K[76];
-    at = 290; l245 = rt.sequence_length(l229);
-    at = 291; l246 = K[77];
-    at = 292; l247 = rt.lt(l246, l245);
-    at = 293; if (rt.truthy(l247)) {
-      at = 294; l249 = K[78];
-      at = 295; l250 = rt.sequence_get(l229, l249);
-      at = 296; l248 = l250;
+    at = 298; l246 = K[78];
+    at = 299; l247 = K[79];
+    at = 300; if (typeof l242 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l242 !== "") { const [x, y] = point(rt, l230); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l247)), color: ink(rt, l246), text: l242}); }
+    at = 301; l248 = K[80];
+    at = 302; l249 = rt.sequence_length(l233);
+    at = 303; l250 = K[81];
+    at = 304; l251 = rt.lt(l250, l249);
+    at = 305; if (rt.truthy(l251)) {
+      at = 306; l253 = K[82];
+      at = 307; l254 = rt.sequence_get(l233, l253);
+      at = 308; l252 = l254;
     } else {
-      at = 297; l251 = K[79];
-      at = 298; l248 = l251;
+      at = 309; l255 = K[83];
+      at = 310; l252 = l255;
     }
-    at = 299; l252 = K[80];
-    at = 300; l253 = K[81];
-    at = 301; if (typeof l248 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l248 !== "") { const [x, y] = point(rt, l244); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l253)), color: ink(rt, l252), text: l248}); }
-    at = 302; l254 = K[82];
-    at = 303; l255 = rt.sequence_length(l229);
-    at = 304; l256 = K[83];
-    at = 305; l257 = rt.lt(l256, l255);
-    at = 306; if (rt.truthy(l257)) {
-      at = 307; l259 = K[84];
-      at = 308; l260 = rt.sequence_get(l229, l259);
-      at = 309; l258 = l260;
+    at = 311; l256 = K[84];
+    at = 312; l257 = K[85];
+    at = 313; if (typeof l252 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l252 !== "") { const [x, y] = point(rt, l248); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l257)), color: ink(rt, l256), text: l252}); }
+    at = 314; l258 = K[86];
+    at = 315; l259 = rt.sequence_length(l233);
+    at = 316; l260 = K[87];
+    at = 317; l261 = rt.lt(l260, l259);
+    at = 318; if (rt.truthy(l261)) {
+      at = 319; l263 = K[88];
+      at = 320; l264 = rt.sequence_get(l233, l263);
+      at = 321; l262 = l264;
     } else {
-      at = 310; l261 = K[85];
-      at = 311; l258 = l261;
+      at = 322; l265 = K[89];
+      at = 323; l262 = l265;
     }
-    at = 312; l262 = K[86];
-    at = 313; l263 = K[87];
-    at = 314; if (typeof l258 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l258 !== "") { const [x, y] = point(rt, l254); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l263)), color: ink(rt, l262), text: l258}); }
-    at = 315; l264 = K[88];
-    at = 316; l265 = rt.sequence_length(l229);
-    at = 317; l266 = K[89];
-    at = 318; l267 = rt.lt(l266, l265);
-    at = 319; if (rt.truthy(l267)) {
-      at = 320; l269 = K[90];
-      at = 321; l270 = rt.sequence_get(l229, l269);
-      at = 322; l268 = l270;
+    at = 324; l266 = K[90];
+    at = 325; l267 = K[91];
+    at = 326; if (typeof l262 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l262 !== "") { const [x, y] = point(rt, l258); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l267)), color: ink(rt, l266), text: l262}); }
+    at = 327; l268 = K[92];
+    at = 328; l269 = rt.sequence_length(l233);
+    at = 329; l270 = K[93];
+    at = 330; l271 = rt.lt(l270, l269);
+    at = 331; if (rt.truthy(l271)) {
+      at = 332; l273 = K[94];
+      at = 333; l274 = rt.sequence_get(l233, l273);
+      at = 334; l272 = l274;
     } else {
-      at = 323; l271 = K[91];
-      at = 324; l268 = l271;
+      at = 335; l275 = K[95];
+      at = 336; l272 = l275;
     }
-    at = 325; l272 = K[92];
-    at = 326; l273 = K[93];
-    at = 327; if (typeof l268 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l268 !== "") { const [x, y] = point(rt, l264); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l273)), color: ink(rt, l272), text: l268}); }
-    at = 328; l274 = K[94];
-    at = 329; l275 = rt.sequence_length(l229);
-    at = 330; l276 = K[95];
-    at = 331; l277 = rt.lt(l276, l275);
-    at = 332; if (rt.truthy(l277)) {
-      at = 333; l279 = K[96];
-      at = 334; l280 = rt.sequence_get(l229, l279);
-      at = 335; l278 = l280;
+    at = 337; l276 = K[96];
+    at = 338; l277 = K[97];
+    at = 339; if (typeof l272 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l272 !== "") { const [x, y] = point(rt, l268); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l277)), color: ink(rt, l276), text: l272}); }
+    at = 340; l278 = K[98];
+    at = 341; l279 = rt.sequence_length(l233);
+    at = 342; l280 = K[99];
+    at = 343; l281 = rt.lt(l280, l279);
+    at = 344; if (rt.truthy(l281)) {
+      at = 345; l283 = K[100];
+      at = 346; l284 = rt.sequence_get(l233, l283);
+      at = 347; l282 = l284;
     } else {
-      at = 336; l281 = K[97];
-      at = 337; l278 = l281;
+      at = 348; l285 = K[101];
+      at = 349; l282 = l285;
     }
-    at = 338; l282 = K[98];
-    at = 339; l283 = K[99];
-    at = 340; if (typeof l278 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l278 !== "") { const [x, y] = point(rt, l274); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l283)), color: ink(rt, l282), text: l278}); }
-    at = 341; l284 = K[100];
-    at = 342; l285 = rt.sequence_length(l229);
-    at = 343; l286 = K[101];
-    at = 344; l287 = rt.lt(l286, l285);
-    at = 345; if (rt.truthy(l287)) {
-      at = 346; l289 = K[102];
-      at = 347; l290 = rt.sequence_get(l229, l289);
-      at = 348; l288 = l290;
+    at = 350; l286 = K[102];
+    at = 351; l287 = K[103];
+    at = 352; if (typeof l282 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l282 !== "") { const [x, y] = point(rt, l278); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l287)), color: ink(rt, l286), text: l282}); }
+    at = 353; l288 = K[104];
+    at = 354; l289 = rt.sequence_length(l233);
+    at = 355; l290 = K[105];
+    at = 356; l291 = rt.lt(l290, l289);
+    at = 357; if (rt.truthy(l291)) {
+      at = 358; l293 = K[106];
+      at = 359; l294 = rt.sequence_get(l233, l293);
+      at = 360; l292 = l294;
     } else {
-      at = 349; l291 = K[103];
-      at = 350; l288 = l291;
+      at = 361; l295 = K[107];
+      at = 362; l292 = l295;
     }
-    at = 351; l292 = K[104];
-    at = 352; l293 = K[105];
-    at = 353; if (typeof l288 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l288 !== "") { const [x, y] = point(rt, l284); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l293)), color: ink(rt, l292), text: l288}); }
-    at = 354; l294 = K[106];
-    at = 355; l295 = rt.sequence_length(l229);
-    at = 356; l296 = K[107];
-    at = 357; l297 = rt.lt(l296, l295);
-    at = 358; if (rt.truthy(l297)) {
-      at = 359; l299 = K[108];
-      at = 360; l300 = rt.sequence_get(l229, l299);
-      at = 361; l298 = l300;
+    at = 363; l296 = K[108];
+    at = 364; l297 = K[109];
+    at = 365; if (typeof l292 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l292 !== "") { const [x, y] = point(rt, l288); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l297)), color: ink(rt, l296), text: l292}); }
+    at = 366; l298 = K[110];
+    at = 367; l299 = rt.sequence_length(l233);
+    at = 368; l300 = K[111];
+    at = 369; l301 = rt.lt(l300, l299);
+    at = 370; if (rt.truthy(l301)) {
+      at = 371; l303 = K[112];
+      at = 372; l304 = rt.sequence_get(l233, l303);
+      at = 373; l302 = l304;
     } else {
-      at = 362; l301 = K[109];
-      at = 363; l298 = l301;
+      at = 374; l305 = K[113];
+      at = 375; l302 = l305;
     }
-    at = 364; l302 = K[110];
-    at = 365; l303 = K[111];
-    at = 366; if (typeof l298 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l298 !== "") { const [x, y] = point(rt, l294); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l303)), color: ink(rt, l302), text: l298}); }
-    at = 367; l304 = K[112];
-    at = 368; l305 = rt.sequence_length(l229);
-    at = 369; l306 = K[113];
-    at = 370; l307 = rt.lt(l306, l305);
-    at = 371; if (rt.truthy(l307)) {
-      at = 372; l309 = K[114];
-      at = 373; l310 = rt.sequence_get(l229, l309);
-      at = 374; l308 = l310;
+    at = 376; l306 = K[114];
+    at = 377; l307 = K[115];
+    at = 378; if (typeof l302 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l302 !== "") { const [x, y] = point(rt, l298); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l307)), color: ink(rt, l306), text: l302}); }
+    at = 379; l308 = K[116];
+    at = 380; l309 = rt.sequence_length(l233);
+    at = 381; l310 = K[117];
+    at = 382; l311 = rt.lt(l310, l309);
+    at = 383; if (rt.truthy(l311)) {
+      at = 384; l313 = K[118];
+      at = 385; l314 = rt.sequence_get(l233, l313);
+      at = 386; l312 = l314;
     } else {
-      at = 375; l311 = K[115];
-      at = 376; l308 = l311;
+      at = 387; l315 = K[119];
+      at = 388; l312 = l315;
     }
-    at = 377; l312 = K[116];
-    at = 378; l313 = K[117];
-    at = 379; if (typeof l308 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l308 !== "") { const [x, y] = point(rt, l304); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l313)), color: ink(rt, l312), text: l308}); }
+    at = 389; l316 = K[120];
+    at = 390; l317 = K[121];
+    at = 391; if (typeof l312 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l312 !== "") { const [x, y] = point(rt, l308); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l317)), color: ink(rt, l316), text: l312}); }
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

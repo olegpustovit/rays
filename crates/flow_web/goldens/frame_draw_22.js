@@ -112,7 +112,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export async function frame(input, state, rt) {
-  K ??= [Float64Array.of(4, 5, 0), 2n, 0.5];
+  K ??= [Float64Array.of(4, 5, 0), 2, 0.5];
   let l0, l1, l2, l3, l4;
   let at = 0;
   try {

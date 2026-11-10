@@ -112,7 +112,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= [Float64Array.of(12, 12, 0), "hi", "#abc", 20n];
+  K ??= [Float64Array.of(12, 12, 0), "hi", "#abc", 20];
   let l0, l1, l2, l3;
   let at = 0;
   try {

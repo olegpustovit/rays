@@ -84,6 +84,21 @@ fn operators_fractal_noise_and_hypot() {
 }
 
 #[test]
+fn float_indices_are_rejected_before_kernel_lowering() {
+    for (name, body) in crate::oracle_cases::invalid_index_cases() {
+        let source = format!("(workspace w (graph g :context value (let* [tested {body}] 0.0)))");
+        let forms = flow_syntax::syntax::parse(&source).unwrap();
+        let (workspace, diagnostics) = flow_check::workspace::check(
+            &[], false, false, None, &flow_check::catalog::Catalog { version: 1, kinds: vec![] }, &forms,
+        );
+        assert!(workspace.is_none(), "{name}");
+        assert_eq!(diagnostics.len(), 1, "{name}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E_TYPE", "{name}");
+        assert!(diagnostics[0].message.contains("nth index") && diagnostics[0].span.is_some(), "{name}: {diagnostics:?}");
+    }
+}
+
+#[test]
 fn fast_kernels_print_for_every_fast_case() {
     let fast_cases = crate::oracle_cases::fast_cases();
     for (name, source) in fast_cases {
