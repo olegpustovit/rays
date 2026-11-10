@@ -13,6 +13,7 @@ fn scale() -> i64 {
     *SCALE.get_or_init(|| {
         let window = sdl3::Window::create("PXUI density", 1, 1, &[sdl3::WindowFlag::Hidden, sdl3::WindowFlag::HighPixelDensity]).expect("density probe");
         let density = f64::from(window.pixel_density().expect("display pixel density"));
+        println!("PXUI native display density: {density}x");
         assert!(density >= 1.0 && density.fract() == 0.0, "native Canvas requires whole pixel density: {density}");
         density as i64
     })

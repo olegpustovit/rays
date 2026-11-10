@@ -38,5 +38,9 @@ ogpu_metal = { path = "../ogpu_metal" }
 name = "window_all"
 harness = false
 
+[[test]]
+name = "window_parity"
+harness = false
+
 [lints]
 workspace = true
