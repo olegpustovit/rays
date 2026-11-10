@@ -459,6 +459,7 @@ dependencies = [
 name = "ogpu_vulkan"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "native_layer_token_sys",
  "ogpu_core",
  "rays_math",
