@@ -1,6 +1,7 @@
 #![allow(clippy::all)]
 //! PXUI owns immediate-mode engine, kit and text widgets over pxui_text; ui re-exports the shared palette, typography and widget API.
 
+pub mod a11y;
 mod arena;
 pub mod draw;
 pub mod geom;

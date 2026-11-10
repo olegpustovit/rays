@@ -16,6 +16,7 @@ Dependencies are std and `cc`; `pxui_text` alone adds cosmic-text for shaping an
 | `pxui_render` | the painter: one instanced pipeline, atlas textures, draws into a pass the caller opened |
 | `pxui_sdl` | SDL3 window host: lifecycle, event pump, surface token |
 | `pxui_wayland` | Wayland client window host (Linux) |
+| `pxui_atspi` | AT-SPI2 accessibility bridge (Linux): serves `pxui::a11y`'s tree over libdbus-1 |
 | `ogpu_core`, `ogpu_mock` | portable GPU API and its mock |
 | `ogpu_metal`, `metal_sys` | Metal backend and its Objective-C++ shim |
 | `ogpu_vulkan`, `vulkan_sys` | Vulkan backend and its C++ shim (vendored volk and VMA) |

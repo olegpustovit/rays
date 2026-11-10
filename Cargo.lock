@@ -503,6 +503,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pxui_atspi"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "pxui",
+]
+
+[[package]]
 name = "pxui_render"
 version = "0.1.0"
 dependencies = [
