@@ -196,7 +196,7 @@ pub fn outline_objects<'a>(value: &ModelView<'a>) -> Vec<navigator::Obj> {
                 Some("camera") => (
                     row.label.clone(),
                     match field("fov") {
-                        Some(fov) if fov > 0.0 && fov < 180.0 => format!("{} mm", cfmt::f(12.0 / (fov * std::f64::consts::PI / 360.0).tan(), 0)),
+                        Some(fov) if fov > 0.0 && fov < std::f64::consts::PI => format!("{} mm", cfmt::f(12.0 / (fov / 2.0).tan(), 0)),
                         _ => row.detail.clone(),
                     },
                 ),

@@ -93,9 +93,9 @@ fn camera_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, (x, y, w, _h
     // both end at their column's right edge, 10 apart
     let mut rows: Vec<(String, String)> = vec![("Camera".to_string(), node.label.clone())];
     if let Some(fov) = field(node, "fov") {
-        if fov > 0.0 && fov < 180.0 {
+        if fov > 0.0 && fov < std::f64::consts::PI {
             // the focal length that gives this vertical angle on a 24 mm gate
-            let mm = 12.0 / (fov * std::f64::consts::PI / 360.0).tan();
+            let mm = 12.0 / (fov / 2.0).tan();
             let aperture = match field(node, "aperture") {
                 Some(a) if a > 0.0 => format!(" \u{b7} r {}", cfmt::g(a, 6)),
                 _ => String::new(),

@@ -16,7 +16,7 @@
 
   (graph scene :context scene
     (let* [plants (scene/geometry (ref garden) :name "garden")
-           cam (scene/camera :name "camera" :eye [0.5 1.8 6] :target [0 0.3 0] :fov 38)
+           cam (scene/camera :name "camera" :eye [0.5 1.8 6] :target [0 0.3 0] :fov 0.6632251157578453)
            key (scene/light :name "key light" :shape "Area" :translate [4 6 3] :intensity 1)
            all (scene/merge plants cam key)]
       (scene/root all :camera cam)))

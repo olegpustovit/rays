@@ -156,6 +156,13 @@ fn text_applies_body() {
     assert!(failed.notice.as_ref().is_some_and(|(k, s)| *k == NoticeKind::Refusal && s.starts_with("w.rays not reloaded")));
     assert_eq!(failed.text.tab, text_pane::Tab::Document);
     assert_eq!(failed.text.draft.as_deref(), Some("(workspace"));
+    // A vertical right angle on the camera's 24 mm gate is a 12 mm lens in the outline.
+    editor_text::apply_text(&mut value, &[TextIntent::DocApply(
+        "(workspace w (graph scene :context scene (scene/camera :name \"wide\" :fov 1.5707963267948966)))".to_owned(),
+    )]);
+    assert!(value.text.doc_errors.found.is_empty());
+    let outline = crate::editor_panels::outline_objects(&(&value).into());
+    assert_eq!(outline.iter().find(|row| row.name == "wide").expect("camera row").detail, "12 mm");
     editor_host::close(&value);
 }
 
