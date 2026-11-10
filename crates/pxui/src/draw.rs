@@ -18,6 +18,11 @@ pub mod flags {
     pub const CONIC: u8 = 3;
     pub const INNER: u8 = 4;
     pub const ROUND: u8 = 8;
+    /// Rect border sides (bits 4–7); none set, or all four, borders every side.
+    pub const TOP: u8 = 16;
+    pub const RIGHT: u8 = 32;
+    pub const BOTTOM: u8 = 64;
+    pub const LEFT: u8 = 128;
 }
 pub const NO_CLIP: [i16; 4] = [i16::MIN, i16::MIN, i16::MAX, i16::MAX];
 
@@ -49,6 +54,22 @@ pub const ATLAS: u32 = u32::MAX;
 pub struct Break {
     pub at_instance: u32,
     pub image: u32,
+}
+
+/// CSS `border` with a width and colour per side `[top, right, bottom, left]`: one border-only rect
+/// instance per side with a non-zero width (draw the fill separately), `count` of them valid.
+// ponytail: one instance per side (up to 4); a side's inner edge uses the radii minus its width, so
+// mixed widths meet at corners with a square seam. A packed per-side format if borders dominate.
+pub fn borders(rect: [f32; 4], radii: [f32; 4], widths: [f32; 4], colors: [[u8; 4]; 4]) -> ([Instance; 4], usize) {
+    let mut out = [Instance::DEFAULT; 4];
+    let mut n = 0;
+    for (i, side) in [flags::TOP, flags::RIGHT, flags::BOTTOM, flags::LEFT].into_iter().enumerate() {
+        if widths[i] > 0.0 {
+            out[n] = Instance::rect(rect, [0; 4]).radii(radii).border(widths[i], colors[i]).sides(side);
+            n += 1;
+        }
+    }
+    (out, n)
 }
 
 /// IEEE half bits of `x` (round to nearest even).
@@ -121,6 +142,8 @@ impl Instance {
     /// Corner radii top-left, top-right, bottom-right, bottom-left.
     pub fn radii(self, radii: [f32; 4]) -> Self { Instance { radii: radii.map(f16), ..self } }
     pub fn border(self, width: f32, color: [u8; 4]) -> Self { Instance { width: f16(width), color2: color, ..self } }
+    /// Draw the border (see [`Instance::border`]) only on the sides in `sides` (`flags::TOP | …`).
+    pub fn sides(self, sides: u8) -> Self { Instance { flags: self.flags & 0x0f | sides & 0xf0, ..self } }
     fn gradient(self, kind: u8, geometry: [f32; 4], to: [u8; 4]) -> Self {
         Instance { flags: self.flags & !3 | kind, aux: [u32::from_le_bytes(to), 0], extra: [halves(geometry[0], geometry[1]), halves(geometry[2], geometry[3])], ..self }
     }

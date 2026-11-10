@@ -7,7 +7,7 @@ use ogpu_core::error::{self, Error};
 use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::render_pass::{Load, Store};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
-use pxui_render::{AtlasKind, Break, Instance, Painter, View};
+use pxui_render::{flags, AtlasKind, Break, Instance, Painter, View};
 #[path = "png.rs"]
 mod png;
 
@@ -145,11 +145,12 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 4] = [
+    let cases: [(&str, fn()); 5] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
         ("gpu_view_scale_and_rotation", gpu_view_scale_and_rotation),
+        ("gpu_per_side_borders", gpu_per_side_borders),
     ];
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--ignored") { return; }
@@ -295,4 +296,34 @@ fn gpu_view_scale_and_rotation() {
     assert_eq!(at(&pixels, 100.0, 70.0), RED, "rotated rect's far end");
     assert_eq!(at(&pixels, 85.0, 54.0), BG, "the old horizontal arm is gone");
     assert_eq!(at(&pixels, 107.0, 54.0), BG, "right of the rotated rect (width 8, half-width 4)");
+}
+
+fn gpu_per_side_borders() {
+    let Some(device) = open() else { return };
+    let queue = ok(be::create_queue(&device));
+    let mut painter = painter(&device);
+    let target = target(&device);
+    let white = [255, 255, 255, 255];
+    let (sides, n) = pxui::draw::borders([60.0, 8.0, 92.0, 32.0], [0.0; 4], [0.0, 4.0, 0.0, 2.0], [[0; 4], RED, [0; 4], BLUE]);
+    assert_eq!(n, 2, "only the two non-zero sides are emitted");
+    let mut instances = vec![
+        Instance::rect([8.0, 8.0, 40.0, 32.0], white).border(4.0, INK).sides(flags::BOTTOM),
+        Instance::rect([60.0, 8.0, 92.0, 32.0], white),
+    ];
+    instances.extend_from_slice(&sides[..n]);
+    painter.begin_frame();
+    pass(&queue, &target, &mut |encoder| ok(painter.draw(encoder, [W * SCALE, H * SCALE], SCALE as f32, &instances, &[])));
+    let pixels = ok(be::read_texture(&target, (W * SCALE * 4) as i64));
+    ok(be::destroy_texture(&target));
+    drop(painter);
+    finish(device, queue);
+    assert_eq!(at(&pixels, 24.0, 30.0), INK, "bottom border band");
+    assert_eq!(at(&pixels, 24.0, 26.0), white, "above the band is fill");
+    assert_eq!(at(&pixels, 24.0, 9.0), white, "no top border");
+    assert_eq!(at(&pixels, 9.0, 20.0), white, "no left border");
+    assert_eq!(at(&pixels, 39.0, 20.0), white, "no right border");
+    assert_eq!(at(&pixels, 61.0, 20.0), BLUE, "left side 2 wide, own colour");
+    assert_eq!(at(&pixels, 63.0, 20.0), white, "left side is only 2 wide");
+    assert_eq!(at(&pixels, 90.0, 20.0), RED, "right side 4 wide, own colour");
+    assert_eq!(at(&pixels, 76.0, 9.0), white, "no top border from the helper either");
 }

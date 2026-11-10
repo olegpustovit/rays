@@ -196,7 +196,15 @@ fragment float4 ui_fragment(VOut in [[stage_in]], texture2d<float> mask_tex [[te
       }
       fill = mix_premul(in.v_color, in.v_p2, clamp(t, 0.0, 1.0));
     }
-    if (in.v_misc.x > 0.0) fill = over(float4(in.v_color2.rgb, in.v_color2.a * (1.0 - cover(d + in.v_misc.x, px))), fill);
+    if (in.v_misc.x > 0.0) {
+      float inner = d + in.v_misc.x;
+      uint sides = flags >> 4u;  // top 1, right 2, bottom 4, left 8; 0 or 15 = all
+      if (sides != 0u && sides != 15u) {
+        float4 s = float4(float((sides >> 3u) & 1u), float(sides & 1u), -float((sides >> 1u) & 1u), -float((sides >> 2u) & 1u));
+        inner = sd_rect(p, in.v_rect + s * in.v_misc.x, max(in.v_radii - in.v_misc.x, 0.0));
+      }
+      fill = over(float4(in.v_color2.rgb, in.v_color2.a * (1.0 - cover(inner, px))), fill);
+    }
     col = float4(fill.rgb, fill.a * cover(d, px));
   } else if (kind == SHADOW) {
     float sigma = sqrt(in.v_p0.z * in.v_p0.z + 0.25 * px * px);

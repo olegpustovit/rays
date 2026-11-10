@@ -34,7 +34,7 @@
 //! | 40–47 | `radii` f16×4 | corners tl tr br bl       | image corners        | caster corners               | –                     | –                         | –                  |
 //! | 48–49 | `width` f16   | border width              | –                    | –                            | stroke width          | stroke width              | stroke width       |
 //! | 50    | `kind` u8     | see [`kind`]                                                                                                                              |||||||
-//! | 51    | `flags` u8    | bits 0–1 gradient (1 linear, 2 radial, 3 conic) | –   | [`flags::INNER`]           | [`flags::ROUND`] caps | [`flags::ROUND`] caps     | (always round)     |
+//! | 51    | `flags` u8    | bits 0–1 gradient (1 linear, 2 radial, 3 conic); bits 4–7 border sides [`flags::TOP`]… | –   | [`flags::INNER`]           | [`flags::ROUND`] caps | [`flags::ROUND`] caps     | (always round)     |
 //! | 52–53 | `view` u16    | index into the view table; 0 = identity                                                                                                   |||||||
 //! | 54–55 | `clip_radius` f16 | corner radius of `clip`                                                                                                               |||||||
 //! | 56–63 | `extra`       | gradient geometry f16×4   | –                    | offset x y, sigma, spread f16 | –                    | start, sweep f32 (radians, + = clockwise) | control x y f32 |

@@ -135,7 +135,15 @@ void main() {
       }
       fill = mix_premul(v_color, v_p2, clamp(t, 0.0, 1.0));
     }
-    if (v_misc.x > 0.0) fill = over(vec4(v_color2.rgb, v_color2.a * (1.0 - cover(d + v_misc.x, px))), fill);
+    if (v_misc.x > 0.0) {
+      float inner = d + v_misc.x;
+      uint sides = flags >> 4u;  // top 1, right 2, bottom 4, left 8; 0 or 15 = all
+      if (sides != 0u && sides != 15u) {
+        vec4 s = vec4(float((sides >> 3u) & 1u), float(sides & 1u), -float((sides >> 1u) & 1u), -float((sides >> 2u) & 1u));
+        inner = sd_rect(p, v_rect + s * v_misc.x, max(v_radii - v_misc.x, 0.0));
+      }
+      fill = over(vec4(v_color2.rgb, v_color2.a * (1.0 - cover(inner, px))), fill);
+    }
     col = vec4(fill.rgb, fill.a * cover(d, px));
   } else if (kind == SHADOW) {
     float sigma = sqrt(v_p0.z * v_p0.z + 0.25 * px * px);
