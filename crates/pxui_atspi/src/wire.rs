@@ -157,8 +157,9 @@ impl Msg {
         made(unsafe { ax_new_error(self.0.as_ptr(), n.as_ptr(), m.as_ptr()) })
     }
 
-    fn put<T>(&mut self, kind: u8, v: &T) -> &mut Msg {
-        unsafe { ax_put(self.0.as_ptr(), kind as c_int, (v as *const T).cast(), 0) };
+    /// A fixed-size basic value at `v` (its type matches `kind`).
+    fn put(&mut self, kind: u8, v: *const c_void) -> &mut Msg {
+        unsafe { ax_put(self.0.as_ptr(), kind as c_int, v, 0) };
         self
     }
     fn put_text(&mut self, kind: u8, v: &str) -> &mut Msg {
@@ -167,11 +168,11 @@ impl Msg {
     }
     pub fn s(&mut self, v: &str) -> &mut Msg { self.put_text(b's', v) }
     pub fn o(&mut self, v: &str) -> &mut Msg { self.put_text(b'o', v) }
-    pub fn u(&mut self, v: u32) -> &mut Msg { self.put(b'u', &v) }
-    pub fn i(&mut self, v: i32) -> &mut Msg { self.put(b'i', &v) }
-    pub fn n(&mut self, v: i16) -> &mut Msg { self.put(b'n', &v) }
-    pub fn d(&mut self, v: f64) -> &mut Msg { self.put(b'd', &v) }
-    pub fn b(&mut self, v: bool) -> &mut Msg { self.put(b'b', &u32::from(v)) }
+    pub fn u(&mut self, v: u32) -> &mut Msg { self.put(b'u', (&v as *const u32).cast()) }
+    pub fn i(&mut self, v: i32) -> &mut Msg { self.put(b'i', (&v as *const i32).cast()) }
+    pub fn n(&mut self, v: i16) -> &mut Msg { self.put(b'n', (&v as *const i16).cast()) }
+    pub fn d(&mut self, v: f64) -> &mut Msg { self.put(b'd', (&v as *const f64).cast()) }
+    pub fn b(&mut self, v: bool) -> &mut Msg { self.put(b'b', (&u32::from(v) as *const u32).cast()) }
     /// Open a container: `b'a'` with the element signature, `b'v'` with the contents' signature, `b'r'`
     /// (struct) or `b'e'` (dict entry) with `""`.
     pub fn open(&mut self, kind: u8, sig: &str) -> &mut Msg {
@@ -200,13 +201,14 @@ impl Msg {
     pub fn arg(&self) -> u8 {
         unsafe { ax_arg_type(self.0.as_ptr()) as u8 }
     }
-    fn get<T: Copy + Default>(&mut self, kind: u8) -> Option<T> {
+    /// A fixed-size basic argument of type `kind` as 8 native-endian bytes (libdbus's DBusBasicValue), and advance.
+    fn get(&mut self, kind: u8) -> Option<[u8; 8]> {
         if self.arg() != kind {
             return None;
         }
-        let mut v = T::default();
+        let mut v = [0u8; 8];
         unsafe {
-            ax_get(self.0.as_ptr(), (&mut v as *mut T).cast());
+            ax_get(self.0.as_ptr(), v.as_mut_ptr().cast());
             ax_next(self.0.as_ptr());
         }
         Some(v)
@@ -224,10 +226,10 @@ impl Msg {
         }
         Some(text(p))
     }
-    pub fn read_u32(&mut self) -> Option<u32> { self.get(b'u') }
-    pub fn read_i32(&mut self) -> Option<i32> { self.get(b'i') }
-    pub fn read_f64(&mut self) -> Option<f64> { self.get(b'd') }
-    pub fn read_bool(&mut self) -> Option<bool> { self.get::<u32>(b'b').map(|v| v != 0) }
+    pub fn read_u32(&mut self) -> Option<u32> { self.get(b'u').map(|v| u32::from_ne_bytes([v[0], v[1], v[2], v[3]])) }
+    pub fn read_i32(&mut self) -> Option<i32> { self.get(b'i').map(|v| i32::from_ne_bytes([v[0], v[1], v[2], v[3]])) }
+    pub fn read_f64(&mut self) -> Option<f64> { self.get(b'd').map(f64::from_ne_bytes) }
+    pub fn read_bool(&mut self) -> Option<bool> { self.get(b'b').map(|v| v[..4] != [0; 4]) }
     /// Step into the current container (array, struct, variant, dict entry); `false` if it is none.
     pub fn enter(&mut self) -> bool {
         unsafe { ax_recurse(self.0.as_ptr()) != 0 }

@@ -175,6 +175,8 @@ pub struct A11yNode {
     pub actions: u32,
     /// editable text: the selection's anchor and the caret, in chars (equal when nothing is selected)
     pub selection: (u32, u32),
+    /// children are linked first_child -> next_sibling -> ... (`NO_PARENT` ends); top-level nodes likewise
+    /// from `A11yTree::first_child(NO_PARENT)`
     pub child_count: u32,
     pub first_child: u32,
     pub next_sibling: u32,
@@ -182,18 +184,20 @@ pub struct A11yNode {
 }
 
 /// The tree in declaration order: a parent always precedes its children.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct A11yTree {
     pub nodes: Vec<A11yNode>,
     pub strings: String,
     /// bumped by `end`; equal revisions mean equal trees
     pub revision: u64,
     index: HashMap<u64, u32>,
+    /// the top-level nodes: first, last, count
+    top: (u32, u32, u32),
 }
 
 impl A11yTree {
     pub fn new() -> A11yTree {
-        A11yTree::default()
+        A11yTree { nodes: Vec::new(), strings: String::new(), revision: 0, index: HashMap::new(), top: (NO_PARENT, NO_PARENT, 0) }
     }
 
     /// Start a rebuild: clears the nodes and strings, keeping their capacity.
@@ -201,6 +205,7 @@ impl A11yTree {
         self.nodes.clear();
         self.strings.clear();
         self.index.clear();
+        self.top = (NO_PARENT, NO_PARENT, 0);
     }
 
     /// Add a node under `parent` (an index `push` returned, or `NO_PARENT`) and return its index.
@@ -223,15 +228,22 @@ impl A11yTree {
             next_sibling: NO_PARENT,
             last_child: NO_PARENT,
         });
-        if parent != NO_PARENT {
+        let last = if parent == NO_PARENT {
+            self.top.2 += 1;
+            if self.top.0 == NO_PARENT {
+                self.top.0 = index;
+            }
+            std::mem::replace(&mut self.top.1, index)
+        } else {
             let p = &mut self.nodes[parent as usize];
             p.child_count += 1;
-            let last = std::mem::replace(&mut p.last_child, index);
-            if last == NO_PARENT {
+            if p.first_child == NO_PARENT {
                 p.first_child = index;
-            } else {
-                self.nodes[last as usize].next_sibling = index;
             }
+            std::mem::replace(&mut p.last_child, index)
+        };
+        if last != NO_PARENT {
+            self.nodes[last as usize].next_sibling = index;
         }
         index
     }
@@ -298,6 +310,7 @@ impl A11yTree {
         self.strings.clone_from(&other.strings);
         self.index.clone_from(&other.index);
         self.revision = other.revision;
+        self.top = other.top;
     }
 
     /// The index of the node with `id`.
@@ -305,32 +318,36 @@ impl A11yTree {
         self.index.get(&id).copied()
     }
 
-    /// The `n`th child of node `parent` (`NO_PARENT`: the `n`th top-level node).
-    pub fn child(&self, parent: u32, n: u32) -> Option<u32> {
-        self.children(parent).nth(n as usize)
+    /// The first child of `parent` (`NO_PARENT`: the first top-level node); `NO_PARENT` when none. Walk on
+    /// with `nodes[i].next_sibling`.
+    pub fn first_child(&self, parent: u32) -> u32 {
+        if parent == NO_PARENT { self.top.0 } else { self.nodes[parent as usize].first_child }
     }
 
-    /// The children of `parent` in order (`NO_PARENT`: the top-level nodes).
-    pub fn children(&self, parent: u32) -> impl Iterator<Item = u32> + '_ {
-        let first = if parent == NO_PARENT {
-            self.nodes.iter().position(|n| n.parent == NO_PARENT).map_or(NO_PARENT, |i| i as u32)
-        } else {
-            self.nodes[parent as usize].first_child
-        };
-        std::iter::successors(Some(first).filter(|i| *i != NO_PARENT), move |i| {
-            if parent == NO_PARENT {
-                // ponytail: top-level nodes are found by scanning; few windows, so linear is fine.
-                self.nodes[*i as usize + 1..].iter().position(|n| n.parent == NO_PARENT).map(|p| *i + 1 + p as u32)
-            } else {
-                Some(self.nodes[*i as usize].next_sibling).filter(|n| *n != NO_PARENT)
+    pub fn child_count(&self, parent: u32) -> u32 {
+        if parent == NO_PARENT { self.top.2 } else { self.nodes[parent as usize].child_count }
+    }
+
+    /// The `n`th child of `parent` (`NO_PARENT`: the `n`th top-level node).
+    pub fn child(&self, parent: u32, n: u32) -> Option<u32> {
+        let mut at = self.first_child(parent);
+        for _ in 0..n {
+            if at == NO_PARENT {
+                break;
             }
-        })
+            at = self.nodes[at as usize].next_sibling;
+        }
+        (at != NO_PARENT).then_some(at)
     }
 
     /// The position of node `index` among its parent's children.
     pub fn index_in_parent(&self, index: u32) -> u32 {
-        let parent = self.nodes[index as usize].parent;
-        self.children(parent).position(|c| c == index).unwrap_or(0) as u32
+        let (mut at, mut k) = (self.first_child(self.nodes[index as usize].parent), 0);
+        while at != index && at != NO_PARENT {
+            at = self.nodes[at as usize].next_sibling;
+            k += 1;
+        }
+        k
     }
 }
 

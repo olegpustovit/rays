@@ -67,7 +67,7 @@ impl Client {
     }
 
     /// Call `member` on `dest`, pumping the bridge until the reply comes.
-    fn call_to(&mut self, dest: &str, path: &str, iface: &str, member: &str, args: impl FnOnce(&mut Msg)) -> Msg {
+    fn call_to(&mut self, dest: &str, path: &str, iface: &str, member: &str, args: fn(&mut Msg)) -> Msg {
         let mut m = Msg::call(dest, path, iface, member);
         args(&mut m);
         let serial = self.conn.send(m).expect("call is well-formed");
@@ -84,7 +84,7 @@ impl Client {
         panic!("no reply to {iface}.{member} on {path}");
     }
 
-    fn call(&mut self, path: &str, iface: &str, member: &str, args: impl FnOnce(&mut Msg)) -> Msg {
+    fn call(&mut self, path: &str, iface: &str, member: &str, args: fn(&mut Msg)) -> Msg {
         let dest = self.bridge.bus_name().to_owned();
         let r = self.call_to(&dest, path, iface, member, args);
         assert_eq!(r.kind(), METHOD_RETURN, "{iface}.{member} on {path} failed: {}", r.error_name());

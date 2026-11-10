@@ -28,6 +28,28 @@ fn build(t: &mut A11yTree, button: &str, checked: bool, with_field: bool) {
     t.end();
 }
 
+fn children(t: &A11yTree, parent: u32) -> Vec<u32> {
+    let (mut out, mut c) = (Vec::new(), t.first_child(parent));
+    while c != NO_PARENT {
+        out.push(c);
+        c = t.nodes[c as usize].next_sibling;
+    }
+    out
+}
+
+#[test]
+fn top_level_nodes_are_linked() {
+    let mut t = A11yTree::new();
+    assert_eq!((t.first_child(NO_PARENT), t.child_count(NO_PARENT)), (NO_PARENT, 0), "a fresh tree is empty");
+    t.begin();
+    let a = t.push(NO_PARENT, 10, Role::Window, Rect::default());
+    t.push(a, 11, Role::Label, Rect::default());
+    let b = t.push(NO_PARENT, 20, Role::Dialog, Rect::default());
+    t.end();
+    assert_eq!(children(&t, NO_PARENT), vec![a, b]);
+    assert_eq!((t.index_in_parent(b), t.child(NO_PARENT, 1), t.child(NO_PARENT, 2)), (1, Some(b), None));
+}
+
 #[test]
 fn builder_links_children_and_interns_strings() {
     let t = sample("Apply", false);
@@ -35,8 +57,9 @@ fn builder_links_children_and_interns_strings() {
     assert_eq!(t.revision, 1);
     assert_eq!(t.str(t.nodes[2].name), "Apply");
     assert_eq!(t.nodes[1].child_count, 3);
-    assert_eq!(t.children(1).collect::<Vec<_>>(), vec![2, 3, 4]);
-    assert_eq!(t.children(NO_PARENT).collect::<Vec<_>>(), vec![0]);
+    assert_eq!(children(&t, 1), vec![2, 3, 4]);
+    assert_eq!(children(&t, NO_PARENT), vec![0]);
+    assert_eq!((t.child_count(1), t.child_count(NO_PARENT), t.child_count(4)), (3, 1, 0));
     assert_eq!(t.child(1, 2), Some(4));
     assert_eq!(t.child(1, 3), None);
     assert_eq!(t.index_in_parent(3), 1);

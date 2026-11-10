@@ -81,12 +81,13 @@ enum Target {
     Node(u32),
 }
 
-/// A value inside an event's variant.
-enum Any<'a> {
+/// An event's variant: an int, a string or a reference to one of our objects (both given as text), a double.
+#[derive(Clone, Copy)]
+enum Any {
     Int(i32),
-    Str(&'a str),
+    Str,
     Num(f64),
-    Obj(&'a str),
+    Obj,
 }
 
 pub struct Bridge {
@@ -171,14 +172,14 @@ impl Bridge {
 
     // ------------------------------------------------------------------ events
 
-    fn signal(&self, path: &str, iface: &str, member: &str, detail: &str, d1: i32, d2: i32, any: Any) {
+    fn signal(&self, path: &str, iface: &str, member: &str, detail: &str, d1: i32, d2: i32, any: Any, text: &str) {
         let mut m = Msg::signal(path, iface, member);
         m.s(detail).i(d1).i(d2);
         match any {
             Any::Int(v) => m.open(b'v', "i").i(v).close(),
-            Any::Str(v) => m.open(b'v', "s").s(v).close(),
+            Any::Str => m.open(b'v', "s").s(text).close(),
             Any::Num(v) => m.open(b'v', "d").d(v).close(),
-            Any::Obj(v) => m.open(b'v', "(so)").open(b'r', "").s(&self.unique).o(v).close().close(),
+            Any::Obj => m.open(b'v', "(so)").open(b'r', "").s(&self.unique).o(text).close().close(),
         };
         m.open(b'a', "{sv}").close();
         self.conn.send(m);
@@ -192,7 +193,7 @@ impl Bridge {
             let n = &old.nodes[i as usize];
             if n.parent == NO_PARENT || new.find(old.nodes[n.parent as usize].id).is_some() {
                 let child = Path::of(Some(id));
-                self.signal(parent_path(old, n).as_str(), EVENT_OBJECT, "ChildrenChanged", "remove", old.index_in_parent(i) as i32, 0, Any::Obj(child.as_str()));
+                self.signal(parent_path(old, n).as_str(), EVENT_OBJECT, "ChildrenChanged", "remove", old.index_in_parent(i) as i32, 0, Any::Obj, child.as_str());
             }
         }
         for &id in &d.added {
@@ -200,7 +201,7 @@ impl Bridge {
             let n = &new.nodes[i as usize];
             if n.parent == NO_PARENT || old.find(new.nodes[n.parent as usize].id).is_some() {
                 let child = Path::of(Some(id));
-                self.signal(parent_path(new, n).as_str(), EVENT_OBJECT, "ChildrenChanged", "add", new.index_in_parent(i) as i32, 0, Any::Obj(child.as_str()));
+                self.signal(parent_path(new, n).as_str(), EVENT_OBJECT, "ChildrenChanged", "add", new.index_in_parent(i) as i32, 0, Any::Obj, child.as_str());
             }
         }
         for &(id, mask) in &d.changed {
@@ -208,19 +209,19 @@ impl Bridge {
             let path = Path::of(Some(id));
             let path = path.as_str();
             if mask & change::NAME != 0 {
-                self.signal(path, EVENT_OBJECT, "PropertyChange", "accessible-name", 0, 0, Any::Str(new.str(n.name)));
+                self.signal(path, EVENT_OBJECT, "PropertyChange", "accessible-name", 0, 0, Any::Str, new.str(n.name));
             }
             if mask & change::DESCRIPTION != 0 {
-                self.signal(path, EVENT_OBJECT, "PropertyChange", "accessible-description", 0, 0, Any::Str(new.str(n.description)));
+                self.signal(path, EVENT_OBJECT, "PropertyChange", "accessible-description", 0, 0, Any::Str, new.str(n.description));
             }
             if mask & change::VALUE != 0 {
                 match n.value {
-                    Value::Number { now, .. } => self.signal(path, EVENT_OBJECT, "PropertyChange", "accessible-value", 0, 0, Any::Num(now)),
+                    Value::Number { now, .. } => self.signal(path, EVENT_OBJECT, "PropertyChange", "accessible-value", 0, 0, Any::Num(now), ""),
                     _ if is_text(n) => {
                         // ponytail: the whole text is replaced; a common prefix/suffix diff if readers need finer events.
                         let (before, after) = (old.value_text(o), new.value_text(n));
-                        self.signal(path, EVENT_OBJECT, "TextChanged", "delete", 0, before.chars().count() as i32, Any::Str(before));
-                        self.signal(path, EVENT_OBJECT, "TextChanged", "insert", 0, after.chars().count() as i32, Any::Str(after));
+                        self.signal(path, EVENT_OBJECT, "TextChanged", "delete", 0, before.chars().count() as i32, Any::Str, before);
+                        self.signal(path, EVENT_OBJECT, "TextChanged", "insert", 0, after.chars().count() as i32, Any::Str, after);
                     }
                     _ => {}
                 }
@@ -230,18 +231,18 @@ impl Bridge {
                     if (o.states ^ n.states) & bit != 0 {
                         let on = (n.states & bit != 0) as i32;
                         for (_, detail) in *atspi {
-                            self.signal(path, EVENT_OBJECT, "StateChanged", detail, on, 0, Any::Int(0));
+                            self.signal(path, EVENT_OBJECT, "StateChanged", detail, on, 0, Any::Int(0), "");
                         }
                     }
                 }
                 if n.states & !o.states & state::FOCUSED != 0 {
-                    self.signal(path, "org.a11y.atspi.Event.Focus", "Focus", "", 0, 0, Any::Int(0));
+                    self.signal(path, "org.a11y.atspi.Event.Focus", "Focus", "", 0, 0, Any::Int(0), "");
                 }
             }
             if mask & change::SELECTION != 0 && is_text(n) {
-                self.signal(path, EVENT_OBJECT, "TextCaretMoved", "", n.selection.1 as i32, 0, Any::Int(0));
+                self.signal(path, EVENT_OBJECT, "TextCaretMoved", "", n.selection.1 as i32, 0, Any::Int(0), "");
                 if o.selection.0 != o.selection.1 || n.selection.0 != n.selection.1 {
-                    self.signal(path, EVENT_OBJECT, "TextSelectionChanged", "", 0, 0, Any::Int(0));
+                    self.signal(path, EVENT_OBJECT, "TextSelectionChanged", "", 0, 0, Any::Int(0), "");
                 }
             }
             // ponytail: RECT (BoundsChanged), PARENT moves and ROLE changes send no event; readers re-query.
@@ -286,11 +287,11 @@ impl Bridge {
         }
     }
 
-    fn children(&self, target: Target) -> impl Iterator<Item = u32> + '_ {
-        self.tree.children(match target {
+    fn index(target: Target) -> u32 {
+        match target {
             Target::Root => NO_PARENT,
             Target::Node(i) => i,
-        })
+        }
     }
 
     fn node(&self, target: Target) -> Option<&A11yNode> {
@@ -339,7 +340,7 @@ impl Bridge {
                 m.close();
             }
             (ACCESSIBLE, "ChildCount", _) => {
-                m.open(b'v', "i").i(self.children(target).count() as i32).close();
+                m.open(b'v', "i").i(self.tree.child_count(Bridge::index(target)) as i32).close();
             }
             (ACCESSIBLE, "Locale" | "AccessibleId" | "HelpText", _) => {
                 m.open(b'v', "s").s("").close();
@@ -357,7 +358,7 @@ impl Bridge {
                 m.open(b'v', "i").i(self.app_id).close();
             }
             (ACTION, "NActions", true) => {
-                m.open(b'v', "i").i(map::node_actions(node.unwrap()).count() as i32).close();
+                m.open(b'v', "i").i(map::node_action_count(node.unwrap()) as i32).close();
             }
             (VALUE, _, true) => {
                 let Value::Number { now, min, max, step } = node.unwrap().value else { return false };
@@ -442,14 +443,16 @@ impl Bridge {
                 true
             }
             (ACCESSIBLE, "GetChildAtIndex") => {
-                let child = msg.read_i32().and_then(|k| u32::try_from(k).ok()).and_then(|k| self.children(target).nth(k as usize));
+                let child = msg.read_i32().and_then(|k| u32::try_from(k).ok()).and_then(|k| self.tree.child(Bridge::index(target), k));
                 self.put_ref(&mut r, child.map(Target::Node));
                 true
             }
             (ACCESSIBLE, "GetChildren") => {
                 r.open(b'a', "(so)");
-                for c in self.children(target) {
+                let mut c = self.tree.first_child(Bridge::index(target));
+                while c != NO_PARENT {
                     self.put_ref(&mut r, Some(Target::Node(c)));
+                    c = self.tree.nodes[c as usize].next_sibling;
                 }
                 r.close();
                 true
@@ -498,7 +501,7 @@ impl Bridge {
             (COMPONENT, _) if node.is_some() => self.component(&member, msg, &mut r, node.unwrap(), out),
             (ACTION, _) if node.is_some_and(|n| map::has_action_interface(&n)) => {
                 let n = node.unwrap();
-                let pick = |msg: &mut Msg| msg.read_i32().and_then(|k| usize::try_from(k).ok()).and_then(|k| map::node_actions(&n).nth(k));
+                let pick = |msg: &mut Msg| msg.read_i32().and_then(|k| usize::try_from(k).ok()).and_then(|k| map::node_action(&n, k));
                 match member.as_str() {
                     "GetName" | "GetLocalizedName" | "GetDescription" | "GetKeyBinding" => {
                         let Some(a) = pick(msg) else { return msg.error(INVALID_ARGS, "no such action") };
@@ -511,7 +514,7 @@ impl Bridge {
                     }
                     "GetActions" => {
                         r.open(b'a', "(sss)");
-                        for a in map::node_actions(&n) {
+                        for a in (0..map::node_action_count(&n)).filter_map(|k| map::node_action(&n, k)) {
                             r.open(b'r', "").s(a.1).s(a.2).s("").close();
                         }
                         r.close();
@@ -601,10 +604,17 @@ impl Bridge {
                     let start = self.tree.find(n.id).unwrap();
                     let mut at = n.rect.contains(p).then_some(start);
                     while let Some(i) = at {
-                        match self.tree.children(i).filter(|c| self.tree.nodes[*c as usize].rect.contains(p)).last() {
-                            Some(c) => at = Some(c),
-                            None => break,
+                        let (mut c, mut hit) = (self.tree.first_child(i), None);
+                        while c != NO_PARENT {
+                            if self.tree.nodes[c as usize].rect.contains(p) {
+                                hit = Some(c);
+                            }
+                            c = self.tree.nodes[c as usize].next_sibling;
                         }
+                        if hit.is_none() {
+                            break;
+                        }
+                        at = hit;
                     }
                     self.put_ref(r, at.map(Target::Node));
                 }

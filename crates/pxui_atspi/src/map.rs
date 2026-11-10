@@ -136,10 +136,13 @@ pub const ACTIONS: &[(pxui::a11y::Action, &str, &str)] = &[
     (pxui::a11y::Action::Collapse, "collapse", "Collapse"),
 ];
 
-/// The node's Action-interface actions in order.
-pub fn node_actions(node: &A11yNode) -> impl Iterator<Item = &'static (pxui::a11y::Action, &'static str, &'static str)> {
-    let mask = node.actions;
-    ACTIONS.iter().filter(move |a| mask & a.0 as u32 != 0)
+/// The node's `k`th Action-interface action, and how many it has.
+pub fn node_action(node: &A11yNode, k: usize) -> Option<&'static (pxui::a11y::Action, &'static str, &'static str)> {
+    ACTIONS.iter().filter(|a| node.actions & a.0 as u32 != 0).nth(k)
+}
+
+pub fn node_action_count(node: &A11yNode) -> usize {
+    ACTIONS.iter().filter(|a| node.actions & a.0 as u32 != 0).count()
 }
 
 pub fn has_action_interface(node: &A11yNode) -> bool {
