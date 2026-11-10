@@ -58,7 +58,7 @@ pub struct DriverMapped {
 }
 
 pub trait DriverPipeline {
-    fn pipeline_token(&self) -> Token;
+    fn as_any(&self) -> &dyn std::any::Any;
     fn max_threads(&self) -> i64;
     fn destroy_pipeline(&self) -> Result<(), Error>;
 }
@@ -115,7 +115,7 @@ pub struct Instance {
 }
 
 pub trait DriverComputeEncoder {
-    fn set_pipeline(&self, pipeline: Token) -> Result<(), Error>;
+    fn set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error>;
     fn set_buffer(&self, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
     fn set_bytes(&self, index: i64, admitted: crate::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error>;
     fn set_texture(&self, index: i64, texture: Token) -> Result<(), Error>;
@@ -178,9 +178,10 @@ impl DriverRenderTarget {
     pub fn clear_color(&self) -> &crate::render_pass::ClearColor { &self.0.clear_color }
     pub fn actions(&self) -> &crate::render_pass::AdmittedActions { &self.0.actions }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One lowered batch draw; the pipeline is shared with the core's own handle.
+#[derive(Clone)]
 pub struct DriverBatchDraw {
-    pub batch_pipeline: Token,
+    pub batch_pipeline: Rc<dyn DriverPipeline>,
     pub batch_buffers: Vec<(ShaderStage, i64, Token, i64)>,
     pub batch_primitive: Primitive,
     pub batch_index: Option<(IndexType, Token, i64, i64)>,
@@ -190,7 +191,7 @@ pub struct DriverBatchDraw {
 }
 
 pub trait DriverRenderEncoder {
-    fn render_set_pipeline(&self, pipeline: Token) -> Result<(), Error>;
+    fn render_set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error>;
     fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
     fn set_stage_texture(&self, stage: ShaderStage, index: i64, texture: Token) -> Result<(), Error>;
     fn set_stage_sampler(&self, stage: ShaderStage, index: i64, sampler: &dyn DriverSampler) -> Result<(), Error>;
@@ -215,7 +216,7 @@ pub trait DriverSampler {
 
 pub trait DriverIcb {
     fn icb_token(&self) -> Token;
-    fn icb_set_pipeline(&self, index: crate::validation::AdmittedIcbIndex, pipeline: Token) -> Result<(), Error>;
+    fn icb_set_pipeline(&self, index: crate::validation::AdmittedIcbIndex, pipeline: &dyn DriverPipeline) -> Result<(), Error>;
     fn icb_set_buffer(&self, index: crate::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error>;
     fn icb_draw(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error>;
     fn icb_draw_indexed(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, buffer: Token, range:&crate::validation::AdmittedIndexRange) -> Result<(), Error>;
@@ -271,7 +272,7 @@ pub trait DriverDevice {
     fn create_sampler(&self, descriptor: &crate::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error>;
     fn create_render_pipeline(&self, options: RenderPipelineOptions, descriptor: &RenderDescriptor, admitted: &pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error>;
     fn create_icb(&self, profile: &crate::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error>;
-    fn create_argument(&self, pipeline: Token, stage: ShaderStage, index: crate::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error>;
+    fn create_argument(&self, pipeline: &dyn DriverPipeline, stage: ShaderStage, index: crate::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error>;
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error>;
     fn create_surface(&self, configuration: &surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error>;
     fn destroy_device(&self) -> Result<(), Error>;
@@ -354,7 +355,7 @@ pub struct Buffer { resource: Resource, buffer_descriptor: AdmittedBuffer, memor
 pub struct Texture { resource: Resource, texture_descriptor: AdmittedTexture }
 #[derive(Clone)]
 pub struct Pipeline(Rc<PipelineInner>);
-struct PipelineInner { driver: RefCell<Option<Box<dyn DriverPipeline>>>, token: Token, max_threads: i64, device: Device, library: Option<Library>, indirect: bool, shape: PipelineShape, render: Option<(pipeline::ColorFormat, i64)>, dead: Cell<bool> }
+struct PipelineInner { driver: RefCell<Option<Rc<dyn DriverPipeline>>>, max_threads: i64, device: Device, library: Option<Library>, indirect: bool, shape: PipelineShape, render: Option<(pipeline::ColorFormat, i64)>, dead: Cell<bool> }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PipelineShape { Vertex, Compute }
 #[derive(Clone)]
@@ -916,7 +917,7 @@ pub fn create_compute_pipeline_from(
     device.0.children.set(device.0.children.get() + 1);
     library.0.pipelines.set(library.0.pipelines.get() + 1);
     Ok(Pipeline(Rc::new(PipelineInner {
-        token: raw.pipeline_token(), max_threads: raw.max_threads(), driver: RefCell::new(Some(raw)), device, library: Some(library.clone()), indirect: false, shape: PipelineShape::Compute, render: None, dead: Cell::new(false),
+        max_threads: raw.max_threads(), driver: RefCell::new(Some(raw.into())), device, library: Some(library.clone()), indirect: false, shape: PipelineShape::Compute, render: None, dead: Cell::new(false),
     })))
 }
 pub fn destroy_library(library: &Library) -> Result<(), Error> {
@@ -1228,7 +1229,7 @@ pub fn set_pipeline(encoder: &ComputeEncoder, pipeline: &Pipeline) -> Result<(),
     if pipeline.0.shape != PipelineShape::Compute {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "render pipelines cannot be set on a compute encoder"));
     }
-    encoder.0.raw().set_pipeline(pipeline.0.token)?;
+    encoder.0.raw().set_pipeline(&*pipeline.0.driver())?;
     encoder.0.max_threads.set(pipeline.0.max_threads);
     Ok(())
 }
@@ -1511,7 +1512,7 @@ pub fn create_render_pipeline(
     let raw = device.0.raw().create_render_pipeline(options, descriptor, &admitted)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Pipeline(Rc::new(PipelineInner {
-        token: raw.pipeline_token(), max_threads: raw.max_threads(), driver: RefCell::new(Some(raw)), device: device.clone(), library: None, indirect, shape: PipelineShape::Vertex, render: Some((descriptor.color_format, descriptor.sample_count)), dead: Cell::new(false),
+        max_threads: raw.max_threads(), driver: RefCell::new(Some(raw.into())), device: device.clone(), library: None, indirect, shape: PipelineShape::Vertex, render: Some((descriptor.color_format, descriptor.sample_count)), dead: Cell::new(false),
     })))
 }
 pub fn pipeline_indirect(pipeline: &Pipeline) -> bool { pipeline.0.indirect }
@@ -1540,7 +1541,7 @@ pub fn icb_set_pipeline(icb: &Icb, index: i64, pipeline: &Pipeline) -> Result<()
     if !Rc::ptr_eq(&pipeline.0.device.0, &icb.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device")); }
     if pipeline.0.shape != PipelineShape::Vertex { return Err(make_error(OP, ErrorKind::InvalidArgument, "compute pipelines cannot draw")); }
     if !pipeline.0.indirect { return Err(make_error(OP, ErrorKind::Unsupported, "pipeline was not compiled for indirect command buffers")); }
-    icb.0.raw().icb_set_pipeline(index, pipeline.0.token)
+    icb.0.raw().icb_set_pipeline(index, &*pipeline.0.driver())
 }
 pub fn icb_set_buffer(
     icb: &Icb, index: i64, stage: ShaderStage, slot: i64, offset: Option<i64>, buffer: &Buffer,
@@ -1624,7 +1625,7 @@ pub fn create_argument(pipeline: &Pipeline, stage: ShaderStage, index: i64) -> R
     if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     live(OP, &pipeline.0.device)?;
     let index=crate::validation::admit_slot(OP,index)?;
-    let raw = pipeline.0.device.0.raw().create_argument(pipeline.0.token, stage, index)?;
+    let raw = pipeline.0.device.0.raw().create_argument(&*pipeline.0.driver(), stage, index)?;
     pipeline.0.device.0.children.set(pipeline.0.device.0.children.get() + 1);
     Ok(Argument(Rc::new(ArgumentInner { length: raw.argument_length(), alignment: raw.argument_alignment(), raw: RefCell::new(Some(raw)), device: pipeline.0.device.clone(), dead: Cell::new(false) })))
 }
@@ -1778,7 +1779,7 @@ pub fn set_render_pipeline(encoder: &RenderEncoder, pipeline: &Pipeline) -> Resu
         return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"));
     }
     render_compatible(OP, encoder, pipeline)?;
-    encoder.0.raw().render_set_pipeline(pipeline.0.token)?;
+    encoder.0.raw().render_set_pipeline(&*pipeline.0.driver())?;
     encoder.0.pipeline_set.set(true);
     encoder.0.indirect.set(pipeline.0.indirect);
     Ok(())
@@ -1899,20 +1900,19 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
     open_render(OP, encoder)?;
     if draws.is_empty() { return Err(make_error(OP, ErrorKind::InvalidArgument, "draw batch is empty")); }
     let device = render_device(encoder);
-    // lowered into storage kept between batches, inner buffer lists included: a batch per pass
-    // per frame allocated a list per draw; an error leaves the scratch to be made again
-    thread_local! { static LOWERED: std::cell::RefCell<Vec<DriverBatchDraw>> = const { std::cell::RefCell::new(Vec::new()) }; }
-    let mut lowered = LOWERED.with(|l| std::mem::take(&mut *l.borrow_mut()));
-    for (n, draw) in draws.iter().enumerate() {
+    // lowered into storage kept between batches: the outer list and the inner buffer lists (a batch
+    // per pass per frame allocated a list per draw); an error leaves the scratch to be made again.
+    // Only the lists are kept; the driver handles in them are dropped with the batch.
+    thread_local! { static LOWERED: std::cell::RefCell<(Vec<DriverBatchDraw>, Vec<Vec<(ShaderStage, i64, Token, i64)>>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) }; }
+    let (mut lowered, mut lists) = LOWERED.with(|l| std::mem::take(&mut *l.borrow_mut()));
+    lowered.clear();
+    for draw in draws {
         if draw.pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
         if !Rc::ptr_eq(&draw.pipeline.0.device.0, &device.0) {
             return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"));
         }
         render_compatible(OP, encoder, &draw.pipeline)?;
-        if n == lowered.len() {
-            lowered.push(DriverBatchDraw { batch_pipeline: draw.pipeline.0.token, batch_buffers: Vec::new(), batch_primitive: draw.primitive, batch_index: None, batch_vertex_start: 0, batch_vertex_count: 0, batch_instances: 0 });
-        }
-        let mut buffers = std::mem::take(&mut lowered[n].batch_buffers);
+        let mut buffers = lists.pop().unwrap_or_default();
         buffers.clear();
         for (stage, index, buffer, offset) in &draw.buffers {
             check_slot(OP, *index)?;
@@ -1929,18 +1929,19 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
             valid_draw(OP, draw.primitive, draw.vertex_start, draw.vertex_count, draw.instances)?;
             None
         };
-        lowered[n] = DriverBatchDraw {
-            batch_pipeline: draw.pipeline.0.token,
+        lowered.push(DriverBatchDraw {
+            batch_pipeline: draw.pipeline.0.driver.borrow().clone().expect("live pipeline payload"),
             batch_buffers: buffers,
             batch_primitive: draw.primitive,
             batch_index: index,
             batch_vertex_start: draw.vertex_start,
             batch_vertex_count: draw.vertex_count,
             batch_instances: draw.instances,
-        };
+        });
     }
-    let result = encoder.0.raw().draw_batch(&lowered[..draws.len()]);
-    LOWERED.with(|l| *l.borrow_mut() = lowered);
+    let result = encoder.0.raw().draw_batch(&lowered);
+    lists.extend(lowered.drain(..).map(|draw| draw.batch_buffers));
+    LOWERED.with(|l| *l.borrow_mut() = (lowered, lists));
     result?;
     encoder.0.pipeline_set.set(true);
     encoder.0.indirect.set(draws.last().unwrap().pipeline.0.indirect);
@@ -2100,7 +2101,7 @@ mod ownership_tests {
         fn destroy(&self) -> Result<(), Error> { self.terminal("test.destroy") }
     }
     impl DriverPipeline for Payload {
-        fn pipeline_token(&self) -> Token { 5 }
+        fn as_any(&self) -> &dyn std::any::Any { self }
         fn max_threads(&self) -> i64 { 64 }
         fn destroy_pipeline(&self) -> Result<(), Error> { self.terminal("test.destroy") }
     }
@@ -2126,7 +2127,7 @@ mod ownership_tests {
     }
     // Invalid input must stop at the portable boundary, before a backend sees a token.
     impl DriverComputeEncoder for Payload {
-        fn set_pipeline(&self, _: Token) -> Result<(), Error> { Ok(()) }
+        fn set_pipeline(&self, _: &dyn DriverPipeline) -> Result<(), Error> { Ok(()) }
         fn set_buffer(&self, _: i64, _: i64, _: Token) -> Result<(), Error> { Ok(()) }
         fn set_bytes(&self, _: i64, _: crate::validation::AdmittedBytes, _: &[u8]) -> Result<(), Error> { panic!("invalid bytes reached driver") }
         fn set_texture(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
@@ -2168,7 +2169,7 @@ mod ownership_tests {
             raw: RefCell::new(Some(Box::new(payload()))), commands: commands.clone(), max_threads: Cell::new(-1),
         }));
         let pipeline = |shape, render, indirect| Pipeline(Rc::new(PipelineInner {
-            driver: RefCell::new(Some(Box::new(payload()))), token: 5, max_threads: 64, device: device.clone(),
+            driver: RefCell::new(Some(Rc::new(payload()))), max_threads: 64, device: device.clone(),
             library: None, indirect, shape, render, dead: Cell::new(false),
         }));
         let compute = pipeline(PipelineShape::Compute, None, false);
@@ -2460,8 +2461,8 @@ mod ownership_tests {
         }));
         let fail = Rc::new(Cell::new(true));
         let pipeline = Pipeline(Rc::new(PipelineInner {
-            driver: RefCell::new(Some(Box::new(Payload { _owner: owner, fail: fail.clone() }))),
-            token: 5, max_threads: 64, device: device.clone(), library: Some(library.clone()),
+            driver: RefCell::new(Some(Rc::new(Payload { _owner: owner, fail: fail.clone() }))),
+            max_threads: 64, device: device.clone(), library: Some(library.clone()),
             indirect: false, shape: PipelineShape::Compute, render: None, dead: Cell::new(false),
         }));
         device.0.children.set(2);

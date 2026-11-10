@@ -11,27 +11,28 @@ use crate::native::{
     RenderEncoder, RenderPassDescriptor,
 };
 use ogpu_core::{
-    backend::{DepthState, DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, DriverSampler, ShaderStage, Token, Winding as OgpuWinding},
+    backend::{DepthState, DriverBatchDraw, DriverPipeline, DriverRenderEncoder, DriverRenderTarget, DriverSampler, ShaderStage, Token, Winding as OgpuWinding},
     error::ErrorKind,
     render_pass::{Cull, IndexType as OgpuIndex, Primitive as OgpuPrimitive, Rect},
 };
 use std::rc::Rc;
 
-fn render_pipeline(context: &CommandContext, token: i64) -> Result<native::RenderPipeline, Error> {
-    let Some(pipeline) = context.pipeline(token) else {
+fn render_pipeline(context: &CommandContext, pipeline: &dyn DriverPipeline) -> Result<native::RenderPipeline, Error> {
+    let Some(pipeline) = crate::backend::metal_pipeline(pipeline) else {
         return Err(fail(context.operation, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
     };
     match pipeline.native() {
         Native::Compute(_) => Err(fail(context.operation, ErrorKind::InvalidArgument, "compute pipeline cannot draw")),
         Native::Render(native) => {
-            context.keep_pipeline(&pipeline)?;
+            context.keep_pipeline(pipeline)?;
             Ok(native.clone())
         }
     }
 }
 
 struct ResolvedDraw {
-    token: i64,
+    /// The portable pipeline's identity, to skip rebinding it.
+    token: *const (),
     native: native::RenderPipeline,
     buffers: Vec<(ShaderStage, i64, crate::buffer::Buffer, i64)>,
     index: Option<(OgpuIndex, crate::buffer::Buffer, i64, i64)>,
@@ -41,7 +42,7 @@ struct ResolvedDraw {
 fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[DriverBatchDraw]) -> Result<(), Error> {
     let mut resolved: Vec<ResolvedDraw> = Vec::with_capacity(draws.len());
     for d in draws {
-        let native = render_pipeline(context, d.batch_pipeline)?;
+        let native = render_pipeline(context, &*d.batch_pipeline)?;
         let mut buffers = Vec::with_capacity(d.batch_buffers.len());
         for (stage, slot, token, offset) in &d.batch_buffers {
             let buffer = context.find_buffer(*token)?;
@@ -56,9 +57,9 @@ fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[Driver
                 Some((*kind, index_buffer, *offset, *count))
             }
         };
-        resolved.push(ResolvedDraw { token: d.batch_pipeline, native, buffers, index });
+        resolved.push(ResolvedDraw { token: Rc::as_ptr(&d.batch_pipeline).cast(), native, buffers, index });
     }
-    let mut previous: Option<i64> = None;
+    let mut previous: Option<*const ()> = None;
     for (d, r) in draws.iter().zip(resolved.iter()) {
         if previous != Some(r.token) {
             encoder.set_pipeline(&r.native)?;
@@ -155,8 +156,8 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
 }
 
 impl DriverRenderEncoder for Render {
-    fn render_set_pipeline(&self, token: Token) -> Result<(), Error> {
-        let native = render_pipeline(&self.context, token)?;
+    fn render_set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
+        let native = render_pipeline(&self.context, pipeline)?;
         self.encoder.set_pipeline(&native)
     }
 

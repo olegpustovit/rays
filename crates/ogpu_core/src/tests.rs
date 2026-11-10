@@ -182,7 +182,7 @@ impl crate::backend::DriverDevice for DiscardDevice {
     fn create_sampler(&self, _: &crate::validation::AdmittedSampler) -> Result<Box<dyn crate::backend::DriverSampler>, crate::error::Error> { Err(discard_test_error()) }
     fn create_render_pipeline(&self, _: crate::backend::RenderPipelineOptions, _: &pipeline::RenderDescriptor, _: &pipeline::AdmittedRenderPipeline) -> Result<Box<dyn crate::backend::DriverPipeline>, crate::error::Error> { Err(discard_test_error()) }
     fn create_icb(&self, _: &crate::validation::AdmittedIcb) -> Result<Box<dyn crate::backend::DriverIcb>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_argument(&self, _: i64, _: crate::backend::ShaderStage, _: crate::validation::AdmittedSlot) -> Result<Box<dyn crate::backend::DriverArgument>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_argument(&self, _: &dyn crate::backend::DriverPipeline, _: crate::backend::ShaderStage, _: crate::validation::AdmittedSlot) -> Result<Box<dyn crate::backend::DriverArgument>, crate::error::Error> { Err(discard_test_error()) }
     fn create_queue(&self) -> Result<Box<dyn crate::backend::DriverQueue>, crate::error::Error> { Err(discard_test_error()) }
     fn create_surface(&self, _: &surface::AdmittedConfiguration) -> Result<Box<dyn crate::backend::DriverSurface>, crate::error::Error> {
         Ok(Box::new(DiscardSurface { fail_first: self.fail_first, attempts: self.attempts.clone() }))

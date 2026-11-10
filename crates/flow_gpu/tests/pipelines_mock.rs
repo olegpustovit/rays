@@ -11,9 +11,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 struct Counts { live: Rc<Cell<i64>>, next: Rc<Cell<i64>> }
-struct Pipeline { token: b::Token, live: Rc<Cell<i64>> }
+struct Pipeline { live: Rc<Cell<i64>> }
 impl DriverPipeline for Pipeline {
-    fn pipeline_token(&self) -> b::Token { self.token }
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn max_threads(&self) -> i64 { 1024 }
     fn destroy_pipeline(&self) -> Result<(), Error> { self.live.set(self.live.get() - 1); Ok(()) }
 }
@@ -23,7 +23,7 @@ impl DriverLibrary for Library {
         let Counts { live, next } = &*self.counts;
         live.set(live.get() + 1);
         next.set(next.get() + 1);
-        Ok(Box::new(Pipeline { token: next.get(), live: live.clone() }))
+        Ok(Box::new(Pipeline { live: live.clone() }))
     }
     fn destroy_library(&self) -> Result<(), Error> { self.inner.destroy_library() }
 }
@@ -47,7 +47,7 @@ impl DriverDevice for Dev {
         create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn b::DriverSampler>, Error>;
         create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error>;
         create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn b::DriverIcb>, Error>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, Error>;
+        create_argument(pipeline: &dyn b::DriverPipeline, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, Error>;
         create_queue() -> Result<Box<dyn b::DriverQueue>, Error>;
         create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn b::DriverSurface>, Error>;
         destroy_device() -> Result<(), Error>;

@@ -67,7 +67,7 @@ impl b::DriverResource for Wrapped<dyn b::DriverResource> {
     }
 }
 impl b::DriverPipeline for Wrapped<dyn b::DriverPipeline> {
-    forward! { pipeline_token() -> b::Token; max_threads() -> i64; }
+    forward! { as_any() -> &dyn std::any::Any; max_threads() -> i64; }
     fn destroy_pipeline(&self) -> Result<(), E> {
         self.inner.destroy_pipeline()?;
         self.st.pipelines.set(self.st.pipelines.get() - 1);
@@ -76,7 +76,7 @@ impl b::DriverPipeline for Wrapped<dyn b::DriverPipeline> {
 }
 impl b::DriverRenderEncoder for Wrapped<dyn b::DriverRenderEncoder> {
     forward! {
-        render_set_pipeline(pipeline: b::Token) -> Result<(), E>;
+        render_set_pipeline(pipeline: &dyn b::DriverPipeline) -> Result<(), E>;
         set_stage_buffer(stage: b::ShaderStage, index: i64, offset: i64, buffer: b::Token) -> Result<(), E>;
         set_stage_texture(stage: b::ShaderStage, index: i64, texture: b::Token) -> Result<(), E>;
         set_stage_sampler(stage: b::ShaderStage, index: i64, sampler: &dyn b::DriverSampler) -> Result<(), E>;
@@ -150,7 +150,7 @@ impl b::DriverDevice for Wrapped<dyn b::DriverDevice> {
         instance_layout(kind: b::InstanceKind) -> Vec<i64>;
         create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn b::DriverSampler>, E>;
         create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn b::DriverIcb>, E>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, E>;
+        create_argument(pipeline: &dyn b::DriverPipeline, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, E>;
         create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn b::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }

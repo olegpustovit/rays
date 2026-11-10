@@ -6,7 +6,7 @@ use crate::{
     device::{fail},
     pipeline::Native,
 };
-use ogpu_core::{backend::{DriverComputeEncoder, Token}, error::ErrorKind};
+use ogpu_core::{backend::{DriverComputeEncoder, DriverPipeline, Token}, error::ErrorKind};
 use std::rc::Rc;
 
 fn size(t: (i64, i64, i64)) -> (usize, usize, usize) {
@@ -25,15 +25,15 @@ pub fn create(context: &Rc<CommandContext>) -> Result<Box<dyn DriverComputeEncod
 }
 
 impl DriverComputeEncoder for Compute {
-    fn set_pipeline(&self, token: Token) -> Result<(), Error> {
+    fn set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
         let c = &self.context;
-        let Some(pipeline) = c.pipeline(token) else {
+        let Some(pipeline) = crate::backend::metal_pipeline(pipeline) else {
             return Err(fail(c.operation, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
         };
         match pipeline.native() {
             Native::Render(_) => Err(fail(c.operation, ErrorKind::InvalidArgument, "render pipeline cannot execute compute")),
             Native::Compute(compute) => {
-                c.keep_pipeline(&pipeline)?;
+                c.keep_pipeline(pipeline)?;
                 self.encoder.set_pipeline(compute)
             }
         }

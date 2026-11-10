@@ -589,7 +589,7 @@ impl DriverDevice for MockDevice {
     fn create_icb(&self, _: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
         Err(fail("Backend_mock.create_icb", ErrorKind::Unsupported, "mock backend does not rasterize"))
     }
-    fn create_argument(&self, _: i64, _: ShaderStage, _: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
+    fn create_argument(&self, _: &dyn DriverPipeline, _: ShaderStage, _: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
         Err(fail("Backend_mock.create_argument", ErrorKind::Unsupported, "mock backend does not rasterize"))
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> { create_queue(&self.c) }

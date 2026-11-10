@@ -51,7 +51,7 @@ impl b::DriverMapping for Faulty<dyn b::DriverMapping> {
     forward! { readback() -> b::OwnedReadback; }
 }
 impl b::DriverPipeline for Faulty<dyn b::DriverPipeline> {
-    forward! { pipeline_token() -> b::Token; max_threads() -> i64; }
+    forward! { as_any() -> &dyn std::any::Any; max_threads() -> i64; }
     fn destroy_pipeline(&self) -> Result<(), E> {
         let result = self.inner.destroy_pipeline();
         if result.is_ok() { self.f.pipelines.set(self.f.pipelines.get() - 1); }
@@ -103,7 +103,7 @@ impl b::DriverDevice for Faulty<dyn b::DriverDevice> {
         create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn b::DriverSampler>, E>;
         create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn b::DriverPipeline>, E>;
         create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn b::DriverIcb>, E>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, E>;
+        create_argument(pipeline: &dyn b::DriverPipeline, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, E>;
         create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn b::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }

@@ -86,7 +86,7 @@ enum IcbDraw {
 
 #[derive(Clone, Default)]
 struct IcbCommand {
-    pipeline: Option<Token>,
+    pipeline: Option<Rc<PipelineEntry>>,
     buffers: Vec<(i64, i64, Token)>,
     draw: Option<IcbDraw>,
 }
@@ -177,7 +177,6 @@ struct Dev {
     next: Cell<i64>,
     buffers: RefCell<HashMap<i64, Rc<BufferEntry>>>,
     textures: RefCell<HashMap<i64, Rc<TextureEntry>>>,
-    pipelines: RefCell<HashMap<i64, Rc<PipelineEntry>>>,
     icbs: RefCell<HashMap<i64, Rc<RefCell<Vec<IcbCommand>>>>>,
     arguments: RefCell<HashMap<(i64, i64), ArgumentCell>>,
     frames: RefCell<HashMap<i64, Rc<RefCell<Option<vk::Surface>>>>>,
@@ -210,12 +209,6 @@ impl Dev {
         match self.textures.borrow().get(&id) {
             Some(texture) => Ok(texture.clone()),
             None => Err(fail(op, ErrorKind::InvalidArgument, "texture graph is incomplete")),
-        }
-    }
-    fn find_pipeline(&self, op: &str, id: Token) -> Result<Rc<PipelineEntry>, Error> {
-        match self.pipelines.borrow().get(&id) {
-            Some(pipeline) => Ok(pipeline.clone()),
-            None => Err(fail(op, ErrorKind::InvalidArgument, "pipeline graph is incomplete")),
         }
     }
     fn find_accel(&self, op: &str, id: Token) -> Result<Rc<vk::AccelerationStructure>, Error> {
@@ -401,30 +394,34 @@ fn register_texture(dev: &Rc<Dev>, descriptor: &AdmittedTexture) -> Result<Box<d
 }
 
 struct OwnedPipeline {
-    dev: Rc<Dev>,
-    id: Token,
+    entry: Rc<PipelineEntry>,
     max_threads: i64,
 }
 
+/// The native pipeline behind a portable one, or the graph-incomplete error.
+fn pipeline_entry(op: &str, pipeline: &dyn DriverPipeline) -> Result<Rc<PipelineEntry>, Error> {
+    match pipeline.as_any().downcast_ref::<OwnedPipeline>() {
+        Some(pipeline) => Ok(pipeline.entry.clone()),
+        None => Err(fail(op, ErrorKind::InvalidArgument, "pipeline graph is incomplete")),
+    }
+}
+
 impl DriverPipeline for OwnedPipeline {
-    fn pipeline_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn max_threads(&self) -> i64 {
         self.max_threads
     }
     fn destroy_pipeline(&self) -> Result<(), Error> {
-        self.dev.pipelines.borrow_mut().remove(&self.id);
         live_add(-1);
         Ok(())
     }
 }
 
-fn own_pipeline(dev: &Rc<Dev>, pipeline: vk::Pipeline, local: (i64, i64, i64), max_threads: i64) -> Box<dyn DriverPipeline> {
+fn own_pipeline(pipeline: vk::Pipeline, local: (i64, i64, i64), max_threads: i64) -> Box<dyn DriverPipeline> {
     live_add(1);
-    let id = dev.token();
-    dev.pipelines.borrow_mut().insert(id, Rc::new(PipelineEntry { pipeline, local }));
-    Box::new(OwnedPipeline { dev: dev.clone(), id, max_threads })
+    Box::new(OwnedPipeline { entry: Rc::new(PipelineEntry { pipeline, local }), max_threads })
 }
 
 fn kernel_space(kind: BindingKind) -> u32 {
@@ -480,7 +477,7 @@ impl DriverLibrary for ShaderLibrary {
         };
         let pipeline = vk::Pipeline::compute(&device, module, entry, &natives).map_err(|failure| of_vk(LIBRARY_OP, failure))?;
         let local = (reflected.local_size.0 as i64, reflected.local_size.1 as i64, reflected.local_size.2 as i64);
-        Ok(own_pipeline(&self.dev, pipeline, local, self.dev.max_invocations))
+        Ok(own_pipeline(pipeline, local, self.dev.max_invocations))
     }
     fn destroy_library(&self) -> Result<(), Error> {
         *self.module.borrow_mut() = None;
@@ -540,7 +537,7 @@ fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descrip
             },
         )
     .map_err(|failure| of_vk(OP, failure))?;
-    Ok(own_pipeline(dev, pipeline, (1, 1, 1), 0))
+    Ok(own_pipeline(pipeline, (1, 1, 1), 0))
 }
 
 fn create_sampler(dev: &Rc<Dev>, descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error> {
@@ -626,8 +623,9 @@ impl DriverIcb for IndirectCommands {
     fn icb_token(&self) -> Token {
         self.id
     }
-    fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, pipeline: Token) -> Result<(), Error> {
-        self.at(index, &mut |c| c.pipeline = Some(pipeline))
+    fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
+        let entry = pipeline_entry(ICB_OP, pipeline)?;
+        self.at(index, &mut |c| c.pipeline = Some(entry.clone()))
     }
     fn icb_set_buffer(&self, index: ogpu_core::validation::AdmittedIcbIndex, _stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error> {
         self.at(index, &mut |c| c.buffers.insert(0, (slot, offset, buffer)))
@@ -1103,8 +1101,8 @@ struct ComputePass {
 }
 
 impl DriverComputeEncoder for ComputePass {
-    fn set_pipeline(&self, id: Token) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_pipeline(QUEUE_OP, id)?;
+    fn set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
+        let entry = pipeline_entry(QUEUE_OP, pipeline)?;
         self.local.set(entry.local);
         self.cmds.run(QUEUE_OP, &mut |c| c.set_pipeline(&entry.pipeline))
     }
@@ -1272,10 +1270,15 @@ struct Render {
     cmds: Rc<Cmds>,
 }
 
-impl DriverRenderEncoder for Render {
-    fn render_set_pipeline(&self, id: Token) -> Result<(), Error> {
-        let entry = self.cmds.dev.find_pipeline(QUEUE_OP, id)?;
+impl Render {
+    fn bind_pipeline(&self, entry: &PipelineEntry) -> Result<(), Error> {
         self.cmds.run(QUEUE_OP, &mut |c| c.set_pipeline(&entry.pipeline))
+    }
+}
+
+impl DriverRenderEncoder for Render {
+    fn render_set_pipeline(&self, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
+        self.bind_pipeline(&pipeline_entry(QUEUE_OP, pipeline)?)
     }
     fn set_stage_buffer(&self, _stage: ShaderStage, index: i64, offset: i64, id: Token) -> Result<(), Error> {
         let argument = self.cmds.dev.arguments.borrow().get(&(id, offset)).cloned();
@@ -1373,7 +1376,7 @@ impl DriverRenderEncoder for Render {
     }
     fn draw_batch(&self, draws: &[DriverBatchDraw]) -> Result<(), Error> {
         for draw in draws {
-            self.render_set_pipeline(draw.batch_pipeline)?;
+            self.render_set_pipeline(&*draw.batch_pipeline)?;
             for &(stage, index, buffer, offset) in &draw.batch_buffers {
                 self.set_stage_buffer(stage, index, offset, buffer)?;
             }
@@ -1399,8 +1402,8 @@ impl DriverRenderEncoder for Render {
             let Some(command) = command else {
                 return Err(fail(QUEUE_OP, ErrorKind::InvalidArgument, "indirect command index is out of range"));
             };
-            if let Some(pipeline) = command.pipeline {
-                self.render_set_pipeline(pipeline)?;
+            if let Some(entry) = &command.pipeline {
+                self.bind_pipeline(entry)?;
             }
             for &(slot, offset, buffer) in &command.buffers {
                 self.set_stage_buffer(ShaderStage::Vertex, slot, offset, buffer)?;
@@ -1695,7 +1698,7 @@ impl DriverDevice for VulkanDevice {
     fn create_icb(&self, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
         create_icb(&self.dev, profile)
     }
-    fn create_argument(&self, _pipeline: Token, _stage: ShaderStage, _index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
+    fn create_argument(&self, _pipeline: &dyn DriverPipeline, _stage: ShaderStage, _index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
         create_argument(&self.dev)
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> {
@@ -1712,7 +1715,6 @@ impl DriverDevice for VulkanDevice {
         // Natives leaked past their owners go with the device.
         self.dev.buffers.borrow_mut().clear();
         self.dev.textures.borrow_mut().clear();
-        self.dev.pipelines.borrow_mut().clear();
         self.dev.icbs.borrow_mut().clear();
         self.dev.arguments.borrow_mut().clear();
         self.dev.frames.borrow_mut().clear();
@@ -1744,7 +1746,6 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
         next: Cell::new(1),
         buffers: RefCell::default(),
         textures: RefCell::default(),
-        pipelines: RefCell::default(),
         icbs: RefCell::default(),
         arguments: RefCell::default(),
         frames: RefCell::default(),

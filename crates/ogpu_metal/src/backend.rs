@@ -177,32 +177,26 @@ fn max_threads(pipeline: &Pipeline) -> i64 {
     }
 }
 
-struct MetalPipeline {
-    dev: Rc<Dev>,
-    pipeline: Pipeline,
-    id: i64,
+pub(crate) struct MetalPipeline {
+    pub(crate) pipeline: Pipeline,
     max: i64,
 }
 
 impl DriverPipeline for MetalPipeline {
-    fn pipeline_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn max_threads(&self) -> i64 {
         self.max
     }
     fn destroy_pipeline(&self) -> Result<(), Error> {
-        self.dev.t.pipelines.borrow_mut().remove(&self.id);
-        self.pipeline.destroy()?;
-        Ok(())
+        self.pipeline.destroy()
     }
 }
 
-fn own_pipeline(dev: &Rc<Dev>, pipeline: Pipeline) -> Result<Box<dyn DriverPipeline>, Error> {
-    let id = dev.t.token();
-    dev.t.pipelines.borrow_mut().insert(id, pipeline.clone());
+fn own_pipeline(pipeline: Pipeline) -> Result<Box<dyn DriverPipeline>, Error> {
     let max = max_threads(&pipeline);
-    Ok(Box::new(MetalPipeline { dev: dev.clone(), pipeline, id, max }))
+    Ok(Box::new(MetalPipeline { pipeline, max }))
 }
 
 struct MetalLibrary {
@@ -214,7 +208,7 @@ struct MetalLibrary {
 impl DriverLibrary for MetalLibrary {
     fn create_compute_pipeline_in(&self, function: &ogpu_core::shader::AdmittedFunction, interface: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
         let pipeline = pipeline::create_compute_from_library(&self.dev.device, &self.value, function, interface)?;
-        own_pipeline(&self.dev, pipeline)
+        own_pipeline(pipeline)
     }
     fn destroy_library(&self) -> Result<(), Error> {
         self.value.destroy()?;
@@ -312,7 +306,7 @@ fn create_sampler(dev: &Rc<Dev>, descriptor: &ogpu_core::validation::AdmittedSam
 
 fn create_render_pipeline(dev: &Rc<Dev>, _options: RenderPipelineOptions, descriptor: &RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error> {
     let pipeline = pipeline::create_render_owned(&dev.device, descriptor, admitted)?;
-    own_pipeline(dev, pipeline)
+    own_pipeline(pipeline)
 }
 
 const ICB_OP: &str = "Ogpu_metal.Backend.create_icb";
@@ -346,8 +340,8 @@ impl DriverIcb for MetalIcb {
     fn icb_token(&self) -> Token {
         self.id
     }
-    fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, token: Token) -> Result<(), Error> {
-        let Some(pipeline) = self.dev.t.pipelines.borrow().get(&token).cloned() else {
+    fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
+        let Some(pipeline) = metal_pipeline(pipeline) else {
             return Err(fail(ICB_OP, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
         };
         match pipeline.native() {
@@ -443,8 +437,13 @@ impl DriverArgument for MetalArgument {
     }
 }
 
-fn create_argument(dev: &Rc<Dev>, pipeline: Token, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
-    let Some(pipeline) = dev.t.pipelines.borrow().get(&pipeline).cloned() else {
+/// The Metal pipeline behind a portable one.
+pub(crate) fn metal_pipeline(pipeline: &dyn DriverPipeline) -> Option<&Pipeline> {
+    pipeline.as_any().downcast_ref::<MetalPipeline>().map(|p| &p.pipeline)
+}
+
+fn create_argument(dev: &Rc<Dev>, pipeline: &dyn DriverPipeline, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
+    let Some(pipeline) = metal_pipeline(pipeline).cloned() else {
         return Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
     };
     if stage == ShaderStage::Vertex {
@@ -774,7 +773,7 @@ impl DriverDevice for MetalDevice {
     fn create_icb(&self, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
         create_icb(&self.dev, profile)
     }
-    fn create_argument(&self, pipeline: Token, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
+    fn create_argument(&self, pipeline: &dyn DriverPipeline, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
         create_argument(&self.dev, pipeline, stage, index)
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> {

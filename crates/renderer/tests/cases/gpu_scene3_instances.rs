@@ -417,7 +417,7 @@ impl backend::DriverResource for Observed<dyn backend::DriverResource> {
 }
 impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder> {
     forward! {
-        render_set_pipeline(pipeline: backend::Token) -> Result<(), E>;
+        render_set_pipeline(pipeline: &dyn backend::DriverPipeline) -> Result<(), E>;
         set_stage_texture(stage: backend::ShaderStage, index: i64, texture: backend::Token) -> Result<(), E>;
         set_stage_sampler(stage: backend::ShaderStage, index: i64, sampler: &dyn backend::DriverSampler) -> Result<(), E>;
         set_viewport(rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), E>;
@@ -490,7 +490,7 @@ impl backend::DriverDevice for Observed<dyn backend::DriverDevice> {
         create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn backend::DriverSampler>, E>;
         create_render_pipeline(options: backend::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn backend::DriverPipeline>, E>;
         create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn backend::DriverIcb>, E>;
-        create_argument(pipeline: backend::Token, stage: backend::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn backend::DriverArgument>, E>;
+        create_argument(pipeline: &dyn backend::DriverPipeline, stage: backend::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn backend::DriverArgument>, E>;
         create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn backend::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }
