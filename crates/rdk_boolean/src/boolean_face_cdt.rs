@@ -194,7 +194,7 @@ pub fn build(
     for local in 0..3 {
         points.push(face_triangle_implicit(constraints, side, triangle, local));
     }
-    let mut arrangement_to_point = scratch::filled(arrangement_count, 0i64);
+    let mut arrangement_to_point = scratch::i64_filled(arrangement_count, 0);
     for arrangement_point in 0..arrangement_count {
         let point = arrangement_mod::view::point(arrangement, arrangement_point as i64);
         let found = (0..3).find(|&candidate| implicit_point::equal(&points[candidate], point));
@@ -217,21 +217,21 @@ pub fn build(
         Sign::Zero => return Err(fail(Code::InvalidConstraints, "degenerate source triangle during face CDT")),
     };
     let initial_triangle_points: [i64; 3] = if source_winding > 0 { [0, 1, 2] } else { [0, 2, 1] };
-    let mut insert_points = scratch::empty::<i64>();
+    let mut insert_points = scratch::i64_empty();
     insert_points.extend(3..points.len() as i64);
     let source_constraint_count = arrangement_mod::segment_count(arrangement);
     // Face arrangement already canonicalizes every construction and performs its own indexed
     // incidence pass, so no point/segment rescan is needed here.
-    let mut constraint_points = scratch::empty::<i64>();
+    let mut constraint_points = scratch::i64_empty();
     for segment in 0..source_constraint_count {
         constraint_points.push(arrangement_to_point[arrangement_mod::segment_first(arrangement, segment) as usize]);
         constraint_points.push(arrangement_to_point[arrangement_mod::segment_second(arrangement, segment) as usize]);
     }
     let n = points.len();
-    let mut u_min = scratch::filled(n, 0.0f64);
-    let mut u_max = scratch::filled(n, 0.0f64);
-    let mut v_min = scratch::filled(n, 0.0f64);
-    let mut v_max = scratch::filled(n, 0.0f64);
+    let mut u_min = scratch::f64_filled(n, 0.0);
+    let mut u_max = scratch::f64_filled(n, 0.0);
+    let mut v_min = scratch::f64_filled(n, 0.0);
+    let mut v_max = scratch::f64_filled(n, 0.0);
     for point in 0..n {
         let ((x_min, x_max), (y_min, y_max), (z_min, z_max)) = implicit_point::bounds(&points[point]);
         let (a, b, c, d) = match projection_axis {

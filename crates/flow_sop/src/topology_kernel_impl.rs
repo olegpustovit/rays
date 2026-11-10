@@ -167,8 +167,9 @@ pub fn triangles(geometry: &Geometry, component: &str) -> Result<Value, Diagnost
     let mut ok = vec![1i64; count];
     let (mut primitive, mut a, mut b, mut c) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut scratch = polygon_triangulation::create_scratch();
+    let mut rows: Vec<(i64, i64, i64)> = Vec::new();
     for p in 0..count {
-        let mut rows: Vec<(i64, i64, i64)> = Vec::new();
+        rows.clear();
         let result = polygon_triangulation::primitive(
             None,
             &positions,

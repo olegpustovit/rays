@@ -354,10 +354,10 @@ fn segment_pair_candidates(
     let point_planes = projected_bounds(points, point_count, projection);
     let seg = segment_bounds(segment_first, segment_second, segment_count, &point_planes);
     let seg = choose_sweep_axis(seg);
-    let mut order = scratch::empty::<usize>();
+    let mut order = scratch::usize_empty();
     order.extend(0..segment_count);
     order.sort_unstable_by(|&l, &r| fcmp(seg.u_min[l], seg.u_min[r]).then(l.cmp(&r)));
-    let mut active = scratch::filled(segment_count, 0usize);
+    let mut active = scratch::usize_filled(segment_count, 0);
     let mut active_count = 0usize;
     let mut first: Vec<i64> = Vec::new();
     let mut second: Vec<i64> = Vec::new();
@@ -408,13 +408,13 @@ fn point_segment_candidates(
     let swap = interval_score(&seg_planes.v_min, &seg_planes.v_max) < interval_score(&seg_planes.u_min, &seg_planes.u_max);
     let (point, seg) = if swap { (swap_axes(point_planes), swap_axes(seg_planes)) } else { (point_planes, seg_planes) };
     let event_count = segment_count + point_count;
-    let mut events = scratch::empty::<usize>();
+    let mut events = scratch::usize_empty();
     events.extend(0..event_count);
     let event_lower = |event: usize| if event < segment_count { seg.u_min[event] } else { point.u_min[event - segment_count] };
     events.sort_unstable_by(|&l, &r| fcmp(event_lower(l), event_lower(r)).then(l.cmp(&r)));
-    let mut active_segments = scratch::filled(segment_count, 0usize);
+    let mut active_segments = scratch::usize_filled(segment_count, 0);
     let mut active_segment_count = 0usize;
-    let mut active_points = scratch::filled(point_count, 0usize);
+    let mut active_points = scratch::usize_filled(point_count, 0);
     let mut active_point_count = 0usize;
     let mut first: Vec<i64> = Vec::new();
     let mut second: Vec<i64> = Vec::new();
@@ -472,14 +472,14 @@ fn point_segment_candidates(
     if dense { Ok(CandidateResult::Dense) } else { Ok(CandidateResult::Candidates(finish_candidates(first, second))) }
 }
 
-fn canonicalize_points(points: &[implicit_point::T], count: usize) -> (Vec<implicit_point::T>, scratch::Buf<usize>) {
+fn canonicalize_points(points: &[implicit_point::T], count: usize) -> (Vec<implicit_point::T>, scratch::Usize) {
     if count == 0 {
-        return (Vec::new(), scratch::empty());
+        return (Vec::new(), scratch::usize_empty());
     }
-    let mut order = scratch::empty::<usize>();
+    let mut order = scratch::usize_empty();
     order.extend(0..count);
     order.sort_unstable_by(|&l, &r| compare_xyz(&points[l], &points[r]).cmp(&0).then(l.cmp(&r)));
-    let mut representative = scratch::filled(count, 0usize);
+    let mut representative = scratch::usize_filled(count, 0);
     let mut first = 0usize;
     while first < count {
         let mut last = first + 1;
@@ -493,7 +493,7 @@ fn canonicalize_points(points: &[implicit_point::T], count: usize) -> (Vec<impli
         }
         first = last;
     }
-    let mut old_to_new = scratch::filled(count, 0usize);
+    let mut old_to_new = scratch::usize_filled(count, 0);
     let mut unique_count = 0usize;
     for point in 0..count {
         if representative[point] == point {
@@ -534,8 +534,8 @@ struct State {
     split_points: Vec<i64>,
     split_next: Vec<i64>,
     split_set: HashSet<(i64, i64)>,
-    split_head: scratch::Buf<i64>,
-    segment_split_count: scratch::Buf<i64>,
+    split_head: scratch::I64,
+    segment_split_count: scratch::I64,
 }
 
 impl State {
@@ -910,8 +910,8 @@ pub fn build(
         split_points: Vec::with_capacity(split_capacity),
         split_next: Vec::with_capacity(split_capacity),
         split_set: HashSet::new(),
-        split_head: scratch::filled(raw_segment_count, -1i64),
-        segment_split_count: scratch::filled(raw_segment_count, 0i64),
+        split_head: scratch::i64_filled(raw_segment_count, -1),
+        segment_split_count: scratch::i64_filled(raw_segment_count, 0),
     };
     for segment in 0..raw_segment_count {
         let (first, second) = (state.segment_first[segment], state.segment_second[segment]);
@@ -1004,16 +1004,16 @@ pub fn build(
     }
     // Materialize the split points of every segment, in axis order.
     let split_count = state.split_segments.len();
-    let mut counts = scratch::filled(raw_segment_count, 0usize);
+    let mut counts = scratch::usize_filled(raw_segment_count, 0);
     for split in 0..split_count {
         counts[state.split_segments[split] as usize] += 1;
     }
-    let mut offsets = scratch::filled(raw_segment_count + 1, 0usize);
+    let mut offsets = scratch::usize_filled(raw_segment_count + 1, 0);
     for segment in 0..raw_segment_count {
         offsets[segment + 1] = offsets[segment] + counts[segment];
     }
-    let mut values = scratch::filled(split_count, 0i64);
-    let mut cursors = scratch::empty::<usize>();
+    let mut values = scratch::i64_filled(split_count, 0);
+    let mut cursors = scratch::usize_empty();
     cursors.extend_from_slice(&offsets);
     for split in 0..split_count {
         let segment = state.split_segments[split] as usize;
@@ -1044,7 +1044,7 @@ pub fn build(
             }
         }
     }
-    let mut order = scratch::empty::<usize>();
+    let mut order = scratch::usize_empty();
     order.extend(0..output_first.len());
     let key = |i: usize| (output_first[i].min(output_second[i]), output_first[i].max(output_second[i]));
     // Ties are duplicate segments with equal keys, and only the key is read afterwards.

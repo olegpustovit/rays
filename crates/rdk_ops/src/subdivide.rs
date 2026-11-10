@@ -58,7 +58,7 @@ pub(crate) fn free_point_part(
     geometry_value: &geometry::T,
 ) -> Result<Option<geometry::T>, error::T> {
     let topology_view = topology::view::view(geometry::topology(geometry_value))?;
-    let mut used = vec![0u8; topology_view.point_count as usize];
+    let mut used = rdk_core::scratch::u8_filled(topology_view.point_count as usize, 0);
     for (vertex, &point) in topology_view.vertex_points.iter().enumerate() {
         cancel::poll(cancel_arc.as_deref(), vertex as i64, 16_383)?;
         used[point as usize] = 1;
@@ -141,7 +141,7 @@ pub(crate) fn automatic_boundary_holes(
     let point_byte_count = (point_count >> 3) + if point_count & 7 == 0 { 0 } else { 1 };
     let grain = grain.unwrap_or(16_384);
     support::check_positive(grain).map_err(|_| invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()))?;
-    let mut boundary_points = vec![0_u8; point_byte_count as usize];
+    let mut boundary_points = rdk_core::scratch::u8_filled(point_byte_count as usize, 0);
     support::par_fill(cancel_token, grain, &mut boundary_points, &|byte: i64| {
         let base = byte << 3;
         let mut value = 0_u8;

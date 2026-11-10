@@ -408,7 +408,7 @@ fn squared_limit(count: i64) -> i64 {
 }
 
 fn canonicalize(count: usize, triangle_a: &[i64], triangle_b: &[i64], triangle_c: &[i64]) -> Vec<i64> {
-    let mut packed = scratch::filled(count * 3, 0i64);
+    let mut packed = scratch::i64_filled(count * 3, 0);
     for triangle in 0..count {
         let (a, b, c) = (triangle_a[triangle], triangle_b[triangle], triangle_c[triangle]);
         let at = triangle * 3;
@@ -426,7 +426,7 @@ fn canonicalize(count: usize, triangle_a: &[i64], triangle_b: &[i64], triangle_c
             packed[at + 2] = b;
         }
     }
-    let mut order = scratch::empty::<usize>();
+    let mut order = scratch::usize_empty();
     order.extend(0..count);
     // Equal packed triples are identical rows, so an unstable sort gives the same bytes.
     order.sort_unstable_by(|&left, &right| {
@@ -555,8 +555,8 @@ struct St {
     constraint_winding: Vec<i64>,
     walk_start: i64,
     insertion_queue: BinaryHeap<Reverse<i64>>,
-    strip_marks: scratch::Buf<u8>,
-    boundary_stamps: scratch::Buf<i64>,
+    strip_marks: scratch::U8,
+    boundary_stamps: scratch::I64,
     boundary_edges: HashMap<i64, i64>,
     boundary_generation: i64,
 }
@@ -1223,7 +1223,7 @@ fn recover_constraint(
     a: i64,
     b: i64,
 ) -> Result<(), String> {
-    let mut strip = scratch::empty::<i64>();
+    let mut strip = scratch::i64_empty();
     let mut current = incident_start(st, cb, a, b)?;
     let mut entry_key: i64 = -1;
     let mut steps: i64 = 0;
@@ -1263,9 +1263,9 @@ fn recover_constraint(
         return Err(err_message("Planar CDT constraint trace failed; an open constraint segment contains an unsplit point"));
     }
     let strip_count = strip.len() as i64;
-    let mut boundary_u = scratch::empty::<i64>();
-    let mut boundary_v = scratch::empty::<i64>();
-    let mut boundary_triangle = scratch::empty::<i64>();
+    let mut boundary_u = scratch::i64_empty();
+    let mut boundary_v = scratch::i64_empty();
+    let mut boundary_triangle = scratch::i64_empty();
     for index in 0..strip.len() {
         let triangle = strip[index];
         let (ta, tb, tc) = tri(st, triangle);
@@ -1358,7 +1358,7 @@ fn recover_constraint(
         }
         Ok(next as usize)
     };
-    let mut visited_boundary = scratch::filled(boundary_count, 0u8);
+    let mut visited_boundary = scratch::u8_filled(boundary_count, 0);
     let mut cycles: Vec<Vec<i64>> = Vec::new();
     for start in 0..boundary_count {
         if visited_boundary[start] == 0 {
@@ -1391,7 +1391,7 @@ fn recover_constraint(
             main_cycle = bridge_cycle(st, cb, a, b, &strip, &main_cycle, &cycles[index])?;
         }
     }
-    let mut emitted = scratch::filled(strip.len() * 3, 0i64);
+    let mut emitted = scratch::i64_filled(strip.len() * 3, 0);
     let mut emitted_count: i64 = 0;
     {
         let a_index = point_index(a, &main_cycle);
@@ -1423,8 +1423,8 @@ fn recover_constraint(
             strip_count,
         )?;
     }
-    let mut interior = scratch::empty::<i64>();
-    let mut interior_seen = scratch::filled(u(st.point_count), 0u8);
+    let mut interior = scratch::i64_empty();
+    let mut interior_seen = scratch::u8_filled(u(st.point_count), 0);
     for index in 0..strip.len() {
         let (ta, tb, tc) = tri(st, strip[index]);
         for point in [ta, tb, tc] {
@@ -1832,7 +1832,7 @@ fn run(
     let triangle_points = &req.triangle_points[..];
     let incremental = req.incremental;
     if !incremental {
-        let mut referenced = scratch::filled(u(point_count), 0u8);
+        let mut referenced = scratch::u8_filled(u(point_count), 0);
         for triangle in 0..initial_triangle_count {
             let a = triangle_points[triangle * 3];
             let b = triangle_points[triangle * 3 + 1];
@@ -2079,8 +2079,8 @@ pub fn build(
                 constraint_winding: Vec::new(),
                 walk_start: 0,
                 insertion_queue: BinaryHeap::new(),
-                strip_marks: scratch::filled(u(triangle_capacity), 0u8),
-                boundary_stamps: scratch::filled(u(point_count), 0i64),
+                strip_marks: scratch::u8_filled(u(triangle_capacity), 0),
+                boundary_stamps: scratch::i64_filled(u(point_count), 0),
                 boundary_edges: HashMap::new(),
                 boundary_generation: 0,
             };
@@ -2127,8 +2127,8 @@ pub fn build(
                 constraint_winding: Vec::new(),
                 walk_start: 0,
                 insertion_queue: BinaryHeap::new(),
-                strip_marks: scratch::filled(u(triangle_capacity), 0u8),
-                boundary_stamps: scratch::filled(u(point_count), 0i64),
+                strip_marks: scratch::u8_filled(u(triangle_capacity), 0),
+                boundary_stamps: scratch::i64_filled(u(point_count), 0),
                 boundary_edges: HashMap::new(),
                 boundary_generation: 0,
             };
