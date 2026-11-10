@@ -46,3 +46,20 @@ Nodes are retained records with `Handle`s; `Look` data replaces the panel's, lab
 ghost's paint closures; canvas closures live in the frame arena. `window_pxui_baseline`: 0
 allocations, about 3.9 to 4.0 us per warm kit frame before and after (debug, 2x).
 `window_pxui_arena_first_frame` asserts the first frame of a new canvas node allocates nothing.
+
+## After P5 commit 2 (hybrid views, engine)
+
+`window_pxui_view_costs` (`crates/pxui/tests/cases/views.rs`): ten views of 50 kit widgets (25 labels,
+25 buttons) each, `Ui::frame` only, debug, 2x, 100 frames after 10 warm-up, two runs:
+
+| Frame | CPU per frame | Allocations | Nodes declared |
+| --- | --- | --- | --- |
+| All ten views kept | 6.4 to 6.5 us | 0 | 11 |
+| One view (50 widgets) rebuilt | 42 us | 0 | 61 |
+| All 500 widgets rebuilt | 370 to 490 us | 0 | 511 |
+
+The kept frame is mostly the per-slot scans (`prune`, `next_repaint`), O(nodes) but a few ns each.
+`window_pxui_baseline` stays at 0 allocations (4.2 to 5.5 us, noisy under load). Editor
+`alloc_budget` unchanged: empty/basic/bare 445/652/600 allocations per frame. `gpu_retained_bytes`
+asserts an all-kept frame writes 0 instance bytes to the painter and a one-instance patch 64 bytes in
+each of the painter's three frame copies.
