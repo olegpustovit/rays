@@ -1,7 +1,7 @@
 //! The Rays mesh bridge preserves point/vertex N, Cd and uv; primitive colors expand per corner when required. Vertex-owned attributes cause deterministic corner expansion; immutable input planes stay unchanged.
 use std::sync::Arc;
 
-use rays::mesh::{self, Vec3_buffer};
+use rays::mesh::{self, Vec3Buffer};
 use rays_math::{color, vec2};
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::topology::{self, PrimitiveKind};
@@ -24,8 +24,8 @@ fn text(e: error::T) -> String {
     error::to_string(&e)
 }
 
-fn mesh_vec3(view: &packed::float3::view::View) -> Vec3_buffer {
-    Vec3_buffer::of_planes(view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
+fn mesh_vec3(view: &packed::float3::view::View) -> Vec3Buffer {
+    Vec3Buffer::of_planes(view.x.to_vec(), view.y.to_vec(), view.z.to_vec())
 }
 
 use rdk_core::attribute::owner_name;
@@ -101,7 +101,7 @@ fn vertex_points_of(topo: &topology::T) -> Result<Arc<Vec<u32>>, String> {
     Ok(topology::view::view(topo).map_err(text)?.vertex_points)
 }
 
-fn expanded_vec3(vertex_points: &[u32], count: usize, source: &Source) -> Result<Vec3_buffer, String> {
+fn expanded_vec3(vertex_points: &[u32], count: usize, source: &Source) -> Result<Vec3Buffer, String> {
     let values = match source {
         Source::Point(Planes::F3(v)) | Source::Vertex(Planes::F3(v)) => v,
         _ => unreachable!("position and normal sources are Float3"),
@@ -114,7 +114,7 @@ fn expanded_vec3(vertex_points: &[u32], count: usize, source: &Source) -> Result
         y[vertex] = input.y[i];
         z[vertex] = input.z[i];
     }
-    Ok(Vec3_buffer::of_planes(x, y, z))
+    Ok(Vec3Buffer::of_planes(x, y, z))
 }
 
 fn color_array(expanded: bool, vertex_points: &[u32], count: usize, source: &Source) -> Vec<color::T> {
@@ -196,7 +196,7 @@ fn standards(g: &geometry::T) -> Result<Standard, String> {
     Ok((n?, cd?, uv?))
 }
 
-fn shared_normals(normals: Option<Source>) -> Result<Option<Vec3_buffer>, String> {
+fn shared_normals(normals: Option<Source>) -> Result<Option<Vec3Buffer>, String> {
     match normals {
         None => Ok(None),
         Some(Source::Point(Planes::F3(values))) => Ok(Some(mesh_vec3(&packed::float3::view::view(&values).map_err(text)?))),
@@ -209,7 +209,7 @@ fn expanded_normals(
     vertex_points: &[u32],
     count: usize,
     normals: &Option<Source>,
-) -> Result<Option<Vec3_buffer>, String> {
+) -> Result<Option<Vec3Buffer>, String> {
     match normals {
         None => Ok(None),
         Some(source) => expanded_vec3(vertex_points, count, source).map(Some),
@@ -228,12 +228,12 @@ fn curve_mesh(g: &geometry::T, kinds: &[PrimitiveKind]) -> Result<mesh::Mesh, St
     if expand {
         let positions = expanded_vec3(&vertex_points, count, &Source::Point(Planes::F3(geometry::positions(g).clone())))?;
         let normals = expanded_normals(&vertex_points, count, &normals)?;
-        mesh::view::create_packed_shared(Some(mesh::mode::Lines), Some(Arc::new(indices)), normals, colors_out.map(Arc::new), tex_out.map(Arc::new), positions)
+        mesh::view::create_packed_shared(Some(mesh::Mode::Lines), Some(Arc::new(indices)), normals, colors_out.map(Arc::new), tex_out.map(Arc::new), positions)
     } else {
         let positions = mesh_vec3(&packed::float3::view::view(geometry::positions(g)).map_err(text)?);
         let normals = shared_normals(normals)?;
         mesh::view::create_packed_shared(
-            Some(mesh::mode::Lines),
+            Some(mesh::Mode::Lines),
             Some(Arc::new(indices)),
             normals,
             colors_out.map(Arc::new),
@@ -267,7 +267,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::Mesh, String> {
         let colors = colors.as_ref().map(|s| color_array(true, &vertex_points, count, s));
         let tex_coords = tex_coords.as_ref().map(|s| tex_coord_array(true, &vertex_points, count, s));
         let indices: Vec<i64> = (0..count as i64).collect();
-        mesh::view::create_packed_owned(Some(mesh::mode::Triangles), Some(indices), normals, colors, tex_coords, positions)
+        mesh::view::create_packed_owned(Some(mesh::Mode::Triangles), Some(indices), normals, colors, tex_coords, positions)
     } else {
         let positions = mesh_vec3(&packed::float3::view::view(geometry::positions(g)).map_err(text)?);
         let normals = shared_normals(normals)?;
@@ -275,10 +275,10 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::Mesh, String> {
         let colors = colors.as_ref().map(|s| Arc::new(color_array(false, &vertex_points, count, s)));
         let tex_coords = tex_coords.as_ref().map(|s| Arc::new(tex_coord_array(false, &vertex_points, count, s)));
         if !has_primitives {
-            mesh::view::create_packed_shared(Some(mesh::mode::Points), None, normals, colors, tex_coords, positions)
+            mesh::view::create_packed_shared(Some(mesh::Mode::Points), None, normals, colors, tex_coords, positions)
         } else {
             mesh::view::create_packed_shared(
-                Some(mesh::mode::Triangles),
+                Some(mesh::Mode::Triangles),
                 Some(vertex_points),
                 normals,
                 colors,
@@ -318,7 +318,7 @@ pub fn to_trace_mesh(g: &geometry::T) -> Result<mesh::Mesh, error::T> {
     })
 }
 
-fn rdk_float3(view: &Vec3_buffer) -> Result<packed::float3::T, String> {
+fn rdk_float3(view: &Vec3Buffer) -> Result<packed::float3::T, String> {
     packed::float3::view::of_shared_exn(Arc::new(view.x.to_vec()), Arc::new(view.y.to_vec()), Arc::new(view.z.to_vec())).map_err(text)
 }
 
@@ -342,10 +342,10 @@ fn tex_coord_attribute(tex_coords: &[vec2::T]) -> Result<attribute::T, String> {
 fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
     let view = mesh::view::packed_view(m)?;
     match view.mode {
-        mesh::mode::Points | mesh::mode::Triangles => {
+        mesh::Mode::Points | mesh::Mode::Triangles => {
             let positions = rdk_float3(&view.vertices)?;
             let point_count = packed::float3::length(&positions);
-            let topo = if view.mode == mesh::mode::Points {
+            let topo = if view.mode == mesh::Mode::Points {
                 topology::empty(point_count).map_err(text)
             } else if view.indices.len() % 3 != 0 {
                 Err("Rdk.Rays_mesh.of_mesh: malformed triangle index count".to_owned())

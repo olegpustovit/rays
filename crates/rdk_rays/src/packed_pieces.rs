@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use param::{FieldView, Value};
-use rays::mesh::{self, Vec3_buffer};
+use rays::mesh::{self, Vec3Buffer};
 use rays::num::{fmax, fmin};
 use rays_math::text_array::TextArray;
 use rays_math::{color, noise, vec2, vec3};
@@ -16,7 +16,7 @@ use crate::rays_mesh;
 #[derive(Clone)]
 pub struct T {
     base_mesh: mesh::Mesh,
-    base: mesh::view::packed_view,
+    base: mesh::view::PackedView,
     piece_of_vertex: Vec<usize>,
     center_x: Vec<f64>,
     center_y: Vec<f64>,
@@ -71,17 +71,17 @@ fn primitive_pieces(piece_attribute: &str, g: &geometry::T) -> Result<(Vec<usize
 
 fn expand_triangles_preserving_attributes(m: &mesh::Mesh) -> Result<mesh::Mesh, String> {
     let source = mesh::view::packed_view(m)?;
-    if source.mode != mesh::mode::Triangles {
+    if source.mode != mesh::Mode::Triangles {
         return Err("Packed_pieces: expected a triangulated render mesh".to_owned());
     }
     let count = source.indices.len();
     let select = |plane: &[f64]| -> Vec<f64> { source.indices.iter().map(|&i| plane[i as usize]).collect() };
-    let select3 = |values: &Vec3_buffer| Vec3_buffer::of_planes(select(&values.x), select(&values.y), select(&values.z));
+    let select3 = |values: &Vec3Buffer| Vec3Buffer::of_planes(select(&values.x), select(&values.y), select(&values.z));
     let vertices = select3(&source.vertices);
     let normals = source.normals.as_ref().map(select3);
     let colors: Option<Vec<color::T>> = source.colors.as_ref().map(|c| source.indices.iter().map(|&i| c[i as usize]).collect());
     let tex_coords: Option<Vec<vec2::T>> = source.tex_coords.as_ref().map(|c| source.indices.iter().map(|&i| c[i as usize]).collect());
-    mesh::view::create_packed_owned(Some(mesh::mode::Triangles), Some((0..count as i64).collect()), normals, colors, tex_coords, vertices)
+    mesh::view::create_packed_owned(Some(mesh::Mode::Triangles), Some((0..count as i64).collect()), normals, colors, tex_coords, vertices)
 }
 
 fn text(e: error::T) -> String {
@@ -105,7 +105,7 @@ pub fn of_geometry(piece_attribute: &str, g: &geometry::T) -> Result<T, String> 
     let expanded = expand_triangles_preserving_attributes(&m)?;
     let base = mesh::view::packed_view(&expanded)?;
     let expected = (geometry::primitive_count(&g) * 3) as usize;
-    if base.mode != mesh::mode::Triangles || base.vertices.x.len() != expected {
+    if base.mode != mesh::Mode::Triangles || base.vertices.x.len() != expected {
         return Err("Packed_pieces: triangle render ancestry is inconsistent".to_owned());
     }
     let piece_of_vertex: Vec<usize> = (0..expected).map(|vertex| primitive_piece[vertex / 3]).collect();
@@ -174,7 +174,7 @@ fn mesh_with(value: &T, offsets: [&[f64]; 3], amount: f64, n: &Noise) -> Result<
             })
             .collect()
     };
-    let positions = Vec3_buffer::of_planes(
+    let positions = Vec3Buffer::of_planes(
         moved(&value.base.vertices.x, offsets[0]),
         moved(&value.base.vertices.y, offsets[1]),
         moved(&value.base.vertices.z, offsets[2]),

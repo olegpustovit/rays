@@ -11,3 +11,6 @@ rdk_ops = { path = "../rdk_ops" }
 rays = { path = "../rays" }
 rays_math = { path = "../rays_math" }
 param = { path = "../param" }
+
+[lints]
+workspace = true

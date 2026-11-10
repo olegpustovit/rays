@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use rays::material;
 use rays::mesh;
-use rays::scene3::{self as d3, cull};
+use rays::scene3::{self as d3, Cull};
 use rays_math::{color, mat4};
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::{error, geometry, packed, topology};
@@ -274,10 +274,10 @@ pub fn scene3_result(
         Preview::Pieces(pieces) => packed_pieces::mesh_for_explosion(explosion, pieces)?,
         Preview::Device(g) => {
             let count = geometry::point_count(g);
-            let mode = if geometry::primitive_count(g) == 0 { mesh::mode::Points } else { mesh::mode::Triangles };
+            let mode = if geometry::primitive_count(g) == 0 { mesh::Mode::Points } else { mesh::Mode::Triangles };
             match device.and_then(|device| device(g)) {
                 Some((key, normals, device_index_count, device_color_width, keep)) => {
-                    let indices = if mode == mesh::mode::Triangles && device_index_count.is_none() {
+                    let indices = if mode == mesh::Mode::Triangles && device_index_count.is_none() {
                         Some(topology::view::view(geometry::topology(g)).map_err(text)?.vertex_points)
                     } else {
                         None
@@ -292,7 +292,7 @@ pub fn scene3_result(
                             let host_geometry = g.clone();
                             let bounds_geometry = g.clone();
                             let m = mesh::view::create_device(
-                                mesh::view::device_args {
+                                mesh::view::DeviceArgs {
                                     mode: Some(mode),
                                     indices,
                                     device_index_count,
@@ -301,7 +301,7 @@ pub fn scene3_result(
                                         host(&host_geometry)
                                     })),
                                     bounds: Some(Rc::new(move || geometry_view::bounds(&bounds_geometry))),
-                                    derived: mode == mesh::mode::Triangles && geometry::find_attribute(Owner::Point, "N", g).is_none(),
+                                    derived: mode == mesh::Mode::Triangles && geometry::find_attribute(Owner::Point, "N", g).is_none(),
                                     key: key.clone(),
                                     normals,
                                     keep: Some(keep),
@@ -336,8 +336,8 @@ pub fn scene3_result(
     // back faces are culled: a closed surface draws about half its triangles. An open one (a
     // plane, a grid) is empty from behind; its winding decides which side shows.
     let draw = |material: material::Material, m: mesh::Mesh| match &surface.transforms {
-        None => d3::mesh(Some(material), None, None, Some(cull::Cull_back), None, m),
-        Some(transforms) => d3::instances_array(Some(material), None, Some(cull::Cull_back), None, m, transforms),
+        None => d3::mesh(Some(material), None, None, Some(Cull::CullBack), None, m),
+        Some(transforms) => d3::instances_array(Some(material), None, Some(Cull::CullBack), None, m, transforms),
     };
     let drawings = if surface.batches.is_empty() {
         vec![draw(material::default(), m)]

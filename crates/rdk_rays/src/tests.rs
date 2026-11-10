@@ -316,7 +316,7 @@ fn geometry_view_keeps_opaque_bytes_and_validates_material_identifiers() {
     assert!(packed_pieces::explosion("exploded_view", &fields).is_none());
 }
 
-/// Remaining checks of `run` in lib/rdk/test_rdk.ml: packed group cardinality and difference, and
+/// Remaining checks of `run` in : packed group cardinality and difference, and
 /// the extrude's point-group remap, canonical-P refusal and undersized-polygon refusal.
 #[test]
 fn groups_extrude_remap_and_construction_refusals() {

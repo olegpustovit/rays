@@ -76,7 +76,7 @@ pub fn wire_mesh(value: &T) -> Result<mesh::Mesh, String> {
         indices[(edge * 2) as usize] = a;
         indices[(edge * 2 + 1) as usize] = b;
     }
-    mesh::view::create_owned(Some(mesh::mode::Lines), Some(indices), &vertices)
+    mesh::view::create_owned(Some(mesh::Mode::Lines), Some(indices), &vertices)
 }
 
 // ---- the sheet ----
