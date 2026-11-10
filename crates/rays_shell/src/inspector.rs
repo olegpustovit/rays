@@ -4,7 +4,7 @@ use crate::kit;
 use param::{Effects, FieldView, KindView, Schema, Value};
 use pxui::theme;
 use pxui::ui::*;
-use rays_math::color::{self, T as Color};
+use pxui::geom::color::{self, T as Color};
 use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -34,7 +34,7 @@ pub enum FlowChange {
 #[derive(Clone, Debug)]
 pub struct FlowOpts {
     pub expanded: Vec<String>,
-    pub width: Option<f64>,
+    pub width: Option<f32>,
     pub pins: bool,
     pub pin_click: bool,
     pub chips: Vec<(String, Color)>,
@@ -69,7 +69,7 @@ fn text_of(bytes: &[u8]) -> String {
 
 /// Everything the row builders share.
 struct Ctx {
-    width: f64,
+    width: f32,
     theme: theme::Theme,
     ink_2: Color,
     ink_3: Color,
@@ -99,7 +99,7 @@ fn pin_change(ui: &mut Ui, cx: &Ctx, boxed: &UiBox, path: &str, shown: bool, cli
     out
 }
 
-fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f64, y: f64, enabled: bool) -> bool {
+fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f32, y: f32, enabled: bool) -> bool {
     let pin = label == "pin";
     let x = if pin { 6.0 } else { x };
     let w = if pin { 18.0 } else { 20.0 };
@@ -113,7 +113,7 @@ fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f64, y: f64, enabled
         let (hovered, foreground, ink_3) = (signal.hovered, cx.theme.foreground, cx.ink_3);
         let label = label.to_string();
         let cap = kit::cap_size(ui);
-        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
             let color = if enabled && hovered { foreground } else { ink_3 };
             if label == "\u{d7}" {
                 let cx = x + (w / 2.0);
@@ -143,7 +143,7 @@ fn numeric(
     key: &str,
     ranged: bool,
     edit: bool,
-    (x, y, w): (f64, f64, f64),
+    (x, y, w): (f32, f32, f32),
 ) -> Vec<FlowChange> {
     // the kit's number field: a drag changes the value from the one it had, by the step of its
     // kind and soft range (a vector's cell has none), so a click without a drag writes nothing
@@ -153,8 +153,8 @@ fn numeric(
         edit,
         left: expression(text),
         trail: field.unit.clone().map(|unit| (unit, cx.ink_3)),
-        fraction: range.and_then(|r| param::number::fraction(r, text)),
-        scrub: Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx, fine))),
+        fraction: range.and_then(|r| param::number::fraction(r, text).map(|f| f as f32)),
+        scrub: Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx as f64, fine))),
         ..ValueFieldOpts::default()
     };
     let valid = move |t: &str| param::number::valid(kind, t) || expression(t);
@@ -180,7 +180,7 @@ fn input(
     field: &FieldView,
     path: &str,
     edit: bool,
-    (x, y, w): (f64, f64, f64),
+    (x, y, w): (f32, f32, f32),
 ) -> Vec<FlowChange> {
     let key = format!("flow-value-{path}");
     let theme = cx.theme;
@@ -243,7 +243,7 @@ fn input(
             ui.set_state(&boxed, if open { 1 } else { 0 });
             let chip = cx.chip(&choices[index]);
             let shown = choices[index].clone();
-            ui.draw(&boxed, move |paint, (x, y, w, h)| {
+            ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
                 paint.fill(x, y + h - 1.0, w, 1.0, if open { theme.accent } else { theme::edge(&theme) });
                 let pad = match chip {
                     Some(color) => {
@@ -259,7 +259,7 @@ fn input(
             if !open || just_opened {
                 return Vec::new();
             }
-            let (bx, by, bw, bh) = ui.rect(&boxed);
+            let Rect { x: bx, y: by, w: bw, h: bh } = ui.rect(&boxed);
             let opts = MenuOpts {
                 width: Some(bw),
                 selected: Some(index as i64),
@@ -320,14 +320,14 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
                 BoxOpts::default()
                     .flags(CLICKABLE | TAB_STOP_MARKED)
                     .at((control_x, control_y))
-                    .w(Size::Px(1.0f64.max(control_w - 24.0)))
+                    .w(Size::Px(1.0f32.max(control_w - 24.0)))
                     .h(Size::Px(20.0)),
             );
             let followed = ui.signal(&link).clicked;
             let theme = cx.theme;
             let ink_2 = cx.ink_2;
             let source = source.to_string();
-            ui.draw(&boxed, move |paint, (x, y, _, _)| {
+            ui.draw(&boxed, move |paint, Rect { x, y, w: _, h: _ }| {
                 let ty = paint.text_top(None, y + control_y - 0.5, 20.0);
                 let left = x + control_x + 2.0;
                 let right = x + control_x + control_w - 2.0;
@@ -367,7 +367,7 @@ fn scalar(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), path: &str, t
         let label_x = ui.inspector_label_x();
         let label = ui.box_(
             "label-edit",
-            BoxOpts::default().flags(CLICKABLE).at((label_x, 2.0)).w(Size::Px(1.0f64.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
+            BoxOpts::default().flags(CLICKABLE).at((label_x, 2.0)).w(Size::Px(1.0f32.max(control_x - label_x - 8.0))).h(Size::Px(20.0)),
         );
         let edit = ui.signal(&label).double_clicked;
         let edits = input(ui, cx, on_choice, true, field, path, edit, (control_x, control_y, control_w));
@@ -395,7 +395,7 @@ fn is_color_1(field: &FieldView) -> bool {
     }
 }
 
-fn swatch_and_hex(ui: &mut Ui, path: &str, control: (f64, f64, f64), swatch: Color, hex: &str) -> String {
+fn swatch_and_hex(ui: &mut Ui, path: &str, control: (f32, f32, f32), swatch: Color, hex: &str) -> String {
     kit::colour(ui, path, (control.0, control.1), control.2, swatch, hex)
 }
 
@@ -569,7 +569,7 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
 
 /// One inspector row per field inside the current panel; folders become sections, open when their
 /// "/"-joined path is in `expanded`. Returns this frame's edits, empty when nothing changed.
-pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f64>, views: Vec<FieldView>) -> Vec<(String, Value)> {
+pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f32>, views: Vec<FieldView>) -> Vec<(String, Value)> {
     let rows: Vec<FlowRow> = views
         .into_iter()
         .map(|field| FlowRow { path: field.name.clone(), fields: vec![field], shown: false, locked: true, drive: None, live: None })

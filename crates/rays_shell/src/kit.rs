@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use pxui::theme;
 use pxui::ui::*;
-use rays_math::color::{self, T as Color};
+use pxui::geom::color::{self, T as Color};
 
 /// The chrome's three graph inks, the same as `rays_graph::scope_paint::ports` (which the chrome
 /// may not reach): an int port's green for a checked file, a float port's blue for an expression,
@@ -24,7 +24,7 @@ pub enum Port {
     Hint,
 }
 
-pub fn text_y(ui: &Ui, y: f64, h: f64) -> f64 {
+pub fn text_y(ui: &Ui, y: f32, h: f32) -> f32 {
     ui.text_top(None, y, h)
 }
 
@@ -32,18 +32,18 @@ pub fn cap_size(ui: &Ui) -> i64 {
     8.max(ui.font_size() - 2)
 }
 
-pub fn cap_y(ui: &Ui, y: f64, h: f64) -> f64 {
+pub fn cap_y(ui: &Ui, y: f32, h: f32) -> f32 {
     ui.text_top(Some(cap_size(ui)), y, h)
 }
 
 /// the width of a label (`Paint::cap`): upper case, 0.08 em of tracking after each letter
-pub fn cap_width(ui: &mut Ui, text: &str) -> f64 {
+pub fn cap_width(ui: &mut Ui, text: &str) -> f32 {
     ui.cap_width(text)
 }
 
 /// the width of a text button, the kit's `.btn`: a transparent 1-point edge, 6, the label, 6 and
 /// the key, 6, the edge
-pub fn button_width(ui: &mut Ui, hint: Option<&str>, icon: bool, label: &str) -> f64 {
+pub fn button_width(ui: &mut Ui, hint: Option<&str>, icon: bool, label: &str) -> f32 {
     let size = cap_size(ui);
     14.0 + ui.text_width(None, label)
         + if icon { 13.0 } else { 0.0 }
@@ -62,7 +62,7 @@ pub enum Icon {
 /// Options of `button`.
 #[derive(Clone, Debug)]
 pub struct ButtonOpts {
-    pub h: f64,
+    pub h: f32,
     pub enabled: bool,
     pub active: bool,
     pub primary: bool,
@@ -80,7 +80,7 @@ impl Default for ButtonOpts {
 /// A button is its text and, in ink-3, its key: a fill on hover and press, the control fill
 /// while `active`; `primary` is the one outlined button of a panel. `icon` draws a play triangle
 /// or a stop square before the label. True on a click.
-pub fn button(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, o: &ButtonOpts, label: &str) -> bool {
+pub fn button(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, o: &ButtonOpts, label: &str) -> bool {
     let (bx, by) = at;
     let theme = ui.theme();
     let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w)).h(Size::Px(o.h)).at((bx, by)));
@@ -91,8 +91,8 @@ pub fn button(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, o: &ButtonOpts, la
     let label = ui.cached_label(&boxed, 0, label);
     let hint = o.hint.as_ref().map(|hint| ui.cached_label(&boxed, 1, hint));
     let size = cap_size(ui);
-    ui.draw(&boxed, move |paint, (x, y, w, h)| {
-        paint_button_ground(paint, &theme, held, hovered, active, primary, (x, y, w, h));
+    ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
+        paint_button_ground(paint, &theme, held, hovered, active, primary, Rect::new(x, y, w, h));
         let color = if enabled { theme.foreground } else { theme::ink_3(&theme) };
         let tx = match icon {
             None if centered => x + ((w - paint.text_width(None, &label)) / 2.0).floor(),
@@ -103,7 +103,7 @@ pub fn button(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, o: &ButtonOpts, la
                     Icon::Play => {
                         // the sheet's 7 x 8 triangle: half-point scanlines, so a Retina pixel row is one
                         for row in 0..=15 {
-                            let top = cy - 4.0 + (0.5 * row as f64);
+                            let top = cy - 4.0 + (0.5 * row as f32);
                             let reach = 1.0 - ((top + 0.25 - cy).abs() / 4.0);
                             paint.fill(x + 7.0, top, 7.0 * reach, 0.5, color);
                         }
@@ -124,17 +124,17 @@ pub fn button(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, o: &ButtonOpts, la
     signal.clicked && enabled
 }
 
-fn cap_y_of(paint: &Paint, y: f64, h: f64) -> f64 {
+fn cap_y_of(paint: &Paint, y: f32, h: f32) -> f32 {
     cap_y_paint(paint, y, h)
 }
 
 /// A colour: a 20-point swatch, then its hex field to the right edge of the control column; the
 /// hex text typed (or `hex` unchanged). `key` names the pair; `at` is the control column.
-pub fn colour(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, swatch: Color, hex: &str) -> String {
+pub fn colour(ui: &mut Ui, key: &str, at: (f32, f32), w: f32, swatch: Color, hex: &str) -> String {
     let (x, y) = at;
     let boxed = ui.box_fmt(format_args!("swatch-{key}"), BoxOpts::default().at((x, y)).w(Size::Px(20.0)).h(Size::Px(20.0)));
     let edge = theme::edge(&ui.theme());
-    ui.draw(&boxed, move |paint, (sx, sy, sw, sh)| {
+    ui.draw(&boxed, move |paint, Rect { x: sx, y: sy, w: sw, h: sh }| {
         // a 20-point square with its border inside
         paint.fill(sx, sy, sw, sh, swatch);
         paint.stroke(sx + 0.5, sy + 0.5, sw - 1.0, sh - 1.0, edge);
@@ -146,21 +146,21 @@ pub fn colour(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, swatch: Color, hex
 
 /// The kit's switch: 28 x 14, a line-3 edge, an 8-point knob that is ink-3 on the track at the left
 /// and the accent on white at the right. True on a click.
-pub fn switch(ui: &mut Ui, key: &str, at: (f64, f64), on: bool) -> bool {
+pub fn switch(ui: &mut Ui, key: &str, at: (f32, f32), on: bool) -> bool {
     let (sx, sy) = at;
     let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(28.0)).h(Size::Px(14.0)).at((sx, sy)));
     let signal = ui.signal(&boxed);
     let theme = ui.theme();
-    ui.draw(&boxed, move |paint, (x, y, _, _)| paint_switch(paint, &theme, x, y, on));
+    ui.draw(&boxed, move |paint, Rect { x, y, w: _, h: _ }| paint_switch(paint, &theme, x, y, on));
     signal.clicked
 }
 
 /// Text tabs: the one in use is ink with a 1-point underline, the others ink-3. Laid out leftwards
 /// from `right`; the index clicked and where the row starts.
-pub fn segments(ui: &mut Ui, key: &str, right: f64, y: f64, labels: &[String], active: i64) -> (Option<i64>, f64) {
+pub fn segments(ui: &mut Ui, key: &str, right: f32, y: f32, labels: &[String], active: i64) -> (Option<i64>, f32) {
     let h = 20.0;
     let theme = ui.theme();
-    let total = 12.0 * (labels.len() as i64 - 1).max(0) as f64 + labels.iter().map(|label| ui.text_width(None, label)).sum::<f64>();
+    let total = 12.0 * (labels.len() as i64 - 1).max(0) as f32 + labels.iter().map(|label| ui.text_width(None, label)).sum::<f32>();
     let mut x = right - total;
     let mut clicked = None;
     for (index, label) in labels.iter().enumerate() {
@@ -175,7 +175,7 @@ pub fn segments(ui: &mut Ui, key: &str, right: f64, y: f64, labels: &[String], a
         }
         let hovered = signal.hovered;
         let label = ui.cached_label(&boxed, 0, label);
-        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
             let on = index as i64 == active;
             let ty = paint.text_top(None, y, h);
             paint.text_c((x + 4.0, ty), if on || hovered { theme.foreground } else { theme::ink_3(&theme) }, &label);
@@ -189,26 +189,26 @@ pub fn segments(ui: &mut Ui, key: &str, right: f64, y: f64, labels: &[String], a
 }
 
 /// `cap_y` for a painter, which has the paint and not the handle.
-pub fn cap_y_paint(paint: &Paint, y: f64, h: f64) -> f64 {
+pub fn cap_y_paint(paint: &Paint, y: f32, h: f32) -> f32 {
     paint.text_top(Some(8.max(paint.font_size - 2)), y, h)
 }
 
 /// A vector: cells in the control column, 8 between, each with its axis letter in ink-3 drawn on
 /// `boxed` (the row); `cell index x w` makes the cell's own field (x, w relative to `boxed`).
 /// `reserve` keeps room at the right for a row's toggle.
-pub fn vector(ui: &mut Ui, boxed: &UiBox, at: (f64, f64), w: f64, reserve: f64, axes: &[&str], cell: &mut dyn FnMut(&mut Ui, usize, f64, f64)) {
+pub fn vector(ui: &mut Ui, boxed: &UiBox, at: (f32, f32), w: f32, reserve: f32, axes: &[&str], cell: &mut dyn FnMut(&mut Ui, usize, f32, f32)) {
     let (cx, cy) = at;
-    let n = axes.len() as f64;
+    let n = axes.len() as f32;
     let cell_w = (w - reserve - (8.0 * (n - 1.0))) / n;
     let theme = ui.theme();
     let cap = cap_size(ui);
     for (index, axis) in axes.iter().enumerate() {
         // the cells' edges land on whole points, as the sheet's do
-        let start = cx + (index as f64 * (cell_w + 8.0));
+        let start = cx + (index as f32 * (cell_w + 8.0));
         let fx = start.round();
         let fw = (start + cell_w).round() - start.round();
         let axis = axis.to_string();
-        ui.draw(boxed, move |paint, (x, y, _, _)| {
+        ui.draw(boxed, move |paint, Rect { x, y, w: _, h: _ }| {
             let ty = cap_y_paint(paint, y + cy - 0.5, 20.0);
             paint.text_s((x + fx + 2.0, ty), cap, theme::ink_3(&theme), &axis);
         });

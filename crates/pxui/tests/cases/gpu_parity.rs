@@ -136,8 +136,8 @@ fn zones(ui: &mut Ui) {
             rays_graph::scope_paint::zone_branch(&t, true),
         ];
         for (i, zone) in list.iter().enumerate() {
-            let x = 12.0 + (i % 2) as f64 * 154.0;
-            let y = 12.0 + (i / 2) as f64 * 92.0;
+            let x = 12.0 + (i % 2) as f32 * 154.0;
+            let y = 12.0 + (i / 2) as f32 * 92.0;
             paint.rect(x, y, 142.0, 80.0, Some(zone.fill), None);
             if zone.dashed {
                 paint.dashed_rect(x, y, 142.0, 80.0, zone.edge);
@@ -147,7 +147,7 @@ fn zones(ui: &mut Ui) {
         }
         let ports = rays_graph::scope_paint::ports(&t);
         for (i, c) in [ports.text, ports.fn_, ports.record].iter().enumerate() {
-            paint.rect(170.0 + i as f64 * 20.0, 200.0, 10.0, 10.0, Some(*c), None);
+            paint.rect(170.0 + i as f32 * 20.0, 200.0, 10.0, 10.0, Some(*c), None);
         }
     });
 }

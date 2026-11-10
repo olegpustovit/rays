@@ -8,7 +8,7 @@ use pxui::ui::*;
 /// The sheet's button row: 20 points, `Cancel esc` and the primary `accept` with its key,
 /// right-aligned 8 from the edge of a window `width` wide (its 1-point edges inside), 4 apart,
 /// and 8 under it. A click is the same as the key.
-fn buttons(ui: &mut Ui, key: &str, width: f64, accept: &str) -> Pick {
+fn buttons(ui: &mut Ui, key: &str, width: f32, accept: &str) -> Pick {
     let row = ui.box_fmt(format_args!("{key}-buttons"), BoxOpts::default().w(Size::Grow).h(Size::Px(28.0)));
     let mut out = Pick::None;
     ui.within(&row, &mut |ui| {
@@ -30,7 +30,7 @@ fn buttons(ui: &mut Ui, key: &str, width: f64, accept: &str) -> Pick {
     out
 }
 
-fn spacer(ui: &mut Ui, key: &str, height: f64) {
+fn spacer(ui: &mut Ui, key: &str, height: f32) {
     ui.box_(key, BoxOpts::default().w(Size::Grow).h(Size::Px(height)));
 }
 
@@ -43,7 +43,7 @@ pub fn name(ui: &mut Ui, key: &str, title: &str, description: &str, label: &str,
         let line = ui.box_("prompt-description", BoxOpts::default().w(Size::Grow).h(Size::Px(24.0)));
         let theme = ui.theme();
         let description = description.to_string();
-        ui.draw(&line, move |paint, (x, y, w, h)| {
+        ui.draw(&line, move |paint, Rect { x, y, w, h }| {
             let ty = paint.text_top(None, y, h);
             let shown = ellipsis(&mut |s| paint.text_width(None, s), w - 16.0, &description);
             paint.text_c((x + 8.0, ty), theme::ink_2(&theme), &shown);

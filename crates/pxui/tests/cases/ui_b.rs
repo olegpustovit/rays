@@ -262,7 +262,7 @@ impl Rig {
             wrap: self.wrapped,
             errors: self.errors.clone(),
             language: self.language.clone(),
-            on_context: Some(Rc::new(move |at| context.set(Some(at)))),
+            on_context: Some(Rc::new(move |at| context.set(Some((f64::from(at.0), f64::from(at.1)))))),
             on_scrub: Some(Rc::new(move |p| scrubs.borrow_mut().insert(0, p))),
             on_scrub_edit: Some(Rc::new(move |range, value| scrub_edits.borrow_mut().insert(0, (range, value.to_owned())))),
             ..TextAreaOpts::default()

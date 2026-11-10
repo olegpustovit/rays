@@ -26,7 +26,7 @@ pub fn frame(ui: &mut Ui, frame: &Frame, f: &mut dyn FnMut(&mut Ui)) {
     }
     // no window, no effect
     if let Some(ground) = out.background {
-        let _ = sketch::set_window_background(ground);
+        let _ = sketch::set_window_background(rays_math::color::rgba(ground.r, ground.g, ground.b, ground.a));
     }
     charge(ui);
 }

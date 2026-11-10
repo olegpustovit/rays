@@ -20,10 +20,10 @@ pub enum Intent {
 pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool, frame: i64, time: f64, max_frame: i64) -> Vec<Intent> {
     let (x, y, width, height) = bounds;
     let theme = ui.theme();
-    let (fx, fy, fw, fh) = (x as f64, y as f64, width as f64, height as f64);
+    let (fx, fy, fw, fh) = (x as f32, y as f32, width as f32, height as f32);
     let bar = ui.box_("workspace-timeline", BoxOpts::default().flags(CLIP | CLICKABLE).w(Size::Px(fw)).h(Size::Px(fh)).at((fx, fy)));
     let top = if edge { 1.0 } else { 0.0 };
-    ui.draw(&bar, move |paint, (x, y, w, h)| {
+    ui.draw(&bar, move |paint, Rect { x, y, w, h }| {
         paint.fill(x, y, w, h, theme.panel);
         if edge {
             paint.fill(x, y, w, 1.0, theme::edge(&theme));
@@ -35,7 +35,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
     ui.within(&bar, &mut |ui| {
         let cy = top + ((bar_h - 20.0) / 2.0);
         let mut cx = 12.0;
-        let button = |ui: &mut Ui, cx: &mut f64, key: &str, icon: Option<kit::Icon>, hint: Option<&'static str>, active: bool, label: &str| -> bool {
+        let button = |ui: &mut Ui, cx: &mut f32, key: &str, icon: Option<kit::Icon>, hint: Option<&'static str>, active: bool, label: &str| -> bool {
             let w = kit::button_width(ui, hint, icon.is_some(), label);
             let opts = kit::ButtonOpts { icon, hint: hint.map(Into::into), active, ..kit::ButtonOpts::default() };
             let clicked = kit::button(ui, key, (*cx, cy), w, &opts, label);
@@ -50,7 +50,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
         if tall {
             cx = cx + 4.0 + 1.0 + 4.0 + 8.0;
         }
-        let label = |ui: &mut Ui, cx: &mut f64, text: &str| -> f64 {
+        let label = |ui: &mut Ui, cx: &mut f32, text: &str| -> f32 {
             let at = *cx;
             *cx = *cx + kit::cap_width(ui, text) + 8.0;
             at
@@ -83,21 +83,21 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
         let ruler_h = fh - ruler_y;
         // the ruler's own line-2 edge is its first column; the ticks divide what is inside it
         let inner_x = if tall { 0.0 } else { 1.0 };
-        let span = 1.0f64.max(ruler_w - inner_x);
-        let range = (frame as f64).max(max_frame as f64);
+        let span = 1.0f32.max(ruler_w - inner_x);
+        let range = (frame as f32).max(max_frame as f32);
         let ruler = ui.box_(
             "timeline-scrub",
             BoxOpts::default().flags(CLICKABLE | BLOCKING).at((ruler_x, ruler_y)).w(Size::Px(ruler_w)).h(Size::Px(ruler_h)),
         );
         let signal = ui.signal(&ruler);
-        let scrub: Option<f64> = if signal.button == Some(MouseButton::LeftButton) && (signal.held || signal.released) && ruler_w > 1.0 {
+        let scrub: Option<f32> = if signal.button == Some(MouseButton::LeftButton) && (signal.held || signal.released) && ruler_w > 1.0 {
             let px = (if signal.released { signal.release_point } else { signal.pointer }).0;
-            let rx = ui.rect(&ruler).0;
-            Some((0.0f64.max(1.0f64.min((px - rx - inner_x) / span)) * range).round())
+            let rx = ui.rect(&ruler).x;
+            Some((0.0f32.max(1.0f32.min((px - rx - inner_x) / span)) * range).round())
         } else {
             None
         };
-        ui.draw(&bar, move |paint, (x, y, w, _)| {
+        ui.draw(&bar, move |paint, Rect { x, y, w, h: _ }| {
             let y = y + top;
             let h = bar_h;
             let cy = kit::cap_y_paint(paint, y, h);
@@ -113,14 +113,14 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
             paint.text_c((x + readout_x, ty), if tall { theme.foreground } else { theme::ink_2(&theme) }, &readout);
         });
         let cap = kit::cap_size(ui);
-        ui.draw(&ruler, move |paint, (x, y, w, h)| {
+        ui.draw(&ruler, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
             if !tall {
                 paint.fill(x, y, 1.0, h, theme::edge(&theme));
             }
             let left = x + inner_x;
-            let at = |fraction: f64| left + (fraction * span).floor();
-            let head = at(frame as f64 / 1.0f64.max(range));
+            let at = |fraction: f32| left + (fraction * span).floor();
+            let head = at(frame as f32 / 1.0f32.max(range));
             paint.fill(left, y, head - left, h, theme::tint(&theme));
             // a strip has fifty minor ticks and a major one in five; a taller ruler a tick a
             // hundredth and a major one in ten, numbered
@@ -129,12 +129,12 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
             let minor_h = if tall { 6.0 } else { 5.0 };
             let major_h = if tall { 14.0 } else { 10.0 };
             for tick in 0..minors {
-                let tx = at(tick as f64 / minors as f64);
+                let tx = at(tick as f32 / minors as f32);
                 if tick % every == 0 {
                     paint.fill(tx, y + h - major_h, 1.0, major_h, theme::border(&theme));
                     if tall {
                         let cy = kit::cap_y_paint(paint, y + 16.0, 24.0);
-                        let number = (range * tick as f64 / minors as f64).round() as i64;
+                        let number = (range * tick as f32 / minors as f32).round() as i64;
                         paint.text_s((tx + 4.0, cy), cap, theme::ink_3(&theme), &number.to_string());
                     }
                 } else {
@@ -169,7 +169,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
             out.push(Intent::ResetPlayback);
         }
         if let Some(target) = scrub {
-            if target != frame as f64 {
+            if target != frame as f32 {
                 out.push(Intent::SeekPlayback(target as i64));
             }
         }

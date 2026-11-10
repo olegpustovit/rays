@@ -311,7 +311,7 @@ pub fn window_pxui_input() {
         ui.frame(&plain(vec![]), &mut |ui| {
             ui.modal(None, label, &mut |ui| row = Some(ui.box_("row", BoxOpts::default().h(Size::Px(24.0)))));
         });
-        ui.rect(&row.expect("modal open")).1
+        f64::from(ui.rect(&row.expect("modal open")).y)
     };
     modal_y(&mut ui, "height-original");
     let centred = modal_y(&mut ui, "height-original");

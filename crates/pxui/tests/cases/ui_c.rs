@@ -4,7 +4,7 @@ use crate::ui_b::*;
 use input::{Event, Key, MouseButton, Platform};
 use pxui::ui::*;
 use rays::scene::{self, layer};
-use rays_math::color;
+use pxui::geom::color;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -331,7 +331,7 @@ pub fn text_area_4(rig: &mut Rig) {
     // a number dragged sideways follows the pointer: an integer one per six points, a float a
     // tenth of its last place per point; the host hears Live frames and one Done
     for dx in [-20.0, -6.0, -2.0, 0.0, 2.0, 6.0, 20.0] {
-        assert_eq!(scrubbed("10", dx, false), param::number::scrub(param::number::Kind::Int, None, "10", dx, false));
+        assert_eq!(scrubbed("10", dx, false), param::number::scrub(param::number::Kind::Int, None, "10", f64::from(dx), false));
     }
     rig.area = String::new();
     rig.plain(vec![press((150, 12)), release((150, 12))]);
@@ -474,7 +474,7 @@ pub fn text_area_5(rig: &mut Rig) {
     }
     // a row label cut short of its right-hand detail: whole when it fits, else an ellipsis within
     // the limit, never a split multi-byte character
-    let cp = |s: &str| 7.0 * s.bytes().filter(|c| c & 0xC0 != 0x80).count() as f64;
+    let cp = |s: &str| 7.0 * s.bytes().filter(|c| c & 0xC0 != 0x80).count() as f32;
     if ellipsis(&mut |s| cp(s), 200.0, "split side by side") != "split side by side" {
         fail("a fitting label was cut");
     }
@@ -606,7 +606,7 @@ pub fn window_pxui_modal_4() {
             ui.to_front(0, &front);
             let back = ui.box_("back", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
             for b in [&front, &back] {
-                ui.draw(b, |paint, (x, y, w, h)| paint.fill(x, y, w, h, color::white()));
+                ui.draw(b, |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, color::white()));
             }
             out = (ui.signal(&front).clicked, ui.signal(&back).clicked);
         });
@@ -618,7 +618,7 @@ pub fn window_pxui_modal_4() {
     }
     let fk = front_key.get();
     let under = move |k: i64| -> Vec<scene::Node> {
-        if k == fk { vec![scene::rect((0, 0), 100, 60, Some(color::black()), None).unwrap()] } else { Vec::new() }
+        if k == fk { vec![scene::rect((0, 0), 100, 60, Some(rays_math::color::black()), None).unwrap()] } else { Vec::new() }
     };
     let nodes = rays_shell::host::scene(&ui, Some(&under));
     match layer::stage_native(320, 240, &nodes) {

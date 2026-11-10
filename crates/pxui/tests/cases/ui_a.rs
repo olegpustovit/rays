@@ -78,8 +78,8 @@ fn scale_3(scale: f64) {
     let mut build = |ui: &mut Ui| {
         let current = compact.borrow().clone();
         let o = ValueFieldOpts {
-            fraction: Some(parse(&current).unwrap_or(0.0)),
-            slide: Some(Rc::new(|fraction| cfmt::g(fraction, 17))),
+            fraction: Some(parse(&current).unwrap_or(0.0) as f32),
+            slide: Some(Rc::new(|fraction: f32| cfmt::g(f64::from(fraction), 17))),
             ..ValueFieldOpts::default()
         };
         let (value, _) = ui.value_field((20.0, 20.0), 101.0, 21.0, &o, &|text| parse(text).is_some(), "compact", &current);
@@ -348,7 +348,7 @@ fn scale_7(scale: f64) {
             child = Some(ui.box_("content", BoxOpts::default().w(Size::Px(100.0)).h(Size::Px(100.0))));
             ui.leave(saved);
         });
-        child_y.set(ui.rect(&child.unwrap()).1);
+        child_y.set(ui.rect(&child.unwrap()).y);
     };
     rubber(&mut ui, vec![]);
     rubber(&mut ui, vec![move_to((50, 40)), Event::Scrolled((0.0, 1.0))]);
@@ -402,7 +402,7 @@ impl Pad {
     fn new(content: f64, start: f64, h: Size, dt: f64, scale: f64) -> Pad {
         let mut p = Pad { ui: field_ui(), clock: 100.0, dt, content, h };
         let parent = p.step(scale, vec![move_to((50, 40))]);
-        p.ui.set_scroll_offset(&parent, start);
+        p.ui.set_scroll_offset(&parent, start as f32);
         p.step(scale, vec![Event::TrackpadScrolled { delta: (0.0, 0.0), phase: ScrollPhase::Touched, time: 5.0 }]);
         p
     }
@@ -417,7 +417,7 @@ impl Pad {
                 BoxOpts::default().flags(SCROLL + CLIP).at((0.0, 0.0)).w(Size::Px(100.0)).h(h.clone()).scroll_step(24.0),
             );
             let saved = ui.enter(&p);
-            ui.box_("long", BoxOpts::default().w(Size::Px(100.0)).h(Size::Px(content)));
+            ui.box_("long", BoxOpts::default().w(Size::Px(100.0)).h(Size::Px(content as f32)));
             ui.leave(saved);
             parent = Some(p);
         });
@@ -453,7 +453,7 @@ fn scale_8(scale: f64) {
         let mut parent = pad.step(scale, lifted());
         for _ in 0..(3.0 / dt) as i64 {
             parent = pad.step(scale, vec![]);
-            let offset = pad.ui.scroll_offset(&parent);
+            let offset = f64::from(pad.ui.scroll_offset(&parent));
             // a pixel of slack: the coast is snapped to device pixels
             if offset < previous || offset - previous > stride + 1.0 {
                 fail(&lab("trackpad coast did not slow down monotonically"));
@@ -461,7 +461,7 @@ fn scale_8(scale: f64) {
             stride = offset - previous;
             previous = offset;
         }
-        if stride != 0.0 || pad.ui.scroll_position(&parent) != previous {
+        if stride != 0.0 || f64::from(pad.ui.scroll_position(&parent)) != previous {
             fail(&lab("trackpad coast did not come to rest"));
         }
         pad.ui.destroy();
@@ -484,7 +484,7 @@ fn scale_8(scale: f64) {
     let mut deepest: f64 = 0.0;
     for _ in 0..120 {
         parent = pad.step(scale, vec![]);
-        deepest = deepest.min(pad.ui.scroll_position(&parent));
+        deepest = deepest.min(f64::from(pad.ui.scroll_position(&parent)));
     }
     if deepest > -1.0 || deepest < -80.0 {
         fail(&lab("trackpad coast did not bounce off the edge"));

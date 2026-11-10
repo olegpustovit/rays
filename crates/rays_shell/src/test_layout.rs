@@ -271,7 +271,7 @@ fn header_groups_stand_inside_the_header() {
         let (placed, limit) = slots(width);
         for (slot, w) in placed.iter().zip([100.0, 150.0]) {
             if let Some(right) = slot {
-                assert!(!(right - w < 104.0 || *right > (100 + width - 36) as f64 || limit > right - w), "a header group leaves its header");
+                assert!(!(right - w < 104.0 || *right > (100 + width - 36) as f32 || limit > right - w), "a header group leaves its header");
             }
         }
     }

@@ -961,7 +961,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
         // PXUI is headed for its own repository: rays_math and scene_command leave in P2 with the draw list.
-        ("pxui", &["input", "cfmt", "rays_math", "scene_command"][..]),
+        ("pxui", &["input", "cfmt", "scene_command"][..]),
         ("pxui_text", &[][..]),
         ("rays_shell", &["rays", "rays_math", "editor_core", "pxui", "mem"][..]),
         ("rays_graph", &[

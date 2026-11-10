@@ -5,7 +5,7 @@ use param::{FieldView, FloatRange, Impact, KindView, Value};
 use pxui::ui::*;
 use rays_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
 use rays_shell::tree::{self as T, Command, DropAt, Intent, Row};
-use rays_math::color;
+use pxui::geom::color;
 
 fn left_press(p: (f64, f64)) -> Event {
     Event::PointerPressed(MouseButton::LeftButton, p)

@@ -56,7 +56,7 @@ impl Default for Opts {
 }
 
 /// where the lead's parts go: the file, the dot, the status cut to `limit`, and the end
-fn lead_plan<'a>(width: &mut dyn FnMut(&str) -> f64, x: f64, file: &str, limit: f64, text: &'a str) -> (f64, f64, f64, Cow<'a, str>, f64) {
+fn lead_plan<'a>(width: &mut dyn FnMut(&str) -> f32, x: f32, file: &str, limit: f32, text: &'a str) -> (f32, f32, f32, Cow<'a, str>, f32) {
     let mut tx = x + 12.0;
     let file_x = tx;
     if !file.is_empty() {
@@ -71,7 +71,7 @@ fn lead_plan<'a>(width: &mut dyn FnMut(&str) -> f64, x: f64, file: &str, limit: 
 
 /// What every strip starts with: the file, a dot for the state (checked, cooking, refused) and
 /// the status line in ink-2, cut to `limit`; where the next thing goes.
-fn lead(paint: &mut Paint, (x, y, h): (f64, f64, f64), file: &str, state: State, limit: f64, text: &str) -> f64 {
+fn lead(paint: &mut Paint, (x, y, h): (f32, f32, f32), file: &str, state: State, limit: f32, text: &str) -> f32 {
     let theme = paint.theme;
     let ty = paint.text_top(None, y, h);
     let (file_x, dot_x, text_x, shown, after) = lead_plan(&mut |s| paint.text_width(None, s), x, file, limit, text);
@@ -89,7 +89,7 @@ fn lead(paint: &mut Paint, (x, y, h): (f64, f64, f64), file: &str, state: State,
 }
 
 /// where the end's parts start (the layout, then the frame rate), 12 from the edge, 8 apart
-fn trail_start(ui: &mut Ui, x: f64, w: f64, notes: &[String], readout: &str, layout: &str, fps: Option<i64>) -> f64 {
+fn trail_start(ui: &mut Ui, x: f32, w: f32, notes: &[String], readout: &str, layout: &str, fps: Option<i64>) -> f32 {
     let mut right = x + w - 12.0;
     if let Some(fps) = fps {
         right = right - kit::cap_width(ui, &format!("{fps} fps")) - 8.0;
@@ -104,7 +104,7 @@ fn trail_start(ui: &mut Ui, x: f64, w: f64, notes: &[String], readout: &str, lay
 }
 
 /// the strip's end: the layout in use, then the frame rate in ink, 8 apart; where they start
-fn trail(paint: &mut Paint, (x, y, w, h): (f64, f64, f64, f64), notes: &[String], readout: &str, layout: &str, fps: Option<i64>) -> f64 {
+fn trail(paint: &mut Paint, (x, y, w, h): (f32, f32, f32, f32), notes: &[String], readout: &str, layout: &str, fps: Option<i64>) -> f32 {
     let theme = paint.theme;
     let cy = kit::cap_y_paint(paint, y, h);
     let mut right = x + w - 12.0;
@@ -136,16 +136,16 @@ fn trail(paint: &mut Paint, (x, y, w, h): (f64, f64, f64, f64), notes: &[String]
 }
 
 /// the hairline above the bar; the bar is the 24 points under it
-fn ground(paint: &mut Paint, (x, y, w, h): (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+fn ground(paint: &mut Paint, Rect { x, y, w, h }: Rect) -> Rect {
     let theme = paint.theme;
     paint.fill(x, y, w, h, theme.panel);
     paint.fill(x, y, w, 1.0, theme::edge(&theme));
-    (x, y + 1.0, w, h - 1.0)
+    Rect::new(x, y + 1.0, w, h - 1.0)
 }
 
 /// the rule, then the focused pane's kind (ink) and what is selected (ink-2), both labels; where
 /// the next thing goes
-fn focus_labels(paint: &mut Paint, (y, h): (f64, f64), rule: bool, accent: bool, after: f64, kind: Option<&str>, selection: Option<&str>) -> f64 {
+fn focus_labels(paint: &mut Paint, (y, h): (f32, f32), rule: bool, accent: bool, after: f32, kind: Option<&str>, selection: Option<&str>) -> f32 {
     let theme = paint.theme;
     let mut tx = after + 17.0;
     if rule {
@@ -160,7 +160,7 @@ fn focus_labels(paint: &mut Paint, (y, h): (f64, f64), rule: bool, accent: bool,
 }
 
 /// where the labels of `focus_labels` end, without painting
-fn focus_end(ui: &mut Ui, after: f64, kind: Option<&str>, selection: Option<&str>) -> f64 {
+fn focus_end(ui: &mut Ui, after: f32, kind: Option<&str>, selection: Option<&str>) -> f32 {
     let mut tx = after + 17.0;
     for text in [kind, selection].into_iter().flatten() {
         tx = tx + kit::cap_width(ui, text) + 8.0;
@@ -175,11 +175,11 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts) {
     if height > 0 {
         let boxed = ui.box_(
             "workspace-status",
-            BoxOpts::default().flags(CLIP).w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)),
+            BoxOpts::default().flags(CLIP).w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)),
         );
         let o = o.clone();
         ui.draw(&boxed, move |paint, b| {
-            let (x, y, w, h) = ground(paint, b);
+            let Rect { x, y, w, h } = ground(paint, b);
             let right = trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
             let limit = if o.kind.is_none() && o.selection.is_none() { right } else { right - 160.0 };
             let after = lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
@@ -208,14 +208,14 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             // `waiting for a key`, the frame rate at the end
             let boxed = ui.box_(
                 "workspace-guide",
-                BoxOpts::default().flags(CLIP).w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)),
+                BoxOpts::default().flags(CLIP).w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)),
             );
             let o = o.clone();
             let pending = pending.clone();
             ui.draw(&boxed, move |paint, b| {
-                let (x, y, w, h) = ground(paint, b);
+                let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
-                let after = lead(paint, (x, y, h), &o.file, o.state, x + 320.0f64.min(w / 4.0), &o.text);
+                let after = lead(paint, (x, y, h), &o.file, o.state, x + 320.0f32.min(w / 4.0), &o.text);
                 let tx = focus_labels(paint, (y, h), true, true, after, Some(&pending), None);
                 let ty = paint.text_top(None, y, h);
                 paint.text_c((tx, ty), theme::ink_2(&theme), "waiting for a key");
@@ -226,9 +226,9 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 "workspace-guide",
                 BoxOpts::default()
                     .flags(CLICKABLE | CLIP)
-                    .w(Size::Px(width as f64))
-                    .h(Size::Px(height as f64))
-                    .at((x as f64, y as f64)),
+                    .w(Size::Px(width as f32))
+                    .h(Size::Px(height as f32))
+                    .at((x as f32, y as f32)),
             );
             let keys = o.extra.clone();
             let title = guide_context::name(context);
@@ -242,8 +242,8 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 | guide_context::GuideContext::Text => o.selection.clone(),
                 _ => Some(title.to_string()),
             };
-            let fx = x as f64;
-            let fw = width as f64;
+            let fx = x as f32;
+            let fw = width as f32;
             let limit = trail_start(ui, fx, fw, &o.notes, &o.readout, &o.layout, o.fps);
             let has_lead = !(o.file.is_empty() && o.text.is_empty());
             // the lead (file, dot, status) takes what the labels and the key hints leave, at least a
@@ -256,15 +256,15 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 keys_w = keys_w + ui.text_width(Some(small), k) + ui.text_width(None, l) + 16.0;
             }
             let max_w = (limit - labels_w - 8.0 - fx).max(0.0);
-            let natural_limit = (fx + 320.0f64.min(fw / 4.0)).max(limit - labels_w - keys_w - 8.0);
+            let natural_limit = (fx + 320.0f32.min(fw / 4.0)).max(limit - labels_w - keys_w - 8.0);
             let natural_end = if has_lead {
                 let (_, _, _, _, after) = lead_plan(&mut |s| ui.text_width(None, s), fx, &o.file, natural_limit, &o.text);
                 after
             } else {
                 fx - 5.0
             };
-            let stored = |ui: &Ui| -> Option<f64> {
-                ui.text_state(&bar).and_then(|t| (&t).parse::<f64>().ok()).map(|w| w.min(max_w))
+            let stored = |ui: &Ui| -> Option<f32> {
+                ui.text_state(&bar).and_then(|t| (&t).parse::<f32>().ok()).map(|w| w.min(max_w))
             };
             let split_x = (match stored(ui) {
                 Some(w) => fx + w,
@@ -272,7 +272,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             }) + 1.0;
             let split = ui.box_(
                 "workspace-guide-split",
-                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(7.0)).h(Size::Px(height as f64)).at((split_x, y as f64)),
+                BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(7.0)).h(Size::Px(height as f32)).at((split_x, y as f32)),
             );
             let (lead_limit, after_lead) = if !has_lead {
                 (natural_limit, natural_end)
@@ -287,7 +287,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                     ui.set_text_state(&bar, Some((natural_end - fx).to_string()));
                 }
                 if sg.held {
-                    ui.set_text_state(&bar, Some(max_w.min(24.0f64.max(sg.pointer.0 - 4.0 - fx)).to_string()));
+                    ui.set_text_state(&bar, Some(max_w.min(24.0f32.max(sg.pointer.0 - 4.0 - fx)).to_string()));
                 }
                 match stored(ui) {
                     Some(w) => (fx + w, fx + w),
@@ -295,13 +295,13 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
                 }
             };
             let labels_end = focus_end(ui, after_lead, kind.as_deref(), selection.as_deref());
-            let mut pairs: Vec<(f64, String, String, f64)> = Vec::new();
+            let mut pairs: Vec<(f32, String, String, f32)> = Vec::new();
             let mut tx = labels_end;
             for (key, label) in &keys {
                 let kw = ui.text_width(Some(small), key);
                 let lw = ui.text_width(None, label);
                 if tx + kw + 8.0 + lw > limit - 8.0 {
-                    tx = f64::INFINITY;
+                    tx = f32::INFINITY;
                 } else {
                     pairs.push((tx, key.clone(), label.clone(), kw));
                     tx = tx + kw + 8.0 + lw + 8.0;
@@ -310,7 +310,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             let o2 = o.clone();
             let accent = o.accent;
             ui.draw(&bar, move |paint, b| {
-                let (x, y, w, h) = ground(paint, b);
+                let Rect { x, y, w, h } = ground(paint, b);
                 trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, o2.fps);
                 // the file and its state, to the rule, then the labels
                 if has_lead {
@@ -338,7 +338,7 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
 /// Echo, the sheet's `08`: tips stacked 4 apart in the pane's bottom-left corner, the last at the
 /// bottom. A tip is 24 high on the sheet fill with a line-2 edge and 13-point text 7 in;
 /// information starts with a 6-point dot in the hint colour, a refusal reads in the error ink.
-pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f64, f64, f64, f64)], tips: &[(String, TipKind)]) {
+pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f32, f32, f32, f32)], tips: &[(String, TipKind)]) {
     let (x, y, width, height) = bounds;
     if width > 0 && height > 0 && !tips.is_empty() {
         let theme = ui.theme();
@@ -348,11 +348,11 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f64, f64, f64, 
                 TipKind::Info => 32.0,
                 TipKind::Refusal => 14.0,
             };
-            let w = ((0.max(width - 24)) as f64).min(ui.text_width(None, text) + extra);
-            let top = (y + 0.max(height - 12)) as f64 - ((count - index) as f64 * 28.0) + 4.0;
+            let w = ((0.max(width - 24)) as f32).min(ui.text_width(None, text) + extra);
+            let top = (y + 0.max(height - 12)) as f32 - ((count - index) as f32 * 28.0) + 4.0;
             // a tip that would sit on a rectangle of `avoid` (a graph card) moves up above it
-            let left = (x + 12) as f64;
-            let mut sorted: Vec<(f64, f64, f64, f64)> = avoid.to_vec();
+            let left = (x + 12) as f32;
+            let mut sorted: Vec<(f32, f32, f32, f32)> = avoid.to_vec();
             sorted.sort_by(|(_, a, _, _), (_, b, _, _)| b.total_cmp(a));
             let mut top = top;
             for (ax, ay, aw, ah) in sorted {
@@ -362,11 +362,11 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f64, f64, f64, 
             }
             let boxed = ui.box_(
                 &format!("echo-tip-{index}"),
-                BoxOpts::default().flags(CLIP).w(Size::Px(w)).h(Size::Px(24.0)).at(((x + 12) as f64, top)),
+                BoxOpts::default().flags(CLIP).w(Size::Px(w)).h(Size::Px(24.0)).at(((x + 12) as f32, top)),
             );
             let kind = *kind;
             let text = text.clone();
-            ui.draw(&boxed, move |paint, (x, y, w, h)| {
+            ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
                 paint.fill(x, y, w, h, theme.input);
                 paint.frame(x, y, w, h, theme::edge(&theme));
                 let ty = paint.text_top(None, y, h);

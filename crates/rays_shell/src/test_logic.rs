@@ -5,7 +5,7 @@ use editor_core::command;
 use editor_core::keymap::Trigger;
 use editor_core::panels::Panel;
 use input::{Key, Platform};
-use rays_math::color;
+use pxui::geom::color;
 
 fn row(id: i64, depth: i64, label: &str) -> Row {
     Row { id, depth, label: label.to_string(), detail: String::new(), badge: ("S".to_string(), color::gray(90)), link: false, ghost: false, flags: vec![true] }

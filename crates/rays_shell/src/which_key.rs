@@ -8,7 +8,7 @@ use editor_core::panels::Panel;
 use input::{Key, Platform};
 use pxui::theme;
 use pxui::ui::*;
-use rays_math::color::T as Color;
+use pxui::geom::color::T as Color;
 
 pub type Rows = Vec<(String, String)>;
 pub type Sections = Vec<(String, Rows)>;
@@ -118,18 +118,18 @@ fn by_category(
 /// Sections of key rows, one to a column, painted by one box. A section is a label in ink-3
 /// (`gap` points above it) over rows of 24: the key in ink-3 at the label size, 8 points on, what
 /// it does, and a chevron when the key continues into more keys. `cols` columns share `w`.
-fn columns(paint: &mut Paint, (x, y, w): (f64, f64, f64), cols: i64, gap: f64, label_ink: Color, sections: &[(String, Rows)]) {
+fn columns(paint: &mut Paint, (x, y, w): (f32, f32, f32), cols: i64, gap: f32, label_ink: Color, sections: &[(String, Rows)]) {
     let theme = paint.theme;
-    let row = paint.row_height as f64;
+    let row = paint.row_height as f32;
     let cap = 8.max(paint.font_size - 2);
-    let col_w = w / (1.max(cols)) as f64;
+    let col_w = w / (1.max(cols)) as f32;
     for (column, (title, rows)) in sections.iter().enumerate() {
-        let cx = x + (column as f64 * col_w);
+        let cx = x + (column as f32 * col_w);
         let cy = kit::cap_y_paint(paint, y + gap, row);
         paint.cap((cx + 12.0, cy), Some(theme::ink_3(&theme)), title);
         for (k, (key, label)) in rows.iter().enumerate() {
             let rx = cx;
-            let ry = y + gap + row + (k as f64 * row);
+            let ry = y + gap + row + (k as f32 * row);
             let group = label.starts_with('+');
             let label = if group { &label[1..] } else { &label[..] };
             let key_width = paint.text_width(Some(cap), key);
@@ -187,11 +187,11 @@ pub fn panel(
         .collect(),
     };
     let (view_w, view_h) = ui.view_size();
-    let row = ui.row_height() as f64;
+    let row = ui.row_height() as f32;
     let cols = 6.max(sections.len() as i64);
     // the edge, 8, the head row, a section label under 4, its rows, 8; never under the sheet's 183
-    let height = 183.0f64.max(1.0 + 8.0 + row + 4.0 + row + (tallest(&sections) as f64 * row) + 8.0);
-    let y = 0.0f64.max(view_h - layout::STATUS_HEIGHT as f64 - height);
+    let height = 183.0f32.max(1.0 + 8.0 + row + 4.0 + row + (tallest(&sections) as f32 * row) + 8.0);
+    let y = 0.0f32.max(view_h - layout::STATUS_HEIGHT as f32 - height);
     let leader = if prefix.is_empty() { "/".to_string() } else { format!("/ {prefix}") };
     // build before the body it shields; the host closes it on any key
     let cap = kit::cap_size(ui);
@@ -199,7 +199,7 @@ pub fn panel(
         let boxed = ui.box_("leader-sheet", BoxOpts::default().w(Size::Grow).h(Size::Px(height)));
         let sections = sections.clone();
         let leader = leader.clone();
-        ui.draw(&boxed, move |paint, (x, y, w, _)| {
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
             paint.fill(x, y, w, 1.0, theme::border(&theme));
             let y = y + 9.0;
             let ly = kit::cap_y_paint(paint, y, row);
@@ -295,12 +295,12 @@ pub fn sheet(
         // written) 8 before the close button, which ends 8 from the edge
         let title = ui.box_("keys-title", BoxOpts::default().w(Size::Grow).h(Size::Px(28.0)));
         let ctx = context.clone();
-        ui.draw(&title, move |paint, (x, y, w, _)| {
+        ui.draw(&title, move |paint, Rect { x, y, w, h: _ }| {
             let ty = kit::cap_y_paint(paint, y + 4.0, 24.0);
             paint.cap((x + 12.0, ty), Some(theme::ink_2(&theme)), "Keys");
             if !ctx.is_empty() {
                 let cw = paint.text_width(Some(cap), &ctx);
-                paint.text_s((x + w - 36.0 - cw, ty), cap, rays_math::color::with_alpha(theme::ink_2(&theme), 179), &ctx);
+                paint.text_s((x + w - 36.0 - cw, ty), cap, pxui::geom::color::with_alpha(theme::ink_2(&theme), 179), &ctx);
             }
         });
         ui.within(&title, &mut |ui| {
@@ -343,21 +343,21 @@ pub fn sheet(
             stacks[shortest].push(section.clone());
         }
         let tallest = stacks.iter().fold(0, |most, stack| most.max(height(stack)));
-        let row = ui.row_height() as f64;
-        let boxed = ui.box_("keys-sheet", BoxOpts::default().w(Size::Grow).h(Size::Px((tallest as f64 * row) + 8.0)));
-        ui.draw(&boxed, move |paint, (x, y, w, _)| {
+        let row = ui.row_height() as f32;
+        let boxed = ui.box_("keys-sheet", BoxOpts::default().w(Size::Grow).h(Size::Px((tallest as f32 * row) + 8.0)));
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
             for (column, stack) in stacks.iter().enumerate() {
                 let mut top = y;
                 for section in stack {
                     columns(
                         paint,
-                        (x + (column as f64 * w / 3.0), top, w / 3.0),
+                        (x + (column as f32 * w / 3.0), top, w / 3.0),
                         1,
                         0.0,
                         theme::ink_2(&theme),
                         std::slice::from_ref(section),
                     );
-                    top += rows_of(section) as f64 * row;
+                    top += rows_of(section) as f32 * row;
                 }
             }
         });

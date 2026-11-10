@@ -379,7 +379,7 @@ pub fn window_shell_prompts() {
 pub fn window_shell_echo_tips() {
     // Echo: a refusal is a tip in the error ink (no dot), information has its dot; neither is drawn
     // for no tips, and a card under a tip does not change what is drawn.
-    let tip_instances = |avoid: &[(f64, f64, f64, f64)], tips: &[(String, TipKind)]| -> i64 {
+    let tip_instances = |avoid: &[(f32, f32, f32, f32)], tips: &[(String, TipKind)]| -> i64 {
         instances(&mut |ui| {
             status_bar::tips(ui, (0, 0, 400, 300), avoid, tips);
         })

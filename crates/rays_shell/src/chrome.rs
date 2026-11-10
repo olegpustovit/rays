@@ -47,18 +47,18 @@ pub enum Intent {
 fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: std::fmt::Arguments) -> UiBox {
     ui.box_fmt(
         label,
-        BoxOpts::default().flags(flags).w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)),
+        BoxOpts::default().flags(flags).w(Size::Px(width as f32)).h(Size::Px(height as f32)).at((x as f32, y as f32)),
     )
 }
 
 /// A pane's PXUI hit ancestor; children keep screen-space coordinates.
 pub fn pane_root(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: &str) -> UiBox {
     let (x, y, width, height) = bounds;
-    let rect = (x as f64, y as f64, width as f64, height as f64);
+    let rect = Rect::new(x as f32, y as f32, width as f32, height as f32);
     let mut opts = BoxOpts::default()
         .flags(CLICKABLE)
-        .w(Size::Px(frame.input.size.0 as f64))
-        .h(Size::Px(frame.input.size.1 as f64))
+        .w(Size::Px(frame.input.size.0 as f32))
+        .h(Size::Px(frame.input.size.1 as f32))
         .at((0.0, 0.0));
     opts.hit_rect = Some(rect);
     ui.box_(label, opts)
@@ -110,11 +110,11 @@ impl Fit {
     }
 }
 
-fn fit_crumbs(width: &mut dyn FnMut(&str) -> f64, room: f64, sub: &str) -> Fit {
+fn fit_crumbs(width: &mut dyn FnMut(&str) -> f32, room: f32, sub: &str) -> Fit {
     let mut fit = Fit { dots: false, from: 0 };
     loop {
         let len = fit.len(sub);
-        let mut row = ((len as f64 - 1.0) * (width("/") + 8.0)) - 8.0;
+        let mut row = ((len as f32 - 1.0) * (width("/") + 8.0)) - 8.0;
         for (_, part) in fit.parts(sub) {
             row = row + width(part) + 8.0;
         }
@@ -180,24 +180,24 @@ pub fn panel_menu(
     ui: &mut Ui,
     l: &Leaf,
     boxed: &UiBox,
-    at: Option<(f64, f64)>,
+    at: Option<(f32, f32)>,
 ) -> Vec<Intent> {
     let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let key_of: &dyn Fn(&str) -> String = key_of.unwrap_or(&no_key);
     if let Some((x, y)) = at {
         ui.set_state(boxed, 1);
-        ui.set_text_state(boxed, Some(format!("{} {}", cfmt::g(x, 6), cfmt::g(y, 6))));
+        ui.set_text_state(boxed, Some(format!("{} {}", cfmt::g(x as f64, 6), cfmt::g(y as f64, 6))));
     }
     if ui.state(boxed, 0) != 1 {
         return Vec::new();
     }
     let (x, y, w, h) = l.frame;
-    let default_at = (x as f64, (y + h) as f64);
+    let default_at = (x as f32, (y + h) as f32);
     let at = match ui.text_state(boxed) {
         Some(text) => {
             let parts: Vec<&str> = text.split(' ').collect();
             if parts.len() == 2 {
-                match ((parts[0]).parse::<f64>().ok(), (parts[1]).parse::<f64>().ok()) {
+                match ((parts[0]).parse::<f32>().ok(), (parts[1]).parse::<f32>().ok()) {
                     (Some(mx), Some(my)) => (mx, my),
                     _ => default_at,
                 }
@@ -264,10 +264,10 @@ pub fn panel_menu(
 /// right edge of each, and where the title must end. The title gives way first (its breadcrumb,
 /// then its label and the focus square: tabs are how a pane is used, the title only names it); a
 /// group that would not fit in the header is left out, with those after it.
-pub fn header_slots(l: &Leaf, widths: &[f64]) -> (Vec<Option<f64>>, f64) {
+pub fn header_slots(l: &Leaf, widths: &[f32]) -> (Vec<Option<f32>>, f32) {
     let (x, _, w, _) = l.header;
-    let left = x as f64 + 4.0;
-    let mut right = (x + w) as f64 - if l.floating { 64.0 } else { 36.0 };
+    let left = x as f32 + 4.0;
+    let mut right = (x + w) as f32 - if l.floating { 64.0 } else { 36.0 };
     let mut fits = true;
     let mut slots = Vec::new();
     for width in widths {
@@ -287,15 +287,15 @@ fn default_title(l: &Leaf) -> String {
     panels::name(&l.panel).to_string()
 }
 
-fn no_groups(_: &Leaf) -> Vec<f64> {
+fn no_groups(_: &Leaf) -> Vec<f32> {
     Vec::new()
 }
 
-fn edge_color(theme: &theme::Theme, moving: &Rc<RefCell<Option<Path>>>, path: &Path) -> rays_math::color::T {
+fn edge_color(theme: &theme::Theme, moving: &Rc<RefCell<Option<Path>>>, path: &Path) -> pxui::geom::color::T {
     if moving.borrow().as_ref() == Some(path) { theme.accent } else { theme::border(theme) }
 }
 
-fn cut<'a>(paint: &mut Paint, size: Option<i64>, room: f64, part: &'a str) -> Cow<'a, str> {
+fn cut<'a>(paint: &mut Paint, size: Option<i64>, room: f32, part: &'a str) -> Cow<'a, str> {
     ellipsis(&mut |s| paint.text_width(size, s), room.max(0.0), part)
 }
 
@@ -315,7 +315,7 @@ pub fn update(
     state: Option<&dyn Fn(&[usize]) -> panels::State>,
     hidden: Option<&[Panel]>,
     title: Option<&dyn Fn(&Leaf) -> String>,
-    groups: Option<&dyn Fn(&Leaf) -> Vec<f64>>,
+    groups: Option<&dyn Fn(&Leaf) -> Vec<f32>>,
     key_of: Option<&dyn Fn(&str) -> String>,
     focus: Option<&Path>,
     tree: &Panels,
@@ -326,7 +326,7 @@ pub fn update(
     let default_hidden = [Panel::Timeline];
     let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);
     let title: &dyn Fn(&Leaf) -> String = title.unwrap_or(&default_title);
-    let groups: &dyn Fn(&Leaf) -> Vec<f64> = groups.unwrap_or(&no_groups);
+    let groups: &dyn Fn(&Leaf) -> Vec<f32> = groups.unwrap_or(&no_groups);
     let geometry = geometry(Some(state), Some(hidden), tree, frame);
     let theme = ui.theme();
     // the window being carried: its edge is the accent and four brackets stand round it
@@ -341,16 +341,16 @@ pub fn update(
                 ui.to_front(order, &boxed);
                 let l = l.clone();
                 let moving = moving.clone();
-                ui.draw_over(&boxed, move |paint, (x, y, w, h)| {
+                ui.draw_over(&boxed, move |paint, Rect { x, y, w, h }| {
                     let line = edge_color(&theme, &moving, &l.path);
                     let hy = l.header.1;
                     let fy = l.frame.1;
-                    paint.fill(x, y, w, (hy - fy) as f64, theme.input);
+                    paint.fill(x, y, w, (hy - fy) as f32, theme.input);
                     // a viewport window: the sheet's white round the picture and a line-2 frame on it
                     if matches!(l.panel, Panel::View(_)) && l.body.2 > 0 {
                         let (bx, by, bw, bh) = l.body;
-                        let (bx, by, bw, bh) = (bx as f64, by as f64, bw as f64, bh as f64);
-                        let hy = hy as f64;
+                        let (bx, by, bw, bh) = (bx as f32, by as f32, bw as f32, bh as f32);
+                        let hy = hy as f32;
                         paint.fill(x, hy, w, by - hy, theme.input);
                         paint.fill(x, by, bx - x, y + h - by, theme.input);
                         paint.fill(bx + bw, by, x + w - bx - bw, y + h - by, theme.input);
@@ -370,8 +370,8 @@ pub fn update(
                 let hy = l.header.1;
                 if hy > fy {
                     let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-margin{}", key(&l.path)));
-                    ui.draw(&boxed, move |paint, (x, y, w, _)| {
-                        paint.fill(x, y, w, (hy - fy) as f64, theme.panel);
+                    ui.draw(&boxed, move |paint, Rect { x, y, w, h: _ }| {
+                        paint.fill(x, y, w, (hy - fy) as f32, theme.panel);
                     });
                 }
             }
@@ -388,7 +388,7 @@ pub fn update(
                 let is_floating = l.floating;
                 let path = l.path.clone();
                 let moving = moving.clone();
-                ui.draw(&boxed, move |paint, (x, y, w, h)| {
+                ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
                     // a window is a sheet with one line-3 edge; a docked panel is the ground
                     if is_floating {
                         paint.fill(x, y, w, h, theme.input);
@@ -405,7 +405,7 @@ pub fn update(
     let mut tip: Option<(i64, i64, i64)> = None;
     for (n, s) in geometry.splitters.iter().enumerate() {
         let boxed = floating(ui, NO_FLAGS, s.bounds, format_args!("workspace-gutter-{n}"));
-        ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, theme::edge(&theme)));
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, theme::edge(&theme)));
     }
     let mut headers: Vec<Header> = Vec::new();
     for (order, l) in geometry.leaves.iter().enumerate() {
@@ -450,7 +450,7 @@ pub fn update(
             }
             let hovered = signal.hovered;
             let focused = ui.focused(&dock);
-            ui.draw(&dock, move |paint, (x, y, w, h)| {
+            ui.draw(&dock, move |paint, Rect { x, y, w, h }| {
                 if hovered {
                     paint.fill(x, y, w, h, theme::hover_fill(&theme));
                 }
@@ -517,7 +517,7 @@ pub fn update(
         let at = if context_clicked(&drag) {
             Some(drag.release_point)
         } else if drag.clicked && still {
-            Some((x as f64, (y + h) as f64))
+            Some((x as f32, (y + h) as f32))
         } else {
             None
         };
@@ -525,10 +525,10 @@ pub fn update(
         // the parts of a docked breadcrumb before its last are buttons: a click is `Crumb` of its index
         let text = title(l);
         let (main, sub) = split_title(&text);
-        if !sub.is_empty() && !l.floating && !state(&l.path).collapsed && w as f64 >= 60.0 {
+        if !sub.is_empty() && !l.floating && !state(&l.path).collapsed && w as f32 >= 60.0 {
             let focused = focus == Some(&l.path);
             let limit = header_slots(l, &groups(l)).1;
-            let mut tx = x as f64 + 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, &main) + 8.0;
+            let mut tx = x as f32 + 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, &main) + 8.0;
             let fit = fit_crumbs(&mut |p| ui.text_width(None, p), limit - tx, sub);
             let count = fit.len(sub);
             for (n, (index, part)) in fit.parts(sub).enumerate() {
@@ -553,11 +553,11 @@ pub fn update(
         let size = kit::cap_size(ui);
         let tw = ui.text_width(Some(size), words);
         let w = tw + 14.0;
-        let tx = ((frame.input.size.0 - 4) as f64 - w).min(wx as f64 + (0.625 * ww as f64));
-        let ty = 4.0f64.max(wy as f64 - 30.0);
+        let tx = ((frame.input.size.0 - 4) as f32 - w).min(wx as f32 + (0.625 * ww as f32));
+        let ty = 4.0f32.max(wy as f32 - 30.0);
         let boxed = ui.box_("workspace-drag-tip", BoxOpts::default().w(Size::Px(w)).h(Size::Px(20.0)).at((tx, ty)));
         ui.to_front(i64::MAX, &boxed);
-        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
             paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
             let cy = kit::cap_y_paint(paint, y, h);
@@ -573,7 +573,7 @@ pub fn update(
                 ui.to_front(i64::MAX - 1, &boxed);
                 // the padding box of the window, brackets 4 points outside it
                 ui.draw(&boxed, move |paint, _| {
-                    paint.brackets(fx as f64 + 1.0, fy as f64 + 1.0, fw as f64 - 2.0, fh as f64 - 2.0, 4.0, 8.0, 2.0, theme.accent);
+                    paint.brackets(fx as f32 + 1.0, fy as f32 + 1.0, fw as f32 - 2.0, fh as f32 - 2.0, 4.0, 8.0, 2.0, theme.accent);
                 });
             }
         }
@@ -583,7 +583,7 @@ pub fn update(
         let collapse_hovered = ui.signal(&hd.button).hovered;
         // the keyboard's mark is the sheet's: an accent line over the last row of the button
         if ui.focused(&hd.button) {
-            ui.draw_over(&hd.button, move |paint, (x, y, w, h)| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
+            ui.draw_over(&hd.button, move |paint, Rect { x, y, w, h }| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
         }
         let panel_state = state(&l.path);
         let collapsed = panel_state.collapsed || hidden.contains(&l.panel);
@@ -598,7 +598,7 @@ pub fn update(
         let l = l.clone();
         let text = hd.title.clone();
         let cap = kit::cap_size(ui);
-        ui.draw(&text_box, move |paint, (x, y, w, h)| {
+        ui.draw(&text_box, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, if l.floating { theme.input } else { theme.panel });
             let ink_2 = theme::ink_2(&theme);
             let ink_3 = theme::ink_3(&theme);
@@ -627,7 +627,7 @@ pub fn update(
                 tx += paint.cap_width(&main) + 8.0;
                 let ty = paint.text_top(None, y, h);
                 // put: cut to the room left, paint, and advance
-                let put = |paint: &mut Paint, tx: &mut f64, color: rays_math::color::T, part: &str| {
+                let put = |paint: &mut Paint, tx: &mut f32, color: pxui::geom::color::T, part: &str| {
                     let part = cut(paint, None, limit - *tx, part);
                     if !part.is_empty() {
                         paint.text_c((*tx, ty), color, &part);
@@ -640,7 +640,7 @@ pub fn update(
                     let size = cap;
                     let cy = kit::cap_y_paint(paint, y, h);
                     let shown = cut(paint, Some(size), limit - tx, &sub);
-                    paint.text_s((tx, cy), size, rays_math::color::with_alpha(ink_2, 179), &shown);
+                    paint.text_s((tx, cy), size, pxui::geom::color::with_alpha(ink_2, 179), &shown);
                 } else if !sub.is_empty() && !collapsed {
                     let fit = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, sub);
                     let count = fit.len(sub);
@@ -678,7 +678,7 @@ pub fn update(
 
 /// where a header's tools begin: after its title, the 8-point gap, the 1 x 12 rule between two
 /// 4-point margins and the next 8-point gap (the title is laid out as `update` draws it)
-pub fn tools_start(ui: &mut Ui, focused: bool, floating: bool, collapsed: bool, text: &str) -> f64 {
+pub fn tools_start(ui: &mut Ui, focused: bool, floating: bool, collapsed: bool, text: &str) -> f32 {
     let (main, sub) = split_title(text);
     let mut x = 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, &main);
     if sub.is_empty() {
@@ -738,7 +738,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
         // half it would take is tinted
         let under = pane_hovered || edges.iter().any(|e| e.3);
         let theme = ui.theme();
-        let (fx, fy, fw, fh) = (x as f64, y as f64, w as f64, h as f64);
+        let (fx, fy, fw, fh) = (x as f32, y as f32, w as f32, h as f32);
         for (side, suffix, boxed, hovered) in edges {
             if under {
                 let label = format!("split {suffix}");
@@ -785,12 +785,12 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         };
         let (x, y, width, height) = s.bounds;
         let (gx, gy) = if s.axis == Axis::H { (3, 0) } else { (0, 3) };
-        let hit_rect = ((x - gx) as f64, (y - gy) as f64, (width + (2 * gx)) as f64, (height + (2 * gy)) as f64);
+        let hit_rect = Rect::new((x - gx) as f32, (y - gy) as f32, (width + (2 * gx)) as f32, (height + (2 * gy)) as f32);
         let mut opts = BoxOpts::default()
             .flags(CLICKABLE | BLOCKING)
-            .at((x as f64, y as f64))
-            .w(Size::Px(width as f64))
-            .h(Size::Px(height as f64));
+            .at((x as f32, y as f32))
+            .w(Size::Px(width as f32))
+            .h(Size::Px(height as f32));
         opts.hit = Some(Rc::new(move |_| hit_rect));
         let boxed = ui.box_fmt(format_args!("workspace-grip-{n}"), opts);
         let signal = ui.signal(&boxed);
@@ -799,16 +799,16 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         }
         if signal.held {
             let accent = theme.accent;
-            ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, accent));
+            ui.draw(&boxed, move |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, accent));
             // the ratio it makes, in a tip beside the gutter: "58 / 42"
             let (first, second) = sides(s);
-            let a = (100.0 * first as f64 / (1.max(first + second)) as f64).round() as i64;
+            let a = (100.0 * first as f32 / (1.max(first + second)) as f32).round() as i64;
             let tw = kit::cap_width(ui, &format!("{} / {}", a, 100 - a));
             let (px, py) = signal.pointer;
-            let (tx, ty) = if s.axis == Axis::H { ((x + 8) as f64, py - 10.0) } else { (px + 8.0, (y + 8) as f64) };
+            let (tx, ty) = if s.axis == Axis::H { ((x + 8) as f32, py - 10.0) } else { (px + 8.0, (y + 8) as f32) };
             let tip = ui.box_("workspace-gutter-tip", BoxOpts::default().w(Size::Px(tw)).h(Size::Px(20.0)).at((tx, ty)));
             ui.to_front(i64::MAX, &tip);
-            ui.draw(&tip, move |paint, (x, y, _, h)| {
+            ui.draw(&tip, move |paint, Rect { x, y, w: _, h }| {
                 let cy = kit::cap_y_paint(paint, y, h);
                 paint.ratio((x, cy), a, 100 - a);
             });
@@ -819,7 +819,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             let along = if s.axis == Axis::H { px } else { py };
             // a fixed split is dragged in whole points of its fixed side, any other by ratio
             let size = match s.size {
-                PSize::Ratio(_) => PSize::Ratio((along - s.start as f64) / (1.max(s.span)) as f64),
+                PSize::Ratio(_) => PSize::Ratio((along as f64 - s.start as f64) / (1.max(s.span)) as f64),
                 PSize::First(_) => PSize::First(along.round() as i64 - s.start),
                 PSize::Second(_) => PSize::Second(s.start + s.span - SPLITTER_WIDTH - along.round() as i64),
             };
@@ -833,17 +833,17 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         // the menu opens where the gutter was clicked
         if clicked {
             let (px, py) = signal.release_point;
-            ui.set_text_state(&boxed, Some(format!("{} {}", cfmt::g(px, 6), cfmt::g(py, 6))));
+            ui.set_text_state(&boxed, Some(format!("{} {}", cfmt::g(px as f64, 6), cfmt::g(py as f64, 6))));
         }
         let opened = ui.state(&boxed, 0) == 1 || clicked;
         ui.set_state(&boxed, if opened { 1 } else { 0 });
         if opened {
-            let default_at = (x as f64, y as f64);
+            let default_at = (x as f32, y as f32);
             let at = match ui.text_state(&boxed) {
                 Some(text) => {
                     let parts: Vec<&str> = text.split(' ').collect();
                     if parts.len() == 2 {
-                        match ((parts[0]).parse::<f64>().ok(), (parts[1]).parse::<f64>().ok()) {
+                        match ((parts[0]).parse::<f32>().ok(), (parts[1]).parse::<f32>().ok()) {
                             (Some(a), Some(b)) => (a, b),
                             _ => default_at,
                         }
@@ -887,7 +887,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             }
         }
         let ink = theme::ink_3(&theme);
-        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+        ui.draw(&boxed, move |paint, Rect { x, y, w, h }| {
             // an 8-point corner of two 1-point lines, 4 points in from the window's edges
             paint.fill(x + w - 5.0, y + h - 12.0, 1.0, 8.0, ink);
             paint.fill(x + w - 12.0, y + h - 5.0, 8.0, 1.0, ink);

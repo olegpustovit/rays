@@ -9,7 +9,7 @@ use crate::theme::{self, Theme};
 use crate::ui_core::*;
 use crate::ui_kit::*;
 use input::{Event, Key, MouseButton};
-use rays_math::color::{self, T as Color};
+use crate::geom::{color, Rgba as Color};
 use std::rc::Rc;
 
 pub fn previous_utf8(text: &str, index: usize) -> usize {
@@ -262,7 +262,8 @@ pub fn word_at(text: &str, i: usize) -> (usize, usize) {
 /// A number literal dragged `dx` points: a float moves a tenth of its last decimal place per
 /// point (Shift: ten times that) and keeps one more decimal; an integer moves one per six points,
 /// as the inspector's integers do.
-pub fn scrubbed(literal: &str, dx: f64, coarse: bool) -> String {
+pub fn scrubbed(literal: &str, dx: f32, coarse: bool) -> String {
+    let dx = dx as f64;
     let int_value = literal.parse::<i64>().ok();
     match (literal.find('.'), int_value) {
         (None, Some(v)) => {
@@ -291,15 +292,15 @@ pub fn scrubbed(literal: &str, dx: f64, coarse: bool) -> String {
 // ---- the retained edit state ----
 
 impl Ui {
-    pub(crate) fn text_caret_at(&mut self, size: Option<i64>, text: &str, x: f64) -> usize {
-        let density = self.fonts_mut().density as f64;
+    pub(crate) fn text_caret_at(&mut self, size: Option<i64>, text: &str, x: f32) -> usize {
+        let density = self.fonts_mut().density as f32;
         let Some(font) = self.fonts_mut().face(size) else { return text.len() };
         let length = text.len();
         let id = if length == 0 { 0 } else { self.fonts_mut().atlas_font_id(&font) };
         let mut width = 0.0;
         for (index, c) in text.char_indices() {
             let advance = match self.fonts_mut().glyph(&font, id, c as i64) {
-                Some(g) => g.advance as f64 / density,
+                Some(g) => g.advance as f32 / density,
                 None => 0.0,
             };
             if x < width + advance / 2.0 {
@@ -453,9 +454,9 @@ impl Ui {
         }
     }
 
-    pub(crate) fn point_text_caret(&mut self, size: Option<i64>, edit: &mut TextEdit, signal: &Signal, shift: bool, x: f64, right: f64) {
+    pub(crate) fn point_text_caret(&mut self, size: Option<i64>, edit: &mut TextEdit, signal: &Signal, shift: bool, x: f32, right: f32) {
         let scroll = self.edit_scroll_x;
-        let at = |ui: &mut Ui, px: f64, text: &str| ui.text_caret_at(size, text, 0.0f64.max(right.min(px) - x + scroll));
+        let at = |ui: &mut Ui, px: f32, text: &str| ui.text_caret_at(size, text, 0.0f32.max(right.min(px) - x + scroll));
         let line_of = |e: &TextEdit, _: usize| (0, e.text.len());
         if signal.pressed {
             let a = at(self, signal.press_point.0, &edit.text);
@@ -464,12 +465,12 @@ impl Ui {
         if signal.dragging || (signal.held && signal.pointer != signal.press_point) {
             let px = signal.pointer.0;
             if px < x {
-                self.edit_scroll_x = 0.0f64.max(self.edit_scroll_x - 1.0f64.max(24.0f64.min((x - px) * 0.25)));
+                self.edit_scroll_x = 0.0f32.max(self.edit_scroll_x - 1.0f32.max(24.0f32.min((x - px) * 0.25)));
             } else if px > right {
-                self.edit_scroll_x += 1.0f64.max(24.0f64.min((px - right) * 0.25));
+                self.edit_scroll_x += 1.0f32.max(24.0f32.min((px - right) * 0.25));
             }
             let scroll = self.edit_scroll_x;
-            let a = self.text_caret_at(size, &edit.text, 0.0f64.max(right.min(px) - x + scroll));
+            let a = self.text_caret_at(size, &edit.text, 0.0f32.max(right.min(px) - x + scroll));
             self.drag_select(edit, &line_of, a);
         }
     }
@@ -631,7 +632,7 @@ pub fn paint_text_edit(
     paint: &mut Paint,
     size: Option<i64>,
     right: bool,
-    inset: f64,
+    inset: f32,
     caret: bool,
     control: IRect,
     y: i64,
@@ -641,9 +642,9 @@ pub fn paint_text_edit(
     let (cx, cy, cw, ch) = control;
     let theme = paint.theme;
     let before = edit.text[..edit.caret].to_owned();
-    let visible = 1.max(cw - 4) as f64;
+    let visible = 1.max(cw - 4) as f32;
     let full = paint.text_width(size, &edit.text);
-    let scroll = 0.0f64.max(paint.edit_scroll_x.min(0.0f64.max(full - visible)));
+    let scroll = 0.0f32.max(paint.edit_scroll_x.min(0.0f32.max(full - visible)));
     let caret_width = paint.text_width(size, &before);
     let scroll = if caret_width < scroll {
         caret_width
@@ -654,32 +655,32 @@ pub fn paint_text_edit(
     };
     paint.edit_scroll_x = scroll;
     // a number keeps its right edge while it is edited, until it outgrows the field
-    let origin = if right && full <= visible { (cx + cw - 2) as f64 - full } else { cx as f64 + inset };
+    let origin = if right && full <= visible { (cx + cw - 2) as f32 - full } else { cx as f32 + inset };
     let text_x = origin - scroll;
     let caret_x = text_x + caret_width;
-    paint.input_region(caret_x - cx as f64, cx as f64, cy as f64, cw as f64, ch as f64);
+    paint.input_region(caret_x - cx as f32, cx as f32, cy as f32, cw as f32, ch as f32);
     let previous_clip = paint.clip_rect;
-    paint.clip_rect = intersect(previous_clip, (cx as f64, cy as f64, cw as f64, ch as f64));
+    paint.clip_rect = intersect(previous_clip, Rect::new(cx as f32, cy as f32, cw as f32, ch as f32));
     if edit.caret != edit.anchor {
         let (start, stop) = text_selection(edit);
         let x0 = paint.text_width(size, &edit.text[..start]);
         let w = paint.text_width(size, &edit.text[start..stop]);
-        paint.fill(text_x + x0, cy as f64 + 0.5, w, 1.max(ch - 2) as f64, theme::tint(&theme));
+        paint.fill(text_x + x0, cy as f32 + 0.5, w, 1.max(ch - 2) as f32, theme::tint(&theme));
     }
     if composition.is_empty() {
-        paint.text_with((text_x, y as f64), size, 0.0, None, &edit.text);
+        paint.text_with((text_x, y as f32), size, 0.0, None, &edit.text);
     } else {
-        paint.text_with((text_x, y as f64), size, 0.0, None, &before);
-        paint.text_with((caret_x, y as f64), size, 0.0, None, composition);
+        paint.text_with((text_x, y as f32), size, 0.0, None, &before);
+        paint.text_with((caret_x, y as f32), size, 0.0, None, composition);
         let cwid = paint.text_width(size, composition);
-        paint.text_with((caret_x + cwid, y as f64), size, 0.0, None, &edit.text[edit.caret..]);
+        paint.text_with((caret_x + cwid, y as f32), size, 0.0, None, &edit.text[edit.caret..]);
     }
     // the caret is the line of the text it sits in: 14 of a 20-point field at body size
     let (caret_y, caret_h) = match size {
-        None => (cy as f64 + 2.5, 14.0),
+        None => (cy as f32 + 2.5, 14.0),
         Some(size) => {
-            let h = size as f64 * 1.1;
-            (cy as f64 + (ch as f64 - h) / 2.0, h)
+            let h = size as f32 * 1.1;
+            (cy as f32 + (ch as f32 - h) / 2.0, h)
         }
     };
     if caret {
@@ -720,7 +721,7 @@ impl Ui {
     ) -> (Option<String>, bool) {
         let bounds = ints(self.rect(row));
         let control = p.control.unwrap_or_else(|| value_control(bounds));
-        let inside_control = |point: (f64, f64)| contains(floats(control), point);
+        let inside_control = |point: (f32, f32)| contains(floats(control), point);
         let editing = self.text_state(row);
         let state = self.state(row, 1);
         match editing {
@@ -740,12 +741,12 @@ impl Ui {
                 let mut cancelled = false;
                 let (cx, _, cw, _) = control;
                 let left = if p.align_right {
-                    ((cx + 2) as f64).max((cx + cw - 2) as f64 - self.text_width(p.size, &edit.text))
+                    ((cx + 2) as f32).max((cx + cw - 2) as f32 - self.text_width(p.size, &edit.text))
                 } else {
-                    (cx + 2) as f64
+                    (cx + 2) as f32
                 };
                 let shift = self.press_shift(row);
-                self.point_text_caret(p.size, &mut edit, signal, shift, left, (cx + cw - 2) as f64);
+                self.point_text_caret(p.size, &mut edit, signal, shift, left, (cx + cw - 2) as f32);
                 for (event, modifiers) in keys {
                     match event {
                         Event::KeyPressed(Key::Enter) if !self.command_modifiers(modifiers) => match parse(&edit.text) {
@@ -827,9 +828,9 @@ impl Ui {
 pub struct ValueFieldOpts {
     pub size: Option<i64>,
     pub display: Option<String>,
-    pub fraction: Option<f64>,
-    pub slide: Option<Rc<dyn Fn(f64) -> String>>,
-    pub scrub: Option<Rc<dyn Fn(&str, f64, bool) -> String>>,
+    pub fraction: Option<f32>,
+    pub slide: Option<Rc<dyn Fn(f32) -> String>>,
+    pub scrub: Option<Rc<dyn Fn(&str, f32, bool) -> String>>,
     pub left: bool,
     pub edit: bool,
     pub lead: Option<(String, Color)>,
@@ -837,7 +838,7 @@ pub struct ValueFieldOpts {
     pub line: Option<Color>,
     pub bare: bool,
     pub placeholder: Option<String>,
-    pub tracking: Option<f64>,
+    pub tracking: Option<f32>,
 }
 
 impl Default for ValueFieldOpts {
@@ -869,7 +870,7 @@ impl Ui {
     /// in ink-3 where an empty value would be. Only valid text commits; the boolean reports an open
     /// text editor.
     #[allow(clippy::too_many_arguments)]
-    pub fn value_field(&mut self, at: (f64, f64), w: f64, h: f64, o: &ValueFieldOpts, valid: &dyn Fn(&str) -> bool, label: &str, value: &str) -> (String, bool) {
+    pub fn value_field(&mut self, at: (f32, f32), w: f32, h: f32, o: &ValueFieldOpts, valid: &dyn Fn(&str) -> bool, label: &str, value: &str) -> (String, bool) {
         let bx = self.box_(
             label,
             BoxOpts::default().flags(CLICKABLE | TAB_STOP | BLOCKING | CLIP).at(at).w(Size::Px(w)).h(Size::Px(h)),
@@ -946,7 +947,7 @@ impl Ui {
             let bounds = ints(rect);
             let (x, y, w, h) = bounds;
             let previous_clip = paint.clip_rect;
-            paint.clip_rect = intersect(previous_clip, (x as f64, y as f64, w as f64, h as f64));
+            paint.clip_rect = intersect(previous_clip, Rect::new(x as f32, y as f32, w as f32, h as f32));
             if invalid || editing || !o.bare {
                 underline(
                     paint,
@@ -962,8 +963,8 @@ impl Ui {
             }
             // the content is centred in the 19 points above the hairline: a body line starts half a point up
             let text_y = match size {
-                Some(size) => (y + 0.max((h - size) / 2)) as f64,
-                None => y as f64 + (h - 1 - paint.font_size) as f64 / 2.0 - 0.5,
+                Some(size) => (y + 0.max((h - size) / 2)) as f32,
+                None => y as f32 + (h - 1 - paint.font_size) as f32 / 2.0 - 0.5,
             };
             if editing && focused_now {
                 let ty = y + 0.max((h - size.unwrap_or(paint.font_size)) / 2);
@@ -971,23 +972,23 @@ impl Ui {
             } else {
                 // the 2-point line under the value is its position in the soft range
                 if let Some(f) = o.fraction {
-                    paint.fill(x as f64, (y + h - 3) as f64, w as f64 * 0.0f64.max(1.0f64.min(f)), 2.0, theme::ink_2(&theme));
+                    paint.fill(x as f32, (y + h - 3) as f32, w as f32 * 0.0f32.max(1.0f32.min(f)), 2.0, theme::ink_2(&theme));
                 }
                 let tracking = o.tracking.unwrap_or(0.0);
                 match (&o.lead, &o.trail) {
                     (None, None) if shown.is_empty() && o.placeholder.is_some() => {
-                        paint.text_with(((x + 2) as f64, text_y), size, 0.0, Some(theme::ink_3(&theme)), o.placeholder.as_ref().unwrap());
+                        paint.text_with(((x + 2) as f32, text_y), size, 0.0, Some(theme::ink_3(&theme)), o.placeholder.as_ref().unwrap());
                     }
                     (None, None) => {
                         let width = paint.text_width(size, &shown);
-                        let tx = if o.left { (x + 2) as f64 } else { (x + w - 2) as f64 - width };
+                        let tx = if o.left { (x + 2) as f32 } else { (x + w - 2) as f32 - width };
                         paint.text_with((tx, text_y), size, tracking, None, &shown);
                     }
                     _ => {
                         // a lead (the expression's f) and a trail (its live value) frame the value: 6 between
-                        let draw_part = |paint: &mut Paint, right: bool, text: &str, color: Color| -> f64 {
+                        let draw_part = |paint: &mut Paint, right: bool, text: &str, color: Color| -> f32 {
                             let width = paint.text_width(size, text);
-                            let tx = if right { (x + w - 2) as f64 - width } else { (x + 2) as f64 };
+                            let tx = if right { (x + w - 2) as f32 - width } else { (x + 2) as f32 };
                             paint.text_with((tx, text_y), size, 0.0, Some(color), text);
                             width
                         };
@@ -1001,11 +1002,11 @@ impl Ui {
                         };
                         // with no lead the value sits against its trail (a unit: [35 mm])
                         let fit_size = size.unwrap_or(paint.font_size);
-                        let fitted = inspector_fit(paint, fit_size, w as f64 - 4.0 - lead_w - trail_w, &shown);
+                        let fitted = inspector_fit(paint, fit_size, w as f32 - 4.0 - lead_w - trail_w, &shown);
                         let value_x = if o.lead.is_none() && !o.left {
-                            (x + w - 2) as f64 - trail_w - paint.text_width(size, &fitted)
+                            (x + w - 2) as f32 - trail_w - paint.text_width(size, &fitted)
                         } else {
-                            (x + 2) as f64 + lead_w
+                            (x + 2) as f32 + lead_w
                         };
                         paint.text_with((value_x, text_y), size, 0.0, Some(theme.foreground), &fitted);
                     }
@@ -1041,8 +1042,8 @@ impl Ui {
         // chips, buttons or hairline
         let display_size = font_size * (if win { theme::TITLE_SIZE } else { theme::DISPLAY_SIZE }) / theme::FONT_SIZE;
         let small = 8.max(font_size - 2);
-        let line = self.row_height() as f64;
-        let title_h = if win { self.row_height() as f64 } else { (display_size + 8) as f64 };
+        let line = self.row_height() as f32;
+        let title_h = if win { self.row_height() as f32 } else { (display_size + 8) as f32 };
         let width = self.inspector_width();
         let chips = !win && (kind.is_some() || badge.is_some() || index.is_some());
         let actions: Vec<HeadAction> = if win { Vec::new() } else { actions.to_vec() };
@@ -1063,7 +1064,7 @@ impl Ui {
         let title_shown = match &rename {
             Some(valid) => {
                 let saved = self.enter(&header);
-                let o = ValueFieldOpts { size: Some(display_size), left: true, bare: true, tracking: Some(-0.01 * display_size as f64), ..ValueFieldOpts::default() };
+                let o = ValueFieldOpts { size: Some(display_size), left: true, bare: true, tracking: Some(-0.01 * display_size as f32), ..ValueFieldOpts::default() };
                 let (t, _) = self.value_field(
                     (text_x - 2.0, if win { y_title - 1.0 } else { y_title - 2.0 }),
                     width - 2.0 * (text_x - 2.0),
@@ -1101,7 +1102,7 @@ impl Ui {
         let index = index.map(|s| s.to_owned());
         let title_own = title.to_owned();
         let detail = detail.to_owned();
-        self.draw(&header, move |paint, (x, y, w, h)| {
+        self.draw(&header, move |paint, Rect { x, y, w, h }| {
             if !win {
                 paint.fill(x, y + h - 1.0, w, 1.0, theme::edge(&theme));
             }
@@ -1109,9 +1110,9 @@ impl Ui {
                 let at = y + 12.0 + paint.text_top(Some(small), 0.0, line);
                 let mut cx = x + 8.0;
                 // the kind gives way when the index and badge need the room
-                let per = small as f64 / 2.0 + 0.08 * small as f64;
+                let per = small as f32 / 2.0 + 0.08 * small as f32;
                 let taken = index.as_ref().map(|t| mono_width(0.0, small, t) + 6.0).unwrap_or(0.0)
-                    + badge.as_ref().map(|t| mono_width(0.08 * small as f64, small, t) + 6.0).unwrap_or(0.0);
+                    + badge.as_ref().map(|t| mono_width(0.08 * small as f32, small, t) + 6.0).unwrap_or(0.0);
                 if let Some(text) = &kind {
                     let room = ((w - 16.0 - taken) / per) as i64;
                     let text: String = if text.len() as i64 <= room {
@@ -1123,23 +1124,23 @@ impl Ui {
                     };
                     paint.cap((cx, at), None, &text);
                     // the glyphs run a little wider than the design's metrics: never closer than 6
-                    cx += mono_width(0.08 * small as f64, small, &text).max(paint.cap_width(&text)) + 6.0;
+                    cx += mono_width(0.08 * small as f32, small, &text).max(paint.cap_width(&text)) + 6.0;
                 }
                 if let Some(text) = &badge {
                     paint.cap((cx, at), Some(theme.accent), text);
                 }
                 // the sheet's 0.04em tracking follows every letter, the last too, so it ends 8 from the edge
                 if let Some(text) = &index {
-                    let tracking = 0.04 * small as f64;
+                    let tracking = 0.04 * small as f32;
                     let count = text.bytes().filter(|b| b & 0xc0 != 0x80).count();
                     let tw = paint.text_width(Some(small), text);
-                    paint.text_with((x + w - 8.0 - tw - tracking * count as f64, at), Some(small), tracking, Some(theme::ink_3(&theme)), text);
+                    paint.text_with((x + w - 8.0 - tw - tracking * count as f32, at), Some(small), tracking, Some(theme::ink_3(&theme)), text);
                 }
             }
             if !renaming {
                 let dy = if win { paint.text_top(Some(display_size), 0.0, title_h) } else { 2.0 };
                 let fitted = inspector_fit(paint, display_size, w - 2.0 * text_x, &title_own);
-                paint.text_with((x + text_x, y + y_title + dy), Some(display_size), -0.01 * display_size as f64, Some(theme.foreground), &fitted);
+                paint.text_with((x + text_x, y + y_title + dy), Some(display_size), -0.01 * display_size as f32, Some(theme.foreground), &fitted);
             }
             let ty = paint.text_top(None, 0.0, line);
             let fs = paint.font_size;
@@ -1160,10 +1161,10 @@ impl Ui {
         on: bool,
         dim: bool,
         enabled: bool,
-        x: f64,
-        w: f64,
-        pad: f64,
-        y_buttons: f64,
+        x: f32,
+        w: f32,
+        pad: f32,
+        y_buttons: f32,
         pressed: &mut Option<i64>,
     ) {
         let saved = self.enter(header);
@@ -1182,7 +1183,7 @@ impl Ui {
         let label = label.to_owned();
         let hint = hint.to_owned();
         self.draw(&b, move |paint, rect| {
-            let (x, y, _, h) = rect;
+            let Rect { x, y, h, .. } = rect;
             paint_button_ground(paint, &theme, enabled && signal.held, enabled && signal.hovered, on, false, rect);
             let ty = paint.text_top(None, y, h);
             let ink = if !enabled {
@@ -1218,7 +1219,7 @@ impl Ui {
         if focused {
             let (cx, _, cw, _) = value_control(ints(self.rect(&row)));
             let shift = self.press_shift(&row);
-            self.point_text_caret(None, &mut edit, &signal, shift, (cx + 2) as f64, (cx + cw - 2) as f64);
+            self.point_text_caret(None, &mut edit, &signal, shift, (cx + 2) as f32, (cx + cw - 2) as f32);
             for (event, modifiers) in self.key_events(&row) {
                 self.edit_text_event(false, &mut edit, &|_| true, &modifiers, &event);
             }
@@ -1233,7 +1234,7 @@ impl Ui {
         {
             let (px, py) = self.pointer();
             let (cx, cy, cw, ch) = value_control(ints(self.rect(&row)));
-            if hovered && px >= cx as f64 && px < (cx + cw) as f64 && py >= cy as f64 && py < (cy + ch) as f64 {
+            if hovered && px >= cx as f32 && px < (cx + cw) as f32 && py >= cy as f32 && py < (cy + ch) as f32 {
                 self.request_cursor(Cursor::Text);
             }
         }
@@ -1262,7 +1263,7 @@ impl Ui {
     /// hairline: the new value and what its keys asked, Enter or Down `Next`, Shift-Enter or Up
     /// `Previous`, Escape `Close`. `grab` takes the keyboard for it.
     #[allow(clippy::too_many_arguments)]
-    pub fn line_field(&mut self, at: (f64, f64), w: f64, h: f64, grab: bool, placeholder: &str, label: &str, value: &str) -> (String, LineStep) {
+    pub fn line_field(&mut self, at: (f32, f32), w: f32, h: f32, grab: bool, placeholder: &str, label: &str, value: &str) -> (String, LineStep) {
         let field = self.box_(label, BoxOpts::default().flags(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK).at(at).w(Size::Px(w)).h(Size::Px(h)));
         if grab {
             self.focus_box(&field);
@@ -1278,7 +1279,7 @@ impl Ui {
         if focused {
             let (fx, _, fw, _) = ints(self.rect(&field));
             let shift = self.press_shift(&field);
-            self.point_text_caret(None, &mut edit, &signal, shift, (fx + 2) as f64, (fx + fw - 2) as f64);
+            self.point_text_caret(None, &mut edit, &signal, shift, (fx + 2) as f32, (fx + fw - 2) as f32);
             for (event, modifiers) in self.key_events(&field) {
                 match &event {
                     Event::KeyPressed(Key::Enter) if !self.command_modifiers(&modifiers) => {
@@ -1425,7 +1426,7 @@ pub struct TextAreaOpts {
     pub select: Option<(i64, i64)>,
     pub splice: Vec<(i64, i64, String)>,
     pub language: Option<Language>,
-    pub on_context: Option<Rc<dyn Fn((f64, f64))>>,
+    pub on_context: Option<Rc<dyn Fn((f32, f32))>>,
     pub on_scrub: Option<Rc<dyn Fn(ScrubPhase)>>,
     pub on_scrub_edit: Option<Rc<dyn Fn((i64, i64), &str)>>,
     pub on_click: Option<Rc<dyn Fn(i64, bool)>>,
@@ -1506,8 +1507,8 @@ fn row_at_slot(notes: &Notes, count: usize, k: i64) -> usize {
     }
 }
 
-fn gutter_of(char_w: f64, lines: usize) -> f64 {
-    36.0 + char_w * 0.max(lines.to_string().len() as i64 - 3) as f64
+fn gutter_of(char_w: f32, lines: usize) -> f32 {
+    36.0 + char_w * 0.max(lines.to_string().len() as i64 - 3) as f32
 }
 
 fn clamp_pos(v: i64) -> usize {
@@ -1519,8 +1520,8 @@ fn clamp_pos(v: i64) -> usize {
 #[derive(Clone, Copy)]
 struct Wrap {
     wrap: bool,
-    w: f64,
-    char_w: f64,
+    w: f32,
+    char_w: f32,
 }
 
 #[derive(Default)]
@@ -1533,7 +1534,7 @@ struct AreaState {
     typed: bool,
 }
 
-type Scrubbing = Option<(usize, String, f64, bool)>;
+type Scrubbing = Option<(usize, String, f32, bool)>;
 
 impl Ui {
     /// The rows of a text: (start, stop, logical line) with `stop` exclusive and before the
@@ -1612,7 +1613,7 @@ impl Ui {
 
     /// A box at the root, laid out and painted after every pane (like a tooltip), so a popup under
     /// a caret is never clipped by its pane.
-    fn overlay_box(&mut self, flags: Flags, at: (f64, f64), w: f64, h: f64, label: &str) -> UiBox {
+    fn overlay_box(&mut self, flags: Flags, at: (f32, f32), w: f32, h: f32, label: &str) -> UiBox {
         let saved = self.enter_root();
         let overlay = self.box_(label, BoxOpts::default().flags(flags).w(Size::Px(w)).h(Size::Px(h)).at(at));
         self.push_overlay(overlay.index);
@@ -1988,10 +1989,10 @@ impl Ui {
     /// is a list of (start, stop, replacement) byte ranges of the given text applied together as
     /// one undo step before `select`.
     #[allow(clippy::too_many_arguments)]
-    pub fn text_area_submit(&mut self, at: (f64, f64), w: f64, h: f64, o: &TextAreaOpts, label: &str, text: &str) -> (String, bool) {
+    pub fn text_area_submit(&mut self, at: (f32, f32), w: f32, h: f32, o: &TextAreaOpts, label: &str, text: &str) -> (String, bool) {
         // a line of code is one and a half times its text, as code editors set it (17 points at
         // 11, 20 at 13): the 24-point row is a control's, twice the text
-        let row = self.text_line_height() as f64;
+        let row = self.text_line_height() as f32;
         let body = self.box_(
             label,
             BoxOpts::default().flags(CLICKABLE | FOCUSABLE | BLOCKING | SCROLL | CLIP | KEEP_TAB).at(at).w(Size::Px(w)).h(Size::Px(h)).scroll_step(row),
@@ -2034,7 +2035,7 @@ impl Ui {
         let saved = self.enter(&body);
         let content = self.box_(
             &format!("{}-content", label),
-            BoxOpts::default().w(Size::Px(w)).h(Size::Px((count + note_rows(&rows).len()) as f64 * row + pad)),
+            BoxOpts::default().w(Size::Px(w)).h(Size::Px((count + note_rows(&rows).len()) as f32 * row + pad)),
         );
         let suggest = self.box_fmt(format_args!("{}-suggest", label), BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
         let scrub = self.box_fmt(format_args!("{}-scrub", label), BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
@@ -2047,11 +2048,11 @@ impl Ui {
         }
         let focused = self.focused(&body);
         let gutter = gutter_of(char_w, logical_count(&rows));
-        let (bx, by, bw, bh) = self.rect(&body);
-        let horizontal0 = self.state(&body, 0) as f64;
+        let Rect { x: bx, y: by, w: bw, h: bh } = self.rect(&body);
+        let horizontal0 = self.state(&body, 0) as f32;
         let scroll_pos = self.scroll_position(&body);
         // the byte at a point; `strict` answers only over the row's glyphs
-        let point_in = |ui: &mut Ui, strict: bool, text: &str, rows: &Rows, (px, py): (f64, f64)| -> Option<usize> {
+        let point_in = |ui: &mut Ui, strict: bool, text: &str, rows: &Rows, (px, py): (f32, f32)| -> Option<usize> {
             let count = rows.len();
             let notes = note_rows(rows);
             let line = row_at_slot(&notes, count, ((py - by + scroll_pos - pad) / row).floor() as i64);
@@ -2060,12 +2061,12 @@ impl Ui {
             if strict && (x < 0.0 || x > ui.text_width(None, &line_text) || py < by || py > by + bh) {
                 None
             } else {
-                Some(start_of(rows, line) + ui.text_caret_at(None, &line_text, 0.0f64.max(x)))
+                Some(start_of(rows, line) + ui.text_caret_at(None, &line_text, 0.0f32.max(x)))
             }
         };
         // a number is dragged by its underline: the lowest 9 points of its row, so a drag that
         // selects text from a number does not rewrite it
-        let on_handle = |(_, py): (f64, f64)| {
+        let on_handle = |(_, py): (f32, f32)| {
             let y = py - by + scroll_pos - pad;
             y - row * (y / row).floor() >= row - 9.0
         };
@@ -2144,17 +2145,17 @@ impl Ui {
         // Enter takes the row only after Up or Down chose it; Tab takes it always
         st.chosen = open & 256 != 0;
         let first = (st.selected + 1).saturating_sub(shown);
-        let popup: Option<(UiBox, Vec<UiBox>, f64, f64)> = if shown == 0 {
+        let popup: Option<(UiBox, Vec<UiBox>, f32, f32)> = if shown == 0 {
             None
         } else {
             let doc_empty = items[st.selected].doc.is_empty();
-            let mut width: f64 = 220.0;
+            let mut width: f32 = 220.0;
             for c in &items {
                 width = width.max(self.text_width(None, &c.label) + self.text_width(None, &c.detail) + 44.0);
             }
             let (view_w, _) = self.view_size();
-            let width = width.min(120.0f64.max(view_w - 16.0));
-            let height = (shown as i64 * self.row_height()) as f64 + if doc_empty { 4.0 } else { 22.0 };
+            let width = width.min(120.0f32.max(view_w - 16.0));
+            let height = (shown as i64 * self.row_height()) as f32 + if doc_empty { 4.0 } else { 22.0 };
             let container = self.overlay_box(BLOCKING, (0.0, 0.0), width, height, &format!("{}-completions", label));
             let saved = self.enter(&container);
             let mut boxes = Vec::new();
@@ -2306,13 +2307,13 @@ impl Ui {
         };
         let target = if moved { Some(edit.caret) } else { revealed.map(|index| final_text.len().min(clamp_pos(index))) };
         let longest = rows.iter().map(|(s, e, _)| e - s).max().unwrap_or(0);
-        let visible = 1.0f64.max(bw - gutter - 16.0);
-        let max_x = if o.wrap { 0.0 } else { 0.0f64.max(longest as f64 * char_w - visible) };
-        let mut horizontal = 0.0f64.max(max_x.min(horizontal0 + signal.scroll.0 * row));
-        let mut vertical = 0.0f64.max((0.0f64.max((count + notes.len()) as f64 * row + pad - bh)).min(self.scroll_offset(&body)));
+        let visible = 1.0f32.max(bw - gutter - 16.0);
+        let max_x = if o.wrap { 0.0 } else { 0.0f32.max(longest as f32 * char_w - visible) };
+        let mut horizontal = 0.0f32.max(max_x.min(horizontal0 + signal.scroll.0 * row));
+        let mut vertical = 0.0f32.max((0.0f32.max((count + notes.len()) as f32 * row + pad - bh)).min(self.scroll_offset(&body)));
         if let Some(index) = target {
             let line = row_at(&rows, index);
-            let top = pad + slot_of(&notes, line) as f64 * row;
+            let top = pad + slot_of(&notes, line) as f32 * row;
             if top < vertical {
                 vertical = top;
             } else if top + row > vertical + bh {
@@ -2384,17 +2385,17 @@ impl Ui {
             let ls = start_of(&rows, line);
             let anchor = text_x0 + self.text_width(None, &final_text[ls..index]);
             let (view_w, view_h) = self.view_size();
-            let px = 8.0f64.max((anchor - 8.0).min(view_w - width - 8.0));
-            let below = by - offset + pad + (slot_of(&notes, caret_line) + 1) as f64 * row;
+            let px = 8.0f32.max((anchor - 8.0).min(view_w - width - 8.0));
+            let below = by - offset + pad + (slot_of(&notes, caret_line) + 1) as f32 * row;
             let py = if below + height <= view_h - 8.0 {
                 below
             } else {
-                8.0f64.max(by - offset + pad + slot_of(&notes, caret_line) as f64 * row - height)
+                8.0f32.max(by - offset + pad + slot_of(&notes, caret_line) as f32 * row - height)
             };
             self.set_at(container, (px, py));
             let selected = st.selected;
             let doc = items[selected].doc.clone();
-            self.draw(container, move |paint, (x, y, w, h)| {
+            self.draw(container, move |paint, Rect { x, y, w, h }| {
                 paint.fill(x, y, w, h, theme.input);
                 paint.frame(x, y, w, h, theme::edge(&theme));
                 if !doc.is_empty() {
@@ -2461,22 +2462,22 @@ struct AreaPaint {
     spans: Vec<(i64, i64)>,
     errors: Vec<i64>,
     notes: Notes,
-    char_w: f64,
+    char_w: f32,
     final_text: String,
     rows: Rows,
     count: usize,
     focused: bool,
     edit: TextEdit,
-    row: f64,
-    pad: f64,
-    offset: f64,
-    horizontal: f64,
-    gutter: f64,
+    row: f32,
+    pad: f32,
+    offset: f32,
+    horizontal: f32,
+    gutter: f32,
     theme: Theme,
 }
 
 impl AreaPaint {
-    fn paint(&self, paint: &mut Paint, (bx, by, bw, bh): Rect) {
+    fn paint(&self, paint: &mut Paint, Rect { x: bx, y: by, w: bw, h: bh }: Rect) {
         let theme = self.theme;
         let final_text = self.final_text.as_str();
         let rows = &self.rows;
@@ -2495,8 +2496,8 @@ impl AreaPaint {
         let selected = self.focused && edit.caret != edit.anchor;
         let (s0, s1) = text_selection(edit);
         let width = |paint: &mut Paint, t: &str| paint.text_width(None, t);
-        let clip = |paint: &mut Paint, x: f64, w: f64| paint.clip_rect = intersect(previous, (x, by, w, bh));
-        let band = |paint: &mut Paint, line: usize, start: usize, stop: usize, color: Color, y: f64| {
+        let clip = |paint: &mut Paint, x: f32, w: f32| paint.clip_rect = intersect(previous, Rect::new(x, by, w, bh));
+        let band = |paint: &mut Paint, line: usize, start: usize, stop: usize, color: Color, y: f32| {
             let ls = start_of(rows, line);
             let le = stop_of(rows, line);
             // a selection runs on past the end of a row that ends a line
@@ -2506,7 +2507,7 @@ impl AreaPaint {
             if start < stop || (start <= le && stop > le) {
                 let x0 = width(paint, &final_text[ls..start.min(le)]);
                 let x1 = if stop > le { width(paint, &final_text[ls..le]) + char_w } else { width(paint, &final_text[ls..stop]) };
-                paint.fill(text_x + x0, y, 1.0f64.max(x1 - x0), row, color);
+                paint.fill(text_x + x0, y, 1.0f32.max(x1 - x0), row, color);
             }
         };
         // the colours are sorted and the rows come in order: one walk of them, whatever the rows
@@ -2515,8 +2516,8 @@ impl AreaPaint {
         let mut line = first;
         while line <= last {
             let lu = line as usize;
-            let y = by - offset + pad + slot_of(&self.notes, lu) as f64 * row;
-            let text_y = y + 0.max((paint.font_size + (paint.font_size + 1) / 2 - paint.font_size) / 2) as f64;
+            let y = by - offset + pad + slot_of(&self.notes, lu) as f32 * row;
+            let text_y = y + 0.max((paint.font_size + (paint.font_size + 1) / 2 - paint.font_size) / 2) as f32;
             let logical = rows[lu].2;
             let starts_line = lu == 0 || rows[lu - 1].2 != logical;
             clip(paint, bx, bw);
@@ -2575,7 +2576,7 @@ impl AreaPaint {
                     paint.fill(
                         text_x + x0,
                         y + row - 4.0,
-                        1.0f64.max(x1 - x0),
+                        1.0f32.max(x1 - x0),
                         2.0,
                         if self.scrubbing { theme.accent } else { color::with_alpha(theme.accent, 160) },
                     );
@@ -2600,7 +2601,7 @@ impl AreaPaint {
                         let a = a.max(ls);
                         let b = b.min(le);
                         let x0 = width(paint, &final_text[ls..a]);
-                        let w1 = 1.0f64.max(width(paint, &final_text[a..b]));
+                        let w1 = 1.0f32.max(width(paint, &final_text[a..b]));
                         paint.fill(text_x + x0, y + row - 3.0, w1, 1.0, theme::invalid());
                     }
                 }
@@ -2648,7 +2649,7 @@ impl AreaPaint {
         // the message rows: the diagnostic at the label size, under the indent of its line
         clip(paint, bx + gutter, bw - gutter);
         for (k, (after, _, message)) in self.notes.iter().enumerate() {
-            let y = by - offset + pad + (*after + 1 + k) as f64 * row;
+            let y = by - offset + pad + (*after + 1 + k) as f32 * row;
             if y + row > by && y < by + bh {
                 let ls = start_of(rows, *after);
                 let mut indent = 0;
@@ -2662,7 +2663,7 @@ impl AreaPaint {
         }
         clip(paint, bx + gutter, bw - gutter);
         if self.focused {
-            let y = by - offset + pad + slot_of(&self.notes, caret_line) as f64 * row;
+            let y = by - offset + pad + slot_of(&self.notes, caret_line) as f32 * row;
             let ls = start_of(rows, caret_line);
             let caret_x = text_x + width(paint, &final_text[ls..edit.caret]);
             paint.input_region(caret_x - bx, bx, y, bw, row);
@@ -2734,9 +2735,9 @@ impl Ui {
         let (sx, _, sw, _) = ints(self.rect(&search));
         let prefix: i64 = if o.slash { 13 } else { 0 };
         // the slash is 6.5 wide and 6 of gap: the query starts 14.5 in from the field's edge
-        let inset = if o.slash { 14.5 - prefix as f64 } else { 2.0 };
+        let inset = if o.slash { 14.5 - prefix as f32 } else { 2.0 };
         let shift = self.press_shift(&search);
-        self.point_text_caret(None, &mut edit, &search_signal, shift, (sx + 4 + prefix) as f64 + inset, (sx + sw - 4 - 2) as f64);
+        self.point_text_caret(None, &mut edit, &search_signal, shift, (sx + 4 + prefix) as f32 + inset, (sx + sw - 4 - 2) as f32);
         for (event, modifiers) in keys {
             let count = rows.len() as i64;
             if result == Pick::None {
@@ -2802,7 +2803,7 @@ impl Ui {
                 }
                 let control = (cx + prefix, cy, 1.max(cw - prefix), ch);
                 if edit.text.is_empty() {
-                    paint.text_c(((cx + prefix) as f64 + inset, label_y(font_size, cy, ch) as f64), theme::ink_3(&theme), &placeholder);
+                    paint.text_c(((cx + prefix) as f32 + inset, label_y(font_size, cy, ch) as f32), theme::ink_3(&theme), &placeholder);
                 }
                 paint_text_edit(paint, None, false, inset, !edit.text.is_empty(), control, label_y(font_size, cy, ch), &composition, &edit);
             });
@@ -2817,7 +2818,7 @@ impl Ui {
                 BoxOpts::default()
                     .flags(CLICKABLE | FOCUSABLE | BLOCKING | if off(index) { KEEP_FOCUS } else { 0 })
                     .w(Size::Grow)
-                    .h(Size::Px(row_height as f64)),
+                    .h(Size::Px(row_height as f32)),
             );
             let row_signal = self.signal(&row);
             if result == Pick::None && row_signal.clicked && !off(index) {
@@ -2847,11 +2848,11 @@ impl Ui {
                 let key_size = 8.max(paint.font_size - 2);
                 let key_text = "\u{21b5}";
                 let right = if current {
-                    (x + w - SIDE) as f64 - paint.text_width(Some(key_size), key_text) - 8.0
+                    (x + w - SIDE) as f32 - paint.text_width(Some(key_size), key_text) - 8.0
                 } else {
-                    (x + w - SIDE) as f64
+                    (x + w - SIDE) as f32
                 };
-                let limit = right - paint.text_width(None, &detail) - 12.0 - text_x as f64;
+                let limit = right - paint.text_width(None, &detail) - 12.0 - text_x as f32;
                 let text = ellipsis(&mut |s| paint.text_width(None, s), limit, &text);
                 if let Some(color) = swatch {
                     fill_i(paint, (x + SIDE, y + (h - 8) / 2, 8, 8), if unavailable { theme::ink_3(&theme) } else { color });
@@ -2868,7 +2869,7 @@ impl Ui {
                     }
                     let _ = c;
                 }
-                let mut pen = text_x as f64;
+                let mut pen = text_x as f32;
                 let mut start = 0usize;
                 while start < text.len() {
                     let flag = matched[start];
@@ -2878,7 +2879,7 @@ impl Ui {
                     }
                     let run = &text[start..stop];
                     paint.text_c(
-                        (pen, label_y(paint.font_size, y, h) as f64),
+                        (pen, label_y(paint.font_size, y, h) as f32),
                         if doomed {
                             theme::invalid()
                         } else if unavailable {
@@ -2895,15 +2896,15 @@ impl Ui {
                 }
                 let right = if current {
                     let width = paint.text_width(Some(key_size), key_text);
-                    let ty = paint.text_top(Some(key_size), y as f64, h as f64);
-                    paint.text_s(((x + w - SIDE) as f64 - width, ty), key_size, theme::ink_3(&theme), key_text);
-                    (x + w - SIDE) as f64 - width - 8.0
+                    let ty = paint.text_top(Some(key_size), y as f32, h as f32);
+                    paint.text_s(((x + w - SIDE) as f32 - width, ty), key_size, theme::ink_3(&theme), key_text);
+                    (x + w - SIDE) as f32 - width - 8.0
                 } else {
-                    (x + w - SIDE) as f64
+                    (x + w - SIDE) as f32
                 };
                 let dw = paint.text_width(None, &detail);
                 paint.text_c(
-                    (right - dw, label_y(paint.font_size, y, h) as f64),
+                    (right - dw, label_y(paint.font_size, y, h) as f32),
                     if unavailable { theme::ink_3(&theme) } else { theme::muted(&theme) },
                     &detail,
                 );
@@ -2938,7 +2939,7 @@ pub enum MenuResult {
 
 #[derive(Clone, Default)]
 pub struct MenuOpts {
-    pub width: Option<f64>,
+    pub width: Option<f32>,
     pub selected: Option<i64>,
     pub swatches: Vec<Option<Color>>,
     pub keys: Vec<String>,
@@ -2956,9 +2957,9 @@ struct MenuRows {
     opened: Option<i64>,
     chevrons: Vec<i64>,
     lead_from: i64,
-    swatch_pad: f64,
+    swatch_pad: f32,
     key_size: i64,
-    gap: f64,
+    gap: f32,
 }
 
 impl Ui {
@@ -2973,7 +2974,7 @@ impl Ui {
             let index = index as i64;
             if text.is_empty() {
                 let line = self.box_fmt(format_args!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(m.gap)));
-                self.draw(&line, move |paint, (x, y, w, _)| paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme)));
+                self.draw(&line, move |paint, Rect { x, y, w, h: _ }| paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme)));
             } else {
                 let enabled = *enabled;
                 let row = self.kit_row(Some(if enabled { CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY } else { BLOCKING }), None, text);
@@ -2999,11 +3000,11 @@ impl Ui {
                     }
                     // the current choice: a 6-point accent square before the label
                     if selected == Some(index) {
-                        paint.fill(rx as f64 + SIDE as f64, y as f64 + h as f64 / 2.0 - 3.0, 6.0, 6.0, theme.accent);
+                        paint.fill(rx as f32 + SIDE as f32, y as f32 + h as f32 / 2.0 - 3.0, 6.0, 6.0, theme.accent);
                     }
                     if let Some(color) = swatch {
-                        let sx = (rx + SIDE + lead) as f64;
-                        let sy = y as f64 + h as f64 / 2.0 - 4.0;
+                        let sx = (rx + SIDE + lead) as f32;
+                        let sy = y as f32 + h as f32 / 2.0 - 4.0;
                         paint.fill(sx, sy, 8.0, 8.0, color);
                         paint.frame(sx, sy, 8.0, 8.0, theme::edge(&theme));
                     }
@@ -3022,12 +3023,12 @@ impl Ui {
                         &shown,
                     );
                     if chevron {
-                        paint.chevron(((rx + w) as f64 - 15.25, y as f64 + h as f64 / 2.0), Dir::Right, theme::ink_2(&theme));
+                        paint.chevron(((rx + w) as f32 - 15.25, y as f32 + h as f32 / 2.0), Dir::Right, theme::ink_2(&theme));
                     }
                     if let Some(key) = &key {
                         let kw = paint.text_width(Some(key_size), key);
-                        let ty = paint.text_top(Some(key_size), y as f64, h as f64);
-                        paint.text_s(((rx + w - SIDE) as f64 - kw, ty), key_size, theme::ink_2(&theme), key);
+                        let ty = paint.text_top(Some(key_size), y as f32, h as f32);
+                        paint.text_s(((rx + w - SIDE) as f32 - kw, ty), key_size, theme::ink_2(&theme), key);
                     }
                 });
                 if enabled && signal.clicked && !chevron && picked.is_none() {
@@ -3038,7 +3039,7 @@ impl Ui {
         (picked, hovered)
     }
 
-    fn menu_measure(&mut self, lead: f64, keys: &[String], chevrons: &[i64], base: f64, items: &[(String, bool)], swatch_pad: f64, key_size: i64) -> f64 {
+    fn menu_measure(&mut self, lead: f32, keys: &[String], chevrons: &[i64], base: f32, items: &[(String, bool)], swatch_pad: f32, key_size: i64) -> f32 {
         // the 1-point edge, 12 points of padding, then the label, 24 points and the key or chevron
         let mut w = base;
         for (index, (text, _)) in items.iter().enumerate() {
@@ -3063,12 +3064,12 @@ impl Ui {
     /// the menu, in the order the submenus are given. With `selected`, the rows from `lead_from`
     /// (default 0) on keep a slot for the accent square before their label. A press outside the
     /// menu in the frame that first builds it dismisses it.
-    pub fn context_menu(&mut self, at: (f64, f64), o: &MenuOpts, label: &str, items: &[(String, bool)]) -> MenuResult {
+    pub fn context_menu(&mut self, at: (f32, f32), o: &MenuOpts, label: &str, items: &[(String, bool)]) -> MenuResult {
         let (x, y) = at;
         let submenu_key = key_of(self.current_seed(), &format!("{}-sub", label));
         // the width follows the longest row; an empty label is a separator line; `keys` are the
         // shortcuts at the right of the rows, in ink-2 at the label size
-        let row_height = self.row_height() as f64;
+        let row_height = self.row_height() as f32;
         let gap = 9.0;
         let key_size = 8.max(self.font_size() - 2);
         let swatch_pad = if o.swatches.iter().any(|s| s.is_some()) { 14.0 } else { 0.0 };
@@ -3078,8 +3079,8 @@ impl Ui {
         let width = view_w.min(self.menu_measure(lead, &o.keys, &chevrons, o.width.unwrap_or(150.0), items, swatch_pad, key_size));
         let height_of = |items: &[(String, bool)]| items.iter().fold(14.0, |h, (text, _)| h + if text.is_empty() { gap } else { row_height });
         let height = height_of(items);
-        let x = 0.0f64.max(x.min(view_w - width));
-        let y = 0.0f64.max(y.min(view_h - height));
+        let x = 0.0f32.max(x.min(view_w - width));
+        let y = 0.0f32.max(y.min(view_h - height));
         // the submenu of a row: a second menu overlapping this one by a point, level with its row
         let row_top = |index: i64| {
             y + 7.0 + items.iter().take(0.max(index) as usize).fold(0.0, |top, (text, _)| top + if text.is_empty() { gap } else { row_height })
@@ -3088,8 +3089,8 @@ impl Ui {
             let sub_width = view_w.min(ui.menu_measure(if sub.current.is_none() { 0.0 } else { 14.0 }, &sub.keys, &[], 0.0, &sub.rows, swatch_pad, key_size));
             let sub_height = height_of(&sub.rows);
             let sx = if x + width - 1.0 + sub_width <= view_w { x + width - 1.0 } else { x - sub_width + 1.0 };
-            let sy = 0.0f64.max((row_top(sub.row) - 7.0).min(view_h - sub_height));
-            (sx, sy, sub_width, sub_height)
+            let sy = 0.0f32.max((row_top(sub.row) - 7.0).min(view_h - sub_height));
+            Rect::new(sx, sy, sub_width, sub_height)
         };
         // the rows of the submenus are numbered after those of this menu, in order
         let mut bases = Vec::new();
@@ -3148,7 +3149,7 @@ impl Ui {
             None => MenuResult::Open,
             Some(si) => {
                 let sub = o.submenus[si].clone();
-                let (sx, sy, sw, sh) = sub_geometry(self, &sub);
+                let Rect { x: sx, y: sy, w: sw, h: sh } = sub_geometry(self, &sub);
                 let mut sub_picked: Option<i64> = None;
                 self.popup(Some(stroke), None, true, true, (sx, sy), sw, sh, &format!("{}-sub", label), &mut |ui: &mut Ui| {
                     ui.box_("menu-top", BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(6.0)));

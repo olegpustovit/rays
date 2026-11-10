@@ -1,16 +1,17 @@
 //! Each frame builds keyed boxes with flags and per-axis sizing. Per-key state lives in Ui's retained cache and expires when omitted for a frame. Input uses prior-frame rectangles; layout follows construction and painting packs instance lists. Painters own their Paint borrow for the paint duration.
 use crate::theme::{self, Theme};
+pub use crate::geom::Rect;
+pub(crate) use crate::geom::p32;
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
-use rays_math::hash;
+use crate::geom::hash;
 use input::frame as rframe;
-use rays_math::color::{self, T as Color};
+use crate::geom::{color, Rgba as Color};
 use scene_command::ui_batch::{self, Clip};
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-pub type Rect = (f64, f64, f64, f64);
 pub type Flags = i64;
 /// Sentinel for no box in parent, child and sibling indices.
 pub const NONE: usize = usize::MAX;
@@ -118,11 +119,11 @@ impl SlotTable {
 #[derive(Clone)]
 pub enum Size {
     /// fixed
-    Px(f64),
+    Px(f32),
     /// fraction of the parent's inner size
-    Pct(f64),
+    Pct(f32),
     /// function of the parent's inner size
-    Rel(Rc<dyn Fn(f64) -> f64>),
+    Rel(Rc<dyn Fn(f32) -> f32>),
     /// share of the remaining space, or the full cross size
     Grow,
     /// children's extent plus padding
@@ -189,7 +190,7 @@ pub enum Drop {
 }
 
 /// Points a pressed pointer travels before a press is a drag: a carry starts, a click ends.
-pub const DRAG_THRESHOLD: f64 = 4.0;
+pub const DRAG_THRESHOLD: f32 = 4.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cursor {
@@ -226,12 +227,12 @@ struct BoxRec {
     flags: Flags,
     w: Size,
     h: Size,
-    max_h: f64,
+    max_h: f32,
     row: bool,
-    padding: f64,
-    at_x: f64,
-    at_y: f64,
-    scroll_step: f64,
+    padding: f32,
+    at_x: f32,
+    at_y: f32,
+    scroll_step: f32,
     hit: Option<HitFn>,
     hit_rect: Option<Rect>,
     painters: Vec<PaintRow>,
@@ -252,11 +253,11 @@ impl BoxRec {
             flags: 0,
             w: Size::Grow,
             h: Size::Grow,
-            max_h: f64::INFINITY,
+            max_h: f32::INFINITY,
             row: false,
             padding: 0.0,
-            at_x: f64::NAN,
-            at_y: f64::NAN,
+            at_x: f32::NAN,
+            at_y: f32::NAN,
             scroll_step: 0.0,
             hit: None,
             hit_rect: None,
@@ -283,10 +284,10 @@ pub fn key(b: &UiBox) -> i64 {
 struct Slot {
     key: i64,
     touched: i64,
-    rx: f64,
-    ry: f64,
-    rw: f64,
-    rh: f64,
+    rx: f32,
+    ry: f32,
+    rw: f32,
+    rh: f32,
     scroll_raw: f64,
     scroll_visual: f64,
     scroll_event_time: f64,
@@ -301,8 +302,8 @@ struct Slot {
     labels: Vec<Rc<str>>,
     label_count: usize,
     press_time: f64,
-    press_x: f64,
-    press_y: f64,
+    press_x: f32,
+    press_y: f32,
     /// consecutive left presses within 0.35 s and 5 points
     press_count: i64,
 }
@@ -341,10 +342,10 @@ struct HitRec {
     key: i64,
     parent: i64,
     flags: Flags,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
 }
 
 /// What a press, a drag, a scroll or a key did to a box this frame.
@@ -357,17 +358,17 @@ pub struct Accumulator {
     pub double_clicked: bool,
     pub clicks: i64,
     pub moved: bool,
-    pub drag_x: f64,
-    pub drag_y: f64,
-    pub press_point: (f64, f64),
-    pub release_point: (f64, f64),
+    pub drag_x: f32,
+    pub drag_y: f32,
+    pub press_point: (f32, f32),
+    pub release_point: (f32, f32),
     pub button: Option<MouseButton>,
-    pub scroll_x: f64,
-    pub scroll_y_steps: f64,
+    pub scroll_x: f32,
+    pub scroll_y_steps: f32,
     /// what moves a scroll box: an unphased wheel's steps, the fingers' points on a trackpad, and
     /// whether they touched or lifted this frame
-    pub scroll_wheel: f64,
-    pub scroll_drag: f64,
+    pub scroll_wheel: f32,
+    pub scroll_drag: f32,
     pub scroll_touch: bool,
     pub scroll_lift: bool,
     /// product of this frame's pinch factors
@@ -731,8 +732,8 @@ impl Fonts {
     }
 
     /// the width of kit text in points: the one measure of the build and of painting
-    pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f64 {
-        self.text_width_px(size, text) as f64 / self.density as f64
+    pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f32 {
+        (self.text_width_px(size, text) as f64 / self.density as f64) as f32
     }
 
     pub fn destroy(&mut self) {
@@ -755,16 +756,16 @@ pub struct Ui {
     table: SlotTable,
     slots: Vec<Slot>,
     free: Vec<usize>,
-    scroll_y: Vec<f64>,
+    scroll_y: Vec<f32>,
     // per-frame boxes
     count: usize,
     boxes: Vec<BoxRec>,
-    l_x: Vec<f64>,
-    l_y: Vec<f64>,
-    l_w: Vec<f64>,
-    l_h: Vec<f64>,
-    l_content: Vec<f64>,
-    l_gutter: Vec<f64>,
+    l_x: Vec<f32>,
+    l_y: Vec<f32>,
+    l_w: Vec<f32>,
+    l_h: Vec<f32>,
+    l_content: Vec<f32>,
+    l_gutter: Vec<f32>,
     // build state
     parents: Vec<usize>,
     overlays: Vec<usize>,
@@ -777,12 +778,12 @@ pub struct Ui {
     closed_section: usize,
     kit_window: bool,
     // input
-    pointer: (f64, f64),
+    pointer: (f32, f32),
     hot: i64,
-    hover_rest: Option<(String, (f64, f64), f64, i64)>,
+    hover_rest: Option<(String, (f32, f32), f64, i64)>,
     active: Option<i64>,
     active_button: MouseButton,
-    active_press: (f64, f64),
+    active_press: (f32, f32),
     active_keys: Vec<Key>,
     focus: i64,
     keyboard_focus: bool,
@@ -792,7 +793,7 @@ pub struct Ui {
     pub edit_value: String,
     pub(crate) edit_caret: usize,
     pub(crate) edit_anchor: usize,
-    pub(crate) edit_scroll_x: f64,
+    pub(crate) edit_scroll_x: f32,
     window_ground: Option<Color>,
     gesture_key: i64,
     gesture_time: f64,
@@ -807,7 +808,7 @@ pub struct Ui {
     pub(crate) edit_group: i64,
     pub(crate) edit_shelf: Vec<ShelfEntry>,
     pub(crate) edit_unit: Option<(usize, usize, i64)>,
-    pub(crate) edit_column: f64,
+    pub(crate) edit_column: f32,
     pub(crate) scrub_origin: Option<(i64, String)>,
     payload: Option<(Payload, Origin)>,
     dropped: Option<(Payload, i64)>,
@@ -820,9 +821,9 @@ pub struct Ui {
     modal_key: Option<i64>,
     modal_extra: Vec<i64>,
     modal_in_frame: bool,
-    view_w: f64,
-    view_h: f64,
-    modal_heights: HashMap<i64, (f64, i64)>,
+    view_w: f32,
+    view_h: f32,
+    modal_heights: HashMap<i64, (f32, i64)>,
     signals: HashMap<i64, Accumulator>,
     hits: Vec<HitRec>,
     hit_count: usize,
@@ -849,21 +850,9 @@ pub type ShelfEntry = (i64, String, Vec<(String, usize, usize)>, Vec<(String, us
 
 
 
-pub fn contains(rect: Rect, point: (f64, f64)) -> bool {
-    let (x, y, w, h) = rect;
-    let (px, py) = point;
-    px >= x && py >= y && px < x + w && py < y + h
-}
+pub fn contains(rect: Rect, point: (f32, f32)) -> bool { rect.contains(point) }
 
-pub fn intersect(a: Rect, b: Rect) -> Rect {
-    let (ax, ay, aw, ah) = a;
-    let (bx, by, bw, bh) = b;
-    let x = ax.max(bx);
-    let y = ay.max(by);
-    let right = (ax + aw).min(bx + bw);
-    let bottom = (ay + ah).min(by + bh);
-    (x, y, (right - x).max(0.0), (bottom - y).max(0.0))
-}
+pub fn intersect(a: Rect, b: Rect) -> Rect { a.intersect(b) }
 
 fn packed(c: Color) -> i32 {
     (((c.r << 24) | (c.g << 16) | (c.b << 8) | c.a) as u32) as i32
@@ -913,7 +902,7 @@ impl Ui {
             kit_row_height: 24,
             closed_section: NONE,
             kit_window: false,
-            pointer: (f64::NAN, f64::NAN),
+            pointer: (f32::NAN, f32::NAN),
             hot: 0,
             hover_rest: None,
             active: None,
@@ -1041,7 +1030,7 @@ impl Ui {
         self.kit_row_height
     }
 
-    pub fn view_size(&self) -> (f64, f64) {
+    pub fn view_size(&self) -> (f32, f32) {
         (self.view_w, self.view_h)
     }
 
@@ -1060,17 +1049,17 @@ impl Ui {
 
     /// The width of kit text in points, for layout during the build (`Paint::text_width` while
     /// painting).
-    pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f64 {
+    pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f32 {
         self.fonts.text_width(size, text)
     }
 
     /// Measure the same ASCII-uppercase label style as `Paint::cap`, reusing the frame's text buffer.
-    pub fn cap_width(&mut self, text: &str) -> f64 {
+    pub fn cap_width(&mut self, text: &str) -> f32 {
         let mut buffer = std::mem::take(&mut self.label);
         buffer.clear();
         buffer.extend(text.chars().map(|c| c.to_ascii_uppercase()));
         let size = 8.max(self.font_size - 2);
-        let width = self.text_width(Some(size), &buffer) + 0.08 * size as f64 * text.chars().count() as f64;
+        let width = self.text_width(Some(size), &buffer) + 0.08 * size as f32 * text.chars().count() as f32;
         self.label = buffer;
         width
     }
@@ -1213,13 +1202,13 @@ impl Ui {
         self.chain.contains(&ancestor)
     }
 
-    fn hit_contains(&self, index: usize, point: (f64, f64)) -> bool {
+    fn hit_contains(&self, index: usize, point: (f32, f32)) -> bool {
         let h = &self.hits[index];
-        contains((h.x, h.y, h.w, h.h), point)
+        contains(Rect::new(h.x, h.y, h.w, h.h), point)
     }
 
     /// Topmost hit entry under `point`; 0 when none.
-    fn topmost(&self, point: (f64, f64)) -> i64 {
+    fn topmost(&self, point: (f32, f32)) -> i64 {
         for index in (0..self.hit_count).rev() {
             if self.hit_contains(index, point) {
                 return self.hits[index].key;
@@ -1229,7 +1218,7 @@ impl Ui {
     }
 
     /// The root key whose box or child is topmost under the point in PXUI's previous hit tree.
-    pub fn root_at(&self, point: (f64, f64), roots: &[i64]) -> Option<i64> {
+    pub fn root_at(&self, point: (f32, f32), roots: &[i64]) -> Option<i64> {
         let mut found = None;
         self.hit_ancestors(self.topmost(point), &mut |key| {
             if found.is_none() && roots.contains(&key) {
@@ -1244,7 +1233,7 @@ impl Ui {
         let mut last = None;
         for event in &frame.input.events {
             if let Event::PointerPressed(_, point) = event {
-                if let Some(root) = self.root_at(*point, roots) {
+                if let Some(root) = self.root_at(p32(*point), roots) {
                     last = Some(root);
                 }
             }
@@ -1262,7 +1251,7 @@ impl Ui {
     /// The scroll box the wheel goes to at `point`: the topmost one, unless a blocking box lies
     /// over it that is not its own content (a field inside a scrolling panel lets the panel
     /// scroll; a menu over it does not).
-    fn scroll_target(&mut self, point: (f64, f64)) -> i64 {
+    fn scroll_target(&mut self, point: (f32, f32)) -> i64 {
         let mut blocker = 0;
         let mut index = self.hit_count as i64 - 1;
         while index >= 0 {
@@ -1337,7 +1326,7 @@ impl Ui {
         }
     }
 
-    fn pointer_target(&mut self, point: (f64, f64)) -> i64 {
+    fn pointer_target(&mut self, point: (f32, f32)) -> i64 {
         match self.active {
             Some(target) => target,
             None => {
@@ -1375,8 +1364,8 @@ impl Ui {
         self.modal_in_frame = self.modal_key.is_some();
         let mut modifiers = input::keys_before(&self.previous_keys, &frame.input.keys, &frame.input.events);
         self.previous_keys = frame.input.keys.clone();
-        self.view_w = frame.input.size.0 as f64;
-        self.view_h = frame.input.size.1 as f64;
+        self.view_w = frame.input.size.0 as f32;
+        self.view_h = frame.input.size.1 as f32;
         // a trackpad's motion also arrives as wheel steps: in such a frame those only feed
         // `signal.scroll`, and the gesture moves the scroll box
         let phased = frame.input.events.iter().any(|e| match e {
@@ -1393,16 +1382,16 @@ impl Ui {
             }
             let (owner, delta): (i64, (f64, f64)) = match event {
                 Event::PointerMoved(point) => {
-                    let owner = self.pointer_target(*point);
+                    let owner = self.pointer_target(p32(*point));
                     let delta = if self.pointer.0.is_finite() {
-                        (point.0 - self.pointer.0, point.1 - self.pointer.1)
+                        (point.0 - self.pointer.0 as f64, point.1 - self.pointer.1 as f64)
                     } else {
                         (0.0, 0.0)
                     };
                     (owner, delta)
                 }
                 Event::PointerPressed(_, point) | Event::PointerReleased(_, point) => {
-                    (self.pointer_target(*point), (0.0, 0.0))
+                    (self.pointer_target(p32(*point)), (0.0, 0.0))
                 }
                 Event::Scrolled(_) | Event::Pinched(_) => {
                     let target = match self.active {
@@ -1427,7 +1416,7 @@ impl Ui {
             match event {
                 Event::PointerMoved(point) => {
                     let (px, py) = self.pointer;
-                    self.pointer = *point;
+                    self.pointer = p32(*point);
                     if let Some(active) = self.active {
                         let (x, y) = self.pointer;
                         let value = self.accumulator(active);
@@ -1443,9 +1432,9 @@ impl Ui {
                 Event::PointerPressed(MouseButton::LeftButton, point)
                     if matches!(self.payload, Some((_, Origin::FromKey))) =>
                 {
-                    self.pointer = *point;
+                    self.pointer = p32(*point);
                     if let Some((payload, _)) = &self.payload {
-                        self.dropped = Some((payload.clone(), self.topmost(*point)));
+                        self.dropped = Some((payload.clone(), self.topmost(p32(*point))));
                     }
                     self.payload = None;
                     if let Some(last) = self.routed_events.last_mut() {
@@ -1453,7 +1442,7 @@ impl Ui {
                     }
                 }
                 Event::PointerPressed(button, point) => {
-                    self.pointer = *point;
+                    self.pointer = p32(*point);
                     let target = if owner == 0 || self.flags_of_key(owner) & CLICKABLE != 0 {
                         owner
                     } else {
@@ -1528,7 +1517,7 @@ impl Ui {
                     }
                 }
                 Event::PointerReleased(button, point) => {
-                    self.pointer = *point;
+                    self.pointer = p32(*point);
                     if let Some(active) = self.active {
                         if *button == self.active_button {
                             if let Some((_, Origin::FromPointer(o))) = &self.payload {
@@ -1560,10 +1549,10 @@ impl Ui {
                     let target = self.modal_target(scroll);
                     if target != 0 {
                         let value = self.accumulator(target);
-                        value.scroll_x += horizontal;
-                        value.scroll_y_steps += vertical;
+                        value.scroll_x += *horizontal as f32;
+                        value.scroll_y_steps += *vertical as f32;
                         if !phased {
-                            value.scroll_wheel += vertical;
+                            value.scroll_wheel += *vertical as f32;
                         }
                     }
                 }
@@ -1595,7 +1584,7 @@ impl Ui {
                             value.scroll_touch = true;
                             value.scroll_lift = false;
                         }
-                        value.scroll_drag += vertical;
+                        value.scroll_drag += *vertical as f32;
                     }
                 }
                 // a trackpad pinch goes where the wheel goes
@@ -1603,7 +1592,7 @@ impl Ui {
                     let scroll = self.scroll_target(self.pointer);
                     let target = self.modal_target(scroll);
                     if target != 0 {
-                        self.accumulator(target).pinch *= scale;
+                        self.accumulator(target).pinch *= *scale;
                     }
                 }
                 // Cancellation ends capture without a release: no click, no commit.
@@ -1656,7 +1645,7 @@ impl Ui {
                 _ => {}
             }
         }
-        let (mouse_x, mouse_y) = frame.input.pointer;
+        let (mouse_x, mouse_y) = p32(frame.input.pointer);
         if !self.pointer.0.is_finite() {
             self.pointer = (mouse_x, mouse_y);
         }
@@ -1726,7 +1715,7 @@ impl Ui {
         &self.composition
     }
 
-    pub(crate) fn pointer(&self) -> (f64, f64) {
+    pub(crate) fn pointer(&self) -> (f32, f32) {
         self.pointer
     }
 
@@ -1824,7 +1813,7 @@ impl Ui {
 /// `label` cut to `limit` points wide with an ellipsis, on a character boundary. `width` measures
 /// text as the sum of its characters, so one pass from the start measures each character once and
 /// stops at the first that does not fit: the cost follows what is shown, not the label's length.
-pub fn ellipsis<'a>(width: &mut dyn FnMut(&str) -> f64, limit: f64, label: &'a str) -> Cow<'a, str> {
+pub fn ellipsis<'a>(width: &mut dyn FnMut(&str) -> f32, limit: f32, label: &'a str) -> Cow<'a, str> {
     let dots = width("\u{2026}");
     // `cut`: the longest prefix that fits with the ellipsis after it; -1 when the ellipsis alone does
     // not
@@ -1852,11 +1841,11 @@ pub struct BoxOpts {
     pub flags: Flags,
     pub w: Size,
     pub h: Size,
-    pub max_h: f64,
+    pub max_h: f32,
     pub axis: Axis,
-    pub padding: f64,
-    pub at: Option<(f64, f64)>,
-    pub scroll_step: f64,
+    pub padding: f32,
+    pub at: Option<(f32, f32)>,
+    pub scroll_step: f32,
     pub hit: Option<HitFn>,
     pub hit_rect: Option<Rect>,
 }
@@ -1867,7 +1856,7 @@ impl Default for BoxOpts {
             flags: NO_FLAGS,
             w: Size::Grow,
             h: Size::Fit,
-            max_h: f64::INFINITY,
+            max_h: f32::INFINITY,
             axis: Axis::Column,
             padding: 0.0,
             at: None,
@@ -1891,7 +1880,7 @@ impl BoxOpts {
         self.h = h;
         self
     }
-    pub fn max_h(mut self, max_h: f64) -> BoxOpts {
+    pub fn max_h(mut self, max_h: f32) -> BoxOpts {
         self.max_h = max_h;
         self
     }
@@ -1899,15 +1888,15 @@ impl BoxOpts {
         self.axis = axis;
         self
     }
-    pub fn padding(mut self, padding: f64) -> BoxOpts {
+    pub fn padding(mut self, padding: f32) -> BoxOpts {
         self.padding = padding;
         self
     }
-    pub fn at(mut self, at: (f64, f64)) -> BoxOpts {
+    pub fn at(mut self, at: (f32, f32)) -> BoxOpts {
         self.at = Some(at);
         self
     }
-    pub fn scroll_step(mut self, step: f64) -> BoxOpts {
+    pub fn scroll_step(mut self, step: f32) -> BoxOpts {
         self.scroll_step = step;
         self
     }
@@ -1945,15 +1934,15 @@ pub struct Signal {
     /// captured and the pointer moved this frame
     pub dragging: bool,
     /// captured pointer motion this frame
-    pub drag: (f64, f64),
+    pub drag: (f32, f32),
     /// latest pointer, screen space
-    pub pointer: (f64, f64),
+    pub pointer: (f32, f32),
     /// where the current or last press began
-    pub press_point: (f64, f64),
-    pub release_point: (f64, f64),
+    pub press_point: (f32, f32),
+    pub release_point: (f32, f32),
     pub button: Option<MouseButton>,
     /// wheel steps routed to this box
-    pub scroll: (f64, f64),
+    pub scroll: (f32, f32),
     /// product of the trackpad pinch factors routed to this box this frame
     pub pinch: f64,
     /// ordered key/text events while focused
@@ -2023,7 +2012,7 @@ impl Ui {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn set_box(&mut self, index: usize, flags: Flags, w: Size, h: Size, max_h: f64, row: bool, padding: f64, at_x: f64, at_y: f64, scroll_step: f64, hit: Option<HitFn>) {
+    fn set_box(&mut self, index: usize, flags: Flags, w: Size, h: Size, max_h: f32, row: bool, padding: f32, at_x: f32, at_y: f32, scroll_step: f32, hit: Option<HitFn>) {
         let b = &mut self.boxes[index];
         b.flags = flags;
         b.w = w;
@@ -2045,7 +2034,7 @@ impl Ui {
         let key = self.unique_key(key);
         let parent = self.current_parent();
         let index = self.append_box(key, parent);
-        let (at_x, at_y) = opts.at.unwrap_or((f64::NAN, f64::NAN));
+        let (at_x, at_y) = opts.at.unwrap_or((f32::NAN, f32::NAN));
         self.set_box(index, opts.flags, opts.w, opts.h, opts.max_h, opts.axis == Axis::Row, opts.padding, at_x, at_y, opts.scroll_step, opts.hit);
         self.boxes[index].hit_rect = opts.hit_rect;
         UiBox { index, box_key: key, box_slot: self.boxes[index].slot }
@@ -2076,7 +2065,7 @@ impl Ui {
         }
     }
 
-    pub fn set_at(&mut self, b: &UiBox, at: (f64, f64)) {
+    pub fn set_at(&mut self, b: &UiBox, at: (f32, f32)) {
         self.require_building();
         self.boxes[b.index].at_x = at.0;
         self.boxes[b.index].at_y = at.1;
@@ -2134,7 +2123,7 @@ impl Ui {
     /// The box's screen rectangle from the previous frame.
     pub fn rect(&self, b: &UiBox) -> Rect {
         let s = &self.slots[b.box_slot];
-        (s.rx, s.ry, s.rw, s.rh)
+        Rect::new(s.rx, s.ry, s.rw, s.rh)
     }
 
     pub fn signal(&self, b: &UiBox) -> Signal {
@@ -2213,8 +2202,8 @@ impl Ui {
     }
 
     /// The released right-click in this box or a descendant, through shared capture.
-    pub fn context_at(&mut self, b: &UiBox) -> Option<(f64, f64)> {
-        let targets: Vec<(i64, (f64, f64))> = self
+    pub fn context_at(&mut self, b: &UiBox) -> Option<(f32, f32)> {
+        let targets: Vec<(i64, (f32, f32))> = self
             .signals
             .iter()
             .filter(|(_, v)| {
@@ -2309,16 +2298,16 @@ impl Ui {
         }
     }
 
-    pub fn scroll_offset(&self, b: &UiBox) -> f64 {
+    pub fn scroll_offset(&self, b: &UiBox) -> f32 {
         self.scroll_y[b.box_slot]
     }
 
     /// Current painted scroll position, including elastic edge movement.
-    pub fn scroll_position(&self, b: &UiBox) -> f64 {
-        self.scroll_y[b.box_slot] + self.slots[b.box_slot].scroll_visual
+    pub fn scroll_position(&self, b: &UiBox) -> f32 {
+        self.scroll_y[b.box_slot] + self.slots[b.box_slot].scroll_visual as f32
     }
 
-    pub fn set_scroll_offset(&mut self, b: &UiBox, value: f64) {
+    pub fn set_scroll_offset(&mut self, b: &UiBox, value: f32) {
         self.scroll_y[b.box_slot] = value;
         let s = &mut self.slots[b.box_slot];
         s.scroll_raw = 0.0;
@@ -2409,7 +2398,7 @@ impl Ui {
         self.boxes[self.current_parent()].last
     }
 
-    pub(crate) fn box_w_px(&self, index: usize) -> Option<f64> {
+    pub(crate) fn box_w_px(&self, index: usize) -> Option<f32> {
         match self.boxes[index].w {
             Size::Px(w) => Some(w),
             _ => None,
@@ -2431,7 +2420,7 @@ impl Ui {
 
     pub(crate) fn slot_rect(&self, slot: usize) -> Rect {
         let s = &self.slots[slot];
-        (s.rx, s.ry, s.rw, s.rh)
+        Rect::new(s.rx, s.ry, s.rw, s.rh)
     }
 
     pub(crate) fn slot_for(&self, key: i64) -> Option<usize> {
@@ -2455,7 +2444,7 @@ impl Ui {
             let padding = self.boxes[index].padding;
             let row = self.boxes[index].row;
             let mut along = 0.0;
-            let mut across: f64 = 0.0;
+            let mut across: f32 = 0.0;
             let mut next = self.boxes[index].first;
             while next != NONE {
                 let child = next;
@@ -2475,7 +2464,7 @@ impl Ui {
             let content_w = (if row { along } else { across }) + 2.0 * padding;
             let content_h = (if row { across } else { along }) + 2.0 * padding;
             self.l_content[index] = content_h;
-            let resolve = |kind: &Size, content: f64| match kind {
+            let resolve = |kind: &Size, content: f32| match kind {
                 Size::Px(value) => *value,
                 Size::Fit => content,
                 _ => 0.0,
@@ -2487,11 +2476,11 @@ impl Ui {
 
     fn pull(&mut self, slot: usize, max_scroll: f64, height: f64, past: f64, delta: f64) {
         let old = self.slots[slot].scroll_raw;
-        let next = self.scroll_y[slot] + old - delta;
+        let next = self.scroll_y[slot] as f64 + old - delta;
         let bounded = 0.0f64.max(max_scroll.min(next));
         let over = next - bounded;
         let raw = if max_scroll <= 0.0 || over == 0.0 { 0.0 } else { old + (over - old) * past };
-        self.scroll_y[slot] = bounded;
+        self.scroll_y[slot] = bounded as f32;
         self.slots[slot].scroll_raw = raw;
         self.slots[slot].scroll_visual = scroll_stretch(raw, height);
     }
@@ -2501,8 +2490,8 @@ impl Ui {
     pub(crate) fn apply_scroll(&mut self, consume: bool, time: f64, index: usize) {
         let slot = self.boxes[index].slot;
         let key = self.boxes[index].key;
-        let height = self.l_h[index];
-        let max_scroll = 0.0f64.max(self.l_content[index] - height);
+        let height = self.l_h[index] as f64;
+        let max_scroll = 0.0f64.max(self.l_content[index] as f64 - height);
         let (wheel, drag, touch, lift) = match self.signals.get(&key) {
             Some(v) => (v.scroll_wheel, v.scroll_drag, v.scroll_touch, v.scroll_lift),
             None => (0.0, 0.0, false, false),
@@ -2515,19 +2504,19 @@ impl Ui {
             self.slots[slot].scroll_event_time = f64::INFINITY;
         }
         if drag != 0.0 {
-            self.pull(slot, max_scroll, height, 1.0, drag);
+            self.pull(slot, max_scroll, height, 1.0, drag as f64);
             // held by the fingers: it springs back when they lift
             self.slots[slot].scroll_event_time = f64::INFINITY;
         } else if wheel != 0.0 {
             let step = self.boxes[index].scroll_step;
-            self.pull(slot, max_scroll, height, SCROLL_WHEEL_PAST, wheel * step);
+            self.pull(slot, max_scroll, height, SCROLL_WHEEL_PAST, wheel as f64 * step as f64);
             self.slots[slot].scroll_event_time = time;
         }
         if lift {
             if self.slots[slot].scroll_visual != 0.0 {
                 self.slots[slot].scroll_event_time = f64::NEG_INFINITY;
             } else if max_scroll > 0.0 && self.gesture_velocity.abs() >= SCROLL_MIN_VELOCITY {
-                let y = self.scroll_y[slot];
+                let y = self.scroll_y[slot] as f64;
                 let s = &mut self.slots[slot];
                 s.scroll_mode = 1;
                 s.scroll_velocity = self.gesture_velocity;
@@ -2553,7 +2542,7 @@ impl Ui {
                         if (at(mid) - edge) * (y - edge) > 0.0 { late = mid } else { early = mid }
                     }
                     let arrival = velocity * (-late / SCROLL_COAST_TAU).exp();
-                    self.scroll_y[slot] = edge;
+                    self.scroll_y[slot] = edge as f32;
                     let s = &mut self.slots[slot];
                     s.scroll_mode = 2;
                     s.scroll_start += late;
@@ -2561,7 +2550,7 @@ impl Ui {
                 } else {
                     // on whole device pixels, so text is sharp where the coast ends
                     let density = self.density as f64;
-                    self.scroll_y[slot] = (y * density).round() / density;
+                    self.scroll_y[slot] = ((y * density).round() / density) as f32;
                     if (velocity * (-t / SCROLL_COAST_TAU).exp()).abs() < SCROLL_MIN_VELOCITY {
                         self.slots[slot].scroll_mode = 0;
                     }
@@ -2604,17 +2593,17 @@ impl Ui {
             let row = self.boxes[index].row;
             let flags = self.boxes[index].flags;
             let scrolls = flags & SCROLL != 0;
-            let max_scroll = 0.0f64.max(self.l_content[index] - self.l_h[index]);
+            let max_scroll = 0.0f32.max(self.l_content[index] - self.l_h[index]);
             let gutter = if scrolls && max_scroll > 0.0 && flags & OVER_THUMB == 0 { 10.0 } else { 0.0 };
             self.l_gutter[index] = gutter;
             let slot = self.boxes[index].slot;
             if scrolls {
                 self.apply_scroll(false, time, index);
-                self.scroll_y[slot] = 0.0f64.max(max_scroll.min(self.scroll_y[slot]));
+                self.scroll_y[slot] = 0.0f32.max(max_scroll.min(self.scroll_y[slot]));
             }
             let inner_w = self.l_w[index] - 2.0 * padding - gutter;
             let inner_h = self.l_h[index] - 2.0 * padding;
-            let relative = |kind: &Size, inner: f64, current: f64| match kind {
+            let relative = |kind: &Size, inner: f32, current: f32| match kind {
                 Size::Pct(fraction) => inner * fraction,
                 Size::Rel(f) => f(inner),
                 _ => current,
@@ -2639,10 +2628,10 @@ impl Ui {
             let share = if grow_count == 0 {
                 0.0
             } else {
-                0.0f64.max(((if row { inner_w } else { inner_h }) - fixed) / grow_count as f64)
+                0.0f32.max(((if row { inner_w } else { inner_h }) - fixed) / grow_count as f32)
             };
             let mut cursor = padding;
-            let scroll_offset = if scrolls { self.scroll_y[slot] + self.slots[slot].scroll_visual } else { 0.0 };
+            let scroll_offset = if scrolls { self.scroll_y[slot] + self.slots[slot].scroll_visual as f32 } else { 0.0 };
             next = self.boxes[index].first;
             while next != NONE {
                 let child = next;
@@ -2681,14 +2670,14 @@ impl Ui {
     }
 
     fn screen(&self, index: usize) -> Rect {
-        (self.l_x[index], self.l_y[index], self.l_w[index], self.l_h[index])
+        Rect::new(self.l_x[index], self.l_y[index], self.l_w[index], self.l_h[index])
     }
 
-    pub(crate) fn set_l_h(&mut self, b: &UiBox, h: f64) {
+    pub(crate) fn set_l_h(&mut self, b: &UiBox, h: f32) {
         self.l_h[b.index] = h;
     }
 
-    pub(crate) fn set_l_content(&mut self, b: &UiBox, v: f64) {
+    pub(crate) fn set_l_content(&mut self, b: &UiBox, v: f32) {
         self.l_content[b.index] = v;
     }
 }
@@ -2739,8 +2728,8 @@ pub enum Dir {
 /// Where the top of kit text of `size` points goes to sit centred in a row at `y` of height `h`: its
 /// top is half of what the row has over the text size. Measured against the kit's reference
 /// renders: 13-point text in a 24-point row has its ascenders at 7 and its descenders at 18.
-pub fn text_top_for(font_size: i64, size: Option<i64>, y: f64, h: f64) -> f64 {
-    y + ((h - size.unwrap_or(font_size) as f64) / 2.0).floor()
+pub fn text_top_for(font_size: i64, size: Option<i64>, y: f32, h: f32) -> f32 {
+    y + ((h - size.unwrap_or(font_size) as f32) / 2.0).floor()
 }
 
 /// The painter's handle for one frame. It owns the instance builder, the glyph atlas and the
@@ -2757,21 +2746,21 @@ pub struct Paint {
     pub ime: Option<((i64, i64, i64, i64), i64)>,
     label: String,
     /// the horizontal scroll of the focused text; painters adjust it
-    pub edit_scroll_x: f64,
+    pub edit_scroll_x: f32,
     /// the content height of each box of this frame, by box index
-    pub l_content: Vec<f64>,
+    pub l_content: Vec<f32>,
     /// the scroll offset of each retained slot
-    pub scroll_y: Vec<f64>,
+    pub scroll_y: Vec<f32>,
 }
 
 impl Paint {
     fn prepare(&mut self) {
-        let (x, y, w, h) = self.clip_rect;
-        self.builder.set_clip(Some(Clip { x, y, width: w, height: h }));
+        let Rect { x, y, w, h } = self.clip_rect;
+        self.builder.set_clip(Some(Clip { x: x as f64, y: y as f64, width: w as f64, height: h as f64 }));
     }
 
     /// Borrow a host-owned image for this frame through the normal UI texture batch.
-    pub fn image(&mut self, x: f64, y: f64, w: f64, h: f64, image: &Image) {
+    pub fn image(&mut self, x: f32, y: f32, w: f32, h: f32, image: &Image) {
         // ponytail: at most 64 borrowed images per frame, linear identity lookup.
         let id = match self.borrowed_images.iter().find(|(_, other)| Rc::ptr_eq(&other.handle, &image.handle)) {
             Some((id, _)) => *id,
@@ -2787,39 +2776,39 @@ impl Paint {
         self.prepare();
         let (iw, ih) = (image.width, image.height);
         self.builder
-            .textured(id, x, y, w, h, 0.0, 0.0, iw as f64, ih as f64, -1)
+            .textured(id, x as f64, y as f64, w as f64, h as f64, 0.0, 0.0, iw as f64, ih as f64, -1)
             .expect("Ui.Paint.image");
     }
 
     /// Square fills cover exactly the pixels of the equivalent triangle rectangle.
-    pub fn fill(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
+    pub fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
         self.prepare();
-        self.builder.rect(x, y, w, h, packed(color), 0, 0.0, 0.0, false).expect("Ui.Paint.fill");
+        self.builder.rect(x as f64, y as f64, w as f64, h as f64, packed(color), 0, 0.0, 0.0, false).expect("Ui.Paint.fill");
     }
 
     /// A band of `width` centred on the rectangle's edges.
-    pub fn stroke_w(&mut self, x: f64, y: f64, w: f64, h: f64, width: f64, color: Color) {
+    pub fn stroke_w(&mut self, x: f32, y: f32, w: f32, h: f32, width: f32, color: Color) {
         self.prepare();
-        self.builder.rect(x, y, w, h, 0, packed(color), width, 0.0, false).expect("Ui.Paint.stroke");
+        self.builder.rect(x as f64, y as f64, w as f64, h as f64, 0, packed(color), width as f64, 0.0, false).expect("Ui.Paint.stroke");
     }
 
-    pub fn stroke(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
+    pub fn stroke(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
         self.stroke_w(x, y, w, h, 1.0, color);
     }
 
     /// A border drawn inside its box, as CSS draws one: `stroke` centres its line on the
     /// rectangle's edge, so a box of whole points gets the line half a width in; the border then
     /// covers whole points.
-    pub fn frame_w(&mut self, x: f64, y: f64, w: f64, h: f64, width: f64, color: Color) {
+    pub fn frame_w(&mut self, x: f32, y: f32, w: f32, h: f32, width: f32, color: Color) {
         let half = width / 2.0;
         self.stroke_w(x + half, y + half, w - width, h - width, width, color);
     }
 
-    pub fn frame(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
+    pub fn frame(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
         self.frame_w(x, y, w, h, 1.0, color);
     }
 
-    pub fn rect(&mut self, x: f64, y: f64, w: f64, h: f64, fill: Option<Color>, stroke: Option<Color>) {
+    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, fill: Option<Color>, stroke: Option<Color>) {
         let fill = match (fill, stroke) {
             (None, None) => Some(color::white()),
             _ => fill,
@@ -2832,13 +2821,14 @@ impl Paint {
         }
     }
 
-    fn wire(&mut self, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64), p3: (f64, f64), width: f64, color: Color) {
+    fn wire(&mut self, p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), p3: (f32, f32), width: f32, color: Color) {
         self.prepare();
-        self.builder.wire([p0, p1, p2, p3], width, packed(color)).expect("Ui.Paint.wire");
+        let d = |p: (f32, f32)| (p.0 as f64, p.1 as f64);
+        self.builder.wire([d(p0), d(p1), d(p2), d(p3)], width as f64, packed(color)).expect("Ui.Paint.wire");
     }
 
     /// Butt-capped; axis-aligned lines are exact rectangles.
-    pub fn line_w(&mut self, from: (f64, f64), to: (f64, f64), width: f64, color: Color) {
+    pub fn line_w(&mut self, from: (f32, f32), to: (f32, f32), width: f32, color: Color) {
         let (x0, y0) = from;
         let (x1, y1) = to;
         let half = width / 2.0;
@@ -2858,11 +2848,11 @@ impl Paint {
         }
     }
 
-    pub fn line(&mut self, from: (f64, f64), to: (f64, f64), color: Color) {
+    pub fn line(&mut self, from: (f32, f32), to: (f32, f32), color: Color) {
         self.line_w(from, to, 1.0, color);
     }
 
-    pub fn circle(&mut self, at: (f64, f64), radius: f64, fill: Option<Color>, stroke: Option<Color>) {
+    pub fn circle(&mut self, at: (f32, f32), radius: f32, fill: Option<Color>, stroke: Option<Color>) {
         self.prepare();
         let fill = match (fill, stroke) {
             (None, None) => Some(color::white()),
@@ -2870,32 +2860,33 @@ impl Paint {
         };
         self.builder
             .rect(
-                at.0 - radius,
-                at.1 - radius,
-                2.0 * radius,
-                2.0 * radius,
+                (at.0 - radius) as f64,
+                (at.1 - radius) as f64,
+                (2.0 * radius) as f64,
+                (2.0 * radius) as f64,
                 fill.map(packed).unwrap_or(0),
                 stroke.map(packed).unwrap_or(0),
                 if stroke.is_some() { 1.0 } else { 0.0 },
-                radius,
+                radius as f64,
                 true,
             )
             .expect("Ui.Paint.circle");
     }
 
     /// Dots every `spacing` points from `origin`, drawn by one quad.
-    pub fn grid(&mut self, x: f64, y: f64, w: f64, h: f64, origin: (f64, f64), spacing: f64, dot: f64, color: Color) {
+    pub fn grid(&mut self, x: f32, y: f32, w: f32, h: f32, origin: (f32, f32), spacing: f32, dot: f32, color: Color) {
         self.prepare();
-        self.builder.grid(x, y, w, h, origin.0, origin.1, spacing, dot, packed(color)).expect("Ui.Paint.grid");
+        self.builder.grid(x as f64, y as f64, w as f64, h as f64, origin.0 as f64, origin.1 as f64, spacing as f64, dot as f64, packed(color)).expect("Ui.Paint.grid");
     }
 
     /// Kit text with its top-left corner at `at`. Without `size` it uses the UI's own font; with
     /// `size` the kit face at that size. Glyphs stay on physical pixels. `tracking` adds points
     /// between glyphs.
-    pub fn text_with(&mut self, at: (f64, f64), size: Option<i64>, tracking: f64, color: Option<Color>, text: &str) {
+    pub fn text_with(&mut self, at: (f32, f32), size: Option<i64>, tracking: f32, color: Option<Color>, text: &str) {
         if text.is_empty() {
             return;
         }
+        let (at, tracking) = ((at.0 as f64, at.1 as f64), tracking as f64);
         let Some(font) = self.fonts.face(size) else { return };
         self.prepare();
         let id = self.fonts.atlas.font_id(&font);
@@ -2937,24 +2928,24 @@ impl Paint {
         }
     }
 
-    pub fn text(&mut self, at: (f64, f64), text: &str) {
+    pub fn text(&mut self, at: (f32, f32), text: &str) {
         self.text_with(at, None, 0.0, None, text);
     }
 
-    pub fn text_c(&mut self, at: (f64, f64), color: Color, text: &str) {
+    pub fn text_c(&mut self, at: (f32, f32), color: Color, text: &str) {
         self.text_with(at, None, 0.0, Some(color), text);
     }
 
-    pub fn text_s(&mut self, at: (f64, f64), size: i64, color: Color, text: &str) {
+    pub fn text_s(&mut self, at: (f32, f32), size: i64, color: Color, text: &str) {
         self.text_with(at, Some(size), 0.0, Some(color), text);
     }
 
-    pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f64 {
+    pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f32 {
         self.fonts.text_width(size, text)
     }
 
     /// Where the top of kit text of `size` goes to sit centred in a row at `y` of height `h`.
-    pub fn text_top(&self, size: Option<i64>, y: f64, h: f64) -> f64 {
+    pub fn text_top(&self, size: Option<i64>, y: f32, h: f32) -> f32 {
         text_top_for(self.font_size, size, y, h)
     }
 
@@ -2963,12 +2954,12 @@ impl Paint {
         8.max(self.font_size - 2)
     }
 
-    pub fn cap_tracking(&self) -> f64 {
-        0.08 * self.label_size() as f64
+    pub fn cap_tracking(&self) -> f32 {
+        0.08 * self.label_size() as f32
     }
 
     /// A label: upper case at `label_size` with 0.08 em of tracking, ink-2 by default.
-    pub fn cap(&mut self, at: (f64, f64), color: Option<Color>, label: &str) {
+    pub fn cap(&mut self, at: (f32, f32), color: Option<Color>, label: &str) {
         let color = color.unwrap_or(theme::ink_2(&self.theme));
         let size = self.label_size();
         let tracking = self.cap_tracking();
@@ -2981,20 +2972,20 @@ impl Paint {
 
     /// The tracking follows every letter, the last too (CSS letter-spacing): text after a label
     /// starts one step later, and a right-aligned label ends one step early.
-    pub fn cap_width(&mut self, label: &str) -> f64 {
+    pub fn cap_width(&mut self, label: &str) -> f32 {
         let mut buffer = std::mem::take(&mut self.label);
         buffer.clear();
         buffer.extend(label.chars().map(|c| c.to_ascii_uppercase()));
         let count = buffer.chars().count();
         let size = self.label_size();
-        let width = self.text_width(Some(size), &buffer) + self.cap_tracking() * count as f64;
+        let width = self.text_width(Some(size), &buffer) + self.cap_tracking() * count as f32;
         self.label = buffer;
         width
     }
 
     /// A chevron centred on `at`: its strokes span 7 x 3.5, which with the 1-point line is the
     /// sheet's 9 x 5.5 of ink.
-    pub fn chevron(&mut self, at: (f64, f64), direction: Dir, color: Color) {
+    pub fn chevron(&mut self, at: (f32, f32), direction: Dir, color: Color) {
         let (a, b) = match direction {
             Dir::Down => ((-3.5, -1.75), (3.5, -1.75)),
             Dir::Up => ((-3.5, 1.75), (3.5, 1.75)),
@@ -3007,13 +2998,13 @@ impl Paint {
             Dir::Right => (1.75, 0.0),
             Dir::Left => (-1.75, 0.0),
         };
-        let p = |d: (f64, f64)| (at.0 + d.0, at.1 + d.1);
+        let p = |d: (f32, f32)| (at.0 + d.0, at.1 + d.1);
         self.line(p(a), p(tip), color);
         self.line(p(tip), p(b), color);
     }
 
     /// Selection: four corner brackets `offset` outside the rectangle.
-    pub fn brackets(&mut self, x: f64, y: f64, w: f64, h: f64, offset: f64, length: f64, width: f64, color: Color) {
+    pub fn brackets(&mut self, x: f32, y: f32, w: f32, h: f32, offset: f32, length: f32, width: f32, color: Color) {
         let x = x - offset;
         let y = y - offset;
         let w = w + 2.0 * offset;
@@ -3036,24 +3027,24 @@ impl Paint {
         }
     }
 
-    pub fn dashed_w(&mut self, from: (f64, f64), to: (f64, f64), width: f64, color: Color) {
+    pub fn dashed_w(&mut self, from: (f32, f32), to: (f32, f32), width: f32, color: Color) {
         let (x0, y0) = from;
         let (x1, y1) = to;
         let length = (x1 - x0).hypot(y1 - y0);
         let steps = (length / 7.0).ceil() as i64;
         for step in 0..steps {
-            let a = step as f64 * 7.0 / length;
-            let b = 1.0f64.min((step as f64 * 7.0 + 4.0) / length);
+            let a = step as f32 * 7.0 / length;
+            let b = 1.0f32.min((step as f32 * 7.0 + 4.0) / length);
             self.line_w((x0 + (x1 - x0) * a, y0 + (y1 - y0) * a), (x0 + (x1 - x0) * b, y0 + (y1 - y0) * b), width, color);
         }
     }
 
-    pub fn dashed(&mut self, from: (f64, f64), to: (f64, f64), color: Color) {
+    pub fn dashed(&mut self, from: (f32, f32), to: (f32, f32), color: Color) {
         self.dashed_w(from, to, 1.0, color);
     }
 
     /// 4 on, 3 off: a zone, a drop target.
-    pub fn dashed_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
+    pub fn dashed_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
         self.dashed((x, y), (x + w, y), color);
         self.dashed((x, y + h), (x + w, y + h), color);
         self.dashed((x, y), (x, y + h), color);
@@ -3062,7 +3053,7 @@ impl Paint {
 
     /// An outline flag centred at `at`: 12 points, the input fill, a line-3 edge inside the box
     /// and, when on, a 6-point mark in ink-2; square, or `round` for the columns after the first.
-    pub fn flag(&mut self, at: (f64, f64), round: bool, on: bool) {
+    pub fn flag(&mut self, at: (f32, f32), round: bool, on: bool) {
         let theme = self.theme;
         let (cx, cy) = at;
         if round {
@@ -3080,13 +3071,13 @@ impl Paint {
     }
 
     /// The ratio of a splitter being dragged, `first / second`, as an accent label with no box.
-    pub fn ratio(&mut self, at: (f64, f64), first: i64, second: i64) {
+    pub fn ratio(&mut self, at: (f32, f32), first: i64, second: i64) {
         let accent = self.theme.accent;
         self.cap(at, Some(accent), &format!("{} / {}", first, second));
     }
 
     /// The focused text's input area, for the input method; the first one painted wins.
-    pub fn input_region(&mut self, cursor: f64, x: f64, y: f64, w: f64, h: f64) {
+    pub fn input_region(&mut self, cursor: f32, x: f32, y: f32, w: f32, h: f32) {
         if self.ime.is_none() {
             self.ime = Some(((x as i64, y as i64, w as i64, h as i64), 0.max(cursor.round() as i64)));
         }
@@ -3096,7 +3087,7 @@ impl Paint {
 impl Ui {
     fn record_hit(&mut self, index: usize, parent: i64, rect: Rect) {
         let position = self.hit_count;
-        let (x, y, w, h) = rect;
+        let Rect { x, y, w, h } = rect;
         let rec = HitRec { key: self.boxes[index].key, parent, flags: self.boxes[index].flags, x, y, w, h };
         if position >= self.hits.len() {
             self.hits.push(rec);
@@ -3125,7 +3116,7 @@ impl Ui {
         }
         let screen_rect = self.screen(index);
         let slot = self.boxes[index].slot;
-        let (x, y, w, h) = screen_rect;
+        let Rect { x, y, w, h } = screen_rect;
         {
             let s = &mut self.slots[slot];
             s.rx = x;
@@ -3138,11 +3129,11 @@ impl Ui {
             Some(f) => f(screen_rect),
         });
         let clipped_hit = intersect(hit, clip_rect);
-        let (_, _, hw, hh) = clipped_hit;
+        let Rect { w: hw, h: hh, .. } = clipped_hit;
         let visible = match (self.boxes[index].hit_rect, &self.boxes[index].hit) {
             (None, None) => hw > 0.0 && hh > 0.0,
             _ => {
-                let (_, _, vw, vh) = intersect(screen_rect, clip_rect);
+                let Rect { w: vw, h: vh, .. } = intersect(screen_rect, clip_rect);
                 vw > 0.0 && vh > 0.0
             }
         };
@@ -3160,7 +3151,7 @@ impl Ui {
             }
             let child_clip = if flags & CLIP != 0 {
                 let padding = self.boxes[index].padding;
-                intersect(clip_rect, (x + padding, y + padding, 0.0f64.max(w - 2.0 * padding), 0.0f64.max(h - 2.0 * padding)))
+                intersect(clip_rect, Rect::new(x + padding, y + padding, 0.0f32.max(w - 2.0 * padding), 0.0f32.max(h - 2.0 * padding)))
             } else {
                 clip_rect
             };
@@ -3176,7 +3167,7 @@ impl Ui {
             if shown && self.keyboard_focus && self.focus == self.boxes[index].key && flags & FOCUS_MARK == 0 {
                 paint.clip_rect = clip_rect;
                 let accent = self.theme.accent;
-                paint.frame(self.l_x[index], self.l_y[index], 0.0f64.max(self.l_w[index]), 0.0f64.max(self.l_h[index]), accent);
+                paint.frame(self.l_x[index], self.l_y[index], 0.0f32.max(self.l_w[index]), 0.0f32.max(self.l_h[index]), accent);
             }
         } else {
             // Culled: keep retained rectangles current for `rect` queries.
@@ -3187,7 +3178,7 @@ impl Ui {
     fn retain_rects(&mut self, index: usize) {
         let mut child = self.boxes[index].first;
         while child != NONE {
-            let (x, y, w, h) = self.screen(child);
+            let Rect { x, y, w, h } = self.screen(child);
             let slot = self.boxes[child].slot;
             let s = &mut self.slots[slot];
             s.rx = x;
@@ -3205,7 +3196,7 @@ impl Ui {
         self.hit_count = 0;
         self.chain_key = 0;
         self.fonts.density = self.density;
-        let clip = (0.0, 0.0, frame.input.size.0 as f64, frame.input.size.1 as f64);
+        let clip = Rect::new(0.0, 0.0, frame.input.size.0 as f32, frame.input.size.1 as f32);
         let placeholder = Fonts::placeholder(self.fonts.backend);
         let mut paint = Paint {
             builder,
@@ -3262,14 +3253,14 @@ impl Ui {
         let tip_w = 2.0 + 12.0 + tw1 + 6.0 + tw2;
         let tip = self.box_("ui-carry-tip", BoxOpts::default().w(Size::Px(tip_w)).h(Size::Px(20.0)).at((px + 14.0, py + 14.0 + 20.0 + 8.0)));
         let value = payload.value.clone();
-        self.draw_over(&ghost, move |paint, (x, y, w, h)| {
+        self.draw_over(&ghost, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
-            paint.text_s((x + 6.0, y + ((20 - size) as f64 / 2.0).floor()), size, theme.foreground, &value);
+            paint.text_s((x + 6.0, y + ((20 - size) as f32 / 2.0).floor()), size, theme.foreground, &value);
         });
-        self.draw_over(&tip, move |paint, (x, y, w, h)| {
+        self.draw_over(&tip, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
             paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
-            let ty = y + ((20 - small) as f64 / 2.0).floor();
+            let ty = y + ((20 - small) as f32 / 2.0).floor();
             paint.text_s((x + 7.0, ty), small, theme.foreground, tip_text);
             paint.text_s((x + 7.0 + tw1 + 6.0, ty), small, theme::ink_3(&theme), tip_key);
         });
@@ -3340,9 +3331,9 @@ impl Ui {
         self.set_box(
             root,
             NO_FLAGS,
-            Size::Px(frame.input.size.0 as f64),
-            Size::Px(frame.input.size.1 as f64),
-            f64::INFINITY,
+            Size::Px(frame.input.size.0 as f32),
+            Size::Px(frame.input.size.1 as f32),
+            f32::INFINITY,
             false,
             0.0,
             0.0,
@@ -3467,8 +3458,8 @@ impl Ui {
             return;
         }
         let size = 8.max(self.font_size - 2);
-        let char_width = 1.0f64.max(self.text_width(Some(size), "0"));
-        let width = 400.0f64.min(40.0f64.max(self.view_w - 16.0));
+        let char_width = 1.0f32.max(self.text_width(Some(size), "0"));
+        let width = 400.0f32.min(40.0f32.max(self.view_w - 16.0));
         let columns = 1.max(((width - 14.0) / char_width) as i64) as usize;
         let mut lines: Vec<String> = Vec::new();
         let mut line = String::new();
@@ -3482,25 +3473,25 @@ impl Ui {
             }
         }
         lines.push(line);
-        let mut widest: f64 = 0.0;
+        let mut widest: f32 = 0.0;
         for l in &lines {
             widest = widest.max(self.text_width(Some(size), l));
         }
         let width = width.min(14.0 + widest);
-        let height = 20.0 + 14.0 * (lines.len() as f64 - 1.0);
+        let height = 20.0 + 14.0 * (lines.len() as f32 - 1.0);
         let (px, py) = self.pointer;
-        let x = 8.0f64.max((px + 12.0).min(self.view_w - width - 8.0));
-        let y = if py + height + 24.0 <= self.view_h { py + 20.0 } else { 8.0f64.max(py - height - 8.0) };
+        let x = 8.0f32.max((px + 12.0).min(self.view_w - width - 8.0));
+        let y = if py + height + 24.0 <= self.view_h { py + 20.0 } else { 8.0f32.max(py - height - 8.0) };
         let saved = self.enter_root();
         let tip = self.box_("ui-tooltip", BoxOpts::default().w(Size::Px(width)).h(Size::Px(height)).at((x, y)));
         self.overlays.push(tip.index);
         let theme = self.theme;
-        self.draw(&tip, move |paint, (x, y, w, h)| {
+        self.draw(&tip, move |paint, Rect { x, y, w, h }| {
             paint.fill(x, y, w, h, theme.input);
             paint.frame(x, y, w, h, theme::edge(&theme));
             for (i, line) in lines.iter().enumerate() {
                 paint.text_s(
-                    (x + 7.0, y + 14.0 * i as f64 + ((20 - size) as f64 / 2.0).floor()),
+                    (x + 7.0, y + 14.0 * i as f32 + ((20 - size) as f32 / 2.0).floor()),
                     size,
                     theme.foreground,
                     line,
@@ -3510,7 +3501,7 @@ impl Ui {
         self.leave(saved);
     }
 
-    pub fn col(&mut self, padding: f64, label: &str, f: &mut dyn FnMut(&mut Ui)) {
+    pub fn col(&mut self, padding: f32, label: &str, f: &mut dyn FnMut(&mut Ui)) {
         let b = self.box_(label, BoxOpts::default().axis(Axis::Column).padding(padding));
         self.within(&b, f);
     }
@@ -3596,12 +3587,12 @@ impl Ui {
         self.modal_heights.insert(key, (height, self.frame_number));
     }
 
-    pub(crate) fn modal_height(&self, key: i64) -> f64 {
+    pub(crate) fn modal_height(&self, key: i64) -> f32 {
         self.modal_heights.get(&key).map(|(h, _)| *h).unwrap_or(0.0)
     }
 
 
-    pub(crate) fn slot_rw(&self, slot: usize) -> f64 {
+    pub(crate) fn slot_rw(&self, slot: usize) -> f32 {
         self.slots[slot].rw
     }
 

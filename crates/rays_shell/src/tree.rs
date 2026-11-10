@@ -11,7 +11,7 @@ use input::{Key, MouseButton};
 use pxui::theme;
 use pxui::ui::*;
 use rays::frame;
-use rays_math::color::T as Color;
+use pxui::geom::color::T as Color;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -93,7 +93,7 @@ pub struct Tree {
     renaming: Option<(i64, String)>,
     drag: Option<Drag>,
     reveal: bool,
-    context: Option<(f64, f64, i64, Vec<i64>)>,
+    context: Option<(f32, f32, i64, Vec<i64>)>,
 }
 
 pub fn create() -> Tree {
@@ -308,8 +308,8 @@ pub fn run_command(t: &mut Tree, rows: &[Row], selected: &[i64], command: Comman
 }
 
 /// a 12-point flag and its 8-point gap
-const FLAG_WIDTH: f64 = 20.0;
-const INDENT_STEP: f64 = 12.0;
+const FLAG_WIDTH: f32 = 20.0;
+const INDENT_STEP: f32 = 12.0;
 
 fn ancestors(rows: &[Row], shown: &[usize], k: usize) -> Vec<usize> {
     let mut chain: Vec<usize> = Vec::new();
@@ -324,7 +324,7 @@ fn ancestors(rows: &[Row], shown: &[usize], k: usize) -> Vec<usize> {
 }
 
 /// the ancestors of the first row in view stay at the top while the list is scrolled
-fn sticky_of(rows: &[Row], shown: &[usize], height: f64, scroll: f64) -> Vec<usize> {
+fn sticky_of(rows: &[Row], shown: &[usize], height: f32, scroll: f32) -> Vec<usize> {
     let count = shown.len();
     if count == 0 || scroll <= 0.0 {
         return Vec::new();
@@ -333,7 +333,7 @@ fn sticky_of(rows: &[Row], shown: &[usize], height: f64, scroll: f64) -> Vec<usi
     ancestors(rows, shown, k).into_iter().take(3).collect()
 }
 
-fn drop_of(offset: f64) -> DropAt {
+fn drop_of(offset: f32) -> DropAt {
     if offset < 0.25 {
         DropAt::Before
     } else if offset > 0.75 {
@@ -348,8 +348,8 @@ fn drop_of(offset: f64) -> DropAt {
 /// slice is painted. `title` leads the header, e.g. the level's breadcrumb.
 pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i64, i64, i64), title: &str, columns: &[String], rows: &[Row], selected: &[i64], intents: &mut Vec<Intent>) {
     let theme = ui.theme();
-    let height = ui.row_height() as f64;
-    let (x, y, w, h) = (bounds.0 as f64, bounds.1 as f64, bounds.2 as f64, bounds.3 as f64);
+    let height = ui.row_height() as f32;
+    let (x, y, w, h) = (bounds.0 as f32, bounds.1 as f32, bounds.2 as f32, bounds.3 as f32);
     let shown = visible(t, rows);
     let count = shown.len();
     let at = |k: usize| &rows[shown[k]];
@@ -362,7 +362,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
     let mut scroll = ui.scroll_offset(&boxed);
     if t.reveal {
         if let Some(k) = t.focus.and_then(|f| position(rows, &shown, f)) {
-            let row_top = k as f64 * height;
+            let row_top = k as f32 * height;
             if row_top < scroll {
                 scroll = row_top;
             } else if row_top + height > scroll + body {
@@ -370,14 +370,14 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             }
         }
     }
-    let scroll = 0.0f64.max(scroll.min(0.0f64.max((count as f64 * height) - body)));
+    let scroll = 0.0f32.max(scroll.min(0.0f32.max((count as f32 * height) - body)));
     if t.reveal {
         ui.set_scroll_offset(&boxed, scroll);
     }
     ui.within(&boxed, &mut |ui| {
-        ui.box_("tree-content", BoxOpts::default().w(Size::Px(w)).h(Size::Px((count + 1) as f64 * height)));
+        ui.box_("tree-content", BoxOpts::default().w(Size::Px(w)).h(Size::Px((count + 1) as f32 * height)));
     });
-    let row_at = |py: f64| -> Option<usize> {
+    let row_at = |py: f32| -> Option<usize> {
         // a sticky row is the row under the pointer, not the one scrolled beneath it
         let slot = ((py - top) / height).floor() as i64;
         let sticky = sticky_of(rows, &shown, height, scroll);
@@ -391,8 +391,8 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
         }
     };
     // the last flag ends 12 from the edge, a flag column is a 12-point flag and an 8-point gap
-    let columns_x = x + w - 24.0 - (FLAG_WIDTH * 0.max(columns.len() as i64 - 1) as f64);
-    let column_at = |px: f64| -> Option<i64> {
+    let columns_x = x + w - 24.0 - (FLAG_WIDTH * 0.max(columns.len() as i64 - 1) as f32);
+    let column_at = |px: f32| -> Option<i64> {
         if px < columns_x - 4.0 { None } else { Some(((px - columns_x) / FLAG_WIDTH) as i64) }
     };
     let flag = |k: usize, column: i64| -> bool {
@@ -414,7 +414,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             Some(k) => {
                 let row = at(k);
                 let px = signal.press_point.0;
-                let chevron_x = x + 12.0 + (row.depth as f64 * INDENT_STEP);
+                let chevron_x = x + 12.0 + (row.depth as f32 * INDENT_STEP);
                 if has_children(rows, shown[k]) && px >= chevron_x - 6.0 && px < chevron_x + 10.0 {
                     if t.folded.contains(&row.id) {
                         t.folded.remove(&row.id);
@@ -513,7 +513,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
             } else {
                 match row_at(signal.pointer.1) {
                     Some(k) if moved && !ids.contains(&at(k).id) && !at(k).ghost => {
-                        let offset = ((py - top + scroll) / height) - k as f64;
+                        let offset = ((py - top + scroll) / height) - k as f32;
                         intents.push(Intent::Move { ids, target: at(k).id, drop: drop_of(offset) });
                     }
                     _ => {}
@@ -545,7 +545,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
     let drop_hint: Option<(usize, DropAt)> = match &t.drag {
         Some(Drag::Rows { moved: true, ids }) => match row_at(signal.pointer.1) {
             Some(k) if !ids.contains(&at(k).id) => {
-                let offset = ((signal.pointer.1 - top + scroll) / height) - k as f64;
+                let offset = ((signal.pointer.1 - top + scroll) / height) - k as f32;
                 Some((k, drop_of(offset)))
             }
             _ => None,
@@ -593,7 +593,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
                 None
             };
             let flag_filter_none = filter.is_none();
-            let draw_row = |paint: &mut Paint, k: usize, row_y: f64| {
+            let draw_row = |paint: &mut Paint, k: usize, row_y: f32| {
                 let row = at(k);
                 let index = shown[k];
                 let selected = is_selected(row.id);
@@ -607,7 +607,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
                 } else if hover == Some(k) {
                     paint.fill(x, row_y, w, height, theme::faint_border(&theme));
                 }
-                let indent = |level: i64| x + 12.0 + (level as f64 * INDENT_STEP);
+                let indent = |level: i64| x + 12.0 + (level as f32 * INDENT_STEP);
                 let text_y = paint.text_top(None, row_y, height);
                 if has_children(rows, index) {
                     paint.chevron(
@@ -638,35 +638,35 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
                 }
                 // Flags: a square for the first column (visible), a round one for the others.
                 for (column, value) in row.flags.iter().enumerate() {
-                    let cx = columns_x + (column as f64 * FLAG_WIDTH) + 6.0;
+                    let cx = columns_x + (column as f32 * FLAG_WIDTH) + 6.0;
                     let cy = row_y + (height / 2.0);
                     paint.flag((cx, cy), column > 0, *value);
                 }
             };
             for k in first..=last {
-                draw_row(paint, k as usize, top + (k as f64 * height) - scroll);
+                draw_row(paint, k as usize, top + (k as f32 * height) - scroll);
             }
             // the sheet's brackets: 4 points out of the fill, which is 6 in from the list's edge; after
             // every row, since they reach into the rows above and below, whose ground would cover them
-            let mark = |paint: &mut Paint, k: usize, row_y: f64| {
+            let mark = |paint: &mut Paint, k: usize, row_y: f32| {
                 if is_selected(at(k).id) {
                     paint.brackets(x + 6.0, row_y, w - 12.0, height, 4.0, 8.0, 2.0, theme.accent);
                 }
             };
             for k in first..=last {
-                mark(paint, k as usize, top + (k as f64 * height) - scroll);
+                mark(paint, k as usize, top + (k as f32 * height) - scroll);
             }
             for (slot, k) in sticky.iter().enumerate() {
-                draw_row(paint, *k, top + (slot as f64 * height));
+                draw_row(paint, *k, top + (slot as f32 * height));
             }
             for (slot, k) in sticky.iter().enumerate() {
-                mark(paint, *k, top + (slot as f64 * height));
+                mark(paint, *k, top + (slot as f32 * height));
             }
             if !sticky.is_empty() {
-                paint.fill(x, top + (sticky.len() as f64 * height), w, 1.0, theme::edge(&theme));
+                paint.fill(x, top + (sticky.len() as f32 * height), w, 1.0, theme::edge(&theme));
             }
             if let Some((k, drop)) = drop_hint {
-                let row_y = top + (k as f64 * height) - scroll;
+                let row_y = top + (k as f32 * height) - scroll;
                 match drop {
                     DropAt::Inside => paint.frame_w(x, row_y, w, height, 2.0, theme.accent),
                     DropAt::Before | DropAt::After => {
@@ -682,7 +682,7 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
                 paint.cap((x + 12.0, cy), Some(ink_3), &title);
                 for (column, name) in columns.iter().enumerate() {
                     let nw = paint.cap_width(name);
-                    paint.cap((columns_x + (column as f64 * FLAG_WIDTH) + 6.0 - (nw / 2.0), cy), Some(ink_2), name);
+                    paint.cap((columns_x + (column as f32 * FLAG_WIDTH) + 6.0 - (nw / 2.0), cy), Some(ink_2), name);
                 }
             }
         });

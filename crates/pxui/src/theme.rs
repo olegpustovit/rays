@@ -1,7 +1,7 @@
 //! The design kit's palette and typography (kit rev 3, specification/pxui.md): four type sizes, three
 //! text inks, three line strengths. Separation comes from space first, a hairline second, a
 //! rectangle last; nothing is filled with ink.
-use rays_math::color::{self, T as Color};
+use crate::geom::{color, Rgba as Color};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
