@@ -53,7 +53,7 @@ fn numeric_character(c: char) -> bool {
 
 fn clipboard_command(command: bool, event: &Event) -> Option<char> {
     match event {
-        Event::Key_pressed(Key::KeyChar(key)) if command => Some(key.to_ascii_lowercase()),
+        Event::KeyPressed(Key::KeyChar(key)) if command => Some(key.to_ascii_lowercase()),
         _ => None,
     }
 }
@@ -542,7 +542,7 @@ impl Ui {
             _ => {}
         }
         match event {
-            Event::Text_input(text) if accept(text) => {
+            Event::TextInput(text) if accept(text) => {
                 let typing = !text.chars().any(|c| c == ' ' || c == '\t' || c == '\n');
                 self.remember(edit, typing);
                 replace_text(edit, text);
@@ -551,7 +551,7 @@ impl Ui {
                 }
                 true
             }
-            Event::Key_pressed(Key::Backspace) => {
+            Event::KeyPressed(Key::Backspace) => {
                 let target = if line {
                     line_start(&edit.text, edit.caret)
                 } else if word {
@@ -561,7 +561,7 @@ impl Ui {
                 };
                 self.delete_to(edit, target)
             }
-            Event::Key_pressed(Key::Delete) => {
+            Event::KeyPressed(Key::Delete) => {
                 let target = if line {
                     line_end(&edit.text, edit.caret)
                 } else if word {
@@ -571,7 +571,7 @@ impl Ui {
                 };
                 self.delete_to(edit, target)
             }
-            Event::Key_pressed(Key::ArrowLeft) => {
+            Event::KeyPressed(Key::ArrowLeft) => {
                 let target = if line {
                     line_start(&edit.text, edit.caret)
                 } else if word {
@@ -584,7 +584,7 @@ impl Ui {
                 move_caret(edit, target, shift);
                 false
             }
-            Event::Key_pressed(Key::ArrowRight) => {
+            Event::KeyPressed(Key::ArrowRight) => {
                 let target = if line {
                     line_end(&edit.text, edit.caret)
                 } else if word {
@@ -597,12 +597,12 @@ impl Ui {
                 move_caret(edit, target, shift);
                 false
             }
-            Event::Key_pressed(Key::Home) => {
+            Event::KeyPressed(Key::Home) => {
                 let t = line_start(&edit.text, edit.caret);
                 move_caret(edit, t, shift);
                 false
             }
-            Event::Key_pressed(Key::End) => {
+            Event::KeyPressed(Key::End) => {
                 let t = line_end(&edit.text, edit.caret);
                 move_caret(edit, t, shift);
                 false
@@ -756,11 +756,11 @@ impl Ui {
                 self.point_text_caret(p.size, &mut edit, signal, shift, left, (cx + cw - 2) as f64);
                 for (event, modifiers) in keys {
                     match event {
-                        Event::Key_pressed(Key::Enter) if !self.command_modifiers(modifiers) => match parse(&edit.text) {
+                        Event::KeyPressed(Key::Enter) if !self.command_modifiers(modifiers) => match parse(&edit.text) {
                             Some(value) => committed = Some(value),
                             None => state = 0,
                         },
-                        Event::Key_pressed(Key::Escape) => cancelled = true,
+                        Event::KeyPressed(Key::Escape) => cancelled = true,
                         event => {
                             if self.edit_text_event(false, &mut edit, accept, modifiers, event) {
                                 state = if parse(&edit.text).is_some() { 1 } else { 0 };
@@ -792,7 +792,7 @@ impl Ui {
                     && (signal.release_point.1 - signal.press_point.1).abs() < 4.0;
                 let platform = self.platform();
                 let enter = move |(event, modifiers): &(Event, Vec<Key>)| {
-                    matches!(event, Event::Key_pressed(Key::Enter)) && !input::command_held(platform, modifiers)
+                    matches!(event, Event::KeyPressed(Key::Enter)) && !input::command_held(platform, modifiers)
                 };
                 let enter_pressed = keys.iter().any(|k| enter(k));
                 if p.edit_request
@@ -1315,12 +1315,12 @@ impl Ui {
             self.point_text_caret(None, &mut edit, &signal, shift, (fx + 2) as f64, (fx + fw - 2) as f64);
             for (event, modifiers) in self.key_events(&field) {
                 match &event {
-                    Event::Key_pressed(Key::Enter) if !self.command_modifiers(&modifiers) => {
+                    Event::KeyPressed(Key::Enter) if !self.command_modifiers(&modifiers) => {
                         step = if modifiers.contains(&Key::Shift) { LineStep::Previous } else { LineStep::Next };
                     }
-                    Event::Key_pressed(Key::ArrowDown) => step = LineStep::Next,
-                    Event::Key_pressed(Key::ArrowUp) => step = LineStep::Previous,
-                    Event::Key_pressed(Key::Escape) => step = LineStep::Close,
+                    Event::KeyPressed(Key::ArrowDown) => step = LineStep::Next,
+                    Event::KeyPressed(Key::ArrowUp) => step = LineStep::Previous,
+                    Event::KeyPressed(Key::Escape) => step = LineStep::Close,
                     event => {
                         self.edit_text_event(false, &mut edit, &|_| true, &modifiers, event);
                     }
@@ -1722,33 +1722,33 @@ impl Ui {
             let line = row_at(&rows, edit.caret);
             // Up and Down keep the column they started from across shorter rows
             match &event {
-                Event::Key_pressed(Key::ArrowUp) | Event::Key_pressed(Key::ArrowDown) if !command => {}
-                Event::Key_pressed(Key::PageUp | Key::PageDown | Key::Shift | Key::Ctrl | Key::Alt | Key::Meta) => {}
+                Event::KeyPressed(Key::ArrowUp) | Event::KeyPressed(Key::ArrowDown) if !command => {}
+                Event::KeyPressed(Key::PageUp | Key::PageDown | Key::Shift | Key::Ctrl | Key::Alt | Key::Meta) => {}
                 _ => self.edit_column = -1.0,
             }
             let listing = shown > 0 && !st.closed;
             match &event {
-                Event::Key_pressed(Key::Enter) if command => st.submitted = true,
+                Event::KeyPressed(Key::Enter) if command => st.submitted = true,
                 // the completion popup takes Up, Down, Tab, Enter and Escape while it is open
-                Event::Key_pressed(key @ (Key::ArrowUp | Key::ArrowDown)) if listing => {
+                Event::KeyPressed(key @ (Key::ArrowUp | Key::ArrowDown)) if listing => {
                     let n = items.len();
                     st.chosen = true;
                     st.selected = (st.selected + if *key == Key::ArrowUp { n - 1 } else { 1 }) % n;
                 }
-                Event::Key_pressed(Key::Tab) if listing && !command => {
+                Event::KeyPressed(Key::Tab) if listing && !command => {
                     let c = items[st.selected].clone();
                     self.accept_completion(edit, suggest, st, &c);
                 }
-                Event::Key_pressed(Key::Enter) if listing && st.chosen => {
+                Event::KeyPressed(Key::Enter) if listing && st.chosen => {
                     let c = items[st.selected].clone();
                     self.accept_completion(edit, suggest, st, &c);
                 }
-                Event::Key_pressed(Key::Escape) if open != 0 && !st.closed => {
+                Event::KeyPressed(Key::Escape) if open != 0 && !st.closed => {
                     self.set_state(suggest, 0);
                     st.closed = true;
                 }
-                Event::Key_pressed(Key::Escape) => self.unfocus(),
-                Event::Key_pressed(Key::Enter) => {
+                Event::KeyPressed(Key::Escape) => self.unfocus(),
+                Event::KeyPressed(Key::Enter) => {
                     let indent = match language {
                         Some(l) => (l.indent)(&edit.text, text_selection(edit).0 as i64),
                         None => String::new(),
@@ -1762,7 +1762,7 @@ impl Ui {
                 }
                 // brackets come in pairs: an opener wraps the selection or inserts both, a closer
                 // typed before itself steps over it, Backspace between an empty pair takes both
-                Event::Text_input(s) if language.is_some() && s.len() == 1 && !command => {
+                Event::TextInput(s) if language.is_some() && s.len() == 1 && !command => {
                     let language_ref = language.as_ref().unwrap();
                     let c = s.chars().next().unwrap();
                     let pairs = &language_ref.pairs;
@@ -1805,7 +1805,7 @@ impl Ui {
                     }
                     st.typed = true;
                 }
-                Event::Key_pressed(Key::Backspace)
+                Event::KeyPressed(Key::Backspace)
                     if language.is_some()
                         && !command
                         && edit.caret == edit.anchor
@@ -1824,7 +1824,7 @@ impl Ui {
                     st.typed = true;
                 }
                 // Command-X / C with no selection take the caret's whole logical line, newline included
-                Event::Key_pressed(Key::KeyChar(key @ ('x' | 'X' | 'c' | 'C'))) if command && edit.caret == edit.anchor => {
+                Event::KeyPressed(Key::KeyChar(key @ ('x' | 'X' | 'c' | 'C'))) if command && edit.caret == edit.anchor => {
                     let s = line_start(&edit.text, edit.caret);
                     let e = edit.text.len().min(line_end(&edit.text, edit.caret) + 1);
                     if rays::clipboard::set_text(&edit.text[s..e]).is_ok() && (*key == 'x' || *key == 'X') {
@@ -1835,7 +1835,7 @@ impl Ui {
                         st.typed = true;
                     }
                 }
-                Event::Key_pressed(Key::Tab) if !command && edit.caret != edit.anchor => {
+                Event::KeyPressed(Key::Tab) if !command && edit.caret != edit.anchor => {
                     // Tab and Shift-Tab with a selection indent and dedent every line it touches
                     let (a, b) = text_selection(edit);
                     let (first, stop) = line_block(&edit.text, a, b);
@@ -1861,7 +1861,7 @@ impl Ui {
                         keep_selection(edit, first, first + shifted.len());
                     }
                 }
-                Event::Key_pressed(Key::Tab) if !command => {
+                Event::KeyPressed(Key::Tab) if !command => {
                     if !shift {
                         self.change(edit, st);
                         replace_text(edit, "  ");
@@ -1885,7 +1885,7 @@ impl Ui {
                 // line and form edits: Command-/ toggles comments, Option-Up and Down move the
                 // lines, with Shift duplicate them, Command-Option-Up selects the enclosing form,
                 // Command-Shift-\ jumps to the matching bracket
-                Event::Key_pressed(Key::KeyChar('/')) if command && language.is_some() => {
+                Event::KeyPressed(Key::KeyChar('/')) if command && language.is_some() => {
                     let (a, b) = text_selection(edit);
                     let (first, stop) = line_block(&edit.text, a, b);
                     let block = edit.text[first..stop].to_owned();
@@ -1902,7 +1902,7 @@ impl Ui {
                         }
                     }
                 }
-                Event::Key_pressed(key @ (Key::ArrowUp | Key::ArrowDown)) if modifiers.contains(&Key::Alt) && !command => {
+                Event::KeyPressed(key @ (Key::ArrowUp | Key::ArrowDown)) if modifiers.contains(&Key::Alt) && !command => {
                     let (a, b) = text_selection(edit);
                     let (first, stop) = line_block(&edit.text, a, b);
                     let n = edit.text.len();
@@ -1933,7 +1933,7 @@ impl Ui {
                         shift_by(edit, after as i64 - stop as i64);
                     }
                 }
-                Event::Key_pressed(Key::ArrowUp) if command && modifiers.contains(&Key::Alt) => {
+                Event::KeyPressed(Key::ArrowUp) if command && modifiers.contains(&Key::Alt) => {
                     let (a, b) = text_selection(edit);
                     if let Some(l) = language {
                         let pairs: Vec<(usize, usize)> = (l.brackets)(&edit.text).iter().map(|(o, c)| (clamp_pos(*o), clamp_pos(*c))).collect();
@@ -1943,7 +1943,7 @@ impl Ui {
                         }
                     }
                 }
-                Event::Key_pressed(Key::KeyChar('\\')) if command && shift && language.is_some() => {
+                Event::KeyPressed(Key::KeyChar('\\')) if command && shift && language.is_some() => {
                     let l = language.as_ref().unwrap();
                     let pairs: Vec<(usize, usize)> = (l.brackets)(&edit.text).iter().map(|(o, c)| (clamp_pos(*o), clamp_pos(*c))).collect();
                     if let Some(at) = bracket_jump(&pairs, edit.caret) {
@@ -1951,26 +1951,26 @@ impl Ui {
                         edit.anchor = at;
                     }
                 }
-                Event::Key_pressed(Key::ArrowUp) if command => move_caret(edit, 0, shift),
-                Event::Key_pressed(Key::ArrowDown) if command => move_caret(edit, edit.text.len(), shift),
-                Event::Key_pressed(Key::ArrowUp) => self.vertical(edit, &rows, count, line, -1, shift),
-                Event::Key_pressed(Key::ArrowDown) => self.vertical(edit, &rows, count, line, 1, shift),
-                Event::Key_pressed(Key::PageUp) => self.vertical(edit, &rows, count, line, -page, shift),
-                Event::Key_pressed(Key::PageDown) => self.vertical(edit, &rows, count, line, page, shift),
-                Event::Key_pressed(Key::Home | Key::ArrowLeft)
-                    if self.line_modifiers(&modifiers) || event == Event::Key_pressed(Key::Home) =>
+                Event::KeyPressed(Key::ArrowUp) if command => move_caret(edit, 0, shift),
+                Event::KeyPressed(Key::ArrowDown) if command => move_caret(edit, edit.text.len(), shift),
+                Event::KeyPressed(Key::ArrowUp) => self.vertical(edit, &rows, count, line, -1, shift),
+                Event::KeyPressed(Key::ArrowDown) => self.vertical(edit, &rows, count, line, 1, shift),
+                Event::KeyPressed(Key::PageUp) => self.vertical(edit, &rows, count, line, -page, shift),
+                Event::KeyPressed(Key::PageDown) => self.vertical(edit, &rows, count, line, page, shift),
+                Event::KeyPressed(Key::Home | Key::ArrowLeft)
+                    if self.line_modifiers(&modifiers) || event == Event::KeyPressed(Key::Home) =>
                 {
                     move_caret(edit, start_of(&rows, line), shift)
                 }
-                Event::Key_pressed(Key::End | Key::ArrowRight)
-                    if self.line_modifiers(&modifiers) || event == Event::Key_pressed(Key::End) =>
+                Event::KeyPressed(Key::End | Key::ArrowRight)
+                    if self.line_modifiers(&modifiers) || event == Event::KeyPressed(Key::End) =>
                 {
                     move_caret(edit, stop_of(&rows, line), shift)
                 }
                 event => {
                     if self.edit_text_event(true, edit, &|_| true, &modifiers, event) {
                         st.changed = true;
-                        if matches!(event, Event::Text_input(_) | Event::Key_pressed(Key::Backspace | Key::Delete)) {
+                        if matches!(event, Event::TextInput(_) | Event::KeyPressed(Key::Backspace | Key::Delete)) {
                             st.typed = true;
                         }
                     }
@@ -2397,7 +2397,7 @@ impl Ui {
             _ => None,
         };
         if hovered_number.is_some() {
-            self.request_cursor(Cursor::Horizontal_resize);
+            self.request_cursor(Cursor::HorizontalResize);
         }
         if let (Some(l), Some(byte)) = (&language, under_pointer) {
             if hovered_number.is_none() && open == 0 {
@@ -2776,24 +2776,24 @@ impl Ui {
             let count = rows.len() as i64;
             if result == Pick::None {
                 match &event {
-                    Event::Key_pressed(Key::Backspace) if edit.text.is_empty() => result = Pick::Back,
-                    Event::Key_pressed(Key::ArrowLeft) if edit.text.is_empty() => result = Pick::Back,
-                    Event::Key_pressed(Key::ArrowDown) if count > 0 => {
+                    Event::KeyPressed(Key::Backspace) if edit.text.is_empty() => result = Pick::Back,
+                    Event::KeyPressed(Key::ArrowLeft) if edit.text.is_empty() => result = Pick::Back,
+                    Event::KeyPressed(Key::ArrowDown) if count > 0 => {
                         cursor = (cursor + 1) % count;
                         armed = -1;
                     }
-                    Event::Key_pressed(Key::ArrowUp) if count > 0 => {
+                    Event::KeyPressed(Key::ArrowUp) if count > 0 => {
                         cursor = (cursor + count - 1) % count;
                         armed = -1;
                     }
-                    Event::Key_pressed(Key::Enter) => {
+                    Event::KeyPressed(Key::Enter) => {
                         result = if count > 0 {
                             if off(cursor) { Pick::None } else { Pick::Pick(cursor) }
                         } else {
                             Pick::Submit
                         };
                     }
-                    Event::Key_pressed(Key::Delete) if count > 0 && edit.caret == edit.anchor => {
+                    Event::KeyPressed(Key::Delete) if count > 0 && edit.caret == edit.anchor => {
                         if armed == cursor {
                             result = Pick::Delete(cursor);
                             armed = -1;
@@ -2801,7 +2801,7 @@ impl Ui {
                             armed = cursor;
                         }
                     }
-                    Event::Key_pressed(Key::Escape) => result = Pick::Cancel,
+                    Event::KeyPressed(Key::Escape) => result = Pick::Cancel,
                     event => {
                         self.edit_text_event(false, &mut edit, &|_| true, &modifiers, event);
                         if edit.text != query {

@@ -30,7 +30,7 @@ pub fn window_pxui_picker() {
     let last = Cell::new(Pick::None);
     let off_index = Cell::new(-1i64);
     let all_off = Cell::new(false);
-    let mut pick = |ui: &mut Ui, command: bool, shift: bool, events: Vec<Event>| {
+    let pick = |ui: &mut Ui, command: bool, shift: bool, events: Vec<Event>| {
         let keys = if command {
             vec![Key::Meta]
         } else if shift {
@@ -60,7 +60,7 @@ pub fn window_pxui_picker() {
     if last.get() != Pick::Pick(2) {
         fail("picker arrows did not move the cursor");
     }
-    pick(&mut ui, false, false, vec![Event::Text_input("dla".into()), key_down(Key::Enter)]);
+    pick(&mut ui, false, false, vec![Event::TextInput("dla".into()), key_down(Key::Enter)]);
     if *query.borrow() != "dla" || last.get() != Pick::Pick(0) || rows(&query.borrow())[0].0 != "delta" {
         fail("picker typing did not filter rows before Enter");
     }
@@ -105,7 +105,7 @@ pub fn window_pxui_picker() {
     if last.get() != Pick::Delete(0) {
         fail("picker did not delete on the second Delete");
     }
-    pick(&mut ui, false, false, vec![Event::Text_input("zzz".into()), key_down(Key::Enter)]);
+    pick(&mut ui, false, false, vec![Event::TextInput("zzz".into()), key_down(Key::Enter)]);
     if last.get() != Pick::Submit {
         fail("picker Enter with no rows did not submit");
     }
@@ -125,7 +125,7 @@ pub fn window_pxui_picker() {
     off_index.set(1);
     pick(&mut ui, false, false, vec![]);
     pick(&mut ui, false, false, vec![press((60, 3 + 48 + 12)), release((60, 3 + 48 + 12))]);
-    pick(&mut ui, false, false, vec![Event::Text_input("a".into())]);
+    pick(&mut ui, false, false, vec![Event::TextInput("a".into())]);
     if last.get() != Pick::None || *query.borrow() != "a" {
         fail("a click on an unavailable picker row took the keyboard");
     }
@@ -148,7 +148,7 @@ pub fn window_pxui_context_menu() {
     // dismisses; the host keeps it open on Open.
     let mut ui = field_ui();
     let result = Cell::new(MenuResult::Open);
-    let mut menu = |ui: &mut Ui, events: Vec<Event>| {
+    let menu = |ui: &mut Ui, events: Vec<Event>| {
         ui.frame(&frame_at(vec![], 1.0, 0.0, events), &mut |ui| {
             result.set(ui.context_menu(
                 (20.0, 20.0),
@@ -185,7 +185,7 @@ pub fn window_pxui_context_menu() {
 
 pub fn window_pxui_submenu() {
     let mut ui = field_ui();
-    let mut submenu = |ui: &mut Ui, events: Vec<Event>| -> MenuResult {
+    let submenu = |ui: &mut Ui, events: Vec<Event>| -> MenuResult {
         let mut out = MenuResult::Open;
         ui.frame(&frame_at(vec![], 1.0, 0.0, events), &mut |ui| {
             let o = MenuOpts {
@@ -315,25 +315,25 @@ pub fn text_area_start(platform: Platform) -> Rig {
     rig.plain(vec![
         press((150, 12)),
         release((150, 12)),
-        Event::Text_input("ab".into()),
+        Event::TextInput("ab".into()),
         key_down(Key::Enter),
-        Event::Text_input("cd".into()),
+        Event::TextInput("cd".into()),
     ]);
     rig.expect("insert and Enter", "ab\ncd");
-    rig.plain(vec![key_down(Key::ArrowUp), Event::Text_input("X".into())]);
+    rig.plain(vec![key_down(Key::ArrowUp), Event::TextInput("X".into())]);
     rig.expect("Up keeps the column", "abX\ncd");
-    rig.plain(vec![key_down(Key::Home), Event::Text_input("_".into())]);
+    rig.plain(vec![key_down(Key::Home), Event::TextInput("_".into())]);
     rig.expect("Home is line-scoped", "_abX\ncd");
     rig.plain(vec![key_down(Key::ArrowDown), key_down(Key::End), key_down(Key::Backspace)]);
     rig.expect("Down then End then Backspace", "_abX\nc");
     rig.plain(vec![key_down(Key::Delete)]);
     rig.expect("Delete at the end", "_abX\nc");
     let cursor = rig.region().1;
-    rig.plain(vec![Event::Text_editing { text: "e".into(), start: 0, length: 1 }]);
+    rig.plain(vec![Event::TextEditing { text: "e".into(), start: 0, length: 1 }]);
     if rig.region().1 != cursor {
         fail("composition moved the caret");
     }
-    rig.plain(vec![Event::Text_input("\u{e9}".into())]);
+    rig.plain(vec![Event::TextInput("\u{e9}".into())]);
     rig.expect("IME commit", "_abX\nc\u{e9}");
     let previous = rays::clipboard::get_text();
     let command_key = rig.command_key;
@@ -380,7 +380,7 @@ pub fn text_area_1(rig: &mut Rig) {
     rig.expect("Tab at the start of the line", "  ab  ");
     rig.keyed(vec![Key::Shift], vec![key_down(Key::Tab)]);
     rig.expect("Shift-Tab takes two spaces", "ab  ");
-    rig.plain(vec![Event::Text_input("x".into())]);
+    rig.plain(vec![Event::TextInput("x".into())]);
     rig.keyed(vec![Key::Shift], vec![key_down(Key::Tab)]);
     rig.expect("Shift-Tab on an unindented line", "xab  ");
     if rig.submitted {
@@ -400,7 +400,7 @@ pub fn text_area_1(rig: &mut Rig) {
     rig.area = "a".repeat(100);
     rig.wrapped = true;
     rig.plain(vec![press((150, 60)), release((150, 60))]);
-    rig.plain(vec![Event::Text_input("X".into())]);
+    rig.plain(vec![Event::TextInput("X".into())]);
     let x_at = rig.area.find('X').unwrap() as i64;
     if x_at < 60 || x_at > 99 {
         fail(&format!("a click on the third row landed at column {}", x_at));
@@ -410,18 +410,18 @@ pub fn text_area_1(rig: &mut Rig) {
     if y_third < 2 * 17 {
         fail(&format!("a wrapped caret is on the first row (y {})", y_third));
     }
-    rig.plain(vec![key_down(Key::ArrowUp), Event::Text_input("Y".into())]);
+    rig.plain(vec![key_down(Key::ArrowUp), Event::TextInput("Y".into())]);
     let y_at = rig.area.find('Y').unwrap() as i64;
     if y_at >= x_at || x_at - y_at > 60 {
         fail(&format!("Up did not move to the row above ({} then {})", x_at, y_at));
     }
-    rig.plain(vec![key_down(Key::Home), Event::Text_input("H".into())]);
+    rig.plain(vec![key_down(Key::Home), Event::TextInput("H".into())]);
     let h_at = rig.area.find('H').unwrap() as i64;
     if h_at == 0 || h_at > y_at {
         fail("Home on a wrapped row was not row-scoped");
     }
     rig.plain(vec![key_down(Key::ArrowUp), key_down(Key::ArrowUp), key_down(Key::ArrowUp)]);
-    rig.plain(vec![Event::Text_input("T".into())]);
+    rig.plain(vec![Event::TextInput("T".into())]);
     if rig.area.find('T').unwrap() > 40 {
         fail("Up at the first row did not go to the start");
     }

@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, clippy::all)]
+#![allow(clippy::all)]
 //! PXUI owns immediate-mode engine, kit and text widgets over Rays; ui re-exports the shared palette, typography and widget API.
 
 pub mod theme;

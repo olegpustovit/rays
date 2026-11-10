@@ -142,13 +142,13 @@ fn scale_3(scale: f64) {
     tick(&mut ui2, 2.0, vec![release((30, 30))]);
     tick(&mut ui2, 2.5, vec![press((50, 30))]);
     let before = compact.borrow().clone();
-    tick(&mut ui2, 3.0, vec![Event::Focus_lost, move_to((400, 30))]);
+    tick(&mut ui2, 3.0, vec![Event::FocusLost, move_to((400, 30))]);
     if *compact.borrow() != before {
         fail(&lab("window focus loss did not cancel capture"));
     }
     tick(&mut ui2, 3.5, vec![press((50, 30))]);
     let before = compact.borrow().clone();
-    tick(&mut ui2, 4.0, vec![Event::Pointer_cancelled(MouseButton::LeftButton), move_to((400, 30))]);
+    tick(&mut ui2, 4.0, vec![Event::PointerCancelled(MouseButton::LeftButton), move_to((400, 30))]);
     if *compact.borrow() != before {
         fail(&lab("pointer cancellation did not stop capture"));
     }
@@ -229,16 +229,16 @@ fn scale_6(scale: f64) {
     if !ui.text_input_focused() {
         fail(&lab("a click did not open the field"));
     }
-    fstep(&mut ui, vec![], 0.5, vec![Event::Text_input("27".into()), key_down(Key::Enter)], &mut build);
+    fstep(&mut ui, vec![], 0.5, vec![Event::TextInput("27".into()), key_down(Key::Enter)], &mut build);
     if *count.borrow() != "27" || ui.text_input_focused() {
         fail(&lab(&format!("typed number was not committed: {}", count.borrow())));
     }
     open_field(&mut ui, &mut build);
-    fstep(&mut ui, vec![], 0.5, vec![Event::Text_input("x".into()), key_down(Key::Enter)], &mut build);
+    fstep(&mut ui, vec![], 0.5, vec![Event::TextInput("x".into()), key_down(Key::Enter)], &mut build);
     if *count.borrow() != "27" || !ui.text_input_focused() {
         fail(&lab("invalid number text was committed or dismissed"));
     }
-    fstep(&mut ui, vec![], 0.5, vec![key_down(Key::Escape), Event::Text_input("4".into())], &mut build);
+    fstep(&mut ui, vec![], 0.5, vec![key_down(Key::Escape), Event::TextInput("4".into())], &mut build);
     if *count.borrow() != "27" || ui.text_input_focused() {
         fail(&lab("Escape did not cancel numeric editing"));
     }
@@ -264,14 +264,14 @@ fn scale_6(scale: f64) {
         &mut ui,
         vec![],
         0.5,
-        vec![key_down(Key::ArrowRight), key_down(Key::ArrowLeft), Event::Text_input("2".into()), key_down(Key::Enter)],
+        vec![key_down(Key::ArrowRight), key_down(Key::ArrowLeft), Event::TextInput("2".into()), key_down(Key::Enter)],
         &mut build,
     );
     if *count.borrow() != "321" {
         fail(&lab("numeric editor ignored its insertion caret"));
     }
     open_field(&mut ui, &mut build);
-    fstep(&mut ui, vec![], 0.5, vec![Event::Text_input("2.5".into())], &mut build);
+    fstep(&mut ui, vec![], 0.5, vec![Event::TextInput("2.5".into())], &mut build);
     fstep(&mut ui, vec![], 0.5, vec![press((300, 200))], &mut build);
     if *count.borrow() != "2.5" {
         fail(&lab("typed number was not committed by an outside press"));
@@ -403,7 +403,7 @@ impl Pad {
         let mut p = Pad { ui: field_ui(), clock: 100.0, dt, content, h };
         let parent = p.step(scale, vec![move_to((50, 40))]);
         p.ui.set_scroll_offset(&parent, start);
-        p.step(scale, vec![Event::Trackpad_scrolled { delta: (0.0, 0.0), phase: ScrollPhase::Touched, time: 5.0 }]);
+        p.step(scale, vec![Event::TrackpadScrolled { delta: (0.0, 0.0), phase: ScrollPhase::Touched, time: 5.0 }]);
         p
     }
 
@@ -427,13 +427,13 @@ impl Pad {
 
 fn finger(time: f64, dy: f64) -> Vec<Event> {
     vec![
-        Event::Trackpad_scrolled { delta: (0.0, dy), phase: ScrollPhase::Moved, time },
+        Event::TrackpadScrolled { delta: (0.0, dy), phase: ScrollPhase::Moved, time },
         Event::Scrolled((0.0, dy * 0.1)),
     ]
 }
 
 fn lifted() -> Vec<Event> {
-    vec![Event::Trackpad_scrolled { delta: (0.0, 0.0), phase: ScrollPhase::Lifted, time: 5.04 }]
+    vec![Event::TrackpadScrolled { delta: (0.0, 0.0), phase: ScrollPhase::Lifted, time: 5.04 }]
 }
 
 fn scale_8(scale: f64) {
@@ -591,8 +591,8 @@ fn scale_10(scale: f64) {
         vec![
             press((150, row(0))),
             release((150, row(0))),
-            Event::Text_editing { text: "e".into(), start: 0, length: 1 },
-            Event::Text_input("h\u{e9}".into()),
+            Event::TextEditing { text: "e".into(), start: 0, length: 1 },
+            Event::TextInput("h\u{e9}".into()),
             key_down(Key::Backspace),
         ],
         &mut build,
@@ -604,14 +604,14 @@ fn scale_10(scale: f64) {
     if cursor_after_h <= 8 {
         fail(&lab("IME cursor stayed at the field origin"));
     }
-    step(scale, &mut ui, vec![Event::Pointer_cancelled(MouseButton::LeftButton), Event::Text_input("!".into())], &mut build);
+    step(scale, &mut ui, vec![Event::PointerCancelled(MouseButton::LeftButton), Event::TextInput("!".into())], &mut build);
     if *title.borrow() != "h!" {
         fail(&lab("pointer cancellation dismissed text focus"));
     }
     if ime_cursor(&ui, &lab) <= cursor_after_h {
         fail(&lab("IME cursor did not follow the inserted text"));
     }
-    step(scale, &mut ui, vec![Event::Text_input(" two words".into()), key_down(Key::Delete), Event::Text_input("!".into())], &mut build);
+    step(scale, &mut ui, vec![Event::TextInput(" two words".into()), key_down(Key::Delete), Event::TextInput("!".into())], &mut build);
     if *title.borrow() != "h! two words!" || !ui.text_input_focused() {
         fail(&lab("focused text input lost spaces or changed at-end Delete"));
     }
@@ -641,7 +641,7 @@ fn scale_10(scale: f64) {
         step(
             scale,
             &mut ui,
-            vec![Event::Text_input("a\u{e9}\u{4e2d}z".into()), key_down(Key::ArrowLeft), key_down(Key::ArrowLeft), key_down(Key::Delete)],
+            vec![Event::TextInput("a\u{e9}\u{4e2d}z".into()), key_down(Key::ArrowLeft), key_down(Key::ArrowLeft), key_down(Key::Delete)],
             &mut build,
         );
         if *title.borrow() != "a\u{e9}z" {
@@ -661,7 +661,7 @@ fn scale_10(scale: f64) {
             fail(&lab("paste ignored the insertion caret"));
         }
     });
-    step(scale, &mut ui, vec![press((125, row(0))), release((125, row(0))), Event::Text_input("!".into())], &mut build);
+    step(scale, &mut ui, vec![press((125, row(0))), release((125, row(0))), Event::TextInput("!".into())], &mut build);
     if *title.borrow() != "!a\u{e9}z" {
         fail(&lab("mouse click did not place the text caret"));
     }
@@ -718,7 +718,7 @@ fn scale_11(scale: f64) {
     if !typing.get() {
         fail(&lab("a double-click on a scrub field did not open typing"));
     }
-    tick(&mut ui, vec![key_down(kc('a')), Event::Text_input("99".into())], &mut build);
+    tick(&mut ui, vec![key_down(kc('a')), Event::TextInput("99".into())], &mut build);
     tick(&mut ui, vec![key_down(Key::Enter)], &mut build);
     tick(&mut ui, vec![], &mut build);
     if typing.get() || !number.borrow().ends_with("99") {
@@ -833,7 +833,7 @@ pub fn window_pxui_tooltip_rest() {
     if !step(&mut ui, None, false, 0.881, vec![]).0 {
         fail("tooltip did not restart after movement");
     }
-    step(&mut ui, None, false, 0.9, vec![Event::Focus_lost]);
+    step(&mut ui, None, false, 0.9, vec![Event::FocusLost]);
     if step(&mut ui, None, false, 0.91, vec![move_to((11, 10))]).0 {
         fail("focus loss kept hover rest");
     }
@@ -950,7 +950,7 @@ pub fn window_pxui_batches() {
         Ok(staged) => {
             let mut batches = 0;
             for layer in &staged.layers {
-                if let layer::native_layer::Ui_layer(batch, _) = layer {
+                if let layer::NativeLayer::UiLayer(batch, _) = layer {
                     batches += batch.batches().len();
                 }
             }

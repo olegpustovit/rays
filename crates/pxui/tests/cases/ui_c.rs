@@ -32,22 +32,22 @@ pub fn text_area_2(rig: &mut Rig) {
     rig.errors = vec![];
     rig.language = Some(plain_language());
     rig.area = String::new();
-    rig.plain(vec![press((150, 12)), release((150, 12)), Event::Text_input("(".into())]);
+    rig.plain(vec![press((150, 12)), release((150, 12)), Event::TextInput("(".into())]);
     rig.expect("an opener inserts its pair", "()");
-    rig.plain(vec![Event::Text_input("a".into()), Event::Text_input(")".into())]);
+    rig.plain(vec![Event::TextInput("a".into()), Event::TextInput(")".into())]);
     rig.expect("a closer typed before itself steps over it", "(a)");
     rig.plain(vec![key_down(Key::ArrowLeft), key_down(Key::Enter)]);
     rig.expect("Enter indents as the language says", "(a\n  )");
-    rig.plain(vec![Event::Text_input("\"".into()), Event::Text_input("\"".into())]);
+    rig.plain(vec![Event::TextInput("\"".into()), Event::TextInput("\"".into())]);
     rig.expect("a quote pairs, then steps over its twin", "(a\n  \"\")");
     rig.plain(vec![key_down(Key::ArrowLeft), key_down(Key::Backspace)]);
     rig.expect("Backspace between an empty pair takes both", "(a\n  )");
     rig.keyed(vec![Key::Shift], vec![key_down(Key::Home)]);
-    rig.plain(vec![Event::Text_input("(".into())]);
+    rig.plain(vec![Event::TextInput("(".into())]);
     rig.expect("an opener wraps the selection", "(a\n(  ))");
     rig.plain(vec![
-        Event::Pointer_pressed(MouseButton::RightButton, (100.0, 20.0)),
-        Event::Pointer_released(MouseButton::RightButton, (100.0, 20.0)),
+        Event::PointerPressed(MouseButton::RightButton, (100.0, 20.0)),
+        Event::PointerReleased(MouseButton::RightButton, (100.0, 20.0)),
     ]);
     if rig.context.get().is_none() {
         fail("a right-click did not reach on_context");
@@ -121,13 +121,13 @@ pub fn text_area_3(rig: &mut Rig) {
         ..base
     });
     rig.area = String::new();
-    rig.plain(vec![press((150, 12)), release((150, 12)), Event::Text_input("z".into()), Event::Text_input("e".into())]);
+    rig.plain(vec![press((150, 12)), release((150, 12)), Event::TextInput("z".into()), Event::TextInput("e".into())]);
     rig.expect("typing opens the popup without changing the text", "ze");
     rig.plain(vec![key_down(Key::ArrowDown)]);
     rig.expect("Down moves in the popup, not in the text", "ze");
     rig.plain(vec![key_down(Key::Tab)]);
     rig.expect("Tab accepts the chosen completion", "zephyr");
-    rig.plain(vec![Event::Text_input(" ".into()), Event::Text_input("z".into())]);
+    rig.plain(vec![Event::TextInput(" ".into()), Event::TextInput("z".into())]);
     rig.plain(vec![key_down(Key::Escape)]);
     if !rig.ui.text_input_focused() {
         fail("Escape closed the editor instead of the popup");
@@ -139,10 +139,10 @@ pub fn text_area_3(rig: &mut Rig) {
     // Enter breaks the line unless Up or Down chose a row; Tab always accepts
     let saved = rig.language.clone();
     rig.area = String::new();
-    rig.plain(vec![press((150, 12)), release((150, 12)), Event::Text_input("z".into()), Event::Text_input("e".into())]);
+    rig.plain(vec![press((150, 12)), release((150, 12)), Event::TextInput("z".into()), Event::TextInput("e".into())]);
     rig.plain(vec![key_down(Key::Enter)]);
     rig.expect("Enter after a typed word breaks the line, it does not take the popup", "ze\n");
-    rig.plain(vec![Event::Text_input(" ".into()), Event::Text_input("z".into()), Event::Text_input("e".into())]);
+    rig.plain(vec![Event::TextInput(" ".into()), Event::TextInput("z".into()), Event::TextInput("e".into())]);
     rig.plain(vec![key_down(Key::ArrowDown)]);
     rig.plain(vec![key_down(Key::Enter)]);
     rig.expect("Enter takes the row an arrow chose", "ze\n zephyr");
@@ -167,14 +167,14 @@ pub fn text_area_3(rig: &mut Rig) {
     rig.expect("Tab without a selection still inserts two spaces", "a\n\nb\nc  ");
     // brackets and quotes pair and step over only in code
     rig.area = String::new();
-    rig.plain(vec![press((150, 12)), release((150, 12)), Event::Text_input("\"".into()), Event::Text_input("(".into())]);
+    rig.plain(vec![press((150, 12)), release((150, 12)), Event::TextInput("\"".into()), Event::TextInput("(".into())]);
     rig.expect("a bracket inside a string is typed as it is", "\"(\"");
-    rig.plain(vec![Event::Text_input("\"".into())]);
+    rig.plain(vec![Event::TextInput("\"".into())]);
     rig.expect("a quote before the closing quote steps over it", "\"(\"");
     rig.area = "\"x\"".to_owned();
     rig.plain(vec![]);
     rig.keyed(vec![Key::Meta], vec![key_down(Key::ArrowUp)]);
-    rig.plain(vec![Event::Text_input("\"".into())]);
+    rig.plain(vec![Event::TextInput("\"".into())]);
     rig.expect("a quote before a string's opening quote does not step over it", "\"\"\"x\"");
     // Up and Down keep their column across a short line
     rig.area = "abcdef\nab\nabcdef".to_owned();
@@ -183,7 +183,7 @@ pub fn text_area_3(rig: &mut Rig) {
     rig.plain((0..5).map(|_| key_down(Key::ArrowRight)).collect());
     rig.plain(vec![key_down(Key::ArrowDown)]);
     rig.plain(vec![key_down(Key::ArrowDown)]);
-    rig.plain(vec![Event::Text_input("X".into())]);
+    rig.plain(vec![Event::TextInput("X".into())]);
     rig.expect("Down across a short line returns to the column it left", "abcdef\nab\nabcdeXf");
     // `select` takes the keyboard and places the selection; `splice` is one undo step
     rig.language = None;
@@ -193,7 +193,7 @@ pub fn text_area_3(rig: &mut Rig) {
     if !rig.ui.text_input_focused() {
         fail("a select request did not focus the area");
     }
-    rig.plain(vec![Event::Text_input("2".into())]);
+    rig.plain(vec![Event::TextInput("2".into())]);
     rig.expect("typing replaces the requested selection", "one 2 one");
     rig.area = "one two one".to_owned();
     rig.step(
@@ -259,7 +259,7 @@ pub fn text_area_3(rig: &mut Rig) {
     rig.plain(vec![]);
     rig.keyed(vec![Key::Meta], vec![key_down(Key::ArrowUp)]);
     rig.keyed(vec![Key::Meta], vec![key_down(kc('/'))]);
-    rig.plain(vec![Event::Text_input("Q".into())]);
+    rig.plain(vec![Event::TextInput("Q".into())]);
     rig.expect("the caret keeps its place in a commented line", "; Qx\n y");
     rig.area = "one\ntwo\nthree".to_owned();
     rig.plain(vec![]);
@@ -271,7 +271,7 @@ pub fn text_area_3(rig: &mut Rig) {
     rig.expect("Option-Up on the first line does nothing", "one\ntwo\nthree");
     rig.keyed(alt.clone(), vec![key_down(Key::ArrowDown)]);
     rig.expect("Option-Down moves the line down", "two\none\nthree");
-    rig.plain(vec![Event::Text_input("X".into())]);
+    rig.plain(vec![Event::TextInput("X".into())]);
     rig.expect("the caret travels with the moved line", "two\noneX\nthree");
     rig.keyed(alt.clone(), vec![key_down(Key::ArrowDown)]);
     rig.keyed(alt.clone(), vec![key_down(Key::ArrowDown)]);
@@ -282,13 +282,13 @@ pub fn text_area_3(rig: &mut Rig) {
     rig.plain(vec![]);
     rig.keyed(vec![Key::Meta], vec![key_down(Key::ArrowDown)]);
     rig.keyed(alt_shift.clone(), vec![key_down(Key::ArrowDown)]);
-    rig.plain(vec![Event::Text_input("Z".into())]);
+    rig.plain(vec![Event::TextInput("Z".into())]);
     rig.expect("Shift-Option-Down copies the line and keeps the caret on the copy", "ab\nabZ");
     rig.area = "ab".to_owned();
     rig.plain(vec![]);
     rig.keyed(vec![Key::Meta], vec![key_down(Key::ArrowDown)]);
     rig.keyed(alt_shift.clone(), vec![key_down(Key::ArrowUp)]);
-    rig.plain(vec![Event::Text_input("Z".into())]);
+    rig.plain(vec![Event::TextInput("Z".into())]);
     rig.expect("Shift-Option-Up copies the line above and keeps the caret on the original", "abZ\nab");
     rig.area = "(a (b c) d)".to_owned();
     rig.plain(vec![]);
@@ -316,7 +316,7 @@ pub fn text_area_3(rig: &mut Rig) {
     // a text that comes back unchanged takes its own undo steps back
     rig.area = "foo".to_owned();
     rig.plain(vec![press((150, 12)), release((150, 12))]);
-    rig.plain(vec![Event::Text_input("x".into())]);
+    rig.plain(vec![Event::TextInput("x".into())]);
     rig.expect("typing", "foox");
     rig.area = "other".to_owned();
     rig.plain(vec![]);
@@ -382,9 +382,9 @@ pub fn text_area_4(rig: &mut Rig) {
     l.rewrite = Some(Rc::new(|text, caret| (format!("{}!", text), caret)));
     rig.language = Some(l);
     rig.area = String::new();
-    rig.plain(vec![press((150, 12)), release((150, 12)), Event::Text_input("a".into())]);
+    rig.plain(vec![press((150, 12)), release((150, 12)), Event::TextInput("a".into())]);
     rig.expect("the rewrite keeps the text as the language wants it", "a!");
-    rig.plain(vec![Event::Text_input("b".into())]);
+    rig.plain(vec![Event::TextInput("b".into())]);
     rig.expect("the caret stays where the rewrite put it", "ab!!");
     rig.language = None;
 }
@@ -396,7 +396,7 @@ pub fn text_area_windows(rig: &mut Rig) {
     rig.plain(vec![press((150, 12)), release((150, 12))]);
     rig.keyed(vec![Key::Ctrl], vec![key_down(Key::ArrowDown)]);
     rig.keyed(vec![Key::Ctrl], vec![key_down(Key::ArrowLeft)]);
-    rig.plain(vec![Event::Text_input("X".into())]);
+    rig.plain(vec![Event::TextInput("X".into())]);
     rig.expect("Ctrl-Left moves to the start of the word", "one two Xthree");
     rig.plain(vec![key_down(Key::End)]);
     rig.keyed(vec![Key::Ctrl], vec![key_down(Key::Backspace)]);
@@ -408,9 +408,9 @@ pub fn text_area_windows(rig: &mut Rig) {
     rig.keyed(vec![Key::Ctrl], vec![key_down(kc('z'))]);
     rig.keyed(vec![Key::Ctrl, Key::Shift], vec![key_down(kc('z'))]);
     rig.expect("Ctrl-Shift-Z redoes", "one two ");
-    rig.plain(vec![key_down(Key::Home), Event::Text_input("_".into())]);
+    rig.plain(vec![key_down(Key::Home), Event::TextInput("_".into())]);
     rig.expect("Home is the start of the line", "_one two ");
-    rig.plain(vec![key_down(Key::End), Event::Text_input("$".into())]);
+    rig.plain(vec![key_down(Key::End), Event::TextInput("$".into())]);
     rig.expect("End is the end of the line", "_one two $");
 }
 
@@ -421,21 +421,21 @@ pub fn text_area_5(rig: &mut Rig) {
     // a click past the end of the first row lands after "beta"
     let at = (290, 12);
     rig.plain(vec![press(at), release(at), press(at), release(at)]);
-    rig.plain(vec![Event::Text_input("X".into())]);
+    rig.plain(vec![Event::TextInput("X".into())]);
     rig.expect("a double click selects the word", "alpha X\ngamma delta");
     rig.plain(vec![press(at), release(at), press(at), release(at), press(at), release(at)]);
-    rig.plain(vec![Event::Text_input("L".into())]);
+    rig.plain(vec![Event::TextInput("L".into())]);
     rig.expect("a triple click selects the line with its break", "Lgamma delta");
     rig.area = "one two three".to_owned();
     rig.plain(vec![press((150, 12)), release((150, 12))]);
     rig.keyed(vec![Key::Meta], vec![key_down(Key::ArrowDown)]);
     rig.keyed(vec![Key::Alt], vec![key_down(Key::ArrowLeft)]);
-    rig.plain(vec![Event::Text_input("X".into())]);
+    rig.plain(vec![Event::TextInput("X".into())]);
     rig.expect("Option-Left moves to the start of the word", "one two Xthree");
     rig.keyed(vec![Key::Alt], vec![key_down(Key::Backspace)]);
     rig.expect("Option-Backspace takes the word before the caret", "one two three");
     rig.keyed(vec![Key::Alt, Key::Shift], vec![key_down(Key::ArrowLeft)]);
-    rig.plain(vec![Event::Text_input("2".into())]);
+    rig.plain(vec![Event::TextInput("2".into())]);
     rig.expect("Shift-Option-Left extends the selection by a word", "one 2three");
     rig.keyed(vec![Key::Meta], vec![key_down(Key::Backspace)]);
     rig.expect("Command-Backspace takes the line to the caret", "three");
@@ -448,9 +448,9 @@ pub fn text_area_5(rig: &mut Rig) {
     rig.expect("Shift-Command-Z redoes", "one two three");
     rig.area = String::new();
     rig.plain(vec![press((150, 12)), release((150, 12))]);
-    rig.plain(vec![Event::Text_input("a".into())]);
-    rig.plain(vec![Event::Text_input("b".into())]);
-    rig.plain(vec![Event::Text_input("c".into())]);
+    rig.plain(vec![Event::TextInput("a".into())]);
+    rig.plain(vec![Event::TextInput("b".into())]);
+    rig.plain(vec![Event::TextInput("c".into())]);
     rig.keyed(vec![Key::Meta], vec![key_down(kc('z'))]);
     rig.expect("consecutive typing undoes as one step", "");
     rig.keyed(vec![Key::Meta], vec![key_down(kc('y'))]);
@@ -527,7 +527,7 @@ pub fn window_pxui_modal_1() {
     // Modal: centered, and Escape or a press outside dismisses it.
     let mut ui = ui11();
     let shown = Cell::new(false);
-    let mut modal = |ui: &mut Ui, events: Vec<Event>| {
+    let modal = |ui: &mut Ui, events: Vec<Event>| {
         ui.frame(&frame_at(vec![], 1.0, 0.0, events), &mut |ui| {
             shown.set(ui.modal(Some(200.0), "modal", &mut |ui| ui.label("Hello")));
         });
@@ -556,7 +556,7 @@ pub fn window_pxui_modal_1() {
 pub fn window_pxui_modal_2() {
     let mut ui = ui11();
     let shown = Cell::new(false);
-    let mut popup = |ui: &mut Ui, events: Vec<Event>| {
+    let popup = |ui: &mut Ui, events: Vec<Event>| {
         ui.frame(&frame_at(vec![], 1.0, 0.0, events), &mut |ui| {
             shown.set(ui.popup(None, None, true, false, (20.0, 20.0), 200.0, 10.0, "popup", &mut |ui| {
                 ui.label("One");
@@ -579,7 +579,7 @@ pub fn window_pxui_modal_2() {
 
 pub fn window_pxui_modal_3() {
     let mut ui = ui11();
-    let mut menu = |ui: &mut Ui, events: Vec<Event>| -> MenuResult {
+    let menu = |ui: &mut Ui, events: Vec<Event>| -> MenuResult {
         let mut out = MenuResult::Open;
         ui.frame(&frame_at(vec![], 1.0, 0.0, events), &mut |ui| {
             let o = MenuOpts { width: Some(240.0), selected: Some(1), ..MenuOpts::default() };
@@ -598,7 +598,7 @@ pub fn window_pxui_modal_3() {
 pub fn window_pxui_modal_4() {
     let mut ui = ui11();
     let front_key = Cell::new(0i64);
-    let mut raised = |ui: &mut Ui, events: Vec<Event>| -> (bool, bool) {
+    let raised = |ui: &mut Ui, events: Vec<Event>| -> (bool, bool) {
         let mut out = (false, false);
         ui.frame(&frame_at(vec![], 1.0, 0.0, events), &mut |ui| {
             let front = ui.box_("front", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
@@ -617,7 +617,7 @@ pub fn window_pxui_modal_4() {
         fail("a later body covered a raised floating control");
     }
     let fk = front_key.get();
-    let under = move |k: i64| -> Vec<scene::node> {
+    let under = move |k: i64| -> Vec<scene::Node> {
         if k == fk { vec![scene::rect((0, 0), 100, 60, Some(color::black()), None).unwrap()] } else { Vec::new() }
     };
     let nodes = ui.scene(Some(&under));
@@ -625,7 +625,7 @@ pub fn window_pxui_modal_4() {
         Ok(staged) => {
             let ok = matches!(
                 &staged.layers[..],
-                [layer::native_layer::Ui_layer(..), layer::native_layer::Scene2_layer(..), layer::native_layer::Ui_layer(..)]
+                [layer::NativeLayer::UiLayer(..), layer::NativeLayer::Scene2Layer(..), layer::NativeLayer::UiLayer(..)]
             );
             if !ok {
                 fail("native content was not between the background and floating controls");
@@ -644,7 +644,7 @@ pub fn window_pxui_two_widgets() {
     let words = RefCell::new("alpha beta gamma".to_owned());
     let number = RefCell::new("240".to_owned());
     let clock = Cell::new(0.0);
-    let mut tick = |ui: &mut Ui, keys: Vec<Key>, dt: f64, events: Vec<Event>| {
+    let tick = |ui: &mut Ui, keys: Vec<Key>, dt: f64, events: Vec<Event>| {
         clock.set(clock.get() + dt);
         ui.frame(&frame_at(keys, 1.0, clock.get(), events), &mut |ui| {
             let w = words.borrow().clone();
@@ -660,7 +660,7 @@ pub fn window_pxui_two_widgets() {
     tick(&mut ui, vec![], 0.05, vec![press((100, 30)), release((100, 30))]);
     tick(&mut ui, vec![], 1.0, vec![press((100, 30)), release((100, 30)), press((100, 30))]);
     tick(&mut ui, vec![], 0.05, vec![release((100, 30))]);
-    tick(&mut ui, vec![], 0.05, vec![Event::Text_input("X".into())]);
+    tick(&mut ui, vec![], 0.05, vec![Event::TextInput("X".into())]);
     tick(&mut ui, vec![], 1.0, vec![press((60, 70)), release((60, 70)), press((60, 70))]);
     tick(&mut ui, vec![], 0.05, vec![move_to((61, 70))]);
     tick(&mut ui, vec![], 0.05, vec![release((61, 70))]);
@@ -685,7 +685,7 @@ pub fn window_pxui_carry() {
     let mut ui = ui11();
     let clicked = Cell::new(false);
     let popup = Cell::new(false);
-    let mut carried = |ui: &mut Ui, events: Vec<Event>| -> (Option<Payload>, Option<Drop>, bool) {
+    let carried = |ui: &mut Ui, events: Vec<Event>| -> (Option<Payload>, Option<Drop>, bool) {
         let mut out = (None, None, false);
         ui.frame(&frame_at(vec![], 1.0, 0.0, events), &mut |ui| {
             if popup.get() {
@@ -741,7 +741,7 @@ pub fn window_pxui_carry() {
     // cancellation and focus loss clear it, delivering nothing
     carried(&mut ui, vec![press((10, 10))]);
     carried(&mut ui, vec![move_to((10, 120))]);
-    match carried(&mut ui, vec![Event::Pointer_cancelled(MouseButton::LeftButton)]) {
+    match carried(&mut ui, vec![Event::PointerCancelled(MouseButton::LeftButton)]) {
         (None, None, _) => {}
         _ => fail("a pointer cancellation left the payload held"),
     }
@@ -751,7 +751,7 @@ pub fn window_pxui_carry() {
     }
     carried(&mut ui, vec![press((10, 10))]);
     carried(&mut ui, vec![move_to((10, 120))]);
-    match carried(&mut ui, vec![Event::Focus_lost]) {
+    match carried(&mut ui, vec![Event::FocusLost]) {
         (None, None, _) => {}
         _ => fail("a focus loss left the payload held"),
     }
@@ -853,7 +853,7 @@ pub fn window_pxui_retained_keys() {
     // Keys that come and go (150,000 of them, 500 a frame) leave the retained state the size it was.
     let mut ui = ui11();
     let next = Cell::new(0i64);
-    let mut churn = |ui: &mut Ui| {
+    let churn = |ui: &mut Ui| {
         ui.frame(&frame_at(vec![], 1.0, 0.0, vec![]), &mut |ui| {
             for _ in 0..500 {
                 next.set(next.get() + 1);

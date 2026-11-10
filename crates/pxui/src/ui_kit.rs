@@ -643,8 +643,8 @@ impl Ui {
         let mut dismissed = false;
         for event in self.frame_events() {
             match event {
-                Event::Key_pressed(Key::Escape) | Event::Focus_lost => dismissed = true,
-                Event::Pointer_pressed(_, point) => {
+                Event::KeyPressed(Key::Escape) | Event::FocusLost => dismissed = true,
+                Event::PointerPressed(_, point) => {
                     if (slot.is_some() || opts.dismiss_initial)
                         && !contains(rect, *point)
                         && !opts.keep.iter().any(|r| contains(*r, *point))

@@ -26,19 +26,19 @@ pub fn pointer(p: (i64, i64)) -> (f64, f64) {
 }
 
 pub fn press(p: (i64, i64)) -> Event {
-    Event::Pointer_pressed(MouseButton::LeftButton, pointer(p))
+    Event::PointerPressed(MouseButton::LeftButton, pointer(p))
 }
 
 pub fn release(p: (i64, i64)) -> Event {
-    Event::Pointer_released(MouseButton::LeftButton, pointer(p))
+    Event::PointerReleased(MouseButton::LeftButton, pointer(p))
 }
 
 pub fn move_to(p: (i64, i64)) -> Event {
-    Event::Pointer_moved(pointer(p))
+    Event::PointerMoved(pointer(p))
 }
 
 pub fn key_down(k: Key) -> Event {
-    Event::Key_pressed(k)
+    Event::KeyPressed(k)
 }
 
 pub fn kc(c: char) -> Key {

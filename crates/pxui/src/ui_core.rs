@@ -177,8 +177,8 @@ pub struct Payload {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Origin {
-    From_pointer(i64),
-    From_key,
+    FromPointer(i64),
+    FromKey,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -190,12 +190,12 @@ pub enum Drop {
 }
 
 /// Points a pressed pointer travels before a press is a drag: a carry starts, a click ends.
-pub const drag_threshold: f64 = 4.0;
+pub const DRAG_THRESHOLD: f64 = 4.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cursor {
-    Horizontal_resize,
-    Vertical_resize,
+    HorizontalResize,
+    VerticalResize,
     Text,
 }
 
@@ -632,7 +632,7 @@ impl Fonts {
         let loaded = match self.kit_font() {
             Some(path) => font::load(&path, size).map(|f| {
                 // the sheets' renderer does not hint: unhinted glyphs have its weight and x-height
-                let _ = font::set_hinting(&f, font::hinting::None_hinting);
+                let _ = font::set_hinting(&f, font::Hinting::NoneHinting);
                 f
             }),
             None => Err("no kit font".to_owned()),
@@ -800,12 +800,12 @@ pub struct Ui {
     chain_key: i64,
     chain: Vec<i64>,
     batch_builder: Option<ui_batch::Builder>,
-    regions: Vec<scene::node>,
+    regions: Vec<scene::Node>,
     label: String,
     painted_layers: Vec<(i64, ui_batch::Table)>,
-    scene_layers: Vec<(i64, Vec<scene::node>)>,
+    scene_layers: Vec<(i64, Vec<scene::Node>)>,
     borrowed_images: Vec<(i64, image::Image)>,
-    scene: Vec<scene::node>,
+    scene: Vec<scene::Node>,
     destroyed: bool,
 }
 
@@ -992,7 +992,7 @@ impl Ui {
 
     /// The most recently completed frame, including text-input regions. `under` inserts a host
     /// scene immediately before a floating root's paint, addressed by its box key.
-    pub fn scene(&self, under: Option<&dyn Fn(i64) -> Vec<scene::node>>) -> Vec<scene::node> {
+    pub fn scene(&self, under: Option<&dyn Fn(i64) -> Vec<scene::Node>>) -> Vec<scene::Node> {
         match under {
             None => self.scene.clone(),
             Some(under) => {
@@ -1093,7 +1093,7 @@ impl Ui {
                     self.active = None;
                 }
                 // the box that holds a carry's pointer is gone: the carry goes with it
-                if let Some((_, Origin::From_pointer(owner))) = &self.payload {
+                if let Some((_, Origin::FromPointer(owner))) = &self.payload {
                     if *owner == key {
                         self.payload = None;
                     }
@@ -1213,7 +1213,7 @@ impl Ui {
     pub fn last_press_within(&self, frame: &rframe::Frame, roots: &[i64]) -> Option<i64> {
         let mut last = None;
         for event in &frame.input.events {
-            if let Event::Pointer_pressed(_, point) = event {
+            if let Event::PointerPressed(_, point) = event {
                 if let Some(root) = self.root_at(*point, roots) {
                     last = Some(root);
                 }
@@ -1335,7 +1335,7 @@ impl Ui {
         self.dropped = None;
         // a carry lives with the press that holds it: capture taken away since (a popup, a host
         // dismissal) takes the payload too, so no later release puts it
-        if let Some((_, Origin::From_pointer(owner))) = &self.payload {
+        if let Some((_, Origin::FromPointer(owner))) = &self.payload {
             if self.active != Some(*owner) {
                 self.payload = None;
             }
@@ -1350,19 +1350,19 @@ impl Ui {
         // a trackpad's motion also arrives as wheel steps: in such a frame those only feed
         // `signal.scroll`, and the gesture moves the scroll box
         let phased = frame.input.events.iter().any(|e| match e {
-            Event::Trackpad_scrolled { delta: (dx, dy), .. } => *dx != 0.0 || *dy != 0.0,
+            Event::TrackpadScrolled { delta: (dx, dy), .. } => *dx != 0.0 || *dy != 0.0,
             _ => false,
         });
         for (event_index, event) in frame.input.events.iter().enumerate() {
             modifiers = input::keys_after(&modifiers, event);
             let command = self.command_modifiers(&modifiers);
-            if let Event::Key_pressed(Key::Tab) = event {
+            if let Event::KeyPressed(Key::Tab) = event {
                 if !command && self.flags_of_key(self.focus) & KEEP_TAB == 0 {
                     self.traverse_focus(modifiers.contains(&Key::Shift));
                 }
             }
             let (owner, delta): (i64, (f64, f64)) = match event {
-                Event::Pointer_moved(point) => {
+                Event::PointerMoved(point) => {
                     let owner = self.pointer_target(*point);
                     let delta = if self.pointer.0.is_finite() {
                         (point.0 - self.pointer.0, point.1 - self.pointer.1)
@@ -1371,7 +1371,7 @@ impl Ui {
                     };
                     (owner, delta)
                 }
-                Event::Pointer_pressed(_, point) | Event::Pointer_released(_, point) => {
+                Event::PointerPressed(_, point) | Event::PointerReleased(_, point) => {
                     (self.pointer_target(*point), (0.0, 0.0))
                 }
                 Event::Scrolled(_) | Event::Pinched(_) => {
@@ -1385,17 +1385,17 @@ impl Ui {
                     };
                     (target, (0.0, 0.0))
                 }
-                Event::Key_pressed(Key::Tab) if !command => {
+                Event::KeyPressed(Key::Tab) if !command => {
                     (if self.focus == 0 { ROOT_KEY } else { self.focus }, (0.0, 0.0))
                 }
-                Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. } => {
+                Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } => {
                     (self.focus, (0.0, 0.0))
                 }
                 _ => (0, (0.0, 0.0)),
             };
             self.routed_events.push((owner, event.clone(), delta));
             match event {
-                Event::Pointer_moved(point) => {
+                Event::PointerMoved(point) => {
                     let (px, py) = self.pointer;
                     self.pointer = *point;
                     if let Some(active) = self.active {
@@ -1410,8 +1410,8 @@ impl Ui {
                 }
                 // a carry started from a key: a left press is the put, on what is under it, and
                 // nothing else sees the press
-                Event::Pointer_pressed(MouseButton::LeftButton, point)
-                    if matches!(self.payload, Some((_, Origin::From_key))) =>
+                Event::PointerPressed(MouseButton::LeftButton, point)
+                    if matches!(self.payload, Some((_, Origin::FromKey))) =>
                 {
                     self.pointer = *point;
                     if let Some((payload, _)) = &self.payload {
@@ -1422,7 +1422,7 @@ impl Ui {
                         last.0 = -1;
                     }
                 }
-                Event::Pointer_pressed(button, point) => {
+                Event::PointerPressed(button, point) => {
                     self.pointer = *point;
                     let target = if owner == 0 || self.flags_of_key(owner) & CLICKABLE != 0 {
                         owner
@@ -1497,11 +1497,11 @@ impl Ui {
                         }
                     }
                 }
-                Event::Pointer_released(button, point) => {
+                Event::PointerReleased(button, point) => {
                     self.pointer = *point;
                     if let Some(active) = self.active {
                         if *button == self.active_button {
-                            if let Some((_, Origin::From_pointer(o))) = &self.payload {
+                            if let Some((_, Origin::FromPointer(o))) = &self.payload {
                                 if *o == active && *button == MouseButton::LeftButton {
                                     released_carry = true;
                                 }
@@ -1540,15 +1540,15 @@ impl Ui {
                 // The fingers on a trackpad: the gesture stays with the box it began over, and the
                 // velocity it is released with is its last motion over the time since the one
                 // before. The system's own momentum is not used: the box coasts by itself.
-                Event::Trackpad_scrolled { phase: ScrollPhase::Momentum, .. } => {}
-                Event::Trackpad_scrolled { phase: ScrollPhase::Lifted, time, .. } => {
+                Event::TrackpadScrolled { phase: ScrollPhase::Momentum, .. } => {}
+                Event::TrackpadScrolled { phase: ScrollPhase::Lifted, time, .. } => {
                     // fingers that rested before they lifted leave the content where it is
                     if time - self.gesture_time > 0.1 {
                         self.gesture_velocity = 0.0;
                     }
                     self.lift();
                 }
-                Event::Trackpad_scrolled { delta: (_, vertical), phase, time } => {
+                Event::TrackpadScrolled { delta: (_, vertical), phase, time } => {
                     if *phase == ScrollPhase::Touched || self.gesture_key == 0 {
                         let scroll = self.scroll_target(self.pointer);
                         self.gesture_key = self.modal_target(scroll);
@@ -1577,18 +1577,18 @@ impl Ui {
                     }
                 }
                 // Cancellation ends capture without a release: no click, no commit.
-                Event::Pointer_cancelled(button) => {
+                Event::PointerCancelled(button) => {
                     if *button == self.active_button {
                         self.active = None;
                     }
-                    if let Some((_, Origin::From_pointer(_))) = &self.payload {
+                    if let Some((_, Origin::FromPointer(_))) = &self.payload {
                         if *button == MouseButton::LeftButton {
                             self.payload = None;
                             released_carry = false;
                         }
                     }
                 }
-                Event::Focus_lost => {
+                Event::FocusLost => {
                     self.gesture_velocity = 0.0;
                     self.lift();
                     self.payload = None;
@@ -1600,21 +1600,21 @@ impl Ui {
                     self.edit_focus = 0;
                     self.keyboard_focus = false;
                 }
-                Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. } => {
+                Event::KeyPressed(_) | Event::KeyReleased(_) | Event::TextInput(_) | Event::TextEditing { .. } => {
                     if self.focus != 0 {
                         let focus = self.focus;
                         let mods = modifiers.clone();
                         let value = self.accumulator(focus);
                         value.keys.push((event.clone(), mods));
-                        if let Event::Key_pressed(Key::Enter) | Event::Key_pressed(Key::Space) | Event::Key_pressed(Key::KeyChar(' ')) = event {
+                        if let Event::KeyPressed(Key::Enter) | Event::KeyPressed(Key::Space) | Event::KeyPressed(Key::KeyChar(' ')) = event {
                             if !command {
                                 value.clicked = true;
                             }
                         }
                         match event {
-                            Event::Text_editing { text, .. } => self.composition = text.clone(),
-                            Event::Text_input(_) => self.composition.clear(),
-                            Event::Key_pressed(Key::Escape) if self.flags_of_key(self.focus) & TAB_ONLY != 0 => {
+                            Event::TextEditing { text, .. } => self.composition = text.clone(),
+                            Event::TextInput(_) => self.composition.clear(),
+                            Event::KeyPressed(Key::Escape) if self.flags_of_key(self.focus) & TAB_ONLY != 0 => {
                                 self.focus = 0;
                                 self.keyboard_focus = false;
                                 self.edit_focus = 0;
@@ -1630,7 +1630,7 @@ impl Ui {
         if !self.pointer.0.is_finite() {
             self.pointer = (mouse_x, mouse_y);
         }
-        self.hot = if frame.input.events.iter().any(|e| matches!(e, Event::Focus_lost)) {
+        self.hot = if frame.input.events.iter().any(|e| matches!(e, Event::FocusLost)) {
             0
         } else {
             self.topmost(self.pointer)
@@ -1674,7 +1674,7 @@ impl Ui {
 
     /// The key was pressed in this frame's events (a dialog's Enter).
     pub fn key_pressed(&self, key: Key) -> bool {
-        self.frame_events.iter().any(|e| matches!(e, Event::Key_pressed(k) if *k == key))
+        self.frame_events.iter().any(|e| matches!(e, Event::KeyPressed(k) if *k == key))
     }
 
     pub fn unfocus(&mut self) {
@@ -1735,10 +1735,10 @@ impl Ui {
         let mut complete = true;
         for (target, event, (mx, my)) in &self.routed_events {
             match event {
-                Event::Focus_lost | Event::Pointer_cancelled(_) => events.push(event.clone()),
+                Event::FocusLost | Event::PointerCancelled(_) => events.push(event.clone()),
                 _ => {
                     let ok = match event {
-                        Event::Pointer_pressed(..) | Event::Pointer_released(..) | Event::Pointer_moved(_) | Event::Scrolled(_) => {
+                        Event::PointerPressed(..) | Event::PointerReleased(..) | Event::PointerMoved(_) | Event::Scrolled(_) => {
                             accepts_pointer(*target)
                         }
                         _ => accepts(*target),
@@ -1747,8 +1747,8 @@ impl Ui {
                         events.push(event.clone());
                         dx += mx;
                         dy += my;
-                    } else if let Event::Pointer_released(button, _) = event {
-                        events.push(Event::Pointer_cancelled(*button));
+                    } else if let Event::PointerReleased(button, _) = event {
+                        events.push(Event::PointerCancelled(*button));
                         complete = false;
                     } else {
                         complete = false;
@@ -1763,7 +1763,7 @@ impl Ui {
             cancelled.extend(frame.input.buttons.iter().cloned());
         }
         for button in cancelled {
-            events.push(Event::Pointer_cancelled(button));
+            events.push(Event::PointerCancelled(button));
         }
         let mut out = frame.clone();
         out.input.events = events;
@@ -2238,12 +2238,12 @@ impl Ui {
     pub fn carry(&mut self, from: Option<&UiBox>, kind: &str, value: &str) {
         match from {
             None => {
-                if let Some((held, Origin::From_key)) = &self.payload {
+                if let Some((held, Origin::FromKey)) = &self.payload {
                     if held.kind == kind && held.value == value {
                         return;
                     }
                 }
-                self.payload = Some((Payload { kind: kind.to_owned(), value: value.to_owned() }, Origin::From_key));
+                self.payload = Some((Payload { kind: kind.to_owned(), value: value.to_owned() }, Origin::FromKey));
             }
             Some(b) => {
                 if self.payload.is_none()
@@ -2253,10 +2253,10 @@ impl Ui {
                 {
                     let (px, py) = self.active_press;
                     let (x, y) = self.pointer;
-                    if (x - px).hypot(y - py) >= drag_threshold {
+                    if (x - px).hypot(y - py) >= DRAG_THRESHOLD {
                         self.payload = Some((
                             Payload { kind: kind.to_owned(), value: value.to_owned() },
-                            Origin::From_pointer(b.box_key),
+                            Origin::FromPointer(b.box_key),
                         ));
                     }
                 }
@@ -2727,7 +2727,7 @@ pub struct Paint {
     pub row_height: i64,
     pub fonts: Fonts,
     pub borrowed_images: Vec<(i64, image::Image)>,
-    pub regions: Vec<scene::node>,
+    pub regions: Vec<scene::Node>,
     label: String,
     /// the horizontal scroll of the focused text; painters adjust it
     pub edit_scroll_x: f64,
@@ -3420,7 +3420,7 @@ impl Ui {
             Some(frame) => frame.input.t,
             None => 0.0,
         };
-        if self.active.is_some() || self.modal_in_frame || self.frame_events.iter().any(|e| matches!(e, Event::Focus_lost)) {
+        if self.active.is_some() || self.modal_in_frame || self.frame_events.iter().any(|e| matches!(e, Event::FocusLost)) {
             self.hover_rest = None;
             return false;
         }

@@ -1,4 +1,4 @@
-//! Native pixel goldens pin kit widgets, overlays and graph zone tokens at two pixels per logical point. Token geometry and every channel are checked.
+//! Native pixel goldens pin kit widgets, overlays and graph zone tokens at the selected display density. Token geometry and every channel are checked.
 use crate::common;
 use input::{Event, Platform};
 use pxui::theme;
@@ -8,7 +8,15 @@ use rays_math::color;
 use std::rc::Rc;
 
 const WIDTH: i64 = 320;
-const SCALE: i64 = 2;
+fn scale() -> i64 {
+    static SCALE: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(|| {
+        let window = sdl3::Window::create("PXUI density", 1, 1, &[sdl3::WindowFlag::Hidden, sdl3::WindowFlag::HighPixelDensity]).expect("density probe");
+        let density = f64::from(window.pixel_density().expect("display pixel density"));
+        assert!(density >= 1.0 && density.fract() == 0.0, "native Canvas requires whole pixel density: {density}");
+        density as i64
+    })
+}
 
 fn font_path() -> String {
     format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"))
@@ -25,29 +33,33 @@ fn frame_at(count: i64, height: i64) -> frame::Frame {
     input.tick = count;
     input.size = (WIDTH, height);
     input.pointer = (-100.0, -100.0);
-    input.events = vec![Event::Pointer_moved((-100.0, -100.0))];
-    frame::Frame { input, pixel_scale: (SCALE as f64, SCALE as f64), fps: 60.0, mouse_delta: (0.0, 0.0) }
+    input.events = vec![Event::PointerMoved((-100.0, -100.0))];
+    frame::Frame { input, pixel_scale: (scale() as f64, scale() as f64), fps: 60.0, mouse_delta: (0.0, 0.0) }
 }
 
 /// The second frame of a fresh UI with the pointer parked away from every widget, rendered
-/// `SCALE` pixels a point.
+/// at the selected display density.
 fn render(height: i64, build: &mut dyn FnMut(&mut Ui)) -> canvas::Canvas {
     let mut ui = Ui::create(Platform::Apple, None, Some(font_path()));
     for count in 0..2 {
         ui.frame(&frame_at(count, height), build);
     }
-    let canvas_ = canvas::create(WIDTH * SCALE, height * SCALE).expect("canvas");
+    let canvas_ = canvas::create(WIDTH * scale(), height * scale()).expect("canvas");
     let mut nodes = vec![scene::clear(color::rgb(228, 139, 161))];
     nodes.extend(ui.scene(None));
-    canvas::render(Some(SCALE), &canvas_, &nodes).expect("Canvas.render");
+    canvas::render(Some(scale()), &canvas_, &nodes).expect("Canvas.render");
     ui.destroy();
     canvas_
 }
 
 /// Compare `canvas_` with the golden; a drift names the pixels that differ.
 fn check(name: &str, golden: &str, canvas_: canvas::Canvas) {
+    let golden = golden.replace("_2x.png", &format!("_{}x.png", scale()));
+    if std::env::var("RAYS_UPDATE_FIXTURES").as_deref() == Ok("1") {
+        canvas::save_png(&canvas_, &golden_path(&golden)).expect("refresh parity golden");
+    }
     let actual = canvas::to_image(&canvas_).expect("to_image");
-    let golden_image = image::load(&golden_path(golden)).expect("golden");
+    let golden_image = image::load(&golden_path(&golden)).expect("golden");
     let (gd, ad) = (image::dimensions(&golden_image), image::dimensions(&actual));
     assert!(gd == ad, "PXUI {name} parity: golden is {}x{}, render is {}x{}", gd.0, gd.1, ad.0, ad.1);
     let g = image::pixels(&golden_image).expect("pixels");
@@ -196,7 +208,7 @@ fn gpu_parity_commands() {
             let staged = rays::scene::layer::stage_native(WIDTH, *height, &ui.scene(None)).unwrap_or_else(|e| panic!("{name}: {e}"));
             let mut packets = 0;
             for layer in &staged.layers {
-                if let rays::scene::layer::native_layer::Ui_layer(batch, _) = layer {
+                if let rays::scene::layer::NativeLayer::UiLayer(batch, _) = layer {
                     assert!(batch.count() > 0, "{name}: empty UI batch");
                     for b in batch.batches() {
                         assert!(b.first >= 0 && b.count > 0, "{name}: malformed batch");

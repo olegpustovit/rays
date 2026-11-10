@@ -1,4 +1,4 @@
-//! Ports of lib/pxui test_table.ml, test_keyboard.ml and test_input.ml.
+//! Ports of lib/pxui ,  and .
 use crate::support::*;
 use input::{Event, Key, MouseButton, ScrollPhase};
 use pxui::ui::*;
@@ -63,7 +63,7 @@ pub fn window_pxui_table() {
         &table_frame(
             16,
             vec![
-                Event::Trackpad_scrolled { delta: (0.0, -72.0), phase: ScrollPhase::Moved, time: 16.0 / 60.0 },
+                Event::TrackpadScrolled { delta: (0.0, -72.0), phase: ScrollPhase::Moved, time: 16.0 / 60.0 },
                 Event::Scrolled((0.0, -3.0)),
             ],
         ),
@@ -71,11 +71,11 @@ pub fn window_pxui_table() {
     );
     assert!(cells.get() >= 12 && cells.get() <= 20 && first.get() == 10033);
     ui.frame(
-        &table_frame(17, vec![Event::Trackpad_scrolled { delta: (0.0, -72.0), phase: ScrollPhase::Moved, time: 17.0 / 60.0 }]),
+        &table_frame(17, vec![Event::TrackpadScrolled { delta: (0.0, -72.0), phase: ScrollPhase::Moved, time: 17.0 / 60.0 }]),
         &mut build,
     );
     ui.frame(
-        &table_frame(18, vec![Event::Trackpad_scrolled { delta: (0.0, 0.0), phase: ScrollPhase::Lifted, time: 18.0 / 60.0 }]),
+        &table_frame(18, vec![Event::TrackpadScrolled { delta: (0.0, 0.0), phase: ScrollPhase::Lifted, time: 18.0 / 60.0 }]),
         &mut build,
     );
     cells.set(0);
@@ -127,7 +127,7 @@ pub fn window_pxui_keyboard() {
         &mut ui,
         &mut model,
         vec![],
-        vec![key_down(Key::Shift), key_down(Key::Tab), Event::Key_released(Key::Shift), Event::Text_input("!".into())],
+        vec![key_down(Key::Shift), key_down(Key::Tab), Event::KeyReleased(Key::Shift), Event::TextInput("!".into())],
     );
     check(model.text == "old!", "same-frame Shift release changed backwards Tab traversal");
     step(&mut ui, &mut model, vec![], vec![key_down(Key::Tab), key_down(Key::Enter)]);
@@ -142,20 +142,20 @@ pub fn window_pxui_keyboard() {
     check(!ui.text_input_focused(), "disappearing focused controls kept focus");
     step(&mut ui, &mut model, vec![], vec![key_down(Key::Space)]);
     check(model.enabled, "a control that had disappeared kept its keyboard activation");
-    step(&mut ui, &mut model, vec![Key::Shift], vec![key_down(Key::Tab), Event::Text_input("!".into())]);
+    step(&mut ui, &mut model, vec![Key::Shift], vec![key_down(Key::Tab), Event::TextInput("!".into())]);
     check(model.text == "old!!", "Shift-Tab did not enter the last text field");
     step(
         &mut ui,
         &mut model,
         vec![],
-        vec![key_down(Key::Meta), key_down(kc('a')), Event::Key_released(Key::Meta), Event::Text_input("new".into())],
+        vec![key_down(Key::Meta), key_down(kc('a')), Event::KeyReleased(Key::Meta), Event::TextInput("new".into())],
     );
     check(model.text == "new", "same-frame Command release broke text select-all");
     step(
         &mut ui,
         &mut model,
         vec![],
-        vec![key_down(Key::Shift), key_down(Key::ArrowLeft), Event::Key_released(Key::Shift), key_down(Key::Backspace)],
+        vec![key_down(Key::Shift), key_down(Key::ArrowLeft), Event::KeyReleased(Key::Shift), key_down(Key::Backspace)],
     );
     check(model.text == "ne", "same-frame Shift release broke text selection");
     step(&mut ui, &mut model, vec![], vec![key_down(Key::Tab), key_down(Key::Enter)]);
@@ -163,7 +163,7 @@ pub fn window_pxui_keyboard() {
     step(&mut ui, &mut model, vec![], vec![key_down(Key::Escape)]);
     check(!ui.text_input_focused(), "Escape did not return control keys to the host");
     step(&mut ui, &mut model, vec![], vec![key_down(Key::Tab)]);
-    step(&mut ui, &mut model, vec![], vec![Event::Focus_lost, key_down(Key::Enter)]);
+    step(&mut ui, &mut model, vec![], vec![Event::FocusLost, key_down(Key::Enter)]);
     check(model.clicks == 2 && !ui.text_input_focused(), "focus loss did not cancel keyboard activation");
     let mut menu = MenuResult::Open;
     let mut background = false;
@@ -179,7 +179,7 @@ pub fn window_pxui_keyboard() {
     ui.frame(&keyboard_frame(vec![], vec![]), &mut popup);
     ui.frame(&keyboard_frame(vec![], vec![key_down(Key::Tab), key_down(Key::Enter)]), &mut popup);
     check(menu == MenuResult::Pick(1) && !background, "modal traversal reached a disabled row or escaped to the background");
-    ui.frame(&keyboard_frame(vec![], vec![Event::Focus_lost]), &mut |_| {});
+    ui.frame(&keyboard_frame(vec![], vec![Event::FocusLost]), &mut |_| {});
     let picked = std::cell::RefCell::new(None);
     let mut picker = |ui: &mut Ui| {
         ui.modal(None, "picker", &mut |ui| {
@@ -235,26 +235,26 @@ pub fn window_pxui_input() {
     };
     step(&mut ui, false, plain(vec![]));
     let drag = vec![
-        Event::Pointer_pressed(MouseButton::RightButton, (10.0, 10.0)),
-        Event::Pointer_moved((220.0, 20.0)),
-        Event::Pointer_released(MouseButton::RightButton, (220.0, 20.0)),
+        Event::PointerPressed(MouseButton::RightButton, (10.0, 10.0)),
+        Event::PointerMoved((220.0, 20.0)),
+        Event::PointerReleased(MouseButton::RightButton, (220.0, 20.0)),
     ];
     let (inp, _, graph) = step(&mut ui, false, plain(drag.clone()));
     check(inp.input.events == drag && !graph.pressed, "viewport capture did not survive a pane crossing/release");
     let drag = vec![
-        Event::Pointer_pressed(MouseButton::MiddleButton, (200.0, 10.0)),
-        Event::Pointer_moved((10.0, 10.0)),
-        Event::Pointer_released(MouseButton::MiddleButton, (10.0, 10.0)),
+        Event::PointerPressed(MouseButton::MiddleButton, (200.0, 10.0)),
+        Event::PointerMoved((10.0, 10.0)),
+        Event::PointerReleased(MouseButton::MiddleButton, (10.0, 10.0)),
     ];
     let (inp, _, graph) = step(&mut ui, false, plain(drag));
     check(
-        inp.input.events == vec![Event::Pointer_cancelled(MouseButton::MiddleButton)] && graph.pressed,
+        inp.input.events == vec![Event::PointerCancelled(MouseButton::MiddleButton)] && graph.pressed,
         "graph-owned drag reached the viewport",
     );
     let click = vec![press((40, 40)), release((40, 40)), key_down(Key::Enter)];
     let (inp, control, _) = step(&mut ui, false, input_frame(vec![], vec![Key::Shift], click.clone()));
     check(
-        control.clicked && inp.input.events == vec![Event::Pointer_cancelled(MouseButton::LeftButton)] && inp.input.keys.is_empty(),
+        control.clicked && inp.input.events == vec![Event::PointerCancelled(MouseButton::LeftButton)] && inp.input.keys.is_empty(),
         "child widget input escaped to its viewport root",
     );
     let mut events = click.clone();
@@ -264,34 +264,34 @@ pub fn window_pxui_input() {
         !control.clicked
             && inp.input.buttons.is_empty()
             && inp.mouse_delta == (0.0, 0.0)
-            && inp.input.events == vec![Event::Pointer_cancelled(MouseButton::LeftButton)],
+            && inp.input.events == vec![Event::PointerCancelled(MouseButton::LeftButton)],
         "new popup did not shield this frame's underlying controls",
     );
     let mut with_escape = vec![key_down(Key::Escape)];
     with_escape.extend(click.clone());
     let (inp, control, _) = step(&mut ui, true, plain(with_escape));
     check(
-        !control.clicked && inp.input.events == vec![Event::Pointer_cancelled(MouseButton::LeftButton)],
+        !control.clicked && inp.input.events == vec![Event::PointerCancelled(MouseButton::LeftButton)],
         "popup dismissal leaked its remaining press/release events",
     );
     step(&mut ui, false, plain(vec![]));
     step(
         &mut ui,
         false,
-        input_frame(vec![MouseButton::RightButton], vec![], vec![Event::Pointer_pressed(MouseButton::RightButton, (10.0, 10.0))]),
+        input_frame(vec![MouseButton::RightButton], vec![], vec![Event::PointerPressed(MouseButton::RightButton, (10.0, 10.0))]),
     );
     let (inp, _, _) = step(&mut ui, true, input_frame(vec![MouseButton::RightButton], vec![], vec![]));
     check(
-        inp.input.events.contains(&Event::Pointer_cancelled(MouseButton::RightButton)),
+        inp.input.events.contains(&Event::PointerCancelled(MouseButton::RightButton)),
         "popup opening did not cancel the viewport's captured gesture",
     );
-    step(&mut ui, false, plain(vec![Event::Focus_lost]));
-    let (inp, _, _) = step(&mut ui, false, plain(vec![Event::Focus_lost, Event::Pointer_cancelled(MouseButton::RightButton)]));
+    step(&mut ui, false, plain(vec![Event::FocusLost]));
+    let (inp, _, _) = step(&mut ui, false, plain(vec![Event::FocusLost, Event::PointerCancelled(MouseButton::RightButton)]));
     check(
-        inp.input.events == vec![Event::Focus_lost, Event::Pointer_cancelled(MouseButton::RightButton)],
+        inp.input.events == vec![Event::FocusLost, Event::PointerCancelled(MouseButton::RightButton)],
         "cancellation events were consumed",
     );
-    let mut only_view = |ui: &mut Ui| -> i64 {
+    let only_view = |ui: &mut Ui| -> i64 {
         let b = ui.box_("only-view", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(160.0)).h(Size::Px(240.0)));
         key_of_box(&b)
     };
@@ -302,7 +302,7 @@ pub fn window_pxui_input() {
     let mut owner = 0;
     ui.frame(&plain(unowned_click.clone()), &mut |ui| owner = only_view(ui));
     check(
-        ui.input(Some(owner)).input.events == vec![Event::Pointer_cancelled(MouseButton::LeftButton)],
+        ui.input(Some(owner)).input.events == vec![Event::PointerCancelled(MouseButton::LeftButton)],
         "unowned pointer events escaped to an explicit viewport owner",
     );
     check(ui.input(None).input.events == unowned_click, "default input lost unowned pointer events");
@@ -337,7 +337,7 @@ pub fn window_pxui_input() {
     );
     let mut held = Vec::new();
     ui.frame(
-        &input_frame(vec![MouseButton::LeftButton], vec![], vec![Event::Key_released(Key::Shift), move_to((20, 10))]),
+        &input_frame(vec![MouseButton::LeftButton], vec![], vec![Event::KeyReleased(Key::Shift), move_to((20, 10))]),
         &mut |ui| held = probe(ui),
     );
     let mut released = Vec::new();
