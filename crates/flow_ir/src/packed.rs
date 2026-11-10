@@ -3369,6 +3369,18 @@ pub mod host {
 
     /// Declared types of the structured Core arguments captured by this region.
     pub fn argument_types(t: &T) -> Result<Vec<Ty>, Diagnostic> {
+        cached_argument_types(t).map(<[Ty]>::to_vec)
+    }
+
+    fn cached_argument_types(t: &T) -> Result<&[Ty], Diagnostic> {
+        if let Some(types) = t.argument_types.get() {
+            return Ok(types);
+        }
+        let types = collect_argument_types(t)?;
+        Ok(t.argument_types.get_or_init(|| types))
+    }
+
+    fn collect_argument_types(t: &T) -> Result<Vec<Ty>, Diagnostic> {
         let mut types: HashMap<i64, Ty> = HashMap::new();
         let mut visited: HashSet<(i64, i64)> = HashSet::new();
         fn value(v: &Value, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<(i64, i64)>) -> Result<(), Diagnostic> {
@@ -3437,7 +3449,7 @@ pub mod host {
     /// for a device that checks what it uploads (a resident fold's placeholders are zeros).
     pub fn bind_arguments(t: &T, arguments: &[Value], validate: Option<bool>) -> Result<T, Diagnostic> {
         let validate = validate.unwrap_or(true);
-        let types = argument_types(t)?;
+        let types = cached_argument_types(t)?;
         if types.len() != arguments.len() {
             return Err(value::fail("E_CORE_ARGUMENT", "Compiled region argument count differs from its declaration."));
         }

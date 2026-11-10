@@ -358,6 +358,8 @@ pub mod region {
         pub capture_roots: flow_eval::Roots,
         pub destination: Option<Arc<Destination>>,
         pub slot_plan: Arc<OnceLock<Registers>>,
+        /// The declared argument types, found once per capture binding (a rebound region starts empty).
+        pub argument_types: Arc<OnceLock<Vec<Ty>>>,
         pub residual: ResidualId,
         pub term: Arc<Term>,
         pub sources: Sources,
@@ -933,6 +935,7 @@ pub mod region {
             capture_roots: Default::default(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
+            argument_types: Arc::new(OnceLock::new()),
             residual: p.residual,
             term: p.term,
             sources: p.sources,
@@ -965,6 +968,7 @@ pub mod region {
             capture_roots: t.capture_roots.clone(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
+            argument_types: Arc::new(OnceLock::new()),
             residual: o.residual.unwrap_or(t.residual),
             term: o.term.unwrap_or_else(|| t.term.clone()),
             sources: o.sources.unwrap_or_else(|| t.sources.clone()),
@@ -1012,7 +1016,7 @@ pub mod region {
             }
             // Every other field is shared or copied once; the replaced captures are never cloned first.
             let mut bound = T {
-                capture_roots: Default::default(), destination: t.destination.clone(), slot_plan: t.slot_plan.clone(), residual, term: t.term.clone(),
+                capture_roots: Default::default(), destination: t.destination.clone(), slot_plan: t.slot_plan.clone(), argument_types: Arc::new(OnceLock::new()), residual, term: t.term.clone(),
                 sources, widths: t.widths.clone(), uniforms, uniform_names: t.uniform_names.clone(), code: t.code.clone(),
                 dependent: t.dependent.clone(), outputs: t.outputs.clone(), count, origin: t.origin.clone(), iteration: t.iteration,
                 result: t.result.clone(), skip: t.skip.clone(), stages, fusion: t.fusion, dynamic: t.dynamic,
