@@ -29,8 +29,8 @@ fn kind_from_code(code: u8) -> PrimitiveKind {
 }
 
 struct Payload {
-    vertex_points: Arc<Vec<i64>>,
-    primitive_offsets: Arc<Vec<i64>>,
+    vertex_points: Arc<Vec<u32>>,
+    primitive_offsets: Arc<Vec<u32>>,
     primitive_kinds: Arc<[u8]>,
 }
 
@@ -59,20 +59,21 @@ pub fn upgrade(value: &WeakTopology) -> Option<T> { value.0.upgrade().map(|inner
 
 fn make_owned(
     point_count: i64,
-    vertex_points: Vec<i64>,
-    primitive_offsets: Vec<i64>,
+    vertex_points: Vec<u32>,
+    primitive_offsets: Vec<u32>,
     primitive_kinds: Vec<u8>,
-) -> T {
+) -> Result<T, error::T> {
     view::create_validated_shared(point_count, vertex_points, Arc::new(primitive_offsets), primitive_kinds.into())
 }
 
 fn validate(
     operation: &str,
     point_count: i64,
-    vertex_points: &[i64],
-    primitive_offsets: &[i64],
+    vertex_points: &[u32],
+    primitive_offsets: &[u32],
     primitive_kinds: &[u8],
 ) -> Result<(), error::T> {
+    check_counts(operation, point_count, vertex_points.len(), primitive_kinds.len())?;
     if point_count < 0 {
         return Err(error::new(
             operation,
@@ -94,9 +95,7 @@ fn validate(
             "Topology: first primitive offset must be zero".to_owned(),
         ));
     }
-    if primitive_offsets[primitive_offsets.len() - 1]
-        != i64::try_from(vertex_points.len()).expect("Topology: too many vertices")
-    {
+    if primitive_offsets[primitive_offsets.len() - 1] as usize != vertex_points.len() {
         return Err(error::new(
             operation,
             Code::InvalidTopology,
@@ -112,7 +111,7 @@ fn validate(
     }
     if vertex_points
         .iter()
-        .any(|&point| point < 0 || point >= point_count)
+        .any(|&point| i64::from(point) >= point_count)
     {
         return Err(error::new(
             operation,
@@ -150,6 +149,19 @@ fn validate(
     Ok(())
 }
 
+/// Every point, vertex and primitive index is a u32; larger geometry is a typed error.
+fn check_counts(operation: &str, points: i64, vertices: usize, primitives: usize) -> Result<(), error::T> {
+    const LIMIT: u64 = u32::MAX as u64;
+    if points > LIMIT as i64 || vertices as u64 > LIMIT || primitives as u64 > LIMIT {
+        return Err(error::new(
+            operation,
+            Code::GeometryTooLarge,
+            format!("Topology: {points} points, {vertices} vertices, {primitives} primitives exceed the 4294967295 element limit"),
+        ));
+    }
+    Ok(())
+}
+
 fn invalid_topology(operation: &str, message: &str) -> error::T {
     error::new(operation, Code::InvalidTopology, message.to_owned())
 }
@@ -161,13 +173,13 @@ pub fn empty(point_count: i64) -> Result<T, error::T> {
             "Topology.empty: negative point count",
         ));
     }
-    Ok(make_owned(point_count, Vec::new(), vec![0], Vec::new()))
+    make_owned(point_count, Vec::new(), vec![0], Vec::new())
 }
 
 pub fn polygons_owned(
     point_count: i64,
-    vertex_points: Vec<i64>,
-    primitive_offsets: Vec<i64>,
+    vertex_points: Vec<u32>,
+    primitive_offsets: Vec<u32>,
 ) -> Result<T, error::T> {
     let primitive_count = primitive_offsets.len().saturating_sub(1);
     let primitive_kinds = vec![0; primitive_count];
@@ -178,18 +190,18 @@ pub fn polygons_owned(
         &primitive_offsets,
         &primitive_kinds,
     )?;
-    Ok(make_owned(
+    make_owned(
         point_count,
         vertex_points,
         primitive_offsets,
         primitive_kinds,
-    ))
+    )
 }
 
 pub fn create_owned(
     point_count: i64,
-    vertex_points: Vec<i64>,
-    primitive_offsets: Vec<i64>,
+    vertex_points: Vec<u32>,
+    primitive_offsets: Vec<u32>,
     primitive_kinds: Vec<PrimitiveKind>,
 ) -> Result<T, error::T> {
     let primitive_kinds: Vec<u8> = primitive_kinds.into_iter().map(kind_code).collect();
@@ -200,12 +212,12 @@ pub fn create_owned(
         &primitive_offsets,
         &primitive_kinds,
     )?;
-    Ok(make_owned(
+    make_owned(
         point_count,
         vertex_points,
         primitive_offsets,
         primitive_kinds,
-    ))
+    )
 }
 
 pub fn point_count(value: &T) -> i64 {
@@ -230,7 +242,7 @@ pub fn payload_bytes(value: &T) -> i64 {
         .vertex_count
         .saturating_add(value.inner.primitive_count)
         .saturating_add(1)
-        .saturating_mul(std::mem::size_of::<i64>() as i64)
+        .saturating_mul(std::mem::size_of::<u32>() as i64)
         .saturating_add(value.inner.primitive_count)
 }
 
@@ -246,7 +258,7 @@ pub fn point_of_vertex(value: &T, vertex: i64) -> Result<i64, error::T> {
                 "Topology.point_of_vertex: index out of bounds".to_owned(),
             )
         })?;
-    Ok(planes.vertex_points[vertex])
+    Ok(i64::from(planes.vertex_points[vertex]))
 }
 
 pub fn primitive_vertex_range(value: &T, primitive: i64) -> Result<(i64, i64), error::T> {
@@ -262,8 +274,8 @@ pub fn primitive_vertex_range(value: &T, primitive: i64) -> Result<(i64, i64), e
             )
         })?;
     Ok((
-        planes.primitive_offsets[primitive],
-        planes.primitive_offsets[primitive + 1],
+        i64::from(planes.primitive_offsets[primitive]),
+        i64::from(planes.primitive_offsets[primitive + 1]),
     ))
 }
 
@@ -381,7 +393,7 @@ pub fn deferred(
                             if kind_from_code(planes.primitive_kinds[primitive]) != kind
                                 || planes.primitive_offsets[primitive + 1]
                                     - planes.primitive_offsets[primitive]
-                                    != size
+                                    != size as u32
                             {
                                 return Err(invalid_topology(
                                     "Topology.deferred",
@@ -444,8 +456,8 @@ pub mod builder {
 
     pub struct T {
         point_count: i64,
-        vertex_points: Vec<i64>,
-        primitive_offsets: Vec<i64>,
+        vertex_points: Vec<u32>,
+        primitive_offsets: Vec<u32>,
         primitive_kinds: Vec<u8>,
         frozen: bool,
     }
@@ -530,7 +542,7 @@ pub mod builder {
         builder: &mut T,
         kind: PrimitiveKind,
         minimum: usize,
-        points: &[i64],
+        points: &[u32],
     ) -> Result<(), error::T> {
         if builder.frozen {
             return Err(error::new(
@@ -548,7 +560,7 @@ pub mod builder {
         }
         if points
             .iter()
-            .any(|&point| point < 0 || point >= builder.point_count)
+            .any(|&point| i64::from(point) >= builder.point_count)
         {
             return Err(error::new(
                 "Topology.Builder",
@@ -560,7 +572,7 @@ pub mod builder {
             .vertex_points
             .len()
             .checked_add(points.len())
-            .and_then(|count| i64::try_from(count).ok())
+            .and_then(|count| u32::try_from(count).ok())
             .ok_or_else(|| {
                 error::new(
                     "Topology.Builder",
@@ -598,11 +610,11 @@ pub mod builder {
         Ok(())
     }
 
-    pub fn add_open_polyline(builder: &mut T, points: &[i64]) -> Result<(), error::T> {
+    pub fn add_open_polyline(builder: &mut T, points: &[u32]) -> Result<(), error::T> {
         add_primitive(builder, PrimitiveKind::OpenPolyline, 2, points)
     }
 
-    pub fn add_closed_polyline(builder: &mut T, points: &[i64]) -> Result<(), error::T> {
+    pub fn add_closed_polyline(builder: &mut T, points: &[u32]) -> Result<(), error::T> {
         add_primitive(builder, PrimitiveKind::ClosedPolyline, 3, points)
     }
 
@@ -615,12 +627,12 @@ pub mod builder {
             ));
         }
         builder.frozen = true;
-        Ok(make_owned(
+        make_owned(
             builder.point_count,
             std::mem::take(&mut builder.vertex_points),
             std::mem::take(&mut builder.primitive_offsets),
             std::mem::take(&mut builder.primitive_kinds),
-        ))
+        )
     }
 }
 
@@ -630,8 +642,8 @@ pub mod view {
     #[derive(Clone)]
     pub struct View {
         pub point_count: i64,
-        pub vertex_points: Arc<Vec<i64>>,
-        pub primitive_offsets: Arc<Vec<i64>>,
+        pub vertex_points: Arc<Vec<u32>>,
+        pub primitive_offsets: Arc<Vec<u32>>,
         pub primitive_kinds: Arc<[u8]>,
     }
 
@@ -664,15 +676,16 @@ pub mod view {
     /// Reuses the primitive layout planes while taking ownership of new vertex references.
     pub fn create_validated_shared(
         point_count: i64,
-        vertex_points: Vec<i64>,
-        primitive_offsets: Arc<Vec<i64>>,
+        vertex_points: Vec<u32>,
+        primitive_offsets: Arc<Vec<u32>>,
         primitive_kinds: Arc<[u8]>,
-    ) -> T {
+    ) -> Result<T, error::T> {
+        check_counts("Topology.create", point_count, vertex_points.len(), primitive_kinds.len())?;
         let data_id = support::fresh_data_id();
         let identity = support::IdentityToken::new(data_id);
-        let vertex_count = i64::try_from(vertex_points.len()).expect("Topology: too many vertices");
-        let primitive_count = i64::try_from(primitive_kinds.len()).expect("Topology: too many primitives");
-        T {
+        let vertex_count = vertex_points.len() as i64;
+        let primitive_count = primitive_kinds.len() as i64;
+        Ok(T {
             inner: Arc::new(Inner {
                 point_count,
                 vertex_count,
@@ -687,15 +700,15 @@ pub mod view {
                 deferred: None,
                 shape: None,
             }),
-        }
+        })
     }
 
     pub fn create_validated_owned(
         point_count: i64,
-        vertex_points: Vec<i64>,
-        primitive_offsets: Vec<i64>,
+        vertex_points: Vec<u32>,
+        primitive_offsets: Vec<u32>,
         primitive_kinds: Vec<u8>,
-    ) -> T {
+    ) -> Result<T, error::T> {
         make_owned(
             point_count,
             vertex_points,
@@ -730,10 +743,22 @@ mod tests {
     }
 
     #[test]
+    fn geometry_above_u32_elements_is_a_typed_error() {
+        let limit = u64::from(u32::MAX);
+        for (points, vertices, primitives) in [(limit as i64 + 1, 0, 0), (0, limit as usize + 1, 0), (0, 0, limit as usize + 1)] {
+            let failure = check_counts("test", points, vertices, primitives).unwrap_err();
+            assert_eq!(error::code(&failure), Code::GeometryTooLarge);
+        }
+        check_counts("test", limit as i64, limit as usize, limit as usize).unwrap();
+        let failure = create_owned(limit as i64 + 1, Vec::new(), vec![0], Vec::new()).err().unwrap();
+        assert_eq!(error::code(&failure), Code::GeometryTooLarge);
+    }
+
+    #[test]
     fn repointed_layout_reuses_arcs_and_has_fresh_identity() {
-        let repoint = |source: &view::View, vertices: Vec<i64>| view::create_validated_shared(
+        let repoint = |source: &view::View, vertices: Vec<u32>| view::create_validated_shared(
             source.point_count, vertices, source.primitive_offsets.clone(), source.primitive_kinds.clone(),
-        );
+        ).unwrap();
         if std::env::var_os("RAYS_TOPOLOGY_BENCH").is_some() {
             let count = 4096;
             let source = polygons_owned(3, (0..count * 3).map(|v| v % 3).collect(), (0..=count).map(|p| p * 3).collect()).unwrap();
@@ -767,7 +792,7 @@ mod tests {
         assert!(Arc::ptr_eq(&layout.primitive_offsets, &target_view.primitive_offsets));
         assert!(Arc::ptr_eq(&layout.primitive_kinds, &target_view.primitive_kinds));
         let changed_offsets = Arc::new(vec![0, 4, 6]);
-        let resized = view::create_validated_shared(4, target_view.vertex_points.to_vec(), changed_offsets.clone(), layout.primitive_kinds.clone());
+        let resized = view::create_validated_shared(4, target_view.vertex_points.to_vec(), changed_offsets.clone(), layout.primitive_kinds.clone()).unwrap();
         let resized = view::view(&resized).unwrap();
         assert!(Arc::ptr_eq(&changed_offsets, &resized.primitive_offsets));
         assert!(Arc::ptr_eq(&layout.primitive_kinds, &resized.primitive_kinds));
@@ -918,11 +943,11 @@ mod ported_rdk_tests {
         for count in [0_usize, 3, 32767, 32768, 65535, 65536, 65537, 131073] {
             for polygon in [false, true] {
                 let construct = |bad: &[usize]| {
-                    let mut vertices: Vec<i64> = (0..count as i64).collect();
+                    let mut vertices: Vec<u32> = (0..count as u32).collect();
                     for &index in bad {
-                        vertices[index] = count as i64;
+                        vertices[index] = count as u32;
                     }
-                    let offsets = if count == 0 { vec![0] } else { vec![0, count as i64] };
+                    let offsets = if count == 0 { vec![0] } else { vec![0, count as u32] };
                     if polygon {
                         polygons_owned(count as i64, vertices, offsets)
                     } else {
@@ -934,8 +959,8 @@ mod ported_rdk_tests {
                 let view = view::view(&built).unwrap();
                 assert_eq!(view.point_count, count as i64);
                 assert_eq!(view.vertex_points.len(), count);
-                assert!(view.vertex_points.iter().copied().eq(0..count as i64));
-                assert_eq!(&*view.primitive_offsets, if count == 0 { vec![0] } else { vec![0, count as i64] }.as_slice());
+                assert!(view.vertex_points.iter().copied().eq(0..count as u32));
+                assert_eq!(&*view.primitive_offsets, if count == 0 { vec![0] } else { vec![0, count as u32] }.as_slice());
                 assert_eq!(&*view.primitive_kinds, if count == 0 { vec![] } else { vec![u8::from(!polygon)] }.as_slice());
                 if count > 0 {
                     let mut indices = vec![0, 65535.min(count - 1), 65536.min(count - 1), count - 1];
@@ -962,11 +987,11 @@ mod ported_rdk_tests {
 
     fn simultaneous_invalid_validation_body() {
         let count = 131073_usize;
-        let mut vertices: Vec<i64> = (0..count as i64).collect();
-        vertices[0] = -1;
-        vertices[65536] = count as i64;
-        let c = count as i64;
-        let expect = |text: &str, point_count: i64, vertices: &[i64], offsets: Vec<i64>, kinds: Vec<PrimitiveKind>| {
+        let mut vertices: Vec<u32> = (0..count as u32).collect();
+        vertices[0] = u32::MAX;
+        vertices[65536] = count as u32;
+        let c = count as u32;
+        let expect = |text: &str, point_count: i64, vertices: &[u32], offsets: Vec<u32>, kinds: Vec<PrimitiveKind>| {
             assert_eq!(
                 message(create_owned(point_count, vertices.to_vec(), offsets, kinds)),
                 text,
@@ -974,19 +999,19 @@ mod ported_rdk_tests {
             );
         };
         expect("Topology: point count is negative", -1, &vertices, vec![], vec![]);
-        expect("Topology: primitive offsets must contain the initial zero", c, &vertices, vec![], vec![]);
-        expect("Topology: first primitive offset must be zero", c, &vertices, vec![1, c - 1], vec![]);
-        expect("Topology: final primitive offset must equal vertex count", c, &vertices, vec![0, c - 1], vec![]);
-        expect("Topology: primitive kind count must match primitive count", c, &vertices, vec![0, c], vec![]);
+        expect("Topology: primitive offsets must contain the initial zero", i64::from(c), &vertices, vec![], vec![]);
+        expect("Topology: first primitive offset must be zero", i64::from(c), &vertices, vec![1, c - 1], vec![]);
+        expect("Topology: final primitive offset must equal vertex count", i64::from(c), &vertices, vec![0, c - 1], vec![]);
+        expect("Topology: primitive kind count must match primitive count", i64::from(c), &vertices, vec![0, c], vec![]);
         let offsets = vec![0, c, c - 1, c];
         let kinds = vec![PrimitiveKind::Polygon; 3];
-        expect(INVALID, c, &vertices, offsets.clone(), kinds.clone());
+        expect(INVALID, i64::from(c), &vertices, offsets.clone(), kinds.clone());
         vertices[0] = 0;
         vertices[65536] = 65536;
-        expect("Topology: primitive offsets are not ordered", c, &vertices, offsets, kinds);
+        expect("Topology: primitive offsets are not ordered", i64::from(c), &vertices, offsets, kinds);
         expect(
             "Topology: primitive has too few vertices for its kind",
-            c,
+            i64::from(c),
             &vertices,
             vec![0, 1, c],
             vec![PrimitiveKind::Polygon; 2],
@@ -1009,8 +1034,8 @@ mod ported_rdk_tests {
     /// A 2x2 quad grid uses nine source points.
     fn grid_quads() -> T {
         let mut vertices = Vec::new();
-        for row in 0..2_i64 {
-            for column in 0..2_i64 {
+        for row in 0..2_u32 {
+            for column in 0..2_u32 {
                 let p = row * 3 + column;
                 vertices.extend([p, p + 1, p + 4, p + 3]);
             }

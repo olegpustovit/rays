@@ -4,9 +4,9 @@ use crate::{cancel, error, support, topology};
 use crate::error::Code;
 
 struct Data {
-    primitive_of_vertex: Arc<[i64]>,
-    point_offsets: Arc<[i64]>,
-    point_vertices: Arc<[i64]>,
+    primitive_of_vertex: Arc<[u32]>,
+    point_offsets: Arc<[u32]>,
+    point_vertices: Arc<[u32]>,
 }
 
 #[derive(Clone)]
@@ -28,9 +28,9 @@ fn create_uncached(
     let point_count = usize::try_from(source.point_count).expect("Topology point count is invalid");
     let vertex_count = source.vertex_points.len();
     let primitive_count = source.primitive_kinds.len();
-    let mut primitive_of_vertex = vec![-1; vertex_count];
+    let mut primitive_of_vertex = vec![0_u32; vertex_count];
     let mut point_offsets = vec![
-        0_i64;
+        0_u32;
         point_count
             .checked_add(1)
             .expect("Topology point count exceeds array limits")
@@ -38,16 +38,13 @@ fn create_uncached(
 
     for primitive in 0..primitive_count {
         cancel::poll(cancel_value, primitive as i64, 4095).map_err(|_| cancelled_error())?;
-        let first = usize::try_from(source.primitive_offsets[primitive])
-            .expect("Topology primitive offset is invalid");
-        let last = usize::try_from(source.primitive_offsets[primitive + 1])
-            .expect("Topology primitive offset is invalid");
+        let first = source.primitive_offsets[primitive] as usize;
+        let last = source.primitive_offsets[primitive + 1] as usize;
         for vertex in first..last {
             cancel::poll(cancel_value, vertex as i64, 16_383)
                 .map_err(|_| cancelled_error())?;
-            primitive_of_vertex[vertex] = primitive as i64;
-            let point = usize::try_from(source.vertex_points[vertex])
-                .expect("Topology point index is invalid");
+            primitive_of_vertex[vertex] = primitive as u32;
+            let point = source.vertex_points[vertex] as usize;
             point_offsets[point + 1] += 1;
         }
     }
@@ -55,13 +52,13 @@ fn create_uncached(
         point_offsets[point + 1] += point_offsets[point];
     }
 
-    let mut point_vertices = vec![0_i64; vertex_count];
+    let mut point_vertices = vec![0_u32; vertex_count];
     let mut point_cursor = point_offsets.clone();
     for vertex in 0..vertex_count {
         cancel::poll(cancel_value, vertex as i64, 16_383).map_err(|_| cancelled_error())?;
         let point = source.vertex_points[vertex] as usize;
         let output = point_cursor[point] as usize;
-        point_vertices[output] = vertex as i64;
+        point_vertices[output] = vertex as u32;
         point_cursor[point] += 1;
     }
 
@@ -78,7 +75,7 @@ fn index_bytes(value: &support::IdentityValue) -> i64 {
     let support::IdentityValue::PointIndex(index) = value else {
         return 0;
     };
-    let words = std::mem::size_of::<i64>() as i64;
+    let words = std::mem::size_of::<u32>() as i64;
     (index.data.primitive_of_vertex.len() as i64)
         .saturating_add(index.data.point_offsets.len() as i64)
         .saturating_add(index.data.point_vertices.len() as i64)
@@ -122,9 +119,9 @@ pub mod view {
 
     #[derive(Clone)]
     pub struct View {
-        pub primitive_of_vertex: Arc<[i64]>,
-        pub point_offsets: Arc<[i64]>,
-        pub point_vertices: Arc<[i64]>,
+        pub primitive_of_vertex: Arc<[u32]>,
+        pub point_offsets: Arc<[u32]>,
+        pub point_vertices: Arc<[u32]>,
     }
 
     pub fn view(value: &T) -> View {

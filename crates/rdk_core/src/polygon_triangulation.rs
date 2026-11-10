@@ -107,8 +107,8 @@ pub fn primitive(
     emit: &mut dyn FnMut(i64, i64, i64, i64),
 )-> Result<(), error::T> {
     let primitive_index = primitive as usize;
-    let first = topology_view.primitive_offsets[primitive_index];
-    let last = topology_view.primitive_offsets[primitive_index + 1];
+    let first = i64::from(topology_view.primitive_offsets[primitive_index]);
+    let last = i64::from(topology_view.primitive_offsets[primitive_index + 1]);
     let size = last - first;
     if topology_view.primitive_kinds[primitive_index] != 0 {
         return Err(invalid_polygon(format!("primitive {primitive} is a curve, not a polygon")));

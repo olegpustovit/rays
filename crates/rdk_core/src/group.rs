@@ -104,7 +104,8 @@ pub fn ordered_elements(value: &T) -> Option<Vec<i64>> {
     value.order.as_ref().map(|order| order.to_vec())
 }
 
-pub fn mem(index: i64, value: &T) -> bool {
+pub fn mem(index: impl Into<i64>, value: &T) -> bool {
+    let index = index.into();
     if index < 0 || index >= value.length {
         return false;
     }

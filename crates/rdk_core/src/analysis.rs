@@ -95,7 +95,8 @@ fn require_group(
 }
 
 
-fn allowed(value: Option<&group::T>, index: i64) -> bool {
+fn allowed(value: Option<&group::T>, index: impl Into<i64>) -> bool {
+    let index = index.into();
     value.map_or(true, |group_value| group::mem(index, group_value))
 }
 
