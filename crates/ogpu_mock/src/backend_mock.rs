@@ -441,8 +441,7 @@ impl MockCommands {
         }
     }
     fn run(&self) -> Result<(), Error> {
-        let recorded = self.ops.borrow().clone();
-        recorded.iter().try_for_each(|t| execute_transfer(&self.c, t))
+        self.ops.borrow().iter().try_for_each(|t| execute_transfer(&self.c, t))
     }
 }
 
