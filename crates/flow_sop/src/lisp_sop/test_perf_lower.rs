@@ -44,17 +44,23 @@ fn debug_lowering_beats_archived_native() {
 fn validation_without_editor_records_preserves_geometry_and_errors() {
     let source = "(workspace w (defn shift :context value [(x : float)] (+ x 0.5)) (graph g :context sop (sop/mesh :points (exact (map (fn [(i : int)] [(shift (float i)) 0 0]) (array/range 512 :type int))) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))))";
     let (recorded, recorded_root) = lower_text(lower::Options::default(), source);
-    let (validation, validation_root) = lower_text(lower::Options { record: false, ..Default::default() }, source);
     assert!(!recorded.evaluated.records.is_empty());
-    assert!(validation.evaluated.records.is_empty());
-    assert_eq!(geometry_bytes(&cook_once(1, &recorded_root)), geometry_bytes(&cook_once(1, &validation_root)));
+    let expected = geometry_bytes(&cook_once(1, &recorded_root));
+    for reference in [false, true] {
+        let gpu = flow_ir::flow_ir::gpu::Config { fast: reference, ..flow_ir::flow_ir::gpu::default() };
+        let (validation, root) = lower_text(lower::Options { record: false, reference, gpu, ..Default::default() }, source);
+        assert!(validation.evaluated.records.is_empty());
+        assert_eq!(expected, geometry_bytes(&cook_once(1, &root)));
+    }
     let bad = "(workspace w (graph g :context sop (sop/mesh :points (exact (map (fn [(i : int)] (if (int/eq i 256) (error \"E_COORD\" \"bad coordinate\") [(float i) 0 0])) (array/range 512 :type int))) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))))";
-    let errors = [true, false].map(|record| {
-        let error = lower::workspace(None, Vec::new(), lower::Options { record, ..Default::default() }, &parse(bad))
+    let errors = [(true, false), (false, false), (false, true)].map(|(record, reference)| {
+        let gpu = flow_ir::flow_ir::gpu::Config { fast: reference, ..flow_ir::flow_ir::gpu::default() };
+        let error = lower::workspace(None, Vec::new(), lower::Options { record, reference, gpu, ..Default::default() }, &parse(bad))
             .err().expect("selected computed error");
         (error.code, error.message, error.span)
     });
     assert_eq!(errors[0], errors[1]);
+    assert_eq!(errors[0], errors[2]);
 }
 
 

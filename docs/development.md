@@ -127,3 +127,11 @@ incremental sessions subsequently reclaimed 21.245 GB, leaving 53.211 GB allocat
 53.782 GB logical. The newest completed session for each exact configuration, fresh incomplete
 sessions, working sessions and live-locked sessions are retained. The 15 GB limit remains red.
 Native Cocoa and measured-density PXUI checks pass. The remaining limits stay visible as failures.
+
+The current normal-mode `buildtime -- check` passes with unchanged budgets: leaf/middle/top
+touch checks take 0.134/0.245/0.288 s and the editor touch chain takes 1.617 s. All-target workspace
+checking takes 6.70 s after source changes, then 0.283 s fully warm with no output or warnings.
+The fully cached SOP run passes 499 cases in 29.451 s (0.04 s compilation), meeting its 30 s
+suite target; 30 of 98 exact cases still exceed 0.5 s. Current native GPU qualification passes
+41 cases in 5.487 s, zero skips. These individual checks do not replace the cache-blocked
+whole-workspace qualification command.

@@ -6,7 +6,7 @@ that were subsequently fixed do not belong here.
 
 | Item | Reproduce / establish evidence | Current evidence |
 | --- | --- | --- |
-| SOP suite and exact-case targets | `cargo t -p flow_sop` | All 499 cases pass without skips in 30.832 s, above the 30 s target. Thirty-one of the 98 exact cases exceed 0.5 s. Fixture reductions are still in progress. |
+| SOP exact-case target | `cargo t -p flow_sop` | All 499 cases pass without skips in 29.451 s, meeting the 30 s suite target. Thirty of the 98 exact cases still exceed 0.5 s; the slowest is dense-curve subdivision at 0.989 s. |
 | Debug geometry lowering versus the archived native thresholds | `ONLY=box,transform,sphere,garden PHASES=1 cargo t -p flow_sop debug_lowering_beats_archived_native` | The last recorded Mac gate fails transform/garden against stored Windows thresholds. It is not a same-machine comparison. |
 | Debug sketch-check deadlines | `cargo run -q -p buildtime -- profile` | M1 cached app build 0.131 s and touch rebuild 4.526 s. All 49 checks were attempted in 14.612 s, but gallery and swarm were killed at their 1 s deadlines; 47 completed. Complete direct medians are swarm 1.543 s and gallery 1.405 s. See [development](development.md). |
 | Target cache size | `cargo run -p buildtime -- gc` | Pruning 2,101 superseded completed incremental sessions reclaimed 21.245 GB. The retained target is still 53.211 GB allocated / 53.782 GB logical against the 15 GB limit. |

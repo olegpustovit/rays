@@ -1017,13 +1017,17 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
     let make_programs = || -> (R<executor::Program>, Arc<OnceLock<R<executor::Program>>>) {
         let lazy = Arc::new(OnceLock::new());
         let first = prepare(&data);
-        let points = match &data {
-            Value::Record(fields) => prepare(&Value::Record(
-                fields.iter().filter(|(n, _)| !["vertex_points", "primitive_offsets", "kinds"].contains(&n.as_str())).cloned().collect::<Vec<_>>().into(),
-            )),
-            _ => prepare(&data),
-        };
-        let _ = lazy.set(points);
+        // A stateless CPU/reference node cannot select cached device topology. Stateful programs
+        // remain shared across CPU/GPU rebuilds, so keep their existing points preparation.
+        if opts.state.is_some() || (!env.reference && env.gpu.fast) {
+            let points = match &data {
+                Value::Record(fields) => prepare(&Value::Record(
+                    fields.iter().filter(|(n, _)| !["vertex_points", "primitive_offsets", "kinds"].contains(&n.as_str())).cloned().collect::<Vec<_>>().into(),
+                )),
+                _ => prepare(&data),
+            };
+            let _ = lazy.set(points);
+        }
         (first, lazy)
     };
     // a stateful mesh is rebuilt each frame over the same arguments: its programs, and so its kernels'
