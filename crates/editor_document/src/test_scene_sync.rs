@@ -1006,11 +1006,11 @@ fn world_member_edits() {
         "World member",
         Level::Scene,
         &doc,
-        &Edit::Fields(vec![(wid, vec![float("exposure", 1.), float("rotation", 20.)])]),
-        &with_scene(&doc, world_node(&scene(&doc), &[float("exposure", 1.), float("rotation", 20.)])),
+        &Edit::Fields(vec![(wid, vec![float("exposure", 1.), float("rotate", 20.)])]),
+        &with_scene(&doc, world_node(&scene(&doc), &[float("exposure", 1.), float("rotate", 20.)])),
     );
     check(
-        contains(&flat(&source(&edited)), "(scene/world (ref sky) :name \"Bloom\" :exposure 1.0 :rotation 20.0)"),
+        contains(&flat(&source(&edited)), "(scene/world (ref sky) :name \"Bloom\" :exposure 1.0 :rotate 20.0)"),
         &format!("a World member's edit did not reach its call: {}", source(&edited)),
     );
     same_after_reload(&edited, "World member");

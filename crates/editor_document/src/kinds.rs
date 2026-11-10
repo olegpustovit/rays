@@ -144,6 +144,7 @@ pub fn descriptors() -> Vec<Descriptor> {
             fields.extend(extra_fields(&qualified));
             fields.extend(groups.into_iter().flatten());
             out.push(Descriptor {
+                description: kind.description.clone(),
                 slots: kind_slots(&qualified),
                 slot_types: if qualified == "scene/geometry" { vec!["geometry".to_owned(), "image".to_owned()] } else { Vec::new() },
                 keyword_inputs: Vec::new(),
@@ -157,6 +158,7 @@ pub fn descriptors() -> Vec<Descriptor> {
         }
         out.push(Descriptor {
             qualified: "settings/config".to_owned(),
+            description: "Configure canvas dimensions, timing and native window settings.".into(),
             key: "config".to_owned(),
             operation: "config".to_owned(),
             label: "Settings".to_owned(),

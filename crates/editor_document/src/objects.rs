@@ -1,15 +1,11 @@
 //! the scene's objects as plain kinds (`scene/geometry`,
 //! `scene/camera`, `scene/light`, `scene/root`): typed schemas, and the reads and edits of a
 //! `kind_graph::T` of them. The input of an object is its parent.
-use crate::kind_graph::{self as g, chc, fl, int, kind_make, schema_of, tog, Rec};
+use crate::kind_graph::{self as g, angle, chc, fl, int, kind_make, schema_of, tog, Rec};
 use param::{Schema, Value};
 use scene_core::{camera as rcamera, light as rlight};
 use rays_math::{color, mat4, vec3};
 use std::sync::{Arc, OnceLock};
-
-fn radians(degrees: f64) -> f64 {
-    degrees * std::f64::consts::PI / 180.
-}
 
 fn float(name: &str, value: f64) -> (String, Value) {
     (name.to_owned(), Value::Float(value))
@@ -36,16 +32,16 @@ pub mod geometry {
     pub fn parameters_schema() -> Arc<Schema> {
         static S: OnceLock<Arc<Schema>> = OnceLock::new();
         S.get_or_init(|| {
-            let t = |n: &'static str, l: &'static str| fl(n, l, "Transform", 0., -20., 20., None, None);
-            let r = |n: &'static str, l: &'static str| fl(n, l, "Transform", 0., -180., 180., None, None);
+            let t = |n: &'static str, l: &'static str| sop::decl::Spec { unit: Some("m"), ..fl(n, l, "Transform", 0., -20., 20., None, None) };
+            let r = |n: &'static str, l: &'static str| angle(n, l, "Transform", 0., -180., 180., None, None);
             let s = |n: &'static str, l: &'static str| fl(n, l, "Transform", 1., 0., 5., None, None);
             schema_of(vec![
                 t("translate_x", "Translate X"),
                 t("translate_y", "Translate Y"),
                 t("translate_z", "Translate Z"),
-                r("rotate_x", "Rotate X (degrees)"),
-                r("rotate_y", "Rotate Y (degrees)"),
-                r("rotate_z", "Rotate Z (degrees)"),
+                r("rotate_x", "Rotate X (radians)"),
+                r("rotate_y", "Rotate Y (radians)"),
+                r("rotate_z", "Rotate Z (radians)"),
                 s("scale_x", "Scale X"),
                 s("scale_y", "Scale Y"),
                 s("scale_z", "Scale Z"),
@@ -83,7 +79,7 @@ pub mod geometry {
     }
 
     pub fn kind() -> g::Kind {
-        kind_make("geometry", "Geometry", &["Object"], &parameters_schema())
+        kind_make("geometry", "Geometry", "Place geometry in a scene with a local transform and visibility controls.", &["Object"], &parameters_schema())
     }
 }
 
@@ -113,16 +109,15 @@ pub mod camera {
     pub fn parameters_schema() -> Arc<Schema> {
         static S: OnceLock<Arc<Schema>> = OnceLock::new();
         S.get_or_init(|| {
-            let mut fov = fl("fov", "FOV (degrees)", "Lens", 60., 5., 150., Some(1.), Some(179.));
-            fov.unit = Some("deg");
-            let tr = |n: &'static str, l: &'static str, d: f64| fl(n, l, "Transform", d, -100., 100., None, None);
+            let fov = angle("fov", "FOV (radians)", "Lens", 60., 5., 150., Some(1.), Some(179.));
+            let tr = |n: &'static str, l: &'static str, d: f64| sop::decl::Spec { unit: Some("m"), ..fl(n, l, "Transform", d, -100., 100., None, None) };
             let up = |n: &'static str, l: &'static str, d: f64| fl(n, l, "Transform", d, -1., 1., None, None);
             schema_of(vec![
                 fov,
-                fl("near", "Near clip", "Lens", 0.1, 0.01, 10., Some(0.0001), None),
-                fl("far", "Far clip", "Lens", 1000., 10., 10000., Some(0.001), None),
-                fl("aperture", "Aperture (lens radius)", "Lens", 0., 0., 2., Some(0.), None),
-                fl("focus_distance", "Focus distance (0: target)", "Lens", 0., 0., 100., Some(0.), None),
+                sop::decl::Spec { unit: Some("m"), ..fl("near", "Near clip", "Lens", 0.1, 0.01, 10., Some(0.0001), None) },
+                sop::decl::Spec { unit: Some("m"), ..fl("far", "Far clip", "Lens", 1000., 10., 10000., Some(0.001), None) },
+                sop::decl::Spec { unit: Some("m"), ..fl("aperture", "Aperture (lens radius)", "Lens", 0., 0., 2., Some(0.), None) },
+                sop::decl::Spec { unit: Some("m"), ..fl("focus_distance", "Focus distance (0: target)", "Lens", 0., 0., 100., Some(0.), None) },
                 tr("eye_x", "Eye X", 0.),
                 tr("eye_y", "Eye Y", 0.),
                 tr("eye_z", "Eye Z", 7.),
@@ -164,7 +159,7 @@ pub mod camera {
     }
 
     pub fn kind() -> g::Kind {
-        kind_make("camera", "Camera", &["Object"], &parameters_schema())
+        kind_make("camera", "Camera", "Define a perspective camera, lens and viewport target.", &["Object"], &parameters_schema())
     }
 
     pub fn of_node(node: &g::Node) -> Option<(rcamera::Camera, bool)> {
@@ -175,17 +170,17 @@ pub mod camera {
         let at = vec3::create(p.eye_x, p.eye_y, p.eye_z);
         let target = vec3::create(p.target_x, p.target_y, p.target_z);
         let up = vec3::create(p.up_x, p.up_y, p.up_z);
-        let lens = rcamera::lens {
+        let lens = rcamera::Lens {
             aperture: p.aperture,
             focus_distance: if p.focus_distance > 0. { Some(p.focus_distance) } else { None },
         };
-        let camera = rcamera::perspective(Some(p.fov * std::f64::consts::PI / 180.), Some(p.near), Some(p.far), at, target).ok()?;
+        let camera = rcamera::perspective(Some(p.fov), Some(p.near), Some(p.far), at, target).ok()?;
         let camera = rcamera::with_up(up, &camera).ok()?;
         let camera = rcamera::with_lens(lens, &camera).ok()?;
         Some((camera, p.follow_viewport))
     }
 
-    pub fn lens_values(lens: &rcamera::lens) -> Vec<(String, Value)> {
+    pub fn lens_values(lens: &rcamera::Lens) -> Vec<(String, Value)> {
         vec![float("aperture", lens.aperture), float("focus_distance", lens.focus_distance.unwrap_or(0.))]
     }
 
@@ -197,7 +192,7 @@ pub mod camera {
             float("target_x", target.x),
             float("target_y", target.y),
             float("target_z", target.z),
-            float("fov", fov_y * 180. / std::f64::consts::PI),
+            float("fov", fov_y),
         ]
     }
 }
@@ -285,7 +280,7 @@ pub mod root {
     }
 
     pub fn kind() -> g::Kind {
-        kind_make("root", "Root", &["Render"], &parameters_schema())
+        kind_make("root", "Root", "Assemble the scene root with render and output settings.", &["Render"], &parameters_schema())
     }
 
     pub fn default() -> Parameters {
@@ -354,8 +349,8 @@ pub mod light {
     pub fn parameters_schema() -> Arc<Schema> {
         static S: OnceLock<Arc<Schema>> = OnceLock::new();
         S.get_or_init(|| {
-            let tr = |n: &'static str, l: &'static str, d: f64| fl(n, l, "Transform", d, -20., 20., None, None);
-            let aim = |n: &'static str, l: &'static str| fl(n, l, "Aim", 0., -20., 20., None, None);
+            let tr = |n: &'static str, l: &'static str, d: f64| sop::decl::Spec { unit: Some("m"), ..fl(n, l, "Transform", d, -20., 20., None, None) };
+            let aim = |n: &'static str, l: &'static str| sop::decl::Spec { unit: Some("m"), ..fl(n, l, "Aim", 0., -20., 20., None, None) };
             let col = |n: &'static str, l: &'static str| fl(n, l, "Color", 1., 0., 1., Some(0.), None);
             schema_of(vec![
                 chc("shape", "Type", &SHAPE_LABELS, "Area"),
@@ -369,9 +364,9 @@ pub mod light {
                 col("color_g", "Green"),
                 col("color_b", "Blue"),
                 fl("intensity", "Intensity", "", 40., 0., 2000., Some(0.), None),
-                fl("width", "Width", "Area", 2., 0.01, 20., Some(0.001), None),
-                fl("height", "Height", "Area", 2., 0.01, 20., Some(0.001), None),
-                fl("cone", "Cone (degrees)", "Spot", 30., 1., 89., Some(0.1), Some(89.9)),
+                sop::decl::Spec { unit: Some("m"), ..fl("width", "Width", "Area", 2., 0.01, 20., Some(0.001), None) },
+                sop::decl::Spec { unit: Some("m"), ..fl("height", "Height", "Area", 2., 0.01, 20., Some(0.001), None) },
+                angle("cone", "Cone (radians)", "Spot", 30., 1., 89., Some(0.1), Some(89.9)),
                 tog("visible", "Visible", "", true),
                 tog("render", "Renderable", "", true),
             ])
@@ -406,7 +401,7 @@ pub mod light {
     }
 
     pub fn kind() -> g::Kind {
-        kind_make("light", "Light", &["Object"], &parameters_schema())
+        kind_make("light", "Light", "Add an area, point, directional or spot light to the scene.", &["Object"], &parameters_schema())
     }
 }
 
@@ -436,17 +431,17 @@ pub fn light(node: &g::Node) -> Option<light::Parameters> {
     }
 }
 
-/// Translate, then rotate Z.Y.X (degrees), then scale; lights and cameras carry positions instead
+/// Translate, then rotate Z.Y.X (radians), then scale; lights and cameras carry positions instead
 /// of a rotation, so only a translation.
 fn local(node: &g::Node) -> mat4::T {
     match geometry(node) {
         Some(p) => mat4::mul(
             &mat4::translation(vec3::create(p.translate_x, p.translate_y, p.translate_z)),
             &mat4::mul(
-                &mat4::rotation_z(radians(p.rotate_z)),
+                &mat4::rotation_z(p.rotate_z),
                 &mat4::mul(
-                    &mat4::rotation_y(radians(p.rotate_y)),
-                    &mat4::mul(&mat4::rotation_x(radians(p.rotate_x)), &mat4::scaling(vec3::create(p.scale_x, p.scale_y, p.scale_z))),
+                    &mat4::rotation_y(p.rotate_y),
+                    &mat4::mul(&mat4::rotation_x(p.rotate_x), &mat4::scaling(vec3::create(p.scale_x, p.scale_y, p.scale_z))),
                 ),
             ),
         ),
@@ -499,11 +494,11 @@ pub fn visible(node: &g::Node) -> bool {
 }
 
 /// A geometry object's face culling (back faces when it says nothing).
-pub fn cull(node: &g::Node) -> scene_core::cull {
+pub fn cull(node: &g::Node) -> scene_core::Cull {
     match g::field(node, "cull") {
-        Some(Value::Choice(c)) if c == "None" => scene_core::cull::Cull_none,
-        Some(Value::Choice(c)) if c == "Front" => scene_core::cull::Cull_front,
-        _ => scene_core::cull::Cull_back,
+        Some(Value::Choice(c)) if c == "None" => scene_core::Cull::CullNone,
+        Some(Value::Choice(c)) if c == "Front" => scene_core::Cull::CullFront,
+        _ => scene_core::Cull::CullBack,
     }
 }
 
@@ -533,7 +528,7 @@ fn to_light(scene: &[g::Node], id: i64) -> Option<rlight::Light> {
     let attenuation = rlight::attenuation(Some(0.), Some(1.)).ok()?;
     let result = match p.shape {
         light::Shape::Point => rlight::point(Some(diffuse), Some(intensity), Some(attenuation), at),
-        light::Shape::Spot => rlight::spot(Some(diffuse), Some(intensity), Some(attenuation), at, direction, radians(p.cone), 8.),
+        light::Shape::Spot => rlight::spot(Some(diffuse), Some(intensity), Some(attenuation), at, direction, p.cone, 8.),
         // ponytail: one raster sample per area light keeps the viewport fast; the path tracer
         // integrates the true rectangle.
         light::Shape::Area => rlight::area(Some(diffuse), Some(intensity), Some(attenuation), Some(1), at, direction, p.width, p.height),
@@ -560,12 +555,12 @@ pub fn lights(render: bool, scene: &[g::Node]) -> Vec<rlight::Light> {
 pub fn light_values(l: &rlight::Light) -> Vec<(String, Value)> {
     let (r, gr, b, _) = color::to_tuple(l.diffuse);
     let (at, target, shape, extra): (vec3::T, vec3::T, &str, Vec<(String, Value)>) = match &l.kind {
-        rlight::kind::Directional { direction } => (vec3::scale(*direction, -8.), vec3::zero(), "Directional", vec![]),
-        rlight::kind::Point { position, .. } => (*position, vec3::zero(), "Point", vec![]),
-        rlight::kind::Spot { position, direction, cutoff, .. } => {
-            (*position, vec3::add(*position, *direction), "Spot", vec![float("cone", cutoff * 180. / std::f64::consts::PI)])
+        rlight::Kind::Directional { direction } => (vec3::scale(*direction, -8.), vec3::zero(), "Directional", vec![]),
+        rlight::Kind::Point { position, .. } => (*position, vec3::zero(), "Point", vec![]),
+        rlight::Kind::Spot { position, direction, cutoff, .. } => {
+            (*position, vec3::add(*position, *direction), "Spot", vec![float("cone", *cutoff)])
         }
-        rlight::kind::Area { position, direction, width, height, .. } => {
+        rlight::Kind::Area { position, direction, width, height, .. } => {
             (*position, vec3::add(*position, *direction), "Area", vec![float("width", *width), float("height", *height)])
         }
     };
@@ -600,15 +595,14 @@ fn decompose(matrix: &mat4::T) -> Vec<(String, Value)> {
     };
     let (sx, sy, sz) = (scale(0), scale(1), scale(2));
     let r = |row: i64, column: i64| get(row, column) / [sx, sy, sz][column as usize];
-    let degrees = |angle: f64| angle * 180. / std::f64::consts::PI;
     use rays_math::float::{max as fmax, min as fmin};
     vec![
         float("translate_x", get(0, 3)),
         float("translate_y", get(1, 3)),
         float("translate_z", get(2, 3)),
-        float("rotate_x", degrees(r(2, 1).atan2(r(2, 2)))),
-        float("rotate_y", degrees(fmax(-1., fmin(1., -r(2, 0))).asin())),
-        float("rotate_z", degrees(r(1, 0).atan2(r(0, 0)))),
+        float("rotate_x", r(2, 1).atan2(r(2, 2))),
+        float("rotate_y", fmax(-1., fmin(1., -r(2, 0))).asin()),
+        float("rotate_z", r(1, 0).atan2(r(0, 0))),
         float("scale_x", sx),
         float("scale_y", sy),
         float("scale_z", sz),

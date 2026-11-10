@@ -41,6 +41,8 @@ pub struct Options {
     pub factories: Option<Vec<Factory>>,
     pub gpu: Option<gpu::Config>,
     pub defer: Option<bool>,
+    /// None keeps editor probe recording enabled.
+    pub record: Option<bool>,
     pub previous: Option<document::T>,
 }
 
@@ -851,6 +853,7 @@ fn objects_only(all: Vec<Call>) -> Vec<Call> {
 /// Whatever a declared object's text does not say is the schema's default, so the text is the
 /// whole truth of it.
 pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<document::T> {
+    let _phase = flow_syntax::phase_timer::measure("document.lower");
     flow_ir::fallback::reset();
     let previous = options.previous.as_ref();
     let defer = options.defer.unwrap_or(true);
@@ -894,6 +897,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         None => {
             let lower = |gpu: &gpu::Config| -> R<lower_mod::T> {
                 let o = lower_mod::Options {
+                    record: options.record.unwrap_or(true),
                     gpu: gpu.clone(),
                     defer,
                     compiled_ids: compiled_ids.clone(),

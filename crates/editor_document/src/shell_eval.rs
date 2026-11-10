@@ -121,7 +121,7 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::Panels> {
             leaf(acc, path, args, Panel::Lisp)
         }
         E::Struct(g) if g.name == "ui/timeline" => leaf(acc, path, &g.fields, Panel::Timeline),
-        E::Struct(g) if g.name == "ui/split" || g.name == "ui/split-at" => {
+        E::Struct(g) if g.name == "ui/split" || g.name == "ui/split_at" => {
             let args = &g.fields;
             let first = arg("first", args)?;
             let second = arg("second", args)?;
@@ -262,7 +262,7 @@ fn walk(f: &mut Found, env: &[(&str, TermId)], place: Option<(Home, ArgKey)>, pa
                     f.inline(&h, path, &pos(0), &r);
                     walk(f, env, Some((h, pos(0))), path, &r, &vargs[0].1);
                 }
-                "ui/split" | "ui/split-at" => {
+                "ui/split" | "ui/split_at" => {
                     let h = here();
                     for (i, key) in ["first", "second"].iter().enumerate() {
                         if let (Some(index), Some((_, va))) = (args.iter().position(|field| t.name(field.name) == *key), vargs.iter().find(|(name, _)| name.as_str() == *key)) {

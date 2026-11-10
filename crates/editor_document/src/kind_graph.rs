@@ -11,14 +11,16 @@ use std::sync::Arc;
 pub struct Kind {
     pub key: String,
     pub label: String,
+    pub description: String,
     pub category: Vec<String>,
     pub defaults: settings::T,
 }
 
-pub fn kind_make(key: &str, label: &str, category: &[&str], schema: &Arc<Schema>) -> Kind {
+pub fn kind_make(key: &str, label: &str, description: &str, category: &[&str], schema: &Arc<Schema>) -> Kind {
     Kind {
         key: key.to_owned(),
         label: label.to_owned(),
+        description: description.to_owned(),
         category: category.iter().map(|c| (*c).to_owned()).collect(),
         defaults: settings::make(schema, schema.default().to_vec()),
     }
@@ -153,6 +155,12 @@ pub fn same(a: &[Node], b: &[Node]) -> bool {
 #[allow(clippy::too_many_arguments)]
 pub fn fl(name: &'static str, label: &'static str, folder: &'static str, default: f64, min: f64, max: f64, hard_min: Option<f64>, hard_max: Option<f64>) -> decl::Spec {
     decl::Spec { label, folder, ..decl::spec(name, decl::float_kind(min, max, hard_min, hard_max), Value::Float(default)) }
+}
+
+/// Radian field; declaration constants use degrees for readable schema ranges.
+#[allow(clippy::too_many_arguments)]
+pub fn angle(name: &'static str, label: &'static str, folder: &'static str, default: f64, min: f64, max: f64, hard_min: Option<f64>, hard_max: Option<f64>) -> decl::Spec {
+    decl::Spec { unit: Some("rad"), ..fl(name, label, folder, default.to_radians(), min.to_radians(), max.to_radians(), hard_min.map(f64::to_radians), hard_max.map(f64::to_radians)) }
 }
 
 #[allow(clippy::too_many_arguments)]

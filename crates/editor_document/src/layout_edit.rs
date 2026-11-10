@@ -15,11 +15,11 @@ pub use editor_core::panels::{Axis, Side, Size};
 
 #[derive(Clone, Debug)]
 pub enum Op {
-    /// The binding `node` of an editor graph is a `ui/split` or `ui/split-at`; it becomes
-    /// `ui/split-at` with this ratio (clamped to 0.1-0.9, four decimals), or a `ui/split` with
+    /// The binding `node` of an editor graph is a `ui/split` or `ui/split_at`; it becomes
+    /// `ui/split_at` with this ratio (clamped to 0.1-0.9, four decimals), or a `ui/split` with
     /// `:first_size` or `:second_size` in whole points (1 or more).
     SetLayoutSize { node: Path, size: Size },
-    /// The panel `node` becomes the first half of a new `ui/split-at`; the second is `panel`.
+    /// The panel `node` becomes the first half of a new `ui/split_at`; the second is `panel`.
     SplitPanel { node: Path, axis: Axis, ratio: f64, panel: Syntax },
     /// The split holding panel `node` becomes the other half; a panel outside a split does not close.
     ClosePanel { node: Path },
@@ -52,7 +52,7 @@ fn ratio_text(r: f64) -> String {
     t
 }
 
-const CONTAINERS: [&str; 4] = ["ui/split", "ui/split-at", "ui/tile", "ui/floating"];
+const CONTAINERS: [&str; 4] = ["ui/split", "ui/split_at", "ui/tile", "ui/floating"];
 
 fn is_container(h: &str) -> bool {
     CONTAINERS.contains(&h)
@@ -109,7 +109,7 @@ out }
 fn layout_kids<'a>(e: &S, builder: &'a SyntaxBuilder) -> impl Iterator<Item = S> + 'a {
     let args = args_of(e, builder);
     let (start, count) = match head_sym(e, builder) {
-        Some("ui/split" | "ui/split-at") => {
+        Some("ui/split" | "ui/split_at") => {
             let count = positions(args, builder).count();
             if count >= 2 { (count - 2, 2) } else { (0, 0) }
         }
@@ -122,7 +122,7 @@ fn layout_kids<'a>(e: &S, builder: &'a SyntaxBuilder) -> impl Iterator<Item = S>
 /// Where child `i` sits among the positional arguments.
 fn kid_pos(e: &S, i: i64, builder: &SyntaxBuilder) -> i64 {
     match head_sym(e, builder) {
-        Some("ui/split" | "ui/split-at") => positions(args_of(e, builder), builder).count() as i64 - 2 + i,
+        Some("ui/split" | "ui/split_at") => positions(args_of(e, builder), builder).count() as i64 - 2 + i,
         _ => i,
     }
 }
@@ -130,7 +130,7 @@ fn kid_pos(e: &S, i: i64, builder: &SyntaxBuilder) -> i64 {
 fn strip(e: &S, removed: &mut Vec<String>, builder: &mut SyntaxBuilder) -> R<Option<S>> {
     match node_of(e, builder) {
         Node::Sym(name) if removed.iter().any(|removed| removed == builder.name(name)) => Ok(None),
-        Node::List(_) if matches!(head_sym(e, builder), Some("ui/split" | "ui/split-at")) => {
+        Node::List(_) if matches!(head_sym(e, builder), Some("ui/split" | "ui/split_at")) => {
             let pair = { let mut kids = layout_kids(e, builder); (kids.next(), kids.next()) };
             match pair {
                 (Some(a), Some(b)) => {
@@ -208,7 +208,7 @@ let res = strip(&sc.res, &mut removed, builder)?.ok_or_else(|| fail("Keep at lea
 Ok((ps, res, removed)) }
 
 fn drop_kid(e: &S, i: i64, builder: &mut SyntaxBuilder) -> R<Option<S>> { match head_sym(e, builder) {
-    Some("ui/split" | "ui/split-at") => Ok(layout_kids(e, builder).nth((1 - i) as usize)),
+    Some("ui/split" | "ui/split_at") => Ok(layout_kids(e, builder).nth((1 - i) as usize)),
     Some("ui/tile") => {
         if layout_kids(e, builder).count() == 1 { Ok(None) } else { Ok(Some(arg_set(e, &ArgKey::Pos(i), None, builder)?)) }
     }
@@ -239,7 +239,7 @@ Ok(e) }
 
 fn has_docked(e: &S, builder: &SyntaxBuilder) -> bool { match head_sym(e, builder) {
     Some("ui/floating") => false,
-    Some("ui/split" | "ui/split-at" | "ui/tile") => layout_kids(e, builder).any(|id| has_docked(&id, builder)),
+    Some("ui/split" | "ui/split_at" | "ui/tile") => layout_kids(e, builder).any(|id| has_docked(&id, builder)),
     _ => true,
 } }
 
@@ -412,7 +412,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             let e = get_node(sx, &leaf, builder)?;
             let not_split = || fail("That panel is not a split.");
             let (axis, a, b) = match head_sym(&e, builder) {
-                Some("ui/split" | "ui/split-at") => {
+                Some("ui/split" | "ui/split_at") => {
                     let axis = positions(args_of(&e, builder), builder).next();
                     let mut kids = layout_kids(&e, builder);
                     match (axis, kids.next(), kids.next()) {
@@ -427,7 +427,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             let new = match size {
                 Size::First(n) => fixed("first_size", *n, builder),
                 Size::Second(n) => fixed("second_size", *n, builder),
-                Size::Ratio(r) => call("ui/split-at", vec![axis, num_node(&ratio_text(*r), builder), a, b], builder),
+                Size::Ratio(r) => call("ui/split_at", vec![axis, num_node(&ratio_text(*r), builder), a, b], builder),
             };
             set_node(sx, &leaf, keep_notes(&e, new, builder), builder)
         }, builder)
@@ -442,7 +442,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             let a = fresh(&mut used, &format!("{leaf}_a"));
             let b = fresh(&mut used, &format!("{leaf}_b"));
             let (p, orig) = sc.ps[j].clone();
-            let split = call("ui/split-at", vec![
+            let split = call("ui/split_at", vec![
                 str_node(if *axis == Axis::H { "horizontal" } else { "vertical" }, builder),
                 num_node(&ratio_text(*ratio), builder), sym(&a, builder), sym(&b, builder),
             ], builder);
@@ -480,7 +480,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             }
             let group = fresh(&mut used, &format!("{target}_dock"));
             let first = matches!(side, Side::Left | Side::Top);
-            let split = call("ui/split-at", vec![
+            let split = call("ui/split_at", vec![
                 str_node(if matches!(side, Side::Top | Side::Bottom) { "vertical" } else { "horizontal" }, builder),
                 num_node("0.5", builder),
                 sym(if first { &leaf } else { &target }, builder),
@@ -608,7 +608,7 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
     Op::LayoutWindow { graph, panel } => {
         let panel = builder.import(panel);
         edit_layout(src, graph, &|_, layout, builder| {
-            Ok(call("ui/split-at", vec![str_node("horizontal", builder), num_node("0.5", builder), *layout, call("ui/floating", vec![panel], builder)], builder))
+            Ok(call("ui/split_at", vec![str_node("horizontal", builder), num_node("0.5", builder), *layout, call("ui/floating", vec![panel], builder)], builder))
         }, builder)
     }
     Op::LayoutFloat { graph, at } => edit_layout(src, graph, &|ps, layout, builder| {
@@ -618,13 +618,13 @@ fn rewrite(src: &[S], op: &Op, builder: &mut SyntaxBuilder) -> R<Vec<S>> { match
             // a window docks beside the rest
             let first = |window: &S, builder: &SyntaxBuilder| layout_kids(window, builder).next().ok_or_else(|| fail("A floating window holds no panel."));
             match take(up, &tree, builder)? {
-                (Some(rest), window) => Ok(call("ui/split-at", vec![str_node("horizontal", builder), num_node("0.7", builder), rest, first(&window, builder)?], builder)),
+                (Some(rest), window) => Ok(call("ui/split_at", vec![str_node("horizontal", builder), num_node("0.7", builder), rest, first(&window, builder)?], builder)),
                 (None, window) => first(&window, builder),
             }
         } else {
             match take(at, &tree, builder)? {
                 (Some(rest), panel) if has_docked(&rest, builder) => {
-                    Ok(call("ui/split-at", vec![str_node("horizontal", builder), num_node("0.5", builder), rest, call("ui/floating", vec![panel], builder)], builder))
+                    Ok(call("ui/split_at", vec![str_node("horizontal", builder), num_node("0.5", builder), rest, call("ui/floating", vec![panel], builder)], builder))
                 }
                 _ => Err(fail("A layout keeps one docked panel.")),
             }

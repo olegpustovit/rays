@@ -272,7 +272,7 @@ fn part_contexts() {
     let w = layers::to_world(None, &world_node, crate::document::layers(&d, world_node.id).unwrap()).expect("the World does not read");
     assert!(w.exposure == -0.5, "World exposure");
     assert!(
-        matches!(&w.layers[..], [a, b] if matches!(&a.layer, scene_core::world::layer::Sky { turbidity, .. } if *turbidity == 3.) && matches!(&b.layer, scene_core::world::layer::Sun { intensity, .. } if *intensity == 1500.)),
+        matches!(&w.layers[..], [a, b] if matches!(&a.layer, scene_core::world::Layer::Sky { turbidity, .. } if *turbidity == 3.) && matches!(&b.layer, scene_core::world::Layer::Sun { intensity, .. } if *intensity == 1500.)),
         "World layers, bottom first"
     );
     let window = lowering::window(&bloom).unwrap();
