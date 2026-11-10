@@ -62,6 +62,30 @@ fn form(source: &str, tokens: &[Token], at: &mut usize, next: &mut Id, notes: Ve
     };
     Ok(builder.push(fresh(next), node, span(token), trivia(notes, Vec::new())))
 }
+// ponytail: indentation only attributes an already-invalid form; use a line map if very large malformed files make this error path slow.
+fn unclosed_span(source: &str, tokens: &[Token], opening: &Token) -> (i64, i64) {
+    let mut stack: Vec<&Token> = Vec::new();
+    let mut suspect = opening;
+    for token in tokens {
+        match token.kind {
+            Kind::Open('(') => {
+                let position = diagnostic::position_of_offset(source, token.start);
+                if let Some(parent) = stack.last() {
+                    let parent_position = diagnostic::position_of_offset(source, parent.start);
+                    if position.line > parent_position.line && position.col <= parent_position.col {
+                        suspect = parent;
+                    }
+                }
+                stack.push(token);
+            }
+            Kind::Open(_) => stack.push(token),
+            Kind::Close(_) => { stack.pop(); }
+            _ => (),
+        }
+    }
+    if suspect.start < opening.start { (opening.start, opening.stop) } else { (suspect.start, suspect.stop) }
+}
+
 fn group(source: &str, tokens: &[Token], at: &mut usize, next: &mut Id, opening: &Token, delimiter: char, id: Id, notes: Vec<String>, depth: usize, builder: &mut SyntaxBuilder) -> Result<SyntaxId, Diagnostic> {
     let expected = match delimiter { '(' => ')', '[' => ']', _ => '}' };
     let mut items = Vec::new();
@@ -83,7 +107,10 @@ fn group(source: &str, tokens: &[Token], at: &mut usize, next: &mut Id, opening:
                 let line = diagnostic::position_of_offset(source, opening.start).line;
                 return Err(fail(source, token.start, token.stop, "E_UNEXPECTED", &format!("Expected {expected:?} to close the {delimiter:?} on line {line}, found {actual:?}")));
             }
-            Kind::End => return Err(fail(source, opening.start, opening.stop, "E_UNCLOSED", &format!("This {delimiter:?} is never closed"))),
+            Kind::End => {
+                let (start, stop) = unclosed_span(source, tokens, opening);
+                return Err(fail(source, start, stop, "E_UNCLOSED", &format!("This {delimiter:?} is never closed")));
+            },
             _ => items.push(form(source, tokens, at, next, leading, depth + 1, builder)?),
         }
     }
@@ -199,4 +226,17 @@ mod tests {
         }
     }
     use std::sync::Arc;
+}
+
+#[cfg(test)]
+mod unclosed_tests {
+    #[test]
+    fn unclosed_form_points_at_the_inner_indentation_break() {
+        let source = "(workspace example\n  (graph first :context draw\n    (draw/circle [0 0] 3\n  (graph next :context draw (draw/merge)))";
+        let diagnostic = crate::syntax::parse(source).unwrap_err();
+        assert_eq!(diagnostic.code, "E_UNCLOSED");
+        assert_eq!(diagnostic.position.unwrap().line, 3);
+        assert_eq!(diagnostic.span.unwrap().start as usize, source.find("(draw/circle").unwrap());
+        assert!(crate::syntax::parse("(workspace example\n(graph first :context draw\n(draw/circle [0 0] 3)))").is_ok(), "indentation must never change valid Lisp semantics");
+    }
 }

@@ -299,7 +299,7 @@ fn core(form: &Syntax, indent: usize) -> String {
         Node::List(_) if len == 0 => flat,
         Node::List(_) => {
             let call_head = head(form);
-            let bind_forms = ["let*", "for", "sum"];
+            let bind_forms = ["let", "let*", "for", "sum"];
             let is_vec_at = |index: usize| index < len && matches!(&form.arena().row(forms[index]).node, Node::Vec(_));
             let vec_len = |index: usize| match &form.arena().row(forms[index]).node { Node::Vec(values) => form.range(*values).len(), _ => 0 };
             let slots_plain = |n: usize| forms.get(1..n).unwrap_or(&[]).iter().all(|child| form.arena().notes(*child).is_empty());
@@ -334,7 +334,7 @@ fn core(form: &Syntax, indent: usize) -> String {
             } else if !deeply_nested
                 && (fits(indent, WIDTH) || (fits(0, 44) && !bind_forms.contains(&call_head) && call_head != "fold" && call_head != "scan"))
                 && !special
-                && !(call_head == "let*" && len > 1 && is_vec_at(1) && vec_len(1) > 2)
+                && !(matches!(call_head, "let" | "let*") && len > 1 && is_vec_at(1) && vec_len(1) > 2)
             {
                 flat
             } else if bind_forms.contains(&call_head) && is_vec_at(1) && len == 3 && slots_plain(2) {

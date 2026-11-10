@@ -188,7 +188,7 @@ mod tests {
         let mut builder = SyntaxBuilder::new();
         let original = make(Draft::Sym("z".into()));
         let original_row = builder.import(&original);
-        let changed = builder.with_location(original_row, 8, Span { start: 20, finish: 21 });
+        let changed = builder.with_location(original_row, 8, rays_diagnostic::Span { start: 20, finish: 21 });
         assert!(equal(&builder.freeze().handle(changed), &original));
         assert_eq!(head(&one("(call x)")), Some("call"));
         let forms = parse("a b c").unwrap();

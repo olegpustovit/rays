@@ -263,11 +263,13 @@ fn vector(ty: &Ty) -> bool { matches!(ty, Ty::Vec2 | Ty::Vec3 | Ty::Vec4) }
 
 pub fn fits(have: &Ty, want: &Ty) -> bool {
     if matches!(have, Ty::Any) || matches!(want, Ty::Any) || have == want { return true; }
+    if matches!((have, want), (Ty::Float, Ty::Int)) { return false; }
+    if matches!((have, want), (Ty::Vec2, Ty::Vec3)) { return true; }
     if (num(have) && (num(want) || matches!(want, Ty::Bool))) || (matches!(have, Ty::Bool) && num(want)) { return true; }
     if matches!(want, Ty::Color) && (matches!(have, Ty::Text | Ty::Vec3) || matches!(have, Ty::List(element) if **element == Ty::Float || **element == Ty::Int)) { return true; }
     if vector(want) && num(have) { return true; }
     match (have, want) {
-        (Ty::List(h), Ty::List(w)) => fits(h, w),
+        (Ty::List(h), Ty::List(w) | Ty::Array(w)) => fits(h, w),
         (Ty::Array(h), Ty::Array(w)) => h == w || matches!(h.as_ref(), Ty::Any) || matches!(w.as_ref(), Ty::Any),
         (Ty::Record(hs), Ty::Record(ws)) => ws.iter().all(|(name, want)| hs.iter().find(|(field, _)| field == name).is_some_and(|(_, have)| fits(have, want))),
         (Ty::Fn(_), Ty::Fn(None)) => true,
@@ -280,6 +282,9 @@ pub fn coerce(have: &Ty, want: &Ty) -> Ty {
     if matches!(want, Ty::Any) || matches!(have, Ty::Any) || have == want { return have.clone(); }
     match (have, want) {
         (Ty::List(h), Ty::List(w)) => Ty::List(Box::new(coerce(h, w))),
+        (Ty::List(h), Ty::Array(w)) => Ty::Array(Box::new(coerce(h, w))),
+        (Ty::Vec2, Ty::Vec3) => Ty::Vec3,
+        (Ty::Float, Ty::Int) => have.clone(),
         (Ty::Array(h), Ty::Array(w)) => Ty::Array(Box::new(if matches!(w.as_ref(), Ty::Any) { (**h).clone() } else { (**w).clone() })),
         (Ty::Record(hs), Ty::Record(ws)) => Ty::Record(hs.iter().map(|(name, ty)| (*name, ws.iter().find(|(field, _)| field == name).map_or_else(|| ty.clone(), |(_, want)| coerce(ty, want)))).collect()),
         _ if (num(have) || matches!(have, Ty::Bool)) && (num(want) || matches!(want, Ty::Bool) || vector(want) && !matches!(have, Ty::Bool)) => want.clone(),
@@ -361,7 +366,7 @@ mod tests {
         assert!(!fits(&typed, &Ty::Fn(Some(Box::new(FnSignature { params: vec![Ty::Vec3], result: Ty::Float })))));
         for invalid in ["fn(", "fn(float)", "fn(float)->", "fn(nope)->float", "fn(float,)->float"] { assert_eq!(of_string(invalid), None); }
         assert!(has_fn(&Ty::Fn(None)) && !has_fn(&Ty::Any));
-        assert!(fits(&Ty::Int, &Ty::Float) && fits(&Ty::Float, &Ty::Int) && fits(&Ty::Int, &Ty::Bool) && fits(&Ty::Bool, &Ty::Float));
+        assert!(fits(&Ty::Int, &Ty::Float) && !fits(&Ty::Float, &Ty::Int) && fits(&Ty::Int, &Ty::Bool) && fits(&Ty::Bool, &Ty::Float));
         assert!(fits(&Ty::Int, &Ty::Vec3) && !fits(&Ty::Bool, &Ty::Vec3) && !fits(&Ty::Vec3, &Ty::Float));
         assert!(fits(&Ty::Text, &Ty::Color) && fits(&Ty::Vec3, &Ty::Color) && !fits(&Ty::Float, &Ty::Color));
         assert!(fits(&Ty::Any, &geometry()) && fits(&geometry(), &Ty::Any) && !fits(&geometry(), &Ty::Float));
@@ -372,7 +377,7 @@ mod tests {
         assert!(!fits(&Ty::Record(vec![("a".into(), Ty::Int)]), &Ty::Record(vec![("a".into(), Ty::Int), ("b".into(), Ty::Int)])));
         assert!(!fits(&Ty::List(Box::new(Ty::Int)), &Ty::Int) && !fits(&Ty::Int, &Ty::List(Box::new(Ty::Int))));
         assert_eq!(coerce(&Ty::Int, &Ty::Float), Ty::Float);
-        assert_eq!(coerce(&Ty::Float, &Ty::Int), Ty::Int);
+        assert_eq!(coerce(&Ty::Float, &Ty::Int), Ty::Float);
         assert_eq!(coerce(&Ty::Float, &Ty::Bool), Ty::Bool);
         assert_eq!(coerce(&Ty::Int, &Ty::Vec3), Ty::Vec3);
         assert_eq!(coerce(&Ty::Bool, &Ty::Vec3), Ty::Bool);
@@ -417,9 +422,9 @@ mod tests {
             assert_eq!(join(&vector, &vector), Some(vector.clone()));
             for other in [Ty::Vec2, Ty::Vec3, Ty::Vec4] {
                 if vector != other {
-                    assert!(!fits(&vector, &other));
+                    assert_eq!(fits(&vector, &other), vector == Ty::Vec2 && other == Ty::Vec3);
                     assert!(!fits(&Ty::Array(Box::new(vector.clone())), &Ty::Array(Box::new(other.clone()))));
-                    assert_eq!(coerce(&vector, &other), vector);
+                    assert_eq!(coerce(&vector, &other), if vector == Ty::Vec2 && other == Ty::Vec3 { Ty::Vec3 } else { vector.clone() });
                     assert_eq!(join(&vector, &other), None);
                 }
             }

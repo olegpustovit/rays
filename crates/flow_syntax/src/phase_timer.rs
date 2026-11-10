@@ -98,7 +98,7 @@ mod tests {
     use super::*;
     use std::{cell::Cell, rc::Rc};
     fn clock(time: Rc<Cell<f64>>) -> Box<dyn FnMut() -> f64> { Box::new(move || time.get()) }
-    // lib/flow/test_phase_timer.ml exercises actual unwinding, not only guard drop order.
+    //  exercises actual unwinding, not only guard drop order.
     #[test]
     fn panics_restore_suspended_samples_and_clear_aborted_samples() {
         use std::panic::{catch_unwind, AssertUnwindSafe};

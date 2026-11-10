@@ -71,9 +71,8 @@ pub fn of_string(text: &str) -> Result<Context, Diagnostic> {
     }
 }
 pub fn of_qualified(value: &str) -> Option<Context> {
-    [("scene", scene()), ("sop", sop()), ("world", world()), ("settings", settings())]
-        .into_iter()
-        .find_map(|(prefix, context)| value.strip_prefix(prefix).is_some_and(|suffix| suffix.starts_with('/')).then_some(context))
+    let prefix = value.split_once('/')?.0;
+    if prefix == "ui" { Some(editor()) } else { of_string(prefix).ok() }
 }
 
 #[cfg(test)]

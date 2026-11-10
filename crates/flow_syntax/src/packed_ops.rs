@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types)]
+
 pub use rays_math::float::{min as float_min, max as float_max};
 use crate::{ty::Ty, value, Diagnostic};
 
@@ -48,94 +48,64 @@ pub enum Primitive {
     Floor,
     Ceil,
     Round,
-    Int_convert,
-    Float_convert,
+    IntConvert,
+    FloatConvert,
     Integer(Integer),
-    Integer_compare(Comparison),
+    IntegerCompare(Comparison),
     Equal,
     Show,
-    Text_concat,
-    Text_blank,
-    Text_trim,
-    Text_lower,
-    Text_repr,
-    Text_table_decode,
-    Text_table_encode,
-    Text_split,
-    Text_tokens,
-    Text_to_float,
-    Text_to_int,
-    Sequence_length,
-    Sequence_get,
-    Sequence_build,
-    Sequence_slice,
-    Sequence_concat,
-    Array_max_length,
-    Array_range,
-    Array_int,
-    Array_text,
-    Array_float,
-    Array_vec3,
-    Array_vec4,
-    Array_nth,
-    Array_count,
-    Array_slice,
-    Array_concat,
-    Array_reduce(Reduction),
-    Array_segment(Reduction),
-    Array_segment_argmax,
-    Next_after,
-    Array_scatter_add,
-    Array_compact,
-    Array_scan_sum,
-    Array_grade,
-    Array_index_of,
+    TextConcat,
+    TextBlank,
+    TextTrim,
+    TextLower,
+    TextRepr,
+    TextTableDecode,
+    TextTableEncode,
+    TextSplit,
+    TextTokens,
+    TextToFloat,
+    TextToInt,
+    SequenceLength,
+    SequenceGet,
+    SequenceBuild,
+    SequenceSlice,
+    SequenceConcat,
+    ArrayMaxLength,
+    ArrayRange,
+    ArrayInt,
+    ArrayText,
+    ArrayFloat,
+    ArrayVec3,
+    ArrayVec4,
+    ArrayNth,
+    ArrayCount,
+    ArraySlice,
+    ArrayConcat,
+    ArrayReduce(Reduction),
+    ArraySegment(Reduction),
+    ArraySegmentArgmax,
+    NextAfter,
+    ArrayScatterAdd,
+    ArrayCompact,
+    ArrayScanSum,
+    ArrayGrade,
+    ArrayIndexOf,
     Rand,
-    Rand_at,
+    RandAt,
     Fma,
-    Checked_mul,
-    Checked_fma,
+    CheckedMul,
+    CheckedFma,
     Noise3,
-    Color_parse,
-    Color_byte(ByteMode),
+    ColorParse,
+    ColorByte(ByteMode),
     Coerce(Ty),
     Truthy,
     Error,
     Fail(String, String),
-    Fail_diagnostic(Diagnostic),
+    FailDiagnostic(Box<Diagnostic>),
 }
 
 pub const PRIMITIVES: &[(&str, Primitive)] = &[
-    ("+", Primitive::Numeric(Binary::Add)),
-    ("-", Primitive::Numeric(Binary::Sub)),
-    ("*", Primitive::Numeric(Binary::Mul)),
-    ("/", Primitive::Numeric(Binary::Div)),
-    ("mod", Primitive::Numeric(Binary::Mod)),
-    ("pow", Primitive::Numeric(Binary::Pow)),
-    ("min", Primitive::Numeric(Binary::Min)),
-    ("max", Primitive::Numeric(Binary::Max)),
-    ("<", Primitive::Numeric(Binary::Lt)),
-    ("<=", Primitive::Numeric(Binary::Le)),
-    (">", Primitive::Numeric(Binary::Gt)),
-    (">=", Primitive::Numeric(Binary::Ge)),
-    ("=", Primitive::Numeric(Binary::Eq)),
-    ("and", Primitive::Numeric(Binary::And)),
-    ("or", Primitive::Numeric(Binary::Or)),
-    ("atan2", Primitive::Numeric(Binary::Atan2)),
-    ("hypot", Primitive::Numeric(Binary::Hypot)),
-    ("ldexp", Primitive::Numeric(Binary::Ldexp)),
-    ("sin", Primitive::Math(Unary::Sin)),
-    ("cos", Primitive::Math(Unary::Cos)),
-    ("sqrt", Primitive::Math(Unary::Sqrt)),
-    ("abs", Primitive::Math(Unary::Abs)),
-    ("not", Primitive::Math(Unary::Not)),
-    ("tan", Primitive::Math(Unary::Tan)),
-    ("asin", Primitive::Math(Unary::Asin)),
-    ("acos", Primitive::Math(Unary::Acos)),
-    ("exp", Primitive::Math(Unary::Exp)),
-    ("log", Primitive::Math(Unary::Log)),
-    ("sign", Primitive::Math(Unary::Sign)),
-    ("rsqrt", Primitive::Math(Unary::Rsqrt)),
     ("int/add", Primitive::Integer(Integer::Iadd)),
     ("int/sub", Primitive::Integer(Integer::Isub)),
     ("int/mul", Primitive::Integer(Integer::Imul)),
@@ -146,85 +116,149 @@ pub const PRIMITIVES: &[(&str, Primitive)] = &[
     ("int/xor", Primitive::Integer(Integer::Ixor)),
     ("int/shl", Primitive::Integer(Integer::Ishl)),
     ("int/shr", Primitive::Integer(Integer::Ishr)),
-    ("int/lt", Primitive::Integer_compare(Comparison::Ilt)),
-    ("int/le", Primitive::Integer_compare(Comparison::Ile)),
-    ("int/gt", Primitive::Integer_compare(Comparison::Igt)),
-    ("int/ge", Primitive::Integer_compare(Comparison::Ige)),
-    ("int/eq", Primitive::Integer_compare(Comparison::Ieq)),
+    ("int/lt", Primitive::IntegerCompare(Comparison::Ilt)),
+    ("int/le", Primitive::IntegerCompare(Comparison::Ile)),
+    ("int/gt", Primitive::IntegerCompare(Comparison::Igt)),
+    ("int/ge", Primitive::IntegerCompare(Comparison::Ige)),
+    ("int/eq", Primitive::IntegerCompare(Comparison::Ieq)),
     ("remainder", Primitive::Remainder),
     ("floor", Primitive::Floor),
     ("ceil", Primitive::Ceil),
     ("round", Primitive::Round),
-    ("int", Primitive::Int_convert),
-    ("float", Primitive::Float_convert),
+    ("int", Primitive::IntConvert),
+    ("float", Primitive::FloatConvert),
     ("equal?", Primitive::Equal),
     ("show", Primitive::Show),
-    ("text/concat", Primitive::Text_concat),
-    ("text/blank?", Primitive::Text_blank),
-    ("text/trim", Primitive::Text_trim),
-    ("text/lower", Primitive::Text_lower),
-    ("text/repr", Primitive::Text_repr),
-    ("text/table_decode", Primitive::Text_table_decode),
-    ("text/table_encode", Primitive::Text_table_encode),
-    ("text/split", Primitive::Text_split),
-    ("text/tokens", Primitive::Text_tokens),
-    ("text/to_float", Primitive::Text_to_float),
-    ("text/to_int", Primitive::Text_to_int),
-    ("array/sum", Primitive::Array_reduce(Reduction::Sum)),
-    ("array/min", Primitive::Array_reduce(Reduction::Minimum)),
-    ("array/max", Primitive::Array_reduce(Reduction::Maximum)),
-    ("array/segment_sum", Primitive::Array_segment(Reduction::Sum)),
-    ("array/segment_min", Primitive::Array_segment(Reduction::Minimum)),
-    ("array/segment_max", Primitive::Array_segment(Reduction::Maximum)),
-    ("array/segment_argmax", Primitive::Array_segment_argmax),
-    ("float/next_after", Primitive::Next_after),
-    ("array/grade", Primitive::Array_grade),
-    ("array/index_of", Primitive::Array_index_of),
-    ("array/compact", Primitive::Array_compact),
-    ("array/scan_sum", Primitive::Array_scan_sum),
-    ("array/scatter_add", Primitive::Array_scatter_add),
-    ("sequence/length", Primitive::Sequence_length),
-    ("sequence/get", Primitive::Sequence_get),
-    ("sequence/build", Primitive::Sequence_build),
-    ("sequence/slice", Primitive::Sequence_slice),
-    ("sequence/concat", Primitive::Sequence_concat),
-    ("array/max_length", Primitive::Array_max_length),
-    ("array/range", Primitive::Array_range),
-    ("array/int", Primitive::Array_int),
-    ("array/float", Primitive::Array_float),
-    ("array/vec3", Primitive::Array_vec3),
-    ("array/vec4", Primitive::Array_vec4),
-    ("array/text", Primitive::Array_text),
-    ("array/nth", Primitive::Array_nth),
-    ("array/count", Primitive::Array_count),
-    ("array/slice", Primitive::Array_slice),
-    ("array/concat", Primitive::Array_concat),
+    ("text/concat", Primitive::TextConcat),
+    ("text/blank?", Primitive::TextBlank),
+    ("text/trim", Primitive::TextTrim),
+    ("text/lower", Primitive::TextLower),
+    ("text/repr", Primitive::TextRepr),
+    ("text/table_decode", Primitive::TextTableDecode),
+    ("text/table_encode", Primitive::TextTableEncode),
+    ("text/split", Primitive::TextSplit),
+    ("text/tokens", Primitive::TextTokens),
+    ("text/to_float", Primitive::TextToFloat),
+    ("text/to_int", Primitive::TextToInt),
+    ("array/sum", Primitive::ArrayReduce(Reduction::Sum)),
+    ("array/min", Primitive::ArrayReduce(Reduction::Minimum)),
+    ("array/max", Primitive::ArrayReduce(Reduction::Maximum)),
+    ("array/segment_sum", Primitive::ArraySegment(Reduction::Sum)),
+    ("array/segment_min", Primitive::ArraySegment(Reduction::Minimum)),
+    ("array/segment_max", Primitive::ArraySegment(Reduction::Maximum)),
+    ("array/segment_argmax", Primitive::ArraySegmentArgmax),
+    ("float/next_after", Primitive::NextAfter),
+    ("array/grade", Primitive::ArrayGrade),
+    ("array/index_of", Primitive::ArrayIndexOf),
+    ("array/compact", Primitive::ArrayCompact),
+    ("array/scan_sum", Primitive::ArrayScanSum),
+    ("array/scatter_add", Primitive::ArrayScatterAdd),
+    ("sequence/length", Primitive::SequenceLength),
+    ("sequence/get", Primitive::SequenceGet),
+    ("sequence/build", Primitive::SequenceBuild),
+    ("sequence/slice", Primitive::SequenceSlice),
+    ("sequence/concat", Primitive::SequenceConcat),
+    ("array/max_length", Primitive::ArrayMaxLength),
+    ("array/range", Primitive::ArrayRange),
+    ("array/int", Primitive::ArrayInt),
+    ("array/float", Primitive::ArrayFloat),
+    ("array/vec3", Primitive::ArrayVec3),
+    ("array/vec4", Primitive::ArrayVec4),
+    ("array/text", Primitive::ArrayText),
+    ("array/nth", Primitive::ArrayNth),
+    ("array/count", Primitive::ArrayCount),
+    ("array/slice", Primitive::ArraySlice),
+    ("array/concat", Primitive::ArrayConcat),
     ("value/rand", Primitive::Rand),
-    ("rand/at", Primitive::Rand_at),
+    ("rand/at", Primitive::RandAt),
     ("fma", Primitive::Fma),
     ("noise3", Primitive::Noise3),
-    ("color/parse", Primitive::Color_parse),
-    ("float/mul_checked", Primitive::Checked_mul),
-    ("float/fma_checked", Primitive::Checked_fma),
+    ("color/parse", Primitive::ColorParse),
+    ("float/mul_checked", Primitive::CheckedMul),
+    ("float/fma_checked", Primitive::CheckedFma),
     ("truthy", Primitive::Truthy),
     ("error", Primitive::Error),
 ];
 
-pub fn primitive(name: &str) -> Option<Primitive> { PRIMITIVES.iter().find(|(n, _)| *n == name).map(|(_, op)| op.clone()) }
+#[derive(Clone, Copy)]
+pub enum Cpu { F1(fn(f64) -> f64), F2(fn(f64, f64) -> f64) }
+#[derive(Clone, Copy)]
+pub enum SpirvMath { Float(i64), Glsl(i64), Compare(i64), ReducedAngle(i64), AbsGlsl(i64), BoundedGlsl(i64), Special }
+
+/// Each kernel math primitive owns its scalar meaning and backend spellings here.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MathOutput { Arithmetic, Float, Bool }
+
+pub struct MathPrim {
+    pub name: &'static str,
+    pub operation: Primitive,
+    pub cpu: Cpu,
+    pub output: MathOutput,
+    pub msl: Option<&'static str>,
+    pub spirv: SpirvMath,
+    pub js: &'static str,
+    pub wgsl: Option<&'static str>,
+}
+
+pub static MATH_PRIMS: &[MathPrim] = &[
+    MathPrim { name: "+", operation: Primitive::Numeric(Binary::Add), cpu: Cpu::F2(|x, y| x + y), output: MathOutput::Arithmetic, msl: Some("({a}+{b})"), spirv: SpirvMath::Float(129), js: "{a} + {b}", wgsl: Some("({a} + {b})") },
+    MathPrim { name: "-", operation: Primitive::Numeric(Binary::Sub), cpu: Cpu::F2(|x, y| x - y), output: MathOutput::Arithmetic, msl: Some("({a}-{b})"), spirv: SpirvMath::Float(131), js: "{a} - {b}", wgsl: Some("({a} - {b})") },
+    MathPrim { name: "*", operation: Primitive::Numeric(Binary::Mul), cpu: Cpu::F2(|x, y| x * y), output: MathOutput::Arithmetic, msl: Some("({a}*{b})"), spirv: SpirvMath::Float(133), js: "{a} * {b}", wgsl: Some("({a} * {b})") },
+    MathPrim { name: "/", operation: Primitive::Numeric(Binary::Div), cpu: Cpu::F2(|x, y| if y == 0.0 { 0.0 } else { x / y }), output: MathOutput::Arithmetic, msl: Some("({b}==0.0f?0.0f:{a}/{b})"), spirv: SpirvMath::Special, js: "{b} === 0 ? 0 : {a} / {b}", wgsl: Some("select({a} / {b}, 0.0, {b} == 0.0)") },
+    MathPrim { name: "mod", operation: Primitive::Numeric(Binary::Mod), cpu: Cpu::F2(|x, y| if y == 0.0 { 0.0 } else { ((x % y) + y) % y }), output: MathOutput::Arithmetic, msl: Some("({b}==0.0f?0.0f:fmod(fmod({a},{b})+{b},{b}))"), spirv: SpirvMath::Special, js: "{b} === 0 ? 0 : (({a} % {b}) + {b}) % {b}", wgsl: Some("select((({a} % {b}) + {b}) % {b}, 0.0, {b} == 0.0)") },
+    MathPrim { name: "pow", operation: Primitive::Numeric(Binary::Pow), cpu: Cpu::F2(|x, y| x.abs().powf(y)), output: MathOutput::Arithmetic, msl: Some("pow(fabs({a}),{b})"), spirv: SpirvMath::Special, js: "Math.pow(Math.abs({a}), {b})", wgsl: Some("wpow({a}, {b})") },
+    MathPrim { name: "min", operation: Primitive::Numeric(Binary::Min), cpu: Cpu::F2(|x, y| float_min(x, y)), output: MathOutput::Arithmetic, msl: Some("min({a},{b})"), spirv: SpirvMath::Glsl(37), js: "Math.min({a}, {b})", wgsl: Some("min({a}, {b})") },
+    MathPrim { name: "max", operation: Primitive::Numeric(Binary::Max), cpu: Cpu::F2(|x, y| float_max(x, y)), output: MathOutput::Arithmetic, msl: Some("max({a},{b})"), spirv: SpirvMath::Glsl(40), js: "Math.max({a}, {b})", wgsl: Some("max({a}, {b})") },
+    MathPrim { name: "<", operation: Primitive::Numeric(Binary::Lt), cpu: Cpu::F2(|x, y| if x < y { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}<{b})"), spirv: SpirvMath::Compare(184), js: "({a} < {b} ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} < {b}))") },
+    MathPrim { name: "<=", operation: Primitive::Numeric(Binary::Le), cpu: Cpu::F2(|x, y| if x <= y { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}<={b})"), spirv: SpirvMath::Compare(188), js: "({a} <= {b} ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} <= {b}))") },
+    MathPrim { name: ">", operation: Primitive::Numeric(Binary::Gt), cpu: Cpu::F2(|x, y| if x > y { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}>{b})"), spirv: SpirvMath::Compare(186), js: "({a} > {b} ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} > {b}))") },
+    MathPrim { name: ">=", operation: Primitive::Numeric(Binary::Ge), cpu: Cpu::F2(|x, y| if x >= y { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}>={b})"), spirv: SpirvMath::Compare(190), js: "({a} >= {b} ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} >= {b}))") },
+    MathPrim { name: "=", operation: Primitive::Numeric(Binary::Eq), cpu: Cpu::F2(|x, y| if x == y { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}=={b})"), spirv: SpirvMath::Compare(180), js: "({a} === {b} ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} == {b}))") },
+    MathPrim { name: "and", operation: Primitive::Numeric(Binary::And), cpu: Cpu::F2(|x, y| if x != 0.0 && y != 0.0 { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}!=0.0f&&{b}!=0.0f)"), spirv: SpirvMath::Special, js: "({a} !== 0 && {b} !== 0 ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} != 0.0 && {b} != 0.0))") },
+    MathPrim { name: "or", operation: Primitive::Numeric(Binary::Or), cpu: Cpu::F2(|x, y| if x != 0.0 || y != 0.0 { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}!=0.0f||{b}!=0.0f)"), spirv: SpirvMath::Special, js: "({a} !== 0 || {b} !== 0 ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} != 0.0 || {b} != 0.0))") },
+    MathPrim { name: "atan2", operation: Primitive::Numeric(Binary::Atan2), cpu: Cpu::F2(|x, y| rays_math::libm::atan2(x, y)), output: MathOutput::Float, msl: Some("atan2({a},{b})"), spirv: SpirvMath::Glsl(25), js: "Math.atan2({a}, {b})", wgsl: Some("atan2({a}, {b})") },
+    MathPrim { name: "hypot", operation: Primitive::Numeric(Binary::Hypot), cpu: Cpu::F2(|x, y| x.hypot(y)), output: MathOutput::Float, msl: None, spirv: SpirvMath::Special, js: "Math.hypot({a}, {b})", wgsl: None },
+    MathPrim { name: "ldexp", operation: Primitive::Numeric(Binary::Ldexp), cpu: Cpu::F2(|x, y| ldexp(x, y.trunc() as i64)), output: MathOutput::Float, msl: Some("ldexp({a},int({b}))"), spirv: SpirvMath::Special, js: "({a} * 2 ** Math.trunc({b}))", wgsl: Some("ldexp({a}, i32({b}))") },
+    MathPrim { name: "sin", operation: Primitive::Math(Unary::Sin), cpu: Cpu::F1(|x| rays_math::libm::sin(x)), output: MathOutput::Float, msl: Some("sin({a})"), spirv: SpirvMath::ReducedAngle(13), js: "Math.sin({a})", wgsl: Some("sin({a})") },
+    MathPrim { name: "cos", operation: Primitive::Math(Unary::Cos), cpu: Cpu::F1(|x| rays_math::libm::cos(x)), output: MathOutput::Float, msl: Some("cos({a})"), spirv: SpirvMath::ReducedAngle(14), js: "Math.cos({a})", wgsl: Some("cos({a})") },
+    MathPrim { name: "sqrt", operation: Primitive::Math(Unary::Sqrt), cpu: Cpu::F1(|x| x.abs().sqrt()), output: MathOutput::Float, msl: Some("sqrt(fabs({a}))"), spirv: SpirvMath::AbsGlsl(31), js: "Math.sqrt(Math.abs({a}))", wgsl: Some("sqrt(abs({a}))") },
+    MathPrim { name: "abs", operation: Primitive::Math(Unary::Abs), cpu: Cpu::F1(|x| x.abs()), output: MathOutput::Float, msl: Some("fabs({a})"), spirv: SpirvMath::Glsl(4), js: "Math.abs({a})", wgsl: Some("abs({a})") },
+    MathPrim { name: "not", operation: Primitive::Math(Unary::Not), cpu: Cpu::F1(|x| if x == 0.0 { 1.0 } else { 0.0 }), output: MathOutput::Bool, msl: Some("({a}==0.0f)"), spirv: SpirvMath::Special, js: "({a} === 0 ? 1 : 0)", wgsl: Some("select(0.0, 1.0, ({a} == 0.0))") },
+    MathPrim { name: "tan", operation: Primitive::Math(Unary::Tan), cpu: Cpu::F1(|x| rays_math::libm::tan(x)), output: MathOutput::Float, msl: Some("tan({a})"), spirv: SpirvMath::ReducedAngle(15), js: "Math.tan({a})", wgsl: Some("tan({a})") },
+    MathPrim { name: "asin", operation: Primitive::Math(Unary::Asin), cpu: Cpu::F1(|x| rays_math::libm::asin(x)), output: MathOutput::Float, msl: Some("(fabs({a})>1.0f?as_type<float>(0x7fc00000u):asin({a}))"), spirv: SpirvMath::BoundedGlsl(16), js: "Math.asin({a})", wgsl: Some("select(asin(clamp({a}, -1.0, 1.0)), bitcast<f32>(0x7fc00000u), abs({a}) > 1.0)") },
+    MathPrim { name: "acos", operation: Primitive::Math(Unary::Acos), cpu: Cpu::F1(|x| rays_math::libm::acos(x)), output: MathOutput::Float, msl: Some("(fabs({a})>1.0f?as_type<float>(0x7fc00000u):acos({a}))"), spirv: SpirvMath::BoundedGlsl(17), js: "Math.acos({a})", wgsl: Some("select(acos(clamp({a}, -1.0, 1.0)), bitcast<f32>(0x7fc00000u), abs({a}) > 1.0)") },
+    MathPrim { name: "exp", operation: Primitive::Math(Unary::Exp), cpu: Cpu::F1(|x| x.exp()), output: MathOutput::Float, msl: Some("exp({a})"), spirv: SpirvMath::Glsl(27), js: "Math.exp({a})", wgsl: Some("exp({a})") },
+    MathPrim { name: "log", operation: Primitive::Math(Unary::Log), cpu: Cpu::F1(|x| x.ln()), output: MathOutput::Float, msl: Some("({a}<=0.0f?as_type<float>(0x7fc00000u):log({a}))"), spirv: SpirvMath::Special, js: "Math.log({a})", wgsl: Some("select(log(select(1.0, {a}, {a} > 0.0)), bitcast<f32>(0x7fc00000u), {a} <= 0.0)") },
+    MathPrim { name: "sign", operation: Primitive::Math(Unary::Sign), cpu: Cpu::F1(|x| if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { x }), output: MathOutput::Float, msl: Some("({a}>0.0f?1.0f:({a}<0.0f?-1.0f:{a}))"), spirv: SpirvMath::Special, js: "Math.sign({a})", wgsl: Some("select({a}, select(-1.0, 1.0, {a} > 0.0), {a} != 0.0)") },
+    MathPrim { name: "rsqrt", operation: Primitive::Math(Unary::Rsqrt), cpu: Cpu::F1(|x| 1.0 / x.abs().sqrt()), output: MathOutput::Float, msl: Some("rsqrt(fabs({a}))"), spirv: SpirvMath::AbsGlsl(32), js: "(1 / Math.sqrt(Math.abs({a})))", wgsl: Some("inverseSqrt(abs({a}))") },
+ ];
+
+pub fn math_prim(operation: &Primitive) -> &'static MathPrim {
+    match operation {
+        Primitive::Numeric(operation) => &MATH_PRIMS[*operation as usize],
+        Primitive::Math(operation) => &MATH_PRIMS[18 + *operation as usize],
+        _ => unreachable!("math primitive"),
+    }
+}
+
+pub fn math_source(template: &str, a: &str, b: &str) -> String { template.replace("{a}", a).replace("{b}", b) }
+
+pub fn primitive(name: &str) -> Option<Primitive> { MATH_PRIMS.iter().find(|row| row.name == name).map(|row| row.operation.clone()).or_else(|| PRIMITIVES.iter().find(|(n, _)| *n == name).map(|(_, op)| op.clone())) }
 pub fn primitive_name(operation: &Primitive) -> &'static str {
     match operation {
-        Primitive::Color_byte(_) => "color/byte",
+        Primitive::Numeric(_) | Primitive::Math(_) => math_prim(operation).name,
+        Primitive::ColorByte(_) => "color/byte",
         Primitive::Coerce(_) => "coerce",
-        Primitive::Fail(..) | Primitive::Fail_diagnostic(_) => "fail",
+        Primitive::Fail(..) | Primitive::FailDiagnostic(_) => "fail",
         _ => PRIMITIVES.iter().find(|(_, op)| op == operation).expect("complete primitive table").0,
     }
 }
 pub fn binary(name: &str) -> Option<Binary> { if let Some(Primitive::Numeric(op)) = primitive(name) { Some(op) } else { None } }
 pub fn unary(name: &str) -> Option<Unary> { if let Some(Primitive::Math(op)) = primitive(name) { Some(op) } else { None } }
 pub fn integer(name: &str) -> Option<Integer> { if let Some(Primitive::Integer(op)) = primitive(name) { Some(op) } else { None } }
-pub fn comparison(name: &str) -> Option<Comparison> { if let Some(Primitive::Integer_compare(op)) = primitive(name) { Some(op) } else { None } }
+pub fn comparison(name: &str) -> Option<Comparison> { if let Some(Primitive::IntegerCompare(op)) = primitive(name) { Some(op) } else { None } }
 pub fn integer_name(operation: Integer) -> &'static str { primitive_name(&Primitive::Integer(operation)) }
-pub fn comparison_name(operation: Comparison) -> &'static str { primitive_name(&Primitive::Integer_compare(operation)) }
+pub fn comparison_name(operation: Comparison) -> &'static str { primitive_name(&Primitive::IntegerCompare(operation)) }
 
 #[inline]
 pub fn integer_apply(operation: Integer, a: i64, b: i64) -> Result<i64, crate::Diagnostic> {
@@ -287,44 +321,11 @@ pub fn ldexp(value: f64, exponent: i64) -> f64 {
 
 #[inline]
 pub fn binary_apply(op: Binary, x: f64, y: f64) -> f64 {
-    match op {
-        Binary::Add => x + y,
-        Binary::Sub => x - y,
-        Binary::Mul => x * y,
-        Binary::Div => if y == 0.0 { 0.0 } else { x / y },
-        Binary::Mod => if y == 0.0 { 0.0 } else { ((x % y) + y) % y },
-        Binary::Pow => x.abs().powf(y),
-        Binary::Min => float_min(x, y),
-        Binary::Max => float_max(x, y),
-        Binary::Lt => if x < y { 1.0 } else { 0.0 },
-        Binary::Le => if x <= y { 1.0 } else { 0.0 },
-        Binary::Gt => if x > y { 1.0 } else { 0.0 },
-        Binary::Ge => if x >= y { 1.0 } else { 0.0 },
-        Binary::Eq => if x == y { 1.0 } else { 0.0 },
-        Binary::And => if x != 0.0 && y != 0.0 { 1.0 } else { 0.0 },
-        Binary::Or => if x != 0.0 || y != 0.0 { 1.0 } else { 0.0 },
-        Binary::Atan2 => rays_math::libm::atan2(x, y),
-        Binary::Hypot => x.hypot(y),
-        Binary::Ldexp => ldexp(x, y.trunc() as i64),
-    }
+    if let Cpu::F2(cpu) = math_prim(&Primitive::Numeric(op)).cpu { cpu(x, y) } else { unreachable!("binary primitive") }
 }
-
 #[inline]
 pub fn unary_apply(op: Unary, x: f64) -> f64 {
-    match op {
-        Unary::Sin => rays_math::libm::sin(x),
-        Unary::Cos => rays_math::libm::cos(x),
-        Unary::Sqrt => x.abs().sqrt(),
-        Unary::Abs => x.abs(),
-        Unary::Not => if x == 0.0 { 1.0 } else { 0.0 },
-        Unary::Tan => rays_math::libm::tan(x),
-        Unary::Asin => rays_math::libm::asin(x),
-        Unary::Acos => rays_math::libm::acos(x),
-        Unary::Exp => x.exp(),
-        Unary::Log => x.ln(),
-        Unary::Sign => if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { x },
-        Unary::Rsqrt => 1.0 / x.abs().sqrt(),
-    }
+    if let Cpu::F1(cpu) = math_prim(&Primitive::Math(op)).cpu { cpu(x) } else { unreachable!("unary primitive") }
 }
 
 pub fn rand_at(seed: i64, index: i64) -> f64 { rays_math::rand::float_at_int(seed, index) }
@@ -333,20 +334,35 @@ const DERIVED_NAMES: &[&str] = &["length", "dot", "cross", "normalize"];
 pub fn noise_names() -> Vec<String> { vec![primitive_name(&Primitive::Noise3).to_owned()] }
 pub fn names() -> Vec<String> {
     let names = |filter: fn(&Primitive) -> bool| PRIMITIVES.iter().filter(move |(_, op)| filter(op)).map(|(name, _)| (*name).to_owned());
-    names(|op| matches!(op, Primitive::Numeric(_) | Primitive::Math(_)))
+    MATH_PRIMS.iter().map(|row| row.name.to_owned())
         .chain(noise_names())
         .chain(DERIVED_NAMES.iter().map(|name| (*name).to_owned()))
         .chain(std::iter::once(primitive_name(&Primitive::Fma).to_owned()))
-        .chain(names(|op| matches!(op, Primitive::Integer(_) | Primitive::Integer_compare(_))))
-        .chain(std::iter::once(primitive_name(&Primitive::Rand_at).to_owned())).collect()
+        .chain(names(|op| matches!(op, Primitive::Integer(_) | Primitive::IntegerCompare(_))))
+        .chain(std::iter::once(primitive_name(&Primitive::RandAt).to_owned())).collect()
 }
 pub fn supports(name: &str) -> bool {
-    DERIVED_NAMES.contains(&name) || matches!(primitive(name), Some(Primitive::Numeric(_) | Primitive::Math(_) | Primitive::Integer(_) | Primitive::Integer_compare(_) | Primitive::Noise3 | Primitive::Fma | Primitive::Rand_at))
+    DERIVED_NAMES.contains(&name) || matches!(primitive(name), Some(Primitive::Numeric(_) | Primitive::Math(_) | Primitive::Integer(_) | Primitive::IntegerCompare(_) | Primitive::Noise3 | Primitive::Fma | Primitive::RandAt))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn math_rows_keep_cpu_and_backend_names_together() {
+        let mut names = std::collections::HashSet::new();
+        for row in MATH_PRIMS {
+            assert!(names.insert(row.name));
+            assert_eq!(primitive(row.name), Some(row.operation.clone()));
+            assert!(std::ptr::eq(math_prim(&row.operation), row));
+            assert_eq!(primitive_name(&row.operation), row.name);
+            assert!(row.js.contains("{a}"));
+        }
+        assert_eq!(math_prim(&Primitive::Numeric(Binary::Atan2)).msl, Some("atan2({a},{b})"));
+        assert_eq!(binary_apply(Binary::Div, 2.0, 0.0), 0.0);
+        assert_eq!(unary_apply(Unary::Sqrt, -4.0), 2.0);
+    }
+
     #[test]
     fn primitive_names_round_trip_without_aliases() {
         let mut names = std::collections::HashSet::new();
@@ -358,7 +374,7 @@ mod tests {
         assert!(primitive("unknown").is_none());
         assert!(binary("text/trim").is_none());
         assert_eq!(primitive_name(&Primitive::Coerce(Ty::Int)), "coerce");
-        assert_eq!(primitive_name(&Primitive::Color_byte(ByteMode::Unclamped)), "color/byte");
+        assert_eq!(primitive_name(&Primitive::ColorByte(ByteMode::Unclamped)), "color/byte");
     }
 
     #[test]

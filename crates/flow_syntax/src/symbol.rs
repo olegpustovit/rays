@@ -97,7 +97,7 @@ pub fn valid_name(name: &str) -> bool {
 }
 
 pub fn reserved(name: &str) -> bool {
-    matches!(name, "t" | "pi" | "nil" | "true" | "false" | "let*" | "values" | "graph" | "defgraph" | "+" | "-" | "*" | "/" | "pow" | "min" | "max" | "sin" | "cos" | "abs" | "floor" | "sqrt")
+    matches!(name, "t" | "pi" | "nil" | "true" | "false" | "let" | "let*" | "values" | "graph" | "defgraph" | "+" | "-" | "*" | "/" | "pow" | "min" | "max" | "sin" | "cos" | "abs" | "floor" | "sqrt")
 }
 #[cfg(test)]
 mod tests {

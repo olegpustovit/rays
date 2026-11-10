@@ -159,13 +159,13 @@ pub enum Value {
     Vec3(f64, f64, f64),
     Vec4(f64, f64, f64, f64),
     List(Arc<Vec<Value>>),
-    Int_array(Arc<Vec<i64>>),
-    Text_array(Arc<TextArray>),
+    IntArray(Arc<Vec<i64>>),
+    TextArray(Arc<TextArray>),
     /// Packed float/vector rows; width is 1..=4 and storage must contain complete rows.
     Floats(usize, Arc<Vec<f64>>),
     Record(Record),
     Deferred(Ty, i64),
-    No_geo,
+    NoGeo,
     Struct(Arc<GeoPayload>),
     Source(Arc<GeoPayload>),
     Fn(FnId),
@@ -258,13 +258,13 @@ pub fn ty_of(value: &Value) -> Ty {
         Value::Vec3(..) => Ty::Vec3,
         Value::Vec4(..) => Ty::Vec4,
         Value::List(values) => Ty::List(Box::new(elem_ty(values))),
-        Value::Int_array(_) => Ty::Array(Box::new(Ty::Int)),
-        Value::Text_array(_) => Ty::Array(Box::new(Ty::Text)),
+        Value::IntArray(_) => Ty::Array(Box::new(Ty::Int)),
+        Value::TextArray(_) => Ty::Array(Box::new(Ty::Text)),
         Value::Floats(width, _) => Ty::Array(Box::new(match width { 1 => Ty::Float, 2 => Ty::Vec2, 3 => Ty::Vec3, 4 => Ty::Vec4, _ => Ty::Any })),
         Value::Record(fields) => Ty::Record(fields.iter().map(|(name, value)| (*name, ty_of(value))).collect()),
         Value::Deferred(ty, _) => ty.clone(),
         Value::Struct(g) | Value::Source(g) => g.ty.clone(),
-        Value::No_geo => ty::geometry(),
+        Value::NoGeo => ty::geometry(),
         Value::Fn(_) => Ty::Fn(None),
         Value::Residual(_) => Ty::Any,
     }
@@ -276,11 +276,11 @@ pub fn ty_is(value: &Value, want: &Ty) -> bool {
         | (Value::Vec2(..), Ty::Vec2) | (Value::Vec3(..), Ty::Vec3) | (Value::Vec4(..), Ty::Vec4) | (Value::Residual(_), Ty::Any) => true,
         (Value::Deferred(ty, _), want) => ty == want,
         (Value::Struct(g) | Value::Source(g), want) => g.ty == *want,
-        (Value::Int_array(_), Ty::Array(e)) => **e == Ty::Int,
-        (Value::Text_array(_), Ty::Array(e)) => **e == Ty::Text,
+        (Value::IntArray(_), Ty::Array(e)) => **e == Ty::Int,
+        (Value::TextArray(_), Ty::Array(e)) => **e == Ty::Text,
         (Value::Floats(width, _), Ty::Array(e)) => **e == match width { 1 => Ty::Float, 2 => Ty::Vec2, 3 => Ty::Vec3, 4 => Ty::Vec4, _ => Ty::Any },
         (Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Text(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..) | Value::Residual(_)
-            | Value::Int_array(_) | Value::Text_array(_) | Value::Floats(..), _) => false,
+            | Value::IntArray(_) | Value::TextArray(_) | Value::Floats(..), _) => false,
         _ => ty_of(value) == *want,
     }
 }
@@ -298,16 +298,22 @@ pub fn elem_ty(values: &[Value]) -> Ty {
 pub fn coerce_to(want: &Ty, value: &Value) -> Result<Value, Diagnostic> {
     match (want, value) {
         (Ty::Any, _) | (_, Value::Residual(_) | Value::Source(..)) => Ok(value.clone()),
-        (Ty::Int, Value::Float(f)) => Ok(Value::Int(to_int("int", round(*f))?)),
+        (Ty::Int, Value::Float(f)) => { fin("int", *f)?; Err(fail("E_TYPE", "Float does not implicitly convert to Int; use int, floor, ceil or round.")) },
         (Ty::Int, Value::Bool(value)) => Ok(Value::Int(i64::from(*value))),
         (Ty::Float, Value::Int(value)) => Ok(Value::Float(*value as f64)),
         (Ty::Float, Value::Bool(value)) => Ok(Value::Float(if *value { 1.0 } else { 0.0 })),
         (Ty::Bool, Value::Int(_) | Value::Float(_)) => Ok(Value::Bool(truthy(value)?)),
+        (Ty::Vec3, Value::Vec2(x, y)) => Ok(Value::Vec3(*x, *y, 0.0)),
         (Ty::Vec3, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec3(n, n, n)) },
         (Ty::Vec2, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec2(n, n)) },
         (Ty::Vec4, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec4(n, n, n, n)) },
+        (Ty::Array(element), Value::List(values)) => {
+            let element = if **element == Ty::Any { elem_ty(values) } else { (**element).clone() };
+            let values = values.iter().map(|value| coerce_to(&element, value)).collect::<Result<Vec<_>, _>>()?;
+            array_init(&element, values.len() as i64, &|index| values[index].clone())
+        },
         (Ty::List(element), Value::List(values)) => Ok(Value::List(Arc::new(values.iter().map(|value| coerce_to(element, value)).collect::<Result<Vec<_>, _>>()?))),
-        (Ty::Array(element), Value::Int_array(values)) if **element == Ty::Float => Ok(Value::Floats(1, Arc::new(values.iter().map(|value| *value as f64).collect()))),
+        (Ty::Array(element), Value::IntArray(values)) if **element == Ty::Float => Ok(Value::Floats(1, Arc::new(values.iter().map(|value| *value as f64).collect()))),
         (Ty::Record(wanted), Value::Record(fields)) => Ok(Value::Record(fields.iter().map(|(name, value)| {
             Ok((*name, wanted.iter().find(|(field, _)| field == name).map_or_else(|| Ok(value.clone()), |(_, want)| coerce_to(want, value))?))
         }).collect::<Result<Vec<_>, Diagnostic>>()?.into())),
@@ -333,8 +339,8 @@ pub fn show_with(conc: &dyn Fn(&Value) -> Value, value: &Value) -> Vec<u8> {
             output.push(b']');
             output
         }
-        Value::Int_array(values) => format!("{} × int", values.len()).into_bytes(),
-        Value::Text_array(values) => format!("{} × text", values.len()).into_bytes(),
+        Value::IntArray(values) => format!("{} × int", values.len()).into_bytes(),
+        Value::TextArray(values) => format!("{} × text", values.len()).into_bytes(),
         value @ Value::Floats(width, _) => format!("{} × {}", array_length(&value).unwrap_or(0), match width { 1 => "float", 2 => "vec2", 3 => "vec3", 4 => "vec4", _ => "any" }).into_bytes(),
         Value::Record(fields) => {
             let mut output = vec![b'{'];
@@ -517,8 +523,8 @@ pub fn key_of(residual: &dyn Fn(ResidualId) -> i64, value: &Value) -> Vec<u8> {
             key.push(b']');
             key
         }
-        Value::Int_array(values) => key_int_array(values),
-        Value::Text_array(values) => key_text_array(values),
+        Value::IntArray(values) => key_int_array(values),
+        Value::TextArray(values) => key_text_array(values),
         Value::Floats(width, values) => key_float_array(values, match width { 1 => "A", 2 => "V2", 3 => "V", 4 => "V4", _ => return key_float_array(values, &format!("invalid{width}")) }),
         Value::Record(fields) => {
             let mut key = vec![b'{'];
@@ -534,7 +540,7 @@ pub fn key_of(residual: &dyn Fn(ResidualId) -> i64, value: &Value) -> Vec<u8> {
         Value::Deferred(ty, id) if *ty == ty::geometry() => format!("g{id}").into_bytes(),
         Value::Deferred(ty, id) if *ty == ty::image() => format!("image:{id}").into_bytes(),
         Value::Deferred(ty, id) => format!("node:{}:{id}", ty::to_string(ty)).into_bytes(),
-        Value::No_geo => b"G".to_vec(),
+        Value::NoGeo => b"G".to_vec(),
         Value::Struct(g) => {
             let mut key = format!("S{}", g.name).into_bytes();
             key.extend(key_of(residual, &Value::Record(g.fields.clone())));
@@ -585,8 +591,8 @@ pub fn list_arg(value: &Value) -> Result<&[Value], Diagnostic> {
 }
 pub fn array_length(value: &Value) -> Result<usize, Diagnostic> {
     match value {
-        Value::Int_array(values) => Ok(values.len()),
-        Value::Text_array(values) => Ok(values.len()),
+        Value::IntArray(values) => Ok(values.len()),
+        Value::TextArray(values) => Ok(values.len()),
         Value::Floats(width @ 1..=4, values) if values.len() % width == 0 => Ok(values.len() / width),
         Value::Floats(width, _) => Err(fail("E_ARRAY_TYPE", match width {
             2 => "Packed vec2 storage has two coordinates per element.",
@@ -602,8 +608,8 @@ pub fn array_get(value: &Value, index: i64) -> Result<Value, Diagnostic> {
     if index < 0 || index as u128 >= length as u128 { return Err(fail("E_ARRAY_RANGE", "Array index is outside its length.")); }
     let index = index as usize;
     let value = match value {
-        Value::Int_array(values) => Value::Int(values[index]),
-        Value::Text_array(values) => { let mut text = array_buffer(values[index].len())?; text.extend_from_slice(&values[index]); Value::Text(text.into()) },
+        Value::IntArray(values) => Value::Int(values[index]),
+        Value::TextArray(values) => { let mut text = array_buffer(values[index].len())?; text.extend_from_slice(&values[index]); Value::Text(text.into()) },
         Value::Floats(1, values) => Value::Float(values[index]),
         Value::Floats(2, values) => Value::Vec2(values[index * 2], values[index * 2 + 1]),
         Value::Floats(3, values) => Value::Vec3(values[index * 3], values[index * 3 + 1], values[index * 3 + 2]),
@@ -657,14 +663,14 @@ pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Resul
         let count = allocation_count(count)?;
         let mut values = TextArray::try_with_capacity(count).map_err(|_| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
         for index in 0..count { match f(index) { Value::Text(text) => values.try_push(&text).map_err(|_| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?, _ => return Err(fail("E_ARRAY_TYPE", "Text arrays contain text values.")) } }
-        return Ok(Value::Text_array(Arc::new(values)));
+        return Ok(Value::TextArray(Arc::new(values)));
     }
     if *element == Ty::Int {
         let count = allocation_count(count)?;
         let mut values = array_buffer(count)?;
         values.resize(count, 0);
         for (index, slot) in values.iter_mut().enumerate() { *slot = match coerce_to(&Ty::Int, &f(index))? { Value::Int(value) => value, _ => return Err(fail("E_ARRAY_TYPE", "Packed integer arrays contain integer values.")) }; }
-        return Ok(Value::Int_array(Arc::new(values)));
+        return Ok(Value::IntArray(Arc::new(values)));
     }
     let width = match element {
         Ty::Float | Ty::Any => 1,
@@ -758,7 +764,7 @@ pub fn with_error(protected: &dyn Fn() -> Result<Value, Diagnostic>, map: &dyn F
 }
 
 pub fn error_row_index(value: &Value, grain: Option<i64>, check: Option<&dyn Fn() -> Result<(), Diagnostic>>) -> Result<Option<i64>, Diagnostic> {
-    let Value::Int_array(rows) = value else { return Err(fail("E_DIAGNOSTIC_ROWS", "Diagnostic rows require an integer 0/1 array.")); };
+    let Value::IntArray(rows) = value else { return Err(fail("E_DIAGNOSTIC_ROWS", "Diagnostic rows require an integer 0/1 array.")); };
     if grain.is_some_and(|grain| grain <= 0) { return Err(fail("E_DIAGNOSTIC_CONTEXT", "Diagnostic grain must be positive.")); }
     if let Some(check) = check { check()?; }
     let mut first = None;
@@ -780,10 +786,10 @@ pub fn error_row_index(value: &Value, grain: Option<i64>, check: Option<&dyn Fn(
     Ok(Some(selected as i64))
 }
 pub fn diagnose_rows(select: &dyn Fn(&Value, i64) -> i64, map: &dyn Fn(Value) -> Result<Value, Diagnostic>, value: &Value) -> Result<Value, Diagnostic> {
-    let Some(first) = error_row_index(value, None, None)? else { return Ok(Value::No_geo); };
+    let Some(first) = error_row_index(value, None, None)? else { return Ok(Value::NoGeo); };
     let index = select(value, first);
     match value {
-        Value::Int_array(rows) if index >= 0 && (index as u128) < rows.len() as u128 && rows[index as usize] == 1 => (),
+        Value::IntArray(rows) if index >= 0 && (index as u128) < rows.len() as u128 && rows[index as usize] == 1 => (),
         _ => return Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis returned a non-failing row.")),
     }
     with_error(&|| Err(fail("E_DIAGNOSTIC_ROW", "A diagnostic row failed.")), &|_| map(Value::Int(index)))
@@ -791,6 +797,22 @@ pub fn diagnose_rows(select: &dyn Fn(&Value, i64) -> i64, map: &dyn Fn(Value) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authoring_coercions_preserve_fractional_sizes_and_widen_small_shapes() {
+        use super::*;
+        assert!(ty::fits(&Ty::Vec2, &Ty::Vec3));
+        assert_eq!(coerce_to(&Ty::Vec3, &Value::Vec2(2.0, 3.0)).unwrap(), Value::Vec3(2.0, 3.0, 0.0));
+        let list = Ty::List(Box::new(Ty::Int));
+        let array = Ty::Array(Box::new(Ty::Float));
+        assert!(ty::fits(&list, &array));
+        assert_eq!(ty::coerce(&list, &array), array);
+        let input = Value::List(Arc::new(vec![Value::Int(2), Value::Int(3)]));
+        assert_eq!(coerce_to(&array, &input).unwrap(), Value::Floats(1, Arc::new(vec![2.0, 3.0])));
+        assert!(!ty::fits(&Ty::Float, &Ty::Int));
+        assert_eq!(coerce_to(&Ty::Int, &Value::Float(2.0)).unwrap_err().code, "E_TYPE");
+        assert_eq!(coerce_to(&Ty::Float, &Value::Int(2)).unwrap(), Value::Float(2.0));
+    }
+
     #[test]
     fn array_capacities_use_platform_bytes_and_oversize_is_typed_memory() {
         let slots = isize::MAX as usize / size_of::<f64>();
@@ -864,8 +886,8 @@ mod tests {
         assert_eq!(key_of(&|id| id.0, &Value::Deferred(ty::image(), 3)), b"image:3".to_vec());
         assert_ne!(key_of(&|id| id.0, &Value::Deferred(ty::image(), 3)), key_of(&|id| id.0, &Value::Int(3)));
         assert_eq!(coerce_to(&Ty::Float, &Value::Int(3)).unwrap(), Value::Float(3.0));
-        assert_eq!(coerce_to(&Ty::Int, &Value::Float(1.5)).unwrap(), Value::Int(2));
-        assert_eq!(coerce_to(&Ty::Int, &Value::Float(-1.5)).unwrap(), Value::Int(-1));
+        assert_eq!(coerce_to(&Ty::Int, &Value::Float(1.5)).unwrap_err().code, "E_TYPE");
+        assert_eq!(coerce_to(&Ty::Int, &Value::Float(-1.5)).unwrap_err().code, "E_TYPE");
         assert_eq!(coerce_to(&Ty::Bool, &Value::Float(-0.0)).unwrap(), Value::Bool(false));
         assert_eq!(coerce_to(&Ty::Bool, &Value::Int(-1)).unwrap(), Value::Bool(true));
         assert_eq!(coerce_to(&Ty::Float, &Value::Bool(true)).unwrap(), Value::Float(1.0));
@@ -875,16 +897,16 @@ mod tests {
         assert_eq!(coerce_to(&Ty::Vec3, &Value::Vec3(1.0, 2.0, 3.0)).unwrap(), Value::Vec3(1.0, 2.0, 3.0));
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] { assert_eq!(coerce_to(&Ty::Int, &Value::Float(value)).unwrap_err().code, "E_NONFINITE"); }
         let integers = Arc::new(vec![-(1_i64 << 62), -(1_i64 << 62) + 1, -(1_i64 << 53) - 1, 0, (1_i64 << 53) + 1, (1_i64 << 62) - 1]);
-        let packed = Value::Int_array(integers.clone());
+        let packed = Value::IntArray(integers.clone());
         assert_eq!(ty_of(&packed), Ty::Array(Box::new(Ty::Int)));
         assert_eq!(array_length(&packed), Ok(integers.len()));
         for (index, value) in integers.iter().enumerate() { assert_eq!(array_get(&packed, index as i64), Ok(Value::Int(*value))); }
         validate(&packed).unwrap();
         assert_eq!(show_with(&|value| value.clone(), &packed), "6 × int".as_bytes().to_vec());
         assert_ne!(key_of(&|id| id.0, &packed), key_of(&|id| id.0, &Value::Floats(1, Arc::new(integers.iter().map(|n| *n as f64).collect()))));
-        assert_eq!(array_init(&Ty::Int, 0, &|_| unreachable!()).unwrap(), Value::Int_array(Arc::new(vec![])));
-        assert_eq!(array_init(&Ty::Text, 0, &|_| unreachable!()).unwrap(), Value::Text_array(Arc::new(TextArray::new())));
-        assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8].into())).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]].into())));
+        assert_eq!(array_init(&Ty::Int, 0, &|_| unreachable!()).unwrap(), Value::IntArray(Arc::new(vec![])));
+        assert_eq!(array_init(&Ty::Text, 0, &|_| unreachable!()).unwrap(), Value::TextArray(Arc::new(TextArray::new())));
+        assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8].into())).unwrap(), Value::TextArray(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]].into())));
         assert_eq!(array_init(&Ty::Text, 1, &|_| Value::Int(0)).unwrap_err().code, "E_ARRAY_TYPE");
         assert_eq!(array_init(&Ty::Int, -1, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_RANGE");
         assert_eq!(array_init(&Ty::Int, i64::MAX, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_MEMORY");
@@ -916,7 +938,7 @@ mod tests {
         assert_eq!(array_get(&packed, -1).unwrap_err().code, "E_ARRAY_RANGE");
         assert_eq!(array_get(&packed, integers.len() as i64).unwrap_err().code, "E_ARRAY_RANGE");
         let texts = Arc::new(TextArray::from(vec![Vec::new(), "猫".as_bytes().to_vec(), b"a\0b".to_vec(), "é".as_bytes().to_vec(), "😀".as_bytes().to_vec(), b"quote\"\\\n".to_vec()]));
-        let array = Value::Text_array(texts.clone());
+        let array = Value::TextArray(texts.clone());
         assert_eq!(ty_of(&array), Ty::Array(Box::new(Ty::Text)));
         assert_eq!(array_length(&array), Ok(texts.len()));
         for (index, text) in texts.iter().enumerate() { assert_eq!(array_get(&array, index as i64), Ok(Value::Text(text.into()))); }
@@ -927,7 +949,7 @@ mod tests {
         let mut expected_key = b"s256:".to_vec();
         expected_key.extend(0_u8..=255);
         assert_eq!(key_of(&|id| id.0, &every_byte), expected_key);
-        let byte_array = Value::Text_array(Arc::new(vec![(0_u8..=255).collect::<Vec<u8>>()].into()));
+        let byte_array = Value::TextArray(Arc::new(vec![(0_u8..=255).collect::<Vec<u8>>()].into()));
         assert_eq!(array_get(&byte_array, 0), Ok(Value::Text((0_u8..=255).collect::<std::sync::Arc<[u8]>>())));
         let mut expected_array_key = b"AT[256:".to_vec();
         expected_array_key.extend(0_u8..=255);
@@ -1020,24 +1042,24 @@ mod tests {
         finite.validate_once(&values, &check).unwrap();
         finite.validate_once(&values, &check).unwrap();
         assert_eq!(checks.load(Ordering::Relaxed), 1);
-        let large_ints = Value::Int_array(Arc::new(vec![7; 4097]));
-        let large_texts = Value::Text_array(Arc::new(vec![b"x".to_vec(); 4097].into()));
+        let large_ints = Value::IntArray(Arc::new(vec![7; 4097]));
+        let large_texts = Value::TextArray(Arc::new(vec![b"x".to_vec(); 4097].into()));
         assert_eq!(key_of(&|id| id.0, &packed), key_of(&|id| id.0, &packed));
         assert_eq!(key_of(&|id| id.0, &large_ints), key_of(&|id| id.0, &large_ints));
         assert_eq!(key_of(&|id| id.0, &large_texts), key_of(&|id| id.0, &large_texts));
-        let large_invalid = Value::Text_array(Arc::new(vec![vec![0xff]; 4097].into()));
-        let large_other = Value::Text_array(Arc::new(vec![vec![0xfe]; 4097].into()));
+        let large_invalid = Value::TextArray(Arc::new(vec![vec![0xff]; 4097].into()));
+        let large_other = Value::TextArray(Arc::new(vec![vec![0xfe]; 4097].into()));
         assert_ne!(key_of(&|id| id.0, &large_invalid), key_of(&|id| id.0, &large_other));
         assert!(remembered().iter().any(|entry| entry.owner == "array_key" && entry.bytes > 0));
         assert!(remembered().iter().any(|entry| entry.owner == "finite_arrays" && entry.bytes > 0));
         assert!(retained_bytes() <= 64 * 256);
-        let rows = Value::Int_array(Arc::new(vec![0, 1, 0, 1, 1, 0]));
+        let rows = Value::IntArray(Arc::new(vec![0, 1, 0, 1, 1, 0]));
         assert_eq!(error_row_index(&rows, None, None), Ok(Some(1)));
         assert_eq!(error_row_index(&rows, Some(3), None), Ok(Some(1)));
-        assert_eq!(error_row_index(&Value::Int_array(Arc::new(vec![0, 0])), None, None), Ok(None));
-        assert_eq!(diagnose_rows(&|_, first| first, &|_| Ok(Value::No_geo), &rows).unwrap_err().code, "E_DIAGNOSTIC_MAP");
-        assert_eq!(diagnose_rows(&|_, first| first, &|_| Ok(Value::No_geo), &Value::Int_array(Arc::new(vec![0, 0]))).unwrap(), Value::No_geo);
-        assert_eq!(error_row_index(&Value::Int_array(Arc::new(vec![0, 2])), None, None).unwrap_err().code, "E_DIAGNOSTIC_ROWS");
+        assert_eq!(error_row_index(&Value::IntArray(Arc::new(vec![0, 0])), None, None), Ok(None));
+        assert_eq!(diagnose_rows(&|_, first| first, &|_| Ok(Value::NoGeo), &rows).unwrap_err().code, "E_DIAGNOSTIC_MAP");
+        assert_eq!(diagnose_rows(&|_, first| first, &|_| Ok(Value::NoGeo), &Value::IntArray(Arc::new(vec![0, 0]))).unwrap(), Value::NoGeo);
+        assert_eq!(error_row_index(&Value::IntArray(Arc::new(vec![0, 2])), None, None).unwrap_err().code, "E_DIAGNOSTIC_ROWS");
         assert_eq!(error_row_index(&rows, Some(0), None).unwrap_err().code, "E_DIAGNOSTIC_CONTEXT");
     }
 

@@ -563,7 +563,7 @@ mod tests {
     fn macro_parameter_shapes_and_names() {
         assert_eq!(params(&one("(defmacro m [a b & rest] `(+ ~a ~b))")).unwrap(), (vec!["a".to_owned(), "b".to_owned()], Some("rest".to_owned())));
         assert_eq!(params(&one("(defmacro m [a b] `(+ ~a ~b))")).unwrap(), (vec!["a".to_owned(), "b".to_owned()], None));
-        assert!(valid_name("sort-by") && valid_name("a1_b"));
+        assert!(valid_name("sort_by") && valid_name("a1_b"));
         assert!(!valid_name("A") && !valid_name("1a"));
     }
 }

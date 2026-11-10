@@ -159,6 +159,6 @@ fn macro_params_and_valid_names() {
         Ok((req, None)) => assert_eq!(req, vec!["a".to_owned(), "b".to_owned()]),
         _ => panic!("required parameter shape"),
     }
-    assert!(macros::valid_name("sort-by") && macros::valid_name("a1_b"));
+    assert!(macros::valid_name("sort_by") && macros::valid_name("a1_b"));
     assert!(!macros::valid_name("A") && !macros::valid_name("1a"));
 }
