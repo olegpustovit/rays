@@ -8,7 +8,7 @@ use ogpu_core::{
         DepthState, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBatchDraw, DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame,
         DriverIcb, DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue,
-        DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, Floats,
+        DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, DriverSurface,
         InstanceKind, Receipt, RenderPipelineOptions, ShaderStage, Token, Warm, Winding,
     },
     caps::Caps,
@@ -16,11 +16,10 @@ use ogpu_core::{
     handle,
     pipeline::{Blend, ColorFormat, DepthFormat, RenderDescriptor},
     render_pass::{Comparison, Cull, IndexType, Load, Primitive, Rect, Store},
-    shader::{self, Binding as ShaderBinding, BindingKind, ConstantValue, Shader},
+    shader::{self, Binding as ShaderBinding, BindingKind, Shader},
     surface::{Configuration, PresentMode},
     types::{
-        self, AddressMode, BufferDescriptor, BufferUsage, Memory, MipFilter, SamplerDescriptor,
-        SamplerFilter, TextureDescriptor, TextureFormat, TextureUsage,
+        self, AddressMode, BufferDescriptor, BufferUsage, Memory, MipFilter, SamplerFilter,
     },
 };
 use std::{

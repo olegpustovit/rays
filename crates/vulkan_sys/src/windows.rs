@@ -296,7 +296,7 @@ impl Device {
     pub fn buffer(&self,size:u64,kind:BufferKind)->Result<Buffer,Error>{
         if size==0{return Err(Error::InvalidInput("buffer size must be nonzero"));}
         let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_buffer_create(self.raw(),size,if kind==BufferKind::Shared{0}else{1},&mut raw)})?;
-        let raw=nonnull(raw)?;let device=self.inner.clone();let inner=Arc::new(BufferInner{raw,device:device.clone(),size});
+        let raw=nonnull(raw)?;let device=self.inner.clone();let inner=Arc::new(BufferInner{raw,_device:device.clone(),size});
         Ok(Buffer{raw,device,size,inner})
     }
     pub fn shader(&self,bytes:&[u8])->Result<ShaderModule,Error>{
@@ -487,7 +487,7 @@ pub struct DepthAttachment{pub texture:Texture,pub load:i32,pub store:i32,pub cl
 
 #[derive(Clone)]
 pub struct Buffer { raw: NonNull<c_void>, device: Arc<DeviceInner>, size: u64, inner: Arc<BufferInner> }
-struct BufferInner { raw: NonNull<c_void>, device: Arc<DeviceInner>, size: u64 }
+struct BufferInner { raw: NonNull<c_void>, _device: Arc<DeviceInner>, size: u64 }
 unsafe impl Send for BufferInner {}
 unsafe impl Sync for BufferInner {}
 impl Drop for BufferInner { fn drop(&mut self) { unsafe { rv_buffer_destroy(self.raw.as_ptr()) } } }
@@ -611,16 +611,15 @@ impl Surface{
 }
 impl Drop for Surface{fn drop(&mut self){unsafe{rv_surface_destroy(self.raw.as_ptr())}}}
 
-struct AccelInner { raw:NonNull<c_void>,device:Arc<DeviceInner>,_buffers:RefCell<Vec<Arc<BufferInner>>>,_children:Vec<Arc<AccelInner>> }
+struct AccelInner { raw:NonNull<c_void>,_device:Arc<DeviceInner>,_buffers:RefCell<Vec<Arc<BufferInner>>>,_children:Vec<Arc<AccelInner>> }
 impl Drop for AccelInner { fn drop(&mut self){unsafe{rv_accel_destroy(self.raw.as_ptr())}} }
 #[derive(Clone)]
 pub struct AccelerationStructure{raw:NonNull<c_void>,device:Arc<DeviceInner>,inner:Arc<AccelInner>}
 fn acceleration(raw:NonNull<c_void>,device:Arc<DeviceInner>,buffers:Vec<Arc<BufferInner>>,children:Vec<Arc<AccelInner>>)->AccelerationStructure{
-    let inner=Arc::new(AccelInner{raw,device:device.clone(),_buffers:RefCell::new(buffers),_children:children});
+    let inner=Arc::new(AccelInner{raw,_device:device.clone(),_buffers:RefCell::new(buffers),_children:children});
     AccelerationStructure{raw,device,inner}
 }
 impl AccelerationStructure {
     pub fn sizes(&self)->AccelerationSizes{let mut s=NativeAccelSizes{structure:0,build_scratch:0,update_scratch:0};unsafe{rv_accel_sizes(self.raw.as_ptr(),&mut s)};AccelerationSizes{structure_bytes:s.structure,build_scratch_bytes:s.build_scratch,update_scratch_bytes:s.update_scratch}}
     fn raw(&self)->*mut c_void{self.raw.as_ptr()}
 }
-
