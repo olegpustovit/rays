@@ -3700,7 +3700,7 @@ pub(crate) fn split_disconnected_point_fans(
         output_points,
         vertex_points.clone(),
         topology_view.primitive_offsets.clone(),
-        topology_view.primitive_kinds.clone(),
+        topology_view.primitive_kinds,
     );
     let source_positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     let positions = packed::float3::view::of_owned_exn(
@@ -4811,7 +4811,7 @@ pub(crate) fn once(
     }
     geometry::create(
         positions,
-        plan.topology.clone(),
+        plan.topology,
         Some(attributes),
         Some(groups),
         Some(edge_groups),

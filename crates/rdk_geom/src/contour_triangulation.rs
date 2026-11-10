@@ -282,7 +282,7 @@ fn run(
     }
     let ring_count = ring.len();
     let mut output = vec![0i64; (ring_count - 2) * 3];
-    let mut remaining = ring.clone();
+    let mut remaining = ring;
     let mut active = ring_count;
     let mut emitted = 0usize;
     while active > 3 {

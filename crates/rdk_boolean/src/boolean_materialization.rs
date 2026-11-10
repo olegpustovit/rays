@@ -1775,7 +1775,7 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
                 output_points,
                 vertex_points,
                 topology.primitive_offsets.clone(),
-                topology.primitive_kinds.clone(),
+                topology.primitive_kinds,
             );
             let source_positions = positions_view(geometry_value)?;
             let select = |source: &[f64]| -> Result<Vec<f64>, error::T> {

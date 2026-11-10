@@ -566,7 +566,7 @@ impl Probe {
     fn map_at(&mut self, path: &[Symbol], probes: &[i64]) -> Option<Summary> {
         let (zone, calls) = self.map_scope(path, probes)?;
         let k = *probes.last()?;
-        let key = (zone.clone(), probes.to_vec());
+        let key = (zone, probes.to_vec());
         let records: Records = match self.calls.get(&key) {
             Some(r) => r.clone(),
             None => {

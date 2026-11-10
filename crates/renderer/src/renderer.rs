@@ -833,7 +833,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                             // and re-uploads into its same-shape texture.
                             let texture = Rc::new(SampledTexture {
                                 key: texture_key(&key, density, borrowed_generation),
-                                levels: Rc::new(vec![TextureLevel { width, height, bytes: bytes_.clone() }]),
+                                levels: Rc::new(vec![TextureLevel { width, height, bytes: bytes_ }]),
                                 sampler: scene_image_sampler(),
                                 gpu: None,
                             });

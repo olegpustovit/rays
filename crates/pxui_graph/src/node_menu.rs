@@ -242,7 +242,7 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
             });
             // the rows, kept so that a row's square and unavailability are known
             let latest: Rc<RefCell<Vec<Entry>>> = Rc::new(RefCell::new(Vec::new()));
-            let (l1, l2, l3) = (latest.clone(), latest.clone(), latest.clone());
+            let (l1, l2, l3) = (latest.clone(), latest.clone(), latest);
             let mut o = PickerOpts::default();
             o.limit = MENU_LIMIT;
             o.mark = Some(Rc::new(move |index: i64| {

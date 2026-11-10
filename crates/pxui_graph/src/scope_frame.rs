@@ -1291,7 +1291,7 @@ pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &U
             let (x0, y0) = canvas_signal.press_point;
             let rw = (px - x0).abs();
             let rh = (py - y0).abs();
-            let selected: PathSet = if rw < 3.0 && rh < 3.0 { base.clone() } else { base.union(&marquee_hits(t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
+            let selected: PathSet = if rw < 3.0 && rh < 3.0 { base } else { base.union(&marquee_hits(t, (x0.min(px), y0.min(py), rw, rh))).cloned().collect() };
             if selected != t.selected {
                 emit.push(Change::Selected(selected.iter().cloned().collect()));
             }
@@ -1678,7 +1678,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
         }
         None => None,
     };
-    let snap = snapshot.clone();
+    let snap = snapshot;
     let press_point = canvas_signal.press_point;
     ui.draw_over(canvas, move |paint, rect| {
         let (cx, cy, cw, ch) = rect;

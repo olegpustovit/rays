@@ -2786,7 +2786,7 @@ fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Erro
     if !direct {
         let attributes = match &slot_vertex_attributes {
             Some(attributes) => attributes.borrow().buffer.clone(),
-            None => vertices.clone(),
+            None => vertices,
         };
         let mut buf = Vec::with_capacity(1 + buffers.len());
         buf.push((vertex_stage, 11, attributes, 0));
@@ -2861,7 +2861,7 @@ fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Erro
         }
         Scene3 | Scene3Points | Scene3Textured => regenerated(buffers, textures, samplers, &scene3, &[(1, 6)], &[(2, 7)]),
         Scene3World => {
-            let base = if slot_gpu_vertices.is_some() { device_scene3(&scene3) } else { scene3.clone() };
+            let base = if slot_gpu_vertices.is_some() { device_scene3(&scene3) } else { scene3 };
             let mut table = vec![((f, 3), vec![6])];
             table.extend(base);
             regenerated(buffers, textures, samplers, &table, &[(1, 7), (4, 9), (8, 13), (9, 11)], &[(2, 8), (5, 10), (10, 12)])

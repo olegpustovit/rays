@@ -269,7 +269,7 @@ pub(crate) fn apply_with_mapping(
         )?
     };
     let maps = Maps {
-        point_map: point_map.clone(),
+        point_map,
         vertex_map: vertex_map.clone(),
         primitive_map: primitive_map.clone(),
         point_identity,

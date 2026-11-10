@@ -316,7 +316,7 @@ fn reduce(
             if compact { clusters.count } else { source_count as i64 },
             vertex_points,
             source_topology.primitive_offsets.clone(),
-            source_topology.primitive_kinds.clone(),
+            source_topology.primitive_kinds,
         )
     };
     let (output_attributes, output_groups) = fuse_rules::apply(

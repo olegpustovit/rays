@@ -612,7 +612,6 @@ fn run_state_internal(
     let render_failure: Rc<RefCell<Option<error>>> = Rc::new(RefCell::new(None));
     let render_scene: Rc<dyn Fn(&scene::Scene)> = {
         let coordinator = coordinator.clone();
-        let native_caches = native_caches.clone();
         let render_failure = render_failure.clone();
         Rc::new(move |scene_: &scene::Scene| {
             // ponytail: scan scene metadata each frame; move the focused region into staged scene
@@ -637,7 +636,7 @@ fn run_state_internal(
 
     let program_ = Rc::new(program_);
     let crash = Rc::new(crash_state {
-        crash_dir: crash_dir.clone(),
+        crash_dir,
         title: config_.title.clone(),
         recent: RefCell::new(VecDeque::with_capacity(120)),
         model: RefCell::new(None),

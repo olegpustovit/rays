@@ -565,7 +565,7 @@ pub(crate) fn subdivide_polygons(
         cancel_token,
         &OnceOptions {
             edge_ancestry_attribute: pull_plan.as_ref().map(|plan| plan.ancestry_attribute.clone()),
-            ..iterate_options.clone()
+            ..iterate_options
         },
         scheme,
         iterations,

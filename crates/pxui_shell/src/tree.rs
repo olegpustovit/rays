@@ -562,7 +562,6 @@ pub fn update(t: &mut Tree, ui: &mut Ui, _frame: &frame::Frame, bounds: (i64, i6
         let folded = t.folded.clone();
         let filter = t.filter.clone();
         let dragging = t.drag.is_some();
-        let signal = signal.clone();
         let slot = boxed.box_slot;
         let hover_pointer = signal.pointer.1;
         let build_scroll = scroll;

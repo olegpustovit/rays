@@ -306,7 +306,7 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
             let opts = ValueFieldOpts {
                 display: Some(source[1..].to_string()),
                 lead: Some(("\u{192}".to_string(), cx.ink_2)),
-                trail: live.clone().map(|value| (value, cx.ink_2)),
+                trail: live.map(|value| (value, cx.ink_2)),
                 line: Some(theme::ports(&cx.theme).float),
                 ..ValueFieldOpts::default()
             };
@@ -325,7 +325,6 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
             let theme = cx.theme;
             let ink_2 = cx.ink_2;
             let source = source.to_string();
-            let live = live.clone();
             ui.draw(&boxed, move |paint, (x, y, _, _)| {
                 let ty = paint.text_top(None, y + control_y - 0.5, 20.0);
                 let left = x + control_x + 2.0;

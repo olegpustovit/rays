@@ -1214,7 +1214,7 @@ fn node_of(c: &Cx, folded: &dyn Fn(&[Symbol]) -> bool, visible: &[String], expr:
         name: name.clone(),
         binds: match (nested_leaf, pat) {
             (None, Some(pt)) => eb::pat_names(pt),
-            _ => vec![name.clone()],
+            _ => vec![name],
         },
         head,
         rows,

@@ -154,7 +154,7 @@ fn install_outputs(
         let item = attribute::create_owned(
             name,
             attribute::Owner::Primitive,
-            attribute::Storage::Int(Arc::new(outputs.unique_counts.clone())),
+            attribute::Storage::Int(Arc::new(outputs.unique_counts)),
         )
         .map_err(wrap)?;
         output = geometry::with_attribute(item, &output).map_err(wrap)?;

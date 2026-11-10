@@ -1054,7 +1054,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
             source: source.clone(),
             mode,
             primitive,
-            key: se::MeshKey::GpuVertices { name: key.clone(), indices: if mesh::view::device_index_count(m).is_some() { None } else { Some(indices_key) } },
+            key: se::MeshKey::GpuVertices { name: key, indices: if mesh::view::device_index_count(m).is_some() { None } else { Some(indices_key) } },
             vertices: new_bytes(Vec::new()),
             indices,
             vertex_attributes: (

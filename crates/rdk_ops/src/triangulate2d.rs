@@ -1437,7 +1437,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
             && !params.remove_outside_constraint_polygons
             && !params.remove_outside_silhouette =>
         {
-            (seed_view.triangle_points.clone(), Vec::new())
+            (seed_view.triangle_points, Vec::new())
         }
         None => {
             let value = planar_cdt::build(
@@ -1496,7 +1496,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
                 return Err(invalid("maximum new points is smaller than the required constraint split count"));
             }
             let (refinement_constraints, refinement_winding): (Vec<i64>, Vec<i64>) = match &arrangement {
-                None => (initial_constraints.clone(), Vec::new()),
+                None => (initial_constraints, Vec::new()),
                 Some(arrangement) => {
                     let view = planar_constraints::view::view(arrangement);
                     (view.constraint_points.to_vec(), view.constraint_winding.to_vec())

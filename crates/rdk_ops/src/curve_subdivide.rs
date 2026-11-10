@@ -654,7 +654,7 @@ fn once(
     }
     geometry::create(
         positions,
-        plan.output_topology.clone(),
+        plan.output_topology,
         Some(attributes),
         Some(groups),
         Some(edge_groups),

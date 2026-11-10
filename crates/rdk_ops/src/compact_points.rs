@@ -52,7 +52,7 @@ fn compact(
         retained,
         vertex_points,
         source.primitive_offsets.clone(),
-        source.primitive_kinds.clone(),
+        source.primitive_kinds,
     );
     let mut attributes = Vec::new();
     for item in geometry::attributes(value) {

@@ -481,7 +481,7 @@ fn remove_inline_points(
         output_points,
         vertex_points,
         primitive_offsets.into(),
-        view.primitive_kinds.clone(),
+        view.primitive_kinds,
     );
     let point_identity = output_points == source_points;
     let new_positions =
@@ -542,7 +542,7 @@ fn unique_points_all(cancel_value: Option<&cancel::T>, grain: i64, geometry_valu
         output_points,
         (0..source_vertices).collect(),
         view.primitive_offsets.clone(),
-        view.primitive_kinds.clone(),
+        view.primitive_kinds,
     );
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
@@ -666,7 +666,7 @@ fn unique_points_selected(
         output_points,
         vertex_points,
         view.primitive_offsets.clone(),
-        view.primitive_kinds.clone(),
+        view.primitive_kinds,
     );
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
@@ -956,7 +956,7 @@ fn split_points_on_edge_ends(
         output_points,
         vertex_points,
         view.primitive_offsets.clone(),
-        view.primitive_kinds.clone(),
+        view.primitive_kinds,
     );
     let positions = select_positions(cancel_value, grain, &point_map, geometry_value)?;
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
@@ -1324,7 +1324,7 @@ fn make_planar(
         output_points,
         vertex_points,
         view.primitive_offsets.clone(),
-        view.primitive_kinds.clone(),
+        view.primitive_kinds,
     );
     let attributes = remap_point_attributes(cancel_value, grain, &point_map, geometry_value)?;
     let groups = remap_point_groups(cancel_value, grain, &point_map, geometry_value)?;
