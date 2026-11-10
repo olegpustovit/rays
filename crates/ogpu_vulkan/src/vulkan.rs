@@ -131,6 +131,8 @@ impl Buffer {
     pub fn zero(&self) -> Result<(), Error> { self.0.zero().map_err(|failure| error("buffer_zero", failure)) }
     pub fn write(&mut self, offset: u64, bytes: &[u8]) -> Result<(), Error> { self.0.write(offset, bytes).map_err(|failure| error("buffer_write", failure)) }
     pub fn read(&self, offset: u64, bytes: &mut [u8]) -> Result<(), Error> { self.0.read(offset, bytes).map_err(|failure| error("buffer_read", failure)) }
+    pub fn host_ptr(&self) -> Option<std::ptr::NonNull<u8>> { self.0.host_ptr() }
+    pub fn flush_range(&self, offset: u64, length: u64) -> Result<(), Error> { self.0.flush_range(offset, length).map_err(|failure| error("buffer_flush_range", failure)) }
     pub fn flush(&self, bytes: &[u8]) -> Result<(), Error> { self.0.flush(bytes).map_err(|failure| error("buffer_flush", failure)) }
     pub fn invalidate(&self, bytes: &mut [u8]) -> Result<(), Error> { self.0.invalidate(bytes).map_err(|failure| error("buffer_invalidate", failure)) }
     pub fn flush_view(&self, view: &ZeroedView, byte_len: u64) -> Result<(), Error> { self.0.flush_view(&view.0, byte_len).map_err(|failure| error("buffer_flush", failure)) }
@@ -150,6 +152,7 @@ impl Pipeline {
 pub struct Texture(sys::Texture);
 impl Texture {
     pub fn descriptor(&self) -> TextureDescriptor { self.0.descriptor() }
+    pub fn write(&self, bytes: &[u8], args: BlitDescriptor) -> Result<(), Error> { self.0.write(bytes, args).map_err(|failure| error("texture_write", failure)) }
     pub fn read(&self, bytes: &mut [u8], bytes_per_row: u64, texel_bytes: u32) -> Result<(), Error> { self.0.read(bytes, bytes_per_row, texel_bytes).map_err(|failure| error("texture_read", failure)) }
 }
 pub struct ZeroedView(sys::ZeroedView);

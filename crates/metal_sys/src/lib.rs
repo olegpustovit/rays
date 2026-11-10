@@ -303,6 +303,22 @@ fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
         { let _ = (texture, destination, bytes_per_row, bytes_per_image, region, mip_level, slice); Err(Error::Unavailable) }
     }
 
+    /// Replace a texture region from `source`; the native side bounds the footprint against `source.len()`.
+    pub fn write_texture(
+        texture: &Handle, source: &[u8], bytes_per_row: usize, bytes_per_image: usize,
+        region: (u64, u64, u64, u64, u64, u64), mip_level: u64, slice: u64,
+    ) -> Result<(), Error> {
+        #[cfg(target_vendor = "apple")]
+        {
+            let mut message: *const c_char = std::ptr::null();
+            let (x, y, z, width, height, depth) = region;
+            let status = unsafe { rays_metal_texture_write(texture.as_native_ptr()?, source.as_ptr(), source.len(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
+            if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
+        }
+        #[cfg(not(target_vendor = "apple"))]
+        { let _ = (texture, source, bytes_per_row, bytes_per_image, region, mip_level, slice); Err(Error::Unavailable) }
+    }
+
     pub fn read_texture_bytes(
         texture: &Handle, length: usize, bytes_per_row: usize, bytes_per_image: usize,
         region: (u64, u64, u64, u64, u64, u64), mip_level: u64, slice: u64,
@@ -464,6 +480,11 @@ fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
             Ok(unsafe { slice::from_raw_parts(self.pointer.as_ptr().add(offset), length) }.to_vec())
         }
     }
+    /// Stable CPU address of a shared buffer, valid until the buffer is released (Metal shared storage is persistently mapped).
+    pub fn shared_buffer_ptr(buffer: &Handle) -> Result<(NonNull<u8>, usize), Error> {
+        let lease = shared_buffer_readback(buffer)?;
+        Ok((lease.pointer, lease.length))
+    }
     pub fn shared_buffer_readback(buffer: &Handle) -> Result<SharedBufferReadback, Error> {
         #[cfg(target_vendor = "apple")]
         {
@@ -492,6 +513,7 @@ fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
         fn rays_metal_texture_create(device: *mut NativeHandle, descriptor: *const TextureDescriptor, label: *const c_char, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
         fn rays_metal_texture_info(texture: *mut NativeHandle, output: *mut i64, message: *mut *const c_char) -> i32;
         fn rays_metal_texture_read(texture: *mut NativeHandle, destination: *mut u8, destination_length: usize, bytes_per_row: usize, bytes_per_image: usize, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64, mip_level: u64, slice: u64, message: *mut *const c_char) -> i32;
+        fn rays_metal_texture_write(texture: *mut NativeHandle, source: *const u8, source_length: usize, bytes_per_row: usize, bytes_per_image: usize, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64, mip_level: u64, slice: u64, message: *mut *const c_char) -> i32;
         fn rays_metal_command_buffer_wait(buffer: *mut NativeHandle, message: *mut *const c_char) -> i32;
         fn rays_metal_command_buffer_error(buffer: *mut NativeHandle, output: *mut *const c_char) -> i32;
         fn rays_metal_presentation_command_snapshot(buffer: *mut NativeHandle, output: *mut CommandBufferDiagnostics, message: *mut *const c_char) -> i32;

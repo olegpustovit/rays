@@ -249,6 +249,15 @@ impl DriverResource for BufferResource {
     fn read_into(&self, offset: i64, destination: &mut [u8], at: usize, length: usize) -> Result<(), Error> {
         buffer_read_into(self.op, &self.entry, offset, destination, at, length)
     }
+    fn host_ptr(&self) -> Result<std::ptr::NonNull<u8>, Error> {
+        self.entry.buffer.borrow().host_ptr().ok_or_else(|| fail(self.op, ErrorKind::Unsupported, "buffer is device-local; create it with create_host_buffer"))
+    }
+    fn flush_host(&self, offset: i64, length: usize) -> Result<(), Error> {
+        if !in_range(self.entry.size, offset, length) {
+            return Err(fail(self.op, ErrorKind::InvalidArgument, "flush range is invalid"));
+        }
+        self.entry.buffer.borrow().flush_range(offset as u64, length as u64).map_err(|failure| of_vk(self.op, failure))
+    }
     fn destroy(&self) -> Result<(), Error> {
         live_add(-1);
         Ok(())
@@ -267,11 +276,14 @@ fn register_buffer(dev: &Rc<Dev>, op: &'static str, created: Result<vk::Buffer, 
 /// submit and reads go through the transfer queue; Shared reads as zeros, so it is filled like a mapped
 /// buffer is. ponytail: a host-visible tier for a buffer the host rewrites every frame and the GPU reads
 /// once, if a measurement ever shows the staging copy.
-fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
+fn create_buffer(dev: &Rc<Dev>, memory: Memory, host: bool, descriptor: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
     const OP: &str = "Ogpu_vulkan.create_buffer";
     let device = dev.device(OP)?;
-    let resource = register_buffer(dev, OP, device.buffer(descriptor.size as u64, vk::BufferKind::DeviceLocal), descriptor.size)?;
-    if memory == Memory::Shared {
+    // `host` (BufferKind::Host): host-visible memory persistently mapped by VMA, zeroed at creation, written in place.
+    // ponytail: HOST_ACCESS_RANDOM (read-back capable); a write-combined sequential-write tier if instance-ring throughput needs it.
+    let kind = if host { vk::BufferKind::Shared } else { vk::BufferKind::DeviceLocal };
+    let resource = register_buffer(dev, OP, device.buffer(descriptor.size as u64, kind), descriptor.size)?;
+    if memory == Memory::Shared && !host {
         let zeroed = resource.entry.buffer.borrow().zero().map_err(|failure| of_vk(OP, failure));
         if let Err(failure) = zeroed {
             let _ = resource.destroy();
@@ -341,6 +353,15 @@ impl DriverResource for TextureResource {
     }
     fn read_into(&self, _: i64, _: &mut [u8], _: usize, _: usize) -> Result<(), Error> {
         Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "texture reads require an admitted layout"))
+    }
+    fn write_texture(&self, write: &TextureRead, bytes: &[u8]) -> Result<(), Error> {
+        if !write.belongs_to(&self.profile) { return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "transfer belongs to another admitted texture")); }
+        let (region, texel) = (write.region(), types::texel_bytes(self.profile.format) as u32);
+        let args = vk::BlitDescriptor {
+            buffer_offset: 0, bytes_per_row: write.bytes_per_row() as u32, texel_bytes: texel, mip_level: write.mip_level() as u32,
+            x: region.x as i32, y: region.y as i32, z: region.z as i32, width: region.width as u32, height: region.height as u32, depth: region.depth as u32,
+        };
+        self.entry.texture.write(bytes, args).map_err(|failure| of_vk(TEXTURE_OP, failure))
     }
     fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> {
         let mut bytes = vec![0; read.length()];
@@ -682,6 +703,7 @@ fn generated_buffer(dev: &Rc<Dev>, generated: &mut Vec<Box<dyn DriverResource>>,
     let resource = create_buffer(
         dev,
         Memory::DeviceLocal,
+        false,
         &BufferDescriptor {
             label: Some("Vulkan ray bounds".to_owned()),
             size: bytes.len() as i64,
@@ -1627,7 +1649,7 @@ impl DriverDevice for VulkanDevice {
         }
         let memory = match descriptor.storage { StorageMode::Shared => Memory::Shared, StorageMode::Private => Memory::DeviceLocal,
             _ => return Err(fail("Ogpu_vulkan.create_buffer", ErrorKind::Unsupported, "native storage mode is unavailable in Vulkan")) };
-        create_buffer(&self.dev, memory, &descriptor.descriptor)
+        create_buffer(&self.dev, memory, descriptor.kind == ogpu_core::validation::BufferKind::Host, &descriptor.descriptor)
     }
     fn create_mapped_buffer(&self, descriptor: &AdmittedBuffer) -> Result<DriverMapped, Error> {
         if !descriptor.admitted_for(&self.capabilities) {

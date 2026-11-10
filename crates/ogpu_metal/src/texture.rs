@@ -59,6 +59,10 @@ impl Texture {
         self.0.metal.read_bytes_into(read, destination)
     }
 
+    pub(crate) fn write_bytes(&self, write: &ogpu_core::validation::TextureRead, bytes: &[u8]) -> Result<(), Error> {
+        self.0.metal.write_bytes(write, bytes)
+    }
+
     pub fn destroy(&self) -> Result<(), Error> {
         if !self.destroyed() {
             // Held elsewhere (a command buffer in flight): the last drop releases it.

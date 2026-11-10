@@ -215,6 +215,9 @@ unsafe extern "C" {
     fn rv_buffer_destroy(buffer: *mut c_void);
     fn rv_buffer_write(buffer: *mut c_void, offset: u64, data: *const c_void, length: u64) -> i32;
     fn rv_buffer_read(buffer: *mut c_void, offset: u64, data: *mut c_void, length: u64) -> i32;
+    fn rv_buffer_map(buffer: *mut c_void) -> *mut c_void;
+    fn rv_buffer_flush_range(buffer: *mut c_void, offset: u64, length: u64) -> i32;
+    fn rv_texture_write(texture:*mut c_void,bytes:*const c_void,args:*const NativeBlit)->i32;
     fn rv_buffer_flush(buffer: *mut c_void, data: *const c_void, length: u64) -> i32;
     fn rv_buffer_invalidate(buffer: *mut c_void, data: *mut c_void, length: u64) -> i32;
     fn rv_shader_create(device: *mut c_void, bytes: *const c_void, length: u64, out: *mut *mut c_void) -> i32;
@@ -504,6 +507,13 @@ impl Buffer {
         if offset.checked_add(bytes.len() as u64).is_none_or(|end|end>self.inner.size) { return Err(Error::InvalidInput("read range exceeds buffer")); }
         Error::status(unsafe { rv_buffer_read(self.inner.raw.as_ptr(),offset,bytes.as_mut_ptr().cast(),bytes.len() as u64) })
     }
+    /// Persistent host address of a `BufferKind::Shared` (host-visible, VMA-mapped) buffer; `None` for device-local buffers.
+    pub fn host_ptr(&self) -> Option<NonNull<u8>> { NonNull::new(unsafe { rv_buffer_map(self.inner.raw.as_ptr()) }.cast()) }
+    /// Flush host writes in `[offset, offset+length)` (vmaFlushAllocation; a no-op on coherent memory).
+    pub fn flush_range(&self, offset:u64, length:u64) -> Result<(),Error> {
+        if offset.checked_add(length).is_none_or(|end|end>self.inner.size) { return Err(Error::InvalidInput("flush range exceeds buffer")); }
+        Error::status(unsafe { rv_buffer_flush_range(self.inner.raw.as_ptr(),offset,length) })
+    }
     pub fn flush(&self, bytes:&[u8]) -> Result<(),Error> {
         if bytes.len() as u64>self.inner.size { return Err(Error::InvalidInput("flush range exceeds buffer")); }
         Error::status(unsafe { rv_buffer_flush(self.inner.raw.as_ptr(),bytes.as_ptr().cast(),bytes.len() as u64) })
@@ -580,6 +590,17 @@ const _: () = assert!(std::mem::size_of::<Texture>() == 56);
 struct TextureOwner{raw:NonNull<c_void>}
 impl Texture{
     pub fn descriptor(&self)->TextureDescriptor{self.descriptor}
+    /// Write a 2D rectangle (`args.buffer_offset` is ignored; rows `bytes_per_row` apart, last row needs only its pixels).
+    pub fn write(&self,bytes:&[u8],args:BlitDescriptor)->Result<(),Error>{
+        let d=self.descriptor;let mip=args.mip_level;
+        let width=d.width.checked_shr(mip).unwrap_or(0).max(1);let height=d.height.checked_shr(mip).unwrap_or(0).max(1);
+        if args.texel_bytes==0||mip>=d.mip_levels||args.bytes_per_row%args.texel_bytes!=0||args.x<0||args.y<0||args.z!=0||args.depth!=1||args.width==0||args.height==0||
+            (args.x as u32).checked_add(args.width).is_none_or(|end|end>width)||(args.y as u32).checked_add(args.height).is_none_or(|end|end>height)||
+            args.bytes_per_row<args.width.saturating_mul(args.texel_bytes)||
+            (args.bytes_per_row as u64*(args.height as u64-1)+args.width as u64*args.texel_bytes as u64)>bytes.len() as u64{return Err(Error::InvalidInput("invalid texture write layout"));}
+        let n=NativeBlit{offset:0,bytes_per_row:args.bytes_per_row,texel:args.texel_bytes,mip:mip,x:args.x,y:args.y,z:0,width:args.width,height:args.height,depth:1};
+        Error::status(unsafe{rv_texture_write(self.raw.as_ptr(),bytes.as_ptr().cast(),&n)})
+    }
     pub fn read(&self,bytes:&mut[u8],bytes_per_row:u64,texel_bytes:u32)->Result<(),Error>{
         if texel_bytes==0||bytes_per_row%texel_bytes as u64!=0||bytes_per_row<self.descriptor.width as u64*texel_bytes as u64||
             bytes_per_row.checked_mul(self.descriptor.height as u64).is_none_or(|n|n>bytes.len() as u64){return Err(Error::InvalidInput("invalid texture read layout"));}

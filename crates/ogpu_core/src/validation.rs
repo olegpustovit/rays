@@ -62,7 +62,7 @@ impl AdmittedTexture {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BufferKind { Ordinary, Mapped, Readback }
+pub enum BufferKind { Ordinary, Mapped, Readback, /** persistently host-mapped, written in place (an instance ring) */ Host }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BufferProfile {
     pub descriptor: BufferDescriptor,
@@ -304,8 +304,7 @@ pub fn admit_ordinary_texture(capabilities: &Caps, mut descriptor: TextureDescri
     let operation = OP;
     if matches!(
         descriptor.format,
-        TextureFormat::R8Unorm
-            | TextureFormat::Bgra8Unorm
+        TextureFormat::Bgra8Unorm
             | TextureFormat::Bgra8UnormSrgb
             | TextureFormat::Depth32Float
     ) {

@@ -221,6 +221,12 @@ impl Buffer {
         let operation = "Metal.Buffer.read_bytes";
         metal_sys::native::read_buffer(&self.0.raw, offset, length).map_err(|failure| sys_error(operation, failure))
     }
+    /// Persistent CPU address; Metal shared storage is unified, so no flush is needed.
+    pub fn host_ptr(&self) -> Result<std::ptr::NonNull<u8>, Error> {
+        let operation = "Metal.Buffer.host_ptr";
+        self.0.lifetime.ensure_live(operation)?;
+        metal_sys::native::shared_buffer_ptr(&self.0.raw).map(|(pointer, _)| pointer).map_err(|failure| sys_error(operation, failure))
+    }
     /// Captures the allocation, not its bytes. The caller must finish GPU writes before reading.
     /// The resulting read-only view may outlive this wrapper and never enters the main-thread API.
     pub fn owned_readback(&self) -> Result<std::sync::Arc<dyn Fn(i64, usize) -> Result<Vec<u8>, Error> + Send + Sync>, Error> {
@@ -369,6 +375,14 @@ impl Texture {
         metal_sys::native::read_texture(&self.0.raw, destination, read.length(), read.bytes_per_row(), read.bytes_per_image(),
             (o.x as u64, o.y as u64, o.z as u64, e.width as u64, e.height as u64, e.depth as u64),
             read.mip_level() as u64, read.slice() as u64).map_err(|failure| sys_error(OP, failure))
+    }
+    pub fn write_bytes(&self, write: &TextureRead, bytes: &[u8]) -> Result<(), Error> {
+        const OP: &str = "Metal.Texture.write_bytes";
+        self.validate_read_owner(OP, write)?;
+        let o = write.region().origin(); let e = write.region().extent();
+        metal_sys::native::write_texture(&self.0.raw, bytes, write.bytes_per_row(), write.bytes_per_image(),
+            (o.x as u64, o.y as u64, o.z as u64, e.width as u64, e.height as u64, e.depth as u64),
+            write.mip_level() as u64, write.slice() as u64).map_err(|failure| sys_error(OP, failure))
     }
     fn validate_read_owner(&self, operation: &str, read: &TextureRead) -> Result<(), Error> {
         // A reusable layout can outlive admission. This checks allocation retirement,
