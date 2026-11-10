@@ -244,7 +244,7 @@ pub(crate) fn crease_data(
             let mut edge_sharpness = vec![0.0; edge_count];
             if let Some(values) = &vertex_weights {
                 for vertex in 0..topology_view.vertex_points.len() {
-                    let edge = index.edge_of_vertex[vertex];
+                    let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex]);
                     if edge >= 0 {
                         let slot = &mut edge_sharpness[edge as usize];
                         *slot = fmax(*slot, values[vertex]);
@@ -257,7 +257,7 @@ pub(crate) fn crease_data(
                     for vertex in topology_view.primitive_offsets[primitive]
                         ..topology_view.primitive_offsets[primitive + 1]
                     {
-                        let edge = index.edge_of_vertex[vertex as usize];
+                        let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
                         if edge >= 0 {
                             let slot = &mut edge_sharpness[edge as usize];
                             *slot = fmax(*slot, weight);
@@ -479,7 +479,7 @@ pub(crate) fn apply_crease_input(
     }
     let mut values = vec![0.0; source_topology.vertex_points.len()];
     for vertex in 0..values.len() {
-        let edge = source_index.edge_of_vertex[vertex];
+        let edge = rdk_core::topology_index::widen(source_index.edge_of_vertex[vertex]);
         if edge >= 0 {
             values[vertex] = edge_sharpness[edge as usize];
         }

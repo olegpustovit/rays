@@ -308,16 +308,16 @@ fn reduce(
     let output_topology = if !compact && !rewire {
         source_topology_value.clone()
     } else {
-        let mut vertex_points = vec![0i64; geometry::vertex_count(geometry_value) as usize];
+        let mut vertex_points = vec![0u32; geometry::vertex_count(geometry_value) as usize];
         support::par_fill(cancel_value, params.grain, &mut vertex_points, &|vertex| {
-            Ok(point_map[source_topology.vertex_points[vertex as usize] as usize])
+            Ok(point_map[source_topology.vertex_points[vertex as usize] as usize] as u32)
         })?;
         topology::view::create_validated_shared(
             if compact { clusters.count } else { source_count as i64 },
             vertex_points,
             source_topology.primitive_offsets.clone(),
             source_topology.primitive_kinds,
-        )
+        )?
     };
     let (output_attributes, output_groups) = fuse_rules::apply(
         cancel_value,

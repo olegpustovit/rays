@@ -73,7 +73,7 @@ fn corner_deleted(
 ) -> bool {
     match owner {
         group::Owner::Point => {
-            is_selected(selection, delete_selected, view.vertex_points[vertex as usize])
+            is_selected(selection, delete_selected, i64::from(view.vertex_points[vertex as usize]))
         }
         group::Owner::Vertex => is_selected(selection, delete_selected, vertex),
         group::Owner::Primitive => false,
@@ -88,8 +88,8 @@ fn primitive_retained_count(
     view: &topology::view::View,
     primitive: usize,
 ) -> i64 {
-    let first = view.primitive_offsets[primitive];
-    let last = view.primitive_offsets[primitive + 1];
+    let first = i64::from(view.primitive_offsets[primitive]);
+    let last = i64::from(view.primitive_offsets[primitive + 1]);
     if owner == group::Owner::Primitive {
         if is_selected(selection, delete_selected, primitive as i64) { 0 } else { last - first }
     } else {
@@ -128,7 +128,7 @@ pub(crate) fn build_plan(
         cancel::poll(cancel_value, primitive as i64, 1023)?;
         let count =
             primitive_retained_count(owner, selection, delete_selected, policy, &view, primitive);
-        let source_count = view.primitive_offsets[primitive + 1] - view.primitive_offsets[primitive];
+        let source_count = i64::from(view.primitive_offsets[primitive + 1] - view.primitive_offsets[primitive]);
         retained_counts[primitive] = count;
         if count > 0 {
             retained_primitives += 1;
@@ -143,15 +143,15 @@ pub(crate) fn build_plan(
     }
     let mut vertex_map = vec![0i64; retained_vertices as usize];
     let mut primitive_map = vec![0i64; retained_primitives];
-    let mut primitive_offsets = vec![0i64; retained_primitives + 1];
+    let mut primitive_offsets = vec![0u32; retained_primitives + 1];
     let mut primitive_kinds = vec![0u8; retained_primitives];
     let mut vertex_at = 0usize;
     let mut primitive_at = 0usize;
     for primitive in 0..primitive_count {
         cancel::poll(cancel_value, primitive as i64, 1023)?;
         if retained_counts[primitive] > 0 {
-            let first = view.primitive_offsets[primitive];
-            let last = view.primitive_offsets[primitive + 1];
+            let first = i64::from(view.primitive_offsets[primitive]);
+            let last = i64::from(view.primitive_offsets[primitive + 1]);
             primitive_map[primitive_at] = primitive as i64;
             primitive_kinds[primitive_at] = view.primitive_kinds[primitive];
             for vertex in first..last {
@@ -164,7 +164,7 @@ pub(crate) fn build_plan(
                 }
             }
             primitive_at += 1;
-            primitive_offsets[primitive_at] = vertex_at as i64;
+            primitive_offsets[primitive_at] = vertex_at as u32;
         }
     }
     if vertex_at as i64 != retained_vertices {
@@ -196,7 +196,7 @@ pub(crate) fn build_plan(
             point_map.push(point as i64);
         }
     }
-    let mut vertex_points = vec![0i64; retained_vertices as usize];
+    let mut vertex_points = vec![0u32; retained_vertices as usize];
     for vertex in 0..retained_vertices as usize {
         cancel::poll(cancel_value, vertex as i64, 16_383)?;
         let old_point = view.vertex_points[vertex_map[vertex] as usize];
@@ -204,14 +204,14 @@ pub(crate) fn build_plan(
         if point < 0 {
             return Err(fail("retained topology references a deleted point"));
         }
-        vertex_points[vertex] = point;
+        vertex_points[vertex] = point as u32;
     }
     let output_topology = topology::view::create_validated_owned(
         retained_points,
         vertex_points,
         primitive_offsets,
         primitive_kinds,
-    );
+    )?;
     let point_identity = point_map.len() == source_points;
     let unchanged = point_identity
         && vertex_map.len() == view.vertex_points.len()
@@ -389,7 +389,7 @@ pub fn primitive_partitions(
             let piece = piece as usize;
             primitive_maps[piece].push(primitive as i64);
             for vertex in view.primitive_offsets[primitive]..view.primitive_offsets[primitive + 1] {
-                vertex_maps[piece].push(vertex);
+                vertex_maps[piece].push(i64::from(vertex));
             }
         }
     }
@@ -397,7 +397,7 @@ pub fn primitive_partitions(
         .iter()
         .map(|vertices| {
             let mut candidates: Vec<i64> =
-                vertices.iter().map(|&vertex| view.vertex_points[vertex as usize]).collect();
+                vertices.iter().map(|&vertex| i64::from(view.vertex_points[vertex as usize])).collect();
             candidates.sort_unstable();
             candidates.dedup();
             candidates
@@ -409,7 +409,7 @@ pub fn primitive_partitions(
         let point_map = &point_maps[piece];
         let vertex_map = &vertex_maps[piece];
         let primitive_map = &primitive_maps[piece];
-        let mut primitive_offsets = vec![0i64; primitive_map.len() + 1];
+        let mut primitive_offsets = vec![0u32; primitive_map.len() + 1];
         let mut primitive_kinds = vec![0u8; primitive_map.len()];
         for (output, &source) in primitive_map.iter().enumerate() {
             let source = source as usize;
@@ -418,21 +418,21 @@ pub fn primitive_partitions(
                 - view.primitive_offsets[source];
             primitive_kinds[output] = view.primitive_kinds[source];
         }
-        let mut vertex_points = vec![0i64; vertex_map.len()];
+        let mut vertex_points = vec![0u32; vertex_map.len()];
         for (output, &source_vertex) in vertex_map.iter().enumerate() {
-            let source_point = view.vertex_points[source_vertex as usize];
+            let source_point = i64::from(view.vertex_points[source_vertex as usize]);
             let point = lower_bound(point_map, source_point);
             if point >= point_map.len() || point_map[point] != source_point {
                 return Err(fail("piece primitive references a point outside its point partition"));
             }
-            vertex_points[output] = point as i64;
+            vertex_points[output] = point as u32;
         }
         let output_topology = topology::view::create_validated_owned(
             point_map.len() as i64,
             vertex_points,
             primitive_offsets,
             primitive_kinds,
-        );
+        )?;
         let point_identity = point_map.len() == source_points;
         let unchanged = point_identity
             && vertex_map.len() == view.vertex_points.len()

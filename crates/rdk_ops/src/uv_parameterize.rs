@@ -53,7 +53,7 @@ fn edge_endpoint_corners(
     local: i64,
 ) -> Result<(i64, i64), error::T> {
     let corner = index_view.edge_vertices[(index_view.edge_offsets[edge as usize] + local) as usize];
-    let next = index_view.next_vertex[corner as usize];
+    let next = rdk_core::topology_index::widen(index_view.next_vertex[corner as usize]);
     if next < 0 {
         return Err(fail("UV parameterization requires polygon edges"));
     }

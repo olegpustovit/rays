@@ -1011,7 +1011,7 @@ pub(crate) fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, 
                     let source_corner = edge_source_corner[vertex as usize];
                     if source_corner >= 0 {
                         let source_edge = topology_index::edge_of_vertex(&source_index, source_corner)?;
-                        let target_edge = target_view.edge_of_vertex[vertex as usize];
+                        let target_edge = rdk_core::topology_index::widen(target_view.edge_of_vertex[vertex as usize]);
                         if source_edge >= 0 && target_edge >= 0 && edge_group::mem(source_edge, source_group) {
                             edge_group::builder::set(&mut builder, target_edge, true)?;
                         }

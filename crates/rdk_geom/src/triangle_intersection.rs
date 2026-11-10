@@ -523,8 +523,8 @@ pub fn events_into(
 ) -> Result<usize, error::T> {
     let left_vertices = &left.topology.vertex_points;
     let right_vertices = &right.topology.vertex_points;
-    let corner = |surface: &Surface, vertices: &[i64], triangle: i64, local: i64| {
-        vertices[surface_index::view::triangle_vertex(&surface.index, triangle, local) as usize]
+    let corner = |surface: &Surface, vertices: &[u32], triangle: i64, local: i64| {
+        i64::from(vertices[surface_index::view::triangle_vertex(&surface.index, triangle, local) as usize])
     };
     events_points_into(
         scratch,

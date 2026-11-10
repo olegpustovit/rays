@@ -192,7 +192,7 @@ fn remap_edge_groups_from_index(
             cancel::poll(cancel_value, edge, 4095).map_err(|_| cancelled_error())?;
             let first = target.edge_offsets[edge as usize];
             let target_vertex = target.edge_vertices[first as usize];
-            let source_edge = source.edge_of_vertex[target_vertex as usize];
+            let source_edge = rdk_core::topology_index::widen(source.edge_of_vertex[target_vertex as usize]);
             source_edge >= 0 && edge_group::mem(source_edge, item)
         }))?);
     }
@@ -241,11 +241,11 @@ fn remap_healed_edge_groups(
                 let mut source_vertex = source_first;
                 let mut traversed = 0_usize;
                 while !found && source_vertex != source_last && traversed <= source.next_vertex.len() {
-                    let source_edge = source.edge_of_vertex[source_vertex as usize];
+                    let source_edge = rdk_core::topology_index::widen(source.edge_of_vertex[source_vertex as usize]);
                     if source_edge >= 0 && edge_group::mem(source_edge, item) {
                         found = true;
                     }
-                    source_vertex = source.next_vertex[source_vertex as usize];
+                    source_vertex = rdk_core::topology_index::widen(source.next_vertex[source_vertex as usize]);
                     traversed += 1;
                 }
                 incidence += 1;
@@ -726,7 +726,7 @@ fn orient_polygons(
                     let first = view.primitive_offsets[current as usize];
                     let last = view.primitive_offsets[current as usize + 1];
                     for vertex in first..last {
-                        let edge = index_view.edge_of_vertex[vertex as usize];
+                        let edge = rdk_core::topology_index::widen(index_view.edge_of_vertex[vertex as usize]);
                         if edge >= 0 && invalid_edge < 0 && contradiction < 0 {
                             let edge_first = index_view.edge_offsets[edge as usize];
                             let edge_last = index_view.edge_offsets[edge as usize + 1];
@@ -877,8 +877,8 @@ fn split_points_on_edge_ends(
             let mut representative_b = -1_i64;
             for at in first..last {
                 let vertex = iv.edge_vertices[at as usize];
-                let vertex_a = if view.vertex_points[vertex as usize] == a { vertex } else { iv.next_vertex[vertex as usize] };
-                let vertex_b = if view.vertex_points[vertex as usize] == b { vertex } else { iv.next_vertex[vertex as usize] };
+                let vertex_a = if view.vertex_points[vertex as usize] == a { vertex } else { rdk_core::topology_index::widen(iv.next_vertex[vertex as usize]) };
+                let vertex_b = if view.vertex_points[vertex as usize] == b { vertex } else { rdk_core::topology_index::widen(iv.next_vertex[vertex as usize]) };
                 if flags & 1 == 0 {
                     if representative_a < 0 {
                         representative_a = vertex_a;
@@ -1017,7 +1017,7 @@ fn cusp_polygons(
                     let mut found = false;
                     let mut vertex = first;
                     while !found && vertex < last {
-                        let edge = iv.edge_of_vertex[vertex as usize];
+                        let edge = rdk_core::topology_index::widen(iv.edge_of_vertex[vertex as usize]);
                         if edge >= 0 {
                             let mut at = iv.edge_offsets[edge as usize];
                             let finish = iv.edge_offsets[edge as usize + 1];
@@ -1805,7 +1805,7 @@ fn facet_primitives_of_selection(
             group::init(Some(grain), group::Owner::Primitive, "__facet_from_edges", primitive_count, &|primitive| Ok({
                 cancel::poll(cancel_value, primitive, 4095).map_err(|_| cancelled_error())?;
                 (view.primitive_offsets[primitive as usize]..view.primitive_offsets[primitive as usize + 1]).any(|vertex| {
-                    let edge = incidence.edge_of_vertex[vertex as usize];
+                    let edge = rdk_core::topology_index::widen(incidence.edge_of_vertex[vertex as usize]);
                     edge >= 0 && edge_group::mem(edge, edges)
                 })
             }))?

@@ -120,8 +120,8 @@ fn link_condition(
     let v0 = index.edge_vertices[u(first)];
     let v1 = index.edge_vertices[u(first + 1)];
     let opposite = |vertex: i64| {
-        let next = index.next_vertex[u(vertex)];
-        topology.vertex_points[u(index.next_vertex[u(next)])]
+        let next = rdk_core::topology_index::widen(index.next_vertex[u(vertex)]);
+        topology.vertex_points[u(rdk_core::topology_index::widen(index.next_vertex[u(next)]))]
     };
     let c = opposite(v0);
     let d = opposite(v1);
@@ -954,7 +954,7 @@ fn rounded_sliver_edges(
                     degenerate_count += 1;
                     let first = topology.primitive_offsets[u(primitive)];
                     for local in 0..3 {
-                        let edge = index.edge_of_vertex[u(first + local)];
+                        let edge = rdk_core::topology_index::widen(index.edge_of_vertex[u(first + local)]);
                         if edge >= 0 {
                             support::bits::set(&mut bits, edge);
                         }
@@ -1039,7 +1039,7 @@ fn rounded_self_contact_edges(
                     repairable += 1;
                     let first = topology.primitive_offsets[u(primitive)];
                     for local in 0..3 {
-                        let edge = index.edge_of_vertex[u(first + local)];
+                        let edge = rdk_core::topology_index::widen(index.edge_of_vertex[u(first + local)]);
                         if edge >= 0 {
                             let length = edge_length(&positions, index.edge_a[u(edge)], index.edge_b[u(edge)]);
                             if length <= minimum {
@@ -1912,7 +1912,7 @@ pub fn detriangulate(
                 let first_vertex = index.edge_vertices[u(first)];
                 let second_vertex = index.edge_vertices[u(first + 1)];
                 let opposite = |vertex: i64| {
-                    topology.vertex_points[u(index.next_vertex[u(index.next_vertex[u(vertex)])])]
+                    topology.vertex_points[u(rdk_core::topology_index::widen(index.next_vertex[u(index.next_vertex[u(vertex)])]))]
                 };
                 let a = index.edge_a[u(edge)];
                 let b = index.edge_b[u(edge)];
@@ -2002,7 +2002,7 @@ pub fn detriangulate(
                         let first = topology.primitive_offsets[u(primitive)];
                         let last = topology.primitive_offsets[u(primitive + 1)];
                         for vertex in first..last {
-                            let edge = index.edge_of_vertex[u(vertex)];
+                            let edge = rdk_core::topology_index::widen(index.edge_of_vertex[u(vertex)]);
                             if edge >= 0 && !edge_group::mem(edge, &selected) {
                                 let mut internal = false;
                                 for incident in index.edge_offsets[u(edge)]..index.edge_offsets[u(edge + 1)] {

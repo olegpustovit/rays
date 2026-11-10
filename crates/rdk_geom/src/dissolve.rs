@@ -74,11 +74,11 @@ pub mod output {
         }
     }
 
-    pub(crate) fn add(value: &mut T, source: i64, kind: PrimitiveKind, corners: &[i64], source_points: &[i64]) {
+    pub(crate) fn add(value: &mut T, source: i64, kind: PrimitiveKind, corners: &[i64], source_points: &[u32]) {
         let minimum = if kind == PrimitiveKind::OpenPolyline { 2 } else { 3 };
         if corners.len() >= minimum {
             for &vertex in corners {
-                int_buffer::add(&mut value.points, source_points[vertex as usize]);
+                int_buffer::add(&mut value.points, i64::from(source_points[vertex as usize]));
                 int_buffer::add(&mut value.vertices, vertex);
             }
             value.kinds.push(kind);
@@ -202,7 +202,7 @@ fn rotate(value: &[i64], at: usize) -> Vec<i64> {
 
 fn find_point(view: &topology::view::View, corners: &[i64], point: i64) -> i64 {
     for (index, &vertex) in corners.iter().enumerate() {
-        if view.vertex_points[vertex as usize] == point {
+        if i64::from(view.vertex_points[vertex as usize]) == point {
             return index as i64;
         }
     }
@@ -229,7 +229,7 @@ fn bridge_loops(
         let mut edge = 0usize;
         while found_loop < 0 && edge < index.edge_a.len() {
             if selected(selected_edges, edge) {
-                let (a, b) = (index.edge_a[edge], index.edge_b[edge]);
+                let (a, b) = (i64::from(index.edge_a[edge]), i64::from(index.edge_b[edge]));
                 let ca = find_point(view, &current, a);
                 let cb = find_point(view, &current, b);
                 let mut candidate = 0usize;
@@ -344,10 +344,10 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
             let first = index.edge_offsets[edge] as usize;
             let last = index.edge_offsets[edge + 1] as usize;
             if last - first == 2 {
-                let left_vertex = index.edge_vertices[first];
-                let right_vertex = index.edge_vertices[first + 1];
-                let left_next = index.next_vertex[left_vertex as usize];
-                let right_next = index.next_vertex[right_vertex as usize];
+                let left_vertex = i64::from(index.edge_vertices[first]);
+                let right_vertex = i64::from(index.edge_vertices[first + 1]);
+                let left_next = rdk_core::topology_index::widen(index.next_vertex[left_vertex as usize]);
+                let right_next = rdk_core::topology_index::widen(index.next_vertex[right_vertex as usize]);
                 if point_of_vertex(left_vertex) != point_of_vertex(right_next)
                     || point_of_vertex(left_next) != point_of_vertex(right_vertex)
                 {
@@ -389,7 +389,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
         let primitive = index.primitive_of_vertex[vertex] as usize;
         if view.primitive_kinds[primitive] == 0 {
             let root = parent.parent[primitive] as usize;
-            let edge = index.edge_of_vertex[vertex];
+            let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex]);
             if component_selected[root] && edge >= 0 && !selected(&selected_edges, edge as usize) {
                 candidate[vertex] = true;
                 component_vertices[root].push(vertex as i64);
@@ -397,7 +397,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
         }
     }
     let next_boundary = |vertex: usize| -> Result<i64, error::T> {
-        let mut current = index.next_vertex[vertex];
+        let mut current = rdk_core::topology_index::widen(index.next_vertex[vertex]);
         let mut steps = 0usize;
         while current >= 0 && selected(&selected_edges, index.edge_of_vertex[current as usize] as usize) {
             steps += 1;
@@ -410,11 +410,11 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
             if last - first == 1 {
                 current = -1;
             } else {
-                let opposite = index.opposite_vertex[current as usize];
+                let opposite = rdk_core::topology_index::widen(index.opposite_vertex[current as usize]);
                 if opposite < 0 {
                     return Err(fail("selected edge has no manifold opposite"));
                 }
-                current = index.next_vertex[opposite as usize];
+                current = rdk_core::topology_index::widen(index.next_vertex[opposite as usize]);
             }
         }
         Ok(current)
@@ -466,8 +466,8 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
         cancel::poll(cancel_value, primitive as i64, 1023)?;
         let root = parent.parent[primitive] as usize;
         if !component_selected[root] {
-            let first = view.primitive_offsets[primitive];
-            let last = view.primitive_offsets[primitive + 1];
+            let first = i64::from(view.primitive_offsets[primitive]);
+            let last = i64::from(view.primitive_offsets[primitive + 1]);
             let corners: Vec<i64> = (first..last).collect();
             let kind = topology::primitive_kind(topology_value, primitive as i64)?;
             output::add(&mut output, primitive as i64, kind, &corners, &view.vertex_points);
@@ -493,7 +493,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
                         if !closed {
                             let last = corners.last().copied();
                             if let Some(last) = last {
-                                corners.push(index.next_vertex[last as usize]);
+                                corners.push(rdk_core::topology_index::widen(index.next_vertex[last as usize]));
                             }
                         }
                         if params.remove_inline_points {
@@ -544,8 +544,8 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
     }
     let output_topology = topology::create_owned(
         view.point_count,
-        output.points.values,
-        output.offsets.values,
+        topology::narrow("Dissolve", &output.points.values).map_err(recode)?,
+        topology::narrow("Dissolve", &output.offsets.values).map_err(recode)?,
         output.kinds,
     )
     .map_err(recode)?;
@@ -779,13 +779,13 @@ mod tests {
         let foreign = manifold_edges(&ring());
         assert_eq!(code(run(&Params { edges: Some(foreign), ..params() }, &source)), "invalid_topology");
 
-        let malformed = |vertex_points: &[i64]| {
+        let malformed = |vertex_points: &[u32]| {
             geom(
                 &[0., 1., 0., 1., 0.5],
                 &[0., 0., 1., 1., 2.],
                 &[0.; 5],
                 vertex_points,
-                &(0..=(vertex_points.len() / 3) as i64).map(|p| p * 3).collect::<Vec<_>>(),
+                &(0..=(vertex_points.len() / 3) as u32).map(|p| p * 3).collect::<Vec<_>>(),
                 None,
             )
         };

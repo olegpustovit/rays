@@ -247,12 +247,12 @@ fn shared_plan(
                     left[at] = vertex;
                     right[at] = vertex;
                     old[at] = true;
-                    let edge = index.edge_of_vertex[vertex as usize];
+                    let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
                     if edge >= 0 {
                         source_edge[at] = edge;
                         let midpoint = output as usize;
                         output += 1;
-                        let next = index.next_vertex[vertex as usize];
+                        let next = rdk_core::topology_index::widen(index.next_vertex[vertex as usize]);
                         if next < 0 {
                             return Err(fail("curve edge has no following corner"));
                         }
@@ -345,13 +345,13 @@ fn independent_plan(
             vertex_left[old] = vertex;
             vertex_right[old] = vertex;
             vertex_old[old] = true;
-            let edge = index.edge_of_vertex[vertex as usize];
+            let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
             if edge >= 0 {
                 source_edge_of_output_vertex[old] = edge;
                 let midpoint = output as usize;
                 output += 1;
                 point_offsets[midpoint + 1] = point_offsets[midpoint] + 2;
-                let next = index.next_vertex[vertex as usize];
+                let next = rdk_core::topology_index::widen(index.next_vertex[vertex as usize]);
                 if next < 0 {
                     return Err(fail("curve edge has no following corner"));
                 }
@@ -407,7 +407,7 @@ fn independent_plan(
                         sources[at] = view.vertex_points[vertex as usize];
                         weights[at] = 1.0;
                     }
-                    let next = index.next_vertex[vertex as usize];
+                    let next = rdk_core::topology_index::widen(index.next_vertex[vertex as usize]);
                     if next >= 0 {
                         let midpoint_at = (point_offsets[output as usize] - base) as usize;
                         output += 1;
@@ -616,7 +616,7 @@ fn remap_edge_group(
         cancel::poll(cancel_value, vertex as i64, 16_383)?;
         let source_edge = plan.source_edge_of_output_vertex[vertex];
         if source_edge >= 0 && edge_group::mem(source_edge, value) {
-            let output_edge = output_view.edge_of_vertex[vertex];
+            let output_edge = rdk_core::topology_index::widen(output_view.edge_of_vertex[vertex]);
             if output_edge < 0 {
                 return Err(fail("curve child edge ancestry is incomplete"));
             }

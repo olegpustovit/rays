@@ -253,7 +253,7 @@ fn remap_edge_groups(
     for vertex in 0..source_edge_of_vertex.len() {
         cancel::poll(cancel_value, vertex as i64, 4095)?;
         let source_edge = source_edge_of_vertex[vertex];
-        let target_edge = target.edge_of_vertex[vertex];
+        let target_edge = rdk_core::topology_index::widen(target.edge_of_vertex[vertex]);
         if source_edge >= 0 && target_edge >= 0 {
             let previous = source_of_target[target_edge as usize];
             if previous >= 0 && previous != source_edge {
@@ -384,7 +384,7 @@ fn edge_remove_fast(
         if topology.primitive_kinds[pu] == OPEN_POLYLINE {
             let mut in_run = false;
             for vertex in first..last {
-                if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] > 0 {
+                if rdk_core::topology_index::widen(index.next_vertex[vertex as usize]) >= 0 && edge_parts[vertex as usize] > 0 {
                     if !in_run {
                         fragments += 1;
                         in_run = true;
@@ -396,7 +396,7 @@ fn edge_remove_fast(
         } else {
             for vertex in first..last {
                 if edge_parts[vertex as usize] > 0 {
-                    let previous = index.previous_vertex[vertex as usize];
+                    let previous = rdk_core::topology_index::widen(index.previous_vertex[vertex as usize]);
                     if previous < 0 || edge_parts[previous as usize] == 0 {
                         fragments += 1;
                     }
@@ -460,7 +460,7 @@ fn edge_remove_fast(
                 };
                 if topology.primitive_kinds[pu] == OPEN_POLYLINE {
                     for vertex in first..last {
-                        if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] > 0 {
+                        if rdk_core::topology_index::widen(index.next_vertex[vertex as usize]) >= 0 && edge_parts[vertex as usize] > 0 {
                             if !state.active {
                                 begin(&mut state, vertex);
                             }
@@ -473,7 +473,7 @@ fn edge_remove_fast(
                 } else {
                     let mut start = -1_i64;
                     for vertex in first..last {
-                        let previous = index.previous_vertex[vertex as usize];
+                        let previous = rdk_core::topology_index::widen(index.previous_vertex[vertex as usize]);
                         if start < 0
                             && edge_parts[vertex as usize] > 0
                             && (previous < 0 || edge_parts[previous as usize] == 0)
@@ -543,7 +543,7 @@ fn edge_remove_fast(
                         let target_vertex = (output + vertex - source_first) as usize;
                         points[target_vertex] = topology.vertex_points[vertex as usize];
                         maps[target_vertex] = vertex;
-                        edge_of_vertex[target_vertex] = index.edge_of_vertex[vertex as usize];
+                        edge_of_vertex[target_vertex] = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
                     }
                 } else {
                     let start = fragment_start[tu];
@@ -560,7 +560,7 @@ fn edge_remove_fast(
                         points[slot] = topology.vertex_points[source_vertex as usize];
                         maps[slot] = source_vertex;
                         if local < edges {
-                            edge_of_vertex[slot] = index.edge_of_vertex[source_vertex as usize];
+                            edge_of_vertex[slot] = rdk_core::topology_index::widen(index.edge_of_vertex[source_vertex as usize]);
                         }
                     }
                     let size = edges + 1;
@@ -628,7 +628,7 @@ impl Samples<'_> {
         clone: bool,
     ) {
         let sv = source_vertex as usize;
-        let next = source.index.next_vertex[sv];
+        let next = rdk_core::topology_index::widen(source.index.next_vertex[sv]);
         let parts = edge_parts[sv];
         let crossing = edge_cut_weight[sv];
         let weight = if crossing >= 0.0 && parts == 2 {
@@ -751,12 +751,12 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                 cancel::poll(cancel_value, vertex, 4095)?;
                 let slot = (vertex - first) as usize;
                 let vu = vertex as usize;
-                let next = index.next_vertex[vu];
+                let next = rdk_core::topology_index::widen(index.next_vertex[vu]);
                 if next < 0 {
                     continue;
                 }
                 let primitive = index.primitive_of_vertex[vu];
-                let edge = index.edge_of_vertex[vu];
+                let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vu]);
                 let excluded = !selected(primitives, primitive)
                     || match cut_edges {
                         Some(selection) if element == Element::PolyCutEdges => !edge_group::mem(edge, selection),
@@ -879,8 +879,8 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     let mut vertex_break = vec![0_u8; vc];
     support::par_fill(cancel_value, grain, &mut vertex_break, &|vertex| {
         let vu = vertex as usize;
-        let next = index.next_vertex[vu];
-        let previous = index.previous_vertex[vu];
+        let next = rdk_core::topology_index::widen(index.next_vertex[vu]);
+        let previous = rdk_core::topology_index::widen(index.previous_vertex[vu]);
         let mut breaks = false;
         if next >= 0 || previous >= 0 {
             match element {
@@ -905,7 +905,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         let mut updated = vec![0_i64; vc];
         support::par_fill(cancel_value, grain, &mut updated, &|vertex| {
             let vu = vertex as usize;
-            let next = index.next_vertex[vu];
+            let next = rdk_core::topology_index::widen(index.next_vertex[vu]);
             Ok(if next >= 0 {
                 match strategy {
                     Strategy::PolyCutCut => 1,
@@ -927,14 +927,14 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
             let first = topology.primitive_offsets[primitive as usize];
             let last = topology.primitive_offsets[primitive as usize + 1];
             for vertex in first..last {
-                if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] != 1 {
+                if rdk_core::topology_index::widen(index.next_vertex[vertex as usize]) >= 0 && edge_parts[vertex as usize] != 1 {
                     changed = true;
                 }
             }
             if !changed {
                 for vertex in first..last {
-                    let previous = index.previous_vertex[vertex as usize];
-                    let next = index.next_vertex[vertex as usize];
+                    let previous = rdk_core::topology_index::widen(index.previous_vertex[vertex as usize]);
+                    let next = rdk_core::topology_index::widen(index.next_vertex[vertex as usize]);
                     if previous >= 0
                         && next >= 0
                         && edge_parts[previous as usize] > 0
@@ -1013,7 +1013,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                         } else if !closed && vertex == first {
                             1
                         } else {
-                            let previous = index.previous_vertex[vertex as usize];
+                            let previous = rdk_core::topology_index::widen(index.previous_vertex[vertex as usize]);
                             if previous < 0 || edge_parts[previous as usize] == 0 {
                                 1
                             } else if vertex_break[vertex as usize] != 0 {
@@ -1189,7 +1189,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                         samples.point_right[output] = point;
                         samples.vertex_left[output] = source_vertex;
                         samples.vertex_right[output] = source_vertex;
-                        edge_of_vertex[output] = index.edge_of_vertex[source_vertex as usize];
+                        edge_of_vertex[output] = rdk_core::topology_index::widen(index.edge_of_vertex[source_vertex as usize]);
                     }
                 } else {
                     let first_segment = fragment_first[tu];
@@ -1205,7 +1205,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                         let source_vertex = segment_vertex[segment as usize];
                         let part = segment_part[segment as usize];
                         let output = (output_first + local) as usize;
-                        edge_of_vertex[output] = index.edge_of_vertex[source_vertex as usize];
+                        edge_of_vertex[output] = rdk_core::topology_index::widen(index.edge_of_vertex[source_vertex as usize]);
                         samples.write_sample(&source, &edge_parts, &edge_cut_weight, output + 1, source_vertex, part, true, false);
                     }
                     let size = count + 1;

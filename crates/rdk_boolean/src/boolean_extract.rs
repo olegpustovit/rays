@@ -413,10 +413,10 @@ fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
 
 fn native_edge(view: &topology_index::view::View, primitive: i64, first: i64, second: i64) -> i64 {
     let (f, s) = (first as usize, second as usize);
-    if view.primitive_of_vertex[f] == primitive && view.next_vertex[f] == second {
-        view.edge_of_vertex[f]
-    } else if view.primitive_of_vertex[s] == primitive && view.next_vertex[s] == first {
-        view.edge_of_vertex[s]
+    if view.primitive_of_vertex[f] == primitive && rdk_core::topology_index::widen(view.next_vertex[f]) == second {
+        rdk_core::topology_index::widen(view.edge_of_vertex[f])
+    } else if view.primitive_of_vertex[s] == primitive && rdk_core::topology_index::widen(view.next_vertex[s]) == first {
+        rdk_core::topology_index::widen(view.edge_of_vertex[s])
     } else {
         -1
     }

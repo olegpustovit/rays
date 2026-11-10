@@ -1477,7 +1477,7 @@ mod tests {
             );
             let creaseweight: Vec<f64> = (0..geometry::vertex_count(&base))
                 .map(|vertex| {
-                    let edge = index.edge_of_vertex[vertex as usize];
+                    let edge = rdk_core::topology_index::widen(index.edge_of_vertex[vertex as usize]);
                     if edge < 0 {
                         return 0.0;
                     }
@@ -1579,7 +1579,7 @@ mod tests {
         let high_right = topology_index::find_edge(&mask_index_value, 6, 10).unwrap();
         let mask_weights: Vec<f64> = (0..geometry::vertex_count(&mask_base))
             .map(|vertex| {
-                let edge = mask_index.edge_of_vertex[vertex as usize];
+                let edge = rdk_core::topology_index::widen(mask_index.edge_of_vertex[vertex as usize]);
                 if edge == target_edge {
                     0.5
                 } else if edge == high_left || edge == high_right {
@@ -1953,7 +1953,7 @@ mod tests {
         );
         let source_edge = shared - geometry::point_count(&triangles);
         let creaseweights: Vec<f64> = (0..geometry::vertex_count(&triangles))
-            .map(|vertex| if source_index.edge_of_vertex[vertex as usize] == source_edge { 1.0 } else { 0.0 })
+            .map(|vertex| if rdk_core::topology_index::widen(source_index.edge_of_vertex[vertex as usize]) == source_edge { 1.0 } else { 0.0 })
             .collect();
         let creased = geometry::with_attribute(
             float_attr(Owner::Vertex, "creaseweight", creaseweights),
@@ -2249,7 +2249,7 @@ mod tests {
         let crease_edge = topology_index::find_edge(&source_index_value, 5, 6).unwrap();
         let source_index = topology_index::view::view(&source_index_value);
         let crease_weights: Vec<f64> = (0..geometry::vertex_count(&input))
-            .map(|vertex| if source_index.edge_of_vertex[vertex as usize] == crease_edge { 1.0 } else { 0.0 })
+            .map(|vertex| if rdk_core::topology_index::widen(source_index.edge_of_vertex[vertex as usize]) == crease_edge { 1.0 } else { 0.0 })
             .collect();
         let creased_input =
             geometry::with_attribute(float_attr(Owner::Vertex, "creaseweight", crease_weights), &input).unwrap();

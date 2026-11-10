@@ -75,7 +75,7 @@ pub fn primitive_features(
     let mut offsets = vec![0_i64; entity_count as usize + 1];
     for primitive in 0..entity_count as usize {
         cancel::poll(cancel_value, primitive as i64, 4095)?;
-        let corners = topology_view.primitive_offsets[primitive + 1] - topology_view.primitive_offsets[primitive];
+        let corners = i64::from(topology_view.primitive_offsets[primitive + 1] - topology_view.primitive_offsets[primitive]);
         let count = match topology_view.primitive_kinds[primitive] {
             0 => corners - 2,
             1 => corners - 1,
@@ -116,8 +116,8 @@ pub fn primitive_features(
                     continue;
                 }
                 let p = primitive as usize;
-                let first = topology_view.primitive_offsets[p];
-                let last = topology_view.primitive_offsets[p + 1];
+                let first = i64::from(topology_view.primitive_offsets[p]);
+                let last = i64::from(topology_view.primitive_offsets[p + 1]);
                 let at = (offsets[p] - base) as usize;
                 match topology_view.primitive_kinds[p] {
                     0 => {
@@ -131,9 +131,9 @@ pub fn primitive_features(
                                 let feature = at + local as usize;
                                 chunk.entities[feature] = primitive;
                                 chunk.kinds[feature] = TRIANGLE;
-                                chunk.a[feature] = topology_view.vertex_points[va as usize];
-                                chunk.b[feature] = topology_view.vertex_points[vb as usize];
-                                chunk.c[feature] = topology_view.vertex_points[vc as usize];
+                                chunk.a[feature] = i64::from(topology_view.vertex_points[va as usize]);
+                                chunk.b[feature] = i64::from(topology_view.vertex_points[vb as usize]);
+                                chunk.c[feature] = i64::from(topology_view.vertex_points[vc as usize]);
                             },
                         );
                         if let Err(problem) = result {
@@ -147,14 +147,14 @@ pub fn primitive_features(
                         for local in 0..(last - first - 1).max(0) {
                             let feature = at + local as usize;
                             chunk.entities[feature] = primitive;
-                            chunk.a[feature] = topology_view.vertex_points[(first + local) as usize];
-                            chunk.b[feature] = topology_view.vertex_points[(first + local + 1) as usize];
+                            chunk.a[feature] = i64::from(topology_view.vertex_points[(first + local) as usize]);
+                            chunk.b[feature] = i64::from(topology_view.vertex_points[(first + local + 1) as usize]);
                         }
                         if kind == 2 {
                             let feature = (offsets[p + 1] - 1 - base) as usize;
                             chunk.entities[feature] = primitive;
-                            chunk.a[feature] = topology_view.vertex_points[(last - 1) as usize];
-                            chunk.b[feature] = topology_view.vertex_points[first as usize];
+                            chunk.a[feature] = i64::from(topology_view.vertex_points[(last - 1) as usize]);
+                            chunk.b[feature] = i64::from(topology_view.vertex_points[first as usize]);
                         }
                     }
                 }
@@ -207,8 +207,8 @@ pub fn edge_features(
     let offsets: Vec<i64> = (0..=entity_count).collect();
     let entities: Vec<i64> = (0..entity_count).collect();
     let kinds = vec![SEGMENT; entity_count as usize];
-    let a = reverse.edge_a.to_vec();
-    let b = reverse.edge_b.to_vec();
+    let a: Vec<i64> = reverse.edge_a.iter().map(|&p| i64::from(p)).collect();
+    let b: Vec<i64> = reverse.edge_b.iter().map(|&p| i64::from(p)).collect();
     let c = vec![-1_i64; entity_count as usize];
     for edge in 0..entity_count as usize {
         cancel::poll(cancel_value, edge as i64, 4095)?;
@@ -632,10 +632,10 @@ pub fn nearest_entities_with_distances(
 mod tests {
     use super::*;
 
-    fn geometry_of(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, vertices: Vec<i64>, offsets: Vec<i64>, kinds: Vec<u8>) -> geometry::T {
+    fn geometry_of(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, vertices: Vec<u32>, offsets: Vec<u32>, kinds: Vec<u8>) -> geometry::T {
         let count = x.len() as i64;
         let positions = packed::float3::view::of_owned_exn(x, y, z).unwrap();
-        let topo = topology::view::create_validated_owned(count, vertices, offsets, kinds);
+        let topo = topology::view::create_validated_owned(count, vertices, offsets, kinds).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 
@@ -650,7 +650,7 @@ mod tests {
             x.extend([primitive as f64 * 3.0, primitive as f64 * 3.0 + 1.0, primitive as f64 * 3.0 + 1.0, primitive as f64 * 3.0]);
             y.extend([0.0, 0.0, 1.0, 1.0]);
             vertices.extend(primitive * 4..primitive * 4 + 4);
-            offsets.push(vertices.len() as i64);
+            offsets.push(vertices.len() as u32);
             kinds.push((primitive % 3) as u8);
         }
         let input = geometry_of(x, y, vec![0.0; 384], vertices, offsets, kinds);

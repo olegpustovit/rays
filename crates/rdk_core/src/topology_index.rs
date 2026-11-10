@@ -304,7 +304,7 @@ fn get(name: &str, values: &[u32], index: i64) -> Result<i64, error::T> {
 }
 
 /// NONE becomes the public -1 "missing" value.
-fn widen(value: u32) -> i64 {
+pub fn widen(value: u32) -> i64 {
     if value == NONE { -1 } else { i64::from(value) }
 }
 

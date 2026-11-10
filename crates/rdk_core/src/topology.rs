@@ -162,6 +162,22 @@ fn check_counts(operation: &str, points: i64, vertices: usize, primitives: usize
     Ok(())
 }
 
+/// Narrows i64 index scratch into topology planes: negative is invalid, above u32::MAX is too large.
+pub fn narrow(operation: &str, values: &[i64]) -> Result<Vec<u32>, error::T> {
+    values
+        .iter()
+        .map(|&value| {
+            u32::try_from(value).map_err(|_| {
+                if value < 0 {
+                    invalid_topology(operation, "Topology: negative index")
+                } else {
+                    error::new(operation, Code::GeometryTooLarge, "Topology: index exceeds the 4294967295 element limit".to_owned())
+                }
+            })
+        })
+        .collect()
+}
+
 fn invalid_topology(operation: &str, message: &str) -> error::T {
     error::new(operation, Code::InvalidTopology, message.to_owned())
 }

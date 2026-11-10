@@ -264,7 +264,7 @@ impl Ctx {
     }
 
     fn edge_token(&self, side: usize, vertex: usize) -> Result<usize, error::T> {
-        let edge = self.edge_of_vertex[vertex];
+        let edge = rdk_core::topology_index::widen(self.edge_of_vertex[vertex]);
         if edge < 0 {
             Err(fail("Rdk.Plane_clip.clip: missing topology edge"))
         } else {

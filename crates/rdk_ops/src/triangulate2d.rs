@@ -519,7 +519,7 @@ fn constraint_segments(
                 let vertex = index_view.edge_vertices[incidence as usize];
                 let primitive = index_view.primitive_of_vertex[vertex as usize];
                 if signs[primitive as usize] == chosen {
-                    let next = index_view.next_vertex[vertex as usize];
+                    let next = rdk_core::topology_index::widen(index_view.next_vertex[vertex as usize]);
                     if next >= 0 {
                         let a = projected_vertex_points[vertex as usize];
                         let b = projected_vertex_points[next as usize];
