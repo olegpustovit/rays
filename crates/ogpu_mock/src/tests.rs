@@ -156,3 +156,33 @@ fn owned_readback_is_lazy_cross_thread_and_retains_the_allocation() {
     // Allocation-lifetime conformance only: normal callers stop using readers at semantic free.
     assert_eq!(std::thread::spawn(move || readback(0, 8).unwrap()).join().unwrap(), [2, 3, 4, 5, 6, 7, 8, 9]);
 }
+
+#[test]
+fn texture_rect_write_and_stable_host_ring() {
+    select();
+    let device = backend::create_device(virtual_impl::create_driver().unwrap()).unwrap();
+    let atlas = backend::create_texture(&device, TextureDescriptor {
+        label: None, width: 4, height: 4, depth: 1, mip_levels: 1, sample_count: 1, format: TextureFormat::R8Unorm,
+        usage: vec![TextureUsage::TextureCopyDst, TextureUsage::TextureBinding],
+    }).unwrap();
+    let extent = Extent { width: 2, height: 2, depth: 1 };
+    backend::write_texture(&atlas, None, Origin { x: 1, y: 1, z: 0 }, extent, 4, &[1, 2, 0, 0, 3, 4]).unwrap();
+    let mut expected = vec![0u8; 16];
+    expected[5..7].copy_from_slice(&[1, 2]);
+    expected[9..11].copy_from_slice(&[3, 4]);
+    assert_eq!(backend::read_texture(&atlas, 4).unwrap(), expected);
+    let outside = backend::write_texture(&atlas, None, Origin { x: 3, y: 3, z: 0 }, extent, 4, &[0; 6]);
+    assert_eq!(outside.unwrap_err().kind, ErrorKind::InvalidArgument);
+    let short = backend::write_texture(&atlas, None, Origin { x: 0, y: 0, z: 0 }, extent, 4, &[0; 5]);
+    assert_eq!(short.unwrap_err().kind, ErrorKind::InvalidArgument);
+
+    let ring = backend::create_host_buffer(&device, buffer(64)).unwrap();
+    let (pointer, length) = backend::host_ptr(&ring).unwrap();
+    assert_eq!((length, backend::host_ptr(&ring).unwrap().0), (64, pointer));
+    unsafe { std::slice::from_raw_parts_mut(pointer.as_ptr().add(8), 3) }.copy_from_slice(&[7, 8, 9]);
+    backend::flush_host_range(&ring, 8, 3).unwrap();
+    assert_eq!(backend::read_buffer(&ring, 8, 3).unwrap(), vec![7, 8, 9]);
+    assert!(backend::flush_host_range(&ring, 63, 2).is_err());
+    let local = backend::create_buffer(&device, buffer(64), Some(Memory::DeviceLocal)).unwrap();
+    assert_eq!(backend::host_ptr(&local).unwrap_err().kind, ErrorKind::Unsupported);
+}

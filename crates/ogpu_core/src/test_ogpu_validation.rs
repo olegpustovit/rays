@@ -106,8 +106,9 @@ fn centralized_validation() {
         ),
     )
     .unwrap();
+    // R8Unorm is the glyph-atlas format: a sampled, copy-destination texture is admitted.
+    validation::validate_texture(&capabilities, &texture(TextureFormat::R8Unorm, vec![TextureUsage::TextureBinding, TextureUsage::TextureCopyDst])).unwrap();
     for format in [
-        TextureFormat::R8Unorm,
         TextureFormat::Bgra8Unorm,
         TextureFormat::Bgra8UnormSrgb,
         TextureFormat::Depth32Float,

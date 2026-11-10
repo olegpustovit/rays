@@ -1113,6 +1113,43 @@ fn gpu_conformance_render() {
     finish(device);
 }
 
+/// A standalone painter's three primitives, no window or surface anywhere: an offscreen render target read
+/// back from the GPU, an R8 sub-rectangle written in place, and a persistently mapped instance ring.
+fn gpu_painter_primitives() {
+    let device = open();
+    let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
+    let usage = [TextureUsage::TextureBinding, TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc];
+    let target = be::create_texture(&device, texture_descriptor("offscreen", 4, &usage)).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::render_encoder(&commands, &render_target(&target, Load::Clear, Store::Store, (0.125, 0.25, 0.5, 1.))).unwrap_or_else(|failure| die(failure));
+    be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    let pixels = be::read_texture(&target, 16).unwrap_or_else(|failure| die(failure));
+    require(pixels.chunks_exact(4).all(|p| p == [0x20, 0x40, 0x80, 0xff]), "offscreen clear differs");
+
+    let atlas = be::create_texture(&device, TextureDescriptor { format: TextureFormat::R8Unorm, ..texture_descriptor("atlas", 4, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]) }).unwrap_or_else(|failure| die(failure));
+    // A 2x2 glyph with a padded 4-byte row pitch, whose last row carries only its pixels.
+    be::write_texture(&atlas, None, Origin { x: 1, y: 1, z: 0 }, Extent { width: 2, height: 2, depth: 1 }, 4, &[1, 2, 0, 0, 3, 4]).unwrap_or_else(|failure| die(failure));
+    let mut expected = vec![0u8; 16];
+    expected[5..7].copy_from_slice(&[1, 2]);
+    expected[9..11].copy_from_slice(&[3, 4]);
+    require(be::read_texture(&atlas, 4).unwrap_or_else(|failure| die(failure)) == expected, "R8 sub-rectangle write differs");
+    refused(be::write_texture(&atlas, None, Origin { x: 3, y: 3, z: 0 }, Extent { width: 2, height: 2, depth: 1 }, 4, &[0; 6]).err(), ErrorKind::InvalidArgument, "an out-of-bounds rectangle was accepted");
+
+    let ring = be::create_host_buffer(&device, buf("ring", 64, &[BufferUsage::Vertex, BufferUsage::Storage])).unwrap_or_else(|failure| die(failure));
+    let (pointer, length) = be::host_ptr(&ring).unwrap_or_else(|failure| die(failure));
+    require(length == 64 && be::host_ptr(&ring).unwrap_or_else(|failure| die(failure)).0 == pointer, "the ring pointer is not stable");
+    unsafe { std::slice::from_raw_parts_mut(pointer.as_ptr().add(16), 4) }.copy_from_slice(&[9, 8, 7, 6]);
+    be::flush_host_range(&ring, 16, 4).unwrap_or_else(|failure| die(failure));
+    require(be::read_buffer(&ring, 16, 4).unwrap_or_else(|failure| die(failure)) == [9, 8, 7, 6], "ring write is not visible");
+    let local = be::create_buffer(&device, buf("local", 64, &[BufferUsage::Vertex]), Some(Memory::DeviceLocal)).unwrap_or_else(|failure| die(failure));
+    refused(be::host_ptr(&local).err(), ErrorKind::Unsupported, "a device-local buffer was host mapped");
+    for texture in [&target, &atlas] { be::destroy_texture(texture).unwrap_or_else(|failure| die(failure)); }
+    for buffer in [&ring, &local] { be::destroy_buffer(buffer).unwrap_or_else(|failure| die(failure)); }
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
+    finish(device);
+}
+
 fn render(device: &Device) {
     let capabilities = be::capabilities(&device);
     let profile = capabilities;
@@ -1544,4 +1581,5 @@ pub const CASES: &[(&str, fn())] = &[
         ("gpu_conformance_transfer_and_compute", gpu_conformance_transfer_and_compute),
         ("gpu_conformance_ray_tracing", gpu_conformance_ray_tracing),
         ("gpu_conformance_render", gpu_conformance_render),
+        ("gpu_painter_primitives", gpu_painter_primitives),
     ];

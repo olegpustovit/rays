@@ -92,6 +92,7 @@ impl DriverResource for MetalBuffer {
     fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error> {
         self.value.read_bytes(&self.dev.device, offset, length as i64)
     }
+    fn host_ptr(&self) -> Result<std::ptr::NonNull<u8>, Error> { self.value.metal().host_ptr() }
     fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error> {
         let bytes = self.value.read_bytes(&self.dev.device, offset, length as i64)?;
         if length > destination.len().saturating_sub(destination_offset) || destination_offset > destination.len() {
@@ -162,6 +163,7 @@ impl DriverResource for MetalTexture {
     fn read_into(&self, _: i64, _: &mut [u8], _: usize, _: usize) -> Result<(), Error> {
         Err(fail("Ogpu_metal.Backend.texture.read_into", ErrorKind::InvalidArgument, "texture reads require an admitted layout"))
     }
+    fn write_texture(&self, write: &TextureRead, bytes: &[u8]) -> Result<(), Error> { self.value.write_bytes(write, bytes) }
     fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> { self.value.read_bytes(read) }
     fn read_texture_into(&self, read: &TextureReadInto, destination: &mut [u8]) -> Result<(), Error> {
         self.value.read_bytes_into(read, destination)

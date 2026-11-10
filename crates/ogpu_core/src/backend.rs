@@ -39,6 +39,16 @@ pub trait DriverResource {
         read.bind_destination(destination.len())?;
         self.read_into(0, destination, 0, read.layout().length())
     }
+    /// Write a texture region from host bytes laid out by `write` (rows at `bytes_per_row`); no staging buffer, no command.
+    fn write_texture(&self, _write: &TextureRead, _bytes: &[u8]) -> Result<(), Error> {
+        Err(error::make("Backend.write_texture", ErrorKind::Unsupported, "backend cannot write textures from the host"))
+    }
+    /// Stable CPU address of a host-visible allocation, valid until `destroy`.
+    fn host_ptr(&self) -> Result<std::ptr::NonNull<u8>, Error> {
+        Err(error::make("Backend.host_ptr", ErrorKind::Unsupported, "backend cannot map this buffer persistently"))
+    }
+    /// Make host writes in `[offset, offset+length)` visible to the GPU; a no-op on coherent memory.
+    fn flush_host(&self, _offset: i64, _length: usize) -> Result<(), Error> { Ok(()) }
     fn destroy(&self) -> Result<(), Error>;
 }
 
@@ -533,6 +543,18 @@ pub fn create_buffer(device: &Device, descriptor: BufferDescriptor, memory: Opti
     Ok(Buffer { resource: make_resource(device, raw), buffer_descriptor: descriptor, memory })
 }
 
+/// A host-visible buffer for `host_ptr`: allocate once, write a range each frame, no staging copy. Never assumes
+/// unified memory: a backend with discrete memory must back it with host-visible, persistently mapped allocation.
+pub fn create_host_buffer(device: &Device, descriptor: BufferDescriptor) -> Result<Buffer, Error> {
+    const OP: &str = "Backend.create_host_buffer";
+    live(OP, device)?;
+    let descriptor = crate::validation::admit_buffer(&device.0.capabilities,
+        BufferProfile { descriptor, storage: StorageMode::Shared, cpu_cache: CpuCacheMode::DefaultCache, kind: BufferKind::Host })?;
+    let raw = device.0.raw().create_buffer(&descriptor)?;
+    device.0.children.set(device.0.children.get() + 1);
+    Ok(Buffer { resource: make_resource(device, raw), buffer_descriptor: descriptor, memory: Memory::Shared })
+}
+
 pub fn create_mapped_buffer(device: &Device, descriptor: BufferDescriptor) -> Result<Buffer, Error> {
     const OP: &str = "Backend.create_mapped_buffer";
     live(OP, device)?;
@@ -748,6 +770,44 @@ pub fn read_texture_into(texture: &Texture, bytes_per_row: i64, destination: &mu
     let read = crate::validation::admit_base_texture_read(&texture.texture_descriptor, bytes_per_row)?;
     let read = read.into_destination(destination)?;
     texture.resource.0.raw().read_texture_into(&read, destination)
+}
+/// Overwrite a sub-rectangle of mip `mip` of a 2D texture from `bytes` (rows `bytes_per_row` apart, the last row
+/// needs only its pixels). Requires `TextureCopyDst`; takes effect immediately, so do not rewrite a region the GPU
+/// is still sampling (ring the textures, or complete the queue first).
+pub fn write_texture(texture: &Texture, mip: Option<i64>, origin: Origin, extent: Extent, bytes_per_row: i64, bytes: &[u8]) -> Result<(), Error> {
+    const OP: &str = "Backend.write_texture";
+    let d = &texture.texture_descriptor;
+    if texture.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "texture is destroyed")); }
+    if !d.usage.contains(&TextureUsage::TextureCopyDst) {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "texture lacks Texture_copy_dst usage"));
+    }
+    if d.format == TextureFormat::Depth32Float { return Err(make_error(OP, ErrorKind::Unsupported, "depth textures are not host writable")); }
+    let (Ok(row), Ok(x), Ok(y), Ok(w), Ok(h), Ok(mip)) = (usize::try_from(bytes_per_row), usize::try_from(origin.x), usize::try_from(origin.y),
+        usize::try_from(extent.width), usize::try_from(extent.height), usize::try_from(mip.unwrap_or(0))) else {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "texture region is invalid"));
+    };
+    if origin.z != 0 || extent.depth != 1 { return Err(make_error(OP, ErrorKind::Unsupported, "only 2D regions can be written")); }
+    let region = crate::validation::TextureRegion { x, y, z: 0, width: w, height: h, depth: 1 };
+    let layout = crate::validation::admit_texture_read(d, region, mip, 0, row, row.saturating_mul(h))?;
+    let texel = types::texel_bytes(d.format) as usize;
+    if bytes.len() < row * (h - 1) + w * texel {
+        return Err(make_error(OP, ErrorKind::InvalidArgument, "bytes do not cover the texture region"));
+    }
+    texture.resource.0.raw().write_texture(&layout, bytes)
+}
+/// Stable pointer and length of a `create_host_buffer` buffer: create it once, write ranges every frame,
+/// call `flush_host_range` after writing. Valid until the buffer is destroyed; synchronising with GPU reads is the caller's job.
+pub fn host_ptr(buffer: &Buffer) -> Result<(std::ptr::NonNull<u8>, usize), Error> {
+    const OP: &str = "Backend.host_ptr";
+    if buffer.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed")); }
+    if buffer.buffer_descriptor.kind != BufferKind::Host { return Err(make_error(OP, ErrorKind::Unsupported, "only create_host_buffer buffers are host mapped")); }
+    Ok((buffer.resource.0.raw().host_ptr()?, buffer.buffer_descriptor.size as usize))
+}
+pub fn flush_host_range(buffer: &Buffer, offset: i64, length: usize) -> Result<(), Error> {
+    const OP: &str = "Backend.flush_host_range";
+    if buffer.resource.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "buffer is destroyed")); }
+    buffer_range(OP, buffer, offset, length)?;
+    buffer.resource.0.raw().flush_host(offset, length)
 }
 /// Validates `epoch` against what was submitted; `Ok(true)` when it is already complete.
 fn bound_epoch(operation: &str, queue: &Queue, epoch: i64) -> Result<bool, Error> {

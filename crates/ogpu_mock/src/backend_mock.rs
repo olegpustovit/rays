@@ -231,6 +231,28 @@ impl DriverResource for MockResource {
         }
         Ok(data[offset as usize..offset as usize + length].to_vec())
     }
+    fn write_texture(&self, w: &ogpu_core::validation::TextureRead, bytes: &[u8]) -> Result<(), Error> {
+        let state = self.c.borrow();
+        let Some(storage) = state.texture_storage.get(&self.id) else {
+            return Err(fail("Backend_mock.write_texture", ErrorKind::InvalidArgument, "resource is not a color texture"));
+        };
+        let texel = types::texel_bytes(storage.descriptor.format) as usize;
+        let width = mip_extent(storage.descriptor.width, w.mip_level() as i64) as usize;
+        let (r, row) = (w.region(), w.bytes_per_row());
+        let mut level = storage.levels[w.mip_level()].lock().unwrap();
+        for y in 0..r.height {
+            let from = y * row;
+            let to = ((r.y + y) * width + r.x) * texel;
+            let n = r.width * texel;
+            level[to..to + n].copy_from_slice(&bytes[from..from + n]);
+        }
+        Ok(())
+    }
+    fn host_ptr(&self) -> Result<std::ptr::NonNull<u8>, Error> {
+        // The Vec never reallocates, so its address is stable until the resource is dropped.
+        std::ptr::NonNull::new(self.bytes.lock().unwrap().as_mut_ptr())
+            .ok_or_else(|| fail("Backend_mock.host_ptr", ErrorKind::InvalidArgument, "empty buffer"))
+    }
     fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error> {
         let data = self.bytes.lock().unwrap();
         if !in_range(data.len(), offset, length as i64)

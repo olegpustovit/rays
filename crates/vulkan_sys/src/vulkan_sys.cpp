@@ -578,6 +578,13 @@ int32_t rv_buffer_read(void *buffer, uint64_t offset, void *data, uint64_t lengt
   auto *b = static_cast<Buffer *>(buffer); if (offset > b->size || length > b->size - offset) return VK_ERROR_VALIDATION_FAILED_EXT;
   return staged_read(b, offset, length, data);
 }
+// Persistent host address of a kind-0 (host-visible, VMA-mapped) buffer; null for a device-local one.
+void *rv_buffer_map(void *buffer) { return static_cast<Buffer *>(buffer)->map; }
+// Make host writes in [offset, offset+length) visible to the device; a no-op on coherent memory.
+int32_t rv_buffer_flush_range(void *buffer, uint64_t offset, uint64_t length) {
+  auto *b = static_cast<Buffer *>(buffer); if (!b->map || offset > b->size || length > b->size - offset) return VK_ERROR_VALIDATION_FAILED_EXT;
+  return length ? vmaFlushAllocation(b->device->allocator, b->allocation, offset, length) : VK_SUCCESS;
+}
 int32_t rv_buffer_flush(void *buffer, const void *data, uint64_t length) { return staged_write(static_cast<Buffer *>(buffer), 0, data, length); }
 int32_t rv_buffer_invalidate(void *buffer, void *data, uint64_t length) { return staged_read(static_cast<Buffer *>(buffer), 0, length, data); }
 struct rv_binding { uint32_t binding; int32_t kind; };
@@ -778,6 +785,17 @@ int32_t rv_texture_read(void *texture, void *bytes, uint64_t row, uint32_t texel
   if (r == VK_SUCCESS) { VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO}; wi.semaphoreCount = 1; wi.pSemaphores = &d->ticks; wi.pValues = &tick; r = vkWaitSemaphores(d->device,&wi,UINT64_MAX); }
   if (r == VK_SUCCESS) { vmaInvalidateAllocation(d->allocator,allocation,0,total); memcpy(bytes,mapped.pMappedData,total); }
   vmaDestroyBuffer(d->allocator,staging,allocation); return r;
+}
+// Host-to-image rectangle: staged into the pending upload command like staged_write, so it lands before the next submit.
+// `bytes` holds the rows at a->bytes_per_row; a->offset is ignored.
+int32_t rv_texture_write(void *texture, const void *bytes, const rv_blit_desc *a) {
+  auto *t = static_cast<Texture *>(texture); Device *d = t->device; std::lock_guard<std::recursive_mutex> lock(d->qlock);
+  VkDeviceSize total = static_cast<VkDeviceSize>(a->bytes_per_row) * (static_cast<VkDeviceSize>(a->height) * a->depth - 1) + static_cast<VkDeviceSize>(a->width) * a->texel;
+  Command *u = upload_cmd(d); VkBuffer chunk{}; VkDeviceSize at{}; char *room = u ? arena(u, total, 16, &chunk, &at) : nullptr;
+  if (!room) return VK_ERROR_OUT_OF_DEVICE_MEMORY; memcpy(room, bytes, total);
+  VkBufferImageCopy r{}; r.bufferOffset = at; r.bufferRowLength = a->bytes_per_row / a->texel; r.imageSubresource = {t->aspect,a->mip,0,1};
+  r.imageOffset = {a->x,a->y,a->z}; r.imageExtent = {a->width,a->height,a->depth}; full_barrier(u->cb);
+  vkCmdCopyBufferToImage(u->cb,chunk,t->image,VK_IMAGE_LAYOUT_GENERAL,1,&r); return VK_SUCCESS;
 }
 void rv_blit_buffer_to_texture(void *commands, void *buffer, void *texture, const rv_blit_desc *a) {
   auto *c = static_cast<Command *>(commands); auto *t = static_cast<Texture *>(texture);
