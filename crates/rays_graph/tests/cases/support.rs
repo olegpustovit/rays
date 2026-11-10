@@ -60,7 +60,7 @@ pub fn frame_ev(mouse: (i64, i64), events: Vec<Event>) -> rframe::Frame {
 
 /// A UI over the default kit face at the 11-point kit size, as `Pxui.Ui.create ~platform:Apple ~font_size:11`.
 pub fn new_ui() -> Ui {
-    Ui::create(Platform::Apple, Some(11), None, &rays_shell::host::BACKEND)
+    Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None))
 }
 
 pub const CASES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../specification/workspace/cases");

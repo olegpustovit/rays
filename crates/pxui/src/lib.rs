@@ -1,5 +1,5 @@
 #![allow(clippy::all)]
-//! PXUI owns immediate-mode engine, kit and text widgets over Rays; ui re-exports the shared palette, typography and widget API.
+//! PXUI owns immediate-mode engine, kit and text widgets over pxui_text; ui re-exports the shared palette, typography and widget API.
 
 pub mod draw;
 pub mod geom;
@@ -10,3 +10,4 @@ pub mod ui_text;
 pub mod ui;
 
 pub use theme::Theme;
+pub use pxui_text as text;

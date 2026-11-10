@@ -7,7 +7,7 @@ release legal review.
 
 | Surface | Distributed material / provenance | External obligation |
 | --- | --- | --- |
-| SDL3 core/image/ttf/mixer bindings | Rays-written bindings plus checked-in inventories, ABI facts and provenance hashes. Generated modules identify generator version and pinned headers. | SDL projects use the zlib license. System/shared libraries and their notices remain external dependencies; Rays does not vendor them here. |
+| SDL3 core/image/mixer bindings | Rays-written bindings plus checked-in inventories, ABI facts and provenance hashes. Generated modules identify generator version and pinned headers. | SDL projects use the zlib license. System/shared libraries and their notices remain external dependencies; Rays does not vendor them here. |
 | Metal binding | Rays-written safe/raw layers and typed Objective-C++ bridge. Checked-in Rust declarations and the owning sys crate bridge call the installed SDK, which checks native types at compile time. | Apple SDK headers/frameworks are system build inputs obtainable with the Command Line Tools and are not redistributed by Rays. Apple platform/tool terms apply to builders and shipped applications. The full IDE and offline shader toolchain are not required. |
 | OGPU, OGPU Metal, scene execution, native runtime support, and low core | Original Rays Rust source under MIT. | No additional bundled third-party renderer implementation or shader binary is introduced by these libraries. |
 

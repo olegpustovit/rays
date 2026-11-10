@@ -193,14 +193,18 @@ card), the label in `ink_2`, the control, 12 points. Parameter rows are 24 point
 too long for its column takes a 48-point row with the control underneath. A switch row gives the
 label the row and puts the switch at its end.
 
-Glyphs are rasterized by SDL_ttf exactly as whole strings were: each code
-point is rendered at the backing density (`Font.Private.glyph`), packed
-white-with-coverage into one shelf atlas, and placed at the font's pen
-advance for that density with the run's origin snapped to a physical pixel.
-The atlas uses `Image.upload_rgba`; a failed upload stays dirty for retry.
-For the kit face this reproduces whole-string rendering pixel for pixel at
-1×, 2×, and 3× (only the RGB of fully transparent pixels differs). Pair
-kerning of proportional overrides is not applied.
+Text is `pxui_text` (cosmic-text shaping, bidi, wrapping and fallback; swash
+rasterising into an R8 mask atlas and an RGBA colour atlas). The host loads the
+fonts from bytes into the `Text` it hands `Ui::create` (font 0 is the kit face,
+the bundled Pragmasevka unless `RAYS_UI_FONT` names another); nothing scans the
+system. A text draw or measure is keyed by a hash of its text and style, so an
+unchanged label is a layout-cache hit; `Ui::frame` ends the text frame, which
+drops layouts the frame did not use. A run's first baseline sits the font's
+ascent below its top, on a device pixel. Carets, hit tests and selection
+spans of the text widgets come from the same layouts. `Paint::text_styled` and
+`Ui::text_metrics` take any `pxui::text::Style`: wrap, ellipsis, line limit,
+alignment, tracking and font (an icon font is one more loaded font). The host
+feeds its painter's atlases from `Text::drain_uploads`.
 
 Kit rows: 12 points at each side, a label column of 112 points (half of a narrow row), then
 the control at `y + 2`, `row_height - 4` tall; a switch sits at the right edge; text sits at

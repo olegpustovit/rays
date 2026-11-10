@@ -6,7 +6,7 @@ Use Cargo and the toolchain in `rust-toolchain.toml`. SDL floors and tested rele
 macOS:
 
 ```sh
-brew install pkgconf sdl3 sdl3_image sdl3_ttf sdl3_mixer
+brew install pkgconf sdl3 sdl3_image sdl3_mixer
 cargo build -p rays_bin
 ```
 

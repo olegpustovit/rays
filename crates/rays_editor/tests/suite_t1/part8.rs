@@ -234,7 +234,7 @@ pub fn run_outline_button() {
     };
     let leaf = layout::find(&layout::geometry(None, None, &d.shell.expect("shell").tree, &idle_frame(0)), &Panel::Graph).expect("graph leaf");
     let header = leaf.header;
-    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), None, &rays_shell::host::BACKEND);
+    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), rays_shell::host::text(None));
     let from = rays_shell::chrome::tools_start(&mut ui, true, false, false, &format!("Graph\t{} / value", r.dump("pane graph")));
     let (x, y) = match rays_editor::bars::tool_rect(true, &mut ui, header, from, rays_editor::bars::Tool::Outline) {
         Some((x, y, w, h)) => (f64::from(x + w / 2.), f64::from(y + h / 2.)),

@@ -33,7 +33,7 @@ fn frame_at(count: i64, height: i64, density: i64) -> frame::Frame {
 /// The second frame of a fresh UI with the pointer parked away from every widget, rendered
 /// offscreen at `density`, and the painter's draw calls for it.
 fn render(density: i64, height: i64, build: &mut dyn FnMut(&mut Ui)) -> (canvas::Canvas, u64) {
-    let ui = Rc::new(RefCell::new(Ui::create(Platform::Apple, None, Some(font_path()), &rays_shell::host::BACKEND)));
+    let ui = Rc::new(RefCell::new(Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&font_path())))));
     for count in 0..2 {
         ui.borrow_mut().frame(&frame_at(count, height, density), build);
     }
@@ -191,7 +191,7 @@ fn gpu_parity_commands() {
     let fixtures: [(&str, i64, fn(&mut Ui)); 4] = [("overlays", 300, overlays), ("zones", 390, zones), ("table", 300, table), ("panel", 300, new_panel)];
     for density in DENSITIES {
         for (name, height, build) in fixtures.iter() {
-            let mut ui = Ui::create(Platform::Apple, None, Some(font_path()), &rays_shell::host::BACKEND);
+            let mut ui = Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&font_path())));
             for count in 0..2 {
                 ui.frame(&frame_at(count, *height, density), &mut |ui| build(ui));
             }

@@ -1,5 +1,5 @@
 //! Runtime contracts from ;  is helper-only (zero cases).
-use rays::{camera, easy_camera, font, image, light, path, scene};
+use rays::{camera, easy_camera, light, path, scene};
 use rays_math::{color, mat4, noise, rand, vec3};
 use std::sync::{Mutex, OnceLock};
 
@@ -114,23 +114,7 @@ fn run_scene2() {
     }
 }
 
-fn run_font() {
-    assert!(crate::common::gpu(), "font runtime requires the native qualification device");
-    let font = font::system(Some(20)).expect("system font");
-    let ascent = font::get_ascent(&font).expect("font metrics");
-    let pixels = |align| {
-        let image = font::cached_text(Some(400), Some(align), None, &font,
-            "short\na much longer second line", font::RenderMode::Blended(color::white())).expect("cached text");
-        image::pixels(&image).expect("text pixels")
-    };
-    let left = pixels(font::Alignment::Left);
-    let center = pixels(font::Alignment::Center);
-    font::destroy(&font);
-    assert!(ascent > 0, "font metrics are placeholders");
-    assert_ne!(left, center, "font alignment is ignored");
-}
-
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![("rays.core", run_core), ("rays.keys", run_keys),
-        ("rays.scene2", run_scene2), ("rays.font", run_font)]
+        ("rays.scene2", run_scene2)]
 }

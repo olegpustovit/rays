@@ -26,7 +26,7 @@
 import { requestDevice } from './gpu.js';
 
 const U = globalThis.GPUBufferUsage, T = globalThis.GPUTextureUsage;
-// The native automatic font is the system UI font (SF Mono on macOS, lib/sdl3_ttf/sdl3_ttf.ml).
+// The native automatic font is the system UI font (SF Mono on macOS, crates/rays/src/font.rs).
 const FONT = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace';
 const TEXT_CACHE = 256;   // strings kept as textures (the native text cache capacity)
 const KIND = { rect: 0, circle: 4, line: 5 };   // the Shape_batch kind words
@@ -92,8 +92,8 @@ export async function createPresenter(canvas, { dpr, images = () => null, clear 
     return { texture, view: texture.createView(), w, h };
   };
   const texts = new Map(), pictures = new WeakMap(), garbage = [];
-  // The whole string, white, left-aligned on one line whose top is the image top (SDL_ttf blended: the
-  // baseline is the font ascent below it), at `size * density` pixels; the quad tints it by the ink.
+  // The whole string, white, left-aligned on one line whose top is the image top (as native sketch text:
+  // the baseline is the font ascent below it), at `size * density` pixels; the quad tints it by the ink.
   const textTexture = (text, size, density) => {
     const key = `${density}|${size}|${text}`;
     let entry = texts.get(key);

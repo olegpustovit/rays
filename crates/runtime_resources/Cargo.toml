@@ -9,7 +9,7 @@ license.workspace = true
 test = false
 
 [dependencies]
-sdl3 = { path = "../sdl3", features = ["image", "mixer", "ttf"] }
+sdl3 = { path = "../sdl3", features = ["image", "mixer"] }
 ogpu_core = { path = "../ogpu_core" }
 
 [dev-dependencies]

@@ -299,7 +299,7 @@ impl Rig {
 
 pub fn text_area_start(platform: Platform) -> Rig {
     let mut rig = Rig {
-        ui: Ui::create(platform, Some(11), Some(font_path()), &rays_shell::host::BACKEND),
+        ui: Ui::create(platform, Some(11), rays_shell::host::text(Some(&font_path()))),
         area: String::new(),
         errors: Vec::new(),
         wrapped: false,

@@ -23,7 +23,8 @@
 //!   `AtlasKind::Color` glyphs are RGBA as rasterised. Missing glyphs are rasterised on demand.
 //! - `drain_uploads(&mut dyn FnMut(AtlasKind, x, y, w, h, &[u8], stride))`: texel rectangles
 //!   written since the last drain; rows are `stride` bytes apart, `w * bytes_per_pixel` used.
-//! - `atlas_size(kind) -> (w, h)`, `bytes() -> usize` (atlas mirrors), `end_frame()`.
+//! - `atlas_size(kind) -> (w, h)`, `bytes() -> usize` (atlas mirrors), `end_frame()`,
+//!   `ascent(font) -> f32` (fraction of the size). `PRAGMASEVKA` is the bundled UI face.
 //!
 //! `max_lines` (0 = unlimited) clips; with `ellipsis` the last visible line ends in an ellipsis
 //! (one line when `max_lines` is 0). Unchanged layouts and glyph iteration of already
@@ -72,10 +73,12 @@ pub struct Style {
     /// 0 = unlimited.
     pub max_lines: u16,
     pub ellipsis: bool,
+    /// Points added after every glyph (CSS `letter-spacing`).
+    pub tracking: f32,
 }
 impl Default for Style {
     fn default() -> Style {
-        Style { font: 0, size: 14.0, weight: 400, italic: false, line_height: 0.0, wrap: Wrap::None, align: Align::Left, max_lines: 0, ellipsis: false }
+        Style { font: 0, size: 14.0, weight: 400, italic: false, line_height: 0.0, wrap: Wrap::None, align: Align::Left, max_lines: 0, ellipsis: false, tracking: 0.0 }
     }
 }
 
@@ -100,6 +103,9 @@ pub struct Glyph {
     pub uv: Rect,
     pub atlas: AtlasKind,
 }
+
+/// The bundled UI face (the PXUI default theme's font).
+pub const PRAGMASEVKA: &[u8] = include_bytes!("../../../assets/fonts/Pragmasevka-Regular.ttf");
 
 const MASK_SIZE: (u32, u32) = (1024, 2048);
 const COLOR_SIZE: (u32, u32) = (1024, 1024);
@@ -177,6 +183,7 @@ pub struct Text {
     fs: FontSystem,
     swash: SwashCache,
     names: Vec<String>,
+    ascents: Vec<f32>,
     entries: HashMap<u64, Entry>,
     frame: u32,
     atlases: [Atlas; 2],
@@ -195,6 +202,7 @@ impl Text {
             fs: FontSystem::new_with_locale_and_db("en-US".into(), fontdb::Database::new()),
             swash: SwashCache::new(),
             names: Vec::new(),
+            ascents: Vec::new(),
             entries: HashMap::new(),
             frame: 1,
             atlases: [Atlas::new(MASK_SIZE, 1), Atlas::new(COLOR_SIZE, 4)],
@@ -212,8 +220,18 @@ impl Text {
     pub fn add_font(&mut self, bytes: &[u8]) -> usize {
         let ids = self.fs.db_mut().load_font_source(fontdb::Source::Binary(Arc::new(bytes.to_vec())));
         let name = ids.first().and_then(|id| self.fs.db().face(*id)).and_then(|f| f.families.first()).map(|f| f.0.clone()).unwrap_or_default();
+        let ascent = ids.first().and_then(|id| self.fs.get_font(*id, Weight::NORMAL)).map_or(0.0, |f| {
+            let m = f.as_swash().metrics(&[]);
+            m.ascent / m.units_per_em as f32
+        });
         self.names.push(name);
+        self.ascents.push(ascent);
         self.names.len() - 1
+    }
+
+    /// The font's ascent as a fraction of its size (0 for an unknown index).
+    pub fn ascent(&self, font: u16) -> f32 {
+        self.ascents.get(font as usize).copied().unwrap_or(0.0)
     }
 
     pub fn layout(&mut self, key: u64, text: &str, style: &Style, max_width: f32) -> Metrics {
@@ -244,6 +262,7 @@ impl Text {
             None => Family::SansSerif,
         };
         let attrs = Attrs::new().family(family).weight(Weight(style.weight)).style(if style.italic { CStyle::Italic } else { CStyle::Normal });
+        let attrs = if style.tracking != 0.0 { attrs.letter_spacing(style.tracking / style.size) } else { attrs };
         let b = &mut e.buf;
         b.set_metrics(CMetrics::new(style.size, lh));
         b.set_wrap(match style.wrap {

@@ -90,7 +90,7 @@ for (const dir of dirs) {
   if (r.unavailable) { console.error('present_e2e: WebGPU unavailable'); process.exit(3); }
   if (r.failure) { console.log(`FAIL ${dir}: ${r.failure}`); bad++; continue; }
   const got = Buffer.from(r.raw);
-  // Text is rasterized by Chrome's font stack, not SDL_ttf: its line boxes (generous: 0.7 em a glyph, 1.6 em high,
+  // Text is rasterized by Chrome's font stack, not the native one: its line boxes (generous: 0.7 em a glyph, 1.6 em high,
   // 4 points of margin) are compared by total brightness instead (ratio within 0.5..2), everything else per pixel.
   const boxes = r.texts.map(t => [t.x - 4, t.y - 4, t.x + t.size * 0.7 * t.length + 4, t.y + t.size * 1.6 + 4]);
   const inText = (x, y) => boxes.some(([x0, y0, x1, y1]) => x >= x0 && x < x1 && y >= y0 && y < y1);

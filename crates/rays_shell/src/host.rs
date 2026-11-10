@@ -1,16 +1,24 @@
-//! PXUI's host services from Rays: SDL_ttf faces and GPU images in, scene layers and platform
+//! PXUI's host services from Rays: the kit font and GPU images in, scene layers and platform
 //! requests out.
 use input::{frame::Frame, Event};
 use ogpu_core::backend::{self, Texture};
 use ogpu_core::error::{self, Error, ErrorKind};
 use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
-use pxui::ui::{Backend, Font, Image, Raster, Ui};
+use pxui::text::{self, Text};
+use pxui::ui::{Image, Ui};
 use pxui_render::{AtlasKind, Break, Painter};
-use rays::{clipboard, font, image, scene, sketch};
+use rays::{clipboard, image, scene, sketch};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
+
+/// The kit's text engine: the face in the file at `path` (`RAYS_UI_FONT`), else the bundled
+/// Pragmasevka. Fonts come only from these bytes; nothing scans the system.
+pub fn text(path: Option<&str>) -> Text {
+    let bytes = path.and_then(|p| std::fs::read(p).ok());
+    Text::new(&[bytes.as_deref().unwrap_or(text::PRAGMASEVKA)])
+}
 
 /// Run a frame as the Rays host does: the clipboard text the last frame asked for arrives first,
 /// and the clipboard and window-ground requests apply after.
@@ -97,8 +105,8 @@ fn painter(ui: &Rc<RefCell<Ui>>) -> scene::UiPaint {
         let held = weak.clone();
         let paint: scene::UiPaint = Rc::new(move |pass: &scene::UiPass, layer: usize| match held.upgrade() {
             None => Ok(()),
-            Some(ui) => match ui.try_borrow() {
-                Ok(ui) => paint_layer(&ui, pass, layer),
+            Some(ui) => match ui.try_borrow_mut() {
+                Ok(mut ui) => paint_layer(&mut ui, pass, layer),
                 Err(_) => Err(error::make("Pxui.paint", ErrorKind::InvalidState, "the UI is being changed while its frame renders")),
             },
         });
@@ -113,27 +121,30 @@ pub fn draw_calls() -> u64 {
 }
 
 /// The thread's painter and what its atlases and textures hold.
-// ponytail: one painter per thread, re-uploading the glyph mask when another UI paints; two UIs
-// drawn into one frame would share the mask. A painter per UI if that ever happens.
+// ponytail: one painter per thread, re-uploading the glyph atlases when another UI paints; two UIs
+// drawn into one frame would share them. A painter per UI if that ever happens.
 struct Shared {
     device: i64,
     painter: Painter,
-    /// the atlas epoch the mask holds, and how many of its written rectangles
-    atlas: (u64, usize),
+    /// the UI whose glyph atlases the painter holds (0: none)
+    owner: usize,
     frame: u64,
     /// image textures by identity, with their generation and the frame that last drew them
     images: Vec<(i64, i64, Texture, u64)>,
 }
 
-fn paint_layer(ui: &Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error> {
-    let Some(layer) = ui.output().draw.get(layer) else { return Ok(()) };
+fn paint_layer(ui: &mut Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error> {
+    if ui.output().draw.get(layer).is_none() {
+        return Ok(());
+    }
     PAINTER.with(|shared| {
         let mut shared = shared.borrow_mut();
         let device = ogpu_core::handle::device_id(backend::device_handle(pass.device));
         if shared.as_ref().is_none_or(|s| s.device != device) {
-            let size = (pxui::ui::ATLAS_WIDTH as u32, pxui::ui::ATLAS_HEIGHT as u32);
-            let painter = Painter::new(pass.device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, size, (1, 1))?;
-            *shared = Some(Shared { device, painter, atlas: (0, 0), frame: 0, images: Vec::new() });
+            let t = ui.text_mut();
+            let (mask, color) = (t.atlas_size(text::AtlasKind::Mask), t.atlas_size(text::AtlasKind::Color));
+            let painter = Painter::new(pass.device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, mask, color)?;
+            *shared = Some(Shared { device, painter, owner: 0, frame: 0, images: Vec::new() });
         }
         let s = shared.as_mut().expect("painter");
         if s.frame != pass.frame {
@@ -149,7 +160,8 @@ fn paint_layer(ui: &Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error>
                 keep
             });
         }
-        sync_atlas(s, ui.atlas())?;
+        sync_atlas(s, ui)?;
+        let layer = &ui.output().draw[layer];
         if layer.breaks.is_empty() {
             return s.painter.draw(pass.encoder, pass.size_px, pass.scale, &layer.instances, &[]);
         }
@@ -160,30 +172,33 @@ fn paint_layer(ui: &Ui, pass: &scene::UiPass, layer: usize) -> Result<(), Error>
             let id = as_rays_image(i).map_or(0, image::identity);
             s.images.iter().find(|(key, ..)| *key == id).map(|(_, _, texture, _)| texture).expect("image texture")
         }).collect();
-        let breaks: Vec<Break> = layer.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: Some(textures[b.image as usize]) }).collect();
+        let breaks: Vec<Break> = layer.breaks.iter().map(|b| Break { at_instance: b.at_instance, texture: (b.image != pxui::draw::ATLAS).then(|| textures[b.image as usize]) }).collect();
         s.painter.draw(pass.encoder, pass.size_px, pass.scale, &layer.instances, &breaks)
     })
 }
 
-/// The glyph mask as the painter's R8 atlas: rows a new epoch fills, then the band of rows the new
-/// glyphs since the last upload span.
-fn sync_atlas(s: &mut Shared, atlas: &pxui::ui::Atlas) -> Result<(), Error> {
-    let (epoch, written) = atlas.written();
-    let width = atlas.width as usize;
-    let rows = if s.atlas.0 != epoch {
-        Some((0, atlas.height as u32))
-    } else {
-        written[s.atlas.1..].iter().fold(None, |band: Option<(u32, u32)>, r| {
-            let (y0, y1) = band.unwrap_or((r[1], r[1] + r[3]));
-            Some((y0.min(r[1]), y1.max(r[1] + r[3])))
-        })
-    };
-    if let Some((y0, y1)) = rows.filter(|(y0, y1)| y1 > y0) {
-        let bytes = &atlas.pixels[y0 as usize * width..y1 as usize * width];
-        s.painter.upload(AtlasKind::Mask, 0, y0, width as u32, y1 - y0, bytes, width)?;
+/// The UI's glyph atlases into the painter's: the rectangles rasterised since the last upload, or
+/// both atlases whole when the painter last held another UI's.
+fn sync_atlas(s: &mut Shared, ui: &mut Ui) -> Result<(), Error> {
+    let owner = ui as *const Ui as usize;
+    let t = ui.text_mut();
+    let kind = |k: text::AtlasKind| if k == text::AtlasKind::Mask { AtlasKind::Mask } else { AtlasKind::Color };
+    if s.owner != owner {
+        s.owner = owner;
+        for (k, texel) in [(text::AtlasKind::Mask, 1), (text::AtlasKind::Color, 4)] {
+            let (w, h) = t.atlas_size(k);
+            s.painter.upload(kind(k), 0, 0, w, h, t.atlas_pixels(k), w as usize * texel)?;
+        }
+        t.drain_uploads(&mut |_, _, _, _, _, _, _| {});
+        return Ok(());
     }
-    s.atlas = (epoch, written.len());
-    Ok(())
+    let mut result = Ok(());
+    t.drain_uploads(&mut |k, x, y, w, h, bytes, stride| {
+        if result.is_ok() {
+            result = s.painter.upload(kind(k), x, y, w, h, bytes, stride);
+        }
+    });
+    result
 }
 
 /// A texture holding the image's pixels at their generation.
@@ -213,10 +228,6 @@ fn image_texture(s: &mut Shared, pass: &scene::UiPass, i: &Image) -> Result<(), 
     Ok(())
 }
 
-fn face(f: &Font) -> &font::Font {
-    f.0.downcast_ref::<font::Font>().expect("PXUI font from another backend")
-}
-
 /// A Rays image as PXUI's handle, for `Paint::image`.
 pub fn image(i: &image::Image) -> Image {
     let (width, height) = image::dimensions(i);
@@ -227,25 +238,3 @@ pub fn image(i: &image::Image) -> Image {
 pub fn as_rays_image(i: &Image) -> Option<&image::Image> {
     i.handle.downcast_ref::<image::Image>()
 }
-
-fn open_font(path: Option<&str>, size: i64) -> Option<Font> {
-    let opened = match path {
-        Some(path) => font::load(path, size).ok().inspect(|f| {
-            let _ = font::set_hinting(f, font::Hinting::NoneHinting);
-        }),
-        None => font::system(Some(size)).ok(),
-    };
-    opened.map(|f| Font(Rc::new(f)))
-}
-
-fn glyph(f: &Font, density: i64, code: i64) -> Option<Raster> {
-    let g = font::raster::glyph(Some(density), face(f), code).ok()?;
-    Some(Raster { width: g.glyph_width, height: g.glyph_height, advance: g.glyph_advance, alpha: g.glyph_alpha })
-}
-
-pub static BACKEND: Backend = Backend {
-    open_font,
-    close_font: |f| font::destroy(face(f)),
-    ascent: |f| font::get_ascent(face(f)).unwrap_or(0),
-    glyph,
-};

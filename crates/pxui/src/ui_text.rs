@@ -292,23 +292,12 @@ pub fn scrubbed(literal: &str, dx: f32, coarse: bool) -> String {
 // ---- the retained edit state ----
 
 impl Ui {
+    /// The byte of kit text whose caret is nearest `x` points from its start (pxui_text's hit test).
     pub(crate) fn text_caret_at(&mut self, size: Option<i64>, text: &str, x: f32) -> usize {
-        let density = self.fonts_mut().density as f32;
-        let Some(font) = self.fonts_mut().face(size) else { return text.len() };
-        let length = text.len();
-        let id = if length == 0 { 0 } else { self.fonts_mut().atlas_font_id(&font) };
-        let mut width = 0.0;
-        for (index, c) in text.char_indices() {
-            let advance = match self.fonts_mut().glyph(&font, id, c as i64) {
-                Some(g) => g.advance as f32 / density,
-                None => 0.0,
-            };
-            if x < width + advance / 2.0 {
-                return index;
-            }
-            width += advance;
-        }
-        length
+        let style = kit_style(size.unwrap_or(self.font_size()), 0.0);
+        let t = self.text_mut();
+        let (key, m) = lay_out(t, &style, 0.0, text);
+        t.hit(key, x, m.h / 2.0).min(text.len())
     }
 
     pub fn text_undo_bytes(&self) -> usize {
@@ -645,7 +634,7 @@ pub fn paint_text_edit(
     let visible = 1.max(cw - 4) as f32;
     let full = paint.text_width(size, &edit.text);
     let scroll = 0.0f32.max(paint.edit_scroll_x.min(0.0f32.max(full - visible)));
-    let caret_width = paint.text_width(size, &before);
+    let caret_width = paint.caret_x(size, &edit.text, edit.caret);
     let scroll = if caret_width < scroll {
         caret_width
     } else if caret_width - scroll > visible {
@@ -663,9 +652,17 @@ pub fn paint_text_edit(
     paint.clip_rect = intersect(previous_clip, Rect::new(cx as f32, cy as f32, cw as f32, ch as f32));
     if edit.caret != edit.anchor {
         let (start, stop) = text_selection(edit);
-        let x0 = paint.text_width(size, &edit.text[..start]);
-        let w = paint.text_width(size, &edit.text[start..stop]);
-        paint.fill(text_x + x0, cy as f32 + 0.5, w, 1.max(ch - 2) as f32, theme::tint(&theme));
+        let mut spans = [(0.0, 0.0); 4];
+        let mut n = 0;
+        paint.selection(size, &edit.text, start, stop, &mut |x0, w| {
+            if n < spans.len() {
+                spans[n] = (x0, w);
+                n += 1;
+            }
+        });
+        for &(x0, w) in &spans[..n] {
+            paint.fill(text_x + x0, cy as f32 + 0.5, w, 1.max(ch - 2) as f32, theme::tint(&theme));
+        }
     }
     if composition.is_empty() {
         paint.text_with((text_x, y as f32), size, 0.0, None, &edit.text);
@@ -1956,7 +1953,7 @@ impl Ui {
             self.edit_column
         } else {
             let s = start_of(rows, line);
-            self.text_width(None, &edit.text[s..edit.caret])
+            self.caret_x(None, &row_text(&edit.text, rows, line), edit.caret - s)
         };
         self.edit_column = x;
         if target < 0 {
@@ -2317,8 +2314,8 @@ impl Ui {
             } else if top + row > vertical + bh {
                 vertical = top + row - bh;
             }
-            let ls = start_of(&rows, line);
-            let x = self.text_width(None, &final_text[ls..index.min(stop_of(&rows, line))]);
+            let (ls, le) = (start_of(&rows, line), stop_of(&rows, line));
+            let x = self.caret_x(None, &final_text[ls..le], index.min(le) - ls);
             if x < horizontal {
                 horizontal = x;
             } else if x - horizontal > visible {
@@ -2380,8 +2377,8 @@ impl Ui {
             let caret_line = row_at(&rows, edit.caret);
             let index = clamp_pos(items[st.selected].replace.0);
             let line = row_at(&rows, index);
-            let ls = start_of(&rows, line);
-            let anchor = text_x0 + self.text_width(None, &final_text[ls..index]);
+            let (ls, le) = (start_of(&rows, line), stop_of(&rows, line));
+            let anchor = text_x0 + self.caret_x(None, &final_text[ls..le], index.min(le) - ls);
             let (view_w, view_h) = self.view_size();
             let px = 8.0f32.max((anchor - 8.0).min(view_w - width - 8.0));
             let below = by - offset + pad + (slot_of(&notes, caret_line) + 1) as f32 * row;
@@ -2494,6 +2491,8 @@ impl AreaPaint {
         let selected = self.focused && edit.caret != edit.anchor;
         let (s0, s1) = text_selection(edit);
         let width = |paint: &mut Paint, t: &str| paint.text_width(None, t);
+        // where the caret before byte `i` of the row `ls..le` sits, from the row's start
+        let at = |paint: &mut Paint, ls: usize, le: usize, i: usize| paint.caret_x(None, &final_text[ls..le], i.min(le) - ls);
         let clip = |paint: &mut Paint, x: f32, w: f32| paint.clip_rect = intersect(previous, Rect::new(x, by, w, bh));
         let band = |paint: &mut Paint, line: usize, start: usize, stop: usize, color: Color, y: f32| {
             let ls = start_of(rows, line);
@@ -2503,8 +2502,8 @@ impl AreaPaint {
             let start = start.max(ls);
             let stop = stop.min(if newline { le + 1 } else { le });
             if start < stop || (start <= le && stop > le) {
-                let x0 = width(paint, &final_text[ls..start.min(le)]);
-                let x1 = if stop > le { width(paint, &final_text[ls..le]) + char_w } else { width(paint, &final_text[ls..stop]) };
+                let x0 = at(paint, ls, le, start);
+                let x1 = if stop > le { at(paint, ls, le, le) + char_w } else { at(paint, ls, le, stop) };
                 paint.fill(text_x + x0, y, 1.0f32.max(x1 - x0), row, color);
             }
         };
@@ -2559,7 +2558,7 @@ impl AreaPaint {
                     let le = stop_of(rows, lu);
                     if b >= ls && b < le {
                         // the glyph's box (6.5 x 14) with a 1-point outline outside it: 8.5 x 16
-                        let x = text_x + width(paint, &final_text[ls..b]) - 1.0;
+                        let x = text_x + at(paint, ls, le, b) - 1.0;
                         paint.frame(x, y + 2.0, char_w + 2.0, 16.0, theme.accent);
                     }
                 }
@@ -2569,8 +2568,8 @@ impl AreaPaint {
                 let ls = start_of(rows, lu);
                 let le = stop_of(rows, lu);
                 if a >= ls && a < le {
-                    let x0 = width(paint, &final_text[ls..a]);
-                    let x1 = width(paint, &final_text[ls..b.min(le)]);
+                    let x0 = at(paint, ls, le, a);
+                    let x1 = at(paint, ls, le, b);
                     paint.fill(
                         text_x + x0,
                         y + row - 4.0,
@@ -2586,8 +2585,8 @@ impl AreaPaint {
             for (a, b, c) in &self.chips {
                 let (a, b) = (clamp_pos(*a), clamp_pos(*b));
                 if a >= ls && a < le && b <= final_text.len() {
-                    let x0 = width(paint, &final_text[ls..a]);
-                    let w1 = width(paint, &final_text[a..b.min(le)]);
+                    let x0 = at(paint, ls, le, a);
+                    let w1 = at(paint, ls, le, b) - x0;
                     paint.fill(text_x + x0, y + row - 5.0, w1, 4.0, *c);
                 }
             }
@@ -2598,8 +2597,8 @@ impl AreaPaint {
                     if a < le && b > ls && b > a && b <= final_text.len() {
                         let a = a.max(ls);
                         let b = b.min(le);
-                        let x0 = width(paint, &final_text[ls..a]);
-                        let w1 = 1.0f32.max(width(paint, &final_text[a..b]));
+                        let x0 = at(paint, ls, le, a);
+                        let w1 = 1.0f32.max(at(paint, ls, le, b) - x0);
                         paint.fill(text_x + x0, y + row - 3.0, w1, 1.0, theme::invalid());
                     }
                 }
@@ -2607,7 +2606,7 @@ impl AreaPaint {
             let line_str = &final_text[ls..le];
             if self.focused && lu == caret_line && !self.composition.is_empty() {
                 let before = &final_text[ls..edit.caret];
-                let caret_x = text_x + width(paint, before);
+                let caret_x = text_x + at(paint, ls, le, edit.caret);
                 paint.text_c((text_x, text_y), theme.foreground, before);
                 paint.text_c((caret_x, text_y), theme.foreground, &self.composition);
                 let cw = width(paint, &self.composition);
@@ -2623,7 +2622,7 @@ impl AreaPaint {
                 let mut k = colors_ahead;
                 let run = |paint: &mut Paint, a: usize, b: usize, c: Color| {
                     if a < b {
-                        let ax = text_x + width(paint, &final_text[ls..a]);
+                        let ax = text_x + at(paint, ls, le, a);
                         paint.text_c((ax, text_y), c, &final_text[a..b]);
                     }
                 };
@@ -2662,8 +2661,8 @@ impl AreaPaint {
         clip(paint, bx + gutter, bw - gutter);
         if self.focused {
             let y = by - offset + pad + slot_of(&self.notes, caret_line) as f32 * row;
-            let ls = start_of(rows, caret_line);
-            let caret_x = text_x + width(paint, &final_text[ls..edit.caret]);
+            let (ls, le) = (start_of(rows, caret_line), stop_of(rows, caret_line));
+            let caret_x = text_x + at(paint, ls, le, edit.caret);
             paint.input_region(caret_x - bx, bx, y, bw, row);
             paint.fill(caret_x.round(), y + 2.0, 1.0, row - 4.0, theme.accent);
         }

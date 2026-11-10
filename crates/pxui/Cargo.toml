@@ -13,6 +13,7 @@ test = false
 [dependencies]
 cfmt = { path = "../cfmt" }
 input = { path = "../input" }
+pxui_text = { path = "../pxui_text" }
 
 # ponytail: the window cases run on the Rays host (fonts, clipboard, scene lowering) until
 # pxui_text and pxui_render make them headless (P2-P4).

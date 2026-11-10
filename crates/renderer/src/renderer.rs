@@ -11,7 +11,7 @@ use ogpu_core::error::{self as oerror, Error, ErrorKind};
 use ogpu_core::pipeline::Blend;
 use ogpu_core::types::{AddressMode, BufferDescriptor, BufferUsage, MipFilter, SamplerDescriptor, SamplerFilter};
 use runtime::{FrameFacts, PresentationFacts};
-use runtime_resources::{assets, canvas, image, text};
+use runtime_resources::{assets, canvas, image};
 use scene_command::render_ir::{self as ir, Command, RenderIr};
 use scene_command::ui_batch::Table as Shapes;
 use scene_command::marks;
@@ -817,20 +817,6 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                         }
                     }
                 }
-            }
-        }
-        retained_resource::Text(text) => {
-            // Text snapshots are immutable and uniquely identified, like images: a hit touches no
-            // pixels, a miss copies them once.
-            let key = format!("text:{}", text::identity(&text));
-            let generation = text::generation(&text);
-            if !text::destroyed(&text)
-                && let Some(cached) = find(&key, generation) {
-                    return Ok(cached);
-                }
-            match (text::size(&text), text::borrow_pixels(&text)) {
-                (Ok((width, height)), Ok(pixels)) => finish(true, &key, generation, width, height, &pixels),
-                (Err(e), _) | (_, Err(e)) => Err(resource_error_value(operation, &e)),
             }
         }
         retained_resource::Canvas(canvas) => {

@@ -169,3 +169,19 @@ fn warm_unchanged_frame_allocates_nothing() {
     assert_eq!(m, n);
     assert_eq!(allocs, 0, "warm frame allocated {allocs} times");
 }
+
+#[test]
+fn monospace_advances_tracking_and_ascent() {
+    let mut t = Text::new(&[pxui_text::PRAGMASEVKA]);
+    let st = Style { size: 13.0, ..Style::default() };
+    let one = t.layout(1, "-", &st, 0.0).w;
+    // contextual alternates (`calt`) swap shapes, never cell widths: UI columns stay aligned
+    for s in ["->", "!=", "==>", "www", "ii"] {
+        let w = t.layout(2, s, &st, 0.0).w;
+        assert!((w - one * s.chars().count() as f32).abs() < 1e-3, "{s}: {w} vs {one} a cell");
+    }
+    let tracked = t.layout(3, "abc", &Style { tracking: 1.5, ..st }, 0.0).w;
+    assert!((tracked - 3.0 * (one + 1.5)).abs() < 1e-3, "tracking follows every glyph: {tracked}");
+    let a = t.ascent(0);
+    assert!(a > 0.5 && a < 1.5, "ascent ratio {a}");
+}

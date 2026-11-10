@@ -11,7 +11,7 @@ use rays_math::color;
 use renderer::renderer::Resource as retained_resource;
 use renderer::scene_execution as se;
 pub use renderer::scene_execution::{UiLayer, UiPaint, UiPass};
-use runtime_resources::{canvas as RCanvas, image as RImage, text as RText};
+use runtime_resources::{canvas as RCanvas, image as RImage};
 use scene_command::display_list::{self, Segment};
 use scene_command::render_ir::{self, Command, Geometry, Transform};
 use scene_command::shape2;
@@ -38,7 +38,6 @@ pub struct TextNode {
     pub size: i64,
     pub wrap: Option<i64>,
     pub align: font::Alignment,
-    pub provided_font: Option<font::Font>,
     automatic: RefCell<Option<font::raster::Automatic>>,
     rendered: RefCell<Option<image::Image>>,
 }
@@ -286,7 +285,6 @@ pub fn text(at: (i64, i64), color_: Option<color::T>, size: Option<i64>, value: 
         size: size.unwrap_or(16),
         wrap: None,
         align: font::Alignment::Left,
-        provided_font: None,
         automatic: RefCell::new(None),
         rendered: RefCell::new(None),
     }))
@@ -368,7 +366,6 @@ pub fn clip(at: (i64, i64), w: i64, h: i64, nodes: Scene) -> Node {
 fn same_handle(x: &retained_resource, y: &retained_resource) -> bool {
     match (x, y) {
         (retained_resource::Image(a), retained_resource::Image(b)) => RImage::identity(a) == RImage::identity(b),
-        (retained_resource::Text(a), retained_resource::Text(b)) => Rc::ptr_eq(a, b),
         (retained_resource::Canvas(a), retained_resource::Canvas(b)) => RCanvas::identity(a) == RCanvas::identity(b),
         _ => false,
     }
@@ -384,14 +381,6 @@ fn same_segment(a: &Arc<Segment>, b: &Arc<Segment>) -> bool {
 
 fn same_ui(a: &ui_batch::Table, b: &ui_batch::Table) -> bool {
     a.count() == b.count() && a.instances() == b.instances() && a.batches() == b.batches() && a.marks() == b.marks()
-}
-
-fn same_font(a: &Option<font::Font>, b: &Option<font::Font>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(x), Some(y)) => font::same(x, y),
-        _ => false,
-    }
 }
 
 fn same_children(a: &Rc<Vec<Node>>, b: &Rc<Vec<Node>>) -> bool {
@@ -412,7 +401,6 @@ fn same_text(x: &TextNode, y: &TextNode) -> bool {
         && x.size == y.size
         && x.wrap == y.wrap
         && x.align == y.align
-        && same_font(&x.provided_font, &y.provided_font)
 }
 
 fn same_node(a: &Node, b: &Node) -> bool {
@@ -629,7 +617,6 @@ pub mod layer {
         for (_, r) in resources {
             stamp = match r {
                 retained_resource::Image(image) => mix(mix(stamp, RImage::identity(image)), RImage::generation(image)),
-                retained_resource::Text(text) => mix(mix(stamp, RText::identity(text)), RText::generation(text)),
                 retained_resource::Canvas(canvas) => mix(mix(stamp, RCanvas::identity(canvas)), RCanvas::generation(canvas)),
             };
         }
@@ -653,15 +640,9 @@ pub mod layer {
         if let Some(img) = n.rendered.borrow().as_ref() {
             return Ok(img.clone());
         }
-        let img = match &n.provided_font {
-            Some(f) => font::cached_text(n.wrap, Some(n.align), Some(density), f, &n.value, font::RenderMode::Blended(n.color))?,
-            None => {
-                let automatic = font::raster::borrow_automatic(n.wrap, Some(n.align), Some(density), n.size, &n.value, font::RenderMode::Blended(n.color))?;
-                let img = font::raster::automatic_image(&automatic);
-                *n.automatic.borrow_mut() = Some(automatic);
-                img
-            }
-        };
+        let automatic = font::raster::borrow_automatic(n.wrap, Some(n.align), Some(density), n.size, &n.value, font::RenderMode::Blended(n.color))?;
+        let img = font::raster::automatic_image(&automatic);
+        *n.automatic.borrow_mut() = Some(automatic);
         *n.rendered.borrow_mut() = Some(img.clone());
         Ok(img)
     }
@@ -1054,7 +1035,6 @@ pub mod layer {
     fn resource_version(r: &(i64, retained_resource)) -> (i64, i64, i64) {
         match r {
             (id, retained_resource::Image(i)) => (*id, RImage::identity(i), RImage::generation(i)),
-            (id, retained_resource::Text(x)) => (*id, RText::identity(x), RText::generation(x)),
             (id, retained_resource::Canvas(c)) => (*id, RCanvas::identity(c), RCanvas::generation(c)),
         }
     }
@@ -1336,7 +1316,6 @@ pub mod layer {
         let mix3 = |s: i64, id: i64, a: i64, b: i64| mix(mix(mix(s, id), a), b);
         resources.iter().fold(stamp, |s, r| match r {
             (id, retained_resource::Image(i)) => mix3(s, *id, RImage::identity(i), RImage::generation(i)),
-            (id, retained_resource::Text(x)) => mix3(s, *id, RText::identity(x), RText::generation(x)),
             (id, retained_resource::Canvas(c)) => mix3(s, *id, RCanvas::identity(c), RCanvas::generation(c)),
         })
     }

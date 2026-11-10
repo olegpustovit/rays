@@ -190,7 +190,7 @@ fn lower_all(
                 native::lower_scene2(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ir)
             }
             layer::NativeLayer::Scene2Segment(segment, resources) => {
-                let cacheable = resources.iter().all(|(_, r)| matches!(r, rr::Resource::Text(_)));
+                let cacheable = resources.is_empty();
                 let version = layer::native_segment_version(segment, resources);
                 let ir = scene::segment_ir(segment).map_err(Error::Stage)?;
                 native::lower_scene2_segment(

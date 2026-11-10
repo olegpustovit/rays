@@ -231,7 +231,7 @@ pub fn text_keys_are_handled() {
     assert!(!keys.is_empty(), "no text keys");
     for (label, trigger) in keys {
         let Trigger::Chord(k, mods) = trigger else { panic!("text key without a chord") };
-        let mut ui = pxui::ui::Ui::create(Platform::Apple, Some(11), None, &rays_shell::host::BACKEND);
+        let mut ui = pxui::ui::Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
         let text = Rc::new(RefCell::new("(a (b c))\n(d (e))".to_string()));
         let sel = Rc::new(RefCell::new((0i64, 0i64)));
         let caret = Rc::new(RefCell::new(0i64));

@@ -965,7 +965,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
         // PXUI is headed for its own repository: plain data in (input), a draw list out.
-        ("pxui", &["input", "cfmt"][..]),
+        ("pxui", &["input", "cfmt", "pxui_text"][..]),
         ("pxui_text", &[][..]),
         // The UI painter: the portable GPU API and PXUI's draw list, so it moves to the PXUI repository unchanged.
         ("pxui_render", &["ogpu_core", "pxui"][..]),

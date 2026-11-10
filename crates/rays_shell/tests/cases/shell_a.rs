@@ -12,7 +12,7 @@ use rays::frame;
 
 pub fn new_ui() -> Ui {
     let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
-    Ui::create(input::Platform::Apple, Some(11), Some(path), &rays_shell::host::BACKEND)
+    Ui::create(input::Platform::Apple, Some(11), rays_shell::host::text(Some(&path)))
 }
 
 /// Build a 400x300 logical frame unless sized, with the supplied pointer and events.

@@ -8,6 +8,7 @@ use input::frame as rframe;
 use crate::geom::{color, Rgba as Color};
 use crate::draw::{Break, Instance};
 use std::any::Any;
+use pxui_text::{Metrics, Style, Text};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -384,39 +385,12 @@ pub struct Accumulator {
     pub press_keys: Vec<Key>,
 }
 
-// ------------------------------------------------------ glyph atlas
-
-/// The mask atlas the painter holds: glyph uv are normalised to this size.
-pub const ATLAS_WIDTH: i64 = 1024;
-pub const ATLAS_HEIGHT: i64 = 4096;
-
-#[derive(Clone, Copy, Debug)]
-pub struct Glyph {
-    pub gx: i64,
-    pub gy: i64,
-    pub gw: i64,
-    pub gh: i64,
-    pub advance: i64,
-}
-
-/// A host font face: the host opens it and rasterises its glyphs.
-#[derive(Clone)]
-pub struct Font(pub Rc<dyn Any>);
-
 /// A host texture with its size in pixels; PXUI only binds it to the instances that sample it.
 #[derive(Clone)]
 pub struct Image {
     pub handle: Rc<dyn Any>,
     pub width: i64,
     pub height: i64,
-}
-
-/// One rasterised code point: coverage bytes, one per pixel, and the pen advance in pixels.
-pub struct Raster {
-    pub width: i64,
-    pub height: i64,
-    pub advance: i64,
-    pub alpha: Vec<u8>,
 }
 
 /// One paint layer: the base UI, then a layer per floating root (`key` is its box key; 0 for the
@@ -452,300 +426,33 @@ pub struct FrameOut<'a> {
     pub platform: &'a PlatformOut,
 }
 
-/// What PXUI needs from the host's text and texture services.
-// ponytail: a function table until pxui_text (P3) and pxui_render (P2) own glyphs and textures.
-pub struct Backend {
-    /// The face at `path` unhinted, or the system face when `path` is `None`, at `size` points.
-    pub open_font: fn(path: Option<&str>, size: i64) -> Option<Font>,
-    pub close_font: fn(&Font),
-    /// The face's ascent in points.
-    pub ascent: fn(&Font) -> i64,
-    /// One code point at `density` exactly as it appears inside a rendered string.
-    pub glyph: fn(&Font, density: i64, code: i64) -> Option<Raster>,
+// -------------------------------------------------------------- text
+
+/// The layout key of `text` in `style` at `width`: equal text in an equal style shares one cached
+/// layout, so an unchanged label is a cache hit wherever it is drawn or measured.
+fn text_key(style: &Style, width: f32, text: &str) -> u64 {
+    let mut seed = hash::mix(style.font as i64, style.size.to_bits() as i64);
+    for v in [style.weight as i64, style.italic as i64, style.line_height.to_bits() as i64, style.wrap as i64, style.align as i64, style.max_lines as i64, style.ellipsis as i64, style.tracking.to_bits() as i64, width.to_bits() as i64] {
+        seed = hash::mix(seed, v);
+    }
+    hash::bytes(seed as u64, text.as_bytes())
 }
 
-/// The glyph coverage mirror, one byte per texel, `width` by `height` (the painter's mask atlas
-/// is `ATLAS_WIDTH` by `ATLAS_HEIGHT`; rows past `height` are unused).
-pub struct Atlas {
-    pub width: i64,
-    pub height: i64,
-    pub pixels: Vec<u8>,
-    glyphs: HashMap<i64, Glyph>,
-    shelf_x: i64,
-    shelf_y: i64,
-    shelf_h: i64,
-    /// the glyph rectangles written since `epoch` began, `[x, y, w, h]`
-    written: Vec<[u32; 4]>,
-    epoch: u64,
-    fonts: Vec<(Font, i64)>,
-    next_font: i64,
+/// Kit text: the UI face (font 0) at `size` points with `tracking` points after every glyph.
+pub fn kit_style(size: i64, tracking: f32) -> Style {
+    Style { size: size as f32, tracking, ..Style::default() }
 }
 
-/// Every atlas content generation in the process is distinct, so a host can tell a cleared or
-/// different atlas from the one it last uploaded.
-fn next_epoch() -> u64 {
-    static EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+/// Lay `text` out (a cache hit when unchanged) and return its key and metrics.
+pub(crate) fn lay_out(t: &mut Text, style: &Style, width: f32, text: &str) -> (u64, Metrics) {
+    let key = text_key(style, width, text);
+    (key, t.layout(key, text, style, width))
 }
 
-impl Atlas {
-    fn empty() -> Atlas {
-        Atlas { width: ATLAS_WIDTH, height: 0, pixels: Vec::new(), glyphs: HashMap::new(), shelf_x: 0, shelf_y: 0, shelf_h: 0, written: Vec::new(), epoch: next_epoch(), fonts: Vec::new(), next_font: 1 }
-    }
-
-    fn create() -> Atlas {
-        Atlas { height: 256, pixels: vec![0; (ATLAS_WIDTH * 256) as usize], ..Atlas::empty() }
-    }
-
-    /// The content generation and the glyph rectangles written in it so far, in order. A host
-    /// uploads `pixels` rows `0..height` when the epoch is new to it, then the rectangles past
-    /// those it has uploaded.
-    pub fn written(&self) -> (u64, &[[u32; 4]]) {
-        (self.epoch, &self.written)
-    }
-
-    /// PXUI opens its faces once and never restyles them, so a face keeps its glyph ids.
-    fn font_id(&mut self, font: &Font) -> i64 {
-        match self.fonts.iter().find(|(candidate, _)| Rc::ptr_eq(&candidate.0, &font.0)) {
-            Some((_, id)) => *id,
-            None => {
-                let id = self.next_font;
-                self.next_font += 1;
-                self.fonts.insert(0, (font.clone(), id));
-                id
-            }
-        }
-    }
-
-    fn reset(&mut self) {
-        self.glyphs.clear();
-        for p in self.pixels.iter_mut() {
-            *p = 0;
-        }
-        self.shelf_x = 0;
-        self.shelf_y = 0;
-        self.shelf_h = 0;
-        self.written.clear();
-        self.epoch = next_epoch();
-    }
-
-    // ponytail: a single shelf-packed page that doubles in height up to 4096 rows; when that
-    // fills, the atlas is cleared and glyphs re-rasterize.
-    fn reserve(&mut self, width: i64, height: i64) -> Option<(i64, i64)> {
-        let padded_w = width + 1;
-        let padded_h = height + 1;
-        if padded_w > self.width {
-            return None;
-        }
-        if self.shelf_x + padded_w > self.width {
-            self.shelf_y += self.shelf_h;
-            self.shelf_x = 0;
-            self.shelf_h = 0;
-        }
-        if self.shelf_y + padded_h > self.height {
-            let mut h = self.height;
-            while self.shelf_y + padded_h > h && h < ATLAS_HEIGHT {
-                h *= 2;
-            }
-            if self.shelf_y + padded_h > h {
-                self.reset();
-            } else {
-                self.pixels.resize((self.width * h) as usize, 0);
-                self.height = h;
-            }
-        }
-        let x = self.shelf_x;
-        let y = self.shelf_y;
-        self.shelf_x = x + padded_w;
-        self.shelf_h = self.shelf_h.max(padded_h);
-        Some((x, y))
-    }
-
-    fn glyph(&mut self, backend: &Backend, font: &Font, id: i64, density: i64, code: i64) -> Option<Glyph> {
-        let key = (((id * 32) + density) << 21) | code;
-        if let Some(found) = self.glyphs.get(&key) {
-            return Some(*found);
-        }
-        let raster = (backend.glyph)(font, density, code)?;
-        let glyph = if raster.width == 0 || raster.height == 0 {
-            Some(Glyph { gx: 0, gy: 0, gw: 0, gh: 0, advance: raster.advance })
-        } else {
-            match self.reserve(raster.width, raster.height) {
-                None => None,
-                Some((gx, gy)) => {
-                    for row in 0..raster.height {
-                        for column in 0..raster.width {
-                            self.pixels[((gy + row) * self.width + (gx + column)) as usize] =
-                                raster.alpha[(row * raster.width + column) as usize];
-                        }
-                    }
-                    self.written.push([gx as u32, gy as u32, raster.width as u32, raster.height as u32]);
-                    Some(Glyph { gx, gy, gw: raster.width, gh: raster.height, advance: raster.advance })
-                }
-            }
-        };
-        if let Some(g) = glyph {
-            self.glyphs.insert(key, g);
-        }
-        glyph
-    }
-
-}
-
-// ------------------------------------------------------------- fonts
-
-/// The kit faces by size, the glyph atlas and the text measure: the part of the UI that painting
-/// shares. `Paint` owns it while a frame paints.
-pub struct Fonts {
-    backend: &'static Backend,
-    faces: HashMap<i64, Option<Font>>,
-    font_path: Option<String>,
-    kit_font: Option<Option<String>>,
-    ascent_ratio: Option<f64>,
-    pub atlas: Atlas,
-    pub density: i64,
-    pub font_size: i64,
-}
-
-impl Fonts {
-    /// What `Ui` holds while `Paint` borrows its fonts.
-    fn placeholder(backend: &'static Backend) -> Fonts {
-        Fonts { backend, faces: HashMap::new(), font_path: None, kit_font: None, ascent_ratio: None, atlas: Atlas::empty(), density: 1, font_size: 13 }
-    }
-}
-
-
-fn upward(directory: &std::path::Path, relative: &std::path::Path) -> Option<String> {
-    let mut dir = Some(directory.to_path_buf());
-    while let Some(d) = dir {
-        let candidate = d.join(relative);
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().into_owned());
-        }
-        dir = d.parent().map(|p| p.to_path_buf());
-    }
-    None
-}
-
-impl Fonts {
-    fn create(backend: &'static Backend, font_path: Option<String>, font_size: i64) -> Fonts {
-        Fonts {
-            backend,
-            faces: HashMap::new(),
-            font_path,
-            kit_font: None,
-            ascent_ratio: None,
-            atlas: Atlas::create(),
-            density: 1,
-            font_size,
-        }
-    }
-
-    /// The kit face: the caller's `font_path`, else Pragmasevka found from the working directory or
-    /// the executable upward.
-    fn kit_font(&mut self) -> Option<String> {
-        if self.kit_font.is_none() {
-            let found = match &self.font_path {
-                Some(path) => Some(path.clone()),
-                None => {
-                    let relative: std::path::PathBuf =
-                        ["assets", "fonts", "Pragmasevka-Regular.ttf"].iter().collect();
-                    let cwd = std::env::current_dir().ok().and_then(|d| upward(&d, &relative));
-                    cwd.or_else(|| {
-                        std::env::current_exe()
-                            .ok()
-                            .and_then(|e| e.parent().map(|p| p.to_path_buf()))
-                            .and_then(|d| upward(&d, &relative))
-                    })
-                }
-            };
-            self.kit_font = Some(found);
-        }
-        self.kit_font.clone().unwrap()
-    }
-
-    pub fn face(&mut self, size: Option<i64>) -> Option<Font> {
-        let size = size.unwrap_or(self.font_size);
-        if let Some(face) = self.faces.get(&size) {
-            return face.clone();
-        }
-        // the sheets' renderer does not hint: the host opens the kit face unhinted
-        let loaded = self.kit_font().and_then(|path| (self.backend.open_font)(Some(&path), size));
-        let face = loaded.or_else(|| (self.backend.open_font)(None, size));
-        self.faces.insert(size, face.clone());
-        face
-    }
-
-    /// The kit face's ascent as a fraction of its size, measured once on a large face. SDL_ttf
-    /// rounds a font's ascent up to a whole pixel; the sheets' renderer rounds it to the nearest.
-    fn ascent_ratio(&mut self) -> f64 {
-        if self.ascent_ratio.is_none() {
-            let ratio = match self.kit_font() {
-                Some(path) => match (self.backend.open_font)(Some(&path), 4096) {
-                    Some(f) => {
-                        let ratio = (self.backend.ascent)(&f) as f64 / 4096.0;
-                        (self.backend.close_font)(&f);
-                        ratio
-                    }
-                    None => 0.0,
-                },
-                None => 0.0,
-            };
-            self.ascent_ratio = Some(ratio);
-        }
-        self.ascent_ratio.unwrap()
-    }
-
-    /// the move, in points, that puts a glyph raster's baseline on the nearest pixel row of its
-    /// ascent instead of the one above: 0 or one device pixel up
-    fn ascent_shift(&mut self, size: i64, density: i64) -> f64 {
-        let ratio = self.ascent_ratio();
-        if ratio == 0.0 {
-            0.0
-        } else {
-            let exact = ratio * size as f64 * density as f64;
-            (exact.round() - (exact - 0.02).ceil()) / density as f64
-        }
-    }
-
-    pub fn atlas_font_id(&mut self, font: &Font) -> i64 {
-        self.atlas.font_id(font)
-    }
-
-    pub fn glyph(&mut self, font: &Font, id: i64, code: i64) -> Option<Glyph> {
-        let density = self.density;
-        self.atlas.glyph(self.backend, font, id, density, code)
-    }
-
-    pub fn text_width_px(&mut self, size: Option<i64>, text: &str) -> i64 {
-        match self.face(size) {
-            None => 0,
-            Some(font) => {
-                let id = if text.is_empty() { 0 } else { self.atlas.font_id(&font) };
-                let mut total = 0;
-                for c in text.chars() {
-                    if let Some(g) = self.glyph(&font, id, c as i64) {
-                        total += g.advance;
-                    }
-                }
-                total
-            }
-        }
-    }
-
-    /// the width of kit text in points: the one measure of the build and of painting
-    pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f32 {
-        (self.text_width_px(size, text) as f64 / self.density as f64) as f32
-    }
-
-    pub fn destroy(&mut self) {
-        for (_, face) in self.faces.drain() {
-            if let Some(f) = face {
-                (self.backend.close_font)(&f);
-            }
-        }
-        self.atlas.fonts.clear();
-    }
+/// The x of the caret before byte `index` of single-line kit text, in points from its start.
+fn caret_x(t: &mut Text, size: i64, text: &str, index: usize) -> f32 {
+    let (key, _) = lay_out(t, &kit_style(size, 0.0), 0.0, text);
+    t.caret(key, index.min(text.len())).x
 }
 
 // ----------------------------------------------------------------- Ui
@@ -754,7 +461,8 @@ pub struct Ui {
     theme: Theme,
     font_size: i64,
     platform: Platform,
-    fonts: Fonts,
+    /// the text engine; `Paint` holds it while a frame paints
+    text: Option<Text>,
     table: SlotTable,
     slots: Vec<Slot>,
     free: Vec<usize>,
@@ -844,7 +552,7 @@ pub struct Ui {
     destroyed: bool,
 }
 
-/// Bytes a UI holds: the glyph atlas's CPU mirror and the text undo stacks and shelf.
+/// Bytes a UI holds: the glyph atlases' CPU mirrors and the text undo stacks and shelf.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Bytes {
     pub atlas: i64,
@@ -872,20 +580,18 @@ pub fn int_key(seed: i64, n: i64) -> i64 {
 
 impl Ui {
     /// `platform` is the host's modifier conventions: the text keys and every Command check follow
-    /// it. `font_path` names the kit face's file (default: Pragmasevka found from the working
-    /// directory or the executable upward; the environment is never read); `font_size` is the
-    /// logical size of kit text.
-    pub fn create(platform: Platform, font_size: Option<i64>, font_path: Option<String>, backend: &'static Backend) -> Ui {
+    /// it. `text` holds the fonts the host loaded: font 0 is the kit face (`pxui_text::PRAGMASEVKA`
+    /// in the default theme); `font_size` is the logical size of kit text.
+    pub fn create(platform: Platform, font_size: Option<i64>, text: Text) -> Ui {
         let font_size = font_size.unwrap_or(theme::FONT_SIZE);
         if font_size <= 0 {
             panic!("Ui.create: font_size must be positive");
         }
-        let fonts = Fonts::create(backend, font_path, font_size);
         Ui {
             theme: theme::default(),
             font_size,
             platform,
-            fonts,
+            text: Some(text),
             table: SlotTable::create(),
             slots: Vec::new(),
             free: Vec::new(),
@@ -974,12 +680,10 @@ impl Ui {
         self.platform
     }
 
-    /// Release the glyph atlas and the kit faces this UI loaded. The handle must not be used
-    /// afterwards.
+    /// Release what this UI holds. The handle must not be used afterwards.
     pub fn destroy(&mut self) {
         if !self.destroyed {
             self.destroyed = true;
-            self.fonts.destroy();
             self.draw.clear();
             self.spare.clear();
             self.draw_len = 0;
@@ -1008,7 +712,6 @@ impl Ui {
             panic!("Ui.set_font_size: size must be positive");
         }
         self.font_size = size;
-        self.fonts.font_size = size;
         self.kit_row_height = 24.max(size + 11);
     }
 
@@ -1031,9 +734,10 @@ impl Ui {
         self.draw_revision
     }
 
-    /// The glyph mask the frame's glyph instances sample (`Atlas::written` says what changed).
-    pub fn atlas(&self) -> &Atlas {
-        &self.fonts.atlas
+    /// The text engine: the host loads fonts into it and feeds its painter from `drain_uploads`
+    /// (the glyph atlases the frame's glyph instances sample).
+    pub fn text_mut(&mut self) -> &mut Text {
+        self.text.as_mut().expect("Ui: text is out while painting")
     }
 
     /// How many keys the retained cache holds (live slots).
@@ -1058,14 +762,27 @@ impl Ui {
         if self.destroyed {
             Bytes::default()
         } else {
-            Bytes { atlas: self.fonts.atlas.pixels.len() as i64, text_undo: self.text_undo_held }
+            Bytes { atlas: self.text.as_ref().map_or(0, |t| t.bytes()) as i64, text_undo: self.text_undo_held }
         }
     }
 
     /// The width of kit text in points, for layout during the build (`Paint::text_width` while
     /// painting).
     pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f32 {
-        self.fonts.text_width(size, text)
+        let size = size.unwrap_or(self.font_size);
+        lay_out(self.text_mut(), &kit_style(size, 0.0), 0.0, text).1.w
+    }
+
+    /// Lay `text` out in any style (wrap, ellipsis, line limit, alignment, font) within `width`
+    /// points (0: unbounded), as `Paint::text_styled` draws it.
+    pub fn text_metrics(&mut self, style: &Style, width: f32, text: &str) -> Metrics {
+        lay_out(self.text_mut(), style, width, text).1
+    }
+
+    /// The x of the caret before byte `index` of kit text, in points from the text's start.
+    pub fn caret_x(&mut self, size: Option<i64>, text: &str, index: usize) -> f32 {
+        let size = size.unwrap_or(self.font_size);
+        caret_x(self.text_mut(), size, text, index)
     }
 
     /// Measure the same ASCII-uppercase label style as `Paint::cap`, reusing the frame's text buffer.
@@ -1074,13 +791,9 @@ impl Ui {
         buffer.clear();
         buffer.extend(text.chars().map(|c| c.to_ascii_uppercase()));
         let size = 8.max(self.font_size - 2);
-        let width = self.text_width(Some(size), &buffer) + 0.08 * size as f32 * text.chars().count() as f32;
+        let width = lay_out(self.text_mut(), &kit_style(size, 0.08 * size as f32), 0.0, &buffer).1.w;
         self.label = buffer;
         width
-    }
-
-    pub(crate) fn fonts_mut(&mut self) -> &mut Fonts {
-        &mut self.fonts
     }
 
     // ----------------------------------------------------- retained slots
@@ -2780,6 +2493,12 @@ pub fn text_top_for(font_size: i64, size: Option<i64>, y: f32, h: f32) -> f32 {
     y + ((h - size.unwrap_or(font_size) as f32) / 2.0).floor()
 }
 
+/// The instance clip of `rect`: whole points covering it.
+fn clip_of(Rect { x, y, w, h }: Rect) -> [i16; 4] {
+    let whole = |v: f32| v.clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+    [whole(x.floor()), whole(y.floor()), whole((x + w).ceil()), whole((y + h).ceil())]
+}
+
 /// The painter's handle for one frame. It owns the layers being filled, the glyph atlas and the
 /// layout arrays painters read while painting; `Ui::frame` hands them back afterwards.
 pub struct Paint {
@@ -2789,7 +2508,9 @@ pub struct Paint {
     pub theme: Theme,
     pub font_size: i64,
     pub row_height: i64,
-    pub fonts: Fonts,
+    /// device pixels per point
+    pub density: i64,
+    pub text: Text,
     /// the focused text's input area and caret offset
     pub ime: Option<((i64, i64, i64, i64), i64)>,
     label: String,
@@ -2817,16 +2538,14 @@ impl Paint {
 
     /// Append `instance` under the current clip.
     fn push(&mut self, instance: Instance) {
-        let Rect { x, y, w, h } = self.clip_rect;
-        let whole = |v: f32| v.clamp(i16::MIN as f32, i16::MAX as f32) as i16;
-        let clip = [whole(x.floor()), whole(y.floor()), whole((x + w).ceil()), whole((y + h).ceil())];
+        let clip = clip_of(self.clip_rect);
         self.layers[self.layer].instances.push(Instance { clip, ..instance });
     }
 
     /// An edge at `v` points as the rasteriser covers pixel centres (`a <= centre < b`): snapped
     /// to the pixel grid, so hard-edged fills keep the pixels a triangle rectangle covers.
     fn snap(&self, v: f32) -> f32 {
-        let d = self.fonts.density as f32;
+        let d = self.density as f32;
         (v * d - 0.5).ceil() / d
     }
 
@@ -2977,41 +2696,44 @@ impl Paint {
     }
 
     /// Kit text with its top-left corner at `at`. Without `size` it uses the UI's own font; with
-    /// `size` the kit face at that size. Glyphs stay on physical pixels. `tracking` adds points
-    /// between glyphs.
+    /// `size` the kit face at that size. `tracking` adds points after every glyph.
     pub fn text_with(&mut self, at: (f32, f32), size: Option<i64>, tracking: f32, color: Option<Color>, text: &str) {
-        if text.is_empty() {
-            return;
+        if !text.is_empty() {
+            let style = kit_style(size.unwrap_or(self.font_size), tracking);
+            self.text_styled(at, &style, 0.0, color, text);
         }
-        let (at, tracking) = ((at.0 as f64, at.1 as f64), tracking as f64);
-        let Some(font) = self.fonts.face(size) else { return };
-        let id = self.fonts.atlas.font_id(&font);
+    }
+
+    /// Text in any style (wrap, ellipsis, line limit, alignment, font) within `width` points (0:
+    /// unbounded), its top-left corner at `at`: the first baseline sits the font's ascent below `at`,
+    /// on a device pixel. Mask glyphs take `color` (the theme's foreground by default); colour glyphs
+    /// keep their own colours under its alpha.
+    pub fn text_styled(&mut self, at: (f32, f32), style: &Style, width: f32, color: Option<Color>, text: &str) -> Metrics {
+        let (key, m) = lay_out(&mut self.text, style, width, text);
+        let d = self.density as f32;
+        let snap = |v: f32| (v * d).round() / d;
+        let baseline = snap(at.1 + self.text.ascent(style.font) * style.size);
+        let origin = (snap(at.0), baseline - m.baseline);
         let color = rgba(color.unwrap_or(self.theme.foreground));
-        let (aw, ah) = (ATLAS_WIDTH as f32, ATLAS_HEIGHT as f32);
-        let density = self.fonts.density as f64;
-        // Snap the run's origin to a physical pixel so each glyph texel lands on exactly one
-        // backing pixel, as whole-string text does.
-        let snap = |value: f64| (value * density).round() / density;
-        let screen_x = snap(at.0);
-        let shift = self.fonts.ascent_shift(size.unwrap_or(self.font_size), self.fonts.density);
-        let screen_y = snap(at.1 + shift);
-        // the pen runs in fractional physical pixels (0.88 points of tracking is 1.76 at 2x); each
-        // glyph is placed on a whole pixel
-        let mut pen = 0.0_f64;
-        let tracking = tracking * density;
-        for c in text.chars() {
-            if let Some(glyph) = self.fonts.glyph(&font, id, c as i64) {
-                if glyph.gw > 0 {
-                    let gx = screen_x + pen.round() / density;
-                    let gw = glyph.gw as f64 / density;
-                    let gh = glyph.gh as f64 / density;
-                    let (u0, v0) = (glyph.gx as f32 / aw, glyph.gy as f32 / ah);
-                    let (u1, v1) = ((glyph.gx + glyph.gw) as f32 / aw, (glyph.gy + glyph.gh) as f32 / ah);
-                    self.push(Instance::mask([gx as f32, screen_y as f32, (gx + gw) as f32, (screen_y + gh) as f32], [u0, v0, u1, v1], color));
+        let clip = clip_of(self.clip_rect);
+        let Paint { text: t, layers, layer, .. } = self;
+        let layer = &mut layers[*layer];
+        t.glyphs(key, origin, d, &mut |g| {
+            let r = [g.rect.x / d, g.rect.y / d, (g.rect.x + g.rect.w) / d, (g.rect.y + g.rect.h) / d];
+            let uv = [g.uv.x, g.uv.y, g.uv.x + g.uv.w, g.uv.y + g.uv.h];
+            let instance = match g.atlas {
+                pxui_text::AtlasKind::Mask => Instance::mask(r, uv, color),
+                pxui_text::AtlasKind::Color => {
+                    // image instances after an image's break sample that image: break back to the atlas
+                    if layer.breaks.last().is_some_and(|b| b.image != crate::draw::ATLAS) {
+                        layer.breaks.push(Break { at_instance: layer.instances.len() as u32, image: crate::draw::ATLAS });
+                    }
+                    Instance::image(r, uv, [255, 255, 255, color[3]])
                 }
-                pen += glyph.advance as f64 + tracking;
-            }
-        }
+            };
+            layer.instances.push(Instance { clip, ..instance });
+        });
+        m
     }
 
     pub fn text(&mut self, at: (f32, f32), text: &str) {
@@ -3027,7 +2749,27 @@ impl Paint {
     }
 
     pub fn text_width(&mut self, size: Option<i64>, text: &str) -> f32 {
-        self.fonts.text_width(size, text)
+        let size = size.unwrap_or(self.font_size);
+        lay_out(&mut self.text, &kit_style(size, 0.0), 0.0, text).1.w
+    }
+
+    /// See `Ui::text_metrics`.
+    pub fn text_metrics(&mut self, style: &Style, width: f32, text: &str) -> Metrics {
+        lay_out(&mut self.text, style, width, text).1
+    }
+
+    /// The x of the caret before byte `index` of kit text, in points from the text's start.
+    pub fn caret_x(&mut self, size: Option<i64>, text: &str, index: usize) -> f32 {
+        let size = size.unwrap_or(self.font_size);
+        caret_x(&mut self.text, size, text, index)
+    }
+
+    /// The highlight of bytes `a..b` of single-line kit text: one span per visual run (two or
+    /// more across a direction change), as `(x, w)` in points from the text's start.
+    pub fn selection(&mut self, size: Option<i64>, text: &str, a: usize, b: usize, f: &mut dyn FnMut(f32, f32)) {
+        let size = size.unwrap_or(self.font_size);
+        let (key, _) = lay_out(&mut self.text, &kit_style(size, 0.0), 0.0, text);
+        self.text.selection(key, a, b, &mut |r| f(r.x, r.w));
     }
 
     /// Where the top of kit text of `size` goes to sit centred in a row at `y` of height `h`.
@@ -3062,9 +2804,8 @@ impl Paint {
         let mut buffer = std::mem::take(&mut self.label);
         buffer.clear();
         buffer.extend(label.chars().map(|c| c.to_ascii_uppercase()));
-        let count = buffer.chars().count();
-        let size = self.label_size();
-        let width = self.text_width(Some(size), &buffer) + self.cap_tracking() * count as f32;
+        let style = kit_style(self.label_size(), self.cap_tracking());
+        let width = lay_out(&mut self.text, &style, 0.0, &buffer).1.w;
         self.label = buffer;
         width
     }
@@ -3279,9 +3020,7 @@ impl Ui {
         self.painting = true;
         self.hit_count = 0;
         self.chain_key = 0;
-        self.fonts.density = self.density;
         let clip = Rect::new(0.0, 0.0, frame.input.size.0 as f32, frame.input.size.1 as f32);
-        let placeholder = Fonts::placeholder(self.fonts.backend);
         // paint into the other buffer, keeping the last frame's layers to compare with
         let mut paint = Paint {
             layers: std::mem::take(&mut self.spare),
@@ -3291,7 +3030,8 @@ impl Ui {
             theme: self.theme,
             font_size: self.font_size,
             row_height: self.kit_row_height,
-            fonts: std::mem::replace(&mut self.fonts, placeholder),
+            density: self.density,
+            text: self.text.take().expect("Ui: painting re-entered"),
             ime: None,
             label: std::mem::take(&mut self.label),
             edit_scroll_x: self.edit_scroll_x,
@@ -3310,7 +3050,7 @@ impl Ui {
         }
         self.spare = std::mem::replace(&mut self.draw, paint.layers);
         self.draw_len = len;
-        self.fonts = paint.fonts;
+        self.text = Some(paint.text);
         self.out.ime = paint.ime;
         self.label = paint.label;
         self.edit_scroll_x = paint.edit_scroll_x;
@@ -3397,7 +3137,6 @@ impl Ui {
         }
         let (scale_x, scale_y) = frame.pixel_scale;
         self.density = 1.max(scale_x.max(scale_y).round() as i64);
-        self.fonts.density = self.density;
         self.frame_number += 1;
         // a request made between frames is this frame; one made while building is the next
         self.frame_requested = false;
@@ -3475,6 +3214,7 @@ impl Ui {
         self.intrinsic();
         self.arrange(frame.input.t);
         self.paint_all(frame);
+        self.text_mut().end_frame();
         self.foreground.clear();
         self.prune();
         if self.focus != 0 && self.table.find(self.focus).is_none() {

@@ -11,7 +11,6 @@ test-util = []
 # SDL3 satellites: each links its own library, so only crates that call them pay for it.
 image = []
 mixer = []
-ttf = []
 
 [dependencies]
 native_layer_token_sys = { path = "../native_layer_token_sys" }

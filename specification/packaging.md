@@ -6,7 +6,7 @@ platforms are Apple Silicon with Metal and Windows with Vulkan. Web export is a
 separate 2D product target. [Packaging instructions](../packaging/README.md) list
 current platform commands and prerequisites.
 
-SDL3 core, image, ttf and mixer are system dependencies discovered through
+SDL3 core, image and mixer are system dependencies discovered through
 pkg-config or the documented platform paths. The owning sys crates compile
 required ABI code with `cc`; metadata, headers and runtime versions must agree.
 Missing dependencies fail the build or return typed startup errors.

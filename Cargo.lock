@@ -501,6 +501,7 @@ dependencies = [
  "ogpu_metal",
  "ogpu_vulkan",
  "param",
+ "pxui_text",
  "rays",
  "rays_graph",
  "rays_math",

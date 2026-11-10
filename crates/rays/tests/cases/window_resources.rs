@@ -200,17 +200,6 @@ fn window_resources_automatic_text_cache() {
             layer::release(s);
         }
         require(RImage::pixels(&images[256]).is_err(), "transient image retained");
-        // An explicit font owns its cached text: releasing scenes leaves it alone and destroying
-        // the font destroys it.
-        let font_ = font::system(Some(15)).expect("font");
-        let cached = font::cached_text(None, None, None, &font_, "explicit lifetime", font::RenderMode::Blended(color::white())).expect("text");
-        let image = image::resource(&cached);
-        let other = vec![scene::text((0, 0), None, Some(15), "explicit lifetime")];
-        automatic_stage(&other);
-        layer::release(&other);
-        require(RImage::pixels(&image).is_ok(), "explicit cached text shortened");
-        font::destroy(&font_);
-        require(RImage::pixels(&image).is_err(), "explicit font cache not destroyed");
         let (_, references) = font::raster::automatic_counts();
         require(references == 0, "automatic references outlived their scenes");
     });

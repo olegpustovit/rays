@@ -40,7 +40,11 @@ pub struct Instance {
 }
 const _: () = assert!(size_of::<Instance>() == 64);
 
-/// From `at_instance` on, the layer's [`kind::IMAGE`] instances sample `images[image]`.
+/// `Break::image` of a break back to the colour atlas (colour glyphs after an image).
+pub const ATLAS: u32 = u32::MAX;
+
+/// From `at_instance` on, the layer's [`kind::IMAGE`] instances sample `images[image]` (or the
+/// colour atlas for [`ATLAS`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Break {
     pub at_instance: u32,

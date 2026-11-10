@@ -49,7 +49,7 @@ fn version_compatibility_rejects_older_and_prerelease_versions() {
         ErrorKind::IncompatibleVersion,
     );
     assert_eq!(
-        crate::validate_version_for("SDL3_ttf", prerelease, true, prerelease)
+        crate::validate_version_for("SDL3_mixer", prerelease, true, prerelease)
             .unwrap_err()
             .kind,
         ErrorKind::IncompatibleVersion,

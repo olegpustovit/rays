@@ -89,7 +89,6 @@ probe_sunflower
 probe_tree
 rays_editor_layout_panes
 rays.core
-rays.font
 rays.keys
 rays.scene2
 run_host_scene_edit

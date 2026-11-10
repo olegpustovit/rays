@@ -27,8 +27,8 @@ driver *traits* in `ogpu_core::backend` (`Driver`, `DriverDevice`, `DriverQueue`
 records: a driver object is one struct, an encoder is one boxed object rather than a boxed closure per
 operation, and the `backend` layer keeps its liveness/state guards around each `&self` call. Metal, Vulkan
 and mock depend only on `ogpu_core`; `native_layer_token` lives in `native_layer_token_sys::portable`.
-Thin crates were folded into their owners (C10): SDL3_image/ttf/mixer are `sdl3::{image,ttf,mixer}` over
-`sdl3_sys::{image,ttf,mixer}` (one build script), `runtime_input` is `runtime::runtime_input`, `cfmt_sys` is
+Thin crates were folded into their owners (C10): SDL3_image/mixer are `sdl3::{image,mixer}` over
+`sdl3_sys::{image,mixer}` (one build script), `runtime_input` is `runtime::runtime_input`, `cfmt_sys` is
 `cfmt::sys`, and the safe Vulkan wrapper is `ogpu_vulkan::vulkan`.
 
 The Rust renderer does not expose a raw SDL window accessor. Window ownership and
@@ -113,7 +113,7 @@ native dependencies. Image decoding is supplied by the caller through the `files
 The shared file-table embedder belongs to `flow`; both the node catalog and
 web runtime embedding invoke it. The manifest generator belongs to
 `sop_catalog`, and the one SDL binding generator belongs to `sdl3`, reused by
-the image, TTF and mixer bindings. Generator executables do not add product
+the image and mixer bindings. Generator executables do not add product
 library edges. The test-only `lisp_sop` helper depends on Flow/SOP/RDK/math and
 has no document, renderer or UI reach; the gate pins that boundary.
 
@@ -123,7 +123,7 @@ exports. Crash reports, presets, source saves and web exports use the same
 replacement path through `Runtime_resources.write_text` or `write_atomic`.
 Its owned-resource APIs return `Ogpu.Error.t` directly. The shared kind set
 includes `Wrong_domain`, `Destroyed`, `Decode` and `Io` alongside the GPU
-validation kinds; SDL image, TTF and mixer binding errors remain their own
+validation kinds; SDL image and mixer binding errors remain their own
 types and are translated at the resource boundary.
 
 `flow` depends on the dependency-free `diagnostic`, `param`, `input` and `rays_math` libraries. Its value graphs, expressions,
@@ -261,7 +261,7 @@ examples / sketches / pxui / editor / rdk_rays
                       renderer ---------------> runtime_resources
                          |                             |
                          v                             v
-                      runtime ------> sdl3::{image, ttf, mixer}
+                      runtime ------> sdl3::{image, mixer}
                          |
                          v
                     ogpu_core ---> native_layer_token_sys
@@ -895,7 +895,7 @@ release, and preserve same-device validation. Sketch-owned resources are
 released through `Sketch.run_state ~on_stop` while the SDL3 and Metal runtime
 is still live. Command completion retains any referenced resources until their
 submitted work completes.
-SDL3, TTF, and mixer finalizer tokens queue until the initial domain drains
+SDL3 and mixer finalizer tokens queue until the initial domain drains
 them; no token is discarded when the queue grows.
 Resource-level font rendering returns an owned text snapshot. Automatic scene
 text and explicit high-level font caches are bounded by their Rays owners;

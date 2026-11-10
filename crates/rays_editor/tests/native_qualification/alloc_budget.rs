@@ -103,7 +103,7 @@ fn bare() { check("bare", "(workspace empty (graph g :context value 0))", BARE) 
 fn paint_storage() {
     use std::{cell::Cell, rc::Rc};
     use pxui::ui::{BoxOpts, Paint, Rect, Size, Ui};
-    let mut ui = Ui::create(input::Platform::Apple, None, None, &rays_shell::host::BACKEND);
+    let mut ui = Ui::create(input::Platform::Apple, None, rays_shell::host::text(None));
     let token = Rc::new(Cell::new(0));
     let mut label_owner = None::<std::rc::Weak<str>>;
     let painter = |token: Rc<Cell<i32>>| move |_: &mut Paint, _: Rect| token.set(token.get() + 1);

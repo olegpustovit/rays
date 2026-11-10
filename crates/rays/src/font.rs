@@ -1,8 +1,7 @@
-//! Fonts and rendered images use per-font/per-context caches with String errors.
+//! Sketch text: pxui_text shapes and rasterises it into per-context cached images; String errors.
 use crate::image;
 use renderer::side_lru::{self, Table, TableKey};
 use rays_math::color;
-use runtime_resources::font as RFont;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -12,34 +11,10 @@ pub enum RenderMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Hinting {
-    NormalHinting,
-    LightHinting,
-    MonoHinting,
-    NoneHinting,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alignment {
     Left,
     Center,
     Right,
-}
-
-const TEXT_CACHE_CAPACITY: i64 = 256;
-
-pub struct FontData {
-    resource: RefCell<RFont::Font>,
-    generation: Cell<i64>,
-    cache: RefCell<Table>,
-}
-
-/// Open font clones share one font; same tests that owner identity.
-#[derive(Clone)]
-pub struct Font(Rc<FontData>);
-
-pub fn same(a: &Font, b: &Font) -> bool {
-    Rc::ptr_eq(&a.0, &b.0)
 }
 
 // the pixels an image of a cached text holds
@@ -50,71 +25,9 @@ fn image_bytes(img: &image::Image) -> i64 {
     }
 }
 
-fn destroy_image_item(_key: &TableKey, item: side_lru::Item) {
-    if let Ok(img) = item.downcast::<image::Image>() {
-        let _ = image::destroy(&img);
-    }
-}
-
-fn text_cache() -> Table {
-    side_lru::create(lru::cache("rays.font.text"), true, side_lru::UNBOUNDED_BYTES, Box::new(destroy_image_item), TEXT_CACHE_CAPACITY)
-}
-
-fn message(operation: &str, error: &runtime_resources::Error) -> String {
-    format!("{operation}: {}", ogpu_core::error::to_string(error))
-}
-
-fn make(resource: Result<RFont::Font, runtime_resources::Error>) -> Result<Font, String> {
-    match resource {
-        Ok(resource) => Ok(Font(Rc::new(FontData {
-            resource: RefCell::new(resource),
-            generation: Cell::new(1),
-            cache: RefCell::new(text_cache()),
-        }))),
-        Err(error) => Err(message("Font.load", &error)),
-    }
-}
-
-pub fn load(path: &str, size: i64) -> Result<Font, String> {
-    make(RFont::open_file(path, size as f64))
-}
-
-pub fn system(size: Option<i64>) -> Result<Font, String> {
-    make(RFont::open_system(size.unwrap_or(16) as f64))
-}
-
 fn rgba(mode: RenderMode) -> (i64, i64, i64, i64) {
     let RenderMode::Blended(c) = mode;
     (c.r, c.g, c.b, c.a)
-}
-
-fn resource_align(a: Alignment) -> RFont::Alignment {
-    match a {
-        Alignment::Left => RFont::Alignment::Left,
-        Alignment::Center => RFont::Alignment::Center,
-        Alignment::Right => RFont::Alignment::Right,
-    }
-}
-
-fn paint(density: i64, wrap: Option<i64>, align: Alignment, font: &Font, text: &str, mode: RenderMode) -> Result<image::Image, String> {
-    let rendered = RFont::render(&mut font.0.resource.borrow_mut(), wrap, Some(resource_align(align)), density, rgba(mode), text.as_bytes());
-    match rendered {
-        Err(error) => Err(message("Font.render_text", &error)),
-        Ok(None) => image::create(1, 1, None),
-        Ok(Some(mut value)) => {
-            // `into_image` hands the pixels over; the text is then dead, destroy is a no-op.
-            let result = image_of_text(&mut value);
-            let _ = runtime_resources::text::destroy(&mut value);
-            result
-        }
-    }
-}
-
-fn image_of_text(text: &mut runtime_resources::text::Text) -> Result<image::Image, String> {
-    match runtime_resources::text::into_image(text) {
-        Ok(img) => image::of_resource(img),
-        Err(error) => Err(message("Font.image", &error)),
-    }
 }
 
 fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str, mode: RenderMode) -> TableKey {
@@ -122,61 +35,9 @@ fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str,
     TableKey::Str(format!("{density}|{size}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
 }
 
-pub fn cached_text(wrap: Option<i64>, align: Option<Alignment>, density: Option<i64>, font: &Font, text: &str, mode: RenderMode) -> Result<image::Image, String> {
-    let align = align.unwrap_or(Alignment::Left);
-    let density = density.unwrap_or(1);
-    let k = key(wrap, align, density, 0, text, mode);
-    if let Some(item) = side_lru::find(&mut font.0.cache.borrow_mut(), &k)
-        && let Ok(img) = item.downcast::<image::Image>() {
-            return Ok((*img).clone());
-        }
-    let img = paint(density, wrap, align, font, text, mode)?;
-    side_lru::add(&mut font.0.cache.borrow_mut(), image_bytes(&img), k, Rc::new(img.clone()));
-    Ok(img)
-}
-
-fn clear_cache(font: &Font) {
-    side_lru::clear(&mut font.0.cache.borrow_mut());
-}
-
-fn resource_hinting(h: Hinting) -> RFont::Hinting {
-    match h {
-        Hinting::NormalHinting => RFont::Hinting::NormalHinting,
-        Hinting::LightHinting => RFont::Hinting::LightHinting,
-        Hinting::MonoHinting => RFont::Hinting::MonoHinting,
-        Hinting::NoneHinting => RFont::Hinting::NoneHinting,
-    }
-}
-
-pub fn set_hinting(font: &Font, value: Hinting) -> Result<(), String> {
-    let result = RFont::set_hinting(&mut font.0.resource.borrow_mut(), resource_hinting(value));
-    match result {
-        Ok(()) => {
-            clear_cache(font);
-            font.0.generation.set(font.0.generation.get() + 1);
-            Ok(())
-        }
-        Err(error) => Err(message("Font.set_hinting", &error)),
-    }
-}
-
-pub fn destroy(font: &Font) {
-    clear_cache(font);
-    let _ = RFont::destroy(&mut font.0.resource.borrow_mut());
-}
-
-/// Vertical metrics in logical points; errors on a destroyed font.
-pub fn get_ascent(font: &Font) -> Result<i64, String> {
-    match RFont::metrics(&mut font.0.resource.borrow_mut()) {
-        Ok(m) => Ok(m.ascent),
-        Err(error) => Err(message("Font.metrics", &error)),
-    }
-}
-
-
 // Sketch text: pxui_text shapes and rasterises into its atlases; the glyph quads are composited on the
 // CPU into one straight-alpha RGBA image per string (the scene's existing textured-quad path).
-// ponytail: one image per string, like the SDL_ttf path; glyph quads straight into the scene
+// ponytail: one image per string; glyph quads straight into the scene
 // pass when text lowering gets an instanced route.
 const SYSTEM_FONTS: [&str; 8] = [
     "/System/Library/Fonts/SFNSMono.ttf",
@@ -188,7 +49,6 @@ const SYSTEM_FONTS: [&str; 8] = [
     "C:\\Windows\\Fonts\\segoeui.ttf",
     "C:\\Windows\\Fonts\\arial.ttf",
 ];
-const BUNDLED: &[u8] = include_bytes!("../../../assets/fonts/Pragmasevka-Regular.ttf");
 
 thread_local! {
     // Text is shaped on whichever thread lowers the scene; cosmic-text is deterministic, so every
@@ -199,7 +59,7 @@ thread_local! {
 fn text_engine() -> pxui_text::Text {
     let system = SYSTEM_FONTS.iter().find_map(|p| std::fs::read(p).ok());
     let mut fonts: Vec<&[u8]> = system.iter().map(|v| v.as_slice()).collect();
-    fonts.push(BUNDLED);
+    fonts.push(pxui_text::PRAGMASEVKA);
     pxui_text::Text::new(&fonts)
 }
 
@@ -432,48 +292,6 @@ pub mod raster {
         match context {
             None => (0, 0),
             Some(context) => (side_lru::length(&mut context.0.automatic_cache.borrow_mut()), context.0.automatic_references.get()),
-        }
-    }
-
-    pub fn generation(font: &super::Font) -> i64 {
-        font.0.generation.get()
-    }
-
-    pub struct Glyph {
-        pub glyph_width: i64,
-        pub glyph_height: i64,
-        pub glyph_advance: i64,
-        pub glyph_alpha: Vec<u8>,
-    }
-
-    /// Rasterize one code point at `density` exactly as it appears inside a rendered string;
-    /// `glyph_advance` is the pen advance in backing pixels and `glyph_alpha` holds one coverage
-    /// byte per pixel.
-    pub fn glyph(density: Option<i64>, font: &super::Font, code: i64) -> Result<Glyph, String> {
-        let density = density.unwrap_or(1);
-        let Some(ch) = u32::try_from(code).ok().and_then(char::from_u32) else {
-            return Err("Font.glyph: invalid code point".to_string());
-        };
-        let metrics = RFont::glyph_metrics_at(&mut font.0.resource.borrow_mut(), density, code).map_err(|e| message("Font.glyph", &e))?;
-        let text = ch.to_string();
-        let rendered = RFont::render(&mut font.0.resource.borrow_mut(), None, None, density, (255, 255, 255, 255), text.as_bytes())
-            .map_err(|e| message("Font.glyph", &e))?;
-        match rendered {
-            None => Ok(Glyph { glyph_width: 0, glyph_height: 0, glyph_advance: metrics.advance, glyph_alpha: Vec::new() }),
-            Some(mut rendered) => {
-                let size = runtime_resources::text::size(&rendered);
-                let pixels = runtime_resources::text::pixels(&rendered);
-                let _ = runtime_resources::text::destroy(&mut rendered);
-                match (size, pixels) {
-                    (Ok((width, height)), Ok(rgba)) => Ok(Glyph {
-                        glyph_width: width,
-                        glyph_height: height,
-                        glyph_advance: metrics.advance,
-                        glyph_alpha: (0..(width * height) as usize).map(|index| rgba[index * 4 + 3]).collect(),
-                    }),
-                    (Err(error), _) | (_, Err(error)) => Err(message("Font.glyph", &error)),
-                }
-            }
         }
     }
 }

@@ -11,7 +11,7 @@ cargo run -p rays_bin -- web sketches/basic.rays -o _out/basic
 ```
 
 Use the toolchain pinned in `rust-toolchain.toml`. On macOS:
-`brew install pkgconf sdl3 sdl3_image sdl3_ttf sdl3_mixer`.
+`brew install pkgconf sdl3 sdl3_image sdl3_mixer`.
 Windows setup: [packaging](packaging/README.md).
 
 Debug builds are the daily workflow. Run `cargo check -p <crate>` while editing, then

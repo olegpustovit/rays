@@ -72,7 +72,7 @@ pub fn inspector_rows() {
     let schema = parameters_schema();
     let mut values = schema.default().to_vec();
     check(schema.fields().len() == 5, "sop_params defaults or ignored-field policy is incorrect");
-    let mut ui = Ui::create(Platform::Apple, Some(11), None, &rays_shell::host::BACKEND);
+    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
     let mut step = |values: &Vec<Value>, time: f64, events: Vec<Event>| -> (Vec<Value>, param::Effects) {
         let mut out = (values.clone(), param::NO_EFFECTS);
         let v = values.clone();
@@ -123,7 +123,7 @@ pub fn flow_rows() {
     let schema = parameters_schema();
     let views = schema.view(schema.default()).expect("view");
     let count = pxui_view_without_folder(views.iter().find(|v| v.name == "count").expect("count").clone());
-    let mut ui = Ui::create(Platform::Apple, Some(11), None, &rays_shell::host::BACKEND);
+    let mut ui = Ui::create(Platform::Apple, Some(11), rays_shell::host::text(None));
     let row = |drive: Option<&str>, locked: bool| FlowRow { path: "count".into(), fields: vec![count.clone()], shown: true, locked, drive: drive.map(String::from), live: Some("3".into()) };
     let mut step = |opts: &FlowOpts, rows: &[FlowRow], events: Vec<Event>| -> Vec<FlowChange> {
         let mut out = Vec::new();

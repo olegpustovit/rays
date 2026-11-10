@@ -307,57 +307,6 @@ fn png_rows() {
     canvas::destroy(&canvas).unwrap();
 }
 
-fn font() {
-    let mut font = font::open_system(14.).unwrap();
-    font::set_hinting(&mut font, font::Hinting::LightHinting).unwrap();
-    let white = (255, 255, 255, 255);
-    assert!(font::render(&mut font, None, None, 1, white, b"").unwrap().is_none(), "empty text");
-    assert_eq!(match font::render(&mut font, None, None, 1, white, b"\xc0\x80") { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "UTF-8");
-    let mut transferred = font::render(&mut font, None, None, 1, white, b"transfer").unwrap().unwrap();
-    let mut expected = text::pixels(&transferred).unwrap();
-    let image = text::into_image(&mut transferred).unwrap();
-    assert!(text::destroyed(&transferred) && image::pixels(&image).unwrap() == expected, "text-to-image ownership transfer changed pixels");
-    expected.fill(0);
-    assert!(image::pixels(&image).unwrap() != expected, "public text pixels still alias the transferred image");
-    text::destroy(&mut transferred).unwrap();
-    image::destroy(&image).unwrap();
-    let mut advance = |density| font::glyph_metrics_at(&mut font, density, 'A' as i64).unwrap().advance;
-    let (a1, a2) = (advance(1), advance(2));
-    assert!(a1 > 0 && a2 > a1, "glyph metrics");
-    assert!(
-        matches!(font::glyph_metrics_at(&mut font, 0, 'A' as i64), Err(e) if e.kind == ErrorKind::InvalidArgument)
-            && match font::render(&mut font, None, None, 17, (0, 0, 0, 255), b"x") { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::InvalidArgument,
-        "density outside 1..16 accepted"
-    );
-    // Rendered text is its own picture: twice the density is about twice the size, and neither a
-    // font mutation nor the font's teardown shortens it.
-    let mut size = |density| {
-        let mut text = font::render(&mut font, None, None, density, (255, 0, 0, 255), b"explicit").unwrap().unwrap();
-        let size = text::size(&text).unwrap();
-        text::destroy(&mut text).unwrap();
-        size
-    };
-    let (w1, h1) = size(1);
-    let mut explicit = font::render(&mut font, None, None, 2, (255, 0, 0, 255), b"explicit").unwrap().unwrap();
-    let (width, height) = text::size(&explicit).unwrap();
-    assert!(width > 0 && height > 0 && (width - 2 * w1).abs() <= 4 && (height - 2 * h1).abs() <= 2, "explicit text");
-    let generation = text::generation(&explicit);
-    let pixels = text::pixels(&explicit).unwrap();
-    font::set_hinting(&mut font, font::Hinting::MonoHinting).unwrap();
-    font::destroy(&mut font).unwrap();
-    assert!(
-        !text::destroyed(&explicit)
-            && text::size(&explicit).unwrap() == (width, height)
-            && text::generation(&explicit) == generation
-            && text::pixels(&explicit).unwrap() == pixels,
-        "font mutation or teardown shortened text lifetime"
-    );
-    text::destroy(&mut explicit).unwrap();
-    assert!(text::destroyed(&explicit), "text survived its own destroy");
-    font::destroy(&mut font).unwrap();
-    assert_eq!(match font::render(&mut font, None, None, 1, (0, 0, 0, 0), b"dead") { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "stale font");
-}
-
 fn wav() -> Vec<u8> {
     let n = 800usize;
     let mut b = vec![0u8; 44 + n * 2];
@@ -421,7 +370,6 @@ pub const CASES: &[(&str, fn())] = &[
         ("image_and_canvas", image_and_canvas),
         ("capture_shares_storage_until_write", capture_shares_storage_until_write),
         ("png_rows", png_rows),
-        ("font", font),
         ("audio", audio),
         ("assets", assets),
     ];

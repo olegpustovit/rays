@@ -388,7 +388,36 @@ fn key_of_box(b: &UiBox) -> i64 {
     key(b)
 }
 
+/// Label typography through pxui_text: wrap, ellipsis with a line limit, alignment and a second
+/// (icon) font addressed by code point.
+pub fn window_pxui_typography() {
+    use pxui::text::{Align, Style, Wrap};
+    let mut ui = new_ui(None);
+    let icons = ui.text_mut().add_font(include_bytes!("../../../../assets/fonts/Pragmasevka-Regular.ttf")) as u16;
+    let body = Style { size: 13.0, ..Style::default() };
+    let text = "one two three four five six";
+    let mut metrics = Vec::new();
+    ui.frame(&frame_at(vec![], 2.0, 0.0, vec![]), &mut |ui| {
+        metrics.push(ui.text_metrics(&Style { wrap: Wrap::Word, ..body }, 60.0, text));
+        metrics.push(ui.text_metrics(&Style { wrap: Wrap::Word, max_lines: 1, ellipsis: true, ..body }, 60.0, text));
+        let b = ui.box_("typography", BoxOpts::default().w(Size::Px(200.0)).h(Size::Px(40.0)).at((0.0, 0.0)));
+        ui.draw(&b, move |paint, _| {
+            paint.text_styled((0.0, 0.0), &Style { align: Align::Right, ..body }, 200.0, None, "end");
+            paint.text_styled((0.0, 20.0), &Style { font: icons, ..body }, 0.0, None, "\u{2192}");
+        });
+    });
+    let (wrapped, clipped) = (metrics[0], metrics[1]);
+    assert!(wrapped.lines > 1 && wrapped.w <= 60.0, "wrap: {wrapped:?}");
+    assert!(clipped.lines == 1 && clipped.w <= 60.0, "ellipsis on one line: {clipped:?}");
+    let glyphs: Vec<_> = ui.output().draw[0].instances.iter().filter(|i| i.kind == pxui::draw::kind::MASK).collect();
+    assert!(glyphs.len() == 4, "three right-aligned glyphs and one icon: {}", glyphs.len());
+    assert!(glyphs[0].rect[0] > 150.0, "right alignment: first glyph at {}", glyphs[0].rect[0]);
+    assert!(glyphs[3].rect[1] >= 20.0, "the icon sits on its own line");
+    ui.destroy();
+}
+
 pub const CASES: &[(&str, fn())] = &[
+    ("window_pxui_typography", window_pxui_typography),
     ("window_pxui_table", window_pxui_table),
     ("window_pxui_keyboard", window_pxui_keyboard),
     ("window_pxui_input", window_pxui_input),

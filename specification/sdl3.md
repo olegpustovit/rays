@@ -1,8 +1,8 @@
 # SDL3 binding contract
 
 `crates/sdl3` provides the safe platform API. Required C/Objective-C++ ABI work
-lives under `crates/sdl3_sys`. Core, image, ttf and mixer cover only Rays's window,
-input, image, font and audio needs. Runtime must use the ownership-aware safe API.
+lives under `crates/sdl3_sys`. Core, image and mixer cover only Rays's window,
+input, image and audio needs; text is `pxui_text` (cosmic-text), not SDL. Runtime must use the ownership-aware safe API.
 
 ## Versions and ABI
 
@@ -23,7 +23,7 @@ an older build cannot silently mask them.
 | Class | Contract |
 | --- | --- |
 | Pure or any-thread query | Error formatting, immutable handle facts, installed version facts and documented thread-safe native queries acquire/destroy no resources. |
-| Initial thread | Initialization, hints, windows, cursors, clipboard, text input, dialogs, event polling, native views, decoding, fonts and audio check the initial thread before native calls. |
+| Initial thread | Initialization, hints, windows, cursors, clipboard, text input, dialogs, event polling, native views, decoding and audio check the initial thread before native calls. |
 | Deferred release | A destructor on another thread can only enqueue an opaque token. Drain children before parents on the initial thread. |
 | Native callback | Queue an owned result in bounded native storage. Never invoke application update or mutate document state from a callback. |
 | Blocking initial-thread call | Preserve the native handle's owner and lifetime through the wait. |
@@ -35,7 +35,7 @@ concurrent ownership mutation valid.
 ## Callbacks and live resize
 
 Polled events are converted while SDL still owns their pointer payloads; copy
-all strings before returning. Decoder/font results are caller-owned packed RGBA8.
+all strings before returning. Decoder results are caller-owned packed RGBA8.
 The mixer owns audio-device work. Native dialogs return an id immediately, retain
 filters/default paths until completion, queue chosen/cancelled/failed outcomes,
 and deliver each result exactly once during initial-thread polling. Refuse a
@@ -77,7 +77,7 @@ error text before another native call; a retained diagnostic remains unchanged.
 A failed image/audio reload preserves the previous usable resource.
 
 Failure coverage includes absent video/audio drivers, invalid dimensions and
-names, missing/malformed image/font/audio inputs, unsupported native window
+names, missing/malformed image/audio inputs, unsupported native window
 views, invalid dialog filters/paths/capacity, wrong-thread calls and destroyed
 parents. Event tests cover every translated/skipped kind and copied payload
 lifetimes. Lifecycle checks verify bounded handles and native memory.
