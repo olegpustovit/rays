@@ -836,21 +836,33 @@ impl TermBuilder {
     /// `finish`, also returning each `extra` row the roots reach, sealed with them.
     pub fn finish_with(self, roots: &[TermId], forms: &[SyntaxId], extra: &[TermId]) -> (Arc<TermArena>, Vec<TermId>, Vec<SyntaxId>, Vec<Option<Term>>) {
         // ponytail: compact once per graph through the importer; compact tables in place if this copy profiles hot.
-        let source = self.freeze();
+        let freeze_phase = flow_syntax::phase_timer::measure("check.seal_source");
+        // Importing reads payloads and edges only; index free names on the compacted output.
+        let source = Arc::new(self.freeze_rows());
+        drop(freeze_phase);
+        let import_phase = flow_syntax::phase_timer::measure("check.seal_import");
         let mut builder = TermBuilder::new();
         let forms = forms.iter().map(|&id| builder.import_form(&source.syntax.handle(id))).collect();
         let roots = roots.iter().map(|&id| builder.import(&source.handle(id))).collect();
         let extra: Vec<Option<TermId>> = extra.iter().map(|&id| builder.imported(&source.handle(id))).collect();
+        drop(import_phase);
+        let freeze_phase = flow_syntax::phase_timer::measure("check.seal_output");
         let arena = builder.freeze();
+        drop(freeze_phase);
         let extra = extra.into_iter().map(|id| id.map(|id| arena.handle(id))).collect();
         (arena, roots, forms, extra)
     }
 
-    pub fn freeze(mut self) -> Arc<TermArena> {
+    fn freeze_rows(mut self) -> TermArena {
         self.tables.rows.shrink_to_fit();
         self.tables.terms.shrink_to_fit();
-        let free_names = Vec::with_capacity(self.tables.rows.len());
-        let mut arena = TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze().into_iter().map(symbol::intern_owned).collect(), free_names, syntax: self.syntax.freeze(), checked: Default::default() };
+        let free_names = Vec::new();
+        TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze().into_iter().map(symbol::intern_owned).collect(), free_names, syntax: self.syntax.freeze(), checked: Default::default() }
+    }
+
+    pub fn freeze(self) -> Arc<TermArena> {
+        let mut arena = self.freeze_rows();
+        arena.free_names.reserve(arena.tables.rows.len());
         arena.build_free_names();
         arena.tables.ranges.shrink_to_fit();
         Arc::new(arena)
@@ -1225,6 +1237,20 @@ mod tests {
         assert_eq!(target.rows().len(), source.rows().len());
         assert_eq!(target.handle(imported), root);
         assert_eq!(format!("{:?}", target.handle(imported)), expected_debug);
+        let mut compacted = TermBuilder::new();
+        let discarded_form = compacted.import_form(&root.form());
+        let discarded = compacted.push(None, &Ty::Any, discarded_form, Draft::RefBinding("discarded".into(), vec![]));
+        let imported = compacted.import(&root);
+        let (compacted, roots, _, extra) = compacted.finish_with(&[imported], &[], &[discarded, imported]);
+        assert!(extra[0].is_none());
+        assert_eq!(extra[1].as_ref(), Some(&compacted.handle(roots[0])));
+        assert_eq!(compacted.rows().len(), source.rows().len());
+        assert_eq!(compacted.handle(roots[0]), root);
+        for (&expected, &actual) in source.children(root.row_id()).iter().zip(compacted.children(roots[0])) {
+            let expected: Vec<_> = source.free_names(expected).iter().map(|&name| source.name(name)).collect();
+            let actual: Vec<_> = compacted.free_names(actual).iter().map(|&name| compacted.name(name)).collect();
+            assert_eq!(actual, expected);
+        }
         let mut checked = flow_syntax::syntax::Memory::default();
         let mut syntax = flow_syntax::syntax::Memory::default();
         target.attribute(&mut checked, &mut syntax);
