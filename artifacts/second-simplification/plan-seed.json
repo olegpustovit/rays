@@ -125,7 +125,7 @@
   },
   "Z1": {
     "status": "active",
-    "note": "Real update/scene/render/after_present allocation trace; owner-buffer and callback/published-scene reuse preparation"
+    "note": "Owner-buffer, callback, stable-label, immutable scene metadata and renderer scratch reuse installed; qualification in progress"
   },
   "Z2": {
     "status": "pending",
@@ -141,7 +141,7 @@
   },
   "Z5": {
     "status": "active",
-    "note": "Full CPU/Lisp/hash/JS/prelude engine and seed/spec audit; preparation only, no source changes"
+    "note": "Full64-bit shared hash/SplitMix64 installed across CPU, Lisp, JS and private engines; spec and affected identities updated"
   },
   "Z6": {
     "status": "pending",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "29c9efbf \u2014 common validation moved to core; entry checks109\u219227; 98 immediate closures removed"
+    "note": "29c9efbf 98ffd32a \u2014 common GPU semantic validation consolidated; literal admission audit still finds overlap"
   },
   "G2": {
     "status": "done",
