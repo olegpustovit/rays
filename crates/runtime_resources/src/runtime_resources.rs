@@ -299,10 +299,10 @@ pub mod image {
     }
 
     fn gpu_pixels(operation: &str, x: &mut image_data) -> Result<Vec<u8>, error> {
-        match x.gpu.clone() {
+        match &x.gpu {
             None => copy_buffer(operation, &x.rgba),
             Some(source) => {
-                let texture = gpu_texture(operation, x, &source)?;
+                let texture = gpu_texture(operation, x, source)?;
                 let pixels = backend::read_texture(&texture, x.width * 4)?;
                 x.readbacks += 1;
                 Ok(pixels)
@@ -349,11 +349,11 @@ pub mod image {
         {
             return Ok(x.rgba.clone());
         }
-        if let Some(b) = x.spare.clone() {
+        if let Some(b) = x.spare.take() {
             if b.len() == length && !leased(x, &b) {
-                x.spare = None;
                 return Ok(b);
             }
+            x.spare = Some(b);
         }
         if x.leases.len() < 2 {
             let mut value = byte_buffer("Image.borrow_snapshot", length)?;
@@ -365,11 +365,10 @@ pub mod image {
     }
 
     fn install(x: &mut image_data, b: bytes) {
-        let old = x.rgba.clone();
         let old_owned = x.canvas_owner.is_none();
-        x.rgba = b.clone();
+        let old = std::mem::replace(&mut x.rgba, b);
         x.canvas_owner = None;
-        if !Rc::ptr_eq(&old, &b) && !leased(x, &old) && !return_canvas_storage(x, &old) && old_owned {
+        if !Rc::ptr_eq(&old, &x.rgba) && !leased(x, &old) && !return_canvas_storage(x, &old) && old_owned {
             x.spare = Some(old);
         }
     }
@@ -482,10 +481,10 @@ pub mod image {
         check("Image.gpu_snapshot", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
-        match d.gpu.clone() {
+        match &d.gpu {
             None => Ok(None),
             Some(source) => {
-                let texture = gpu_texture("Image.gpu_snapshot", d, &source)?;
+                let texture = gpu_texture("Image.gpu_snapshot", d, source)?;
                 Ok(Some((d.width, d.height, d.generation, texture)))
             }
         }
@@ -518,7 +517,7 @@ pub mod image {
             let mut s = source.0.borrow_mut();
             tg.width = s.width;
             tg.height = s.height;
-            let moved = s.rgba.clone();
+            let moved = std::mem::replace(&mut s.rgba, new_bytes(Vec::new()));
             install(&mut tg, moved.clone());
             tg.gpu = None;
             if let Some(i) = s.canvas_returns.iter().position(|(k, _)| Rc::ptr_eq(k, &moved)) {
@@ -526,7 +525,6 @@ pub mod image {
                 register_canvas_storage(&mut tg, moved, callback);
             }
             tg.generation += 1;
-            s.rgba = new_bytes(Vec::new());
             s.dead = true;
             Ok(())
     }
@@ -566,8 +564,8 @@ pub mod image {
         d.rgba.capacity() as i64 + d.spare.as_ref().map_or(0, |b| b.capacity() as i64)
     }
 
-    pub(crate) fn rgba_of(x: &image_data) -> bytes {
-        x.rgba.clone()
+    pub(crate) fn rgba_of(x: &image_data) -> &bytes {
+        &x.rgba
     }
 }
 
@@ -740,7 +738,7 @@ pub mod canvas {
 
     fn valid_mirror(x: &canvas_data, image: &image::Image) -> bool {
         let i = image.0.borrow();
-        !i.dead && i.canvas_owner == Some(x.identity) && Rc::ptr_eq(&image::rgba_of(&i), &x.rgba)
+        !i.dead && i.canvas_owner == Some(x.identity) && Rc::ptr_eq(image::rgba_of(&i), &x.rgba)
     }
 
     fn accept_returned_storage(x: &mut canvas_data, b: &bytes) {
@@ -764,25 +762,24 @@ pub mod canvas {
     }
 
     fn detach_mirror(x: &mut canvas_data) {
-        if let Some(image) = x.mirror.clone() {
+        if let Some(image) = x.mirror.take() {
             if valid_mirror(x, &image) {
                 image.0.borrow_mut().canvas_owner = None;
             }
         }
-        x.mirror = None;
     }
 
     fn discard_invalid_mirror(x: &mut canvas_data) {
-        if let Some(image) = x.mirror.clone() {
-            if !valid_mirror(x, &image) {
+        if let Some(image) = &x.mirror {
+            if !valid_mirror(x, image) {
                 x.mirror = None;
             }
         }
     }
 
     fn detach_for_mutation(x: &mut canvas_data) -> Result<(), error> {
-        match x.mirror.clone() {
-            Some(image) if valid_mirror(x, &image) => {
+        match &x.mirror {
+            Some(image) if valid_mirror(x, image) => {
                 let replacement = match x.spare.take() {
                     Some(mut spare) if spare.len() == x.rgba.len() => {
                         unique(&mut spare)?.copy_from_slice(&x.rgba);
@@ -803,8 +800,8 @@ pub mod canvas {
     }
 
     fn detach_for_overwrite(x: &mut canvas_data) -> Result<(), error> {
-        match x.mirror.clone() {
-            Some(image) if valid_mirror(x, &image) => {
+        match &x.mirror {
+            Some(image) if valid_mirror(x, image) => {
                 let replacement = match x.spare.take() {
                     Some(spare) if spare.len() == x.rgba.len() => spare,
                     other => {
@@ -1023,9 +1020,8 @@ pub mod text {
     /// Consume the text and transfer its owned RGBA storage to an image.
     pub fn into_image(x: &mut Text) -> Result<image::Image, error> {
         check("Text.into_image", x)?;
-        let image = image::of_owned_rgba(x.width, x.height, x.rgba.clone());
+        let image = image::of_owned_rgba(x.width, x.height, std::mem::replace(&mut x.rgba, new_bytes(Vec::new())));
         x.dead = true;
-        x.rgba = new_bytes(Vec::new());
         Ok(image)
     }
 }
