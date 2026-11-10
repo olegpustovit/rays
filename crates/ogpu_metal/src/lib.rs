@@ -1,4 +1,5 @@
-//! The Metal driver owns native device, resource, queue, surface and encoder modules. Unsupported platforms compile but return typed NoAdapter/Unsupported errors.
+//! The macOS Metal driver owns native device, resource, queue, surface and encoder modules.
+#![cfg(target_os = "macos")]
 pub mod device;
 pub mod buffer;
 pub mod texture;
