@@ -144,8 +144,8 @@
     "note": "9ec77825 0e3d83a9 b032690c 1cb47792 \u2014 full64 hash/SplitMix64 and unambiguous segment framing; strict scratch regression corrected"
   },
   "Z6": {
-    "status": "active",
-    "note": "Substantive source installed in working tree; native formatting replaces compatibility logic; baseline at 29707ae1"
+    "status": "done",
+    "note": "9deaa70d \u2014 native float formatting/parsing, shared byte quoting, Unicode metadata, full-width values and typed provenance; retired compatibility removed"
   },
   "Z7": {
     "status": "pending",
