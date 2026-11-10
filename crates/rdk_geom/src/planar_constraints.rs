@@ -96,7 +96,7 @@ fn exact_point(value: &T, point: i64) -> Result<implicit_point::T, error::T> {
     Ok(result)
 }
 
-#[allow(non_snake_case)]
+
 pub mod view {
     use super::{T, exact_point};
     use crate::implicit_point;

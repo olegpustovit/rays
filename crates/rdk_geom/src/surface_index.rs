@@ -1965,7 +1965,7 @@ mod ported_tests {
 
 #[cfg(test)]
 mod attribute_suite_tests {
-    //! The surface-index checks of lib/rdk/test_rdk_attributes.ml that lib/rdk/test_surface_index.ml
+    //! The surface-index checks of  that
     //! does not cover (the transfer half is ported in rdk_ops/attribute_transfer.rs).
     use super::*;
 

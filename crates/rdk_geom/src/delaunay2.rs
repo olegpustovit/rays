@@ -45,7 +45,7 @@ pub fn source_unique(value: &T, source: i64) -> Result<i64, error::T> {
     Ok(value.source_unique[source as usize])
 }
 
-#[allow(non_snake_case)]
+
 pub mod view {
     use super::T;
 

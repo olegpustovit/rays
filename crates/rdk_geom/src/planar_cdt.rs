@@ -368,7 +368,7 @@ fn prepare_workspace_points(workspace: &mut Workspace, required: i64) {
     }
 }
 
-#[allow(non_snake_case)]
+
 pub mod view {
     use super::T;
     use std::sync::Arc;

@@ -92,7 +92,7 @@ pub fn provenance_parent_weights(value: &T, node: i64) -> Result<(f64, f64, f64)
     ))
 }
 
-#[allow(non_snake_case)]
+
 pub mod view {
     use super::T;
 

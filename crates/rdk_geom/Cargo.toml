@@ -8,3 +8,6 @@ license.workspace = true
 rdk_core = { path = "../rdk_core" }
 rays_math = { path = "../rays_math" }
 parallel = { path = "../parallel" }
+
+[lints]
+workspace = true
