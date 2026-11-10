@@ -435,6 +435,8 @@ pub struct PlatformOut {
     pub clipboard: Option<String>,
     /// the UI wants the clipboard's text: the host sends `Event::Paste` with the next frame
     pub paste: bool,
+    /// when the UI needs its next frame with no input (`Ui::repaint_at`)
+    pub repaint_at: Option<f64>,
 }
 
 /// The completed frame: its paint layers and the platform requests.
@@ -830,6 +832,7 @@ pub struct Ui {
     spare: Vec<Layer>,
     draw_revision: i64,
     painting: bool,
+    frame_requested: bool,
     out: PlatformOut,
     destroyed: bool,
 }
@@ -954,6 +957,7 @@ impl Ui {
             spare: Vec::new(),
             draw_revision: 0,
             painting: false,
+            frame_requested: false,
             out: PlatformOut::default(),
             destroyed: false,
         }
@@ -1798,19 +1802,37 @@ impl Ui {
         out
     }
 
-    /// Time alone changes nothing in the last frame's UI: no gesture, focused text, scroll in
-    /// motion or hover delay running. A host may skip frames while its input stands still.
-    pub fn at_rest(&self) -> bool {
-        self.active.is_none()
-            && self.focus == 0
-            && self.slots.iter().all(|s| s.scroll_mode == 0)
-            && self.slots.iter().all(|s| s.scroll_visual == 0.0)
-            && match (&self.hover_rest, &self.input_frame) {
-                (Some((_, _, start, seen)), Some(frame)) if *seen == self.frame_number => {
-                    frame.input.t - start >= HOVER_SECONDS
-                }
-                _ => true,
-            }
+    /// When the last frame's UI needs another frame with no input: at once for a gesture,
+    /// focused text, a scroll in motion or a requested frame, at the end of a running hover
+    /// delay; `None` when time alone changes nothing.
+    pub fn repaint_at(&self) -> Option<f64> {
+        if self.frame_requested { Some(f64::NEG_INFINITY) } else { self.out.repaint_at }
+    }
+
+    /// The frame gate: build, lay out and paint only for input or a due repaint. A host that gets
+    /// `false` keeps the last frame and waits for input or `repaint_at`.
+    pub fn wants_frame(&self, events: &[Event], now: f64) -> bool {
+        !events.is_empty() || self.repaint_at().is_some_and(|at| now >= at)
+    }
+
+    /// Ask for a frame: between frames, the next one; while building, the one after this (an
+    /// animation or timer the app drives calls it every frame it runs).
+    pub fn request_frame(&mut self) {
+        self.frame_requested = true;
+    }
+
+    fn next_repaint(&self, now: f64) -> Option<f64> {
+        if self.frame_requested
+            || self.active.is_some()
+            || self.focus != 0
+            || self.slots.iter().any(|s| s.scroll_mode != 0 || s.scroll_visual != 0.0)
+        {
+            return Some(now);
+        }
+        match &self.hover_rest {
+            Some((_, _, start, seen)) if *seen == self.frame_number && now - start < HOVER_SECONDS => Some(start + HOVER_SECONDS),
+            _ => None,
+        }
     }
 }
 
@@ -3355,6 +3377,8 @@ impl Ui {
         self.density = 1.max(scale_x.max(scale_y).round() as i64);
         self.fonts.density = self.density;
         self.frame_number += 1;
+        // a request made between frames is this frame; one made while building is the next
+        self.frame_requested = false;
         self.out.clipboard = None;
         self.out.paste = false;
         self.out.background = None;
@@ -3435,6 +3459,8 @@ impl Ui {
             self.focus = 0;
             self.edit_focus = 0;
         }
+        self.out.repaint_at = self.next_repaint(frame.input.t);
+        self.frame_requested = false;
         // Layout, hit rectangles and painting are published data now. The callbacks can capture
         // whole document versions, so keep them only while building.
         self.clear_frame_callbacks();

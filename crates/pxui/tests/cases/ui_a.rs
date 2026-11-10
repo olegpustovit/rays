@@ -793,6 +793,47 @@ pub fn window_pxui_scale_2x() {
     with_scale(2.0);
 }
 
+/// The frame gate: no frame without input, a due hover delay, a scroll in motion or a request;
+/// a frame that paints what the last one did keeps its draw revision.
+pub fn window_pxui_frame_gate() {
+    let mut ui = field_ui();
+    let step = |ui: &mut Ui, time: f64, events: Vec<Event>| {
+        ui.frame(&frame_at(vec![], 1.0, time, events), &mut |ui| {
+            let b = ui.box_("gate", BoxOpts::default().flags(CLICKABLE).at((200.0, 150.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
+            if ui.hovered_within(&b) && ui.hover_delay("gate") {
+                ui.tooltip("gate", "Tip");
+            }
+            ui.draw(&b, |paint, Rect { x, y, w, h }| paint.fill(x, y, w, h, pxui::geom::color::white()));
+        });
+    };
+    step(&mut ui, 0.0, vec![]);
+    let revision = ui.draw_revision();
+    step(&mut ui, 0.05, vec![]);
+    if ui.repaint_at().is_some() || ui.wants_frame(&[], 10.0) || ui.draw_revision() != revision {
+        fail(&format!("an idle UI asked for a frame or changed its draw: {:?} {} {}", ui.repaint_at(), revision, ui.draw_revision()));
+    }
+    if !ui.wants_frame(&[move_to((210, 160))], 0.1) {
+        fail("input did not open the gate");
+    }
+    step(&mut ui, 0.1, vec![move_to((210, 160))]);
+    if ui.repaint_at() != Some(0.1 + 0.38) || ui.wants_frame(&[], 0.3) || !ui.wants_frame(&[], 0.481) {
+        fail(&format!("the hover delay did not ask for its frame: {:?}", ui.repaint_at()));
+    }
+    step(&mut ui, 0.481, vec![]);
+    if ui.draw_revision() == revision || ui.repaint_at().is_some() {
+        fail("the tooltip frame did not paint, or kept asking");
+    }
+    ui.request_frame();
+    if !ui.wants_frame(&[], 0.5) {
+        fail("a requested frame did not open the gate");
+    }
+    step(&mut ui, 0.5, vec![]);
+    if ui.wants_frame(&[], 0.6) {
+        fail("a request outlived its frame");
+    }
+    ui.destroy();
+}
+
 pub fn window_pxui_tooltip_rest() {
     let mut ui = field_ui();
     let key_name = RefCell::new("a".to_owned());
@@ -1001,6 +1042,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("window_pxui_full_width_retained_state", window_pxui_full_width_retained_state),
     ("window_pxui_scale_1x", window_pxui_scale_1x),
     ("window_pxui_scale_2x", window_pxui_scale_2x),
+    ("window_pxui_frame_gate", window_pxui_frame_gate),
     ("window_pxui_tooltip_rest", window_pxui_tooltip_rest),
     ("window_pxui_hover_cursor", window_pxui_hover_cursor),
     ("window_pxui_fit_box", window_pxui_fit_box),

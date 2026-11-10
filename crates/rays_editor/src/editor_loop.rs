@@ -721,7 +721,7 @@ pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
         && core.hud.is_none()
         && (core.notice.is_none() || frame_.input.t - core.notice_at >= 3.)
         && core.traces.iter().all(|(_, t)| t.samples >= t.cap)
-        && core.ui.borrow().at_rest()
+        && core.ui.borrow().repaint_at().is_none()
         && cook::at_rest(&core.cook)
         && (timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing || !reads_clock(value))
 }
@@ -741,7 +741,15 @@ pub fn settle(before_rest: &Option<Rest>, value: &mut LoopModel, frame_: &frame:
 
 pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> Option<Rest> {
     match &value.rest {
-        Some(rest_) if rest_.still >= REST_FRAMES && frame_.input.events.is_empty() && same_input(&rest_.shown, frame_) && frame_.input.t >= rest_.shown.input.t && frame_.input.t - rest_.shown.input.t < REST_SECONDS => Some(rest_.clone()),
+        Some(rest_)
+            if rest_.still >= REST_FRAMES
+                && !value.core.ui.borrow().wants_frame(&frame_.input.events, frame_.input.t)
+                && same_input(&rest_.shown, frame_)
+                && frame_.input.t >= rest_.shown.input.t
+                && frame_.input.t - rest_.shown.input.t < REST_SECONDS =>
+        {
+            Some(rest_.clone())
+        }
         _ => None,
     }
 }
