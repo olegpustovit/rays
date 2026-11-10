@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "tools/t", "tools/gate"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+
+# Debug runs must be fast too: opt-level 1 and no debuginfo (measured in Rays on M1).
+[profile.dev]
+opt-level = 1
+debug = 0
+incremental = true
+codegen-units = 256
+overflow-checks = true
+
+# The counting allocator runs on every allocation; unoptimised it was ~15% of debug time.
+# A consumer's root workspace ignores this file: Rays repeats this override in its own Cargo.toml.
+[profile.dev.package.mem_sys]
+opt-level = 3
+
+[profile.release]
+codegen-units = 16
+lto = "thin"
+debug = "line-tables-only"
+
+[workspace.lints.rust]
+warnings = "deny"

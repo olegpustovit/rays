@@ -177,7 +177,36 @@ fn civil_date(days_since_epoch: i64) -> (i64, u32, u32) {
 }
 
 fn main() {
-    process::exit(run());
+    process::exit(pxui_checkout().unwrap_or_else(run));
+}
+
+/// Rays embeds PXUI as the `pxui/` checkout, outside its workspace, so cargo cannot test those packages
+/// from Rays' root. A `-p` naming only PXUI crates re-runs this runner inside the checkout (its workspace)
+/// with Rays' target directory; anywhere else (including PXUI itself) this is a no-op.
+fn pxui_checkout() -> Option<i32> {
+    let root = env::current_dir().ok()?;
+    let args: Vec<OsString> = env::args_os().skip(1).collect();
+    match pxui_only(&root, &args)? {
+        false => {
+            eprintln!("rays-t: run PXUI crates and Rays crates in separate `cargo t` calls");
+            Some(2)
+        }
+        true => {
+            let mut command = Command::new(env::current_exe().ok()?);
+            command.args(&args).current_dir(root.join("pxui"));
+            if env::var_os("CARGO_TARGET_DIR").is_none() { command.env("CARGO_TARGET_DIR", root.join("target")); }
+            Some(command.status().map_or(1, status_code))
+        }
+    }
+}
+
+/// None: no `-p` names a `pxui/crates/*` package (or there is no checkout); Some(all of them do).
+fn pxui_only(root: &Path, args: &[OsString]) -> Option<bool> {
+    if !root.join("pxui/Cargo.toml").is_file() { return None; }
+    let packages: Vec<&OsString> = args.windows(2).filter(|pair| pair[0] == "-p" || pair[0] == "--package").map(|pair| &pair[1]).collect();
+    let inside = |name: &&OsString| root.join("pxui/crates").join(name).join("Cargo.toml").is_file() && !root.join("crates").join(name).exists();
+    let count = packages.iter().filter(|name| inside(name)).count();
+    if count == 0 { None } else { Some(count == packages.len()) }
 }
 
 fn run() -> i32 {
@@ -861,7 +890,9 @@ fn default_target_dir() -> PathBuf {
     if let Some(target_dir) = env::var_os("CARGO_TARGET_DIR") {
         return target_dir.into();
     }
-    for directory in Path::new(env!("CARGO_MANIFEST_DIR")).ancestors() {
+    // The invoking workspace, not the runner's own: Rays runs this crate from the pxui/ checkout.
+    let start = env::current_dir().unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    for directory in start.ancestors() {
         if fs::read_to_string(directory.join("Cargo.toml"))
             .is_ok_and(|manifest| manifest.lines().any(|line| line.trim() == "[workspace]"))
         {
@@ -1289,7 +1320,7 @@ fn report_timeout(elapsed: Duration, operation: &str) -> i32 {
 
 #[cfg(test)]
 #[allow(dead_code)]
-#[path = "../../../crates/renderer/tests/common/window.rs"]
+#[path = "../window_harness.rs"]
 mod native_test_runner;
 #[cfg(test)]
 fn release_keepalive() {}
@@ -1306,6 +1337,19 @@ mod tests {
         ]);
         assert_eq!(cases.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
             ["unique", "first::same", "second::same"]);
+    }
+
+    #[test]
+    fn pxui_packages_run_in_the_checkout_only_when_named_alone() {
+        let root = std::env::temp_dir().join(format!("rays-t-pxui-{}", process::id()));
+        for dir in ["pxui/crates/pxui", "crates/rays"] { fs::create_dir_all(root.join(dir)).unwrap(); }
+        let args = |names: &[&str]| names.iter().flat_map(|name| ["-p", name]).map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(pxui_only(&root, &args(&["pxui"])), None, "no checkout manifest yet");
+        for manifest in ["pxui/Cargo.toml", "pxui/crates/pxui/Cargo.toml"] { fs::write(root.join(manifest), "").unwrap(); }
+        assert_eq!(pxui_only(&root, &args(&["pxui"])), Some(true));
+        assert_eq!(pxui_only(&root, &args(&["pxui", "rays"])), Some(false));
+        assert_eq!(pxui_only(&root, &args(&["rays"])), None);
+        fs::remove_dir_all(&root).unwrap();
     }
 
     static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

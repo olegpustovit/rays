@@ -207,12 +207,12 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         KERNEL_ENTRY.iter().any(|(file, entry)| path.ends_with(file) && name.text == *entry)
             .then(|| function_body(&tokens, index).map(|(body, _)| (index, body)))?
     }).collect();
-    let unsafe_allowed = crate_name.ends_with("_sys") || crate_name == "parallel";
+    let unsafe_allowed = crate_name.ends_with("_sys") || policy::UNSAFE_CRATES.contains(&crate_name);
     let mut issues = Vec::new();
 
     for (index, token) in tokens.iter().enumerate() {
         if token.text == "unsafe" && !unsafe_allowed {
-            issue(&mut issues, path, token.line, "unsafe is restricted to *_sys crates and parallel");
+            issue(&mut issues, path, token.line, "unsafe is restricted to *_sys crates and the policy's UNSAFE_CRATES");
         }
         if matches!(token.text.as_str(), "async" | "await") {
             issue(&mut issues, path, token.line, "async/await is not allowed in product code");
@@ -573,6 +573,8 @@ struct Package {
     package_name: String,
     crate_name: String,
     product: bool,
+    /// A submodule crate (`pxui/crates/*`): in the graph so reach rules see through it, but policed by its own repository's gate.
+    external: bool,
     deps: Vec<DepSpec>,
     has_binary: bool,
     has_gpu_dev_targets: bool,
@@ -891,106 +893,8 @@ fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
     lib_name.unwrap_or(package_name).replace('-', "_")
 }
 
-/// Rust-only helper leaves that stand in for OCaml stdlib, printf and int semantics: any product crate may name them.
-const HELPER_LEAVES: [&str; 1] = ["cfmt"];
-/// OCaml leaves a crate may name directly when its allowed dependencies reach them (flow reaches
-/// rays_diagnostic and input; lru reaches mem).
-// param: OCaml flow depends on it, so anything reaching flow reaches param.
-const OCAML_LEAVES: [&str; 4] = ["rays_diagnostic", "input", "mem", "param"];
-
-/// Direct production edges in the Rust architecture. Sys crates own their native ABI bridges.
-fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
-    HashMap::from([
-        ("cfmt", &[][..]),
-        ("rays_diagnostic", &[][..]),
-        ("native_layer_token_sys", &[][..]),
-        ("mem_sys", &[][..]),
-        ("mem", &["mem_sys"][..]),
-        ("lru", &["mem"][..]),
-        ("param", &["cfmt"][..]),
-        ("input", &[][..]),
-        ("rays_math_sys", &[][..]),
-        ("rays_math", &["rays_math_sys"][..]),
-        ("scene_command", &["rays_math"][..]),
-        ("parallel", &[][..]),
-        ("sdl3_sys", &["native_layer_token_sys"][..]),
-        ("metal_sys", &["ogpu_core"][..]),
-        ("vulkan_sys", &["ogpu_core"][..]),
-        ("rdk_core", &["mem", "parallel", "rays_math"][..]),
-        ("rdk_geom", &["rdk_core", "rays_math", "parallel"][..]),
-        ("rdk_ops", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
-        ("rdk_boolean", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
-        ("rdk_rays", &["rdk_core", "rdk_geom", "rdk_ops", "rays", "rays_math", "param"][..]),
-        ("scene_core", &["rays_math", "lru", "parallel"][..]),
-        ("rays", &[
-            "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
-            "parallel", "ogpu_core", "scene_core", "pxui_text",
-        ][..]),
-        // The window host is a leaf: it may reach only SDL, the input types and the native layer token.
-        ("pxui_sdl", &["sdl3", "input", "native_layer_token_sys"][..]),
-        // Its Wayland sibling: libwayland-client and xkbcommon through its own C shim, no other crate.
-        ("pxui_wayland", &["input", "native_layer_token_sys"][..]),
-        ("runtime", &["pxui_sdl", "sdl3", "ogpu_core", "input"][..]),
-        ("runtime_resources", &["sdl3", "ogpu_core"][..]),
-        ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources", "scene_core"][..]),
-        ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
-        ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math", "lru"][..]),
-        ("flow_eval", &["flow_syntax", "flow_check", "param", "rays_diagnostic", "input", "rays_math", "mem_sys"][..]),
-        ("flow_graph", &["flow_syntax", "flow_check", "flow_eval", "param"][..]),
-        ("flow_ir", &[
-            "flow_syntax", "flow_check", "flow_eval", "param", "rays_math", "scene_command", "lru", "parallel",
-        ][..]),
-        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu_core", "rays_math"][..]),
-        ("flow_gpu", &[
-            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_shader", "param", "rays_math", "ogpu_core",
-            "renderer", "lru", "mem", "parallel",
-        ][..]),
-        ("flow_web", &[
-            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "param", "rays_math", "scene_command", "parallel",
-        ][..]),
-        ("sop", &["param", "input", "rays_diagnostic", "rays_math", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "lru", "mem", "parallel"][..]),
-        ("flow_sop", &[
-            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "lru", "param", "sop", "rays_diagnostic", "rays_math",
-            "parallel", "rdk_core", "rdk_geom", "rdk_ops", "flow_sop_catalog",
-        ][..]),
-        ("flow_sop_catalog", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "param", "sop", "rays_math"][..]),
-        ("flow_native", &[
-            "editor_document", "rays", "rays_math", "input", "flow_syntax", "flow_check", "flow_eval",
-            "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
-            "parallel", "sop", "flow_shader", "ogpu_core", "rdk_core",
-        ][..]),
-        ("ogpu_core", &["native_layer_token_sys"][..]),
-        ("ogpu_mock", &["ogpu_core"][..]),
-        // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
-        ("ogpu_metal", &["ogpu_core", "metal_sys", "native_layer_token_sys"][..]),
-        ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys", "rays_math"][..]),
-        // PXUI is headed for its own repository: plain data in (input), a draw list out.
-        ("pxui", &["input", "cfmt", "pxui_text"][..]),
-        ("pxui_text", &[][..]),
-        // The UI painter: the portable GPU API and PXUI's draw list, so it moves to the PXUI repository unchanged.
-        ("pxui_render", &["ogpu_core", "pxui"][..]),
-        ("rays_shell", &["rays", "rays_math", "editor_core", "pxui", "pxui_render", "ogpu_core", "mem"][..]),
-        ("rays_graph", &[
-            "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
-        ][..]),
-        ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
-        ("web_export", &[
-            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_web", "flow_sop", "editor_document", "input",
-            "param", "scene_command", "flow_shader", "rays_math", "sop",
-        ][..]),
-        ("rays_pathtracer", &[
-            "rays", "ogpu_core", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
-            "runtime_resources", "rays_math", "flow_shader", "runtime",
-        ][..]),
-        ("rays_bin", &["editor_document", "rays_editor", "web_export", "flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "runtime", "sdl3", "ogpu_core", "ogpu_metal", "ogpu_vulkan"][..]),
-    ])
-}
-
-fn local_workspace_only() -> HashSet<&'static str> {
-    HashSet::from([
-        "sdl3", "editor_document", "rays_editor",
-    ])
-}
+mod policy;
+use policy::{direct_allowlist, forbidden_reaches, local_workspace_only, HELPER_LEAVES, OCAML_LEAVES};
 
 /// OCaml leaves that `start` reaches through its allowed dependencies (transitively, over the policy).
 fn ocaml_leaves_reached(start: &str, allowlist: &HashMap<&'static str, &'static [&'static str]>) -> HashSet<&'static str> {
@@ -1009,110 +913,6 @@ fn ocaml_leaves_reached(start: &str, allowlist: &HashMap<&'static str, &'static 
         }
     }
     reached
-}
-
-fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
-    let mut rules: HashMap<String, HashSet<String>> = HashMap::new();
-    let upper = [
-        "param", "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop",
-        "flow_native", "rays", "editor_core", "editor_document", "pxui", "rays_shell", "rays_graph",
-        "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
-        "web_export", "rays_editor", "rays_bin", "flow_sop_catalog",
-    ];
-    let gpu = [
-        "sdl3", "metal_sys", "vulkan_sys", "ogpu_core",
-        "ogpu_mock", "ogpu_metal", "ogpu_vulkan", "runtime",
-        "runtime_resources", "renderer",
-    ];
-    let mut upper_no_gpu = upper.to_vec();
-    upper_no_gpu.extend(["runtime", "runtime_resources", "renderer"]);
-    let foundational = [
-        "cfmt",
-        "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "pxui_sdl", "pxui_wayland",
-        "metal_sys", "vulkan_sys", "ogpu_core",
-        "rdk_core",
-    ];
-    for library in foundational {
-        rules.entry(library.to_owned()).or_default().extend(upper_no_gpu.iter().map(|name| (*name).to_owned()));
-    }
-    let mut forbid = |library: &str, names: &[&str]| {
-        rules.entry(library.to_owned()).or_default().extend(names.iter().map(|name| (*name).to_owned()));
-    };
-    for library in ["runtime", "renderer", "rays"] {
-        forbid(library, &["metal_sys", "ogpu_metal", "vulkan_sys", "ogpu_vulkan"]);
-    }
-    for library in ["ogpu_metal", "vulkan_sys", "ogpu_vulkan"] {
-        forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
-    }
-    forbid("runtime", &upper);
-    forbid("pxui_sdl", &["ogpu_core", "runtime", "renderer"]);
-    forbid("pxui_wayland", &["sdl3", "pxui_sdl", "ogpu_core", "runtime", "renderer", "pxui", "pxui_render"]);
-    forbid("flow_native", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
-    forbid("flow_ir", &[
-        "rays", "pxui", "rays_shell", "rays_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops",
-        "rdk_boolean", "rdk_rays", "rays_pathtracer", "rays_editor",
-    ]);
-    forbid("flow_shader", &[
-        "runtime", "renderer", "ogpu_mock", "ogpu_metal", "ogpu_vulkan",
-        "rays", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
-        "sop", "editor_core", "pxui", "rays_shell", "rays_graph", "rays_editor",
-    ]);
-    forbid("flow_gpu", &[
-        "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
-        "editor_core", "pxui", "rays_shell", "rays_graph", "rays_editor",
-    ]);
-    forbid("flow_web", &[
-        "rays", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
-        "flow_sop", "flow_gpu", "editor_core", "pxui", "rays_shell", "rays_graph", "rays_editor",
-    ]);
-    forbid("flow_web", &gpu);
-    // G6: the web target needs no SDL, runtime or renderer, directly or transitively.
-    forbid("web_export", &["pxui", "rays_shell", "rays_graph", "rays_editor", "rays", "runtime", "runtime_resources", "renderer", "sdl3"]);
-    forbid("rays", &[
-        "pxui", "rays_shell", "rays_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean",
-        "rdk_rays", "rays_pathtracer", "rays_editor",
-    ]);
-    forbid("rays_math", &["rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "sop"]);
-    forbid("rays_math", &gpu);
-    forbid("rdk_core", &["rdk_geom", "rdk_ops", "rdk_boolean", "rays", "rdk_rays", "sop"]);
-    forbid("rdk_core", &gpu);
-    forbid("rdk_geom", &["rdk_ops", "rdk_boolean", "rays", "rdk_rays", "sop"]);
-    forbid("rdk_geom", &gpu);
-    forbid("rdk_ops", &["rdk_boolean", "rays", "rdk_rays", "sop"]);
-    forbid("rdk_ops", &gpu);
-    forbid("rdk_boolean", &["rdk_ops", "rays", "rdk_rays", "sop"]);
-    forbid("rdk_boolean", &gpu);
-    forbid("sop", &["rays", "rdk_rays", "pxui", "rays_shell", "rays_graph", "rays_editor"]);
-    forbid("sop", &gpu);
-    forbid("editor_core", &["pxui", "rays_shell", "rays_graph", "rays_editor", "sop"]);
-    forbid("editor_document", &["pxui", "rays_shell", "rays_graph", "rays_editor"]);
-    forbid("pxui", &["rays", "param", "mem", "lru", "runtime", "runtime_resources", "renderer", "sdl3", "editor_core", "rays_shell", "sop", "rays_graph", "rays_editor", "scene_command", "rays_math", "ogpu_core"]);
-    forbid("rays_shell", &["sop", "rays_graph", "rays_editor"]);
-    forbid("rays_graph", &["sop", "rays_shell", "rays_editor"]);
-    forbid("pxui_render", &upper_no_gpu.iter().copied().filter(|name| *name != "pxui").collect::<Vec<_>>());
-    forbid("pxui_render", &["scene_command", "scene_core", "rays_math", "mem", "mem_sys", "lru", "sdl3", "metal_sys", "vulkan_sys", "ogpu_metal", "ogpu_vulkan", "ogpu_mock"]);
-    forbid("rays_pathtracer", &[
-        "metal_sys", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
-        "editor_document", "pxui", "rays_shell", "rays_graph", "rays_editor",
-    ]);
-    forbid("rdk_rays", &[
-        "metal_sys", "ogpu_metal", "rdk_boolean", "sop", "editor_core",
-        "editor_document", "pxui", "rays_shell", "rays_graph", "rays_pathtracer", "rays_editor",
-    ]);
-    // Flow is UI-free and GPU-free, but its three crates may reach the OCaml flow's leaves (param, input, diagnostic).
-    for library in ["flow_syntax", "flow_check", "flow_eval"] {
-        forbid(library, &[
-            "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays",
-            "editor_core", "pxui", "rays_shell", "rays_graph", "sop", "rays_editor",
-        ]);
-        forbid(library, &gpu);
-    }
-    forbid("flow_sop_catalog", &[
-        "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui", "rays_shell", "rays_graph", "rays_editor", "rays_bin",
-    ]);
-    forbid("flow_sop_catalog", &gpu);
-    rules
 }
 
 fn dependency_path(start: &str, goal: &str, graph: &HashMap<String, Vec<String>>) -> Option<Vec<String>> {
@@ -1159,7 +959,7 @@ fn ogpu_selection_errors(
     workspace: &Path,
 ) -> Vec<String> {
     let mut errors = Vec::new();
-    for package in packages {
+    for package in packages.iter().filter(|package| !package.external) {
         let all_selected = direct.get(&package.crate_name).map(Vec::as_slice).unwrap_or_default();
         let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
         // Production startup cannot be satisfied by a dev dependency. Tests may explicitly
@@ -1234,6 +1034,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
     cargo_manifests(&workspace.join("crates"), &mut manifests)?;
     cargo_manifests(&workspace.join("tools"), &mut manifests)?;
     cargo_manifests(&workspace.join("bin"), &mut manifests)?;
+    cargo_manifests(&workspace.join("pxui/crates"), &mut manifests)?;
     manifests.sort();
 
     let mut packages = Vec::new();
@@ -1243,7 +1044,8 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
         let parsed = parse_manifest(&manifest_path)?;
         let Some(package_name) = parsed.package_name.as_deref() else { continue };
         let relative = manifest_path.strip_prefix(workspace).unwrap_or(&manifest_path).to_string_lossy().replace('\\', "/");
-        let is_product = relative.starts_with("crates/") || relative.starts_with("bin/");
+        let external = relative.starts_with("pxui/");
+        let is_product = relative.starts_with("crates/") || relative.starts_with("bin/") || external;
         let crate_name = crate_name(package_name, parsed.lib_name.as_deref());
         let (has_binary, has_gpu_dev_targets) = package_targets(manifest_path.parent().unwrap_or(workspace), &parsed)?;
         let mut dependencies = Vec::new();
@@ -1264,6 +1066,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
             package_name: package_name.to_owned(),
             crate_name,
             product: is_product,
+            external,
             deps: dependencies,
             has_binary,
             has_gpu_dev_targets,
@@ -1289,6 +1092,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
     let local_policy = local_workspace_only();
 
     for package in &packages {
+        let errors_before = errors.len();
         let manifest_dir = package.manifest.parent().unwrap_or(workspace);
         let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
         if package.product
@@ -1321,7 +1125,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
                     }
                 }
             } else if (dependency_package == "cc" && dependency.kind == "build-dependencies")
-                || (package.package_name == "pxui_text" && dependency_package == "cosmic-text" && dependency.kind == "dependencies")
+                || (dependency.kind == "dependencies" && policy::EXTERNAL_CRATES.contains(&(package.package_name.as_str(), dependency_package)))
             {
                 None
             } else {
@@ -1329,14 +1133,11 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
                 None
             };
             if let Some(target) = resolved {
-                if package.crate_name == "rays"
-                    && dependency.kind != "dev-dependencies"
-                    && ["sdl3"].contains(&target.crate_name.as_str())
+                if dependency.kind != "dev-dependencies"
+                    && policy::NO_DIRECT.iter().any(|(from, to, _)| *from == package.crate_name && *to == target.crate_name)
                 {
-                    errors.push(format!(
-                        "{path}:{}: rays depends directly on {} (SDL services belong to runtime)",
-                        dependency.line, target.crate_name
-                    ));
+                    let why = policy::NO_DIRECT.iter().find(|(from, to, _)| *from == package.crate_name && *to == target.crate_name).map_or("", |row| row.2);
+                    errors.push(format!("{path}:{}: {} depends directly on {} ({why})", dependency.line, package.crate_name, target.crate_name));
                 }
                 if dependency.kind != "dev-dependencies" {
                     direct.insert(target.crate_name.clone());
@@ -1367,11 +1168,12 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
                 }
             }
         }
+        if package.external { errors.truncate(errors_before); }
     }
 
     let reach_rules = forbidden_reaches();
     for (library, forbidden) in reach_rules {
-        if !by_crate.contains_key(&library) {
+        if !by_crate.get(&library).is_some_and(|index| !packages[*index].external) {
             continue;
         }
         for target in forbidden {
@@ -1385,9 +1187,10 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
     }
     // The PXUI crates build and test with no SDL and nothing from Rays: their tests (dev
     // dependencies) may not reach the window host, SDL or any Rays crate either.
-    for library in ["pxui", "pxui_text", "pxui_render"] {
-        for dependency in selection_direct.get(library).into_iter().flatten() {
-            for target in ["sdl3", "sdl3_sys", "pxui_sdl", "runtime", "runtime_resources", "renderer", "rays", "rays_shell", "rays_graph", "rays_editor", "param", "mem"] {
+    for library in policy::TESTS_INCLUDED {
+        if !by_crate.get(*library).is_some_and(|index| !packages[*index].external) { continue; }
+        for dependency in selection_direct.get(*library).into_iter().flatten() {
+            for target in policy::TESTS_INCLUDED_FORBIDDEN.iter().copied() {
                 let path = if dependency == target { Some(vec![dependency.clone()]) } else { dependency_path(dependency, target, &graph) };
                 if let Some(path) = path {
                     errors.push(format!("dependency boundary: {library} (tests included) must not reach `{target}` (via {library} -> {})", path.join(" -> ")));
@@ -1401,13 +1204,20 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
 }
 
 
+/// With a `pxui/` checkout: its recorded commit must be on the PXUI remote (tools/check-pxui-remote.sh).
+fn pxui_remote(workspace: &Path) -> Result<Vec<String>, String> {
+    if !workspace.join("pxui").exists() {
+        return Ok(Vec::new());
+    }
+    let output = std::process::Command::new("sh").arg("tools/check-pxui-remote.sh").current_dir(workspace).output()
+        .map_err(|error| format!("cannot run tools/check-pxui-remote.sh: {error}"))?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    Ok(if output.status.success() { Vec::new() } else { vec![String::from_utf8_lossy(&output.stderr).trim().to_owned()] })
+}
+
 fn docs(workspace: &Path) -> Result<Vec<String>, String> {
     // rays-t bounds setup/build, each case and the test run. Gate checks never refresh fixtures.
-    for (package, filter, target) in [
-        ("flow_check", "examples_check", None),
-        ("rays_bin", "cli_help_errors_json_and_documentation", Some("cli")),
-        ("rays_bin", "registry_metadata_contracts", Some("cli")),
-    ] {
+    for (package, filter, target) in policy::DOCS_CHECKS.iter().copied() {
         let mut command = std::process::Command::new("cargo");
         command.current_dir(workspace).args(["t", "--profile", "default", "-p", package])
             .env_remove("RAYS_UPDATE_FIXTURES").env_remove("RAYS_ALLOW_SKIP");
@@ -1432,8 +1242,8 @@ fn workspace_root() -> Result<PathBuf, String> {
 fn main() {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "all".into());
-    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps" | "docs" | "all") {
-        eprintln!("usage: cargo run -p gate -- <shape|deps|docs|all>");
+    if args.next().is_some() || !matches!(command.as_str(), "shape" | "deps" | "docs" | "pxui" | "all") {
+        eprintln!("usage: cargo run -p gate -- <shape|deps|docs|pxui|all>");
         process::exit(2);
     }
     let workspace = match workspace_root() {
@@ -1447,8 +1257,10 @@ fn main() {
         "shape" => shape(&workspace),
         "deps" => deps(&workspace),
         "docs" => docs(&workspace),
+        "pxui" => pxui_remote(&workspace),
         _ => shape(&workspace).and_then(|mut errors| {
             errors.extend(deps(&workspace)?);
+            errors.extend(pxui_remote(&workspace)?);
             if errors.is_empty() { errors.extend(docs(&workspace)?); }
             Ok(errors)
         }),
@@ -1485,7 +1297,7 @@ mod tests {
             workspace.as_path()
         };
         let disabled = super::lib_unit_tests_disabled(root).expect("manifest scan");
-        assert!(disabled.contains("pxui") && disabled.contains("flow_shader"));
+        assert!(disabled.contains("flow_shader"));
     }
 
     #[test]
@@ -1704,7 +1516,7 @@ mod tests {
         let mock = dependency("ogpu_mock", "dev-dependencies", None);
         let mut app = Package {
             manifest: PathBuf::from("crates/app/Cargo.toml"),
-            package_name: "app".into(), crate_name: "app".into(), product: true,
+            package_name: "app".into(), crate_name: "app".into(), product: true, external: false,
             deps: vec![core.clone(), metal.clone(), vulkan.clone()],
             has_binary: true, has_gpu_dev_targets: false,
         };

@@ -1,5 +1,5 @@
 //! Real native layer ownership runs on the process initial thread, outside libtest workers.
-#[path = "../../renderer/tests/common/window.rs"]
+#[path = "../../../tools/t/window_harness.rs"]
 mod window;
 
 fn release_keepalive() {}
