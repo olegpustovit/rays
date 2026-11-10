@@ -107,18 +107,23 @@ the leaf/middle/top source-touch budgets and runs the middle/top suites through 
 
 | Machine / profile | Cold app build | Cached app build | flow_ir touch app build | Corpus |
 | --- | --- | --- | --- | --- |
-| Apple M1, arm64, rustc 1.99.1, current O1 | Unmeasured; warm cache retained | 0.121 s | 4.011 s | Red; stopped at 15.019 s before all 49 files |
+| Apple M1, arm64, rustc 1.99.1, current O1 | Unmeasured; warm cache retained | 0.131 s | 4.526 s | Red; 49 attempted in 14.612 s, gallery and swarm killed at 1 s |
 | Windows / current profile | Unmeasured; machine unavailable | Unmeasured | Unmeasured | Unmeasured |
 
 This is current-profile evidence, not a completed O0/O1 comparison. The corpus's one-second
-budget still fails for `sop_gallery`, the three swarm sketches and `ws_rosette`. Direct complete
-probes measured swarm at 2.915 s and gallery at 1.510 s. Swarm materializes 30.84 million exact
-integer corners (1.964 s), 10.28 million offsets and 5.148 million color vectors; validation keeps
+budget still fails for `sop_gallery` and `swarm`; the other 47 sketches completed. Because two
+checks were killed, the bounded total does not prove the complete corpus meets 15 s. Separate
+complete probes after one warmup measured medians of 1.543 s for swarm and 1.405 s for gallery
+(three alternating samples). Swarm materializes 30.84 million exact integer corners,
+10.28 million offsets and 5.148 million color vectors; validation keeps
 those computed values checked. CLI lowering omits editor probe records, while editor lowering
 retains them. Geometry bytes and selected computed-error diagnostics match in the regression.
 
 `cargo t --all` is implemented and its dispatcher regression passes; complete native qualification
 is still blocked by the cache-size check. GC retains the recent warm cache: its initial observed
 size was 75.537 GB and zero artifacts qualified for seven-day deletion. A later inode-aware audit
-measured 72.963 GB of allocated storage, so hardlink accounting does not meet the 15 GB limit.
+measured 72.963 GB of allocated storage. Conservative pruning of 2,101 superseded completed
+incremental sessions subsequently reclaimed 21.245 GB, leaving 53.211 GB allocated and
+53.782 GB logical. The newest completed session for each exact configuration, fresh incomplete
+sessions, working sessions and live-locked sessions are retained. The 15 GB limit remains red.
 Native Cocoa and measured-density PXUI checks pass. The remaining limits stay visible as failures.
