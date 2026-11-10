@@ -153,7 +153,7 @@
   },
   "Z8": {
     "status": "active",
-    "note": "Physical byte-limit/typed-memory regressions being installed; shared allocation owners and all cap callers mapped"
+    "note": "Shared platform-byte allocation owners installed across Core/Packed/JS/SOP/native; final shipped-node/COW/image audit underway"
   },
   "Z9": {
     "status": "pending",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "3541e92f fff7ce6c d70effc7 \u2014 Core descriptor/slot/size admission and successful-Driver state transitions"
+    "note": "3541e92f fff7ce6c d70effc7 c3169e12 \u2014 Core descriptor/slot/size/resource-use admission and successful-Driver state transitions"
   },
   "G2": {
     "status": "done",
