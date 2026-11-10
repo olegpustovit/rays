@@ -30,6 +30,68 @@ pub struct Configuration {
     pub layer: Option<Token>,
 }
 
+/// Immutable configuration admitted by Core before entering a driver.
+#[derive(Clone)]
+pub struct AdmittedConfiguration(Configuration);
+impl std::ops::Deref for AdmittedConfiguration {
+    type Target = Configuration;
+    fn deref(&self) -> &Configuration { &self.0 }
+}
+pub fn admit_configuration(operation: &str, configuration: Configuration) -> Result<AdmittedConfiguration, Error> {
+    validate_configuration(operation, &configuration)?;
+    Ok(AdmittedConfiguration(configuration))
+}
+
+/// CAMetalLayer's descriptor, shared by ordinary surfaces and direct native callers.
+#[derive(Clone, Copy, Debug)]
+pub struct LayerProfile {
+    pub width: usize,
+    pub height: usize,
+    pub format: crate::types::TextureFormat,
+    pub framebuffer_only: bool,
+    pub maximum_drawables: usize,
+    pub allows_timeout: bool,
+    pub display_sync: bool,
+    pub presents_with_transaction: bool,
+}
+impl LayerProfile {
+    pub fn default(width: usize, height: usize) -> Self {
+        Self { width, height, format: crate::types::TextureFormat::Bgra8Unorm, framebuffer_only: false,
+            maximum_drawables: 3, allows_timeout: true, display_sync: false, presents_with_transaction: false }
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub struct AdmittedLayer(LayerProfile);
+impl std::ops::Deref for AdmittedLayer {
+    type Target = LayerProfile;
+    fn deref(&self) -> &LayerProfile { &self.0 }
+}
+pub fn admit_layer(operation: &str, profile: LayerProfile) -> Result<AdmittedLayer, Error> {
+    if profile.width == 0 || profile.height == 0 || !(2..=3).contains(&profile.maximum_drawables) {
+        return Err(invalid(operation, "invalid drawable size or maximum count"));
+    }
+    validate_layer_format(operation, profile.format)?;
+    Ok(AdmittedLayer(profile))
+}
+fn validate_layer_format(operation: &str, format: crate::types::TextureFormat) -> Result<(), Error> {
+    use crate::types::TextureFormat;
+    if matches!(format, TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb | TextureFormat::Rgba16Float) { Ok(()) }
+    else { Err(error::make(operation, ErrorKind::Unsupported, "pixel format is not supported by CAMetalLayer")) }
+}
+impl AdmittedConfiguration {
+    pub fn layer_profile(&self, framebuffer_only: bool) -> Result<AdmittedLayer, Error> {
+        let format = match self.format {
+            Format::Bgra8Unorm => crate::types::TextureFormat::Bgra8Unorm,
+            Format::Rgba8Unorm => return Err(invalid("Ogpu.Surface.configure", "CAMetalLayer does not expose RGBA8 drawable format")),
+        };
+        // Core already admitted positive dimensions and capacity 1..=3. A logical
+        // capacity of one still needs CAMetalLayer's physical minimum of two drawables.
+        Ok(AdmittedLayer(LayerProfile { width: self.physical_width as usize, height: self.physical_height as usize,
+            format, framebuffer_only, maximum_drawables: self.max_acquired.max(2) as usize,
+            allows_timeout: true, display_sync: self.present_mode == PresentMode::Fifo, presents_with_transaction: false }))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Availability {
     Available,

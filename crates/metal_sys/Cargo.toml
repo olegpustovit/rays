@@ -8,6 +8,9 @@ build = "build.rs"
 [lib]
 test = false
 
+[dependencies]
+ogpu_core = { path = "../ogpu_core" }
+
 [build-dependencies]
 cc = "1"
 

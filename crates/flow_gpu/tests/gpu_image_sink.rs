@@ -80,7 +80,7 @@ impl b::DriverRenderEncoder for Wrapped<dyn b::DriverRenderEncoder> {
         set_stage_buffer(stage: b::ShaderStage, index: i64, offset: i64, buffer: b::Token) -> Result<(), E>;
         set_stage_texture(stage: b::ShaderStage, index: i64, texture: b::Token) -> Result<(), E>;
         set_stage_sampler(stage: b::ShaderStage, index: i64, sampler: b::Token) -> Result<(), E>;
-        set_viewport(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
+        set_viewport(rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), E>;
         set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
         set_cull(cull: ogpu_core::render_pass::Cull) -> Result<(), E>;
         set_winding(winding: b::Winding) -> Result<(), E>;
@@ -145,17 +145,15 @@ impl b::DriverDevice for Wrapped<dyn b::DriverDevice> {
         device_handle() -> ogpu_core::handle::Device;
         allocated_size() -> i64;
         recommended_working_set() -> i64;
-        create_mapped_buffer(descriptor: &ogpu_core::types::BufferDescriptor) -> Result<b::DriverMapped, E>;
-        create_depth_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        create_memoryless_texture(depth: bool, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_mapped_buffer(descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<b::DriverMapped, E>;
         create_library(shader: &ogpu_core::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, E>;
         warm_library(shader: &ogpu_core::shader::Shader) -> Option<b::Warm>;
         create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, E>;
         instance_layout(kind: b::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
-        create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, E>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, E>;
-        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
+        create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn b::DriverSampler>, E>;
+        create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn b::DriverIcb>, E>;
+        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, E>;
+        create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn b::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }
     fn capabilities(&self) -> ogpu_core::caps::Caps {
@@ -163,16 +161,16 @@ impl b::DriverDevice for Wrapped<dyn b::DriverDevice> {
         if self.st.no_render.get() { caps.render_pipeline = false; }
         caps
     }
-    fn create_buffer(&self, memory: ogpu_core::types::Memory, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
-        Ok(wrap(self.inner.create_buffer(memory, descriptor)?, &self.st))
+    fn create_buffer(&self, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<Box<dyn b::DriverResource>, E> {
+        Ok(wrap(self.inner.create_buffer(descriptor)?, &self.st))
     }
-    fn create_render_pipeline(&self, options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E> {
+    fn create_render_pipeline(&self, options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn b::DriverPipeline>, E> {
         if self.st.fail_pipeline.get() { return injected(); }
-        let pipeline = self.inner.create_render_pipeline(options, descriptor)?;
+        let pipeline = self.inner.create_render_pipeline(options, descriptor, admitted)?;
         self.st.pipelines.set(self.st.pipelines.get() + 1);
         Ok(wrap(pipeline, &self.st))
     }
-    fn create_texture(&self, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+    fn create_texture(&self, descriptor: &ogpu_core::validation::AdmittedTexture) -> Result<Box<dyn b::DriverResource>, E> {
         if self.st.fail_texture.get() { return injected(); }
         let inner = self.inner.create_texture(descriptor)?;
         Ok(Box::new(Wrapped { inner, st: self.st.clone(), texture: true }))

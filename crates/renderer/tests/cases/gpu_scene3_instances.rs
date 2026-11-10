@@ -420,7 +420,7 @@ impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder>
         render_set_pipeline(pipeline: backend::Token) -> Result<(), E>;
         set_stage_texture(stage: backend::ShaderStage, index: i64, texture: backend::Token) -> Result<(), E>;
         set_stage_sampler(stage: backend::ShaderStage, index: i64, sampler: backend::Token) -> Result<(), E>;
-        set_viewport(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
+        set_viewport(rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), E>;
         set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
         set_cull(cull: Cull) -> Result<(), E>;
         set_winding(winding: backend::Winding) -> Result<(), E>;
@@ -483,23 +483,21 @@ impl backend::DriverDevice for Observed<dyn backend::DriverDevice> {
         capabilities() -> ogpu_core::caps::Caps;
         allocated_size() -> i64;
         recommended_working_set() -> i64;
-        create_mapped_buffer(descriptor: &BufferDescriptor) -> Result<backend::DriverMapped, E>;
-        create_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
-        create_depth_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
-        create_memoryless_texture(depth: bool, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
+        create_mapped_buffer(descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<backend::DriverMapped, E>;
+        create_texture(descriptor: &ogpu_core::validation::AdmittedTexture) -> Result<Box<dyn backend::DriverResource>, E>;
         create_library(shader: &ogpu_core::shader::Shader) -> Result<Box<dyn backend::DriverLibrary>, E>;
         warm_library(shader: &ogpu_core::shader::Shader) -> Option<backend::Warm>;
         create_accel(descriptor: &backend::DriverAccelDescriptor) -> Result<Box<dyn backend::DriverAccel>, E>;
         instance_layout(kind: backend::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn backend::DriverSampler>, E>;
-        create_render_pipeline(options: backend::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn backend::DriverPipeline>, E>;
-        create_icb(max_commands: i64) -> Result<Box<dyn backend::DriverIcb>, E>;
-        create_argument(pipeline: backend::Token, stage: backend::ShaderStage, index: i64) -> Result<Box<dyn backend::DriverArgument>, E>;
-        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn backend::DriverSurface>, E>;
+        create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn backend::DriverSampler>, E>;
+        create_render_pipeline(options: backend::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn backend::DriverPipeline>, E>;
+        create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn backend::DriverIcb>, E>;
+        create_argument(pipeline: backend::Token, stage: backend::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn backend::DriverArgument>, E>;
+        create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn backend::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }
-    fn create_buffer(&self, memory: ogpu_core::types::Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn backend::DriverResource>, E> {
-        let buffer = self.inner.create_buffer(memory, descriptor)?;
+    fn create_buffer(&self, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<Box<dyn backend::DriverResource>, E> {
+        let buffer = self.inner.create_buffer(descriptor)?;
         if let Some(label) = &descriptor.label {
             self.seen.borrow_mut().buffers.insert(label.clone(), buffer.token());
         }

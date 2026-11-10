@@ -1,3 +1,4 @@
+use crate::validation::{AdmittedBuffer, AdmittedTexture};
 use crate::{
     acceleration, binding, caps, error::ErrorKind, handle, pipeline, shader, surface, types,
     validation,
@@ -157,7 +158,7 @@ fn discard_test_error() -> crate::error::Error {
 
 struct DiscardSurface { fail_first: bool, attempts: std::rc::Rc<std::cell::Cell<i64>> }
 impl crate::backend::DriverSurface for DiscardSurface {
-    fn configure(&self, _: &crate::surface::Configuration) -> Result<(), crate::error::Error> { Ok(()) }
+    fn configure(&self, _: &crate::surface::AdmittedConfiguration) -> Result<(), crate::error::Error> { Ok(()) }
     fn acquire_sync(&self) -> Result<crate::backend::DriverAcquire, crate::error::Error> {
         Ok(crate::backend::DriverAcquire::Acquired(crate::backend::DriverFrame { frame_token: 7 }))
     }
@@ -180,21 +181,19 @@ impl crate::backend::DriverDevice for DiscardDevice {
     fn capabilities(&self) -> caps::Caps { caps::minimum_m1() }
     fn allocated_size(&self) -> i64 { 0 }
     fn recommended_working_set(&self) -> i64 { 0 }
-    fn create_buffer(&self, _: types::Memory, _: &types::BufferDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_mapped_buffer(&self, _: &types::BufferDescriptor) -> Result<crate::backend::DriverMapped, crate::error::Error> { Err(discard_test_error()) }
-    fn create_texture(&self, _: &types::TextureDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_depth_texture(&self, _: &types::TextureDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_memoryless_texture(&self, _: bool, _: &types::TextureDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_buffer(&self, _: &AdmittedBuffer) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_mapped_buffer(&self, _: &AdmittedBuffer) -> Result<crate::backend::DriverMapped, crate::error::Error> { Err(discard_test_error()) }
+    fn create_texture(&self, _: &AdmittedTexture) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
     fn create_library(&self, _: &shader::Shader) -> Result<Box<dyn crate::backend::DriverLibrary>, crate::error::Error> { Err(discard_test_error()) }
     fn warm_library(&self, _: &shader::Shader) -> Option<crate::backend::Warm> { None }
     fn create_accel(&self, _: &crate::backend::DriverAccelDescriptor) -> Result<Box<dyn crate::backend::DriverAccel>, crate::error::Error> { Err(discard_test_error()) }
     fn instance_layout(&self, _: crate::backend::InstanceKind) -> Vec<i64> { vec![64; 12] }
-    fn create_sampler(&self, _: &types::SamplerDescriptor) -> Result<Box<dyn crate::backend::DriverSampler>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_render_pipeline(&self, _: crate::backend::RenderPipelineOptions, _: &pipeline::RenderDescriptor) -> Result<Box<dyn crate::backend::DriverPipeline>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_icb(&self, _: i64) -> Result<Box<dyn crate::backend::DriverIcb>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_argument(&self, _: i64, _: crate::backend::ShaderStage, _: i64) -> Result<Box<dyn crate::backend::DriverArgument>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_sampler(&self, _: &crate::validation::AdmittedSampler) -> Result<Box<dyn crate::backend::DriverSampler>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_render_pipeline(&self, _: crate::backend::RenderPipelineOptions, _: &pipeline::RenderDescriptor, _: &pipeline::AdmittedRenderPipeline) -> Result<Box<dyn crate::backend::DriverPipeline>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_icb(&self, _: &crate::validation::AdmittedIcb) -> Result<Box<dyn crate::backend::DriverIcb>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_argument(&self, _: i64, _: crate::backend::ShaderStage, _: crate::validation::AdmittedSlot) -> Result<Box<dyn crate::backend::DriverArgument>, crate::error::Error> { Err(discard_test_error()) }
     fn create_queue(&self) -> Result<Box<dyn crate::backend::DriverQueue>, crate::error::Error> { Err(discard_test_error()) }
-    fn create_surface(&self, _: &surface::Configuration) -> Result<Box<dyn crate::backend::DriverSurface>, crate::error::Error> {
+    fn create_surface(&self, _: &surface::AdmittedConfiguration) -> Result<Box<dyn crate::backend::DriverSurface>, crate::error::Error> {
         Ok(Box::new(DiscardSurface { fail_first: self.fail_first, attempts: self.attempts.clone() }))
     }
     fn destroy_device(&self) -> Result<(), crate::error::Error> { Ok(()) }
@@ -275,4 +274,26 @@ fn backend_discard_callback_failure_keeps_frame_retryable() {
     assert!(crate::backend::configure(&target, discard_test_configuration()).is_ok());
     assert!(crate::backend::destroy_surface(&target).is_ok());
     assert!(crate::backend::destroy_device(&device).is_ok());
+}
+
+#[test]
+fn surface_capacity_is_admitted_before_the_driver() {
+    let (device, _) = discard_test_device(false);
+    let mut configuration = discard_test_configuration();
+    configuration.max_acquired = 1;
+    let surface = crate::backend::create_surface(&device, configuration).unwrap();
+    let first = match crate::backend::acquire_sync(&surface).unwrap() {
+        crate::backend::AcquireResult::Acquired(frame) => frame, _ => panic!("mock frame missing"),
+    };
+    let error = crate::backend::acquire_sync(&surface).err().expect("capacity admitted before second driver acquisition");
+    assert_eq!(error.kind, ErrorKind::Capacity);
+    assert_eq!(error.operation, "Backend.acquire_sync");
+    crate::backend::discard(&first).unwrap();
+    assert_eq!(crate::backend::discard(&first).unwrap_err().kind, ErrorKind::InvalidState);
+    let next = match crate::backend::acquire_sync(&surface).unwrap() {
+        crate::backend::AcquireResult::Acquired(frame) => frame, _ => panic!("released capacity missing"),
+    };
+    crate::backend::discard(&next).unwrap();
+    crate::backend::destroy_surface(&surface).unwrap();
+    crate::backend::destroy_device(&device).unwrap();
 }

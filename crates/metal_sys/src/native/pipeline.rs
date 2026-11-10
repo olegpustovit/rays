@@ -144,21 +144,26 @@ pub fn create_compute_pipeline(
     { let _ = (device, function, label, reflection); Err(Error::Unavailable) }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn create_render_pipeline(
-    compiler: &Handle,
-    library: &Handle,
-    label: Option<&str>,
-    vertex: &str,
-    fragment: Option<&str>,
-    reflection: bool,
-    sample_count: u64,
-    color_attachments: &[ColorAttachment],
-    primitive_topology: i32,
-    support_indirect_command_buffers: bool,
-) -> Result<(Handle, (Vec<Binding>, Vec<Binding>)), Error> {
+pub fn create_render_pipeline(compiler: &Handle, library: &Handle, profile: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<(Handle, (Vec<Binding>, Vec<Binding>)), Error> {
     #[cfg(target_vendor = "apple")]
     {
+        let options = profile.options();
+        let label = options.label.as_deref();
+        let vertex = profile.vertex();
+        let fragment = options.fragment.as_deref();
+        let reflection = options.reflection;
+        let sample_count = options.raster_sample_count as u64;
+        let color_attachments = options.color_attachments.as_ref().expect("Core admitted color attachments").iter().map(|attachment| ColorAttachment {
+            pixel_format: super::pixel_format_code(attachment.format) as i32,
+            blending_state: match attachment.blending { ogpu_core::pipeline::BlendState::Disabled => 0, ogpu_core::pipeline::BlendState::Enabled => 1 },
+            source_rgb_blend_factor: blend_factor_code(attachment.source_rgb), destination_rgb_blend_factor: blend_factor_code(attachment.destination_rgb),
+            rgb_blend_operation: blend_operation_code(attachment.rgb_operation), source_alpha_blend_factor: blend_factor_code(attachment.source_alpha),
+            destination_alpha_blend_factor: blend_factor_code(attachment.destination_alpha), alpha_blend_operation: blend_operation_code(attachment.alpha_operation),
+            write_mask: attachment.write_mask.iter().copied().fold(0, |bits, value| bits | color_write_bit(value)),
+        }).collect::<Vec<_>>();
+        let primitive_topology = match options.primitive_topology { ogpu_core::render_pass::Primitive::PointList => 1,
+            ogpu_core::render_pass::Primitive::LineList | ogpu_core::render_pass::Primitive::LineStrip => 2, _ => 3 };
+        let support_indirect_command_buffers = options.support_indirect_command_buffers;
         let label = label.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels must not contain NUL".into()))?;
         let vertex = CString::new(vertex).map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL".into()))?;
         let fragment = fragment.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL".into()))?;
@@ -183,7 +188,7 @@ pub fn create_render_pipeline(
         Ok((pipeline, reflection))
     }
     #[cfg(not(target_vendor = "apple"))]
-    { let _ = (compiler, library, label, vertex, fragment, reflection, sample_count, color_attachments, primitive_topology, support_indirect_command_buffers); Err(Error::Unavailable) }
+    { let _ = (compiler, library, profile); Err(Error::Unavailable) }
 }
 
 pub fn render_pipeline_reflection(pipeline: &Handle) -> Result<(Vec<Binding>, Vec<Binding>), Error> {
@@ -287,4 +292,26 @@ unsafe extern "C" {
         destination_level: u64, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64,
         message: *mut *const c_char,
     ) -> i32;
+}
+
+#[cfg(target_vendor = "apple")]
+use ogpu_core::pipeline::{BlendFactor, BlendOperation, ColorWrite};
+#[cfg(target_vendor = "apple")]
+fn blend_factor_code(value: BlendFactor) -> i32 {
+    match value {
+        BlendFactor::Zero => 0, BlendFactor::One => 1, BlendFactor::SourceColor => 2, BlendFactor::OneMinusSourceColor => 3,
+        BlendFactor::SourceAlpha => 4, BlendFactor::OneMinusSourceAlpha => 5, BlendFactor::DestinationColor => 6,
+        BlendFactor::OneMinusDestinationColor => 7, BlendFactor::DestinationAlpha => 8, BlendFactor::OneMinusDestinationAlpha => 9,
+        BlendFactor::SourceAlphaSaturated => 10, BlendFactor::Color => 11, BlendFactor::OneMinusColor => 12, BlendFactor::Alpha => 13,
+        BlendFactor::OneMinusAlpha => 14, BlendFactor::Source1Color => 15, BlendFactor::OneMinusSource1Color => 16,
+        BlendFactor::Source1Alpha => 17, BlendFactor::OneMinusSource1Alpha => 18,
+    }
+}
+#[cfg(target_vendor = "apple")]
+fn blend_operation_code(value: BlendOperation) -> i32 {
+    match value { BlendOperation::Add => 0, BlendOperation::Subtract => 1, BlendOperation::ReverseSubtract => 2, BlendOperation::Min => 3, BlendOperation::Max => 4 }
+}
+#[cfg(target_vendor = "apple")]
+fn color_write_bit(value: ColorWrite) -> i32 {
+    match value { ColorWrite::Red => 8, ColorWrite::Green => 4, ColorWrite::Blue => 2, ColorWrite::Alpha => 1 }
 }

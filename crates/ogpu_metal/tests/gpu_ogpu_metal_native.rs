@@ -77,7 +77,7 @@ fn gpu_foundation() {
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
-    expect(ErrorKind::InvalidArgument, buffer::create(&device, buffer::Memory::Shared, &buffer_descriptor(0, &[BufferUsage::CopySrc])).err());
+    expect(ErrorKind::InvalidArgument, make_buffer(&device, buffer::Memory::Shared, &buffer_descriptor(0, &[BufferUsage::CopySrc])).err());
     let values: Vec<Buffer> = [
         (buffer::Memory::DeviceLocal, BufferUsage::Storage),
         (buffer::Memory::Shared, BufferUsage::Uniform),
@@ -85,9 +85,9 @@ fn gpu_foundation() {
         (buffer::Memory::Readback, BufferUsage::CopyDst),
     ]
     .into_iter()
-    .map(|(memory, usage)| buffer::create(&device, memory, &buffer_descriptor(64, &[usage])).unwrap_or_else(|failure| die(failure)))
+    .map(|(memory, usage)| make_buffer(&device, memory, &buffer_descriptor(64, &[usage])).unwrap_or_else(|failure| die(failure)))
     .collect();
-    expect(ErrorKind::InvalidArgument, buffer::create(&device, buffer::Memory::Readback, &buffer_descriptor(64, &[BufferUsage::Uniform])).err());
+    expect(ErrorKind::InvalidArgument, make_buffer(&device, buffer::Memory::Readback, &buffer_descriptor(64, &[BufferUsage::Uniform])).err());
     for value in &values {
         value.descriptor(&device).unwrap_or_else(|failure| die(failure));
     }
@@ -147,13 +147,11 @@ fn gpu_capabilities() {
         reported.limits.max_buffer_size == info.max_buffer_length as i64 && reported.ray_tracing == info.raytracing,
         "reported capability differs from Metal probe"
     );
-    let mut maximum = 1;
-    for sample in [2usize, 4, 8] {
-        if device.metal().supports_texture_sample_count(sample).expect("sample count") {
-            maximum = sample as i64;
-        }
+    let mut samples = 0;
+    for sample in [1usize, 2, 4, 8, 16, 32, 64] {
+        if device.metal().supports_texture_sample_count(sample).expect("sample count") { samples |= sample as u32; }
     }
-    assert_eq!(reported.limits.max_sample_count, maximum.min(4), "sample limit differs from qualified Metal probes");
+    assert_eq!(reported.limits.sample_counts, samples, "sample mask differs from actual Metal probes");
     device.destroy().unwrap_or_else(|failure| die(failure));
 }
 
@@ -254,10 +252,10 @@ fn gpu_pipeline() {
     let compute_binding = Binding { group: 0, binding: 0, kind: BindingKind::StorageBuffer, visibility: vec![Stage::Compute] };
     let compute_shader = make_shader("mapped-compute", COMPUTE_SOURCE, &[("mapped_compute", Stage::Compute)], vec![compute_binding.clone()]);
     let library_value = library::create(&device, &compute_shader).unwrap_or_else(|failure| die(failure));
-    let compute = pipeline::create_compute_from_library(&device, &library_value, "mapped_compute", &[], &[compute_binding.clone()]).unwrap_or_else(|failure| die(failure));
-    expect(ErrorKind::InvalidArgument, pipeline::create_compute_from_library(&device, &library_value, "mapped_compute", &[], &[Binding { kind: BindingKind::SampledTexture, ..compute_binding.clone() }]).err(),
+    let compute = make_compute_from_library(&device, &library_value, "mapped_compute", &[], &[compute_binding.clone()]).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidArgument, make_compute_from_library(&device, &library_value, "mapped_compute", &[], &[Binding { kind: BindingKind::SampledTexture, ..compute_binding.clone() }]).err(),
     );
-    assert!(pipeline::create_compute_from_library(&device, &library_value, "absent", &[], &[]).is_err(), "absent entry accepted");
+    assert!(make_compute_from_library(&device, &library_value, "absent", &[], &[]).is_err(), "absent entry accepted");
     let invalid_shader = make_shader("invalid-msl", "this is not Metal", &[("bad", Stage::Compute)], vec![]);
     assert!(library::create(&device, &invalid_shader).is_err(), "invalid MSL compiled");
     let render_shader = make_shader("mapped-render", RENDER_SOURCE, &[("mapped_vertex", Stage::Vertex), ("mapped_fragment", Stage::Fragment)], vec![]);
@@ -274,7 +272,7 @@ fn gpu_pipeline() {
         sample_count: 1,
     };
     for blend in [Blend::Replace, Blend::Alpha, Blend::Add, Blend::Multiply, Blend::Screen, Blend::Subtract] {
-        let value = pipeline::create_render_owned(false, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, blend, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+        let value = make_render_owned(false, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, blend, &device, &descriptor).unwrap_or_else(|failure| die(failure));
         value.destroy().unwrap_or_else(|failure| die(failure));
     }
     compute.destroy().unwrap_or_else(|failure| die(failure));
@@ -313,12 +311,12 @@ fn gpu_pipeline_argument_buffer() {
         sample_count: 1,
     };
     // Without `indirect` no fragment function is retained for encoders.
-    let direct = pipeline::create_render_owned(false, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
-    expect(ErrorKind::InvalidState, direct.argument_encoder(1).err());
-    let indirect = pipeline::create_render_owned(true, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
-    let mut encoder = indirect.argument_encoder(1).unwrap_or_else(|failure| die(failure));
+    let direct = make_render_owned(false, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, direct.argument_encoder(ogpu_core::validation::admit_slot("test",1).unwrap()).err());
+    let indirect = make_render_owned(true, ogpu_metal::native::pipeline::PrimitiveTopology::TriangleList, Blend::Replace, &device, &descriptor).unwrap_or_else(|failure| die(failure));
+    let mut encoder = indirect.argument_encoder(ogpu_core::validation::admit_slot("test",1).unwrap()).unwrap_or_else(|failure| die(failure));
     assert!(encoder.encoded_length() > 0, "argument encoder length");
-    expect(ErrorKind::InvalidArgument, indirect.argument_encoder(u64::MAX).err());
+    expect(ErrorKind::InvalidArgument, ogpu_core::validation::admit_slot("test",i64::MAX).err());
     encoder.destroy().expect("encoder destroy");
     indirect.destroy().unwrap_or_else(|failure| die(failure));
     direct.destroy().unwrap_or_else(|failure| die(failure));
@@ -530,3 +528,18 @@ pub const CASES: &[(&str, fn())] = &[
         ("gpu_destroy_releases_retained_driver_payloads", gpu_destroy_releases_retained_driver_payloads),
         ("gpu_destroy_preserves_only_escaped_owned_readback", gpu_destroy_preserves_only_escaped_owned_readback),
     ];
+
+fn make_buffer(device: &Device, memory: buffer::Memory, descriptor: &BufferDescriptor) -> Result<Buffer, Error> {
+    let admitted = ogpu_core::validation::admit_buffer(&device.capabilities(), memory.profile(descriptor.clone()))?;
+    buffer::create(device, &admitted)
+}
+fn make_render_owned(indirect: bool, topology: ogpu_metal::native::Primitive, blend: Blend, device: &Device, descriptor: &RenderDescriptor) -> Result<pipeline::Pipeline, Error> {
+    let profile = ogpu_core::pipeline::create_render(&device.capabilities(), descriptor)?.with_options(be::RenderPipelineOptions { blend, topology, indirect });
+    pipeline::create_render_owned(device, descriptor, &profile)
+}
+
+fn make_compute_from_library(device: &Device, library: &library::Library, entry: &str, constants: &[(String, ogpu_core::shader::ConstantValue)], interface: &[Binding]) -> Result<pipeline::Pipeline, ogpu_core::error::Error> {
+    ogpu_core::shader::validate_bindings(interface)?;
+    let function = ogpu_core::shader::admit_compute_function(entry.to_owned(), constants)?;
+    pipeline::create_compute_from_library(device, library, &function, interface)
+}

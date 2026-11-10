@@ -4,7 +4,7 @@ use super::NativeHandle;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct IndirectCommandBufferDescriptor {
+struct IndirectCommandBufferDescriptor {
     pub command_types: i64,
     pub inherit_buffers: u8,
     pub inherit_pipeline_state: u8,
@@ -26,27 +26,46 @@ pub struct IndirectCommandBufferDescriptor {
     pub support_color_attachment_mapping: u8,
 }
 
-pub fn create_indirect_command_buffer(
-    device: &Handle,
-    descriptor: &IndirectCommandBufferDescriptor,
-    max_command_count: u64,
-    options: i64,
-) -> Result<Handle, Error> {
+pub fn create_indirect_command_buffer(device: &Handle, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Handle, Error> {
     #[cfg(target_vendor = "apple")]
     {
+        let d = profile.descriptor();
+        let descriptor = IndirectCommandBufferDescriptor {
+            command_types: profile.command_types_bits(),
+            inherit_buffers: u8::from(d.inherit_buffers),
+            inherit_pipeline_state: u8::from(d.inherit_pipeline_state),
+            max_vertex_buffer_bind_count: d.max_vertex_buffer_bind_count as i64,
+            max_fragment_buffer_bind_count: d.max_fragment_buffer_bind_count as i64,
+            max_kernel_buffer_bind_count: d.max_kernel_buffer_bind_count as i64,
+            support_ray_tracing: u8::from(d.support_ray_tracing),
+            support_dynamic_attribute_stride: u8::from(d.support_dynamic_attribute_stride),
+            max_kernel_threadgroup_memory_bind_count: d.max_kernel_threadgroup_memory_bind_count as i64,
+            max_object_buffer_bind_count: d.max_object_buffer_bind_count as i64,
+            max_mesh_buffer_bind_count: d.max_mesh_buffer_bind_count as i64,
+            max_object_threadgroup_memory_bind_count: d.max_object_threadgroup_memory_bind_count as i64,
+            inherit_depth_stencil_state: u8::from(d.inherit_depth_stencil_state),
+            inherit_depth_bias: u8::from(d.inherit_depth_bias),
+            inherit_depth_clip_mode: u8::from(d.inherit_depth_clip_mode),
+            inherit_cull_mode: u8::from(d.inherit_cull_mode),
+            inherit_front_facing_winding: u8::from(d.inherit_front_facing_winding),
+            inherit_triangle_fill_mode: u8::from(d.inherit_triangle_fill_mode),
+            support_color_attachment_mapping: u8::from(d.support_color_attachment_mapping),
+        };
+        let max_command_count = profile.capacity() as u64;
+        let options = (2 << 4) | (2 << 8);
         use std::ffi::c_char;
         let mut output = std::ptr::null_mut();
         let mut message: *const c_char = std::ptr::null();
         let status = unsafe {
             rays_metal_indirect_command_buffer_create(
-                device.as_native_ptr()?, descriptor, max_command_count, options, &mut output, &mut message,
+                device.as_native_ptr()?, &descriptor, max_command_count, options, &mut output, &mut message,
             )
         };
         if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
         unsafe { Handle::from_native(output) }
     }
     #[cfg(not(target_vendor = "apple"))]
-    { let _ = (device, descriptor, max_command_count, options); Err(Error::Unavailable) }
+    { let _ = (device, profile); Err(Error::Unavailable) }
 }
 
 pub fn draw_indexed(

@@ -5,7 +5,7 @@ use ogpu_core::{
     error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},
-    types::{BufferDescriptor, BufferUsage},
+    types::BufferDescriptor,
 };
 use std::{
     cell::Cell,
@@ -24,7 +24,7 @@ struct BufferInner {
     metal: native::Buffer,
     handle: ResourceHandle,
     device: Device,
-    descriptor: BufferDescriptor,
+    descriptor: ogpu_core::validation::AdmittedBuffer,
     submission_uses: Cell<i64>,
     destroy_requested: Cell<bool>,
     /// Last command buffer that retained it.
@@ -34,20 +34,17 @@ struct BufferInner {
 #[derive(Clone)]
 pub struct Buffer(Rc<BufferInner>);
 
-fn validate_memory(descriptor: &BufferDescriptor, memory: Memory) -> Result<(), Error> {
-    match memory {
-        Memory::DeviceLocal | Memory::Shared | Memory::Upload => Ok(()),
-        Memory::Readback => {
-            if descriptor.usage.contains(&BufferUsage::CopyDst) {
-                Ok(())
-            } else {
-                Err(fail("Ogpu_metal.Buffer.create", ErrorKind::InvalidArgument, "readback buffers require Copy_dst usage"))
-            }
-        }
+impl Memory {
+    pub fn profile(self, descriptor: BufferDescriptor) -> ogpu_core::validation::BufferProfile {
+        use ogpu_core::validation::{BufferKind, BufferProfile};
+        BufferProfile { descriptor,
+            storage: if self == Memory::DeviceLocal { native::StorageMode::Private } else { native::StorageMode::Shared },
+            cpu_cache: if self == Memory::Upload { native::CpuCacheMode::WriteCombined } else { native::CpuCacheMode::DefaultCache },
+            kind: if self == Memory::Readback { BufferKind::Readback } else { BufferKind::Ordinary } }
     }
 }
 
-fn wrap(device: &Device, descriptor: &BufferDescriptor, metal: native::Buffer) -> Buffer {
+fn wrap(device: &Device, descriptor: &ogpu_core::validation::AdmittedBuffer, metal: native::Buffer) -> Buffer {
     device.attach_resource();
     Buffer(Rc::new(BufferInner {
         metal,
@@ -60,14 +57,8 @@ fn wrap(device: &Device, descriptor: &BufferDescriptor, metal: native::Buffer) -
     }))
 }
 
-pub fn create(device: &Device, memory: Memory, descriptor: &BufferDescriptor) -> Result<Buffer, Error> {
-    validate_memory(descriptor, memory)?;
-    let (storage, cache) = match memory {
-        Memory::DeviceLocal => (native::StorageMode::Private, native::CpuCacheMode::DefaultCache),
-        Memory::Shared | Memory::Readback => (native::StorageMode::Shared, native::CpuCacheMode::DefaultCache),
-        Memory::Upload => (native::StorageMode::Shared, native::CpuCacheMode::WriteCombined),
-    };
-    let native = native::Buffer::create(device.metal(), descriptor.size as u64, storage, cache, descriptor.label.as_deref())?;
+pub fn create(device: &Device, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<Buffer, Error> {
+    let native = native::Buffer::create(device.metal(), descriptor)?;
     Ok(wrap(device, descriptor, native))
 }
 
@@ -82,7 +73,7 @@ impl Buffer {
 
     pub fn descriptor(&self, device: &Device) -> Result<BufferDescriptor, Error> {
         self.validate("Ogpu_metal.Buffer.descriptor", device)?;
-        Ok(self.0.descriptor.clone())
+        Ok(self.0.descriptor.descriptor.clone())
     }
 
     pub fn write_bytes(&self, _device: &Device, dst_offset: i64, bytes: &[u8]) -> Result<(), Error> {

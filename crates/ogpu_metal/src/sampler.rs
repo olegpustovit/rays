@@ -5,7 +5,7 @@ use ogpu_core::{
     error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},
-    types::{AddressMode, SamplerDescriptor},
+
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -21,38 +21,10 @@ struct SamplerInner {
 #[derive(Clone)]
 pub struct Sampler(Rc<SamplerInner>);
 
-fn address(value: AddressMode) -> native::AddressMode {
-    match value {
-        AddressMode::ClampToEdge => native::AddressMode::ClampToEdge,
-        AddressMode::Repeat => native::AddressMode::Repeat,
-        AddressMode::MirrorRepeat => native::AddressMode::MirrorRepeat,
-    }
-}
-
-pub fn create(device: &Device, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
-    let native = native::SamplerDescriptor {
-        min_filter: descriptor.min_filter,
-        mag_filter: descriptor.mag_filter,
-        mip_filter: descriptor.mip_filter,
-        max_anisotropy: descriptor.max_anisotropy as u8,
-        address_s: address(descriptor.address_u),
-        address_t: address(descriptor.address_v),
-        address_r: address(descriptor.address_v),
-        lod_min: descriptor.lod_min as f32,
-        lod_max: descriptor.lod_max as f32,
-        support_argument_buffers: true,
-        label: descriptor.label.clone(),
-        ..native::SamplerDescriptor::default()
-    };
-    let metal = native::Sampler::create(device.metal(), native)?;
+pub fn create(device: &Device, descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Sampler, Error> {
+    let metal = native::Sampler::create(device.metal(), descriptor)?;
     device.attach_resource();
-    Ok(Sampler(Rc::new(SamplerInner {
-        metal,
-        handle: handle::create(device.handle()),
-        device: device.clone(),
-        submissions: Cell::new(0),
-        retained_by: Cell::new(0),
-    })))
+    Ok(Sampler(Rc::new(SamplerInner { metal, device: device.clone(), handle: handle::create(device.handle()), submissions: Cell::new(0), retained_by: Cell::new(0) })))
 }
 
 impl Sampler {

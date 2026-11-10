@@ -6,6 +6,7 @@
 #include <cmath>
 #include <string>
 #include <new>
+#include <limits>
 #include <type_traits>
 #include "metal_handle.h"
 #include "metal_kinds.h"
@@ -28,13 +29,64 @@ extern "C" int32_t rays_metal_is_main_thread(void) { return pthread_main_np(); }
 extern "C" int32_t rays_metal_buffer_copy(MetalHandle *handle, uint64_t offset, uint8_t *bytes, uintptr_t length, uint8_t write, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLBuffer> buffer = checked_object(handle, KIND_BUFFER); if (offset > buffer.length || length > buffer.length - offset) return set_error(message, "buffer range is out of bounds"); void *contents = buffer.contents; if (contents == nullptr) return set_error(message, "buffer has no CPU mapping"); if (length != 0) { if (write) __builtin_memcpy(static_cast<uint8_t *>(contents) + offset, bytes, length); else __builtin_memcpy(bytes, static_cast<uint8_t *>(contents) + offset, length); } if (write && length != 0 && buffer.storageMode == MTLStorageModeManaged) [buffer didModifyRange:NSMakeRange(static_cast<NSUInteger>(offset), static_cast<NSUInteger>(length))]; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 extern "C" int32_t rays_metal_buffer_readback(MetalHandle *handle, uint8_t **contents, uint64_t *length, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLBuffer> buffer = checked_object(handle, KIND_BUFFER); if (buffer.storageMode != MTLStorageModeShared) return set_error(message, "readback requires shared buffer storage"); if (contents == nullptr || length == nullptr) return set_error(message, "invalid readback output"); *contents = static_cast<uint8_t *>(buffer.contents); *length = buffer.length; if (*contents == nullptr) return set_error(message, "buffer has no CPU mapping"); return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 #include <unistd.h>
-extern "C" int32_t rays_metal_buffer_create_mapped(MetalHandle *device_handle, uint64_t length, int64_t options, MetalHandle **out, float **mapping, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLDevice> device = checked_object(device_handle, KIND_DEVICE); if (length == 0 || (length & 3) != 0) return set_error(message, "mapped buffer length must be a positive multiple of four"); const uint64_t page = static_cast<uint64_t>(getpagesize()); if (page == 0 || length > UINT64_MAX - (page - 1)) return set_error(message, "mapped buffer rounded length overflows"); const uint64_t rounded = ((length + page - 1) / page) * page; if (rounded > std::numeric_limits<NSUInteger>::max()) return set_error(message, "mapped buffer exceeds Metal length bounds"); id<MTLBuffer> buffer = [device newBufferWithLength:static_cast<NSUInteger>(rounded) options:static_cast<MTLResourceOptions>(options)]; if (buffer == nil || buffer.contents == nullptr) return set_error(message, "unable to allocate mapped Metal buffer"); __builtin_memset(buffer.contents, 0, static_cast<size_t>(rounded)); *out = make_handle(buffer, KIND_BUFFER); if (*out == nullptr) return set_error(message, "unable to allocate Metal handle"); *mapping = static_cast<float *>(buffer.contents); return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
+extern "C" int32_t rays_metal_buffer_create_mapped(MetalHandle *device_handle, uint64_t length, int64_t options, MetalHandle **out, float **mapping, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLDevice> device = checked_object(device_handle, KIND_DEVICE); const uint64_t page = static_cast<uint64_t>(getpagesize()); if (page == 0 || length > UINT64_MAX - (page - 1)) return set_error(message, "mapped buffer rounded length overflows"); const uint64_t rounded = ((length + page - 1) / page) * page; if (rounded > std::numeric_limits<NSUInteger>::max()) return set_error(message, "mapped buffer exceeds Metal length bounds"); id<MTLBuffer> buffer = [device newBufferWithLength:static_cast<NSUInteger>(rounded) options:static_cast<MTLResourceOptions>(options)]; if (buffer == nil || buffer.contents == nullptr) return set_error(message, "unable to allocate mapped Metal buffer"); __builtin_memset(buffer.contents, 0, static_cast<size_t>(rounded)); *out = make_handle(buffer, KIND_BUFFER); if (*out == nullptr) return set_error(message, "unable to allocate Metal handle"); *mapping = static_cast<float *>(buffer.contents); return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 struct RaysTextureDescriptor { int32_t texture_type; int32_t pixel_format; uint64_t width; uint64_t height; uint64_t depth; uint64_t mip_levels; uint64_t sample_count; uint64_t array_length; int32_t storage_mode; int32_t cpu_cache_mode; int32_t hazard_tracking_mode; int32_t usage; uint8_t allow_gpu_optimized_contents; int32_t compression_type; int32_t swizzle_red; int32_t swizzle_green; int32_t swizzle_blue; int32_t swizzle_alpha; };
 extern "C" int32_t rays_metal_texture_create(MetalHandle *device_handle, const RaysTextureDescriptor *source, const char *label, MetalHandle **out, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLDevice> device = checked_object(device_handle, KIND_DEVICE); MTLTextureDescriptor *descriptor = [[MTLTextureDescriptor alloc] init]; descriptor.textureType = static_cast<MTLTextureType>(source->texture_type); descriptor.pixelFormat = static_cast<MTLPixelFormat>(source->pixel_format); descriptor.width = static_cast<NSUInteger>(source->width); descriptor.height = static_cast<NSUInteger>(source->height); descriptor.depth = static_cast<NSUInteger>(source->depth); descriptor.mipmapLevelCount = static_cast<NSUInteger>(source->mip_levels); descriptor.sampleCount = static_cast<NSUInteger>(source->sample_count); descriptor.arrayLength = static_cast<NSUInteger>(source->array_length); descriptor.storageMode = static_cast<MTLStorageMode>(source->storage_mode); descriptor.cpuCacheMode = static_cast<MTLCPUCacheMode>(source->cpu_cache_mode); descriptor.hazardTrackingMode = static_cast<MTLHazardTrackingMode>(source->hazard_tracking_mode); descriptor.usage = static_cast<MTLTextureUsage>(source->usage); descriptor.allowGPUOptimizedContents = source->allow_gpu_optimized_contents != 0; if (@available(macOS 15.0, *)) descriptor.compressionType = static_cast<MTLTextureCompressionType>(source->compression_type); else if (source->compression_type != 0) return set_unavailable(message); if (@available(macOS 13.0, *)) descriptor.swizzle = MTLTextureSwizzleChannelsMake(static_cast<MTLTextureSwizzle>(source->swizzle_red), static_cast<MTLTextureSwizzle>(source->swizzle_green), static_cast<MTLTextureSwizzle>(source->swizzle_blue), static_cast<MTLTextureSwizzle>(source->swizzle_alpha)); else if (source->swizzle_red != 2 || source->swizzle_green != 3 || source->swizzle_blue != 4 || source->swizzle_alpha != 5) return set_unavailable(message); NSString *text = nil; if (label != nullptr) { text = [NSString stringWithUTF8String:label]; if (text == nil) return set_error(message, "invalid UTF-8 texture label"); } id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor]; if (texture == nil) return set_error(message, "Metal returned no texture"); if (text != nil) texture.label = text; *out = make_handle(texture, KIND_TEXTURE); return *out ? 0 : set_error(message, "unable to allocate Metal handle"); } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
-extern "C" int32_t rays_metal_texture_read(MetalHandle *handle, uint8_t *destination, uintptr_t bytes_per_row, uintptr_t bytes_per_image, uint64_t x, uint64_t y, uint64_t z, uint64_t width, uint64_t height, uint64_t depth, uint64_t mip_level, uint64_t slice, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLTexture> texture = checked_object(handle, KIND_TEXTURE); MTLRegion region = MTLRegionMake3D(static_cast<NSUInteger>(x), static_cast<NSUInteger>(y), static_cast<NSUInteger>(z), static_cast<NSUInteger>(width), static_cast<NSUInteger>(height), static_cast<NSUInteger>(depth)); [texture getBytes:destination bytesPerRow:bytes_per_row bytesPerImage:bytes_per_image fromRegion:region mipmapLevel:static_cast<NSUInteger>(mip_level) slice:static_cast<NSUInteger>(slice)]; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
+extern "C" int32_t rays_metal_texture_read(MetalHandle *handle, uint8_t *destination, uintptr_t destination_length, uintptr_t bytes_per_row, uintptr_t bytes_per_image, uint64_t x, uint64_t y, uint64_t z, uint64_t width, uint64_t height, uint64_t depth, uint64_t mip_level, uint64_t slice, const char **message) {
+  if (message) *message = nullptr;
+  @try { @autoreleasepool {
+    id<MTLTexture> texture = checked_object(handle, KIND_TEXTURE);
+    // This safe Rust ABI accepts a borrowed slice. Bound the actual native write, including
+    // standalone sys callers that have no Core admission value; never trust a raw pointer alone.
+    if (texture.storageMode == MTLStorageModePrivate || texture.storageMode == MTLStorageModeMemoryless || texture.sampleCount != 1)
+      return rays_metal_set_unsupported(message, "texture has no CPU transfer mapping");
+    if (destination == nullptr || mip_level >= texture.mipmapLevelCount || width == 0 || height == 0 || depth == 0)
+      return rays_metal_set_invalid_argument(message, "invalid texture region or mip level");
+    const NSUInteger shift = static_cast<NSUInteger>(mip_level > 63 ? 63 : mip_level);
+    const NSUInteger mw = MAX(NSUInteger(1), texture.width >> shift);
+    const NSUInteger mh = MAX(NSUInteger(1), texture.height >> shift);
+    const NSUInteger md = MAX(NSUInteger(1), texture.depth >> shift);
+    if (x > mw || width > mw - x || y > mh || height > mh - y || z > md || depth > md - z)
+      return rays_metal_set_invalid_argument(message, "texture region exceeds the native allocation");
+    NSUInteger slices = 1;
+    switch (texture.textureType) {
+      case MTLTextureTypeCube: slices = 6; break;
+      case MTLTextureTypeCubeArray: slices = texture.arrayLength * 6; break;
+      case MTLTextureType1DArray: case MTLTextureType2DArray: slices = texture.arrayLength; break;
+      default: break;
+    }
+    if (slice >= slices) return rays_metal_set_invalid_argument(message, "texture slice exceeds the native allocation");
+    NSUInteger texel = 0;
+    switch (texture.pixelFormat) {
+      case MTLPixelFormatR8Unorm: texel = 1; break;
+      case MTLPixelFormatRGBA8Unorm: case MTLPixelFormatBGRA8Unorm:
+      case MTLPixelFormatBGRA8Unorm_sRGB: case MTLPixelFormatDepth32Float: texel = 4; break;
+      case MTLPixelFormatRGBA16Float: texel = 8; break;
+      case MTLPixelFormatRGBA32Float: texel = 16; break;
+      default: return rays_metal_set_unsupported(message, "native CPU transfer pixel format is unsupported");
+    }
+    const NSUInteger max = std::numeric_limits<NSUInteger>::max();
+    if (width > max / texel) return rays_metal_set_invalid_argument(message, "texture row size overflow");
+    const NSUInteger row = static_cast<NSUInteger>(width) * texel;
+    if (bytes_per_row < row || bytes_per_row % texel != 0 || height > max / bytes_per_row)
+      return rays_metal_set_invalid_argument(message, "texture row pitch is invalid");
+    const NSUInteger image = static_cast<NSUInteger>(height) * bytes_per_row;
+    if (depth > 1 && bytes_per_image < image)
+      return rays_metal_set_invalid_argument(message, "texture image pitch is invalid");
+    const NSUInteger rows = static_cast<NSUInteger>(height - 1) * bytes_per_row;
+    if (depth > 1 && depth - 1 > max / bytes_per_image)
+      return rays_metal_set_invalid_argument(message, "texture transfer size overflow");
+    const NSUInteger images = static_cast<NSUInteger>(depth - 1) * bytes_per_image;
+    if (row > max - rows || rows + row > max - images || images + rows + row > destination_length)
+      return rays_metal_set_invalid_argument(message, "texture destination is too short");
+    MTLRegion region = MTLRegionMake3D(static_cast<NSUInteger>(x), static_cast<NSUInteger>(y), static_cast<NSUInteger>(z), static_cast<NSUInteger>(width), static_cast<NSUInteger>(height), static_cast<NSUInteger>(depth));
+    [texture getBytes:destination bytesPerRow:bytes_per_row bytesPerImage:bytes_per_image fromRegion:region mipmapLevel:static_cast<NSUInteger>(mip_level) slice:static_cast<NSUInteger>(slice)];
+    return 0;
+  } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); }
+}
 extern "C" int32_t rays_metal_command_buffer_wait(MetalHandle *handle, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLCommandBuffer> buffer = checked_object(handle, KIND_COMMAND_BUFFER); [buffer waitUntilCompleted]; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 extern "C" int32_t rays_metal_command_buffer_error(MetalHandle *handle, const char **output) { @try { @autoreleasepool { id<MTLCommandBuffer> buffer = checked_object(handle, KIND_COMMAND_BUFFER); NSError *error = buffer.error; if (error == nil) { *output = nullptr; return 0; } text_buffer = error.localizedDescription.UTF8String ?: "Metal command buffer failed"; *output = text_buffer.c_str(); return 1; } } @catch (NSException *exception) { text_buffer = exception.reason.UTF8String ?: "Metal command buffer failed"; *output = text_buffer.c_str(); return 1; } }
-extern "C" int32_t rays_metal_compute_encoder_set_bytes(MetalHandle *handle, const uint8_t *bytes, uintptr_t length, uint64_t index, const char **message) { if (message) *message = nullptr; if (length == 0) return set_error(message, "compute byte binding must not be empty"); @try { @autoreleasepool { id<MTLComputeCommandEncoder> encoder = checked_object(handle, KIND_COMPUTE_ENCODER); [encoder setBytes:bytes length:length atIndex:static_cast<NSUInteger>(index)]; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
+extern "C" int32_t rays_metal_compute_encoder_set_bytes(MetalHandle *handle, const uint8_t *bytes, uintptr_t length, uint64_t index, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLComputeCommandEncoder> encoder = checked_object(handle, KIND_COMPUTE_ENCODER); [encoder setBytes:bytes length:length atIndex:static_cast<NSUInteger>(index)]; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 extern "C" int32_t rays_metal_compute_encoder_use_accelerations(MetalHandle *handle, MetalHandle **structures, uintptr_t count, const char **message) { if (message) *message = nullptr; if (count == 0) return set_error(message, "acceleration structure list must not be empty"); @try { @autoreleasepool { id<MTLComputeCommandEncoder> encoder = checked_object(handle, KIND_COMPUTE_ENCODER); for (uintptr_t index = 0; index < count; ++index) { id<MTLAccelerationStructure> structure = checked_object(structures[index], KIND_ACCELERATION_STRUCTURE); [encoder useResource:structure usage:MTLResourceUsageRead]; } return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
 struct RaysPresentationCommandSnapshot { uint64_t queue_device_id; uint64_t device_id; uint64_t error_options; double gpu_start; double gpu_end; double kernel_start; double kernel_end; uint8_t retained_references; };
 extern "C" int32_t rays_metal_presentation_command_snapshot(MetalHandle *handle, RaysPresentationCommandSnapshot *out, const char **message) { if (message) *message = nullptr; @try { @autoreleasepool { id<MTLCommandBuffer> buffer = checked_object(handle, KIND_COMMAND_BUFFER); out->queue_device_id = buffer.commandQueue.device.registryID; out->device_id = buffer.device.registryID; out->error_options = static_cast<uint64_t>(buffer.errorOptions); out->gpu_start = buffer.GPUStartTime; out->gpu_end = buffer.GPUEndTime; out->kernel_start = buffer.kernelStartTime; out->kernel_end = buffer.kernelEndTime; out->retained_references = buffer.retainedReferences ? 1 : 0; return 0; } } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); } }
@@ -756,11 +808,6 @@ extern "C" int32_t rays_metal_render_depth_stencil(MetalHandle *receiver, MetalH
 }
 extern "C" int32_t rays_metal_render_encoder_set_viewport(MetalHandle *receiver, MTLViewport arg0, const char **message) {
   if (message) *message = nullptr;
-  if (!std::isfinite(arg0.originX) || !std::isfinite(arg0.originY) || !std::isfinite(arg0.width) ||
-      !std::isfinite(arg0.height) || !std::isfinite(arg0.znear) || !std::isfinite(arg0.zfar) ||
-      arg0.width <= 0 || arg0.height <= 0 || arg0.znear < 0 || arg0.znear > 1 ||
-      arg0.zfar < 0 || arg0.zfar > 1 || arg0.znear > arg0.zfar)
-    return rays_metal_set_invalid_argument(message, "viewport is non-finite, empty, or outside the depth range");
   @try {
     @autoreleasepool {
       id<MTLRenderCommandEncoder> object = checked_object(receiver, KIND_RENDER_ENCODER);

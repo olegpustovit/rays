@@ -1,5 +1,6 @@
 //! Ogpu_metal.Backend: OGPU's driver traits over the Metal modules. Tokens name native objects;
 //! the checks live in `ogpu_core::backend`, as for Vulkan.
+use ogpu_core::validation::{AdmittedBuffer, AdmittedTexture, TextureRead, TextureReadInto};
 use crate::native;
 use crate::{
     acceleration::{self, Acceleration},
@@ -28,9 +29,7 @@ use ogpu_core::{
     handle,
     pipeline::RenderDescriptor,
     render_pass::{IndexType, Primitive},
-    shader::{Binding, ConstantValue, Shader},
-    surface::Configuration,
-    types::{BufferDescriptor, Memory, SamplerDescriptor, TextureDescriptor, TextureFormat},
+    shader::{Binding, Shader},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -74,14 +73,6 @@ impl Dev {
     }
 }
 
-fn buffer_memory(memory: Memory) -> Result<buffer::Memory, Error> {
-    match memory {
-        Memory::Shared => Ok(buffer::Memory::Shared),
-        Memory::DeviceLocal => Ok(buffer::Memory::DeviceLocal),
-        Memory::Memoryless => Err(fail("Ogpu_metal.Backend.create_buffer", ErrorKind::InvalidArgument, "memoryless buffers do not exist")),
-    }
-}
-
 /// The host view a mapped buffer made on first ask; its buffer clears it on destroy.
 
 struct MetalBuffer {
@@ -122,8 +113,8 @@ fn register_buffer(dev: &Rc<Dev>, created: Result<Buffer, Error>) -> Result<Meta
     Ok(MetalBuffer { dev: dev.clone(), value, id })
 }
 
-fn create_buffer(dev: &Rc<Dev>, memory: Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-    Ok(Box::new(register_buffer(dev, buffer_memory(memory).and_then(|m| buffer::create(&dev.device, m, descriptor)))?))
+fn create_buffer(dev: &Rc<Dev>, descriptor: &AdmittedBuffer) -> Result<Box<dyn DriverResource>, Error> {
+    Ok(Box::new(register_buffer(dev, buffer::create(&dev.device, descriptor))?))
 }
 
 
@@ -137,8 +128,8 @@ impl DriverMapping for MetalMapping {
     }
 }
 
-fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error> {
-    let value = buffer::create(&dev.device, buffer::Memory::Shared, descriptor)?;
+fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &AdmittedBuffer) -> Result<DriverMapped, Error> {
+    let value = buffer::create(&dev.device, descriptor)?;
     let resource = register_buffer(dev, Ok(value.clone()))?;
     let native_readback = value.metal().owned_readback()?;
     let readback: OwnedReadback = std::sync::Arc::new(move |offset, length| {
@@ -150,44 +141,21 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
     })
 }
 
-fn texture_memory(host_read: bool, descriptor: &TextureDescriptor) -> Memory {
-    if descriptor.sample_count == 1 && host_read { Memory::Shared } else { Memory::DeviceLocal }
-}
-
-struct MetalTexture {
-    dev: Rc<Dev>,
-    value: Texture,
-    id: i64,
-    host_read: bool,
-    height: i64,
-}
-
+struct MetalTexture { dev: Rc<Dev>, value: Texture, id: i64 }
 impl DriverResource for MetalTexture {
-    fn token(&self) -> Token {
-        self.id
-    }
-    fn write(&self, _offset: i64, _bytes: &[u8]) -> Result<(), Error> {
+    fn token(&self) -> Token { self.id }
+    fn write(&self, _: i64, _: &[u8]) -> Result<(), Error> {
         Err(fail("Ogpu_metal.Backend.texture.write", ErrorKind::Unsupported, "use a transfer pass for textures"))
     }
-    fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error> {
-        let height = self.height;
-        if !self.host_read {
-            Err(fail("Ogpu_metal.Backend.depth.read", ErrorKind::Unsupported, "depth textures are not host readable"))
-        } else if offset != 0 || height <= 0 || (length as i64) % height != 0 {
-            Err(fail("Ogpu_metal.Backend.texture.read", ErrorKind::InvalidArgument, "texture read range is invalid"))
-        } else {
-            self.value.read_bytes(length as i64 / height)
-        }
+    fn read(&self, _: i64, _: usize) -> Result<Vec<u8>, Error> {
+        Err(fail("Ogpu_metal.Backend.texture.read", ErrorKind::InvalidArgument, "texture reads require an admitted layout"))
     }
-    fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error> {
-        let height = self.height;
-        if !self.host_read {
-            Err(fail("Ogpu_metal.Backend.depth.read_into", ErrorKind::Unsupported, "depth textures are not host readable"))
-        } else if offset != 0 || destination_offset != 0 || length != destination.len() || height <= 0 || (length as i64) % height != 0 {
-            Err(fail("Ogpu_metal.Backend.texture.read_into", ErrorKind::InvalidArgument, "destination must exactly match the texture read range"))
-        } else {
-            self.value.read_bytes_into(length as i64 / height, destination)
-        }
+    fn read_into(&self, _: i64, _: &mut [u8], _: usize, _: usize) -> Result<(), Error> {
+        Err(fail("Ogpu_metal.Backend.texture.read_into", ErrorKind::InvalidArgument, "texture reads require an admitted layout"))
+    }
+    fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> { self.value.read_bytes(read) }
+    fn read_texture_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
+        self.value.read_bytes_into(read)
     }
     fn destroy(&self) -> Result<(), Error> {
         self.value.destroy()?;
@@ -195,16 +163,11 @@ impl DriverResource for MetalTexture {
         Ok(())
     }
 }
-
-fn register_texture(dev: &Rc<Dev>, host_read: bool, descriptor: &TextureDescriptor, created: Result<Texture, Error>) -> Result<Box<dyn DriverResource>, Error> {
-    let value = created?;
+fn create_texture(dev: &Rc<Dev>, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
+    let value = texture::create(&dev.device, descriptor)?;
     let id = dev.t.token();
     dev.t.resources.borrow_mut().insert(id, Resource::Texture(value.clone()));
-    Ok(Box::new(MetalTexture { dev: dev.clone(), value, id, host_read, height: descriptor.height }))
-}
-
-fn create_texture_format(dev: &Rc<Dev>, format: TextureFormat, host_read: bool, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-    register_texture(dev, host_read, descriptor, texture::create(&dev.device, texture_memory(host_read, descriptor), format, descriptor))
+    Ok(Box::new(MetalTexture { dev: dev.clone(), value, id }))
 }
 
 fn max_threads(pipeline: &Pipeline) -> i64 {
@@ -249,8 +212,8 @@ struct MetalLibrary {
 }
 
 impl DriverLibrary for MetalLibrary {
-    fn create_compute_pipeline_in(&self, entry: &str, constants: &[(String, ConstantValue)], interface: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
-        let pipeline = pipeline::create_compute_from_library(&self.dev.device, &self.value, entry, constants, interface)?;
+    fn create_compute_pipeline_in(&self, function: &ogpu_core::shader::AdmittedFunction, interface: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
+        let pipeline = pipeline::create_compute_from_library(&self.dev.device, &self.value, function, interface)?;
         own_pipeline(&self.dev, pipeline)
     }
     fn destroy_library(&self) -> Result<(), Error> {
@@ -268,9 +231,7 @@ fn create_library(dev: &Rc<Dev>, shader: &Shader) -> Result<Box<dyn DriverLibrar
 }
 
 fn warm_library(dev: &Rc<Dev>, shader: &Shader) -> Option<ogpu_core::backend::Warm> {
-    let source = std::str::from_utf8(ogpu_core::shader::bytes(shader)).ok()?;
-    let entry = &ogpu_core::shader::entry_points(shader).first()?.name;
-    let warm = native::Library::warm(dev.device.metal(), source, entry).ok()?;
+    let warm = native::Library::warm(dev.device.metal(), shader).ok()?;
     Some(Box::new(move || warm.state()))
 }
 
@@ -347,15 +308,15 @@ impl DriverSampler for MetalSampler {
     }
 }
 
-fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> Result<Box<dyn DriverSampler>, Error> {
+fn create_sampler(dev: &Rc<Dev>, descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error> {
     let value = sampler::create(&dev.device, descriptor)?;
     let id = dev.t.token();
     dev.t.samplers.borrow_mut().insert(id, value.clone());
     Ok(Box::new(MetalSampler { dev: dev.clone(), value, id }))
 }
 
-fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descriptor: &RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error> {
-    let pipeline = pipeline::create_render_owned(options.indirect, options.topology, options.blend, &dev.device, descriptor)?;
+fn create_render_pipeline(dev: &Rc<Dev>, _options: RenderPipelineOptions, descriptor: &RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error> {
+    let pipeline = pipeline::create_render_owned(&dev.device, descriptor, admitted)?;
     own_pipeline(dev, pipeline)
 }
 
@@ -368,13 +329,13 @@ struct MetalIcb {
 }
 
 impl MetalIcb {
-    fn command(&self, index: i64) -> Result<native::RenderCommand, Error> {
-        let index = index as usize;
-        if let Some(Some(c)) = self.entry.commands.borrow().get(index) {
+    fn command(&self, index: ogpu_core::validation::AdmittedIcbIndex) -> Result<native::RenderCommand, Error> {
+        let at = index.index();
+        if let Some(Some(c)) = self.entry.commands.borrow().get(at) {
             return Ok(c.clone());
         }
         let c = native::RenderCommand::at(&self.entry.icb, index)?;
-        self.entry.commands.borrow_mut()[index] = Some(c.clone());
+        self.entry.commands.borrow_mut()[at] = Some(c.clone());
         Ok(c)
     }
 
@@ -390,7 +351,7 @@ impl DriverIcb for MetalIcb {
     fn icb_token(&self) -> Token {
         self.id
     }
-    fn icb_set_pipeline(&self, index: i64, token: Token) -> Result<(), Error> {
+    fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, token: Token) -> Result<(), Error> {
         let Some(pipeline) = self.dev.t.pipelines.borrow().get(&token).cloned() else {
             return Err(fail(ICB_OP, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
         };
@@ -399,7 +360,7 @@ impl DriverIcb for MetalIcb {
             Native::Render(native) => self.command(index)?.set_pipeline(native),
         }
     }
-    fn icb_set_buffer(&self, index: i64, stage: ShaderStage, slot: i64, offset: i64, token: Token) -> Result<(), Error> {
+    fn icb_set_buffer(&self, index: ogpu_core::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, token: Token) -> Result<(), Error> {
         let command = self.command(index)?;
         let buffer = self.find_buffer(token)?;
         match stage {
@@ -407,10 +368,10 @@ impl DriverIcb for MetalIcb {
             ShaderStage::Fragment => command.set_fragment_buffer(slot as usize, offset as u64, buffer.metal()),
         }
     }
-    fn icb_draw(&self, index: i64, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
+    fn icb_draw(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.command(index)?.draw_primitives(primitive, first as usize, count as usize, Some(instances as usize))
     }
-    fn icb_draw_indexed(&self, index: i64, primitive: Primitive, index_type: IndexType, token: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
+    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, index_type: IndexType, token: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
         let command = self.command(index)?;
         let index_buffer = self.find_buffer(token)?;
         command.draw_indexed(
@@ -434,13 +395,9 @@ impl DriverIcb for MetalIcb {
     }
 }
 
-fn create_icb(dev: &Rc<Dev>, max_commands: i64) -> Result<Box<dyn DriverIcb>, Error> {
-    let mut descriptor = native::IndirectCommandBuffer::descriptor(vec![native::indirect::CommandType::IndirectDraw, native::indirect::CommandType::IndirectDrawIndexed]);
-    descriptor.inherit_buffers = false;
-    descriptor.inherit_pipeline_state = false;
-    descriptor.max_vertex_buffer_bind_count = 8;
-    descriptor.max_fragment_buffer_bind_count = 8;
-    let icb = native::IndirectCommandBuffer::create(dev.device.metal(), max_commands as usize, &descriptor)?;
+fn create_icb(dev: &Rc<Dev>, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
+    let max_commands = profile.capacity();
+    let icb = native::IndirectCommandBuffer::create(dev.device.metal(), profile)?;
     let id = dev.t.token();
     let entry = Rc::new(IcbEntry { icb, commands: RefCell::new(vec![None; max_commands as usize]) });
     dev.t.icbs.borrow_mut().insert(id, entry.clone());
@@ -452,7 +409,7 @@ const ARGUMENT_OP: &str = "Ogpu_metal.Backend.create_argument";
 struct MetalArgument {
     dev: Rc<Dev>,
     pipeline: Pipeline,
-    index: i64,
+    index: ogpu_core::validation::AdmittedSlot,
     encoder: RefCell<native::ShaderArgumentEncoder>,
     length: i64,
     alignment: i64,
@@ -465,7 +422,7 @@ impl MetalArgument {
         let Some(Resource::Buffer(buffer)) = self.dev.t.resource(buffer) else {
             return Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "buffer graph is incomplete"));
         };
-        let mut scratch = self.pipeline.argument_encoder(self.index as u64)?;
+        let mut scratch = self.pipeline.argument_encoder(self.index)?;
         let done = scratch
             .set_argument_buffer(buffer.metal(), offset as u64)
             .and_then(|()| scratch.set(slot as u64, resource));
@@ -498,14 +455,14 @@ impl DriverArgument for MetalArgument {
     }
 }
 
-fn create_argument(dev: &Rc<Dev>, pipeline: Token, stage: ShaderStage, index: i64) -> Result<Box<dyn DriverArgument>, Error> {
+fn create_argument(dev: &Rc<Dev>, pipeline: Token, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
     let Some(pipeline) = dev.t.pipelines.borrow().get(&pipeline).cloned() else {
         return Err(fail(ARGUMENT_OP, ErrorKind::InvalidArgument, "pipeline graph is incomplete"));
     };
     if stage == ShaderStage::Vertex {
         return Err(fail(ARGUMENT_OP, ErrorKind::Unsupported, "argument encoders are exposed for fragment functions"));
     }
-    let encoder = RefCell::new(pipeline.argument_encoder(index as u64)?);
+    let encoder = RefCell::new(pipeline.argument_encoder(index)?);
     let (length, alignment) = (encoder.borrow().encoded_length() as i64, encoder.borrow().alignment() as i64);
     Ok(Box::new(MetalArgument { dev: dev.clone(), pipeline, index, encoder, length, alignment }))
 }
@@ -718,7 +675,7 @@ struct MetalSurface {
 }
 
 impl DriverSurface for MetalSurface {
-    fn configure(&self, configuration: &Configuration) -> Result<(), Error> {
+    fn configure(&self, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<(), Error> {
         self.value.configure(configuration)
     }
     fn acquire_sync(&self) -> Result<DriverAcquire, Error> {
@@ -742,10 +699,7 @@ impl DriverSurface for MetalSurface {
         Ok(())
     }
     fn destroy_surface(&self) -> Result<(), Error> {
-        let frames = self.dev.acquired_frames.borrow().values().filter(|(owner, _)| owner.same(&self.value)).count();
-        if frames != 0 {
-            Err(fail("Ogpu_metal.Backend.destroy_surface", ErrorKind::InvalidState, "surface has outstanding frames"))
-        } else if self.value.in_flight_presentations() != 0 {
+        if self.value.in_flight_presentations() != 0 {
             Err(fail("Ogpu_metal.Backend.destroy_surface", ErrorKind::InvalidState, "surface has presentations in flight"))
         } else {
             self.value.destroy();
@@ -755,7 +709,7 @@ impl DriverSurface for MetalSurface {
     }
 }
 
-fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> Result<Box<dyn DriverSurface>, Error> {
+fn create_surface(dev: &Rc<Dev>, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error> {
     const OP: &str = "Ogpu_metal.Backend.create_surface";
     let Some(token) = &configuration.layer else {
         return Err(fail(OP, ErrorKind::Unsupported, "surface needs a native layer token"));
@@ -765,9 +719,9 @@ fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> Result<Box<dy
             token,
             token.owner_id(),
             token.generation(),
-            native::surface::Configuration::default(configuration.physical_width as usize, configuration.physical_height as usize),
+            configuration.layer_profile(true)?,
         )?;
-    let value = surface::create(&dev.device, layer, configuration)?;
+    let value = surface::create(&dev.device, layer)?;
     Ok(Box::new(MetalSurface { dev: dev.clone(), value }))
 }
 
@@ -816,25 +770,14 @@ impl DriverDevice for MetalDevice {
     fn recommended_working_set(&self) -> i64 {
         metal_size(&self.dev.device, |i| i.recommended_max_working_set_size)
     }
-    fn create_buffer(&self, memory: Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        create_buffer(&self.dev, memory, descriptor)
+    fn create_buffer(&self, descriptor: &AdmittedBuffer) -> Result<Box<dyn DriverResource>, Error> {
+        create_buffer(&self.dev, descriptor)
     }
-    fn create_mapped_buffer(&self, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error> {
+    fn create_mapped_buffer(&self, descriptor: &AdmittedBuffer) -> Result<DriverMapped, Error> {
         create_mapped_buffer(&self.dev, descriptor)
     }
-    fn create_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        create_texture_format(&self.dev, descriptor.format, true, descriptor)
-    }
-    fn create_depth_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        create_texture_format(&self.dev, TextureFormat::Depth32Float, false, descriptor)
-    }
-    fn create_memoryless_texture(&self, depth: bool, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        register_texture(
-            &self.dev,
-            false,
-            descriptor,
-            texture::create(&self.dev.device, Memory::Memoryless, if depth { TextureFormat::Depth32Float } else { descriptor.format }, descriptor),
-        )
+    fn create_texture(&self, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
+        create_texture(&self.dev, descriptor)
     }
     fn create_library(&self, shader: &Shader) -> Result<Box<dyn DriverLibrary>, Error> {
         create_library(&self.dev, shader)
@@ -848,22 +791,22 @@ impl DriverDevice for MetalDevice {
     fn instance_layout(&self, kind: InstanceKind) -> Vec<i64> {
         instance_layout(kind)
     }
-    fn create_sampler(&self, descriptor: &SamplerDescriptor) -> Result<Box<dyn DriverSampler>, Error> {
+    fn create_sampler(&self, descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error> {
         create_sampler(&self.dev, descriptor)
     }
-    fn create_render_pipeline(&self, options: RenderPipelineOptions, descriptor: &RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error> {
-        create_render_pipeline(&self.dev, options, descriptor)
+    fn create_render_pipeline(&self, options: RenderPipelineOptions, descriptor: &RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error> {
+        create_render_pipeline(&self.dev, options, descriptor, admitted)
     }
-    fn create_icb(&self, max_commands: i64) -> Result<Box<dyn DriverIcb>, Error> {
-        create_icb(&self.dev, max_commands)
+    fn create_icb(&self, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
+        create_icb(&self.dev, profile)
     }
-    fn create_argument(&self, pipeline: Token, stage: ShaderStage, index: i64) -> Result<Box<dyn DriverArgument>, Error> {
+    fn create_argument(&self, pipeline: Token, stage: ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
         create_argument(&self.dev, pipeline, stage, index)
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> {
         create_queue(&self.dev)
     }
-    fn create_surface(&self, configuration: &Configuration) -> Result<Box<dyn DriverSurface>, Error> {
+    fn create_surface(&self, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error> {
         create_surface(&self.dev, configuration)
     }
     fn destroy_device(&self) -> Result<(), Error> {

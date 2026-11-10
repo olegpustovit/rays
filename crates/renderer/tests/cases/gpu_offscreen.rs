@@ -855,10 +855,10 @@ fn gpu_execution_blends_samples_resize() {
         }
     }
     let scene3=execution_scene3_draw("samples",0xff0080ff,(0.,0.));
-    let supported=ogpu_core::backend::capabilities(&se::device(&e)).limits.max_sample_count;
+    let supported=ogpu_core::backend::capabilities(&se::device(&e)).limits;
     for samples in [1,4,9,16] {
         let mut d=(*scene3).clone(); d.samples=samples; let d=Rc::new(d);
-        if samples>supported {
+        if !supported.supports_samples(samples) {
             let uploaded=se::upload_bytes(&e);
             assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[d]),Err(error) if error.kind==ogpu_core::error::ErrorKind::Unsupported));
             assert_eq!(se::upload_bytes(&e),uploaded,"unsupported samples uploaded data");
@@ -876,7 +876,7 @@ fn gpu_execution_blends_samples_resize() {
         se::submit(None,&mut || {},None,&mut e,&[Rc::new(d)]).unwrap();
         assert_eq!(se::read_pixels(&mut e,32).unwrap(),[255,0,128,255].repeat(64));
     }
-    if supported>=4 {
+    if supported.supports_samples(4) {
         let mut d=(*scene3).clone(); d.samples=4; d.draw.state.viewport=(0,0,8,8); d.draw.state.scissor=(0,0,8,8);
         se::submit(None,&mut || {},None,&mut e,&[Rc::new(d)]).unwrap();
         assert_eq!(se::read_pixels(&mut e,32).unwrap(),[255,0,128,255].repeat(64));

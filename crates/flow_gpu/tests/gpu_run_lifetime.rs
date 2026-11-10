@@ -61,8 +61,8 @@ impl b::DriverPipeline for Faulty<dyn b::DriverPipeline> {
 }
 impl b::DriverLibrary for Faulty<dyn b::DriverLibrary> {
     forward! { destroy_library() -> Result<(), E>; }
-    fn create_compute_pipeline_in(&self, entry: &str, constants: &[(String, ogpu_core::shader::ConstantValue)], interface: &[ogpu_core::shader::Binding]) -> Result<Box<dyn b::DriverPipeline>, E> {
-        let pipeline = self.inner.create_compute_pipeline_in(entry, constants, interface)?;
+    fn create_compute_pipeline_in(&self, function: &ogpu_core::shader::AdmittedFunction, interface: &[ogpu_core::shader::Binding]) -> Result<Box<dyn b::DriverPipeline>, E> {
+        let pipeline = self.inner.create_compute_pipeline_in(function, interface)?;
         bump(&self.f.pipelines);
         Ok(Box::new(wrap(pipeline, &self.f, 0)))
     }
@@ -99,26 +99,24 @@ impl b::DriverDevice for Faulty<dyn b::DriverDevice> {
         device_handle() -> ogpu_core::handle::Device;
         capabilities() -> ogpu_core::caps::Caps;
         allocated_size() -> i64;
-        create_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        create_depth_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        create_memoryless_texture(depth: bool, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_texture(descriptor: &ogpu_core::validation::AdmittedTexture) -> Result<Box<dyn b::DriverResource>, E>;
         warm_library(shader: &ogpu_core::shader::Shader) -> Option<b::Warm>;
         create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, E>;
         instance_layout(kind: b::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
-        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E>;
-        create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, E>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, E>;
-        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
+        create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn b::DriverSampler>, E>;
+        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn b::DriverPipeline>, E>;
+        create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn b::DriverIcb>, E>;
+        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, E>;
+        create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn b::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }
     fn recommended_working_set(&self) -> i64 { self.f.working_set.get().unwrap_or_else(|| self.inner.recommended_working_set()) }
-    fn create_buffer(&self, memory: ogpu_core::types::Memory, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+    fn create_buffer(&self, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<Box<dyn b::DriverResource>, E> {
         bump(&self.f.creates);
-        let r = self.inner.create_buffer(memory, descriptor)?;
+        let r = self.inner.create_buffer(descriptor)?;
         Ok(Box::new(wrap(r, &self.f, descriptor.size)))
     }
-    fn create_mapped_buffer(&self, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<b::DriverMapped, E> {
+    fn create_mapped_buffer(&self, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<b::DriverMapped, E> {
         let mapped = self.inner.create_mapped_buffer(descriptor)?;
         Ok(b::DriverMapped {
             mapped_resource: Box::new(wrap(mapped.mapped_resource, &self.f, descriptor.size)),

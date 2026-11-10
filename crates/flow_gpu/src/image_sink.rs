@@ -129,7 +129,6 @@ fn allocate(t: &T, width: i64, height: i64) -> Result<Storage, Diagnostic> {
         format: TextureFormat::Rgba8Unorm,
         usage: vec![TextureUsage::TextureBinding, TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc],
     };
-    gpu(ogpu_core::validation::validate_texture(&b::capabilities(&t.0.device), &descriptor))?;
     let texture = gpu(b::create_texture(&t.0.device, descriptor))?;
     t.0.textures.set(t.0.textures.get() + 1);
     Ok(Storage { texture, width, height })

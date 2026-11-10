@@ -377,7 +377,9 @@ pub fn render_depth_stencil(receiver: &Handle, arg0: Option<&Handle>) -> Result<
     Ok(())
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_render_depth_stencil"] fn ffi_rays_metal_render_depth_stencil(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn render_encoder_set_viewport(receiver: &Handle, arg0: record::Mtl_viewport) -> Result<(), Error> {
+pub fn render_encoder_set_viewport(receiver: &Handle, admitted: ogpu_core::render_pass::AdmittedViewport) -> Result<(), Error> {
+    let v=admitted.viewport();
+    let arg0=record::Mtl_viewport {originX:v.x,originY:v.y,width:v.width,height:v.height,znear:v.znear,zfar:v.zfar};
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_render_encoder_set_viewport(receiver_ptr, arg0, &mut message) };
@@ -704,7 +706,8 @@ pub fn compute35_acceleration(receiver: &Handle, arg0: Option<&Handle>, arg1: u6
     Ok(())
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_compute35_acceleration"] fn ffi_rays_metal_compute35_acceleration(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, arg1: u64, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn shader_function_argument_encoder(receiver: &Handle, arg0: u64) -> Result<Handle, Error> {
+pub fn shader_function_argument_encoder(receiver: &Handle, index: ogpu_core::validation::AdmittedSlot) -> Result<Handle, Error> {
+    let arg0=index.index() as u64;
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     let mut output: MaybeUninit<*mut super::NativeHandle> = MaybeUninit::uninit();

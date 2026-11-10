@@ -1,21 +1,21 @@
 //! The portable mock: host memory behind the driver record. It never executes compute, ray
 //! tracing or rasterization (those are `Unsupported`); it stores buffers and textures, replays
 //! recorded buffer-to-texture blits at commit, and counts what is alive.
+use ogpu_core::validation::{AdmittedBuffer, AdmittedTexture, StorageMode};
 use ogpu_core::{
     backend::{
         Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame, DriverIcb,
         DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue, DriverRenderEncoder,
-        DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, Floats, GpuTiming, InstanceKind,
+        DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, GpuTiming, InstanceKind,
         OwnedReadback, Receipt, RenderPipelineOptions, ShaderStage, Warm,
     },
     caps,
     error::{self, Error, ErrorKind},
     handle,
     pipeline::RenderDescriptor,
-    shader::{Binding, ConstantValue, Shader},
-    surface::Configuration,
-    types::{self, BufferDescriptor, Extent, Memory, Origin, SamplerDescriptor, TextureDescriptor},
+    shader::{Binding, Shader},
+    types::{self, BufferDescriptor, Extent, Origin, TextureDescriptor, TextureFormat},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -494,7 +494,7 @@ impl DriverCommands for MockCommands {
 struct MockSurface { c: Shared, frame: Cell<i64> }
 
 impl DriverSurface for MockSurface {
-    fn configure(&self, _: &Configuration) -> Result<(), Error> {
+    fn configure(&self, _: &ogpu_core::surface::AdmittedConfiguration) -> Result<(), Error> {
         let injected = std::mem::replace(&mut self.c.borrow_mut().fail_configure, false);
         if injected {
             Err(fail("Backend_mock.configure", ErrorKind::InvalidState, "injected configure failure"))
@@ -529,7 +529,7 @@ fn create_surface(c: &Shared) -> Result<Box<dyn DriverSurface>, Error> {
 struct MockLibrary { c: Shared, id: i64 }
 
 impl DriverLibrary for MockLibrary {
-    fn create_compute_pipeline_in(&self, _: &str, _: &[(String, ConstantValue)], _: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
+    fn create_compute_pipeline_in(&self, _: &ogpu_core::shader::AdmittedFunction, _: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
         Err(fail(
             "Backend_mock.create_compute_pipeline_in",
             ErrorKind::Unsupported,
@@ -563,24 +563,18 @@ impl DriverDevice for MockDevice {
         self.c.borrow().memory.values().map(|bytes| bytes.lock().unwrap().len() as i64).sum()
     }
     fn recommended_working_set(&self) -> i64 { 8 * 1024 * 1024 * 1024 }
-    fn create_buffer(&self, _memory: Memory, d: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
+    fn create_buffer(&self, d: &AdmittedBuffer) -> Result<Box<dyn DriverResource>, Error> {
         Ok(Box::new(resource(&self.c, "buffer", d.size)?))
     }
-    fn create_mapped_buffer(&self, d: &BufferDescriptor) -> Result<DriverMapped, Error> {
-        create_mapped_buffer(&self.c, d)
+    fn create_mapped_buffer(&self, d: &AdmittedBuffer) -> Result<DriverMapped, Error> {
+        create_mapped_buffer(&self.c, &d.descriptor)
     }
-    fn create_texture(&self, d: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        Ok(Box::new(create_texture(&self.c, d)?))
-    }
-    fn create_depth_texture(&self, _: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        Ok(Box::new(create_depth_texture(&self.c)?))
-    }
-    fn create_memoryless_texture(&self, _: bool, _: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        Err(fail(
-            "Backend_mock.create_memoryless_texture",
-            ErrorKind::Unsupported,
-            "the mock has no memoryless attachments",
-        ))
+    fn create_texture(&self, d: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
+        if d.storage == StorageMode::Memoryless {
+            return Err(fail("Backend_mock.create_memoryless_texture", ErrorKind::Unsupported, "the mock has no memoryless attachments"));
+        }
+        if d.format == TextureFormat::Depth32Float { Ok(Box::new(create_depth_texture(&self.c)?)) }
+        else { Ok(Box::new(create_texture(&self.c, &d.descriptor)?)) }
     }
     fn create_library(&self, _: &Shader) -> Result<Box<dyn DriverLibrary>, Error> {
         let id = token(&self.c);
@@ -599,23 +593,23 @@ impl DriverDevice for MockDevice {
             InstanceKind::MotionInstances => vec![44, -1, 8, 12, 20, 24, 0, 4, 28, 32, 36, 40],
         }
     }
-    fn create_sampler(&self, _: &SamplerDescriptor) -> Result<Box<dyn DriverSampler>, Error> {
+    fn create_sampler(&self, _: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error> {
         let id = token(&self.c);
         self.c.borrow_mut().pipelines += 1;
         add(&self.c, format!("create-sampler:{id}"));
         Ok(Box::new(MockSampler { c: self.c.clone(), id }))
     }
-    fn create_render_pipeline(&self, _: RenderPipelineOptions, _: &RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error> {
+    fn create_render_pipeline(&self, _: RenderPipelineOptions, _: &RenderDescriptor, _: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error> {
         Err(fail("Backend_mock.create_render_pipeline", ErrorKind::Unsupported, "mock backend does not rasterize"))
     }
-    fn create_icb(&self, _: i64) -> Result<Box<dyn DriverIcb>, Error> {
+    fn create_icb(&self, _: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
         Err(fail("Backend_mock.create_icb", ErrorKind::Unsupported, "mock backend does not rasterize"))
     }
-    fn create_argument(&self, _: i64, _: ShaderStage, _: i64) -> Result<Box<dyn DriverArgument>, Error> {
+    fn create_argument(&self, _: i64, _: ShaderStage, _: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
         Err(fail("Backend_mock.create_argument", ErrorKind::Unsupported, "mock backend does not rasterize"))
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> { create_queue(&self.c) }
-    fn create_surface(&self, _: &Configuration) -> Result<Box<dyn DriverSurface>, Error> { create_surface(&self.c) }
+    fn create_surface(&self, _: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error> { create_surface(&self.c) }
     fn destroy_device(&self) -> Result<(), Error> {
         handle::destroy_device(&self.handle);
         add(&self.c, "destroy-device".to_owned());

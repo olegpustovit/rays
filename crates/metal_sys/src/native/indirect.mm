@@ -30,7 +30,7 @@ extern "C" int32_t rays_metal_indirect_command_buffer_create(
     uint64_t raw_count, int64_t raw_options, MetalHandle **out, const char **message) {
     if (@available(macOS 10.14, *)) { } else return rays_metal_set_unavailable(message, "indirect command buffers require macOS 10.14 or newer");
     constexpr int64_t valid_command_types = 1 | 2 | 32 | 64;
-    if (source == nullptr || out == nullptr || raw_count == 0 || raw_options < 0 ||
+    if (source == nullptr || out == nullptr || raw_options < 0 ||
         source->command_types == 0 || (source->command_types & ~valid_command_types) != 0)
         return rays_metal_set_error(message, "invalid indirect command buffer size or options");
     @try {

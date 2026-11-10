@@ -19,7 +19,7 @@ impl DriverPipeline for Pipeline {
 }
 struct Library { inner: Box<dyn DriverLibrary>, counts: Rc<Counts> }
 impl DriverLibrary for Library {
-    fn create_compute_pipeline_in(&self, _entry: &str, _constants: &[(String, ogpu_core::shader::ConstantValue)], _interface: &[ogpu_core::shader::Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
+    fn create_compute_pipeline_in(&self, _function: &ogpu_core::shader::AdmittedFunction, _interface: &[ogpu_core::shader::Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
         let Counts { live, next } = &*self.counts;
         live.set(live.get() + 1);
         next.set(next.get() + 1);
@@ -38,20 +38,18 @@ impl DriverDevice for Dev {
         device_handle() -> ogpu_core::handle::Device;
         allocated_size() -> i64;
         recommended_working_set() -> i64;
-        create_buffer(memory: ogpu_core::types::Memory, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, Error>;
-        create_mapped_buffer(descriptor: &ogpu_core::types::BufferDescriptor) -> Result<b::DriverMapped, Error>;
-        create_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, Error>;
-        create_depth_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, Error>;
-        create_memoryless_texture(depth: bool, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, Error>;
+        create_buffer(descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<Box<dyn b::DriverResource>, Error>;
+        create_mapped_buffer(descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<b::DriverMapped, Error>;
+        create_texture(descriptor: &ogpu_core::validation::AdmittedTexture) -> Result<Box<dyn b::DriverResource>, Error>;
         warm_library(shader: &ogpu_core::shader::Shader) -> Option<b::Warm>;
         create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, Error>;
         instance_layout(kind: b::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, Error>;
-        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error>;
-        create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, Error>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, Error>;
+        create_sampler(descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn b::DriverSampler>, Error>;
+        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error>;
+        create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn b::DriverIcb>, Error>;
+        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn b::DriverArgument>, Error>;
         create_queue() -> Result<Box<dyn b::DriverQueue>, Error>;
-        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, Error>;
+        create_surface(configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn b::DriverSurface>, Error>;
         destroy_device() -> Result<(), Error>;
     }
     fn capabilities(&self) -> ogpu_core::caps::Caps {

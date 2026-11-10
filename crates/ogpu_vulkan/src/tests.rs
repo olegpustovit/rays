@@ -1510,22 +1510,22 @@ fn gpu_conformance_render() {
 /// working set cannot fit any heap, so the driver refuses it at once.
 #[test]
 fn gpu_out_of_device_memory_is_capacity() {
-    let driver = create_with_validation((true, true));
-    let raw = match driver.create_device() {
-        Err(failure) if failure.kind == ErrorKind::NoAdapter => return,
-        Err(failure) => panic!("{}", error::to_string(&failure)),
+    let raw = match crate::vulkan::Device::create(true,true) {
+        Err(failure) if failure.kind == crate::vulkan::ErrorKind::NoAdapter => {
+            eprintln!("OGPU conformance (Vulkan): skipped (no device)");
+            return;
+        },
+        Err(failure) => panic!("{failure}"),
         Ok(raw) => raw,
     };
-    let size = 2 * raw.recommended_working_set();
-    match raw.create_buffer(Memory::DeviceLocal, &buf("", size, &[BufferUsage::Storage])) {
-        Err(failure) if failure.kind == ErrorKind::Capacity => (),
-        Err(failure) => panic!("out of device memory is not Capacity: {}", error::to_string(&failure)),
-        Ok(resource) => {
-            let _ = resource.destroy();
-            panic!("a buffer of twice the working set was created");
-        }
+    let size = 2 * raw.memory().expect("native memory budget").device_local_budget;
+    // This probes physical OOM deliberately beyond Core's logical resource limit.
+    // The safe native allocation API still uses the owning backend's typed error mapper.
+    match raw.buffer(size,crate::vulkan::BufferKind::DeviceLocal) {
+        Err(failure) => assert_eq!(crate::backend::of_vk("Ogpu_vulkan.create_buffer",failure).kind,ErrorKind::Capacity),
+        Ok(resource) => { drop(resource); panic!("a buffer of twice the working set was created"); }
     }
-    raw.destroy_device().unwrap_or_else(|failure| die(failure));
+    drop(raw);
     assert_eq!(impl_::live_handles(), 0, "out-of-memory test leaked handles");
     assert_eq!(crate::vulkan::Device::validation_messages(), 0, "out-of-memory test: validation messages");
 }

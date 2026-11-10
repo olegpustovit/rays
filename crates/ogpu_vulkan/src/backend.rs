@@ -1,5 +1,6 @@
 //! OGPU's driver records over the Vulkan bridge. Tokens name native objects; the checks live in
 //! `ogpu_core::backend`, as for Metal.
+use ogpu_core::validation::{AdmittedBuffer, AdmittedTexture, TextureRead, TextureReadInto, StorageMode};
 use rays_math::float::{min as omin, max as omax};
 use ogpu_core::{
     backend::{
@@ -45,7 +46,7 @@ fn fail(op: &str, kind: ErrorKind, text: &str) -> Error {
 }
 
 /// Every Vulkan failure becomes an Ogpu error here, and nowhere else.
-fn of_vk(op: &str, failure: vk::Error) -> Error {
+pub(crate) fn of_vk(op: &str, failure: vk::Error) -> Error {
     match failure.kind {
         vk::ErrorKind::NoAdapter => error::make(op, ErrorKind::NoAdapter, "no discrete Vulkan 1.3 device"),
         vk::ErrorKind::Unsupported => error::make(op, ErrorKind::Unsupported, "unsupported by the Vulkan bridge"),
@@ -66,7 +67,7 @@ struct BufferEntry {
 
 struct TextureEntry {
     texture: vk::Texture,
-    descriptor: TextureDescriptor,
+    descriptor: AdmittedTexture,
 }
 
 struct PipelineEntry {
@@ -358,9 +359,7 @@ const TEXTURE_OP: &str = "Ogpu_vulkan.create_texture";
 struct TextureResource {
     dev: Rc<Dev>,
     id: Token,
-    format: TextureFormat,
-    width: i64,
-    height: i64,
+    profile: AdmittedTexture,
 }
 
 impl DriverResource for TextureResource {
@@ -370,23 +369,28 @@ impl DriverResource for TextureResource {
     fn write(&self, _offset: i64, _bytes: &[u8]) -> Result<(), Error> {
         Err(fail(TEXTURE_OP, ErrorKind::Unsupported, "use a transfer pass for textures"))
     }
-    fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error> {
-        let mut bytes = vec![0u8; length];
-        self.read_into(offset, &mut bytes, 0, length)?;
+    fn read(&self, _: i64, _: usize) -> Result<Vec<u8>, Error> {
+        Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "texture reads require an admitted layout"))
+    }
+    fn read_into(&self, _: i64, _: &mut [u8], _: usize, _: usize) -> Result<(), Error> {
+        Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "texture reads require an admitted layout"))
+    }
+    fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> {
+        let mut bytes = vec![0; read.length()];
+        let entry = self.dev.find_texture(TEXTURE_OP, self.id)?;
+        if !read.belongs_to(&self.profile) { return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "transfer belongs to another admitted texture")); }
+        entry.texture.read(&mut bytes, read.bytes_per_row() as u64, types::texel_bytes(self.profile.format) as u32)
+            .map_err(|failure| of_vk(TEXTURE_OP, failure))?;
         Ok(bytes)
     }
-    fn read_into(&self, offset: i64, destination: &mut [u8], at: usize, length: usize) -> Result<(), Error> {
-        let (width, height) = (self.width, self.height);
-        if offset != 0 || at != 0 || length != destination.len() || height <= 0 || length as i64 % height != 0 {
-            return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "destination must match the texture read range"));
-        }
-        let row = length as i64 / height;
-        let texel = types::texel_bytes(self.format);
-        if row < width * texel || row % texel != 0 {
-            return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "row pitch is invalid"));
+    fn read_texture_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
+        let (read, destination) = read.parts();
+        if !read.belongs_to(&self.profile) {
+            return Err(fail(TEXTURE_OP, ErrorKind::InvalidArgument, "transfer belongs to another admitted texture"));
         }
         let entry = self.dev.find_texture(TEXTURE_OP, self.id)?;
-        entry.texture.read(destination, row as u64, texel as u32).map_err(|failure| of_vk(TEXTURE_OP, failure))
+        entry.texture.read(destination, read.bytes_per_row() as u64, types::texel_bytes(self.profile.format) as u32)
+            .map_err(|failure| of_vk(TEXTURE_OP, failure))
     }
     fn destroy(&self) -> Result<(), Error> {
         self.dev.textures.borrow_mut().remove(&self.id);
@@ -395,7 +399,7 @@ impl DriverResource for TextureResource {
     }
 }
 
-fn register_texture(dev: &Rc<Dev>, format: TextureFormat, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
+fn register_texture(dev: &Rc<Dev>, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
     let device = dev.device(TEXTURE_OP)?;
     let created = device.texture(vk::TextureDescriptor {
         width: descriptor.width as u32,
@@ -403,16 +407,15 @@ fn register_texture(dev: &Rc<Dev>, format: TextureFormat, descriptor: &TextureDe
         depth: descriptor.depth.max(1) as u32,
         mip_levels: descriptor.mip_levels.max(1) as u32,
         samples: descriptor.sample_count.max(1) as u32,
-        format: format_index(format),
+        format: format_index(descriptor.format),
         storage: descriptor.usage.contains(&TextureUsage::StorageBinding),
         attachment: descriptor.usage.contains(&TextureUsage::RenderAttachment),
     });
     let native = created.map_err(|failure| of_vk(TEXTURE_OP, failure))?;
     live_add(1);
     let id = dev.token();
-    let stored = TextureDescriptor { format, ..descriptor.clone() };
-    dev.textures.borrow_mut().insert(id, Rc::new(TextureEntry { texture: native, descriptor: stored }));
-    Ok(Box::new(TextureResource { dev: dev.clone(), id, format, width: descriptor.width, height: descriptor.height }))
+    dev.textures.borrow_mut().insert(id, Rc::new(TextureEntry { texture: native, descriptor: descriptor.clone() }));
+    Ok(Box::new(TextureResource { dev: dev.clone(), id, profile: descriptor.clone() }))
 }
 
 struct OwnedPipeline {
@@ -469,7 +472,9 @@ struct ShaderLibrary {
 }
 
 impl DriverLibrary for ShaderLibrary {
-    fn create_compute_pipeline_in(&self, entry: &str, constants: &[(String, ConstantValue)], declared: &[ShaderBinding]) -> Result<Box<dyn DriverPipeline>, Error> {
+    fn create_compute_pipeline_in(&self, function: &ogpu_core::shader::AdmittedFunction, declared: &[ShaderBinding]) -> Result<Box<dyn DriverPipeline>, Error> {
+        let entry = function.name();
+        let constants = function.constants();
         if !constants.is_empty() {
             return Err(fail(LIBRARY_OP, ErrorKind::Unsupported, "SPIR-V kernels take no named function constants"));
         }
@@ -556,16 +561,22 @@ fn create_render_pipeline(dev: &Rc<Dev>, options: RenderPipelineOptions, descrip
     Ok(own_pipeline(dev, pipeline, (1, 1, 1), 0))
 }
 
-fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> Result<Box<dyn DriverSampler>, Error> {
+fn create_sampler(dev: &Rc<Dev>, descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error> {
     const OP: &str = "Ogpu_vulkan.create_sampler";
+    if !descriptor.normalized_coordinates || descriptor.address_r != AddressMode::ClampToEdge
+        || descriptor.lod_average || descriptor.lod_bias != 0. || descriptor.compare_function != Comparison::Never
+        || descriptor.reduction_mode != ogpu_core::validation::ReductionMode::WeightedAverage
+        || descriptor.border_color != ogpu_core::validation::BorderColor::TransparentBlack {
+        return Err(fail(OP, ErrorKind::Unsupported, "advanced sampler profile is unavailable in Vulkan"));
+    }
+
     let filter = |filter: SamplerFilter| match filter {
         SamplerFilter::Nearest => 0,
         SamplerFilter::Linear => 1,
     };
     let address = |mode: AddressMode| match mode {
-        AddressMode::ClampToEdge => 0,
-        AddressMode::Repeat => 1,
-        AddressMode::MirrorRepeat => 2,
+        AddressMode::ClampToEdge => Ok(0), AddressMode::Repeat => Ok(1), AddressMode::MirrorRepeat => Ok(2),
+        _ => Err(fail(OP, ErrorKind::Unsupported, "advanced sampler addressing is unavailable in Vulkan")),
     };
     let mip = match descriptor.mip_filter {
         MipFilter::NoMip => 0,
@@ -577,8 +588,8 @@ fn create_sampler(dev: &Rc<Dev>, descriptor: &SamplerDescriptor) -> Result<Box<d
             min_filter: filter(descriptor.min_filter),
             mag_filter: filter(descriptor.mag_filter),
             mip_filter: mip,
-            address_u: address(descriptor.address_u),
-            address_v: address(descriptor.address_v),
+            address_u: address(descriptor.address_s)?,
+            address_v: address(descriptor.address_t)?,
             anisotropy: descriptor.max_anisotropy as i32,
             lod_min: descriptor.lod_min,
             lod_max: descriptor.lod_max,
@@ -615,15 +626,13 @@ struct IndirectCommands {
 }
 
 impl IndirectCommands {
-    fn at(&self, index: i64, edit: &mut dyn FnMut(&mut IcbCommand)) -> Result<(), Error> {
+    fn at(&self, index: ogpu_core::validation::AdmittedIcbIndex, edit: &mut dyn FnMut(&mut IcbCommand)) -> Result<(), Error> {
         let mut commands = self.commands.borrow_mut();
-        match usize::try_from(index).ok().and_then(|index| commands.get_mut(index)) {
-            Some(command) => {
-                edit(command);
-                Ok(())
-            }
-            None => Err(fail(ICB_OP, ErrorKind::InvalidArgument, "indirect command index is out of range")),
+        if !index.belongs_to_capacity(commands.len()) {
+            return Err(fail(ICB_OP, ErrorKind::InvalidArgument, "index was admitted for another indirect command capacity"));
         }
+        edit(&mut commands[index.index()]);
+        Ok(())
     }
 }
 
@@ -631,16 +640,16 @@ impl DriverIcb for IndirectCommands {
     fn icb_token(&self) -> Token {
         self.id
     }
-    fn icb_set_pipeline(&self, index: i64, pipeline: Token) -> Result<(), Error> {
+    fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, pipeline: Token) -> Result<(), Error> {
         self.at(index, &mut |c| c.pipeline = Some(pipeline))
     }
-    fn icb_set_buffer(&self, index: i64, _stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error> {
+    fn icb_set_buffer(&self, index: ogpu_core::validation::AdmittedIcbIndex, _stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error> {
         self.at(index, &mut |c| c.buffers.insert(0, (slot, offset, buffer)))
     }
-    fn icb_draw(&self, index: i64, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
+    fn icb_draw(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.at(index, &mut |c| c.draw = Some(IcbDraw::Draw { primitive, first, count, instances }))
     }
-    fn icb_draw_indexed(&self, index: i64, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
+    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.at(index, &mut |c| c.draw = Some(IcbDraw::Indexed { primitive, index_type, buffer, offset, count, instances }))
     }
     fn destroy_icb(&self) -> Result<(), Error> {
@@ -650,10 +659,10 @@ impl DriverIcb for IndirectCommands {
     }
 }
 
-fn create_icb(dev: &Rc<Dev>, max_commands: i64) -> Result<Box<dyn DriverIcb>, Error> {
+fn create_icb(dev: &Rc<Dev>, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
     let id = dev.token();
     live_add(1);
-    let commands = Rc::new(RefCell::new(vec![IcbCommand::default(); max_commands.max(0) as usize]));
+    let commands = Rc::new(RefCell::new(vec![IcbCommand::default(); profile.capacity()]));
     dev.icbs.borrow_mut().insert(id, commands.clone());
     Ok(Box::new(IndirectCommands { dev: dev.clone(), id, commands }))
 }
@@ -1139,8 +1148,8 @@ impl DriverComputeEncoder for ComputePass {
         let entry = self.cmds.dev.find_buffer(QUEUE_OP, id)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_buffer(index as u32, offset as u64, &entry.buffer.borrow()))
     }
-    fn set_bytes(&self, index: i64, bytes: &[u8]) -> Result<(), Error> {
-        self.cmds.run(QUEUE_OP, &mut |c| c.set_bytes(index as u32, bytes))
+    fn set_bytes(&self, index: i64, bytes: ogpu_core::validation::AdmittedBytes<'_>) -> Result<(), Error> {
+        self.cmds.run(QUEUE_OP, &mut |c| c.set_bytes(index as u32, bytes.bytes()))
     }
     fn set_texture(&self, index: i64, id: Token) -> Result<(), Error> {
         let entry = self.cmds.dev.find_texture(QUEUE_OP, id)?;
@@ -1327,7 +1336,8 @@ impl DriverRenderEncoder for Render {
         let sampler = self.cmds.dev.find_sampler(QUEUE_OP, id)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_sampler(index as u32, &sampler))
     }
-    fn set_viewport(&self, rect: Rect) -> Result<(), Error> {
+    fn set_viewport(&self, rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), Error> {
+        let rect=rect.points().ok_or_else(||fail(QUEUE_OP,ErrorKind::Unsupported,"fractional native viewport is unavailable in Vulkan"))?;
         self.cmds.run(QUEUE_OP, &mut |c| {
             c.viewport(vk::Rect { x: rect.x as i32, y: rect.y as i32, width: rect.width as i32, height: rect.height as i32 });
             Ok(())
@@ -1620,7 +1630,7 @@ struct SurfaceHandle {
 }
 
 impl DriverSurface for SurfaceHandle {
-    fn configure(&self, configuration: &Configuration) -> Result<(), Error> {
+    fn configure(&self, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<(), Error> {
         match self.cell.borrow_mut().as_mut() {
             Some(surface) => surface.configure(immediate(configuration)).map_err(|failure| of_vk(SURFACE_OP, failure)),
             None => Err(surface_stale()),
@@ -1661,7 +1671,7 @@ impl DriverSurface for SurfaceHandle {
     }
 }
 
-fn create_surface(dev: &Rc<Dev>, configuration: &Configuration) -> Result<Box<dyn DriverSurface>, Error> {
+fn create_surface(dev: &Rc<Dev>, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error> {
     let Some(layer) = &configuration.layer else {
         return Err(fail(SURFACE_OP, ErrorKind::Unsupported, "surface needs a native layer token"));
     };
@@ -1693,20 +1703,28 @@ impl DriverDevice for VulkanDevice {
         let memory = self.dev.device("Ogpu_vulkan.memory").ok().and_then(|device| device.memory().ok());
         memory.map_or(0, |m| m.device_local_budget as i64)
     }
-    fn create_buffer(&self, memory: Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        create_buffer(&self.dev, memory, descriptor)
+    fn create_buffer(&self, descriptor: &AdmittedBuffer) -> Result<Box<dyn DriverResource>, Error> {
+        if !descriptor.admitted_for(&self.capabilities) {
+            return Err(fail("Ogpu_vulkan.create_buffer", ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
+        let memory = match descriptor.storage { StorageMode::Shared => Memory::Shared, StorageMode::Private => Memory::DeviceLocal,
+            _ => return Err(fail("Ogpu_vulkan.create_buffer", ErrorKind::Unsupported, "native storage mode is unavailable in Vulkan")) };
+        create_buffer(&self.dev, memory, &descriptor.descriptor)
     }
-    fn create_mapped_buffer(&self, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error> {
-        create_mapped_buffer(&self.dev, descriptor)
+    fn create_mapped_buffer(&self, descriptor: &AdmittedBuffer) -> Result<DriverMapped, Error> {
+        if !descriptor.admitted_for(&self.capabilities) {
+            return Err(fail("Ogpu_vulkan.create_mapped_buffer", ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
+        create_mapped_buffer(&self.dev, &descriptor.descriptor)
     }
-    fn create_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        register_texture(&self.dev, descriptor.format, descriptor)
-    }
-    fn create_depth_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        register_texture(&self.dev, TextureFormat::Depth32Float, descriptor)
-    }
-    fn create_memoryless_texture(&self, _depth: bool, _descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
-        Err(fail("Ogpu_vulkan.create_memoryless_texture", ErrorKind::Unsupported, "this device has no tile memory"))
+    fn create_texture(&self, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
+        if !descriptor.admitted_for(&self.capabilities) {
+            return Err(fail("Ogpu_vulkan.create_texture", ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
+        if descriptor.storage == StorageMode::Memoryless {
+            return Err(fail("Ogpu_vulkan.create_memoryless_texture", ErrorKind::Unsupported, "this device has no tile memory"));
+        }
+        register_texture(&self.dev, descriptor)
     }
     fn create_library(&self, shader: &Shader) -> Result<Box<dyn DriverLibrary>, Error> {
         create_library(&self.dev, shader)
@@ -1725,22 +1743,25 @@ impl DriverDevice for VulkanDevice {
             InstanceKind::MotionInstances => vec![44, -1, -1, 0, 4, 8, 12, 16, 20, 24, 28, 32],
         }
     }
-    fn create_sampler(&self, descriptor: &SamplerDescriptor) -> Result<Box<dyn DriverSampler>, Error> {
+    fn create_sampler(&self, descriptor: &ogpu_core::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error> {
         create_sampler(&self.dev, descriptor)
     }
-    fn create_render_pipeline(&self, options: RenderPipelineOptions, descriptor: &RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error> {
+    fn create_render_pipeline(&self, options: RenderPipelineOptions, descriptor: &RenderDescriptor, _admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error> {
+        if !_admitted.admitted_for(&self.capabilities) {
+            return Err(fail("Ogpu_vulkan.create_render_pipeline", ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
         create_render_pipeline(&self.dev, options, descriptor)
     }
-    fn create_icb(&self, max_commands: i64) -> Result<Box<dyn DriverIcb>, Error> {
-        create_icb(&self.dev, max_commands)
+    fn create_icb(&self, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
+        create_icb(&self.dev, profile)
     }
-    fn create_argument(&self, _pipeline: Token, _stage: ShaderStage, _index: i64) -> Result<Box<dyn DriverArgument>, Error> {
+    fn create_argument(&self, _pipeline: Token, _stage: ShaderStage, _index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
         create_argument(&self.dev)
     }
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> {
         create_queue(&self.dev)
     }
-    fn create_surface(&self, configuration: &Configuration) -> Result<Box<dyn DriverSurface>, Error> {
+    fn create_surface(&self, configuration: &ogpu_core::surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error> {
         create_surface(&self.dev, configuration)
     }
     fn destroy_device(&self) -> Result<(), Error> {
@@ -1799,12 +1820,17 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
     let capabilities = Caps {
         limits: Limits {
             max_buffer_size: facts.max_buffer_bytes as i64,
-            max_texture_dimension_2d: facts.max_texture_dimension as i64,
+            max_texture_dimension_1d: facts.max_texture_dimension_1d as i64,
+            max_texture_dimension_2d: facts.max_texture_dimension_2d as i64,
+            max_texture_dimension_3d: facts.max_texture_dimension_3d as i64,
+            max_texture_dimension_cube: facts.max_texture_dimension_cube as i64,
+            max_texture_array_layers: facts.max_texture_array_layers as i64,
             max_bind_groups: 4,
-            max_sample_count: facts.max_samples as i64,
+            sample_counts: facts.sample_counts, color_sample_counts: facts.color_sample_counts, depth_sample_counts: facts.depth_sample_counts,
         },
         compute_pipeline: true,
         render_pipeline: true,
+        render_requires_fragment: false,
         ray_tracing: true,
         ray_tracing_curves: false,
         // only after device_create enables rayQuery and accelerationStructure

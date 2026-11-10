@@ -29,6 +29,8 @@ pub enum TextureUsage {
     RenderAttachment,
     TextureCopySrc,
     TextureCopyDst,
+    TextureView,
+    TextureAtomic,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +100,9 @@ pub enum AddressMode {
     ClampToEdge,
     Repeat,
     MirrorRepeat,
+    MirrorClampToEdge,
+    ClampToZero,
+    ClampToBorder,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -136,3 +141,20 @@ pub fn half_of_float(value: f64) -> i64 {
         (sign | round(mantissa | (1u64 << 52), (1051 - exponent) as u32)) as i64
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorageMode { Shared, Managed, Private, Memoryless }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CpuCacheMode { DefaultCache, WriteCombined }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HazardTrackingMode { Default, Untracked, Tracked }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TextureKind { Texture1d, Texture1dArray, Texture2d, Texture2dArray, Texture2dMultisample, TextureCube, TextureCubeArray, Texture3d, Texture2dMultisampleArray, TextureBuffer }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompressionType { Lossless, Lossy }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SwizzleChannel { Zero, One, Red, Green, Blue, Alpha }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Swizzle { pub red: SwizzleChannel, pub green: SwizzleChannel, pub blue: SwizzleChannel, pub alpha: SwizzleChannel }
+impl Swizzle { pub const IDENTITY: Self = Self { red: SwizzleChannel::Red, green: SwizzleChannel::Green, blue: SwizzleChannel::Blue, alpha: SwizzleChannel::Alpha }; }

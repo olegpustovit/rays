@@ -853,8 +853,8 @@ fn find_pipeline(value: &SceneExecution, family: PipelineFamily, blend: Blend, s
 }
 
 fn sample_counts(device: &Device) -> Vec<i64> {
-    let max = backend::capabilities(device).limits.max_sample_count;
-    [1, 4, 9, 16].into_iter().filter(|samples| *samples <= max).collect()
+    let limits = backend::capabilities(device).limits;
+    [1, 4, 9, 16].into_iter().filter(|samples| limits.supports_samples(*samples)).collect()
 }
 
 fn allocate_target(device: &Device, configuration: &Configuration) -> Result<Texture, Error> {

@@ -5,7 +5,7 @@ use ogpu_core::{
     error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},
-    shader::{self, Shader},
+    shader::Shader,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -20,15 +20,8 @@ struct LibraryInner {
 #[derive(Clone)]
 pub struct Library(Rc<LibraryInner>);
 
-pub fn compile_native(operation: &str, device: &Device, shader_value: &Shader) -> Result<native::Library, Error> {
-    if shader::backend(shader_value) != "metal" {
-        return Err(fail(operation, ErrorKind::InvalidArgument, "shader backend is not metal"));
-    }
-    let source = match std::str::from_utf8(shader::bytes(shader_value)) {
-        Ok(text) => text,
-        Err(_) => return Err(fail(operation, ErrorKind::InvalidArgument, "shader source is not UTF-8")),
-    };
-    native::Library::compile_source(device.metal(), source, shader::label(shader_value))
+pub fn compile_native(_operation: &str, device: &Device, shader_value: &Shader) -> Result<native::Library, Error> {
+    native::Library::compile_source(device.metal(), shader_value)
 }
 
 pub fn create(device: &Device, shader_value: &Shader) -> Result<Library, Error> {

@@ -45,11 +45,10 @@ extern "C" int32_t rays_metal_layer_configure(
   if (message != nullptr) *message = nullptr;
   @try {
     @autoreleasepool {
-      if (layer_handle == nullptr || width == 0 || height == 0 ||
+      if (layer_handle == nullptr ||
           width > static_cast<uint64_t>(std::numeric_limits<NSUInteger>::max()) ||
           height > static_cast<uint64_t>(std::numeric_limits<NSUInteger>::max()) ||
-          maximum_drawables < 2 || maximum_drawables > 3 ||
-          (format != 80 && format != 81 && format != 115))
+          maximum_drawables > static_cast<uint64_t>(std::numeric_limits<NSUInteger>::max()))
         return rays_metal_set_error(message, "invalid Metal layer configuration");
       CAMetalLayer *layer = (__bridge CAMetalLayer *)
           rays_metal_handle_object(layer_handle, KIND_METAL_LAYER);

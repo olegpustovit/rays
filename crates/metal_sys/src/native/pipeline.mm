@@ -75,18 +75,17 @@ static id<MTLFunction> checked_render_function(id<MTLLibrary> library,
                                                NSString *name,
                                                MTLFunctionType expected,
                                                const char *stage,
+                                               int32_t *status,
                                                const char **message) {
-  if (name == nil || name.length == 0 ||
-      ![library.functionNames containsObject:name]) {
-    rays_metal_set_error(message, (std::string("Metal render ") + stage +
-                                   " function is absent from its library").c_str());
+  id<MTLFunction> function = [library newFunctionWithName:name];
+  if (function == nil) {
+    const std::string text = std::string("Metal render ") + stage + " function is absent or unavailable in its library";
+    *status = [library.functionNames containsObject:name]
+        ? rays_metal_set_error(message,text.c_str()) : rays_metal_set_invalid_argument(message,text.c_str());
     return nil;
   }
-  id<MTLFunction> function = [library newFunctionWithName:name];
-  if (function == nil || function.functionType != expected ||
-      function.device.registryID != library.device.registryID) {
-    rays_metal_set_error(message, (std::string("Metal render ") + stage +
-                                   " function has an incompatible stage or device").c_str());
+  if (function.functionType != expected || function.device.registryID != library.device.registryID) {
+    *status = rays_metal_set_error(message, (std::string("Metal render ") + stage + " function has an incompatible stage or device").c_str());
     return nil;
   }
   return function;
@@ -307,7 +306,7 @@ extern "C" int32_t rays_metal_compiler_create_render_pipeline(
   if (output) *output = nullptr;
   if (compiler_handle == nullptr || library_handle == nullptr || raw_vertex == nullptr ||
       output == nullptr || (attachment_count != 0 && attachments == nullptr) ||
-      attachment_count > 8 || raw_sample_count == 0 || raw_sample_count > std::numeric_limits<NSUInteger>::max() ||
+      raw_sample_count > std::numeric_limits<NSUInteger>::max() ||
       raw_topology < 1 || raw_topology > 3)
     return rays_metal_set_error(message, "invalid Metal 4 render-pipeline arguments");
   @try {
@@ -326,18 +325,14 @@ extern "C" int32_t rays_metal_compiler_create_render_pipeline(
         if ((raw_label != nullptr && label == nil) || vertex_name == nil ||
             (raw_fragment != nullptr && fragment_name == nil))
           return rays_metal_set_error(message, "Metal render-pipeline strings are not valid UTF-8");
-        id<MTLFunction> vertex_function = checked_render_function(library, vertex_name, MTLFunctionTypeVertex, "vertex", message);
-        if (vertex_function == nil) return 1;
+        int32_t function_status = 0;
+        id<MTLFunction> vertex_function = checked_render_function(library, vertex_name, MTLFunctionTypeVertex, "vertex", &function_status, message);
+        if (vertex_function == nil) return function_status;
         id<MTLFunction> fragment_function = nil;
         if (fragment_name != nil) {
-          fragment_function = checked_render_function(library, fragment_name, MTLFunctionTypeFragment, "fragment", message);
-          if (fragment_function == nil) return 1;
+          fragment_function = checked_render_function(library, fragment_name, MTLFunctionTypeFragment, "fragment", &function_status, message);
+          if (fragment_function == nil) return function_status;
         }
-        if ((fragment_function != nil) != (attachment_count != 0))
-          return rays_metal_set_error(message, "render rasterization requires a fragment function and color attachments");
-        if (raw_sample_count > static_cast<uint64_t>(std::numeric_limits<NSUInteger>::max()) ||
-            ![compiler.device supportsTextureSampleCount:static_cast<NSUInteger>(raw_sample_count)])
-          return rays_metal_set_error(message, "Metal render sample count is unsupported");
         MTL4RenderPipelineDescriptor *descriptor = [[MTL4RenderPipelineDescriptor alloc] init];
         if (label != nil) descriptor.label = label;
         MTL4LibraryFunctionDescriptor *vertex = [[MTL4LibraryFunctionDescriptor alloc] init];
@@ -515,9 +510,9 @@ extern "C" int32_t rays_metal_blit_encoder_copy_buffer_to_texture(
           destination_z > mip_depth || copy_depth > mip_depth - destination_z ||
           row_blocks > std::numeric_limits<NSUInteger>::max() / bytes_per_block ||
           row_pitch < row_blocks * bytes_per_block || row_pitch % bytes_per_block != 0 ||
-          image_rows != 0 && row_pitch > std::numeric_limits<NSUInteger>::max() / image_rows ||
+          (image_rows != 0 && row_pitch > std::numeric_limits<NSUInteger>::max() / image_rows) ||
           image_pitch < row_pitch * image_rows ||
-          copy_depth != 0 && image_pitch > std::numeric_limits<NSUInteger>::max() / copy_depth)
+          (copy_depth != 0 && image_pitch > std::numeric_limits<NSUInteger>::max() / copy_depth))
         return rays_metal_set_invalid_argument(message, "buffer-to-texture blit range or row pitch is invalid");
       const NSUInteger required = image_pitch * copy_depth;
       if (required > source.length - source_offset)

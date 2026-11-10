@@ -20,17 +20,31 @@ unsafe extern "C" {
  #[link_name="rays_metal_depth_stencil_create"] fn raw_depth(device:*mut NativeHandle, descriptor:*const DepthStencilDescriptor, label:*const c_char, output:*mut *mut NativeHandle, message:*mut *const c_char)->i32;
  #[link_name="rays_metal_render_pass_descriptor_set_sizes"] fn raw_sizes(pass:*mut NativeHandle,width:i64,height:i64,array_length:i64,samples:i64,message:*mut *const c_char)->i32;
  #[link_name="rays_metal_render_pass_descriptor_set_attachments"] fn raw_attachments(pass:*mut NativeHandle,color:*mut NativeHandle,depth:*mut NativeHandle,stencil:*mut NativeHandle,visibility:*mut NativeHandle,clear:*const f64,message:*mut *const c_char)->i32;
- #[link_name="rays_metal_render_pass_color_store_action"] fn raw_color_store(pass:*mut NativeHandle,action:i32,message:*mut *const c_char)->i32;
- #[link_name="rays_metal_render_pass_color_load_action"] fn raw_color_load(pass:*mut NativeHandle,action:i32,message:*mut *const c_char)->i32;
- #[link_name="rays_metal_render_pass_depth_stencil_actions"] fn raw_depth_stencil_actions(pass:*mut NativeHandle,depth_load:i32,depth_store:i32,clear_depth:f64,stencil_load:i32,stencil_store:i32,clear_stencil:u32,message:*mut *const c_char)->i32;
+ #[link_name="rays_metal_render_pass_set_actions"] fn raw_actions(pass:*mut NativeHandle,cl:i32,cs:i32,dl:i32,ds:i32,cd:f64,sl:i32,ss:i32,clear_stencil:u32,message:*mut *const c_char)->i32;
 }
 #[cfg(target_vendor="apple")]
 unsafe fn finish(status:i32, output:*mut NativeHandle, message:*const c_char)->Result<Handle,Error>{ if status!=0 { return Err(unsafe{Error::from_native(status,message)}); } unsafe{Handle::from_native(output)} }
 fn label(value:Option<&str>)->Result<Option<std::ffi::CString>,Error>{ value.map(std::ffi::CString::new).transpose().map_err(|_|Error::InvalidArgument("Metal labels may not contain NUL".into())) }
-pub fn create_sampler(device:&Handle,descriptor:&SamplerDescriptor,name:Option<&str>)->Result<Handle,Error>{
- #[cfg(target_vendor="apple")] { let name=label(name)?; let mut out=std::ptr::null_mut();let mut msg=std::ptr::null();let status=unsafe{raw_sampler(device.as_native_ptr()?,descriptor,name.as_ref().map_or(std::ptr::null(),|x|x.as_ptr()),&mut out,&mut msg)};unsafe{finish(status,out,msg)} }
- #[cfg(not(target_vendor="apple"))] {let _=(device,descriptor,name);Err(Error::Unavailable)}
+pub fn create_sampler(device: &Handle, admitted: &ogpu_core::validation::AdmittedSampler) -> Result<Handle,Error> {
+ #[cfg(target_vendor="apple")] {
+    use ogpu_core::types::AddressMode;
+    let address = |mode| match mode { AddressMode::ClampToEdge => 0, AddressMode::MirrorClampToEdge => 1,
+        AddressMode::Repeat => 2, AddressMode::MirrorRepeat => 3, AddressMode::ClampToZero => 4, AddressMode::ClampToBorder => 5 };
+    let d = admitted;
+    let descriptor = SamplerDescriptor { min_filter: d.min_filter as i32, mag_filter: d.mag_filter as i32,
+        mip_filter: d.mip_filter as i32, max_anisotropy: d.max_anisotropy as i32,
+        address_s: address(d.address_s), address_t: address(d.address_t), address_r: address(d.address_r),
+        border_color: d.border_color as i32, reduction_mode: d.reduction_mode as i32,
+        normalized_coordinates: d.normalized_coordinates as u8, lod_min: d.lod_min as f32, lod_max: d.lod_max as f32,
+        lod_average: d.lod_average as u8, lod_bias: d.lod_bias as f32, compare_function: d.compare_function as i32,
+        support_argument_buffers: d.support_argument_buffers as u8 };
+    let name=label(d.label.as_deref())?; let mut out=std::ptr::null_mut();let mut msg=std::ptr::null();
+    let status=unsafe{raw_sampler(device.as_native_ptr()?,&descriptor,name.as_ref().map_or(std::ptr::null(),|x|x.as_ptr()),&mut out,&mut msg)};
+    unsafe{finish(status,out,msg)}
+ }
+ #[cfg(not(target_vendor="apple"))] {let _=(device,admitted);Err(Error::Unavailable)}
 }
+
 pub fn create_depth_stencil(device:&Handle,descriptor:&DepthStencilDescriptor,name:Option<&str>)->Result<Handle,Error>{
  #[cfg(target_vendor="apple")] {let name=label(name)?;let mut out=std::ptr::null_mut();let mut msg=std::ptr::null();let status=unsafe{raw_depth(device.as_native_ptr()?,descriptor,name.as_ref().map_or(std::ptr::null(),|x|x.as_ptr()),&mut out,&mut msg)};unsafe{finish(status,out,msg)}}
  #[cfg(not(target_vendor="apple"))] {let _=(device,descriptor,name);Err(Error::Unavailable)}
@@ -39,24 +53,17 @@ pub fn create_render_pass()->Result<Handle,Error>{
  #[cfg(target_vendor="apple")] {crate::registry::render_pass_descriptor_create()}
  #[cfg(not(target_vendor="apple"))] {Err(Error::Unavailable)}
 }
-pub fn set_render_pass_sizes(pass:&Handle,width:u64,height:u64,samples:u64)->Result<(),Error>{
- if width==0||height==0||samples==0{return Err(Error::InvalidArgument("render pass sizes must be positive".into()));}
- #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{raw_sizes(pass.as_native_ptr()?,i64::try_from(width).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds".into()))?,i64::try_from(height).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds".into()))?,1,i64::try_from(samples).map_err(|_|Error::InvalidArgument("render pass size exceeds signed bounds".into()))?,&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
- #[cfg(not(target_vendor="apple"))] {let _=(pass,width,height,samples);Err(Error::Unavailable)}
+pub fn set_render_pass_sizes(pass:&Handle,extent:&ogpu_core::validation::AdmittedTexture)->Result<(),Error>{
+ #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{raw_sizes(pass.as_native_ptr()?,extent.width,extent.height,1,extent.sample_count,&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
+ #[cfg(not(target_vendor="apple"))] {let _=(pass,extent);Err(Error::Unavailable)}
 }
-pub fn set_render_pass_attachments(pass:&Handle,color:&Handle,depth:Option<&Handle>,stencil:Option<&Handle>,clear:[f64;4])->Result<(),Error>{
- #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{raw_attachments(pass.as_native_ptr()?,color.as_native_ptr()?,match depth{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},match stencil{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},std::ptr::null_mut(),clear.as_ptr(),&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
+pub fn set_render_pass_attachments(pass:&Handle,color:&Handle,depth:Option<&Handle>,stencil:Option<&Handle>,clear:&ogpu_core::render_pass::ClearColor)->Result<(),Error>{
+ #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let clear=clear.array();let status=unsafe{raw_attachments(pass.as_native_ptr()?,color.as_native_ptr()?,match depth{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},match stencil{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},std::ptr::null_mut(),clear.as_ptr(),&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
  #[cfg(not(target_vendor="apple"))] {let _=(pass,color,depth,stencil,clear);Err(Error::Unavailable)}
 }
-pub fn set_color_store(pass:&Handle,action:i32)->Result<(),Error>{action_call(pass,action,true)}
-pub fn set_color_load(pass:&Handle,action:i32)->Result<(),Error>{action_call(pass,action,false)}
-fn action_call(pass:&Handle,action:i32,store:bool)->Result<(),Error>{
- #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let p=pass.as_native_ptr()?;let status=unsafe{if store{raw_color_store(p,action,&mut msg)}else{raw_color_load(p,action,&mut msg)}};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
- #[cfg(not(target_vendor="apple"))] {let _=(pass,action,store);Err(Error::Unavailable)}
-}
-pub fn set_depth_stencil_actions(pass:&Handle,dl:i32,ds:i32,cd:f64,sl:i32,ss:i32,cs:u32)->Result<(),Error>{
- #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{raw_depth_stencil_actions(pass.as_native_ptr()?,dl,ds,cd,sl,ss,cs,&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
- #[cfg(not(target_vendor="apple"))] {let _=(pass,dl,ds,cd,sl,ss,cs);Err(Error::Unavailable)}
+pub fn set_render_pass_actions(pass:&Handle,actions:&ogpu_core::render_pass::AdmittedActions)->Result<(),Error>{
+ #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let a=actions;let status=unsafe{raw_actions(pass.as_native_ptr()?,load_code(a.color_load),a.color_store as i32,load_code(a.depth_load),a.depth_store as i32,a.clear_depth,load_code(a.stencil_load),a.stencil_store as i32,a.clear_stencil,&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
+ #[cfg(not(target_vendor="apple"))] {let _=(pass,actions);Err(Error::Unavailable)}
 }
 
 // ogpu_metal: the resolve target of colour attachment 0.
@@ -66,3 +73,6 @@ pub fn set_render_pass_resolve(pass:&Handle,texture:Option<&Handle>)->Result<(),
  #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{rays_metal_render_pass_set_resolve(pass.as_native_ptr()?,match texture{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
  #[cfg(not(target_vendor="apple"))] {let _=(pass,texture);Err(Error::Unavailable)}
 }
+
+#[cfg(target_vendor="apple")]
+fn load_code(value:ogpu_core::render_pass::Load)->i32 { match value { ogpu_core::render_pass::Load::DontCare=>0, ogpu_core::render_pass::Load::Load=>1, ogpu_core::render_pass::Load::Clear=>2 } }

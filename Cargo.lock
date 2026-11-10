@@ -297,6 +297,7 @@ name = "metal_sys"
 version = "0.1.0"
 dependencies = [
  "cc",
+ "ogpu_core",
 ]
 
 [[package]]

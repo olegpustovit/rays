@@ -5,42 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 
-#[derive(Clone, Copy, Debug)]
-pub struct Configuration {
-    pub width: usize,
-    pub height: usize,
-    pub format: Format,
-    pub framebuffer_only: bool,
-    pub maximum_drawables: usize,
-    pub allows_timeout: bool,
-    pub display_sync: bool,
-    pub presents_with_transaction: bool,
-}
-
-impl Configuration {
-    pub fn default(width: usize, height: usize) -> Self {
-        Self {
-            width,
-            height,
-            format: Format::Bgra8Unorm,
-            framebuffer_only: false,
-            maximum_drawables: 3,
-            allows_timeout: true,
-            display_sync: false,
-            presents_with_transaction: false,
-        }
-    }
-
-    fn validate(self, operation: &str) -> Result<(), Error> {
-        if self.width == 0 || self.height == 0 || !(2..=3).contains(&self.maximum_drawables) {
-            return Err(error(operation, ErrorKind::InvalidArgument, "invalid drawable size or maximum count"));
-        }
-        if !matches!(self.format, Format::Bgra8Unorm | Format::Bgra8UnormSrgb | Format::Rgba16Float) {
-            return Err(error(operation, ErrorKind::Unsupported, "pixel format is not supported by CAMetalLayer"));
-        }
-        Ok(())
-    }
-}
+pub use ogpu_core::surface::LayerProfile as Configuration;
+use ogpu_core::surface::AdmittedLayer;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Loss {
@@ -70,12 +36,11 @@ impl Surface {
         token: &Token,
         owner_id: i64,
         generation: i64,
-        configuration: Configuration,
+        configuration: AdmittedLayer,
     ) -> Result<Self, Error> {
         let operation = "Metal.Surface.adopt_borrowed";
         enter_main(operation)?;
         device.ensure_live(operation)?;
-        configuration.validate(operation)?;
         let layer = token.borrow_raw(owner_id, generation).ok_or_else(|| {
             error(operation, ErrorKind::StaleHandle, "native layer token is stale or belongs to another owner")
         })?;
@@ -97,10 +62,9 @@ impl Surface {
         &self.0.device
     }
 
-    pub fn configure(&self, configuration: Configuration) -> Result<(), Error> {
+    pub fn configure(&self, configuration: AdmittedLayer) -> Result<(), Error> {
         let operation = "Metal.Surface.configure";
         self.ensure_live(operation)?;
-        configuration.validate(operation)?;
         configure_raw(&self.0.raw, configuration).map_err(|failure| sys_error(operation, failure))
     }
 
@@ -217,19 +181,6 @@ fn ensure_surface_live(surface: &SurfaceInner, operation: &str) -> Result<(), Er
     surface.device.ensure_live(operation)
 }
 
-fn configure_raw(layer: &metal_sys::Handle, configuration: Configuration) -> Result<(), metal_sys::Error> {
-    let width = u64::try_from(configuration.width).map_err(|_| metal_sys::Error::InvalidArgument("drawable width is too large".into()))?;
-    let height = u64::try_from(configuration.height).map_err(|_| metal_sys::Error::InvalidArgument("drawable height is too large".into()))?;
-    let maximum_drawables = u64::try_from(configuration.maximum_drawables).map_err(|_| metal_sys::Error::InvalidArgument("maximum drawable count is too large".into()))?;
-    metal_sys::native::surface::configure_layer(
-        layer,
-        width,
-        height,
-        crate::native::resource::pixel_format_code(configuration.format) as i64,
-        configuration.framebuffer_only,
-        maximum_drawables,
-        configuration.allows_timeout,
-        configuration.display_sync,
-        configuration.presents_with_transaction,
-    )
+fn configure_raw(layer: &metal_sys::Handle, configuration: AdmittedLayer) -> Result<(), metal_sys::Error> {
+    metal_sys::native::surface::configure_layer(layer, &configuration)
 }

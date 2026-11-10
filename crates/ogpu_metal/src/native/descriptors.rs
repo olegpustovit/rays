@@ -1,3 +1,4 @@
+pub use metal_sys::native::pixel_format_code;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -6,45 +7,24 @@ use metal_sys::native::descriptors as sys;
 
 pub use ogpu_core::types::SamplerFilter as Filter;
 pub use ogpu_core::types::MipFilter;
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AddressMode { ClampToEdge, MirrorClampToEdge, Repeat, MirrorRepeat, ClampToZero, ClampToBorder }
+pub use ogpu_core::types::AddressMode;
 pub use ogpu_core::render_pass::Comparison as CompareFunction;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StencilOperation { Keep, Zero, Replace, IncrementClamp, DecrementClamp, Invert, IncrementWrap, DecrementWrap }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum BorderColor { TransparentBlack, OpaqueBlack, OpaqueWhite }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReductionMode { WeightedAverage, Minimum, Maximum }
-
-#[derive(Clone, Debug)]
-pub struct SamplerDescriptor {
-    pub min_filter: Filter, pub mag_filter: Filter, pub mip_filter: MipFilter,
-    pub max_anisotropy: u8, pub address_s: AddressMode, pub address_t: AddressMode,
-    pub address_r: AddressMode, pub border_color: BorderColor, pub reduction_mode: ReductionMode,
-    pub normalized_coordinates: bool, pub lod_min: f32, pub lod_max: f32,
-    pub lod_average: bool, pub lod_bias: f32, pub compare_function: CompareFunction,
-    pub support_argument_buffers: bool, pub label: Option<String>,
-}
-impl Default for SamplerDescriptor {
-    fn default() -> Self { Self { min_filter: Filter::Nearest, mag_filter: Filter::Nearest, mip_filter: MipFilter::NoMip, max_anisotropy: 1, address_s: AddressMode::ClampToEdge, address_t: AddressMode::ClampToEdge, address_r: AddressMode::ClampToEdge, border_color: BorderColor::TransparentBlack, reduction_mode: ReductionMode::WeightedAverage, normalized_coordinates: true, lod_min: 0.0, lod_max: f32::MAX, lod_average: false, lod_bias: 0.0, compare_function: CompareFunction::Never, support_argument_buffers: false, label: None } }
-}
-fn load_code(value: LoadAction) -> i32 { match value { LoadAction::DontCare => 0, LoadAction::Load => 1, LoadAction::Clear => 2 } }
+pub use ogpu_core::validation::{BorderColor, ReductionMode, SamplerProfile as SamplerDescriptor, AdmittedSampler};
 fn compare(v: CompareFunction) -> i32 { v as i32 }
-fn filter(v: Filter) -> i32 { v as i32 }
-fn mip(v: MipFilter) -> i32 { v as i32 }
-fn address(v: AddressMode) -> i32 { v as i32 }
 fn operation(v: StencilOperation) -> i32 { v as i32 }
-fn sampler_raw(d: &SamplerDescriptor) -> sys::SamplerDescriptor { sys::SamplerDescriptor { min_filter: filter(d.min_filter), mag_filter: filter(d.mag_filter), mip_filter: mip(d.mip_filter), max_anisotropy: d.max_anisotropy as i32, address_s: address(d.address_s), address_t: address(d.address_t), address_r: address(d.address_r), border_color: d.border_color as i32, reduction_mode: d.reduction_mode as i32, normalized_coordinates: d.normalized_coordinates as u8, lod_min: d.lod_min, lod_max: d.lod_max, lod_average: d.lod_average as u8, lod_bias: d.lod_bias, compare_function: compare(d.compare_function), support_argument_buffers: d.support_argument_buffers as u8 } }
+
 struct SamplerInner { raw: metal_sys::Handle, lifetime: Lifetime, device: Device, device_attached: AtomicBool }
 impl SamplerInner { fn detach_device(&self) { if self.device_attached.swap(false, Ordering::AcqRel) { self.device.lifetime().detach(); } } }
 impl Drop for SamplerInner { fn drop(&mut self) { self.lifetime.destroyed.store(true, Ordering::Release); self.detach_device(); } }
 #[derive(Clone)]
 pub struct Sampler(Arc<SamplerInner>);
 impl Sampler {
-    pub fn create(device: &Device, d: SamplerDescriptor) -> Result<Self, Error> {
+    pub fn create(device: &Device, d: &AdmittedSampler) -> Result<Self, Error> {
         let op = "Metal.Sampler.create";
         enter_main(op)?; device.ensure_live(op)?;
-        let raw = sys::create_sampler(device.raw(), &sampler_raw(&d), d.label.as_deref()).map_err(|failure| sys_error(op, failure))?;
+        let raw = sys::create_sampler(device.raw(), d).map_err(|failure| sys_error(op, failure))?;
         device.lifetime().attach(); Ok(Self(Arc::new(SamplerInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true) })))
     }
     pub fn destroy(&self) -> Result<(), Error> { self.0.lifetime.destroy_parent("Metal.Sampler.destroy")?; self.0.detach_device(); Ok(()) }
@@ -66,7 +46,7 @@ pub struct DepthStencil(Arc<DepthStencilInner>);
 impl DepthStencil {
     pub fn create(device: &Device, d: DepthStencilDescriptor) -> Result<Self, Error> {
         let op = "Metal.DepthStencil.create";
-        enter_main(op)?; device.ensure_live(op)?; if d.label.as_deref().is_some_and(|x| x.as_bytes().contains(&0)) { return Err(error(op, ErrorKind::InvalidArgument, "label contains NUL")); }
+        enter_main(op)?; device.ensure_live(op)?; ogpu_core::validation::validate_label(op, d.label.as_deref())?;
         let raw_desc = sys::DepthStencilDescriptor { depth_compare_function: compare(d.depth_compare), depth_write_enabled: d.depth_write as u8, front_face_stencil: d.front_face.map(face).unwrap_or_default(), has_front_face_stencil: d.front_face.is_some() as u8, back_face_stencil: d.back_face.map(face).unwrap_or_default(), has_back_face_stencil: d.back_face.is_some() as u8 };
         let raw = sys::create_depth_stencil(device.raw(), &raw_desc, d.label.as_deref()).map_err(|failure| sys_error(op, failure))?; device.lifetime().attach(); Ok(Self(Arc::new(DepthStencilInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true) })))
     }
@@ -91,14 +71,14 @@ impl Drop for RenderPassInner { fn drop(&mut self) { self.lifetime.destroyed.sto
 #[derive(Clone)]
 pub struct RenderPassDescriptor(Arc<RenderPassInner>);
 pub use ogpu_core::render_pass::Load as LoadAction;
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StoreAction { DontCare, Store, MultisampleResolve, StoreAndMultisampleResolve }
+pub use ogpu_core::render_pass::AttachmentStore as StoreAction;
 impl RenderPassDescriptor {
-    pub fn create(device: &Device, width: u64, height: u64, sample_count: u64) -> Result<Self, Error> {
+    pub fn create(device: &Device, extent: &ogpu_core::validation::AdmittedTexture) -> Result<Self, Error> {
         let op = "Metal.RenderPassDescriptor.create";
-        enter_main(op)?; device.ensure_live(op)?; let raw = sys::create_render_pass().map_err(|failure| sys_error(op, failure))?; if let Err(failure) = sys::set_render_pass_sizes(&raw, width, height, sample_count).map_err(|failure| sys_error(op, failure)) { drop(raw); return Err(failure); } device.lifetime().attach(); Ok(Self(Arc::new(RenderPassInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true), width, height, samples: sample_count, attachments: std::sync::Mutex::new((None,None,None)), resolve: std::sync::Mutex::new(None) })))
+        let (width,height,sample_count) = (extent.width as u64,extent.height as u64,extent.sample_count as u64);
+        enter_main(op)?; device.ensure_live(op)?; let raw = sys::create_render_pass().map_err(|failure| sys_error(op, failure))?; if let Err(failure) = sys::set_render_pass_sizes(&raw, extent).map_err(|failure| sys_error(op, failure)) { drop(raw); return Err(failure); } device.lifetime().attach(); Ok(Self(Arc::new(RenderPassInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true), width, height, samples: sample_count, attachments: std::sync::Mutex::new((None,None,None)), resolve: std::sync::Mutex::new(None) })))
     }
-    pub fn set_attachments(&self, color: &Texture, depth: Option<&Texture>, stencil: Option<&Texture>, clear: [f64; 4]) -> Result<(), Error> {
+    pub fn set_attachments(&self, color: &Texture, depth: Option<&Texture>, stencil: Option<&Texture>, clear: &ogpu_core::render_pass::ClearColor) -> Result<(), Error> {
         let op = "Metal.RenderPassDescriptor.set_attachments";
         if stencil.is_some() { return Err(error(op, ErrorKind::Unsupported, "stencil texture formats are not exposed")); }
         sys::set_render_pass_attachments(&self.0.raw, color.raw(), depth.map(Texture::raw), stencil.map(Texture::raw), clear).map_err(|failure| sys_error(op, failure))?;
@@ -108,12 +88,10 @@ impl RenderPassDescriptor {
         *old = (Some(color.clone()), depth.cloned(), stencil.cloned());
         Ok(())
     }
-    pub fn set_actions(&self, color_load: LoadAction, color_store: StoreAction, depth_load: LoadAction, depth_store: StoreAction, clear_depth: f64, stencil_load: LoadAction, stencil_store: StoreAction, clear_stencil: u32) -> Result<(), Error> {
-        let op = "Metal.RenderPassDescriptor.set_actions";
-        sys::set_color_load(&self.0.raw, load_code(color_load)).map_err(|failure| sys_error(op, failure))?;
-        sys::set_color_store(&self.0.raw, color_store as i32).map_err(|failure| sys_error(op, failure))?;
-        sys::set_depth_stencil_actions(&self.0.raw, load_code(depth_load), depth_store as i32, clear_depth, load_code(stencil_load), stencil_store as i32, clear_stencil).map_err(|failure| sys_error(op, failure))
+    pub fn set_actions(&self, actions: &ogpu_core::render_pass::AdmittedActions) -> Result<(), Error> {
+        sys::set_render_pass_actions(&self.0.raw, actions).map_err(|failure| sys_error("Metal.RenderPassDescriptor.set_actions", failure))
     }
+
     pub fn destroy(&self) -> Result<(), Error> { self.0.lifetime.destroy_parent("Metal.RenderPassDescriptor.destroy")?; self.0.release_attachments(); self.0.detach_device(); Ok(()) }
     pub fn width(&self) -> u64 { self.0.width }
     pub fn height(&self) -> u64 { self.0.height }

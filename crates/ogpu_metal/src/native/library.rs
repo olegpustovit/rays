@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::native::resource::{error, sys_error, enter_main, validate_text, Device, Error, ErrorKind, Lifetime};
+use crate::native::resource::{error, sys_error, enter_main, Device, Error, ErrorKind, Lifetime};
 use metal_sys;
 
 struct LibraryInner {
@@ -22,13 +22,12 @@ impl Drop for LibraryInner {
 #[derive(Clone)]
 pub struct Library(Arc<LibraryInner>);
 impl Library {
-    pub fn compile_source(device: &Device, source: &str, label: Option<&str>) -> Result<Self, Error> {
+    pub fn compile_source(device: &Device, shader: &ogpu_core::shader::Shader) -> Result<Self, Error> {
         const OP: &str = "Metal.Library.compile_source";
         enter_main(OP)?;
         device.lifetime().ensure_live(OP)?;
-        if source.is_empty() { return Err(error(OP, ErrorKind::InvalidArgument, "shader source is empty")); }
-        validate_text(OP, source)?;
-        if let Some(label) = label { validate_text(OP, label)?; }
+        let source = ogpu_core::shader::source(shader).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "shader backend is not Metal"))?;
+        let label = ogpu_core::shader::label(shader);
         let raw = metal_sys::native::compile_library(device.raw(), source, label).map_err(|failure| sys_error(OP, failure))?;
         device.lifetime().dependents.fetch_add(1, Ordering::AcqRel);
         Ok(Self(Arc::new(LibraryInner {
@@ -41,12 +40,13 @@ impl Library {
 
     /// Compiles `source` and `entry`'s compute pipeline in Metal's background, so a later
     /// `compile_source` of the same source is a cache hit; poll the result, drop it any time.
-    pub fn warm(device: &Device, source: &str, entry: &str) -> Result<metal_sys::native::library::Warm, Error> {
+    pub fn warm(device: &Device, shader: &ogpu_core::shader::Shader) -> Result<metal_sys::native::library::Warm, Error> {
         const OP: &str = "Metal.Library.warm";
+        enter_main(OP)?;
         device.lifetime().ensure_live(OP)?;
-        validate_text(OP, source)?;
-        validate_text(OP, entry)?;
-        metal_sys::native::library::library_warm(device.raw(), source, entry).map_err(|failure| sys_error(OP, failure))
+        let source = ogpu_core::shader::source(shader).ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "shader backend is not Metal"))?;
+        let entry = ogpu_core::shader::entry_points(shader).first().ok_or_else(|| error(OP, ErrorKind::InvalidArgument, "warm library needs an entry point"))?;
+        metal_sys::native::library::library_warm(device.raw(), source, &entry.name).map_err(|failure| sys_error(OP, failure))
     }
 
     pub fn function_names(&self) -> Result<Vec<String>, Error> {
@@ -71,35 +71,7 @@ impl Library {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FunctionKind { Vertex, Fragment, Kernel, Visible, Intersection, Mesh, Object, Unknown(i64) }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum FunctionConstantValue {
-    // The narrow integer kinds carry an i64 so an out-of-range value reaches the range check (as in lib/metal).
-    Bool(bool), Int8(i64), Uint8(i64), Int16(i64), Uint16(i64), Int32(i32), Uint32(i64),
-    Int64(i64), Uint64Bits(i64), Float16(f64), Float32(f64),
-}
-impl FunctionConstantValue {
-    fn raw(self) -> Result<(i32, i64, f64), &'static str> {
-        let within = |value: i64, low: i64, high: i64| (low..=high).contains(&value);
-        Ok(match self {
-            Self::Bool(value) => (0, i64::from(value), 0.0),
-            Self::Int8(value) if within(value, -128, 127) => (1, value, 0.0),
-            Self::Uint8(value) if within(value, 0, 255) => (2, value, 0.0),
-            Self::Int16(value) if within(value, -32_768, 32_767) => (3, value, 0.0),
-            Self::Uint16(value) if within(value, 0, 65_535) => (4, value, 0.0),
-            Self::Int32(value) => (5, i64::from(value), 0.0),
-            Self::Uint32(value) if within(value, 0, 0xffff_ffff) => (6, value, 0.0),
-            Self::Int64(value) => (7, value, 0.0),
-            Self::Uint64Bits(value) => (8, value, 0.0),
-            Self::Float16(value) => (9, 0, value),
-            Self::Float32(value) => (10, 0, value),
-            Self::Int8(_) => return Err("int8 function constant is out of range"),
-            Self::Uint8(_) => return Err("uint8 function constant is out of range"),
-            Self::Int16(_) => return Err("int16 function constant is out of range"),
-            Self::Uint16(_) => return Err("uint16 function constant is out of range"),
-            Self::Uint32(_) => return Err("uint32 function constant is out of range"),
-        })
-    }
-}
+pub use ogpu_core::shader::{FunctionConstantValue, AdmittedFunction, AdmittedComputeOptions};
 
 struct FunctionInner {
     raw: metal_sys::Handle,
@@ -119,30 +91,18 @@ impl Drop for FunctionInner {
 #[derive(Clone)]
 pub struct Function(Arc<FunctionInner>);
 impl Function {
-    pub fn find(library: &Library, name: &str) -> Result<Self, Error> {
-        const OP: &str = "Metal.Function.find";
-        Self::create(library, name, OP, &|| metal_sys::native::find_function(library.raw(), name).map_err(|failure| sys_error(OP, failure)))
+    pub fn create(library: &Library, profile: &AdmittedFunction) -> Result<Self, Error> {
+        const OP: &str = "Metal.Function.create";
+        enter_main(OP)?;
+        library.lifetime().ensure_live(OP)?;
+        let raw = if profile.specialized() {
+            metal_sys::native::specialize_function(library.raw(), profile.name(), profile.constants(), None)
+        } else { metal_sys::native::find_function(library.raw(), profile.name()) }.map_err(|failure| sys_error(OP, failure))?;
+        library.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
+        Ok(Self(Arc::new(FunctionInner { raw, lifetime: Lifetime::new(), library: library.clone(), library_attached: AtomicBool::new(true) })))
     }
 
-    pub fn specialize(library: &Library, constants: &[(String, FunctionConstantValue)], name: &str) -> Result<Self, Error> {
-        const OP: &str = "Metal.Function.specialize";
-        Self::create(library, name, OP, &|| {
-            let mut raw_constants: Vec<(String, i32, i64, f64)> = Vec::with_capacity(constants.len());
-            for (constant_name, value) in constants {
-                if constant_name.is_empty() || constant_name.as_bytes().contains(&0) {
-                    return Err(error(OP, ErrorKind::InvalidArgument, "function-constant names must be nonempty and contain no NUL byte"));
-                }
-                if raw_constants.iter().any(|(seen, _, _, _)| seen == constant_name) {
-                    return Err(error(OP, ErrorKind::InvalidArgument, "function-constant list contains a duplicate name"));
-                }
-                let (tag, integral, floating) = value.raw().map_err(|message| error(OP, ErrorKind::InvalidArgument, message))?;
-                raw_constants.push((constant_name.clone(), tag, integral, floating));
-            }
-            metal_sys::native::specialize_function(library.raw(), name, &raw_constants, None).map_err(|failure| sys_error(OP, failure))
-        })
-    }
-
-    pub fn argument_encoder(&self, buffer_index: u64) -> Result<ShaderArgumentEncoder, Error> {
+    pub fn argument_encoder(&self, buffer_index: ogpu_core::validation::AdmittedSlot) -> Result<ShaderArgumentEncoder, Error> {
         const OP: &str = "Metal.Function.argument_encoder";
         enter_main(OP)?;
         self.0.lifetime.ensure_live(OP)?;
@@ -168,26 +128,6 @@ impl Function {
         })
     }
 
-    fn create(
-        library: &Library,
-        name: &str,
-        operation: &'static str,
-        make: &dyn Fn() -> Result<metal_sys::Handle, Error>,
-    ) -> Result<Self, Error> {
-        enter_main(operation)?;
-        library.lifetime().ensure_live(operation)?;
-        if name.is_empty() || name.as_bytes().contains(&0) {
-            return Err(error(operation, ErrorKind::InvalidArgument, "function name must be nonempty and contain no NUL byte"));
-        }
-        let raw = make()?;
-        library.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
-        Ok(Self(Arc::new(FunctionInner {
-            raw,
-            lifetime: Lifetime::new(),
-            library: library.clone(),
-            library_attached: AtomicBool::new(true),
-        })))
-    }
 
     pub fn kind(&self) -> Result<FunctionKind, Error> {
         const OP: &str = "Metal.Function.kind";

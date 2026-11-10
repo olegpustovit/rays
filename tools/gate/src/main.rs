@@ -862,7 +862,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("scene_command", &["rays_math"][..]),
         ("parallel", &[][..]),
         ("sdl3_sys", &["native_layer_token_sys"][..]),
-        ("metal_sys", &[][..]),
+        ("metal_sys", &["ogpu_core"][..]),
         ("vulkan_sys", &[][..]),
         ("rdk_core", &["mem", "parallel", "rays_math"][..]),
         ("rdk_geom", &["rdk_core", "rays_math", "parallel"][..]),
@@ -1528,17 +1528,24 @@ mod tests {
         )
         .unwrap();
         let cc_build_edge = deps(&root);
-        for package in ["flow_ir", "pxui", "ogpu_metal", "metal_sys"] {
+        for package in ["flow_ir", "pxui", "ogpu_metal", "metal_sys", "ogpu_core"] {
             fs::create_dir_all(root.join(format!("crates/{package}/src"))).unwrap();
             fs::write(root.join(format!("crates/{package}/Cargo.toml")), format!("[package]\nname = \"{package}\"\n")).unwrap();
             fs::write(root.join(format!("crates/{package}/src/lib.rs")), "").unwrap();
         }
         fs::write(root.join("crates/flow_ir/Cargo.toml"), "[package]\nname = \"flow_ir\"\n[dependencies]\npxui = { path = \"../pxui\" }\n").unwrap();
         fs::write(root.join("crates/rays/Cargo.toml"), "[package]\nname = \"rays\"\n[dependencies]\nogpu_metal = { path = \"../ogpu_metal\" }\nmetal_sys = { path = \"../metal_sys\" }\n").unwrap();
+        fs::write(root.join("crates/metal_sys/Cargo.toml"), "[package]\nname = \"metal_sys\"\n[dependencies]\nogpu_core = { path = \"../ogpu_core\" }\n").unwrap();
         let boundaries = deps(&root).unwrap();
         assert!(boundaries.iter().any(|issue| issue.contains("flow_ir must not reach") && issue.contains("pxui")));
         assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("ogpu_metal")));
         assert!(boundaries.iter().any(|issue| issue.contains("rays must not reach") && issue.contains("metal_sys")));
+        assert!(!boundaries.iter().any(|issue| issue.contains("`metal_sys` may not directly depend on `ogpu_core`")));
+        let sys_manifest = root.join("crates/metal_sys/Cargo.toml");
+        let admitted_sys = fs::read_to_string(&sys_manifest).unwrap();
+        fs::write(&sys_manifest,format!("{admitted_sys}pxui = {{ path = \"../pxui\" }}\n")).unwrap();
+        assert!(deps(&root).unwrap().iter().any(|issue| issue.contains("`metal_sys` may not directly depend on `pxui`")));
+        fs::write(sys_manifest,admitted_sys).unwrap();
         for package in ["flow_ir", "rays"] {
             let path = root.join(format!("crates/{package}/Cargo.toml"));
             fs::write(&path, fs::read_to_string(&path).unwrap().replace("[dependencies]", "[dev-dependencies]")).unwrap();

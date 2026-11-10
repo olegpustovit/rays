@@ -22,9 +22,7 @@ pub(crate) fn enter_main(operation: &str) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn validate_text(operation: &str, value: &str) -> Result<(), Error> {
-    if value.as_bytes().contains(&0) { Err(error(operation, ErrorKind::InvalidArgument, "string contains a NUL byte")) } else { Ok(()) }
-}
+
 
 pub(crate) struct Lifetime { pub(crate) destroyed: AtomicBool, pub(crate) dependents: Arc<AtomicUsize> }
 
@@ -46,7 +44,7 @@ impl Lifetime {
     pub(crate) fn dependent_counter(&self) -> Arc<AtomicUsize> { self.dependents.clone() }
 }
 
-pub(crate) struct DeviceInner { raw: metal_sys::Handle, lifetime: Lifetime, registry_id: u64 }
+pub(crate) struct DeviceInner { raw: metal_sys::Handle, lifetime: Lifetime, registry_id: u64, capabilities: std::sync::OnceLock<ogpu_core::caps::Caps> }
 impl Drop for DeviceInner { fn drop(&mut self) { self.lifetime.destroyed.store(true, Ordering::Release); } }
 #[derive(Clone)]
 pub struct Device(pub(crate) Arc<DeviceInner>);
@@ -63,14 +61,39 @@ pub struct DeviceInfo {
 
 impl Device {
     pub fn system_default() -> Result<Self, Error> {
-        enter_main("Metal.Device.system_default")?;
         let raw = metal_sys::native::default_device().map_err(|failure| match failure {
             metal_sys::Error::Unavailable => error("Metal.Device.system_default", ErrorKind::NoAdapter, "no Metal adapter is available"),
             metal_sys::Error::Native(message) => error("Metal.Device.system_default", ErrorKind::NoAdapter, &message),
             other => sys_error("Metal.Device.system_default", other),
         })?;
         let registry_id = metal_sys::registry::device_registry_id(&raw).map_err(|failure| sys_error("Metal.Device.registry_id", failure))?;
-        Ok(Self(Arc::new(DeviceInner { raw, lifetime: Lifetime::new(), registry_id })))
+        Ok(Self(Arc::new(DeviceInner { raw, lifetime: Lifetime::new(), registry_id, capabilities: std::sync::OnceLock::new() })))
+    }
+    pub fn capabilities(&self) -> Result<ogpu_core::caps::Caps, Error> {
+        if let Some(caps) = self.0.capabilities.get() { return Ok(*caps); }
+        let info = self.info()?;
+        let mut sample_counts = 0;
+        for count in [1usize, 2, 4, 8, 16, 32, 64] {
+            if self.supports_texture_sample_count(count)? { sample_counts |= count as u32; }
+        }
+        let family = |f| self.supports_family(f);
+        let large = family(DeviceFamily::Apple10)?;
+        let curves = family(DeviceFamily::Apple9)?;
+        let caps = ogpu_core::caps::Caps {
+            limits: ogpu_core::caps::Limits { max_buffer_size: info.max_buffer_length as i64,
+                // https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
+                max_texture_dimension_1d: if large { 32_768 } else { 16_384 },
+                max_texture_dimension_2d: if large { 32_768 } else { 16_384 },
+                max_texture_dimension_3d: 2_048,
+                max_texture_dimension_cube: if large { 32_768 } else { 16_384 },
+                max_texture_array_layers: 2_048, max_bind_groups: 4, sample_counts, color_sample_counts: sample_counts, depth_sample_counts: sample_counts },
+            compute_pipeline: true, render_pipeline: true, render_requires_fragment: true, ray_tracing: info.raytracing,
+            ray_tracing_curves: info.raytracing && curves, ray_tracing_motion: info.raytracing,
+            ray_tracing_refit: true, memoryless_attachments: family(DeviceFamily::Apple7)?,
+            unified_memory: info.unified_memory,
+        };
+        let _ = self.0.capabilities.set(caps);
+        Ok(caps)
     }
     pub fn same(&self, other: &Self) -> bool { self.0.registry_id == other.0.registry_id }
     pub fn info(&self) -> Result<DeviceInfo, Error> {
@@ -120,13 +143,7 @@ impl Device {
     pub(crate) fn detach_child(&self) { self.0.lifetime.detach(); }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StorageMode { Shared, Managed, Private, Memoryless }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CpuCacheMode { DefaultCache, WriteCombined }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HazardTrackingMode { Default, Untracked, Tracked }
-
+pub use ogpu_core::types::{StorageMode, CpuCacheMode, HazardTrackingMode};
 struct BufferInner { raw: metal_sys::Handle, lifetime: Lifetime, device: Device, length: u64, storage: StorageMode, device_attached: AtomicBool }
 impl Drop for BufferInner {
     fn drop(&mut self) {
@@ -161,28 +178,33 @@ fn options(storage: StorageMode, cache: CpuCacheMode, hazard: HazardTrackingMode
     cache_code(cache) | (storage_code(storage) << 4) | (hazard << 8)
 }
 impl Buffer {
-    pub fn create(device: &Device, length: u64, storage: StorageMode, cache: CpuCacheMode, label: Option<&str>) -> Result<Self, Error> {
+    pub fn create(device: &Device, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<Self, Error> {
         let operation = "Metal.Buffer.create";
         enter_main(operation)?;
         device.0.lifetime.ensure_live(operation)?;
-        if length == 0 { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length must be positive")); }
-        if storage == StorageMode::Memoryless { return Err(error(operation, ErrorKind::InvalidArgument, "a buffer cannot be memoryless")); }
-        if let Some(label) = label { validate_text(operation, label)?; }
-        if length > metal_sys::registry::device_max_buffer_length(device.raw()).map_err(|failure| sys_error(operation, failure))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
+        if !descriptor.admitted_for(&device.capabilities()?) {
+            return Err(error(operation, ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
+        let length = descriptor.size as u64;
+        let storage = descriptor.storage;
+        let cache = descriptor.cpu_cache;
+        let label = descriptor.label.as_deref();
         let raw = metal_sys::registry::buffer_create(device.raw(), length, options(storage, cache, HazardTrackingMode::Default)).map_err(|failure| sys_error(operation, failure))?;
         verify_buffer(operation, &raw, length, storage, cache)?;
         if let Some(label) = label { metal_sys::registry::set_buffer_label(&raw, label).map_err(|failure| sys_error(operation, failure))?; }
         device.0.lifetime.dependents.fetch_add(1, Ordering::AcqRel);
         Ok(Self(Arc::new(BufferInner { raw, lifetime: Lifetime::new(), device: device.clone(), length, storage, device_attached: AtomicBool::new(true) })))
     }
-    pub fn create_mapped(device: &Device, length: u64, label: Option<&str>) -> Result<(Self, MappedBuffer), Error> {
+    pub fn create_mapped(device: &Device, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<(Self, MappedBuffer), Error> {
         let operation = "Metal.Buffer.create_mapped";
         enter_main(operation)?;
         device.0.lifetime.ensure_live(operation)?;
-        if length == 0 || length % 4 != 0 { return Err(error(operation, ErrorKind::InvalidArgument, "mapped buffer length must be a positive multiple of four")); }
-        if let Some(label) = label { validate_text(operation, label)?; }
-        if length > metal_sys::registry::device_max_buffer_length(device.raw()).map_err(|failure| sys_error(operation, failure))? { return Err(error(operation, ErrorKind::InvalidArgument, "buffer length exceeds the device limit")); }
-        let (raw, mapping) = metal_sys::native::create_mapped_buffer(device.raw(), length, options(StorageMode::Shared, CpuCacheMode::DefaultCache, HazardTrackingMode::Default)).map_err(|failure| sys_error(operation, failure))?;
+        if !descriptor.admitted_for(&device.capabilities()?) {
+            return Err(error(operation, ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
+        let length = descriptor.size as u64;
+        let label = descriptor.label.as_deref();
+        let (raw, mapping) = metal_sys::native::create_mapped_buffer(device.raw(), descriptor).map_err(|failure| sys_error(operation, failure))?;
         let actual_length = metal_sys::registry::buffer_info_length(&raw).map_err(|failure| sys_error(operation, failure))?;
         if actual_length < length { return Err(error(operation, ErrorKind::DeviceLost, "mapped buffer is shorter than its requested view")); }
         verify_buffer(operation, &raw, actual_length, StorageMode::Shared, CpuCacheMode::DefaultCache)?;
@@ -204,16 +226,13 @@ impl Buffer {
     /// The resulting read-only view may outlive this wrapper and never enters the main-thread API.
     pub fn owned_readback(&self) -> Result<std::sync::Arc<dyn Fn(i64, usize) -> Result<Vec<u8>, Error> + Send + Sync>, Error> {
         let operation = "Metal.Buffer.owned_readback";
-        enter_main(operation)?;
         self.0.lifetime.ensure_live(operation)?;
         if self.0.storage != StorageMode::Shared {
             return Err(error(operation, ErrorKind::Unsupported, "readback requires shared buffer storage"));
         }
         let readback = metal_sys::native::shared_buffer_readback(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
-        let allocation_length = self.0.length;
         Ok(Arc::new(move |offset, length| {
             let offset = u64::try_from(offset).map_err(|_| error(operation, ErrorKind::InvalidArgument, "negative read offset"))?;
-            validate_range(operation, allocation_length, offset, length)?;
             readback.read(offset, length).map_err(|failure| sys_error(operation, failure))
         }))
     }
@@ -225,10 +244,6 @@ impl Buffer {
     pub fn is_destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
-}
-fn validate_range(operation: &str, total: u64, offset: u64, length: usize) -> Result<(), Error> {
-    let length = u64::try_from(length).map_err(|_| error(operation, ErrorKind::InvalidArgument, "range length exceeds 64-bit bounds"))?;
-    if offset > total || length > total - offset { Err(error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer")) } else { Ok(()) }
 }
 
 pub mod release_queue {
@@ -242,52 +257,14 @@ pub mod release_queue {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TextureKind { Texture1d, Texture1dArray, Texture2d, Texture2dArray, Texture2dMultisample, TextureCube, TextureCubeArray, Texture3d, Texture2dMultisampleArray, TextureBuffer }
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum TextureUsage { ShaderRead, ShaderWrite, RenderTarget, PixelFormatView, ShaderAtomic }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CompressionType { Lossless, Lossy }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SwizzleChannel { Zero, One, Red, Green, Blue, Alpha }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Swizzle { pub red: SwizzleChannel, pub green: SwizzleChannel, pub blue: SwizzleChannel, pub alpha: SwizzleChannel }
-impl Swizzle { pub const IDENTITY: Self = Self { red: SwizzleChannel::Red, green: SwizzleChannel::Green, blue: SwizzleChannel::Blue, alpha: SwizzleChannel::Alpha }; }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TextureDescriptor {
-    pub kind: TextureKind,
-    pub format: ogpu_core::types::TextureFormat,
-    pub width: usize,
-    pub height: usize,
-    pub depth: usize,
-    pub mip_levels: usize,
-    pub sample_count: usize,
-    pub array_length: usize,
-    pub storage: StorageMode,
-    pub cpu_cache: CpuCacheMode,
-    pub hazard_tracking: HazardTrackingMode,
-    pub usage: Vec<TextureUsage>,
-    pub allow_gpu_optimized_contents: bool,
-    pub compression: CompressionType,
-    pub swizzle: Swizzle,
-    pub label: Option<String>,
-}
-
-impl TextureDescriptor {
-    pub fn descriptor_2d(format: ogpu_core::types::TextureFormat, width: usize, height: usize, storage: StorageMode, usage: Vec<TextureUsage>, label: Option<String>) -> Self {
-        Self { kind: TextureKind::Texture2d, format, width, height, depth: 1, mip_levels: 1, sample_count: 1, array_length: 1, storage, cpu_cache: CpuCacheMode::DefaultCache, hazard_tracking: HazardTrackingMode::Default, usage, allow_gpu_optimized_contents: true, compression: CompressionType::Lossless, swizzle: Swizzle::IDENTITY, label }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TextureRegion { pub x: usize, pub y: usize, pub z: usize, pub width: usize, pub height: usize, pub depth: usize }
+pub use ogpu_core::types::{TextureKind, TextureUsage, CompressionType, Swizzle, SwizzleChannel};
+pub use ogpu_core::validation::{TextureProfile as TextureDescriptor, TextureRegion, AdmittedTexture, TextureRead, TextureReadInto};
 
 pub(crate) struct TextureInner {
     pub(crate) raw: metal_sys::Handle,
     pub(crate) lifetime: Lifetime,
     pub(crate) device: Device,
-    pub(crate) descriptor: TextureDescriptor,
+    pub(crate) descriptor: AdmittedTexture,
     device_attached: AtomicBool,
     drawable_dependents: Option<Arc<AtomicUsize>>,
     drawable_attached: AtomicBool,
@@ -305,109 +282,25 @@ impl Drop for TextureInner {
 #[derive(Clone)]
 pub struct Texture(Arc<TextureInner>);
 
-fn texture_kind_code(kind: TextureKind) -> i32 {
-    match kind { TextureKind::Texture1d => 0, TextureKind::Texture1dArray => 1, TextureKind::Texture2d => 2, TextureKind::Texture2dArray => 3, TextureKind::Texture2dMultisample => 4, TextureKind::TextureCube => 5, TextureKind::TextureCubeArray => 6, TextureKind::Texture3d => 7, TextureKind::Texture2dMultisampleArray => 8, TextureKind::TextureBuffer => 9 }
-}
-fn texture_usage_bit(usage: TextureUsage) -> i32 {
-    match usage { TextureUsage::ShaderRead => 0x1, TextureUsage::ShaderWrite => 0x2, TextureUsage::RenderTarget => 0x4, TextureUsage::PixelFormatView => 0x10, TextureUsage::ShaderAtomic => 0x20 }
-}
-fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
-    match value { SwizzleChannel::Zero => 0, SwizzleChannel::One => 1, SwizzleChannel::Red => 2, SwizzleChannel::Green => 3, SwizzleChannel::Blue => 4, SwizzleChannel::Alpha => 5 }
-}
-fn texture_array(kind: TextureKind) -> bool { matches!(kind, TextureKind::Texture1dArray | TextureKind::Texture2dArray | TextureKind::TextureCubeArray | TextureKind::Texture2dMultisampleArray) }
-fn texture_multisample(kind: TextureKind) -> bool { matches!(kind, TextureKind::Texture2dMultisample | TextureKind::Texture2dMultisampleArray) }
-fn texture_slices(descriptor: &TextureDescriptor) -> Option<usize> {
-    match descriptor.kind {
-        TextureKind::Texture1dArray | TextureKind::Texture2dArray | TextureKind::Texture2dMultisampleArray => Some(descriptor.array_length),
-        TextureKind::TextureCube => Some(6),
-        TextureKind::TextureCubeArray => descriptor.array_length.checked_mul(6),
-        _ => Some(1),
-    }
-}
-fn texture_mip_size(size: usize, level: usize) -> usize { (size >> level.min(usize::BITS as usize - 1)).max(1) }
-fn validate_texture_descriptor(device: &Device, descriptor: &TextureDescriptor) -> Result<(), Error> {
-    // Core admits ordinary textures; this native descriptor also exposes arrays, cubes,
-    // swizzles and storage modes, so its complete validation includes shared shape facts.
-    let operation = "Metal.Texture.create";
-    if descriptor.width == 0 || descriptor.height == 0 || descriptor.depth == 0 || descriptor.mip_levels == 0 || descriptor.sample_count == 0 || descriptor.array_length == 0 {
-        return Err(error(operation, ErrorKind::InvalidArgument, "texture dimensions and counts must be positive"));
-    }
-    if (descriptor.kind == TextureKind::TextureBuffer && descriptor.width > 268_435_456) || (descriptor.kind != TextureKind::TextureBuffer && (descriptor.width > 16_384 || descriptor.height > 16_384 || descriptor.depth > 2_048)) {
-        return Err(error(operation, ErrorKind::InvalidArgument, "texture dimensions exceed the binding's checked Metal limits"));
-    }
-    let max_dimension = descriptor.width.max(descriptor.height).max(descriptor.depth);
-    let max_mips = (usize::BITS - max_dimension.leading_zeros()) as usize;
-    if descriptor.mip_levels > max_mips { return Err(error(operation, ErrorKind::InvalidArgument, "texture mip count exceeds its dimensions")); }
-    if descriptor.array_length >= 2_048 { return Err(error(operation, ErrorKind::InvalidArgument, "texture array length must be below 2048")); }
-    if descriptor.usage.iter().copied().collect::<std::collections::HashSet<_>>().len() != descriptor.usage.len() { return Err(error(operation, ErrorKind::InvalidArgument, "texture usage contains duplicates")); }
-    let writable = descriptor.usage.iter().any(|usage| matches!(usage, TextureUsage::ShaderWrite | TextureUsage::ShaderAtomic));
-    if descriptor.swizzle != Swizzle::IDENTITY && writable { return Err(error(operation, ErrorKind::InvalidArgument, "texture swizzling is incompatible with shader-write and shader-atomic usage")); }
-    if descriptor.storage == StorageMode::Memoryless && descriptor.usage.as_slice() != [TextureUsage::RenderTarget] { return Err(error(operation, ErrorKind::InvalidArgument, "a memoryless texture is a render target and nothing else")); }
-    if descriptor.compression == CompressionType::Lossy { return Err(error(operation, ErrorKind::InvalidArgument, "pixel format does not support lossy texture compression")); }
-    if let Some(label) = &descriptor.label { validate_text(operation, label)?; }
-    match descriptor.kind {
-        TextureKind::Texture1d | TextureKind::TextureBuffer if descriptor.height != 1 || descriptor.depth != 1 => return Err(error(operation, ErrorKind::InvalidArgument, "1D and buffer textures require height=depth=1")),
-        TextureKind::Texture1dArray if descriptor.height != 1 || descriptor.depth != 1 => return Err(error(operation, ErrorKind::InvalidArgument, "1D-array textures require height=depth=1")),
-        TextureKind::Texture2d | TextureKind::Texture2dArray | TextureKind::Texture2dMultisample | TextureKind::Texture2dMultisampleArray | TextureKind::TextureCube | TextureKind::TextureCubeArray if descriptor.depth != 1 => return Err(error(operation, ErrorKind::InvalidArgument, "2D, cube, and multisample textures require depth=1")),
-        TextureKind::TextureCube | TextureKind::TextureCubeArray if descriptor.width != descriptor.height => return Err(error(operation, ErrorKind::InvalidArgument, "cube textures must be square")),
-        TextureKind::Texture3d if descriptor.array_length != 1 => return Err(error(operation, ErrorKind::InvalidArgument, "3D textures cannot be arrays")),
-        _ => {}
-    }
-    if texture_array(descriptor.kind) && descriptor.array_length < 2 { return Err(error(operation, ErrorKind::InvalidArgument, "array textures require at least two elements")); }
-    if !texture_array(descriptor.kind) && descriptor.array_length != 1 { return Err(error(operation, ErrorKind::InvalidArgument, "non-array textures require array_length=1")); }
-    if texture_multisample(descriptor.kind) && (descriptor.mip_levels != 1 || descriptor.sample_count == 1) { return Err(error(operation, ErrorKind::InvalidArgument, "multisample textures require one mip level and more than one sample")); }
-    if !texture_multisample(descriptor.kind) && descriptor.sample_count != 1 { return Err(error(operation, ErrorKind::InvalidArgument, "non-multisample textures require sample_count=1")); }
-    if descriptor.kind == TextureKind::TextureBuffer && descriptor.mip_levels != 1 { return Err(error(operation, ErrorKind::InvalidArgument, "buffer textures require exactly one mip level")); }
-    if descriptor.sample_count != 1 && !device.supports_texture_sample_count(descriptor.sample_count)? { return Err(error(operation, ErrorKind::InvalidArgument, "device does not support the texture sample count")); }
-    Ok(())
-}
-
 impl Texture {
     pub fn descriptor_2d(format: ogpu_core::types::TextureFormat, width: usize, height: usize, storage: StorageMode, usage: &[TextureUsage], label: Option<&str>) -> TextureDescriptor {
         TextureDescriptor::descriptor_2d(format, width, height, storage, usage.to_vec(), label.map(str::to_owned))
     }
-    pub fn create(device: &Device, descriptor: TextureDescriptor) -> Result<Self, Error> {
+    pub fn create(device: &Device, descriptor: AdmittedTexture) -> Result<Self, Error> {
         let operation = "Metal.Texture.create";
         enter_main(operation)?;
         device.0.lifetime.ensure_live(operation)?;
-        validate_texture_descriptor(device, &descriptor)?;
-        if descriptor.kind == TextureKind::TextureBuffer { return Err(error(operation, ErrorKind::InvalidArgument, "texture-buffer resources must be created from a buffer")); }
-        let raw_descriptor = metal_sys::TextureDescriptor {
-            texture_type: texture_kind_code(descriptor.kind), pixel_format: pixel_format_code(descriptor.format) as i32,
-            width: descriptor.width as u64, height: descriptor.height as u64, depth: descriptor.depth as u64,
-            mip_levels: descriptor.mip_levels as u64, sample_count: descriptor.sample_count as u64, array_length: descriptor.array_length as u64,
-            storage_mode: match descriptor.storage { StorageMode::Shared => 0, StorageMode::Managed => 1, StorageMode::Private => 2, StorageMode::Memoryless => 3 },
-            cpu_cache_mode: match descriptor.cpu_cache { CpuCacheMode::DefaultCache => 0, CpuCacheMode::WriteCombined => 1 },
-            hazard_tracking_mode: match descriptor.hazard_tracking { HazardTrackingMode::Default => 2, HazardTrackingMode::Untracked => 1, HazardTrackingMode::Tracked => 2 },
-            usage: descriptor.usage.iter().copied().fold(0, |bits, usage| bits | texture_usage_bit(usage)),
-            allow_gpu_optimized_contents: u8::from(descriptor.allow_gpu_optimized_contents),
-            compression_type: match descriptor.compression { CompressionType::Lossless => 0, CompressionType::Lossy => 1 },
-            swizzle_red: texture_swizzle_code(descriptor.swizzle.red), swizzle_green: texture_swizzle_code(descriptor.swizzle.green),
-            swizzle_blue: texture_swizzle_code(descriptor.swizzle.blue), swizzle_alpha: texture_swizzle_code(descriptor.swizzle.alpha),
-        };
-        if let Some(label) = descriptor.label.as_deref() { validate_text(operation, label)?; }
-        let raw = metal_sys::native::create_texture(device.raw(), &raw_descriptor, descriptor.label.as_deref()).map_err(|failure| sys_error(operation, failure))?;
+        if !descriptor.admitted_for(&device.capabilities()?) {
+            return Err(error(operation, ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
+        }
+        let raw_descriptor = metal_sys::native::texture_descriptor(&descriptor);
+        let raw = metal_sys::native::create_texture(device.raw(), &descriptor).map_err(|failure| sys_error(operation, failure))?;
         let actual = metal_sys::native::texture_info(&raw).map_err(|failure| sys_error(operation, failure))?;
-        let expected = [
-            i64::from(texture_kind_code(descriptor.kind)),
-            i64::from(pixel_format_code(descriptor.format)),
-            descriptor.width as i64,
-            descriptor.height as i64,
-            descriptor.depth as i64,
-            descriptor.mip_levels as i64,
-            descriptor.sample_count as i64,
-            descriptor.array_length as i64,
-            descriptor.usage.iter().copied().fold(0, |bits, usage| bits | texture_usage_bit(usage)) as i64,
-            storage_code(descriptor.storage),
-            cache_code(descriptor.cpu_cache),
-            match descriptor.hazard_tracking { HazardTrackingMode::Default | HazardTrackingMode::Tracked => 2, HazardTrackingMode::Untracked => 1 },
-            i64::from(descriptor.allow_gpu_optimized_contents),
-            match descriptor.compression { CompressionType::Lossless => 0, CompressionType::Lossy => 1 },
-            i64::from(texture_swizzle_code(descriptor.swizzle.red)),
-            i64::from(texture_swizzle_code(descriptor.swizzle.green)),
-            i64::from(texture_swizzle_code(descriptor.swizzle.blue)),
-            i64::from(texture_swizzle_code(descriptor.swizzle.alpha)),
-        ];
+        let d = raw_descriptor;
+        let expected = [d.texture_type as i64, d.pixel_format as i64, d.width as i64, d.height as i64, d.depth as i64,
+            d.mip_levels as i64, d.sample_count as i64, d.array_length as i64, d.usage as i64, d.storage_mode as i64,
+            d.cpu_cache_mode as i64, d.hazard_tracking_mode as i64, d.allow_gpu_optimized_contents as i64,
+            d.compression_type as i64, d.swizzle_red as i64, d.swizzle_green as i64, d.swizzle_blue as i64, d.swizzle_alpha as i64];
         if actual != expected {
             const FIELDS: [&str; 18] = ["kind", "format", "width", "height", "depth", "mip_levels", "sample_count", "array_length", "usage", "storage", "cpu_cache", "hazard_tracking", "allow_gpu_optimized_contents", "compression", "swizzle_red", "swizzle_green", "swizzle_blue", "swizzle_alpha"];
             let differing = (0..FIELDS.len()).filter(|&index| actual[index] != expected[index])
@@ -418,9 +311,6 @@ impl Texture {
             return Err(error(operation, ErrorKind::DeviceLost, "Metal changed the checked texture sharing mode during creation"));
         }
         device.attach_child(operation)?;
-        // Metal reports a default hazard mode as tracked (both are checked as 2 above).
-        let mut descriptor = descriptor;
-        if descriptor.hazard_tracking == HazardTrackingMode::Default { descriptor.hazard_tracking = HazardTrackingMode::Tracked; }
         Ok(Self(Arc::new(TextureInner {
             raw,
             lifetime: Lifetime::new(),
@@ -447,8 +337,9 @@ impl Texture {
         let width = usize::try_from(width).map_err(|_| error(operation, ErrorKind::InvalidArgument, "drawable width exceeds platform bounds"))?;
         let height = usize::try_from(height).map_err(|_| error(operation, ErrorKind::InvalidArgument, "drawable height exceeds platform bounds"))?;
         let descriptor = TextureDescriptor::descriptor_2d(
-            format, width, height, StorageMode::Private, vec![TextureUsage::RenderTarget], None,
+            format, width, height, StorageMode::Private, vec![TextureUsage::RenderAttachment], None,
         );
+        let descriptor = ogpu_core::validation::admit_texture(&device.capabilities()?, descriptor)?;
         drawable_dependents.fetch_add(1, Ordering::AcqRel);
         Ok(Self(Arc::new(TextureInner {
             raw,
@@ -463,43 +354,39 @@ impl Texture {
     }
     pub fn device(&self) -> &Device { &self.0.device }
     pub fn descriptor(&self) -> &TextureDescriptor { &self.0.descriptor }
+    pub fn admitted_descriptor(&self) -> &AdmittedTexture { &self.0.descriptor }
     pub fn is_destroyed(&self) -> bool { self.0.lifetime.destroyed.load(Ordering::Acquire) }
-    pub fn read_bytes(&self, region: TextureRegion, mip_level: usize, slice: usize, bytes_per_row: usize, bytes_per_image: usize) -> Result<Vec<u8>, Error> {
-        let operation = "Metal.Texture.read_bytes";
-        self.0.lifetime.ensure_live(operation)?;
-        let total = self.validate_transfer(operation, region, mip_level, slice, bytes_per_row, bytes_per_image)?;
-        let destination = metal_sys::native::read_texture_bytes(&self.0.raw, total, bytes_per_row, bytes_per_image, (region.x as u64, region.y as u64, region.z as u64, region.width as u64, region.height as u64, region.depth as u64), mip_level as u64, slice as u64).map_err(|failure| sys_error(operation, failure))?;
-        Ok(destination)
+    pub fn read_bytes(&self, read: &TextureRead) -> Result<Vec<u8>, Error> {
+        const OP: &str = "Metal.Texture.read_bytes";
+        self.validate_read_owner(OP, read)?;
+        let o = read.region().origin(); let e = read.region().extent();
+        metal_sys::native::read_texture_bytes(&self.0.raw, read.length(), read.bytes_per_row(), read.bytes_per_image(),
+            (o.x as u64, o.y as u64, o.z as u64, e.width as u64, e.height as u64, e.depth as u64),
+            read.mip_level() as u64, read.slice() as u64).map_err(|failure| sys_error(OP, failure))
     }
-    pub fn read_bytes_into(&self, region: TextureRegion, mip_level: usize, slice: usize, bytes_per_row: usize, bytes_per_image: usize, destination: &mut [u8]) -> Result<(), Error> {
-        let operation = "Metal.Texture.read_bytes_into";
-        self.0.lifetime.ensure_live(operation)?;
-        let total = self.validate_transfer(operation, region, mip_level, slice, bytes_per_row, bytes_per_image)?;
-        if destination.len() != total { return Err(error(operation, ErrorKind::InvalidArgument, "destination length does not match the complete pitched region")); }
-        metal_sys::native::read_texture(&self.0.raw, destination, bytes_per_row, bytes_per_image, (region.x as u64, region.y as u64, region.z as u64, region.width as u64, region.height as u64, region.depth as u64), mip_level as u64, slice as u64).map_err(|failure| sys_error(operation, failure))
+    pub fn read_bytes_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
+        const OP: &str = "Metal.Texture.read_bytes_into";
+        let (read, destination) = read.parts();
+        self.validate_read_owner(OP, read)?;
+        let o = read.region().origin(); let e = read.region().extent();
+        metal_sys::native::read_texture(&self.0.raw, destination, read.bytes_per_row(), read.bytes_per_image(),
+            (o.x as u64, o.y as u64, o.z as u64, e.width as u64, e.height as u64, e.depth as u64),
+            read.mip_level() as u64, read.slice() as u64).map_err(|failure| sys_error(OP, failure))
     }
-    fn validate_transfer(&self, operation: &str, region: TextureRegion, mip_level: usize, slice: usize, bytes_per_row: usize, bytes_per_image: usize) -> Result<usize, Error> {
-        // Unlike core's base-level read, native transfers select arbitrary regions/mips/slices.
-        // Their physical span and storage checks also cover the common base-level case.
-        let descriptor = &self.0.descriptor;
-        if matches!(descriptor.storage, StorageMode::Private | StorageMode::Memoryless) { return Err(error(operation, ErrorKind::Unsupported, "private textures have no CPU transfer mapping")); }
-        if texture_multisample(descriptor.kind) { return Err(error(operation, ErrorKind::Unsupported, "multisample textures do not support CPU transfer")); }
-        if mip_level >= descriptor.mip_levels { return Err(error(operation, ErrorKind::InvalidArgument, "mip level is outside the texture")); }
-        if slice >= texture_slices(descriptor).unwrap_or(usize::MAX) { return Err(error(operation, ErrorKind::InvalidArgument, "slice is outside the texture")); }
-        if region.width == 0 || region.height == 0 || region.depth == 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture region dimensions must be positive")); }
-        let width = texture_mip_size(descriptor.width, mip_level);
-        let height = texture_mip_size(descriptor.height, mip_level);
-        let depth = texture_mip_size(descriptor.depth, mip_level);
-        if region.x > width || region.width > width-region.x || region.y > height || region.height > height-region.y || region.z > depth || region.depth > depth-region.z { return Err(error(operation, ErrorKind::InvalidArgument, "texture region exceeds the selected mip level")); }
-        let texel_bytes = ogpu_core::types::texel_bytes(descriptor.format) as usize;
-        let min_row = region.width.checked_mul(texel_bytes).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture row size overflow"))?;
-        if bytes_per_row < min_row || bytes_per_row % texel_bytes != 0 { return Err(error(operation, ErrorKind::InvalidArgument, "texture row pitch is too small or not block-aligned")); }
-        let min_image = bytes_per_row.checked_mul(region.height).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture image size overflow"))?;
-        if bytes_per_image < min_image { return Err(error(operation, ErrorKind::InvalidArgument, "texture image pitch is smaller than its rows")); }
-        bytes_per_image.checked_mul(region.depth).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "texture transfer size overflow"))
+    fn validate_read_owner(&self, operation: &str, read: &TextureRead) -> Result<(), Error> {
+        // A reusable layout can outlive admission. This checks allocation retirement,
+        // never dimensions or pitches; the sys ABI still validates its opaque native handle.
+        if self.0.descriptor.retired() {
+            return Err(error(operation, ErrorKind::StaleHandle, "texture is destroyed"));
+        }
+        if !read.belongs_to(&self.0.descriptor) {
+            return Err(error(operation, ErrorKind::InvalidArgument, "transfer belongs to another admitted texture"));
+        }
+        Ok(())
     }
     pub fn destroy(&self) -> Result<(), Error> {
         self.0.lifetime.destroy_parent("Metal.Texture.destroy")?;
+        self.0.descriptor.retire();
         if self.0.device_attached.swap(false, Ordering::AcqRel) { self.0.device.lifetime().detach(); }
         if self.0.drawable_attached.swap(false, Ordering::AcqRel) {
             if let Some(dependents) = &self.0.drawable_dependents { dependents.fetch_sub(1, Ordering::AcqRel); }
@@ -719,11 +606,12 @@ impl Drop for ComputePipelineInner {
 #[derive(Clone)]
 pub struct ComputePipeline(Arc<ComputePipelineInner>);
 impl ComputePipeline {
-    pub fn create(function: &crate::native::library::Function, label: Option<&str>, reflection: bool) -> Result<Self, Error> {
+    pub fn create(function: &crate::native::library::Function, options: &ogpu_core::shader::AdmittedComputeOptions) -> Result<Self, Error> {
         let operation = "Metal.Compute_pipeline.create";
         enter_main(operation)?;
         function.lifetime().ensure_live(operation)?;
-        if let Some(label) = label { validate_text(operation, label)?; }
+        let label = options.label();
+        let reflection = options.reflection();
         let device = function.device();
         device.ensure_live(operation)?;
         let (raw, reflected) = metal_sys::native::pipeline::create_compute_pipeline(device.raw(), function.raw(), label, reflection).map_err(|failure| sys_error(operation, failure))?;
@@ -782,7 +670,7 @@ impl ComputeEncoder {
         self.0.command_buffer.retain_texture(texture);
         Ok(())
     }
-    pub fn set_bytes(&self, index: usize, bytes: &[u8]) -> Result<(), Error> {
+    pub fn set_bytes(&self, index: usize, bytes: ogpu_core::validation::AdmittedBytes<'_>) -> Result<(), Error> {
         metal_sys::native::set_compute_bytes(&self.0.raw, bytes, index as u64).map_err(|failure| sys_error("Metal.Compute_encoder.set_bytes", failure))
     }
     pub fn dispatch_threads(&self, threads: (usize, usize, usize), threadgroup: (usize, usize, usize)) -> Result<(), Error> {
@@ -814,9 +702,4 @@ impl ComputeEncoder {
         for a in structures { self.0.command_buffer.retain_acceleration(a); }
         Ok(())
     }
-}
-
-pub fn pixel_format_code(format: Format) -> u32 {
-    match format { Format::R8Unorm => 10, Format::Rgba8Unorm => 70, Format::Bgra8Unorm => 80,
-        Format::Bgra8UnormSrgb => 81, Format::Rgba16Float => 115, Format::Rgba32Float => 125, Format::Depth32Float => 252 }
 }

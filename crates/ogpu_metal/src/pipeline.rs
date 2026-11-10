@@ -5,12 +5,11 @@ use crate::{
     device::{fail, Device},
     library::{self, Library},
 };
-use crate::native::{BlendFactor, BlendOperation, BlendState, ColorAttachment, PrimitiveTopology};
 use ogpu_core::{
     error::ErrorKind,
     handle::{self, ResourceHandle},
-    pipeline::{Blend, ColorFormat, RenderDescriptor},
-    shader::{self, Binding, BindingKind, ConstantValue, EntryPoint, Stage},
+    pipeline::RenderDescriptor,
+    shader::{self, Binding, BindingKind},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -129,47 +128,18 @@ fn validate_reflection(op: &str, expected: &[Binding], bindings: &[native::Shade
     Ok(())
 }
 
-fn metal_constants(constants: &[(String, ConstantValue)]) -> Vec<(String, native::FunctionConstantValue)> {
-    constants
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.clone(),
-                match *value {
-                    ConstantValue::Bool(v) => native::FunctionConstantValue::Bool(v),
-                    ConstantValue::Int32(v) => native::FunctionConstantValue::Int32(v),
-                    ConstantValue::Uint32(v) => native::FunctionConstantValue::Uint32((v as i64) & 0xffff_ffff),
-                    ConstantValue::Float32(v) => native::FunctionConstantValue::Float32(v),
-                },
-            )
-        })
-        .collect()
-}
-
-pub fn create_compute_from_library(device: &Device, library_value: &Library, entry: &str, constants: &[(String, ConstantValue)], interface: &[Binding]) -> Result<Pipeline, Error> {
+pub fn create_compute_from_library(device: &Device, library_value: &Library, admitted: &ogpu_core::shader::AdmittedFunction, interface: &[Binding]) -> Result<Pipeline, Error> {
     let op = "Ogpu_metal.Pipeline.create_compute_from_library";
     let native = library_value.metal();
-    let found = if constants.is_empty() {
-        native::Function::find(native, entry)
-    } else {
-        native::Function::specialize(native, &metal_constants(constants), entry)
-    };
-    let function = found?;
-    let pipeline_value = match native::ComputePipeline::create(&function, Some(entry), true) {
+    let function = native::Function::create(native, admitted)?;
+    let pipeline_value = match native::ComputePipeline::create(&function, &admitted.pipeline_options(true)) {
         Ok(p) => p,
         Err(e) => {
             let _ = function.destroy();
             return Err(e);
         }
     };
-    let declared = shader::create(shader::Descriptor {
-        backend: "metal".to_owned(),
-        label: None,
-        bytes: b"x".to_vec(),
-        entry_points: vec![EntryPoint { name: entry.to_owned(), stage: Stage::Compute }],
-        bindings: interface.to_vec(),
-    });
-    let checked = declared.and_then(|declared| validate_reflection(op, shader::bindings(&declared), pipeline_value.bindings().unwrap_or(&[])));
+    let checked = validate_reflection(op, interface, pipeline_value.bindings().unwrap_or(&[]));
     if let Err(e) = checked {
         let _ = pipeline_value.destroy();
         let _ = function.destroy();
@@ -190,35 +160,8 @@ pub fn create_compute_from_library(device: &Device, library_value: &Library, ent
     })))
 }
 
-fn attachment(blend: Blend, format: native::Format) -> ColorAttachment {
-    let mut a = ColorAttachment::new(format);
-    let mut set = |source_rgb, destination_rgb, source_alpha, destination_alpha| {
-        a.blending = BlendState::Enabled;
-        a.source_rgb = source_rgb;
-        a.destination_rgb = destination_rgb;
-        a.source_alpha = source_alpha;
-        a.destination_alpha = destination_alpha;
-    };
-    match blend {
-        Blend::Replace => {}
-        Blend::Alpha => set(BlendFactor::SourceAlpha, BlendFactor::OneMinusSourceAlpha, BlendFactor::One, BlendFactor::OneMinusSourceAlpha),
-        Blend::Add => set(BlendFactor::One, BlendFactor::One, BlendFactor::One, BlendFactor::One),
-        Blend::Multiply => set(BlendFactor::DestinationColor, BlendFactor::Zero, BlendFactor::One, BlendFactor::OneMinusSourceAlpha),
-        Blend::Screen => set(BlendFactor::OneMinusDestinationColor, BlendFactor::One, BlendFactor::One, BlendFactor::OneMinusSourceAlpha),
-        Blend::Subtract => {
-            set(BlendFactor::One, BlendFactor::One, BlendFactor::One, BlendFactor::OneMinusSourceAlpha);
-            a.rgb_operation = BlendOperation::ReverseSubtract;
-        }
-    }
-    a
-}
-
-fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blend, op: &str, device: &Device, descriptor: &RenderDescriptor) -> Result<Pipeline, Error> {
+fn build_render(op: &str, device: &Device, descriptor: &RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Pipeline, Error> {
     let library_value = library::compile_native(op, device, &descriptor.vertex)?;
-    let color = match descriptor.color_format {
-        ColorFormat::Rgba8Unorm => native::Format::Rgba8Unorm,
-        ColorFormat::Bgra8Unorm => native::Format::Bgra8Unorm,
-    };
     let compiler = match native::Compiler::create(device.metal()) {
         Ok(c) => c,
         Err(e) => {
@@ -226,17 +169,7 @@ fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blen
             return Err(e);
         }
     };
-    let options = native::RenderPipelineOptions {
-        label: descriptor.label.clone(),
-        fragment: descriptor.fragment.as_ref().map(|_| descriptor.fragment_entry.clone().expect("fragment entry")),
-        reflection: true,
-        raster_sample_count: descriptor.sample_count as usize,
-        color_attachments: Some(vec![attachment(blend, color)]),
-        primitive_topology: topology,
-        support_indirect_command_buffers: support_indirect,
-        ..native::RenderPipelineOptions::default()
-    };
-    let created = compiler.create_render_pipeline(&library_value, &descriptor.vertex_entry, &options);
+    let created = compiler.create_render_pipeline(&library_value, admitted);
     let _ = compiler.destroy();
     let pipeline_value = match created {
         Ok(p) => p,
@@ -267,14 +200,14 @@ fn build_render(support_indirect: bool, topology: PrimitiveTopology, blend: Blen
 
 /// An owned, uncached render pipeline for the portable driver. With `indirect`, the fragment
 /// function is retained for argument encoders and indirect command buffers.
-pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: Blend, device: &Device, descriptor: &RenderDescriptor) -> Result<Pipeline, Error> {
+pub fn create_render_owned(device: &Device, descriptor: &RenderDescriptor, admitted: &ogpu_core::pipeline::AdmittedRenderPipeline) -> Result<Pipeline, Error> {
     let op = "Ogpu_metal.Pipeline.create_render_owned";
-    let value = build_render(indirect, topology, blend, op, device, descriptor)?;
-    if !indirect {
+    let value = build_render(op, device, descriptor, admitted)?;
+    if !admitted.options().support_indirect_command_buffers {
         return Ok(value);
     }
     match (&value.0.native, &descriptor.fragment_entry) {
-        (Native::Render(native), Some(entry)) => match native.supports_indirect_command_buffers() {
+        (Native::Render(native), Some(_)) => match native.supports_indirect_command_buffers() {
             Err(e) => {
                 let _ = value.destroy();
                 Err(e)
@@ -283,7 +216,7 @@ pub fn create_render_owned(indirect: bool, topology: PrimitiveTopology, blend: B
                 let _ = value.destroy();
                 Err(fail(op, ErrorKind::Unsupported, "native pipeline does not support indirect commands"))
             }
-            Ok(true) => match native::Function::find(&value.0.library, entry) {
+            Ok(true) => match native::Function::create(&value.0.library, &admitted.fragment_function().expect("Core admitted fragment")) {
                 Err(e) => {
                     let _ = value.destroy();
                     Err(e)
@@ -320,12 +253,8 @@ impl Pipeline {
         &self.0.native
     }
 
-    pub fn argument_encoder(&self, buffer_index: u64) -> Result<native::ShaderArgumentEncoder, Error> {
+    pub fn argument_encoder(&self, buffer_index: ogpu_core::validation::AdmittedSlot) -> Result<native::ShaderArgumentEncoder, Error> {
         let operation = "Ogpu_metal.Pipeline.argument_encoder";
-        // Metal asserts (and aborts) on an index that is no buffer slot; the Rust binding does not range-check it.
-        if buffer_index >= 31 {
-            return Err(fail(operation, ErrorKind::InvalidArgument, "argument buffer index is outside [0, 31)"));
-        }
         let function = match (&self.0.native, self.0.functions.borrow().first()) {
             (Native::Render(_), Some(function)) => function.clone(),
             _ => return Err(fail(operation, ErrorKind::InvalidState, "fragment function was not retained")),

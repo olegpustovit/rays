@@ -7,22 +7,15 @@ use crate::{
     pipeline::Native,
 };
 use crate::native::{
-    pipeline::{RenderResource, RenderStage, ResourceUsage, Scissor, Viewport},
-    RenderEncoder, RenderPassDescriptor, StoreAction,
+    pipeline::{RenderResource, RenderStage, ResourceUsage, Scissor},
+    RenderEncoder, RenderPassDescriptor,
 };
 use ogpu_core::{
     backend::{DepthState, DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, ShaderStage, Token, Winding as OgpuWinding},
     error::ErrorKind,
-    render_pass::{Cull, IndexType as OgpuIndex, Load, Primitive as OgpuPrimitive, Rect, Store},
+    render_pass::{Cull, IndexType as OgpuIndex, Primitive as OgpuPrimitive, Rect},
 };
 use std::rc::Rc;
-
-fn depth_store(value: Store) -> StoreAction {
-    match value {
-        Store::Store | Store::Resolve => StoreAction::Store,
-        Store::Discard => StoreAction::DontCare,
-    }
-}
 
 fn render_pipeline(context: &CommandContext, token: i64) -> Result<native::RenderPipeline, Error> {
     let Some(pipeline) = context.pipeline(token) else {
@@ -148,28 +141,16 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
     for texture in resolve.iter().chain(depth.iter()) {
         context.keep_texture(texture)?;
     }
-    let pass = RenderPassDescriptor::create(context.device.metal(), target.target_width as u64, target.target_height as u64, target.target_samples as u64)?;
+    let pass = RenderPassDescriptor::create(context.device.metal(), color_texture.metal().admitted_descriptor())?;
     let fail_pass = |e: native::Error| {
         let _ = pass.destroy();
         e
     };
-    let (r, g, b, a) = color.color_clear;
-    pass.set_attachments(color_texture.metal(), depth.as_ref().map(|d| d.metal()), None, [r, g, b, a]).map_err(&fail_pass)?;
+    pass.set_attachments(color_texture.metal(), depth.as_ref().map(|d| d.metal()), None, target.clear_color()).map_err(&fail_pass)?;
     if let Some(resolve) = &resolve {
         pass.set_resolve_texture(Some(resolve.metal())).map_err(&fail_pass)?;
     }
-    let keep = color.color_store == Store::Store;
-    let color_store = match (&resolve, keep) {
-        (None, false) => StoreAction::DontCare,
-        (None, true) => StoreAction::Store,
-        (Some(_), false) => StoreAction::MultisampleResolve,
-        (Some(_), true) => StoreAction::StoreAndMultisampleResolve,
-    };
-    let (depth_load, depth_store_action, depth_clear) = match &target.target_depth {
-        None => (Load::Clear, StoreAction::Store, 1.0),
-        Some(d) => (d.depth_load, depth_store(d.depth_store), d.depth_clear),
-    };
-    pass.set_actions(color.color_load, color_store, depth_load, depth_store_action, depth_clear, Load::Clear, StoreAction::Store, 0).map_err(&fail_pass)?;
+    pass.set_actions(target.actions()).map_err(&fail_pass)?;
     let encoder = RenderEncoder::create(&context.native, &pass).map_err(&fail_pass)?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Render(encoder.clone(), pass.clone()));
     Ok(Box::new(Render { context: context.clone(), encoder, pass, declared: std::cell::RefCell::new(Vec::new()) }))
@@ -213,8 +194,8 @@ impl DriverRenderEncoder for Render {
         }
     }
 
-    fn set_viewport(&self, rect: Rect) -> Result<(), Error> {
-        self.encoder.set_viewport(Viewport { x: rect.x as f64, y: rect.y as f64, width: rect.width as f64, height: rect.height as f64, znear: 0., zfar: 1. })
+    fn set_viewport(&self, rect: ogpu_core::render_pass::AdmittedViewport) -> Result<(), Error> {
+        self.encoder.set_viewport(rect)
     }
 
     fn set_scissor(&self, rect: Rect) -> Result<(), Error> {

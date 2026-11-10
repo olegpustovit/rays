@@ -2,67 +2,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::native::resource::{error, sys_error, enter_main, Buffer, CommandBuffer, Device, DeviceFamily, Error, ErrorKind, Lifetime, Texture, TextureRegion};
-use ogpu_core::types::TextureFormat as Format;
 use crate::native::{descriptors::{DepthStencil, RenderPassDescriptor, Sampler}, library::Library};
 
 pub use ogpu_core::render_pass::Primitive as PrimitiveTopology;
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum BlendState { Disabled, Enabled }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum BlendFactor {
-    Zero, One, SourceColor, OneMinusSourceColor, SourceAlpha, OneMinusSourceAlpha,
-    DestinationColor, OneMinusDestinationColor, DestinationAlpha, OneMinusDestinationAlpha,
-    SourceAlphaSaturated, Color, OneMinusColor, Alpha, OneMinusAlpha,
-    Source1Color, OneMinusSource1Color, Source1Alpha, OneMinusSource1Alpha,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum BlendOperation { Add, Subtract, ReverseSubtract, Min, Max }
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ColorWrite { Red, Green, Blue, Alpha }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ColorAttachment {
-    pub format: Format,
-    pub blending: BlendState,
-    pub source_rgb: BlendFactor,
-    pub destination_rgb: BlendFactor,
-    pub rgb_operation: BlendOperation,
-    pub source_alpha: BlendFactor,
-    pub destination_alpha: BlendFactor,
-    pub alpha_operation: BlendOperation,
-    pub write_mask: Vec<ColorWrite>,
-}
-impl ColorAttachment {
-    pub fn new(format: Format) -> Self {
-        Self {
-            format, blending: BlendState::Disabled, source_rgb: BlendFactor::One,
-            destination_rgb: BlendFactor::Zero, rgb_operation: BlendOperation::Add,
-            source_alpha: BlendFactor::One, destination_alpha: BlendFactor::Zero,
-            alpha_operation: BlendOperation::Add,
-            write_mask: vec![ColorWrite::Red, ColorWrite::Green, ColorWrite::Blue, ColorWrite::Alpha],
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct RenderPipelineOptions {
-    pub label: Option<String>,
-    pub fragment: Option<String>,
-    pub reflection: bool,
-    pub raster_sample_count: usize,
-    pub color_formats: Option<Vec<Format>>,
-    pub color_attachments: Option<Vec<ColorAttachment>>,
-    pub primitive_topology: PrimitiveTopology,
-    pub support_indirect_command_buffers: bool,
-}
-impl Default for RenderPipelineOptions {
-    fn default() -> Self {
-        Self {
-            label: None, fragment: None, reflection: false, raster_sample_count: 1,
-            color_formats: None, color_attachments: None, primitive_topology: PrimitiveTopology::TriangleList,
-            support_indirect_command_buffers: false,
-        }
-    }
-}
+pub use ogpu_core::pipeline::{BlendState, BlendFactor, BlendOperation, ColorWrite, ColorAttachment,
+    RenderPipelineOptions, AdmittedRenderPipeline};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BindingAccess { ReadOnly, ReadWrite, WriteOnly, Unknown(i32) }
@@ -145,55 +89,18 @@ impl Compiler {
         Ok(Self(Arc::new(CompilerInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true) })))
     }
 
-    pub fn create_render_pipeline(&self, library: &Library, vertex: &str, options: &RenderPipelineOptions) -> Result<RenderPipeline, Error> {
+    pub fn create_render_pipeline(&self, library: &Library, profile: &AdmittedRenderPipeline) -> Result<RenderPipeline, Error> {
         const OP: &str = "Metal.Compiler.create_render_pipeline";
         enter_main(OP)?;
         self.0.lifetime.ensure_live(OP)?;
         library.lifetime().ensure_live(OP)?;
         if !self.0.device.same(library.device()) { return Err(error(OP, ErrorKind::CrossDevice, "compiler and library belong to different devices")); }
-        if vertex.is_empty() || vertex.as_bytes().contains(&0) { return Err(error(OP, ErrorKind::InvalidArgument, "vertex function name must be nonempty and contain no NUL byte")); }
-        if let Some(fragment) = &options.fragment {
-            if fragment.is_empty() || fragment.as_bytes().contains(&0) { return Err(error(OP, ErrorKind::InvalidArgument, "fragment function name must be nonempty and contain no NUL byte")); }
+        if !profile.admitted_for(&self.0.device.capabilities()?) {
+            return Err(error(OP, ErrorKind::CrossDevice, "pipeline was admitted for different device capabilities"));
         }
-        if options.label.as_ref().is_some_and(|label| label.as_bytes().contains(&0)) { return Err(error(OP, ErrorKind::InvalidArgument, "render-pipeline label contains a NUL byte")); }
-        let names = library.function_names()?;
-        if !names.iter().any(|name| name == vertex) { return Err(error(OP, ErrorKind::InvalidArgument, "vertex function is absent from the source library")); }
-        if options.fragment.as_ref().is_some_and(|fragment| !names.iter().any(|name| name == fragment)) { return Err(error(OP, ErrorKind::InvalidArgument, "fragment function is absent from the source library")); }
-        let mut color_attachments = match (&options.color_formats, &options.color_attachments) {
-            (Some(_), Some(_)) => return Err(error(OP, ErrorKind::InvalidArgument, "color_formats and color_attachments are mutually exclusive")),
-            (Some(formats), None) => formats.iter().copied().map(ColorAttachment::new).collect(),
-            (None, Some(attachments)) => attachments.clone(),
-            (None, None) => vec![ColorAttachment::new(Format::Bgra8Unorm)],
-        };
-        // Rasterization is always on: it needs exactly one fragment function and one to eight colours.
-        if options.fragment.is_none() { return Err(error(OP, ErrorKind::InvalidArgument, "rasterization requires exactly one fragment function")); }
-        if color_attachments.is_empty() || color_attachments.len() > 8 {
-            return Err(error(OP, ErrorKind::InvalidArgument, "render color attachments must match rasterization and not exceed eight"));
-        }
-        if color_attachments.iter().any(|attachment| attachment.format == Format::Depth32Float) { return Err(error(OP, ErrorKind::InvalidArgument, "render color attachments require color pixel formats")); }
-        if color_attachments.iter().any(|attachment| attachment.write_mask.iter().copied().collect::<std::collections::HashSet<_>>().len() != attachment.write_mask.len()) { return Err(error(OP, ErrorKind::InvalidArgument, "render color-write masks contain duplicate channels")); }
-        if options.raster_sample_count == 0 { return Err(error(OP, ErrorKind::InvalidArgument, "render raster sample count must be positive")); }
-        if !self.0.device.supports_texture_sample_count(options.raster_sample_count)? { return Err(error(OP, ErrorKind::Unsupported, "the Metal device does not support the render sample count")); }
-        let sample_count = u64::try_from(options.raster_sample_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "render sample count exceeds native bounds"))?;
-        let native_sample_count = i64::try_from(sample_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "render sample count exceeds descriptor bounds"))?;
-        let raw_colors = color_attachments.drain(..).map(|attachment| {
-            metal_sys::native::pipeline::ColorAttachment {
-                pixel_format: crate::native::resource::pixel_format_code(attachment.format) as i32,
-                blending_state: match attachment.blending { BlendState::Disabled => 0, BlendState::Enabled => 1 },
-                source_rgb_blend_factor: blend_factor_code(attachment.source_rgb),
-                destination_rgb_blend_factor: blend_factor_code(attachment.destination_rgb),
-                rgb_blend_operation: blend_operation_code(attachment.rgb_operation),
-                source_alpha_blend_factor: blend_factor_code(attachment.source_alpha),
-                destination_alpha_blend_factor: blend_factor_code(attachment.destination_alpha),
-                alpha_blend_operation: blend_operation_code(attachment.alpha_operation),
-                write_mask: attachment.write_mask.iter().copied().fold(0, |bits, value| bits | color_write_bit(value)),
-            }
-        }).collect::<Vec<_>>();
-        let topology = match options.primitive_topology { PrimitiveTopology::PointList => 1, PrimitiveTopology::LineList | PrimitiveTopology::LineStrip => 2, PrimitiveTopology::TriangleList | PrimitiveTopology::TriangleStrip => 3 };
+        let options = profile.options();
         let (raw, reflection) = metal_sys::native::pipeline::create_render_pipeline(
-            &self.0.raw, library.raw(), options.label.as_deref(), vertex,
-            options.fragment.as_deref(), options.reflection, native_sample_count as u64,
-            &raw_colors, topology, options.support_indirect_command_buffers,
+            &self.0.raw, library.raw(), profile,
         ).map_err(|failure| sys_error(OP, failure))?;
         self.0.device.attach_child(OP)?;
         Ok(RenderPipeline(Arc::new(RenderPipelineInner {
@@ -209,22 +116,6 @@ impl Compiler {
     }
 }
 
-fn blend_factor_code(value: BlendFactor) -> i32 {
-    match value {
-        BlendFactor::Zero => 0, BlendFactor::One => 1, BlendFactor::SourceColor => 2, BlendFactor::OneMinusSourceColor => 3,
-        BlendFactor::SourceAlpha => 4, BlendFactor::OneMinusSourceAlpha => 5, BlendFactor::DestinationColor => 6,
-        BlendFactor::OneMinusDestinationColor => 7, BlendFactor::DestinationAlpha => 8, BlendFactor::OneMinusDestinationAlpha => 9,
-        BlendFactor::SourceAlphaSaturated => 10, BlendFactor::Color => 11, BlendFactor::OneMinusColor => 12, BlendFactor::Alpha => 13,
-        BlendFactor::OneMinusAlpha => 14, BlendFactor::Source1Color => 15, BlendFactor::OneMinusSource1Color => 16,
-        BlendFactor::Source1Alpha => 17, BlendFactor::OneMinusSource1Alpha => 18,
-    }
-}
-fn blend_operation_code(value: BlendOperation) -> i32 {
-    match value { BlendOperation::Add => 0, BlendOperation::Subtract => 1, BlendOperation::ReverseSubtract => 2, BlendOperation::Min => 3, BlendOperation::Max => 4 }
-}
-fn color_write_bit(value: ColorWrite) -> i32 {
-    match value { ColorWrite::Red => 8, ColorWrite::Green => 4, ColorWrite::Blue => 2, ColorWrite::Alpha => 1 }
-}
 
 struct RenderPipelineInner {
     raw: metal_sys::Handle,
@@ -257,8 +148,7 @@ impl RenderPipeline {
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Viewport { pub x: f64, pub y: f64, pub width: f64, pub height: f64, pub znear: f64, pub zfar: f64 }
+pub use ogpu_core::render_pass::Viewport;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Scissor { pub x: usize, pub y: usize, pub width: usize, pub height: usize }
 pub use ogpu_core::render_pass::Cull as CullMode;
@@ -345,9 +235,9 @@ impl RenderEncoder {
         if let Some(state) = state { self.0.command_buffer.retain_depth_stencil(state); }
         Ok(())
     }
-    pub fn set_viewport(&self, viewport: Viewport) -> Result<(), Error> {
+    pub fn set_viewport(&self, viewport: ogpu_core::render_pass::AdmittedViewport) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.set_viewport";
-        metal_sys::registry::render_encoder_set_viewport(&self.0.raw, metal_sys::registry::record::Mtl_viewport { originX: viewport.x, originY: viewport.y, width: viewport.width, height: viewport.height, znear: viewport.znear, zfar: viewport.zfar }).map_err(|failure| sys_error(OP, failure))
+        metal_sys::registry::render_encoder_set_viewport(&self.0.raw, viewport).map_err(|failure| sys_error(OP, failure))
     }
     pub fn set_scissor(&self, scissor: Scissor) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.set_scissor";

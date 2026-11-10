@@ -65,9 +65,6 @@ fn layout_stage(stage: Stage) -> LayoutStage {
 }
 
 fn entry(operation: &str, shader_value: &Shader, name: &str, stage: Stage) -> Result<(), Error> {
-    if !valid_text(name) {
-        return Err(invalid(operation, "entry-point name is empty or contains NUL"));
-    }
     if shader::entry_points(shader_value)
         .iter()
         .any(|value| value.name == name && value.stage == stage)
@@ -137,9 +134,9 @@ fn reflection(operation: &str, layout: &PipelineLayout, shaders: &[(&Shader, Sta
     Ok(())
 }
 
-pub fn create_render(capabilities: &Caps, descriptor: &RenderDescriptor) -> Result<(), Error> {
+pub fn create_render(capabilities: &Caps, descriptor: &RenderDescriptor) -> Result<AdmittedRenderPipeline, Error> {
     let operation = "Ogpu.Pipeline.create_render";
-    if descriptor.label.as_deref().is_some_and(|label| !valid_text(label)) {
+    if descriptor.label.as_deref().is_some_and(str::is_empty) {
         return Err(invalid(operation, "pipeline label is empty or contains NUL"));
     }
     if descriptor.backend != "metal" && descriptor.backend != "vulkan" && descriptor.backend != "mock" {
@@ -154,11 +151,17 @@ pub fn create_render(capabilities: &Caps, descriptor: &RenderDescriptor) -> Resu
     {
         return Err(invalid(operation, "shader backend does not match pipeline backend"));
     }
-    if ![1, 4, 9, 16].contains(&descriptor.sample_count)
-        || descriptor.sample_count > capabilities.limits.max_sample_count
-    {
-        return Err(invalid(operation, "sample count is unsupported"));
+    if descriptor.depth_format == DepthFormat::Depth32Float && !capabilities.limits.supports_texture_samples(crate::types::TextureFormat::Depth32Float, descriptor.sample_count) {
+        return Err(invalid(operation, "render depth sample count is unsupported"));
     }
+    let admitted = admit_render_profile(capabilities, descriptor.vertex_entry.clone(), RenderPipelineOptions {
+        label: descriptor.label.clone(), fragment: descriptor.fragment_entry.clone(), reflection: true,
+        raster_sample_count: descriptor.sample_count as usize,
+        color_attachments: Some(vec![ColorAttachment::new(match descriptor.color_format {
+            ColorFormat::Rgba8Unorm => crate::types::TextureFormat::Rgba8Unorm,
+            ColorFormat::Bgra8Unorm => crate::types::TextureFormat::Bgra8Unorm })]),
+        ..RenderPipelineOptions::default()
+    })?;
     entry(operation, &descriptor.vertex, &descriptor.vertex_entry, Stage::Vertex)?;
     let fragment = match (&descriptor.fragment, &descriptor.fragment_entry) {
         (None, None) => None,
@@ -177,6 +180,137 @@ pub fn create_render(capabilities: &Caps, descriptor: &RenderDescriptor) -> Resu
     if let Some(shader_value) = fragment {
         stages.push((shader_value, Stage::Fragment));
     }
-    reflection(operation, &descriptor.layout, &stages)
+    reflection(operation, &descriptor.layout, &stages)?;
+    Ok(admitted)
 }
 
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlendState { Disabled, Enabled }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlendFactor {
+    Zero, One, SourceColor, OneMinusSourceColor, SourceAlpha, OneMinusSourceAlpha,
+    DestinationColor, OneMinusDestinationColor, DestinationAlpha, OneMinusDestinationAlpha,
+    SourceAlphaSaturated, Color, OneMinusColor, Alpha, OneMinusAlpha,
+    Source1Color, OneMinusSource1Color, Source1Alpha, OneMinusSource1Alpha,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlendOperation { Add, Subtract, ReverseSubtract, Min, Max }
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ColorWrite { Red, Green, Blue, Alpha }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ColorAttachment {
+    pub format: crate::types::TextureFormat,
+    pub blending: BlendState,
+    pub source_rgb: BlendFactor,
+    pub destination_rgb: BlendFactor,
+    pub rgb_operation: BlendOperation,
+    pub source_alpha: BlendFactor,
+    pub destination_alpha: BlendFactor,
+    pub alpha_operation: BlendOperation,
+    pub write_mask: Vec<ColorWrite>,
+}
+impl ColorAttachment {
+    pub fn new(format: crate::types::TextureFormat) -> Self {
+        Self {
+            format, blending: BlendState::Disabled, source_rgb: BlendFactor::One,
+            destination_rgb: BlendFactor::Zero, rgb_operation: BlendOperation::Add,
+            source_alpha: BlendFactor::One, destination_alpha: BlendFactor::Zero,
+            alpha_operation: BlendOperation::Add,
+            write_mask: vec![ColorWrite::Red, ColorWrite::Green, ColorWrite::Blue, ColorWrite::Alpha],
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RenderPipelineOptions {
+    pub label: Option<String>,
+    pub fragment: Option<String>,
+    pub reflection: bool,
+    pub raster_sample_count: usize,
+    pub color_formats: Option<Vec<crate::types::TextureFormat>>,
+    pub color_attachments: Option<Vec<ColorAttachment>>,
+    pub primitive_topology: crate::render_pass::Primitive,
+    pub support_indirect_command_buffers: bool,
+}
+impl Default for RenderPipelineOptions {
+    fn default() -> Self {
+        Self {
+            label: None, fragment: None, reflection: false, raster_sample_count: 1,
+            color_formats: None, color_attachments: None, primitive_topology: crate::render_pass::Primitive::TriangleList,
+            support_indirect_command_buffers: false,
+        }
+    }
+}
+
+
+#[derive(Clone, Debug)]
+pub struct AdmittedRenderPipeline(std::rc::Rc<RenderProfile>);
+#[derive(Clone, Debug)]
+struct RenderProfile { capabilities: Caps, vertex: String, options: RenderPipelineOptions }
+impl AdmittedRenderPipeline {
+    pub fn admitted_for(&self, capabilities: &Caps) -> bool { self.0.capabilities.limits == capabilities.limits && self.0.capabilities.render_requires_fragment == capabilities.render_requires_fragment }
+    pub fn fragment_function(&self) -> Option<crate::shader::AdmittedFunction> {
+        self.0.options.fragment.as_ref().map(|name| crate::shader::AdmittedFunction::from_render_entry(name.clone()))
+    }
+    pub fn vertex(&self) -> &str { &self.0.vertex }
+    pub fn options(&self) -> &RenderPipelineOptions { &self.0.options }
+    pub fn with_options(mut self, options: crate::backend::RenderPipelineOptions) -> Self {
+        let profile = std::rc::Rc::make_mut(&mut self.0);
+        profile.options.primitive_topology = options.topology;
+        profile.options.support_indirect_command_buffers = options.indirect;
+        if let Some(colors) = profile.options.color_attachments.as_mut() {
+            for color in colors { *color = color_attachment(options.blend, color.format); }
+        }
+        self
+    }
+}
+
+pub fn color_attachment(blend: Blend, format: crate::types::TextureFormat) -> ColorAttachment {
+    let mut a = ColorAttachment::new(format);
+    let mut set = |source_rgb, destination_rgb, source_alpha, destination_alpha| {
+        a.blending = BlendState::Enabled;
+        a.source_rgb = source_rgb; a.destination_rgb = destination_rgb;
+        a.source_alpha = source_alpha; a.destination_alpha = destination_alpha;
+    };
+    match blend {
+        Blend::Replace => {},
+        Blend::Alpha => set(BlendFactor::SourceAlpha, BlendFactor::OneMinusSourceAlpha, BlendFactor::One, BlendFactor::OneMinusSourceAlpha),
+        Blend::Add => set(BlendFactor::One, BlendFactor::One, BlendFactor::One, BlendFactor::One),
+        Blend::Multiply => set(BlendFactor::DestinationColor, BlendFactor::Zero, BlendFactor::One, BlendFactor::OneMinusSourceAlpha),
+        Blend::Screen => set(BlendFactor::OneMinusDestinationColor, BlendFactor::One, BlendFactor::One, BlendFactor::OneMinusSourceAlpha),
+        Blend::Subtract => { set(BlendFactor::One, BlendFactor::One, BlendFactor::One, BlendFactor::OneMinusSourceAlpha); a.rgb_operation = BlendOperation::ReverseSubtract; },
+    }
+    a
+}
+
+pub fn admit_render_profile(capabilities: &Caps, vertex: String, mut options: RenderPipelineOptions) -> Result<AdmittedRenderPipeline, Error> {
+    const OP: &str = "Ogpu.Pipeline.admit_render_profile";
+    crate::validation::validate_label(OP, options.label.as_deref())?;
+    if !valid_text(&vertex) || options.fragment.as_deref().is_some_and(|s| !valid_text(s)) {
+        return Err(invalid(OP, "render function name is empty or contains NUL"));
+    }
+    if capabilities.render_requires_fragment && options.fragment.is_none() {
+        return Err(invalid(OP, "rasterization requires a fragment function"));
+    }
+    if options.raster_sample_count == 0 || !options.raster_sample_count.is_power_of_two() {
+        return Err(invalid(OP, "render sample count is invalid"));
+    }
+    if !capabilities.limits.supports_texture_samples(crate::types::TextureFormat::Rgba8Unorm, options.raster_sample_count as i64) {
+        return Err(error::make(OP, ErrorKind::Unsupported, "render sample count is unsupported"));
+    }
+    let colors = match (options.color_formats.take(), options.color_attachments.take()) {
+        (Some(_), Some(_)) => return Err(invalid(OP, "color_formats and color_attachments are mutually exclusive")),
+        (Some(formats), None) => formats.into_iter().map(ColorAttachment::new).collect(),
+        (None, Some(colors)) => colors,
+        (None, None) => vec![ColorAttachment::new(crate::types::TextureFormat::Bgra8Unorm)],
+    };
+    if colors.is_empty() || colors.len() > 8 || colors.iter().any(|c| c.format == crate::types::TextureFormat::Depth32Float) {
+        return Err(invalid(OP, "render color attachments require one to eight color formats"));
+    }
+    if colors.iter().any(|c| c.write_mask.iter().enumerate().any(|(i, channel)| c.write_mask[..i].contains(channel))) {
+        return Err(invalid(OP, "render color-write masks contain duplicate channels"));
+    }
+    options.color_attachments = Some(colors);
+    Ok(AdmittedRenderPipeline(std::rc::Rc::new(RenderProfile { capabilities: *capabilities, vertex, options })))
+}

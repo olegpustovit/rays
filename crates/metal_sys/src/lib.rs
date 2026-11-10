@@ -127,11 +127,12 @@ pub mod native {
     pub mod indirect;
     pub mod pipeline;
     pub mod reflection;
-    pub use indirect::{create_indirect_command_buffer, draw_indexed, IndirectCommandBufferDescriptor};
+    pub use indirect::{create_indirect_command_buffer, draw_indexed};
 
     pub fn default_device() -> Result<Handle, Error> {
         #[cfg(target_vendor = "apple")]
         {
+            super::drain_releases()?;
             let mut output = std::ptr::null_mut();
             let mut message: *const c_char = std::ptr::null();
             let status = unsafe { rays_metal_default_device(&mut output, &mut message) };
@@ -230,7 +231,45 @@ pub mod native {
 
     #[repr(C)]
     struct RawFunctionConstant { name: *const c_char, tag: i32, integral: i64, floating: f64 }
-    pub fn create_texture(device: &Handle, descriptor: &TextureDescriptor, label: Option<&str>) -> Result<Handle, Error> {
+    use ogpu_core::types::{TextureFormat as Format, TextureKind, TextureUsage, StorageMode, CpuCacheMode, HazardTrackingMode, CompressionType, SwizzleChannel};
+pub fn pixel_format_code(format: Format) -> u32 {
+    match format { Format::R8Unorm => 10, Format::Rgba8Unorm => 70, Format::Bgra8Unorm => 80,
+        Format::Bgra8UnormSrgb => 81, Format::Rgba16Float => 115, Format::Rgba32Float => 125, Format::Depth32Float => 252 }
+}
+fn texture_kind_code(kind: TextureKind) -> i32 {
+    match kind { TextureKind::Texture1d => 0, TextureKind::Texture1dArray => 1, TextureKind::Texture2d => 2, TextureKind::Texture2dArray => 3, TextureKind::Texture2dMultisample => 4, TextureKind::TextureCube => 5, TextureKind::TextureCubeArray => 6, TextureKind::Texture3d => 7, TextureKind::Texture2dMultisampleArray => 8, TextureKind::TextureBuffer => 9 }
+}
+fn texture_usage_bit(usage: TextureUsage) -> i32 {
+    match usage { TextureUsage::TextureBinding => 0x1, TextureUsage::StorageBinding => 0x2,
+        TextureUsage::RenderAttachment => 0x4, TextureUsage::TextureView => 0x10, TextureUsage::TextureAtomic => 0x20,
+        TextureUsage::TextureCopySrc | TextureUsage::TextureCopyDst => 0 }
+}
+fn texture_usage_bits(usages: &[TextureUsage]) -> i32 {
+    let bits = usages.iter().copied().fold(0, |bits, usage| bits | texture_usage_bit(usage));
+    if bits == 0 && !usages.is_empty() { 1 } else { bits }
+}
+fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
+    match value { SwizzleChannel::Zero => 0, SwizzleChannel::One => 1, SwizzleChannel::Red => 2, SwizzleChannel::Green => 3, SwizzleChannel::Blue => 4, SwizzleChannel::Alpha => 5 }
+}
+
+    pub fn texture_descriptor(descriptor: &ogpu_core::validation::AdmittedTexture) -> TextureDescriptor {
+        TextureDescriptor {
+            texture_type: texture_kind_code(descriptor.kind), pixel_format: pixel_format_code(descriptor.format) as i32,
+            width: descriptor.width as u64, height: descriptor.height as u64, depth: descriptor.depth as u64,
+            mip_levels: descriptor.mip_levels as u64, sample_count: descriptor.sample_count as u64, array_length: descriptor.array_length as u64,
+            storage_mode: match descriptor.storage { StorageMode::Shared => 0, StorageMode::Managed => 1, StorageMode::Private => 2, StorageMode::Memoryless => 3 },
+            cpu_cache_mode: match descriptor.cpu_cache { CpuCacheMode::DefaultCache => 0, CpuCacheMode::WriteCombined => 1 },
+            hazard_tracking_mode: match descriptor.hazard_tracking { HazardTrackingMode::Default => 2, HazardTrackingMode::Untracked => 1, HazardTrackingMode::Tracked => 2 },
+            usage: texture_usage_bits(&descriptor.usage),
+            allow_gpu_optimized_contents: u8::from(descriptor.allow_gpu_optimized_contents),
+            compression_type: match descriptor.compression { CompressionType::Lossless => 0, CompressionType::Lossy => 1 },
+            swizzle_red: texture_swizzle_code(descriptor.swizzle.red), swizzle_green: texture_swizzle_code(descriptor.swizzle.green),
+            swizzle_blue: texture_swizzle_code(descriptor.swizzle.blue), swizzle_alpha: texture_swizzle_code(descriptor.swizzle.alpha),
+        }
+    }
+    pub fn create_texture(device: &Handle, admitted: &ogpu_core::validation::AdmittedTexture) -> Result<Handle, Error> {
+        let descriptor = &texture_descriptor(admitted);
+        let label = admitted.label.as_deref();
         #[cfg(target_vendor = "apple")]
         {
             let label = label.map(std::ffi::CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal strings must not contain NUL".into()))?;
@@ -265,7 +304,7 @@ pub mod native {
         {
             let mut message: *const c_char = std::ptr::null();
             let (x, y, z, width, height, depth) = region;
-            let status = unsafe { rays_metal_texture_read(texture.as_native_ptr()?, destination.as_mut_ptr(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
+            let status = unsafe { rays_metal_texture_read(texture.as_native_ptr()?, destination.as_mut_ptr(), destination.len(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
             if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -281,7 +320,7 @@ pub mod native {
         {
             let mut message: *const c_char = std::ptr::null();
             let (x, y, z, width, height, depth) = region;
-            let status = unsafe { rays_metal_texture_read(texture.as_native_ptr()?, bytes.as_mut_ptr(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
+            let status = unsafe { rays_metal_texture_read(texture.as_native_ptr()?, bytes.as_mut_ptr(), bytes.len(), bytes_per_row, bytes_per_image, x, y, z, width, height, depth, mip_level, slice, &mut message) };
             if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
         }
         #[cfg(not(target_vendor = "apple"))]
@@ -327,7 +366,8 @@ pub mod native {
     }
 
 
-    pub fn set_compute_bytes(encoder: &Handle, bytes: &[u8], index: u64) -> Result<(), Error> {
+    pub fn set_compute_bytes(encoder: &Handle, admitted: ogpu_core::validation::AdmittedBytes<'_>, index: u64) -> Result<(), Error> {
+        let bytes=admitted.bytes();
         #[cfg(target_vendor = "apple")]
         {
             let mut message: *const c_char = std::ptr::null();
@@ -377,7 +417,12 @@ pub mod native {
         Ok(bytes)
     }
 
-    pub fn create_mapped_buffer(device: &Handle, length: u64, options: i64) -> Result<(Handle, MappedBuffer), Error> {
+    pub fn create_mapped_buffer(device: &Handle, descriptor: &ogpu_core::validation::AdmittedBuffer) -> Result<(Handle, MappedBuffer), Error> {
+        if descriptor.kind != ogpu_core::validation::BufferKind::Mapped {
+            return Err(Error::InvalidArgument("mapped creation requires a mapped buffer admission".into()));
+        }
+        let length = descriptor.size as u64;
+        let options = 0;
         #[cfg(target_vendor = "apple")]
         {
             let mut output = std::ptr::null_mut();
@@ -428,7 +473,7 @@ pub mod native {
     pub fn shared_buffer_readback(buffer: &Handle) -> Result<SharedBufferReadback, Error> {
         #[cfg(target_vendor = "apple")]
         {
-            if !is_main_thread() { return Err(Error::WrongThread); }
+            super::drain_releases()?;
             let mut pointer = std::ptr::null_mut();
             let mut length = 0;
             let mut message = std::ptr::null();
@@ -452,7 +497,7 @@ pub mod native {
         fn rays_metal_buffer_create_mapped(device: *mut NativeHandle, length: u64, options: i64, output: *mut *mut NativeHandle, mapping: *mut *mut f32, message: *mut *const c_char) -> i32;
         fn rays_metal_texture_create(device: *mut NativeHandle, descriptor: *const TextureDescriptor, label: *const c_char, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
         fn rays_metal_texture_info(texture: *mut NativeHandle, output: *mut i64, message: *mut *const c_char) -> i32;
-        fn rays_metal_texture_read(texture: *mut NativeHandle, destination: *mut u8, bytes_per_row: usize, bytes_per_image: usize, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64, mip_level: u64, slice: u64, message: *mut *const c_char) -> i32;
+        fn rays_metal_texture_read(texture: *mut NativeHandle, destination: *mut u8, destination_length: usize, bytes_per_row: usize, bytes_per_image: usize, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64, mip_level: u64, slice: u64, message: *mut *const c_char) -> i32;
         fn rays_metal_command_buffer_wait(buffer: *mut NativeHandle, message: *mut *const c_char) -> i32;
         fn rays_metal_command_buffer_error(buffer: *mut NativeHandle, output: *mut *const c_char) -> i32;
         fn rays_metal_presentation_command_snapshot(buffer: *mut NativeHandle, output: *mut CommandBufferDiagnostics, message: *mut *const c_char) -> i32;

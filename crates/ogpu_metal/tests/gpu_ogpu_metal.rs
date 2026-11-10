@@ -780,6 +780,11 @@ fn ray_tracing(device: &Device) {
         ErrorKind::InvalidArgument,
         "a refit of another shape was accepted",
     );
+    let short_scratch = local_buffer(&device,"short-refit-scratch",1,&[BufferUsage::Storage]);
+    let failure=be::refit_accel(&encoder,&refittable,moved_descriptor.clone(),&short_scratch,None).unwrap_err();
+    assert_eq!(failure.kind,ErrorKind::InvalidArgument);
+    assert_eq!(failure.operation,"Metal.Acceleration_encoder.refit_with");
+    assert_eq!(failure.message,"scratch range is too small");
     be::refit_accel(&encoder, &refittable, moved_descriptor, &refit_scratch, None).unwrap_or_else(|failure| die(failure));
     be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
     query_in(&commands, &trace, &refittable);
@@ -787,6 +792,7 @@ fn ray_tracing(device: &Device) {
     check_hits("refit triangles", &rt.read_hits(), &[triangle_hit(0, 0, 1.), triangle_hit(1, 0, 1.), NO_HIT, NO_HIT]);
     be::destroy_accel(&refittable).unwrap_or_else(|failure| die(failure));
     be::destroy_buffer(&refit_scratch).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&short_scratch).unwrap_or_else(|failure| die(failure));
     be::destroy_buffer(&moved).unwrap_or_else(|failure| die(failure));
 
     // Procedural box/capsule candidates, motion keyframes, user-id instances with masks, and compaction.
@@ -857,14 +863,31 @@ fn ray_tracing(device: &Device) {
             caps: CurveCaps::SphereCaps,
         }],
     };
-    println!("  device: ray_tracing_curves={} memoryless_attachments={} max_sample_count={}", caps::has(&profile, &Feature::RayTracingCurves), profile.memoryless_attachments, profile.limits.max_sample_count);
+    println!("  device: ray_tracing_curves={} memoryless_attachments={} max_sample_count={}", caps::has(&profile, &Feature::RayTracingCurves), profile.memoryless_attachments, profile.limits.max_sample_count());
     let curve_resources = if caps::has(&profile, &Feature::RayTracingCurves) {
         let curve_interface = ray_interface.clone();
         let curve_pipeline = be::create_compute_pipeline_from(&extra, "trace_curves", None, &curve_interface).unwrap_or_else(|failure| die(failure));
-        let curve_blas = be::create_accel(&device, curve_descriptor, false).unwrap_or_else(|failure| die(failure));
+        let curve_blas = be::create_accel(&device, curve_descriptor.clone(), false).unwrap_or_else(|failure| die(failure));
         rt.build_one(&curve_blas, &big_scratch);
         let curve_hits = rt.query(&curve_pipeline, &curve_blas, &Extras::default());
         check_hits("native curve", &curve_hits, &[NO_HIT, NO_HIT, generated_hit(0, 0, 1.5), NO_HIT]);
+        let refittable_curve=be::create_accel(&device,curve_descriptor.clone(),true).unwrap_or_else(|failure| die(failure));
+        rt.build_one(&refittable_curve,&big_scratch);
+        let mut changed_curve=curve_descriptor;
+        if let AccelDescriptor::Blas {geometries}=&mut changed_curve {
+            if let Geometry::Curves {caps,..}=&mut geometries[0] {*caps=CurveCaps::NoCaps;}
+        }
+        let short=local_buffer(&device,"changed-curve-scratch",1,&[BufferUsage::Storage]);
+        let commands=be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+        let encoder=be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
+        let failure=be::refit_accel(&encoder,&refittable_curve,changed_curve,&short,None).unwrap_err();
+        assert_eq!(failure.kind,ErrorKind::InvalidArgument);
+        assert_eq!(failure.operation,"Metal.Acceleration_encoder.refit_with");
+        assert!(matches!(failure.message.as_str(),"scratch range is too small"|"destination acceleration structure is too small"));
+        be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
+        be::abandon(&commands).unwrap_or_else(|failure| die(failure));
+        be::destroy_buffer(&short).unwrap_or_else(|failure| die(failure));
+        be::destroy_accel(&refittable_curve).unwrap_or_else(|failure| die(failure));
         Some((curve_pipeline, curve_blas))
     } else {
         refused(

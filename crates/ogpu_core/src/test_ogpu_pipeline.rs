@@ -10,7 +10,7 @@ fn die(error: Error) -> ! {
     panic!("{}", crate::error::to_string(&error))
 }
 
-fn reject(result: Result<(), Error>) {
+fn reject(result: Result<pipeline::AdmittedRenderPipeline, Error>) {
     match result {
         Err(error) if error.kind == ErrorKind::InvalidArgument => {}
         _ => panic!("expected rejection"),

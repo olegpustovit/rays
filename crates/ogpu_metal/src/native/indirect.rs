@@ -6,62 +6,7 @@ use crate::native::resource::{error, sys_error, enter_main, Buffer, Device, Erro
 use crate::native::pipeline::RenderPipeline;
 use metal_sys;
 
-const PRIVATE_TRACKED_RESOURCE_OPTIONS: i64 = (2 << 4) | (2 << 8);
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CommandType { IndirectDraw, IndirectDrawIndexed, IndirectConcurrentDispatch, IndirectConcurrentDispatchThreads }
-impl CommandType {
-    fn bit(self) -> i64 {
-        match self { Self::IndirectDraw => 1, Self::IndirectDrawIndexed => 2, Self::IndirectConcurrentDispatch => 32, Self::IndirectConcurrentDispatchThreads => 64 }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Descriptor {
-    pub command_types: Vec<CommandType>,
-    pub inherit_buffers: bool,
-    pub inherit_pipeline_state: bool,
-    pub max_vertex_buffer_bind_count: usize,
-    pub max_fragment_buffer_bind_count: usize,
-    pub max_kernel_buffer_bind_count: usize,
-    pub support_ray_tracing: bool,
-    pub support_dynamic_attribute_stride: bool,
-    pub max_kernel_threadgroup_memory_bind_count: usize,
-    pub max_object_buffer_bind_count: usize,
-    pub max_mesh_buffer_bind_count: usize,
-    pub max_object_threadgroup_memory_bind_count: usize,
-    pub inherit_depth_stencil_state: bool,
-    pub inherit_depth_bias: bool,
-    pub inherit_depth_clip_mode: bool,
-    pub inherit_cull_mode: bool,
-    pub inherit_front_facing_winding: bool,
-    pub inherit_triangle_fill_mode: bool,
-    pub support_color_attachment_mapping: bool,
-}
-impl Descriptor {
-    pub fn new(command_types: Vec<CommandType>) -> Self {
-        Self {
-            command_types,
-            inherit_buffers: false,
-            inherit_pipeline_state: false,
-            max_vertex_buffer_bind_count: 0,
-            max_fragment_buffer_bind_count: 0,
-            max_kernel_buffer_bind_count: 0,
-            support_ray_tracing: false,
-            support_dynamic_attribute_stride: false,
-            max_kernel_threadgroup_memory_bind_count: 0,
-            max_object_buffer_bind_count: 0,
-            max_mesh_buffer_bind_count: 0,
-            max_object_threadgroup_memory_bind_count: 0,
-            inherit_depth_stencil_state: true,
-            inherit_depth_bias: true,
-            inherit_depth_clip_mode: true,
-            inherit_cull_mode: true,
-            inherit_front_facing_winding: true,
-            inherit_triangle_fill_mode: true,
-            support_color_attachment_mapping: false,
-        }
-    }
-}
+pub use ogpu_core::validation::{IcbCommandType as CommandType, IcbDescriptor as Descriptor, AdmittedIcb};
 
 struct Retained(RetainedResource);
 enum RetainedResource { Buffer(Buffer), Pipeline(RenderPipeline) }
@@ -93,53 +38,13 @@ impl Drop for IndirectCommandBufferInner {
 pub struct IndirectCommandBuffer(Arc<IndirectCommandBufferInner>);
 impl IndirectCommandBuffer {
     pub fn descriptor(command_types: Vec<CommandType>) -> Descriptor { Descriptor::new(command_types) }
-    pub fn create(device: &Device, max_command_count: usize, descriptor: &Descriptor) -> Result<Self, Error> {
+    pub fn create(device: &Device, profile: &AdmittedIcb) -> Result<Self, Error> {
         const OP: &str = "Metal.Indirect_command_buffer.create";
         enter_main(OP)?;
         device.ensure_live(OP)?;
-        if descriptor.command_types.is_empty() {
-            return Err(error(OP, ErrorKind::InvalidArgument, "at least one indirect command type is required"));
-        }
-        if descriptor.command_types.windows(2).any(|pair| pair[0] as u8 >= pair[1] as u8) {
-            return Err(error(OP, ErrorKind::InvalidArgument, "indirect command types must be unique and ordered"));
-        }
-        if max_command_count == 0 { return Err(error(OP, ErrorKind::InvalidArgument, "maximum command count must be positive")); }
-        let counts = [
-            descriptor.max_vertex_buffer_bind_count,
-            descriptor.max_fragment_buffer_bind_count,
-            descriptor.max_kernel_buffer_bind_count,
-            descriptor.max_kernel_threadgroup_memory_bind_count,
-            descriptor.max_object_buffer_bind_count,
-            descriptor.max_mesh_buffer_bind_count,
-            descriptor.max_object_threadgroup_memory_bind_count,
-        ];
-        if counts.iter().any(|&count| count > 31) {
-            return Err(error(OP, ErrorKind::InvalidArgument, "indirect binding counts must be in [0, 31]"));
-        }
-        let command_types = descriptor.command_types.iter().fold(0, |bits, command| bits | command.bit());
-        let raw_descriptor = metal_sys::native::IndirectCommandBufferDescriptor {
-            command_types,
-            inherit_buffers: u8::from(descriptor.inherit_buffers),
-            inherit_pipeline_state: u8::from(descriptor.inherit_pipeline_state),
-            max_vertex_buffer_bind_count: counts[0] as i64,
-            max_fragment_buffer_bind_count: counts[1] as i64,
-            max_kernel_buffer_bind_count: counts[2] as i64,
-            support_ray_tracing: u8::from(descriptor.support_ray_tracing),
-            support_dynamic_attribute_stride: u8::from(descriptor.support_dynamic_attribute_stride),
-            max_kernel_threadgroup_memory_bind_count: counts[3] as i64,
-            max_object_buffer_bind_count: counts[4] as i64,
-            max_mesh_buffer_bind_count: counts[5] as i64,
-            max_object_threadgroup_memory_bind_count: counts[6] as i64,
-            inherit_depth_stencil_state: u8::from(descriptor.inherit_depth_stencil_state),
-            inherit_depth_bias: u8::from(descriptor.inherit_depth_bias),
-            inherit_depth_clip_mode: u8::from(descriptor.inherit_depth_clip_mode),
-            inherit_cull_mode: u8::from(descriptor.inherit_cull_mode),
-            inherit_front_facing_winding: u8::from(descriptor.inherit_front_facing_winding),
-            inherit_triangle_fill_mode: u8::from(descriptor.inherit_triangle_fill_mode),
-            support_color_attachment_mapping: u8::from(descriptor.support_color_attachment_mapping),
-        };
-        let max = u64::try_from(max_command_count).map_err(|_| error(OP, ErrorKind::InvalidArgument, "maximum command count exceeds native bounds"))?;
-        let raw = metal_sys::native::create_indirect_command_buffer(device.raw(), &raw_descriptor, max, PRIVATE_TRACKED_RESOURCE_OPTIONS).map_err(|failure| sys_error(OP, failure))?;
+        let max_command_count = profile.capacity();
+        let descriptor = profile.descriptor();
+        let raw = metal_sys::native::create_indirect_command_buffer(device.raw(), profile).map_err(|failure| sys_error(OP, failure))?;
         device.attach_child(OP)?;
         Ok(Self(Arc::new(IndirectCommandBufferInner {
             raw, lifetime: Lifetime::new(), device: device.clone(), max_command_count,
@@ -158,12 +63,6 @@ impl IndirectCommandBuffer {
     fn retain(&self, resource: RetainedResource) {
         resource.lifetime().attach();
         self.0.retained.borrow_mut().push(Retained(resource));
-    }
-
-    fn validate_range(&self, operation: &str, location: usize, length: usize) -> Result<(), Error> {
-        if location > self.0.max_command_count || length > self.0.max_command_count - location {
-            Err(error(operation, ErrorKind::InvalidArgument, "range exceeds the indirect command buffer"))
-        } else { Ok(()) }
     }
 
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
@@ -193,15 +92,17 @@ pub use ogpu_core::render_pass::IndexType;
 #[derive(Clone)]
 pub struct RenderCommand(Arc<RenderCommandInner>);
 impl RenderCommand {
-    pub fn at(buffer: &IndirectCommandBuffer, index: usize) -> Result<Self, Error> {
+    pub fn at(buffer: &IndirectCommandBuffer, index: ogpu_core::validation::AdmittedIcbIndex) -> Result<Self, Error> {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.at";
         enter_main(OP)?;
         buffer.0.lifetime.ensure_live(OP)?;
         if !buffer.0.command_types.contains(&CommandType::IndirectDraw) && !buffer.0.command_types.contains(&CommandType::IndirectDrawIndexed) {
             return Err(error(OP, ErrorKind::InvalidState, "descriptor does not enable render commands"));
         }
-        buffer.validate_range(OP, index, 1)?;
-        let raw = metal_sys::registry::indirect_render_command(&buffer.0.raw, index as u64).map_err(|failure| sys_error(OP, failure))?;
+        if !index.belongs_to_capacity(buffer.0.max_command_count) {
+            return Err(error(OP, ErrorKind::InvalidArgument, "index was admitted for another indirect command capacity"));
+        }
+        let raw = metal_sys::registry::indirect_render_command(&buffer.0.raw, index.index() as u64).map_err(|failure| sys_error(OP, failure))?;
         buffer.0.lifetime.attach();
         Ok(Self(Arc::new(RenderCommandInner { raw, lifetime: Lifetime::new(), parent: buffer.clone(), parent_attached: AtomicBool::new(true) })))
     }

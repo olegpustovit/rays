@@ -4,7 +4,7 @@ use crate::{
     device::{fail, Device},
     present_source,
 };
-use crate::native::{LoadAction, RenderPassDescriptor, RenderEncoder, StoreAction};
+use crate::native::{RenderPassDescriptor, RenderEncoder};
 use ogpu_core::error::{Error, ErrorKind};
 use std::cell::Cell;
 
@@ -22,7 +22,8 @@ pub fn create(device: &Device) -> Result<Presentation, Error> {
     if device.destroyed() {
         return Err(fail(OPERATION, ErrorKind::StaleHandle, "device is destroyed"));
     }
-    let library = native::Library::compile_source(native, present_source::SOURCE, Some("Rays presentation"))?;
+    let shader = ogpu_core::shader::of_metal_source(present_source::SOURCE.to_owned(),Some("Rays presentation".into()))?;
+    let library = native::Library::compile_source(native, &shader)?;
     let compiler = match native::Compiler::create(native) {
         Ok(c) => c,
         Err(e) => {
@@ -37,7 +38,8 @@ pub fn create(device: &Device) -> Result<Presentation, Error> {
         primitive_topology: native::PrimitiveTopology::TriangleList,
         ..native::RenderPipelineOptions::default()
     };
-    let compiled = compiler.create_render_pipeline(&library, "present_vertex", &options);
+    let admitted = ogpu_core::pipeline::admit_render_profile(&device.capabilities(), "present_vertex".to_owned(), options);
+    let compiled = admitted.and_then(|profile| compiler.create_render_pipeline(&library, &profile));
     let _ = compiler.destroy();
     match compiled {
         Err(e) => {
@@ -63,17 +65,7 @@ impl Presentation {
             return Err(fail(OPERATION, ErrorKind::CrossDevice, "presentation texture belongs to another device"));
         }
         let (s, t) = (source.descriptor(), target.descriptor());
-        if s.kind != native::TextureKind::Texture2d
-            || s.format != native::Format::Rgba8Unorm
-            || s.depth != 1
-            || s.mip_levels != 1
-            || s.sample_count != 1
-            || s.array_length != 1
-        {
-            Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation source must be a single-sample 2D RGBA8 texture"))
-        } else if !s.usage.contains(&native::TextureUsage::ShaderRead) {
-            Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation source must be shader-readable"))
-        } else if t.kind != native::TextureKind::Texture2d
+        if t.kind != native::TextureKind::Texture2d
             || t.format != native::Format::Bgra8Unorm
             || t.depth != 1
             || t.mip_levels != 1
@@ -81,7 +73,7 @@ impl Presentation {
             || t.array_length != 1
         {
             Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation target must be a single-sample 2D BGRA8 texture"))
-        } else if !t.usage.contains(&native::TextureUsage::RenderTarget) {
+        } else if !t.usage.contains(&native::TextureUsage::RenderAttachment) {
             Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation target must be renderable"))
         } else if s.width != t.width || s.height != t.height {
             Err(fail(OPERATION, ErrorKind::InvalidArgument, "presentation source and target extents differ"))
@@ -96,10 +88,10 @@ impl Presentation {
             return Err(fail(OPERATION, ErrorKind::StaleHandle, "presentation command buffer is destroyed"));
         }
         self.validate_resources(commands.device(), source, target)?;
-        let pass = RenderPassDescriptor::create(&self.device, target.descriptor().width as u64, target.descriptor().height as u64, 1)?;
+        let pass = RenderPassDescriptor::create(&self.device, target.admitted_descriptor())?;
         let configured = pass
-            .set_attachments(target, None, None, [0., 0., 0., 1.])
-            .and_then(|()| pass.set_actions(LoadAction::Clear, StoreAction::Store, LoadAction::DontCare, StoreAction::DontCare, 1.0, LoadAction::DontCare, StoreAction::DontCare, 0));
+            .set_attachments(target, None, None, &ogpu_core::render_pass::ClearColor::BLACK)
+            .and_then(|()| pass.set_actions(&ogpu_core::render_pass::AdmittedActions::PRESENT));
         if let Err(e) = configured {
             let _ = pass.destroy();
             return Err(e);

@@ -56,31 +56,18 @@ pub fn adopt_borrowed_layer(device: &Handle, layer: NonNull<c_void>) -> Result<H
     { let _ = (device, layer); Err(Error::Unavailable) }
 }
 
-pub fn configure_layer(
-    layer: &Handle,
-    width: u64,
-    height: u64,
-    format: i64,
-    framebuffer_only: bool,
-    maximum_drawables: u64,
-    allows_timeout: bool,
-    display_sync: bool,
-    presents_with_transaction: bool,
-) -> Result<(), Error> {
+pub fn configure_layer(layer: &Handle, configuration: &ogpu_core::surface::AdmittedLayer) -> Result<(), Error> {
     #[cfg(target_vendor = "apple")]
     {
         let mut message = null();
-        let status = unsafe {
-            layer_configure(
-                layer.as_native_ptr()?, width, height, format,
-                u8::from(framebuffer_only), maximum_drawables, u8::from(allows_timeout),
-                u8::from(display_sync), u8::from(presents_with_transaction), &mut message,
-            )
-        };
+        let c = configuration;
+        let status = unsafe { layer_configure(layer.as_native_ptr()?, c.width as u64, c.height as u64,
+            super::pixel_format_code(c.format) as i64, u8::from(c.framebuffer_only), c.maximum_drawables as u64,
+            u8::from(c.allows_timeout), u8::from(c.display_sync), u8::from(c.presents_with_transaction), &mut message) };
         if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
     }
     #[cfg(not(target_vendor = "apple"))]
-    { let _ = (layer, width, height, format, framebuffer_only, maximum_drawables, allows_timeout, display_sync, presents_with_transaction); Err(Error::Unavailable) }
+    { let _ = (layer, configuration); Err(Error::Unavailable) }
 }
 
 pub fn next_drawable(layer: &Handle) -> Result<Option<Handle>, Error> {

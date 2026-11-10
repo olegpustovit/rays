@@ -1,7 +1,7 @@
 //! Ogpu_metal.Device: one Metal device with its OGPU capability profile and live-resource count.
 use crate::native;
 use ogpu_core::{
-    caps::{self, Caps, Limits},
+    caps::Caps,
     error::{self, Error, ErrorKind},
     handle,
 };
@@ -25,49 +25,7 @@ pub struct Device(Rc<DeviceInner>);
 impl Device {
     pub fn system_default() -> Result<Device, Error> {
         let metal = native::Device::system_default()?;
-        let info = match metal.info() {
-            Ok(info) => info,
-            Err(value) => {
-                let _ = metal.destroy();
-                return Err(value);
-            }
-        };
-        let mut max_sample_count = 1;
-        for sample in [4, 9, 16] {
-            match metal.supports_texture_sample_count(sample as usize) {
-                Ok(true) => max_sample_count = sample,
-                Ok(false) => {}
-                Err(value) => {
-                    let _ = metal.destroy();
-                    return Err(value);
-                }
-            }
-        }
-        let family = |f: native::DeviceFamily| matches!(metal.supports_family(f), Ok(true));
-        // Curve primitives intersect only on Apple GPU family 9 and later.
-        let curves = family(native::DeviceFamily::Apple9);
-        // tile memory: every Apple family
-        let tiled = family(native::DeviceFamily::Apple7);
-        let capabilities = Caps {
-            limits: Limits {
-                max_buffer_size: info.max_buffer_length as i64,
-                max_texture_dimension_2d: 16_384,
-                max_bind_groups: 4,
-                max_sample_count,
-            },
-            compute_pipeline: true,
-            render_pipeline: true,
-            ray_tracing: info.raytracing,
-            ray_tracing_curves: info.raytracing && curves,
-            ray_tracing_motion: info.raytracing,
-            ray_tracing_refit: info.raytracing,
-            memoryless_attachments: tiled,
-            unified_memory: true,
-        };
-        if let Err(failure) = caps::validate(&capabilities) {
-            let _ = metal.destroy();
-            return Err(failure);
-        }
+        let capabilities = metal.capabilities()?;
         Ok(Device(Rc::new(DeviceInner {
             metal,
             handle: handle::create_device(),

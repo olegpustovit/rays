@@ -1,3 +1,4 @@
+use crate::validation::{AdmittedBuffer, AdmittedTexture, TextureRead, TextureReadInto, BufferProfile, BufferKind, StorageMode, CpuCacheMode};
 use crate::{
     acceleration::{self, Acceleration, BufferRange, Descriptor as PortableDescriptor, Geometry as AccelGeometry},
     caps::{self, Caps, Feature},
@@ -32,6 +33,11 @@ pub trait DriverResource {
     fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), Error>;
     fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error>;
     fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error>;
+    fn read_texture(&self, read: &TextureRead) -> Result<Vec<u8>, Error> { self.read(0, read.length()) }
+    fn read_texture_into(&self, read: &mut TextureReadInto<'_>) -> Result<(), Error> {
+        let (layout, destination) = read.parts();
+        self.read_into(0, destination, 0, layout.length())
+    }
     fn destroy(&self) -> Result<(), Error>;
 }
 
@@ -71,14 +77,14 @@ pub enum DriverAcquire {
 }
 
 pub trait DriverSurface {
-    fn configure(&self, configuration: &Configuration) -> Result<(), Error>;
+    fn configure(&self, configuration: &surface::AdmittedConfiguration) -> Result<(), Error>;
     fn acquire_sync(&self) -> Result<DriverAcquire, Error>;
     fn discard(&self, frame: DriverFrame) -> Result<(), Error>;
     fn destroy_surface(&self) -> Result<(), Error>;
 }
 
 pub trait DriverLibrary {
-    fn create_compute_pipeline_in(&self, entry: &str, constants: &[(String, ConstantValue)], interface: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error>;
+    fn create_compute_pipeline_in(&self, function: &crate::shader::AdmittedFunction, interface: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error>;
     fn destroy_library(&self) -> Result<(), Error>;
 }
 
@@ -131,7 +137,7 @@ pub struct Instance {
 pub trait DriverComputeEncoder {
     fn set_pipeline(&self, pipeline: Token) -> Result<(), Error>;
     fn set_buffer(&self, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
-    fn set_bytes(&self, index: i64, bytes: &[u8]) -> Result<(), Error>;
+    fn set_bytes(&self, index: i64, bytes: crate::validation::AdmittedBytes<'_>) -> Result<(), Error>;
     fn set_texture(&self, index: i64, texture: Token) -> Result<(), Error>;
     fn set_accel(&self, index: i64, accel: Token) -> Result<(), Error>;
     fn dispatch_threads(&self, threads: (i64, i64, i64), threadgroup: (i64, i64, i64)) -> Result<(), Error>;
@@ -176,12 +182,21 @@ pub struct DriverDepthAttachment {
     pub depth_clear: f64,
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct DriverRenderTarget {
+pub struct DriverRenderTarget(DriverRenderProfile);
+#[derive(Clone, Debug, PartialEq)]
+pub struct DriverRenderProfile {
     pub target_colors: Vec<DriverColorAttachment>,
     pub target_depth: Option<DriverDepthAttachment>,
     pub target_width: i64,
     pub target_height: i64,
     pub target_samples: i64,
+    clear_color: crate::render_pass::ClearColor,
+    actions: crate::render_pass::AdmittedActions,
+}
+impl std::ops::Deref for DriverRenderTarget { type Target = DriverRenderProfile; fn deref(&self) -> &DriverRenderProfile { &self.0 } }
+impl DriverRenderTarget {
+    pub fn clear_color(&self) -> &crate::render_pass::ClearColor { &self.0.clear_color }
+    pub fn actions(&self) -> &crate::render_pass::AdmittedActions { &self.0.actions }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DriverBatchDraw {
@@ -199,7 +214,7 @@ pub trait DriverRenderEncoder {
     fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, buffer: Token) -> Result<(), Error>;
     fn set_stage_texture(&self, stage: ShaderStage, index: i64, texture: Token) -> Result<(), Error>;
     fn set_stage_sampler(&self, stage: ShaderStage, index: i64, sampler: Token) -> Result<(), Error>;
-    fn set_viewport(&self, rect: Rect) -> Result<(), Error>;
+    fn set_viewport(&self, rect: crate::render_pass::AdmittedViewport) -> Result<(), Error>;
     fn set_scissor(&self, rect: Rect) -> Result<(), Error>;
     fn set_cull(&self, cull: Cull) -> Result<(), Error>;
     fn set_winding(&self, winding: Winding) -> Result<(), Error>;
@@ -220,10 +235,10 @@ pub trait DriverSampler {
 
 pub trait DriverIcb {
     fn icb_token(&self) -> Token;
-    fn icb_set_pipeline(&self, index: i64, pipeline: Token) -> Result<(), Error>;
-    fn icb_set_buffer(&self, index: i64, stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error>;
-    fn icb_draw(&self, index: i64, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error>;
-    fn icb_draw_indexed(&self, index: i64, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error>;
+    fn icb_set_pipeline(&self, index: crate::validation::AdmittedIcbIndex, pipeline: Token) -> Result<(), Error>;
+    fn icb_set_buffer(&self, index: crate::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error>;
+    fn icb_draw(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error>;
+    fn icb_draw_indexed(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error>;
     fn destroy_icb(&self) -> Result<(), Error>;
 }
 
@@ -263,23 +278,21 @@ pub trait DriverDevice {
     fn capabilities(&self) -> Caps;
     fn allocated_size(&self) -> i64;
     fn recommended_working_set(&self) -> i64;
-    fn create_buffer(&self, memory: Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error>;
-    fn create_mapped_buffer(&self, descriptor: &BufferDescriptor) -> Result<DriverMapped, Error>;
-    fn create_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error>;
-    fn create_depth_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error>;
-    fn create_memoryless_texture(&self, depth: bool, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error>;
+    fn create_buffer(&self, descriptor: &AdmittedBuffer) -> Result<Box<dyn DriverResource>, Error>;
+    fn create_mapped_buffer(&self, descriptor: &AdmittedBuffer) -> Result<DriverMapped, Error>;
+    fn create_texture(&self, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error>;
     fn create_library(&self, shader: &Shader) -> Result<Box<dyn DriverLibrary>, Error>;
     /// Compiles a library and its first entry's compute pipeline in the driver's background so a
     /// later `create_library` of the same shader is a cache hit; None where the driver cannot.
     fn warm_library(&self, shader: &Shader) -> Option<Warm>;
     fn create_accel(&self, descriptor: &DriverAccelDescriptor) -> Result<Box<dyn DriverAccel>, Error>;
     fn instance_layout(&self, kind: InstanceKind) -> Vec<i64>;
-    fn create_sampler(&self, descriptor: &SamplerDescriptor) -> Result<Box<dyn DriverSampler>, Error>;
-    fn create_render_pipeline(&self, options: RenderPipelineOptions, descriptor: &RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error>;
-    fn create_icb(&self, max_commands: i64) -> Result<Box<dyn DriverIcb>, Error>;
-    fn create_argument(&self, pipeline: Token, stage: ShaderStage, index: i64) -> Result<Box<dyn DriverArgument>, Error>;
+    fn create_sampler(&self, descriptor: &crate::validation::AdmittedSampler) -> Result<Box<dyn DriverSampler>, Error>;
+    fn create_render_pipeline(&self, options: RenderPipelineOptions, descriptor: &RenderDescriptor, admitted: &pipeline::AdmittedRenderPipeline) -> Result<Box<dyn DriverPipeline>, Error>;
+    fn create_icb(&self, profile: &crate::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error>;
+    fn create_argument(&self, pipeline: Token, stage: ShaderStage, index: crate::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error>;
     fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error>;
-    fn create_surface(&self, configuration: &Configuration) -> Result<Box<dyn DriverSurface>, Error>;
+    fn create_surface(&self, configuration: &surface::AdmittedConfiguration) -> Result<Box<dyn DriverSurface>, Error>;
     fn destroy_device(&self) -> Result<(), Error>;
 }
 
@@ -353,9 +366,9 @@ struct ResourceInner {
     dead: Cell<bool>,
 }
 #[derive(Clone)]
-pub struct Buffer { resource: Resource, buffer_descriptor: BufferDescriptor, memory: Memory }
+pub struct Buffer { resource: Resource, buffer_descriptor: AdmittedBuffer, memory: Memory }
 #[derive(Clone)]
-pub struct Texture { resource: Resource, texture_descriptor: TextureDescriptor }
+pub struct Texture { resource: Resource, texture_descriptor: AdmittedTexture }
 #[derive(Clone)]
 pub struct Pipeline(Rc<PipelineInner>);
 struct PipelineInner { driver: RefCell<Option<Box<dyn DriverPipeline>>>, token: Token, max_threads: i64, device: Device, library: Option<Library>, indirect: bool, shape: PipelineShape, render: Option<(pipeline::ColorFormat, i64)>, dead: Cell<bool> }
@@ -369,7 +382,7 @@ pub struct Queue(Rc<RefCell<QueueInner>>);
 struct QueueInner { raw: RefCell<Option<Box<dyn DriverQueue>>>, device: Device, dead: bool, completed_epoch: i64, gpu_timing: GpuTiming }
 #[derive(Clone)]
 pub struct Surface(Rc<SurfaceInner>);
-struct SurfaceInner { raw: RefCell<Option<Box<dyn DriverSurface>>>, device: Device, dead: Cell<bool>, frames: Cell<i64>, configuration: RefCell<Configuration> }
+struct SurfaceInner { raw: RefCell<Option<Box<dyn DriverSurface>>>, device: Device, dead: Cell<bool>, frames: Cell<i64>, configuration: RefCell<surface::AdmittedConfiguration> }
 #[derive(Clone)]
 pub struct Frame(Rc<FrameInner>);
 struct FrameInner { raw: DriverFrame, surface: Surface, consumed: Cell<bool> }
@@ -495,7 +508,7 @@ fn accel_check(operation: &str, device: &Device, value: &Accel) -> Result<(), Er
 }
 fn require(operation: &str, device: &Device, feature: Feature) -> Result<(), Error> { caps::require(Some(operation), &device.0.capabilities, &feature) }
 fn check_slot(operation: &str, index: i64) -> Result<(), Error> {
-    if !(0..31).contains(&index) { Err(make_error(operation, ErrorKind::InvalidArgument, "binding slot is out of range")) } else { Ok(()) }
+    crate::validation::admit_slot(operation,index).map(|_| ())
 }
 fn finite(value: f64) -> bool { value.is_finite() && value.abs() <= f32::MAX as f64 }
 fn border_code(border: Border) -> i64 { match border { Border::Clamp => 0, Border::Vanish => 1 } }
@@ -518,12 +531,11 @@ pub fn recommended_working_set(device: &Device) -> i64 { device.0.raw.borrow().a
 pub fn create_buffer(device: &Device, descriptor: BufferDescriptor, memory: Option<Memory>) -> Result<Buffer, Error> {
     const OP: &str = "Backend.create_buffer";
     live(OP, device)?;
-    crate::validation::validate_buffer(&device.0.capabilities, &descriptor)?;
     let memory = memory.unwrap_or(Memory::Shared);
-    if memory == Memory::Memoryless {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "a buffer cannot be memoryless"));
-    }
-    let raw = device.0.raw().create_buffer(memory, &descriptor)?;
+    let storage = match memory { Memory::Shared => StorageMode::Shared, Memory::DeviceLocal => StorageMode::Private, Memory::Memoryless => StorageMode::Memoryless };
+    let descriptor = crate::validation::admit_buffer(&device.0.capabilities,
+        BufferProfile { descriptor, storage, cpu_cache: CpuCacheMode::DefaultCache, kind: BufferKind::Ordinary })?;
+    let raw = device.0.raw().create_buffer(&descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Buffer { resource: make_resource(device, raw), buffer_descriptor: descriptor, memory })
 }
@@ -531,10 +543,8 @@ pub fn create_buffer(device: &Device, descriptor: BufferDescriptor, memory: Opti
 pub fn create_mapped_buffer(device: &Device, descriptor: BufferDescriptor) -> Result<Buffer, Error> {
     const OP: &str = "Backend.create_mapped_buffer";
     live(OP, device)?;
-    crate::validation::validate_buffer(&device.0.capabilities, &descriptor)?;
-    if descriptor.size % 4 != 0 {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "mapped buffer size must be a multiple of 4"));
-    }
+    let descriptor = crate::validation::admit_buffer(&device.0.capabilities,
+        BufferProfile { descriptor, storage: StorageMode::Shared, cpu_cache: CpuCacheMode::DefaultCache, kind: BufferKind::Mapped })?;
     let mapped = device.0.raw().create_mapped_buffer(&descriptor)?;
     let resource = make_resource(device, mapped.mapped_resource);
     *resource.0.mapping.borrow_mut() = Some(mapped.mapping);
@@ -676,40 +686,22 @@ pub fn release_mapped_view(buffer: &Buffer) -> Result<(), Error> {
 }
 pub fn buffer_size(buffer: &Buffer) -> i64 { buffer.buffer_descriptor.size }
 
-pub fn create_texture(device: &Device, descriptor: TextureDescriptor) -> Result<Texture, Error> {
-    const OP: &str = "Backend.create_texture";
-    live(OP, device)?;
-    crate::validation::validate_texture(&device.0.capabilities, &descriptor)?;
+fn create_texture_kind(operation: &str, device: &Device, descriptor: TextureDescriptor, depth: bool, memoryless: bool) -> Result<Texture, Error> {
+    live(operation, device)?;
+    if memoryless { require(operation, device, Feature::MemorylessAttachments)?; }
+    let descriptor = crate::validation::admit_ordinary_texture(&device.0.capabilities, descriptor, depth, memoryless)?;
     let raw = device.0.raw().create_texture(&descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Texture { resource: make_resource(device, raw), texture_descriptor: descriptor })
 }
-pub fn create_depth_texture(device: &Device, mut descriptor: TextureDescriptor) -> Result<Texture, Error> {
-    const OP: &str = "Backend.create_depth_texture";
-    live(OP, device)?;
-    crate::validation::validate_texture(&device.0.capabilities, &descriptor)?;
-    if !descriptor.usage.contains(&TextureUsage::RenderAttachment)
-        || descriptor.usage.iter().any(|usage| *usage != TextureUsage::RenderAttachment)
-    {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "depth textures are render-attachment only"));
-    }
-    descriptor.format = TextureFormat::Depth32Float;
-    let raw = device.0.raw().create_depth_texture(&descriptor)?;
-    device.0.children.set(device.0.children.get() + 1);
-    Ok(Texture { resource: make_resource(device, raw), texture_descriptor: descriptor })
+pub fn create_texture(device: &Device, descriptor: TextureDescriptor) -> Result<Texture, Error> {
+    create_texture_kind("Backend.create_texture", device, descriptor, false, false)
 }
-pub fn create_memoryless_texture(device: &Device, depth: bool, mut descriptor: TextureDescriptor) -> Result<Texture, Error> {
-    const OP: &str = "Backend.create_memoryless_texture";
-    live(OP, device)?;
-    require(OP, device, Feature::MemorylessAttachments)?;
-    crate::validation::validate_texture(&device.0.capabilities, &descriptor)?;
-    if descriptor.usage.as_slice() != &[TextureUsage::RenderAttachment] {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "memoryless textures are render-attachment only"));
-    }
-    if depth { descriptor.format = TextureFormat::Depth32Float; }
-    let raw = device.0.raw().create_memoryless_texture(depth, &descriptor)?;
-    device.0.children.set(device.0.children.get() + 1);
-    Ok(Texture { resource: make_resource(device, raw), texture_descriptor: descriptor })
+pub fn create_depth_texture(device: &Device, descriptor: TextureDescriptor) -> Result<Texture, Error> {
+    create_texture_kind("Backend.create_depth_texture", device, descriptor, true, false)
+}
+pub fn create_memoryless_texture(device: &Device, depth: bool, descriptor: TextureDescriptor) -> Result<Texture, Error> {
+    create_texture_kind("Backend.create_memoryless_texture", device, descriptor, depth, true)
 }
 
 pub fn create_queue(device: &Device) -> Result<Queue, Error> {
@@ -724,7 +716,7 @@ pub fn create_queue(device: &Device) -> Result<Queue, Error> {
 pub fn create_surface(device: &Device, configuration: Configuration) -> Result<Surface, Error> {
     const OP: &str = "Backend.create_surface";
     live(OP, device)?;
-    surface::validate_configuration(OP, &configuration)?;
+    let configuration = surface::admit_configuration(OP, configuration)?;
     let raw = device.0.raw().create_surface(&configuration)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Surface(Rc::new(SurfaceInner {
@@ -755,29 +747,14 @@ pub fn read_buffer(buffer: &Buffer, offset: i64, length: i64) -> Result<Vec<u8>,
     buffer_range(OP, buffer, offset, length)?;
     buffer.resource.0.raw().read(offset, length)
 }
-fn texture_read_length(operation: &str, texture: &Texture, bytes_per_row: i64) -> Result<usize, Error> {
-    let d = &texture.texture_descriptor;
-    if texture.resource.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "texture is destroyed")); }
-    if d.format == TextureFormat::Depth32Float || d.sample_count != 1 {
-        return Err(make_error(operation, ErrorKind::Unsupported, "depth and multisample textures are not host readable"));
-    }
-    let texel_bytes = types::texel_bytes(d.format);
-    let minimum = d.width.checked_mul(texel_bytes);
-    if minimum.is_none_or(|minimum| bytes_per_row < minimum) || bytes_per_row % texel_bytes != 0 || d.height <= 0 {
-        return Err(make_error(operation, ErrorKind::InvalidArgument, "row pitch is invalid"));
-    }
-    bytes_per_row.checked_mul(d.height).and_then(|bytes| usize::try_from(bytes).ok())
-        .ok_or_else(|| make_error(operation, ErrorKind::InvalidArgument, "row pitch is invalid"))
-}
 pub fn read_texture(texture: &Texture, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
-    let length = texture_read_length("Backend.read_texture", texture, bytes_per_row)?;
-    texture.resource.0.raw().read(0, length)
+    let read = crate::validation::admit_base_texture_read(&texture.texture_descriptor, bytes_per_row)?;
+    texture.resource.0.raw().read_texture(&read)
 }
 pub fn read_texture_into(texture: &Texture, bytes_per_row: i64, destination: &mut [u8]) -> Result<(), Error> {
-    const OP: &str = "Backend.read_texture_into";
-    let length = texture_read_length(OP, texture, bytes_per_row)?;
-    if destination.len() != length { return Err(make_error(OP, ErrorKind::InvalidArgument, "destination length does not match texture extent")); }
-    texture.resource.0.raw().read_into(0, destination, 0, length)
+    let read = crate::validation::admit_base_texture_read(&texture.texture_descriptor, bytes_per_row)?;
+    let mut read = read.into_destination(destination)?;
+    texture.resource.0.raw().read_texture_into(&mut read)
 }
 pub fn complete_through(queue: &Queue, epoch: i64) -> Result<(), Error> {
     let q = queue.0.borrow();
@@ -800,7 +777,7 @@ pub fn configure(surface: &Surface, configuration: Configuration) -> Result<(), 
     const OP: &str = "Backend.configure";
     if surface.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "surface is destroyed")); }
     if surface.0.frames.get() != 0 { return Err(make_error(OP, ErrorKind::InvalidState, "surface has acquired frames")); }
-    crate::surface::validate_configuration(OP, &configuration)?;
+    let configuration = surface::admit_configuration(OP, configuration)?;
     surface.0.raw().configure(&configuration)?;
     *surface.0.configuration.borrow_mut() = configuration;
     Ok(())
@@ -808,6 +785,9 @@ pub fn configure(surface: &Surface, configuration: Configuration) -> Result<(), 
 pub fn acquire_sync(surface: &Surface) -> Result<AcquireResult, Error> {
     const OP: &str = "Backend.acquire_sync";
     if surface.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "surface is destroyed")); }
+    if surface.0.frames.get() >= surface.0.configuration.borrow().max_acquired {
+        return Err(make_error(OP, ErrorKind::Capacity, "acquired-frame capacity reached"));
+    }
     match surface.0.raw().acquire_sync()? {
         DriverAcquire::Acquired(raw) => {
             surface.0.frames.set(surface.0.frames.get() + 1);
@@ -848,7 +828,9 @@ fn destroy_resource(resource: &Resource) -> Result<(), Error> {
     Ok(())
 }
 pub fn destroy_buffer(buffer: &Buffer) -> Result<(), Error> { destroy_resource(&buffer.resource) }
-pub fn destroy_texture(texture: &Texture) -> Result<(), Error> { destroy_resource(&texture.resource) }
+pub fn destroy_texture(texture: &Texture) -> Result<(), Error> {
+    destroy_resource(&texture.resource)?; texture.texture_descriptor.retire(); Ok(())
+}
 pub fn destroy_pipeline(pipeline: &Pipeline) -> Result<(), Error> {
     let p = &pipeline.0;
     if p.dead.get() { return Ok(()); }
@@ -923,13 +905,10 @@ pub fn create_compute_pipeline_from(
     if library.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "library is destroyed")); }
     live(OP, &library.0.device)?;
     require(OP, &library.0.device, Feature::ComputePipeline)?;
-    if entry.is_empty() || entry.as_bytes().contains(&0) {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "entry name is empty or contains NUL"));
-    }
     crate::shader::validate_bindings(interface)?;
     let constants = constants.unwrap_or_default();
-    crate::shader::validate_constants(&constants)?;
-    let raw = library.0.raw().create_compute_pipeline_in(entry, &constants, interface)?;
+    let function = crate::shader::admit_compute_function(entry.to_owned(), &constants)?;
+    let raw = library.0.raw().create_compute_pipeline_in(&function, interface)?;
     let device = library.0.device.clone();
     device.0.children.set(device.0.children.get() + 1);
     library.0.pipelines.set(library.0.pipelines.get() + 1);
@@ -1255,7 +1234,7 @@ pub fn set_bytes(encoder: &ComputeEncoder, index: i64, bytes: &[u8]) -> Result<(
     const OP: &str = "Backend.set_bytes";
     open_compute(OP, encoder)?;
     check_slot(OP, index)?;
-    if bytes.is_empty() || bytes.len() > 4096 { return Err(make_error(OP, ErrorKind::InvalidArgument, "inline bytes must be 1..4096 bytes")); }
+    let bytes=crate::validation::admit_bytes(OP,bytes)?;
     encoder.0.raw().set_bytes(index, bytes)
 }
 pub fn set_texture(encoder: &ComputeEncoder, index: i64, texture: &Texture) -> Result<(), Error> {
@@ -1366,7 +1345,9 @@ pub fn refit_accel(
     open_accel(OP, encoder)?;
     accel_check(OP, &device, accel)?;
     let offset = scratch_offset.unwrap_or(0);
-    check_scratch(OP, &device, scratch, offset, accel_sizes(accel).refit_scratch_size)?;
+    // The new native descriptor determines refit scratch extent; the original size can be stale.
+    // Core admits the logical buffer/offset; the native backend checks the newly queried extent.
+    check_scratch(OP, &device, scratch, offset, 0)?;
     acceleration::refit(&device.0.handle, &mut accel.0.portable.borrow_mut(), portable_of(&device, &descriptor))?;
     encoder.0.raw().refit(accel.0.token, &driver_of(true, &descriptor), scratch.resource.0.token, offset)
 }
@@ -1482,7 +1463,7 @@ pub fn compute_use_accels(encoder: &ComputeEncoder, accels: &[Accel]) -> Result<
 pub fn create_sampler(device: &Device, descriptor: SamplerDescriptor) -> Result<Sampler, Error> {
     const OP: &str = "Backend.create_sampler";
     live(OP, device)?;
-    crate::validation::validate_sampler(&descriptor)?;
+    let descriptor = crate::validation::admit_sampler(crate::validation::SamplerProfile::ordinary(descriptor))?;
     let raw = device.0.raw().create_sampler(&descriptor)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Sampler(Rc::new(SamplerInner { token: raw.sampler_token(), raw: RefCell::new(Some(raw)), device: device.clone(), dead: Cell::new(false) })))
@@ -1505,11 +1486,12 @@ pub fn create_render_pipeline(
     const OP: &str = "Backend.create_render_pipeline";
     live(OP, device)?;
     require(OP, device, Feature::RenderPipeline)?;
-    pipeline::create_render(&device.0.capabilities, descriptor)?;
+    let admitted = pipeline::create_render(&device.0.capabilities, descriptor)?;
     let topology = topology.unwrap_or(Primitive::TriangleList);
     let indirect = indirect.unwrap_or(false);
     let options = RenderPipelineOptions { blend: blend.unwrap_or(Blend::Replace), topology, indirect };
-    let raw = device.0.raw().create_render_pipeline(options, descriptor)?;
+    let admitted = admitted.with_options(options);
+    let raw = device.0.raw().create_render_pipeline(options, descriptor, &admitted)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Pipeline(Rc::new(PipelineInner {
         token: raw.pipeline_token(), max_threads: raw.max_threads(), driver: RefCell::new(Some(raw)), device: device.clone(), library: None, indirect, shape: PipelineShape::Vertex, render: Some((descriptor.color_format, descriptor.sample_count)), dead: Cell::new(false),
@@ -1519,21 +1501,24 @@ pub fn pipeline_indirect(pipeline: &Pipeline) -> bool { pipeline.0.indirect }
 pub fn create_icb(device: &Device, max_commands: i64) -> Result<Icb, Error> {
     const OP: &str = "Backend.create_icb";
     live(OP, device)?;
-    if max_commands <= 0 || max_commands > 65_536 {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect command capacity must be in 1..65536"));
-    }
-    let raw = device.0.raw().create_icb(max_commands)?;
+    let capacity = usize::try_from(max_commands).ok().filter(|&n| n <= 65_536)
+        .ok_or_else(|| make_error(OP, ErrorKind::InvalidArgument, "indirect command capacity must be in 1..65536"))?;
+    let mut descriptor = crate::validation::IcbDescriptor::new(vec![crate::validation::IcbCommandType::IndirectDraw, crate::validation::IcbCommandType::IndirectDrawIndexed]);
+    descriptor.max_vertex_buffer_bind_count = 8;
+    descriptor.max_fragment_buffer_bind_count = 8;
+    let profile = crate::validation::admit_icb(capacity, descriptor)?;
+    let raw = device.0.raw().create_icb(&profile)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Icb(Rc::new(IcbInner { token: raw.icb_token(), raw: RefCell::new(Some(raw)), device: device.clone(), capacity: max_commands, dead: Cell::new(false) })))
 }
-fn check_icb(operation: &str, icb: &Icb, index: i64) -> Result<(), Error> {
-    if icb.0.dead.get() { Err(make_error(operation, ErrorKind::StaleHandle, "indirect command buffer is destroyed")) }
-    else if index < 0 || index >= icb.0.capacity { Err(make_error(operation, ErrorKind::InvalidArgument, "indirect command index is out of range")) }
-    else { Ok(()) }
+fn check_icb(operation: &str, icb: &Icb, index: i64) -> Result<crate::validation::AdmittedIcbIndex, Error> {
+    if icb.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "indirect command buffer is destroyed")); }
+    crate::validation::admit_icb_index(icb.0.capacity as usize,index)
 }
+
 pub fn icb_set_pipeline(icb: &Icb, index: i64, pipeline: &Pipeline) -> Result<(), Error> {
     const OP: &str = "Backend.icb_set_pipeline";
-    check_icb(OP, icb, index)?;
+    let index = check_icb(OP, icb, index)?;
     if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     if !Rc::ptr_eq(&pipeline.0.device.0, &icb.0.device.0) { return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device")); }
     if pipeline.0.shape != PipelineShape::Vertex { return Err(make_error(OP, ErrorKind::InvalidArgument, "compute pipelines cannot draw")); }
@@ -1544,7 +1529,7 @@ pub fn icb_set_buffer(
     icb: &Icb, index: i64, stage: ShaderStage, slot: i64, offset: Option<i64>, buffer: &Buffer,
 ) -> Result<(), Error> {
     const OP: &str = "Backend.icb_set_buffer";
-    check_icb(OP, icb, index)?;
+    let index = check_icb(OP, icb, index)?;
     check_slot(OP, slot)?;
     resource_check(OP, &icb.0.device, &buffer.resource)?;
     let offset = offset.unwrap_or(0);
@@ -1593,7 +1578,7 @@ pub fn icb_draw(
     icb: &Icb, index: i64, primitive: Primitive, first: i64, count: i64, instances: Option<i64>,
 ) -> Result<(), Error> {
     const OP: &str = "Backend.icb_draw";
-    check_icb(OP, icb, index)?;
+    let index = check_icb(OP, icb, index)?;
     let instances = instances.unwrap_or(1);
     valid_draw(OP, primitive, first, count, instances)?;
     icb.0.raw().icb_draw(index, primitive, first, count, instances)
@@ -1603,7 +1588,7 @@ pub fn icb_draw_indexed(
     buffer: &Buffer, offset: i64, count: i64, instances: Option<i64>,
 ) -> Result<(), Error> {
     const OP: &str = "Backend.icb_draw_indexed";
-    check_icb(OP, icb, index)?;
+    let index = check_icb(OP, icb, index)?;
     let instances = instances.unwrap_or(1);
     valid_indexed(OP, &icb.0.device, primitive, index_type, buffer, offset, count, instances)?;
     icb.0.raw().icb_draw_indexed(index, primitive, index_type, buffer.resource.0.token, offset, count, instances)
@@ -1620,7 +1605,7 @@ pub fn create_argument(pipeline: &Pipeline, stage: ShaderStage, index: i64) -> R
     const OP: &str = "Backend.create_argument";
     if pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
     live(OP, &pipeline.0.device)?;
-    check_slot(OP, index)?;
+    let index=crate::validation::admit_slot(OP,index)?;
     let raw = pipeline.0.device.0.raw().create_argument(pipeline.0.token, stage, index)?;
     pipeline.0.device.0.children.set(pipeline.0.device.0.children.get() + 1);
     Ok(Argument(Rc::new(ArgumentInner { length: raw.argument_length(), alignment: raw.argument_alignment(), raw: RefCell::new(Some(raw)), device: pipeline.0.device.clone(), dead: Cell::new(false) })))
@@ -1710,15 +1695,25 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
         if !same_extent(&depth.depth_texture) || depth.depth_texture.texture_descriptor.sample_count != samples {
             return Err(make_error(OP, ErrorKind::InvalidArgument, "depth attachment extent or sample count differs"));
         }
-        if depth.depth_store == Store::Resolve { return Err(make_error(OP, ErrorKind::InvalidArgument, "depth attachments cannot resolve")); }
-        if !depth.depth_clear.is_finite() || depth.depth_clear < 0.0 || depth.depth_clear > 1.0 {
-            return Err(make_error(OP, ErrorKind::InvalidArgument, "depth clear is outside [0,1]"));
-        }
     }
-    if ![color.clear.0, color.clear.1, color.clear.2, color.clear.3].iter().all(|value| value.is_finite()) {
-        return Err(make_error(OP, ErrorKind::InvalidArgument, "clear color is not finite"));
-    }
-    let driver_target = DriverRenderTarget {
+    let clear_color = crate::render_pass::admit_clear_color([color.clear.0,color.clear.1,color.clear.2,color.clear.3])?;
+    use crate::render_pass::AttachmentStore;
+    let color_store = match (&color.resolve,color.store) {
+        (None,Store::Discard) => AttachmentStore::DontCare,
+        (None,_) => AttachmentStore::Store,
+        (Some(_),Store::Store) => AttachmentStore::StoreAndMultisampleResolve,
+        (Some(_),_) => AttachmentStore::MultisampleResolve,
+    };
+    let (depth_load,depth_store,clear_depth) = match &target.depth {
+        None => (Load::Clear,AttachmentStore::Store,1.),
+        Some(d) => (d.depth_load,match d.depth_store { Store::Store => AttachmentStore::Store,
+            Store::Discard => AttachmentStore::DontCare, Store::Resolve => AttachmentStore::MultisampleResolve },d.depth_clear),
+    };
+    let actions = crate::render_pass::admit_actions(crate::render_pass::Actions {
+        color_load: color.load, color_store, depth_load, depth_store, clear_depth,
+        stencil_load: Load::Clear, stencil_store: AttachmentStore::Store, clear_stencil: 0,
+    })?;
+    let driver_target = DriverRenderTarget(DriverRenderProfile {
         target_colors: vec![DriverColorAttachment {
             color: color.texture.resource.0.token,
             color_resolve: color.resolve.as_ref().map(|texture| texture.resource.0.token),
@@ -1728,8 +1723,8 @@ pub fn render_encoder(commands: &Commands, target: &RenderTarget) -> Result<Rend
             depth: depth.depth_texture.resource.0.token,
             depth_load: depth.depth_load, depth_store: depth.depth_store, depth_clear: depth.depth_clear,
         }),
-        target_width: width, target_height: height, target_samples: samples,
-    };
+        target_width: width, target_height: height, target_samples: samples, clear_color, actions,
+    });
     let raw = commands.0.raw().render_encoder(&driver_target)?;
     commands.0.state.set(CommandsState::Encoding);
     let encoder = RenderEncoder(Rc::new(RenderInner {
@@ -1804,7 +1799,7 @@ pub fn set_stage_sampler(encoder: &RenderEncoder, stage: ShaderStage, index: i64
 pub fn set_viewport(encoder: &RenderEncoder, rect: Rect) -> Result<(), Error> {
     const OP: &str = "Backend.set_viewport";
     open_render(OP, encoder)?;
-    if rect.width <= 0 || rect.height <= 0 { return Err(make_error(OP, ErrorKind::InvalidArgument, "viewport is empty")); }
+    let rect=crate::render_pass::admit_viewport_points(rect)?;
     encoder.0.raw().set_viewport(rect)
 }
 fn valid_rect(operation: &str, rect: Rect) -> Result<(), Error> {
@@ -2046,6 +2041,7 @@ fn validate_present(operation: &str, queue: &Queue, source: &Texture, frame: &Fr
     if descriptor.width != configuration.physical_width || descriptor.height != configuration.physical_height {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "source texture extent does not match the configured physical surface extent"));
     }
+    if descriptor.depth != 1 || descriptor.mip_levels != 1 { return Err(make_error(operation, ErrorKind::InvalidArgument, "presentation source must be a single-mip 2D texture")); }
     if descriptor.sample_count != 1 { return Err(make_error(operation, ErrorKind::InvalidArgument, "source texture must have sample_count=1")); }
     if descriptor.format != TextureFormat::Rgba8Unorm { return Err(make_error(operation, ErrorKind::InvalidArgument, "source texture must be Rgba8_unorm")); }
     if !descriptor.usage.contains(&TextureUsage::TextureBinding) {
@@ -2105,13 +2101,22 @@ mod ownership_tests {
     impl DriverComputeEncoder for Payload {
         fn set_pipeline(&self, _: Token) -> Result<(), Error> { Ok(()) }
         fn set_buffer(&self, _: i64, _: i64, _: Token) -> Result<(), Error> { Ok(()) }
-        fn set_bytes(&self, _: i64, _: &[u8]) -> Result<(), Error> { panic!("invalid bytes reached driver") }
+        fn set_bytes(&self, _: i64, _: crate::validation::AdmittedBytes<'_>) -> Result<(), Error> { panic!("invalid bytes reached driver") }
         fn set_texture(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
         fn set_accel(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
         fn dispatch_threads(&self, _: (i64, i64, i64), _: (i64, i64, i64)) -> Result<(), Error> { Ok(()) }
         fn dispatch_indirect(&self, _: Token, _: i64, _: (i64, i64, i64)) -> Result<(), Error> { panic!("invalid indirect dispatch reached driver") }
         fn compute_use_accels(&self, _: &[Token]) -> Result<(), Error> { unreachable!() }
         fn end_compute(&self) -> Result<(), Error> { Ok(()) }
+    }
+
+    fn admitted_test_buffer(descriptor: BufferDescriptor) -> AdmittedBuffer {
+        crate::validation::admit_buffer(&caps::minimum_m1(), BufferProfile { descriptor,
+            storage: StorageMode::Shared, cpu_cache: CpuCacheMode::DefaultCache, kind: BufferKind::Ordinary }).unwrap()
+    }
+    fn admitted_test_texture(descriptor: TextureDescriptor) -> AdmittedTexture {
+        crate::validation::admit_texture(&caps::minimum_m1(), crate::validation::TextureProfile::ordinary(
+            &caps::minimum_m1(), descriptor, false, false)).unwrap()
     }
 
     #[test]
@@ -2143,7 +2148,7 @@ mod ownership_tests {
         let render = pipeline(PipelineShape::Vertex, Some((pipeline::ColorFormat::Rgba8Unorm, 1)), false);
         let buffer = Buffer {
             resource: make_resource(&device, Box::new(payload())), memory: Memory::Shared,
-            buffer_descriptor: BufferDescriptor { label: None, size: 16, usage: vec![BufferUsage::Storage] },
+            buffer_descriptor: admitted_test_buffer(BufferDescriptor { label: None, size: 16, usage: vec![BufferUsage::Storage] }),
         };
         let reject = |kind, result: Result<(), Error>| assert_eq!(result.unwrap_err().kind, kind);
         reject(ErrorKind::InvalidState, dispatch_threads(&encoder, (1, 1, 1), (1, 1, 1)));
@@ -2228,8 +2233,8 @@ mod ownership_tests {
         let device = device();
         let texture = Texture {
             resource: make_resource(&device, Box::new(Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) })),
-            texture_descriptor: TextureDescriptor { label: None, width: 4, height: 4, depth: 1, mip_levels: 1,
-                sample_count: 1, format: TextureFormat::Rgba8Unorm, usage: vec![TextureUsage::RenderAttachment] },
+            texture_descriptor: admitted_test_texture(TextureDescriptor { label: None, width: 4, height: 4, depth: 1, mip_levels: 1,
+                sample_count: 1, format: TextureFormat::Rgba8Unorm, usage: vec![TextureUsage::RenderAttachment] }),
         };
         for row in [-1, 0, 15, 17, i64::MAX] {
             assert_eq!(read_texture(&texture, row).unwrap_err().kind, ErrorKind::InvalidArgument);
@@ -2237,10 +2242,12 @@ mod ownership_tests {
         }
         assert_eq!(read_texture(&texture, 16).unwrap(), [7; 64]);
         let buffer = Buffer { resource: texture.resource.clone(), memory: Memory::Shared,
-            buffer_descriptor: BufferDescriptor { label: None, size: 1024, usage: vec![BufferUsage::CopySrc] } };
+            buffer_descriptor: admitted_test_buffer(BufferDescriptor { label: None, size: 1024, usage: vec![BufferUsage::CopySrc] }) };
 
         let mut depth = texture.clone();
-        depth.texture_descriptor.format = TextureFormat::Depth32Float;
+        let mut descriptor = depth.texture_descriptor.descriptor.clone();
+        descriptor.format = TextureFormat::Depth32Float;
+        depth.texture_descriptor = admitted_test_texture(descriptor);
         assert_eq!(read_texture(&depth, 16).unwrap_err().kind, ErrorKind::Unsupported);
         let queue = Queue(Rc::new(RefCell::new(QueueInner { raw: RefCell::new(None), device: device.clone(), dead: false,
             completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0. } })));
@@ -2268,7 +2275,7 @@ mod ownership_tests {
         let buffer = Buffer {
             resource: make_resource(&device, Box::new(Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) })),
             memory: Memory::Shared,
-            buffer_descriptor: BufferDescriptor { label: None, size: 36, usage: vec![BufferUsage::Storage] },
+            buffer_descriptor: admitted_test_buffer(BufferDescriptor { label: None, size: 36, usage: vec![BufferUsage::Storage] }),
         };
         let invalid = AccelDescriptor::Blas { geometries: vec![Geometry::Triangles { vertices: buffer.clone(), offset: 0, length: 36, vertex_stride: 12, vertex_count: 6 }] };
         let error = create_accel(&device, invalid, false).err().expect("oversized triangle rejected before native entry");
@@ -2299,7 +2306,7 @@ mod ownership_tests {
     }
     struct IdleLibrary;
     impl DriverLibrary for IdleLibrary {
-        fn create_compute_pipeline_in(&self, _: &str, _: &[(String, ConstantValue)], _: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> { unreachable!() }
+        fn create_compute_pipeline_in(&self, _: &crate::shader::AdmittedFunction, _: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> { unreachable!() }
         fn destroy_library(&self) -> Result<(), Error> { Ok(()) }
     }
 
@@ -2324,7 +2331,7 @@ mod ownership_tests {
         let allocation_weak = Arc::downgrade(&allocation);
         *resource.0.mapping.borrow_mut() = Some(Box::new(TestMapping { allocation, _view_owner: view_owner }));
         *resource.0.mapped.borrow_mut() = Some(MappedHost { view: RefCell::new(None), released: Cell::new(false), float_count: 2 });
-        let buffer = Buffer { resource, buffer_descriptor: BufferDescriptor { label: None, size: 8, usage: vec![BufferUsage::CopyDst] }, memory: Memory::Shared };
+        let buffer = Buffer { resource, buffer_descriptor: admitted_test_buffer(BufferDescriptor { label: None, size: 8, usage: vec![BufferUsage::CopyDst] }), memory: Memory::Shared };
         let clone = buffer.clone();
         let id = buffer_id(&buffer);
         let readback = owned_readback(&buffer).unwrap();
