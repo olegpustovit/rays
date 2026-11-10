@@ -191,14 +191,16 @@ fn gpu_scene_golden_and_spot_checks() {
     }
     let (w, h, expected) = png::decode(&std::fs::read(&golden).expect("golden; refresh with RAYS_UPDATE_FIXTURES=1"));
     assert_eq!((w, h), (W * SCALE, H * SCALE), "golden size");
-    let (mut different, mut first) = (0, None);
+    let (mut different, mut first, mut max) = (0, None, 0);
     for (i, (a, b)) in pixels.chunks(4).zip(expected.chunks(4)).enumerate() {
+        max = max.max(a.iter().zip(b).map(|(x, y)| (*x as i32 - *y as i32).abs()).max().unwrap());
         // ponytail: 4 levels absorb Metal/Vulkan transcendental differences on edges; tighten after the Windows run.
         if !near(a.try_into().unwrap(), b.try_into().unwrap(), 4) {
             different += 1;
             first.get_or_insert((i as u32 % w, i as u32 / w));
         }
     }
+    println!("pxui_render golden max per-channel difference: {max}");
     assert_eq!(different, 0, "{different} pixels differ from {golden}, first at {first:?}");
 }
 
