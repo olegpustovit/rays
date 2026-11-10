@@ -1,14 +1,46 @@
 use input::{Event, Key, MouseButton, Platform};
 use pxui::ui::*;
-use rays::frame;
+use input::frame;
 
-pub fn font_path() -> String {
-    format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"))
+/// The golden face: the pointer positions in the text tests assume its advance.
+pub const DEPARTURE_MONO: &[u8] = include_bytes!("../../../../assets/fonts/DepartureMono-Regular.otf");
+
+/// A text engine over the golden face alone.
+pub fn golden_text() -> pxui::text::Text {
+    pxui::text::Text::new(&[DEPARTURE_MONO])
 }
 
-/// A UI over the golden face: the pointer positions in the text tests assume its advance.
+/// A UI over the golden face.
 pub fn new_ui(font_size: Option<i64>) -> Ui {
-    Ui::create(Platform::Apple, font_size, rays_shell::host::text(Some(&font_path())))
+    Ui::create(Platform::Apple, font_size, golden_text())
+}
+
+/// The host's clipboard, in the test process.
+pub mod clipboard {
+    use std::cell::RefCell;
+    thread_local! { static TEXT: RefCell<String> = const { RefCell::new(String::new()) }; }
+    pub fn get_text() -> Result<String, String> {
+        Ok(TEXT.with(|t| t.borrow().clone()))
+    }
+    pub fn set_text(text: &str) -> Result<(), String> {
+        TEXT.with(|t| *t.borrow_mut() = text.to_owned());
+        Ok(())
+    }
+}
+
+/// Run a frame as a host does: the clipboard text the last frame asked for arrives first as
+/// `Event::Paste`, the clipboard write the frame asked for applies after.
+pub fn host_frame(ui: &mut Ui, frame: &frame::Frame, f: &mut dyn FnMut(&mut Ui)) {
+    if ui.output().platform.paste {
+        let mut with = frame.clone();
+        with.input.events.insert(0, Event::Paste(clipboard::get_text().unwrap()));
+        ui.frame(&with, f);
+    } else {
+        ui.frame(frame, f);
+    }
+    if let Some(text) = &ui.output().platform.clipboard {
+        clipboard::set_text(text).unwrap();
+    }
 }
 
 pub fn fail(message: &str) -> ! {

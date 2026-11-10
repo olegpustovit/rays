@@ -37,7 +37,7 @@ pub fn window_pxui_picker() {
         } else {
             vec![]
         };
-        rays_shell::host::frame(ui, &frame_at(keys, 1.0, 0.0, events), &mut |ui| {
+        host_frame(ui, &frame_at(keys, 1.0, 0.0, events), &mut |ui| {
             ui.panel(PanelOpts::default().at(0.0, 0.0).width(240.0), "p", &mut |ui| {
                 let off: Rc<dyn Fn(i64) -> bool> = {
                     let (off_index, all_off) = (off_index.clone(), all_off.clone());
@@ -65,14 +65,14 @@ pub fn window_pxui_picker() {
     }
     with_clipboard(&mut || {
         *query.borrow_mut() = String::new();
-        rays::clipboard::set_text("del").unwrap_or_else(|m| fail(&m));
+        clipboard::set_text("del").unwrap_or_else(|m| fail(&m));
         pick(&mut ui, true, false, vec![key_down(kc('v'))]);
         pick(&mut ui, false, false, vec![]);
         if *query.borrow() != "del" {
             fail("picker did not paste the search query");
         }
         pick(&mut ui, true, false, vec![key_down(kc('c'))]);
-        if rays::clipboard::get_text() != Ok("del".to_owned()) {
+        if clipboard::get_text() != Ok("del".to_owned()) {
             fail("picker did not copy the search query");
         }
         pick(&mut ui, true, false, vec![key_down(kc('x'))]);
@@ -84,7 +84,7 @@ pub fn window_pxui_picker() {
         pick(&mut ui, false, false, vec![key_down(Key::ArrowLeft)]);
         pick(&mut ui, false, true, vec![key_down(Key::ArrowLeft)]);
         pick(&mut ui, true, false, vec![key_down(kc('c'))]);
-        if rays::clipboard::get_text() != Ok("t".to_owned()) {
+        if clipboard::get_text() != Ok("t".to_owned()) {
             fail("picker did not copy the selected query character");
         }
         pick(&mut ui, true, false, vec![key_down(kc('x'))]);
@@ -268,7 +268,7 @@ impl Rig {
         };
         let area = &mut self.area;
         let submitted = &mut self.submitted;
-        rays_shell::host::frame(&mut self.ui, &frame_at(o.keys, 1.0, self.time, events), &mut |ui| {
+        host_frame(&mut self.ui, &frame_at(o.keys, 1.0, self.time, events), &mut |ui| {
             let (text, submit) = ui.text_area_submit((0.0, 0.0), 300.0, 96.0, &opts, "area", area);
             *area = text;
             *submitted = submit;
@@ -299,7 +299,7 @@ impl Rig {
 
 pub fn text_area_start(platform: Platform) -> Rig {
     let mut rig = Rig {
-        ui: Ui::create(platform, Some(11), rays_shell::host::text(Some(&font_path()))),
+        ui: Ui::create(platform, Some(11), golden_text()),
         area: String::new(),
         errors: Vec::new(),
         wrapped: false,
@@ -336,17 +336,17 @@ pub fn text_area_start(platform: Platform) -> Rig {
     }
     rig.plain(vec![Event::TextInput("\u{e9}".into())]);
     rig.expect("IME commit", "_abX\nc\u{e9}");
-    let previous = rays::clipboard::get_text();
+    let previous = clipboard::get_text();
     let command_key = rig.command_key;
     rig.keyed(vec![Key::Shift], vec![key_down(Key::ArrowLeft)]);
     rig.keyed(vec![command_key], vec![key_down(kc('c'))]);
-    if rays::clipboard::get_text() != Ok("\u{e9}".to_owned()) {
+    if clipboard::get_text() != Ok("\u{e9}".to_owned()) {
         fail("text area copy ignored the selection");
     }
     rig.keyed(vec![command_key], vec![key_down(kc('a'))]);
     rig.keyed(vec![command_key], vec![key_down(kc('x'))]);
     rig.expect("cut all", "");
-    if rays::clipboard::get_text() != Ok("_abX\nc\u{e9}".to_owned()) {
+    if clipboard::get_text() != Ok("_abX\nc\u{e9}".to_owned()) {
         fail("text area cut lost the text");
     }
     rig.keyed(vec![command_key], vec![key_down(kc('v'))]);
@@ -363,7 +363,7 @@ pub fn text_area_start(platform: Platform) -> Rig {
     rig.keyed(vec![command_key], vec![key_down(kc('x'))]);
     rig.expect("cut with no selection takes the caret's line", "cd");
     if let Ok(text) = previous {
-        let _ = rays::clipboard::set_text(&text);
+        let _ = clipboard::set_text(&text);
     }
     rig
 }

@@ -1383,6 +1383,18 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
             }
         }
     }
+    // The PXUI crates build and test with no SDL and nothing from Rays: their tests (dev
+    // dependencies) may not reach the window host, SDL or any Rays crate either.
+    for library in ["pxui", "pxui_text", "pxui_render"] {
+        for dependency in selection_direct.get(library).into_iter().flatten() {
+            for target in ["sdl3", "sdl3_sys", "pxui_sdl", "runtime", "runtime_resources", "renderer", "rays", "rays_shell", "rays_graph", "rays_editor", "param", "mem"] {
+                let path = if dependency == target { Some(vec![dependency.clone()]) } else { dependency_path(dependency, target, &graph) };
+                if let Some(path) = path {
+                    errors.push(format!("dependency boundary: {library} (tests included) must not reach `{target}` (via {library} -> {})", path.join(" -> ")));
+                }
+            }
+        }
+    }
     errors.extend(ogpu_selection_errors(&packages, &runtime_graph, &selection_direct, workspace));
     errors.sort();
     Ok(errors)

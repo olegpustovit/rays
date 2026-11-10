@@ -208,11 +208,12 @@ feeds its painter's atlases from `Text::drain_uploads`.
 
 Kit rows: 12 points at each side, a label column of 112 points (half of a narrow row), then
 the control at `y + 2`, `row_height - 4` tall; a switch sits at the right edge; text sits at
-`y + max 4 ((row_height - font_size - 3) / 2)`. `test_ui_parity`
-compares an offscreen 2x render (no window, as `tools/ui_shot` draws) of the kit widgets with
-`lib/pxui/fixtures/kit_panel_2x.png` pixel for pixel; the goldens are rendered with
-DepartureMono (the test sets `RAYS_UI_FONT`) and are regenerated only when the kit's design
-changes, by running the test with `RAYS_UPDATE_FIXTURES=<dir>`.
+`y + max 4 ((row_height - font_size - 3) / 2)`. pxui's `gpu_pxui_parity` target
+renders the kit widgets headless (no SDL, no window: `pxui_render`'s painter into an offscreen
+texture) at 1x and 2x and compares them with `crates/pxui/fixtures/kit_*_{1,2}x.png` pixel for
+pixel; the goldens are rendered with
+DepartureMono (the test loads it as font 0) and are regenerated deliberately, by running the
+target with `RAYS_UPDATE_FIXTURES=1`.
 
 ## Coordinate model
 
@@ -458,7 +459,8 @@ theme in `rays_graph::scope_paint`: `zone_for`, `zone_fold`, `zone_sum`,
 palette), and `ports` entries `text`, `fn` and `record` (a list draws its
 element colour on a stacked socket, a function a diamond, a record a wide
 pill). `theme::dark` tells the two palettes apart.
-`test_ui_parity` guards them with `fixtures/kit_zones_2x.png`. The
+rays_shell's `window_host_zones_parity` guards them, through the Rays renderer, with
+`crates/rays_shell/fixtures/kit_zones_{1,2}x.png`. The
 iteration selector is built from ordinary boxes; no widget was added to `Ui`.
 The footers (value, sparkline, tags) are painted
 the same way: no new token or widget.

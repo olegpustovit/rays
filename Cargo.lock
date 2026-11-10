@@ -495,19 +495,12 @@ version = "0.1.0"
 dependencies = [
  "cfmt",
  "input",
- "mem",
  "mem_sys",
  "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
- "param",
+ "pxui_render",
  "pxui_text",
- "rays",
- "rays_graph",
- "rays_math",
- "rays_shell",
- "renderer",
- "sdl3",
 ]
 
 [[package]]
@@ -727,6 +720,7 @@ dependencies = [
  "pxui",
  "pxui_render",
  "rays",
+ "rays_graph",
  "rays_math",
  "renderer",
  "sdl3",

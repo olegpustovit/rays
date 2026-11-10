@@ -3,7 +3,6 @@ use crate::support::*;
 use crate::ui_b::*;
 use input::{Event, Key, MouseButton, Platform};
 use pxui::ui::*;
-use rays::scene::{self, layer};
 use pxui::geom::color;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -330,9 +329,8 @@ pub fn text_area_3(rig: &mut Rig) {
 pub fn text_area_4(rig: &mut Rig) {
     // a number dragged sideways follows the pointer: an integer one per six points, a float a
     // tenth of its last place per point; the host hears Live frames and one Done
-    for dx in [-20.0, -6.0, -2.0, 0.0, 2.0, 6.0, 20.0] {
-        assert_eq!(scrubbed("10", dx, false), param::number::scrub(param::number::Kind::Int, None, "10", f64::from(dx), false));
-    }
+    // (the rule against Rays' param::number::scrub is checked in rays_shell's host cases)
+    assert_eq!((scrubbed("10", -20.0, false), scrubbed("10", 6.0, false)), ("7".to_owned(), "11".to_owned()));
     rig.area = String::new();
     rig.plain(vec![press((150, 12)), release((150, 12))]);
     let origin = rig.region().1;
@@ -616,24 +614,11 @@ pub fn window_pxui_modal_4() {
     if raised(&mut ui, vec![press((20, 20)), release((20, 20))]) != (true, false) {
         fail("a later body covered a raised floating control");
     }
-    let fk = front_key.get();
-    let under = move |k: i64| -> Vec<scene::Node> {
-        if k == fk { vec![scene::rect((0, 0), 100, 60, Some(rays_math::color::black()), None).unwrap()] } else { Vec::new() }
-    };
-    let ui = std::rc::Rc::new(std::cell::RefCell::new(ui));
-    let nodes = rays_shell::host::scene(&ui, Some(&under));
-    let mut ui = std::rc::Rc::try_unwrap(ui).ok().expect("one owner").into_inner();
-    match layer::stage_native(320, 240, &nodes) {
-        Ok(staged) => {
-            let ok = matches!(
-                &staged.layers[..],
-                [layer::NativeLayer::UiLayer(..), layer::NativeLayer::Scene2Layer(..), layer::NativeLayer::UiLayer(..)]
-            );
-            if !ok {
-                fail("native content was not between the background and floating controls");
-            }
-        }
-        Err(_) => fail("native content was not between the background and floating controls"),
+    // the raised control paints its own layer over the base (rays_shell's host cases stage the
+    // native content between them)
+    let keys: Vec<i64> = ui.output().draw.iter().map(|l| l.key).collect();
+    if keys != [0, front_key.get()] {
+        fail(&format!("the raised control is not a layer of its own: {keys:?}"));
     }
     ui.destroy();
 }
@@ -806,7 +791,7 @@ pub fn window_pxui_carry() {
 
 pub fn window_pxui_retired_callbacks() {
     // Published frames retain no callback payloads: each closure releases its last captured owner after painting.
-    let mut ui = Ui::create(Platform::Apple, None, rays_shell::host::text(Some(&font_path())));
+    let mut ui = Ui::create(Platform::Apple, None, golden_text());
     let held: Vec<Rc<[u8; 32]>> = (0..5).map(|_| Rc::new([b'x'; 32])).collect();
     let seen: Rc<RefCell<[bool; 5]>> = Rc::new(RefCell::new([false; 5]));
     let painter = |index: usize| -> Box<dyn Fn(&mut Paint, Rect)> {
@@ -881,8 +866,6 @@ pub fn window_pxui_retained_keys() {
 pub fn window_pxui_text_memory() {
     let mut ui = ui11();
     let mut other = ui11();
-    let owner = mem::document("pxui.text_undo");
-    let at_start = mem::bytes(&owner);
     for key in 1..=5i64 {
         for step in 1..=200i64 {
             let last = format!("{} {} {}", key, step, "x".repeat(100_000));
@@ -894,15 +877,14 @@ pub fn window_pxui_text_memory() {
         }
     }
     let bytes = ui.text_undo_bytes();
-    rays_shell::host::charge(&mut ui);
     if bytes > TEXT_UNDO_BYTE_CAP {
         fail("text undo passed its byte cap across stacks");
     }
     if bytes < TEXT_UNDO_BYTE_CAP / 2 {
         fail("text undo kept far less than its cap");
     }
-    if mem::bytes(&owner) - at_start != bytes as i64 {
-        fail("text undo's charge is not what it holds");
+    if ui.bytes().text_undo != bytes as i64 {
+        fail("the UI does not report the text undo it holds");
     }
     if ui.edit_undo.is_empty() {
         fail("the open text keeps its newest steps");
@@ -930,10 +912,10 @@ pub fn window_pxui_text_memory() {
     if Rc::ptr_eq(&ui.text_rows(Some(3), a), &first_a) {
         fail("rows are per wrap width");
     }
-    rays_shell::host::destroy(&mut ui);
-    rays_shell::host::destroy(&mut other);
-    if mem::bytes(&owner) != at_start {
-        fail("destroying the handle releases its charge");
+    ui.destroy();
+    other.destroy();
+    if ui.bytes() != Bytes::default() {
+        fail("a destroyed handle still reports bytes");
     }
 }
 

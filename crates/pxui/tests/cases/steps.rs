@@ -29,14 +29,14 @@ pub fn label(scale: f64, message: &str) -> String {
 
 pub fn step(scale: f64, ui: &mut Ui, events: Vec<Event>, build: &mut dyn FnMut(&mut Ui)) {
     let t = advance();
-    rays_shell::host::frame(ui, &frame_at(vec![], scale, t, events), &mut |ui| {
+    host_frame(ui, &frame_at(vec![], scale, t, events), &mut |ui| {
         ui.panel(PanelOpts::default().at(0.0, 0.0).width(240.0), "panel", &mut |ui| build(ui));
     });
 }
 
 pub fn modified_step(scale: f64, ui: &mut Ui, modifiers: Vec<Key>, k: Key, build: &mut dyn FnMut(&mut Ui)) {
     let t = advance();
-    rays_shell::host::frame(ui, &frame_at(modifiers, scale, t, vec![key_down(k)]), &mut |ui| {
+    host_frame(ui, &frame_at(modifiers, scale, t, vec![key_down(k)]), &mut |ui| {
         ui.panel(PanelOpts::default().at(0.0, 0.0).width(240.0), "panel", &mut |ui| build(ui));
     });
 }
@@ -55,9 +55,9 @@ pub fn settle(scale: f64, ui: &mut Ui, build: &mut dyn FnMut(&mut Ui)) {
 
 /// Runs `f` with the clipboard restored afterwards.
 pub fn with_clipboard(f: &mut dyn FnMut()) {
-    let previous = rays::clipboard::get_text();
+    let previous = clipboard::get_text();
     f();
     if let Ok(text) = previous {
-        let _ = rays::clipboard::set_text(&text);
+        let _ = clipboard::set_text(&text);
     }
 }

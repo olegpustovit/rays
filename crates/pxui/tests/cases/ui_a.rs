@@ -217,7 +217,7 @@ fn scale_6(scale: f64) {
     let clock = Cell::new(0.0);
     let fstep = |ui: &mut Ui, keys: Vec<Key>, dt: f64, events: Vec<Event>, build: &mut dyn FnMut(&mut Ui)| {
         clock.set(clock.get() + dt);
-        rays_shell::host::frame(ui, &frame_at(keys, scale, clock.get(), events), build);
+        host_frame(ui, &frame_at(keys, scale, clock.get(), events), build);
     };
     let open_field = |ui: &mut Ui, build: &mut dyn FnMut(&mut Ui)| {
         fstep(ui, vec![], 0.5, vec![press((70, 30)), release((70, 30))], build);
@@ -244,14 +244,14 @@ fn scale_6(scale: f64) {
     open_field(&mut ui, &mut build);
     with_clipboard(&mut || {
         // a copied line comes with its break: a field of one line takes the line
-        rays::clipboard::set_text("12\n").unwrap_or_else(|m| fail(&m));
+        clipboard::set_text("12\n").unwrap_or_else(|m| fail(&m));
         fstep(&mut ui, vec![Key::Meta], 0.5, vec![key_down(kc('v'))], &mut build);
         fstep(&mut ui, vec![], 0.5, vec![key_down(Key::Enter)], &mut build);
         if *count.borrow() != "12" {
             fail(&lab("numeric editor refused a pasted line for its break"));
         }
         open_field(&mut ui, &mut build);
-        rays::clipboard::set_text("31").unwrap_or_else(|m| fail(&m));
+        clipboard::set_text("31").unwrap_or_else(|m| fail(&m));
         fstep(&mut ui, vec![Key::Meta], 0.5, vec![key_down(kc('v'))], &mut build);
         fstep(&mut ui, vec![], 0.5, vec![key_down(Key::Enter)], &mut build);
         if *count.borrow() != "31" {
@@ -624,17 +624,17 @@ fn scale_10(scale: f64) {
         fail(&lab("IME cursor ignored keyboard caret movement"));
     }
     with_clipboard(&mut || {
-        rays::clipboard::set_text(" pasted").unwrap_or_else(|m| fail(&m));
+        clipboard::set_text(" pasted").unwrap_or_else(|m| fail(&m));
         command_step(scale, &mut ui, 'v', &mut build);
         if *title.borrow() != "h! two word! pasted" {
             fail(&lab("Command-V did not paste into the focused text field"));
         }
         command_step(scale, &mut ui, 'c', &mut build);
-        if rays::clipboard::get_text() != Ok(title.borrow().clone()) {
+        if clipboard::get_text() != Ok(title.borrow().clone()) {
             fail(&lab("Command-C did not copy the focused text field"));
         }
         command_step(scale, &mut ui, 'x', &mut build);
-        if !title.borrow().is_empty() || rays::clipboard::get_text() != Ok("h! two word! pasted".to_owned()) {
+        if !title.borrow().is_empty() || clipboard::get_text() != Ok("h! two word! pasted".to_owned()) {
             fail(&lab("Command-X did not cut the focused text field"));
         }
         step(
@@ -648,7 +648,7 @@ fn scale_10(scale: f64) {
         }
         modified_step(scale, &mut ui, vec![Key::Shift], Key::ArrowLeft, &mut build);
         command_step(scale, &mut ui, 'c', &mut build);
-        if rays::clipboard::get_text() != Ok("\u{e9}".to_owned()) {
+        if clipboard::get_text() != Ok("\u{e9}".to_owned()) {
             fail(&lab("Command-C ignored the selected UTF-8 character"));
         }
         command_step(scale, &mut ui, 'x', &mut build);
@@ -736,7 +736,7 @@ fn scale_11(scale: f64) {
     let field_time = Cell::new(0.0);
     let field_step = |ui: &mut Ui, keys: Vec<Key>, events: Vec<Event>, build: &mut dyn FnMut(&mut Ui)| {
         field_time.set(field_time.get() + 0.5);
-        rays_shell::host::frame(ui, &frame_at(keys, scale, field_time.get(), events), build);
+        host_frame(ui, &frame_at(keys, scale, field_time.get(), events), build);
     };
     field_step(&mut ui, vec![], vec![], &mut build);
     field_step(&mut ui, vec![], vec![press((40, 30)), release((40, 30))], &mut build);
@@ -763,7 +763,7 @@ fn scale_11(scale: f64) {
     field_step(&mut ui, vec![], vec![release((220, 30))], &mut build);
     with_clipboard(&mut || {
         field_step(&mut ui, vec![Key::Meta], vec![key_down(kc('c'))], &mut build);
-        if rays::clipboard::get_text() != Ok(long_value.to_owned()) {
+        if clipboard::get_text() != Ok(long_value.to_owned()) {
             fail(&lab("edge drag did not select through the end"));
         }
     });
