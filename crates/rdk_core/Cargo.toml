@@ -8,3 +8,6 @@ license.workspace = true
 mem = { path = "../mem" }
 parallel = { path = "../parallel" }
 rays_math = { path = "../rays_math" }
+
+[lints]
+workspace = true

@@ -640,33 +640,7 @@ mod tests {
     use super::{builder, Owner, view};
     use crate::error::Code;
 
-    #[test]
-    #[ignore]
-    fn bit_array_timing() {
-        let median = |work: &dyn Fn()| {
-            let mut samples = [std::time::Duration::ZERO; 3];
-            for sample in &mut samples {
-                let start = std::time::Instant::now();
-                for _ in 0..4 { work(); }
-                *sample = start.elapsed();
-            }
-            samples.sort();
-            samples[1]
-        };
-        for domains in [1, 4] {
-            parallel::with_domains(domains, || {
-                for grain in [97, 4096] {
-                    let create = || super::init(Some(grain), Owner::Point, "left", 100_003, &|i| Ok(i % 3 == 0)).unwrap();
-                    let left = create();
-                    assert_eq!(super::cardinality(&left), 33_335);
-                    let right = super::init(Some(grain), Owner::Point, "right", 100_003, &|i| Ok(i % 5 == 0)).unwrap();
-                    let init = median(&|| drop(std::hint::black_box(create())));
-                    let union = median(&|| drop(std::hint::black_box(super::union(&left, &right).unwrap())));
-                    eprintln!("R6 bits domains={domains} grain={grain}: init4={init:?} union4={union:?}");
-                }
-            });
-        }
-    }
+
 
     #[test]
     fn init_packs_partial_bytes_and_keeps_the_first_typed_predicate_error() {
@@ -693,7 +667,7 @@ mod tests {
         }
     }
 
-    // The only behavioral assertion in lib/rdk/test_point_jitter.ml; its runner never jitters.
+    // The only behavioral assertion in ; its runner never jitters.
     #[test]
     fn point_jitter_source_selection_membership() {
         let selected = super::init(Some(1), Owner::Point, "selected", 4, &|point| Ok(point < 3)).unwrap();

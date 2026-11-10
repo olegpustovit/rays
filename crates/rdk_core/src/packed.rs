@@ -124,7 +124,7 @@ pub mod int_array {
     }
 
     pub fn get(value: &T, index: i64) -> Result<Vec<i64>, error::T> {
-        let (first, last) = row_range("Int_array", &value.offsets, index)?;
+        let (first, last) = row_range("IntArray", &value.offsets, index)?;
         Ok(value.values[first..last].to_vec())
     }
 
@@ -134,7 +134,7 @@ pub mod int_array {
 
     pub fn create_shared(offsets: Arc<Vec<i64>>, values: Arc<Vec<i64>>) -> Result<T, error::T> {
         validate_offsets(
-            "Int_array",
+            "IntArray",
             &offsets,
             i64::try_from(values.len()).unwrap_or(i64::MAX),
         )?;

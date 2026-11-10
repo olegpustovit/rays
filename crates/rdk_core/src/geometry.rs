@@ -679,7 +679,7 @@ mod tests {
         assert_eq!(owner_count(&empty, attribute::Owner::Detail), 1);
     }
 
-    // Top-level deferred-storage assertions in lib/rdk/test_attribute_lifecycle.ml.
+    // Top-level deferred-storage assertions in .
     #[test]
     fn deferred_positions_and_attribute_metadata_stay_lazy_across_racing_readers() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -727,7 +727,7 @@ mod tests {
         assert!(!attribute::resident(&noise));
     }
 
-    // lib/rdk/test_rdk_sources.ml: retain the original million-point/domain matrix.
+    // : retain the original million-point/domain matrix.
     #[test]
     fn million_point_range_kernel_is_exact_in_each_domain_context() {
         for domains in [1, 4] {

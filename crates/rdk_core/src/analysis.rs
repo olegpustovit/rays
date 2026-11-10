@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(count, 2);
     }
 
-    /// The rest of lib/rdk/test_connectivity.ml: unmasked point mode, the primitive sentinel,
+    /// The rest of : unmasked point mode, the primitive sentinel,
     /// point seams and the validation errors.
     #[test]
     fn modes_sentinels_point_seams_and_validation() {

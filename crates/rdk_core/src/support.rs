@@ -13,7 +13,7 @@ pub fn fresh_data_id() -> i64 {
     NEXT_DATA_ID.fetch_add(1, AtomicOrdering::Relaxed)
 }
 
-#[allow(non_snake_case)]
+
 pub mod bits {
     pub fn mem(bits: &[u8], index: i64) -> bool {
         let index = usize::try_from(index).expect("bit index must be nonnegative");
