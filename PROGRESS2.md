@@ -15,13 +15,13 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | Wave | Items | Done | Active | Pending |
 |------|------:|-----:|-------:|--------:|
 | X | 6 | 6 | 0 | 0 |
-| B | 8 | 7 | 1 | 0 |
+| B | 8 | 8 | 0 | 0 |
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
-| Z | 11 | 3 | 5 | 3 |
+| Z | 11 | 7 | 4 | 0 |
 | R | 10 | 10 | 0 | 0 |
-| G | 7 | 1 | 2 | 4 |
-| **All** | **58** | **43** | **8** | **7** |
+| G | 7 | 5 | 1 | 0 |
+| **All** | **58** | **52** | **6** | **0** |
 
 ## Items
 
@@ -709,3 +709,4 @@ All commands use the normal shared target and `cargo t`, without RAYS_SLOW/deadl
 - Fixed stale expectations: `faa1e34d` text_literal_scrub (X4 6-pt step), `ca4a33df` marks_scene_picture_digests (Z6 stroke triangle order, bisected). **B8** `b178c3e9` prune projects only layout-rooted graphs (run_panels 2.93→2.41s). Full rays_editor still ~104 s: gpu_editor 193 device cases serial 88 s; device floor 0.14 s/case (27 s); heavy cases dominated by lowering::of_workspace→flow_sop::lower::of_checked (~85%).
 - **B8 closed** (user decision 2026-11-10): item (&ModelView, 122 fns) done in `3dcb2c3c`; split/prune/fixes above; `a2c0ea9b` removes the auto-discovered editor_all test binary. Editor suite wall time (~104 s vs 60 s cap; 193 serial device cases, lowering-dominated) is tracked as a follow-up outside this plan.
 - **Z4** merged `fc80f664` (`82bdd6db`…`ce09990e`): u32 topology/point/edge indices, `topology_index::NONE`, `GeometryTooLarge`/`E_GEOMETRY_TOO_LARGE` at validating constructors (+ no-alloc regression), rays::Mesh indices u32 aliasing topology; Lisp boundary widens (NONE→-1). Subdivide peak 29.10→24.64 MB (cap 24.7 MB), warm subdivide peak cap 3,445,100→2,660,000, boolean 926,350→855,000. gi( 430→155. All rdk/sop/flow/native/editor suites green. Remaining i64: remap mapping arrays, group order, rdk_geom Features, builder scratch narrowed by copy — follow-up pass.
+- Artifact v51 published: 52 done / 6 active (Z0 Z1 Z5 Z9 Z10 G1); DB records + embedded seed synced; tracker check passes.
