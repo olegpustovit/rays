@@ -961,17 +961,17 @@ pub fn window_pxui_baseline() {
     }
     let frame_allocs = (mem_sys::local_alloc_count() - c0) as f64 / n as f64;
     let frame_bytes = (mem_sys::alloc_bytes_total() - b0) as f64 / n as f64;
-    // lowering side: Ui::scene clones Vec<Node>; stage_native lowers it to batches
+    // lowering side: host::scene wraps the draw layers as scene nodes; stage_native lowers them to batches
     let (c1, b1) = (mem_sys::local_alloc_count(), mem_sys::alloc_bytes_total());
     let t = std::time::Instant::now();
     for _ in 0..n {
-        std::hint::black_box(ui.scene(None));
+        std::hint::black_box(rays_shell::host::scene(&ui, None));
     }
     let scene_ns = t.elapsed().as_nanos();
     let scene_allocs = (mem_sys::local_alloc_count() - c1) as f64 / n as f64;
     let scene_bytes = (mem_sys::alloc_bytes_total() - b1) as f64 / n as f64;
     let mut batches = 0;
-    if let Ok(staged) = layer::stage_native(320, 240, &ui.scene(None)) {
+    if let Ok(staged) = layer::stage_native(320, 240, &rays_shell::host::scene(&ui, None)) {
         for l in &staged.layers {
             if let layer::NativeLayer::UiLayer(batch, _) = l {
                 batches += batch.batches().len();
