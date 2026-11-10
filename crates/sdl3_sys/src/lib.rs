@@ -181,7 +181,7 @@ impl CursorShape {
 }
 
 pub struct Cursor {
-    raw: Option<NonNull<ffi::SDL_Cursor>>,
+    raw: Option<NonNull<ffi::SDLCursor>>,
     _main_thread_only: PhantomData<Rc<()>>,
 }
 
@@ -242,11 +242,11 @@ pub struct WindowState {
 }
 
 struct WindowHandle {
-    raw: Cell<Option<NonNull<ffi::SDL_Window>>>,
+    raw: Cell<Option<NonNull<ffi::SDLWindow>>>,
 }
 
 impl WindowHandle {
-    fn raw(&self) -> std::result::Result<NonNull<ffi::SDL_Window>, Error> {
+    fn raw(&self) -> std::result::Result<NonNull<ffi::SDLWindow>, Error> {
         self.raw.get().ok_or_else(|| destroyed("window is destroyed"))
     }
 
@@ -289,7 +289,7 @@ impl Window {
         })
     }
 
-    fn raw(&self) -> std::result::Result<NonNull<ffi::SDL_Window>, Error> { self.handle.raw() }
+    fn raw(&self) -> std::result::Result<NonNull<ffi::SDLWindow>, Error> { self.handle.raw() }
 
     fn clone_handle(&self) -> Self {
         Self { handle: Rc::clone(&self.handle), _main_thread_only: PhantomData }
@@ -371,7 +371,7 @@ impl Window {
         Ok(unsafe { string(ffi::rays_sdl3_window_title(raw.as_ptr())) })
     }
 
-    fn boolean(&self, operation: unsafe extern "C" fn(*mut ffi::SDL_Window) -> bool, fallback: &str) -> std::result::Result<(), Error> {
+    fn boolean(&self, operation: unsafe extern "C" fn(*mut ffi::SDLWindow) -> bool, fallback: &str) -> std::result::Result<(), Error> {
         let raw = self.raw()?;
         clear_error();
         // SAFETY: the window handle remains live for this call.
@@ -757,9 +757,9 @@ mod ffi {
     use std::ffi::c_int;
 
     #[repr(C)]
-    pub struct SDL_Window { _private: [u8; 0] }
+    pub struct SDLWindow { _private: [u8; 0] }
     #[repr(C)]
-    pub struct SDL_Cursor { _private: [u8; 0] }
+    pub struct SDLCursor { _private: [u8; 0] }
 
     unsafe extern "C" {
         pub fn rays_sdl3_linked_version() -> i32;
@@ -778,35 +778,35 @@ mod ffi {
         pub fn rays_sdl3_set_hint(name: *const c_char, value: *const c_char) -> bool;
         pub fn rays_sdl3_clipboard_set_text(text: *const c_char) -> bool;
         pub fn rays_sdl3_clipboard_get_text() -> *mut c_char;
-        pub fn rays_sdl3_create_cursor(shape: c_int) -> *mut SDL_Cursor;
-        pub fn rays_sdl3_set_cursor(cursor: *mut SDL_Cursor) -> bool;
-        pub fn rays_sdl3_destroy_cursor(cursor: *mut SDL_Cursor);
-        pub fn rays_sdl3_create_window(title: *const c_char, width: c_int, height: c_int, flags: u32) -> *mut SDL_Window;
-        pub fn rays_sdl3_destroy_window(window: *mut SDL_Window);
-        pub fn rays_sdl3_window_size(window: *mut SDL_Window, width: *mut c_int, height: *mut c_int) -> bool;
-        pub fn rays_sdl3_window_size_in_pixels(window: *mut SDL_Window, width: *mut c_int, height: *mut c_int) -> bool;
-        pub fn rays_sdl3_window_state(window: *mut SDL_Window) -> u32;
-        pub fn rays_sdl3_window_id(window: *mut SDL_Window) -> u32;
-        pub fn rays_sdl3_window_pixel_density(window: *mut SDL_Window) -> f32;
-        pub fn rays_sdl3_window_display_scale(window: *mut SDL_Window) -> f32;
-        pub fn rays_sdl3_window_position(window: *mut SDL_Window, x: *mut c_int, y: *mut c_int) -> bool;
-        pub fn rays_sdl3_window_title(window: *mut SDL_Window) -> *const c_char;
-        pub fn rays_sdl3_center_window(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_set_window_size(window: *mut SDL_Window, width: c_int, height: c_int) -> bool;
-        pub fn rays_sdl3_set_window_resizable(window: *mut SDL_Window, enabled: bool) -> bool;
-        pub fn rays_sdl3_set_window_relative_mouse(window: *mut SDL_Window, enabled: bool) -> bool;
-        pub fn rays_sdl3_show_window(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_raise_window(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_hide_window(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_restore_window(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_sync_window(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_set_window_background(window: *mut SDL_Window, red: f64, green: f64, blue: f64);
-        pub fn rays_sdl3_start_text_input(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_stop_text_input(window: *mut SDL_Window) -> bool;
-        pub fn rays_sdl3_set_text_input_area(window: *mut SDL_Window, x: c_int, y: c_int, width: c_int, height: c_int, cursor: c_int) -> bool;
-        pub fn rays_sdl3_show_dialog(window: *mut SDL_Window, kind: c_int, names: *const *const c_char,
+        pub fn rays_sdl3_create_cursor(shape: c_int) -> *mut SDLCursor;
+        pub fn rays_sdl3_set_cursor(cursor: *mut SDLCursor) -> bool;
+        pub fn rays_sdl3_destroy_cursor(cursor: *mut SDLCursor);
+        pub fn rays_sdl3_create_window(title: *const c_char, width: c_int, height: c_int, flags: u32) -> *mut SDLWindow;
+        pub fn rays_sdl3_destroy_window(window: *mut SDLWindow);
+        pub fn rays_sdl3_window_size(window: *mut SDLWindow, width: *mut c_int, height: *mut c_int) -> bool;
+        pub fn rays_sdl3_window_size_in_pixels(window: *mut SDLWindow, width: *mut c_int, height: *mut c_int) -> bool;
+        pub fn rays_sdl3_window_state(window: *mut SDLWindow) -> u32;
+        pub fn rays_sdl3_window_id(window: *mut SDLWindow) -> u32;
+        pub fn rays_sdl3_window_pixel_density(window: *mut SDLWindow) -> f32;
+        pub fn rays_sdl3_window_display_scale(window: *mut SDLWindow) -> f32;
+        pub fn rays_sdl3_window_position(window: *mut SDLWindow, x: *mut c_int, y: *mut c_int) -> bool;
+        pub fn rays_sdl3_window_title(window: *mut SDLWindow) -> *const c_char;
+        pub fn rays_sdl3_center_window(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_set_window_size(window: *mut SDLWindow, width: c_int, height: c_int) -> bool;
+        pub fn rays_sdl3_set_window_resizable(window: *mut SDLWindow, enabled: bool) -> bool;
+        pub fn rays_sdl3_set_window_relative_mouse(window: *mut SDLWindow, enabled: bool) -> bool;
+        pub fn rays_sdl3_show_window(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_raise_window(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_hide_window(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_restore_window(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_sync_window(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_set_window_background(window: *mut SDLWindow, red: f64, green: f64, blue: f64);
+        pub fn rays_sdl3_start_text_input(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_stop_text_input(window: *mut SDLWindow) -> bool;
+        pub fn rays_sdl3_set_text_input_area(window: *mut SDLWindow, x: c_int, y: c_int, width: c_int, height: c_int, cursor: c_int) -> bool;
+        pub fn rays_sdl3_show_dialog(window: *mut SDLWindow, kind: c_int, names: *const *const c_char,
             patterns: *const *const c_char, count: c_int, default_location: *const c_char) -> c_int;
-        pub fn rays_sdl3_create_metal_view(window: *mut SDL_Window) -> *mut c_void;
+        pub fn rays_sdl3_create_metal_view(window: *mut SDLWindow) -> *mut c_void;
         pub fn rays_sdl3_destroy_metal_view(view: *mut c_void);
         pub fn rays_sdl3_metal_layer(view: *mut c_void) -> *mut c_void;
         pub fn rays_sdl3_retain_layer(layer: *mut c_void);

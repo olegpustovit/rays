@@ -14,3 +14,6 @@ native_layer_token_sys = { path = "../native_layer_token_sys" }
 
 [build-dependencies]
 cc = "1"
+
+[lints]
+workspace = true
