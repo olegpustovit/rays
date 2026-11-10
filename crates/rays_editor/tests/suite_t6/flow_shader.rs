@@ -1,4 +1,4 @@
-//! test_flow_shader.ml, adapted to the Rust image-kernel API (`image_kernel::prepare` takes the map's function id).
+//! , adapted to the Rust image-kernel API (`image_kernel::prepare` takes the map's function id).
 #![allow(dead_code, unused_imports)]
 use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;

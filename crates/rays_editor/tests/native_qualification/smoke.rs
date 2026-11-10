@@ -1,4 +1,4 @@
-//! Runtime contracts from test_rays.ml; test_text.ml is helper-only (zero cases).
+//! Runtime contracts from ;  is helper-only (zero cases).
 use rays::{camera, easy_camera, font, image, light, path, scene};
 use rays_math::{color, mat4, noise, rand, vec3};
 use std::sync::{Mutex, OnceLock};
@@ -79,7 +79,7 @@ fn run_core() {
     assert!(vec3::nearly_equal(easy_camera::target(&framed), vec3::create(1., 0., 0.), 1e-12));
     assert!((easy_camera::distance(&framed) - 6_f64.sqrt() * 1.2).abs() <= 1e-9);
     let sampled_area = light::area(None, None, None, Some(16), vec3::create(0., 3., 0.), vec3::create(0., -1., 0.), 4., 2.).unwrap();
-    assert!(matches!(sampled_area.kind, light::kind::Area { samples: 16, .. }));
+    assert!(matches!(sampled_area.kind, light::Kind::Area { samples: 16, .. }));
 }
 
 fn run_keys() {
@@ -120,11 +120,11 @@ fn run_font() {
     let ascent = font::get_ascent(&font).expect("font metrics");
     let pixels = |align| {
         let image = font::cached_text(Some(400), Some(align), None, &font,
-            "short\na much longer second line", font::render_mode::Blended(color::white())).expect("cached text");
+            "short\na much longer second line", font::RenderMode::Blended(color::white())).expect("cached text");
         image::pixels(&image).expect("text pixels")
     };
-    let left = pixels(font::alignment::Left);
-    let center = pixels(font::alignment::Center);
+    let left = pixels(font::Alignment::Left);
+    let center = pixels(font::Alignment::Center);
     font::destroy(&font);
     assert!(ascent > 0, "font metrics are placeholders");
     assert_ne!(left, center, "font alignment is ignored");

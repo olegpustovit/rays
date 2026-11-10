@@ -1,5 +1,5 @@
 //! Public editor APIs retain typed create/measure options, sketch-owned inspector results and shared document/model snapshots.
-#![allow(non_camel_case_types, non_snake_case)]
+
 use editor_document::lowering;
 
 pub use editor_document::kinds::Window as window;
@@ -40,37 +40,37 @@ pub mod editor {
     use crate::source_file;
     use crate::viewport as V;
 
-    pub use crate::editor_model::picked;
+    pub use crate::editor_model::Picked;
     pub use crate::loop_model::Create;
-    pub use crate::loop_model::Draw_fn;
+    pub use crate::loop_model::DrawFn;
     pub use crate::loop_model::{
         camera, can_redo, can_undo, carry_line, carrying, displayed_node, document, edit, edit_layout, edit_phases, level, network, node_box, panes, prepared, probe, redo_label, scene_document, selected_node, set_probe, set_settings, settings, timeline,
         undo_label, workspace, world,
     };
-    pub type prepared_t = cook::prepared;
+    pub type PreparedT = cook::Prepared;
     pub type Editor = loop_model::LoopModel;
-    pub type Prepared = cook::prepared;
+    pub type Prepared = cook::Prepared;
 
     /// What the app prepares of a cooked object: its geometry and its surface.
-    pub fn prepare(settings: &editor_document::settings::T, output: &sop::session::Output) -> Result<cook::prepared, String> {
+    pub fn prepare(settings: &editor_document::settings::T, output: &sop::session::Output) -> Result<cook::Prepared, String> {
         cook::prepare(settings, output)
     }
 
     /// The object's 3D scene, pieces exploded as its node says.
-    pub fn draw(node: &sop::node::T, prepared: &cook::prepared) -> Result<rays::scene3::Scene3, rdk_rays::surface::ConversionError> {
+    pub fn draw(node: &sop::node::T, prepared: &cook::Prepared) -> Result<rays::scene3::Scene3, rdk_rays::surface::ConversionError> {
         cook::draw(node, prepared)
     }
 
     /// `prepare` and `draw` as the closures `create` and `run` take.
-    pub fn prepare_fn() -> cook::Prepare_fn {
+    pub fn prepare_fn() -> cook::PrepareFn {
         Rc::new(|s, o| cook::prepare(s, o))
     }
-    pub fn draw_fn() -> Draw_fn {
+    pub fn draw_fn() -> DrawFn {
         Rc::new(|n, p| cook::draw(n, p))
     }
 
     /// `[await_]` (default false) makes each `update` block on the cook it submits.
-    pub fn create(options: Create, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<Editor, String> {
+    pub fn create(options: Create, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::PrepareFn, draw: DrawFn) -> Result<Editor, String> {
         loop_model::create(options, workspace, source, prepare, draw)
     }
 
@@ -93,7 +93,7 @@ pub mod editor {
         value
     }
 
-    pub fn scene(value: &Editor, frame_: &frame::Frame) -> Vec<rays::scene::node> {
+    pub fn scene(value: &Editor, frame_: &frame::Frame) -> Vec<rays::scene::Node> {
         editor_loop::scene_of(value, frame_)
     }
 
@@ -114,7 +114,7 @@ pub mod editor {
     }
 
     /// Visible, renderable geometry objects' latest cooks at their world transforms.
-    pub fn objects(value: &Editor) -> Vec<(rays_math::mat4::T, cook::Prepared_ref)> {
+    pub fn objects(value: &Editor) -> Vec<(rays_math::mat4::T, cook::PreparedRef)> {
         loop_model::objects_placed(value)
     }
 
@@ -169,7 +169,7 @@ pub mod editor {
 
         /// The language forms of the add menu with the Lisp each is added as.
         pub fn menu_forms() -> Vec<(String, String)> {
-            crate::editor_add::FORMS.iter().map(|(_, form, text, _)| (form.to_string(), text.to_string())).collect()
+            crate::editor_add::FORMS.iter().map(|(_, form, _)| (form.to_string(), crate::editor_add::form_example(form).to_string())).collect()
         }
 
         /// Completions from the vocabulary currently used by the workspace text panes.
@@ -205,7 +205,7 @@ pub mod editor {
         }
 
         /// The picture each canvas pane drew last frame, in layout order.
-        pub fn canvas_scenes(value: &Editor) -> Vec<Vec<rays::scene::node>> {
+        pub fn canvas_scenes(value: &Editor) -> Vec<Vec<rays::scene::Node>> {
             value.canvases.iter().map(|(_, p)| p.scene.clone()).collect()
         }
 
@@ -265,7 +265,7 @@ pub mod editor {
 
     /// The scene root's output resolution in pixels and the samples per pixel at which a sketch's
     /// progressive renderer stops.
-    pub type render_settings = objects::root::Render;
+    pub type RenderSettings = objects::root::Render;
 
     /// The ACTIVE camera object's view and lens (the viewport camera when the document has none).
     pub fn render_camera(value: &Editor) -> rays::camera::Camera {
@@ -277,7 +277,7 @@ pub mod editor {
         loop_model::view_camera(value)
     }
 
-    pub fn render_settings(value: &Editor) -> render_settings {
+    pub fn render_settings(value: &Editor) -> RenderSettings {
         objects::root::render(&value.extra.root)
     }
 
@@ -287,7 +287,7 @@ pub mod editor {
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct slot {
+    pub struct Slot {
         pub film: (i64, i64),
         pub step: i64,
         pub samples: i64,
@@ -296,8 +296,8 @@ pub mod editor {
     }
 
     /// The path tracer slot serving the viewport with this key, when it has one.
-    pub fn slot_of(value: &Editor, key: &str) -> Option<slot> {
-        renderer_mod::info(&value.extra.renderer, key).map(|i| slot { film: i.size, step: i.step, samples: i.samples, max_spp: i.cap, viewports: i.viewports })
+    pub fn slot_of(value: &Editor, key: &str) -> Option<Slot> {
+        renderer_mod::info(&value.extra.renderer, key).map(|i| Slot { film: i.size, step: i.step, samples: i.samples, max_spp: i.cap, viewports: i.viewports })
     }
 
     pub fn flying(value: &Editor) -> bool {
@@ -332,12 +332,12 @@ pub mod editor {
         max_frames: Option<i64>,
         crash_dir: Option<String>,
         profile: Option<bool>,
-        config: rays::sketch::config,
+        config: rays::sketch::Config,
         workspace: workspace_doc::T,
         source: Option<source_file::SourceFile>,
-        prepare: cook::Prepare_fn,
-        draw: Draw_fn,
-    ) -> Result<(), rays::sketch::error> {
+        prepare: cook::PrepareFn,
+        draw: DrawFn,
+    ) -> Result<(), rays::sketch::Error> {
         editor_loop::run(options, max_frames, crash_dir, profile, config, workspace, source, prepare, draw)
     }
 }
@@ -351,7 +351,7 @@ pub mod reduce {
     use rays::frame;
 
     use super::editor;
-    use crate::editor_commands::action;
+    use crate::editor_commands::Action;
     use crate::editor_inspect;
     use crate::editor_panes;
     use crate::editor_reduce;
@@ -393,7 +393,7 @@ pub mod reduce {
     /// Reduces one frame in which no pane was built: the keys are `actions`, the list's selection
     /// is `select` (scene object ids), and `preview` puts a payload in flight whose hot target shows
     /// that edit on a scratch document, as a carry does.
-    pub fn step(editor: editor::Editor, select: Option<&[i64]>, preview: Option<&fe::Op>, actions: &[action], frame_: &frame::Frame) -> Result<editor::Editor, String> {
+    pub fn step(editor: editor::Editor, select: Option<&[i64]>, preview: Option<&fe::Op>, actions: &[Action], frame_: &frame::Frame) -> Result<editor::Editor, String> {
         let core = editor_reduce::reduce_idle(select, preview, &editor.core, actions, frame_)?;
         Ok(editor::with_core(editor, core))
     }
@@ -424,14 +424,14 @@ pub mod workspace {
     /// Where a workspace came from: `path` relative to the project root, `digest` the SHA-256 of
     /// its text.
     #[derive(Clone, Debug, PartialEq)]
-    pub struct source {
+    pub struct Source {
         pub path: String,
         pub digest: String,
     }
 
     /// What the process environment says, parsed once by the executable; the libraries never read it.
     #[derive(Clone, Debug, PartialEq, Default)]
-    pub struct process {
+    pub struct Process {
         pub max_frames: Option<i64>,
         pub crash_dir: Option<String>,
         pub profile: bool,
@@ -439,8 +439,8 @@ pub mod workspace {
         pub ui_font: Option<String>,
     }
 
-    pub fn no_process() -> process {
-        process::default()
+    pub fn no_process() -> Process {
+        Process::default()
     }
 
     /// Parse and check a `.rays` text against `workspace_catalog`.
@@ -490,7 +490,7 @@ pub mod workspace {
 
     /// One static evaluation a start: the document the editor opens is built here, and the window
     /// and the camera are read from it.
-    fn run(inputs: Option<Rc<workspace_doc::Inputs>>, factories: Option<Vec<Factory>>, source: Option<source>, process: process, doc: workspace_doc::T) -> Result<(), Diagnostic> {
+    fn run(inputs: Option<Rc<workspace_doc::Inputs>>, factories: Option<Vec<Factory>>, source: Option<Source>, process: Process, doc: workspace_doc::T) -> Result<(), Diagnostic> {
         let mut doc = doc;
         if let Some(inputs) = &inputs {
             doc.inputs = std::sync::Arc::new((**inputs).clone());
@@ -509,7 +509,7 @@ pub mod workspace {
                 Some(document) => lowering::document_window(document),
                 None => workspace_window(&doc),
             }?;
-            let config = rays::sketch::config { width: window.width, height: window.height, title: window.title.clone(), fps: Some(window.fps), ..rays::sketch::default_config() };
+            let config = rays::sketch::Config { width: window.width, height: window.height, title: window.title.clone(), fps: Some(window.fps), ..rays::sketch::default_config() };
             let lights = vec![rays::light::directional(Some(rays_math::color::white()), None, vec3::create(-1., -1.4, -0.8)).map_err(|m| rays_diagnostic::error("E_RUNTIME".to_string(), m, None, None, None, Vec::new(), Vec::new()))?];
             let base = easy_camera::create(Some(vec3::zero()), Some(3.6), Some(0.4), Some(0.6), None, None).expect("base camera");
             let camera = match (&opened, &factories) {
@@ -564,11 +564,12 @@ pub mod workspace {
         let result = (|| {
             let canvas = rays::canvas::create(width, height).map_err(|m| fail("E_GPU_STARTUP", m))?;
             let result = (|| {
+                rays::canvas::render(Some(1), &canvas, &[]).map_err(|m| fail("E_GPU_STARTUP", m))?;
                 let state = flow_eval::create_state();
                 for tick in 0..=frame {
                     let live = input::Frame { dt: 1. / 60., frame: tick, tick, size: (width, height), pointer: (-100., -100.), ..input::at_time(tick as f64 / 60.) };
                     let (images, image_state, image_plan, image_live) = (host.images.clone(), state.clone(), evaluated.plan.clone(), live.clone());
-                    let resolver: drawing::image_resolver = Rc::new(move |v| workspace_images::image(None, false, &images, &image_state, &image_live, &image_plan, v));
+                    let resolver: drawing::ImageResolver = Rc::new(move |v| workspace_images::image(None, false, &images, &image_state, &image_live, &image_plan, v));
                     let scene = drawing::render_prepared(&prepared, &live, live.size, &drawing::RenderOptions { state: Some(state.clone()), image: Some(resolver), ..Default::default() })?;
                     if tick == frame {
                         rays::canvas::render(Some(1), &canvas, &scene).map_err(|m| fail("E_RENDER", m))?;
@@ -608,12 +609,12 @@ pub mod workspace {
         let failure: Rc<std::cell::RefCell<Option<Diagnostic>>> = Rc::new(std::cell::RefCell::new(None));
         let (view_host, view_images, view_failure, view_doc, view_plan, view_state) = (host.clone(), images.clone(), failure.clone(), doc.clone(), evaluated.plan.clone(), state.clone());
         let (width, height) = (window.width, window.height);
-        let view = move |_model: &dyn std::any::Any, frame_: &rays::frame::Frame| -> Vec<rays::scene::node> {
+        let view = move |_model: &dyn std::any::Any, frame_: &rays::frame::Frame| -> Vec<rays::scene::Node> {
             let live = input::Frame { dt: 1. / fps as f64, frame: frame_.input.frame, tick: frame_.input.tick, size: (width, height), ..input::at_time(frame_.input.t) };
             let images = view_images.clone();
             let (state, plan) = (view_state.clone(), view_plan.clone());
             let live_for_image = live.clone();
-            let resolver: drawing::image_resolver = Rc::new(move |v| workspace_images::image(None, false, &images, &state, &live_for_image, &plan, v));
+            let resolver: drawing::ImageResolver = Rc::new(move |v| workspace_images::image(None, false, &images, &state, &live_for_image, &plan, v));
             let options = drawing::RenderOptions { state: Some(view_state.clone()), image: Some(resolver), ..Default::default() };
             match drawing::render_prepared(&prepared, &live, live.size, &options) {
                 Ok(scene) => match workspace_host::export_update(&mut view_host.borrow_mut(), &view_state, &live, &view_doc, &view_plan) {
@@ -629,11 +630,11 @@ pub mod workspace {
                 }
             }
         };
-        let config = rays::sketch::config { width, height, title: window.title.clone(), clock: rays::sketch::clock::Fixed(1. / fps as f64), ..rays::sketch::default_config() };
+        let config = rays::sketch::Config { width, height, title: window.title.clone(), clock: rays::sketch::Clock::Fixed(1. / fps as f64), ..rays::sketch::default_config() };
         let after_host = host.clone();
         let after_failure = failure.clone();
         let stop_host = host.clone();
-        let program = rays::sketch::program {
+        let program = rays::sketch::Program {
             init: Box::new(|_| Box::new(())),
             update: Box::new(|_, _| None),
             view: Box::new(view),
@@ -657,7 +658,7 @@ pub mod workspace {
     /// `main path` opens the `.rays` file at `path` and its imports beside it in the editor; `text`
     /// opens that text instead, saved to `path` (the empty editor). On a failure it returns
     /// diagnostics without printing or exiting.
-    pub fn main(text: Option<String>, process: Option<process>, path: &str) -> Result<(), Vec<Diagnostic>> {
+    pub fn main(text: Option<String>, process: Option<Process>, path: &str) -> Result<(), Vec<Diagnostic>> {
         let text = match text {
             Some(text) => text,
             None => std::fs::read(path)
@@ -666,7 +667,7 @@ pub mod workspace {
         };
         let imports = source_file::read_imports(path, &text)?;
         let doc = load(None, imports, None, &text)?;
-        run(None, None, Some(source { path: path.to_string(), digest: lowering::sha256(&text) }), process.unwrap_or_default(), doc).map_err(|d| vec![d])
+        run(None, None, Some(Source { path: path.to_string(), digest: lowering::sha256(&text) }), process.unwrap_or_default(), doc).map_err(|d| vec![d])
     }
 }
 
@@ -678,7 +679,7 @@ pub mod measure {
     use rays::frame;
 
     #[derive(Clone, Debug)]
-    pub struct sample {
+    pub struct Sample {
         pub frame: i64,
         pub live: i64,
         /// The device's allocated bytes, through OGPU.
@@ -690,9 +691,9 @@ pub mod measure {
     }
 
     #[derive(Clone, Debug)]
-    pub struct outcome {
-        pub early: sample,
-        pub fin: sample,
+    pub struct Outcome {
+        pub early: Sample,
+        pub fin: Sample,
         pub fallbacks: Vec<(String, String, i64)>,
         pub readback_bytes: i64,
         /// arrays read back; the rest is bounds a selection box asks for
@@ -725,7 +726,7 @@ pub mod measure {
     }
 
     /// `step` runs before each frame's update, for scripted edits.
-    pub fn run(options: MeasureOptions, step: &dyn Fn(i64, editor::Editor) -> editor::Editor, early: i64, frames: i64, workspace: &editor_document::workspace_doc::T) -> Result<outcome, String> {
+    pub fn run(options: MeasureOptions, step: &dyn Fn(i64, editor::Editor) -> editor::Editor, early: i64, frames: i64, workspace: &editor_document::workspace_doc::T) -> Result<Outcome, String> {
         let MeasureOptions { width, height, device } = options;
         let canvas = rays::canvas::create(width, height)?;
         let result = (|| {
@@ -751,13 +752,13 @@ pub mod measure {
                 )?;
                 let mut editor = editor;
                 let allocated0 = mem::allocated_bytes() as f64;
-                let measure = |editor: &editor::Editor, walk: bool, tick: i64| -> sample {
+                let measure = |editor: &editor::Editor, walk: bool, tick: i64| -> Sample {
                     let device = workspace_gpu::device_limits(&editor.host.borrow().gpu).map(|(b, _, _)| b).unwrap_or(0);
                     // one walk, the last: a walk's hash set stays in the footprint of the next sample
                     let report = mem::report_with(mem::ReportOptions { walk, device, budget: None });
-                    sample { frame: tick, live: report.live_bytes, device, footprint: report.footprint, allocated: mem::allocated_bytes() as f64 - allocated0, promoted: 0., report }
+                    Sample { frame: tick, live: report.live_bytes, device, footprint: report.footprint, allocated: mem::allocated_bytes() as f64 - allocated0, promoted: 0., report }
                 };
-                let mut first: Option<sample> = None;
+                let mut first: Option<Sample> = None;
                 let mut failure: Option<String> = None;
                 let mut tick = 0;
                 while failure.is_none() && tick < frames {
@@ -780,7 +781,7 @@ pub mod measure {
                         let fin = measure(&editor, true, frames);
                         let early = first.unwrap_or_else(|| fin.clone());
                         let (stats, _, _, _, _) = workspace_gpu::image_stats(&editor.host.borrow().gpu);
-                        Ok(outcome {
+                        Ok(Outcome {
                             early,
                             fin,
                             fallbacks: flow_ir::fallback::seen(),

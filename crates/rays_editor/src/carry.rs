@@ -5,7 +5,7 @@
 //! what a widget accepts: `put` runs the edit (the one the inspector or the graph already writes) and
 //! the document's own check, and its result is the preview, the refusal's reason and the write. See
 //! specification/flow.md, "Carry".
-#![allow(non_camel_case_types)]
+
 use editor_core::panels::{self, Panel};
 use editor_document::document::{self, T as Document};
 use editor_document::{document_edit, scene_sync};
@@ -35,17 +35,17 @@ pub enum Place {
     /// a viewport panel under the pointer, before the host's pick says which surface
     Viewport(String),
     /// a byte of the text pane's shown text, where `(ref name)` would be inserted
-    Text { target: Text_target, text: String, byte: i64 },
+    Text { target: TextTarget, text: String, byte: i64 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Text_target {
+pub enum TextTarget {
     /// the Document tab: the whole workspace text
     Whole,
     /// the Graph tab of this graph
-    Graph_text(String),
+    GraphText(String),
     /// the Selection tab: the closure of this binding
-    Selection_text(w::Path),
+    SelectionText(w::Path),
     /// the tab holds an unapplied draft, whose bytes are not the document's
     Drafted,
 }
@@ -339,13 +339,13 @@ pub fn plan(factories: Factories, catalog: &Catalog, doc: &Document, payload: &P
             let inserted = insert_at(text, byte, &payload.value);
             let source = &doc.workspace.ws.source;
             match target {
-                Text_target::Drafted => Err("The text has an unapplied draft: apply or discard it first".to_string()),
-                Text_target::Whole => Ok(Edit::Rewrite(inserted, what)),
-                Text_target::Graph_text(graph) => {
+                TextTarget::Drafted => Err("The text has an unapplied draft: apply or discard it first".to_string()),
+                TextTarget::Whole => Ok(Edit::Rewrite(inserted, what)),
+                TextTarget::GraphText(graph) => {
                     let op = text_pane::graph_op(source, graph, None, &inserted).map_err(|d| d.message)?;
                     ok(doc, vec![op], what)
                 }
-                Text_target::Selection_text(path) => {
+                TextTarget::SelectionText(path) => {
                     let op = text_pane::graph_op(source, &path[0], Some(path.as_slice()), &inserted).map_err(|d| d.message)?;
                     ok(doc, vec![op], what)
                 }

@@ -1,5 +1,5 @@
 //! Viewport camera controls, panel requests, guides and handles return frame intents. Loop rest bookkeeping tracks changes to cloned extras; inspector results remain sketch-owned Rc values.
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
+
 use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -23,18 +23,18 @@ use rays::easy_camera;
 use rays::frame;
 use rays::light;
 use rays::path as rpath;
-use rays::scene::{self, node as scene_node};
+use rays::scene::{self, Node as scene_node};
 use rays::scene3::{self as d3, walk};
 use rays::sketch;
 use rays::world;
 use rays_math::{color, mat4, vec3};
 
 use crate::cook;
-use crate::editor_commands::action;
+use crate::editor_commands::Action;
 use crate::editor_host;
 use crate::editor_inspect;
 use crate::editor_list;
-use crate::editor_model::{self as model, picked, EditorModel as Model};
+use crate::editor_model::{Picked, EditorModel as Model};
 use crate::editor_renderer as renderer;
 
 type Nodes = Vec<scene_node>;
@@ -48,23 +48,23 @@ pub mod cc {
     use super::*;
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct visibility {
+    pub struct Visibility {
         pub prefix: String,
         pub ui_visible: bool,
         pub filename: String,
         pub open_camera: Option<bool>,
     }
 
-    pub type Control = visibility;
+    pub type Control = Visibility;
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct render_request {
+    pub struct RenderRequest {
         pub filename: String,
     }
 
-    pub fn make(prefix: &str) -> visibility {
+    pub fn make(prefix: &str) -> Visibility {
         assert!(!prefix.is_empty(), "Pxui camera control: prefix is empty");
-        visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None }
+        Visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None }
     }
 
     pub fn create() -> Control {
@@ -139,7 +139,7 @@ pub mod cc {
         ui.inspector_section("Camera", false, set_expanded, "Camera", build)
     }
 
-    pub fn widgets(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (Control, easy_camera::EasyCamera, Vec<render_request>) {
+    pub fn widgets(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (Control, easy_camera::EasyCamera, Vec<RenderRequest>) {
         let mut out_camera = camera.clone();
         let mut control_out = control.clone();
         let mut saves: Vec<String> = Vec::new();
@@ -171,7 +171,7 @@ pub mod cc {
             control_out = c;
             saves = s;
         });
-        (control_out, out_camera, saves.into_iter().map(|filename| render_request { filename }).collect())
+        (control_out, out_camera, saves.into_iter().map(|filename| RenderRequest { filename }).collect())
     }
 
     pub fn navigate(control_area: Option<Bounds>, camera: &easy_camera::EasyCamera, frame_: &frame::Frame) -> easy_camera::EasyCamera {
@@ -183,29 +183,29 @@ pub mod cc {
         control.ui_visible
     }
 
-    pub fn save(request: &render_request) -> Result<(), String> {
+    pub fn save(request: &RenderRequest) -> Result<(), String> {
         rays::canvas::save_screen_png(&request.filename)
     }
 }
 
-pub type camera = easy_camera::EasyCamera;
-pub type control = cc::Control;
-pub type rendered = d3::Scene3;
-pub type request = cc::render_request;
-pub type view = rcam::Camera;
+pub type Camera = easy_camera::EasyCamera;
+pub type Control = cc::Control;
+pub type Rendered = d3::Scene3;
+pub type Request = cc::RenderRequest;
+pub type View = rcam::Camera;
 
 /// The view's handle tool: W translate, E rotate, R scale, Escape none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum tool {
+pub enum Tool {
     Move,
     Turn,
     Grow,
-    No_tool,
+    NoTool,
 }
 
 /// What the view draws over the render while the UI shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct show {
+pub struct Show {
     pub cameras: bool,
     pub axes: bool,
     pub handles: bool,
@@ -214,7 +214,7 @@ pub struct show {
 /// Look-through, the fly speed while the pointer is captured, the active camera node's view and
 /// the free viewport's view with its lens, and the guides.
 #[derive(Clone)]
-pub struct extra {
+pub struct Extra {
     /// the viewports that look through their render camera, by key
     pub looking: Vec<String>,
     /// the focused viewport: the one the toggle and the navigation mean
@@ -245,25 +245,25 @@ pub struct extra {
     pub written: Option<rcam::Camera>,
     /// a held drag moved the following camera: its node is written on release
     pub follow_pending: bool,
-    pub show: show,
-    pub tool: tool,
+    pub show: Show,
+    pub tool: Tool,
     pub renderer: renderer::State,
     pub renderer_request: Option<renderer::Mode>,
 }
 
-pub fn default_camera() -> camera {
+pub fn default_camera() -> Camera {
     easy_camera::create(Some(vec3::zero()), Some(7.), None, None, None, None).expect("default camera")
 }
-pub fn create_control() -> control {
+pub fn create_control() -> Control {
     cc::create()
 }
-pub fn ui_visible(c: &control) -> bool {
+pub fn ui_visible(c: &Control) -> bool {
     cc::ui_visible(c)
 }
-pub fn toggle_ui(c: &control) -> control {
+pub fn toggle_ui(c: &Control) -> Control {
     cc::toggle_ui(c)
 }
-pub fn open_camera(c: &control) -> control {
+pub fn open_camera(c: &Control) -> Control {
     cc::open_camera(c)
 }
 pub fn set_relative(enabled: bool) {
@@ -272,10 +272,10 @@ pub fn set_relative(enabled: bool) {
 
 /// The one way out of a pointer grab: the orbit drag's relative mouse and the fly mode end
 /// together, on every path that stops navigating.
-pub fn release(extra_: &extra) -> extra {
+pub fn release(extra_: &Extra) -> Extra {
     if extra_.relative_grab || extra_.fly.is_some() {
         set_relative(false);
-        extra { relative_grab: false, fly: None, ..extra_.clone() }
+        Extra { relative_grab: false, fly: None, ..extra_.clone() }
     } else {
         extra_.clone()
     }
@@ -306,7 +306,7 @@ pub fn view_parameters(easy: &easy_camera::EasyCamera) -> Vec<(String, Value)> {
 fn following_view(node: &rcam::Camera, easy: &easy_camera::EasyCamera) -> Option<rcam::Camera> {
     let view = easy_camera::camera(easy).ok()?;
     let (near, far) = match rcam::projection(node) {
-        rcam::projection::Perspective { near, far, .. } | rcam::projection::Orthographic { near, far, .. } => (near, far),
+        rcam::Projection::Perspective { near, far, .. } | rcam::Projection::Orthographic { near, far, .. } => (near, far),
     };
     let fov = easy_camera::fov_y(easy) * 180. / std::f64::consts::PI;
     let camera = rcam::perspective(Some(fov * std::f64::consts::PI / 180.), Some(near), Some(far), rcam::position(&view), rcam::target(&view)).ok()?;
@@ -317,7 +317,7 @@ pub fn same_view(a: &rcam::Camera, b: &rcam::Camera) -> bool {
     vec3::nearly_equal(rcam::position(a), rcam::position(b), 1e-6)
         && vec3::nearly_equal(rcam::target(a), rcam::target(b), 1e-6)
         && match (rcam::projection(a), rcam::projection(b)) {
-            (rcam::projection::Perspective { fov_y: a, .. }, rcam::projection::Perspective { fov_y: b, .. }) => (a - b).abs() < 1e-6,
+            (rcam::Projection::Perspective { fov_y: a, .. }, rcam::Projection::Perspective { fov_y: b, .. }) => (a - b).abs() < 1e-6,
             _ => false,
         }
 }
@@ -342,7 +342,7 @@ pub fn seed_scene(easy: &easy_camera::EasyCamera, scene: kg::T) -> kg::T {
 /// One ACTIVE camera whenever any exists; a nonempty scene of a workspace with no scene graph
 /// losing the last camera re-adds the default within the same undo entry. An intentionally
 /// empty scene stays empty.
-pub fn sync_cameras(mode: editor_host::scene_mode, core: &mut Model, easy: &easy_camera::EasyCamera) {
+pub fn sync_cameras(mode: editor_host::SceneMode, core: &mut Model, easy: &easy_camera::EasyCamera) {
     let scene = editor_inspect::scene(core);
     // A scene graph is authoritative: the host only supplies a camera for host-owned scenes.
     if camera_ids(&scene).is_empty() && !scene.is_empty() && lowering::graph_of(&core.doc.workspace.ws, context::scene()).is_none() {
@@ -358,21 +358,21 @@ pub fn sync_cameras(mode: editor_host::scene_mode, core: &mut Model, easy: &easy
     };
     if active != core.doc.active_camera {
         let scene = editor_inspect::scene(core);
-        editor_host::scene_edit(core, editor_host::scene_mode::Amend, Some(active), scene.clone());
+        editor_host::scene_edit(core, editor_host::SceneMode::Amend, Some(active), scene.clone());
     }
 }
 
 /// How the viewport `key` renders: through which camera and as which root says. A viewport over
 /// its own scene instance reads that instance's root; any other renders as the document.
-pub struct look_ {
+pub struct Look {
     pub through: rcam::Camera,
     pub settings: root::Parameters,
 }
 
-pub fn look(extra_: &extra, key: &str) -> look_ {
+pub fn look(extra_: &Extra, key: &str) -> Look {
     match extra_.view_roots.iter().find(|(k, _)| k == key) {
-        Some((_, ViewRoot { params, camera })) => look_ { through: camera.clone().unwrap_or_else(|| extra_.document_camera.clone()), settings: params.clone() },
-        None => look_ { through: extra_.document_camera.clone(), settings: extra_.root.clone() },
+        Some((_, ViewRoot { params, camera })) => Look { through: camera.clone().unwrap_or_else(|| extra_.document_camera.clone()), settings: params.clone() },
+        None => Look { through: extra_.document_camera.clone(), settings: extra_.root.clone() },
     }
 }
 
@@ -388,7 +388,7 @@ pub fn render_camera_of(core: &Model, easy: &easy_camera::EasyCamera) -> rcam::C
 pub fn free_view_of(render_camera: &rcam::Camera, previous: Option<&rcam::Camera>, camera: &easy_camera::EasyCamera) -> rcam::Camera {
     let view = easy_camera::camera(camera).expect("easy camera");
     let lens = rcam::lens(render_camera);
-    let view = rcam::with_lens(if same_view(render_camera, &view) { lens } else { rcam::lens { focus_distance: None, ..lens } }, &view).unwrap_or(view);
+    let view = rcam::with_lens(if same_view(render_camera, &view) { lens } else { rcam::Lens { focus_distance: None, ..lens } }, &view).unwrap_or(view);
     match previous {
         Some(previous) if *previous == view => previous.clone(),
         _ => view,
@@ -400,7 +400,7 @@ pub fn of_root(r: root::Renderer) -> renderer::Mode {
     match r {
         root::Renderer::Raster => renderer::Mode::Raster,
         root::Renderer::Wireframe => renderer::Mode::Wireframe,
-        root::Renderer::PathTraced => renderer::Mode::Path_traced,
+        root::Renderer::PathTraced => renderer::Mode::PathTraced,
     }
 }
 
@@ -408,7 +408,7 @@ pub fn to_root(m: renderer::Mode) -> root::Renderer {
     match m {
         renderer::Mode::Raster => root::Renderer::Raster,
         renderer::Mode::Wireframe => root::Renderer::Wireframe,
-        renderer::Mode::Path_traced => root::Renderer::PathTraced,
+        renderer::Mode::PathTraced => root::Renderer::PathTraced,
     }
 }
 
@@ -423,21 +423,21 @@ pub fn renderer_setting(core: &Model) -> Option<renderer::Mode> {
     })
 }
 
-pub fn looks(extra_: &extra, key: &str) -> bool {
+pub fn looks(extra_: &Extra, key: &str) -> bool {
     extra_.looking.iter().any(|k| k == key)
 }
-pub fn look_through(extra_: &extra) -> bool {
+pub fn look_through(extra_: &Extra) -> bool {
     looks(extra_, &extra_.key)
 }
 
-pub fn set_look(extra_: &extra, on: bool) -> extra {
+pub fn set_look(extra_: &Extra, on: bool) -> Extra {
     let mut looking: Vec<String> = if on { vec![extra_.key.clone()] } else { Vec::new() };
     looking.extend(extra_.looking.iter().filter(|k| **k != extra_.key).cloned());
-    extra { looking, ..extra_.clone() }
+    Extra { looking, ..extra_.clone() }
 }
 
-pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, extra) {
-    sync_cameras(editor_host::scene_mode::Reset, &mut core, camera_);
+pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, Extra) {
+    sync_cameras(editor_host::SceneMode::Reset, &mut core, camera_);
     let render_camera = render_camera_of(&core, camera_);
     // the viewports whose `:look_through true` says so; the focus starts in the first viewport
     let looking = core.doc.shell.as_ref().map(|s| s.start.looking.clone()).unwrap_or_default();
@@ -454,7 +454,7 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, extra
     };
     let mode = root_renderer(&core).or_else(|| renderer_setting(&core)).unwrap_or(renderer::Mode::Raster);
     let custom = root_renderer(&core).is_none() && renderer_setting(&core).is_some();
-    let extra_ = extra {
+    let extra_ = Extra {
         looking: looking.clone(),
         key,
         started: looking,
@@ -472,18 +472,18 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, extra
         follow_request: None,
         written: None,
         follow_pending: false,
-        show: show { cameras: true, axes: true, handles: true },
-        tool: tool::Move,
+        show: Show { cameras: true, axes: true, handles: true },
+        tool: Tool::Move,
         renderer: renderer::State { mode, custom, ..renderer::empty() },
         renderer_request: None,
     };
     (core, extra_)
 }
 
-pub fn begin_frame<'a>(extra_: &extra, frame_: &'a frame::Frame) -> (extra, Cow<'a, frame::Frame>) {
+pub fn begin_frame<'a>(extra_: &Extra, frame_: &'a frame::Frame) -> (Extra, Cow<'a, frame::Frame>) {
     match extra_.fly {
         None => {
-            let lost = frame_.input.events.iter().any(|e| matches!(e, Event::Focus_lost));
+            let lost = frame_.input.events.iter().any(|e| matches!(e, Event::FocusLost));
             (if lost { release(extra_) } else { extra_.clone() }, Cow::Borrowed(frame_))
         }
         Some(_) => {
@@ -494,15 +494,15 @@ pub fn begin_frame<'a>(extra_: &extra, frame_: &'a frame::Frame) -> (extra, Cow<
 }
 
 /// What a camera-panel callback hands back through `Panel_result`.
-pub struct panel_out {
-    pub control: control,
-    pub camera: camera,
-    pub requests: Vec<request>,
-    pub extra: extra,
+pub struct PanelOut {
+    pub control: Control,
+    pub camera: Camera,
+    pub requests: Vec<Request>,
+    pub extra: Extra,
     pub inspected: Rc<dyn Any>,
 }
 
-pub fn panel(ui: &mut Ui, control_: &control, camera_: &camera, extra_: &extra, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> panel_out {
+pub fn panel(ui: &mut Ui, control_: &Control, camera_: &Camera, extra_: &Extra, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> PanelOut {
     let mut next = extra_.clone();
     ui.inspector_section("Viewport", true, None, "Viewport", &mut |ui| {
         // the label column is 0.3 of the panel less 16: the rows say it short, their keys stay
@@ -519,7 +519,7 @@ pub fn panel(ui: &mut Ui, control_: &control, camera_: &camera, extra_: &extra, 
         let cameras = ui.inspector_toggle("Cameras and lights", "Cameras", extra_.show.cameras);
         let axes = ui.inspector_toggle("Axis gizmo", "Axis gizmo", extra_.show.axes);
         let handles = ui.inspector_toggle("Selected node handles", "Handles", extra_.show.handles);
-        next = extra { follow_request, show: show { cameras, axes, handles }, ..set_look(extra_, through) };
+        next = Extra { follow_request, show: Show { cameras, axes, handles }, ..set_look(extra_, through) };
     });
     let (control_out, camera_out, requests) = cc::widgets(control_, ui, camera_);
     // the scene's root: renderer, size and samples
@@ -546,18 +546,18 @@ pub fn panel(ui: &mut Ui, control_: &control, camera_: &camera, extra_: &extra, 
         next.root_request = Some(root_);
     }
     let inspected = inspector(ui);
-    panel_out { control: control_out, camera: camera_out, requests, extra: next, inspected }
+    PanelOut { control: control_out, camera: camera_out, requests, extra: next, inspected }
 }
 
 /// The values serialized by `section`, without constructing a syntax arena on an idle poll.
-pub fn section_key(camera_: &camera, extra_: &extra) -> ([u64; 7], bool, renderer::Mode) {
+pub fn section_key(camera_: &Camera, extra_: &Extra) -> ([u64; 7], bool, renderer::Mode) {
     let camera = easy_camera::camera(camera_).expect("viewport form");
     let eye = rcam::position(&camera);
     let target = rcam::target(&camera);
     ([eye.x.to_bits(), eye.y.to_bits(), eye.z.to_bits(), target.x.to_bits(), target.y.to_bits(), target.z.to_bits(), easy_camera::fov_y(camera_).to_bits()], look_through(extra_), extra_.renderer_request.unwrap_or(extra_.renderer.mode))
 }
 
-pub fn section(camera_: &camera, extra_: &extra) -> Syntax {
+pub fn section(camera_: &Camera, extra_: &Extra) -> Syntax {
     let form = crate::preset_viewport::encode(camera_, look_through(extra_)).expect("viewport form");
     match &form.node {
         SNode::Map(fields) => {
@@ -572,7 +572,7 @@ pub fn section(camera_: &camera, extra_: &extra) -> Syntax {
     }
 }
 
-pub fn restore(camera_: &camera, extra_: &extra, json: &Syntax) -> (camera, extra) {
+pub fn restore(camera_: &Camera, extra_: &Extra, json: &Syntax) -> (Camera, Extra) {
     let (camera_, look) = crate::preset_viewport::decode(camera_.clone(), json);
     fn find(form: &Syntax, items: &[flow_syntax::arena::SyntaxId]) -> Option<renderer::Mode> {
         match items {
@@ -587,37 +587,37 @@ pub fn restore(camera_: &camera, extra_: &extra, json: &Syntax) -> (camera, extr
         SNode::Map(fields) => find(json, json.range(*fields)),
         _ => None,
     };
-    (camera_, extra { renderer_request: mode, ..set_look(extra_, look) })
+    (camera_, Extra { renderer_request: mode, ..set_look(extra_, look) })
 }
 
-pub fn apply_action(camera_: &camera, extra_: &extra, a: &action) -> (extra, Option<String>) {
+pub fn apply_action(camera_: &Camera, extra_: &Extra, a: &Action) -> (Extra, Option<String>) {
     match a {
-        action::Tool(0) => (extra { tool: tool::No_tool, ..extra_.clone() }, Some("Orbit (handles hidden)".to_string())),
-        action::Tool(1) => (extra { tool: tool::Move, ..extra_.clone() }, Some("Translate (W)".to_string())),
-        action::Tool(2) => (extra { tool: tool::Turn, ..extra_.clone() }, Some("Rotate (E)".to_string())),
-        action::Tool(3) => (extra { tool: tool::Grow, ..extra_.clone() }, Some("Scale (R)".to_string())),
-        action::Look_through => (set_look(extra_, !look_through(extra_)), None),
-        action::Look_through_camera => (set_look(extra_, true), None),
+        Action::Tool(0) => (Extra { tool: Tool::NoTool, ..extra_.clone() }, Some("Orbit (handles hidden)".to_string())),
+        Action::Tool(1) => (Extra { tool: Tool::Move, ..extra_.clone() }, Some("Translate (W)".to_string())),
+        Action::Tool(2) => (Extra { tool: Tool::Turn, ..extra_.clone() }, Some("Rotate (E)".to_string())),
+        Action::Tool(3) => (Extra { tool: Tool::Grow, ..extra_.clone() }, Some("Scale (R)".to_string())),
+        Action::LookThrough => (set_look(extra_, !look_through(extra_)), None),
+        Action::LookThroughCamera => (set_look(extra_, true), None),
         // the header's tabs: the same request as the Scene root section's renderer row
-        action::Render_mode(index) => {
+        Action::RenderMode(index) => {
             let renderer = [root::Renderer::Raster, root::Renderer::Wireframe, root::Renderer::PathTraced][(*index).clamp(0, 2) as usize];
-            (extra { root_request: Some(root::Parameters { renderer, ..extra_.root.clone() }), ..extra_.clone() }, None)
+            (Extra { root_request: Some(root::Parameters { renderer, ..extra_.root.clone() }), ..extra_.clone() }, None)
         }
-        action::Fly if extra_.fly.is_none() => {
+        Action::Fly if extra_.fly.is_none() => {
             set_relative(true);
-            (extra { fly: Some((easy_camera::distance(camera_) * 0.5).max(0.5)), ..extra_.clone() }, Some("Flying: WASD/QE move, Shift x4, wheel speed, Esc exits".to_string()))
+            (Extra { fly: Some((easy_camera::distance(camera_) * 0.5).max(0.5)), ..extra_.clone() }, Some("Flying: WASD/QE move, Shift x4, wheel speed, Esc exits".to_string()))
         }
         _ => (extra_.clone(), None),
     }
 }
 
-pub fn on_doc(previous: &document::T, core: &mut Model, camera_: &camera) {
+pub fn on_doc(previous: &document::T, core: &mut Model, camera_: &Camera) {
     if !kg::same(&editor_inspect::scene(core), &document::scene_graph(previous)) || core.doc.active_camera != previous.active_camera {
-        sync_cameras(editor_host::scene_mode::Amend, core, camera_);
+        sync_cameras(editor_host::SceneMode::Amend, core, camera_);
     }
 }
 
-pub fn navigate(area: Bounds, grab: (bool, bool), _control: &control, camera_: &camera, extra_: &extra, core: &Model, input: &frame::Frame) -> (camera, extra) {
+pub fn navigate(area: Bounds, grab: (bool, bool), _control: &Control, camera_: &Camera, extra_: &Extra, core: &Model, input: &frame::Frame) -> (Camera, Extra) {
     let (pressed, released) = grab;
     let active = active_node(core);
     // A fixed render camera owns the view while look-through is enabled.
@@ -627,12 +627,12 @@ pub fn navigate(area: Bounds, grab: (bool, bool), _control: &control, camera_: &
     match extra_.fly {
         Some(speed) => {
             match easy_camera::fly(speed, camera_, input) {
-                Ok((camera_, speed)) => (camera_, extra { fly: Some(speed), ..extra_.clone() }),
+                Ok((camera_, speed)) => (camera_, Extra { fly: Some(speed), ..extra_.clone() }),
                 Err(_) => (camera_.clone(), extra_.clone()),
             }
         }
         None => {
-            let released = released || input.input.events.iter().any(|e| matches!(e, Event::Focus_lost));
+            let released = released || input.input.events.iter().any(|e| matches!(e, Event::FocusLost));
             let grabbing = if pressed {
                 true
             } else if released || input.input.buttons.is_empty() {
@@ -644,30 +644,30 @@ pub fn navigate(area: Bounds, grab: (bool, bool), _control: &control, camera_: &
                 set_relative(grabbing);
             }
             let camera_ = cc::navigate(Some(area), camera_, input);
-            (camera_, extra { relative_grab: grabbing, ..extra_.clone() })
+            (camera_, Extra { relative_grab: grabbing, ..extra_.clone() })
         }
     }
 }
 
-pub fn frame_bounds(min: vec3::T, max: vec3::T, camera_: &camera) -> camera {
+pub fn frame_bounds(min: vec3::T, max: vec3::T, camera_: &Camera) -> Camera {
     easy_camera::frame_bounds(min, max, camera_)
 }
 
 /// Follow-viewport motion writes the camera node as view state (no undo entry); node edits and
 /// undo pull the viewport back to the document. On a frame that stepped the history (`stepped`)
 /// nothing is written: the document just restored is the one to show.
-pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, extra_: extra, stepped: bool, held: bool) -> (camera, extra) {
+pub fn on_view(core: &mut Model, previous: &Camera, key: &str, camera_: Camera, extra_: Extra, stepped: bool, held: bool) -> (Camera, Extra) {
     // a change in the Render section: an authored root takes it; without one only the renderer is
     // the viewport's own choice, and any other setting writes the root
     let mut extra_ = match extra_.root_request.clone() {
         None => extra_,
         Some(root_) if root_renderer(&*core).is_none() && root::Parameters { renderer: core.doc.root.renderer, ..root_.clone() } == core.doc.root => {
             let mode = of_root(root_.renderer);
-            extra { root_request: None, renderer_request: Some(mode), ..extra_ }
+            Extra { root_request: None, renderer_request: Some(mode), ..extra_ }
         }
         Some(root_) => {
             editor_host::set_root(core, &root_);
-            extra { root_request: None, ..extra_ }
+            Extra { root_request: None, ..extra_ }
         },
     };
     let mode = match (extra_.renderer_request, renderer_setting(&*core)) {
@@ -682,7 +682,7 @@ pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, 
         (None, None) => extra_.renderer.mode,
     };
     let custom = root_renderer(&*core).is_none() && renderer_setting(&*core).is_some();
-    extra_ = extra {
+    extra_ = Extra {
         renderer: renderer::State { mode, custom, ..extra_.renderer.clone() },
         renderer_request: None,
         root: root::Parameters { renderer: to_root(mode), ..core.doc.root.clone() },
@@ -711,7 +711,7 @@ pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, 
                     match kg::set_fields(&editor_inspect::scene(&*core), node.id, &view_parameters(&camera_)) {
                         Ok((scene, _)) => {
                             written = Some(easy_camera::camera(&camera_).expect("camera"));
-                            editor_host::scene_edit(core, editor_host::scene_mode::Amend, None, scene);
+                            editor_host::scene_edit(core, editor_host::SceneMode::Amend, None, scene);
                             camera_
                         }
                         Err(_) => camera_,
@@ -723,7 +723,7 @@ pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, 
                 } else {
                     written = Some(node_view.clone());
                     let lensed = match rcam::projection(node_view) {
-                        rcam::projection::Perspective { fov_y, .. } => easy_camera::with_fov_y(fov_y, &camera_).unwrap_or_else(|_| camera_.clone()),
+                        rcam::Projection::Perspective { fov_y, .. } => easy_camera::with_fov_y(fov_y, &camera_).unwrap_or_else(|_| camera_.clone()),
                         _ => camera_.clone(),
                     };
                     easy_camera::of_view(rcam::position(node_view), rcam::target(node_view), &lensed)
@@ -741,7 +741,7 @@ pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, 
         (Some(c), Some(a)) if std::ptr::eq(c, a) => decoded,
         _ => current.as_ref().and_then(ocamera::of_node),
     };
-    extra_ = extra {
+    extra_ = Extra {
         document_camera: deferred.or_else(|| decoded.as_ref().map(|(c, _)| c.clone())).unwrap_or_else(|| easy_camera::camera(&camera_).expect("camera")),
         view_roots: core.doc.view_roots.clone(),
         ..extra_
@@ -753,10 +753,10 @@ pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, 
     if said != extra_.started {
         let mut looking: Vec<String> = extra_.looking.iter().filter(|k| said.contains(k) || extra_.started.contains(k) == said.contains(k)).cloned().collect();
         looking.extend(said.iter().filter(|k| !extra_.started.contains(k) && !extra_.looking.contains(k)).cloned());
-        extra_ = extra { started: said, looking, ..extra_ };
+        extra_ = Extra { started: said, looking, ..extra_ };
     }
     let free_view = free_view_of(&free_camera, Some(&extra_.free_view), &camera_);
-    let extra_ = extra {
+    let extra_ = Extra {
         key: key.to_string(),
         free_camera,
         free_view,
@@ -773,8 +773,8 @@ pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, 
 /// The view shows the render camera while looking through it and on the frame whose framebuffer a
 /// PNG request captures; otherwise the viewport camera carries the ACTIVE camera's lens, focused on
 /// the orbit target unless the node follows the viewport.
-pub fn view_camera(camera_: &camera, extra_: &extra, key: &str, pending: bool) -> rcam::Camera {
-    let look_ { through, .. } = look(extra_, key);
+pub fn view_camera(camera_: &Camera, extra_: &Extra, key: &str, pending: bool) -> rcam::Camera {
+    let Look { through, .. } = look(extra_, key);
     if looks(extra_, key) || pending { through } else { free_view_of(&through, None, camera_) }
 }
 
@@ -784,7 +784,7 @@ pub fn pick_ray(viewport: Bounds, view_: &rcam::Camera, at: (f64, f64)) -> Optio
 
 /// A viewport shows the root's gate, not the whole pane, only while looking through the render
 /// camera. Its own free view fills the pane whatever draws it.
-pub fn film(extra_: &extra, key: &str, (x, y, width, height): Bounds) -> Bounds {
+pub fn film(extra_: &Extra, key: &str, (x, y, width, height): Bounds) -> Bounds {
     if !looks(extra_, key) {
         return (x, y, width, height);
     }
@@ -818,7 +818,7 @@ pub fn film(extra_: &extra, key: &str, (x, y, width, height): Bounds) -> Bounds 
 /// Each viewport renders as its own root says. Looking through the render camera, the tracer's
 /// film is the root's resolution in a step that fits the viewport's gate in drawable pixels; a free
 /// view's film is the pane itself. `views` carry each viewport's rectangle (`film`).
-pub fn render(extra_: &extra, pixel_scale: (f64, f64), focus: Option<&str>, views: Vec<(String, Bounds, rcam::Camera, d3::Scene3)>) -> extra {
+pub fn render(extra_: &Extra, pixel_scale: (f64, f64), focus: Option<&str>, views: Vec<(String, Bounds, rcam::Camera, d3::Scene3)>) -> Extra {
     let (scale_x, scale_y) = pixel_scale;
     let views: Vec<renderer::View> = views
         .into_iter()
@@ -837,47 +837,47 @@ pub fn render(extra_: &extra, pixel_scale: (f64, f64), focus: Option<&str>, view
             }
         })
         .collect();
-    extra { renderer: renderer::update(&extra_.renderer, extra_.renderer.mode, extra_.renderer.custom, focus, &views), ..extra_.clone() }
+    Extra { renderer: renderer::update(&extra_.renderer, extra_.renderer.mode, extra_.renderer.custom, focus, &views), ..extra_.clone() }
 }
 
 /// A traced viewport's header: whether it looks through, and the renderer (0 solid, 1 wire, 2 traced).
-pub fn header_tools(extra_: &extra) -> Option<(bool, i64)> {
+pub fn header_tools(extra_: &Extra) -> Option<(bool, i64)> {
     Some((
         look_through(extra_),
         match extra_.renderer.mode {
             renderer::Mode::Raster => 0,
             renderer::Mode::Wireframe => 1,
-            renderer::Mode::Path_traced => 2,
+            renderer::Mode::PathTraced => 2,
         },
     ))
 }
 
 /// A traced viewport's film in pixels, samples, cap and bounces.
-pub fn trace(extra_: &extra, key: &str) -> Option<((i64, i64), i64, i64, i64)> {
+pub fn trace(extra_: &Extra, key: &str) -> Option<((i64, i64), i64, i64, i64)> {
     let settings = look(extra_, key).settings;
     renderer::info(&extra_.renderer, key).map(|i| (i.size, i.samples, i.cap, settings.bounces))
 }
 
-pub fn render_status(extra_: &extra) -> Option<String> {
+pub fn render_status(extra_: &Extra) -> Option<String> {
     extra_.renderer.error.clone()
 }
 
-pub fn paint(extra_: &extra, key: &str, viewport: Bounds, camera_: &rcam::Camera, rendered_: &d3::Scene3) -> Nodes {
+pub fn paint(extra_: &Extra, key: &str, viewport: Bounds, camera_: &rcam::Camera, rendered_: &d3::Scene3) -> Nodes {
     renderer::paint(&extra_.renderer, key, viewport, camera_, rendered_)
 }
 
 /// Objects under their world transforms. Light objects light the scene when there are any;
 /// otherwise the first object's own lights do.
-pub fn compose(scene_: &kg::T, world_: Option<&world::baked>, pieces: Vec<(mat4::T, bool, d3::Scene3)>) -> d3::Scene3 {
+pub fn compose(scene_: &kg::T, world_: Option<&world::Baked>, pieces: Vec<(mat4::T, bool, d3::Scene3)>) -> d3::Scene3 {
     let lights = objects::lights(false, scene_);
     let base = pieces.first().map(|(_, _, first)| first.clone()).unwrap_or_else(d3::empty);
-    let nodes: Vec<d3::node> = pieces
+    let nodes: Vec<d3::Node> = pieces
         .iter()
         .map(|(matrix, ghost, scene3)| {
             let placed = d3::transform(matrix.clone(), d3::nodes(scene3));
             // ponytail: ghosts screen-blend without writing depth; a real override material would
             // need a Scene3 material-override node.
-            if *ghost { d3::with_depth(d3::depth_state(Some(false)), vec![d3::with_blend(d3::blend::Screen, vec![placed])]) } else { placed }
+            if *ghost { d3::with_depth(d3::depth_state(Some(false)), vec![d3::with_blend(d3::Blend::Screen, vec![placed])]) } else { placed }
         })
         .collect();
     let lights = if !lights.is_empty() || !objects::ids("light", scene_).is_empty() { lights } else { walk::lights(&base) };
@@ -894,7 +894,7 @@ pub fn axes() -> [vec3::T; 3] {
     [vec3::create(1., 0., 0.), vec3::create(0., 1., 0.), vec3::create(0., 0., 1.)]
 }
 
-pub const axis_names: [&str; 3] = ["x", "y", "z"];
+pub const AXIS_NAMES: [&str; 3] = ["x", "y", "z"];
 
 fn hex(h: &str) -> color::T {
     color::hex_exn(h).expect("viewport colour")
@@ -916,7 +916,7 @@ pub fn project(bounds: Bounds, camera_: &rcam::Camera, point: vec3::T) -> Option
     rcam::world_to_screen(bounds, camera_, point).ok().flatten().map(|s| (s.x, s.y))
 }
 
-pub fn screen_box(view_: &rcam::Camera, bounds: Bounds, world_: &mat4::T, box_: &cook::bounds) -> Option<Bounds> {
+pub fn screen_box(view_: &rcam::Camera, bounds: Bounds, world_: &mat4::T, box_: &cook::Bounds) -> Option<Bounds> {
     let mut corners: Vec<Option<(f64, f64)>> = Vec::new();
     cook::iter_corners(world_, box_, &mut |point| corners.push(project(bounds, view_, point)));
     if corners.iter().any(|c| c.is_none()) {
@@ -975,7 +975,7 @@ pub fn frustum(bounds: Bounds, view_: &rcam::Camera, color_: color::T, camera_: 
     let right = vec3::normalize(side);
     let up = vec3::cross(right, forward);
     let fov_y = match rcam::projection(camera_) {
-        rcam::projection::Perspective { fov_y, .. } => fov_y,
+        rcam::Projection::Perspective { fov_y, .. } => fov_y,
         _ => 1.,
     };
     let (_, _, width, height) = bounds;
@@ -998,23 +998,23 @@ pub fn frustum(bounds: Bounds, view_: &rcam::Camera, color_: color::T, camera_: 
 /// Handles on the selected node's xyz parameter triples, found by name: W translates position-like
 /// triples, E rotates `rotate_*`, R scales `scale_*`; Escape hides them so a drag only orbits. A
 /// camera's target also slides along the view direction: its focus distance.
-pub const handle_prefixes: [&str; 5] = ["translate", "center", "origin", "eye", "target"];
-pub const arrow_length: f64 = 60.;
+pub const HANDLE_PREFIXES: [&str; 5] = ["translate", "center", "origin", "eye", "target"];
+pub const ARROW_LENGTH: f64 = 60.;
 
 /// A handle: its box key, colour, tool, screen base and tip, `unit` (one world unit along its axis
 /// on screen, so a drag maps back to a delta), and the parameter edits a delta makes.
 #[derive(Clone)]
-pub struct arrow {
+pub struct Arrow {
     pub name: String,
     pub color: color::T,
-    pub tool: tool,
+    pub tool: Tool,
     pub base: (f64, f64),
     pub tip: (f64, f64),
     pub unit: (f64, f64),
     pub edits: Rc<dyn Fn(f64) -> Vec<(String, Value)>>,
 }
 
-pub fn arrows(node: &picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4::T, tool_: tool) -> Vec<arrow> {
+pub fn arrows(node: &Picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4::T, tool_: Tool) -> Vec<Arrow> {
     let project_ = |point: vec3::T| project(bounds, view_, mat4::transform_point(space, point));
     let values = &node.fields;
     let find = |name: &str| -> Option<f64> {
@@ -1035,8 +1035,8 @@ pub fn arrows(node: &picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4:
             _ => None,
         }
     };
-    let pivot = handle_prefixes.iter().find_map(|p| triple(p));
-    let make = |name: String, color_: color::T, at: vec3::T, direction: vec3::T, per_pixel: f64, edits: Rc<dyn Fn(f64) -> Vec<(String, Value)>>| -> Option<arrow> {
+    let pivot = HANDLE_PREFIXES.iter().find_map(|p| triple(p));
+    let make = |name: String, color_: color::T, at: vec3::T, direction: vec3::T, per_pixel: f64, edits: Rc<dyn Fn(f64) -> Vec<(String, Value)>>| -> Option<Arrow> {
         match (project_(at), project_(vec3::add(at, direction))) {
             (Some(base), Some((ux, uy))) => {
                 let (dx, dy) = (ux - base.0, uy - base.1);
@@ -1044,14 +1044,14 @@ pub fn arrows(node: &picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4:
                 if length < 1e-3 {
                     None
                 } else {
-                    Some(arrow {
+                    Some(Arrow {
                         name,
                         color: color_,
                         tool: tool_,
                         base,
                         unit: (dx, dy),
                         edits: Rc::new(move |delta| edits(delta * per_pixel)),
-                        tip: (base.0 + dx / length * arrow_length, base.1 + dy / length * arrow_length),
+                        tip: (base.0 + dx / length * ARROW_LENGTH, base.1 + dy / length * ARROW_LENGTH),
                     })
                 }
             }
@@ -1060,12 +1060,12 @@ pub fn arrows(node: &picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4:
     };
     let ax = axes();
     let colors = axis_colors();
-    let handles = |prefix: &str, (x, y, z): (f64, f64, f64), at: vec3::T| -> Vec<arrow> {
+    let handles = |prefix: &str, (x, y, z): (f64, f64, f64), at: vec3::T| -> Vec<Arrow> {
         (0..3)
             .filter_map(|axis| {
-                let name = format!("{prefix}_{}", axis_names[axis]);
+                let name = format!("{prefix}_{}", AXIS_NAMES[axis]);
                 let value = [x, y, z][axis];
-                let per_pixel = if tool_ == tool::Turn { range(&name).unwrap_or(360.) / 360. } else { 1. };
+                let per_pixel = if tool_ == Tool::Turn { range(&name).unwrap_or(360.) / 360. } else { 1. };
                 let n = name.clone();
                 make(name, colors[axis], at, ax[axis], per_pixel, Rc::new(move |delta| vec![(n.clone(), Value::Float(value + delta))]))
             })
@@ -1076,9 +1076,9 @@ pub fn arrows(node: &picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4:
         None => vec3::zero(),
     };
     match tool_ {
-        tool::No_tool => Vec::new(),
-        tool::Move => {
-            let distance: Vec<arrow> = match (triple("eye"), triple("target")) {
+        Tool::NoTool => Vec::new(),
+        Tool::Move => {
+            let distance: Vec<Arrow> = match (triple("eye"), triple("target")) {
                 (Some((ex, ey, ez)), Some((tx, ty, tz))) => {
                     let target = vec3::create(tx, ty, tz);
                     let direction = vec3::sub(target, vec3::create(ex, ey, ez));
@@ -1103,7 +1103,7 @@ pub fn arrows(node: &picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4:
                 }
                 _ => Vec::new(),
             };
-            let mut out: Vec<arrow> = handle_prefixes
+            let mut out: Vec<Arrow> = HANDLE_PREFIXES
                 .iter()
                 .flat_map(|prefix| match triple(prefix) {
                     Some(values) => handles(prefix, values, vec3::create(values.0, values.1, values.2)),
@@ -1113,15 +1113,15 @@ pub fn arrows(node: &picked, view_: &rcam::Camera, bounds: Bounds, space: &mat4:
             out.extend(distance);
             out
         }
-        tool::Turn => triple("rotate").map(|v| handles("rotate", v, at)).unwrap_or_default(),
-        tool::Grow => triple("scale").map(|v| handles("scale", v, at)).unwrap_or_default(),
+        Tool::Turn => triple("rotate").map(|v| handles("rotate", v, at)).unwrap_or_default(),
+        Tool::Grow => triple("scale").map(|v| handles("scale", v, at)).unwrap_or_default(),
     }
 }
 
-pub const pick_size: f64 = 16.;
+pub const PICK_SIZE: f64 = 16.;
 
 /// Handle drags edit the selected node; a click on a camera guide's eye selects that camera object.
-pub fn handles(ui: &mut Ui, selected: Option<&picked>, scene_: &kg::T, space: &mat4::T, view_: &rcam::Camera, extra_: &extra, bounds: Bounds) -> (Vec<(String, Value)>, bool, Option<i64>) {
+pub fn handles(ui: &mut Ui, selected: Option<&Picked>, scene_: &kg::T, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, bounds: Bounds) -> (Vec<(String, Value)>, bool, Option<i64>) {
     let mut edits: Vec<(String, Value)> = Vec::new();
     let mut grab = false;
     if let Some(node) = selected {
@@ -1133,7 +1133,7 @@ pub fn handles(ui: &mut Ui, selected: Option<&picked>, scene_: &kg::T, space: &m
                 let (mx, my) = signal.drag;
                 let (ux, uy) = a.unit;
                 let delta = match a.tool {
-                    tool::Turn => (mx * ux + my * uy) / ux.hypot(uy),
+                    Tool::Turn => (mx * ux + my * uy) / ux.hypot(uy),
                     _ => (mx * ux + my * uy) / (ux * ux + uy * uy),
                 };
                 if signal.held && delta != 0. {
@@ -1152,7 +1152,7 @@ pub fn handles(ui: &mut Ui, selected: Option<&picked>, scene_: &kg::T, space: &m
             if let Some(camera_) = camera_ {
                 if !same_view(&camera_, view_) {
                     if let Some((x, y)) = project(bounds, view_, rcam::position(&camera_)) {
-                        let box_ = ui.box_fmt(format_args!("pick-camera-{node_id}"), BoxOpts::default().flags(CLICKABLE).w(Size::Px(pick_size)).h(Size::Px(pick_size)).at((x - pick_size / 2., y - pick_size / 2.)));
+                        let box_ = ui.box_fmt(format_args!("pick-camera-{node_id}"), BoxOpts::default().flags(CLICKABLE).w(Size::Px(PICK_SIZE)).h(Size::Px(PICK_SIZE)).at((x - PICK_SIZE / 2., y - PICK_SIZE / 2.)));
                         let signal = ui.signal(&box_);
                         grab = grab || signal.held;
                         if signal.clicked {
@@ -1185,7 +1185,7 @@ pub fn gizmo((x, y, width, height): Bounds, view_: &rcam::Camera) -> Nodes {
         let (dx, dy) = [(3., 4.), (6., 4.), (-8., 7.)][axis];
         out.extend(thick_line(1.5, colors[axis], (cx, cy), tip));
         if !compact {
-            out.push(scene::text(((tip.0 + dx) as i64, (tip.1 + dy) as i64 - 6), Some(colors[axis]), Some(pxui::theme::LABEL_SIZE), &axis_names[axis].to_uppercase()));
+            out.push(scene::text(((tip.0 + dx) as i64, (tip.1 + dy) as i64 - 6), Some(colors[axis]), Some(pxui::theme::LABEL_SIZE), &AXIS_NAMES[axis].to_uppercase()));
         }
     }
     out
@@ -1210,10 +1210,10 @@ pub fn light_guide(bounds: Bounds, view_: &rcam::Camera, color_: color::T, light
         }
     };
     match &light_.kind {
-        light::kind::Directional { direction } => aim(vec3::scale(*direction, -4.), *direction),
-        light::kind::Point { position, .. } => project(bounds, view_, *position).map(marker).unwrap_or_default(),
-        light::kind::Spot { position, direction, .. } => aim(*position, *direction),
-        light::kind::Area { position, direction, width, height, .. } => {
+        light::Kind::Directional { direction } => aim(vec3::scale(*direction, -4.), *direction),
+        light::Kind::Point { position, .. } => project(bounds, view_, *position).map(marker).unwrap_or_default(),
+        light::Kind::Spot { position, direction, .. } => aim(*position, *direction),
+        light::Kind::Area { position, direction, width, height, .. } => {
             let side = vec3::cross(*direction, vec3::create(0., 1., 0.));
             let side = if vec3::length(side) < 1e-6 { vec3::create(1., 0., 0.) } else { vec3::normalize(side) };
             let up = vec3::normalize(vec3::cross(side, *direction));
@@ -1230,7 +1230,7 @@ pub fn light_guide(bounds: Bounds, view_: &rcam::Camera, color_: color::T, light
 
 /// `bounds` is the rectangle the view is drawn in (`film`): what is projected lies on the picture.
 /// The axis gizmo belongs to the `pane`'s corner.
-pub fn guides(scene_: &kg::T, selected: Option<&picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &extra, pane: Bounds, bounds: Bounds) -> Nodes {
+pub fn guides(scene_: &kg::T, selected: Option<&Picked>, space: &mat4::T, view_: &rcam::Camera, extra_: &Extra, pane: Bounds, bounds: Bounds) -> Nodes {
     let mut cameras = Nodes::new();
     if extra_.show.cameras {
         for node_id in camera_ids(scene_) {
@@ -1260,12 +1260,12 @@ pub fn guides(scene_: &kg::T, selected: Option<&picked>, space: &mat4::T, view_:
                 let at = (a.tip.0 as i64, a.tip.1 as i64);
                 handles_.extend(line(2, a.color, a.base, a.tip));
                 match a.tool {
-                    tool::Turn => {
+                    Tool::Turn => {
                         handles_.extend(one(scene::circle(at, 7, None, Some(a.color))));
                         handles_.extend(one(scene::circle(at, 6, None, Some(a.color))));
                     }
-                    tool::Grow => handles_.extend(one(scene::rect((at.0 - 5, at.1 - 5), 10, 10, Some(a.color), None))),
-                    tool::Move | tool::No_tool => handles_.extend(one(scene::circle(at, 5, Some(a.color), None))),
+                    Tool::Grow => handles_.extend(one(scene::rect((at.0 - 5, at.1 - 5), 10, 10, Some(a.color), None))),
+                    Tool::Move | Tool::NoTool => handles_.extend(one(scene::circle(at, 5, Some(a.color), None))),
                 }
             }
         }
@@ -1279,14 +1279,14 @@ pub fn guides(scene_: &kg::T, selected: Option<&picked>, space: &mat4::T, view_:
     out
 }
 
-pub fn save(request: &request) -> Result<(), String> {
+pub fn save(request: &Request) -> Result<(), String> {
     cc::save(request)
 }
-pub fn filename(request: &request) -> String {
+pub fn filename(request: &Request) -> String {
     request.filename.clone()
 }
 
-pub fn close(extra_: &extra) {
+pub fn close(extra_: &Extra) {
     renderer::close(&extra_.renderer);
     let _ = release(extra_);
 }

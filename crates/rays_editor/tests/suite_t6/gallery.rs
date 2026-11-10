@@ -113,7 +113,7 @@ fn bounds(g: &rdk_core::geometry::T) -> [f64; 6] {
 
 fn scene_of(g: &rdk_core::geometry::T) -> scene3::Scene3 {
     let m = rays_mesh::to_mesh(g).unwrap();
-    scene3::create(None, None, None, None, vec![scene3::mesh(Some(rays::material::unlit(rays_math::color::white())), None, None, Some(scene3::cull::Cull_none), None, m)]).unwrap()
+    scene3::create(None, None, None, None, vec![scene3::mesh(Some(rays::material::unlit(rays_math::color::white())), None, None, Some(scene3::Cull::CullNone), None, m)]).unwrap()
 }
 
 fn packed(g: &rdk_core::geometry::T) -> std::rc::Rc<renderer::scene_execution::SampledDraw> {

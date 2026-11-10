@@ -1,5 +1,5 @@
 //! Apply text-pane drafts, merges, scrubs and save bookkeeping; optional settings use trailing Options.
-#![allow(non_camel_case_types)]
+
 use flow_syntax::symbol::Symbol;
 use std::sync::Arc;
 
@@ -139,7 +139,7 @@ pub fn select_source(value: &mut EditorModel, path: &[Symbol]) {
             {
                 let view = &mut pane_mut(value).view;
                 scope::select(vec![path.to_vec()], view);
-                scope_commands::run_command(view, scope::Command::Frame_selection, &mut Vec::new());
+                scope_commands::run_command(view, scope::Command::FrameSelection, &mut Vec::new());
             };
         }
     } else {
@@ -247,7 +247,7 @@ fn one_intent(value: &mut EditorModel, intent: &Intent) {
         Intent::PrintError(error) => {
             let message = rays_diagnostic::to_string(error);
             value.edit_error = Some(message.clone());
-            value.notice = Some((notice_kind::Refusal, message));
+            value.notice = Some((NoticeKind::Refusal, message));
         }
         Intent::Tab(tab) => {
             text.tab = *tab;
@@ -493,7 +493,7 @@ pub fn apply_text_at(value: &mut EditorModel, key: &flow_check::workspace::Path,
         mine.target = None;
     }
     let code = std::mem::replace(&mut value.text, mine);
-    value.locals = put_local(key, &|l| local { code: code.clone(), ..l }, &value.locals);
+    value.locals = put_local(key, &|l| Local { code: code.clone(), ..l }, &value.locals);
 }
 
 /// The unapplied drafts of a text pane, as the applies its Check & apply would make.

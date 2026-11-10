@@ -1,4 +1,4 @@
-//! test_workspace_source.ml: the source file of a .rays sketch: found, saved over only while it is
+//! : the source file of a .rays sketch: found, saved over only while it is
 //! what the document came from, polled twice a second, reloaded as one history entry, refused text
 //! leaving the last good document; autosave, start keywords, imports, libraries, vocabulary.
 use super::t4::*;
@@ -74,7 +74,7 @@ pub fn files() {
     assert!(source_file::poll(100., &source).1.is_none(), "own write reloaded");
     // digest mismatch: another writer changed the file, so Save refuses
     write(&file, &text1);
-    assert!(source_file::save(&source, "x").err() == Some(source_file::Save_error::Changed), "saved over another writer's text");
+    assert!(source_file::save(&source, "x").err() == Some(source_file::SaveError::Changed), "saved over another writer's text");
     assert!(read(&file) == text1, "the refused save left the file alone");
     // the poll: one content read per half second
     let source = source_file::at(&file, &sha(&text0));
@@ -191,7 +191,7 @@ fn set_arg(path: &[&str], kw: &str, value: S::Draft) -> fe::Op {
     fe::Op::SetArg { node: path.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect(), key: fe::ArgKey::Kw(kw.into()), sub: vec![], value: S::make(value) }
 }
 fn meta(c: char) -> Event {
-    Event::Key_pressed(Key::KeyChar(c))
+    Event::KeyPressed(Key::KeyChar(c))
 }
 
 pub fn editor_flow() {
@@ -362,7 +362,7 @@ pub fn autosave() {
     r.edit(set_arg(&["g", "@result"], "radius", S::Draft::Num("1.25".into())));
     let e = r.d.ed.take().unwrap();
     r.replace(editor::set_renderer(e, rays_editor::editor_renderer::Mode::Wireframe));
-    r.step(vec![Event::Pointer_moved((200., 300.)), Event::Scrolled((0., -2.))]);
+    r.step(vec![Event::PointerMoved((200., 300.)), Event::Scrolled((0., -2.))]);
     let eye = |e: &editor::Editor| rays::camera::position(&rays::easy_camera::camera(&editor::camera(e)).unwrap());
     let saved_eye = eye(r.e());
     r.d.close();
@@ -375,11 +375,11 @@ pub fn autosave() {
     r.advance(70);
     assert!(read(&state) == snapshot && fs::metadata(&state).unwrap().modified().unwrap() == stamp, "an unchanged restarted sketch overwrote the last edited state");
     // E7: orbiting in the pristine document does not write over the earlier session's unsaved work
-    r.step(vec![Event::Pointer_moved((200., 300.)), Event::Scrolled((0., -2.))]);
+    r.step(vec![Event::PointerMoved((200., 300.)), Event::Scrolled((0., -2.))]);
     r.advance(70);
     assert!(read(&state) == snapshot, "orbiting after a restart overwrote the last edited state");
     r.step(vec![meta_k('/'), meta_k('b')]);
-    r.step(vec![Event::Key_pressed(Key::Enter)]);
+    r.step(vec![Event::KeyPressed(Key::Enter)]);
     assert!(has(&source_text(r.e()), ":radius 1.25") && editor::undo_label(r.e()) == Some("Restore last edited state".to_string()), "/ b did not restore the last edited state as one undo entry: {:?}; {}; {}", editor::undo_label(r.e()), cook_line(r.e()), source_text(r.e()));
     assert!(rays_math::vec3::nearly_equal(saved_eye, eye(r.e()), 1e-9), "recovery did not restore the viewport");
     assert!(editor::renderer(r.e()) == rays_editor::editor_renderer::Mode::Wireframe, "recovery did not restore the shared renderer choice");
@@ -391,11 +391,11 @@ pub fn autosave() {
     r = Run::new(create(), (200., 300.));
     r.step(vec![]);
     r.step(vec![meta_k('/'), meta_k('b')]);
-    r.step(vec![Event::Key_pressed(Key::Enter)]);
+    r.step(vec![Event::KeyPressed(Key::Enter)]);
     assert!(has(&source_text(r.e()), ":radius 0.5") && has(&cook_line(r.e()), "rejected"), "a broken autosave replaced the live document or hid its error");
     r.step(vec![meta_k('/'), meta_k('b')]);
-    r.step(vec![Event::Key_pressed(Key::Delete)]);
-    r.step(vec![Event::Key_pressed(Key::Delete)]);
+    r.step(vec![Event::KeyPressed(Key::Delete)]);
+    r.step(vec![Event::KeyPressed(Key::Delete)]);
     assert!(!std::path::Path::new(&state).exists(), "Delete twice did not remove the recovery file");
     r.d.close();
     assert!(!std::path::Path::new(&state).exists(), "closing an unchanged sketch recreated deleted recovery");
@@ -415,7 +415,7 @@ pub fn autosave() {
     let _ = fs::remove_dir_all(&dir);
 }
 fn meta_k(c: char) -> Event {
-    Event::Key_pressed(Key::KeyChar(c))
+    Event::KeyPressed(Key::KeyChar(c))
 }
 
 /// The start keywords (flow.md 11.11) through the two routes that replace the document from a file.
@@ -456,7 +456,7 @@ pub fn start_keywords() {
     assert!(line(&r, "projection") == "text" && has(&line(&r, "panels"), "lisp code: document tab"), "a reload did not follow the changed keywords: {} / {}", line(&r, "projection"), line(&r, "panels"));
     // a preset: saved with :view "text", loaded over a document that says "list"
     r.step(vec![meta_k('/'), meta_k('s')]);
-    r.step(vec![Event::Key_pressed(Key::Enter)]);
+    r.step(vec![Event::KeyPressed(Key::Enter)]);
     r.step(vec![]);
     let name = match editor_document::preset::list(&presets).as_slice() {
         [(name, _)] => name.clone(),
@@ -468,7 +468,7 @@ pub fn start_keywords() {
     assert!(line(&r, "projection") == "list", "an edit of :view was not followed");
     let load = |r: &mut Run| {
         r.step(vec![meta_k('/'), meta_k('b')]);
-        r.step(vec![Event::Text_input(name.clone()), Event::Key_pressed(Key::Enter)]);
+        r.step(vec![Event::TextInput(name.clone()), Event::KeyPressed(Key::Enter)]);
         r.step(vec![]);
         r.step(vec![]);
     };
@@ -613,22 +613,22 @@ pub fn vocabulary_refresh() {
     write(&file, &text(Some("distance")));
     poll(&mut r);
     assert!(head(&r) && labels(&r, "sop/vocab_card geo :dis").iter().any(|l| l == ":distance"), "reload did not add local kind and parameter completions");
-    let step = |r: &mut Run, a: rays_editor::editor_commands::action| {
+    let step = |r: &mut Run, a: rays_editor::editor_commands::Action| {
         r.d.count += 1;
         let f = frame(&Opts::default(), (450., 300.), vec![], r.d.count);
         let e = r.d.ed.take().unwrap();
         r.d.ed = Some(rays_editor::reduce::step(e, None, None, &[a], &f).unwrap());
     };
-    step(&mut r, rays_editor::editor_commands::action::Undo);
+    step(&mut r, rays_editor::editor_commands::Action::Undo);
     assert!(!head(&r), "undo retained removed declaration completion");
-    step(&mut r, rays_editor::editor_commands::action::Redo);
+    step(&mut r, rays_editor::editor_commands::Action::Redo);
     assert!(head(&r), "redo did not restore declaration completion");
     write(&file, &text(Some("amount")));
     poll(&mut r);
     assert!(labels(&r, "sop/vocab_card geo :am").iter().any(|l| l == ":amount") && !labels(&r, "sop/vocab_card geo :dis").iter().any(|l| l == ":distance"), "schema edit kept old keyword vocabulary");
     r.edit(set_arg(&["g", "@result"], "amount", S::Draft::Num("0.75".into())));
     assert!(head(&r) && labels(&r, "sop/vocab_card geo :am").iter().any(|l| l == ":amount"), "scalar scrub lost declaration vocabulary");
-    step(&mut r, rays_editor::editor_commands::action::Undo);
+    step(&mut r, rays_editor::editor_commands::Action::Undo);
     write(&file, &text(None));
     poll(&mut r);
     assert!(!head(&r), "reload retained removed local kind completion");

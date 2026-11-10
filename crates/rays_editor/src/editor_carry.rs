@@ -1,6 +1,5 @@
-//! The carry's turn of a frame: the key route, the preview, the put and the cancel. Port of
-//! lib/rays_editor/editor_carry.ml.
-#![allow(non_camel_case_types)]
+//! The carry's turn of a frame: the key route, the preview, the put and the cancel.
+
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -13,7 +12,7 @@ use rays::frame;
 
 use crate::carry::{self as carry_mod, Place};
 use crate::cook;
-use crate::editor_commands::action;
+use crate::editor_commands::Action;
 use crate::editor_inspect::kind;
 use crate::editor_model::*;
 use crate::editor_panes::{follow_target, go, graph_name, graph_of_object};
@@ -24,64 +23,64 @@ use crate::selection;
 
 // ---- carry ----
 
-pub const carry_letters: &str = "asdfghjkl";
+pub const CARRY_LETTERS: &str = "asdfghjkl";
 /// seconds the pointer rests on a node before the carry enters it
-pub const carry_rest: f64 = 0.6;
+pub const CARRY_REST: f64 = 0.6;
 
 /// While a payload is carried the document only navigates: the keys that walk, follow, go back and
 /// jump work; every edit waits for the put.
-pub fn carry_allowed(a: &action) -> bool {
+pub fn carry_allowed(a: &Action) -> bool {
     match a {
-        action::Enter | action::Up | action::Back(_) | action::Jump | action::Guide_toggle | action::Guide_keys | action::Frame_tile | action::Pick_up => true,
-        action::Scope_command(scope::Command::Walk(_) | scope::Command::Frame_all | scope::Command::Frame_selection) => true,
+        Action::Enter | Action::Up | Action::Back(_) | Action::Jump | Action::GuideToggle | Action::GuideKeys | Action::FrameTile | Action::PickUp => true,
+        Action::ScopeCommand(scope::Command::Walk(_) | scope::Command::FrameAll | scope::Command::FrameSelection) => true,
         _ => false,
     }
 }
 
-pub fn carry_place(p: &carry_preview) -> &Place {
+pub fn carry_place(p: &CarryPreview) -> &Place {
     match p {
-        carry_preview::Showing { place, .. } | carry_preview::Held_back { place, .. } | carry_preview::Refused { place, .. } => place,
+        CarryPreview::Showing { place, .. } | CarryPreview::HeldBack { place, .. } | CarryPreview::Refused { place, .. } => place,
     }
 }
 
 /// the document the panels read: the scratch copy while a target is hot and its picture is on
 /// screen, else the one that was there
-pub fn carry_shown(c: &carry) -> Arc<Document> {
+pub fn carry_shown(c: &Carry) -> Arc<Document> {
     match &c.preview {
-        Some(carry_preview::Showing { doc, .. }) => doc.clone(),
-        Some(carry_preview::Held_back { .. } | carry_preview::Refused { .. }) | None => c.original.clone(),
+        Some(CarryPreview::Showing { doc, .. }) => doc.clone(),
+        Some(CarryPreview::HeldBack { .. } | CarryPreview::Refused { .. }) | None => c.original.clone(),
     }
 }
 
 /// The put at `place`, run on the original: the checker's answer is the preview, the refusal's
 /// reason and the write.  A put that takes longer than the budget (or onto a cook that does) is
 /// said and not shown.
-pub fn carry_try(value: &EditorModel, c: &carry, place: &Place) -> carry_preview {
+pub fn carry_try(value: &EditorModel, c: &Carry, place: &Place) -> CarryPreview {
     let Some(catalog) = flow_catalog(value) else {
-        return carry_preview::Refused { place: place.clone(), reason: "The catalog is unavailable".to_string() };
+        return CarryPreview::Refused { place: place.clone(), reason: "The catalog is unavailable".to_string() };
     };
     let start = (value.clock)();
     let result = carry_mod::put(Some(&value.factories), &catalog, &c.original, &c.payload, place);
     let spent = (value.clock)() - start;
     match result {
-        Err(reason) => carry_preview::Refused { place: place.clone(), reason },
+        Err(reason) => CarryPreview::Refused { place: place.clone(), reason },
         Ok((doc, what)) => {
             let doc = Arc::new(doc);
             match value.cook.seconds {
                 _ if spent >= value.carry_budget => {
-                    carry_preview::Held_back { place: place.clone(), doc, what, reason: format!("applying takes {} ms", (spent * 1000.0) as i64) }
+                    CarryPreview::HeldBack { place: place.clone(), doc, what, reason: format!("applying takes {} ms", (spent * 1000.0) as i64) }
                 }
                 Some(cook_seconds) if cook_seconds >= value.carry_budget => {
-                    carry_preview::Held_back { place: place.clone(), doc, what, reason: format!("a cook takes {} ms", (cook_seconds * 1000.0) as i64) }
+                    CarryPreview::HeldBack { place: place.clone(), doc, what, reason: format!("a cook takes {} ms", (cook_seconds * 1000.0) as i64) }
                 }
-                _ => carry_preview::Showing { place: place.clone(), doc, what },
+                _ => CarryPreview::Showing { place: place.clone(), doc, what },
             }
         }
     }
 }
 
 /// The key route's letters for the graph the pane shows now (they follow navigation).
-pub fn carry_targets<'a>(value: &ModelView<'a>, c: carry) -> carry {
+pub fn carry_targets<'a>(value: &ModelView<'a>, c: Carry) -> Carry {
     let graph = graph_name(value);
     if let Some((for_graph, _)) = &c.targets {
         if *for_graph == graph {
@@ -92,9 +91,9 @@ pub fn carry_targets<'a>(value: &ModelView<'a>, c: carry) -> carry {
         None => Vec::new(),
         Some(catalog) => carry_mod::targets(Some(&value.factories), &catalog, None, &c.original, &c.payload, graph.as_deref()),
     };
-    let letters: Vec<char> = carry_letters.chars().collect();
+    let letters: Vec<char> = CARRY_LETTERS.chars().collect();
     let targets = found.into_iter().enumerate().map(|(i, (place, label))| (letters[i].to_string(), place, label)).collect();
-    carry { targets: Some((graph, targets)), ..c }
+    Carry { targets: Some((graph, targets)), ..c }
 }
 
 fn referenced_payload(ws: &w::Workspace, name: &str) -> Option<Result<carry_mod::Payload, String>> {
@@ -155,7 +154,7 @@ pub fn carry_payload<'a>(value: &ModelView<'a>) -> Result<carry_mod::Payload, St
     scene.ok_or_else(|| "Nothing to pick up \u{b7} open a material, SOP or scene graph, or select a geometry or camera object".to_string())
 }
 
-pub fn carry_cancel(value: &mut EditorModel, c: &carry, notice: (notice_kind, String)) {
+pub fn carry_cancel(value: &mut EditorModel, c: &Carry, notice: (NoticeKind, String)) {
     value.ui.borrow_mut().cancel_carry();
     let doc = c.original.clone();
     let level = document::resolve_level(&doc, pane_level(&(&*value).into()));
@@ -169,11 +168,11 @@ pub fn carry_cancel(value: &mut EditorModel, c: &carry, notice: (notice_kind, St
     pane_mut(value).at = level;
 }
 
-pub fn carry_commit(value: &mut EditorModel, c: &carry, doc: &Arc<Document>, what: &str) {
+pub fn carry_commit(value: &mut EditorModel, c: &Carry, doc: &Arc<Document>, what: &str) {
     value.ui.borrow_mut().cancel_carry();
     value.carry = None;
     install(value, (**doc).clone(), "Put", Merge::Step);
-    value.notice = Some((notice_kind::Info, format!("Put {} \u{b7} wrote {what} \u{b7} one undo entry", c.payload.value)));
+    value.notice = Some((NoticeKind::Info, format!("Put {} \u{b7} wrote {what} \u{b7} one undo entry", c.payload.value)));
 }
 
 fn first_char(letter: &str) -> char {
@@ -189,7 +188,7 @@ pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a fra
             let carrying = value.ui.borrow().carrying();
             return match carrying {
                 Some(payload) => {
-                    value.carry = Some(carry {
+                    value.carry = Some(Carry {
                         payload,
                         via: Via::Pointer,
                         original: crate::editor_history::present_arc(&value.history),
@@ -209,10 +208,10 @@ pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a fra
         }
         Some(c) => c.clone(),
     };
-    let pressed: Vec<Key> = frame_.input.events.iter().filter_map(|e| if let Event::Key_pressed(k) = e { Some(k.clone()) } else { None }).collect();
+    let pressed: Vec<Key> = frame_.input.events.iter().filter_map(|e| if let Event::KeyPressed(k) = e { Some(k.clone()) } else { None }).collect();
     let idle = value.leader == router::State::Idle;
     let escape = idle && pressed.contains(&Key::Escape);
-    let lost = frame_.input.events.iter().any(|e| matches!(e, Event::Focus_lost));
+    let lost = frame_.input.events.iter().any(|e| matches!(e, Event::FocusLost));
     let typing = !text_focus && idle && value.prompt.is_none() && value.menu.is_none();
     let c = if c.via == Via::Keys { carry_targets(&(&*value).into(), c) } else { c };
     let letters: Vec<(String, Place, String)> = match &c.targets {
@@ -229,7 +228,7 @@ pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a fra
     }
     let enter = c.via == Via::Keys && typing && pressed.contains(&Key::Enter);
     let consumed = |key: &Key| -> bool { (idle && *key == Key::Escape) || (c.via == Via::Keys && typing && (*key == Key::Enter || letters.iter().any(|(l, _, _)| Key::KeyChar(first_char(l)) == *key))) };
-    let taken_event = |event: &Event| matches!(event, Event::Key_pressed(key) | Event::Key_released(key) if consumed(key));
+    let taken_event = |event: &Event| matches!(event, Event::KeyPressed(key) | Event::KeyReleased(key) if consumed(key));
     let mut taken = Cow::Borrowed(frame_);
     if frame_.input.events.iter().any(taken_event) || frame_.input.keys.iter().any(consumed) {
         let taken = taken.to_mut();
@@ -262,18 +261,18 @@ pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a fra
     let still_carrying = value.ui.borrow().carrying().is_some();
     if escape || lost || (!still_carrying && dropped.is_none()) {
         let message = if lost { "Carry dropped \u{b7} the window lost focus \u{b7} nothing written" } else { "Carry dropped \u{b7} nothing written" };
-        carry_cancel(value, &c, (notice_kind::Info, message.to_string()));
+        carry_cancel(value, &c, (NoticeKind::Info, message.to_string()));
         return (taken, true);
     }
     let preview = if desired.as_ref() == c.preview.as_ref().map(carry_place) { c.preview.clone() } else { desired.as_ref().map(|d| carry_try(&*value, &c, d)) };
     c.preview = preview.clone();
     if dropped.is_some() || enter {
         match preview {
-            Some(carry_preview::Showing { doc, what, .. } | carry_preview::Held_back { doc, what, .. }) => carry_commit(value, &c, &doc, &what),
-            Some(carry_preview::Refused { reason, .. }) => carry_cancel(value, &c, (notice_kind::Refusal, format!("Refused \u{b7} {reason} \u{b7} nothing written"))),
-            None if dropped.is_some() => carry_cancel(value, &c, (notice_kind::Info, "Carry dropped \u{b7} nothing written".to_string())),
+            Some(CarryPreview::Showing { doc, what, .. } | CarryPreview::HeldBack { doc, what, .. }) => carry_commit(value, &c, &doc, &what),
+            Some(CarryPreview::Refused { reason, .. }) => carry_cancel(value, &c, (NoticeKind::Refusal, format!("Refused \u{b7} {reason} \u{b7} nothing written"))),
+            None if dropped.is_some() => carry_cancel(value, &c, (NoticeKind::Info, "Carry dropped \u{b7} nothing written".to_string())),
             None => {
-                value.carry = Some(carry { hint: Some("Pick a target letter first, or Esc".to_string()), ..c });
+                value.carry = Some(Carry { hint: Some("Pick a target letter first, or Esc".to_string()), ..c });
                 return (taken, false);
             }
         }
@@ -288,7 +287,7 @@ pub fn carry_step<'a>(value: &mut EditorModel, text_focus: bool, frame_: &'a fra
         _ => None,
     };
     let entered: Option<String> = match &resting {
-        Some((Place::Node(path), since)) if frame_.input.t - *since >= carry_rest => {
+        Some((Place::Node(path), since)) if frame_.input.t - *since >= CARRY_REST => {
             // what the original document references, not the preview
             let original = ModelView { doc: &c.original, ..ModelView::from(&*value) };
             follow_target(&original, Some(path.as_slice()))

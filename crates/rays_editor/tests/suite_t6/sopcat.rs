@@ -552,7 +552,7 @@ fn run_body() {
     check(node::operation(&points) == "points" && edit::factory_arity(&points_factory) == 0, "point-generation editor factory has the wrong node or arity");
     let mut point_session = session::create(2, 1_000_000).unwrap();
     let point_mesh = rdk_rays::rays_mesh::to_mesh(&cook(&mut point_session, &points)).unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)));
-    check(matches!(rays::mesh::mode(&point_mesh), rays::mesh::mode::Points) && rays::mesh::vertex_count(&point_mesh) == 50, "point-only SOP output did not retain point rendering mode");
+    check(matches!(rays::mesh::mode(&point_mesh), rays::mesh::Mode::Points) && rays::mesh::vertex_count(&point_mesh) == 50, "point-only SOP output did not retain point rendering mode");
     session::close(&mut point_session);
     let explosion = rdk_rays::packed_pieces::explosion(node::operation(&graph), &node::parameter_fields(&graph)).unwrap();
     check(node::operation(&graph) == "exploded_view" && explosion.amount == 0.32 && explosion.piece_attribute == "piece", "standard Exploded View node lost its operation or PPX defaults");

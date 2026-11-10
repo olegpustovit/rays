@@ -1,5 +1,5 @@
 //! Loop snapshots share the host through Rc<RefCell>. Scene identity and retained rest bookkeeping skip unchanged composition; replacing core/extra invalidates rest. Shared baked/drawn owners compare by identity, while Scene3 uses same().
-#![allow(non_camel_case_types)]
+
 use flow_syntax::symbol::Symbol;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -33,62 +33,62 @@ use crate::cook;
 use crate::editor_host;
 use crate::editor_inspect::{self, View};
 use crate::editor_list;
-use crate::editor_model::{self as m, picked, update};
+use crate::editor_model::{self as m, Picked};
 use crate::editor_setup;
 use crate::editor_shell;
 use crate::editor_status;
-use crate::loop_view::{canvas_picture, hidden_entry, hidden_scene_cache, hidden_only, view_keys};
+use crate::loop_view::{CanvasPicture, hidden_entry, HiddenSceneCache, hidden_only, view_keys};
 use crate::source_file;
 use crate::timeline;
 use crate::viewport as V;
-use crate::world_map::world_drag;
+use crate::world_map::WorldDrag;
 
-pub type layout = pxui_shell::layout::Panels;
+pub type Layout = pxui_shell::layout::Panels;
 
 /// How the editor draws a prepared object (the sketch's `draw`).
-pub type Draw_fn = Rc<dyn Fn(&node::T, &cook::prepared) -> Result<d3::Scene3, ConversionError>>;
+pub type DrawFn = Rc<dyn Fn(&node::T, &cook::Prepared) -> Result<d3::Scene3, ConversionError>>;
 
 /// The last full frame, once nothing but the clock could change it: its picture, and how many full
 /// frames in a row drew the same one.
 #[derive(Clone)]
-pub struct rest {
-    pub picture: Vec<rays::scene::node>,
+pub struct Rest {
+    pub picture: Vec<rays::scene::Node>,
     pub still: i64,
     pub shown: frame::Frame,
 }
 
 /// A World's bake with the World it came from; shared, compared by identity.
-pub type baked_pair = (world::World, Rc<world::baked>);
+pub type BakedPair = (world::World, Rc<world::Baked>);
 
 /// One object's drawing: its graph and prepared value (the cache key), the scene, its texture and
 /// the conversion error.
 #[derive(Clone)]
-pub struct drawn_entry {
+pub struct DrawnEntry {
     pub graph: node::T,
-    pub prepared: cook::Prepared_ref,
+    pub prepared: cook::PreparedRef,
     pub rendered: d3::Scene3,
     pub texture: Option<texture::Texture>,
     pub error: Option<String>,
 }
 
-pub type Drawn = BTreeMap<i64, drawn_entry>;
+pub type Drawn = BTreeMap<i64, DrawnEntry>;
 
 #[derive(Clone)]
 pub struct LoopModel {
     /// Shared only by explicit Editor snapshots; the native loop mutates its unique core.
     pub core: Rc<m::EditorModel>,
-    pub rest: Option<rest>,
+    pub rest: Option<Rest>,
     /// the orbit of the focused viewport
-    pub camera: V::camera,
+    pub camera: V::Camera,
     /// the orbits of the other viewports, by key
-    pub cameras: Vec<(String, V::camera)>,
+    pub cameras: Vec<(String, V::Camera)>,
     /// the viewport `camera` belongs to
     pub viewing: Option<String>,
-    pub control: V::control,
-    pub draw: Draw_fn,
-    pub rendered: Option<V::rendered>,
+    pub control: V::Control,
+    pub draw: DrawFn,
+    pub rendered: Option<V::Rendered>,
     /// viewports over another scene instance
-    pub views: Vec<(String, V::rendered)>,
+    pub views: Vec<(String, V::Rendered)>,
     /// per object
     pub drawn: Rc<Drawn>,
     pub composed: Option<(kg::T, Level, Vec<(String, Vec<i64>)>)>,
@@ -98,18 +98,18 @@ pub struct LoopModel {
     pub memory_error: Option<String>,
     /// the machine's budget and the pressure source are set
     pub memory_known: bool,
-    pub baked: Option<Rc<world::baked>>,
-    pub baked_from: Option<baked_pair>,
+    pub baked: Option<Rc<world::Baked>>,
+    pub baked_from: Option<BakedPair>,
     /// the World of each viewport over another scene instance
-    pub baked_views: Vec<(String, baked_pair)>,
+    pub baked_views: Vec<(String, BakedPair)>,
     /// the lat-long view's upload
-    pub map: Option<(Rc<world::baked>, image::Image)>,
+    pub map: Option<(Rc<world::Baked>, image::Image)>,
     pub render_status: Option<String>,
-    pub pending_render: Option<V::request>,
+    pub pending_render: Option<V::Request>,
     pub background: color::T,
-    pub extra: V::extra,
-    pub hidden_scene_cache: Option<hidden_scene_cache>,
-    pub world_drag: Option<world_drag>,
+    pub extra: V::Extra,
+    pub hidden_scene_cache: Option<HiddenSceneCache>,
+    pub world_drag: Option<WorldDrag>,
     /// a left press in the view that may become a click
     pub pick_press: Option<(f64, f64)>,
     /// the .rays the document came from: polled, saved over
@@ -130,7 +130,7 @@ pub struct LoopModel {
     pub saved_view: Syntax,
     pub saved_view_key: ([u64; 7], bool, crate::editor_renderer::Mode),
     pub state_error: Option<String>,
-    pub canvases: Vec<(String, canvas_picture)>,
+    pub canvases: Vec<(String, CanvasPicture)>,
     pub host: Rc<std::cell::RefCell<workspace_host::WorkspaceHost>>,
     /// when this frame's update ended, and the meshes it draws for the first time
     pub presenting: Option<(f64, Vec<rdk_core::geometry::T>)>,
@@ -158,7 +158,7 @@ pub struct Create {
     pub gpu_owner: Option<workspace_gpu::WorkspaceGpu>,
     pub settings: Option<editor_document::settings::T>,
     pub lights: Vec<light::Light>,
-    pub camera: Option<V::camera>,
+    pub camera: Option<V::Camera>,
     pub background: Option<color::T>,
     pub seed: Option<i64>,
     pub grain: Option<i64>,
@@ -190,7 +190,7 @@ fn real_path(file: &str) -> String {
     }
 }
 
-pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<LoopModel, String> {
+pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::PrepareFn, draw: DrawFn) -> Result<LoopModel, String> {
     let mut workspace = workspace.clone();
     if let Some(inputs) = o.inputs {
         workspace.inputs = std::sync::Arc::new((*inputs).clone());
@@ -206,8 +206,8 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
     let gpu = workspace_gpu::config(&host.gpu, false);
     let seed_camera = camera.clone();
     let lights = o.lights;
-    let defaults = editor_setup::create_opts::default();
-    let opts = editor_setup::create_opts {
+    let defaults = editor_setup::CreateOpts::default();
+    let opts = editor_setup::CreateOpts {
         gpu: Some(gpu),
         settings: o.settings,
         seed_scene: Some(Rc::new(move |scene| V::seed_scene(&seed_camera, seed_lights(&lights, scene)))),
@@ -304,16 +304,16 @@ pub fn prepared(value: &LoopModel) -> Option<rdk_core::geometry::T> {
     editor_list::prepared(&(&value.core).into()).map(|p| p.geometry.clone())
 }
 
-pub fn camera(value: &LoopModel) -> V::camera {
+pub fn camera(value: &LoopModel) -> V::Camera {
     value.camera.clone()
 }
-pub fn extra(value: &LoopModel) -> V::extra {
+pub fn extra(value: &LoopModel) -> V::Extra {
     value.extra.clone()
 }
 pub fn timeline(value: &LoopModel) -> timeline::Timeline {
     editor_list::timeline(&value.core)
 }
-pub fn selected_node(value: &LoopModel) -> Option<picked> {
+pub fn selected_node(value: &LoopModel) -> Option<Picked> {
     editor_list::selected_node(&(&value.core).into())
 }
 pub fn displayed_node(value: &LoopModel) -> node::T {
@@ -406,11 +406,11 @@ pub fn lights(value: &LoopModel) -> Vec<light::Light> {
     objects::lights(true, &resolved_scene(value))
 }
 
-pub fn world(value: &LoopModel) -> Option<world::baked> {
+pub fn world(value: &LoopModel) -> Option<world::Baked> {
     value.baked.as_ref().map(|b| (**b).clone())
 }
 
-pub fn objects_placed(value: &LoopModel) -> Vec<(mat4::T, cook::Prepared_ref)> {
+pub fn objects_placed(value: &LoopModel) -> Vec<(mat4::T, cook::PreparedRef)> {
     editor_host::placed_pieces(true, None, &value.core).into_iter().map(|(matrix, piece)| (matrix, piece.prepared)).collect()
 }
 
@@ -444,7 +444,7 @@ pub fn look_key(value: &LoopModel, key: &str) -> String {
 
 /// the view of the viewport `key`: its own orbit, the focused one's being `camera`, through the
 /// camera of its own root
-pub fn camera_for(viewing: &Option<String>, camera: &V::camera, cameras: &[(String, V::camera)], extra: &V::extra, pending: bool, key: &str) -> rays::camera::Camera {
+pub fn camera_for(viewing: &Option<String>, camera: &V::Camera, cameras: &[(String, V::Camera)], extra: &V::Extra, pending: bool, key: &str) -> rays::camera::Camera {
     let key = look_key_of(viewing, key);
     let orbit = if viewing.as_deref() == Some(key.as_str()) {
         camera.clone()
@@ -465,8 +465,8 @@ pub fn view_camera(value: &LoopModel) -> rays::camera::Camera {
 /// Which viewport the orbit belongs to, and the orbits of the others.
 pub struct Focus {
     pub viewing: Option<String>,
-    pub camera: V::camera,
-    pub cameras: Vec<(String, V::camera)>,
+    pub camera: V::Camera,
+    pub cameras: Vec<(String, V::Camera)>,
 }
 
 /// Focus moves to another viewport: the orbit of the one left is kept, the new one starts from the
@@ -494,7 +494,7 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &pxui_shell:
             Panel::View(key) if Some(&key) != value.viewing.as_ref() => match &value.viewing {
                 None => {
                     // the first focus: every other viewport starts as a copy of the orbit in use
-                    let others: Vec<(String, V::camera)> = g
+                    let others: Vec<(String, V::Camera)> = g
                         .leaves
                         .iter()
                         .filter_map(|leaf| match &leaf.panel {
@@ -505,7 +505,7 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &pxui_shell:
                     Focus { viewing: Some(key), cameras: others, ..unchanged }
                 }
                 Some(previous) => {
-                    let mut kept: Vec<(String, V::camera)> = if keys.contains(previous) {
+                    let mut kept: Vec<(String, V::Camera)> = if keys.contains(previous) {
                         let mut k = vec![(previous.clone(), value.camera.clone())];
                         k.extend(unchanged.cameras.iter().filter(|(p, _)| p != previous).cloned());
                         k
@@ -523,7 +523,7 @@ pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &pxui_shell:
     }
 }
 
-pub fn paint_view(value: &LoopModel, key: &str, viewport: pxui_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::node> {
+pub fn paint_view(value: &LoopModel, key: &str, viewport: pxui_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::Node> {
     V::paint(&value.extra, key, V::film(&value.extra, &look_key(value, key), viewport), view_, rendered)
 }
 
@@ -583,15 +583,15 @@ pub fn composition_key(core: &m::EditorModel, scene: &kg::T) -> (kg::T, Level, V
 }
 
 /// What `compose` hands back, and whether the drawings (`drawn`) are new ones.
-pub struct composed_out {
-    pub rendered: Option<V::rendered>,
-    pub views: Vec<(String, V::rendered)>,
+pub struct ComposedOut {
+    pub rendered: Option<V::Rendered>,
+    pub views: Vec<(String, V::Rendered)>,
     pub drawn: Rc<Drawn>,
     pub errors: Vec<String>,
     pub drawn_changed: bool,
 }
 
-fn same_baked(a: &Option<Rc<world::baked>>, b: &Option<Rc<world::baked>>) -> bool {
+fn same_baked(a: &Option<Rc<world::Baked>>, b: &Option<Rc<world::Baked>>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
         (None, None) => true,
@@ -599,11 +599,11 @@ fn same_baked(a: &Option<Rc<world::baked>>, b: &Option<Rc<world::baked>>) -> boo
     }
 }
 
-fn same_baked_views(a: &[(String, baked_pair)], b: &[(String, baked_pair)]) -> bool {
+fn same_baked_views(a: &[(String, BakedPair)], b: &[(String, BakedPair)]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|((k, (_, x)), (k2, (_, y)))| k == k2 && Rc::ptr_eq(x, y))
 }
 
-pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &Option<Rc<world::baked>>, baked_views: &[(String, baked_pair)], scene: &kg::T) -> composed_out {
+pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &Option<Rc<world::Baked>>, baked_views: &[(String, BakedPair)], scene: &kg::T) -> ComposedOut {
     let draw_errors = |drawn: &Drawn, errors: &[String]| -> Vec<String> {
         let mut out: Vec<String> = errors.to_vec();
         for e in drawn.values() {
@@ -647,7 +647,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
         || !same_baked_views(baked_views, &value.baked_views)
         || value.rendered.is_none())
     {
-        return composed_out { rendered: value.rendered.clone(), views: value.views.clone(), drawn: value.drawn.clone(), errors: draw_errors(&value.drawn, &errors), drawn_changed: false };
+        return ComposedOut { rendered: value.rendered.clone(), views: value.views.clone(), drawn: value.drawn.clone(), errors: draw_errors(&value.drawn, &errors), drawn_changed: false };
     }
     let placed = editor_host::placed_pieces(false, Some(&View::All), core);
     let mut drawn: Drawn = BTreeMap::new();
@@ -673,7 +673,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
                     Some(tex) => walk::with_texture(&d3::textured(None, tex.clone()), &scene3),
                     None => scene3,
                 };
-                drawn.insert(piece.id, drawn_entry { graph: piece.graph.clone(), prepared: piece.prepared.clone(), rendered: scene3, texture, error });
+                drawn.insert(piece.id, DrawnEntry { graph: piece.graph.clone(), prepared: piece.prepared.clone(), rendered: scene3, texture, error });
             }
         }
     }
@@ -684,7 +684,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
             Level::Scene => false,
         }
     };
-    let compose_pieces = |world_: &Option<Rc<world::baked>>, view: &View, pieces: Vec<(mat4::T, cook::piece)>| -> d3::Scene3 {
+    let compose_pieces = |world_: &Option<Rc<world::Baked>>, view: &View, pieces: Vec<(mat4::T, cook::Piece)>| -> d3::Scene3 {
         V::compose(
             &editor_host::scene_for_view(Some(scene.clone()), Some(view), core),
             world_.as_deref(),
@@ -710,7 +710,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     let views: Vec<(String, d3::Scene3)> = if waiting {
         Vec::new()
     } else {
-        let mut composed: Vec<(String, d3::Scene3, Option<flow_syntax::value::Value>, Option<Rc<world::baked>>)> = Vec::new();
+        let mut composed: Vec<(String, d3::Scene3, Option<flow_syntax::value::Value>, Option<Rc<world::Baked>>)> = Vec::new();
         for key in view_keys(core) {
             let world_ = baked_views.iter().find(|(k, _)| *k == key).map(|(_, (_, b))| b.clone());
             let instance = instance_of(&key);
@@ -740,7 +740,7 @@ pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &
     };
     let rendered = if waiting { None } else { Some(compose_pieces(baked, &View::Primary, editor_host::placed_pieces(false, None, core))) };
     let errs = draw_errors(&drawn, &errors);
-    composed_out { rendered, views, drawn: Rc::new(drawn), errors: errs, drawn_changed: true }
+    ComposedOut { rendered, views, drawn: Rc::new(drawn), errors: errs, drawn_changed: true }
 }
 
 /// The frame that first drew a mesh has been presented: its time is the display sink's first draw.

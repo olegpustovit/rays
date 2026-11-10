@@ -1,5 +1,5 @@
-//! Helpers of the t2 group: ports of test_support.ml, ws_fixture.ml, editor_prepare.ml and the
-//! frame/click helpers of test_editor_input.ml the group's tests use.
+//! Helpers of the t2 group: ports of , ,  and the
+//! frame/click helpers of  the group's tests use.
 #![allow(dead_code)]
 use std::sync::Arc;
 
@@ -103,11 +103,11 @@ pub fn frame(n: i64) -> frame::Frame {
 }
 
 pub fn click_events(p: (f64, f64)) -> Vec<Event> {
-    vec![Event::Pointer_pressed(MouseButton::LeftButton, p), Event::Pointer_released(MouseButton::LeftButton, p)]
+    vec![Event::PointerPressed(MouseButton::LeftButton, p), Event::PointerReleased(MouseButton::LeftButton, p)]
 }
 
 pub fn undo_frame(point: (f64, f64), n: i64) -> frame::Frame {
-    frame_full(&[], &[Key::Meta], (0., 0.), point, vec![Event::Key_pressed(Key::KeyChar('z'))], n)
+    frame_full(&[], &[Key::Meta], (0., 0.), point, vec![Event::KeyPressed(Key::KeyChar('z'))], n)
 }
 
 pub fn temp_dir(tag: &str) -> String {

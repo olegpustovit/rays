@@ -1,4 +1,4 @@
-//! Editor-driven sections of lib/rays_editor/test/test_text_pane.ml: editor_text, editor_binding, editor_w9,
+//! Editor-driven sections of : editor_text, editor_binding, editor_w9,
 //! editor_active_scrub, editor_literal_scrub, editor_text_drop, editor_command_click, editor_text_find.
 use super::t5c::*;
 use editor_document::workspace_doc as wd;
@@ -61,7 +61,7 @@ pub fn editor_text() {
     let type_text = |env: &mut Env, text: &str| {
         env.click(area);
         env.step_k(&[Key::Meta], vec![ch('a')]);
-        env.step(vec![Event::Text_input(text.into())]);
+        env.step(vec![Event::TextInput(text.into())]);
     };
     type_text(&mut env, &replace(&applied, "(seeds : int 8)", "(seeds : int 7)"));
     check(has(&env.dump(), "draft yes"), &format!("a draft was not kept\n{}", env.dump()));
@@ -78,7 +78,7 @@ pub fn editor_text() {
     check(has(&text, &format!("error at line {line}:")), &format!("error not at line {line}\n{text}"));
     check(same_ws(&env.ws(), &original) && env.undo() == base, "an invalid apply changed the document");
     env.click(area);
-    env.step(vec![Event::Text_input("\n".into())]);
+    env.step(vec![Event::TextInput("\n".into())]);
     check(!has(&env.dump(), ", error"), &format!("an edit left its stale error mark\n{}", env.dump()));
     env.click(apply);
     check(has(&env.dump(), "error at line"), "the next apply marks its line again");
@@ -86,7 +86,7 @@ pub fn editor_text() {
     let before = marked(&env);
     env.click(area);
     env.step_k(&[Key::Meta], vec![key(Key::ArrowDown)]);
-    env.step(vec![Event::Text_input("\n".into())]);
+    env.step(vec![Event::TextInput("\n".into())]);
     check(has(&marked(&env), "error at line") && marked(&env) == before, &format!("typing below the error cleared it or moved it\n{}", env.dump()));
     env.click(discard);
     type_text(&mut env, &format!("{applied} \"open"));
@@ -95,7 +95,7 @@ pub fn editor_text() {
         env.step(vec![]);
     }
     check(has(&env.dump(), ", error"), &format!("a rested draft was not parsed\n{}", env.dump()));
-    env.step(vec![Event::Text_input("\"".into())]);
+    env.step(vec![Event::TextInput("\"".into())]);
     check(!has(&env.dump(), ", error"), &format!("the parse of an older text outlived an edit\n{}", env.dump()));
     for _ in 0..30 {
         env.step(vec![]);
@@ -119,7 +119,7 @@ pub fn editor_text() {
     check(has(&graph_text, "(graph sunflower"), "the Graph tab does not show the graph");
     env.click(area);
     env.step_k(&[Key::Meta], vec![ch('a')]);
-    env.step(vec![Event::Text_input(replace(&graph_text, "(seeds : int 8)", "(seeds : int 6)"))]);
+    env.step(vec![Event::TextInput(replace(&graph_text, "(seeds : int 8)", "(seeds : int 6)"))]);
     check(has(&env.dump(), "graph tab, draft yes"), &format!("the Graph tab kept no draft\n{}", env.dump()));
     check(same_ws(&env.ws(), &original), "a Graph draft changed the document");
     env.step_k(&[Key::Meta], vec![key(Key::Enter)]);
@@ -128,7 +128,7 @@ pub fn editor_text() {
     let labelled = env.undo();
     env.click(area);
     env.step_k(&[Key::Meta], vec![ch('a')]);
-    env.step(vec![Event::Text_input(replace(&graph_text, "(seeds : int 8)", "(seeds : int 5)"))]);
+    env.step(vec![Event::TextInput(replace(&graph_text, "(seeds : int 8)", "(seeds : int 5)"))]);
     check(has(&env.dump(), "graph tab, draft yes"), "the draft was not made");
     for _ in 0..3 {
         env.step_k(&[Key::Meta], vec![ch('z')]);
@@ -139,7 +139,7 @@ pub fn editor_text() {
     let applied_graph = env.ws();
     env.click(area);
     env.step_k(&[Key::Meta], vec![ch('a')]);
-    env.step(vec![Event::Text_input(replace(&graph_text, "(sqrt i)", "(sqrt nosuch)"))]);
+    env.step(vec![Event::TextInput(replace(&graph_text, "(sqrt i)", "(sqrt nosuch)"))]);
     env.step_k(&[Key::Meta], vec![key(Key::Enter)]);
     check(has(&env.dump(), "graph tab, draft yes, error"), &format!("a refused graph left the pane\n{}", env.dump()));
     check(same_ws(&env.ws(), &applied_graph), "a refused Graph apply changed the document");
@@ -205,7 +205,7 @@ pub fn editor_binding() {
     let type_closure = |env: &mut Env, text: &str| {
         env.click(area);
         env.step_k(&[Key::Meta], vec![ch('a')]);
-        env.step(vec![Event::Text_input(text.into())]);
+        env.step(vec![Event::TextInput(text.into())]);
     };
     let original = env.ws();
     type_closure(&mut env, "(let* [head (sop/merge nosuch)] head)");
@@ -213,7 +213,7 @@ pub fn editor_binding() {
     check(has(&env.dump(), "error at line 1:"), &format!("a refused closure has no line\n{}", env.dump()));
     check(same_ws(&env.ws(), &original), "a refused closure changed the document");
     env.click(area);
-    env.step(vec![Event::Text_input(" ".into())]);
+    env.step(vec![Event::TextInput(" ".into())]);
     check(!has(&env.dump(), ", error"), "typing in the closure left its error mark");
     type_closure(&mut env, "(let* [nosuch 1] nosuch)");
     env.click(apply);
@@ -264,7 +264,7 @@ pub fn editor_binding() {
 type Script = Vec<(i64, Box<dyn Fn(&editor::Editor) -> Vec<Event>>)>;
 
 fn click_events(p: (f64, f64)) -> Vec<Event> {
-    vec![Event::Pointer_moved(p), Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]
+    vec![Event::PointerMoved(p), Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]
 }
 
 /// A card's header, where the graph pane put it.
@@ -285,7 +285,7 @@ fn w9_frames(env0: editor::Editor, first: i64, last: i64, script: &Script) -> ed
                 4 => click_events((900., 304.)),
                 6 => vec![key(Key::ArrowDown)],
                 8 => vec![ch('i')],
-                12 => vec![Event::Pointer_moved((780., 380.)), Event::Scrolled((0., 9.))],
+                12 => vec![Event::PointerMoved((780., 380.)), Event::Scrolled((0., 9.))],
                 16 => click_events((960., 470.)),
                 _ => vec![],
             },
@@ -308,7 +308,7 @@ pub fn editor_w9() {
     };
     let untouched = printed(&editor::workspace(&prefix).source);
     check(has(&untouched, "^:bypass (sop/subdivide inner"), "soft starts bypassed");
-    
+
     let petals = ["rosette", ":petals"];
     let lab = |l: &Option<String>| l.clone().unwrap_or_else(|| "-".into());
     let soft_click = |e: &editor::Editor| click_events(head(e, &["rosette", "soft"], (60., 12.)));
@@ -322,7 +322,7 @@ pub fn editor_w9() {
             (22, Box::new(soft_click)),
             (26, Box::new(|_| click_events((1220., 92.)))),
             (28, Box::new(|_| vec![ch('a')])),
-            (30, Box::new(|_| vec![Event::Text_input("gentle".into())])),
+            (30, Box::new(|_| vec![Event::TextInput("gentle".into())])),
             (32, Box::new(|_| vec![key(Key::Enter)])),
         ],
     );
@@ -336,12 +336,12 @@ pub fn editor_w9() {
                 Box::new(|_| {
                     let mut v = vec![key(Key::Alt)];
                     v.extend(click_events((1290., 165.)));
-                    v.push(Event::Key_released(Key::Alt));
+                    v.push(Event::KeyReleased(Key::Alt));
                     v
                 }),
             ),
             (28, Box::new(|_| vec![ch('a')])),
-            (30, Box::new(|_| vec![Event::Text_input("3".into())])),
+            (30, Box::new(|_| vec![Event::TextInput("3".into())])),
             (32, Box::new(|_| vec![key(Key::Enter)])),
         ],
     );
@@ -355,7 +355,7 @@ pub fn editor_w9() {
     );
     check(has(&text, "(defmacro soft_tpl [p1 inner]") && label.as_deref() == Some("Make macro"), &format!("Enter in the make-macro dialog: {}", lab(&label)));
     editor::close(&fresh);
-    let wheel = || -> Box<dyn Fn(&editor::Editor) -> Vec<Event>> { Box::new(|_| vec![Event::Pointer_moved((1260., 405.)), Event::Scrolled((0., -2.))]) };
+    let wheel = || -> Box<dyn Fn(&editor::Editor) -> Vec<Event>> { Box::new(|_| vec![Event::PointerMoved((1260., 405.)), Event::Scrolled((0., -2.))]) };
     let (text, label) = scenario(
         &prefix,
         vec![
@@ -367,7 +367,7 @@ pub fn editor_w9() {
             (29, wheel()),
             (30, Box::new(|_| click_events((1290., 763.)))),
             (32, Box::new(|_| vec![ch('a')])),
-            (34, Box::new(|_| vec![Event::Text_input("a fresh note".into())])),
+            (34, Box::new(|_| vec![Event::TextInput("a fresh note".into())])),
             (36, Box::new(|_| vec![key(Key::Enter)])),
         ],
     );
@@ -387,17 +387,17 @@ pub fn editor_active_scrub() {
   (graph g :context sop (sop/box))
   (graph scene :context scene (scene/merge (scene/geometry (ref g))))
   (graph editor :context editor
-    (let* [wide (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp))
-           split (ui/split-at "horizontal" 0.5 (ui/graph) (ui/inspector))
-           three (ui/split-at "horizontal" 0.3 (ui/inspector) (ui/graph))]
+    (let* [wide (ui/split_at "vertical" 0.12 (ui/graph) (ui/lisp))
+           split (ui/split_at "horizontal" 0.5 (ui/graph) (ui/inspector))
+           three (ui/split_at "horizontal" 0.3 (ui/inspector) (ui/graph))]
       (ui/workspace (ui/switch wide split three :active 0)))))"#;
     let (mut env, presets) = start_env(text);
     env.settle();
     let (gx, gy, gw, gh) = env.graph_pane();
     let gy = gy + gh + 1 + 28;
     let tab = tab_at(gw < 400, gx + gw - 36, gy, 2);
-    env.at(tab, vec![Event::Pointer_moved(tab)]);
-    env.at(tab, vec![Event::Pointer_pressed(LB, tab), Event::Pointer_released(LB, tab)]);
+    env.at(tab, vec![Event::PointerMoved(tab)]);
+    env.at(tab, vec![Event::PointerPressed(LB, tab), Event::PointerReleased(LB, tab)]);
     env.step(vec![]);
     let printed_text = env.src();
     let lines: Vec<&str> = printed_text.split('\n').collect();
@@ -408,11 +408,11 @@ pub fn editor_active_scrub() {
     let before = env.ws();
     let history = env.undo();
     let (nx, ny) = number;
-    env.at(number, vec![Event::Pointer_moved(number)]);
-    env.at_b(&[LB], number, vec![Event::Pointer_pressed(LB, number)]);
-    env.at_b(&[LB], (nx + 10., ny), vec![Event::Pointer_moved((nx + 10., ny))]);
+    env.at(number, vec![Event::PointerMoved(number)]);
+    env.at_b(&[LB], number, vec![Event::PointerPressed(LB, number)]);
+    env.at_b(&[LB], (nx + 10., ny), vec![Event::PointerMoved((nx + 10., ny))]);
     check(has(&env.src(), ":active 2"), &format!("a drag of ten points did not set :active 2 live: {}", env.src()));
-    env.at((nx + 10., ny), vec![Event::Pointer_released(LB, (nx + 10., ny))]);
+    env.at((nx + 10., ny), vec![Event::PointerReleased(LB, (nx + 10., ny))]);
     env.step(vec![]);
     check(env.undo().as_deref() == Some("Edit text"), &format!("the drag is one Edit text entry: {:?}", env.undo()));
     env.step_k(&[Key::Meta], vec![ch('z')]);
@@ -426,7 +426,7 @@ pub fn editor_literal_scrub() {
     (graph g :context sop (let* [a (sop/points :points 1)] a))
     (graph scene :context scene (scene/merge (scene/geometry (ref g))))
     (graph editor :context editor
-      (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph "g") (ui/lisp)))))"#;
+      (ui/workspace (ui/split_at "vertical" 0.12 (ui/graph "g") (ui/lisp)))))"#;
     let catalog = catalog();
     for (tab_index, tab) in [(0usize, T::Tab::Selection), (1, T::Tab::Graph), (2, T::Tab::Document)] {
         let presets = scratch_dir("rays-token-presets");
@@ -437,14 +437,14 @@ pub fn editor_literal_scrub() {
         env.settle();
         let (x, y, w, h) = editor::node_box(env.e(), &["g".into(), "a".into()]).expect("box");
         let point = ((x + w / 2) as f64, (y + 12.min(h / 2)) as f64);
-        env.at(point, vec![Event::Pointer_moved(point)]);
-        env.at(point, vec![Event::Pointer_pressed(LB, point), Event::Pointer_released(LB, point)]);
+        env.at(point, vec![Event::PointerMoved(point)]);
+        env.at(point, vec![Event::PointerPressed(LB, point), Event::PointerReleased(LB, point)]);
         env.step(vec![]);
         let (gx, gy, gw, gh) = env.graph_pane();
         let top = gy + gh + 1 + 28;
         let tab_point = tab_at(gw < 400, gx + gw - 36, top, tab_index);
-        env.at(tab_point, vec![Event::Pointer_moved(tab_point)]);
-        env.at(tab_point, vec![Event::Pointer_pressed(LB, tab_point), Event::Pointer_released(LB, tab_point)]);
+        env.at(tab_point, vec![Event::PointerMoved(tab_point)]);
+        env.at(tab_point, vec![Event::PointerPressed(LB, tab_point), Event::PointerReleased(LB, tab_point)]);
         env.step(vec![]);
         let g_a: flow_check::workspace::Path = vec!["g".into(), "a".into()];
         let pts = ArgKey::Kw("points".into());
@@ -456,12 +456,12 @@ pub fn editor_literal_scrub() {
         let (nx, ny) = number;
         let before = env.ws();
         let label = env.undo();
-        env.at(number, vec![Event::Pointer_moved(number)]);
-        env.at_b(&[LB], number, vec![Event::Pointer_pressed(LB, number)]);
+        env.at(number, vec![Event::PointerMoved(number)]);
+        env.at_b(&[LB], number, vec![Event::PointerPressed(LB, number)]);
         let drag = |env: &mut Env, dx: f64| -> flow_syntax::phase_timer::PhaseTimer {
             let t0 = std::time::Instant::now();
             let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || t0.elapsed().as_secs_f64()));
-            env.at_b(&[LB], (nx + dx, ny), vec![Event::Pointer_moved((nx + dx, ny))]);
+            env.at_b(&[LB], (nx + dx, ny), vec![Event::PointerMoved((nx + dx, ny))]);
             guard.finish()
         };
         let scrubbed = |sample: &flow_syntax::phase_timer::PhaseTimer, what: &str| {
@@ -498,12 +498,12 @@ pub fn editor_literal_scrub() {
         alt.source = source;
         alt.checked = std::sync::Arc::new(checked);
         check(wd::to_text(&ws).unwrap() == wd::to_text(&alt).unwrap(), "text token scrub differs from the full syntax edit");
-        env.at((nx + 20., ny), vec![Event::Pointer_released(LB, (nx + 20., ny))]);
+        env.at((nx + 20., ny), vec![Event::PointerReleased(LB, (nx + 20., ny))]);
         env.step(vec![]);
         check(env.undo().as_deref() == Some("Edit text"), "text token scrub lost its history label");
         let focus_graph = ((gx + gw - 12) as f64, (gy + 10.min(gh - 1)) as f64);
-        env.at(focus_graph, vec![Event::Pointer_moved(focus_graph)]);
-        env.at(focus_graph, vec![Event::Pointer_pressed(LB, focus_graph), Event::Pointer_released(LB, focus_graph)]);
+        env.at(focus_graph, vec![Event::PointerMoved(focus_graph)]);
+        env.at(focus_graph, vec![Event::PointerPressed(LB, focus_graph), Event::PointerReleased(LB, focus_graph)]);
         env.step(vec![]);
         env.step_k(&[Key::Meta], vec![ch('z')]);
         check(same_ws(&env.ws(), &before) && env.undo() == label, &format!("text token scrub in tab {tab_index} was not one undo entry: label {:?} (was {:?}), redo {}", env.undo(), label, editor::can_redo(env.e())));
@@ -519,7 +519,7 @@ const DROP: &str = r#"(workspace drop
   (graph b :context sop (sop/merge (sop/box)))
   (graph scene :context scene (scene/merge (scene/geometry (ref b))))
   (graph editor :context editor
-    (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#;
+    (ui/workspace (ui/split_at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#;
 
 pub fn editor_text_drop() {
     let presets = scratch_dir("rays-text-presets");
@@ -527,7 +527,7 @@ pub fn editor_text_drop() {
     let mut env = Env::new(create(editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font, carry_budget: Some(f64::INFINITY), ..options() }, &load(DROP)));
     let jump = |env: &mut Env, name: &str| {
         env.step(vec![key(Key::KeyChar('/')), ch('j')]);
-        env.step(vec![Event::Text_input(name.into())]);
+        env.step(vec![Event::TextInput(name.into())]);
         env.step(vec![key(Key::Enter)]);
         env.step(vec![]);
     };
@@ -553,12 +553,12 @@ pub fn editor_text_drop() {
         (gx as f64 + 36. + (col + after) as f64 * 6.95, top as f64 + 6. + 2. + l as f64 * LINE_PITCH)
     };
     let over = point(&env, T::Tab::Graph, "(sop/merge", 10);
-    env.at(over, vec![Event::Pointer_moved(over)]);
+    env.at(over, vec![Event::PointerMoved(over)]);
     env.at(over, vec![]);
     check(has(&line(&env), "(ref a) at line"), &format!("the strip says where it goes: {}", line(&env)));
     check(has(&env.src(), "(sop/merge (ref a) (sop/box)"), &format!("the preview is the edit: {}", env.src()));
     check(env.undo() == history, "a preview writes nothing to the history");
-    env.at(over, vec![Event::Pointer_pressed(LB, over), Event::Pointer_released(LB, over)]);
+    env.at(over, vec![Event::PointerPressed(LB, over), Event::PointerReleased(LB, over)]);
     env.step(vec![]);
     env.step(vec![]);
     check(editor::carrying(env.e()).is_none() && env.undo().as_deref() == Some("Put") && has(&env.src(), "(sop/merge (ref a) (sop/box)"), &format!("a release writes it as one Put entry: {}", env.src()));
@@ -569,7 +569,7 @@ pub fn editor_text_drop() {
     env.step(vec![]);
     jump(&mut env, "b");
     let inside = point(&env, T::Tab::Graph, "(sop/merge", 5);
-    env.at(inside, vec![Event::Pointer_moved(inside)]);
+    env.at(inside, vec![Event::PointerMoved(inside)]);
     env.at(inside, vec![]);
     check(has(&line(&env), "Refused"), &format!("a put that does not check is refused: {}", line(&env)));
     check(same_ws(&env.ws(), &original), "and the picture is the original");
@@ -579,7 +579,7 @@ pub fn editor_text_drop() {
     let a = ((gx + 200) as f64, (top + 24 + 60) as f64);
     env.at(a, vec![]);
     env.click_s(a);
-    env.step(vec![Event::Text_input("x".into())]);
+    env.step(vec![Event::TextInput("x".into())]);
     env.step(vec![key(Key::Escape)]);
     env.step(vec![]);
     jump(&mut env, "a");
@@ -587,7 +587,7 @@ pub fn editor_text_drop() {
     env.step(vec![]);
     jump(&mut env, "b");
     let over = point(&env, T::Tab::Graph, "(sop/merge", 10);
-    env.at(over, vec![Event::Pointer_moved(over)]);
+    env.at(over, vec![Event::PointerMoved(over)]);
     env.at(over, vec![]);
     check(has(&line(&env), "unapplied draft"), &format!("a draft refuses: {}", line(&env)));
     env.step(vec![key(Key::Escape)]);
@@ -598,10 +598,10 @@ pub fn editor_text_drop() {
     env.step(vec![ch('y')]);
     env.step(vec![]);
     let over = point(&env, T::Tab::Document, "(sop/merge", 10);
-    env.at(over, vec![Event::Pointer_moved(over)]);
+    env.at(over, vec![Event::PointerMoved(over)]);
     env.at(over, vec![]);
     check(has(&line(&env), "(ref a) at line"), &format!("the Document text takes it too: {}", line(&env)));
-    env.at(over, vec![Event::Pointer_pressed(LB, over), Event::Pointer_released(LB, over)]);
+    env.at(over, vec![Event::PointerPressed(LB, over), Event::PointerReleased(LB, over)]);
     env.step(vec![]);
     env.step(vec![]);
     check(env.undo().as_deref() == Some("Put") && has(&env.src(), "(sop/merge (ref a) (sop/box)"), &format!("a put at a caret of the Document text is one Put entry: {}", env.src()));
@@ -615,7 +615,7 @@ const CC: &str = r#"(workspace cc
   (graph g :context value (let* [a 1.0 b (+ 2.0 (* 3.0 a)) c (ref h)] (+ a b)))
   (graph h :context value (let* [target 7.0] target))
   (graph editor :context editor
-    (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#;
+    (ui/workspace (ui/split_at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#;
 
 pub fn editor_command_click() {
     let (mut env, presets) = start_env(CC);
@@ -623,8 +623,8 @@ pub fn editor_command_click() {
     let (gx, gy, gw, gh) = env.graph_pane();
     let gy = gy + gh + 1 + 28;
     let tab = tab_at(gw < 400, gx + gw - 36, gy, 2);
-    env.at(tab, vec![Event::Pointer_moved(tab)]);
-    env.at(tab, vec![Event::Pointer_pressed(LB, tab), Event::Pointer_released(LB, tab)]);
+    env.at(tab, vec![Event::PointerMoved(tab)]);
+    env.at(tab, vec![Event::PointerPressed(LB, tab), Event::PointerReleased(LB, tab)]);
     env.step(vec![]);
     let printed_text = env.src();
     let lines: Vec<&str> = printed_text.split('\n').collect();
@@ -632,26 +632,26 @@ pub fn editor_command_click() {
     let col = find_col(lines[line], "(+ a b)", 3);
     let char_w = 6.95;
     let name = (gx as f64 + 36. + col as f64 * char_w + 3., gy as f64 + 6. + 2. + line as f64 * LINE_PITCH);
-    env.at(name, vec![Event::Pointer_moved(name)]);
-    env.at(name, vec![Event::Pointer_pressed(LB, name), Event::Pointer_released(LB, name)]);
+    env.at(name, vec![Event::PointerMoved(name)]);
+    env.at(name, vec![Event::PointerPressed(LB, name), Event::PointerReleased(LB, name)]);
     env.step(vec![]);
     check(editor::private::inspector_subject(env.e()) == Some(vec!["g".into(), "@result".into()]), "an ordinary click in Document did not select its containing node");
-    env.at_k(&[Key::Meta], name, vec![Event::Pointer_pressed(LB, name), Event::Pointer_released(LB, name)]);
+    env.at_k(&[Key::Meta], name, vec![Event::PointerPressed(LB, name), Event::PointerReleased(LB, name)]);
     env.step(vec![]);
     env.step(vec![]);
     check(env.line("scope selected") == "g/a", &format!("a Command-click on a name did not select its binding: {}", env.line("scope selected")));
     check(editor::private::inspector_subject(env.e()) == Some(vec!["g".into(), "a".into()]), "the inspector does not show the Command-clicked binding");
     let graph_tab = tab_at(gw < 400, gx + gw - 36, gy, 1);
-    env.at(graph_tab, vec![Event::Pointer_moved(graph_tab)]);
-    env.at(graph_tab, vec![Event::Pointer_pressed(LB, graph_tab), Event::Pointer_released(LB, graph_tab)]);
+    env.at(graph_tab, vec![Event::PointerMoved(graph_tab)]);
+    env.at(graph_tab, vec![Event::PointerPressed(LB, graph_tab), Event::PointerReleased(LB, graph_tab)]);
     env.step(vec![]);
     let graph = T::make_shown(&env.ws().source, "g", None, T::Tab::Graph).unwrap();
     let lines: Vec<&str> = graph.text.split('\n').collect();
     let line = lines.iter().position(|l| has(l, "(ref h)")).expect("line");
     let col = find_col(lines[line], "(ref h)", 5);
     let reference = (gx as f64 + 36. + col as f64 * char_w + 3., gy as f64 + 8. + line as f64 * LINE_PITCH);
-    env.at(reference, vec![Event::Pointer_moved(reference)]);
-    env.at_k(&[Key::Ctrl], reference, vec![Event::Pointer_pressed(LB, reference), Event::Pointer_released(LB, reference)]);
+    env.at(reference, vec![Event::PointerMoved(reference)]);
+    env.at_k(&[Key::Ctrl], reference, vec![Event::PointerPressed(LB, reference), Event::PointerReleased(LB, reference)]);
     env.step(vec![]);
     env.step(vec![]);
     check(env.line("pane graph") == "h", "Ctrl-click did not open the referenced graph");
@@ -687,14 +687,14 @@ pub fn editor_text_find() {
     let (gx, gy, gw, gh) = env.graph_pane();
     let gy = gy + gh + 1 + 28;
     let tab = tab_at(gw < 400, gx + gw - 36, gy, 2);
-    env.at(tab, vec![Event::Pointer_moved(tab)]);
-    env.at(tab, vec![Event::Pointer_pressed(LB, tab), Event::Pointer_released(LB, tab)]);
+    env.at(tab, vec![Event::PointerMoved(tab)]);
+    env.at(tab, vec![Event::PointerPressed(LB, tab), Event::PointerReleased(LB, tab)]);
     env.step(vec![]);
     let document = |env: &Env| -> String { T::make_shown(&env.ws().source, "g", None, T::Tab::Document).unwrap().applied.text().unwrap().to_string() };
     env.click_s(((gx + 200) as f64, (gy + 8) as f64));
     command(&mut env, 'f');
     check(has(&env.line("text"), "find \"\""), &format!("Command-F did not open the bar: {}", env.line("text")));
-    env.step(vec![Event::Text_input("(graph".into())]);
+    env.step(vec![Event::TextInput("(graph".into())]);
     env.step(vec![]);
     check(has(&env.line("text"), "find \"(graph\""), &format!("typing did not set the query: {}", env.line("text")));
     let matches = T::find_all(false, "(graph", &document(&env));
@@ -719,7 +719,7 @@ pub fn editor_text_find() {
     check(names == want, "the symbols are the graphs and the let* names, in order");
     command(&mut env, 'p');
     check(has(&dump_prompt(&env), "go to symbol"), &format!("Command-P did not open the symbols: {}", dump_prompt(&env)));
-    env.step(vec![Event::Text_input("target".into())]);
+    env.step(vec![Event::TextInput("target".into())]);
     env.step(vec![key(Key::Enter)]);
     env.step(vec![]);
     env.step(vec![]);
@@ -749,7 +749,7 @@ pub fn editor_text_find() {
     command(&mut env, 'l');
     check(has(&dump_prompt(&env), "go to line"), &format!("Command-L did not open the line prompt: {}", dump_prompt(&env)));
     let target_text = format!("{}:{}", line + 1, col + 1);
-    env.step(vec![Event::Text_input(target_text.clone())]);
+    env.step(vec![Event::TextInput(target_text.clone())]);
     env.step(vec![key(Key::Enter)]);
     env.step(vec![]);
     env.step(vec![]);

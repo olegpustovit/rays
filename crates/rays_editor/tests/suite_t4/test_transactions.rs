@@ -1,4 +1,4 @@
-//! test_editor_transactions.ml: the node a click selects is the node an edit in the same frame
+//! : the node a click selects is the node an edit in the same frame
 //! changes, undo agrees with the document, a changed graph with the same prepared value is drawn
 //! again, and one pointer drag is one undo entry.
 use super::t4::*;
@@ -67,7 +67,7 @@ pub fn run() {
     let workspace: workspace_doc::T = of_text(Some(&factories), TEXT);
     let draws = Rc::new(Cell::new(0i64));
     let counter = draws.clone();
-    let draw: editor::Draw_fn = Rc::new(move |n, p| {
+    let draw: editor::DrawFn = Rc::new(move |n, p| {
         counter.set(counter.get() + 1);
         editor::draw(n, p)
     });
@@ -145,13 +145,13 @@ pub fn run() {
     // one drag is one undo entry, and two drags are two
     let drag = |d: &mut Driver, path: &[&str], dx: f64| {
         let at = header(d, path);
-        d.bk(&[LeftButton], &[], at, vec![Event::Pointer_pressed(LeftButton, at)]);
+        d.bk(&[LeftButton], &[], at, vec![Event::PointerPressed(LeftButton, at)]);
         for step_dx in [dx / 4., dx / 2., dx * 3. / 4.] {
             let target = (at.0 + step_dx, at.1);
-            d.bk(&[LeftButton], &[], target, vec![Event::Pointer_moved(target)]);
+            d.bk(&[LeftButton], &[], target, vec![Event::PointerMoved(target)]);
         }
         let target = (at.0 + dx, at.1);
-        d.step_at(target, vec![Event::Pointer_released(LeftButton, target)]);
+        d.step_at(target, vec![Event::PointerReleased(LeftButton, target)]);
     };
     d.count += 90;
     let unmoved = text(&d);

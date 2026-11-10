@@ -5,7 +5,7 @@
 //! The reducer owns the model and keeps only the previous identities needed for comparisons;
 //! `Frame_input.view_state` is an `Rc<dyn Fn>`; optional arguments (`?gpu ?pump`) are trailing
 //! `Option`s of `reduce`.
-#![allow(non_camel_case_types)]
+
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use editor_document::preset;
 use editor_document::scene_sync::{self as sync, Edit};
 use editor_document::settings;
 use flow_graph::flow_edit::{self as fe, ArgKey, Op};
-use flow_syntax::syntax::{self as s, Node as SNode, Syntax};
+use flow_syntax::syntax::{Node as SNode, Syntax};
 use input::{Event, MouseButton};
 use param::{Effects, Value};
 use pxui_graph::scope_commands;
@@ -37,10 +37,10 @@ use crate::cook;
 use crate::echo;
 use crate::editor_actions::{in_world, intent_label, world_keys};
 use crate::editor_carry::carry_payload;
-use crate::editor_commands::action;
+use crate::editor_commands::Action;
 use crate::editor_history::{self as history, Merge};
 use crate::editor_inspect::{kind, lists, level_key, node_path, objects as level_objects, view_wants, View};
-use crate::editor_list::{apply_tree, enterable, geometry_objects, open_level, tree_edit, tree_state};
+use crate::editor_list::{apply_tree, enterable, geometry_objects, open_level, tree_edit, TreeState};
 use crate::editor_model::*;
 use crate::editor_panels::{apply_change, dock_panels};
 use crate::editor_panes::{follow_target, fresh_local, go, graph_name, lit_tags, remember, scope_name, viewport_target};
@@ -59,14 +59,14 @@ fn basename(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 /// A row of the Navigator opens its graph in the graph panel, selecting a node there.
-pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut EditorModel) -> Option<(String, Option<Path>)> {
+pub fn outline_step(created: &Option<String>, result: &FrameResult, v: &mut EditorModel) -> Option<(String, Option<Path>)> {
     let mut outlined: Option<(String, Option<Path>)> = result.outline_intents.iter().find_map(|i| match i {
         crate::navigator::Intent::Open { graph, node } => Some((graph.clone(), node.clone())),
         _ => None,
     });
     // / j, or a material just made, shows its graph like a row of the outline
     if outlined.is_none() {
-        if let Some(prompt_intent::Go(graph)) = &result.prompt_intent {
+        if let Some(PromptIntent::Go(graph)) = &result.prompt_intent {
             outlined = Some((graph.clone(), None));
         } else if let Some(graph) = created {
             outlined = Some((graph.clone(), None));
@@ -87,7 +87,7 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut Edi
             {
                 let view = &mut pane_mut(v).view;
                 scope::select(vec![node], view);
-                scope_commands::run_command(view, scope::Command::Frame_selection, &mut Vec::new());
+                scope_commands::run_command(view, scope::Command::FrameSelection, &mut Vec::new());
             };
         }
     }
@@ -99,19 +99,19 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut Edi
 
 /// Entering and leaving levels: the graph a reference follows, the level i / u / list activation
 /// open.
-pub fn level_target(followed: Option<String>, has_route: bool, value2: &EditorModel, level: Level, doc: &Document, selection: &selection::Selection, actions: &[action], result: &frame_result) -> (Option<String>, Option<Level>) {
-    let top = actions.iter().find(|a| matches!(a, action::Enter | action::Up | action::Go_world));
+pub fn level_target(followed: Option<String>, has_route: bool, value2: &EditorModel, level: Level, doc: &Document, selection: &selection::Selection, actions: &[Action], result: &FrameResult) -> (Option<String>, Option<Level>) {
+    let top = actions.iter().find(|a| matches!(a, Action::Enter | Action::Up | Action::GoWorld));
     let target = if followed.is_some() {
         None
     } else {
         match (top, &result.opened) {
-            (Some(action::Up), _) if has_route => None,
-            (Some(action::Up), _) => match level {
+            (Some(Action::Up), _) if has_route => None,
+            (Some(Action::Up), _) => match level {
                 Level::Inside(_) => Some(Level::Scene),
                 Level::Scene => None,
             },
-            (Some(action::Go_world), _) => objects::ids("world", &doc.scene).into_iter().find(|id| enterable(value2, *id)).map(Level::Inside),
-            (Some(action::Enter), _) | (_, Some(_)) => {
+            (Some(Action::GoWorld), _) => objects::ids("world", &doc.scene).into_iter().find(|id| enterable(value2, *id)).map(Level::Inside),
+            (Some(Action::Enter), _) | (_, Some(_)) => {
                 let candidate = match result.opened {
                     Some(id) => Some(id),
                     None => selection::selected(selection),
@@ -128,17 +128,17 @@ pub fn level_target(followed: Option<String>, has_route: bool, value2: &EditorMo
 }
 
 /// The history key of a gesture still in progress, if the frame's change belongs to one.
-pub fn gesture_key<'a>(value: &ModelView<'a>, frame_: &frame::Frame, loaded: bool, world_added: bool, world_label: &Option<String>, result: &frame_result) -> Option<String> {
-    let dragging = frame::mouse_down(MouseButton::LeftButton, frame_) || frame::has_event(&|e| matches!(e, Event::Pointer_released(MouseButton::LeftButton, _)), frame_);
+pub fn gesture_key<'a>(value: &ModelView<'a>, frame_: &frame::Frame, loaded: bool, world_added: bool, world_label: &Option<String>, result: &FrameResult) -> Option<String> {
+    let dragging = frame::mouse_down(MouseButton::LeftButton, frame_) || frame::has_event(&|e| matches!(e, Event::PointerReleased(MouseButton::LeftButton, _)), frame_);
     if !dragging || loaded || world_added || world_label.is_some() {
         return None;
     }
     let found = result.changes.iter().find_map(|c| match c {
-        change::Set_parameter { node, path, .. } => Some(format!("graph.scrub:{}:{}:{}", level_key(pane_level(value)), node, path)),
-        change::Syntax_edit(op) => fe::gesture(op),
-        change::Layout_edit(op) => layout_edit::gesture(op).map(|g| g.to_string()),
-        change::Panel_state(path, _) => Some(format!("panel:{}", flow_syntax::symbol::join_path(&panel_key(&value.doc, path), "/"))),
-        change::Dock_panels(path, _, _) => Some(format!("panel:{}", flow_syntax::symbol::join_path(&panel_key(&value.doc, path), "/"))),
+        Change::SetParameter { node, path, .. } => Some(format!("graph.scrub:{}:{}:{}", level_key(pane_level(value)), node, path)),
+        Change::SyntaxEdit(op) => fe::gesture(op),
+        Change::LayoutEdit(op) => layout_edit::gesture(op).map(|g| g.to_string()),
+        Change::PanelState(path, _) => Some(format!("panel:{}", flow_syntax::symbol::join_path(&panel_key(&value.doc, path), "/"))),
+        Change::DockPanels(path, _, _) => Some(format!("panel:{}", flow_syntax::symbol::join_path(&panel_key(&value.doc, path), "/"))),
         _ => None,
     });
     if found.is_some() {
@@ -163,14 +163,14 @@ pub fn gesture_key<'a>(value: &ModelView<'a>, frame_: &frame::Frame, loaded: boo
 }
 
 /// The graph pane's layout gestures: moving, collapsing, levels, frames, probes.
-pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], mut next: Arc<Document>, mut result: frame_result, scope_changes: &[scope::Change]) -> (Arc<Document>, frame_result, PathMap<i64>) {
+pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], mut next: Arc<Document>, mut result: FrameResult, scope_changes: &[scope::Change]) -> (Arc<Document>, FrameResult, PathMap<i64>) {
     let mut probes = value.probes.clone();
     if loaded {
         return (next, result, probes);
     }
     for c in scope_changes {
         match c {
-            scope::Change::Zone_collapsed { zone, collapsed } => {
+            scope::Change::ZoneCollapsed { zone, collapsed } => {
                 let default = zone.last().is_some_and(|leaf| fe::nested(leaf));
                 let desired = if *collapsed || default { Some(*collapsed) } else { None };
                 if next.workspace.ws.layout.collapsed.get(zone).copied() != desired {
@@ -189,7 +189,7 @@ pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], mut ne
                 }
                 if added.is_empty() { result.label = "Move".to_string(); }
             }
-            scope::Change::Level_set(changes) => {
+            scope::Change::LevelSet(changes) => {
                 if changes.iter().any(|(path, level, pinned)| next.workspace.ws.layout.level.get(path) != level.as_ref() || next.workspace.ws.layout.pinned.get(path).copied() != if *pinned { Some(true) } else { None }) {
                     let layout = &mut Arc::make_mut(&mut next).workspace.ws.layout;
                     for (path, level, pinned) in changes {
@@ -202,8 +202,8 @@ pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], mut ne
                 }
                 result.label = "Detail level".to_string();
             }
-            scope::Change::Probe_set { zone, index } => { probes.insert(zone.clone(), *index); }
-            scope::Change::Frames_set { scope: sc, frames } => {
+            scope::Change::ProbeSet { zone, index } => { probes.insert(zone.clone(), *index); }
+            scope::Change::FramesSet { scope: sc, frames } => {
                 let frames: Vec<_> = frames.iter().map(|(title, at, size)| lbp::Frame { title: title.clone(), at: *at, size: *size }).collect();
                 let desired = if frames.is_empty() { None } else { Some(&frames) };
                 if next.workspace.ws.layout.frames.get(sc) != desired {
@@ -220,7 +220,7 @@ pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], mut ne
 
 /// The scene and World edits act on derived objects: each difference is written to the text (a
 /// refused one changes nothing).
-pub fn reconciled(value: &EditorModel, before: &Arc<Document>, next: Arc<Document>, result: frame_result) -> (Arc<Document>, frame_result) {
+pub fn reconciled(value: &EditorModel, before: &Arc<Document>, next: Arc<Document>, result: FrameResult) -> (Arc<Document>, FrameResult) {
     if Arc::ptr_eq(before, &next) { return (next, result); }
     let mut result = result;
     match document_edit::reconcile(Some(&value.factories), None, before, &next) {
@@ -234,7 +234,7 @@ pub fn reconciled(value: &EditorModel, before: &Arc<Document>, next: Arc<Documen
 
 /// What a frame's gestures leave besides the document.
 #[derive(Clone, Default)]
-pub struct gesture_log {
+pub struct GestureLog {
     pub added: Vec<Path>,
     pub created: Option<String>,
     pub renamed: Option<(String, String)>,
@@ -242,7 +242,7 @@ pub struct gesture_log {
     pub note: Option<String>,
 }
 
-fn first_note(g: &mut gesture_log, note: Option<String>) {
+fn first_note(g: &mut GestureLog, note: Option<String>) {
     if g.note.is_none() {
         g.note = note;
     }
@@ -266,21 +266,21 @@ fn inline_gesture(value: &EditorModel, next: &Document, home: &Home, key: &ArgKe
     }
 }
 
-type Written = (Arc<Document>, frame_result, Vec<Path>, Option<String>, Option<(String, String)>, Option<String>);
+type Written = (Arc<Document>, FrameResult, Vec<Path>, Option<String>, Option<(String, String)>, Option<String>);
 
 /// The frame's changes and gestures written to the document, text first: the first refusal leaves
 /// none applied. Returns the document, the result, the nodes added, a graph made, a graph renamed
 /// and the note the echo shows.
-pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Document>, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Arc<Document>, result: frame_result) -> Written {
+pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Document>, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Arc<Document>, result: FrameResult) -> Written {
     let (mut next, mut result) = if loaded { (next, result) } else { reconciled(value, present, next, result) };
     // Workspace gestures: one rewrite of the source per gesture, lowered into the document, one
     // history entry named by the op. A frame's gestures land together: the first one refused leaves
     // none of them applied, and a later one cannot hide its message.
     let gestures = (!loaded && (!tree_edits.is_empty() || result.handle_changes.is_some() || !result.changes.is_empty())).then(|| (next.clone(), result.clone()));
-    let mut g = gesture_log::default();
+    let mut g = GestureLog::default();
     let factories: &[Factory] = &value.factories;
     let level = pane_level(value);
-    let set_fields = |next: &mut Arc<Document>, result: &mut frame_result, g: &mut gesture_log, node: i64, values: &[(String, Value)]| {
+    let set_fields = |next: &mut Arc<Document>, result: &mut FrameResult, g: &mut GestureLog, node: i64, values: &[(String, Value)]| {
         match sync::set_fields(Some(factories), next, level, node, values) {
             Ok(Some((doc, effects, home))) => {
                 let note = sync::template_note(next, &home);
@@ -323,10 +323,10 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                 continue;
             }
             match &c {
-                change::Set_parameter { node, path, value: field } if in_text(*node) => {
+                Change::SetParameter { node, path, value: field } if in_text(*node) => {
                     set_fields(&mut next, &mut result, &mut g, *node, &[(path.clone(), field.clone())]);
                 }
-                change::Dock_panels(source, target, side) => match dock_panels(factories, &next, source, target, *side) {
+                Change::DockPanels(source, target, side) => match dock_panels(factories, &next, source, target, *side) {
                     Ok(doc) => {
                         next = Arc::new(doc);
                         result.label = "Arrange panel".to_string();
@@ -334,7 +334,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     }
                     Err(message) => g.refused = Some(message),
                 },
-                change::Panel_state(path, state) => {
+                Change::PanelState(path, state) => {
                     let key = panel_key(&next, path);
                     let state = *state;
                     if next.workspace.ws.layout.panels.get(&key) != Some(&state) {
@@ -343,8 +343,8 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     result.label = if state.collapsed { "Collapse panel" } else { "Arrange panel" }.to_string();
                     result.edit_error = None;
                 }
-                change::Select_layout(name) if editor_document::workspace_doc::editor_graph(&next.workspace.ws).map(|g| g.name).as_ref() == Some(name) => {}
-                change::Select_layout(name) => match document_edit::select_layout(Some(factories), &next, name) {
+                Change::SelectLayout(name) if editor_document::workspace_doc::editor_graph(&next.workspace.ws).map(|g| g.name).as_ref() == Some(name) => {}
+                Change::SelectLayout(name) => match document_edit::select_layout(Some(factories), &next, name) {
                     Ok(doc) => {
                         next = Arc::new(doc);
                         result.label = "Switch layout".to_string();
@@ -352,7 +352,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     }
                     Err(message) => g.refused = Some(message),
                 },
-                change::Syntax_edit(op) => match document_edit::syntax_edit(Some(factories), &next, op) {
+                Change::SyntaxEdit(op) => match document_edit::syntax_edit(Some(factories), &next, op) {
                     Ok(doc) => {
                         // a math node a wire folded into its reader opens as a card, where it was
                         let doc = match op {
@@ -398,7 +398,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     }
                     Err(message) => g.refused = Some(message),
                 },
-                change::Layout_edit(op) => match document_edit::layout_op(Some(factories), &next, op) {
+                Change::LayoutEdit(op) => match document_edit::layout_op(Some(factories), &next, op) {
                     Ok(doc) => {
                         next = Arc::new(doc);
                         result.label = layout_edit::label(op).to_string();
@@ -407,7 +407,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     }
                     Err(message) => g.refused = Some(message),
                 },
-                change::Syntax_batch(label, ops) => match document_edit::syntax_batch(Some(factories), &next, ops) {
+                Change::SyntaxBatch(label, ops) => match document_edit::syntax_batch(Some(factories), &next, ops) {
                     Ok(doc) => {
                         for op in ops {
                             match op {
@@ -428,7 +428,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     }
                     Err(message) => g.refused = Some(message),
                 },
-                change::Pin_row { node, label, pin } => {
+                Change::PinRow { node, label, pin } => {
                     let pin = *pin;
                     let current = next.workspace.ws.layout.rows.get(node).and_then(|rows| rows.get(label)).copied();
                     if current != pin || next.workspace.ws.layout.rows.get(node).is_some_and(|rows| rows.is_empty()) {
@@ -446,7 +446,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                     result.label = if pin == Some(false) { "Unpin row from card" } else { "Pin row to card" }.to_string();
                     result.edit_error = None;
                 }
-                change::Object_arg { node, key, sub, expr } => {
+                Change::ObjectArg { node, key, sub, expr } => {
                     // the expression typed in a row is the argument of the call that holds the
                     // object (of a loop's template: every copy changes)
                     let home = match level {
@@ -472,7 +472,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                         }
                     }
                 }
-                change::Syntax_inline { home, key, make } => {
+                Change::SyntaxInline { home, key, make } => {
                     let make = make.clone();
                     let applied = inline_gesture(value, &next, home, key, &|doc, path| {
                         let op = make(path);
@@ -487,7 +487,7 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
                         Err(message) => g.refused = Some(message),
                     }
                 }
-                change::Layout_inline { home, key, make } => {
+                Change::LayoutInline { home, key, make } => {
                     let make = make.clone();
                     let applied = inline_gesture(value, &next, home, key, &|doc, path| {
                         let op = make(path);
@@ -518,47 +518,47 @@ pub fn write_gestures<'a>(value: &ModelView<'a>, loaded: bool, present: &Arc<Doc
 }
 
 /// The prompt a frame leaves open, the notice, and a preset it loaded.
-pub fn prompt_step(value: &EditorModel, view_state: &dyn Fn(Option<&Panel_result>) -> Syntax, result: &frame_result) -> (Option<prompt>, Option<(notice_kind, String)>, Option<preset::Loaded>) {
-    let load = |intent: &prompt_intent| -> (Option<prompt>, Option<(notice_kind, String)>, Option<preset::Loaded>) {
-        let last = matches!(intent, prompt_intent::Load_last_state);
+pub fn prompt_step(value: &EditorModel, view_state: &dyn Fn(Option<&PanelResult>) -> Syntax, result: &FrameResult) -> (Option<Prompt>, Option<(NoticeKind, String)>, Option<preset::Loaded>) {
+    let load = |intent: &PromptIntent| -> (Option<Prompt>, Option<(NoticeKind, String)>, Option<preset::Loaded>) {
+        let last = matches!(intent, PromptIntent::LoadLastState);
         let (path, restored) = match intent {
-            prompt_intent::Load_preset_file(name) => (preset::path(&value.presets, name), format!("Loaded preset {name}")),
+            PromptIntent::LoadPresetFile(name) => (preset::path(&value.presets, name), format!("Loaded preset {name}")),
             _ => (state_file(value), "Restored last edited state".to_string()),
         };
         let rejected = if last { "Last edited state rejected: " } else { "Preset rejected: " };
         let ops = (*value.doc.workspace.ws.checked.ops).clone();
         match preset::load_with_ops(Some(value.gpu.clone()), ops, &path, Some(&value.factories), &value.doc.settings) {
-            Ok(loaded) => (result.prompt.clone(), Some((notice_kind::Info, restored)), Some(loaded)),
-            Err(message) => (result.prompt.clone(), Some((notice_kind::Refusal, format!("{rejected}{message}"))), None),
+            Ok(loaded) => (result.prompt.clone(), Some((NoticeKind::Info, restored)), Some(loaded)),
+            Err(message) => (result.prompt.clone(), Some((NoticeKind::Refusal, format!("{rejected}{message}"))), None),
         }
     };
     let (prompt, notice, loaded) = match &result.prompt_intent {
         None => {
             let found = result.changes.iter().find_map(|c| match c {
-                change::Notice(message) => Some((notice_kind::Info, message.clone())),
-                change::Declined(message) => Some((notice_kind::Refusal, message.clone())),
+                Change::Notice(message) => Some((NoticeKind::Info, message.clone())),
+                Change::Declined(message) => Some((NoticeKind::Refusal, message.clone())),
                 _ => None,
             });
             (result.prompt.clone(), found.or_else(|| value.notice.clone()), None)
         }
-        Some(prompt_intent::Run_action(_) | prompt_intent::Edit_source(_) | prompt_intent::Go(_) | prompt_intent::Find_node(_)) => (result.prompt.clone(), value.notice.clone(), None),
-        Some(prompt_intent::Save_preset_file(name)) => {
+        Some(PromptIntent::RunAction(_) | PromptIntent::EditSource(_) | PromptIntent::Go(_) | PromptIntent::FindNode(_)) => (result.prompt.clone(), value.notice.clone(), None),
+        Some(PromptIntent::SavePresetFile(name)) => {
             let notice = match preset::save(&value.presets, name, &value.doc, &view_state(result.panel.as_ref())) {
-                Ok(path) => (notice_kind::Info, format!("Saved preset {}", basename(&path))),
-                Err(message) => (notice_kind::Refusal, format!("Preset not saved: {message}")),
+                Ok(path) => (NoticeKind::Info, format!("Saved preset {}", basename(&path))),
+                Err(message) => (NoticeKind::Refusal, format!("Preset not saved: {message}")),
             };
             (result.prompt.clone(), Some(notice), None)
         }
-        Some(intent @ (prompt_intent::Load_preset_file(_) | prompt_intent::Load_last_state)) => load(intent),
-        Some(intent @ (prompt_intent::Delete_preset_file { .. } | prompt_intent::Delete_last_state(_))) => {
+        Some(intent @ (PromptIntent::LoadPresetFile(_) | PromptIntent::LoadLastState)) => load(intent),
+        Some(intent @ (PromptIntent::DeletePresetFile { .. } | PromptIntent::DeleteLastState(_))) => {
             let (directory, name, query, description) = match intent {
-                prompt_intent::Delete_preset_file { name, query } => (value.presets.clone(), name.clone(), query.clone(), format!("preset {name}")),
-                prompt_intent::Delete_last_state(query) => (state_directory(value), value.state_name.clone(), query.clone(), "last edited state".to_string()),
+                PromptIntent::DeletePresetFile { name, query } => (value.presets.clone(), name.clone(), query.clone(), format!("preset {name}")),
+                PromptIntent::DeleteLastState(query) => (state_directory(value), value.state_name.clone(), query.clone(), "last edited state".to_string()),
                 _ => unreachable!(),
             };
             let notice = match preset::delete(&directory, &name) {
-                Ok(()) => (notice_kind::Info, format!("Deleted {description}")),
-                Err(message) => (notice_kind::Refusal, format!("Preset not deleted: {message}")),
+                Ok(()) => (NoticeKind::Info, format!("Deleted {description}")),
+                Err(message) => (NoticeKind::Refusal, format!("Preset not deleted: {message}")),
             };
             (browse(value, &query), Some(notice), None)
         }
@@ -566,7 +566,7 @@ pub fn prompt_step(value: &EditorModel, view_state: &dyn Fn(Option<&Panel_result
     // [m] in the workspace pane: the make-macro dialog over the selection, its first two literals
     // ticked as in the study.
     let macro_nodes = result.scope_changes.iter().find_map(|c| match c {
-        scope::Change::Macro_requested(nodes) => Some(nodes.clone()),
+        scope::Change::MacroRequested(nodes) => Some(nodes.clone()),
         _ => None,
     });
     let (prompt, notice) = match macro_nodes {
@@ -574,9 +574,9 @@ pub fn prompt_step(value: &EditorModel, view_state: &dyn Fn(Option<&Panel_result
             Ok(draft) => {
                 let holes = draft.literals.iter().enumerate().map(|(i, _)| (i < 2, format!("p{}", i + 1))).collect();
                 let state = shell_prompt::Macro { name: draft.name.clone(), holes };
-                (Some(prompt::Making_macro { nodes, draft, state }), notice)
+                (Some(Prompt::MakingMacro { nodes, draft, state }), notice)
             }
-            Err(d) => (prompt, Some((notice_kind::Refusal, d.message.clone()))),
+            Err(d) => (prompt, Some((NoticeKind::Refusal, d.message.clone()))),
         },
         None => (prompt, notice),
     };
@@ -585,7 +585,7 @@ pub fn prompt_step(value: &EditorModel, view_state: &dyn Fn(Option<&Panel_result
         _ => None,
     });
     let prompt = match referenced {
-        Some(name) => Some(prompt::Referencing(name, String::new())),
+        Some(name) => Some(Prompt::Referencing(name, String::new())),
         None => prompt,
     };
     (prompt, notice, loaded)
@@ -593,7 +593,7 @@ pub fn prompt_step(value: &EditorModel, view_state: &dyn Fn(Option<&Panel_result
 
 /// A payload in flight: what the panes saw under the pointer becomes the carry's report, and
 /// nothing else edits the document until the put (navigation and selection only).
-pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, result: &frame_result) -> Option<carry_report> {
+pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, result: &FrameResult) -> Option<CarryReport> {
     if !carrying {
         return None;
     }
@@ -603,7 +603,7 @@ pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::St
     let mut found: Vec<(carry_mod::Place, bool)> = Vec::new();
     for c in &result.scope_changes {
         match c {
-            scope::Change::Drop_over { path, .. } => found.push((place_of_path(path), false)),
+            scope::Change::DropOver { path, .. } => found.push((place_of_path(path), false)),
             scope::Change::Dropped { path, .. } => found.push((place_of_path(path), true)),
             _ => {}
         }
@@ -619,12 +619,12 @@ pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::St
                         text_pane::Tab::Selection => text.binding_draft.as_ref().is_some_and(|(p, _)| *p == shown.key),
                     };
                     let target = if drafted {
-                        carry_mod::Text_target::Drafted
+                        carry_mod::TextTarget::Drafted
                     } else {
                         match text.tab {
-                            text_pane::Tab::Document => carry_mod::Text_target::Whole,
-                            text_pane::Tab::Graph => carry_mod::Text_target::Graph_text(shown.graph.clone()),
-                            text_pane::Tab::Selection => carry_mod::Text_target::Selection_text(shown.key.clone()),
+                            text_pane::Tab::Document => carry_mod::TextTarget::Whole,
+                            text_pane::Tab::Graph => carry_mod::TextTarget::GraphText(shown.graph.clone()),
+                            text_pane::Tab::Selection => carry_mod::TextTarget::SelectionText(shown.key.clone()),
                         }
                     };
                     Some((carry_mod::Place::Text { target, text: shown.text.clone(), byte: *byte }, *dropped))
@@ -642,18 +642,18 @@ pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::St
     }
     found.extend(result.drops.iter().cloned());
     let _ = value;
-    found.into_iter().next().map(|(over, dropped)| carry_report { over, dropped })
+    found.into_iter().next().map(|(over, dropped)| CarryReport { over, dropped })
 }
 
 /// `[y]`: the payload is held by the handle (no pointer capture); a press or Enter puts it.
-pub fn pick_up(value2: &EditorModel, actions: &[action], frame_: &frame::Frame, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
+pub fn pick_up(value2: &EditorModel, actions: &[Action], frame_: &frame::Frame, report: Option<CarryReport>) -> (Option<Carry>, Option<String>) {
     match &value2.carry {
-        Some(c) => (Some(carry { report, ..c.clone() }), None),
-        None if actions.contains(&action::Pick_up) => match carry_payload(&value2.into()) {
+        Some(c) => (Some(Carry { report, ..c.clone() }), None),
+        None if actions.contains(&Action::PickUp) => match carry_payload(&value2.into()) {
             Ok(payload) => {
                 value2.ui.borrow_mut().carry(None, &payload.kind, &payload.value);
                 (
-                    Some(carry {
+                    Some(Carry {
                         payload,
                         via: Via::Keys,
                         original: value2.doc.clone(),
@@ -676,10 +676,10 @@ pub fn pick_up(value2: &EditorModel, actions: &[action], frame_: &frame::Frame, 
 }
 
 /// What the camera is asked to frame: the object a `F` in a graph names, or every cooked object.
-pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::update_result, frame_request: Option<(i64, i64)>, actions: &[action], frame_: &frame::Frame, result: &frame_result) -> (Option<i64>, Option<Option<bounds>>) {
+pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::UpdateResult, frame_request: Option<(i64, i64)>, actions: &[Action], frame_: &frame::Frame, result: &FrameResult) -> (Option<i64>, Option<Option<Bounds>>) {
     // Framing: local bounds move into the world with their object; at the scene level [F] frames
     // every cooked object.
-    let world_bounds = |id: i64, b: &bounds| cook::transformed(&objects::world(&doc.scene, id), b);
+    let world_bounds = |id: i64, b: &Bounds| cook::transformed(&objects::world(&doc.scene, id), b);
     // a framing cook may finish frames after its request: the object is remembered until it does
     let framing = match frame_request {
         Some((id, _)) => Some(id),
@@ -687,7 +687,7 @@ pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::update_
     };
     let framed = match (&cooked.framed, framing) {
         (Some(Some(b)), Some(id)) => Some(Some(world_bounds(id, b))),
-        (framed, _) if actions.contains(&action::Frame_camera) && pane_level(&value2.into()) == Level::Scene => {
+        (framed, _) if actions.contains(&Action::FrameCamera) && pane_level(&value2.into()) == Level::Scene => {
             let _ = framed;
             let view = match active_view(&value2.into(), &geometry(&value2.into(), &result.workspace, frame_)) {
                 Some(leaf) => match &leaf.panel {
@@ -696,7 +696,7 @@ pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::update_
                 },
                 None => View::Primary,
             };
-            let mut union: Option<bounds> = None;
+            let mut union: Option<Bounds> = None;
             for piece in cooked.cook.pieces.iter() {
                 if !view_wants(value2, &view, piece.id) {
                     continue;
@@ -718,24 +718,24 @@ pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::update_
 
 /// The graph panel's own projection: list and text views are panels of their own now (`/ l`
 /// retypes), so opening a graph is the only thing that changes it.
-pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[action], result: &frame_result, value2: &EditorModel) -> Level_map {
+pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[Action], result: &FrameResult, value2: &EditorModel) -> LevelMap {
     let level = pane_level(&value2.into());
     let views = pane_views(&value2.into()).clone();
     if result.open_graph.is_some() || outlined.is_some() {
-        return level_map_add(views, level, Graph_view);
+        return level_map_add(views, level, GraphView);
     }
     match result.view_pick {
-        Some(view) if view != Text_view || graph_name(&value2.into()).is_some() => level_map_add(views, level, view),
+        Some(view) if view != TextView || graph_name(&value2.into()).is_some() => level_map_add(views, level, view),
         Some(_) => views,
         None => {
             let retype = actions.iter().find_map(|a| match a {
-                action::Panel_retype(p @ (Panel::Graph | Panel::List | Panel::Lisp)) if value2.focus == Panel::Graph => Some(p.clone()),
+                Action::PanelRetype(p @ (Panel::Graph | Panel::List | Panel::Lisp)) if value2.focus == Panel::Graph => Some(p.clone()),
                 _ => None,
             });
             match retype {
-                Some(Panel::Graph) => level_map_add(views, level, Graph_view),
-                Some(Panel::List) => level_map_add(views, level, List_view),
-                Some(_) if graph_name(&value2.into()).is_some() => level_map_add(views, level, Text_view),
+                Some(Panel::Graph) => level_map_add(views, level, GraphView),
+                Some(Panel::List) => level_map_add(views, level, ListView),
+                Some(_) if graph_name(&value2.into()).is_some() => level_map_add(views, level, TextView),
                 _ => views,
             }
         }
@@ -743,13 +743,13 @@ pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[acti
 }
 
 /// Command-Z / Shift-Command-Z: the history step, its notice and the document it leaves.
-pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[action], notice: Option<(notice_kind, String)>, h: history::EditorHistory) -> (history::EditorHistory, Arc<Document>, bool, Option<(notice_kind, String)>) {
+pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[Action], notice: Option<(NoticeKind, String)>, h: history::EditorHistory) -> (history::EditorHistory, Arc<Document>, bool, Option<(NoticeKind, String)>) {
     // an entry holds no lowering: stepping there lowers its text again, unless it is the last present
     let current = history::present_arc(&h);
     let factories = value.factories.clone();
     let restore = move |saved: &document::Snapshot| lowering::restore(Some(&factories), &current, saved);
-    let redo = actions.contains(&action::Redo);
-    let undo = actions.contains(&action::Undo);
+    let redo = actions.contains(&Action::Redo);
+    let undo = actions.contains(&Action::Undo);
     let stepped = if redo {
         history::redo(&restore, &h)
     } else if undo {
@@ -758,7 +758,7 @@ pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[action], notice
         None
     };
     let refused = match &stepped {
-        Some(Err(diagnostic)) => Some((notice_kind::Refusal, format!("Undo refused: {}", rays_diagnostic::to_string(diagnostic)))),
+        Some(Err(diagnostic)) => Some((NoticeKind::Refusal, format!("Undo refused: {}", rays_diagnostic::to_string(diagnostic)))),
         _ => None,
     };
     let was_step = refused.is_some();
@@ -768,11 +768,11 @@ pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[action], notice
     };
     let notice = match &stepped {
         None if was_step => refused,
-        None if redo => Some((notice_kind::Refusal, "Redo: nothing to redo".to_string())),
-        None if undo => Some((notice_kind::Refusal, "Undo: nothing to undo".to_string())),
+        None if redo => Some((NoticeKind::Refusal, "Redo: nothing to redo".to_string())),
+        None if undo => Some((NoticeKind::Refusal, "Undo: nothing to undo".to_string())),
         None => notice,
-        Some(_) if redo => history::redo_label(&h).map(|label| (notice_kind::Info, format!("Redo {label}"))),
-        Some(_) => Some((notice_kind::Info, format!("Undo {}", history::label(&h)))),
+        Some(_) if redo => history::redo_label(&h).map(|label| (NoticeKind::Info, format!("Redo {label}"))),
+        Some(_) => Some((NoticeKind::Info, format!("Undo {}", history::label(&h)))),
     };
     match stepped {
         Some(next) => {
@@ -787,7 +787,7 @@ pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[action], notice
 }
 
 /// The pointer and keys of the sketch go to the pane in focus, else the first viewer.
-pub fn view_input(value: &EditorModel, result: &frame_result) -> frame::Frame {
+pub fn view_input(value: &EditorModel, result: &FrameResult) -> frame::Frame {
     let is_view = |p: &Panel| matches!(p, Panel::View(_));
     let owner = match result.pane_keys.iter().find(|(_, (panel, _))| *panel == result.focus && is_view(panel)) {
         Some((key, _)) => Some(*key),
@@ -796,16 +796,16 @@ pub fn view_input(value: &EditorModel, result: &frame_result) -> frame::Frame {
     value.ui.borrow().input(owner)
 }
 
-pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline_changes: Vec<timeline::Change>, result: &frame_result) -> (timeline::Timeline, Vec<timeline::Change>, i64) {
+pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline_changes: Vec<timeline::Change>, result: &FrameResult) -> (timeline::Timeline, Vec<timeline::Change>, i64) {
     let mut timeline = timeline;
     let mut changes = timeline_changes;
     for intent in &result.timeline_intents {
         let (next, emitted) = match intent {
-            timeline_intent::Pause_toggle => timeline::toggle_pause(&timeline),
-            timeline_intent::Stop_playback => timeline::stop(&timeline),
-            timeline_intent::Reset_playback => timeline::reset(&timeline),
-            timeline_intent::Seek_playback(frame_) => timeline::seek(&timeline, *frame_),
-            timeline_intent::Set_end(_) => (timeline.clone(), Vec::new()),
+            TimelineIntent::PauseToggle => timeline::toggle_pause(&timeline),
+            TimelineIntent::StopPlayback => timeline::stop(&timeline),
+            TimelineIntent::ResetPlayback => timeline::reset(&timeline),
+            TimelineIntent::SeekPlayback(frame_) => timeline::seek(&timeline, *frame_),
+            TimelineIntent::SetEnd(_) => (timeline.clone(), Vec::new()),
         };
         timeline = next;
         changes.extend(emitted);
@@ -813,7 +813,7 @@ pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline
     // the End field of a tall timeline: the scrub range (view state, like the playhead)
     let mut frames = value.timeline_frames;
     for intent in &result.timeline_intents {
-        if let timeline_intent::Set_end(last) = intent {
+        if let TimelineIntent::SetEnd(last) = intent {
             frames = (*last).max(1);
         }
     }
@@ -822,18 +822,18 @@ pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline
 
 /// What the frame around the panes hands the reducer.
 #[derive(Clone)]
-pub struct Frame_input<'a> {
+pub struct FrameInput<'a> {
     pub carry_changed: bool,
     pub all_ui_visible: bool,
-    pub view_state: Rc<dyn Fn(Option<&Panel_result>) -> Syntax>,
+    pub view_state: Rc<dyn Fn(Option<&PanelResult>) -> Syntax>,
     pub carrying: bool,
     pub held_keys: Vec<input::Key>,
     pub leader: router::State,
     pub frame: &'a frame::Frame,
     pub hud: Option<(String, f64)>,
-    pub actions: Vec<action>,
+    pub actions: Vec<Action>,
     pub guide: bool,
-    pub copied: Option<(notice_kind, String)>,
+    pub copied: Option<(NoticeKind, String)>,
     pub steady: i64,
     pub status_fps: Option<i64>,
     pub status_fps_at: f64,
@@ -842,7 +842,7 @@ pub struct Frame_input<'a> {
     pub graph_shown: bool,
     pub text: text_pane::State,
     pub text_shown: Option<text_pane::Shown>,
-    pub row_sets: Vec<(row_source, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>))>,
+    pub row_sets: Vec<(RowSource, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>))>,
     pub rows: Vec<tree::Row>,
 }
 
@@ -850,14 +850,14 @@ fn same_workspace_all(a: &document::Workspace, b: &document::Workspace) -> bool 
     same_workspace(&a.ws, &b.ws) && crate::editor_inspect::same_lowered(&a.lowered, &b.lowered)
 }
 
-fn same_pieces(a: &[cook::piece], b: &[cook::piece]) -> bool {
+fn same_pieces(a: &[cook::Piece], b: &[cook::Piece]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Rc::ptr_eq(&x.bounds, &y.bounds))
 }
 
-pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input<'_>, owned: &mut EditorModel, result: frame_result) -> update {
+pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn()>, input: FrameInput<'_>, owned: &mut EditorModel, result: FrameResult) -> Update {
     let value = &*owned;
     let _timer = flow_syntax::phase_timer::measure("reduce");
-    let Frame_input {
+    let FrameInput {
         carry_changed,
         all_ui_visible,
         view_state,
@@ -881,15 +881,15 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         rows,
     } = input;
     let mut result = result;
-    if let Some(prompt_intent::Edit_source(op)) = &result.prompt_intent {
-        result.changes.push(change::Syntax_edit(op.clone()));
+    if let Some(PromptIntent::EditSource(op)) = &result.prompt_intent {
+        result.changes.push(Change::SyntaxEdit(op.clone()));
     }
     // i on a collapsed function or loop opens it in place, as a double click does
     let mut actions = actions;
     if let [zone] = scope::selected(pane_view(&value.into())).as_slice() {
-        if actions.contains(&action::Enter) && scope::collapsed_zone(pane_view(&value.into()), zone) {
-            result.scope_changes.push(scope::Change::Zone_collapsed { zone: zone.clone(), collapsed: false });
-            actions.retain(|a| *a != action::Enter);
+        if actions.contains(&Action::Enter) && scope::collapsed_zone(pane_view(&value.into()), zone) {
+            result.scope_changes.push(scope::Change::ZoneCollapsed { zone: zone.clone(), collapsed: false });
+            actions.retain(|a| *a != Action::Enter);
         }
     }
     let carry_report = carry_report_of(value, carrying, &text, text_shown.as_ref(), &result);
@@ -901,9 +901,9 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         result.other_texts = Vec::new();
         result.menu_pick = None;
         result.tree_intents.retain(|i| matches!(i, tree::Intent::Select(_)));
-        result.scope_changes.retain(|c| matches!(c, scope::Change::Selected(_) | scope::Change::Activated(_) | scope::Change::Drop_over { .. } | scope::Change::Dropped { .. } | scope::Change::Notice(_)));
+        result.scope_changes.retain(|c| matches!(c, scope::Change::Selected(_) | scope::Change::Activated(_) | scope::Change::DropOver { .. } | scope::Change::Dropped { .. } | scope::Change::Notice(_)));
         result.prompt_intent = match result.prompt_intent.take() {
-            Some(intent @ prompt_intent::Go(_)) => Some(intent),
+            Some(intent @ PromptIntent::Go(_)) => Some(intent),
             _ => None,
         };
     }
@@ -912,7 +912,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     } else {
         match save_guide(&value.preferences, guide) {
             Ok(()) => None,
-            Err(message) => Some((notice_kind::Refusal, format!("Guide preference not saved: {message}"))),
+            Err(message) => Some((NoticeKind::Refusal, format!("Guide preference not saved: {message}"))),
         }
     };
     // The one reduction phase: panes have finished constructing their boxes.
@@ -920,11 +920,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     // gestures); only an object the host made is edited as a derived node, for reconcile to adopt
     let level0 = pane_level(&value.into());
     let in_text = |node: i64| sync::in_text(&value.doc, level0, node);
-    let host_changes: Vec<change> = result
+    let host_changes: Vec<Change> = result
         .changes
         .iter()
         .filter(|c| match c {
-            change::Set_parameter { node, .. } | change::Rename { node, .. } => !in_text(*node),
+            Change::SetParameter { node, .. } | Change::Rename { node, .. } => !in_text(*node),
             _ => true,
         })
         .cloned()
@@ -934,17 +934,17 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     // (below); the derived network is edited only for the others
     let mut tree_edits: Vec<Edit> = result.tree_intents.iter().filter_map(|i| tree_edit(&value.into(), &rows, i)).collect();
     for c in &result.changes {
-        if let change::Rename { node, label } = c {
+        if let Change::Rename { node, label } = c {
             if in_text(*node) {
                 tree_edits.push(Edit::Rename(*node, label.clone()));
             }
         }
     }
     let applied = result.tree_intents.iter().fold(
-        tree_state { document, selection: result.selection.clone(), tree: result.tree.clone(), opened: result.opened, label: None, rows: rows.clone() },
+        TreeState { document, selection: result.selection.clone(), tree: result.tree.clone(), opened: result.opened, label: None, rows: rows.clone() },
         |state, intent| apply_tree(&value.into(), state, intent),
     );
-    let tree_state { document, selection, tree: tree_value, opened, label: tree_label, .. } = applied;
+    let TreeState { document, selection, tree: tree_value, opened, label: tree_label, .. } = applied;
     let mut edit_error = edit_error;
     let mut document = document;
     let mut parameter_effects = Effects::default();
@@ -1020,7 +1020,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     } else {
         let candidate = match result.opened {
             Some(id) => Some(id),
-            None if actions.contains(&action::Enter) => selection::selected(&result.selection),
+            None if actions.contains(&Action::Enter) => selection::selected(&result.selection),
             None => None,
         };
         match candidate {
@@ -1064,7 +1064,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // / e opens the World, writing one (a [scene/world] member and its world graph) on first use.
     let mut world_added = false;
-    if objects::ids("world", &next.scene).is_empty() && actions.contains(&action::Go_world) {
+    if objects::ids("world", &next.scene).is_empty() && actions.contains(&Action::GoWorld) {
         if let Ok(ops) = sync::add_world(&next) {
             if let Ok(doc) = document_edit::syntax_batch(Some(&value.factories), &next, &ops) {
                 next = Arc::new(doc);
@@ -1092,7 +1092,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let history_after = if Arc::ptr_eq(&next, &present) || same_document(&next, &present) {
         value.history.clone()
     } else {
-        let label = if matches!(result.prompt_intent, Some(prompt_intent::Load_last_state)) && loaded_flag {
+        let label = if matches!(result.prompt_intent, Some(PromptIntent::LoadLastState)) && loaded_flag {
             "Restore last edited state".to_string()
         } else if loaded_flag {
             "Load preset".to_string()
@@ -1103,7 +1103,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         } else {
             result.label.clone()
         };
-        let merge = if result.changes.iter().any(|c| matches!(c, change::Layout_edit(layout_edit::Op::SetLayout { .. }))) {
+        let merge = if result.changes.iter().any(|c| matches!(c, Change::LayoutEdit(layout_edit::Op::SetLayout { .. }))) {
             // keys: no drag seals it
             Merge::Burst { key: "layout".to_string(), at: frame_.input.t, window: 1.5 }
         } else {
@@ -1134,7 +1134,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     });
     let followed = match activated {
         Some(path) => follow_target(&value.into(), Some(&path)),
-        None if actions.contains(&action::Enter) => follow_target(&value.into(), None).or_else(|| viewport_target(&value.into())),
+        None if actions.contains(&Action::Enter) => follow_target(&value.into(), None).or_else(|| viewport_target(&value.into())),
         None => None,
     };
     let picked_row = result.tree_intents.iter().find_map(|i| match i {
@@ -1176,7 +1176,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // / e selects the scene's World, then enters it
     if let Some(Level::Inside(id)) = target {
-        if actions.contains(&action::Go_world) && level == Level::Scene {
+        if actions.contains(&Action::GoWorld) && level == Level::Scene {
             selection = selection::select(id);
         }
     }
@@ -1186,7 +1186,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     value2.open_import = scope_changes
         .iter()
         .find_map(|c| match c {
-            scope::Change::Open_import(file) => Some(file.clone()),
+            scope::Change::OpenImport(file) => Some(file.clone()),
             _ => None,
         })
         .or_else(|| value2.open_import.clone());
@@ -1203,8 +1203,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     // u goes back along the route taken
     let pops = actions.iter().fold(0i64, |n, a| match a {
-        action::Up => n.max(1),
-        action::Back(k) => n.max(*k),
+        Action::Up => n.max(1),
+        Action::Back(k) => n.max(*k),
         _ => n,
     });
     let route = pane_route(&(&*value2).into()).to_vec();
@@ -1222,7 +1222,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         go(value2, graph);
     }
     // In the World, / m flips the view pane to the lat-long map.
-    let map_view = if actions.contains(&action::Toggle_map) && in_world(&(&*value2).into()) { !value2.map_view } else { value2.map_view && in_world(&(&*value2).into()) };
+    let map_view = if actions.contains(&Action::ToggleMap) && in_world(&(&*value2).into()) { !value2.map_view } else { value2.map_view && in_world(&(&*value2).into()) };
     value2.map_view = map_view;
     // a renamed graph keeps being the one shown, and the one [u] returns to
     if let Some((old, now)) = &renamed {
@@ -1230,7 +1230,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         { let pane = pane_mut(value2); pane.shown = name(&pane.shown); pane.route = pane.route.iter().map(|(level, g)| (*level, name(g))).collect(); };
     }
     let outlined = outline_step(&created, &result, value2);
-    if let Some(prompt_intent::Find_node(path)) = &result.prompt_intent {
+    if let Some(PromptIntent::FindNode(path)) = &result.prompt_intent {
         select_source(value2, path);
     }
     let projections = projections_of(&outlined, &actions, &result, &*value2);
@@ -1239,7 +1239,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     if selection_changed {
         text.target = None;
     }
-    let locals: Vec<(crate::panel_map::Key, local)> = if selection_changed {
+    let locals: Vec<(crate::panel_map::Key, Local)> = if selection_changed {
         result
             .locals
             .iter()
@@ -1258,7 +1258,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     pane_mut(value2).views = projections;
     value2.locals = locals;
     for c in &result.changes {
-        if let change::Follow_source(path) = c {
+        if let Change::FollowSource(path) = c {
             select_source(value2, path);
         }
     }
@@ -1271,7 +1271,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     }
     sync_scope(value2);
     for c in &scope_changes {
-        if let scope::Change::Display_set(path) = c {
+        if let scope::Change::DisplaySet(path) = c {
             view_node(value2, path);
         }
     }
@@ -1330,11 +1330,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let new_notice = if guide_error.is_some() {
         guide_error
     } else if let Some(m) = pick_error {
-        Some((notice_kind::Refusal, m))
+        Some((NoticeKind::Refusal, m))
     } else if copied.is_some() {
         copied
     } else if document_changed && !loaded_flag && !undone {
-        edit_note.map(|m| (notice_kind::Info, m))
+        edit_note.map(|m| (NoticeKind::Info, m))
     } else {
         notice
     };
@@ -1344,8 +1344,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         _ => true,
     };
     let queued = match &result.prompt_intent {
-        Some(prompt_intent::Run_action(a)) => vec![a.clone()],
-        _ if all_ui_visible && actions.contains(&action::Add_node) && !graph_shown && has_panel(&(&*value2).into(), &Panel::Graph) => vec![action::Add_node],
+        Some(PromptIntent::RunAction(a)) => vec![a.clone()],
+        _ if all_ui_visible && actions.contains(&Action::AddNode) && !graph_shown && has_panel(&(&*value2).into(), &Panel::Graph) => vec![Action::AddNode],
         _ => Vec::new(),
     };
     let notice_at = value2.notice_at;
@@ -1375,9 +1375,9 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     let scene_changed = carry_changed || !kg::same(&doc.scene, &previous_doc.scene) || prepared_changed;
     let mut out_actions = actions.clone();
     if entered_camera.is_some() && entered_camera == doc.active_camera {
-        out_actions.push(action::Look_through_camera);
+        out_actions.push(Action::LookThroughCamera);
     }
-    update {
+    Update {
         effects,
         prepared_changed,
         scene_changed,
@@ -1396,14 +1396,14 @@ fn network_present<'a>(value: &ModelView<'a>) -> bool {
 /// One reduction with no panes built, for tests of the reducer: the keys are `actions`, the list's
 /// selection is `select`, and `preview` puts a payload in flight whose hot target shows that edit
 /// on a scratch document (as `carry_step` leaves the model while a target is hot).
-pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorModel, actions: &[action], frame_: &frame::Frame) -> Result<EditorModel, String> {
+pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorModel, actions: &[Action], frame_: &frame::Frame) -> Result<EditorModel, String> {
     let mut value = value.clone();
     value.live_frame = flow_native::live_frame::of_frame(frame_);
     if let Some(op) = preview {
         let doc = document_edit::syntax_edit(Some(&value.factories), &value.doc, op)?;
         let doc = Arc::new(doc);
         value.lisp_vocab = vocabulary_for(&value, &doc);
-        value.carry = Some(carry {
+        value.carry = Some(Carry {
             payload: carry_mod::Payload { kind: "sop".to_string(), value: String::new() },
             via: Via::Keys,
             original: value.doc.clone(),
@@ -1414,7 +1414,7 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorM
             anchor: None,
             resting: None,
             hint: None,
-            preview: Some(carry_preview::Showing { place: carry_mod::Place::Graph(String::new()), doc: doc.clone(), what: String::new() }),
+            preview: Some(CarryPreview::Showing { place: carry_mod::Place::Graph(String::new()), doc: doc.clone(), what: String::new() }),
         });
         value.doc = doc;
     }
@@ -1429,8 +1429,8 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorM
 }
 
 /// The frame result of a frame in which no pane asked for anything.
-pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -> frame_result {
-    frame_result {
+pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -> FrameResult {
+    FrameResult {
         workspace: value.workspace.clone(),
         focus: value.focus.clone(),
         focus_path: value.focus_path.clone(),
@@ -1472,8 +1472,8 @@ pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -
 }
 
 /// The reducer's input for a frame without panes.
-pub fn idle_input<'a, 'f>(value: &ModelView<'a>, actions: &[action], frame_: &'f frame::Frame) -> Frame_input<'f> {
-    Frame_input {
+pub fn idle_input<'a, 'f>(value: &ModelView<'a>, actions: &[Action], frame_: &'f frame::Frame) -> FrameInput<'f> {
+    FrameInput {
         carry_changed: false,
         all_ui_visible: false,
         view_state: Rc::new(|_| {

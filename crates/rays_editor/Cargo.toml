@@ -39,6 +39,7 @@ mem = { path = "../mem" }
 flow_gpu = { path = "../flow_gpu" }
 
 [dev-dependencies]
+flow_shader = { path = "../flow_shader" }
 rdk_ops = { path = "../rdk_ops" }
 ogpu_core = { path = "../ogpu_core" }
 renderer = { path = "../renderer" }
@@ -66,4 +67,16 @@ harness = false
 [[test]]
 name = "gpu_editor"
 path = "tests/gpu_editor.rs"
+harness = false
+
+[lints]
+workspace = true
+
+[[test]]
+name = "window_pxui_graph"
+path = "../pxui_graph/tests/window_pxui_graph.rs"
+harness = false
+
+[[test]]
+name = "gpu_flow_integration"
 harness = false

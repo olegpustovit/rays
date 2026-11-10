@@ -214,7 +214,7 @@ pub fn hoist() {
     let r = path(&["sunflower", "seeds_each", "r"]);
     let (x, y, tw, th) = scope::inspect::box_of(&view, &r).expect("r box");
     let (_, changes) = pg::scope_click(&mut ui, view, ((x + tw - 30. * z) as i64, (y + th - 10. * z) as i64));
-    check(!changes.iter().any(|c| matches!(c, Change::Syntax_edit(fe::Op::Hoist { .. }))), "r offered a hoist");
+    check(!changes.iter().any(|c| matches!(c, Change::SyntaxEdit(fe::Op::Hoist { .. }))), "r offered a hoist");
     ui.destroy();
 }
 
@@ -316,7 +316,7 @@ pub fn skips() {
     let _ = rg;
     let eval = eval_recorded(&g);
     let plan = eval.plan.clone();
-    let mut rg = probe::make(&eval, Options::default());
+    let rg = probe::make(&eval, Options::default());
     let result = path(&["g", "b", "@result"]);
     check(rg.plan_node(None, &result, &[1]).is_none(), "a skipped iteration has no plan node to pick");
     for k in [0i64, 2, 3] {

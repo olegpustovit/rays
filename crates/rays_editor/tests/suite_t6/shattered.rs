@@ -1,4 +1,4 @@
-//! test_shattered_studio.ml: the studio fracture, exact across 1 and 4 domains, closed manifold shards.
+//! : the studio fracture, exact across 1 and 4 domains, closed manifold shards.
 #![allow(dead_code, unused_imports)]
 use std::collections::HashMap;
 

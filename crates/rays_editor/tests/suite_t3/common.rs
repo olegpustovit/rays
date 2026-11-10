@@ -8,10 +8,10 @@ use rays::frame;
 use rays_editor::{editor, workspace};
 
 pub fn key(k: Key) -> Event {
-    Event::Key_pressed(k)
+    Event::KeyPressed(k)
 }
 pub fn ch(c: char) -> Event {
-    Event::Key_pressed(Key::KeyChar(c))
+    Event::KeyPressed(Key::KeyChar(c))
 }
 
 /// `Test_editor_input.frame ?buttons ?keys ?delta mouse events count` (900 x 640 points).

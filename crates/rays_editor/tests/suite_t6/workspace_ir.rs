@@ -1,4 +1,4 @@
-//! test_workspace_ir.ml with the static part of workspace_parity.ml: for each sketch, the static evaluation, the
+//!  with the static part of : for each sketch, the static evaluation, the
 //! compiled lowering and the reference lowering (`Options.reference`) agree on every node, instance, result, state
 //! and record (keys with functions replaced by their bodies), and every authored value compiles for the IR executor.
 //! Not ported: the per-frame IR/reference value forcing at four times and two domain counts, the SOP cooks at each

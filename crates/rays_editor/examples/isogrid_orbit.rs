@@ -21,7 +21,7 @@ fn main() {
             buttons: if drag { vec![input::MouseButton::LeftButton] } else { vec![] },
             keys: if drag { vec![input::Key::Alt] } else { vec![] }, events, ..input::at_time(tick as f64 / 60.) },
         pixel_scale: (1., 1.), fps: 60., mouse_delta: delta };
-    let mut step = |editor: editor::Editor, f: &rays::frame::Frame| -> (editor::Editor, f64, f64) {
+    let step = |editor: editor::Editor, f: &rays::frame::Frame| -> (editor::Editor, f64, f64) {
         let t0 = Instant::now();
         let e = editor::update(editor, f);
         let t1 = Instant::now();
@@ -37,7 +37,7 @@ fn main() {
     println!("idle alloc {} KB/frame", (mem_sys::alloc_bytes_total() - idle0) / 30 / 1024);
     // press with Alt held
     tick += 1;
-    let f = frame(tick, at, vec![input::Event::Key_pressed(input::Key::Alt), input::Event::Pointer_pressed(input::MouseButton::LeftButton, at)], true, (0., 0.));
+    let f = frame(tick, at, vec![input::Event::KeyPressed(input::Key::Alt), input::Event::PointerPressed(input::MouseButton::LeftButton, at)], true, (0., 0.));
     editor = step(editor, &f).0;
     let cam0 = format!("{:?}", rays::camera::position(&editor::view_camera(&editor)));
     let (mut su, mut sr, mut worst) = (0., 0., 0f64);
@@ -46,7 +46,7 @@ fn main() {
     for _ in 0..frames {
         tick += 1;
         p.0 += 4.;
-        let f = frame(tick, p, vec![input::Event::Pointer_moved(p)], true, (4., 0.));
+        let f = frame(tick, p, vec![input::Event::PointerMoved(p)], true, (4., 0.));
         let (e, u, r) = step(editor, &f);
         editor = e; su += u; sr += r; worst = worst.max(u + r);
         if u + r > 30. { eprintln!("slow frame {tick}: update {u:.1} ms render {r:.1} ms"); }

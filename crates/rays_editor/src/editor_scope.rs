@@ -1,7 +1,7 @@
 //! lay the workspace pane out again when the document, the
 //! probes or the graph changed (`sync_scope`), the probe previews it shows (`sync_views`), and the
 //! inspector's subject for a scene object or World layer (`scene_target`). Bundle C.
-#![allow(non_camel_case_types)]
+
 use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -117,7 +117,7 @@ pub fn view_node(value: &mut EditorModel, path: &[Symbol]) {
     });
     match owner {
         Some(owner) => {
-            value.previews.insert(owner, preview { path: path.to_vec(), chain });
+            value.previews.insert(owner, Preview { path: path.to_vec(), chain });
             sync_views(value)
         }
         None => {
@@ -127,7 +127,7 @@ pub fn view_node(value: &mut EditorModel, path: &[Symbol]) {
             }
             match &value.canvas_preview {
                 Some(held) if held.path == path => value.canvas_preview = None,
-                _ => value.canvas_preview = Some(preview { path: path.to_vec(), chain }),
+                _ => value.canvas_preview = Some(Preview { path: path.to_vec(), chain }),
             }
             sync_views(value)
         }
@@ -186,7 +186,7 @@ pub fn sync_scope(value: &mut EditorModel) {
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
-    let previous: Option<Rc<scope_key>> = pane(&(&*value).into()).laid.clone();
+    let previous: Option<Rc<ScopeKey>> = pane(&(&*value).into()).laid.clone();
     let arguments: Option<Vec<editor_document::literal_edit::Change>> = previous.as_ref().and_then(|k| {
         if k.graph != name || k.ws.layout.collapsed != ws.layout.collapsed {
             None
@@ -200,7 +200,7 @@ pub fn sync_scope(value: &mut EditorModel) {
     });
     let edits: Vec<(Path, ArgKey, S)> =
         arguments.as_deref().unwrap_or(&[]).iter().map(|c| (c.path.clone(), ArgKey::Kw(c.field.clone()), c.expr.clone())).collect();
-    let same = |k: &scope_key| k.graph == name && k.ws.layout == ws.layout && arguments.is_some();
+    let same = |k: &ScopeKey| k.graph == name && k.ws.layout == ws.layout && arguments.is_some();
     let moved = match &previous {
         Some(k) => !(same(k) && k.probe_map == value.probes),
         None => true,
@@ -223,7 +223,7 @@ pub fn sync_scope(value: &mut EditorModel) {
     // the executions are a list forcing a probe rewrites, so it is never physically the same
     // twice: comparing it by identity made every frame fresh. Their count changes when a probe
     // first runs, which is when a footer needs them.
-    let quiet = |k: &scope_key| -> f64 { 2.0f64.min(0.2f64.max(4.0 * (now - k.stamp))) };
+    let quiet = |k: &ScopeKey| -> f64 { 2.0f64.min(0.2f64.max(4.0 * (now - k.stamp))) };
     let fresh = match &previous {
         Some(k) => !(k.evaluated.as_ref().map_or(false, |e| Arc::ptr_eq(e, &evaluated))
             && k.summaries == summaries
@@ -394,7 +394,7 @@ pub fn sync_scope(value: &mut EditorModel) {
         }
         (None, _) => Vec::new(),
     };
-    let key = scope_key {
+    let key = ScopeKey {
         ws: ws.clone(),
         probe_map: value.probes.clone(),
         graph: name,
@@ -422,7 +422,7 @@ fn node_owner<'a>(value: &ModelView<'a>, node_id: i64) -> Option<i64> {
 /// else one made for the inspector alone (ponytail: laid out again each frame the inspector shows
 /// such an object; the scene graphs are small). `None` for what the text does not bind by name
 /// (a host object, a loop's copy, an inline call): those keep the derived-node sheet.
-pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(scope_key, Path)> {
+pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(ScopeKey, Path)> {
     let homes = &value.doc.homes;
     let list = match pane_level(value) {
         Level::Scene => &homes.objects,
@@ -441,7 +441,7 @@ pub fn scene_target<'a>(value: &ModelView<'a>, id: i64) -> Option<(scope_key, Pa
                     let options = Options { clock: Some(value.clock.clone()), state: Some(value.cook.state.clone()), ..Default::default() };
                     let collapsed = ws.layout.collapsed.clone();
                     let scope_proj = p::of_graph_with(&|p_: &[Symbol]| collapsed.get(p_) != Some(&false), &catalog, &ws.checked, &graph).ok()?;
-                    scope_key {
+                    ScopeKey {
                         ws,
                         probe_map: value.probes.clone(),
                         graph,

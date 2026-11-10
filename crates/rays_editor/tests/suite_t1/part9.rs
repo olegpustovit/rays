@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 9: run_roots (the window-free half of the two-roots section).
+//! , part 9: run_roots (the window-free half of the two-roots section).
 //! The native sections (run_native, run_view_native, run_renderers_native, run_roots_native,
 //! run_budget_native) open a window through Sketch.run_state and are not ported here.
 use super::support::*;
@@ -24,7 +24,7 @@ fn roots_text(renderer: &str) -> String {
            root (scene/root all :camera cam :renderer "{renderer}" :width 640 :height 640 :max_spp 16 :bounces 12)]
       root))
   (graph editor :context editor
-    (ui/workspace (ui/split-at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#
+    (ui/workspace (ui/split_at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#
     )
 }
 
@@ -55,7 +55,7 @@ pub fn run_roots() {
     let w = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     check(b::next_turn(&order, None, &w(&["b", "c", "d"])) == Some("b".into()), "the first wanting viewport takes the first turn");
     check(b::next_turn(&order, Some("b"), &w(&["b", "c", "d"])) == Some("c".into()), "the next takes the next");
-    check(b::next_turn(&order, Some("d"), &w(&["b", "c"])) == Some("b".into()), "the rotation wraps");
+    check(b::next_turn(&order, Some("d"), &w(&["b", "c"])) == Some("b".into()), "the rotate wraps");
     check(b::next_turn(&order, Some("c"), &w(&["b"])) == Some("b".into()), "a lone one repeats");
     check(b::next_turn(&order, Some("a"), &[]).is_none(), "no one wants, no turn");
     let mut r = Run::new(editor(&roots_text("Raster")));
@@ -71,7 +71,7 @@ pub fn run_roots() {
     let film = |r: &Run| editor::film(&r.e, &frame(&[], p, vec![], r.count));
     let (fx, fy, pane_w, pane_h) = film(&r);
     check((fx, fy) == (0, 0) && pane_w > 0 && pane_h > 0, "a free view does not fill its pane");
-    r.step(p, vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('v'))]);
+    r.step(p, vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('v'))]);
     r.step(p, vec![]);
     r.step(p, vec![]);
     check(editor::look_through(&r.e), "/ v did not look through the camera");

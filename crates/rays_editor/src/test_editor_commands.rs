@@ -12,7 +12,7 @@ fn every_command_names_its_action_and_scope() {
     // an id shared by several keys is one command: same action, same label
     let undo = find("edit.undo");
     assert_eq!(undo.len(), 2);
-    assert!(undo.iter().all(|u| *c::action_of(u) == c::action::Undo && u.label == "undo"));
+    assert!(undo.iter().all(|u| *c::action_of(u) == c::Action::Undo && u.label == "undo"));
     assert_eq!(find("edit.redo").len(), 4);
     // the leader keys are listed by the leader sheet
     let save = find("preset.save")[0];
@@ -20,12 +20,12 @@ fn every_command_names_its_action_and_scope() {
     assert!(save.guide.contains(&editor_core::guide_context::GuideContext::Leader));
     // the graph pane's own keys carry the pane as their scope
     let tab = find("graph.add-after")[0];
-    assert_eq!((tab.scope.clone(), c::action_of(tab).clone()), (Some(Panel::Graph), c::action::Add_node));
+    assert_eq!((tab.scope.clone(), c::action_of(tab).clone()), (Some(Panel::Graph), c::Action::AddNode));
     assert_eq!(find("view.frame-camera")[0].scope, Some(Panel::View(String::new())));
     // the scope and list bindings are routed through the table
-    assert!(keymap.iter().any(|command| matches!(c::action_of(command), c::action::Scope_command(_))));
-    assert!(keymap.iter().any(|command| matches!(c::action_of(command), c::action::List_command(_))));
-    assert!(keymap.iter().any(|command| *c::action_of(command) == c::action::Text_command(text_pane::Command::Definition)));
+    assert!(keymap.iter().any(|command| matches!(c::action_of(command), c::Action::ScopeCommand(_))));
+    assert!(keymap.iter().any(|command| matches!(c::action_of(command), c::Action::ListCommand(_))));
+    assert!(keymap.iter().any(|command| *c::action_of(command) == c::Action::TextCommand(text_pane::Command::Definition)));
     // ten layouts, named by their index
     assert_eq!((0..10).filter(|i| !find(&format!("layout.{i}")).is_empty()).count(), 10);
 }
@@ -61,15 +61,15 @@ fn the_router_runs_the_table() {
     use input::{Event, Key, Platform};
     let keymap = c::keymap();
     let refs: Vec<&c::Command> = keymap.iter().collect();
-    let mut frame = crate::test_timeline::frame_with(0.0, vec![Event::Key_pressed(Key::KeyChar('z'))], vec![]);
+    let mut frame = crate::test_timeline::frame_with(0.0, vec![Event::KeyPressed(Key::KeyChar('z'))], vec![]);
     frame.input.keys = vec![Key::Meta];
     let (_, matched, rest) =
         router::step(&[], Platform::Apple, &refs, &Panel::Graph, false, &frame, router::State::Idle);
-    assert_eq!(matched.iter().map(|m| c::action_of(m).clone()).collect::<Vec<_>>(), vec![c::action::Undo]);
+    assert_eq!(matched.iter().map(|m| c::action_of(m).clone()).collect::<Vec<_>>(), vec![c::Action::Undo]);
     assert!(rest.input.events.is_empty());
     // / then s opens the preset save
-    let frame = crate::test_timeline::frame_with(0.0, vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('s'))], vec![]);
+    let frame = crate::test_timeline::frame_with(0.0, vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('s'))], vec![]);
     let (state, matched, _) =
         router::step(&[], Platform::Apple, &refs, &Panel::Graph, false, &frame, router::State::Idle);
-    assert_eq!((state, matched.iter().map(|m| c::action_of(m).clone()).collect::<Vec<_>>()), (router::State::Idle, vec![c::action::Save_preset]));
+    assert_eq!((state, matched.iter().map(|m| c::action_of(m).clone()).collect::<Vec<_>>()), (router::State::Idle, vec![c::Action::SavePreset]));
 }

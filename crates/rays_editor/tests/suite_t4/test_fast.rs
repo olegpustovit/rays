@@ -1,4 +1,4 @@
-//! test_fast_path.ml: a camera write in a workspace holding a [fn] closure takes the literal fast
+//! : a camera write in a workspace holding a [fn] closure takes the literal fast
 //! path (no lowering, no evaluation) and the document is the one a full lowering gives. The
 //! gpu_sea / ws_orrery scrub sweeps and the Gc.live_words bound are SKIPPED (see gpu_suite_t4).
 use super::t4::*;

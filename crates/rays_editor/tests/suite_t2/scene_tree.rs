@@ -1,4 +1,4 @@
-//! test_scene_tree.ml: the scene tree, window-free: list keys, enter/up, lights, reparent, hide,
+//! : the scene tree, window-free: list keys, enter/up, lights, reparent, hide,
 //! World keys, the three projections, host camera deletion, typed draw errors.
 use std::cell::Cell;
 use std::rc::Rc;
@@ -67,7 +67,7 @@ fn labelled(e: &Ed) -> Labelled {
 
 fn open(text: &str, counter: Option<Rc<Cell<i64>>>) -> Ed {
     let ws = workspace(text);
-    let prepare: rays_editor::cook::Prepare_fn = Rc::new(move |s, o| {
+    let prepare: rays_editor::cook::PrepareFn = Rc::new(move |s, o| {
         if let Some(c) = &counter {
             c.set(c.get() + 1);
         }
@@ -107,7 +107,7 @@ struct Run {
 
 impl Run {
     fn step_with(&mut self, mouse: (i64, i64), keys: &[Key], buttons: &[MouseButton], events: Vec<Event>) {
-        
+
         self.count += 1;
         let started = std::time::Instant::now();
         let shown = format!("{events:?}");
@@ -118,17 +118,13 @@ impl Run {
         self.step_with((450, 320), &[], &[], events);
     }
     fn key(&mut self, k: Key) {
-        self.step(vec![Event::Key_pressed(k)]);
+        self.step(vec![Event::KeyPressed(k)]);
     }
     fn chars(&mut self, cs: &[char]) {
-        self.step(cs.iter().map(|c| Event::Key_pressed(Key::KeyChar(*c))).collect());
+        self.step(cs.iter().map(|c| Event::KeyPressed(Key::KeyChar(*c))).collect());
     }
     fn label(&self) -> Option<String> {
         editor::selected_node(&self.e).map(|p| p.label)
-    }
-    fn click_at(&mut self, p: (i64, i64)) {
-        let f = (p.0 as f64, p.1 as f64);
-        self.step_with(p, &[], &[], vec![Event::Pointer_pressed(MouseButton::LeftButton, f), Event::Pointer_released(MouseButton::LeftButton, f)]);
     }
     fn names(&self) -> String {
         editor::document(&self.e).iter().map(|i| i.label.clone()).collect::<Vec<_>>().join(",")
@@ -138,14 +134,6 @@ impl Run {
         while self.label().as_deref() != Some(name) {
             assert!(tries > 0, "no list row named {name} among {} at level {}", self.names(), editor::level(&self.e).unwrap_or("scene".into()));
             self.key(Key::ArrowDown);
-            tries -= 1;
-        }
-    }
-    fn select_up(&mut self, name: &str, tries: i64) {
-        let mut tries = tries;
-        while self.label().as_deref() != Some(name) {
-            assert!(tries > 0, "no list row named {name}");
-            self.key(Key::ArrowUp);
             tries -= 1;
         }
     }
@@ -203,7 +191,7 @@ struct Ctx {
 }
 
 fn press(p: (f64, f64)) -> Vec<Event> {
-    vec![Event::Pointer_pressed(MouseButton::LeftButton, p), Event::Pointer_released(MouseButton::LeftButton, p)]
+    vec![Event::PointerPressed(MouseButton::LeftButton, p), Event::PointerReleased(MouseButton::LeftButton, p)]
 }
 
 fn at(p: (i64, i64)) -> (f64, f64) {
@@ -233,11 +221,11 @@ fn row_of(r: &mut Run, cx: &Ctx, name: &str) -> ((i64, i64), Vec<Event>) {
 }
 
 fn slash(r: &mut Run, c: char) {
-    r.step(vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar(c))]);
+    r.step(vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar(c))]);
 }
 
 fn slash_l(r: &mut Run, c: char) {
-    r.step(vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('l')), Event::Key_pressed(Key::KeyChar(c))]);
+    r.step(vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('l')), Event::KeyPressed(Key::KeyChar(c))]);
 }
 
 /// List keys, camera, enter/up, the Flow list projection, double-click enter.
@@ -286,7 +274,7 @@ fn sec_b(r: &mut Run, _cx: &Ctx, cooks: &Rc<Cell<i64>>) {
     let lights_before = editor::lights(&r.e).len();
     let cooked = cooks.get();
     let position = |e: &Ed| match editor::lights(e).first().map(|l| l.kind.clone()) {
-        Some(rays::light::kind::Area { position, .. }) => position,
+        Some(rays::light::Kind::Area { position, .. }) => position,
         _ => panic!("the first light is not an area light"),
     };
     let before = position(&r.e);
@@ -297,7 +285,7 @@ fn sec_b(r: &mut Run, _cx: &Ctx, cooks: &Rc<Cell<i64>>) {
     assert!(source(&r.e).contains(":parent \"geo1\""), "Tab did not write the parent to the text");
     assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Reparent"), "reparenting is not one 'Reparent' entry");
     assert!(rays_math::vec3::nearly_equal(position(&r.e), before, 1e-6), "reparenting moved the light in the world");
-    r.step_with((450, 320), &[Key::Shift], &[], vec![Event::Key_pressed(Key::Tab)]);
+    r.step_with((450, 320), &[Key::Shift], &[], vec![Event::KeyPressed(Key::Tab)]);
     assert!(parent(&r.e).is_none(), "Shift-Tab did not move the light back to the scene root");
     assert!(!source(&r.e).contains(":parent"), "Shift-Tab left the parent in the text");
     r.chars(&['h']);
@@ -309,7 +297,7 @@ fn sec_b(r: &mut Run, _cx: &Ctx, cooks: &Rc<Cell<i64>>) {
     }
     assert!(cooks.get() == cooked, "a scene-level edit re-cooked SOPs");
     // Undo walks back through the scene edits.
-    r.step_with((450, 320), &[Key::Meta], &[], vec![Event::Key_pressed(Key::KeyChar('z'))]);
+    r.step_with((450, 320), &[Key::Meta], &[], vec![Event::KeyPressed(Key::KeyChar('z'))]);
     assert!(editor::lights(&r.e).len() == lights_before, "undo did not show the light again");
     assert!(!source(&r.e).contains(":visible false"), "undo left the hidden flag in the text");
 }
@@ -325,11 +313,11 @@ fn sec_c(r: &mut Run, _cx: &Ctx, cooks: &Rc<Cell<i64>>) {
     let slider = |x: i64| (ix + 100 + x, iy + 370);
     let translate_x = |e: &Ed| editor::selected_node(e).and_then(|n| n.fields.into_iter().find(|f| f.name == "translate_x").map(|f| f.current));
     let before = translate_x(&r.e);
-    r.step_with(slider(0), &[], &[MouseButton::LeftButton], vec![Event::Pointer_pressed(MouseButton::LeftButton, at(slider(0)))]);
+    r.step_with(slider(0), &[], &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, at(slider(0)))]);
     for x in [4, 8, 12, 16] {
         r.step_with(slider(x), &[], &[MouseButton::LeftButton], vec![]);
     }
-    r.step_with(slider(20), &[], &[], vec![Event::Pointer_released(MouseButton::LeftButton, at(slider(20)))]);
+    r.step_with(slider(20), &[], &[], vec![Event::PointerReleased(MouseButton::LeftButton, at(slider(20)))]);
     assert!(before.is_some() && translate_x(&r.e) != before, "dragging the Translate X slider did not edit geo1");
     assert!(source(&r.e).contains(":translate ["), "the Translate X drag did not reach the text");
     assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Edit value"), "the slider drag is not one \"Edit value\" entry");
@@ -358,18 +346,18 @@ fn sec_d(r: &mut Run, cx: &Ctx, _cooks: &Rc<Cell<i64>>) {
     let press_p = (100., 300.);
     let release = (800., 1000.);
     let camera = editor::camera(&r.e);
-    r.step_with((100, 300), &[], &[MouseButton::LeftButton], vec![Event::Pointer_pressed(MouseButton::LeftButton, press_p)]);
-    r.step_with((800, 1000), &[], &[MouseButton::LeftButton], vec![Event::Pointer_moved(release)]);
+    r.step_with((100, 300), &[], &[MouseButton::LeftButton], vec![Event::PointerPressed(MouseButton::LeftButton, press_p)]);
+    r.step_with((800, 1000), &[], &[MouseButton::LeftButton], vec![Event::PointerMoved(release)]);
     let moved = parameters(&r.e, selected);
     assert!(moved != original && moved.iter().find(|(n, _)| n == "elevation").map(|(_, v)| v.clone()) == Some(Value::Float(-90.)), "captured map-layer movement did not clamp outside the map");
     assert!(source(&r.e).contains(":elevation -90.0"), "the map-layer drag did not reach the text");
     assert!(others.iter().all(|(id, values)| &parameters(&r.e, *id) == values), "a map-layer gesture edited another stable node");
-    r.step_with((800, 1000), &[], &[], vec![Event::Pointer_released(MouseButton::LeftButton, release)]);
+    r.step_with((800, 1000), &[], &[], vec![Event::PointerReleased(MouseButton::LeftButton, release)]);
     assert!(
         rays::camera::position(&rays::easy_camera::camera(&editor::camera(&r.e)).unwrap()) == rays::camera::position(&rays::easy_camera::camera(&camera).unwrap()),
         "map-layer movement also navigated the 3D camera"
     );
-    r.step_with((450, 320), &[Key::Meta], &[], vec![Event::Key_pressed(Key::KeyChar('z'))]);
+    r.step_with((450, 320), &[Key::Meta], &[], vec![Event::KeyPressed(Key::KeyChar('z'))]);
     assert!(parameters(&r.e, selected) == original, "map-layer drag did not undo in one entry");
     assert!(!source(&r.e).contains(":elevation -90.0"), "undoing the map-layer drag left the text edited");
 }
@@ -412,7 +400,7 @@ fn sec_d2(r: &mut Run, cx: &Ctx, _cooks: &Rc<Cell<i64>>) {
     let saved = labelled(&r.e);
     let baked = editor::world(&r.e);
     r.chars(&['t', 'n', 'd']);
-    let eager = |b: &Option<rays::world::baked>| b.as_ref().map(|b| format!("{:?}", (&b.camera, &b.lighting, &b.lights, &b.sun, &b.background, b.exposure)));
+    let eager = |b: &Option<rays::world::Baked>| b.as_ref().map(|b| format!("{:?}", (&b.camera, &b.lighting, &b.lights, &b.sun, &b.background, b.exposure)));
     assert!(labelled(&r.e) == saved && eager(&editor::world(&r.e)) == eager(&baked), "World keys edited the scene level");
 }
 
@@ -446,7 +434,7 @@ fn sec_e(r: &mut Run, cx: &Ctx, _cooks: &Rc<Cell<i64>>) {
     r.step(vec![]);
     let (point, _) = row_of(r, cx, "world");
     let f = at(point);
-    r.step_with(point, &[], &[], vec![Event::Pointer_pressed(MouseButton::RightButton, f), Event::Pointer_released(MouseButton::RightButton, f)]);
+    r.step_with(point, &[], &[], vec![Event::PointerPressed(MouseButton::RightButton, f), Event::PointerReleased(MouseButton::RightButton, f)]);
     r.step_with(point, &[], &[], vec![]);
     let item = (point.0 + 20, point.1 + 3 + 12);
     r.step_with(item, &[], &[], vec![]);
@@ -470,7 +458,7 @@ fn run_host() {
         let env = r.e.clone();
         let (gx, gy, _, _) = r.graph_pane();
         let at = ((gx + 40) as f64, (gy + 400) as f64);
-        r.step(vec![Event::Pointer_pressed(MouseButton::LeftButton, at), Event::Pointer_released(MouseButton::LeftButton, at)]);
+        r.step(vec![Event::PointerPressed(MouseButton::LeftButton, at), Event::PointerReleased(MouseButton::LeftButton, at)]);
         r.key(Key::Home);
         let mut tries = 8;
         while r.label().as_deref() != Some("camera1") {
@@ -487,7 +475,7 @@ fn run_host() {
         let reopened = editor::update(reopened, &tframe((450, 320), vec![], &[], &[], 100));
         assert!(names(&reopened).contains(&"g".to_owned()) && !names(&reopened).contains(&"camera1".to_owned()), "the deleted camera came back on reload");
         editor::close(&reopened);
-        r.step_with((450, 320), &[Key::Meta], &[], vec![Event::Key_pressed(Key::KeyChar('z'))]);
+        r.step_with((450, 320), &[Key::Meta], &[], vec![Event::KeyPressed(Key::KeyChar('z'))]);
         let undone = r.e.clone();
         assert!(names(&undone).contains(&"camera1".to_owned()) && !source(&undone).contains("graph scene"), "undo did not give the host camera back");
         editor::close(&env);
@@ -532,7 +520,7 @@ fn run_surface_errors() {
         current = editor::update(current.clone(), &tframe((450, 320), vec![], &[], &[], 2));
         assert_eq!(calls.get(), 1, "cached conversion error repeated the draw");
         assert!(current.context_error.as_deref().map(|s| s.contains(message)).unwrap_or(false), "cached drawing lost its conversion error");
-        current = editor::edit(current.clone(), &Op_size()).expect("edit");
+        current = editor::edit(current.clone(), &op_size()).expect("edit");
         current = editor::update(current.clone(), &tframe((450, 320), vec![], &[], &[], 3));
         assert!(calls.get() == 2 && current.context_error.is_none(), "a corrected prepared object kept its old conversion error");
     }));
@@ -542,7 +530,7 @@ fn run_surface_errors() {
     }
 }
 
-#[allow(non_snake_case)]
-fn Op_size() -> flow_graph::flow_edit::Op {
+
+fn op_size() -> flow_graph::flow_edit::Op {
     set_arg(&["geo", "box"], "size", "[2 2 2]")
 }

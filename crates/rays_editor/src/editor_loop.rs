@@ -1,5 +1,5 @@
 //! Coordinate editor frames and resource lifetime. Inspectors return Rc<dyn Any>; frame closures use the shared Ui. Retained source/term memory accounting updates when documents change and excludes other allocator/lowering owners.
-#![allow(non_camel_case_types, non_upper_case_globals)]
+
 use std::borrow::Cow;
 use std::any::Any;
 use std::cell::RefCell;
@@ -23,19 +23,19 @@ use pxui::ui::Ui;
 use pxui_shell::layout::Bounds;
 use rays::frame;
 use rays::image;
-use rays::scene::{self, node as scene_node};
+use rays::scene::{self, Node as scene_node};
 use rays::sketch;
 use rays_diagnostic::Diagnostic;
 use sop::context::dependencies::{self as deps, Fact};
 
 use crate::cook;
-use crate::editor_commands::{self, action};
+use crate::editor_commands::{self, Action};
 use crate::editor_frame;
 use crate::editor_history as history;
 use crate::editor_host;
 use crate::editor_inspect;
 use crate::editor_list;
-use crate::editor_model::{self as m, notice_kind, update, Panel_result};
+use crate::editor_model::{self as m, NoticeKind, Update, PanelResult};
 use crate::editor_panes;
 use crate::editor_shell;
 use crate::editor_status;
@@ -83,8 +83,8 @@ fn host_images(value: &LoopModel) -> workspace_images::WorkspaceImages {
 }
 
 /// each canvas panel's picture: reused while its plan, size and preview stand, else rendered
-pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: &input::Frame, raw_frame: &frame::Frame, core: &m::EditorModel, control: &V::control) -> (Vec<(String, canvas_picture)>, Option<String>) {
-    let mut pictures: Vec<(String, canvas_picture)> = Vec::new();
+pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: &input::Frame, raw_frame: &frame::Frame, core: &m::EditorModel, control: &V::Control) -> (Vec<(String, CanvasPicture)>, Option<String>) {
+    let mut pictures: Vec<(String, CanvasPicture)> = Vec::new();
     let mut error = context_error;
     let geometry = editor_shell::geometry(&core.into(), &core.workspace, raw_frame);
     let images = host_images(value);
@@ -97,8 +97,11 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
         let (_, _, w, h) = if !V::ui_visible(control) && core.focus == Panel::Canvas(key.clone()) { (0, 0, raw_frame.input.size.0, raw_frame.input.size.1) } else { leaf.body };
         // a picture's frame is its pane: frame/width and frame/height read the canvas, not the window
         let input = input::Frame { size: (w, h), ..input.clone() };
-        let drawing_value = core.doc.shell.as_ref().and_then(|shell| shell.canvases.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()));
         let lowered = &core.doc.workspace.lowered;
+        let drawing_value = match &core.doc.shell {
+            Some(shell) => shell.canvases.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()),
+            None => lowered.plan.instances.iter().find(|instance| instance.default && instance.graph == key).map(|instance| instance.result.clone()),
+        };
         let preview = core.canvas_viewed.clone();
         let drawing_value = match &preview {
             Some((t, id)) if *t == ty::drawing() => Some(EValue::Deferred(t.clone(), *id)),
@@ -113,8 +116,8 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
             Some(picture) if same_plan && picture.preview == preview => picture.dynamic,
             _ => !lowered.states.is_empty() || lowered.plan.nodes.iter().any(|n| n.args.iter().any(|(_, v)| flow_eval::is_live(v) || flow_eval::frame_dependent(v))),
         };
-        let blank = |previous: &Option<canvas_picture>| -> canvas_picture {
-            previous.clone().unwrap_or(canvas_picture { size: (w, h), dynamic, plan: pid, scene: Vec::new(), prepared: None, preview: preview.clone() })
+        let blank = |previous: &Option<CanvasPicture>| -> CanvasPicture {
+            previous.clone().unwrap_or(CanvasPicture { size: (w, h), dynamic, plan: pid, scene: Vec::new(), prepared: None, preview: preview.clone() })
         };
         // a canvas previewing an image node
         if let Some((pty, id)) = preview.clone().filter(|(pty, _)| *pty == ty::image()) {
@@ -125,7 +128,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
                     let scale = (w as f64 / iw as f64).min(h as f64 / ih as f64);
                     let mut scene_: Nodes = scene::rect((0, 0), w, h, Some(rays_math::color::black()), None).ok().into_iter().collect();
                     scene_.extend(scene::image(&img, (0, 0), Some(scale), None).ok());
-                    pictures.insert(0, (key, canvas_picture { size: (w, h), dynamic, plan: pid, scene: scene_, prepared: None, preview: preview.clone() }));
+                    pictures.insert(0, (key, CanvasPicture { size: (w, h), dynamic, plan: pid, scene: scene_, prepared: None, preview: preview.clone() }));
                 }
                 Err(d) => {
                     pictures.insert(0, (key, blank(&previous)));
@@ -144,9 +147,9 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
         }
         let fast = lowering::fast(&core.doc);
         let gpu = workspace_gpu::config(&gpu_t, fast);
-        let prepare = |previous: &Option<canvas_picture>| -> Result<Rc<drawing::prepared>, Diagnostic> {
+        let prepare = |previous: &Option<CanvasPicture>| -> Result<Rc<drawing::Prepared>, Diagnostic> {
             match previous {
-                Some(canvas_picture { prepared: Some(p), preview: held, .. }) if same_plan && *held == preview => Ok(p.clone()),
+                Some(CanvasPicture { prepared: Some(p), preview: held, .. }) if same_plan && *held == preview => Ok(p.clone()),
                 _ => drawing::prepare(
                     &drawing::PrepareOptions { gpu: Some(gpu.clone()), profile: Some(lowered.profile.clone()), approx: None, states: lowered.states.clone() },
                     &lowered.plan,
@@ -155,7 +158,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
                 .map(Rc::new),
             }
         };
-        let mut rendered: Option<Result<(Rc<drawing::prepared>, Nodes), Diagnostic>> = None;
+        let mut rendered: Option<Result<(Rc<drawing::Prepared>, Nodes), Diagnostic>> = None;
         match prepare(&previous) {
             Err(d) => rendered = Some(Err(d)),
             Ok(p) => {
@@ -165,7 +168,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
                     let live = input.clone();
                     let plan = lowered.plan.clone();
                     let gpu_for_image = gpu.clone();
-                    let resolver: drawing::image_resolver = Rc::new(move |v: &EValue| workspace_images::image(Some(&gpu_for_image), true, &image_images, &state, &live, &plan, v));
+                    let resolver: drawing::ImageResolver = Rc::new(move |v: &EValue| workspace_images::image(Some(&gpu_for_image), true, &image_images, &state, &live, &plan, v));
                     let options = drawing::RenderOptions {
                         state: Some(core.cook.state.clone()),
                         image: Some(resolver),
@@ -177,7 +180,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: 
             }
         }
         match rendered.expect("rendered") {
-            Ok((prepared, scene_)) => pictures.insert(0, (key, canvas_picture { size: (w, h), dynamic, plan: pid, scene: scene_, prepared: Some(prepared), preview: preview.clone() })),
+            Ok((prepared, scene_)) => pictures.insert(0, (key, CanvasPicture { size: (w, h), dynamic, plan: pid, scene: scene_, prepared: Some(prepared), preview: preview.clone() })),
             Err(d) => {
                 // the last picture stays up, unless its mark sets bind GPU outputs this failed
                 // render may already have replaced
@@ -231,13 +234,13 @@ pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
 /// are reduced before sealing its history. Updates the drag and returns the input
 /// with the drag's pointer events taken out, the held modifiers at the end of the frame, and the
 /// pane's press and release for the camera's pointer grab.
-pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[action], sent: &'a frame::Frame, area: Bounds) -> (Cow<'a, frame::Frame>, Vec<Key>, (bool, bool)) {
+pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[Action], sent: &'a frame::Frame, area: Bounds) -> (Cow<'a, frame::Frame>, Vec<Key>, (bool, bool)) {
     let (previous_level, previous_map, held_keys, pane_keys) = before;
     let seal = |core: &mut m::EditorModel| { core.history = history::seal(false, core.history.clone()); };
     let world_drag = if loaded
         || m::pane_level(&(&value.core).into()) != previous_level
         || value.core.map_view != previous_map
-        || actions.iter().any(|a| matches!(a, action::Undo | action::Redo | action::Hide_ui))
+        || actions.iter().any(|a| matches!(a, Action::Undo | Action::Redo | Action::HideUi))
     { None } else { value.world_drag.clone() };
     let modifiers = input::keys_before(held_keys, &sent.input.keys, &sent.input.events);
     let modifiers = sent.input.events.iter().fold(modifiers, |keys, e| input::keys_after(&keys, e));
@@ -250,14 +253,14 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
         (Some(s), Some(box_)) => {
             let drag = match world_drag {
                 None if s.pressed && s.button == Some(MouseButton::LeftButton) => match world_operation(core, area, s.press_point, ui.press_keys(box_).contains(&Key::Shift)) {
-                    Some(operation) => { seal(core); Some(self::world_drag { operation, point: s.press_point, area }) },
+                    Some(operation) => { seal(core); Some(self::WorldDrag { operation, point: s.press_point, area }) },
                     None => None,
                 },
                 drag => drag,
             };
             match drag {
                 Some(drag) if s.released => { move_world(core, &drag, s.release_point); seal(core); (None, true) },
-                Some(drag) if s.held => { move_world(core, &drag, s.pointer); (Some(self::world_drag { point: s.pointer, ..drag }), true) },
+                Some(drag) if s.held => { move_world(core, &drag, s.pointer); (Some(self::WorldDrag { point: s.pointer, ..drag }), true) },
                 Some(drag) => { move_world(core, &drag, s.pointer); seal(core); (None, true) },
                 None => (None, false),
             }
@@ -274,8 +277,8 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
         Cow::Borrowed(sent)
     } else {
         let mut routed = sent.clone();
-        routed.input.events.retain(|e| !matches!(e, Event::Pointer_pressed(MouseButton::LeftButton, _) | Event::Pointer_moved(_) | Event::Pointer_released(MouseButton::LeftButton, _)));
-        routed.input.events.push(Event::Pointer_cancelled(MouseButton::LeftButton));
+        routed.input.events.retain(|e| !matches!(e, Event::PointerPressed(MouseButton::LeftButton, _) | Event::PointerMoved(_) | Event::PointerReleased(MouseButton::LeftButton, _)));
+        routed.input.events.push(Event::PointerCancelled(MouseButton::LeftButton));
         routed.input.buttons.retain(|button| *button != MouseButton::LeftButton);
         routed.mouse_delta = (0., 0.);
         Cow::Owned(routed)
@@ -290,7 +293,7 @@ pub fn world_drag_frame<'a>(value: &mut LoopModel, before: (Level, bool, &[Key],
 /// what the panes draw over the views: header tools, the gate where a film is not the whole pane,
 /// the selected object box in the focused view, and the render clock
 #[allow(clippy::too_many_arguments)]
-pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::extra, viewing: &Option<String>, camera: &V::camera, cameras: &[(String, V::camera)], pending: bool, bodies: &[(String, Bounds)]) {
+pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::Extra, viewing: &Option<String>, camera: &V::Camera, cameras: &[(String, V::Camera)], pending: bool, bodies: &[(String, Bounds)]) {
     let core = Rc::make_mut(&mut value.core);
     core.view_tools = V::header_tools(extra);
     // what the panes draw over a view: the gate where it is not the whole pane, and the selected
@@ -318,7 +321,7 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::extra, vie
                     Some((_, t)) if samples >= t.samples && t.film == film => (if t.samples >= cap { t.seconds } else { now - t.since }, t.since),
                     _ => (0., now),
                 };
-                (key.clone(), m::trace { film, samples, cap, bounces, seconds, since })
+                (key.clone(), m::Trace { film, samples, cap, bounces, seconds, since })
             })
         })
         .collect();
@@ -327,21 +330,21 @@ pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::extra, vie
 /// The frame's clicks pick in the view, and a payload carried over a viewport finds its surface.
 /// Updates the core and the press still waiting for its release.
 #[allow(clippy::too_many_arguments)]
-pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::camera, extra: &V::extra, area: Bounds, modifiers: &[Key], input: &frame::Frame, raw_frame: &frame::Frame) {
+pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::Camera, extra: &V::Extra, area: Bounds, modifiers: &[Key], input: &frame::Frame, raw_frame: &frame::Frame) {
     // A press and release within the drag threshold is a click: the view picks.
     let mut press = value.pick_press;
     let mut clicks: Vec<(f64, f64)> = Vec::new();
     for event in &input.input.events {
         match event {
-            Event::Pointer_pressed(MouseButton::LeftButton, point) => press = Some(*point),
-            Event::Pointer_released(MouseButton::LeftButton, (qx, qy)) => {
+            Event::PointerPressed(MouseButton::LeftButton, point) => press = Some(*point),
+            Event::PointerReleased(MouseButton::LeftButton, (qx, qy)) => {
                 match press {
-                    Some((px, py)) if (qx - px).hypot(qy - py) < pxui::ui::drag_threshold => clicks.insert(0, (*qx, *qy)),
+                    Some((px, py)) if (qx - px).hypot(qy - py) < pxui::ui::DRAG_THRESHOLD => clicks.insert(0, (*qx, *qy)),
                     _ => {}
                 }
                 press = None;
             }
-            Event::Pointer_cancelled(MouseButton::LeftButton) | Event::Focus_lost => press = None,
+            Event::PointerCancelled(MouseButton::LeftButton) | Event::FocusLost => press = None,
             _ => {}
         }
     }
@@ -412,12 +415,12 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let panel_control = value.control.clone();
     let panel_camera = value.camera.clone();
     let panel_extra = extra.clone();
-    let camera_panel = move |ui: &mut Ui| -> Panel_result { Rc::new(V::panel(ui, &panel_control, &panel_camera, &panel_extra, inspector)) };
+    let camera_panel = move |ui: &mut Ui| -> PanelResult { Rc::new(V::panel(ui, &panel_control, &panel_camera, &panel_extra, inspector)) };
     let handles_scene = editor_inspect::scene(&value.core).clone();
     let handles_view = view_camera(&value);
     let handles_extra = extra.clone();
     let handles_key = focus_key(&value);
-    let view_handles = move |ui: &mut Ui, selected: Option<&m::picked>, space: rays_math::mat4::T, bounds: Bounds| {
+    let view_handles = move |ui: &mut Ui, selected: Option<&m::Picked>, space: rays_math::mat4::T, bounds: Bounds| {
         // a handle is where the picture shows its point: in the view's film, not its pane
         V::handles(ui, selected, &handles_scene, &space, &handles_view, &handles_extra, V::film(&handles_extra, &handles_key, bounds))
     };
@@ -433,15 +436,15 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let gpu_t = host_gpu(&value);
     let text_focus = ui.borrow().text_input_focused();
     let error_status = error_status_of(&value, &image_errors);
-    let view_state: Rc<dyn Fn(Option<&Panel_result>) -> flow_syntax::syntax::Syntax> = {
+    let view_state: Rc<dyn Fn(Option<&PanelResult>) -> flow_syntax::syntax::Syntax> = {
         let (camera, extra) = (value.camera.clone(), value.extra.clone());
-        Rc::new(move |panel| match panel.and_then(|p| (**p).downcast_ref::<V::panel_out>()) {
+        Rc::new(move |panel| match panel.and_then(|p| (**p).downcast_ref::<V::PanelOut>()) {
             Some(p) => V::section(&p.camera, &p.extra),
             None => V::section(&camera, &extra),
         })
     };
     let host_events = workspace_host::take_events(&mut value.host.borrow_mut());
-    let mut updated: Option<update> = None;
+    let mut updated: Option<Update> = None;
     let mut host_events = Some(host_events);
     workspace_gpu::with_backend(&gpu_t, lowering::fast(&value.core.doc), &mut |gpu| {
         let metadata: flow_sop::lower::ImageMetadata = Arc::new(|plan, id| FRAME_IMAGES.with(|f| f.borrow().as_ref().and_then(|images| workspace_images::peek(images, plan, id)).map(|i| image::dimensions(&i))));
@@ -475,7 +478,7 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let geometry = editor_shell::geometry(&(&value.core).into(), &value.core.workspace, &frame);
     let focused = follow_focus_in(&value, &value.core, &geometry);
     let panes = editor_shell::panes_in(&(&value.core).into(), &geometry);
-    let panel_out: Option<Rc<V::panel_out>> = update_.panel.take().and_then(|p| Rc::downcast::<V::panel_out>(p).ok());
+    let panel_out: Option<Rc<V::PanelOut>> = update_.panel.take().and_then(|p| Rc::downcast::<V::PanelOut>(p).ok());
     let (control, camera, requests, extra, inspected) = match panel_out {
         Some(p) => {
             let camera = if focused.viewing != value.viewing { focused.camera.clone() } else { p.camera.clone() };
@@ -493,8 +496,8 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     let mut render_status = value.render_status.clone();
     for a in &update_.actions {
         match a {
-            action::Hide_ui => control = V::toggle_ui(&control),
-            action::Open_camera => control = V::open_camera(&control),
+            Action::HideUi => control = V::toggle_ui(&control),
+            Action::OpenCamera => control = V::open_camera(&control),
             other => {
                 let (e, notice) = V::apply_action(&camera, &extra, other);
                 extra = e;
@@ -506,12 +509,12 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     }
     V::on_doc(&document, Rc::make_mut(&mut value.core), &camera);
     // Command-S applies drafts before writing; rejected drafts keep the save waiting.
-    let source = if !update_.actions.contains(&action::Save_source) {
+    let source = if !update_.actions.contains(&Action::SaveSource) {
         value.source.clone()
     } else if editor_text::apply_drafts(value.refused.as_deref(), Rc::make_mut(&mut value.core)) {
         save_source(Rc::make_mut(&mut value.core), value.source.clone(), &V::section(&camera, &extra))
     } else {
-        Rc::make_mut(&mut value.core).notice = Some((notice_kind::Refusal, "Not saved: the text pane's draft does not check \u{b7} fix or discard it, then save".to_string()));
+        Rc::make_mut(&mut value.core).notice = Some((NoticeKind::Refusal, "Not saved: the text pane's draft does not check \u{b7} fix or discard it, then save".to_string()));
         value.source.clone()
     };
     if source != value.source {
@@ -529,16 +532,16 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
         Some(None) => (camera, Some("Nothing to frame: no cooked points".to_string())),
         None => (camera, render_status),
     };
-    let stepped = update_.actions.iter().any(|a| matches!(a, action::Undo | action::Redo));
+    let stepped = update_.actions.iter().any(|a| matches!(a, Action::Undo | Action::Redo));
     let (camera, extra) = V::on_view(Rc::make_mut(&mut value.core), &previous_camera, &focus_key_of(&focused.viewing), camera, extra, stepped, !raw_frame.input.buttons.is_empty());
-    let ends_pointer = |e: &Event| matches!(e, Event::Pointer_released(MouseButton::LeftButton, _) | Event::Pointer_cancelled(MouseButton::LeftButton) | Event::Focus_lost);
+    let ends_pointer = |e: &Event| matches!(e, Event::PointerReleased(MouseButton::LeftButton, _) | Event::PointerCancelled(MouseButton::LeftButton) | Event::FocusLost);
     if !frame::mouse_down(MouseButton::LeftButton, &raw_frame) || frame::has_event(&ends_pointer, &raw_frame) || frame::has_event(&ends_pointer, &update_.input) {
         Rc::make_mut(&mut value.core).history = history::seal(true, value.core.history.clone());
     }
     let live = value.world_drag.is_some() || timeline::mode(&editor_list::timeline(&value.core)) == timeline::Mode::Playing;
     let baked_from = bake_world(None, value.baked_from.as_ref(), &value.core, live);
     let baked = baked_from.as_ref().map(|(_, b)| b.clone());
-    let new_views: Vec<(String, baked_pair)> = view_keys(&value.core)
+    let new_views: Vec<(String, BakedPair)> = view_keys(&value.core)
         .into_iter()
         .filter_map(|key| {
             let previous = value.baked_views.iter().find(|(k, _)| *k == key).map(|(_, p)| p.clone());
@@ -687,8 +690,8 @@ pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
 /// autosave), waking the frame when it has something to show. The picture must also have stood still
 /// for `rest_frames` full frames, which covers what no clause names: a visible clock moving is a
 /// picture changing.
-pub const rest_seconds: f64 = 1.;
-pub const rest_frames: i64 = 2;
+pub const REST_SECONDS: f64 = 1.;
+pub const REST_FRAMES: i64 = 2;
 
 pub fn same_input(a: &frame::Frame, b: &frame::Frame) -> bool {
     a.input.size == b.input.size && a.pixel_scale == b.pixel_scale && a.input.pointer == b.input.pointer && a.input.buttons == b.input.buttons && a.input.keys == b.input.keys
@@ -722,7 +725,7 @@ pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
         && (timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing || !reads_clock(value))
 }
 
-pub fn settle(before_rest: &Option<rest>, value: &mut LoopModel, frame_: &frame::Frame) {
+pub fn settle(before_rest: &Option<Rest>, value: &mut LoopModel, frame_: &frame::Frame) {
     if !may_rest(&value, frame_) {
         value.rest = None;
         return;
@@ -732,12 +735,12 @@ pub fn settle(before_rest: &Option<rest>, value: &mut LoopModel, frame_: &frame:
         Some(rest) if same_input(&rest.shown, frame_) && scene::layer::same(&rest.picture, &picture) => rest.still + 1,
         _ => 0,
     };
-    value.rest = Some(rest { picture, still, shown: frame_.clone() });
+    value.rest = Some(Rest { picture, still, shown: frame_.clone() });
 }
 
-pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> Option<rest> {
+pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> Option<Rest> {
     match &value.rest {
-        Some(rest_) if rest_.still >= rest_frames && frame_.input.events.is_empty() && same_input(&rest_.shown, frame_) && frame_.input.t >= rest_.shown.input.t && frame_.input.t - rest_.shown.input.t < rest_seconds => Some(rest_.clone()),
+        Some(rest_) if rest_.still >= REST_FRAMES && frame_.input.events.is_empty() && same_input(&rest_.shown, frame_) && frame_.input.t >= rest_.shown.input.t && frame_.input.t - rest_.shown.input.t < REST_SECONDS => Some(rest_.clone()),
         _ => None,
     }
 }
@@ -894,9 +897,9 @@ pub fn state_text(value: &LoopModel) -> String {
         "level: {}\nprojection: {}\npane graph: {}\ngraph panels: {}\nwindows: {}\npanels: {}\nroute: {}\ntext: {}\nmap view: {}\ngraph pan: {}\nguide: {}\nkey hud: {}\nselected: {}\nscope selected: {}\nfocus: {}\nprompt: {}\nundo: {} ({} entries)\nredo: {}\ncook: {}\nedit error: {}\nrenderer: {}\nlive scene: {}\nautosave: {}\nload document.rays with / b (workspace documents only) after copying it to {}\n",
         editor_status::level_name(&core.into()),
         match editor_panes::projection_of(&core.into()) {
-            m::projection::List_view => "list",
-            m::projection::Graph_view => "graph",
-            m::projection::Text_view => "text",
+            m::Projection::ListView => "list",
+            m::Projection::GraphView => "graph",
+            m::Projection::TextView => "text",
         },
         or_dash(&editor_panes::graph_name(&core.into())),
         editor_panes::graph_panels(&core.into()),
@@ -951,19 +954,19 @@ pub fn run(
     max_frames: Option<i64>,
     crash_dir: Option<String>,
     profile: Option<bool>,
-    config: sketch::config,
+    config: sketch::Config,
     workspace: workspace_doc::T,
     source: Option<source_file::SourceFile>,
-    prepare: cook::Prepare_fn,
-    draw: Draw_fn,
-) -> Result<(), sketch::error> {
+    prepare: cook::PrepareFn,
+    draw: DrawFn,
+) -> Result<(), sketch::Error> {
     let Create { inputs, name, presets, factories, gpu_owner, settings, lights, camera, background, seed, grain, domains, max_entries, max_payload_bytes, await_: _, carry_budget, preferences, ui_text_size, platform, ui_font, opened } = options;
     let name = name.unwrap_or_else(|| workspace_doc::name(&workspace));
     // `opened`, the caller's document of this workspace, is handed to the editor once and not kept by
     // the loop: after an edit or a reload only the history decides how long it lives.
     let handed = Rc::new(RefCell::new(opened));
-    let deterministic = matches!(config.clock, sketch::clock::Fixed(_));
-    let init: Box<dyn Fn(&frame::Frame) -> sketch::model> = {
+    let deterministic = matches!(config.clock, sketch::Clock::Fixed(_));
+    let init: Box<dyn Fn(&frame::Frame) -> sketch::Model> = {
         let handed = handed.clone();
         let (workspace, source, prepare, draw) = (workspace.clone(), source.clone(), prepare.clone(), draw.clone());
         let slots = RefCell::new(Some((inputs, presets, factories, gpu_owner, settings, lights, camera, background, preferences, platform, ui_font)));
@@ -1004,7 +1007,7 @@ pub fn run(
             Box::new(value)
         })
     };
-    let program = sketch::program {
+    let program = sketch::Program {
         init,
         update: Box::new(move |model, frame_| {
             let value = model.downcast_mut::<LoopModel>().expect("editor model");
@@ -1032,5 +1035,5 @@ pub fn run(
         })),
         on_stop: Some(Box::new(|model| close(model.downcast_ref::<LoopModel>().expect("editor model")))),
     };
-    sketch::run_state(Some(config), max_frames, crash_dir, profile, program).map(|_| ())
+    sketch::run_state(sketch::RunOptions { config: Some(config), max_frames, crash_dir, profile: profile.unwrap_or(false) }, program).map(|_| ())
 }

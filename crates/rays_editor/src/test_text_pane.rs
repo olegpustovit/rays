@@ -370,7 +370,7 @@ fn shown_cache_and_commands() {
 }
 
 /// The editor's Lisp as the text area's language: indentation, bracket pairs, completions,
-/// descriptions and parinfer (lisp_text.rs is bundle A's; this section lives in test_text_pane.ml).
+/// descriptions and parinfer (lisp_text.rs is bundle A's; this section lives in ).
 #[test]
 fn lisp_text() {
     use crate::lisp_text as l;
@@ -470,7 +470,7 @@ fn lisp_text_completions() {
     };
     assert_eq!(sorted(&format!("{ui}ui/lisp :tab \"")), ["document", "graph", "selection"], "a lisp panel's tabs complete");
     assert_eq!(labels(&format!("{ui}ui/graph :view \"l")), ["list"], "a graph panel's views complete");
-    assert!(sorted(&format!("{ui}ui/split \"")) == ["horizontal", "vertical"] && labels(&format!("{ui}ui/split-at \"v")) == ["vertical"], "the split axis completes");
+    assert!(sorted(&format!("{ui}ui/split \"")) == ["horizontal", "vertical"] && labels(&format!("{ui}ui/split_at \"v")) == ["vertical"], "the split axis completes");
     assert!(labels(&format!("{ui}ui/split \"vertical\" a b :first_size \"")).is_empty(), "a size completes no text");
     let text = d("sop/box :connectivity \"Qu");
     let c = l::complete(&names, &[], &vocab, &text, doc.len() + 24);
@@ -491,7 +491,7 @@ fn lisp_text_completions() {
     assert!(describe(doc, index_of(":size_x") + 3).contains("Size X"), "a parameter's description");
     let with_box = format!("{doc}sop/box :size [1 1 1])");
     assert!(describe(&with_box, doc.len() as i64 + 10).contains("Size"), "a group's description");
-    assert!(describe(doc, 15).contains("network"), "graph form");
+    assert!(describe(doc, 15).contains("reactive graph"), "graph form");
     assert_eq!(describe(doc, doc.len() as i64 - 1), "", "an open paren has no description");
     let with_ring = format!("{doc}sop/transform ring)");
     assert!(describe(&with_ring, doc.len() as i64 + 15).contains("let* binding"), "a binding's description");

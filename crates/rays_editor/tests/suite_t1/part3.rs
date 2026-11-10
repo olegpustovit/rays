@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 3: run_ops, run_restore, run_camera_zoom, run_cameras,
+//! , part 3: run_ops, run_restore, run_camera_zoom, run_cameras,
 //! run_instances, run_views.
 use super::support::*;
 use editor_core::panels::{self, Panel, Size};
@@ -47,7 +47,7 @@ pub fn run_ops() {
     let sh = tree(&e);
     // resize
     let r = ok("Resize panel", L::SetLayoutSize { node: p(&["editor", "left"]), size: LSize::Ratio(0.3) });
-    check(has(&source(&r), "(ui/split-at \"vertical\" 0.3 network code)"), "Set_layout_ratio");
+    check(has(&source(&r), "(ui/split_at \"vertical\" 0.3 network code)"), "Set_layout_ratio");
     let clamped = tree(&ok("Resize panel", L::SetLayoutSize { node: p(&["editor", "left"]), size: LSize::Ratio(5.) }));
     check(
         match &clamped {
@@ -59,17 +59,17 @@ pub fn run_ops() {
         },
         "a ratio clamps to 0.9",
     );
-    // a ui/split (no ratio) becomes ui/split-at
+    // a ui/split (no ratio) becomes ui/split_at
     let plain = editor(&with_editor("    (let* [a (ui/graph) b (ui/lisp) s (ui/split \"horizontal\" a b)] (ui/workspace s))"));
     match editor::edit_layout(plain.clone(), &L::SetLayoutSize { node: p(&["editor", "s"]), size: LSize::Ratio(0.25) }) {
-        Ok(q) => check(has(&source(&q), "(ui/split-at \"horizontal\" 0.25 a b)"), "ui/split gets a ratio"),
+        Ok(q) => check(has(&source(&q), "(ui/split_at \"horizontal\" 0.25 a b)"), "ui/split gets a ratio"),
         Err(m) => fail(&m),
     }
     // split, close, retype: the editor's panel table writes the panel forms
     let panel = |kind: &str| panel_kinds::expr(&editor::workspace(&e).source, kind).expect("panel kind");
     let sp = ok("Split panel", L::SplitPanel { node: p(&["editor", "network"]), axis: Axis::V, ratio: 0.5, panel: panel("lisp") });
     check(panels::to_string(&tree(&sp)) == "(h outline (h (v (v graph lisp) lisp) (tile view)))", &format!("split: {}", panels::to_string(&tree(&sp))));
-    check(has(&source(&sp), "(ui/split-at \"vertical\" 0.5 network_a network_b)"), "the new split");
+    check(has(&source(&sp), "(ui/split_at \"vertical\" 0.5 network_a network_b)"), "the new split");
     let c = ok("Close panel", L::ClosePanel { node: p(&["editor", "network"]) });
     check(panels::to_string(&tree(&c)) == "(h outline (h lisp (tile view)))", &format!("close: {}", panels::to_string(&tree(&c))));
     let t = ok("Retype panel", L::SetPanelKind { node: p(&["editor", "network"]), panel: panel("list") });
@@ -82,7 +82,7 @@ pub fn run_ops() {
     check(has(&source(&v), "outline (ui/viewport (ref scene))"), "a viewport is over the first scene graph");
     let docked = ok("Dock panel", L::DockPanel { node: p(&["editor", "network"]), target: p(&["editor", "outline"]), side: Side::Right });
     check(panels::to_string(&tree(&docked)) == "(h (h outline graph) (h lisp (tile view)))", &format!("docking duplicated a panel or left a gap: {}", panels::to_string(&tree(&docked))));
-    check(has(&source(&docked), "(ui/split-at \"horizontal\" 0.5 outline network)"), "docking was not reflected in the editor Lisp");
+    check(has(&source(&docked), "(ui/split_at \"horizontal\" 0.5 outline network)"), "docking was not reflected in the editor Lisp");
     // undo restores the tree with the source
     check(panels::to_string(&tree(&e)) == panels::to_string(&sh), "undo target");
     // refusals leave everything alone
@@ -106,7 +106,7 @@ pub fn run_ops() {
         }
         Err(message) => fail(&message),
     }
-    let switched = editor(&with_editor("(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline)] (ui/workspace (ui/switch (ui/split-at \"horizontal\" 0.5 main window) (ui/lisp) :active 0)))"));
+    let switched = editor(&with_editor("(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline)] (ui/workspace (ui/switch (ui/split_at \"horizontal\" 0.5 main window) (ui/lisp) :active 0)))"));
     match editor::edit_layout(switched.clone(), &L::ClosePanel { node: p(&["editor", "outline"]) }) {
         Ok(closed) => {
             check(!has(&source(&closed), "ui/floating") && has(&source(&closed), "(ui/switch main (ui/lisp)"), "closing a floating panel did not clean its switch branch");
@@ -118,7 +118,7 @@ pub fn run_ops() {
         Err(message) => fail(&message),
     }
     // a panel that follows a graph panel keeps following it when a window docks on that panel or is closed
-    let followed = editor(&with_editor("(let* [network (ui/graph) inspector (ui/inspector :of network)] (ui/workspace (ui/split-at \"horizontal\" 0.5 network inspector)))"));
+    let followed = editor(&with_editor("(let* [network (ui/graph) inspector (ui/inspector :of network)] (ui/workspace (ui/split_at \"horizontal\" 0.5 network inspector)))"));
     match editor::edit_layout(followed.clone(), &L::LayoutWindow { graph: "editor".into(), panel: panel_kinds::expr(&[], "outline").expect("outline") }) {
         Err(message) => fail(&format!("new window: {message}")),
         Ok(windowed) => match editor::edit_layout(windowed, &L::DockPanel { node: p(&["editor", "inspector"]), target: p(&["editor", "network"]), side: Side::Left }) {
@@ -187,10 +187,10 @@ pub fn run_camera_zoom() {
         "(workspace zoom (graph g :context sop (sop/box)) (graph scene :context scene (scene/merge (scene/geometry (ref g)) (scene/camera :eye [0 0 12345.123456789] :follow_viewport true :active true))))",
         editor::Create { camera: Some(camera), ..Default::default() },
     );
-    let mut step = |e: &mut editor::Editor, events: Vec<Event>, count: i64| *e = editor::update(e.clone(), &frame(&[], (200., 200.), events, count));
+    let step = |e: &mut editor::Editor, events: Vec<Event>, count: i64| *e = editor::update(e.clone(), &frame(&[], (200., 200.), events, count));
     step(&mut e, vec![], 0);
     step(&mut e, vec![], 1);
-    step(&mut e, vec![Event::Pointer_moved((200., 200.)), Event::Pointer_pressed(LB, (200., 200.)), Event::Pointer_released(LB, (200., 200.))], 2);
+    step(&mut e, vec![Event::PointerMoved((200., 200.)), Event::PointerPressed(LB, (200., 200.)), Event::PointerReleased(LB, (200., 200.))], 2);
     for count in 3..=15 {
         step(&mut e, vec![Event::Scrolled((0., -1.))], 2 * count);
         let viewport = rays::easy_camera::camera(&editor::camera(&e)).expect("camera");
@@ -205,16 +205,16 @@ pub fn run_camera_zoom() {
     let eye_of = |e: &editor::Editor| rays::camera::position(&rays::easy_camera::camera(&editor::camera(e)).expect("camera"));
     let (before, start) = (source(&e), eye_of(&e));
     let at = (200., 200.);
-    e = editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (0., 0.), at, vec![Event::Key_pressed(Key::Alt), Event::Pointer_pressed(LB, at)], 40));
+    e = editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (0., 0.), at, vec![Event::KeyPressed(Key::Alt), Event::PointerPressed(LB, at)], 40));
     for i in 1..=4 {
         let p = (200. + 8. * i as f64, 200.);
-        e = editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (8., 0.), p, vec![Event::Pointer_moved(p)], 40 + i));
+        e = editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (8., 0.), p, vec![Event::PointerMoved(p)], 40 + i));
         check(rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&editor::render_camera(&e)), 1e-6), "a held orbit left the render camera behind the viewport");
     }
     check(!rays_math::vec3::nearly_equal(start, eye_of(&e), 1e-6), "the Alt-drag did not orbit");
     check(source(&e) == before, "a held orbit wrote the document on every frame");
     let p = (232., 200.);
-    e = editor::update(e.clone(), &frame_full(&[], &[], (0., 0.), p, vec![Event::Pointer_released(LB, p), Event::Key_released(Key::Alt)], 45));
+    e = editor::update(e.clone(), &frame_full(&[], &[], (0., 0.), p, vec![Event::PointerReleased(LB, p), Event::KeyReleased(Key::Alt)], 45));
     check(source(&e) != before && rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&editor::render_camera(&e)), 1e-6), "releasing the orbit did not write the camera node");
     editor::close(&e);
 }
@@ -242,23 +242,23 @@ pub fn run_cameras() {
     let keys = ["v1.1.0", "v1.1.1", "v1.1.2", "v1.1.3"];
     let click = |r: &mut Run, key: &str| {
         let pt = center(r, key);
-        r.step(pt, vec![Event::Pointer_moved(pt)]);
-        r.stepb(&[LB], pt, vec![Event::Pointer_pressed(LB, pt)]);
-        r.step(pt, vec![Event::Pointer_released(LB, pt)]);
+        r.step(pt, vec![Event::PointerMoved(pt)]);
+        r.stepb(&[LB], pt, vec![Event::PointerPressed(LB, pt)]);
+        r.step(pt, vec![Event::PointerReleased(LB, pt)]);
         r.step(pt, vec![]);
     };
     // a press at the point of the click just before would be a double click
     let orbit = |r: &mut Run, key: &str, delta: (f64, f64)| {
         let (x, y) = center(r, key);
         let y = y + 40.;
-        r.step((x, y), vec![Event::Pointer_moved((x, y))]);
-        r.stepb(&[LB], (x, y), vec![Event::Pointer_pressed(LB, (x, y))]);
+        r.step((x, y), vec![Event::PointerMoved((x, y))]);
+        r.stepb(&[LB], (x, y), vec![Event::PointerPressed(LB, (x, y))]);
         for k in 1..=6 {
             let pt = (x + k as f64 * delta.0, y + k as f64 * delta.1);
-            stepd(r, &[LB], delta, pt, vec![Event::Pointer_moved(pt)]);
+            stepd(r, &[LB], delta, pt, vec![Event::PointerMoved(pt)]);
         }
         let last = (x + 6. * delta.0, y + 6. * delta.1);
-        r.step(last, vec![Event::Pointer_released(LB, last)]);
+        r.step(last, vec![Event::PointerReleased(LB, last)]);
         r.step(last, vec![]);
     };
     let same = |a, b| rays_math::vec3::nearly_equal(a, b, 1e-9);
@@ -284,9 +284,9 @@ pub fn run_cameras() {
         let (x, y, _, _) = layout::find(&geometry(&r), &Panel::Graph).expect("graph leaf").body;
         ((x + 20) as f64, (y + 200) as f64)
     };
-    r.step(graph_pane, vec![Event::Pointer_moved(graph_pane)]);
-    r.stepb(&[LB], graph_pane, vec![Event::Pointer_pressed(LB, graph_pane)]);
-    r.step(graph_pane, vec![Event::Pointer_released(LB, graph_pane)]);
+    r.step(graph_pane, vec![Event::PointerMoved(graph_pane)]);
+    r.stepb(&[LB], graph_pane, vec![Event::PointerPressed(LB, graph_pane)]);
+    r.step(graph_pane, vec![Event::PointerReleased(LB, graph_pane)]);
     r.step(graph_pane, vec![key(Key::KeyChar('/')), ch('l'), ch('g')]);
     r.step(graph_pane, vec![]);
     let projection = r.dump("projection");
@@ -314,7 +314,7 @@ pub fn run_instances() {
     (scene/root (scene/merge (ref set) (scene/world (ref dusk) :name "Dusk" :exposure -2))
                 :renderer "Path traced" :max_spp 1024 :bounces 12))
   (graph editor :context editor
-    (ui/workspace (ui/split-at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#;
+    (ui/workspace (ui/split_at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#;
     let mut e = editor(text);
     for c in 1..=12 {
         e = editor::update(e, &frame(&[], (450., 300.), vec![], c));
@@ -342,7 +342,7 @@ pub fn run_views() {
     match staged {
         Err(m) => fail(&m),
         Ok(staged) => {
-            let viewports = staged.layers.iter().filter(|l| matches!(l, rays::scene::layer::native_layer::Scene3_layer(_))).count();
+            let viewports = staged.layers.iter().filter(|l| matches!(l, rays::scene::layer::NativeLayer::Scene3Layer(_))).count();
             check(viewports == 4, &format!("four viewports draw four 3D layers, got {viewports}"));
         }
     }

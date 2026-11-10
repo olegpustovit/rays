@@ -1,6 +1,6 @@
 //! The editor's cook: one geometry object's latest cook (its displayed SOP graph, the sketch's
 //! prepared value, and bounds in the object's own space), the async worker, the schedule, the probe
-//! footers and the framing jobs. #![allow(non_camel_case_types)]
+//! footers and the framing jobs.
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
@@ -16,7 +16,7 @@ use rays::frame;
 use rays_math::{mat4, vec3};
 use rdk_rays::geometry_view as gv;
 use rdk_rays::surface;
-use sop::async_cook::{self, Completion, Prepared};
+use sop::async_cook::{self, Completion, Prepared as AsyncPrepared};
 use sop::context::{self, dependencies as deps};
 use sop::edit_graph;
 use sop::node;
@@ -26,13 +26,13 @@ use crate::pick;
 use crate::schedule;
 use crate::timeline;
 
-pub type bounds = (vec3::T, vec3::T);
+pub type Bounds = (vec3::T, vec3::T);
 pub type Geometry = rdk_core::geometry::T;
 pub type Key2 = (i64, i64);
 
 /// One geometry object's latest cook: its displayed SOP graph, the sketch's prepared value, and
 /// bounds in the object's own space.
-pub struct prepared {
+pub struct Prepared {
     pub geometry: Geometry,
     pub surface: surface::T,
 }
@@ -40,16 +40,16 @@ pub struct prepared {
 /// The prepared value is shared between the cache and the pieces. A surface keeps device handles in
 /// `Rc`s, so it never leaves the initial domain: the worker cooks, the initial domain prepares (see
 /// `Raw` and `finish`).
-pub type Prepared_ref = Rc<prepared>;
+pub type PreparedRef = Rc<Prepared>;
 
 #[derive(Clone)]
-pub struct piece {
+pub struct Piece {
     pub id: i64,
     pub graph: node::T,
-    pub prepared: Prepared_ref,
+    pub prepared: PreparedRef,
     /// read on the initial domain when asked (framing, the selected box): a device's P stays there
     /// until then
-    pub bounds: Rc<OnceCell<Option<bounds>>>,
+    pub bounds: Rc<OnceCell<Option<Bounds>>>,
     pub settings: settings::T,
     /// projection of the graph's declared context dependencies
     pub context: Vec<u8>,
@@ -62,14 +62,14 @@ pub struct piece {
 }
 
 /// What a footer shows of a geometry value: its object and compiled node.
-pub type summary = (Key2, probe::Geometry);
-pub type source = (Key2, gv::T);
+pub type Summary = (Key2, probe::Geometry);
+pub type Source = (Key2, gv::T);
 
-pub enum cooked {
-    Displayed(Vec<piece>, Vec<summary>, Vec<source>),
+pub enum Cooked {
+    Displayed(Vec<Piece>, Vec<Summary>, Vec<Source>),
     /// the footers' counts alone: the displayed objects are cache hits
-    Probed(Vec<piece>, Vec<summary>, Vec<source>),
-    Framed(Option<bounds>),
+    Probed(Vec<Piece>, Vec<Summary>, Vec<Source>),
+    Framed(Option<Bounds>),
 }
 
 /// What the worker hands back (it is `Send`): the cooked outputs of the displayed graphs with the
@@ -83,19 +83,19 @@ pub enum Raw {
         settings: settings::T,
         lit: pick::Set,
         context: context::T,
-        found: Vec<summary>,
-        data: Vec<source>,
+        found: Vec<Summary>,
+        data: Vec<Source>,
     },
-    Framed(Option<bounds>),
+    Framed(Option<Bounds>),
 }
 
 /// Compute a piece's bounds on first use.
-pub fn piece_bounds(piece: &piece) -> Option<bounds> {
+pub fn piece_bounds(piece: &Piece) -> Option<Bounds> {
     *piece.bounds.get_or_init(|| output_bounds(&piece.output).ok().flatten())
 }
 
 /// Build a piece's ray index on first use.
-pub fn piece_surface(piece: &piece) -> Option<&gv::Surface> {
+pub fn piece_surface(piece: &Piece) -> Option<&gv::Surface> {
     piece
         .surface
         .get_or_init(|| sop::payload::geometry(&piece.output.payload).ok().and_then(|g| pick::surface(&g)))
@@ -105,29 +105,29 @@ pub fn piece_surface(piece: &piece) -> Option<&gv::Surface> {
 const PREPARED_BYTE_CAPACITY: i64 = 64 * 1024 * 1024;
 const PREPARED_ENTRIES: usize = 16;
 
-pub type Prepare_fn = Rc<dyn Fn(&settings::T, &Output) -> Result<prepared, String>>;
+pub type PrepareFn = Rc<dyn Fn(&settings::T, &Output) -> Result<Prepared, String>>;
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 
-struct Cache_entry {
+struct CacheEntry {
     id: i64,
     settings: settings::T,
     output: Output,
     context: Vec<u8>,
-    value: Prepared_ref,
+    value: PreparedRef,
     bytes: i64,
 }
 
-/// Prepared results use a 16-entry/64MiB MRU cache keyed by settings/output identity. ponytail: it remains an initial-thread list outside global Lru retreat; a surface cannot be shared between threads.
-struct Prepared_cache {
-    entries: VecDeque<Cache_entry>,
+/// AsyncPrepared results use a 16-entry/64MiB MRU cache keyed by settings/output identity. ponytail: it remains an initial-thread list outside global Lru retreat; a surface cannot be shared between threads.
+struct PreparedCache {
+    entries: VecDeque<CacheEntry>,
     bytes: i64,
 }
 
 /// What `prepare_cached` needs.
 #[derive(Clone)]
 pub struct Preparer {
-    cache: Rc<RefCell<Prepared_cache>>,
-    prepare: Prepare_fn,
+    cache: Rc<RefCell<PreparedCache>>,
+    prepare: PrepareFn,
     clock: Clock,
 }
 
@@ -141,7 +141,7 @@ pub struct Cook {
     pub await_: bool,
     pub schedule: schedule::Schedule,
     pub preparer: Preparer,
-    pub pieces: Vec<piece>,
+    pub pieces: Vec<Piece>,
     /// the latest desired submission settings
     pub settings: Option<settings::T>,
     pub error: Option<String>,
@@ -169,25 +169,25 @@ pub struct Cook {
     pub probes_owed: bool,
     /// updates since the last edit: footers are counted once an edit settles
     pub quiet: i64,
-    pub summaries: Vec<summary>,
+    pub summaries: Vec<Summary>,
     /// same bounded optional cook targets as summaries
-    pub sources: Vec<source>,
+    pub sources: Vec<Source>,
 }
 
-pub struct update_result {
+pub struct UpdateResult {
     pub cook: Cook,
     pub edit_error: Option<String>,
     pub prepared_changed: bool,
-    pub framed: Option<Option<bounds>>,
+    pub framed: Option<Option<Bounds>>,
 }
 
-pub fn geometry_bounds(g: &Geometry) -> Option<bounds> {
+pub fn geometry_bounds(g: &Geometry) -> Option<Bounds> {
     gv::bounds(g)
 }
 
 /// The eight corners of a box under a transform: the one walk for every box taken to another space
 /// (an instance's, the world's, the screen's).
-pub fn iter_corners(matrix: &mat4::T, b: &bounds, f: &mut dyn FnMut(vec3::T)) {
+pub fn iter_corners(matrix: &mat4::T, b: &Bounds, f: &mut dyn FnMut(vec3::T)) {
     let (lo, hi) = b;
     for corner in 0..8 {
         f(mat4::transform_point(
@@ -201,7 +201,7 @@ pub fn iter_corners(matrix: &mat4::T, b: &bounds, f: &mut dyn FnMut(vec3::T)) {
     }
 }
 
-pub fn union(a: &bounds, b: &bounds) -> bounds {
+pub fn union(a: &Bounds, b: &Bounds) -> Bounds {
     let ((a, bb), (c, d)) = (a, b);
     (
         vec3::create(a.x.min(c.x), a.y.min(c.y), a.z.min(c.z)),
@@ -210,7 +210,7 @@ pub fn union(a: &bounds, b: &bounds) -> bounds {
 }
 
 /// The box around a box under each of `matrices`.
-pub fn transformed_all(matrices: &[mat4::T], b: &bounds) -> bounds {
+pub fn transformed_all(matrices: &[mat4::T], b: &Bounds) -> Bounds {
     let mut lower = vec3::create(f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let mut upper = vec3::create(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
     for matrix in matrices {
@@ -222,12 +222,12 @@ pub fn transformed_all(matrices: &[mat4::T], b: &bounds) -> bounds {
     (lower, upper)
 }
 
-pub fn transformed(matrix: &mat4::T, b: &bounds) -> bounds {
+pub fn transformed(matrix: &mat4::T, b: &Bounds) -> Bounds {
     transformed_all(std::slice::from_ref(matrix), b)
 }
 
 /// A packed output's bounds: the prototype's box at every instance.
-pub fn output_bounds(output: &Output) -> Result<Option<bounds>, rays_diagnostic::Diagnostic> {
+pub fn output_bounds(output: &Output) -> Result<Option<Bounds>, rays_diagnostic::Diagnostic> {
     let geometry = sop::payload::geometry(&output.payload)?;
     Ok(match (geometry_bounds(&geometry), &output.instances) {
         (None, _) => None,
@@ -246,7 +246,7 @@ fn unix_now() -> f64 {
 /// (latest request wins). The default is false; `Frame.t` does not say the clock is fixed, so an
 /// export host passes `await_: Some(true)`.
 pub fn create(
-    prepare: Prepare_fn,
+    prepare: PrepareFn,
     seed: i64,
     grain: i64,
     domains: Option<i64>,
@@ -275,7 +275,7 @@ pub fn create(
         domains,
         await_,
         schedule: schedule::initial(),
-        preparer: Preparer { cache: Rc::new(RefCell::new(Prepared_cache { entries: VecDeque::new(), bytes: 0 })), prepare, clock },
+        preparer: Preparer { cache: Rc::new(RefCell::new(PreparedCache { entries: VecDeque::new(), bytes: 0 })), prepare, clock },
         pieces: Vec::new(),
         settings: None,
         error: None,
@@ -336,11 +336,11 @@ pub fn stats(value: &Cook) -> sop::session::Stats {
     async_cook::stats(&value.worker)
 }
 
-pub fn pieces(value: &Cook) -> &[piece] {
+pub fn pieces(value: &Cook) -> &[Piece] {
     &value.pieces
 }
 
-fn same_key(entry: &Cache_entry, id: i64, settings: &settings::T, output: &Output, context: &[u8]) -> bool {
+fn same_key(entry: &CacheEntry, id: i64, settings: &settings::T, output: &Output, context: &[u8]) -> bool {
     entry.id == id && settings::same_values(&entry.settings, settings) && sop::session::same_output(&entry.output, output) && entry.context == context
 }
 
@@ -353,7 +353,7 @@ pub fn prepare_cached(
     context: &[u8],
     settings: &settings::T,
     output: &Output,
-) -> Result<Prepared_ref, String> {
+) -> Result<PreparedRef, String> {
     {
         let mut cache = p.cache.borrow_mut();
         if let Some(at) = cache.entries.iter().position(|e| same_key(e, id, settings, output, context)) {
@@ -378,7 +378,7 @@ pub fn prepare_cached(
     let cacheable = flow_sop::attribute_kernel::resident_vec3(&made.geometry, "P").is_none()
         && source <= PREPARED_BYTE_CAPACITY
         && bytes <= (PREPARED_BYTE_CAPACITY - source) / 2;
-    let prepared: Prepared_ref = Rc::new(made);
+    let prepared: PreparedRef = Rc::new(made);
     if cacheable {
         let bytes = source + bytes * 2;
         let instances = output.instances.as_ref().map_or(0, |a| a.len() as i64);
@@ -389,7 +389,7 @@ pub fn prepare_cached(
                 let old = cache.entries.remove(at).expect("present cache entry");
                 cache.bytes -= old.bytes;
             }
-            cache.entries.push_front(Cache_entry {
+            cache.entries.push_front(CacheEntry {
                 id,
                 settings: settings.clone(),
                 output: output.clone(),
@@ -485,9 +485,9 @@ pub fn update(
     timeline: &timeline::Timeline,
     frame: &frame::Frame,
     frame_request: Option<Key2>,
-) -> update_result {
+) -> UpdateResult {
     let _phase = flow_syntax::phase_timer::measure("cook");
-    if timeline_changes.iter().any(|c| matches!(c, timeline::Change::Reset_now | timeline::Change::Stopped_now)) {
+    if timeline_changes.iter().any(|c| matches!(c, timeline::Change::ResetNow | timeline::Change::StoppedNow)) {
         reset_state(false, value);
     }
     let mut input = input.unwrap_or_else(|| flow_native::live_frame::of_frame(frame));
@@ -568,17 +568,17 @@ pub fn update(
     let mut summaries = value.summaries.clone();
     let mut sources = value.sources.clone();
     let (mut pieces, mut error, mut seconds, mut prepared_changed, mut framed, mut framing, force_next): (
-        Vec<piece>,
+        Vec<Piece>,
         Option<String>,
         Option<f64>,
         bool,
-        Option<Option<bounds>>,
+        Option<Option<Bounds>>,
         Option<bool>,
         bool,
     ) = match completion {
         None => (value.pieces.clone(), value.error.clone(), value.seconds, false, None, value.framing, false),
         Some(Completion { result: Ok(prepared), seconds: took, .. }) => match complete(gpu, &value.preparer, &value.pieces, prepared) {
-            Ok(cooked::Displayed(pieces, found, data)) => {
+            Ok(Cooked::Displayed(pieces, found, data)) => {
                 // a display cook that counted nothing keeps the counts it has
                 if !found.is_empty() {
                     summaries = found;
@@ -586,12 +586,12 @@ pub fn update(
                 }
                 (pieces, None, Some(took), true, None, None, false)
             }
-            Ok(cooked::Probed(pieces, found, data)) => {
+            Ok(Cooked::Probed(pieces, found, data)) => {
                 summaries = found;
                 sources = data;
                 (pieces, value.error.clone(), value.seconds, true, None, None, false)
             }
-            Ok(cooked::Framed(b)) => (value.pieces.clone(), value.error.clone(), value.seconds, false, Some(b), None, resume),
+            Ok(Cooked::Framed(b)) => (value.pieces.clone(), value.error.clone(), value.seconds, false, Some(b), None, resume),
             Err(message) => {
                 set_failure(value, None);
                 (value.pieces.clone(), Some(message), Some(took), false, None, None, false)
@@ -686,7 +686,7 @@ pub fn update(
                 ctx,
                 graph_nodes,
                 probe_nodes,
-                Box::new(move |outputs, optional| job.prepare(outputs, optional).map(|raw| Box::new(raw) as Prepared)),
+                Box::new(move |outputs, optional| job.prepare(outputs, optional).map(|raw| Box::new(raw) as AsyncPrepared)),
             )
         });
         match result {
@@ -716,7 +716,7 @@ pub fn update(
         };
         match awaited.result {
             Ok(prepared) => match complete(gpu, &value.preparer, &value.pieces, prepared) {
-                Ok(cooked::Displayed(awaited_pieces, found, data)) => {
+                Ok(Cooked::Displayed(awaited_pieces, found, data)) => {
                     summaries = found;
                     sources = data;
                     pieces = awaited_pieces.into_iter().filter(|p| compiled.contains_key(&p.id)).collect();
@@ -724,7 +724,7 @@ pub fn update(
                     seconds = Some(awaited.seconds);
                     prepared_changed = true;
                 }
-                Ok(cooked::Framed(_) | cooked::Probed(..)) => {}
+                Ok(Cooked::Framed(_) | Cooked::Probed(..)) => {}
                 Err(message) => {
                     error = Some(message);
                     seconds = Some(awaited.seconds);
@@ -742,7 +742,7 @@ pub fn update(
     // a piece prepared under another highlight is prepared again from its kept output: no recook, no
     // lowering, and nothing when no tag is involved
     let mut retinted = false;
-    let mut retinted_pieces: Vec<piece> = Vec::new();
+    let mut retinted_pieces: Vec<Piece> = Vec::new();
     for piece in pieces {
         if pick::same_set(&piece.lit, lit) {
             retinted_pieces.push(piece);
@@ -750,7 +750,7 @@ pub fn update(
         }
         match sop::payload::geometry(&piece.output.payload) {
             Err(_) => retinted_pieces.push(piece),
-            Ok(geometry) if pick::tags(&geometry).is_none() => retinted_pieces.push(piece::with_lit(piece, lit)),
+            Ok(geometry) if pick::tags(&geometry).is_none() => retinted_pieces.push(Piece::with_lit(piece, lit)),
             Ok(_) => {
                 let made = pick::tint(&piece.output, lit)
                     .map_err(|d| rays_diagnostic::error_to_string(&d))
@@ -758,7 +758,7 @@ pub fn update(
                 match made {
                     Ok(prepared) => {
                         retinted = true;
-                        retinted_pieces.push(piece { prepared, lit: lit.clone(), ..piece });
+                        retinted_pieces.push(Piece { prepared, lit: lit.clone(), ..piece });
                     }
                     Err(_) => retinted_pieces.push(piece),
                 }
@@ -795,7 +795,7 @@ pub fn update(
                                 n.clone(),
                                 Box::new(|output| {
                                     output_bounds(&output)
-                                        .map(|b| Box::new(Raw::Framed(b)) as Prepared)
+                                        .map(|b| Box::new(Raw::Framed(b)) as AsyncPrepared)
                                         .map_err(|d| rays_diagnostic::error_to_string(&d))
                                 }),
                             )
@@ -830,11 +830,11 @@ pub fn update(
         sources,
         ..value.clone()
     };
-    update_result { cook, edit_error, prepared_changed, framed }
+    UpdateResult { cook, edit_error, prepared_changed, framed }
 }
 
-impl piece {
-    fn with_lit(mut piece: piece, lit: &pick::Set) -> piece {
+impl Piece {
+    fn with_lit(mut piece: Piece, lit: &pick::Set) -> Piece {
         piece.lit = lit.clone();
         piece
     }
@@ -854,7 +854,7 @@ struct Job {
 }
 
 impl Job {
-    fn summary(&self, key: Key2, n: &node::T, output: &Output) -> Option<summary> {
+    fn summary(&self, key: Key2, n: &node::T, output: &Output) -> Option<Summary> {
         let g = sop::payload::geometry(&output.payload).ok()?;
         let v = gv::summary(&g);
         Some((
@@ -871,8 +871,8 @@ impl Job {
     }
 
     fn prepare(self, outputs: Vec<Output>, optional: Vec<Option<Output>>) -> Result<Raw, String> {
-        let mut found: Vec<summary> = Vec::new();
-        let mut data: Vec<source> = Vec::new();
+        let mut found: Vec<Summary> = Vec::new();
+        let mut data: Vec<Source> = Vec::new();
         for ((key, n), output) in self.probed.iter().zip(optional.iter()) {
             let Some(output) = output else { continue };
             if let sop::payload::T::Geometry(_) = &output.payload {
@@ -905,9 +905,9 @@ impl Job {
 /// The initial domain's half of a cook: a piece per displayed graph, reusing the previous pieces of
 /// an unchanged graph, settings, context projection and highlight, else preparing the (tinted)
 /// output.
-fn finish(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[piece], raw: Raw) -> Result<cooked, String> {
+fn finish(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[Piece], raw: Raw) -> Result<Cooked, String> {
     let (probe_only, graphs, outputs, settings, lit, context, found, data) = match raw {
-        Raw::Framed(b) => return Ok(cooked::Framed(b)),
+        Raw::Framed(b) => return Ok(Cooked::Framed(b)),
         Raw::Cooked { probe_only, graphs, outputs, settings, lit, context, found, data } => (probe_only, graphs, outputs, settings, lit, context, found, data),
     };
     let mut pieces = Vec::new();
@@ -927,7 +927,7 @@ fn finish(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[piece], ra
         let _geometry = sop::payload::geometry(&output.payload).map_err(|d| rays_diagnostic::error_to_string(&d))?;
         let tinted = pick::tint(&output, &lit).map_err(|d| rays_diagnostic::error_to_string(&d))?;
         let prepared = prepare_cached(gpu, preparer, *id, &projection, &settings, &tinted)?;
-        pieces.push(piece {
+        pieces.push(Piece {
             id: *id,
             graph: graph.clone(),
             prepared,
@@ -939,10 +939,10 @@ fn finish(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[piece], ra
             context: projection,
         });
     }
-    Ok(if probe_only { cooked::Probed(pieces, found, data) } else { cooked::Displayed(pieces, found, data) })
+    Ok(if probe_only { Cooked::Probed(pieces, found, data) } else { Cooked::Displayed(pieces, found, data) })
 }
 
-fn complete(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[piece], prepared: Prepared) -> Result<cooked, String> {
+fn complete(gpu: Option<&gpu::Config>, preparer: &Preparer, previous: &[Piece], prepared: AsyncPrepared) -> Result<Cooked, String> {
     match prepared.downcast::<Raw>() {
         Ok(raw) => finish(gpu, preparer, previous, *raw),
         Err(_) => Err("cook returned an unexpected value".to_string()),
@@ -969,7 +969,7 @@ type Cast<'a> = &'a dyn Fn(Option<&gv::Surface>, &Geometry, vec3::T, vec3::T) ->
 /// is `origin + t * direction`: the parameter, not the local distance, so hits of pieces and
 /// instances with any scale compare in the world's units. A piece drawn as instances casts the ray
 /// into each instance's own frame (about 2 us each; per click, never per frame).
-fn pick_by(cast_hit: Cast, piece: &piece, origin: vec3::T, direction: vec3::T) -> Option<(f64, Hit)> {
+fn pick_by(cast_hit: Cast, piece: &Piece, origin: vec3::T, direction: vec3::T) -> Option<(f64, Hit)> {
     let cast = |origin: vec3::T, direction: vec3::T| -> Option<(f64, Hit)> {
         let geometry = match &piece.output.payload {
             sop::payload::T::Geometry(g) => g,
@@ -997,7 +997,7 @@ fn pick_by(cast_hit: Cast, piece: &piece, origin: vec3::T, direction: vec3::T) -
 }
 
 /// The nearest provenance tag under the ray, see `pick_by`.
-pub fn pick(piece: &piece, origin: vec3::T, direction: vec3::T) -> Option<(f64, i64)> {
+pub fn pick(piece: &Piece, origin: vec3::T, direction: vec3::T) -> Option<(f64, i64)> {
     let cast: Cast = &|surface, geometry, origin, direction| pick::cast(surface, geometry, origin, direction).map(|(d, tag)| (d, Hit::Tag(tag)));
     match pick_by(cast, piece, origin, direction) {
         Some((t, Hit::Tag(tag))) => Some((t, tag)),
@@ -1006,7 +1006,7 @@ pub fn pick(piece: &piece, origin: vec3::T, direction: vec3::T) -> Option<(f64, 
 }
 
 /// The `shop_materialpath` of the nearest primitive under the ray (Alt-click).
-pub fn pick_material(piece: &piece, origin: vec3::T, direction: vec3::T) -> Option<(f64, Option<String>)> {
+pub fn pick_material(piece: &Piece, origin: vec3::T, direction: vec3::T) -> Option<(f64, Option<String>)> {
     let cast: Cast = &|surface, geometry, origin, direction| pick::cast_material(surface, geometry, origin, direction).map(|(d, m)| (d, Hit::Material(m)));
     match pick_by(cast, piece, origin, direction) {
         Some((t, Hit::Material(path))) => Some((t, path)),
@@ -1015,11 +1015,11 @@ pub fn pick_material(piece: &piece, origin: vec3::T, direction: vec3::T) -> Opti
 }
 
 /// As the app prepares a cooked object (instances, pieces and materials), and draws it.
-pub fn prepare(_: &settings::T, output: &Output) -> Result<prepared, String> {
+pub fn prepare(_: &settings::T, output: &Output) -> Result<Prepared, String> {
     let geometry = sop::payload::geometry(&output.payload).map_err(|d| rays_diagnostic::error_to_string(&d))?;
     let instances = output.instances.as_ref().map(|a| a.as_ref().clone());
     let surface = surface::of_geometry(instances, &geometry)?;
-    Ok(prepared { geometry, surface })
+    Ok(Prepared { geometry, surface })
 }
 
 pub type Display = Rc<dyn Fn(&Geometry) -> Option<surface::DeviceBinding>>;
@@ -1035,7 +1035,7 @@ pub fn with_display(device: Display, f: &mut dyn FnMut()) {
     DISPLAY.with(|d| d.replace(previous));
 }
 
-pub fn draw(n: &node::T, p: &prepared) -> Result<rays::scene3::Scene3, surface::ConversionError> {
+pub fn draw(n: &node::T, p: &Prepared) -> Result<rays::scene3::Scene3, surface::ConversionError> {
     let explosion = rdk_rays::packed_pieces::explosion(node::operation(n), &node::parameter_fields(n));
     let device = DISPLAY.with(|d| d.borrow().clone());
     match &device {

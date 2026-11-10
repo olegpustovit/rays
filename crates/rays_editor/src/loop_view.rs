@@ -1,6 +1,6 @@
 // Preserve the existing viewport and floating-window compositing priority.
 //! Compose viewport, canvas and floating-window layers under UI. Hidden scenes are reused by extent, Scene3::same, camera, background and visibility.
-#![allow(non_camel_case_types)]
+
 use std::rc::Rc;
 
 use editor_core::panels::Panel;
@@ -11,7 +11,7 @@ use pxui_shell::layout::Bounds;
 use rays::camera as rcam;
 use rays::frame;
 use rays::image;
-use rays::scene::{self, node as scene_node};
+use rays::scene::{self, Node as scene_node};
 use rays::scene3::{self as d3};
 use rays::sketch;
 use rays::world;
@@ -30,16 +30,16 @@ type Nodes = Vec<scene_node>;
 /// The shape the editor asks of the platform for the pointer, or the default one while the UI is hidden.
 pub fn set_ui_cursor(ui: &Ui, visible: bool) -> Result<(), String> {
     let shape = match if visible { ui.cursor() } else { None } {
-        Some(pxui::ui::Cursor::Horizontal_resize) => sketch::cursor::Horizontal_resize,
-        Some(pxui::ui::Cursor::Vertical_resize) => sketch::cursor::Vertical_resize,
-        Some(pxui::ui::Cursor::Text) => sketch::cursor::Text,
-        None => sketch::cursor::Default,
+        Some(pxui::ui::Cursor::HorizontalResize) => sketch::Cursor::HorizontalResize,
+        Some(pxui::ui::Cursor::VerticalResize) => sketch::Cursor::VerticalResize,
+        Some(pxui::ui::Cursor::Text) => sketch::Cursor::Text,
+        None => sketch::Cursor::Default,
     };
     sketch::set_cursor(shape)
 }
 
 #[derive(Clone)]
-pub struct hidden_scene_cache {
+pub struct HiddenSceneCache {
     pub width: i64,
     pub height: i64,
     pub rendered: Option<d3::Scene3>,
@@ -50,20 +50,20 @@ pub struct hidden_scene_cache {
 }
 
 #[derive(Clone)]
-pub struct canvas_picture {
+pub struct CanvasPicture {
     pub size: (i64, i64),
     pub dynamic: bool,
     pub scene: Nodes,
     /// the plan this picture was made from, by identity (`workspace_images::plan_id`)
     pub plan: u64,
-    pub prepared: Option<Rc<drawing::prepared>>,
+    pub prepared: Option<Rc<drawing::Prepared>>,
     /// the node shown instead of the pane's own picture
     pub preview: Option<(Ty, i64)>,
 }
 
 /// A World bake for this frame: the preview size while a gesture or the day cycle is live, the
 /// final size when idle.
-pub fn bake_world(view: Option<&View>, previous: Option<&(world::World, Rc<world::baked>)>, core: &Model, live: bool) -> Option<(world::World, Rc<world::baked>)> {
+pub fn bake_world(view: Option<&View>, previous: Option<&(world::World, Rc<world::Baked>)>, core: &Model, live: bool) -> Option<(world::World, Rc<world::Baked>)> {
     let time = timeline::time(&editor_list::timeline(core));
     editor_host::world(view, core, Some(time)).and_then(|w| {
         let (width, height) = if live { (512, 256) } else { (2048, 1024) };
@@ -129,7 +129,7 @@ fn same_rendered(a: &Option<d3::Scene3>, b: &Option<d3::Scene3>) -> bool {
 
 /// The fully hidden scene, reused while its inputs are unchanged so the renderer sees the same
 /// `Scene.t`.
-pub fn hidden_entry(background: color::T, rendered: Option<&d3::Scene3>, camera: &rcam::Camera, paint_view: &PaintView, cache: Option<&hidden_scene_cache>, core: &Model, frame_: &frame::Frame) -> hidden_scene_cache {
+pub fn hidden_entry(background: color::T, rendered: Option<&d3::Scene3>, camera: &rcam::Camera, paint_view: &PaintView, cache: Option<&HiddenSceneCache>, core: &Model, frame_: &frame::Frame) -> HiddenSceneCache {
     let view_visible = editor_shell::view_visible(&core.into());
     let rendered_owned = rendered.cloned();
     if let Some(cached) = cache {
@@ -139,13 +139,13 @@ pub fn hidden_entry(background: color::T, rendered: Option<&d3::Scene3>, camera:
     }
     let mut scene = vec![scene::clear(background)];
     scene.extend(world_nodes(paint_view, "@hidden", camera, rendered, view_visible, (0, 0, frame_.input.size.0, frame_.input.size.1)));
-    hidden_scene_cache { width: frame_.input.size.0, height: frame_.input.size.1, rendered: rendered_owned, camera: camera.clone(), background, view_visible, scene }
+    HiddenSceneCache { width: frame_.input.size.0, height: frame_.input.size.1, rendered: rendered_owned, camera: camera.clone(), background, view_visible, scene }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn compose_view(
     map: Option<&image::Image>,
-    canvases: &[(String, canvas_picture)],
+    canvases: &[(String, CanvasPicture)],
     ui_visible: bool,
     background: color::T,
     rendered: Option<&d3::Scene3>,
@@ -155,7 +155,7 @@ pub fn compose_view(
     camera_of: &dyn Fn(&str) -> rcam::Camera,
     paint_view: &PaintView,
     guides: &dyn Fn(Bounds) -> Nodes,
-    cache: Option<&hidden_scene_cache>,
+    cache: Option<&HiddenSceneCache>,
     core: &Model,
     frame_: &frame::Frame,
 ) -> Nodes {

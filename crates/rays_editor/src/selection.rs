@@ -1,7 +1,7 @@
 //! The rows selected in the list of the open level (scene objects, World layers, the nodes of an
 //! object's network): view state, never in history. The first id is the one the inspector and the
 //! handles follow.
-#![allow(non_camel_case_types)]
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Selection {
     pub ids: Vec<i64>,

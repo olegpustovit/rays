@@ -78,10 +78,10 @@ impl Default for StepOptions {
 }
 
 impl Rig {
-    pub fn new(prepare: cook::Prepare_fn, domains: i64) -> Rig {
+    pub fn new(prepare: cook::PrepareFn, domains: i64) -> Rig {
         Rig { cook: cook::create(prepare, 42, 64, Some(domains), None, None, 16, 16 * 1024 * 1024).expect("cook") }
     }
-    pub fn step(&mut self, o: &StepOptions, objects: &[Obj]) -> cook::update_result {
+    pub fn step(&mut self, o: &StepOptions, objects: &[Obj]) -> cook::UpdateResult {
         let mut frame = still_frame();
         frame.input.buttons = o.buttons.clone();
         let u = cook::update(None, None, false, &o.probes, &pick::Set::default(), None, &self.cook, &o.settings, &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, Effects::default(), &o.changes, &o.timeline, &frame, None);
@@ -89,7 +89,7 @@ impl Rig {
         u
     }
     /// Steps until a cook is published (the first step carries `changes`), returns that update.
-    pub fn finish(&mut self, o: &StepOptions, objects: &[Obj]) -> cook::update_result {
+    pub fn finish(&mut self, o: &StepOptions, objects: &[Obj]) -> cook::UpdateResult {
         let mut published = None;
         let mut first = true;
         await_until(|| {
@@ -103,10 +103,10 @@ impl Rig {
         });
         published.expect("published")
     }
-    pub fn pieces(&self) -> &[cook::piece] {
+    pub fn pieces(&self) -> &[cook::Piece] {
         cook::pieces(&self.cook)
     }
-    pub fn piece(&self, id: i64) -> &cook::piece {
+    pub fn piece(&self, id: i64) -> &cook::Piece {
         self.pieces().iter().find(|p| p.id == id).unwrap_or_else(|| panic!("no piece {id}"))
     }
 }
@@ -210,7 +210,7 @@ pub fn reuse() {
     let objects = vec![network_of(1, &source), network_of(2, &source)];
     let prepares = Arc::new(AtomicI64::new(0));
     let counter = prepares.clone();
-    let prepare: cook::Prepare_fn = Rc::new(move |_, _| {
+    let prepare: cook::PrepareFn = Rc::new(move |_, _| {
         counter.fetch_add(1, Ordering::SeqCst);
         empty_prepared()
     });
@@ -238,7 +238,7 @@ pub fn reuse() {
     assert!(prepares.load(Ordering::SeqCst) == 5, "idle frames resubmitted static objects");
     // footers are counted by a job of their own after the display: the pieces stay, nothing is
     // prepared again, and the counts arrive
-    let pieces: Vec<Rc<cook::prepared>> = rig.pieces().iter().map(|p| p.prepared.clone()).collect();
+    let pieces: Vec<Rc<cook::Prepared>> = rig.pieces().iter().map(|p| p.prepared.clone()).collect();
     let node_id = objects[0].2;
     let probes = vec![(1, node_id)];
     await_until(|| {
@@ -333,7 +333,7 @@ pub fn live_drive() {
     let root = graph.root.expect("root");
     let net = graph.network.clone();
     let target = flow_sop::port::Port { node: root, path: "uniform_scale".to_string() };
-    let points_of = |p: &cook::prepared| -> Vec<(u64, u64, u64)> {
+    let points_of = |p: &cook::Prepared| -> Vec<(u64, u64, u64)> {
         let pts = rdk_core::geometry::positions(&p.geometry);
         (0..rdk_core::packed::float3::length(pts)).map(|i| rdk_core::packed::float3::get(pts, i).map(|(x, y, z)| (x.to_bits(), y.to_bits(), z.to_bits())).unwrap()).collect()
     };
@@ -366,7 +366,7 @@ pub fn live_drive() {
 /// Delayed completion retains submitted settings; superseded or emptied requests never publish.
 pub fn barriers() {
     let source = source_geometry();
-    let prepare_x: cook::Prepare_fn = Rc::new(|s, _| prepared_at(mode_of(s) as f64));
+    let prepare_x: cook::PrepareFn = Rc::new(|s, _| prepared_at(mode_of(s) as f64));
     // 1. delayed completion
     {
         let barrier = Barrier::new();

@@ -2,7 +2,7 @@
 //! Immutable; the caller keeps the returned value. `digest` is the SHA-256 of the text the running
 //! document last came from (built from, reloaded or saved), so an edit from any other writer differs
 //! from it.
-#![allow(non_camel_case_types)]
+
 use std::path::{Path, PathBuf};
 
 use editor_core::store;
@@ -19,7 +19,7 @@ pub struct SourceFile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Save_error {
+pub enum SaveError {
     Changed,
     Failed(String),
 }
@@ -148,18 +148,18 @@ pub fn accepted(t: &SourceFile, text: &str) -> SourceFile {
 /// Only over the text the document came from; the file keeps its permissions (a temporary file is
 /// created 0600). The digest check and rename cannot exclude another editor writing between them;
 /// that requires a cooperative writer protocol, not an atomic rename alone.
-pub fn save(value: &SourceFile, text: &str) -> Result<SourceFile, Save_error> {
+pub fn save(value: &SourceFile, text: &str) -> Result<SourceFile, SaveError> {
     let text = if text.ends_with('\n') { text.to_string() } else { format!("{text}\n") };
     match read(&value.file) {
         Ok(disk) if sha(&disk) == value.digest => {
             let perm = std::fs::metadata(&value.file).ok().map(|m| m.permissions());
-            store::write_text(&value.file, &text).map_err(Save_error::Failed)?;
+            store::write_text(&value.file, &text).map_err(SaveError::Failed)?;
             if let Some(perm) = perm {
                 let _ = std::fs::set_permissions(&value.file, perm);
             }
             Ok(SourceFile { polled: value.polled, imports: value.imports.clone(), ..synced(&value.file, &sha(&text)) })
         }
-        Ok(_) => Err(Save_error::Changed),
-        Err(message) => Err(Save_error::Failed(message)),
+        Ok(_) => Err(SaveError::Changed),
+        Err(message) => Err(SaveError::Failed(message)),
     }
 }

@@ -1,4 +1,4 @@
-//! carry_tests and viewport_carry_tests of lib/rays_editor/test/test_materials.ml: a material, a SOP graph, a scene
+//! carry_tests and viewport_carry_tests of : a material, a SOP graph, a scene
 //! graph and a camera carried by pointer and by keys onto nodes, panels and surfaces.
 use super::t5c::*;
 use editor_core::keymap::Trigger;
@@ -65,7 +65,7 @@ impl Ed {
     }
     fn jump(&mut self, name: &str) {
         self.step(vec![key(Key::KeyChar('/')), ch('j')]);
-        self.step(vec![Event::Text_input(name.into()), key(Key::Enter)]);
+        self.step(vec![Event::TextInput(name.into()), key(Key::Enter)]);
         self.step(vec![]);
     }
 }
@@ -82,9 +82,9 @@ const CARRY_SOURCE: &str = r##"(workspace carrying
 
 const EDITOR: &str = r#"
   (graph editor :context editor
-    (ui/workspace (ui/split-at "horizontal" 0.22 (ui/outline)
-      (ui/split-at "horizontal" 0.45 (ui/viewport (ref scene))
-        (ui/split-at "horizontal" 0.62 (ui/graph) (ui/inspector))))))"#;
+    (ui/workspace (ui/split_at "horizontal" 0.22 (ui/outline)
+      (ui/split_at "horizontal" 0.45 (ui/viewport (ref scene))
+        (ui/split_at "horizontal" 0.62 (ui/graph) (ui/inspector))))))"#;
 
 fn with_editor_graph(source: &str) -> String {
     format!("{}{})", &source[..source.len() - 1], EDITOR)
@@ -159,15 +159,15 @@ pub fn carry_tests() {
     let history = e.undo();
     let drag_to = |e: &mut Ed, target: (f64, f64)| {
         let from = row_of(e, "cobalt");
-        e.step_m(from, vec![Event::Pointer_moved(from)]);
-        e.step_b(from, vec![Event::Pointer_pressed(LB, from)]);
+        e.step_m(from, vec![Event::PointerMoved(from)]);
+        e.step_b(from, vec![Event::PointerPressed(LB, from)]);
         let (fx, fy) = from;
-        e.step_b((fx + 2., fy + 1.), vec![Event::Pointer_moved((fx + 2., fy + 1.))]);
+        e.step_b((fx + 2., fy + 1.), vec![Event::PointerMoved((fx + 2., fy + 1.))]);
         chk(editor::carrying(e.e()).is_none(), "inside the dead zone nothing is carried");
-        e.step_b((fx + 12., fy + 6.), vec![Event::Pointer_moved((fx + 12., fy + 6.))]);
+        e.step_b((fx + 12., fy + 6.), vec![Event::PointerMoved((fx + 12., fy + 6.))]);
         e.step_b((fx + 12., fy + 6.), vec![]);
         chk(editor::carrying(e.e()) == Some(("material".into(), "(ref cobalt)".into())), "past the dead zone the row is carried");
-        e.step_b(target, vec![Event::Pointer_moved(target)]);
+        e.step_b(target, vec![Event::PointerMoved(target)]);
         e.step_b(target, vec![]);
     };
     let sm = tile(&e, &["shards", "m"]);
@@ -177,26 +177,26 @@ pub fn carry_tests() {
     chk(has(&e.line(), "Preview") && has(&e.line(), ":material (ref cobalt) on shards/m"), &format!("the strip says what a release writes: {}", e.line()));
     let sm = tile(&e, &["shards", "m"]);
     e.step_b(sm, vec![key(Key::Escape)]);
-    e.step_m(sm, vec![Event::Pointer_released(LB, sm)]);
+    e.step_m(sm, vec![Event::PointerReleased(LB, sm)]);
     e.step(vec![]);
     chk(editor::carrying(e.e()).is_none() && same_ws(&e.ws(), &ws), "Escape leaves the document physically equal");
     chk(e.undo() == history, "and there is nothing to undo");
     let sm = tile(&e, &["shards", "m"]);
     drag_to(&mut e, sm);
-    e.step_b((2000., 2000.), vec![Event::Pointer_moved((2000., 2000.))]);
-    e.step_m((2000., 2000.), vec![Event::Pointer_released(LB, (2000., 2000.))]);
+    e.step_b((2000., 2000.), vec![Event::PointerMoved((2000., 2000.))]);
+    e.step_m((2000., 2000.), vec![Event::PointerReleased(LB, (2000., 2000.))]);
     e.step(vec![]);
     chk(editor::carrying(e.e()).is_none() && same_ws(&e.ws(), &ws), "a release over nothing restores the document");
     let sm = tile(&e, &["shards", "m"]);
     drag_to(&mut e, sm);
-    e.step(vec![Event::Focus_lost]);
+    e.step(vec![Event::FocusLost]);
     e.step(vec![]);
     e.step(vec![]);
     chk(editor::carrying(e.e()).is_none() && same_ws(&e.ws(), &ws), "a lost window focus restores the document");
     let sm = tile(&e, &["shards", "m"]);
     drag_to(&mut e, sm);
     let at = tile(&e, &["shards", "m"]);
-    e.step_m(at, vec![Event::Pointer_released(LB, at)]);
+    e.step_m(at, vec![Event::PointerReleased(LB, at)]);
     e.step(vec![]);
     e.step(vec![]);
     chk(editor::carrying(e.e()).is_none() && e.undo().as_deref() == Some("Put"), &format!("a release puts it, as one entry: {:?}", e.undo()));
@@ -254,7 +254,7 @@ pub fn carry_tests() {
     chk(has(&e.line(), "Refused"), &format!("a merge takes no material, and the strip says why: {}", e.line()));
     chk(same_ws(&e.ws(), &ws), "a refused target shows nothing");
     let at = tile(&e, &["scene", "@result"]);
-    e.step_m(at, vec![Event::Pointer_released(LB, at)]);
+    e.step_m(at, vec![Event::PointerReleased(LB, at)]);
     e.step(vec![]);
     e.step(vec![]);
     chk(editor::carrying(e.e()).is_none() && e.undo() == history, "a release on a refusal writes nothing");
@@ -262,13 +262,13 @@ pub fn carry_tests() {
     let drag_graph = |e: &mut Ed, graph: &str, target: (f64, f64)| {
         let from = row_of(e, graph);
         let (fx, fy) = from;
-        e.step_m(from, vec![Event::Pointer_moved(from)]);
-        e.step_b(from, vec![Event::Pointer_pressed(LB, from)]);
-        e.step_b((fx + 12., fy + 6.), vec![Event::Pointer_moved((fx + 12., fy + 6.))]);
+        e.step_m(from, vec![Event::PointerMoved(from)]);
+        e.step_b(from, vec![Event::PointerPressed(LB, from)]);
+        e.step_b((fx + 12., fy + 6.), vec![Event::PointerMoved((fx + 12., fy + 6.))]);
         e.step_b((fx + 12., fy + 6.), vec![]);
-        e.step_b(target, vec![Event::Pointer_moved(target)]);
+        e.step_b(target, vec![Event::PointerMoved(target)]);
         e.step_b(target, vec![]);
-        e.step_m(target, vec![Event::Pointer_released(LB, target)]);
+        e.step_m(target, vec![Event::PointerReleased(LB, target)]);
         e.step(vec![]);
         e.step(vec![]);
     };
@@ -281,13 +281,13 @@ pub fn carry_tests() {
     // timings of a preview: apply on the first hot frame, restore on the cancel
     e.jump("shards");
     let from = row_of(&e, "cobalt");
-    e.step_m(from, vec![Event::Pointer_moved(from)]);
-    e.step_b(from, vec![Event::Pointer_pressed(LB, from)]);
+    e.step_m(from, vec![Event::PointerMoved(from)]);
+    e.step_b(from, vec![Event::PointerPressed(LB, from)]);
     let (fx, fy) = from;
-    e.step_b((fx + 12., fy + 6.), vec![Event::Pointer_moved((fx + 12., fy + 6.))]);
+    e.step_b((fx + 12., fy + 6.), vec![Event::PointerMoved((fx + 12., fy + 6.))]);
     e.step_b((fx + 12., fy + 6.), vec![]);
     let target = tile(&e, &["shards", "m"]);
-    e.step_b(target, vec![Event::Pointer_moved(target)]);
+    e.step_b(target, vec![Event::PointerMoved(target)]);
     let t0 = std::time::Instant::now();
     e.step_b(target, vec![]);
     let apply = t0.elapsed().as_secs_f64() * 1000.;
@@ -295,24 +295,24 @@ pub fn carry_tests() {
     let t0 = std::time::Instant::now();
     e.step_b(target, vec![key(Key::Escape)]);
     let restore = t0.elapsed().as_secs_f64() * 1000.;
-    e.step_m(target, vec![Event::Pointer_released(LB, target)]);
+    e.step_m(target, vec![Event::PointerReleased(LB, target)]);
     e.step(vec![]);
     chk(same_ws(&e.ws(), &ws), "restored");
     // resting on a node enters what it references after 0.6 s
     e.jump("shards");
     let from = row_of(&e, "cobalt");
     let (fx, fy) = from;
-    e.step_m(from, vec![Event::Pointer_moved(from)]);
-    e.step_b(from, vec![Event::Pointer_pressed(LB, from)]);
-    e.step_b((fx + 12., fy + 6.), vec![Event::Pointer_moved((fx + 12., fy + 6.))]);
+    e.step_m(from, vec![Event::PointerMoved(from)]);
+    e.step_b(from, vec![Event::PointerPressed(LB, from)]);
+    e.step_b((fx + 12., fy + 6.), vec![Event::PointerMoved((fx + 12., fy + 6.))]);
     let target = tile(&e, &["shards", "m"]);
-    e.step_b(target, vec![Event::Pointer_moved(target)]);
+    e.step_b(target, vec![Event::PointerMoved(target)]);
     e.step_full(35, &[LB], &[], target, vec![]);
     chk(e.pane() == "shards", "the pointer has not rested long enough to enter");
     e.step_full(40, &[LB], &[], target, vec![]);
     chk(e.pane() == "spare" && editor::carrying(e.e()).is_some(), &format!("resting on a node entered the graph it reads, still carrying: {}", e.pane()));
     e.step_b(target, vec![key(Key::Escape)]);
-    e.step_m(target, vec![Event::Pointer_released(LB, target)]);
+    e.step_m(target, vec![Event::PointerReleased(LB, target)]);
     e.step(vec![]);
     chk(same_ws(&e.ws(), &ws) && editor::carrying(e.e()).is_none(), "and Escape still gives the document back");
     e.step(vec![ch('u')]);
@@ -325,18 +325,18 @@ pub fn carry_tests() {
     let carry_from_row = |e: &mut Ed, graph: &str| {
         let from = row_of(e, graph);
         let (fx, fy) = from;
-        e.step_m(from, vec![Event::Pointer_moved(from)]);
-        e.step_b(from, vec![Event::Pointer_pressed(LB, from)]);
-        e.step_b((fx + 12., fy + 6.), vec![Event::Pointer_moved((fx + 12., fy + 6.))]);
+        e.step_m(from, vec![Event::PointerMoved(from)]);
+        e.step_b(from, vec![Event::PointerPressed(LB, from)]);
+        e.step_b((fx + 12., fy + 6.), vec![Event::PointerMoved((fx + 12., fy + 6.))]);
     };
     e.jump("scene");
     carry_from_row(&mut e, "cobalt");
     let over = view_center(&e);
-    e.step_b(over, vec![Event::Pointer_moved(over)]);
+    e.step_b(over, vec![Event::PointerMoved(over)]);
     e.step_b(over, vec![]);
     e.step_b(over, vec![]);
     chk(has(&e.line(), ":material (ref cobalt) on m in graph shards"), &format!("a surface names its node: {}", e.line()));
-    e.step_m(over, vec![Event::Pointer_released(LB, over)]);
+    e.step_m(over, vec![Event::PointerReleased(LB, over)]);
     e.step(vec![]);
     e.step(vec![]);
     chk(e.undo().as_deref() == Some("Put") && e.text() == by_pointer, "a put on a surface is the same entry as on the node");
@@ -357,11 +357,11 @@ pub fn carry_tests() {
     e.jump("scene");
     carry_from_row(&mut e, "cobalt");
     let over = view_center(&e);
-    e.step_b(over, vec![Event::Pointer_moved(over)]);
+    e.step_b(over, vec![Event::PointerMoved(over)]);
     e.step_b(over, vec![]);
     e.step_b(over, vec![]);
     chk(has(&e.line(), "a sop/material node and :material (ref cobalt) in graph plinth"), &format!("no material node yet: {}", e.line()));
-    e.step_m(over, vec![Event::Pointer_released(LB, over)]);
+    e.step_m(over, vec![Event::PointerReleased(LB, over)]);
     e.step(vec![]);
     e.step(vec![]);
     chk(e.undo().as_deref() == Some("Put") && has(&e.text(), "(sop/material b :material (ref cobalt))"), &format!("one entry added the node and its material: {}", e.text()));
@@ -379,7 +379,7 @@ pub fn carry_tests() {
     chk(same_ws(&e.ws(), &ws) && has(&e.text(), "(ref spare)") && !has(&e.text(), "(ref cobalt)"), "a held-back put shows no picture: the document shown is the original");
     chk(editor::carrying(e.e()).is_some() && e.undo() == history, "the carry goes on, nothing is written");
     let at = tile(&e, &["shards", "m"]);
-    e.step_m(at, vec![Event::Pointer_released(LB, at)]);
+    e.step_m(at, vec![Event::PointerReleased(LB, at)]);
     e.step(vec![]);
     e.step(vec![]);
     chk(editor::carrying(e.e()).is_none() && e.undo().as_deref() == Some("Put") && has(&e.text(), ":material (ref cobalt)"), "the release writes it, as one Put entry");
@@ -420,7 +420,7 @@ const VIEWPORT_SOURCE: &str = r#"(workspace views
   (graph editor :context editor
     (let* [left (ui/viewport (ref day))
            right (ui/viewport (ref night))]
-      (ui/workspace (ui/split-at "horizontal" 0.6 (ui/split-at "horizontal" 0.5 left right) (ui/graph))))))"#;
+      (ui/workspace (ui/split_at "horizontal" 0.6 (ui/split_at "horizontal" 0.5 left right) (ui/graph))))))"#;
 
 pub fn viewport_carry_tests() {
     let ws0 = load(VIEWPORT_SOURCE);
@@ -454,8 +454,8 @@ pub fn viewport_carry_tests() {
     e.jump("day");
     let (bx, by, bw, bh) = editor::node_box(e.e(), &["day".into(), "side".into()]).expect("box");
     let at = (bx as f64 + bw as f64 / 2., by as f64 + bh as f64 - 6.);
-    e.step_m(at, vec![Event::Pointer_moved(at)]);
-    e.step_m(at, vec![Event::Pointer_pressed(LB, at), Event::Pointer_released(LB, at)]);
+    e.step_m(at, vec![Event::PointerMoved(at)]);
+    e.step_m(at, vec![Event::PointerPressed(LB, at), Event::PointerReleased(LB, at)]);
     e.step(vec![]);
     e.step(vec![ch('y')]);
     e.step(vec![]);
@@ -485,10 +485,10 @@ pub fn viewport_carry_tests() {
     e.step(vec![]);
     let (vx, vy, vw, vh) = editor::panes(e.e(), &frame_at((0., 0.), vec![], e.d.count)).view;
     let over = (vx as f64 + vw as f64 / 2., vy as f64 + vh as f64 / 2.);
-    e.step_m(over, vec![Event::Pointer_moved(over)]);
+    e.step_m(over, vec![Event::PointerMoved(over)]);
     e.step_m(over, vec![]);
     chk(has(&e.line(), "(ui/viewport (ref night))"), &format!("the pointer over the panel previews it: {}", e.line()));
-    e.step_m(over, vec![Event::Pointer_pressed(LB, over), Event::Pointer_released(LB, over)]);
+    e.step_m(over, vec![Event::PointerPressed(LB, over), Event::PointerReleased(LB, over)]);
     e.step(vec![]);
     chk(editor::carrying(e.e()).is_none() && e.undo().as_deref() == Some("Put") && has(&e.text(), "left (ui/viewport (ref night))"), &format!("a press on the panel is the put: {}", e.text()));
     undo(&mut e);

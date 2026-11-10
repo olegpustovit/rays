@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 1: run_lowering, run_editor, run_panel_keys, run_unbound_panels,
+//! , part 1: run_lowering, run_editor, run_panel_keys, run_unbound_panels,
 //! run_wire_gestures.
 use super::support::*;
 use editor_core::panels::{self, Panel, Size};
@@ -67,7 +67,7 @@ pub fn run_lowering() {
     }
     // negative: what the checker or the evaluator refuses leaves no layout
     expect_error("a split axis", &with_editor("    (ui/workspace (ui/split \"diagonal\" (ui/graph) (ui/lisp)))"), "axis");
-    expect_error("a computed ratio out of range", &with_editor("    (let* [r (* 3 0.5)] (ui/workspace (ui/split-at \"horizontal\" r (ui/graph) (ui/lisp))))"), "0.1");
+    expect_error("a computed ratio out of range", &with_editor("    (let* [r (* 3 0.5)] (ui/workspace (ui/split_at \"horizontal\" r (ui/graph) (ui/lisp))))"), "0.1");
     expect_error("an empty tile", &with_editor("    (ui/workspace (ui/tile (for [i (range 0)] (ui/graph))))"), "tile");
     // a selected layout that names no editor graph is dropped, not an error (a removed graph)
     check(of_text(&format!("{}\n(layout (editor \"missing\"))", with_editor("    (ui/workspace (ui/graph))"))).layout.editor.is_none(), "a dangling editor layout was kept");
@@ -82,7 +82,7 @@ pub fn run_frame_key() {
         let events = match n {
             4 => {
                 let p = (900., 300.);
-                vec![Event::Pointer_moved(p), Event::Pointer_pressed(MouseButton::LeftButton, p), Event::Pointer_released(MouseButton::LeftButton, p)]
+                vec![Event::PointerMoved(p), Event::PointerPressed(MouseButton::LeftButton, p), Event::PointerReleased(MouseButton::LeftButton, p)]
             }
             6 => vec![key(Key::ArrowDown)],
             8 => vec![key(Key::KeyChar('i'))],
@@ -113,16 +113,16 @@ pub fn run_editor() {
     };
     settle(&r);
     let drag = |r: &mut Run, from: (f64, f64), to: (f64, f64)| {
-        r.step(from, vec![Event::Pointer_moved(from)]);
-        r.stepb(&[MouseButton::LeftButton], from, vec![Event::Pointer_pressed(MouseButton::LeftButton, from)]);
-        r.stepb(&[MouseButton::LeftButton], to, vec![Event::Pointer_moved(to)]);
-        r.step(to, vec![Event::Pointer_released(MouseButton::LeftButton, to)]);
+        r.step(from, vec![Event::PointerMoved(from)]);
+        r.stepb(&[MouseButton::LeftButton], from, vec![Event::PointerPressed(MouseButton::LeftButton, from)]);
+        r.stepb(&[MouseButton::LeftButton], to, vec![Event::PointerMoved(to)]);
+        r.step(to, vec![Event::PointerReleased(MouseButton::LeftButton, to)]);
         r.step((450., 300.), vec![]);
     };
     // drag the outline | rest gutter: one rewrite of the editor graph, one history entry.
     // At 900 points the outline's 120-point minimum lifts its 13% to 169.
     drag(&mut r, (169.5, 300.), (300., 300.));
-    check(has(&r.source(), "(ui/split-at \"horizontal\" 0.3333 outline right)"), &format!("the drag rewrote the outline split: {}", r.source()));
+    check(has(&r.source(), "(ui/split_at \"horizontal\" 0.3333 outline right)"), &format!("the drag rewrote the outline split: {}", r.source()));
     check(r.undo_label() == Some("Resize panel".into()), "one history entry named Resize panel");
     // the header menu of the graph panel: split side by side
     r.click_button(MouseButton::RightButton, (400., 10.));
@@ -163,9 +163,9 @@ pub fn run_panel_keys() {
         r.step((300., 150.), vec![]);
         r.step((300., 150.), vec![]);
         // a press in the graph panel focuses it
-        r.step((300., 150.), vec![Event::Pointer_moved((300., 150.))]);
-        r.step((300., 150.), vec![Event::Pointer_pressed(MouseButton::LeftButton, (300., 150.))]);
-        r.step((300., 150.), vec![Event::Pointer_released(MouseButton::LeftButton, (300., 150.))]);
+        r.step((300., 150.), vec![Event::PointerMoved((300., 150.))]);
+        r.step((300., 150.), vec![Event::PointerPressed(MouseButton::LeftButton, (300., 150.))]);
+        r.step((300., 150.), vec![Event::PointerReleased(MouseButton::LeftButton, (300., 150.))]);
         r.step((300., 150.), vec![]);
         check(r.dump("focus") == "Graph", &format!("focus is the graph panel: {}", r.dump("focus")));
         r
@@ -187,9 +187,9 @@ pub fn run_panel_keys() {
     r.step(m, vec![]);
     let (gx, gy, _, _) = r.panes().graph;
     let p = ((gx + 40) as f64, (gy + 40) as f64);
-    r.step(p, vec![Event::Pointer_moved(p)]);
-    r.step(p, vec![Event::Pointer_pressed(MouseButton::LeftButton, p)]);
-    r.step(p, vec![Event::Pointer_released(MouseButton::LeftButton, p)]);
+    r.step(p, vec![Event::PointerMoved(p)]);
+    r.step(p, vec![Event::PointerPressed(MouseButton::LeftButton, p)]);
+    r.step(p, vec![Event::PointerReleased(MouseButton::LeftButton, p)]);
     r.step(p, vec![]);
     check(!has(&r.source(), "(graph editor"), "the plain workspace has no editor graph");
     r.step(p, vec![slash(), ch('l'), ch('i')]);
@@ -200,26 +200,26 @@ pub fn run_panel_keys() {
     );
     r.close();
     // the sketch reads the pointer only on its picture
-    let two = with_editor("    (let* [a (ui/graph) b (ui/viewport (ref scene)) both (ui/split-at \"horizontal\" 0.5 a b)] (ui/workspace both))");
+    let two = with_editor("    (let* [a (ui/graph) b (ui/viewport (ref scene)) both (ui/split_at \"horizontal\" 0.5 a b)] (ui/workspace both))");
     let mut r = Run::new(editor(&two));
     let held = [MouseButton::LeftButton];
     let (panel, picture) = ((200., 300.), (700., 300.));
     let live = |r: &Run| editor::private::live_frame(&r.e);
     r.step(picture, vec![]);
-    r.step(picture, vec![Event::Pointer_moved(picture)]);
+    r.step(picture, vec![Event::PointerMoved(picture)]);
     check(live(&r).pointer == picture, "the picture has the pointer");
-    r.step(panel, vec![Event::Pointer_moved(panel)]);
-    r.stepb(&held, panel, vec![Event::Pointer_pressed(MouseButton::LeftButton, panel)]);
+    r.step(panel, vec![Event::PointerMoved(panel)]);
+    r.stepb(&held, panel, vec![Event::PointerPressed(MouseButton::LeftButton, panel)]);
     check(live(&r).pointer == picture && live(&r).buttons.is_empty() && live(&r).events.is_empty(), "a press on a panel reached the sketch");
-    r.stepb(&held, picture, vec![Event::Pointer_moved(picture)]);
+    r.stepb(&held, picture, vec![Event::PointerMoved(picture)]);
     check(live(&r).buttons.is_empty(), "a drag begun on a panel became the sketch's over the picture");
-    r.step(picture, vec![Event::Pointer_released(MouseButton::LeftButton, picture)]);
+    r.step(picture, vec![Event::PointerReleased(MouseButton::LeftButton, picture)]);
     r.step(picture, vec![]);
-    r.stepb(&held, picture, vec![Event::Pointer_pressed(MouseButton::LeftButton, picture)]);
+    r.stepb(&held, picture, vec![Event::PointerPressed(MouseButton::LeftButton, picture)]);
     check(live(&r).buttons == [MouseButton::LeftButton] && !live(&r).events.is_empty(), "a press on the picture did not reach the sketch");
-    r.stepb(&held, panel, vec![Event::Pointer_moved(panel)]);
+    r.stepb(&held, panel, vec![Event::PointerMoved(panel)]);
     check(live(&r).buttons == [MouseButton::LeftButton] && live(&r).pointer == panel, "a drag begun on the picture was cut at its edge");
-    r.step(panel, vec![Event::Pointer_released(MouseButton::LeftButton, panel)]);
+    r.step(panel, vec![Event::PointerReleased(MouseButton::LeftButton, panel)]);
     check(!live(&r).events.is_empty(), "the sketch missed the release of its own drag");
     r.step(panel, vec![]);
     check(live(&r).pointer == panel && live(&r).buttons.is_empty(), "the pointer left the picture where the drag ended");
@@ -228,8 +228,8 @@ pub fn run_panel_keys() {
     let mut r = Run::new(editor(&two));
     let esc = [Key::Escape];
     let click = |r: &mut Run, keys: &[Key], at: (f64, f64)| {
-        r.step_full(&[], keys, at, vec![Event::Pointer_pressed(MouseButton::LeftButton, at)]);
-        r.step_full(&[], keys, at, vec![Event::Pointer_released(MouseButton::LeftButton, at)]);
+        r.step_full(&[], keys, at, vec![Event::PointerPressed(MouseButton::LeftButton, at)]);
+        r.step_full(&[], keys, at, vec![Event::PointerReleased(MouseButton::LeftButton, at)]);
         r.step_full(&[], keys, at, vec![]);
     };
     let seen = |r: &Run| editor::private::live_frame(&r.e).keys;
@@ -256,14 +256,14 @@ pub fn run_unbound_panels() {
         let mut r = Run::new(editor(text));
         r.step(at, vec![]);
         r.step(at, vec![]);
-        r.step(at, vec![Event::Pointer_moved(at)]);
-        r.step(at, vec![Event::Pointer_pressed(MouseButton::LeftButton, at)]);
-        r.step(at, vec![Event::Pointer_released(MouseButton::LeftButton, at)]);
+        r.step(at, vec![Event::PointerMoved(at)]);
+        r.step(at, vec![Event::PointerPressed(MouseButton::LeftButton, at)]);
+        r.step(at, vec![Event::PointerReleased(MouseButton::LeftButton, at)]);
         r.step(at, vec![]);
         r
     };
     let slash = || key(Key::KeyChar('/'));
-    let inline = with_editor("    (ui/workspace (ui/split-at \"vertical\" 0.5 (ui/graph) (ui/viewport (ref scene))))");
+    let inline = with_editor("    (ui/workspace (ui/split_at \"vertical\" 0.5 (ui/graph) (ui/viewport (ref scene))))");
     let at = (300., 100.);
     let mut r = started(&inline, at);
     check(r.dump("focus") == "Graph", &format!("focus is the inline graph panel: {}", r.dump("focus")));
@@ -274,7 +274,7 @@ pub fn run_unbound_panels() {
     let mut r = started(&inline, at);
     r.step(at, vec![slash(), ch('o'), ch('v')]);
     r.step(at, vec![]);
-    check((r.undo_label() == Some("Split panel".into()) && has(&r.source(), "graph_a")) || has(&r.source(), "ui/split-at \"horizontal\" 0.5"), &format!("an inline panel was split: {:?}\n{}", r.undo_label(), r.source()));
+    check((r.undo_label() == Some("Split panel".into()) && has(&r.source(), "graph_a")) || has(&r.source(), "ui/split_at \"horizontal\" 0.5"), &format!("an inline panel was split: {:?}\n{}", r.undo_label(), r.source()));
     r.close();
     // a loop's panels: retyping edits the template, splitting them says why it cannot
     let at = (800., 100.);
@@ -322,9 +322,9 @@ pub fn run_wire_gestures() {
     let mut r = started("(workspace w (graph g :context sop (let* [a (sop/box) m (sop/transform a)] m)))");
     let (gx, gy, gw, gh) = r.panes().graph;
     let p = ((gx + 40) as f64, (gy + 40) as f64);
-    r.step(p, vec![Event::Pointer_moved(p)]);
-    r.stepb(&[MouseButton::LeftButton], p, vec![Event::Pointer_pressed(MouseButton::LeftButton, p)]);
-    r.step(p, vec![Event::Pointer_released(MouseButton::LeftButton, p)]);
+    r.step(p, vec![Event::PointerMoved(p)]);
+    r.stepb(&[MouseButton::LeftButton], p, vec![Event::PointerPressed(MouseButton::LeftButton, p)]);
+    r.step(p, vec![Event::PointerReleased(MouseButton::LeftButton, p)]);
     r.step(p, vec![key(Key::Home)]);
     r.step(p, vec![ch('i')]);
     r.step(p, vec![]);
@@ -339,23 +339,14 @@ pub fn run_wire_gestures() {
     let mid = ((from.0 + into.0) / 2., (from.1 + into.1) / 2.);
     let empty = ((gx + gw - 30) as f64, (gy + gh - 30) as f64);
     let held = [MouseButton::LeftButton];
-    r.step(mid, vec![Event::Pointer_moved(mid)]);
-    r.stepb(&held, mid, vec![Event::Pointer_pressed(MouseButton::LeftButton, mid)]);
-    r.stepb(&held, empty, vec![Event::Pointer_moved(empty)]);
-    r.step(empty, vec![Event::Pointer_released(MouseButton::LeftButton, empty)]);
+    r.step(mid, vec![Event::PointerMoved(mid)]);
+    r.stepb(&held, mid, vec![Event::PointerPressed(MouseButton::LeftButton, mid)]);
+    r.stepb(&held, empty, vec![Event::PointerMoved(empty)]);
+    r.step(empty, vec![Event::PointerReleased(MouseButton::LeftButton, empty)]);
     r.step(empty, vec![]);
     r.step(empty, vec![text_input("transform")]);
     r.step(empty, vec![key(Key::Enter)]);
     r.step(empty, vec![]);
     check(r.undo_label() == Some("Insert node".into()) && has(&r.source(), "(sop/transform a)") && has(&r.source(), "(sop/transform transform)"), &format!("a node inserted on a pulled wire: {}", r.source()));
     r.close();
-}
-
-pub fn probe() {
-    let text = std::fs::read_to_string(std::env::var("PROBE_FILE").unwrap()).unwrap();
-    let t0 = std::time::Instant::now();
-    let w = of_text(&text);
-    eprintln!("of_text {:?}", t0.elapsed());
-    let _ = build_ok(&w);
-    eprintln!("lowered {:?}", t0.elapsed());
 }

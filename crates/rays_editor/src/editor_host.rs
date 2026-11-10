@@ -1,5 +1,5 @@
 //! Model entry points handle scene/settings edits, World state, picking, reload and carried surfaces; optional settings use concrete Options.
-#![allow(non_camel_case_types)]
+
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -34,13 +34,13 @@ use crate::text_pane;
 /// How `scene_edit` records: `Reset` starts the history, `Amend` folds into the present entry and
 /// keeps what redo would restore.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum scene_mode {
+pub enum SceneMode {
     Reset,
     Amend,
 }
 
 /// Host camera bookkeeping changes view state without history entries. active_camera None uses the document camera.
-pub fn scene_edit(value: &mut EditorModel, mode: scene_mode, active_camera: Option<Option<i64>>, scene_graph: kg::T) {
+pub fn scene_edit(value: &mut EditorModel, mode: SceneMode, active_camera: Option<Option<i64>>, scene_graph: kg::T) {
     if value.carry.is_some() {
         return;
     }
@@ -65,8 +65,8 @@ pub fn scene_edit(value: &mut EditorModel, mode: scene_mode, active_camera: Opti
         Ok(doc) => {
             let doc = adopt(&value.history, Arc::new(doc));
             let history = match mode {
-                scene_mode::Reset => history::restart(doc.clone(), value.history.clone()),
-                scene_mode::Amend => commit(&doc, None, Some(Merge::Repair), value.history.clone()),
+                SceneMode::Reset => history::restart(doc.clone(), value.history.clone()),
+                SceneMode::Amend => commit(&doc, None, Some(Merge::Repair), value.history.clone()),
             };
             // camera bookkeeping is not unsaved work: a document that was the file's still is
             let filed = if same_text(&value.doc, &value.filed) { document::text(&doc) } else { value.filed.clone() };
@@ -77,7 +77,7 @@ pub fn scene_edit(value: &mut EditorModel, mode: scene_mode, active_camera: Opti
     }
 }
 
-pub fn machinery<'a>(value: &ModelView<'a>, under: Option<&dyn Fn(i64) -> Vec<ui_scene::node>>, all_ui_visible: bool) -> Vec<ui_scene::node> {
+pub fn machinery<'a>(value: &ModelView<'a>, under: Option<&dyn Fn(i64) -> Vec<ui_scene::Node>>, all_ui_visible: bool) -> Vec<ui_scene::Node> {
     if all_ui_visible || *value.leader != editor_core::router::State::Idle { value.ui.borrow().scene(under) } else { Vec::new() }
 }
 
@@ -183,11 +183,11 @@ pub fn scene_for_view(override_: Option<kg::T>, view: Option<&View>, value: &Edi
     if unwanted.is_empty() { scene_graph } else { kg::remove(&unwanted, &scene_graph) }
 }
 
-pub fn placed_pieces(render: bool, view: Option<&View>, value: &EditorModel) -> Vec<(mat4::T, cook::piece)> {
+pub fn placed_pieces(render: bool, view: Option<&View>, value: &EditorModel) -> Vec<(mat4::T, cook::Piece)> {
     placed_pieces_of(render, view, value, pieces(value))
 }
 
-fn placed_pieces_of(render: bool, view: Option<&View>, value: &EditorModel, pieces: &[cook::piece]) -> Vec<(mat4::T, cook::piece)> {
+fn placed_pieces_of(render: bool, view: Option<&View>, value: &EditorModel, pieces: &[cook::Piece]) -> Vec<(mat4::T, cook::Piece)> {
     let view = view.cloned().unwrap_or(View::Primary);
     let scene_graph = scene(value);
     pieces
@@ -270,7 +270,7 @@ enum Hit {
 
 /// The nearest hit over the placed pieces of `view`, by the ray parameter, each piece cast in its
 /// own space: the distance, what `cast` found and the piece's object.
-fn nearest_by(placed: &[(mat4::T, cook::piece)], origin: vec3::T, direction: vec3::T, cast: &dyn Fn(&cook::piece, vec3::T, vec3::T) -> Option<(f64, Hit)>) -> Option<(f64, Hit, i64)> {
+fn nearest_by(placed: &[(mat4::T, cook::Piece)], origin: vec3::T, direction: vec3::T, cast: &dyn Fn(&cook::Piece, vec3::T, vec3::T) -> Option<(f64, Hit)>) -> Option<(f64, Hit, i64)> {
     let mut best: Option<(f64, Hit, i64)> = None;
     for (matrix, piece) in placed {
         let Some(inverse) = mat4::inverse(matrix) else { continue };
@@ -302,7 +302,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3
                     go(value, &graph);
                 },
                 None => {
-                    value.notice = Some((notice_kind::Refusal, format!("No material graph for {path}")));
+                    value.notice = Some((NoticeKind::Refusal, format!("No material graph for {path}")));
                 }
             },
             _ => {},
@@ -396,10 +396,10 @@ pub fn reload(imports: Option<&[(String, String)]>, value: &mut EditorModel, nam
         graphs: Vec::new(),
         ..text.clone()
     };
-    value.notice = Some((notice_kind::Info, format!("Reloaded {name}")));
+    value.notice = Some((NoticeKind::Info, format!("Reloaded {name}")));
     value.text = clean(&value.text);
     value.filed = document::text(&value.doc);
-    value.locals = value.locals.iter().map(|(key, l)| (key.clone(), local { code: clean(&l.code), ..l.clone() })).collect();
+    value.locals = value.locals.iter().map(|(key, l)| (key.clone(), Local { code: clean(&l.code), ..l.clone() })).collect();
     Ok(())
 }
 
@@ -411,7 +411,7 @@ pub fn reload_failed(value: &mut EditorModel, name: &str, text: &str, diagnostic
             None => format!(": {}", d.message),
         },
     };
-    value.notice = Some((notice_kind::Refusal, format!("{name} not reloaded{first}")));
+    value.notice = Some((NoticeKind::Refusal, format!("{name} not reloaded{first}")));
     value.text = text_pane::State {
         tab: text_pane::Tab::Document,
         draft: Some(text.to_string()),
@@ -444,13 +444,13 @@ pub fn carry_over_surface(view: Option<&str>, value: &mut EditorModel, origin: v
             }
         }
     };
-    value.carry = Some(carry { report: Some(carry_report { over: place, dropped: report.dropped }), ..c });
+    value.carry = Some(Carry { report: Some(CarryReport { over: place, dropped: report.dropped }), ..c });
 }
 
 /// A pointer carry is over a viewport: the host should look through the viewport's camera.
 pub fn carry_viewport(value: &EditorModel) -> Option<String> {
     match &value.carry {
-        Some(carry { report: Some(carry_report { over: Place::Viewport(key), .. }), payload, .. }) if payload.kind == "material" || payload.kind == "sop" => Some(key.clone()),
+        Some(Carry { report: Some(CarryReport { over: Place::Viewport(key), .. }), payload, .. }) if payload.kind == "material" || payload.kind == "sop" => Some(key.clone()),
         _ => None,
     }
 }

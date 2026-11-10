@@ -1,7 +1,7 @@
 //! The source file of the loop: polled, imported, saved over, and the autosave of the recovery
 //! file. //!
 //! Source operations mutate the stored model and the frame's change metadata.
-#![allow(non_camel_case_types)]
+
 use std::path::Path;
 use std::sync::Arc;
 use std::rc::Rc;
@@ -13,16 +13,16 @@ use editor_document::workspace_doc;
 use input::Event;
 use rays::sketch;
 
-use crate::editor_commands::action;
+use crate::editor_commands::Action;
 use crate::editor_host;
-use crate::editor_model::{self as m, notice_kind, update};
+use crate::editor_model::{self as m, NoticeKind, Update};
 use crate::editor_setup;
 use crate::editor_text;
 use crate::loop_model::LoopModel;
 use crate::source_file;
 use crate::viewport as V;
 
-fn notice(value: &mut LoopModel, kind: notice_kind, text: String) {
+fn notice(value: &mut LoopModel, kind: NoticeKind, text: String) {
     Rc::make_mut(&mut value.core).notice = Some((kind, text));
 }
 
@@ -35,14 +35,14 @@ fn basename(file: &str) -> String {
 /// draft, the file's new text waits (`held`) and the strip says how to choose. It loads once the
 /// edits are undone, or at once by "Reload sketch from its file" (the palette). Nothing is polled
 /// while a payload is carried: the document shown is a preview then.
-pub fn open_import(value: &mut LoopModel, update_: &mut update) {
+pub fn open_import(value: &mut LoopModel, update_: &mut Update) {
     let (path, source) = match (&value.core.open_import, &value.source) {
         (Some(path), Some(source)) => (path.clone(), source.clone()),
         _ => return,
     };
     Rc::make_mut(&mut value.core).open_import = None;
     if editor_text::unsaved(None, &value.core) {
-        notice(value, notice_kind::Refusal, format!("Save or undo your changes before opening {path}."));
+        notice(value, NoticeKind::Refusal, format!("Save or undo your changes before opening {path}."));
         return;
     }
     let file = if Path::new(&path).is_relative() {
@@ -52,7 +52,7 @@ pub fn open_import(value: &mut LoopModel, update_: &mut update) {
     };
     match store::read_text(&file) {
         Err(message) => {
-            notice(value, notice_kind::Refusal, message);
+            notice(value, NoticeKind::Refusal, message);
         }
         Ok(original) => match editor_host::reload(Some(&[]), Rc::make_mut(&mut value.core), &basename(&file), &original) {
             Err(ds) => {
@@ -71,21 +71,21 @@ pub fn open_import(value: &mut LoopModel, update_: &mut update) {
 
 /// Command-O: the system dialog over the sketch's folder; its answer, a frame later, is opened the
 /// way an import is (unsaved work refuses it).
-pub fn open_dialog(value: &mut LoopModel, update_: &mut update, events: &[Event]) {
-    if update_.actions.contains(&action::Open_source) {
+pub fn open_dialog(value: &mut LoopModel, update_: &mut Update, events: &[Event]) {
+    if update_.actions.contains(&Action::OpenSource) {
         match &value.source {
-            None => notice(value, notice_kind::Refusal, "This editor was not opened from a .rays file.".to_string()),
+            None => notice(value, NoticeKind::Refusal, "This editor was not opened from a .rays file.".to_string()),
             Some(source) => {
                 let dir = Path::new(source_file::file(source)).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
-                match sketch::show_file_dialog(Some(&[("Rays sketch".to_string(), vec!["rays".to_string()])]), Some(&dir), sketch::dialog::Open_file) {
+                match sketch::show_file_dialog(Some(&[("Rays sketch".to_string(), vec!["rays".to_string()])]), Some(&dir), sketch::Dialog::OpenFile) {
                     Ok(id) => value.open_dialog = Some(id),
-                    Err(message) => notice(value, notice_kind::Refusal, format!("Open: {message}")),
+                    Err(message) => notice(value, NoticeKind::Refusal, format!("Open: {message}")),
                 }
             }
         }
     }
     for event in events {
-        if let Event::File_dialog { id, result } = event {
+        if let Event::FileDialog { id, result } = event {
             if value.open_dialog == Some(*id) {
                 value.open_dialog = None;
                 match result {
@@ -94,14 +94,14 @@ pub fn open_dialog(value: &mut LoopModel, update_: &mut update, events: &[Event]
                             Rc::make_mut(&mut value.core).open_import = Some(path.clone());
                         }
                     }
-                    Err(message) => notice(value, notice_kind::Refusal, format!("Open: {message}")),
+                    Err(message) => notice(value, NoticeKind::Refusal, format!("Open: {message}")),
                 }
             }
         }
     }
 }
 
-pub fn reload_source(value: &mut LoopModel, update_: &mut update, now: f64) {
+pub fn reload_source(value: &mut LoopModel, update_: &mut Update, now: f64) {
     let previous = match &value.source {
         Some(previous) if !editor_host::carrying(&value.core) => previous.clone(),
         _ => return,
@@ -110,11 +110,11 @@ pub fn reload_source(value: &mut LoopModel, update_: &mut update, now: f64) {
     let name = basename(source_file::file(&file));
     if file.error != previous.error {
         Rc::make_mut(&mut value.core).notice = Some(match &file.error {
-            Some(message) => (notice_kind::Refusal, format!("Source unreadable: {message}")),
-            None => (notice_kind::Info, format!("Source readable again: {name}")),
+            Some(message) => (NoticeKind::Refusal, format!("Source unreadable: {message}")),
+            None => (NoticeKind::Info, format!("Source readable again: {name}")),
         });
     }
-    let forced = update_.actions.contains(&action::Reload_source);
+    let forced = update_.actions.contains(&Action::ReloadSource);
     let text = match (&read, &value.held) {
         (Some(_), _) => read.clone(),
         (None, None) if forced => store::read_text(source_file::file(&file)).ok(),
@@ -129,7 +129,7 @@ pub fn reload_source(value: &mut LoopModel, update_: &mut update, now: f64) {
         value.held = Some(text);
         if read.is_some() {
             Rc::make_mut(&mut value.core).notice = Some((
-                notice_kind::Info,
+                NoticeKind::Info,
                 format!("{name} changed on disk \u{b7} your unsaved edits are kept \u{b7} undo them or run \"Reload sketch from its file\" to take the file; Command-S saves yours as a preset"),
             ));
         }
@@ -157,14 +157,14 @@ pub fn save_source(core: &mut m::EditorModel, source: Option<source_file::Source
     let preset = |core: &mut m::EditorModel, why: &str| {
         let name = preset::default_name((core.clock)());
         match preset::save(&core.presets, &name, &core.doc, view) {
-            Ok(path) => notice(core, notice_kind::Info, format!("{why}; saved as preset {}", basename(&path))),
-            Err(message) => notice(core, notice_kind::Refusal, format!("Not saved: {message}")),
+            Ok(path) => notice(core, NoticeKind::Info, format!("{why}; saved as preset {}", basename(&path))),
+            Err(message) => notice(core, NoticeKind::Refusal, format!("Not saved: {message}")),
         }
     };
     let text = match preset::text(&core.doc) {
         Ok(text) => text,
         Err(message) => {
-            notice(core, notice_kind::Refusal, format!("Not saved: {message}"));
+            notice(core, NoticeKind::Refusal, format!("Not saved: {message}"));
             return source;
         }
     };
@@ -172,12 +172,12 @@ pub fn save_source(core: &mut m::EditorModel, source: Option<source_file::Source
         None => { preset(core, "no source file"); None },
         Some(file) => match source_file::save(&file, &text) {
             Ok(file) => {
-                notice(core, notice_kind::Info, format!("Saved {}", basename(source_file::file(&file))));
+                notice(core, NoticeKind::Info, format!("Saved {}", basename(source_file::file(&file))));
                 core.filed = editor_document::document::text(&core.doc);
                 Some(file)
             }
-            Err(source_file::Save_error::Changed) => { preset(core, "source changed since build"); Some(file) },
-            Err(source_file::Save_error::Failed(message)) => { notice(core, notice_kind::Refusal, format!("Not saved: {message}")); Some(file) },
+            Err(source_file::SaveError::Changed) => { preset(core, "source changed since build"); Some(file) },
+            Err(source_file::SaveError::Failed(message)) => { notice(core, NoticeKind::Refusal, format!("Not saved: {message}")); Some(file) },
         },
     }
 }

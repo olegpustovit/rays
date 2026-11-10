@@ -1,4 +1,4 @@
-//! test_history_memory.ml. Rust has no GC: the Weak/Gc/Obj.reachable_words assertions (an old
+//! . Rust has no GC: the Weak/Gc/Obj.reachable_words assertions (an old
 //! lowering is collected, an entry's stated size against reachable words, collections per frame)
 //! have no counterpart and are omitted; the undo/redo relowering and the typed E_MEMORY budget run.
 use super::t4::*;
@@ -25,7 +25,7 @@ pub fn history() {
         let plan = editor::private::image_plan(d.e());
         (Doc::to_text(&editor::workspace(d.e())).unwrap(), editor::document(d.e()).iter().map(|n| (n.id, n.label.clone(), n.kind.clone())).collect(), plan.nodes.iter().map(|n| (n.id, n.kind.clone())).collect())
     };
-    let undo = |d: &mut Driver| d.bk(&[], &[Key::Meta], off, vec![Event::Key_pressed(Key::KeyChar('z'))]);
+    let undo = |d: &mut Driver| d.bk(&[], &[Key::Meta], off, vec![Event::KeyPressed(Key::KeyChar('z'))]);
     let edit = |d: &mut Driver, n: i64| {
         let op = F::Op::AddNode { scope: vec!["picture".into()], name: format!("added_{n}"), expr: S::make(S::Draft::Num(format!("{:?}", n as f64))) };
         let e = d.ed.take().unwrap();
@@ -45,7 +45,7 @@ pub fn history() {
     undo(&mut d);
     assert!(dump(&d) == start, "undo all the way back gives the first document");
     assert!(!editor::can_undo(d.e()), "nothing left to undo");
-    d.bk(&[], &[Key::Meta, Key::Shift], off, vec![Event::Key_pressed(Key::KeyChar('z'))]);
+    d.bk(&[], &[Key::Meta, Key::Shift], off, vec![Event::KeyPressed(Key::KeyChar('z'))]);
     assert!(dump(&d) == after_one, "redo lowers the entry again");
     d.close();
     let _ = std::fs::remove_dir_all(&presets);

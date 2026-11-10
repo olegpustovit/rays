@@ -1,5 +1,5 @@
 //! Unit tests of navigator.rs: the rows over the bloom studio (lifted from the Navigator section of
-//! lib/rays_editor/test/test_bloom_studio.ml, which needs the whole Editor), the narrow sheet, the
+//! , which needs the whole Editor), the narrow sheet, the
 //! search, the jump list and the colour/notes helpers. The click and key paths of `view` run in the
 //! editor suites (bundle F).
 use crate::navigator::{self as n, Obj, Params, Row};

@@ -1,4 +1,4 @@
-//! The editor-driven end of lib/rays_editor/test/test_scene_sync.ml: a workspace with no scene graph gets one when
+//! The editor-driven end of : a workspace with no scene graph gets one when
 //! an object is added through `Editor::edit`. (The rest of the file is Document/Scene_sync work, ported in
 //! editor_document.)
 use super::t5c::*;

@@ -34,7 +34,7 @@ fn cooked(lit: &pick::Set, existing: Option<cook::Cook>, lowered: &lower::T, pre
         Some(c) => c,
         None => {
             let counter = prepared.clone();
-            let prepare: cook::Prepare_fn = Rc::new(move |s, o| {
+            let prepare: cook::PrepareFn = Rc::new(move |s, o| {
                 counter.set(counter.get() + 1);
                 cook::prepare(s, o)
             });
@@ -86,7 +86,7 @@ fn present(geometry: &rdk_core::geometry::T, tag: i64) -> bool {
     pick::tags(geometry).expect("tags").contains(&tag)
 }
 
-fn geometry_of(piece: &cook::piece) -> rdk_core::geometry::T {
+fn geometry_of(piece: &cook::Piece) -> rdk_core::geometry::T {
     sop::payload::geometry(&piece.output.payload).expect("geometry")
 }
 
@@ -116,7 +116,7 @@ pub fn pick_sunflower() {
         p.output.instances = Some(Arc::new(transforms));
         p
     };
-    let hit = |p: &cook::piece, origin: vec3::T| cook::pick(p, origin, down);
+    let hit = |p: &cook::Piece, origin: vec3::T| cook::pick(p, origin, down);
     let d1 = hit(&piece, over).map(|(d, _)| d).unwrap_or_else(|| fail("no plain hit"));
     let shifted = vec3::create(over.x + 100., over.y, over.z);
     match hit(&instanced(vec![mat4::identity(), mat4::translation(vec3::create(100., 0., 0.))]), shifted) {
@@ -199,7 +199,7 @@ fn flat(text: &str, clicks: &[((f64, f64), &str, &str)]) {
     let (gx, gy, _, _) = panes.graph;
     let row = ((gx + 60) as f64, (gy + 24 + 12) as f64);
     d.step_at(row, vec![]);
-    d.step_at(row, vec![Event::Pointer_pressed(MouseButton::LeftButton, row), Event::Pointer_released(MouseButton::LeftButton, row)]);
+    d.step_at(row, vec![Event::PointerPressed(MouseButton::LeftButton, row), Event::PointerReleased(MouseButton::LeftButton, row)]);
     d.step_at(row, vec![ch('i')]);
     d.count += 30; // past the double-click interval
     for _ in 0..4 {
@@ -213,9 +213,9 @@ fn flat(text: &str, clicks: &[((f64, f64), &str, &str)]) {
     };
     for (world, expected, message) in clicks {
         let p = at(&d, *world);
-        d.step_at(p, vec![Event::Pointer_moved(p)]);
-        d.step_full(&[MouseButton::LeftButton], &[], p, vec![Event::Pointer_pressed(MouseButton::LeftButton, p)], 1);
-        d.step_at(p, vec![Event::Pointer_released(MouseButton::LeftButton, p)]);
+        d.step_at(p, vec![Event::PointerMoved(p)]);
+        d.step_full(&[MouseButton::LeftButton], &[], p, vec![Event::PointerPressed(MouseButton::LeftButton, p)], 1);
+        d.step_at(p, vec![Event::PointerReleased(MouseButton::LeftButton, p)]);
         d.step_at(p, vec![]);
         let got = selected(&d);
         if got != *expected {

@@ -3,7 +3,7 @@
 //! casts a CPU ray to find the primitive under the pointer, and tints the primitives of the probed
 //! iteration.
 //!
-//! ponytail: a CPU ray over `Rdk.Surface_index` (a BVH of the displayed geometry, built at the first
+//! ponytail: a CPU ray over `rdk_geom::surface_index` (a BVH of the displayed geometry, built at the first
 //! click and kept with the piece), not an ID buffer. The upgrade path when meshes pass about 1M
 //! triangles is an OGPU ID-buffer feature (skill add-ogpu-feature).
 use std::collections::BTreeSet;

@@ -73,7 +73,7 @@ impl gpu::Kernel for CountedKernel {
 fn grid() {
     assert!(crate::common::gpu(), "native GPU required");
     let n = side();
-    let text = format!("(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns {n} :rows {n} :size 3.0 :rotation 0.3)))");
+    let text = format!("(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns {n} :rows {n} :size 3.0 :rotate 0.3)))");
     let start=std::time::Instant::now();let cpu_node=node(&text,None,None);let cpu_seconds=start.elapsed();let cpu=cook(&cpu_node);
     for force in [false,true] {
         let gpu = wg::create(None); if force { wg::qualification(&gpu); }

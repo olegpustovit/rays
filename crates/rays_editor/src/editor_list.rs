@@ -1,5 +1,5 @@
 //! The open level's list: its objects, the focused geometry object and its cook, and the list
-//! rows and intents. #![allow(non_camel_case_types)]
+//! rows and intents.
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -81,22 +81,22 @@ pub fn focus_object<'a>(value: &ModelView<'a>) -> Option<i64> {
     }
 }
 
-pub fn pieces(value: &EditorModel) -> &[cook::piece] {
+pub fn pieces(value: &EditorModel) -> &[cook::Piece] {
     &value.cook.pieces
 }
 
-pub fn piece<'a>(value: &ModelView<'a>) -> Option<&'a cook::piece> {
+pub fn piece<'a>(value: &ModelView<'a>) -> Option<&'a cook::Piece> {
     let id = focus_object(value)?;
     pieces(value.model).iter().find(|piece| piece.id == id)
 }
 
-pub fn prepared<'a>(value: &ModelView<'a>) -> Option<&'a cook::Prepared_ref> {
+pub fn prepared<'a>(value: &ModelView<'a>) -> Option<&'a cook::PreparedRef> {
     piece(value).map(|piece| &piece.prepared)
 }
 
 /// The object in focus (the selected scene object, or the one whose network is open): its world
 /// transform, its cooked bounds in its own space, and its name.
-pub fn selected_bounds<'a>(value: &ModelView<'a>) -> Option<(mat4::T, cook::bounds, String)> {
+pub fn selected_bounds<'a>(value: &ModelView<'a>) -> Option<(mat4::T, cook::Bounds, String)> {
     let piece = piece(value)?;
     let bounds = cook::piece_bounds(piece)?;
     let scene_graph = scene(value);
@@ -132,7 +132,7 @@ pub fn timeline(value: &EditorModel) -> crate::timeline::Timeline {
     value.timeline
 }
 
-pub fn selected_node<'a>(value: &ModelView<'a>) -> Option<picked> {
+pub fn selected_node<'a>(value: &ModelView<'a>) -> Option<Picked> {
     match scope_node(value) {
         Some((_, node)) => Some(of_sop(&node)),
         None => {
@@ -331,21 +331,21 @@ pub fn trunk_rows(network: &net::Network, viewed: Option<i64>, flags: &dyn Fn(i6
 }
 
 /// The rows a level's list shows, and its flag columns, built when asked.
-pub type lazy_rows = Rc<dyn Fn() -> (Vec<Row>, Vec<String>)>;
+pub type LazyRows = Rc<dyn Fn() -> (Vec<Row>, Vec<String>)>;
 
 /// The open level's list: what it is made from, and its rows and flag columns when asked.
-pub fn rows<'a>(value: &ModelView<'a>) -> (row_source, lazy_rows) {
+pub fn rows<'a>(value: &ModelView<'a>) -> (RowSource, LazyRows) {
     match (pane_level(value), network(value)) {
         (Level::Scene, _) => {
             let scene_graph = scene(value).clone();
             let active = value.doc.active_camera;
-            (row_source::Objects(scene_graph.clone()), Rc::new(move || (scene_rows(active, &scene_graph), vec!["v".to_string(), "r".to_string()])))
+            (RowSource::Objects(scene_graph.clone()), Rc::new(move || (scene_rows(active, &scene_graph), vec!["v".to_string(), "r".to_string()])))
         }
         (Level::Inside(_), Some(network)) => {
             let graph = network.graph.clone();
             let displayed = network.displayed;
             (
-                row_source::Network(network.graph.clone()),
+                RowSource::Network(network.graph.clone()),
                 Rc::new(move || {
                     (
                         trunk_rows(&graph, displayed, &|node_id, node| match node {
@@ -359,7 +359,7 @@ pub fn rows<'a>(value: &ModelView<'a>) -> (row_source, lazy_rows) {
         }
         (Level::Inside(_), None) => {
             let layers = level_objects(value).into_owned();
-            (row_source::Objects(layers.clone()), Rc::new(move || (layer_rows(&layers), vec!["v".to_string()])))
+            (RowSource::Objects(layers.clone()), Rc::new(move || (layer_rows(&layers), vec!["v".to_string()])))
         }
     }
 }
@@ -460,7 +460,7 @@ pub fn reparented(document: &[kg::Node], rows: &[Row], intent: &Intent) -> Optio
 /// The state `apply_tree` folds: the open level's graph, the selection, the list's view state, an
 /// entry request, the history label and the rows the intents refer to.
 #[derive(Clone)]
-pub struct tree_state {
+pub struct TreeState {
     pub document: kg::T,
     pub selection: selection::Selection,
     pub tree: tree::Tree,
@@ -472,7 +472,7 @@ pub struct tree_state {
 /// Tree intents become selection, an entry request, and edits of the derived network for the
 /// objects only the host made (reconcile adopts them): what the text has is edited as text
 /// (`tree_edit`).
-pub fn apply_tree<'a>(value: &ModelView<'a>, state: tree_state, intent: &Intent) -> tree_state {
+pub fn apply_tree<'a>(value: &ModelView<'a>, state: TreeState, intent: &Intent) -> TreeState {
     let level = pane_level(value);
     let in_text = |id: i64| scene_sync::in_text(&value.doc, level, id);
     let hosted = |ids: &[i64]| -> Vec<i64> { ids.iter().copied().filter(|id| !in_text(*id)).collect() };

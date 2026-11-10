@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 4: run_loop_copies, run_loop_expression, run_panel_states,
+//! , part 4: run_loop_copies, run_loop_expression, run_panel_states,
 //! run_ref_picker, run_compose, run_layouts.
 use super::support::*;
 use editor_core::panels::{self, Panel};
@@ -33,7 +33,7 @@ fn select_row(r: &mut Run, k: usize) {
     r.step(m, vec![]);
     let (gx, gy, _, _) = r.panes().graph;
     let p = ((gx + 40) as f64, (gy + 400) as f64);
-    r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+    r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
     r.step(m, vec![key(Key::Home)]);
     for _ in 0..k {
         r.step(m, vec![key(Key::ArrowDown)]);
@@ -47,11 +47,11 @@ fn drag_slider(r: &mut Run, row: i64) {
     // the first field of a vector row starts at the control column: 12 + 6 + 8 + 56 + 8 = 90 in a
     // 180-wide panel; a point 10 inside it
     let at = |x: i64| ((ix + 100 + x) as f64, (iy + row) as f64);
-    r.stepb(&[LB], at(0), vec![Event::Pointer_pressed(LB, at(0))]);
+    r.stepb(&[LB], at(0), vec![Event::PointerPressed(LB, at(0))]);
     for x in [4, 8, 12, 16] {
         r.stepb(&[LB], at(x), vec![]);
     }
-    r.step(at(20), vec![Event::Pointer_released(LB, at(20))]);
+    r.step(at(20), vec![Event::PointerReleased(LB, at(20))]);
     r.step((450., 300.), vec![]);
 }
 
@@ -160,9 +160,9 @@ pub fn run_loop_expression() {
     let (ix, iy, _, _) = r.panes().inspector;
     // Option-click on the translate X field of the lamp
     let label = ((ix + 100) as f64, (iy + 118 + 28 + 24 + 40 + 120 + 40 + 12) as f64);
-    r.step(label, vec![Event::Pointer_moved(label)]);
-    r.step_full(&[LB], &[Key::Alt], label, vec![Event::Pointer_pressed(LB, label)]);
-    r.step_full(&[], &[Key::Alt], label, vec![Event::Pointer_released(LB, label)]);
+    r.step(label, vec![Event::PointerMoved(label)]);
+    r.step_full(&[LB], &[Key::Alt], label, vec![Event::PointerPressed(LB, label)]);
+    r.step_full(&[], &[Key::Alt], label, vec![Event::PointerReleased(LB, label)]);
     r.step(label, vec![key(Key::KeyChar('a'))]);
     r.step(label, vec![text_input("=(* i 3)")]);
     r.step(label, vec![key(Key::Enter)]);
@@ -187,8 +187,8 @@ pub fn run_panel_states() {
     let mut r = Run::new(editor_with("(workspace panels (graph g :context sop (sop/box)))", editor::Create { presets: Some(directory.to_str().unwrap().into()), ..Default::default() }));
     let m = (450., 300.);
     let click = |r: &mut Run, p: (f64, f64)| {
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
         r.step(p, vec![]);
     };
     r.step(m, vec![]);
@@ -200,13 +200,13 @@ pub fn run_panel_states() {
     let moved = (grip.0 + 30., grip.1);
     let ws_text = |r: &Run| workspace_doc::to_text(&editor::workspace(&r.e)).unwrap();
     let before_split = ws_text(&r);
-    r.step(grip, vec![Event::Pointer_moved(grip)]);
-    r.stepb(&[LB], grip, vec![Event::Pointer_pressed(LB, grip)]);
-    r.stepb(&[LB], moved, vec![Event::Pointer_moved(moved)]);
+    r.step(grip, vec![Event::PointerMoved(grip)]);
+    r.stepb(&[LB], grip, vec![Event::PointerPressed(LB, grip)]);
+    r.stepb(&[LB], moved, vec![Event::PointerMoved(moved)]);
     check(ws_text(&r) == before_split && r.undo_label().is_none(), "a held splitter drag committed authored state before release");
-    r.step(moved, vec![Event::Pointer_released(LB, moved)]);
+    r.step(moved, vec![Event::PointerReleased(LB, moved)]);
     r.step(moved, vec![]);
-    check(editor::workspace(&r.e).layout.editor.is_none() && has(&r.source(), "ui/split-at") && r.undo_label() == Some("Resize panel".into()), "resizing the default shell did not write its editor graph");
+    check(editor::workspace(&r.e).layout.editor.is_none() && has(&r.source(), "ui/split_at") && r.undo_label() == Some("Resize panel".into()), "resizing the default shell did not write its editor graph");
     let saved_shell = build_ok(&editor::workspace(&r.e)).shell.map(|s| panels::to_string(&s.tree));
     check(build_ok(&of_text(&ws_text(&r))).shell.map(|s| panels::to_string(&s.tree)) == saved_shell, "the first splitter edit did not round-trip through Lisp");
     r.step_full(&[], &[Key::Meta], moved, vec![ch('z')]);
@@ -221,11 +221,11 @@ pub fn run_panel_states() {
     let (gx, gy, _, _) = r.panes().graph;
     let start = ((gx + 8) as f64, (gy - 11) as f64);
     let moved = (start.0 + 30., start.1 + 70.);
-    r.step(start, vec![Event::Pointer_moved(start)]);
-    r.stepb(&[LB], start, vec![Event::Pointer_pressed(LB, start)]);
-    r.stepb(&[LB], moved, vec![Event::Pointer_moved(moved)]);
-    r.stepb(&[LB], (moved.0 + 10., moved.1), vec![Event::Pointer_moved((moved.0 + 10., moved.1))]);
-    r.step(moved, vec![Event::Pointer_released(LB, moved)]);
+    r.step(start, vec![Event::PointerMoved(start)]);
+    r.stepb(&[LB], start, vec![Event::PointerPressed(LB, start)]);
+    r.stepb(&[LB], moved, vec![Event::PointerMoved(moved)]);
+    r.stepb(&[LB], (moved.0 + 10., moved.1), vec![Event::PointerMoved((moved.0 + 10., moved.1))]);
+    r.step(moved, vec![Event::PointerReleased(LB, moved)]);
     r.step(moved, vec![]);
     check(state(&r, "network").window.is_some() && r.undo_label() == Some("Arrange panel".into()), "the panel drag handle did not undock the panel");
     let window = state(&r, "network").window.unwrap();
@@ -234,16 +234,16 @@ pub fn run_panel_states() {
     let to = (grip.0 + 35., grip.1 + 30.);
     let before_move = ws_text(&r);
     let before_bounds = r.panes().graph;
-    r.step(grip, vec![Event::Pointer_moved(grip)]);
-    r.stepb(&[LB], grip, vec![Event::Pointer_pressed(LB, grip)]);
-    r.stepb(&[LB], to, vec![Event::Pointer_moved(to)]);
+    r.step(grip, vec![Event::PointerMoved(grip)]);
+    r.stepb(&[LB], grip, vec![Event::PointerPressed(LB, grip)]);
+    r.stepb(&[LB], to, vec![Event::PointerMoved(to)]);
     check(ws_text(&r) == before_move, "a held floating-window drag committed authored state before release");
-    r.step(to, vec![Event::Pointer_cancelled(LB)]);
+    r.step(to, vec![Event::PointerCancelled(LB)]);
     check(ws_text(&r) == before_move && r.panes().graph == before_bounds, "cancelling a floating-window drag retained draft bounds or changed authored state");
-    r.step(grip, vec![Event::Pointer_moved(grip)]);
-    r.stepb(&[LB], grip, vec![Event::Pointer_pressed(LB, grip)]);
-    r.stepb(&[LB], to, vec![Event::Pointer_moved(to)]);
-    r.step(to, vec![Event::Pointer_released(LB, to)]);
+    r.step(grip, vec![Event::PointerMoved(grip)]);
+    r.stepb(&[LB], grip, vec![Event::PointerPressed(LB, grip)]);
+    r.stepb(&[LB], to, vec![Event::PointerMoved(to)]);
+    r.step(to, vec![Event::PointerReleased(LB, to)]);
     r.step(to, vec![]);
     check(state(&r, "network").window == Some((x + 35, y + 30, w, h)), "an underlying pane covered the floating drag handle");
     r.step_full(&[], &[Key::Meta], to, vec![ch('z')]);
@@ -252,11 +252,11 @@ pub fn run_panel_states() {
     let corner = ((x + w - 4) as f64, (y + visible_h - 4) as f64);
     let to = (corner.0 - 35., corner.1 - 40.);
     let before_resize = ws_text(&r);
-    r.step(corner, vec![Event::Pointer_moved(corner)]);
-    r.stepb(&[LB], corner, vec![Event::Pointer_pressed(LB, corner)]);
-    r.stepb(&[LB], to, vec![Event::Pointer_moved(to)]);
+    r.step(corner, vec![Event::PointerMoved(corner)]);
+    r.stepb(&[LB], corner, vec![Event::PointerPressed(LB, corner)]);
+    r.stepb(&[LB], to, vec![Event::PointerMoved(to)]);
     check(ws_text(&r) == before_resize, "a held floating-window resize committed authored state before release");
-    r.step(to, vec![Event::Pointer_released(LB, to)]);
+    r.step(to, vec![Event::PointerReleased(LB, to)]);
     r.step(to, vec![]);
     check(state(&r, "network").window == Some((x, y, w - 35, visible_h - 40)), "the floating window resize handle did not persist its size");
     r.step_full(&[], &[Key::Meta], to, vec![ch('z')]);
@@ -267,11 +267,11 @@ pub fn run_panel_states() {
     let (gx, gy, _, _) = r.panes().graph;
     let start = ((gx + 8) as f64, (gy - 11) as f64);
     let target = (180., 580.);
-    r.step(start, vec![Event::Pointer_moved(start)]);
-    r.stepb(&[LB], start, vec![Event::Pointer_pressed(LB, start)]);
-    r.stepb(&[LB], target, vec![Event::Pointer_moved(target)]);
+    r.step(start, vec![Event::PointerMoved(start)]);
+    r.stepb(&[LB], start, vec![Event::PointerPressed(LB, start)]);
+    r.stepb(&[LB], target, vec![Event::PointerMoved(target)]);
     r.stepb(&[LB], target, vec![]);
-    r.step(target, vec![Event::Pointer_released(LB, target)]);
+    r.step(target, vec![Event::PointerReleased(LB, target)]);
     r.step(target, vec![]);
     check(has(&r.source(), "preview network)") && state(&r, "network").window.is_none() && r.dump("edit error") == "-", &format!("the edge drop did not dock the panel: {}\n{}", r.dump("edit error"), r.source()));
     r.step_full(&[], &[Key::Meta], target, vec![ch('z')]);
@@ -322,8 +322,8 @@ pub fn run_ref_picker() {
     r.step(m, vec![]);
     let (ix, iy, _, _) = r.panes().inspector;
     let click = |r: &mut Run, p: (f64, f64)| {
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
     };
     let (bx, by, _, _) = editor::node_box(&r.e, &["scene".into(), "geom".into()]).expect("geom box");
     click(&mut r, ((bx + 60) as f64, (by + 12) as f64));
@@ -414,8 +414,8 @@ const SWITCH_TEXT: &str = r#"
              network (ui/graph)
              inspector (ui/inspector)
              code (ui/lisp)
-             build (ui/split-at "horizontal" 0.4 preview (ui/split-at "horizontal" 0.62 network inspector))
-             write (ui/split-at "horizontal" 0.46 preview (ui/split-at "vertical" 0.5 network code))
+             build (ui/split_at "horizontal" 0.4 preview (ui/split_at "horizontal" 0.62 network inspector))
+             write (ui/split_at "horizontal" 0.46 preview (ui/split_at "vertical" 0.5 network code))
              look preview]
         (ui/workspace (ui/switch build write look :active 0)))))
 "#;
@@ -463,7 +463,7 @@ pub fn run_layouts() {
     let docked = edit(&floated, L::LayoutFloat { graph: "editor".into(), at: vec![1, 0] });
     check(panels::label(&shell_of(&build_ok(&docked)).tree) == "View | Inspector | Graph", &format!("a window docks: {}", text(&docked)));
     // a switch inside a split edits in place
-    let nested = of_text(&with_editor("    (ui/workspace (ui/split-at \"horizontal\" 0.5 (ui/graph) (ui/switch (ui/lisp) (ui/inspector) :active 1)))"));
+    let nested = of_text(&with_editor("    (ui/workspace (ui/split_at \"horizontal\" 0.5 (ui/graph) (ui/switch (ui/lisp) (ui/inspector) :active 1)))"));
     let n_set = edit(&nested, L::SetLayout { graph: "editor".into(), index: 0 });
     check(has(&text(&n_set), "(ui/switch (ui/lisp) (ui/inspector) :active 0)") || has(&text(&n_set), ":active 0"), &format!("Set_layout reaches a switch inside a split: {}", text(&n_set)));
     check(panels::to_string(&shell_of(&build_ok(&n_set)).tree) == "(h graph lisp)", "and the column swaps");
@@ -523,9 +523,9 @@ pub fn run_layouts() {
     r.step(m, vec![]);
     let (gx, gy, gw, gh) = editor::panes(&r.e, &frame(&[], (0., 0.), vec![], r.count)).graph;
     let at = (gx as f64 + gw as f64 / 2., gy as f64 + gh as f64 / 2.);
-    r.step(at, vec![Event::Pointer_moved(at)]);
-    r.step(at, vec![Event::Pointer_pressed(LB, at)]);
-    r.step(at, vec![Event::Pointer_released(LB, at)]);
+    r.step(at, vec![Event::PointerMoved(at)]);
+    r.step(at, vec![Event::PointerPressed(LB, at)]);
+    r.step(at, vec![Event::PointerReleased(LB, at)]);
     r.step(at, vec![]);
     r.step(at, vec![key(Key::KeyChar('/')), ch('o'), ch('f')]);
     r.step(at, vec![]);

@@ -150,7 +150,7 @@ fn chain_counterexamples() {
             (float3::resident(g::positions(&geometry)),profile::placements(&lowered.profile)[0].clone())
         };
         let (resident,p) = cook(65536,None);
-        assert!(!resident && p.reason==Reason::Missing_consumer && p.cpu_consumers.is_none());
+        assert!(!resident && p.reason==Reason::MissingConsumer && p.cpu_consumers.is_none());
         let mut settle = |n,readers| {
             for _ in 0..4 { cook(n,Some(readers)); }
             for i in 0..=4 {
@@ -169,7 +169,7 @@ fn chain_counterexamples() {
         assert!(consistent(&small),"small chain: {small:?}");
         let (_,grown) = cook(65536,Some(1));
         assert_ne!(grown.count,small.count);
-        for (n,readers,reason) in [(32,1,Reason::Cpu_consumer),(32,0,Reason::Cpu_measured_cheaper),(65536,0,Reason::Device_measured_cheaper)] {
+        for (n,readers,reason) in [(32,1,Reason::CpuConsumer),(32,0,Reason::CpuMeasuredCheaper),(65536,0,Reason::DeviceMeasuredCheaper)] {
             let backend = config.backend.as_ref().unwrap();
             let device_ran = Arc::new(AtomicBool::new(false));
             let on_device = Arc::new(AtomicBool::new(false));
@@ -206,9 +206,9 @@ fn chain_counterexamples() {
                 let p = profile::placements(&lowered.profile).into_iter().find(|p| p.owner.0 != vec!["sop/mesh_planes".to_owned()]).unwrap();
                 assert_eq!(p.cpu_consumers,Some(readers));
                 let resident = float3::resident(g::positions(&geometry));
-                if fresh && frame<2 { assert!(p.reason==Reason::No_cost_evidence && p.cpu_seconds.is_none() && resident); }
+                if fresh && frame<2 { assert!(p.reason==Reason::NoCostEvidence && p.cpu_seconds.is_none() && resident); }
                 else if frame>=4 { assert!(p.cpu_seconds.is_some() && p.device_seconds.is_some()); assert!(consistent(&p)); assert_eq!(resident,cost::on_device(p.reason)); }
-                if side==512 && readers==0 && frame==5 {assert_eq!(p.reason,Reason::Device_measured_cheaper);}
+                if side==512 && readers==0 && frame==5 {assert_eq!(p.reason,Reason::DeviceMeasuredCheaper);}
             }
             sop::session::close(&mut session);
         }
@@ -229,7 +229,7 @@ fn retained_generations() {
         let geometry = isogrid::cook(&mut small_session,&small_node,0.);
         assert!(!float3::resident(g::positions(&geometry)));
         let placements = profile::placements(&small.profile);
-        assert!(placements.iter().any(|p| matches!(p.reason,Reason::Cpu_consumer|Reason::Cpu_measured_cheaper)));
+        assert!(placements.iter().any(|p| matches!(p.reason,Reason::CpuConsumer|Reason::CpuMeasuredCheaper)));
         assert!(!placements.iter().any(|p| cost::on_device(p.reason)));
         sop::session::close(&mut small_session);
         let (lowered,node) = lower_source(&config,&source);

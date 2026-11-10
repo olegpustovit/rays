@@ -1,4 +1,4 @@
-//! test_workspace_doc.ml, the Editor-driven parts: part_editor, part_conditional_history,
+//! , the Editor-driven parts: part_editor, part_conditional_history,
 //! part_live, part_preset, part_pane_layout, part_editor_contexts, part_projection_reuse
 //! (the pure Workspace_doc parts live in editor_document's own tests).
 use crate::common;
@@ -46,7 +46,7 @@ fn fr(keys: &[Key], events: Vec<Event>, count: i64) -> rays::frame::Frame {
 }
 
 fn ch(c: char) -> Event {
-    Event::Key_pressed(Key::KeyChar(c))
+    Event::KeyPressed(Key::KeyChar(c))
 }
 
 fn editor(text: &str, presets: Option<&str>) -> Ed {
@@ -190,7 +190,7 @@ fn part_preset() {
         let (e, count) = settle(e, 0, &|e| editor::prepared(e).is_some());
         let mut e = editor::edit(e, &Op::SetNote { node: s(&["g", "a"]), text: "kept".into() }).unwrap();
         e = editor::update(e, &fr(&[], vec![ch('/'), ch('s')], count + 1));
-        e = editor::update(e, &fr(&[], vec![Event::Key_pressed(Key::Enter)], count + 2));
+        e = editor::update(e, &fr(&[], vec![Event::KeyPressed(Key::Enter)], count + 2));
         let listed = preset::list(directory);
         assert!(listed.len() == 1, "/ s did not save one preset");
         let name = listed[0].0.clone();
@@ -205,7 +205,7 @@ fn part_preset() {
         // load through / b: one undo entry
         e = editor::edit(e, &Op::Rename { node: s(&["g", "a"]), to_: "ball".into() }).unwrap();
         e = editor::update(e, &fr(&[], vec![ch('/'), ch('b')], count + 3));
-        e = editor::update(e, &fr(&[], vec![Event::Text_input(name.clone()), Event::Key_pressed(Key::Enter)], count + 4));
+        e = editor::update(e, &fr(&[], vec![Event::TextInput(name.clone()), Event::KeyPressed(Key::Enter)], count + 4));
         e = editor::update(e, &fr(&[], vec![], count + 5));
         assert!(doc::to_text(&editor::workspace(&e)).unwrap().contains("(sop/transform a "), "/ b restored the saved source");
         assert_eq!(editor::undo_label(&e).as_deref(), Some("Load preset"), "load is one undo entry");

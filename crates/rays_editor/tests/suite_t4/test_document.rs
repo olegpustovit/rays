@@ -1,4 +1,4 @@
-//! test_editor_document.ml: validation, dump, preset round trip, delete-all through real UI events.
+//! : validation, dump, preset round trip, delete-all through real UI events.
 use super::t4::*;
 use editor_document::{document, document_edit, kind_graph, lowering, objects, preset, workspace_doc};
 use flow_ir::flow_ir::gpu;

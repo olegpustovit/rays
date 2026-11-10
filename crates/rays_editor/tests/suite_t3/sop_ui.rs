@@ -37,7 +37,7 @@ fn frame(time: f64, events: Vec<Event>) -> rays::frame::Frame {
 
 fn click(x: i64, y: i64) -> Vec<Event> {
     let p = (x as f64, y as f64);
-    vec![Event::Pointer_pressed(MouseButton::LeftButton, p), Event::Pointer_released(MouseButton::LeftButton, p)]
+    vec![Event::PointerPressed(MouseButton::LeftButton, p), Event::PointerReleased(MouseButton::LeftButton, p)]
 }
 
 /// the inspector's x on an operator row that reads the context symbol `t` disconnects it
@@ -54,7 +54,7 @@ pub fn reset_context_symbol() {
     let a2 = a.clone();
     let found = rays_editor::editor_inspect::arg_request(&src, &n, &move |_| Some((a2.clone(), Vec::new())), &FlowChange::Reset("@arg:a".to_string()));
     match found {
-        Some(rays_editor::editor_model::change::Syntax_edit(flow_graph::flow_edit::Op::Disconnect { node, key, fallback, .. })) => {
+        Some(rays_editor::editor_model::Change::SyntaxEdit(flow_graph::flow_edit::Op::Disconnect { node, key, fallback, .. })) => {
             assert!(node == n.path && key == a.key && fallback.is_some());
         }
         other => fail(&format!("the x on a context-symbol row emitted no disconnect: {}", other.is_some())),
@@ -106,7 +106,7 @@ pub fn inspector_rows() {
     let (v, _) = step(
         &values,
         1.5,
-        vec![Event::Pointer_pressed(MouseButton::LeftButton, (140., row(2) as f64)), Event::Pointer_moved((400., row(2) as f64)), Event::Pointer_released(MouseButton::LeftButton, (400., row(2) as f64))],
+        vec![Event::PointerPressed(MouseButton::LeftButton, (140., row(2) as f64)), Event::PointerMoved((400., row(2) as f64)), Event::PointerReleased(MouseButton::LeftButton, (400., row(2) as f64))],
     );
     values = v;
     check(get(&values, "count") == Value::Int(5), "inspector integer drag did not clamp to the soft range");
@@ -138,11 +138,11 @@ pub fn flow_rows() {
     let pin = FlowOpts { pin_click: true, ..Default::default() };
     check(step(&pin, &[row(None, false)], click(14, 12)) == vec![FlowChange::Pinned("count".into(), false)], "Flow inspector pin did not emit the card-row request");
     // the cross shows on the hovered row: hover first
-    step(&pin, &[row(Some("← Clock.t"), true)], vec![Event::Pointer_moved((258., 12.))]);
+    step(&pin, &[row(Some("← Clock.t"), true)], vec![Event::PointerMoved((258., 12.))]);
     check(step(&pin, &[row(Some("← Clock.t"), true)], click(258, 12)) == vec![FlowChange::Reset("count".into())], "Flow inspector reset did not clear the drive");
     let expression_row = row(Some("=t"), true);
     step(&pin, &[expression_row.clone()], click(170, 12));
-    let edits = step(&FlowOpts::default(), &[expression_row.clone()], vec![Event::Key_pressed(Key::End), Event::Text_input("*2".into()), Event::Key_pressed(Key::Enter)]);
+    let edits = step(&FlowOpts::default(), &[expression_row.clone()], vec![Event::KeyPressed(Key::End), Event::TextInput("*2".into()), Event::KeyPressed(Key::Enter)]);
     check(edits == vec![FlowChange::Expression("count".into(), "=t*2".into())], "Flow inspector expression field did not commit an edit");
     // folders
     let folder_row = FlowRow { fields: vec![views.iter().find(|v| v.name == "count").unwrap().clone()], ..row(None, false) };

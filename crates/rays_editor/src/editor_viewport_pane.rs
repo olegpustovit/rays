@@ -1,5 +1,5 @@
 //! The viewport panes' marks: what is painted over each view, in the kit's marks (viewport.html).
-#![allow(non_camel_case_types)]
+
 use editor_document::kind_graph;
 use param::Value;
 use pxui::theme;
@@ -10,7 +10,7 @@ use rays_math::color::T as Color;
 
 use crate::editor_inspect::{group_digits, scene};
 use crate::editor_list::{piece, pieces};
-use crate::editor_model::{trace, ModelView};
+use crate::editor_model::{Trace, ModelView};
 
 pub type Rect = (i64, i64, i64, i64);
 
@@ -42,7 +42,7 @@ fn field(node: &kind_graph::Node, name: &str) -> Option<f64> {
 }
 
 /// The draw of the traced readout of a viewport (its samples are the caption's "n/cap spp").
-fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, narrow: bool, (x, y, w, h): (f64, f64, f64, f64), t: &trace) {
+fn traced_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, narrow: bool, (x, y, w, h): (f64, f64, f64, f64), t: &Trace) {
     if !(w > 200.0 && h > 120.0) {
         return;
     }

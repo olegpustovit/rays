@@ -1,4 +1,4 @@
-//! test_2d_ports.ml: each 2D sketch loads to its own text, Command-S saves it unchanged, and its
+//! : each 2D sketch loads to its own text, Command-S saves it unchanged, and its
 //! drawing commands are identical at one and eight domains. The native PNG export modes
 //! (Sketch.export_state vs Workspace.export) are SKIPPED: no Sketch.export_state counterpart here.
 use super::t4::*;
@@ -7,7 +7,6 @@ use input::{Event, Key, MouseButton::LeftButton};
 use rays_editor::{editor, source_file, workspace};
 use std::cell::RefCell;
 
-const NAMES: [&str; 8] = ["basic", "generative", "noise", "recursive_rectangles", "drawing", "audio", "file_dialog", "pxui"];
 
 fn dimensions(name: &str) -> (i64, i64) {
     match name {
@@ -26,15 +25,15 @@ fn frame_of(synthetic: bool, name: &str, count: i64) -> rays::frame::Frame {
         vec![]
     } else {
         match (name, count) {
-            ("drawing", 1) => vec![Event::Pointer_pressed(LeftButton, (100., 140.)), Event::Pointer_moved((120., 160.))],
-            ("drawing", 2) => vec![Event::Pointer_moved((140., 180.))],
-            ("drawing", 3) => vec![Event::Pointer_released(LeftButton, (160., 190.))],
-            ("recursive_rectangles", 1) => vec![Event::Pointer_pressed(LeftButton, (100., 140.))],
-            ("audio", 1) => vec![Event::Key_pressed(Key::KeyChar('3'))],
-            ("audio", 3) => vec![Event::Pointer_pressed(LeftButton, (400., 180.))],
-            ("file_dialog", 1) => vec![Event::File_dropped("sample.png".into()), Event::File_dialog { id: 1, result: Ok(vec!["a.png".into(), "b.png".into()]) }],
-            ("file_dialog", 2) => vec![Event::File_drag_moved((90., 140.)), Event::Pinched(1.25)],
-            ("file_dialog", 3) => vec![Event::File_drag_ended, Event::File_dialog { id: 2, result: Ok(vec![]) }],
+            ("drawing", 1) => vec![Event::PointerPressed(LeftButton, (100., 140.)), Event::PointerMoved((120., 160.))],
+            ("drawing", 2) => vec![Event::PointerMoved((140., 180.))],
+            ("drawing", 3) => vec![Event::PointerReleased(LeftButton, (160., 190.))],
+            ("recursive_rectangles", 1) => vec![Event::PointerPressed(LeftButton, (100., 140.))],
+            ("audio", 1) => vec![Event::KeyPressed(Key::KeyChar('3'))],
+            ("audio", 3) => vec![Event::PointerPressed(LeftButton, (400., 180.))],
+            ("file_dialog", 1) => vec![Event::FileDropped("sample.png".into()), Event::FileDialog { id: 1, result: Ok(vec!["a.png".into(), "b.png".into()]) }],
+            ("file_dialog", 2) => vec![Event::FileDragMoved((90., 140.)), Event::Pinched(1.25)],
+            ("file_dialog", 3) => vec![Event::FileDragEnded, Event::FileDialog { id: 2, result: Ok(vec![]) }],
             _ => vec![],
         }
     };
@@ -70,7 +69,7 @@ fn save_roundtrip(name: &str) {
     let mut ed = editor::update(ed, &frame_of(false, name, 0));
     let mut save = frame_of(false, name, 1);
     save.input.keys = vec![Key::Meta];
-    save.input.events = vec![Event::Key_pressed(Key::KeyChar('s'))];
+    save.input.events = vec![Event::KeyPressed(Key::KeyChar('s'))];
     ed = editor::update(ed, &save);
     ed = editor::update(ed, &frame_of(false, name, 2));
     // Atomic replacement preserves source text and comments.

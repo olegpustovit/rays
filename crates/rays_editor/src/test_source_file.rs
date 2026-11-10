@@ -27,7 +27,7 @@ fn polls_the_file_and_saves_over_the_text_it_came_from() {
     let (s, text) = sf::poll(3.0, &s);
     assert_eq!(text, None, "the same refused text is not offered again");
     // saving over text that is not the one accepted is refused
-    assert_eq!(sf::save(&s, "x").err(), Some(sf::Save_error::Changed));
+    assert_eq!(sf::save(&s, "x").err(), Some(sf::SaveError::Changed));
     let s = sf::accepted(&s, "(workspace w2)\n");
     let saved = sf::save(&s, "(workspace w3)").unwrap();
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "(workspace w3)\n");

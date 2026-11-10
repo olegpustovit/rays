@@ -2,7 +2,7 @@
 //! displayed node), node ownership, new graphs and materials, and the workspace inspector (the
 //! sheet of the node selected in the graph pane). Bundle C; Editor_model and Editor_shell come
 //! from bundle D.
-#![allow(non_camel_case_types)]
+
 use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -29,7 +29,7 @@ use sop::edit_graph;
 use sop::node;
 
 use crate::cook;
-use crate::editor_model::{change, flow_catalog, preview, scope_key, EditorModel as Model, ModelView};
+use crate::editor_model::{Change, flow_catalog, Preview, ScopeKey, EditorModel as Model, ModelView};
 use crate::navigator;
 use crate::text_pane;
 
@@ -159,7 +159,7 @@ pub fn displayed<'a>(value: &ModelView<'a>) -> Option<i64> {
 }
 
 pub fn viewed_path<'a>(value: &ModelView<'a>, scope: &p::Scope) -> Option<Path> {
-    let valid = |pv: &preview| -> Option<Path> {
+    let valid = |pv: &Preview| -> Option<Path> {
         match (pv.path.first(), scope.path.first()) {
             (Some(graph), Some(root)) if graph == root => Some(pv.path.clone()),
             _ => None,
@@ -664,11 +664,11 @@ pub fn arg_row_in(entries: &[Entry], name: &str) -> Option<(p::Row, Vec<i64>)> {
 }
 
 /// The request of an edit of a sub-row or of an operator row.
-pub fn follow_row(source: &[S], n: &p::Node, r: &p::Row) -> Option<change> {
-    p::sources(r).into_iter().find_map(|name| text_pane::reference_target(source, &n.path, &name).map(change::Follow_source))
+pub fn follow_row(source: &[S], n: &p::Node, r: &p::Row) -> Option<Change> {
+    p::sources(r).into_iter().find_map(|name| text_pane::reference_target(source, &n.path, &name).map(Change::FollowSource))
 }
 
-pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(p::Row, Vec<i64>)>, ev: &insp::FlowChange) -> Option<change> {
+pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(p::Row, Vec<i64>)>, ev: &insp::FlowChange) -> Option<Change> {
     match ev {
         insp::FlowChange::Follow(path) => arg_row(path).and_then(|(r, sub)| {
             let mut expr = r.expr.clone();
@@ -700,12 +700,12 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
                 if let Some(i) = component {
                     sub2.push(i);
                 }
-                change::Syntax_edit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: sub2, value })
+                Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: sub2, value })
             })
         }),
         insp::FlowChange::Expression(path, text) => arg_row(path).map(|(r, sub)| match expression_text(text) {
-            Ok(value) => change::Syntax_edit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub, value }),
-            Err(message) => change::Declined(message),
+            Ok(value) => Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub, value }),
+            Err(message) => Change::Declined(message),
         }),
         insp::FlowChange::Reset(path) => arg_row(path).and_then(|(r, sub)| {
             // the x on a row that reads a name (a wire, a context symbol such as `t`) writes what
@@ -723,7 +723,7 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
             } else {
                 r.ty.as_ref().and_then(|ty| fe::default_for(ty, &r.label, None))
             };
-            Some(change::Syntax_edit(fe::Op::Disconnect { node: n.path.clone(), key: r.key.clone(), fallback }))
+            Some(Change::SyntaxEdit(fe::Op::Disconnect { node: n.path.clone(), key: r.key.clone(), fallback }))
         }),
         _ => None,
     }
@@ -760,7 +760,7 @@ pub fn iteration_picks(ui: &mut Ui, footer: &probe::Footer, chain: &[Path], prob
             for k in 0..iterations.len().min(64) {
                 let label = format!("{}{}  {}", if k as i64 == current { "\u{25ba} " } else { "  " }, k + 1, iterations[k]);
                 if ui.inspector_button(&format!("ws-iter-{k}"), &label) {
-                    picks.push(ScopeChange::Probe_set { zone: z.clone(), index: k as i64 });
+                    picks.push(ScopeChange::ProbeSet { zone: z.clone(), index: k as i64 });
                 }
             }
             picks
@@ -771,12 +771,12 @@ pub fn iteration_picks(ui: &mut Ui, footer: &probe::Footer, chain: &[Path], prob
 
 /// The note above the binding in the Lisp: one line here, typing is one history entry; the last
 /// section, closed.
-pub fn note_section(ui: &mut Ui, width: f64, n: &p::Node) -> Vec<change> {
+pub fn note_section(ui: &mut Ui, width: f64, n: &p::Node) -> Vec<Change> {
     if n.synthetic || p::anonymous(n) {
         return Vec::new();
     }
     let current = n.note.clone().unwrap_or_default();
-    let mut out: Vec<change> = Vec::new();
+    let mut out: Vec<Change> = Vec::new();
     ui.inspector_section("ws-note-section", false, None, "Note", &mut |ui| {
         if current.contains('\n') {
             ui.inspector_message("ws-note-lines", "A note of several lines is edited in the text pane.");
@@ -789,7 +789,7 @@ pub fn note_section(ui: &mut Ui, width: f64, n: &p::Node) -> Vec<change> {
             text = ui.value_field((cx, cy), cw, 20.0, &o, &|_| true, "ws-note-field", &current).0;
         });
         if text != current {
-            out.push(change::Syntax_edit(fe::Op::SetNote { node: n.path.clone(), text }));
+            out.push(Change::SyntaxEdit(fe::Op::SetNote { node: n.path.clone(), text }));
         }
     });
     out
@@ -852,7 +852,7 @@ fn is_literal(e: &S) -> bool {
 }
 
 /// The layout switch of a node, when it is one: the names of its layouts and the active index.
-pub type Layout_names = Option<(Vec<String>, i64)>;
+pub type LayoutNames = Option<(Vec<String>, i64)>;
 
 /// What a drag of a splitter gives: the size to write.
 pub type Resized<'a> = &'a dyn Fn(&[Symbol], pxui_shell::layout::Way) -> Option<le::Size>;
@@ -873,9 +873,9 @@ pub fn field_edits<'a>(
     n: &p::Node,
     resized: Resized,
     graph: &str,
-    layout_names: &Layout_names,
+    layout_names: &LayoutNames,
     rows: &[insp::FlowRow],
-) -> Vec<change> {
+) -> Vec<Change> {
     if rows.is_empty() {
         return Vec::new();
     }
@@ -903,7 +903,7 @@ pub fn field_edits<'a>(
             if nm == "@layout" {
                 if let Some((names, _)) = layout_names {
                     if let Some(index) = names.iter().position(|x| x == chosen) {
-                        out.push(change::Layout_edit(le::Op::SetLayout { graph: graph.to_owned(), index: index as i64 }));
+                        out.push(Change::LayoutEdit(le::Op::SetLayout { graph: graph.to_owned(), index: index as i64 }));
                     }
                 }
                 continue;
@@ -916,7 +916,7 @@ pub fn field_edits<'a>(
                         pxui_shell::layout::Way::First => le::Size::First(240),
                         pxui_shell::layout::Way::Second => le::Size::Second(240),
                     });
-                    out.push(change::Layout_edit(le::Op::SetLayoutSize { node: n.path.clone(), size }));
+                    out.push(Change::LayoutEdit(le::Op::SetLayoutSize { node: n.path.clone(), size }));
                 }
                 continue;
             }
@@ -941,13 +941,13 @@ pub fn field_edits<'a>(
                     match edited {
                         Value::Choice(c) if c == "new material" => {
                             let (mname, make) = new_material(value);
-                            out.push(change::Syntax_batch(
+                            out.push(Change::SyntaxBatch(
                                 "New material".to_owned(),
                                 vec![make, fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: vec![], value: ref_form(&mname) }],
                             ));
                         }
                         Value::Choice(c) if c != "(none)" && !c.is_empty() => {
-                            out.push(change::Syntax_edit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: vec![], value: ref_form(c) }));
+                            out.push(Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: vec![], value: ref_form(c) }));
                         }
                         _ => {}
                     }
@@ -974,14 +974,14 @@ pub fn field_edits<'a>(
                             let id = builder.push_draft(0, s::Draft::Vec(items), Default::default(), None);
                             builder.freeze().handle(id)
                         };
-                        out.push(change::Syntax_edit(fe::Op::SetArg { node: n.path.clone(), key: ArgKey::Kw(parameter.path.clone()), sub: vec![], value: syntax }));
+                        out.push(Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: ArgKey::Kw(parameter.path.clone()), sub: vec![], value: syntax }));
                         break;
                     }
                 }
             }
             insp::FlowChange::Pinned(path, want) => {
                 if let Some(r) = row_of(path) {
-                    out.push(change::Pin_row { node: n.path.clone(), label: r.label.clone(), pin: if *want == p::row_shown(None, &r) { None } else { Some(*want) } });
+                    out.push(Change::PinRow { node: n.path.clone(), label: r.label.clone(), pin: if *want == p::row_shown(None, &r) { None } else { Some(*want) } });
                 }
             }
             insp::FlowChange::Expression(path, text) => {
@@ -993,16 +993,16 @@ pub fn field_edits<'a>(
                     None => (path.clone(), vec![]),
                 };
                 match expression_text(text) {
-                    Ok(v) => out.push(change::Syntax_edit(fe::Op::SetArg { node: n.path.clone(), key: ArgKey::Kw(key), sub, value: v })),
-                    Err(message) => out.push(change::Declined(message)),
+                    Ok(v) => out.push(Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: ArgKey::Kw(key), sub, value: v })),
+                    Err(message) => out.push(Change::Declined(message)),
                 }
             }
             insp::FlowChange::Reset(path) => {
                 if let Some((r, _)) = ref_rows.iter().find(|(r, _)| format!("@ref:{}", r.label) == *path) {
-                    out.push(change::Syntax_edit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: vec![], value: sym("nil") }));
+                    out.push(Change::SyntaxEdit(fe::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub: vec![], value: sym("nil") }));
                 } else {
                     let key = path.split('.').next().unwrap_or("").to_owned();
-                    out.push(change::Syntax_edit(fe::Op::Disconnect { node: n.path.clone(), key: ArgKey::Kw(key), fallback: None }));
+                    out.push(Change::SyntaxEdit(fe::Op::Disconnect { node: n.path.clone(), key: ArgKey::Kw(key), fallback: None }));
                 }
             }
         }
@@ -1066,9 +1066,9 @@ pub fn operator_rows(n: &p::Node, pin_of: &dyn Fn(&p::Row) -> Option<bool>, size
 }
 
 /// A switch's layouts and a split's size, as choice rows.
-pub fn layout_and_size_rows(value: &Model, n: &p::Node) -> (Layout_names, Option<insp::FlowRow>, [&'static str; 3], Option<insp::FlowRow>) {
+pub fn layout_and_size_rows(value: &Model, n: &p::Node) -> (LayoutNames, Option<insp::FlowRow>, [&'static str; 3], Option<insp::FlowRow>) {
     // a switch's :active is a choice among its layouts, named from their panels
-    let layout_names: Layout_names = match (n.head.as_str(), &value.doc.shell) {
+    let layout_names: LayoutNames = match (n.head.as_str(), &value.doc.shell) {
         ("ui/switch", Some(sh)) => match &sh.switch {
             Some(sw) if sw.layouts.len() == n.rows.iter().filter(|r| matches!(r.key, ArgKey::Pos(_)) && r.kind != p::RowKind::Add).count() => {
                 Some((editor_core::panels::labels(&sw.layouts), sw.active))
@@ -1096,7 +1096,7 @@ pub fn layout_and_size_rows(value: &Model, n: &p::Node) -> (Layout_names, Option
     // a split is sized by ratio or with one side fixed: the choice converts it, keeping the sizes
     // it shows (flow.md 11.11)
     let size_names = ["By ratio", "First side fixed", "Second side fixed"];
-    let size_row = if n.head != "ui/split" && n.head != "ui/split-at" {
+    let size_row = if n.head != "ui/split" && n.head != "ui/split_at" {
         None
     } else {
         let given = |key: &str| n.rows.iter().any(|r| r.key == ArgKey::Kw(key.to_owned()) && r.expr.is_some());
@@ -1223,7 +1223,7 @@ pub fn zone_says(ui: &mut Ui, width: f64, zone_text: &Option<(&'static str, fn(&
 }
 
 /// A graph input: its type, and its default as one Lisp form.
-pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, path: &[Symbol]) -> (Vec<change>, Vec<ScopeChange>) {
+pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, path: &[Symbol]) -> (Vec<Change>, Vec<ScopeChange>) {
     let Some(input) = scope.inputs.iter().find(|i| i.path == path) else { return (vec![], vec![]) };
     ui.inspector_header("ws-input", Some("input"), None, None, None, &[], None, false, &input.name, &ty::to_string(&input.ty));
     let shown = input.default.as_ref().map(lisp::flat).unwrap_or_default();
@@ -1251,24 +1251,24 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, p
         return (vec![], vec![]);
     }
     match s::parse(&text) {
-        Ok(mut v) if v.len() == 1 => (vec![change::Syntax_edit(fe::Op::SetInputDefault { form: graph.to_owned(), input: input.name.clone(), value: v.remove(0) })], vec![]),
+        Ok(mut v) if v.len() == 1 => (vec![Change::SyntaxEdit(fe::Op::SetInputDefault { form: graph.to_owned(), input: input.name.clone(), value: v.remove(0) })], vec![]),
         Ok(v) if v.is_empty() => (vec![], vec![]),
-        Ok(_) => (vec![change::Declined("A default is one Lisp form".to_owned())], vec![]),
-        Err(d) => (vec![change::Declined(format!("Default: {}", d.message))], vec![]),
+        Ok(_) => (vec![Change::Declined("A default is one Lisp form".to_owned())], vec![]),
+        Err(d) => (vec![Change::Declined(format!("Default: {}", d.message))], vec![]),
     }
 }
 
 /// An expression chip clicked on a card: the row is the subject.
-pub fn expression_inspector(ui: &mut Ui, width: f64, value: &Model, holder: &p::Node, r: &p::Row) -> (Vec<change>, Vec<ScopeChange>) {
+pub fn expression_inspector(ui: &mut Ui, width: f64, value: &Model, holder: &p::Node, r: &p::Row) -> (Vec<Change>, Vec<ScopeChange>) {
     let e = r.expr.clone().expect("expression row");
     let op = s::head(&e).unwrap_or_default().to_owned();
     ui.inspector_header("ws-header", Some(&op), None, None, None, &[], None, false, &format!("{} \u{b7} {}", p::title(holder), r.label), &lisp::flat(&e));
     let entries = sub_entries(true, r);
-    let mut requests: Vec<change> = Vec::new();
+    let mut requests: Vec<Change> = Vec::new();
     let source: &[S] = &value.doc.workspace.ws.source;
     ui.inspector_body(&mut |ui| {
         if ui.inspector_button(&format!("ws-unfold-{}", r.label), &format!("Unfold {}", r.label)) {
-            requests.push(change::Syntax_edit(fe::Op::Unfold { node: holder.path.clone(), key: r.key.clone(), sub: vec![] }));
+            requests.push(Change::SyntaxEdit(fe::Op::Unfold { node: holder.path.clone(), key: r.key.clone(), sub: vec![] }));
         }
         if !entries.is_empty() {
             let opts = insp::FlowOpts { width: Some(width), kind_label: Some(kind_label(&op)), ..Default::default() };
@@ -1286,12 +1286,12 @@ pub fn expression_inspector(ui: &mut Ui, width: f64, value: &Model, holder: &p::
 }
 
 /// What the Inspector hands back for a frame: graph requests and the probe moves.
-pub type Inspected = (Vec<change>, Vec<ScopeChange>);
+pub type Inspected = (Vec<Change>, Vec<ScopeChange>);
 
 /// The optional arguments of `workspace_inspector`.
 pub struct InspectorOpts<'a> {
     pub image: &'a dyn Fn(i64) -> Option<rays::image::Image>,
-    pub laid: Option<scope_key>,
+    pub laid: Option<ScopeKey>,
     pub window: bool,
     pub on_choice: Option<&'a dyn Fn(&str, &UiBox)>,
     pub resized: Resized<'a>,
@@ -1471,7 +1471,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, p
     );
     let pressed = head.chosen.map(|i| buttons[i as usize].1.clone());
     // Reset all: every written argument of the node removed, one undoable entry
-    let reset_all: Vec<change> = if !head.reset_pressed {
+    let reset_all: Vec<Change> = if !head.reset_pressed {
         vec![]
     } else {
         let ops: Vec<fe::Op> = parameters
@@ -1481,53 +1481,53 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, p
             .collect();
         match ops.len() {
             0 => vec![],
-            1 => vec![change::Syntax_edit(ops.into_iter().next().unwrap())],
-            _ => vec![change::Syntax_batch("Reset all".to_owned(), ops)],
+            1 => vec![Change::SyntaxEdit(ops.into_iter().next().unwrap())],
+            _ => vec![Change::SyntaxBatch("Reset all".to_owned(), ops)],
         }
     };
     // the name: editing it is the pane's Rename (the text's binding name); a nested node has no
     // name yet, giving it one binds it
-    let rename_edit: Vec<change> = if n.synthetic || head.renamed == p::title(&n) {
+    let rename_edit: Vec<Change> = if n.synthetic || head.renamed == p::title(&n) {
         vec![]
     } else {
-        vec![change::Syntax_edit(fe::Op::Rename { node: n.path.clone(), to_: head.renamed.clone() })]
+        vec![Change::SyntaxEdit(fe::Op::Rename { node: n.path.clone(), to_: head.renamed.clone() })]
     };
     let flags: Inspected = match pressed {
-        Some(Pressed::Bypass) => (vec![change::Syntax_edit(fe::Op::ToggleBypass { node: n.path.clone() })], vec![]),
-        Some(Pressed::View) => (vec![], vec![ScopeChange::Display_set(n.path.clone())]),
+        Some(Pressed::Bypass) => (vec![Change::SyntaxEdit(fe::Op::ToggleBypass { node: n.path.clone() })], vec![]),
+        Some(Pressed::View) => (vec![], vec![ScopeChange::DisplaySet(n.path.clone())]),
         Some(Pressed::Enter) => (vec![], vec![ScopeChange::Activated(n.path.clone())]),
         Some(Pressed::Activate(root)) => (
-            vec![change::Syntax_edit(fe::Op::SetArg { node: root, key: ArgKey::Kw("camera".to_owned()), sub: vec![], value: sym(&last_name) })],
+            vec![Change::SyntaxEdit(fe::Op::SetArg { node: root, key: ArgKey::Kw("camera".to_owned()), sub: vec![], value: sym(&last_name) })],
             vec![],
         ),
         None => (vec![], vec![]),
     };
     let mut on_card = 0i64;
-    let mut requests: Vec<change> = Vec::new();
+    let mut requests: Vec<Change> = Vec::new();
     let mut picks: Vec<ScopeChange> = Vec::new();
     ui.inspector_body(&mut |ui| {
         zone_says(ui, width, &zone_text, &n);
         readout_rows(ui, &n, value, &footer, &readouts, width, zone_text.is_some());
-        let hoist: Vec<change> = if footer.invariant && ui.inspector_button("ws-hoist", "Move out of the loop") {
-            vec![change::Syntax_edit(fe::Op::Hoist { node: n.path.clone() })]
+        let hoist: Vec<Change> = if footer.invariant && ui.inspector_button("ws-hoist", "Move out of the loop") {
+            vec![Change::SyntaxEdit(fe::Op::Hoist { node: n.path.clone() })]
         } else {
             vec![]
         };
         // a macro call: what it is, and the request the pane's lens button makes
-        let mut macro_edit: Vec<change> = vec![];
+        let mut macro_edit: Vec<Change> = vec![];
         if let Some(name) = &n.macro_ {
             ui.inspector_message("ws-macro", &format!("Macro {name}: its rows are the holes."));
             if ui.inspector_button("ws-inline", "Replace call with expansion") {
-                macro_edit.push(change::Syntax_edit(fe::Op::InlineMacro { node: n.path.clone() }));
+                macro_edit.push(Change::SyntaxEdit(fe::Op::InlineMacro { node: n.path.clone() }));
             }
         }
         // the items of a list or a string: each can move up a place
-        let mut movers: Vec<change> = vec![];
+        let mut movers: Vec<Change> = vec![];
         if !n.synthetic && p::reorderable(&n) {
             for r in &n.rows {
                 if let ArgKey::Pos(k) = r.key {
                     if k >= 1 && k < 24 && ui.inspector_button(&format!("ws-move-{k}"), &format!("Move item {} up", k + 1)) {
-                        movers.push(change::Syntax_edit(fe::Op::MoveItem { node: n.path.clone(), pos: k }));
+                        movers.push(Change::SyntaxEdit(fe::Op::MoveItem { node: n.path.clone(), pos: k }));
                     }
                 }
             }
@@ -1544,10 +1544,10 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, p
             entries.extend(sub_entries(ir.shown, r));
         }
         // the operator rows' Unfold: the nested call becomes its own binding and card
-        let mut unfold_nested: Vec<change> = vec![];
+        let mut unfold_nested: Vec<Change> = vec![];
         for (r, _) in &op_rows {
             if r.expr.as_ref().map_or(false, operator_call) && ui.inspector_button(&format!("ws-unfold-{}", r.label), &format!("Unfold {}", r.label)) {
-                unfold_nested.push(change::Syntax_edit(fe::Op::Unfold { node: n.path.clone(), key: r.key.clone(), sub: vec![] }));
+                unfold_nested.push(Change::SyntaxEdit(fe::Op::Unfold { node: n.path.clone(), key: r.key.clone(), sub: vec![] }));
             }
         }
         let arg_row = |name: &str| arg_row_in(&entries, name);

@@ -11,7 +11,7 @@ use sop::session;
 
 fn case_text(name: &str) -> String {
     let text = read_case(name);
-    // These are the exact fixture overrides in test_workspace_live.ml.
+    // These are the exact fixture overrides in .
     match name {
         "sunflower" => text.replacen("(seeds : int 240)", "(seeds : int 8)", 1),
         "orrery" => text.replacen("(rings : int 3)", "(rings : int 2)", 1).replacen("(moons : int 8)", "(moons : int 2)", 1),

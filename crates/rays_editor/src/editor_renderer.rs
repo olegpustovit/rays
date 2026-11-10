@@ -1,5 +1,5 @@
 //! Path-traced editor viewports share the renderer settings. ponytail: converted meshes use a 64-entry MRU list with estimated byte charges outside global Lru retreat.
-#![allow(non_camel_case_types)]
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use rays_pathtracer::rays_pathtracer as p;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    Path_traced,
+    PathTraced,
     Raster,
     Wireframe,
 }
@@ -38,7 +38,7 @@ pub fn wire_color(background: &color::T) -> color::T {
 
 pub fn label(mode: Mode) -> &'static str {
     match mode {
-        Mode::Path_traced => "Path traced",
+        Mode::PathTraced => "Path traced",
         Mode::Raster => "Raster",
         Mode::Wireframe => "Wireframe",
     }
@@ -46,7 +46,7 @@ pub fn label(mode: Mode) -> &'static str {
 
 pub fn of_label(label: &str) -> Option<Mode> {
     match label {
-        "Path traced" => Some(Mode::Path_traced),
+        "Path traced" => Some(Mode::PathTraced),
         "Raster" => Some(Mode::Raster),
         "Wireframe" => Some(Mode::Wireframe),
         _ => None,
@@ -54,7 +54,7 @@ pub fn of_label(label: &str) -> Option<Mode> {
 }
 
 #[derive(Clone)]
-pub struct Cached_mesh {
+pub struct CachedMesh {
     pub trace_source: mesh::Mesh,
     pub traced: p::Mesh,
 }
@@ -64,16 +64,16 @@ const MESH_ENTRIES: usize = 64;
 /// The converted source meshes, most recent first, keyed by the mesh (physical identity) and its
 /// material.
 #[derive(Clone)]
-pub struct Mesh_cache {
-    entries: VecDeque<(mesh::Mesh, material::Material, Rc<Cached_mesh>)>,
+pub struct MeshCache {
+    entries: VecDeque<(mesh::Mesh, material::Material, Rc<CachedMesh>)>,
 }
 
-impl Mesh_cache {
-    fn peek(&self, mesh_: &mesh::Mesh, material_: &material::Material) -> Option<Rc<Cached_mesh>> {
+impl MeshCache {
+    fn peek(&self, mesh_: &mesh::Mesh, material_: &material::Material) -> Option<Rc<CachedMesh>> {
         self.entries.iter().find(|(m, mat, _)| mesh::same(m, mesh_) && mat == material_).map(|(_, _, c)| c.clone())
     }
 
-    fn add(&mut self, mesh_: mesh::Mesh, material_: material::Material, cached: Cached_mesh) {
+    fn add(&mut self, mesh_: mesh::Mesh, material_: material::Material, cached: CachedMesh) {
         if let Some(at) = self.entries.iter().position(|(m, mat, _)| mesh::same(m, &mesh_) && *mat == material_) {
             self.entries.remove(at);
         }
@@ -83,13 +83,13 @@ impl Mesh_cache {
         }
     }
 
-    fn head(&self) -> Option<(&material::Material, &Rc<Cached_mesh>)> {
+    fn head(&self) -> Option<(&material::Material, &Rc<CachedMesh>)> {
         self.entries.front().map(|(_, mat, c)| (mat, c))
     }
 }
 
-pub fn empty_meshes() -> Mesh_cache {
-    Mesh_cache { entries: VecDeque::new() }
+pub fn empty_meshes() -> MeshCache {
+    MeshCache { entries: VecDeque::new() }
 }
 
 /// How one viewport renders: the root of its scene instance, else the document's. The sample cap is
@@ -141,7 +141,7 @@ pub struct State {
     pub mode: Mode,
     pub custom: bool,
     pub slots: Vec<Slot>,
-    pub meshes: Mesh_cache,
+    pub meshes: MeshCache,
     pub error: Option<String>,
     pub raster_only: bool,
     pub turn: Option<String>,
@@ -195,11 +195,11 @@ pub fn wire_scene(scene: &d3::Scene3) -> d3::Scene3 {
         &mut |drawing, transforms| {
             let material = material::unlit(wire_color(&walk::ambient(scene)));
             let node = match transforms {
-                None => d3::mesh(Some(material), None, Some(d3::render_mode::Wireframe), Some(d3::cull::Cull_none), None, drawing.mesh.clone()),
+                None => d3::mesh(Some(material), None, Some(d3::RenderMode::Wireframe), Some(d3::Cull::CullNone), None, drawing.mesh.clone()),
                 Some(transforms) => d3::instances_array(
                     Some(material),
-                    Some(d3::render_mode::Wireframe),
-                    Some(d3::cull::Cull_none),
+                    Some(d3::RenderMode::Wireframe),
+                    Some(d3::Cull::CullNone),
                     None,
                     drawing.mesh.clone(),
                     transforms,
@@ -216,8 +216,8 @@ pub fn wire_scene(scene: &d3::Scene3) -> d3::Scene3 {
 /// identity transform, normals of its own): the tracer reads it where the device holds it
 /// (`Rays_pathtracer.mesh`), never converted or cached, so a deforming mesh refits its structure
 /// instead of being read back.
-pub fn device_drawing(scene: &d3::Scene3) -> Option<walk::drawing> {
-    let mut batches: Vec<(walk::drawing, bool)> = Vec::new();
+pub fn device_drawing(scene: &d3::Scene3) -> Option<walk::Drawing> {
+    let mut batches: Vec<(walk::Drawing, bool)> = Vec::new();
     walk::iter_batches(&mut |drawing, transforms| batches.push((drawing.clone(), transforms.is_some())), scene);
     match batches.as_slice() {
         [(drawing, false)]
@@ -233,12 +233,12 @@ pub fn device_drawing(scene: &d3::Scene3) -> Option<walk::drawing> {
 }
 
 
-type Traced = (Mesh_cache, p::Mesh, (mesh::Mesh, p::Material));
+type Traced = (MeshCache, p::Mesh, (mesh::Mesh, p::Material));
 
 /// The cache keeps at most 64 converted source meshes. Placement remains in the tracer's instance
 /// structure, so an orbit does not convert or upload geometry. The scene's mesh and material a new
 /// tracer starts from come with it.
-pub fn traced_scene(meshes: &Mesh_cache, scene: &d3::Scene3) -> Result<Traced, String> {
+pub fn traced_scene(meshes: &MeshCache, scene: &d3::Scene3) -> Result<Traced, String> {
     if let Some(drawing) = device_drawing(scene) {
         let first = (drawing.mesh.clone(), traced_material(&drawing.material));
         let traced = p::mesh(None, None, std::slice::from_ref(&first))?;
@@ -259,7 +259,7 @@ pub fn traced_scene(meshes: &Mesh_cache, scene: &d3::Scene3) -> Result<Traced, S
                         let geometry = rdk_rays::rays_mesh::of_mesh(&drawing.mesh).map_err(|e| rdk_rays::geometry_view::error_string(&e))?;
                         let trace_mesh = rdk_rays::rays_mesh::to_trace_mesh(&geometry).map_err(|e| rdk_rays::geometry_view::error_string(&e))?;
                         let traced = p::mesh(None, None, &[(trace_mesh.clone(), traced_material(&drawing.material))])?;
-                        let cached = Cached_mesh { trace_source: trace_mesh, traced };
+                        let cached = CachedMesh { trace_source: trace_mesh, traced };
                         cache.add(drawing.mesh.clone(), drawing.material.clone(), cached.clone());
                         Rc::new(cached)
                     }
@@ -287,7 +287,7 @@ pub fn traced_scene(meshes: &Mesh_cache, scene: &d3::Scene3) -> Result<Traced, S
 /// Viewports asking for the same traced picture share one tracer: the same scene, camera, film and
 /// setting.
 pub fn shares(a: &View, b: &View) -> bool {
-    a.setting.mode == Mode::Path_traced && a.setting == b.setting && d3::same(&a.scene, &b.scene) && a.film == b.film && a.camera == b.camera
+    a.setting.mode == Mode::PathTraced && a.setting == b.setting && d3::same(&a.scene, &b.scene) && a.film == b.film && a.camera == b.camera
 }
 
 /// The groups of viewports that share a tracer, the focused one first so it keeps the slot it had.
@@ -382,7 +382,7 @@ pub fn update(state: &State, mode: Mode, custom: bool, focus: Option<&str>, view
             claimed.push(i);
         }
         let cap = group.iter().fold(1, |cap, v| cap.max(v.cap));
-        let wants = view.setting.mode == Mode::Path_traced
+        let wants = view.setting.mode == Mode::PathTraced
             && match previous.map(|i| &state.slots[i]) {
                 Some(Slot { tracer: Some(tracer), scene, camera, film, .. }) => {
                     !d3::same(scene, &view.scene) || camera.as_ref() != Some(&view.camera) || *film != view.film || p::samples(&tracer.borrow()) < cap
@@ -422,7 +422,7 @@ pub fn update(state: &State, mode: Mode, custom: bool, focus: Option<&str>, view
     }
 }
 
-fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut Mesh_cache) -> Slot {
+fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut MeshCache) -> Slot {
     let view = &plan.view;
     let previous: Option<&Slot> = plan.previous.map(|i| &state.slots[i]);
     let setting = view.setting;
@@ -451,7 +451,7 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut Mesh_cache) 
         },
         // at its cap with nothing changed (the focused one too), or not this frame's turn: the
         // picture it had stays
-        Mode::Path_traced if !plan.wants || !(plan.focused || is_chosen) => match previous {
+        Mode::PathTraced if !plan.wants || !(plan.focused || is_chosen) => match previous {
             Some(slot) => {
                 let mut slot = Slot { keys: plan.names.clone(), cap: plan.limit, ..slot.clone() };
                 if let (Some(tracer), false) = (&slot.tracer, plan.wants) {
@@ -463,7 +463,7 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut Mesh_cache) 
             }
             None => blank,
         },
-        Mode::Path_traced => {
+        Mode::PathTraced => {
             let prior: Slot = previous.cloned().unwrap_or_else(|| blank.clone());
             if (!d3::same(&prior.scene, scene) || prior.tracer.is_none()) && no_batches(scene) {
                 return Slot { scene: scene.clone(), ..blank };
@@ -562,7 +562,7 @@ pub fn info(state: &State, key: &str) -> Option<Info> {
     }
 }
 
-pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &camera::Camera, scene_: &d3::Scene3) -> Vec<scene::node> {
+pub fn paint(state: &State, key: &str, bounds: (i64, i64, i64, i64), camera: &camera::Camera, scene_: &d3::Scene3) -> Vec<scene::Node> {
     let raster = || vec![scene::view3d(Some(bounds), camera, scene_.clone())];
     if state.custom || state.raster_only {
         return raster();

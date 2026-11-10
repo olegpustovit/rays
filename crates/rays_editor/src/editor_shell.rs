@@ -1,5 +1,5 @@
 //! Shell helpers return updated owned models for layouts, panel state, geometry and inspectors.
-#![allow(non_camel_case_types)]
+
 use flow_syntax::symbol::Symbol;
 use std::borrow::Cow;
 use editor_core::panels::{self, Panel};
@@ -57,7 +57,7 @@ pub fn completion_names(value: &EditorModel) -> lisp_text::Names {
 
 /// The tree drawn now: the editor graph's (the host's when the document has none, or after
 /// "Restore layout"), with the split being dragged at its live ratio.
-pub fn shell_tree<'a>(value: &'a EditorModel, shell: &'a shell) -> Cow<'a, panels::Panels> {
+pub fn shell_tree<'a>(value: &'a EditorModel, shell: &'a Shell) -> Cow<'a, panels::Panels> {
     let base = match &value.doc.shell {
         Some(s) if !shell.restored => &s.tree,
         _ => &shell.tree,
@@ -68,7 +68,7 @@ pub fn shell_tree<'a>(value: &'a EditorModel, shell: &'a shell) -> Cow<'a, panel
     }
 }
 
-pub fn visible(shell: &shell, panel: &Panel) -> bool {
+pub fn visible(shell: &Shell, panel: &Panel) -> bool {
     !shell.hidden.contains(panel)
 }
 
@@ -147,7 +147,7 @@ pub fn panel_state<'a>(value: &ModelView<'a>, path: &[usize]) -> panels::State {
 }
 
 /// An edit that changes the editor graph's tree ends "Restore layout".
-pub fn unrestore(before: &Document, after: &Document, mut shell: shell) -> shell {
+pub fn unrestore(before: &Document, after: &Document, mut shell: Shell) -> Shell {
     fn tree(doc: &Document) -> Option<&panels::Panels> { doc.shell.as_ref().map(|s| &s.tree) }
     if tree(before) != tree(after) {
         shell.restored = false;
@@ -157,7 +157,7 @@ pub fn unrestore(before: &Document, after: &Document, mut shell: shell) -> shell
 }
 
 /// the host bar above the panels: a document with an editor graph has one
-pub fn shell_hidden<'a>(value: &ModelView<'a>, shell: &shell) -> Vec<Panel> {
+pub fn shell_hidden<'a>(value: &ModelView<'a>, shell: &Shell) -> Vec<Panel> {
     if shell.restored {
         shell.hidden.clone()
     } else if panel_state(value, &[HOST_BAR]).collapsed && !panels::each_leaf(&shell_tree(value, shell), &mut |_, p| *p == Panel::Timeline) {
@@ -174,12 +174,12 @@ struct GeoKey {
     shell_doc: Option<std::sync::Arc<editor_document::document::Shell>>,
     states: std::collections::BTreeMap<flow_check::workspace::Path, panels::State>,
     graph: String,
-    workspace: shell,
+    workspace: Shell,
 }
 
 thread_local! { static GEOMETRY: std::cell::RefCell<Option<(GeoKey, std::rc::Rc<layout::Geometry>)>> = const { std::cell::RefCell::new(None) }; }
 
-pub fn geometry<'a>(value: &ModelView<'a>, shell: &shell, frame: &frame::Frame) -> std::rc::Rc<layout::Geometry> {
+pub fn geometry<'a>(value: &ModelView<'a>, shell: &Shell, frame: &frame::Frame) -> std::rc::Rc<layout::Geometry> {
     let ws = &value.doc.workspace.ws;
     let graph = workspace_doc::editor_graph_ref(ws).map_or("@default", |g| g.name.as_str());
     let hit = GEOMETRY.with(|cache| cache.borrow().as_ref().and_then(|(k, g)| {
@@ -259,7 +259,7 @@ pub fn view_visible<'a>(value: &ModelView<'a>) -> bool {
 thread_local! { static LEAVES: std::cell::RefCell<Option<(panels::Panels, std::rc::Rc<Vec<(layout::Path, Panel)>>)>> = const { std::cell::RefCell::new(None) }; }
 
 /// `panels::leaves` of the tree shown, kept while the tree is the same: a frame reads it many times.
-pub fn shell_leaves(value: &EditorModel, shell: &shell) -> std::rc::Rc<Vec<(layout::Path, Panel)>> {
+pub fn shell_leaves(value: &EditorModel, shell: &Shell) -> std::rc::Rc<Vec<(layout::Path, Panel)>> {
     let tree = shell_tree(value, shell);
     if let Some(found) = LEAVES.with(|cache| cache.borrow().as_ref().filter(|(seen, _)| *seen == *tree).map(|(_, leaves)| leaves.clone())) {
         return found;
@@ -299,16 +299,16 @@ pub fn graph_path_known<'a>(value: &ModelView<'a>) -> Option<&'a layout::Path> {
 }
 
 /// What a graph leaf's own keywords open it with: its `:view`, else the canvas when it pins a graph.
-pub fn start_views(doc: &Document, level: Level, path: &[usize]) -> Level_map {
+pub fn start_views(doc: &Document, level: Level, path: &[usize]) -> LevelMap {
     match &doc.shell {
         None => level_map_empty(),
         Some(s) => match s.start.graph_views.iter().find(|(p, _)| p == path).map(|(_, v)| v.as_str()) {
-            Some("list") => level_map_singleton(level, projection::List_view),
-            Some("text") => level_map_singleton(level, projection::Text_view),
-            Some(_) => level_map_singleton(level, projection::Graph_view),
+            Some("list") => level_map_singleton(level, Projection::ListView),
+            Some("text") => level_map_singleton(level, Projection::TextView),
+            Some(_) => level_map_singleton(level, Projection::GraphView),
             None => {
                 if s.named.iter().any(|(p, _)| p == path) {
-                    level_map_singleton(level, projection::Graph_view)
+                    level_map_singleton(level, Projection::GraphView)
                 } else {
                     level_map_empty()
                 }
@@ -317,12 +317,12 @@ pub fn start_views(doc: &Document, level: Level, path: &[usize]) -> Level_map {
     }
 }
 
-fn new_pane(doc: &Document, at: Level, path: &[usize]) -> graph_pane {
-    graph_pane { view: scope::create(None, None), laid: None, shown: None, route: Vec::new(), views: start_views(doc, at, path), at, picked: selection::empty() }
+fn new_pane(doc: &Document, at: Level, path: &[usize]) -> GraphPane {
+    GraphPane { view: scope::create(None, None), laid: None, shown: None, route: Vec::new(), views: start_views(doc, at, path), at, picked: selection::empty() }
 }
 
 /// The pane's graph state, borrowed unless it is new or its level disappeared.
-pub fn pane_at<'a>(value: &ModelView<'a>, (key, path): (&flow_check::workspace::Path, &layout::Path)) -> Cow<'a, graph_pane> {
+pub fn pane_at<'a>(value: &ModelView<'a>, (key, path): (&flow_check::workspace::Path, &layout::Path)) -> Cow<'a, GraphPane> {
     if value.key == Some(key) { return Cow::Borrowed(value.pane); }
     let mut pane = match panel_map::find(&value.model.panes, key) {
         Some(pane) => Cow::Borrowed(pane),

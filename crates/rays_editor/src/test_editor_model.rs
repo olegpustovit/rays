@@ -16,7 +16,7 @@ use crate::editor_history as history;
 use crate::editor_host;
 use crate::editor_list;
 use crate::editor_model::*;
-use crate::editor_setup::{self, create_opts};
+use crate::editor_setup::{self, CreateOpts};
 use crate::editor_shell;
 use crate::editor_status;
 use crate::editor_text;
@@ -32,13 +32,13 @@ fn workspace(text: &str) -> workspace_doc::T {
 }
 
 fn model() -> EditorModel {
-    let opts = create_opts {
+    let opts = CreateOpts {
         // no preferences file and no state folder of the user's: a unique temp name
         preferences: Some(std::env::temp_dir().join("rays-editor-test-no-preferences.rays").to_string_lossy().to_string()),
         presets: Some(std::env::temp_dir().join("rays-editor-test-presets").to_string_lossy().to_string()),
         ui_text_size: 11,
         await_: Some(true),
-        ..create_opts::default()
+        ..CreateOpts::default()
     };
     editor_setup::create(opts, &workspace(TEXT), Rc::new(cook::prepare)).expect("model")
 }
@@ -77,12 +77,12 @@ fn creation_shell_list_status() {
 
     // the list: the scene level lists objects with the visible and render columns
     let (source, rows) = editor_list::rows(&(&value).into());
-    assert!(matches!(source, row_source::Objects(_)));
+    assert!(matches!(source, RowSource::Objects(_)));
     let (shown, columns) = rows();
     assert_eq!(columns, vec!["v".to_string(), "r".to_string()]);
     assert!(!shown.is_empty());
     // a select intent folds into the selection; a rename of a hosted object folds into the graph
-    let state = editor_list::tree_state {
+    let state = editor_list::TreeState {
         document: crate::editor_inspect::objects(&(&value).into()).into_owned(),
         selection: selection::clear(),
         tree: tree::create(),
@@ -153,7 +153,7 @@ fn text_applies_body() {
     let diagnostics = text_pane_errors("(workspace");
     let mut failed = value.clone();
     editor_host::reload_failed(&mut failed, "w.rays", "(workspace", &diagnostics);
-    assert!(failed.notice.as_ref().is_some_and(|(k, s)| *k == notice_kind::Refusal && s.starts_with("w.rays not reloaded")));
+    assert!(failed.notice.as_ref().is_some_and(|(k, s)| *k == NoticeKind::Refusal && s.starts_with("w.rays not reloaded")));
     assert_eq!(failed.text.tab, text_pane::Tab::Document);
     assert_eq!(failed.text.draft.as_deref(), Some("(workspace"));
     editor_host::close(&value);
@@ -175,16 +175,16 @@ fn host_entry_points_and_carry_letters() {
     let value = model();
     assert!(!editor_host::carrying(&value));
     assert!(editor_host::carry_viewport(&value).is_none());
-    assert_eq!(editor_carry::carry_letters.len(), 9);
-    assert!(editor_carry::carry_allowed(&crate::editor_commands::action::Enter));
-    assert!(!editor_carry::carry_allowed(&crate::editor_commands::action::Undo));
+    assert_eq!(editor_carry::CARRY_LETTERS.len(), 9);
+    assert!(editor_carry::carry_allowed(&crate::editor_commands::Action::Enter));
+    assert!(!editor_carry::carry_allowed(&crate::editor_commands::Action::Undo));
     // nothing selected and no graph open: there is nothing to pick up, and the message says so
     let error = editor_carry::carry_payload(&(&value).into()).err().unwrap_or_default();
     assert!(error.starts_with("Nothing to pick up"), "{error}");
     // the scene edit of the host leaves no undo entry (`Amend` folds into the present)
     let scene = document::scene_graph(&value.doc);
     let mut amended = value.clone();
-    editor_host::scene_edit(&mut amended, editor_host::scene_mode::Amend, None, scene.clone());
+    editor_host::scene_edit(&mut amended, editor_host::SceneMode::Amend, None, scene.clone());
     assert_eq!(history::depth(&amended.history), history::depth(&value.history));
     // a settings write of the same values is a no-op
     let mut same = value.clone();
@@ -194,4 +194,36 @@ fn host_entry_points_and_carry_letters() {
     assert!(editor_host::placed_pieces(false, None, &value).is_empty());
     assert!(editor_host::world_id(&value).is_none());
     editor_host::close(&value);
+}
+
+#[test]
+fn single_draw_default_canvas_has_editable_layout() {
+    let ws = workspace("(workspace canvas (graph picture :context draw (draw/background \"#223344\")))");
+    let value = editor_setup::create(CreateOpts { await_: Some(true), ..Default::default() }, &ws, Rc::new(cook::prepare)).unwrap();
+    assert!(value.doc.shell.is_none(), "the default canvas must not insert authored text");
+    assert_eq!(value.focus, Panel::Canvas("picture".into()));
+    let shown = editor_shell::shell_tree(&value, &value.workspace);
+    assert_eq!(*shown, panels::Panels::Leaf(Panel::Canvas("picture".into())));
+    let (_, changes) = crate::editor_panels::layout_intents(&(&value).into(), &value.workspace, &[pxui_shell::chrome::Intent::SplitPanel(vec![], panels::Axis::H)]);
+    assert_eq!(changes.len(), 2, "the first gesture materializes then edits the layout");
+    let mut doc = (*value.doc).clone();
+    for change in changes {
+        doc = match change {
+            Change::SyntaxEdit(op) => editor_document::document_edit::syntax_edit(Some(&value.factories), &doc, &op).unwrap(),
+            Change::LayoutEdit(op) => editor_document::document_edit::layout_op(Some(&value.factories), &doc, &op).unwrap(),
+            _ => panic!("unexpected layout change"),
+        };
+    }
+    let shell = doc.shell.as_ref().expect("gesture writes the editor graph");
+    assert_eq!(panels::leaves(&shell.tree).len(), 2);
+    assert!(panels::leaves(&shell.tree).iter().any(|(_, panel)| matches!(panel, Panel::Canvas(_))));
+    assert_eq!(shell.canvases.len(), 1, "the split keeps the original drawing value");
+    editor_host::close(&value);
+    let live = crate::editor::create(crate::editor::Create { await_: Some(true), ..Default::default() }, &ws, None, crate::editor::prepare_fn(), crate::editor::draw_fn()).unwrap();
+    let at = rays::frame::Frame { input: input::Frame { size: (640, 360), ..input::at_time(0.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+    let live = crate::editor::update(live, &at);
+    let pictures = crate::editor::private::canvas_scenes(&live);
+    assert_eq!(pictures.len(), 1);
+    assert!(!pictures[0].is_empty(), "the implicit canvas resolves and draws its graph");
+    crate::editor::close(&live);
 }

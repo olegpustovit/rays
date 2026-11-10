@@ -1,4 +1,4 @@
-//! test_image_sop.ml: the mixed image SOP `attr_from_image`.
+//! : the mixed image SOP `attr_from_image`.
 #![allow(dead_code, unused_imports)]
 use std::sync::Arc;
 

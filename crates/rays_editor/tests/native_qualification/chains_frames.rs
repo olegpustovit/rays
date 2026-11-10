@@ -22,7 +22,7 @@ fn scene(g:&g::T,gpu:Option<&wg::WorkspaceGpu>)->rays::scene3::Scene3 {
     let surface=surface::of_geometry(None,g).unwrap();
     match gpu {Some(gpu)=>surface::scene3(None,Some(&|g|binding(gpu,g)),&surface).unwrap(),None=>surface::scene3(None,None,&surface).unwrap()}
 }
-fn picture(canvas:&rays::canvas::Canvas,camera:&rays::camera::Camera,g:&g::T,gpu:Option<&wg::WorkspaceGpu>,world:Option<&rays::world::baked>)->(Vec<u8>,std::time::Duration) {
+fn picture(canvas:&rays::canvas::Canvas,camera:&rays::camera::Camera,g:&g::T,gpu:Option<&wg::WorkspaceGpu>,world:Option<&rays::world::Baked>)->(Vec<u8>,std::time::Duration) {
     let start=std::time::Instant::now();let scene=scene(g,gpu); let scene=world.map(|w|rays::scene3::with_world(w.clone(),&scene)).unwrap_or(scene);
     rays::canvas::render(None,canvas,&[rays::scene::clear(color::black()),rays::scene::view3d(None,camera,scene)]).unwrap();
     let elapsed=start.elapsed();(rays::canvas::pixels(canvas).unwrap().into_iter().flat_map(|c|[c.r as u8,c.g as u8,c.b as u8,c.a as u8]).collect(),elapsed)
@@ -74,7 +74,7 @@ pub(super) fn run(index: usize) {
             let dispatch=Arc::new(AtomicUsize::new(0));let config=counted(config,&dispatch);let mut device=Animation::new(&text,Some(config));
             let canvas=rays::canvas::create(256,256).unwrap();let host_canvas=rays::canvas::create(256,256).unwrap();
             let camera=rays::camera::perspective(None,None,None,vec3::create(0.4,2.2,1.3),vec3::create(0.,1.,0.)).unwrap();
-            let world=if triangles {let mut w=rays::world::bake(Some(1),None,64,32,&rays::world::default()).unwrap();w.sun=Some(rays::world::sun {direction:vec3::normalize(vec3::create(0.3,1.,0.2)),radiance:rays::world::rgb(4.,4.,4.),angular_radius:0.01});Some(w)}else{None};
+            let world=if triangles {let mut w=rays::world::bake(Some(1),None,64,32,&rays::world::default()).unwrap();w.sun=Some(rays::world::Sun {direction:vec3::normalize(vec3::create(0.3,1.,0.2)),radiance:rays::world::rgb(4.,4.,4.),angular_radius:0.01});Some(w)}else{None};
             let mut device_tracer=None;let mut host_tracer=None;
             let mut gpu_times=Vec::new();let mut cpu_times=Vec::new();let mut display_times=Vec::new();let mut host_times=Vec::new();let mut trace_times=Vec::new();let mut host_trace_times=Vec::new();
             for frame in 0..8 {

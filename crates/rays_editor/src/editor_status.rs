@@ -1,5 +1,5 @@
 //! The status strip: the line it says, the open dialog's name for a crash report, the probe
-//! caption. #![allow(non_camel_case_types)]
+//! caption.
 use flow_syntax::symbol::Symbol;
 use editor_core::guide_context;
 use editor_core::keymap;
@@ -26,17 +26,17 @@ use crate::timeline;
 pub fn prompt_name(value: &EditorModel) -> &'static str {
     match &value.prompt {
         None => "-",
-        Some(prompt::Keys) => "keys",
-        Some(prompt::Saving(_)) => "save preset",
-        Some(prompt::Palette(_)) => "commands",
-        Some(prompt::Jumping(_)) => "jump",
-        Some(prompt::Symbols(_)) => "go to symbol",
-        Some(prompt::Referencing(..)) => "references",
-        Some(prompt::Going(_)) => "go to line",
-        Some(prompt::Picking { .. }) => "panel kind",
-        Some(prompt::Splitting { .. }) => "split",
-        Some(prompt::Browsing { .. }) => "presets",
-        Some(prompt::Making_macro { .. }) => "make macro",
+        Some(Prompt::Keys) => "keys",
+        Some(Prompt::Saving(_)) => "save preset",
+        Some(Prompt::Palette(_)) => "commands",
+        Some(Prompt::Jumping(_)) => "jump",
+        Some(Prompt::Symbols(_)) => "go to symbol",
+        Some(Prompt::Referencing(..)) => "references",
+        Some(Prompt::Going(_)) => "go to line",
+        Some(Prompt::Picking { .. }) => "panel kind",
+        Some(Prompt::Splitting { .. }) => "split",
+        Some(Prompt::Browsing { .. }) => "presets",
+        Some(Prompt::MakingMacro { .. }) => "make macro",
     }
 }
 
@@ -55,16 +55,16 @@ pub fn level_name_at(value: &EditorModel, level: editor_document::document::Leve
 
 /// The strip while a payload is carried: what it is, then (a target hot) what putting it writes in
 /// the words of the text, or why the place refuses it.
-pub fn carry_line(c: &carry) -> String {
+pub fn carry_line(c: &Carry) -> String {
     let held = &c.payload.value;
     let put = match c.via {
         Via::Keys => "Enter",
         Via::Pointer => "release",
     };
     match &c.preview {
-        Some(carry_preview::Showing { what, .. }) => format!("Preview \u{b7} {put} writes {what} \u{b7} Esc drops"),
-        Some(carry_preview::Held_back { what, reason, .. }) => format!("Would write {what} \u{b7} no preview, {reason} \u{b7} {put} writes it"),
-        Some(carry_preview::Refused { reason, .. }) => format!("Refused \u{b7} {reason}"),
+        Some(CarryPreview::Showing { what, .. }) => format!("Preview \u{b7} {put} writes {what} \u{b7} Esc drops"),
+        Some(CarryPreview::HeldBack { what, reason, .. }) => format!("Would write {what} \u{b7} no preview, {reason} \u{b7} {put} writes it"),
+        Some(CarryPreview::Refused { reason, .. }) => format!("Refused \u{b7} {reason}"),
         None => {
             let lead = match &c.hint {
                 Some(hint) => format!("{hint} \u{b7} "),
@@ -89,7 +89,7 @@ pub fn status_text<'a>(value: &ModelView<'a>, brief: bool) -> String {
     }
     let playing = timeline::mode(&value.timeline) == timeline::Mode::Playing;
     let idle = || -> String {
-        let text_error = if stored_projection(value) == Text_view { text_pane::first_error(&value.text) } else { None };
+        let text_error = if stored_projection(value) == TextView { text_pane::first_error(&value.text) } else { None };
         if let Some(d) = text_error {
             return format!("Text rejected: {}", rays_diagnostic::to_string(&d));
         }

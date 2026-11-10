@@ -1,4 +1,4 @@
-//! Behavioral ports of test_workspace_gpu_native.ml and test_workspace_gpu_marks.ml.
+//! Behavioral ports of  and .
 use crate::common;
 use flow_eval as e;
 use flow_native::{drawing, workspace_gpu as wg, workspace_images as wi, workspace_resources as wr};
@@ -435,8 +435,8 @@ const MARKS: &str = r##"(workspace gpu_marks
             :fill (map (fn [i] [(/ (mod (+ i (* t 8)) 8) 8) 0.5 0.25]) indices) :stroke "#ff8800"))
         (draw/lines positions (map (fn [i] [(+ (* (mod i 64) 2) 3) (+ (/ (- i (mod i 64)) 32) 5) 0]) indices)
           :color (map (fn [i] [0.5 (/ (mod (+ i (* t 8)) 4) 4) 1]) indices) :width 1.5)))))"##;
-fn mark_tokens(scene: &[rays::scene::node]) -> usize {
-    use rays::scene::node as N;
+fn mark_tokens(scene: &[rays::scene::Node]) -> usize {
+    use rays::scene::Node as N;
     scene.iter().map(|n| match n {
         N::Shapes(s) => usize::from(s.marks().is_some()),
         N::Group(children) | N::Translate(_, _, children) | N::Rotate(_, children)
@@ -453,7 +453,7 @@ fn gpu_marks() {
     let options = drawing::PrepareOptions { gpu: Some(config), approx: Some(p.approx.clone()), states: p.states.clone(), ..Default::default() };
     let prepared = ok(drawing::prepare(&options, &p.plan, &v));
     let c = canvas::create(160, 96).unwrap();
-    let capture = |scene: &[rays::scene::node]| { canvas::render(None, &c, scene).unwrap(); canvas::pixels(&c).unwrap() };
+    let capture = |scene: &[rays::scene::Node]| { canvas::render(None, &c, scene).unwrap(); canvas::pixels(&c).unwrap() };
     for time in [0., 0.5, 0.25] {
         let live = input::Frame { size: (160, 96), ..input::at_time(time) };
         let cpu = ok(drawing::render_prepared(&prepared, &live, (160, 96), &Default::default()));

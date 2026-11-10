@@ -1,4 +1,4 @@
-//! test_editor_consistency.ml: cross-representation checks of authored text, derived state, saved
+//! : cross-representation checks of authored text, derived state, saved
 //! state and the picture.
 use std::sync::Arc;
 
@@ -160,7 +160,7 @@ pub fn layers(e: &Ed) -> Staged {
         .layers
         .iter()
         .filter_map(|l| match l {
-            rays::scene::layer::native_layer::Scene3_layer(p) => Some(
+            rays::scene::layer::NativeLayer::Scene3Layer(p) => Some(
                 p.entries
                     .iter()
                     .map(|entry| (entry.draw.state.transform_uniforms.as_ref().map(|b| b.to_vec()), entry.draw.mesh.vertices.to_vec()))
@@ -187,7 +187,7 @@ const FROZEN: [(&str, &str, &str); 5] = [
     ("scene", "(scene/geometry (ref g) :translate [t 0 0])", "scene/geometry.translate"),
     ("world", "(world/sky :turbidity (+ 2 t))", "world/sky.turbidity"),
     ("settings", "(settings/config :fps (+ 60 (int t)))", "settings/config.fps"),
-    ("editor", "(ui/workspace (ui/split-at \"horizontal\" (+ 0.4 (* 0.1 t)) (ui/graph) (ui/inspector)))", "ui/split-at.ratio"),
+    ("editor", "(ui/workspace (ui/split_at \"horizontal\" (+ 0.4 (* 0.1 t)) (ui/graph) (ui/inspector)))", "ui/split_at.ratio"),
 ];
 
 fn frozen_row(i: usize) {
@@ -402,7 +402,7 @@ fn live_lights() {
         assert!(after[0] == before[0] && after[1] != before[1], "a live comparison override changed primary lighting");
         let mut f = frozen(4);
         f.input.keys = vec![Key::Meta];
-        f.input.events = vec![Event::Key_pressed(Key::KeyChar('z'))];
+        f.input.events = vec![Event::KeyPressed(Key::KeyChar('z'))];
         upd(e, |e| editor::update(e, &f));
         assert!(layers(e) == before, "one undo did not restore live comparison lighting");
     });

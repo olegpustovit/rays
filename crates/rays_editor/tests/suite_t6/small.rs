@@ -1,4 +1,4 @@
-//! test_terminal_boolean_normals.ml and test_custom_sop.ml.
+//!  and .
 #![allow(dead_code, unused_imports)]
 use std::sync::Arc;
 
@@ -54,7 +54,7 @@ pub fn terminal_normals() {
     assert!(mesh(&source).is_err(), "malformed terminal N was accepted");
 }
 
-// ---- test_custom_sop.ml
+// ----
 
 fn controls_schema() -> Arc<param::Schema> {
     let tx = param::field("translate_x".into(), param::floating(-5., 5., None, None).unwrap(), Value::Float(0.)).unwrap().label("Translate X".into()).unwrap().folder(vec!["Transform".into()]).unwrap();

@@ -8,10 +8,10 @@ use rays::frame;
 use rays_editor::{editor, workspace};
 
 pub fn key(k: Key) -> Event {
-    Event::Key_pressed(k)
+    Event::KeyPressed(k)
 }
 pub fn ch(c: char) -> Event {
-    Event::Key_pressed(Key::KeyChar(c))
+    Event::KeyPressed(Key::KeyChar(c))
 }
 
 /// `Test_editor_input.frame ?buttons ?keys ?delta mouse events count` (900 x 640 points).
@@ -208,8 +208,8 @@ impl Env {
     }
     /// moved, then pressed and released (no trailing frame)
     pub fn click(&mut self, p: (f64, f64)) {
-        self.at(p, vec![Event::Pointer_moved(p)]);
-        self.at(p, vec![Event::Pointer_pressed(MouseButton::LeftButton, p), Event::Pointer_released(MouseButton::LeftButton, p)]);
+        self.at(p, vec![Event::PointerMoved(p)]);
+        self.at(p, vec![Event::PointerPressed(MouseButton::LeftButton, p), Event::PointerReleased(MouseButton::LeftButton, p)]);
     }
     /// `click` and one more frame
     pub fn click_s(&mut self, p: (f64, f64)) {
@@ -280,14 +280,14 @@ pub fn catalog() -> flow_check::catalog::Catalog {
 }
 
 /// `Editor_prepare.empty`.
-pub fn prepare_empty() -> rays_editor::cook::Prepare_fn {
+pub fn prepare_empty() -> rays_editor::cook::PrepareFn {
     use rdk_core::geometry as geo;
     std::rc::Rc::new(|_, _| {
         let positions = rdk_core::packed::float3::of_owned(Vec::new(), Vec::new(), Vec::new()).map_err(|e| format!("{e:?}"))?;
         let topology = rdk_core::topology::empty(0).map_err(|e| format!("{e:?}"))?;
         let geometry = geo::create(positions, topology, None, None, None).map_err(|e| format!("{e:?}"))?;
         let surface = rdk_rays::surface::of_geometry(None, &geometry)?;
-        Ok(rays_editor::cook::prepared { geometry, surface })
+        Ok(rays_editor::cook::Prepared { geometry, surface })
     })
 }
 

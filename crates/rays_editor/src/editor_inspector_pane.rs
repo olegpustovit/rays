@@ -1,7 +1,7 @@
 //! the Inspector panel of a frame. Which subject
 //! it shows: the node selected in the graph pane, a scene object or World layer, the settings and
 //! camera panel when nothing is selected. Bundle C.
-#![allow(non_camel_case_types)]
+
 use flow_syntax::symbol::Symbol;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -33,13 +33,13 @@ use crate::text_pane;
 
 /// What the inspector hands back for a frame: the sketch's panel result, the graph requests, the
 /// settings changes, the live-cook flag, the probe moves and the places a carried payload hovers.
-pub type Inspector_result = (Option<Panel_result>, Vec<change>, Vec<(String, Value)>, bool, Vec<scope::Change>, Vec<(carry::Place, bool)>);
+pub type InspectorResult = (Option<PanelResult>, Vec<Change>, Vec<(String, Value)>, bool, Vec<scope::Change>, Vec<(carry::Place, bool)>);
 
 /// The inspector panel inside `inspector_root` at `bounds`.
 #[allow(clippy::too_many_arguments)]
 pub fn inspect_panel<'a>(
     image: &dyn Fn(i64) -> Option<rays::image::Image>,
-    camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
+    camera_panel: &dyn Fn(&mut Ui) -> PanelResult,
     inspector_visible: bool,
     unchanged: &settings::T,
     resized: Resized,
@@ -48,7 +48,7 @@ pub fn inspect_panel<'a>(
     input: (ModelView<'a>, &scope::Pane, &selection::Selection, bool),
     inspector_root: &UiBox,
     bounds: layout::Bounds,
-) -> Inspector_result {
+) -> InspectorResult {
     let (value, scope_view, selection_, scope_active) = input;
     let value = &value;
     let ws = &value.doc.workspace.ws;
@@ -79,10 +79,10 @@ pub fn inspect_panel<'a>(
         bounds
     };
     let width = bounds.2.max(1) as f64;
-    let mut result: Option<Inspector_result> = None;
+    let mut result: Option<InspectorResult> = None;
     on_sheet(ui, window, &mut |ui| {
         ui.within(inspector_root, &mut |ui| {
-            let out: Inspector_result = if !inspector_visible {
+            let out: InspectorResult = if !inspector_visible {
                 (None, vec![], vec![], value.live_cook, vec![], vec![])
             } else if !scope_selected.is_empty() {
                 match scope_selected.as_slice() {
@@ -111,7 +111,7 @@ pub fn inspect_panel<'a>(
                 // Sketch settings above the environment's camera/render panel.
                 let mut changes: Vec<(String, Value)> = Vec::new();
                 let mut live = value.live_cook;
-                let mut panel: Option<Panel_result> = None;
+                let mut panel: Option<PanelResult> = None;
                 inspector_panel(window, ui, bounds, &mut |ui| {
                     let (node_count, label): (usize, Box<dyn Fn(i64) -> Option<String>>) = match network(value) {
                         Some(network) => {
@@ -225,14 +225,14 @@ fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width:
 
 /// The sheet of a scene object or World layer the text does not bind by name: its fields, with
 /// the name edited in place.
-fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_graph::Node], node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<change> {
+fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_graph::Node], node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<Change> {
     let (fields, label, kind_) = match kind_graph::find(document, node_id) {
         Some(node) => (kind_graph::fields(&node), node.label.clone(), node.kind.clone()),
         None => (Vec::new(), format!("#{node_id}"), "unknown".to_owned()),
     };
     let preview = pane_level(value) == Level::Scene
         && value.doc.shell.as_ref().map_or(false, |shell| shell.views.iter().any(|(_, ids)| ids.contains(&node_id)));
-    let mut changes: Vec<change> = Vec::new();
+    let mut changes: Vec<Change> = Vec::new();
     inspector_panel(window, ui, bounds, &mut |ui| {
         ui.scope(&format!("node.{node_id}"), &mut |ui| {
             let inspector_width = bounds.2.max(1) as f64;
@@ -269,9 +269,9 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 &detail,
             );
             if head.renamed != label && !preview {
-                changes.push(change::Rename { node: node_id, label: head.renamed.clone() });
+                changes.push(Change::Rename { node: node_id, label: head.renamed.clone() });
             }
-            let mut body: Vec<change> = Vec::new();
+            let mut body: Vec<Change> = Vec::new();
             ui.inspector_body(&mut |ui| {
                 if input_count > 0 {
                     ui.inspector_section("flow-input-heading", true, None, "Inputs", &mut |ui| {
@@ -304,7 +304,7 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                 let opts = insp::FlowOpts { expanded, width: Some(inspector_width), kind_label: Some(kind_label(&kind_)), ..Default::default() };
                 for ev in insp::flow_fields(ui, &opts, None, &rows) {
                     match ev {
-                        insp::FlowChange::Edited(path, v) => body.push(change::Set_parameter { node: node_id, path, value: v }),
+                        insp::FlowChange::Edited(path, v) => body.push(Change::SetParameter { node: node_id, path, value: v }),
                         insp::FlowChange::Expression(path, text) => {
                             // a row is a field of the node; its argument is the parameter holding it
                             // (a vector's field is one component of it)
@@ -318,8 +318,8 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                                 }
                             });
                             match (expression_text(&text), key_sub) {
-                                (Ok(expr), Some((key, sub))) => body.push(change::Object_arg { node: node_id, key, sub, expr }),
-                                (Err(message), _) => body.push(change::Declined(message)),
+                                (Ok(expr), Some((key, sub))) => body.push(Change::ObjectArg { node: node_id, key, sub, expr }),
+                                (Err(message), _) => body.push(Change::Declined(message)),
                                 (Ok(_), None) => {}
                             }
                         }
@@ -332,7 +332,7 @@ fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_gra
                                 if let Some(form) = fe::arg_text(&ws.source, &from, &ArgKey::Kw(path.clone()))
                                     && let SNode::Sym(name) = form.node {
                                     if let Some(target) = text_pane::reference_target(&ws.source, &from, form.name(name)) {
-                                        body.push(change::Follow_source(target));
+                                        body.push(Change::FollowSource(target));
                                     }
                                 }
                             }

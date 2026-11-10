@@ -1,5 +1,5 @@
 //! Creation of the model: the document a workspace starts from, the preferences and the state
-//! folder. #![allow(non_camel_case_types)]
+//! folder.
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -9,9 +9,9 @@ use editor_core::store;
 use editor_document::document::{self, Level, T as Document};
 use editor_document::kind_graph as kg;
 use editor_document::workspace_doc;
-use editor_document::{kinds, layout_by_path, lowering, objects, preset, settings};
+use editor_document::{layout_by_path, lowering, objects, preset, settings};
 use flow_native::workspace_gpu;
-use flow_sop::{lower, manifest};
+use flow_sop::lower;
 use flow_syntax::context;
 use flow_syntax::phase_timer;
 use flow_syntax::syntax::{self, Draft};
@@ -39,7 +39,7 @@ use crate::timeline;
 /// workspace`, when it already built it to read the window and the camera (Workspace.run): the
 /// workspace is evaluated once a start.
 pub fn workspace_doc(
-    gpu: Option<workspace_gpu::policy>,
+    gpu: Option<workspace_gpu::Policy>,
     opened: Option<Document>,
     factories: &[Factory],
     seed_scene: &dyn Fn(kg::T) -> kg::T,
@@ -96,14 +96,14 @@ pub fn state_file(value: &EditorModel) -> String {
     preset::path(&state_directory(value), &value.state_name)
 }
 
-pub fn browse(value: &EditorModel, query: &str) -> Option<prompt> {
+pub fn browse(value: &EditorModel, query: &str) -> Option<Prompt> {
     let last_state = std::fs::metadata(state_file(value)).ok().filter(|m| m.is_file()).and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs_f64());
-    Some(prompt::Browsing { query: query.to_string(), presets: preset::list(&value.presets), last_state })
+    Some(Prompt::Browsing { query: query.to_string(), presets: preset::list(&value.presets), last_state })
 }
 
 /// Optional loop creation settings.
-pub struct create_opts {
-    pub gpu: Option<workspace_gpu::policy>,
+pub struct CreateOpts {
+    pub gpu: Option<workspace_gpu::Policy>,
     pub settings: Option<settings::T>,
     pub seed_scene: Option<Rc<dyn Fn(kg::T) -> kg::T>>,
     pub name: String,
@@ -125,9 +125,9 @@ pub struct create_opts {
     pub opened: Option<Document>,
 }
 
-impl Default for create_opts {
-    fn default() -> create_opts {
-        create_opts {
+impl Default for CreateOpts {
+    fn default() -> CreateOpts {
+        CreateOpts {
             gpu: None,
             settings: None,
             seed_scene: None,
@@ -144,7 +144,7 @@ impl Default for create_opts {
             carry_budget: 0.5,
             clock: None,
             preferences: None,
-            ui_text_size: default_text_size,
+            ui_text_size: DEFAULT_TEXT_SIZE,
             platform: None,
             ui_font: None,
             opened: None,
@@ -156,8 +156,8 @@ fn wall_clock() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
-pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Prepare_fn) -> Result<EditorModel, String> {
-    let create_opts {
+pub fn create(opts: CreateOpts, workspace: &workspace_doc::T, prepare: cook::PrepareFn) -> Result<EditorModel, String> {
+    let CreateOpts {
         gpu, settings: given_settings, seed_scene, name, presets, state_key, factories, seed, grain, domains, max_entries, max_payload_bytes, await_, carry_budget, clock, preferences, ui_text_size, platform, ui_font, opened,
     } = opts;
     let factories = if factories.is_empty() { sop::nodes::factories() } else { factories };
@@ -170,7 +170,11 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     let seed_scene = seed_scene.unwrap_or_else(|| Rc::new(|scene| scene));
     let doc = workspace_doc(Some(gpu.clone()), opened, &factories, &*seed_scene, &workspace)?;
     let cook = cook::create(prepare, seed, grain, domains, await_, Some(clock.clone()), max_entries, max_payload_bytes)?;
-    let shell = shell { tree: std::rc::Rc::new(layout_default()), hidden: vec![panels::Panel::Timeline], live: None, window_live: None, restored: false };
+    let mut drawings = workspace.checked.graphs.iter().filter(|g| g.context == context::draw());
+    let single_draw = drawings.next().filter(|_| drawings.next().is_none()).filter(|_| !workspace.checked.graphs.iter().any(|g| g.context == context::editor()));
+    let initial_panel = single_draw.map(|g| panels::Panel::Canvas(g.name.clone()));
+    let initial_tree = initial_panel.clone().map(panels::Panels::Leaf).unwrap_or_else(layout_default);
+    let shell = Shell { tree: std::rc::Rc::new(initial_tree), hidden: vec![panels::Panel::Timeline], live: None, window_live: None, restored: false };
     let presets = match presets {
         Some(directory) => directory,
         None => editor_core::store::filename_concat(&user_folder(platform), &preset::sanitize(&name)),
@@ -213,7 +217,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
         notice_at: 0.0,
         filed: document::text(&doc),
         gpu,
-        panes: panel_map::make(graph_pane { view: scope::create(None, None), laid: None, shown: None, route: Vec::new(), views: level_map_empty(), at: level, picked: selection::empty() }),
+        panes: panel_map::make(GraphPane { view: scope::create(None, None), laid: None, shown: None, route: Vec::new(), views: level_map_empty(), at: level, picked: selection::empty() }),
         text: text_pane::initial(),
         map_view: false,
         rows: Rc::new(Vec::new()),
@@ -247,7 +251,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
         last_dt: 0.0,
         steady: 0,
         history,
-        focus: panels::main(),
+        focus: initial_panel.unwrap_or_else(panels::main),
         focus_path: None,
         pane_keys: Rc::new(Vec::new()),
         leader: editor_core::router::State::Idle,
@@ -257,7 +261,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
         text_at: None,
         outline_at: None,
         locals: Vec::new(),
-        started: Rc::new(started::default()),
+        started: Rc::new(Started::default()),
         framing: None,
         carry: None,
         carry_budget,

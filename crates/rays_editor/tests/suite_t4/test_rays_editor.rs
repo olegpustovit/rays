@@ -1,4 +1,4 @@
-//! test_rays_editor.ml: the workspace editor end to end (layout panes, camera nodes, sketch
+//! : the workspace editor end to end (layout panes, camera nodes, sketch
 //! settings, presets and look-through, the full workspace walk). `native_smoke` opens a Sketch
 //! window and has no Rust counterpart here (skipped, see SKIPPED).
 use super::t4::*;
@@ -18,13 +18,13 @@ fn pointer((x, y): (i64, i64)) -> (f64, f64) {
     (x as f64, y as f64)
 }
 fn press(b: input::MouseButton, p: (i64, i64)) -> Event {
-    Event::Pointer_pressed(b, pointer(p))
+    Event::PointerPressed(b, pointer(p))
 }
 fn release(b: input::MouseButton, p: (i64, i64)) -> Event {
-    Event::Pointer_released(b, pointer(p))
+    Event::PointerReleased(b, pointer(p))
 }
 fn mv(p: (i64, i64)) -> Event {
-    Event::Pointer_moved(pointer(p))
+    Event::PointerMoved(pointer(p))
 }
 
 fn frame_ex(width: i64, height: i64, mouse: Option<(i64, i64)>, events: Vec<Event>, count: i64) -> frame::Frame {
@@ -56,11 +56,11 @@ fn card_row((x, y, w, _): Rect) -> (i64, i64) {
 }
 
 /// The packed PXUI instances of a composed scene, for exact comparisons.
-fn ui_bytes(scene: &[rays::scene::node]) -> Vec<u8> {
+fn ui_bytes(scene: &[rays::scene::Node]) -> Vec<u8> {
     let staged = rays::scene::layer::stage_native_render(900, 640, scene).unwrap_or_else(|m| panic!("{m}"));
     let mut out = Vec::new();
     for layer in &staged.layers {
-        if let rays::scene::layer::native_layer::Ui_layer(batch, _) = layer {
+        if let rays::scene::layer::NativeLayer::UiLayer(batch, _) = layer {
             out.extend_from_slice(batch.instances());
         }
     }
@@ -179,12 +179,12 @@ pub fn layout_panes() {
     }
     for (graph, action) in pxui_graph::scope_commands::bindings() {
         assert!(
-            rays_editor::editor_commands::keymap().iter().any(|c| c.id == graph.id && c.trigger == graph.trigger && *rays_editor::editor_commands::action_of(c) == rays_editor::editor_commands::action::Scope_command(action.clone())),
+            rays_editor::editor_commands::keymap().iter().any(|c| c.id == graph.id && c.trigger == graph.trigger && *rays_editor::editor_commands::action_of(c) == rays_editor::editor_commands::Action::ScopeCommand(action.clone())),
             "graph command missing from the host keymap"
         );
     }
-    let camera_binding = |key: &str, action: rays_editor::editor_commands::action| rays_editor::editor_commands::keymap().iter().any(|c| c.trigger == Some(editor_core::keymap::Trigger::Leader(key.into())) && *rays_editor::editor_commands::action_of(c) == action);
-    assert!(camera_binding("h", rays_editor::editor_commands::action::Hide_ui) && camera_binding("c", rays_editor::editor_commands::action::Open_camera), "camera visibility commands missing from the host keymap");
+    let camera_binding = |key: &str, action: rays_editor::editor_commands::Action| rays_editor::editor_commands::keymap().iter().any(|c| c.trigger == Some(editor_core::keymap::Trigger::Leader(key.into())) && *rays_editor::editor_commands::action_of(c) == action);
+    assert!(camera_binding("h", rays_editor::editor_commands::Action::HideUi) && camera_binding("c", rays_editor::editor_commands::Action::OpenCamera), "camera visibility commands missing from the host keymap");
     let workspace = L::default();
     let panes = |hidden: Option<&[panels::Panel]>, tree: &L::Panels, f: &frame::Frame| L::panes(&L::geometry(None, hidden, tree, f));
     let initial = panes(None, &workspace, &frame_ex(1000, 640, None, vec![], 0));
@@ -321,8 +321,8 @@ pub fn sketch_settings() {
     let schema = Arc::new(param::schema("mode".into(), vec![field]).unwrap());
     let seen = Arc::new(AtomicI64::new(-1));
     let (s2, seen2) = (schema.clone(), seen.clone());
-    let prepare: rays_editor::cook::Prepare_fn = std::rc::Rc::new(move |settings, output| {
-        if let Ok(Value::Int(v)) = Editor_settings_get(&s2, settings) {
+    let prepare: rays_editor::cook::PrepareFn = std::rc::Rc::new(move |settings, output| {
+        if let Ok(Value::Int(v)) = editor_settings_get(&s2, settings) {
             seen2.store(v, Ordering::SeqCst);
         }
         editor::prepare(settings, output)
@@ -345,12 +345,12 @@ pub fn sketch_settings() {
     let undo = with_keys(fre(199, vec![k('z')]), vec![Key::Meta]);
     let after = up(ed, undo);
     ed = wait_mode(0, 200, after);
-    assert!(matches!(Editor_settings_get(&schema, &editor::settings(&ed)), Ok(Value::Int(0))), "undo did not restore the sketch settings");
+    assert!(matches!(editor_settings_get(&schema, &editor::settings(&ed)), Ok(Value::Int(0))), "undo did not restore the sketch settings");
     editor::close(&ed);
 }
 
-#[allow(non_snake_case)]
-fn Editor_settings_get(schema: &param::Schema, settings: &editor_document::settings::T) -> Result<Value, String> {
+
+fn editor_settings_get(schema: &param::Schema, settings: &editor_document::settings::T) -> Result<Value, String> {
     editor_document::settings::get(schema, settings).map(|v| v[0].clone())
 }
 
@@ -487,7 +487,7 @@ pub fn workspace_walk() {
         with_keys(fre(count, vec![k(c)]), keys)
     };
     ed = up(ed, frm(24, source_point, vec![k('/'), k('a')]));
-    ed = up(ed, frm(25, source_point, vec![Event::Text_input("null".into()), key(Key::Enter)]));
+    ed = up(ed, frm(25, source_point, vec![Event::TextInput("null".into()), key(Key::Enter)]));
     assert!(has(&text_of(&ed), "(sop/null source)"), "the leader add-node menu did not add a node wired to the selection");
     assert!(editor::can_undo(&ed), "the added node did not enter the undo stack");
     ed = up(ed, chord(false, 'z', 26));
@@ -556,7 +556,7 @@ pub fn workspace_walk() {
     let staged = rays::scene::layer::stage_native_render(900, 640, &editor::scene(&ed, &current_frame)).unwrap_or_else(|m| panic!("{m}"));
     let mut batches = 0;
     for layer in &staged.layers {
-        if let rays::scene::layer::native_layer::Ui_layer(batch, _) = layer {
+        if let rays::scene::layer::NativeLayer::UiLayer(batch, _) = layer {
             batches += batch.batches().len();
         }
     }
@@ -565,7 +565,7 @@ pub fn workspace_walk() {
     let menu_point = (graph_x + graph_width / 2, graph_y + graph_height / 2);
     let add = |ed: editor::Editor, count: i64| {
         let ed = up(ed, frm(count, menu_point, vec![k('/'), k('a')]));
-        up(ed, frm(count + 1, menu_point, vec![Event::Text_input("null".into()), key(Key::Enter)]))
+        up(ed, frm(count + 1, menu_point, vec![Event::TextInput("null".into()), key(Key::Enter)]))
     };
     ed = add(ed, 230);
     assert!(has(&text_of(&ed), "(sop/null output)") && sop::node::label(&editor::displayed_node(&ed)) == "transform", "workspace could not add a node reading the result without moving the display: {}\n{}", sop::node::operation(&editor::displayed_node(&ed)), text_of(&ed));

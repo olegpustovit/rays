@@ -1,4 +1,4 @@
-//! test_bloom_studio.ml: the ws_bloom sketch through the editor; the Navigator lists the document
+//! : the ws_bloom sketch through the editor; the Navigator lists the document
 //! and opens a graph or node from a click, the host bars run commands, Make defn writes a function.
 use std::rc::Rc;
 
@@ -70,9 +70,9 @@ impl Bloom {
         self.step(&[], &[], (450., 300.), events);
     }
     fn click(&mut self, (x, y): (f64, f64)) {
-        self.step(&[], &[], (x, y), vec![Event::Pointer_moved((x, y))]);
-        self.step(&[MouseButton::LeftButton], &[], (x, y), vec![Event::Pointer_pressed(MouseButton::LeftButton, (x, y))]);
-        self.step(&[], &[], (x, y), vec![Event::Pointer_released(MouseButton::LeftButton, (x, y))]);
+        self.step(&[], &[], (x, y), vec![Event::PointerMoved((x, y))]);
+        self.step(&[MouseButton::LeftButton], &[], (x, y), vec![Event::PointerPressed(MouseButton::LeftButton, (x, y))]);
+        self.step(&[], &[], (x, y), vec![Event::PointerReleased(MouseButton::LeftButton, (x, y))]);
         self.plain(vec![]);
     }
 }
@@ -86,7 +86,7 @@ fn body(r: &mut Bloom) {
     let ws = editor::workspace(&r.e);
     let doc: document::T = build(&ws);
     let shell = doc.shell.clone().expect("shell");
-    let geometry = |r: &Bloom| layout::geometry(None, Some(&[Panel::Timeline]), &shell.tree, &bframe(&[], &[], (0., 0.), vec![], 0));
+    let geometry = |_r: &Bloom| layout::geometry(None, Some(&[Panel::Timeline]), &shell.tree, &bframe(&[], &[], (0., 0.), vec![], 0));
     let _ = r;
     let outline = |r: &Bloom| layout::find(&geometry(r), &Panel::Outline).expect("outline").body;
     let graph_leaf = |r: &Bloom| layout::find(&geometry(r), &Panel::Graph).expect("graph leaf");
@@ -149,14 +149,14 @@ fn body(r: &mut Bloom) {
     r.click(p);
     let (gx, gy, gw, _) = graph_leaf(r).body;
     let p = ((gx + gw - 40) as f64, (gy + 40) as f64);
-    r.step(&[], &[], p, vec![Event::Pointer_moved(p)]);
-    r.step(&[MouseButton::LeftButton], &[Key::Shift], p, vec![Event::Pointer_pressed(MouseButton::LeftButton, p)]);
-    r.step(&[], &[Key::Shift], p, vec![Event::Pointer_released(MouseButton::LeftButton, p)]);
+    r.step(&[], &[], p, vec![Event::PointerMoved(p)]);
+    r.step(&[MouseButton::LeftButton], &[Key::Shift], p, vec![Event::PointerPressed(MouseButton::LeftButton, p)]);
+    r.step(&[], &[Key::Shift], p, vec![Event::PointerReleased(MouseButton::LeftButton, p)]);
     r.step(&[], &[], p, vec![]);
     assert_eq!(dump_line(&r.e, "scope selected"), "flower/heart", "heart stays selected");
     let before = editor::workspace(&r.e);
     let label = editor::undo_label(&r.e);
-    r.step(&[], &[], p, vec![Event::Key_pressed(Key::KeyChar('v'))]);
+    r.step(&[], &[], p, vec![Event::KeyPressed(Key::KeyChar('v'))]);
     r.step(&[], &[], p, vec![]);
     r.plain(vec![]);
     assert!(same_ws(&editor::workspace(&r.e), &before) && editor::undo_label(&r.e) == label, "v changed the source or history");
@@ -167,10 +167,10 @@ fn body(r: &mut Bloom) {
     let (slider_y, slider_x, slider_w) = (y + h / 2., x + 76., w - 86.);
     let from = (slider_x + slider_w * 0.3, slider_y);
     let to = (slider_x + slider_w * 0.9, slider_y);
-    r.step(&[], &[], from, vec![Event::Pointer_moved(from)]);
-    r.step(&[MouseButton::LeftButton], &[], from, vec![Event::Pointer_pressed(MouseButton::LeftButton, from)]);
-    r.step(&[MouseButton::LeftButton], &[], to, vec![Event::Pointer_moved(to)]);
-    r.step(&[], &[], to, vec![Event::Pointer_released(MouseButton::LeftButton, to)]);
+    r.step(&[], &[], from, vec![Event::PointerMoved(from)]);
+    r.step(&[MouseButton::LeftButton], &[], from, vec![Event::PointerPressed(MouseButton::LeftButton, from)]);
+    r.step(&[MouseButton::LeftButton], &[], to, vec![Event::PointerMoved(to)]);
+    r.step(&[], &[], to, vec![Event::PointerReleased(MouseButton::LeftButton, to)]);
     r.plain(vec![]);
     assert!(!source(&r.e).contains("(petals : int 3)") && source(&r.e).contains("(petals : int "), "the slider changed the input's default: {}", source(&r.e));
     assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Input default"), "named in history");
@@ -178,8 +178,8 @@ fn body(r: &mut Bloom) {
     let name_at = (slider_x - 60., slider_y);
     r.click(name_at);
     r.click(name_at);
-    r.plain(vec![Event::Text_input("7".into())]);
-    r.plain(vec![Event::Key_pressed(Key::Enter)]);
+    r.plain(vec![Event::TextInput("7".into())]);
+    r.plain(vec![Event::KeyPressed(Key::Enter)]);
     r.plain(vec![]);
     assert!(source(&r.e).contains("(petals : int 7)"), "a typed default is written as an int: {}", source(&r.e));
     assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Input default"), "the typed default is a history entry");

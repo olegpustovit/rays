@@ -1,5 +1,5 @@
 //! The World's lat-long map in the view pane: its sRGB image, where a point lands on it, and the
-//! drags that rotate the World or move a layer or the sun. #![allow(non_camel_case_types)]
+//! drags that rotate the World or move a layer or the sun.
 use editor_document::document::Level;
 use editor_document::kind_graph as kg;
 use param::Value;
@@ -13,7 +13,7 @@ use crate::editor_model::EditorModel;
 
 /// The World's camera map as an sRGB image (width, height, RGBA bytes): the path tracer's
 /// exposure, ACES fit, and gamma, so the map reads like the renders.
-pub fn map_rgba(baked: &world::baked) -> (i64, i64, Vec<u8>) {
+pub fn map_rgba(baked: &world::Baked) -> (i64, i64, Vec<u8>) {
     let map = &baked.camera;
     let step = (map.width / 1024).max(1);
     let (width, height) = (map.width / step, map.height / step);
@@ -52,15 +52,15 @@ pub fn map_uv(viewport: Bounds, (px, py): (f64, f64)) -> Option<(f64, f64)> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum world_operation {
-    Rotate_world(i64),
-    Move_layer(i64, i64),
-    Move_sun(i64),
+pub enum WorldOperation {
+    RotateWorld(i64),
+    MoveLayer(i64, i64),
+    MoveSun(i64),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct world_drag {
-    pub operation: world_operation,
+pub struct WorldDrag {
+    pub operation: WorldOperation,
     pub point: (f64, f64),
     pub area: Bounds,
 }
@@ -69,37 +69,37 @@ pub fn wrap_degrees(value: f64) -> f64 {
     (((value + 180.) % 360.) + 360.) % 360. - 180.
 }
 
-pub fn world_operation(core: &EditorModel, area: Bounds, point: (f64, f64), shift: bool) -> Option<world_operation> {
+pub fn world_operation(core: &EditorModel, area: Bounds, point: (f64, f64), shift: bool) -> Option<WorldOperation> {
     match editor_host::world_id(core) {
         Some(world) if core.map_view && map_uv(area, point).is_some() => match editor_list::selected_node(&core.into()) {
-            Some(node) if node.fields.iter().any(|f| f.name == "azimuth") => Some(world_operation::Move_layer(world, node.id)),
-            Some(node) if node.kind == "sun" => Some(world_operation::Move_sun(world)),
+            Some(node) if node.fields.iter().any(|f| f.name == "azimuth") => Some(WorldOperation::MoveLayer(world, node.id)),
+            Some(node) if node.kind == "sun" => Some(WorldOperation::MoveSun(world)),
             _ => None,
         },
-        Some(world) if !core.map_view && shift => Some(world_operation::Rotate_world(world)),
+        Some(world) if !core.map_view && shift => Some(WorldOperation::RotateWorld(world)),
         _ => None,
     }
 }
 
-pub fn move_world(core: &mut EditorModel, drag: &world_drag, point: (f64, f64)) {
+pub fn move_world(core: &mut EditorModel, drag: &WorldDrag, point: (f64, f64)) {
     if point == drag.point {
         return;
     }
     match &drag.operation {
-        world_operation::Rotate_world(world) => {
-            let rotation = kg::find(&editor_inspect::scene(&*core), *world).and_then(|node| match kg::field(&node, "rotation") {
+        WorldOperation::RotateWorld(world) => {
+            let rotation = kg::find(&editor_inspect::scene(&*core), *world).and_then(|node| match kg::field(&node, "rotate") {
                 Some(Value::Float(v)) => Some(v),
                 _ => None,
             });
             match rotation {
                 Some(rotation) => {
                     let rotation = wrap_degrees(rotation + 0.5 * (point.0 - drag.point.0));
-                    editor_host::edit_node(core, Level::Scene, *world, &[("rotation".to_string(), Value::Float(rotation))], "Rotate World")
+                    editor_host::edit_node(core, Level::Scene, *world, &[("rotate".to_string(), Value::Float(rotation))], "Rotate World")
                 }
                 None => {},
             }
         }
-        op @ (world_operation::Move_layer(world, _) | world_operation::Move_sun(world)) => {
+        op @ (WorldOperation::MoveLayer(world, _) | WorldOperation::MoveSun(world)) => {
             let (x, y, w, h) = map_rect(drag.area);
             let u = ((point.0 - x as f64) / w.max(1) as f64).min(1.).max(0.);
             let v = ((point.1 - y as f64) / h.max(1) as f64).min(1.).max(0.);
@@ -109,7 +109,7 @@ pub fn move_world(core: &mut EditorModel, drag: &world_drag, point: (f64, f64)) 
             let azimuth = wrap_degrees(degrees(direction.x.atan2(-direction.z) - rotation));
             let elevation = degrees(direction.y.asin());
             match op {
-                world_operation::Move_layer(_, id) => editor_host::edit_node(
+                WorldOperation::MoveLayer(_, id) => editor_host::edit_node(
                     core,
                     Level::Inside(*world),
                     *id,

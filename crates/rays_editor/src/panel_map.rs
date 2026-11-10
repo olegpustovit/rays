@@ -1,8 +1,8 @@
 //! Panel_map owns one state per key; switching focus changes only the selected key. The canonical empty key is adopted by the first real graph panel.
-#![allow(non_camel_case_types)]
+
 use editor_core::panels::Path;
 
-pub use crate::editor_model::graph_pane as Pane;
+pub use crate::editor_model::GraphPane as Pane;
 
 pub type Key = flow_check::workspace::Path;
 

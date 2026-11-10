@@ -1,5 +1,5 @@
 //! the entries of the node menu at a screen point. Bundle C.
-#![allow(non_camel_case_types)]
+
 use flow_syntax::context::{self, Context};
 use flow_syntax::ty;
 use pxui_graph::node_menu::{self as menu, Entry};

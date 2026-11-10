@@ -102,7 +102,8 @@ fn a_selected_path_names_its_binding_unless_it_is_nested() {
 
 #[test]
 fn every_form_of_the_add_menu_parses_and_every_value_entry_makes_an_expression() {
-    for (_, name, text, binding) in FORMS.iter() {
+    for (_, name, binding) in FORMS.iter() {
+        let text = crate::editor_add::form_example(name);
         assert!(s::parse(text).is_ok_and(|v| v.len() == 1), "{name}: {text}");
         assert!(!binding.is_empty());
     }

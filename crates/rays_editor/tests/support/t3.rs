@@ -1,5 +1,5 @@
-//! Test support shared by suite t3: ports of lisp_sop.ml, Test_support.Workspace_cook, Editor_prepare and
-//! test_text.ml (copied from flow_sop/src/lisp_sop.rs and lisp_sop/support.rs, which are cfg(test) there).
+//! Test support shared by suite t3: ports of , Test_support.Workspace_cook, Editor_prepare and
+//!  (copied from flow_sop/src/lisp_sop.rs and lisp_sop/support.rs, which are cfg(test) there).
 #![allow(dead_code)]
 // Test support: a SOP graph written as Rays Lisp text,
 // compiled to a `sop::node::T` by the same lowering the editor uses.
@@ -276,37 +276,37 @@ pub fn case_text(name: &str) -> String {
 use rays_editor::cook;
 
 /// `Editor_prepare.surface`: the cooked geometry, as the app prepares it.
-pub fn prepare_surface() -> cook::Prepare_fn {
+pub fn prepare_surface() -> cook::PrepareFn {
     std::rc::Rc::new(|s, o| cook::prepare(s, o))
 }
 
 /// A prepared that is the single point (x, 0, 0): a test marks what a prepare saw with it.
-pub fn prepared_at(x: f64) -> Result<cook::prepared, String> {
+pub fn prepared_at(x: f64) -> Result<cook::Prepared, String> {
     prepared_of(vec![x], vec![0.], vec![0.], 1)
 }
 
-fn prepared_of(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, points: i64) -> Result<cook::prepared, String> {
+fn prepared_of(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, points: i64) -> Result<cook::Prepared, String> {
     let positions = rdk_core::packed::float3::of_owned(x, y, z).map_err(|e| format!("{e:?}"))?;
     let topology = rdk_core::topology::empty(points).map_err(|e| format!("{e:?}"))?;
     let geometry = geo::create(positions, topology, None, None, None).map_err(|e| format!("{e:?}"))?;
     let surface = rdk_rays::surface::of_geometry(None, &geometry)?;
-    Ok(cook::prepared { geometry, surface })
+    Ok(cook::Prepared { geometry, surface })
 }
 
-pub fn empty_prepared() -> Result<cook::prepared, String> {
+pub fn empty_prepared() -> Result<cook::Prepared, String> {
     prepared_of(Vec::new(), Vec::new(), Vec::new(), 0)
 }
 
 /// `Editor_prepare.empty`.
-pub fn prepare_empty() -> cook::Prepare_fn {
+pub fn prepare_empty() -> cook::PrepareFn {
     std::rc::Rc::new(|_, _| empty_prepared())
 }
 
-pub fn first_point(p: &cook::prepared) -> (f64, f64, f64) {
+pub fn first_point(p: &cook::Prepared) -> (f64, f64, f64) {
     rdk_core::packed::float3::get(geo::positions(&p.geometry), 0).expect("a first point")
 }
 
-pub fn x_of(p: &cook::prepared) -> f64 {
+pub fn x_of(p: &cook::Prepared) -> f64 {
     first_point(p).0
 }
 

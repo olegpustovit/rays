@@ -1,6 +1,5 @@
 //! The text pane keeps pure tab/text state and returns intents for post-frame application. Shown shares source/text/span maps through Arcs; Printed lazily owns one document and both span views.
 use flow_syntax::symbol::Symbol;
-use editor_document::literal_edit::Change;
 use editor_document::settings;
 use editor_document::workspace_doc::{self as wd, T as WorkspaceDoc};
 use flow_graph::flow_edit::{self as fe, ArgKey, Op};

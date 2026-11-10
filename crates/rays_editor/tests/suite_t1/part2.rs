@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 2: run_values, run_duplicate_and_view, run_loop_view,
+//! , part 2: run_values, run_duplicate_and_view, run_loop_view,
 //! run_result_view, run_geometry_view, run_movers.
 use super::support::*;
 use flow_graph::flow_edit::{ArgKey, Op};
@@ -15,8 +15,8 @@ fn centre_x(e: &editor::Editor) -> Option<f64> {
 }
 
 fn click_at(r: &mut Run, p: (f64, f64)) {
-    r.step(p, vec![Event::Pointer_moved(p)]);
-    r.step(p, vec![Event::Pointer_pressed(L, p), Event::Pointer_released(L, p)]);
+    r.step(p, vec![Event::PointerMoved(p)]);
+    r.step(p, vec![Event::PointerPressed(L, p), Event::PointerReleased(L, p)]);
 }
 
 pub fn run_values() {
@@ -31,9 +31,9 @@ pub fn run_values() {
         r.step((450., 300.), vec![]);
         let (gx, gy, _, _) = r.panes().graph;
         let p = ((gx + 40) as f64, (gy + 40) as f64);
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(L, p)]);
-        r.step(p, vec![Event::Pointer_released(L, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(L, p)]);
+        r.step(p, vec![Event::PointerReleased(L, p)]);
         if opening {
             r.step(p, vec![key(Key::Home)]);
             r.step(p, vec![key(Key::KeyChar('i'))]);
@@ -192,14 +192,14 @@ pub fn run_duplicate_and_view() {
         r.step(m, vec![]);
         r.step(m, vec![]);
         check(centre_x(&r.e) == Some(20.), "the initial viewport did not show the graph result");
-        r.step((150., 300.), vec![Event::Pointer_moved((150., 300.))]);
+        r.step((150., 300.), vec![Event::PointerMoved((150., 300.))]);
         r.step((150., 300.), vec![Event::Scrolled((0., -1.))]);
         r.step(m, vec![]);
         let (gx, gy, _, _) = r.panes().graph;
         let p = ((gx + 40) as f64, (gy + 40) as f64);
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(L, p)]);
-        r.step(p, vec![Event::Pointer_released(L, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(L, p)]);
+        r.step(p, vec![Event::PointerReleased(L, p)]);
         r.step(p, vec![key(Key::Home)]);
         r.step(p, vec![key(Key::KeyChar('i'))]);
         r.step(p, vec![]);
@@ -216,8 +216,8 @@ pub fn run_duplicate_and_view() {
         check(sop::node::label(&editor::displayed_node(&r.e)) == "box" && centre_x(&r.e) == Some(0.), &format!("v marked the node but did not show it in the viewport: {node}"));
         let (x, y, w, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("box b");
         let target = ((x + w / 2) as f64, (y + 3) as f64);
-        r.step(target, vec![Event::Pointer_moved(target)]);
-        r.step(target, vec![Event::Pointer_pressed(L, target), Event::Pointer_released(L, target)]);
+        r.step(target, vec![Event::PointerMoved(target)]);
+        r.step(target, vec![Event::PointerPressed(L, target), Event::PointerReleased(L, target)]);
         r.step(target, vec![key(Key::KeyChar('v'))]);
         r.step(p, vec![]);
         check(centre_x(&r.e) == Some(20.), "viewing the result did not restore its geometry");
@@ -418,23 +418,23 @@ pub fn run_movers() {
     r.step(m, vec![]);
     let (gx, gy, _, _) = r.panes().graph;
     let p = ((gx + 40) as f64, (gy + 40) as f64);
-    r.step(p, vec![Event::Pointer_moved(p)]);
-    r.step(p, vec![Event::Pointer_pressed(L, p)]);
-    r.step(p, vec![Event::Pointer_released(L, p)]);
+    r.step(p, vec![Event::PointerMoved(p)]);
+    r.step(p, vec![Event::PointerPressed(L, p)]);
+    r.step(p, vec![Event::PointerReleased(L, p)]);
     r.step(p, vec![key(Key::Home)]);
     r.step(p, vec![key(Key::KeyChar('i'))]);
     r.step(p, vec![]);
     let (bx, by, bw, _) = editor::node_box(&r.e, &["g".into(), "widths".into()]).expect("widths");
     let c = ((bx + bw / 2) as f64, (by + 8) as f64);
-    r.step(c, vec![Event::Pointer_moved(c)]);
-    r.step(c, vec![Event::Pointer_pressed(L, c)]);
-    r.step(c, vec![Event::Pointer_released(L, c)]);
+    r.step(c, vec![Event::PointerMoved(c)]);
+    r.step(c, vec![Event::PointerPressed(L, c)]);
+    r.step(c, vec![Event::PointerReleased(L, c)]);
     r.step(c, vec![]);
     let (ix, _, iw, _) = r.panes().inspector;
     let q = ((ix + iw / 2) as f64, 210.);
-    r.step(q, vec![Event::Pointer_moved(q)]);
-    r.step(q, vec![Event::Pointer_pressed(L, q)]);
-    r.step(q, vec![Event::Pointer_released(L, q)]);
+    r.step(q, vec![Event::PointerMoved(q)]);
+    r.step(q, vec![Event::PointerPressed(L, q)]);
+    r.step(q, vec![Event::PointerReleased(L, q)]);
     r.step(q, vec![]);
     let label = r.undo_label();
     let moved = has(&r.source(), "(list 1 3 2") || has(&r.source(), "(list 2 1 3");

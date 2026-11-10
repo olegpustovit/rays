@@ -1,4 +1,4 @@
-//! Editor suite t1: test_workspace_shell.ml
+//! Editor suite t1:
 mod support {
     pub use crate::support::shell::*;
 }

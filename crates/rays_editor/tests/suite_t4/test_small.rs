@@ -1,4 +1,4 @@
-//! test_host_effects.ml, test_threading.ml, test_workspace_start.ml (errors only: start/reload run
+//! , ,  (errors only: start/reload run
 //! a real window through Workspace::main, which has no headless route; see SKIPPED).
 use super::t4::*;
 use flow_syntax::{lisp, syntax};
@@ -34,7 +34,7 @@ pub fn host_effects_edge() {
         up(editor, eframe(vec![], vec![], 0));
         assert_eq!(editor::private::host_stats(editor), (false, 0, 0, 0));
         for count in 1..=2 {
-            up(editor, eframe(vec![Key::KeyChar('q')], vec![Event::Key_pressed(Key::KeyChar('q'))], count));
+            up(editor, eframe(vec![Key::KeyChar('q')], vec![Event::KeyPressed(Key::KeyChar('q'))], count));
         }
         assert_eq!(editor::private::host_stats(editor), (true, 1, 0, 0));
         up(editor, eframe(vec![], vec![], 3));

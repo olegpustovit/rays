@@ -21,8 +21,8 @@ fn marks(body: &str) -> (Buffers, Vec<Entry>) {
     let marks = ok(core_exec::draw(&prepared, &live(), (200,100), &buffers, &core_exec::DrawOptions { root, ..Default::default() }));
     (buffers, marks)
 }
-fn serialize(s: &[scene::node]) -> Vec<u8> { scene_command::render_ir::serialize(&scene::layer::to_ir(s).unwrap()) }
-fn new_scene(body: &str) -> Result<Vec<scene::node>, Diagnostic> {
+fn serialize(s: &[scene::Node]) -> Vec<u8> { scene_command::render_ir::serialize(&scene::layer::to_ir(s).unwrap()) }
+fn new_scene(body: &str) -> Result<Vec<scene::Node>, Diagnostic> {
     let (buffers, marks) = marks(body);
     ms::scene(&buffers, None, None, None, None, &marks)
 }
@@ -118,11 +118,11 @@ fn hand_marks() {
     let image = Entry::Image { resource:1,x:0,y:0,scale:1.,angle:0. };
     match ms::scene(&buffers,None,None,None,None,&[image]) { Err(d) => assert_eq!(d.code,"E_IMAGE"), Ok(_) => panic!("image without resolver accepted") }
 }
-fn prepare(n: usize) -> drawing::prepared {
+fn prepare(n: usize) -> drawing::Prepared {
     let e = evaluate(&format!(r##"(draw/translate [(* 10 (sin t)) 0 0] (draw/rects (map (fn [i] [(* (mod i 800) 1.0) (/ i 1250) 0]) (array/range {n})) [3 3 0] :fill "#5aaaf0"))"##));
     ok(drawing::prepare(&drawing::PrepareOptions { states:e.states.clone(), ..Default::default() },&e.plan,&e.results.iter().find(|(n,_)| n=="g").unwrap().1))
 }
-fn frame(p: &drawing::prepared,s: &flow_eval::State,i: i64) -> Vec<scene::node> {
+fn frame(p: &drawing::Prepared,s: &flow_eval::State,i: i64) -> Vec<scene::Node> {
     let live = input::Frame { frame:i,tick:i,size:(800,600),..input::at_time(i as f64/60.) };
     ok(drawing::render_prepared(p,&live,live.size,&drawing::RenderOptions { state:Some(s.clone()),..Default::default() }))
 }
@@ -143,7 +143,7 @@ fn retention() {
 fn device_registration() {
     let registered = std::rc::Rc::new(Cell::new(0));
     let count = registered.clone();
-    let gpu = move |_:i64,_:i64,_:i64,_:&[ms::attribute]| { count.set(count.get()+1); Ok(m::gpu_token(1,2,1).unwrap()) };
+    let gpu = move |_:i64,_:i64,_:i64,_:&[ms::Attribute]| { count.set(count.get()+1); Ok(m::gpu_token(1,2,1).unwrap()) };
     let device = |_| Ok(flow_ir::flow_ir::gpu::Value { identity:1,count:2,width:1,output:0,stamp:1,gpu_seconds:None });
     let run = |x| {
         let (buffers, mut entries) = marks(&format!("(draw/circles (map (fn [i] [(+ {x} i) 0 0]) (array/range 2)) :radius (map (fn [i] 1.0) (array/range 2)))"));

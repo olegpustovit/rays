@@ -1,5 +1,5 @@
 //! History retains Arc<Document> presents and compact snapshots; Arc::ptr_eq identifies unchanged documents.
-#![allow(non_camel_case_types)]
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 

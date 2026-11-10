@@ -1,4 +1,4 @@
-//! Helpers shared by the t6 files: ports of ws_fixture.ml / test_support.ml bits and the frame builders.
+//! Helpers shared by the t6 files: ports of  /  bits and the frame builders.
 #![allow(dead_code)]
 use editor_document::workspace_doc as wd;
 use input::{Event, Platform};

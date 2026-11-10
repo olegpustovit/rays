@@ -1,4 +1,4 @@
-//! test_editor_consistency.ml, second half: viewport interaction, renderers, live-light failure,
+//! , second half: viewport interaction, renderers, live-light failure,
 //! camera menus and the compiled probe panels.
 use crate::common;
 use super::consistency::*;
@@ -39,16 +39,6 @@ fn center(e: &Ed, key: &str) -> (f64, f64) {
     let g = layout::geometry(None, Some(&[Panel::Timeline]), &shell(&doc).tree, &frame(1));
     let (x, y, w, h) = layout::find(&g, &Panel::View(key.to_owned())).expect("view leaf").body;
     ((x + w / 2) as f64, (y + h / 2) as f64)
-}
-
-fn leaf_body(e: &Ed, panel: Panel) -> (i64, i64, i64, i64) {
-    let doc = build(&editor::workspace(e));
-    let g = layout::geometry(None, Some(&[Panel::Timeline]), &shell(&doc).tree, &frame(1));
-    layout::find(&g, &panel).expect("leaf").body
-}
-
-fn click_at(e: &mut Ed, p: (f64, f64), n: i64) {
-    *e = editor::update(e.clone(), &frame_at(p, click_events(p), n));
 }
 
 fn position(e: &Ed, key: &str) -> rays_math::vec3::T {
@@ -127,7 +117,7 @@ fn hidden_preview() {
         // Focus the authored empty preview, then hide the UI. The fullscreen image remains empty.
         let p = center(e, "v:\"editor\"/\"blank\"");
         upd(e, |e| editor::update(e, &frame_at(p, click_events(p), 2)));
-        upd(e, |e| editor::update(e, &frame_at(p, vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('h'))], 3)));
+        upd(e, |e| editor::update(e, &frame_at(p, vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('h'))], 3)));
         assert_eq!(layers(e).iter().map(|l| l.len()).collect::<Vec<_>>(), vec![0], "hiding the UI switched the focused preview to the primary scene");
     });
 }
@@ -135,7 +125,7 @@ fn hidden_preview() {
 fn focused_framing() {
     with_editor(&workspace(PREVIEW_TEXT), None, |e| {
         let count = std::cell::Cell::new(1);
-        let mut frame_view = |e: &mut Ed, key: &str| {
+        let frame_view = |e: &mut Ed, key: &str| {
             let p = center(e, key);
             count.set(count.get() + 1);
             let c = count.get();
@@ -143,7 +133,7 @@ fn focused_framing() {
             let before = position(e, key);
             count.set(count.get() + 1);
             let c = count.get();
-            upd(e, |e| editor::update(e, &frame_at(p, vec![Event::Key_pressed(Key::KeyChar('f'))], c)));
+            upd(e, |e| editor::update(e, &frame_at(p, vec![Event::KeyPressed(Key::KeyChar('f'))], c)));
             (before, position(e, key))
         };
         let (before, after) = frame_view(e, "v:\"editor\"/\"main\"");
@@ -165,7 +155,7 @@ fn preview_orbits() {
         };
         let focus = |e: &mut Ed, update: &dyn Fn(&mut Ed, &[MouseButton], (f64, f64), (f64, f64), Vec<Event>), key: &str| {
             let point = center(e, key);
-            update(e, &[], (0., 0.), point, vec![Event::Pointer_moved(point)]);
+            update(e, &[], (0., 0.), point, vec![Event::PointerMoved(point)]);
             update(e, &[], (0., 0.), point, click_events(point));
         };
         let main = "v:\"editor\"/\"main\"";
@@ -174,13 +164,13 @@ fn preview_orbits() {
         let initial = position(e, main);
         let (x, y) = center(e, comparison);
         let point = (x, y + 40.);
-        update(e, &[MouseButton::LeftButton], (0., 0.), point, vec![Event::Pointer_pressed(MouseButton::LeftButton, point)]);
+        update(e, &[MouseButton::LeftButton], (0., 0.), point, vec![Event::PointerPressed(MouseButton::LeftButton, point)]);
         for k in 1..=6 {
             let point = (x + k as f64 * 15., y + 40. + k as f64 * 2.);
-            update(e, &[MouseButton::LeftButton], (15., 2.), point, vec![Event::Pointer_moved(point)]);
+            update(e, &[MouseButton::LeftButton], (15., 2.), point, vec![Event::PointerMoved(point)]);
         }
         let point = (x + 90., y + 52.);
-        update(e, &[], (0., 0.), point, vec![Event::Pointer_released(MouseButton::LeftButton, point)]);
+        update(e, &[], (0., 0.), point, vec![Event::PointerReleased(MouseButton::LeftButton, point)]);
         let orbited = position(e, comparison);
         assert!(!same(initial, orbited) && same(position(e, main), initial), "viewport orbit fixture did not produce isolated cameras");
         let preserved = |e: &Ed| assert!(same(position(e, main), initial) && same(position(e, comparison), orbited), "layout change transferred or reset named viewport orbits");
@@ -291,11 +281,11 @@ fn live_light_determinism() {
             let drawings = std::rc::Rc::new(std::cell::Cell::new(0));
             let (p, d) = (prepares.clone(), drawings.clone());
             let options = editor::Create { platform: Some(input::Platform::Apple), ui_text_size: Some(11), presets: Some(presets.to_owned()), await_: Some(true), domains: Some(domains), seed: Some(42), ..Default::default() };
-            let prepare: rays_editor::cook::Prepare_fn = std::rc::Rc::new(move |s, o| {
+            let prepare: rays_editor::cook::PrepareFn = std::rc::Rc::new(move |s, o| {
                 p.set(p.get() + 1);
                 rays_editor::cook::prepare(s, o)
             });
-            let draw: editor::Draw_fn = std::rc::Rc::new(move |n, pr| {
+            let draw: editor::DrawFn = std::rc::Rc::new(move |n, pr| {
                 d.set(d.get() + 1);
                 rays_editor::cook::draw(n, pr)
             });
@@ -377,13 +367,13 @@ fn lisp_apply() {
             upd(e, |e| editor::update(e, &frame_full(&[], keys, (0., 0.), mouse, events, c)));
         };
         let click = |e: &mut Ed, run: &dyn Fn(&mut Ed, (f64, f64), &[Key], Vec<Event>), p: (f64, f64)| {
-            run(e, p, &[], vec![Event::Pointer_moved(p)]);
+            run(e, p, &[], vec![Event::PointerMoved(p)]);
             run(e, p, &[], click_events(p));
         };
         click(e, &run, tab_at(x + w - 32, y, 2));
         click(e, &run, ((x + 180) as f64, (y + 80) as f64));
-        run(e, (450., 300.), &[Key::Meta], vec![Event::Key_pressed(Key::KeyChar('a'))]);
-        run(e, (450., 300.), &[], vec![Event::Text_input(replace(&wd::to_text(&ws).unwrap(), "(sop/box)", "(sop/box :size [2 2 2])"))]);
+        run(e, (450., 300.), &[Key::Meta], vec![Event::KeyPressed(Key::KeyChar('a'))]);
+        run(e, (450., 300.), &[], vec![Event::TextInput(replace(&wd::to_text(&ws).unwrap(), "(sop/box)", "(sop/box :size [2 2 2])"))]);
         let before = format!("{:?}", editor::prepared(e).map(|g| {
             let v = rdk_core::packed::float3::view::view(rdk_core::geometry::positions(&g)).unwrap();
             (v.x.clone(), v.y.clone(), v.z.clone())
@@ -416,29 +406,29 @@ fn enter_camera() {
             let c = count.get();
             upd(e, |e| editor::update(e, &frame_at(mouse, events, c)));
         };
-        let click = |button: MouseButton, p: (f64, f64)| vec![Event::Pointer_pressed(button, p), Event::Pointer_released(button, p)];
+        let click = |button: MouseButton, p: (f64, f64)| vec![Event::PointerPressed(button, p), Event::PointerReleased(button, p)];
         let (gx, gy, _, _) = editor::panes(e, &frame(0)).graph;
         let in_list = ((gx + 60) as f64, (gy + 350) as f64);
         step_(e, in_list, click(MouseButton::LeftButton, in_list));
-        step_(e, (450., 300.), vec![Event::Key_pressed(Key::Home)]);
+        step_(e, (450., 300.), vec![Event::KeyPressed(Key::Home)]);
         let mut index = 0;
         loop {
             if editor::selected_node(e).map(|p| p.label) == Some("telephoto".to_owned()) {
                 break;
             }
             assert!(index < 4, "no camera row telephoto");
-            step_(e, (450., 300.), vec![Event::Key_pressed(Key::ArrowDown)]);
+            step_(e, (450., 300.), vec![Event::KeyPressed(Key::ArrowDown)]);
             index += 1;
         }
         let row = index;
-        step_(e, (450., 300.), vec![Event::Key_pressed(Key::KeyChar('i'))]);
+        step_(e, (450., 300.), vec![Event::KeyPressed(Key::KeyChar('i'))]);
         let v = |e: &Ed| format!("{:?}", editor::view_camera(e)) == format!("{:?}", editor::render_camera(e));
         assert!(editor::look_through(e) && v(e) && rays::camera::position(&editor::render_camera(e)) == rays_math::vec3::create(13., 8.8, 14.8), "camera Enter did not choose and look through the selected camera");
-        step_(e, (450., 300.), vec![Event::Key_pressed(Key::KeyChar('i'))]);
+        step_(e, (450., 300.), vec![Event::KeyPressed(Key::KeyChar('i'))]);
         assert!(editor::look_through(e), "repeated camera Enter disabled look-through");
         let in_view = (100., 300.);
         step_(e, in_view, click(MouseButton::LeftButton, in_view));
-        step_(e, in_view, vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('v'))]);
+        step_(e, in_view, vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('v'))]);
         assert!(!editor::look_through(e), "camera fixture did not leave look-through");
         let at = ((gx + 60) as f64, (gy + 24 + row * 24 + 12) as f64);
         step_(e, at, click(MouseButton::RightButton, at));
@@ -483,7 +473,7 @@ fn named_inspector() {
         r#"(workspace named
     (graph g :context sop (let* [a (sop/test_source :value 1)] a))
     (graph editor :context editor
-      (ui/workspace (ui/split-at "horizontal" 0.6 (ui/graph "g") (ui/inspector)))))"#,
+      (ui/workspace (ui/split_at "horizontal" 0.6 (ui/graph "g") (ui/inspector)))))"#,
         |e, _ws, factories| {
             let (x, y, w, _) = editor::node_box(e, &s(&["g", "a"])).expect("node box");
             let p = ((x + w / 2) as f64, (y + 10) as f64);
@@ -493,9 +483,9 @@ fn named_inspector() {
             let doc = lower_with(factories, &editor::workspace(e));
             let g = layout::geometry(None, Some(&[Panel::Timeline]), &shell(&doc).tree, &frame(1));
             let (from, to) = inspector_drag_from(layout::find(&g, &Panel::Inspector).expect("inspector").body);
-            upd(e, |e| editor::update(e, &frame_full(&[MouseButton::LeftButton], &[], (0., 0.), from, vec![Event::Pointer_pressed(MouseButton::LeftButton, from)], 4)));
-            upd(e, |e| editor::update(e, &frame_full(&[MouseButton::LeftButton], &[], (0., 0.), to, vec![Event::Pointer_moved(to)], 5)));
-            upd(e, |e| editor::update(e, &frame_at(to, vec![Event::Pointer_released(MouseButton::LeftButton, to)], 6)));
+            upd(e, |e| editor::update(e, &frame_full(&[MouseButton::LeftButton], &[], (0., 0.), from, vec![Event::PointerPressed(MouseButton::LeftButton, from)], 4)));
+            upd(e, |e| editor::update(e, &frame_full(&[MouseButton::LeftButton], &[], (0., 0.), to, vec![Event::PointerMoved(to)], 5)));
+            upd(e, |e| editor::update(e, &frame_at(to, vec![Event::PointerReleased(MouseButton::LeftButton, to)], 6)));
             assert_eq!(editor::undo_label(e).as_deref(), Some("Edit value"), "a named SOP pane at the scene level had no editable inspector fields");
         },
     );
@@ -506,8 +496,8 @@ fn stale_inspector_draft() {
         r#"(workspace drafts
     (graph g :context sop (let* [a (sop/test_source :value 1)] a))
     (graph editor :context editor (ui/workspace
-      (ui/split-at "horizontal" 0.6
-        (ui/split-at "vertical" 0.5 (ui/graph "g") (ui/lisp)) (ui/inspector)))))"#,
+      (ui/split_at "horizontal" 0.6
+        (ui/split_at "vertical" 0.5 (ui/graph "g") (ui/lisp)) (ui/inspector)))))"#,
         |e, _ws, factories| {
             let count = std::cell::Cell::new(0);
             let update = |e: &mut Ed, keys: &[Key], buttons: &[MouseButton], p: (f64, f64), events: Vec<Event>| {
@@ -523,13 +513,13 @@ fn stale_inspector_draft() {
             let (lx, ly, _, lh) = layout::find(&panes, &Panel::Lisp).expect("lisp").body;
             let area = ((lx + 150) as f64, (ly + 70) as f64);
             update(e, &[], &[], area, click_events(area));
-            update(e, &[Key::Meta], &[], area, vec![Event::Key_pressed(Key::KeyChar('a'))]);
-            update(e, &[], &[], area, vec![Event::Text_input("(let* [a (sop/test_source :value 2)] a)".into())]);
+            update(e, &[Key::Meta], &[], area, vec![Event::KeyPressed(Key::KeyChar('a'))]);
+            update(e, &[], &[], area, vec![Event::TextInput("(let* [a (sop/test_source :value 2)] a)".into())]);
             let (from, to) = inspector_drag_from(layout::find(&panes, &Panel::Inspector).expect("inspector").body);
             let before = editor::workspace(e);
-            update(e, &[], &[MouseButton::LeftButton], from, vec![Event::Pointer_pressed(MouseButton::LeftButton, from)]);
-            update(e, &[], &[MouseButton::LeftButton], to, vec![Event::Pointer_moved(to)]);
-            update(e, &[], &[], to, vec![Event::Pointer_released(MouseButton::LeftButton, to)]);
+            update(e, &[], &[MouseButton::LeftButton], from, vec![Event::PointerPressed(MouseButton::LeftButton, from)]);
+            update(e, &[], &[MouseButton::LeftButton], to, vec![Event::PointerMoved(to)]);
+            update(e, &[], &[], to, vec![Event::PointerReleased(MouseButton::LeftButton, to)]);
             let edited = editor::workspace(e);
             let label = editor::undo_label(e);
             assert!(!same_ws(&edited, &before) && label.as_deref() == Some("Edit value"), "fixture inspector did not change the source");
@@ -550,7 +540,7 @@ fn named_handles() {
     (graph g :context sop (let* [a (sop/box :center [0 0 0])] a))
     (graph scene :context scene (scene/geometry (ref g) :translate [1 0 0]))
     (graph editor :context editor (ui/workspace
-      (ui/split-at "horizontal" 0.5 (ui/viewport (ref scene)) (ui/graph "g")))))"#,
+      (ui/split_at "horizontal" 0.5 (ui/viewport (ref scene)) (ui/graph "g")))))"#,
     );
     let camera = rays::easy_camera::with_inertia(false, &rays::easy_camera::create(None, Some(7.), None, None, None, None).unwrap());
     with_editor(&ws, Some(camera), |e| {
@@ -575,9 +565,9 @@ fn named_handles() {
         let tip = (base.x + dx / length * 60., base.y + dy / length * 60.);
         let target = (tip.0 + dx / length * 30., tip.1 + dy / length * 30.);
         let before = editor::workspace(e);
-        update(e, &[MouseButton::LeftButton], (0., 0.), tip, vec![Event::Pointer_pressed(MouseButton::LeftButton, tip)]);
-        update(e, &[MouseButton::LeftButton], (target.0 - tip.0, target.1 - tip.1), target, vec![Event::Pointer_moved(target)]);
-        update(e, &[], (0., 0.), target, vec![Event::Pointer_released(MouseButton::LeftButton, target)]);
+        update(e, &[MouseButton::LeftButton], (0., 0.), tip, vec![Event::PointerPressed(MouseButton::LeftButton, tip)]);
+        update(e, &[MouseButton::LeftButton], (target.0 - tip.0, target.1 - tip.1), target, vec![Event::PointerMoved(target)]);
+        update(e, &[], (0., 0.), target, vec![Event::PointerReleased(MouseButton::LeftButton, target)]);
         let after = editor::workspace(e);
         let binding = |w: &wd::T| rays_editor::text_pane::binding(&w.source, &s(&["g", "a"])).map(|(_, v)| flat(&v));
         assert!(!same_ws(&after, &before) && binding(&after) != binding(&before), "named SOP handle did not write its owning graph argument");

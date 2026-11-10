@@ -11,7 +11,7 @@ use rays_editor::{editor, reduce};
 
 /// The widths and heights of the images a scene draws (render_ir `Image` destinations), read from
 /// the command's Debug text: this crate does not depend on scene_command.
-pub fn image_sizes(scene: &[rays::scene::node]) -> Vec<(f64, f64)> {
+pub fn image_sizes(scene: &[rays::scene::Node]) -> Vec<(f64, f64)> {
     let commands = rays::scene::layer::commands(None, scene).expect("scene commands");
     let mut out = Vec::new();
     for c in commands {
@@ -31,7 +31,7 @@ pub fn image_sizes(scene: &[rays::scene::node]) -> Vec<(f64, f64)> {
     out
 }
 
-fn widths(scene: &[rays::scene::node]) -> Vec<f64> {
+fn widths(scene: &[rays::scene::Node]) -> Vec<f64> {
     image_sizes(scene).into_iter().map(|(w, _)| w).collect()
 }
 
@@ -103,7 +103,7 @@ pub fn canvas_frame_size() {
 /// every language form of the add menu starts as an expression that checks
 pub fn menu_forms() {
     let forms = editor::private::menu_forms();
-    for form in ["if", "cond", "case", "for", "fold", "scan", "sum", "fn", "map", "filter", "reduce", "sort-by", "list", "record", "let*", "state"] {
+    for form in ["if", "cond", "case", "for", "fold", "scan", "sum", "fn", "map", "filter", "reduce", "sort_by", "list", "record", "let", "state"] {
         assert!(forms.iter().any(|(f, _)| f == form), "the add menu has no {form}");
     }
     for (form, text) in &forms {
@@ -122,16 +122,16 @@ pub fn world_command() {
         |editor| {
             let editor = editor::update(editor, &frame_at((450., 300.), vec![], 0));
             let before = editor::workspace(&editor);
-            let step = |editor: editor::Editor, actions: &[l::action], count: i64| reduce::step(editor, None, None, actions, &frame_at((450., 300.), vec![], count)).expect("step");
-            let created = step(editor, &[l::action::Go_world], 1);
+            let step = |editor: editor::Editor, actions: &[l::Action], count: i64| reduce::step(editor, None, None, actions, &frame_at((450., 300.), vec![], count)).expect("step");
+            let created = step(editor, &[l::Action::GoWorld], 1);
             let source = text_of(&created);
             assert!(
                 has(&source, "(scene/world (ref sky))") && has(&source, "(graph sky :context world") && has(&source, "(world/sun (world/sky))") && editor::undo_label(&created) == Some("Add World".to_string()),
                 "/ e did not write the World and its graph as one Add World entry: {source}"
             );
-            let repeated = step(created.clone(), &[l::action::Go_world], 2);
+            let repeated = step(created.clone(), &[l::Action::GoWorld], 2);
             assert!(same_ws(&editor::workspace(&repeated), &editor::workspace(&created)), "opening an existing World rewrote the document");
-            let undone = step(repeated, &[l::action::Undo], 3);
+            let undone = step(repeated, &[l::Action::Undo], 3);
             assert!(same_ws(&editor::workspace(&undone), &before), "one undo did not restore the World-free document");
         },
     );
@@ -154,14 +154,14 @@ pub fn world_drag() {
     let at = |dx: f64| (p.0 + dx, p.1);
     let shift = [Key::Shift];
     let left = [MouseButton::LeftButton];
-    d.step_full(&[], &shift, at(0.), vec![Event::Pointer_moved(at(0.))], 1);
-    d.step_full(&left, &shift, at(0.), vec![Event::Pointer_pressed(MouseButton::LeftButton, at(0.))], 1);
-    d.step_full(&left, &shift, at(20.), vec![Event::Pointer_moved(at(20.))], 1);
-    d.step_full(&left, &shift, at(40.), vec![Event::Pointer_moved(at(40.))], 1);
-    d.step_full(&[], &shift, at(40.), vec![Event::Pointer_released(MouseButton::LeftButton, at(40.))], 1);
+    d.step_full(&[], &shift, at(0.), vec![Event::PointerMoved(at(0.))], 1);
+    d.step_full(&left, &shift, at(0.), vec![Event::PointerPressed(MouseButton::LeftButton, at(0.))], 1);
+    d.step_full(&left, &shift, at(20.), vec![Event::PointerMoved(at(20.))], 1);
+    d.step_full(&left, &shift, at(40.), vec![Event::PointerMoved(at(40.))], 1);
+    d.step_full(&[], &shift, at(40.), vec![Event::PointerReleased(MouseButton::LeftButton, at(40.))], 1);
     assert!(d.text() != before, "a Shift-drag in the view did not rotate the World");
     assert!(editor::undo_label(d.e()) == Some("Rotate World".to_string()), "the drag's undo entry is not Rotate World: {:?}", editor::undo_label(d.e()));
-    let undone = reduce::step(d.e().clone(), None, None, &[l::action::Undo], &frame_at((450., 300.), vec![], d.count + 1)).expect("undo");
+    let undone = reduce::step(d.e().clone(), None, None, &[l::Action::Undo], &frame_at((450., 300.), vec![], d.count + 1)).expect("undo");
     assert!(text_of(&undone) == before, "one undo did not undo the whole World drag");
     d.close();
 }
@@ -253,16 +253,16 @@ pub fn text_keys_are_handled() {
             });
         };
         step(&[], vec![]);
-        step(&[], vec![Event::Pointer_pressed(MouseButton::LeftButton, (60., 31.)), Event::Pointer_released(MouseButton::LeftButton, (60., 31.))]);
+        step(&[], vec![Event::PointerPressed(MouseButton::LeftButton, (60., 31.)), Event::PointerReleased(MouseButton::LeftButton, (60., 31.))]);
         let before = (text.borrow().clone(), *sel.borrow(), *caret.borrow());
-        step(&mods, vec![Event::Key_pressed(k)]);
+        step(&mods, vec![Event::KeyPressed(k)]);
         let after = (text.borrow().clone(), *sel.borrow(), *caret.borrow());
         assert!(before != after, "key sheet lists {label} but the text area ignores it");
         ui.destroy();
     }
 }
 
-fn router_actions(focus: &Panel, events: Vec<Event>) -> Vec<l::action> {
+fn router_actions(focus: &Panel, events: Vec<Event>) -> Vec<l::Action> {
     let keymap = l::keymap();
     let refs: Vec<&l::Command> = keymap.iter().collect();
     let (_, actions, _) = router::step(
@@ -282,15 +282,15 @@ pub fn keys_and_guide() {
     text_keys_are_handled();
     for focus in [Panel::View(String::new()), Panel::View("v1.0".into()), Panel::Graph, Panel::List, Panel::Lisp, Panel::Inspector, Panel::Outline, Panel::Timeline] {
         for (events, expected) in [
-            (vec![key(Key::Shift), ch('/')], l::action::Guide_toggle),
-            (vec![ch('?')], l::action::Guide_toggle),
-            (vec![key(Key::KeyChar('/')), ch('?')], l::action::Guide_keys),
+            (vec![key(Key::Shift), ch('/')], l::Action::GuideToggle),
+            (vec![ch('?')], l::Action::GuideToggle),
+            (vec![key(Key::KeyChar('/')), ch('?')], l::Action::GuideKeys),
         ] {
             assert!(router_actions(&focus, events) == vec![expected], "guide key failed outside or inside graph focus ({focus:?})");
         }
     }
     // Tab is the graph's own key for the add menu, and no other pane's
-    for (focus, expected) in [(Panel::Graph, vec![l::action::Add_node]), (Panel::View(String::new()), vec![]), (Panel::Outline, vec![]), (Panel::Inspector, vec![])] {
+    for (focus, expected) in [(Panel::Graph, vec![l::Action::AddNode]), (Panel::View(String::new()), vec![]), (Panel::Outline, vec![]), (Panel::Inspector, vec![])] {
         assert!(router_actions(&focus, vec![key(Key::Tab)]) == expected, "Tab is not the graph's add key alone ({focus:?})");
     }
     assert!(
@@ -345,7 +345,7 @@ pub fn keys_and_guide() {
         "the host guide contexts changed"
     );
     // the list walks with j and k as with the arrows
-    let list_step = |c: char, expected: pxui_shell::tree::Command| router_actions(&Panel::Graph, vec![ch(c)]).iter().any(|a| *a == l::action::List_command(expected));
+    let list_step = |c: char, expected: pxui_shell::tree::Command| router_actions(&Panel::Graph, vec![ch(c)]).iter().any(|a| *a == l::Action::ListCommand(expected));
     assert!(list_step('j', pxui_shell::tree::Command::Down) && list_step('k', pxui_shell::tree::Command::Up), "j and k do not walk the list");
     // focus is a panel; commands are scoped by its kind
     assert!(
@@ -374,11 +374,11 @@ pub fn keys_and_guide() {
         (Key::Delete, vec![], SC::Delete),
         (Key::Backspace, vec![], SC::Delete),
         (Key::KeyChar('b'), vec![], SC::Bypass),
-        (Key::KeyChar('r'), vec![], SC::Wrap_repeat),
-        (Key::KeyChar('r'), vec![Key::Shift], SC::Wrap_iterate),
+        (Key::KeyChar('r'), vec![], SC::WrapRepeat),
+        (Key::KeyChar('r'), vec![Key::Shift], SC::WrapIterate),
         (Key::KeyChar('c'), vec![], SC::Collapse),
-        (Key::KeyChar('m'), vec![], SC::Make_macro),
-        (Key::Home, vec![], SC::Frame_all),
+        (Key::KeyChar('m'), vec![], SC::MakeMacro),
+        (Key::Home, vec![], SC::FrameAll),
     ];
     for (pressed, modifiers, expected) in cases {
         let events: Vec<Event> = modifiers.iter().map(|m| key(m.clone())).chain(std::iter::once(key(pressed))).collect();
@@ -440,7 +440,7 @@ pub fn guide_preference() {
     assert!(enabled() == Some(false), "key-sheet dismissal kept keyboard focus");
     // Toggle preserves unrelated preferences, and Hide follows the same save path.
     store::save("rays-editor", &filename, &[("guide".to_string(), flow_syntax::syntax::parse("false").unwrap().remove(0)), ("other".to_string(), flow_syntax::syntax::parse("7").unwrap().remove(0))]).expect("save");
-    step(&mut d, vec![key(Key::Shift), ch('/'), Event::Key_released(Key::Shift)], 8);
+    step(&mut d, vec![key(Key::Shift), ch('/'), Event::KeyReleased(Key::Shift)], 8);
     step(&mut d, vec![ch('?')], 9);
     let values = store::load("rays-editor", &filename).expect("load");
     assert!(store::bool(&values, "guide") == Some(false) && store::int(&values, "other") == Some(7), "Hide did not save off or discarded another preference");
@@ -453,7 +453,7 @@ pub fn guide_preference() {
         std::fs::read_to_string(format!("{dir}/editor.txt")).expect("editor.txt")
     };
     assert!(has(&dump(&d), "key hud: ? · toggle guide\n"), "key HUD did not use the routed command label");
-    step(&mut d, vec![key(Key::Ctrl), ch('z'), Event::Key_released(Key::Ctrl)], 13);
+    step(&mut d, vec![key(Key::Ctrl), ch('z'), Event::KeyReleased(Key::Ctrl)], 13);
     assert!(has(&dump(&d), "key hud: ⌃Z · undo\n"), "key HUD displayed a different alias from the routed chord");
     step(&mut d, vec![], 200);
     assert!(has(&dump(&d), "key hud: -\n"), "key HUD outlived 1.5 seconds");

@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 8: run_expression_chip, run_context_menus, run_lisp_inspector,
+//! , part 8: run_expression_chip, run_context_menus, run_lisp_inspector,
 //! run_array_capacity_menu, run_open_defn, run_outline_button, run_idle_rest.
 use super::support::*;
 use editor_core::panels::Panel;
@@ -26,8 +26,8 @@ pub fn run_expression_chip() {
     r.step(m, vec![]);
     r.step(m, vec![]);
     let click = |r: &mut Run, p: (f64, f64)| {
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
     };
     let (bx, by, bw, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
     let nw = flow_graph::projection::node_width();
@@ -40,11 +40,11 @@ pub fn run_expression_chip() {
     let before = r.source();
     let (ix, iy, _, _) = r.panes().inspector;
     let at = |dy: i64, x: i64| ((ix + 200 + x) as f64, (iy + dy) as f64);
-    r.stepb(&[LB], at(190, 0), vec![Event::Pointer_pressed(LB, at(190, 0))]);
+    r.stepb(&[LB], at(190, 0), vec![Event::PointerPressed(LB, at(190, 0))]);
     for x in [20, 40, 60, 80] {
         r.stepb(&[LB], at(190, x), vec![]);
     }
-    r.step(at(190, 90), vec![Event::Pointer_released(LB, at(190, 90))]);
+    r.step(at(190, 90), vec![Event::PointerReleased(LB, at(190, 90))]);
     r.step(m, vec![]);
     let after = r.source();
     check(after != before && has(&after, "(+ 2.0 (* ") && !has(&after, "(* 3.0 a)"), &format!("the 3.0 of the * was not editable from the row's inspector: {after}"));
@@ -68,11 +68,11 @@ pub fn run_context_menus() {
         r.close();
         let _ = std::fs::remove_dir_all(&presets);
     };
-    let hover = |r: &mut Run, p: (f64, f64)| r.step(p, vec![Event::Pointer_moved(p)]);
+    let hover = |r: &mut Run, p: (f64, f64)| r.step(p, vec![Event::PointerMoved(p)]);
     let click = |r: &mut Run, b: MouseButton, p: (f64, f64)| {
         hover(r, p);
-        r.stepb(&[b], p, vec![Event::Pointer_pressed(b, p)]);
-        r.step(p, vec![Event::Pointer_released(b, p)]);
+        r.stepb(&[b], p, vec![Event::PointerPressed(b, p)]);
+        r.step(p, vec![Event::PointerReleased(b, p)]);
     };
     exercise("(let* [outline (ui/outline) main (ui/graph \"g\")] (ui/workspace (ui/split \"horizontal\" outline main :first_size 216)))", &|r| {
         let origin = (20., 220.);
@@ -131,15 +131,15 @@ pub fn run_lisp_inspector() {
     check(editor::private::inspector_subject(&r.e) == Some(vec!["g".into(), "card".into()]), "Lisp card did not reach the inspector");
     let (ix, iy, _, _) = r.panes().inspector;
     let at = |x: i64| ((ix + 200 + x) as f64, (iy + 186) as f64);
-    r.stepb(&[LB], at(0), vec![Event::Pointer_pressed(LB, at(0))]);
+    r.stepb(&[LB], at(0), vec![Event::PointerPressed(LB, at(0))]);
     for x in [20, 40, 60, 80] {
         r.stepb(&[LB], at(x), vec![]);
     }
-    r.step(at(90), vec![Event::Pointer_released(LB, at(90))]);
+    r.step(at(90), vec![Event::PointerReleased(LB, at(90))]);
     r.step(m, vec![]);
     check(has(&r.source(), "(sop/local_card src :distance"), &format!("bypassed Lisp node lost its unset inspector parameter: {}", r.source()));
     let p = (150., 300.);
-    r.step(p, vec![Event::Pointer_moved(p)]);
+    r.step(p, vec![Event::PointerMoved(p)]);
     r.step(p, vec![key(Key::KeyChar('/')), key(Key::KeyChar('a'))]);
     r.step(p, vec![text_input("local_card")]);
     r.step(p, vec![key(Key::Enter)]);
@@ -159,7 +159,7 @@ pub fn run_array_capacity_menu() {
     let p = (150., 300.);
     r.step(p, vec![]);
     r.step(p, vec![]);
-    r.step(p, vec![Event::Pointer_moved(p)]);
+    r.step(p, vec![Event::PointerMoved(p)]);
     r.step(p, vec![key(Key::KeyChar('/')), key(Key::KeyChar('a'))]);
     r.step(p, vec![text_input("array/max_length")]);
     r.step(p, vec![key(Key::Enter)]);
@@ -241,8 +241,8 @@ pub fn run_outline_button() {
         None => fail("the Outline button is cut off"),
     };
     ui.destroy();
-    r.step((x, y), vec![Event::Pointer_moved((x, y))]);
-    r.step((x, y), vec![Event::Pointer_pressed(LB, (x, y)), Event::Pointer_released(LB, (x, y))]);
+    r.step((x, y), vec![Event::PointerMoved((x, y))]);
+    r.step((x, y), vec![Event::PointerPressed(LB, (x, y)), Event::PointerReleased(LB, (x, y))]);
     r.step((x, y), vec![]);
     r.step((x, y), vec![]);
     check(has(&r.source(), "(ui/outline)"), "the Outline button did not split an Outline in");
@@ -266,7 +266,7 @@ pub fn run_idle_rest() {
             }
             t
         }
-        fn tick(&mut self, mouse: (f64, f64), step: i64, events: Vec<Event>) -> Vec<rays::scene::node> {
+        fn tick(&mut self, mouse: (f64, f64), step: i64, events: Vec<Event>) -> Vec<rays::scene::Node> {
             self.count += step;
             let f = frame(&[], mouse, events, self.count);
             self.e = editor::update(self.e.clone(), &f);
@@ -274,7 +274,7 @@ pub fn run_idle_rest() {
             self.e = editor::after_present(self.e.clone(), &f);
             scene
         }
-        fn tick0(&mut self) -> Vec<rays::scene::node> {
+        fn tick0(&mut self) -> Vec<rays::scene::Node> {
             self.tick((450., 300.), 1, vec![])
         }
     }
@@ -291,7 +291,7 @@ pub fn run_idle_rest() {
     let a = t.tick0();
     check(rays::scene::same(&t.tick0(), &a), "still at rest");
     // what wakes it: a moved pointer, an event, the second that what polls runs on
-    let after_rest = |t: &mut T, wake: &dyn Fn(&mut T) -> Vec<rays::scene::node>, what: &str| {
+    let after_rest = |t: &mut T, wake: &dyn Fn(&mut T) -> Vec<rays::scene::Node>, what: &str| {
         let prev = t.tick0();
         let woke = wake(t);
         // Pointer movement may leave the rendered Scene picture unchanged.
@@ -303,7 +303,7 @@ pub fn run_idle_rest() {
         check(rays::scene::same(&t.tick0(), &p), &format!("{what}: the editor did not come back to rest"));
     };
     after_rest(&mut t, &|t| t.tick((451., 300.), 1, vec![]), "a moved pointer");
-    after_rest(&mut t, &|t| t.tick((451., 300.), 1, vec![Event::Focus_lost]), "an event");
+    after_rest(&mut t, &|t| t.tick((451., 300.), 1, vec![Event::FocusLost]), "an event");
     after_rest(&mut t, &|t| t.tick((451., 300.), 61, vec![]), "a second");
     editor::close(&t.e);
     // a graph that reads the clock never rests while it plays, even while its picture holds still

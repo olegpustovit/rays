@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 6: run_studio_keywords, run_studio_tail, run_panels,
+//! , part 6: run_studio_keywords, run_studio_tail, run_panels,
 //! run_host_scene_edit, run_panel_chain.
 use super::support::*;
 use editor_document::layout_edit::{Op as L, Size as LSize};
@@ -25,9 +25,9 @@ pub fn run_studio_keywords() {
     }
     let mut r = Run::new(editor(&studio_text()));
     let click = |r: &mut Run, p: (f64, f64)| {
-        big(r, &[], p, vec![Event::Pointer_moved(p)]);
-        big(r, &[LB], p, vec![Event::Pointer_pressed(LB, p)]);
-        big(r, &[], p, vec![Event::Pointer_released(LB, p)]);
+        big(r, &[], p, vec![Event::PointerMoved(p)]);
+        big(r, &[LB], p, vec![Event::PointerPressed(LB, p)]);
+        big(r, &[], p, vec![Event::PointerReleased(LB, p)]);
         big(r, &[], p, vec![]);
     };
     let at = (600., 700.);
@@ -74,7 +74,7 @@ pub fn run_studio_keywords() {
         click(r, (1390., 217. + dy));
     };
     pick(&mut r, 27.);
-    check(has(&r.source(), "studio (ui/split-at \"horizontal\" 0.1505 outline work)") && r.undo_label() == Some("Resize panel".into()), &format!("the Size row did not size the split by its ratio: {}", r.source()));
+    check(has(&r.source(), "studio (ui/split_at \"horizontal\" 0.1505 outline work)") && r.undo_label() == Some("Resize panel".into()), &format!("the Size row did not size the split by its ratio: {}", r.source()));
     pick(&mut r, 75.);
     check(has(&r.source(), "studio (ui/split \"horizontal\" outline work :second_size 1223)"), &format!("the Size row did not fix the second side at its points: {}", r.source()));
     r.close();
@@ -91,9 +91,9 @@ pub fn run_studio_tail() {
     r.step(a, vec![]);
     check(r.dump("pane graph") == "garden" && r.dump("projection") == "graph" && has(&r.dump("panels"), "graph 0*; graph 1: selection tab, draft no"), &format!("the second graph panel does not hold its own text pane: {}", r.dump("panels")));
     let point = (650., 300.);
-    r.step(point, vec![Event::Pointer_moved(point)]);
-    r.stepb(&[LB], point, vec![Event::Pointer_pressed(LB, point)]);
-    r.step(point, vec![Event::Pointer_released(LB, point)]);
+    r.step(point, vec![Event::PointerMoved(point)]);
+    r.stepb(&[LB], point, vec![Event::PointerPressed(LB, point)]);
+    r.step(point, vec![Event::PointerReleased(LB, point)]);
     r.step(point, vec![text_input(" ")]);
     r.step(point, vec![]);
     r.step(point, vec![]);
@@ -144,9 +144,9 @@ pub fn run_panels() {
         *e = next;
     };
     let click = |step: &mut dyn FnMut(&mut editor::Editor, &[MouseButton], (f64, f64), Vec<Event>), e: &mut editor::Editor, p: (f64, f64)| {
-        step(e, &[], p, vec![Event::Pointer_moved(p)]);
-        step(e, &[LB], p, vec![Event::Pointer_pressed(LB, p)]);
-        step(e, &[], p, vec![Event::Pointer_released(LB, p)]);
+        step(e, &[], p, vec![Event::PointerMoved(p)]);
+        step(e, &[LB], p, vec![Event::PointerPressed(LB, p)]);
+        step(e, &[], p, vec![Event::PointerReleased(LB, p)]);
         step(e, &[], p, vec![]);
     };
     step(&mut e, &[], (100., 100.), vec![]);
@@ -239,8 +239,8 @@ pub fn run_panel_chain() {
     for _ in 0..6 {
         r.step(at, vec![]);
     }
-    r.step(at, vec![Event::Pointer_moved(at)]);
-    r.step(at, vec![Event::Pointer_pressed(LB, at), Event::Pointer_released(LB, at)]);
+    r.step(at, vec![Event::PointerMoved(at)]);
+    r.step(at, vec![Event::PointerPressed(LB, at), Event::PointerReleased(LB, at)]);
     let keys = |r: &mut Run, cs: &[char]| {
         for c in cs {
             r.step(at, vec![key(Key::KeyChar(if *c == ' ' { '/' } else { *c }))]);

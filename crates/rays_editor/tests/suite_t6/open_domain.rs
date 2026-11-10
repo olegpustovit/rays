@@ -23,6 +23,8 @@ fn contains(text: &str, fragment: &str) -> bool {
 
 fn op_with(name: &str, signature: Signature, body_name: &'static str) -> Op {
     Op {
+        doc: flow_check::registry::description(name, &signature).into(),
+        example: flow_check::registry::example(name, &signature).into(),
         name: name.into(),
         ctx: C::sop(),
         signature,
@@ -123,7 +125,7 @@ pub fn open_domain() {
     }
     assert!(op::validate(&[ops.clone(), ops.clone()].concat()).is_some(), "duplicate immutable operators accepted");
     assert!(wd::of_text(&wd::TextOptions::default(), &catalog, text).is_err(), "extra operator leaked into default checker");
-    let kind = Kind { qualified: "sop/item".into(), context, slots: vec![], parameters: vec![], outputs: vec![], facts: None };
+    let kind = Kind { qualified: "sop/item".into(), description: "Test node.".into(), context, slots: vec![], parameters: vec![], outputs: vec![], facts: None };
     let with_kind = Catalog { version: 1, kinds: vec![kind] };
     let declared = doc(of_text(&[], &with_kind, "(workspace w (graph g :context sop (sop/item)))"));
     assert!(static_eval(&declared.checked, false).results.iter().find(|(n, _)| n == "g").map(|(_, v)| v.clone()) == Some(Value::Deferred(geometry.clone(), 0)), "custom catalog item ignored its built-in context result type");
@@ -144,11 +146,11 @@ pub fn open_domain() {
     assert!(editor::node_box(&host, &["g".into(), "@result".into()]).is_some(), "host omitted custom operator's card");
     let (x, y, width, height) = editor::panes(&host, &frame(vec![])).graph;
     let point = ((x + width / 2) as f64, (y + height / 2) as f64);
-    host = step(host, vec![Event::Pointer_moved(point), Event::Pointer_pressed(MouseButton::LeftButton, point), Event::Pointer_released(MouseButton::LeftButton, point)]);
-    host = step(host, vec![Event::Key_pressed(Key::KeyChar('/'))]);
-    host = step(host, vec![Event::Key_pressed(Key::KeyChar('a'))]);
-    host = step(host, vec![Event::Text_input("sop/toy_box".into())]);
-    host = step(host, vec![Event::Key_pressed(Key::Enter)]);
+    host = step(host, vec![Event::PointerMoved(point), Event::PointerPressed(MouseButton::LeftButton, point), Event::PointerReleased(MouseButton::LeftButton, point)]);
+    host = step(host, vec![Event::KeyPressed(Key::KeyChar('/'))]);
+    host = step(host, vec![Event::KeyPressed(Key::KeyChar('a'))]);
+    host = step(host, vec![Event::TextInput("sop/toy_box".into())]);
+    host = step(host, vec![Event::KeyPressed(Key::Enter)]);
     let after = editor::workspace(&host);
     let count = authored(&static_eval(&after.checked, false).plan);
     assert!(contains(&wd::to_text(&after).unwrap(), "sop/toy_box") && count == 3, "host menu did not insert custom operator ({count} nodes): {}", wd::to_text(&after).unwrap());

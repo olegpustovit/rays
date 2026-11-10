@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 5: run_root_section, run_idle_follow, run_hide_and_order,
+//! , part 5: run_root_section, run_idle_follow, run_hide_and_order,
 //! run_copy_lisp, run_studio.
 use super::support::*;
 use editor_core::panels::{self, Panel};
@@ -36,8 +36,8 @@ pub fn run_root_section() {
     // the Renderer row of the Scene root section: a press opens its menu under the field; the second row is Wireframe.
     let row = iy + 90 + 24 + 4 + 24 + 40 + 96 + 40 + 24 + 40;
     let press = |r: &mut Run, at: (f64, f64)| {
-        r.step(at, vec![Event::Pointer_moved(at)]);
-        r.step(at, vec![Event::Pointer_pressed(LB, at), Event::Pointer_released(LB, at)]);
+        r.step(at, vec![Event::PointerMoved(at)]);
+        r.step(at, vec![Event::PointerPressed(LB, at), Event::PointerReleased(LB, at)]);
         r.step(at, vec![]);
     };
     let x = (ix + iw * 3 / 4) as f64;
@@ -109,9 +109,9 @@ pub fn run_hide_and_order() {
     let click = |r: &mut Run, path: &[&str]| {
         let (bx, by, bw, bh) = editor::node_box(&r.e, &path.iter().map(|s| flow_syntax::symbol::Symbol::from(*s)).collect::<Vec<_>>()).expect("node box");
         let at = (bx as f64 + bw as f64 / 2., by as f64 + bh as f64 - 6.);
-        r.step(at, vec![Event::Pointer_moved(at)]);
-        r.step(at, vec![Event::Pointer_pressed(LB, at)]);
-        r.step(at, vec![Event::Pointer_released(LB, at)]);
+        r.step(at, vec![Event::PointerMoved(at)]);
+        r.step(at, vec![Event::PointerPressed(LB, at)]);
+        r.step(at, vec![Event::PointerReleased(LB, at)]);
         r.step(at, vec![]);
     };
     click(&mut r, &["scene", "a"]);
@@ -133,7 +133,7 @@ pub fn run_hide_and_order() {
     let mut y = by + 4;
     while !moved && y < by + bh {
         let at = ((bx + bw / 2) as f64, y as f64);
-        r.step(at, vec![Event::Pointer_moved(at)]);
+        r.step(at, vec![Event::PointerMoved(at)]);
         r.step_full(&[], &[Key::Alt], at, vec![key(Key::ArrowDown)]);
         r.step(at, vec![]);
         if has(&r.source(), "(scene/merge b a)") {
@@ -229,7 +229,7 @@ pub fn run_studio() {
     let sized = apply(&ws, L::SetLayoutSize { node: vec!["editor".into(), "studio".into()], size: LSize::First(260) });
     check(has(&text_of(&sized), "(ui/split \"horizontal\" outline work :first_size 260)"), "a fixed side is written in points");
     let ratio = apply(&ws, L::SetLayoutSize { node: vec!["editor".into(), "stage".into()], size: LSize::Ratio(0.61803) });
-    check(has(&text_of(&ratio), "(ui/split-at \"vertical\" 0.618 preview timeline)"), "a ratio keeps four decimals");
+    check(has(&text_of(&ratio), "(ui/split_at \"vertical\" 0.618 preview timeline)"), "a ratio keeps four decimals");
     match workspace_doc::edit(&catalog(), &ws, &Op::SetArg { node: vec!["editor".into(), "studio".into()], key: ArgKey::Kw("second_size".into()), sub: vec![], value: s::make(Node::Num("100".into())) }) {
         Err(d) => check(has(&rays_diagnostic::to_string(&d), "one side"), &format!("two fixed sides: {}", rays_diagnostic::to_string(&d))),
         Ok(_) => fail("two fixed sides was accepted"),
@@ -269,10 +269,10 @@ pub fn run_studio() {
     check(r.dump("text").starts_with("graph tab"), &format!("the lisp panel's tab: {}", r.dump("text")));
     check(editor::look_through(&r.e), "the viewport did not start looking through the render camera");
     let g0 = (216.5, 100.);
-    r.step(g0, vec![Event::Pointer_moved(g0)]);
-    r.stepb(&[LB], g0, vec![Event::Pointer_pressed(LB, g0)]);
-    r.stepb(&[LB], (180.2, 100.), vec![Event::Pointer_moved((180.2, 100.))]);
-    r.step((180.2, 100.), vec![Event::Pointer_released(LB, (180.2, 100.))]);
+    r.step(g0, vec![Event::PointerMoved(g0)]);
+    r.stepb(&[LB], g0, vec![Event::PointerPressed(LB, g0)]);
+    r.stepb(&[LB], (180.2, 100.), vec![Event::PointerMoved((180.2, 100.))]);
+    r.step((180.2, 100.), vec![Event::PointerReleased(LB, (180.2, 100.))]);
     r.step((180.2, 100.), vec![]);
     check(has(&r.source(), "(ui/split \"horizontal\" outline work :first_size 180)") && r.undo_label() == Some("Resize panel".into()), &format!("the gutter of a fixed split did not write points: {}", r.source()));
     // the second layout: a floating graph on the material beside the docked graph, each its own pane
@@ -310,9 +310,9 @@ pub fn run_studio() {
         *e = next;
     };
     let click = |step: &mut dyn FnMut(&mut editor::Editor, &[MouseButton], (f64, f64), Vec<Event>), e: &mut editor::Editor, p: (f64, f64)| {
-        step(e, &[], p, vec![Event::Pointer_moved(p)]);
-        step(e, &[LB], p, vec![Event::Pointer_pressed(LB, p)]);
-        step(e, &[], p, vec![Event::Pointer_released(LB, p)]);
+        step(e, &[], p, vec![Event::PointerMoved(p)]);
+        step(e, &[LB], p, vec![Event::PointerPressed(LB, p)]);
+        step(e, &[], p, vec![Event::PointerReleased(LB, p)]);
         step(e, &[], p, vec![]);
     };
     let rest = |step: &mut dyn FnMut(&mut editor::Editor, &[MouseButton], (f64, f64), Vec<Event>), e: &mut editor::Editor, p: (f64, f64)| {
@@ -328,7 +328,7 @@ pub fn run_studio() {
         l => fail(&format!("{} inspectors drew their rows, not 2", l.len())),
     };
     let scroll = |step: &mut dyn FnMut(&mut editor::Editor, &[MouseButton], (f64, f64), Vec<Event>), e: &mut editor::Editor, p: (f64, f64)| {
-        step(e, &[], p, vec![Event::Pointer_moved(p)]);
+        step(e, &[], p, vec![Event::PointerMoved(p)]);
         for _ in 0..6 {
             step(e, &[], p, vec![Event::Scrolled((0., -8.))]);
         }

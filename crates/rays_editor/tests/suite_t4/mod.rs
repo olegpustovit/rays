@@ -1,18 +1,18 @@
-//! Shared helpers of the t4 editor suite: ports of ws_fixture.ml, the frame builders of
-//! test_editor_input.ml and the cook-settle loops. Not a test target by itself.
+//! Shared helpers of the t4 editor suite: ports of , the frame builders of
+//!  and the cook-settle loops. Not a test target by itself.
 #![allow(dead_code)]
 use input::{Event, Key, MouseButton};
 use rays::frame;
 use rays_editor::editor;
 
 pub fn key(k: Key) -> Event {
-    Event::Key_pressed(k)
+    Event::KeyPressed(k)
 }
 pub fn chr(c: char) -> Event {
-    Event::Key_pressed(Key::KeyChar(c))
+    Event::KeyPressed(Key::KeyChar(c))
 }
 pub fn click(point: (f64, f64)) -> Vec<Event> {
-    vec![Event::Pointer_pressed(MouseButton::LeftButton, point), Event::Pointer_released(MouseButton::LeftButton, point)]
+    vec![Event::PointerPressed(MouseButton::LeftButton, point), Event::PointerReleased(MouseButton::LeftButton, point)]
 }
 
 #[derive(Clone, Default)]
@@ -23,7 +23,7 @@ pub struct Opts {
     pub mouse: Option<(f64, f64)>,
 }
 
-/// test_editor_input.ml `frame` (size 900x640).
+///  `frame` (size 900x640).
 pub fn frame(o: &Opts, mouse: (f64, f64), events: Vec<Event>, count: i64) -> frame::Frame {
     frame::Frame {
         input: input::Frame { dt: 1. / 60., frame: count, tick: count, size: (900, 640), pointer: mouse, keys: o.keys.clone(), buttons: o.buttons.clone(), events, ..input::at_time(count as f64 / 60.) },
@@ -37,7 +37,7 @@ pub fn frame0() -> frame::Frame {
     frame(&Opts::default(), (0., 0.), Vec::new(), 0)
 }
 
-/// ws_fixture.ml `of_text`.
+///  `of_text`.
 pub fn of_text(factories: Option<&[sop::edit_graph::Factory]>, text: &str) -> editor_document::workspace_doc::T {
     let catalog = rays_editor::workspace_catalog(factories).unwrap_or_else(|d| panic!("{d:?}"));
     editor_document::workspace_doc::of_text(&Default::default(), &catalog, text).unwrap_or_else(|ds| panic!("{ds:?}"))

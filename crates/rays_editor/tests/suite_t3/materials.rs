@@ -49,7 +49,7 @@ fn geometry_of(o: &sop::session::Output) -> rdk_core::geometry::T {
     ok(sop::payload::geometry(&o.payload))
 }
 
-fn surface_scene(node: &sop::node::T, surface: &rdk_rays::surface::T) -> Vec<rays::scene3::walk::drawing> {
+fn surface_scene(node: &sop::node::T, surface: &rdk_rays::surface::T) -> Vec<rays::scene3::walk::Drawing> {
     let explosion = rdk_rays::packed_pieces::explosion(sop::node::operation(node), &sop::node::parameter_fields(node));
     let scene = ok(rdk_rays::surface::scene3(explosion.as_ref(), None, surface));
     rays::scene3::walk::drawings(&scene)
@@ -159,13 +159,13 @@ pub fn follow_tests() {
     let pane = |d: &Driver| dump_line(d.e(), "pane graph");
     let route = |d: &Driver| dump_line(d.e(), "route");
     let click = |d: &mut Driver, keys: &[Key], (x, y): (f64, f64)| {
-        d.step_full(&[], keys, (x, y), vec![Event::Pointer_moved((x, y))], 1);
-        d.step_full(&[MouseButton::LeftButton], keys, (x, y), vec![Event::Pointer_pressed(MouseButton::LeftButton, (x, y))], 1);
-        d.step_full(&[], keys, (x, y), vec![Event::Pointer_released(MouseButton::LeftButton, (x, y))], 1);
+        d.step_full(&[], keys, (x, y), vec![Event::PointerMoved((x, y))], 1);
+        d.step_full(&[MouseButton::LeftButton], keys, (x, y), vec![Event::PointerPressed(MouseButton::LeftButton, (x, y))], 1);
+        d.step_full(&[], keys, (x, y), vec![Event::PointerReleased(MouseButton::LeftButton, (x, y))], 1);
     };
     let jump = |d: &mut Driver, name: &str| {
         d.step(vec![key(Key::KeyChar('/')), ch('j')]);
-        d.step(vec![Event::Text_input(name.into())]);
+        d.step(vec![Event::TextInput(name.into())]);
         d.step(vec![key(Key::Enter)]);
         d.step(vec![]);
     };
@@ -273,7 +273,7 @@ pub fn follow_tests() {
     // / a: Material makes a graph and opens it; Material of... fills the reference
     jump(&mut d, "scene");
     d.step(vec![key(Key::KeyChar('/')), ch('a')]);
-    d.step(vec![Event::Text_input("material".into())]);
+    d.step(vec![Event::TextInput("material".into())]);
     d.step(vec![key(Key::Enter)]);
     d.step(vec![]);
     check(has(&d.text(), "(graph material :context material"), &format!("/ a made a material graph: {}", d.text()));
@@ -285,7 +285,7 @@ pub fn follow_tests() {
     let body = tile(&d, &["shards", "m"]);
     click(&mut d, &[], body);
     d.step(vec![key(Key::KeyChar('/')), ch('a')]);
-    d.step(vec![Event::Text_input("spare".into())]);
+    d.step(vec![Event::TextInput("spare".into())]);
     d.step(vec![key(Key::Enter)]);
     d.step(vec![]);
     check(has(&d.text(), ":material (ref spare)") && has(&d.text(), "(sop/material m"), &format!("Material of... adds a sop/material after the selection: {}", d.text()));

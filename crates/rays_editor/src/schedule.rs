@@ -2,7 +2,7 @@
 //! parameter change, after `force`, and whenever the sketch clock changed and any reachable node
 //! declares `Time` or `Frame`. While a primary-pointer edit is held it cooks only when `live` and
 //! the worker is idle; otherwise only the latest desired cook is retained until release.
-#![allow(non_camel_case_types)]
+
 use input::MouseButton;
 use param::Effects;
 use rays::frame;

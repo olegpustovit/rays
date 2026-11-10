@@ -17,12 +17,12 @@ use rays::frame;
 
 use crate::cook;
 use crate::editor_actions::{apply_action, in_world, intent_label, routed, world_keys};
-use crate::editor_commands::{self, action, action_of};
+use crate::editor_commands::{self, Action, action_of};
 use crate::editor_frame;
 use crate::editor_history as history;
 use crate::editor_model::*;
-use crate::editor_reduce::{self, gesture_key, idle_input, idle_result, reduce, reduce_idle, Frame_input};
-use crate::editor_setup::{self, create_opts};
+use crate::editor_reduce::{self, gesture_key, idle_input, idle_result, reduce, reduce_idle, FrameInput};
+use crate::editor_setup::{self, CreateOpts};
 use crate::selection;
 use crate::timeline;
 
@@ -31,12 +31,12 @@ const TEXT: &str = "(workspace w (graph g :context sop (sop/box)))";
 fn model() -> EditorModel {
     let catalog = editor_document::kinds::catalog(flow_sop::manifest::VERSION, &sop::nodes::factories()).expect("catalog");
     let ws = workspace_doc::of_text(&TextOptions::default(), &catalog, TEXT).expect("workspace");
-    let opts = create_opts {
+    let opts = CreateOpts {
         preferences: Some(std::env::temp_dir().join("rays-editor-test-no-preferences.rays").to_string_lossy().to_string()),
         presets: Some(std::env::temp_dir().join("rays-editor-test-presets").to_string_lossy().to_string()),
         ui_text_size: 11,
         await_: Some(true),
-        ..create_opts::default()
+        ..CreateOpts::default()
     };
     editor_setup::create(opts, &ws, Rc::new(cook::prepare)).expect("model")
 }
@@ -62,33 +62,33 @@ fn actions_routing_and_labels() {
         // not in the World: its keys are not routed; no layouts: the digit commands are left out
         assert!(!in_world(&(&value).into()));
         let keymap = routed(&(&value).into());
-        assert!(keymap.iter().all(|c| !matches!(action_of(c), action::World_emit | action::World_reseed | action::World_time(_) | action::World_play | action::World_preset(_) | action::Layout_switch(_))));
+        assert!(keymap.iter().all(|c| !matches!(action_of(c), Action::WorldEmit | Action::WorldReseed | Action::WorldTime(_) | Action::WorldPlay | Action::WorldPreset(_) | Action::LayoutSwitch(_))));
         // the graph panel is in the default tree: the node menu key is routed, and so is frame-camera
-        assert!(keymap.iter().any(|c| matches!(action_of(c), action::Add_node)));
-        assert!(keymap.iter().any(|c| matches!(action_of(c), action::Frame_camera)));
+        assert!(keymap.iter().any(|c| matches!(action_of(c), Action::AddNode)));
+        assert!(keymap.iter().any(|c| matches!(action_of(c), Action::FrameCamera)));
 
         // undo labels of graph intents
-        assert_eq!(intent_label(&change::Select_layout("x".into())).as_deref(), Some("Switch layout"));
-        assert_eq!(intent_label(&change::Set_parameter { node: 1, path: "size".into(), value: Value::Float(1.0) }).as_deref(), Some("Set size"));
-        assert_eq!(intent_label(&change::Pin_row { node: vec![], label: "a".into(), pin: Some(false) }).as_deref(), Some("Unpin row from card"));
-        assert_eq!(intent_label(&change::Pin_row { node: vec![], label: "a".into(), pin: None }).as_deref(), Some("Pin row to card"));
-        assert_eq!(intent_label(&change::Notice("x".into())), None);
+        assert_eq!(intent_label(&Change::SelectLayout("x".into())).as_deref(), Some("Switch layout"));
+        assert_eq!(intent_label(&Change::SetParameter { node: 1, path: "size".into(), value: Value::Float(1.0) }).as_deref(), Some("Set size"));
+        assert_eq!(intent_label(&Change::PinRow { node: vec![], label: "a".into(), pin: Some(false) }).as_deref(), Some("Unpin row from card"));
+        assert_eq!(intent_label(&Change::PinRow { node: vec![], label: "a".into(), pin: None }).as_deref(), Some("Pin row to card"));
+        assert_eq!(intent_label(&Change::Notice("x".into())), None);
 
         // leader actions: restore layout flips, open-camera clears the selection and shows the
         // inspector, play/pause steps the timeline
         let state = (value.workspace.clone(), selection::select(3), value.tree.clone(), value.timeline.clone(), Vec::new());
-        let (workspace, selection, _, _, _) = apply_action(&value, state.clone(), &action::Restore_layout);
+        let (workspace, selection, _, _, _) = apply_action(&value, state.clone(), &Action::RestoreLayout);
         assert!(workspace.restored);
         assert_eq!(workspace.hidden, vec![Panel::Timeline]);
-        let again = apply_action(&value, (workspace, selection, value.tree.clone(), value.timeline.clone(), Vec::new()), &action::Restore_layout);
+        let again = apply_action(&value, (workspace, selection, value.tree.clone(), value.timeline.clone(), Vec::new()), &Action::RestoreLayout);
         assert!(!again.0.restored);
-        let (_, selection, _, _, _) = apply_action(&value, state.clone(), &action::Open_camera);
+        let (_, selection, _, _, _) = apply_action(&value, state.clone(), &Action::OpenCamera);
         assert!(selection::selected(&selection).is_none());
-        let (_, _, _, stepped, _) = apply_action(&value, state.clone(), &action::Play_pause);
+        let (_, _, _, stepped, _) = apply_action(&value, state.clone(), &Action::PlayPause);
         assert_ne!(timeline::mode(&stepped), timeline::mode(&value.timeline));
 
         // World keys outside a World edit nothing
-        let (doc, label, edits) = world_keys(&(&value).into(), &value.doc, &selection::empty(), &[action::World_emit]);
+        let (doc, label, edits) = world_keys(&(&value).into(), &value.doc, &selection::empty(), &[Action::WorldEmit]);
         assert!(label.is_none() && edits.is_empty());
         assert!(Arc::ptr_eq(&doc, &value.doc));
         assert!(editor_document::document::scene_graph(&doc).len() == editor_document::document::scene_graph(&value.doc).len());
@@ -112,16 +112,16 @@ fn reducer_idle_undo_and_gestures() {
         assert_eq!(history::depth(&idle.history), 0);
         assert!(idle.notice.is_none());
         // undo and redo with nothing to step say so
-        let undone = reduce_idle(None, None, &value, &[action::Undo], &frame0).expect("undo");
-        assert_eq!(undone.notice, Some((notice_kind::Refusal, "Undo: nothing to undo".to_string())));
-        let redone = reduce_idle(None, None, &value, &[action::Redo], &frame0).expect("redo");
-        assert_eq!(redone.notice, Some((notice_kind::Refusal, "Redo: nothing to redo".to_string())));
+        let undone = reduce_idle(None, None, &value, &[Action::Undo], &frame0).expect("undo");
+        assert_eq!(undone.notice, Some((NoticeKind::Refusal, "Undo: nothing to undo".to_string())));
+        let redone = reduce_idle(None, None, &value, &[Action::Redo], &frame0).expect("redo");
+        assert_eq!(redone.notice, Some((NoticeKind::Refusal, "Redo: nothing to redo".to_string())));
 
         // a syntax gesture is written to the text, one history entry named by the op
         let expr = syntax::parse("(sop/box)").expect("parse").remove(0);
         let op = Op::AddNode { scope: vec!["g".into()], name: "second".to_string(), expr };
         let mut result = idle_result(&(&value).into(), selection::empty());
-        result.changes = vec![change::Syntax_edit(op)];
+        result.changes = vec![Change::SyntaxEdit(op)];
         let mut owned = value.clone();
         let identity = owned.preferences.as_ptr();
         let out = reduce(None, None, idle_input(&(&owned).into(), &[], &frame0), &mut owned, result);
@@ -134,23 +134,23 @@ fn reducer_idle_undo_and_gestures() {
         assert!(out.effects.cook);
         assert!(owned.edit_error.is_none());
         let wrote = owned.notice.clone().expect("a note of what was written");
-        assert_eq!(wrote.0, notice_kind::Info);
+        assert_eq!(wrote.0, NoticeKind::Info);
         assert!(wrote.1.starts_with("Wrote "), "{}", wrote.1);
 
         // undo restores the text
-        let back = reduce_idle(None, None, &owned, &[action::Undo], &frame0).expect("undo");
+        let back = reduce_idle(None, None, &owned, &[Action::Undo], &frame0).expect("undo");
         assert!(!editor_document::preset::text(&back.doc).unwrap().contains("second"));
         assert_eq!(history::depth(&back.history), 0);
-        assert_eq!(back.notice, Some((notice_kind::Info, "Undo Add node".to_string())));
+        assert_eq!(back.notice, Some((NoticeKind::Info, "Undo Add node".to_string())));
         // and redo brings it back
-        let forth = reduce_idle(None, None, &back, &[action::Redo], &frame0).expect("redo");
+        let forth = reduce_idle(None, None, &back, &[Action::Redo], &frame0).expect("redo");
         assert!(editor_document::preset::text(&forth.doc).unwrap().contains("second"));
 
         // A successful prefix and then a refusal roll the whole gesture batch back.
         let mut result = idle_result(&(&value).into(), selection::empty());
         result.changes = vec![
-            change::Syntax_edit(Op::AddNode { scope: vec!["g".into()], name: "rolled_back".to_string(), expr: syntax::parse("(sop/box)").unwrap().remove(0) }),
-            change::Syntax_edit(Op::RemoveGraph { name: "missing".to_string() }),
+            Change::SyntaxEdit(Op::AddNode { scope: vec!["g".into()], name: "rolled_back".to_string(), expr: syntax::parse("(sop/box)").unwrap().remove(0) }),
+            Change::SyntaxEdit(Op::RemoveGraph { name: "missing".to_string() }),
         ];
         let mut refused = value.clone();
         reduce(None, None, idle_input(&(&value).into(), &[], &frame0), &mut refused, result);
@@ -170,7 +170,7 @@ fn reducer_gesture_keys_layout_and_prompts() {
         let free = frame_at(0.0, vec![], vec![]);
         let mut result = idle_result(&(&value).into(), selection::empty());
         // a scrub is one gesture key while the button is down, none when it is not
-        result.changes = vec![change::Set_parameter { node: 4, path: "size".to_string(), value: Value::Float(2.0) }];
+        result.changes = vec![Change::SetParameter { node: 4, path: "size".to_string(), value: Value::Float(2.0) }];
         assert_eq!(gesture_key(&(&value).into(), &held, false, false, &None, &result).as_deref(), Some("graph.scrub:scene:4:size"));
         assert_eq!(gesture_key(&(&value).into(), &free, false, false, &None, &result), None);
         assert_eq!(gesture_key(&(&value).into(), &held, true, false, &None, &result), None);
@@ -192,7 +192,7 @@ fn reducer_gesture_keys_layout_and_prompts() {
         assert_eq!(repeated_result.label, "Move");
         // a zone collapsed is stored, a probe is view state only
         let mut result = idle_result(&(&value).into(), selection::empty());
-        result.scope_changes = vec![scope::Change::Zone_collapsed { zone: vec!["g".into(), "z".into()], collapsed: true }, scope::Change::Probe_set { zone: vec!["g".into(), "z".into()], index: 3 }];
+        result.scope_changes = vec![scope::Change::ZoneCollapsed { zone: vec!["g".into(), "z".into()], collapsed: true }, scope::Change::ProbeSet { zone: vec!["g".into(), "z".into()], index: 3 }];
         let (next, result, probes) = editor_reduce::layout_gestures(&value, false, &[], value.doc.clone(), result.clone(), &result.scope_changes.clone());
         assert_eq!(result.label, "Collapse zone");
         assert_eq!(next.workspace.ws.layout.collapsed.get(&vec!["g".into(), "z".into()]), Some(&true));
@@ -202,22 +202,22 @@ fn reducer_gesture_keys_layout_and_prompts() {
         let dir = std::env::temp_dir().join(format!("rays-editor-test-presets-{}", std::process::id()));
         let mut value = value;
         value.presets = dir.to_string_lossy().to_string();
-        let view = |_: Option<&Panel_result>| syntax::make(syntax::Draft::Map(Vec::new()));
+        let view = |_: Option<&PanelResult>| syntax::make(syntax::Draft::Map(Vec::new()));
         let mut result = idle_result(&(&value).into(), selection::empty());
-        result.prompt_intent = Some(prompt_intent::Save_preset_file("probe".to_string()));
+        result.prompt_intent = Some(PromptIntent::SavePresetFile("probe".to_string()));
         let (_, notice, loaded) = editor_reduce::prompt_step(&value, &view, &result);
         assert!(loaded.is_none());
         let (kind, text) = notice.expect("a notice");
-        assert_eq!(kind, notice_kind::Info);
+        assert_eq!(kind, NoticeKind::Info);
         assert!(text.starts_with("Saved preset probe"), "{text}");
-        result.prompt_intent = Some(prompt_intent::Load_preset_file("probe".to_string()));
+        result.prompt_intent = Some(PromptIntent::LoadPresetFile("probe".to_string()));
         let (_, notice, loaded) = editor_reduce::prompt_step(&value, &view, &result);
         assert!(loaded.is_some(), "{:?}", notice);
-        assert_eq!(notice, Some((notice_kind::Info, "Loaded preset probe".to_string())));
-        result.prompt_intent = Some(prompt_intent::Load_preset_file("nothing-here".to_string()));
+        assert_eq!(notice, Some((NoticeKind::Info, "Loaded preset probe".to_string())));
+        result.prompt_intent = Some(PromptIntent::LoadPresetFile("nothing-here".to_string()));
         let (_, notice, loaded) = editor_reduce::prompt_step(&value, &view, &result);
         assert!(loaded.is_none());
-        assert_eq!(notice.expect("refusal").0, notice_kind::Refusal);
+        assert_eq!(notice.expect("refusal").0, NoticeKind::Refusal);
         let _ = std::fs::remove_dir_all(&dir);
         editor_host_close(&value);
     });
@@ -241,7 +241,7 @@ fn frame_helpers() {
         let all = editor_commands::keymap().to_vec();
         let live = editor_frame::live_keymap(false, std::rc::Rc::new(all.clone()));
         assert!(live.len() < all.len());
-        assert!(live.iter().all(|c| !matches!(action_of(c), action::List_command(_) | action::Frame_camera)));
+        assert!(live.iter().all(|c| !matches!(action_of(c), Action::ListCommand(_) | Action::FrameCamera)));
         assert_eq!(editor_frame::live_keymap(true, std::rc::Rc::new(all.clone())).len(), all.len());
         // no carry: no marks
         assert_eq!(editor_frame::carry_marks(&value), (Vec::new(), None));
@@ -253,8 +253,8 @@ fn frame_helpers() {
         // Level is still the scene
         assert_eq!(pane_level(&(&value).into()), Level::Scene);
         // the reducer's idle input mirrors the model
-        let input: Frame_input = idle_input(&(&value).into(), &[action::Undo], &early);
-        assert_eq!(input.actions, vec![action::Undo]);
+        let input: FrameInput = idle_input(&(&value).into(), &[Action::Undo], &early);
+        assert_eq!(input.actions, vec![Action::Undo]);
         assert!(!input.carrying);
         editor_host_close(&value);
     });
@@ -270,9 +270,9 @@ fn whole_frame_update() {
     big_stack(|| {
         let value = model();
         let frame0 = frame_at(0.0, vec![], vec![]);
-        let camera = |_: &mut pxui::ui::Ui| -> Panel_result { Rc::new(()) };
-        let handles = |_: &mut pxui::ui::Ui, _: Option<&picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
-        let view_state: Rc<dyn Fn(Option<&Panel_result>) -> syntax::Syntax> = Rc::new(|_| syntax::make(syntax::Draft::Map(Vec::new())));
+        let camera = |_: &mut pxui::ui::Ui| -> PanelResult { Rc::new(()) };
+        let handles = |_: &mut pxui::ui::Ui, _: Option<&Picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
+        let view_state: Rc<dyn Fn(Option<&PanelResult>) -> syntax::Syntax> = Rc::new(|_| syntax::make(syntax::Draft::Map(Vec::new())));
         // the panes hidden: only the keys and the reducer run
         let mut updated = value.clone();
         let out = editor_frame::update(&mut updated, false, false, &camera, &handles, None, None, view_state.clone(), &frame0, None, None, Vec::new(), None);
@@ -295,7 +295,7 @@ fn whole_frame_update() {
         updated.edit_phases = flow_syntax::phase_timer::empty();
         // every pane drawn headless: the shell's panels get roots, the focus stays, nothing edits
         let frame1 = frame_at(1.0 / 60.0, vec![], vec![]);
-        let out = editor_frame::update(&mut updated, true, false, &camera, &handles, None, None, view_state, &frame1, None, None, Vec::new(), None);
+        let _out = editor_frame::update(&mut updated, true, false, &camera, &handles, None, None, view_state, &frame1, None, None, Vec::new(), None);
         assert!(Arc::ptr_eq(&updated.doc, &value.doc));
         assert!(!updated.pane_keys.is_empty());
         assert_eq!(updated.focus, value.focus);
@@ -501,9 +501,9 @@ fn frame_views_borrow_the_owned_model() {
             assert!(editor_shell::has_panel(&(&value).into(), &Panel::Graph));
         }
         let frame = frame_at(0.0, vec![], vec![]);
-        let camera = |_: &mut pxui::ui::Ui| -> Panel_result { Rc::new(()) };
-        let handles = |_: &mut pxui::ui::Ui, _: Option<&picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
-        let view_state = Rc::new(|_: Option<&Panel_result>| syntax::make(syntax::Draft::Map(Vec::new())));
+        let camera = |_: &mut pxui::ui::Ui| -> PanelResult { Rc::new(()) };
+        let handles = |_: &mut pxui::ui::Ui, _: Option<&Picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
+        let view_state = Rc::new(|_: Option<&PanelResult>| syntax::make(syntax::Draft::Map(Vec::new())));
         let identity = value.preferences.as_ptr();
         // Warm the UI's font/layout caches before measuring a steady frame.
         editor_frame::update(&mut value, true, false, &camera, &handles, None, None, view_state.clone(), &frame, None, None, Vec::new(), None);

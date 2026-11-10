@@ -32,6 +32,6 @@ fn timeline_advances_pauses_stops_resets_and_seeks() {
     let (sought, seek_changes) = t::seek(&timeline, 8);
     assert!(t::frame(&sought) == 8 && t::time(&sought) == 2.0 && t::mode(&sought) == Mode::Paused && t::changed_context(&seek_changes));
     assert_eq!(t::frame(&t::seek(&timeline, -3).0), 0, "seek did not clamp at frame 0");
-    let key = frame_with(0.25, vec![input::Event::Key_pressed(input::Key::KeyChar('p'))], vec![]);
+    let key = frame_with(0.25, vec![input::Event::KeyPressed(input::Key::KeyChar('p'))], vec![]);
     assert_eq!(t::mode(&t::update(&t::create(), &key).0), Mode::Playing, "timeline reacted to a key press");
 }

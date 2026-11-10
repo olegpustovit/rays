@@ -55,7 +55,7 @@ pub(super) fn picture(owner: &gpu::WorkspaceGpu, geometry: &g::T) -> scene3::Sce
 pub(super) fn frame(camera: &rays::camera::Camera, picture: scene3::Scene3) -> scene::Scene {
     vec![scene::clear(color::black()), scene::view3d(None, camera, picture)]
 }
-pub(super) fn draw(canvas: &canvas::Canvas, frame: &[scene::node]) -> Vec<color::T> {
+pub(super) fn draw(canvas: &canvas::Canvas, frame: &[scene::Node]) -> Vec<color::T> {
     canvas::render(None, canvas, frame).unwrap();
     canvas::pixels(canvas).unwrap()
 }
@@ -114,7 +114,7 @@ fn run(owner: &gpu::WorkspaceGpu, config: &ir_gpu::Config, workspace: &editor_do
     let easy = rays::easy_camera::create(None,None,None,None,None,None).unwrap();
     let framed = rays::easy_camera::camera(&rays::easy_camera::frame_bounds(lo, hi, &easy)).unwrap();
     let mut world = rays::world::bake(Some(1), None, 32,16,&rays::world::default()).unwrap();
-    world.sun = Some(rays::world::sun { direction: vec3::normalize(vec3::create(0.3,1.,0.2)), radiance: rays::world::rgb(4.,4.,4.), angular_radius: 0.01 });
+    world.sun = Some(rays::world::Sun { direction: vec3::normalize(vec3::create(0.3,1.,0.2)), radiance: rays::world::rgb(4.,4.,4.), angular_radius: 0.01 });
     let mut variants = Vec::new();
     for (name, camera, shadow) in [("orbit", orbit, false), ("frame", framed, false), ("shadow", camera.clone(), true)] {
         let adapted = if shadow { scene3::with_world(world.clone(), &picture) } else { picture.clone() };
@@ -174,8 +174,8 @@ fn run(owner: &gpu::WorkspaceGpu, config: &ir_gpu::Config, workspace: &editor_do
     assert!(gpu::image_stats(owner).0.payload_readback_bytes > before.payload_readback_bytes);
     let read_for_trace = gpu::image_stats(owner).0.payload_readback_bytes;
     let host_mesh = scene3::walk::drawings(&host_scene)[0].mesh.clone();
-    for mode in [scene3::render_mode::Wireframe,scene3::render_mode::Vertices] {
-        let mode_frame = |mesh| frame(&camera,scene3::create(None,None,None,None,vec![scene3::mesh(None,None,Some(mode),Some(scene3::cull::Cull_none),None,mesh)]).unwrap());
+    for mode in [scene3::RenderMode::Wireframe,scene3::RenderMode::Vertices] {
+        let mode_frame = |mesh| frame(&camera,scene3::create(None,None,None,None,vec![scene3::mesh(None,None,Some(mode),Some(scene3::Cull::CullNone),None,mesh)]).unwrap());
         assert_eq!(draw(&canvas,&mode_frame(mesh.clone())),draw(&host_canvas,&mode_frame(host_mesh.clone())));
     }
     assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,read_for_trace);

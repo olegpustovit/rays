@@ -369,7 +369,7 @@ fn live_mesh() {
         traced(&gpu,config);
         assert!(flow_ir::fallback::seen().is_empty(),"{:?}",flow_ir::fallback::seen());
         // Sorting within a per-vertex map remains a CPU-only form.
-        let broken=text(16).replace("(mod vertex 4)","(nth (sort-by (fn [(n : int)] n) (list (mod vertex 4))) 0)");
+        let broken=text(16).replace("(mod vertex 4)","(nth (sort_by (fn [(n : int)] n) (list (mod vertex 4))) 0)");
         cook(&broken,Some(config.clone()),&[0.],None,false,|_,_|{});
         assert!(flow_ir::fallback::seen().iter().any(|(site,reason,_)|site.ends_with("positions")&&!reason.is_empty()));
         flow_ir::fallback::reset();

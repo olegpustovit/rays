@@ -3,7 +3,7 @@
 //! Specialisation of `Editor_core.Command`: the commands are `editor_core::command::Command` (scope = a
 //! kind of panel) and their `action` field is a code into this module's action table.
 //! `action_of(&command)` gives the `action` back.
-#![allow(non_camel_case_types)]
+
 use std::sync::OnceLock;
 
 use editor_core::command;
@@ -18,90 +18,90 @@ use pxui_shell::tree;
 use crate::text_pane;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum action {
-    Save_preset,
-    Browse_presets,
+pub enum Action {
+    SavePreset,
+    BrowsePresets,
     /// Command-S: rewrite the sketch's .rays, else a preset
-    Save_source,
+    SaveSource,
     /// the palette: take the source file's text over unsaved edits
-    Reload_source,
+    ReloadSource,
     /// Command-O: choose a .rays in the system dialog and open it in this window
-    Open_source,
-    Toggle_timeline,
-    Toggle_graph,
-    Toggle_inspector,
-    Hide_ui,
-    Open_camera,
-    Play_pause,
+    OpenSource,
+    ToggleTimeline,
+    ToggleGraph,
+    ToggleInspector,
+    HideUi,
+    OpenCamera,
+    PlayPause,
     Reset,
     Stop,
-    Add_node,
-    Frame_tile,
-    Frame_camera,
-    Look_through,
-    Look_through_camera,
+    AddNode,
+    FrameTile,
+    FrameCamera,
+    LookThrough,
+    LookThroughCamera,
     Fly,
     /// 0 none, 1 translate, 2 rotate, 3 scale
     Tool(i64),
     /// the viewport header's tabs: 0 solid, 1 wire, 2 traced
-    Render_mode(i64),
+    RenderMode(i64),
     Undo,
     Redo,
-    Panel_split(Axis),
-    Panel_close,
+    PanelSplit(Axis),
+    PanelClose,
     /// / o ...: the focused panel, as the header menu does
-    Panel_retype(Panel),
-    Panel_pick,
+    PanelRetype(Panel),
+    PanelPick,
     /// x, n: a menu of panel kinds at the pointer; 1-8 or a click picks, then x places a split, n
     /// opens a window
-    Window_pick,
+    WindowPick,
     /// the pending split, committed where the pointer clicked
-    Panel_split_at(Path, Axis, f64, Panel),
+    PanelSplitAt(Path, Axis, f64, Panel),
     /// / m: in the World, the view pane flips to the lat-long map
-    Toggle_map,
+    ToggleMap,
     /// Command +/-/0: the kit text of every panel but the graph and viewports
-    Ui_scale(i64),
-    Restore_layout,
+    UiScale(i64),
+    RestoreLayout,
     Enter,
     Up,
-    Go_world,
+    GoWorld,
     /// Esc, or a click on an earlier part of the graph header's route: that many steps back, only
     /// along the route
     Back(i64),
     /// I: the followed graph in a floating window
     Peek,
     /// y: carry the open material or SOP graph, or the selected object's graph (see carry.rs)
-    Pick_up,
+    PickUp,
     /// / j: a filter over every graph
     Jump,
     /// Command-F, -Option-F, -G, -Shift-G, -E and F12: the find bar, its matches, the definition
     /// under the caret
-    Text_command(text_pane::Command),
+    TextCommand(text_pane::Command),
     /// Command-P: a filter over the bindings of the text
-    Goto_symbol,
+    GotoSymbol,
     /// Command-L: a line and column of the text
-    Goto_line,
-    Layout_switch(i64),
-    Layout_new,
+    GotoLine,
+    LayoutSwitch(i64),
+    LayoutNew,
     /// / [ 0..9, n, x: the layouts of the editor graph's switch
-    Layout_remove,
-    Window_new(Panel),
+    LayoutRemove,
+    WindowNew(Panel),
     /// / n g/l/t/i/u/m/w: a floating window in the active layout; / o f floats or docks the
     /// focused panel
-    Float_toggle,
-    World_emit,
-    World_reseed,
-    World_time(f64),
-    World_play,
-    World_preset(i64),
+    FloatToggle,
+    WorldEmit,
+    WorldReseed,
+    WorldTime(f64),
+    WorldPlay,
+    WorldPreset(i64),
     /// the workspace pane, see `Editor_panes.scope_name`
-    Scope_command(Scope_command_t),
-    List_command(tree::Command),
-    Guide_toggle,
-    Guide_keys,
-    Command_palette,
+    ScopeCommand(Scope_command_t),
+    ListCommand(tree::Command),
+    GuideToggle,
+    GuideKeys,
+    CommandPalette,
     /// the palette: the workspace text, as Command-S writes it, on the clipboard
-    Copy_lisp,
+    CopyLisp,
 }
 
 /// A command's scope is a kind of panel: any viewport is `View ""`, and the list and the lisp panel
@@ -121,18 +121,18 @@ pub use editor_core::router::State;
 /// What the table is made of: each command with the action its `action` code names.
 struct Table {
     commands: Vec<Command>,
-    actions: Vec<action>,
+    actions: Vec<Action>,
 }
 
 struct Builder {
     commands: Vec<Command>,
-    actions: Vec<action>,
+    actions: Vec<Action>,
 }
 
 impl Builder {
     /// `command ?trigger ?scope ?guide ~id ~label action`: a leader key is listed by the leader
     /// sheet.
-    fn command(&mut self, id: &str, label: &str, trigger: Option<Trigger>, scope: Option<Panel>, guide: &[gc::GuideContext], act: action) {
+    fn command(&mut self, id: &str, label: &str, trigger: Option<Trigger>, scope: Option<Panel>, guide: &[gc::GuideContext], act: Action) {
         let mut g: Vec<gc::GuideContext> = Vec::new();
         if matches!(trigger, Some(Trigger::Leader(_))) {
             g.push(gc::GuideContext::Leader);
@@ -158,58 +158,53 @@ fn build() -> Table {
     let view = Some(Panel::View(String::new()));
     let ch = Key::KeyChar;
     use gc::GuideContext::{Canvas, Hints, List, Multi, Node};
-    use action::*;
-    b.command("guide.toggle", "toggle guide", chord(ch('/'), &[Key::Shift]), None, &[Canvas, Node, Multi, Hints, gc::GuideContext::Leader, List], Guide_toggle);
-    b.command("guide.toggle", "toggle guide", chord(ch('?'), &[]), None, &[], Guide_toggle);
-    b.command("guide.keys", "all keys", leader("?"), None, &[Canvas, Node, Multi, Hints, List], Guide_keys);
-    b.command("preset.save", "save preset", leader("s"), None, &[], Save_preset);
-    b.command("preset.browse", "browse presets", leader("b"), None, &[], Browse_presets);
-    b.command("workspace.toggle-timeline", "toggle timeline", leader("t"), None, &[], Toggle_timeline);
-    b.command("workspace.toggle-graph", "toggle graph", leader("g"), None, &[], Toggle_graph);
-    b.command("workspace.toggle-inspector", "toggle inspector", leader("i"), None, &[], Toggle_inspector);
-    b.command("workspace.hide-ui", "hide all UI", leader("h"), None, &[], Hide_ui);
-    b.command("workspace.camera-section", "camera section", leader("c"), None, &[], Open_camera);
-    b.command("timeline.play-pause", "play / pause", leader("p"), None, &[], Play_pause);
-    b.command("timeline.play-pause", "play / pause", chord(Key::Space, &[]), None, &[], Play_pause);
+    use Action::*;
+    b.command("guide.toggle", "toggle guide", chord(ch('/'), &[Key::Shift]), None, &[Canvas, Node, Multi, Hints, gc::GuideContext::Leader, List], GuideToggle);
+    b.command("guide.toggle", "toggle guide", chord(ch('?'), &[]), None, &[], GuideToggle);
+    b.command("guide.keys", "all keys", leader("?"), None, &[Canvas, Node, Multi, Hints, List], GuideKeys);
+    b.command("preset.save", "save preset", leader("s"), None, &[], SavePreset);
+    b.command("preset.browse", "browse presets", leader("b"), None, &[], BrowsePresets);
+    b.command("workspace.toggle-timeline", "toggle timeline", leader("t"), None, &[], ToggleTimeline);
+    b.command("workspace.toggle-graph", "toggle graph", leader("g"), None, &[], ToggleGraph);
+    b.command("workspace.toggle-inspector", "toggle inspector", leader("i"), None, &[], ToggleInspector);
+    b.command("workspace.hide-ui", "hide all UI", leader("h"), None, &[], HideUi);
+    b.command("workspace.camera-section", "camera section", leader("c"), None, &[], OpenCamera);
+    b.command("timeline.play-pause", "play / pause", leader("p"), None, &[], PlayPause);
+    b.command("timeline.play-pause", "play / pause", chord(Key::Space, &[]), None, &[], PlayPause);
     b.command("timeline.reset", "reset", leader("r"), None, &[], Reset);
     b.command("timeline.reset", "reset", chord(ch('p'), &[Key::Shift]), None, &[], Reset);
     b.command("sketch.stop", "stop", leader("q"), None, &[], Stop);
-    b.command("workspace.command-palette", "command palette", leader("/"), None, &[], Command_palette);
-    b.command("file.copy-lisp", "Copy workspace as Lisp", None, None, &[], Copy_lisp);
-    b.command("file.reload", "Reload sketch from its file", None, None, &[], Reload_source);
-    b.command("world.map", "3D / map (World)", leader("m"), None, &[], Toggle_map);
-    b.command("workspace.restore-layout", "restore layout", leader("z"), None, &[], Restore_layout);
-    b.command("panel.split-right", "split panel, side by side", leader("ov"), None, &[], Panel_split(Axis::H));
-    b.command("panel.split-below", "split panel, stacked", leader("oh"), None, &[], Panel_split(Axis::V));
-    b.command("panel.close", "close panel", leader("ox"), None, &[], Panel_close);
-    b.command("panel.pick-split", "split panel at the pointer (pick a kind)", leader("x"), None, &[], Panel_pick);
-    b.command("window.pick", "new window (pick a kind)", leader("n"), None, &[], Window_pick);
-    b.command("panel.float", "float / dock panel", leader("of"), None, &[], Float_toggle);
+    b.command("workspace.command-palette", "command palette", leader("/"), None, &[], CommandPalette);
+    b.command("file.copy-lisp", "Copy workspace as Lisp", None, None, &[], CopyLisp);
+    b.command("file.reload", "Reload sketch from its file", None, None, &[], ReloadSource);
+    b.command("world.map", "3D / map (World)", leader("m"), None, &[], ToggleMap);
+    b.command("workspace.restore-layout", "restore layout", leader("z"), None, &[], RestoreLayout);
+    b.command("panel.split-right", "split panel, side by side", leader("ov"), None, &[], PanelSplit(Axis::H));
+    b.command("panel.split-below", "split panel, stacked", leader("oh"), None, &[], PanelSplit(Axis::V));
+    b.command("panel.close", "close panel", leader("ox"), None, &[], PanelClose);
+    b.command("panel.pick-split", "split panel at the pointer (pick a kind)", leader("x"), None, &[], PanelPick);
+    b.command("window.pick", "new window (pick a kind)", leader("n"), None, &[], WindowPick);
+    b.command("panel.float", "float / dock panel", leader("of"), None, &[], FloatToggle);
     // / [: the first nine rows are the layouts, named from their panels when which-key draws
     for i in 0..10 {
-        b.command(&format!("layout.{i}"), "layout", leader(&format!("[{i}")), None, &[], Layout_switch(i));
+        b.command(&format!("layout.{i}"), "layout", leader(&format!("[{i}")), None, &[], LayoutSwitch(i));
     }
-    b.command("layout.new", "layout: new, from this one", leader("[n"), None, &[], Layout_new);
-    b.command("layout.remove", "layout: remove this one", leader("[x"), None, &[], Layout_remove);
+    b.command("layout.new", "layout: new, from this one", leader("[n"), None, &[], LayoutNew);
+    b.command("layout.remove", "layout: remove this one", leader("[x"), None, &[], LayoutRemove);
     // / l: the focused panel becomes one of the kinds (a document without an editor graph gets one
     // written from its layout first)
-    b.command("panel.graph", "panel: graph", leader("lg"), None, &[], Panel_retype(Panel::Graph));
-    b.command("panel.list", "panel: list", leader("ll"), None, &[], Panel_retype(Panel::List));
-    b.command("panel.lisp", "panel: lisp text", leader("lt"), None, &[], Panel_retype(Panel::Lisp));
-    b.command("panel.inspector", "panel: inspector", leader("li"), None, &[], Panel_retype(Panel::Inspector));
-    b.command("panel.outline", "panel: outline", leader("lu"), None, &[], Panel_retype(Panel::Outline));
-    b.command("panel.timeline", "panel: timeline", leader("lm"), None, &[], Panel_retype(Panel::Timeline));
-    b.command("panel.viewport", "panel: viewport", leader("lw"), None, &[], Panel_retype(Panel::View(String::new())));
-    b.command("panel.canvas", "panel: canvas", leader("lc"), None, &[], Panel_retype(Panel::Canvas(String::new())));
-    b.command("scene.world", "World", leader("e"), None, &[], Go_world);
-    b.command("graph.add-node", "add (menu)", leader("a"), None, &[], Add_node);
+    for entry in editor_core::panels::PANELS {
+        b.command(entry.command, &format!("panel: {}", entry.id), leader(entry.shortcut), None, &[], PanelRetype(entry.panel.clone()));
+    }
+    b.command("scene.world", "World", leader("e"), None, &[], GoWorld);
+    b.command("graph.add-node", "add (menu)", leader("a"), None, &[], AddNode);
     // the graph's own key for the same menu: with a node selected the pick is wired after it
-    b.command("graph.add-after", "add after", chord(Key::Tab, &[]), graph.clone(), &[], Add_node);
-    b.command("world.emit", "dome / light", chord(ch('t'), &[]), graph.clone(), &[Node, List], World_emit);
-    b.command("world.reseed", "reseed", chord(ch('n'), &[]), graph.clone(), &[Node, List], World_reseed);
-    b.command("world.earlier", "time -30 min", chord(ch('['), &[]), graph.clone(), &[Canvas, Node, Multi, List], World_time(-0.5));
-    b.command("world.later", "time +30 min", chord(ch(']'), &[]), graph.clone(), &[Canvas, Node, Multi, List], World_time(0.5));
-    b.command("world.play", "play day cycle", chord(ch('d'), &[]), graph.clone(), &[Canvas, Node, Multi, List], World_play);
+    b.command("graph.add-after", "add after", chord(Key::Tab, &[]), graph.clone(), &[], AddNode);
+    b.command("world.emit", "dome / light", chord(ch('t'), &[]), graph.clone(), &[Node, List], WorldEmit);
+    b.command("world.reseed", "reseed", chord(ch('n'), &[]), graph.clone(), &[Node, List], WorldReseed);
+    b.command("world.earlier", "time -30 min", chord(ch('['), &[]), graph.clone(), &[Canvas, Node, Multi, List], WorldTime(-0.5));
+    b.command("world.later", "time +30 min", chord(ch(']'), &[]), graph.clone(), &[Canvas, Node, Multi, List], WorldTime(0.5));
+    b.command("world.play", "play day cycle", chord(ch('d'), &[]), graph.clone(), &[Canvas, Node, Multi, List], WorldPlay);
     for (index, (name, _)) in rays::world::presets().iter().enumerate() {
         b.command(
             &format!("world.preset.{}", index + 1),
@@ -217,46 +212,46 @@ fn build() -> Table {
             chord(ch((b'1' + index as u8) as char), &[]),
             graph.clone(),
             &[Canvas, Node, Multi, List],
-            World_preset(index as i64),
+            WorldPreset(index as i64),
         );
     }
     b.command("scene.enter", "follow / enter", chord(ch('i'), &[]), None, &[Node, List], Enter);
     b.command("scene.peek", "peek (floating graph)", chord(ch('i'), &[Key::Shift]), None, &[Node, List], Peek);
     b.command("scene.jump", "jump to graph", leader("j"), None, &[], Jump);
-    b.command("text.definition", "go to definition", chord(Key::F12, &[]), None, &[], Text_command(text_pane::Command::Definition));
-    b.command("text.references", "find references", chord(Key::F12, &[Key::Shift]), None, &[], Text_command(text_pane::Command::References));
+    b.command("text.definition", "go to definition", chord(Key::F12, &[]), None, &[], TextCommand(text_pane::Command::Definition));
+    b.command("text.references", "find references", chord(Key::F12, &[Key::Shift]), None, &[], TextCommand(text_pane::Command::References));
     // carry: y picks up; the target letters, Enter and Escape are read by `editor_frame` while it
     // lasts
-    b.command("carry.pick-up", "pick up (carry it onto a place)", chord(ch('y'), &[]), None, &[Canvas, Node, Multi, List], Pick_up);
+    b.command("carry.pick-up", "pick up (carry it onto a place)", chord(ch('y'), &[]), None, &[Canvas, Node, Multi, List], PickUp);
     b.command("scene.up", "back (up a level)", chord(ch('u'), &[]), None, &[Canvas, Node, Multi, List], Up);
     b.command("scene.back", "back along the route", chord(Key::Escape, &[]), graph.clone(), &[Canvas, Node, Multi], Back(1));
     // Rare: the graph context menu and the palette, no leader key.
-    b.command("graph.frame-tile", "frame displayed tile", leader("f"), graph.clone(), &[], Frame_tile);
-    b.command("graph.frame-tile", "reveal list selection", chord(ch('f'), &[]), graph.clone(), &[List], Frame_tile);
-    b.command("view.frame-camera", "frame the displayed node", chord(ch('f'), &[]), view.clone(), &[Canvas, Node, Multi], Frame_camera);
+    b.command("graph.frame-tile", "frame displayed tile", leader("f"), graph.clone(), &[], FrameTile);
+    b.command("graph.frame-tile", "reveal list selection", chord(ch('f'), &[]), graph.clone(), &[List], FrameTile);
+    b.command("view.frame-camera", "frame the displayed node", chord(ch('f'), &[]), view.clone(), &[Canvas, Node, Multi], FrameCamera);
     for modifier in [Key::Meta, Key::Ctrl] {
-        b.command("file.save", "save sketch", chord(ch('s'), &[modifier]), None, &[], Save_source);
-        b.command("file.open", "open sketch", chord(ch('o'), &[modifier]), None, &[], Open_source);
+        b.command("file.save", "save sketch", chord(ch('s'), &[modifier]), None, &[], SaveSource);
+        b.command("file.open", "open sketch", chord(ch('o'), &[modifier]), None, &[], OpenSource);
         b.command("edit.undo", "undo", chord(ch('z'), &[modifier]), None, &[], Undo);
         b.command("edit.redo", "redo", chord(ch('z'), &[modifier, Key::Shift]), None, &[], Redo);
         b.command("edit.redo", "redo", chord(ch('y'), &[modifier]), None, &[], Redo);
-        b.command("text.find", "find in text", chord(ch('f'), &[modifier]), None, &[], Text_command(text_pane::Command::Find));
-        b.command("text.replace", "find and replace", chord(ch('f'), &[modifier, Key::Alt]), None, &[], Text_command(text_pane::Command::FindReplace));
-        b.command("text.next", "next match", chord(ch('g'), &[modifier]), None, &[], Text_command(text_pane::Command::FindNext));
-        b.command("text.previous", "previous match", chord(ch('g'), &[modifier, Key::Shift]), None, &[], Text_command(text_pane::Command::FindPrevious));
-        b.command("text.find-selection", "find the selection", chord(ch('e'), &[modifier]), None, &[], Text_command(text_pane::Command::FindSelection));
-        b.command("text.symbol", "go to symbol", chord(ch('p'), &[modifier]), None, &[], Goto_symbol);
-        b.command("text.line", "go to line", chord(ch('l'), &[modifier]), None, &[], Goto_line);
-        b.command("ui.larger", "larger panel text", chord(ch('='), &[modifier]), None, &[], Ui_scale(1));
-        b.command("ui.larger", "larger panel text", chord(ch('+'), &[modifier]), None, &[], Ui_scale(1));
-        b.command("ui.smaller", "smaller panel text", chord(ch('-'), &[modifier]), None, &[], Ui_scale(-1));
-        b.command("ui.reset-size", "default panel text size", chord(ch('0'), &[modifier]), None, &[], Ui_scale(0));
+        b.command("text.find", "find in text", chord(ch('f'), &[modifier]), None, &[], TextCommand(text_pane::Command::Find));
+        b.command("text.replace", "find and replace", chord(ch('f'), &[modifier, Key::Alt]), None, &[], TextCommand(text_pane::Command::FindReplace));
+        b.command("text.next", "next match", chord(ch('g'), &[modifier]), None, &[], TextCommand(text_pane::Command::FindNext));
+        b.command("text.previous", "previous match", chord(ch('g'), &[modifier, Key::Shift]), None, &[], TextCommand(text_pane::Command::FindPrevious));
+        b.command("text.find-selection", "find the selection", chord(ch('e'), &[modifier]), None, &[], TextCommand(text_pane::Command::FindSelection));
+        b.command("text.symbol", "go to symbol", chord(ch('p'), &[modifier]), None, &[], GotoSymbol);
+        b.command("text.line", "go to line", chord(ch('l'), &[modifier]), None, &[], GotoLine);
+        b.command("ui.larger", "larger panel text", chord(ch('='), &[modifier]), None, &[], UiScale(1));
+        b.command("ui.larger", "larger panel text", chord(ch('+'), &[modifier]), None, &[], UiScale(1));
+        b.command("ui.smaller", "smaller panel text", chord(ch('-'), &[modifier]), None, &[], UiScale(-1));
+        b.command("ui.reset-size", "default panel text size", chord(ch('0'), &[modifier]), None, &[], UiScale(0));
     }
     for (c, scope_action) in scope_commands::bindings() {
         let mut c = c;
         c.scope = graph.clone();
         c.action = b.actions.len();
-        b.actions.push(Scope_command(scope_action));
+        b.actions.push(ScopeCommand(scope_action));
         b.commands.push(c);
     }
     for (c, tree_action) in tree::bindings() {
@@ -264,11 +259,11 @@ fn build() -> Table {
         c.scope = graph.clone();
         c.guide = vec![List];
         c.action = b.actions.len();
-        b.actions.push(List_command(tree_action));
+        b.actions.push(ListCommand(tree_action));
         b.commands.push(c);
     }
     b.command("view.fly", "fly (WASD, Q/E, Esc)", leader("w"), view.clone(), &[], Fly);
-    b.command("view.look-through", "look through render camera", leader("v"), view.clone(), &[], Look_through);
+    b.command("view.look-through", "look through render camera", leader("v"), view.clone(), &[], LookThrough);
     b.command("view.translate", "move handles", chord(ch('w'), &[]), view.clone(), &[Canvas, Node, Multi], Tool(1));
     b.command("view.rotate", "rotate handles", chord(ch('e'), &[]), view.clone(), &[Canvas, Node, Multi], Tool(2));
     b.command("view.scale", "scale handles", chord(ch('r'), &[]), view.clone(), &[Canvas, Node, Multi], Tool(3));
@@ -288,7 +283,7 @@ pub fn keymap() -> &'static [Command] {
 }
 
 /// What a command of this table does (its `action` code is an index into the table's actions).
-pub fn action_of(c: &Command) -> &'static action {
+pub fn action_of(c: &Command) -> &'static Action {
     &table().actions[c.action]
 }
 
@@ -361,16 +356,4 @@ pub fn describe_prefix(prefix: &str) -> Option<String> {
     }
 }
 
-pub fn pane_name(panel: &Panel) -> &'static str {
-    match panel {
-        Panel::Canvas(_) => "Canvas",
-        Panel::View(_) => "View",
-        Panel::Graph => "Graph",
-        Panel::List => "List",
-        Panel::Lisp => "Lisp",
-        Panel::Inspector => "Inspector",
-        Panel::Spreadsheet => "Spreadsheet",
-        Panel::Outline => "Outline",
-        Panel::Timeline => "Timeline",
-    }
-}
+pub fn pane_name(panel: &Panel) -> &'static str { editor_core::panels::definition(panel).title }

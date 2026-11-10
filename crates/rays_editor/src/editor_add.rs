@@ -2,7 +2,7 @@
 //! becomes one `AddNode` at the selected zone (else the graph body), wired to the selected node
 //! when the kind takes a geometry input; the language's forms and "Value" entries are cards with a
 //! small working expression to edit in place. Bundle C.
-#![allow(non_camel_case_types)]
+
 use flow_syntax::symbol::Symbol;
 use editor_document::document::Level;
 use editor_document::scene_sync;
@@ -70,27 +70,33 @@ pub fn add_target<'a>(value: &ModelView<'a>) -> Option<(String, Context)> {
 }
 
 /// The language's forms, which are not operators: the menu adds each as a card with a small
-/// working expression to edit in place. Section of the Value category, name in the menu, the
-/// expression it starts as, the binding's name.
-pub const FORMS: [(&str, &str, &str, &str); 17] = [
-    ("Frame", "state", "(state [previous 0.0] (+ previous (frame/dt)))", "state"),
-    ("Branch", "if", "(if true 1.0 0.0)", "choice"),
-    ("Branch", "cond", "(cond false 1.0 :else 0.0)", "choice"),
-    ("Branch", "case", "(case 0 0 1.0 :else 0.0)", "choice"),
-    ("Loop", "for", "(for [i (range 4)] i)", "each"),
-    ("Loop", "fold", "(fold [total 0.0] [i (range 4)] (+ total i))", "folded"),
-    ("Loop", "iterate", "(iterate 3 0.0 (fn [x] (+ x 1.0)))", "iterated"),
-    ("Loop", "scan", "(scan [total 0.0] [i (range 4)] (+ total i))", "steps"),
-    ("Loop", "sum", "(sum [i (range 4)] i)", "total"),
-    ("Function", "fn", "(fn [x] x)", "function"),
-    ("Function", "map", "(map (fn [x] x) (range 4))", "mapped"),
-    ("Function", "filter", "(filter (fn [x] (> x 1)) (range 4))", "kept"),
-    ("Function", "reduce", "(reduce (fn [total x] (+ total x)) 0 (range 4))", "reduced"),
-    ("Function", "sort-by", "(sort-by (fn [x] x) (range 4))", "sorted"),
-    ("Data", "list", "(list 1.0 2.0 3.0)", "items"),
-    ("Data", "record", "{:a 1.0 :b 2.0}", "record"),
-    ("Data", "let*", "(let* [a 1.0] a)", "scope"),
+/// working expression to edit in place. Each row names its Value category section,
+/// the form, and the binding. Expressions come from the language registry.
+pub const FORMS: [(&str, &str, &str); 17] = [
+    ("Frame", "state", "state"),
+    ("Branch", "if", "choice"),
+    ("Branch", "cond", "choice"),
+    ("Branch", "case", "choice"),
+    ("Loop", "for", "each"),
+    ("Loop", "fold", "folded"),
+    ("Loop", "iterate", "iterated"),
+    ("Loop", "scan", "steps"),
+    ("Loop", "sum", "total"),
+    ("Function", "fn", "function"),
+    ("Function", "map", "mapped"),
+    ("Function", "filter", "kept"),
+    ("Function", "reduce", "reduced"),
+    ("Function", "sort_by", "sorted"),
+    ("Data", "list", "items"),
+    ("Data", "record", "record"),
+    ("Data", "let", "scope"),
 ];
+
+pub fn form_example(form: &str) -> &'static str {
+    if form == "record" { "{:a 1.0 :b 2.0}" } else {
+        flow_check::registry::FORMS.iter().find(|entry| entry.0 == form).expect("menu form is registered").3
+    }
+}
 
 fn value_entry(output: Option<Ty>, sub: &str, key: &str, label: &str) -> Entry {
     let output = match (output, sub) {
@@ -115,7 +121,7 @@ pub fn value_entries() -> Vec<Entry> {
         value_entry(None, "Text", "=text", "Text"),
         value_entry(None, "Text", "=str", "str"),
     ];
-    for (sub, form, _, _) in FORMS.iter() {
+    for (sub, form, _) in FORMS.iter() {
         let output = match *sub {
             "Loop" | "Data" | "Function" => Ty::List(Box::new(Ty::Float)),
             _ => Ty::Float,
@@ -123,7 +129,7 @@ pub fn value_entries() -> Vec<Entry> {
         out.push(value_entry(Some(output), sub, &format!("={form}"), form));
     }
     for o in w::value_ops() {
-        if FORMS.iter().any(|(_, form, _, _)| *form == o) {
+        if FORMS.iter().any(|(_, form, _)| *form == o) {
             continue;
         }
         let output = if o == "array/max_length" { Some(Ty::Int) } else { None };
@@ -177,9 +183,9 @@ pub fn value_expression(ops: &[op::Op], wire: Option<(String, Ty)>, context: &Co
             ),
             "mesh".to_owned(),
         ),
-        form if FORMS.iter().any(|(_, f, _, _)| *f == form) => {
-            let (_, _, text, name) = FORMS.iter().find(|(_, f, _, _)| *f == form).unwrap();
-            (parse_one(text), (*name).to_owned())
+        form if FORMS.iter().any(|(_, f, _)| *f == form) => {
+            let (_, _, name) = FORMS.iter().find(|(_, f, _)| *f == form).unwrap();
+            (parse_one(form_example(form)), (*name).to_owned())
         }
         o => {
             let signature = w::op_signature(ops, context, o);
@@ -219,22 +225,22 @@ fn last_of(path: &[Symbol]) -> &str {
 
 /// A kind picked in the node menu, as one `AddNode` at the selected zone (else the graph body),
 /// wired to the selected node when the kind takes a geometry input.
-pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
+pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<Change> {
     let target = add_target(value);
     if let Some(context) = key.strip_prefix("newgraph:") {
         // "New graph: <context>" of the add menu: a whole graph, opened once made
-        return vec![change::Syntax_batch("New graph".to_owned(), vec![new_graph(value, context).1])];
+        return vec![Change::SyntaxBatch("New graph".to_owned(), vec![new_graph(value, context).1])];
     }
-    let Some((graph, context)) = target else { return vec![change::Declined("Open a graph to add a node to it".to_owned())] };
+    let Some((graph, context)) = target else { return vec![Change::Declined("Open a graph to add a node to it".to_owned())] };
     if context == context::scene() && (key == "geometry" || key == "world" || key.starts_with("of:")) {
         // composition: geometry brings its SOP graph, World its world graph, one gesture each
-        let geometry = |existing: Option<&str>, label: String| vec![change::Syntax_batch(label, scene_sync::add_geometry(&value.doc, existing))];
+        let geometry = |existing: Option<&str>, label: String| vec![Change::SyntaxBatch(label, scene_sync::add_geometry(&value.doc, existing))];
         return if key == "geometry" {
             geometry(None, "Add geometry".to_owned())
         } else if key == "world" {
             match scene_sync::add_world(&value.doc) {
-                Ok(ops) => vec![change::Syntax_batch("Add World".to_owned(), ops)],
-                Err(message) => vec![change::Declined(message)],
+                Ok(ops) => vec![Change::SyntaxBatch("Add World".to_owned(), ops)],
+                Err(message) => vec![Change::Declined(message)],
             }
         } else {
             let g = &key[3..];
@@ -242,7 +248,7 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
         };
     }
     if context == context::scene() && key == "material" {
-        return vec![change::Syntax_batch("New material".to_owned(), vec![new_material(value).1])];
+        return vec![Change::SyntaxBatch("New material".to_owned(), vec![new_material(value).1])];
     }
     let ws = &value.doc.workspace.ws;
     let selected = scope::selected(pane_view(value));
@@ -250,12 +256,12 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
         // several selected objects move into a new merge; with none selected, an empty merge
         let name = fe::fresh_name(&ws.source, &graph, "group");
         return if selected.len() >= 2 {
-            vec![change::Syntax_edit(fe::Op::GroupMerge { nodes: selected, name })]
+            vec![Change::SyntaxEdit(fe::Op::GroupMerge { nodes: selected, name })]
         } else {
             let mut builder = s::SyntaxBuilder::new();
             let head = builder.push_draft(0, s::Draft::Sym("scene/merge".into()), Default::default(), None);
             let id = builder.push_draft(0, s::Draft::List(vec![head]), Default::default(), None);
-            vec![change::Syntax_edit(fe::Op::AddNode { scope: vec![graph.into()], name, expr: builder.freeze().handle(id) })]
+            vec![Change::SyntaxEdit(fe::Op::AddNode { scope: vec![graph.into()], name, expr: builder.freeze().handle(id) })]
         };
     }
     let is_value = key.starts_with('=');
@@ -394,12 +400,12 @@ pub fn scope_add<'a>(value: &ModelView<'a>, key: &str) -> Vec<change> {
         _ => vec![],
     };
     if rename.is_empty() && insert.is_empty() {
-        vec![change::Syntax_edit(add)]
+        vec![Change::SyntaxEdit(add)]
     } else {
         let label = if insert.is_empty() { "Add node" } else { "Insert node" };
         let mut ops = rename;
         ops.push(add);
         ops.extend(insert);
-        vec![change::Syntax_batch(label.to_owned(), ops)]
+        vec![Change::SyntaxBatch(label.to_owned(), ops)]
     }
 }

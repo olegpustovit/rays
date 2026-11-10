@@ -1,4 +1,4 @@
-//! The editor-driven sections of lib/rays_editor/test/test_text_pane.ml (those that need the whole
+//! The editor-driven sections of  (those that need the whole
 //! `Editor`). Ported here: editor_graph_drafts and editor_fn_frames. The others (editor_text,
 //! editor_binding, editor_w9, editor_active_scrub, editor_command_click, editor_literal_scrub,
 //! editor_text_drop, editor_text_find) lower the 240-seed sunflower/rosette sketches and drive
@@ -32,7 +32,7 @@ pub fn graph_drafts() {
   (graph b :context sop (sop/merge (sop/box)))
   (graph scene :context scene (scene/merge (scene/geometry (ref b))))
   (graph editor :context editor
-    (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#;
+    (ui/workspace (ui/split_at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#;
     let mut d = start_env(text);
     let mouse = std::cell::Cell::new((450., 320.));
     let step = |d: &mut Driver, keys: &[Key], events: Vec<Event>| d.step_full(&[], keys, mouse.get(), events, 1);
@@ -43,7 +43,7 @@ pub fn graph_drafts() {
     let jump = |d: &mut Driver, name: &str| {
         step(d, &[], vec![key(Key::Escape)]);
         step(d, &[], vec![key(Key::KeyChar('/')), ch('j')]);
-        step(d, &[], vec![Event::Text_input(name.into())]);
+        step(d, &[], vec![Event::TextInput(name.into())]);
         step(d, &[], vec![key(Key::Enter)]);
         step(d, &[], vec![]);
     };
@@ -54,8 +54,8 @@ pub fn graph_drafts() {
     let (gx, gy, gw, gh) = editor::panes(d.e(), &frame_at((450., 320.), vec![], 0)).graph;
     let top = gy + gh + 1 + 28;
     let click = |d: &mut Driver, point: (f64, f64)| {
-        at(d, point, vec![Event::Pointer_moved(point)]);
-        at(d, point, vec![Event::Pointer_pressed(MouseButton::LeftButton, point), Event::Pointer_released(MouseButton::LeftButton, point)]);
+        at(d, point, vec![Event::PointerMoved(point)]);
+        at(d, point, vec![Event::PointerPressed(MouseButton::LeftButton, point), Event::PointerReleased(MouseButton::LeftButton, point)]);
         step(d, &[], vec![]);
     };
     let area = (gx as f64 + 120., top as f64 + 40.);
@@ -64,7 +64,7 @@ pub fn graph_drafts() {
         click(d, tab_at(gw < 400, gx + gw - 36, top, 1));
         click(d, area);
         step(d, &[Key::Meta], vec![ch('a')]);
-        step(d, &[], vec![Event::Text_input(format!("(sop/box) ; {name}"))]);
+        step(d, &[], vec![Event::TextInput(format!("(sop/box) ; {name}"))]);
     };
     draft_in(&mut d, "a");
     check(has(&summary(&d), "graph drafts: a"), &format!("a draft was not kept: {}", summary(&d)));
@@ -82,16 +82,16 @@ pub fn fn_frames() {
             r#"(workspace fz
   (graph g :context value (let* [{maps}] 1.0))
   (graph editor :context editor
-    (ui/workspace (ui/split-at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#
+    (ui/workspace (ui/split_at "vertical" 0.12 (ui/graph) (ui/lisp)))))"#
         );
         let mut d = start_env(&text);
         for _ in 0..4 {
             d.step_at((450., 320.), vec![]);
         }
-        d.step_at((450., 320.), vec![Event::Key_pressed(Key::Escape)]);
-        d.step_at((450., 320.), vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('j'))]);
-        d.step_at((450., 320.), vec![Event::Text_input("g".into())]);
-        d.step_at((450., 320.), vec![Event::Key_pressed(Key::Enter)]);
+        d.step_at((450., 320.), vec![Event::KeyPressed(Key::Escape)]);
+        d.step_at((450., 320.), vec![Event::KeyPressed(Key::KeyChar('/')), Event::KeyPressed(Key::KeyChar('j'))]);
+        d.step_at((450., 320.), vec![Event::TextInput("g".into())]);
+        d.step_at((450., 320.), vec![Event::KeyPressed(Key::Enter)]);
         for _ in 0..4 {
             d.step_at((450., 320.), vec![]);
         }

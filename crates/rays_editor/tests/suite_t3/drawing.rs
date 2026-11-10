@@ -15,7 +15,7 @@ fn doc(text: &str) -> editor_document::workspace_doc::T {
     load(text)
 }
 
-fn render_once(plan: &flow_eval::Plan, value: &Value, live: &input::Frame, size: (i64, i64)) -> Result<Vec<rays::scene::node>, rays_diagnostic::Diagnostic> {
+fn render_once(plan: &flow_eval::Plan, value: &Value, live: &input::Frame, size: (i64, i64)) -> Result<Vec<rays::scene::Node>, rays_diagnostic::Diagnostic> {
     let prepared = drawing::prepare(&drawing::PrepareOptions::default(), plan, value)?;
     drawing::render_prepared(&prepared, live, size, &drawing::RenderOptions::default())
 }

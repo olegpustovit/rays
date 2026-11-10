@@ -8,7 +8,7 @@
 //!
 //! ponytail: the text is lexed once per frame per need (colours, pairs, indent, completions); the
 //! workspace texts are a few hundred lines.
-#![allow(non_camel_case_types)]
+
 use std::any::Any;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -157,62 +157,11 @@ pub fn empty_vocab() -> Vocab {
     vocab(Vec::new(), &[])
 }
 
-/// The one-line docs of the special forms; `specials` are the checker's forms
-/// (`Flow.Workspace.special_forms`) with theirs, so a form the language does not have is never
-/// offered.
-const SPECIAL_DOCS: &[(&str, &str)] = &[
-    ("workspace", "(workspace name graphs...) \u{b7} the document: graphs, defns, macros"),
-    ("import", "(import \"relative/path.rays\") \u{b7} shared definitions and graphs beside the workspace"),
-    ("graph", "(graph name :context sop [inputs] body) \u{b7} a network; the body is a let* or an expression"),
-    ("defn", "(defn name :context value [(p : type) ...] body) \u{b7} a function called as (name args)"),
-    (
-        "defnode",
-        "(defnode sop/name [slots and parameters] body) \u{b7} a reusable SOP kind with typed inputs and parameter defaults",
-    ),
-    ("defmacro", "(defmacro name [params] `template) \u{b7} a syntax template; ~p fills a hole"),
-    ("let*", "(let* [name expr ...] result) \u{b7} sequential bindings: the graph's nodes"),
-    ("for", "(for [i (range n)] body) \u{b7} repeat over lists; geometry merges, numbers are summed"),
-    ("fold", "(fold [acc init] [i xs] body) \u{b7} feed the result back: acc is the previous value"),
-    ("iterate", "(iterate n init (fn [x] body)) \u{b7} apply the function n times; n is a value, not a literal"),
-    ("state", "(state [s init] step) \u{b7} fold frames; s is the previous frame's value"),
-    ("scan", "(scan [acc init] [i xs] body) \u{b7} like fold, keeping every step as a list"),
-    ("sum", "(sum [i xs] body) \u{b7} add the body over the list"),
-    ("if", "(if test then else) \u{b7} a branch; both arms have the same type"),
-    (
-        "with_error",
-        "(with_error protected mapper) \u{b7} map and rethrow a reached error; success and cancellation bypass the mapper",
-    ),
-    (
-        "error_rows",
-        "(error_rows flags mapper :policy \"first\") \u{b7} report an integer 0/1 failure mask; range-last uses native cook grain",
-    ),
-    ("cond", "(cond test expr ... :else expr) \u{b7} the first test that holds"),
-    ("case", "(case expr literal expr ... :else expr) \u{b7} match a literal"),
-    ("fn", "(fn [a b] body) \u{b7} an anonymous function for map, filter, reduce, sort-by"),
-    ("ref", "(ref graph :input value ...) \u{b7} another graph's result with input overrides"),
-    ("values", "(values :a x :b y) \u{b7} a record of named results"),
-    ("list", "(list a b c) \u{b7} a homogeneous list"),
-    ("concat", "(concat xs ys) \u{b7} join lists"),
-    ("str", "(str a b) \u{b7} text from parts"),
-    ("get", "(get record :field) \u{b7} read a field; also record.field"),
-    ("assoc", "(assoc record :field value) \u{b7} a record with a field changed"),
-    ("map", "(map f xs) \u{b7} apply f to each item"),
-    ("filter", "(filter f xs) \u{b7} the items f accepts"),
-    ("reduce", "(reduce f init xs) \u{b7} fold a function over a list"),
-    ("sort-by", "(sort-by f xs) \u{b7} sort by a key function"),
-    ("quote", "(quote form) \u{b7} the form itself, unevaluated"),
-    ("quasiquote", "`form \u{b7} a template; ~x fills, ~@xs splices"),
-    ("unquote", "~x \u{b7} fill a hole of a template"),
-    ("unquote-splicing", "~@xs \u{b7} splice a list into a template"),
-];
-
+/// Language forms use the same signatures and descriptions as CLI lookup.
 pub fn specials() -> Vec<(String, String)> {
-    let mut forms = vec!["import"];
-    forms.extend(workspace::special_forms().iter().copied());
+    let mut forms = vec![("import".to_owned(), "(import \"relative/path.rays\") · Read definitions and graphs from a neighbouring workspace.".to_owned())];
+    forms.extend(flow_check::registry::FORMS.iter().map(|(name, args, doc, _)| ((*name).to_owned(), format!("({name} {args}) · {doc}"))));
     forms
-        .into_iter()
-        .filter_map(|form| SPECIAL_DOCS.iter().find(|(name, _)| *name == form).map(|(_, doc)| (form.to_string(), doc.to_string())))
-        .collect()
 }
 
 pub fn constants() -> Vec<(&'static str, &'static str)> {

@@ -1,7 +1,7 @@
 //! The host bars of the workspace: the graph panel's toolbar (Add, Repeat, Iterate, fn, macro,
 //! defn: graph.html's list; the narrower workspace.html header drops macro). Buttons only report a
 //! click: `editor_frame` maps it to the one command or edit it means.
-#![allow(non_camel_case_types)]
+
 use std::collections::HashMap;
 
 use editor_core::panels::{self, Axis, Panel, Path, Size};
@@ -151,17 +151,13 @@ impl Names {
         };
         match tree {
             panels::Panels::Leaf(p) => {
-                let (base, form) = match p {
-                    Panel::Canvas(key) => ("canvas", format!("(ui/canvas (ref {key}))")),
-                    Panel::View(_) => ("preview", format!("(ui/viewport (ref {scene}))")),
-                    Panel::Graph => ("network", "(ui/graph)".to_string()),
-                    Panel::List => ("list", "(ui/list)".to_string()),
-                    Panel::Lisp => ("code", "(ui/lisp)".to_string()),
-                    Panel::Inspector => ("inspector", "(ui/inspector)".to_string()),
-                    Panel::Outline => ("outline", "(ui/outline)".to_string()),
-                    Panel::Spreadsheet => ("spreadsheet", "(ui/spreadsheet)".to_string()),
-                    Panel::Timeline => ("timeline", "(ui/timeline)".to_string()),
+                let entry = panels::definition(p);
+                let form = match p {
+                    Panel::Canvas(key) => format!("(ui/canvas (ref {key}))"),
+                    Panel::View(_) => format!("(ui/viewport (ref {scene}))"),
+                    _ => format!("(ui/{})", entry.id),
                 };
+                let base = entry.binding;
                 self.bind(base, form)
             }
             panels::Panels::Split { axis, size, a, b } => {
@@ -170,7 +166,7 @@ impl Names {
                 let axis = if *axis == Axis::H { "horizontal" } else { "vertical" };
                 let form = match size {
                     Size::Ratio(ratio) => {
-                        format!("(ui/split-at \"{axis}\" {} {a} {b})", flow_syntax::lisp::float((ratio * 1e4).round() / 1e4))
+                        format!("(ui/split_at \"{axis}\" {} {a} {b})", flow_syntax::lisp::float((ratio * 1e4).round() / 1e4))
                     }
                     Size::First(n) => format!("(ui/split \"{axis}\" {a} {b} :first_size {n})"),
                     Size::Second(n) => format!("(ui/split \"{axis}\" {a} {b} :second_size {n})"),

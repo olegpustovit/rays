@@ -1,9 +1,9 @@
 //! Panels: titles, the navigator's inputs, the focused leaf, layout gestures, docking, and the
-//! clipboard commands. #![allow(non_camel_case_types)]
+//! clipboard commands.
 use flow_syntax::symbol::Symbol;
 use std::rc::Rc;
 
-use editor_core::panels::{self, Axis, Panel};
+use editor_core::panels::{self, Panel};
 use editor_document::document::{self, Origin, T as Document};
 use editor_document::kind_graph as kg;
 use editor_document::layout_by_path::PathMap;
@@ -20,7 +20,7 @@ use pxui_shell::layout::{self, Leaf};
 use sop::edit_graph::Factory;
 
 use crate::bars;
-use crate::editor_commands::{self, action};
+use crate::editor_commands::{self, Action};
 use crate::editor_inspect::{inspector_paths, scene};
 use crate::editor_list::scene_rows;
 use crate::editor_model::*;
@@ -37,17 +37,18 @@ pub fn panel_title<'a>(value: &ModelView<'a>, leaf: &Leaf) -> String {
     // a graph panel's title is its own pane's
     let (pane, path) = shown_pane(value, (&panel_key(&value.doc, &leaf.path), &leaf.path, &leaf.panel));
     let graph = graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_default();
+    let title = editor_core::panels::definition(&leaf.panel).menu_title;
     let (name, sub): (&str, String) = match &leaf.panel {
-        Panel::Canvas(_) => ("Canvas", String::new()),
+        Panel::Canvas(_) => (title, String::new()),
         Panel::View(_) => {
             // the scene it shows and its render camera: "scene / camera"
             let scene_name = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.context == context::scene()).map(|g| g.name.clone()).unwrap_or_default();
             let camera = value.doc.active_camera.and_then(|id| kg::find(&scene(&value), id).map(|n| n.label));
             let parts: Vec<String> = [scene_name, camera.unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect();
-            ("Viewport", parts.join(" / "))
+            (title, parts.join(" / "))
         }
         Panel::Graph => (
-            "Graph",
+            title,
             if graph.is_empty() {
                 String::new()
             } else {
@@ -60,9 +61,9 @@ pub fn panel_title<'a>(value: &ModelView<'a>, leaf: &Leaf) -> String {
                 head + &ctx.map(|c| format!(" / {c}")).unwrap_or_default()
             },
         ),
-        Panel::List => ("List", level_name_at(value, pane.at)),
+        Panel::List => (title, level_name_at(value, pane.at)),
         Panel::Lisp => (
-            "Lisp",
+            title,
             if leaf.frame.2 < 400 {
                 String::new() // the narrow sheet has the kind alone
             } else if graph.is_empty() {
@@ -92,12 +93,12 @@ pub fn panel_title<'a>(value: &ModelView<'a>, leaf: &Leaf) -> String {
                 }
                 _ => graph.clone(),
             };
-            ("Inspector", sub)
+            (title, sub)
         }
-        Panel::Outline => ("Outline", if leaf.frame.2 < 300 { String::new() } else { value.file.clone() }),
-        Panel::Spreadsheet => ("Spreadsheet", graph.clone()),
+        Panel::Outline => (title, if leaf.frame.2 < 300 { String::new() } else { value.file.clone() }),
+        Panel::Spreadsheet => (title, graph.clone()),
         Panel::Timeline => (
-            "Timeline",
+            title,
             // the real step of the sketch: the same step every frame is a fixed one
             if value.steady >= 3 && value.last_dt > 0.0 { format!("fixed dt 1/{}", (1.0 / value.last_dt).round() as i64) } else { "realtime".to_string() },
         ),
@@ -134,16 +135,16 @@ fn find_ty(name: &str, sc: &fproj::Scope) -> Option<Ty> {
 /// Make a reusable function from the selected nodes: the names they read from outside are typed
 /// from the graph pane's projection, the context is the result's (a geometry is `sop`, anything
 /// else `value`).
-pub fn defn_change<'a>(value: &ModelView<'a>, paths: &[flow_check::workspace::Path]) -> change {
+pub fn defn_change<'a>(value: &ModelView<'a>, paths: &[flow_check::workspace::Path]) -> Change {
     let ws = &value.doc.workspace.ws;
     let scope_opt = pane_laid(value).map(|k| k.scope.clone());
     match (fe::defn_draft(&ws.source, paths), scope_opt) {
-        (Err(d), _) => change::Declined(d.message),
-        (Ok(_), None) => change::Declined("Open a graph to make a function from its nodes".to_string()),
+        (Err(d), _) => Change::Declined(d.message),
+        (Ok(_), None) => Change::Declined("Open a graph to make a function from its nodes".to_string()),
         (Ok(draft), Some(scope)) => {
             let typed: Vec<(String, Option<String>)> = draft.free.iter().map(|n| (n.clone(), find_ty(n, &scope).and_then(|t| ty_text(&t)))).collect();
             if let Some((n, _)) = typed.iter().find(|(_, t)| t.is_none()) {
-                return change::Declined(format!("The function reads {n}, whose type a function cannot take."));
+                return Change::Declined(format!("The function reads {n}, whose type a function cannot take."));
             }
             let mut result_ty = None;
             for path in paths {
@@ -151,7 +152,7 @@ pub fn defn_change<'a>(value: &ModelView<'a>, paths: &[flow_check::workspace::Pa
                     result_ty = Some(n.ty);
                 }
             }
-            change::Syntax_edit(Op::MakeDefn {
+            Change::SyntaxEdit(Op::MakeDefn {
                 nodes: paths.to_vec(),
                 name: draft.name,
                 context: if result_ty == Some(flow_syntax::ty::geometry()) { "sop" } else { "value" }.to_string(),
@@ -317,79 +318,67 @@ pub fn focused_leaf(g: &layout::Geometry, focus: &Panel, path: Option<&[usize]>)
         })
 }
 
-pub fn panel_kind(panel: &Panel) -> &'static str {
-    match panel {
-        Panel::Canvas(_) => "canvas",
-        Panel::View(_) => "viewport",
-        Panel::Graph => "graph",
-        Panel::List => "list",
-        Panel::Lisp => "lisp",
-        Panel::Inspector => "inspector",
-        Panel::Outline => "outline",
-        Panel::Timeline => "timeline",
-        Panel::Spreadsheet => "spreadsheet",
-    }
-}
+pub fn panel_kind(panel: &Panel) -> &'static str { editor_core::panels::definition(panel).id }
 
 fn scene_name(value: &EditorModel) -> String {
     value.doc.workspace.ws.checked.graphs.iter().find(|g| g.context == context::scene()).map(|g| g.name.clone()).unwrap_or_else(|| "scene".to_string())
 }
 
-fn set_editor_graph(form: s::Syntax) -> change {
-    change::Syntax_edit(Op::SetGraph { name: "editor".to_string(), form })
+fn set_editor_graph(form: s::Syntax) -> Change {
+    Change::SyntaxEdit(Op::SetGraph { name: "editor".to_string(), form })
 }
 
 /// / [ and / n: the layouts of the switch and the floating windows, each one edit of the editor
 /// graph (written from the layout shown first, when the document has none).
-pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &shell, leaf: Option<&Leaf>, actions: &[action]) -> Vec<change> {
+pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &Shell, leaf: Option<&Leaf>, actions: &[Action]) -> Vec<Change> {
     let graph = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let has_switch = value.doc.shell.as_ref().and_then(|s| s.switch.as_ref()).is_some();
-    let edit = |make: &dyn Fn(String) -> le::Op| -> Vec<change> {
+    let edit = |make: &dyn Fn(String) -> le::Op| -> Vec<Change> {
         match &graph {
-            _ if workspace.restored => vec![change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())],
-            Some(graph) => vec![change::Layout_edit(make(graph.clone()))],
+            _ if workspace.restored => vec![Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())],
+            Some(graph) => vec![Change::LayoutEdit(make(graph.clone()))],
             None => {
                 let scene = scene_name(value);
-                let (text, _) = bars::tree_text("editor", &scene, &shell_tree(value, &shell { live: None, ..workspace.clone() }));
+                let (text, _) = bars::tree_text("editor", &scene, &shell_tree(value, &Shell { live: None, ..workspace.clone() }));
                 match s::parse(&text) {
-                    Ok(forms) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), change::Layout_edit(make("editor".to_string()))],
-                    _ => vec![change::Declined("The layout could not be written as an editor graph.".to_string())],
+                    Ok(forms) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), Change::LayoutEdit(make("editor".to_string()))],
+                    _ => vec![Change::Declined("The layout could not be written as an editor graph.".to_string())],
                 }
             }
         }
     };
-    let window = |kind: &str| -> Vec<change> {
+    let window = |kind: &str| -> Vec<Change> {
         match panel_kinds::expr(&value.doc.workspace.ws.source, kind) {
             Ok(panel) => edit(&|graph| le::Op::LayoutWindow { graph, panel: panel.clone() }),
-            Err(message) => vec![change::Declined(message)],
+            Err(message) => vec![Change::Declined(message)],
         }
     };
     let mut out = Vec::new();
     for a in actions {
         out.extend(match a {
-            action::Layout_switch(index) if has_switch => edit(&|graph| le::Op::SetLayout { graph, index: *index }),
-            action::Layout_switch(index) => {
+            Action::LayoutSwitch(index) if has_switch => edit(&|graph| le::Op::SetLayout { graph, index: *index }),
+            Action::LayoutSwitch(index) => {
                 // an older file: several editor graphs
                 match layouts(value).get(*index as usize) {
-                    Some((name, _)) => vec![change::Select_layout(name.clone())],
+                    Some((name, _)) => vec![Change::SelectLayout(name.clone())],
                     None => Vec::new(),
                 }
             }
-            action::Layout_new if !has_switch && !layouts(value).is_empty() => {
+            Action::LayoutNew if !has_switch && !layouts(value).is_empty() => {
                 // an older file with several editor graphs: they become the layouts of one switch first
                 match &graph {
-                    Some(graph) => vec![change::Layout_edit(le::Op::MergeThenNew { graph: graph.clone() })],
+                    Some(graph) => vec![Change::LayoutEdit(le::Op::MergeThenNew { graph: graph.clone() })],
                     None => Vec::new(),
                 }
             }
-            action::Layout_new => edit(&|graph| le::Op::LayoutNew { graph }),
-            action::Layout_remove => edit(&|graph| le::Op::LayoutRemove { graph }),
-            action::Window_new(panel) => window(panel_kind(panel)),
-            action::Peek => match peek_target(value) {
+            Action::LayoutNew => edit(&|graph| le::Op::LayoutNew { graph }),
+            Action::LayoutRemove => edit(&|graph| le::Op::LayoutRemove { graph }),
+            Action::WindowNew(panel) => window(panel_kind(panel)),
+            Action::Peek => match peek_target(value) {
                 Some(target) => window(&format!("graph:{target}")),
-                None => vec![change::Declined("Nothing selected to peek at".to_string())],
+                None => vec![Change::Declined("Nothing selected to peek at".to_string())],
             },
-            action::Float_toggle => match leaf {
+            Action::FloatToggle => match leaf {
                 Some(leaf) => edit(&|graph| le::Op::LayoutFloat { graph, at: leaf.path.iter().map(|i| *i as i64).collect() }),
                 None => Vec::new(),
             },
@@ -401,25 +390,25 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &shell, leaf: Option
 
 type Maker = Rc<dyn Fn(&flow_check::workspace::Path) -> le::Op>;
 
-pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[chrome::Intent]) -> (shell, Vec<change>) {
+pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &Shell, intents: &[chrome::Intent]) -> (Shell, Vec<Change>) {
     if intents.is_empty() {
         return (workspace.clone(), Vec::new());
     }
-    let base = shell_tree(value, &shell { live: None, ..workspace.clone() }).into_owned();
+    let base = shell_tree(value, &Shell { live: None, ..workspace.clone() }).into_owned();
     let editor = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let shell_doc = if workspace.restored { None } else { value.doc.shell.as_ref() };
-    let edit = |path: &layout::Path, make: Maker| -> Vec<change> {
+    let edit = |path: &layout::Path, make: Maker| -> Vec<Change> {
         match (&editor, shell_doc) {
             (Some(graph), Some(s)) => match s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o) {
-                Some(Origin::Bound(name)) => vec![change::Layout_edit(make(&vec![graph.clone().into(), name.clone().into()]))],
+                Some(Origin::Bound(name)) => vec![Change::LayoutEdit(make(&vec![graph.clone().into(), name.clone().into()]))],
                 Some(Origin::Inline(home, key)) => {
                     let make = make.clone();
-                    vec![change::Layout_inline { home: home.clone(), key: key.clone(), make: Rc::new(move |p: &flow_check::workspace::Path| make(p)) }]
+                    vec![Change::LayoutInline { home: home.clone(), key: key.clone(), make: Rc::new(move |p: &flow_check::workspace::Path| make(p)) }]
                 }
                 Some(Origin::Loop(home, key)) => {
                     // a loop's panels are copies of its one template: retyping edits the template
                     match make(&Vec::new()) {
-                        le::Op::SetPanelKind { panel, .. } => vec![change::Layout_inline {
+                        le::Op::SetPanelKind { panel, .. } => vec![Change::LayoutInline {
                             home: home.clone(),
                             key: key.clone(),
                             make: Rc::new(move |p: &flow_check::workspace::Path| {
@@ -428,31 +417,31 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
                                 le::Op::SetPanelKind { node, panel: panel.clone() }
                             }),
                         }],
-                        _ => vec![change::Declined(format!(
+                        _ => vec![Change::Declined(format!(
                             "These panels are copies made by a loop in {}: retype them (/ o), or edit the loop in the editor graph.",
                             document::describe(&value.doc.workspace.ws.source, home)
                         ))],
                     }
                 }
-                None => vec![change::Declined("This panel is not part of the editor graph's tree.".to_string())],
+                None => vec![Change::Declined("This panel is not part of the editor graph's tree.".to_string())],
             },
-            _ if workspace.restored => vec![change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())],
+            _ if workspace.restored => vec![Change::Declined("The default layout is showing. / z returns to the editor graph.".to_string())],
             _ => {
                 // no editor graph: the layout shown is written as one first, then edited
                 let scene = scene_name(value);
                 let (text, name_of) = bars::tree_text("editor", &scene, &base);
                 match (s::parse(&text), name_of(path)) {
-                    (Ok(forms), Some(leaf)) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), change::Layout_edit(make(&vec!["editor".into(), leaf.into()]))],
-                    _ => vec![change::Declined("This panel is not part of the layout.".to_string())],
+                    (Ok(forms), Some(leaf)) if forms.len() == 1 => vec![set_editor_graph(forms[0].clone()), Change::LayoutEdit(make(&vec!["editor".into(), leaf.into()]))],
+                    _ => vec![Change::Declined("This panel is not part of the layout.".to_string())],
                 }
             }
         }
     };
     // a panel of `kind` for `make`: the form the editor's panel table writes, or why there is none
-    let with_panel = |kind: &str, path: &layout::Path, make: Rc<dyn Fn(s::Syntax, &flow_check::workspace::Path) -> le::Op>| -> Vec<change> {
+    let with_panel = |kind: &str, path: &layout::Path, make: Rc<dyn Fn(s::Syntax, &flow_check::workspace::Path) -> le::Op>| -> Vec<Change> {
         match panel_kinds::expr(&value.doc.workspace.ws.source, kind) {
             Ok(panel) => edit(path, Rc::new(move |node: &flow_check::workspace::Path| make(panel.clone(), node))),
-            Err(message) => vec![change::Declined(message)],
+            Err(message) => vec![Change::Declined(message)],
         }
     };
     let beside = |path: &layout::Path| -> &'static str {
@@ -461,7 +450,7 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
             _ => panel_kinds::beside(""),
         }
     };
-    let save_state = |path: &layout::Path, state: panels::State| -> Vec<change> {
+    let save_state = |path: &layout::Path, state: panels::State| -> Vec<Change> {
         let mut prefix = Vec::new();
         if editor.is_none() {
             let scene = scene_name(value);
@@ -472,11 +461,11 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
                 }
             }
         }
-        prefix.push(change::Panel_state(path.clone(), state));
+        prefix.push(Change::PanelState(path.clone(), state));
         prefix
     };
     let mut w = workspace.clone();
-    let mut changes: Vec<change> = Vec::new();
+    let mut changes: Vec<Change> = Vec::new();
     for intent in intents {
         match intent {
             chrome::Intent::Toggle(path) => {
@@ -484,7 +473,7 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
                 changes.extend(save_state(path, panels::State { collapsed: !state.collapsed, ..state }));
             }
             chrome::Intent::Window(path, window) => changes.extend(save_state(path, panels::State { window: *window, ..panel_state(value, path) })),
-            chrome::Intent::Window_drag(path, window, released) => {
+            chrome::Intent::WindowDrag(path, window, released) => {
                 if *released {
                     w.window_live = None;
                     changes.extend(save_state(path, panels::State { window: Some(*window), ..panel_state(value, path) }));
@@ -493,23 +482,23 @@ pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[c
                 }
             }
             chrome::Intent::Dragging(..) | chrome::Intent::Crumb(..) => {}
-            chrome::Intent::Dock_panel(source, target, side) => changes.push(change::Dock_panels(source.clone(), target.clone(), *side)),
+            chrome::Intent::DockPanel(source, target, side) => changes.push(Change::DockPanels(source.clone(), target.clone(), *side)),
             chrome::Intent::Resize { node, size } => w.live = Some((node.clone(), *size)),
             chrome::Intent::Settled => {
                 if let Some((node, size)) = w.live.take() {
                     changes.extend(edit(&node, Rc::new(move |node: &flow_check::workspace::Path| le::Op::SetLayoutSize { node: node.clone(), size })));
                 }
             }
-            chrome::Intent::Split_panel(path, axis) => {
+            chrome::Intent::SplitPanel(path, axis) => {
                 let axis = *axis;
                 changes.extend(with_panel(beside(path), path, Rc::new(move |panel, node| le::Op::SplitPanel { node: node.clone(), axis, ratio: 0.5, panel })));
             }
-            chrome::Intent::Split_panel_at(path, axis, ratio, kind) => {
+            chrome::Intent::SplitPanelAt(path, axis, ratio, kind) => {
                 let (axis, ratio) = (*axis, *ratio);
                 changes.extend(with_panel(panel_kind(kind), path, Rc::new(move |panel, node| le::Op::SplitPanel { node: node.clone(), axis, ratio, panel })));
             }
-            chrome::Intent::Close_panel(path) => changes.extend(edit(path, Rc::new(|node: &flow_check::workspace::Path| le::Op::ClosePanel { node: node.clone() }))),
-            chrome::Intent::Retype_panel(path, kind) => {
+            chrome::Intent::ClosePanel(path) => changes.extend(edit(path, Rc::new(|node: &flow_check::workspace::Path| le::Op::ClosePanel { node: node.clone() }))),
+            chrome::Intent::RetypePanel(path, kind) => {
                 changes.extend(with_panel(panel_kind(kind), path, Rc::new(|panel, node| le::Op::SetPanelKind { node: node.clone(), panel })));
             }
         }
@@ -554,14 +543,14 @@ pub fn dock_panels(factories: &[Factory], doc: &Document, source: &layout::Path,
 
 /// A pane's request applied to the open level's objects or layers: a parameter or name of one the
 /// host made.  Text gestures (`Syntax_edit`) are applied to the whole document afterwards.
-pub fn apply_change(state: (kg::T, Option<String>, param::Effects), c: &change) -> (kg::T, Option<String>, param::Effects) {
+pub fn apply_change(state: (kg::T, Option<String>, param::Effects), c: &Change) -> (kg::T, Option<String>, param::Effects) {
     let (document, error, effects) = state;
     match c {
-        change::Set_parameter { node, path, value } => match kg::set_fields(&document, *node, &[(path.clone(), value.clone())]) {
+        Change::SetParameter { node, path, value } => match kg::set_fields(&document, *node, &[(path.clone(), value.clone())]) {
             Err(message) => (document, Some(message), effects),
             Ok((document, changed)) => (document, None, param::union_effects(effects, changed)),
         },
-        change::Rename { node, label } => match kg::find(&document, *node) {
+        Change::Rename { node, label } => match kg::find(&document, *node) {
             None => {
                 let message = format!("no object #{node}");
                 (document, Some(message), effects)
@@ -581,46 +570,46 @@ pub fn apply_change(state: (kg::T, Option<String>, param::Effects), c: &change) 
 
 /// Command-C / X: the selected bindings as Lisp pairs ("name expr" per line) on the clipboard, the
 /// text a let* vector or the Lisp pane takes.
-pub fn copy_bindings(value: &EditorModel, paths: &[flow_check::workspace::Path]) -> change {
+pub fn copy_bindings(value: &EditorModel, paths: &[flow_check::workspace::Path]) -> Change {
     let ws = &value.doc.workspace.ws;
     let mut lines = Vec::new();
     for path in paths {
         if let Some((_, form)) = text_pane::binding(&ws.source, path) {
             let (text, _) = match lisp::print(&[form]) {
                 Ok(printed) => printed,
-                Err(error) => return change::Declined(rays_diagnostic::to_string(&error)),
+                Err(error) => return Change::Declined(rays_diagnostic::to_string(&error)),
             };
             lines.push(format!("{} {}", path.last().map_or("", |name| name.as_str()), text.trim()));
         }
     }
     if lines.is_empty() {
-        return change::Declined("Nothing to copy".to_string());
+        return Change::Declined("Nothing to copy".to_string());
     }
     let text = lines.join("\n");
     if let Err(error) = rays_diagnostic::check_source_len(text.len()) {
-        return change::Declined(rays_diagnostic::to_string(&error));
+        return Change::Declined(rays_diagnostic::to_string(&error));
     }
     match rays::clipboard::set_text(&text) {
-        Ok(()) => change::Notice(format!("Copied {} binding{}", lines.len(), if lines.len() == 1 { "" } else { "s" })),
-        Err(message) => change::Declined(format!("Clipboard: {message}")),
+        Ok(()) => Change::Notice(format!("Copied {} binding{}", lines.len(), if lines.len() == 1 { "" } else { "s" })),
+        Err(message) => Change::Declined(format!("Clipboard: {message}")),
     }
 }
 
 /// The palette's "Copy workspace as Lisp": the text Command-S writes, on the clipboard.
-pub fn copy_workspace(value: &EditorModel) -> (notice_kind, String) {
+pub fn copy_workspace(value: &EditorModel) -> (NoticeKind, String) {
     match preset::text(&value.doc).and_then(|text| rays::clipboard::set_text(&text)) {
-        Ok(()) => (notice_kind::Info, "Copied the workspace as Lisp".to_string()),
-        Err(message) => (notice_kind::Refusal, format!("Clipboard: {message}")),
+        Ok(()) => (NoticeKind::Info, "Copied the workspace as Lisp".to_string()),
+        Err(message) => (NoticeKind::Refusal, format!("Clipboard: {message}")),
     }
 }
 
 /// Command-V: the clipboard's "name expr" pairs (or bare expressions, named by their head) become
 /// `Add_node`s in the selected scope (`Text_pane::paste_ops`), one history entry.
-pub fn paste_bindings<'a>(value: &ModelView<'a>) -> Vec<change> {
-    let Some((graph, _)) = add_target(value) else { return vec![change::Declined("Open a graph to paste into".to_string())] };
+pub fn paste_bindings<'a>(value: &ModelView<'a>) -> Vec<Change> {
+    let Some((graph, _)) = add_target(value) else { return vec![Change::Declined("Open a graph to paste into".to_string())] };
     let text = match rays::clipboard::get_text() {
         Ok(text) => text,
-        Err(message) => return vec![change::Declined(format!("Clipboard: {message}"))],
+        Err(message) => return vec![Change::Declined(format!("Clipboard: {message}"))],
     };
     let ws = &value.doc.workspace.ws;
     let selected = scope::selected(pane_view(value));
@@ -630,9 +619,9 @@ pub fn paste_bindings<'a>(value: &ModelView<'a>) -> Vec<change> {
     };
     // one gesture: every binding lands or none does
     match text_pane::paste_ops(&ws.source, &graph, &scope_path, &text) {
-        Err(message) => vec![change::Declined(message)],
-        Ok(ops) if ops.len() == 1 => vec![change::Syntax_edit(ops[0].clone())],
-        Ok(ops) => vec![change::Syntax_batch("Paste".to_string(), ops)],
+        Err(message) => vec![Change::Declined(message)],
+        Ok(ops) if ops.len() == 1 => vec![Change::SyntaxEdit(ops[0].clone())],
+        Ok(ops) => vec![Change::SyntaxBatch("Paste".to_string(), ops)],
     }
 }
 

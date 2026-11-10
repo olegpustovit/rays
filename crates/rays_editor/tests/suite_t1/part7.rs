@@ -1,4 +1,4 @@
-//! test_workspace_shell.ml, part 7: run_undo_and_input, run_carry_reaches_no_history,
+//! , part 7: run_undo_and_input, run_carry_reaches_no_history,
 //! run_atomic_frame, run_undo_under_pane, run_spreadsheet, run_op_inspector, run_nested_inspector.
 use super::support::*;
 use editor_document::workspace_doc;
@@ -40,7 +40,7 @@ pub fn run_undo_and_input() {
     let at = (200., 300.);
     let mut r = session(plain, at);
     let orbit = |r: &mut Run| {
-        r.step(at, vec![Event::Pointer_moved(at), Event::Scrolled((0., -2.))]);
+        r.step(at, vec![Event::PointerMoved(at), Event::Scrolled((0., -2.))]);
         for _ in 0..20 {
             r.step(at, vec![]);
         }
@@ -67,11 +67,11 @@ pub fn run_undo_and_input() {
     let (gx, gy, gw, _) = r.panes().graph;
     let flag = |row: i64| ((gx + gw - 38) as f64, (gy + 24 + 24 * row + 12) as f64);
     r.count += 30;
-    r.step(flag(0), vec![Event::Pointer_moved(flag(0))]);
-    r.stepb(&[LB], flag(0), vec![Event::Pointer_pressed(LB, flag(0))]);
-    r.stepb(&[LB], flag(1), vec![Event::Pointer_moved(flag(1))]);
-    r.stepb(&[LB], flag(2), vec![Event::Pointer_moved(flag(2))]);
-    r.step(flag(2), vec![Event::Pointer_released(LB, flag(2))]);
+    r.step(flag(0), vec![Event::PointerMoved(flag(0))]);
+    r.stepb(&[LB], flag(0), vec![Event::PointerPressed(LB, flag(0))]);
+    r.stepb(&[LB], flag(1), vec![Event::PointerMoved(flag(1))]);
+    r.stepb(&[LB], flag(2), vec![Event::PointerMoved(flag(2))]);
+    r.step(flag(2), vec![Event::PointerReleased(LB, flag(2))]);
     r.step(at, vec![]);
     check(count_of(&r.source(), ":visible false") == 3, &format!("the stroke did not hide three rows: {}", r.source()));
     r.step_full(&[], &[Key::Meta], at, vec![press('z')]);
@@ -81,23 +81,23 @@ pub fn run_undo_and_input() {
     let m = (450., 300.);
     let mut r = session(&case("variations"), m);
     let (gutter, away) = ((169.5, 300.), (300., 300.));
-    r.step(gutter, vec![Event::Pointer_moved(gutter)]);
-    r.stepb(&[LB], gutter, vec![Event::Pointer_pressed(LB, gutter)]);
-    r.stepb(&[LB], away, vec![Event::Pointer_moved(away)]);
-    r.step(away, vec![Event::Focus_lost]);
+    r.step(gutter, vec![Event::PointerMoved(gutter)]);
+    r.stepb(&[LB], gutter, vec![Event::PointerPressed(LB, gutter)]);
+    r.stepb(&[LB], away, vec![Event::PointerMoved(away)]);
+    r.step(away, vec![Event::FocusLost]);
     r.step(away, vec![]);
     let before = r.source();
-    r.step(gutter, vec![Event::Pointer_moved(gutter)]);
-    r.stepb(&[LB], gutter, vec![Event::Pointer_pressed(LB, gutter)]);
-    r.step(gutter, vec![Event::Pointer_released(LB, gutter)]);
+    r.step(gutter, vec![Event::PointerMoved(gutter)]);
+    r.stepb(&[LB], gutter, vec![Event::PointerPressed(LB, gutter)]);
+    r.step(gutter, vec![Event::PointerReleased(LB, gutter)]);
     r.step(m, vec![]);
     check(r.source() == before && r.undo_label().is_none(), &format!("a click on a gutter committed the size of an interrupted drag: {:?}", r.undo_label()));
     r.close();
     // E19: the focus of a closed panel goes to its neighbour, so the next panel key acts
     let inspector = (800., 300.);
     let mut r = session(plain, inspector);
-    r.step(inspector, vec![Event::Pointer_moved(inspector)]);
-    r.step(inspector, vec![Event::Pointer_pressed(LB, inspector), Event::Pointer_released(LB, inspector)]);
+    r.step(inspector, vec![Event::PointerMoved(inspector)]);
+    r.step(inspector, vec![Event::PointerPressed(LB, inspector), Event::PointerReleased(LB, inspector)]);
     let keys = |r: &mut Run, at: (f64, f64), cs: &[char]| {
         for c in cs {
             r.step(at, vec![press(*c)]);
@@ -112,8 +112,8 @@ pub fn run_undo_and_input() {
     r.close();
     // E21: fly mode ends when the view stops navigating (a fixed camera, looked through)
     let mut r = session(plain, at);
-    r.step(at, vec![Event::Pointer_moved(at)]);
-    r.step(at, vec![Event::Pointer_pressed(LB, at), Event::Pointer_released(LB, at)]);
+    r.step(at, vec![Event::PointerMoved(at)]);
+    r.step(at, vec![Event::PointerPressed(LB, at), Event::PointerReleased(LB, at)]);
     for c in [' ', 'v'] {
         r.step(at, vec![press(c)]);
         r.step(at, vec![]);
@@ -133,8 +133,8 @@ pub fn run_undo_and_input() {
     let (gx, gy, gw, _) = r.panes().graph;
     let row = ((gx + 60) as f64, (gy + 24 + 12) as f64);
     let click = |r: &mut Run, p: (f64, f64)| {
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
         r.step(p, vec![]);
     };
     click(&mut r, row);
@@ -174,16 +174,16 @@ pub fn run_undo_and_input() {
     let mut r = session(plain, m);
     let (gx, gy, gw, gh) = r.panes().graph;
     let row = ((gx + 60) as f64, (gy + 24 + 12) as f64);
-    r.step(row, vec![Event::Pointer_moved(row)]);
-    r.step(row, vec![Event::Pointer_pressed(LB, row), Event::Pointer_released(LB, row)]);
+    r.step(row, vec![Event::PointerMoved(row)]);
+    r.step(row, vec![Event::PointerPressed(LB, row), Event::PointerReleased(LB, row)]);
     r.step(row, vec![press('i')]);
     r.step(m, vec![]);
     r.count += 30;
     let canvas = ((gx + gw - 40) as f64, (gy + gh - 40) as f64);
     let away = ((gx + gw - 80) as f64, (gy + gh - 60) as f64);
-    r.step(canvas, vec![Event::Pointer_moved(canvas)]);
-    r.stepb(&[M], canvas, vec![Event::Pointer_pressed(M, canvas)]);
-    r.stepb(&[M], away, vec![Event::Pointer_moved(away)]);
+    r.step(canvas, vec![Event::PointerMoved(canvas)]);
+    r.stepb(&[M], canvas, vec![Event::PointerPressed(M, canvas)]);
+    r.stepb(&[M], away, vec![Event::PointerMoved(away)]);
     check(r.dump("graph pan") == "true", "a middle drag on the canvas is not a pan");
     for c in [' ', 'l', 'l'] {
         r.stepb(&[M], away, vec![press(c)]);
@@ -211,7 +211,7 @@ pub fn run_carry_reaches_no_history() {
     let side = editor::scene_document(&e).iter().find(|i| i.label == "side").expect("side camera").id;
     let preview = Op::SetArg { node: vec!["scene".into(), "side".into()], key: ArgKey::Kw("fov".into()), sub: vec![], value: s::make(Node::Num("40.0".into())) };
     let before = source(&e);
-    let enter = rays_editor::editor_commands::action::Enter;
+    let enter = rays_editor::editor_commands::Action::Enter;
     let stepped = reduce::step(e.clone(), Some(&[side]), Some(&preview), &[enter.clone()], &frame(&[], m, vec![], 3)).expect("step");
     check(editor::carrying(&stepped).is_some(), "the reducer dropped the carry");
     check(!editor::can_undo(&stepped), &format!("entering a camera during a carry reached the history: {:?}", editor::undo_label(&stepped)));
@@ -230,8 +230,8 @@ pub fn run_atomic_frame() {
     for _ in 0..4 {
         r.step(at, vec![]);
     }
-    r.step(at, vec![Event::Pointer_moved(at)]);
-    r.step(at, vec![Event::Pointer_pressed(LB, at), Event::Pointer_released(LB, at)]);
+    r.step(at, vec![Event::PointerMoved(at)]);
+    r.step(at, vec![Event::PointerPressed(LB, at), Event::PointerReleased(LB, at)]);
     let before = r.source();
     let label = r.undo_label();
     for c in [' ', 'o', 'x'] {
@@ -256,8 +256,8 @@ pub fn run_undo_under_pane() {
     (ui/workspace (ui/split "horizontal" (ui/graph :focus true) (ui/graph)))))"#;
     let mut r = Run::new(editor(text));
     let click = |r: &mut Run, p: (f64, f64)| {
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
         r.step(p, vec![]);
     };
     for _ in 0..4 {
@@ -321,7 +321,7 @@ pub fn run_spreadsheet() {
     ui.destroy();
     let point = ((x + w) as f64 - 8. - detail_width / 2., y as f64 + 12.);
     r.step(point, vec![]);
-    r.step(point, vec![Event::Pointer_pressed(LB, point), Event::Pointer_released(LB, point)]);
+    r.step(point, vec![Event::PointerPressed(LB, point), Event::PointerReleased(LB, point)]);
     check(reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet Detail tab did not route shared input");
     check(reduce::spreadsheet(&r.e, &[1, 1]).0 == 0, "spreadsheet owner state leaked to another pane");
     r.e = editor::edit(r.e.clone(), &Op::SetArg { node: vec!["g".into(), "@result".into()], key: ArgKey::Kw("columns".into()), sub: vec![], value: s::make(Node::Num("4".into())) }).expect("edit");
@@ -353,8 +353,8 @@ pub fn run_op_inspector() {
     r.step(m, vec![]);
     r.step(m, vec![]);
     let click = |r: &mut Run, p: (f64, f64)| {
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
     };
     let (bx, by, _, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
     click(&mut r, ((bx + 60) as f64, (by + 12) as f64));
@@ -364,11 +364,11 @@ pub fn run_op_inspector() {
     // the first row (a, 3.0) is a slider 186 points under the panel body's top
     let (ix, iy, _, _) = r.panes().inspector;
     let at = |x: i64| ((ix + 200 + x) as f64, (iy + 186) as f64);
-    r.stepb(&[LB], at(0), vec![Event::Pointer_pressed(LB, at(0))]);
+    r.stepb(&[LB], at(0), vec![Event::PointerPressed(LB, at(0))]);
     for x in [20, 40, 60, 80] {
         r.stepb(&[LB], at(x), vec![]);
     }
-    r.step(at(90), vec![Event::Pointer_released(LB, at(90))]);
+    r.step(at(90), vec![Event::PointerReleased(LB, at(90))]);
     r.step(m, vec![]);
     check(r.source() != before && !has(&r.source(), "(* 3.0 a)") && has(&r.source(), "(* "), &format!("the inspector showed no editable input row of a * node: {}", r.source()));
     let label = r.undo_label();
@@ -392,8 +392,8 @@ pub fn run_nested_inspector() {
     r.step(m, vec![]);
     r.step(m, vec![]);
     let click = |r: &mut Run, p: (f64, f64)| {
-        r.step(p, vec![Event::Pointer_moved(p)]);
-        r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
+        r.step(p, vec![Event::PointerMoved(p)]);
+        r.step(p, vec![Event::PointerPressed(LB, p), Event::PointerReleased(LB, p)]);
     };
     let (bx, by, _, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
     click(&mut r, ((bx + 60) as f64, (by + 12) as f64));
@@ -402,11 +402,11 @@ pub fn run_nested_inspector() {
     let before = r.source();
     let (ix, iy, _, _) = r.panes().inspector;
     let at = |dy: i64, x: i64| ((ix + 200 + x) as f64, (iy + dy) as f64);
-    r.stepb(&[LB], at(281, 0), vec![Event::Pointer_pressed(LB, at(281, 0))]);
+    r.stepb(&[LB], at(281, 0), vec![Event::PointerPressed(LB, at(281, 0))]);
     for x in [20, 40, 60, 80] {
         r.stepb(&[LB], at(281, x), vec![]);
     }
-    r.step(at(281, 90), vec![Event::Pointer_released(LB, at(281, 90))]);
+    r.step(at(281, 90), vec![Event::PointerReleased(LB, at(281, 90))]);
     r.step(m, vec![]);
     let after = r.source();
     check(after != before && has(&after, "(+ 2.0 (* ") && has(&after, "a 1.0") && has(&after, " a))") && !has(&after, "(* 3.0 a)"), &format!("the nested * input was not editable from the inspector: {after}"));

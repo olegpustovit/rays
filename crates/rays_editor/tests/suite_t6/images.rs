@@ -1,4 +1,4 @@
-//! test_workspace_images.ml and test_workspace_images_native.ml. Every case needs the Vulkan device (the owner
+//!  and . Every case needs the Vulkan device (the owner
 //! opens a GPU service), so each starts with `common::gpu()`.
 #![allow(dead_code, unused_imports)]
 use std::cell::RefCell;
@@ -395,8 +395,8 @@ fn lane_resources_snapshot() {
 fn scene_textures_preserved() {
     use rays::scene3 as s3;
     let texture = s3::textured(None, rays::texture::init(2, 2, &|_, _| rays_math::color::white()).unwrap());
-    let plane = s3::plane(Some(s3::cull::Cull_front), 2., 3.).unwrap();
-    let scene = s3::create(None, Some(rays_math::color::red()), None, Some(4), vec![s3::translate(rays_math::vec3::create(2., 3., 4.), vec![s3::with_blend(s3::blend::Add, vec![s3::with_depth(s3::depth_state(Some(false)), vec![plane])])])]).unwrap();
+    let plane = s3::plane(Some(s3::Cull::CullFront), 2., 3.).unwrap();
+    let scene = s3::create(None, Some(rays_math::color::red()), None, Some(4), vec![s3::translate(rays_math::vec3::create(2., 3., 4.), vec![s3::with_blend(s3::Blend::Add, vec![s3::with_depth(s3::depth_state(Some(false)), vec![plane])])])]).unwrap();
     let textured = s3::walk::with_texture(&texture, &scene);
     let (a, b) = (s3::walk::drawings(&scene), s3::walk::drawings(&textured));
     assert_eq!(a.len(), b.len());
@@ -452,7 +452,7 @@ fn capacity() {
     editor::close(&owner);
 }
 
-// ---- test_workspace_images_native.ml ----
+// ----  ----
 
 use runtime_resources::image as I;
 
@@ -819,11 +819,11 @@ fn export_or_skip(dir: &std::path::Path, doc: &editor_document::workspace_doc::T
 
 // ---- the two reload-driven resident cases ----
 
-fn plane_scene(source_image: &rays::image::Image, texture: &rays::texture::Texture) -> Vec<rays::scene::node> {
+fn plane_scene(source_image: &rays::image::Image, texture: &rays::texture::Texture) -> Vec<rays::scene::Node> {
     use rays::scene3 as s3;
     let mesh = rays::mesh::plane(2. * 65. / 17., 2.).unwrap();
     let camera = rays::camera::orthographic(2., rays_math::vec3::create(0., 0., 2.), rays_math::vec3::zero()).unwrap();
-    let scene3 = s3::create(None, Some(rays_math::color::white()), None, None, vec![s3::mesh(Some(rays::material::matte(rays_math::color::white())), Some(s3::textured(Some(rays::texture::filter::Nearest), texture.clone())), None, Some(s3::cull::Cull_none), None, mesh)]).unwrap();
+    let scene3 = s3::create(None, Some(rays_math::color::white()), None, None, vec![s3::mesh(Some(rays::material::matte(rays_math::color::white())), Some(s3::textured(Some(rays::texture::Filter::Nearest), texture.clone())), None, Some(s3::Cull::CullNone), None, mesh)]).unwrap();
     vec![rays::scene::clear(rays_math::color::black()), rays::scene::image(source_image, (0, 0), None, None).unwrap(), rays::scene::layer::layer_break(), rays::scene::view3d(Some((33, 0, 32, 17)), &camera, scene3)]
 }
 

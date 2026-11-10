@@ -3,7 +3,7 @@
 //! The runtime frame clock always advances, while this clock can pause, stop, and reset without
 //! touching global state. It reads no keys: the host drives `toggle_pause`, `stop`, and `reset`
 //! from its keymap.
-#![allow(non_camel_case_types)]
+
 use rays::frame;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,10 +23,10 @@ pub struct Timeline {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
     Advanced,
-    Paused_now,
+    PausedNow,
     Resumed,
-    Stopped_now,
-    Reset_now,
+    StoppedNow,
+    ResetNow,
     Seeked,
 }
 
@@ -43,15 +43,15 @@ pub fn frame(value: &Timeline) -> i64 {
     value.frame
 }
 pub fn reset(_: &Timeline) -> (Timeline, Vec<Change>) {
-    (create(), vec![Change::Reset_now])
+    (create(), vec![Change::ResetNow])
 }
 pub fn stop(_: &Timeline) -> (Timeline, Vec<Change>) {
-    (Timeline { mode: Mode::Stopped, time: 0.0, frame: 0 }, vec![Change::Stopped_now])
+    (Timeline { mode: Mode::Stopped, time: 0.0, frame: 0 }, vec![Change::StoppedNow])
 }
 
 pub fn toggle_pause(value: &Timeline) -> (Timeline, Vec<Change>) {
     match value.mode {
-        Mode::Playing => (Timeline { mode: Mode::Paused, ..*value }, vec![Change::Paused_now]),
+        Mode::Playing => (Timeline { mode: Mode::Paused, ..*value }, vec![Change::PausedNow]),
         Mode::Paused | Mode::Stopped => (Timeline { mode: Mode::Playing, ..*value }, vec![Change::Resumed]),
     }
 }
@@ -77,5 +77,5 @@ pub fn update(value: &Timeline, runtime_frame: &frame::Frame) -> (Timeline, Vec<
 }
 
 pub fn changed_context(changes: &[Change]) -> bool {
-    changes.iter().any(|c| matches!(c, Change::Advanced | Change::Stopped_now | Change::Reset_now | Change::Seeked))
+    changes.iter().any(|c| matches!(c, Change::Advanced | Change::StoppedNow | Change::ResetNow | Change::Seeked))
 }

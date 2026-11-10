@@ -1,4 +1,4 @@
-//! Ports of the helpers at the top of test_workspace_shell.ml / test_editor_input.ml.
+//! Ports of the helpers at the top of  / .
 #![allow(dead_code)]
 use editor_document::document;
 use editor_document::kinds;
@@ -160,9 +160,9 @@ impl Run {
         self.step_full(buttons, &[], mouse, events)
     }
     pub fn click_button(&mut self, button: MouseButton, p: (f64, f64)) {
-        self.step(p, vec![Event::Pointer_moved(p)]);
-        self.stepb(&[button], p, vec![Event::Pointer_pressed(button, p)]);
-        self.step(p, vec![Event::Pointer_released(button, p)]);
+        self.step(p, vec![Event::PointerMoved(p)]);
+        self.stepb(&[button], p, vec![Event::PointerPressed(button, p)]);
+        self.step(p, vec![Event::PointerReleased(button, p)]);
     }
     pub fn click(&mut self, p: (f64, f64)) {
         self.click_button(MouseButton::LeftButton, p)
@@ -184,13 +184,13 @@ impl Run {
     }
 }
 pub fn key(k: Key) -> Event {
-    Event::Key_pressed(k)
+    Event::KeyPressed(k)
 }
 pub fn ch(c: char) -> Event {
-    Event::Key_pressed(Key::KeyChar(c))
+    Event::KeyPressed(Key::KeyChar(c))
 }
 pub fn text_input(s: &str) -> Event {
-    Event::Text_input(s.to_string())
+    Event::TextInput(s.to_string())
 }
 pub fn fpt(a: i64, b: i64) -> (f64, f64) {
     (a as f64, b as f64)
