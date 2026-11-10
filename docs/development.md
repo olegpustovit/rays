@@ -44,6 +44,43 @@ Do not include cargo compilation in runtime comparisons. Measure release separat
 Stored OCaml thresholds remain in the Rust debug lowering performance test; the tag provides
 reproducible source for refreshing same-machine baselines.
 
+## Same-machine native comparison (2026-11-10)
+
+Apple M1, 16 GiB, macOS 27.0.1 (26A434), eight logical CPUs. The unmodified
+`ocaml-reference` checkout used OCaml 5.3.0 and Dune 3.21.1, native dev build; Rust
+used the repository's normal debug profile at `05ed0200`. Existing `telegram` opam
+libraries supplied the reference dependencies. Dune alone was bootstrapped locally
+from its checksum-verified release, without changing an installed switch or adding
+OCaml dependencies to Rust. Bootstrap took 62.46 s; the first reference app build
+took 56.75 s with two jobs. These preparation times are not paired cold-build data.
+
+Both executables ran the same 20 byte-identical sketches (none imports another
+file), then `mem sketches/basic.rays --frames 30`. One warmup preceded three
+alternating samples per implementation, with compilation outside the timers and
+other build/test jobs paused. Each sample starts a fresh process. The native `mem`
+route uses a 960×640 offscreen GPU canvas, fixed 60 Hz and one editor domain in both
+versions; checks retain their normal defaults. All 16 commands exited successfully.
+
+| Workload | OCaml median | Rust debug median | Rust result |
+| --- | --- | --- | --- |
+| `check` common 20-sketch corpus | 1.850556 s | 2.027166 s | 9.5% slower |
+| `mem` basic, 30 fixed frames | 0.177366 s | 0.165680 s | 6.6% faster |
+
+OS maximum-resident-set medians were 182.4/311.6 MB for the check corpus and
+97.6/73.3 MB for the native frame command (OCaml/Rust, decimal MB). Native ledgers
+reported 664.9/113.5 KB allocated per frame and zero readback in both versions;
+OCaml GC allocation and Rust allocator counters cover different memory and are not
+a byte-parity metric. OCaml check samples were 1.828/1.851/2.563 s, Rust
+2.027/2.033/2.018 s. This establishes a real Mac runtime comparison, not an overall
+Rust win. Release, paired cold builds and Windows remain unmeasured.
+
+The external comparison script is `../rays-support/paired_native.py`; its source
+hashes, complete commands, samples and stdout/stderr are retained under
+`/tmp/rays-reference-common-corpus.json`, `/tmp/rays-native-paired.log` and
+`/tmp/rays-native-paired/`. The other 29 top-level sketch files changed public
+spellings, units, integer conversions or topology recipes and were excluded from
+this identical-input comparison.
+
 ## Root migration verification (2026-11-06, Mac M1)
 
 Warm app typecheck: 0.10 s. All-target workspace typecheck: 7.13 s. Debug app build: 5.81 s
