@@ -18,10 +18,10 @@ Baseline audit: `dev` @ `e2e4ab02` (2026-11-09). Follows the [first plan](https:
 | B | 8 | 8 | 0 | 0 |
 | A | 4 | 4 | 0 | 0 |
 | D | 12 | 12 | 0 | 0 |
-| Z | 11 | 6 | 5 | 0 |
+| Z | 11 | 7 | 4 | 0 |
 | R | 10 | 10 | 0 | 0 |
 | G | 7 | 6 | 1 | 0 |
-| **All** | **58** | **52** | **6** | **0** |
+| **All** | **58** | **53** | **5** | **0** |
 
 ## Items
 
@@ -710,3 +710,6 @@ All commands use the normal shared target and `cargo t`, without RAYS_SLOW/deadl
 - **B8 closed** (user decision 2026-11-10): item (&ModelView, 122 fns) done in `3dcb2c3c`; split/prune/fixes above; `a2c0ea9b` removes the auto-discovered editor_all test binary. Editor suite wall time (~104 s vs 60 s cap; 193 serial device cases, lowering-dominated) is tracked as a follow-up outside this plan.
 - **Z4** merged `fc80f664` (`82bdd6db`…`ce09990e`): u32 topology/point/edge indices, `topology_index::NONE`, `GeometryTooLarge`/`E_GEOMETRY_TOO_LARGE` at validating constructors (+ no-alloc regression), rays::Mesh indices u32 aliasing topology; Lisp boundary widens (NONE→-1). Subdivide peak 29.10→24.64 MB (cap 24.7 MB), warm subdivide peak cap 3,445,100→2,660,000, boolean 926,350→855,000. gi( 430→155. All rdk/sop/flow/native/editor suites green. Remaining i64: remap mapping arrays, group order, rdk_geom Features, builder scratch narrowed by copy — follow-up pass.
 - Artifact v51 published: 52 done / 6 active (Z0 Z1 Z5 Z9 Z10 G1); DB records + embedded seed synced; tracker check passes.
+- Windows box back online (HEAD 6fd9abe6, 176 behind dev); Windows qualification agent dispatched for G3/G5/G1/Z4/Z5/Z10 (Vulkan compiled for the first time since G3/G5).
+- **Z9** merged (`06105ee5` `bb5f1cde` + root shape fix): process-wide ledger-charged scratch pool (`rdk_core::scratch`, evictor empties under pressure; ponytail: per-worker pools if contention); boolean CDT/arrangement/radial buffers borrow it; flow_ir profile::record updates in place. Changed-input warm cooks: boolean 26,695→16,214 allocs (cap 16,500), scatter 422,487→261,961 (cap 262,500, peak cap 12.99M→6.4M), subdivide 68,525→68,523 (≈99% of subdivide/scatter allocations are Flow evaluation: arg type clones, Walker path vecs, Arena::fresh, lowering Source clones — not kernel scratch). flow_sop438, rdk_*, flow_ir pass; shape 491.
+- Artifact v52: Z9 done (53/58). Z0 flow-eval warm-cook agent dispatched.
