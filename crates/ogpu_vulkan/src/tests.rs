@@ -1529,7 +1529,7 @@ fn gpu_painter_primitives() {
     let mut expected = vec![0u8; 16];
     expected[5..7].copy_from_slice(&[1, 2]);
     expected[9..11].copy_from_slice(&[3, 4]);
-    require(be::read_texture(&atlas, 4).unwrap_or_else(|failure| die(failure)) == expected, "R8 sub-rectangle write differs");
+    assert_eq!(be::read_texture(&atlas, 4).unwrap_or_else(|failure| die(failure)), expected, "R8 sub-rectangle write differs");
     refused(be::write_texture(&atlas, None, Origin { x: 3, y: 3, z: 0 }, Extent { width: 2, height: 2, depth: 1 }, 4, &[0; 6]).err(), ErrorKind::InvalidArgument, "an out-of-bounds rectangle was accepted");
 
     let ring = be::create_host_buffer(&device, buf("ring", 64, &[BufferUsage::Vertex, BufferUsage::Storage])).unwrap_or_else(|failure| die(failure));
