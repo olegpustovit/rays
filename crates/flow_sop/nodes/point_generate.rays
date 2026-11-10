@@ -4,7 +4,7 @@
 ; rows, the pattern-matched ones are copied from the full-source remap; P always comes from the source.
 (defn pg_error :context value [(reason : text)]
   (error "invalid_geometry" "point_generate could not produce valid geometry"
-    :cause (str "point_generate [invalid_geometry]: Rdk.Point_generate.point_generate: " reason)))
+    :cause (str "point_generate [invalid_geometry]: sop/point_generate: " reason)))
 (defn pg_pattern_ok :context value [(pattern : text)]
   (or (text/blank? pattern) (equal? (text/glob_error pattern) "")))
 ; One point attribute copied from src to dst (same rows) without naming its storage type.
@@ -49,6 +49,7 @@
                            (or (not (equal? mode "Probability attribute")) (not (text/blank? probability_attribute))))
                       (and (pg_pattern_ok copy_point_attributes) (pg_pattern_ok copy_detail_attributes))))
   :code "E_PARAM" :message "sop/point_generate: invalid parameters"
+  :description "Generate points from source points using counts or probabilities."
   [(in0 : geometry)
    (mode : text "Per point" :label "Generation mode" :choices ["Total count" "Per point" "Probability attribute"])
    (group : text "" :label "Point group")

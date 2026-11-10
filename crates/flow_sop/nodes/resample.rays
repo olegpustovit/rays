@@ -139,12 +139,13 @@
               segment_length_attribute segments_attribute curve_u_attribute
               curve_number_attribute distance_attribute tangent_attribute)
   :code "E_PARAM" :message "sop/resample: invalid parameters"
+  :description "Resample curves at uniform distances and interpolate their attributes."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
    (use_segments : bool true :label "Use segments")
    (segments : int 10 :label "Segments" :min 1 :max 1024 :hard_min 1)
    (use_maximum_segment_length : bool false :label "Use maximum segment length")
-   (maximum_segment_length : float 0.1 :label "Maximum segment length" :min 0.0001 :max 10 :hard_min 0)
+   (maximum_segment_length : float 0.1 :unit "m" :label "Maximum segment length" :min 0.0001 :max 10 :hard_min 0)
    (segment_length_attribute : text "" :label "Segment length attribute" :folder "Overrides")
    (segments_attribute : text "" :label "Segments attribute" :folder "Overrides")
    (even_last_segment : bool true :label "Even last segment")

@@ -6,7 +6,7 @@
 ; optional copy groups mark each block's primitives.
 (defn dup_fail :context value [(reason : text)]
   (error "invalid_parameter" "duplicate could not produce valid geometry"
-    :cause (str "duplicate [invalid_parameter]: Rdk.Instance_copy.duplicate: " reason)))
+    :cause (str "duplicate [invalid_parameter]: sop/duplicate: " reason)))
 (defn dup_identity_rows :context value []
   {:r0 (array/vec4 1 [1.0 0.0 0.0 0.0]) :r1 (array/vec4 1 [0.0 1.0 0.0 0.0])
    :r2 (array/vec4 1 [0.0 0.0 1.0 0.0]) :r3 (array/vec4 1 [0.0 0.0 0.0 1.0])})
@@ -41,6 +41,7 @@
 (defnode sop/duplicate :label "Duplicate" :category "Copy"
   :validate (int/lt copies (array/max_length :type int))
   :code "E_PARAM" :message "sop/duplicate: copies must fit a nonnegative array count"
+  :description "Make transformed copies of selected geometry and carry its attributes."
   [(in0 : geometry)
    (copies : int 1 :label "Copies" :min 1 :max 1024 :hard_min 0)
    (cumulative : bool true :label "Cumulative transform")

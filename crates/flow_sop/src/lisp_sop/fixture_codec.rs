@@ -1,4 +1,4 @@
-//! Test fixture interchange from lib/flow_sop/goldens/fixture_codec.ml.
+//! Test fixture interchange from .
 use std::sync::Arc;
 use flow_syntax::{syntax::{self,Node,Syntax},lisp};
 use flow_syntax::arena::{SyntaxArena, SyntaxId};

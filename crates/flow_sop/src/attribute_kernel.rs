@@ -521,12 +521,12 @@ pub(crate) fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str
     let storage = held_storage(&held)?;
     let Some(planes) = columns(storage)? else {
         return match (storage, component) {
-            (Storage::Int(data), None) => Ok(Value::Int_array(data.clone())),
-            (Storage::Text(data), None) => Ok(Value::Text_array(data.clone())),
-            (Storage::FloatArray(data), Some("offsets")) => Ok(Value::Int_array(float_array::view::view(data).offsets)),
+            (Storage::Int(data), None) => Ok(Value::IntArray(data.clone())),
+            (Storage::Text(data), None) => Ok(Value::TextArray(data.clone())),
+            (Storage::FloatArray(data), Some("offsets")) => Ok(Value::IntArray(float_array::view::view(data).offsets)),
             (Storage::FloatArray(data), Some("values")) => Ok(Value::Floats(1, float_array::view::view(data).values)),
-            (Storage::IntArray(data), Some("offsets")) => Ok(Value::Int_array(int_array::view::view(data).offsets)),
-            (Storage::IntArray(data), Some("values")) => Ok(Value::Int_array(int_array::view::view(data).values)),
+            (Storage::IntArray(data), Some("offsets")) => Ok(Value::IntArray(int_array::view::view(data).offsets)),
+            (Storage::IntArray(data), Some("values")) => Ok(Value::IntArray(int_array::view::view(data).values)),
             _ => err("E_ATTR_TYPE", "This attribute storage requires its typed array foundation."),
         };
     };
@@ -577,7 +577,7 @@ fn read_checked(component: &str, owner: Owner, kind: &str, name: &str, g: &geome
         Ok(if valid_only {
             let mut valid = V::array_buffer(data.len())?;
             valid.extend(data.into_iter().map(|x| x as i64));
-            Value::Int_array(Arc::new(valid))
+            Value::IntArray(Arc::new(valid))
         } else { wide_array(width, data) })
     };
     if count.saturating_mul(width) <= 4096 {
@@ -1211,13 +1211,13 @@ fn semantic_owned(owner: Owner, name: &str, storage: Storage, g: &geometry::T) -
 pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str, name: &str, values: &Value, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
     let count = owner_count(g, owner);
     match (kind, values) {
-        ("int", Value::Int_array(data)) => {
+        ("int", Value::IntArray(data)) => {
             if data.len() != count {
                 return err("E_ATTR_COUNT", "Integer attribute count differs from owner count.");
             }
             semantic_owned(owner, name, Storage::Int(data.clone()), g)
         }
-        ("text", Value::Text_array(data)) => {
+        ("text", Value::TextArray(data)) => {
             if data.len() != count {
                 return err("E_ATTR_COUNT", "Text attribute count differs from owner count.");
             }
@@ -1253,7 +1253,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             install_planes(owner, kind, name, planes.into_iter().cloned().collect(), g)
         }
         ("float_array" | "int_array", Value::Record(fields)) => match (fields.get_str("offsets"), fields.get_str("values")) {
-            (Some(Value::Int_array(offsets)), Some(values)) => {
+            (Some(Value::IntArray(offsets)), Some(values)) => {
                 if offsets.len() != count + 1 {
                     return err("E_ATTR_COUNT", "CSR row count differs from owner count.");
                 }
@@ -1266,7 +1266,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
                         let csr = float_array::create_shared(offsets.clone(), data.clone()).map_err(|e| fail("E_ATTR_COUNT", &rerr(&e)))?;
                         semantic_owned(owner, name, Storage::FloatArray(csr), g)
                     }
-                    ("int_array", Value::Int_array(data)) => {
+                    ("int_array", Value::IntArray(data)) => {
                         let csr = int_array::create_shared(offsets.clone(), data.clone()).map_err(|e| fail("E_ATTR_COUNT", &rerr(&e)))?;
                         semantic_owned(owner, name, Storage::IntArray(csr), g)
                     }
@@ -1387,7 +1387,7 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
         ("vec4", Value::Vec4(x, y, z, q)) => Some(vec![*x, *y, *z, *q]),
         _ => None,
     };
-    let (Some((vals, constant_count)), Value::Int_array(selection), Some(default_row)) = (vals, selection, default_row) else {
+    let (Some((vals, constant_count)), Value::IntArray(selection), Some(default_row)) = (vals, selection, default_row) else {
         return match constant {
             Some(Err(d)) => Err(d),
             _ => err("E_ATTR_TYPE", "Selected writes require numeric arrays, an integer selection and a matching default value."),
@@ -1472,7 +1472,7 @@ pub fn write_constant_source(
                 semantic_owned(owner, name, Storage::Int(Arc::new(data)), g).map(Some)
             }
             Value::Text(_) => {
-                let Value::Text_array(data) = V::array_init(&Ty::Text, count as i64, &|_| value.clone())? else { unreachable!() };
+                let Value::TextArray(data) = V::array_init(&Ty::Text, count as i64, &|_| value.clone())? else { unreachable!() };
                 semantic_owned(owner, name, Storage::Text(data), g).map(Some)
             }
             Value::Float(_) | Value::Vec3(..) | Value::Vec4(..) => {
@@ -1985,7 +1985,7 @@ pub fn delete_after(deletes: &[(String, String)], cancel_token: &Arc<cancel::T>,
 
 /// The measured display sinks of a backend (`Gpu::Display` in its evidence): seconds per float the
 /// editor spent preparing a host mesh for display, and a resident one.
-#[allow(non_snake_case)]
+
 pub mod display_sink {
     use super::*;
 
@@ -2280,7 +2280,7 @@ impl Kernel {
                             ("int", 1) => {
                                 let mut values = V::array_buffer(data[0].len())?;
                                 values.extend(data[0].iter().map(|x| *x as i64));
-                                Value::Int_array(Arc::new(values))
+                                Value::IntArray(Arc::new(values))
                             },
                             (_, 1) => float_array(data.into_iter().next().unwrap()),
                             _ => Value::Record(Vec::new().into()),
@@ -2430,14 +2430,14 @@ pub fn node(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>, o: &NodeOptions, 
         fields.extend(o.default.clone().map(|v| ("default".into(), v)));
         Value::Record(fields.into())
     };
-    let program = prepare(o.profile.clone(), o.strict, Some(o.approx.clone()), Some(Sink::Sop_input), &sources, &inputs, &data);
+    let program = prepare(o.profile.clone(), o.strict, Some(o.approx.clone()), Some(Sink::SopInput), &sources, &inputs, &data);
     // a lone write as a one-field record, for the device (Executor::record_on_device)
     let lone_record = match &o.gpu {
         Some(gpu) if gpu.fast && gpu.backend.is_some() && o.prior.is_empty() && !selected && !o.reference => Some(prepare(
             o.profile.clone(),
             o.strict,
             Some(o.approx.clone()),
-            Some(Sink::Sop_input),
+            Some(Sink::SopInput),
             &sources,
             &inputs,
             &Value::Record(vec![("values".into(), values.clone())].into()),
@@ -2704,7 +2704,7 @@ use rdk_ops::line_geometry;
                             let expected = bits(&with_attr(&original, owner, "selected", pack(width, &expected_planes)));
                             for domains in [1, 8] {
                                 on_domains(domains, &|| {
-                                    let out = write_selected(97, owner, kind, "selected", &values, &Value::Int_array(Arc::new(mask.clone())), &default, &original).unwrap();
+                                    let out = write_selected(97, owner, kind, "selected", &values, &Value::IntArray(Arc::new(mask.clone())), &default, &original).unwrap();
                                     assert_eq!(bits(&out), expected);
                                     assert_eq!(bits(&original), before);
                                 });
@@ -2714,16 +2714,16 @@ use rdk_ops::line_geometry;
                             assert_eq!(code(write_selected(97, owner, kind, "selected", values, &selection, default, &original)), want);
                             assert_eq!(bits(&original), before);
                         };
-                        invalid(Value::Int_array(Arc::new(vec![0; count + 1])), &default, &values, "E_ATTR_COUNT");
-                        invalid(Value::Int_array(Arc::new(vec![0; count])), &Value::Text(b"wrong".as_slice().into()), &values, "E_ATTR_TYPE");
+                        invalid(Value::IntArray(Arc::new(vec![0; count + 1])), &default, &values, "E_ATTR_COUNT");
+                        invalid(Value::IntArray(Arc::new(vec![0; count])), &Value::Text(b"wrong".as_slice().into()), &values, "E_ATTR_TYPE");
                         if count > 0 {
-                            invalid(Value::Int_array(Arc::new(vec![2; count])), &default, &values, "E_ATTR_SELECTION");
+                            invalid(Value::IntArray(Arc::new(vec![2; count])), &default, &values, "E_ATTR_SELECTION");
                             let mut bad = replacements.clone();
                             bad[0] = f64::NAN;
-                            invalid(Value::Int_array(Arc::new(vec![0; count])), &default, &array(width, bad.clone()), "E_NONFINITE");
+                            invalid(Value::IntArray(Arc::new(vec![0; count])), &default, &array(width, bad.clone()), "E_NONFINITE");
                             let mut late = vec![0; count];
                             late[count - 1] = -1;
-                            invalid(Value::Int_array(Arc::new(late)), &default, &array(width, bad), "E_ATTR_SELECTION");
+                            invalid(Value::IntArray(Arc::new(late)), &default, &array(width, bad), "E_ATTR_SELECTION");
                         }
                     }
                 }
@@ -2736,7 +2736,7 @@ use rdk_ops::line_geometry;
     fn csr_writer_finite_scan() {
         let geo = points(1);
         let write = |data: &[f64]| {
-            write(97, Owner::Point, "float_array", "csr", &Value::Record(vec![("offsets".into(), Value::Int_array(Arc::new(vec![0, data.len() as i64]))), ("values".into(), float_array(data.to_vec()))].into()), &geo)
+            write(97, Owner::Point, "float_array", "csr", &Value::Record(vec![("offsets".into(), Value::IntArray(Arc::new(vec![0, data.len() as i64]))), ("values".into(), float_array(data.to_vec()))].into()), &geo)
         };
         let data = [-0.0, 0.0, f64::MAX];
         let written = write(&data).unwrap();
@@ -2764,7 +2764,7 @@ use rdk_ops::line_geometry;
             Owner::Point,
             "float_array",
             "csr",
-            &Value::Record(vec![("offsets".into(), Value::Int_array(Arc::new(vec![0]))), ("values".into(), float_array(vec![]))].into()),
+            &Value::Record(vec![("offsets".into(), Value::IntArray(Arc::new(vec![0]))), ("values".into(), float_array(vec![]))].into()),
             &points(0),
         );
         assert!(empty.is_ok());
@@ -2864,7 +2864,7 @@ use rdk_ops::line_geometry;
                 let args = vec![("count".into(), Value::Int(count as i64)), ("value".into(), fill.clone())];
                 let marker = op::constant_array_descriptor(&name, &args).unwrap();
                 if kind == "float" {
-                    let selection = Value::Int_array(Arc::new(vec![1; count]));
+                    let selection = Value::IntArray(Arc::new(vec![1; count]));
                     assert_eq!(code(write_selected(97, Owner::Point, kind, "constant", &marker, &selection, &Value::Float(f64::NAN), &original)), "E_NONFINITE");
                     assert_eq!(bits(&original), before);
                 }
@@ -2880,7 +2880,7 @@ use rdk_ops::line_geometry;
                         if ["float", "vec3", "vec4"].contains(&kind) {
                             let selects: [&dyn Fn(usize) -> i64; 3] = [&|_| 0, &|_| 1, &|i| (i % 2) as i64];
                             for select in selects {
-                                let selection = Value::Int_array(Arc::new((0..count).map(select).collect()));
+                                let selection = Value::IntArray(Arc::new((0..count).map(select).collect()));
                                 let actual = write_constant_source(97, Owner::Point, kind, "constant", Some(&selection), Some(&fill), &marker, &original).unwrap().unwrap();
                                 let expected = write_selected(97, Owner::Point, kind, "constant", &dense, &selection, &fill, &original).unwrap();
                                 assert_eq!(bits(&actual), bits(&expected));
@@ -2968,7 +2968,7 @@ use rdk_ops::line_geometry;
                     extra.extend(fields.clone());
                     let mut dup = vec![fields[0].clone()];
                     dup.extend(fields.clone());
-                    let mut int_x = vec![("x".into(), Value::Int_array(Arc::new(vec![0; count])))];
+                    let mut int_x = vec![("x".into(), Value::IntArray(Arc::new(vec![0; count])))];
                     int_x.extend(fields.iter().skip(1).cloned());
                     let mut vec3_x = vec![("x".into(), Value::Floats(3, Arc::new(vec![])))];
                     vec3_x.extend(fields.iter().skip(1).cloned());
@@ -2999,7 +2999,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
                         3 => Value::Vec3(0.0, 0.0, 0.0),
                         _ => Value::Vec4(0.0, 0.0, 0.0, 0.0),
                     };
-                    let selection = Value::Int_array(Arc::new(vec![1; count]));
+                    let selection = Value::IntArray(Arc::new(vec![1; count]));
                     assert_eq!(code(write_selected(97, owner, kind, "planes", &values, &selection, &default, &original)), "E_ATTR_TYPE");
                     assert_eq!(bits(&original), before);
                 }
@@ -3039,9 +3039,9 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn topology_fields(g: &geometry::T) -> Vec<(Symbol, Value)> {
         let view = topology::view::view(geometry::topology(g)).unwrap();
         vec![
-            ("vertex_points".into(), Value::Int_array(Arc::new(view.vertex_points.iter().map(|&v| i64::from(v)).collect()))),
-            ("primitive_offsets".into(), Value::Int_array(Arc::new(view.primitive_offsets.iter().map(|&v| i64::from(v)).collect()))),
-            ("kinds".into(), Value::Int_array(Arc::new(view.primitive_kinds.iter().map(|k| i64::from(*k)).collect()))),
+            ("vertex_points".into(), Value::IntArray(Arc::new(view.vertex_points.iter().map(|&v| i64::from(v)).collect()))),
+            ("primitive_offsets".into(), Value::IntArray(Arc::new(view.primitive_offsets.iter().map(|&v| i64::from(v)).collect()))),
+            ("kinds".into(), Value::IntArray(Arc::new(view.primitive_kinds.iter().map(|k| i64::from(*k)).collect()))),
         ]
     }
 
@@ -3166,7 +3166,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     #[test]
     fn missing_geometry_source_is_refused() {
         let lookup: GeometryLookup = Arc::new(|_| None);
-        for geometry in [Value::No_geo, Value::Deferred(ty::geometry(), 7), Value::Deferred(Ty::Float, 7)] {
+        for geometry in [Value::NoGeo, Value::Deferred(ty::geometry(), 7), Value::Deferred(Ty::Float, 7)] {
             let source = source_value("sop/topology", array_of(Ty::Int), vec![("geometry".into(), geometry), ("component".into(), Value::Text(b"vertex_points".as_slice().into()))].into());
             assert_eq!(code(resolve(None, &lookup, &source)), "E_DATA_SOURCE");
         }
@@ -3243,7 +3243,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
             }
             let component = |name: &str| Value::Text(name.as_bytes().into());
             match read(&attr_source("sop/attr_checked", "P", &[("component", component("valid"))])) {
-                Value::Int_array(valid) => {
+                Value::IntArray(valid) => {
                     assert_eq!(valid.len(), count);
                     for i in 0..count {
                         assert_eq!(valid[i], i64::from(i % 7 != 3));

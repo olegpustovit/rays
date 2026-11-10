@@ -1,5 +1,5 @@
 ; Whole-node draft. Rotates the input so the From axis lands on the Into axis.
-; Mat4.rotation with the arm64 multiply-add fusion of each entry.
+; Mat4.rotate with the arm64 multiply-add fusion of each entry.
 (defn fused_rotation :context value [(direction : vec3) (angle : float)]
   (let* [axis (fused_normalize direction) c (cos angle) s (sin angle) om (- 1.0 c)]
     (if (= (fused_dot axis axis) 0.0) (mat4_identity)
@@ -14,6 +14,7 @@
             (fma (* axis.z axis.z) om c) 0.0]
        :r3 [0.0 0.0 0.0 1.0]})))
 (defnode sop/match_axis :label "Match Axis" :category ["Modify" "Align"]
+  :description "Rotate geometry so one direction aligns with another."
   [(in0 : geometry)
    (from_x : float 0.0 :label "From X" :folder ["From"] :min -1 :max 1 :vec3 ["from" 0])
    (from_y : float 1.0 :label "From Y" :folder ["From"] :min -1 :max 1 :vec3 ["from" 1])
@@ -25,7 +26,7 @@
          into_raw [into_x into_y into_z]]
     (if (or (<= (fused_dot from_raw from_raw) 1e-30) (<= (fused_dot into_raw into_raw) 1e-30))
       (error "invalid_axis" "match_axis could not produce valid geometry"
-        :cause "match_axis [invalid_axis]: Rdk.Match_size.match_axis: vectors must be finite and non-zero")
+        :cause "match_axis [invalid_axis]: sop/match_axis: vectors must be finite and non-zero")
       (let* [from (fused_normalize from_raw)
              into (fused_normalize into_raw)
              dot (max -1.0 (min 1.0 (fused_dot from into)))

@@ -18,7 +18,7 @@ use std::sync::Arc;
 type Exp = Value;
 
 fn ints(a: &[i64]) -> Value {
-    Value::Int_array(Arc::new(a.to_vec()))
+    Value::IntArray(Arc::new(a.to_vec()))
 }
 fn floats(a: Vec<f64>) -> Value {
     Value::Floats(1, Arc::new(a))

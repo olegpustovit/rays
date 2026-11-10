@@ -1,6 +1,7 @@
 ; Whole-node draft of Reverse: permutes vertices inside selected primitives, then
 ; carries every payload through sop/remap. Edge groups follow their endpoints.
 (defnode sop/reverse :label "Reverse" :category "Topology"
+  :description "Reverse corner order inside selected primitives."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
    (operation : text "Reverse vertices" :label "Operation" :choices ["Reverse vertices" "Shift vertices"])

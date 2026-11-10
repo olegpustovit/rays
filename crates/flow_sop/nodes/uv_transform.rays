@@ -4,6 +4,7 @@
                       (and (= (- scale_u scale_u) 0.0) (= (- scale_v scale_v) 0.0)))
                  (and (= (- angle angle) 0.0) (and (= (- pivot_u pivot_u) 0.0) (= (- pivot_v pivot_v) 0.0))))
   :code "E_PARAM" :message "sop/uv_transform: transform parameters must be finite"
+  :description "Translate, rotate and scale texture coordinates around a UV pivot."
   [(in0 : geometry)
    (name : text "uv" :label "UV attribute")
    (owner : text "Vertex" :label "Owner" :choices ["Point" "Vertex"])
@@ -12,7 +13,7 @@
    (translate_v : float 0.0 :label "Translate V" :folder ["Transform" "Translate"] :min -10 :max 10 :primary true)
    (scale_u : float 1.0 :label "Scale U" :folder ["Transform" "Scale"] :min -10 :max 10 :primary true)
    (scale_v : float 1.0 :label "Scale V" :folder ["Transform" "Scale"] :min -10 :max 10 :primary true)
-   (angle : float 0.0 :label "Angle" :folder ["Transform"] :min -3.141592653589793 :max 3.141592653589793 :primary true)
+   (angle : float 0.0 :label "Angle" :folder ["Transform"] :min -3.141592653589793 :max 3.141592653589793 :primary true :unit "rad")
    (pivot_u : float 0.5 :label "Pivot U" :folder ["Transform" "Pivot"] :min -10 :max 10)
    (pivot_v : float 0.5 :label "Pivot V" :folder ["Transform" "Pivot"] :min -10 :max 10)]
   (let* [selected_owner (text/lower owner)

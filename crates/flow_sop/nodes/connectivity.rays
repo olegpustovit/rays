@@ -15,6 +15,7 @@
   (and (= a.x b.x) (and (= a.y b.y) (= a.z b.z))))
 (defn connectivity_safe :context value [(index : int)] (if (int/ge index 0) index 0))
 (defnode sop/connectivity :label "Connectivity" :category ["Attribute" "Analysis"]
+  :description "Label connected pieces, with optional attribute seams or UV islands."
   [(in0 : geometry)
    (owner : text "Primitives" :label "Connectivity type" :choices ["Points" "Primitives"])
    (primitive_group : text "" :label "Primitive group" :folder ["Selection"])

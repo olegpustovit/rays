@@ -1,78 +1,8 @@
-//! Lowering time of three small graphs (debug build); run with `cargo t -p flow_sop perf_lower -- --ignored --nocapture`.
+//! Debug lowering must beat the recorded native baseline; failures remain visible.
 use super::support::*;
 use crate::{catalog, lower};
 use crate::operators as ops;
 use std::time::Instant;
-
-fn time(text: &str) -> String {
-    let forms = parse(text);
-    let t0 = Instant::now();
-    let factories = sop::nodes::factories();
-    let cat = catalog::of_factories(crate::manifest::VERSION, &[], None, &factories).unwrap();
-    let t1 = Instant::now();
-    let (checked, _) = catalog::check_workspace(ops::all(), false, None, &cat, &forms);
-    let checked = checked.unwrap();
-    let t2 = Instant::now();
-    use std::sync::atomic::Ordering::Relaxed;
-    let prof = std::env::var("PROF").is_ok(); if prof { flow_eval::PROFILE_ON.store(true, Relaxed); }
-    let (s0, a0, b0) = (flow_eval::EVAL_STEPS.load(Relaxed), mem_sys::alloc_count(), mem_sys::alloc_bytes_total());
-    lower::of_checked(Some(factories.clone()), lower::Options::default(), &checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    let t3 = Instant::now();
-    if prof { flow_eval::PROFILE_ON.store(false, Relaxed); eprintln!("{}", flow_eval::profile_report()); }
-    let (s1, a1, b1) = (flow_eval::EVAL_STEPS.load(Relaxed), mem_sys::alloc_count(), mem_sys::alloc_bytes_total());
-    lower::of_checked(Some(factories), lower::Options::default(), &checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    let t4 = Instant::now();
-    format!("catalog {:.3} check {:.3} lower {:.3} warm {:.3} | steps {} allocs {} bytes {} ({:.1} allocs/step)", (t1 - t0).as_secs_f64(), (t2 - t1).as_secs_f64(), (t3 - t2).as_secs_f64(), (t4 - t3).as_secs_f64(), s1 - s0, a1 - a0, b1 - b0, (a1 - a0) as f64 / (s1 - s0).max(1) as f64)
-}
-
-#[test]
-#[ignore = "benchmark"]
-fn perf_lower() {
-    for body in ["(sop/box)", "(sop/transform (sop/box) :translate [1 0 0])", "(sop/uv_sphere :radius 0.5)"] {
-        eprintln!("PERF {body}: {}", time(&format!("(workspace w (graph g :context sop {body}))")));
-    }
-}
-
-#[test]
-#[ignore = "benchmark"]
-fn perf_lower_box() { eprintln!("PERF box: {}", time("(workspace w (graph g :context sop (sop/box)))")); }
-#[test]
-#[ignore = "benchmark"]
-fn perf_lower_transform() { eprintln!("PERF transform: {}", time("(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))")); }
-#[test]
-#[ignore = "benchmark"]
-fn perf_lower_sphere() { eprintln!("PERF sphere: {}", time("(workspace w (graph g :context sop (sop/uv_sphere :radius 0.5)))")); }
-#[test]
-#[ignore = "benchmark"]
-fn perf_loop() { for _ in 0..12 { eprintln!("PERF loop: {}", time("(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))")); } }
-#[test]
-#[ignore = "benchmark"]
-fn perf_check_loop() {
-    let forms = parse("(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))");
-    let factories = sop::nodes::factories();
-    let cat = catalog::of_factories(crate::manifest::VERSION, &[], None, &factories).unwrap();
-    for _ in 0..15 { let t = Instant::now(); let _ = catalog::check_workspace(ops::all(), false, None, &cat, &forms); eprintln!("PERF check {:.3}", t.elapsed().as_secs_f64()); }
-}
-#[test]
-#[ignore = "benchmark"]
-fn perf_check_phases() {
-    let forms = parse("(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))");
-    let factories = sop::nodes::factories();
-    let cat = catalog::of_factories(crate::manifest::VERSION, &[], None, &factories).unwrap();
-    for round in 0..2 {
-        let start = Instant::now();
-        let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || start.elapsed().as_secs_f64()));
-        let _ = catalog::check_workspace(ops::all(), false, None, &cat, &forms);
-        let t = guard.finish();
-        eprintln!("PERF phases round {round} total {:.3}", t.total);
-        for e in t.entries.iter().take(12) { eprintln!("PERF   {} calls {} {:.3}", e.phase, e.calls, e.seconds); }
-    }
-}
-#[test]
-#[ignore = "benchmark"]
-fn perf_lower_garden() {
-    eprintln!("PERF garden: {}", time("(workspace w (graph garden :context sop [(seed : int 1) (count : int 40)] (let* [bed (sop/tube :top_radius 1 :bottom_radius 1 :height 0.04 :columns 48) spots (sop/scatter bed :count count :seed seed) dot (sop/uv_sphere :radius 0.06 :segments 8 :rings 4) dots (sop/copy_to_points dot spots) result (sop/set_color (sop/merge bed dots) :color \"#3b7d4e\")] result)))"));
-}
 
 // ---- perf gate: a DEBUG build lowers faster than archived native (docs/history/eval-design.md) ----
 // archived native `Lower.lower_checked` times on the reference Windows host (ms, cold: first lowering in the process).
@@ -99,7 +29,6 @@ fn cold_lower_seconds(text: &str) -> (f64, f64) {
 }
 
 #[test]
-#[ignore = "perf gate: run in a DEBUG build with `RAYS_SLOW=1 cargo t -p flow_sop debug_lowering_beats -- --ignored --nocapture`"]
 fn debug_lowering_beats_archived_native() {
     // deep Lisp recursion: the garden needs the main thread's stack in a debug build
     let report = std::thread::Builder::new().stack_size(256 << 20).spawn(|| {
@@ -109,4 +38,44 @@ fn debug_lowering_beats_archived_native() {
     for (name, ms, baseline, evaluate) in &report { eprintln!("GATE {build} {name}: {ms:.0} ms (evaluator {evaluate:.0} ms; archived native {baseline:.0} ms, {:.1}x)", ms / baseline); }
     let slower: Vec<_> = report.iter().filter(|(_, ms, baseline, _)| ms >= baseline).map(|(name, ms, baseline, _)| format!("{name} {ms:.0} ms >= {baseline:.0} ms")).collect();
     assert!(slower.is_empty(), "{build} lowering is not faster than archived native: {}", slower.join(", "));
+}
+
+#[test]
+fn validation_without_editor_records_preserves_geometry_and_errors() {
+    let source = "(workspace w (defn shift :context value [(x : float)] (+ x 0.5)) (graph g :context sop (sop/mesh :points (exact (map (fn [(i : int)] [(shift (float i)) 0 0]) (array/range 512 :type int))) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))))";
+    let (recorded, recorded_root) = lower_text(lower::Options::default(), source);
+    let (validation, validation_root) = lower_text(lower::Options { record: false, ..Default::default() }, source);
+    assert!(!recorded.evaluated.records.is_empty());
+    assert!(validation.evaluated.records.is_empty());
+    assert_eq!(geometry_bytes(&cook_once(1, &recorded_root)), geometry_bytes(&cook_once(1, &validation_root)));
+    let bad = "(workspace w (graph g :context sop (sop/mesh :points (exact (map (fn [(i : int)] (if (int/eq i 256) (error \"E_COORD\" \"bad coordinate\") [(float i) 0 0])) (array/range 512 :type int))) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))))";
+    let errors = [true, false].map(|record| {
+        let error = lower::workspace(None, Vec::new(), lower::Options { record, ..Default::default() }, &parse(bad))
+            .err().expect("selected computed error");
+        (error.code, error.message, error.span)
+    });
+    assert_eq!(errors[0], errors[1]);
+}
+
+
+#[test]
+fn swarm_topology_template_matches_original_at_kernel_and_degenerate_boundaries() {
+    let library = include_str!("../../../../sketches/swarm_lib.rays");
+    let start = library.find("          quads# ").expect("swarm topology start");
+    let finish = library.find("          mesh# ").expect("swarm topology end");
+    let topology = &library[start..finish];
+    let original = topology.replace("share_body# (and (> ~tubes 1)", "share_body# (and false");
+    assert_ne!(original, topology);
+    let evaluate = |body: &str, tubes: i64, points: i64, sides: i64| {
+        let body = body.replace("~tubes", "tubes").replace("~points", "points").replace("~sides", "sides");
+        let source = format!("(workspace w (graph g :context value [(tubes : int {tubes}) (points : int {points}) (sides : int {sides})] (let* [last# (- points 1) rings# (* (* tubes points) sides) {body}] corners#)))");
+        let catalog = flow_check::catalog::Catalog { version: 1, kinds: Vec::new() };
+        let (checked, errors) = flow_check::workspace::check(ops::all(), false, false, None, &catalog, &parse(&source));
+        let checked = checked.expect(&format!("{errors:?}"));
+        flow_ir::flow_ir::static_(&flow_ir::flow_ir::StaticOptions { verify: true, ..Default::default() }, &checked)
+            .map(|result| result.results[0].1.clone()).map_err(|error| (error.code, error.message))
+    };
+    for (tubes, points, sides) in [(0, 3, 3), (1, 3, 3), (2, 1, 3), (2, 0, 3), (2, 3, 0), (-1, 3, 3), (2, -1, 3), (2, 113, 3), (2, 114, 3)] {
+        assert_eq!(evaluate(topology, tubes, points, sides), evaluate(&original, tubes, points, sides), "{tubes}/{points}/{sides}");
+    }
 }

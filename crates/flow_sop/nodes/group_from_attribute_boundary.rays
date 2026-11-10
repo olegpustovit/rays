@@ -144,6 +144,7 @@
           (exact (map (fn [(n : int)] (if (int/gt n 0) 1 0))
             (array/scatter_add c.ev (exact (map (fn [(x : int) (l : int)] (int/mul x l)) d c.live)) c.edges)))))))
 (defnode sop/group_from_attribute_boundary :label "Group from Attribute Boundary" :category ["Group" "Create"]
+  :description "Select boundaries where chosen attributes or group membership change."
   [(in0 : geometry)
    (owner : text "Edges" :label "Group type" :choices ["Points" "Vertices" "Primitives" "Edges"])
    (name : text "attribute_boundary" :label "Group name")

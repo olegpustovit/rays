@@ -2,13 +2,13 @@
 ; corners; cylinder/sphere seam and pole repair are per-primitive segment reductions over the
 ; (contiguous) corners of each primitive. Fused multiply-adds follow the native arm64 object code.
 (defn uvp_finite :context value [(x : float)] (= (- x x) 0.0))
-; Rdk.Uv_ops.normalized_with_inverse: unit direction and 1 / original length.
+; sop/uv_project: unit direction and 1 / original length.
 (defn uvp_unit :context value [(x : float) (y : float) (z : float)]
   (let* [scale (max (max (abs x) (abs y)) (abs z))
          nx (/ x scale) ny (/ y scale) nz (/ z scale)
          inverse (/ 1.0 (sqrt (fma nz nz (fma ny ny (* nx nx)))))]
     {:x (* nx inverse) :y (* ny inverse) :z (* nz inverse) :inverse (/ inverse scale) :scale scale}))
-; Rdk.Uv_ops.radial_frame: axis, seam and the third axis; radial_sq is the seam's remaining length.
+; sop/uv_project: axis, seam and the third axis; radial_sq is the seam's remaining length.
 (defn uvp_radial :context value [(axis_x : float) (axis_y : float) (axis_z : float)
                                   (seam_x : float) (seam_y : float) (seam_z : float)]
   (let* [a (uvp_unit axis_x axis_y axis_z)
@@ -60,13 +60,14 @@
   :validate (uvp_valid projection origin_x origin_y origin_z axis_x axis_y axis_z seam_x seam_y seam_z
               planar_u_x planar_u_y planar_u_z planar_v_x planar_v_y planar_v_z height u_min u_max v_min v_max)
   :code "E_PARAM" :message "sop/uv_project: invalid projection parameters"
+  :description "Project planar, cylindrical or spherical UV coordinates onto selected corners."
   [(in0 : geometry)
    (projection : text "Planar" :label "Projection" :choices ["Planar" "Cylindrical" "Spherical"])
    (name : text "uv" :label "UV attribute")
    (group : text "" :label "Primitive group")
-   (origin_x : float 0.0 :label "Origin X" :folder ["Projection" "Origin"] :min -10 :max 10 :vec3 ["origin" 0])
-   (origin_y : float 0.0 :label "Origin Y" :folder ["Projection" "Origin"] :min -10 :max 10 :vec3 ["origin" 1])
-   (origin_z : float 0.0 :label "Origin Z" :folder ["Projection" "Origin"] :min -10 :max 10 :vec3 ["origin" 2])
+   (origin_x : float 0.0 :unit "m" :label "Origin X" :folder ["Projection" "Origin"] :min -10 :max 10 :vec3 ["origin" 0])
+   (origin_y : float 0.0 :unit "m" :label "Origin Y" :folder ["Projection" "Origin"] :min -10 :max 10 :vec3 ["origin" 1])
+   (origin_z : float 0.0 :unit "m" :label "Origin Z" :folder ["Projection" "Origin"] :min -10 :max 10 :vec3 ["origin" 2])
    (axis_x : float 0.0 :label "Axis X" :folder ["Projection" "Axis"] :min -1 :max 1 :vec3 ["axis" 0])
    (axis_y : float 1.0 :label "Axis Y" :folder ["Projection" "Axis"] :min -1 :max 1 :vec3 ["axis" 1])
    (axis_z : float 0.0 :label "Axis Z" :folder ["Projection" "Axis"] :min -1 :max 1 :vec3 ["axis" 2])
@@ -79,7 +80,7 @@
    (planar_v_x : float 0.0 :label "V axis X" :folder ["Projection" "Planar"] :min -1 :max 1 :vec3 ["planar_v" 0])
    (planar_v_y : float 0.0 :label "V axis Y" :folder ["Projection" "Planar"] :min -1 :max 1 :vec3 ["planar_v" 1])
    (planar_v_z : float 1.0 :label "V axis Z" :folder ["Projection" "Planar"] :min -1 :max 1 :vec3 ["planar_v" 2])
-   (height : float 1.0 :label "Cylinder height" :folder ["Projection" "Cylindrical"] :min 0.01 :max 10 :hard_min 0)
+   (height : float 1.0 :label "Cylinder height" :folder ["Projection" "Cylindrical"] :min 0.01 :max 10 :hard_min 0 :unit "m")
    (u_min : float 0.0 :label "U minimum" :folder ["Range" "U"] :min -10 :max 10)
    (u_max : float 1.0 :label "U maximum" :folder ["Range" "U"] :min -10 :max 10)
    (v_min : float 0.0 :label "V minimum" :folder ["Range" "V"] :min -10 :max 10)

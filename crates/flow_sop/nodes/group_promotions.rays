@@ -146,6 +146,7 @@
     "primitive" (sop/count geo :primitives) :else (sop/count geo :edges)))
 
 (defnode sop/group_promotions :label "Group Promotions" :category ["Group" "Convert"]
+  :description "Apply ordered rules that promote matching groups between element owners."
   [(in0 : geometry)
    (rules : text "point\tprimitive\t*\t\tfalse\tfalse\tany\t0\tfalse\tfalse\tfalse\t"
      :label "Rules (source, destination, pattern, new name, keep, attribute, operation...)"

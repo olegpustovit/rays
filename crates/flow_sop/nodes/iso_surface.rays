@@ -1,4 +1,4 @@
-; Whole Iso surface draft (Rdk.Iso_surface): marching tetrahedra, six tetrahedra per lattice cell. The field
+; Whole Iso surface draft (sop/iso_surface): marching tetrahedra, six tetrahedra per lattice cell. The field
 ; is sampled on the lattice with `map`, gradients are central differences, every (cell, tetrahedron) slot
 ; counts its triangles (min(pop, 4 - pop) of its four corner bits), `scan_sum` places them, and vertices,
 ; orientation flips and (optionally) flat normals are computed per triangle edge. Triangles own their
@@ -38,16 +38,17 @@
 (defnode sop/iso_surface :label "Iso surface" :category ["Create" "Field"]
   :validate (iso_valid resolution_x resolution_y resolution_z min_x min_y min_z max_x max_y max_z iso)
   :code "E_PARAM" :message "sop/iso_surface: invalid parameters"
+  :description "Extract a polygon isosurface from a sampled scalar field."
   [(field : (fn [vec3] float) :keyword true)
    (resolution_x : float 64.0 :label "Resolution x" :min 1 :max 128 :primary true :vec3 ["resolution" 0])
    (resolution_y : float 64.0 :label "Resolution y" :min 1 :max 128 :vec3 ["resolution" 1])
    (resolution_z : float 64.0 :label "Resolution z" :min 1 :max 128 :vec3 ["resolution" 2])
-   (min_x : float -2.0 :label "Min x" :min -10 :max 10 :vec3 ["min" 0])
-   (min_y : float -2.0 :label "Min y" :min -10 :max 10 :vec3 ["min" 1])
-   (min_z : float -2.0 :label "Min z" :min -10 :max 10 :vec3 ["min" 2])
-   (max_x : float 2.0 :label "Max x" :min -10 :max 10 :vec3 ["max" 0])
-   (max_y : float 2.0 :label "Max y" :min -10 :max 10 :vec3 ["max" 1])
-   (max_z : float 2.0 :label "Max z" :min -10 :max 10 :vec3 ["max" 2])
+   (min_x : float -2.0 :unit "m" :label "Min x" :min -10 :max 10 :vec3 ["min" 0])
+   (min_y : float -2.0 :unit "m" :label "Min y" :min -10 :max 10 :vec3 ["min" 1])
+   (min_z : float -2.0 :unit "m" :label "Min z" :min -10 :max 10 :vec3 ["min" 2])
+   (max_x : float 2.0 :unit "m" :label "Max x" :min -10 :max 10 :vec3 ["max" 0])
+   (max_y : float 2.0 :unit "m" :label "Max y" :min -10 :max 10 :vec3 ["max" 1])
+   (max_z : float 2.0 :unit "m" :label "Max z" :min -10 :max 10 :vec3 ["max" 2])
    (iso : float 0.0 :label "Iso" :min -10 :max 10 :primary true)
    (smooth : bool true :label "Smooth")]
   (let* [rx (int resolution_x) ry (int resolution_y) rz (int resolution_z)

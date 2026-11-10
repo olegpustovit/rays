@@ -7,6 +7,7 @@
 (defnode sop/smooth :label "Smooth" :category ["Deform"]
   :validate (equal? (text/glob_error attributes) "")
   :code "E_PARAM" :message "sop/smooth: invalid attribute pattern"
+  :description "Smooth selected points while optionally pinning borders and recomputing normals."
   [(in0 : geometry)
    (group : text "" :label "Point group")
    (constrained_points : text "" :label "Constrained points")

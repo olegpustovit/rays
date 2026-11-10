@@ -5,7 +5,7 @@
   (error "E_PARAM" (str "sop/attribute_noise_quaternion: " reason)))
 (defn noise_quaternion_fail :context value [(reason : text)]
   (error "invalid_noise" "attribute_noise could not produce valid geometry"
-    :cause (str "attribute_noise [invalid_noise]: Rdk.Attribute_ops.noise: " reason)))
+    :cause (str "attribute_noise [invalid_noise]: sop/attribute_noise_quaternion: " reason)))
 ; Parse "scalar,x", "vec2,x,y", "vec3,x,y,z" or "vec4,x,y,z,w": {:valid :dim :a :b :c :d}.
 (defn noise_quaternion_numeric :context value [(text : text)]
   (let* [parts (text/split text ",")
@@ -82,6 +82,7 @@
 (defnode sop/attribute_noise_quaternion :label "Attribute Noise (Quaternion)" :category ["Attribute" "Noise"]
   :facts {:elementwise points :reads ["P" "$name" "$location~attribute:"] :writes ["$name"] :topology preserved :exact false}
   :validate (noise_quaternion_validate group owner name location range frequency_x frequency_y frequency_z octaves)
+  :description "Generate normalized quaternion noise and blend it into orientations."
   [(in0 : geometry)
    (group : text "" :label "Group")
    (owner : text "Point" :label "Owner" :choices ["Point" "Vertex" "Primitive" "Detail"])

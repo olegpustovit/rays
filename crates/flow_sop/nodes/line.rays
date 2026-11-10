@@ -1,21 +1,22 @@
 ; Native-compatible line and isolated-point generator over owned scalar planes.
 (defnode sop/line :label "Line" :category ["Create" "Curve"]
+  :description "Create a subdivided line or isolated points along a direction."
   [(kind : text "Polygon curve" :label "Primitive type" :choices ["Polygon curve" "Points"])
    (points : int 2 :label "Points" :min 2 :max 128 :hard_min 1)
-   (origin_x : float 0.0 :label "Origin X" :folder "Origin" :min -10 :max 10 :vec3 ["origin" 0])
-   (origin_y : float 0.0 :label "Origin Y" :folder "Origin" :min -10 :max 10 :vec3 ["origin" 1])
-   (origin_z : float 0.0 :label "Origin Z" :folder "Origin" :min -10 :max 10 :vec3 ["origin" 2])
+   (origin_x : float 0.0 :unit "m" :label "Origin X" :folder "Origin" :min -10 :max 10 :vec3 ["origin" 0])
+   (origin_y : float 0.0 :unit "m" :label "Origin Y" :folder "Origin" :min -10 :max 10 :vec3 ["origin" 1])
+   (origin_z : float 0.0 :unit "m" :label "Origin Z" :folder "Origin" :min -10 :max 10 :vec3 ["origin" 2])
    (direction_x : float 0.0 :label "Direction X" :folder "Direction" :min -1 :max 1 :vec3 ["direction" 0])
    (direction_y : float 1.0 :label "Direction Y" :folder "Direction" :min -1 :max 1 :vec3 ["direction" 1])
    (direction_z : float 0.0 :label "Direction Z" :folder "Direction" :min -1 :max 1 :vec3 ["direction" 2])
-   (length : float 1.0 :label "Length" :min 0 :max 10 :hard_min 0)]
+   (length : float 1.0 :label "Length" :min 0 :max 10 :hard_min 0 :unit "m")]
   (if (and (equal? kind "Polygon curve") (int/lt points 2))
     (error "invalid_parameter" "line could not produce valid geometry"
-      :cause "line [invalid_parameter]: Rdk.Line_geometry.line: curve output requires at least 2 points")
+      :cause "line [invalid_parameter]: sop/line: curve output requires at least 2 points")
     (let* [scale (max (abs direction_x) (max (abs direction_y) (abs direction_z)))]
       (if (= scale 0.0)
         (error "invalid_parameter" "line could not produce valid geometry"
-          :cause "line [invalid_parameter]: Rdk.Line_geometry.line: direction must be non-zero")
+          :cause "line [invalid_parameter]: sop/line: direction must be non-zero")
         (let* [sx (/ direction_x scale) sy (/ direction_y scale) sz (/ direction_z scale)
                ; Native Apple-Silicon contraction: xx is rounded, then two FMAs.
                magnitude (sqrt (fma sz sz (fma sy sy (* sx sx))))
@@ -28,7 +29,7 @@
                end_z (float/fma_checked dz 1.0 origin_z)]
           (if (not (and end_x.valid (and end_y.valid end_z.valid)))
             (error "invalid_parameter" "line could not produce valid geometry"
-              :cause "line [invalid_parameter]: Rdk.Line_geometry.line: endpoint is not finite")
+              :cause "line [invalid_parameter]: sop/line: endpoint is not finite")
             (if (int/gt points (array/max_length :type float))
               (error "uncaught_node_exception" "a procedural node raised an exception while cooking"
                 :cause "Invalid_argument(\"Array.make\")")

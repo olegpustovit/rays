@@ -1,5 +1,6 @@
 (workspace delete_edge_group_node
 (defnode sop/delete_edge_group :label "Delete Edge Group" :category ["Group" "Manage"]
+  :description "Remove a named edge group from the geometry."
   [(in0 : geometry) (name : text "edges" :label "Edge group")]
   (sop/delete_edge in0 name))
 )

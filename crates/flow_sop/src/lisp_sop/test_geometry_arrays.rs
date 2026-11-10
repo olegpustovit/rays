@@ -1,4 +1,4 @@
-//! Assertion map: lib/flow_sop/test_geometry_arrays.ml C1/C4 (both public mesh representations).
+//! Assertion map:  C1/C4 (both public mesh representations).
 use flow_syntax::symbol::Symbol;
 use super::support::*;
 use crate::{attribute_kernel as ak, catalog, lisp_sop, lower, operators, value_lane};
@@ -8,7 +8,7 @@ use rdk_core::{attribute::{self, Owner, Storage}, geometry as geo, packed::float
 use sop::{context as ctx, edit_graph as edit, node, session};
 use std::sync::Arc;
 
-fn ints(xs: Vec<i64>) -> Value { Value::Int_array(Arc::new(xs)) }
+fn ints(xs: Vec<i64>) -> Value { Value::IntArray(Arc::new(xs)) }
 fn floats(xs: Vec<f64>) -> Value { Value::Floats(1, Arc::new(xs)) }
 fn fixture(which: usize) -> geo::T {
     use topology::PrimitiveKind::{Polygon as P, OpenPolyline as O, ClosedPolyline as C};
@@ -64,7 +64,7 @@ fn round_trip(which: usize, planes:bool) {
             session::close(&mut s);
         }}
         let actual=cook_once(1,&n);
-        fn mutate(v:&mut Value) { match v {Value::Record(fs)=>{let mut fields:Vec<_>=fs.iter().cloned().collect();for (_,v) in &mut fields {mutate(v)}*fs=fields.into()},Value::Int_array(xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99},Value::Floats(1, xs)|Value::Floats(3, xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99.0},_=>()}}
+        fn mutate(v:&mut Value) { match v {Value::Record(fs)=>{let mut fields:Vec<_>=fs.iter().cloned().collect();for (_,v) in &mut fields {mutate(v)}*fs=fields.into()},Value::IntArray(xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99},Value::Floats(1, xs)|Value::Floats(3, xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99.0},_=>()}}
         for (_,v) in &mut input {mutate(v)}
         assert_eq!(geometry_bytes(&actual),before,"mesh borrowed mutable Flow input");
     }
@@ -118,7 +118,7 @@ fn topology_queries_keep_planes_origins_and_immutable_readers() {
     let native=topology::view::view(geo::topology(&original)).unwrap();
     let Value::Record(queried_fields)=force(&original,&queried) else {panic!("topology record expected")};
     for (name,plane) in [("vertex_points",&native.vertex_points),("primitive_offsets",&native.primitive_offsets)] {
-        let Value::Int_array(values)=&queried_fields.iter().find(|(key,_)|key==name).unwrap().1 else {panic!("topology integer plane expected")};
+        let Value::IntArray(values)=&queried_fields.iter().find(|(key,_)|key==name).unwrap().1 else {panic!("topology integer plane expected")};
         // Z4: native planes are u32 and Lisp Int is i64, so the query widens a copy; the contents must agree.
         assert!(values.iter().copied().eq(plane.iter().map(|&p|i64::from(p))),"topology query changed native {name} contents");
     }
@@ -177,7 +177,7 @@ fn errors(planes:bool) {
 #[test]
 fn unavailable_topology_sources_refuse(){
     let lookup:ak::GeometryLookup=Arc::new(|_|None);
-    for g in [Value::No_geo,Value::Deferred(ty::geometry(),7),Value::Deferred(Ty::Float,7)] {
+    for g in [Value::NoGeo,Value::Deferred(ty::geometry(),7),Value::Deferred(Ty::Float,7)] {
         let source=source_value("sop/topology", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(),g),("component".into(),Value::Text(b"vertex_points".as_slice().into()))].into());
         assert_eq!(ak::resolve(None,&lookup,&source).unwrap_err().code,"E_DATA_SOURCE");
     }
@@ -340,7 +340,7 @@ fn text_attribute_eval_read_write_preserves_every_byte() {
         ("attribute".into(), Value::Text(b"bytes".as_slice().into())),
         ("type".into(), Value::Text(b"text".as_slice().into())),
     ].into());
-    assert_eq!(ak::resolve(None, &lookup, &source).unwrap(), Value::Text_array(Arc::new(rows.clone().into())));
+    assert_eq!(ak::resolve(None, &lookup, &source).unwrap(), Value::TextArray(Arc::new(rows.clone().into())));
     let literal = flow_syntax::lisp::quote_string(&bytes);
     let cases = [
         (r#"(exact (map (fn [(value : text)] (str value "\000")) (sop/attr geo "bytes" :type text)))"#.to_owned(), rows.iter().map(|row| [row.as_slice(), &[0]].concat()).collect::<Vec<Vec<u8>>>()),

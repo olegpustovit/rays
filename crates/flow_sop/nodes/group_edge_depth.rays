@@ -3,6 +3,7 @@
   (error "invalid_group" "group_edge_depth could not produce valid geometry"
     :cause (str "group_edge_depth [invalid_group]: " reason)))
 (defnode sop/group_edge_depth :label "Group Edge Depth" :category ["Group" "Expand"]
+  :description "Select points within a bounded number of edge hops from a seed group."
   [(in0 : geometry)
    (point_group : text "seed" :label "Seed point group")
    (name : text "depth" :label "Output group")

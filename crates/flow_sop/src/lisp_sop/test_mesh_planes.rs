@@ -1,4 +1,4 @@
-//! lib/flow_sop/test_mesh_planes.ml checks(): exact bytes, independent ownership and diagnostic order.
+//!  checks(): exact bytes, independent ownership and diagnostic order.
 use flow_syntax::symbol::Symbol;
 use super::support::geometry_bytes;
 use crate::topology_kernel;
@@ -7,7 +7,7 @@ use rdk_core::{geometry as geo, packed::float3, topology};
 use std::sync::Arc;
 
 fn floats(xs: Vec<f64>) -> Value { Value::Floats(1, Arc::new(xs)) }
-fn ints(xs: Vec<i64>) -> Value { Value::Int_array(Arc::new(xs)) }
+fn ints(xs: Vec<i64>) -> Value { Value::IntArray(Arc::new(xs)) }
 fn fields(n: usize) -> Vec<(Symbol, Value)> {
     vec![("x".into(), floats((0..n).map(|i| i as f64).collect())),
          ("y".into(), floats((0..n).map(|i| if i & 1 == 0 { -0.0 } else { f64::from_bits(1) }).collect())),

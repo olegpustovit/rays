@@ -1,11 +1,11 @@
-; Whole Attribute Randomize draft (Rdk.Attribute_ops.randomize). Every sample is computed in a vec4
+; Whole Attribute Randomize draft (sop/attribute_randomize). Every sample is computed in a vec4
 ; lane (components beyond the output dimension are ignored) from four uniform streams per element
 ; (rand/at of the element's identity, or the fraction attribute), blended with the existing attribute
 ; by one of five operations and written through sop/with_planes. Bisection quantiles run as fixed
 ; `iterate` passes; ramp and weighted lookups are merge-grades of the knots with the fractions.
 (defn ar_error :context value [(reason : text)]
   (error "invalid_randomize" "attribute_randomize could not produce valid geometry"
-    :cause (str "attribute_randomize [invalid_randomize]: Rdk.Attribute_ops.randomize: " reason)))
+    :cause (str "attribute_randomize [invalid_randomize]: sop/attribute_randomize: " reason)))
 (defn ar_finite :context value [(x : float)] (= (- x x) 0.0))
 (defn ar_kind_dim :context value [(kind : text)] (case kind "Scalar" 1 "Vector 2" 2 "Vector 3" 3 :else 4))
 (defn ar_nb :context value [(raw : text)] (not (text/blank? raw)))
@@ -23,7 +23,7 @@
   (and (or (int/lt kd 2) (= v.y v.x)) (and (or (int/lt kd 3) (= v.z v.x)) (or (int/lt kd 4) (= v.w v.x)))))
 (defn ar_zero :context value [(kd : int) (v : vec4)]
   (and (= v.x 0.0) (and (or (int/lt kd 2) (= v.y 0.0)) (and (or (int/lt kd 3) (= v.z 0.0)) (or (int/lt kd 4) (= v.w 0.0))))))
-; Rdk.Attribute_ops.sigma of one log-normal component (0 for a zero deviation).
+; sop/attribute_randomize of one log-normal component (0 for a zero deviation).
 (defn ar_sigma :context value [(median : float) (deviation : float)]
   (if (= deviation 0.0) 0.0
     (let* [ratio (/ (* deviation deviation) (* median median))]
@@ -135,7 +135,7 @@
                           (and (or (not (or use_minimum use_maximum)) (int/eq kd dimension)) limits_ok))))))))
 
 ; ---- samplers -------------------------------------------------------------------------------
-; Peter Acklam's inverse-normal approximation (Rdk.Attribute_ops.normal_quantile); fused like arm64.
+; Peter Acklam's inverse-normal approximation (sop/attribute_randomize); fused like arm64.
 (defn ar_quantile_array :context value [(p : (array float))]
   (let* [lower (exact (map (fn [(x : float)]
            (let* [q (sqrt (* -2.0 (log (if (and (> x 0.0) (< x 0.02425)) x 0.5))))]
@@ -300,6 +300,7 @@
               minimum maximum [minimum_vector_x minimum_vector_y minimum_vector_z minimum_w]
               [maximum_vector_x maximum_vector_y maximum_vector_z maximum_w])
   :code "E_PARAM" :message "sop/attribute_randomize: invalid parameters"
+  :description "Generate and blend reproducible random scalar or vector attributes."
   [(in0 : geometry)
    (selection_owner : text "Point" :label "Selection owner" :folder ["Selection"] :choices ["Point" "Vertex" "Primitive" "Edge"])
    (selection_group : text "" :label "Selection group" :folder ["Selection"])
@@ -339,7 +340,7 @@
    (step_z : float 1.0 :label "Step Z" :folder ["Distribution" "Step"] :min 0 :max 10 :vec3 ["step" 2])
    (step_w : float 1.0 :label "Step W" :folder ["Distribution" "Step"] :min 0 :max 10)
    (probability_b : float 0.5 :label "Probability B" :folder ["Distribution"] :min 0 :max 1 :hard_min 0 :hard_max 1)
-   (cone_angle : float 0.7853981633974483 :label "Cone angle" :folder ["Distribution"] :min 0 :max 3.141592653589793)
+   (cone_angle : float 0.7853981633974483 :label "Cone angle" :folder ["Distribution"] :min 0 :max 3.141592653589793 :unit "rad")
    (dimensions : int 3 :label "Dimensions" :folder ["Distribution"] :min 1 :max 4 :hard_min 1 :hard_max 4)
    (use_minimum : bool false :label "Clamp minimum" :folder ["Clamp"])
    (minimum : float 0.0 :label "Minimum" :folder ["Clamp"] :min -10 :max 10)

@@ -22,6 +22,7 @@
   :validate (and (and (or (not recursive) (equal? owner "Point")) (not (text/blank? target_attribute)))
                  (not (equal? (text/trim original_point_attribute) "N")))
   :code "E_PARAM" :message "sop/rewire_vertices: invalid recursive mode, target or original attribute"
+  :description "Reconnect selected corners to point indices stored in an attribute."
   [(in0 : geometry)
    (selection_owner : text "Vertex" :label "Selection owner" :choices ["Point" "Vertex" "Primitive" "Edge"])
    (selection : text "" :label "Selection group")

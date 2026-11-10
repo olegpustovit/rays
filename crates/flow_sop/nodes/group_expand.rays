@@ -1,4 +1,4 @@
-; Whole Group Expand draft (Rdk.Group_ops.expand). Every owner is one neighbour relation stored as
+; Whole Group Expand draft (sop/group_expand). Every owner is one neighbour relation stored as
 ; directed pairs (source influences destination): points by edge, edges by shared point, vertices by
 ; next/previous corner and shared point, primitives by shared point or edge. Stepping, flooding and
 ; shrinking are one level-synchronous `iterate` over a state `selected + 2 * step`, with transition
@@ -82,6 +82,7 @@
               use_normal_attribute normal_name connectivity_attributes connectivity_tolerance use_collision
               collision_owner collision_group collision_contain)
   :code "E_PARAM" :message "sop/group_expand: invalid parameters"
+  :description "Grow, shrink or flood a group through element neighbours."
   [(in0 : geometry)
    (owner : text "Points" :label "Group type" :choices ["Points" "Vertices" "Primitives" "Edges"])
    (group : text "group" :label "Source group")

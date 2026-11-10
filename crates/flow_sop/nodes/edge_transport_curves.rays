@@ -19,6 +19,7 @@
               (and (not (equal? attribute "P"))
                    (or (equal? operation "Total") (not (or integrate_constant scale_by_edge_length)))))
   :code "E_PARAM" :message "sop/edge_transport_curves: invalid parameters"
+  :description "Transport orientation frames along ordered curves."
   [(in0 : geometry)
    (attribute : text "value" :label "Attribute")
    (primitive_group : text "" :label "Primitive group")

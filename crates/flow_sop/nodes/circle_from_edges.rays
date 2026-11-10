@@ -161,12 +161,13 @@
     final.sum))
 
 (defnode sop/circle_from_edges :label "Circle from Edges" :category ["Topology" "Edge"]
+  :description "Fit circles to selected edge components and optionally move points onto them."
   [(in0 : geometry)
    (group : text "" :label "Edge group")
    (use_radius : bool false :label "Override radius")
    (radius : float 1.0 :label "Radius" :min 0.01 :max 10 :hard_min 0
      :validate (or (not use_radius) (> radius 0.0))
-     :code "E_PARAM" :message "sop/circle_from_edges: radius must be finite and positive")
+     :code "E_PARAM" :message "sop/circle_from_edges: radius must be finite and positive" :unit "m")
    (scale_x : float 1.0 :label "Scale X" :folder ["Scale"] :min -4 :max 4 :vec3 ["scale" 0])
    (scale_y : float 1.0 :label "Scale Y" :folder ["Scale"] :min -4 :max 4 :vec3 ["scale" 1])
    (scale_z : float 1.0 :label "Scale Z" :folder ["Scale"] :min -4 :max 4 :vec3 ["scale" 2])

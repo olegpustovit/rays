@@ -2,6 +2,7 @@
 ; Unique edges keep their first-occurrence order (the point map is monotone), so the
 ; edge ancestry is the identity.
 (defnode sop/compact_points :label "Compact Points" :category ["Topology" "Cleanup"]
+  :description "Remove unused points while preserving the order of retained points."
   [(in0 : geometry)]
   (let* [points (sop/count in0 :points)
          vertices (sop/count in0 :vertices)

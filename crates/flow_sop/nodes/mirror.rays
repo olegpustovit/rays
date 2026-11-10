@@ -6,11 +6,12 @@
   (let* [twice (* 2.0 (fma (- v.z o.z) n.z (fma (- v.y o.y) n.y (* (- v.x o.x) n.x))))]
     [(fma (* -1.0 twice) n.x v.x) (fma (* -1.0 twice) n.y v.y) (fma (* -1.0 twice) n.z v.z)]))
 (defnode sop/mirror :label "Mirror" :category "Modify"
+  :description "Reflect selected geometry across a plane and optionally keep the original."
   [(in0 : geometry)
    (keep_original : bool true :label "Keep original")
-   (origin_x : float 0.0 :label "Origin X" :folder ["Plane" "Origin"] :min -10 :max 10 :vec3 ["origin" 0])
-   (origin_y : float 0.0 :label "Origin Y" :folder ["Plane" "Origin"] :min -10 :max 10 :vec3 ["origin" 1])
-   (origin_z : float 0.0 :label "Origin Z" :folder ["Plane" "Origin"] :min -10 :max 10 :vec3 ["origin" 2])
+   (origin_x : float 0.0 :unit "m" :label "Origin X" :folder ["Plane" "Origin"] :min -10 :max 10 :vec3 ["origin" 0])
+   (origin_y : float 0.0 :unit "m" :label "Origin Y" :folder ["Plane" "Origin"] :min -10 :max 10 :vec3 ["origin" 1])
+   (origin_z : float 0.0 :unit "m" :label "Origin Z" :folder ["Plane" "Origin"] :min -10 :max 10 :vec3 ["origin" 2])
    (normal_x : float 1.0 :label "Normal X" :folder ["Plane" "Normal"] :min -1 :max 1 :vec3 ["normal" 0])
    (normal_y : float 0.0 :label "Normal Y" :folder ["Plane" "Normal"] :min -1 :max 1 :vec3 ["normal" 1])
    (normal_z : float 0.0 :label "Normal Z" :folder ["Plane" "Normal"] :min -1 :max 1 :vec3 ["normal" 2])]

@@ -1,5 +1,4 @@
 //! Topology-preserving metadata nodes return typed Diagnostics for invalid owner/conflict words.
-use flow_syntax::symbol::Symbol;
 use flow_eval::Value;
 use flow_syntax::lisp;
 use flow_syntax::arena::{Node, SyntaxBuilder};
@@ -457,7 +456,7 @@ fn names(owner: Owner, pattern: &str, value: &geometry::T) -> Result<Value, Diag
         .filter(|a| attribute::owner(a) == owner && attribute_pattern::matches(&compiled, attribute::name(a)))
         .map(|a| attribute::name(a).as_bytes())
         .collect();
-    Ok(Value::Text_array(Arc::new(found)))
+    Ok(Value::TextArray(Arc::new(found)))
 }
 
 /// Parallel name/type/owner columns of the stored attributes, in native attribute order.
@@ -477,7 +476,7 @@ pub fn entries(owner: Option<Owner>, component: &str, value: &geometry::T) -> Re
             out.push(column(attribute)?.as_bytes());
         }
     }
-    Ok(Value::Text_array(Arc::new(out)))
+    Ok(Value::TextArray(Arc::new(out)))
 }
 
 // a method, not a free fn: its output borrows from `self` without a lifetime parameter
@@ -593,9 +592,9 @@ mod tests {
         assert_eq!(kind(Owner::Detail, "tag", &geometry).as_deref(), Some("text"));
         assert_eq!(kind(Owner::Point, "nope", &geometry), None);
         let names = entries(Some(Owner::Point), "name", &geometry).expect("names");
-        assert_eq!(names, Value::Text_array(Arc::new(vec![b"Cd".to_vec()].into())));
+        assert_eq!(names, Value::TextArray(Arc::new(vec![b"Cd".to_vec()].into())));
         let types = entries(None, "type", &geometry).expect("types");
-        assert_eq!(types, Value::Text_array(Arc::new(vec![b"float".to_vec(), b"text".to_vec()].into())));
+        assert_eq!(types, Value::TextArray(Arc::new(vec![b"float".to_vec(), b"text".to_vec()].into())));
         assert_eq!(entries(None, "bogus", &geometry).unwrap_err().code, "E_ATTR_ENTRIES");
         let found = geometry.clone();
         let lookup = move |id: i64| if id == 7 { Some(found.clone()) } else { None };
@@ -610,9 +609,9 @@ mod tests {
         let missing = source("sop/attr_type", vec![("attribute", text("zz"))]);
         assert_eq!(resolve(&lookup, &missing).unwrap_err().code, "E_ATTR_TYPE");
         let listing = source("sop/attr_names", vec![("pattern", text("*"))]);
-        assert_eq!(resolve(&lookup, &listing).expect("names"), Value::Text_array(Arc::new(vec![b"Cd".to_vec()].into())));
+        assert_eq!(resolve(&lookup, &listing).expect("names"), Value::TextArray(Arc::new(vec![b"Cd".to_vec()].into())));
         let table = source("sop/attr_entries", vec![("component", text("owner")), ("owner", text("any"))]);
-        assert_eq!(resolve(&lookup, &table).expect("owners"), Value::Text_array(Arc::new(vec![b"point".to_vec(), b"detail".to_vec()].into())));
+        assert_eq!(resolve(&lookup, &table).expect("owners"), Value::TextArray(Arc::new(vec![b"point".to_vec(), b"detail".to_vec()].into())));
         let uncooked = |_: i64| None;
         assert_eq!(resolve(&uncooked, &attr_type).unwrap_err().code, "E_DATA_SOURCE");
         assert_eq!(resolve(&lookup, &Value::Int(1)).unwrap_err().code, "E_DATA_SOURCE");

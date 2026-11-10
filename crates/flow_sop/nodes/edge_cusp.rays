@@ -18,6 +18,7 @@
   (if (int/eq (array/nth vp corner) point) corner (array/nth following corner)))
 
 (defnode sop/edge_cusp :label "Edge Cusp" :category ["Topology" "Edge"]
+  :description "Split points at selected edge ends to create sharp seams."
   [(in0 : geometry)
    (group : text "" :label "Edge group")
    (update_point_normals : bool true :label "Update point normals")]

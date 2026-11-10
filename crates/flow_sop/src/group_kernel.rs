@@ -1,6 +1,5 @@
 //! cooked immutable group boundary; native RDK owns
 //! membership and order.
-use flow_syntax::symbol::Symbol;
 use crate::attribute_metadata;
 use flow_syntax::ty;
 use flow_syntax::value::Value;
@@ -84,7 +83,7 @@ fn mask(group: &group::T) -> Value {
             }
         }
     }
-    Value::Int_array(Arc::new(values))
+    Value::IntArray(Arc::new(values))
 }
 
 pub fn read(owner: Owner, name: &str, geometry: &Geometry) -> Result<Value, Diagnostic> {
@@ -95,7 +94,7 @@ pub fn read(owner: Owner, name: &str, geometry: &Geometry) -> Result<Value, Diag
         },
         Owner::Edge => match geometry::find_edge_group(name, geometry) {
             None => missing(name),
-            Some(found) => Ok(Value::Int_array(Arc::new(
+            Some(found) => Ok(Value::IntArray(Arc::new(
                 (0..edge_group::length(&found)).map(|index| i64::from(edge_group::mem(index, &found))).collect(),
             ))),
         },
@@ -128,14 +127,14 @@ fn order(owner: Owner, name: &str, geometry: &Geometry) -> Result<Value, Diagnos
             None => missing(name),
             Some(_) => Ok(Value::Record(vec![
                 ("ordered".into(), Value::Bool(false)),
-                ("indices".into(), Value::Int_array(Arc::new(Vec::new()))),
+                ("indices".into(), Value::IntArray(Arc::new(Vec::new()))),
             ].into())),
         },
         Owner::Ordinary(owner) => match geometry::find_group(owner, name, geometry) {
             None => missing(name),
             Some(found) => Ok(Value::Record(vec![
                 ("ordered".into(), Value::Bool(group::is_ordered(&found))),
-                ("indices".into(), Value::Int_array(Arc::new(group::ordered_elements(&found).unwrap_or_default()))),
+                ("indices".into(), Value::IntArray(Arc::new(group::ordered_elements(&found).unwrap_or_default()))),
             ].into())),
         },
     }
@@ -147,7 +146,7 @@ fn names(owner: Owner, pattern: &str, geometry: &Geometry) -> Result<Value, Diag
         Owner::Ordinary(owner) => geometry::groups(geometry).iter().filter(|g| group::owner(g) == owner).map(|g| group::name(g).to_owned()).collect(),
         Owner::Edge => geometry::edge_groups(geometry).iter().map(|g| edge_group::name(g).to_owned()).collect(),
     };
-    Ok(Value::Text_array(Arc::new(
+    Ok(Value::TextArray(Arc::new(
         found.into_iter().filter(|name| attribute_pattern::matches(&pattern, name)).map(String::into_bytes).collect(),
     )))
 }
@@ -183,7 +182,7 @@ fn entries(selected_owner: &str, pattern: &str, component: &str, geometry: &Geom
             }
         })
         .collect();
-    Ok(Value::Text_array(Arc::new(values)))
+    Ok(Value::TextArray(Arc::new(values)))
 }
 
 pub fn write(order: Option<&[i64]>, owner: Owner, name: &str, mask: &[i64], geometry: &Geometry) -> Result<Geometry, Diagnostic> {
@@ -334,9 +333,9 @@ mod tests {
     fn triangle() -> Geometry {
         mesh(&[
             ("points".into(), Value::Floats(3, Arc::new(vec![0., 0., 0., 1., 0., 0., 0., 1., 0.]))),
-            ("vertex_points".into(), Value::Int_array(Arc::new(vec![0, 1, 2]))),
-            ("primitive_offsets".into(), Value::Int_array(Arc::new(vec![0, 3]))),
-            ("kinds".into(), Value::Int_array(Arc::new(vec![0]))),
+            ("vertex_points".into(), Value::IntArray(Arc::new(vec![0, 1, 2]))),
+            ("primitive_offsets".into(), Value::IntArray(Arc::new(vec![0, 3]))),
+            ("kinds".into(), Value::IntArray(Arc::new(vec![0]))),
         ])
         .unwrap()
     }
@@ -353,7 +352,7 @@ mod tests {
         let g = triangle();
         let p = Owner::Ordinary(group::Owner::Point);
         let written = write(None, p, "hot", &[1, 0, 1], &g).unwrap();
-        assert_eq!(read(p, "hot", &written).unwrap(), Value::Int_array(Arc::new(vec![1, 0, 1])));
+        assert_eq!(read(p, "hot", &written).unwrap(), Value::IntArray(Arc::new(vec![1, 0, 1])));
         assert_eq!(read(p, "cold", &written).err().unwrap().code, "E_GROUP_MISSING");
         assert_eq!(write(None, p, "hot", &[1, 0], &g).err().unwrap().code, "E_GROUP_COUNT");
         assert_eq!(write(None, p, "hot", &[1, 2, 0], &g).err().unwrap().code, "E_GROUP_MASK");
@@ -368,11 +367,11 @@ mod tests {
         let g = write(None, Owner::Ordinary(group::Owner::Primitive), "quad", &[1], &triangle()).unwrap();
         assert_eq!(
             names(Owner::Ordinary(group::Owner::Primitive), "*", &g).unwrap(),
-            Value::Text_array(Arc::new(vec![b"quad".to_vec()].into()))
+            Value::TextArray(Arc::new(vec![b"quad".to_vec()].into()))
         );
         assert_eq!(
             entries("any", "*", "owners", &g).unwrap(),
-            Value::Text_array(Arc::new(vec![b"primitive".to_vec()].into()))
+            Value::TextArray(Arc::new(vec![b"primitive".to_vec()].into()))
         );
     }
 }

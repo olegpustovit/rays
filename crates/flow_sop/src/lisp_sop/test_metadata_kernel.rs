@@ -217,7 +217,7 @@ fn all_owners_and_storages_rename_without_copying() {
     }
     assert!(geometry_bytes(&geometry) == before, "all-storage rename mutated source");
     match attr_names(Owner::Point, "b_*", &renamed) {
-        Ok(Value::Text_array(names)) => {
+        Ok(Value::TextArray(names)) => {
             // the query's array is a copy: changing it leaves the geometry alone
             let mut copy = names.to_rows();
             copy[0] = b"mutated copy".to_vec();
@@ -251,7 +251,7 @@ fn attr_entries_columns_keep_native_order_and_owner_filter() {
     let input = fixture();
     let texts = |owner: Option<Owner>, component: &str| -> Vec<String> {
         match attribute_metadata::entries(owner, component, &input) {
-            Ok(Value::Text_array(values)) => values.iter().map(|v| String::from_utf8(v.to_vec()).unwrap()).collect(),
+            Ok(Value::TextArray(values)) => values.iter().map(|v| String::from_utf8(v.to_vec()).unwrap()).collect(),
             _ => panic!("attr_entries column is not text"),
         }
     };

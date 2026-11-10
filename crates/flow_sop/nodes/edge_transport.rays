@@ -1,7 +1,7 @@
 ; Whole Edge Transport draft. Roots come from the connected components of the selected edge graph
 ; (sop/components with the selection as mask) or the root group; the shortest-path forest is
-; graph/shortest_paths :ties "lowest" over the edges whose two ends are selected (the factored
-; Rdk.Shortest_paths.forest_search of the native node), graph/forest labels depth and root, and the
+; graph/shortest_paths :ties "lowest" over edges whose two ends are selected.
+; graph/forest labels depth and root, and the
 ; sweeps are the shared etp_ Jacobi passes of prelude.rays. Backward sweeps read the children of a
 ; point in the order the search settled them, like the native children table.
 
@@ -10,6 +10,7 @@
               (and (not (equal? attribute "P"))
                    (or (equal? operation "Total") (not (or integrate_constant scale_by_edge_length)))))
   :code "E_PARAM" :message "sop/edge_transport: invalid parameters"
+  :description "Build a shortest-path forest and transport frames along selected edges."
   [(in0 : geometry)
    (attribute : text "value" :label "Attribute")
    (point_group : text "" :label "Point group")

@@ -4,7 +4,7 @@
 ; frame (radial, pole, tangent) from the prelude orients, rotates and scales the result.
 (defn platonic_error :context value [(reason : text)]
   (error "invalid_parameter" "platonic could not produce valid geometry"
-    :cause (str "platonic [invalid_parameter]: Rdk.Parametric_generators.platonic: " reason)))
+    :cause (str "platonic [invalid_parameter]: sop/platonic: " reason)))
 (defn platonic_ints :context value [(raw : text)]
   (exact (map (fn [(token : text)] (let* [parsed (text/to_int token)] parsed.value)) (text/tokens raw))))
 ; One raw coordinate (axis 0, 1 or 2) of every point.
@@ -28,10 +28,11 @@
 (defnode sop/platonic :label "Platonic Solid" :category ["Create" "Primitive"]
   :validate (and (> radius 0.0) (<= radius 1.7976931348623157e308))
   :code "E_PARAM" :message "sop/platonic: radius must be finite and positive"
+  :description "Create a regular solid or a truncated icosahedron."
   [(kind : text "Dodecahedron" :label "Type" :primary true
      :choices ["Tetrahedron" "Cube" "Octahedron" "Icosahedron" "Dodecahedron" "Soccer ball"])
    (normals : text "Vertex" :label "Normals" :choices ["None" "Point" "Vertex"])
-   (radius : float 1.0 :label "Radius" :min 0.01 :max 10 :hard_min 0 :primary true)
+   (radius : float 1.0 :label "Radius" :min 0.01 :max 10 :hard_min 0 :primary true :unit "m")
    (orientation : text "Y axis" :label "Orientation" :folder ["Transform"]
      :choices ["X axis" "Y axis" "Z axis" "Custom axis"]
      :validate (not (and (equal? orientation "Custom axis") (and (= axis_x 0.0) (and (= axis_y 0.0) (= axis_z 0.0)))))
@@ -39,13 +40,13 @@
    (axis_x : float 0.0 :label "Axis X" :folder ["Transform" "Custom axis"] :min -1 :max 1 :vec3 ["axis" 0])
    (axis_y : float 1.0 :label "Axis Y" :folder ["Transform" "Custom axis"] :min -1 :max 1 :vec3 ["axis" 1])
    (axis_z : float 0.0 :label "Axis Z" :folder ["Transform" "Custom axis"] :min -1 :max 1 :vec3 ["axis" 2])
-   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0])
-   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1])
-   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2])
-   (rotation_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 0])
-   (rotation_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 1])
-   (rotation_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 2])
-   (rotation_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
+   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+   (rotate_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 0] :unit "rad")
+   (rotate_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 1] :unit "rad")
+   (rotate_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 2] :unit "rad")
+   (rotate_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
      :choices ["XYZ" "XZY" "YXZ" "YZX" "ZXY" "ZYX"])
    (face_groups : text "" :label "Face group prefix" :folder ["Attributes"])]
   (let* [soccer (equal? kind "Soccer ball")
@@ -102,7 +103,7 @@
                   length (sqrt (fma n.z n.z (fma n.y n.y (* n.x n.x))))]
              [(/ n.x length) (/ n.y length) (/ n.z length)]))
            (array/range face_count :type int)))
-         frame (gen_frame orientation [axis_x axis_y axis_z] [rotation_x rotation_y rotation_z] rotation_order)
+         frame (gen_frame orientation [axis_x axis_y axis_z] [rotate_x rotate_y rotate_z] rotate_order)
          comb (fn [(v : vec3)]
            [(fma frame.t.x v.z (fma frame.p.x v.y (* frame.r.x v.x)))
             (fma frame.t.y v.z (fma frame.p.y v.y (* frame.r.y v.x)))

@@ -376,7 +376,7 @@ pub fn unregister(id: i64) {
 
 #[cfg(test)]
 mod tests {
-    //! lib/flow_sop/test_trace.ml, host side: the registered scene answers a lattice of rays at a
+    //! , host side: the registered scene answers a lattice of rays at a
     //! quad like a direct `Surface_index.raycast` (t and prim), vertex motion with an unmoved end
     //! keyframe agrees with the static path, and spheres, strands and instances report their
     //! documented prim, instance and normal. The kernel-level checks of that file (a `.rays` program

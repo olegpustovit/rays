@@ -1,6 +1,7 @@
 ; One Lisp body for both displacement modes. Scalar seed specializes the noise kernel.
 (defnode sop/noise_displace :label "Noise Displace" :category ["Deform" "Noise"]
   :facts {:elementwise points :reads ["P" "N"] :writes ["P" "N"] :topology preserved :exact false}
+  :description "Displace selected points with seeded scalar or vector noise."
   [(in0 : geometry)
    (mode : text "height_2d" :label "Mode" :choices ["height_2d" "normal_3d"])
    (context_seed : bool false :label "Use context seed")

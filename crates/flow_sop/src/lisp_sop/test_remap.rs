@@ -184,7 +184,7 @@ fn geometry(r: Result<session::Output, Diagnostic>) -> geo::T {
 }
 
 fn args(p: &[i64], v: &[i64], prim: &[i64], offsets: &[i64], values: &[i64], policy: &str) -> Args {
-    let ints = |a: &[i64]| Value::Int_array(Arc::new(a.to_vec()));
+    let ints = |a: &[i64]| Value::IntArray(Arc::new(a.to_vec()));
     vec![
         ("points".into(), ints(p)),
         ("vertices".into(), ints(v)),
@@ -424,7 +424,7 @@ fn malformed_arguments_get_typed_codes_and_cancellation_is_honoured() {
     let src = source(3);
     let dst = target(1, &source(3));
     let valid = args(&[0, 1, 2], &[0, 1, 2], &[0], &[0, 1, 2, 3], &[0, 1, 2], "target");
-    let ints = |a: &[i64]| Value::Int_array(Arc::new(a.to_vec()));
+    let ints = |a: &[i64]| Value::IntArray(Arc::new(a.to_vec()));
     for (key, value, code) in [
         ("positions", Value::Text(b"other".as_slice().into()), "E_REMAP_POLICY"),
         ("points", ints(&[]), "E_REMAP_COUNT"),
@@ -656,7 +656,7 @@ fn changing_any_semantic_input_misses_the_cache() {
     // result must equal a fresh-session oracle.
     let src = source(3);
     let dst = target(1, &source(3));
-    let ints = |a: &[i64]| Value::Int_array(Arc::new(a.to_vec()));
+    let ints = |a: &[i64]| Value::IntArray(Arc::new(a.to_vec()));
     let base = args(&[0, 1, 2], &[0, 1, 2], &[0], &[0, 1, 2, 3], &[0, 1, 2], "target");
     let target_p = ok(geo::with_positions(ok(float3::view::of_owned_exn(vec![9.0, 8.0, 7.0], vec![0.0; 3], vec![0.0; 3])), &dst));
     let t = ok(topology::create_owned(3, vec![2, 1, 0], vec![0, 3], vec![topology::PrimitiveKind::Polygon]));
@@ -780,7 +780,7 @@ fn mix_of(count: i64, shift: i64, n: i64) -> Mix {
 }
 
 fn mix_args(pc: &Mix, vc: &Mix, rc: &Mix, policy: &str, offsets: &[i64], ancestors: &[i64]) -> Args {
-    let ints = |a: &[i64]| Value::Int_array(Arc::new(a.to_vec()));
+    let ints = |a: &[i64]| Value::IntArray(Arc::new(a.to_vec()));
     let floats = |a: &[f64]| Value::Floats(1, Arc::new(a.to_vec()));
     vec![
         ("pa".into(), ints(&pc.0)),
@@ -1001,7 +1001,7 @@ fn weighted_remap_refusals() {
     );
     let with = |key: &str, value: Value| replace(&ok_args, key, value);
     let all = mix_body(true, true, true);
-    let ints = |a: Vec<i64>| Value::Int_array(Arc::new(a));
+    let ints = |a: Vec<i64>| Value::IntArray(Arc::new(a));
     for (key, value, code) in [
         ("pt", Value::Floats(1, Arc::new(vec![0.5; np as usize - 1])), "E_REMAP_COUNT"),
         ("pa", ints(vec![4; np as usize]), "E_REMAP_INDEX"),

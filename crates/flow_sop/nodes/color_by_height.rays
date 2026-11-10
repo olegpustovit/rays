@@ -1,6 +1,7 @@
 ; Whole-node draft.
 (defnode sop/color_by_height :label "Color by Height" :category ["Attribute" "Color"]
   :facts {:elementwise points :reads ["P"] :writes ["Cd"] :topology preserved :exact false}
+  :description "Map point heights between two colours."
   [(in0 : geometry)
    (low_red : int 32 :label "Red" :folder ["Low color"] :min 0 :max 255 :hard_min 0 :hard_max 255)
    (low_green : int 64 :label "Green" :folder ["Low color"] :min 0 :max 255 :hard_min 0 :hard_max 255)

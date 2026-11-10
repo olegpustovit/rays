@@ -1,4 +1,4 @@
-; Whole Edge Flip draft (Rdk.Edge_flip). Every selected edge must join two distinct, consistently wound polygons;
+; Whole Edge Flip draft (sop/edge_flip). Every selected edge must join two distinct, consistently wound polygons;
 ; the two polygons are re-cut along the rotated diagonal (shift = cycles mod ring size) and, when asked, their
 ; vertex attributes are cycled. All errors share one code, so the plan is checked as one pass of array maps:
 ; per-edge preconditions, the claim of each primitive by at most one planned edge, no repeated point in the
@@ -8,7 +8,7 @@
 ; recomputed by the Normal node's face-area point mode.
 (defn ef_error :context value [(reason : text)]
   (error "invalid_topology" "edge_flip could not produce valid geometry"
-    :cause (str "edge_flip [invalid_topology]: Rdk.Edge_flip.edge_flip: " reason)))
+    :cause (str "edge_flip [invalid_topology]: sop/edge_flip: " reason)))
 (defn ef_safe :context value [(index : int)] (if (int/ge index 0) index 0))
 (defn ef_mod :context value [(x : int) (m : int)] (if (int/gt m 0) (int/mod x m) 0))
 (defn ef_finite :context value [(x : float)] (= (- x x) 0.0))
@@ -61,6 +61,7 @@
         (if (and (and (= lp.x rp.x) (= lp.y rp.y)) (= lp.z rp.z)) 1 0)))))
 
 (defnode sop/edge_flip :label "Edge Flip" :category ["Topology" "Edge"]
+  :description "Rotate the shared diagonal between adjacent polygons."
   [(in0 : geometry)
    (group : text "" :label "Edge group")
    (cycles : int 1 :label "Cycles" :min 0 :max 16 :hard_min 0)

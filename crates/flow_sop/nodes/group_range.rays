@@ -59,6 +59,7 @@
                               adjacency.edge_of_vertex)) topology.primitive_offsets))))))
 
 (defnode sop/group_range :label "Group Range" :category ["Group" "Create"]
+  :description "Select element ranges with filtering, connectivity and merge rules."
   [(in0 : geometry)
    (owner : text "Points" :label "Group type" :choices ["Points" "Vertices" "Primitives" "Edges"])
    (name : text "range" :label "Output group")

@@ -1,4 +1,4 @@
-//! lib/flow_sop/test_gpu_bulk.ml: the source's explicit float32 mock measures placement, not native correctness.
+//! : the source's explicit float32 mock measures placement, not native correctness.
 use super::support::*;
 use crate::{attribute_kernel,lower,value_lane};
 use flow_ir::{flow_ir::{gpu,PlacementReason,profile},packed};
@@ -39,7 +39,7 @@ impl gpu::Kernel for MockKernel{
 }
 fn ticks()->lower::Clock{let n=Arc::new(AtomicUsize::new(0));Arc::new(move||n.fetch_add(1,Ordering::SeqCst)as f64+1.)}
 fn positions(backend:Option<Arc<dyn gpu::Backend>>)->float3::T{
-    let text="(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 100 :rows 100 :size 3.0 :rotation 0.3)))";
+    let text="(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 100 :rows 100 :size 3.0 :rotate 0.3)))";
     let gpu=backend.map_or_else(gpu::default,|b|gpu::Config{backend:Some(b),fast:true,..gpu::default()});
     let(_,n)=lower_text(lower::Options{gpu,clock:ticks(),..Default::default()},text);
     let mut s=new_session(0,0);let c=context(4,97);let mut last=None;
@@ -66,7 +66,7 @@ fn captured(points:bool,capture:bool,time:f64){
     calls.planes.store(0,Ordering::SeqCst);let geometry=cook(&mut s,&context,&root);
     if points{for(name,indexed)in[("sourcepoint",false),("sourceindex",true)]{let rdk_core::attribute::Storage::Int(xs)=rdk_core::attribute::storage(&geo::find_attribute(rdk_core::attribute::Owner::Point,name,&geometry).unwrap()).unwrap()else{panic!("source integer attribute")};assert_eq!(*xs,(0..32).map(|i|if indexed{i}else{-1}).collect::<Vec<_>>());}}
     assert_eq!(calls.planes.load(Ordering::SeqCst),usize::from(capture));
-    if capture{assert!(profile::placements(&l.profile).iter().any(|p|p.cpu_consumers==Some(1)&&p.reason==PlacementReason::Device_measured_cheaper));}
+    if capture{assert!(profile::placements(&l.profile).iter().any(|p|p.cpu_consumers==Some(1)&&p.reason==PlacementReason::DeviceMeasuredCheaper));}
     assert_eq!(float3::get(geo::positions(&geometry),31).unwrap(),(31.+time,0.,0.));session::close(&mut s);
 }
 #[test]fn opaque_mesh_declines_resident_record(){captured(false,false,0.)}

@@ -6,6 +6,7 @@
 (defnode sop/rest_position :label "Rest Position" :category ["Attribute" "Motion"]
   :validate (not (equal? rest_attribute "P"))
   :code "E_PARAM" :message "sop/rest_position: rest attribute cannot be P"
+  :description "Store rest positions and optional rest normals as attributes."
   [(input : geometry)
    (reference : geometry :required false)
    (mode : text "Store" :label "Mode" :choices ["Store" "Extract" "Swap"])

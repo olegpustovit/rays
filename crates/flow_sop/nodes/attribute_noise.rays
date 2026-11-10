@@ -5,7 +5,7 @@
   (error "E_PARAM" (str "sop/attribute_noise: " reason)))
 (defn noise_fail :context value [(reason : text)]
   (error "invalid_noise" "attribute_noise could not produce valid geometry"
-    :cause (str "attribute_noise [invalid_noise]: Rdk.Attribute_ops.noise: " reason)))
+    :cause (str "attribute_noise [invalid_noise]: sop/attribute_noise: " reason)))
 (defn noise_finite :context value [(v : float)] (= (- v v) 0.0))
 (defn noise_dimension :context value [(kind : text)]
   (case kind "Float" 1 "Vector" 3 :else 4))
@@ -41,6 +41,7 @@
   :facts {:elementwise points :reads ["P" "$name" "$location_attribute"] :writes ["$name" "N"] :topology preserved :exact false}
   :validate (noise_validate owner name group kind location location_attribute range operation blend octaves
               lacunarity roughness min_x min_y min_z min_w max_x max_y max_z max_w)
+  :description "Blend seeded fractal noise into scalar or vector attributes."
   [(in0 : geometry)
    (owner : text "Point" :label "Owner" :choices ["Point" "Vertex" "Primitive" "Detail"])
    (name : text "noise" :label "Attribute")
@@ -65,9 +66,9 @@
    (frequency_x : float 1.0 :label "Frequency X" :folder ["Noise" "Frequency"] :min 0 :max 20 :vec3 ["frequency" 0])
    (frequency_y : float 1.0 :label "Frequency Y" :folder ["Noise" "Frequency"] :min 0 :max 20 :vec3 ["frequency" 1])
    (frequency_z : float 1.0 :label "Frequency Z" :folder ["Noise" "Frequency"] :min 0 :max 20 :vec3 ["frequency" 2])
-   (offset_x : float 0.0 :label "Offset X" :folder ["Noise" "Offset"] :min -10 :max 10 :vec3 ["offset" 0])
-   (offset_y : float 0.0 :label "Offset Y" :folder ["Noise" "Offset"] :min -10 :max 10 :vec3 ["offset" 1])
-   (offset_z : float 0.0 :label "Offset Z" :folder ["Noise" "Offset"] :min -10 :max 10 :vec3 ["offset" 2])
+   (offset_x : float 0.0 :label "Offset X" :folder ["Noise" "Offset"] :min -10 :max 10 :vec3 ["offset" 0] :unit "m")
+   (offset_y : float 0.0 :label "Offset Y" :folder ["Noise" "Offset"] :min -10 :max 10 :vec3 ["offset" 1] :unit "m")
+   (offset_z : float 0.0 :label "Offset Z" :folder ["Noise" "Offset"] :min -10 :max 10 :vec3 ["offset" 2] :unit "m")
    (octaves : int 1 :label "Octaves" :folder ["Noise" "Fractal"] :min 1 :max 12 :hard_min 1)
    (lacunarity : float 2.0 :label "Lacunarity" :folder ["Noise" "Fractal"] :min 0 :max 8)
    (roughness : float 0.5 :label "Roughness" :folder ["Noise" "Fractal"] :min 0 :max 1)]

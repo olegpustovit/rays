@@ -20,6 +20,7 @@
         :else (if (int/eq kind 1) same (ends_pack (int/add size 1) 1 1 0 1))))))
 
 (defnode sop/ends :label "Ends" :category ["Topology" "Curve"]
+  :description "Open, close or unroll selected curve ends."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
    (mode : text "Open" :label "U end"

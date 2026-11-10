@@ -3,6 +3,7 @@
   :validate (and (and (<= (abs m30) 1e-12) (<= (abs m31) 1e-12))
                  (and (<= (abs m32) 1e-12) (<= (abs (- m33 1.0)) 1e-12)))
     :code "E_PARAM" :message "sop/set_transform: matrix must be affine"
+  :description "Write a constant transformation matrix attribute."
   [(in0 : geometry)
    (m00 : float 1.0 :label "M00" :folder ["Matrix" "Row 0"] :min -10 :max 10)
    (m01 : float 0.0 :label "M01" :folder ["Matrix" "Row 0"] :min -10 :max 10)

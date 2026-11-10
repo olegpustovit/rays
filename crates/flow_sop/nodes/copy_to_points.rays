@@ -6,7 +6,7 @@
 ; sop/pack_instances carrier. Native arm64 contracts a +. b *. c: explicit fma where that happens.
 (defn ctp_fail :context value [(reason : text)]
   (error "invalid_attribute" "copy_to_points could not produce valid geometry"
-    :cause (str "copy_to_points [invalid_attribute]: Rdk.Instance_copy.copy_to_points: " reason)))
+    :cause (str "copy_to_points [invalid_attribute]: sop/copy_to_points: " reason)))
 (defmacro ctp_bad [geo name type]
   `(and (sop/has_attr ~geo ~name :owner "point")
         (not (sop/has_attr ~geo ~name :owner "point" :type ~type))))
@@ -14,7 +14,7 @@
 (defn ctp_nf3 :context value [(v : vec3)] (if (and (ctp_ok v.x) (and (ctp_ok v.y) (ctp_ok v.z))) 0 1))
 (defn ctp_nf4 :context value [(v : vec4)] (if (and (and (ctp_ok v.x) (ctp_ok v.y)) (and (ctp_ok v.z) (ctp_ok v.w))) 0 1))
 
-; ---- quaternions: normalized like copy_frames' set_quaternion, rows of the rotation matrix
+; ---- quaternions: normalized like copy_frames' set_quaternion, rows of the rotate matrix
 (defn ctp_qn :context value [(q : vec4)]
   (let* [scale (max (abs q.x) (max (abs q.y) (max (abs q.z) (abs q.w))))
          live (> scale 0.0)
@@ -68,7 +68,7 @@
 (defn ctp_aligned_row2 :context value [(z : vec4) (x : vec4)]
   [x.z (fma (* -1.0 z.y) x.x (* z.x x.y)) z.z])
 
-; ---- cofactor matrix of the affine normal path (columns a b c of the rotation block, scaled by s)
+; ---- cofactor matrix of the affine normal path (columns a b c of the rotate block, scaled by s)
 (defn ctp_matrix_scale :context value [(a3 : vec3) (b3 : vec3) (c3 : vec3)]
   (let* [sc (max (abs a3.x) (max (abs b3.x) (max (abs c3.x) (max (abs a3.y) (max (abs b3.y) (max (abs c3.y)
               (max (abs a3.z) (max (abs b3.z) (abs c3.z)))))))))]
@@ -84,7 +84,7 @@
     [(fma (* -1.0 c) e (* b f)) (fma (* -1.0 a) f (* c d)) (fma (* -1.0 b) d (* a e))]))
 (defn ctp_det :context value [(a3 : vec3) (b3 : vec3) (c3 : vec3) (s : float) (r : vec3)]
   (fma (/ c3.x s) r.z (fma (/ b3.x s) r.y (* (/ a3.x s) r.x))))
-; A normal through three rows (the cofactor rows times the determinant sign, or the rotation rows over the
+; A normal through three rows (the cofactor rows times the determinant sign, or the rotate rows over the
 ; scale), renormalized; zero below 1e-20.
 (defn ctp_normal_through :context value [(r0 : vec3) (r1 : vec3) (r2 : vec3) (v : vec3)]
   (let* [x (+ (fma r0.x v.x (* r0.y v.y)) (* r0.z v.z))
@@ -113,7 +113,7 @@
     (array/nth listed (int/add (array/nth piece_offsets (array/nth tp k)) (int/sub i (array/nth starts k)))))
     owner (array/range (array/count owner) :type int))))
 
-; The frame of every target: scale s, rotation rows r0 r1 r2, translation t, and a problem code (0 none).
+; The frame of every target: scale s, rotate rows r0 r1 r2, translation t, and a problem code (0 none).
 (defn ctp_frames :context sop [(tgt : geometry)]
   (let* [pts (sop/count tgt :points)
          idx (array/range pts :type int)
@@ -669,6 +669,7 @@
 (defnode sop/copy_to_points :label "Copy to Points" :category "Copy"
   :validate (ctp_valid pack source_group piece_attribute target_attributes)
   :code "E_PARAM" :message "sop/copy_to_points: invalid parameters"
+  :description "Place source geometry on target point frames with optional piece matching."
   [(source : geometry)
    (targets : geometry)
    (source_group : text "" :label "Source group" :folder ["Selection"])

@@ -111,7 +111,7 @@ pub fn workspace_node_result(with_: &[(String, node::T)], source: &str) -> Resul
     all.extend(factories());
     let forms = syntax::parse(source).map_err(|d| rays_diagnostic::to_string(&d))?;
     let lowered = catalog::of_factories(manifest::VERSION, &[], None, &all).and_then(|cat| match catalog::check_workspace(&image_ops, false, None, &cat, &forms) {
-        (Some(checked), _) => lower::of_checked(Some(all.clone()), lower::Options::default(), &checked),
+        (Some(checked), _) => lower::of_checked(Some(all.clone()), lower::Options { record: false, ..Default::default() }, &checked),
         (None, diagnostics) => Err(diagnostics
             .into_iter()
             .find(|d| d.severity == rays_diagnostic::Severity::ErrorSeverity)
@@ -229,9 +229,9 @@ mod tests {
         payload::geometry(&out.payload).unwrap()
     }
 
-    // lib/flow_sop/lisp_sop/test_workspace_node.ml
+    //
     #[test]
-    
+
     fn workspace_node_helpers() {
         let workspace = "(workspace shared\n    (defn size :context value [] 3)\n    (graph g :context sop (sop/grid :columns (size) :rows 2)))";
         assert_eq!(rdk_core::geometry::point_count(&cook(&workspace_node(&[], workspace))), 12, "workspace definitions were not available while lowering");

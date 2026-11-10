@@ -112,7 +112,7 @@ fn compile(network: &Network, value: &Value) -> Result<executor::Program, Diagno
         &executor::CompileOptions {
             profile: network.profile.clone(),
             approx: network.approx.clone(),
-            sink: Some(Sink::Sop_input),
+            sink: Some(Sink::SopInput),
             ..executor::CompileOptions::default()
         },
     )

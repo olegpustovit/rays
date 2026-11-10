@@ -63,6 +63,7 @@
           (if (text/blank? total_name) written
             (sop/with_attr written total_name (array/float 1 total) :owner "detail" :type float))))))
 (defnode sop/measure :label "Measure" :category ["Attribute" "Analysis"]
+  :description "Write perimeter, area or volume measurements on selected primitives."
   [(in0 : geometry)
    (kind : text "Area" :label "Measure" :choices ["Perimeter" "Area" "Signed volume"])
    (group : text "" :label "Primitive group")

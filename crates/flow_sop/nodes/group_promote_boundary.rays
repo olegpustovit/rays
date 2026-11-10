@@ -68,6 +68,7 @@
                         (exact (map (fn [(v : int)] (array/nth contribution v)) owned)) edges)))))))
 
 (defnode sop/group_promote_boundary :label "Group Promote Boundary" :category ["Group" "Convert"]
+  :description "Promote a group and keep only elements touching its boundary."
   [(in0 : geometry)
    (source : text "Primitives" :label "Source owner" :choices ["Points" "Vertices" "Primitives" "Edges"])
    (destination : text "Edges" :label "Destination owner" :choices ["Points" "Vertices" "Primitives" "Edges"])

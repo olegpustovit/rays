@@ -15,6 +15,7 @@
     (text/table_decode raw))))
 
 (defnode sop/group_delete :label "Group Delete" :category ["Group" "Edit"]
+  :description "Delete groups matching owner and name rules."
   [(in0 : geometry)
    (rules : text "" :label "Rules (owner, pattern)" :kind encoded :normalize metadata_group_delete_normalize)
    (delete_unused : bool false :label "Delete unused groups")]

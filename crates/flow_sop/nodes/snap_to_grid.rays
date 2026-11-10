@@ -48,17 +48,18 @@
   :validate (snap_valid [spacing_x spacing_y spacing_z] [offset_x offset_y offset_z] max_distance
               attribute_rules group_rules)
   :code "E_PARAM" :message "sop/snap_to_grid: invalid grid, distance or fuse rules"
+  :description "Snap selected positions to a spatial grid and optionally fuse coincident points."
   [(in0 : geometry)
    (group : text "" :label "Point group")
-   (spacing_x : float 1.0 :label "Spacing X" :folder ["Grid" "Spacing"] :min 0.001 :max 10 :hard_min 0 :vec3 ["spacing" 0])
-   (spacing_y : float 1.0 :label "Spacing Y" :folder ["Grid" "Spacing"] :min 0.001 :max 10 :hard_min 0 :vec3 ["spacing" 1])
-   (spacing_z : float 1.0 :label "Spacing Z" :folder ["Grid" "Spacing"] :min 0.001 :max 10 :hard_min 0 :vec3 ["spacing" 2])
-   (offset_x : float 0.0 :label "Offset X" :folder ["Grid" "Offset"] :min -10 :max 10 :vec3 ["offset" 0])
-   (offset_y : float 0.0 :label "Offset Y" :folder ["Grid" "Offset"] :min -10 :max 10 :vec3 ["offset" 1])
-   (offset_z : float 0.0 :label "Offset Z" :folder ["Grid" "Offset"] :min -10 :max 10 :vec3 ["offset" 2])
+   (spacing_x : float 1.0 :label "Spacing X" :folder ["Grid" "Spacing"] :min 0.001 :max 10 :hard_min 0 :vec3 ["spacing" 0] :unit "m")
+   (spacing_y : float 1.0 :label "Spacing Y" :folder ["Grid" "Spacing"] :min 0.001 :max 10 :hard_min 0 :vec3 ["spacing" 1] :unit "m")
+   (spacing_z : float 1.0 :label "Spacing Z" :folder ["Grid" "Spacing"] :min 0.001 :max 10 :hard_min 0 :vec3 ["spacing" 2] :unit "m")
+   (offset_x : float 0.0 :label "Offset X" :folder ["Grid" "Offset"] :min -10 :max 10 :vec3 ["offset" 0] :unit "m")
+   (offset_y : float 0.0 :label "Offset Y" :folder ["Grid" "Offset"] :min -10 :max 10 :vec3 ["offset" 1] :unit "m")
+   (offset_z : float 0.0 :label "Offset Z" :folder ["Grid" "Offset"] :min -10 :max 10 :vec3 ["offset" 2] :unit "m")
    (rounding : text "Nearest" :label "Rounding" :choices ["Nearest" "Down" "Up"])
    (limit_distance : bool false :label "Limit snapping distance")
-   (max_distance : float 1.0 :label "Maximum distance" :min 0 :max 10 :hard_min 0)
+   (max_distance : float 1.0 :unit "m" :label "Maximum distance" :min 0 :max 10 :hard_min 0)
    (fuse_points : bool false :label "Fuse points" :folder ["Fuse"])
    (position : text "Average" :label "Position" :folder ["Fuse"]
      :choices ["First" "Least point" "Greatest point" "Average" "Minimum" "Maximum" "Mode" "Median" "Sum"
@@ -122,7 +123,7 @@
                                          :remove_unused_points_from_degenerate_primitives false) :points)
                             (sop/count guarded :points))
                   (error "invalid_geometry" "fuse could not produce valid geometry"
-                    :cause "fuse [invalid_geometry]: Rdk.Fuse_reduce.fuse: weighted position reduction requires a weight attribute")
+                    :cause "fuse [invalid_geometry]: sop/snap_to_grid: weighted position reduction requires a weight attribute")
                   grouped)
               :else
                 ; Native selects with the input's group even when the snapped group replaced its name.

@@ -1,4 +1,4 @@
-//! lib/flow_sop/test_keyword_ports.ml: native Fn/Image factory, manifest, edits, captures and cache.
+//! : native Fn/Image factory, manifest, edits, captures and cache.
 use super::support::*;
 use crate::{catalog,manifest,lower,operators,attribute_kernel as ak};
 use flow_graph::{flow_edit::{self as e,ArgKey,Op},projection as p};
@@ -36,7 +36,7 @@ fn keyword_manifest_defaults_projection_checked_gestures(){
 fn text(offset:i64)->String{format!("(workspace w (defn consume :context sop [(f : fn)] (sop/test_field :field f :picture (image/noise :width 1 :height 1))) (graph g :context sop (let* [a (let* [offset (+ {offset} t) field (fn [p amount] (+ p.x offset))] (consume field)) b (let* [offset (+ 4 t) field (fn [p amount] (+ p.x offset))] (sop/test_field :field field :picture (image/noise :width 1 :height 1)))] (sop/merge a b))))")}
 fn live_cache(domains:i64){
     let first=lowered(false,None,&text(7));let functions=first.plan.nodes.iter().filter(|n|n.kind=="sop/test_field").map(|n|{let Value::Fn(f)=n.args.iter().find(|(k,_)|k=="field").unwrap().1 else{panic!("function input")};f}).collect::<Vec<_>>();assert_eq!(functions.len(),2);
-    let values=std::sync::Mutex::new(vec![Value::No_geo;functions.len()]);
+    let values=std::sync::Mutex::new(vec![Value::NoGeo;functions.len()]);
     parallel::run_unit(Some(domains),&||parallel::for_(1,0,functions.len()as i64-1,&|i|{
         let v=flow_eval::host::map_function(None,None,&FnSignature{params:vec![Ty::Vec3,Ty::Float],result:Ty::Vec3},functions[i as usize],&[Value::Floats(3, Arc::new(vec![2.,0.,0.])),Value::Floats(1, Arc::new(vec![0.]))]).unwrap();
         let p=ak::prepare(None,false,None,None,&[],&[],&v).unwrap();let packed=executor::packed_region(&p).unwrap();let live=input::at_time(0.5);

@@ -1,7 +1,7 @@
 ; Whole Box draft. Points are numbered by a lattice id g = x + (X+1)*(y + (Y+1)*z).
 (defn box_error :context value [(reason : text)]
     (error "invalid_parameter" "box could not produce valid geometry"
-      :cause (str "box [invalid_parameter]: Rdk.Box_generator.box: " reason)))
+      :cause (str "box [invalid_parameter]: sop/box: " reason)))
   ; Checked counts: -1 is the native "too large" option.
   (defn box_cmul :context value [(left : int) (right : int) (limit : int)]
     (cond (or (int/lt left 0) (int/lt right 0)) -1
@@ -27,23 +27,24 @@
                (array/range ~count :type int)))
       :owner "primitive" :name ~name))
   (defnode sop/box :label "Box" :category ["Create" "Primitive"]
-    [(connectivity : text "Quads" :label "Connectivity"
+    :description "Create subdivided box surfaces, surface points or a point lattice."
+  [(connectivity : text "Quads" :label "Connectivity"
        :choices ["Triangles" "Quads" "Surface points" "Lattice points"])
      (normals : text "Vertex" :label "Normals" :choices ["Auto" "None" "Point" "Vertex"])
-     (size_x : float 1.0 :label "Size X" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["size" 0])
-     (size_y : float 1.0 :label "Size Y" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["size" 1])
-     (size_z : float 1.0 :label "Size Z" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["size" 2])
-     (x_divisions : int 1 :label "X divisions" :folder ["Divisions"] :min 1 :max 24 :hard_min 1)
-     (y_divisions : int 1 :label "Y divisions" :folder ["Divisions"] :min 1 :max 24 :hard_min 1)
-     (z_divisions : int 1 :label "Z divisions" :folder ["Divisions"] :min 1 :max 24 :hard_min 1)
+     (size_x : float 1.0 :label "Size X" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["size" 0] :unit "m")
+     (size_y : float 1.0 :label "Size Y" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["size" 1] :unit "m")
+     (size_z : float 1.0 :label "Size Z" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["size" 2] :unit "m")
+     (divisions_x : int 1 :label "X divisions" :folder ["Divisions"] :min 1 :max 24 :hard_min 1)
+     (divisions_y : int 1 :label "Y divisions" :folder ["Divisions"] :min 1 :max 24 :hard_min 1)
+     (divisions_z : int 1 :label "Z divisions" :folder ["Divisions"] :min 1 :max 24 :hard_min 1)
      (consolidate_points : bool false :label "Consolidate points" :folder ["Topology"])
-     (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0])
-     (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1])
-     (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2])
-     (rotation_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :unit "rad" :vec3 ["rotation" 0])
-     (rotation_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :unit "rad" :vec3 ["rotation" 1])
-     (rotation_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :unit "rad" :vec3 ["rotation" 2])
-     (rotation_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
+     (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+     (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+     (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+     (rotate_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 0] :unit "rad")
+     (rotate_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 1] :unit "rad")
+     (rotate_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 2] :unit "rad")
+     (rotate_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
        :choices ["XYZ" "XZY" "YXZ" "YZX" "ZXY" "ZYX"])
      (uniform_scale : float 1.0 :label "Uniform scale" :folder ["Transform"] :min 0.01 :max 10 :hard_min 0)
      (uv_attribute : text "" :label "UV attribute" :folder ["Attributes"])
@@ -63,7 +64,7 @@
            sx checked_x.value sy checked_y.value sz checked_z.value
            max_int 9223372036854775807]
       (cond
-        (or (int/eq x_divisions max_int) (or (int/eq y_divisions max_int) (int/eq z_divisions max_int)))
+        (or (int/eq divisions_x max_int) (or (int/eq divisions_y max_int) (int/eq divisions_z max_int)))
           (box_error "point cardinality overflows")
         (not (and (> uniform_scale 0.0) (and (and checked_x.valid (and checked_y.valid checked_z.valid))
                (and (> sx 0.0) (and (> sy 0.0) (> sz 0.0))))))
@@ -77,9 +78,9 @@
           (box_error "volume lattice points do not have surface normals")
         (and triangles (and (not consolidate_points) (and (equal? normal_mode "Point")
              (and (= center_x 0.0) (and (= center_y 0.0) (and (= center_z 0.0)
-             (and (= rotation_x 0.0) (and (= rotation_y 0.0) (and (= rotation_z 0.0)
-             (and (= uniform_scale 1.0) (and (int/eq x_divisions 1) (and (int/eq y_divisions 1)
-             (and (int/eq z_divisions 1) (and (not has_uv) (not has_groups)))))))))))))))
+             (and (= rotate_x 0.0) (and (= rotate_y 0.0) (and (= rotate_z 0.0)
+             (and (= uniform_scale 1.0) (and (int/eq divisions_x 1) (and (int/eq divisions_y 1)
+             (and (int/eq divisions_z 1) (and (not has_uv) (not has_groups)))))))))))))))
           ; The fixed 24-point cube: sign masks per coordinate, faces of four points.
           (let* [hx (* sx 0.5) hy (* sy 0.5) hz (* sz 0.5)
                  points (array/range 24 :type int)
@@ -104,19 +105,19 @@
                    :kinds (array/int 12 0))]
             (sop/with_attr cube "N" face_normals :owner "point" :type vec3))
         :else
-          (let* [nxp (int/add x_divisions 1) nyp (int/add y_divisions 1) nzp (int/add z_divisions 1)
+          (let* [nxp (int/add divisions_x 1) nyp (int/add divisions_y 1) nzp (int/add divisions_z 1)
                  xy_points (box_cmul nxp nyp limit) yz_points (box_cmul nyp nzp limit)
                  zx_points (box_cmul nzp nxp limit)
-                 xy_cells (box_cmul x_divisions y_divisions limit)
-                 yz_cells (box_cmul y_divisions z_divisions limit)
-                 zx_cells (box_cmul z_divisions x_divisions limit)
+                 xy_cells (box_cmul divisions_x divisions_y limit)
+                 yz_cells (box_cmul divisions_y divisions_z limit)
+                 zx_cells (box_cmul divisions_z divisions_x limit)
                  face_local_points (if (and (int/ge xy_points 0) (and (int/ge yz_points 0) (int/ge zx_points 0)))
                    (box_cmul 2 (box_cadd (box_cadd xy_points yz_points limit) zx_points limit) limit) -1)
-                 ring (int/add (int/mul 2 nxp) (int/mul 2 (int/sub y_divisions 1)))
+                 ring (int/add (int/mul 2 nxp) (int/mul 2 (int/sub divisions_y 1)))
                  boundary_points (if (int/ge xy_points 0)
-                   (let* [a (box_cmul 2 nxp limit) b (box_cmul 2 (int/sub y_divisions 1) limit)
+                   (let* [a (box_cmul 2 nxp limit) b (box_cmul 2 (int/sub divisions_y 1) limit)
                           ring_total (box_cadd a b limit)
-                          middle (box_cmul (int/sub z_divisions 1) ring_total limit)
+                          middle (box_cmul (int/sub divisions_z 1) ring_total limit)
                           caps (box_cmul 2 xy_points limit)]
                      (if (or (int/lt ring_total 0) (or (int/lt middle 0) (int/lt caps 0))) -1
                        (box_cadd caps middle limit)))
@@ -141,9 +142,9 @@
                 (let* [primitive_count (if polygon (int/mul surface_cells primitive_per_cell) 0)
                        vertex_count (if polygon (int/mul surface_cells slots) 0)
                        hx (* sx 0.5) hy (* sy 0.5) hz (* sz 0.5)
-                       rotated (or (not (= rotation_x 0.0)) (or (not (= rotation_y 0.0)) (not (= rotation_z 0.0))))
-                       rx (mat4_rotation_x rotation_x) ry (mat4_rotation_y rotation_y) rz (mat4_rotation_z rotation_z)
-                       matrix (case rotation_order
+                       rotated (or (not (= rotate_x 0.0)) (or (not (= rotate_y 0.0)) (not (= rotate_z 0.0))))
+                       rx (mat4_rotation_x rotate_x) ry (mat4_rotation_y rotate_y) rz (mat4_rotation_z rotate_z)
+                       matrix (case rotate_order
                          "XYZ" (mat4_mul rz (mat4_mul ry rx))
                          "XZY" (mat4_mul ry (mat4_mul rz rx))
                          "YXZ" (mat4_mul rz (mat4_mul rx ry))
@@ -160,8 +161,8 @@
                             (fma m22 v.z (fma m21 v.y (* m20 v.x)))]
                            v))
                        ; Face order: +x, -x, +y, -y, +z, -z. u runs along the first listed axis.
-                       udiv (fn [(f : int)] (cond (int/lt f 2) y_divisions (int/lt f 4) z_divisions :else x_divisions))
-                       vdiv (fn [(f : int)] (cond (int/lt f 2) z_divisions (int/lt f 4) x_divisions :else y_divisions))
+                       udiv (fn [(f : int)] (cond (int/lt f 2) divisions_y (int/lt f 4) divisions_z :else divisions_x))
+                       vdiv (fn [(f : int)] (cond (int/lt f 2) divisions_z (int/lt f 4) divisions_x :else divisions_y))
                        po1 yz_points po2 (int/mul 2 yz_points) po3 (int/add po2 zx_points)
                        po4 (int/add po2 (int/mul 2 zx_points)) po5 (int/add po4 xy_points)
                        co1 yz_cells co2 (int/mul 2 yz_cells) co3 (int/add co2 zx_cells)
@@ -180,25 +181,25 @@
                                (int/eq f 3) co3 (int/eq f 4) co4 :else co5))
                        ; Grid point of a face cell corner, as a lattice id.
                        face_grid (fn [(f : int) (row : int) (col : int)]
-                         (let* [x (cond (int/eq f 0) x_divisions (int/eq f 1) 0 (int/eq f 2) row
-                                    (int/eq f 3) row (int/eq f 4) col :else (int/sub x_divisions col))
-                                y (cond (int/lt f 2) col (int/eq f 2) y_divisions (int/eq f 3) 0
+                         (let* [x (cond (int/eq f 0) divisions_x (int/eq f 1) 0 (int/eq f 2) row
+                                    (int/eq f 3) row (int/eq f 4) col :else (int/sub divisions_x col))
+                                y (cond (int/lt f 2) col (int/eq f 2) divisions_y (int/eq f 3) 0
                                     :else row)
-                                z (cond (int/eq f 0) row (int/eq f 1) (int/sub z_divisions row)
-                                    (int/eq f 2) col (int/eq f 3) (int/sub z_divisions col)
-                                    (int/eq f 4) z_divisions :else 0)]
+                                z (cond (int/eq f 0) row (int/eq f 1) (int/sub divisions_z row)
+                                    (int/eq f 2) col (int/eq f 3) (int/sub divisions_z col)
+                                    (int/eq f 4) divisions_z :else 0)]
                            (int/add x (int/mul nxp (int/add y (int/mul nyp z))))))
                        plane xy_points
-                       top_base (int/add plane (int/mul (int/sub z_divisions 1) ring))
+                       top_base (int/add plane (int/mul (int/sub divisions_z 1) ring))
                        boundary_index (fn [(g : int)]
                          (let* [x (int/mod g nxp) yz (int/div g nxp) y (int/mod yz nyp) z (int/div yz nyp)]
                            (cond (int/eq z 0) (int/add (int/mul y nxp) x)
-                                 (int/eq z z_divisions) (int/add top_base (int/add (int/mul y nxp) x))
+                                 (int/eq z divisions_z) (int/add top_base (int/add (int/mul y nxp) x))
                                  :else
                                    (let* [base (int/add plane (int/mul (int/sub z 1) ring))]
                                      (cond (int/eq y 0) (int/add base x)
-                                           (int/eq y y_divisions)
-                                             (int/add base (int/add nxp (int/add (int/mul 2 (int/sub y_divisions 1)) x)))
+                                           (int/eq y divisions_y)
+                                             (int/add base (int/add nxp (int/add (int/mul 2 (int/sub divisions_y 1)) x)))
                                            :else (int/add base (int/add nxp
                                              (int/add (int/mul 2 (int/sub y 1)) (if (int/eq x 0) 0 1)))))))))
                        ; Point number of a face cell corner.
@@ -211,20 +212,20 @@
                        boundary_grid (fn [(p : int)]
                          (cond (int/lt p plane) p
                                (int/ge p top_base)
-                                 (int/add (int/sub p top_base) (int/mul plane z_divisions))
+                                 (int/add (int/sub p top_base) (int/mul plane divisions_z))
                                :else
                                  (let* [local (int/sub p plane) z (int/add 1 (int/div local ring))
                                         within (int/mod local ring)
                                         pair (int/sub within nxp)
-                                        tail (int/sub pair (int/mul 2 (int/sub y_divisions 1)))
+                                        tail (int/sub pair (int/mul 2 (int/sub divisions_y 1)))
                                         x (cond (int/lt within nxp) within
-                                                (int/lt pair (int/mul 2 (int/sub y_divisions 1)))
-                                                  (if (int/eq (int/and pair 1) 0) 0 x_divisions)
+                                                (int/lt pair (int/mul 2 (int/sub divisions_y 1)))
+                                                  (if (int/eq (int/and pair 1) 0) 0 divisions_x)
                                                 :else tail)
                                         y (cond (int/lt within nxp) 0
-                                                (int/lt pair (int/mul 2 (int/sub y_divisions 1)))
+                                                (int/lt pair (int/mul 2 (int/sub divisions_y 1)))
                                                   (int/add 1 (int/div pair 2))
-                                                :else y_divisions)]
+                                                :else divisions_y)]
                                    (int/add x (int/mul nxp (int/add y (int/mul nyp z)))))))
                        local_grid (fn [(p : int)]
                          (let* [f (face_of_point p) local (int/sub p (point_base f))
@@ -241,11 +242,11 @@
                        invalid (if safe (array/int 0)
                          (array/compact (map (fn [(p : int)]
                            (let* [g (point_grid p) x (int/mod g nxp) yz (int/div g nxp) y (int/mod yz nyp) z (int/div yz nyp)
-                                  axes (and (box_axis_valid sx x x_divisions)
-                                         (and (box_axis_valid sy y y_divisions) (box_axis_valid sz z z_divisions)))]
+                                  axes (and (box_axis_valid sx x divisions_x)
+                                         (and (box_axis_valid sy y divisions_y) (box_axis_valid sz z divisions_z)))]
                              (if (not axes) 1
-                               (let* [lx (box_axis hx sx x x_divisions) ly (box_axis hy sy y y_divisions)
-                                      lz (box_axis hz sz z z_divisions)
+                               (let* [lx (box_axis hx sx x divisions_x) ly (box_axis hy sy y divisions_y)
+                                      lz (box_axis hz sz z divisions_z)
                                       cx (if rotated
                                            (let* [a (float/fma_checked m01 ly (* m00 lx))
                                                   b (float/fma_checked m02 lz a.value)]
@@ -264,9 +265,9 @@
                                  (if (and cx.valid (and cy.valid cz.valid)) 0 1))))) pts)))]
                   (if (int/gt (array/count invalid) 0)
                     (box_error (str "generated point " (array/nth invalid 0) " is not finite"))
-                    (let* [axis_x (exact (map (fn [(i : int)] (box_axis hx sx i x_divisions)) (array/range nxp :type int)))
-                           axis_y (exact (map (fn [(i : int)] (box_axis hy sy i y_divisions)) (array/range nyp :type int)))
-                           axis_z (exact (map (fn [(i : int)] (box_axis hz sz i z_divisions)) (array/range nzp :type int)))
+                    (let* [axis_x (exact (map (fn [(i : int)] (box_axis hx sx i divisions_x)) (array/range nxp :type int)))
+                           axis_y (exact (map (fn [(i : int)] (box_axis hy sy i divisions_y)) (array/range nyp :type int)))
+                           axis_z (exact (map (fn [(i : int)] (box_axis hz sz i divisions_z)) (array/range nzp :type int)))
                            positions (exact (map (fn [(p : int)]
                              (let* [g (point_grid p)
                                     x (int/mod g nxp) yz (int/div g nxp) y (int/mod yz nyp) z (int/div yz nyp)
@@ -286,7 +287,7 @@
                                        (int/eq slot 3) 0 (int/eq slot 4) 2 :else 3)
                                  slot)))
                            ; One packed key per vertex: face + 6 * (corner row + row_span * corner column).
-                           row_span (int/add (int/add (max x_divisions (max y_divisions z_divisions)) 1) 1)
+                           row_span (int/add (int/add (max divisions_x (max divisions_y divisions_z)) 1) 1)
                            vertex_keys (exact (map (fn [(v : int)]
                              (let* [f (vertex_face v) c (int/sub (int/div v slots) (cell_base f))
                                     k (corner v)
@@ -316,9 +317,9 @@
                                  (if consolidate_points
                                    (let* [g (boundary_grid p)
                                           x (int/mod g nxp) yz (int/div g nxp) y (int/mod yz nyp) z (int/div yz nyp)
-                                          qx (cond (int/eq x 0) -1.0 (int/eq x x_divisions) 1.0 :else 0.0)
-                                          qy (cond (int/eq y 0) -1.0 (int/eq y y_divisions) 1.0 :else 0.0)
-                                          qz (cond (int/eq z 0) -1.0 (int/eq z z_divisions) 1.0 :else 0.0)
+                                          qx (cond (int/eq x 0) -1.0 (int/eq x divisions_x) 1.0 :else 0.0)
+                                          qy (cond (int/eq y 0) -1.0 (int/eq y divisions_y) 1.0 :else 0.0)
+                                          qz (cond (int/eq z 0) -1.0 (int/eq z divisions_z) 1.0 :else 0.0)
                                           length (sqrt (fma qz qz (fma qy qy (* qx qx))))]
                                      (rot [(/ qx length) (/ qy length) (/ qz length)]))
                                    (face_normal (face_of_point p)))) pts))

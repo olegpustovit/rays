@@ -1,4 +1,4 @@
-; Whole-node draft. Discrete curvature of a polygon surface (Rdk.Curvature): mean (cotangent Laplacian of the
+; Whole-node draft. Discrete curvature of a polygon surface (sop/measure_curvature): mean (cotangent Laplacian of the
 ; scaled positions over the mixed Voronoi area, along the area-weighted normal), Gaussian (angle defect over
 ; mixed area), principal minimum/maximum, curvedness and shape index, optional Jacobi smoothing over the edge
 ; neighbours, optional point group. The surface metric (scaled positions, Rdk's ear-clipped sop/triangles,
@@ -240,6 +240,7 @@
 (defnode sop/measure_curvature :label "Measure Curvature" :category ["Measure"]
   :validate (crv_names_ok mean gaussian minimum maximum curvedness shape_index)
   :code "E_PARAM" :message "sop/measure_curvature: outputs need at least one distinct name, none P"
+  :description "Measure mean, Gaussian and principal curvature on a polygon surface."
   [(in0 : geometry)
    (point_group : text "" :label "Point group")
    (boundary : text "Zero" :label "Boundary" :choices ["Zero" "One-sided"])

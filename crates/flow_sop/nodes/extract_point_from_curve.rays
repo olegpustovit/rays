@@ -95,6 +95,7 @@
   :validate (xpc_valid distance_attribute constant cut primitive_attribute point_attributes
               primitive_attributes curve_u_attribute number_cuts_attribute curve_number_attribute)
   :code "E_PARAM" :message "sop/extract_point_from_curve: invalid parameters"
+  :description "Extract interpolated curve points where a distance attribute crosses a value."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
    (distance_attribute : text "distance" :label "Distance attribute")

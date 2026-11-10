@@ -444,7 +444,7 @@
               remapped)))))
 
   ; Axis frame of the pole-oriented generators (platonic, tube, torus): radial, pole and tangent,
-  ; rotated by the rotation order (Plane_generators.normalize_plane_axis rescales before the length).
+  ; rotated by the rotate order (Plane_generators.normalize_plane_axis rescales before the length).
   (defn gen_normalize :context value [(value : vec3)]
     (let* [scale (max (abs value.x) (max (abs value.y) (abs value.z)))
            x (/ value.x scale) y (/ value.y scale) z (/ value.z scale)
@@ -460,14 +460,14 @@
                                   (fma (* -1.0 projection) pole.z reference.z)])]
       {:r radial :p pole
        :t (gen_normalize (vec3_cross radial pole))}))
-  (defn gen_frame :context value [(orientation : text) (axis : vec3) (rotation : vec3) (order : text)]
+  (defn gen_frame :context value [(orientation : text) (axis : vec3) (rotate : vec3) (order : text)]
     (let* [
            frame0 (cond (equal? orientation "X axis") {:r [0.0 1.0 0.0] :p [1.0 0.0 0.0] :t [0.0 0.0 -1.0]}
                         (equal? orientation "Y axis") {:r [1.0 0.0 0.0] :p [0.0 1.0 0.0] :t [0.0 0.0 1.0]}
                         (equal? orientation "Z axis") {:r [1.0 0.0 0.0] :p [0.0 0.0 1.0] :t [0.0 -1.0 0.0]}
                         :else (gen_custom_frame axis))
-           rotation_zero (and (= rotation.x 0.0) (and (= rotation.y 0.0) (= rotation.z 0.0)))
-           mx (mat4_rotation_x rotation.x) my (mat4_rotation_y rotation.y) mz (mat4_rotation_z rotation.z)
+           rotation_zero (and (= rotate.x 0.0) (and (= rotate.y 0.0) (= rotate.z 0.0)))
+           mx (mat4_rotation_x rotate.x) my (mat4_rotation_y rotate.y) mz (mat4_rotation_z rotate.z)
            matrix (case order
              "XYZ" (mat4_mul mz (mat4_mul my mx))
              "XZY" (mat4_mul my (mat4_mul mz mx))
@@ -482,7 +482,7 @@
                 (+ (fma matrix.r2.x v.x (* matrix.r2.y v.y)) (* matrix.r2.z v.z))]))]
       {:r (direction frame0.r) :p (direction frame0.p) :t (direction frame0.t)}))
 
-  ; Rdk.Deform.resolve_directions without a named attribute: the point N, else the vertex N
+  ; sop/prelude without a named attribute: the point N, else the vertex N
   ; averaged onto its points, else the summed polygon area vectors (fan triangles from each
   ; polygon's first vertex, added to every point of the polygon in vertex order).
   (defn deform_area_directions :context sop [(geo : geometry)]
@@ -975,8 +975,7 @@
                   (sop/normals cleared :owner (if had_point "Point" "Vertex") :weighting "Face area")
                   cleared)))))))))
 
-; Whole PolyWire / Sweep Circle port (Rdk.Sweep_circle.run: the legacy fast path of mesh/sweep_circle.ml
-; and the general engine curve/polywire.ml). One engine, `pw_run`, shared by both nodes.
+; PolyWire and Sweep Circle share one engine, `pw_run`.
 ; Everything is whole-array: rings per curve are laid out through prefix sums, the zipper between rings
 ; of different side counts is a merge of two arithmetic key sequences (sorted with array/grade), the only
 ; sequential steps (arc length and parallel transport) are one `iterate` over the ring index.

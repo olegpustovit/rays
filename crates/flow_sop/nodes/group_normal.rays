@@ -59,6 +59,7 @@
     (if (or (= ascale 0.0) (= bscale 0.0)) [0.0 0.0 0.0] (+ (* x xi) (* y yi)))))
 
 (defnode sop/group_normal :label "Group by Normal" :category ["Group" "Create"]
+  :description "Select elements whose normals lie within an angular spread of a direction."
   [(in0 : geometry)
    (owner : text "Primitives" :label "Group type" :choices ["Points" "Primitives" "Edges"])
    (name : text "normal" :label "Group name")
@@ -67,7 +68,7 @@
    (direction_z : float 0.0 :label "Direction Z" :folder "Direction" :min -1 :max 1 :vec3 ["direction" 2]
      :validate (not (and (and (= direction_x 0.0) (= direction_y 0.0)) (= direction_z 0.0)))
      :code "E_PARAM" :message "sop/group_normal: direction must be non-zero")
-   (spread_angle : float 0.7853981633974483 :label "Spread angle" :min 0 :max 3.141592653589793
+   (spread_angle : float 0.7853981633974483 :unit "rad" :label "Spread angle" :min 0 :max 3.141592653589793
      :hard_min 0 :hard_max 3.141592653589793)
    (normal_attribute : text "" :label "Normal attribute" :folder "Normals")
    (use_existing_normal : bool true :label "Use existing normal" :folder "Normals")

@@ -190,6 +190,7 @@
 (defnode sop/attribute_composite :label "Attribute Composite" :category ["Attribute" "Transfer"]
   :validate (ac_valid point_attributes vertex_attributes primitive_attributes detail_attributes weights)
   :code "E_PARAM" :message "sop/attribute_composite: invalid attribute pattern or layer weights"
+  :description "Composite matching attributes from weighted geometry layers."
   [(input : geometry)
    (layer1 : geometry :required false)
    (layer2 : geometry :required false)

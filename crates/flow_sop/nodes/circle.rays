@@ -90,9 +90,10 @@
                   segments arc start_angle end_angle orientation
                   [horizontal_x horizontal_y horizontal_z] [vertical_x vertical_y vertical_z])
     :code "E_PARAM" :message "sop/circle: invalid parameters"
-    [(arc : text "Closed" :label "Arc" :choices ["Closed" "Open arc" "Chord closed" "Sliced"])
-     (start_angle : float 0.0 :label "Start angle" :folder "Arc" :min -6.283185 :max 6.283185)
-     (end_angle : float 6.283185307179586 :label "End angle" :folder "Arc" :min -6.283185 :max 6.283185)
+    :description "Create a polygon circle, arc or ellipse in a chosen plane."
+  [(arc : text "Closed" :label "Arc" :choices ["Closed" "Open arc" "Chord closed" "Sliced"])
+     (start_angle : float 0.0 :label "Start angle" :folder "Arc" :min -6.283185 :max 6.283185 :unit "rad")
+     (end_angle : float 6.283185307179586 :label "End angle" :folder "Arc" :min -6.283185 :max 6.283185 :unit "rad")
      (orientation : text "XZ" :label "Orientation" :choices ["XZ" "XY" "YZ" "Custom axes"])
      (horizontal_x : float 1.0 :label "Horizontal X" :min -1 :max 1 :vec3 ["horizontal" 0])
      (horizontal_y : float 0.0 :label "Horizontal Y" :min -1 :max 1 :vec3 ["horizontal" 1])
@@ -100,16 +101,16 @@
      (vertical_x : float 0.0 :label "Vertical X" :min -1 :max 1 :vec3 ["vertical" 0])
      (vertical_y : float 0.0 :label "Vertical Y" :min -1 :max 1 :vec3 ["vertical" 1])
      (vertical_z : float 1.0 :label "Vertical Z" :min -1 :max 1 :vec3 ["vertical" 2])
-     (radius : float 1.0 :label "Auto radius" :min 0.01 :max 10 :hard_min 0)
+     (radius : float 1.0 :label "Auto radius" :min 0.01 :max 10 :hard_min 0 :unit "m")
      (radius_x_mode : text "Explicit" :label "Radius X mode" :choices ["Explicit" "Auto"])
      (radius_y_mode : text "Explicit" :label "Radius Y mode" :choices ["Explicit" "Auto"])
      (reverse : bool false :label "Reverse")
-     (center_x : float 0.0 :label "Center X" :folder "Transform" :min -10 :max 10 :vec3 ["center" 0])
-     (center_y : float 0.0 :label "Center Y" :folder "Transform" :min -10 :max 10 :vec3 ["center" 1])
-     (center_z : float 0.0 :label "Center Z" :folder "Transform" :min -10 :max 10 :vec3 ["center" 2])
-     (radius_x : float 1.0 :label "Radius X" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true)
-     (radius_y : float 1.0 :label "Radius Y" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true)
-     (rotation : float 0.0 :label "Rotation" :folder "Transform" :min -3.14159 :max 3.14159)
+     (center_x : float 0.0 :label "Center X" :folder "Transform" :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+     (center_y : float 0.0 :label "Center Y" :folder "Transform" :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+     (center_z : float 0.0 :label "Center Z" :folder "Transform" :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+     (radius_x : float 1.0 :label "Radius X" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true :unit "m")
+     (radius_y : float 1.0 :label "Radius Y" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true :unit "m")
+     (rotate : float 0.0 :label "Rotation" :folder "Transform" :min -3.14159 :max 3.14159 :unit "rad")
      (uniform_scale : float 1.0 :label "Uniform scale" :folder "Size" :min 0.01 :max 10 :hard_min 0)
      (segments : int 48 :label "Segments" :min 3 :max 256 :hard_min 3 :primary true)]
     (let* [frame (circle_frame
@@ -119,10 +120,10 @@
                (cond (equal? orientation "XY") [0.0 1.0 0.0]
                      (equal? orientation "XZ") [0.0 0.0 1.0]
                      (equal? orientation "YZ") [0.0 0.0 1.0] :else [vertical_x vertical_y vertical_z])
-               rotation)]
+               rotate)]
       (if (not (equal? frame.failure ""))
         (error "invalid_parameter" "circle could not produce valid geometry"
-          :cause (str "circle [invalid_parameter]: Rdk.Plane_generators.circle: " frame.failure))
+          :cause (str "circle [invalid_parameter]: sop/circle: " frame.failure))
         (let* [h frame.horizontal v frame.vertical
                effective_x (* (if (equal? radius_x_mode "Auto") radius radius_x) uniform_scale)
                effective_y (* (if (equal? radius_y_mode "Auto") radius radius_y) uniform_scale)
@@ -167,7 +168,7 @@
                checked_rows (error_rows invalid_rows
                  (fn [(index : int)] {:code "invalid_parameter"
                    :message "circle could not produce valid geometry"
-                   :cause (list (str "circle [invalid_parameter]: Rdk.Plane_generators.circle: generated point "
+                   :cause (list (str "circle [invalid_parameter]: sop/circle: generated point "
                      index " is not finite"))}) :policy "first")]
           (sop/mesh_planes
             :points {:x (if sliced (array/concat plane_x (array/float 1 center_x)) plane_x)

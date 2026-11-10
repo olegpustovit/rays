@@ -100,6 +100,7 @@
       (sop/with_group acc (exact mask) :name name :owner owner))))
 
 (defnode sop/edge_divide :label "Edge Divide" :category ["Topology" "Edge"]
+  :description "Insert points and corners along selected edges and interpolate attributes."
   [(in0 : geometry)
    (group : text "" :label "Edge group")
    (divisions : int 2 :label "Divisions" :min 1 :max 64 :hard_min 1)

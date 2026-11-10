@@ -15,6 +15,7 @@
   (unitize_error "missing_group" (str "uv_unitize could not find " kind " group " (text/repr name))))
 
 (defnode sop/uv_unitize :label "UV Unitize" :category ["UV" "Layout"]
+  :description "Normalize UV bounds per primitive or connected island."
   [(in0 : geometry)
    (mode : text "Per face" :label "Mode" :choices ["Per face" "Islands"])
    (name : text "uv" :label "UV attribute")

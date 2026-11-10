@@ -30,7 +30,7 @@
 (defn pr_fract :context value [(x : float)] (- x (float_floor x)))
 (defn pr_ix :context value [(n : int)] (array/range n :type int))
 
-; ---- quaternions: normalized like copy_frames' set_quaternion, rows of the rotation matrix
+; ---- quaternions: normalized like copy_frames' set_quaternion, rows of the rotate matrix
 (defn pr_qn :context value [(q : vec4)]
   (let* [scale (max (abs q.x) (max (abs q.y) (max (abs q.z) (abs q.w))))
          live (> scale 0.0)
@@ -180,6 +180,7 @@
                                               (not (equal? source_point_attribute source_index_attribute))))))
                            (and (pr_pattern_ok copy_point_attributes) (pr_pattern_ok transform_attributes)))))
   :code "E_PARAM" :message "sop/point_replicate: invalid parameters"
+  :description "Replicate points or custom shapes using source point frames and counts."
   [(input : geometry)
    (custom_shape : geometry :required false)
    (group : text "" :label "Point group")
@@ -190,15 +191,15 @@
    (seed : int 0 :label "Seed" :folder ["Random"] :min 0 :max 9999)
    (id_attribute : text "id" :label "ID attribute" :folder ["Random"])
    (shape : text "Sphere" :label "Shape" :folder ["Shape"] :choices ["Point" "Box" "Sphere" "Disk" "Line" "Custom"])
-   (center_x : float 0.0 :label "Center X" :folder ["Shape" "Center"] :min -10 :max 10 :vec3 ["center" 0])
-   (center_y : float 0.0 :label "Center Y" :folder ["Shape" "Center"] :min -10 :max 10 :vec3 ["center" 1])
-   (center_z : float 0.0 :label "Center Z" :folder ["Shape" "Center"] :min -10 :max 10 :vec3 ["center" 2])
-   (size_x : float 1.0 :label "Size X" :folder ["Shape" "Size"] :min 0 :max 10 :hard_min 0 :vec3 ["size" 0])
-   (size_y : float 1.0 :label "Size Y" :folder ["Shape" "Size"] :min 0 :max 10 :hard_min 0 :vec3 ["size" 1])
-   (size_z : float 1.0 :label "Size Z" :folder ["Shape" "Size"] :min 0 :max 10 :hard_min 0 :vec3 ["size" 2])
-   (orientation_x : float 0.0 :label "Rotate X" :folder ["Shape" "Orientation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["orientation" 0])
-   (orientation_y : float 0.0 :label "Rotate Y" :folder ["Shape" "Orientation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["orientation" 1])
-   (orientation_z : float 0.0 :label "Rotate Z" :folder ["Shape" "Orientation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["orientation" 2])
+   (center_x : float 0.0 :label "Center X" :folder ["Shape" "Center"] :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+   (center_y : float 0.0 :label "Center Y" :folder ["Shape" "Center"] :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+   (center_z : float 0.0 :label "Center Z" :folder ["Shape" "Center"] :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+   (size_x : float 1.0 :label "Size X" :folder ["Shape" "Size"] :min 0 :max 10 :hard_min 0 :vec3 ["size" 0] :unit "m")
+   (size_y : float 1.0 :label "Size Y" :folder ["Shape" "Size"] :min 0 :max 10 :hard_min 0 :vec3 ["size" 1] :unit "m")
+   (size_z : float 1.0 :label "Size Z" :folder ["Shape" "Size"] :min 0 :max 10 :hard_min 0 :vec3 ["size" 2] :unit "m")
+   (orientation_x : float 0.0 :unit "rad" :label "Rotate X" :folder ["Shape" "Orientation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["orientation" 0])
+   (orientation_y : float 0.0 :unit "rad" :label "Rotate Y" :folder ["Shape" "Orientation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["orientation" 1])
+   (orientation_z : float 0.0 :unit "rad" :label "Rotate Z" :folder ["Shape" "Orientation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["orientation" 2])
    (uniform_scale : float 1.0 :label "Uniform scale" :folder ["Shape"] :min 0 :max 10 :hard_min 0)
    (quasi_stratified : bool false :label "Quasi-stratified" :folder ["Random"])
    (velocity_stretch : text "None" :label "Velocity stretch" :folder ["Velocity"] :choices ["None" "Scaled velocity" "Velocity only"])
@@ -347,7 +348,7 @@
              sc (if has_scale (sop/attr input "scale" :owner "point" :type vec3) (array/vec3 pts [1.0 1.0 1.0]))
              svec (if has_matrix (array/vec3 pts [1.0 1.0 1.0])
                     (exact (map (fn [(a : float) (b : vec3)] [(* a b.x) (* a b.y) (* a b.z)]) ps sc)))
-             ; ---- frame rotation: transform | orient | N/v with up
+             ; ---- frame rotate: transform | orient | N/v with up
              o1 (if (int/eq mw 9) 3 4)
              o2 (if (int/eq mw 9) 6 8)
              mr0 (if has_matrix (exact (map (fn [(i : int)] (let* [f (array/nth moffs i)] [(array/nth mvals (int/add f 0)) (array/nth mvals (int/add f (int/add 0 1))) (array/nth mvals (int/add f (int/add 0 2)))])) idx)) svec)
@@ -464,7 +465,7 @@
                           [(fma sx noise_amplitude_x q.x) (fma sy noise_amplitude_y q.y) (fma sz noise_amplitude_z q.z)]))
                         srcs qpos))
                       qpos)
-             ; ---- node rotation Rz (Ry Rx), the Mat4.mul fused chains
+             ; ---- node rotate Rz (Ry Rx), the Mat4.mul fused chains
              cxo (cos orientation_x) sxo (sin orientation_x)
              cyo (cos orientation_y) syo (sin orientation_y)
              czo (cos orientation_z) szo (sin orientation_z)

@@ -109,6 +109,7 @@
       0.0)) (array/range (array/count selected) :type int)))))
 
 (defnode sop/edge_relax :label "Edge Relax" :category ["Topology" "Edge"]
+  :description "Relax selected edge lengths toward target lengths with bounded iterations."
   [(source : geometry) (reference : geometry)
    (group_owner : text "Edge" :label "Group type" :choices ["Point" "Vertex" "Primitive" "Edge"])
    (group : text "" :label "Group"

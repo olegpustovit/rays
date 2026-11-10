@@ -73,10 +73,11 @@
     {:bad (not finite) :lengths final.sum}))
 
 (defnode sop/convert_line :label "Convert Line" :category ["Topology" "Curve"]
+  :description "Convert selected edges into polylines and optionally join them into paths."
   [(in0 : geometry)
    (group : text "" :label "Edge group")
    (connect_path : bool false :label "Connect path")
-   (maximum_distance : float 0.001 :label "Maximum distance" :min 0 :max 10 :hard_min 0)
+   (maximum_distance : float 0.001 :unit "m" :label "Maximum distance" :min 0 :max 10 :hard_min 0)
    (connect_only_to_other_end_points : bool false :label "Only other endpoints")
    (make_isolated_loops_closed : bool false :label "Close isolated loops")
    (remove_unused_points : bool false :label "Remove unused points")

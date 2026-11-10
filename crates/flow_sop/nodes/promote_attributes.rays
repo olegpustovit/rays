@@ -5,7 +5,7 @@
 ; Rename/index patterns use text/glob_rewrite_set (whitespace separators, escapes, last matching positive term wins).
 (defn pa_error :context value [(reason : text)]
   (error "invalid_attribute" "attribute_promote could not produce valid geometry"
-    :cause (str "attribute_promote [invalid_attribute]: Rdk.Attribute_ops.promote: " reason)))
+    :cause (str "attribute_promote [invalid_attribute]: sop/promote_attributes: " reason)))
 (defn pa_owner :context value [(raw : text)]
   (case raw "Vertex" "vertex" "Primitive" "primitive" "Detail" "detail" :else "point"))
 (defn pa_count :context sop [(geo : geometry) (owner : text)]
@@ -412,6 +412,7 @@
 (defnode sop/promote_attributes :label "Promote Attributes" :category ["Attribute" "Promote"]
   :validate (pa_valid method_ pattern into_pattern index_pattern)
   :code "E_PARAM" :message "sop/promote_attributes: invalid pattern, rewrite or index request"
+  :description "Reduce and transfer attributes between element owners or pieces."
   [(in0 : geometry)
    (source : text "Point" :label "Source owner" :choices ["Point" "Vertex" "Primitive" "Detail"])
    (destination : text "Primitive" :label "Destination owner" :choices ["Point" "Vertex" "Primitive" "Detail"])

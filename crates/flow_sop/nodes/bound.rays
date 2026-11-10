@@ -2,7 +2,7 @@
 ; of triangles built here) or a UV sphere (sop/uv_sphere) scaled and moved by sop/transform.
 (defn bound_error :context value [(reason : text)]
   (error "invalid_geometry" "bound could not produce valid geometry"
-    :cause (str "bound [invalid_geometry]: Rdk.Bound.bound: " reason)))
+    :cause (str "bound [invalid_geometry]: sop/bound: " reason)))
 (defn bound_finite :context value [(value : vec3)]
   (and (<= (abs value.x) 1.7976931348623157e308)
     (and (<= (abs value.y) 1.7976931348623157e308) (<= (abs value.z) 1.7976931348623157e308))))
@@ -119,6 +119,7 @@
                 (and (and (and (>= upper_y 0.0) (<= upper_y 1.7976931348623157e308)) (and (>= upper_z 0.0) (<= upper_z 1.7976931348623157e308)))
                   (and (>= minimum_radius 0.0) (<= minimum_radius 1.7976931348623157e308))))
   :code "E_PARAM" :message "sop/bound: padding and minimum radius must be finite and non-negative"
+  :description "Create a bounding box or sphere around selected input points."
   [(in0 : geometry)
    (group_owner : text "Point" :label "Group type" :choices ["Point" "Vertex" "Primitive" "Edge"])
    (group : text "" :label "Group")
@@ -128,13 +129,13 @@
    (divisions_z : int 1 :label "Z divisions" :folder ["Box"] :min 1 :max 64 :hard_min 1)
    (segments : int 32 :label "Segments" :folder ["Sphere"] :min 3 :max 256 :hard_min 3)
    (rings : int 16 :label "Rings" :folder ["Sphere"] :min 2 :max 256 :hard_min 2)
-   (minimum_radius : float 0.0 :label "Minimum radius" :folder ["Sphere"] :min 0 :max 10 :hard_min 0)
-   (lower_x : float 0.0 :label "Lower X" :folder ["Padding" "Lower"] :min -10 :max 10 :vec3 ["lower" 0])
-   (lower_y : float 0.0 :label "Lower Y" :folder ["Padding" "Lower"] :min -10 :max 10 :vec3 ["lower" 1])
-   (lower_z : float 0.0 :label "Lower Z" :folder ["Padding" "Lower"] :min -10 :max 10 :vec3 ["lower" 2])
-   (upper_x : float 0.0 :label "Upper X" :folder ["Padding" "Upper"] :min -10 :max 10 :vec3 ["upper" 0])
-   (upper_y : float 0.0 :label "Upper Y" :folder ["Padding" "Upper"] :min -10 :max 10 :vec3 ["upper" 1])
-   (upper_z : float 0.0 :label "Upper Z" :folder ["Padding" "Upper"] :min -10 :max 10 :vec3 ["upper" 2])
+   (minimum_radius : float 0.0 :unit "m" :label "Minimum radius" :folder ["Sphere"] :min 0 :max 10 :hard_min 0)
+   (lower_x : float 0.0 :unit "m" :label "Lower X" :folder ["Padding" "Lower"] :min -10 :max 10 :vec3 ["lower" 0])
+   (lower_y : float 0.0 :unit "m" :label "Lower Y" :folder ["Padding" "Lower"] :min -10 :max 10 :vec3 ["lower" 1])
+   (lower_z : float 0.0 :unit "m" :label "Lower Z" :folder ["Padding" "Lower"] :min -10 :max 10 :vec3 ["lower" 2])
+   (upper_x : float 0.0 :unit "m" :label "Upper X" :folder ["Padding" "Upper"] :min -10 :max 10 :vec3 ["upper" 0])
+   (upper_y : float 0.0 :unit "m" :label "Upper Y" :folder ["Padding" "Upper"] :min -10 :max 10 :vec3 ["upper" 1])
+   (upper_z : float 0.0 :unit "m" :label "Upper Z" :folder ["Padding" "Upper"] :min -10 :max 10 :vec3 ["upper" 2])
    (bounds_group : text "" :label "Bounds group" :folder ["Output"])
    (center_attribute : text "" :label "Center attribute" :folder ["Output"]
      :validate (not (equal? (text/trim center_attribute) "P"))

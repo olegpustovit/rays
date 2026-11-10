@@ -178,6 +178,7 @@
                      (and (not (text/blank? piece_attribute)) (not (equal? piece_attribute "P"))))
                  (and (not (equal? source_primitive_attribute "P")) (not (equal? piece_output_attribute "P"))))
   :code "E_PARAM" :message "sop/extract_centroid: piece, source primitive and output attribute names cannot be P"
+  :description "Create centroid points for the detail, primitives or attribute pieces."
   [(in0 : geometry)
    (run_over : text "Detail" :label "Run over" :choices ["Detail" "Primitives" "Point pieces" "Primitive pieces"])
    (piece_attribute : text "piece" :label "Piece attribute")

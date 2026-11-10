@@ -99,6 +99,7 @@
     (and (equal? (nth row 0) "edge") (not (text/blank? (nth row 3)))) "native edges cannot match by attribute"
     :else (text/glob_error (nth row 1))))
 (defnode sop/group_copy :label "Group Copy" :category ["Group" "Transfer"]
+  :description "Copy source groups through index or attribute-based element mappings."
   [(source : geometry)
    (target : geometry)
    (use_rules : bool false :label "Use rules")

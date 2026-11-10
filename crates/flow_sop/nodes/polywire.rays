@@ -3,9 +3,10 @@
   :validate (pw_valid radius first_segment_scale last_segment_scale maximum_joint_scale u_min u_max v_min v_max
     sides segments max_valence use_segment_scales maximum_joint_scale_attribute prevent_joint_buckling)
   :code "E_PARAM" :message "sop/polywire: numeric values must be finite"
+  :description "Build polygon tubes around curves with configurable joints and end scales."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
-   (radius : float 0.1 :label "Radius" :min 0.0001 :max 10 :hard_min 0)
+   (radius : float 0.1 :label "Radius" :min 0.0001 :max 10 :hard_min 0 :unit "m")
    (use_sides : bool true :label "Set divisions")
    (sides : int 8 :label "Divisions" :min 3 :max 256 :hard_min 3)
    (divisions_attribute : text "" :label "Divisions attribute" :folder ["Overrides"])

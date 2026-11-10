@@ -2,7 +2,7 @@
 ; where u_twice is twice the (unwrapped) segment index plus one for the pole-triangle apex.
 (defn uvs_error :context value [(reason : text)]
   (error "invalid_parameter" "uv_sphere could not produce valid geometry"
-    :cause (str "uv_sphere [invalid_parameter]: Rdk.Uv_sphere.uv_sphere: " reason)))
+    :cause (str "uv_sphere [invalid_parameter]: sop/uv_sphere: " reason)))
 (defn uvs_cmul :context value [(left : int) (right : int) (limit : int)]
   (cond (or (int/lt left 0) (int/lt right 0)) -1
         (int/eq left 0) 0
@@ -58,6 +58,7 @@
 (defnode sop/uv_sphere :label "UV Sphere" :category ["Create" "Primitive"]
   :validate (not (and (equal? connectivity "Points") (and (equal? normals_mode "Explicit") (equal? normals "Vertex"))))
   :code "E_PARAM" :message "sop/uv_sphere: point output cannot carry vertex normals"
+  :description "Create a latitude-longitude sphere with normals and texture coordinates."
   [(connectivity : text "Triangles" :label "Connectivity"
      :choices ["Triangles" "Alternating triangles" "Quads" "Rows" "Columns" "Rows and columns" "Points"])
    (normals_mode : text "Explicit" :label "Normals mode" :choices ["Explicit" "Auto"])
@@ -68,9 +69,9 @@
    (axis_x : float 0.0 :label "Axis X" :folder ["Transform" "Axis"] :min -1 :max 1 :vec3 ["axis" 0])
    (axis_y : float 1.0 :label "Axis Y" :folder ["Transform" "Axis"] :min -1 :max 1 :vec3 ["axis" 1])
    (axis_z : float 0.0 :label "Axis Z" :folder ["Transform" "Axis"] :min -1 :max 1 :vec3 ["axis" 2])
-   (rotation_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
+   (rotate_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
      :choices ["XYZ" "XZY" "YXZ" "YZX" "ZXY" "ZYX"])
-   (base_radius : float 1.0 :label "Base radius" :folder ["Size"] :min 0.01 :max 10 :hard_min 0
+   (base_radius : float 1.0 :unit "m" :label "Base radius" :folder ["Size"] :min 0.01 :max 10 :hard_min 0
      :validate (and (> base_radius 0.0) (and (> radius_x 0.0) (and (> radius_y 0.0) (and (> radius_z 0.0) (> uniform_scale 0.0)))))
      :code "E_PARAM" :message "sop/uv_sphere: radii and scale must be positive")
    (radius_x_mode : text "Explicit" :label "Radius X mode" :folder ["Size"] :choices ["Explicit" "Auto"])
@@ -83,16 +84,16 @@
      :code "E_PARAM" :message "sop/uv_sphere: scaled radii must be finite and positive")
    (unique_points_per_pole : bool false :label "Unique pole points" :folder ["Topology"])
    (triangular_poles : bool true :label "Triangular poles" :folder ["Topology"])
-   (radius_x : float 1.0 :label "Radius X" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["radius" 0])
-   (radius_y : float 1.0 :label "Radius Y" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["radius" 1])
-   (radius_z : float 1.0 :label "Radius Z" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["radius" 2])
+   (radius_x : float 1.0 :label "Radius X" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["radius" 0] :unit "m")
+   (radius_y : float 1.0 :label "Radius Y" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["radius" 1] :unit "m")
+   (radius_z : float 1.0 :label "Radius Z" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true :vec3 ["radius" 2] :unit "m")
    (uniform_scale : float 1.0 :label "Uniform scale" :folder ["Size"] :min 0.01 :max 10 :hard_min 0)
-   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0])
-   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1])
-   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2])
-   (rotation_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 0])
-   (rotation_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 1])
-   (rotation_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 2])
+   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+   (rotate_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 0] :unit "rad")
+   (rotate_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 1] :unit "rad")
+   (rotate_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 2] :unit "rad")
    (segments : int 48 :label "Segments" :folder ["Resolution"] :min 3 :max 256 :hard_min 3 :primary true
      :validate (not (or (int/eq segments 9223372036854775807) (int/eq rings 9223372036854775807)))
      :code "E_PARAM" :message "sop/uv_sphere: output cardinality overflows")
@@ -121,20 +122,20 @@
          rz_checked (uvs_scaled radius_z_mode radius_z base_radius uniform_scale)
          rx rx_checked.value ry ry_checked.value rz rz_checked.value
          identity_frame (and (equal? orientation "Y axis")
-           (and (= rotation_x 0.0) (and (= rotation_y 0.0) (and (= rotation_z 0.0)
+           (and (= rotate_x 0.0) (and (= rotate_y 0.0) (and (= rotate_z 0.0)
            (and (= center_x 0.0) (and (= center_y 0.0) (= center_z 0.0)))))))
          compatible_normals (and identity_frame (and (equal? connectivity "Triangles")
            (and (not unique_points_per_pole) (and triangular_poles (and (equal? normal_mode "Point")
            (and (not has_uv) (and (= uniform_scale 1.0)
            (and (= rx radius) (and (= ry radius) (= rz radius))))))))))
-         rotation_zero (and (= rotation_x 0.0) (and (= rotation_y 0.0) (= rotation_z 0.0)))
+         rotation_zero (and (= rotate_x 0.0) (and (= rotate_y 0.0) (= rotate_z 0.0)))
          frame0 (cond (equal? orientation "X axis") {:r [0.0 1.0 0.0] :p [1.0 0.0 0.0] :t [0.0 0.0 -1.0]}
                       (equal? orientation "Y axis") {:r [1.0 0.0 0.0] :p [0.0 1.0 0.0] :t [0.0 0.0 1.0]}
                       (equal? orientation "Z axis") {:r [1.0 0.0 0.0] :p [0.0 0.0 1.0] :t [0.0 -1.0 0.0]}
                       :else (uvs_custom_frame [axis_x axis_y axis_z]))
          matrix (if rotation_zero (mat4_identity)
-           (let* [mx (mat4_rotation_x rotation_x) my (mat4_rotation_y rotation_y) mz (mat4_rotation_z rotation_z)]
-             (case rotation_order
+           (let* [mx (mat4_rotation_x rotate_x) my (mat4_rotation_y rotate_y) mz (mat4_rotation_z rotate_z)]
+             (case rotate_order
                "XYZ" (mat4_mul mz (mat4_mul my mx))
                "XZY" (mat4_mul my (mat4_mul mz mx))
                "YXZ" (mat4_mul mz (mat4_mul mx my))

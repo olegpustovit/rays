@@ -2,7 +2,7 @@
 ; declares the Frame cache dependency as native does.
 (defn fade_fail :context value [(reason : text)]
   (error "invalid_attribute_fade" "attribute_fade could not produce valid geometry"
-    :cause (str "attribute_fade [invalid_attribute_fade]: Rdk.Attribute_fade.attribute_fade: " reason)))
+    :cause (str "attribute_fade [invalid_attribute_fade]: sop/attribute_fade: " reason)))
 ; Per-point scalar from a float or int point attribute of geo, or a constant when absent or unnamed.
 (defn fade_scalar :context sop [(geo : geometry) (name : text) (label : text) (fallback : float)]
   (cond
@@ -23,6 +23,7 @@
                            (and (>= fade_in 0.0) (and (>= fade_hold 0.0) (>= fade_out 0.0))))
                       true))
   :code "E_PARAM" :message "sop/attribute_fade: invalid fade attribute, durations or ramps"
+  :description "Animate attribute values with per-point fade and retiming controls."
   [(input : geometry)
    (start_source : geometry :required false)
    (hold_source : geometry :required false)

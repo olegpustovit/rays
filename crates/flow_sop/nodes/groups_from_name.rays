@@ -5,6 +5,7 @@
   (error "invalid_group" "groups_from_name could not produce valid geometry"
     :cause (str "groups_from_name [invalid_group]: " reason)))
 (defnode sop/groups_from_name :label "Groups from Name" :category ["Group" "Convert"]
+  :description "Create groups from an element name attribute."
   [(in0 : geometry)
    (owner : text "Primitive" :label "Attribute owner" :choices ["Point" "Vertex" "Primitive"])
    (attribute : text "name" :label "Name attribute")

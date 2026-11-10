@@ -22,6 +22,7 @@
     (text/table_decode raw))))
 
 (defnode sop/group_rename :label "Group Rename" :category ["Group" "Edit"]
+  :description "Rename groups using ordered pattern and replacement rules."
   [(in0 : geometry)
    (rules : text "" :label "Rules (owner, pattern, replacement, conflict)" :kind encoded
      :normalize group_rename_normalize)]

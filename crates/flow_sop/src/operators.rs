@@ -142,7 +142,7 @@ fn validate_args(args: &Args) -> Result<(), Diagnostic> {
 
 fn attr() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/attr".into(),
         ctx: context::sop(),
         signature: sig(&[("geometry", ty::geometry()), ("attribute", Ty::Text)], &[("owner", Ty::Text), ("type", Ty::Text)]),
@@ -184,7 +184,7 @@ fn checked_attribute_type(args: &Named) -> Result<Ty, Diagnostic> {
 
 fn attr_checked() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/attr_checked".into(),
         out: constant(rec(&[("values", ar(Ty::Vec3)), ("valid", ar(Ty::Int))])),
         out_args: Some(Arc::new(|args| checked_attribute_type(args))),
@@ -220,7 +220,7 @@ fn planes_type() -> Ty {
 fn attr_planes() -> Op {
     let Ty::Record(fields) = planes_type() else { unreachable!("planes_type is a record") };
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/attr_planes".into(),
         signature: sig(&[("geometry", ty::geometry()), ("attribute", Ty::Text)], &[("owner", Ty::Text)]),
         out: constant(planes_type()),
@@ -237,7 +237,7 @@ fn with_attr() -> Op {
     signature.pos.push(("values".into(), Ty::Any));
     signature.kw.extend(pairs(&[("selection", ar(Ty::Int)), ("default", Ty::Any), ("when", Ty::Bool)]));
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/with_attr".into(),
         signature,
         out: constant(ty::geometry()),
@@ -293,7 +293,7 @@ fn guarded_body(name: &'static str) -> Body {
 
 fn has_attr() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/has_attr".into(),
         out: constant(Ty::Bool),
         out_args: Some(Arc::new(|args| {
@@ -309,7 +309,7 @@ fn has_attr() -> Op {
 
 fn delete_attr() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/delete_attr".into(),
         signature: sig(&[("geometry", ty::geometry()), ("attribute", Ty::Text)], &[("owner", Ty::Text), ("when", Ty::Bool)]),
         out: constant(ty::geometry()),
@@ -345,7 +345,7 @@ fn strings(items: &[&str]) -> Vec<String> {
 
 fn count() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/count".into(),
         category: "Topology".into(),
         signature: sig(&[("geometry", ty::geometry()), ("element", Ty::Text)], &[]),
@@ -369,7 +369,7 @@ fn int_fields(names: &[&str]) -> Vec<(Symbol, Ty)> {
 fn edges_like(name: &'static str, components: &[&str]) -> Op {
     let fields = int_fields(components);
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: name.into(),
         signature: sig(&[("geometry", ty::geometry())], &[]),
         out: constant(Ty::Record(fields.clone())),
@@ -416,7 +416,7 @@ fn triangles() -> Op {
 fn components() -> Op {
     let fields = vec![("id".into(), ar(Ty::Int)), ("count".into(), Ty::Int)];
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/components".into(),
         signature: sig(&[("geometry", ty::geometry())], &[("over", Ty::Text), ("mask", ar(Ty::Int)), ("seams", ar(Ty::Int))]),
         out: constant(Ty::Record(fields.clone())),
@@ -442,7 +442,7 @@ fn rows_type() -> Ty {
 fn graph_op(name: &'static str, pos: &[(&str, Ty)], kw: &[(&str, Ty)], fields: &[(&str, Ty)]) -> Op {
     let fields = pairs(fields);
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: name.into(),
         category: "Topology".into(),
         signature: sig(pos, kw),
@@ -523,7 +523,7 @@ fn mesh() -> Op {
     let fields = mesh_fields();
     let names: Vec<Symbol> = fields.iter().map(|(n, _)| symbol::intern(n)).collect();
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/mesh".into(),
         signature: sig(&[], &fields),
         out: constant(ty::geometry()),
@@ -545,7 +545,7 @@ fn mesh_planes() -> Op {
     let names: Vec<Symbol> = fields.iter().map(|(n, _)| symbol::intern(n)).collect();
     let needs = needs_all("sop/mesh_planes", names.clone());
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/mesh_planes".into(),
         signature: sig(&[], &fields),
         out_args: Some(Arc::new(move |args| {
@@ -590,7 +590,7 @@ fn group_check(args: &Args) -> Result<(), Diagnostic> {
 
 fn group() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/group".into(),
         category: "Groups".into(),
         signature: sig(&[("geometry", ty::geometry())], &[("name", Ty::Text), ("owner", Ty::Text), ("as_owner", Ty::Text)]),
@@ -619,7 +619,7 @@ fn group_order() -> Op {
     let mut signature = base.signature.clone();
     signature.kw.retain(|(n, _)| n != "as_owner");
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/group_order".into(),
         out: constant(group_order_type()),
         signature,
@@ -632,7 +632,7 @@ fn group_order() -> Op {
 fn group_names() -> Op {
     let base = group();
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/group_names".into(),
         choices: without_as_owner(&base.choices),
         signature: sig(&[("geometry", ty::geometry()), ("pattern", Ty::Text)], &[("owner", Ty::Text)]),
@@ -661,7 +661,7 @@ fn group_names() -> Op {
 fn group_entries() -> Op {
     let fields = vec![("owners".into(), ar(Ty::Text)), ("names".into(), ar(Ty::Text))];
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/group_entries".into(),
         signature: sig(&[("geometry", ty::geometry()), ("pattern", Ty::Text)], &[("owner", Ty::Text)]),
         out: constant(Ty::Record(fields.clone())),
@@ -678,7 +678,7 @@ fn with_group() -> Op {
     signature.pos = pairs(&[("geometry", ty::geometry()), ("values", ar(Ty::Int))]);
     signature.kw.push(("order".into(), Ty::Any));
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/with_group".into(),
         signature,
         out: constant(ty::geometry()),
@@ -723,7 +723,7 @@ fn context_source(what: &'static str) -> Body {
 
 fn context_seed() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/context_seed".into(),
         ctx: context::value(),
         category: "Random".into(),
@@ -748,7 +748,7 @@ fn context_seed() -> Op {
 
 fn value_context(name: &'static str, category: &str, out: Ty, what: &'static str) -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: name.into(),
         ctx: context::value(),
         category: category.into(),
@@ -804,7 +804,7 @@ fn rewrite_check(args: &Args, parse: &dyn Fn(&str) -> Result<(), Diagnostic>, co
 
 fn rename_attr() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/rename_attr".into(),
         category: "Metadata".into(),
         signature: sig(
@@ -825,7 +825,7 @@ fn rename_attr() -> Op {
 
 fn rename_group() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/rename_group".into(),
         choices: vec![
             ("owner".into(), strings(&["point", "vertex", "primitive", "edge", "any"])),
@@ -850,7 +850,7 @@ fn swap_attr() -> Op {
     signature.pos = pairs(&[("geometry", ty::geometry()), ("source", Ty::Text), ("destination", Ty::Text)]);
     signature.kw = pairs(&[("owner", Ty::Text), ("method", Ty::Text)]);
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/swap_attr".into(),
         signature,
         choices: vec![
@@ -879,7 +879,7 @@ fn swap_attr() -> Op {
 
 fn delete_attrs() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/delete_attrs".into(),
         category: "Metadata".into(),
         signature: sig(
@@ -916,7 +916,7 @@ fn delete_attrs() -> Op {
 
 fn delete_group() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/delete_group".into(),
         signature: sig(&[("geometry", ty::geometry()), ("pattern", Ty::Text)], &[("owner", Ty::Text), ("unused", Ty::Bool)]),
         choices: vec![("owner".into(), strings(&["point", "vertex", "primitive", "edge", "any"]))],
@@ -945,7 +945,7 @@ fn attr_type() -> Op {
     let mut signature = base.signature.clone();
     signature.kw = pairs(&[("owner", Ty::Text)]);
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/attr_type".into(),
         category: "Metadata".into(),
         signature,
@@ -961,7 +961,7 @@ fn attr_names() -> Op {
     let mut signature = base.signature.clone();
     signature.pos = pairs(&[("geometry", ty::geometry()), ("pattern", Ty::Text)]);
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/attr_names".into(),
         signature,
         out: constant(ar(Ty::Text)),
@@ -982,7 +982,7 @@ fn attr_entries() -> Op {
     signature.pos = pairs(&[("geometry", ty::geometry())]);
     let fields = vec![("name".into(), ar(Ty::Text)), ("type".into(), ar(Ty::Text)), ("owner".into(), ar(Ty::Text))];
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/attr_entries".into(),
         signature,
         out: constant(Ty::Record(fields.clone())),
@@ -994,7 +994,7 @@ fn attr_entries() -> Op {
 
 fn glob_error() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "text/glob_error".into(),
         ctx: context::value(),
         category: "Text".into(),
@@ -1021,7 +1021,7 @@ fn pattern_replacement_text() -> Signature {
 
 fn glob_rewrite_error() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "text/glob_rewrite_error".into(),
         signature: pattern_replacement(),
         body: Arc::new(|_, _, args| {
@@ -1037,7 +1037,7 @@ fn glob_rewrite_error() -> Op {
 
 fn glob_rewrite_set_error() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "text/glob_rewrite_set_error".into(),
         signature: pattern_replacement(),
         body: Arc::new(|_, _, args| {
@@ -1063,7 +1063,7 @@ fn pure_source(ty: Ty, name: &str, args: &Args, run: &dyn Fn() -> Result<Value, 
 
 fn glob_rewrite_op(name: &'static str, rewrite: fn(&str, &str, &str) -> Result<String, Diagnostic>) -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: name.into(),
         signature: pattern_replacement_text(),
         body: Arc::new(move |_, _, args| {
@@ -1085,7 +1085,7 @@ fn glob_rewrite_set() -> Op {
 
 fn glob_rewrite_set_matches() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "text/glob_rewrite_set_matches".into(),
         signature: pattern_replacement_text(),
         out: constant(Ty::Bool),
@@ -1101,7 +1101,7 @@ fn glob_rewrite_set_matches() -> Op {
 
 fn glob_literal() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "text/glob_literal".into(),
         signature: sig(&[("text", Ty::Text)], &[]),
         body: Arc::new(|_, _, args| {
@@ -1113,7 +1113,7 @@ fn glob_literal() -> Op {
 
 fn group_name_valid() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "text/group_name_valid".into(),
         signature: sig(&[("text", Ty::Text)], &[]),
         out: constant(Ty::Bool),
@@ -1128,7 +1128,7 @@ fn group_name_valid() -> Op {
 
 fn group_name_forced() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "text/group_name_forced".into(),
         signature: sig(&[("text", Ty::Text)], &[]),
         body: Arc::new(|_, _, args| {
@@ -1142,7 +1142,7 @@ fn group_name_forced() -> Op {
 
 fn with_planes() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/with_planes".into(),
         signature: sig(&[("geometry", ty::geometry()), ("attribute", Ty::Text), ("planes", planes_type())], &[("owner", Ty::Text)]),
         out_args: None,
@@ -1159,7 +1159,7 @@ fn mix_type() -> Ty {
 
 fn remap() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/remap".into(),
         out_args: None,
         signature: sig(
@@ -1195,7 +1195,7 @@ fn remap() -> Op {
 
 fn concat() -> Op {
     Op {
-        doc: String::new(), example: String::new(),
+        doc: "".into(), example: "".into(),
         name: "sop/concat".into(),
         signature: sig(
             &[("sources", Ty::List(Box::new(ty::geometry())))],
@@ -1262,8 +1262,8 @@ static ALL: LazyLock<Vec<Op>> = LazyLock::new(|| {
         group_name_forced(),
     ];
     for operator in &mut ops {
-        operator.doc = flow_check::registry::description(&operator.name, &operator.signature);
-        operator.example = flow_check::registry::example(&operator.name, &operator.signature);
+        operator.doc = flow_check::registry::description(&operator.name, &operator.signature).into();
+        operator.example = flow_check::registry::example(&operator.name, &operator.signature).into();
     }
     ops
 });
@@ -1339,9 +1339,9 @@ mod tests {
 
     #[test]
     fn counts_and_checks_refuse_bad_arguments() {
-        let bad = vec![("geometry".into(), Value::No_geo), ("element".into(), text("faces"))];
+        let bad = vec![("geometry".into(), Value::NoGeo), ("element".into(), text("faces"))];
         assert_eq!((find("sop/count").check)(&bad).err().unwrap().code, "E_TOPOLOGY_COUNT");
-        let remap = vec![("points".into(), Value::No_geo)];
+        let remap = vec![("points".into(), Value::NoGeo)];
         assert_eq!((find("sop/remap").check)(&remap).err().unwrap().message, "sop/remap needs :vertices or :vertex_mix.");
         let mesh = (find("sop/mesh").check)(&[]).err().unwrap();
         assert_eq!(mesh.message, "sop/mesh needs :points.");
@@ -1486,7 +1486,7 @@ mod parity {
         random_proof(&mapped,&program,&live,&expected);
     }
     fn rand_indices(seed:i64,primitive:bool){
-        let indices=indices(LANES);let input=Value::Int_array(Arc::new(indices.clone()));
+        let indices=indices(LANES);let input=Value::IntArray(Arc::new(indices.clone()));
         let(mapped,program,live)=if primitive{
             let(m,p)=map(Some(seed),Ty::Int,input,"(rand/at (int/add seed (frame/index)) i)");(m,p,input::at_time(0.))
         }else if seed<0{
@@ -1541,7 +1541,7 @@ mod parity {
             panic!("fn expected")
         };
         let signature = flow_syntax::ty::FnSignature { params: vec![Ty::Int, Ty::Int], result: Ty::Float };
-        let mapped = e::host::map_function(None, None, &signature, f, &[Value::Int_array(Arc::new(seeds.clone())), Value::Int_array(Arc::new(indices.clone()))]).unwrap();
+        let mapped = e::host::map_function(None, None, &signature, f, &[Value::IntArray(Arc::new(seeds.clone())), Value::IntArray(Arc::new(indices.clone()))]).unwrap();
         let program = compile(&mapped);
         let expected: Vec<f64> = seeds.iter().zip(&indices).map(|(s, i)| native(*s, *i)).collect();
         random_proof(&mapped,&program,&live,&expected);
@@ -1782,7 +1782,7 @@ mod parity {
         };
         let arrays=inputs.arrays.iter().map(|a|match a{
             Value::Floats(1, xs)|Value::Floats(3, xs)|Value::Floats(4, xs)=>format!("Float64Array.from([{}])",xs.iter().map(|x|flow_syntax::lisp::float(*x)).collect::<Vec<_>>().join(",")),
-            Value::Int_array(xs)=>format!("BigInt64Array.from([{}])",xs.iter().map(|x|format!("{x}n")).collect::<Vec<_>>().join(",")),
+            Value::IntArray(xs)=>format!("BigInt64Array.from([{}])",xs.iter().map(|x|format!("{x}n")).collect::<Vec<_>>().join(",")),
             _=>panic!("numeric input array expected")
         }).collect::<Vec<_>>().join(",");
         let mut uniforms=inputs.uniforms.iter().map(|v|{let s=js_value(v);if matches!(v,Value::Vec2(..)|Value::Vec3(..)|Value::Vec4(..)){s}else{format!("[{s}]")}}).collect::<Vec<_>>();

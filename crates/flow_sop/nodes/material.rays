@@ -35,6 +35,7 @@
                            :owner "primitive" :type vec4 :selection selection :default [0.0 0.0 0.0 1.0])
             "material_round" (array/float count round) :owner "primitive" :type float :selection selection :default 0.0)))))
 (defnode sop/material :label "Material" :category ["Attribute" "Material"]
+  :description "Assign colour, roughness, emission and corner rounding to primitives."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
    (material : text "" :label "Material")

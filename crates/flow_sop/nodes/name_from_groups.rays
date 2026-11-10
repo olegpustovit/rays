@@ -3,6 +3,7 @@
   (error "invalid_group" "name_from_groups could not produce valid geometry"
     :cause (str "name_from_groups [invalid_group]: " reason)))
 (defnode sop/name_from_groups :label "Name from Groups" :category ["Group" "Convert"]
+  :description "Write element names from matching group memberships."
   [(in0 : geometry)
    (owner : text "Primitive" :label "Group type" :choices ["Point" "Vertex" "Primitive"])
    (attribute : text "name" :label "Name attribute")

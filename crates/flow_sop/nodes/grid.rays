@@ -115,7 +115,8 @@
     :validate (grid_validate counts connectivity orientation columns rows size width height
                   uv_attribute [horizontal_x horizontal_y horizontal_z] [vertical_x vertical_y vertical_z])
     :code "E_PARAM" :message "sop/grid: invalid parameters"
-    [(counts : text "Divisions" :label "Counts" :choices ["Divisions" "Point counts"])
+    :description "Create a subdivided rectangular grid in a chosen plane."
+  [(counts : text "Divisions" :label "Counts" :choices ["Divisions" "Point counts"])
      (connectivity : text "Triangles" :label "Connectivity"
        :choices ["Points" "Rows" "Columns" "Rows and columns" "Quads" "Triangles" "Alternating triangles" "Reverse triangles"])
      (orientation : text "XZ" :label "Orientation" :choices ["XY" "XZ" "YZ" "Custom axes"])
@@ -129,13 +130,13 @@
      (height_mode : text "Explicit" :label "Height mode" :choices ["Explicit" "Auto"])
      (columns : int 10 :label "Columns" :folder "Resolution" :min 1 :max 64 :hard_min 1 :primary true)
      (rows : int 10 :label "Rows" :folder "Resolution" :min 1 :max 64 :hard_min 1 :primary true)
-     (size : float 1.0 :label "Size" :min 0.01 :max 10 :hard_min 0)
-     (width : float 1.0 :label "Width" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true)
-     (height : float 1.0 :label "Height" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true)
-     (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0])
-     (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1])
-     (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2])
-     (rotation : float 0.0 :label "Rotation" :folder "Transform" :min -3.14159 :max 3.14159)
+     (size : float 1.0 :label "Size" :min 0.01 :max 10 :hard_min 0 :unit "m")
+     (width : float 1.0 :label "Width" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true :unit "m")
+     (height : float 1.0 :label "Height" :folder "Size" :min 0.01 :max 10 :hard_min 0 :primary true :unit "m")
+     (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+     (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+     (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+     (rotate : float 0.0 :label "Rotation" :folder "Transform" :min -3.14159 :max 3.14159 :unit "rad")
      (uv_attribute : text "" :label "UV attribute" :folder "Attributes")]
     (let* [frame (grid_frame
                (cond (equal? orientation "XY") [1.0 0.0 0.0]
@@ -143,10 +144,10 @@
                      (equal? orientation "YZ") [0.0 0.0 1.0] :else [horizontal_x horizontal_y horizontal_z])
                (cond (equal? orientation "XY") [-0.0 -1.0 -0.0]
                      (equal? orientation "XZ") [0.0 0.0 1.0]
-                     (equal? orientation "YZ") [0.0 1.0 0.0] :else [vertical_x vertical_y vertical_z]) rotation)]
+                     (equal? orientation "YZ") [0.0 1.0 0.0] :else [vertical_x vertical_y vertical_z]) rotate)]
       (if (not (equal? frame.failure ""))
         (error "invalid_parameter" "grid could not produce valid geometry"
-          :cause (str "grid [invalid_parameter]: Rdk.Plane_generators.grid: " frame.failure))
+          :cause (str "grid [invalid_parameter]: sop/grid: " frame.failure))
         (let* [h frame.horizontal vert frame.vertical normal frame.normal
                extra (if (equal? counts "Divisions") 1 0)
                u_count (int/add columns extra) v_count (int/add rows extra)
@@ -185,7 +186,7 @@
                checked_rows (error_rows invalid_points
                  (fn [(index : int)] {:code "invalid_parameter"
                    :message "grid could not produce valid geometry"
-                   :cause (list (str "grid [invalid_parameter]: Rdk.Plane_generators.grid: generated point "
+                   :cause (list (str "grid [invalid_parameter]: sop/grid: generated point "
                      index " is not finite"))}) :policy "first")
                point_mode (equal? connectivity "Points") row_mode (equal? connectivity "Rows")
                column_mode (equal? connectivity "Columns") both_mode (equal? connectivity "Rows and columns")

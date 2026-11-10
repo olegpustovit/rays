@@ -1,4 +1,4 @@
-//! Ports of lib/flow_sop/test_noise_displace_contract.ml and test_merge_source.ml.
+//! Ports of  and .
 use super::support::*;
 use crate::{catalog, lisp_sop, lower, manifest, operators};
 use rdk_core::geometry as geo;
@@ -82,7 +82,7 @@ fn noise_displace_sop_cache_context_seed_dependency_and_relabel_identity() {
 fn lisp_source_merge_domains_inputs_and_cancellation() {
     use rdk_core::attribute::{self,Owner,Storage};
     use rdk_ops::mesh_merge;
-    let geometry=cook_once(1,&lisp_sop::node(&[],"(sop/box :size [1.0 2.0 3.0] :x_divisions 2 :y_divisions 2 :z_divisions 2 :face_groups \"face\")"));
+    let geometry=cook_once(1,&lisp_sop::node(&[],"(sop/box :size [1.0 2.0 3.0] :divisions_x 2 :divisions_y 2 :divisions_z 2 :face_groups \"face\")"));
     let count=geo::primitive_count(&geometry)as usize;let tag=lower::source_attribute();
     let add=|name:&str,storage:Storage|geo::with_attribute(attribute::create_owned(name,Owner::Primitive,storage).unwrap(),&geometry).unwrap();
     let named=add("src",Storage::Int(Arc::new(vec![73;count])));let tagged=add(tag,Storage::Int(Arc::new(vec![42;count])));let float_named=add("src",Storage::Float(Arc::new(vec![0.25;count])));

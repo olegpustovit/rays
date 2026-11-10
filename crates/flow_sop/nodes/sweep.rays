@@ -1,4 +1,4 @@
-; Whole Sweep draft (Rdk Sweep.run, curve/sweep.ml): every pair of a selected backbone curve and a selected
+; Sweep: every pair of a selected backbone curve and a selected
 ; cross-section curve becomes a grid of points (cross-section point placed in the frame of the backbone vertex),
 ; with eight connectivity variants, end caps, UVs, prefixed cross-section attributes/groups and edge groups.
 ; Everything is whole-array over the "selected vertices" (the vertices of the selected curves in order). The
@@ -163,7 +163,7 @@
 ; ---- frames ----
 ; The kernels below are staged through arrays on purpose: nested calls inside one kernel are inlined without
 ; sharing, and a deep nest exceeds the lowering budget.
-; Rodrigues rotation of v about the unit axis k (native rotate_about_axis_into).
+; Rodrigues rotate of v about the unit axis k (native rotate_about_axis_into).
 (defn sw_rot :context value [(k : vec3) (angle : float) (v : vec3)]
   (let* [cosine (cos angle) sine (sin angle) c (vec3_cross k v)
          dot (fma k.z v.z (fma k.y v.y (* k.x v.x))) s1 (- 1.0 cosine)]
@@ -617,6 +617,7 @@
 (defnode sop/sweep :label "Sweep" :category ["Topology" "Surface"]
   :validate (sw_valid scale roll twist caps connectivity uv_attribute) :code "E_PARAM"
   :message "sop/sweep: invalid transform, caps connectivity or UV attribute"
+  :description "Place cross sections along backbone curves to form polygon surfaces."
   [(backbone : geometry) (cross_section : geometry)
    (backbone_group : text "" :label "Backbone primitive group")
    (cross_section_group : text "" :label "Cross-section primitive group")
@@ -628,8 +629,8 @@
    (transform_attributes : bool true :label "Transform attributes")
    (reverse_cross_sections : bool false :label "Reverse cross sections")
    (scale : float 1.0 :label "Scale" :folder ["Transform"] :min -10 :max 10)
-   (roll : float 0.0 :label "Roll" :folder ["Transform"] :min -6.283185307179586 :max 6.283185307179586)
-   (twist : float 0.0 :label "Twist" :folder ["Transform"] :min -12.566370614359172 :max 12.566370614359172)
+   (roll : float 0.0 :unit "rad" :label "Roll" :folder ["Transform"] :min -6.283185307179586 :max 6.283185307179586)
+   (twist : float 0.0 :label "Twist" :folder ["Transform"] :min -12.566370614359172 :max 12.566370614359172 :unit "rad")
    (caps : bool false :label "End caps")
    (cap_group : text "caps" :label "Cap group")
    (uv_attribute : text "uv" :label "UV attribute")

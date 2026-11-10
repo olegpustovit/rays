@@ -1,6 +1,7 @@
 (defnode sop/poly_loft :label "PolyLoft" :category ["Topology" "Polygon"]
   :validate (<= collinearity_tolerance 1.0) :code "E_PARAM"
   :message "sop/poly_loft: collinearity tolerance must be between zero and one"
+  :description "Join successive curve sections with aligned polygon strips."
   [(input : geometry) (rest : geometry :required false)
    (group : text "" :label "Primitive group")
    (connect_closest_ends : bool true :label "Connect closest ends")

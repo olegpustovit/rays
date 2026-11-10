@@ -187,7 +187,8 @@ mod tests {
 
     #[test]
     fn typed_function_is_checked() {
-        for body in ["(fn [uv] uv.x)", "(fn [(uv : vec3)] [uv.x uv.y 0 1])", "(fn [u v] [0 0 0 1])"] {
+        assert!(accepted("(workspace w (graph img :context image (image/map (fn [(uv : vec3)] [uv.x uv.y uv.z 1]))))"), "vec2 callback arguments widen to vec3");
+        for body in ["(fn [uv] uv.x)", "(fn [(uv : vec4)] [uv.x uv.y 0 1])", "(fn [u v] [0 0 0 1])"] {
             assert!(!accepted(&format!("(workspace w (graph img :context image (image/map {body})))")), "accepted: {body}");
         }
     }

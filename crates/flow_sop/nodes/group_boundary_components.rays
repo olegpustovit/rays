@@ -9,6 +9,7 @@
     (if (int/eq (int/mod i 2) 0) (array/nth a (int/div i 2)) (array/nth b (int/div i 2))))
     (array/range (int/mul 2 (array/count a)) :type int))))
 (defnode sop/group_boundary_components :label "Group Boundary Components" :category ["Group" "Create"]
+  :description "Create a point group for each connected boundary component."
   [(in0 : geometry)
    (prefix : text "boundary" :label "Group prefix")
    (conflict : text "Replace" :label "Conflict" :choices ["Replace" "Union"])

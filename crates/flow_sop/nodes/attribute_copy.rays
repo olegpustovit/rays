@@ -334,6 +334,7 @@
   :validate (acopy_valid match_ group_owner source_match_attribute target_match_attribute target_element_attribute
               source_group_pattern target_group_pattern rules)
   :code "E_PARAM" :message "sop/attribute_copy: invalid rules, matching attributes or group patterns"
+  :description "Copy matched attributes through index or value-based element mappings."
   [(source : geometry)
    (target : geometry)
    (group_owner : text "Points" :label "Selection owner" :choices ["Points" "Vertices" "Primitives"])

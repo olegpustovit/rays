@@ -217,6 +217,7 @@
 (defnode sop/blend_shapes :label "Blend Shapes" :category ["Attribute" "Transfer"]
   :validate (bs_valid attributes weights shape_masks)
   :code "E_PARAM" :message "sop/blend_shapes: invalid attribute pattern, shape weights or shape masks"
+  :description "Blend point positions from connected shapes, optionally matched by ID."
   [(input : geometry)
    (shape1 : geometry :required false)
    (shape2 : geometry :required false)

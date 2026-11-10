@@ -1,6 +1,7 @@
 ; Whole-node draft of Blast: deletes the elements of a group (or everything else) and
 ; carries the survivors through sop/remap. Uses edge_ancestry and int_gather from the prelude.
 (defnode sop/blast :label "Blast" :category ["Topology" "Delete"]
+  :description "Delete selected elements or their complement and preserve surviving payloads."
   [(in0 : geometry)
    (owner : text "Primitives" :label "Group type" :choices ["Points" "Vertices" "Primitives"])
    (group : text "group" :label "Group")

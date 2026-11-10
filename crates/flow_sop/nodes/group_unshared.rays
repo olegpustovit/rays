@@ -1,5 +1,6 @@
 ; Whole Group Unshared draft: edges used by exactly one corner, promoted to points or primitives.
 (defnode sop/group_unshared :label "Group Unshared" :category ["Group" "Create"]
+  :description "Select boundary elements belonging to unshared polygon edges."
   [(in0 : geometry)
    (owner : text "Edges" :label "Group type" :choices ["Points" "Vertices" "Primitives" "Edges"])
    (name : text "unshared" :label "Group name")

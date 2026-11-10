@@ -1,7 +1,7 @@
 //! Encoded-parameter workspace checks (need flow_sop::operators).
 use crate::operators;
 use flow_check::catalog::Catalog;
-use flow_check::workspace::{self, Node, Workspace};
+use flow_check::workspace::{Node, Workspace};
 use flow_sop_catalog::catalog::{self, Descriptor};
 use flow_sop_catalog::encoded_parameters::for_node;
 use param::Value as ParamValue;

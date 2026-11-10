@@ -29,6 +29,7 @@
   :validate (reduce (fn [valid row]
     (and (swap_attributes_rewrite_validate (nth row 1) (nth row 2))
       (swap_attributes_rewrite_validate (nth row 2) (nth row 1)))) true (text/table_decode rules))
+  :description "Exchange the names and values of matched attributes."
   [(in0 : geometry)
    (rules : text "" :label "Rules (owner, source, destination, method)" :kind encoded
      :normalize swap_attributes_normalize)]

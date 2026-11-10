@@ -13,7 +13,9 @@ use flow_eval::{self as E, Instance, Node as ENode, Plan, State, Value};
 use input::Frame;
 use flow_ir::flow_ir::{cost, executor, gpu, Placement, PlacementReason, profile, Sink};
 use flow_syntax::context as fctx;
-use flow_syntax::syntax::{self, Syntax};
+#[cfg(test)]
+use flow_syntax::syntax;
+use flow_syntax::syntax::Syntax;
 use flow_syntax::ty::{self, FnSignature, Ty};
 use flow_syntax::value::{FnId, ResidualId, source_value, struct_value};
 use rays_diagnostic::Diagnostic;
@@ -34,7 +36,7 @@ pub type PathMap = BTreeMap<Vec<i64>, i64>;
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type OnProfile = Arc<dyn Fn(&Arc<profile::T>) + Send + Sync>;
 
-/// `Rdk.Mesh_merge.provenance_attribute`: the primitive int attribute every collecting merge writes.
+/// The primitive Int provenance attribute every collecting merge writes.
 pub const SOURCE_ATTRIBUTE: &str = "__flow_src";
 pub fn source_attribute() -> &'static str {
     SOURCE_ATTRIBUTE
@@ -819,11 +821,11 @@ pub mod chain {
         let rebuild_record = |route: Route, abandoned: Box<dyn Fn() + Send + Sync>, record: Box<dyn Fn(&rdk_core::geometry::T, bool, f64) + Send + Sync>| Placed { route, record, abandoned };
         match (&state, readers) {
             (None, _) => {
-                report(None, PlacementReason::No_cost_evidence, None, None);
+                report(None, PlacementReason::NoCostEvidence, None, None);
                 rebuild_record(Route::Cpu, Box::new(|| {}), record)
             }
             (_, None) => {
-                report(None, PlacementReason::Missing_consumer, None, None);
+                report(None, PlacementReason::MissingConsumer, None, None);
                 rebuild_record(Route::Cpu, Box::new(|| {}), record)
             }
             (Some(state), Some(_)) => {
@@ -867,7 +869,7 @@ pub mod chain {
                     }
                     _ => {
                         let _ = none_placed;
-                        report(None, PlacementReason::No_cost_evidence, None, None);
+                        report(None, PlacementReason::NoCostEvidence, None, None);
                         rebuild_record(Route::Device, Box::new(|| {}), record)
                     }
                 }
@@ -1007,7 +1009,7 @@ fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, ar
     let data = Value::Record(args.iter().filter(|(n, _)| !["source", "target", "sources", "geometry"].contains(&n.as_str())).cloned().collect::<Vec<_>>().into());
     let prepare = {
         let (env, sources, inputs) = (env.clone(), sources.to_vec(), inputs.to_vec());
-        move |data: &Value| ak::prepare(Some(env.profile.clone()), env.strict_body, Some(env.approx.clone()), Some(Sink::Sop_input), &sources, &inputs, data)
+        move |data: &Value| ak::prepare(Some(env.profile.clone()), env.strict_body, Some(env.approx.clone()), Some(Sink::SopInput), &sources, &inputs, data)
     };
     // a topology no frame or state changes is built once (Topology_kernel_impl.static_cached): later
     // cooks run `points_program`, without it
@@ -1211,7 +1213,7 @@ fn mesh_cook(
                             let mut out = Vec::new();
                             for v in values {
                                 match v {
-                                    Value::No_geo => {}
+                                    Value::NoGeo => {}
                                     Value::Deferred(t, id) if is_geometry_ty(t) => match geometry(*id) {
                                         Some(g) => out.push(g),
                                         None => return Err(fail("E_DATA_SOURCE", "Concat needs cooked source geometries.")),
@@ -1499,7 +1501,7 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &flow_syntax::value::Recor
         },
         None,
         Arc::new(move |_, context, geometries| {
-            let result = if geometries.is_empty() || args_c.get_str("geometry") == Some(&Value::No_geo) {
+            let result = if geometries.is_empty() || args_c.get_str("geometry") == Some(&Value::NoGeo) {
                 Err(fail("E_DATA_SOURCE", "Group write needs geometry."))
             } else if sctx::cancelled(context) {
                 Err(fail("E_CANCELLED", "Group kernel cancelled."))
@@ -1522,16 +1524,16 @@ fn group_node_in(env: &KernelEnv, o: &NodeOpts, args: &flow_syntax::value::Recor
                         Value::Record(fields) => {
                             let order: R<Option<Vec<i64>>> = match fields.get_str("order") {
                                 None => Ok(None),
-                                Some(Value::Int_array(order)) => Ok(Some((**order).clone())),
+                                Some(Value::IntArray(order)) => Ok(Some((**order).clone())),
                                 Some(Value::Record(f)) => match (f.get_str("ordered"), f.get_str("indices")) {
-                                    (Some(Value::Bool(ordered)), Some(Value::Int_array(indices))) => Ok(if *ordered { Some((**indices).clone()) } else { None }),
+                                    (Some(Value::Bool(ordered)), Some(Value::IntArray(indices))) => Ok(if *ordered { Some((**indices).clone()) } else { None }),
                                     _ => Err(fail("E_GROUP_ORDER", "Group order requires an integer array or an ordered/indices record.")),
                                 },
                                 _ => Err(fail("E_GROUP_ORDER", "Group order requires an integer array or an ordered/indices record.")),
                             };
                             let order = order?;
                             match fields.get_str("values") {
-                                Some(Value::Int_array(mask)) => gk::write(order.as_deref(), owner, &name, mask, &geometries[0]),
+                                Some(Value::IntArray(mask)) => gk::write(order.as_deref(), owner, &name, mask, &geometries[0]),
                                 _ => Err(fail("E_GROUP_MASK", "Group mask requires an integer array.")),
                             }
                         }
@@ -2254,7 +2256,7 @@ pub fn install_hooks() {
         E::set_live_kernels(Arc::new(|nodes: &[ENode]| {
             nodes.iter().all(|n| match kernel_data(n) {
                 Some(data) if E::frame_dependent(&data) => {
-                    executor::compile(&data, &executor::CompileOptions { strict: true, sink: Some(Sink::Sop_input), ..Default::default() }).is_ok()
+                    executor::compile(&data, &executor::CompileOptions { strict: true, sink: Some(Sink::SopInput), ..Default::default() }).is_ok()
                 }
                 _ => true,
             })
@@ -2333,6 +2335,8 @@ fn cached_digest(checked: &Workspace, extra: &[NodeDefinition], compute: &dyn Fn
 #[derive(Clone)]
 pub struct Options {
     pub provenance_tags: bool,
+    /// Editor probe records; command-line validation does not consume them.
+    pub record: bool,
     pub tag_base: i64,
     pub reference: bool,
     pub gpu: gpu::Config,
@@ -2357,6 +2361,7 @@ impl Default for Options {
     fn default() -> Options {
         Options {
             provenance_tags: true,
+            record: true,
             tag_base: 0,
             reference: false,
             gpu: gpu::default(),
@@ -2765,7 +2770,7 @@ impl CookServices {
             let geometry = get(&n.args, "geometry").expect("geometry");
             let root = match geometry {
                 Value::Deferred(_, id) => Some(*id),
-                Value::No_geo => None,
+                Value::NoGeo => None,
                 _ => return Err(fail("E_LOWER", "Attribute write without geometry")),
             };
             let mut out: Vec<i64> = root.into_iter().collect();
@@ -3081,7 +3086,7 @@ impl HostRun {
                 let ctx = if *actual == ty::image() { fctx::image() } else { fctx::sop() };
                 Ok(Some(builder.push(None, ty, form, Draft::Call { kind, ctx, args: Vec::new() })))
             }
-            Value::No_geo if is_geometry_ty(ty) => {
+            Value::NoGeo if is_geometry_ty(ty) => {
                 let syntax = builder.syntax_builder();
                 let name = syntax.intern("nil");
                 let nil = syntax.push(0, flow_syntax::arena::Node::Sym(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
@@ -3262,12 +3267,12 @@ impl HostRun {
                     let attr = txt(attr);
                     let target = self.geometry_r(*id)?;
                     let materialized = match values {
-                        Value::Floats(1..=4, _) | Value::Int_array(_) | Value::Text_array(_) => true,
+                        Value::Floats(1..=4, _) | Value::IntArray(_) | Value::TextArray(_) => true,
                         Value::Record(fields) => {
                             if !selected && ["vec2", "vec3", "vec4"].contains(&kind.as_str()) {
                                 !E::is_live(values)
                             } else {
-                                matches!((fields.get_str("offsets"), fields.get_str("values")), (Some(Value::Int_array(_)), Some(Value::Floats(1, _) | Value::Int_array(_))))
+                                matches!((fields.get_str("offsets"), fields.get_str("values")), (Some(Value::IntArray(_)), Some(Value::Floats(1, _) | Value::IntArray(_))))
                             }
                         }
                         _ => false,
@@ -3279,7 +3284,7 @@ impl HostRun {
                     let first = if selection.is_some() || default.is_some() { None } else { ak::write_source(&geometry_fn, owner, &kind, &attr, values, &target)? };
                     let selected_materialized = match (selection, default) {
                         (None, None) => true,
-                        (Some(Value::Int_array(_)), Some(Value::Float(_) | Value::Int(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..))) => true,
+                        (Some(Value::IntArray(_)), Some(Value::Float(_) | Value::Int(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..))) => true,
                         _ => false,
                     };
                     let grain = sctx::grain(&self.context);
@@ -3404,7 +3409,7 @@ impl HostRun {
                         self.snapshot(ty, *id)?;
                         Ok(Value::Deferred(ty.clone(), *id))
                     }
-                    (1, Some(Value::No_geo)) if is_geometry_ty(ty) => Ok(Value::No_geo),
+                    (1, Some(Value::NoGeo)) if is_geometry_ty(ty) => Ok(Value::NoGeo),
                     _ => Err(data_source("Protected completion needs one matching cooked handle.")),
                 } },
                 Value::Source(g) if g.name == "$core/cooked" && g.fields.len() == 1 && g.fields[0].0 == "id" => match &g.fields[0].1 {
@@ -3577,7 +3582,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
     };
     let result = result.and_then(|v| match v {
         Value::Deferred(ty, id) if is_geometry_ty(&ty) => run.snapshot(&ty, id),
-        Value::No_geo => Err(fail("E_LOWER", "Cooked selection returned empty geometry.")),
+        Value::NoGeo => Err(fail("E_LOWER", "Cooked selection returned empty geometry.")),
         _ => Err(data_source("Cooked selection must return a geometry handle.")),
     });
     if let Some(s) = &scope {
@@ -3716,6 +3721,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
         )
     };
     let args = edit::FactoryArgs {
+        description: definition.description.clone().unwrap_or_default(),
         operation: Some(definition.operation.clone()),
         fields: definition.fields.clone(),
         ..edit::factory_args(&key, &definition.label, &category.iter().map(String::as_str).collect::<Vec<_>>())
@@ -3850,7 +3856,7 @@ impl CookServices {
                     } else {
                         Some(self.tag_sources(cid, &args))
                     };
-                    lisp_factory(&self.call_env, &self.kernel_source, node.error.clone(), &args, tag_base, definition_index)
+                    lisp_factory(&self.call_env, &self.kernel_source, node.error.as_deref().cloned(), &args, tag_base, definition_index)
                 }
                 None => self.find_factory(&key)?,
             }
@@ -3884,7 +3890,7 @@ impl CookServices {
         };
         fn add_rest(name: &str, value: &Value, next_rest: &mut usize, arity: &mut usize, slots: &mut Vec<(usize, i64)>, kernels: &mut Vec<KernelInput>, rest: usize, add_function: &mut dyn FnMut(usize, usize, &str, FnId, &mut Vec<(usize, i64)>, &mut Vec<KernelInput>) -> R<()>) -> R<()> {
             match value {
-                Value::No_geo => {}
+                Value::NoGeo => {}
                 Value::Deferred(ty, id) if ty::is_cooked(ty) => {
                     slots.push((*next_rest, *id));
                     *next_rest += 1;
@@ -3907,7 +3913,7 @@ impl CookServices {
         for (name, value) in &args {
             match (names.iter().position(|n| *name == *n), value) {
                 (Some(index), value) if Some(index) == rest => add_rest(name, value, &mut next_rest, &mut arity, &mut slots, &mut kernels, rest.unwrap(), &mut add_function)?,
-                (Some(_), Value::No_geo) => {}
+                (Some(_), Value::NoGeo) => {}
                 (Some(index), Value::Deferred(ty, id)) if ty::is_cooked(ty) => slots.push((index, *id)),
                 (Some(index), Value::Fn(f)) => add_function(index, index, name, *f, &mut slots, &mut kernels)?,
                 (Some(_), _) => return Err(fail("E_LOWER", &format!("Slot {name} needs geometry"))),
@@ -4135,7 +4141,7 @@ impl Lowerer {
                 };
                 let values = get(&args, "values").cloned().expect("a write has values");
                 let mut sources = self.deps(node)?;
-                if matches!(get(&args, "geometry"), Some(Value::No_geo)) {
+                if matches!(get(&args, "geometry"), Some(Value::NoGeo)) {
                     sources.insert(0, -1);
                 }
                 let (this, node_c, sources_c) = (self.services.clone(), node.clone(), sources.clone());
@@ -4401,7 +4407,7 @@ impl ZoneCook {
                     opts.extend(inner.captures.iter().cloned());
                     let ins: Vec<node::T> = opts.iter().filter_map(|i| bound.get(i).cloned()).collect();
                     this.make_zone(state.clone(), outer.to_vec(), &inner, ins)
-                } else if n.kind == "sop/with_attr" && get(&n.args, "geometry") != Some(&Value::No_geo) {
+                } else if n.kind == "sop/with_attr" && get(&n.args, "geometry") != Some(&Value::NoGeo) {
                     let name = match get(&n.args, "attribute") {
                         Some(Value::Text(name)) => txt(name),
                         _ => return Err(fail("E_LOWER", "Attribute name must be static text")),
@@ -4599,7 +4605,7 @@ impl Lowerer {
             }
             let program = Arc::new(executor::compile(
                 values,
-                &executor::CompileOptions { profile: Some(self.profile.clone()), approx: self.checked.approx.clone(), sink: Some(Sink::Sop_input), ..Default::default() },
+                &executor::CompileOptions { profile: Some(self.profile.clone()), approx: self.checked.approx.clone(), sink: Some(Sink::SopInput), ..Default::default() },
             )?);
             // Fast writes choose placement in their cook, where downstream consumers are known,
             // stateful ones too: the lane has advanced the state, and the rebuilt node cooks over its
@@ -4725,7 +4731,7 @@ impl Lowerer {
         }
         let (mut graph, root) = match &instance.result {
             Value::Deferred(t, id) if ty::is_cooked(t) => (graph, Some(self.compiled[*id as usize])),
-            Value::No_geo => (graph, None),
+            Value::NoGeo => (graph, None),
             Value::Residual(r) if *E::residual::residual_view(*r)?.term.ty() == ty::geometry() => {
                 let ids = cooked_sources(&instance.result);
                 let captures: R<Vec<(i64, Ty, node::T)>> = ids
@@ -4808,7 +4814,7 @@ impl Lowerer {
             let slot_value = |v: &Value| -> Value {
                 match v {
                     Value::Int(id) => Value::Deferred(self.plan.nodes[*id as usize].ty.clone(), *id),
-                    _ => Value::No_geo,
+                    _ => Value::NoGeo,
                 }
             };
             let rest: Vec<String> = self.lisp_definition(&kind).map(|d| d.slots.iter().filter(|s| s.rest).map(|s| s.name.clone()).collect()).unwrap_or_default();
@@ -4883,7 +4889,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
         })
     };
     let (checked, evaluated) = flow_ir::flow_ir::qualify_workspace(
-        &flow_ir::flow_ir::QualifyOptions { record: true, inputs: o.inputs.clone(), observe: Some(observe), replay: true, verify: false, defer: o.defer, gpu: Some(o.gpu.clone()) },
+        &flow_ir::flow_ir::QualifyOptions { record: o.record, inputs: o.inputs.clone(), observe: Some(observe), replay: true, verify: false, defer: o.defer, gpu: Some(o.gpu.clone()) },
         &checked_in,
     )?;
     let checked = Arc::new(checked);
@@ -5042,7 +5048,7 @@ pub fn of_checked(factories: Option<Vec<Factory>>, o: Options, checked: &Workspa
     MEMORY.call_once(|| mem::root(&mem::plan("flow.eval.arenas"), Arc::new(|visitor| {
         for (address, bytes) in E::memory_allocations() { visitor.allocation(address, bytes); }
     })));
-    let checked = ep::checked(checked.clone())?;
+    let checked = { let _phase = flow_syntax::phase_timer::measure("lower.prepare"); ep::checked(checked.clone())? };
     lower_checked(factories.unwrap_or_else(sop::nodes::factories), o, checked)
 }
 
@@ -5241,7 +5247,7 @@ fn failed_card_as_call(n: &ENode, plan: &Plan, checked: &Workspace) -> ENode {
     let slot_value = |v: &Value| -> Value {
         match v {
             Value::Int(id) => Value::Deferred(plan.nodes[*id as usize].ty.clone(), *id),
-            _ => Value::No_geo,
+            _ => Value::NoGeo,
         }
     };
     let mut args: Vec<(Symbol, Value)> = slots

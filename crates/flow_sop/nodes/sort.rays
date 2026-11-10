@@ -1,4 +1,4 @@
-; Whole Sort draft (Rdk.Ordering.sort). The sorted `sources` are a stable grade of the key over the
+; Whole Sort draft (sop/sort). The sorted `sources` are a stable grade of the key over the
 ; (optionally restricted, possibly ordered) slots, then a permutation of points or primitives is applied
 ; with sop/remap. Random is Rdk's sequential Fisher-Yates swap list resolved in parallel: position i is
 ; final after its own swap, and the value a swap moves is found by following "the next swap that
@@ -30,7 +30,7 @@
          hits (array/scatter_add safe (array/int m 1) m)
          distinct (int/eq (array/sum (exact (map (fn [(h : int)] (if (int/eq h 1) 0 1)) hits))) 0)]
     {:ok (and known distinct) :order (array/scatter_add safe slots m)}))
-; Rdk.Ordering.randomize_in_place on the identity: for i = n-1 downto 1 swap A[i] with A[o_i].
+; sop/sort on the identity: for i = n-1 downto 1 swap A[i] with A[o_i].
 (defn sort_random :context value [(n : int) (seed : int)]
   (let* [idx (array/range n :type int)
          o (exact (map (fn [(i : int)]
@@ -94,6 +94,7 @@
          :z (exact (map (fn [(s : float) (k : float)] (* s k)) (plane_sum pz) scale))}))))
 
 (defnode sop/sort :label "Sort" :category "Utility"
+  :description "Reorder points or primitives by spatial, attribute or random keys."
   [(in0 : geometry)
    (owner : text "Points" :label "Entity" :choices ["Points" "Primitives"])
    (key : text "X" :label "Sort by"

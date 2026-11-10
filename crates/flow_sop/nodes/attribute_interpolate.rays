@@ -1,4 +1,4 @@
-; Whole Attribute Interpolate port. Native Rdk.Attribute_interpolate: every destination of the target owner has a
+; Whole Attribute Interpolate port. Native sop/attribute_interpolate: every destination of the target owner has a
 ; row of weighted source entries. Primitive/UVW: the corners of the driver primitive weighted by the polygon or
 ; curve basis at the driver UVW; weighted drivers: the numbers/weights row of the destination (point, vertex or
 ; primitive numbers). Entries are flat arrays (row starts rs, lengths rl, weight ew, source element per owner).
@@ -556,6 +556,7 @@
               numbers_attribute weights_attribute compute_weights computed_numbers_attribute
               computed_weights_attribute point_pattern vertex_pattern primitive_pattern detail_pattern)
   :code "E_PARAM" :message "sop/attribute_interpolate: invalid attributes, patterns, driver or weights"
+  :description "Interpolate source attributes using primitive coordinates or weighted element mappings."
   [(source : geometry)
    (target : geometry)
    (target_owner : text "Point" :label "Target owner" :choices ["Point" "Vertex" "Primitive" "Detail"])

@@ -108,9 +108,10 @@
       (sop/with_group acc selected :name name :owner "primitive"))))
 
 (defnode sop/poly_path :label "PolyPath" :category ["Topology" "Curve"]
+  :description "Join selected edges into ordered paths with optional endpoint clustering."
   [(in0 : geometry)
    (connect_end_points : bool false :label "Connect endpoints")
-   (maximum_distance : float 0.001 :label "Maximum distance" :min 0 :max 10 :hard_min 0)
+   (maximum_distance : float 0.001 :unit "m" :label "Maximum distance" :min 0 :max 10 :hard_min 0)
    (connect_only_to_other_end_points : bool false :label "Only other endpoints")
    (make_isolated_loops_closed : bool false :label "Close isolated loops")]
   (let* [n (sop/count in0 :points)

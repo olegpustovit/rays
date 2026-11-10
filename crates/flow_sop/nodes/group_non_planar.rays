@@ -20,6 +20,7 @@
         (exact (map (fn [(a : int) (b : int)] (int/and a b)) fixed
                  (sop/group geo :name base_name :owner "primitive")))))))
 (defnode sop/group_non_planar :label "Group Non-Planar" :category ["Group" "Create"]
+  :description "Select polygons whose points deviate from their fitted plane."
   [(in0 : geometry)
    (name : text "nonplanar" :label "Group name")
    (tolerance : float 0.000001 :label "Tolerance" :min 0 :max 0.1 :hard_min 0)

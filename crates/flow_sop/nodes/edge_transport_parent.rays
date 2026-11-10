@@ -1,4 +1,4 @@
-; Whole Edge Transport Parent draft. The tree scan is graph/forest (the factored Rdk.Forest.scan of
+; Whole Edge Transport Parent draft. The tree scan is graph/forest (the factored sop/edge_transport_parent of
 ; the native node); the forward and backward sweeps are Jacobi passes over the points: a point only
 ; reads its parent (forward) or its children in CSR order (backward), so after depth+1 passes every
 ; tree point holds exactly the value the native breadth-first sweep writes. Points outside every tree
@@ -9,6 +9,7 @@
               (and (not (equal? attribute "P"))
                    (or (equal? operation "Total") (not (or integrate_constant scale_by_edge_length)))))
   :code "E_PARAM" :message "sop/edge_transport_parent: invalid parameters"
+  :description "Propagate frames through parent indices in a point forest."
   [(in0 : geometry)
    (attribute : text "value" :label "Attribute")
    (point_group : text "" :label "Point group")

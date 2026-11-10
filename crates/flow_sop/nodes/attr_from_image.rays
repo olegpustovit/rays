@@ -36,6 +36,7 @@
   :facts {:elementwise points :reads ["$uv"] :writes ["$attribute"] :topology preserved :exact true}
   :validate (and (not (equal? attribute "P")) (not (text/blank? attribute))) :code "E_PARAM"
   :message "sop/attr_from_image: attribute must be nonblank and cannot be P"
+  :description "Sample image colours at UV coordinates into a geometry attribute."
   [(geometry : geometry)
    (image : image)
    (attribute : text "image" :label "Attribute" :primary true)

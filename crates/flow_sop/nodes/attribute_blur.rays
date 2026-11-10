@@ -73,6 +73,7 @@
 (defnode sop/attribute_blur :label "Attribute Blur" :category ["Attribute" "Filter"]
   :validate (equal? (text/glob_error attributes) "")
   :code "E_PARAM" :message "sop/attribute_blur: invalid attribute pattern"
+  :description "Blur point attributes over edge neighbours with weighted iterations."
   [(in0 : geometry)
    (attributes : text "P" :label "Attributes")
    (group : text "" :label "Point group")

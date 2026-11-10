@@ -3,6 +3,7 @@
   (error "invalid_group" "group_invert could not produce valid geometry"
     :cause (str "group_invert [invalid_group]: " reason)))
 (defnode sop/group_invert :label "Group Invert" :category ["Group" "Edit"]
+  :description "Invert membership of groups matching the selected names."
   [(in0 : geometry)
    (owner : text "Any" :label "Group type" :choices ["Any" "Points" "Vertices" "Primitives" "Edges"])
    (pattern : text "*" :label "Group pattern")

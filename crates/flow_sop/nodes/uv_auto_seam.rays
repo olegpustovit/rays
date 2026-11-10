@@ -59,10 +59,11 @@
               (and (and (>= angle 0.0) (<= angle 3.141592653589793))
                    (and (>= uv_tolerance 0.0) (< uv_tolerance 1e308))))
   :code "E_PARAM" :message "sop/uv_auto_seam: name nonempty, angle within [0,pi], UV tolerance finite and non-negative"
+  :description "Mark UV seams at geometric, selection or texture discontinuities."
   [(in0 : geometry)
    (name : text "uv_seams" :label "Seam group")
    (group : text "" :label "Primitive group")
-   (angle : float 1.0471975511965976 :label "Angle threshold" :min 0 :max 3.141592653589793 :hard_min 0 :hard_max 3.141592653589793)
+   (angle : float 1.0471975511965976 :label "Angle threshold" :min 0 :max 3.141592653589793 :hard_min 0 :hard_max 3.141592653589793 :unit "rad")
    (include_boundaries : bool true :label "Include boundaries")
    (include_non_manifold : bool true :label "Include non-manifold")
    (partition_attribute : text "" :label "Partition attribute" :folder ["Cuts"])

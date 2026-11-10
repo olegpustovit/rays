@@ -29,6 +29,7 @@
       (array/segment_max padded grown))))
 
 (defnode sop/crease :label "Crease" :category ["Topology" "Edge"]
+  :description "Assign vertex crease weights and optional colour visualization."
   [(in0 : geometry)
    (group : text "" :label "Edge group")
    (operation : text "Add" :label "Operation" :choices ["Add" "Set" "Delete"])

@@ -1,4 +1,4 @@
-//! lib/flow_sop/test_math_helpers.ml: exact scalar/FMA bytes, four-ULP compound native gate.
+//! : exact scalar/FMA bytes, four-ULP compound native gate.
 use crate::{catalog, operators};
 use flow_syntax::{syntax::{self,Node,Syntax},value::Value};
 use rays_math::{mat4 as m,vec3 as v,quat as q};

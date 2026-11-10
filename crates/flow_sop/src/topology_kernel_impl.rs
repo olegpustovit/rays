@@ -39,7 +39,7 @@ fn widen_all(values: &[u32]) -> Vec<i64> {
     values.iter().map(|&v| i64::from(v)).collect()
 }
 fn ints(values: Vec<i64>) -> Value {
-    Value::Int_array(Arc::new(values))
+    Value::IntArray(Arc::new(values))
 }
 fn admit(bytes: i64) -> Result<(), Diagnostic> {
     mem::admit_bytes(mem::Pool::Host, bytes).map_err(|r| value::fail("E_ARRAY_MEMORY", &r.to_string()))
@@ -220,7 +220,7 @@ pub fn components(geometry: &Geometry, args: &flow_syntax::value::Record) -> Res
     };
     let selected = match args.get_str("mask") {
         None => None,
-        Some(Value::Int_array(mask)) if mask.len() as i64 == count => {
+        Some(Value::IntArray(mask)) if mask.len() as i64 == count => {
             if mask.iter().any(|bit| *bit != 0 && *bit != 1) {
                 return fail("E_COMPONENTS_MASK", "Components mask holds only 0 and 1.");
             }
@@ -230,7 +230,7 @@ pub fn components(geometry: &Geometry, args: &flow_syntax::value::Record) -> Res
                     .map_err(|e| diag("E_COMPONENTS_MASK", &rdk_message(&e)))?,
             )
         }
-        Some(Value::Int_array(_)) => {
+        Some(Value::IntArray(_)) => {
             return fail("E_COMPONENTS_MASK", "Components mask length differs from the labelled element count.");
         }
         Some(_) => return fail("E_COMPONENTS_MASK", "Components mask is an integer array."),
@@ -238,7 +238,7 @@ pub fn components(geometry: &Geometry, args: &flow_syntax::value::Record) -> Res
     // `:seams` is a 0/1 edge mask (one entry per `sop/edges` edge): a seam edge joins nothing.
     let seams = match args.get_str("seams") {
         None => None,
-        Some(Value::Int_array(mask)) => {
+        Some(Value::IntArray(mask)) => {
             let topology = geometry::topology(geometry);
             let index = index_of(topology)?;
             if mask.len() as i64 != topology_index::edge_count(&index) {
@@ -396,7 +396,7 @@ pub fn mesh(args: &Args) -> Result<Geometry, Diagnostic> { mesh_with(&|name| arg
 
 pub fn mesh_with<'a>(args: &dyn Fn(&str) -> Option<&'a Value>) -> Result<Geometry, Diagnostic> {
     match (args("points"), args("vertex_points"), args("primitive_offsets"), args("kinds")) {
-        (Some(points), Some(Value::Int_array(vertices)), Some(Value::Int_array(offsets)), Some(Value::Int_array(kinds))) => {
+        (Some(points), Some(Value::IntArray(vertices)), Some(Value::IntArray(offsets)), Some(Value::IntArray(kinds))) => {
             let (count, positions) = mesh_points(points)?;
             if kinds.iter().any(|kind| *kind < 0 || *kind > 2) {
                 return fail("E_TOPOLOGY_KIND", "Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline).");
@@ -510,7 +510,7 @@ static STATIC_TOPOLOGIES: Mutex<Vec<StaticTopology>> = Mutex::new(Vec::new());
 fn key_matches(key: &StaticKey, value: &Value) -> bool {
     match (key, value) {
         (StaticKey::Floats(weak), Value::Floats(1..=4, a)) => alive(weak, a),
-        (StaticKey::Ints(weak), Value::Int_array(a)) => weak.upgrade().is_some_and(|k| Arc::ptr_eq(&k, a)),
+        (StaticKey::Ints(weak), Value::IntArray(a)) => weak.upgrade().is_some_and(|k| Arc::ptr_eq(&k, a)),
         (StaticKey::Residual(id, home), Value::Residual(r)) => r.0 == *id && r.1 == *home,
         _ => false,
     }
@@ -525,7 +525,7 @@ fn key_dead(key: &StaticKey) -> bool {
 fn key_of(value: &Value) -> Option<StaticKey> {
     match value {
         Value::Floats(1..=4, a) => Some(StaticKey::Floats(Arc::downgrade(a))),
-        Value::Int_array(a) => Some(StaticKey::Ints(Arc::downgrade(a))),
+        Value::IntArray(a) => Some(StaticKey::Ints(Arc::downgrade(a))),
         Value::Residual(r) => Some(StaticKey::Residual(r.0, r.1)),
         _ => None,
     }
@@ -633,11 +633,11 @@ pub fn mesh_resident_with<'a>(static_key: Option<&Value>, scope: &dyn Residency,
         keep_static(key, point_count, topology);
     };
     let (points, vertices, offsets, kinds) = (args("points"), args("vertex_points"), args("primitive_offsets"), args("kinds"));
-    if let (Some(points @ Value::Floats(3, _)), Some(Value::Int_array(v)), Some(Value::Int_array(o)), Some(Value::Int_array(k))) =
+    if let (Some(points @ Value::Floats(3, _)), Some(Value::IntArray(v)), Some(Value::IntArray(o)), Some(Value::IntArray(k))) =
         (points, vertices, offsets, kinds)
     {
         if count_of(scope, points).is_some()
-            && [v, o, k].iter().all(|a| count_of(scope, &Value::Int_array((*a).clone())).is_none())
+            && [v, o, k].iter().all(|a| count_of(scope, &Value::IntArray((*a).clone())).is_none())
         {
             // device points, host topology: the points stay where they are
             let point_count = count_of(scope, points)?;
@@ -666,7 +666,7 @@ pub fn mesh_resident_with<'a>(static_key: Option<&Value>, scope: &dyn Residency,
                 return Some(value.clone());
             }
             match value {
-                Value::Int_array(a) if a.is_empty() => scope.executor().fill(&Ty::Array(Box::new(Ty::Int)), 0, &Value::Int(0)).ok().flatten(),
+                Value::IntArray(a) if a.is_empty() => scope.executor().fill(&Ty::Array(Box::new(Ty::Int)), 0, &Value::Int(0)).ok().flatten(),
                 _ => None,
             }
         };
@@ -685,7 +685,7 @@ pub fn mesh_resident_with<'a>(static_key: Option<&Value>, scope: &dyn Residency,
     // fills it rather than the whole mesh coming back
     let on_device = count_of(scope, points).is_some();
     let device = |v: &Value| -> Value {
-        if let Value::Int_array(a) = v {
+        if let Value::IntArray(a) = v {
             if on_device && count_of(scope, v).is_none() && !a.is_empty() && a.iter().all(|x| *x == a[0]) {
                 if let Ok(Some(filled)) = scope.executor().fill(&Ty::Array(Box::new(Ty::Int)), a.len() as i64, &Value::Int(a[0])) {
                     return filled;
@@ -852,7 +852,7 @@ fn mapping<'a>(cancel: Option<&cancel::T>, args: &dyn Fn(&str) -> Option<&'a Val
         _ => "primitive_mix",
     };
     match args(name).or_else(|| args(mix)) {
-        Some(Value::Int_array(map)) => {
+        Some(Value::IntArray(map)) => {
             bounded("", map)?;
             Ok(Carry::Plain(map.clone()))
         }
@@ -861,7 +861,7 @@ fn mapping<'a>(cancel: Option<&cancel::T>, args: &dyn Fn(&str) -> Option<&'a Val
             names.sort();
             let find = |key: &str| fields.iter().find(|(n, _)| n == key).map(|(_, v)| v);
             match (names.as_slice(), find("a"), find("b"), find("t")) {
-                (["a", "b", "t"], Some(Value::Int_array(a)), Some(Value::Int_array(b)), Some(Value::Floats(1, t))) => {
+                (["a", "b", "t"], Some(Value::IntArray(a)), Some(Value::IntArray(b)), Some(Value::Floats(1, t))) => {
                     if t.len() as i64 != target_count {
                         return fail("E_REMAP_COUNT", &format!("Remap {name} map must match target owner count."));
                     }
@@ -933,7 +933,7 @@ pub fn remap_with<'a>(cancel: Option<&cancel::T>, grain: i64, source: &Geometry,
         None => return fail("E_REMAP_EDGES", "Remap changed topology requires explicit edge ancestry."),
         Some(Value::Record(fields)) => {
             let pair = match (fields.len(), fields.get_str("offsets"), fields.get_str("values")) {
-                (2, Some(Value::Int_array(x)), Some(Value::Int_array(y))) => Some((x, y)),
+                (2, Some(Value::IntArray(x)), Some(Value::IntArray(y))) => Some((x, y)),
                 _ => None,
             };
             let Some((offsets, ancestors)) = pair else {
@@ -1161,7 +1161,7 @@ mod tests {
     }
 }
 
-/// Ports of lib/flow_sop/test_topology_kernel.ml and test_adjacency.ml (the parts that need no
+/// Ports of  and  (the parts that need no
 /// Lisp_sop): the authored operators against the native indices, both execution tiers, at one and
 /// eight domains.
 #[cfg(test)]
@@ -1186,7 +1186,7 @@ mod integration {
         }
     }
     fn ints(a: &[i64]) -> Value {
-        Value::Int_array(Arc::new(a.to_vec()))
+        Value::IntArray(Arc::new(a.to_vec()))
     }
     fn w(a: &[u32]) -> Vec<i64> {
         a.iter().map(|&v| i64::from(v)).collect()
@@ -1343,7 +1343,7 @@ mod integration {
             let lookup = lookup_of(None);
             attribute_kernel::resolve(None, &lookup, &source_value("sop/adjacency", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), geometry), ("component".into(), text("next_vertex"))].into()))
         };
-        for geometry in [Value::No_geo, Value::Deferred(ty::geometry(), 7)] {
+        for geometry in [Value::NoGeo, Value::Deferred(ty::geometry(), 7)] {
             assert_eq!(resolve(geometry).err().unwrap().code, "E_DATA_SOURCE");
         }
     }
@@ -1470,7 +1470,7 @@ mod integration {
         refused(lookup_of(None), count(handle(7), "points"), "E_DATA_SOURCE");
         refused(
             lookup_of(None),
-            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), Value::No_geo), ("component".into(), text("a"))].into()),
+            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), Value::NoGeo), ("component".into(), text("a"))].into()),
             "E_DATA_SOURCE",
         );
         refused(lookup_of(Some(geometry.clone())), count(handle(7), "detail"), "E_TOPOLOGY_COUNT");

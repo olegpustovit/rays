@@ -1,7 +1,7 @@
 ; Whole Distance Along Geometry draft: edge lengths, graph/shortest_paths, then the soft falloff per point.
 (defn distance_along_error :context value [(reason : text)]
   (error "invalid_distance" "distance_along_geometry could not produce valid geometry"
-    :cause (str "distance_along_geometry [invalid_distance]: Rdk.Transform_ops.distance_along_geometry: " reason)))
+    :cause (str "distance_along_geometry [invalid_distance]: sop/distance_along_geometry: " reason)))
 (defnode sop/distance_along_geometry :label "Distance Along Geometry" :category ["Attribute" "Distance"]
   :validate (and (and (and (not (< radius 0.0)) (not (and (equal? radius_mode "Fixed") (= radius 0.0))))
                       (not (and (text/blank? distance_attribute) (text/blank? mask_attribute))))
@@ -9,6 +9,7 @@
                       (not (and (not (text/blank? distance_attribute))
                                 (equal? (text/trim distance_attribute) (text/trim mask_attribute))))))
   :code "E_PARAM" :message "sop/distance_along_geometry: invalid radius or output names"
+  :description "Measure shortest-path distances along geometry edges with optional falloff."
   [(in0 : geometry)
    (start_owner : text "Point" :label "Start group type" :choices ["Point" "Vertex" "Primitive" "Edge"])
    (start_group : text "start" :label "Start group")
@@ -17,7 +18,7 @@
    (affected_group : text "" :label "Affected group" :folder "Affected")
    (falloff : text "Linear" :label "Falloff" :choices ["Linear" "Quadratic" "Cubic"])
    (radius_mode : text "Maximum distance" :label "Radius" :choices ["Fixed" "Maximum distance"])
-   (radius : float 1.0 :label "Fixed radius" :min 0.0001 :max 1000 :hard_min 0)
+   (radius : float 1.0 :label "Fixed radius" :min 0.0001 :max 1000 :hard_min 0 :unit "m")
    (distance_attribute : text "distance" :label "Distance attribute" :folder "Output")
    (mask_attribute : text "" :label "Mask attribute" :folder "Output")]
   (let* [start_source (text/lower start_owner)

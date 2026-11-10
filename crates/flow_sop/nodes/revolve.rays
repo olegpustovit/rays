@@ -36,22 +36,23 @@
   :validate (revolve_valid revolve_type connectivity divisions start_angle end_angle caps
               uv_attribute axis_x axis_y axis_z)
   :code "E_PARAM" :message "sop/revolve: invalid parameters"
+  :description "Revolve curves around an axis to create polygon surfaces and caps."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
    (revolve_type : text "Closed" :label "Revolve type" :choices ["Closed" "Open arc"])
    (connectivity : text "Quads" :label "Connectivity"
      :choices ["Points" "Rows" "Columns" "Rows and columns" "Quads" "Triangles"
                "Alternating triangles" "Reverse triangles"])
-   (start_angle : float 0.0 :label "Start angle" :min -6.283185307179586 :max 6.283185307179586)
-   (end_angle : float 6.283185307179586 :label "End angle" :min -6.283185307179586 :max 6.283185307179586)
+   (start_angle : float 0.0 :label "Start angle" :min -6.283185307179586 :max 6.283185307179586 :unit "rad")
+   (end_angle : float 6.283185307179586 :label "End angle" :min -6.283185307179586 :max 6.283185307179586 :unit "rad")
    (reverse_cross_sections : bool false :label "Reverse cross sections")
    (caps : bool false :label "End caps")
    (cap_group : text "caps" :label "Cap group")
    (uv_attribute : text "uv" :label "UV attribute")
    (divisions : int 32 :label "Divisions" :min 2 :max 512 :hard_min 1)
-   (origin_x : float 0.0 :label "Origin X" :folder ["Axis" "Origin"] :min -100 :max 100 :vec3 ["origin" 0])
-   (origin_y : float 0.0 :label "Origin Y" :folder ["Axis" "Origin"] :min -100 :max 100 :vec3 ["origin" 1])
-   (origin_z : float 0.0 :label "Origin Z" :folder ["Axis" "Origin"] :min -100 :max 100 :vec3 ["origin" 2])
+   (origin_x : float 0.0 :unit "m" :label "Origin X" :folder ["Axis" "Origin"] :min -100 :max 100 :vec3 ["origin" 0])
+   (origin_y : float 0.0 :unit "m" :label "Origin Y" :folder ["Axis" "Origin"] :min -100 :max 100 :vec3 ["origin" 1])
+   (origin_z : float 0.0 :unit "m" :label "Origin Z" :folder ["Axis" "Origin"] :min -100 :max 100 :vec3 ["origin" 2])
    (axis_x : float 0.0 :label "Axis X" :folder ["Axis" "Direction"] :min -1 :max 1 :vec3 ["axis" 0])
    (axis_y : float 1.0 :label "Axis Y" :folder ["Axis" "Direction"] :min -1 :max 1 :vec3 ["axis" 1])
    (axis_z : float 0.0 :label "Axis Z" :folder ["Axis" "Direction"] :min -1 :max 1 :vec3 ["axis" 2])]

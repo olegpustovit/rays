@@ -3,7 +3,7 @@
 ; output range. Unselected rows keep the destination's values (a new destination starts at zero).
 (defn remap_fail :context value [(reason : text)]
   (error "invalid_remap" "attribute_remap could not produce valid geometry"
-    :cause (str "attribute_remap [invalid_remap]: Rdk.Attribute_ops.remap: " reason)))
+    :cause (str "attribute_remap [invalid_remap]: sop/attribute_remap: " reason)))
 (defn remap_dimension :context value [(kind : text)]
   (case kind "Scalar" 1 "Vector 2" 2 "Vector 3" 3 :else 4))
 (defn remap_validate :context value
@@ -52,6 +52,7 @@
   :validate (remap_validate owner name (text/trim into) group kind input_range input_min_x input_min_y input_min_z
               input_min_w input_max_x input_max_y input_max_z input_max_w ramp)
   :code "E_PARAM" :message "sop/attribute_remap: invalid parameters"
+  :description "Rescale attribute components through input ranges, ramps and output ranges."
   [(in0 : geometry)
    (owner : text "Point" :label "Owner" :choices ["Point" "Vertex" "Primitive" "Detail"])
    (name : text "value" :label "Source attribute")

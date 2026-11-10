@@ -82,20 +82,21 @@
                total scales))]
     {:bad bad :normals normals}))
 (defnode sop/group_edges :label "Group Edges" :category ["Group" "Create"]
+  :description "Select edges by incidence, length or angles between neighbouring faces."
   [(in0 : geometry)
    (name : text "edges" :label "Group name")
    (group : text "" :label "Primitive group")
    (incidence : text "Any" :label "Incidence" :choices ["Any" "Boundary" "Manifold" "Non-manifold"])
    (use_min_length : bool false :label "Minimum length" :folder ["Length"])
-   (min_length : float 0.0 :label "Minimum" :folder ["Length"] :min 0 :max 10 :hard_min 0)
+   (min_length : float 0.0 :unit "m" :label "Minimum" :folder ["Length"] :min 0 :max 10 :hard_min 0)
    (use_max_length : bool false :label "Maximum length" :folder ["Length"])
-   (max_length : float 1.0 :label "Maximum" :folder ["Length"] :min 0 :max 10 :hard_min 0)
+   (max_length : float 1.0 :unit "m" :label "Maximum" :folder ["Length"] :min 0 :max 10 :hard_min 0)
    (angle_basis : text "Primitive dihedral" :label "Angle basis" :folder ["Angle"]
      :choices ["Primitive dihedral" "Incident edges"])
    (use_min_angle : bool false :label "Minimum angle" :folder ["Angle"])
-   (min_angle : float 0.0 :label "Minimum" :folder ["Angle"] :min 0 :max 3.141592653589793)
+   (min_angle : float 0.0 :unit "rad" :label "Minimum" :folder ["Angle"] :min 0 :max 3.141592653589793)
    (use_max_angle : bool false :label "Maximum angle" :folder ["Angle"])
-   (max_angle : float 3.141592653589793 :label "Maximum" :folder ["Angle"] :min 0 :max 3.141592653589793)]
+   (max_angle : float 3.141592653589793 :unit "rad" :label "Maximum" :folder ["Angle"] :min 0 :max 3.141592653589793)]
   (let* [group_name (text/trim group)
          angle_filter (or use_min_angle use_max_angle)
          dihedral (equal? angle_basis "Primitive dihedral")]

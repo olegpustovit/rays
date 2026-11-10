@@ -1,4 +1,4 @@
-//! lib/flow_sop/goldens/test_fixture_codec.ml: complete storage/owner/group fixture and malformed inputs.
+//! : complete storage/owner/group fixture and malformed inputs.
 use std::sync::Arc;
 use super::{fixture_codec as codec,support::geometry_bytes};
 use rdk_core::{attribute::{self,Owner,Storage},geometry as geo,packed,topology,topology_index,group,edge_group};

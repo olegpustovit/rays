@@ -1,6 +1,7 @@
 (workspace set_vector_node
 (defnode sop/set_vector :label "Set Vector" :category ["Attribute" "Set"]
   :validate (not (text/blank? name)) :code "E_PARAM" :message "sop/set_vector: empty name"
+  :description "Write a constant three-component vector attribute."
   [(in0 : geometry)
    (owner : text "Point" :label "Owner" :choices ["Point" "Vertex" "Primitive" "Detail"])
    (name : text "v" :label "Attribute"

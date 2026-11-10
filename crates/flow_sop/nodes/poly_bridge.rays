@@ -380,6 +380,7 @@
   :validate (and (and (not (text/blank? source_group)) (not (text/blank? destination_group)))
               (and (int/ge divisions 1) (<= collinearity_tolerance 1.0)))
   :code "E_PARAM" :message "sop/poly_bridge: group names must be present, divisions positive, tolerance within [0,1]"
+  :description "Connect pairs of edge paths with aligned polygon strips."
   [(in0 : geometry)
    (source_group : text "source" :label "Source edge group")
    (destination_group : text "destination" :label "Destination edge group")

@@ -1,4 +1,4 @@
-; Whole Normal draft (Rdk.Normal_ops). Raw polygon area vectors (the fan of cross products from the
+; Whole Normal draft (sop/normals). Raw polygon area vectors (the fan of cross products from the
 ; first vertex, summed per primitive with array/segment_sum) feed three weightings; point normals are
 ; scatter-added, cusped vertex normals sum over the pairs (vertex, vertex of the same point) built
 ; from the point-vertex incidence. The authored selection is converted to the target owner and merged
@@ -7,7 +7,7 @@
 ; the existing value only with "keep original zero". Finite inputs only; non-finite sums are errors.
 (defn normals_error :context value [(reason : text)]
   (error "invalid_topology" "normals could not produce valid geometry"
-    :cause (str "normals [invalid_topology]: Rdk.Normal_ops.normals: " reason)))
+    :cause (str "normals [invalid_topology]: sop/normals: " reason)))
 (defn normals_max :context value [(v : vec3)] (max (abs v.x) (max (abs v.y) (abs v.z))))
 
 ; Fan of cross products from the first vertex, summed per primitive; polygons only.
@@ -224,12 +224,13 @@
   :facts {:elementwise none :reads ["P" "$attribute"] :writes ["$attribute"] :topology preserved :exact false}
   :validate (and (not (text/blank? attribute)) (and (>= cusp_angle 0.0) (<= cusp_angle 3.141592653589793)))
   :code "E_PARAM" :message "sop/normals: attribute must be named and cusp angle finite within [0,pi]"
+  :description "Compute point or vertex normals with weighting and cusp controls."
   [(in0 : geometry)
    (group_owner : text "Point" :label "Group type" :folder ["Selection"] :choices ["Point" "Vertex" "Primitive" "Edge"])
    (group : text "" :label "Group" :folder ["Selection"])
    (owner : text "Vertex" :label "Add normals to" :choices ["Point" "Vertex" "Primitive" "Detail"])
    (weighting : text "Vertex angle" :label "Weighting" :choices ["Vertex angle" "Each vertex" "Face area"])
-   (cusp_angle : float 3.141592653589793 :label "Cusp angle" :min 0 :max 3.141592653589793 :hard_min 0 :hard_max 3.141592653589793)
+   (cusp_angle : float 3.141592653589793 :unit "rad" :label "Cusp angle" :min 0 :max 3.141592653589793 :hard_min 0 :hard_max 3.141592653589793)
    (keep_original_zero : bool false :label "Keep original zero normals")
    (reverse : bool false :label "Reverse normals")
    (attribute : text "N" :label "Attribute" :folder ["Attributes"])]

@@ -1265,6 +1265,7 @@
                  (and (and (= (- crease_weight crease_weight) 0.0) (>= crease_weight 0.0))
                       (or generate_resulting_creases (text/blank? (text/trim resulting_crease_group)))))
   :code "E_PARAM" :message "sop/subdivide: invalid parameters"
+  :description "Subdivide polygon surfaces with crease and attribute interpolation controls."
   [(input : geometry)
    (creases : geometry :required false)
    (group : text "" :label "Primitive group")

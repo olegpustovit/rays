@@ -29,6 +29,7 @@
   :category ["Attribute" "Manage"]
   :validate (reduce (fn [valid row]
     (rename_attributes_rewrite_validate (nth row 1) (nth row 2))) true (text/table_decode rules))
+  :description "Rename attributes using owner-specific pattern and replacement rules."
   [(in0 : geometry)
    (rules : text "" :label "Rules (owner, pattern, replacement, conflict)" :kind encoded
      :normalize rename_attributes_normalize)]

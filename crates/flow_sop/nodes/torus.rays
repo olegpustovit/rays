@@ -3,7 +3,7 @@
 ; connectivity names its point, normal and UV; the V end cap strip and the two U end caps follow the surface.
 (defn torus_error :context value [(reason : text)]
   (error "invalid_parameter" "torus could not produce valid geometry"
-    :cause (str "torus [invalid_parameter]: Rdk.Parametric_generators.torus: " reason)))
+    :cause (str "torus [invalid_parameter]: sop/torus: " reason)))
 (defn torus_cmul :context value [(left : int) (right : int) (limit : int)]
   (cond (or (int/lt left 0) (int/lt right 0)) -1
         (int/eq left 0) 0
@@ -48,6 +48,7 @@
                   (and (and major.valid (and minor.valid (and (> major.value 0.0) (> minor.value 0.0))))
                     (and (and u_span.valid (not (= u_span.value 0.0))) (and v_span.valid (not (= v_span.value 0.0))))))))
   :code "E_PARAM" :message "sop/torus: counts, radii, scale and angle spans must be valid"
+  :description "Create a torus surface with optional partial arcs and end caps."
   [(connectivity : text "Triangles" :label "Connectivity"
      :choices ["Triangles" "Alternating triangles" "Quads" "Rows" "Columns" "Rows and columns" "Points"])
    (normals_mode : text "Explicit" :label "Normals mode" :choices ["Explicit" "Auto"])
@@ -60,17 +61,17 @@
    (axis_x : float 0.0 :label "Axis X" :folder ["Transform" "Axis"] :min -1 :max 1 :vec3 ["axis" 0])
    (axis_y : float 1.0 :label "Axis Y" :folder ["Transform" "Axis"] :min -1 :max 1 :vec3 ["axis" 1])
    (axis_z : float 0.0 :label "Axis Z" :folder ["Transform" "Axis"] :min -1 :max 1 :vec3 ["axis" 2])
-   (rotation_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
+   (rotate_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
      :choices ["XYZ" "XZY" "YXZ" "YZX" "ZXY" "ZYX"])
-   (major_radius : float 1.0 :label "Major radius" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true)
-   (minor_radius : float 0.25 :label "Minor radius" :folder ["Size"] :min 0.01 :max 5 :hard_min 0 :primary true)
+   (major_radius : float 1.0 :unit "m" :label "Major radius" :folder ["Size"] :min 0.01 :max 10 :hard_min 0 :primary true)
+   (minor_radius : float 0.25 :unit "m" :label "Minor radius" :folder ["Size"] :min 0.01 :max 5 :hard_min 0 :primary true)
    (uniform_scale : float 1.0 :label "Uniform scale" :folder ["Size"] :min 0.01 :max 10 :hard_min 0)
-   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0])
-   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1])
-   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2])
-   (rotation_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 0])
-   (rotation_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 1])
-   (rotation_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 2])
+   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+   (rotate_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 0] :unit "rad")
+   (rotate_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 1] :unit "rad")
+   (rotate_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 2] :unit "rad")
    (u_start : float 0.0 :label "U start" :folder ["Arc" "U"] :min -6.283185 :max 6.283185)
    (u_end : float 6.283185307179586 :label "U end" :folder ["Arc" "U"] :min -6.283185 :max 6.283185)
    (v_start : float 0.0 :label "V start" :folder ["Arc" "V"] :min -6.283185 :max 6.283185)
@@ -131,7 +132,7 @@
          v_cosine (exact (map (fn [(i : int)] (cos (v_angle i))) (array/range columns :type int)))
          u_param (exact (map (fn [(i : int)] (/ (float i) u_divisor)) (array/range rows :type int)))
          v_param (exact (map (fn [(i : int)] (/ (float i) v_divisor)) (array/range columns :type int)))
-         frame (gen_frame orientation [axis_x axis_y axis_z] [rotation_x rotation_y rotation_z] rotation_order)
+         frame (gen_frame orientation [axis_x axis_y axis_z] [rotate_x rotate_y rotate_z] rotate_order)
          comb (fn [(v : vec3)]
            [(fma frame.t.x v.z (fma frame.p.x v.y (* frame.r.x v.x)))
             (fma frame.t.y v.z (fma frame.p.y v.y (* frame.r.y v.x)))

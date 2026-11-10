@@ -14,6 +14,7 @@
   :category ["Attribute" "Manage"]
   :validate (and (and (metadata_delete_validate point_pattern) (metadata_delete_validate vertex_pattern))
     (and (metadata_delete_validate primitive_pattern) (metadata_delete_validate detail_pattern)))
+  :description "Remove attributes matching the selected owner and name patterns."
   [(input : geometry) (reference : geometry :required false)
    (delete_non_selected : bool false :label "Delete non-selected")
    (point_pattern : text "" :label "Point attributes" :folder ["Patterns"])

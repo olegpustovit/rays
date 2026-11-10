@@ -214,6 +214,7 @@
 (defnode sop/attribute_laplacian :label "Attribute Laplacian" :category ["Attribute" "Filter"]
   :validate (not (equal? (text/trim output) "P"))
   :code "E_PARAM" :message "sop/attribute_laplacian: output must be non-empty and not P"
+  :description "Compute a uniform or cotangent Laplacian of point attributes."
   [(in0 : geometry)
    (point_group : text "" :label "Point group")
    (weighting : text "Cotangent" :label "Weighting" :choices ["Cotangent" "Positive cotangent" "Uniform"])

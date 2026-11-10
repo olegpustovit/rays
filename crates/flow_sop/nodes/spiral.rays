@@ -4,7 +4,7 @@
 ; four Newton steps (one map per step), and frames, quaternions and distances follow from positions.
 (defn spiral_error :context value [(reason : text)]
   (error "invalid_parameter" "spiral could not produce valid geometry"
-    :cause (str "spiral [invalid_parameter]: Rdk.Spiral.spiral: " reason)))
+    :cause (str "spiral [invalid_parameter]: sop/spiral: " reason)))
 ; One half of a "position:value" knot: the number, valid only for two colon-separated parts.
 (defn spiral_part :context value [(token : text) (index : int)]
   (let* [parts (text/split token ":")]
@@ -89,15 +89,16 @@
                         (equal? radius_mode "Logarithmic end") (and (> start_radius 0.0) (> end_radius 0.0))
                         :else true))))
   :code "E_PARAM" :message "sop/spiral: invalid extent, radius or scale"
+  :description "Create spiral curves with configurable radius, pitch and height ramps."
   [(extent_mode : text "Turns and height" :label "Extent" :choices ["Turns and height" "Height and pitch"])
    (turns : float 3.0 :label "Turns" :folder ["Extent"] :min 0.01 :max 20 :hard_min 0)
-   (height : float 2.0 :label "Height" :folder ["Extent"] :min -20 :max 20)
-   (pitch : float 0.6666666666666666 :label "Pitch" :folder ["Extent"] :min -10 :max 10)
+   (height : float 2.0 :label "Height" :folder ["Extent"] :min -20 :max 20 :unit "m")
+   (pitch : float 0.6666666666666666 :unit "m" :label "Pitch" :folder ["Extent"] :min -10 :max 10)
    (radius_mode : text "Archimedean change" :label "Radius model"
      :choices ["Archimedean change" "Archimedean end" "Logarithmic change" "Logarithmic end"])
-   (start_radius : float 1.0 :label "Start radius" :folder ["Radius"] :min 0.001 :max 10 :hard_min 0)
-   (radius_change : float 0.0 :label "Increase per turn" :folder ["Radius"] :min -5 :max 5)
-   (end_radius : float 1.0 :label "End radius" :folder ["Radius"] :min 0.001 :max 10 :hard_min 0)
+   (start_radius : float 1.0 :unit "m" :label "Start radius" :folder ["Radius"] :min 0.001 :max 10 :hard_min 0)
+   (radius_change : float 0.0 :unit "m" :label "Increase per turn" :folder ["Radius"] :min -5 :max 5)
+   (end_radius : float 1.0 :unit "m" :label "End radius" :folder ["Radius"] :min 0.001 :max 10 :hard_min 0)
    (logarithmic_scale : float 1.0 :label "Scale per turn" :folder ["Radius"] :min 0.01 :max 4 :hard_min 0)
    (height_ramp : text "" :label "Height ramp"
      :description "Comma-separated position:value knots; blank is unset, one knot is constant, multiple knots span 0 through 1."
@@ -109,7 +110,7 @@
      :code "E_PARAM" :message "sop/spiral: invalid radius ramp")
    (radius_scale : float 1.0 :label "Radius scale" :folder ["Radius"] :min 0.01 :max 10 :hard_min 0)
    (direction : text "Counterclockwise" :label "Direction" :choices ["Counterclockwise" "Clockwise"])
-   (start_angle : float 0.0 :label "Start angle" :min -6.283185307179586 :max 6.283185307179586)
+   (start_angle : float 0.0 :label "Start angle" :min -6.283185307179586 :max 6.283185307179586 :unit "rad")
    (divisions_mode : text "Per turn" :label "Divisions" :choices ["Per curve" "Per turn"])
    (divisions : int 32 :label "Division count" :min 2 :max 512 :hard_min 1
      :validate (let* [segments (spiral_segments divisions_mode (spiral_turns extent_mode turns height pitch) divisions)
@@ -126,13 +127,13 @@
    (axis_x : float 0.0 :label "Axis X" :folder ["Transform" "Custom axis"] :min -1 :max 1 :vec3 ["axis" 0])
    (axis_y : float 1.0 :label "Axis Y" :folder ["Transform" "Custom axis"] :min -1 :max 1 :vec3 ["axis" 1])
    (axis_z : float 0.0 :label "Axis Z" :folder ["Transform" "Custom axis"] :min -1 :max 1 :vec3 ["axis" 2])
-   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0])
-   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1])
-   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2])
-   (rotation_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 0])
-   (rotation_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 1])
-   (rotation_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotation" 2])
-   (rotation_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
+   (center_x : float 0.0 :label "Center X" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 0] :unit "m")
+   (center_y : float 0.0 :label "Center Y" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 1] :unit "m")
+   (center_z : float 0.0 :label "Center Z" :folder ["Transform" "Center"] :min -10 :max 10 :vec3 ["center" 2] :unit "m")
+   (rotate_x : float 0.0 :label "Rotate X" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 0] :unit "rad")
+   (rotate_y : float 0.0 :label "Rotate Y" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 1] :unit "rad")
+   (rotate_z : float 0.0 :label "Rotate Z" :folder ["Transform" "Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 2] :unit "rad")
+   (rotate_order : text "XYZ" :label "Rotation order" :folder ["Transform" "Rotate"]
      :choices ["XYZ" "XZY" "YXZ" "YZX" "ZXY" "ZYX"])
    (uniform_scale : float 1.0 :label "Uniform scale" :folder ["Transform"] :min 0.01 :max 10 :hard_min 0)
    (angle_attribute : text "" :label "Angle" :folder ["Attributes"])
@@ -246,7 +247,7 @@
              local_height (exact (map (fn [(u : float)] (* (height_at u) uniform_scale)) t_values))
              base_sine (exact (map (fn [(a : float)] (sin a)) angles))
              base_cosine (exact (map (fn [(a : float)] (cos a)) angles))
-             frame (gen_frame orientation [axis_x axis_y axis_z] [rotation_x rotation_y rotation_z] rotation_order)
+             frame (gen_frame orientation [axis_x axis_y axis_z] [rotate_x rotate_y rotate_z] rotate_order)
              phase_sine (exact (map (fn [(s : int)] (sin (/ (* (* 2.0 pi_value) (float s)) (float spiral_count)))) (array/range spiral_count :type int)))
              phase_cosine (exact (map (fn [(s : int)] (cos (/ (* (* 2.0 pi_value) (float s)) (float spiral_count)))) (array/range spiral_count :type int)))
              all (array/range total :type int)

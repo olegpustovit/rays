@@ -424,6 +424,7 @@
                (ps_range total) owner))} :owner "point" :type float_array)))))
 
 (defnode sop/point_split :label "Point Split" :category ["Topology" "Point"]
+  :description "Split shared points at selected corners or attribute seams."
   [(in0 : geometry)
    (group_owner : text "Point" :label "Group type" :choices ["Point" "Vertex" "Primitive" "Edge"])
    (group : text "" :label "Group"

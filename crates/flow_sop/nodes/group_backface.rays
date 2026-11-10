@@ -18,11 +18,12 @@
         (exact (map (fn [(a : int) (b : int)] (int/and a b)) fixed
                  (sop/group geo :name base_name :owner "primitive")))))))
 (defnode sop/group_backface :label "Group Backfaces" :category ["Group" "Create"]
+  :description "Select polygons whose normals face away from a viewpoint."
   [(in0 : geometry)
    (name : text "backface" :label "Group name")
-   (viewpoint_x : float 0.0 :label "Viewpoint X" :folder ["Viewpoint"] :min -100 :max 100 :vec3 ["viewpoint" 0])
-   (viewpoint_y : float 0.0 :label "Viewpoint Y" :folder ["Viewpoint"] :min -100 :max 100 :vec3 ["viewpoint" 1])
-   (viewpoint_z : float 10.0 :label "Viewpoint Z" :folder ["Viewpoint"] :min -100 :max 100 :vec3 ["viewpoint" 2])
+   (viewpoint_x : float 0.0 :unit "m" :label "Viewpoint X" :folder ["Viewpoint"] :min -100 :max 100 :vec3 ["viewpoint" 0])
+   (viewpoint_y : float 0.0 :unit "m" :label "Viewpoint Y" :folder ["Viewpoint"] :min -100 :max 100 :vec3 ["viewpoint" 1])
+   (viewpoint_z : float 10.0 :unit "m" :label "Viewpoint Z" :folder ["Viewpoint"] :min -100 :max 100 :vec3 ["viewpoint" 2])
    (base : text "" :label "Base group" :folder ["Combine"])
    (merge : text "Replace" :label "Operation" :folder ["Combine"]
      :choices ["Replace" "Union" "Intersection" "Subtract" "Exclusive or"])]

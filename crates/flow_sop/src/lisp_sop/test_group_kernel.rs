@@ -39,7 +39,7 @@ fn text(s: &str) -> Value {
 }
 
 fn ints(a: &[i64]) -> Value {
-    Value::Int_array(Arc::new(a.to_vec()))
+    Value::IntArray(Arc::new(a.to_vec()))
 }
 
 fn edge_count(g: &geo::T) -> i64 {
@@ -228,7 +228,7 @@ fn native_owner_masks(defnode_round_trip: bool) {
             let mask_value = ints(&mask);
             assert!(query(&expected, owner, "selected", None) == mask_value);
             // the query hands out a copy: changing it leaves the geometry's group alone
-            if let Value::Int_array(data) = query(&expected, owner, "selected", None) {
+            if let Value::IntArray(data) = query(&expected, owner, "selected", None) {
                 let mut copy = (*data).clone();
                 copy.iter_mut().for_each(|v| *v = 0);
             }
@@ -250,7 +250,7 @@ fn wildcard_names_and_refusals() {
             let compiled = ok(rdk_core::attribute_pattern::compile(pattern));
             let printed = flow_syntax::lisp::quote_string(pattern.as_bytes());
             let expected: Vec<Vec<u8>> = names.iter().filter(|n| rdk_core::attribute_pattern::matches(&compiled, n)).map(|n| n.as_bytes().to_vec()).collect();
-            exact(&g, &format!("(sop/group_names geo {printed} :owner {owner})"), &Value::Text_array(Arc::new(expected.into())));
+            exact(&g, &format!("(sop/group_names geo {printed} :owner {owner})"), &Value::TextArray(Arc::new(expected.into())));
         }
     }
     let mut s = create_session();
@@ -457,8 +457,8 @@ fn group_frame_folds_recook_exact_masks() {
 #[test]
 fn glob_literal_rewrite_and_group_entries() {
     let geometry = fixtures().remove(1);
-    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_literal value)) (array/text 5001 "a*"))"#, &Value::Text_array(Arc::new(vec![b"a\\*".to_vec(); 5001].into())));
-    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_rewrite "a*" "b*" value)) (array/text 5001 "a猫"))"#, &Value::Text_array(Arc::new(vec!["b猫".as_bytes().to_vec(); 5001].into())));
+    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_literal value)) (array/text 5001 "a*"))"#, &Value::TextArray(Arc::new(vec![b"a\\*".to_vec(); 5001].into())));
+    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_rewrite "a*" "b*" value)) (array/text 5001 "a猫"))"#, &Value::TextArray(Arc::new(vec!["b猫".as_bytes().to_vec(); 5001].into())));
     let cat = catalog0();
     let checker = |c: &flow_check::catalog::Catalog, forms: &[syntax::Syntax]| flow_check::workspace::check(operators::all(), false, false, None, c, forms);
     let forms = parse(
@@ -605,7 +605,7 @@ fn ordinary_group_byte_masks_preserve_immutable_storage() {
                 for domains in [1i64, 4, 8] {
                     parallel::run_unit(Some(domains), &|| {
                         match query(&geometry, owner, "bytes", None) {
-                            Value::Int_array(actual) => {
+                            Value::IntArray(actual) => {
                                 assert!(*actual == expected);
                                 // the array is a copy: flipping it must not reach the group
                                 if length > 0 {
@@ -680,7 +680,7 @@ fn promotion_matches(n: i64, owner: &str, native_owner: Option<group::Owner>, se
                         assert!(native_promoted(&geometry, owner, "promoted", grain) == expected);
                     }
                     assert!(flow_ok(promoted_query(&geometry, owner, "promoted")) == expected);
-                    if let Value::Int_array(values) = flow_ok(promoted_query(&geometry, owner, "promoted")) {
+                    if let Value::IntArray(values) = flow_ok(promoted_query(&geometry, owner, "promoted")) {
                         if n > 0 {
                             let mut copy = (*values).clone();
                             copy[0] = 1 - copy[0];
@@ -805,7 +805,7 @@ fn promotion_origin_defnodes_cook_the_promoted_mask() {
                 let output = cook(&mut s, domains, &node);
                 assert!(node::facts(&node).reads == ["P"]);
                 match (attribute::storage(&geo::find_attribute(Owner::Point, "mark", &output).unwrap()), &expected) {
-                    (Ok(Storage::Int(actual)), Value::Int_array(expected)) => assert!(actual == *expected),
+                    (Ok(Storage::Int(actual)), Value::IntArray(expected)) => assert!(actual == *expected),
                     _ => panic!("mark is not the promoted mask"),
                 }
             }

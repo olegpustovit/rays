@@ -1,4 +1,4 @@
-; Whole-node draft. Separate Pieces (Rdk.Separate_pieces): Separate packs the pieces named by an integer or text
+; Whole-node draft. Separate Pieces (sop/separate_pieces): Separate packs the pieces named by an integer or text
 ; attribute along an axis, each after the previous one's far end plus a gap, storing each element's translation;
 ; Move back subtracts a stored translation. The placement cursor is an `iterate` over the pieces with record state;
 ; the native "nudge up to 8 ulps until the piece clears the cursor" is a counted inner iterate of float/next_after.
@@ -203,6 +203,7 @@
                                    (plane (exact (map sp_py positions)) ty)
                                    (plane (exact (map sp_pz positions)) tz)))))
 (defnode sop/separate_pieces :label "Separate Pieces" :category ["Modify" "Pieces"]
+  :description "Space attribute-defined pieces along an axis or restore their stored positions."
   [(in0 : geometry)
    (owner : text "Primitive" :label "Piece owner" :choices ["Point" "Primitive"])
    (piece_attribute : text "piece" :label "Piece attribute")
@@ -210,7 +211,7 @@
    (axis_x : float 1.0 :label "Axis X" :folder ["Axis"] :min -1 :max 1 :vec3 ["axis" 0])
    (axis_y : float 0.0 :label "Axis Y" :folder ["Axis"] :min -1 :max 1 :vec3 ["axis" 1])
    (axis_z : float 0.0 :label "Axis Z" :folder ["Axis"] :min -1 :max 1 :vec3 ["axis" 2])
-   (gap : float 0.001 :label "Gap" :min 0 :max 1 :hard_min 0)
+   (gap : float 0.001 :unit "m" :label "Gap" :min 0 :max 1 :hard_min 0)
    (mode : text "Separate" :label "Mode" :choices ["Separate" "Move back"])]
   (let* [owner_name (if (equal? owner "Point") "point" "primitive")]
     (cond

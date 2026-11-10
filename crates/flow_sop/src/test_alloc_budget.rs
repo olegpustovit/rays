@@ -177,7 +177,7 @@ fn aliased_store_allocations() {
         locals: vec![Ty::Int, list.clone(), list.clone(), Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Record(vec![("original".into(), list.clone()), ("alias".into(), list)])],
         body: vec![
             statement(0, c::StatementNode::Assign(0, c::Expr::Constant(0))),
-            statement(1, c::StatementNode::Assign(1, c::Expr::Prim(c::Primitive::Sequence_build, vec![("count".into(), 0)]))),
+            statement(1, c::StatementNode::Assign(1, c::Expr::Prim(c::Primitive::SequenceBuild, vec![("count".into(), 0)]))),
             statement(2, c::StatementNode::Assign(2, c::Expr::Local(1))),
             statement(3, c::StatementNode::Assign(3, c::Expr::Constant(1))),
             statement(4, c::StatementNode::Counted {

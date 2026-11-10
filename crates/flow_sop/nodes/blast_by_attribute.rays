@@ -25,6 +25,7 @@
 (defnode sop/blast_by_attribute :label "Blast by Attribute" :category ["Topology" "Delete"]
   :validate (blast_by_attribute_validate attribute owner mode threshold minimum maximum center width
               output output_group remove_unused_points)
+  :description "Select or delete elements by attribute values and thresholds."
   [(in0 : geometry)
    (owner : text "Points" :label "Owner" :choices ["Points" "Primitives"])
    (attribute : text "mask" :label "Attribute")
@@ -32,8 +33,8 @@
    (threshold : float 0.5 :label "Threshold" :folder ["Comparison" "Below"] :min -10 :max 10)
    (minimum : float 0.0 :label "Minimum" :folder ["Comparison" "Range"] :min -10 :max 10)
    (maximum : float 1.0 :label "Maximum" :folder ["Comparison" "Range"] :min -10 :max 10)
-   (center : float 0.5 :label "Center" :folder ["Comparison" "Width"] :min -10 :max 10)
-   (width : float 0.5 :label "Width" :folder ["Comparison" "Width"] :min 0 :max 10 :hard_min 0)
+   (center : float 0.5 :label "Center" :folder ["Comparison" "Width"] :min -10 :max 10 :unit "m")
+   (width : float 0.5 :label "Width" :folder ["Comparison" "Width"] :min 0 :max 10 :hard_min 0 :unit "m")
    (group : text "" :label "Base group")
    (invert : bool false :label "Invert selection")
    (output : text "Delete elements" :label "Output" :choices ["Delete elements" "Create group"])

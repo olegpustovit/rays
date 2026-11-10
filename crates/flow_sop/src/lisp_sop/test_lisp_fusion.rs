@@ -53,7 +53,7 @@ fn cook_fresh(domains: i64, n: &node::T) -> Vec<u8> {
 }
 
 fn kernel_runs(profiles: &Profiles) -> usize {
-    profiles.lock().unwrap().iter().map(|p| profile::executions(p).iter().filter(|e| e.tier == Tier::Cpu_kernel).count()).sum()
+    profiles.lock().unwrap().iter().map(|p| profile::executions(p).iter().filter(|e| e.tier == Tier::CpuKernel).count()).sum()
 }
 
 fn with_attr_writes(root: &node::T) -> usize {

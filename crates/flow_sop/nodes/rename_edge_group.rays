@@ -1,5 +1,6 @@
 (workspace rename_edge_group_node
 (defnode sop/rename_edge_group :label "Rename Edge Group" :category ["Group" "Manage"]
+  :description "Rename a selected edge group."
   [(in0 : geometry) (from : text "edges" :label "From") (into : text "renamed" :label "To")]
   (sop/rename_edge in0 from into))
 )

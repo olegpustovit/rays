@@ -41,6 +41,7 @@
 (defnode sop/enumerate :label "Enumerate" :category ["Attribute" "Generate"]
   :validate (and (not (text/blank? name)) (not (and (equal? owner "Point") (equal? name "P"))))
   :code "E_PARAM" :message "sop/enumerate: invalid attribute name"
+  :description "Write sequential indices per selected element or attribute-defined piece."
   [(in0 : geometry)
    (owner : text "Point" :label "Owner" :choices ["Point" "Vertex" "Primitive"])
    (name : text "id" :label "Attribute")

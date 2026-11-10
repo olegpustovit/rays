@@ -19,6 +19,7 @@
                           (and (not (or (text/blank? workset_length_attribute) (equal? workset_length_attribute "P")))
                                (and (not (equal? workset_begin_attribute workset_length_attribute)) sort_output)))))
   :code "E_PARAM" :message "sop/graph_color: invalid attribute names or worksets without sorted output"
+  :description "Assign integer colours so neighbouring elements have different values."
   [(in0 : geometry)
    (group_owner : text "Primitive" :label "Group type" :choices ["Point" "Vertex" "Primitive" "Edge"])
    (group : text "" :label "Group")

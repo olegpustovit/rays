@@ -1,7 +1,7 @@
 ; Whole Point Velocity draft. Initialization is computed from neighbouring snapshots (backward,
 ; forward or central difference, optionally matched by an int/text point attribute), kept,
 ; set to a constant or read from an attribute; the add vector is applied last. Error codes
-; follow Rdk.Motion: invalid_attribute, missing_attribute, invalid_argument (non-finite data),
+; follow sop/point_velocity: invalid_attribute, missing_attribute, invalid_argument (non-finite data),
 ; invalid_deformation (snapshots, matching, unmatched points).
 (defn point_velocity_error :context value [(code : text) (reason : text)]
   (error code "point_velocity could not produce valid geometry"
@@ -64,6 +64,7 @@
   :validate (point_velocity_valid dt set_x set_y set_z source_scale add_x add_y add_z velocity_attribute
               acceleration_attribute compute_acceleration initialization approximation source_attribute)
   :code "E_PARAM" :message "sop/point_velocity: invalid parameters"
+  :description "Compute, set or adjust point velocities from geometry snapshots."
   [(input : geometry)
    (previous : geometry :required false)
    (next : geometry :required false)

@@ -2,6 +2,7 @@
 ; (sop/provenance_base) is the editor lowering's provenance tag base for this merge (-1: no tag).
 ; (attribute and group policy, errors and the optional provenance attribute are native's).
 (defnode sop/merge :label "Merge" :category "Copy"
+  :description "Concatenate input geometry with attribute, group and provenance policies."
   [(input : geometry :rest true)
    (source_attribute : text "" :label "Source attribute")
    (source_base : int 0 :label "Source base" :min -1000 :max 1000)]

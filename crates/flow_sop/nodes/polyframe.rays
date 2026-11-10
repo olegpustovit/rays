@@ -1,4 +1,4 @@
-; Whole PolyFrame draft (Rdk.Polyframe). Six styles over four selection owners. The point styles
+; Whole PolyFrame draft (sop/polyframe). Six styles over four selection owners. The point styles
 ; (first edge, two edges, primitive centroid) take the tangent from the point's first incident corner;
 ; Texture UV and the two gradient styles solve the per-corner uv gradient frame (tangent, bitangent)
 ; and sum it over a point's corners (Texture UV) or keep it per vertex (gradients). Every style ends
@@ -233,6 +233,7 @@
                                             (equal? (text/trim tangent_attribute) (text/trim bitangent_attribute)))))))
                      (not (and (equal? style "Attribute gradient") (text/blank? style_attribute))))))
   :code "E_PARAM" :message "sop/polyframe: output names must be distinct, nonblank and not P; gradient attribute must be named"
+  :description "Compute tangent and bitangent frames from edges, normals or UV gradients."
   [(in0 : geometry)
    (group_owner : text "Primitive" :label "Group type" :choices ["Point" "Vertex" "Primitive" "Edge"])
    (group : text "" :label "Group")

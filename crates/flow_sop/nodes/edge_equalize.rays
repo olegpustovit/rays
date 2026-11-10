@@ -70,6 +70,7 @@
       0.0)) (array/range (array/count selected) :type int)))))
 
 (defnode sop/edge_equalize :label "Edge Equalize" :category ["Topology" "Edge"]
+  :description "Relax points until selected edge lengths approach a common target."
   [(in0 : geometry)
    (group : text "" :label "Edge group")
    (method_ : text "Average" :label "Method" :choices ["Average" "Longest" "Shortest"])

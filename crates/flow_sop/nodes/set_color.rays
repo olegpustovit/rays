@@ -1,6 +1,7 @@
 (defnode sop/set_color :label "Set Color" :category ["Attribute" "Set"]
   :validate (or (not (equal? owner "Detail")) (text/blank? group))
   :code "E_PARAM" :message "sop/set_color: a detail color cannot be restricted to a group"
+  :description "Write a constant colour attribute on selected elements."
   [(in0 : geometry)
    (group : text "" :label "Group")
    (owner : text "Point" :label "Owner" :choices ["Point" "Vertex" "Primitive" "Detail"])

@@ -72,6 +72,7 @@
 (defnode sop/group_ranges :label "Group Ranges" :category ["Group" "Create"]
   :validate (>= (count (text/table_decode (gr_normalize rules))) 0)
   :code "E_PARAM" :message "sop/group_ranges: invalid rules"
+  :description "Apply an ordered table of range and connectivity selection rules."
   [(in0 : geometry)
    (rules : text "point\trange\t\tfalse\treplace\tstart_end\t0\t-1\tnone\t0\t1\t0\tnone\t\t\t0\tfalse\tedge\t\tfalse\tfalse"
      :label "Range rules" :kind encoded :normalize gr_normalize)]

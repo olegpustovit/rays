@@ -1,4 +1,4 @@
-; Whole Carve port of Curve_ops.carve_curves. Every mode is the same pipeline: a plan of whole-array
+; Carve. Every mode is the same pipeline: a plan of whole-array
 ; descriptions (output vertex rows, point and vertex carry maps, source edge spans), then `carve_finish`
 ; builds the mesh, carries payload with sop/remap (weighted maps where native interpolates) and rewrites
 ; the edge groups from the spans, because a native target edge is a member only when ALL its source edges
@@ -544,6 +544,7 @@
 (defnode sop/carve :label "Carve" :category ["Topology" "Curve"]
   :validate (and (>= first 0.0) (and (<= last 1.0) (if extract_points (<= first last) (< first last))))
   :code "E_PARAM" :message "sop/carve: parameters require 0 <= first < last <= 1 (equality allowed for extraction)"
+  :description "Trim, split or extract portions of curves by parameter or distance."
   [(in0 : geometry)
    (group : text "" :label "Primitive group")
    (relative_arc_length : bool true :label "Relative arc length")

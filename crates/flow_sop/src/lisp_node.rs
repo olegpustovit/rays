@@ -232,7 +232,7 @@ pub(crate) fn parameter_component(kind: &str, group: Symbol, value: &Value, fiel
 
 pub(crate) fn is_parameter(value: &Value) -> bool {
     matches!(value, Value::Source(g) if g.name == "$lisp/parameter" && g.fields.len() == 1
-        && matches!(g.fields.iter().next(), Some((_, Value::No_geo)))
+        && matches!(g.fields.iter().next(), Some((_, Value::NoGeo)))
         && matches!(g.ty, Ty::Bool | Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4))
 }
 
@@ -382,7 +382,7 @@ pub fn node(options: &NodeOptions, build_body: BuildFn, inputs: &[node::T]) -> R
     let kind: Arc<str> = options.kind.as_str().into();
     let slots: Arc<Vec<(Symbol, Value)>> = Arc::new(arguments(&fields, &values)?.into_iter().filter_map(|(name, value)| {
         matches!(value, Value::Bool(_) | Value::Float(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..))
-            .then(|| (name, value::source_value("$lisp/parameter", value::ty_of(&value), vec![(name, Value::No_geo)].into())))
+            .then(|| (name, value::source_value("$lisp/parameter", value::ty_of(&value), vec![(name, Value::NoGeo)].into())))
     }).collect());
     let cache: BodyCache = Arc::new(Mutex::new(None));
     // A first build specializes every value, so static nodes cook as fast as a fully constant
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn parameter_descriptors_keep_owner_trust_and_worker_snapshots() {
         let name: Symbol = "amount".into();
-        let descriptor = || value::source_value("$lisp/parameter", Ty::Float, vec![(name, Value::No_geo)].into());
+        let descriptor = || value::source_value("$lisp/parameter", Ty::Float, vec![(name, Value::NoGeo)].into());
         let outer = descriptor();
         let inner = descriptor();
         let forged = descriptor();

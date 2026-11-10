@@ -27,3 +27,6 @@ rdk_core = { path = "../rdk_core" }
 mem_sys = { path = "../mem_sys" }
 flow_graph = { path = "../flow_graph" }
 flow_web = { path = "../flow_web" }
+
+[lints]
+workspace = true

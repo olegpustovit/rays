@@ -1,5 +1,6 @@
 ; Whole-node draft; keep unregistered until every recipe and performance gate passes.
 (defnode sop/point_jitter :label "Point Jitter" :category "Point"
+  :description "Apply seeded random displacement to selected point positions."
   [(in0 : geometry)
    (group : text "" :label "Group")
    (mask_attribute : text "" :label "Mask attribute")

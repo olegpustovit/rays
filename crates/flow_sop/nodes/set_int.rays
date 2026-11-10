@@ -1,6 +1,7 @@
 (workspace set_int_node
 (defnode sop/set_int :label "Set Integer" :category ["Attribute" "Set"]
   :validate (not (text/blank? name)) :code "E_PARAM" :message "sop/set_int: empty name"
+  :description "Write a constant integer attribute on selected elements."
   [(in0 : geometry)
    (owner : text "Point" :label "Owner" :choices ["Point" "Vertex" "Primitive" "Detail"])
    (name : text "value" :label "Attribute"

@@ -4,7 +4,7 @@
 ; sop/with_attr) and a node body this size takes 10-40 s to lower per gate build. Two details are also open:
 ; P is never interpolated (a point pattern matching P is ignored) and the transfer visits attributes owner by
 ; owner, not in the source's interleaved order.
-; Whole Scatter draft (Rdk.Scatter.run): area-weighted surface sampling by Walker's alias method with a
+; Whole Scatter draft (sop/scatter): area-weighted surface sampling by Walker's alias method with a
 ; keyed hash per (index, stream), optional point/vertex/primitive/detail density, N / Cd interpolation,
 ; provenance attributes and the weighted attribute transfer of the three corner weights.
 ; Triangles come from sop/triangles (Rdk's ear clipper). The only sequential piece, the alias table, is one
@@ -12,7 +12,7 @@
 ; every step takes one small (a carried demoted large first) and tops it up from the large on the stack.
 (defn sc_error :context value [(reason : text)]
   (error "invalid_geometry" "scatter could not produce valid geometry"
-    :cause (str "scatter [invalid_geometry]: Rdk.Scatter.scatter_surface: " reason)))
+    :cause (str "scatter [invalid_geometry]: sop/scatter: " reason)))
 (defn sc_pattern_ok :context value [(pattern : text)]
   (or (text/blank? (text/trim pattern)) (equal? (text/glob_error (text/trim pattern)) "")))
 (defn sc_finite :context value [(x : float)] (= (- x x) 0.0))
@@ -635,6 +635,7 @@
                                          (and (and (text/blank? (text/trim vertex_pattern)) (text/blank? (text/trim primitive_pattern)))
                                               (text/blank? (text/trim detail_pattern)))))))))
   :code "E_PARAM" :message "sop/scatter: invalid parameters"
+  :description "Scatter weighted random points on polygon surfaces and transfer source payloads."
   [(in0 : geometry)
    (count : int 100 :label "Count" :min 1 :max 100000 :hard_min 0)
    (context_seed : bool false :label "Use context seed" :folder ["Random"])

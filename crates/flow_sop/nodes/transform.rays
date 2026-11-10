@@ -17,27 +17,27 @@
 (defn transform_matrix_finite :context value [(m : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4})]
   (and (transform_row_finite m.r0) (and (transform_row_finite m.r1)
     (and (transform_row_finite m.r2) (transform_row_finite m.r3)))))
-; Rdk.Transform_ops.compose_transform; ok is false where native refuses the parameters.
+; sop/transform; ok is false where native refuses the parameters.
 (defn transform_compose :context value
-  [(order : text) (rotation_order : text) (translate : vec3) (rotate : vec3) (scale : vec3)
-   (shear : vec3) (uniform_scale : float) (pivot : vec3) (pivot_rotation : vec3) (invert : bool)]
+  [(order : text) (rotate_order : text) (translate : vec3) (rotate : vec3) (scale : vec3)
+   (shear : vec3) (uniform_scale : float) (pivot : vec3) (pivot_rotate : vec3) (invert : bool)]
   (let* [finite (and (transform_vec_finite translate) (and (transform_vec_finite rotate)
                   (and (transform_vec_finite scale) (and (transform_vec_finite shear)
-                    (and (transform_vec_finite pivot) (and (transform_vec_finite pivot_rotation)
+                    (and (transform_vec_finite pivot) (and (transform_vec_finite pivot_rotate)
                       (transform_finite uniform_scale)))))))
          scaled (* scale uniform_scale)
          scale_shear (mat4_mul {:r0 [1.0 shear.x shear.y 0.0] :r1 [0.0 1.0 shear.z 0.0]
                                 :r2 [0.0 0.0 1.0 0.0] :r3 [0.0 0.0 0.0 1.0]} (mat4_scaling scaled))
-         rotation (transform_rotation rotation_order rotate)
+         rotate_matrix (transform_rotation rotate_order rotate)
          translation (mat4_translation translate)
          core (case order
-                "SRT" (mat4_mul translation (mat4_mul rotation scale_shear))
-                "STR" (mat4_mul rotation (mat4_mul translation scale_shear))
-                "RST" (mat4_mul translation (mat4_mul scale_shear rotation))
-                "RTS" (mat4_mul scale_shear (mat4_mul translation rotation))
-                "TSR" (mat4_mul rotation (mat4_mul scale_shear translation))
-                :else (mat4_mul scale_shear (mat4_mul rotation translation)))
-         pivot_matrix (transform_rotation rotation_order pivot_rotation)
+                "SRT" (mat4_mul translation (mat4_mul rotate_matrix scale_shear))
+                "STR" (mat4_mul rotate_matrix (mat4_mul translation scale_shear))
+                "RST" (mat4_mul translation (mat4_mul scale_shear rotate_matrix))
+                "RTS" (mat4_mul scale_shear (mat4_mul translation rotate_matrix))
+                "TSR" (mat4_mul rotate_matrix (mat4_mul scale_shear translation))
+                :else (mat4_mul scale_shear (mat4_mul rotate_matrix translation)))
+         pivot_matrix (transform_rotation rotate_order pivot_rotate)
          matrix (mat4_mul (mat4_translation pivot)
                   (mat4_mul pivot_matrix
                     (mat4_mul core
@@ -48,17 +48,17 @@
         (if (= (count inverse) 0) {:ok false :matrix (mat4_identity)}
           {:ok (transform_matrix_finite (nth inverse 0)) :matrix (nth inverse 0)})))))
 (defn transform_resolve :context value
-  [(mode : text) (matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4}) (order : text) (rotation_order : text)
+  [(mode : text) (matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4}) (order : text) (rotate_order : text)
    (translate : vec3) (rotate : vec3) (scale : vec3) (shear : vec3) (uniform_scale : float)
-   (pivot : vec3) (pivot_rotation : vec3) (invert : bool)]
+   (pivot : vec3) (pivot_rotate : vec3) (invert : bool)]
   (if (equal? mode "Matrix") {:ok (transform_matrix_finite matrix) :matrix matrix}
-    (transform_compose order rotation_order translate rotate scale shear uniform_scale pivot pivot_rotation invert)))
+    (transform_compose order rotate_order translate rotate scale shear uniform_scale pivot pivot_rotate invert)))
 (defn transform_valid :context value
-  [(mode : text) (matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4}) (order : text) (rotation_order : text)
+  [(mode : text) (matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4}) (order : text) (rotate_order : text)
    (translate : vec3) (rotate : vec3) (scale : vec3) (shear : vec3) (uniform_scale : float)
-   (pivot : vec3) (pivot_rotation : vec3) (invert : bool)]
-  (let* [resolved (transform_resolve mode matrix order rotation_order translate rotate scale shear
-                    uniform_scale pivot pivot_rotation invert)]
+   (pivot : vec3) (pivot_rotate : vec3) (invert : bool)]
+  (let* [resolved (transform_resolve mode matrix order rotate_order translate rotate scale shear
+                    uniform_scale pivot pivot_rotate invert)]
     resolved.ok))
 (defn transform_normal :context value
   [(normal_matrix : {:r0 vec4 :r1 vec4 :r2 vec4 :r3 vec4}) (preserve : bool) (n : vec3)]
@@ -166,25 +166,26 @@
 (defnode sop/transform :label "Transform" :category "Modify"
   :facts {:elementwise points :reads ["P" "N"] :writes ["P" "N"] :topology preserved :exact false}
   :validate (transform_valid mode {:r0 [m00 m01 m02 m03] :r1 [m10 m11 m12 m13] :r2 [m20 m21 m22 m23] :r3 [m30 m31 m32 m33]}
-                 order rotation_order [translate_x translate_y translate_z] [rotate_x rotate_y rotate_z]
+                 order rotate_order [translate_x translate_y translate_z] [rotate_x rotate_y rotate_z]
                  [scale_x scale_y scale_z] [shear_xy shear_xz shear_yz] uniform_scale
-                 [pivot_x pivot_y pivot_z] [pivot_rotation_x pivot_rotation_y pivot_rotation_z] invert)
+                 [pivot_x pivot_y pivot_z] [pivot_rotate_x pivot_rotate_y pivot_rotate_z] invert)
   :code "E_PARAM" :message "sop/transform: invalid transform"
+  :description "Apply translation, rotation, scale, shear or an explicit matrix to selected points."
   [(in0 : geometry)
    (mode : text "TRS" :label "Transform mode" :choices ["TRS" "Matrix"])
    (group_owner : text "Point" :label "Group type" :folder ["Selection"] :choices ["Point" "Vertex" "Primitive" "Edge"])
    (group : text "" :label "Group" :folder ["Selection"])
    (order : text "SRT" :label "Transform order" :choices ["SRT" "STR" "RST" "RTS" "TSR" "TRS"])
-   (rotation_order : text "XYZ" :label "Rotation order" :choices ["XYZ" "XZY" "YXZ" "YZX" "ZXY" "ZYX"])
+   (rotate_order : text "XYZ" :label "Rotation order" :choices ["XYZ" "XZY" "YXZ" "YZX" "ZXY" "ZYX"])
    (shear_xy : float 0.0 :label "Shear XY" :folder ["Transform" "Shear"] :min -4 :max 4)
    (shear_xz : float 0.0 :label "Shear XZ" :folder ["Transform" "Shear"] :min -4 :max 4)
    (shear_yz : float 0.0 :label "Shear YZ" :folder ["Transform" "Shear"] :min -4 :max 4)
-   (pivot_x : float 0.0 :label "Pivot X" :folder ["Transform" "Pivot"] :min -10 :max 10 :vec3 ["pivot" 0])
-   (pivot_y : float 0.0 :label "Pivot Y" :folder ["Transform" "Pivot"] :min -10 :max 10 :vec3 ["pivot" 1])
-   (pivot_z : float 0.0 :label "Pivot Z" :folder ["Transform" "Pivot"] :min -10 :max 10 :vec3 ["pivot" 2])
-   (pivot_rotation_x : float 0.0 :label "Pivot rotate X" :folder ["Transform" "Pivot rotation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["pivot_rotation" 0])
-   (pivot_rotation_y : float 0.0 :label "Pivot rotate Y" :folder ["Transform" "Pivot rotation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["pivot_rotation" 1])
-   (pivot_rotation_z : float 0.0 :label "Pivot rotate Z" :folder ["Transform" "Pivot rotation"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["pivot_rotation" 2])
+   (pivot_x : float 0.0 :unit "m" :label "Pivot X" :folder ["Transform" "Pivot"] :min -10 :max 10 :vec3 ["pivot" 0])
+   (pivot_y : float 0.0 :unit "m" :label "Pivot Y" :folder ["Transform" "Pivot"] :min -10 :max 10 :vec3 ["pivot" 1])
+   (pivot_z : float 0.0 :unit "m" :label "Pivot Z" :folder ["Transform" "Pivot"] :min -10 :max 10 :vec3 ["pivot" 2])
+   (pivot_rotate_x : float 0.0 :label "Pivot rotate X" :folder ["Transform" "Pivot rotate"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["pivot_rotate" 0] :unit "rad")
+   (pivot_rotate_y : float 0.0 :label "Pivot rotate Y" :folder ["Transform" "Pivot rotate"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["pivot_rotate" 1] :unit "rad")
+   (pivot_rotate_z : float 0.0 :label "Pivot rotate Z" :folder ["Transform" "Pivot rotate"] :min -3.141592653589793 :max 3.141592653589793 :vec3 ["pivot_rotate" 2] :unit "rad")
    (invert : bool false :label "Invert transform" :folder ["Transform"])
    (m00 : float 1.0 :label "M00" :folder ["Matrix"] :min -10 :max 10)
    (m01 : float 0.0 :label "M01" :folder ["Matrix"] :min -10 :max 10)
@@ -202,12 +203,12 @@
    (m31 : float 0.0 :label "M31" :folder ["Matrix"] :min -10 :max 10)
    (m32 : float 0.0 :label "M32" :folder ["Matrix"] :min -10 :max 10)
    (m33 : float 1.0 :label "M33" :folder ["Matrix"] :min -10 :max 10)
-   (translate_x : float 0.0 :label "Translate X" :folder ["Translate"] :min -10 :max 10 :vec3 ["translate" 0])
-   (translate_y : float 0.0 :label "Translate Y" :folder ["Translate"] :min -10 :max 10 :vec3 ["translate" 1])
-   (translate_z : float 0.0 :label "Translate Z" :folder ["Translate"] :min -10 :max 10 :vec3 ["translate" 2])
-   (rotate_x : float 0.0 :label "Rotate X" :folder ["Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 0])
-   (rotate_y : float 0.0 :label "Rotate Y" :folder ["Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 1])
-   (rotate_z : float 0.0 :label "Rotate Z" :folder ["Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 2])
+   (translate_x : float 0.0 :label "Translate X" :folder ["Translate"] :min -10 :max 10 :vec3 ["translate" 0] :unit "m")
+   (translate_y : float 0.0 :label "Translate Y" :folder ["Translate"] :min -10 :max 10 :vec3 ["translate" 1] :unit "m")
+   (translate_z : float 0.0 :label "Translate Z" :folder ["Translate"] :min -10 :max 10 :vec3 ["translate" 2] :unit "m")
+   (rotate_x : float 0.0 :label "Rotate X" :folder ["Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 0] :unit "rad")
+   (rotate_y : float 0.0 :label "Rotate Y" :folder ["Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 1] :unit "rad")
+   (rotate_z : float 0.0 :label "Rotate Z" :folder ["Rotate"] :min -3.14159 :max 3.14159 :vec3 ["rotate" 2] :unit "rad")
    (scale_x : float 1.0 :label "Scale X" :folder ["Scale"] :min 0.01 :max 10 :vec3 ["scale" 0])
    (scale_y : float 1.0 :label "Scale Y" :folder ["Scale"] :min 0.01 :max 10 :vec3 ["scale" 1])
    (scale_z : float 1.0 :label "Scale Z" :folder ["Scale"] :min 0.01 :max 10 :vec3 ["scale" 2])
@@ -217,9 +218,9 @@
   (let* [owner (text/lower group_owner)
          group_name (text/trim group)
          resolved (transform_resolve mode {:r0 [m00 m01 m02 m03] :r1 [m10 m11 m12 m13] :r2 [m20 m21 m22 m23] :r3 [m30 m31 m32 m33]}
-                    order rotation_order [translate_x translate_y translate_z] [rotate_x rotate_y rotate_z]
+                    order rotate_order [translate_x translate_y translate_z] [rotate_x rotate_y rotate_z]
                     [scale_x scale_y scale_z] [shear_xy shear_xz shear_yz] uniform_scale
-                    [pivot_x pivot_y pivot_z] [pivot_rotation_x pivot_rotation_y pivot_rotation_z] invert)
+                    [pivot_x pivot_y pivot_z] [pivot_rotate_x pivot_rotate_y pivot_rotate_z] invert)
          matrix resolved.matrix]
     (if (deform_group_missing in0 owner group_name)
       (error "missing_group" (str "transform could not find " owner " group " (text/repr group_name)))
