@@ -746,8 +746,8 @@ pub struct FrameOptions {
     pub internal: bool,
 }
 
-struct Context {
-    program: C::Program,
+struct Context<'a> {
+    program: &'a C::Program,
     body: String,
     used: HashSet<String>,
     map: Vec<(i64, flow_ir::core_ir::Span)>,
@@ -769,7 +769,7 @@ struct Context {
     kernel: Option<KernelFn>,
 }
 
-impl Context {
+impl Context<'_> {
     fn is_gpu(&self, region: i64) -> bool { self.gpu.as_ref().map(|g| g(region)).unwrap_or(false) }
     fn kernel_of(&self, region: i64) -> Option<String> { self.kernel.as_ref().and_then(|k| k(region)) }
     fn slot_of(&self, slot: i64) -> i64 { self.state_slot.as_ref().map(|f| f(slot)).unwrap_or(slot) }
@@ -826,7 +826,7 @@ fn call(primitive: &Primitive, args: &[(Symbol, i64)]) -> Result<String, Diagnos
     Ok(format!("rt.{}({})", export_name(primitive), statics.join(", ")))
 }
 
-fn expression(ctx: &mut Context, e: &Expr) -> Result<String, Diagnostic> {
+fn expression(ctx: &mut Context<'_>, e: &Expr) -> Result<String, Diagnostic> {
     Ok(match e {
         Expr::Constant(n) => format!("K[{n}]"),
         Expr::Local(n) => local(*n),
@@ -869,7 +869,7 @@ fn kind_name(mark: C::Mark) -> &'static str {
     }
 }
 
-fn draw(ctx: &mut Context, d: &Draw) -> String {
+fn draw(ctx: &mut Context<'_>, d: &Draw) -> String {
     ctx.used.insert("num".to_owned());
     match d {
         Draw::Background(c) => format!(
@@ -967,7 +967,7 @@ fn shapes_json(packed: &packed::T) -> String {
     format!("{{sources:{},uniforms:{}}}", list(host::source_shapes(packed)), list(host::uniform_shapes(packed)))
 }
 
-fn line(ctx: &mut Context, depth: usize, text: &str) {
+fn line(ctx: &mut Context<'_>, depth: usize, text: &str) {
     for _ in 0..2 * depth {
         ctx.body.push(' ');
     }
@@ -975,14 +975,14 @@ fn line(ctx: &mut Context, depth: usize, text: &str) {
     ctx.body.push('\n');
 }
 
-fn statements(ctx: &mut Context, depth: usize, list: &[Statement]) -> Result<(), Diagnostic> {
+fn statements(ctx: &mut Context<'_>, depth: usize, list: &[Statement]) -> Result<(), Diagnostic> {
     for s in list {
         statement(ctx, depth, s)?;
     }
     Ok(())
 }
 
-fn slot_key(ctx: &mut Context, slot: i64) -> String {
+fn slot_key(ctx: &mut Context<'_>, slot: i64) -> String {
     let state = &ctx.program.state_slots[slot as usize];
     let stamp = if state.plane == Plane::Host { "input.tick" } else { "input.frame" };
     let key = if state.source.iter.is_empty() {
@@ -1006,7 +1006,7 @@ fn slot_key(ctx: &mut Context, slot: i64) -> String {
     format!("cell(state, {}, {key}, {stamp})", ctx.slot_of(slot))
 }
 
-fn statement(ctx: &mut Context, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
+fn statement(ctx: &mut Context<'_>, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
     if let Some(span) = &s.source.span {
         ctx.map.push((s.id, span.clone()));
     }
@@ -1325,8 +1325,8 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
 
 fn names(a: &[i64]) -> String { a.iter().map(|n| local(*n)).collect::<Vec<_>>().join(", ") }
 
-fn resident_statement(ctx: &mut Context, options: &FrameOptions, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
-    let live = core_exec::resident_live(&ctx.program, s);
+fn resident_statement(ctx: &mut Context<'_>, options: &FrameOptions, depth: usize, s: &Statement) -> Result<(), Diagnostic> {
+    let live = core_exec::resident_live(ctx.program, s);
     match live {
         Some(live) if options.fast && !options.bindings && !options.internal => {
             ctx.is_async = true;
@@ -1348,9 +1348,7 @@ fn resident_statement(ctx: &mut Context, options: &FrameOptions, depth: usize, s
             statement(ctx, 3, s)?;
             ctx.resident = false;
             // its arrays stay on the device when what follows only ranges over and draws them
-            let program = ctx.program.clone();
-            let gpu = ctx.gpu.clone();
-            let tail = core_exec::resident_tail(&program, s, &|r| gpu.as_ref().map(|g| g(r)).unwrap_or(false));
+            let tail = core_exec::resident_tail(ctx.program, s, &|r| ctx.is_gpu(r));
             if let Some((_, ranges)) = &tail {
                 let mut merged = ranges.clone();
                 merged.extend(ctx.tail_ranges.iter().cloned());
@@ -1386,7 +1384,7 @@ pub fn frame_result(options: &FrameOptions, program: &C::Program) -> Result<(Str
         }
     }
     let mut ctx = Context {
-        program: program.clone(),
+        program,
         body: String::with_capacity(4096),
         used: HashSet::new(),
         map: Vec::new(),

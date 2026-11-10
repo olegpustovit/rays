@@ -896,10 +896,11 @@ fn print(fast: bool, image: bool, placement: Option<Placement>, program: &packed
     let compute = matches!(placement, Some(Placement::Compute(_)));
     let placed = placement.is_some();
     let raster = placed && !compute;
+    let layout = Arc::new(layout);
     let mut printer = Printer {
         fast,
         image,
-        layout: Arc::new(layout.clone()),
+        layout: layout.clone(),
         placement: placement.clone(),
         buffers,
         raster,
