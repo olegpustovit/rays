@@ -346,14 +346,19 @@ widgets! {
     /// a section header's caption and its chevron
     section,
     chevron,
-    /// an inspector, list or menu row; `checked` is the keyboard's current row
+    /// an inspector row (its label in ink-2)
     row,
+    /// a list row (picker, completion); `checked` is the keyboard's current row
+    list,
     /// a row armed for deletion
     row_doomed,
     /// a parameter row's pin dot, `checked` when the row is on its card
     pin,
-    /// a small accent mark (a message dot, the current choice's square)
+    /// the current choice's square, a message's dot
     mark,
+    notice,
+    /// an accent caption beside a name
+    badge,
     /// a text button; `checked` while it is on
     button,
     /// a quieter button (`bare`, a trailing reset)
@@ -381,6 +386,7 @@ widgets! {
     /// a menu row and a destructive one, a separator line
     menu,
     menu_danger,
+    menu_key,
     separator,
     /// a window's foot and an inspector's bar (the hairline)
     footer,
@@ -442,9 +448,17 @@ fn rays(t: &Tokens) -> Theme {
         section: States::all(Look { text: ink_3(t), font: label_font, ..n }),
         chevron: States::all(ink(t.foreground)),
         row: States { hover: Look { fill: faint_border(t), ..row }, checked: Look { fill: t.control, ..row }, ..States::all(row) },
+        list: States {
+            hover: Look { fill: faint_border(t), text: t.foreground, ..n },
+            checked: Look { fill: t.control, text: t.foreground, ..n },
+            disabled: ink(ink_3(t)),
+            ..States::all(ink(t.foreground))
+        },
         row_doomed: States::all(Look { fill: pressed_fill(t), text: invalid(), ..n }),
         pin: States { checked: Look { fill: t.foreground, ..dot }, ..States::all(Look { border: ink_3(t), border_w: 1.0, ..dot }) },
         mark: States::all(Look { fill: t.accent, ..n }),
+        notice: States::all(Look { fill: t.accent, ..dot }),
+        badge: States::all(Look { text: t.accent, font: label_font, ..n }),
         button: button(t.foreground),
         button_bare: button(ink_2(t)),
         toggle: States { hover: Look { fill: faint_border(t), text: t.foreground, ..n }, ..States::all(ink(t.foreground)) },
@@ -474,6 +488,7 @@ fn rays(t: &Tokens) -> Theme {
             disabled: ink(ink_3(t)),
             ..States::all(ink(t.invalid))
         },
+        menu_key: States::all(Look { text: ink_2(t), font: small, ..n }),
         separator: States::all(Look { fill: edge(t), ..n }),
         footer: States::all(line(edge(t), TOP)),
         header: States::all(line(edge(t), BOTTOM)),

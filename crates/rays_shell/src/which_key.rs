@@ -306,7 +306,7 @@ pub fn sheet(
         ui.within(&title, &mut |ui| {
             let holder = ui.box_("keys-close-holder", BoxOpts::default().w(Size::Px(40.0)).h(Size::Px(24.0)).at((530.0, 4.0)));
             ui.within(&holder, &mut |ui| {
-                if ui.button_with("\u{d7}###guide-close", true, true, true, Some(theme::ink_2(&theme))) {
+                if ui.button_styled("\u{d7}###guide-close", true, true, true, Some(theme::ink_2(&theme))) {
                     closed = true;
                 }
             });

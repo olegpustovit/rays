@@ -176,6 +176,9 @@ pub const CAPTURE_UNCLAIMED: Flags = 8192;
 /// the control marks its own keyboard focus: the engine strokes no ring round it
 pub const FOCUS_MARK: Flags = 256;
 pub const TAB_STOP_MARKED: Flags = TAB_STOP | FOCUS_MARK;
+/// The node's text is cut with an ellipsis to the room its look leaves (the placed width less the
+/// text inset) when it does not fit.
+pub const FIT_TEXT: Flags = 16384;
 const HIT_FLAGS: Flags = CLICKABLE | FOCUSABLE | SCROLL | BLOCKING | CAPTURE_UNCLAIMED;
 
 /// What a carry holds: a `kind` and a `value`, both strings.
@@ -327,6 +330,9 @@ impl BoxRec {
         BoxRec { key: 0, slot: 0, parent: NONE, first: NONE, last: NONE, next: NONE, hit: None, hit_rect: None, paint: arena::EMPTY, over: arena::EMPTY, view: NO_VIEW, kept: false }
     }
 }
+
+/// A transparent colour.
+const CLEAR_INK: Color = Color { r: 0, g: 0, b: 0, a: 0 };
 
 /// No view: a box that holds none, a fresh piece of a layer.
 const NO_VIEW: u32 = u32::MAX;
@@ -2254,6 +2260,33 @@ impl Ui {
         self.slots[b.box_slot].node.at = Some(at);
     }
 
+    /// Give a node declared this frame the look `look`, picked for `state` (what `node` takes, set once
+    /// its signal is known).
+    pub fn set_look(&mut self, b: &Handle, look: Look, state: State) {
+        if self.live(b) {
+            let n = &mut self.slots[b.box_slot].node;
+            (n.look, n.state) = (look, state);
+        }
+    }
+
+    /// The record of a node declared this frame, to finish declaring it once its signal is known.
+    pub fn node_mut(&mut self, b: &Handle) -> &mut Node {
+        assert!(self.live(b), "Ui.node_mut: a stale handle");
+        &mut self.slots[b.box_slot].node
+    }
+
+    /// `set_look` with the look `states` picks for `state`.
+    pub fn style(&mut self, b: &Handle, states: &States, state: State) {
+        self.set_look(b, *states.pick(state), state);
+    }
+
+    /// What the pointer and keyboard do to the node now: hovered, pressed (it holds the capture),
+    /// focused. A widget adds `checked` and `disabled`.
+    pub fn node_state(&self, b: &Handle) -> State {
+        let key = if self.live(b) { b.box_key } else { 0 };
+        State { hovered: key != 0 && self.hot == key, pressed: key != 0 && self.active == Some(key), focused: key != 0 && self.focus == key, ..State::default() }
+    }
+
     /// The handle still names the node it was made for (that node has not gone since).
     pub fn live(&self, b: &Handle) -> bool {
         self.slots.get(b.box_slot).is_some_and(|s| s.generation == b.generation && s.key == b.box_key && s.key != 0)
@@ -3112,6 +3145,20 @@ impl Paint {
             let at = (x + inset.l, text_top_for(self.font_size, Some(size), y + inset.t, h - inset.t - inset.b));
             let style = Style { font: look.font.family, size: size as f32, weight: look.font.weight, tracking: look.font.tracking * size as f32, ..Style::default() };
             let ink = Some(fade(look.text));
+            let fitted;
+            let text = if node.flags & FIT_TEXT != 0 {
+                let limit = w - inset.l - inset.r;
+                let plain = Style { tracking: 0.0, ..style };
+                if lay_out(&mut self.text, &plain, 0.0, text).1.w <= limit {
+                    text
+                } else {
+                    let shown = ellipsis(&mut |s| lay_out(&mut self.text, &plain, 0.0, s).1.w, limit, text);
+                    fitted = if shown.is_empty() && !(text.is_empty() && limit >= 0.0) { Cow::Borrowed("\u{2026}") } else { shown };
+                    &*fitted
+                }
+            } else {
+                text
+            };
             if look.font.caps {
                 let mut buffer = std::mem::take(&mut self.label);
                 buffer.clear();
@@ -3875,26 +3922,25 @@ impl Ui {
         // kit overlays [07]: a white 20-point chip with the payload in body-size ink, and under it
         // the sheet's tip with the key that drops it
         let ghost = self.box_("ui-carry-ghost", BoxOpts::default().w(Size::Px(width)).h(Size::Px(20.0)).at((px + 14.0, py + 14.0)));
-        let theme = self.theme.tokens;
-        let size = self.font_size;
-        let small = 8.max(size - 2);
+        let small = 8.max(self.font_size - 2);
         let tip_text = "drop to put";
         let tip_key = "esc";
         let tw1 = self.text_width(Some(small), tip_text);
         let tw2 = self.text_width(Some(small), tip_key);
         let tip_w = 2.0 + 12.0 + tw1 + 6.0 + tw2;
         let tip = self.box_("ui-carry-tip", BoxOpts::default().w(Size::Px(tip_w)).h(Size::Px(20.0)).at((px + 14.0, py + 14.0 + 20.0 + 8.0)));
-        let look = Look { fill: theme.input, text: theme.foreground, font: Font { size, ..Font::BODY }, ..Look::NONE };
-        self.slots[ghost.box_slot].node.look = look;
+        let t = self.theme();
+        let (ghost_look, tip_look, key_look) = (t.ghost.idle, t.tooltip.idle, t.key.idle);
+        self.set_look(&ghost, ghost_look, State::default());
         self.slots[ghost.box_slot].node.inset.l = 6.0;
         self.text(&ghost, &payload.value);
-        self.draw_over(&tip, move |paint, Rect { x, y, w, h }| {
-            paint.fill(x, y, w, h, theme.input);
-            paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
-            let ty = y + ((20 - small) as f32 / 2.0).floor();
-            paint.text_s((x + 7.0, ty), small, theme.foreground, tip_text);
-            paint.text_s((x + 7.0 + tw1 + 6.0, ty), small, theme::ink_3(&theme), tip_key);
-        });
+        self.set_look(&tip, tip_look, State::default());
+        self.slots[tip.box_slot].node.inset.l = 7.0;
+        self.text(&tip, tip_text);
+        let inner = self.enter(&tip);
+        let k = self.node_keyed(int_key(tip.box_key, 0), Node { w: Size::Px(tw2.max(1.0)), h: Size::Px(20.0), at: Some((7.0 + tw1 + 6.0, 0.0)), look: key_look, ..Node::DEFAULT });
+        self.text(&k, tip_key);
+        self.leave(inner);
         // Tooltip and ghost layers precede existing foreground entries at maximum priority.
         self.foreground.push((i64::MAX, tip.index));
         self.foreground.push((i64::MAX, ghost.index));
@@ -4099,19 +4145,14 @@ impl Ui {
         let saved = self.enter_root();
         let tip = self.box_("ui-tooltip", BoxOpts::default().w(Size::Px(width)).h(Size::Px(height)).at((x, y)));
         self.overlays.push(tip.index);
-        let theme = self.theme.tokens;
-        self.draw(&tip, move |paint, Rect { x, y, w, h }| {
-            paint.fill(x, y, w, h, theme.input);
-            paint.frame(x, y, w, h, theme::edge(&theme));
-            for (i, line) in lines.iter().enumerate() {
-                paint.text_s(
-                    (x + 7.0, y + 14.0 * i as f32 + ((20 - size) as f32 / 2.0).floor()),
-                    size,
-                    theme.foreground,
-                    line,
-                );
-            }
-        });
+        let look = self.theme().tooltip.idle;
+        self.set_look(&tip, Look { text: CLEAR_INK, ..look }, State::default());
+        let inner = self.enter(&tip);
+        for (i, line) in lines.iter().enumerate() {
+            let n = self.node_keyed(int_key(tip.box_key, i as i64), Node { w: Size::Px(width), h: Size::Px(20.0), at: Some((0.0, 14.0 * i as f32)), look: Look { fill: CLEAR_INK, border: CLEAR_INK, shadows: [Shadow::NONE; 2], ..look }, inset: Edges { l: 7.0, ..Edges::default() }, ..Node::DEFAULT });
+            self.text(&n, line);
+        }
+        self.leave(inner);
         self.leave(saved);
     }
 

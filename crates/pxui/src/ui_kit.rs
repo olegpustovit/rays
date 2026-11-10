@@ -1,7 +1,8 @@
 //! Kit widgets: a panel stacks rows of the PXUI design kit (rev 3): 24-point rows with 12 points at
 //! each side, a label column (0.3 of the panel less 16, for inspector rows), 20-point controls and
-//! the kit face. A field is a value on a hairline, a button is its text; nothing has a radius or an
-//! ink fill. Widgets must be built inside a `panel`.
+//! the kit face. Every widget reads its appearance from the theme in effect (`Ui::theme`): it declares
+//! nodes, picks each node's look from its `States` for the node's state, and the engine paints them;
+//! no standard widget paints with a closure. Widgets must be built inside a `panel`.
 use crate::theme::{self, Tokens as Theme};
 use crate::ui_core::*;
 use input::{Event, Key};
@@ -12,6 +13,41 @@ use std::borrow::Cow;
 pub type IRect = (i64, i64, i64, i64);
 
 impl Ui {
+    /// A part of a widget: a node at `at` in the current parent, `w` x `h`, with `look` and `text`
+    /// inset by `inset`. Keyed by `key` (an `int_key` of its widget's key).
+    pub(crate) fn part(&mut self, key: i64, at: (f32, f32), w: Size, h: f32, look: Look, inset: Edges, text: &str) -> Handle {
+        let n = self.node_keyed(key, Node { w, h: Size::Px(h), at: Some(at), look, inset, ..Node::DEFAULT });
+        self.text(&n, text);
+        n
+    }
+
+    /// Text whose top is exactly `at` (a part as high as its text), `w` wide.
+    pub(crate) fn text_part(&mut self, key: i64, at: (f32, f32), w: f32, look: Look, text: &str) -> Handle {
+        let size = look.font.points(self.font_size()) as f32;
+        self.part(key, at, Size::Px(w.max(1.0)), size, look, Edges::default(), text)
+    }
+
+    /// A part across its parent's whole width whose look sits where `place` puts it.
+    pub(crate) fn placed_part(&mut self, key: i64, y: f32, h: f32, place: Place, look: Look, text: &str) -> Handle {
+        let n = self.node_keyed(key, Node { h: Size::Px(h), at: Some((0.0, y)), look, place, ..Node::DEFAULT });
+        self.text(&n, text);
+        n
+    }
+
+    /// `text` cut with an ellipsis to `width` at `size` points (the ellipsis alone when nothing fits).
+    pub(crate) fn fit_text<'a>(&mut self, size: i64, width: f32, text: &'a str) -> Cow<'a, str> {
+        let shown = ellipsis(&mut |s| self.text_width(Some(size), s), width, text);
+        if shown.is_empty() && !(text.is_empty() && width >= 0.0) { Cow::Borrowed("\u{2026}") } else { shown }
+    }
+
+    /// The width a row being built was laid out at last frame (`inspector_width` before its first).
+    // ponytail: a widget whose layout depends on its row's width reads last frame's; a resize shows
+    // one frame of the old layout. Layout-time placement rules if that frame shows.
+    pub(crate) fn row_width(&self, row: &UiBox) -> f32 {
+        let w = self.rect(row).w;
+        if w > 0.0 { w } else { self.inspector_width() }
+    }
+
     pub(crate) fn kit_row(&mut self, flags: Option<Flags>, hit: Option<HitFn>, label: &str) -> UiBox {
         let flags = flags.unwrap_or(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY);
         let mut opts = BoxOpts::default().flags(flags).w(Size::Grow).h(Size::Px(self.row_height() as f32));
@@ -47,20 +83,18 @@ impl Ui {
             let width = 72.0f32.max(self.text_width(None, header) + 24.0);
             stops[i + 1] = stops[i] + width;
         }
-        let theme = self.tokens();
+        let (head_look, row_look) = (self.theme().table_head.idle, self.theme().table_row.idle);
         let root = self.box_(label, BoxOpts::default().flags(CLIP).at(at).w(Size::Px(w)).h(Size::Px(h)));
         let saved = self.enter(&root);
         let header = self.box_fmt(format_args!("{}-header", label), BoxOpts::default().w(Size::Px(w)).h(Size::Px(row_h)));
+        self.set_look(&header, head_look, State::default());
         {
-            let stops = stops.clone();
-            let headers = headers.to_vec();
-            self.draw(&header, move |paint, Rect { x, y, w: _, h: _ }| {
-                for (i, title) in headers.iter().enumerate() {
-                    let ty = paint.text_top(None, y, row_h);
-                    paint.text_c((x + stops[i] + 8.0, ty), theme::ink_2(&theme), title);
-                }
-                paint.line((x, y + row_h - 0.5), (x + w, y + row_h - 0.5), theme::border(&theme));
-            });
+            let saved = self.enter(&header);
+            for (i, title) in headers.iter().enumerate() {
+                let cell = Size::Px((stops[i + 1] - stops[i] - 8.0).max(1.0));
+                self.part(int_key(header.box_key, i as i64), (stops[i] + 8.0, 0.0), cell, row_h, text_only(&head_look), Edges::default(), title);
+            }
+            self.leave(saved);
         }
         let body_h = 0.0f32.max(h - row_h);
         let body = self.box_(
@@ -88,19 +122,15 @@ impl Ui {
             if self.signal(&row).clicked {
                 clicked = Some(index);
             }
-            let stops = stops.clone();
-            let columns = headers.len();
-            let cell = cell.clone();
-            self.draw(&row, move |paint, Rect { x, y, w: _, h: _ }| {
-                for column in 0..columns {
-                    let value = cell(index, column as i64);
-                    let right = x + stops[column + 1] - 8.0;
-                    let tw = paint.text_width(None, &value);
-                    let ty = paint.text_top(None, y, row_h);
-                    paint.text_c((right - tw, ty), theme.foreground, &value);
-                }
-                paint.line((x, y + row_h - 0.5), (x + w, y + row_h - 0.5), theme::faint_border(&theme));
-            });
+            self.set_look(&row, row_look, State::default());
+            let saved = self.enter(&row);
+            for column in 0..headers.len() {
+                let value = cell(index, column as i64);
+                let tw = self.text_width(None, &value);
+                let right = stops[column + 1] - 8.0;
+                self.part(int_key(row.box_key, column as i64), (right - tw, 0.0), Size::Px(tw.max(1.0)), row_h, text_only(&row_look), Edges::default(), &value);
+            }
+            self.leave(saved);
         }
         self.leave(saved_extent);
         self.leave(saved_body);
@@ -108,6 +138,11 @@ impl Ui {
         self.leave(saved);
         (clicked, sig)
     }
+}
+
+/// A look's text alone (colour, font, opacity): a part that carries a widget's text without its ground.
+pub fn text_only(look: &Look) -> Look {
+    Look { text: look.text, font: look.font, opacity: look.opacity, ..Look::NONE }
 }
 
 pub fn ints(r: Rect) -> IRect {
@@ -160,24 +195,6 @@ pub fn fraction_at(r: IRect, pointer_x: f32) -> f32 {
     0.0f32.max(1.0f32.min((pointer_x - x as f32) / 1.max(w - 1) as f32))
 }
 
-pub fn fill_i(paint: &mut Paint, r: IRect, color: Color) {
-    paint.fill(r.0 as f32, r.1 as f32, r.2 as f32, r.3 as f32, color);
-}
-
-pub fn kit_text(paint: &mut Paint, color: Option<Color>, x: i64, y: i64, text: &str) {
-    paint.text_with((x as f32, y as f32), None, 0.0, color, text);
-}
-
-pub fn hover_row(paint: &mut Paint, theme: &Theme, bounds: IRect) {
-    fill_i(paint, bounds, theme::faint_border(theme));
-}
-
-/// a field is a value on a hairline: accent while it holds the keyboard
-pub fn underline(paint: &mut Paint, r: IRect, color: Color) {
-    let (cx, cy, cw, ch) = r;
-    fill_i(paint, (cx, cy + ch - 1, cw, 1), color);
-}
-
 /// The kit's 28 x 14 switch at a point, on or off: what `toggle` paints.
 pub fn paint_switch(paint: &mut Paint, theme: &Theme, x: f32, y: f32, value: bool) {
     paint.fill(x, y, 28.0, 14.0, if value { theme.input } else { theme.track });
@@ -212,12 +229,6 @@ pub fn paint_button_ground(paint: &mut Paint, theme: &Theme, held: bool, hovered
     }
 }
 
-/// `ellipsis` at a text size; a text with no room at all is the ellipsis alone
-pub fn inspector_fit<'a>(paint: &mut Paint, size: i64, width: f32, text: &'a str) -> Cow<'a, str> {
-    let shown = ellipsis(&mut |s| paint.text_width(Some(size), s), width, text);
-    if shown.is_empty() && !(text.is_empty() && width >= 0.0) { Cow::Borrowed("\u{2026}") } else { shown }
-}
-
 /// The label column is 0.3 of the panel less 16 (98 at 380 wide, 80 at 320); a longer label
 /// ellipsizes in it, never stacks.
 pub fn inspector_label_width(width: f32) -> f32 {
@@ -237,7 +248,9 @@ pub fn mono_width(tracking: f32, size: i64, text: &str) -> f32 {
 
 #[derive(Clone)]
 pub struct PanelOpts {
+    /// a floating sheet's hairline (the theme's popup look in this colour); `look` replaces both
     pub stroke: Option<Color>,
+    pub look: Option<Look>,
     pub window: bool,
     pub x: f32,
     pub y: f32,
@@ -249,7 +262,7 @@ pub struct PanelOpts {
 
 impl Default for PanelOpts {
     fn default() -> PanelOpts {
-        PanelOpts { stroke: None, window: false, x: 12.0, y: 12.0, width: 280.0, height: None, max_height: None, padding: 0 }
+        PanelOpts { stroke: None, look: None, window: false, x: 12.0, y: 12.0, width: 280.0, height: None, max_height: None, padding: 0 }
     }
 }
 
@@ -302,6 +315,8 @@ pub struct Head {
 
 pub struct PopupOpts {
     pub stroke: Option<Color>,
+    /// the sheet's look (the theme's popup in `stroke`'s colour by default)
+    pub look: Option<Look>,
     pub max_height: Option<f32>,
     pub dismiss_initial: bool,
     pub attached: bool,
@@ -311,7 +326,7 @@ pub struct PopupOpts {
 
 impl Default for PopupOpts {
     fn default() -> PopupOpts {
-        PopupOpts { stroke: None, max_height: None, dismiss_initial: true, attached: false, keep: Vec::new(), related: Vec::new() }
+        PopupOpts { stroke: None, look: None, max_height: None, dismiss_initial: true, attached: false, keep: Vec::new(), related: Vec::new() }
     }
 }
 
@@ -341,7 +356,7 @@ impl Ui {
 
     /// Open a panel: the box and the kit state to give back to `panel_leave`.
     pub fn panel_enter(&mut self, opts: &PanelOpts, label: &str) -> (UiBox, (i64, bool)) {
-        let row_height = 24;
+        let row_height = self.theme().row_h as i64;
         if opts.padding < 0 {
             panic!("Ui.panel: padding must be non-negative");
         }
@@ -355,10 +370,15 @@ impl Ui {
             Some(height) => Size::Px(height),
             None => Size::Fit,
         };
-        let theme = self.tokens();
-        let stroke = opts.stroke;
+        let t = self.theme();
         // a floating sheet (a menu, a window) is the input white; a docked panel is the ground
-        let look = Look { fill: if stroke.is_some() { theme.input } else { theme.panel }, ..Look::NONE };
+        let look = match (opts.look, opts.stroke) {
+            (Some(look), _) => look,
+            (None, Some(edge)) => Look { border: edge, ..t.popup.idle },
+            (None, None) => t.panel.idle,
+        };
+        let thumb = t.scrollbar.idle;
+        let bar = Bar { color: thumb.fill, radius: thumb.radius[0], width: t.scrollbar_w, gap: t.scrollbar_gap, margin: padding as f32, whole: true };
         let panel = self.node(
             label,
             Node {
@@ -370,31 +390,10 @@ impl Ui {
                 at: Some((opts.x, opts.y)),
                 scroll_step: row_height as f32,
                 look,
+                bar: Some(bar),
                 ..Node::DEFAULT
             },
         );
-        let index = panel.index;
-        let slot = panel.box_slot;
-        self.canvas_over(&panel, move |paint, rect| {
-            if let Some(color) = stroke {
-                let Rect { x, y, w, h } = rect;
-                paint.frame(x, y, w, h, color);
-            }
-            let (x, y, width, height) = ints(rect);
-            let content = paint.l_content[index] as i64;
-            let maximum = 0.max(content - height);
-            if maximum > 0 {
-                let track_x = x + width - 6;
-                let track_y = y + padding;
-                let track_height = 1.max(height - 2 * padding);
-                let thumb_height = track_height.min(20.max(track_height * height / 1.max(content)));
-                let travel = track_height - thumb_height;
-                let scroll_y = paint.scroll_y[slot] as i64;
-                let thumb_y = track_y + scroll_y * travel / maximum;
-                // no track, no arrows: a 4-point thumb
-                paint.fill(track_x as f32, thumb_y as f32, 4.0, thumb_height as f32, theme::border(&theme));
-            }
-        });
         let previous = (self.row_height(), self.kit_window_flag());
         self.set_kit_row_height(row_height);
         self.set_kit_window(opts.window);
@@ -445,55 +444,47 @@ impl Ui {
         let control_x = if window { 12.0 + 88.0 + 8.0 } else { inspector_control_x(width) };
         let pin = if window { None } else { pin };
         self.lead_gap();
-        let row = self.box_(key, BoxOpts::default().flags(CLICKABLE).w(Size::Grow).h(Size::Px(self.row_height() as f32)));
-        let theme = self.tokens();
+        let rh = self.row_height() as f32;
+        let row = self.node(key, Node { flags: CLICKABLE, h: Size::Px(rh), inset: Edges { l: label_x, ..Edges::default() }, ..Node::DEFAULT });
         let hovered = self.hovered_within(&row);
-        let label = self.cached_label(&row, 0, label);
-        let font_size = self.font_size();
-        self.draw(&row, move |paint, Rect { x, y, w, h }| {
-            if hovered {
-                paint.fill(x, y, w, h, theme::faint_border(&theme));
-            }
-            // the pin dot: filled ink when the row is on its card, an ink-3 ring when it is not
-            if let Some(on) = pin {
-                let at = (x + 15.0, y + h / 2.0);
-                if on {
-                    paint.circle(at, 3.0, Some(theme.foreground), None);
-                } else {
-                    paint.circle(at, 2.5, None, Some(theme::ink_3(&theme)));
-                }
-            }
-            let shown = inspector_fit(paint, font_size, label_w, &label);
-            let ty = paint.text_top(None, y, h);
-            paint.text_c((x + label_x, ty), theme::ink_2(&theme), &shown);
-        });
+        let (look, dot) = (*self.theme().row.pick(State { hovered, ..State::default() }), self.theme().pin);
+        self.set_look(&row, look, State { hovered, ..State::default() });
+        let shown = self.fit_text(self.font_size(), label_w, label);
+        self.text(&row, &shown);
+        // the pin dot: filled ink when the row is on its card, an ink-3 ring when it is not
+        if let Some(on) = pin {
+            let saved = self.enter(&row);
+            self.part(int_key(row.box_key, 0), (12.0, rh / 2.0 - 3.0), Size::Px(6.0), 6.0, *dot.pick(State { checked: on, ..State::default() }), Edges::default(), "");
+            self.leave(saved);
+        }
         (row, control_x, 2.0, 40.0f32.max(width - control_x - 12.0))
     }
 
     /// A collapsible inspector section. Returns whether it is open (and `f` ran).
     pub fn inspector_section(&mut self, key: &str, expanded: bool, set_expanded: Option<bool>, label: &str, f: &mut dyn FnMut(&mut Ui)) -> bool {
         let last = self.last_child_of_parent();
-        let title = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Grow).h(Size::Px(self.row_height() as f32)));
+        let rh = self.row_height() as f32;
+        let title = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Grow).h(Size::Px(rh)));
         let open = self.state(&title, if expanded { 1 } else { 0 }) != 0;
         let open = set_expanded.unwrap_or(open);
         let signal = self.signal(&title);
         let open = if signal.clicked { !open } else { open };
         // the gap above depends on this section's own state, known only now
         let gap = self.section_gap(!open, last) as f32;
-        self.set_box_h(&title, Size::Px(gap + self.row_height() as f32));
+        self.set_box_h(&title, Size::Px(gap + rh));
         self.set_state(&title, if open { 1 } else { 0 });
         if !open {
             self.set_closed_section(title.index);
         }
-        let theme = self.tokens();
-        let label = self.cached_label(&title, 0, label);
-        self.draw(&title, move |paint, Rect { x, y, w, h }| {
-            let (y, h) = (y + gap, h - gap);
-            // the sheet has no hover state on a section header
-            let cy = cap_y(paint, y, h);
-            paint.cap((x + SIDE as f32, cy), Some(theme::ink_3(&theme)), &label);
-            paint.chevron((x + w - SIDE as f32 - 3.0, y + h / 2.0), if open { Dir::Down } else { Dir::Right }, theme.foreground);
-        });
+        // the sheet has no hover state on a section header
+        let (look, chevron) = (self.theme().section.idle, self.theme().chevron.idle);
+        self.set_look(&title, look, State::default());
+        self.node_mut(&title).inset = Edges { l: SIDE as f32, t: gap, ..Edges::default() };
+        self.text(&title, label);
+        let saved = self.enter(&title);
+        let mark = self.placed_part(int_key(title.box_key, 0), gap, rh, Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: 6.0, end: true, ..Place::ALL }, chevron, "");
+        self.node_mut(&mark).mark = Mark::Chevron(if open { Dir::Down } else { Dir::Right });
+        self.leave(saved);
         if open {
             f(self);
         }
@@ -511,8 +502,16 @@ impl Ui {
     pub fn inspector_toggle_value(&mut self, key: &str, at: (f32, f32), value: bool) -> bool {
         let control = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).at(at).w(Size::Px(28.0)).h(Size::Px(20.0)));
         let value = if self.signal(&control).clicked { !value } else { value };
-        let theme = self.tokens();
-        self.draw(&control, move |paint, Rect { x, y, w: _, h: _ }| paint_switch(paint, &theme, x, y + 3.0, value));
+        let on = State { checked: value, ..State::default() };
+        let (track, knob) = (*self.theme().switch.pick(on), *self.theme().knob.pick(on));
+        let saved = self.enter(&control);
+        let switch = self.part(int_key(control.box_key, 0), (0.0, 3.0), Size::Px(28.0), 14.0, track, Edges::default(), "");
+        self.node_mut(&switch).state = on;
+        let inner = self.enter(&switch);
+        let k = self.part(int_key(control.box_key, 1), (if value { 17.0 } else { 3.0 }, 3.0), Size::Px(8.0), 8.0, knob, Edges::default(), "");
+        self.node_mut(&k).state = on;
+        self.leave(inner);
+        self.leave(saved);
         value
     }
 
@@ -528,58 +527,38 @@ impl Ui {
     /// A text button on a row of its own.
     pub fn inspector_button(&mut self, key: &str, label: &str) -> bool {
         self.lead_gap();
-        let row = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Grow).h(Size::Px(self.row_height() as f32)));
+        let row = self.node(key, Node { flags: CLICKABLE | TAB_STOP | FIT_TEXT, h: Size::Px(self.row_height() as f32), ..Node::DEFAULT });
         let signal = self.signal(&row);
-        let theme = self.tokens();
-        let font_size = self.font_size();
-        let label = self.cached_label(&row, 0, label);
-        self.draw(&row, move |paint, Rect { x, y, w, h }| {
-            let shown = inspector_fit(paint, font_size, w - 24.0, &label);
-            let tw = paint.text_width(None, &shown);
-            paint_button_ground(paint, &theme, signal.held, signal.hovered, false, false, Rect::new(x + 6.0, y + 2.0, tw + 12.0, h - 4.0));
-            let ty = paint.text_top(None, y, h);
-            paint.text_c((x + SIDE as f32, ty), theme.foreground, &shown);
-        });
+        // the ground is the label and 6 points each side, from 6 in; the label is cut to the row less 24
+        let tw = self.text_width(None, label);
+        let state = State { hovered: signal.hovered, pressed: signal.held, ..State::default() };
+        let look = Look { ring: Ring::NONE, ..*self.theme().button.pick(state) };
+        self.set_look(&row, look, state);
+        let n = self.node_mut(&row);
+        (n.place, n.inset) = (Place { inset: Edges { l: 6.0, t: 2.0, r: 6.0, b: 2.0 }, w: tw + 12.0, ..Place::ALL }, Edges { l: 6.0, r: 6.0, ..Edges::default() });
+        self.text(&row, label);
         signal.clicked
     }
 
     /// A read-only value in the same responsive inspector row.
     pub fn inspector_readout(&mut self, width: Option<f32>, key: &str, label: &str, value: &str) {
         let (row, control_x, _, control_width) = self.inspector_row(width, None, key, label);
-        let theme = self.tokens();
-        let font_size = self.font_size();
-        let value = self.cached_label(&row, 1, value);
-        self.draw(&row, move |paint, Rect { x, y, w: _, h }| {
-            let shown = inspector_fit(paint, font_size, control_width, &value);
-            let tw = paint.text_width(None, &shown);
-            let ty = paint.text_top(None, y, h);
-            paint.text_c((x + control_x + control_width - tw, ty), theme.foreground, &shown);
-        });
+        let look = self.theme().value.idle;
+        let shown = self.fit_text(self.font_size(), control_width, value);
+        let tw = self.text_width(None, &shown);
+        let rh = self.row_height() as f32;
+        let saved = self.enter(&row);
+        self.part(int_key(row.box_key, 1), (control_x + control_width - tw, 0.0), Size::Px(tw.max(1.0)), rh, look, Edges::default(), &shown);
+        self.leave(saved);
     }
 
     /// The scrolling part of an inspector under its head (the head stays): a column that takes the
     /// rest of the panel and scrolls, its 4-point line-3 thumb 2 from the right edge.
     pub fn inspector_body(&mut self, f: &mut dyn FnMut(&mut Ui)) {
         let rh = self.row_height() as f32;
-        let body = self.box_(
-            "inspector-body",
-            BoxOpts::default().flags(SCROLL | CLIP | OVER_THUMB).w(Size::Grow).h(Size::Grow).axis(Axis::Column).scroll_step(rh),
-        );
-        let theme = self.tokens();
-        let index = body.index;
-        let slot = body.box_slot;
-        self.draw_over(&body, move |paint, Rect { x, y, w, h }| {
-            let content = paint.l_content[index];
-            if content > h {
-                let track_y = y + 6.0;
-                let track_h = 1.0f32.max(h - 12.0);
-                let thumb_h = track_h.min(20.0f32.max(track_h * h / content));
-                let travel = track_h - thumb_h;
-                let maximum = content - h;
-                let thumb_y = track_y + paint.scroll_y[slot] * travel / maximum;
-                paint.fill(x + w - 6.0, thumb_y, 4.0, thumb_h, theme::border(&theme));
-            }
-        });
+        let t = self.theme();
+        let bar = Bar { color: t.scrollbar.idle.fill, radius: t.scrollbar.idle.radius[0], width: t.scrollbar_w, gap: t.scrollbar_gap, margin: 6.0, whole: false };
+        let body = self.node("inspector-body", Node { flags: SCROLL | CLIP | OVER_THUMB, h: Size::Grow, scroll_step: rh, bar: Some(bar), ..Node::DEFAULT });
         self.within(&body, f);
     }
 
@@ -591,42 +570,37 @@ impl Ui {
         let font_size = self.font_size();
         let line = self.row_height() as f32;
         let bar = self.box_("inspector-bar", BoxOpts::default().w(Size::Grow).h(Size::Px(line + 1.0)));
-        let theme = self.tokens();
-        let hints = hints.to_vec();
-        self.draw(&bar, move |paint, Rect { x, y, w, h: _ }| {
-            paint.fill(x, y, w, 1.0, theme::edge(&theme));
-            let y = y + 1.0;
-            let mut at = x + 12.0;
-            for (key, what) in &hints {
-                let ty = paint.text_top(Some(small), y, line);
-                paint.text_s((at, ty), small, theme::ink_3(&theme), key);
-                at += mono_width(0.0, small, key) + 8.0;
-                let ty = paint.text_top(None, y, line);
-                paint.text_c((at, ty), theme::ink_2(&theme), what);
-                at += mono_width(0.0, font_size, what) + 8.0;
-            }
-            let label = format!("{} on card", count);
-            // the sheet's tracking follows the last letter too: the ink ends that much before the 12
-            let label_w = paint.cap_width(&label) + paint.cap_tracking();
-            let left = x + w - 12.0 - label_w;
-            let cy = cap_y(paint, y, line);
-            paint.cap((left, cy), Some(theme::ink_2(&theme)), &label);
-            paint.circle((left - 11.0, y + line / 2.0), 3.0, Some(theme.foreground), None);
-        });
+        let t = self.theme();
+        let (rule, key, hint, label, dot) = (t.footer.idle, t.key.idle, t.hint.idle, t.label.idle, *t.pin.pick(State { checked: true, ..State::default() }));
+        self.set_look(&bar, rule, State::default());
+        let saved = self.enter(&bar);
+        let mut at = 12.0;
+        for (i, (k, what)) in hints.iter().enumerate() {
+            let kw = mono_width(0.0, small, k);
+            self.part(int_key(bar.box_key, 2 * i as i64), (at, 1.0), Size::Px(kw.max(1.0)), line, key, Edges::default(), k);
+            at += kw + 8.0;
+            let ww = mono_width(0.0, font_size, what);
+            self.part(int_key(bar.box_key, 2 * i as i64 + 1), (at, 1.0), Size::Px(ww.max(1.0)), line, hint, Edges::default(), what);
+            at += ww + 8.0;
+        }
+        let text = format!("{} on card", count);
+        // the sheet's tracking follows the last letter too: the ink ends that much before the 12
+        let label_w = self.cap_width(&text) + 0.08 * small as f32;
+        self.placed_part(int_key(bar.box_key, -1), 1.0, line, Place { inset: Edges { r: 12.0, ..Edges::default() }, w: label_w, end: true, ..Place::ALL }, label, &text);
+        let edge = Edges { r: 12.0 + label_w + 8.0, ..Edges::default() };
+        self.placed_part(int_key(bar.box_key, -2), 1.0 + line / 2.0 - 3.0, 6.0, Place { inset: edge, w: 6.0, end: true, ..Place::ALL }, dot, "");
+        self.leave(saved);
     }
 
     pub fn inspector_message(&mut self, key: &str, message: &str) {
         self.lead_gap();
-        let row = self.box_(key, BoxOpts::default().w(Size::Grow).h(Size::Px(self.row_height() as f32)));
-        let theme = self.tokens();
-        let font_size = self.font_size();
-        let row_height = self.row_height();
-        let message = message.to_owned();
-        self.draw(&row, move |paint, Rect { x, y, w, h }| {
-            paint.circle((x + 15.0, y + h / 2.0), 3.0, Some(theme.accent), None);
-            let shown = inspector_fit(paint, font_size, w - 38.0, &message);
-            paint.text_c((x + 26.0, y + label_y(font_size, 0, row_height) as f32), theme::ink_2(&theme), &shown);
-        });
+        let rh = self.row_height() as f32;
+        let (dot, hint) = (self.theme().notice.idle, self.theme().hint.idle);
+        let row = self.node(key, Node { flags: FIT_TEXT, h: Size::Px(rh), look: hint, inset: Edges { l: 26.0, r: 12.0, ..Edges::default() }, ..Node::DEFAULT });
+        self.text(&row, message);
+        let saved = self.enter(&row);
+        self.part(int_key(row.box_key, 0), (12.0, rh / 2.0 - 3.0), Size::Px(6.0), 6.0, dot, Edges::default(), "");
+        self.leave(saved);
     }
 
     /// A floating panel dismissed by Escape, focus loss, or a press outside its last laid-out
@@ -675,8 +649,9 @@ impl Ui {
         // a window's 1-point edge is part of its box: its content starts inside it
         let mut popts = PanelOpts::default().at(x, y).width(width);
         popts.stroke = opts.stroke;
+        popts.look = opts.look;
         popts.max_height = opts.max_height;
-        popts.padding = if opts.stroke.is_none() { 0 } else { 1 };
+        popts.padding = if opts.stroke.is_none() && opts.look.is_none() { 0 } else { 1 };
         self.panel(popts, label, f);
         self.leave(saved);
         self.push_overlay(index);
@@ -689,7 +664,7 @@ impl Ui {
     }
 
     pub fn popup(&mut self, stroke: Option<Color>, max_height: Option<f32>, dismiss_initial: bool, attached: bool, at: (f32, f32), width: f32, height: f32, label: &str, f: &mut dyn FnMut(&mut Ui)) -> bool {
-        let opts = PopupOpts { stroke, max_height, dismiss_initial, attached, keep: Vec::new(), related: Vec::new() };
+        let opts = PopupOpts { stroke, look: None, max_height, dismiss_initial, attached, keep: Vec::new(), related: Vec::new() };
         self.popup_with_related(opts, at, width, height, label, f)
     }
 
@@ -708,16 +683,16 @@ impl Ui {
         let (view_w, view_h) = self.view_size();
         let x = (0.0f32.max((view_w - width) / 2.0)).round();
         let y = (0.0f32.max((view_h - height) / 2.0)).round();
-        let stroke = theme::border(&self.tokens());
-        self.popup(Some(stroke), Some(48.0f32.max(view_h - 32.0)), false, false, (x, y), width, height, label, f)
+        let look = self.theme().modal.idle;
+        let opts = PopupOpts { look: Some(look), max_height: Some(48.0f32.max(view_h - 32.0)), dismiss_initial: false, ..PopupOpts::default() };
+        self.popup_with_related(opts, (x, y), width, height, label, f)
     }
 
     /// A window's title or a panel's caption: ink-2 capitals 12 points from the left, with 4 points
     /// above it when it is the first thing of its parent.
     pub fn label(&mut self, text: &str) {
         let gap = if self.last_child_of_parent() == NONE { 4.0 } else { 0.0 };
-        let size = 8.max(self.font_size() - 2);
-        let look = Look { text: theme::ink_2(&self.tokens()), font: Font { size, tracking: 0.08, caps: true, ..Font::BODY }, ..Look::NONE };
+        let look = self.theme().label.idle;
         let row = self.node(
             text,
             Node { h: Size::Px(gap + self.row_height() as f32), look, inset: Edges { l: SIDE as f32, t: gap, r: 0.0, b: 0.0 }, ..Node::DEFAULT },
@@ -728,32 +703,48 @@ impl Ui {
     /// A window's foot: a line-2 hairline under 4 points of space, then the keys in ink-3 each
     /// followed by what it does in ink-2, 8 points apart, and `right` (a key or a count) at the end.
     pub fn footer(&mut self, right: Option<&str>, hints: &[(String, String)]) {
-        let row = self.box_("footer", BoxOpts::default().flags(NO_FLAGS).w(Size::Grow).h(Size::Px(5.0 + self.row_height() as f32)));
-        let theme = self.tokens();
-        let size = 8.max(self.font_size() - 2);
-        let hints = hints.to_vec();
-        let right = right.map(|s| s.to_owned());
-        self.draw(&row, move |paint, Rect { x, y, w, h }| {
-            paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme));
-            let key_y = paint.text_top(Some(size), y + 5.0, h - 5.0);
-            let hint_y = paint.text_top(None, y + 5.0, h - 5.0);
-            let mut pen = x + SIDE as f32;
-            for (key, what) in &hints {
-                paint.text_s((pen, key_y), size, theme::ink_3(&theme), key);
-                pen += paint.text_width(Some(size), key) + 8.0;
-                paint.text_c((pen, hint_y), theme::ink_2(&theme), what);
-                pen += paint.text_width(None, what) + 8.0;
-            }
-            if let Some(text) = &right {
-                let cw = paint.cap_width(text);
-                paint.cap((x + w - SIDE as f32 - cw, key_y), None, text);
-            }
-        });
+        let rh = self.row_height() as f32;
+        let t = self.theme();
+        let (rule, key, hint, label) = (t.footer.idle, t.key.idle, t.hint.idle, t.label.idle);
+        let row = self.node("footer", Node { h: Size::Px(5.0 + rh), look: rule, place: Place { inset: Edges { t: 4.0, ..Edges::default() }, ..Place::ALL }, ..Node::DEFAULT });
+        let size = key.font.points(self.font_size());
+        let saved = self.enter(&row);
+        let mut pen = SIDE as f32;
+        for (i, (k, what)) in hints.iter().enumerate() {
+            let kw = self.text_width(Some(size), k);
+            self.part(int_key(row.box_key, 2 * i as i64), (pen, 5.0), Size::Px(kw.max(1.0)), rh, key, Edges::default(), k);
+            pen += kw + 8.0;
+            let ww = self.text_width(None, what);
+            self.part(int_key(row.box_key, 2 * i as i64 + 1), (pen, 5.0), Size::Px(ww.max(1.0)), rh, hint, Edges::default(), what);
+            pen += ww + 8.0;
+        }
+        if let Some(text) = right {
+            let cw = self.cap_width(text);
+            self.placed_part(int_key(row.box_key, -1), 5.0, rh, Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: cw, end: true, ..Place::ALL }, label, text);
+        }
+        self.leave(saved);
     }
 
     /// `true` on the frame a press and release both land inside the button.
     pub fn button(&mut self, text: &str) -> bool {
-        self.button_with(text, false, false, false, None)
+        let states = self.theme().button;
+        self.button_ex(text, &states, false, false, false)
+    }
+
+    /// A button in `states` (a variant: `States { idle: Look { fill: RED, ..t.button.idle }, ..t.button }`).
+    pub fn button_with(&mut self, text: &str, states: &States) -> bool {
+        self.button_ex(text, states, false, false, false)
+    }
+
+    /// `button_ex` in the theme's button (`button_bare` when `bare`) with its text in `ink`.
+    pub fn button_styled(&mut self, text: &str, bare: bool, icon: bool, at_end: bool, ink: Option<Color>) -> bool {
+        let mut states = if bare { self.theme().button_bare } else { self.theme().button };
+        if let Some(ink) = ink {
+            for look in [&mut states.idle, &mut states.hover, &mut states.pressed, &mut states.focus, &mut states.checked] {
+                look.text = ink;
+            }
+        }
+        self.button_ex(text, &states, bare, icon, at_end)
     }
 
     /// A button is its text on a 20-point box (6 points of padding in a transparent 1-point edge):
@@ -761,7 +752,7 @@ impl Ui {
     /// starts 5 points in so that its text lines up with the labels at 12. `bare` narrows the
     /// padding to 4 points; `icon` makes it the 20-point square with its glyph centred; `at_end`
     /// puts the box at the row's end, 8 points from the edge; `ink` colours the text.
-    pub fn button_with(&mut self, text: &str, bare: bool, icon: bool, at_end: bool, ink: Option<Color>) -> bool {
+    pub fn button_ex(&mut self, text: &str, states: &States, bare: bool, icon: bool, at_end: bool) -> bool {
         let measure = self.text_width(None, shown(text));
         // the box: a 1-point edge and 6 points of padding (4 when `bare`) round the text; an `icon`
         // is the 20-point control square with its glyph centred
@@ -773,41 +764,24 @@ impl Ui {
         };
         let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY | FOCUS_MARK), None, text);
         self.cached_hit(&row, (width.to_bits() as u64) << 1 | at_end as u64, || Rc::new(extent));
-        let shown = self.cached_label(&row, 0, shown(text));
         let signal = self.signal(&row);
-        let theme = self.tokens();
-        let focus = self.focused(&row);
-        self.draw(&row, move |paint, rect| {
-            let Rect { x, y, w, h } = rect;
-            let Rect { x: cx, y: cy, w: cw, h: ch } = extent(Rect::new(x, y, w, h));
-            let ink = ink.unwrap_or(if bare { theme::ink_2(&theme) } else { theme.foreground });
-            paint_button_ground(paint, &theme, signal.held, signal.hovered, false, false, Rect::new(cx, cy, cw, ch));
-            // the keyboard's mark: the accent over the last row of the box, its whole width
-            if focus {
-                paint.fill(cx, cy + ch - 1.0, cw, 1.0, theme.accent);
-            }
-            let pad = if icon {
-                ((cw - measure) / 2.0).floor()
-            } else if bare {
-                5.0
-            } else {
-                7.0
-            };
-            let direction = match (icon, &*shown) {
-                (true, "<") => Some(Dir::Left),
-                (true, ">") => Some(Dir::Right),
-                (true, "v") => Some(Dir::Down),
-                (true, "^") => Some(Dir::Up),
-                _ => None,
-            };
-            match direction {
-                Some(direction) => paint.chevron((cx + cw / 2.0, cy + ch / 2.0), direction, ink),
-                None => {
-                    let ty = paint.text_top(None, y, h);
-                    paint.text_c((cx + pad, ty), ink, &shown);
-                }
-            }
-        });
+        let state = State { hovered: signal.hovered, pressed: signal.held, focused: self.focused(&row), ..State::default() };
+        self.style(&row, states, state);
+        let pad = if icon { ((width - measure) / 2.0).floor() } else if bare { 5.0 } else { 7.0 };
+        let direction = match (icon, shown(text)) {
+            (true, "<") => Some(Dir::Left),
+            (true, ">") => Some(Dir::Right),
+            (true, "v") => Some(Dir::Down),
+            (true, "^") => Some(Dir::Up),
+            _ => None,
+        };
+        let n = self.node_mut(&row);
+        n.place = Place { inset: Edges { l: 5.0, t: 2.0, r: if at_end { 8.0 } else { 5.0 }, b: 2.0 }, w: width, end: at_end, ..Place::ALL };
+        n.inset = Edges { l: pad, ..Edges::default() };
+        match direction {
+            Some(d) => n.mark = Mark::Chevron(d),
+            None => self.text(&row, shown(text)),
+        }
         signal.clicked
     }
 
@@ -816,20 +790,22 @@ impl Ui {
         let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY), Some(control_hit(toggle_control)), text);
         let signal = self.signal(&row);
         let value = if signal.clicked { !value } else { value };
-        let theme = self.tokens();
-        let shown = self.cached_label(&row, 0, shown(text));
-        let hovered = signal.hovered;
-        let font_size = self.font_size();
-        self.draw(&row, move |paint, rect| {
-            let bounds = ints(rect);
-            let (x, y, _, h) = bounds;
-            let (cx, cy, _, _) = toggle_control(bounds);
-            if hovered {
-                hover_row(paint, &theme, bounds);
-            }
-            kit_text(paint, Some(theme.foreground), x + SIDE, label_y(font_size, y, h), &shown);
-            paint_switch(paint, &theme, cx as f32, cy as f32, value);
-        });
+        let t = self.theme();
+        let hovered = State { hovered: signal.hovered, ..State::default() };
+        let on = State { checked: value, ..State::default() };
+        let (look, track, knob) = (*t.toggle.pick(hovered), *t.switch.pick(on), *t.knob.pick(on));
+        self.set_look(&row, look, hovered);
+        self.node_mut(&row).inset = Edges { l: SIDE as f32, ..Edges::default() };
+        self.text(&row, shown(text));
+        // the 28 x 14 switch 12 from the row's end, the knob 3 in from its side
+        let top = ((self.row_height() - 14) / 2) as f32;
+        let saved = self.enter(&row);
+        let edge = |r: f32, w: f32| Place { inset: Edges { r, ..Edges::default() }, w, end: true, ..Place::ALL };
+        let s = self.placed_part(int_key(row.box_key, 0), top, 14.0, edge(SIDE as f32, 28.0), track, "");
+        self.node_mut(&s).state = on;
+        let k = self.placed_part(int_key(row.box_key, 1), top + 3.0, 8.0, edge(SIDE as f32 + if value { 3.0 } else { 17.0 }, 8.0), knob, "");
+        self.node_mut(&k).state = on;
+        self.leave(saved);
         value
     }
 }

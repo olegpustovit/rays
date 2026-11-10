@@ -6,6 +6,8 @@
 //! Command-A/C/X/V select all, copy, cut and paste, and Command-Z, Shift-Command-Z (or Command-Y)
 //! undo and redo the focused text.
 use crate::theme;
+
+const CLEAR: Color = Color { r: 0, g: 0, b: 0, a: 0 };
 use crate::ui_core::*;
 use crate::ui_kit::*;
 use input::{Event, Key, MouseButton};
@@ -622,14 +624,18 @@ pub fn paint_text_edit(
     size: Option<i64>,
     right: bool,
     inset: f32,
-    caret: bool,
+    marks: Option<(Color, Color)>,
     control: IRect,
     y: i64,
     composition: &str,
     edit: &TextEdit,
 ) {
     let (cx, cy, cw, ch) = control;
-    let theme = paint.theme;
+    // the selection and caret colours (the field look's); `None` hides the caret
+    let (tint, caret) = match marks {
+        Some((selection, caret)) => (selection, Some(caret)),
+        None => (theme::tint(&paint.theme), None),
+    };
     let before = edit.text[..edit.caret].to_owned();
     let visible = 1.max(cw - 4) as f32;
     let full = paint.text_width(size, &edit.text);
@@ -661,7 +667,7 @@ pub fn paint_text_edit(
             }
         });
         for &(x0, w) in &spans[..n] {
-            paint.fill(text_x + x0, cy as f32 + 0.5, w, 1.max(ch - 2) as f32, theme::tint(&theme));
+            paint.fill(text_x + x0, cy as f32 + 0.5, w, 1.max(ch - 2) as f32, tint);
         }
     }
     if composition.is_empty() {
@@ -680,8 +686,8 @@ pub fn paint_text_edit(
             (cy as f32 + (ch as f32 - h) / 2.0, h)
         }
     };
-    if caret {
-        paint.fill(caret_x, caret_y, 1.0, caret_h, theme.accent);
+    if let Some(color) = caret {
+        paint.fill(caret_x, caret_y, 1.0, caret_h, color);
     }
     paint.clip_rect = previous_clip;
 }
@@ -937,80 +943,79 @@ impl Ui {
         let composition = self.composition().to_owned();
         let shown = if typed_is_some || signal.held || signal.released { value.clone() } else { o.display.clone().unwrap_or_else(|| value.clone()) };
         let invalid = self.state(&bx, 1) & 1 == 0;
-        let theme = self.tokens();
-        let o = o.clone();
+        let t = self.theme();
+        let field = if invalid { t.field_invalid.idle } else { *t.field.pick(State { focused: editing, ..State::default() }) };
+        let (fraction, placeholder, value_look) = (t.fraction.idle, t.placeholder.idle, t.value.idle);
+        // the hairline: invalid, editing, or `line` (left out when `bare`)
+        let line = match o.line {
+            Some(c) if !invalid && !editing => Look { border: c, ..field },
+            _ => field,
+        };
+        let look = if invalid || editing || !o.bare { Look { text: CLEAR, ..line } } else { Look { border: CLEAR, text: CLEAR, ..line } };
+        self.set_look(&bx, look, State { focused: editing, ..State::default() });
+        let (x, y, w, h) = (0.0, 0.0, w, h);
         let size = o.size;
-        self.draw(&bx, move |paint, rect| {
-            let bounds = ints(rect);
-            let (x, y, w, h) = bounds;
-            let previous_clip = paint.clip_rect;
-            paint.clip_rect = intersect(previous_clip, Rect::new(x as f32, y as f32, w as f32, h as f32));
-            if invalid || editing || !o.bare {
-                underline(
-                    paint,
-                    bounds,
-                    if invalid {
-                        theme::invalid()
-                    } else if editing {
-                        theme.accent
-                    } else {
-                        o.line.unwrap_or(theme::edge(&theme))
-                    },
-                );
+        let fs = self.font_size();
+        // the content is centred in the 19 points above the hairline: a body line starts half a point up
+        let text_y = match size {
+            Some(size) => (0.max((h as i64 - size) / 2)) as f32,
+            None => (h - 1.0 - fs as f32) / 2.0 - 0.5,
+        };
+        let points = size.unwrap_or(0);
+        let ink = |look: Look| Look { font: Font { size: points, ..look.font }, ..look };
+        let saved = self.enter(&bx);
+        let k = |n: i64| int_key(bx.box_key, n);
+        if editing && focused_now {
+            let ty = y as i64 + 0.max((h as i64 - size.unwrap_or(fs)) / 2);
+            let (selection, caret) = (field.selection, field.caret);
+            self.canvas(&bx, move |paint, rect| {
+                paint_text_edit(paint, size, false, 2.0, Some((selection, caret)), ints(rect), rect.y as i64 + ty, &composition, &edit);
+            });
+        } else {
+            // the 2-point line under the value is its position in the soft range
+            if let Some(f) = o.fraction {
+                self.part(k(0), (x, h - 3.0), Size::Px((w * 0.0f32.max(1.0f32.min(f))).max(0.0)), 2.0, fraction, Edges::default(), "");
             }
-            // the content is centred in the 19 points above the hairline: a body line starts half a point up
-            let text_y = match size {
-                Some(size) => (y + 0.max((h - size) / 2)) as f32,
-                None => y as f32 + (h - 1 - paint.font_size) as f32 / 2.0 - 0.5,
-            };
-            if editing && focused_now {
-                let ty = y + 0.max((h - size.unwrap_or(paint.font_size)) / 2);
-                paint_text_edit(paint, size, false, 2.0, true, bounds, ty, &composition, &edit);
-            } else {
-                // the 2-point line under the value is its position in the soft range
-                if let Some(f) = o.fraction {
-                    paint.fill(x as f32, (y + h - 3) as f32, w as f32 * 0.0f32.max(1.0f32.min(f)), 2.0, theme::ink_2(&theme));
+            let tracking = o.tracking.unwrap_or(0.0);
+            let text_w = |ui: &mut Ui, t: &str| ui.text_width(size, t);
+            match (&o.lead, &o.trail) {
+                (None, None) if shown.is_empty() && o.placeholder.is_some() => {
+                    let p = o.placeholder.as_deref().unwrap_or("");
+                    let pw = text_w(self, p);
+                    self.text_part(k(1), (2.0, text_y), pw, ink(placeholder), p);
                 }
-                let tracking = o.tracking.unwrap_or(0.0);
-                match (&o.lead, &o.trail) {
-                    (None, None) if shown.is_empty() && o.placeholder.is_some() => {
-                        paint.text_with(((x + 2) as f32, text_y), size, 0.0, Some(theme::ink_3(&theme)), o.placeholder.as_ref().unwrap());
-                    }
-                    (None, None) => {
-                        let width = paint.text_width(size, &shown);
-                        let tx = if o.left { (x + 2) as f32 } else { (x + w - 2) as f32 - width };
-                        paint.text_with((tx, text_y), size, tracking, None, &shown);
-                    }
-                    _ => {
-                        // a lead (the expression's f) and a trail (its live value) frame the value: 6 between
-                        let draw_part = |paint: &mut Paint, right: bool, text: &str, color: Color| -> f32 {
-                            let width = paint.text_width(size, text);
-                            let tx = if right { (x + w - 2) as f32 - width } else { (x + 2) as f32 };
-                            paint.text_with((tx, text_y), size, 0.0, Some(color), text);
-                            width
-                        };
-                        let lead_w = match &o.lead {
-                            Some((t, c)) => draw_part(paint, false, t, *c) + 6.0,
-                            None => 0.0,
-                        };
-                        let trail_w = match &o.trail {
-                            Some((t, c)) => draw_part(paint, true, t, *c) + 6.0,
-                            None => 0.0,
-                        };
-                        // with no lead the value sits against its trail (a unit: [35 mm])
-                        let fit_size = size.unwrap_or(paint.font_size);
-                        let fitted = inspector_fit(paint, fit_size, w as f32 - 4.0 - lead_w - trail_w, &shown);
-                        let value_x = if o.lead.is_none() && !o.left {
-                            (x + w - 2) as f32 - trail_w - paint.text_width(size, &fitted)
-                        } else {
-                            (x + 2) as f32 + lead_w
-                        };
-                        paint.text_with((value_x, text_y), size, 0.0, Some(theme.foreground), &fitted);
-                    }
+                (None, None) => {
+                    let width = text_w(self, &shown);
+                    let tx = if o.left { 2.0 } else { w - 2.0 - width };
+                    let em = size.unwrap_or(fs) as f32;
+                    let look = ink(value_look);
+                    self.text_part(k(1), (tx, text_y), width, Look { font: Font { tracking: tracking / em, ..look.font }, ..look }, &shown);
+                }
+                _ => {
+                    // a lead (the expression's f) and a trail (its live value) frame the value: 6 between
+                    let part = |ui: &mut Ui, n: i64, right: bool, text: &str, color: Color| -> f32 {
+                        let width = text_w(ui, text);
+                        let tx = if right { w - 2.0 - width } else { 2.0 };
+                        ui.text_part(k(n), (tx, text_y), width, ink(Look { text: color, ..value_look }), text);
+                        width
+                    };
+                    let lead_w = match &o.lead {
+                        Some((t, c)) => part(self, 2, false, t, *c) + 6.0,
+                        None => 0.0,
+                    };
+                    let trail_w = match &o.trail {
+                        Some((t, c)) => part(self, 3, true, t, *c) + 6.0,
+                        None => 0.0,
+                    };
+                    // with no lead the value sits against its trail (a unit: [35 mm])
+                    let fitted = self.fit_text(size.unwrap_or(fs), w - 4.0 - lead_w - trail_w, &shown);
+                    let fw = text_w(self, &fitted);
+                    let value_x = if o.lead.is_none() && !o.left { w - 2.0 - trail_w - fw } else { 2.0 + lead_w };
+                    self.text_part(k(1), (value_x, text_y), fw, ink(value_look), &fitted);
                 }
             }
-            paint.clip_rect = previous_clip;
-        });
+        }
+        self.leave(saved);
         (value, editing)
     }
 
@@ -1056,7 +1061,6 @@ impl Ui {
             (if buttons { y_buttons + 20.0 } else { y_detail + line }) + 8.0 + 1.0
         };
         let header = self.box_(key, BoxOpts::default().flags(CLIP).w(Size::Grow).h(Size::Px(height)));
-        let theme = self.tokens();
         let renaming = rename.is_some();
         let title_shown = match &rename {
             Some(valid) => {
@@ -1094,56 +1098,57 @@ impl Ui {
                 reset_pressed = true;
             }
         }
-        let kind = kind.map(|s| s.to_owned());
-        let badge = badge.map(|s| s.to_owned());
-        let index = index.map(|s| s.to_owned());
-        let title_own = title.to_owned();
-        let detail = detail.to_owned();
-        self.draw(&header, move |paint, Rect { x, y, w, h }| {
-            if !win {
-                paint.fill(x, y + h - 1.0, w, 1.0, theme::edge(&theme));
+        let t = self.theme();
+        let (rule, label_look, badge_look, index_look, title_look, hint) = (t.header.idle, t.label.idle, t.badge.idle, t.index.idle, t.title.idle, t.hint.idle);
+        if !win {
+            self.set_look(&header, rule, State::default());
+        }
+        let saved = self.enter(&header);
+        let k = |n: i64| int_key(header.box_key, 100 + n);
+        if chips {
+            let at = 12.0 + text_top_for(font_size, Some(small), 0.0, line);
+            let mut cx = 8.0;
+            // the kind gives way when the index and badge need the room
+            let w = width;
+            let per = small as f32 / 2.0 + 0.08 * small as f32;
+            let taken = index.map(|t| mono_width(0.0, small, t) + 6.0).unwrap_or(0.0) + badge.map(|t| mono_width(0.08 * small as f32, small, t) + 6.0).unwrap_or(0.0);
+            if let Some(text) = kind {
+                let room = ((w - 16.0 - taken) / per) as i64;
+                let text: String = if text.len() as i64 <= room {
+                    text.to_owned()
+                } else if room <= 1 {
+                    String::new()
+                } else {
+                    format!("{}.", &text[..(room - 1) as usize])
+                };
+                let tw = self.cap_width(&text);
+                self.text_part(k(0), (cx, at), tw, label_look, &text);
+                // the glyphs run a little wider than the design's metrics: never closer than 6
+                cx += mono_width(0.08 * small as f32, small, &text).max(tw) + 6.0;
             }
-            if chips {
-                let at = y + 12.0 + paint.text_top(Some(small), 0.0, line);
-                let mut cx = x + 8.0;
-                // the kind gives way when the index and badge need the room
-                let per = small as f32 / 2.0 + 0.08 * small as f32;
-                let taken = index.as_ref().map(|t| mono_width(0.0, small, t) + 6.0).unwrap_or(0.0)
-                    + badge.as_ref().map(|t| mono_width(0.08 * small as f32, small, t) + 6.0).unwrap_or(0.0);
-                if let Some(text) = &kind {
-                    let room = ((w - 16.0 - taken) / per) as i64;
-                    let text: String = if text.len() as i64 <= room {
-                        text.clone()
-                    } else if room <= 1 {
-                        String::new()
-                    } else {
-                        format!("{}.", &text[..(room - 1) as usize])
-                    };
-                    paint.cap((cx, at), None, &text);
-                    // the glyphs run a little wider than the design's metrics: never closer than 6
-                    cx += mono_width(0.08 * small as f32, small, &text).max(paint.cap_width(&text)) + 6.0;
-                }
-                if let Some(text) = &badge {
-                    paint.cap((cx, at), Some(theme.accent), text);
-                }
-                // the sheet's 0.04em tracking follows every letter, the last too, so it ends 8 from the edge
-                if let Some(text) = &index {
-                    let tracking = 0.04 * small as f32;
-                    let count = text.bytes().filter(|b| b & 0xc0 != 0x80).count();
-                    let tw = paint.text_width(Some(small), text);
-                    paint.text_with((x + w - 8.0 - tw - tracking * count as f32, at), Some(small), tracking, Some(theme::ink_3(&theme)), text);
-                }
+            if let Some(text) = badge {
+                let tw = self.cap_width(text);
+                self.text_part(k(1), (cx, at), tw, badge_look, text);
             }
-            if !renaming {
-                let dy = if win { paint.text_top(Some(display_size), 0.0, title_h) } else { 2.0 };
-                let fitted = inspector_fit(paint, display_size, w - 2.0 * text_x, &title_own);
-                paint.text_with((x + text_x, y + y_title + dy), Some(display_size), -0.01 * display_size as f32, Some(theme.foreground), &fitted);
+            // the sheet's 0.04em tracking follows every letter, the last too, so it ends 8 from the edge
+            if let Some(text) = index {
+                let tracking = 0.04 * small as f32;
+                let count = text.bytes().filter(|b| b & 0xc0 != 0x80).count();
+                let tw = self.text_width(Some(small), text);
+                let place = Place { inset: Edges { r: 8.0 + tracking * count as f32, ..Edges::default() }, w: tw, end: true, ..Place::ALL };
+                self.placed_part(k(2), at, small as f32, place, index_look, text);
             }
-            let ty = paint.text_top(None, 0.0, line);
-            let fs = paint.font_size;
-            let fitted = inspector_fit(paint, fs, w - 2.0 * text_x, &detail);
-            paint.text_c((x + text_x, y + y_detail + ty), theme::ink_2(&theme), &fitted);
-        });
+        }
+        if !renaming {
+            let dy = if win { text_top_for(font_size, Some(display_size), 0.0, title_h) } else { 2.0 };
+            let look = Look { font: Font { size: display_size, ..title_look.font }, ..title_look };
+            let n = self.node_keyed(k(3), Node { flags: FIT_TEXT, h: Size::Px(display_size as f32), at: Some((0.0, y_title + dy)), look, inset: Edges { l: text_x, r: text_x, ..Edges::default() }, ..Node::DEFAULT });
+            self.text(&n, title);
+        }
+        let ty = text_top_for(font_size, None, 0.0, line);
+        let n = self.node_keyed(k(4), Node { flags: FIT_TEXT, h: Size::Px(font_size as f32), at: Some((0.0, y_detail + ty)), look: hint, inset: Edges { l: text_x, r: text_x, ..Edges::default() }, ..Node::DEFAULT });
+        self.text(&n, detail);
+        self.leave(saved);
         Head { renamed: title_shown, chosen: pressed, reset_pressed }
     }
 
@@ -1169,33 +1174,29 @@ impl Ui {
             &format!("{}-button-{}", key, index),
             BoxOpts::default().flags(if enabled { CLICKABLE | TAB_STOP } else { NO_FLAGS }).at((x, y_buttons)).w(Size::Px(w)).h(Size::Px(20.0)),
         );
-        self.leave(saved);
         let signal = self.signal(&b);
         if enabled && signal.clicked {
             *pressed = Some(index);
         }
-        let theme = self.tokens();
-        let font_size = self.font_size();
-        let small = 8.max(font_size - 2);
-        let label = label.to_owned();
-        let hint = hint.to_owned();
-        self.draw(&b, move |paint, rect| {
-            let Rect { x, y, h, .. } = rect;
-            paint_button_ground(paint, &theme, enabled && signal.held, enabled && signal.hovered, on, false, rect);
-            let ty = paint.text_top(None, y, h);
-            let ink = if !enabled {
-                theme::ink_3(&theme)
-            } else if dim {
-                theme::ink_2(&theme)
-            } else {
-                theme.foreground
-            };
-            paint.text_c((x + 1.0 + pad, ty), ink, &label);
-            if !hint.is_empty() {
-                let hy = paint.text_top(Some(small), y, h);
-                paint.text_s((x + 1.0 + pad + mono_width(0.0, font_size, &label) + 6.0, hy), small, theme::ink_3(&theme), &hint);
-            }
-        });
+        let t = self.theme();
+        let states = if dim { t.button_bare } else { t.button };
+        let key_look = t.key.idle;
+        let state = State { hovered: enabled && signal.hovered, pressed: enabled && signal.held, checked: on, disabled: !enabled, ..State::default() };
+        // a button that cannot be pressed keeps the fill it is on with
+        let look = if !enabled && on { Look { text: states.disabled.text, ..states.checked } } else { *states.pick(state) };
+        self.set_look(&b, look, state);
+        self.node_mut(&b).inset = Edges { l: 1.0 + pad, ..Edges::default() };
+        self.text(&b, label);
+        if !hint.is_empty() {
+            let inner = self.enter(&b);
+            let font_size = self.font_size();
+            let at = 1.0 + pad + mono_width(0.0, font_size, label) + 6.0;
+            let hw = self.text_width(Some(key_look.font.points(font_size)), hint);
+            let n = self.node_keyed(int_key(b.box_key, 0), Node { w: Size::Px(hw.max(1.0)), h: Size::Px(20.0), at: Some((at, 0.0)), look: key_look, ..Node::DEFAULT });
+            self.text(&n, hint);
+            self.leave(inner);
+        }
+        self.leave(saved);
     }
 
     /// A single-line field. A click places the caret and Shift-click or a drag extends the
@@ -1222,11 +1223,10 @@ impl Ui {
             None
         };
         let changed = edit.as_ref().filter(|e| e.text != value).map(|e| e.text.clone());
-        let theme = self.tokens();
-        let shown = self.cached_label(&row, 0, shown(text));
         let composition = if focused { self.composition().to_owned() } else { String::new() };
         let hovered = signal.hovered;
         // the I-beam over the value, as in any text field
+        let width = self.row_width(&row);
         {
             let (px, py) = self.pointer();
             let (cx, cy, cw, ch) = value_control(ints(self.rect(&row)));
@@ -1234,23 +1234,30 @@ impl Ui {
                 self.request_cursor(Cursor::Text);
             }
         }
-        let font_size = self.font_size();
-        let shown_value = self.cached_label(&row, 1, value);
-        self.draw(&row, move |paint, rect| {
-            let bounds = ints(rect);
-            let (x, y, _, h) = bounds;
-            let control = value_control(bounds);
-            let cx = control.0;
-            if hovered {
-                hover_row(paint, &theme, bounds);
+        let t = self.theme();
+        let hover = State { hovered, ..State::default() };
+        let (look, field) = (*t.row.pick(hover), *t.field.pick(State { focused, ..State::default() }));
+        self.set_look(&row, look, hover);
+        self.node_mut(&row).inset = Edges { l: SIDE as f32, ..Edges::default() };
+        self.text(&row, shown(text));
+        // the value on its hairline in the control column
+        let rh = self.row_height() as f32;
+        let (cx, _, cw, _) = value_control((0, 0, width as i64, rh as i64));
+        let saved = self.enter(&row);
+        let control = self.part(int_key(row.box_key, 0), (cx as f32, 2.0), Size::Px(cw as f32), rh - 4.0, field, Edges { l: 2.0, ..Edges::default() }, "");
+        self.node_mut(&control).state = State { focused, ..State::default() };
+        match edit {
+            Some(edit) => {
+                let font_size = self.font_size();
+                let marks = Some((field.selection, field.caret));
+                self.canvas(&control, move |paint, rect| {
+                    let (x, y, w, h) = ints(rect);
+                    paint_text_edit(paint, None, false, 2.0, marks, (x, y, w, h), label_y(font_size, y - 2, h + 4), &composition, &edit)
+                });
             }
-            kit_text(paint, Some(theme::ink_2(&theme)), x + SIDE, label_y(font_size, y, h), &shown);
-            underline(paint, control, if focused { theme.accent } else { theme::edge(&theme) });
-            match &edit {
-                Some(edit) => paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, edit),
-                None => kit_text(paint, Some(theme.foreground), cx + 2, label_y(font_size, y, h), &shown_value),
-            }
-        });
+            None => self.text(&control, value),
+        }
+        self.leave(saved);
         changed
     }
 
@@ -1259,7 +1266,8 @@ impl Ui {
     /// `Previous`, Escape `Close`. `grab` takes the keyboard for it.
     #[allow(clippy::too_many_arguments)]
     pub fn line_field(&mut self, at: (f32, f32), w: f32, h: f32, grab: bool, placeholder: &str, label: &str, value: &str) -> (String, LineStep) {
-        let field = self.box_(label, BoxOpts::default().flags(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK).at(at).w(Size::Px(w)).h(Size::Px(h)));
+        let field_box = self.box_(label, BoxOpts::default().flags(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK).at(at).w(Size::Px(w)).h(Size::Px(h)));
+        let field = field_box;
         if grab {
             self.focus_box(&field);
         }
@@ -1293,27 +1301,25 @@ impl Ui {
         if signal.hovered {
             self.request_cursor(Cursor::Text);
         }
-        let theme = self.tokens();
-        let composition = self.composition().to_owned();
-        let font_size = self.font_size();
-        let placeholder = placeholder.to_owned();
-        let pedit = edit.clone();
-        self.draw(&field, move |paint, rect| {
-            let control = ints(rect);
-            let (x, y, _, h) = control;
-            underline(paint, control, if focused { theme.accent } else { theme::edge(&theme) });
-            if focused {
-                paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, &pedit);
-            } else {
-                kit_text(
-                    paint,
-                    Some(if pedit.text.is_empty() { theme::ink_3(&theme) } else { theme.foreground }),
-                    x + 2,
-                    label_y(font_size, y, h),
-                    if pedit.text.is_empty() { &placeholder } else { &pedit.text },
-                );
-            }
-        });
+        let t = self.theme();
+        let state = State { focused, ..State::default() };
+        let field = *t.field.pick(state);
+        let look = if focused || !edit.text.is_empty() { field } else { Look { text: t.placeholder.idle.text, ..field } };
+        self.set_look(&field_box, look, state);
+        self.node_mut(&field_box).inset = Edges { l: 2.0, ..Edges::default() };
+        if focused {
+            let composition = self.composition().to_owned();
+            let font_size = self.font_size();
+            let pedit = edit.clone();
+            let marks = Some((field.selection, field.caret));
+            self.canvas(&field_box, move |paint, rect| {
+                let control = ints(rect);
+                let (_, y, _, h) = control;
+                paint_text_edit(paint, None, false, 2.0, marks, control, label_y(font_size, y, h), &composition, &pedit);
+            });
+        } else {
+            self.text(&field_box, if edit.text.is_empty() { placeholder } else { &edit.text });
+        }
         (edit.text, step)
     }
 }
@@ -2329,6 +2335,7 @@ impl Ui {
         // painted where the shared elastic scroll puts the content, overshoot included
         let offset = self.scroll_position(&body);
         let theme = self.tokens();
+        let area_look = self.theme().text_area.idle;
         let composition = self.composition().to_owned();
         // the language's colours and the bracket pair at the caret, once per frame
         let colors: Rc<Vec<(i64, i64, Color)>> = match &language {
@@ -2389,31 +2396,28 @@ impl Ui {
             };
             self.set_at(container, (px, py));
             let selected = st.selected;
-            let doc = items[selected].doc.clone();
-            self.draw(container, move |paint, Rect { x, y, w, h }| {
-                paint.fill(x, y, w, h, theme.input);
-                paint.frame(x, y, w, h, theme::edge(&theme));
-                if !doc.is_empty() {
-                    paint.text_c((x + 8.0, y + h - 18.0), theme::muted(&theme), &display(&doc));
-                }
-            });
+            let t = self.theme();
+            let (sheet, list, hint) = (t.popup.idle, t.list, t.hint.idle);
+            self.set_look(container, sheet, State::default());
+            let doc = &items[selected].doc;
+            if !doc.is_empty() {
+                let saved = self.enter(container);
+                let size = self.font_size() as f32;
+                let n = self.node_keyed(int_key(container.box_key, -1), Node { w: Size::Px((width - 8.0).max(1.0)), h: Size::Px(size), at: Some((8.0, height - 18.0)), look: hint, ..Node::DEFAULT });
+                self.text(&n, &display(doc));
+                self.leave(saved);
+            }
             for (i, r) in boxes.iter().enumerate() {
-                let c = items[first + i].clone();
-                let hovered = self.signal(r).hovered;
-                let is_sel = first + i == selected;
-                let font_size = self.font_size();
-                self.draw(r, move |paint, rect| {
-                    let bounds = ints(rect);
-                    let (rx, ry, rw, rh) = bounds;
-                    if is_sel {
-                        fill_i(paint, bounds, theme.control);
-                    } else if hovered {
-                        hover_row(paint, &theme, bounds);
-                    }
-                    kit_text(paint, Some(theme.foreground), rx + SIDE, label_y(font_size, ry, rh), &c.label);
-                    let dw = paint.text_width(None, &c.detail) as i64;
-                    kit_text(paint, Some(theme::muted(&theme)), rx + rw - dw - SIDE, label_y(font_size, ry, rh), &c.detail);
-                });
+                let c = &items[first + i];
+                let state = State { hovered: self.signal(r).hovered, checked: first + i == selected, ..State::default() };
+                self.style(r, &list, state);
+                self.node_mut(r).inset = Edges { l: SIDE as f32, ..Edges::default() };
+                self.text(r, &c.label);
+                let dw = self.text_width(None, &c.detail) as i64 as f32;
+                let rh = self.row_height() as f32;
+                let saved = self.enter(r);
+                self.placed_part(int_key(r.box_key, 0), 0.0, rh, Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: dw, end: true, ..Place::ALL }, hint, &c.detail);
+                self.leave(saved);
             }
         }
         // the text area's painting: gutter, selection, runs, diagnostics, caret
@@ -2440,6 +2444,7 @@ impl Ui {
             horizontal,
             gutter,
             theme,
+            look: area_look,
         };
         self.draw(&body, move |paint, rect| painted.paint(paint, rect));
         (edit.text, st.submitted)
@@ -2469,6 +2474,8 @@ struct AreaPaint {
     horizontal: f32,
     gutter: f32,
     theme: Tokens,
+    /// the area's ground, gutter rule (`border`), text, selection and caret
+    look: Look,
 }
 
 impl AreaPaint {
@@ -2480,10 +2487,11 @@ impl AreaPaint {
         let char_w = self.char_w;
         let (gutter, offset, pad) = (self.gutter, self.offset, self.pad);
         let edit = &self.edit;
-        paint.fill(bx, by, bw, bh, theme.input);
+        let look = self.look;
+        paint.fill(bx, by, bw, bh, look.fill);
         let previous = paint.clip_rect;
         let text_x = bx + gutter - self.horizontal;
-        paint.fill(bx + gutter, by, 1.0, bh, theme::faint_border(&theme));
+        paint.fill(bx + gutter, by, 1.0, bh, look.border);
         let small = paint.label_size();
         let first = 0.max(((offset - pad) / row).floor() as i64 - self.notes.len() as i64);
         let last = (self.count as i64 - 1).min(((offset + bh) / row).floor() as i64);
@@ -2546,10 +2554,10 @@ impl AreaPaint {
             }
             clip(paint, bx + gutter, bw - gutter);
             for (a, b) in &self.spans {
-                band(paint, lu, clamp_pos(*a), clamp_pos(*b), theme::tint(&theme), y);
+                band(paint, lu, clamp_pos(*a), clamp_pos(*b), look.selection, y);
             }
             if selected {
-                band(paint, lu, s0, s1, theme::tint(&theme), y);
+                band(paint, lu, s0, s1, look.selection, y);
             }
             // the bracket pair at the caret: an accent outline
             if let Some((o, k)) = self.matched {
@@ -2664,7 +2672,7 @@ impl AreaPaint {
             let (ls, le) = (start_of(rows, caret_line), stop_of(rows, caret_line));
             let caret_x = text_x + at(paint, ls, le, edit.caret);
             paint.input_region(caret_x - bx, bx, y, bw, row);
-            paint.fill(caret_x.round(), y + 2.0, 1.0, row - 4.0, theme.accent);
+            paint.fill(caret_x.round(), y + 2.0, 1.0, row - 4.0, look.caret);
         }
         paint.clip_rect = previous;
     }
@@ -2781,28 +2789,36 @@ impl Ui {
         let count = rows.len() as i64;
         let length = o.limit.min(count);
         let start = if length == count { 0 } else { 0.max((count - length).min(cursor - length / 2)) };
-        let theme = self.tokens();
         let composition = self.composition().to_owned();
         let placeholder = display(label);
         let font_size = self.font_size();
         let (slash, at_rest) = (o.slash, o.at_rest);
+        let t = self.theme();
+        // a field that has not been typed in yet can sit at rest: the hairline and no caret
+        let resting = at_rest && edit.text.is_empty();
+        let state = State { focused: !resting, ..State::default() };
+        let field = *t.field.pick(state);
+        let (hint, place_look) = (t.hint.idle, t.placeholder.idle);
+        // the search row: a 20-point field in 4 points of padding
+        self.set_look(&search, Look { text: CLEAR, ..field }, state);
+        self.node_mut(&search).place = Place { inset: Edges { l: 4.0, t: 4.0, r: 4.0, b: 4.0 }, ..Place::ALL };
         {
+            let saved = self.enter(&search);
+            if slash {
+                self.part(int_key(search.box_key, 1), (4.0, 4.0), Size::Px(prefix as f32), 20.0, hint, Edges { l: 2.0, ..Edges::default() }, "/");
+            }
+            if edit.text.is_empty() {
+                let pw = self.text_width(None, &placeholder);
+                self.part(int_key(search.box_key, 2), (4.0 + prefix as f32, 4.0), Size::Px(pw + inset), 20.0, place_look, Edges { l: inset, ..Edges::default() }, &placeholder);
+            }
+            self.leave(saved);
             let edit = edit.clone();
-            self.draw(&search, move |paint, rect| {
+            let marks = if edit.text.is_empty() { None } else { Some((field.selection, field.caret)) };
+            self.canvas_over(&search, move |paint, rect| {
                 let (x, y, w, h) = ints(rect);
-                let field = (x + 4, y + 4, 1.max(w - 8), 1.max(h - 8));
-                let (cx, cy, cw, ch) = field;
-                // a field that has not been typed in yet can sit at rest: the hairline and no caret
-                let resting = at_rest && edit.text.is_empty();
-                underline(paint, field, if resting { theme::edge(&theme) } else { theme.accent });
-                if slash {
-                    kit_text(paint, Some(theme::ink_2(&theme)), cx + 2, label_y(font_size, cy, ch), "/");
-                }
+                let (cx, cy, cw, ch) = (x + 4, y + 4, 1.max(w - 8), 1.max(h - 8));
                 let control = (cx + prefix, cy, 1.max(cw - prefix), ch);
-                if edit.text.is_empty() {
-                    paint.text_c(((cx + prefix) as f32 + inset, label_y(font_size, cy, ch) as f32), theme::ink_3(&theme), &placeholder);
-                }
-                paint_text_edit(paint, None, false, inset, !edit.text.is_empty(), control, label_y(font_size, cy, ch), &composition, &edit);
+                paint_text_edit(paint, None, false, inset, marks, control, label_y(font_size, cy, ch), &composition, &edit);
             });
         }
         let saved = self.enter(&list);
@@ -2822,90 +2838,82 @@ impl Ui {
                 result = Pick::Pick(index);
             }
             let current = index == cursor;
-            let hovered = row_signal.hovered;
             let doomed = index == armed;
-            let (text, detail) = rows[index as usize].clone();
-            let swatch = o.mark.as_ref().and_then(|m| m(index));
-            let has_mark = o.mark.is_some();
             let unavailable = off(index);
-            let query = query.clone();
-            self.draw(&row, move |paint, rect| {
-                let bounds = ints(rect);
-                let (x, y, w, h) = bounds;
-                // the keyboard cursor is the control fill; a row armed for deletion reads in the error colour
-                if doomed {
-                    fill_i(paint, bounds, theme::pressed_fill(&theme));
-                } else if current {
-                    fill_i(paint, bounds, theme.control);
-                } else if hovered {
-                    hover_row(paint, &theme, bounds);
+            let (text, detail) = &rows[index as usize];
+            let swatch = o.mark.as_ref().and_then(|m| m(index));
+            let t = self.theme();
+            let ink3 = t.placeholder.idle.text;
+            // the keyboard cursor is the control fill; a row armed for deletion reads in the error colour
+            let state = State { hovered: row_signal.hovered, checked: current, ..State::default() };
+            let look = if doomed { t.row_doomed.idle } else { *t.list.pick(state) };
+            let ink = if doomed { look.text } else if unavailable { t.list.disabled.text } else { t.list.idle.text };
+            let (matched, key_look, detail_look) = (t.matched.idle.text, t.key.idle, if unavailable { t.placeholder.idle } else { t.hint.idle });
+            self.set_look(&row, look, state);
+            let width = self.row_width(&row);
+            let rk = |n: i64| int_key(row.box_key, n);
+            let inner = self.enter(&row);
+            let rh = row_height as f32;
+            let text_x = if o.mark.is_none() { SIDE as f32 } else { SIDE as f32 + 16.0 };
+            // a label that would run into the detail is cut with an ellipsis
+            let key_size = key_look.font.points(font_size);
+            let key_text = "\u{21b5}";
+            let kw = self.text_width(Some(key_size), key_text);
+            let right = if current { width - SIDE as f32 - kw - 8.0 } else { width - SIDE as f32 };
+            let dw = self.text_width(None, detail);
+            let limit = right - dw - 12.0 - text_x;
+            let text = ellipsis(&mut |s| self.text_width(None, s), limit, text);
+            if let Some(color) = swatch {
+                let fill = if unavailable { ink3 } else { color };
+                self.part(rk(0), (SIDE as f32, ((row_height - 8) / 2) as f32), Size::Px(8.0), 8.0, Look { fill, ..Look::NONE }, Edges::default(), "");
+            }
+            // the query's letters, matched in order, in the accent
+            let q = query.to_ascii_lowercase();
+            let lower = text.to_ascii_lowercase();
+            let mut next = 0usize;
+            let mut pen = text_x;
+            let mut start = 0usize;
+            let is_matched = |at: usize, next: &mut usize| {
+                let hit = *next < q.len() && lower.len() > at && lower.as_bytes()[at] == q.as_bytes()[*next];
+                if hit {
+                    *next += 1;
                 }
-                let text_x = if !has_mark { x + SIDE } else { x + SIDE + 16 };
-                // a label that would run into the detail is cut with an ellipsis
-                let key_size = 8.max(paint.font_size - 2);
-                let key_text = "\u{21b5}";
-                let right = if current {
-                    (x + w - SIDE) as f32 - paint.text_width(Some(key_size), key_text) - 8.0
-                } else {
-                    (x + w - SIDE) as f32
-                };
-                let limit = right - paint.text_width(None, &detail) - 12.0 - text_x as f32;
-                let text = ellipsis(&mut |s| paint.text_width(None, s), limit, &text);
-                if let Some(color) = swatch {
-                    fill_i(paint, (x + SIDE, y + (h - 8) / 2, 8, 8), if unavailable { theme::ink_3(&theme) } else { color });
-                }
-                // the query's letters, matched in order, in the accent
-                let q = query.to_ascii_lowercase();
-                let lower = text.to_ascii_lowercase();
-                let mut matched = vec![false; text.len()];
-                let mut next = 0usize;
-                for (at, c) in text.char_indices() {
-                    if next < q.len() && lower.len() > at && lower.as_bytes()[at] == q.as_bytes()[next] {
-                        matched[at] = true;
-                        next += 1;
-                    }
-                    let _ = c;
-                }
-                let mut pen = text_x as f32;
-                let mut start = 0usize;
-                while start < text.len() {
-                    let flag = matched[start];
-                    let mut stop = start;
-                    while stop < text.len() && (stop == start || matched[stop] == flag || text.as_bytes()[stop] & 0xc0 == 0x80) {
+                hit
+            };
+            let mut run_key = 10;
+            let mut flag = !text.is_empty() && is_matched(0, &mut next);
+            while start < text.len() {
+                let mut stop = start + 1;
+                let mut following = false;
+                while stop < text.len() {
+                    if text.as_bytes()[stop] & 0xc0 == 0x80 {
                         stop += 1;
+                        continue;
                     }
-                    let run = &text[start..stop];
-                    paint.text_c(
-                        (pen, label_y(paint.font_size, y, h) as f32),
-                        if doomed {
-                            theme::invalid()
-                        } else if unavailable {
-                            theme::ink_3(&theme)
-                        } else if flag {
-                            theme.accent
-                        } else {
-                            theme.foreground
-                        },
-                        run,
-                    );
-                    pen += paint.text_width(None, run);
-                    start = stop;
+                    following = is_matched(stop, &mut next);
+                    if following != flag {
+                        break;
+                    }
+                    stop += 1;
                 }
-                let right = if current {
-                    let width = paint.text_width(Some(key_size), key_text);
-                    let ty = paint.text_top(Some(key_size), y as f32, h as f32);
-                    paint.text_s(((x + w - SIDE) as f32 - width, ty), key_size, theme::ink_3(&theme), key_text);
-                    (x + w - SIDE) as f32 - width - 8.0
-                } else {
-                    (x + w - SIDE) as f32
-                };
-                let dw = paint.text_width(None, &detail);
-                paint.text_c(
-                    (right - dw, label_y(paint.font_size, y, h) as f32),
-                    if unavailable { theme::ink_3(&theme) } else { theme::muted(&theme) },
-                    &detail,
-                );
-            });
+                let run = &text[start..stop];
+                let rw = self.text_width(None, run);
+                let color = if doomed || unavailable { ink } else if flag { matched } else { ink };
+                self.part(rk(run_key), (pen, 0.0), Size::Px(rw.max(1.0)), rh, Look { text: color, ..Look::NONE }, Edges::default(), run);
+                run_key += 1;
+                pen += rw;
+                start = stop;
+                flag = following;
+            }
+            let edge = |r: f32, w: f32| Place { inset: Edges { r, ..Edges::default() }, w, end: true, ..Place::ALL };
+            let detail_right = if current {
+                self.placed_part(rk(1), 0.0, rh, edge(SIDE as f32, kw), key_look, key_text);
+                SIDE as f32 + kw + 8.0
+            } else {
+                SIDE as f32
+            };
+            self.placed_part(rk(2), 0.0, rh, edge(detail_right, dw), detail_look, detail);
+            self.leave(inner);
         }
         self.leave(saved);
         self.set_state(&search, cursor);
@@ -2955,7 +2963,6 @@ struct MenuRows {
     chevrons: Vec<i64>,
     lead_from: i64,
     swatch_pad: f32,
-    key_size: i64,
     gap: f32,
 }
 
@@ -2964,70 +2971,53 @@ impl Ui {
     fn menu_rows(&mut self, m: &MenuRows) -> (Option<i64>, Option<i64>) {
         let mut hovered = None;
         let mut picked = None;
-        let theme = self.tokens();
         let font_size = self.font_size();
+        let rh = self.row_height() as f32;
         let lead_of = |index: i64| if m.selected.is_none() || index < m.lead_from { 0 } else { 14 };
         for (index, (text, enabled)) in m.items.iter().enumerate() {
             let index = index as i64;
+            let t = self.theme();
             if text.is_empty() {
+                let look = t.separator.idle;
                 let line = self.box_fmt(format_args!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(m.gap)));
-                self.draw(&line, move |paint, Rect { x, y, w, h: _ }| paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme)));
+                self.set_look(&line, look, State::default());
+                self.node_mut(&line).place = Place { inset: Edges { t: 4.0, b: m.gap - 5.0, ..Edges::default() }, ..Place::ALL };
             } else {
                 let enabled = *enabled;
+                let danger = m.danger.contains(&index);
+                let states = if danger { t.menu_danger } else { t.menu };
+                let (mark, swatch_look, chevron_look, key_look) = (t.mark.idle, t.swatch.idle, t.hint.idle, t.menu_key.idle);
                 let row = self.kit_row(Some(if enabled { CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY } else { BLOCKING }), None, text);
                 let signal = self.signal(&row);
                 if enabled && signal.hovered {
                     hovered = Some(index);
                 }
-                let shown = display(text);
                 let chevron = m.chevrons.contains(&index);
-                let opened = m.opened;
-                let selected = m.selected;
-                let swatch = m.swatches.get(index as usize).copied().flatten();
-                let danger = m.danger.contains(&index);
-                let swatch_pad = m.swatch_pad;
-                let key_size = m.key_size;
-                let key = m.keys.get(index as usize).filter(|k| !k.is_empty()).cloned();
-                let lead = lead_of(index);
-                self.draw(&row, move |paint, rect| {
-                    let bounds = ints(rect);
-                    let (rx, y, w, h) = bounds;
-                    if enabled && (signal.hovered || opened == Some(index)) {
-                        fill_i(paint, bounds, theme.control);
-                    }
-                    // the current choice: a 6-point accent square before the label
-                    if selected == Some(index) {
-                        paint.fill(rx as f32 + SIDE as f32, y as f32 + h as f32 / 2.0 - 3.0, 6.0, 6.0, theme.accent);
-                    }
-                    if let Some(color) = swatch {
-                        let sx = (rx + SIDE + lead) as f32;
-                        let sy = y as f32 + h as f32 / 2.0 - 4.0;
-                        paint.fill(sx, sy, 8.0, 8.0, color);
-                        paint.frame(sx, sy, 8.0, 8.0, theme::edge(&theme));
-                    }
-                    // the destructive row reads in the error ink
-                    kit_text(
-                        paint,
-                        Some(if !enabled {
-                            theme::ink_3(&theme)
-                        } else if danger {
-                            theme::invalid()
-                        } else {
-                            theme.foreground
-                        }),
-                        rx + SIDE + lead + swatch_pad as i64,
-                        label_y(font_size, y, h),
-                        &shown,
-                    );
-                    if chevron {
-                        paint.chevron(((rx + w) as f32 - 15.25, y as f32 + h as f32 / 2.0), Dir::Right, theme::ink_2(&theme));
-                    }
-                    if let Some(key) = &key {
-                        let kw = paint.text_width(Some(key_size), key);
-                        let ty = paint.text_top(Some(key_size), y as f32, h as f32);
-                        paint.text_s(((rx + w - SIDE) as f32 - kw, ty), key_size, theme::ink_2(&theme), key);
-                    }
-                });
+                let lead = lead_of(index) as f32;
+                let state = State { hovered: signal.hovered || m.opened == Some(index), disabled: !enabled, ..State::default() };
+                self.style(&row, &states, state);
+                self.node_mut(&row).inset = Edges { l: SIDE as f32 + lead + m.swatch_pad, ..Edges::default() };
+                self.text(&row, &display(text));
+                let k = |n: i64| int_key(row.box_key, n);
+                let saved = self.enter(&row);
+                // the current choice: a 6-point accent square before the label
+                if m.selected == Some(index) {
+                    self.part(k(0), (SIDE as f32, rh / 2.0 - 3.0), Size::Px(6.0), 6.0, mark, Edges::default(), "");
+                }
+                if let Some(color) = m.swatches.get(index as usize).copied().flatten() {
+                    self.part(k(1), (SIDE as f32 + lead, rh / 2.0 - 4.0), Size::Px(8.0), 8.0, Look { fill: color, ..swatch_look }, Edges::default(), "");
+                }
+                if chevron {
+                    let place = Place { inset: Edges { r: 15.25 - 3.0, ..Edges::default() }, w: 6.0, end: true, ..Place::ALL };
+                    let c = self.placed_part(k(2), 0.0, rh, place, chevron_look, "");
+                    self.node_mut(&c).mark = Mark::Chevron(Dir::Right);
+                }
+                if let Some(key) = m.keys.get(index as usize).filter(|k| !k.is_empty()) {
+                    let kw = self.text_width(Some(key_look.font.points(font_size)), key);
+                    let place = Place { inset: Edges { r: SIDE as f32, ..Edges::default() }, w: kw, end: true, ..Place::ALL };
+                    self.placed_part(k(3), 0.0, rh, place, key_look, key);
+                }
+                self.leave(saved);
                 if enabled && signal.clicked && !chevron && picked.is_none() {
                     picked = Some(index);
                 }
@@ -3097,10 +3087,9 @@ impl Ui {
             n += sub.rows.len() as i64;
         }
         let keep: Vec<Rect> = o.submenus.iter().map(|s| sub_geometry(self, s)).collect();
-        let theme = self.tokens();
-        let stroke = theme::edge(&theme);
+        let sheet = self.theme().popup.idle;
         let related = if o.submenus.is_empty() { Vec::new() } else { vec![submenu_key] };
-        let popts = PopupOpts { stroke: Some(stroke), keep, related, ..PopupOpts::default() };
+        let popts = PopupOpts { look: Some(sheet), keep, related, ..PopupOpts::default() };
         let mut opened: Option<i64> = None;
         let mut picked: Option<i64> = None;
         let menu_items = items.to_vec();
@@ -3118,7 +3107,6 @@ impl Ui {
                 chevrons: chevrons.clone(),
                 lead_from: o.lead_from,
                 swatch_pad,
-                key_size,
                 gap,
             };
             let (p, hovered) = ui.menu_rows(&m);
@@ -3148,7 +3136,8 @@ impl Ui {
                 let sub = o.submenus[si].clone();
                 let Rect { x: sx, y: sy, w: sw, h: sh } = sub_geometry(self, &sub);
                 let mut sub_picked: Option<i64> = None;
-                self.popup(Some(stroke), None, true, true, (sx, sy), sw, sh, &format!("{}-sub", label), &mut |ui: &mut Ui| {
+                let sub_opts = PopupOpts { look: Some(sheet), attached: true, ..PopupOpts::default() };
+                self.popup_with_related(sub_opts, (sx, sy), sw, sh, &format!("{}-sub", label), &mut |ui: &mut Ui| {
                     ui.box_("menu-top", BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(6.0)));
                     let m = MenuRows {
                         items: sub.rows.clone(),
@@ -3160,7 +3149,6 @@ impl Ui {
                         chevrons: Vec::new(),
                         lead_from: 0,
                         swatch_pad,
-                        key_size,
                         gap,
                     };
                     let (p, _) = ui.menu_rows(&m);
