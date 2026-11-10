@@ -186,7 +186,7 @@ mod tests {
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
         let offsets: Vec<i64> = (0..=(triangles.len() as i64 / 3)).map(|p| p * 3).collect();
-        let topo = topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets).unwrap();
+        let topo = topology::polygons_owned(points.len() as i64, topology::narrow("test", triangles).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap();
         geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }

@@ -58,8 +58,8 @@ fn cx(cancel: Option<&Arc<cancel::T>>) -> Option<&cancel::T> {
     cancel.map(|value| value.as_ref())
 }
 
-fn u(index: i64) -> usize {
-    index as usize
+fn u<T: Into<i64>>(index: T) -> usize {
+    index.into() as usize
 }
 
 fn is_nonzero(sign: Sign) -> bool {
@@ -89,14 +89,14 @@ fn topology_view(topology_value: &topology::T) -> Result<TopologyView, error::T>
 }
 
 fn primitive_min_edge_length(positions: &Positions, topology: &TopologyView, primitive: i64) -> f64 {
-    let first = topology.primitive_offsets[u(primitive)];
-    let last = topology.primitive_offsets[u(primitive + 1)];
+    let first = i64::from(topology.primitive_offsets[u(primitive)]);
+    let last = i64::from(topology.primitive_offsets[u(primitive + 1)]);
     let mut minimum = f64::INFINITY;
     for vertex in first..last {
         let next = if vertex + 1 == last { first } else { vertex + 1 };
         minimum = omin(
             minimum,
-            edge_length(positions, topology.vertex_points[u(vertex)], topology.vertex_points[u(next)]),
+            edge_length(positions, i64::from(topology.vertex_points[u(vertex)]), i64::from(topology.vertex_points[u(next)])),
         );
     }
     minimum
@@ -104,7 +104,7 @@ fn primitive_min_edge_length(positions: &Positions, topology: &TopologyView, pri
 
 fn primitive_is_triangle(topology: &TopologyView, primitive: i64) -> bool {
     topology.primitive_kinds[u(primitive)] == 0
-        && topology.primitive_offsets[u(primitive + 1)] - topology.primitive_offsets[u(primitive)] == 3
+        && i64::from(topology.primitive_offsets[u(primitive + 1)]) - i64::from(topology.primitive_offsets[u(primitive)]) == 3
 }
 
 fn link_condition(
@@ -116,19 +116,19 @@ fn link_condition(
     a: i64,
     b: i64,
 ) -> bool {
-    let first = index.edge_offsets[u(edge)];
-    let v0 = index.edge_vertices[u(first)];
-    let v1 = index.edge_vertices[u(first + 1)];
+    let first = i64::from(index.edge_offsets[u(edge)]);
+    let v0 = i64::from(index.edge_vertices[u(first)]);
+    let v1 = i64::from(index.edge_vertices[u(first + 1)]);
     let opposite = |vertex: i64| {
         let next = rdk_core::topology_index::widen(index.next_vertex[u(vertex)]);
-        topology.vertex_points[u(rdk_core::topology_index::widen(index.next_vertex[u(next)]))]
+        i64::from(topology.vertex_points[u(rdk_core::topology_index::widen(index.next_vertex[u(next)]))])
     };
     let c = opposite(v0);
     let d = opposite(v1);
-    for local in index.point_edge_offsets[u(a)]..index.point_edge_offsets[u(a + 1)] {
-        let candidate = index.point_edges[u(local)];
-        let x = index.edge_a[u(candidate)];
-        let y = index.edge_b[u(candidate)];
+    for local in i64::from(index.point_edge_offsets[u(a)])..i64::from(index.point_edge_offsets[u(a + 1)]) {
+        let candidate = i64::from(index.point_edges[u(local)]);
+        let x = i64::from(index.edge_a[u(candidate)]);
+        let y = i64::from(index.edge_b[u(candidate)]);
         let neighbor = if x == a { y } else { x };
         if neighbor != a {
             stamps[u(neighbor)] = stamp;
@@ -136,10 +136,10 @@ fn link_condition(
     }
     let mut common = 0;
     let mut valid = true;
-    for local in index.point_edge_offsets[u(b)]..index.point_edge_offsets[u(b + 1)] {
-        let candidate = index.point_edges[u(local)];
-        let x = index.edge_a[u(candidate)];
-        let y = index.edge_b[u(candidate)];
+    for local in i64::from(index.point_edge_offsets[u(b)])..i64::from(index.point_edge_offsets[u(b + 1)]) {
+        let candidate = i64::from(index.point_edges[u(local)]);
+        let x = i64::from(index.edge_a[u(candidate)]);
+        let y = i64::from(index.edge_b[u(candidate)]);
         let neighbor = if x == b { y } else { x };
         if neighbor != b && stamps[u(neighbor)] == stamp {
             common += 1;
@@ -162,8 +162,8 @@ fn contraction_preserves_orientation(
     keep: i64,
     remove: i64,
 ) -> bool {
-    let first = topology.primitive_offsets[u(primitive)];
-    let original = |local: i64| topology.vertex_points[u(first + local)];
+    let first = i64::from(topology.primitive_offsets[u(primitive)]);
+    let original = |local: i64| i64::from(topology.vertex_points[u(first + local)]);
     let contracted = |local: i64| {
         let point = original(local);
         if point == remove { keep } else { point }
@@ -189,7 +189,7 @@ fn contraction_preserves_orientation(
 fn sorted_candidates(candidates: &edge_group::T, lengths: &mut [f64], positions: &Positions, index: &IndexView) -> Vec<i64> {
     let ordered = members(candidates);
     for edge in &ordered {
-        lengths[u(*edge)] = edge_length(positions, index.edge_a[u(*edge)], index.edge_b[u(*edge)]);
+        lengths[u(*edge)] = edge_length(positions, i64::from(index.edge_a[u(*edge)]), i64::from(index.edge_b[u(*edge)]));
     }
     let mut ordered = ordered;
     ordered.sort_by(|left, right| {
@@ -199,8 +199,8 @@ fn sorted_candidates(candidates: &edge_group::T, lengths: &mut [f64], positions:
 }
 
 fn reserve_primitives(index: &IndexView, used_primitives: &mut [u8], point: i64) {
-    for local in index.point_offsets[u(point)]..index.point_offsets[u(point + 1)] {
-        support::bits::set(used_primitives, index.primitive_of_vertex[u(index.point_vertices[u(local)])]);
+    for local in i64::from(index.point_offsets[u(point)])..i64::from(index.point_offsets[u(point + 1)]) {
+        support::bits::set(used_primitives, i64::from(index.primitive_of_vertex[u(index.point_vertices[u(local)])]));
     }
 }
 
@@ -238,17 +238,17 @@ pub fn safe_independent_edges(
                 let stamp = stamp as i64;
                 let edge = *edge;
                 cancel::poll(cx(cancel), stamp, 4095)?;
-                let incidence_first = index.edge_offsets[u(edge)];
-                let incidence_last = index.edge_offsets[u(edge + 1)];
+                let incidence_first = i64::from(index.edge_offsets[u(edge)]);
+                let incidence_last = i64::from(index.edge_offsets[u(edge + 1)]);
                 if incidence_last - incidence_first != 2 {
                     continue;
                 }
-                let a = index.edge_a[u(edge)];
-                let b = index.edge_b[u(edge)];
+                let a = i64::from(index.edge_a[u(edge)]);
+                let b = i64::from(index.edge_b[u(edge)]);
                 let keep = if keep_greatest { a.max(b) } else { a.min(b) };
                 let remove = if keep_greatest { a.min(b) } else { a.max(b) };
-                let primitive_a = index.primitive_of_vertex[u(index.edge_vertices[u(incidence_first)])];
-                let primitive_b = index.primitive_of_vertex[u(index.edge_vertices[u(incidence_first + 1)])];
+                let primitive_a = i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(incidence_first)])]);
+                let primitive_b = i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(incidence_first + 1)])]);
                 if primitive_a != primitive_b
                     && primitive_is_triangle(&topology, primitive_a)
                     && primitive_is_triangle(&topology, primitive_b)
@@ -259,11 +259,11 @@ pub fn safe_independent_edges(
                     && link_condition(&index, &topology, &mut neighbor_stamps, stamp, edge, a, b)
                 {
                     let mut valid = true;
-                    let first = index.point_offsets[u(remove)];
-                    let last = index.point_offsets[u(remove + 1)];
+                    let first = i64::from(index.point_offsets[u(remove)]);
+                    let last = i64::from(index.point_offsets[u(remove + 1)]);
                     let mut local = first;
                     while valid && local < last {
-                        let primitive = index.primitive_of_vertex[u(index.point_vertices[u(local)])];
+                        let primitive = i64::from(index.primitive_of_vertex[u(index.point_vertices[u(local)])]);
                         if primitive != primitive_a
                             && primitive != primitive_b
                             && (support::bits::mem(&used_primitives, primitive)
@@ -312,12 +312,12 @@ pub fn speculative_independent_edges(
             let mut chosen = vec![0u8; bits_len(edge_count)];
             let mut used_primitives = vec![0u8; bits_len(geometry::primitive_count(geometry_value))];
             for edge in ordered {
-                let a = index.edge_a[u(edge)];
-                let b = index.edge_b[u(edge)];
+                let a = i64::from(index.edge_a[u(edge)]);
+                let b = i64::from(index.edge_b[u(edge)]);
                 let mut available = true;
                 for point in [a, b] {
-                    for slot in index.point_offsets[u(point)]..index.point_offsets[u(point + 1)] {
-                        let primitive = index.primitive_of_vertex[u(index.point_vertices[u(slot)])];
+                    for slot in i64::from(index.point_offsets[u(point)])..i64::from(index.point_offsets[u(point + 1)]) {
+                        let primitive = i64::from(index.primitive_of_vertex[u(index.point_vertices[u(slot)])]);
                         if support::bits::mem(&used_primitives, primitive) {
                             available = false;
                         }
@@ -387,24 +387,24 @@ fn empty_geometry() -> Result<geometry::T, error::T> {
 }
 
 fn opposite_duplicate(topology: &TopologyView, first: i64, second: i64) -> bool {
-    let first_offset = topology.primitive_offsets[u(first)];
-    let second_offset = topology.primitive_offsets[u(second)];
-    if topology.primitive_offsets[u(first + 1)] - first_offset != 3
-        || topology.primitive_offsets[u(second + 1)] - second_offset != 3
+    let first_offset = i64::from(topology.primitive_offsets[u(first)]);
+    let second_offset = i64::from(topology.primitive_offsets[u(second)]);
+    if i64::from(topology.primitive_offsets[u(first + 1)]) - first_offset != 3
+        || i64::from(topology.primitive_offsets[u(second + 1)]) - second_offset != 3
     {
         return false;
     }
-    let point = |offset: i64| topology.vertex_points[u(offset)];
+    let point = |offset: i64| i64::from(topology.vertex_points[u(offset)]);
     let (a, b, c) = (point(first_offset), point(first_offset + 1), point(first_offset + 2));
     let (x, y, z) = (point(second_offset), point(second_offset + 1), point(second_offset + 2));
     (a == x && b == z && c == y) || (a == y && b == x && c == z) || (a == z && b == y && c == x)
 }
 
 fn triangle_point_key(topology: &TopologyView, primitive: i64) -> (i64, i64, i64) {
-    let first = topology.primitive_offsets[u(primitive)];
-    let a = topology.vertex_points[u(first)];
-    let b = topology.vertex_points[u(first + 1)];
-    let c = topology.vertex_points[u(first + 2)];
+    let first = i64::from(topology.primitive_offsets[u(primitive)]);
+    let a = i64::from(topology.vertex_points[u(first)]);
+    let b = i64::from(topology.vertex_points[u(first + 1)]);
+    let c = i64::from(topology.vertex_points[u(first + 2)]);
     if a <= b {
         if b <= c {
             (a, b, c)
@@ -652,9 +652,9 @@ fn verify_extracted_orientations(
         while failures[u(range)].load(AtomicOrdering::Relaxed) < 0 && primitive < last {
             cancel::poll(cx(cancel), primitive, 4095)?;
             let offset = primitive * 3;
-            let a = topology.vertex_points[u(offset)];
-            let b = topology.vertex_points[u(offset + 1)];
-            let c = topology.vertex_points[u(offset + 2)];
+            let a = i64::from(topology.vertex_points[u(offset)]);
+            let b = i64::from(topology.vertex_points[u(offset + 1)]);
+            let c = i64::from(topology.vertex_points[u(offset + 2)]);
             let ea = crate::boolean_complex::view::vertex(&complex, view.corner_complex_vertices[u(offset)]);
             let eb = crate::boolean_complex::view::vertex(&complex, view.corner_complex_vertices[u(offset + 1)]);
             let ec = crate::boolean_complex::view::vertex(&complex, view.corner_complex_vertices[u(offset + 2)]);
@@ -920,10 +920,10 @@ fn rounded_triangle_degenerate(positions: &Positions, topology: &TopologyView, p
     if !primitive_is_triangle(topology, primitive) {
         return false;
     }
-    let first = topology.primitive_offsets[u(primitive)];
-    let a = topology.vertex_points[u(first)];
-    let b = topology.vertex_points[u(first + 1)];
-    let c = topology.vertex_points[u(first + 2)];
+    let first = i64::from(topology.primitive_offsets[u(primitive)]);
+    let a = i64::from(topology.vertex_points[u(first)]);
+    let b = i64::from(topology.vertex_points[u(first + 1)]);
+    let c = i64::from(topology.vertex_points[u(first + 2)]);
     a == b
         || b == c
         || c == a
@@ -952,7 +952,7 @@ fn rounded_sliver_edges(
                 cancel::poll(cx(cancel), primitive, 4095)?;
                 if rounded_triangle_degenerate(&positions, &topology, primitive) {
                     degenerate_count += 1;
-                    let first = topology.primitive_offsets[u(primitive)];
+                    let first = i64::from(topology.primitive_offsets[u(primitive)]);
                     for local in 0..3 {
                         let edge = rdk_core::topology_index::widen(index.edge_of_vertex[u(first + local)]);
                         if edge >= 0 {
@@ -998,11 +998,11 @@ fn coordinate_ulp(value: f64) -> f64 {
 }
 
 fn primitive_ulp_scale(positions: &Positions, topology: &TopologyView, primitive: i64) -> f64 {
-    let first = topology.primitive_offsets[u(primitive)];
-    let last = topology.primitive_offsets[u(primitive + 1)];
+    let first = i64::from(topology.primitive_offsets[u(primitive)]);
+    let last = i64::from(topology.primitive_offsets[u(primitive + 1)]);
     let mut scale = 0.;
     for vertex in first..last {
-        let point = u(topology.vertex_points[u(vertex)]);
+        let point = u(i64::from(topology.vertex_points[u(vertex)]));
         scale = omax(scale, coordinate_ulp(positions.x[point]));
         scale = omax(scale, coordinate_ulp(positions.y[point]));
         scale = omax(scale, coordinate_ulp(positions.z[point]));
@@ -1037,11 +1037,11 @@ fn rounded_self_contact_edges(
                 let ulp = primitive_ulp_scale(&positions, &topology, primitive);
                 if minimum <= 8. * ulp {
                     repairable += 1;
-                    let first = topology.primitive_offsets[u(primitive)];
+                    let first = i64::from(topology.primitive_offsets[u(primitive)]);
                     for local in 0..3 {
                         let edge = rdk_core::topology_index::widen(index.edge_of_vertex[u(first + local)]);
                         if edge >= 0 {
-                            let length = edge_length(&positions, index.edge_a[u(edge)], index.edge_b[u(edge)]);
+                            let length = edge_length(&positions, i64::from(index.edge_a[u(edge)]), i64::from(index.edge_b[u(edge)]));
                             if length <= minimum {
                                 support::bits::set(&mut bits, edge);
                             }
@@ -1137,11 +1137,11 @@ fn closed_rounded_slivers(
             let mut valid = selected_count > 0;
             let mut edge = 0usize;
             while valid && edge < index.edge_a.len() {
-                let first = index.edge_offsets[edge];
-                let last = index.edge_offsets[edge + 1];
+                let first = i64::from(index.edge_offsets[edge]);
+                let last = i64::from(index.edge_offsets[edge + 1]);
                 let mut removed = 0;
                 for slot in first..last {
-                    let primitive = index.primitive_of_vertex[u(index.edge_vertices[u(slot)])];
+                    let primitive = i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(slot)])]);
                     if support::bits::mem(&selected, primitive) {
                         removed += 1;
                     }
@@ -1537,12 +1537,12 @@ fn tiny_cleanup_edges(
                 "__rdk_boolean_tiny_seam_continuation",
                 &|edge| -> Result<bool, error::T> {
                     cancel::poll(cx(cancel), edge, 4095)?;
-                    let first = index.edge_offsets[u(edge)];
-                    let last = index.edge_offsets[u(edge + 1)];
+                    let first = i64::from(index.edge_offsets[u(edge)]);
+                    let last = i64::from(index.edge_offsets[u(edge + 1)]);
                     let mut adjacent = false;
                     let mut incident = first;
                     while !adjacent && incident < last {
-                        let primitive = index.primitive_of_vertex[u(index.edge_vertices[u(incident)])];
+                        let primitive = i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(incident)])]);
                         let extraction = cleanup.cleanup_primitive_sources[u(primitive)];
                         if extraction < 0 || extraction >= extraction_primitives {
                             return Err(inv("Boolean cleanup primitive ancestry is out of range"));
@@ -1552,7 +1552,7 @@ fn tiny_cleanup_edges(
                         incident += 1;
                     }
                     Ok(adjacent
-                        && edge_length(&positions, index.edge_a[u(edge)], index.edge_b[u(edge)]) <= threshold)
+                        && edge_length(&positions, i64::from(index.edge_a[u(edge)]), i64::from(index.edge_b[u(edge)])) <= threshold)
                 },
             )
             .map_err(raised)?;
@@ -1697,12 +1697,12 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             for edge in 0..index.edge_a.len() {
                 cancel::poll(cx(cancel), edge as i64, 4095)?;
                 if !edge_group::mem(edge as i64, &cleanup.cleanup_seam_edges) {
-                    let first = index.edge_offsets[edge];
-                    let last = index.edge_offsets[edge + 1];
+                    let first = i64::from(index.edge_offsets[edge]);
+                    let last = i64::from(index.edge_offsets[edge + 1]);
                     if first < last {
-                        let base = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
+                        let base = u(i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]));
                         for incident in first + 1..last {
-                            let other = u(index.primitive_of_vertex[u(index.edge_vertices[u(incident)])]);
+                            let other = u(i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(incident)])]));
                             parent.union_rank(base, other, false);
                         }
                     }
@@ -1723,11 +1723,11 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             let mut point_offsets = vec![0i64; point_count + 1];
             for point in 0..point_count {
                 cancel::poll(cx(cancel), point as i64, 4095)?;
-                let first = index.point_offsets[point];
-                let last = index.point_offsets[point + 1];
+                let first = i64::from(index.point_offsets[point]);
+                let last = i64::from(index.point_offsets[point + 1]);
                 let mut count = 0i64;
                 for incident in first..last {
-                    let primitive = index.primitive_of_vertex[u(index.point_vertices[u(incident)])];
+                    let primitive = i64::from(index.primitive_of_vertex[u(index.point_vertices[u(incident)])]);
                     let component = primitive_component[u(primitive)];
                     if component_stamps[u(component)] != point as i64 {
                         component_stamps[u(component)] = point as i64;
@@ -1747,16 +1747,16 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             let mut component_output = vec![-1i64; u(component_count)];
             component_stamps.iter_mut().for_each(|stamp| *stamp = -1);
             for point in 0..point_count {
-                let first = index.point_offsets[point];
-                let last = index.point_offsets[point + 1];
+                let first = i64::from(index.point_offsets[point]);
+                let last = i64::from(index.point_offsets[point + 1]);
                 let mut next = point_offsets[point];
                 if first == last {
                     point_map[u(next)] = point as i64;
                     next += 1;
                 } else {
                     for incident in first..last {
-                        let vertex = index.point_vertices[u(incident)];
-                        let primitive = index.primitive_of_vertex[u(vertex)];
+                        let vertex = i64::from(index.point_vertices[u(incident)]);
+                        let primitive = i64::from(index.primitive_of_vertex[u(vertex)]);
                         let component = primitive_component[u(primitive)];
                         if component_stamps[u(component)] != point as i64 {
                             component_stamps[u(component)] = point as i64;
@@ -1773,10 +1773,10 @@ pub fn split_seam_points(cancel: Option<&Arc<cancel::T>>, grain: i64, cleanup: &
             }
             let target_topology = topology::view::create_validated_shared(
                 output_points,
-                vertex_points,
+                topology::narrow("Boolean", &vertex_points)?,
                 topology.primitive_offsets.clone(),
                 topology.primitive_kinds,
-            );
+            )?;
             let source_positions = positions_view(geometry_value)?;
             let select = |source: &[f64]| -> Result<Vec<f64>, error::T> {
                 let mut values = Vec::new();
@@ -1908,14 +1908,14 @@ pub fn detriangulate(
             };
             let positions = positions_view(geometry_value)?;
             let coplanar = |edge: i64| {
-                let first = index.edge_offsets[u(edge)];
-                let first_vertex = index.edge_vertices[u(first)];
-                let second_vertex = index.edge_vertices[u(first + 1)];
+                let first = i64::from(index.edge_offsets[u(edge)]);
+                let first_vertex = i64::from(index.edge_vertices[u(first)]);
+                let second_vertex = i64::from(index.edge_vertices[u(first + 1)]);
                 let opposite = |vertex: i64| {
-                    topology.vertex_points[u(rdk_core::topology_index::widen(index.next_vertex[u(index.next_vertex[u(vertex)])]))]
+                    i64::from(topology.vertex_points[u(rdk_core::topology_index::widen(index.next_vertex[u(index.next_vertex[u(vertex)])]))])
                 };
-                let a = index.edge_a[u(edge)];
-                let b = index.edge_b[u(edge)];
+                let a = i64::from(index.edge_a[u(edge)]);
+                let b = i64::from(index.edge_b[u(edge)]);
                 let c = opposite(first_vertex);
                 let d = opposite(second_vertex);
                 predicates::orient3d_packed(&positions.x, &positions.y, &positions.z, a, b, c, d) == Sign::Zero
@@ -1927,18 +1927,18 @@ pub fn detriangulate(
                 "__rdk_boolean_detriangulate",
                 &|edge| -> Result<bool, error::T> {
                     cancel::poll(cx(cancel), edge, 4095)?;
-                    let first = index.edge_offsets[u(edge)];
-                    let last = index.edge_offsets[u(edge + 1)];
+                    let first = i64::from(index.edge_offsets[u(edge)]);
+                    let last = i64::from(index.edge_offsets[u(edge + 1)]);
                     if last - first != 2 || edge_group::mem(edge, &cleanup.cleanup_seam_edges) {
                         return Ok(false);
                     }
-                    let first_primitive = index.primitive_of_vertex[u(index.edge_vertices[u(first)])];
-                    let second_primitive = index.primitive_of_vertex[u(index.edge_vertices[u(first + 1)])];
-                    if topology.primitive_offsets[u(first_primitive + 1)]
-                        - topology.primitive_offsets[u(first_primitive)]
+                    let first_primitive = i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
+                    let second_primitive = i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(first + 1)])]);
+                    if i64::from(topology.primitive_offsets[u(first_primitive + 1)])
+                        - i64::from(topology.primitive_offsets[u(first_primitive)])
                         != 3
-                        || topology.primitive_offsets[u(second_primitive + 1)]
-                            - topology.primitive_offsets[u(second_primitive)]
+                        || i64::from(topology.primitive_offsets[u(second_primitive + 1)])
+                            - i64::from(topology.primitive_offsets[u(second_primitive)])
                             != 3
                     {
                         return Ok(false);
@@ -1963,9 +1963,9 @@ pub fn detriangulate(
                 let selected_edges = members(&selected);
                 let mut parent = DisjointSet::new(primitive_count);
                 for edge in &selected_edges {
-                    let first = index.edge_offsets[u(*edge)];
-                    let a = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
-                    let b = u(index.primitive_of_vertex[u(index.edge_vertices[u(first + 1)])]);
+                    let first = i64::from(index.edge_offsets[u(*edge)]);
+                    let a = u(i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]));
+                    let b = u(i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(first + 1)])]));
                     parent.union_min(a, b);
                 }
                 for primitive in 0..primitive_count {
@@ -1981,8 +1981,8 @@ pub fn detriangulate(
                     head[root] = primitive as i64;
                 }
                 for edge in &selected_edges {
-                    let first = index.edge_offsets[u(*edge)];
-                    let primitive = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
+                    let first = i64::from(index.edge_offsets[u(*edge)]);
+                    let primitive = u(i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]));
                     component_selected[parent.parent[primitive] as usize] = 1;
                 }
                 let points = u(geometry::point_count(geometry_value));
@@ -1999,14 +1999,14 @@ pub fn detriangulate(
                     let mut valid = true;
                     let mut primitive = head[root];
                     while primitive >= 0 {
-                        let first = topology.primitive_offsets[u(primitive)];
-                        let last = topology.primitive_offsets[u(primitive + 1)];
+                        let first = i64::from(topology.primitive_offsets[u(primitive)]);
+                        let last = i64::from(topology.primitive_offsets[u(primitive + 1)]);
                         for vertex in first..last {
                             let edge = rdk_core::topology_index::widen(index.edge_of_vertex[u(vertex)]);
                             if edge >= 0 && !edge_group::mem(edge, &selected) {
                                 let mut internal = false;
-                                for incident in index.edge_offsets[u(edge)]..index.edge_offsets[u(edge + 1)] {
-                                    let other = index.primitive_of_vertex[u(index.edge_vertices[u(incident)])];
+                                for incident in i64::from(index.edge_offsets[u(edge)])..i64::from(index.edge_offsets[u(edge + 1)]) {
+                                    let other = i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(incident)])]);
                                     if other != primitive && parent.parent[u(other)] == root as i64 {
                                         internal = true;
                                     }
@@ -2014,8 +2014,8 @@ pub fn detriangulate(
                                 if internal {
                                     valid = false;
                                 } else {
-                                    let a = u(index.edge_a[u(edge)]);
-                                    let b = u(index.edge_b[u(edge)]);
+                                    let a = u(i64::from(index.edge_a[u(edge)]));
+                                    let b = u(i64::from(index.edge_b[u(edge)]));
                                     for point in [a, b] {
                                         if stamp[point] != root as i64 {
                                             stamp[point] = root as i64;
@@ -2060,8 +2060,8 @@ pub fn detriangulate(
                         if !edge_group::mem(edge, &selected) {
                             false
                         } else {
-                            let first = index.edge_offsets[u(edge)];
-                            let primitive = u(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]);
+                            let first = i64::from(index.edge_offsets[u(edge)]);
+                            let primitive = u(i64::from(index.primitive_of_vertex[u(index.edge_vertices[u(first)])]));
                             safe[parent.parent[primitive] as usize] != 0
                         }
                     }),

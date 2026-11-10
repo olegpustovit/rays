@@ -98,9 +98,9 @@ fn facet_mask(c: &complex::T, facet: i64) -> i64 {
 
 fn native_edge(view: &topology_index::view::View, primitive: i64, first: i64, second: i64) -> i64 {
     let (f, s) = (first as usize, second as usize);
-    if view.primitive_of_vertex[f] == primitive && rdk_core::topology_index::widen(view.next_vertex[f]) == second {
+    if i64::from(view.primitive_of_vertex[f]) == primitive && rdk_core::topology_index::widen(view.next_vertex[f]) == second {
         rdk_core::topology_index::widen(view.edge_of_vertex[f])
-    } else if view.primitive_of_vertex[s] == primitive && rdk_core::topology_index::widen(view.next_vertex[s]) == first {
+    } else if i64::from(view.primitive_of_vertex[s]) == primitive && rdk_core::topology_index::widen(view.next_vertex[s]) == first {
         rdk_core::topology_index::widen(view.edge_of_vertex[s])
     } else {
         -1
@@ -412,7 +412,7 @@ fn materialize_coincident(
     }
     extract_view::validate_materialized(false, &x, &y, &z, &vertices).map_err(Fail::Rdk)?;
     let primitive_offsets: Vec<i64> = (0..=selected as i64).map(|index| index * 3).collect();
-    let topology_value = topology::polygons_owned(x.len() as i64, vertices, primitive_offsets)?;
+    let topology_value = topology::polygons_owned(x.len() as i64, topology::narrow("Boolean", &vertices)?, topology::narrow("Boolean", &primitive_offsets)?)?;
     make_geometry(x, y, z, topology_value)
 }
 
@@ -597,10 +597,10 @@ fn materialize_curves(
     state.curve_edge_offsets.truncate(curve_output + 1);
     let topology_value = topology::view::create_validated_owned(
         x.len() as i64,
-        state.vertices,
-        state.primitive_offsets,
+        topology::narrow("Boolean", &state.vertices)?,
+        topology::narrow("Boolean", &state.primitive_offsets)?,
         state.primitive_kinds,
-    );
+    )?;
     Ok(Curves {
         geometry: make_geometry(x, y, z, topology_value)?,
         kinds: state.curve_kinds,
@@ -770,7 +770,7 @@ mod tests {
         let y = points.iter().map(|p| p.1).collect();
         let z = points.iter().map(|p| p.2).collect();
         let offsets: Vec<i64> = (0..=(triangles.len() as i64 / 3)).map(|p| p * 3).collect();
-        let topo = topology::polygons_owned(points.len() as i64, triangles.to_vec(), offsets).unwrap();
+        let topo = topology::polygons_owned(points.len() as i64, topology::narrow("test", triangles).unwrap(), topology::narrow("test", &offsets).unwrap()).unwrap();
         geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }
@@ -790,7 +790,7 @@ mod tests {
             offsets.push(vertices.len() as i64);
         }
         let topo =
-            topology::create_owned(points.len() as i64, vertices, offsets, kinds.to_vec()).unwrap();
+            topology::create_owned(points.len() as i64, topology::narrow("test", &vertices).unwrap(), topology::narrow("test", &offsets).unwrap(), kinds.to_vec()).unwrap();
         geometry::create(packed::float3::view::of_owned_exn(x, y, z).unwrap(), topo, None, None, None)
             .unwrap()
     }
