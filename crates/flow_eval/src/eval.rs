@@ -2925,9 +2925,10 @@ pub fn frame_reads(value: &Value) -> Vec<String> {
 fn stable_digest(bytes: &[u8]) -> String { format!("{:016x}", rays_math::hash::bytes(rays_math::hash::SEED, bytes)) }
 fn structure_bytes(out: &mut String, bytes: &[u8]) {
     use std::fmt::Write;
+    let header = bytes.len().checked_ilog10().map_or(1, |digits| digits as usize + 1) + 1;
+    out.reserve(header.saturating_add(bytes.len().saturating_mul(2)));
     let _ = write!(out, "{}:", bytes.len());
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    out.reserve(bytes.len() * 2);
     for byte in bytes { out.push(HEX[(byte >> 4) as usize] as char); out.push(HEX[(byte & 15) as usize] as char); }
 }
 fn structure_path(out: &mut String, path: &[Symbol]) {
