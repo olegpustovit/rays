@@ -189,24 +189,27 @@ pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     if !force && now >= value.state_checked && now - value.state_checked < 0.5 {
         return;
     }
-    let view = V::section(&value.camera, &value.extra);
+    let key = V::section_key(&value.camera, &value.extra);
     value.state_checked = now;
     let saved_same = value.saved_doc.upgrade().is_some_and(|d| Arc::ptr_eq(&d, &value.core.doc));
     // a preview document is never saved
-    if (saved_same && view == value.saved_view) || editor_host::carrying(&value.core) {
+    if (saved_same && key == value.saved_view_key) || editor_host::carrying(&value.core) {
         return;
     }
+    let view = if key == value.saved_view_key { value.saved_view.clone() } else { V::section(&value.camera, &value.extra) };
     // the recovery file of an earlier session holds its unsaved work: orbiting in a document that is
     // still the one opened never writes over it
     if !value.state_owned && editor_text::same_text(&value.core.doc, &value.opened) && Path::new(&editor_setup::state_file(&value.core)).exists() {
         value.saved_doc = Arc::downgrade(&value.core.doc);
         value.saved_view = view;
+        value.saved_view_key = key;
         return;
     }
     match preset::save(&editor_setup::state_directory(&value.core), &value.core.state_name, &value.core.doc, &view) {
         Ok(_) => {
             value.saved_doc = Arc::downgrade(&value.core.doc);
             value.saved_view = view;
+            value.saved_view_key = key;
             value.state_error = None;
             value.state_owned = true;
         }

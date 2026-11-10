@@ -1,5 +1,6 @@
 //! Port of lib/pxui_shell/kit.ml. Kit rev 3 pieces the chrome shares: where text sits in a
 //! 24-point bar, and the text button.
+use std::borrow::Cow;
 use pxui::theme;
 use pxui::ui::*;
 use rays_math::color::{self, T as Color};
@@ -18,9 +19,7 @@ pub fn cap_y(ui: &Ui, y: f64, h: f64) -> f64 {
 
 /// the width of a label (`Paint::cap`): upper case, 0.08 em of tracking after each letter
 pub fn cap_width(ui: &mut Ui, text: &str) -> f64 {
-    let count = text.chars().count();
-    let size = cap_size(ui);
-    ui.text_width(Some(size), &text.to_ascii_uppercase()) + 0.08 * size as f64 * count as f64
+    ui.cap_width(text)
 }
 
 /// the width of a text button, the kit's `.btn`: a transparent 1-point edge, 6, the label, 6 and
@@ -49,7 +48,7 @@ pub struct ButtonOpts {
     pub active: bool,
     pub primary: bool,
     pub centered: bool,
-    pub hint: Option<String>,
+    pub hint: Option<Cow<'static, str>>,
     pub icon: Option<Icon>,
 }
 
@@ -70,8 +69,8 @@ pub fn button(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, o: &ButtonOpts, la
     let held = o.enabled && signal.held;
     let hovered = o.enabled && signal.hovered;
     let (enabled, active, primary, centered, icon) = (o.enabled, o.active, o.primary, o.centered, o.icon);
-    let hint = o.hint.clone();
-    let label = label.to_string();
+    let label = ui.cached_label(&boxed, 0, label);
+    let hint = o.hint.as_ref().map(|hint| ui.cached_label(&boxed, 1, hint));
     let size = cap_size(ui);
     ui.draw(&boxed, move |paint, (x, y, w, h)| {
         paint_button_ground(paint, &theme, held, hovered, active, primary, (x, y, w, h));
@@ -142,15 +141,11 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f64, f64), on: bool) -> bool {
 pub fn segments(ui: &mut Ui, key: &str, right: f64, y: f64, labels: &[String], active: i64) -> (Option<i64>, f64) {
     let h = 20.0;
     let theme = ui.theme();
-    let widths: Vec<f64> = labels.iter().map(|label| ui.text_width(None, label)).collect();
-    let mut total = 12.0 * (labels.len() as i64 - 1).max(0) as f64;
-    for w in &widths {
-        total += w;
-    }
+    let total = 12.0 * (labels.len() as i64 - 1).max(0) as f64 + labels.iter().map(|label| ui.text_width(None, label)).sum::<f64>();
     let mut x = right - total;
     let mut clicked = None;
     for (index, label) in labels.iter().enumerate() {
-        let w = widths[index];
+        let w = ui.text_width(None, label);
         let boxed = ui.box_(
             &format!("{key}-{index}"),
             BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(w + 8.0)).h(Size::Px(h)).at((x - 4.0, y)),
@@ -160,7 +155,7 @@ pub fn segments(ui: &mut Ui, key: &str, right: f64, y: f64, labels: &[String], a
             clicked = Some(index as i64);
         }
         let hovered = signal.hovered;
-        let label = label.clone();
+        let label = ui.cached_label(&boxed, 0, label);
         ui.draw(&boxed, move |paint, (x, y, w, h)| {
             let on = index as i64 == active;
             let ty = paint.text_top(None, y, h);

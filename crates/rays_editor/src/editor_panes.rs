@@ -797,8 +797,8 @@ pub fn draw_graph_header<'a>(
                     Some(i) if i != *mode => Some(action::Render_mode(i)),
                     _ => None,
                 };
-                let look = kit::button(ui, "workspace-look", (from + seg_w + 8.0, ty), look_w, &ButtonOpts { active: *looks, hint: Some("C".to_owned()), ..Default::default() }, "Look through");
-                let framed = kit::button(ui, "workspace-frame", (from + seg_w + 8.0 + look_w + 8.0, ty), frame_w, &ButtonOpts { hint: Some("F".to_owned()), ..Default::default() }, "Frame");
+                let look = kit::button(ui, "workspace-look", (from + seg_w + 8.0, ty), look_w, &ButtonOpts { active: *looks, hint: Some("C".into()), ..Default::default() }, "Look through");
+                let framed = kit::button(ui, "workspace-frame", (from + seg_w + 8.0 + look_w + 8.0, ty), frame_w, &ButtonOpts { hint: Some("F".into()), ..Default::default() }, "Frame");
                 if framed {
                     Some(action::Frame_camera)
                 } else if look {

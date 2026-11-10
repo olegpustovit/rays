@@ -14,7 +14,7 @@ const INSTANCE_BYTES: usize = 64;
 pub struct Table {
     bytes: Arc<Vec<u8>>,
     count: i64,
-    batches: Vec<Batch>,
+    batches: Arc<Vec<Batch>>,
     marks: Option<GpuToken>,
     shapes_checked: Arc<AtomicBool>,
 }
@@ -32,7 +32,7 @@ impl Table {
     pub fn marks(&self) -> Option<GpuToken> { self.marks }
     pub fn textures(&self) -> Vec<i64> {
         let mut ids = Vec::new();
-        for batch in &self.batches {
+        for batch in self.batches.iter() {
             if batch.texture > 0 && !ids.contains(&batch.texture) { ids.push(batch.texture); }
         }
         ids
@@ -89,11 +89,11 @@ fn set_word(bytes: &mut Vec<u8>, offset: usize, word: usize, value: i32) -> Resu
 fn kind_code(kind: Kind) -> i32 { match kind { Kind::Rect => 0, Kind::Textured => 1, Kind::Wire => 2, Kind::Grid => 3 } }
 
 pub fn empty() -> Table {
-    Table { bytes: Arc::new(Vec::new()), count: 0, batches: Vec::new(), marks: None, shapes_checked: Arc::new(AtomicBool::new(false)) }
+    Table { bytes: Arc::new(Vec::new()), count: 0, batches: Arc::new(Vec::new()), marks: None, shapes_checked: Arc::new(AtomicBool::new(false)) }
 }
 pub fn of_marks(token: GpuToken) -> Table {
     let count = marks::gpu_count(token);
-    Table { bytes: Arc::new(Vec::new()), count, batches: vec![Batch { first: 0, count, clip: None, texture: 0 }], marks: Some(token), shapes_checked: Arc::new(AtomicBool::new(false)) }
+    Table { bytes: Arc::new(Vec::new()), count, batches: Arc::new(vec![Batch { first: 0, count, clip: None, texture: 0 }]), marks: Some(token), shapes_checked: Arc::new(AtomicBool::new(false)) }
 }
 pub fn copy(value: &Table) -> Table { value.copy() }
 pub fn valid_shapes(value: &Table) -> bool { value.valid_shapes() }
@@ -103,43 +103,45 @@ pub const fn instance_bytes() -> i64 { INSTANCE_BYTES as i64 }
 pub struct Builder {
     bytes: Arc<Vec<u8>>,
     length: usize,
-    batches: Vec<Batch>,
+    batches: Arc<Vec<Batch>>,
     open_first: usize,
     open_texture: i64,
     clip: Option<Clip>,
     render_ir_valid: bool,
     /// Storage of published tables (a frame publishes one per layer): reused once dropped.
-    spares: Vec<Arc<Vec<u8>>>,
+    spares: Vec<(Arc<Vec<u8>>, Arc<Vec<Batch>>, Arc<AtomicBool>)>,
+    shapes_checked: Arc<AtomicBool>,
 }
 impl Builder {
     pub fn create() -> Builder { Self::with_capacity(256) }
     pub fn with_capacity(capacity: i64) -> Builder {
         let capacity = capacity.max(1) as usize;
-        Builder { bytes: Arc::new(vec![0; capacity.saturating_mul(INSTANCE_BYTES)]), length: 0, batches: Vec::new(), open_first: 0, open_texture: 0, clip: None, render_ir_valid: true, spares: Vec::new() }
+        Builder { bytes: Arc::new(vec![0; capacity.saturating_mul(INSTANCE_BYTES)]), length: 0, batches: Arc::new(Vec::new()), open_first: 0, open_texture: 0, clip: None, render_ir_valid: true, spares: Vec::new(), shapes_checked: Arc::new(AtomicBool::new(false)) }
     }
     pub fn reset(&mut self) {
         self.length = 0;
-        self.batches.clear();
         self.open_first = 0;
         self.open_texture = 0;
         self.clip = None;
         self.render_ir_valid = true;
         // a published table still holds the storage (publishing shares it, not a copy): write a
         // spare its table dropped, or a new one, and keep this one as a spare
-        if Arc::strong_count(&self.bytes) != 1 {
-            let free = match self.spares.iter().position(|s| Arc::strong_count(s) == 1) {
+        if Arc::strong_count(&self.bytes) != 1 || Arc::strong_count(&self.batches) != 1 || Arc::strong_count(&self.shapes_checked) != 1 {
+            let (bytes, batches, checked) = match self.spares.iter().position(|(bytes, batches, checked)| Arc::strong_count(bytes) == 1 && Arc::strong_count(batches) == 1 && Arc::strong_count(checked) == 1) {
                 Some(i) => self.spares.swap_remove(i),
-                None => Arc::new(Vec::with_capacity(self.bytes.capacity())),
+                None => (Arc::new(Vec::with_capacity(self.bytes.capacity())), Arc::new(Vec::with_capacity(self.batches.capacity())), Arc::new(AtomicBool::new(false))),
             };
-            self.spares.push(std::mem::replace(&mut self.bytes, free));
-            if self.spares.len() > 64 { self.spares.retain(|s| Arc::strong_count(s) != 1); }
+            self.spares.push((std::mem::replace(&mut self.bytes, bytes), std::mem::replace(&mut self.batches, batches), std::mem::replace(&mut self.shapes_checked, checked)));
+            if self.spares.len() > 64 { self.spares.retain(|(bytes, batches, checked)| Arc::strong_count(bytes) != 1 || Arc::strong_count(batches) != 1 || Arc::strong_count(checked) != 1); }
         }
+        Arc::get_mut(&mut self.batches).expect("unique batches").clear();
+        self.shapes_checked.store(false, Ordering::Release);
         let bytes = Arc::get_mut(&mut self.bytes).expect("unique storage");
         bytes.resize(bytes.capacity(), 0);
     }
     fn close(&mut self) {
         if self.length > self.open_first {
-            self.batches.push(Batch { first: self.open_first as i64, count: (self.length - self.open_first) as i64, clip: self.clip, texture: self.open_texture });
+            Arc::make_mut(&mut self.batches).push(Batch { first: self.open_first as i64, count: (self.length - self.open_first) as i64, clip: self.clip, texture: self.open_texture });
         }
         self.open_first = self.length;
         self.open_texture = 0;
@@ -152,6 +154,9 @@ impl Builder {
         self.open_texture = texture;
     }
     fn reserve(&mut self) -> Result<usize, String> {
+        if Arc::strong_count(&self.shapes_checked) != 1 {
+            self.shapes_checked = Arc::new(AtomicBool::new(false));
+        }
         let needed = self.length.checked_add(1).and_then(|n| n.checked_mul(INSTANCE_BYTES)).ok_or_else(|| String::from("Ui_batch capacity overflow"))?;
         if needed > self.bytes.len() {
             if let Some(bytes) = Arc::get_mut(&mut self.bytes).filter(|b| b.capacity() >= needed) {
@@ -255,7 +260,10 @@ impl Builder {
             let Some(source) = self.bytes.get(..len) else { return Err("Ui_batch: invalid instance storage".into()); };
             Arc::new(source.to_vec())
         };
-        Ok(Table { bytes, count: self.length as i64, batches: self.batches.clone(), marks: None, shapes_checked: Arc::new(AtomicBool::new(self.render_ir_valid)) })
+        if Arc::strong_count(&self.shapes_checked) == 1 {
+            self.shapes_checked.store(self.render_ir_valid, Ordering::Release);
+        }
+        Ok(Table { bytes, count: self.length as i64, batches: self.batches.clone(), marks: None, shapes_checked: self.shapes_checked.clone() })
     }
     fn shape_append(&mut self, kind: i32, x0: f64, y0: f64, x1: f64, y1: f64, fill: i32, stroke: i32, stroke_width: f64) -> Result<(), String> {
         if ![x0, y0, x1, y1, stroke_width].iter().all(|v| v.is_finite() && v.abs() <= 3.4028234663852886e38) || stroke_width < 0.0 {
@@ -371,6 +379,12 @@ mod tests {
         assert!(good.valid_shapes());
         assert!(good.shapes_checked.load(Ordering::Acquire));
         assert!(shared.shapes_checked.load(Ordering::Acquire));
+        assert!(Arc::ptr_eq(&good.batches, &shared.batches));
+        builder.textured(1, 0., 0., 2., 2., 0., 0., 1., 1., -1).unwrap();
+        let changed = published(&mut builder);
+        assert!(!Arc::ptr_eq(&good.shapes_checked, &changed.shapes_checked));
+        assert!(good.valid_shapes());
+        assert!(!changed.valid_shapes(), "a previous publication's validation must not authorize new texture data");
         for (offset, value) in [(0, 0x7fc00000u32), (40, 1), (48, (-1.0f32).to_bits())] {
             let mut bad = good.copy();
             Arc::make_mut(&mut bad.bytes)[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -401,11 +415,15 @@ mod tests {
         partial.reset();
         assert!(!Arc::ptr_eq(&partial.bytes, &first.bytes));
         let storage = Arc::as_ptr(&first.bytes);
+        let batches = Arc::as_ptr(&first.batches);
+        let checked = Arc::as_ptr(&first.shapes_checked);
         drop(first);
         assert!(partial.shape_rect(0.0, 0.0, 1.0, 1.0, -1, 0).is_ok());
         let second = published(&mut partial);
         partial.reset();
         assert!(Arc::as_ptr(&partial.bytes) == storage, "the storage two frames back is reused");
+        assert_eq!(Arc::as_ptr(&partial.batches), batches, "batch metadata storage is reused with its bytes");
+        assert_eq!(Arc::as_ptr(&partial.shapes_checked), checked, "the dropped publication's validation owner is reused");
         drop(second);
     }
 

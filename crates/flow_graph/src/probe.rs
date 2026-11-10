@@ -927,6 +927,10 @@ impl Probe {
         Footer { value, spark, branch, kept, runs, invariant, live: n.live, execution }
     }
 
+    /// Formatted footer memos, exposed for the UI's hidden-report allocation guard.
+    #[doc(hidden)]
+    pub fn cached_footer_count(&self) -> usize { self.feet.len() }
+
     pub fn footer(&mut self, n: &p::Node, probes: &[i64]) -> Footer {
         if n.ty == ty::image() {
             return self.compute_footer(n, probes);

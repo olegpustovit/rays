@@ -1,6 +1,7 @@
 // Port of lib/pxui_graph/scope_paint.ml(i): the kit's cards, wires, zones and footers, drawn through a
 // `Paint`. Painters get only the `Paint` (no `Ui`): text is placed with `Paint::text_top`, the theme is
 // `t.theme`. OCaml optional arguments become option structs (`NodeOpts`, `HeaderOpts`) or `Option`s.
+use std::borrow::Cow;
 use crate::node_menu;
 use crate::scope_state::{self as st, Fr, Pane};
 use crate::scope_wires::{self as w, clip_segment, root_name, Wire};
@@ -56,13 +57,13 @@ fn frame_list(t: &Pane, scope: &[String]) -> Vec<Fr> {
     }
 }
 
-pub fn fitted(paint: &mut Paint, size: i64, width: f64, text: &str) -> String {
+pub fn fitted<'a>(paint: &mut Paint, size: i64, width: f64, text: &'a str) -> Cow<'a, str> {
     // as before, the mark alone when not even it fits
     if paint.text_width(Some(size), text) <= width {
-        return text.to_owned();
+        return Cow::Borrowed(text);
     }
     let t = ellipsis(&mut |s: &str| paint.text_width(Some(size), s), width, text);
-    if t.is_empty() { "\u{2026}".to_owned() } else { t }
+    if t.is_empty() { Cow::Borrowed("\u{2026}") } else { t }
 }
 
 fn dashed_line(paint: &mut Paint, width: f64, color: Color, a: (f64, f64), b: (f64, f64)) {
@@ -668,7 +669,8 @@ pub fn paint_zone_label(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y:
     text_in(paint, fs, theme.foreground, nx, y, hh, &name);
     if let Some(ex) = in_ {
         let ix = nx + paint.text_width(Some(fs), &name) + gap;
-        let f = fitted(paint, fs, 0.0f64.max(x + wd - (9.0 * z) - ix), &format!("in {}", ex));
+        let input = format!("in {}", ex);
+        let f = fitted(paint, fs, 0.0f64.max(x + wd - (9.0 * z) - ix), &input);
         text_in(paint, fs, theme::ink_2(&theme), ix, y, hh, &f);
     }
 }
@@ -1304,7 +1306,8 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
         }
         p::ScopeResult::Node(_) => {}
         p::ScopeResult::Literal(ex) => {
-            let text = fitted(paint, fs, wd * 0.5, &lisp::flat(ex));
+            let flat = lisp::flat(ex);
+            let text = fitted(paint, fs, wd * 0.5, &flat);
             let tw = paint.text_width(Some(fs), &text);
             text_in(paint, fs, theme.foreground, right - tw, ry, rh, &text);
         }

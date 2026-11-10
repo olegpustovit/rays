@@ -1,5 +1,6 @@
 //! Port of lib/pxui_shell/status_bar.ml: the status strip, the guide strip and the echo tips.
 use crate::kit;
+use std::borrow::Cow;
 use editor_core::guide_context;
 use pxui::theme;
 use pxui::ui::*;
@@ -55,7 +56,7 @@ impl Default for Opts {
 }
 
 /// where the lead's parts go: the file, the dot, the status cut to `limit`, and the end
-fn lead_plan(width: &mut dyn FnMut(&str) -> f64, x: f64, file: &str, limit: f64, text: &str) -> (f64, f64, f64, String, f64) {
+fn lead_plan<'a>(width: &mut dyn FnMut(&str) -> f64, x: f64, file: &str, limit: f64, text: &'a str) -> (f64, f64, f64, Cow<'a, str>, f64) {
     let mut tx = x + 12.0;
     let file_x = tx;
     if !file.is_empty() {
@@ -150,14 +151,7 @@ fn focus_labels(paint: &mut Paint, (y, h): (f64, f64), rule: bool, accent: bool,
     if rule {
         paint.fill(after + 4.0, y + ((h - 12.0) / 2.0), 1.0, 12.0, theme::border(&theme));
     }
-    let mut items: Vec<(&str, rays_math::color::T)> = Vec::new();
-    if let Some(k) = kind {
-        items.push((k, if accent { theme.accent } else { theme.foreground }));
-    }
-    if let Some(s) = selection {
-        items.push((s, theme::ink_2(&theme)));
-    }
-    for (text, color) in items {
+    for (text, color) in [kind.map(|k| (k, if accent { theme.accent } else { theme.foreground })), selection.map(|s| (s, theme::ink_2(&theme)))].into_iter().flatten() {
         let cy = kit::cap_y_paint(paint, y, h);
         paint.cap((tx, cy), Some(color), text);
         tx = tx + paint.cap_width(text) + 8.0;

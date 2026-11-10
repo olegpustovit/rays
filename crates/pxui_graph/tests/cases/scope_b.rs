@@ -197,6 +197,32 @@ fn scope_zone_footer_paths() {
     check(scope::inspect::footer_paths(&view).contains(&path(&["g", "a"])), "a zone in view lost its geometry");
 }
 
+fn scope_hidden_reports() {
+    use std::cell::RefCell;
+    use flow_graph::probe;
+    let mut ui = new_ui();
+    let ws = checked("(workspace report (graph g :context value (let* [a (+ 1.0 2.0)] a)))");
+    let evaluated = flow_eval::r#static(&ws, true, None).unwrap();
+    let reports = || Rc::new(RefCell::new(probe::make(&evaluated, probe::Options::default())));
+    let (mut view, _) = scope_view(ScopeOpts::default(), &ws, "g");
+    view.framed = true;
+    view.zoom = 0.25;
+    let first = reports();
+    scope::with_records(first.clone(), &mut view);
+    let (mut view, _) = scope_step(&mut ui, view, &frame0());
+    assert_eq!(first.borrow().cached_footer_count(), 0, "unreadably small graph built formatted footer reports");
+    view.zoom = 1.;
+    let (mut view, _) = scope_step(&mut ui, view, &frame0());
+    assert!(first.borrow().cached_footer_count() > 0, "visible footer fixture did not build real reports");
+    view.pan_x = -1_000_000.;
+    view.pan_y = -1_000_000.;
+    let hidden = reports();
+    scope::with_records(hidden.clone(), &mut view);
+    let (_, _) = scope_step(&mut ui, view, &frame0());
+    assert_eq!(hidden.borrow().cached_footer_count(), 0, "offscreen graph built formatted footer reports");
+    ui.destroy();
+}
+
 // ---------------------------------------------------------------- gestures 1
 
 fn num(n: &str) -> s::Syntax {
@@ -416,6 +442,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("scope_elbow", scope_elbow),
     ("scope_spine", scope_spine),
     ("scope_zone_footer_paths", scope_zone_footer_paths),
+    ("scope_hidden_reports", scope_hidden_reports),
     ("scope_gestures_1", scope_gestures_1),
     ("scope_gestures_1b", scope_gestures_1b),
     ("scope_gestures_2", scope_gestures_2),

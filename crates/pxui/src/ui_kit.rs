@@ -7,6 +7,7 @@ use crate::ui_core::*;
 use input::{Event, Key};
 use rays_math::color::T as Color;
 use std::rc::Rc;
+use std::borrow::Cow;
 
 pub type IRect = (i64, i64, i64, i64);
 
@@ -202,9 +203,9 @@ pub fn paint_button_ground(paint: &mut Paint, theme: &Theme, held: bool, hovered
 }
 
 /// `ellipsis` at a text size; a text with no room at all is the ellipsis alone
-pub fn inspector_fit(paint: &mut Paint, size: i64, width: f64, text: &str) -> String {
+pub fn inspector_fit<'a>(paint: &mut Paint, size: i64, width: f64, text: &'a str) -> Cow<'a, str> {
     let shown = ellipsis(&mut |s| paint.text_width(Some(size), s), width, text);
-    if shown.is_empty() && !(text.is_empty() && width >= 0.0) { "\u{2026}".to_owned() } else { shown }
+    if shown.is_empty() && !(text.is_empty() && width >= 0.0) { Cow::Borrowed("\u{2026}") } else { shown }
 }
 
 /// The label column is 0.3 of the panel less 16 (98 at 380 wide, 80 at 320); a longer label
@@ -437,7 +438,7 @@ impl Ui {
         let row = self.box_(key, BoxOpts::default().flags(CLICKABLE).w(Size::Grow).h(Size::Px(self.row_height() as f64)));
         let theme = self.theme();
         let hovered = self.hovered_within(&row);
-        let label = label.to_owned();
+        let label = self.cached_label(&row, 0, label);
         let font_size = self.font_size();
         self.draw(&row, move |paint, (x, y, w, h)| {
             if hovered {
@@ -475,7 +476,7 @@ impl Ui {
             self.set_closed_section(title.index);
         }
         let theme = self.theme();
-        let label = label.to_owned();
+        let label = self.cached_label(&title, 0, label);
         self.draw(&title, move |paint, (x, y, w, h)| {
             let (y, h) = (y + gap, h - gap);
             // the sheet has no hover state on a section header
@@ -522,7 +523,7 @@ impl Ui {
         let signal = self.signal(&row);
         let theme = self.theme();
         let font_size = self.font_size();
-        let label = label.to_owned();
+        let label = self.cached_label(&row, 0, label);
         self.draw(&row, move |paint, (x, y, w, h)| {
             let shown = inspector_fit(paint, font_size, w - 24.0, &label);
             let tw = paint.text_width(None, &shown);
@@ -538,7 +539,7 @@ impl Ui {
         let (row, control_x, _, control_width) = self.inspector_row(width, None, key, label);
         let theme = self.theme();
         let font_size = self.font_size();
-        let value = value.to_owned();
+        let value = self.cached_label(&row, 1, value);
         self.draw(&row, move |paint, (x, y, _, h)| {
             let shown = inspector_fit(paint, font_size, control_width, &value);
             let tw = paint.text_width(None, &shown);

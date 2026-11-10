@@ -909,6 +909,16 @@ fn gpu_execution_lease_rollback() {
     assert_eq!(leases::checkpoint(&policy),Some(0));
     assert_eq!(leases::checkpoint(&leases::Policy::CopyImageSnapshots),None);
     leases::rollback(&leases::Policy::CopyImageSnapshots,None);
+    let (_,_,_,_,lease)=image::borrow_snapshot(&image).unwrap();
+    leases::retain(&held,lease);
+    leases::release(&held);
+    mem_sys::local_reset();
+    for _ in 0..2 {
+        let (_,_,_,_,lease)=image::borrow_snapshot(&image).unwrap();
+        leases::retain(&held,lease);
+        leases::release(&held);
+    }
+    assert_eq!(mem_sys::local_alloc_count(),0,"released image leases discarded their warm storage");
     image::destroy(&image).unwrap();
 }
 

@@ -35,6 +35,9 @@ pub fn release(value: &Leases) {
     for lease in leases.iter_mut().rev() {
         image::release_snapshot(lease);
     }
+    leases.clear();
+    let mut returned = value.0.borrow_mut();
+    if returned.is_empty() { *returned = leases; }
 }
 
 /// Releases what was retained since `checkpoint`, newest first.

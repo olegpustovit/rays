@@ -43,6 +43,33 @@ pub fn window_shell_inspector_record() {
     ui.destroy();
 }
 
+pub fn window_shell_inspector_folder_order() {
+    use std::cell::RefCell;
+    let row = |name: &str, folder: Option<&str>| {
+        let mut field = cell(name, 0);
+        field.vec3 = None;
+        field.folder = folder.into_iter().map(str::to_owned).collect();
+        field.kind = KindView::Choice(vec!["a".into(), "b".into()]);
+        field.current = Value::Choice("a".into());
+        field.default = field.current.clone();
+        FlowRow { path: name.into(), fields: vec![field], shown: false, locked: true, drive: None, live: None }
+    };
+    let rows = [row("s1", Some("Size")), row("own1", None), row("root_named", Some("Root")), row("s2", Some("Size")), row("own2", None), row("tail", Some("Other"))];
+    for (kind, expected) in [(Some("Root"), vec!["own1", "own2", "root_named", "s1", "s2", "tail"]), (None, vec!["own1", "own2", "s1", "s2", "root_named", "tail"])] {
+        let mut ui = new_ui();
+        let seen = RefCell::new(Vec::new());
+        let opts = FlowOpts { kind_label: kind.map(str::to_owned), expanded: vec!["Root".into(), "Size".into(), "Other".into()], ..Default::default() };
+        ui.frame(&fr((400, 600), (0., 0.), vec![]), &mut |ui| {
+            ui.panel(PanelOpts::default().at(0., 0.).width(260.), "folders", &mut |ui| {
+                let changes = inspector::flow_fields(ui, &opts, Some(&|name, _| seen.borrow_mut().push(name.to_owned())), &rows);
+                assert!(changes.is_empty());
+            });
+        });
+        assert_eq!(*seen.borrow(), expected, "one-level folders changed row/merge order");
+        ui.destroy();
+    }
+}
+
 fn cell(name: &str, index: i64) -> FieldView {
     FieldView {
         name: name.to_string(),
@@ -281,6 +308,7 @@ pub fn window_shell_tree_scroll_and_sticky() {
 
 pub const CASES: &[(&str, fn())] = &[
     ("window_shell_inspector_record", window_shell_inspector_record),
+    ("window_shell_inspector_folder_order", window_shell_inspector_folder_order),
     ("window_shell_vector_cells", window_shell_vector_cells),
     ("window_shell_ranged_float_click", window_shell_ranged_float_click),
     ("window_shell_ranged_float_drag", window_shell_ranged_float_drag),

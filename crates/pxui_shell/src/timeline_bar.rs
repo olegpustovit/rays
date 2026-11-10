@@ -36,9 +36,9 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
     ui.within(&bar, &mut |ui| {
         let cy = top + ((bar_h - 20.0) / 2.0);
         let mut cx = 12.0;
-        let button = |ui: &mut Ui, cx: &mut f64, key: &str, icon: Option<kit::Icon>, hint: Option<&str>, active: bool, label: &str| -> bool {
+        let button = |ui: &mut Ui, cx: &mut f64, key: &str, icon: Option<kit::Icon>, hint: Option<&'static str>, active: bool, label: &str| -> bool {
             let w = kit::button_width(ui, hint, icon.is_some(), label);
-            let opts = kit::ButtonOpts { icon, hint: hint.map(|h| h.to_string()), active, ..kit::ButtonOpts::default() };
+            let opts = kit::ButtonOpts { icon, hint: hint.map(Into::into), active, ..kit::ButtonOpts::default() };
             let clicked = kit::button(ui, key, (*cx, cy), w, &opts, label);
             *cx = *cx + w + 8.0;
             clicked

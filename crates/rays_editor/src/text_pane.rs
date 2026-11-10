@@ -2332,12 +2332,12 @@ fn editor_area(
     });
     let apply_w = kit::button_width(ui, Some(hint), false, "Check and apply");
     let by = ty + 1.0 + ((c.bar - 20.0) / 2.0);
-    let apply_opts = ButtonOpts { primary: true, enabled: can_apply, hint: Some(hint.to_owned()), ..ButtonOpts::default() };
+    let apply_opts = ButtonOpts { primary: true, enabled: can_apply, hint: Some(hint.into()), ..ButtonOpts::default() };
     if kit::button(ui, &format!("{}-apply", key), (c.x + 12.0, by), apply_w, &apply_opts, "Check and apply") || (submitted && can_apply) {
         push(emit, apply(text2.clone()));
     }
     let discard_hint = if c.narrow { None } else { Some("esc") };
-    let discard_opts = ButtonOpts { enabled: can_apply, hint: discard_hint.map(|h| h.to_owned()), ..ButtonOpts::default() };
+    let discard_opts = ButtonOpts { enabled: can_apply, hint: discard_hint.map(Into::into), ..ButtonOpts::default() };
     let discard_w = kit::button_width(ui, discard_hint, false, "Discard");
     if kit::button(ui, &format!("{}-discard", key), (c.x + 12.0 + apply_w + 8.0, by), discard_w, &discard_opts, "Discard") {
         push(emit, discard.clone());

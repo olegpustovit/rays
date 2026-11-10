@@ -64,6 +64,15 @@ fn renderer_scaling() {
     assert_eq!(shorter.len(), 999, "a different draw list reused the cached scaling");
     let bypass = native::scale_sampled_cached(&mut cache, &one, &many);
     assert!(bypass.iter().zip(many.iter()).all(|(a, b)| Rc::ptr_eq(a, b)), "1x facts did not bypass the cache");
+    crate::renderer::scale_sampled_ref(&mut cache, &retina, &many);
+    mem_sys::local_reset();
+    for _ in 0..1000 {
+        let cached = crate::renderer::scale_sampled_ref(&mut cache, &retina, &many);
+        assert_eq!(cached.len(), 1000);
+        let direct = crate::renderer::scale_sampled_ref(&mut cache, &one, &many);
+        assert_eq!(direct.as_ptr(), many.as_ptr(), "1x draw list must be borrowed");
+    }
+    assert_eq!(mem_sys::local_alloc_count(), 0, "warm borrowed scaling copied a draw list");
     // A window is not asked for its size every frame: SDL announces a change, and one announcement
     // costs exactly one query however many arrive.
     let mut flag = change_flag::create();

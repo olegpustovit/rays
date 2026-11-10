@@ -279,6 +279,20 @@ fn whole_frame_update() {
         assert!(Arc::ptr_eq(&updated.doc, &value.doc));
         assert!(out.actions.is_empty());
         assert!(updated.pane_keys.is_empty());
+        // Hidden chrome does not format or clone a profile report. A large report must cost
+        // exactly as many allocations as an empty one while semantic reducers still run.
+        for _ in 0..2 {
+            editor_frame::update(&mut updated, false, false, &camera, &handles, None, None, view_state.clone(), &frame0, None, None, Vec::new(), None);
+        }
+        mem_sys::local_reset();
+        editor_frame::update(&mut updated, false, false, &camera, &handles, None, None, view_state.clone(), &frame0, None, None, Vec::new(), None);
+        let empty_report = mem_sys::local_alloc_count();
+        updated.edit_phases.entries = (0..1000).map(|i| flow_syntax::phase_timer::Entry { phase: format!("visible-profile-{i}"), calls: 1, seconds: 0.001 }).collect();
+        mem_sys::local_reset();
+        editor_frame::update(&mut updated, false, false, &camera, &handles, None, None, view_state.clone(), &frame0, None, None, Vec::new(), None);
+        assert_eq!(mem_sys::local_alloc_count(), empty_report, "hidden chrome built a discarded profile report");
+        assert!(crate::editor_status::status_text(&(&updated).into(), true).contains("visible-profile-999"), "visible status lost the report");
+        updated.edit_phases = flow_syntax::phase_timer::empty();
         // every pane drawn headless: the shell's panels get roots, the focus stays, nothing edits
         let frame1 = frame_at(1.0 / 60.0, vec![], vec![]);
         let out = editor_frame::update(&mut updated, true, false, &camera, &handles, None, None, view_state, &frame1, None, None, Vec::new(), None);

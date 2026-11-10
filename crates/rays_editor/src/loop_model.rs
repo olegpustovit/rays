@@ -139,6 +139,7 @@ pub struct LoopModel {
     /// Identity marker only: recovery must not retain a previous cook's arrays.
     pub saved_doc: Weak<Document>,
     pub saved_view: Syntax,
+    pub saved_view_key: ([u64; 7], bool, crate::editor_renderer::Mode),
     pub state_error: Option<String>,
     pub canvases: Vec<(String, canvas_picture)>,
     pub host: Rc<std::cell::RefCell<workspace_host::WorkspaceHost>>,
@@ -251,6 +252,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
                 core.file = std::path::Path::new(source_file::file(source)).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
             }
             let saved_view = V::section(&camera, &extra);
+            let saved_view_key = V::section_key(&camera, &extra);
             let opened = document::text(&core.doc);
             let saved_doc = std::sync::Arc::downgrade(&core.doc);
             Ok(LoopModel {
@@ -292,6 +294,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
                 state_checked: f64::NEG_INFINITY,
                 saved_doc,
                 saved_view,
+                saved_view_key,
                 state_error: None,
             })
         }

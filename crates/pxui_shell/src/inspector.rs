@@ -47,28 +47,6 @@ impl Default for FlowOpts {
     }
 }
 
-enum Item<'a> {
-    Field(&'a FlowRow),
-    Folder(String, Vec<Item<'a>>),
-}
-
-fn insert<'a>(path: &[String], field: &'a FlowRow, items: &mut Vec<Item<'a>>) {
-    match path.split_first() {
-        None => items.push(Item::Field(field)),
-        Some((name, rest)) => match items.iter_mut().find_map(|i| match i {
-            Item::Folder(candidate, children) if candidate == name => Some(children),
-            _ => None,
-        }) {
-            Some(children) => insert(rest, field, children),
-            None => {
-                let mut children = Vec::new();
-                insert(rest, field, &mut children);
-                items.push(Item::Folder(name.clone(), children));
-            }
-        },
-    }
-}
-
 /// Sections are one level deep: the top folder of a parameter, never the vector's own folder (its
 /// row is one row, in the section it belongs to).
 fn top_folder(row: &FlowRow) -> Option<&str> {
@@ -532,21 +510,19 @@ fn row_widget(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), row: &Flo
 fn no_choice(_: &str, _: &UiBox) {}
 
 #[allow(clippy::too_many_arguments)]
-fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[String], kind_label: Option<&str>, path: &[String], items: &[Item], out: &mut Vec<FlowChange>) {
-    for item in items {
-        match item {
-            Item::Field(row) => out.extend(row_widget(ui, cx, on_choice, row)),
-            Item::Folder(label, children) => {
-                let mut sub = path.to_vec();
-                sub.push(label.clone());
-                let key = sub.join("/");
-                let open = expanded.contains(&key) || (sub.len() == 1 && sub[0] == *label && kind_label == Some(label.as_str()));
-                ui.inspector_section(&format!("flow-section-{key}"), open, None, label, &mut |ui| {
-                    build(ui, cx, on_choice, expanded, kind_label, &sub, children, out);
-                });
+fn build(ui: &mut Ui, cx: &Ctx, on_choice: &dyn Fn(&str, &UiBox), expanded: &[String], kind_label: Option<&str>, rows: &[FlowRow], folder: &str, out: &mut Vec<FlowChange>) {
+    let open = expanded.iter().any(|key| key == folder) || kind_label == Some(folder);
+    ui.inspector_section(&format!("flow-section-{folder}"), open, None, folder, &mut |ui| {
+        // The kind's ungrouped rows precede rows explicitly in its folder, as in the old tree.
+        if kind_label == Some(folder) {
+            for row in rows.iter().filter(|row| top_folder(row).is_none()) {
+                out.extend(row_widget(ui, cx, on_choice, row));
             }
         }
-    }
+        for row in rows.iter().filter(|row| top_folder(row) == Some(folder)) {
+            out.extend(row_widget(ui, cx, on_choice, row));
+        }
+    });
 }
 
 /// Responsive rows shared by Flow, scene, World, and compound interface inspectors, laid out as
@@ -571,21 +547,22 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
         ui.inspector_message("no-parameters", "No parameters");
         return Vec::new();
     }
-    // a kind's own section first, for the arguments that have no folder
-    let folder_of = |row: &FlowRow| -> Vec<String> {
-        match (top_folder(row), &o.kind_label) {
-            (None, Some(label)) => vec![label.clone()],
-            (top, _) => top.map(str::to_string).into_iter().collect(),
-        }
-    };
-    let own: Vec<&FlowRow> = rows.iter().filter(|r| top_folder(r).is_none()).collect();
-    let others: Vec<&FlowRow> = rows.iter().filter(|r| top_folder(r).is_some()).collect();
-    let mut items: Vec<Item> = Vec::new();
-    for row in own.into_iter().chain(others) {
-        insert(&folder_of(row), row, &mut items);
-    }
     let mut out = Vec::new();
-    build(ui, &cx, on_choice, &o.expanded, o.kind_label.as_deref(), &[], &items, &mut out);
+    let own = rows.iter().any(|row| top_folder(row).is_none());
+    if let Some(label) = o.kind_label.as_deref().filter(|_| own) {
+        build(ui, &cx, on_choice, &o.expanded, o.kind_label.as_deref(), rows, label, &mut out);
+    } else {
+        for row in rows.iter().filter(|row| top_folder(row).is_none()) {
+            out.extend(row_widget(ui, &cx, on_choice, row));
+        }
+    }
+    // ponytail: folders are one level deep. Scan this small visible parameter list instead of
+    // allocating a per-frame tree; cache folder indices if inspectors grow to thousands of rows.
+    for (index, row) in rows.iter().enumerate() {
+        let Some(folder) = top_folder(row) else { continue; };
+        if (own && o.kind_label.as_deref() == Some(folder)) || rows[..index].iter().any(|row| top_folder(row) == Some(folder)) { continue; }
+        build(ui, &cx, on_choice, &o.expanded, o.kind_label.as_deref(), rows, folder, &mut out);
+    }
     out
 }
 

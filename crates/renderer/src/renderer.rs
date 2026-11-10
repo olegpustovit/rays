@@ -259,17 +259,26 @@ fn same_draw_list(left: &[Draw], right: &[Draw]) -> bool {
 }
 
 pub fn scale_sampled_cached(cache: &mut ScaledCache, facts: &frame_facts, draws: &[Draw]) -> Vec<Draw> {
-    if !scale_required(facts) {
-        draws.to_vec()
-    } else if same_draw_list(draws, &cache.input) && cache.facts.as_ref() == Some(facts) {
-        cache.output.clone()
-    } else {
-        let scaled = scale_sampled_resources(facts, draws);
-        cache.input = draws.to_vec();
+    scale_sampled_ref(cache, facts, draws).to_vec()
+}
+
+pub(crate) fn scale_sampled_ref<'a>(cache: &'a mut ScaledCache, facts: &frame_facts, draws: &'a [Draw]) -> &'a [Draw] {
+    if !scale_required(facts) { return draws; }
+    if !same_draw_list(draws, &cache.input) || cache.facts.as_ref() != Some(facts) {
+        cache.input.clear();
+        cache.input.extend_from_slice(draws);
         cache.facts = Some(*facts);
-        cache.output = scaled.clone();
-        scaled
+        cache.output.clear();
+        cache.output.extend(draws.iter().map(|entry| match scale_draw(facts, &entry.draw) {
+            None => entry.clone(),
+            Some(scaled) => {
+                let mut copy = (**entry).clone();
+                copy.draw = scaled;
+                Rc::new(copy)
+            }
+        }));
     }
+    &cache.output
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -312,6 +321,7 @@ pub struct RendererData {
     retained_scene2_segment_hits: Cell<i64>,
     retained_scene2_segment_misses: Cell<i64>,
     submissions: RefCell<Vec<Submission>>,
+    submission_draws: RefCell<Vec<Draw>>,
     last_step_draws: RefCell<Vec<Draw>>,
     last_step_prepared: RefCell<Vec<Draw>>,
     retained_views: RefCell<Vec<Rc<RetainedView>>>,
@@ -507,6 +517,7 @@ fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_:
         retained_scene2_segment_hits: Cell::new(0),
         retained_scene2_segment_misses: Cell::new(0),
         submissions: RefCell::new(Vec::new()),
+        submission_draws: RefCell::new(Vec::new()),
         last_step_draws: RefCell::new(Vec::new()),
         last_step_prepared: RefCell::new(Vec::new()),
         // count only: views of layers the scene's cache charges
@@ -1099,12 +1110,10 @@ fn step_core(
             Ok(presented)
         }
         Ok(None) => {
-            let draws: Vec<Draw> = if same_draw_list(draws, &value.0.last_step_draws.borrow()) {
-                value.0.last_step_prepared.borrow().clone()
-            } else {
-                let prepared: Vec<Draw> = draws
-                    .iter()
-                    .map(|x| {
+            if !same_draw_list(draws, &value.0.last_step_draws.borrow()) {
+                let mut prepared = value.0.last_step_prepared.borrow_mut();
+                prepared.clear();
+                prepared.extend(draws.iter().map(|x| {
                         let d = &x.draw;
                         let s = &d.state;
                         let viewport = match s.viewport {
@@ -1132,13 +1141,14 @@ fn step_core(
                             samples: x.samples,
                             draw: draw_,
                         })
-                    })
-                    .collect();
-                *value.0.last_step_draws.borrow_mut() = draws.to_vec();
-                *value.0.last_step_prepared.borrow_mut() = prepared.clone();
-                prepared
-            };
-            let scaled = scale_sampled_cached(&mut value.0.scaled.borrow_mut(), &value.0.renderer_facts.get(), &draws);
+                    }));
+                let mut input = value.0.last_step_draws.borrow_mut();
+                input.clear();
+                input.extend_from_slice(draws);
+            }
+            let draws = value.0.last_step_prepared.borrow();
+            let mut scaled_cache = value.0.scaled.borrow_mut();
+            let scaled = scale_sampled_ref(&mut scaled_cache, &value.0.renderer_facts.get(), &draws);
             let result = match (identity, version) {
                 (None, None) => scene_execution::submit(None, after_prepare, clear, &mut value.0.renderer.borrow_mut(), &scaled),
                 (Some(identity), Some(version)) => {
@@ -1402,8 +1412,12 @@ fn step_submission(
     let result = if batches.iter().any(|b| !Rc::ptr_eq(&b.owner.0, &submission_.0)) {
         Err(fail_error("Renderer.Native.step", ErrorKind::InvalidArgument, "draw batch belongs to another submission"))
     } else {
-        let draws: Vec<Draw> = batches.iter().flat_map(|b| b.draws.iter().cloned()).collect();
-        step_core(&mut || close_submission(submission_), clear, identity, version, &submission_.0.owner, &draws).map(|_| ())
+        let mut draws = submission_.0.owner.0.submission_draws.borrow_mut();
+        draws.clear();
+        draws.extend(batches.iter().flat_map(|b| b.draws.iter().cloned()));
+        let result = step_core(&mut || close_submission(submission_), clear, identity, version, &submission_.0.owner, &draws).map(|_| ());
+        draws.clear();
+        result
     };
     close_submission(submission_);
     result
@@ -1467,6 +1481,7 @@ pub fn destroy(value: &Renderer) -> Result<(), Error> {
     let assets = assets::destroy(&mut value.0.assets.borrow_mut());
     side_lru::clear(&mut value.0.snapshots.borrow_mut());
     renderer_retained_plans::clear(&mut value.0.retained_plans.borrow_mut());
+    value.0.submission_draws.borrow_mut().clear();
     value.0.last_step_draws.borrow_mut().clear();
     value.0.last_step_prepared.borrow_mut().clear();
     renderer_lowering::clear(&mut value.0.lowering.borrow_mut());

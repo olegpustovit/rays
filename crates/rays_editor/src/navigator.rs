@@ -4,6 +4,7 @@
 //! graph unfolded into its loops and bindings, the reusable functions and macros, the active graph's
 //! inputs as sliders and the data flow around it. Pure state and rows; `view` draws inside
 //! `Ui::frame` and returns intents that `Editor_frame` applies after the frame.
+use std::borrow::Cow;
 use flow_check::workspace::{self as w, Graph, Workspace};
 use flow_graph::probe::{self, Probe};
 use flow_graph::projection as p;
@@ -723,7 +724,7 @@ struct PaintCtx {
     small: i64,
 }
 
-fn ell(paint: &mut Paint, limit: f64, label: &str) -> String {
+fn ell<'a>(paint: &mut Paint, limit: f64, label: &'a str) -> Cow<'a, str> {
     ellipsis(&mut |s| paint.text_width(None, s), limit, label)
 }
 

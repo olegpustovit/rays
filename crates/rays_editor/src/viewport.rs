@@ -8,6 +8,7 @@
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 use std::any::Any;
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use editor_core::panels::{self, Panel};
@@ -239,6 +240,7 @@ pub struct extra {
     pub free_camera: rcam::Camera,
     /// the document's root settings, the renderer as shown
     pub root: root::Parameters,
+    root_rows: Rc<RefCell<(Option<root::Parameters>, Vec<pxui_shell::inspector::FlowRow>)>>,
     /// the Render section's edit
     pub root_request: Option<root::Parameters>,
     /// the ACTIVE camera follows the viewport
@@ -470,6 +472,7 @@ pub fn init(mut core: Model, camera_: &easy_camera::EasyCamera) -> (Model, extra
         viewing: camera_.clone(),
         free_camera: render_camera,
         root: core.doc.root.clone(),
+        root_rows: Rc::new(RefCell::new((None, Vec::new()))),
         root_request: None,
         following: active_node(&core).map(|n| follows(&n)),
         follow_request: None,
@@ -509,37 +512,40 @@ pub fn panel(ui: &mut Ui, control_: &control, camera_: &camera, extra_: &extra, 
     let mut next = extra_.clone();
     ui.inspector_section("Viewport", true, None, "Viewport", &mut |ui| {
         // the label column is 0.3 of the panel less 16: the rows say it short, their keys stay
-        let short = |label: &str| -> String {
-            match label {
-                "Look through render camera" => "Look through",
-                "Camera follows viewport" => "Follows view",
-                "Cameras and lights" => "Cameras",
-                "Selected node handles" => "Handles",
-                other => other,
-            }
-            .to_string()
-        };
-        let through = ui.inspector_toggle("Look through render camera", &short("Look through render camera"), look_through(extra_));
+        let through = ui.inspector_toggle("Look through render camera", "Look through", look_through(extra_));
         // The ACTIVE camera's own parameter, here so a look-through can be set up by orbiting: on,
         // the viewport drives the camera.
         let follow_request = match extra_.following {
             Some(following) => {
-                let wanted = ui.inspector_toggle("Camera follows viewport", &short("Camera follows viewport"), following);
+                let wanted = ui.inspector_toggle("Camera follows viewport", "Follows view", following);
                 if wanted != following { Some(wanted) } else { None }
             }
             None => None,
         };
-        let cameras = ui.inspector_toggle("Cameras and lights", &short("Cameras and lights"), extra_.show.cameras);
-        let axes = ui.inspector_toggle("Axis gizmo", &short("Axis gizmo"), extra_.show.axes);
-        let handles = ui.inspector_toggle("Selected node handles", &short("Selected node handles"), extra_.show.handles);
+        let cameras = ui.inspector_toggle("Cameras and lights", "Cameras", extra_.show.cameras);
+        let axes = ui.inspector_toggle("Axis gizmo", "Axis gizmo", extra_.show.axes);
+        let handles = ui.inspector_toggle("Selected node handles", "Handles", extra_.show.handles);
         next = extra { follow_request, show: show { cameras, axes, handles }, ..set_look(extra_, through) };
     });
     let (control_out, camera_out, requests) = cc::widgets(control_, ui, camera_);
     // the scene's root: renderer, size and samples
     let mut root_ = extra_.root.clone();
     ui.inspector_section("renderer-section", true, None, "Scene root", &mut |ui| {
-        if let Ok((values, _)) = pxui_shell::inspector::record(ui, &root::parameters_schema(), &root::to_values(&extra_.root)) {
-            root_ = root::from_values(values);
+        use pxui_shell::inspector::{self, FlowChange, FlowOpts, FlowRow};
+        let mut cached = extra_.root_rows.borrow_mut();
+        if cached.0.as_ref() != Some(&extra_.root) {
+            let Ok(fields) = root::parameters_schema().view(&root::to_values(&extra_.root)) else { return; };
+            cached.1 = fields.into_iter().map(|field| FlowRow { path: field.name.clone(), fields: vec![field], shown: false, locked: true, drive: None, live: None }).collect();
+            cached.0 = Some(extra_.root.clone());
+        }
+        let changes: Vec<_> = inspector::flow_fields(ui, &FlowOpts::default(), None, &cached.1).into_iter().filter_map(|change| match change {
+            FlowChange::Edited(name, value) => Some((name, value)),
+            _ => None,
+        }).collect();
+        if !changes.is_empty() {
+            if let Ok((values, _)) = root::parameters_schema().apply_all(&root::to_values(&extra_.root), &changes) {
+                root_ = root::from_values(values);
+            }
         }
     });
     if root_ != extra_.root {
@@ -547,6 +553,14 @@ pub fn panel(ui: &mut Ui, control_: &control, camera_: &camera, extra_: &extra, 
     }
     let inspected = inspector(ui);
     panel_out { control: control_out, camera: camera_out, requests, extra: next, inspected }
+}
+
+/// The values serialized by `section`, without constructing a syntax arena on an idle poll.
+pub fn section_key(camera_: &camera, extra_: &extra) -> ([u64; 7], bool, renderer::Mode) {
+    let camera = easy_camera::camera(camera_).expect("viewport form");
+    let eye = rcam::position(&camera);
+    let target = rcam::target(&camera);
+    ([eye.x.to_bits(), eye.y.to_bits(), eye.z.to_bits(), target.x.to_bits(), target.y.to_bits(), target.z.to_bits(), easy_camera::fov_y(camera_).to_bits()], look_through(extra_), extra_.renderer_request.unwrap_or(extra_.renderer.mode))
 }
 
 pub fn section(camera_: &camera, extra_: &extra) -> Syntax {

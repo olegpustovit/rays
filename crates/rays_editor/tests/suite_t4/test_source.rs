@@ -328,6 +328,31 @@ pub fn autosave() {
     write(&file, &text0);
     let create = || editor(Some(&presets), vec![], source_file::at(&file, &sha(&text0)), &text0);
     let mut r = Run::new(create(), (200., 300.));
+    // The idle key covers exactly the serialized camera, look-through and renderer values.
+    // Clipping/inertia changes must not alter the bytes; orbit/lens/mode changes must.
+    {
+        use rays_editor::viewport as v;
+        let camera = &r.e().camera;
+        let extra = &r.e().extra;
+        let mut changed_renderer = extra.clone();
+        changed_renderer.renderer_request = Some(rays_editor::editor_renderer::Mode::Wireframe);
+        let variants = vec![
+            (camera.clone(), extra.clone()),
+            (rays::easy_camera::with_clip(0.25, 500., camera).unwrap(), extra.clone()),
+            (rays::easy_camera::with_inertia(false, camera), extra.clone()),
+            (rays::easy_camera::with_distance(9.25, camera).unwrap(), extra.clone()),
+            (rays::easy_camera::with_fov_y(0.8, camera).unwrap(), extra.clone()),
+            (camera.clone(), v::set_look(extra, !v::look_through(extra))),
+            (camera.clone(), changed_renderer),
+        ];
+        for (a, ea) in &variants {
+            for (b, eb) in &variants {
+                let bytes_a = flow_syntax::lisp::print(&[v::section(a, ea)]).unwrap().0;
+                let bytes_b = flow_syntax::lisp::print(&[v::section(b, eb)]).unwrap().0;
+                assert_eq!(v::section_key(a, ea) == v::section_key(b, eb), bytes_a == bytes_b, "autosave key changed serialized-byte equality");
+            }
+        }
+    }
     r.step(vec![]);
     r.step(vec![]);
     let real = fs::canonicalize(&file).unwrap().to_string_lossy().into_owned();

@@ -27,10 +27,13 @@ const FRAMES: i64 = 30;
 // R8: mutate pane view state in place: empty 1,198 / 81,820.
 // R9: retain the shared document and skip idle gesture rollback snapshots: basic 1,305 / 148,265;
 // empty 1,154 / 80,422; bare 1,378 / 95,326.
+// R10: typed renderer keys and numeric hashes: basic 1,285 / 147,518.
+// Z1/G1/Z5: reuse UI callbacks, labels and renderer buffers with shared hash/ABI changes:
+// basic 1,232 / 141,996; empty 916 / 53,361; bare 1,156 / 69,746.
 // Never raise.
-const BASIC: (u64, u64) = (1_305, 148_265);
-const EMPTY: (u64, u64) = (1_154, 80_422);
-const BARE: (u64, u64) = (1_378, 95_326);
+const BASIC: (u64, u64) = (1_232, 141_996);
+const EMPTY: (u64, u64) = (916, 53_361);
+const BARE: (u64, u64) = (1_156, 69_746);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");
@@ -87,4 +90,49 @@ fn empty() { check("empty", include_str!("../../../rays_bin/src/empty.rays"), EM
 // no editor graph: the host's default shell
 fn bare() { check("bare", "(workspace empty (graph g :context value 0))", BARE) }
 
-pub fn cases() -> Vec<(&'static str, fn())> { vec![("alloc_budget_basic", basic), ("alloc_budget_empty", empty), ("alloc_budget_bare", bare)] }
+// A repeated callsite reuses only its allocation: captured resources are released after each
+// paint, and changing the closure type at the same box/position remains safe.
+fn paint_storage() {
+    use std::{cell::Cell, rc::Rc};
+    use pxui::ui::{BoxOpts, Paint, Rect, Size, Ui};
+    let mut ui = Ui::create(input::Platform::Apple, None, None);
+    let token = Rc::new(Cell::new(0));
+    let mut label_owner = None::<std::rc::Weak<str>>;
+    let painter = |token: Rc<Cell<i32>>| move |_: &mut Paint, _: Rect| token.set(token.get() + 1);
+    for round in 0..6 {
+        let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(round as f64) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+        ui.begin_frame(&f);
+        let b = ui.box_("reuse", BoxOpts::default().w(Size::Px(20.)).h(Size::Px(20.)));
+        let before = mem_sys::alloc_count();
+        let previous = label_owner.as_ref().map(|previous| previous.upgrade().unwrap());
+        let label = ui.cached_label(&b, 0, if round < 4 { "Repeated label" } else { "Changed label" });
+        if let Some(previous) = previous {
+            if round == 4 {
+                assert!(!Rc::ptr_eq(&previous, &label), "changed text reused a stale label");
+                assert_eq!(previous.as_ref(), "Repeated label", "changing a label mutated its retained snapshot");
+            } else {
+                assert!(Rc::ptr_eq(&previous, &label), "unchanged label storage was replaced");
+            }
+        }
+        label_owner = Some(Rc::downgrade(&label));
+        if round == 3 {
+            let token = token.clone();
+            ui.draw(&b, move |_: &mut Paint, _: Rect| token.set(token.get() + 1));
+        } else {
+            ui.draw(&b, painter(token.clone()));
+        }
+        ui.draw_over(&b, painter(token.clone()));
+        if [1, 2, 5].contains(&round) {
+            assert_eq!(mem_sys::alloc_count(), before, "warm callback storage allocated");
+        }
+        ui.end_frame(&f);
+        assert_eq!(Rc::strong_count(&token), 1, "published frame retained a callback payload");
+        assert_eq!(token.get(), (round + 1) * 2);
+    }
+    let f = rays::frame::Frame { input: input::Frame { size: (100, 100), ..input::at_time(7.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+    ui.frame(&f, &mut |_| {});
+    assert!(label_owner.unwrap().upgrade().is_none(), "a retired box retained its cached label");
+    ui.destroy();
+}
+
+pub fn cases() -> Vec<(&'static str, fn())> { vec![("alloc_budget_paint_storage", paint_storage), ("alloc_budget_basic", basic), ("alloc_budget_empty", empty), ("alloc_budget_bare", bare)] }

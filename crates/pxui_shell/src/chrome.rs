@@ -1,6 +1,7 @@
 //! Port of lib/pxui_shell/chrome.ml: chrome of the retained workspace, painted and hit through
 //! PXUI boxes: panel backgrounds, splitters, and header bars with a collapse button and a
 //! right-click menu (split, close, retype).
+use std::borrow::Cow;
 use crate::kit;
 use crate::layout::*;
 use crate::layout::Size as PSize;
@@ -59,7 +60,7 @@ pub fn pane_root(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: &str)
         .w(Size::Px(frame.input.size.0 as f64))
         .h(Size::Px(frame.input.size.1 as f64))
         .at((0.0, 0.0));
-    opts.hit = Some(Rc::new(move |_| rect));
+    opts.hit_rect = Some(rect);
     ui.box_(label, opts)
 }
 
@@ -316,7 +317,7 @@ fn edge_color(theme: &theme::Theme, moving: &Rc<RefCell<Option<Path>>>, path: &P
     if moving.borrow().as_ref() == Some(path) { theme.accent } else { theme::border(theme) }
 }
 
-fn cut(paint: &mut Paint, size: Option<i64>, room: f64, part: &str) -> String {
+fn cut<'a>(paint: &mut Paint, size: Option<i64>, room: f64, part: &'a str) -> Cow<'a, str> {
     ellipsis(&mut |s| paint.text_width(size, s), room.max(0.0), part)
 }
 

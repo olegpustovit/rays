@@ -15,9 +15,9 @@ fn buttons(ui: &mut Ui, key: &str, width: f64, accept: &str) -> Pick {
         let primary_w = kit::button_width(ui, Some("\u{21b5}"), false, accept);
         let cancel_w = kit::button_width(ui, Some("esc"), false, "Cancel");
         let primary_x = width - 2.0 - 8.0 - primary_w;
-        let cancel_opts = kit::ButtonOpts { hint: Some("esc".to_string()), ..kit::ButtonOpts::default() };
+        let cancel_opts = kit::ButtonOpts { hint: Some("esc".into()), ..kit::ButtonOpts::default() };
         let cancel = kit::button(ui, &format!("{key}-cancel"), (primary_x - 4.0 - cancel_w, 0.0), cancel_w, &cancel_opts, "Cancel");
-        let submit_opts = kit::ButtonOpts { primary: true, hint: Some("\u{21b5}".to_string()), ..kit::ButtonOpts::default() };
+        let submit_opts = kit::ButtonOpts { primary: true, hint: Some("\u{21b5}".into()), ..kit::ButtonOpts::default() };
         let submit = kit::button(ui, &format!("{key}-accept"), (primary_x, 0.0), primary_w, &submit_opts, accept);
         out = if cancel {
             Pick::Cancel

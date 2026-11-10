@@ -13,6 +13,8 @@ use rays_math::hash;
 use rays::{font, frame as rframe, image, scene, sketch};
 use rays_math::color::{self, T as Color};
 use scene_command::ui_batch::{self, Clip};
+use std::any::Any;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -215,6 +217,14 @@ pub enum UndoKind {
 pub type Painter = Rc<dyn Fn(&mut Paint, Rect)>;
 pub type HitFn = Rc<dyn Fn(Rect) -> Rect>;
 
+// Keep a box's allocation between frames, but release its captured document and resources as
+// soon as painting finishes. A different closure type replaces this one row safely.
+struct PaintRow {
+    value: Box<dyn Any>,
+    paint: fn(&dyn Any, &mut Paint, Rect),
+    clear: fn(&mut dyn Any),
+}
+
 struct BoxRec {
     key: i64,
     slot: usize,
@@ -232,8 +242,11 @@ struct BoxRec {
     at_y: f64,
     scroll_step: f64,
     hit: Option<HitFn>,
-    painters: Vec<Painter>,
-    overlays: Vec<Painter>,
+    hit_rect: Option<Rect>,
+    painters: Vec<PaintRow>,
+    overlays: Vec<PaintRow>,
+    painter_count: usize,
+    overlay_count: usize,
 }
 
 impl BoxRec {
@@ -255,8 +268,11 @@ impl BoxRec {
             at_y: f64::NAN,
             scroll_step: 0.0,
             hit: None,
+            hit_rect: None,
             painters: Vec::new(),
             overlays: Vec::new(),
+            painter_count: 0,
+            overlay_count: 0,
         }
     }
 }
@@ -291,6 +307,8 @@ struct Slot {
     scroll_from: f64,
     state_value: i64,
     text_value: Option<String>,
+    labels: Vec<Rc<str>>,
+    label_count: usize,
     press_time: f64,
     press_x: f64,
     press_y: f64,
@@ -317,6 +335,8 @@ impl Slot {
             scroll_from: 0.0,
             state_value: MIN_INT,
             text_value: None,
+            labels: Vec::new(),
+            label_count: 0,
             press_time: f64::NEG_INFINITY,
             press_x: 0.0,
             press_y: 0.0,
@@ -794,6 +814,8 @@ pub struct Ui {
     chain: Vec<i64>,
     batch_builder: Option<ui_batch::Builder>,
     regions: Vec<scene::node>,
+    label: String,
+    painted_layers: Vec<(i64, ui_batch::Table)>,
     scene_layers: Vec<(i64, Vec<scene::node>)>,
     borrowed_images: Vec<(i64, image::Image)>,
     scene: Vec<scene::node>,
@@ -925,6 +947,8 @@ impl Ui {
             chain: Vec::new(),
             batch_builder: Some(ui_batch::Builder::with_capacity(1024)),
             regions: Vec::new(),
+            label: String::new(),
+            painted_layers: Vec::new(),
             scene_layers: Vec::new(),
             borrowed_images: Vec::new(),
             scene: Vec::new(),
@@ -950,6 +974,12 @@ impl Ui {
             self.fonts.destroy();
             self.borrowed_images.clear();
             self.scene.clear();
+            self.scene_layers.clear();
+            self.painted_layers.clear();
+            self.regions.clear();
+            self.boxes.clear();
+            for slot in &mut self.slots { slot.labels.clear(); }
+            self.count = 0;
         }
     }
 
@@ -1020,6 +1050,17 @@ impl Ui {
         self.fonts.text_width(size, text)
     }
 
+    /// Measure the same ASCII-uppercase label style as `Paint::cap`, reusing the frame's text buffer.
+    pub fn cap_width(&mut self, text: &str) -> f64 {
+        let mut buffer = std::mem::take(&mut self.label);
+        buffer.clear();
+        buffer.extend(text.chars().map(|c| c.to_ascii_uppercase()));
+        let size = 8.max(self.font_size - 2);
+        let width = self.text_width(Some(size), &buffer) + 0.08 * size as f64 * text.chars().count() as f64;
+        self.label = buffer;
+        width
+    }
+
     pub(crate) fn fonts_mut(&mut self) -> &mut Fonts {
         &mut self.fonts
     }
@@ -1049,11 +1090,14 @@ impl Ui {
 
     fn prune(&mut self) {
         for slot in 0..self.slots.len() {
+            let label_count = self.slots[slot].label_count;
+            self.slots[slot].labels.truncate(label_count);
             let key = self.slots[slot].key;
             if key != 0 && self.slots[slot].touched < self.frame_number {
                 self.table.remove(key);
                 self.slots[slot].key = 0;
                 self.slots[slot].text_value = None;
+                self.slots[slot].labels.clear();
                 self.free.push(slot);
                 if self.focus == key {
                     self.focus = 0;
@@ -1770,7 +1814,7 @@ impl Ui {
 /// `label` cut to `limit` points wide with an ellipsis, on a character boundary. `width` measures
 /// text as the sum of its characters, so one pass from the start measures each character once and
 /// stops at the first that does not fit: the cost follows what is shown, not the label's length.
-pub fn ellipsis(width: &mut dyn FnMut(&str) -> f64, limit: f64, label: &str) -> String {
+pub fn ellipsis<'a>(width: &mut dyn FnMut(&str) -> f64, limit: f64, label: &'a str) -> Cow<'a, str> {
     let dots = width("\u{2026}");
     // `cut`: the longest prefix that fits with the ellipsis after it; -1 when the ellipsis alone does
     // not
@@ -1780,13 +1824,13 @@ pub fn ellipsis(width: &mut dyn FnMut(&str) -> f64, limit: f64, label: &str) -> 
         let next = index + c.len_utf8();
         used += width(&label[index..next]);
         if used > limit {
-            return if cut < 0 { String::new() } else { format!("{}\u{2026}", &label[..cut as usize]) };
+            return if cut < 0 { Cow::Borrowed("") } else { Cow::Owned(format!("{}\u{2026}", &label[..cut as usize])) };
         }
         if used + dots <= limit {
             cut = next as i64;
         }
     }
-    label.to_owned()
+    Cow::Borrowed(label)
 }
 
 pub(crate) const HOVER_SECONDS: f64 = 0.380;
@@ -1804,6 +1848,7 @@ pub struct BoxOpts {
     pub at: Option<(f64, f64)>,
     pub scroll_step: f64,
     pub hit: Option<HitFn>,
+    pub hit_rect: Option<Rect>,
 }
 
 impl Default for BoxOpts {
@@ -1818,6 +1863,7 @@ impl Default for BoxOpts {
             at: None,
             scroll_step: 24.0,
             hit: None,
+            hit_rect: None,
         }
     }
 }
@@ -1946,6 +1992,7 @@ impl Ui {
         self.count = index + 1;
         let slot = self.slot_of(key);
         self.slots[slot].touched = self.frame_number;
+        self.slots[slot].label_count = 0;
         let b = &mut self.boxes[index];
         b.key = key;
         b.slot = slot;
@@ -1978,8 +2025,9 @@ impl Ui {
         b.at_y = at_y;
         b.scroll_step = scroll_step;
         b.hit = hit;
-        b.painters.clear();
-        b.overlays.clear();
+        b.hit_rect = None;
+        b.painter_count = 0;
+        b.overlay_count = 0;
     }
 
     pub fn box_keyed(&mut self, key: i64, opts: BoxOpts) -> UiBox {
@@ -1989,6 +2037,7 @@ impl Ui {
         let index = self.append_box(key, parent);
         let (at_x, at_y) = opts.at.unwrap_or((f64::NAN, f64::NAN));
         self.set_box(index, opts.flags, opts.w, opts.h, opts.max_h, opts.axis == Axis::Row, opts.padding, at_x, at_y, opts.scroll_step, opts.hit);
+        self.boxes[index].hit_rect = opts.hit_rect;
         UiBox { index, box_key: key, box_slot: self.boxes[index].slot }
     }
 
@@ -2262,6 +2311,17 @@ impl Ui {
         self.slots[b.box_slot].state_value = value;
     }
 
+    /// Stable paint text follows its existing retained box key and is discarded with that slot.
+    pub fn cached_label(&mut self, b: &UiBox, index: usize, text: &str) -> Rc<str> {
+        let slot = &mut self.slots[b.box_slot];
+        slot.label_count = slot.label_count.max(index + 1);
+        if index >= slot.labels.len() {
+            slot.labels.resize_with(index + 1, || Rc::from(""));
+        }
+        if slot.labels[index].as_ref() != text { slot.labels[index] = Rc::from(text); }
+        slot.labels[index].clone()
+    }
+
     pub fn text_state(&self, b: &UiBox) -> Option<String> {
         self.slots[b.box_slot].text_value.clone()
     }
@@ -2271,13 +2331,37 @@ impl Ui {
     }
 
     /// Paint with the box's final laid-out rectangle, before its children.
-    pub fn draw(&mut self, b: &UiBox, painter: impl Fn(&mut Paint, Rect) + 'static) {
-        self.boxes[b.index].painters.push(Rc::new(painter));
+    pub fn draw<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, painter: F) {
+        let b = &mut self.boxes[b.index];
+        let position = b.painter_count;
+        b.painter_count += 1;
+        if let Some(value) = b.painters.get_mut(position).and_then(|row| row.value.downcast_mut::<Option<F>>()) {
+            *value = Some(painter);
+        } else {
+            let row = PaintRow {
+                value: Box::new(Some(painter)),
+                paint: |value, paint, rect| value.downcast_ref::<Option<F>>().unwrap().as_ref().unwrap()(paint, rect),
+                clear: |value| { *value.downcast_mut::<Option<F>>().unwrap() = None; },
+            };
+            if position == b.painters.len() { b.painters.push(row); } else { b.painters[position] = row; }
+        }
     }
 
     /// Paint after the box's children, outside its content clip.
-    pub fn draw_over(&mut self, b: &UiBox, painter: impl Fn(&mut Paint, Rect) + 'static) {
-        self.boxes[b.index].overlays.push(Rc::new(painter));
+    pub fn draw_over<F: Fn(&mut Paint, Rect) + 'static>(&mut self, b: &UiBox, painter: F) {
+        let b = &mut self.boxes[b.index];
+        let position = b.overlay_count;
+        b.overlay_count += 1;
+        if let Some(value) = b.overlays.get_mut(position).and_then(|row| row.value.downcast_mut::<Option<F>>()) {
+            *value = Some(painter);
+        } else {
+            let row = PaintRow {
+                value: Box::new(Some(painter)),
+                paint: |value, paint, rect| value.downcast_ref::<Option<F>>().unwrap().as_ref().unwrap()(paint, rect),
+                clear: |value| { *value.downcast_mut::<Option<F>>().unwrap() = None; },
+            };
+            if position == b.overlays.len() { b.overlays.push(row); } else { b.overlays[position] = row; }
+        }
     }
 
     /// Raise a root box and its children above ordinary boxes, below modal popups. Higher `order`
@@ -2655,6 +2739,7 @@ pub struct Paint {
     pub fonts: Fonts,
     pub borrowed_images: Vec<(i64, image::Image)>,
     pub regions: Vec<scene::node>,
+    label: String,
     /// the horizontal scroll of the focused text; painters adjust it
     pub edit_scroll_x: f64,
     /// the content height of each box of this frame, by box index
@@ -2871,16 +2956,24 @@ impl Paint {
         let color = color.unwrap_or(theme::ink_2(&self.theme));
         let size = self.label_size();
         let tracking = self.cap_tracking();
-        self.text_with(at, Some(size), tracking, Some(color), &label.to_ascii_uppercase());
+        let mut buffer = std::mem::take(&mut self.label);
+        buffer.clear();
+        buffer.extend(label.chars().map(|c| c.to_ascii_uppercase()));
+        self.text_with(at, Some(size), tracking, Some(color), &buffer);
+        self.label = buffer;
     }
 
     /// The tracking follows every letter, the last too (CSS letter-spacing): text after a label
     /// starts one step later, and a right-aligned label ends one step early.
     pub fn cap_width(&mut self, label: &str) -> f64 {
-        let label = label.to_ascii_uppercase();
-        let count = label.chars().count();
+        let mut buffer = std::mem::take(&mut self.label);
+        buffer.clear();
+        buffer.extend(label.chars().map(|c| c.to_ascii_uppercase()));
+        let count = buffer.chars().count();
         let size = self.label_size();
-        self.text_width(Some(size), &label) + self.cap_tracking() * count as f64
+        let width = self.text_width(Some(size), &buffer) + self.cap_tracking() * count as f64;
+        self.label = buffer;
+        width
     }
 
     /// A chevron centred on `at`: its strokes span 7 x 3.5, which with the 1-point line is the
@@ -3003,12 +3096,12 @@ impl Ui {
         self.hit_count = position + 1;
     }
 
-    fn run_painters(&self, painters: &[Painter], index: usize, clip_rect: Rect, paint: &mut Paint) {
+    fn run_painters(&self, painters: &[PaintRow], index: usize, clip_rect: Rect, paint: &mut Paint) {
         if !painters.is_empty() {
             paint.clip_rect = clip_rect;
             let local = self.screen(index);
             for painter in painters {
-                painter(paint, local);
+                (painter.paint)(painter.value.as_ref(), paint, local);
             }
         }
     }
@@ -3029,15 +3122,15 @@ impl Ui {
             s.rw = w;
             s.rh = h;
         }
-        let hit = match &self.boxes[index].hit {
+        let hit = self.boxes[index].hit_rect.unwrap_or_else(|| match &self.boxes[index].hit {
             None => screen_rect,
             Some(f) => f(screen_rect),
-        };
+        });
         let clipped_hit = intersect(hit, clip_rect);
         let (_, _, hw, hh) = clipped_hit;
-        let visible = match &self.boxes[index].hit {
-            None => hw > 0.0 && hh > 0.0,
-            Some(_) => {
+        let visible = match (self.boxes[index].hit_rect, &self.boxes[index].hit) {
+            (None, None) => hw > 0.0 && hh > 0.0,
+            _ => {
                 let (_, _, vw, vh) = intersect(screen_rect, clip_rect);
                 vw > 0.0 && vh > 0.0
             }
@@ -3052,7 +3145,7 @@ impl Ui {
         let shown = visible;
         if shown || ((w <= 0.0 || h <= 0.0) && flags & CLIP == 0) {
             if shown {
-                self.run_painters(&self.boxes[index].painters, index, clip_rect, paint);
+                self.run_painters(&self.boxes[index].painters[..self.boxes[index].painter_count], index, clip_rect, paint);
             }
             let child_clip = if flags & CLIP != 0 {
                 let padding = self.boxes[index].padding;
@@ -3067,7 +3160,7 @@ impl Ui {
                 child = self.boxes[child].next;
             }
             if shown {
-                self.run_painters(&self.boxes[index].overlays, index, clip_rect, paint);
+                self.run_painters(&self.boxes[index].overlays[..self.boxes[index].overlay_count], index, clip_rect, paint);
             }
             if shown && self.keyboard_focus && self.focus == self.boxes[index].key && flags & FOCUS_MARK == 0 {
                 paint.clip_rect = clip_rect;
@@ -3111,12 +3204,14 @@ impl Ui {
             row_height: self.kit_row_height,
             fonts: std::mem::take(&mut self.fonts),
             borrowed_images: std::mem::take(&mut self.borrowed_images),
-            regions: Vec::new(),
+            regions: std::mem::take(&mut self.regions),
+            label: std::mem::take(&mut self.label),
             edit_scroll_x: self.edit_scroll_x,
             l_content: std::mem::take(&mut self.l_content),
             scroll_y: std::mem::take(&mut self.scroll_y),
         };
-        let mut layers: Vec<(i64, ui_batch::Table)> = Vec::new();
+        let mut layers = std::mem::take(&mut self.painted_layers);
+        layers.clear();
         let mut key = 0i64;
         self.visit(&mut paint, &mut layers, &mut key, 0, clip, 0);
         layers.push((key, paint.builder.publish().expect("Ui.frame: publish")));
@@ -3125,6 +3220,7 @@ impl Ui {
         self.fonts = paint.fonts;
         self.borrowed_images = paint.borrowed_images;
         self.regions = paint.regions;
+        self.label = paint.label;
         self.edit_scroll_x = paint.edit_scroll_x;
         self.l_content = paint.l_content;
         self.scroll_y = paint.scroll_y;
@@ -3178,8 +3274,12 @@ impl Ui {
             b.w = Size::Grow;
             b.h = Size::Grow;
             b.hit = None;
-            b.painters.clear();
-            b.overlays.clear();
+            b.hit_rect = None;
+            for row in b.painters.iter_mut().chain(&mut b.overlays) {
+                (row.clear)(row.value.as_mut());
+            }
+            b.painter_count = 0;
+            b.overlay_count = 0;
         }
     }
 
@@ -3235,8 +3335,8 @@ impl Ui {
             0.0,
             None,
         );
-        self.parents = vec![root];
-        self.seeds = vec![ROOT_KEY];
+        self.parents.push(root);
+        self.seeds.push(ROOT_KEY);
     }
 
     pub fn end_frame(&mut self, frame: &rframe::Frame) {
@@ -3245,11 +3345,13 @@ impl Ui {
         self.parents.clear();
         self.seeds.clear();
         // Move popups to the end of the root's children, oldest first.
-        let mut ordered = self.foreground.clone();
-        ordered.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut moves: Vec<usize> = ordered.iter().map(|(_, i)| *i).collect();
-        moves.extend(self.overlays.iter().copied());
-        for index in moves {
+        self.foreground.sort_by(|a, b| a.0.cmp(&b.0));
+        for position in 0..self.foreground.len() + self.overlays.len() {
+            let index = if position < self.foreground.len() {
+                self.foreground[position].1
+            } else {
+                self.overlays[position - self.foreground.len()]
+            };
             if self.boxes[index].parent == 0 && self.boxes[0].last != index {
                 let mut previous = NONE;
                 let mut child = self.boxes[0].first;
@@ -3275,7 +3377,7 @@ impl Ui {
         self.intrinsic();
         self.arrange(frame.input.t);
         self.borrowed_images.clear();
-        let layers = self.paint_all(frame);
+        let mut layers = self.paint_all(frame);
         self.foreground.clear();
         self.prune();
         if self.focus != 0 && self.table.find(self.focus).is_none() {
@@ -3283,8 +3385,9 @@ impl Ui {
             self.edit_focus = 0;
         }
         self.fonts.atlas.publish();
-        let mut scene_layers = Vec::new();
-        for (key, batch) in layers {
+        let mut scene_layers = std::mem::take(&mut self.scene_layers);
+        let layer_count = layers.len();
+        for (position, (key, batch)) in layers.drain(..).enumerate() {
             let textures = batch.textures();
             let mut images: Vec<(i64, image::Image)> = Vec::new();
             if let Some(atlas_image) = &self.fonts.atlas.image {
@@ -3298,20 +3401,24 @@ impl Ui {
                 }
             }
             let batch = if images.is_empty() && !textures.is_empty() { ui_batch::empty() } else { batch };
-            let layer = if batch.count() == 0 {
-                Vec::new()
-            } else {
-                vec![scene::layer::ui(Some(images), batch).expect("Ui.frame: layer")]
-            };
-            scene_layers.push((key, layer));
+            if position == scene_layers.len() {
+                scene_layers.push((key, Vec::new()));
+            }
+            let (layer_key, layer) = &mut scene_layers[position];
+            *layer_key = key;
+            layer.clear();
+            if batch.count() != 0 {
+                layer.push(scene::layer::ui(Some(images), batch).expect("Ui.frame: layer"));
+            }
         }
+        scene_layers.truncate(layer_count);
+        self.painted_layers = layers;
         self.scene_layers = scene_layers;
-        let mut all: Vec<scene::node> = Vec::new();
+        self.scene.clear();
         for (_, layer) in &self.scene_layers {
-            all.extend(layer.iter().cloned());
+            self.scene.extend(layer.iter().cloned());
         }
-        all.extend(self.regions.iter().cloned());
-        self.scene = all;
+        self.scene.extend(self.regions.iter().cloned());
         // Layout, hit rectangles and painting are published data now. The callbacks can capture
         // whole document versions, so keep them only while building.
         self.clear_frame_callbacks();
@@ -3336,7 +3443,7 @@ impl Ui {
                     && time >= *start =>
             {
                 let start = *start;
-                self.hover_rest = Some((key.to_owned(), self.pointer, start, self.frame_number));
+                self.hover_rest.as_mut().unwrap().3 = self.frame_number;
                 time - start >= HOVER_SECONDS
             }
             _ => {
