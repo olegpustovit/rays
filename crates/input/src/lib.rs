@@ -481,8 +481,7 @@ pub mod gate {
             live.events.retain(|event| !pointer_event(event));
         }
         if g.prompt || g.menu || g.leader || g.text_focus || !g.focus_on_picture {
-            let blocked = live.keys.clone();
-            live.keys.clear();
+            let blocked = std::mem::take(&mut live.keys);
             live.events.retain(|event| !key_event(event));
             (live, blocked)
         } else {
