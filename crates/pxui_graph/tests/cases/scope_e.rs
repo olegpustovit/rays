@@ -95,14 +95,14 @@ fn run_readable() {
     check(scope::inspect::tagged_wires(&far) >= 1, "a wire four thousand points long was not a tag");
     let lit = { let mut r8_view = far.clone(); scope::select(vec![path(&["g", "a"])], &mut r8_view); r8_view };
     check(scope::inspect::tagged_wires(&lit) == 0, "selecting the source did not show the real wire");
-    let (off, _) = { let mut r8_view = far; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::Toggle_tags, &mut r8_changes); (r8_view, r8_changes) };
+    let (off, _) = { let mut r8_view = far; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::ToggleTags, &mut r8_changes); (r8_view, r8_changes) };
     check(scope::inspect::tagged_wires(&off) == 0, "the tags toggle left a tag");
     // Unfold all: one Unfold per call written in a row of the card
     let ws = checked("(workspace u (graph g :context sop (let* [a (sop/merge (sop/box) (sop/box))] a)))");
     let (view, _) = scope_view(ScopeOpts::default(), &ws, "g");
     let (view, _) = scope_step(&mut ui, view, &frame0());
-    let (_, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![path(&["g", "a"])], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::Unfold_all, &mut r8_changes); (r8_view, r8_changes) };
-    let unfolds = changes.iter().filter(|c| matches!(c, scope::Change::Syntax_edit(e::Op::Unfold { .. }))).count();
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![path(&["g", "a"])], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::UnfoldAll, &mut r8_changes); (r8_view, r8_changes) };
+    let unfolds = changes.iter().filter(|c| matches!(c, scope::Change::SyntaxEdit(e::Op::Unfold { .. }))).count();
     check(unfolds >= 2, "Unfold all did not unfold every call of the card");
 }
 
@@ -136,7 +136,7 @@ fn bench_scope_big() {
     });
     let pv = view.clone();
     time("2001 nodes: Point_all", if verbose { 5 } else { 1 }, &mut || {
-        let _ = { let mut r8_view = pv.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::Point_all, &mut r8_changes); (r8_view, r8_changes) };
+        let _ = { let mut r8_view = pv.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, scope::Command::PointAll, &mut r8_changes); (r8_view, r8_changes) };
     });
     check(scope::inspect::wire_count(&view) > 0, "the big scope has no wires");
 }
@@ -151,13 +151,13 @@ fn scope_mutation_keeps_prior_changes_and_defers_syntax_edits() {
     scope::select(vec![path(&["g", "a"])], &mut view);
     let prefix = Change::Notice("earlier intent".into());
     let mut changes = vec![prefix.clone()];
-    scope::run_command(&mut view, Command::Show_hints, &mut changes);
+    scope::run_command(&mut view, Command::ShowHints, &mut changes);
     assert_eq!(changes, vec![prefix.clone()]);
     step_hints(&mut view, &[], false, &mut changes);
     let target = view.hinting.as_ref().unwrap().targets.iter().find(|target| target.key.is_some()).unwrap().clone();
     let keys: Vec<Key> = target.label.chars().map(Key::KeyChar).collect();
     step_hints(&mut view, &keys, false, &mut changes);
-    assert_eq!(changes, vec![prefix, Change::Syntax_edit(e::Op::Connect {
+    assert_eq!(changes, vec![prefix, Change::SyntaxEdit(e::Op::Connect {
         node: target.node, key: target.key.unwrap(), src: "a".into(), iter: false,
     })]);
     assert!(view.hinting.is_none());
@@ -167,9 +167,9 @@ fn scope_mutation_keeps_prior_changes_and_defers_syntax_edits() {
 
 fn change_equality() {
     use pxui_graph::scope_state::Change;
-    let edit = Change::Syntax_edit(e::Op::Rename { node: path(&["g", "a"]), to_: "b".into() });
+    let edit = Change::SyntaxEdit(e::Op::Rename { node: path(&["g", "a"]), to_: "b".into() });
     let same = edit.clone();
-    let different = Change::Syntax_edit(e::Op::Rename { node: path(&["g", "a"]), to_: "c".into() });
+    let different = Change::SyntaxEdit(e::Op::Rename { node: path(&["g", "a"]), to_: "c".into() });
     mem_sys::local_reset();
     assert_eq!(edit, same);
     assert_ne!(edit, different);

@@ -28,13 +28,13 @@ pub fn pointer(p: (i64, i64)) -> (f64, f64) {
     (p.0 as f64, p.1 as f64)
 }
 pub fn mouse_press(button: MouseButton, point: (i64, i64)) -> Event {
-    Event::Pointer_pressed(button, pointer(point))
+    Event::PointerPressed(button, pointer(point))
 }
 pub fn mouse_release(button: MouseButton, point: (i64, i64)) -> Event {
-    Event::Pointer_released(button, pointer(point))
+    Event::PointerReleased(button, pointer(point))
 }
 pub fn mouse_move(point: (i64, i64)) -> Event {
-    Event::Pointer_moved(pointer(point))
+    Event::PointerMoved(pointer(point))
 }
 
 /// `frame ~mouse ~keys ~events ()`: a 1000 x 700 frame.
@@ -147,7 +147,7 @@ pub fn scope_paint(ui: &mut Ui, view: Pane) -> i64 {
             .layers
             .iter()
             .fold(0, |total, l| match l {
-                layer::native_layer::Ui_layer(batch, _) => total + batch.count(),
+                layer::NativeLayer::UiLayer(batch, _) => total + batch.count(),
                 _ => total,
             }),
     }
@@ -173,7 +173,7 @@ pub mod g {
     use super::*;
 
     pub fn syntax(op: flow_graph::flow_edit::Op) -> Change {
-        Change::Syntax_edit(op)
+        Change::SyntaxEdit(op)
     }
 
     pub fn frame(mouse: (i64, i64), keys: Vec<Key>, events: Vec<Event>) -> rframe::Frame {
@@ -226,7 +226,7 @@ pub mod g {
     }
 
     pub fn type_text(ui: &mut Ui, view: Pane, text: &str) -> (Pane, Vec<Change>) {
-        scope_step(ui, view, &frame_ev((0, 0), vec![Event::Text_input(text.to_owned()), Event::Key_pressed(Key::Enter)]))
+        scope_step(ui, view, &frame_ev((0, 0), vec![Event::TextInput(text.to_owned()), Event::KeyPressed(Key::Enter)]))
     }
 }
 

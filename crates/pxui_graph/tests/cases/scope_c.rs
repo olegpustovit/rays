@@ -71,21 +71,21 @@ fn scope_gestures_3() {
     check(changes.contains(&syn(Op::MoveItem { node: widths.clone(), pos: 1 })), "the row arrow did not become Move_item");
     let hover = (scope::inspect::row_center(&view, &widths, second).expect("c").0 as i64, uy as i64);
     let (hovered, _) = scope_step(&mut ui, view.clone(), &g::frame(hover, Vec::new(), vec![mouse_move(hover)]));
-    check({ let mut r8_view = hovered.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Item_up, &mut r8_changes); (r8_view, r8_changes) }.1 == vec![syn(Op::MoveItem { node: widths.clone(), pos: 1 })], "Alt-Up: Move_item");
-    check({ let mut r8_view = hovered.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Item_down, &mut r8_changes); (r8_view, r8_changes) }.1 == vec![syn(Op::MoveItem { node: widths.clone(), pos: 2 })], "Alt-Down: Move_item");
+    check({ let mut r8_view = hovered.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::ItemUp, &mut r8_changes); (r8_view, r8_changes) }.1 == vec![syn(Op::MoveItem { node: widths.clone(), pos: 1 })], "Alt-Up: Move_item");
+    check({ let mut r8_view = hovered.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::ItemDown, &mut r8_changes); (r8_view, r8_changes) }.1 == vec![syn(Op::MoveItem { node: widths.clone(), pos: 2 })], "Alt-Down: Move_item");
     // Delete over an item of a variadic input removes the item, whatever it holds
     check(
         { let mut r8_view = hovered.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) }.1 == vec![syn(Op::Disconnect { node: widths.clone(), key: ArgKey::Pos(1), fallback: None })],
         "Delete on a hovered list item did not remove it",
     );
-    check(matches!({ let mut r8_view = view.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Item_up, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice(), [Change::Notice(_)]), "Alt-Up with no hovered item");
+    check(matches!({ let mut r8_view = view.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::ItemUp, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice(), [Change::Notice(_)]), "Alt-Up with no hovered item");
     match records(&kit_scope.nodes).first() {
         Some(record) => {
             let add = record.rows.iter().position(|r| r.kind == p::RowKind::Add).expect("add");
             if let Some((rx, ry)) = scope::inspect::row_center(&view, &record.path, add) {
                 let (_, changes) = g::scope_click(&mut ui, view.clone(), (rx as i64, ry as i64));
                 check(
-                    changes.iter().any(|c| matches!(c, Change::Syntax_edit(Op::AddField { node, .. }) if *node == record.path)),
+                    changes.iter().any(|c| matches!(c, Change::SyntaxEdit(Op::AddField { node, .. }) if *node == record.path)),
                     "the + field row did not become Add_field",
                 );
             }
@@ -100,7 +100,7 @@ fn scope_gestures_3() {
     let ri = rn.rows.iter().position(|r| r.kind == p::RowKind::Add).expect("add");
     let (rx, ry) = scope::inspect::row_center(&rview, &path(&["g", "r"]), ri).expect("c");
     let (_, changes) = g::scope_click(&mut ui, rview, (rx as i64, ry as i64));
-    check(changes.iter().any(|c| matches!(c, Change::Syntax_edit(Op::AddField { name, .. }) if name == "f1")), "the + field row did not pick the first unused name");
+    check(changes.iter().any(|c| matches!(c, Change::SyntaxEdit(Op::AddField { name, .. }) if name == "f1")), "the + field row did not pick the first unused name");
     // a wire taken off a variadic input takes the item with it: no nil is left behind
     let mw = checked("(workspace m (graph g :context sop (let* [a (sop/box) b (sop/box) m (sop/merge a b)] m)))");
     let mview = g::settled(&mut ui, g::scope_view(&mw, "g").0);
@@ -119,7 +119,7 @@ fn scope_gestures_3() {
     let at = add_row(&oview, &oscope, &values);
     let (naming, changes) = g::scope_click(&mut ui, oview, at);
     check(changes.is_empty() && scope::editing(&naming), "the + output row did not open a name field");
-    let (_, changes) = scope_step(&mut ui, naming, &g::frame((0, 0), Vec::new(), vec![Event::Text_input("depth".into()), Event::Key_pressed(Key::Enter)]));
+    let (_, changes) = scope_step(&mut ui, naming, &g::frame((0, 0), Vec::new(), vec![Event::TextInput("depth".into()), Event::KeyPressed(Key::Enter)]));
     check(
         changes.contains(&syn(Op::AddField { node: values.clone(), name: "depth".into(), value: s::make(s::Draft::Num("0".into())) })),
         "a named output did not become Add_field",
@@ -153,7 +153,7 @@ fn scope_gestures_3() {
 fn drag(ui: &mut pxui::ui::Ui, view: scope::Pane, shift: bool, a: (i64, i64), b: (i64, i64)) -> (scope::Pane, Vec<Change>) {
     let mut evs = Vec::new();
     if shift {
-        evs.push(Event::Key_pressed(Key::Shift));
+        evs.push(Event::KeyPressed(Key::Shift));
     }
     evs.push(mouse_move(a));
     evs.push(mouse_press(MouseButton::LeftButton, a));
@@ -172,9 +172,9 @@ fn scope_gestures_4() {
     let bloom = path(&["flower", "bloom"]);
     // frames: Shift-G makes one around the selection, the corner resizes it, the cross deletes it
     let view = g::settled(&mut ui, { let mut r8_view = g::scope_view(&w, "flower").0; scope::select(vec![heart.clone(), bloom.clone()], &mut r8_view); r8_view });
-    let (view, changes) = { let mut r8_view = view; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Make_frame, &mut r8_changes); (r8_view, r8_changes) };
+    let (view, changes) = { let mut r8_view = view; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::MakeFrame, &mut r8_changes); (r8_view, r8_changes) };
     let made = match changes.as_slice() {
-        [Change::Frames_set { scope: sc, frames }] if *sc == path(&["flower"]) && frames.len() == 1 => frames[0].clone(),
+        [Change::FramesSet { scope: sc, frames }] if *sc == path(&["flower"]) && frames.len() == 1 => frames[0].clone(),
         _ => fail("Shift-G did not make one frame"),
     };
     let (title, at, (fw, fh)) = made.clone();
@@ -197,7 +197,7 @@ fn scope_gestures_4() {
     let (sized, _) = scope_step(&mut ui, sized, &g::frame(drag_to, Vec::new(), vec![mouse_move(drag_to)]));
     let (_, changes) = scope_step(&mut ui, sized, &g::frame(drag_to, Vec::new(), vec![mouse_release(MouseButton::LeftButton, drag_to)]));
     let grown = changes.iter().find_map(|c| match c {
-        Change::Frames_set { frames, .. } if frames.len() == 1 => Some((frames[0].2 .0, frames[0].2 .1)),
+        Change::FramesSet { frames, .. } if frames.len() == 1 => Some((frames[0].2 .0, frames[0].2 .1)),
         _ => None,
     });
     match grown {
@@ -206,14 +206,14 @@ fn scope_gestures_4() {
     }
     let cross = ((sx0 + ((fx0 + fw) * z) - 10.0) as i64, (sy0 + (fy0 * z) + 10.0) as i64);
     let (_, changes) = g::scope_click(&mut ui, framed.clone(), cross);
-    check(changes.iter().any(|c| matches!(c, Change::Frames_set { frames, .. } if frames.is_empty())), "the cross did not delete the frame");
+    check(changes.iter().any(|c| matches!(c, Change::FramesSet { frames, .. } if frames.is_empty())), "the cross did not delete the frame");
     let title_at = ((sx0 + (fx0 * z) + 20.0) as i64, (sy0 + (fy0 * z) + 8.0) as i64);
     let (retitled, _) = g::double_click(&mut ui, framed.clone(), title_at);
     check(scope::editing(&retitled), "a double-click on a frame title did not open its field");
     let retitled = g::settled(&mut ui, retitled);
     let (_, changes) = g::type_text(&mut ui, retitled, "legs");
     check(
-        changes.iter().any(|c| matches!(c, Change::Frames_set { frames, .. } if frames.len() == 1 && frames[0].0 == "legs" && frames[0].0 != title)),
+        changes.iter().any(|c| matches!(c, Change::FramesSet { frames, .. } if frames.len() == 1 && frames[0].0 == "legs" && frames[0].0 != title)),
         "typing a frame title did not emit Frames_set",
     );
     // a drag on the title carries the frame with the nodes inside it, as one Moved and one Frames_set
@@ -229,7 +229,7 @@ fn scope_gestures_4() {
     let fr_at: Vec<(f64, f64)> = changes
         .iter()
         .filter_map(|c| match c {
-            Change::Frames_set { frames, .. } if frames.len() == 1 => Some(frames[0].1),
+            Change::FramesSet { frames, .. } if frames.len() == 1 => Some(frames[0].1),
             _ => None,
         })
         .collect();
@@ -242,13 +242,13 @@ fn scope_gestures_4() {
     }
     // f frames the selection, with nothing selected all of it
     let far = { let mut r8_view = framed.clone(); scope::with_bounds(0, 0, 400, 300, &mut r8_view); r8_view };
-    let zoomed = { let mut r8_view = { let mut r8_view = far.clone(); scope::select(vec![heart.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Frame_selection, &mut r8_changes); (r8_view, r8_changes) }.0;
+    let zoomed = { let mut r8_view = { let mut r8_view = far.clone(); scope::select(vec![heart.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::FrameSelection, &mut r8_changes); (r8_view, r8_changes) }.0;
     match scope::inspect::box_of(&zoomed, &heart) {
         Some((x, y, w2, h2)) => check(x >= 0.0 && y >= 0.0 && x + w2 <= 400.0 && y + h2 <= 300.0 && w2 * h2 > 0.0, "framing the selection left the node out of view"),
         None => fail("the framed node has no box"),
     }
     check(
-        scope::zoom(&{ let mut r8_view = { let mut r8_view = far.clone(); scope::select(Vec::new(), &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Frame_selection, &mut r8_changes); (r8_view, r8_changes) }.0) == scope::zoom(&{ let mut r8_view = far; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Frame_all, &mut r8_changes); (r8_view, r8_changes) }.0),
+        scope::zoom(&{ let mut r8_view = { let mut r8_view = far.clone(); scope::select(Vec::new(), &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::FrameSelection, &mut r8_changes); (r8_view, r8_changes) }.0) == scope::zoom(&{ let mut r8_view = far; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::FrameAll, &mut r8_changes); (r8_view, r8_changes) }.0),
         "framing an empty selection is framing all",
     );
     // marquee: a drag on empty canvas selects the nodes of one scope it covers; Shift adds

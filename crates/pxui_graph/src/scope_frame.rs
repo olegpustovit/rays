@@ -185,24 +185,24 @@ pub fn context_items(t: &Pane, path: &[Symbol]) -> Vec<(String, bool)> {
 
 pub fn context_command(i: i64) -> Command {
     match i {
-        0 => Command::Fold_into,
+        0 => Command::FoldInto,
         1 => Command::Unfold,
         2 => Command::Hoist,
         3 => Command::Collapse,
         4 => Command::Bypass,
-        5 => Command::Wrap_repeat,
-        6 => Command::Wrap_iterate,
-        7 => Command::Make_fn,
-        8 => Command::Make_macro,
-        9 => Command::Make_defn,
-        11 => Command::Wrap_if,
-        12 => Command::Add_arm,
-        13 => Command::Delete_arm,
-        14 => Command::Wrap_map,
-        15 => Command::Wrap_filter,
-        16 => Command::Inline_fn,
-        17 => Command::Item_up,
-        18 => Command::Item_down,
+        5 => Command::WrapRepeat,
+        6 => Command::WrapIterate,
+        7 => Command::MakeFn,
+        8 => Command::MakeMacro,
+        9 => Command::MakeDefn,
+        11 => Command::WrapIf,
+        12 => Command::AddArm,
+        13 => Command::DeleteArm,
+        14 => Command::WrapMap,
+        15 => Command::WrapFilter,
+        16 => Command::InlineFn,
+        17 => Command::ItemUp,
+        18 => Command::ItemDown,
         _ => Command::Delete,
     }
 }
@@ -219,10 +219,10 @@ pub fn unfold_row(n: &p::Node, r: &p::Row) -> Vec<Change> {
                 .enumerate()
                 .map(|(i, sg)| if i == last { e::nested_leaf(&n.name, &r.key).map(Into::into).unwrap_or(*sg) } else { sg.clone() })
                 .collect();
-            return vec![Change::Zone_collapsed { zone, collapsed: false }];
+            return vec![Change::ZoneCollapsed { zone, collapsed: false }];
         }
     }
-    vec![Change::Syntax_edit(e::Op::Unfold { node: n.path.clone(), key: r.key.clone(), sub: Vec::new() })]
+    vec![Change::SyntaxEdit(e::Op::Unfold { node: n.path.clone(), key: r.key.clone(), sub: Vec::new() })]
 }
 
 /// The footer of a card at the iterations pinned in its zones: its value is the ghost beside the out-port.
@@ -238,7 +238,7 @@ pub enum Tap {
     Track,
     Toggle,
     Lens,
-    Lens_step(i64),
+    LensStep(i64),
     Replace,
 }
 
@@ -398,7 +398,7 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                                 for i in 0..=len {
                                     let ((bxx, byy), size) = sp::lens_button_box(len, i);
                                     let b = bxz(ui, z, &format!("ls{}", i), (bxx, top + byy), size);
-                                    taps.push((b, Tap::Lens_step(i)));
+                                    taps.push((b, Tap::LensStep(i)));
                                 }
                                 let ((rx, ry), size) = sp::lens_replace_box(lh);
                                 let b = bxz(ui, z, "lr", (rx, top + ry), size);
@@ -444,7 +444,7 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
     let h = sp::FIELD_H * z;
     let ay = (ry + 4.0) * z;
     let nonfinite = !matches!(r.key, ArgKey::Kw(_));
-    let set = |sub: Vec<i64>, value: s::Syntax| Change::Syntax_edit(e::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub, value });
+    let set = |sub: Vec<i64>, value: s::Syntax| Change::SyntaxEdit(e::Op::SetArg { node: n.path.clone(), key: r.key.clone(), sub, value });
     if r.chip == p::Chip::Const {
         if let Some(ex) = &r.expr {
             match &ex.node {
@@ -605,7 +605,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     // a value node: its number is a field in the header, at body size
                     let saved = ui.enter(&tile);
                     if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", d.name(*text)) {
-                        fields.push(Change::Syntax_edit(e::Op::SetInputDefault { form: i.path[0].to_string(), input: i.name.clone(), value: number_syntax(text2) }));
+                        fields.push(Change::SyntaxEdit(e::Op::SetInputDefault { form: i.path[0].to_string(), input: i.name.clone(), value: number_syntax(text2) }));
                     }
                     ui.leave(saved);
                 }
@@ -664,24 +664,24 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                                             break name;
                                         }
                                     };
-                                    add_clicks.push(Change::Syntax_edit(e::Op::AddField { node: n.path.clone(), name, value: number_syntax("0".to_owned()) }));
+                                    add_clicks.push(Change::SyntaxEdit(e::Op::AddField { node: n.path.clone(), name, value: number_syntax("0".to_owned()) }));
                                 }
                                 ArgKey::Kw(kw) if kw.is_empty() => {
                                     c.opened = Some(Editing::Output(n.path.clone()));
                                     // a new output is named first
                                 }
                                 _ if n.head == "list" || n.head == "str" => {
-                                    add_clicks.push(Change::Syntax_edit(e::Op::AddItem { node: n.path.clone() }));
+                                    add_clicks.push(Change::SyntaxEdit(e::Op::AddItem { node: n.path.clone() }));
                                 }
                                 key => {
                                     // a type with no literal (geometry, a list, a function, a scene) is wired
                                     match &r.ty {
                                         Some(Ty::Named(nm)) if nm == "geometry" => add_clicks.push(Change::Notice("Wire a node onto this row".to_owned())),
                                         Some(ty) => match e::default_for(ty, &r.label, None) {
-                                            Some(value) => add_clicks.push(Change::Syntax_edit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value })),
+                                            Some(value) => add_clicks.push(Change::SyntaxEdit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value })),
                                             None => add_clicks.push(Change::Notice("Wire a node onto this row".to_owned())),
                                         },
-                                        None => add_clicks.push(Change::Syntax_edit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value: number_syntax("0".to_owned()) })),
+                                        None => add_clicks.push(Change::SyntaxEdit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value: number_syntax("0".to_owned()) })),
                                     }
                                 }
                             },
@@ -694,7 +694,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     let (left, fw, _, _, _) = sp::wired_geo(&mut |size, text| measure_ui(ui, t, size, text), t, z, fs, 0.0, pl.w * z, true, &sp::wired_name(r, nm));
                     let b = ui.box_fmt(format_args!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(fw)).h(Size::Px(16.0 * z)).at((left - fw - (2.0 * z), row_y)));
                     if ui.signal(&b).clicked {
-                        add_clicks.push(Change::Syntax_edit(e::Op::FoldInto { node: t.folds[&(n.path.clone(), i)].clone() }));
+                        add_clicks.push(Change::SyntaxEdit(e::Op::FoldInto { node: t.folds[&(n.path.clone(), i)].clone() }));
                     }
                 } else if let p::Chip::Name(nm) = &r.chip {
                     if !e::nested(nm) {
@@ -731,7 +731,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
         (Some(Editing::Name(path)), Item::Item(n)) if *path == n.path => {
             let saved = ui.enter(&tile);
             let np = n.path.clone();
-            editors = edit_field(c, ui, (21.0 * z, 3.0 * z), (pl.w - 21.0 - sp::HEAD_PAD) * z, 18.0 * z, "name", &p::title(n), &valid_name, &move |v| Change::Syntax_edit(e::Op::Rename { node: np.clone(), to_: v }));
+            editors = edit_field(c, ui, (21.0 * z, 3.0 * z), (pl.w - 21.0 - sp::HEAD_PAD) * z, 18.0 * z, "name", &p::title(n), &valid_name, &move |v| Change::SyntaxEdit(e::Op::Rename { node: np.clone(), to_: v }));
             ui.leave(saved);
         }
         (Some(Editing::Output(path)), Item::Item(n)) if *path == n.path => {
@@ -740,7 +740,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     let saved = ui.enter(&tile);
                     let np = n.path.clone();
                     editors = edit_field(c, ui, (sp::LABEL_X * z, (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT) + 4.0) * z), (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z, sp::FIELD_H * z, "output", "", &valid_name, &move |v| {
-                        Change::Syntax_edit(e::Op::AddField { node: np.clone(), name: v, value: number_syntax("0".to_owned()) })
+                        Change::SyntaxEdit(e::Op::AddField { node: np.clone(), name: v, value: number_syntax("0".to_owned()) })
                     });
                     ui.leave(saved);
                 }
@@ -757,7 +757,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
             };
             let (form, input) = (i.path[0].to_string(), i.name.clone());
             editors = edit_field(c, ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, "default", &text, &|v: &str| single_form(v).is_some(), &move |v| {
-                Change::Syntax_edit(e::Op::SetInputDefault { form: form.clone(), input: input.clone(), value: single_form(&v).expect("validated") })
+                Change::SyntaxEdit(e::Op::SetInputDefault { form: form.clone(), input: input.clone(), value: single_form(&v).expect("validated") })
             });
             ui.leave(saved);
         }
@@ -774,7 +774,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                         if *j >= 1 {
                             let b = ui.box_fmt(format_args!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(16.0 * z)).h(Size::Px(16.0 * z)).at(((pl.w - 22.0) * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
                             if ui.signal(&b).clicked {
-                                movers.push(Change::Syntax_edit(e::Op::MoveItem { node: n.path.clone(), pos: *j }));
+                                movers.push(Change::SyntaxEdit(e::Op::MoveItem { node: n.path.clone(), pos: *j }));
                             }
                         }
                     }
@@ -796,7 +796,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                             if r.kind != p::RowKind::Add && *j != *active {
                                 let b = ui.box_fmt(format_args!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((pl.w - 24.0) * z)).h(Size::Px(16.0 * z)).at((12.0 * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
                                 if ui.signal(&b).clicked {
-                                    switchers.push(Change::Layout_active { graph: t.key.clone(), index: *j });
+                                    switchers.push(Change::LayoutActive { graph: t.key.clone(), index: *j });
                                 }
                             }
                         }
@@ -841,7 +841,7 @@ pub fn drop_change(t: &Pane, ui: &mut Ui, canvas: &UiBox, tiles: &[Tile]) -> Opt
         None => (vec![t.key.clone().into()], on_canvas),
     };
     Some(match drop {
-        Drop::Hover(pay) => Change::Drop_over { path, kind: pay.kind, value: pay.value },
+        Drop::Hover(pay) => Change::DropOver { path, kind: pay.kind, value: pay.value },
         Drop::Dropped(pay) => Change::Dropped { path, kind: pay.kind, value: pay.value },
     })
 }
@@ -867,7 +867,7 @@ pub fn context_step(t: &mut Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &S
     }
     if t.context.is_none() && context_clicked(canvas_signal) {
         let (x, y) = canvas_signal.release_point;
-        emit.push(Change::Menu_requested(x, y));
+        emit.push(Change::MenuRequested(x, y));
     }
     if let Some((at, path)) = t.context.clone() {
         let items = context_items(t, &path);
@@ -876,7 +876,7 @@ pub fn context_step(t: &mut Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &S
             MenuResult::Dismiss => { t.context = None; },
             MenuResult::Pick(i) => {
                 match t.saved.imported(&path) {
-                    Some(file) => emit.push(Change::Open_import(file)),
+                    Some(file) => emit.push(Change::OpenImport(file)),
                     None => emit.extend(action_changes(t, context_command(i))),
                 }
                 t.context = None;
@@ -913,7 +913,7 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
             Item::Input(_) => None,
             Item::Item(n) => match &n.zone {
                 None => {
-                    // anywhere on the header is the in-port of the first geometry slot
+                    // anywhere on the header is the in-
                     match row_at(f64::INFINITY, tp, n, tp.shown, lx, ly) {
                         Some(i) if i < n.rows.len() => {
                             let r = &n.rows[i];
@@ -971,20 +971,20 @@ pub fn finish_wire(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), emit: &
     let off = unwire_at(t, &lifted);
     match &target {
         Some((node, key)) => {
-            emit.push(Change::Syntax_edit(e::Op::Connect { node: node.clone(), key: key.clone(), src: w.src.clone(), iter: w.iter }));
+            emit.push(Change::SyntaxEdit(e::Op::Connect { node: node.clone(), key: key.clone(), src: w.src.clone(), iter: w.iter }));
             for op in off {
-                emit.push(Change::Syntax_edit(op));
+                emit.push(Change::SyntaxEdit(op));
             }
         }
         None if !w.lift.is_empty() && !any_hover => {
             for op in off {
-                emit.push(Change::Syntax_edit(op));
+                emit.push(Change::SyntaxEdit(op));
             }
         }
         None if on_canvas => {
             emit.push(Change::Selected(vec![src_path.clone()]));
             let (x, y) = release_point;
-            emit.push(Change::Menu_requested(x, y));
+            emit.push(Change::MenuRequested(x, y));
         }
         None => emit.push(Change::Notice("Drop the wire on an input row".to_owned())),
     }
@@ -1098,7 +1098,7 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                 }
                 // a folded function or loop opens in place; anything else follows what it references
                 Item::Item(n) if n.zone.is_some() && t.saved.collapsed(&pl.path) => {
-                    emit.push(Change::Zone_collapsed { zone: pl.path.clone(), collapsed: false });
+                    emit.push(Change::ZoneCollapsed { zone: pl.path.clone(), collapsed: false });
                 }
                 Item::Item(n) if !n.synthetic => {
                     emit.push(Change::Activated(pl.path.clone()));
@@ -1131,8 +1131,8 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
             let bs = ui.signal(b);
             if let Item::Item(n) = &pl.item {
                 match on {
-                    Tap::Toggle if bs.clicked => emit.push(Change::Zone_collapsed { zone: n.path.clone(), collapsed: !pl.collapsed }),
-                    Tap::Replace if bs.clicked => emit.push(Change::Syntax_edit(e::Op::InlineMacro { node: n.path.clone() })),
+                    Tap::Toggle if bs.clicked => emit.push(Change::ZoneCollapsed { zone: n.path.clone(), collapsed: !pl.collapsed }),
+                    Tap::Replace if bs.clicked => emit.push(Change::SyntaxEdit(e::Op::InlineMacro { node: n.path.clone() })),
                     Tap::Lens if bs.clicked => {
                         lens_changed = true;
                         if lens_next.iter().any(|(q, _)| *q == n.path) {
@@ -1145,7 +1145,7 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                             lens_next.insert(0, (n.path.clone(), step));
                         }
                     }
-                    Tap::Lens_step(i) if bs.clicked => {
+                    Tap::LensStep(i) if bs.clicked => {
                         lens_changed = true;
                         lens_next.retain(|(q, _)| *q != n.path);
                         lens_next.insert(0, (n.path.clone(), *i));
@@ -1154,7 +1154,7 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                         let count = count_of(t, &n.path);
                         let index = 0.max((count - 1).min(t.saved.probe(&n.path) + d));
                         if count > 0 && index != t.saved.probe(&n.path) {
-                            emit.push(Change::Probe_set { zone: n.path.clone(), index });
+                            emit.push(Change::ProbeSet { zone: n.path.clone(), index });
                         }
                     }
                     Tap::Track if bs.pressed || bs.held => {
@@ -1164,7 +1164,7 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                             let px = if bs.released { bs.release_point.0 } else { bs.pointer.0 };
                             let index = 0.max((count - 1).min((((px - x) / wd) * count as f64) as i64));
                             if index != t.saved.probe(&n.path) {
-                                emit.push(Change::Probe_set { zone: n.path.clone(), index });
+                                emit.push(Change::ProbeSet { zone: n.path.clone(), index });
                             }
                         }
                     }
@@ -1180,7 +1180,7 @@ pub fn tile_gestures(t: &mut Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles
                     _ => Vec::new(),
                 };
                 for op in ops {
-                    emit.push(Change::Syntax_edit(op));
+                    emit.push(Change::SyntaxEdit(op));
                 }
             }
         }
@@ -1236,7 +1236,7 @@ pub fn pointer_step(t: &mut Pane, ui: &mut Ui, frame: &rframe::Frame, canvas: &U
     let panning = all_signals.iter().any(|sg| non_left_held(sg) || non_left_released(sg));
     let pan_pressed = all_signals.iter().any(|sg| non_left_pressed(sg));
     let pan_released = all_signals.iter().any(|sg| non_left_released(sg));
-    let lost = frame.input.events.iter().any(|ev| matches!(ev, Event::Focus_lost));
+    let lost = frame.input.events.iter().any(|ev| matches!(ev, Event::FocusLost));
     let panning_grab = if pan_pressed || panning {
         true
     } else if pan_released || lost || frame.input.buttons.is_empty() {
@@ -1423,7 +1423,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
                 let all2 = all.clone();
                 let scope2 = scope.clone();
                 let ch = edit_field(ctx, ui, local(t, (x + 4.0, y + 2.0)), (wd - 24.0).max(40.0), 16.0 * z, &format!("frt{}", i), &title, &|s: &str| !s.is_empty() && !s.contains('"'), &move |v| {
-                    Change::Frames_set {
+                    Change::FramesSet {
                         scope: scope2.clone(),
                         frames: all2.iter().enumerate().map(|(j, f)| if j == i { (v.clone(), f.1, f.2) } else { f.clone() }).collect(),
                     }
@@ -1433,7 +1433,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
             }
         }
         if xs.clicked {
-            emit.push(Change::Frames_set { scope: scope.clone(), frames: all.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, f)| f.clone()).collect() });
+            emit.push(Change::FramesSet { scope: scope.clone(), frames: all.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, f)| f.clone()).collect() });
         } else if ts.double_clicked && t.editing.is_none() {
             (t.drag, t.editing) = (None, Some(Editing::Title(scope.clone(), i as i64)));
         } else if rs.pressed && left_button(&rs) {
@@ -1475,7 +1475,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
                         if ndx.hypot(ndy) > 3.0 / z {
                             let mv: Vec<(Path, f64, f64)> = paths.iter().filter_map(|path| rel_at(t, path).map(|(rx, ry)| (path.clone(), p::snap(rx + ndx), p::snap(ry + ndy)))).collect();
                             emit.push(Change::Moved(mv));
-                            emit.push(Change::Frames_set { scope: scope.clone(), frames: frame_list(t, &scope) });
+                            emit.push(Change::FramesSet { scope: scope.clone(), frames: frame_list(t, &scope) });
                         }
                         t.drag = None;
                     }
@@ -1484,7 +1484,7 @@ pub fn frames_step(t: &mut Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &Ui
                     let (dx, dy) = rs.drag;
                     { t.drag = Some(Drag::Sizing { scope: scope.clone(), index: i as i64, dw: dw + (dx / z), dh: dh + (dy / z) }); };
                     if rs.released {
-                        emit.push(Change::Frames_set { scope: scope.clone(), frames: frame_list(t, &scope) });
+                        emit.push(Change::FramesSet { scope: scope.clone(), frames: frame_list(t, &scope) });
                         t.drag = None;
                     }
                 }

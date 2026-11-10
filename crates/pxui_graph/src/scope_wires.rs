@@ -548,7 +548,7 @@ fn names_of(e: &Option<S>) -> Vec<String> {
     }
 }
 
-/// A plain `for` has no out-port of its own: what it yields wires from the yielded card.
+/// A plain `for` has no out-what it yields wires from the yielded card.
 fn inner_out(items: &Items, n: &p::Node) -> Option<((f64, f64), Path)> {
     let z = n.zone.as_ref()?;
     if z.kind != ZoneKind::For {

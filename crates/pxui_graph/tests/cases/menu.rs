@@ -49,7 +49,7 @@ fn opened(ui: &mut Ui, entries: Vec<Entry>) -> Menu {
 }
 
 fn key(k: Key) -> Event {
-    Event::Key_pressed(k)
+    Event::KeyPressed(k)
 }
 
 fn run_menu() {
@@ -57,7 +57,7 @@ fn run_menu() {
     // a SOP with an input picks like any other: typing its name and Enter
     let null = || vec![entry(1, &["Utility"], "null", "Null")];
     let m = opened(&mut ui, null());
-    check(picks(&mut ui, m, vec![Event::Text_input("null".into()), key(Key::Enter)]) == Some("null".to_owned()), "the menu search did not pick a node");
+    check(picks(&mut ui, m, vec![Event::TextInput("null".into()), key(Key::Enter)]) == Some("null".to_owned()), "the menu search did not pick a node");
     let m = opened(&mut ui, null());
     let r = menu_step(&mut ui, m, &frame_ev((400, 250), vec![key(Key::Escape)]));
     check(r.0.is_none() && r.1.is_none(), "Escape did not close the menu");
@@ -70,7 +70,7 @@ fn run_menu() {
     let row_y = 250 + 1 + 28 + 28 + 12;
     let point = (420.0, row_y as f64);
     let m = opened(&mut ui, nested());
-    let (_, picked) = menu_step(&mut ui, m, &frame_ev((420, row_y), vec![Event::Pointer_pressed(MouseButton::LeftButton, point), Event::Pointer_released(MouseButton::LeftButton, point)]));
+    let (_, picked) = menu_step(&mut ui, m, &frame_ev((420, row_y), vec![Event::PointerPressed(MouseButton::LeftButton, point), Event::PointerReleased(MouseButton::LeftButton, point)]));
     check(picked == Some("box".to_owned()), "a click on a row of the menu did not pick it");
     // after a node, the kinds that take an input come first
     let fitting = node_menu::create(Some("grid1"), 400, 250, vec![entry(0, &["Utility"], "box", "Box"), entry(1, &["Utility"], "null", "Null")]);
@@ -84,7 +84,7 @@ fn run_menu() {
     // the visual row window never makes later nodes inaccessible
     let many: Vec<Entry> = (0..15).map(|i| entry(0, &["Utility"], &format!("node_{:02}", i), &format!("Node {:02}", i))).collect();
     let m = opened(&mut ui, many.clone());
-    let menu = match menu_step(&mut ui, m, &frame_ev((400, 250), vec![Event::Text_input("node".into())])) {
+    let menu = match menu_step(&mut ui, m, &frame_ev((400, 250), vec![Event::TextInput("node".into())])) {
         (Some(menu), _) => menu,
         (None, _) => fail("typing closed the menu"),
     };
@@ -93,9 +93,9 @@ fn run_menu() {
     check(picks(&mut ui, menu, events) == Some("node_12".to_owned()), "the menu's row window made later nodes inaccessible");
     // global search matches a category breadcrumb and uses the shared fuzzy rule
     let m = opened(&mut ui, nested());
-    check(picks(&mut ui, m, vec![Event::Text_input("primitive".into()), key(Key::Enter)]) == Some("box".to_owned()), "global search did not match a category breadcrumb");
+    check(picks(&mut ui, m, vec![Event::TextInput("primitive".into()), key(Key::Enter)]) == Some("box".to_owned()), "global search did not match a category breadcrumb");
     let m = opened(&mut ui, nested());
-    check(picks(&mut ui, m, vec![Event::Text_input("prmtv".into()), key(Key::Enter)]) == Some("box".to_owned()), "node search did not use the shared fuzzy matching rule");
+    check(picks(&mut ui, m, vec![Event::TextInput("prmtv".into()), key(Key::Enter)]) == Some("box".to_owned()), "node search did not use the shared fuzzy matching rule");
     // every generated SOP can be reached by typing its key
     let factories = sop::nodes::factories();
     let entries: Vec<Entry> = factories
@@ -114,7 +114,7 @@ fn run_menu() {
     for e in &entries {
         let menu = opened(&mut ui, entries.clone());
         let index = node_menu::keys(&menu, &e.key).iter().position(|k| *k == e.key).expect("listed");
-        let mut events = vec![Event::Text_input(e.key.clone())];
+        let mut events = vec![Event::TextInput(e.key.clone())];
         events.extend((0..index).map(|_| key(Key::ArrowDown)));
         events.push(key(Key::Enter));
         check(picks(&mut ui, menu, events) == Some(e.key.clone()), &format!("the menu cannot reach generated SOP {}", e.key));

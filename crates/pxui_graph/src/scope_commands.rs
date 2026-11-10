@@ -13,7 +13,7 @@ use flow_graph::probe::Summary;
 use flow_graph::projection as p;
 use flow_graph::projection::Level;
 use flow_syntax::lisp;
-use flow_syntax::syntax::{self as s, Node, Syntax};
+use flow_syntax::syntax::{Node, Syntax};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::Value;
 use input::Key;
@@ -232,7 +232,7 @@ pub fn conditional_target(n: &p::Node) -> (Path, i64) {
 }
 
 fn edit(op: Op) -> Vec<Change> {
-    vec![Change::Syntax_edit(op)]
+    vec![Change::SyntaxEdit(op)]
 }
 
 fn row_of(t: &Pane, path: &[Symbol], key: &ArgKey) -> Option<(p::Node, p::Row)> {
@@ -256,12 +256,12 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
                     // a wire comes off; an item of a variadic input (a list's, a merge's) goes with what it holds
                     let n = st::node_of(t, path).unwrap();
                     let r = n.rows.iter().find(|r| r.key == *key).unwrap().clone();
-                    return unwire(t, &n, &r).into_iter().map(Change::Syntax_edit).collect();
+                    return unwire(t, &n, &r).into_iter().map(Change::SyntaxEdit).collect();
                 }
             }
             match &t.selected_wire {
                 Some((path, key, fb)) => match row_of(t, path, key) {
-                    Some((n, r)) => unwire(t, &n, &r).into_iter().map(Change::Syntax_edit).collect(),
+                    Some((n, r)) => unwire(t, &n, &r).into_iter().map(Change::SyntaxEdit).collect(),
                     None => edit(Op::Disconnect { node: path.clone(), key: key.clone(), fallback: fb.clone() }),
                 },
                 None => {
@@ -269,7 +269,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
                 }
             }
         }
-        Command::Fold_into => one(&|n| edit(Op::FoldInto { node: n.path.clone() })),
+        Command::FoldInto => one(&|n| edit(Op::FoldInto { node: n.path.clone() })),
         Command::Unfold => one(&|n| {
             let (parent, arm) = conditional_target(n);
             if parent != n.path {
@@ -288,7 +288,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
                 _ => vec![Change::Notice("Nothing to unfold here".to_owned())],
             }
         }),
-        Command::Unfold_all => one(&|n| {
+        Command::UnfoldAll => one(&|n| {
             let ops: Vec<Op> = n.rows.iter().filter(|r| nested_chip(r)).map(|r| Op::Unfold { node: n.path.clone(), key: r.key.clone(), sub: Vec::new() }).collect();
             if ops.is_empty() { vec![Change::Notice("Nothing to unfold here".to_owned())] } else { ops.into_iter().flat_map(edit).collect() }
         }),
@@ -311,40 +311,40 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
                 None => edit(Op::ToggleBypass { node: n.path.clone() }),
             }
         }),
-        Command::Wrap_repeat => wrap(e::Loop::For, "repeat"),
-        Command::Wrap_iterate => wrap(e::Loop::Fold, "iterate"),
-        Command::Wrap_if => wrap(e::Loop::If, "wrap"),
-        Command::Wrap_map => wrap(e::Loop::Map, "map"),
-        Command::Wrap_filter => wrap(e::Loop::Filter, "filter"),
-        Command::Inline_fn => one(&|n| edit(Op::InlineDefn { node: n.path.clone() })),
-        Command::Add_arm => one(&|n| {
+        Command::WrapRepeat => wrap(e::Loop::For, "repeat"),
+        Command::WrapIterate => wrap(e::Loop::Fold, "iterate"),
+        Command::WrapIf => wrap(e::Loop::If, "wrap"),
+        Command::WrapMap => wrap(e::Loop::Map, "map"),
+        Command::WrapFilter => wrap(e::Loop::Filter, "filter"),
+        Command::InlineFn => one(&|n| edit(Op::InlineDefn { node: n.path.clone() })),
+        Command::AddArm => one(&|n| {
             let (node, after) = conditional_target(n);
             edit(Op::AddArm { node, after })
         }),
-        Command::Delete_arm => one(&|n| {
+        Command::DeleteArm => one(&|n| {
             let (node, index) = conditional_target(n);
             let index = if node == n.path { 0 } else { index };
             edit(Op::DeleteArm { node, index })
         }),
-        Command::Make_fn => {
+        Command::MakeFn => {
             if paths.is_empty() { vec![Change::Notice("Select nodes to make a function".to_owned())] } else { edit(Op::MakeLocalFn { nodes: paths.clone() }) }
         }
-        Command::Make_macro => {
-            if paths.is_empty() { vec![Change::Notice("Select nodes to make a macro".to_owned())] } else { vec![Change::Macro_requested(paths.clone())] }
+        Command::MakeMacro => {
+            if paths.is_empty() { vec![Change::Notice("Select nodes to make a macro".to_owned())] } else { vec![Change::MacroRequested(paths.clone())] }
         }
-        Command::Make_defn => {
-            if paths.is_empty() { vec![Change::Notice("Select nodes to make a reusable function".to_owned())] } else { vec![Change::Defn_requested(paths.clone())] }
+        Command::MakeDefn => {
+            if paths.is_empty() { vec![Change::Notice("Select nodes to make a reusable function".to_owned())] } else { vec![Change::DefnRequested(paths.clone())] }
         }
         Command::Collapse => nodes
             .iter()
             .filter_map(|n| match &n.zone {
-                None if n.expr => Some(Change::Zone_collapsed { zone: outer_expr(t, &n.path), collapsed: true }),
+                None if n.expr => Some(Change::ZoneCollapsed { zone: outer_expr(t, &n.path), collapsed: true }),
                 Some(z) if z.kind == p::ZoneKind::Let => None,
                 None => None,
-                Some(_) => Some(Change::Zone_collapsed { zone: n.path.clone(), collapsed: !t.saved.collapsed(&n.path) }),
+                Some(_) => Some(Change::ZoneCollapsed { zone: n.path.clone(), collapsed: !t.saved.collapsed(&n.path) }),
             })
             .collect(),
-        Command::Probe_step(delta) => {
+        Command::ProbeStep(delta) => {
             // with nothing selected, one stepper pins the iteration of every zone of the graph
             let nodes: Vec<p::Node> = if !nodes.is_empty() {
                 nodes.clone()
@@ -361,50 +361,50 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
                         } else {
                             let cur = t.saved.probe(&n.path);
                             let index = 0.max((count - 1).min(cur + delta));
-                            if index == cur { None } else { Some(Change::Probe_set { zone: n.path.clone(), index }) }
+                            if index == cur { None } else { Some(Change::ProbeSet { zone: n.path.clone(), index }) }
                         }
                     }
                     _ => None,
                 })
                 .collect()
         }
-        Command::Frame_all | Command::Tidy | Command::Toggle_tags | Command::Frame_selection | Command::Walk(_) | Command::Edit_name | Command::Make_frame | Command::Open_level
-        | Command::Point_level | Command::Open_all | Command::Point_all | Command::Show_hints => Vec::new(),
+        Command::FrameAll | Command::Tidy | Command::ToggleTags | Command::FrameSelection | Command::Walk(_) | Command::EditName | Command::MakeFrame | Command::OpenLevel
+        | Command::PointLevel | Command::OpenAll | Command::PointAll | Command::ShowHints => Vec::new(),
         Command::Duplicate => {
             if paths.is_empty() { vec![Change::Notice("Select nodes to duplicate".to_owned())] } else { edit(Op::Duplicate { nodes: paths.clone() }) }
         }
         Command::Copy => {
-            if paths.is_empty() { vec![Change::Notice("Select nodes to copy".to_owned())] } else { vec![Change::Copy_requested(paths.clone())] }
+            if paths.is_empty() { vec![Change::Notice("Select nodes to copy".to_owned())] } else { vec![Change::CopyRequested(paths.clone())] }
         }
         Command::Cut => {
             if paths.is_empty() {
                 vec![Change::Notice("Select nodes to cut".to_owned())]
             } else {
-                let mut v = vec![Change::Copy_requested(paths.clone())];
+                let mut v = vec![Change::CopyRequested(paths.clone())];
                 v.extend(edit(Op::DeleteNodes { nodes: paths.clone() }));
                 v
             }
         }
-        Command::Paste => vec![Change::Paste_requested],
+        Command::Paste => vec![Change::PasteRequested],
         Command::Display => one(&|n| {
             if ![ty::geometry(), ty::drawing(), ty::image()].contains(&n.ty) {
                 vec![Change::Notice("Only a geometry, drawing or image node can be viewed".to_owned())]
             } else {
-                vec![Change::Display_set(n.path.clone())]
+                vec![Change::DisplaySet(n.path.clone())]
             }
         }),
-        Command::Item_up | Command::Item_down => {
+        Command::ItemUp | Command::ItemDown => {
             if let Some((path, ArgKey::Pos(i))) = &t.hovered_row {
                 if matches!(st::node_of(t, path), Some(n) if p::reorderable(&n)) {
-                    return edit(Op::MoveItem { node: path.clone(), pos: if command == Command::Item_up { *i } else { *i + 1 } });
+                    return edit(Op::MoveItem { node: path.clone(), pos: if command == Command::ItemUp { *i } else { *i + 1 } });
                 }
             }
             // off a list item: a step of a chain moves along it; a binding moves in the text (cards stay put)
             one(&|n| {
                 if e::nested(n.path.last().map(|x| x.as_str()).unwrap_or("")) {
-                    edit(Op::MoveStep { node: n.path.clone(), earlier: command == Command::Item_up })
+                    edit(Op::MoveStep { node: n.path.clone(), earlier: command == Command::ItemUp })
                 } else {
-                    edit(Op::MoveBinding { node: n.path.clone(), by: if command == Command::Item_up { -1 } else { 1 } })
+                    edit(Op::MoveBinding { node: n.path.clone(), by: if command == Command::ItemUp { -1 } else { 1 } })
                 }
             })
         }
@@ -452,7 +452,7 @@ fn levelled(t: &Pane, path: &[Symbol]) -> Option<Level> {
 
 fn level_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
     let chosen: Vec<(Path, Level)> = match command {
-        Command::Open_all | Command::Point_all => t.geo.items.iter().filter_map(|(pl, _, _)| level_of(pl).map(|l| (pl.path.clone(), l))).collect(),
+        Command::OpenAll | Command::PointAll => t.geo.items.iter().filter_map(|(pl, _, _)| level_of(pl).map(|l| (pl.path.clone(), l))).collect(),
         _ => st::selected(t).into_iter().filter_map(|q| levelled(t, &q).map(|l| (q, l))).collect(),
     };
     if chosen.is_empty() {
@@ -467,8 +467,8 @@ fn level_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
     let now: HashSet<&Path> = chosen.iter().map(|(q, _)| q).collect();
     let back_of = |q: &Path| before.get(q).copied().unwrap_or(Level::Card);
     let (changes, back): (Vec<(Path, Option<Level>, bool)>, Vec<(Path, Level)>) = match command {
-        Command::Open_level => (chosen.iter().map(|(q, l)| (q.clone(), Some(level_up(*l)), true)).collect(), t.back.clone()),
-        Command::Open_all => (chosen.iter().map(|(q, _)| (q.clone(), None, false)).collect(), t.back.clone()),
+        Command::OpenLevel => (chosen.iter().map(|(q, l)| (q.clone(), Some(level_up(*l)), true)).collect(), t.back.clone()),
+        Command::OpenAll => (chosen.iter().map(|(q, _)| (q.clone(), None, false)).collect(), t.back.clone()),
         _ => {
             let all_points = chosen.iter().all(|(_, l)| *l == Level::Point);
             if all_points {
@@ -490,7 +490,7 @@ fn level_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
         }
     };
     t.back = back;
-    emit.push(Change::Level_set(changes));
+    emit.push(Change::LevelSet(changes));
 }
 
 // ---- letter hints (flow.md 7.5): [w] labels every input the selected output can connect to ----
@@ -629,7 +629,7 @@ pub fn step_hints(t: &mut Pane, pressed: &[Key], clicked: bool, emit: &mut Vec<C
                 let found = live.iter().find(|tg| tg.label == typed).map(|tg| (*tg).clone());
                 match found {
                     Some(HintTarget { node, key: Some(key), .. }) => {
-                        emit.push(Change::Syntax_edit(Op::Connect { node, key, src: h.src.clone(), iter: false }));
+                        emit.push(Change::SyntaxEdit(Op::Connect { node, key, src: h.src.clone(), iter: false }));
                         cancel = true;
                     }
                     Some(HintTarget { node, key: None, .. }) if h.stage.is_none() => {
@@ -682,18 +682,18 @@ pub fn step_hints(t: &mut Pane, pressed: &[Key], clicked: bool, emit: &mut Vec<C
 
 pub fn run_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
     match command {
-        Command::Frame_all => st::frame_all(t),
+        Command::FrameAll => st::frame_all(t),
         Command::Tidy => st::tidy(t),
-        Command::Toggle_tags => {
+        Command::ToggleTags => {
             let msg = if t.tags { "wire tags off" } else { "wire tags on" };
             let tags = !t.tags;
             t.tags = tags;
             emit.push(Change::Notice(msg.to_owned()));
         }
-        Command::Open_level | Command::Point_level | Command::Open_all | Command::Point_all => level_command(t, command, emit),
-        Command::Show_hints => start_hints(t, emit),
-        Command::Frame_selection => frame_selection(t),
-        Command::Edit_name => {
+        Command::OpenLevel | Command::PointLevel | Command::OpenAll | Command::PointAll => level_command(t, command, emit),
+        Command::ShowHints => start_hints(t, emit),
+        Command::FrameSelection => frame_selection(t),
+        Command::EditName => {
             let sel = st::selected(t);
             if let [path] = sel.as_slice() {
                 if matches!(st::node_of(t, path), Some(n) if !n.synthetic) {
@@ -707,11 +707,11 @@ pub fn run_command(t: &mut Pane, command: Command, emit: &mut Vec<Change>) {
             }
             emit.push(Change::Notice("Select one node or graph input to edit".to_owned()));
         }
-        Command::Make_frame => match new_frame(t) {
+        Command::MakeFrame => match new_frame(t) {
             Some((scope, frame)) => {
                 let mut frames = t.saved.frames(&scope);
                 frames.push(frame);
-                emit.push(Change::Frames_set { scope, frames });
+                emit.push(Change::FramesSet { scope, frames });
             }
             None => emit.push(Change::Notice("Select nodes to frame".to_owned())),
         },
@@ -787,36 +787,36 @@ pub fn bindings() -> Vec<Cmd> {
         make(&some, "delete", "delete", Command::Delete, Key::Delete, &[]),
         make(&some, "delete", "delete", Command::Delete, Key::Backspace, &[]),
         make(&some, "delete", "delete", Command::Delete, ch('x'), &[]),
-        make(&one, "fold", "fold into use", Command::Fold_into, ch('f'), &shift),
+        make(&one, "fold", "fold into use", Command::FoldInto, ch('f'), &shift),
         make(&one, "unfold", "unfold a call", Command::Unfold, ch('u'), &shift),
-        make(&one, "unfold-all", "unfold every call of the card", Command::Unfold_all, ch('u'), &[Key::Shift, Key::Alt]),
+        make(&one, "unfold-all", "unfold every call of the card", Command::UnfoldAll, ch('u'), &[Key::Shift, Key::Alt]),
         make(&one, "hoist", "hoist out", Command::Hoist, ch('h'), &shift),
         make(&one, "bypass", "toggle bypass", Command::Bypass, ch('b'), &[]),
-        make(&some, "macro", "make macro", Command::Make_macro, ch('m'), &[]),
-        make(&some, "repeat", "repeat (loop)", Command::Wrap_repeat, ch('r'), &[]),
-        make(&some, "iterate", "iterate (feed back)", Command::Wrap_iterate, ch('r'), &shift),
-        make(&some, "conditional", "wrap conditional", Command::Wrap_if, ch('i'), &shift),
-        make(&some, "map", "wrap in map", Command::Wrap_map, ch('m'), &shift),
-        make(&some, "filter", "wrap in filter", Command::Wrap_filter, ch('l'), &shift),
-        make(&one, "inline-fn", "inline a function call", Command::Inline_fn, ch('i'), &[Key::Shift, Key::Alt]),
-        make(&one, "add-arm", "add conditional arm", Command::Add_arm, ch('a'), &[Key::Alt]),
-        make(&one, "delete-arm", "delete first arm", Command::Delete_arm, Key::Delete, &[Key::Alt]),
-        make(&some, "function", "make function", Command::Make_fn, ch('l'), &[]),
-        make(&some, "defn", "make reusable function (defn)", Command::Make_defn, ch('d'), &[]),
+        make(&some, "macro", "make macro", Command::MakeMacro, ch('m'), &[]),
+        make(&some, "repeat", "repeat (loop)", Command::WrapRepeat, ch('r'), &[]),
+        make(&some, "iterate", "iterate (feed back)", Command::WrapIterate, ch('r'), &shift),
+        make(&some, "conditional", "wrap conditional", Command::WrapIf, ch('i'), &shift),
+        make(&some, "map", "wrap in map", Command::WrapMap, ch('m'), &shift),
+        make(&some, "filter", "wrap in filter", Command::WrapFilter, ch('l'), &shift),
+        make(&one, "inline-fn", "inline a function call", Command::InlineFn, ch('i'), &[Key::Shift, Key::Alt]),
+        make(&one, "add-arm", "add conditional arm", Command::AddArm, ch('a'), &[Key::Alt]),
+        make(&one, "delete-arm", "delete first arm", Command::DeleteArm, Key::Delete, &[Key::Alt]),
+        make(&some, "function", "make function", Command::MakeFn, ch('l'), &[]),
+        make(&some, "defn", "make reusable function (defn)", Command::MakeDefn, ch('d'), &[]),
         make(&some, "collapse", "collapse or expand zone", Command::Collapse, ch('c'), &[]),
-        make(&any, "probe-prev", "previous iteration (every zone with nothing selected)", Command::Probe_step(-1), ch('['), &[]),
-        make(&any, "probe-next", "next iteration (every zone with nothing selected)", Command::Probe_step(1), ch(']'), &[]),
-        make(&any, "frame-all", "frame all", Command::Frame_all, Key::Home, &[]),
+        make(&any, "probe-prev", "previous iteration (every zone with nothing selected)", Command::ProbeStep(-1), ch('['), &[]),
+        make(&any, "probe-next", "next iteration (every zone with nothing selected)", Command::ProbeStep(1), ch(']'), &[]),
+        make(&any, "frame-all", "frame all", Command::FrameAll, Key::Home, &[]),
         make(&any, "tidy", "tidy: recompute every card position", Command::Tidy, ch('t'), &shift),
-        make(&any, "tags", "toggle name tags on long wires", Command::Toggle_tags, ch('y'), &shift),
-        make(&any, "frame-selection", "frame the selection", Command::Frame_selection, ch('f'), &[]),
-        make(&one, "hints", "letter hints: connect the selected output", Command::Show_hints, ch('w'), &[]),
-        make(&some, "open", "open one level", Command::Open_level, ch('o'), &[]),
-        make(&some, "point", "point, or back", Command::Point_level, ch('p'), &[]),
-        make(&any, "open-all", "every node to card", Command::Open_all, ch('o'), &shift),
-        make(&any, "point-all", "every node to a point, or back", Command::Point_all, ch('k'), &shift),
-        make(&one, "rename", "rename node / edit input default", Command::Edit_name, Key::F2, &[]),
-        make(&some, "frame", "frame the selection (titled box)", Command::Make_frame, ch('g'), &shift),
+        make(&any, "tags", "toggle name tags on long wires", Command::ToggleTags, ch('y'), &shift),
+        make(&any, "frame-selection", "frame the selection", Command::FrameSelection, ch('f'), &[]),
+        make(&one, "hints", "letter hints: connect the selected output", Command::ShowHints, ch('w'), &[]),
+        make(&some, "open", "open one level", Command::OpenLevel, ch('o'), &[]),
+        make(&some, "point", "point, or back", Command::PointLevel, ch('p'), &[]),
+        make(&any, "open-all", "every node to card", Command::OpenAll, ch('o'), &shift),
+        make(&any, "point-all", "every node to a point, or back", Command::PointAll, ch('k'), &shift),
+        make(&one, "rename", "rename node / edit input default", Command::EditName, Key::F2, &[]),
+        make(&some, "frame", "frame the selection (titled box)", Command::MakeFrame, ch('g'), &shift),
         make(&some, "duplicate", "duplicate", Command::Duplicate, ch('d'), &[Key::Meta]),
         make(&some, "duplicate", "duplicate", Command::Duplicate, ch('d'), &[Key::Ctrl]),
         make(&some, "copy", "copy as text", Command::Copy, ch('c'), &[Key::Meta]),
@@ -826,8 +826,8 @@ pub fn bindings() -> Vec<Cmd> {
         make(&any, "paste", "paste bindings", Command::Paste, ch('v'), &[Key::Meta]),
         make(&any, "paste", "paste bindings", Command::Paste, ch('v'), &[Key::Ctrl]),
         make(&one, "display", "view in the viewport", Command::Display, ch('v'), &[]),
-        make(&one, "item-up", "move list item or chain step up, or the binding in the text", Command::Item_up, Key::ArrowUp, &[Key::Alt]),
-        make(&one, "item-down", "move list item or chain step down, or the binding in the text", Command::Item_down, Key::ArrowDown, &[Key::Alt]),
+        make(&one, "item-up", "move list item or chain step up, or the binding in the text", Command::ItemUp, Key::ArrowUp, &[Key::Alt]),
+        make(&one, "item-down", "move list item or chain step down, or the binding in the text", Command::ItemDown, Key::ArrowDown, &[Key::Alt]),
     ];
     for (direction, arrow, name) in [(Direction::Left, Key::ArrowLeft, "left"), (Direction::Down, Key::ArrowDown, "down"), (Direction::Up, Key::ArrowUp, "up"), (Direction::Right, Key::ArrowRight, "right")] {
         v.push(make(&any, &format!("walk.{}", name), &format!("walk {}", name), Command::Walk(direction), arrow, &[]));

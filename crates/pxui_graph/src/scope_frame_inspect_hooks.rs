@@ -147,7 +147,7 @@ pub fn lens_replace(t: &Pane, path: &[Symbol]) -> Option<(f64, f64)> {
     }
 }
 
-/// every port of a plain node at the level it is shown, in screen points: the in end, the out end,
+/// every the in end, the out end,
 /// a card's row sockets and named outputs
 pub fn ports(t: &Pane, path: &[Symbol]) -> Vec<(f64, f64)> {
     match t.item_at(path) {

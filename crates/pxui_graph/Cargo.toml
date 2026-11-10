@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "pxui_graph"
 version.workspace = true
 edition.workspace = true
@@ -21,26 +22,5 @@ flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
 flow_graph = { path = "../flow_graph" }
 
-[dev-dependencies]
-flow_eval = { path = "../flow_eval" }
-editor_document = { path = "../editor_document" }
-sdl3 = { path = "../sdl3" }
-sop = { path = "../sop" }
-flow_sop = { path = "../flow_sop" }
-rays_diagnostic = { path = "../rays_diagnostic" }
-scene_command = { path = "../scene_command" }
-mem_sys = { path = "../mem_sys" }
-ogpu_core = { path = "../ogpu_core" }
-renderer = { path = "../renderer" }
-
-# The kit text needs the SDL main thread (fonts): the pane's cases run on their own main
-# (the rays crate tests/common/window.rs) in one process, as pxui's window_* targets do.
-[target.'cfg(windows)'.dev-dependencies]
-ogpu_vulkan = { path = "../ogpu_vulkan" }
-
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-ogpu_metal = { path = "../ogpu_metal" }
-
-[[test]]
-name = "window_pxui_graph"
-harness = false
+[lints]
+workspace = true

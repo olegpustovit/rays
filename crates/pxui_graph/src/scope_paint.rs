@@ -714,7 +714,7 @@ impl Default for HeaderOpts {
     }
 }
 
-/// The card's header: the in-port of the first geometry slot, the type square, the name, and at the right
+/// The card's header: the in-
 /// the view flag, the marks and the kind (a failed node says its code instead).
 pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, wd: f64, n: &p::Node, o: &HeaderOpts) {
     let theme = t.theme;

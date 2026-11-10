@@ -22,31 +22,31 @@ pub type Frame3 = (String, (f64, f64), (f64, f64));
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Change {
-    Syntax_edit(e::Op),
+    SyntaxEdit(e::Op),
     /// a click on a layout of an editor graph's switch: the host makes it the active one
-    Layout_active { graph: String, index: i64 },
-    Probe_set { zone: Path, index: i64 },
-    Zone_collapsed { zone: Path, collapsed: bool },
+    LayoutActive { graph: String, index: i64 },
+    ProbeSet { zone: Path, index: i64 },
+    ZoneCollapsed { zone: Path, collapsed: bool },
     Selected(Vec<Path>),
     Moved(Vec<(Path, f64, f64)>),
     /// nodes opened or pointed: their new level (`None`: back to the default, `Card`) and whether it is pinned
-    Level_set(Vec<(Path, Option<Level>, bool)>),
+    LevelSet(Vec<(Path, Option<Level>, bool)>),
     /// the host puts these bindings' text on the clipboard
-    Copy_requested(Vec<Path>),
+    CopyRequested(Vec<Path>),
     /// the host adds the clipboard's bindings here
-    Paste_requested,
+    PasteRequested,
     /// a right-click on empty canvas: the host opens its add menu there
-    Menu_requested(f64, f64),
-    Open_import(String),
+    MenuRequested(f64, f64),
+    OpenImport(String),
     /// the host opens the make-macro dialog over these nodes
-    Macro_requested(Vec<Path>),
+    MacroRequested(Vec<Path>),
     /// the host types the outside names and writes the `defn`
-    Defn_requested(Vec<Path>),
+    DefnRequested(Vec<Path>),
     /// the frames of one scope after a gesture (create, resize, retitle, delete)
-    Frames_set { scope: Path, frames: Vec<Frame3> },
-    Display_set(Path),
+    FramesSet { scope: Path, frames: Vec<Frame3> },
+    DisplaySet(Path),
     Activated(Path),
-    Drop_over { path: Path, kind: String, value: String },
+    DropOver { path: Path, kind: String, value: String },
     Dropped { path: Path, kind: String, value: String },
     Notice(String),
 }
@@ -62,53 +62,53 @@ pub enum Direction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Delete,
-    Fold_into,
+    FoldInto,
     Unfold,
     /// every call written in a row of the selected card becomes its own card
-    Unfold_all,
+    UnfoldAll,
     Hoist,
     Bypass,
-    Wrap_repeat,
-    Wrap_iterate,
-    Wrap_if,
-    Wrap_map,
-    Wrap_filter,
-    Inline_fn,
-    Add_arm,
-    Delete_arm,
-    Make_fn,
-    Make_macro,
-    Make_defn,
+    WrapRepeat,
+    WrapIterate,
+    WrapIf,
+    WrapMap,
+    WrapFilter,
+    InlineFn,
+    AddArm,
+    DeleteArm,
+    MakeFn,
+    MakeMacro,
+    MakeDefn,
     Collapse,
-    Probe_step(i64),
-    Frame_all,
+    ProbeStep(i64),
+    FrameAll,
     Tidy,
-    Toggle_tags,
+    ToggleTags,
     Walk(Direction),
     /// rename the selected node, or edit the default of a selected graph input
-    Edit_name,
-    Item_up,
+    EditName,
+    ItemUp,
     /// move the hovered list item
-    Item_down,
+    ItemDown,
     /// a titled frame around the selected nodes
-    Make_frame,
+    MakeFrame,
     Duplicate,
     Display,
     Copy,
     Cut,
     Paste,
     /// `f`: pan and zoom to the selected nodes (all, with none selected)
-    Frame_selection,
+    FrameSelection,
     /// `o`: the selection one level more detailed, pinned
-    Open_level,
+    OpenLevel,
     /// `p`: the selection to points, or back to its previous level
-    Point_level,
+    PointLevel,
     /// every node to card
-    Open_all,
+    OpenAll,
     /// every node to a point, or every node back
-    Point_all,
+    PointAll,
     /// letter hints; a letter connects the selected node's output
-    Show_hints,
+    ShowHints,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

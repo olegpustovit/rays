@@ -1,4 +1,4 @@
-//! test_pxui_graph.ml lines 900-1556: curves, formulas, elbows, spines, footer paths and the first two
+//! : curves, formulas, elbows, spines, footer paths and the first two
 //! gesture groups.
 use crate::support::*;
 use flow_graph::flow_edit as e;
@@ -11,7 +11,7 @@ use pxui_graph::scope_state::{Change, Command, Pane, ScopeOpts};
 use std::rc::Rc;
 
 fn syn(op: e::Op) -> Change {
-    Change::Syntax_edit(op)
+    Change::SyntaxEdit(op)
 }
 
 fn wires(view: &Pane) -> Vec<Vec<(f64, f64)>> {
@@ -61,7 +61,7 @@ fn scope_curve() {
     let (hovered, _) = scope_step(&mut ui, view, &frame_ev(at, vec![mouse_move(at)]));
     let (_, ch) = { let mut r8_view = hovered; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Delete, &mut r8_changes); (r8_view, r8_changes) };
     check(
-        matches!(ch.as_slice(), [Change::Syntax_edit(e::Op::Disconnect { node, key: e::ArgKey::Cell(1), fallback: Some(_) })] if *node == path(&["g", "a#0"])),
+        matches!(ch.as_slice(), [Change::SyntaxEdit(e::Op::Disconnect { node, key: e::ArgKey::Cell(1), fallback: Some(_) })] if *node == path(&["g", "a#0"])),
         "Delete over a vector row with a wired cell is not a Disconnect of that cell",
     );
     // every card inside a function's zone lies inside the zone's rectangle, cell cards included
@@ -107,7 +107,7 @@ fn scope_field_formula() {
     let at = (x as i64, y as i64);
     let (v, _) = scope_click(&mut ui, view, at);
     let (_, changes) = scope_click(&mut ui, v, at);
-    let unfolded = changes.iter().any(|c| matches!(c, Change::Syntax_edit(e::Op::Unfold { key: e::ArgKey::Field(f), .. }) if f == "x"));
+    let unfolded = changes.iter().any(|c| matches!(c, Change::SyntaxEdit(e::Op::Unfold { key: e::ArgKey::Field(f), .. }) if f == "x"));
     check(unfolded, "the formula glyph of a record field did not unfold it");
 }
 
@@ -230,7 +230,7 @@ fn num(n: &str) -> s::Syntax {
 }
 
 fn set_args(changes: &[Change]) -> Vec<e::Op> {
-    changes.iter().filter_map(|c| if let Change::Syntax_edit(op @ e::Op::SetArg { .. }) = c { Some(op.clone()) } else { None }).collect()
+    changes.iter().filter_map(|c| if let Change::SyntaxEdit(op @ e::Op::SetArg { .. }) = c { Some(op.clone()) } else { None }).collect()
 }
 
 fn written(ops: &[e::Op]) -> Vec<String> {
@@ -260,14 +260,14 @@ fn scope_gestures_1() {
     let (view, changes) = g::type_text(&mut ui, view, "core");
     check(changes.contains(&syn(e::Op::Rename { node: heart.clone(), to_: "core".into() })), "typing a name did not become Rename");
     check(!scope::editing(&view), "the name field stayed open after Enter");
-    let (view, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![heart.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Edit_name, &mut r8_changes); (r8_view, r8_changes) };
+    let (view, changes) = { let mut r8_view = { let mut r8_view = view; scope::select(vec![heart.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::EditName, &mut r8_changes); (r8_view, r8_changes) };
     check(changes.is_empty() && scope::editing(&view), "F2 did not open the name field");
     let view = g::settled(&mut ui, view);
-    let (view, changes) = scope_step(&mut ui, view, &g::frame((0, 0), vec![], vec![Event::Text_input("two words".into()), Event::Key_pressed(Key::Enter)]));
-    check(!changes.iter().any(|c| matches!(c, Change::Syntax_edit(e::Op::Rename { .. }))), "a name with a space was accepted");
-    let view = scope_step(&mut ui, view, &g::frame((0, 0), vec![], vec![Event::Key_pressed(Key::Escape)])).0;
+    let (view, changes) = scope_step(&mut ui, view, &g::frame((0, 0), vec![], vec![Event::TextInput("two words".into()), Event::KeyPressed(Key::Enter)]));
+    check(!changes.iter().any(|c| matches!(c, Change::SyntaxEdit(e::Op::Rename { .. }))), "a name with a space was accepted");
+    let view = scope_step(&mut ui, view, &g::frame((0, 0), vec![], vec![Event::KeyPressed(Key::Escape)])).0;
     check(!scope::editing(&view), "Escape left the name field open");
-    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Edit_name, &mut r8_changes); (r8_view, r8_changes) };
+    let (_, changes) = { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::EditName, &mut r8_changes); (r8_view, r8_changes) };
     check(matches!(changes.as_slice(), [Change::Notice(_)]), "F2 with nothing selected");
     // a graph input's default: double-click its tile, type a form
     let petals = path(&["flower", ":petals"]);
@@ -278,7 +278,7 @@ fn scope_gestures_1() {
     let view = g::settled(&mut ui, view);
     let (_, changes) = g::type_text(&mut ui, view, "9");
     check(
-        changes.iter().any(|c| matches!(c, Change::Syntax_edit(e::Op::SetInputDefault { form, input, value }) if form == "flower" && input == "petals" && matches!(value.node, Node::Num(n) if value.name(n) == "9"))),
+        changes.iter().any(|c| matches!(c, Change::SyntaxEdit(e::Op::SetInputDefault { form, input, value }) if form == "flower" && input == "petals" && matches!(value.node, Node::Num(n) if value.name(n) == "9"))),
         "typing an input default did not become Set_input_default",
     );
     // scrub: a drag on a number field is Set_arg
@@ -293,7 +293,7 @@ fn scope_gestures_1() {
     let (_, released) = scope_step(&mut ui, view, &g::frame(towards, vec![], vec![mouse_release(MouseButton::LeftButton, towards)]));
     let mut all = moved;
     all.extend(released);
-    check(all.iter().any(|c| matches!(c, Change::Syntax_edit(e::Op::SetArg { node, sub, .. }) if sub.len() == 1 && *node == heart)), "scrubbing a vector field did not become Set_arg");
+    check(all.iter().any(|c| matches!(c, Change::SyntaxEdit(e::Op::SetArg { node, sub, .. }) if sub.len() == 1 && *node == heart)), "scrubbing a vector field did not become Set_arg");
 }
 
 fn scope_gestures_1b() {
@@ -343,7 +343,7 @@ fn scope_gestures_1b() {
         events.extend(click(point));
         let (view, _) = scope_step(ui, view, &g::frame(point, vec![Key::Alt], events));
         let (view, changes) = g::type_text(ui, view, text);
-        let _ = scope_step(ui, view, &g::frame((0, 0), vec![], vec![Event::Key_pressed(Key::Escape)]));
+        let _ = scope_step(ui, view, &g::frame((0, 0), vec![], vec![Event::KeyPressed(Key::Escape)]));
         set_args(&changes)
     };
     for text in ["NaN", "Infinity", "-Infinity"] {
@@ -375,20 +375,20 @@ fn scope_gestures_2() {
     let view = g::settled(&mut ui, { let mut r8_view = g::scope_view(&w, "flower").0; scope::select(vec![heart.clone()], &mut r8_view); r8_view });
     let only = |c: Command| { let mut r8_view = view.clone(); let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, c, &mut r8_changes); (r8_view, r8_changes) }.1;
     let h = || vec![heart.clone()];
-    check(only(Command::Fold_into) == vec![syn(e::Op::FoldInto { node: heart.clone() })], "f: Fold_into");
+    check(only(Command::FoldInto) == vec![syn(e::Op::FoldInto { node: heart.clone() })], "f: Fold_into");
     check(only(Command::Hoist) == vec![syn(e::Op::Hoist { node: heart.clone() })], "h: Hoist");
-    check(only(Command::Wrap_repeat) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::For })], "r: Wrap For");
-    check(only(Command::Wrap_iterate) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::Fold })], "Shift-r: Wrap Fold");
-    check(only(Command::Wrap_map) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::Map })], "Shift-m: Wrap Map");
-    check(only(Command::Wrap_filter) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::Filter })], "Shift-l: Wrap Filter");
-    check(only(Command::Inline_fn) == vec![syn(e::Op::InlineDefn { node: heart.clone() })], "Alt-Shift-i: Inline_defn");
-    check(only(Command::Item_up) == vec![syn(e::Op::MoveBinding { node: heart.clone(), by: -1 })], "Alt-Up off a list: Move_binding");
-    check(only(Command::Item_down) == vec![syn(e::Op::MoveBinding { node: heart.clone(), by: 1 })], "Alt-Down off a list: Move_binding");
-    check(only(Command::Make_fn) == vec![syn(e::Op::MakeLocalFn { nodes: h() })], "l: Make_local_fn");
+    check(only(Command::WrapRepeat) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::For })], "r: Wrap For");
+    check(only(Command::WrapIterate) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::Fold })], "Shift-r: Wrap Fold");
+    check(only(Command::WrapMap) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::Map })], "Shift-m: Wrap Map");
+    check(only(Command::WrapFilter) == vec![syn(e::Op::Wrap { nodes: h(), loop_: e::Loop::Filter })], "Shift-l: Wrap Filter");
+    check(only(Command::InlineFn) == vec![syn(e::Op::InlineDefn { node: heart.clone() })], "Alt-Shift-i: Inline_defn");
+    check(only(Command::ItemUp) == vec![syn(e::Op::MoveBinding { node: heart.clone(), by: -1 })], "Alt-Up off a list: Move_binding");
+    check(only(Command::ItemDown) == vec![syn(e::Op::MoveBinding { node: heart.clone(), by: 1 })], "Alt-Down off a list: Move_binding");
+    check(only(Command::MakeFn) == vec![syn(e::Op::MakeLocalFn { nodes: h() })], "l: Make_local_fn");
     check(only(Command::Duplicate) == vec![syn(e::Op::Duplicate { nodes: h() })], "Command-D: Duplicate");
-    check(only(Command::Copy) == vec![Change::Copy_requested(h())], "Command-C: Copy_requested");
-    check(only(Command::Cut) == vec![Change::Copy_requested(h()), syn(e::Op::DeleteNodes { nodes: h() })], "Command-X: copy, then delete");
-    check(only(Command::Paste) == vec![Change::Paste_requested], "Command-V: Paste_requested");
+    check(only(Command::Copy) == vec![Change::CopyRequested(h())], "Command-C: Copy_requested");
+    check(only(Command::Cut) == vec![Change::CopyRequested(h()), syn(e::Op::DeleteNodes { nodes: h() })], "Command-X: copy, then delete");
+    check(only(Command::Paste) == vec![Change::PasteRequested], "Command-V: Paste_requested");
     // a screen point as a grid-snapped position in a scope: further right on screen is further right in the scope
     {
         let (x, y, _, _) = g::center_of(&view, &heart);
@@ -401,7 +401,7 @@ fn scope_gestures_2() {
     // fold and unfold: the keys, and the right-click menu's rows
     let result = path(&["flower", "result"]);
     match { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![result.clone()], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Unfold, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice() {
-        [Change::Syntax_edit(e::Op::Unfold { node, sub, .. })] if *node == result && sub.is_empty() => {}
+        [Change::SyntaxEdit(e::Op::Unfold { node, sub, .. })] if *node == result && sub.is_empty() => {}
         _ => fail("Shift-U on a call with an inline call did not become Unfold"),
     }
     let (hx, hy, _, _) = g::center_of(&view, &heart);
@@ -414,8 +414,8 @@ fn scope_gestures_2() {
     // a right-click on empty canvas asks the host for its add menu at that point
     let empty = (2900, 1900);
     let (_, requested) = scope_step(&mut ui, view.clone(), &g::frame(empty, vec![], vec![mouse_move(empty), mouse_press(MouseButton::RightButton, empty), mouse_release(MouseButton::RightButton, empty)]));
-    check(requested.contains(&Change::Menu_requested(2900.0, 1900.0)), "a right-click on empty canvas did not ask for the add menu");
-    check(only(Command::Display) == vec![Change::Display_set(heart.clone())], "v: a geometry node is shown in the viewport");
+    check(requested.contains(&Change::MenuRequested(2900.0, 1900.0)), "a right-click on empty canvas did not ask for the add menu");
+    check(only(Command::Display) == vec![Change::DisplaySet(heart.clone())], "v: a geometry node is shown in the viewport");
     match { let mut r8_view = { let mut r8_view = view.clone(); scope::select(vec![path(&["flower", "petals"])], &mut r8_view); r8_view }; let mut r8_changes = Vec::new(); scope::run_command(&mut r8_view, Command::Display, &mut r8_changes); (r8_view, r8_changes) }.1.as_slice() {
         [Change::Notice(_)] => {}
         _ => fail("v on a number did not say only geometry can be viewed"),
