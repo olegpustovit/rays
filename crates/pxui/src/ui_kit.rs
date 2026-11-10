@@ -356,7 +356,7 @@ impl Ui {
 
     /// Open a panel: the box and the kit state to give back to `panel_leave`.
     pub fn panel_enter(&mut self, opts: &PanelOpts, label: &str) -> (UiBox, (i64, bool)) {
-        let row_height = self.theme().row_h as i64;
+        let row_height = (self.theme().row_h * self.theme().tokens.density).round() as i64;
         if opts.padding < 0 {
             panic!("Ui.panel: padding must be non-negative");
         }

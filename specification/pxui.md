@@ -419,6 +419,30 @@ ui.frame(&FrameIn, &mut Text, |ui| ...) -> FrameOut
    builds only visible rows plus 4 each side; `ui.verify_views(true)` re-runs clean views and panics
    naming one whose output changed. `ui.built_nodes()` counts the last build's declared nodes.
 
+**Styling (P5 commit 2, styling half, landed).** `pxui::theme`: `Tokens` (colour roles, `space`,
+`radius` small/medium/large, type sizes, `motion` fast/normal/slow + cubic-bezier `ease`,
+`reduced_motion`, `density`), `Look` (fill solid or a two-stop linear `gradient` at `angle`, `border`
++ `border_w` on `sides`, per-corner `radius`, two `shadows` outer or inner, `text` + `Font` (family
+index, size, weight, tracking in ems, caps), `opacity`, focus `ring`, `selection`, `caret`), `States`
+(idle, hover, pressed, focus, disabled, checked; `pick(State)`), and `Theme` (tokens, `row_h`,
+`control_h`, the default `ring`, scrollbar width and gap, one `States` per kit part). `Theme::default()`
+is the Rays look; `ui.theme() -> &Theme`, `ui.tokens()`, `ui.set_theme` (rebuilds views; snaps),
+`ui.themed(&theme, f)` (a view rebuilds when the override it was built under changes),
+`ui.button_with(text, &States)`. Every kit widget declares nodes and picks their looks
+(`ui.set_look`, `ui.style`); a node's `place` puts its look in a sub-rectangle known after layout,
+`mark` draws a chevron, `bar` a scroll thumb, `FIT_TEXT` ellipsizes its text. Canvas closures remain
+for the text widgets' caret, selection and composition and the text area's code painter. Looks
+interpolate between states over the theme's motion (a transition record per node, painted steady and
+stepped through the patch path: a kept view is not rebuilt; `repaint_at` asks for frames until it
+rests); `ui.animate(handle, Target::{Look, Offset, Opacity}, Curve::{Bezier, Spring})` drives the same
+path. A theme is a flat `key = value` file (`Theme::parse(text, &base) -> Result<Theme,
+Vec<ThemeError>>`, `Theme::write`): `tokens.*` keys re-derive the looks, then `PART.STATE.FIELD` or
+`PART.FIELD` keys override them; `crates/pxui/themes/rays.theme` is the default written out and
+`dusk.theme` a second theme (golden `kit_dusk_{1,2}x.png`). Views also take `view_transform` /
+`view_scale` (hit testing through the inverse) and `view_backdrop_blur` (`FrameOut::blurs`, fulfilled by
+the host); `Paint::image_fit`, `image_nine` and `icon` draw images and icon glyphs. Content filters,
+group opacity, blend modes, 3D transforms, filled paths and a selector engine are left out on purpose.
+
 Composition closures are called immediately; standard widgets carry a `Look` (plain data); only `canvas`
 closures outlive the build, and they live in the frame arena. Public functions take concrete types or
 `&mut dyn FnMut`; no proc macros, no generics-heavy public API.
