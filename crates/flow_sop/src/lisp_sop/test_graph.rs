@@ -28,7 +28,7 @@ fn rec(fields: Vec<(&str, Value)>) -> Value {
 }
 
 fn fixtures() -> Vec<(&'static str, geo::T)> {
-    let topology = |points: i64, vertex_points: &[i64], offsets: &[i64], kinds: &[K]| topo::create_owned(points, vertex_points.to_vec(), offsets.to_vec(), kinds.to_vec()).unwrap();
+    let topology = |points: i64, vertex_points: &[i64], offsets: &[i64], kinds: &[K]| topo::create_owned(points, topo::saturate(vertex_points), topo::saturate(offsets), kinds.to_vec()).unwrap();
     vec![
         ("empty", topo::empty(0).unwrap()),
         ("shared-polygons", topology(5, &[0, 1, 2, 2, 1, 3], &[0, 3, 6], &[K::Polygon, K::Polygon])),
@@ -98,7 +98,7 @@ fn view_of(geometry: &geo::T) -> View {
 }
 
 fn other(view: &View, p: i64, e: i64) -> i64 {
-    if view.edge_a[e as usize] == p { view.edge_b[e as usize] } else { view.edge_a[e as usize] }
+    if i64::from(view.edge_a[e as usize]) == p { i64::from(view.edge_b[e as usize]) } else { i64::from(view.edge_a[e as usize]) }
 }
 
 fn walk(parent: &[i64], target: i64) -> Vec<i64> {
@@ -132,7 +132,7 @@ fn oracle_paths(view: &View, radius: f64, lengths: &[f64], roots: &[i64]) -> Exp
         let Some(p) = best else { break };
         settled[p] = true;
         for slot in view.point_edge_offsets[p]..view.point_edge_offsets[p + 1] {
-            let e = view.point_edges[slot as usize];
+            let e = i64::from(view.point_edges[slot as usize]);
             let q = other(view, p as i64, e) as usize;
             let candidate = dist[p] + lengths[e as usize];
             if q != p && candidate <= radius && candidate < dist[q] {
@@ -222,7 +222,7 @@ fn oracle_hops(view: &View, blocked_point: &dyn Fn(i64) -> bool, blocked_edge: &
         let mut found: Vec<i64> = Vec::new();
         for &p in &layer {
             for slot in view.point_edge_offsets[p as usize]..view.point_edge_offsets[p as usize + 1] {
-                let e = view.point_edges[slot as usize];
+                let e = i64::from(view.point_edges[slot as usize]);
                 let q = other(view, p, e);
                 if q != p && depth[q as usize] < 0 && !blocked_edge(e) && (q == target || !blocked_point(q)) {
                     let candidate = dist[p as usize] + lengths[e as usize];
@@ -347,7 +347,7 @@ fn oracle_lowest(view: &View, blocked_edge: &dyn Fn(i64) -> bool, target: i64, l
         settled[p] = true;
         order.push(p as i64);
         for slot in view.point_edge_offsets[p]..view.point_edge_offsets[p + 1] {
-            let e = view.point_edges[slot as usize];
+            let e = i64::from(view.point_edges[slot as usize]);
             let q = other(view, p as i64, e) as usize;
             if !blocked_edge(e) && !settled[q] {
                 let candidate = dist[p] + lengths[e as usize];

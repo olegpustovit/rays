@@ -164,18 +164,23 @@ fn check_counts(operation: &str, points: i64, vertices: usize, primitives: usize
 
 /// Narrows i64 index scratch into topology planes: negative is invalid, above u32::MAX is too large.
 pub fn narrow(operation: &str, values: &[i64]) -> Result<Vec<u32>, error::T> {
-    values
-        .iter()
-        .map(|&value| {
-            u32::try_from(value).map_err(|_| {
-                if value < 0 {
-                    invalid_topology(operation, "Topology: negative index")
-                } else {
-                    error::new(operation, Code::GeometryTooLarge, "Topology: index exceeds the 4294967295 element limit".to_owned())
-                }
-            })
-        })
-        .collect()
+    let mut output = Vec::with_capacity(values.len());
+    for &value in values {
+        output.push(u32::try_from(value).map_err(|_| {
+            if value < 0 {
+                invalid_topology(operation, "Topology: negative index")
+            } else {
+                error::new(operation, Code::GeometryTooLarge, "Topology: index exceeds the 4294967295 element limit".to_owned())
+            }
+        })?);
+    }
+    Ok(output)
+}
+
+/// Lisp Int arrays into topology planes: a value outside u32 becomes u32::MAX, which validation
+/// rejects exactly as it rejected the out-of-range i64 (invalid point, unordered or final offset).
+pub fn saturate(values: &[i64]) -> Vec<u32> {
+    values.iter().map(|&value| u32::try_from(value).unwrap_or(u32::MAX)).collect()
 }
 
 fn invalid_topology(operation: &str, message: &str) -> error::T {

@@ -25,7 +25,7 @@ pub fn encode(g:&geo::T)->String{
         tag("attribute",[owner(attribute::owner(a)).into(),quote(attribute::name(a).as_bytes()),kind.into(),list(planes)])}).collect::<Vec<_>>();
     let groups=geo::groups(g).iter().map(|g|{let order=match group::ordered_elements(g){Some(xs)=>tag("ordered",[ints(&xs)]),None=>tag("unordered",[ints(&(0..group::length(g)).filter(|i|group::mem(*i,g)).collect::<Vec<_>>())])};tag("group",[owner(group_owner(group::owner(g))).into(),quote(group::name(g).as_bytes()),order])}).collect::<Vec<_>>();
     let edges=geo::edge_groups(g).iter().map(|g|tag("edge_group",[quote(edge_group::name(g).as_bytes()),ints(&(0..edge_group::length(g)).filter(|i|edge_group::mem(*i,g)).collect::<Vec<_>>())])).collect::<Vec<_>>();
-    tag("geometry",[tag("positions",[floats(&p.x),floats(&p.y),floats(&p.z)]),tag("topology",[t.point_count.to_string(),ints(&t.vertex_points),ints(&t.primitive_offsets),list(t.primitive_kinds.iter().map(|k|match k{0=>"polygon",1=>"open_polyline",2=>"closed_polyline",_=>unreachable!()}.to_owned()))]),tag("attributes",attrs),tag("groups",groups),tag("edge_groups",edges)])
+    tag("geometry",[tag("positions",[floats(&p.x),floats(&p.y),floats(&p.z)]),tag("topology",[t.point_count.to_string(),ints(&t.vertex_points.iter().map(|&v|i64::from(v)).collect::<Vec<_>>()),ints(&t.primitive_offsets.iter().map(|&v|i64::from(v)).collect::<Vec<_>>()),list(t.primitive_kinds.iter().map(|k|match k{0=>"polygon",1=>"open_polyline",2=>"closed_polyline",_=>unreachable!()}.to_owned()))]),tag("attributes",attrs),tag("groups",groups),tag("edge_groups",edges)])
 }
 fn bad(s:&str)->String{format!("malformed frozen geometry: {s}")}
 fn children<'a>(name:&str,a:&'a SyntaxArena,id:SyntaxId)->R<&'a [SyntaxId]>{match a.row(id).node{Node::List(xs) if a.range(xs).first().is_some_and(|&h|matches!(a.row(h).node,Node::Sym(s) if a.name(s)==name))=>Ok(&a.range(xs)[1..]),_=>Err(bad(&format!("expected {name}")))}}
@@ -44,7 +44,7 @@ pub fn decode(source:&str)->R<geo::T>{
     let p=children("positions",a,unique("positions")?)?;let [x,y,z]=p else{return Err(bad("positions require x/y/z planes"))};let positions=rk(packed::float3::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?))?;
     let t=children("topology",a,unique("topology")?)?;let [n,vp,po,ks]=t else{return Err(bad("invalid topology"))};
     let kinds=array(a,*ks)?.iter().map(|&id|match sym(a,id)?{"polygon"=>Ok(topology::PrimitiveKind::Polygon),"open_polyline"=>Ok(topology::PrimitiveKind::OpenPolyline),"closed_polyline"=>Ok(topology::PrimitiveKind::ClosedPolyline),_=>Err(bad("unknown primitive kind"))}).collect::<R<Vec<_>>>()?;
-    let topology=rk(topology::create_owned(integer(a,*n)?,int_array(a,*vp)?,int_array(a,*po)?,kinds))?;
+    let topology=rk(topology::create_owned(integer(a,*n)?,topology::saturate(&int_array(a,*vp)?),topology::saturate(&int_array(a,*po)?),kinds))?;
     let attrs=children("attributes",a,unique("attributes")?)?.iter().map(|&id|{let [o,n,k,p]=children("attribute",a,id)? else{return Err(bad("invalid attribute"))};let p=array(a,*p)?;
         let storage=match(sym(a,*k)?,p){
             ("float",[v])=>Storage::Float(Arc::new(float_array(a,*v)?)),("int",[v])=>Storage::Int(Arc::new(int_array(a,*v)?)),

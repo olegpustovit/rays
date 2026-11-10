@@ -82,6 +82,9 @@ fn point_graph(adjacency: Option<&Value>) -> Result<PointGraph, Diagnostic> {
             return Err(refuse("E_GRAPH_ADJACENCY", "Graph adjacency edge endpoint is out of range."));
         }
     }
+    if points > u32::MAX as usize || edges > u32::MAX as usize || point_edges.len() > u32::MAX as usize {
+        return Err(refuse("E_GEOMETRY_TOO_LARGE", "Graph adjacency exceeds the 4294967295 element limit."));
+    }
     check_rows("Graph adjacency point_edges", points, edges, &point_edge_offsets, &point_edges)?;
     Ok(PointGraph { points, edges, point_edge_offsets, point_edges, edge_a, edge_b })
 }
@@ -126,8 +129,13 @@ fn tree_path(parent: &[i64], reached: &dyn Fn(i64) -> bool, target: i64) -> Vec<
     path
 }
 
-fn shared(values: &[i64]) -> Arc<[i64]> {
-    Arc::from(values)
+/// Adjacency values are range-checked by `parse` (and sizes capped at u32), so the narrowing is exact.
+fn shared(values: &[i64]) -> Arc<[u32]> {
+    narrowed(values).into()
+}
+
+fn narrowed(values: &[i64]) -> Vec<u32> {
+    values.iter().map(|&v| v as u32).collect()
 }
 
 fn shared_floats(values: &[f64]) -> Arc<Vec<f64>> {
@@ -219,10 +227,10 @@ fn shortest_paths(args: &flow_syntax::value::Record) -> Result<(Vec<f64>, Vec<i6
         let forest = shortest_paths::forest_search(
             &valid,
             points as i64,
-            &point_edge_offsets,
-            &point_edges,
-            &edge_a,
-            &edge_b,
+            &narrowed(&point_edge_offsets),
+            &narrowed(&point_edges),
+            &narrowed(&edge_a),
+            &narrowed(&edge_b),
             &lengths,
             &roots,
         );

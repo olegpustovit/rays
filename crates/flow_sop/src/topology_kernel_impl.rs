@@ -34,6 +34,10 @@ fn arg<'a>(args: &'a Args, name: &str) -> Option<&'a Value> {
 fn is_text(value: Option<&Value>, text: &str) -> bool {
     matches!(value, Some(Value::Text(bytes)) if bytes.as_ref() == text.as_bytes())
 }
+/// u32 topology planes into the Lisp Int (i64) array.
+fn widen_all(values: &[u32]) -> Vec<i64> {
+    values.iter().map(|&v| i64::from(v)).collect()
+}
 fn ints(values: Vec<i64>) -> Value {
     Value::Int_array(Arc::new(values))
 }
@@ -88,8 +92,8 @@ fn kept(
 pub fn topology_component(geometry: &Geometry, component: &str) -> Result<Value, Diagnostic> {
     let view = topo_view(geometry::topology(geometry))?;
     match component {
-        "vertex_points" => Ok(Value::Int_array(view.vertex_points)),
-        "primitive_offsets" => Ok(Value::Int_array(view.primitive_offsets)),
+        "vertex_points" => Ok(ints(widen_all(&view.vertex_points))),
+        "primitive_offsets" => Ok(ints(widen_all(&view.primitive_offsets))),
         "kinds" => Ok(ints(view.primitive_kinds.iter().map(|k| *k as i64).collect())),
         _ => fail("E_DATA_SOURCE", "Topology source requires vertex_points, primitive_offsets or kinds."),
     }
@@ -99,7 +103,9 @@ pub fn topology_component(geometry: &Geometry, component: &str) -> Result<Value,
 /// Topology_index hashes.
 pub fn adjacency(geometry: &Geometry, component: &str) -> Result<Value, Diagnostic> {
     let topology = geometry::topology(geometry);
-    let array = |a: &[i64]| Ok(ints(a.to_vec()));
+    let array = |a: &[u32]| Ok(ints(widen_all(a)));
+    // missing neighbours and edges (NONE) read as -1 in Lisp
+    let sentinel = |a: &[u32]| Ok(ints(a.iter().map(|&v| topology_index::widen(v)).collect()));
     match component {
         "primitive_of_vertex" => array(&point_index::view::view(&points_of(topology)?).primitive_of_vertex),
         "point_vertex_offsets" => array(&point_index::view::view(&points_of(topology)?).point_offsets),
@@ -108,10 +114,10 @@ pub fn adjacency(geometry: &Geometry, component: &str) -> Result<Value, Diagnost
         | "point_edge_offsets" | "point_edges" => {
             let view = topology_index::view::view(&index_of(topology)?);
             match component {
-                "next_vertex" => array(&view.next_vertex),
-                "previous_vertex" => array(&view.previous_vertex),
-                "edge_of_vertex" => array(&view.edge_of_vertex),
-                "opposite_vertex" => array(&view.opposite_vertex),
+                "next_vertex" => sentinel(&view.next_vertex),
+                "previous_vertex" => sentinel(&view.previous_vertex),
+                "edge_of_vertex" => sentinel(&view.edge_of_vertex),
+                "opposite_vertex" => sentinel(&view.opposite_vertex),
                 "edge_a" => array(&view.edge_a),
                 "edge_b" => array(&view.edge_b),
                 "point_edge_offsets" => array(&view.point_edge_offsets),
@@ -137,8 +143,8 @@ pub fn fans(geometry: &Geometry, component: &str) -> Result<Value, Diagnostic> {
                 .iter()
                 .map(|vertex| {
                     let primitive = p.primitive_of_vertex[*vertex as usize] as usize;
-                    let first = t.primitive_offsets[primitive];
-                    let corners = t.primitive_offsets[primitive + 1] - first;
+                    let first = i64::from(t.primitive_offsets[primitive]);
+                    let corners = i64::from(t.primitive_offsets[primitive + 1]) - first;
                     pick(first, t.primitive_kinds[primitive] == 0 && corners >= 3, corners)
                 })
                 .collect(),
@@ -399,8 +405,11 @@ pub fn mesh_with<'a>(args: &dyn Fn(&str) -> Option<&'a Value>) -> Result<Geometr
                 admit(bytes)?;
             }
             let kinds: Vec<topology::PrimitiveKind> = kinds.iter().map(|k| kind_of(*k)).collect();
-            let topology = topology::create_owned(count, (**vertices).clone(), (**offsets).clone(), kinds)
-                .map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))?;
+            let topology = topology::create_owned(count, topology::saturate(vertices), topology::saturate(offsets), kinds)
+                .map_err(|e| {
+                    let code = if rdk_core::error::code(&e) == rdk_core::error::Code::GeometryTooLarge { "E_GEOMETRY_TOO_LARGE" } else { "E_TOPOLOGY" };
+                    diag(code, &rdk_message(&e))
+                })?;
             let positions = positions()?;
             geometry::create(positions, topology, None, None, None).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))
         }
@@ -478,7 +487,7 @@ fn host_topology(point_count: i64, vertices: &[i64], offsets: &[i64], kinds: &[i
     if kinds.iter().any(|kind| *kind < 0 || *kind > 2) {
         return Err("Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline).".to_owned());
     }
-    topology::create_owned(point_count, vertices.to_vec(), offsets.to_vec(), kinds.iter().map(|k| kind_of(*k)).collect())
+    topology::create_owned(point_count, topology::saturate(vertices), topology::saturate(offsets), kinds.iter().map(|k| kind_of(*k)).collect())
         .map_err(|e| rdk_message(&e))
 }
 
@@ -725,7 +734,7 @@ pub fn mesh_resident_with<'a>(static_key: Option<&Value>, scope: &dyn Residency,
             let holder = holder.clone();
             Arc::new(move || {
                 let kinds: Vec<topology::PrimitiveKind> = holder.kinds.materialise().map_err(rdk_error)?.iter().map(|k| kind_of(*k)).collect();
-                topology::create_owned(point_count, holder.vertices.materialise().map_err(rdk_error)?, holder.offsets.materialise().map_err(rdk_error)?, kinds)
+                topology::create_owned(point_count, topology::saturate(&holder.vertices.materialise().map_err(rdk_error)?), topology::saturate(&holder.offsets.materialise().map_err(rdk_error)?), kinds)
             })
         };
         let topology = topology::deferred(None, Some(holder.clone() as Arc<dyn deferred::Holder>), Some(release), point_count, vertex_count, primitive_count, materialise)
@@ -803,8 +812,8 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<Geometry>, source: &Value) -> Re
         _ => {
             let index = topology_index::view::view(&index_of(geometry::topology(&geometry))?);
             match component.as_deref() {
-                Some("a") => Ok(ints(index.edge_a.to_vec())),
-                Some("b") => Ok(ints(index.edge_b.to_vec())),
+                Some("a") => Ok(ints(widen_all(&index.edge_a))),
+                Some("b") => Ok(ints(widen_all(&index.edge_b))),
                 _ => fail("E_DATA_SOURCE", "Edge source requires endpoint component a or b."),
             }
         }
@@ -1178,6 +1187,12 @@ mod integration {
     fn ints(a: &[i64]) -> Value {
         Value::Int_array(Arc::new(a.to_vec()))
     }
+    fn w(a: &[u32]) -> Vec<i64> {
+        a.iter().map(|&v| i64::from(v)).collect()
+    }
+    fn s(a: &[u32]) -> Vec<i64> {
+        a.iter().map(|&v| topology_index::widen(v)).collect()
+    }
     fn text(s: &str) -> Value {
         Value::Text(s.as_bytes().into())
     }
@@ -1188,7 +1203,7 @@ mod integration {
     fn fixtures() -> Vec<(&'static str, Geometry)> {
         use topology::PrimitiveKind::{ClosedPolyline, OpenPolyline, Polygon};
         let make = |points: i64, vertices: Vec<i64>, offsets: Vec<i64>, kinds: Vec<topology::PrimitiveKind>| {
-            ok(topology::create_owned(points, vertices, offsets, kinds))
+            ok(topology::create_owned(points, topology::saturate(&vertices), topology::saturate(&offsets), kinds))
         };
         let all = vec![
             ("empty", ok(topology::empty(0))),
@@ -1270,13 +1285,13 @@ mod integration {
             ] {
                 agree(&geometry, &format!("(sop/count geo :{element})"), &Value::Int(expected));
             }
-            let expected = Value::Record(vec![("a".into(), ints(&view.edge_a)), ("b".into(), ints(&view.edge_b))].into());
+            let expected = Value::Record(vec![("a".into(), ints(&w(&view.edge_a))), ("b".into(), ints(&w(&view.edge_b)))].into());
             agree(&geometry, "(sop/edges geo)", &expected);
             let mut live = input::at_time(0.25);
             live.frame = 3;
             let (value, resolve) = evaluate(&geometry, "(map (fn [(x : int)] (int/add x (frame/index))) (get (sop/edges geo) :a))");
             let core = flow_ok(executor::compile(&value, &executor::CompileOptions { strict: true, ..Default::default() }));
-            let expected = ints(&view.edge_a.iter().map(|x| x + 3).collect::<Vec<_>>());
+            let expected = ints(&view.edge_a.iter().map(|&x| i64::from(x) + 3).collect::<Vec<_>>());
             over_domains(&|| {
                 assert_eq!(flow_ok(flow_eval::host::force_reference(&value, &live, None, None, Some(resolve.clone()))), expected);
                 let options = executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
@@ -1296,29 +1311,29 @@ mod integration {
             let index = flow_ok(index_of(geometry::topology(&geometry)));
             let v = topology_index::view::view(&index);
             let expected = Value::Record(vec![
-                ("primitive_of_vertex".into(), ints(&v.primitive_of_vertex)),
-                ("next_vertex".into(), ints(&v.next_vertex)),
-                ("previous_vertex".into(), ints(&v.previous_vertex)),
-                ("edge_of_vertex".into(), ints(&v.edge_of_vertex)),
-                ("opposite_vertex".into(), ints(&v.opposite_vertex)),
-                ("edge_a".into(), ints(&v.edge_a)),
-                ("edge_b".into(), ints(&v.edge_b)),
-                ("point_edge_offsets".into(), ints(&v.point_edge_offsets)),
-                ("point_edges".into(), ints(&v.point_edges)),
-                ("point_vertex_offsets".into(), ints(&v.point_offsets)),
-                ("point_vertices".into(), ints(&v.point_vertices)),
+                ("primitive_of_vertex".into(), ints(&w(&v.primitive_of_vertex))),
+                ("next_vertex".into(), ints(&s(&v.next_vertex))),
+                ("previous_vertex".into(), ints(&s(&v.previous_vertex))),
+                ("edge_of_vertex".into(), ints(&s(&v.edge_of_vertex))),
+                ("opposite_vertex".into(), ints(&s(&v.opposite_vertex))),
+                ("edge_a".into(), ints(&w(&v.edge_a))),
+                ("edge_b".into(), ints(&w(&v.edge_b))),
+                ("point_edge_offsets".into(), ints(&w(&v.point_edge_offsets))),
+                ("point_edges".into(), ints(&w(&v.point_edges))),
+                ("point_vertex_offsets".into(), ints(&w(&v.point_offsets))),
+                ("point_vertices".into(), ints(&w(&v.point_vertices))),
             ].into());
             agree(&geometry, "(sop/adjacency geo)", &expected);
-            agree(&geometry, "(get (sop/adjacency geo) :edge_a)", &ints(&v.edge_a));
+            agree(&geometry, "(get (sop/adjacency geo) :edge_a)", &ints(&w(&v.edge_a)));
             // sop/fans: the face of each incident corner, as the gather of area normals folds it
             let t = flow_ok(topo_view(geometry::topology(&geometry)));
             let face = |f: &dyn Fn(usize) -> i64| ints(&v.point_vertices.iter().map(|vertex| f(v.primitive_of_vertex[*vertex as usize] as usize)).collect::<Vec<_>>());
-            agree(&geometry, "(get (sop/fans geo) :first)", &face(&|p| t.primitive_offsets[p]));
+            agree(&geometry, "(get (sop/fans geo) :first)", &face(&|p| i64::from(t.primitive_offsets[p])));
             agree(
                 &geometry,
                 "(get (sop/fans geo) :corners)",
                 &face(&|p| {
-                    let corners = t.primitive_offsets[p + 1] - t.primitive_offsets[p];
+                    let corners = i64::from(t.primitive_offsets[p + 1] - t.primitive_offsets[p]);
                     if t.primitive_kinds[p] == 0 && corners >= 3 { corners } else { 0 }
                 }),
             );

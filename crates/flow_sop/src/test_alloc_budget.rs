@@ -23,7 +23,7 @@ fn grid(cells: i64) -> geometry::T {
         }
     }
     let points = x.len();
-    let topology = topology::polygons_owned(points as i64, vertex_points, offsets).unwrap();
+    let topology = topology::polygons_owned(points as i64, topology::saturate(&vertex_points), topology::saturate(&offsets)).unwrap();
     geometry::create(packed::float3::view::of_owned_exn(x, vec![0.0; points], z).unwrap(), topology, Some(Vec::new()), None, None).unwrap()
 }
 
@@ -66,8 +66,8 @@ fn subdivide_peak_bytes() {
     assert!(peak.get() <= LIMIT, "subdivide peak {} > {LIMIT}", peak.get());
 }
 
-// 29_101_694 B after C4 (29_629_590 after M18; 34_086_038 before C3/M18): 128x128 quads, one Catmull-Clark pass.
-const LIMIT: i64 = 29_150_000;
+// 24_638_058 B after Z4 u32 topology (29_101_694 after C4; 29_629_590 after M18; 34_086_038 before C3/M18): 128x128 quads, one Catmull-Clark pass.
+const LIMIT: i64 = 24_700_000;
 
 /// (c) Flow read then write of P, Cd, a float, an int and a text attribute on a 100k-point grid, on
 /// one thread: peak live bytes and allocation count above the baseline.
@@ -242,8 +242,8 @@ fn attribute_map_output_buffers() {
 // Shared residual/term/Record data, Symbol names and geometry layout: maxima across all three fixture sizes,
 // rounded to cover key-size variation. Never raise.
 // Each pair is (allocations, peak B); changed-input peak excludes only newly owned output payload.
-const SUBDIVIDE_WARM: [(u64, i64); 2] = [(18, 3_752), (68_565, 3_445_100)];
-const BOOLEAN_WARM: [(u64, i64); 2] = [(25, 4_426), (26_695, 926_350)];
+const SUBDIVIDE_WARM: [(u64, i64); 2] = [(18, 3_752), (68_565, 2_660_000)];
+const BOOLEAN_WARM: [(u64, i64); 2] = [(25, 4_426), (26_695, 855_000)];
 const SCATTER_WARM: [(u64, i64); 2] = [(18, 5_360), (598_565, 12_985_200)];
 
 // These are session cooks: lowering and input construction stay outside the counters.

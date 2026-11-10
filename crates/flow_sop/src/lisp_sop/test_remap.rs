@@ -112,8 +112,8 @@ fn target(copies: i64, src: &geo::T) -> geo::T {
     let primitives = geo::primitive_count(src);
     let made = ok(topology::create_owned(
         copies * points,
-        (0..copies * vertices).map(|i| t.vertex_points[(i % vertices) as usize] + i / vertices * points).collect(),
-        (0..=copies * primitives).map(|i| if i == copies * primitives { copies * vertices } else { t.primitive_offsets[(i % primitives) as usize] + i / primitives * vertices }).collect(),
+        (0..copies * vertices).map(|i| (i64::from(t.vertex_points[(i % vertices) as usize]) + i / vertices * points) as u32).collect(),
+        (0..=copies * primitives).map(|i| (if i == copies * primitives { copies * vertices } else { i64::from(t.primitive_offsets[(i % primitives) as usize]) + i / primitives * vertices }) as u32).collect(),
         vec![topology::PrimitiveKind::Polygon; (copies * primitives) as usize],
     ));
     let n = (copies * points) as usize;

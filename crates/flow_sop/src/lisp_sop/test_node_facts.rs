@@ -46,7 +46,7 @@ fn plane_grid(columns: i64, rows: i64, size: f64) -> geo::T {
         }
     }
     let positions = rdk_ok(rdk_core::packed::float3::of_owned(x, z, y));
-    let topology = rdk_ok(rdk_core::topology::polygons_owned(stride * (rows + 1), vp, offsets));
+    let topology = rdk_ok(rdk_core::topology::polygons_owned(stride * (rows + 1), rdk_core::topology::saturate(&vp), rdk_core::topology::saturate(&offsets)));
     rdk_ok(geo::create(positions, topology, None, None, None))
 }
 

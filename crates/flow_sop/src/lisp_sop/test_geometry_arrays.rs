@@ -27,7 +27,7 @@ fn fields(g: &geo::T, planes: bool) -> Vec<(Symbol, Value)> {
     let p = float3::view::view(geo::positions(g)).unwrap();
     let points = if planes { Value::Record(vec![("x".into(),floats(p.x.to_vec())),("y".into(),floats(p.y.to_vec())),("z".into(),floats(p.z.to_vec()))].into()) }
         else { Value::Floats(3, Arc::new((0..p.x.len()).flat_map(|i|[p.x[i],p.y[i],p.z[i]]).collect())) };
-    vec![("points".into(),points),("vertex_points".into(),ints(t.vertex_points.to_vec())),("primitive_offsets".into(),ints(t.primitive_offsets.to_vec())),("kinds".into(),ints(t.primitive_kinds.iter().map(|i|*i as i64).collect()))]
+    vec![("points".into(),points),("vertex_points".into(),ints(t.vertex_points.iter().map(|&v|i64::from(v)).collect())),("primitive_offsets".into(),ints(t.primitive_offsets.iter().map(|&v|i64::from(v)).collect())),("kinds".into(),ints(t.primitive_kinds.iter().map(|i|*i as i64).collect()))]
 }
 fn source_arrays(planes: bool) -> String {
     let points = if planes { "{:x (array float) :y (array float) :z (array float)} {:x (array/float 0) :y (array/float 0) :z (array/float 0)}" } else {"(array vec3) (array/vec3 0)"};
@@ -119,7 +119,8 @@ fn topology_queries_keep_planes_origins_and_immutable_readers() {
     let Value::Record(queried_fields)=force(&original,&queried) else {panic!("topology record expected")};
     for (name,plane) in [("vertex_points",&native.vertex_points),("primitive_offsets",&native.primitive_offsets)] {
         let Value::Int_array(values)=&queried_fields.iter().find(|(key,_)|key==name).unwrap().1 else {panic!("topology integer plane expected")};
-        assert!(Arc::ptr_eq(values,plane),"topology query copied native {name} storage");
+        // Z4: native planes are u32 and Lisp Int is i64, so the query widens a copy; the contents must agree.
+        assert!(values.iter().copied().eq(plane.iter().map(|&p|i64::from(p))),"topology query changed native {name} contents");
     }
     for read in ["(map (fn [(i : int)] (int/add i 1)) topo.vertex_points)","(array/grade topo.vertex_points)","(array/scan_sum topo.vertex_points)","(array/slice topo.primitive_offsets 0 1)","(array/concat topo.vertex_points topo.primitive_offsets)","(array/compact (map (fn [(i : int)] (if (= i 0) 1 0)) topo.vertex_points))","(array/segment_sum topo.vertex_points topo.primitive_offsets)","(array/scatter_add topo.vertex_points topo.vertex_points 64)","(array/sum topo.vertex_points)"] {
         force(&original,&evaluate(&format!("(let* [topo (sop/topology geo)] {read})")));assert_eq!(geometry_bytes(&original),before,"{read}");
