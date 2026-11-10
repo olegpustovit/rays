@@ -43,9 +43,13 @@ pub fn key_of(seed: i64, text: &str) -> i64 {
 
 /// The label without its `##` suffix.
 pub fn display(text: &str) -> String {
+    shown(text).to_owned()
+}
+
+pub(crate) fn shown(text: &str) -> &str {
     match find_marker(text, "##") {
-        Some(index) => text[..index].to_owned(),
-        None => text.to_owned(),
+        Some(index) => &text[..index],
+        None => text,
     }
 }
 
@@ -301,6 +305,8 @@ struct Slot {
     text_value: Option<String>,
     labels: Vec<Rc<str>>,
     label_count: usize,
+    /// a hit shape a kit widget keeps between frames, by its parameters
+    hit: Option<(u64, HitFn)>,
     press_time: f64,
     press_x: f32,
     press_y: f32,
@@ -329,6 +335,7 @@ impl Slot {
             text_value: None,
             labels: Vec::new(),
             label_count: 0,
+            hit: None,
             press_time: f64::NEG_INFINITY,
             press_x: 0.0,
             press_y: 0.0,
@@ -2359,6 +2366,21 @@ impl Ui {
         }
         if slot.labels[index].as_ref() != text { slot.labels[index] = Rc::from(text); }
         slot.labels[index].clone()
+    }
+
+    /// Give `b` the hit shape `make` builds, kept in its slot while `key` (the shape's parameters)
+    /// is unchanged: no closure per frame.
+    pub(crate) fn cached_hit(&mut self, b: &UiBox, key: u64, make: impl FnOnce() -> HitFn) {
+        let slot = &mut self.slots[b.box_slot];
+        let hit = match &slot.hit {
+            Some((k, hit)) if *k == key => hit.clone(),
+            _ => {
+                let hit = make();
+                slot.hit = Some((key, hit.clone()));
+                hit
+            }
+        };
+        self.boxes[b.index].hit = Some(hit);
     }
 
     pub fn text_state(&self, b: &UiBox) -> Option<String> {

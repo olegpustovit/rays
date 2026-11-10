@@ -111,7 +111,7 @@ fn controls(ui: &mut Ui, model: &mut Model) {
     ui.panel(PanelOpts::default().width(400.0), "controls", &mut |ui| {
         out.clicks = m.clicks + if ui.button("Run") { 1 } else { 0 };
         out.enabled = ui.toggle("Enabled", m.enabled);
-        out.text = ui.text_field("Text", &m.text);
+        out.text = ui.text_field("Text", &m.text).unwrap_or_else(|| m.text.clone());
     });
     *model = out;
 }

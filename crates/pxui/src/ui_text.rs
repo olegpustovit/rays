@@ -1205,18 +1205,14 @@ impl Ui {
     /// selection, a double click selects the word (a triple the line), the word keys move and
     /// delete by words, Command-arrows (Apple) and Home/End move by lines, Command-A/C/X/V select
     /// all, copy, cut and paste, and Command-Z, Shift-Command-Z (or Command-Y) undo and redo the
-    /// focused text.
-    pub fn text_field(&mut self, text: &str, value: &str) -> String {
+    /// focused text. The result is the new value on the frames that change it.
+    pub fn text_field(&mut self, text: &str, value: &str) -> Option<String> {
         let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | FOCUS_MARK), Some(control_hit(value_control)), text);
         let signal = self.signal(&row);
         let focused = self.focused(&row);
-        let mut edit = if focused {
-            self.load_text_edit(row.box_key, value)
-        } else {
-            let end = value.len();
-            TextEdit { text: value.to_owned(), caret: end, anchor: end }
-        };
-        if focused {
+        // an unfocused field paints `value` as it is (kept in its slot); only editing copies it
+        let edit = if focused {
+            let mut edit = self.load_text_edit(row.box_key, value);
             let (cx, _, cw, _) = value_control(ints(self.rect(&row)));
             let shift = self.press_shift(&row);
             self.point_text_caret(None, &mut edit, &signal, shift, (cx + 2) as f32, (cx + cw - 2) as f32);
@@ -1224,11 +1220,14 @@ impl Ui {
                 self.edit_text_event(false, &mut edit, &|_| true, &modifiers, &event);
             }
             self.save_text_edit(&edit);
-        }
-        let value = edit.text.clone();
+            Some(edit)
+        } else {
+            None
+        };
+        let changed = edit.as_ref().filter(|e| e.text != value).map(|e| e.text.clone());
         let theme = self.theme();
-        let shown = display(text);
-        let composition = self.composition().to_owned();
+        let shown = self.cached_label(&row, 0, shown(text));
+        let composition = if focused { self.composition().to_owned() } else { String::new() };
         let hovered = signal.hovered;
         // the I-beam over the value, as in any text field
         {
@@ -1239,7 +1238,7 @@ impl Ui {
             }
         }
         let font_size = self.font_size();
-        let shown_value = value.clone();
+        let shown_value = self.cached_label(&row, 1, value);
         self.draw(&row, move |paint, rect| {
             let bounds = ints(rect);
             let (x, y, _, h) = bounds;
@@ -1250,13 +1249,12 @@ impl Ui {
             }
             kit_text(paint, Some(theme::ink_2(&theme)), x + SIDE, label_y(font_size, y, h), &shown);
             underline(paint, control, if focused { theme.accent } else { theme::edge(&theme) });
-            if focused {
-                paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, &edit);
-            } else {
-                kit_text(paint, Some(theme.foreground), cx + 2, label_y(font_size, y, h), &shown_value);
+            match &edit {
+                Some(edit) => paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, edit),
+                None => kit_text(paint, Some(theme.foreground), cx + 2, label_y(font_size, y, h), &shown_value),
             }
         });
-        value
+        changed
     }
 
     /// A one-line search field at `at` (the first string is its key, the second its value) with a

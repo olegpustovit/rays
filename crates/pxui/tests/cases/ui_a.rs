@@ -580,7 +580,7 @@ fn scale_10(scale: f64) {
     let title = RefCell::new(String::new());
     let mut build = |ui: &mut Ui| {
         let current = title.borrow().clone();
-        *title.borrow_mut() = ui.text_field("Title", &current);
+        *title.borrow_mut() = ui.text_field("Title", &current).unwrap_or(current.clone());
     };
     let mut ui = field_ui();
     settle(scale, &mut ui, &mut build);
@@ -674,9 +674,9 @@ fn scale_10(scale: f64) {
     let long = RefCell::new("long text".to_owned());
     let mut build = |ui: &mut Ui| {
         let s = short.borrow().clone();
-        *short.borrow_mut() = ui.text_field("Short", &s);
+        *short.borrow_mut() = ui.text_field("Short", &s).unwrap_or(s.clone());
         let l = long.borrow().clone();
-        *long.borrow_mut() = ui.text_field("Long", &l);
+        *long.borrow_mut() = ui.text_field("Long", &l).unwrap_or(l.clone());
     };
     let mut ui = field_ui();
     settle(scale, &mut ui, &mut build);
@@ -929,7 +929,7 @@ pub fn window_pxui_hover_cursor() {
     let title = RefCell::new(String::new());
     let mut field = |ui: &mut Ui| {
         let t = title.borrow().clone();
-        *title.borrow_mut() = ui.text_field("Title", &t);
+        *title.borrow_mut() = ui.text_field("Title", &t).unwrap_or(t.clone());
     };
     field_ui.frame(&frame_at(vec![], 1.0, 0.6, vec![]), &mut field);
     field_ui.frame(&frame_at(vec![], 1.0, 0.7, vec![move_to((150, row(0)))]), &mut field);
@@ -975,7 +975,8 @@ pub fn window_pxui_fit_box() {
     ui.destroy();
 }
 
-/// Heap allocations and CPU per warm kit frame (docs/pxui-baseline.md). Measurement only.
+/// A warm kit frame allocates nothing (docs/pxui-baseline.md: P0 measured 15 allocations); the CPU
+/// time is reported.
 pub fn window_pxui_baseline() {
     let build = |ui: &mut Ui| {
         ui.panel(PanelOpts::default(), "panel", &mut |ui| {
@@ -1001,6 +1002,9 @@ pub fn window_pxui_baseline() {
     let allocs = mem_sys::local_alloc_count() - c0;
     let frame_bytes = (mem_sys::alloc_bytes_total() - b0) as f64 / n as f64;
     eprintln!("PXUI_BASELINE frame: {:.1} allocs {frame_bytes:.0} B {:.1} us", allocs as f64 / n as f64, frame_ns as f64 / n as f64 / 1e3);
+    if allocs != 0 {
+        fail(&format!("a warm kit frame allocated: {allocs} allocations in {n} frames"));
+    }
     ui.destroy();
 }
 

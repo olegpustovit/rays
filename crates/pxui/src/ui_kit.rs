@@ -141,8 +141,18 @@ pub fn toggle_control(r: IRect) -> IRect {
     (x + w - SIDE - 28, y + (h - 14) / 2, 28, 14)
 }
 
+/// The hit shape of a control on its row; one closure per shape for the thread's life.
 pub fn control_hit(shape: fn(IRect) -> IRect) -> HitFn {
-    Rc::new(move |rect| floats(shape(ints(rect))))
+    thread_local! { static HITS: std::cell::RefCell<Vec<(usize, HitFn)>> = const { std::cell::RefCell::new(Vec::new()) }; }
+    HITS.with(|hits| {
+        let mut hits = hits.borrow_mut();
+        if let Some((_, hit)) = hits.iter().find(|(key, _)| *key == shape as usize) {
+            return hit.clone();
+        }
+        let hit: HitFn = Rc::new(move |rect| floats(shape(ints(rect))));
+        hits.push((shape as usize, hit.clone()));
+        hit
+    })
 }
 
 pub fn fraction_at(r: IRect, pointer_x: f32) -> f32 {
@@ -708,7 +718,7 @@ impl Ui {
         let gap = if self.last_child_of_parent() == NONE { 4.0 } else { 0.0 };
         let row = self.box_(text, BoxOpts::default().flags(NO_FLAGS).w(Size::Grow).h(Size::Px(gap + self.row_height() as f32)));
         let theme = self.theme();
-        let shown = display(text);
+        let shown = self.cached_label(&row, 0, shown(text));
         self.draw(&row, move |paint, Rect { x, y, w: _, h }| {
             let cy = cap_y(paint, y + gap, h - gap);
             paint.cap((x + SIDE as f32, cy), Some(theme::ink_2(&theme)), &shown);
@@ -752,8 +762,7 @@ impl Ui {
     /// padding to 4 points; `icon` makes it the 20-point square with its glyph centred; `at_end`
     /// puts the box at the row's end, 8 points from the edge; `ink` colours the text.
     pub fn button_with(&mut self, text: &str, bare: bool, icon: bool, at_end: bool, ink: Option<Color>) -> bool {
-        let shown = display(text);
-        let measure = self.text_width(None, &shown);
+        let measure = self.text_width(None, shown(text));
         // the box: a 1-point edge and 6 points of padding (4 when `bare`) round the text; an `icon`
         // is the 20-point control square with its glyph centred
         let width = if icon { 20.0 } else { measure + if bare { 10.0 } else { 14.0 } };
@@ -762,11 +771,9 @@ impl Ui {
             let bx = if at_end { x + w - 8.0 - width } else { x + 5.0 };
             Rect::new(bx, y + 2.0, 1.0f32.max(width.min(w - 10.0)), h - 4.0)
         };
-        let row = self.kit_row(
-            Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY | FOCUS_MARK),
-            Some(Rc::new(extent)),
-            text,
-        );
+        let row = self.kit_row(Some(CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY | FOCUS_MARK), None, text);
+        self.cached_hit(&row, (width.to_bits() as u64) << 1 | at_end as u64, || Rc::new(extent));
+        let shown = self.cached_label(&row, 0, shown(text));
         let signal = self.signal(&row);
         let theme = self.theme();
         let focus = self.focused(&row);
@@ -786,7 +793,7 @@ impl Ui {
             } else {
                 7.0
             };
-            let direction = match (icon, shown.as_str()) {
+            let direction = match (icon, &*shown) {
                 (true, "<") => Some(Dir::Left),
                 (true, ">") => Some(Dir::Right),
                 (true, "v") => Some(Dir::Down),
@@ -810,7 +817,7 @@ impl Ui {
         let signal = self.signal(&row);
         let value = if signal.clicked { !value } else { value };
         let theme = self.theme();
-        let shown = display(text);
+        let shown = self.cached_label(&row, 0, shown(text));
         let hovered = signal.hovered;
         let font_size = self.font_size();
         self.draw(&row, move |paint, rect| {

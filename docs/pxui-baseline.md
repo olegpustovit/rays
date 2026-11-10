@@ -30,3 +30,12 @@ state, one cargo process at a time. Re-run with `cargo t -p pxui window_pxui_bas
   `Ui::scene` only.
 - Draw calls: `batches()` counts batches, which is the draw count for the one UI layer; a clipped scroll
   list was not measured, only the plain panel.
+
+## After P2
+
+`window_pxui_baseline` now asserts 0 allocations per warm kit frame (it measures 0 B and about 2 us at
+2x, debug). The 15 were the per-frame `ui_batch` publication, `display` copies of labels, the hit
+closures of the toggle and button, and the text field's value copies; labels now live in the slot's
+cached labels, hit shapes are kept per shape or per slot, and `text_field` returns the new value only
+on the frames that change it. `gpu_parity_draw_calls` asserts one painter draw call per layer for the
+panel and for the clipped table. A focused text field still copies its value while editing.
