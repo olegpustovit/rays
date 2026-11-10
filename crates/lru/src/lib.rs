@@ -211,15 +211,16 @@ impl CacheState {
             self.entries.push(None);
             self.entries.len() - 1
         });
+        let hash = key.hash;
         self.entries[index] = Some(Entry {
-            key: key.clone(),
+            key,
             value,
             size,
             touched,
             newer: index,
             older: index,
         });
-        self.buckets.entry(key.hash).or_default().push(index);
+        self.buckets.entry(hash).or_default().push(index);
         self.length += 1;
         self.link_newest(index);
         self.add_charge(size);
