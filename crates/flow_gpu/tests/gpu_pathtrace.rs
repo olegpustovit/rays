@@ -1,4 +1,4 @@
-//! Ports of lib/flow_gpu/test_film.ml, test_resolve.ml and test_helpers.ml.
+//! Ports of ,  and .
 //! film: in-place read-modify-write accumulation through `bound`/`into` plus an RGBA8 resolve by
 //! the image sink, ties to even. resolve: `resolve_preview.rays` on the GPU matches the same
 //! arithmetic written out on the host. helpers: `pathtrace_helpers.rays` kernels on the GPU match

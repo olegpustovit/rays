@@ -12,4 +12,4 @@
 (defn fill-vectors :context value
   [(id : int) (out : (array int)) (bound : (array int)) (size : int)]
   (if (int/lt id (array/nth bound 0))
-    (gpu/store-int out id (array/nth bound (int/add 2 (int/mod id (array/nth bound 1))))) 0))
+    (gpu/store_int out id (array/nth bound (int/add 2 (int/mod id (array/nth bound 1))))) 0))

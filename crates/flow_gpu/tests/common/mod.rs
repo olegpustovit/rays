@@ -28,7 +28,9 @@ pub fn lease() -> ::renderer::renderer::Gpu {
 }
 
 fn select() {
+    #[cfg(not(target_os = "macos"))]
     use ogpu_core::impl_::Impl;
+
     #[cfg(windows)]
     ogpu_core::impl_::select(Impl {
         backend: ogpu_vulkan::impl_::BACKEND,
@@ -46,7 +48,8 @@ pub fn gpu() -> bool {
         return true;
     }
     if !cfg!(any(windows, target_os = "macos")) {
-        println!("skipped: no native OGPU implementation on this platform");
+        println!("RAYS_TEST_SKIP: skipped: no native OGPU implementation on this platform");
+        assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
         return false;
     }
     select();
@@ -56,7 +59,8 @@ pub fn gpu() -> bool {
             true
         }
         Err(e) if e.kind == ErrorKind::NoAdapter => {
-            println!("skipped: no device ({})", error::to_string(&e));
+            println!("RAYS_TEST_SKIP: skipped: no device ({})", error::to_string(&e));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             false
         }
         Err(e) => panic!("{}", error::to_string(&e)),

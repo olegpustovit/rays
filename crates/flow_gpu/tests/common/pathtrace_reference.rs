@@ -1,4 +1,4 @@
-//! Host arithmetic from test_helpers.ml and test_sampling.ml, independent of the Lisp evaluator.
+//! Host arithmetic from  and , independent of the Lisp evaluator.
 pub type V = [f64; 3];
 pub fn add(a: V, b: V) -> V { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
 pub fn sub(a: V, b: V) -> V { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
@@ -25,7 +25,9 @@ pub fn basis([nx, ny, nz]: V) -> (V, V) {
 pub fn close(name: &str, a: f64, b: f64, tolerance: f64) {
     assert!(!((a-b).abs() > tolerance * b.abs().max(1.0)), "{name}: {a:.9e} vs {b:.9e}");
 }
+#[allow(dead_code)] // Also used by the independently compiled helpers_reference fixture.
 pub fn d_ggx(noh: f64, a2: f64) -> f64 { let d = noh*noh*(a2-1.0)+1.0; a2/(std::f64::consts::PI*d*d) }
+#[allow(dead_code)] // Also used by the independently compiled helpers_reference fixture.
 pub fn v_smith(nov: f64, nol: f64, a2: f64) -> f64 {
     0.5 / (nol*(nov*nov*(1.0-a2)+a2).sqrt() + nov*(nol*nol*(1.0-a2)+a2).sqrt()).max(1e-6)
 }

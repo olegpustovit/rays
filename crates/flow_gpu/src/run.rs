@@ -15,10 +15,10 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex, Weak};
 use std::thread::ThreadId;
 
 /// Idle bytes kept for reuse: the pool's free list, and a host's display storage.
-pub const free_budget: i64 = 256 << 20;
-const free_idle_drains: i64 = 1024;
-pub const slot_shrink_after: i64 = 240;
-const slot_shrink_floor: i64 = 1 << 20;
+pub const FREE_BUDGET: i64 = 256 << 20;
+const FREE_IDLE_DRAINS: i64 = 1024;
+pub const SLOT_SHRINK_AFTER: i64 = 240;
+const SLOT_SHRINK_FLOOR: i64 = 1 << 20;
 
 static HELD_OWNER: LazyLock<mem::Owner> = LazyLock::new(|| mem::plan_in(mem::Pool::Device, "flow_gpu.held"));
 static FREE_OWNER: LazyLock<mem::Owner> = LazyLock::new(|| mem::cache_in(mem::Pool::Device, "flow_gpu.free"));
@@ -199,13 +199,13 @@ fn held_input(array: &Arc<Vec<f64>>, length: i64, uint32: bool) -> Option<Buffer
 #[derive(Clone, Copy, Debug)]
 enum Entry {
     /// uniform, offset, width
-    Uniform_at(usize, usize, usize),
+    UniformAt(usize, usize, usize),
     /// gather, offset
-    Gather_at(usize, usize),
-    Strands_at(usize),
-    Spheres_at(usize),
+    GatherAt(usize, usize),
+    StrandsAt(usize),
+    SpheresAt(usize),
     /// frame instruction, offset
-    Frame_at(usize, usize),
+    FrameAt(usize, usize),
 }
 
 fn entries(kernel: &Kernel) -> Vec<Entry> {
@@ -215,14 +215,14 @@ fn entries(kernel: &Kernel) -> Vec<Entry> {
         .map(|(name, offset, width)| {
             let (offset, width) = (*offset as usize, *width as usize);
             if let Some(rest) = name.strip_prefix("uniform:") {
-                Entry::Uniform_at(rest.parse().unwrap(), offset, width)
+                Entry::UniformAt(rest.parse().unwrap(), offset, width)
             } else {
                 let parts: Vec<&str> = name.split(':').collect();
                 match parts.as_slice() {
-                    ["gather", k, _] => Entry::Gather_at(k.parse().unwrap(), offset),
-                    ["scene", "strands"] => Entry::Strands_at(offset),
-                    ["scene", "spheres"] => Entry::Spheres_at(offset),
-                    ["frame", index, _] => Entry::Frame_at(index.parse().unwrap(), offset),
+                    ["gather", k, _] => Entry::GatherAt(k.parse().unwrap(), offset),
+                    ["scene", "strands"] => Entry::StrandsAt(offset),
+                    ["scene", "spheres"] => Entry::SpheresAt(offset),
+                    ["frame", index, _] => Entry::FrameAt(index.parse().unwrap(), offset),
                     _ => panic!("Run: uniform layout entry {name}"),
                 }
             }
@@ -241,8 +241,6 @@ struct PoolState {
     tick: i64,
     /// oldest first, by id
     retired: Vec<(i64, Weak<Token>)>,
-    /// bytes created by the pool's owner at its last requested cycle
-    collected_at: i64,
     /// live holders of closed runners: settled, unread, theirs until `close_pool`
     orphans: Vec<Weak<Token>>,
     created: i64,
@@ -265,7 +263,6 @@ pub fn pool() -> Pool {
             free_ages: HashMap::new(),
             tick: 0,
             retired: Vec::new(),
-            collected_at: 0,
             orphans: Vec::new(),
             created: 0,
             free_limit: 512 << 20,
@@ -294,7 +291,7 @@ fn drain_pool(pool: &Pool) {
         let stale: Vec<bool> = s
             .free
             .iter()
-            .map(|(buffer, _)| tick - s.free_ages.get(&b::buffer_id(buffer)).copied().unwrap_or(tick) > free_idle_drains)
+            .map(|(buffer, _)| tick - s.free_ages.get(&b::buffer_id(buffer)).copied().unwrap_or(tick) > FREE_IDLE_DRAINS)
             .collect();
         let free = std::mem::take(&mut s.free);
         let mut keep = vec![];
@@ -327,7 +324,7 @@ fn drain_pool(pool: &Pool) {
         let fits = |free: i64, limit: i64| free + capacity <= limit.max(8 * capacity);
         let (total, own) = s.free.iter().fold((0, 0), |(total, own), (_, c)| (total + c, if *c == capacity { own + c } else { own }));
         // a frame of big outputs must find its buffers again
-        if fits(own, free_budget) && fits(total, s.free_limit) {
+        if fits(own, FREE_BUDGET) && fits(total, s.free_limit) {
             mem::charge(&FREE_OWNER, capacity);
             // a dead buffer: under RAYS_MEM_CLOBBER a wrong lifetime reads NaN at once
             if mem::clobber() {
@@ -705,9 +702,9 @@ fn ensure(d: &Data, slot: &mut Slot, creations: &mut i64, mapped: bool, length: 
         }
     }
     // a slot that has asked for under a quarter of its size for this long comes back down
-    if length > 0 && length < slot.capacity / 4 && slot.capacity > slot_shrink_floor {
+    if length > 0 && length < slot.capacity / 4 && slot.capacity > SLOT_SHRINK_FLOOR {
         slot.low += 1;
-        if slot.low >= slot_shrink_after {
+        if slot.low >= SLOT_SHRINK_AFTER {
             if let Some(buffer) = &slot.buffer {
                 let _ = b::destroy_buffer(buffer);
             }
@@ -904,7 +901,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
     put_i32(&mut st.uniforms, 0, values.count as i32);
     for e in &d.layout {
         match *e {
-            Entry::Uniform_at(index, offset, width) => {
+            Entry::UniformAt(index, offset, width) => {
                 if index >= values.uniforms.len() || values.uniforms[index].len() != width {
                     return Err(e_kernel("GPU uniform type changed."));
                 }
@@ -917,7 +914,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                     }
                 }
             }
-            Entry::Gather_at(k, offset) => {
+            Entry::GatherAt(k, offset) => {
                 let (u, width) = kernel.gathers[k];
                 if u as usize >= values.tables.len() {
                     return Err(e_kernel("GPU gather table changed."));
@@ -928,9 +925,9 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                 };
                 put_i32(&mut st.uniforms, offset, (length / width) as i32);
             }
-            Entry::Strands_at(offset) => put_i32(&mut st.uniforms, offset, extras.strand_count as i32),
-            Entry::Spheres_at(offset) => put_i32(&mut st.uniforms, offset, o.scene.as_ref().map_or(0, |s| s.sphere_count) as i32),
-            Entry::Frame_at(index, offset) => {
+            Entry::StrandsAt(offset) => put_i32(&mut st.uniforms, offset, extras.strand_count as i32),
+            Entry::SpheresAt(offset) => put_i32(&mut st.uniforms, offset, o.scene.as_ref().map_or(0, |s| s.sphere_count) as i32),
+            Entry::FrameAt(index, offset) => {
                 if index >= values.frame.len() {
                     return Err(e_kernel("GPU frame uniform changed."));
                 }
@@ -943,7 +940,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
         }
     }
     let captures: Vec<usize> = d.layout.iter().flat_map(|e| match *e {
-        Entry::Uniform_at(_, offset, width) => (0..width).map(|c| offset + 4 * c).collect(),
+        Entry::UniformAt(_, offset, width) => (0..width).map(|c| offset + 4 * c).collect(),
         _ => vec![],
     }).collect();
     let compiled = pipelines::specialized(&d.pipelines, kernel, &captures, &st.uniforms).unwrap_or(compiled);
@@ -1300,10 +1297,10 @@ fn uint32_values(output: &Output, index: Option<i64>) -> Result<Vec<i64>, Diagno
 }
 
 /// `index` overrides the selected output (initially the first). Uint32 storage returns an exact
-/// `Int_array`, including values above 2^24 and through 2^32-1.
+/// `IntArray`, including values above 2^24 and through 2^32-1.
 pub fn readback(output: &Output, index: Option<i64>) -> Result<Value, Diagnostic> {
     if uint32_output(output, index) {
-        return uint32_values(output, index).map(|v| Value::Int_array(Arc::new(v)));
+        return uint32_values(output, index).map(|v| Value::IntArray(Arc::new(v)));
     }
     let contents = completed(output, index)?;
     let count = output.count as usize;
@@ -1819,7 +1816,7 @@ fn integer_holder(domain: ThreadId, planes: gpu::Planes, kept: Option<Rc<Kept>>)
     let resident = kept_id.map(|id| {
         let values = Arc::new(vec![id]);
         flow_ir::packed::host::register_integer_input(&values, input.as_ref().unwrap());
-        Value::Int_array(values)
+        Value::IntArray(values)
     });
     let (m, s) = (ops.clone(), ops.clone());
     Uint32Holder {
@@ -1857,7 +1854,7 @@ pub(crate) fn uint32_view(holder: &Uint32Holder, count: i64) -> Uint32Holder {
     let cache: Arc<Mutex<Option<Vec<i64>>>> = Arc::new(Mutex::new(None));
     let (h1, h2, h3) = (holder.clone(), holder.clone(), holder.clone());
     let (resident, input) = match (&holder.resident, &holder.input) {
-        (Some(Value::Int_array(old)), Some(input)) => {
+        (Some(Value::IntArray(old)), Some(input)) => {
             let values = Arc::new(vec![old[0], count]);
             let view = Arc::new(vec![input[0], count as f64]);
             let binding = BINDABLE.with(|b| b.borrow().iter().rev().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, input))).map(|(_, token, id, _)| (token.clone(), *id)));
@@ -1865,7 +1862,7 @@ pub(crate) fn uint32_view(holder: &Uint32Holder, count: i64) -> Uint32Holder {
                 BINDABLE.with(|b| b.borrow_mut().push((Arc::downgrade(&view), token, id, count)));
             }
             flow_ir::packed::host::register_integer_input(&values, &view);
-            (Some(Value::Int_array(values)), Some(view))
+            (Some(Value::IntArray(values)), Some(view))
         }
         _ => (None, None),
     };
@@ -2099,7 +2096,7 @@ pub mod private {
         s.free_ages.insert(b::buffer_id(&buffer), tick);
         s.free.push((buffer, bytes));
     }
-    pub const slot_shrink_after: i64 = super::slot_shrink_after;
+    pub const SLOT_SHRINK_AFTER: i64 = super::SLOT_SHRINK_AFTER;
     /// Holders freed unread (`release(false)`).
     pub fn pool_freed(pool: &Pool) -> i64 {
         pool.0.shared.freed.load(Ordering::SeqCst)
@@ -2805,9 +2802,9 @@ pub fn build_scene(caps: Option<&ogpu_core::caps::Caps>, gpu_: &renderer::render
     }
 }
 
-/// Idle bytes kept for reuse (see [`free_budget`]).
+/// Idle bytes kept for reuse (see [`FREE_BUDGET`]).
 pub fn free_budget_bytes() -> i64 {
-    free_budget
+    FREE_BUDGET
 }
 
 /// Physical identity of a runner.

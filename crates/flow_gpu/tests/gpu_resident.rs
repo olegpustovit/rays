@@ -1,4 +1,4 @@
-//! Native source map for lib/flow_gpu/test_run.ml (the runner half is gpu_run.rs):
+//! Native source map for  (the runner half is gpu_run.rs):
 //! 474–587 -> resident_fold (all six calls at 888–901, unchanged capacities/levels);
 //! 589–668 -> resident_value; 670–725 -> resident_history;
 //! 727–801 -> counted; 803–874 -> compaction; 876–966 -> host_counters.
@@ -74,7 +74,7 @@ fn fold_case(gpu: &renderer::renderer::Gpu, n: i64, levels: i64, keep: &str, slo
         let Seen::Invoke(Some(v)) = seen else { return };
         calls.fetch_add(1, Ordering::Relaxed);
         let block = match v {
-            Value::Int_array(a) => a.len(),
+            Value::IntArray(a) => a.len(),
             Value::Floats(1..=4, a) => a.len(),
             _ => usize::MAX,
         };
@@ -199,7 +199,7 @@ fn resident_state() {
     let state = flow_eval::create_state();
     let owner = mem::plan_in(mem::Pool::Device, "flow_gpu.held");
     let before = owner.bytes();
-    let mut last = Value::No_geo;
+    let mut last = Value::NoGeo;
     for frame in 0..32 {
         let live = input::Frame { frame, tick: frame, ..input::at_time(frame as f64 / 60.) };
         tp::ok(flow_eval::residual::bind_live(root, &live, Some(&state)));
@@ -227,7 +227,7 @@ fn resident_state() {
 
 fn same_identity(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Int_array(a), Value::Int_array(b)) => Arc::ptr_eq(a, b),
+        (Value::IntArray(a), Value::IntArray(b)) => Arc::ptr_eq(a, b),
         (Value::Floats(aw @ 1..=4, a), Value::Floats(bw, b)) if aw == bw => Arc::ptr_eq(a, b),
         _ => a == b,
     }

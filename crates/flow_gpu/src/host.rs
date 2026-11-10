@@ -635,7 +635,7 @@ pub(crate) struct Scope {
 fn raw(v: &Value) -> Option<usize> {
     match v {
         Value::Floats(1..=4, a) => Some(Arc::as_ptr(a) as usize),
-        Value::Int_array(a) => Some(Arc::as_ptr(a) as usize),
+        Value::IntArray(a) => Some(Arc::as_ptr(a) as usize),
         _ => None,
     }
 }
@@ -676,9 +676,6 @@ fn int_array_ty() -> Ty {
     Ty::Array(Box::new(Ty::Int))
 }
 
-fn fresh_site_slot() -> Rc<HSlot> {
-    new_slot(false)
-}
 
 /// What `planned`/`prepared` hand `invoke`: a region's inputs and its device bindings.
 struct Level {
@@ -758,7 +755,7 @@ impl Scope {
             Value::Floats(1..=4, a) => {
                 self.lookup(Arc::as_ptr(a) as usize).or_else(|| self.durable(v))
             }
-            Value::Int_array(a) => self.lookup(Arc::as_ptr(a) as usize),
+            Value::IntArray(a) => self.lookup(Arc::as_ptr(a) as usize),
             _ => None,
         }
     }
@@ -810,14 +807,14 @@ impl Scope {
     /// `length` (`capacity`), so it costs no host memory by its size.
     fn placeholder(&self, counted: bool, known: bool, clamped: i64, origin: Option<(Buffer, i64, i64)>, slot: &Rc<HSlot>, ty: &Ty, buffer: (Buffer, i64), cell: Option<(Buffer, i64)>, length: i64) -> Value {
         let v = match ty {
-            Ty::Array(inner) if **inner == Ty::Int => Value::Int_array(Arc::new(vec![0])),
+            Ty::Array(inner) if **inner == Ty::Int => Value::IntArray(Arc::new(vec![0])),
             Ty::Array(inner) if **inner == Ty::Float => Value::Floats(1, Arc::new(vec![0.0])),
             Ty::Array(inner) if **inner == Ty::Vec2 => Value::Floats(2, Arc::new(vec![0.0; 2])),
             Ty::Array(inner) if **inner == Ty::Vec3 => Value::Floats(3, Arc::new(vec![0.0; 3])),
             _ => Value::Floats(4, Arc::new(vec![0.0; 4])),
         };
         let kind = match &v {
-            Value::Int_array(_) => 0,
+            Value::IntArray(_) => 0,
             other => kind_of(other),
         };
         let p = Rc::new(Placeholder {
@@ -846,7 +843,7 @@ impl Scope {
     fn integer_source(&self, code: &[Instruction], source: i64) -> bool {
         self.uint32
             && code.iter().any(|c| match flow_shader::trace::flat(c).1 {
-                Instruction::Int_input(i) => *i == source,
+                Instruction::IntInput(i) => *i == source,
                 _ => false,
             })
     }
@@ -1021,8 +1018,8 @@ impl Scope {
         let mut tables: Vec<i64> = vec![];
         for code in packed.code.iter() {
             match flow_shader::trace::flat(code).1 {
-                Instruction::Int_input(i) => inputs.push(*i),
-                Instruction::Array_prepare(u, Ty::Array(inner)) if **inner == Ty::Int => tables.push(*u),
+                Instruction::IntInput(i) => inputs.push(*i),
+                Instruction::ArrayPrepare(u, Ty::Array(inner)) if **inner == Ty::Int => tables.push(*u),
                 _ => {}
             }
         }
@@ -1180,7 +1177,7 @@ impl Scope {
         for s in 0..plan.plan_sources.len() {
             let (i, mul, div) = match &plan.plan_sources[s] {
                 phost::Argument::Argument(i) => (*i, 1, 1),
-                phost::Argument::Argument_range(i, mul, div) => (*i, *mul, *div),
+                phost::Argument::ArgumentRange(i, mul, div) => (*i, *mul, *div),
             };
             let arg = &args[i as usize];
             match self.find(arg) {
@@ -1217,7 +1214,7 @@ impl Scope {
         for s in 0..plan.plan_sources.len() {
             bound_arrays.push(match &plan.plan_sources[s] {
                 phost::Argument::Argument(i) => self.bound(&args[*i as usize]),
-                phost::Argument::Argument_range(..) => self.iota(Some(self.integer_source(&code, s as i64)), n),
+                phost::Argument::ArgumentRange(..) => self.iota(Some(self.integer_source(&code, s as i64)), n),
             });
         }
         let mut bound_tables: Vec<Option<(Buffer, i64)>> = vec![];
@@ -1759,7 +1756,7 @@ impl Scope {
         let integer = self.s.borrow().integers.iter().find(|(k, _)| *k == p.key).map(|(_, h)| h.clone());
         let float = self.s.borrow().floats.iter().find(|(k, _)| *k == p.key).map(|(_, h)| h.clone());
         if let Some(holder) = integer {
-            return Ok(Value::Int_array(Arc::new((holder.materialise)()?)));
+            return Ok(Value::IntArray(Arc::new((holder.materialise)()?)));
         }
         if let Some(holder) = float {
             return self.host_of_planes(&holder);
@@ -1774,12 +1771,12 @@ impl Scope {
         if p.uint32 {
             let values = run::read_uint32(&self.queue, &p.buffer.0, epoch, length)?;
             t.0.resident_payload_bytes.set(t.0.resident_payload_bytes.get() + length * 4);
-            return Ok(Value::Int_array(Arc::new(values)));
+            return Ok(Value::IntArray(Arc::new(values)));
         }
         let xs = run::read_floats(&self.queue, &p.buffer.0, epoch, length * width)?;
         t.0.resident_payload_bytes.set(t.0.resident_payload_bytes.get() + length * width * 4);
         Ok(match v {
-            Value::Int_array(_) => Value::Int_array(Arc::new(xs.iter().map(|x| *x as i64).collect())),
+            Value::IntArray(_) => Value::IntArray(Arc::new(xs.iter().map(|x| *x as i64).collect())),
             Value::Floats(width, _) => Value::Floats(*width, Arc::new(xs)),
             _ => Value::Floats(4, Arc::new(xs)),
         })
@@ -1911,7 +1908,7 @@ impl Scope {
                 let Some(buffer) = self.iota(Some(self.uint32 && integer), length) else { return Ok(None) };
                 let (kind, a) = match ty {
                     Ty::Array(i) if **i == Ty::Float => (1, Value::Floats(1, Arc::new(vec![0.0]))),
-                    _ => (0, Value::Int_array(Arc::new(vec![0]))),
+                    _ => (0, Value::IntArray(Arc::new(vec![0]))),
                 };
                 let mut copy = p.copy();
                 copy.key = raw(&a).unwrap();
@@ -2520,7 +2517,7 @@ fn return_display_buffer(t: &T, bytes: i64, out: &Buffer) {
         let bs = t.0.buffers.borrow();
         (bs.get(&bytes).map_or(0, |v| v.len()), bs.contains_key(&bytes), bs.len(), bs.iter().map(|(size, v)| size * v.len() as i64).sum::<i64>())
     };
-    if live(t) && free_len < 4 && (known || sizes < 64) && idle + bytes <= run::free_budget.max(4 * bytes) {
+    if live(t) && free_len < 4 && (known || sizes < 64) && idle + bytes <= run::FREE_BUDGET.max(4 * bytes) {
         t.0.buffers.borrow_mut().entry(bytes).or_default().push(out.clone());
     } else {
         destroy_owned(&DISPLAY_OWNER, out);

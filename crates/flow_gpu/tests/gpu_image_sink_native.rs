@@ -71,7 +71,7 @@ fn parity(name: &str, width: i64, height: i64, time: f64, actual: &[u8], expecte
     println!("image_sink,{name},{width},{height},{time:.2},{maximum},{channels},{pixels}");
     assert!(maximum <= 1, "{name}: max channel difference {maximum}");
 }
-fn source(output: &s::Output) -> i::gpu_source_fn {
+fn source(output: &s::Output) -> i::GpuSourceFn {
     let output = output.clone();
     Rc::new(move || s::texture(&output))
 }
@@ -81,8 +81,8 @@ fn snapshot(canvas: &canvas::Canvas) -> Vec<u8> {
     image::destroy(&captured).unwrap();
     bytes
 }
-fn render(canvas: &canvas::Canvas, nodes: &[scene::node]) { canvas::render(None, canvas, nodes).unwrap(); }
-fn checked(nodes: &[scene::node]) -> Rc<scene::layer::staged_native> {
+fn render(canvas: &canvas::Canvas, nodes: &[scene::Node]) { canvas::render(None, canvas, nodes).unwrap(); }
+fn checked(nodes: &[scene::Node]) -> Rc<scene::layer::StagedNative> {
     scene::layer::stage_native_render_checked(None, 65, 17, nodes).unwrap_or_else(|e| {
         let mut message = String::new();
         scene::layer::pp_native_error(&mut message, &e);
@@ -215,7 +215,7 @@ fn qualified_publication() {
     let segment = builder.publish(scene_command::display_list::fresh_id().unwrap(), 0).unwrap();
     for (index, nodes) in [vec![node.clone()], vec![scene::display_list(Some(vec![(1, image.clone())]), segment).unwrap()], vec![node.clone(), scene::layer::layer_break(), node.clone()]].into_iter().enumerate() {
         let rendering = scene::layer::stage_native_render(65, 17, &nodes).unwrap();
-        if nodes.len() > 1 || matches!(rendering.layers.as_slice(), [scene::layer::native_layer::Scene2_segment(..)]) { assert!(rendering.resources.is_empty()); }
+        if nodes.len() > 1 || matches!(rendering.layers.as_slice(), [scene::layer::NativeLayer::Scene2Segment(..)]) { assert!(rendering.resources.is_empty()); }
         let coordinator = rr::create_offscreen(&rr::Configuration { logical_width: 65, logical_height: 17, drawable_width: 65, drawable_height: 17, ..rr::default_configuration() }).unwrap();
         let staged = scene::layer::stage_native(65, 17, &nodes).unwrap();
         let lower = || rr::lower_scene2(&coordinator, 1, &|id| staged.resources.iter().find(|(key, _)| *key == id).map(|(_, resource)| resource.clone()), &staged.scene2);
@@ -261,20 +261,20 @@ fn qualified_publication() {
     host::close(&host);
 }
 
-fn image_scene(image: &image::Image) -> Vec<scene::node> {
+fn image_scene(image: &image::Image) -> Vec<scene::Node> {
     vec![scene::clear(color::black()), scene::image(image, (0, 0), None, None).unwrap()]
 }
-fn mesh_scene(texture: &texture::Texture, viewport: Option<(i64, i64, i64, i64)>) -> Vec<scene::node> {
+fn mesh_scene(texture: &texture::Texture, viewport: Option<(i64, i64, i64, i64)>) -> Vec<scene::Node> {
     let mesh = rays::mesh::plane(2.0 * 65.0 / 17.0, 2.0).unwrap();
     let camera = rays::camera::orthographic(2.0, vec3::create(0.0, 0.0, 2.0), vec3::zero()).unwrap();
-    let mesh = scene3::mesh(Some(rays::material::matte(color::white())), Some(scene3::textured(Some(texture::filter::Nearest), texture.clone())), None, Some(scene3::cull::Cull_none), None, mesh);
+    let mesh = scene3::mesh(Some(rays::material::matte(color::white())), Some(scene3::textured(Some(texture::Filter::Nearest), texture.clone())), None, Some(scene3::Cull::CullNone), None, mesh);
     let world = scene3::create(None, Some(color::white()), None, None, vec![mesh]).unwrap();
     vec![scene::clear(color::black()), scene::view3d(viewport, &camera, world)]
 }
-fn mixed(image: &image::Image, texture: &texture::Texture) -> Vec<scene::node> {
+fn mixed(image: &image::Image, texture: &texture::Texture) -> Vec<scene::Node> {
     vec![scene::clear(color::black()), scene::group(vec![scene::image(image, (0, 0), None, None).unwrap()]), scene::layer::layer_break(), scene::group(mesh_scene(texture, Some((33, 0, 32, 17))).into_iter().skip(1).collect())]
 }
-fn verify_resident(canvas: &canvas::Canvas, current: &i::Image, scenes: &[Vec<scene::node>], converted: &s::Output, width: i64, height: i64, time: f64) {
+fn verify_resident(canvas: &canvas::Canvas, current: &i::Image, scenes: &[Vec<scene::Node>], converted: &s::Output, width: i64, height: i64, time: f64) {
     let bytes = pixels(converted, width);
     let reference_image = image::upload_rgba(None, width, height, &bytes).unwrap();
     let colors = bytes.chunks_exact(4).map(|p| color::rgba(p[0] as i64, p[1] as i64, p[2] as i64, p[3] as i64)).collect();
@@ -297,10 +297,10 @@ fn verify_resident(canvas: &canvas::Canvas, current: &i::Image, scenes: &[Vec<sc
     }
     image::destroy(&reference_image).unwrap();
 }
-fn expire(canvas: &canvas::Canvas, current: &i::Image, scenes: &[Vec<scene::node>]) {
+fn expire(canvas: &canvas::Canvas, current: &i::Image, scenes: &[Vec<scene::Node>]) {
     for nodes in scenes {
         match scene::layer::stage_native_render_checked(None, 65, 17, nodes) {
-            Err(scene::layer::native_error::Resource(error)) => assert_eq!(error.kind, ErrorKind::Destroyed),
+            Err(scene::layer::NativeError::Resource(error)) => assert_eq!(error.kind, ErrorKind::Destroyed),
             Ok(_) => (),
             Err(e) => { let mut message = String::new(); scene::layer::pp_native_error(&mut message, &e); panic!("resident expiry staging: {message}"); }
         }
@@ -359,7 +359,7 @@ fn resident_consumers() {
     i::replace_gpu_source(&current, 17, 5, source(&resized)).unwrap();
     i::replace(&current, 17, 5, &vec![255; 17 * 5 * 4]).unwrap();
     assert!(texture::of_image(&current).is_err());
-    assert!(matches!(scene::layer::stage_native_render_checked(None, 65, 17, &meshed), Err(scene::layer::native_error::Message(message)) if message.ends_with("borrowed GPU texture needs an explicit CPU snapshot")));
+    assert!(matches!(scene::layer::stage_native_render_checked(None, 65, 17, &meshed), Err(scene::layer::NativeError::Message(message)) if message.ends_with("borrowed GPU texture needs an explicit CPU snapshot")));
     assert_eq!(i::readbacks(&current), 1);
     i::replace_gpu_source(&current, 17, 5, source(&resized)).unwrap();
     assert_eq!(texture::private::identity(&view), identity);

@@ -2,7 +2,7 @@
 (defn write-indices :context value [(id : int) (output : (array int))
                                   (bound : (array int)) (size : int)]
   (if (int/lt id (array/nth bound 0))
-    (gpu/store-int output id (if (int/eq (array/nth bound 1) 0) id (array/nth bound 2))) 0))
+    (gpu/store_int output id (if (int/eq (array/nth bound 1) 0) id (array/nth bound 2))) 0))
 
 (defn write-float-indices :context value [(id : int) (output : (array float))
                                          (bound : (array int)) (size : int)]

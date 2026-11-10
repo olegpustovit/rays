@@ -42,7 +42,7 @@ fn native(stream: &gpu::Integers) -> &run::Uint32Holder {
 }
 fn ints(v: &Value) -> Vec<i64> {
     match v {
-        Value::Int_array(a) => (**a).clone(),
+        Value::IntArray(a) => (**a).clone(),
         _ => panic!("int array expected"),
     }
 }
@@ -227,9 +227,9 @@ fn kinds_of_values() {
                         let fields: Vec<(flow_syntax::symbol::Symbol, Box<dyn Fn() -> Value>)> = fields.iter().map(|(k, v)| (k.clone(), capture(scope, v))).collect();
                         Box::new(move || Value::Record(fields.iter().map(|(k, make)| (k.clone(), make())).collect::<Vec<_>>().into()))
                     }
-                    Value::Int_array(_) => {
+                    Value::IntArray(_) => {
                         let holder = scope.retain_uint32(v).expect("uint32 holder");
-                        Box::new(move || Value::Int_array(Arc::new(holder.materialise().unwrap())))
+                        Box::new(move || Value::IntArray(Arc::new(holder.materialise().unwrap())))
                     }
                     Value::Floats(1..=4, _) => {
                         let holder = scope.retain_float(v).expect("float holder");
@@ -437,7 +437,7 @@ fn topology() {
 /// uint32 outputs, inputs bound from a device buffer, gathers and scalars
 fn outputs() {
     let Some((lease, pipes)) = setup() else { return };
-    let lv = live(0.0);
+    let _lv = live(0.0);
     for expression in ["(+ (+ i 16777217) (int t))", "(+ 2147483647 (int/mod (int t) 1))", "(int/mod (+ i (int t)) 2)"] {
         let packed = program(expression);
         let msl = u32_kernel(&packed);
@@ -568,7 +568,7 @@ fn resident_inputs() {
         let mut inputs = prepare(&consumer, 0.);
         if gather {
             let u = consumer.code.iter().find_map(|c| match c {
-                flow_ir::core_ir::region::Instruction::Array_prepare(u, _) => Some(*u as usize), _ => None,
+                flow_ir::core_ir::region::Instruction::ArrayPrepare(u, _) => Some(*u as usize), _ => None,
             }).expect("integer table capture");
             inputs.tables[u] = numeric.clone();
         } else { inputs.arrays[0] = numeric.clone(); }

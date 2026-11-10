@@ -312,7 +312,7 @@ fn slot_shrink_hysteresis() {
         let big = prepare(&fixture("arithmetic", 400_000));
         let shrinking = run::create_owned(None, device, queue, cache, kernel);
         tp::ok(dispatch(&shrinking, &big)); let grown = run::private::buffer_creations(&shrinking);
-        for _ in 0..run::private::slot_shrink_after { tp::ok(dispatch(&shrinking, values)); }
+        for _ in 0..run::private::SLOT_SHRINK_AFTER { tp::ok(dispatch(&shrinking, values)); }
         assert!(run::private::buffer_creations(&shrinking) > grown);
         let stable = run::private::buffer_creations(&shrinking);
         for _ in 0..16 { tp::ok(dispatch(&shrinking, values)); }

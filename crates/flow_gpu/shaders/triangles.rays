@@ -23,8 +23,8 @@
             (if (and (> x epsilon) (and (> y epsilon) (> z epsilon))) 0 -1)))
         -1))))
 (defn put-triangle :context value [(out : (array int)) (at : int) (a : int) (b : int) (c : int)]
-  (int/add (gpu/store-int out at a)
-    (int/add (gpu/store-int out (int/add at 1) b) (gpu/store-int out (int/add at 2) c))))
+  (int/add (gpu/store_int out at a)
+    (int/add (gpu/store_int out (int/add at 1) b) (gpu/store_int out (int/add at 2) c))))
 (defn quad :context value [(p : (array float)) (out : (array int)) (at : int)
                            (ia : int) (ib : int) (ic : int) (id : int)]
   (let* [a (at3 p ia) b (at3 p ib) c (at3 p ic) d (at3 p id)
@@ -84,6 +84,6 @@
            (fold [acc 0] [chunk (range chunks)]
              (let* [i (int/add lane (int/mul chunk size))]
                (int/add acc (if (int/lt i groups) (array/nth blocks i) 0)))))
-         prefix (gpu/group-scan failed)]
+         prefix (gpu/group_scan failed)]
     (if (int/eq lane 0)
-      (if (int/eq pass 0) (gpu/store-int blocks group prefix.total) (gpu/store-int status 0 prefix.total)) 0)))
+      (if (int/eq pass 0) (gpu/store_int blocks group prefix.total) (gpu/store_int status 0 prefix.total)) 0)))

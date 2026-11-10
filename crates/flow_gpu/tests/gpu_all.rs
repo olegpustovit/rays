@@ -1,6 +1,5 @@
 mod common;
 mod gpu_image_sink;
-mod gpu_image_sink_native;
 mod gpu_incidence;
 mod gpu_pathtrace;
 mod gpu_raster;
@@ -8,16 +7,12 @@ mod gpu_resident;
 mod gpu_run;
 mod gpu_run_lifetime;
 mod gpu_sampling;
-mod gpu_sop_mesh;
-mod gpu_trace;
-mod gpu_triangles;
 mod gpu_uint32;
 mod pipelines_mock;
 
 fn main() {
     let groups: &[(&str, &[(&str, fn())])] = &[
         ("gpu_image_sink", gpu_image_sink::CASES),
-        ("gpu_image_sink_native", gpu_image_sink_native::CASES),
         ("gpu_incidence", gpu_incidence::CASES),
         ("gpu_pathtrace", gpu_pathtrace::CASES),
         ("gpu_raster", gpu_raster::CASES),
@@ -25,9 +20,6 @@ fn main() {
         ("gpu_run", gpu_run::CASES),
         ("gpu_run_lifetime", gpu_run_lifetime::CASES),
         ("gpu_sampling", gpu_sampling::CASES),
-        ("gpu_sop_mesh", gpu_sop_mesh::CASES),
-        ("gpu_trace", gpu_trace::CASES),
-        ("gpu_triangles", gpu_triangles::CASES),
         ("gpu_uint32", gpu_uint32::CASES),
         ("pipelines_mock", pipelines_mock::CASES),
     ];

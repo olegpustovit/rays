@@ -2,7 +2,7 @@
 ; width (bound[5]) apart, in an iterate (a range fold stops at 4,096 rows a lane); each group's nine
 ; collective sums make a 36-byte record at group x 9, and the host ORs the records.
 (defmacro check-bit [flags bit]
-  `(gpu/group-scan (if (int/eq (int/and ~flags ~bit) 0) 0 1)))
+  `(gpu/group_scan (if (int/eq (int/and ~flags ~bit) 0) 0 1)))
 (defn topology-check :context value
   [(id : int) (vertices : (array int)) (offsets : (array int)) (kinds : (array int))
    (out : (array int)) (bound : (array int)) (size : int)]
@@ -41,9 +41,9 @@
          at (int/mul (int/div id size) 9)]
     (if (int/eq (int/mod id size) 0)
       (int/add
-        (int/add (int/add (gpu/store-int out at a.total) (gpu/store-int out (int/add at 1) b.total))
-                 (int/add (gpu/store-int out (int/add at 2) c.total) (gpu/store-int out (int/add at 3) d.total)))
-        (int/add (int/add (gpu/store-int out (int/add at 4) e.total) (gpu/store-int out (int/add at 5) f.total))
-                 (int/add (gpu/store-int out (int/add at 6) g.total)
-                          (int/add (gpu/store-int out (int/add at 7) h.total) (gpu/store-int out (int/add at 8) j.total)))))
+        (int/add (int/add (gpu/store_int out at a.total) (gpu/store_int out (int/add at 1) b.total))
+                 (int/add (gpu/store_int out (int/add at 2) c.total) (gpu/store_int out (int/add at 3) d.total)))
+        (int/add (int/add (gpu/store_int out (int/add at 4) e.total) (gpu/store_int out (int/add at 5) f.total))
+                 (int/add (gpu/store_int out (int/add at 6) g.total)
+                          (int/add (gpu/store_int out (int/add at 7) h.total) (gpu/store_int out (int/add at 8) j.total)))))
       0)))
