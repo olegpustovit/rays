@@ -207,7 +207,8 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         KERNEL_ENTRY.iter().any(|(file, entry)| path.ends_with(file) && name.text == *entry)
             .then(|| function_body(&tokens, index).map(|(body, _)| (index, body)))?
     }).collect();
-    let unsafe_allowed = crate_name.ends_with("_sys") || policy::UNSAFE_CRATES.contains(&crate_name);
+    let unsafe_allowed = crate_name.ends_with("_sys") || policy::UNSAFE_CRATES.contains(&crate_name)
+        || policy::UNSAFE_FILES.iter().any(|(file, _)| *file == path);
     let mut issues = Vec::new();
 
     for (index, token) in tokens.iter().enumerate() {
@@ -1401,6 +1402,13 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn shape_gate_allows_unsafe_only_in_listed_files() {
+        let source = "fn f() { unsafe { g() } }";
+        assert!(shape_source("pxui", "crates/pxui/src/arena.rs", source).is_empty());
+        assert!(!shape_source("pxui", "crates/pxui/src/other.rs", source).is_empty());
+    }
 
     #[test]
     fn dependency_gate_resolves_workspace_dependencies_and_rejects_prohibited_edges() {

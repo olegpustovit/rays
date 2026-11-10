@@ -241,3 +241,9 @@ pub const UNSAFE_CRATES: &[&str] = &[
     "pxui_wayland", // pxui: owns its C shim and the extern block over it, like a *_sys crate
     "pxui_atspi", // pxui: likewise, over libdbus-1
 ];
+
+/// Files besides those of `UNSAFE_CRATES` that may use `unsafe`, each with its reason.
+pub const UNSAFE_FILES: &[(&str, &str)] = &[
+    ("crates/pxui/src/arena.rs", "frame bump arena: canvas closures are written into raw bytes and called through type-erased records"), // pxui
+    ("crates/pxui_render/src/lib.rs", "writes instance bytes into the host-mapped upload ring and views instance structs as bytes"), // pxui
+];

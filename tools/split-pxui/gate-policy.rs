@@ -71,3 +71,9 @@ pub const DOCS_CHECKS: &[(&str, &str, Option<&str>)] = &[];
 
 /// Crates besides `*_sys` that may use `unsafe`.
 pub const UNSAFE_CRATES: &[&str] = &["pxui_wayland", "pxui_atspi"]; // own their C shims and the extern blocks over them, like *_sys crates
+
+/// Files besides those of `UNSAFE_CRATES` that may use `unsafe`, each with its reason.
+pub const UNSAFE_FILES: &[(&str, &str)] = &[
+    ("crates/pxui/src/arena.rs", "frame bump arena: canvas closures are written into raw bytes and called through type-erased records"),
+    ("crates/pxui_render/src/lib.rs", "writes instance bytes into the host-mapped upload ring and views instance structs as bytes"),
+];

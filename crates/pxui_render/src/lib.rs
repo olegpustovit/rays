@@ -344,13 +344,13 @@ impl Painter {
     /// Globals at `start`: target size in points, the first-instance offset, then the view table.
     fn write_header(&self, start: usize, size_px: [u32; 2], scale: f32, first: u32) {
         let globals = [size_px[0] as f32 / scale, size_px[1] as f32 / scale, f32::from_bits(first), 0.0];
-        self.write(start, &as_bytes::<16>(&globals));
+        self.write_floats(start, &globals);
         for (i, v) in self.views[..self.views_len].iter().enumerate() {
             let record = [
                 v.offset[0], v.offset[1], v.opacity, v.scale, v.clip[0], v.clip[1], v.clip[2], v.clip[3],
                 v.transform[0], v.transform[1], v.transform[2], v.transform[3], v.pivot[0], v.pivot[1], 0.0, 0.0,
             ];
-            self.write(start + 16 + i * VIEW_BYTES, &as_bytes::<VIEW_BYTES>(&record));
+            self.write_floats(start + 16 + i * VIEW_BYTES, &record);
         }
     }
 
@@ -363,6 +363,10 @@ impl Painter {
         backend::set_stage_texture(pass, ShaderStage::Fragment, 2, &self.mask)?;
         backend::set_stage_sampler(pass, ShaderStage::Fragment, 4, &self.sampler)?;
         backend::set_stage_texture(pass, ShaderStage::Fragment, 5, &self.color)
+    }
+
+    fn write_floats(&self, at: usize, floats: &[f32]) {
+        for (i, f) in floats.iter().enumerate() { self.write(at + 4 * i, &f.to_le_bytes()); }
     }
 
     fn write(&self, at: usize, bytes: &[u8]) {
@@ -463,8 +467,8 @@ impl Painter {
         let start = self.reserve(2 * ALIGN)?;
         let pass_one = [x0 as f32 / sw, y0 as f32 / sh, (x1 - x0) as f32 / sw, (y1 - y0) as f32 / sh, down as f32 / sw, 0.0, sigma, radius];
         let pass_two = [0.0, 0.0, 1.0, 1.0, 0.0, 1.0 / h, sigma, radius];
-        self.write(start, &as_bytes::<32>(&pass_one));
-        self.write(start + ALIGN, &as_bytes::<32>(&pass_two));
+        self.write_floats(start, &pass_one);
+        self.write_floats(start + ALIGN, &pass_two);
         backend::flush_host_range(&self.ring, start as i64, 2 * ALIGN)?;
         let blur = self.blur.as_ref().expect("created above");
         for (i, (src, dst)) in [(source, &blur.a), (&blur.a, &blur.b)].into_iter().enumerate() {
@@ -575,12 +579,6 @@ impl Painter {
         }
         Ok(())
     }
-}
-
-fn as_bytes<const N: usize>(floats: &[f32]) -> [u8; N] {
-    let mut out = [0u8; N];
-    for (chunk, f) in out.chunks_exact_mut(4).zip(floats) { chunk.copy_from_slice(&f.to_le_bytes()); }
-    out
 }
 
 impl Drop for Painter {
