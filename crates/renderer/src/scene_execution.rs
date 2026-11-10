@@ -59,6 +59,8 @@ pub struct GpuVerticesData {
     pub indirect: Option<(Buffer, i64)>,
     pub indices: Option<(Buffer, i64)>,
     pub colors: Option<(Buffer, i64)>,
+    /// the producer's stamp of the index content: equal nonzero stamps promise equal indices; 0 promises nothing
+    pub topology: Cell<u64>,
     pub valid: Box<dyn Fn() -> bool>,
     pub active: Cell<bool>,
 }
@@ -150,6 +152,7 @@ pub fn register_gpu_vertices(
         indirect,
         indices,
         colors,
+        topology: Cell::new(0),
         domain: thread_id(),
         valid,
         active: Cell::new(true),
@@ -3462,6 +3465,14 @@ pub mod private {
         match found {
             Some(source) if gpu_vertices_valid(&source) => Some((source.indices.clone(), source.colors.clone())),
             _ => None,
+        }
+    }
+
+    /// A live, valid registration's producer-owned index-content stamp (0: none).
+    pub fn find_gpu_topology(owner: &super::GpuVerticesOwner, key: &str) -> u64 {
+        match owner.borrow().gpu_vertex_registry.get(key) {
+            Some(source) if gpu_vertices_valid(source) => source.topology.get(),
+            _ => 0,
         }
     }
 

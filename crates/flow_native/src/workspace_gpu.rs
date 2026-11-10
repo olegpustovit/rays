@@ -193,6 +193,8 @@ pub struct Data {
     bound: RefCell<HashMap<String, (i64, Rc<dyn Fn()>)>>,
     /// a live display by its geometry's data id
     shown: RefCell<HashMap<i64, Shown>>,
+    /// the last all-triangle topology streams shown and the stamp their index content was given
+    topology: RefCell<Option<(Arc<G::Integers>, Arc<G::Integers>, Arc<G::Integers>, u64)>>,
     frames: Cell<i64>,
     /// dropped displays, released at a later `frame`
     releasing: RefCell<Vec<(i64, Rc<dyn Fn()>)>>,
@@ -240,6 +242,7 @@ pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> WorkspaceGpu
         display_refusal: RefCell::new(None),
         bound: RefCell::new(HashMap::new()),
         shown: RefCell::new(HashMap::new()),
+        topology: RefCell::new(None),
         frames: Cell::new(0),
         releasing: RefCell::new(Vec::new()),
     });
@@ -1113,6 +1116,7 @@ pub fn display(t_: &WorkspaceGpu, geometry: &rdk_core::geometry::T) -> Option<(S
         buffer
     };
     let topology = rdk_core::geometry::topology(geometry);
+    let stamp = Cell::new(0u64);
     let bound = (|| -> Result<(String, bool, Option<i64>, i64, Box<dyn Fn()>), String> {
         let buffer = pin(&positions)?;
         let normals = match rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Point, "N", geometry) {
@@ -1146,6 +1150,20 @@ pub fn display(t_: &WorkspaceGpu, geometry: &rdk_core::geometry::T) -> Option<(S
                 None if !rdk_core::topology::resident(topology) && rdk_core::topology::all_triangles(topology).unwrap_or(false) => None,
                 None => return Err("Topology is unavailable as resident triangle/quad streams.".to_owned()),
                 Some((vertices, offsets, kinds)) => {
+                    // All-triangle indices are a function of the topology streams alone, so the same streams
+                    // keep one stamp; quads split by the current positions and take none.
+                    // ponytail: pointer identity of the last streams only; a content hash if topology streams are rebuilt per frame
+                    if vertices.count == 3 * kinds.count {
+                        let mut last = d.topology.borrow_mut();
+                        match &*last {
+                            Some((v, o, k, n)) if Arc::ptr_eq(v, &vertices) && Arc::ptr_eq(o, &offsets) && Arc::ptr_eq(k, &kinds) => stamp.set(*n),
+                            _ => {
+                                let n = last.as_ref().map_or(0, |l| l.3) + 1;
+                                *last = Some((vertices.clone(), offsets.clone(), kinds.clone(), n));
+                                stamp.set(n);
+                            }
+                        }
+                    }
                     let pins: Vec<Option<run::Pin>> = [&vertices, &offsets, &kinds].iter().map(|x| run::pin_integers(x)).collect();
                     let result = match (pins.get(0), pins.get(1), pins.get(2)) {
                         (Some(Some((v, nv, vv, _))), Some(Some((o, no, ov, _))), Some(Some((k, nk, kv, _)))) if vv() && ov() && kv() => {
@@ -1171,6 +1189,7 @@ pub fn display(t_: &WorkspaceGpu, geometry: &rdk_core::geometry::T) -> Option<(S
             indices.clone(),
             colors.clone(),
             count,
+            stamp.get(),
             Rc::new(move || !closed.get() && checks2.borrow().iter().all(|valid| valid())),
         )
         .map_err(|e| ogpu_core::error::to_string(&e))?;

@@ -211,7 +211,7 @@ fn resident() -> resident {
     backend::write_buffer(&device_indices, 0, &f.indices).unwrap();
     let alive = Rc::new(Cell::new(true));
     let valid = alive.clone();
-    let (key, unregister) = renderer::register_gpu_positions(&gpu, &positions, None, Some((device_indices.clone(), 3)), None, 3, Rc::new(move || valid.get())).unwrap();
+    let (key, unregister) = renderer::register_gpu_positions(&gpu, &positions, None, Some((device_indices.clone(), 3)), None, 3, 0, Rc::new(move || valid.get())).unwrap();
     resident { runtime, host, gpu, positions, device_indices, key, alive, unregister, f }
 }
 
@@ -285,6 +285,7 @@ fn resident_colors(width: usize) {
         Some((r.device_indices.clone(), 3)),
         Some((color_buffer.clone(), width as i64)),
         3,
+        0,
         Rc::new(|| true),
     ).unwrap();
     let mut white = uniform(true);
@@ -361,7 +362,7 @@ fn gpu_scene3_borrowed_stream_guards() {
     let device=renderer::gpu_device(&r.gpu);
     let colors=backend::create_buffer(&device,BufferDescriptor { label:Some("guard-colors".into()),size:36,usage:vec![BufferUsage::Vertex,BufferUsage::Storage,BufferUsage::CopyDst] },None).unwrap();
     backend::write_buffer(&colors,0,&[1f32.to_le_bytes();9].concat()).unwrap();
-    let (key,unregister)=renderer::register_gpu_positions(&r.gpu,&r.positions,None,Some((r.device_indices.clone(),3)),Some((colors.clone(),3)),3,Rc::new(|| true)).unwrap();
+    let (key,unregister)=renderer::register_gpu_positions(&r.gpu,&r.positions,None,Some((r.device_indices.clone(),3)),Some((colors.clone(),3)),3,0,Rc::new(|| true)).unwrap();
     let mut uniforms=uniform(true); set(&mut uniforms,79,1.);
     let colored=device_entry(&r,key.clone(),uniforms.clone(),"resident-colors",Vec::new());
     check(colored);

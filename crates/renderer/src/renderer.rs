@@ -2001,12 +2001,21 @@ pub fn gpu_streams(gpu_: &Gpu, key: &str) -> Option<(Option<(Buffer, i64)>, Opti
     scene_execution::private::find_gpu_streams(&gpu_.0.owner.scene_vertices, key)
 }
 
+/// The producer's stamp of the indices borrowed under `key` (0: none, or the registration is gone).
+pub fn gpu_topology(gpu_: &Gpu, key: &str) -> u64 {
+    if gpu_.0.released.get() {
+        return 0;
+    }
+    scene_execution::private::find_gpu_topology(&gpu_.0.owner.scene_vertices, key)
+}
+
 /// Borrows another producer's `count` packed float3 positions (and normals) for a Scene3 mesh drawn
 /// from the device: the key a device mesh names and its unregistration (initial domain). The
 /// producer keeps the buffers while `valid`; a draw of a registration no longer valid is refused as
 /// stale. Optional `indices` borrows uint32 triangle indices with their settled count; `colors`
 /// borrows packed float3/float4 colours with their component width. At most 128 borrowed sources are
-/// live.
+/// live. `topology` is the producer's stamp of the index content (0 for none): while it stays equal and
+/// nonzero the indices promise the same triangles, whatever buffer holds them.
 pub fn register_gpu_positions(
     gpu_: &Gpu,
     positions: &Buffer,
@@ -2014,6 +2023,7 @@ pub fn register_gpu_positions(
     indices: Option<(Buffer, i64)>,
     colors: Option<(Buffer, i64)>,
     count: i64,
+    topology: u64,
     valid: Rc<dyn Fn() -> bool>,
 ) -> Result<(String, Box<dyn Fn()>), Error> {
     let operation = "Renderer.register_gpu_positions";
@@ -2035,5 +2045,6 @@ pub fn register_gpu_positions(
         count,
         Box::new(move || !lease.0.released.get() && valid()),
     )?;
+    registration.topology.set(topology);
     Ok((key, Box::new(move || scene_execution::private::unregister_gpu_vertices(&registration))))
 }

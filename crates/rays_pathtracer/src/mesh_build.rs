@@ -49,6 +49,8 @@ pub struct DeviceGpu {
     pub vertex_count: i64,
     pub material_key: Vec<u8>,
     pub vix: Buffer,
+    /// the producer's nonzero stamp of the borrowed index content and its corner count (0: host corners)
+    pub topology: (u64, i64),
     /// false: the producer's index stream
     pub owns_vix: bool,
     pub refit_scratch: Buffer,

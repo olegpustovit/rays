@@ -4,6 +4,7 @@ use common::meshes;
 use common::pt::{self, frames, get, pixels, rgb};
 use rays_math::{mat4, vec3};
 use rays_pathtracer::rays_pathtracer as p;
+use std::rc::Rc;
 
 fn black() -> p::Environment {
     p::Environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] }
@@ -79,6 +80,56 @@ fn live_updates() {
     }
     assert!(p::private::edits(&tracer) >= start + 2, "a live mesh never installed");
     p::destroy(&mut tracer);
+}
+
+/// A device mesh whose triangle indices live on the device (no host corners) refits in place while the
+/// producer's topology stamp holds, over a fresh index buffer and registration each frame.
+fn device_topology_refits() {
+    if !common::gpu() {
+        return;
+    }
+    use ogpu_core::backend;
+    use ogpu_core::types::{BufferDescriptor, BufferUsage};
+    let material = pt::material(rgb(0.8, 0.2, 0.2));
+    let scene = p::Scene { objects: vec![(objects().ball, material.clone())], spheres: vec![], strands: vec![], environment: black(), lights: vec![] };
+    let mut tracer = get(p::create(&Default::default(), 16, 16, &scene));
+    let camera = rays::camera::perspective(None, None, None, v3(0., 0., 5.), vec3::zero()).unwrap();
+    let device = renderer::renderer::gpu_device(&tracer.lease);
+    let make = |label: &str, bytes: &[u8]| {
+        let usage = vec![BufferUsage::Vertex, BufferUsage::Index, BufferUsage::Storage, BufferUsage::CopyDst];
+        let buffer = backend::create_buffer(&device, BufferDescriptor { label: Some(label.to_owned()), size: bytes.len() as i64, usage }, None).unwrap();
+        backend::write_buffer(&buffer, 0, bytes).unwrap();
+        buffer
+    };
+    let floats = |values: &[f32]| values.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>();
+    let normals = make("topology-normals", &floats(&[0., 0., 1., 0., 0., 1., 0., 0., 1., 0., 0., 1.]));
+    let mut held = vec![normals.clone()];
+    let mut unregisters = vec![];
+    for frame in 0..3 {
+        let z = frame as f32 * 0.1;
+        let positions = make("topology-positions", &floats(&[-1., -1., z, 1., -1., z, 1., 1., z, -1., 1., z]));
+        let indices = make("topology-indices", &[0u32, 1, 2, 0, 2, 3].iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>());
+        let (key, unregister) = renderer::renderer::register_gpu_positions(&tracer.lease, &positions, Some(normals.clone()), Some((indices.clone(), 6)), None, 4, 1, Rc::new(|| true)).unwrap();
+        held.extend([positions, indices]);
+        unregisters.push(unregister);
+        let mesh = rays::mesh::view::create_device(
+            rays::mesh::view::device_args { device_index_count: Some(6), key, normals: true, ..Default::default() },
+            4,
+        )
+        .unwrap();
+        let start = p::private::edits(&tracer);
+        get(p::queue_mesh(&mut tracer, &prepared(&mesh, &material)));
+        let mut spins = 0;
+        while p::private::edits(&tracer) <= start && spins < 200_000 {
+            get(p::render(&mut tracer, &camera));
+            spins += 1;
+        }
+        assert!(p::private::edits(&tracer) > start, "device mesh frame {frame} never installed");
+    }
+    assert_eq!(p::private::refits(&tracer), 2, "same-stamp GPU-topology frames must refit, not rebuild");
+    p::destroy(&mut tracer);
+    unregisters.iter().for_each(|u| u());
+    held.iter().for_each(|b| backend::destroy_buffer(b).unwrap());
 }
 
 fn mean_diff(a: &[u8], b: &[u8]) -> (f64, usize) {
@@ -341,4 +392,4 @@ fn light_of() {
     p::destroy(&mut tracer);
 }
 
-pub const CASES: &[(&str, fn())] = &[("live_updates", live_updates), ("scene_mesh", scene_mesh), ("timing", timing), ("mixed_spheres", mixed_spheres), ("light_of", light_of)];
+pub const CASES: &[(&str, fn())] = &[("live_updates", live_updates), ("scene_mesh", scene_mesh), ("timing", timing), ("mixed_spheres", mixed_spheres), ("light_of", light_of), ("device_topology_refits", device_topology_refits)];

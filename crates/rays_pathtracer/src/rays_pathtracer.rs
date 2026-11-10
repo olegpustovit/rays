@@ -845,9 +845,12 @@ fn device_async(t: &mut PathTracer, m: &Mesh, d: &mesh_data::Device) -> Result<O
     let corners = d.index_count;
     let material_key = material_bytes(&m.materials);
     let g = GatherInputs { positions, normals, colors, corners, vertices: d.vertex_count };
+    // the producer's stamp of the borrowed index content; host corners carry none
+    let topology = (if d.corners.is_empty() { renderer::renderer::gpu_topology(&t.lease, &d.key) } else { 0 }, corners);
+    let device_indices = indices.as_ref().filter(|(_, n)| *n == corners).map(|(buffer, _)| buffer.clone());
     let reusable = match &t.gpu.device {
         Some(installed) => {
-            !d.corners.is_empty()
+            (!d.corners.is_empty() || (topology.0 != 0 && topology == installed.topology && device_indices.is_some()))
                 && installed.vertex_count == d.vertex_count
                 && t.gpu.shape.colored == d.colored
                 && installed.material_key == material_key
@@ -862,8 +865,10 @@ fn device_async(t: &mut PathTracer, m: &Mesh, d: &mesh_data::Device) -> Result<O
         // the last gather read the previous mesh's buffers: done before that mesh is let go
         wait(&t.queue, installed.receipt)?;
         let commands = b::begin_commands(&t.queue).map_err(gpu_err)?;
+        // equal stamps promise equal indices; the producer's current buffer is the live one, the installed may be pooled again
+        let vix = if topology.0 != 0 { device_indices.clone().unwrap() } else { installed.vix.clone() };
         let encoded = (|| -> Result<Receipt, String> {
-            encode_gather(t, &commands, &g, &installed.vix, &t.gpu.positions, &t.gpu.normals, &t.gpu.colors)?;
+            encode_gather(t, &commands, &g, &vix, &t.gpu.positions, &t.gpu.normals, &t.gpu.colors)?;
             let encoder = b::accel_encoder(&commands).map_err(gpu_err)?;
             b::refit_accel(&encoder, &t.gpu.structure, corner_triangles(&t.gpu.positions, corners), &installed.refit_scratch, None).map_err(gpu_err)?;
             b::end_accel(&encoder).map_err(gpu_err)?;
@@ -874,6 +879,7 @@ fn device_async(t: &mut PathTracer, m: &Mesh, d: &mesh_data::Device) -> Result<O
                 let slot = t.gpu.device.as_mut().unwrap();
                 slot.source = d.holder.clone();
                 slot.corners = d.corners.clone();
+                slot.vix = vix;
                 slot.receipt = receipt;
                 t.refits += 1;
                 edited(t);
@@ -886,7 +892,7 @@ fn device_async(t: &mut PathTracer, m: &Mesh, d: &mesh_data::Device) -> Result<O
         };
     }
     let mut o = DeviceOwned { owned: vec![], structure: None, commands: None };
-    let built = device_build(t, &mut o, m, d, &g, indices, &material_key);
+    let built = device_build(t, &mut o, m, d, &g, indices, &material_key, topology);
     match built {
         Ok(build) => Ok(Some(build)),
         Err(e) => {
@@ -904,7 +910,7 @@ fn device_async(t: &mut PathTracer, m: &Mesh, d: &mesh_data::Device) -> Result<O
     }
 }
 
-fn device_build(t: &PathTracer, o: &mut DeviceOwned, m: &Mesh, d: &mesh_data::Device, g: &GatherInputs, indices: Option<(Buffer, i64)>, material_key: &[u8]) -> Result<MeshBuild, String> {
+fn device_build(t: &PathTracer, o: &mut DeviceOwned, m: &Mesh, d: &mesh_data::Device, g: &GatherInputs, indices: Option<(Buffer, i64)>, material_key: &[u8], topology: (u64, i64)) -> Result<MeshBuild, String> {
     let corners = g.corners;
     let held = indices.and_then(|(buffer, n)| if n == corners { Some(buffer) } else { None });
     let vix = match &held {
@@ -949,6 +955,7 @@ fn device_build(t: &PathTracer, o: &mut DeviceOwned, m: &Mesh, d: &mesh_data::De
                 vertex_count: d.vertex_count,
                 material_key: material_key.to_vec(),
                 vix,
+                topology: if held.is_some() { topology } else { (0, corners) },
                 owns_vix: held.is_none(),
                 refit_scratch,
                 source: d.holder.clone(),
