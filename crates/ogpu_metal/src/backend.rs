@@ -570,7 +570,9 @@ fn begin_commands(dev: &Rc<Dev>, queue: &Queue, active: &Rc<Vec<PendingPresentat
         tables: dev.t.clone(),
         commands_token: dev.t.token(),
         open_encoder: RefCell::new(None),
-        retained: RefCell::new(Vec::new()),
+        // Sized up front (here and in the native command buffer) so binding a pass's resources does not
+        // reallocate mid-encode; pxui_render asserts an allocation-free draw.
+        retained: RefCell::new(Vec::with_capacity(16)),
     });
     Ok(Box::new(MetalCommands { queue: queue.clone(), active: active.clone(), context }))
 }

@@ -965,6 +965,8 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("pxui_text", &[][..]),
         ("rays_shell", &["rays", "rays_math", "editor_core", "pxui", "mem"][..]),
         ("rays_graph", &[
+        // The UI painter: only the portable GPU API, so it moves to the PXUI repository unchanged.
+        ("pxui_render", &["ogpu_core"][..]),
             "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
         ][..]),
         ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
@@ -1082,6 +1084,8 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("pxui", &["rays", "param", "mem", "lru", "runtime", "runtime_resources", "renderer", "sdl3", "editor_core", "rays_shell", "sop", "rays_graph", "rays_editor"]);
     forbid("rays_shell", &["sop", "rays_graph", "rays_editor"]);
     forbid("rays_graph", &["sop", "rays_shell", "rays_editor"]);
+    forbid("pxui_render", &upper_no_gpu);
+    forbid("pxui_render", &["scene_command", "scene_core", "rays_math", "mem", "mem_sys", "lru", "input", "sdl3", "metal_sys", "vulkan_sys", "ogpu_metal", "ogpu_vulkan", "ogpu_mock"]);
     forbid("rays_pathtracer", &[
         "metal_sys", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
         "editor_document", "pxui", "rays_shell", "rays_graph", "rays_editor",
