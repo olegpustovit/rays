@@ -2151,6 +2151,10 @@ mod ownership_tests {
         for (offset,count,instances) in [(-1,3,1),(2,3,1),(0,0,1),(0,3,0),(0,4,1),(0,6,1)] {
             reject(ErrorKind::InvalidArgument,icb_draw_indexed(&icb,0,Primitive::TriangleList,IndexType::Uint32,&buffer,offset,count,Some(instances)));
         }
+        // Empty ordinary use is a no-op, even with no pipeline; the fake Driver would panic.
+        compute_use_accels(&encoder, &[]).unwrap();
+        assert_eq!(crate::validation::validate_acceleration_use("test", 0).unwrap_err().kind, ErrorKind::InvalidArgument);
+        crate::validation::validate_acceleration_use("test", usize::MAX).unwrap();
         reject(ErrorKind::InvalidState, dispatch_threads(&encoder, (1, 1, 1), (1, 1, 1)));
         reject(ErrorKind::InvalidArgument, set_pipeline(&encoder, &render));
         set_pipeline(&encoder, &compute).unwrap();
@@ -2187,6 +2191,7 @@ mod ownership_tests {
         dispatch_threads(&encoder, (4, 1, 1), (64, 1, 1)).unwrap();
         end_compute(&encoder).unwrap();
         reject(ErrorKind::InvalidState, set_buffer(&encoder, 0, &buffer));
+        reject(ErrorKind::InvalidState, compute_use_accels(&encoder, &[]));
         let icb = Icb(Rc::new(IcbInner { raw: RefCell::new(None), token: 7, device: device.clone(), capacity: 1, dead: Cell::new(false) }));
         compute.0.dead.set(false);
         reject(ErrorKind::InvalidArgument, icb_set_pipeline(&icb, 0, &compute));

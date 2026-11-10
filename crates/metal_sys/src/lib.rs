@@ -370,7 +370,8 @@ fn texture_swizzle_code(value: SwizzleChannel) -> i32 {
     }
 
     pub fn use_accelerations(encoder: &Handle, structures: &[Handle]) -> Result<(), Error> {
-        if structures.is_empty() { return Err(Error::InvalidArgument("acceleration structure list must not be empty".into())); }
+        ogpu_core::validation::validate_acceleration_use("Metal.Compute_encoder.use_acceleration_structures", structures.len())
+            .map_err(|failure| Error::InvalidArgument(failure.message.into()))?;
         #[cfg(target_vendor = "apple")]
         {
             let pointers = structures.iter().map(Handle::as_native_ptr).collect::<Result<Vec<_>, _>>()?;

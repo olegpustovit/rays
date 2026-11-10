@@ -219,6 +219,12 @@ fn gpu_compute_encoder() {
     let encoder = ComputeEncoder::create(&command).unwrap_or_else(|failure| die(failure));
     encoder.set_pipeline(&pipeline).unwrap_or_else(|failure| die(failure));
     encoder.set_buffer(0, 0, &buffer).unwrap_or_else(|failure| die(failure));
+    without_handles("empty acceleration use", &mut || {
+        let failure = encoder.use_acceleration_structures(&[]).unwrap_err();
+        assert_eq!(failure.kind, ErrorKind::InvalidArgument);
+        assert_eq!(failure.operation, "Metal.Compute_encoder.use_acceleration_structures");
+        assert_eq!(failure.message, "acceleration structure list must not be empty");
+    });
     let inline = ogpu_core::validation::admit_bytes("test", &[0;4]).unwrap();
     for bytes in [&[0u8;3][..], &[0u8;5][..]] {
         reject(ErrorKind::InvalidArgument, encoder.set_bytes(1, inline, bytes).err());

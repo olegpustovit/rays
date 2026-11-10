@@ -549,6 +549,12 @@ pub fn admit_acceleration_size(operation: &str, size: u64) -> Result<std::num::N
     std::num::NonZeroU64::new(size).ok_or_else(|| invalid(operation,"structure size must be positive"))
 }
 
+#[inline]
+pub fn validate_acceleration_use(operation: &str, count: usize) -> Result<(), Error> {
+    if count == 0 { Err(invalid(operation, "acceleration structure list must not be empty")) }
+    else { Ok(()) }
+}
+
 pub fn validate_resource_use(operation: &str, count: usize, usage: i32, stages: i32) -> Result<(), Error> {
     if count == 0 || usage == 0 || stages == 0 {
         Err(invalid(operation, "resources, usage, and stages must be nonempty"))
