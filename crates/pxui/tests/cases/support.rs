@@ -8,7 +8,7 @@ pub fn font_path() -> String {
 
 /// A UI over the golden face: the pointer positions in the text tests assume its advance.
 pub fn new_ui(font_size: Option<i64>) -> Ui {
-    Ui::create(Platform::Apple, font_size, Some(font_path()))
+    Ui::create(Platform::Apple, font_size, Some(font_path()), &rays_shell::host::BACKEND)
 }
 
 pub fn fail(message: &str) -> ! {

@@ -350,6 +350,7 @@ dependencies = [
  "param",
  "rays",
  "rays_math",
+ "rays_shell",
  "renderer",
  "scene_command",
  "sdl3",

@@ -2,6 +2,7 @@
 
 
 pub mod chrome;
+pub mod host;
 pub mod inspector;
 pub mod kit;
 pub mod layout;

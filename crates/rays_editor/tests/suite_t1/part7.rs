@@ -316,7 +316,7 @@ pub fn run_spreadsheet() {
     let layouts = layout::geometry(None, None, &shell.tree, &idle_frame(r.count));
     let leaf = layouts.leaves.iter().find(|l| l.path == vec![1usize, 0]).expect("leaf");
     let (x, y, w, _) = leaf.body;
-    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, None, None);
+    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, None, None, &rays_shell::host::BACKEND);
     let detail_width = ui.text_width(None, "Detail");
     ui.destroy();
     let point = ((x + w) as f64 - 8. - detail_width / 2., y as f64 + 12.);

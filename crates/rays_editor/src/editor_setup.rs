@@ -195,7 +195,7 @@ pub fn create(opts: CreateOpts, workspace: &workspace_doc::T, prepare: cook::Pre
     let state_name = lowering::sha256(&state_key);
     let doc = Arc::new(doc);
     let ui = {
-        let mut ui = Ui::create(platform, None, ui_font);
+        let mut ui = Ui::create(platform, None, ui_font, &rays_shell::host::BACKEND);
         ui.set_font_size(ui_text_size);
         ui
     };

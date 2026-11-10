@@ -804,7 +804,7 @@ pub fn window_pxui_carry() {
 
 pub fn window_pxui_retired_callbacks() {
     // Published frames retain no callback payloads: each closure releases its last captured owner after painting.
-    let mut ui = Ui::create(Platform::Apple, None, Some(font_path()));
+    let mut ui = Ui::create(Platform::Apple, None, Some(font_path()), &rays_shell::host::BACKEND);
     let held: Vec<Rc<[u8; 32]>> = (0..5).map(|_| Rc::new([b'x'; 32])).collect();
     let seen: Rc<RefCell<[bool; 5]>> = Rc::new(RefCell::new([false; 5]));
     let painter = |index: usize| -> Box<dyn Fn(&mut Paint, Rect)> {

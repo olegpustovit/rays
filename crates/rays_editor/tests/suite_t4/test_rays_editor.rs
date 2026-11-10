@@ -193,7 +193,7 @@ pub fn layout_panes() {
     assert!(header == (0, 4, width(initial.view), 24), "workspace header is not a compact single line");
     assert!((width(initial.view) - 449).abs() <= 1 && (width(initial.graph) - 349).abs() <= 1 && (width(initial.inspector) - 200).abs() <= 1, "workspace defaults are not 45/35/20 after splitter space");
     let splitter_x = width(initial.view) + 2;
-    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), None);
+    let mut ui = pxui::ui::Ui::create(input::Platform::Apple, Some(11), None, &rays_shell::host::BACKEND);
     let mut step = |f: &frame::Frame| {
         let mut out = Vec::new();
         ui.frame(f, &mut |ui| {

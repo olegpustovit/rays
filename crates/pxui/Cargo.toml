@@ -20,6 +20,7 @@ input = { path = "../input" }
 scene_command = { path = "../scene_command" }
 
 [dev-dependencies]
+rays_shell = { path = "../rays_shell" }
 ogpu_core = { path = "../ogpu_core" }
 renderer = { path = "../renderer" }
 sdl3 = { path = "../sdl3" }

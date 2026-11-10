@@ -2,7 +2,7 @@
 use crate::theme::{self, Theme};
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
 use rays_math::hash;
-use rays::{font, frame as rframe, image, scene, sketch};
+use rays::{frame as rframe, scene, sketch};
 use rays_math::color::{self, T as Color};
 use scene_command::ui_batch::{self, Clip};
 use std::any::Any;
@@ -391,6 +391,41 @@ pub struct Glyph {
     pub advance: i64,
 }
 
+/// A host font face: the host opens it and rasterises its glyphs.
+#[derive(Clone)]
+pub struct Font(pub Rc<dyn Any>);
+
+/// A host texture with its size in pixels; PXUI only binds it to the instances that sample it.
+#[derive(Clone)]
+pub struct Image {
+    pub handle: Rc<dyn Any>,
+    pub width: i64,
+    pub height: i64,
+}
+
+/// One rasterised code point: coverage bytes, one per pixel, and the pen advance in pixels.
+pub struct Raster {
+    pub width: i64,
+    pub height: i64,
+    pub advance: i64,
+    pub alpha: Vec<u8>,
+}
+
+/// What PXUI needs from the host's text and texture services.
+// ponytail: a function table until pxui_text (P3) and pxui_render (P2) own glyphs and textures.
+pub struct Backend {
+    /// The face at `path` unhinted, or the system face when `path` is `None`, at `size` points.
+    pub open_font: fn(path: Option<&str>, size: i64) -> Option<Font>,
+    pub close_font: fn(&Font),
+    /// The face's ascent in points.
+    pub ascent: fn(&Font) -> i64,
+    /// One code point at `density` exactly as it appears inside a rendered string.
+    pub glyph: fn(&Font, density: i64, code: i64) -> Option<Raster>,
+    /// Create, or update in place, an RGBA texture.
+    pub upload_rgba: fn(into: Option<&Image>, width: i64, height: i64, rgba: &[u8]) -> Option<Image>,
+    pub destroy_image: fn(&Image),
+}
+
 pub struct Atlas {
     pub width: i64,
     pub height: i64,
@@ -400,8 +435,8 @@ pub struct Atlas {
     shelf_y: i64,
     shelf_h: i64,
     dirty: bool,
-    pub image: Option<image::Image>,
-    fonts: Vec<(font::Font, i64, i64)>,
+    pub image: Option<Image>,
+    fonts: Vec<(Font, i64)>,
     next_font: i64,
 }
 
@@ -440,23 +475,14 @@ impl Atlas {
         }
     }
 
-    fn font_id(&mut self, font: &font::Font) -> i64 {
-        let generation = font::raster::generation(font);
-        let found = self.fonts.iter().position(|(candidate, _, _)| font::same(candidate, font));
-        match found {
-            Some(at) if self.fonts[at].2 == generation => self.fonts[at].1,
-            Some(at) => {
-                // A mutated font (style, hinting) rasterizes differently: new glyph ids.
-                let id = self.fonts[at].1;
-                self.glyphs.retain(|key, _| ((*key as u64 >> 26) as i64) != id);
-                self.fonts.remove(at);
-                self.fonts.insert(0, (font.clone(), id, generation));
-                id
-            }
+    /// PXUI opens its faces once and never restyles them, so a face keeps its glyph ids.
+    fn font_id(&mut self, font: &Font) -> i64 {
+        match self.fonts.iter().find(|(candidate, _)| Rc::ptr_eq(&candidate.0, &font.0)) {
+            Some((_, id)) => *id,
             None => {
                 let id = self.next_font;
                 self.next_font += 1;
-                self.fonts.insert(0, (font.clone(), id, generation));
+                self.fonts.insert(0, (font.clone(), id));
                 id
             }
         }
@@ -505,32 +531,26 @@ impl Atlas {
         Some((x, y))
     }
 
-    fn glyph(&mut self, font: &font::Font, id: i64, density: i64, code: i64) -> Option<Glyph> {
+    fn glyph(&mut self, backend: &Backend, font: &Font, id: i64, density: i64, code: i64) -> Option<Glyph> {
         let key = (((id * 32) + density) << 21) | code;
         if let Some(found) = self.glyphs.get(&key) {
             return Some(*found);
         }
-        let raster = font::raster::glyph(Some(density), font, code).ok()?;
-        let glyph = if raster.glyph_width == 0 || raster.glyph_height == 0 {
-            Some(Glyph { gx: 0, gy: 0, gw: 0, gh: 0, advance: raster.glyph_advance })
+        let raster = (backend.glyph)(font, density, code)?;
+        let glyph = if raster.width == 0 || raster.height == 0 {
+            Some(Glyph { gx: 0, gy: 0, gw: 0, gh: 0, advance: raster.advance })
         } else {
-            match self.reserve(raster.glyph_width, raster.glyph_height) {
+            match self.reserve(raster.width, raster.height) {
                 None => None,
                 Some((gx, gy)) => {
-                    for row in 0..raster.glyph_height {
-                        for column in 0..raster.glyph_width {
+                    for row in 0..raster.height {
+                        for column in 0..raster.width {
                             self.pixels[((gy + row) * self.width + (gx + column)) as usize] =
-                                raster.glyph_alpha[(row * raster.glyph_width + column) as usize];
+                                raster.alpha[(row * raster.width + column) as usize];
                         }
                     }
                     self.dirty = true;
-                    Some(Glyph {
-                        gx,
-                        gy,
-                        gw: raster.glyph_width,
-                        gh: raster.glyph_height,
-                        advance: raster.glyph_advance,
-                    })
+                    Some(Glyph { gx, gy, gw: raster.width, gh: raster.height, advance: raster.advance })
                 }
             }
         };
@@ -541,13 +561,13 @@ impl Atlas {
     }
 
     /// The mirror is alpha alone: a glyph's color is constant, so the upload writes it.
-    fn publish(&mut self) {
+    fn publish(&mut self, backend: &Backend) {
         if self.dirty {
             let mut rgba = Vec::with_capacity(4 * self.pixels.len());
             for alpha in &self.pixels {
                 rgba.extend_from_slice(&[0xff, 0xff, 0xff, *alpha]);
             }
-            if let Ok(image) = image::upload_rgba(self.image.as_ref(), self.width, self.height, &rgba) {
+            if let Some(image) = (backend.upload_rgba)(self.image.as_ref(), self.width, self.height, &rgba) {
                 self.image = Some(image);
                 self.dirty = false;
             }
@@ -560,7 +580,8 @@ impl Atlas {
 /// The kit faces by size, the glyph atlas and the text measure: the part of the UI that painting
 /// shares. `Paint` owns it while a frame paints.
 pub struct Fonts {
-    faces: HashMap<i64, Option<font::Font>>,
+    backend: &'static Backend,
+    faces: HashMap<i64, Option<Font>>,
     font_path: Option<String>,
     kit_font: Option<Option<String>>,
     ascent_ratio: Option<f64>,
@@ -569,9 +590,10 @@ pub struct Fonts {
     pub font_size: i64,
 }
 
-impl Default for Fonts {
-    fn default() -> Fonts {
-        Fonts { faces: HashMap::new(), font_path: None, kit_font: None, ascent_ratio: None, atlas: Atlas::empty(), density: 1, font_size: 13 }
+impl Fonts {
+    /// What `Ui` holds while `Paint` borrows its fonts.
+    fn placeholder(backend: &'static Backend) -> Fonts {
+        Fonts { backend, faces: HashMap::new(), font_path: None, kit_font: None, ascent_ratio: None, atlas: Atlas::empty(), density: 1, font_size: 13 }
     }
 }
 
@@ -589,8 +611,9 @@ fn upward(directory: &std::path::Path, relative: &std::path::Path) -> Option<Str
 }
 
 impl Fonts {
-    fn create(font_path: Option<String>, font_size: i64) -> Fonts {
+    fn create(backend: &'static Backend, font_path: Option<String>, font_size: i64) -> Fonts {
         Fonts {
+            backend,
             faces: HashMap::new(),
             font_path,
             kit_font: None,
@@ -624,23 +647,14 @@ impl Fonts {
         self.kit_font.clone().unwrap()
     }
 
-    pub fn face(&mut self, size: Option<i64>) -> Option<font::Font> {
+    pub fn face(&mut self, size: Option<i64>) -> Option<Font> {
         let size = size.unwrap_or(self.font_size);
         if let Some(face) = self.faces.get(&size) {
             return face.clone();
         }
-        let loaded = match self.kit_font() {
-            Some(path) => font::load(&path, size).map(|f| {
-                // the sheets' renderer does not hint: unhinted glyphs have its weight and x-height
-                let _ = font::set_hinting(&f, font::Hinting::NoneHinting);
-                f
-            }),
-            None => Err("no kit font".to_owned()),
-        };
-        let face = match loaded {
-            Ok(f) => Some(f),
-            Err(_) => font::system(Some(size)).ok(),
-        };
+        // the sheets' renderer does not hint: the host opens the kit face unhinted
+        let loaded = self.kit_font().and_then(|path| (self.backend.open_font)(Some(&path), size));
+        let face = loaded.or_else(|| (self.backend.open_font)(None, size));
         self.faces.insert(size, face.clone());
         face
     }
@@ -650,13 +664,13 @@ impl Fonts {
     fn ascent_ratio(&mut self) -> f64 {
         if self.ascent_ratio.is_none() {
             let ratio = match self.kit_font() {
-                Some(path) => match font::load(&path, 4096) {
-                    Ok(f) => {
-                        let ratio = font::get_ascent(&f).unwrap_or(0) as f64 / 4096.0;
-                        font::destroy(&f);
+                Some(path) => match (self.backend.open_font)(Some(&path), 4096) {
+                    Some(f) => {
+                        let ratio = (self.backend.ascent)(&f) as f64 / 4096.0;
+                        (self.backend.close_font)(&f);
                         ratio
                     }
-                    Err(_) => 0.0,
+                    None => 0.0,
                 },
                 None => 0.0,
             };
@@ -677,13 +691,13 @@ impl Fonts {
         }
     }
 
-    pub fn atlas_font_id(&mut self, font: &font::Font) -> i64 {
+    pub fn atlas_font_id(&mut self, font: &Font) -> i64 {
         self.atlas.font_id(font)
     }
 
-    pub fn glyph(&mut self, font: &font::Font, id: i64, code: i64) -> Option<Glyph> {
+    pub fn glyph(&mut self, font: &Font, id: i64, code: i64) -> Option<Glyph> {
         let density = self.density;
-        self.atlas.glyph(font, id, density, code)
+        self.atlas.glyph(self.backend, font, id, density, code)
     }
 
     pub fn text_width_px(&mut self, size: Option<i64>, text: &str) -> i64 {
@@ -710,7 +724,7 @@ impl Fonts {
     pub fn destroy(&mut self) {
         for (_, face) in self.faces.drain() {
             if let Some(f) = face {
-                font::destroy(&f);
+                (self.backend.close_font)(&f);
             }
         }
         self.atlas.fonts.clear();
@@ -804,7 +818,7 @@ pub struct Ui {
     label: String,
     painted_layers: Vec<(i64, ui_batch::Table)>,
     scene_layers: Vec<(i64, Vec<scene::Node>)>,
-    borrowed_images: Vec<(i64, image::Image)>,
+    borrowed_images: Vec<(i64, Image)>,
     scene: Vec<scene::Node>,
     destroyed: bool,
 }
@@ -845,12 +859,12 @@ impl Ui {
     /// it. `font_path` names the kit face's file (default: Pragmasevka found from the working
     /// directory or the executable upward; the environment is never read); `font_size` is the
     /// logical size of kit text.
-    pub fn create(platform: Platform, font_size: Option<i64>, font_path: Option<String>) -> Ui {
+    pub fn create(platform: Platform, font_size: Option<i64>, font_path: Option<String>, backend: &'static Backend) -> Ui {
         let font_size = font_size.unwrap_or(theme::FONT_SIZE);
         if font_size <= 0 {
             panic!("Ui.create: font_size must be positive");
         }
-        let fonts = Fonts::create(font_path, font_size);
+        let fonts = Fonts::create(backend, font_path, font_size);
         mem::charge(atlas_owner(), fonts.atlas.pixels.len() as i64);
         Ui {
             theme: theme::default(),
@@ -953,7 +967,7 @@ impl Ui {
             mem::release(atlas_owner(), self.fonts.atlas.pixels.len() as i64);
             self.destroyed = true;
             if let Some(image) = self.fonts.atlas.image.take() {
-                let _ = image::destroy(&image);
+                (self.fonts.backend.destroy_image)(&image);
             }
             self.fonts.destroy();
             self.borrowed_images.clear();
@@ -2726,7 +2740,7 @@ pub struct Paint {
     pub font_size: i64,
     pub row_height: i64,
     pub fonts: Fonts,
-    pub borrowed_images: Vec<(i64, image::Image)>,
+    pub borrowed_images: Vec<(i64, Image)>,
     pub regions: Vec<scene::Node>,
     label: String,
     /// the horizontal scroll of the focused text; painters adjust it
@@ -2744,9 +2758,9 @@ impl Paint {
     }
 
     /// Borrow a host-owned image for this frame through the normal UI texture batch.
-    pub fn image(&mut self, x: f64, y: f64, w: f64, h: f64, image: &image::Image) {
+    pub fn image(&mut self, x: f64, y: f64, w: f64, h: f64, image: &Image) {
         // ponytail: at most 64 borrowed images per frame, linear identity lookup.
-        let id = match self.borrowed_images.iter().find(|(_, other)| image::same(other, image)) {
+        let id = match self.borrowed_images.iter().find(|(_, other)| Rc::ptr_eq(&other.handle, &image.handle)) {
             Some((id, _)) => *id,
             None => {
                 if self.borrowed_images.len() >= 64 {
@@ -2758,7 +2772,7 @@ impl Paint {
             }
         };
         self.prepare();
-        let (iw, ih) = image::dimensions(image);
+        let (iw, ih) = (image.width, image.height);
         self.builder
             .textured(id, x, y, w, h, 0.0, 0.0, iw as f64, ih as f64, -1)
             .expect("Ui.Paint.image");
@@ -3185,13 +3199,14 @@ impl Ui {
         self.chain_key = 0;
         self.fonts.density = self.density;
         let clip = (0.0, 0.0, frame.input.size.0 as f64, frame.input.size.1 as f64);
+        let placeholder = Fonts::placeholder(self.fonts.backend);
         let mut paint = Paint {
             builder,
             clip_rect: clip,
             theme: self.theme,
             font_size: self.font_size,
             row_height: self.kit_row_height,
-            fonts: std::mem::take(&mut self.fonts),
+            fonts: std::mem::replace(&mut self.fonts, placeholder),
             borrowed_images: std::mem::take(&mut self.borrowed_images),
             regions: std::mem::take(&mut self.regions),
             label: std::mem::take(&mut self.label),
@@ -3373,12 +3388,13 @@ impl Ui {
             self.focus = 0;
             self.edit_focus = 0;
         }
-        self.fonts.atlas.publish();
+        let backend = self.fonts.backend;
+        self.fonts.atlas.publish(backend);
         let mut scene_layers = std::mem::take(&mut self.scene_layers);
         let layer_count = layers.len();
         for (position, (key, batch)) in layers.drain(..).enumerate() {
             let textures = batch.textures();
-            let mut images: Vec<(i64, image::Image)> = Vec::new();
+            let mut images: Vec<(i64, Image)> = Vec::new();
             if let Some(atlas_image) = &self.fonts.atlas.image {
                 if !textures.is_empty() {
                     images.push((1, atlas_image.clone()));
@@ -3397,6 +3413,7 @@ impl Ui {
             *layer_key = key;
             layer.clear();
             if batch.count() != 0 {
+                let images = images.iter().filter_map(|(id, img)| img.handle.downcast_ref::<rays::image::Image>().map(|i| (*id, i.clone()))).collect();
                 layer.push(scene::layer::ui(Some(images), batch).expect("Ui.frame: layer"));
             }
         }

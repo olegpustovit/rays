@@ -1368,7 +1368,7 @@ pub fn workspace_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, width: f64, p
         ui.inspector_readout(Some(width), "image-size", "image", &format!("{w} \u{d7} {h}"));
         let height = 160.0f64.min(width * h as f64 / w as f64);
         let bx = ui.box_("image-thumbnail", pxui::ui::BoxOpts::default().w(pxui::ui::Size::Px(width)).h(pxui::ui::Size::Px(height)));
-        let image = image.clone();
+        let image = rays_shell::host::image(&image);
         ui.draw(&bx, move |paint, (x, y, bw, bh)| {
             let scale = (bw / w as f64).min(bh / h as f64);
             paint.image(x, y, w as f64 * scale, h as f64 * scale, &image);

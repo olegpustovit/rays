@@ -13,7 +13,7 @@ use rays::scene::layer;
 
 pub fn new_ui() -> Ui {
     let path = format!("{}/../../assets/fonts/DepartureMono-Regular.otf", env!("CARGO_MANIFEST_DIR"));
-    Ui::create(input::Platform::Apple, Some(11), Some(path))
+    Ui::create(input::Platform::Apple, Some(11), Some(path), &rays_shell::host::BACKEND)
 }
 
 /// Build a 400x300 logical frame unless sized, with the supplied pointer and events.
