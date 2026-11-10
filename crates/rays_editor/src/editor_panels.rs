@@ -402,6 +402,9 @@ pub fn layout_actions<'a>(value: &ModelView<'a>, workspace: &shell, leaf: Option
 type Maker = Rc<dyn Fn(&flow_check::workspace::Path) -> le::Op>;
 
 pub fn layout_intents<'a>(value: &ModelView<'a>, workspace: &shell, intents: &[chrome::Intent]) -> (shell, Vec<change>) {
+    if intents.is_empty() {
+        return (workspace.clone(), Vec::new());
+    }
     let base = shell_tree(value, &shell { live: None, ..workspace.clone() }).into_owned();
     let editor = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let shell_doc = if workspace.restored { None } else { value.doc.shell.as_ref() };

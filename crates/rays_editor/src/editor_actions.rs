@@ -1,5 +1,6 @@
 //! Leader actions owned by the workspace, the undo labels of intents, the World keys and the
 //! routed keymap. #![allow(non_camel_case_types)]
+use crate::editor_shell::shell_leaves;
 use editor_core::keymap::Trigger;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -43,7 +44,7 @@ pub fn apply_action(value: &EditorModel, state: Applied, action: &action) -> App
             let workspace = if workspace.restored {
                 shell { restored: false, live: None, window_live: None, ..workspace }
             } else {
-                shell { tree: layout::default(), hidden: vec![Panel::Timeline], live: None, window_live: None, restored: true }
+                shell { tree: std::rc::Rc::new(layout::default()), hidden: vec![Panel::Timeline], live: None, window_live: None, restored: true }
             };
             (workspace, selection, tree, timeline, changes)
         }
@@ -221,7 +222,7 @@ struct Routing {
 /// Commands that only mean something on this level and projection; the last frame's list while
 /// its facts hold.
 pub fn routed<'a>(value: &ModelView<'a>) -> Rc<Vec<editor_commands::Command>> {
-    let leaves = panels::leaves(&shell_tree(value, &value.workspace));
+    let leaves = shell_leaves(value, &value.workspace);
     let (listing, texting) = (listing(value), texting(value));
     let r = Routing {
         graph_shown: graph_family(value),

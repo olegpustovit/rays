@@ -258,17 +258,27 @@ impl RenderEncoder {
     }
     pub fn use_resources(&self, resources: &[RenderResource], usage: &[ResourceUsage], stages: &[RenderStage]) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.use_resources";
-        let mut raw_resources = Vec::with_capacity(resources.len());
-        for resource in resources {
-            let (kind, raw) = match resource {
-                RenderResource::Buffer(value) => (0, value.raw()),
-                RenderResource::Texture(value) => (1, value.raw()),
-            };
-            raw_resources.push((kind, raw));
-        }
         let usage = usage.iter().fold(0, |bits, value| bits | match value { ResourceUsage::Read => 1, ResourceUsage::Write => 2, ResourceUsage::Sample => 4 });
         let stages = stages.iter().fold(0, |bits, value| bits | match value { RenderStage::Vertex => 1, RenderStage::Fragment => 2 });
-        metal_sys::native::pipeline::render_encoder_use_resources(&self.0.raw, &raw_resources, usage, stages).map_err(|failure| sys_error(OP, failure))?;
+        fn handle(resource: &RenderResource) -> (i32, &metal_sys::Handle) {
+            match resource {
+                RenderResource::Buffer(value) => (0, value.raw()),
+                RenderResource::Texture(value) => (1, value.raw()),
+            }
+        }
+        if resources.is_empty() {
+            // validation rejects it
+            metal_sys::native::pipeline::render_encoder_use_resources(&self.0.raw, &[], usage, stages).map_err(|failure| sys_error(OP, failure))?;
+        }
+        // chunks on the stack: a pass declares its resources every frame
+        for chunk in resources.chunks(32) {
+            let first = handle(&chunk[0]);
+            let mut raw = [first; 32];
+            for (slot, resource) in raw.iter_mut().zip(chunk) {
+                *slot = handle(resource);
+            }
+            metal_sys::native::pipeline::render_encoder_use_resources(&self.0.raw, &raw[..chunk.len()], usage, stages).map_err(|failure| sys_error(OP, failure))?;
+        }
         for resource in resources {
             match resource {
                 RenderResource::Buffer(value) => self.0.command_buffer.retain_buffer(value),

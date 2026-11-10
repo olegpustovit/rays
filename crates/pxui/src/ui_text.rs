@@ -2069,8 +2069,8 @@ impl Ui {
             &format!("{}-content", label),
             BoxOpts::default().w(Size::Px(w)).h(Size::Px((count + note_rows(&rows).len()) as f64 * row + pad)),
         );
-        let suggest = self.box_(&format!("{}-suggest", label), BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
-        let scrub = self.box_(&format!("{}-scrub", label), BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
+        let suggest = self.box_fmt(format_args!("{}-suggest", label), BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
+        let scrub = self.box_fmt(format_args!("{}-scrub", label), BoxOpts::default().w(Size::Px(0.0)).h(Size::Px(0.0)).at((0.0, 0.0)));
         self.leave(saved);
         let signal = self.signal(&body);
         // the I-beam over text; a number under the pointer asks for the scrub cursor further down,
@@ -3007,7 +3007,7 @@ impl Ui {
         for (index, (text, enabled)) in m.items.iter().enumerate() {
             let index = index as i64;
             if text.is_empty() {
-                let line = self.box_(&format!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(m.gap)));
+                let line = self.box_fmt(format_args!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(m.gap)));
                 self.draw(&line, move |paint, (x, y, w, _)| paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme)));
             } else {
                 let enabled = *enabled;

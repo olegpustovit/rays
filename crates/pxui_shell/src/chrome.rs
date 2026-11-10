@@ -44,8 +44,8 @@ pub enum Intent {
     Crumb(Path, i64),
 }
 
-fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: &str) -> UiBox {
-    ui.box_(
+fn floating(ui: &mut Ui, flags: Flags, (x, y, width, height): Bounds, label: std::fmt::Arguments) -> UiBox {
+    ui.box_fmt(
         label,
         BoxOpts::default().flags(flags).w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)),
     )
@@ -85,68 +85,66 @@ impl std::fmt::Display for PathKey<'_> {
 }
 
 /// a title's path is its parts joined by " / "; a bare slash ("fixed dt 1/60") is part of a word
-fn split_crumbs(sub: &str) -> Vec<String> {
-    let bytes = sub.as_bytes();
-    let n = bytes.len();
-    let mut out: Vec<String> = Vec::new();
-    let mut from = 0;
-    let mut i = 0;
-    loop {
-        if i + 3 > n {
-            out.push(sub[from..].to_string());
-            break;
-        }
-        if &bytes[i..i + 3] == b" / " {
-            out.push(sub[from..i].to_string());
-            from = i + 3;
-            i += 3;
-        } else {
-            i += 1;
-        }
-    }
-    out.into_iter().map(|s| s.trim().to_string()).collect()
+fn crumbs(sub: &str) -> std::iter::Map<std::str::Split<'_, &'static str>, fn(&str) -> &str> {
+    sub.split(" / ").map(str::trim as fn(&str) -> &str)
 }
 
-/// a path too long for its room loses its head, not its subject: "… / sop". Each part keeps its
-/// index in the title; the dropped head is (-1, "…")
-fn fit_crumbs(width: &mut dyn FnMut(&str) -> f64, room: f64, parts: &[String]) -> Vec<(i64, String)> {
-    let dots = (-1i64, "\u{2026}".to_string());
-    let mut parts: Vec<(i64, String)> = parts.iter().enumerate().map(|(i, p)| (i as i64, p.clone())).collect();
+fn numbered((i, part): (usize, &str)) -> (i64, &str) {
+    (i as i64, part)
+}
+
+/// A path too long for its room loses its head, not its subject: "… / sop". The parts shown are
+/// `from` on, behind a "…" when `dots`; each keeps its index in the title, the dots are -1.
+struct Fit {
+    dots: bool,
+    from: usize,
+}
+
+impl Fit {
+    fn parts<'a>(&self, sub: &'a str) -> std::iter::Chain<std::option::IntoIter<(i64, &'a str)>, std::iter::Map<std::iter::Skip<std::iter::Enumerate<std::iter::Map<std::str::Split<'a, &'static str>, fn(&str) -> &str>>>, fn((usize, &str)) -> (i64, &str)>> {
+        self.dots.then_some((-1i64, "\u{2026}")).into_iter().chain(crumbs(sub).enumerate().skip(self.from).map(numbered as fn((usize, &str)) -> (i64, &str)))
+    }
+
+    fn len(&self, sub: &str) -> usize {
+        self.dots as usize + crumbs(sub).count() - self.from
+    }
+}
+
+fn fit_crumbs(width: &mut dyn FnMut(&str) -> f64, room: f64, sub: &str) -> Fit {
+    let mut fit = Fit { dots: false, from: 0 };
     loop {
-        let mut row = ((parts.len() as f64 - 1.0) * (width("/") + 8.0)) - 8.0;
-        for (_, part) in &parts {
+        let len = fit.len(sub);
+        let mut row = ((len as f64 - 1.0) * (width("/") + 8.0)) - 8.0;
+        for (_, part) in fit.parts(sub) {
             row = row + width(part) + 8.0;
         }
         let over = row > room;
-        if over && parts.len() == 2 && parts[0] == dots {
-            return vec![parts[1].clone()];
+        if over && len == 2 && fit.dots {
+            fit.dots = false;
+            return fit;
         }
-        if over && parts.len() >= 3 && parts[0] == dots {
-            let mut next = vec![dots.clone()];
-            next.extend_from_slice(&parts[2..]);
-            parts = next;
+        if over && len >= 3 && fit.dots {
+            fit.from += 1;
             continue;
         }
-        if over && parts.len() >= 2 {
-            let mut next = vec![dots.clone()];
-            next.extend_from_slice(&parts[1..]);
-            parts = next;
+        if over && len >= 2 {
+            fit = Fit { dots: true, from: 1 };
             continue;
         }
-        return parts;
+        return fit;
     }
 }
 
 /// "Title<TAB>a / b": the kind and its breadcrumb
-fn split_title(text: &str) -> (String, String) {
+fn split_title(text: &str) -> (&str, &str) {
     match text.find('\t') {
-        Some(i) => (text[..i].to_string(), text[i + 1..].to_string()),
-        None => (text.to_string(), String::new()),
+        Some(i) => (&text[..i], &text[i + 1..]),
+        None => (text, ""),
     }
 }
 
 fn has_crumbs(sub: &str) -> bool {
-    split_crumbs(sub).len() > 1
+    sub.contains(" / ")
 }
 
 fn retypes() -> Vec<(&'static str, Panel)> {
@@ -359,7 +357,7 @@ pub fn update(
             // a view paints its own picture; a window over one still has its line-3 edge and the
             // sheet fill of its title row's margin
             Panel::View(_) | Panel::Canvas(_) | Panel::Timeline if l.floating => {
-                let boxed = floating(ui, NO_FLAGS, l.frame, &format!("workspace-window-edge{}", key(&l.path)));
+                let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-window-edge{}", key(&l.path)));
                 ui.to_front(order, &boxed);
                 let l = l.clone();
                 let moving = moving.clone();
@@ -391,7 +389,7 @@ pub fn update(
                 let fy = l.frame.1;
                 let hy = l.header.1;
                 if hy > fy {
-                    let boxed = floating(ui, NO_FLAGS, l.frame, &format!("workspace-margin{}", key(&l.path)));
+                    let boxed = floating(ui, NO_FLAGS, l.frame, format_args!("workspace-margin{}", key(&l.path)));
                     ui.draw(&boxed, move |paint, (x, y, w, _)| {
                         paint.fill(x, y, w, (hy - fy) as f64, theme.panel);
                     });
@@ -402,7 +400,7 @@ pub fn update(
                     ui,
                     NO_FLAGS,
                     l.frame,
-                    &format!("workspace-{}{}", panels::name(p).to_ascii_lowercase(), key(&l.path)),
+                    format_args!("workspace-{}{}", panels::lower_name(p), key(&l.path)),
                 );
                 if l.floating {
                     ui.to_front(order, &boxed);
@@ -426,7 +424,7 @@ pub fn update(
     // where the drag tip goes: over the right of the window being moved
     let mut tip: Option<(i64, i64, i64)> = None;
     for (n, s) in geometry.splitters.iter().enumerate() {
-        let boxed = floating(ui, NO_FLAGS, s.bounds, &format!("workspace-gutter-{n}"));
+        let boxed = floating(ui, NO_FLAGS, s.bounds, format_args!("workspace-gutter-{n}"));
         ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, theme::edge(&theme)));
     }
     let mut headers: Vec<Header> = Vec::new();
@@ -436,8 +434,8 @@ pub fn update(
         if h <= 0 {
             continue;
         }
-        let label = format!("{}{}", panels::name(&l.panel).to_ascii_lowercase(), key(&l.path));
-        let boxed = floating(ui, CLICKABLE | CLIP, l.header, &format!("workspace-header-{label}"));
+        let (name, path) = (panels::lower_name(&l.panel), key(&l.path));
+        let boxed = floating(ui, CLICKABLE | CLIP, l.header, format_args!("workspace-header-{name}{path}"));
         if l.floating {
             ui.to_front(order, &boxed);
         }
@@ -449,7 +447,7 @@ pub fn update(
             ui,
             TAB_STOP_MARKED | CLICKABLE,
             (x + 0.max(w - 8 - size), y + ((h - size) / 2), size, size),
-            &format!("workspace-collapse-{label}"),
+            format_args!("workspace-collapse-{name}{path}"),
         );
         if l.floating {
             ui.to_front(order, &button);
@@ -463,7 +461,7 @@ pub fn update(
                 ui,
                 TAB_STOP_MARKED | CLICKABLE,
                 (x + 0.max(w - tools), y + ((h - size) / 2), size, size),
-                &format!("workspace-dock-{label}"),
+                format_args!("workspace-dock-{name}{path}"),
             );
             ui.to_front(order, &dock);
             let signal = ui.signal(&dock);
@@ -487,7 +485,7 @@ pub fn update(
             ui,
             CLICKABLE | BLOCKING,
             (x, y, 0.max(w - tools), h),
-            &format!("workspace-drag-{label}"),
+            format_args!("workspace-drag-{name}{path}"),
         );
         if l.floating {
             ui.to_front(order, &grip);
@@ -551,16 +549,17 @@ pub fn update(
             let focused = focus == Some(&l.path);
             let limit = header_slots(l, &groups(l)).1;
             let mut tx = x as f64 + 12.0 + (if focused { 12.0 } else { 0.0 }) + kit::cap_width(ui, &main) + 8.0;
-            let parts = fit_crumbs(&mut |p| ui.text_width(None, p), limit - tx, &split_crumbs(&sub));
-            for (n, (index, part)) in parts.iter().enumerate() {
+            let fit = fit_crumbs(&mut |p| ui.text_width(None, p), limit - tx, sub);
+            let count = fit.len(sub);
+            for (n, (index, part)) in fit.parts(sub).enumerate() {
                 let pw = ui.text_width(None, part);
-                if *index >= 0 && n + 1 < parts.len() && tx + pw <= limit {
-                    let b = floating(ui, CLICKABLE, (tx as i64, y, pw.ceil() as i64, h), &format!("workspace-crumb-{label}-{index}"));
+                if index >= 0 && n + 1 < count && tx + pw <= limit {
+                    let b = floating(ui, CLICKABLE, (tx as i64, y, pw.ceil() as i64, h), format_args!("workspace-crumb-{name}{path}-{index}"));
                     if l.floating {
                         ui.to_front(order, &b);
                     }
                     if ui.signal(&b).clicked {
-                        intents.push(Intent::Crumb(l.path.clone(), *index));
+                        intents.push(Intent::Crumb(l.path.clone(), index));
                     }
                 }
                 tx = tx + pw + 8.0 + (ui.text_width(None, "/") + 8.0);
@@ -590,7 +589,7 @@ pub fn update(
         for l in &geometry.leaves {
             if l.path == path {
                 let (fx, fy, fw, fh) = l.frame;
-                let boxed = floating(ui, NO_FLAGS, (fx - 8, fy - 8, fw + 16, fh + 16), "workspace-moving");
+                let boxed = floating(ui, NO_FLAGS, (fx - 8, fy - 8, fw + 16, fh + 16), format_args!("workspace-moving"));
                 ui.to_front(i64::MAX - 1, &boxed);
                 // the padding box of the window, brackets 4 points outside it
                 ui.draw(&boxed, move |paint, _| {
@@ -663,12 +662,11 @@ pub fn update(
                     let shown = cut(paint, Some(size), limit - tx, &sub);
                     paint.text_s((tx, cy), size, rays_math::color::with_alpha(ink_2, 179), &shown);
                 } else if !sub.is_empty() && !collapsed {
-                    let parts = split_crumbs(&sub);
-                    let fitted = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, &parts);
-                    let count = fitted.len();
-                    for (i, (_, part)) in fitted.iter().enumerate() {
+                    let fit = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, sub);
+                    let count = fit.len(sub);
+                    for (i, (_, part)) in fit.parts(sub).enumerate() {
                         if i + 1 == count {
-                            put(paint, &mut tx, if has_crumbs(&sub) { theme.foreground } else { ink_2 }, part);
+                            put(paint, &mut tx, if has_crumbs(sub) { theme.foreground } else { ink_2 }, part);
                         } else {
                             put(paint, &mut tx, ink_2, part);
                             put(paint, &mut tx, ink_3, "/");
@@ -708,7 +706,7 @@ pub fn tools_start(ui: &mut Ui, focused: bool, floating: bool, collapsed: bool, 
         let size = kit::cap_size(ui);
         x = x + 8.0 + ui.text_width(Some(size), &sub);
     } else {
-        for (i, part) in split_crumbs(&sub).iter().enumerate() {
+        for (i, part) in crumbs(sub).enumerate() {
             if i > 0 {
                 x = x + 8.0 + ui.text_width(None, "/");
             }
@@ -735,7 +733,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
         let ex = 36.min(w / 3);
         let ey = 36.min(h / 3);
         // the pane's own box sits under its four edges, so the pane under the pointer is known
-        let pane = floating(ui, CLICKABLE, (x, y, w, h), &format!("workspace-drop-pane-{}", key(&leaf.path)));
+        let pane = floating(ui, CLICKABLE, (x, y, w, h), format_args!("workspace-drop-pane-{}", key(&leaf.path)));
         ui.to_front(i64::MAX, &pane);
         let pane_hovered = ui.signal(&pane).hovered;
         let mut edges: Vec<(Side, &str, UiBox, bool)> = Vec::new();
@@ -751,7 +749,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
                 Side::Top => "top",
                 Side::Bottom => "bottom",
             };
-            let boxed = floating(ui, CLICKABLE | BLOCKING, rect, &format!("workspace-drop-{}{}", key(&leaf.path), suffix));
+            let boxed = floating(ui, CLICKABLE | BLOCKING, rect, format_args!("workspace-drop-{}{}", key(&leaf.path), suffix));
             ui.to_front(i64::MAX, &boxed);
             let hovered = ui.signal(&boxed).hovered;
             edges.push((side, suffix, boxed, hovered));
@@ -814,7 +812,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             .w(Size::Px(width as f64))
             .h(Size::Px(height as f64));
         opts.hit = Some(Rc::new(move |_| hit_rect));
-        let boxed = ui.box_(&format!("workspace-grip-{n}"), opts);
+        let boxed = ui.box_fmt(format_args!("workspace-grip-{n}"), opts);
         let signal = ui.signal(&boxed);
         if signal.hovered || signal.held {
             ui.request_cursor(if s.axis == Axis::H { Cursor::Horizontal_resize } else { Cursor::Vertical_resize });
@@ -893,7 +891,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         }
         let bounds = leaf.frame;
         let (x, y, w, h) = bounds;
-        let boxed = floating(ui, CLICKABLE | BLOCKING, (x + w - 12, y + h - 12, 12, 12), &format!("workspace-window-size-{}", key(&leaf.path)));
+        let boxed = floating(ui, CLICKABLE | BLOCKING, (x + w - 12, y + h - 12, 12, 12), format_args!("workspace-window-size-{}", key(&leaf.path)));
         ui.to_front(order, &boxed);
         let signal = ui.signal(&boxed);
         let (x, y, w, h) = drag_origin(ui, &boxed, bounds, &signal);

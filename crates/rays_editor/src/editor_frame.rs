@@ -999,7 +999,7 @@ pub fn update_frame(
         leaves.sort_by(|a, b| a.0.cmp(&b.0));
         leaves.dedup_by(|a, b| a.0 == b.0);
         let active = panel_map::key(&value.panes);
-        let active_leaf = panel_map::leaf(&value.panes);
+        let active_leaf = panel_map::leaf(&value.panes).cloned();
         // An inactive projection may consume its own deferred selection, not the active model's.
         let select_later = value.select_later.clone();
         for (key, path) in leaves {
@@ -1135,7 +1135,7 @@ pub fn update_frame(
             // shell now (a fold, a drag) or become one editor-graph edit after the frame.
             let header_focus: Option<layout::Path> = match &focus_path {
                 Some(_) => focus_path.clone(),
-                None => panels::leaves(&shell_tree(&*value, &workspace)).into_iter().find_map(|(path, p)| if p == focus { Some(path) } else { None }),
+                None => shell_leaves(&*value, &workspace).iter().find_map(|(path, p)| if *p == focus { Some(path.clone()) } else { None }),
             };
             // the tabs standing at a header's end, outermost first: a graph panel's Graph / List /
             // Text, then a text view's Selection / Graph / Document.  `Chrome.header_slots` places
@@ -1173,7 +1173,7 @@ pub fn update_frame(
             let state_fn = |path: &[usize]| panel_state(&(&*value).into(), path);
             let title_fn = |leaf: &Leaf| panel_title(&vw, leaf);
             let mut intents = chrome::update(Some(&state_fn), Some(&workspace.hidden), Some(&title_fn), Some(&header_groups), Some(&key_of), header_focus.as_ref(), &shell_tree(&*value, &workspace), ui, &shortcut_frame);
-            let leaves = panels::leaves(&shell_tree(&*value, &workspace));
+            let leaves = shell_leaves(&*value, &workspace);
             intents.extend(panel_intents(&(&*value).into(), &leaves, &workspace, frame_, &focus, focus_path.as_deref(), &actions));
             let layout_leaf = focused_leaf(&geo0, &focus, focus_path.as_deref());
             let (workspace, mut layout_changes) = layout_intents(&vw, &workspace, &intents);
@@ -1336,7 +1336,7 @@ pub fn update_frame(
                 scope_view: scope_view2,
                 scope_changes,
                 tree: tree2,
-                document: level_objects(&(&*value).into()),
+                document: level_objects(&(&*value).into()).into_owned(),
                 edit_error: text_error.clone().or(prompt_error.clone()).or_else(|| value.edit_error.clone()),
                 effects: Effects::default(),
                 timeline_intents,
@@ -1389,7 +1389,7 @@ pub fn update_frame(
             scope_view: scope_view.clone(),
             scope_changes: scope_command_changes.clone(),
             tree: tree_value.clone(),
-            document: level_objects(&(&*value).into()),
+            document: level_objects(&(&*value).into()).into_owned(),
             edit_error: text_error.clone().or_else(|| value.edit_error.clone()),
             effects: Effects::default(),
             timeline_intents: Vec::new(),

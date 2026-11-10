@@ -19,6 +19,7 @@ pub struct ColorAttachment {
 }
 #[cfg(target_vendor = "apple")]
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct RawResource { handle: *mut NativeHandle, kind: i32 }
 
 pub fn render_encoder_use_resources(
@@ -31,16 +32,18 @@ pub fn render_encoder_use_resources(
         .map_err(|failure| Error::InvalidArgument(failure.message.into()))?;
     #[cfg(target_vendor = "apple")]
     {
-        let resources = resources.iter().map(|(kind, handle)| {
-            Ok(RawResource { handle: handle.as_native_ptr()?, kind: *kind })
-        }).collect::<Result<Vec<_>, Error>>()?;
-        let mut message = std::ptr::null();
-        let status = unsafe {
-            rays_metal_render_encoder_use_resources(
-                encoder.as_native_ptr()?, resources.as_ptr(), resources.len(), usage, stages, &mut message,
-            )
-        };
-        if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
+        // chunks on the stack: a pass declares its resources every frame
+        let native = encoder.as_native_ptr()?;
+        for chunk in resources.chunks(32) {
+            let mut raw = [RawResource { handle: std::ptr::null_mut(), kind: 0 }; 32];
+            for (slot, (kind, handle)) in raw.iter_mut().zip(chunk) {
+                *slot = RawResource { handle: handle.as_native_ptr()?, kind: *kind };
+            }
+            let mut message = std::ptr::null();
+            let status = unsafe { rays_metal_render_encoder_use_resources(native, raw.as_ptr(), chunk.len(), usage, stages, &mut message) };
+            if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
+        }
+        Ok(())
     }
     #[cfg(not(target_vendor = "apple"))]
     { let _ = (encoder, resources, usage, stages); Err(Error::Unavailable) }

@@ -124,11 +124,12 @@ pub fn kinds(value: &Model, ctx: &context::Context) -> Vec<scat::Descriptor> {
 
 /// The open level's objects or layers (the scene's if the level is gone: every path resolves the
 /// level first); none inside a geometry object.
-pub fn objects<'a>(value: &ModelView<'a>) -> kind_graph::T {
-    match crate::editor_model::pane_level(value) {
-        Level::Scene => scene(value).clone(),
-        Level::Inside(id) => doc_mod::layers(&value.doc, id).cloned().unwrap_or_else(kind_graph::empty),
-    }
+pub fn objects<'a>(value: &ModelView<'a>) -> std::borrow::Cow<'a, [kind_graph::Node]> {
+    let doc: &'a std::sync::Arc<doc_mod::T> = value.doc;
+    std::borrow::Cow::Borrowed(match crate::editor_model::pane_level(value) {
+        Level::Scene => doc.scene.as_slice(),
+        Level::Inside(id) => doc_mod::layers(doc, id).map_or(&[][..], |layers| layers.as_slice()),
+    })
 }
 
 /// The SOP network of the open geometry object.

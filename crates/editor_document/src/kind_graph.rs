@@ -62,7 +62,7 @@ pub fn fields(node: &Node) -> Vec<FieldView> {
 }
 
 pub fn field(node: &Node, name: &str) -> Option<Value> {
-    fields(node).into_iter().find(|f| f.name == name).map(|f| f.current)
+    settings::value(&node.values, name)
 }
 
 pub fn find(graph: &[Node], id: i64) -> Option<Node> {

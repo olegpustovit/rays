@@ -113,7 +113,7 @@ fn cap_y_of(paint: &Paint, y: f64, h: f64) -> f64 {
 /// hex text typed (or `hex` unchanged). `key` names the pair; `at` is the control column.
 pub fn colour(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, swatch: Color, hex: &str) -> String {
     let (x, y) = at;
-    let boxed = ui.box_(&format!("swatch-{key}"), BoxOpts::default().at((x, y)).w(Size::Px(20.0)).h(Size::Px(20.0)));
+    let boxed = ui.box_fmt(format_args!("swatch-{key}"), BoxOpts::default().at((x, y)).w(Size::Px(20.0)).h(Size::Px(20.0)));
     let edge = theme::edge(&ui.theme());
     ui.draw(&boxed, move |paint, (sx, sy, sw, sh)| {
         // a 20-point square with its border inside

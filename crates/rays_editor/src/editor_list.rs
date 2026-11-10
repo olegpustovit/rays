@@ -358,7 +358,7 @@ pub fn rows<'a>(value: &ModelView<'a>) -> (row_source, lazy_rows) {
             )
         }
         (Level::Inside(_), None) => {
-            let layers = level_objects(value);
+            let layers = level_objects(value).into_owned();
             (row_source::Objects(layers.clone()), Rc::new(move || (layer_rows(&layers), vec!["v".to_string()])))
         }
     }

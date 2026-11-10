@@ -528,7 +528,7 @@ pub fn wire_boxes(c: &mut Ctx, t: &Pane, ui: &mut Ui, origin: (f64, f64), name: 
                 let x1 = ax + ((bx - ax) * u1);
                 let y1 = ay + ((by - ay) * u1);
                 count += 1;
-                let b = ui.box_(&format!("{}{}", prefix, count), BoxOpts::default().flags(CLICKABLE).at((x0.min(x1) - 4.0 - origin.0, y0.min(y1) - 4.0 - origin.1)).w(Size::Px((x1 - x0).abs() + 8.0)).h(Size::Px((y1 - y0).abs() + 8.0)));
+                let b = ui.box_fmt(format_args!("{}{}", prefix, count), BoxOpts::default().flags(CLICKABLE).at((x0.min(x1) - 4.0 - origin.0, y0.min(y1) - 4.0 - origin.1)).w(Size::Px((x1 - x0).abs() + 8.0)).h(Size::Px((y1 - y0).abs() + 8.0)));
                 c.wire_hits.entry(i).or_default().insert(0, b);
             }
         }
@@ -637,7 +637,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     // subject: the holder stays selected, the row is `holder @ [":" ^ label]`
                     let mut subject: Vec<Change> = Vec::new();
                     if let p::Chip::Inline { .. } = r.chip {
-                        let cb = ui.box_(&format!("ex{}", i), BoxOpts::default().flags(CLICKABLE).w(Size::Px((sp::FIELD_W - 24.0) * z)).h(Size::Px(16.0 * z)).at(((sp::value_x(pl.w) + 24.0) * z, row_y)));
+                        let cb = ui.box_fmt(format_args!("ex{}", i), BoxOpts::default().flags(CLICKABLE).w(Size::Px((sp::FIELD_W - 24.0) * z)).h(Size::Px(16.0 * z)).at(((sp::value_x(pl.w) + 24.0) * z, row_y)));
                         let sg = ui.signal(&cb);
                         // a double click expands the call in place, as the glyph does
                         if sg.double_clicked {
@@ -692,7 +692,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 } else if let (p::Chip::Name(nm), true) = (&r.chip, t.folds.contains_key(&(n.path.clone(), i))) {
                     // the fold button of a wired row, where `paint_value` draws its glyph
                     let (left, fw, _, _, _) = sp::wired_geo(&mut |size, text| measure_ui(ui, t, size, text), t, z, fs, 0.0, pl.w * z, true, &sp::wired_name(r, nm));
-                    let b = ui.box_(&format!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(fw)).h(Size::Px(16.0 * z)).at((left - fw - (2.0 * z), row_y)));
+                    let b = ui.box_fmt(format_args!("fold{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(fw)).h(Size::Px(16.0 * z)).at((left - fw - (2.0 * z), row_y)));
                     if ui.signal(&b).clicked {
                         add_clicks.push(Change::Syntax_edit(e::Op::FoldInto { node: t.folds[&(n.path.clone(), i)].clone() }));
                     }
@@ -715,7 +715,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                             let mut m = |size: i64, text: &str| measure_ui(ui, t, size, text);
                             let (left, _, room, _, _) = sp::wired_geo(&mut m, t, z, fs, 0.0, pl.w * z, false, nm);
                             let width = m(fs, "\u{2190}") + (6.0 * z) + m(fs, nm).min(room);
-                            let b = ui.box_(&format!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(width)).h(Size::Px(16.0 * z)).at((left, row_y)));
+                            let b = ui.box_fmt(format_args!("ref{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(width)).h(Size::Px(16.0 * z)).at((left, row_y)));
                             if ui.signal(&b).clicked {
                                 add_clicks.push(Change::Selected(vec![cand]));
                             }
@@ -772,7 +772,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 if let p::Line::Row(i, r) = line {
                     if let (p::RowKind::Rest, ArgKey::Pos(j)) = (r.kind, &r.key) {
                         if *j >= 1 {
-                            let b = ui.box_(&format!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(16.0 * z)).h(Size::Px(16.0 * z)).at(((pl.w - 22.0) * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
+                            let b = ui.box_fmt(format_args!("mv{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(16.0 * z)).h(Size::Px(16.0 * z)).at(((pl.w - 22.0) * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
                             if ui.signal(&b).clicked {
                                 movers.push(Change::Syntax_edit(e::Op::MoveItem { node: n.path.clone(), pos: *j }));
                             }
@@ -794,7 +794,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     if let p::Line::Row(i, r) = line {
                         if let ArgKey::Pos(j) = &r.key {
                             if r.kind != p::RowKind::Add && *j != *active {
-                                let b = ui.box_(&format!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((pl.w - 24.0) * z)).h(Size::Px(16.0 * z)).at((12.0 * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
+                                let b = ui.box_fmt(format_args!("sw{}", i), BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px((pl.w - 24.0) * z)).h(Size::Px(16.0 * z)).at((12.0 * z, (top + (k as f64 * p::ROW_HEIGHT) + 4.0) * z)));
                                 if ui.signal(&b).clicked {
                                     switchers.push(Change::Layout_active { graph: t.key.clone(), index: *j });
                                 }

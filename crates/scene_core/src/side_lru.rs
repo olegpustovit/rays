@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 pub enum TableKey {
     Str(String),
     Int(i64),
+    /// two independent 64-bit hashes of a key that needs no text (a quad's bits)
+    Wide(u64, u64),
 }
 
 pub const UNBOUNDED_BYTES: i64 = i64::MAX;

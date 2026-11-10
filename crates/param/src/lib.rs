@@ -450,6 +450,11 @@ impl Schema {
         &self.fields
     }
 
+    /// Where the field `name` sits in a record.
+    pub fn index_of(&self, name: &str) -> Option<usize> {
+        self.by_name.get(name).copied()
+    }
+
     fn validate_record(&self, record: &[Value]) -> Result<(), String> {
         if record.len() != self.fields.len() {
             return Err("parameter record has the wrong number of fields".to_owned());

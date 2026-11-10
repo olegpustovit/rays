@@ -293,7 +293,7 @@ pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_fil
 // ---- accessors ----
 
 pub fn document(value: &LoopModel) -> kg::T {
-    editor_inspect::objects(&(&value.core).into())
+    editor_inspect::objects(&(&value.core).into()).into_owned()
 }
 
 pub fn network(value: &LoopModel) -> Option<sop::edit_graph::T> {
