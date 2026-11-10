@@ -53,247 +53,247 @@ File "crates/flow_sop/nodes/prelude.rays", line 143, characters 2-68:
 Error [E_NAME]: Invalid, reserved or duplicate name: vec4_component.
 File "crates/flow_sop/nodes/prelude.rays", line 147, characters 2-86:
 Error [E_NAME]: Invalid, reserved or duplicate name: mat4_inverse.
-File "crates/flow_sop/nodes/prelude.rays", line 174, characters 2-53:
+File "crates/flow_sop/nodes/prelude.rays", line 175, characters 2-53:
 Error [E_NAME]: Invalid, reserved or duplicate name: rand_mix_index.
-File "crates/flow_sop/nodes/prelude.rays", line 180, characters 2-59:
+File "crates/flow_sop/nodes/prelude.rays", line 179, characters 2-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: rand_at.
-File "crates/flow_sop/nodes/prelude.rays", line 186, characters 2-80:
+File "crates/flow_sop/nodes/prelude.rays", line 184, characters 2-80:
 Error [E_NAME]: Invalid, reserved or duplicate name: int_gather.
-File "crates/flow_sop/nodes/prelude.rays", line 189, characters 2-79:
+File "crates/flow_sop/nodes/prelude.rays", line 187, characters 2-79:
 Error [E_NAME]: Invalid, reserved or duplicate name: prim_of_vertex.
-File "crates/flow_sop/nodes/prelude.rays", line 196, characters 2-87:
+File "crates/flow_sop/nodes/prelude.rays", line 194, characters 2-87:
 Error [E_NAME]: Invalid, reserved or duplicate name: edge_ancestry.
-File "crates/flow_sop/nodes/prelude.rays", line 209, characters 2-86:
+File "crates/flow_sop/nodes/prelude.rays", line 207, characters 2-86:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_value_keep.
-File "crates/flow_sop/nodes/prelude.rays", line 212, characters 2-44:
+File "crates/flow_sop/nodes/prelude.rays", line 210, characters 2-44:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_value_preferred.
-File "crates/flow_sop/nodes/prelude.rays", line 215, characters 2-40:
+File "crates/flow_sop/nodes/prelude.rays", line 213, characters 2-40:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_value_apply.
-File "crates/flow_sop/nodes/prelude.rays", line 243, characters 2-81:
+File "crates/flow_sop/nodes/prelude.rays", line 241, characters 2-81:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_exists.
-File "crates/flow_sop/nodes/prelude.rays", line 246, characters 2-34:
+File "crates/flow_sop/nodes/prelude.rays", line 244, characters 2-34:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_publish.
-File "crates/flow_sop/nodes/prelude.rays", line 267, characters 2-87:
+File "crates/flow_sop/nodes/prelude.rays", line 265, characters 2-87:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_order_filter.
-File "crates/flow_sop/nodes/prelude.rays", line 270, characters 2-48:
+File "crates/flow_sop/nodes/prelude.rays", line 268, characters 2-48:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_merge_publish_ordered.
-File "crates/flow_sop/nodes/prelude.rays", line 308, characters 2-40:
+File "crates/flow_sop/nodes/prelude.rays", line 306, characters 2-40:
 Error [E_NAME]: Invalid, reserved or duplicate name: group_merge_publish.
-File "crates/flow_sop/nodes/prelude.rays", line 313, characters 2-96:
+File "crates/flow_sop/nodes/prelude.rays", line 311, characters 2-96:
 Error [E_NAME]: Invalid, reserved or duplicate name: edge_usage.
-File "crates/flow_sop/nodes/prelude.rays", line 320, characters 2-38:
+File "crates/flow_sop/nodes/prelude.rays", line 318, characters 2-38:
 Error [E_NAME]: Invalid, reserved or duplicate name: transform_normals.
-File "crates/flow_sop/nodes/prelude.rays", line 332, characters 2-68:
+File "crates/flow_sop/nodes/prelude.rays", line 330, characters 2-68:
 Error [E_NAME]: Invalid, reserved or duplicate name: transform_row_fused.
-File "crates/flow_sop/nodes/prelude.rays", line 334, characters 2-44:
+File "crates/flow_sop/nodes/prelude.rays", line 332, characters 2-44:
 Error [E_NAME]: Invalid, reserved or duplicate name: transform_point_fused.
-File "crates/flow_sop/nodes/prelude.rays", line 341, characters 2-39:
+File "crates/flow_sop/nodes/prelude.rays", line 339, characters 2-39:
 Error [E_NAME]: Invalid, reserved or duplicate name: transform_geometry.
-File "crates/flow_sop/nodes/prelude.rays", line 353, characters 2-56:
+File "crates/flow_sop/nodes/prelude.rays", line 351, characters 2-56:
 Error [E_NAME]: Invalid, reserved or duplicate name: fused_dot.
-File "crates/flow_sop/nodes/prelude.rays", line 355, characters 2-51:
+File "crates/flow_sop/nodes/prelude.rays", line 353, characters 2-51:
 Error [E_NAME]: Invalid, reserved or duplicate name: fused_normalize.
-File "crates/flow_sop/nodes/prelude.rays", line 360, characters 2-58:
+File "crates/flow_sop/nodes/prelude.rays", line 358, characters 2-58:
 Error [E_NAME]: Invalid, reserved or duplicate name: fused_normalize_scaled.
-File "crates/flow_sop/nodes/prelude.rays", line 367, characters 2-80:
+File "crates/flow_sop/nodes/prelude.rays", line 365, characters 2-80:
 Error [E_NAME]: Invalid, reserved or duplicate name: deform_mask.
-File "crates/flow_sop/nodes/prelude.rays", line 371, characters 2-89:
+File "crates/flow_sop/nodes/prelude.rays", line 369, characters 2-89:
 Error [E_NAME]: Invalid, reserved or duplicate name: deform_group_missing.
-File "crates/flow_sop/nodes/prelude.rays", line 376, characters 2-79:
+File "crates/flow_sop/nodes/prelude.rays", line 374, characters 2-79:
 Error [E_NAME]: Invalid, reserved or duplicate name: deform_error.
-File "crates/flow_sop/nodes/prelude.rays", line 382, characters 2-32:
+File "crates/flow_sop/nodes/prelude.rays", line 380, characters 2-32:
 Error [E_NAME]: Invalid, reserved or duplicate name: blast_apply.
-File "crates/flow_sop/nodes/prelude.rays", line 450, characters 2-53:
+File "crates/flow_sop/nodes/prelude.rays", line 448, characters 2-53:
 Error [E_NAME]: Invalid, reserved or duplicate name: gen_normalize.
-File "crates/flow_sop/nodes/prelude.rays", line 455, characters 2-55:
+File "crates/flow_sop/nodes/prelude.rays", line 453, characters 2-55:
 Error [E_NAME]: Invalid, reserved or duplicate name: gen_custom_frame.
-File "crates/flow_sop/nodes/prelude.rays", line 465, characters 2-102:
+File "crates/flow_sop/nodes/prelude.rays", line 463, characters 2-102:
 Error [E_NAME]: Invalid, reserved or duplicate name: gen_frame.
-File "crates/flow_sop/nodes/prelude.rays", line 490, characters 2-62:
+File "crates/flow_sop/nodes/prelude.rays", line 488, characters 2-62:
 Error [E_NAME]: Invalid, reserved or duplicate name: deform_area_directions.
-File "crates/flow_sop/nodes/prelude.rays", line 518, characters 2-65:
+File "crates/flow_sop/nodes/prelude.rays", line 516, characters 2-65:
 Error [E_NAME]: Invalid, reserved or duplicate name: deform_default_directions.
-File "crates/flow_sop/nodes/prelude.rays", line 533, characters 2-63:
+File "crates/flow_sop/nodes/prelude.rays", line 531, characters 2-63:
 Error [E_NAME]: Invalid, reserved or duplicate name: ramp_part.
-File "crates/flow_sop/nodes/prelude.rays", line 536, characters 2-52:
+File "crates/flow_sop/nodes/prelude.rays", line 534, characters 2-52:
 Error [E_NAME]: Invalid, reserved or duplicate name: ramp_positions.
-File "crates/flow_sop/nodes/prelude.rays", line 538, characters 2-49:
+File "crates/flow_sop/nodes/prelude.rays", line 536, characters 2-49:
 Error [E_NAME]: Invalid, reserved or duplicate name: ramp_values.
-File "crates/flow_sop/nodes/prelude.rays", line 540, characters 2-45:
+File "crates/flow_sop/nodes/prelude.rays", line 538, characters 2-45:
 Error [E_NAME]: Invalid, reserved or duplicate name: ramp_ok.
-File "crates/flow_sop/nodes/prelude.rays", line 556, characters 2-96:
+File "crates/flow_sop/nodes/prelude.rays", line 554, characters 2-96:
 Error [E_NAME]: Invalid, reserved or duplicate name: ramp_apply.
-File "crates/flow_sop/nodes/prelude.rays", line 585, characters 0-32:
+File "crates/flow_sop/nodes/prelude.rays", line 583, characters 0-32:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_scales.
-File "crates/flow_sop/nodes/prelude.rays", line 593, characters 0-31:
+File "crates/flow_sop/nodes/prelude.rays", line 591, characters 0-31:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_nlens.
-File "crates/flow_sop/nodes/prelude.rays", line 605, characters 0-31:
+File "crates/flow_sop/nodes/prelude.rays", line 603, characters 0-31:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_dists.
-File "crates/flow_sop/nodes/prelude.rays", line 612, characters 0-34:
+File "crates/flow_sop/nodes/prelude.rays", line 610, characters 0-34:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_vertices.
-File "crates/flow_sop/nodes/prelude.rays", line 624, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 622, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_ncs.
-File "crates/flow_sop/nodes/prelude.rays", line 662, characters 0-76:
+File "crates/flow_sop/nodes/prelude.rays", line 660, characters 0-76:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_part.
-File "crates/flow_sop/nodes/prelude.rays", line 666, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 664, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_align.
-File "crates/flow_sop/nodes/prelude.rays", line 754, characters 0-27:
+File "crates/flow_sop/nodes/prelude.rays", line 752, characters 0-27:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_zip.
-File "crates/flow_sop/nodes/prelude.rays", line 887, characters 0-68:
+File "crates/flow_sop/nodes/prelude.rays", line 885, characters 0-68:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_error.
-File "crates/flow_sop/nodes/prelude.rays", line 892, characters 0-58:
+File "crates/flow_sop/nodes/prelude.rays", line 890, characters 0-58:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_owners.
-File "crates/flow_sop/nodes/prelude.rays", line 898, characters 0-27:
+File "crates/flow_sop/nodes/prelude.rays", line 896, characters 0-27:
 Error [E_NAME]: Invalid, reserved or duplicate name: loft_run.
-File "crates/flow_sop/nodes/prelude.rays", line 986, characters 0-61:
+File "crates/flow_sop/nodes/prelude.rays", line 984, characters 0-61:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_finite.
-File "crates/flow_sop/nodes/prelude.rays", line 987, characters 0-46:
+File "crates/flow_sop/nodes/prelude.rays", line 985, characters 0-46:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_fail.
-File "crates/flow_sop/nodes/prelude.rays", line 992, characters 0-68:
+File "crates/flow_sop/nodes/prelude.rays", line 990, characters 0-68:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_interp.
-File "crates/flow_sop/nodes/prelude.rays", line 997, characters 0-69:
+File "crates/flow_sop/nodes/prelude.rays", line 995, characters 0-69:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_rlen.
-File "crates/flow_sop/nodes/prelude.rays", line 1004, characters 0-65:
+File "crates/flow_sop/nodes/prelude.rays", line 1002, characters 0-65:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_nok.
-File "crates/flow_sop/nodes/prelude.rays", line 1006, characters 0-71:
+File "crates/flow_sop/nodes/prelude.rays", line 1004, characters 0-71:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_normalize.
-File "crates/flow_sop/nodes/prelude.rays", line 1012, characters 0-48:
+File "crates/flow_sop/nodes/prelude.rays", line 1010, characters 0-48:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_init_frame.
-File "crates/flow_sop/nodes/prelude.rays", line 1020, characters 0-70:
+File "crates/flow_sop/nodes/prelude.rays", line 1018, characters 0-70:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_unit_leg.
-File "crates/flow_sop/nodes/prelude.rays", line 1022, characters 0-52:
+File "crates/flow_sop/nodes/prelude.rays", line 1020, characters 0-52:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_init_frame_leg.
-File "crates/flow_sop/nodes/prelude.rays", line 1029, characters 0-71:
+File "crates/flow_sop/nodes/prelude.rays", line 1027, characters 0-71:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_transport.
-File "crates/flow_sop/nodes/prelude.rays", line 1047, characters 0-57:
+File "crates/flow_sop/nodes/prelude.rays", line 1045, characters 0-57:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_cross_imp.
-File "crates/flow_sop/nodes/prelude.rays", line 1049, characters 0-55:
+File "crates/flow_sop/nodes/prelude.rays", line 1047, characters 0-55:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_dot_imp.
-File "crates/flow_sop/nodes/prelude.rays", line 1052, characters 0-99:
+File "crates/flow_sop/nodes/prelude.rays", line 1050, characters 0-99:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_param.
-File "crates/flow_sop/nodes/prelude.rays", line 1059, characters 0-54:
+File "crates/flow_sop/nodes/prelude.rays", line 1057, characters 0-54:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_wrap.
-File "crates/flow_sop/nodes/prelude.rays", line 1061, characters 0-100:
+File "crates/flow_sop/nodes/prelude.rays", line 1059, characters 0-100:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_addwrap.
-File "crates/flow_sop/nodes/prelude.rays", line 1064, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 1062, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_prims.
-File "crates/flow_sop/nodes/prelude.rays", line 1085, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 1083, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_edges.
-File "crates/flow_sop/nodes/prelude.rays", line 1109, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 1107, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_rings.
-File "crates/flow_sop/nodes/prelude.rays", line 1159, characters 0-31:
+File "crates/flow_sop/nodes/prelude.rays", line 1157, characters 0-31:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_centers.
-File "crates/flow_sop/nodes/prelude.rays", line 1166, characters 0-71:
+File "crates/flow_sop/nodes/prelude.rays", line 1164, characters 0-71:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_same.
-File "crates/flow_sop/nodes/prelude.rays", line 1171, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 1169, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_links.
-File "crates/flow_sop/nodes/prelude.rays", line 1225, characters 0-32:
+File "crates/flow_sop/nodes/prelude.rays", line 1223, characters 0-32:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_tangents.
-File "crates/flow_sop/nodes/prelude.rays", line 1253, characters 0-31:
+File "crates/flow_sop/nodes/prelude.rays", line 1251, characters 0-31:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_lengths.
-File "crates/flow_sop/nodes/prelude.rays", line 1275, characters 0-67:
+File "crates/flow_sop/nodes/prelude.rays", line 1273, characters 0-67:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_fin.
-File "crates/flow_sop/nodes/prelude.rays", line 1278, characters 0-33:
+File "crates/flow_sop/nodes/prelude.rays", line 1276, characters 0-33:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_trans_arr.
-File "crates/flow_sop/nodes/prelude.rays", line 1301, characters 0-27:
+File "crates/flow_sop/nodes/prelude.rays", line 1299, characters 0-27:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_seq.
-File "crates/flow_sop/nodes/prelude.rays", line 1321, characters 0-81:
+File "crates/flow_sop/nodes/prelude.rays", line 1319, characters 0-81:
 Error [E_NAME]: Invalid, reserved or duplicate name: int_gather_v.
-File "crates/flow_sop/nodes/prelude.rays", line 1325, characters 0-30:
+File "crates/flow_sop/nodes/prelude.rays", line 1323, characters 0-30:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_totals.
-File "crates/flow_sop/nodes/prelude.rays", line 1332, characters 0-28:
+File "crates/flow_sop/nodes/prelude.rays", line 1330, characters 0-28:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_roll.
-File "crates/flow_sop/nodes/prelude.rays", line 1365, characters 0-74:
+File "crates/flow_sop/nodes/prelude.rays", line 1363, characters 0-74:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_upframes.
-File "crates/flow_sop/nodes/prelude.rays", line 1370, characters 0-71:
+File "crates/flow_sop/nodes/prelude.rays", line 1368, characters 0-71:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_upbad.
-File "crates/flow_sop/nodes/prelude.rays", line 1376, characters 0-54:
+File "crates/flow_sop/nodes/prelude.rays", line 1374, characters 0-54:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_upleg.
-File "crates/flow_sop/nodes/prelude.rays", line 1385, characters 0-78:
+File "crates/flow_sop/nodes/prelude.rays", line 1383, characters 0-78:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_upframes_leg.
-File "crates/flow_sop/nodes/prelude.rays", line 1387, characters 0-75:
+File "crates/flow_sop/nodes/prelude.rays", line 1385, characters 0-75:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_upbad_leg.
-File "crates/flow_sop/nodes/prelude.rays", line 1391, characters 0-31:
+File "crates/flow_sop/nodes/prelude.rays", line 1389, characters 0-31:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_ringpts.
-File "crates/flow_sop/nodes/prelude.rays", line 1429, characters 0-65:
+File "crates/flow_sop/nodes/prelude.rays", line 1427, characters 0-65:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_gcd.
-File "crates/flow_sop/nodes/prelude.rays", line 1440, characters 0-67:
+File "crates/flow_sop/nodes/prelude.rays", line 1438, characters 0-67:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_faces.
-File "crates/flow_sop/nodes/prelude.rays", line 1467, characters 0-54:
+File "crates/flow_sop/nodes/prelude.rays", line 1465, characters 0-54:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_cnext.
-File "crates/flow_sop/nodes/prelude.rays", line 1469, characters 0-73:
+File "crates/flow_sop/nodes/prelude.rays", line 1467, characters 0-73:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_craw.
-File "crates/flow_sop/nodes/prelude.rays", line 1475, characters 0-26:
+File "crates/flow_sop/nodes/prelude.rays", line 1473, characters 0-26:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_tv.
-File "crates/flow_sop/nodes/prelude.rays", line 1497, characters 0-33:
+File "crates/flow_sop/nodes/prelude.rays", line 1495, characters 0-33:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_outlayout.
-File "crates/flow_sop/nodes/prelude.rays", line 1526, characters 0-31:
+File "crates/flow_sop/nodes/prelude.rays", line 1524, characters 0-31:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_corners.
-File "crates/flow_sop/nodes/prelude.rays", line 1592, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1590, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_pf.
-File "crates/flow_sop/nodes/prelude.rays", line 1594, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1592, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_pi.
-File "crates/flow_sop/nodes/prelude.rays", line 1596, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1594, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_pv.
-File "crates/flow_sop/nodes/prelude.rays", line 1598, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1596, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_vi.
-File "crates/flow_sop/nodes/prelude.rays", line 1600, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1598, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_v2.
-File "crates/flow_sop/nodes/prelude.rays", line 1602, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1600, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_v4.
-File "crates/flow_sop/nodes/prelude.rays", line 1604, characters 0-74:
+File "crates/flow_sop/nodes/prelude.rays", line 1602, characters 0-74:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_pf.
-File "crates/flow_sop/nodes/prelude.rays", line 1607, characters 0-72:
+File "crates/flow_sop/nodes/prelude.rays", line 1605, characters 0-72:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_pi.
-File "crates/flow_sop/nodes/prelude.rays", line 1610, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1608, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_pv.
-File "crates/flow_sop/nodes/prelude.rays", line 1613, characters 0-59:
+File "crates/flow_sop/nodes/prelude.rays", line 1611, characters 0-59:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_vi.
-File "crates/flow_sop/nodes/prelude.rays", line 1616, characters 0-87:
+File "crates/flow_sop/nodes/prelude.rays", line 1614, characters 0-87:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_v2.
-File "crates/flow_sop/nodes/prelude.rays", line 1620, characters 0-87:
+File "crates/flow_sop/nodes/prelude.rays", line 1618, characters 0-87:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_v4.
-File "crates/flow_sop/nodes/prelude.rays", line 1627, characters 0-30:
+File "crates/flow_sop/nodes/prelude.rays", line 1625, characters 0-30:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_legacy.
-File "crates/flow_sop/nodes/prelude.rays", line 1641, characters 0-92:
+File "crates/flow_sop/nodes/prelude.rays", line 1639, characters 0-92:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_count_bad_f.
-File "crates/flow_sop/nodes/prelude.rays", line 1648, characters 0-99:
+File "crates/flow_sop/nodes/prelude.rays", line 1646, characters 0-99:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_count_bad_i.
-File "crates/flow_sop/nodes/prelude.rays", line 1652, characters 0-26:
+File "crates/flow_sop/nodes/prelude.rays", line 1650, characters 0-26:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_prep.
-File "crates/flow_sop/nodes/prelude.rays", line 1715, characters 0-31:
+File "crates/flow_sop/nodes/prelude.rays", line 1713, characters 0-31:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_edgebad.
-File "crates/flow_sop/nodes/prelude.rays", line 1733, characters 0-69:
+File "crates/flow_sop/nodes/prelude.rays", line 1731, characters 0-69:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_valence.
-File "crates/flow_sop/nodes/prelude.rays", line 1747, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 1745, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_edgeanc.
-File "crates/flow_sop/nodes/prelude.rays", line 1811, characters 0-25:
+File "crates/flow_sop/nodes/prelude.rays", line 1809, characters 0-25:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_run.
-File "crates/flow_sop/nodes/prelude.rays", line 1966, characters 0-131:
+File "crates/flow_sop/nodes/prelude.rays", line 1964, characters 0-131:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_allfinite.
-File "crates/flow_sop/nodes/prelude.rays", line 1969, characters 0-29:
+File "crates/flow_sop/nodes/prelude.rays", line 1967, characters 0-29:
 Error [E_NAME]: Invalid, reserved or duplicate name: pw_valid.
-File "crates/flow_sop/nodes/prelude.rays", line 1985, characters 0-55:
+File "crates/flow_sop/nodes/prelude.rays", line 1983, characters 0-55:
 Error [E_NAME]: Invalid, reserved or duplicate name: etp_length.
-File "crates/flow_sop/nodes/prelude.rays", line 1995, characters 0-32:
+File "crates/flow_sop/nodes/prelude.rays", line 1993, characters 0-32:
 Error [E_NAME]: Invalid, reserved or duplicate name: etp_forward.
-File "crates/flow_sop/nodes/prelude.rays", line 2026, characters 0-33:
+File "crates/flow_sop/nodes/prelude.rays", line 2024, characters 0-33:
 Error [E_NAME]: Invalid, reserved or duplicate name: etp_backward.
-File "crates/flow_sop/nodes/prelude.rays", line 2066, characters 0-34:
+File "crates/flow_sop/nodes/prelude.rays", line 2064, characters 0-34:
 Error [E_NAME]: Invalid, reserved or duplicate name: etp_normalize.
-File "crates/flow_sop/nodes/prelude.rays", line 2096, characters 2-52:
+File "crates/flow_sop/nodes/prelude.rays", line 2094, characters 2-52:
 Error [E_NAME]: Invalid, reserved or duplicate name: lap_manifold.
-File "crates/flow_sop/nodes/prelude.rays", line 2153, characters 2-56:
+File "crates/flow_sop/nodes/prelude.rays", line 2151, characters 2-56:
 Error [E_NAME]: Invalid, reserved or duplicate name: lap_rows.
-File "crates/flow_sop/nodes/prelude.rays", line 2160, characters 2-67:
+File "crates/flow_sop/nodes/prelude.rays", line 2158, characters 2-67:
 Error [E_NAME]: Invalid, reserved or duplicate name: lap_times.
-File "crates/flow_sop/nodes/prelude.rays", line 2161, characters 2-79:
+File "crates/flow_sop/nodes/prelude.rays", line 2159, characters 2-79:
 Error [E_NAME]: Invalid, reserved or duplicate name: lap_pick.
-File "crates/flow_sop/nodes/prelude.rays", line 2163, characters 2-77:
+File "crates/flow_sop/nodes/prelude.rays", line 2161, characters 2-77:
 Error [E_NAME]: Invalid, reserved or duplicate name: lap_pick_int.
-File "crates/flow_sop/nodes/prelude.rays", line 2165, characters 2-68:
+File "crates/flow_sop/nodes/prelude.rays", line 2163, characters 2-68:
 Error [E_NAME]: Invalid, reserved or duplicate name: lap_vec_diff.
-File "crates/flow_sop/nodes/prelude.rays", line 2166, characters 2-86:
+File "crates/flow_sop/nodes/prelude.rays", line 2164, characters 2-86:
 Error [E_NAME]: Invalid, reserved or duplicate name: lap_sumsq.
 File "crates/flow_sop/nodes/prelude.rays", line 2, characters 0-20:
 Error [E_NO_GRAPH]: A workspace needs at least one graph.
