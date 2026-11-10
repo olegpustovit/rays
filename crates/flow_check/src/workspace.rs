@@ -217,7 +217,7 @@ fn add_to(diags: &mut Vec<Diagnostic>, severity: Severity, form: &Syntax, code: 
         Severity::ErrorSeverity => err(code, message, span),
         Severity::Warning => diagnostic::warning(span, code.to_owned(), message),
     };
-    if let Some(name) = syntax::head(form) { diagnostic.signature = crate::registry::signature(name); }
+    if let Some(name) = syntax::head(form) { diagnostic.set_signature(crate::registry::signature(name)); }
     diags.push(diagnostic);
 }
 fn ty_port(t:&Ty)->Option<port_type::PortType>{match t{Ty::Float=>Some(port_type::PortType::Float),Ty::Int=>Some(port_type::PortType::Int),Ty::Bool=>Some(port_type::PortType::Bool),Ty::Vec3=>Some(port_type::PortType::Vec3),Ty::Named(n) if n=="geometry"=>Some(port_type::PortType::Geometry),Ty::Named(n) if n=="image"=>Some(port_type::PortType::Image),Ty::Fn(Some(s))=>Some(port_type::PortType::Fn((**s).clone())),_=>None}}
@@ -1994,10 +1994,10 @@ impl Checker {
                  self.fail_term(form, &code, &message)
              };
              if let Some(diagnostic) = self.diags.get_mut(index) {
-                 diagnostic.signature = suggestions.first().and_then(|name| crate::registry::signature(name)
+                 diagnostic.set_signature(suggestions.first().and_then(|name| crate::registry::signature(name)
                      .or_else(|| self.ops.iter().find(|operator| &operator.name == name).map(crate::registry::op_signature))
-                     .or_else(|| self.catalog.kinds.iter().find(|kind| &kind.qualified == name).map(crate::registry::kind_signature)));
-                 diagnostic.suggest = suggestions;
+                     .or_else(|| self.catalog.kinds.iter().find(|kind| &kind.qualified == name).map(crate::registry::kind_signature))));
+                 diagnostic.set_suggest(suggestions);
              }
              result
          }
@@ -2319,7 +2319,7 @@ impl Checker {
          info.packed.insert(cx.path);
      }
      for diagnostic in &mut self.diags[diagnostic_start..] {
-         diagnostic.signature = Some(crate::registry::op_signature(operator));
+         diagnostic.set_signature(Some(crate::registry::op_signature(operator)));
      }
      (self.make_term(form, result, Draft::Op { op: operator.name.clone(), args: named, skip }), info)
  }
@@ -2721,7 +2721,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
      value.packed.clear();
      value.approx_sources.clear();
     for diagnostic in &mut self.diags[diagnostic_start..] {
-        diagnostic.signature = Some(crate::registry::kind_signature(kind));
+        diagnostic.set_signature(Some(crate::registry::kind_signature(kind)));
     }
     (self.make_term(form, out, Draft::Call { kind: kind.qualified.clone(), ctx: kind.context, args: named }), value)
  }
@@ -3436,6 +3436,7 @@ impl Checker {
     }
 
     fn phase(&mut self, forms: impl IntoIterator<Item = Syntax>) -> (Vec<String>, Vec<String>) {
+        let registration_phase = flow_syntax::phase_timer::measure("check.register");
         let mut declarations = Vec::new();
         let mut seen = BTreeSet::new();
         let mut graph_names = Vec::new();
@@ -3488,6 +3489,8 @@ impl Checker {
             }
         }
 
+        drop(registration_phase);
+        let macro_phase = flow_syntax::phase_timer::measure("check.macros");
         for (head, name, form) in &declarations {
             if head != "defmacro" {
                 continue;
@@ -3499,6 +3502,8 @@ impl Checker {
             }
         }
 
+        drop(macro_phase);
+        let signature_phase = flow_syntax::phase_timer::measure("check.signatures");
         for (head, name, form) in &declarations {
             if head != "graph" && head != "defn" {
                 continue;
@@ -3515,10 +3520,14 @@ impl Checker {
             }
         }
 
+        drop(signature_phase);
+        let function_phase = flow_syntax::phase_timer::measure("check.functions");
         for name in &def_names {
             self.check_def_body(name, !self.call_sites);
         }
+        drop(function_phase);
 
+        let node_phase = flow_syntax::phase_timer::measure("check.nodes");
         for name in node_names {
             let Some(definition) = self.node_defs_get(&name).cloned() else { continue };
             self.events += 1;
@@ -3612,6 +3621,7 @@ impl Checker {
                 normalizers,
             }));
         }
+        drop(node_phase);
         self.check_node_cycles();
         for name in &graph_names {
             if let Some(signature) = self.graphs_get(name) {

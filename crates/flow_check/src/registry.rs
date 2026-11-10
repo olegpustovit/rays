@@ -199,16 +199,16 @@ mod tests {
             let forms = flow_syntax::syntax::parse(&source).unwrap();
             let (_, diagnostics) = crate::workspace::check(&[], false, false, None, &catalog, &forms);
             let diagnostic = diagnostics.iter().find(|diagnostic| diagnostic.code == code).unwrap_or_else(|| panic!("{expression}: {diagnostics:?}"));
-            assert!(diagnostic.signature.is_some(), "{diagnostic:?}");
-            if code == "E_UNKNOWN_KIND" { assert_eq!(diagnostic.suggest.first().map(String::as_str), Some("frame/width")); }
+            assert!(diagnostic.signature().is_some(), "{diagnostic:?}");
+            if code == "E_UNKNOWN_KIND" { assert_eq!(diagnostic.suggest().first().map(String::as_str), Some("frame/width")); }
         }
         let mut custom = op::all().iter().find(|operator| operator.name == "frame/width").unwrap().clone();
         custom.name = "custom/width".into();
         let forms = flow_syntax::syntax::parse("(workspace probe (graph picture :context draw (custom/widht)))").unwrap();
         let (_, diagnostics) = crate::workspace::check(&[custom], false, false, None, &catalog, &forms);
         let diagnostic = diagnostics.iter().find(|diagnostic| diagnostic.code == "E_UNKNOWN_KIND").unwrap_or_else(|| panic!("{diagnostics:?}"));
-        assert_eq!(diagnostic.suggest.first().map(String::as_str), Some("custom/width"));
-        assert!(diagnostic.signature.as_deref().is_some_and(|signature| signature.contains("custom/width")));
+        assert_eq!(diagnostic.suggest().first().map(String::as_str), Some("custom/width"));
+        assert!(diagnostic.signature().is_some_and(|signature| signature.contains("custom/width")));
         let entries = entries(&catalog);
         assert!(entries.iter().all(|entry| !entry.doc.is_empty() && !entry.example.is_empty()));
     }
