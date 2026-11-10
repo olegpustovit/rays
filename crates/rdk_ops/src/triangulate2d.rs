@@ -17,7 +17,7 @@ use rdk_geom::predicates::{self, Sign};
 use crate::compact_points;
 use crate::deletion;
 
-const OPERATION: &str = "Rdk_mesh.Triangulate2d.triangulate_2d";
+const OPERATION: &str = "sop/triangulate_2d";
 const GUARD_OPERATION: &str = "triangulate_2d";
 
 

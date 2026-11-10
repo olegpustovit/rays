@@ -4,7 +4,7 @@ use rdk_core::error::Code;
 
 
 fn fail(message: &str) -> error::T {
-    error::new("Rdk_mesh.Fuse_cleanup", Code::InvalidParameter, format!("Rdk_mesh.Fuse_cleanup.fuse: {message}"))
+    error::new("sop/fuse", Code::InvalidParameter, format!("sop/fuse: {message}"))
 }
 
 fn minimum_vertices(kind: u8) -> i64 {

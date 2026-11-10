@@ -140,7 +140,7 @@ pub(crate) fn automatic_boundary_holes(
     let point_count = topology_view.point_count;
     let point_byte_count = (point_count >> 3) + if point_count & 7 == 0 { 0 } else { 1 };
     let grain = grain.unwrap_or(16_384);
-    support::check_positive(grain).map_err(|_| invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()))?;
+    support::check_positive(grain).map_err(|_| invalid_arg("sop/subdivide_cracks: grain must be positive".to_owned()))?;
     let mut boundary_points = rdk_core::scratch::u8_filled(point_byte_count as usize, 0);
     support::par_fill(cancel_token, grain, &mut boundary_points, &|byte: i64| {
         let base = byte << 3;
@@ -390,7 +390,7 @@ impl Default for PolygonOptions {
 fn validate_iterations_and_bias(iterations: i64, cracks: CrackPolicy) -> Result<(), error::T> {
     if iterations < 0 {
         return Err(invalid_arg(
-            "Rdk_mesh.Subdivide.subdivide: iterations must be non-negative".to_owned(),
+            "sop/subdivide_cracks: iterations must be non-negative".to_owned(),
         ));
     }
     if let CrackPolicy::SubdividePullDivideEdges(bias) | CrackPolicy::SubdividePullTriangulate(bias) =
@@ -398,7 +398,7 @@ fn validate_iterations_and_bias(iterations: i64, cracks: CrackPolicy) -> Result<
     {
         if !bias.is_finite() || !(0.0..=1.0).contains(&bias) {
             return Err(invalid_arg(
-                "Rdk_mesh.Subdivide.subdivide: Pull Divide bias must be finite and in [0, 1]"
+                "sop/subdivide_cracks: Pull Divide bias must be finite and in [0, 1]"
                     .to_owned(),
             ));
         }

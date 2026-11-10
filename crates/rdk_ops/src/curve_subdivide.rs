@@ -30,7 +30,7 @@ pub struct Plan {
 }
 
 fn fail(message: &str) -> error::T {
-    error::new("Rdk_curve.Curve_subdivide", Code::InvalidParameter, message.to_owned())
+    error::new("sop/subdivide_cracks", Code::InvalidParameter, message.to_owned())
 }
 
 fn checked_add(name: &str, left: i64, right: i64) -> Result<i64, error::T> {
@@ -39,7 +39,7 @@ fn checked_add(name: &str, left: i64, right: i64) -> Result<i64, error::T> {
 }
 
 fn grain_size(grain: Option<i64>) -> Result<i64, error::T> {
-    let grain = support::resolve(grain).map_err(|_| fail("Rdk_curve.Curve_subdivide.subdivide: grain must be positive"))?;
+    let grain = support::resolve(grain).map_err(|_| fail("sop/subdivide_cracks: grain must be positive"))?;
     Ok(grain)
 }
 
@@ -800,7 +800,7 @@ mod tests {
         let Err(zero) = iterate(None, Some(0), false, Scheme::Bilinear, 1, &polyline(false)) else {
             panic!("expected failure")
         };
-        assert_eq!(error::message(&zero), "Rdk_curve.Curve_subdivide.subdivide: grain must be positive");
+        assert_eq!(error::message(&zero), "sop/subdivide_cracks: grain must be positive");
         let cancelled = cancel::create();
         cancel::cancel(&cancelled);
         let Err(stopped) = iterate(Some(&cancelled), None, false, Scheme::Bilinear, 1, &polyline(false)) else {

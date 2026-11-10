@@ -8,7 +8,7 @@
 ; Sub fuses, written here with explicit fma.
 (defn pr_error :context value [(reason : text)]
   (error "invalid_geometry" "point_replicate could not produce valid geometry"
-    :cause (str "point_replicate [invalid_geometry]: Rdk_gen.Point_replicate.point_replicate: " reason)))
+    :cause (str "point_replicate [invalid_geometry]: sop/point_replicate: " reason)))
 (defn pr_pattern_ok :context value [(pattern : text)]
   (or (text/blank? pattern) (equal? (text/glob_error pattern) "")))
 (defmacro pr_bad [geo name type]

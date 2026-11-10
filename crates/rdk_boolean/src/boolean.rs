@@ -564,7 +564,7 @@ mod tests {
         .unwrap()
     }
 
-    /// `Rdk_test_support.Boolean_front.run` defaults, with `~grain:1` which every test passes.
+    /// Boolean fixture defaults, with grain 1 as used by the existing tests.
     fn front(right: geometry::T) -> Params {
         Params {
             cancel: None,

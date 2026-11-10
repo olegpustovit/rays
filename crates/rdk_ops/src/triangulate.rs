@@ -6,7 +6,7 @@ use rdk_core::error::Code;
 use rdk_geom::point_grid::float_max;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
-const PREFIX: &str = "Rdk_mesh.Triangulate.triangulate: ";
+const PREFIX: &str = "sop/triangulate: ";
 
 pub struct Params {
     pub cancel: Option<std::sync::Arc<cancel::T>>,
@@ -79,17 +79,17 @@ fn triangulate(
     primitives: Option<&group::T>,
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
-    support::check_positive(grain).map_err(|_| fail("Rdk_mesh.Triangulate.triangulate: grain must be positive".to_owned()))?;
+    support::check_positive(grain).map_err(|_| fail("sop/triangulate: grain must be positive".to_owned()))?;
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(geometry_value);
     let primitive_count = topology::primitive_count(topology_value) as usize;
     if let Some(selection) = primitives {
         if group::owner(selection) != group::Owner::Primitive {
-            return Err(fail("Rdk_mesh.Triangulate.triangulate: selection must own primitives".to_owned()));
+            return Err(fail("sop/triangulate: selection must own primitives".to_owned()));
         }
         if group::length(selection) != primitive_count as i64 {
             return Err(fail(
-                "Rdk_mesh.Triangulate.triangulate: selection length does not match primitive count".to_owned(),
+                "sop/triangulate: selection length does not match primitive count".to_owned(),
             ));
         }
     }
@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(error::code(&failure), Code::InvalidTopology);
         assert_eq!(
             error::message(&failure),
-            "Rdk_mesh.Triangulate.triangulate: primitive 0 has degenerate projected area"
+            "sop/triangulate: primitive 0 has degenerate projected area"
         );
         let messages = |domains| {
             at_domains_strings(domains, &|| {
@@ -402,7 +402,7 @@ mod tests {
         let failure = err(run(&params(), &curve));
         assert_eq!(
             error::message(&failure),
-            "Rdk_mesh.Triangulate.triangulate: primitive 0 is a curve, not a polygon"
+            "sop/triangulate: primitive 0 is a curve, not a polygon"
         );
         let token = std::sync::Arc::new(cancel::create());
         cancel::cancel(&token);

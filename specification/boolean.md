@@ -2,7 +2,7 @@
 
 This document is the normative research and conformance contract for RDK's
 mesh Boolean. The implementation remains private until every public-product
-gate below is closed. `Csg3` and `Rdk.Boolean_detect` are useful narrower
+gate below is closed. `Csg3` and `rdk_ops::boolean_detect` are useful narrower
 tools, but neither is a fallback for this kernel.
 
 ## Evidence hierarchy
@@ -356,7 +356,7 @@ component scan, and in one-/multi-domain cell results. An unrelated boundary
 hit is reported as the exact arrangement-membership invariant failure described
 above; it is not hidden by perturbing the origin.
 
-`Rdk.Boolean.run` and the immutable two-input `Sop.boolean` now promote the
+`rdk_boolean::boolean::run` and the immutable two-input `Sop.boolean` now promote the
 five named treatment-aware products plus solid/solid Shatter. Their typed policy includes per-input
 solid/surface and self-intersection treatment, exact point-payload reject or
 vertex-promotion behavior, shared/split seam points, triangle/unchanged/all
@@ -378,7 +378,7 @@ now dissolves a cut triangle component only when its retained boundary is one
 degree-two cycle. Components with holes or internal retained seams stay
 triangulated instead of publishing a repeated-bridge, non-simple polygon.
 
-`Rdk.Boolean.seam` and `Sop.boolean_seam` reuse the same exact arrangement for
+`rdk_boolean::boolean::seam` and `Sop.boolean_seam` reuse the same exact arrangement for
 diagnostic and downstream modeling output. Curve mode emits independently
 named left-self, between-input, and right-self seam groups. Coincident mode
 emits the exact coincident triangle patches with its own optional primitive

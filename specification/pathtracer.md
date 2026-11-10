@@ -14,7 +14,7 @@ demos; the demo scene is `sketches/pathtracer.rays` (Lisp; the editor's Path tra
   so an animated mesh whose topology changes is never read back: each new mesh rebuilds its structure on the
   device, and frames trace the last one built until it is installed. A lone device mesh has one material
   (`u.lone`), so its ids table has one entry. Float4 colours take the host route.
-- Input: a list of `Rdk.Geometry.t` objects, each with one metallic-roughness
+- Input: a list of `rdk_core::geometry::T` objects, each with one metallic-roughness
   material (`albedo`, `roughness`, `metallic`, `emission`), plus analytic
   `sphere`s (intersected analytically beside the triangle structure, so they
   are exact and never tessellated) and `strand`s (round polylines of constant
@@ -98,7 +98,7 @@ demos; the demo scene is `sketches/pathtracer.rays` (Lisp; the editor's Path tra
   cost; `flush` is the explicit synchronous wait for tests and export. This
   keeps the CPU loop decoupled from GPU frame time. Preview cost still needs
   a measured budget on the M1.
-- Geometry swap: `mesh` flattens `(Rdk.Geometry.t * material)` pairs into a
+- Geometry swap: `mesh` flattens `(rdk_core::geometry::T * material)` pairs into a
   pure triangle soup that a SOP cook worker may build off the initial domain.
   `queue_mesh` uploads it and submits a replacement acceleration build without
   waiting. The previous scene remains visible until the build completes and
@@ -116,7 +116,7 @@ file-backed HDRIs (a baked `Rays.World` is the environment; see World path).
 
 ## Pipeline
 
-1. The flat `create` path triangulates every object with `Rdk.Triangulate.run`, computes
+1. The flat `create` path triangulates every object with `rdk_ops::triangulate::run`, computes
    vertex normals with a 40° cusp so subdivided/rounded surfaces stay smooth
    while boxes stay hard, and flattens everything into one unindexed
    `packed_float3` position buffer, a matching normal buffer, and one material
@@ -344,12 +344,12 @@ Wrangle. `copy_cubes` uses the built-in `sop/copy_to_points` with a "Pack and
 instance" choice, Houdini's Copy to Points pack toggle. Packed, its
 cook is O(prototype + targets): the prototype polygons followed by one loose
 point per copy carrying `scale`; there are no fake packed primitives inside
-`Rdk.Geometry.t`, and `prepare` splits referenced points (prototype) from
+`rdk_core::geometry::T`, and `prepare` splits referenced points (prototype) from
 loose points (instance transforms) on the cook worker. The rasterizer draws
 that with one indexed Metal instance batch through `Scene.D3.instances_array`;
 the tracer uses `mesh_instanced` to keep a single prototype BLAS and build a
 top-level instance structure. Materialized, the node calls
-`Rdk.Instance_copy.copy_to_points`. A "Renderer" choice in the inspector's camera panel
+`rdk_ops::instance_copy::materialize_instances`. A "Renderer" choice in the inspector's camera panel
 (the `~inspector` hook) switches between the path tracer, filled Scene3 raster,
 and a Scene3 wireframe made from indexed Metal lines along unique RDK topology
 edges. The Box catalog defaults to six quads, so the wireframe follows the

@@ -20,8 +20,8 @@
 
 ; SOP gallery: one sop graph per catalog operation worth seeing. The scene
 ; shows one of them (`(ref boolean)`); the outline or the graph pane opens the others. Curves, point clouds, the Voronoi cells and the gyroid are written here as sop/curve
-; and sop/iso_surface expressions (some as literal data, computed once with Catmull-Rom
-; and Rdk.Voronoi2). A solid from explicit points is a closed sop/curve swept along a short curve (:caps true).
+; and sop/iso_surface expressions. Literal curve samples and Voronoi cells preserve authored geometry.
+; A solid from explicit points is a closed sop/curve swept along a short curve (:caps true).
 ^:allow-warnings (workspace sop_gallery
 
   (graph attribute_laplacian :context sop

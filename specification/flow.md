@@ -1821,7 +1821,7 @@ gestures. Integer-array socket defaults use `(array/int 0)`.
 
 `(sop/concat geometries :source_attribute "name" :source_base n)` appends a list
 of geometries with native Merge semantics for every attribute type and group
-(it runs `Rdk.Mesh_merge.run`), so a body never reads attributes whose storage
+(it runs `rdk_ops::mesh_merge::run`), so a body never reads attributes whose storage
 type is only known at cook time. It projects as an ordinary card with a
 geometry-list row.
 

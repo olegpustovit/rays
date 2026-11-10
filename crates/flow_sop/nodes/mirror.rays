@@ -22,7 +22,7 @@
          length (if finite_length (sqrt sq_z.value) 1e300)]
     (if (<= length 1e-20)
       (error "invalid_parameter" "mirror could not produce valid geometry"
-        :cause "mirror [invalid_parameter]: Rdk_mesh.Mirror_geometry.mirror: plane normal must be non-zero")
+        :cause "mirror [invalid_parameter]: sop/mirror: plane normal must be non-zero")
       ; An overflowing length is +infinity natively: every unit component is a signed zero.
       (let* [n (if finite_length [(/ normal_x length) (/ normal_y length) (/ normal_z length)]
                  [(* 0.0 normal_x) (* 0.0 normal_y) (* 0.0 normal_z)])

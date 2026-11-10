@@ -68,7 +68,7 @@ pub(crate) const EDGE_ANCESTRY_PREFIX: &str = "__rdk_subdivide_edge_ancestry_";
 
 /// Public subdivision maps helper failures into its operation code.
 pub(crate) fn fail(message: String) -> error::T {
-    error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidParameter, message)
+    error::new("sop/subdivide_cracks", Code::InvalidParameter, message)
 }
 
 pub(crate) fn failm(message: &str) -> error::T {
@@ -77,7 +77,7 @@ pub(crate) fn failm(message: &str) -> error::T {
 
 /// Internal invalid-input failure.
 pub(crate) fn invalid_arg(message: String) -> error::T {
-    error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidArgument, message)
+    error::new("sop/subdivide_cracks", Code::InvalidArgument, message)
 }
 
 pub(crate) fn checked_add(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
@@ -123,7 +123,7 @@ pub(crate) fn gu(values: &[u8], index: i64) -> u8 {
 /// The `?grain` argument: positive, default 16 384.
 fn grain_of(grain: Option<i64>) -> Result<i64, error::T> {
     let grain = grain.unwrap_or(16_384);
-    support::check_positive(grain).map_err(|_| invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()))?;
+    support::check_positive(grain).map_err(|_| invalid_arg("sop/subdivide_cracks: grain must be positive".to_owned()))?;
     Ok(grain)
 }
 

@@ -21,9 +21,9 @@ struct CompiledGroupRule {
 
 fn fail(message: String) -> error::T {
     error::new(
-        "Rdk_mesh.Fuse_target_rules",
+        "sop/fuse",
         Code::InvalidArgument,
-        format!("Rdk_mesh.Fuse_target_rules.fuse: {message}"),
+        format!("sop/fuse: {message}"),
     )
 }
 
@@ -485,7 +485,7 @@ mod tests {
         let failure = apply(None, 1, &[rule(AttributeMethod::Sum)], &[], &[0], &source, &target).err().unwrap();
         assert_eq!(
             error::message(&failure),
-            "Rdk_mesh.Fuse_target_rules.fuse: fixed-target destination count differs from source point count"
+            "sop/fuse: fixed-target destination count differs from source point count"
         );
         let bare = geom(&[0., 1., 2.], &[0.; 3], &[0.; 3], &[], &[0], None);
         let failure = apply(None, 1, &[rule(AttributeMethod::Sum)], &[], &[0, 0, 0], &source, &bare).err().unwrap();

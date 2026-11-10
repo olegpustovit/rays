@@ -265,7 +265,7 @@
                      primitive_range)))))))]
         (if (int/gt problems 0)
           (error "invalid_geometry" "resample could not produce valid geometry"
-            :cause "resample [invalid_geometry]: Rdk_curve.Resample_curves.resample_curves: invalid input curve")
+            :cause "resample [invalid_geometry]: sop/resample: invalid input curve")
           (let* [sample_range (array/range sample_total :type int)
                  sample_marks (array/scatter_add (array/slice sample_offsets 0 primitives)
                                 (array/int primitives 1) (int/add sample_total 1))
@@ -396,5 +396,5 @@
                      sample_offsets vertex_left weights))]
             (if (int/gt undefined_tangents 0)
               (error "invalid_geometry" "resample could not produce valid geometry"
-                :cause "resample [invalid_geometry]: Rdk_curve.Resample_curves.resample_curves: generated a non-finite or undefined diagnostic")
+                :cause "resample [invalid_geometry]: sop/resample: generated a non-finite or undefined diagnostic")
               grouped)))))))

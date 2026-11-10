@@ -19,7 +19,7 @@ Current work and verification are tracked in [cleanup/status.md](../docs/history
 `rays.sop` combines Processing-style immediacy with a non-destructive
 SOP workflow. A new user should be able to construct, animate, inspect, and
 render an interesting model without learning packed storage. The same
-`Rdk.Geometry.t` remains available to advanced users who descend to native
+`rdk_core::geometry::T` remains available to advanced users who descend to native
 kernels; there is no separate easy-but-slow geometry model.
 
 The common path is a pipeline written in Rays Lisp, the only way to build a SOP graph:
@@ -56,10 +56,10 @@ dependencies, validation, diagnostics, cooking, inspection, and bounded
 session caches. It may use RDK and public Rays value semantics. It
 does not import Runtime, SDL3, Metal, or platform policy.
 
-Cooking produces `Payload.Geometry of Rdk.Geometry.t` or `Payload.Image of Image.t`.
+Cooking produces `Payload.Geometry of rdk_core::geometry::T` or `Payload.Image of Image.t`.
 The image stores row-major RGBA float samples in [0,1] or owned RGBA8 bytes, four per pixel. Its
 constructor copies public input; its public pixel reader returns a copy.
-Images and geometry share `Rdk.Data_id.fresh`, so session component accounting
+Images and geometry share `rdk_core::geometry::fresh_data_id`, so session component accounting
 cannot confuse their identities. An image contributes one component of
 `width * height * 4 * 8` bytes for float storage, or `width * height * 4`
 bytes for RGBA8. An exact float consumer explicitly expands byte storage to
@@ -377,14 +377,14 @@ the wait overlaps whatever the cook does after the dispatch. A status that fails
 device to that write (`Sop.Context.device_refused`): what the cook attempt wrote is dropped and the
 graph cooks again, the write on the CPU, which reports its own errors (`test_settle`, a mock device
 whose status fails, cooks the CPU's bytes). The
-write installs it as deferred storage: `Rdk.Packed.Float3.deferred` for canonical P,
-`Rdk.Attribute.create_deferred` for any other numeric attribute. Both types are abstract, so every
+write installs it as deferred storage: `rdk_core::packed::float3::deferred` for canonical P,
+`rdk_core::attribute::create_deferred` for any other numeric attribute. Both types are abstract, so every
 reader (`Float3.get`/`View.view`, `Attribute.storage`/`View.storage`/`get`) materialises on first
-use through `Rdk.Packed.Deferred` (once, any domain, the thunk and its buffer dropped after), while
+use through `rdk_core::packed::deferred` (once, any domain, the thunk and its buffer dropped after), while
 length, kind, identity and payload size never do. rdk stays GPU-free: it holds only a thunk and a
 release (`Deferred.create ?release`, `Geometry.releasers`). A recook whose result is only held
 (cached, compared by identity, counted) reads nothing back; the first CPU reader of P reads P alone.
-Topology has the corresponding `Rdk.Topology.deferred` carrier: known point,
+Topology has the corresponding `rdk_core::topology::deferred` carrier: known point,
 vertex and primitive counts, optional homogeneous `(kind, corner_count)` shape,
 an opaque holder, release callback and a thunk returning validated owned topology.
 `Geometry.create`, count queries, identity and payload accounting do not force it;
@@ -429,7 +429,7 @@ A clear or a close leaves results to their holders' collection; closing
 the runner first materialises every holder still alive, so a geometry outliving the GPU stays valid. `test_chain_gpu_native` fails if a recook reads back,
 if reading P materialises more than one output or twice, or if a buffer outlives its geometry.
 A later fused write reads a resident attribute where it is (GPU to GPU): the deferred storage
-carries an rdk holder (`Rdk.Packed.Deferred.holder`, an extensible tag rdk never inspects) naming
+carries an rdk holder (`rdk_core::packed::deferred::holder`, an extensible tag rdk never inspects) naming
 the output's placeholder (`Gpu.planes.resident`, one element), `Attribute_kernel.resident_read`
 answers a whole-attribute `sop/attr` of unread resident storage with it, and
 `Packed.Host.prepare_values ?resident` evaluates each source with a resolve that answers
@@ -555,7 +555,7 @@ Tried and stopped (2026-10-29), with what each still needs:
   CPU. An integer source or table converts to floats once per array (`device_inputs`, 8 arrays by
   identity), so a CSR or a selection the topology keeps is uploaded once. An Int `array/range` is
   an index source too (the host's index buffer). The normals themselves stay on the CPU, blocked
-  by four things, in order. (1) `sop/normals` is a Lisp node (its body, not `Rdk.Normal_ops`), so
+  by four things, in order. (1) `sop/normals` is a Lisp node (its body, not `rdk_core::normal_ops`), so
   there is no native node to choose the device in, and a new native registration of a
   Lisp-expressible kind is refused (`lib/flow_sop/AGENTS.md`). (2) The driven transform cannot inline with recompute: the
   static call returns its input at an identity matrix and otherwise `normals_install` (N deleted
@@ -651,7 +651,7 @@ edit to cook 0.289 against 0.526 s, lower 0.377 against 0.383 s, cook 0.828 agai
 
 **Display binding.** A displayed point cloud whose P (and N, if it has one) the device still holds,
 or a triangle mesh (every primitive a triangle) whose P and point N, if it has one, it holds, with no colour, uv,
-vertex N, piece or material to show, is drawn from the device: `Rdk_rays.Surface`
+vertex N, piece or material to show, is drawn from the device: `rdk_rays::surface`
 keeps it as a device preview on the cook worker (nothing read), and `Surface.scene3` binds it on
 the initial domain through the editor's `Flow_native.Workspace_gpu.display`
 (`Attribute_kernel.resident_vec3` finds the placeholders, `Flow_gpu.Run.pin` borrows the held
@@ -728,7 +728,7 @@ lanes, lane l taking the min and max of elements l, l + 1,024, ... (neighbouring
 neighbouring elements) and storing six floats at l x 6; the host reads back those 24 KB (not 12 MB
 of P) and finishes over the lanes. `Gpu.planes.bounds` offers it for a settled, unread vec3 output
 (`Run` on the owner's domain; `Workspace_gpu` routes a cook worker's call there), the write passes
-it to `Rdk.Packed.Float3.deferred ?bounds`, and `Float3.bounds` answers from it while P is unread
+it to `rdk_core::packed::float3::deferred ?bounds`, and `Float3.bounds` answers from it while P is unread
 (otherwise, or when the device cannot, it scans the planes), so `Geometry_view.bounds` never
 materialises P. A device mesh takes the same answer (`create_device ?bounds`, `Mesh.bounds`), which
 the sun fit reads instead of the host copy; its caster scan had read a device mesh's mode through
@@ -922,7 +922,7 @@ Sop never depends on Flow or Flow_ir.
 The cook builds `(rx+1)*(ry+1)*(rz+1)` packed XYZ positions, x fastest, with
 the extractor's exact lattice arithmetic. The host compiles the field as a
 static-count packed map and evaluates exact float64 samples; the shared
-`Rdk.Iso_surface.extract_sampled` marcher borrows those samples read-only.
+`sop/iso_surface` marcher borrows those samples read-only.
 The node is irregular, topology-changing and exact. Constructor validation
 rejects fractional/nonpositive resolution, overflowing packed cardinality,
 nonfinite/unordered bounds and nonfinite iso; cook errors and cancellation
@@ -1843,7 +1843,7 @@ not used for an operation that lacks a real result contract.
 ## Iterative creative sketches
 
 Iterative creative sketches keep feedback outside the per-frame DAG. A
-`Sketch.run_state` model owns the previous `Rdk.Geometry.t`; each fixed-timestep
+`Sketch.run_state` model owns the previous `rdk_core::geometry::T`; each fixed-timestep
 update wraps it with `sop/snapshot`, composes ordinary SOPs or `sop/custom`
 RDK work, cooks the next immutable value, and replaces the previous one.
 The graph for each step remains acyclic and independently inspectable.
@@ -2054,9 +2054,9 @@ workflow concepts without copying Houdini source or wire formats.
 
 A cook result may be packed: `Session.output.instances = Some transforms`
 means "draw `geometry` once per transform". Copy to Points with **Pack and
-instance** produces one (the source once, `Rdk.Instance_copy.copy_transforms`
+instance** produces one (the source once, the `sop/copy_to_points` Lisp transform recipe
 of the targets: the same pscale/scale/orient/N/up/rot/trans/pivot/transform
-rules as the unpacked copy). Packed instances stay outside `Rdk.Geometry.t`:
+rules as the unpacked copy). Packed instances stay outside `rdk_core::geometry::T`:
 a node that consumes a packed result receives it materialized (the explicit
 boundary), memoized per packed output so downstream cache keys keep hitting.
 Renderers draw packed results as instances (`Scene.D3.instances_array`, the

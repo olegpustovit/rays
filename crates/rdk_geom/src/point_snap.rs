@@ -26,10 +26,10 @@ pub enum Targeting {
     SpecifiedPoints(String),
 }
 
-const PREFIX: &str = "Rdk_spatial.Point_snap.fuse: ";
+const PREFIX: &str = "sop/fuse: ";
 
 fn fail(message: String) -> error::T {
-    error::new("Rdk_spatial.Point_snap.fuse", Code::InvalidParameter, format!("{PREFIX}{message}"))
+    error::new("sop/fuse", Code::InvalidParameter, format!("{PREFIX}{message}"))
 }
 
 fn validate_group(label: &str, owner_count: i64, value: Option<&group::T>) -> Result<(), error::T> {

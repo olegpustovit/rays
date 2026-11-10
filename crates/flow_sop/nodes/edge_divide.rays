@@ -4,7 +4,7 @@
 ; interpolation sources are members; both are redone here over the remapped geometry.
 (defn divide_error :context value [(reason : text)]
   (error "invalid_topology" "edge_divide could not produce valid geometry"
-    :cause (str "edge_divide [invalid_topology]: Rdk_mesh.Subdivide.edge_divide: " reason)))
+    :cause (str "edge_divide [invalid_topology]: sop/edge_divide: " reason)))
 (defn divide_safe :context value [(index : int)] (if (int/ge index 0) index 0))
 (defn divide_owners :context value [(offsets : (array int)) (total : int)]
   (let* [segments (int/sub (array/count offsets) 1)

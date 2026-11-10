@@ -1965,7 +1965,7 @@ fn facet(options: &Options, primitives: Option<&group::T>, geometry_value: &geom
 /// Run the Facet SOP. The selection (point, vertex, primitive or edge) is promoted to the
 /// primitives it touches.
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
-    let grain = support::resolve(params.grain).map_err(|_| make(Code::InvalidArgument, "Rdk_mesh.Facet.run: grain must be positive".to_owned()))?;
+    let grain = support::resolve(params.grain).map_err(|_| make(Code::InvalidArgument, "sop/facet: grain must be positive".to_owned()))?;
     let cancel_value = params.cancel.as_deref();
     let primitives = match &params.selection {
         None => None,

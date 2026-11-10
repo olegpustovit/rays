@@ -19,7 +19,7 @@ fn make(operation: &str, code: Code, message: String) -> error::T {
 }
 
 fn message_error(message: &str) -> error::T {
-    make("Rdk_mesh.Clean", Code::InvalidParameter, message.to_owned())
+    make("sop/clean", Code::InvalidParameter, message.to_owned())
 }
 
 fn clean_length(dx: f64, dy: f64, dz: f64) -> f64 {
@@ -562,17 +562,17 @@ fn clean(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, e
     let cancel_value = &params.cancel;
     let grain = params.grain;
     support::check_positive(grain).map_err(|_| make(
-            "Rdk_mesh.Clean",
+            "sop/clean",
             Code::InvalidArgument,
-            "Rdk_mesh.Clean.clean: grain must be positive".to_owned(),
+            "sop/clean: grain must be positive".to_owned(),
         ))?;
     if !params.epsilon.is_finite() || params.epsilon < 0.0 {
-        return Err(message_error("Rdk_mesh.Clean.clean: epsilon must be finite and non-negative"));
+        return Err(message_error("sop/clean: epsilon must be finite and non-negative"));
     }
     if let Some(value) = params.consolidate_distance {
         if !value.is_finite() || value < 0.0 {
             return Err(message_error(
-                "Rdk_mesh.Clean.clean: consolidate distance must be finite and non-negative",
+                "sop/clean: consolidate distance must be finite and non-negative",
             ));
         }
     }

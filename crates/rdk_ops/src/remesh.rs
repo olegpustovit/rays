@@ -14,7 +14,7 @@ use crate::subdivide_refine::{
     collect_edge_members, fmin, gf, gi, gs, gt,
 };
 
-const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
+const OPERATION: &str = "sop/remesh";
 
 /// `fail message = Error (operation ^ ": " ^ message)`.
 pub(crate) fn fail(message: &str) -> error::T {

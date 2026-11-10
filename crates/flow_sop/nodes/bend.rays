@@ -114,21 +114,21 @@
       (deform_group_missing in0 owner group_name)
         (error "missing_group" (str "bend could not find " owner " group " (text/repr group_name)))
       (bend_zero frame_z)
-        (deform_error "bend" "invalid_deformation" "Rdk_mesh.Deform.bend: capture direction must be non-zero")
+        (deform_error "bend" "invalid_deformation" "sop/bend: capture direction must be non-zero")
       (bend_zero up_unit)
-        (deform_error "bend" "invalid_deformation" "Rdk_mesh.Deform.bend: up vector must be non-zero")
+        (deform_error "bend" "invalid_deformation" "sop/bend: up vector must be non-zero")
       (bend_zero frame_y)
         (deform_error "bend" "invalid_deformation"
-          "Rdk_mesh.Deform.bend: up vector must not be parallel to capture direction")
+          "sop/bend: up vector must not be parallel to capture direction")
       (bend_zero frame_x)
-        (deform_error "bend" "invalid_deformation" "Rdk_mesh.Deform.bend: could not construct capture frame")
+        (deform_error "bend" "invalid_deformation" "sop/bend: could not construct capture frame")
       (and (not (text/blank? mask_name))
            (or (equal? mask_name "P") (not (sop/has_attr in0 mask_name))))
         (deform_error "bend" "invalid_deformation"
-          (str "Rdk_mesh.Deform.bend: missing point float attribute " mask_name))
+          (str "sop/bend: missing point float attribute " mask_name))
       (and (not (text/blank? mask_name)) (not (sop/has_attr in0 mask_name :type float)))
         (deform_error "bend" "invalid_deformation"
-          (str "Rdk_mesh.Deform.bend: point attribute " mask_name " must have float storage"))
+          (str "sop/bend: point attribute " mask_name " must have float storage"))
       :else
         (let* [count (sop/count in0 :points)
                positions (sop/attr in0 :P)

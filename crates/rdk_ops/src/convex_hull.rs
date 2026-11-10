@@ -15,7 +15,7 @@ use rdk_core::{
 use rdk_core::error::Code;
 use rdk_geom::predicates::{self, Sign};
 
-const OPERATION: &str = "Rdk_mesh.Convex_hull.convex_hull";
+const OPERATION: &str = "sop/convex_hull";
 const GUARD_OPERATION: &str = "convex_hull";
 
 #[derive(Default)]

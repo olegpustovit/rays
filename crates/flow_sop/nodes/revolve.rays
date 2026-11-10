@@ -172,7 +172,7 @@
              checked (error_rows (exact (map (fn [(code : int)] (if (int/gt code 0) 1 0)) codes))
                (fn [(index : int)]
                  {:code "invalid_geometry" :message "revolve could not produce valid geometry"
-                  :cause (list (str "revolve [invalid_geometry]: Rdk_mesh.Revolve.revolve: primitive " index " "
+                  :cause (list (str "revolve [invalid_geometry]: sop/revolve: primitive " index " "
                     (case (array/nth codes index)
                       1 "is a polygon, not a polygon curve"
                       2 "has fewer than two vertices"

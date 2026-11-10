@@ -55,7 +55,7 @@ impl Params {
     }
 }
 
-const PREFIX: &str = "Rdk_mesh.Poly_bevel.poly_bevel";
+const PREFIX: &str = "sop/poly_bevel";
 
 fn make(code: Code, message: &str) -> error::T {
     error::new("poly_bevel", code, message.to_owned())

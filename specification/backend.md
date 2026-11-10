@@ -176,7 +176,7 @@ other built-in Flow operators. Plain Flow checking remains independent of SOP
 geometry and presentation libraries.
 Cook-time `sop/attr` and `sop/with_attr` declarations live in `flow_sop`.
 Its attribute kernel resolves immutable packed Flow sources against cooked
-RDK inputs and writes through `Rdk.Kernel.edit_point_ranges` or point
+RDK inputs and writes through `flow_sop::attribute_kernel::write` or point
 attributes. The executor receives a resolver callback; neither `flow` nor
 `flow_ir` imports geometry. Environment fold snapshots are passed through
 the existing frame-node rebuild boundary.
@@ -202,7 +202,7 @@ session outputs. The SOP host extracts those values at its existing boundary.
 Geometry nodes lower through `flow_sop`; Drawing nodes lower through
 `Rays_editor.Drawing` into existing native `Rays.Scene` commands. Canvas
 panels use the same PXUI composition and renderer as every other panel.
-`Rdk.Topology.deferred` is the GPU-free topology carrier for an external owner:
+`rdk_core::topology::deferred` is the GPU-free topology carrier for an external owner:
 counts, identity and payload accounting never read its arrays. An optional
 homogeneous kind/corner-count promise answers triangle classification without
 forcing. Payload queries and `Topology.View.view` materialise once across racing

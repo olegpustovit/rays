@@ -4,7 +4,7 @@
 ; unchanged vertices; the point-normal refresh is the Normal node's face-area point mode.
 (defn cusp_error :context value [(reason : text)]
   (error "invalid_topology" "edge_cusp could not produce valid geometry"
-    :cause (str "edge_cusp [invalid_topology]: Rdk_mesh.Facet.edge_cusp: " reason)))
+    :cause (str "edge_cusp [invalid_topology]: sop/edge_cusp: " reason)))
 (defn cusp_safe :context value [(index : int)] (if (int/ge index 0) index 0))
 (defn cusp_following :context value [(j : int) (total : int)] (if (int/lt (int/add j 1) total) (int/add j 1) j))
 (defn cusp_owners :context value [(offsets : (array int)) (total : int)]

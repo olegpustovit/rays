@@ -73,7 +73,7 @@ use rdk_core::edge_group::merge as merge_edge_group;
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {
         Some(name) if (name).trim().is_empty() => Err(fail(&format!(
-            "Rdk_mesh.Poly_extrude.poly_extrude: empty {label} group name"
+            "sop/poly_extrude: empty {label} group name"
         ))),
         _ => Ok(()),
     }
@@ -126,7 +126,7 @@ fn run_default(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     if !distance.is_finite() {
-        return Err(fail("Rdk_mesh.Poly_extrude.poly_extrude: distance must be finite"));
+        return Err(fail("sop/poly_extrude: distance must be finite"));
     }
     let source_topology = geometry::topology(geometry_value);
     let view = topology::view::view(source_topology)?;
@@ -136,7 +136,7 @@ fn run_default(
     for primitive in 0..source_primitives {
         if view.primitive_kinds[primitive] != 0 {
             return Err(fail(&format!(
-                "Rdk_mesh.Poly_extrude.poly_extrude: primitive {primitive} is a curve"
+                "sop/poly_extrude: primitive {primitive} is a curve"
             )));
         }
     }
@@ -197,7 +197,7 @@ fn run_default(
                 let length = (nx * nx + ny * ny + nz * nz).sqrt();
                 if length <= 1e-20 || !length.is_finite() {
                     return Err(fail(&format!(
-                        "Rdk_mesh.Poly_extrude.poly_extrude: primitive {primitive} is degenerate"
+                        "sop/poly_extrude: primitive {primitive} is degenerate"
                     )));
                 }
                 let dx = distance * nx / length;
@@ -307,19 +307,19 @@ fn run_general(
     let distance = params.distance;
     let divide = params.divide;
     if divisions <= 0 {
-        return Err(fail("Rdk_mesh.Poly_extrude.poly_extrude: divisions must be positive"));
+        return Err(fail("sop/poly_extrude: divisions must be positive"));
     }
     if !distance.is_finite() {
-        return Err(fail("Rdk_mesh.Poly_extrude.poly_extrude: distance must be finite"));
+        return Err(fail("sop/poly_extrude: distance must be finite"));
     }
     let source_topology = geometry::topology(geometry_value);
     match &params.primitives {
         Some(selection) if group::owner(selection) != group::Owner::Primitive => {
-            return Err(fail("Rdk_mesh.Poly_extrude.poly_extrude: selection must own primitives"));
+            return Err(fail("sop/poly_extrude: selection must own primitives"));
         }
         Some(selection) if group::length(selection) != geometry::primitive_count(geometry_value) => {
             return Err(fail(
-                "Rdk_mesh.Poly_extrude.poly_extrude: selection length does not match primitive count",
+                "sop/poly_extrude: selection length does not match primitive count",
             ));
         }
         _ => {}
@@ -332,12 +332,12 @@ fn run_general(
     match &params.split_edges {
         Some(_) if divide == Divide::ExtrudeIndividual => {
             return Err(fail(
-                "Rdk_mesh.Poly_extrude.poly_extrude: split edges require connected-components mode",
+                "sop/poly_extrude: split edges require connected-components mode",
             ));
         }
         Some(selection) if edge_group::topology_data_id(selection) != topology::data_id(source_topology) => {
             return Err(fail(
-                "Rdk_mesh.Poly_extrude.poly_extrude: split edge group belongs to another topology",
+                "sop/poly_extrude: split edge group belongs to another topology",
             ));
         }
         _ => {}
@@ -359,7 +359,7 @@ fn run_general(
         cancel_ref,
         Some(grain),
         params.primitives.as_ref(),
-        "Rdk_mesh.Poly_extrude.poly_extrude",
+        "sop/poly_extrude",
         geometry_value,
     )?;
     let index = topology_index::create(cancel_ref, source_topology)?;
@@ -415,7 +415,7 @@ fn run_general(
             }
             if non_manifold >= 0 {
                 return Err(fail(&format!(
-                    "Rdk_mesh.Poly_extrude.poly_extrude: connected extrusion touches non-manifold edge {non_manifold}"
+                    "sop/poly_extrude: connected extrusion touches non-manifold edge {non_manifold}"
                 )));
             }
             let mut root_component = vec![-1i64; source_primitives];
@@ -552,7 +552,7 @@ fn run_general(
             Ok(())
         })?;
         if invalid_direction.load(Ordering::Relaxed) {
-            return Err(fail("Rdk_mesh.Poly_extrude.poly_extrude: selected point normals cancel to zero"));
+            return Err(fail("sop/poly_extrude: selected point normals cancel to zero"));
         }
     }
     let mut base_index = vec![-1i64; source_primitives];
@@ -884,7 +884,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
     let grain = params.grain.unwrap_or(1_024);
     let cancel_ref = params.cancel.as_deref();
     support::check_positive(grain).map_err(|_| {
-        make(Code::InvalidArgument, "Rdk_mesh.Poly_extrude.poly_extrude: grain must be positive")
+        make(Code::InvalidArgument, "sop/poly_extrude: grain must be positive")
     })?;
     let result = if params.primitives.is_none()
         && params.split_edges.is_none()

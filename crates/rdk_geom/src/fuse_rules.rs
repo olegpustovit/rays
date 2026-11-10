@@ -69,7 +69,7 @@ struct CompiledGroupRule {
 }
 
 fn fail(message: String) -> error::T {
-    error::new("Rdk_mesh.Fuse_rules", Code::InvalidArgument, format!("Rdk_mesh.Fuse_rules.fuse: {message}"))
+    error::new("sop/fuse", Code::InvalidArgument, format!("sop/fuse: {message}"))
 }
 
 fn core_fail(failure: error::T) -> error::T {
@@ -617,7 +617,7 @@ fn concatenate_text(
     source: &TextArray,
     ordered_members: &[i64],
 ) -> Result<Vec<Vec<u8>>, error::T> {
-    let memory = || error::new("Rdk_mesh.Fuse_rules", Code::ArrayMemory, "Concatenated text exceeds available memory.".to_owned());
+    let memory = || error::new("sop/fuse", Code::ArrayMemory, "Concatenated text exceeds available memory.".to_owned());
     let mut output = Vec::new();
     output.try_reserve_exact(clusters.count as usize).map_err(|_| memory())?;
     output.resize_with(clusters.count as usize, Vec::new);
@@ -678,7 +678,7 @@ fn reduce_text(
             .collect()),
         AttributeMethod::Concatenate | AttributeMethod::ConcatenateWeightOrder => {
             let rows = concatenate_text(cancel_value, grain, clusters, source, ordered_members)?;
-            let memory = || error::new("Rdk_mesh.Fuse_rules", Code::ArrayMemory, "Concatenated text exceeds available memory.".to_owned());
+            let memory = || error::new("sop/fuse", Code::ArrayMemory, "Concatenated text exceeds available memory.".to_owned());
             let mut packed = TextArray::try_with_capacity(rows.len()).map_err(|_| memory())?;
             for row in rows { packed.try_push(&row).map_err(|_| memory())?; }
             Ok(packed)
@@ -1252,7 +1252,7 @@ mod tests {
         let failure = reduce("t", Sum, true).err().unwrap();
         assert_eq!(
             error::message(&failure),
-            "Rdk_mesh.Fuse_rules.fuse: attribute \"t\" method is unsupported for text storage"
+            "sop/fuse: attribute \"t\" method is unsupported for text storage"
         );
     }
 
@@ -1314,7 +1314,7 @@ mod tests {
         let failure = validate(&[missing], &[], &cloud()).unwrap_err();
         assert_eq!(
             error::message(&failure),
-            "Rdk_mesh.Fuse_rules.fuse: attribute rule \"f\" requires a weight attribute"
+            "sop/fuse: attribute rule \"f\" requires a weight attribute"
         );
         let blank = AttributeRule {
             pattern: "f".to_owned(),

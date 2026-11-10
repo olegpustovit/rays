@@ -17,9 +17,9 @@ rays ──> rays_math
 ```
 
 RDK must not import Sop, Runtime, SDL3, Metal, or platform code.
-The renderer boundary is `Rdk_rays.Rays_mesh`, which converts to and
+The renderer boundary is `rdk_rays::rays_mesh`, which converts to and
 from `Rays.Mesh.t`. `rdk` and `rdk_core` do not link Rays or the GPU
-stack. `Rdk.Color_by_height` accepts normalized RGBA float tuples;
+stack. `sop/color_by_height` accepts normalized RGBA float tuples;
 the procedural SOP converts public `Rays_math.Color.t` inputs at its boundary.
 `rdk_core` owns packed storage, topology, groups, and geometry; `rdk_geom`
 owns exact planar algorithms, indices and intersection queries; `rdk_ops` owns attribute, group,
@@ -508,7 +508,7 @@ index. A builder is single-domain owned. Parallel work may fill only
 preallocated disjoint ranges and may not grow topology or mutate the attribute
 schema concurrently.
 
-`Rdk.Geometry.generate_point_ranges` is the expert VEX-like surface. Bindings are validated once, then
+`rdk_core::geometry::generate_point_ranges` is the expert VEX-like surface. Bindings are validated once, then
 the same native Rust loop runs through stable chunks using the process-wide
 `Parallel` pool. It never creates a pool per operation, task, or frame.
 Topology mutation is not permitted inside an element kernel. Reductions use a
@@ -533,8 +533,8 @@ incompatible attributes, unsupported primitives, numeric failures, and
 cancellation. It does not render, load SDL resources, or inspect the selected
 render target.
 
-Public RDK operations use `Rdk.Error.t` with a stable operation, code, message,
-and optional corrective hints. Long-running operators accept `Rdk.Cancel.t`; polling is
+Public RDK operations use `rdk_core::error::T` with a stable operation, code, message,
+and optional corrective hints. Long-running operators accept `rdk_core::cancel::T`; polling is
 outside arithmetic inner loops or amortized over fixed blocks. Sop cook
 contexts share this token directly, so cancellation cannot publish a partial
 snapshot.
@@ -1179,8 +1179,8 @@ parallel path. Divided boxes compute all six face cardinalities before
 allocation and fill disjoint face-local position, normal, triangle, and winding
 ranges. Bounding spheres start from the selected AABB diagonal, then apply
 asymmetric padding as center/radius changes to the shared UV-sphere generator.
-That generator lives in the `Uv_sphere` test generator with a direct `Rdk.Uv_sphere.run`
-entry point; `Rdk.Uv_sphere` retains its typed-error boundary. It allocates
+The shared `sop/uv_sphere` Lisp node lives in `crates/flow_sop/nodes/uv_sphere.rays`
+and retains its typed-error boundary; no retired native sphere generator is required. It allocates
 exact packed position, normal, and topology arrays
 and fills points/triangles directly, with no per-triangle point tuples. Optional
 detail center/radii and the all-output primitive group are committed only after
@@ -1315,18 +1315,15 @@ between one and four domains.
 
 ### Triangulate 2D
 
-`Rdk.Voronoi2.cells` owns bounded pairwise half-plane clipping for ordered
-2D sites. It removes near-duplicate sites in first-occurrence order, preserves
-polygon vertex order, rejects non-finite inputs, and returns a typed cancellation
-error. The ordered five-cell fixture is checked directly at the RDK boundary
-in one and four domains.
+The gallery's ordered Voronoi cells are preserved as literal geometry in
+`sketches/sop_gallery.rays`. The former clipping helper is retained only in the
+`ocaml-reference` archive; no current Rust Voronoi API is claimed.
 
-`Rdk.Iso_surface` streams XY slabs while extracting a six-tetrahedra
-isosurface into packed RDK point positions, triangle topology, and point
-normals. It supports boxed and dense scalar fields, typed malformed-input and
-cancellation errors, and deterministic one/four-domain output. A captured
-one-cell plane fixture fixed all 24 emitted positions, identity indices, and
-normals across migration.
+`sop/iso_surface`, implemented in `crates/flow_sop/nodes/iso_surface.rays`,
+samples its scalar field on a lattice and extracts six tetrahedra per cell.
+Packed maps and prefix sums place triangle positions and optional point normals.
+Its Lisp validation and the shared evaluator retain typed failures and exact
+sequential/parallel results; Rust owns the execution and geometry carriers.
 
 `Ops.triangulate_2d` is the first public adapter over the shared packed
 `Delaunay2` core. It accepts a typed point selection and projects source points
@@ -1810,7 +1807,7 @@ generated before cardinality and host array limits are validated.
 
 ## Boolean intersection detection
 
-`Rdk.Boolean.run` is the public exact polygon-product boundary over the single
+`rdk_boolean::boolean::run` is the public exact polygon-product boundary over the single
 RDK arrangement core. It builds the arrangement once, evaluates union,
 intersection, either subtraction direction, or XOR for independently typed
 solid/surface operands, transfers the complete supported payload schema through
@@ -1824,13 +1821,13 @@ function returns structured errors, honors the
 shared cancellation token/grain, and produces exact ordered output across
 domain counts.
 
-`Rdk.Boolean.seam` exposes the same arrangement's seam products without
+`rdk_boolean::boolean::seam` exposes the same arrangement's seam products without
 reimplementing intersection decisions. Curve output can name left-self,
 between-input, and right-self primitive groups independently; coincident output
 returns exact coincident triangle patches with an optional named group. Both
 forms retain cancellation and exact ordered one-/multi-domain behavior.
 
-`Rdk.Boolean_detect` is the packed diagnostic stage shared by one-input
+`rdk_ops::boolean_detect` is the packed diagnostic stage shared by one-input
 AxA self detection and two-input AxB detection. It triangulates selected simple
 polygons only inside immutable `Surface_index` values, preserving the source
 topology and every existing payload plane. A two-pass BVH traversal first
@@ -1864,7 +1861,7 @@ required to construct topology-changing Boolean seams.
 
 ## Intersection point analysis
 
-`Rdk.Intersection_analysis` consumes a packed BVH of triangle and
+`rdk_ops::intersection_analysis` consumes a packed BVH of triangle and
 polygon-curve segment pieces and uses the same `Triangle_intersection` narrow
 phase as Boolean Detect for triangle pairs. Its result is point-only geometry.
 With one input it visits unordered AxA pairs;

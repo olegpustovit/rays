@@ -78,7 +78,7 @@
               false
               (let* [points (int/mul u v_count)
                      cells (int/mul (int/sub u 1) (int/sub v_count 1))
-                     ; Sys.max_string_length >= L-1 on the supported 64-bit runtime.
+                     ; Primitive-kind storage is bounded by the same addressable array limit.
                      primitive_limit (int/sub limit 1)
                      topology_ok
                        (cond (equal? connectivity "Points") true

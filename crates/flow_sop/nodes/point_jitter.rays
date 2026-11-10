@@ -24,20 +24,20 @@
       (and (not (text/blank? mask_name))
         (or (equal? mask_name "P") (not (sop/has_attr in0 mask_name))))
         (error "invalid_attribute" "point_jitter could not produce valid geometry"
-          :cause (str "point_jitter [invalid_attribute]: Rdk_gen.Point_jitter.point_jitter: point float attribute "
+          :cause (str "point_jitter [invalid_attribute]: sop/point_jitter: point float attribute "
             (text/repr mask_name) " does not exist"))
       (and (not (text/blank? mask_name)) (not (sop/has_attr in0 mask_name :type float)))
         (error "invalid_attribute" "point_jitter could not produce valid geometry"
-          :cause (str "point_jitter [invalid_attribute]: Rdk_gen.Point_jitter.point_jitter: point attribute "
+          :cause (str "point_jitter [invalid_attribute]: sop/point_jitter: point attribute "
             (text/repr mask_name) " must use float storage"))
       (and use_point_scale (and (sop/has_attr in0 "pscale") (not (sop/has_attr in0 "pscale" :type float))))
         (error "invalid_attribute" "point_jitter could not produce valid geometry"
-          :cause "point_jitter [invalid_attribute]: Rdk_gen.Point_jitter.point_jitter: point attribute \"pscale\" must use float storage")
+          :cause "point_jitter [invalid_attribute]: sop/point_jitter: point attribute \"pscale\" must use float storage")
       (and (not (text/blank? id_name))
         (and (not (equal? id_name "P"))
           (and (sop/has_attr in0 id_name) (not (sop/has_attr in0 id_name :type int)))))
         (error "invalid_attribute" "point_jitter could not produce valid geometry"
-          :cause (str "point_jitter [invalid_attribute]: Rdk_gen.Point_jitter.point_jitter: point attribute "
+          :cause (str "point_jitter [invalid_attribute]: sop/point_jitter: point attribute "
             (text/repr id_name) " must use int storage"))
       :else
         (let* [count (sop/count in0 :points)
@@ -97,7 +97,7 @@
                    positions displaced selection)))]
           (if (int/lt invalid_index count)
             (error "invalid_attribute" "point_jitter could not produce valid geometry"
-              :cause (str "point_jitter [invalid_attribute]: Rdk_gen.Point_jitter.point_jitter: selected point "
+              :cause (str "point_jitter [invalid_attribute]: sop/point_jitter: selected point "
                           invalid_index " has non-finite input or output"))
             (if (int/eq changed 0) in0
               (sop/delete_attr

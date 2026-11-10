@@ -2,7 +2,7 @@
 ; vertices of an edge come from a stable sort of vertices by edge (a CSR with a zero sentinel per edge).
 (defn crease_fail :context value [(reason : text)]
   (error "invalid_crease" "crease could not produce valid geometry"
-    :cause (str "crease [invalid_crease]: Rdk_mesh.Crease.crease: " reason)))
+    :cause (str "crease [invalid_crease]: sop/crease: " reason)))
 (defn crease_finite :context value [(x : float)] (= (- x x) 0.0))
 (defn crease_safe :context value [(index : int)] (if (int/ge index 0) index 0))
 ; Owner segment of every slot given segment start offsets (length segments + 1).

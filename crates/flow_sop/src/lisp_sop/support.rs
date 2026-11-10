@@ -1,4 +1,4 @@
-//! Shared helpers of the ported lib/flow_sop tests (Test_support, Rdk_test_support).
+//! Shared helpers for Lisp SOP fixtures and geometry assertions.
 use crate::lower;
 use flow_syntax::syntax;
 use rdk_core::geometry as geo;
@@ -119,7 +119,7 @@ pub fn case_text(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// `Rdk_test_support.get_ok` / `get_string_ok`.
+/// Unwrap a successful fixture result with a readable diagnostic.
 pub fn fixture_ok<A, E: ToString>(r: Result<A, E>) -> A {
     r.unwrap_or_else(|e| panic!("{}", e.to_string()))
 }

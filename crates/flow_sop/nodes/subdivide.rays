@@ -634,7 +634,7 @@
 ; ---- crease input (native apply_crease_input) ----
 (defn sd_cfail :context value [(reason : text)]
   (error "invalid_topology" "subdivide could not produce valid geometry"
-    :cause (str "subdivide [invalid_topology]: Rdk_mesh.Subdivide.subdivide: " reason)))
+    :cause (str "subdivide [invalid_topology]: sop/subdivide: " reason)))
 (defn sd_finite_ge0 :context value [(x : float)] (if (and (= (- x x) 0.0) (>= x 0.0)) 0 1))
 ; Sharpness a crease corner contributes: the override, else the larger of its vertex and primitive weights.
 (defn sd_contrib :context value
@@ -1165,7 +1165,7 @@
         :else "creaseweight and cornerweight attributes must be float, finite and non-negative"))
 (defn sd_fail :context value [(code : int)]
   (error "invalid_topology" "subdivide could not produce valid geometry"
-    :cause (str "subdivide [invalid_topology]: Rdk_mesh.Subdivide.subdivide: " (sd_reason code))))
+    :cause (str "subdivide [invalid_topology]: sop/subdivide: " (sd_reason code))))
 (defn sd_check :context value
   [(tp : {:vp (array int) :po (array int) :pov (array int) :nv (array int) :pv (array int) :opp (array int) :eov (array int) :peo (array int)
           :pvo (array int) :bc (array int) :points int :edges int :vertices int :prims int})
@@ -1329,7 +1329,7 @@
         (error "missing_group" (str "subdivide could not find hole primitive group " (text/repr hole_name)))
       osd_bad
         (error "invalid_topology" "subdivide could not produce valid geometry"
-          :cause (str "subdivide [invalid_topology]: Rdk_mesh.Subdivide.subdivide: invalid detail attribute "
+          :cause (str "subdivide [invalid_topology]: sop/subdivide: invalid detail attribute "
                       (cond (int/lt scheme_i 0) "osd_scheme" (int/lt bmode 0) "osd_vtxboundaryinterpolation"
                             (int/lt fvmode 0) "osd_fvarlinearinterpolation" (int/lt method 0) "osd_creasingmethod"
                             :else "osd_trianglesubdiv")))

@@ -68,7 +68,7 @@
           (str "sop/mountain: point attribute " mask_name " must have float storage"))
       (and storing (and (sop/has_attr in0 height_name) (not (sop/has_attr in0 height_name :type float))))
         (deform_error "mountain" "invalid_deformation"
-          (str "Rdk_mesh.Deform.mountain: height attribute " height_name " must have float storage"))
+          (str "sop/mountain: height attribute " height_name " must have float storage"))
       :else
         (let* [effective_seed (if (equal? seed_mode "Auto") (sop/context_seed "mountain") seed)
                positions (sop/attr in0 :P)

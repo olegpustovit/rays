@@ -235,7 +235,7 @@ pub struct Params {
 #[doc(hidden)]
 pub fn normals(params: Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     support::check_positive(params.grain)
-        .map_err(|_| fail("Rdk_mesh.Deform.normals: grain must be positive".to_owned()))?;
+        .map_err(|_| fail("sop/normals: grain must be positive".to_owned()))?;
     // ponytail: core Normal_ops owns its cancel token, so an Arc token is checked here and not forwarded.
     cancel::check_opt(params.cancel.as_deref())?;
     let selection = params.primitives.clone().map(element_selection::T::SelectedPrimitives);
@@ -344,6 +344,6 @@ mod tests {
         let n = point_vector_attribute("Test", "N", &out).unwrap();
         assert_eq!(n.z, vec![1.0; 4]);
         let failure = normals(Params { cancel: None, grain: 0, primitives: None }, &g).err().unwrap();
-        assert_eq!(error::message(&failure), "Rdk_mesh.Deform.normals: grain must be positive");
+        assert_eq!(error::message(&failure), "sop/normals: grain must be positive");
     }
 }
