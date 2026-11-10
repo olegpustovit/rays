@@ -1311,12 +1311,10 @@ pub fn accel_encoder(commands: &Commands) -> Result<AccelEncoder, Error> {
 fn open_accel(operation: &str, encoder: &AccelEncoder) -> Result<(), Error> {
     if encoder.0.open.get() { Ok(()) } else { Err(make_error(operation, ErrorKind::InvalidState, "acceleration encoder is ended")) }
 }
-fn check_scratch(operation: &str, device: &Device, scratch: &Buffer, offset: i64, required: i64) -> Result<(), Error> {
+fn check_scratch(operation: &str, device: &Device, scratch: &Buffer, offset: i64) -> Result<(), Error> {
     resource_check(operation, device, &scratch.resource)?;
-    if offset < 0 || offset % 256 != 0 || required < 0 || required > scratch.buffer_descriptor.size
-        || offset > scratch.buffer_descriptor.size - required
-    {
-        Err(make_error(operation, ErrorKind::InvalidArgument, "scratch range is invalid, unaligned, or insufficient"))
+    if offset < 0 || offset % 256 != 0 || offset > scratch.buffer_descriptor.size {
+        Err(make_error(operation, ErrorKind::InvalidArgument, "scratch offset is invalid or unaligned"))
     } else { Ok(()) }
 }
 pub fn build_accel(encoder: &AccelEncoder, accel: &Accel, scratch: &Buffer, scratch_offset: Option<i64>) -> Result<(), Error> {
@@ -1328,9 +1326,11 @@ pub fn build_accel(encoder: &AccelEncoder, accel: &Accel, scratch: &Buffer, scra
     }
     accel_check(OP, &device, accel)?;
     let offset = scratch_offset.unwrap_or(0);
-    check_scratch(OP, &device, scratch, offset, accel_sizes(accel).build_scratch_size)?;
-    acceleration::build(&device.0.handle, &mut accel.0.portable.borrow_mut())?;
-    encoder.0.raw().build(accel.0.token, scratch.resource.0.token, offset)
+    check_scratch(OP, &device, scratch, offset)?;
+    acceleration::validate_build(&device.0.handle, &accel.0.portable.borrow())?;
+    encoder.0.raw().build(accel.0.token, scratch.resource.0.token, offset)?;
+    acceleration::mark_built(&mut accel.0.portable.borrow_mut());
+    Ok(())
 }
 pub fn refit_accel(
     encoder: &AccelEncoder, accel: &Accel, descriptor: AccelDescriptor, scratch: &Buffer, scratch_offset: Option<i64>,
@@ -1347,7 +1347,7 @@ pub fn refit_accel(
     let offset = scratch_offset.unwrap_or(0);
     // The new native descriptor determines refit scratch extent; the original size can be stale.
     // Core admits the logical buffer/offset; the native backend checks the newly queried extent.
-    check_scratch(OP, &device, scratch, offset, 0)?;
+    check_scratch(OP, &device, scratch, offset)?;
     acceleration::refit(&device.0.handle, &mut accel.0.portable.borrow_mut(), portable_of(&device, &descriptor))?;
     encoder.0.raw().refit(accel.0.token, &driver_of(true, &descriptor), scratch.resource.0.token, offset)
 }
@@ -1361,10 +1361,10 @@ pub fn compact_accel(encoder: &AccelEncoder, src: &Accel, dst: &Accel) -> Result
     if Rc::ptr_eq(&src.0, &dst.0) {
         return Err(make_error(OP, ErrorKind::InvalidState, "compaction source and destination are the same structure"));
     }
-    acceleration::compact_into(
-        &device.0.handle, &mut src.0.portable.borrow_mut(), &mut dst.0.portable.borrow_mut(),
-    )?;
-    encoder.0.raw().compact(src.0.token, dst.0.token)
+    acceleration::validate_compaction(&device.0.handle, &src.0.portable.borrow(), &dst.0.portable.borrow())?;
+    encoder.0.raw().compact(src.0.token, dst.0.token)?;
+    acceleration::mark_compacted(&mut dst.0.portable.borrow_mut());
+    Ok(())
 }
 pub fn write_compacted_size(encoder: &AccelEncoder, accel: &Accel, dst: &Buffer, offset: Option<i64>) -> Result<(), Error> {
     const OP: &str = "Backend.write_compacted_size";
@@ -2088,6 +2088,13 @@ mod ownership_tests {
         fn buffer_to_texture(&self, _: Token, _: i64, _: i64, _: i64, _: Token, _: i64, _: Origin, _: Extent) -> Result<(), Error> { unreachable!() }
         fn end_blit(&self) -> Result<(), Error> { self.terminal("test.end") }
     }
+    impl DriverAccelEncoder for Payload {
+        fn build(&self, _: Token, _: Token, _: i64) -> Result<(), Error> { self.terminal("test.build") }
+        fn compact(&self, _: Token, _: Token) -> Result<(), Error> { self.terminal("test.compact") }
+        fn write_compacted_size(&self, _: Token, _: Token, _: i64) -> Result<(), Error> { unreachable!() }
+        fn refit(&self, _: Token, _: &DriverAccelDescriptor, _: Token, _: i64) -> Result<(), Error> { unreachable!() }
+        fn end_accel(&self) -> Result<(), Error> { self.terminal("test.end") }
+    }
     impl DriverCommands for Payload {
         fn compute_encoder(&self) -> Result<Box<dyn DriverComputeEncoder>, Error> { unreachable!() }
         fn accel_encoder(&self) -> Result<Box<dyn DriverAccelEncoder>, Error> { unreachable!() }
@@ -2315,6 +2322,48 @@ mod ownership_tests {
             raw: RefCell::new(None), capabilities: caps::minimum_m1(), handle: handle::create_device(),
             children: Cell::new(0), dead: Cell::new(false), queues: RefCell::new(Vec::new()),
         }))
+    }
+
+    #[test]
+    fn rejected_acceleration_build_and_compaction_can_retry() {
+        let device=device();
+        let queue=Queue(Rc::new(RefCell::new(QueueInner {
+            raw: RefCell::new(None),device:device.clone(),dead:false,completed_epoch:0,gpu_timing:GpuTiming {gpu_seconds:0.},
+        })));
+        let commands=Commands(Rc::new(CommandsInner {
+            raw:RefCell::new(None),queue,state:Cell::new(CommandsState::Encoding),encoder:RefCell::new(None),
+        }));
+        let fail=Rc::new(Cell::new(true));
+        let encoder=AccelEncoder(Rc::new(AccelEncoderInner {
+            raw:RefCell::new(Some(Box::new(Payload {_owner:Rc::new(()),fail:fail.clone()}))),commands,open:Cell::new(true),
+        }));
+        let resource=make_resource(&device,Box::new(Payload {_owner:Rc::new(()),fail:Rc::new(Cell::new(false))}));
+        let scratch=Buffer {resource,buffer_descriptor:admitted_test_buffer(BufferDescriptor {
+            label:None,size:256,usage:vec![BufferUsage::Storage],
+        }),memory:Memory::Shared};
+        let range=BufferRange {buffer:scratch.resource.0.handle.clone(),buffer_size:256,offset:0,length:36};
+        let portable=acceleration::create(&device.0.handle,true,false,PortableDescriptor::Blas {
+            geometries:vec![AccelGeometry::Triangles {vertices:range,vertex_stride:12,vertex_count:3}],motion_keyframes:None,
+        }).unwrap();
+        let destination=acceleration::create(&device.0.handle,true,false,PortableDescriptor::Sized {
+            size:64,template:acceleration::handle(&portable),
+        }).unwrap();
+        let make=|token,portable| Accel(Rc::new(AccelInner {
+            token,raw:RefCell::new(None),sizes:AccelSizes {structure_size:64,build_scratch_size:64,refit_scratch_size:32},
+            device:device.clone(),portable:RefCell::new(portable),structures:vec![],dead:Cell::new(false),
+        }));
+        let source=make(1,portable); let destination=make(2,destination);
+        assert_eq!(build_accel(&encoder,&source,&scratch,None).unwrap_err().operation,"test.build");
+        assert!(!is_built(&source),"rejected driver build marked the structure built");
+        fail.set(false); build_accel(&encoder,&source,&scratch,None).unwrap();
+        assert!(is_built(&source));
+        assert_eq!(build_accel(&encoder,&source,&scratch,None).unwrap_err().kind,ErrorKind::InvalidState);
+        fail.set(true);
+        assert_eq!(compact_accel(&encoder,&source,&destination).unwrap_err().operation,"test.compact");
+        assert!(is_built(&source)); assert!(!is_built(&destination),"rejected compaction filled its destination");
+        fail.set(false); compact_accel(&encoder,&source,&destination).unwrap();
+        assert!(is_built(&source)); assert!(is_built(&destination));
+        assert_eq!(compact_accel(&encoder,&source,&destination).unwrap_err().kind,ErrorKind::InvalidState);
     }
 
     #[test]

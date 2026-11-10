@@ -145,7 +145,8 @@ fn surface_frame_lifecycle_and_acceleration_validation() {
         },
     )
     .unwrap_or_else(|_| panic!("acceleration create failed"));
-    assert!(acceleration::build(&device, &mut structure).is_ok());
+    assert!(acceleration::validate_build(&device, &structure).is_ok());
+    acceleration::mark_built(&mut structure);
     assert!(acceleration::built(&structure));
 }
 fn discard_test_error() -> crate::error::Error {

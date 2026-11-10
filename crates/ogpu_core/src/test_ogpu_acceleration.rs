@@ -72,7 +72,8 @@ fn acceleration_lifecycle_validation() {
     // Refit: only a built refittable primitive structure, from a descriptor of its shape.
     let mut refittable = acceleration::create(&d1, true, true, descriptor.clone()).unwrap_or_else(|failure| die(failure));
     expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut refittable, descriptor.clone()).err());
-    acceleration::build(&d1, &mut refittable).unwrap_or_else(|failure| die(failure));
+    acceleration::validate_build(&d1, &refittable).unwrap_or_else(|failure| die(failure));
+    acceleration::mark_built(&mut refittable);
     acceleration::refit(&d1, &mut refittable, descriptor.clone()).unwrap_or_else(|failure| die(failure));
     acceleration::refit(&d1, &mut refittable, descriptor.clone()).unwrap_or_else(|failure| die(failure));
     expect(
@@ -81,7 +82,8 @@ fn acceleration_lifecycle_validation() {
     );
     expect(ErrorKind::CrossDevice, acceleration::refit(&d2, &mut refittable, descriptor.clone()).err());
     let mut value = make(descriptor.clone()).unwrap_or_else(|failure| die(failure));
-    acceleration::build(&d1, &mut value).unwrap_or_else(|failure| die(failure));
+    acceleration::validate_build(&d1, &value).unwrap_or_else(|failure| die(failure));
+    acceleration::mark_built(&mut value);
     expect(ErrorKind::InvalidState, acceleration::refit(&d1, &mut value, descriptor.clone()).err());
     expect(
         ErrorKind::InvalidArgument,
@@ -94,10 +96,11 @@ fn acceleration_lifecycle_validation() {
     );
     expect(ErrorKind::CrossDevice, acceleration::compacted_size(&d2, &value).err());
     let mut sized = make(Descriptor::Sized { size: 512, template: acceleration::handle(&value) }).unwrap_or_else(|failure| die(failure));
-    expect(ErrorKind::InvalidState, acceleration::build(&d1, &mut sized).err());
+    expect(ErrorKind::InvalidState, acceleration::validate_build(&d1, &sized).err());
     acceleration::compacted_size(&d1, &value).unwrap_or_else(|failure| die(failure));
-    acceleration::compact_into(&d1, &mut value, &mut sized).unwrap_or_else(|failure| die(failure));
-    expect(ErrorKind::InvalidState, acceleration::compact_into(&d1, &mut value, &mut sized).err());
+    acceleration::validate_compaction(&d1, &value, &sized).unwrap_or_else(|failure| die(failure));
+    acceleration::mark_compacted(&mut sized);
+    expect(ErrorKind::InvalidState, acceleration::validate_compaction(&d1, &value, &sized).err());
     expect(ErrorKind::InvalidState, acceleration::compacted_size(&d1, &sized).err());
     // Motion: every keyframed range must match the keyframe count.
     let motion_triangles = |keyframes: Vec<BufferRange>| Geometry::MotionTriangles {

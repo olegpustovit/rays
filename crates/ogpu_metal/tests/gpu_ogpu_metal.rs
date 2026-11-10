@@ -769,6 +769,11 @@ fn ray_tracing(device: &Device) {
         ErrorKind::InvalidState,
         "an unbuilt structure was refit",
     );
+    let short_scratch = local_buffer(&device,"short-build-refit-scratch",1,&[BufferUsage::Storage]);
+    let failure=be::build_accel(&encoder,&refittable,&short_scratch,None).unwrap_err();
+    assert_eq!(failure.kind,ErrorKind::InvalidArgument);
+    assert_eq!(failure.operation,"Metal.Acceleration_encoder.build_with");
+    assert_eq!(failure.message,"scratch range is too small");
     be::build_accel(&encoder, &refittable, &refit_scratch, None).unwrap_or_else(|failure| die(failure));
     refused(
         be::refit_accel(&encoder, &blas, moved_descriptor.clone(), &refit_scratch, None).err(),
@@ -780,7 +785,6 @@ fn ray_tracing(device: &Device) {
         ErrorKind::InvalidArgument,
         "a refit of another shape was accepted",
     );
-    let short_scratch = local_buffer(&device,"short-refit-scratch",1,&[BufferUsage::Storage]);
     let failure=be::refit_accel(&encoder,&refittable,moved_descriptor.clone(),&short_scratch,None).unwrap_err();
     assert_eq!(failure.kind,ErrorKind::InvalidArgument);
     assert_eq!(failure.operation,"Metal.Acceleration_encoder.refit_with");

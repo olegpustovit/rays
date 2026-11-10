@@ -325,7 +325,7 @@ impl Acceleration {
         handle::validate_for(operation, device, &self.handle)
     }
 
-    fn build(&mut self, device: &Device) -> Result<(), Error> {
+    fn validate_build(&self, device: &Device) -> Result<(), Error> {
         let operation = "Ogpu.Acceleration.build";
         self.check(operation, device)?;
         match (&self.descriptor, &self.state) {
@@ -333,10 +333,7 @@ impl Acceleration {
                 operation,
                 "a sized structure is filled by copy or compaction",
             )),
-            (_, State::Empty) => {
-                self.state = State::Built;
-                Ok(())
-            }
+            (_, State::Empty) => Ok(()),
             (_, State::Built | State::Compacted) => Err(invalid_state(
                 operation,
                 "structure has already been built",
@@ -367,19 +364,16 @@ impl Acceleration {
         }
     }
 
-    fn compact_into(
-        source: &mut Self,
-        destination: &mut Self,
+    fn validate_compaction(
+        source: &Self,
+        destination: &Self,
         device: &Device,
     ) -> Result<(), Error> {
         let operation = "Ogpu.Acceleration.compact";
         source.check(operation, device)?;
         destination.check(operation, device)?;
         match (&source.state, &destination.state) {
-            (State::Built, State::Empty) => {
-                destination.state = State::Compacted;
-                Ok(())
-            }
+            (State::Built, State::Empty) => Ok(()),
             (State::Empty | State::Compacted, _) => Err(invalid_state(
                 operation,
                 "compaction requires an uncompacted built source",
@@ -429,9 +423,10 @@ pub fn create(
     Acceleration::create(device, ray_tracing, refit, descriptor)
 }
 
-pub fn build(device: &Device, value: &mut Acceleration) -> Result<(), Error> {
-    value.build(device)
+pub(crate) fn validate_build(device: &Device, value: &Acceleration) -> Result<(), Error> {
+    value.validate_build(device)
 }
+pub(crate) fn mark_built(value: &mut Acceleration) { value.state = State::Built; }
 
 pub fn refit(
     device: &Device,
@@ -441,13 +436,10 @@ pub fn refit(
     value.refit(device, &descriptor)
 }
 
-pub fn compact_into(
-    device: &Device,
-    source: &mut Acceleration,
-    destination: &mut Acceleration,
-) -> Result<(), Error> {
-    Acceleration::compact_into(source, destination, device)
+pub(crate) fn validate_compaction(device: &Device, source: &Acceleration, destination: &Acceleration) -> Result<(), Error> {
+    Acceleration::validate_compaction(source, destination, device)
 }
+pub(crate) fn mark_compacted(destination: &mut Acceleration) { destination.state = State::Compacted; }
 
 pub fn compacted_size(device: &Device, value: &Acceleration) -> Result<(), Error> {
     value.compacted_size(device)
