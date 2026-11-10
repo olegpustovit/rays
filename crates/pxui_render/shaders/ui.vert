@@ -15,6 +15,7 @@ layout(location = 7) flat out vec4 v_p0;
 layout(location = 8) flat out vec4 v_p2;
 layout(location = 9) flat out vec4 v_misc;
 layout(location = 10) flat out uvec2 v_kf;
+layout(location = 11) out vec2 v_tp;
 
 const uint RECT = 0u, MASK = 1u, IMAGE = 2u, SHADOW = 3u, LINE = 4u, ARC = 5u, CURVE = 6u;
 const uint INNER = 4u;
@@ -28,15 +29,19 @@ void main() {
   uint kind = (I.c.x >> 16) & 255u;
   uint flags = I.c.x >> 24;
   uint view = I.c.y & 65535u;
-  vec4 va = g[1u + 2u * view];
-  vec4 vclip = g[2u + 2u * view];
+  vec4 va = g[1u + 4u * view];
+  vec4 vclip = g[2u + 4u * view];
+  vec4 vm = g[3u + 4u * view];
+  vec2 piv = g[4u + 4u * view].xy;
   vec2 off = va.xy;
+  // quad padding in local units: 1 target pixel of anti-aliasing margin even when the view shrinks
+  float pad = max(1.0, 1.0 / max(va.w * sqrt(abs(vm.x * vm.w - vm.y * vm.z)), 1e-3));
   float width = unpackHalf2x16(I.c.x).x;
   vec4 r = I.rect + (kind == ARC ? vec4(off, 0.0, 0.0) : off.xyxy);
   vec4 p0 = (kind == ARC || kind == CURVE) ? vec4(uintBitsToFloat(I.c.zw), 0.0, 0.0) : vec4(unpackHalf2x16(I.c.z), unpackHalf2x16(I.c.w));
   if (kind == CURVE) p0.xy += off;
   vec4 p2 = kind == RECT ? unpackUnorm4x8(I.b.x) : vec4(unpackHalf2x16(I.b.x), unpackHalf2x16(I.b.y));
-  float h = width * 0.5 + 1.0;
+  float h = width * 0.5 + pad;
   vec2 p;
   if (kind == LINE) {
     vec2 d = r.zw - r.xy;
@@ -48,12 +53,15 @@ void main() {
     vec4 box = r;
     if (kind == ARC) box = vec4(r.xy - (r.z + h), r.xy + (r.z + h));
     if (kind == CURVE) box = vec4(min(min(r.xy, r.zw), p0.xy) - h, max(max(r.xy, r.zw), p0.xy) + h);
-    if (kind == RECT || kind == SHADOW) box = r + vec4(-1.0, -1.0, 1.0, 1.0);
-    if (kind == SHADOW && (flags & INNER) == 0u) box = r + p0.xyxy + vec4(-1.0, -1.0, 1.0, 1.0) * (p0.w + 3.0 * p0.z + 1.0);
+    if (kind == RECT || kind == SHADOW) box = r + vec4(-pad, -pad, pad, pad);
+    if (kind == SHADOW && (flags & INNER) == 0u) box = r + p0.xyxy + vec4(-1.0, -1.0, 1.0, 1.0) * (p0.w + 3.0 * p0.z + pad);
     p = mix(box.xy, box.zw, c);
   }
   vec2 uv = mix(unpackUnorm2x16(I.b.x), unpackUnorm2x16(I.b.y), c);
-  gl_Position = vec4(p.x / g[0].x * 2.0 - 1.0, 1.0 - p.y / g[0].y * 2.0, 0.0, 1.0);
+  vec2 t = p - piv;
+  t = piv + va.w * vec2(vm.x * t.x + vm.y * t.y, vm.z * t.x + vm.w * t.y);
+  gl_Position = vec4(t.x / g[0].x * 2.0 - 1.0, 1.0 - t.y / g[0].y * 2.0, 0.0, 1.0);
+  v_tp = t;
   v_pos = vec4(p, uv);
   v_rect = r;
   v_radii = vec4(unpackHalf2x16(I.b.z), unpackHalf2x16(I.b.w));

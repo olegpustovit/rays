@@ -46,8 +46,12 @@
 //!
 //! # View table
 //! Every instance names a [`View`]: an offset added to its rect, clip and control points, an opacity
-//! that scales its alpha, and a clip in target points. Scrolling or fading a cached view is one
-//! `set_view`; index 0 is the identity and cannot be changed.
+//! that scales its alpha, a 2D affine (uniform `scale`, 2x2 `transform`, `pivot`) applied after the
+//! offset, and a clip in target points (after the transform). Scrolling, fading, scaling or rotating a
+//! cached view is one `set_view`; index 0 is the identity and cannot be changed. Shapes stay in view
+//! space and the fragment shader measures pixel size from derivatives, so distance-field anti-aliasing
+//! is correct at any scale or rotation; quads are padded by one target pixel when a view shrinks.
+//! Instance clips live in view space and are transformed with the instances.
 //!
 //! # Batching
 //! A layer is one draw call. [`Break`]s are the only splits: from `at_instance` on, image instances
@@ -68,13 +72,25 @@ const FRAG_SPV: &[u8] = include_bytes!("../shaders/ui.frag.spv");
 
 pub use pxui::draw::{f16, flags, kind, Instance, NO_CLIP};
 pub const MAX_VIEWS: usize = 256;
+/// Bytes of one view record in the globals buffer: four float4s (see the vertex shader).
+const VIEW_BYTES: usize = 64;
 
-/// A per-view record: `offset` moves the view's instances, `opacity` scales their alpha, `clip`
-/// (`[x0, y0, x1, y1]` in target points) bounds them.
+/// A per-view record. `offset` moves the view's instances, `opacity` scales their alpha, `clip`
+/// (`[x0, y0, x1, y1]` in target points, after the transform) bounds them. Then a 2D affine about
+/// `pivot` (in the offset view's own points) maps them to the target: `p' = pivot + scale * M * (p - pivot)`
+/// with `transform` = `M` row-major `[m00, m01, m10, m11]` (rotation, skew, flip) and `scale` a uniform factor.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct View { pub offset: [f32; 2], pub opacity: f32, pub clip: [f32; 4] }
+pub struct View { pub offset: [f32; 2], pub opacity: f32, pub clip: [f32; 4], pub scale: f32, pub transform: [f32; 4], pub pivot: [f32; 2] }
 impl View {
-    pub const IDENTITY: View = View { offset: [0.0; 2], opacity: 1.0, clip: [-32768.0, -32768.0, 32767.0, 32767.0] };
+    pub const IDENTITY: View = View {
+        offset: [0.0; 2], opacity: 1.0, clip: [-32768.0, -32768.0, 32767.0, 32767.0],
+        scale: 1.0, transform: [1.0, 0.0, 0.0, 1.0], pivot: [0.0; 2],
+    };
+    /// Rotation by `radians` (clockwise on screen, y down) about `pivot`.
+    pub fn rotation(radians: f32, pivot: [f32; 2]) -> View {
+        let (s, c) = radians.sin_cos();
+        View { transform: [c, -s, s, c], pivot, ..View::IDENTITY }
+    }
 }
 
 /// From `at_instance` on, [`kind::IMAGE`] instances sample `texture` (`None`: the colour atlas).
@@ -253,13 +269,16 @@ impl Painter {
             let to = breaks.get(k).map_or(instances.len(), |b| b.at_instance as usize);
             (&instances[from..to], if k == 0 { None } else { breaks[k - 1].texture })
         };
-        let header = align(16 + self.views_len * 32);
+        let header = align(16 + self.views_len * VIEW_BYTES);
         let need = header + (0..=breaks.len()).map(|k| align(segment(k).0.len() * 64)).sum::<usize>();
         let start = self.reserve(need)?;
-        self.write(start, &as_bytes(&[size_px[0] as f32 / scale, size_px[1] as f32 / scale])[..16]);
+        self.write(start, &as_bytes::<16>(&[size_px[0] as f32 / scale, size_px[1] as f32 / scale]));
         for (i, v) in self.views[..self.views_len].iter().enumerate() {
-            let record = [v.offset[0], v.offset[1], v.opacity, 0.0, v.clip[0], v.clip[1], v.clip[2], v.clip[3]];
-            self.write(start + 16 + i * 32, &as_bytes(&record));
+            let record = [
+                v.offset[0], v.offset[1], v.opacity, v.scale, v.clip[0], v.clip[1], v.clip[2], v.clip[3],
+                v.transform[0], v.transform[1], v.transform[2], v.transform[3], v.pivot[0], v.pivot[1], 0.0, 0.0,
+            ];
+            self.write(start + 16 + i * VIEW_BYTES, &as_bytes::<VIEW_BYTES>(&record));
         }
         backend::set_render_pipeline(pass, &self.pipeline)?;
         backend::set_cull(pass, Cull::CullNone)?;
@@ -289,8 +308,8 @@ impl Painter {
     }
 }
 
-fn as_bytes(floats: &[f32]) -> [u8; 32] {
-    let mut out = [0u8; 32];
+fn as_bytes<const N: usize>(floats: &[f32]) -> [u8; N] {
+    let mut out = [0u8; N];
     for (chunk, f) in out.chunks_exact_mut(4).zip(floats) { chunk.copy_from_slice(&f.to_le_bytes()); }
     out
 }

@@ -145,10 +145,11 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 3] = [
+    let cases: [(&str, fn()); 4] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
+        ("gpu_view_scale_and_rotation", gpu_view_scale_and_rotation),
     ];
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--ignored") { return; }
@@ -265,4 +266,33 @@ fn gpu_warm_frame_allocates_nothing() {
     ok(be::destroy_texture(&target));
     drop(painter);
     finish(device, queue);
+}
+
+fn gpu_view_scale_and_rotation() {
+    let Some(device) = open() else { return };
+    let queue = ok(be::create_queue(&device));
+    let mut painter = painter(&device);
+    // View 1: halved about its centre (40, 30). View 2: turned a quarter about the centre (100, 54).
+    ok(painter.set_view(1, View { scale: 0.5, pivot: [40.0, 30.0], ..View::IDENTITY }));
+    ok(painter.set_view(2, View::rotation(std::f32::consts::FRAC_PI_2, [100.0, 54.0])));
+    let target = target(&device);
+    // The scaled rect's left edge lands at 30.125, a quarter pixel inside the pixel centre at 30.25:
+    // coverage 0.75 only if the anti-aliasing width follows the scale.
+    let instances = [Instance::rect([20.25, 20.0, 59.75, 40.0], BLUE).view(1), Instance::rect([80.0, 50.0, 120.0, 58.0], RED).view(2)];
+    painter.begin_frame();
+    pass(&queue, &target, &mut |encoder| ok(painter.draw(encoder, [W * SCALE, H * SCALE], SCALE as f32, &instances, &[])));
+    let pixels = ok(be::read_texture(&target, (W * SCALE * 4) as i64));
+    ok(be::destroy_texture(&target));
+    drop(painter);
+    finish(device, queue);
+    assert_eq!(at(&pixels, 40.0, 30.0), BLUE, "scaled rect centre");
+    assert_eq!(at(&pixels, 32.0, 30.0), BLUE, "inside the halved rect");
+    assert_eq!(at(&pixels, 28.0, 30.0), BG, "left of the halved rect (inside the unscaled one)");
+    assert_eq!(at(&pixels, 40.0, 23.0), BG, "above the halved rect");
+    let edge = at(&pixels, 30.3, 30.0);
+    assert!(near(edge, [81, 111, 216, 255], 6), "scaled edge coverage 0.75, not 1: {edge:?}");
+    assert_eq!(at(&pixels, 100.0, 40.0), RED, "rotated rect is now tall");
+    assert_eq!(at(&pixels, 100.0, 70.0), RED, "rotated rect's far end");
+    assert_eq!(at(&pixels, 85.0, 54.0), BG, "the old horizontal arm is gone");
+    assert_eq!(at(&pixels, 107.0, 54.0), BG, "right of the rotated rect (width 8, half-width 4)");
 }

@@ -16,6 +16,7 @@ struct VOut {
   float4 v_p2 [[flat]];
   float4 v_misc [[flat]];
   uint2 v_kf [[flat]];
+  float2 v_tp;
 };
 
 constant uint RECT = 0u, MASK = 1u, IMAGE = 2u, SHADOW = 3u, LINE = 4u, ARC = 5u, CURVE = 6u;
@@ -34,15 +35,19 @@ vertex VOut ui_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
   uint kind = (I.c.x >> 16) & 255u;
   uint flags = I.c.x >> 24;
   uint view = I.c.y & 65535u;
-  float4 va = g[1u + 2u * view];
-  float4 vclip = g[2u + 2u * view];
+  float4 va = g[1u + 4u * view];
+  float4 vclip = g[2u + 4u * view];
+  float4 vm = g[3u + 4u * view];
+  float2 piv = g[4u + 4u * view].xy;
   float2 off = va.xy;
+  // quad padding in local units: 1 target pixel of anti-aliasing margin even when the view shrinks
+  float pad = max(1.0, 1.0 / max(va.w * sqrt(abs(vm.x * vm.w - vm.y * vm.z)), 1e-3));
   float width = half2x16(I.c.x).x;
   float4 r = I.rect + (kind == ARC ? float4(off, 0.0, 0.0) : off.xyxy);
   float4 p0 = (kind == ARC || kind == CURVE) ? float4(as_type<float2>(I.c.zw), 0.0, 0.0) : float4(half2x16(I.c.z), half2x16(I.c.w));
   if (kind == CURVE) p0.xy += off;
   float4 p2 = kind == RECT ? unpack_unorm4x8_to_float(I.b.x) : float4(half2x16(I.b.x), half2x16(I.b.y));
-  float h = width * 0.5 + 1.0;
+  float h = width * 0.5 + pad;
   float2 p;
   if (kind == LINE) {
     float2 d = r.zw - r.xy;
@@ -54,12 +59,15 @@ vertex VOut ui_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float4 box = r;
     if (kind == ARC) box = float4(r.xy - (r.z + h), r.xy + (r.z + h));
     if (kind == CURVE) box = float4(min(min(r.xy, r.zw), p0.xy) - h, max(max(r.xy, r.zw), p0.xy) + h);
-    if (kind == RECT || kind == SHADOW) box = r + float4(-1.0, -1.0, 1.0, 1.0);
-    if (kind == SHADOW && (flags & INNER) == 0u) box = r + p0.xyxy + float4(-1.0, -1.0, 1.0, 1.0) * (p0.w + 3.0 * p0.z + 1.0);
+    if (kind == RECT || kind == SHADOW) box = r + float4(-pad, -pad, pad, pad);
+    if (kind == SHADOW && (flags & INNER) == 0u) box = r + p0.xyxy + float4(-1.0, -1.0, 1.0, 1.0) * (p0.w + 3.0 * p0.z + pad);
     p = mix(box.xy, box.zw, c);
   }
   float2 uv = mix(unpack_unorm2x16_to_float(I.b.x), unpack_unorm2x16_to_float(I.b.y), c);
-  o.position = float4(p.x / g[0].x * 2.0 - 1.0, 1.0 - p.y / g[0].y * 2.0, 0.0, 1.0);
+  float2 t = p - piv;
+  t = piv + va.w * float2(vm.x * t.x + vm.y * t.y, vm.z * t.x + vm.w * t.y);
+  o.position = float4(t.x / g[0].x * 2.0 - 1.0, 1.0 - t.y / g[0].y * 2.0, 0.0, 1.0);
+  o.v_tp = t;
   o.v_pos = float4(p, uv);
   o.v_rect = r;
   o.v_radii = float4(half2x16(I.b.z), half2x16(I.b.w));
@@ -157,9 +165,11 @@ float sd_bezier(float2 pos, float2 A, float2 B, float2 C) {
 fragment float4 ui_fragment(VOut in [[stage_in]], texture2d<float> mask_tex [[texture(2)]],
                             texture2d<float> color_tex [[texture(3)]], sampler samp [[sampler(4)]]) {
   float2 p = in.v_pos.xy;
-  float px = max(length(fwidth(p)) * 0.70710678, 1e-4);
+  // points per pixel, rotation invariant (equals the old fwidth form on axis-aligned views)
+  float px = max(sqrt(0.5 * (dot(dfdx(p), dfdx(p)) + dot(dfdy(p), dfdy(p)))), 1e-4);
+  float pxt = max(sqrt(0.5 * (dot(dfdx(in.v_tp), dfdx(in.v_tp)) + dot(dfdy(in.v_tp), dfdy(in.v_tp)))), 1e-4);
   uint kind = in.v_kf.x, flags = in.v_kf.y;
-  float clip_cov = cover(sd_rect(p, in.v_clip, float4(in.v_misc.y)), px) * cover(sd_rect(p, in.v_vclip, float4(0.0)), px);
+  float clip_cov = cover(sd_rect(p, in.v_clip, float4(in.v_misc.y)), px) * cover(sd_rect(in.v_tp, in.v_vclip, float4(0.0)), pxt);
   if (clip_cov <= 0.0) discard_fragment();
   float4 col;
   if (kind == MASK) {

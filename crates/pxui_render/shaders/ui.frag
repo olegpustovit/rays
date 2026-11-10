@@ -15,6 +15,7 @@ layout(location = 7) flat in vec4 v_p0;
 layout(location = 8) flat in vec4 v_p2;
 layout(location = 9) flat in vec4 v_misc;
 layout(location = 10) flat in uvec2 v_kf;
+layout(location = 11) in vec2 v_tp;
 layout(location = 0) out vec4 out_color;
 
 const uint RECT = 0u, MASK = 1u, IMAGE = 2u, SHADOW = 3u, LINE = 4u, ARC = 5u, CURVE = 6u;
@@ -103,9 +104,11 @@ float sd_bezier(vec2 pos, vec2 A, vec2 B, vec2 C) {
 
 void main() {
   vec2 p = v_pos.xy;
-  float px = max(length(fwidth(p)) * 0.70710678, 1e-4);
+  // points per pixel, rotation invariant (equals the old fwidth form on axis-aligned views)
+  float px = max(sqrt(0.5 * (dot(dFdx(p), dFdx(p)) + dot(dFdy(p), dFdy(p)))), 1e-4);
+  float pxt = max(sqrt(0.5 * (dot(dFdx(v_tp), dFdx(v_tp)) + dot(dFdy(v_tp), dFdy(v_tp)))), 1e-4);
   uint kind = v_kf.x, flags = v_kf.y;
-  float clip_cov = cover(sd_rect(p, v_clip, vec4(v_misc.y)), px) * cover(sd_rect(p, v_vclip, vec4(0.0)), px);
+  float clip_cov = cover(sd_rect(p, v_clip, vec4(v_misc.y)), px) * cover(sd_rect(v_tp, v_vclip, vec4(0.0)), pxt);
   if (clip_cov <= 0.0) discard;
   vec4 col;
   if (kind == MASK) {
