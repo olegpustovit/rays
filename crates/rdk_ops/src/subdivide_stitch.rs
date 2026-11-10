@@ -5,15 +5,15 @@ use rdk_core::support::{self, Windows};
 use rdk_core::{cancel, geometry, packed, topology, topology_index};
 
 use crate::subdivide_refine::{
-    checked_add, checked_mul, failm, fmax, fmin, gf, gi, gs, invalid_arg, DividedBoundary,
+    checked_add, checked_mul, failm, fmax, fmin, gf, gi, gs, gt, invalid_arg, DividedBoundary,
     InterfaceChains, PointWeld, PullPlan, TriangleAppend,
 };
 
 pub(crate) fn shared_edge_endpoint(index: &topology_index::view::View, left: i64, right: i64) -> i64 {
-    let left_a = gi(&index.edge_a, left);
-    let left_b = gi(&index.edge_b, left);
-    let right_a = gi(&index.edge_a, right);
-    let right_b = gi(&index.edge_b, right);
+    let left_a = gt(&index.edge_a, left);
+    let left_b = gt(&index.edge_b, left);
+    let right_a = gt(&index.edge_a, right);
+    let right_b = gt(&index.edge_b, right);
     if left_a == right_a || left_a == right_b {
         left_a
     } else if left_b == right_a || left_b == right_b {
@@ -31,8 +31,8 @@ pub(crate) fn project_to_source_edge(
     y: f64,
     z: f64,
 ) -> (f64, f64, f64) {
-    let a = gi(&index.edge_a, edge);
-    let b = gi(&index.edge_b, edge);
+    let a = gt(&index.edge_a, edge);
+    let b = gt(&index.edge_b, edge);
     let ax = gf(&source_positions.x, a);
     let ay = gf(&source_positions.y, a);
     let az = gf(&source_positions.z, a);
@@ -99,7 +99,7 @@ pub(crate) fn pull_boundary_no_edge_division(
         } else if first != edge {
             let common = common_endpoint[point as usize];
             if common >= 0 {
-                if gi(&source_index.edge_a, edge) != common && gi(&source_index.edge_b, edge) != common
+                if gt(&source_index.edge_a, edge) != common && gt(&source_index.edge_b, edge) != common
                 {
                     return Err(failm("refined boundary point has incompatible source-edge ancestry"));
                 }
@@ -115,14 +115,14 @@ pub(crate) fn pull_boundary_no_edge_division(
     };
     for primitive in 0..topology_view.primitive_kinds.len() as i64 {
         cancel::poll(cancel_token, primitive, 4095)?;
-        let first = gi(&topology_view.primitive_offsets, primitive);
-        let last = gi(&topology_view.primitive_offsets, primitive + 1);
+        let first = gt(&topology_view.primitive_offsets, primitive);
+        let last = gt(&topology_view.primitive_offsets, primitive + 1);
         for vertex in first..last {
             let edge = gi(&ancestry, vertex);
             if edge >= 0 {
                 let next = if vertex + 1 == last { first } else { vertex + 1 };
-                add_constraint(gi(&topology_view.vertex_points, vertex), edge)?;
-                add_constraint(gi(&topology_view.vertex_points, next), edge)?;
+                add_constraint(gt(&topology_view.vertex_points, vertex), edge)?;
+                add_constraint(gt(&topology_view.vertex_points, next), edge)?;
             }
         }
     }
@@ -225,8 +225,8 @@ pub(crate) fn stitch_boundary_no_edge_division(
     let mut counts = vec![0_i64; source_edges];
     for primitive in 0..refined_topology.primitive_kinds.len() as i64 {
         cancel::poll(cancel_token, primitive, 4095)?;
-        for vertex in gi(&refined_topology.primitive_offsets, primitive)
-            ..gi(&refined_topology.primitive_offsets, primitive + 1)
+        for vertex in gt(&refined_topology.primitive_offsets, primitive)
+            ..gt(&refined_topology.primitive_offsets, primitive + 1)
         {
             let edge = gi(&ancestry, vertex);
             if edge >= 0 {
@@ -249,15 +249,15 @@ pub(crate) fn stitch_boundary_no_edge_division(
     let mut end_vertices = vec![0_i64; descendant_count];
     let mut cursor = offsets.clone();
     for primitive in 0..refined_topology.primitive_kinds.len() as i64 {
-        let first = gi(&refined_topology.primitive_offsets, primitive);
-        let last = gi(&refined_topology.primitive_offsets, primitive + 1);
+        let first = gt(&refined_topology.primitive_offsets, primitive);
+        let last = gt(&refined_topology.primitive_offsets, primitive + 1);
         for vertex in first..last {
             let edge = gi(&ancestry, vertex);
             if edge >= 0 {
                 let next = if vertex + 1 == last { first } else { vertex + 1 };
                 let at = cursor[edge as usize] as usize;
-                starts[at] = gi(&refined_topology.vertex_points, vertex);
-                ends[at] = gi(&refined_topology.vertex_points, next);
+                starts[at] = gt(&refined_topology.vertex_points, vertex);
+                ends[at] = gt(&refined_topology.vertex_points, next);
                 start_vertices[at] = vertex;
                 end_vertices[at] = next;
                 cursor[edge as usize] = at as i64 + 1;
@@ -330,8 +330,8 @@ pub(crate) fn stitch_boundary_no_edge_division(
             if source_a < 0 {
                 return Err(failm("stitch source edge has no selected orientation"));
             }
-            let edge_a = gi(&source_index.edge_a, edge);
-            let edge_b = gi(&source_index.edge_b, edge);
+            let edge_a = gt(&source_index.edge_a, edge);
+            let edge_b = gt(&source_index.edge_b, edge);
             let source_b = if edge_a == source_a {
                 edge_b
             } else if edge_b == source_a {
@@ -350,13 +350,13 @@ pub(crate) fn stitch_boundary_no_edge_division(
                 None => return Err(failm("stitch could not find the coarse boundary edge")),
             };
             let coarse_directed =
-                gi(&unselected_index.edge_vertices, gi(&unselected_index.edge_offsets, coarse_edge));
+                gt(&unselected_index.edge_vertices, gt(&unselected_index.edge_offsets, coarse_edge));
             let coarse_next = gs(&unselected_index.next_vertex, coarse_directed);
             if coarse_next < 0 {
                 return Err(failm("stitch coarse edge has no complete corner"));
             }
             let (coarse_a_vertex, coarse_b_vertex) =
-                if gi(&unselected_topology.vertex_points, coarse_directed) == coarse_a {
+                if gt(&unselected_topology.vertex_points, coarse_directed) == coarse_a {
                     (coarse_directed, coarse_next)
                 } else {
                     (coarse_next, coarse_directed)

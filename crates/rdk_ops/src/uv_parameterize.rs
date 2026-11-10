@@ -39,7 +39,7 @@ fn selected_seam(value: &group::T, index_view: &topology_index::view::View, edge
     let last = index_view.edge_offsets[edge as usize + 1];
     let mut selected = false;
     for local in first..last {
-        if group::mem(index_view.edge_vertices[local as usize], value) {
+        if group::mem(i64::from(index_view.edge_vertices[local as usize]), value) {
             selected = true;
         }
     }

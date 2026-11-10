@@ -388,8 +388,8 @@ pub fn split_point_edge_groups(
             } else {
                 let target_edge = topology_edge_lookup::find(
                     &lookup,
-                    target.vertex_points[vertex as usize],
-                    target.vertex_points[next as usize],
+                    i64::from(target.vertex_points[vertex as usize]),
+                    i64::from(target.vertex_points[next as usize]),
                 );
                 if target_edge < 0 {
                     failure = Some("target topology lost a source corner edge".to_owned());

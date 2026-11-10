@@ -289,15 +289,16 @@ pub fn validate_positions(x: &[f64], y: &[f64], z: &[f64]) -> Result<(), error::
     Ok(())
 }
 
-pub fn validate_materialized<V: Copy + Into<i64>>(
+pub fn validate_materialized(
     allow_degenerate: bool,
     x: &[f64],
     y: &[f64],
     z: &[f64],
-    vertex_points: &[V],
+    corners: usize,
+    vertex_at: &dyn Fn(usize) -> i64,
 ) -> Result<(), error::T> {
     let points = x.len() as i64;
-    if vertex_points.len() % 3 != 0 {
+    if corners % 3 != 0 {
         return Err(make(
             Code::RoundingCardinality,
             "materialized triangle corners are not divisible by three".to_owned(),
@@ -311,11 +312,11 @@ pub fn validate_materialized<V: Copy + Into<i64>>(
             _ => predicates::orient2d_packed(z, x, a, b, c),
         }
     };
-    for triangle in 0..vertex_points.len() / 3 {
+    for triangle in 0..corners / 3 {
         let offset = triangle * 3;
-        let a: i64 = vertex_points[offset].into();
-        let b: i64 = vertex_points[offset + 1].into();
-        let c: i64 = vertex_points[offset + 2].into();
+        let a = vertex_at(offset);
+        let b = vertex_at(offset + 1);
+        let c = vertex_at(offset + 2);
         if a < 0 || a >= points || b < 0 || b >= points || c < 0 || c >= points {
             return Err(make(
                 Code::RoundingCardinality,
@@ -936,7 +937,7 @@ fn build_internal(
     }
     edge_source_offsets[sc * 3] = edge_source_count as i64;
     if let Err(failure) =
-        validate_materialized(internal.defer_rounded_slivers, &x, &y, &z, &vertex_points)
+        validate_materialized(internal.defer_rounded_slivers, &x, &y, &z, vertex_points.len(), &|i| vertex_points[i])
     {
         return Err(Fail::Rdk(make(
             error::code(&failure),
@@ -1087,14 +1088,15 @@ pub mod view {
         super::validate_positions(x, y, z)
     }
 
-    pub fn validate_materialized<V: Copy + Into<i64>>(
+    pub fn validate_materialized(
         allow_degenerate: bool,
         x: &[f64],
         y: &[f64],
         z: &[f64],
-        vertex_points: &[V],
+        corners: usize,
+        vertex_at: &dyn Fn(usize) -> i64,
     ) -> Result<(), error::T> {
-        super::validate_materialized(allow_degenerate, x, y, z, vertex_points)
+        super::validate_materialized(allow_degenerate, x, y, z, corners, vertex_at)
     }
 
     #[allow(clippy::type_complexity)]
@@ -1383,19 +1385,19 @@ mod tests {
     // test_materialization_validation
     #[test]
     fn materialization_validation() {
-        validate_materialized(false, &[0., 1., 0.], &[0., 0., 1.], &[0., 0., 0.], &[0_i64, 1, 2])
+        validate_materialized(false, &[0., 1., 0.], &[0., 0., 1.], &[0., 0., 0.], 3, &|i| i as i64)
             .expect("valid rounded triangle failed");
-        match validate_materialized(false, &[0., 0.], &[0., 0.], &[0., 0.], &[] as &[i64]) {
+        match validate_materialized(false, &[0., 0.], &[0., 0.], &[0., 0.], 0, &|i| i as i64) {
             Err(failure) if error::code(&failure) == Code::RoundingCollision => {}
             Err(failure) => panic!("unexpected rounding collision error: {}", error::to_string(&failure)),
             Ok(()) => panic!("rounded exact-point collision was accepted"),
         }
-        match validate_materialized(false, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], &[0, 1, 2]) {
+        match validate_materialized(false, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], 3, &|i| i as i64) {
             Err(failure) if error::code(&failure) == Code::RoundingDegenerate => {}
             Err(failure) => panic!("unexpected rounding degeneracy error: {}", error::to_string(&failure)),
             Ok(()) => panic!("rounded collinear output triangle was accepted"),
         }
-        validate_materialized(true, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], &[0, 1, 2])
+        validate_materialized(true, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], 3, &|i| i as i64)
             .expect("explicit deferred rounding repair was rejected");
         let (x, y, z, representatives, map) = coalesce_positions(
             &[10, 11, 12, 13, 14],

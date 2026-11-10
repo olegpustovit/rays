@@ -147,12 +147,12 @@ pub(crate) fn automatic_boundary_holes(
         let mut value = 0_u8;
         for bit in 0..=(7.min(point_count - base - 1)) {
             let point = base + bit;
-            let mut at = gi(&index.point_edge_offsets, point);
-            let last = gi(&index.point_edge_offsets, point + 1);
+            let mut at = gt(&index.point_edge_offsets, point);
+            let last = gt(&index.point_edge_offsets, point + 1);
             let mut boundary = false;
             while at < last && !boundary {
-                let edge = gi(&index.point_edges, at);
-                if gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge) == 1 {
+                let edge = gt(&index.point_edges, at);
+                if gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge) == 1 {
                     boundary = true;
                 }
                 at += 1;
@@ -171,13 +171,13 @@ pub(crate) fn automatic_boundary_holes(
         let mut value = 0_u8;
         for bit in 0..=(7.min(primitive_count - base - 1)) {
             let primitive = base + bit;
-            let first = gi(&topology_view.primitive_offsets, primitive);
-            let last = gi(&topology_view.primitive_offsets, primitive + 1);
+            let first = gt(&topology_view.primitive_offsets, primitive);
+            let last = gt(&topology_view.primitive_offsets, primitive + 1);
             let mut vertex = first;
             let mut boundary = false;
             while vertex < last && !boundary {
                 cancel::poll(cancel_token, vertex, 4095)?;
-                let point = gi(&topology_view.vertex_points, vertex);
+                let point = gt(&topology_view.vertex_points, vertex);
                 if gu(&boundary_points, point >> 3) & (1 << (point & 7)) != 0 {
                     boundary = true;
                 }

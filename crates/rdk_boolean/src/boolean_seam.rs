@@ -410,7 +410,7 @@ fn materialize_coincident(
             output += 1;
         }
     }
-    extract_view::validate_materialized(false, &x, &y, &z, &vertices).map_err(Fail::Rdk)?;
+    extract_view::validate_materialized(false, &x, &y, &z, vertices.len(), &|i| vertices[i]).map_err(Fail::Rdk)?;
     let primitive_offsets: Vec<i64> = (0..=selected as i64).map(|index| index * 3).collect();
     let topology_value = topology::polygons_owned(x.len() as i64, topology::narrow("Boolean", &vertices)?, topology::narrow("Boolean", &primitive_offsets)?)?;
     make_geometry(x, y, z, topology_value)

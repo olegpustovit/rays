@@ -116,8 +116,7 @@ pub fn endpoints(value: &T, edge: i64) -> Result<(i64, i64), error::T> {
     Ok((i64::from(value.edge_a[edge]), i64::from(value.edge_b[edge])))
 }
 
-pub fn find(value: &T, a: impl Into<i64>, b: impl Into<i64>) -> i64 {
-    let (a, b) = (a.into(), b.into());
+pub fn find(value: &T, a: i64, b: i64) -> i64 {
     if a < 0 || b < 0 || a >= value.point_count || b >= value.point_count {
         return -1;
     }

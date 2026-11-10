@@ -11,7 +11,7 @@ use rdk_core::error::Code;
 use rdk_core::support::Windows;
 
 use crate::subdivide_refine::{
-    collect_edge_members, fmin, gf, gi, gs,
+    collect_edge_members, fmin, gf, gi, gs, gt,
 };
 
 const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
@@ -217,15 +217,15 @@ pub(crate) fn endpoint_vertices(
     edge: i64,
     incidence: i64,
 ) -> Option<(i64, i64)> {
-    let vertex = gi(&index.edge_vertices, incidence);
+    let vertex = gt(&index.edge_vertices, incidence);
     let next = gs(&index.next_vertex, vertex);
     if next < 0 {
         return None;
     }
-    let a = gi(&index.edge_a, edge);
-    let b = gi(&index.edge_b, edge);
-    let point = gi(&topology_view.vertex_points, vertex);
-    let next_point = gi(&topology_view.vertex_points, next);
+    let a = gt(&index.edge_a, edge);
+    let b = gt(&index.edge_b, edge);
+    let point = gt(&topology_view.vertex_points, vertex);
+    let next_point = gt(&topology_view.vertex_points, next);
     if point == a && next_point == b {
         Some((vertex, next))
     } else if point == b && next_point == a {
@@ -266,8 +266,8 @@ pub(crate) fn install_feature_groups(
             if explicit {
                 return Ok(true);
             }
-            let first = gi(&index.edge_offsets, edge);
-            let last = gi(&index.edge_offsets, edge + 1);
+            let first = gt(&index.edge_offsets, edge);
+            let last = gt(&index.edge_offsets, edge + 1);
             if last - first > 2 {
                 return Ok(true);
             }
@@ -309,8 +309,8 @@ pub(crate) fn feature_group(name: &str, geometry_value: &geometry::T) -> Result<
 
 pub(crate) fn primitive_is_triangle(topology_view: &topology::view::View, primitive: i64) -> bool {
     topology_view.primitive_kinds[primitive as usize] == 0
-        && gi(&topology_view.primitive_offsets, primitive + 1)
-            - gi(&topology_view.primitive_offsets, primitive)
+        && gt(&topology_view.primitive_offsets, primitive + 1)
+            - gt(&topology_view.primitive_offsets, primitive)
             == 3
 }
 
@@ -2145,9 +2145,9 @@ pub(crate) fn project_to_reference(
                     let vertex0 = rdk_geom::surface_index::view::triangle_vertex(surface, triangle, 0);
                     let vertex1 = rdk_geom::surface_index::view::triangle_vertex(surface, triangle, 1);
                     let vertex2 = rdk_geom::surface_index::view::triangle_vertex(surface, triangle, 2);
-                    let p0 = gi(&source_topology.vertex_points, vertex0);
-                    let p1 = gi(&source_topology.vertex_points, vertex1);
-                    let p2 = gi(&source_topology.vertex_points, vertex2);
+                    let p0 = gt(&source_topology.vertex_points, vertex0);
+                    let p1 = gt(&source_topology.vertex_points, vertex1);
+                    let p2 = gt(&source_topology.vertex_points, vertex2);
                     let (pa, pb, pc) = (a[point as usize], b[point as usize], c[point as usize]);
                     x[at] = (pa * gf(&source_positions.x, p0))
                         + (pb * gf(&source_positions.x, p1))
@@ -2203,7 +2203,7 @@ pub(crate) fn install_outputs(
                 name,
                 &|edge| Ok({
                     edge_group::mem(edge, &features)
-                        || gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge) != 2
+                        || gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge) != 2
                 }),
             )?;
             geometry::with_edge_group(created, geometry_value)?
@@ -2236,10 +2236,10 @@ pub(crate) fn install_outputs(
                 if !primitive_is_triangle(&topology_view, primitive) {
                     return Ok(0.0);
                 }
-                let first = gi(&topology_view.primitive_offsets, primitive);
-                let p0 = gi(&topology_view.vertex_points, first);
-                let p1 = gi(&topology_view.vertex_points, first + 1);
-                let p2 = gi(&topology_view.vertex_points, first + 2);
+                let first = gt(&topology_view.primitive_offsets, primitive);
+                let p0 = gt(&topology_view.vertex_points, first);
+                let p1 = gt(&topology_view.vertex_points, first + 1);
+                let p2 = gt(&topology_view.vertex_points, first + 2);
                 let dx01 = gf(&positions.x, p1) - gf(&positions.x, p0);
                 let dy01 = gf(&positions.y, p1) - gf(&positions.y, p0);
                 let dz01 = gf(&positions.z, p1) - gf(&positions.z, p0);

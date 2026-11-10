@@ -95,8 +95,7 @@ fn require_group(
 }
 
 
-fn allowed(value: Option<&group::T>, index: impl Into<i64>) -> bool {
-    let index = index.into();
+fn allowed(value: Option<&group::T>, index: i64) -> bool {
     value.map_or(true, |group_value| group::mem(index, group_value))
 }
 
@@ -147,7 +146,7 @@ pub fn classify_connectivity(
                     for vertex in first..last {
                         let edge = reverse.edge_of_vertex[vertex as usize];
                         let is_seam = edge != topology_index::NONE
-                            && seams.map_or(false, |value| edge_group::mem(edge, value));
+                            && seams.map_or(false, |value| edge_group::mem(i64::from(edge), value));
                         if edge != topology_index::NONE && !is_seam {
                             set.union_rank(
                                 reverse.edge_a[edge as usize] as usize,
@@ -195,11 +194,11 @@ pub fn classify_connectivity(
                             for left_slot in first..last.saturating_sub(1) {
                                 let left_vertex = reverse.edge_vertices[left_slot as usize];
                                 let left = reverse.primitive_of_vertex[left_vertex as usize];
-                                if allowed(primitives, left) {
+                                if allowed(primitives, i64::from(left)) {
                                     for right_slot in left_slot + 1..last {
                                         let right_vertex = reverse.edge_vertices[right_slot as usize];
                                         let right = reverse.primitive_of_vertex[right_vertex as usize];
-                                        if allowed(primitives, right) {
+                                        if allowed(primitives, i64::from(right)) {
                                             set.union_rank(left as usize, right as usize, false);
                                         }
                                     }

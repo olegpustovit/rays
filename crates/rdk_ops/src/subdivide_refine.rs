@@ -88,8 +88,13 @@ pub(crate) fn checked_mul(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
     a.checked_mul(b).filter(|_| a >= 0 && b >= 0).ok_or_else(|| fail(format!("{name} exceeds integer limits")))
 }
 
-pub(crate) fn gi<T: Copy + Into<i64>>(values: &[T], index: i64) -> i64 {
-    values[index as usize].into()
+pub(crate) fn gi(values: &[i64], index: i64) -> i64 {
+    values[index as usize]
+}
+
+/// `gi` for the u32 topology planes.
+pub(crate) fn gt(values: &[u32], index: i64) -> i64 {
+    i64::from(values[index as usize])
 }
 
 /// `gi` for the u32 topology-index tables that use `NONE`: a missing entry reads as -1.
@@ -418,10 +423,10 @@ pub(crate) fn apply_crease_input(
                 let mut have = false;
                 let mut weight = 0.0;
                 for at in
-                    gi(&crease_index.edge_offsets, edge)..gi(&crease_index.edge_offsets, edge + 1)
+                    gt(&crease_index.edge_offsets, edge)..gt(&crease_index.edge_offsets, edge + 1)
                 {
-                    let vertex = gi(&crease_index.edge_vertices, at);
-                    let primitive = gi(&crease_index.primitive_of_vertex, vertex);
+                    let vertex = gt(&crease_index.edge_vertices, at);
+                    let primitive = gt(&crease_index.primitive_of_vertex, vertex);
                     if selected(primitive) {
                         let value = contribution(vertex, primitive);
                         if !have || value > weight {
@@ -443,13 +448,13 @@ pub(crate) fn apply_crease_input(
         for primitive in 0..crease_topology.primitive_kinds.len() as i64 {
             cancel::poll(cancel_token, primitive, 4095)?;
             if selected(primitive) {
-                let first = gi(&crease_topology.primitive_offsets, primitive);
-                let last = gi(&crease_topology.primitive_offsets, primitive + 1);
+                let first = gt(&crease_topology.primitive_offsets, primitive);
+                let last = gt(&crease_topology.primitive_offsets, primitive + 1);
                 for vertex in first..last {
                     let crease_edge = gs(&crease_index.edge_of_vertex, vertex);
                     if crease_edge >= 0 {
-                        let a = gi(&crease_index.edge_a, crease_edge);
-                        let b = gi(&crease_index.edge_b, crease_edge);
+                        let a = gt(&crease_index.edge_a, crease_edge);
+                        let b = gt(&crease_index.edge_b, crease_edge);
                         if let Some(source_edge) =
                             topology_index::find_edge(&source_index_value, a, b)
                         {
@@ -517,8 +522,8 @@ pub(crate) fn build_child_edge_sharpness(
         let mut sharp_sum = 0.0;
         let mut sharp_count = 0_i64;
         if method_ == SubdivideCreasingChaikin {
-            for at in gi(&index.point_edge_offsets, point)..gi(&index.point_edge_offsets, point + 1) {
-                let weight = gf(edge_sharpness, gi(&index.point_edges, at));
+            for at in gt(&index.point_edge_offsets, point)..gt(&index.point_edge_offsets, point + 1) {
+                let weight = gf(edge_sharpness, gt(&index.point_edges, at));
                 if weight > 0.0 {
                     sharp_sum += weight;
                     sharp_count += 1;
@@ -530,9 +535,9 @@ pub(crate) fn build_child_edge_sharpness(
     // Slot `edge * 2 + side` belongs to the edge's endpoint on that side.
     filled(cancel_token, grain, edge_sharpness.len() as i64 * 2, &|slot| {
         let (edge, side) = (slot / 2, slot % 2);
-        let point = gi(if side == 0 { &index.edge_a } else { &index.edge_b }, edge);
+        let point = gt(if side == 0 { &index.edge_a } else { &index.edge_b }, edge);
         // A loop edge lists its point once, so its second slot stays 0.
-        if side == 1 && point == gi(&index.edge_a, edge) {
+        if side == 1 && point == gt(&index.edge_a, edge) {
             return Ok(0.0);
         }
         let (sharp_sum, sharp_count) = sharp_totals[point as usize];
@@ -572,7 +577,7 @@ pub(crate) fn build_vertex_sharp_plan(
     let mut child_a = vec![0_i64; count];
     let mut child_b = vec![0_i64; count];
     let child_weight = |point: i64, edge: i64| {
-        let side = if gi(&index.edge_a, edge) == point { 0 } else { 1 };
+        let side = if gt(&index.edge_a, edge) == point { 0 } else { 1 };
         gf(child_edge_sharpness, edge * 2 + side)
     };
     let grain = grain_of(grain)?;
@@ -594,21 +599,21 @@ pub(crate) fn build_vertex_sharp_plan(
         for point in first_point..last_point {
             support::poll(cancel_token, point)?;
             let slot = (point - first_point) as usize;
-            let first = gi(&index.point_edge_offsets, point);
-            let last = gi(&index.point_edge_offsets, point + 1);
+            let first = gt(&index.point_edge_offsets, point);
+            let last = gt(&index.point_edge_offsets, point + 1);
             let classify = |child: bool| -> (u8, i64, i64, f64) {
                 let mut count = 0_i64;
                 let mut a = point;
                 let mut b = point;
                 for at in first..last {
-                    let edge = gi(&index.point_edges, at);
+                    let edge = gt(&index.point_edges, at);
                     let weight =
                         if child { child_weight(point, edge) } else { gf(edge_sharpness, edge) };
                     if weight > 0.0 {
-                        let neighbor = if gi(&index.edge_a, edge) == point {
-                            gi(&index.edge_b, edge)
+                        let neighbor = if gt(&index.edge_a, edge) == point {
+                            gt(&index.edge_b, edge)
                         } else {
-                            gi(&index.edge_a, edge)
+                            gt(&index.edge_a, edge)
                         };
                         if count == 0 {
                             a = neighbor;
@@ -647,7 +652,7 @@ pub(crate) fn build_vertex_sharp_plan(
                     count = 1;
                 }
                 for at in first..last {
-                    let edge = gi(&index.point_edges, at);
+                    let edge = gt(&index.point_edges, at);
                     let parent = gf(edge_sharpness, edge);
                     let child = child_weight(point, edge);
                     let transitioned = match method_ {
@@ -677,8 +682,8 @@ pub(crate) fn build_vertex_sharp_plan(
 }
 
 pub(crate) fn primitive_size(topology_view: &topology::view::View, primitive: i64) -> i64 {
-    gi(&topology_view.primitive_offsets, primitive + 1)
-        - gi(&topology_view.primitive_offsets, primitive)
+    gt(&topology_view.primitive_offsets, primitive + 1)
+        - gt(&topology_view.primitive_offsets, primitive)
 }
 
 fn not_finite(value: &f64) -> bool {
@@ -701,8 +706,8 @@ pub(crate) fn validate(
         if topology_view.primitive_kinds[primitive as usize] != 0 {
             return Err(failm("only polygon primitives are supported"));
         }
-        let first = gi(&topology_view.primitive_offsets, primitive);
-        let last = gi(&topology_view.primitive_offsets, primitive + 1);
+        let first = gt(&topology_view.primitive_offsets, primitive);
+        let last = gt(&topology_view.primitive_offsets, primitive + 1);
         let size = last - first;
         if size < 3 {
             return Err(failm("polygons must contain at least three vertices"));
@@ -712,12 +717,12 @@ pub(crate) fn validate(
         }
         for vertex in first..last {
             let next = if vertex + 1 == last { first } else { vertex + 1 };
-            if gi(&topology_view.vertex_points, vertex) == gi(&topology_view.vertex_points, next) {
+            if gt(&topology_view.vertex_points, vertex) == gt(&topology_view.vertex_points, next) {
                 return Err(failm("a polygon contains a zero-length topology edge"));
             }
         }
         for vertex in first..last {
-            let point = gi(&topology_view.vertex_points, vertex);
+            let point = gt(&topology_view.vertex_points, vertex);
             if point_marks[point as usize] == primitive {
                 return Err(failm("a polygon references the same point more than once"));
             }
@@ -732,7 +737,7 @@ pub(crate) fn validate(
         return Err(failm("positions must be finite"));
     }
     for edge in 0..index.edge_a.len() as i64 {
-        let incidence = gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge);
+        let incidence = gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge);
         if incidence > 2 {
             return Err(failm("non-manifold edges are not supported"));
         }
@@ -741,16 +746,16 @@ pub(crate) fn validate(
     let mut fan_stack = vec![0_i64; topology_view.vertex_points.len()];
     for point in 0..topology_view.point_count {
         cancel::poll(cancel_token, point, 4095)?;
-        let edge_first = gi(&index.point_edge_offsets, point);
-        let edge_last = gi(&index.point_edge_offsets, point + 1);
+        let edge_first = gt(&index.point_edge_offsets, point);
+        let edge_last = gt(&index.point_edge_offsets, point + 1);
         let mut boundary = 0_i64;
         for at in edge_first..edge_last {
-            let edge = gi(&index.point_edges, at);
-            if gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge) == 1 {
+            let edge = gt(&index.point_edges, at);
+            if gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge) == 1 {
                 boundary += 1;
             }
         }
-        let faces = gi(&index.point_offsets, point + 1) - gi(&index.point_offsets, point);
+        let faces = gt(&index.point_offsets, point + 1) - gt(&index.point_offsets, point);
         let edges = edge_last - edge_first;
         if boundary != 0 && boundary != 2 {
             return Err(failm("a boundary vertex does not have exactly two boundary edges"));
@@ -761,11 +766,11 @@ pub(crate) fn validate(
         if faces > 0 {
             let mut stack_count = 1_i64;
             let mut reached = 0_i64;
-            fan_stack[0] = gi(&index.point_vertices, gi(&index.point_offsets, point));
+            fan_stack[0] = gt(&index.point_vertices, gt(&index.point_offsets, point));
             while stack_count > 0 {
                 stack_count -= 1;
                 let corner = fan_stack[stack_count as usize];
-                let primitive = gi(&index.primitive_of_vertex, corner);
+                let primitive = gt(&index.primitive_of_vertex, corner);
                 if face_marks[primitive as usize] != point {
                     face_marks[primitive as usize] = point;
                     reached += 1;
@@ -773,22 +778,22 @@ pub(crate) fn validate(
                     let incoming = gs(&index.edge_of_vertex, gs(&index.previous_vertex, corner));
                     for side in 0..2 {
                         let edge = if side == 0 { outgoing } else { incoming };
-                        if gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge) == 2 {
-                            for at in gi(&index.edge_offsets, edge)..gi(&index.edge_offsets, edge + 1)
+                        if gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge) == 2 {
+                            for at in gt(&index.edge_offsets, edge)..gt(&index.edge_offsets, edge + 1)
                             {
-                                let directed = gi(&index.edge_vertices, at);
-                                let other_primitive = gi(&index.primitive_of_vertex, directed);
+                                let directed = gt(&index.edge_vertices, at);
+                                let other_primitive = gt(&index.primitive_of_vertex, directed);
                                 if other_primitive != primitive
                                     && face_marks[other_primitive as usize] != point
                                 {
                                     let adjacent =
-                                        if gi(&topology_view.vertex_points, directed) == point {
+                                        if gt(&topology_view.vertex_points, directed) == point {
                                             directed
                                         } else {
                                             gs(&index.next_vertex, directed)
                                         };
                                     if adjacent < 0
-                                        || gi(&topology_view.vertex_points, adjacent) != point
+                                        || gt(&topology_view.vertex_points, adjacent) != point
                                     {
                                         return Err(failm(
                                             "edge incidence is inconsistent at a vertex",
@@ -811,18 +816,18 @@ pub(crate) fn validate(
 }
 
 pub(crate) fn boundary_neighbors(index: &topology_index::view::View, point: i64) -> (i64, i64, i64) {
-    let first = gi(&index.point_edge_offsets, point);
-    let last = gi(&index.point_edge_offsets, point + 1);
+    let first = gt(&index.point_edge_offsets, point);
+    let last = gt(&index.point_edge_offsets, point + 1);
     let mut a = -1;
     let mut b = -1;
     let mut count = 0_i64;
     for at in first..last {
-        let edge = gi(&index.point_edges, at);
-        if gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge) == 1 {
-            let neighbor = if gi(&index.edge_a, edge) == point {
-                gi(&index.edge_b, edge)
+        let edge = gt(&index.point_edges, at);
+        if gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge) == 1 {
+            let neighbor = if gt(&index.edge_a, edge) == point {
+                gt(&index.edge_b, edge)
             } else {
-                gi(&index.edge_a, edge)
+                gt(&index.edge_a, edge)
             };
             if count == 0 {
                 a = neighbor;
@@ -841,7 +846,7 @@ pub(crate) fn boundary_corner(
     point: i64,
 ) -> bool {
     boundary_interpolation == SubdivideBoundaryEdgeAndCorner
-        && gi(&index.point_offsets, point + 1) - gi(&index.point_offsets, point) == 1
+        && gt(&index.point_offsets, point + 1) - gt(&index.point_offsets, point) == 1
 }
 
 pub(crate) fn point_term_count(
@@ -865,8 +870,8 @@ pub(crate) fn point_term_count(
                     checked_add(
                         "Loop stencil size",
                         1,
-                        gi(&index.point_edge_offsets, point + 1)
-                            - gi(&index.point_edge_offsets, point),
+                        gt(&index.point_edge_offsets, point + 1)
+                            - gt(&index.point_edge_offsets, point),
                     )
                 }
             }
@@ -875,12 +880,12 @@ pub(crate) fn point_term_count(
                 if boundary == 2 {
                     Ok(if boundary_corner(boundary_interpolation, index, point) { 1 } else { 3 })
                 } else {
-                    let edges = gi(&index.point_edge_offsets, point + 1)
-                        - gi(&index.point_edge_offsets, point);
+                    let edges = gt(&index.point_edge_offsets, point + 1)
+                        - gt(&index.point_edge_offsets, point);
                     let mut corners = 0_i64;
-                    for at in gi(&index.point_offsets, point)..gi(&index.point_offsets, point + 1) {
-                        let vertex = gi(&index.point_vertices, at);
-                        let primitive = gi(&index.primitive_of_vertex, vertex);
+                    for at in gt(&index.point_offsets, point)..gt(&index.point_offsets, point + 1) {
+                        let vertex = gt(&index.point_vertices, at);
+                        let primitive = gt(&index.primitive_of_vertex, vertex);
                         corners += primitive_size(topology_view, primitive);
                     }
                     checked_add(
@@ -897,19 +902,19 @@ pub(crate) fn point_term_count(
         }
     } else if output < source_points + edge_count {
         let edge = output - source_points;
-        let incidence = gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge);
+        let incidence = gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge);
         match scheme {
             Scheme::Bilinear => Ok(2),
             Scheme::Loop => Ok(if incidence == 2 { 4 } else { 2 }),
             Scheme::CatmullClark => {
                 if incidence == 2 {
                     let mut count = 2_i64;
-                    for at in gi(&index.edge_offsets, edge)..gi(&index.edge_offsets, edge + 1) {
-                        let vertex = gi(&index.edge_vertices, at);
+                    for at in gt(&index.edge_offsets, edge)..gt(&index.edge_offsets, edge + 1) {
+                        let vertex = gt(&index.edge_vertices, at);
                         count = checked_add(
                             "Catmull-Clark edge stencil size",
                             count,
-                            primitive_size(topology_view, gi(&index.primitive_of_vertex, vertex)),
+                            primitive_size(topology_view, gt(&index.primitive_of_vertex, vertex)),
                         )?;
                     }
                     Ok(count)
@@ -960,8 +965,8 @@ pub(crate) fn fill_point_stencil(
                         add(right, 0.125);
                     }
                 } else {
-                    let first = gi(&index.point_edge_offsets, point);
-                    let last = gi(&index.point_edge_offsets, point + 1);
+                    let first = gt(&index.point_edge_offsets, point);
+                    let last = gt(&index.point_edge_offsets, point + 1);
                     let n = last - first;
                     if n == 0 {
                         add(point, 1.0);
@@ -971,12 +976,12 @@ pub(crate) fn fill_point_stencil(
                         let beta = (0.625 - (0.375 + (0.25 * angle.cos())).powf(2.0)) / nf;
                         add(point, 1.0 - (nf * beta));
                         for at in first..last {
-                            let edge = gi(&index.point_edges, at);
+                            let edge = gt(&index.point_edges, at);
                             add(
-                                if gi(&index.edge_a, edge) == point {
-                                    gi(&index.edge_b, edge)
+                                if gt(&index.edge_a, edge) == point {
+                                    gt(&index.edge_b, edge)
                                 } else {
-                                    gi(&index.edge_a, edge)
+                                    gt(&index.edge_a, edge)
                                 },
                                 beta,
                             );
@@ -995,10 +1000,10 @@ pub(crate) fn fill_point_stencil(
                         add(right, 0.125);
                     }
                 } else {
-                    let edge_first = gi(&index.point_edge_offsets, point);
-                    let edge_last = gi(&index.point_edge_offsets, point + 1);
-                    let face_first = gi(&index.point_offsets, point);
-                    let face_last = gi(&index.point_offsets, point + 1);
+                    let edge_first = gt(&index.point_edge_offsets, point);
+                    let edge_last = gt(&index.point_edge_offsets, point + 1);
+                    let face_first = gt(&index.point_offsets, point);
+                    let face_last = gt(&index.point_offsets, point + 1);
                     let n = edge_last - edge_first;
                     let faces = face_last - face_first;
                     if n == 0 || faces == 0 {
@@ -1008,19 +1013,19 @@ pub(crate) fn fill_point_stencil(
                         add(point, (nf - 3.0) / nf);
                         let edge_weight = 1.0 / (nf * nf);
                         for at in edge_first..edge_last {
-                            let edge = gi(&index.point_edges, at);
-                            add(gi(&index.edge_a, edge), edge_weight);
-                            add(gi(&index.edge_b, edge), edge_weight);
+                            let edge = gt(&index.point_edges, at);
+                            add(gt(&index.edge_a, edge), edge_weight);
+                            add(gt(&index.edge_b, edge), edge_weight);
                         }
                         let face_count = faces as f64;
                         for at in face_first..face_last {
-                            let vertex = gi(&index.point_vertices, at);
-                            let primitive = gi(&index.primitive_of_vertex, vertex);
-                            let first = gi(&topology_view.primitive_offsets, primitive);
-                            let last = gi(&topology_view.primitive_offsets, primitive + 1);
+                            let vertex = gt(&index.point_vertices, at);
+                            let primitive = gt(&index.primitive_of_vertex, vertex);
+                            let first = gt(&topology_view.primitive_offsets, primitive);
+                            let last = gt(&topology_view.primitive_offsets, primitive + 1);
                             let weight = 1.0 / (nf * face_count * ((last - first) as f64));
                             for corner in first..last {
-                                add(gi(&topology_view.vertex_points, corner), weight);
+                                add(gt(&topology_view.vertex_points, corner), weight);
                             }
                         }
                     }
@@ -1029,10 +1034,10 @@ pub(crate) fn fill_point_stencil(
         }
     } else if output < source_points + edge_count {
         let edge = output - source_points;
-        let a = gi(&index.edge_a, edge);
-        let b = gi(&index.edge_b, edge);
+        let a = gt(&index.edge_a, edge);
+        let b = gt(&index.edge_b, edge);
         *representative = a.min(b);
-        let incidence = gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge);
+        let incidence = gt(&index.edge_offsets, edge + 1) - gt(&index.edge_offsets, edge);
         match scheme {
             Scheme::Bilinear => {
                 add(a, 0.5);
@@ -1042,10 +1047,10 @@ pub(crate) fn fill_point_stencil(
                 if incidence == 2 {
                     add(a, 0.375);
                     add(b, 0.375);
-                    for at in gi(&index.edge_offsets, edge)..gi(&index.edge_offsets, edge + 1) {
-                        let vertex = gi(&index.edge_vertices, at);
+                    for at in gt(&index.edge_offsets, edge)..gt(&index.edge_offsets, edge + 1) {
+                        let vertex = gt(&index.edge_vertices, at);
                         let next = gs(&index.next_vertex, vertex);
-                        add(gi(&topology_view.vertex_points, gs(&index.next_vertex, next)), 0.125);
+                        add(gt(&topology_view.vertex_points, gs(&index.next_vertex, next)), 0.125);
                     }
                 } else {
                     add(a, 0.5);
@@ -1054,13 +1059,13 @@ pub(crate) fn fill_point_stencil(
             }
             Scheme::CatmullClark => {
                 if incidence == 2 {
-                    let first_incidence = gi(&index.edge_offsets, edge);
+                    let first_incidence = gt(&index.edge_offsets, edge);
                     let face_weight = match triangle_subdivision {
                         SubdivideTrianglesCatmullClark => 0.25,
                         SubdivideTrianglesSmooth => {
                             let primitive_weight = |at: i64| {
-                                let vertex = gi(&index.edge_vertices, at);
-                                let primitive = gi(&index.primitive_of_vertex, vertex);
+                                let vertex = gt(&index.edge_vertices, at);
+                                let primitive = gt(&index.primitive_of_vertex, vertex);
                                 if primitive_size(topology_view, primitive) == 3 { 0.470 } else { 0.25 }
                             };
                             0.5 * (primitive_weight(first_incidence)
@@ -1070,14 +1075,14 @@ pub(crate) fn fill_point_stencil(
                     let vertex_weight = 0.5 * (1.0 - (2.0 * face_weight));
                     add(a, vertex_weight);
                     add(b, vertex_weight);
-                    for at in gi(&index.edge_offsets, edge)..gi(&index.edge_offsets, edge + 1) {
-                        let vertex = gi(&index.edge_vertices, at);
-                        let primitive = gi(&index.primitive_of_vertex, vertex);
-                        let first = gi(&topology_view.primitive_offsets, primitive);
-                        let last = gi(&topology_view.primitive_offsets, primitive + 1);
+                    for at in gt(&index.edge_offsets, edge)..gt(&index.edge_offsets, edge + 1) {
+                        let vertex = gt(&index.edge_vertices, at);
+                        let primitive = gt(&index.primitive_of_vertex, vertex);
+                        let first = gt(&topology_view.primitive_offsets, primitive);
+                        let last = gt(&topology_view.primitive_offsets, primitive + 1);
                         let weight = face_weight / ((last - first) as f64);
                         for corner in first..last {
-                            add(gi(&topology_view.vertex_points, corner), weight);
+                            add(gt(&topology_view.vertex_points, corner), weight);
                         }
                     }
                 } else {
@@ -1088,12 +1093,12 @@ pub(crate) fn fill_point_stencil(
         }
     } else {
         let primitive = output - source_points - edge_count;
-        let first = gi(&topology_view.primitive_offsets, primitive);
-        let last = gi(&topology_view.primitive_offsets, primitive + 1);
+        let first = gt(&topology_view.primitive_offsets, primitive);
+        let last = gt(&topology_view.primitive_offsets, primitive + 1);
         let weight = 1.0 / ((last - first) as f64);
-        *representative = gi(&topology_view.vertex_points, first);
+        *representative = gt(&topology_view.vertex_points, first);
         for vertex in first..last {
-            add(gi(&topology_view.vertex_points, vertex), weight);
+            add(gt(&topology_view.vertex_points, vertex), weight);
         }
     }
     if cursor != sources.len() {
@@ -1225,10 +1230,10 @@ pub(crate) fn make_topology(
                 None => vertex,
                 Some(offsets) if vertex >= vertices => offsets[source_primitive_count as usize],
                 Some(offsets) => {
-                    let primitive = gi(&index.primitive_of_vertex, vertex);
+                    let primitive = gt(&index.primitive_of_vertex, vertex);
                     gi(offsets, primitive)
                         + if visible(primitive) {
-                            vertex - gi(&topology_view.primitive_offsets, primitive)
+                            vertex - gt(&topology_view.primitive_offsets, primitive)
                         } else {
                             0
                         }
@@ -1267,7 +1272,7 @@ pub(crate) fn make_topology(
                 let base = output_before(first);
                 for vertex in first..last {
                     support::poll(cancel_token, vertex)?;
-                    let primitive = gi(&index.primitive_of_vertex, vertex);
+                    let primitive = gt(&index.primitive_of_vertex, vertex);
                     let previous = gs(&index.previous_vertex, vertex);
                     let next = gs(&index.next_vertex, vertex);
                     if visible(primitive) {
@@ -1275,14 +1280,14 @@ pub(crate) fn make_topology(
                             None => vertex,
                             Some(offsets) => {
                                 gi(offsets, primitive) + vertex
-                                    - gi(&topology_view.primitive_offsets, primitive)
+                                    - gt(&topology_view.primitive_offsets, primitive)
                             }
                         };
                         let edge = gs(&index.edge_of_vertex, vertex);
                         let previous_edge = gs(&index.edge_of_vertex, previous);
                         let local = (output_primitive - base) as usize;
                         let at = local * 4;
-                        points_out[at] = (gi(&topology_view.vertex_points, vertex)) as u32;
+                        points_out[at] = (gt(&topology_view.vertex_points, vertex)) as u32;
                         points_out[at + 1] = (source_points + edge) as u32;
                         points_out[at + 2] = (face_offset + primitive) as u32;
                         points_out[at + 3] = (source_points + previous_edge) as u32;
@@ -1383,13 +1388,13 @@ pub(crate) fn make_topology(
                     support::poll(cancel_token, primitive)?;
                     if visible(primitive) {
                         let local = output_before(primitive) - base;
-                        let first = gi(&topology_view.primitive_offsets, primitive);
+                        let first = gt(&topology_view.primitive_offsets, primitive);
                         let va = first;
                         let vb = first + 1;
                         let vc = first + 2;
-                        let a = gi(&topology_view.vertex_points, va);
-                        let b = gi(&topology_view.vertex_points, vb);
-                        let c = gi(&topology_view.vertex_points, vc);
+                        let a = gt(&topology_view.vertex_points, va);
+                        let b = gt(&topology_view.vertex_points, vb);
+                        let c = gt(&topology_view.vertex_points, vc);
                         let ea = gs(&index.edge_of_vertex, va);
                         let eb = gs(&index.edge_of_vertex, vb);
                         let ec = gs(&index.edge_of_vertex, vc);
@@ -1633,8 +1638,8 @@ pub(crate) fn point_float(
                     if factor == 0.0 {
                         value
                     } else {
-                        let midpoint = (gf(source, gi(&plan.index.edge_a, edge))
-                            + gf(source, gi(&plan.index.edge_b, edge)))
+                        let midpoint = (gf(source, gt(&plan.index.edge_a, edge))
+                            + gf(source, gt(&plan.index.edge_b, edge)))
                             * 0.5;
                         value + ((midpoint - value) * factor)
                     }
@@ -1702,14 +1707,14 @@ pub(crate) fn fvar_refinement(
     let mut discontinuous_points = vec![0u8; source_points as usize];
     for point in 0..source_points {
         cancel::poll(cancel_token, point, 4095)?;
-        let first = gi(&index.point_offsets, point);
-        let last = gi(&index.point_offsets, point + 1);
+        let first = gt(&index.point_offsets, point);
+        let last = gt(&index.point_offsets, point + 1);
         if first < last {
-            let reference = gi(&index.point_vertices, first);
+            let reference = gt(&index.point_vertices, first);
             continuous_source[point as usize] = reference;
             let mut at = first + 1;
             while at < last && discontinuous_points[point as usize] == 0 {
-                if !equal(reference, gi(&index.point_vertices, at)) {
+                if !equal(reference, gt(&index.point_vertices, at)) {
                     discontinuous_points[point as usize] = 1;
                 }
                 at += 1;
@@ -1720,7 +1725,7 @@ pub(crate) fn fvar_refinement(
         let mut pinned_points = vec![0u8; source_points as usize];
         for point in 0..source_points {
             cancel::poll(cancel_token, point, 4095)?;
-            let faces = gi(&index.point_offsets, point + 1) - gi(&index.point_offsets, point);
+            let faces = gt(&index.point_offsets, point + 1) - gt(&index.point_offsets, point);
             let (_, _, boundary_edges) = boundary_neighbors(index, point);
             let pinned = match mode {
                 SubdivideFvarNone => false,
@@ -1745,11 +1750,11 @@ pub(crate) fn fvar_refinement(
     }
     let mut parents = DisjointSet::new(vertex_count as usize);
     let corner_at_point = |directed: i64, point: i64| -> Result<i64, error::T> {
-        if gi(&topology_view.vertex_points, directed) == point {
+        if gt(&topology_view.vertex_points, directed) == point {
             Ok(directed)
         } else {
             let next = gs(&index.next_vertex, directed);
-            if next < 0 || gi(&topology_view.vertex_points, next) != point {
+            if next < 0 || gt(&topology_view.vertex_points, next) != point {
                 return Err(failm("face-varying edge incidence is inconsistent"));
             }
             Ok(next)
@@ -1757,13 +1762,13 @@ pub(crate) fn fvar_refinement(
     };
     for point in 0..source_points {
         cancel::poll(cancel_token, point, 4095)?;
-        for at in gi(&index.point_edge_offsets, point)..gi(&index.point_edge_offsets, point + 1) {
-            let edge = gi(&index.point_edges, at);
-            let first = gi(&index.edge_offsets, edge);
-            let last = gi(&index.edge_offsets, edge + 1);
+        for at in gt(&index.point_edge_offsets, point)..gt(&index.point_edge_offsets, point + 1) {
+            let edge = gt(&index.point_edges, at);
+            let first = gt(&index.edge_offsets, edge);
+            let last = gt(&index.edge_offsets, edge + 1);
             if last - first == 2 {
-                let left = corner_at_point(gi(&index.edge_vertices, first), point)?;
-                let right = corner_at_point(gi(&index.edge_vertices, first + 1), point)?;
+                let left = corner_at_point(gt(&index.edge_vertices, first), point)?;
+                let right = corner_at_point(gt(&index.edge_vertices, first + 1), point)?;
                 if equal(left, right) {
                     parents.union_rank(left as usize, right as usize, false);
                 }
@@ -1775,8 +1780,8 @@ pub(crate) fn fvar_refinement(
     for point in 0..source_points {
         cancel::poll(cancel_token, point, 4095)?;
         let mut count = 0_i64;
-        for at in gi(&index.point_offsets, point)..gi(&index.point_offsets, point + 1) {
-            let root = parents.find(gi(&index.point_vertices, at) as usize);
+        for at in gt(&index.point_offsets, point)..gt(&index.point_offsets, point + 1) {
+            let root = parents.find(gt(&index.point_vertices, at) as usize);
             if root_seen[root as usize] == 0 {
                 root_seen[root as usize] = 1;
                 count += 1;
@@ -1799,8 +1804,8 @@ pub(crate) fn fvar_refinement(
     for point in 0..source_points {
         cancel::poll(cancel_token, point, 4095)?;
         let mut next = component_offsets[point as usize];
-        for at in gi(&index.point_offsets, point)..gi(&index.point_offsets, point + 1) {
-            let vertex = gi(&index.point_vertices, at);
+        for at in gt(&index.point_offsets, point)..gt(&index.point_offsets, point + 1) {
+            let vertex = gt(&index.point_vertices, at);
             let root = parents.find(vertex as usize);
             if root_target[root as usize] < 0 {
                 root_target[root as usize] = next;
@@ -1825,14 +1830,14 @@ pub(crate) fn fvar_refinement(
     }
     let mut component_faces = vec![0_i64; fvar_point_count as usize];
     for point in 0..source_points {
-        for at in gi(&index.point_offsets, point)..gi(&index.point_offsets, point + 1) {
-            let component = gi(&fvar_vertex_points, gi(&index.point_vertices, at));
+        for at in gt(&index.point_offsets, point)..gt(&index.point_offsets, point + 1) {
+            let component = gt(&fvar_vertex_points, gt(&index.point_vertices, at));
             component_faces[component as usize] += 1;
         }
     }
     let make_isolated = |corner_weights: &[f64]| -> FvarRefinement {
         let corner_sharpness: Vec<f64> = (0..vertex_count)
-            .map(|vertex| gf(corner_weights, gi(&fvar_vertex_points, vertex)))
+            .map(|vertex| gf(corner_weights, gt(&fvar_vertex_points, vertex)))
             .collect();
         FvarRefinement::IsolatedFvar { geometry_refinement: plan.clone(), corner_sharpness }
     };
@@ -1845,7 +1850,7 @@ pub(crate) fn fvar_refinement(
         }
         for component in 0..fvar_point_count as usize {
             let point = original_point_of_fvar[component];
-            let source_faces = gi(&index.point_offsets, point + 1) - gi(&index.point_offsets, point);
+            let source_faces = gt(&index.point_offsets, point + 1) - gt(&index.point_offsets, point);
             if mode != SubdivideFvarNone
                 || (plan.boundary_interpolation == SubdivideBoundaryEdgeAndCorner
                     && source_faces == 1)
@@ -1876,10 +1881,10 @@ pub(crate) fn fvar_refinement(
     for point in 0..fvar_point_count {
         cancel::poll(cancel_token, point, 4095)?;
         let mut count = 0_i64;
-        for at in gi(&fvar_index.point_edge_offsets, point)..gi(&fvar_index.point_edge_offsets, point + 1)
+        for at in gt(&fvar_index.point_edge_offsets, point)..gt(&fvar_index.point_edge_offsets, point + 1)
         {
-            let edge = gi(&fvar_index.point_edges, at);
-            if gi(&fvar_index.edge_offsets, edge + 1) - gi(&fvar_index.edge_offsets, edge) == 1 {
+            let edge = gt(&fvar_index.point_edges, at);
+            if gt(&fvar_index.edge_offsets, edge + 1) - gt(&fvar_index.edge_offsets, edge) == 1 {
                 count += 1;
             }
         }
@@ -1896,7 +1901,7 @@ pub(crate) fn fvar_refinement(
     for fvar_point in 0..fvar_point_count {
         cancel::poll(cancel_token, fvar_point, 4095)?;
         let point = original_point_of_fvar[fvar_point as usize];
-        let source_faces = gi(&index.point_offsets, point + 1) - gi(&index.point_offsets, point);
+        let source_faces = gt(&index.point_offsets, point + 1) - gt(&index.point_offsets, point);
         let components = component_counts[point as usize];
         let (_, _, source_boundary_edges) = boundary_neighbors(index, point);
         let faces = component_faces[fvar_point as usize];
@@ -1932,15 +1937,15 @@ pub(crate) fn fvar_refinement(
             for point in 0..fvar_point_count {
                 cancel::poll(cancel_token, point, 4095)?;
                 let mut sharpness = 0.0_f64;
-                for at in gi(&fvar_index.point_edge_offsets, point)
-                    ..gi(&fvar_index.point_edge_offsets, point + 1)
+                for at in gt(&fvar_index.point_edge_offsets, point)
+                    ..gt(&fvar_index.point_edge_offsets, point + 1)
                 {
-                    let edge = gi(&fvar_index.point_edges, at);
-                    if gi(&fvar_index.edge_offsets, edge + 1) - gi(&fvar_index.edge_offsets, edge)
+                    let edge = gt(&fvar_index.point_edges, at);
+                    if gt(&fvar_index.edge_offsets, edge + 1) - gt(&fvar_index.edge_offsets, edge)
                         == 2
                     {
                         let vertex =
-                            gi(&fvar_index.edge_vertices, gi(&fvar_index.edge_offsets, edge));
+                            gt(&fvar_index.edge_vertices, gt(&fvar_index.edge_offsets, edge));
                         let source_edge = gs(&index.edge_of_vertex, vertex);
                         if source_edge >= 0 {
                             sharpness = fmax(sharpness, gf(&creases.edge_sharpness, source_edge));
@@ -1973,7 +1978,7 @@ pub(crate) fn fvar_refinement(
     let every_component_is_one_face = component_faces.iter().all(|&faces| faces == 1);
     let mut every_edge_is_boundary = true;
     for edge in 0..fvar_index.edge_a.len() as i64 {
-        if gi(&fvar_index.edge_offsets, edge + 1) - gi(&fvar_index.edge_offsets, edge) != 1 {
+        if gt(&fvar_index.edge_offsets, edge + 1) - gt(&fvar_index.edge_offsets, edge) != 1 {
             every_edge_is_boundary = false;
         }
     }
@@ -2086,7 +2091,7 @@ pub(crate) fn fvar_refinement(
     for output in 0..output_count {
         cancel::poll(cancel_token, output, 4095)?;
         output_point_of_vertex[output as usize] = match gu(&plan.vertex_kind, output) {
-            0 => gi(&fvar_vertex_points, gn(&plan.vertex_a, output)),
+            0 => gt(&fvar_vertex_points, gn(&plan.vertex_a, output)),
             1 => {
                 let edge = gs(&fvar_index.edge_of_vertex, gn(&plan.vertex_a, output));
                 if edge < 0 {
@@ -2140,8 +2145,8 @@ pub(crate) fn fvar_point_float(
                     if factor == 0.0 {
                         value
                     } else {
-                        let midpoint = (gf(source, gi(&plan.fvar_index.edge_a, edge))
-                            + gf(source, gi(&plan.fvar_index.edge_b, edge)))
+                        let midpoint = (gf(source, gt(&plan.fvar_index.edge_a, edge))
+                            + gf(source, gt(&plan.fvar_index.edge_b, edge)))
                             * 0.5;
                         value + ((midpoint - value) * factor)
                     }
@@ -2169,8 +2174,8 @@ pub(crate) fn linear_vertex_float(
             }
             _ => {
                 let primitive = gn(&plan.vertex_primitive, vertex);
-                let first = gi(&plan.source_topology.primitive_offsets, primitive);
-                let last = gi(&plan.source_topology.primitive_offsets, primitive + 1);
+                let first = gt(&plan.source_topology.primitive_offsets, primitive);
+                let last = gt(&plan.source_topology.primitive_offsets, primitive + 1);
                 let mut sum = 0.0;
                 for corner in first..last {
                     sum += gf(source, corner);
@@ -2208,8 +2213,8 @@ pub(crate) fn isolated_vertex_float(
             }
             _ => {
                 let primitive = gn(&plan.vertex_primitive, output_vertex);
-                let first = gi(&plan.source_topology.primitive_offsets, primitive);
-                let last = gi(&plan.source_topology.primitive_offsets, primitive + 1);
+                let first = gt(&plan.source_topology.primitive_offsets, primitive);
+                let last = gt(&plan.source_topology.primitive_offsets, primitive + 1);
                 let mut sum = 0.0;
                 for corner in first..last {
                     sum += gf(source, corner);
@@ -2298,7 +2303,7 @@ pub(crate) fn discrete_mapping(
             Owner::Vertex => match gu(&plan.vertex_kind, index) {
                 0 => gn(&plan.vertex_a, index),
                 1 => gn(&plan.vertex_a, index).min(gn(&plan.vertex_b, index)),
-                _ => gi(&plan.source_topology.primitive_offsets, gn(&plan.vertex_primitive, index)),
+                _ => gt(&plan.source_topology.primitive_offsets, gn(&plan.vertex_primitive, index)),
             },
             Owner::Primitive => gn(&plan.primitive_source, index),
             Owner::Detail => 0,
@@ -2317,7 +2322,7 @@ pub(crate) fn vertex_edge_discrete_map(
     filled(cancel_token, grain, count, &|vertex| {
         let edge = gn(&plan.vertex_edge_source, vertex);
         Ok(if edge >= 0 {
-            let directed = gi(&plan.index.edge_vertices, gi(&plan.index.edge_offsets, edge));
+            let directed = gt(&plan.index.edge_vertices, gt(&plan.index.edge_offsets, edge));
             gi(source, directed)
         } else {
             default
@@ -2472,13 +2477,13 @@ fn output_child_slot_in(
         Scheme::CatmullClark | Scheme::Bilinear => vertex / 4,
         Scheme::Loop => vertex / 3,
     };
-    let next = if vertex + 1 == gi(&topology_view.primitive_offsets, primitive + 1) {
-        gi(&topology_view.primitive_offsets, primitive)
+    let next = if vertex + 1 == gt(&topology_view.primitive_offsets, primitive + 1) {
+        gt(&topology_view.primitive_offsets, primitive)
     } else {
         vertex + 1
     };
-    let a = gi(&topology_view.vertex_points, vertex);
-    let b = gi(&topology_view.vertex_points, next);
+    let a = gt(&topology_view.vertex_points, vertex);
+    let b = gt(&topology_view.vertex_points, next);
     let point = if a < plan.source_points {
         a
     } else if b < plan.source_points {
@@ -2486,9 +2491,9 @@ fn output_child_slot_in(
     } else {
         return Err(failm("subdivision child edge omitted its source endpoint"));
     };
-    let side = if point == gi(&plan.index.edge_a, source_edge) {
+    let side = if point == gt(&plan.index.edge_a, source_edge) {
         0
-    } else if point == gi(&plan.index.edge_b, source_edge) {
+    } else if point == gt(&plan.index.edge_b, source_edge) {
         1
     } else {
         return Err(failm("subdivision child edge endpoint ancestry is inconsistent"));
@@ -2623,15 +2628,15 @@ pub(crate) fn remap_group(
                 group::mem(output, group_value)
             } else if output < plan.source_points + plan.edge_count {
                 let edge = output - plan.source_points;
-                group::mem(gi(&plan.index.edge_a, edge), group_value)
-                    && group::mem(gi(&plan.index.edge_b, edge), group_value)
+                group::mem(gt(&plan.index.edge_a, edge), group_value)
+                    && group::mem(gt(&plan.index.edge_b, edge), group_value)
             } else {
                 let primitive = output - plan.face_offset;
-                let first = gi(&plan.source_topology.primitive_offsets, primitive);
-                let last = gi(&plan.source_topology.primitive_offsets, primitive + 1);
+                let first = gt(&plan.source_topology.primitive_offsets, primitive);
+                let last = gt(&plan.source_topology.primitive_offsets, primitive + 1);
                 let mut all = true;
                 for vertex in first..last {
-                    if !group::mem(gi(&plan.source_topology.vertex_points, vertex), group_value) {
+                    if !group::mem(gt(&plan.source_topology.vertex_points, vertex), group_value) {
                         all = false;
                     }
                 }
@@ -2646,8 +2651,8 @@ pub(crate) fn remap_group(
             }
             _ => {
                 let primitive = gn(&plan.vertex_primitive, output);
-                let first = gi(&plan.source_topology.primitive_offsets, primitive);
-                let last = gi(&plan.source_topology.primitive_offsets, primitive + 1);
+                let first = gt(&plan.source_topology.primitive_offsets, primitive);
+                let last = gt(&plan.source_topology.primitive_offsets, primitive + 1);
                 let mut all = true;
                 for vertex in first..last {
                     if !group::mem(vertex, group_value) {
@@ -3335,7 +3340,7 @@ pub(crate) fn combine_parts(
             grain,
             &mut vertex_points[base_vertex as usize..(base_vertex + vertices) as usize],
             &|vertex| {
-                let source_point = gi(&topology_view.vertex_points, vertex) + base_point;
+                let source_point = gt(&topology_view.vertex_points, vertex) + base_point;
                 Ok(match weld {
                     None => source_point,
                     Some(weld) => gi(&weld.old_to_output, source_point),
@@ -3346,7 +3351,7 @@ pub(crate) fn combine_parts(
             cancel_token,
             grain,
             &mut primitive_offsets[base_primitive as usize + 1..(base_primitive + primitives) as usize + 1],
-            &|primitive| Ok((gi(&topology_view.primitive_offsets, primitive + 1) + base_vertex) as u32),
+            &|primitive| Ok((gt(&topology_view.primitive_offsets, primitive + 1) + base_vertex) as u32),
         )?;
         support::par_fill(
             cancel_token,
@@ -3631,22 +3636,22 @@ pub(crate) fn split_disconnected_point_fans(
     let mut parents = DisjointSet::new(vertex_count as usize);
     for edge in 0..index.edge_a.len() as i64 {
         cancel::poll(cancel_token, edge, 16_383)?;
-        let first = gi(&index.edge_offsets, edge);
-        let last = gi(&index.edge_offsets, edge + 1);
+        let first = gt(&index.edge_offsets, edge);
+        let last = gt(&index.edge_offsets, edge + 1);
         if last - first >= 2 {
-            let reference = gi(&index.edge_vertices, first);
+            let reference = gt(&index.edge_vertices, first);
             let reference_next = gs(&index.next_vertex, reference);
             if reference_next < 0 {
                 return Err(failm("topology index exposed an incomplete edge"));
             }
-            let reference_a = gi(&topology_view.vertex_points, reference);
+            let reference_a = gt(&topology_view.vertex_points, reference);
             for at in first + 1..last {
-                let vertex = gi(&index.edge_vertices, at);
+                let vertex = gt(&index.edge_vertices, at);
                 let next = gs(&index.next_vertex, vertex);
                 if next < 0 {
                     return Err(failm("topology index exposed an incomplete edge"));
                 }
-                if gi(&topology_view.vertex_points, vertex) == reference_a {
+                if gt(&topology_view.vertex_points, vertex) == reference_a {
                     parents.union_rank(reference as usize, vertex as usize, false);
                     parents.union_rank(reference_next as usize, next as usize, false);
                 } else {
@@ -3662,11 +3667,11 @@ pub(crate) fn split_disconnected_point_fans(
     let mut extra = 0_i64;
     for point in 0..topology_view.point_count {
         cancel::poll(cancel_token, point, 4095)?;
-        let first = gi(&index.point_offsets, point);
-        let last = gi(&index.point_offsets, point + 1);
+        let first = gt(&index.point_offsets, point);
+        let last = gt(&index.point_offsets, point + 1);
         let mut first_component = true;
         for at in first..last {
-            let vertex = gi(&index.point_vertices, at);
+            let vertex = gt(&index.point_vertices, at);
             let root = gi(&roots, vertex);
             if root_target[root as usize] < 0 {
                 root_source[root as usize] = point;
@@ -3746,16 +3751,16 @@ pub(crate) fn split_disconnected_point_fans(
             let mut builder =
                 edge_group::builder::create(&output_topology, &target_index, edge_group::name(found))?;
             for edge in collect_edge_members(found) {
-                for at in gi(&index.edge_offsets, edge)..gi(&index.edge_offsets, edge + 1) {
-                    let vertex = gi(&index.edge_vertices, at);
+                for at in gt(&index.edge_offsets, edge)..gt(&index.edge_offsets, edge + 1) {
+                    let vertex = gt(&index.edge_vertices, at);
                     let next = gs(&index.next_vertex, vertex);
                     if next < 0 {
                         return Err(failm("topology index exposed an incomplete edge"));
                     }
                     match topology_index::find_edge(
                         &target_index,
-                        gi(&vertex_points, vertex),
-                        gi(&vertex_points, next),
+                        gt(&vertex_points, vertex),
+                        gt(&vertex_points, next),
                     ) {
                         None => return Err(failm("split-fan edge ancestry is inconsistent")),
                         Some(target) => edge_group::builder::set(&mut builder, target, true)?,
@@ -3809,8 +3814,8 @@ pub(crate) fn annotate_pull_interfaces(
         let mut selected_count = 0_i64;
         let mut unselected_count = 0_i64;
         let mut non_polygon = false;
-        for at in gi(&index.edge_offsets, edge)..gi(&index.edge_offsets, edge + 1) {
-            let primitive = gi(&index.primitive_of_vertex, gi(&index.edge_vertices, at));
+        for at in gt(&index.edge_offsets, edge)..gt(&index.edge_offsets, edge + 1) {
+            let primitive = gt(&index.primitive_of_vertex, gt(&index.edge_vertices, at));
             if gu(&topology_view.primitive_kinds, primitive) != 0 {
                 non_polygon = true;
             }
@@ -3848,9 +3853,9 @@ pub(crate) fn annotate_pull_interfaces(
         let edge = gs(&index.edge_of_vertex, vertex);
         if edge >= 0 && interface_edges[edge as usize] != 0 {
             ancestry[vertex as usize] = edge;
-            let primitive = gi(&index.primitive_of_vertex, vertex);
+            let primitive = gt(&index.primitive_of_vertex, vertex);
             if group::mem(primitive, primitives) {
-                selected_edge_start[edge as usize] = gi(&topology_view.vertex_points, vertex);
+                selected_edge_start[edge as usize] = gt(&topology_view.vertex_points, vertex);
             }
         }
     }
@@ -3860,10 +3865,10 @@ pub(crate) fn annotate_pull_interfaces(
     for primitive in 0..topology_view.primitive_kinds.len() as i64 {
         cancel::poll(cancel_token, primitive, 4095)?;
         if !group::mem(primitive, primitives) {
-            for vertex in gi(&topology_view.primitive_offsets, primitive)
-                ..gi(&topology_view.primitive_offsets, primitive + 1)
+            for vertex in gt(&topology_view.primitive_offsets, primitive)
+                ..gt(&topology_view.primitive_offsets, primitive + 1)
             {
-                unselected_used_points[gi(&topology_view.vertex_points, vertex) as usize] = 1;
+                unselected_used_points[gt(&topology_view.vertex_points, vertex) as usize] = 1;
             }
         }
     }
@@ -3927,8 +3932,8 @@ pub(crate) fn interface_chains(
     let mut counts = vec![0_i64; source_edges];
     for primitive in 0..topology_view.primitive_kinds.len() as i64 {
         cancel::poll(cancel_token, primitive, 4095)?;
-        for vertex in gi(&topology_view.primitive_offsets, primitive)
-            ..gi(&topology_view.primitive_offsets, primitive + 1)
+        for vertex in gt(&topology_view.primitive_offsets, primitive)
+            ..gt(&topology_view.primitive_offsets, primitive + 1)
         {
             let edge = gi(&ancestry, vertex);
             if edge >= 0 {
@@ -3958,15 +3963,15 @@ pub(crate) fn interface_chains(
     let mut end_vertices = vec![0_i64; descendants];
     let mut cursor = record_offsets.clone();
     for primitive in 0..topology_view.primitive_kinds.len() as i64 {
-        let first = gi(&topology_view.primitive_offsets, primitive);
-        let last = gi(&topology_view.primitive_offsets, primitive + 1);
+        let first = gt(&topology_view.primitive_offsets, primitive);
+        let last = gt(&topology_view.primitive_offsets, primitive + 1);
         for vertex in first..last {
             let edge = gi(&ancestry, vertex);
             if edge >= 0 {
                 let next = if vertex + 1 == last { first } else { vertex + 1 };
                 let at = cursor[edge as usize] as usize;
-                starts[at] = gi(&topology_view.vertex_points, vertex);
-                ends[at] = gi(&topology_view.vertex_points, next);
+                starts[at] = gt(&topology_view.vertex_points, vertex);
+                ends[at] = gt(&topology_view.vertex_points, next);
                 start_vertices[at] = vertex;
                 end_vertices[at] = next;
                 cursor[edge as usize] = at as i64 + 1;
@@ -4162,8 +4167,8 @@ pub(crate) fn divide_unselected_edges(
             if source_a < 0 {
                 return Err(failm("divided boundary edge has no selected orientation"));
             }
-            let edge_a = gi(&source_index.edge_a, edge);
-            let edge_b = gi(&source_index.edge_b, edge);
+            let edge_a = gt(&source_index.edge_a, edge);
+            let edge_b = gt(&source_index.edge_b, edge);
             let source_b = if source_a == edge_a {
                 edge_b
             } else if source_a == edge_b {
@@ -4191,8 +4196,8 @@ pub(crate) fn divide_unselected_edges(
     let mut vertex_count = 0_i64;
     for primitive in 0..topology_view.primitive_kinds.len() as i64 {
         if gi(&plan.unselected_primitive_of_source, primitive) >= 0 {
-            for vertex in gi(&topology_view.primitive_offsets, primitive)
-                ..gi(&topology_view.primitive_offsets, primitive + 1)
+            for vertex in gt(&topology_view.primitive_offsets, primitive)
+                ..gt(&topology_view.primitive_offsets, primitive + 1)
             {
                 vertex_output[vertex as usize] = vertex_count;
                 vertex_count += 1;
@@ -4219,7 +4224,7 @@ pub(crate) fn divide_unselected_edges(
         let target = gi(&plan.unselected_primitive_of_source, primitive);
         if target >= 0 {
             primitive_offsets[target as usize] =
-                gi(&vertex_output, gi(&topology_view.primitive_offsets, primitive)) as u32;
+                gi(&vertex_output, gt(&topology_view.primitive_offsets, primitive)) as u32;
             primitive_kinds[target as usize] = gu(&topology_view.primitive_kinds, primitive);
             primitive_source[target as usize] = primitive;
         }
@@ -4227,12 +4232,12 @@ pub(crate) fn divide_unselected_edges(
     primitive_offsets[primitive_count as usize] = vertex_count as u32;
     for primitive in 0..topology_view.primitive_kinds.len() as i64 {
         if gi(&plan.unselected_primitive_of_source, primitive) >= 0 {
-            for vertex in gi(&topology_view.primitive_offsets, primitive)
-                ..gi(&topology_view.primitive_offsets, primitive + 1)
+            for vertex in gt(&topology_view.primitive_offsets, primitive)
+                ..gt(&topology_view.primitive_offsets, primitive + 1)
             {
                 cancel::poll(cancel_token, vertex, 16_383)?;
                 let output = gi(&vertex_output, vertex);
-                let source_point = gi(&topology_view.vertex_points, vertex);
+                let source_point = gt(&topology_view.vertex_points, vertex);
                 let output_point = gi(&plan.unselected_point_of_source, source_point);
                 if output_point < 0 {
                     return Err(failm("coarse corner point ancestry was removed"));
@@ -4352,8 +4357,8 @@ pub(crate) fn divide_unselected_edges(
                     }
                 }
             } else {
-                let a = gi(&plan.unselected_point_of_source, gi(&source_index.edge_a, edge));
-                let b = gi(&plan.unselected_point_of_source, gi(&source_index.edge_b, edge));
+                let a = gi(&plan.unselected_point_of_source, gt(&source_index.edge_a, edge));
+                let b = gi(&plan.unselected_point_of_source, gt(&source_index.edge_b, edge));
                 if a >= 0 && b >= 0 {
                     if let Some(child) = topology_index::find_edge(&target_index, a, b) {
                         edge_group::builder::set(&mut builder, child, true)?;
@@ -4498,8 +4503,8 @@ pub(crate) fn triangulate_divided_boundary(
     let mut output_primitives = 0_i64;
     for primitive in 0..primitive_total as i64 {
         cancel::poll(cancel_token, primitive, 1023)?;
-        let corners = gi(&topology_view.primitive_offsets, primitive + 1)
-            - gi(&topology_view.primitive_offsets, primitive);
+        let corners = gt(&topology_view.primitive_offsets, primitive + 1)
+            - gt(&topology_view.primitive_offsets, primitive);
         if boundary[primitive as usize] == 0 {
             output_vertices = checked_add("boundary triangulation vertices", output_vertices, corners)?;
             output_primitives += 1;
@@ -4571,16 +4576,16 @@ pub(crate) fn triangulate_divided_boundary(
     for primitive in 0..primitive_total as i64 {
         cancel::poll(cancel_token, primitive, 255)?;
         if boundary[primitive as usize] == 0 {
-            let first = gi(&topology_view.primitive_offsets, primitive);
-            let last = gi(&topology_view.primitive_offsets, primitive + 1);
+            let first = gt(&topology_view.primitive_offsets, primitive);
+            let last = gt(&topology_view.primitive_offsets, primitive + 1);
             out.begin_primitive(gu(&topology_view.primitive_kinds, primitive), primitive);
             for vertex in first..last {
                 out.emit_vertex(&topology_view.vertex_points, vertex);
             }
             out.end_primitive();
         } else if consistent_topology {
-            let first = gi(&topology_view.primitive_offsets, primitive);
-            let last = gi(&topology_view.primitive_offsets, primitive + 1);
+            let first = gt(&topology_view.primitive_offsets, primitive);
+            let last = gt(&topology_view.primitive_offsets, primitive + 1);
             for vertex in first + 1..last - 1 {
                 out.emit_triangle(&topology_view.vertex_points, primitive, first, vertex, vertex + 1);
             }

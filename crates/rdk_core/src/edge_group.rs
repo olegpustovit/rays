@@ -99,8 +99,7 @@ pub fn payload_bytes(value: &T) -> i64 {
     i64::try_from(value.bits.len()).unwrap_or(i64::MAX)
 }
 
-pub fn mem(edge: impl Into<i64>, value: &T) -> bool {
-    let edge = edge.into();
+pub fn mem(edge: i64, value: &T) -> bool {
     if edge < 0 || edge >= value.length {
         return false;
     }

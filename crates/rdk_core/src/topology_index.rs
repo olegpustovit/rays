@@ -327,8 +327,7 @@ pub fn edge_points(value: &T, edge: i64) -> Result<(i64, i64), error::T> {
     ))
 }
 
-pub fn find_edge_index(value: &T, a: impl Into<i64>, b: impl Into<i64>) -> i64 {
-    let (a, b) = (a.into(), b.into());
+pub fn find_edge_index(value: &T, a: i64, b: i64) -> i64 {
     if a < 0 || b < 0 || a >= value.data.point_count || b >= value.data.point_count {
         return -1;
     }
@@ -348,7 +347,7 @@ pub fn find_edge_index(value: &T, a: impl Into<i64>, b: impl Into<i64>) -> i64 {
     }
 }
 
-pub fn find_edge(value: &T, a: impl Into<i64>, b: impl Into<i64>) -> Option<i64> {
+pub fn find_edge(value: &T, a: i64, b: i64) -> Option<i64> {
     match find_edge_index(value, a, b) {
         -1 => None,
         edge => Some(edge),
