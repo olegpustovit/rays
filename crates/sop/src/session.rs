@@ -198,7 +198,21 @@ enum CacheEvent {
     Time(NodeTiming),
 }
 
+/// The node last cooked or hit; its names are copied only when `stats` is read.
+#[derive(Clone)]
+struct LastNode {
+    node: node::T,
+    input_points: i64,
+    points: i64,
+    seconds: f64,
+    cache_hit: bool,
+}
+
 pub struct T {
+    /// the per-cook memo's storage, kept between cooks: a cache hit builds no table
+    /// the cache key's buffer, kept after a hit
+    key_pool: Vec<u8>,
+    memo_pool: (HashMap<i64, Vec<(node::T, Result<Output, Diagnostic>)>>, Vec<i64>),
     clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     max_entries: i64,
     max_payload_bytes: i64,
@@ -219,7 +233,7 @@ pub struct T {
     volatile_hits: i64,
     volatile_misses: i64,
     evictions: i64,
-    last_node: Option<NodeTiming>,
+    last_node: Option<LastNode>,
     times: Arc<Mutex<HashMap<i64, NodeTiming>>>,
     closed: bool,
     materialized: Vec<(Output, rdk_core::geometry::T)>,
@@ -235,10 +249,14 @@ pub struct T {
     consumer_scans: i64,
 }
 
-fn key_of(bytes: &[u8]) -> Key {
+fn key_hash(bytes: &[u8]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut hasher);
-    Key::new(hasher.finish(), Arc::new(bytes.to_vec()))
+    hasher.finish()
+}
+
+fn key_of(bytes: &[u8]) -> Key {
+    Key::new(key_hash(bytes), Arc::new(bytes.to_vec()))
 }
 
 fn entry_of(value: &lru::Value) -> Arc<Entry> {
@@ -293,6 +311,8 @@ pub fn create(max_entries: i64, max_payload_bytes: i64) -> Result<T, String> {
         cooks: 0,
         hits: 0,
         misses: 0,
+        memo_pool: Default::default(),
+        key_pool: Vec::new(),
         volatile: Arc::new(|_| false),
         slots: HashMap::new(),
         slot_residents: HashMap::new(),
@@ -383,9 +403,10 @@ fn insert(session: &mut T, key: &[u8], entry: Entry) {
     session.evictions += before + i64::from(!replaced) - session.cache.length();
 }
 
-fn lookup(session: &mut T, volatile: bool, node_value: &node::T, key: &[u8]) -> Option<Arc<Entry>> {
+fn lookup(session: &mut T, volatile: bool, node_value: &node::T, key: &Vec<u8>) -> Option<Arc<Entry>> {
     let result = if !volatile {
-        session.cache.find_opt(&key_of(key)).map(|v| entry_of(&v))
+        // the stored keys are `Vec<u8>`: probe with the one in hand
+        session.cache.find_opt_by(key_hash(key), key).map(|v| entry_of(&v))
     } else {
         match session.slots.get(&node::id(node_value)) {
             Some((latest, output)) if latest.as_slice() == key => Some(Arc::clone(output)),
@@ -489,12 +510,12 @@ fn selective(n: &node::T, inputs: &[payload::T]) -> bool {
         && (facts.cook_mode == node::CookMode::DuplicateInput(0) || facts.cook_mode == node::CookMode::Passthrough(0))
 }
 
-fn cache_key(n: &node::T, context: &context::T, inputs: &[payload::T]) -> Vec<u8> {
+fn cache_key(mut buffer: Vec<u8>, n: &node::T, context: &context::T, inputs: &[payload::T]) -> Vec<u8> {
     let parameters = build::cache_parameters(n);
     let parameter_key = node::parameter_key(n);
     let facts_key = build::cache_facts(n);
-    let mut buffer: Vec<u8> =
-        Vec::with_capacity(64 + parameters.len() + parameter_key.len() + facts_key.len() + 8 * inputs.len());
+    buffer.clear();
+    buffer.reserve(64 + parameters.len() + parameter_key.len() + facts_key.len() + 8 * inputs.len());
     fn add_int(buffer: &mut Vec<u8>, v: i64) {
         buffer.extend_from_slice(&v.to_le_bytes());
     }
@@ -770,11 +791,6 @@ struct Memo {
     left: Vec<i64>,
 }
 
-fn new_memo(census: Arc<Census>) -> Memo {
-    let left = census.consumers.clone();
-    Memo { results: HashMap::new(), census, left }
-}
-
 fn memo_find(memo: &Memo, n: &node::T) -> Option<Result<Output, Diagnostic>> {
     memo.results.get(&node::id(n))?.iter().find(|(seen, _)| node::ptr_eq(seen, n)).map(|(_, r)| r.clone())
 }
@@ -1004,7 +1020,7 @@ fn predict(predictions: &mut Predictions, results: &Results, session: &T, contex
         Prediction::Missing
     } else {
         let geometries: Vec<payload::T> = values.into_iter().flatten().collect();
-        let key = cache_key(n, context, &geometries);
+        let key = cache_key(Vec::new(), n, context, &geometries);
         let found = if (session.volatile)(node::id(n)) {
             match session.slots.get(&node::id(n)) {
                 Some((stored, entry)) if stored == &key => Some(Arc::clone(entry)),
@@ -1088,6 +1104,8 @@ fn snapshot(session: &T) -> T {
         slots: session.slots.clone(),
         slot_residents: session.slot_residents.clone(),
         slot_bytes: session.slot_bytes.clone(),
+        memo_pool: Default::default(),
+        key_pool: Vec::new(),
         volatile_hits: 0,
         volatile_misses: 0,
         evictions: 0,
@@ -1475,7 +1493,7 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
     // Zero-entry sessions need only the per-cook memo. Speculative worker journals still need semantic
     // keys for ordered parent replay.
     let cache_active = session.max_entries > 0 || session.journal.is_some();
-    let key = if cache_active { cache_key(n, context, &geometries) } else { Vec::new() };
+    let key = if cache_active { cache_key(std::mem::take(&mut session.key_pool), n, context, &geometries) } else { Vec::new() };
     let volatile = (session.volatile)(node::id(n));
     let found = if cache_active { lookup(session, volatile, n, &key) } else { None };
     if let Some(entry) = found {
@@ -1496,7 +1514,8 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
         if volatile {
             session.volatile_hits += 1;
         }
-        session.last_node = Some(timing(n, &geometries, payload::element_count(&output.payload), 0.0, true));
+        session.last_node = Some(LastNode { node: n.clone(), input_points: geometries.iter().map(payload::element_count).sum(), points: payload::element_count(&output.payload), seconds: 0.0, cache_hit: true });
+        session.key_pool = key;
         return Ok(output);
     }
     session.misses += 1;
@@ -1538,7 +1557,7 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
         Err(_) => 0,
     };
     let sample = timing(n, &geometries, points, seconds, false);
-    session.last_node = Some(sample.clone());
+    session.last_node = Some(LastNode { node: n.clone(), input_points: sample.input_points, points, seconds, cache_hit: false });
     record_time(session, sample);
     match cooked {
         Err(error) => Err(traced(n, error)),
@@ -1631,7 +1650,11 @@ pub fn cook(session: &mut T, cpu_consumers: Option<i64>, context: &context::T, n
         let result = loop {
             session.written.clear();
             let refused = context::refusals(&context);
-            let result = evaluate(&mut new_memo(Arc::clone(&census)), session, &context, n);
+            let mut memo = Memo { results: std::mem::take(&mut session.memo_pool.0), left: std::mem::take(&mut session.memo_pool.1), census: Arc::clone(&census) };
+            memo.left.clone_from(&census.consumers);
+            let result = evaluate(&mut memo, session, &context, n);
+            memo.results.clear();
+            session.memo_pool = (memo.results, memo.left);
             context::settle(&context, true);
             if context::refusals(&context) == refused {
                 break result;
@@ -1666,7 +1689,15 @@ pub fn stats(session: &T) -> Stats {
         retained_entries: session.cache.length(),
         volatile_entries: session.slots.len() as i64,
         retained_payload_bytes: payload_bytes(session),
-        last_node: session.last_node.clone(),
+        last_node: session.last_node.as_ref().map(|l| NodeTiming {
+            node_id: node::id(&l.node),
+            label: node::label(&l.node).to_owned(),
+            operation: node::operation(&l.node).to_owned(),
+            input_points: l.input_points,
+            points: l.points,
+            seconds: l.seconds,
+            cache_hit: l.cache_hit,
+        }),
         consumer_scans: session.consumer_scans,
     }
 }
