@@ -83,7 +83,7 @@ fn creation_shell_list_status() {
     assert!(!shown.is_empty());
     // a select intent folds into the selection; a rename of a hosted object folds into the graph
     let state = editor_list::tree_state {
-        document: crate::editor_inspect::objects(&(&value).into()),
+        document: crate::editor_inspect::objects(&(&value).into()).into_owned(),
         selection: selection::clear(),
         tree: tree::create(),
         opened: None,

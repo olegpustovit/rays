@@ -929,7 +929,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         })
         .cloned()
         .collect();
-    let (document, edit_error, editor_effects) = host_changes.iter().fold((level_objects(&value.into()), value.edit_error.clone(), Effects::default()), |state, c| apply_change(state, c));
+    let (document, edit_error, editor_effects) = host_changes.iter().fold((level_objects(&value.into()).into_owned(), value.edit_error.clone(), Effects::default()), |state, c| apply_change(state, c));
     // what a list or the inspector's name row asks of an object the text has is written to the text
     // (below); the derived network is edited only for the others
     let mut tree_edits: Vec<Edit> = result.tree_intents.iter().filter_map(|i| tree_edit(&value.into(), &rows, i)).collect();
@@ -1443,7 +1443,7 @@ pub fn idle_result<'a>(value: &ModelView<'a>, selection: selection::Selection) -
         tree: value.tree.clone(),
         outline: value.outline.clone(),
         outline_intents: Vec::new(),
-        document: level_objects(value),
+        document: level_objects(value).into_owned(),
         edit_error: value.edit_error.clone(),
         effects: Effects::default(),
         timeline_intents: Vec::new(),

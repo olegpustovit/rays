@@ -193,7 +193,7 @@ pub fn inspect_panel<'a>(
                 (None, inspected.0, vec![], value.live_cook, inspected.1, vec![])
             } else {
                 let node_id = selected_ids[0];
-                let changes = object_inspector(value, ui, &document, node_id, bounds, window, ws);
+                let changes = object_inspector(value, ui, &*document, node_id, bounds, window, ws);
                 (None, changes, vec![], value.live_cook, vec![], vec![])
             };
             result = Some(out);
@@ -225,7 +225,7 @@ fn workspace_inspector_with_drops<'a>(value: &ModelView<'a>, ui: &mut Ui, width:
 
 /// The sheet of a scene object or World layer the text does not bind by name: its fields, with
 /// the name edited in place.
-fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &kind_graph::T, node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<change> {
+fn object_inspector<'a>(value: &ModelView<'a>, ui: &mut Ui, document: &[kind_graph::Node], node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<change> {
     let (fields, label, kind_) = match kind_graph::find(document, node_id) {
         Some(node) => (kind_graph::fields(&node), node.label.clone(), node.kind.clone()),
         None => (Vec::new(), format!("#{node_id}"), "unknown".to_owned()),

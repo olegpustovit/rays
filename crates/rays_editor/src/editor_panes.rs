@@ -120,8 +120,8 @@ pub type Host = (Key, layout::Path, Panel, Host_kind);
 /// view shows.
 pub fn panel_hosts<'a>(value: &ModelView<'a>) -> Vec<Host> {
     let mut out = Vec::new();
-    for (path, panel) in panels::leaves(&shell_tree(value, &value.workspace)) {
-        if !visible(&value.workspace, &panel) || panel_state(value, &path).collapsed {
+    for (path, panel) in shell_leaves(value, &value.workspace).iter() {
+        if !visible(&value.workspace, panel) || panel_state(value, path).collapsed {
             continue;
         }
         let key = panel_key(&value.doc, &path);
@@ -137,7 +137,7 @@ pub fn panel_hosts<'a>(value: &ModelView<'a>) -> Vec<Host> {
             Panel::View(_) | Panel::Canvas(_) | Panel::Inspector | Panel::Spreadsheet | Panel::Timeline => None,
         };
         if let Some(kind) = kind {
-            out.push((key, path, panel, kind));
+            out.push((key, path.clone(), panel.clone(), kind));
         }
     }
     out
@@ -231,7 +231,7 @@ pub fn follow_start(value: &mut EditorModel) {
     if now == *was {
         return;
     }
-    let leaves = panels::leaves(&shell_tree(&*value, &value.workspace));
+    let leaves = shell_leaves(&*value, &value.workspace);
     let path_of = |value: &EditorModel, key: &Key| -> Option<(layout::Path, Panel)> {
         leaves.iter().find(|(path, _)| panel_key(&value.doc, path) == *key).cloned()
     };
@@ -332,7 +332,7 @@ pub fn graph_panels<'a>(value: &ModelView<'a>) -> String {
 }
 
 pub fn windows<'a>(value: &ModelView<'a>) -> String {
-    panels::leaves(&shell_tree(value, &value.workspace))
+    shell_leaves(value, &value.workspace)
         .iter()
         .filter_map(|(path, panel)| panel_state(value, path).window.map(|(x, y, w, h)| format!("{} {} {} {} {}", panels::name(panel).to_lowercase(), x, y, w, h)))
         .collect::<Vec<_>>()
@@ -343,7 +343,7 @@ pub fn windows<'a>(value: &ModelView<'a>) -> String {
 /// pane's tab and draft, a list's focus, folds and filter, an outline's search.
 pub fn panels_line<'a>(value: &ModelView<'a>) -> String {
     let hosts = panel_hosts(value);
-    panels::leaves(&shell_tree(value, &value.workspace))
+    shell_leaves(value, &value.workspace)
         .iter()
         .map(|(path, panel)| {
             let key = panel_key(&value.doc, path);

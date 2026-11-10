@@ -148,7 +148,7 @@ pub fn panel_state<'a>(value: &ModelView<'a>, path: &[usize]) -> panels::State {
 
 /// An edit that changes the editor graph's tree ends "Restore layout".
 pub fn unrestore(before: &Document, after: &Document, mut shell: shell) -> shell {
-    let tree = |doc: &Document| doc.shell.as_ref().map(|s| s.tree.clone());
+    fn tree(doc: &Document) -> Option<&panels::Panels> { doc.shell.as_ref().map(|s| &s.tree) }
     if tree(before) != tree(after) {
         shell.restored = false;
         shell.window_live = None;
@@ -256,9 +256,22 @@ pub fn view_visible<'a>(value: &ModelView<'a>) -> bool {
 
 // ---- graph panels: each [ui/graph] leaf is a pane of its own ----
 
+thread_local! { static LEAVES: std::cell::RefCell<Option<(panels::Panels, std::rc::Rc<Vec<(layout::Path, Panel)>>)>> = const { std::cell::RefCell::new(None) }; }
+
+/// `panels::leaves` of the tree shown, kept while the tree is the same: a frame reads it many times.
+pub fn shell_leaves(value: &EditorModel, shell: &shell) -> std::rc::Rc<Vec<(layout::Path, Panel)>> {
+    let tree = shell_tree(value, shell);
+    if let Some(found) = LEAVES.with(|cache| cache.borrow().as_ref().filter(|(seen, _)| *seen == *tree).map(|(_, leaves)| leaves.clone())) {
+        return found;
+    }
+    let leaves = std::rc::Rc::new(panels::leaves(&tree));
+    LEAVES.with(|cache| *cache.borrow_mut() = Some((tree.into_owned(), leaves.clone())));
+    leaves
+}
+
 /// The graph leaves of the tree shown, by panel key: walked once a frame (`follow_graph`).
 pub fn graph_leaves<'a>(value: &ModelView<'a>) -> Vec<(flow_check::workspace::Path, layout::Path)> {
-    panels::leaves(&shell_tree(value, &value.workspace)).into_iter().filter(|(_, p)| *p == Panel::Graph).map(|(path, _)| (panel_key(&value.doc, &path), path)).collect()
+    shell_leaves(value, &value.workspace).iter().filter(|(_, p)| *p == Panel::Graph).map(|(path, _)| (panel_key(&value.doc, path), path.clone())).collect()
 }
 
 /// The leaf of the pane in use: where its panel was last seen when that is still its leaf (no

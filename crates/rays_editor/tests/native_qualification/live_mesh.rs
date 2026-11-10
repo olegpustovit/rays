@@ -234,7 +234,8 @@ fn sea_initial_close() {
 // R9: observed 51,365 / 2,804,734 B; retain room for the previously observed 808 B variation.
 // R10: observed 51,358 / 2,803,652 B with numeric hashes and typed mesh keys.
 // Z0 still tracks its allocation source; keep this reduced ceiling until that cause is resolved.
-const SEA_FRAME_BUDGET: (u64,u64) = (51_365,2_805_000);
+// Z0/Z1 (shared frame work: memoised geometry, reused labels, stack-keyed quads): observed 12,918-12,921 / 1,043,510-1,060,545 B.
+const SEA_FRAME_BUDGET: (u64,u64) = (12_925,1_061_000);
 
 fn sea_frames() {
     use rays_editor::{editor,workspace};

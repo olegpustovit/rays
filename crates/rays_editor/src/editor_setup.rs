@@ -170,7 +170,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     let seed_scene = seed_scene.unwrap_or_else(|| Rc::new(|scene| scene));
     let doc = workspace_doc(Some(gpu.clone()), opened, &factories, &*seed_scene, &workspace)?;
     let cook = cook::create(prepare, seed, grain, domains, await_, Some(clock.clone()), max_entries, max_payload_bytes)?;
-    let shell = shell { tree: layout_default(), hidden: vec![panels::Panel::Timeline], live: None, window_live: None, restored: false };
+    let shell = shell { tree: std::rc::Rc::new(layout_default()), hidden: vec![panels::Panel::Timeline], live: None, window_live: None, restored: false };
     let presets = match presets {
         Some(directory) => directory,
         None => editor_core::store::filename_concat(&user_folder(platform), &preset::sanitize(&name)),
