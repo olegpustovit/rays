@@ -2970,17 +2970,23 @@ impl Drop for PopGuard {
 
 fn scope_find(residual: ResidualId, term: &Arc<Term>) -> Option<Value> {
     CURRENT.with(|cell| {
-        let current = cell.borrow();
-        current.as_ref()?.entries.iter().find(|(r, t, _)| (r.0, r.1) == (residual.0, residual.1) && same_term(t, term)).map(|(_, _, v)| v.clone())
+        let mut current = cell.borrow_mut();
+        let entries = &mut current.as_mut()?.entries;
+        let index = entries.iter().position(|(r, t, _)| (r.0, r.1) == (residual.0, residual.1) && same_term(t, term))?;
+        let entry = entries.remove(index);
+        let value = entry.2.clone();
+        entries.push(entry);
+        Some(value)
     })
 }
 
 fn scope_add(residual: ResidualId, term: &Arc<Term>, value: &Value) {
     CURRENT.with(|cell| {
         if let Some(scope) = cell.borrow_mut().as_mut() {
-            if scope.entries.len() < SCOPE_CAPACITY {
-                scope.entries.push((residual, term.clone(), value.clone()));
+            if scope.entries.len() == SCOPE_CAPACITY {
+                scope.entries.remove(0);
             }
+            scope.entries.push((residual, term.clone(), value.clone()));
         }
     });
 }
@@ -4381,6 +4387,25 @@ mod tests {
         let next = evaluate(&run, &None, program.residual, &program.term).unwrap();
         assert_eq!(first, next);
         assert_eq!(runs.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn capture_scope_keeps_recent_values_after_capacity() {
+        let (_, program) = compile_body("(map (fn [x] (+ x t)) (array/float 5 1.0))", true);
+        let run = make_run(&program, &input::at_time(0.5), &strict(), None, None);
+        let _scope = ScopeGuard(scope_enter(&run));
+        let key = |i| ResidualId(program.residual.0, i);
+        for i in 0..SCOPE_CAPACITY as i64 {
+            scope_add(key(i), &program.term, &Value::Int(i));
+        }
+        for i in SCOPE_CAPACITY as i64..SCOPE_CAPACITY as i64 * 2 {
+            assert_eq!(scope_find(key(0), &program.term), Some(Value::Int(0)));
+            scope_add(key(i), &program.term, &Value::Int(i));
+            assert_eq!(scope_find(key(i), &program.term), Some(Value::Int(i)));
+            assert_eq!(CURRENT.with(|scope| scope.borrow().as_ref().unwrap().entries.len()), SCOPE_CAPACITY);
+        }
+        assert_eq!(scope_find(key(0), &program.term), Some(Value::Int(0)));
+        assert_eq!(scope_find(key(1), &program.term), None);
     }
 
     // A map of fourteen 1,024-lane blocks splits into five chunks, which the domains share: values,

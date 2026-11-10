@@ -1271,21 +1271,20 @@ fn combining_many_wires() {
 /// The 136 swept points cross the 97-element parallel grain.
 fn general_backbone() {
     let points=curve((0..17).map(|p|{let t=p as f64*(10.0/16.0);(0.3*rays_math::libm::sin(t*0.71),0.2*rays_math::libm::cos(t*0.43),t)}));
-    let backbone=super::node(&[],&r###"(-> (sop/curve %s)
-     (sop/set_float :name "pscale" :value 0.85)
-     (sop/group_edges :name "backbone_edges"))"###.replace("%s",&points));
     let profile=line_geometry::polyline(&line_geometry::Params { closed: true },&(0..8).map(|p|{let a=2.0*std::f64::consts::PI*p as f64/8.0;(0.08*rays_math::libm::cos(a),0.08*rays_math::libm::sin(a),0.0)}).collect::<Vec<_>>()).unwrap();
     let profile=super::snapshot(&profile);
-    let profile=bind(&[("profile",&profile)],r###"(-> (sop/ext_profile)
-     (sop/set_int :name "profile_id" :value 17)
-     (sop/group_edges :name "profile_edges"))"###);
-    let g=exact(&bind(&[("general_backbone",&backbone),("general_profile",&profile)],r###"(sop/sweep
-   (sop/ext_general_backbone)
-   (sop/ext_general_profile)
-   :connectivity "Alternating triangles"
-   :twist 2.3
-   :caps true
-   :cap_group "sweep_caps")"###));
+    let graph=bind(&[("profile",&profile)],&r###"(let [backbone (-> (sop/curve %s)
+                                                       (sop/set_float :name "pscale" :value 0.85)
+                                                       (sop/group_edges :name "backbone_edges"))
+                                               profile (-> (sop/ext_profile)
+                                                           (sop/set_int :name "profile_id" :value 17)
+                                                           (sop/group_edges :name "profile_edges"))]
+        (sop/sweep backbone profile
+           :connectivity "Alternating triangles"
+           :twist 2.3
+           :caps true
+           :cap_group "sweep_caps"))"###.replace("%s",&points));
+    let g=exact(&graph);
     assert_eq!((geo::point_count(&g),geo::primitive_count(&g)),(136,258));assert!(has(&g,Owner::Point,"cross_section_profile_id"));
 }
 

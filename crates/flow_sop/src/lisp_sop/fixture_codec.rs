@@ -1,4 +1,4 @@
-//! Test fixture interchange from .
+//! Lossless geometry and image fixture encoding.
 use std::sync::Arc;
 use flow_syntax::{syntax::{self,Node,Syntax},lisp};
 use flow_syntax::arena::{SyntaxArena, SyntaxId};

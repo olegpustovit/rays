@@ -90,8 +90,10 @@ after the verification builds. Corpus: 206 cases, 15.18 s wall, slowest 2.117 s.
 performance targets are met.
 
 SDL tests set their own dummy driver hints: do not globally set SDL_VIDEODRIVER=dummy for their
-whole suite (the environment overrides SDL_SetHint). The Cocoa window case needs a graphical
-session; it reports No available video device in this environment.
+whole suite (the environment overrides SDL_SetHint). Native window tests run on the process's
+initial thread. The Cocoa native-layer case passes on this host; the former video-device failure
+came from running Cocoa on a test worker. PXUI display parity uses a separate native-driver
+process and this host's measured 1× density.
 
 ## Current profile measurements (2026-11-10)
 
@@ -116,6 +118,7 @@ those computed values checked. CLI lowering omits editor probe records, while ed
 retains them. Geometry bytes and selected computed-error diagnostics match in the regression.
 
 `cargo t --all` is implemented and its dispatcher regression passes; complete native qualification
-is still blocked here. GC retains the recent warm cache: its observed size is 75.537 GB and zero
-artifacts qualified for seven-day deletion. The Cocoa window check also needs a graphical session.
-These limits remain failures, not skipped successes.
+is still blocked by the cache-size check. GC retains the recent warm cache: its initial observed
+size was 75.537 GB and zero artifacts qualified for seven-day deletion. A later inode-aware audit
+measured 72.963 GB of allocated storage, so hardlink accounting does not meet the 15 GB limit.
+Native Cocoa and measured-density PXUI checks pass. The remaining limits stay visible as failures.
