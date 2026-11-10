@@ -9,6 +9,11 @@
 //! painter.set_view(1, View { offset: [0.0, -scroll], ..View::IDENTITY })?;
 //! /* open the pass (or reuse the scene pass) */
 //! painter.draw(&encoder, [w_px, h_px], scale, &instances, &[])?;   // one draw call when no breaks
+//! // a cached layer: only the instances that changed since its last frame are written
+//! painter.draw_retained(&encoder, [w_px, h_px], scale, layer, &instances, &dirty_ranges, &[])?;
+//! // backdrop blur: end the pass that drew the backdrop, blur, then draw the result as an image
+//! let blurred = painter.blur(&queue, &backdrop, [x0, y0, x1, y1], sigma_px)?.clone();
+//! painter.draw(&encoder, .., &[Instance::image(rect, [0.0, 0.0, 1.0, 1.0], tint)], &[Break { at_instance: 0, texture: Some(&blurred) }])?;
 //! ```
 //!
 //! # Conventions (same as the Lisp `ui` shader this replaces)
@@ -58,7 +63,15 @@
 //!
 //! # Batching
 //! A layer is one draw call. [`Break`]s are the only splits: from `at_instance` on, image instances
-//! sample the given external texture instead of the colour atlas.
+//! sample the given external texture instead of the colour atlas. Gradient ramps always read the atlas.
+//!
+//! # Retained layers, blur, and what is left out
+//! [`Painter::draw_retained`] keeps a layer's instances in persistent GPU storage and writes only the
+//! dirty ranges (its doc states the frames-in-flight rule). [`Painter::blur`] is the only extra pass: a
+//! second small pipeline (`blur.*` shaders) runs a downsampling separable gaussian into scratch targets.
+//! Pure helpers in `pxui::draw` place images (`fit`, `nine_slice`) and emit per-side borders.
+//! Not built, opt-in later and only if measured: group opacity (render a view to a texture and composite
+//! it once), texture-cached views and content filters on them, dashed curves.
 
 use ogpu_core::backend::{self, Buffer, ColorAttachment, Device, Pipeline, Queue, RenderEncoder, RenderTarget, Sampler, ShaderStage, Texture};
 use ogpu_core::binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage};

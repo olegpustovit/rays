@@ -63,7 +63,7 @@ fn pass(queue: &Queue, target: &Texture, body: &mut dyn FnMut(&RenderEncoder)) {
 }
 
 fn painter(device: &Device) -> Painter {
-    ok(Painter::new(device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, (64, 64), (32, 32)))
+    ok(Painter::new(device, ColorFormat::Rgba8Unorm, DepthFormat::NoDepth, 1, (64, 64), (256, 32)))
 }
 
 /// Synthetic atlas content: an 8x8 ring glyph in the mask atlas at (16, 16), a 4x4 checker at (0, 0)
@@ -71,6 +71,16 @@ fn painter(device: &Device) -> Painter {
 fn upload_atlases(painter: &mut Painter, glyph: &[u8], checker: &[u8]) {
     ok(painter.upload(AtlasKind::Mask, 16, 16, 8, 8, glyph, 8));
     ok(painter.upload(AtlasKind::Color, 0, 0, 4, 4, checker, 16));
+    let mut row = [0u8; 1024];
+    ramp(&[(0.0, RED), (0.5, GREEN), (1.0, BLUE)], &mut row);
+    ok(painter.upload(AtlasKind::Color, 0, 8, 256, 1, &row, 1024));
+}
+
+/// Views the scene names: 1 fades and shifts, 2 turns a little about its rect's centre.
+fn set_scene_views(painter: &mut Painter) {
+    let faded = View { offset: [8.0, 0.0], opacity: 0.5, ..View::IDENTITY };
+    ok(painter.set_view(1, faded));
+    ok(painter.set_view(2, View::rotation(0.3, [117.0, 88.0])));
 }
 
 fn atlas_bytes() -> (Vec<u8>, Vec<u8>) {
@@ -108,9 +118,12 @@ fn scene() -> Vec<Instance> {
         Instance::arc([56.0, 62.0], 4.0, 0.0, -0.5 * tau, 1.0, BLUE).dash(2.0, 1.5, 0.0),
         Instance::curve([72.0, 68.0], [82.0, 48.0], [92.0, 68.0], 1.5, GREEN),
         Instance::mask([100.0, 52.0, 116.0, 68.0], [16.0 / 64.0, 16.0 / 64.0, 24.0 / 64.0, 24.0 / 64.0], INK),
-        Instance::image([4.0, 72.0, 20.0, 88.0], [0.0, 0.0, 4.0 / 32.0, 4.0 / 32.0], [255, 255, 255, 255]),
+        Instance::image([4.0, 72.0, 20.0, 88.0], [0.0, 0.0, 4.0 / 256.0, 4.0 / 32.0], [255, 255, 255, 255]),
         Instance::rect([24.0, 72.0, 56.0, 92.0], GREEN).clip([30, 76, 50, 88], 4.0),
         Instance::rect([60.0, 72.0, 80.0, 92.0], BLUE).view(1),
+        Instance::rect([92.0, 72.0, 106.0, 92.0], [255, 255, 255, 255]).border(3.0, INK).sides(flags::BOTTOM),
+        Instance::rect([108.0, 72.0, 126.0, 80.0], [0; 4]).linear([0.0, 0.5], [1.0, 0.5], [0; 4]).ramp(8),
+        Instance::rect([108.0, 84.0, 126.0, 92.0], BLUE).view(2),
     ]
 }
 
@@ -118,7 +131,7 @@ fn render_scene(device: &Device, queue: &Queue) -> Vec<u8> {
     let mut painter = painter(device);
     let (glyph, checker) = atlas_bytes();
     upload_atlases(&mut painter, &glyph, &checker);
-    ok(painter.set_view(1, View { offset: [8.0, 0.0], opacity: 0.5, ..View::IDENTITY }));
+    set_scene_views(&mut painter);
     let target = target(device);
     let instances = scene();
     painter.begin_frame();
@@ -191,6 +204,10 @@ fn gpu_scene_golden_and_spot_checks() {
     assert!(near(at(&pixels, 86.0, 82.0), [122, 142, 212, 255], 2), "view opacity halves the rect: {:?}", at(&pixels, 86.0, 82.0));
     assert!(near(at(&pixels, 108.0, 60.0), BG, 0) && near(at(&pixels, 101.0, 60.0), BG, 0), "glyph hole and margin are background");
     assert_eq!(at(&pixels, 104.6, 60.0), INK, "glyph ring is ink");
+    assert_eq!(at(&pixels, 99.0, 90.0), INK, "bottom-only border band");
+    assert_eq!(at(&pixels, 99.0, 80.0), [255, 255, 255, 255], "no border above the band");
+    assert!(near(at(&pixels, 117.0, 76.0), GREEN, 6), "3-stop ramp middle is the middle stop: {:?}", at(&pixels, 117.0, 76.0));
+    assert_eq!(at(&pixels, 117.0, 88.0), BLUE, "rotated view keeps its centre");
     assert_eq!(at(&pixels, 5.0, 73.0), [255, 255, 255, 255], "checker texel 0");
     assert_eq!(at(&pixels, 9.0, 73.0), [20, 40, 160, 255], "checker texel 1");
 
@@ -250,7 +267,7 @@ fn gpu_warm_frame_allocates_nothing() {
     let Some(device) = open() else { return };
     let queue = ok(be::create_queue(&device));
     let mut painter = painter(&device);
-    ok(painter.set_view(1, View { offset: [8.0, 0.0], opacity: 0.5, ..View::IDENTITY }));
+    set_scene_views(&mut painter);
     let (glyph, checker) = atlas_bytes();
     let target = target(&device);
     let instances = scene();
@@ -366,7 +383,7 @@ fn gpu_retained_layer_writes_only_dirty_ranges() {
     let Some(device) = open() else { return };
     let queue = ok(be::create_queue(&device));
     let mut painter = painter(&device);
-    ok(painter.set_view(1, View { offset: [8.0, 0.0], opacity: 0.5, ..View::IDENTITY }));
+    set_scene_views(&mut painter);
     let (glyph, checker) = atlas_bytes();
     upload_atlases(&mut painter, &glyph, &checker);
     let target = target(&device);
