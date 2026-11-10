@@ -15,7 +15,8 @@ fn fail(message: String) -> error::T {
     error::new("Rdk.Deform", Code::InvalidParameter, message)
 }
 
-pub(crate) fn validate_selection(
+#[doc(hidden)]
+pub fn validate_selection(
     topology_value: &topology::T,
     selection: Option<&element_selection::T>,
 ) -> Result<(), error::T> {
@@ -63,7 +64,8 @@ pub(crate) fn validate_selection(
 }
 
 // The index is required for every selection but None and point groups.
-pub(crate) fn point_selected(
+#[doc(hidden)]
+pub fn point_selected(
     selection: Option<&element_selection::T>,
     index: Option<&topology_index::T>,
     point: i64,
@@ -108,7 +110,8 @@ fn planes_of(values: &packed::float3::T) -> Result<Planes, error::T> {
     Ok(Planes { x: values.x.to_vec(), y: values.y.to_vec(), z: values.z.to_vec() })
 }
 
-pub(crate) fn point_vector_attribute(
+#[doc(hidden)]
+pub fn point_vector_attribute(
     operation: &str,
     name: &str,
     geometry_value: &geometry::T,
@@ -203,7 +206,8 @@ fn geometric_point_vectors(
     Ok(Planes { x, y, z })
 }
 
-pub(crate) fn resolve_directions(
+#[doc(hidden)]
+pub fn resolve_directions(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     geometry_value: &geometry::T,
@@ -228,7 +232,8 @@ pub struct Params {
     pub primitives: Option<group::T>,
 }
 
-pub(crate) fn normals(params: Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
+#[doc(hidden)]
+pub fn normals(params: Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     support::check_positive(params.grain)
         .map_err(|_| fail("Rdk_mesh.Deform.normals: grain must be positive".to_owned()))?;
     // ponytail: core Normal_ops owns its cancel token, so an Arc token is checked here and not forwarded.
@@ -253,7 +258,7 @@ pub(crate) fn normals(params: Params, geometry_value: &geometry::T) -> Result<ge
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use crate::compact_points::fixtures::*;
+    use crate::test_support::*;
     use rdk_core::attribute::{Owner, Storage};
 
     fn code(result: Result<(), error::T>) -> String {

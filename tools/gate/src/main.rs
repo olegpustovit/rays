@@ -867,7 +867,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("rdk_core", &["mem", "parallel", "rays_math"][..]),
         ("rdk_geom", &["rdk_core", "rays_math", "parallel"][..]),
         ("rdk_ops", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
-        ("rdk_boolean", &["rdk_core", "rdk_geom", "rdk_ops", "rays_math", "parallel"][..]),
+        ("rdk_boolean", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
         ("rdk_rays", &["rdk_core", "rdk_geom", "rdk_ops", "rays", "rays_math", "param"][..]),
         ("rays", &[
             "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
@@ -1017,7 +1017,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("rdk_geom", &gpu);
     forbid("rdk_ops", &["rdk_boolean", "rays", "rdk_rays", "sop"]);
     forbid("rdk_ops", &gpu);
-    forbid("rdk_boolean", &["rays", "rdk_rays", "sop"]);
+    forbid("rdk_boolean", &["rdk_ops", "rays", "rdk_rays", "sop"]);
     forbid("rdk_boolean", &gpu);
     forbid("sop", &["rays", "rdk_rays", "pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
     forbid("sop", &gpu);

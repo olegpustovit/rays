@@ -18,3 +18,16 @@ pub mod curve_intersection;
 pub mod point_grid;
 pub mod point_clusters;
 pub mod point_snap;
+
+pub mod deletion;
+pub mod dissolve;
+pub mod edge_collapse;
+pub mod fuse_reduce;
+#[doc(hidden)]
+pub mod fuse_cleanup;
+#[doc(hidden)]
+pub mod deform;
+pub mod fuse_rules;
+#[cfg(test)]
+#[allow(dead_code)]
+mod test_support;

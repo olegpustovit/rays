@@ -598,7 +598,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compact_points::fixtures::*;
+    use crate::test_support::*;
     use rdk_core::attribute::{Owner, Storage};
     use rdk_core::group;
 

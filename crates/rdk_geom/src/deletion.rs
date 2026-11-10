@@ -531,7 +531,8 @@ pub struct DeleteParams {
     pub compact_points: bool,
 }
 
-pub(crate) fn delete(
+#[doc(hidden)]
+pub fn delete(
     params: &DeleteParams,
     selection: &group::T,
     geometry_value: &geometry::T,
@@ -597,7 +598,7 @@ pub fn delete_primitives(
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use crate::compact_points::fixtures::*;
+    use crate::test_support::*;
     use rdk_core::attribute::{Owner, Storage};
 
     fn delete_params(selected: bool, compact_points: bool) -> DeleteParams {

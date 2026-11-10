@@ -6,7 +6,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index,
 };
 use rdk_core::error::Code;
-use rdk_geom::point_clusters::Clusters;
+use crate::point_clusters::Clusters;
 
 use crate::deform;
 use crate::fuse_cleanup;
@@ -60,7 +60,8 @@ impl Connectivity {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn raw(
+#[doc(hidden)]
+pub fn raw(
     cancel_value: Option<&cancel::T>,
     grain: Option<i64>,
     edges: Option<&edge_group::T>,
@@ -285,7 +286,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compact_points::fixtures::*;
+    use crate::test_support::*;
     use rdk_core::attribute::{Owner, Storage};
     use rdk_core::group;
     use rdk_core::topology::PrimitiveKind;

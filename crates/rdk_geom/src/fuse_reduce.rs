@@ -1,7 +1,7 @@
 use rdk_core::{attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index};
 use rdk_core::error::Code;
-use rdk_geom::point_clusters::Clusters;
-use rdk_geom::point_grid::{float_max, float_min};
+use crate::point_clusters::Clusters;
+use crate::point_grid::{float_max, float_min};
 
 use crate::fuse_rules::{
     self, average_float, expand_f64, select_f64, sort_float_entries,
@@ -359,7 +359,8 @@ fn reduce(
     )
 }
 
-pub(crate) fn apply(
+#[doc(hidden)]
+pub fn apply(
     cancel_value: Option<&cancel::T>,
     params: &Params,
     clusters: &Clusters,
@@ -378,7 +379,7 @@ pub(crate) fn apply(
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use crate::compact_points::fixtures::*;
+    use crate::test_support::*;
     use rdk_core::attribute::{Owner, Storage};
     use rdk_core::topology::PrimitiveKind;
 

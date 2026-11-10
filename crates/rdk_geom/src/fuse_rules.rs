@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, support, topology_remap};
 use rdk_core::error::Code;
-use rdk_geom::point_clusters::Clusters;
-use rdk_geom::point_grid::{float_max, float_min};
+use crate::point_clusters::Clusters;
+use crate::point_grid::{float_max, float_min};
 use rays_math::text_array::TextArray;
 
 const MAX_STRING_LENGTH: i64 = (1i64 << 57) - 9;
@@ -336,7 +336,8 @@ fn weight_values(geometry_value: &geometry::T, name: &str) -> Result<Vec<f64>, e
     Ok(values)
 }
 
-pub(crate) fn validate(
+#[doc(hidden)]
+pub fn validate(
     attribute_rules: &[AttributeRule],
     group_rules: &[GroupRule],
     _geometry: &geometry::T,
@@ -1133,7 +1134,7 @@ pub(crate) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compact_points::fixtures::*;
+    use crate::test_support::*;
     use rdk_core::attribute::{Owner, Storage};
 
     fn clusters() -> Clusters {

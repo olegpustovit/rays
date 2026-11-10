@@ -16,7 +16,7 @@ use rdk_core::error::Code;
 use rdk_geom::implicit_point;
 use rdk_geom::predicates::{self, Sign};
 use rdk_geom::surface_index;
-use rdk_ops::{deletion, dissolve, edge_collapse, fuse_reduce};
+use rdk_geom::{deletion, dissolve, edge_collapse, fuse_reduce};
 
 use crate::boolean_constraints::{self, Side};
 use crate::boolean_coplanar;

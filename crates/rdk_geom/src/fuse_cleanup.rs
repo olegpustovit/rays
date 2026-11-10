@@ -301,7 +301,8 @@ pub(crate) fn apply_with_mapping(
     Ok((result, old_to_new))
 }
 
-pub(crate) fn apply(
+#[doc(hidden)]
+pub fn apply(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     remove_degenerate_primitives: bool,
@@ -324,7 +325,7 @@ pub(crate) fn apply(
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use crate::compact_points::fixtures::*;
+    use crate::test_support::*;
     use rdk_core::attribute::{Owner, Storage};
     use rdk_core::topology::PrimitiveKind;
 
