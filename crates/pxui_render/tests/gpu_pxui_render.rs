@@ -7,6 +7,7 @@ use ogpu_core::error::{self, Error};
 use ogpu_core::pipeline::{ColorFormat, DepthFormat};
 use ogpu_core::render_pass::{Load, Store};
 use ogpu_core::types::{Extent, Origin, TextureDescriptor, TextureFormat, TextureUsage};
+use pxui::draw::{fit, nine_slice, Fit};
 use pxui_render::{flags, ramp, AtlasKind, Break, Instance, Painter, View};
 #[path = "png.rs"]
 mod png;
@@ -145,7 +146,7 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 8] = [
+    let cases: [(&str, fn()); 10] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
@@ -154,6 +155,8 @@ fn main() {
         ("gpu_ramp_gradient", gpu_ramp_gradient),
         ("gpu_retained_layer_writes_only_dirty_ranges", gpu_retained_layer_writes_only_dirty_ranges),
         ("gpu_backdrop_blur", gpu_backdrop_blur),
+        ("fit_modes_place_and_crop", fit_modes_place_and_crop),
+        ("nine_slice_corners_stay_and_centre_stretches", nine_slice_corners_stay_and_centre_stretches),
     ];
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--ignored") { return; }
@@ -468,3 +471,36 @@ fn gpu_backdrop_blur() {
 }
 
 fn blurred_width(texture: &Texture) -> u32 { be::texture_descriptor(texture).width as u32 }
+
+// Pure image-placement maths (no GPU).
+
+fn close(a: [f32; 4], b: [f32; 4]) -> bool { a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5) }
+
+fn fit_modes_place_and_crop() {
+    let (image, bounds, full) = ([200.0, 100.0], [0.0, 0.0, 100.0, 100.0], [0.0, 0.0, 1.0, 1.0]);
+    assert_eq!(fit(Fit::Fill, image, bounds, full), (bounds, full));
+    let (rect, uv) = fit(Fit::Contain, image, bounds, full);
+    assert!(close(rect, [0.0, 25.0, 100.0, 75.0]) && close(uv, full), "{rect:?} {uv:?}");
+    let (rect, uv) = fit(Fit::Cover, image, bounds, full);
+    assert!(close(rect, bounds) && close(uv, [0.25, 0.0, 0.75, 1.0]), "{rect:?} {uv:?}");
+    let (rect, uv) = fit(Fit::None, image, bounds, full);
+    assert!(close(rect, bounds) && close(uv, [0.25, 0.0, 0.75, 1.0]), "{rect:?} {uv:?}");
+    let (rect, uv) = fit(Fit::None, [20.0, 10.0], bounds, full);
+    assert!(close(rect, [40.0, 45.0, 60.0, 55.0]) && close(uv, full), "{rect:?} {uv:?}");
+    // An atlas slot keeps its offset: the cover crop is taken inside the slot.
+    let (_, uv) = fit(Fit::Cover, image, bounds, [0.5, 0.0, 1.0, 0.5]);
+    assert!(close(uv, [0.625, 0.0, 0.875, 0.5]), "{uv:?}");
+}
+
+fn nine_slice_corners_stay_and_centre_stretches() {
+    let tiles = nine_slice([0.0, 0.0, 100.0, 60.0], [0.0, 0.0, 1.0, 1.0], [30.0, 30.0], [10.0, 10.0, 10.0, 10.0], [255; 4]);
+    let third = 1.0 / 3.0;
+    assert!(close(tiles[0].rect, [0.0, 0.0, 10.0, 10.0]) && tiles[0].kind == pxui::draw::kind::IMAGE);
+    assert!(close(tiles[4].rect, [10.0, 10.0, 90.0, 50.0]));
+    assert!(close(tiles[8].rect, [90.0, 50.0, 100.0, 60.0]));
+    let uv = |i: usize| [0, 1, 2, 3].map(|k| { let w = tiles[i].aux[k / 2]; (w >> (16 * (k % 2)) & 0xffff) as f32 / 65535.0 });
+    assert!(close(uv(0), [0.0, 0.0, third, third]) && close(uv(4), [third, third, 2.0 * third, 2.0 * third]) && close(uv(8), [2.0 * third, 2.0 * third, 1.0, 1.0]));
+    // Too small for its corners: they squeeze together instead of overlapping.
+    let small = nine_slice([0.0, 0.0, 10.0, 60.0], [0.0, 0.0, 1.0, 1.0], [30.0, 30.0], [10.0, 10.0, 10.0, 10.0], [255; 4]);
+    assert!(close(small[0].rect, [0.0, 0.0, 5.0, 10.0]) && close(small[2].rect, [5.0, 0.0, 10.0, 10.0]));
+}

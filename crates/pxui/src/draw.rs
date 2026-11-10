@@ -72,6 +72,56 @@ pub fn borders(rect: [f32; 4], radii: [f32; 4], widths: [f32; 4], colors: [[u8; 
     (out, n)
 }
 
+/// How an image fills a box, like CSS `object-fit`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    /// Stretch to the box.
+    Fill,
+    /// Scale uniformly to fit inside the box, centred; the rect shrinks.
+    Contain,
+    /// Scale uniformly to cover the box, centred; the uv crop.
+    Cover,
+    /// Natural size, centred: smaller images shrink the rect, larger ones crop the uv.
+    None,
+}
+
+/// The rect and uv to draw an `image` (width, height) in `bounds` (`[x0, y0, x1, y1]`) under `mode`.
+/// `uv` is the image's normalised rect in its texture (a whole texture is `[0, 0, 1, 1]`, an atlas
+/// entry its slot); the returned uv is the visible part of it. Pass both to [`Instance::image`].
+pub fn fit(mode: Fit, image: [f32; 2], bounds: [f32; 4], uv: [f32; 4]) -> ([f32; 4], [f32; 4]) {
+    let (bw, bh) = (bounds[2] - bounds[0], bounds[3] - bounds[1]);
+    if mode == Fit::Fill || !(image[0] > 0.0 && image[1] > 0.0) { return (bounds, uv); }
+    let k = match mode {
+        Fit::Contain => (bw / image[0]).min(bh / image[1]),
+        Fit::Cover => (bw / image[0]).max(bh / image[1]),
+        _ => 1.0,
+    };
+    let (w, h) = (image[0] * k, image[1] * k);
+    let (x0, y0) = (bounds[0] + (bw - w) * 0.5, bounds[1] + (bh - h) * 0.5);
+    let rect = [x0.max(bounds[0]), y0.max(bounds[1]), (x0 + w).min(bounds[2]), (y0 + h).min(bounds[3])];
+    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    let visible = [(rect[0] - x0) / w, (rect[1] - y0) / h, (rect[2] - x0) / w, (rect[3] - y0) / h];
+    (rect, [lerp(uv[0], uv[2], visible[0]), lerp(uv[1], uv[3], visible[1]), lerp(uv[0], uv[2], visible[2]), lerp(uv[1], uv[3], visible[3])])
+}
+
+/// CSS `border-image` nine-slice: nine image instances stretching the centre and edges of an `image`
+/// (width, height in texels) between corners of `inset` (`[left, top, right, bottom]` in image units)
+/// drawn 1:1 in `rect`, row-major from the top-left. Corners shrink together if the rect is smaller
+/// than the insets. `uv` as for [`fit`].
+pub fn nine_slice(rect: [f32; 4], uv: [f32; 4], image: [f32; 2], inset: [f32; 4], tint: [u8; 4]) -> [Instance; 9] {
+    let squeeze = |a: f32, b: f32, room: f32| if a + b > room && a + b > 0.0 { room.max(0.0) / (a + b) } else { 1.0 };
+    let (kx, ky) = (squeeze(inset[0], inset[2], rect[2] - rect[0]), squeeze(inset[1], inset[3], rect[3] - rect[1]));
+    let xs = [rect[0], rect[0] + inset[0] * kx, rect[2] - inset[2] * kx, rect[2]];
+    let ys = [rect[1], rect[1] + inset[1] * ky, rect[3] - inset[3] * ky, rect[3]];
+    let (du, dv) = (uv[2] - uv[0], uv[3] - uv[1]);
+    let us = [uv[0], uv[0] + du * inset[0] / image[0], uv[2] - du * inset[2] / image[0], uv[2]];
+    let vs = [uv[1], uv[1] + dv * inset[1] / image[1], uv[3] - dv * inset[3] / image[1], uv[3]];
+    std::array::from_fn(|i| {
+        let (x, y) = (i % 3, i / 3);
+        Instance::image([xs[x], ys[y], xs[x + 1], ys[y + 1]], [us[x], vs[y], us[x + 1], vs[y + 1]], tint)
+    })
+}
+
 /// IEEE half bits of `x` (round to nearest even).
 pub fn f16(x: f32) -> u16 {
     let bits = (x as f64).to_bits();
@@ -113,7 +163,10 @@ impl Instance {
     pub fn mask(rect: [f32; 4], uv: [f32; 4], color: [u8; 4]) -> Self {
         Instance { rect, color, kind: kind::MASK, aux: [unorms(uv[0], uv[1]), unorms(uv[2], uv[3])], ..Self::DEFAULT }
     }
-    /// A colour glyph or image from the RGBA atlas (or the texture of the enclosing break).
+    /// A colour glyph or image from the RGBA atlas (or the texture of the enclosing break). `tint`
+    /// multiplies the texel per channel, alpha included: white keeps the image, a grey scales brightness,
+    /// a translucent white fades it, a colour tints a white-on-transparent icon. Corner radii (`radii`)
+    /// round the image, see [`fit`] and [`nine_slice`] for placing it.
     pub fn image(rect: [f32; 4], uv: [f32; 4], tint: [u8; 4]) -> Self { Instance { kind: kind::IMAGE, ..Self::mask(rect, uv, tint) } }
     /// An analytic gaussian shadow of the rounded rect `rect`/`radii`.
     pub fn shadow(rect: [f32; 4], radii: [f32; 4], color: [u8; 4], offset: [f32; 2], sigma: f32, spread: f32, inner: bool) -> Self {
