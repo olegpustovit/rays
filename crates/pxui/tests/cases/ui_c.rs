@@ -892,6 +892,7 @@ pub fn window_pxui_text_memory() {
         }
     }
     let bytes = ui.text_undo_bytes();
+    rays_shell::host::charge(&mut ui);
     if bytes > TEXT_UNDO_BYTE_CAP {
         fail("text undo passed its byte cap across stacks");
     }
@@ -927,8 +928,8 @@ pub fn window_pxui_text_memory() {
     if Rc::ptr_eq(&ui.text_rows(Some(3), a), &first_a) {
         fail("rows are per wrap width");
     }
-    ui.destroy();
-    other.destroy();
+    rays_shell::host::destroy(&mut ui);
+    rays_shell::host::destroy(&mut other);
     if mem::bytes(&owner) != at_start {
         fail("destroying the handle releases its charge");
     }

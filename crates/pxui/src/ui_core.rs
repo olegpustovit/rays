@@ -9,7 +9,6 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::OnceLock;
 
 pub type Rect = (f64, f64, f64, f64);
 pub type Flags = i64;
@@ -469,20 +468,6 @@ pub struct Atlas {
     next_font: i64,
 }
 
-fn atlas_owner() -> &'static mem::Owner {
-    static OWNER: OnceLock<mem::Owner> = OnceLock::new();
-    OWNER.get_or_init(|| mem::plan("pxui.atlas"))
-}
-
-fn text_undo_owner() -> &'static mem::Owner {
-    static OWNER: OnceLock<mem::Owner> = OnceLock::new();
-    OWNER.get_or_init(|| mem::document("pxui.text_undo"))
-}
-
-pub(crate) fn text_undo_ledger() -> &'static mem::Owner {
-    text_undo_owner()
-}
-
 impl Atlas {
     fn empty() -> Atlas {
         Atlas { width: ATLAS_WIDTH, height: 0, pixels: Vec::new(), glyphs: HashMap::new(), shelf_x: 0, shelf_y: 0, shelf_h: 0, dirty: false, image: None, fonts: Vec::new(), next_font: 1 }
@@ -813,7 +798,9 @@ pub struct Ui {
     gesture_time: f64,
     gesture_velocity: f64,
     pub edit_undo: Vec<(String, usize, usize)>,
-    pub(crate) edit_undo_charged: i64,
+    pub(crate) text_undo_held: i64,
+    /// What the host last charged to its memory ledger for this UI; PXUI never reads it.
+    pub charged: Bytes,
     pub(crate) text_rows_seen: Vec<(Option<usize>, String, Rc<Vec<(usize, usize, usize)>>)>,
     pub(crate) text_colors_seen: Vec<(Theme, String, Rc<Vec<(i64, i64, Color)>>)>,
     pub(crate) edit_redo: Vec<(String, usize, usize)>,
@@ -848,6 +835,13 @@ pub struct Ui {
     out: PlatformOut,
     borrowed_images: Vec<(i64, Image)>,
     destroyed: bool,
+}
+
+/// Bytes a UI holds: the glyph atlas's CPU mirror and the text undo stacks and shelf.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Bytes {
+    pub atlas: i64,
+    pub text_undo: i64,
 }
 
 /// One text left behind: its key, value and its undo and redo stacks.
@@ -892,7 +886,6 @@ impl Ui {
             panic!("Ui.create: font_size must be positive");
         }
         let fonts = Fonts::create(backend, font_path, font_size);
-        mem::charge(atlas_owner(), fonts.atlas.pixels.len() as i64);
         Ui {
             theme: theme::default(),
             font_size,
@@ -941,7 +934,8 @@ impl Ui {
             gesture_time: f64::NAN,
             gesture_velocity: 0.0,
             edit_undo: Vec::new(),
-            edit_undo_charged: 0,
+            text_undo_held: 0,
+            charged: Bytes::default(),
             text_rows_seen: Vec::new(),
             text_colors_seen: Vec::new(),
             edit_redo: Vec::new(),
@@ -986,10 +980,7 @@ impl Ui {
     /// Release the glyph atlas and the kit faces this UI loaded. The handle must not be used
     /// afterwards.
     pub fn destroy(&mut self) {
-        mem::release(text_undo_owner(), self.edit_undo_charged);
-        self.edit_undo_charged = 0;
         if !self.destroyed {
-            mem::release(atlas_owner(), self.fonts.atlas.pixels.len() as i64);
             self.destroyed = true;
             if let Some(image) = self.fonts.atlas.image.take() {
                 (self.fonts.backend.destroy_image)(&image);
@@ -1058,8 +1049,13 @@ impl Ui {
         self.font_size + (self.font_size + 1) / 2
     }
 
-    pub fn atlas_mirror_bytes(&self) -> i64 {
-        self.fonts.atlas.pixels.len() as i64
+    /// The heap this UI holds for the host to account for; zero once destroyed.
+    pub fn bytes(&self) -> Bytes {
+        if self.destroyed {
+            Bytes::default()
+        } else {
+            Bytes { atlas: self.fonts.atlas.pixels.len() as i64, text_undo: self.text_undo_held }
+        }
     }
 
     /// The width of kit text in points, for layout during the build (`Paint::text_width` while

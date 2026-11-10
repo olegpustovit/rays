@@ -59,7 +59,9 @@ pub fn num_field(ui: &mut Ui, at: (f64, f64), w: f64, h: f64, size: Option<i64>,
     });
     let mut o = ValueFieldOpts::default();
     o.size = size;
-    let text2 = ui.number_field(at, w, h, &o, kind, range, Some(valid.clone()), label, text);
+    o.fraction = range.and_then(|r| param::number::fraction(r, text));
+    o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx, fine)));
+    let text2 = ui.value_field(at, w, h, &o, &*valid, label, text).0;
     if text2 != text && valid(&text2) { Some(text2) } else { None }
 }
 

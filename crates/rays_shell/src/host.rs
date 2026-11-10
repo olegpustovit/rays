@@ -4,6 +4,7 @@ use input::{frame::Frame, Event};
 use pxui::ui::{Backend, Font, Image, Raster, Ui};
 use rays::{clipboard, font, image, scene, sketch};
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 /// Run a frame as the Rays host does: the clipboard text the last frame asked for arrives first,
 /// and the clipboard and window-ground requests apply after.
@@ -26,6 +27,28 @@ pub fn frame(ui: &mut Ui, frame: &Frame, f: &mut dyn FnMut(&mut Ui)) {
     // no window, no effect
     if let Some(ground) = out.background {
         let _ = sketch::set_window_background(ground);
+    }
+    charge(ui);
+}
+
+/// Destroy the UI and take what it held off the memory ledger.
+pub fn destroy(ui: &mut Ui) {
+    ui.destroy();
+    charge(ui);
+}
+
+/// The ledger follows what the UI reports holding (after every `frame`).
+pub fn charge(ui: &mut Ui) {
+    static ATLAS: OnceLock<mem::Owner> = OnceLock::new();
+    static TEXT_UNDO: OnceLock<mem::Owner> = OnceLock::new();
+    let now = ui.bytes();
+    let was = std::mem::replace(&mut ui.charged, now);
+    for (owner, was, now) in [
+        (ATLAS.get_or_init(|| mem::plan("pxui.atlas")), was.atlas, now.atlas),
+        (TEXT_UNDO.get_or_init(|| mem::document("pxui.text_undo")), was.text_undo, now.text_undo),
+    ] {
+        mem::charge(owner, now - was);
+        mem::release(owner, was - now);
     }
 }
 

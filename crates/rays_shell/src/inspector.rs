@@ -153,10 +153,12 @@ fn numeric(
         edit,
         left: expression(text),
         trail: field.unit.clone().map(|unit| (unit, cx.ink_3)),
+        fraction: range.and_then(|r| param::number::fraction(r, text)),
+        scrub: Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx, fine))),
         ..ValueFieldOpts::default()
     };
-    let valid: Rc<dyn Fn(&str) -> bool> = Rc::new(move |t| param::number::valid(kind, t) || expression(t));
-    let changed = ui.number_field((x, y), w, 20.0, &opts, kind, range, Some(valid), key, text);
+    let valid = move |t: &str| param::number::valid(kind, t) || expression(t);
+    let changed = ui.value_field((x, y), w, 20.0, &opts, &valid, key, text).0;
     if changed == text {
         Vec::new()
     } else if expression(&changed) {

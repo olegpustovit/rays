@@ -260,13 +260,13 @@ pub fn word_at(text: &str, i: usize) -> (usize, usize) {
 }
 
 /// A number literal dragged `dx` points: a float moves a tenth of its last decimal place per
-/// point (Shift: ten times that) and keeps one more decimal; an integer moves one per six points
-/// (`param::number::int_scrub_delta`, same as the inspector).
+/// point (Shift: ten times that) and keeps one more decimal; an integer moves one per six points,
+/// as the inspector's integers do.
 pub fn scrubbed(literal: &str, dx: f64, coarse: bool) -> String {
     let int_value = literal.parse::<i64>().ok();
     match (literal.find('.'), int_value) {
         (None, Some(v)) => {
-            let n = param::number::int_scrub_delta(dx);
+            let n = (dx / 6.0).round();
             if n == 0.0 {
                 literal.to_owned()
             } else {
@@ -316,13 +316,6 @@ impl Ui {
             + self.edit_shelf.iter().map(|(_, _, undo, redo)| stack_bytes(undo) + stack_bytes(redo)).sum::<usize>()
     }
 
-    /// the ledger follows the stacks' one running total
-    fn charge_text_undo(&mut self, bytes: i64) {
-        mem::charge(text_undo_ledger(), bytes - self.edit_undo_charged);
-        mem::release(text_undo_ledger(), self.edit_undo_charged - bytes);
-        self.edit_undo_charged = bytes;
-    }
-
     fn enforce_text_undo(&mut self) {
         loop {
             let bytes = self.text_undo_bytes();
@@ -337,7 +330,8 @@ impl Ui {
                     false
                 };
             if !dropped {
-                self.charge_text_undo(bytes as i64);
+                // `Ui::bytes` reports the stacks' one running total
+                self.text_undo_held = bytes as i64;
                 return;
             }
         }
@@ -1020,31 +1014,6 @@ impl Ui {
             paint.clip_rect = previous_clip;
         });
         (value, editing)
-    }
-
-    /// A `value_field` over `param::number`: a drag scrubs the text by the step of `kind` and soft
-    /// `range`, so a click writes nothing. The new text; `valid` defaults to the kind's.
-    #[allow(clippy::too_many_arguments)]
-    pub fn number_field(
-        &mut self,
-        at: (f64, f64),
-        w: f64,
-        h: f64,
-        o: &ValueFieldOpts,
-        kind: param::number::Kind,
-        range: Option<(f64, f64)>,
-        valid: Option<Rc<dyn Fn(&str) -> bool>>,
-        key: &str,
-        text: &str,
-    ) -> String {
-        let mut o = o.clone();
-        o.fraction = range.and_then(|r| param::number::fraction(r, text));
-        o.scrub = Some(Rc::new(move |origin, dx, fine| param::number::scrub(kind, range, origin, dx, fine)));
-        let valid: Rc<dyn Fn(&str) -> bool> = match valid {
-            Some(v) => v,
-            None => Rc::new(move |t| param::number::valid(kind, t)),
-        };
-        self.value_field(at, w, h, &o, &*valid, key, text).0
     }
 
     /// The head block of a panel, from the kit's inspector sheet: 12 above, a chips row (the kind

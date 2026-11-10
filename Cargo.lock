@@ -508,6 +508,7 @@ dependencies = [
  "cfmt",
  "editor_core",
  "input",
+ "mem",
  "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",

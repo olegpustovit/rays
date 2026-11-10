@@ -83,7 +83,7 @@ pub fn machinery<'a>(value: &ModelView<'a>, under: Option<&dyn Fn(i64) -> Vec<ui
 
 pub fn close(value: &EditorModel) {
     let _ = history::release(value.history.clone());
-    value.ui.borrow_mut().destroy();
+    rays_shell::host::destroy(&mut value.ui.borrow_mut());
     cook::close(&value.cook);
 }
 
