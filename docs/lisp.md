@@ -74,6 +74,17 @@ Integers, floats, booleans, text, vectors, lists, arrays, records and functions 
 | `with_error` | Map a runtime diagnostic to a recovery value. |
 | `workspace` | Group graphs and reusable definitions into a workspace. |
 
+## File directives
+
+Imports appear before the workspace and resolve paths relative to its source file. Layout follows the workspace; panel and node entries persist editor presentation.
+
+| Directive | Meaning |
+| --- | --- |
+| `import` | Load reusable definitions and graphs from a path relative to this source file. |
+| `layout` | Persist editor presentation after the workspace declaration. |
+| `node` | Save a graph node's position and display state inside layout. |
+| `panel` | Save a panel's disclosure state and optional floating window bounds inside layout. |
+
 ## Namespaces
 
 Each row is a lookup target and an example from its registry entry.

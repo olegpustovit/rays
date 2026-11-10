@@ -50,6 +50,18 @@ pub const FORMS: &[(&str, &str, &str, &str)] = &[
     ("unquote-splicing", "expression", "Insert a sequence of syntax forms inside quasiquote.", "(defmacro call [f & args] `(~f ~@args))"),
 ];
 
+/// File and editor-presentation syntax, validated by the owning host rather than graph-body checking.
+pub const DIRECTIVES: &[(&str, &str, &str, &str)] = &[
+    ("import", "\"relative/path.rays\"", "Load reusable definitions and graphs from a path relative to this source file.", "(import \"swarm_lib.rays\")"),
+    ("layout", "entries...", "Persist editor presentation after the workspace declaration.", "(layout (panel [\"editor\" \"network\"] :collapsed false) (node [\"picture\" \"circle\"] :at [80 120]))"),
+    ("panel", "[editor binding] [:collapsed bool] [:window [x y width height]]", "Save a panel's disclosure state and optional floating window bounds inside layout.", "(panel [\"editor\" \"network\"] :collapsed false)"),
+    ("node", "[graph binding...] [:at [x y]] [:level text] [:pinned bool] [:collapsed bool] [:rows record]", "Save a graph node's position and display state inside layout.", "(node [\"picture\" \"circle\"] :at [80 120] :level \"card\")"),
+];
+
+pub fn is_directive(name: &str) -> bool {
+    DIRECTIVES.iter().any(|entry| entry.0 == name)
+}
+
 pub fn op_signature(operator: &op::Op) -> String {
     let sig = &operator.signature;
     let mut parts = vec![operator.name.clone()];
@@ -72,7 +84,7 @@ pub fn kind_signature(kind: &catalog::Kind) -> String {
 
 pub fn signature(name: &str) -> Option<String> {
     op::all().iter().find(|operator| operator.name == name).map(op_signature)
-        .or_else(|| FORMS.iter().find(|entry| entry.0 == name).map(|entry| format!("({name} {})", entry.1)))
+        .or_else(|| FORMS.iter().chain(DIRECTIVES).find(|entry| entry.0 == name).map(|entry| format!("({name} {})", entry.1)))
 }
 
 fn sample(ty: &Ty) -> String {
@@ -149,7 +161,7 @@ pub fn entries_with_ops(catalog: &catalog::Catalog, extra: &[op::Op]) -> Vec<Ent
         doc: operator.doc.to_string(), example: operator.example.to_string(),
         hidden: operator.name.starts_with("int/") || operator.name.starts_with("array/") && ["array/nth", "array/count"].contains(&operator.name.as_str()),
     }).collect();
-    entries.extend(FORMS.iter().map(|&(name, args, doc, example)| Entry {
+    entries.extend(FORMS.iter().chain(DIRECTIVES).map(|&(name, args, doc, example)| Entry {
         name: name.into(), context: None, signature: format!("({name} {args})"),
         doc: doc.into(), example: example.into(), hidden: name == "let*",
     }));
@@ -174,7 +186,7 @@ pub fn entries_with_ops(catalog: &catalog::Catalog, extra: &[op::Op]) -> Vec<Ent
 
 pub fn names(catalog: &catalog::Catalog) -> Vec<String> {
     let mut names = op::all().iter().map(|operator| operator.name.clone())
-        .chain(FORMS.iter().map(|entry| entry.0.to_owned()))
+        .chain(FORMS.iter().chain(DIRECTIVES).map(|entry| entry.0.to_owned()))
         .chain(catalog.kinds.iter().map(|kind| kind.qualified.clone())).collect::<Vec<_>>();
     names.sort(); names.dedup(); names
 }

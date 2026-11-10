@@ -159,9 +159,8 @@ pub fn empty_vocab() -> Vocab {
 
 /// Language forms use the same signatures and descriptions as CLI lookup.
 pub fn specials() -> Vec<(String, String)> {
-    let mut forms = vec![("import".to_owned(), "(import \"relative/path.rays\") · Read definitions and graphs from a neighbouring workspace.".to_owned())];
-    forms.extend(flow_check::registry::FORMS.iter().map(|(name, args, doc, _)| ((*name).to_owned(), format!("({name} {args}) · {doc}"))));
-    forms
+    flow_check::registry::FORMS.iter().chain(flow_check::registry::DIRECTIVES)
+        .map(|(name, args, doc, _)| ((*name).to_owned(), format!("({name} {args}) · {doc}"))).collect()
 }
 
 pub fn constants() -> Vec<(&'static str, &'static str)> {

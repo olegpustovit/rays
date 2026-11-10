@@ -35,7 +35,7 @@ fn cli_help_errors_json_and_documentation() {
     let guide_path = root().join("docs/lisp.md");
     if std::env::var_os("RAYS_UPDATE_FIXTURES").is_some() { std::fs::write(&guide_path, &guide.stdout).unwrap(); }
     assert_eq!(stdout(&guide), std::fs::read_to_string(guide_path).unwrap());
-    for name in ["-", "->"] {
+    for name in ["-", "->", "import", "layout", "panel", "node"] {
         let lookup = rays(&["doc", name]);
         assert!(lookup.status.success(), "{}: {}", name, String::from_utf8_lossy(&lookup.stderr));
     }
@@ -101,6 +101,24 @@ fn registry_metadata_contracts() {
     for entry in &entries {
         assert!(!entry.doc.trim().is_empty(), "{} has no documentation", entry.name);
         assert!(!entry.example.trim().is_empty(), "{} has no example", entry.name);
+    }
+    for &(name, _, _, example) in flow_check::registry::DIRECTIVES {
+        assert!(!flow_check::workspace::special_forms().contains(&name), "{name} belongs to host syntax");
+        assert!(entries.iter().any(|entry| entry.name == name));
+        if name == "import" {
+            assert_eq!(editor_document::workspace_doc::import_paths(example).unwrap(), vec!["swarm_lib.rays"]);
+            let imports = rays_editor::source_file::read_imports("sketches/directive_example.rays", example).unwrap();
+            let source = format!("{example}\n(workspace directive_example (graph value :context value 1))");
+            let (document, diagnostics, _) = web_export::check_cli::check_text(imports, &source, false).unwrap();
+            assert!(document.is_some(), "{diagnostics:?}");
+            assert!(!diagnostics.iter().any(|d| d.severity == rays_diagnostic::Severity::ErrorSeverity), "{diagnostics:?}");
+        } else {
+            let source = if name == "layout" { example.to_owned() } else { format!("(layout {example})") };
+            let forms = flow_syntax::syntax::parse(&source).unwrap();
+            let layout = editor_document::layout_by_path::of_syntax(&forms[0]).unwrap();
+            assert!(!editor_document::layout_by_path::is_empty(&layout));
+            assert_eq!(layout, editor_document::layout_by_path::of_syntax(&editor_document::layout_by_path::to_syntax(&layout)).unwrap());
+        }
     }
     let mut failures = Vec::new();
     for kind in &catalog.kinds {
