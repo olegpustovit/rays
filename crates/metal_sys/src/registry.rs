@@ -522,18 +522,26 @@ pub fn texture_is_shareable(receiver: &Handle) -> Result<bool, Error> {
     Ok(unsafe { output.assume_init() != 0 })
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_texture_is_shareable"] fn ffi_rays_metal_texture_is_shareable(receiver: *mut super::NativeHandle, output: *mut u8, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn indirect_render_command(receiver: &Handle, arg0: u64) -> Result<Handle, Error> {
+// Only acquisition can bind a command to the allocation that produced it.
+pub struct BoundRenderCommand { raw:Handle, parent:Handle, device_id:u64 }
+impl BoundRenderCommand {
+    pub(crate) fn raw(&self)->&Handle { &self.raw }
+    pub(crate) fn parent(&self)->&Handle { &self.parent }
+    pub(crate) fn device_id(&self)->u64 { self.device_id }
+}
+pub fn indirect_render_command(receiver: &Handle, arg0: u64) -> Result<BoundRenderCommand, Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
+    let mut device_id=0;
     let mut output: MaybeUninit<*mut super::NativeHandle> = MaybeUninit::uninit();
-    #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_indirect_render_command(receiver_ptr, arg0, output.as_mut_ptr(), &mut message) };
+    #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_indirect_render_command(receiver_ptr, arg0, output.as_mut_ptr(), &mut device_id, &mut message) };
     #[cfg(not(target_vendor = "apple"))] let status = 2;
     if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
-    Ok(unsafe { Handle::from_native(output.assume_init())? })
+    Ok(BoundRenderCommand {raw:unsafe { Handle::from_native(output.assume_init())? },parent:receiver.clone(),device_id})
 }
-#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_indirect_render_command"] fn ffi_rays_metal_indirect_render_command(receiver: *mut super::NativeHandle, arg0: u64, output: *mut *mut super::NativeHandle, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn indirect_render_command_set_pipeline(receiver: &Handle, arg0: &Handle) -> Result<(), Error> {
-    let receiver_ptr = receiver.as_native_ptr()?;
+#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_indirect_render_command"] fn ffi_rays_metal_indirect_render_command(receiver: *mut super::NativeHandle, arg0: u64, output: *mut *mut super::NativeHandle, device_id: *mut u64, message: *mut *const std::ffi::c_char) -> i32; }
+pub fn indirect_render_command_set_pipeline(receiver: &BoundRenderCommand, arg0: &Handle) -> Result<(), Error> {
+    let receiver_ptr = receiver.raw.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_indirect_render_command_set_pipeline(receiver_ptr, arg0.as_native_ptr()?, &mut message) };
     #[cfg(not(target_vendor = "apple"))] let status = 2;
@@ -541,8 +549,8 @@ pub fn indirect_render_command_set_pipeline(receiver: &Handle, arg0: &Handle) ->
     Ok(())
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_indirect_render_command_set_pipeline"] fn ffi_rays_metal_indirect_render_command_set_pipeline(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn indirect_render_command_set_vertex_buffer(receiver: &Handle, arg0: &Handle, arg1: u64, arg2: usize) -> Result<(), Error> {
-    let receiver_ptr = receiver.as_native_ptr()?;
+pub fn indirect_render_command_set_vertex_buffer(receiver: &BoundRenderCommand, arg0: &Handle, arg1: u64, arg2: usize) -> Result<(), Error> {
+    let receiver_ptr = receiver.raw.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_indirect_render_command_set_vertex_buffer(receiver_ptr, arg0.as_native_ptr()?, arg1, arg2, &mut message) };
     #[cfg(not(target_vendor = "apple"))] let status = 2;
@@ -550,8 +558,8 @@ pub fn indirect_render_command_set_vertex_buffer(receiver: &Handle, arg0: &Handl
     Ok(())
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_indirect_render_command_set_vertex_buffer"] fn ffi_rays_metal_indirect_render_command_set_vertex_buffer(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, arg1: u64, arg2: usize, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn indirect_render_command_set_fragment_buffer(receiver: &Handle, arg0: &Handle, arg1: u64, arg2: usize) -> Result<(), Error> {
-    let receiver_ptr = receiver.as_native_ptr()?;
+pub fn indirect_render_command_set_fragment_buffer(receiver: &BoundRenderCommand, arg0: &Handle, arg1: u64, arg2: usize) -> Result<(), Error> {
+    let receiver_ptr = receiver.raw.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_indirect_render_command_set_fragment_buffer(receiver_ptr, arg0.as_native_ptr()?, arg1, arg2, &mut message) };
     #[cfg(not(target_vendor = "apple"))] let status = 2;
@@ -559,8 +567,8 @@ pub fn indirect_render_command_set_fragment_buffer(receiver: &Handle, arg0: &Han
     Ok(())
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_indirect_render_command_set_fragment_buffer"] fn ffi_rays_metal_indirect_render_command_set_fragment_buffer(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, arg1: u64, arg2: usize, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn indirect_render_command_draw_primitives(receiver: &Handle, arg0: i64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> Result<(), Error> {
-    let receiver_ptr = receiver.as_native_ptr()?;
+pub fn indirect_render_command_draw_primitives(receiver: &BoundRenderCommand, arg0: i64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> Result<(), Error> {
+    let receiver_ptr = receiver.raw.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_indirect_render_command_draw_primitives(receiver_ptr, arg0, arg1, arg2, arg3, arg4, &mut message) };
     #[cfg(not(target_vendor = "apple"))] let status = 2;

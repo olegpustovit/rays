@@ -291,3 +291,20 @@ fn native_only_predicates_and_compacted_writes_are_admitted_in_core() {
         assert_eq!((admitted.offset(),admitted.size_type(),admitted.bytes()),(offset,kind,bytes));
     }
 }
+
+#[test]
+fn native_index_ranges_preserve_width_and_partial_primitives() {
+    use crate::render_pass::IndexType::{Uint16,Uint32};
+    for (kind,offset,count,instances) in [(Uint16,1,3,1),(Uint32,2,3,1),(Uint32,0,0,1),(Uint16,0,1,0)] {
+        assert_eq!(validation::admit_index_range("test",kind,offset,count,instances).unwrap_err().kind,ErrorKind::InvalidArgument);
+    }
+    for kind in [Uint16,Uint32] {
+        let range=validation::admit_index_range("test",kind,u64::MAX-3,u64::MAX,u64::MAX).unwrap();
+        assert_eq!((range.offset(),range.count(),range.instances()),(u64::MAX-3,u64::MAX,u64::MAX));
+        assert_eq!(range.index_type(),kind);
+        validation::admit_index_range("partial primitive",kind,0,1,1).unwrap();
+    }
+    for base in [i64::MIN,-1] {assert_eq!(validation::validate_base_vertex("test",base).unwrap_err().kind,ErrorKind::InvalidArgument);}
+    validation::validate_base_vertex("test",0).unwrap();
+    validation::validate_base_vertex("test",i64::MAX).unwrap();
+}

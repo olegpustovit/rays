@@ -69,27 +69,21 @@ pub fn create_indirect_command_buffer(device: &Handle, profile: &ogpu_core::vali
 }
 
 pub fn draw_indexed(
-    command: &Handle, primitive: i32, index_count: u64, index_type: i32, index_buffer: &Handle,
-    index_offset: u64, instance_count: u64, base_vertex: i64, base_instance: u64, device_registry_id: u64,
-) -> Result<(), Error> {
-    #[cfg(target_vendor = "apple")]
-    {
-        use std::ffi::c_char;
-        let mut message: *const c_char = std::ptr::null();
-        let status = unsafe {
-            rays_metal_indirect_render_draw_indexed(
-                command.as_native_ptr()?, primitive, index_count, index_type, index_buffer.as_native_ptr()?,
-                index_offset, instance_count, base_vertex, base_instance, device_registry_id, &mut message,
-            )
-        };
-        if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
-        Ok(())
+    command:&crate::registry::BoundRenderCommand,primitive:ogpu_core::render_pass::Primitive,index_buffer:&Handle,
+    range:&ogpu_core::validation::AdmittedIndexRange,base_vertex:i64,base_instance:u64,
+)->Result<(),Error>{
+    ogpu_core::validation::validate_base_vertex("Metal.Indirect_command_buffer.draw_indexed",base_vertex)
+        .map_err(|failure|Error::InvalidArgument(failure.message.into()))?;
+    #[cfg(target_vendor="apple")] {
+        use ogpu_core::render_pass::{Primitive,IndexType};
+        let primitive=match primitive {Primitive::PointList=>0,Primitive::LineList=>1,Primitive::LineStrip=>2,Primitive::TriangleList=>3,Primitive::TriangleStrip=>4};
+        let index_type=match range.index_type(){IndexType::Uint16=>0,IndexType::Uint32=>1};
+        let mut message=std::ptr::null();
+        let status=unsafe{rays_metal_indirect_render_draw_indexed(command.raw().as_native_ptr()?,command.parent().as_native_ptr()?,command.device_id(),primitive,range.count(),index_type,
+            index_buffer.as_native_ptr()?,range.offset(),range.instances(),base_vertex,base_instance,&mut message)};
+        if status==0 {Ok(())}else{Err(unsafe{Error::from_native(status,message)})}
     }
-    #[cfg(not(target_vendor = "apple"))]
-    {
-        let _ = (command, primitive, index_count, index_type, index_buffer, index_offset, instance_count, base_vertex, base_instance, device_registry_id);
-        Err(Error::Unavailable)
-    }
+    #[cfg(not(target_vendor="apple"))] {let _=(command,primitive,index_buffer,range,base_vertex,base_instance);Err(Error::Unavailable)}
 }
 
 #[cfg(target_vendor = "apple")]
@@ -103,9 +97,9 @@ unsafe extern "C" {
         message: *mut *const std::ffi::c_char,
     ) -> i32;
     fn rays_metal_indirect_render_draw_indexed(
-        command: *mut NativeHandle, primitive: i32, index_count: u64, index_type: i32,
+        command: *mut NativeHandle, icb: *mut NativeHandle, device_id:u64, primitive: i32, index_count: u64, index_type: i32,
         index_buffer: *mut NativeHandle, index_offset: u64, instance_count: u64,
-        base_vertex: i64, base_instance: u64, device_registry_id: u64, message: *mut *const std::ffi::c_char,
+        base_vertex: i64, base_instance: u64, message: *mut *const std::ffi::c_char,
     ) -> i32;
 }
 

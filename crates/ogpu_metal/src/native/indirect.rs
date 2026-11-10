@@ -67,18 +67,19 @@ impl IndirectCommandBuffer {
 
     pub(crate) fn raw(&self) -> &metal_sys::Handle { &self.0.raw }
     pub(crate) fn lifetime(&self) -> &Lifetime { &self.0.lifetime }
-    pub(crate) fn device(&self) -> &Device { &self.0.device }
     pub(crate) fn retain_buffer(&self, buffer: &Buffer) { self.retain(RetainedResource::Buffer(buffer.clone())); }
     pub(crate) fn retain_pipeline(&self, pipeline: &RenderPipeline) { self.retain(RetainedResource::Pipeline(pipeline.clone())); }
 
 }
 
 struct RenderCommandInner {
-    raw: metal_sys::Handle,
-    lifetime: Lifetime,
+    raw: metal_sys::registry::BoundRenderCommand,
     parent: IndirectCommandBuffer,
+    // Commands have no dependents; attachment also records their destroyed state.
     parent_attached: AtomicBool,
 }
+#[cfg(target_pointer_width="64")]
+const _:()=assert!(std::mem::size_of::<RenderCommandInner>()==40);
 impl Drop for RenderCommandInner {
     fn drop(&mut self) {
         
@@ -102,7 +103,7 @@ impl RenderCommand {
         }
         let raw = metal_sys::registry::indirect_render_command(&buffer.0.raw, index.index() as u64).map_err(|failure| sys_error(OP, failure))?;
         buffer.0.lifetime.attach();
-        Ok(Self(Arc::new(RenderCommandInner { raw, lifetime: Lifetime::new(), parent: buffer.clone(), parent_attached: AtomicBool::new(true) })))
+        Ok(Self(Arc::new(RenderCommandInner { raw, parent: buffer.clone(), parent_attached: AtomicBool::new(true) })))
     }
     pub fn set_pipeline(&self, pipeline: &RenderPipeline) -> Result<(), Error> {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.set_pipeline";
@@ -128,14 +129,11 @@ impl RenderCommand {
         self.set_buffer("Metal.Indirect_command_buffer.Render_command.set_fragment_buffer", false, index, offset, buffer)
     }
 
-    pub fn draw_indexed(&self, primitive: Primitive, index_type: IndexType, index_buffer: &Buffer, index_offset: u64, index_count: u64, instance_count: Option<u64>) -> Result<(), Error> {
+    pub fn draw_indexed(&self, primitive: Primitive, index_buffer: &Buffer, range:&ogpu_core::validation::AdmittedIndexRange) -> Result<(), Error> {
         const OP: &str = "Metal.Indirect_command_buffer.Render_command.draw_indexed";
-        let instance_count = instance_count.unwrap_or(1);
-        let type_code = match index_type { IndexType::Uint16 => 0, IndexType::Uint32 => 1 };
-        metal_sys::native::draw_indexed(
-            &self.0.raw, crate::native::pipeline::primitive_code(primitive) as i32, index_count, type_code, index_buffer.raw(), index_offset,
-            instance_count, 0, 0, self.0.parent.device().registry_id(),
-        ).map_err(|failure| sys_error(OP, failure))?;
+        if !self.0.parent_attached.load(Ordering::Acquire) {return Err(error(OP,ErrorKind::StaleHandle,"indirect render command is destroyed"));}
+        metal_sys::native::draw_indexed(&self.0.raw,primitive,index_buffer.raw(),range,0,0)
+            .map_err(|failure|sys_error(OP,failure))?;
         self.0.parent.retain_buffer(index_buffer);
         Ok(())
     }
@@ -150,7 +148,6 @@ impl RenderCommand {
     }
 
     pub fn destroy(&self) -> Result<(), Error> {
-        self.0.lifetime.destroy_parent("Metal.Indirect_command_buffer.Render_command.destroy")?;
         if self.0.parent_attached.swap(false, Ordering::AcqRel) { self.0.parent.lifetime().detach(); }
         Ok(())
     }

@@ -1045,6 +1045,38 @@ fragment float4 fragment_direct(O o [[stage_in]],texture2d<float> image [[textur
 "#;
 
 fn gpu_render_icb_argument() {
+    {
+        use ogpu_core::validation::{admit_icb, admit_index_range, IcbDescriptor};
+        let raw_device=metal_sys::native::default_device().unwrap();
+        let indices=metal_sys::registry::buffer_create(&raw_device,12,0).unwrap();
+        let mut descriptor=IcbDescriptor::new(vec![CommandType::IndirectDrawIndexed]);
+        descriptor.inherit_buffers=true;
+        descriptor.inherit_pipeline_state=true;
+        let raw_icb=metal_sys::native::create_indirect_command_buffer(&raw_device,&admit_icb(1,descriptor).unwrap()).unwrap();
+        let compute=metal_sys::native::create_indirect_command_buffer(&raw_device,
+            &admit_icb(1,IcbDescriptor::new(vec![CommandType::IndirectConcurrentDispatch])).unwrap()).unwrap();
+        let draw_only=metal_sys::native::create_indirect_command_buffer(&raw_device,
+            &admit_icb(1,IcbDescriptor::new(vec![CommandType::IndirectDraw])).unwrap()).unwrap();
+        let draw_only_command=metal_sys::registry::indirect_render_command(&draw_only,0).unwrap();
+        let command=metal_sys::registry::indirect_render_command(&raw_icb,0).unwrap();
+        let range=admit_index_range("test",IndexType::Uint32,0,3,1).unwrap();
+        without_handles("direct Sys indexed rejection",&mut || {
+            assert!(matches!(metal_sys::native::draw_indexed(&draw_only_command,Primitive::TriangleList,&indices,&range,0,0),Err(metal_sys::Error::InvalidArgument(_))));
+            assert!(matches!(metal_sys::registry::indirect_render_command(&compute,0),Err(metal_sys::Error::InvalidArgument(_))));
+            assert!(matches!(metal_sys::registry::indirect_render_command(&raw_icb,1),Err(metal_sys::Error::InvalidArgument(_))));
+            assert!(matches!(metal_sys::registry::indirect_render_command(&indices,0),Err(metal_sys::Error::Native(_))));
+            let too_long=admit_index_range("test",IndexType::Uint32,0,4,1).unwrap();
+            assert!(matches!(metal_sys::native::draw_indexed(&command,Primitive::TriangleList,&indices,&too_long,0,0),Err(metal_sys::Error::Native(_))));
+            assert!(matches!(metal_sys::native::draw_indexed(&command,Primitive::TriangleList,&indices,&range,-1,0),Err(metal_sys::Error::InvalidArgument(_))));
+        });
+        // Rejections leave the same native command available, including partial primitives in the advanced API.
+        drop(raw_icb); // The bound command itself retains its actual parent allocation.
+        let partial=admit_index_range("test",IndexType::Uint16,0,1,1).unwrap();
+        without_handles("direct Sys indexed retry",&mut || {
+            metal_sys::native::draw_indexed(&command,Primitive::TriangleList,&indices,&partial,0,0).unwrap();
+            metal_sys::native::draw_indexed(&command,Primitive::TriangleList,&indices,&range,0,0).unwrap();
+        });
+    }
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let compute=IndirectCommandBuffer::create(&device,&ogpu_core::validation::admit_icb(1,
         IndirectCommandBuffer::descriptor(vec![CommandType::IndirectConcurrentDispatch])).unwrap()).unwrap_or_else(|failure|die(failure));
@@ -1052,6 +1084,23 @@ fn gpu_render_icb_argument() {
         reject(ErrorKind::InvalidState,RenderCommand::at(&compute,ogpu_core::validation::admit_icb_index(1,0).unwrap()).err());
     });
     compute.destroy().unwrap_or_else(|failure|die(failure));
+    let mut descriptor=IndirectCommandBuffer::descriptor(vec![CommandType::IndirectDrawIndexed]);
+    descriptor.inherit_buffers=true;
+    descriptor.inherit_pipeline_state=true;
+    let icb=IndirectCommandBuffer::create(&device,&ogpu_core::validation::admit_icb(1,descriptor).unwrap()).unwrap_or_else(|failure|die(failure));
+    let command=RenderCommand::at(&icb,ogpu_core::validation::admit_icb_index(1,0).unwrap()).unwrap_or_else(|failure|die(failure));
+    let indices=shared(&device,12);
+    let range=ogpu_core::validation::admit_index_range("test",IndexType::Uint32,0,3,1).unwrap();
+    command.draw_indexed(Primitive::TriangleList,&indices,&range).unwrap_or_else(|failure|die(failure));
+    reject(ErrorKind::InvalidState,icb.destroy().err());
+    let escaped=command.clone();
+    command.destroy().unwrap_or_else(|failure|die(failure));
+    command.destroy().unwrap_or_else(|failure|die(failure));
+    reject(ErrorKind::StaleHandle,escaped.draw_indexed(Primitive::TriangleList,&indices,&range).err());
+    drop(command);
+    drop(escaped);
+    icb.destroy().unwrap_or_else(|failure|die(failure));
+    indices.destroy().unwrap_or_else(|failure|die(failure));
     let library = compile_library(&device, ICB_SOURCE, None).unwrap_or_else(|failure| die(failure));
     let fragment = find_function(&library, "fragment_main").unwrap_or_else(|failure| die(failure));
     let mut encoder = fragment.argument_encoder(ogpu_core::validation::admit_slot("test",1).unwrap()).unwrap_or_else(|failure| die(failure));

@@ -218,7 +218,7 @@ pub trait DriverIcb {
     fn icb_set_pipeline(&self, index: crate::validation::AdmittedIcbIndex, pipeline: Token) -> Result<(), Error>;
     fn icb_set_buffer(&self, index: crate::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, buffer: Token) -> Result<(), Error>;
     fn icb_draw(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error>;
-    fn icb_draw_indexed(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error>;
+    fn icb_draw_indexed(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, buffer: Token, range:&crate::validation::AdmittedIndexRange) -> Result<(), Error>;
     fn destroy_icb(&self) -> Result<(), Error>;
 }
 
@@ -1542,14 +1542,15 @@ fn valid_draw(operation: &str, primitive: Primitive, first: i64, count: i64, ins
 fn valid_indexed(
     operation: &str, device: &Device, primitive: Primitive, index_type: IndexType,
     buffer: &Buffer, offset: i64, count: i64, instances: i64,
-) -> Result<(), Error> {
+) -> Result<crate::validation::AdmittedIndexRange, Error> {
     resource_check(operation, device, &buffer.resource)?;
-    let stride = match index_type { IndexType::Uint16 => 2, IndexType::Uint32 => 4 };
-    if count <= 0 || offset < 0 || offset % stride != 0 || offset > buffer.buffer_descriptor.size
-        || count > (buffer.buffer_descriptor.size - offset) / stride || instances <= 0
-    {
-        return Err(make_error(operation, ErrorKind::InvalidArgument, "index range is invalid"));
-    }
+    let failure=||make_error(operation,ErrorKind::InvalidArgument,"index range is invalid");
+    let offset=u64::try_from(offset).map_err(|_|failure())?;
+    let count=u64::try_from(count).map_err(|_|failure())?;
+    let instances=u64::try_from(instances).map_err(|_|failure())?;
+    let range=crate::validation::admit_index_range(operation,index_type,offset,count,instances)?;
+    let size=u64::try_from(buffer.buffer_descriptor.size).map_err(|_|failure())?;
+    if offset>size || count>(size-offset)/range.element_bytes() {return Err(failure());}
     if primitive == Primitive::TriangleList && count % 3 != 0 {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "triangle-list index count is not divisible by three"));
     }
@@ -1559,7 +1560,7 @@ fn valid_indexed(
     if primitive == Primitive::LineList && count % 2 != 0 {
         return Err(make_error(operation, ErrorKind::InvalidArgument, "line-list index count is not divisible by two"));
     }
-    Ok(())
+    Ok(range)
 }
 pub fn icb_draw(
     icb: &Icb, index: i64, primitive: Primitive, first: i64, count: i64, instances: Option<i64>,
@@ -1577,8 +1578,8 @@ pub fn icb_draw_indexed(
     const OP: &str = "Backend.icb_draw_indexed";
     let index = check_icb(OP, icb, index)?;
     let instances = instances.unwrap_or(1);
-    valid_indexed(OP, &icb.0.device, primitive, index_type, buffer, offset, count, instances)?;
-    icb.0.raw().icb_draw_indexed(index, primitive, index_type, buffer.resource.0.token, offset, count, instances)
+    let range=valid_indexed(OP, &icb.0.device, primitive, index_type, buffer, offset, count, instances)?;
+    icb.0.raw().icb_draw_indexed(index, primitive, buffer.resource.0.token, &range)
 }
 pub fn destroy_icb(icb: &Icb) -> Result<(), Error> {
     if icb.0.dead.get() { return Ok(()); }
@@ -2145,6 +2146,11 @@ mod ownership_tests {
             buffer_descriptor: admitted_test_buffer(BufferDescriptor { label: None, size: 16, usage: vec![BufferUsage::Storage] }),
         };
         let reject = |kind, result: Result<(), Error>| assert_eq!(result.unwrap_err().kind, kind);
+        // No driver payload: every invalid range must stop before attempting driver entry.
+        let icb=Icb(Rc::new(IcbInner {raw:RefCell::new(None),token:0,device:device.clone(),capacity:1,dead:Cell::new(false)}));
+        for (offset,count,instances) in [(-1,3,1),(2,3,1),(0,0,1),(0,3,0),(0,4,1),(0,6,1)] {
+            reject(ErrorKind::InvalidArgument,icb_draw_indexed(&icb,0,Primitive::TriangleList,IndexType::Uint32,&buffer,offset,count,Some(instances)));
+        }
         reject(ErrorKind::InvalidState, dispatch_threads(&encoder, (1, 1, 1), (1, 1, 1)));
         reject(ErrorKind::InvalidArgument, set_pipeline(&encoder, &render));
         set_pipeline(&encoder, &compute).unwrap();

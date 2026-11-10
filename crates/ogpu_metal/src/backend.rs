@@ -371,17 +371,10 @@ impl DriverIcb for MetalIcb {
     fn icb_draw(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.command(index)?.draw_primitives(primitive, first as usize, count as usize, Some(instances as usize))
     }
-    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, index_type: IndexType, token: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
+    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, token: Token, range:&ogpu_core::validation::AdmittedIndexRange) -> Result<(), Error> {
         let command = self.command(index)?;
         let index_buffer = self.find_buffer(token)?;
-        command.draw_indexed(
-            primitive,
-            index_type,
-            index_buffer.metal(),
-            offset as u64,
-            count as u64,
-            Some(instances as u64),
-        )
+        command.draw_indexed(primitive,index_buffer.metal(),range)
     }
     fn destroy_icb(&self) -> Result<(), Error> {
         for slot in self.entry.commands.borrow_mut().iter_mut() {

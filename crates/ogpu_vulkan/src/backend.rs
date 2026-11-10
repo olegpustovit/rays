@@ -651,8 +651,11 @@ impl DriverIcb for IndirectCommands {
     fn icb_draw(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
         self.at(index, &mut |c| c.draw = Some(IcbDraw::Draw { primitive, first, count, instances }))
     }
-    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, index_type: IndexType, buffer: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
-        self.at(index, &mut |c| c.draw = Some(IcbDraw::Indexed { primitive, index_type, buffer, offset, count, instances }))
+    fn icb_draw_indexed(&self, index: ogpu_core::validation::AdmittedIcbIndex, primitive: Primitive, buffer: Token, range:&ogpu_core::validation::AdmittedIndexRange) -> Result<(), Error> {
+        let (Ok(offset),Ok(count),Ok(instances))=(i64::try_from(range.offset()),i64::try_from(range.count()),i64::try_from(range.instances())) else {
+            return Err(fail(ICB_OP,ErrorKind::InvalidArgument,"indexed command exceeds the native cache integer bounds"));
+        };
+        self.at(index, &mut |c| c.draw = Some(IcbDraw::Indexed { primitive,index_type:range.index_type(),buffer,offset,count,instances }))
     }
     fn destroy_icb(&self) -> Result<(), Error> {
         self.dev.icbs.borrow_mut().remove(&self.id);

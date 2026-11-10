@@ -10,13 +10,16 @@
 #include <type_traits>
 #include "metal_handle.h"
 #include "metal_kinds.h"
-struct MetalHandle { void *object; uint32_t kind; };
+struct MetalHandle { void *object; uint32_t kind; uint32_t icb_command_types; };
+static_assert(sizeof(MetalHandle) == 16, "retain ICB allocation facts without growing native handles");
 static thread_local std::string error_text;
 static thread_local std::string text_buffer;
 extern "C" int32_t rays_metal_set_error(const char **out, const char *message) { error_text = message ? message : "Metal operation failed"; if (out) *out = error_text.c_str(); return 1; }
 extern "C" int32_t rays_metal_set_unavailable(const char **out, const char *message) { error_text = message ? message : "Metal API is unavailable on this macOS version"; if (out) *out = error_text.c_str(); return 2; }
 extern "C" void *rays_metal_handle_object(MetalHandle *handle, uint32_t expected_kind) { if (handle == nullptr || handle->object == nullptr || handle->kind != expected_kind) return nullptr; return handle->object; }
-extern "C" MetalHandle *rays_metal_handle_new(void *pointer, uint32_t kind) { if (pointer == nullptr) return nullptr; id object = (__bridge id)pointer; return new (std::nothrow) MetalHandle{(__bridge_retained void *)object, kind}; }
+extern "C" MetalHandle *rays_metal_handle_new(void *pointer, uint32_t kind) { if (pointer == nullptr) return nullptr; id object = (__bridge id)pointer; return new (std::nothrow) MetalHandle{(__bridge_retained void *)object, kind, 0}; }
+extern "C" MetalHandle *rays_metal_icb_handle_new(void *pointer, uint32_t command_types) { MetalHandle *handle = rays_metal_handle_new(pointer, KIND_INDIRECT_COMMAND_BUFFER); if (handle) handle->icb_command_types = command_types; return handle; }
+extern "C" uint32_t rays_metal_icb_command_types(MetalHandle *handle) { return rays_metal_handle_object(handle, KIND_INDIRECT_COMMAND_BUFFER) ? handle->icb_command_types : 0; }
 static int32_t set_error(const char **out, const char *message) { return rays_metal_set_error(out, message); }
 static int32_t set_unavailable(const char **out) { return rays_metal_set_unavailable(out, nullptr); }
 static MetalHandle *make_handle(id object, uint32_t kind) { return object == nil ? nullptr : rays_metal_handle_new((__bridge void *)object, kind); }
@@ -963,13 +966,18 @@ extern "C" int32_t rays_metal_texture_is_shareable(MetalHandle *receiver, uint8_
     }
   } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); }
 }
-extern "C" int32_t rays_metal_indirect_render_command(MetalHandle *receiver, uint64_t arg0, MetalHandle * *out, const char **message) {
+extern "C" int32_t rays_metal_indirect_render_command(MetalHandle *receiver, uint64_t arg0, MetalHandle * *out, uint64_t *device_id, const char **message) {
   if (message) *message = nullptr;
   @try {
     @autoreleasepool {
       id<MTLIndirectCommandBuffer> object = checked_object(receiver, KIND_INDIRECT_COMMAND_BUFFER);
+      if ((rays_metal_icb_command_types(receiver) & (MTLIndirectCommandTypeDraw | MTLIndirectCommandTypeDrawIndexed)) == 0)
+        return rays_metal_set_invalid_argument(message, "native indirect command buffer does not enable render commands");
+      if (arg0 >= object.size) return rays_metal_set_invalid_argument(message, "indirect command index exceeds the native allocation");
       const id native_result = [object indirectRenderCommandAtIndex:static_cast<NSUInteger>(arg0)];
-      if (native_result == nil) return set_error(message, "Metal returned nil"); *out = make_handle(native_result, KIND_INDIRECT_RENDER_COMMAND);
+      if (native_result == nil) return set_error(message, "Metal returned nil");
+      *device_id = object.device.registryID;
+      *out = make_handle(native_result, KIND_INDIRECT_RENDER_COMMAND);
       return 0;
     }
   } @catch (NSException *exception) { return set_error(message, exception.reason.UTF8String); }

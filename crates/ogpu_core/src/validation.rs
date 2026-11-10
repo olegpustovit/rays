@@ -581,3 +581,28 @@ pub fn validate_render_command_types(operation:&str,types:&[IcbCommandType])->Re
     if types.iter().any(|t|matches!(t,IcbCommandType::IndirectDraw|IcbCommandType::IndirectDrawIndexed)) {Ok(())}
     else {Err(error::make(operation,ErrorKind::InvalidState,"descriptor does not enable render commands"))}
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct AdmittedIndexRange { index_type:crate::render_pass::IndexType,offset:u64,count:std::num::NonZeroU64,instances:std::num::NonZeroU64 }
+impl AdmittedIndexRange {
+    #[inline]
+    pub fn index_type(&self)->crate::render_pass::IndexType { self.index_type }
+    #[inline]
+    pub fn offset(&self)->u64 { self.offset }
+    #[inline]
+    pub fn count(&self)->u64 { self.count.get() }
+    #[inline]
+    pub fn instances(&self)->u64 { self.instances.get() }
+    pub fn element_bytes(&self)->u64 { match self.index_type { crate::render_pass::IndexType::Uint16=>2,crate::render_pass::IndexType::Uint32=>4 } }
+}
+/// Native draws may include incomplete primitives; ordinary Core callers apply their topology policy separately.
+pub fn admit_index_range(operation:&str,index_type:crate::render_pass::IndexType,offset:u64,count:u64,instances:u64)->Result<AdmittedIndexRange,Error>{
+    let failure=||invalid(operation,"index range is invalid");
+    let range=AdmittedIndexRange {index_type,offset,count:std::num::NonZeroU64::new(count).ok_or_else(failure)?,instances:std::num::NonZeroU64::new(instances).ok_or_else(failure)?};
+    if offset%range.element_bytes()!=0 { return Err(failure()); }
+    Ok(range)
+}
+#[inline]
+pub fn validate_base_vertex(operation:&str,base_vertex:i64)->Result<(),Error>{
+    if base_vertex<0 {Err(invalid(operation,"base vertex must be nonnegative"))}else{Ok(())}
+}

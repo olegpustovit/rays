@@ -67,7 +67,7 @@ extern "C" int32_t rays_metal_indirect_command_buffer_create(
             id<MTLIndirectCommandBuffer> buffer = [device newIndirectCommandBufferWithDescriptor:descriptor maxCommandCount:static_cast<NSUInteger>(raw_count) options:static_cast<MTLResourceOptions>(raw_options)];
             if (buffer == nil || buffer.device.registryID != device.registryID || buffer.size == 0)
                 return rays_metal_set_error(message, "Metal rejected the indirect command buffer descriptor");
-            *out = rays_metal_handle_new((__bridge void *)buffer, KIND_INDIRECT_COMMAND_BUFFER);
+            *out = rays_metal_icb_handle_new((__bridge void *)buffer, static_cast<uint32_t>(source->command_types));
             return *out ? 0 : rays_metal_set_error(message, "unable to allocate Metal handle");
         }
     } @catch (NSException *exception) {
@@ -76,24 +76,27 @@ extern "C" int32_t rays_metal_indirect_command_buffer_create(
 }
 
 extern "C" int32_t rays_metal_indirect_render_draw_indexed(
-    MetalHandle *command_handle, int32_t primitive, uint64_t index_count, int32_t index_type,
+    MetalHandle *command_handle, MetalHandle *icb_handle, uint64_t device_id, int32_t primitive, uint64_t index_count, int32_t index_type,
     MetalHandle *index_buffer_handle, uint64_t index_offset, uint64_t instance_count,
-    int64_t base_vertex, uint64_t base_instance, uint64_t device_registry_id, const char **message) {
+    int64_t base_vertex, uint64_t base_instance, const char **message) {
     if (message) *message = nullptr;
-    if (primitive < 0 || primitive > 4 || index_count == 0 || instance_count == 0 ||
-        (index_type != 0 && index_type != 1) || base_vertex < 0)
-        return rays_metal_set_error(message, "invalid indexed indirect draw arguments");
     @try {
         @autoreleasepool {
-            id<MTLIndirectRenderCommand> command = (__bridge id<MTLIndirectRenderCommand>)rays_metal_handle_object(command_handle, KIND_INDIRECT_RENDER_COMMAND);
+            id<MTLIndirectCommandBuffer> icb = (__bridge id<MTLIndirectCommandBuffer>)rays_metal_handle_object(icb_handle, KIND_INDIRECT_COMMAND_BUFFER);
             id<MTLBuffer> index_buffer = (__bridge id<MTLBuffer>)rays_metal_handle_object(index_buffer_handle, KIND_BUFFER);
+            if (icb == nil || index_buffer == nil)
+                return rays_metal_set_error(message, "invalid indirect command buffer or index buffer handle");
+            if ((rays_metal_icb_command_types(icb_handle) & MTLIndirectCommandTypeDrawIndexed) == 0)
+                return rays_metal_set_invalid_argument(message, "native indirect command buffer does not enable indexed draws");
             const uint64_t element_size = index_type == 0 ? 2 : 4;
-            if (index_offset % element_size != 0 || index_offset > index_buffer.length ||
+            if (index_offset > index_buffer.length ||
                 index_count > (index_buffer.length - index_offset) / element_size)
                 return rays_metal_set_error(message, "indexed indirect draw range is invalid");
-            if (index_buffer.device.registryID != device_registry_id)
+            if (index_buffer.device.registryID != device_id)
                 return rays_metal_set_error(message, "index buffer belongs to another device");
             if (@available(macOS 10.14, *)) {
+                id<MTLIndirectRenderCommand> command = (__bridge id<MTLIndirectRenderCommand>)rays_metal_handle_object(command_handle, KIND_INDIRECT_RENDER_COMMAND);
+                if (command == nil) return rays_metal_set_error(message, "invalid indirect render command handle");
                 [command drawIndexedPrimitives:static_cast<MTLPrimitiveType>(primitive)
                                     indexCount:static_cast<NSUInteger>(index_count)
                                      indexType:static_cast<MTLIndexType>(index_type)
