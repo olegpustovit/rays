@@ -11,7 +11,7 @@ use crate::native::{
     RenderEncoder, RenderPassDescriptor,
 };
 use ogpu_core::{
-    backend::{DepthState, DriverBatchDraw, DriverPipeline, DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, ShaderStage, Token, Winding as OgpuWinding},
+    backend::{DepthState, DriverBatchDraw, DriverIcb, DriverPipeline, DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, ShaderStage, Winding as OgpuWinding},
     error::ErrorKind,
     render_pass::{Cull, IndexType as OgpuIndex, Primitive as OgpuPrimitive, Rect},
 };
@@ -261,11 +261,10 @@ impl DriverRenderEncoder for Render {
         use_resources(&self.context, &self.encoder, resources, &mut self.declared.borrow_mut())
     }
 
-    fn execute_icb(&self, token: Token, location: i64, length: i64) -> Result<(), Error> {
-        let c = &self.context;
-        match c.icb(token) {
-            None => Err(fail(c.operation, ErrorKind::InvalidArgument, "indirect command buffer graph is incomplete")),
-            Some(entry) => self.encoder.execute_indirect_commands(&entry, location as usize, length as usize),
+    fn execute_icb(&self, icb: &dyn DriverIcb, location: i64, length: i64) -> Result<(), Error> {
+        match icb.as_any().downcast_ref::<crate::backend::MetalIcb>() {
+            None => Err(fail(self.context.operation, ErrorKind::InvalidArgument, "indirect command buffer graph is incomplete")),
+            Some(icb) => self.encoder.execute_indirect_commands(&icb.entry.icb, location as usize, length as usize),
         }
     }
 

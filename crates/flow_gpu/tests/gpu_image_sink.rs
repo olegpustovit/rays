@@ -90,7 +90,7 @@ impl b::DriverRenderEncoder for Wrapped<dyn b::DriverRenderEncoder> {
         draw_indexed_indirect(primitive: ogpu_core::render_pass::Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: &dyn b::DriverResource, offset: i64, arguments: &dyn b::DriverResource, arguments_offset: i64) -> Result<(), E>;
         draw_batch(draws: &[b::DriverBatchDraw]) -> Result<(), E>;
         use_resources(resources: &[Rc<dyn b::DriverResource>]) -> Result<(), E>;
-        execute_icb(icb: b::Token, location: i64, length: i64) -> Result<(), E>;
+        execute_icb(icb: &dyn b::DriverIcb, location: i64, length: i64) -> Result<(), E>;
     }
     fn draw(&self, primitive: ogpu_core::render_pass::Primitive, first: i64, count: i64, instances: i64) -> Result<(), E> {
         self.st.order.borrow_mut().push("draw");

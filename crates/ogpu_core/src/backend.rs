@@ -206,7 +206,7 @@ pub trait DriverRenderEncoder {
     fn draw_indexed_indirect(&self, primitive: Primitive, index_type: IndexType, buffer: &dyn DriverResource, offset: i64, arguments: &dyn DriverResource, arguments_offset: i64) -> Result<(), Error>;
     fn draw_batch(&self, draws: &[DriverBatchDraw]) -> Result<(), Error>;
     fn use_resources(&self, resources: &[Rc<dyn DriverResource>]) -> Result<(), Error>;
-    fn execute_icb(&self, icb: Token, location: i64, length: i64) -> Result<(), Error>;
+    fn execute_icb(&self, icb: &dyn DriverIcb, location: i64, length: i64) -> Result<(), Error>;
     fn end_render(&self) -> Result<(), Error>;
 }
 
@@ -216,7 +216,7 @@ pub trait DriverSampler {
 }
 
 pub trait DriverIcb {
-    fn icb_token(&self) -> Token;
+    fn as_any(&self) -> &dyn std::any::Any;
     fn icb_set_pipeline(&self, index: crate::validation::AdmittedIcbIndex, pipeline: &dyn DriverPipeline) -> Result<(), Error>;
     fn icb_set_buffer(&self, index: crate::validation::AdmittedIcbIndex, stage: ShaderStage, slot: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error>;
     fn icb_draw(&self, index: crate::validation::AdmittedIcbIndex, primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), Error>;
@@ -399,7 +399,7 @@ pub struct Sampler(Rc<SamplerInner>);
 struct SamplerInner { raw: RefCell<Option<Box<dyn DriverSampler>>>, device: Device, dead: Cell<bool> }
 #[derive(Clone)]
 pub struct Icb(Rc<IcbInner>);
-struct IcbInner { raw: RefCell<Option<Box<dyn DriverIcb>>>, token: Token, device: Device, capacity: i64, dead: Cell<bool> }
+struct IcbInner { raw: RefCell<Option<Box<dyn DriverIcb>>>, device: Device, capacity: i64, dead: Cell<bool> }
 #[derive(Clone)]
 pub struct Argument(Rc<ArgumentInner>);
 struct ArgumentInner { raw: RefCell<Option<Box<dyn DriverArgument>>>, length: i64, alignment: i64, device: Device, dead: Cell<bool> }
@@ -1530,7 +1530,7 @@ pub fn create_icb(device: &Device, max_commands: i64) -> Result<Icb, Error> {
     let profile = crate::validation::admit_icb(capacity, descriptor)?;
     let raw = device.0.raw().create_icb(&profile)?;
     device.0.children.set(device.0.children.get() + 1);
-    Ok(Icb(Rc::new(IcbInner { token: raw.icb_token(), raw: RefCell::new(Some(raw)), device: device.clone(), capacity: max_commands, dead: Cell::new(false) })))
+    Ok(Icb(Rc::new(IcbInner { raw: RefCell::new(Some(raw)), device: device.clone(), capacity: max_commands, dead: Cell::new(false) })))
 }
 fn check_icb(operation: &str, icb: &Icb, index: i64) -> Result<crate::validation::AdmittedIcbIndex, Error> {
     if icb.0.dead.get() { return Err(make_error(operation, ErrorKind::StaleHandle, "indirect command buffer is destroyed")); }
@@ -1975,7 +1975,7 @@ pub fn execute_icb(encoder: &RenderEncoder, icb: &Icb, location: i64, length: i6
     if location < 0 || length <= 0 || location > icb.0.capacity - length {
         return Err(make_error(OP, ErrorKind::InvalidArgument, "indirect command range is out of range"));
     }
-    encoder.0.raw().execute_icb(icb.0.token, location, length)
+    encoder.0.raw().execute_icb(&*icb.0.raw(), location, length)
 }
 pub fn end_render(encoder: &RenderEncoder) -> Result<(), Error> {
     const OP: &str = "Backend.end_render";
@@ -2189,7 +2189,7 @@ mod ownership_tests {
         };
         let reject = |kind, result: Result<(), Error>| assert_eq!(result.unwrap_err().kind, kind);
         // No driver payload: every invalid range must stop before attempting driver entry.
-        let icb=Icb(Rc::new(IcbInner {raw:RefCell::new(None),token:0,device:device.clone(),capacity:1,dead:Cell::new(false)}));
+        let icb=Icb(Rc::new(IcbInner {raw:RefCell::new(None),device:device.clone(),capacity:1,dead:Cell::new(false)}));
         for (offset,count,instances) in [(-1,3,1),(2,3,1),(0,0,1),(0,3,0),(0,4,1),(0,6,1)] {
             reject(ErrorKind::InvalidArgument,icb_draw_indexed(&icb,0,Primitive::TriangleList,IndexType::Uint32,&buffer,offset,count,Some(instances)));
         }
@@ -2234,7 +2234,7 @@ mod ownership_tests {
         end_compute(&encoder).unwrap();
         reject(ErrorKind::InvalidState, set_buffer(&encoder, 0, &buffer));
         reject(ErrorKind::InvalidState, compute_use_accels(&encoder, &[]));
-        let icb = Icb(Rc::new(IcbInner { raw: RefCell::new(None), token: 7, device: device.clone(), capacity: 1, dead: Cell::new(false) }));
+        let icb = Icb(Rc::new(IcbInner { raw: RefCell::new(None), device: device.clone(), capacity: 1, dead: Cell::new(false) }));
         compute.0.dead.set(false);
         reject(ErrorKind::InvalidArgument, icb_set_pipeline(&icb, 0, &compute));
         reject(ErrorKind::Unsupported, icb_set_pipeline(&icb, 0, &render));

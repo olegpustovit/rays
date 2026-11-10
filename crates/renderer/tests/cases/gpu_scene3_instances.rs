@@ -430,7 +430,7 @@ impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder>
         draw_indexed(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: &dyn backend::DriverResource, offset: i64, count: i64, instances: i64) -> Result<(), E>;
         draw_indexed_indirect(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: &dyn backend::DriverResource, offset: i64, arguments: &dyn backend::DriverResource, arguments_offset: i64) -> Result<(), E>;
         use_resources(resources: &[Rc<dyn backend::DriverResource>]) -> Result<(), E>;
-        execute_icb(icb: backend::Token, location: i64, length: i64) -> Result<(), E>;
+        execute_icb(icb: &dyn backend::DriverIcb, location: i64, length: i64) -> Result<(), E>;
         end_render() -> Result<(), E>;
     }
     fn set_stage_buffer(&self, stage: backend::ShaderStage, slot: i64, offset: i64, buffer: &dyn backend::DriverResource) -> Result<(), E> {

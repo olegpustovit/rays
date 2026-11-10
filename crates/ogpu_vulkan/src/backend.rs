@@ -177,7 +177,6 @@ fn validation_mode() -> (bool, bool) {
 struct Dev {
     device: RefCell<Option<Rc<vk::Device>>>,
     next: Cell<i64>,
-    icbs: RefCell<HashMap<i64, Rc<RefCell<Vec<IcbCommand>>>>>,
     frames: RefCell<HashMap<i64, Rc<RefCell<Option<vk::Surface>>>>>,
     queues: Cell<i64>,
     max_invocations: i64,
@@ -594,8 +593,6 @@ impl DriverSampler for OwnedSampler {
 const ICB_OP: &str = "Ogpu_vulkan.icb";
 
 struct IndirectCommands {
-    dev: Rc<Dev>,
-    id: Token,
     commands: Rc<RefCell<Vec<IcbCommand>>>,
 }
 
@@ -611,8 +608,8 @@ impl IndirectCommands {
 }
 
 impl DriverIcb for IndirectCommands {
-    fn icb_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
         let entry = pipeline_entry(ICB_OP, pipeline)?;
@@ -633,18 +630,15 @@ impl DriverIcb for IndirectCommands {
         self.at(index, &mut |c| c.draw = Some(IcbDraw::Indexed { primitive,index_type:range.index_type(),buffer:buffer.clone(),offset,count,instances }))
     }
     fn destroy_icb(&self) -> Result<(), Error> {
-        self.dev.icbs.borrow_mut().remove(&self.id);
         live_add(-1);
         Ok(())
     }
 }
 
-fn create_icb(dev: &Rc<Dev>, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
-    let id = dev.token();
+fn create_icb(profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
     live_add(1);
     let commands = Rc::new(RefCell::new(vec![IcbCommand::default(); profile.capacity()]));
-    dev.icbs.borrow_mut().insert(id, commands.clone());
-    Ok(Box::new(IndirectCommands { dev: dev.clone(), id, commands }))
+    Ok(Box::new(IndirectCommands { commands }))
 }
 
 const ARGUMENT_OP: &str = "Ogpu_vulkan.argument";
@@ -1381,9 +1375,8 @@ impl DriverRenderEncoder for Render {
     fn use_resources(&self, _resources: &[Rc<dyn DriverResource>]) -> Result<(), Error> {
         Ok(())
     }
-    fn execute_icb(&self, id: Token, location: i64, length: i64) -> Result<(), Error> {
-        let recorded = self.cmds.dev.icbs.borrow().get(&id).cloned();
-        let Some(recorded) = recorded else {
+    fn execute_icb(&self, icb: &dyn DriverIcb, location: i64, length: i64) -> Result<(), Error> {
+        let Some(IndirectCommands { commands: recorded }) = icb.as_any().downcast_ref::<IndirectCommands>() else {
             return Err(fail(QUEUE_OP, ErrorKind::InvalidArgument, "indirect commands are unknown"));
         };
         for i in location..location + length {
@@ -1684,7 +1677,7 @@ impl DriverDevice for VulkanDevice {
         create_render_pipeline(&self.dev, options, descriptor)
     }
     fn create_icb(&self, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
-        create_icb(&self.dev, profile)
+        create_icb(profile)
     }
     fn create_argument(&self, _pipeline: &dyn DriverPipeline, _stage: ShaderStage, _index: ogpu_core::validation::AdmittedSlot) -> Result<Box<dyn DriverArgument>, Error> {
         create_argument()
@@ -1701,7 +1694,6 @@ impl DriverDevice for VulkanDevice {
         }
         self.device_live.set(false);
         // Natives leaked past their owners go with the device.
-        self.dev.icbs.borrow_mut().clear();
         self.dev.frames.borrow_mut().clear();
         *self.dev.device.borrow_mut() = None;
         handle::destroy_device(&self.handle);
@@ -1726,7 +1718,6 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
     let dev = Rc::new(Dev {
         device: RefCell::new(Some(Rc::new(device))),
         next: Cell::new(1),
-        icbs: RefCell::default(),
         frames: RefCell::default(),
         queues: Cell::new(0),
         max_invocations: facts.max_invocations as i64,

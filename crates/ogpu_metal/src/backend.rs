@@ -310,10 +310,8 @@ fn create_render_pipeline(dev: &Rc<Dev>, _options: RenderPipelineOptions, descri
 
 const ICB_OP: &str = "Ogpu_metal.Backend.create_icb";
 
-struct MetalIcb {
-    dev: Rc<Dev>,
-    entry: Rc<IcbEntry>,
-    id: i64,
+pub(crate) struct MetalIcb {
+    pub(crate) entry: Rc<IcbEntry>,
 }
 
 impl MetalIcb {
@@ -333,8 +331,8 @@ impl MetalIcb {
 }
 
 impl DriverIcb for MetalIcb {
-    fn icb_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn icb_set_pipeline(&self, index: ogpu_core::validation::AdmittedIcbIndex, pipeline: &dyn DriverPipeline) -> Result<(), Error> {
         let Some(pipeline) = metal_pipeline(pipeline) else {
@@ -367,19 +365,15 @@ impl DriverIcb for MetalIcb {
                 let _ = command.destroy();
             }
         }
-        self.entry.icb.destroy()?;
-        self.dev.t.icbs.borrow_mut().remove(&self.id);
-        Ok(())
+        self.entry.icb.destroy()
     }
 }
 
 fn create_icb(dev: &Rc<Dev>, profile: &ogpu_core::validation::AdmittedIcb) -> Result<Box<dyn DriverIcb>, Error> {
     let max_commands = profile.capacity();
     let icb = native::IndirectCommandBuffer::create(dev.device.metal(), profile)?;
-    let id = dev.t.token();
     let entry = Rc::new(IcbEntry { icb, commands: RefCell::new(vec![None; max_commands as usize]) });
-    dev.t.icbs.borrow_mut().insert(id, entry.clone());
-    Ok(Box::new(MetalIcb { dev: dev.clone(), entry, id }))
+    Ok(Box::new(MetalIcb { entry }))
 }
 
 const ARGUMENT_OP: &str = "Ogpu_metal.Backend.create_argument";

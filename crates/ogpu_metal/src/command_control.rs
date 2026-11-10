@@ -19,7 +19,6 @@ use ogpu_core::{
 };
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
     rc::Rc,
 };
 
@@ -30,7 +29,6 @@ pub struct IcbEntry {
 
 /// The token tables of one device.
 pub struct Tables {
-    pub icbs: RefCell<HashMap<i64, Rc<IcbEntry>>>,
     /// Every depth-stencil state, made with the device (`create_depth_states`): eight comparisons
     /// by write or not. Made lazily they would outlive the first owner that drew with them.
     pub depth_states: RefCell<Vec<(DepthState, DepthStencil)>>,
@@ -40,7 +38,6 @@ pub struct Tables {
 impl Tables {
     pub fn new() -> Tables {
         Tables {
-            icbs: RefCell::new(HashMap::new()),
             depth_states: RefCell::new(Vec::new()),
             next: Cell::new(1),
         }
@@ -173,10 +170,6 @@ impl CommandContext {
             self.retained.borrow_mut().push(Retained::Sampler(sampler.clone()));
         }
         Ok(())
-    }
-
-    pub fn icb(&self, token: i64) -> Option<native::IndirectCommandBuffer> {
-        self.tables.icbs.borrow().get(&token).map(|entry| entry.icb.clone())
     }
 
     pub fn depth_state(&self, state: DepthState) -> Result<DepthStencil, Error> {
