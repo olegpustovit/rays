@@ -61,22 +61,33 @@ fn validation_without_editor_records_preserves_geometry_and_errors() {
 #[test]
 fn swarm_topology_template_matches_original_at_kernel_and_degenerate_boundaries() {
     let library = include_str!("../../../../sketches/swarm_lib.rays");
-    let start = library.find("          quads# ").expect("swarm topology start");
-    let finish = library.find("          mesh# ").expect("swarm topology end");
-    let topology = &library[start..finish];
-    let original = topology.replace("share_body# (and (> ~tubes 1)", "share_body# (and false");
-    assert_ne!(original, topology);
-    let evaluate = |body: &str, tubes: i64, points: i64, sides: i64| {
+    let ring_of = &library[library.find("          ring-of# ").expect("ring lookup")..library.find("          around# ").expect("ring lookup end")];
+    let colors = &library[library.find("          share_tubes# ").expect("sharing guard")..library.find("          quads# ").expect("colors end")];
+    let topology = &library[library.find("          quads# ").expect("topology start")..library.find("          mesh# ").expect("topology end")];
+    let recipe = format!("{ring_of}{colors}{topology}");
+    let original = recipe.replace("share_tubes# (and (> ~tubes 1)", "share_tubes# (and false");
+    assert_ne!(original, recipe);
+    let evaluate = |body: &str, tubes: i64, points: i64, sides: i64, gradient: &str| {
         let body = body.replace("~tubes", "tubes").replace("~points", "points").replace("~sides", "sides");
-        let source = format!("(workspace w (graph g :context value [(tubes : int {tubes}) (points : int {points}) (sides : int {sides})] (let* [last# (- points 1) rings# (* (* tubes points) sides) {body}] 0.0)))").replace('#', "_local");
+        let source = format!("(workspace w (graph g :context value [(tubes : int {tubes}) (points : int {points}) (sides : int {sides})] (let* [last# (- points 1) rings# (* (* tubes points) sides) vertices# (+ rings# (* tubes 2)) gradient# {gradient} {body} result# {{:corners corners# :colors colors#}}] 0.0)))").replace('#', "_local");
         let catalog = flow_check::catalog::Catalog { version: 1, kinds: Vec::new() };
         let (checked, errors) = flow_check::workspace::check(ops::all(), false, false, None, &catalog, &parse(&source));
         assert!(checked.is_some(), "{errors:?}");
-        let checked = checked.expect("checked topology");
+        let checked = checked.expect("checked tube recipe");
         flow_ir::flow_ir::static_(&flow_ir::flow_ir::StaticOptions { record: true, replay: true, verify: true, ..Default::default() }, &checked)
-            .map(|result| result.records.iter().find(|(path, _)| path.last().is_some_and(|name| name.as_str() == "corners_local")).expect("recorded corners").1[0].1.clone()).map_err(|error| (error.code, error.message))
+            .map(|result| {
+                let value = &result.records.iter().find(|(path, _)| path.last().is_some_and(|name| name.as_str() == "result_local")).expect("recorded tube arrays").1[0].1;
+                let flow_eval::Value::Record(fields) = value else { unreachable!("tube arrays record") };
+                let flow_eval::Value::Floats(3, colors) = fields.get_str("colors").expect("colors") else { unreachable!("color vectors") };
+                (fields.get_str("corners").expect("corners").clone(), colors.iter().map(|value| value.to_bits()).collect::<Vec<_>>())
+            }).map_err(|error| (error.code, error.message))
     };
+    let gradient = "{:a [0.57 0.49 0.54] :b [0.459 0.278 0.13] :c [1.0 0.85 1.18] :d [0.0 0.76 0.15]}";
     for (tubes, points, sides) in [(0, 3, 3), (1, 3, 3), (2, 1, 3), (2, 0, 3), (2, 3, 0), (-1, 3, 3), (2, -1, 3), (2, 113, 3), (2, 114, 3)] {
-        assert_eq!(evaluate(topology, tubes, points, sides), evaluate(&original, tubes, points, sides), "{tubes}/{points}/{sides}");
+        assert_eq!(evaluate(&recipe, tubes, points, sides, gradient), evaluate(&original, tubes, points, sides, gradient), "{tubes}/{points}/{sides}");
     }
+    let invalid = "{:a [0.57 0.49 0.54] :b [0.459 0.278 0.13] :c [1e308 0.85 1.18] :d [0.0 0.76 0.15]}";
+    let cached = evaluate(&recipe, 2, 114, 3, invalid);
+    assert!(cached.is_err(), "selected non-finite color must fail");
+    assert_eq!(cached, evaluate(&original, 2, 114, 3, invalid));
 }
