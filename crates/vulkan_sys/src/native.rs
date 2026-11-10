@@ -252,6 +252,7 @@ unsafe extern "C" {
     fn rv_render_draw_indexed(commands:*mut c_void,buffer:*mut c_void,primitive:i32,kind:i32,offset:u64,count:u32,instances:u32)->i32;
     fn rv_render_draw_indexed_indirect(commands:*mut c_void,buffer:*mut c_void,arguments:*mut c_void,primitive:i32,kind:i32,offset:u64,args_offset:u64)->i32;
     fn rv_surface_create(device:*mut c_void,hwnd:*mut c_void,immediate:bool,out:*mut *mut c_void)->i32;
+    fn rv_surface_set_extent(surface:*mut c_void,width:u32,height:u32);
     fn rv_surface_configure(surface:*mut c_void,immediate:bool)->i32;
     fn rv_surface_acquire(surface:*mut c_void,image:*mut i32)->i32;
     fn rv_surface_discard(surface:*mut c_void);
@@ -615,6 +616,8 @@ impl Drop for Sampler{fn drop(&mut self){unsafe{rv_sampler_destroy(self.device.r
 
 pub struct Surface{raw:NonNull<c_void>,device:Arc<DeviceInner>,acquired:bool,_not_send:PhantomData<Rc<()>>}
 impl Surface{
+    /// Wayland surfaces report no size: the host says how large the swapchain images are. Ignored where the OS reports one.
+    pub fn set_extent(&mut self,width:u32,height:u32){self.acquired=false;unsafe{rv_surface_set_extent(self.raw.as_ptr(),width,height)}}
     pub fn configure(&mut self,immediate:bool)->Result<(),Error>{self.acquired=false;Error::status(unsafe{rv_surface_configure(self.raw.as_ptr(),immediate)})}
     pub fn acquire(&mut self)->Result<Acquire,Error>{
         if self.acquired{return Err(Error::InvalidInput("surface image is already acquired"));}

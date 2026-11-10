@@ -14,7 +14,23 @@ fn run(program: &PathBuf, dir: &PathBuf, args: &[&str]) -> bool {
     Command::new(program).current_dir(dir).args(args).status().is_ok_and(|s| s.success())
 }
 
+/// Builds the Wayland test shim where libwayland headers exist; the `wayland_probe` cfg gates the test that uses it.
+/// ponytail: header path is hardcoded to /usr/include (Debian/Ubuntu); use pkg-config if another layout matters.
+fn wayland_probe() {
+    println!("cargo:rustc-check-cfg=cfg(wayland_probe)");
+    println!("cargo:rerun-if-changed=tests/wayland_probe.c");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") || !std::path::Path::new("/usr/include/wayland-client.h").is_file() {
+        return;
+    }
+    cc::Build::new().file("tests/wayland_probe.c").cargo_metadata(false).warnings(true).compile("wayland_probe");
+    // Only the test binaries need the shim and libwayland-client; the library stays headless.
+    println!("cargo:rustc-link-arg-tests={}/libwayland_probe.a", env::var("OUT_DIR").unwrap());
+    println!("cargo:rustc-link-arg-tests=-lwayland-client");
+    println!("cargo:rustc-cfg=wayland_probe");
+}
+
 fn main() {
+    wayland_probe();
     let source = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("tests/shaders");
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     println!("cargo:rerun-if-changed={}", source.display());

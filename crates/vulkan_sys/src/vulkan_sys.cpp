@@ -143,7 +143,7 @@ struct Surface {
   VkSemaphore rendered[16]{};
   VkSemaphore acquired[17]{};
   uint32_t image_count{}, acquire_at{};
-  VkExtent2D extent{};
+  VkExtent2D extent{}, wanted{};  // wanted: the size a Wayland host asks for (the surface itself reports none)
   VkPresentModeKHR mode{};
   int held_image{-1};
   VkSemaphore held_semaphore{};
@@ -928,11 +928,15 @@ int32_t rv_render_draw_indexed_indirect(void *commands, void *buffer, void *argu
 static VkResult rv_swapchain_build(Surface *s) {
   Device *d = s->device; VkSurfaceCapabilitiesKHR caps{}; VkResult r = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(d->physical,s->surface,&caps); if (r != VK_SUCCESS) return r;
   { std::lock_guard<std::recursive_mutex> lock(d->qlock); r = vkQueueWaitIdle(d->main_queue); } if (r != VK_SUCCESS) return r;
-  VkSwapchainKHR old = s->swapchain; s->swapchain = VK_NULL_HANDLE; s->extent = caps.currentExtent; s->held_image = s->current_image = -1; s->stale = false;
-  if (!caps.currentExtent.width || !caps.currentExtent.height) { if (old) vkDestroySwapchainKHR(d->device,old,nullptr); return VK_SUCCESS; }
+  VkSwapchainKHR old = s->swapchain; s->swapchain = VK_NULL_HANDLE; s->held_image = s->current_image = -1; s->stale = false;
+  VkExtent2D extent = caps.currentExtent;
+  if (extent.width == UINT32_MAX) extent = {std::clamp(s->wanted.width, caps.minImageExtent.width, caps.maxImageExtent.width), std::clamp(s->wanted.height, caps.minImageExtent.height, caps.maxImageExtent.height)};
+  if (!s->wanted.width && caps.currentExtent.width == UINT32_MAX) extent = {};
+  s->extent = extent;
+  if (!extent.width || !extent.height) { if (old) vkDestroySwapchainKHR(d->device,old,nullptr); return VK_SUCCESS; }
   uint32_t minimum = std::max(caps.minImageCount + 1,3u); if (caps.maxImageCount && minimum > caps.maxImageCount) minimum = caps.maxImageCount;
   VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR}; ci.surface = s->surface; ci.minImageCount = minimum;
-  ci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM; ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; ci.imageExtent = caps.currentExtent;
+  ci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM; ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; ci.imageExtent = extent;
   ci.imageArrayLayers = 1; ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ci.preTransform = caps.currentTransform; ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; ci.presentMode = s->mode; ci.clipped = VK_TRUE; ci.oldSwapchain = old;
   r = vkCreateSwapchainKHR(d->device,&ci,nullptr,&s->swapchain); if (old) vkDestroySwapchainKHR(d->device,old,nullptr); if (r != VK_SUCCESS) return r;
@@ -963,6 +967,7 @@ int32_t rv_surface_create(void *device, void *hwnd, bool immediate, void **out) 
   r=supported?rv_swapchain_build(s):VK_ERROR_INCOMPATIBLE_DISPLAY_KHR;
   if(r!=VK_SUCCESS){vkDestroySurfaceKHR(d->instance,s->surface,nullptr);delete s;return r;} *out=s;return VK_SUCCESS;
 }
+void rv_surface_set_extent(void *surface, uint32_t width, uint32_t height) { auto *s=static_cast<Surface *>(surface); s->wanted={width,height}; s->stale=true; }
 int32_t rv_surface_configure(void *surface, bool immediate) { auto *s=static_cast<Surface *>(surface); s->mode=immediate?VK_PRESENT_MODE_IMMEDIATE_KHR:VK_PRESENT_MODE_FIFO_KHR; return rv_swapchain_build(s); }
 int32_t rv_surface_acquire(void *surface, int32_t *image) {
   auto *s=static_cast<Surface *>(surface);
