@@ -48,8 +48,8 @@
     "note": "c10ccba4 ae022b58 \u2014 profiles/comments and retired policies removed; Rust edges/startup roles verified"
   },
   "B7": {
-    "status": "pending",
-    "note": ""
+    "status": "done",
+    "note": "f59284e3 \u2014 seven shared modules moved to rdk_geom, ops re-exports retained; Boolean depends on ops only for tests"
   },
   "B8": {
     "status": "active",
@@ -125,11 +125,11 @@
   },
   "Z1": {
     "status": "active",
-    "note": "Owner-buffer, callback, stable-label, immutable scene metadata and renderer scratch reuse installed; qualification in progress"
+    "note": "f24b8b34 \u2014 owner-buffer/callback/label/published-scene/renderer scratch reuse qualified; positive idle allocations and unexplained sea spike remain"
   },
   "Z2": {
-    "status": "pending",
-    "note": ""
+    "status": "active",
+    "note": "Shared binary Text Arc ownership installed across80paths; process symbols/sorted record shapes/full path migration remain"
   },
   "Z3": {
     "status": "pending",
@@ -141,7 +141,7 @@
   },
   "Z5": {
     "status": "active",
-    "note": "Full64-bit shared hash/SplitMix64 installed across CPU, Lisp, JS and private engines; spec and affected identities updated"
+    "note": "9ec77825 \u2014 full64-bit hash/SplitMix64 across CPU/Lisp/prelude/JS/private caches; source/spec/intentional identifier goldens qualified"
   },
   "Z6": {
     "status": "pending",
