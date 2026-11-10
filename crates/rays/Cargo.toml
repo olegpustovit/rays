@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 input = { path = "../input" }
+scene_core = { path = "../scene_core" }
 rays_math = { path = "../rays_math" }
 lru = { path = "../lru" }
 runtime_resources = { path = "../runtime_resources" }

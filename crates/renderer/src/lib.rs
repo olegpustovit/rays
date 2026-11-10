@@ -1,7 +1,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod renderer_shaders;
-pub mod side_lru;
+pub use scene_core::side_lru;
 pub mod scene_attachment_pool;
 pub mod scene_execution;
 pub mod renderer_pipeline;

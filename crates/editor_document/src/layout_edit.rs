@@ -4,7 +4,7 @@ use flow_check::op::Op as FlowOp;
 use flow_check::workspace as w;
 use flow_graph::edit_tree::*;
 use flow_syntax::syntax::Syntax;
-use rays::num::{fmax, fmin};
+use rays_math::float::{max as fmax, min as fmin};
 use rays_diagnostic::Diagnostic;
 
 type S = SyntaxId;

@@ -443,7 +443,7 @@ fn delete_camera_world_and_settings() {
     same_after_reload(&edited, "world restack");
     check(layer_labels(&edited) == strs(&["sky", "sun"]), "the World stack was not rewritten");
     // a preset replaces the layers: the World graph is written whole
-    let world = rays::world::presets().into_iter().find(|(n, _)| n == "white room").unwrap().1;
+    let world = scene_core::world::presets().into_iter().find(|(n, _)| n == "white room").unwrap().1;
     let preset_network = layers::graph_of_world(&world).unwrap();
     let values = layers::of_world(&world).1;
     let preset = with_scene(&document::with_layers(&doc, wid, preset_network.clone()), world_node(&scene(&doc), &values));
@@ -1050,7 +1050,7 @@ fn world_member_edits() {
     check(layer_labels(&edited) == strs(&["sky", "sun"]) && contains(&source(&edited), "(scene/world (ref sky)"), &format!("a restack: {}", source(&edited)));
     same_after_reload(&edited, "World member restack");
     {
-        let world = rays::world::presets().into_iter().find(|(n, _)| n == "white room").unwrap().1;
+        let world = scene_core::world::presets().into_iter().find(|(n, _)| n == "white room").unwrap().1;
         let network = layers::graph_of_world(&world).unwrap();
         let values = layers::of_world(&world).1;
         wrote(
@@ -1363,9 +1363,9 @@ fn instances_each_viewport_has_its_root_and_world() {
             check((day.params.width, day.params.height) == (800, 450) && (night.params.width, night.params.height) == (1600, 900), "each root's own resolution");
             match (&day.camera, &night.camera) {
                 (Some(d), Some(n)) => {
-                    check(rays::camera::position(d) == rays_math::vec3::create(0., 1., 8.), "day looks from its own camera");
-                    check(rays::camera::position(n) == rays_math::vec3::create(4., 2., 6.), "night looks from its own camera");
-                    check(rays::camera::projection(n) != rays::camera::projection(d), "and with its own lens");
+                    check(scene_core::camera::position(d) == rays_math::vec3::create(0., 1., 8.), "day looks from its own camera");
+                    check(scene_core::camera::position(n) == rays_math::vec3::create(4., 2., 6.), "night looks from its own camera");
+                    check(scene_core::camera::projection(n) != scene_core::camera::projection(d), "and with its own lens");
                 }
                 _ => panic!("each root names its camera"),
             }

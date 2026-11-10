@@ -4,7 +4,7 @@
 use crate::kind_graph::{self as g, chc, fl, int, kind_make, schema_of, tog, Rec};
 use crate::objects::read;
 use param::{Schema, Value};
-use rays::world;
+use scene_core::world;
 use std::f64::consts::PI;
 use std::sync::{Arc, OnceLock};
 

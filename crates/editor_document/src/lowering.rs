@@ -20,7 +20,7 @@ use flow_syntax::context::{self, Context};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{Record, Value as E, struct_value};
 use param::Value as PV;
-use rays::camera as rcamera;
+use scene_core::camera as rcamera;
 use rays_diagnostic::Diagnostic;
 use sop::edit_graph::{self, Factory};
 use std::sync::{Arc, OnceLock};

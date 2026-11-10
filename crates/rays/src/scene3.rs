@@ -16,12 +16,7 @@ pub enum render_mode {
     Vertices,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum cull {
-    Cull_none,
-    Cull_back,
-    Cull_front,
-}
+pub use scene_core::cull;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum shading {

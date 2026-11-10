@@ -1,7 +1,7 @@
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 
 pub mod num;
-pub mod light;
+pub use scene_core::light;
 pub mod material;
 pub mod path;
 pub mod texture;
@@ -13,9 +13,9 @@ pub mod image;
 pub(crate) mod canvas_runtime;
 pub mod audio;
 pub mod mesh;
-pub mod camera;
+pub use scene_core::camera;
 pub mod font;
-pub mod world;
+pub use scene_core::world;
 pub(crate) mod idlist;
 pub mod scene3;
 pub(crate) mod scene3_native_lowering;

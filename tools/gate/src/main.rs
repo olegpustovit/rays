@@ -869,13 +869,14 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("rdk_ops", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
         ("rdk_boolean", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
         ("rdk_rays", &["rdk_core", "rdk_geom", "rdk_ops", "rays", "rays_math", "param"][..]),
+        ("scene_core", &["rays_math", "lru", "parallel"][..]),
         ("rays", &[
             "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
-            "parallel", "ogpu_core",
+            "parallel", "ogpu_core", "scene_core",
         ][..]),
         ("runtime", &["sdl3", "ogpu_core", "input"][..]),
         ("runtime_resources", &["sdl3", "ogpu_core"][..]),
-        ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
+        ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources", "scene_core"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
         ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math", "lru"][..]),
         ("flow_eval", &["flow_syntax", "flow_check", "param", "rays_diagnostic", "input", "rays_math", "mem_sys"][..]),
@@ -1004,7 +1005,8 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "flow_sop", "flow_gpu", "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
     forbid("flow_web", &gpu);
-    forbid("web_export", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
+    // G6: the web target needs no SDL, runtime or renderer, directly or transitively.
+    forbid("web_export", &["pxui", "pxui_shell", "pxui_graph", "rays_editor", "rays", "runtime", "runtime_resources", "renderer", "sdl3"]);
     forbid("rays", &[
         "pxui", "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean",
         "rdk_rays", "rays_pathtracer", "rays_editor",

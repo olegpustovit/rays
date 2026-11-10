@@ -15,6 +15,7 @@ scene_command = { path = "../scene_command" }
 runtime = { path = "../runtime" }
 runtime_resources = { path = "../runtime_resources" }
 lru = { path = "../lru" }
+scene_core = { path = "../scene_core" }
 rays_math = { path = "../rays_math" }
 mem = { path = "../mem" }
 cfmt = { path = "../cfmt" }

@@ -261,7 +261,7 @@ fn part_contexts() {
     let g = objects::geometry(&accent).expect("accent is not a geometry object");
     assert!(g.translate_x == 2.2 && g.translate_z == -1.2 && g.scale_x == 0.55 && g.scale_y == 0.55 && g.rotate_y == 0., "a vec3 keyword sets its three fields");
     let (camera, _) = objects::camera::of_node(&ops("camera")[0]).expect("no camera");
-    assert!(rays::camera::position(&camera) == rays_math::vec3::create(0.5, 1.8, 6.), "camera eye");
+    assert!(scene_core::camera::position(&camera) == rays_math::vec3::create(0.5, 1.8, 6.), "camera eye");
     let l = objects::light(&ops("light")[0]).expect("no light");
     assert!(l.intensity == 60. && l.translate_x == 4., "light fields");
     assert_eq!(d.active_camera, Some(ops("camera")[0].id), "the workspace's camera is the active one");
@@ -273,7 +273,7 @@ fn part_contexts() {
     let w = layers::to_world(None, &world_node, crate::document::layers(&d, world_node.id).unwrap()).expect("the World does not read");
     assert!(w.exposure == -0.5, "World exposure");
     assert!(
-        matches!(&w.layers[..], [a, b] if matches!(&a.layer, rays::world::layer::Sky { turbidity, .. } if *turbidity == 3.) && matches!(&b.layer, rays::world::layer::Sun { intensity, .. } if *intensity == 1500.)),
+        matches!(&w.layers[..], [a, b] if matches!(&a.layer, scene_core::world::layer::Sky { turbidity, .. } if *turbidity == 3.) && matches!(&b.layer, scene_core::world::layer::Sun { intensity, .. } if *intensity == 1500.)),
         "World layers, bottom first"
     );
     let window = lowering::window(&bloom).unwrap();

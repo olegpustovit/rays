@@ -3,7 +3,7 @@
 //! `kind_graph::T` of them. The input of an object is its parent.
 use crate::kind_graph::{self as g, chc, fl, int, kind_make, schema_of, tog, Rec};
 use param::{Schema, Value};
-use rays::{camera as rcamera, light as rlight};
+use scene_core::{camera as rcamera, light as rlight};
 use rays_math::{color, mat4, vec3};
 use std::sync::{Arc, OnceLock};
 
@@ -499,11 +499,11 @@ pub fn visible(node: &g::Node) -> bool {
 }
 
 /// A geometry object's face culling (back faces when it says nothing).
-pub fn cull(node: &g::Node) -> rays::scene3::cull {
+pub fn cull(node: &g::Node) -> scene_core::cull {
     match g::field(node, "cull") {
-        Some(Value::Choice(c)) if c == "None" => rays::scene3::cull::Cull_none,
-        Some(Value::Choice(c)) if c == "Front" => rays::scene3::cull::Cull_front,
-        _ => rays::scene3::cull::Cull_back,
+        Some(Value::Choice(c)) if c == "None" => scene_core::cull::Cull_none,
+        Some(Value::Choice(c)) if c == "Front" => scene_core::cull::Cull_front,
+        _ => scene_core::cull::Cull_back,
     }
 }
 
@@ -526,7 +526,7 @@ fn to_light(scene: &[g::Node], id: i64) -> Option<rlight::Light> {
         let d = vec3::sub(target, at);
         if vec3::length(d) < 1e-6 { vec3::create(0., -1., 0.) } else { vec3::normalize(d) }
     };
-    let channel = |value: f64| (255. * rays::num::fmin(1., value)).round() as i64;
+    let channel = |value: f64| (255. * rays_math::float::min(1., value)).round() as i64;
     let diffuse = color::rgb(channel(p.color_r), channel(p.color_g), channel(p.color_b));
     let intensity = p.intensity;
     // Physical 1/d^2 falloff, so raster and the path tracer agree.
@@ -601,7 +601,7 @@ fn decompose(matrix: &mat4::T) -> Vec<(String, Value)> {
     let (sx, sy, sz) = (scale(0), scale(1), scale(2));
     let r = |row: i64, column: i64| get(row, column) / [sx, sy, sz][column as usize];
     let degrees = |angle: f64| angle * 180. / std::f64::consts::PI;
-    use rays::num::{fmax, fmin};
+    use rays_math::float::{max as fmax, min as fmin};
     vec![
         float("translate_x", get(0, 3)),
         float("translate_y", get(1, 3)),

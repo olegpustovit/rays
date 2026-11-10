@@ -1,0 +1,12 @@
+[package]
+name = "scene_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Pure scene description (camera, light, world bake) shared by the runtime and the SDL-free
+# document/web crates; no runtime, renderer or SDL edge.
+[dependencies]
+rays_math = { path = "../rays_math" }
+lru = { path = "../lru" }
+parallel = { path = "../parallel" }

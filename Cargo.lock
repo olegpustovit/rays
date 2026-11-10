@@ -45,10 +45,10 @@ dependencies = [
  "flow_syntax",
  "input",
  "param",
- "rays",
  "rays_diagnostic",
  "rays_math",
  "rdk_core",
+ "scene_core",
  "sop",
 ]
 
@@ -423,6 +423,7 @@ dependencies = [
  "runtime",
  "runtime_resources",
  "scene_command",
+ "scene_core",
 ]
 
 [[package]]
@@ -601,6 +602,7 @@ dependencies = [
  "runtime",
  "runtime_resources",
  "scene_command",
+ "scene_core",
 ]
 
 [[package]]
@@ -626,6 +628,15 @@ dependencies = [
 name = "scene_command"
 version = "0.1.0"
 dependencies = [
+ "rays_math",
+]
+
+[[package]]
+name = "scene_core"
+version = "0.1.0"
+dependencies = [
+ "lru",
+ "parallel",
  "rays_math",
 ]
 

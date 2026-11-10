@@ -8,8 +8,11 @@
 //! toward +X, row 0 is the zenith. Texel `(i, j)` of a `w x h` map holds the direction at
 //! `((i + 0.5) / w, (j + 0.5) / h)`. `rotation` (radians, about +Y) turns the whole World, lights
 //! and sun included: layers are evaluated at azimuth `phi - rotation`.
-use crate::num::{fmax, fmin, int_of_float};
-use renderer::side_lru::{self, Table, TableKey};
+use crate::side_lru::{self, Table, TableKey};
+use rays_math::float::{max as fmax, min as fmin};
+fn int_of_float(x: f64) -> i64 {
+    x as i64
+}
 use rays_math::color::linear;
 use rays_math::rand;
 use rays_math::vec3;
@@ -199,13 +202,13 @@ impl baked {
     /// Irradiance-ready SH: the lighting map's coefficients on the real basis, already multiplied
     /// by the cosine-lobe factors pi, 2pi/3, pi/4 (Ramamoorthi-Hanrahan). Computed when first
     /// forced.
-    pub(crate) fn sh9(&self) -> &Vec<rgb> {
+    pub fn sh9(&self) -> &Vec<rgb> {
         &self.sh9
     }
 
     /// 6 GGX-prefiltered lighting mips for roughness 0, 0.2, .., 1: 128x64, 64x32, .., 4x2. Mip 0
     /// is a box downsample. Computed when first forced.
-    pub(crate) fn specular(&self) -> &Vec<map> {
+    pub fn specular(&self) -> &Vec<map> {
         &self.specular
     }
 }
@@ -1214,7 +1217,7 @@ pub mod private {
     pub use super::cache_context;
     pub use super::create_cache_context;
 
-    pub(crate) fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
+    pub fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
         let previous = super::CURRENT_CACHE.with(|c| c.borrow_mut().replace(context.clone()));
         let _restore = super::Restore(previous);
         f()

@@ -19,7 +19,7 @@ use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::value::Value as E;
 use param::Value as PV;
-use rays::camera as rcamera;
+use scene_core::camera as rcamera;
 use rays_diagnostic::Diagnostic;
 use sop::edit_graph;
 use std::collections::BTreeMap;

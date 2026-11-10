@@ -138,7 +138,7 @@ fn projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<
     }
 }
 
-pub(crate) fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<mat4::T, String> {
+pub fn view_projection_matrix(viewport: (i64, i64, i64, i64), camera: &Camera) -> Result<mat4::T, String> {
     // Validate the view matrix before projection, preserving error priority.
     let view = view_matrix(camera)?;
     let projection = projection_matrix(viewport, camera)?;
