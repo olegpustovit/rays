@@ -1,33 +1,16 @@
 # Event stream
 
 `Input.event` is Rays's owned, typed representation of native application
-events. Runtime polls SDL3 on the initial OCaml domain, translates supported
+events. Runtime polls SDL3 on the initial thread, translates supported
 events in queue order, and folds held keys, buttons, and pointer position into
 `Frame.input`. `Frame.mouse_delta` is the per-frame pointer-motion aggregate.
 Polling and held-input state are private to `Sketch`; there is no global query.
 
 ## Public events
 
-```ocaml
-type Input.event =
-  | Key_pressed of Input.key | Key_released of Input.key
-  | Pointer_moved of float * float
-  | Pointer_pressed of Input.mouse_button * (float * float)
-  | Pointer_released of Input.mouse_button * (float * float)
-  | Pointer_cancelled of Input.mouse_button
-  | Scrolled of float * float
-  | Text_input of string
-  | Text_editing of { text : string; start : int; length : int }
-  | File_dropped of string | File_drag_moved of float * float | File_drag_ended
-  | Pinched of float
-  | File_dialog of { id : int; result : (string list, string) result }
-  | Dialog_opened of int | Resized of int * int
-  | Focus_lost | Focus_gained | Closed
-  | Pixel_size_changed of int * int | Visibility_changed of bool
-  | Trackpad_scrolled of { delta : float * float; phase : Input.scroll_phase; time : float }
-```
+The typed event vocabulary is declared in `crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
 
-All strings are copied into OCaml ownership before SDL3 releases the native
+All strings are copied into owned application storage before SDL3 releases the native
 event payload.
 
 ## Translation rules
@@ -71,22 +54,12 @@ code may consume every ordered motion.
 `Sketch.run_state` polls once per frame and supplies the immutable event list in
 `Frame.input.events`. An update folds it explicitly:
 
-```ocaml
-let update model (frame : Frame.t) =
-  List.fold_left
-    (fun model -> function
-      | Input.Key_pressed Input.Space -> { model with paused = not model.paused }
-      | Input.Closed -> Sketch.quit (); model
-      | _ -> model)
-    model frame.input.events
-```
+The typed event vocabulary is declared in `crates/input/src/lib.rs`; native translation lives under `crates/runtime_input`.
 
 ## Ownership and domain contract
 
 Event polling/waiting, window state changes, text-input activation, and input
-snapshot mutation occur on the initial OCaml domain. Blocking waits may release
-the OCaml runtime only inside the audited SDL3 binding and reacquire it before
-constructing an OCaml value.
+snapshot mutation occur on the initial thread. Blocking waits remain behind the audited SDL3 binding, preserving the owners of all native values.
 
 No user handler receives native pointers. File-drop and text values survive
 after the poll iteration because they are owned copies. `FileDropped` carries

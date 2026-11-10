@@ -229,10 +229,10 @@ compiler profile. Correctness tests additionally enforce deterministic output,
 expected cardinality, and bounded cache/resource behavior. Timing is diagnostic
 unless a stable dedicated benchmark runner is available.
 
-`tools/bench_gpu.exe` reports native fixed costs with separate upload, synchronized dispatch,
+The historical GPU probe reports native fixed costs with separate upload, synchronized dispatch,
 GPU duration and readback columns at 1,024, 65,536 and 1,000,000 elements.
 
-`tools/bench_shattered_renderer.exe` is the native frame benchmark: it cooks
+The historical native frame probe is the native frame benchmark: it cooks
 the shattered-cube graph, renders the packed result through the sketch runtime
 at 1200×760 logical points, and prints one JSON line with frame percentiles,
 allocation, RSS and the live drawable size and scale.
@@ -614,70 +614,8 @@ eigenvector.
 7. Measure elapsed time, minor/major allocation, and live memory.
 8. Run correctness, finite-native, documentation, and diff checks.
 
-## Benchmark commands
+## Measurement commands
 
-Commands as recorded in the log; fixture sizes, per-operation filter names and
-per-stage environment are with each transcript there. Geometry benches run in
-the release profile and are repeated with `RAYS_BENCH_DOMAINS=4`.
-
-| Area | Command |
-|---|---|
-| Exact predicates | `RAYS_PREDICATE_BENCH_COUNT=1000000 RAYS_PREDICATE_BENCH_REPEATS=5 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- predicates` |
-| Circle from Edges | `RAYS_CIRCLE_EDGE_POINTS=1000000 RAYS_CIRCLE_EDGE_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- circle_from_edges` |
-| Graph Color | `RAYS_GRAPH_COLOR_ELEMENTS=1000000 RAYS_GRAPH_COLOR_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- graph_color` |
-| Convex Hull | `RAYS_HULL_REPEATS=3 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- convex_hull` |
-| Extract Centroid | `RAYS_CENTROID_SIZE=1000000 RAYS_CENTROID_REPEATS=3 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- extract_centroid` |
-| Extract Point from Curve | `RAYS_EXTRACT_REPEATS=5 RAYS_BENCH_DOMAINS=1 dune exec --profile release tools/bench_rdk/bench_rdk.exe -- extract_point_curve` |
-| Cold Scene3 display packing | `dune exec tools/bench_scene3_packing.exe -- 1000000 7` (mesh construction excluded; cold coordinate planes, median/p95 and allocated bytes) |
-| Scene3 float64/float32 gallery pixels | `_build/default/tools/check.exe @test/test_scene3_float32_gallery` (native device required; records each scene's maximum channel difference and changed-pixel count) |
-| Editor held drag and undo | `dune exec tools/bench_rays_editor.exe -- 200 1000 2000` |
-| SOP graph scale smoke | `dune build lib/rays_editor/test/test_main.exe`, then `_build/default/lib/rays_editor/test/test_main.exe test_pxui_graph_smoke` |
-| Source digest polling | `dune exec tools/bench_source_poll.exe -- sketches/sop_gallery.rays` |
-| Named-pane owner lookup | `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy dune exec tools/bench_named_owner.exe` |
-| Live light contexts | `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy dune exec tools/bench_live_lights.exe` |
-| Shattered-cube native workflow | `RAYS_SHATTER_FRAMES=1001 /usr/bin/time -p dune exec rays -- sketches/shattered_cube.rays` |
-| Test selection timing | `/usr/bin/time -p env SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy _build/default/tools/check.exe` |
-
-The branch tools accept `auto` (fresh session), `learned` (first cook excluded,
-then cache cleared while retaining measured node costs), `forced` (test gate)
-or `off` after the repeat count. Report the placement mode and actual fanout
-count with the timings: a completely cold session cannot use historical costs.
-`caller_allocated_bytes` retains the old calling-domain measurement for
-comparison; `program_allocated_bytes` samples whole-program GC counters after a
-minor collection outside the timed region, including allocations on workers.
-+
-## Historical baselines retained from the export migration
-
-These measurements were recorded on Apple M1 at the baseline available in Git
-at `62582188`; they are comparison data, not verification of the current
-architecture cleanup. Detailed migration logs remain in that commit.
-
-Prepared, warm, one-domain Core evaluation; median of three runs. Scalar
-timing covers 200,000 forces. Particle timing covers 600 frames at 800×600,
-excluding native events, editor panels and rendering.
-
-| Workload | Before | After | Allocation before | Allocation after |
-| --- | ---: | ---: | ---: | ---: |
-| Scalar residual | 146.2 ns/evaluation | 54.9 ns/evaluation | 1,912 B | 568 B |
-| Particles | 3.192 ms/frame | 0.925 ms/frame | 12,893,656 B/frame | 499,624 B/frame |
-
-Native editor, one domain, 10,000 particles, 800×600 logical points:
-20 warm frames and 600 measured frames per layout. Both builds included
-the Core repair; the changed variable was the probe compiler callback.
-
-| Layout | Update before | Update after | Allocation before | Allocation after |
-| --- | ---: | ---: | ---: | ---: |
-| Canvas | 2.058 ms | 2.032 ms | 8.01 MB | 8.01 MB |
-| Graph | 9.639 ms | 2.842 ms | 42.65 MB | 8.57 MB |
-| Lisp | 3.277 ms | 3.151 ms | 9.15 MB | 9.15 MB |
-| Graph and Lisp | 10.589 ms | 3.893 ms | 44.10 MB | 10.03 MB |
-
-Both-panel median frame period was 18.605 → 16.687 ms; p95 was
-25.189 → 17.822 ms. This setup did not reproduce the reported decay to
-10 FPS. Reproduction commands are `tools/bench_rays_editor.exe --particles-toggle 600`
-and `tools/bench_core.exe frames sketches/particles.rays` (optionally `--boxed`).
-
-Native autorelease repairs reduced recorded per-frame footprint retention
-from 4.0 KiB to zero; `runtime_autorelease` in `@runtest-native`
-guards missing pools. These historical numbers do not replace current
-lifecycle or shader performance qualification.
+Use the bounded Cargo commands in [development](../docs/development.md).
+Dated benchmark commands and measurements are preserved in
+[history](../docs/history/specification/performance.md); they are not current gates.

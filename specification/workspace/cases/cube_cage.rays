@@ -1,6 +1,6 @@
 ; Cube cage: a lattice of hollow cube frames, an octree of point clouds
 ; copied (packed) onto one cell. The renderer, path tracer and settings
-; are OCaml (main.ml); this is the document: network, studio, camera.
+; use the native Rust renderer; this is the document: network, studio, camera.
 ^:allow-warnings (workspace cube_cage
 
   ; The cage is a unit box minus three bars; a small octahedron sits inside.

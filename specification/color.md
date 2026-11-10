@@ -2,7 +2,7 @@
 
 `Color.t` is an immutable RGBA value with four clamped 8-bit channels:
 
-```ocaml
+```text
 type t = { r : int; g : int; b : int; a : int }
 ```
 

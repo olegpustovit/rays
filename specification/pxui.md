@@ -12,7 +12,7 @@ scene and event model.
 (`pxui_graph`) all build boxes in the same `Ui` frame, share one pointer
 capture, one focus, and one hit list, and paint into one instance list.
 
-```ocaml
+```text
 let update model frame =
   Pxui.Ui.frame model.ui frame @@ fun ui ->
   Pxui.Ui.panel ui "Motion" @@ fun () ->
@@ -108,8 +108,8 @@ click and a scoped key in one event batch use the clicked pane.
 
 `Pxui.Theme` is the design kit, revision 3. The reference is the "Rays UI Redesign" canvas
 (foundations, widgets, workspace, overlays and one sheet per panel); `sketches/ws_layout` is the
-layout it is compared with, and `tools/ui_shot.exe FILE.rays OUT.png` renders any workspace's
-editor to a PNG without a window.
+layout it is compared with. Native framebuffer parity is checked through
+`cargo t -p pxui gpu_parity`; the CLI canvas renderer intentionally excludes editor chrome.
 
 Tokens. The six base colours are unchanged (`panel` the ground, `foreground` ink, `control` the
 current row, `input` the sheet, `track` the well, `accent` signal orange `#f0481f`); invalid is
@@ -298,7 +298,7 @@ the title bar of a PXUI host is the ground its chrome is painted on.
 ## Hosts
 
 - The camera panel (Camera and Render sections, `toggle_ui`/`open_camera`, `navigate`) is the editor's, in
-  `rays_editor/viewport.ml`; it uses the shared inspector rows and reads the camera each frame.
+  `crates/rays_editor/src/viewport.rs`; it uses the shared inspector rows and reads the camera each frame.
 - `Editor_core.Store.Settings` persists model values as one
   `(settings :sketch "name" :key value ...)` s-expression, written atomically.
 - `Pxui_shell.Inspector.fields` builds standalone parameter rows from a

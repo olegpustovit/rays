@@ -1,11 +1,10 @@
 # Specification status
 
-Rays is now a Rust-only Cargo workspace. The Lisp language and product design contracts in this
-folder still apply. Implementation paths and OCaml/Dune commands in older design notes describe
-history; use the root README, AGENTS.md and docs/development.md for current layout and workflows.
-The OCaml implementation is available at the annotated `ocaml-reference` tag (`e92f94f0`).
+This folder defines current language, rendering, editor and ownership contracts.
+Use [the Rust crate map](api.md), [Lisp author guide](../docs/lisp.md) and
+[development workflow](../docs/development.md) for current paths and commands.
 
-Rust owns its shaders and goldens. Exact OCaml byte parity and the completed port/cleanup plans
-are historical constraints, not requirements for new work. Preserve Lisp semantics, determinism,
-sequential/parallel equality, bounded ownership and native backend boundaries. Measure compile time,
-debug execution and release execution before performance policy changes.
+Retired OCaml/Dune evidence is preserved only in [history](../docs/history/README.md).
+Rust owns its shaders and goldens. Preserve Lisp semantics, determinism, exact
+sequential/parallel equality, bounded ownership and native backend boundaries.
+Measure compilation, debug and release performance before changing policy.

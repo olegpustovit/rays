@@ -49,7 +49,7 @@ a `1600 × 1200` PNG. Code that needs the current relationship can compare
 
 An alpha mask is explicit and composable:
 
-```ocaml
+```text
 Canvas.map_pixels source (fun ~x:_ ~y:_ color -> color);
 Canvas.map_pixels mask (fun ~x ~y _ ->
   if Float.hypot (float (x - 128)) (float (y - 128)) <= 96.
@@ -62,7 +62,7 @@ Only mask alpha is used, so colored masks behave predictably.
 Canvas and image resources are explicitly owned. `Sketch.run_state` provides
 `on_stop`, which runs while SDL3 and Metal are still active:
 
-```ocaml
+```text
 let stop model =
   List.iter (function Ok () -> () | Error message -> prerr_endline message)
     [Image.destroy model.texture; Canvas.destroy model.canvas]

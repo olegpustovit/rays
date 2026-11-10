@@ -108,8 +108,7 @@ demos; the demo scene is `sketches/pathtracer.rays` (Lisp; the editor's Path tra
   as a preview, like a camera move, so a live slider drag stays interactive;
   accumulation resumes one frame after edits stop, and `reset` restarts at
   full quality (1200x1560, 4 bounces, rounded voxel scene on the M1: preview
-  about 61 ms against 218 ms for a full first sample, `test_main.exe
-  bench_scene`).
+  about 61 ms against 218 ms for a full first sample, a historical scene benchmark).
   `replace_mesh` remains a synchronous version for tests and export.
 
 Not in scope yet: thin-lens depth of field, textures, learned denoising,
@@ -150,7 +149,7 @@ file-backed HDRIs (a baked `Rays.World` is the environment; see World path).
    same topology refits it in place (`Ogpu.Backend.refit_accel`) in one
    command buffer before the next frame (specification/backend.md).
 2. The kernels are Rays Lisp: `pathtrace.rays` (with `pathtrace_helpers.rays`
-   and `resolve_preview.rays`, embedded by a Dune rule) printed to MSL by
+   and `resolve_preview.rays`, embedded by the owning Cargo build script) printed to MSL by
    `Flow_shader.Emit` (`Lisp_kernel`). A kernel set is compiled per scene shape:
    the facts (spp, bounces, round-corner probes, light and panel counts, World,
    background, map size, sun, `bsdf_only`, instanced, motion, strands native
@@ -290,7 +289,7 @@ aliases, rather than the window-free default `runtest`.
 
 The RNG is a PCG hash seeded from pixel index and frame index, so a fixed
 camera and frame sequence reproduces byte-identical output. The library test
-(`lib/rays_pathtracer/test_pathtracer.ml`) renders a lit sphere over a
+(`crates/rays_pathtracer/tests/`) renders a lit sphere over a
 floor twice from reset and asserts identical bytes, a non-flat image, and
 opaque alpha; it then checks a white analytic sphere in the furnace (energy
 conservation), red/green per-instance materials, motion-blur coverage between
@@ -299,13 +298,13 @@ and motion counts. Under `@qualification`, `test_pathtracer_exact_m1` runs the s
 test and compares the MD5 of two of its frames (the lit sphere's first four
 samples and the instanced sphere) with digests recorded on an Apple M1; another
 chip prints that it does not compare. The comment on `exact_m1_digests` says
-when a digest may be refreshed and what has to be shown first. `test_scene.ml` checks that a `scene_mesh` of a flat box, an
+when a digest may be refreshed and what has to be shown first. `crates/rays_pathtracer/tests/` checks that a `scene_mesh` of a flat box, an
 instanced pair with per-instance materials, and a floor matches the same
 meshes composed by hand, that translating an object moves it in the image,
 that a mesh of triangles plus an analytic sphere builds and shows both, and
 that `light_of` area, point, spot, and directional lights light a white matte
 plane to the analytic `albedo I / d²` within 6%, with no handle leak. It skips when no ray-tracing device is present unless
-`RAYS_REQUIRE_RAYTRACING` is set. `test_gpu_film.ml` creates a native
+`RAYS_REQUIRE_RAYTRACING` is set. `crates/rays_pathtracer/tests/` creates a native
 renderer, verifies direct texture publication and explicit pixel readback,
 compares its frame byte-for-byte with the standalone path, then checks teardown
 has no live Metal handle delta after 30 further frames. It also renders the
@@ -328,109 +327,11 @@ checks pass; the native attempt also fails at device acquisition here.
 
 ## Performance
 
-Run the finite native throughput probe with `dune build --force @tools/bench-pathtracer`.
-Set `RAYS_PATHTRACER_FRAMES`, `RAYS_PATHTRACER_SCALE`, or
-`RAYS_PATHTRACER_SPP` to override its defaults (240, 1, and 1). This alias
-opens a native window.
-
-An earlier path-tracer benchmark run (default Dune profile) measured
-roughly 35 ms/frame on an Apple M1 (no hardware ray tracing) for the example
-scene (seven round-cornered cubes, two rectangle lights, one dome panel) at
-480×840, one sample per pixel per frame, five bounces, four round-corner probes
-(eight probes: 39 ms). That run preceded GPU film publication; its CPU
-readback no longer occurs in a native Sketch. `RAYS_PATHTRACER_SCALE=2` renders at
-the Retina drawable size at proportionally lower throughput. Further speed
-needs fewer GPU rays per pixel: adaptive probe counts, or an M3-class GPU with
-hardware ray tracing.
-
-For the 2,065-instance voxel wall, a one-off probe
-on an Apple M1 (arm64, one domain, default Dune profile) measured 9.6 ms and
-3.42 million minor words for CPU triangle expansion before prototype decoding
-was hoisted out of the instance loop; the same single-run probe measured
-5.5–6.1 ms and about 0.79 million minor words afterward. The flattened
-24,780-triangle upload and synchronous Metal acceleration build still took
-6.2 ms in that probe. `RAYS_PATHTRACER_FRAMES=90 RAYS_PATHTRACER_ORBIT=1
-dune exec rays -- sketches/voxel_wall.rays` measured 19.9–29.4 ms per application
-frame on warm/cold runs with full-resolution moving visibility; these totals
-include startup, cook, presentation, and GPU work, so they do not isolate ray
-dispatch. A stationary 90-frame run measured 37.0 ms/frame and 63 accumulated
-samples. Peak live memory was not measured.
-
-After moving wall edits to `queue_mesh`, the same 24,780-triangle benchmark
-measured 0.4 ms on the caller for upload and submission, with 3.5 ms of GPU
-build remaining when explicitly waited on by `flush`. This moves the build
-wait out of the application update; it does not reduce flattened geometry or
-the total GPU build cost.
-
-The instanced path now uploads the cube prototype as one primitive structure
-and compact transform descriptors as a top-level structure. The earlier
-2,065-instance synthetic benchmark measured 3.5–4.6 ms for pure transform
-preparation, about 0.5 ms to submit the Metal build, and 1.8 ms remaining
-when explicitly waited on.
-At 560×800 in `--compare-render`, twelve stationary frames averaged 15.5 ms
-with instances versus 23.8 ms for flat triangles on this M1. That probe uses
-a farther camera than the interactive wall and includes readback; it does not
-establish an orbit speedup. The 120-frame native stationary wall run averaged
-66.1 ms/frame with 114 samples, including startup and UI work.
-The affine 3×3 normal-transform preparation brought the 2,065-instance
-worker step to 1.7–1.9 ms and reduced minor allocation to about 0.26 million
-words. With the prototype already resident, `--gpu` measured a 0.3 ms queued
-edit call and a 1.5 ms explicit build wait. These are single-run observations;
-the 560×800 matched-camera probe above is the rendering comparison.
-The actual 35×59 division wall has 36×60 = 2,160 points and 25,920 triangles;
-the synthetic benchmark now matches that cardinality. Its updated transform
-step measured 2.2 ms, and a reuse edit measured 0.4 ms to submit plus 1.6 ms
-to wait. The corrected finite orbit stays in front of the wall and, with
-temporal reconstruction plus spatial resolve, measured 24.3 ms/application
-frame over 90 frames without PNG capture on the same M1. `Canvas.save_screen_png`
-adds a large one-time capture cost to the short finite run, so its total is
-not used for the orbit throughput figure.
-With direct GPU film publication and selected-mode-only geometry preparation,
-five warm 90-frame orbits reported 20.3, 19.6, 19.5, 19.8, and 19.6
-ms/application frame on the same M1 (median 19.6 ms); a colder run reported
-26.7 ms. A stationary 90-frame run reported 39.4 ms/application frame and
-74 accumulated samples. The earlier figures are separate runs with differing
-changes; they do not isolate a frame-time gain from the film path. The film path eliminates the
-per-frame CPU readback and Scene texture upload by construction, and the
-native sampled-texture test measures zero upload bytes for that draw.
-The matching 2,160-instance `--gpu` benchmark then measured 1.7 ms and
-263,432 minor words for pure transform preparation, 9.1 ms for first upload
-and BLAS/TLAS build, and 0.3 ms to queue a reuse edit plus 1.5 ms at an
-explicit wait. These are single-run measurements under the default Dune
-profile, not frame-time percentiles.
-At the benchmark's farther fixed camera, 64 stationary samples averaged
-18.0 ms/frame with the instance TLAS and 27.5 ms/frame after flattening the
-same 2,160 cubes. The images have a 1.229 mean absolute channel difference
-on RGBA8 (signed mean 0.004). The mean difference fell from 2.195 at twelve
-samples, consistent with stochastic variance. This is a visual and throughput
-comparison, not byte-identical output parity.
-`RAYS_PATHTRACER_PROFILE=1 RAYS_PATHTRACER_FRAMES=90
-RAYS_PATHTRACER_ORBIT=1 dune exec rays -- sketches/voxel_wall.rays` logs the
-completed path-tracer command buffer's Metal GPU time per frame. On this M1,
-89 completed frames had median 11.43 ms, p95 12.31 ms, mean 11.44 ms, and
-maximum 19.42 ms; the 90-frame application mean was 20.4 ms. GPU timestamps
-cover tracing and preview resolve, while the application total also includes
-startup, cook, UI rendering, scheduling, and presentation. PNG capture is
-excluded. This identifies the ray workload as a substantial cost without
-attributing the remaining time to a single phase.
-
-World convergence probe (headless, 2026-09-26, Apple M1, default profile):
-`dune exec lib/rays_pathtracer/test_main.exe -- bench_world` renders a
-floor and a 48x24 UV sphere at 256x256, 1 spp per frame, 6 bounces, in three
-interleaved rounds. Wall time per `render`+`flush` frame (Metal GPU
-timestamps read 0 on this machine), and RGBA8 RMSE against each
-configuration's own 2048-frame reference:
-
-| Configuration | ms/frame (3 rounds) | RMSE @16 | RMSE @64 |
-|---|---|---|---|
-| procedural dome, 1 panel (no World, before) | 3.62 / 3.97 / 3.93 | 3.52 | 1.68 |
-| white room, panels in the maps (CDF + MIS) | 4.11 / 4.22 / 4.40 | 3.01 | 1.36 |
-| white room, 6 promoted panels (rect NEE + hittable) | 6.35 / 6.32 / 6.21 | 3.07 | 1.43 |
-
-The references differ per row, so RMSE compares convergence rates, not
-images. The promoted room pays for testing six rects on every ray and a
-third shadow ray per bounce. Timings exclude tracer creation and one warm-up
-frame.
+Measure native throughput with a fixed clock, scene, sample count and seed.
+Record hardware, profile, wall time, allocations, readback and owned handle deltas.
+Compare like-for-like serial and parallel output before accepting a speed claim.
+Dated benchmark measurements and removed commands are preserved in
+[history](../docs/history/specification/pathtracer.md).
 
 ## SOP workflow example
 

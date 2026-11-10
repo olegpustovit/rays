@@ -145,7 +145,7 @@ parameter is coerced by `Port_type.coerce`, then normalised to the field's hard 
 
 - **SOP kinds** are the registered factories (`Sop_catalog.Editor.factories`), symbol
   `sop/<key>` where `<key>` is the factory's stable key verbatim (`uv_sphere`,
-  `noise_displace`). The PPX rejects a key or slot name that does not match
+  `noise_displace`). The schema checker rejects a key or slot name that does not match
   `[a-z][a-z0-9_]*`. `Flow_sop.Catalog.of_factories` turns them into the checker's
   `Flow.Catalog.catalog`.
 - **Scene, World and settings kinds** are descriptors `Editor_document.Lowering`
@@ -183,7 +183,7 @@ that does not check is refused whole and nothing changes. `Editor_document.Works
 does this for a document and moves layout keys in the same transaction. Comments travel
 with the binding they precede.
 
-The ops are the list in `flow_edit.mli`: `Set_arg`, `Connect`, `Disconnect`,
+The ops are the list in `crates/flow_graph/src/flow_edit.rs`: `Set_arg`, `Connect`, `Disconnect`,
 `Set_input_default`, `Unfold`, `Fold_into`, `Wrap` (Repeat, Iterate), `Hoist`, `Rename`,
 `Make_local_fn`, `Make_defn`, `Make_macro`, `Inline_macro`, `Toggle_bypass`, `Set_note`,
 `Add_item`, `Move_item`, `Add_field`, `Add_node`, `Delete_nodes`, `Duplicate`, `Set_graph`,
@@ -295,7 +295,7 @@ grouping below; Vec2/Vec4 do not expand `Port_type`.
 `[@sop.vec3 "center"]` on three float fields groups them into the vec3 parameter `center`
 with components x, y, z. The record keeps its three fields, so cook code does not change;
 `Param.field.vec3 : (string * int) option` is the group name and component index, and
-`Flow_sop.Port.parameters` checks the same grouping invariants as the PPX. The keyword is
+`Flow_sop.Port.parameters` checks the same grouping invariants as native declarations. The keyword is
 the group name (`:center [0 1 0]`); the underlying field names are not addressable. When the
 common prefix already names another field the group takes another name (Ray's
 `direction_vector` beside its `direction` choice).
@@ -346,7 +346,7 @@ edits use the same paths, boxes and history as other zones.
 
 The add menu lists the language's forms beside the operators, each added as a card holding a
 small working expression to edit in place: Branch (`if`, `cond`, `case`), Loop (`for`, `fold`,
-`scan`, `sum`), Function (`fn`, `map`, `filter`, `reduce`, `sort-by`), Data (`list`, `record`,
+`scan`, `sum`), Function (`fn`, `map`, `filter`, `reduce`, `sort_by`), Data (`list`, `record`,
 `let*`) and Frame (`state`); `Core_add.forms` is the one table. The card menu and keymap expose Wrap conditional (`Shift-I`), Add arm
 (`Alt-A`) and Delete first arm (`Alt-Delete`). An inserted cond arm starts
 with `false`; case starts with a literal of the existing test's kind.
@@ -866,7 +866,7 @@ value `x` keeps its own. A step that is not a call, or a `->` with no value, is 
 The printer threads a chain of three or more calls of node kinds (a head with a `/`, except the
 `ui/` layout forms, which nest) whose first operand is the next call down. A step that carries a
 comment or `^:bypass` is still threaded and keeps them on its own line. Shorter chains and every
-`let*`-named value stay nested, so print and re-read keep the same forms (`lib/rays_editor/test/test_threading.ml`
+`let*`-named value stay nested, so print and re-read keep the same forms (`crates/rays_editor/tests/`
 prints and re-reads every checked-in workspace).
 
 Every step of a `->`, and every call of a node kind written inside another call, is a node of the
@@ -876,7 +876,7 @@ edit in place (`Set_arg`, `Connect`, `Disconnect`, `Toggle_bypass` take the path
 (`Rename`, the name field) binds it under that name; deleting it hands its place to its chain input (`Flow_edit.chain_in`: the first input written as a node call, such as `draw/translate`'s drawing, else the first input);
 dragging its output to a second input, viewing it, or dropping a wire where it is written binds it
 first, so a wire never deletes a node. The caret in its text selects it and selecting it marks its
-text. Inline `map`, `filter`, `reduce` and `sort-by` are cards too; their `fn` inputs
+text. Inline `map`, `filter`, `reduce` and `sort_by` are cards too; their `fn` inputs
 are zones with typed parameter rails, call selectors and editable body cards. Array
 inputs show their checked array type. The selector is view state; scrubbing or wiring
 a body row edits the same authored text, including from the text pane. Expressions,
@@ -1066,7 +1066,7 @@ A source diagnostic has a 1-based position and a half-open byte span; one withou
 text leaves both absent. `Diagnostic.report` prints file, line and column locations so editors can jump to the source. Messages are sentences that name the fix.
 
 The reader's and the argument checker's codes (the language's own are listed in
-`workspace.mli`, `eval.mli` and `macro.mli`):
+the `flow_check`, `flow_eval` and `flow_syntax` crates):
 
 | Code | When | Message shape |
 |---|---|---|
@@ -1120,7 +1120,7 @@ places it. All sizes are logical points.
 | `(ui/split axis a b)` | two panels along `"horizontal"` (a left of b) or `"vertical"` (a above b), half each |
 | `(ui/split axis a b :first_size n)` | `a` is `n` points along the axis, `b` takes the rest |
 | `(ui/split axis a b :second_size n)` | `b` is `n` points, `a` takes the rest |
-| `(ui/split-at axis ratio a b)` | `a` gets `ratio` (0.1–0.9) of the split, `b` the rest |
+| `(ui/split_at axis ratio a b)` | `a` gets `ratio` (0.1–0.9) of the split, `b` the rest |
 | `(ui/tile panel...)` | a grid of 1–16 equal cells |
 | `(ui/floating panel)` | a window over the layout (bounds in `(layout (panel ...))`) |
 | `(ui/switch panel... :active n)` | the layouts of the graph; the active one is the tree |
@@ -1133,7 +1133,7 @@ places it. All sizes are logical points.
 | `(ui/timeline)` | the timeline strip |
 
 **Fixed sizes.** A split is sized one way: by a ratio, or by one fixed side. `:first_size` and
-`:second_size` are whole points (1 or more) and exclude each other (`E_RANGE`); `ui/split-at` takes
+`:second_size` are whole points (1 or more) and exclude each other (`E_RANGE`); `ui/split_at` takes
 neither. The fixed side keeps its points at every window size and the other side takes what is left
 of the split after the one-point gutter. When the split is too small for both, the other side keeps
 its minimum first (a column: 220 points for a viewport, 180 for a graph, list or lisp panel, 120
@@ -1144,9 +1144,9 @@ on its own, so a fixed column never moves when a neighbour's ratio changes.
 
 **Dragging a gutter** writes what the split is sized by (`Flow_edit.Set_layout_size`, one history
 entry "Resize panel"): the fixed side's whole points for a fixed split, else a ratio with four
-decimals in a `ui/split-at` (a `ui/split` without a size becomes one). The same op converts a split:
+decimals in a `ui/split_at` (a `ui/split` without a size becomes one). The same op converts a split:
 a right-click on a gutter, and the Size row the inspector shows for a selected `ui/split` or
-`ui/split-at` card, offer *By ratio*, *Fix first side* and *Fix second side*; the new form keeps the
+`ui/split_at` card, offer *By ratio*, *Fix first side* and *Fix second side*; the new form keeps the
 sizes the split has on screen (the side's points, or their ratio). A panel's header menu has the
 same three rows for the split that holds the panel. The keyword rows of a `ui/split`
 card edit the points in place.
@@ -1238,7 +1238,7 @@ Completion includes imported names and their file. Saving preserves the
 import form and local comments and writes only the importing file. Imported
 files are polled with the main source; changes reload as one history entry
 and wait while the document has unsaved work. Generated programs embed the
-original imported texts, and generated Dune rules depend on imported files.
+original imported texts; reload tracking includes imported files.
 
 ### Spreadsheet
 
@@ -1254,15 +1254,14 @@ the table remains read-only.
 
 ## 12. Catalog manifest and `rays`
 
-`lib/sop_catalog/flow_manifest.exe` writes `lib/sop_catalog/flow_manifest.sexp`
-(`Flow_sop.Manifest.generate`): the catalog version, a digest (version 1 uses the
+`flow_sop_catalog::manifest` generates `crates/flow_sop/flow_manifest.sexp`: the catalog version, a digest (version 1 uses the
 RFC 1321 MD5 content checksum), and for every kind its
 qualified name, key, operation, label, category path, slots, fields (name, label,
 folder, kind with soft and hard range, default, primary, vec3 group, unit) and outputs. The
-file is checked in; `dune build @lib/sop_catalog/runtest` regenerates it and diffs, and an
-intended change is accepted with `dune promote`. `Flow.Catalog.catalog_of_manifest` reads it:
+file is checked in; `RAYS_UPDATE_FIXTURES=1 cargo t -p flow_sop manifest`
+regenerates it, then the same check without that variable verifies it. `Flow.Catalog.catalog_of_manifest` reads it:
 `lib/flow`'s own tests check against it (the library cannot link the catalog), and
-`lib/rays_editor/test/test_sop_catalog.ml` proves it equals the live catalog. The editor and `rays`
+`crates/rays_editor/tests/` proves it equals the live catalog. The editor and `rays`
 check against the live catalog (`Editor_document.Lowering.catalog`): `rays` interprets a `.rays` file,
 so nothing is generated and nothing can be stale.
 The Lisp node library (`lib/flow_sop/nodes/*.rays`) is fixed: the definitions a workspace reaches are
@@ -1270,7 +1269,7 @@ checked once on their own and kept (`Flow.Workspace.prelude`, eight reachable su
 of `sop_gallery` takes 0.045 s against 0.272 s when they were checked with every workspace check
 (`specification/sop.md`, "Kept library checks").
 
-`bin/rays.ml` is `rays`:
+`crates/rays_bin/src/main.rs` is `rays`:
 
 | Command | Does |
 |---|---|
@@ -1324,7 +1323,7 @@ Refusals, all
 with the span of the form: `E_WEB_GRAPH` (the draw graph reaches a `sop` or `scene` graph), `E_WEB_LOWER` (the
 draw graph does not lower to the core), `E_WEB_IMAGE` (unavailable or undecodable file assets, file paths
 not known at export time, image capacity or unsupported pixel bodies), `E_WEB_REGION` (a sum or fold region, a frame fact the runtime lacks) and
-`E_WEB_CAPTURE` (a region input that changes from frame to frame). `tools/web_parity.exe DIR...` runs the
+`E_WEB_CAPTURE` (a region input that changes from frame to frame). the web parity regression runs the
 exported program under `node` for 120 fixed-step frames and compares each frame's mark table with the native
 core executor's (structure exactly, floats within 1e-6); historical results are in Git at `62582188`.
 
@@ -2146,20 +2145,12 @@ Live fields do not change the window or its captured cook seed.
 The native/web compiler's shared frame and numeric region contract is specified
 in [core.md](core.md); its implementation sequence is [web-export/plan.md](web-export/plan.md).
 
-| Library | Owns, for Flow |
-|---|---|
-| `param` | field schemas, with `primary` and `vec3` |
-| `flow` | `Syntax` (reader), `Lisp` (printer), `Macro`, `Workspace` (checker), `Eval`, `Ty`, `Port_type`, `Context`, `Check` (catalog descriptors and the manifest reader), `Diagnostic` |
-| `input` | immutable logical frame facts, validation and exact cache equality |
-| `flow_graph` | `Flow_edit`, `Projection`, `Exposure`, `Probe`, independent of geometry |
-| `flow_sop` | `Catalog`, `Manifest`, `Lower`, `Network`, `Port`, `Value_lane`, `Curve` |
-| `editor_document` | `Workspace_doc`, `Layout_by_path`, `Lowering` (scene, World, settings and editor lowering), `Scene_sync`, `Preset` |
-| `pxui_graph` | `Scope` (the pane) and `Node_menu` |
-| `pxui_shell` | the inspector, the list (`Tree`), the status strip and guide |
-| `rays_editor` | the keymap, carry, the text pane, cook scheduling |
-| `ppx/ppx_rays` | `[@sop.primary]`, `[@sop.vec3]`, `[@@sop.node_key]`, `[@@sop.node_slots]` |
+The current ownership table is [the Rust crate map](api.md). Syntax, checking,
+evaluation, IR, shader and web lowering stay independent of UI. Geometry foundations
+remain independent of runtime/UI and the GPU. Editor adapters depend on those
+foundations, never the reverse.
 
-`test/dependency_gate.ml` enforces the edges; the root `AGENTS.md` and `backend.md` state
+`tools/gate/src/main.rs` enforces the edges; the root `AGENTS.md` and `backend.md` state
 them.
 
 ## 15. Performance
@@ -2172,24 +2163,24 @@ Rules from the root `AGENTS.md` apply. What the code holds itself to:
 - The value lane does no work for networks without drives.
 - A frame never re-lowers.
 
-Benchmarks: `tools/bench_rays_editor.exe` and `dune exec test/test_main.exe -- bench_scope_big`.
+Use `cargo t -p rays_editor` for bounded editor regressions; record focused timing changes in `PROGRESS.md`.
 
 ## 16. Tests
 
 Window-free logic tests in `runtest`: the reader, printer, macros, checker and evaluator
-(`lib/flow/test_*.ml`), threading round trips over every checked-in workspace
-(`lib/rays_editor/test/test_threading.ml`), edits (`lib/flow_sop/test_workspace_edit.ml`), projection and probes
-(`lib/flow_sop/test_projection.ml`, `lib/rays_editor/test/test_probe.ml`), the pane's gestures
-(`lib/pxui_graph/test_pxui_graph.ml`), the document and its layout (`lib/rays_editor/test/test_workspace_doc.ml`),
-lowering, zones and live values (`lib/flow_sop/test_workspace_cook.ml`, `lib/flow_sop/test_workspace_zone.ml`,
-`lib/flow_sop/test_workspace_live.ml`), the shell and its layout forms (`lib/rays_editor/test/test_workspace_shell.ml`),
-the text pane (`lib/rays_editor/test/test_text_pane.ml`), the carry (`lib/pxui/test_ui.ml`,
-`test/test_pxui_graph.ml`, `lib/rays_editor/test/test_materials.ml`), and the gate. Visual checks are in
+(`crates/flow_check/src/`), threading round trips over every checked-in workspace
+(`crates/rays_editor/tests/`), edits (`crates/editor_document/src/test_workspace_edit.rs`), projection and probes
+(`crates/editor_document/src/test_projection.rs`, `crates/rays_editor/tests/`), the pane's gestures
+(`crates/pxui_graph/tests/`), the document and its layout (`crates/editor_document/src/test_workspace_doc.rs`),
+lowering, zones and live values (`crates/editor_document/src/test_workspace_cook.rs`, `crates/flow_sop/src/lisp_sop/test_workspace_zone.rs`,
+`crates/flow_sop/src/`), the shell and its layout forms (`crates/rays_editor/tests/`),
+the text pane (`crates/rays_editor/src/test_text_pane.rs`), the carry (`crates/pxui/tests/`,
+`crates/flow_native/tests/`, `crates/rays_editor/tests/`), and the gate. Visual checks are in
 `@runtest-native`.
 
 ## 17. Deferred
 
-Fields and the diamond socket as data; zoom-to-enter; a `[%workspace]` PPX with generated
+Fields and the diamond socket as data; zoom-to-enter; a source embedding extension with generated
 input records; procedural macros; a per-node cache ring for scrubbing; a file
 dropped from Finder (§7.12).
 
@@ -2211,7 +2202,7 @@ dropped from Finder (§7.12).
 | Macros | quasiquote templates only |
 | Stale layout entries | pruned on load and on structural edits, never an error |
 | Viewport navigation | view state, also with follow-viewport; not an undo entry |
-| Fixed panel sizes (2026-10-05) | `:first_size` / `:second_size` on `ui/split`: one concept, on the split that the gutter drag rewrites; `ui/split-at` stays the ratio form (§11.11) |
+| Fixed panel sizes (2026-10-05) | `:first_size` / `:second_size` on `ui/split`: one concept, on the split that the gutter drag rewrites; `ui/split_at` stays the ratio form (§11.11) |
 | Start keywords (2026-10-05) | keywords on the panel forms (`:focus`, `:look_through`, `:view`, `:tab`), followed when the document opens and whenever their value in the text changes; saved UI state stays in `(layout ...)` |
 | Panel instances (2026-10-05) | every leaf is an instance with its own view state; the level and its selection belong to a graph panel; a binding used twice makes two instances keyed by place |
 | Following a graph panel (2026-10-05) | `:of binding` on `ui/inspector`, `ui/list`, `ui/lisp`: one keyword, a panel-typed wire in the graph; without it the panel follows the focus |

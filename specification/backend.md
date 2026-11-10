@@ -140,7 +140,7 @@ its instruction printer. CPU JavaScript regions call the imported `noise3` from
 `flow` never depends on `flow_ir` and retains an independently callable
 reference tree walker. The printers (`flow_shader`: `Emit`, `Spirv`, `Raster`) sit above the numeric IR and depend
 directly only on `flow`, `flow_ir` and `ogpu_core` (`Shader.binding`, pure data); their
-`print_shader.exe` prints the renderer's, the Metal backend's and `flow_gpu`'s shaders at build
+the Rust `print_shader` tool prints the renderer's, the Metal backend's and `flow_gpu`'s shaders at build
 time, a build action that adds no library edge (the gate reads `libraries` only).
 `flow_gpu` sits above them and the public OGPU API:
 it runs Metal source printed from borrowed immutable register programs, caches at
@@ -314,7 +314,7 @@ from it to `rays`, the runtime or a GPU library.
 `sop` is preprocessed by `rays.ppx` (which links `ppxlib` and `flow`
 at build time only, never into the library): the node declarations that
 yield both the editor factory and the typed `Sop` constructor live there, in
-private modules (`sop_topology.ml` and its siblings), and `Sop.Nodes` exports their factories to
+private modules (`crates/sop/src/sop_topology.rs` and its siblings), and `Sop.Nodes` exports their factories to
 `sop_catalog`. `Edit_graph` no longer calls `Sop`, so a declaration may use
 `Edit_graph.factory` without a cycle.
 
@@ -349,7 +349,7 @@ result is discarded. A subprocess regression checks both paths with
 The Rust dependency gate checks backend selection separately for Apple and
 Windows: mutually exclusive target dependencies do not count as two selections.
 An unconditional second backend or a missing platform backend remains an error.
-All raw Metal binding declarations come from `lib/metal/gen/registry.ml`;
+Raw Metal ABI declarations are checked in under `crates/metal_sys/src/`;
 typed SDK calls are generated, while custom marshalling/ownership primitives
 are explicitly registered as `Native` entries. This does not change the OGPU
 boundary or expose the private raw ABI (see `specification/metal.md`).
@@ -595,53 +595,17 @@ feature availability, and conservative-probe notes travel as one value.
 uses `Caps.require` for typed unsupported-feature results.
 The old Metal `Adapter` module is removed; it no longer duplicates feature
 decisions or wraps capability probes.
-The shared `lib/ogpu/conformance` runner exercises capabilities, encoded
-buffer and texture round trips (padded rows, mip levels, inset origins),
-libraries and compute, ray tracing, the render path, lifetime rejection, and
-teardown on both the mock and Metal drivers. Two executables select
-`ogpu_mock` and `ogpu_metal` through Dune's virtual-library implementation
-mechanism. The portable types live in `ogpu_core`; the wrapped `ogpu` module
-aliases them without changing type identity. Nothing outside `lib/metal` and
-`lib/ogpu_metal` references `Metal` or `Ogpu_metal_native`; the dependency
-gate lists no Metal exception.
+The shared native conformance checks cover capabilities, buffer/texture round
+trips, padded rows, mip levels, inset origins, shader libraries, compute,
+ray tracing, rendering, rejection, retention and teardown. Select one supported
+backend at the process boundary. Mock checks remain isolated tests.
 
-The gate (`test/dependency_gate.ml`) reads the library graph and terminal
-stanzas from Dune files under `lib`, `ppx`, `tools`, `test` and `bin` when
-present. Every executable or test that reaches virtual OGPU must select exactly
-one implementation directly; missing and ambiguous selections fail, including
-through private helper libraries and public library aliases. The gate also
-rejects a default implementation on virtual OGPU.
-The same gate rejects Dune `copy_files` of library ML sources. Existing shared
-IR fixture modules live in the test-only `flow_ir_test_support` library;
-product libraries cannot reach it, including transitively. This repackages
-existing test data and builders without adding a product abstraction.
-"May never
-reach" rules run over the transitive closure; `rays_pathtracer` (no Metal
-backend, mock, geometry graph, catalog, UI or editor library), `rdk_rays`
-(the renderer leaf: `rdk_core`, `rdk_ops` and `rays`, never the
-Boolean stack, `sop` or anything above) and `scene_execution_fixtures`
-(only `renderer` and `ogpu`) have theirs. "Depends only on" whitelists
-check every direct dependency, external ones included: `param`,
-`native_layer_token`, `input`, `diagnostic` and `lru` list none, `flow` only `diagnostic`, `param`, `input` and `rays_math`, `ogpu_core`
-only `native_layer_token`, `ogpu` and `ogpu_mock` only `ogpu_core`, `metal`
-only `threads` and `native_layer_token`, `ogpu_metal_native` only `ogpu_core`,
-`metal` and `lru`, `ogpu_metal` only `ogpu_metal_native` and `metal`,
-`pxui_shell` only `rays`, `rays_math`, `editor_core` and `pxui`, `sop_catalog` only
-`rays_math`, `rdk` and `sop`. Runtime lists only `sdl3` and `ogpu`; Renderer
-lists only `ogpu`, `scene_command`, `runtime`, `lru`, `rays_math` and
-`runtime_resources`. The path tracer lists only `rays`, `ogpu`, `renderer`,
-`runtime_resources`, `rays_math` and `unix`; it cannot reach `rdk_core` through
-any dependency. Negative gate fixtures also reject direct `rdk` and
-`rdk_rays` edges. Callers triangulate and prepare normals through `rdk_rays`
-when their source mesh changes; the tracer consumes `Rays.Mesh.t` planes.
-The Metal token scan covers the same source roots;
-outside the backend it admits
-only the binding tooling (`tools/codemod/metal_registry.ml`), the
-Metal conformance driver (`lib/ogpu/conformance/test_metal.ml`) and the gate
-itself. `lib/metal` takes its source preprocessor from
-`ppx/result_bind`, so no foundational library is built by something under
-`tools/`; the gate rejects a `tools/` path in `lib/metal/dune`. Each rule has
-an injected violation in the gate's own run.
+`cargo run -p gate -- deps` reads Cargo manifests and enforces dependency
+direction. Foundational language/IR/shader/web crates remain UI-free; geometry
+foundations cannot depend on the GPU. Test-only fixture support cannot become a
+product dependency. Native binding code lives in its owning sys crate, with no
+foundational crate built through an application or tool dependency. Existing
+exceptions must be explicit, named and justified in the gate itself.
 
 The IsoGrid native qualification benchmark may use the standard library's
 `Dynlink.unsafe_get_global_value` solely to inspect the already-linked shared
@@ -1030,7 +994,7 @@ native link audit are release requirements: production artifacts may link only
 the declared SDL3, Metal, OGPU, and platform frameworks for this backend.
 
 Long-running, SDK-, driver- and machine-specific checks run under
-`dune build @qualification`; they are release evidence, not the pre-commit
+`RAYS_SLOW=1 cargo t --all`; they are release evidence, not the pre-commit
 gate.
 # Native UI input and export
 
@@ -1038,7 +1002,7 @@ gate.
 and its platform-supplied release operation; it links no Apple framework.
 The macOS SDL adapter supplies CoreFoundation retain/release operations.
 Invalidation releases the owned handle once and refuses future borrows.
-SDL selects its macOS or portable C hooks and link flags through Dune's
+SDL selects its macOS or portable C hooks and link flags through the owning Cargo build script's
 `system` condition. Metal libraries, build actions and tests are enabled
 only on macOS, and the native `rays` executable explicitly links that backend.
 Mock conformance selects its own implementation independently.
@@ -1088,7 +1052,7 @@ the window edge. Frame aggregation lives in this shared input source; the SDL3
 binding exposes no second mouse-delta reduction helper. No SDL value crosses
 into Rays's public API, the sketch
 loop turns it off when it stops, and the library dependency graph is
-unchanged (`test/dependency_gate.ml`). Sketch UI fly mode is its only
+unchanged (`tools/gate/src/main.rs`). Sketch UI fly mode is its only
 in-tree user.
 The SDL3 boundary exposes single-event polling and the coalescing poller;
 the runtime uses the latter to keep input floods bounded.
@@ -1303,7 +1267,7 @@ are not supported. `Run.build_scene` builds either kind through the OGPU acceler
 one. SPIR-V refuses a moving kernel (`E_GPU_FORM`): `SPV_NV_ray_tracing_motion_blur` moves trace-rays pipelines only,
 not ray queries, so a Vulkan host builds at the midpoint. The CPU host (`Trace_scene.register ~ending`,
 `register_instances ~motion`) interpolates vertices (intersected directly) or transforms at the query's time.
-`lib/flow_gpu/test_trace.ml` checks both kinds against the CPU at several times, and the midpoint fallback against
+`crates/flow_sop/src/lisp_sop/test_trace.rs` checks both kinds against the CPU at several times, and the midpoint fallback against
 the CPU at 0.5. Static kernels print byte-identical source.
 
 Strands (curves) are the fourth static fact, `~curves` (`` `Native `` or `` `Loop `` on `Emit.kernel`, a bool on
@@ -1355,7 +1319,7 @@ The Core offer contains Flow values only, with no geometry or backend types.
 
 A read-modify-write float film needs no new sink: a one-output kernel whose input 0 is `~bound` to the film buffer and
 whose output goes `~into` that same buffer reads and writes only its own pixel. A second kernel divides by the sample
-count and `Image_sink.convert` makes RGBA8 (ties to even). `lib/flow_gpu/test_film.ml` runs four accumulations and the
+count and `Image_sink.convert` makes RGBA8 (ties to even). `crates/flow_gpu/tests/` runs four accumulations and the
 resolve on Metal and checks every pixel exactly.
 
 ## Memory
@@ -1384,7 +1348,7 @@ admission over the limit believes it only after a collection: an entry something
 nothing when its cache drops it.
 A one-pool device (Metal) never sets a device limit, so its behaviour is unchanged. Out of device
 memory from the driver (`VK_ERROR_OUT_OF_DEVICE_MEMORY`) is a typed `Capacity` error
-(`lib/ogpu/conformance/test_vulkan.ml`). `@tools/mem` on Windows reads `win.KEY` budgets over `KEY`, because
+(`crates/flow_native/tests/`). `@tools/mem` on Windows reads `win.KEY` budgets over `KEY`, because
 a footprint there is committed private memory.
 
 ## Vulkan on Windows

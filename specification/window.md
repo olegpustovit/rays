@@ -6,7 +6,7 @@ Silicon. `Sketch` is the public entry point.
 
 ## Startup and ownership
 
-Startup performs the following ordered work on the initial OCaml domain:
+Startup performs the following ordered work on the initial thread:
 
 1. initialize the required SDL3 subsystems and extension libraries;
 2. create the configured high-DPI SDL3 window;

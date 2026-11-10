@@ -65,7 +65,7 @@ noise normalized to approximately 0..1.
 
 `fbm1`, `fbm2`, and `fbm3` layer octaves for organic detail:
 
-```ocaml
+```text
 let terrain =
   Noise.fbm3 ~octaves:5 noise ~x:(x *. 0.02) ~y:(y *. 0.02) ~z:time
 ```

@@ -49,3 +49,5 @@ Historical port evidence lives in `docs/history/` and records known unfinished w
 
 Mark deliberate shortcuts with known ceilings using `ponytail:` and an upgrade trigger.
 Never shortcut correctness, input validation, lifetime safety, security or accessibility.
+
+Lisp authoring: [generated guide](docs/lisp.md); lookup any name with `rays doc NAME`.

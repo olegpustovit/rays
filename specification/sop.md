@@ -12,7 +12,7 @@ Lisp-output geometry digests provide the regression contract for accepted bodies
 The architecture cleanup captures all fixture/case outputs before removing native twins.
 It removes parity-only RDK code rather than retaining an oracle library.
 Migration measurements and session logs are available in Git history at `62582188`.
-Current work and verification are tracked in [cleanup/status.md](cleanup/status.md).
+Current work and verification are tracked in [cleanup/status.md](../docs/history/cleanup/status.md).
 
 ## Product intent
 
@@ -47,7 +47,7 @@ An unmatched pattern leaves geometry unchanged.
 Use `sop/group_rename` with `:rules` for owner-scoped or multiple group renames;
 the editor exposes the same rule-based `Group Rename` node.
 Tests write their graphs as Lisp text through `lib/flow_sop/lisp_sop` (`Lisp_sop.node`);
-there is no typed OCaml constructor per node.
+there is no typed Rust constructor per node.
 
 ## Ownership and dependency boundary
 
@@ -144,46 +144,12 @@ uncommitted branch outputs and reports errors in input order.
 SOPs and sketches attach schemas to individual nodes. There is no sketch-wide
 promoted record that shadows the graph; `Edit_graph` owns document edits.
 
-The runtime API is PPX-independent. Templates may be written directly with
-`Param.field` and `Param.schema`. The optional `rays.ppx` deriver
-removes record boilerplate:
-
-```ocaml
-type controls = {
-  divisions : int
-    [@sop.default 16] [@sop.label "Divisions"]
-    [@sop.folder "Geometry"] [@sop.min 1] [@sop.max 64]
-    [@sop.hard_min 1];
-  amplitude : float
-    [@sop.default 0.25] [@sop.folder "Noise"]
-    [@sop.min 0.] [@sop.max 1.];
-  explosion : float
-    [@sop.default 0.] [@sop.folder "View"]
-    [@sop.min 0.] [@sop.max 2.] [@sop.impact "view"];
-}
-[@@deriving sop_params]
-
-let grid_node input p =
-  Custom.node ~label:"deform" ~operation:"custom-deform"
-    ~schema:controls_schema ~values:p [input]
-    (fun ~label ~inputs ~parameters ->
-      Custom.plain ~label ~parameters:(Param.key controls_schema parameters)
-        ~operation:"custom-deform" inputs
-        (fun ~context:_ geometries ->
-          (* Call typed RDK operations here. *)
-          Ok geometries.(0)))
-```
-
-The deriver emits `controls_default` and `controls_schema`. Every record field
-requires `[@sop.default ...]`. Primitive `bool`, `int`, `float`, and `string`
-kinds are inferred; numeric fields require soft `[@sop.min]`/`[@sop.max]`.
-`[@sop.hard_min]` and `[@sop.hard_max]` opt into strict normalization.
-`[@sop.label]`, `[@sop.name]`, `[@sop.description]`, slash-separated
-`[@sop.folder]`, and `[@sop.impact "cook"|"view"|"export"]` provide layout and
-behavior. `[@sop.kind expression]` supplies arbitrary typed choices, and
-`[@sop.ignore]` retains a record field/default without promoting it.
-`[@sop.primary]` marks default card rows; checked `[@sop.vec3 "center"]`
-groups three consecutive float components into one vector row and port.
+Schemas are plain metadata in the dependency-free `param` crate. Each field
+owns a stable name, type, default, description, optional unit, soft/hard range,
+folder, impact and primary status. Vector groups combine consecutive scalar
+components into one inspector row and graph port. Choices retain their typed
+values. Native `spec()` blocks and Lisp `defnode` declarations expose the same
+schema facts, without a source preprocessor or generated Rust constructors.
 
 Schemas live in the dependency-free `param` library. `Pxui_shell.Inspector`
 converts a node.s folders to nested accordions and kinds to native widgets; the
@@ -197,24 +163,15 @@ Persisted parameter state belongs to the graph/node layer. The selected-node
 inspector is regenerated from concrete node metadata and never imports an
 independent canvas-wide shadow record.
 
-A SOP node has one declaration: either an OCaml `parameters` record with
-`[@@deriving sop_params, sop_node]`, or a Lisp `defnode` in
-`lib/flow_sop/nodes/<key>.rays`. Both declarations supply the inspector schema,
-Lisp manifest entry and editor factory. There is no typed OCaml constructor (the
-former `Sop.Sop` facade is gone): Lisp (`sop/<key>`) and
-`Edit_graph.instantiate` build nodes, and tests write graphs as Lisp text.
-There is no separate function name, argument list or typed default override.
-Defaults, validation and cache identity therefore
-cannot drift between the API and the editor. OCaml declarations live in
-`lib/sop` (`groups.ml`, `sop_topology.ml`, `attributes.ml`,
-`shapes.ml`) next to their cooks; `Sop.Nodes` exports their
-factories. Parameter-free nodes declare `type parameters = unit`;
-the same derivation supplies an empty schema. Null and Compact Points use this
-path, with no artificial fields.
-An input-dependent inspector can supply `parameters_build ~schema`, deriving
-presentation from the constructed node while retaining the record's fields and
-defaults. The builder evaluates the operator once and refreshes that schema on
-edits and rewiring. Labeled index choices retain integer values and port types.
+A SOP node has one schema declaration beside its cook in `crates/sop/src/`,
+or one Lisp `defnode` under `crates/flow_sop/nodes/`. Both supply inspector
+metadata, the manifest entry and an editor factory. The native `spec()` block
+owns names, defaults, ranges, units and input arity. Native cooks read values by
+schema name, so reordering declarations does not change behavior. Parameter-free
+nodes have an empty schema, with no artificial fields. Input-dependent inspectors
+derive presentation from the constructed node while retaining those stable facts.
+Factories validate before construction and rebuild after edits or rewiring.
+
 Group Random and Noise Displace expose their existing `context_seed` switch:
 both default to explicit seed 0, while `context_seed:true` selects the cook
 context independently of whether a seed argument was supplied. Point Jitter's
@@ -226,7 +183,7 @@ U/V range toggles preserve the kernel's meaningful omitted-range path; the
 Lisp defaults keep both ranges explicit. The typed APIs flatten endpoint and
 UV ranges and use the same defaults and validation as their factories.
 The ten recorded default drifts are settled; existing
-OCaml callers explicitly pass their former defaults. Box defaults to quads;
+Rust callers explicitly pass their former defaults. Box defaults to quads;
 Tube defaults to triangles with end caps. Box's normals choice includes Auto
 (`~normals:None`), which lets the kernel decide; the default remains Vertex.
 Bound exposes separate box/sphere resolution and grouped lower/upper padding;
@@ -255,52 +212,24 @@ construction. The node's
 cache identity is the schema's `Param.cook_key`, and `Node.parameters`
 reads as `Param.cook_text` (`name=value;...`) unless the cook retains
 legacy diagnostic text; that text does not replace the schema cache key.
-Checks involving several fields or encoded values use
-`[@@sop.validate fun parameters -> ...]` on the record: a pure check returning
-`(unit, string) result`. The generated builder runs it before constructing the
-operator and returns its `Error`; a factory `build` is `Node.t option list ->
-(Node.t, string) result`, so no caller catches `Invalid_argument` or `Failure`.
-An operator that refuses by wiring (a missing optional input) is marked
-`[@@sop.node_fallible]` and returns a result too. Invalid editor writes return an error and retain the
-existing node. Extract Centroid, Ordered Group and Group by Normal use this
-for reserved names, negative indices and non-zero directions respectively.
+Checks involving several fields or encoded values are pure validation functions
+run before constructing the operator. A failed factory returns its error and
+leaves the existing node intact. Missing optional wiring is also a typed error.
+Extract Centroid, Ordered Group and Group by Normal enforce reserved names,
+nonnegative indices and nonzero directions at this boundary.
 Delete Attributes takes its input and optional reference positionally. Curves
 and Parent edge transport default the root value to Zero, as in Lisp; callers
-that need the former OCaml default pass `Transport_root_hold` explicitly.
+that need the former native default pass `Transport_root_hold` explicitly.
 Every catalog node uses one of these declarations; custom cooks stay
 hand-written through `Sop.Custom`. A node writes no parameter text of its own: its inspection text and
 cache key are derived from the record. Switch keeps its `a` and `b` ports and
 takes further branches through the optional repeated `inputs` port.
 
-`rays.sop_catalog` registers OCaml-bodied nodes and declares none. A parameter type
-uses `[@@deriving sop_params, sop_node]` together with stable key, runtime
-operation identity, label, category-path, and input-arity attributes. The
-operation defaults to the key; `sop.node_operation` records deliberate aliases.
-`sop_node` also generates `parameters_build`: given an operator
-`fun ~label parameters input0 ... -> node` (one `Node.t` per required slot, one
-`Node.t option` per optional slot), it returns the recursive, arity-checked
-`build ~label ~inputs parameters` that attaches the schema through
-`Node.parameterize` and rebuilds itself after edits. The generated
-`parameters_factory build`
-binds the same defaults and rebuild function used by inspection. A catalog
-module is therefore the parameter record, one `parameters_build` operator, and
-`let factory = parameters_factory build`; only nodes with external callers keep
-an ergonomic hand-written `create` in `sop_catalog.mli`. Marking the
-containing module `[@@sop.register]` contributes its local factory to a
-deterministic source-order `Sop_catalog.Editor.factories` manifest generated by
-the PPX. There is no mutable global initializer and no hand-maintained second
-list that can omit an implemented catalog node. Constructors delegate geometry
-work to ordinary Sop/RDK operators; controls are never synthesized from
-serialized cache-key strings.
-
-For a Lisp body, the `defnode` header is the declaration. It retains the same
-scalar fields, literal defaults, separate soft/hard ranges, labels, descriptions,
-folders, units, primary flags, impact and vec3 presentation groups as its OCaml
-record. Encoded lists and ramps use text recipes with explicit validation; a
-text kind alone does not supply an encoded decoder. Typed slots retain their
-names, order and required/optional/rest status. Validation predicates run with
-the complete parameter scope before node construction; refused editor writes
-keep the existing node.
+Native registration uses the plain static schema/factory declarations in
+`crates/sop/src/nodes.rs`. Stable key, operation identity, label, category and
+input arity belong to the declaration. There is no mutable global registration
+initializer or generated typed constructor surface. A Lisp node adds its source
+file and one source-list entry; consistency checks derive the other inventories.
 
 ```lisp
 (defnode sop/shift :label "Shift" :category ["Deform"]
@@ -312,15 +241,15 @@ keep the existing node.
     (exact (map (fn [p] (+ p [distance 0.0 0.0])) (sop/attr geo :P)))))
 ```
 
-The Dune source rule embeds the node files through the existing
-`lib/flow/embed.exe`, sorted by filename. `Flow_sop.Catalog.check_workspace`
+The checked-in node source list embeds each Lisp file with `include_str!`; a
+regression compares that list against the directory, sorted by filename. `Flow_sop.Catalog.check_workspace`
 puts these definitions in scope without changing authored form IDs. Catalog
 calls keep their `sop/<key>` identity and project to one graph card; the body is
 internal to that card. Lowering exposes the resulting factories alongside the
 native factories for node menus and inspection. The generated manifest records
 `(body lisp)` and `(calls ...)`; calls come from checked terms, including
 specialized helper functions and macros, rather than a textual name scan.
-Registration rejects a Lisp kind that collides with an OCaml kind.
+Registration rejects a Lisp kind that collides with a native kind.
 The header label supplies menu and inspector text; the initial cook label is the
 stable kind key, matching native factories and their context-seed namespaces.
 `Node.relabel` retains its existing display-only cook identity; a subsequent
@@ -343,7 +272,7 @@ be narrowed without losing capture or body invalidation.
 
 A SOP graph is one program. A call of a Lisp node evaluates its body in
 the calling program (`Flow.Eval`, the host's `inline_parameters`), so the region passes see
-across cards; only the native OCaml SOPs are node boundaries. The call keeps the node's
+across cards; only the native Rust SOPs are node boundaries. The call keeps the node's
 boundaries: its arguments take the node path (schema changes over the defaults, hard ranges,
 choices, encoded text through the normalizers, `sop/material` values as their fields), its
 validations refuse the lowering as a node build did, an error in its body is that card's cook
@@ -492,7 +421,7 @@ viewport (`test_scene3_native_lowering`), `Cook`'s prepared cache keeps no resid
 display's pin and a session's release keep a holder's fate, not the holder (`Run.fate`): once the
 next frame has been shown, no root holds the old frame's holder (`test_holder_frames_native`), and
 its buffer waits for the collector, or for an unpin, whichever is last.
-Measured (`bench_chain_recook.exe`, 1M points, one session toggling an edit, 32 warm and 32
+Measured (a historical benchmark, 1M points, one session toggling an edit, 32 warm and 32
 measured cooks, medians of three interleaved rounds, loaded M1, 2026-10-28): results that die, 1.5-3.2
 ms against dev's 6.0-12.1 ms (and 42-69 ms for the earlier read-the-oldest pool); the last 16 results
 kept alive, 2.0-2.6 ms against 8.9-11.0 ms (39-63 ms), with no output read back in either.
@@ -520,7 +449,7 @@ interleaved or checked read, the copies a write adopts, a large array's finite c
 fill is remembered by its value (`Flow.Op.constant_array`, 8 slots); and a region that only
 forwards its one source (a branch chosen by constants) is that source
 (`Packed.Host.prepare_values`). `test_chain_gpu_native` fails if a recook uploads an input. Measured
-(M1, loaded machine, load 5-11, 2026-10-28, `test_chain_gpu_native.exe`, medians of 5): `grid
+(M1, loaded machine, load 5-11, 2026-10-28, the native chain regression, medians of 5): `grid
 1000x1000 > attribute_noise > transform` recooks in 0.007-0.010 s with the device and nothing read
 back (eager readback before: 0.009-0.027 s, of which 7-10 ms converted all seven planes), 0.005 s
 when the previous results have been collected and their buffers recycled, against 0.11-0.15 s on
@@ -806,7 +735,7 @@ the sun fit reads instead of the host copy; its caster scan had read a device me
 `Mesh.View.view`, which made the host copy every frame a World sun lit one. min and max of float32
 values are exact, so the box equals the host scan's bit for bit (`test_chain_frames_native` fails
 otherwise, or if the bounds read more than 24 KB or materialise anything; `test_settle` checks the
-mock device's answer leaves P resident). Measured (`bench_chain_frames.exe`, 1M points, M1,
+mock device's answer leaves P resident). Measured (a historical benchmark, 1M points, M1,
 2026-10-29, frames 1-7): the bounds of a frame's resident P took 31-59 ms reading P back, now
 1.0-1.3 ms (2.5-2.8 ms with each lane on a contiguous chunk, uncoalesced).
 
@@ -908,7 +837,7 @@ s per frame (0.0071 s for 512 squared) against 0.151 s on the CPU (was a card re
 on the CPU each frame), largest difference 2.6e-7. Of the 7 ms at 512 squared, about 1.6 ms is the
 dispatch as the noise-driven chain's; the rest is the matrix's Lisp evaluation per frame (its
 uniforms, the deferred validation and the two delete guards, each evaluating the matrix).
-Profiled (`bench_chain_frames.exe` with `NODES=1`, per-node session timings, 512 squared): the
+Profiled (a historical benchmark with `NODES=1`, per-node session timings, 512 squared): the
 fused write took 4.9 ms, of which 3.7-4.0 ms was making its ten uniforms
 (`Packed.Host.prepare`): the live matrix is a record whose rows are residuals, and only a
 uniform's top-level residual bindings were made once, so every uniform that read the matrix (its
@@ -947,7 +876,7 @@ relevant facts, and the context dependencies of delegated nodes belong to it. A 
 failed is a plan node with a typed `error` (`Flow.Eval.node.error`) that cooks as that diagnostic.
 
 History: the nested model (each Lisp node body lowered as its own workspace) was measured against
-inline before it was deleted (M-series, 2026-10-28, interleaved, `tools/bench_sop_cook.exe`):
+inline before it was deleted (M-series, 2026-10-28, interleaved, a historical benchmark):
 
 | | inline | nested |
 |---|---|---|
@@ -964,19 +893,19 @@ lowering derives the actual body facts and qualifies its packed kernel before
 cooking.
 
 Input metadata is a signature, not merely a port count. Fixed descriptors use
-required slots; `[@@sop.node_optional "1,2"]` marks zero-based optional slots
+required slots; the declaration's optional-slot metadata marks zero-based optional slots
 and makes `sop_node` generate an `Edit_graph.factory_slots` descriptor.
-`[@@sop.node_slots "input, target"]` names the slots. Generated factories
-default to geometry inputs; `[@@sop.node_types "geometry, image"]` declares
+the declaration's slot names names the slots. Generated factories
+default to geometry inputs; the declaration's typed slots declares
 mixed nominal inputs in the same order. The factory validates the names,
 and the Flow catalog validates them against the type registry. An optional
 type atom in a manifest slot preserves the existing untyped slot spelling
 for geometry; the checker and graph rows use the declared type.
 `sop/attr_from_image` uses this signature for geometry then image, with the
 same declaration generating its schema and factory.
-`[@@sop.node_types ["fn(vec3,float)->float"; "image"]]` also accepts a list
+Function/image slot types also accepts a list
 of serialized types, so commas inside function signatures stay unambiguous.
-`[@@sop.node_keywords "field, picture"]` exposes those required physical
+Keyword-input metadata exposes those required physical
 inputs as typed Lisp keywords. They
 have no scalar Param field, default or drive. The manifest retains their physical
 input order and keyword names; the catalog validates their Fn/Image types.
@@ -1051,7 +980,7 @@ boundary when a downstream SOP needs the transformed points.
 `Sop.Custom.node` attaches a schema to an existing SOP composition without
 recursive reconstruction boilerplate. `Custom.plain` builds a parameter-free
 operator from immutable RDK inputs and a declared `Context`. Together they are
-the typed OCaml extension boundary; `Param.key` supplies cache identity,
+the typed Rust extension boundary; `Param.key` supplies cache identity,
 and parameter edits rebuild the cook closure while keeping the logical graph
 ID. This is not a VEX interpreter; it is the native extension point for RDK
 composition, with explicit dependency and cancellation contracts.
@@ -1111,13 +1040,11 @@ The template/value split and soft-versus-strict behavior are based on the
 public [Houdini ParmTemplate contract](https://www.sidefx.com/docs/houdini/hom/hou/ParmTemplate.html),
 [Houdini numeric strict-range behavior](https://www.sidefx.com/docs/houdini/hom/hou/IntParmTemplate.html),
 and [Blender's separate hard/soft property bounds](https://docs.blender.org/api/current/bpy.props.html#bpy.props.FloatProperty).
-PPX attributes are declared
-through PPXlib's typed attribute API so misspelled or malformed metadata fails
-at the source location rather than being ignored.
+The schema checker rejects misspelled or malformed metadata at its source location.
 
 ## Nodes and cook contract
 
-A graph is an immutable DAG. Shared OCaml values create shared subgraphs. Each
+A graph is an immutable DAG. Shared immutable values create shared subgraphs. Each
 node has a stable ID, human-readable label, operation/version, immutable
 parameters, ordered inputs, cook mode, and declared context dependencies.
 
@@ -1151,7 +1078,7 @@ layer.
 and override-name fields. Its Lisp defaults are Vertex output and Vertex-angle
 weighting; Point, Vertex, Primitive and Detail output are available. Normal,
 Peak, Bend and Clip select components with the same optional `group_owner`
-and `group` fields in Lisp and OCaml, with a blank name selecting the full
+and `group` fields in Lisp and Rust, with a blank name selecting the full
 input. Bend defaults to a Y capture direction, Z up vector, unit length and
 non-continuous twist. Clip defaults to preserving existing group membership.
 Its cache identity includes every control, and missing groups become traced
@@ -1181,7 +1108,7 @@ their deterministic frame/time facts. Each node
 declares exactly which facts affect it. A static box is not invalidated merely
 because time advanced.
 
-Constant parameters are ordinary OCaml values. Time/frame expressions, ramps,
+Constant parameters are ordinary Rust values. Time/frame expressions, ramps,
 easing, remapping, and deterministic noise are opt-in parameter values and mark
 their owning nodes with the corresponding dependency. Random operations derive
 stable streams from the user seed, stable node identity, and element index.
@@ -1626,7 +1553,7 @@ The first coherent set includes:
   exclusion/containment, and parallel independent routes;
 - attributes/groups: constant float/int/vector/quaternion/color creation;
   float/int values, grouped Vec3 values and four quaternion channels take the
-  same optional defaults in Lisp and OCaml, with finite values checked at construction;
+  same optional defaults in Lisp and Rust, with finite values checked at construction;
   constant point transform matrices take 16 optional scalar entries, validated
   as finite and affine; constant color takes a grouped Vec3 plus alpha;
   Rest Position stores/extracts/swaps positions and optional normals, with a
@@ -2120,7 +2047,7 @@ The design was checked through 2026-08-04 against SideFX's primary documentation
   for named-group lifecycle, boolean algebra, range, remapping, and documented
   conflict behavior.
 
-The OCaml API is intentionally smaller and strongly typed. It adopts documented
+The Rust API is intentionally smaller and strongly typed. It adopts documented
 workflow concepts without copying Houdini source or wire formats.
 
 ## Packed outputs

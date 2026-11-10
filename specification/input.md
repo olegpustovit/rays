@@ -67,13 +67,12 @@ translation. Text input is active only while a focused region exists (a focused
 region starts it, none stops it), so the system input method is not engaged
 while no text field has focus.
 
-`File_dropped` owns a copied OCaml path. The native event payload is released at
+`File_dropped` owns a copied owned path. The native event payload is released at
 the runtime boundary and cannot escape into user code.
 
 ## Domain and reset rules
 
-Polling, state mutation, and every SDL3 operation run on the initial OCaml
-domain. Each poll resets only per-frame facts; focus loss clears held keys and
+Polling, state mutation, and every SDL3 operation run on the initial thread. Each poll resets only per-frame facts; focus loss clears held keys and
 buttons. The state is private to `Sketch`.
 
 ## Regression requirements

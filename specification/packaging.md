@@ -1,59 +1,23 @@
-# Packaging the native Metal stack
+# Packaging native Rays
 
-Rays is one opam package and one Dune project. `rays.opam` is generated
-from `dune-project`; it must not be edited independently. The supported package
-target is macOS on Apple Silicon with SDL3 and Metal available.
+Rays is one Cargo workspace. `rays_bin` supplies the executable; workspace crates
+provide the language, editor, runtime and native GPU stack. Supported native
+platforms are Apple Silicon with Metal and Windows with Vulkan. Web export is a
+separate 2D product target. [Packaging instructions](../packaging/README.md) list
+current platform commands and prerequisites.
 
-## Installed boundaries
+SDL3 core, image, ttf and mixer are system dependencies discovered through
+pkg-config or the documented platform paths. The owning sys crates compile
+required ABI code with `cc`; metadata, headers and runtime versions must agree.
+Missing dependencies fail the build or return typed startup errors.
 
-The root package installs:
+Metal, QuartzCore, CoreGraphics, IOSurface and Foundation come from the macOS SDK.
+Metal ABI bindings are checked in under `crates/metal_sys/src/`; no external
+language generator is required at build time. Windows Vulkan loaders and memory
+allocation code live under the owning sys crate. Native resources and every SDL
+operation stay on the initial thread.
 
-- the public creative-coding API as `rays`;
-- foundational native libraries `rays.sdl3`, `rays.sdl3_image`,
-  `rays.sdl3_ttf`, `rays.sdl3_mixer`, `rays.metal`, `rays.ogpu`,
-  and `rays.ogpu_metal`;
-- native runtime/command libraries including `rays.runtime`,
-  `rays.runtime_input`, `rays.runtime_resources`,
-  `rays.scene_command`, and
-  `rays.scene_execution`;
-- ordinary feature libraries such as `rays.rdk`,
-  `rays.sop`, and the UI/sketch adapters.
-
-Runtime sublibraries are native-only internal
-qualification boundaries. Their target types contain only `Native`; they do not
-install alternate backends or make backend selection extensible.
-
-The package installs only the native renderer graph described above. A native
-link audit checks Dune external dependencies and every built executable/shared
-artifact against the declared graph.
-
-## System prerequisites
-
-The four `packaging/conf-sdl3*` opam packages own stable native dependency
-probes. They validate pkg-config metadata plus header/runtime versions for SDL3,
-SDL3_image, SDL3_ttf, and SDL3_mixer. Dynamic discovery is the default;
-documented static and explicit include/library directory modes fail on missing
-metadata or archives rather than changing renderer semantics.
-
-Metal, QuartzCore, CoreGraphics, IOSurface, Foundation, and other used Apple
-frameworks are supplied by the macOS SDK and are not opam packages. Binding
-generation, provenance, and validation use OCaml/Dune tools.
-
-## Install validation
-
-The packaging gate runs release-profile SDL3 discovery fixtures and license
-checks, builds `@install`, installs into a temporary relocatable prefix, confirms
-`ocamlfind` resolves the installed libraries beneath that prefix, and builds an
-independent consumer outside the checkout. Its source build uses a separate
-workspace-relative build directory so invoking it from Dune cannot contend for
-the caller's build lock.
-
-A fresh-switch release qualification additionally installs native-only opam
-dependencies, builds documentation and tests, and inspects the produced package
-and linked artifacts. Success in the developer switch or an isolated prefix is
-useful local evidence but does not replace that final clean-switch run.
-
-Generated and copied material must retain deterministic provenance. Rays's
-source is MIT; SDL3 family libraries use their external zlib licenses; Apple SDK
-headers and frameworks remain system inputs governed by Apple platform terms and
-are not redistributed by this package.
+Release validation must inspect the executable and its linked native artifacts,
+package assets, notices and generated-source provenance. A successful developer
+build does not establish relocatable-package correctness. Follow
+[licenses](licenses.md) and retain each external dependency's license and notices.

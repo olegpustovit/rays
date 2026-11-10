@@ -648,7 +648,7 @@ compared: same counts and topology, every float within a few ulp. A native check
 Lisp fuses compares on Windows with a test-local form written with `fma`, never a looser tolerance. Text
 drawn with the system font (SF Mono on the Mac, Segoe UI on Windows) has per-platform glyph rectangles.
 Windows files: `lib/flow_sop/goldens/data/windows.txt`, `test/draw_snapshots_windows/`, and the
-`Sys.win32` values in `test_remesh.ml` and `test_marks_scene.ml`.
+`Sys.win32` values in `crates/flow_native/tests/` and `crates/rays_pathtracer/tests/`.
 
 ## List model
 
@@ -670,7 +670,7 @@ consumed at compile time need not survive in the core.
 | `linspace(a,b,n)` | Length `max(0,n)`; literal n gives a known count even when endpoints are live. For n=1 the single element is a; otherwise element k is `a+(b-a)*k/(n-1)` in source operation order. |
 | `map` | List inputs zip to minimum count; known input counts make the result count known. It may be unrolled only within the lowering budget; otherwise use the same bounded structured loop. |
 | `filter` | Result count depends on the predicate; live predicates imply live length even with a fixed source count. Preserve order and joined element layout. |
-| `sort-by` / `reverse` | Count is the source count. Compute keys once and sort stably; reverse copies source elements in descending index order. |
+| `sort_by` / `reverse` | Count is the source count. Compute keys once and sort stably; reverse copies source elements in descending index order. |
 | `concat` | Sum input counts, retain input/element order, join element types and coerce, then enforce the source 4,096 cap. No repeated append of an ever-growing prefix. |
 | `take` / `drop` / `rest` | `take` retains the first min(max(0,n),length) elements; `drop` removes that many; `rest` removes one if present. A live n or live source length implies dynamic length. |
 | `for` / `scan` | Product iteration count, minus skipped tuples, controls the collected length. Later clauses may depend on earlier items. List loops count attempted iterations for the 4,096 bound, including skips. |
@@ -1162,7 +1162,7 @@ or rasterizes these paths on a CPU.
 `E_DRAW_LENGTH` guards all per-instance attribute cardinalities; missing
 inputs are `E_DRAW_INPUT`, unknown draw kinds are `E_DRAW_KIND`, invalid
 coordinates are `E_DRAW_RANGE`, and a non-finite rotate angle or scale
-factor is `E_NONFINITE` (as `drawing.ml` raises it). Color decoding keeps
+factor is `E_NONFINITE` (as `crates/flow_native/src/drawing.rs` raises it). Color decoding keeps
 `E_DRAW_COLOR` and its type errors. A count is an element count in every
 attribute buffer. Resource entries resolve through an owned host resource
 table; they never silently disappear when a resolver is absent.
@@ -1382,15 +1382,15 @@ fixtures; CPU frames compare exact structure and attributes within 1e-6 over
 qualification and measurement gates. A green scalar test cannot substitute for
 those whole-program and presenter gates.
 
-The source contracts read for this specification are `lib/flow/value.ml`
-(arithmetic, coercions, display and arrays), `lib/flow/op.ml` (operators and
-frame/event records), `lib/flow/eval.ml` (control, function identity and state),
-`lib/flow/workspace.ml` (static count/type restrictions),
-`lib/flow_ir/packed.ml` and `packed.mli` (regions and refusal codes),
-`lib/flow_ir/operators.ml` (noise and colors), `lib/rays_math/color.ml`,
-`noise.ml`, `rand.ml`, and `lib/rays_editor/drawing.ml` / `lib/rays/scene.ml`
+The source contracts read for this specification are `crates/flow_syntax/src/value.rs`
+(arithmetic, coercions, display and arrays), `crates/flow_check/src/op.rs` (operators and
+frame/event records), `crates/flow_eval/src/eval.rs` (control, function identity and state),
+`crates/flow_check/src/workspace.rs` (static count/type restrictions),
+`crates/flow_ir/src/packed.rs` and `crates/flow_ir/src/packed.rs` (regions and refusal codes),
+`crates/flow_syntax/src/packed_ops.rs` (noise and colors), `crates/rays_math/src/color.rs`,
+`crates/rays_math/src/noise.rs`, `crates/rays_math/src/rand.rs`, and `crates/flow_native/src/drawing.rs` / `crates/rays/src/scene.rs`
 (drawing defaults and coordinate conversion). The runnable census is
-`dune build tools/core_census.exe && _build/default/tools/core_census.exe`.
+`rays doc --json`.
 
 ### Lazy diagnostic mapping
 

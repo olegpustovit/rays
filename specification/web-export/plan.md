@@ -26,15 +26,15 @@ meaning used by compiler parity tests.
 
 | Part | Native | Web |
 | --- | --- | --- |
-| Frame program | OCaml Core executor | Generated JavaScript |
+| Frame program | Rust core executor | Generated JavaScript |
 | CPU region | Packed blocks over Parallel | JavaScript workers over SharedArrayBuffer |
 | GPU region | Metal emitter through OGPU | WGSL emitter and WebGPU |
 | Drawing | Native mark, geometry and quad pipelines | The same pipelines in WebGPU, printed from the same `marks.rays` |
 
 The fixed runtime lives in `lib/web_export/runtime/`. The exporter lives in
-`lib/web_export/web_export.ml`; JavaScript and WGSL emitters live in
+`crates/web_export/src/web_export.rs`; JavaScript and WGSL emitters live in
 `lib/flow_web/`. The architecture cleanup tracks their target homes
-and compiler consolidation in [../cleanup/status.md](../cleanup/status.md).
+and compiler consolidation in [../../docs/history/cleanup/status.md](../../docs/history/cleanup/status.md).
 See [../core.md](../core.md) for the normative shared compiler contract.
 
 ## Output and runtime
@@ -42,7 +42,7 @@ See [../core.md](../core.md) for the normative shared compiler contract.
 The exporter emits the program, kernel sources, binary constants, source map,
 HTML entry and runtime assets. Runtime services own events, the frame loop,
 state, worker scheduling, the WebGPU device and presentation. The bundle
-does not contain an OCaml bytecode interpreter or a shader compiler.
+does not contain a bytecode interpreter or a shader compiler.
 
 Workers require cross-origin isolation. GPU refusal is a checked diagnostic,
 not an implicit single-threaded or browser fallback for native programs.

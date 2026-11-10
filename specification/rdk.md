@@ -1,10 +1,10 @@
 # Packed Development Kit
 
-Status: first production-oriented vertical slice implemented. RDK holds only live kernels: the 37 native SOPs' operations, exact predicates, spatial indexes, solvers and Boolean stages. Operations that a Lisp node expresses live in `lib/flow_sop/nodes/*.rays`; their former OCaml kernels are deleted, not kept as oracles.
+Status: first production-oriented vertical slice implemented. RDK holds only live kernels: the 37 native SOPs' operations, exact predicates, spatial indexes, solvers and Boolean stages. Operations that a Lisp node expresses live in `lib/flow_sop/nodes/*.rays`; their former native kernels are deleted, not kept as oracles.
 
 ## Purpose and boundary
 
-`rays.rdk` is Rays's native OCaml compute-geometry layer. It is inspired
+`rays.rdk` is Rays's native Rust compute-geometry layer. It is inspired
 by the data-oriented parts of Houdini's HDK, not a source-compatible HDK or an
 interpreted VEX clone. Its public values are immutable and target-independent;
 builders and kernels use locally owned mutation over packed storage.
@@ -259,7 +259,7 @@ ancestry or diagnostics.
 
 Attributes are resolved by name, owner, storage, tuple width, and semantic role
 before a hot loop. Numeric data uses packed component arrays; a point is not an
-allocated OCaml record. `Attribute_pattern` compiles whitespace-separated
+allocated host record. `Attribute_pattern` compiles whitespace-separated
 full-name globs once. Blank/`*`, leading-exclusion defaults, left-to-right
 include/exclude overrides, `*`, `?`, byte classes/ranges, negated classes, and
 backslash escapes have structured validation. Matching is allocation-free and
@@ -509,7 +509,7 @@ preallocated disjoint ranges and may not grow topology or mutate the attribute
 schema concurrently.
 
 `Rdk.Geometry.generate_point_ranges` is the expert VEX-like surface. Bindings are validated once, then
-the same native OCaml loop runs through stable chunks using the process-wide
+the same native Rust loop runs through stable chunks using the process-wide
 `Parallel` pool. It never creates a pool per operation, task, or frame.
 Topology mutation is not permitted inside an element kernel. Reductions use a
 deterministic two-phase design and combine partial values in stable chunk order.
@@ -1596,12 +1596,12 @@ disjoint packed writes make one- and multi-domain results byte-identical.
 - Scale regressions cover exact cardinality and retained-byte estimates in
   addition to broad diagnostic timing thresholds.
 
-### Benchmark commands
+### Measurement
 
-| Area | Command |
-|---|---|
-| Attribute Laplacian | `dune build --profile release tools/bench_rdk/bench_rdk.exe`, then `RAYS_BENCH_DOMAINS=1 RAYS_LAPLACIAN_POINTS=1000000 RAYS_LAPLACIAN_REPEATS=3 _build/default/tools/bench_rdk/bench_rdk.exe laplacian`; repeat with `RAYS_BENCH_DOMAINS=4` |
-| Triangulate 2D | `RAYS_DELAUNAY_POINTS=100000 RAYS_DELAUNAY_REPEATS=3 RAYS_REFINEMENT_POINTS=100000 RAYS_REGULARIZATION_POINTS=10000 RAYS_DELAUNAY_DOMAINS=1 dune exec -j 1 tools/bench_rdk/bench_rdk.exe -- delaunay2` |
+Record fixed input sizes, seeds, domain counts, profile, median wall time and
+exact result checks. Run bounded focused checks with `cargo t -p rdk_ops FILTER`;
+large campaigns belong to explicit qualification. Dated commands are retained in
+[history](../docs/history/specification/rdk.md).
 
 ### Kernel and generator contracts
 
@@ -1638,7 +1638,7 @@ before allocation.
 
 Position, normal, UV, topology, offset, and face-group payloads are exact-sized.
 Integer-coordinate helpers compute transforms and attributes inside their
-single call sites, avoiding boxed float arguments on non-Flambda OCaml. Stable
+single call sites, avoiding boxed float arguments on the host execution path. Stable
 point/cell ranges write disjoint slices; only the six face ranges and bounded
 error flags are auxiliary. Smooth welded point normals are the normalized sum
 of incident orthogonal face normals, so face interiors remain flat, edges
@@ -1806,7 +1806,7 @@ Equal-angle work is O(n+s*n), while equal-arc work is
 O(k*log k+n+k+n*log(n+k)+s*n); sorting is limited to interior ramp keys.
 Published output is O(s*n). Shared profile/integration tables use O(n+k)
 auxiliary storage, frame/distance block state is O(s*n/4096), and no output is
-generated before cardinality and OCaml array limits are validated.
+generated before cardinality and host array limits are validated.
 
 ## Boolean intersection detection
 
@@ -2074,5 +2074,5 @@ The design was checked through 2026-08-04 against SideFX's primary documentation
   triangle/polygon-curve scope, and optional input/primitive/UVW/point
   provenance attributes.
 
-No SideFX implementation was copied. This is a native OCaml design based on
+No SideFX implementation was copied. This is a native Rust design based on
 the documented data model and execution constraints.

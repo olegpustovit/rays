@@ -1,5 +1,5 @@
 ; Memory gate budgets. Numbers may only go down; a raise needs a stated reason in the commit.
-; Each scenario runs the real frame (tools/mem_gate.ml, Rays_editor.Measure). Readback is the selection
+; Each scenario runs the real frame (rays mem, rays_editor::measure). Readback is the selection
 ; box's bounds alone: 24,576 B per cook (Editor_list.selected_bounds); payload stays zero on the device.
 ; Flatness is 1% from frame
 ; 30 to the last unless a scenario grows by design; unattributed is 20% of explicit memory unless it

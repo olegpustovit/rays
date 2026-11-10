@@ -26,12 +26,5 @@ a browser, never product code and never a web fallback.
 (the Workspace sheet, 1440 x 900) and layout 1 (the Graph sheet beside the Inspector sheet:
 render at 1581 x 784).
 
-    dune build tools/ui_shot.exe
-    SDL_VIDEODRIVER=dummy ./_build/default/tools/ui_shot.exe specification/pxui-kit/kit.rays out.png
-    UI_SHOT_DO="key:space key:[ key:1 click:490,95" SDL_VIDEODRIVER=dummy \
-      ./_build/default/tools/ui_shot.exe specification/pxui-kit/kit.rays out.png 1581 784
-
-The second command selects `scatter1`: the graph panel is the left 1200 points, the inspector the
-right 380.
-`UI_SHOT_SCALE=2` renders two pixels a point, as a Retina window does: compare that with the
-`@2x` renders (at 1x the app's glyph advances are whole pixels, so text runs a little wide).
+Run `cargo t -p pxui gpu_parity` for native framebuffer parity. The checked-in
+HTML sheets remain visual references; they are not the native rendering path.

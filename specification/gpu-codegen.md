@@ -2,12 +2,12 @@
 
 A shader printed from Rays Lisp must be as fast as a handwritten one. A target
 that is 7x slower (`pathtrace.rays` against `pathtrace.metal`,
-[benchmarks/pathtracer-lisp.md](cleanup/benchmarks/pathtracer-lisp.md)) can't
+[benchmarks/pathtracer-lisp.md](../docs/history/cleanup/benchmarks/pathtracer-lisp.md)) can't
 be shipped. This note says why that happens today and how the emitters must work.
 
 ## Why the generated kernel is slow
 
-`lib/flow_shader/emit.ml` prints MSL from `Packed`, the **CPU block IR**. Packed
+`crates/flow_shader/src/emit.rs` prints MSL from `Packed`, the **CPU block IR**. Packed
 is designed for 1,024-lane blocks on a CPU, and each of its choices is right
 there and wrong on a GPU thread:
 
@@ -309,18 +309,18 @@ gathers read the bound buffers without clamps, and there is no status word.
 - A stage's `(array float)` and `(array int)` parameters are the renderer's buffers. The vertex
   stage's bind in their order; a fragment buffer named like a vertex one shares its binding, any other
   follows the vertex stage's (one binding namespace, as OGPU's layouts). A float column in a buffer of
-  words is read with `gpu/float-bits` (an Int's low 32 bits as a float: `as_type<float>`, `OpBitcast`,
+  words is read with `gpu/float_bits` (an Int's low 32 bits as a float: `as_type<float>`, `OpBitcast`,
   `bitcast<f32>`), so each buffer is bound once. Textures take the bindings the author names after them. The vertex
   entry's first parameter is the vertex id.
 - The vertex result has `:position` (clip space), optionally `:point-size`, and the varyings; those
   under `:flat` are not interpolated. The fragment's other parameters are the varyings, by name, and its result is a colour
   or `{:color c :discard b}`.
-- Stage intrinsics are `gpu/float-bits` (either stage), `gpu/fwidth`, `gpu/sample`, `gpu/sample-level` (an explicit mip level),
-  `gpu/read` (a whole texel at integer coordinates, no sampler) and `gpu/texture-size` (Region
+- Stage intrinsics are `gpu/float_bits` (either stage), `gpu/fwidth`, `gpu/sample`, `gpu/sample_level` (an explicit mip level),
+  `gpu/read` (a whole texel at integer coordinates, no sampler) and `gpu/texture_size` (Region
   `Stage`); texture `t` is sampled with sampler `t + 1`. An argument-buffer pipeline
   (`Raster.msl ~arguments:true`, Scene2's quad) holds texture `t` and its sampler in the argument buffer at
-  buffer `t`. Built-in facts read like frame facts: `(gpu/instance-id)` in a vertex,
-  `(gpu/front-facing)`, `(gpu/depth)` (window depth) and `(gpu/fragment-x)`/`(gpu/fragment-y)` (pixel
+  buffer `t`. Built-in facts read like frame facts: `(gpu/instance_id)` in a vertex,
+  `(gpu/front_facing)`, `(gpu/depth)` (window depth) and `(gpu/fragment_x)`/`(gpu/fragment_y)` (pixel
   position) in a fragment. The CPU and every other target
   refuse them all (`E_GPU_STAGE`).
 - Blending, depth, culling and winding are OGPU pipeline state, never shader code; the renderer sets
@@ -349,17 +349,17 @@ gathers read the bound buffers without clamps, and there is no status word.
 
 No shader text is written by hand in `lib/` outside the printers (P9.G1), and no printed shader is
 checked in. The printers are `flow_shader` (`Emit`, `Spirv`, `Raster`, over
-`flow`, `flow_ir` and `ogpu_core` only); `lib/flow_shader/print_shader.exe OWNER` prints an owner's
+`flow`, `flow_ir` and `ogpu_core` only); `cargo run -p flow_shader --bin print_shader -- OWNER` prints an owner's
 `shaders/NAME.rays` into `NAME.metal` and `NAME.{vert,frag,comp}.spv` in its build directory, run by a
-rule in the owner's dune (`renderer`, `ogpu_metal`, `flow_gpu`), whose embedding rule reads the
-`.metal`. `print_shader.exe web`, run by `web_export`'s dune, prints `compact.rays` and `dispatch.rays`
+rule in the owner's Cargo build script (`renderer`, `ogpu_metal`, `flow_gpu`), whose embedding rule reads the
+`.metal`. `cargo run -p flow_shader --bin print_shader -- web`, run by `web_export`'s build script, prints `compact.rays` and `dispatch.rays`
 through `Flow_web.Wgsl.compute` into `compact.wgsl` and `dispatch.wgsl`, which `web_export` embeds and
 passes to `Flow_web.Kernel_table.table` (`flow_web` holds the printer, so it cannot embed them), and the
 presenter's pipelines (`lib/renderer/shaders/marks.rays`: marks, geometry and quad, the ones native
 prints) through `Raster.stages` and `Flow_web.Wgsl.raster` into
 `marks.wgsl`, which the export serves as `runtime/marks.wgsl` (marks.md, "The Marks pipeline family"). It is a build-time tool: no
 library links it, so the owners' library graph is unchanged.
-`@lib/flow_gpu/runtest` (`test_raster.exe`) validates the printed SPIR-V with `spirv-val` when it is
+`@lib/flow_gpu/runtest` (the native raster regression) validates the printed SPIR-V with `spirv-val` when it is
 installed.
 
 - The Metal backend's presentation blit is `lib/ogpu_metal/shaders/present.rays`, a raster pipeline
@@ -369,10 +369,10 @@ installed.
   `Raster.compute_spirv`; `Flow_web.Wgsl.compute` is always grid): the entry's first parameter is the
   lane (with `grid` its index in the dispatch; the scan stays the group's), its array parameters the bound
   buffers in order, its last the group size (a constant of the target: 1,024 on Metal, 256 on Vulkan and
-  WebGPU); its result is discarded. `(gpu/group-scan x)` is the exclusive prefix sum of an Int over the
+  WebGPU); its result is discarded. `(gpu/group_scan x)` is the exclusive prefix sum of an Int over the
   group with its total, in uniform control flow (a Hillis-Steele scan in threadgroup / `Workgroup` /
   `var<workgroup>` memory between `threadgroup_barrier` / `OpControlBarrier` / `workgroupBarrier`);
-  `(gpu/store buffer index value)` and `gpu/store-int` write a bound buffer and are 1. The resident fold's
+  `(gpu/store buffer index value)` and `gpu/store_int` write a bound buffer and are 1. The resident fold's
   compaction is `lib/flow_gpu/shaders/compact.rays`, printed into `compact.metal`,
   `compact.comp.spv` and the web's `compact.wgsl`. It runs three dispatches over
   blocks of the group size: each group counts its block, one group scans the block counts into first
@@ -416,7 +416,7 @@ installed.
   read field is its hit), compiled once a scene variant (instanced, motion, strands, spheres) and spliced
   into the region in place of the host's fields. The triangle fetch, face normal, instance and motion
   transforms, the strand capsule and the sphere loop are Lisp; the printers emit only the ray queries
-  (`gpu/trace-triangles`, `gpu/trace-any`, `gpu/trace-curves`, `gpu/trace-curves-any`: a Metal
+  (`gpu/trace_triangles`, `gpu/trace_any`, `gpu/trace_curves`, `gpu/trace_curves_any`: a Metal
   `intersector`, SPIR-V `OpRayQuery*`) and the scene table reads (`gpu/scene-*`). A scene without spheres
   folds their tests (`Emit.kernel ?spheres`). Metal reflects only the tables a kernel reads, so its
   interface lists those.
@@ -440,11 +440,11 @@ Nothing gets slower, on either target.
   generated kernel must be faster, not just level, because static
   specialization folds what the handwritten kernel branches on at run time.
 - **CPU time:** the structured IR's CPU lowering (Packed if-conversion,
-  blocks, domains) must be no slower than today. That covers `tools/bench_core.exe`
+  blocks, domains) must be no slower than today. That covers the packed-core benchmark
   (scalar and kernels), the Flow IR and marks benchmarks, and the CPU walker
   run of the same `.rays` kernels, measured the same interleaved way. The
   open scalar regression in
-  [benchmarks/scalar-core.md](cleanup/benchmarks/scalar-core.md) is part of
+  [benchmarks/scalar-core.md](../docs/history/cleanup/benchmarks/scalar-core.md) is part of
   this gate, not a separate item. CPU results stay bit-identical at one and
   multiple domains.
 - **Static shape, checked by tests:** no atomics inside loops and at most one

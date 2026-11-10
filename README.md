@@ -26,6 +26,8 @@ Debug builds are the daily workflow. Run `cargo check -p <crate>` while editing,
 
 OCaml lives only in Git history at [ocaml-reference](https://github.com/OlegHQ/rays/tree/ocaml-reference)
 (commit `e92f94f0`). Rust is the sole implementation here. Existing unfinished performance and
-qualification work is recorded in [the historical checkpoint](docs/history/CHECKPOINT.md).
+qualification work is tracked in [known failures](docs/known-failures.md); dated evidence lives in [history](docs/history/README.md).
 
 [MIT license](LICENSE).
+
+Lisp authoring: [generated guide](docs/lisp.md); lookup any name with `rays doc NAME`.

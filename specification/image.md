@@ -7,7 +7,7 @@ Metal texture, OGPU handle, or native pointer.
 
 ## Construction and loading
 
-```ocaml
+```text
 val load : string -> (Image.t, string) result
 val load_exn : string -> Image.t
 val create : width:int -> height:int -> ?color:Color.t -> unit -> Image.t
@@ -36,7 +36,7 @@ join back to the initial domain.
 
 The high-level path is pure scene construction:
 
-```ocaml
+```text
 Scene.image image ~at:(x, y) ~scale:2. ~angle ()
 ```
 
@@ -63,7 +63,7 @@ precision; exact sampling of RGBA8 images expands bytes by division by 255.
 Loaded or created images are owned by the caller and belong in
 `Sketch.run_state ~on_stop`:
 
-```ocaml
+```text
 let on_stop model =
   match Image.destroy model.sprite with
   | Ok () -> ()
@@ -88,7 +88,7 @@ Successful CPU replacement or Canvas copying clears the GPU backing.
 
 ## Performance contract
 
-Image storage is packed rather than a boxed per-pixel OCaml structure. Stable
+Image storage is packed rather than a boxed per-pixel structure. Stable
 identity plus generation-based invalidation lets renderer caches reuse unchanged
 uploads. Changing content invalidates only the affected resource generation;
 unreachable or destroyed images do not keep native textures alive indefinitely.

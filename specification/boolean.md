@@ -8,7 +8,7 @@ tools, but neither is a fallback for this kernel.
 ## Evidence hierarchy
 
 The target is not a literal clone of one package. It combines the strongest
-published guarantees under RDK's single-core, deterministic, native OCaml
+published guarantees under RDK's single-core, deterministic, native Rust
 constraints.
 
 | Evidence | What RDK adopts | What RDK does not infer |
@@ -33,7 +33,7 @@ heads are not a specification:
 
 | Implementation | Audited revision | License/dependency result | Use in Rays |
 | --- | --- | --- | --- |
-| Cherchi et al. reference arrangement/Boolean | [`bf7eb71`](https://github.com/gcherchi/FastAndRobustMeshArrangements/tree/bf7eb71da991a61ff5414946a4b2754bbd327e41) | MIT | Executable specification for phase order, implicit predicates, constraint insertion, patch classification, and benchmarks. Independently expressed in OCaml/RDK storage |
+| Cherchi et al. reference arrangement/Boolean | [`bf7eb71`](https://github.com/gcherchi/FastAndRobustMeshArrangements/tree/bf7eb71da991a61ff5414946a4b2754bbd327e41) | MIT | Executable specification for phase order, implicit predicates, constraint insertion, patch classification, and benchmarks. Independently expressed in Rust/RDK storage |
 | Geogram exact CSG | [`b6f545a`](https://github.com/BrunoLevy/geogram/tree/b6f545a179ab963879482010eb4ec423b4d352d8) | BSD-3-Clause | Executable specification for exact points, constrained face refinement, radial bundles/polylines, Weiler construction, and expression classification |
 | Manifold | [`ff42ddc`](https://github.com/elalish/manifold/tree/ff42ddc885e2287faa176873e38e795572e95992) | Apache-2.0 | Packed/parallel engineering and payload-provenance reference. Its manifold-input and epsilon-valid contract is a deliberately narrower fast-path model |
 | kigumi | [`374327c`](https://github.com/unageek/kigumi/tree/374327c6d5732c91949e70a9fc0d3bf40182c9b2) | MIT code over CGAL | Useful local radial-classification comparison for open/non-manifold boundaries, but its documented input excludes degenerate faces and self-intersections. CGAL's GPL triangulation remains transitive and is not introduced |
@@ -46,7 +46,7 @@ kernel. RDK owns topology, exact identity, packed storage, deterministic
 ordering, attributes, groups, cancellation, and Apple-Silicon portability. Source
 is inspected to extract invariants and adversarial cases; implementation uses
 RDK types and tests. Any substantially copied permissive code would need its
-notice preserved explicitly, but the current kernel is an independent OCaml
+notice preserved explicitly, but the current kernel is an independent Rust
 implementation.
 
 ## Clean-room algorithm decision

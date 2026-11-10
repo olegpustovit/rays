@@ -50,7 +50,6 @@ work through OGPU, and present one SDL3 Metal drawable. Native Metal or drawable
 unavailability is a typed startup/runtime error; it never selects another
 renderer.
 
-Window, event, resource, and presentation operations stay on the initial OCaml
-domain. Pure geometry preparation may use `Parallel`, but it joins before
+Window, event, resource, and presentation operations stay on the initial thread. Pure geometry preparation may use `Parallel`, but it joins before
 native command recording. Draw ordering and resource lifetime remain
 deterministic for a fixed scene and input stream.

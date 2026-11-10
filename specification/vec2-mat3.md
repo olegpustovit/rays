@@ -1,9 +1,9 @@
 # Vec2
 
 `Vec2` is an immutable, renderer-independent mathematical value. It contains no
-native resource and is safe to share across OCaml domains.
+native resource and is safe to share across worker threads.
 
-```ocaml
+```text
 type t = { x : float; y : float }
 ```
 

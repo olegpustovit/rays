@@ -803,12 +803,12 @@ after each edge operation.
 
 ## Reuse policy
 
-The preferred implementation is a small audited native OCaml kernel over RDK
+The preferred implementation is a small audited native Rust kernel over RDK
 planes. Reusing an external library remains possible when it materially
 improves correctness, but it requires a written review of:
 
 - license and redistribution obligations;
-- Apple-Silicon macOS and repository-local opam availability;
+- Apple-Silicon macOS and availability on supported Cargo/native toolchains;
 - deterministic element ordering and floating-point behavior;
 - cancellation and thread ownership;
 - conversion cost for points, corners, attributes, groups, and face-varying

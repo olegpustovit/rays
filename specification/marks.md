@@ -1,9 +1,9 @@
 # Marks: the run-time drawing contract
 
-Status: implemented. `Scene_command.Marks` (`marks.mli`) is this contract as pure
+Status: implemented. `Scene_command.Marks` (`crates/scene_command/src/marks.rs`) is this contract as pure
 data; `Flow_ir.Core_draw` lowers a draw graph, `Flow_ir.Core_exec.draw` produces the
 table, and `Flow_native.Marks_scene` adapts it to `Scene`. Defaults and error codes were taken
-from the per-kind arms of `lib/rays_editor/drawing.ml` (removed in P3.13); the
+from the per-kind arms of `crates/flow_native/src/drawing.rs` (removed in P3.13); the
 `test/draw_snapshots` digests of the 15 eligible workspaces pin them.
 
 A draw graph, run once per frame by the core executor
@@ -11,7 +11,7 @@ A draw graph, run once per frame by the core executor
 table**: an ordered array of entries. Every default is resolved and every
 check is made before the table exists. A consumer applies no default, never
 reorders, and never reads a Lisp value. The native consumer is the adapter
-`Flow_native.Marks_scene` (P3.8), which builds the same `Render_ir` commands `drawing.ml`
+`Flow_native.Marks_scene` (P3.8), which builds the same `Render_ir` commands `crates/flow_native/src/drawing.rs`
 builds today; the web consumer is the fixed runtime.
 
 ## Units and encodings
@@ -138,7 +138,7 @@ Kind meanings on the native adapter (the oracle for pixel parity):
 | all | fill word 8, stroke word 9, stroke width word 12, anti-alias flag word 13 = `1.0`; every other word 0 |
 
 A mark set becomes one `Shapes` command (a count-0 set becomes an empty
-`Shapes`, as `drawing.ml` emits today). A **point set** is also `Shapes`: each
+`Shapes`, as `crates/flow_native/src/drawing.rs` emits today). A **point set** is also `Shapes`: each
 position retains its finite logical subpixel coordinates and is appended as a
 unit rectangle to the same packed `Ui_batch` buffer. It uses the rect
 pipeline's analytic antialiasing on native and web. A count-0 point set emits
@@ -294,7 +294,7 @@ kernel wrote its count record `{n, 6n, 1, 0, 0, 0}` (`Flow_gpu.Run.count_record`
 that is the indexed indirect draw of `n` quads (`gpu_marks ?indirect`,
 `Scene_execution.Private.register_gpu_vertices ?indirect`, `Ogpu.Backend.draw_indexed_indirect`),
 so the instance count the draw uses is the one the device wrote, never batched into an ICB.
-`lib/renderer/test_marks_native.ml` draws a set registered for 100 rects whose record says
+`crates/renderer/tests/` draws a set registered for 100 rects whose record says
 63 and matches the 63-rect `Ui_batch` pixel for pixel. The set rides in the scene
 as a `Marks.gpu_token` carried by `Ui_batch`, so transform, clip, blend and painter order are the ordinary
 ones. A rect's stroke width is the constant 1, as `Ui_batch.rect`'s; a line's fill is unused.
@@ -327,7 +327,7 @@ image, text, transform and clip meets the rules above. Image `resource` must be
 `> 0`, text `size` is an unvalidated integer (see below), and buffer ids are not
 checked against any table: that is the caller's.
 
-## Ambiguities in today's `drawing.ml` that this file fixes
+## Ambiguities in today's `crates/flow_native/src/drawing.rs` that this file fixes
 
 An implementer must keep these exactly or parity with the P3.1 snapshots breaks:
 
@@ -342,11 +342,11 @@ An implementer must keep these exactly or parity with the P3.1 snapshots breaks:
   `xy = -sin, yx = sin`. The two signs differ and are both kept.
 - A stroke-only mark has a transparent fill (`0`), not white; a stroke colour of
   `0` is "no stroke" even for a hex colour `#00000000`.
-- `core.md` says invalid transforms are `E_DRAW_RANGE`; `drawing.ml` raises
+- `core.md` says invalid transforms are `E_DRAW_RANGE`; `crates/flow_native/src/drawing.rs` raises
   `E_NONFINITE` for a nonfinite rotate angle or scale factor. This file keeps
   `E_NONFINITE`; a later task may change both together.
-- Text `size <= 0` is not validated in `drawing.ml`; the font layer decides.
-- `draw/points` has no count cap in `drawing.ml`; the 1,000,000 cap on point
+- Text `size <= 0` is not validated in `crates/flow_native/src/drawing.rs`; the font layer decides.
+- `draw/points` has no count cap in `crates/flow_native/src/drawing.rs`; the 1,000,000 cap on point
   sets is new here.
 
 ## The `Marks` pipeline family (GPU layout)
@@ -383,10 +383,10 @@ only if a test shows a difference). A buffer shorter than `count * stride` eleme
 caller's error; the shader does not check.
 
 Routing, the device attributes and the cases that stay on the CPU are under "Routing (P4.9)"
-above. The web's `marks.wgsl` is printed at build time from the same `marks.rays` (`print_shader.exe web`,
+above. The web's `marks.wgsl` is printed at build time from the same `marks.rays` (`cargo run -p flow_shader --bin print_shader -- web`,
 `Flow_web.Wgsl.raster`) and reads the same six buffers and the same `params`; the host binds the
 region's output as the attribute buffer, with its width as the stride. A float colour (mode 1) is
-read from the same buffer as a word's bits (`gpu/float-bits`), so fill and stroke are bound once on both
+read from the same buffer as a word's bits (`gpu/float_bits`), so fill and stroke are bound once on both
 targets. Three differences live in the printer's web placement and its bindings, not in the source: the
 vertex id is `instance_index * 4 + corner` of a non-indexed six-vertex draw per instance (so `vid / 4` is
 the instance, with no index buffer); the affine shares group 0 at 6 with every draw's constants; and

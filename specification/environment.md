@@ -3,7 +3,7 @@
 A World is pure data: an ordered stack of procedural layers plus sun and
 framing settings. `World.bake` turns it into CPU products that both the
 raster renderer and the Metal path tracer consume. The interface
-(`lib/rays/world.mli`) is the contract; this note summarises it.
+(`crates/scene_core/src/world.rs`) is the contract; this note summarises it.
 
 ## Mapping
 
@@ -72,9 +72,9 @@ the same ACES tone map. `background` is consulted at bounce 0 only.
 
 `Scene.D3.with_world baked scene` switches that Scene3 to the environment-lit
 path; a Scene3 without a World renders exactly as before (Blinn-Phong over
-`Light.t`, no tone map). Lowering (`scene3_native_lowering.ml`) routes every
+`Light.t`, no tone map). Lowering (`crates/rays/src/scene3_native_lowering.rs`) routes every
 non-point drawing to the `Scene3_world` pipeline (`source_scene3_world` in
-`lib/runtime/runtime.ml`), which computes, per fragment:
+`crates/runtime/src/runtime.rs`), which computes, per fragment:
 
 - **Background.** A clip-space triangle drawn first (depth test off, no depth
   write) turns each fragment into a view ray through the inverse
@@ -146,7 +146,7 @@ texture (1.1 ms for a one-sphere frame).
 
 ## Budget
 
-`dune exec tools/bench_world.exe --profile release` on an Apple M1 (8 domains
+A historical world-bake probe on an Apple M1 (8 domains
 recommended), median ms (2026-09-26):
 
 | Preset | 512x256, 1 domain | 512x256, 8 domains | 2048x1024, 1 | 2048x1024, 8 |
