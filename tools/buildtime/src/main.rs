@@ -539,7 +539,7 @@ fn gc(target: &Path) -> io::Result<()> {
     let remaining = directory_bytes(target)?;
     println!("buildtime: gc removed {removed} stale artifacts ({:.3} GB); target {:.3} GB", reclaimed as f64 / 1e9, remaining as f64 / 1e9);
     if remaining > 15_000_000_000 {
-        return Err(io::Error::other("target exceeds 15 GB after removing artifacts older than seven days; recent build caches retained"));
+        return Err(io::Error::other("target exceeds 15 GB after pruning superseded incremental sessions and artifacts older than seven days; recent latest build caches retained"));
     }
     Ok(())
 }
@@ -570,18 +570,36 @@ fn gc_profiles(path: &Path, cutoff: SystemTime, removed: &mut u64, reclaimed: &m
         } else { None };
         if name == "incremental" {
             for crate_dir in fs::read_dir(&child)? {
-                let crate_dir = crate_dir?.path();
-                if !crate_dir.is_dir() { continue; }
-                for session in fs::read_dir(crate_dir)? {
+                let crate_dir = crate_dir?;
+                if !crate_dir.file_type()?.is_dir() { continue; }
+                let crate_dir = crate_dir.path();
+                let mut sessions = Vec::new();
+                for session in fs::read_dir(&crate_dir)? {
                     let session = session?;
-                    // Rustc locks live sessions. Keep locks and their matching working session.
-                    if session.file_name().to_string_lossy().ends_with(".lock") { continue; }
-                    let metadata = session.metadata()?;
-                    if metadata.modified()? < cutoff {
-                        *reclaimed += directory_bytes(&session.path())?;
-                        if metadata.is_dir() { fs::remove_dir_all(session.path())?; } else { fs::remove_file(session.path())?; }
-                        *removed += 1;
-                    }
+                    if !session.file_type()?.is_dir() { continue; }
+                    let name = session.file_name().to_string_lossy().into_owned();
+                    if !name.starts_with("s-") || name.ends_with("-working") { continue; }
+                    let Some((prefix, hash)) = name.rsplit_once('-') else { continue; };
+                    let Some((stamp, nonce)) = prefix.strip_prefix("s-").and_then(|prefix| prefix.split_once('-')) else { continue; };
+                    if [stamp, nonce, hash].iter().any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())) { continue; }
+                    let path = session.path();
+                    let complete = ["dep-graph.bin", "query-cache.bin", "work-products.bin"].iter().all(|file| path.join(file).is_file());
+                    sessions.push((session.metadata()?.modified()?, name, path, complete));
+                }
+                sessions.sort();
+                // Recent supersession keeps the latest completed session for this exact key.
+                // The original seven-day rule still applies to unlocked, non-working sessions.
+                let newest = sessions.iter().rev().find(|session| session.3).map(|session| session.1.clone());
+                for (modified, name, path, complete) in sessions {
+                    let superseded = complete && Some(&name) != newest.as_ref();
+                    if modified >= cutoff && !superseded { continue; }
+                    let Some((prefix, _)) = name.rsplit_once('-') else { continue; };
+                    // A missing or busy rustc lock leaves this session untouched.
+                    let Ok(lock) = OpenOptions::new().read(true).write(true).open(crate_dir.join(format!("{prefix}.lock"))) else { continue; };
+                    if lock.try_lock().is_err() { continue; }
+                    *reclaimed += directory_bytes(&path)?;
+                    fs::remove_dir_all(path)?;
+                    *removed += 1;
                 }
             }
         } else if name == "deps" {
@@ -867,25 +885,62 @@ mod tests {
     }
 
     #[test]
-    fn gc_removes_only_old_sessions_and_executables_and_persists_status() {
+    fn gc_prunes_only_superseded_unlocked_sessions_and_old_executables_and_persists_status() {
         let temp = TempFile::new(b"");
         let root = temp.0.parent().unwrap();
         let target = root.join("target");
         let sessions = target.join("debug/incremental/canary");
         let deps = target.join("debug/deps");
-        fs::create_dir_all(sessions.join("old")).unwrap();
-        fs::create_dir_all(sessions.join("fresh")).unwrap();
         fs::create_dir_all(&deps).unwrap();
         let old = SystemTime::now() - Duration::from_secs(8 * 86_400);
+        let set_modified = |path: &Path, modified| {
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(windows)] {
+                use std::os::windows::fs::OpenOptionsExt;
+                // FILE_WRITE_ATTRIBUTES and FILE_FLAG_BACKUP_SEMANTICS also permit directories.
+                options.access_mode(0x100).custom_flags(0x02000000);
+            }
+            options.open(path).unwrap().set_times(FileTimes::new().set_modified(modified)).unwrap();
+        };
+        let make_session = |config: &Path, name: &str, complete: bool| {
+            let path = config.join(name);
+            fs::create_dir_all(&path).unwrap();
+            for file in ["dep-graph.bin", "query-cache.bin", "work-products.bin"] { fs::write(path.join(file), "cache").unwrap(); }
+            if !complete { fs::remove_file(path.join("work-products.bin")).unwrap(); }
+            let (prefix, _) = name.rsplit_once('-').unwrap();
+            fs::write(config.join(format!("{prefix}.lock")), "").unwrap();
+            set_modified(&path, old);
+            path
+        };
+        let older = make_session(&sessions, "s-older-1-complete", true);
+        let newest = make_session(&sessions, "s-newest-1-complete", true);
+        let locked = make_session(&sessions, "s-locked-1-complete", true);
+        let incomplete = make_session(&sessions, "s-incomplete-1-complete", false);
+        let old_incomplete = make_session(&sessions, "s-oldpartial-1-complete", false);
+        let working = make_session(&sessions, "s-active-1-working", true);
+        let other = make_session(&target.join("debug/incremental/other-config"), "s-only-1-complete", true);
+        let lone_old = make_session(&target.join("debug/incremental/old-config"), "s-only-1-complete", true);
+        // Even recent completed sessions may be superseded; each configuration keeps its latest.
+        set_modified(&older, SystemTime::now() - Duration::from_secs(1));
+        set_modified(&newest, SystemTime::now());
+        for path in [&other, &incomplete] { set_modified(path, SystemTime::now()); }
+        let live = OpenOptions::new().read(true).write(true).open(sessions.join("s-locked-1.lock")).unwrap();
+        live.try_lock().unwrap();
         let old_executable = deps.join("case.exe");
         fs::write(&old_executable, "binary").unwrap();
         fs::write(deps.join("libcase.rlib"), "library").unwrap();
-        for path in [sessions.join("old"), old_executable.clone()] {
-            fs::File::open(path).unwrap().set_times(FileTimes::new().set_modified(old)).unwrap();
-        }
+        set_modified(&old_executable, old);
+        let cargo = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(target.join("debug/.cargo-lock")).unwrap();
+        cargo.try_lock().unwrap();
         gc(&target).unwrap();
-        assert!(!sessions.join("old").exists());
-        assert!(sessions.join("fresh").exists());
+        assert!(older.exists() && old_executable.exists(), "Cargo's profile lock protects all artifacts");
+        drop(cargo);
+        gc(&target).unwrap();
+        assert!(!older.exists());
+        assert!(!lone_old.exists(), "seven-day rule still applies to a lone completed session");
+        assert!(!old_incomplete.exists(), "old incomplete session requires its exclusive rustc lock");
+        for kept in [newest, locked, incomplete, working, other] { assert!(kept.exists(), "kept {}", kept.display()); }
         assert!(!old_executable.exists());
         assert!(deps.join("libcase.rlib").exists());
         persist_timings(root, &[Timing { label: "test".into(), elapsed: Duration::from_millis(5) }], false).unwrap();
