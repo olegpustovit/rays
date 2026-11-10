@@ -282,7 +282,11 @@ fn warm_cook_allocations(name: &str, root: &sop::node::T, inputs: &[Vec<geometry
     assert_eq!(bytes, support::geometry_bytes(&support::cook_once(1, &variants[2])), "{name}: warm result differs from fresh cook");
     session::close(&mut session);
     eprintln!("{name}: hit {hit:?}; changed {scratch:?} (allocations / scratch peak B, output {output_bytes} B)");
-    for (actual, limit) in [hit, scratch].into_iter().zip(limits) {
+    // hashbrown control groups are 16 B on x86_64 (SSE2) and 8 B on aarch64, so each small table in the hit path
+    // is 8 B larger on Windows (RawTable<(i64, Vec<..>)> 140 B Mac / 148 B Windows); limits are measured on Mac.
+    let group_slack = if cfg!(target_arch = "x86_64") { 8 } else { 0 };
+    for ((actual, limit), slack) in [hit, scratch].into_iter().zip(limits).zip([group_slack, 0]) {
+        let limit = (limit.0, limit.1 + slack);
         assert!(actual.0 <= limit.0 && actual.1 <= limit.1, "{name}: {actual:?} exceeds {limit:?}");
     }
 }
