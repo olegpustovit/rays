@@ -1807,30 +1807,21 @@ fn delaunay_repair(st: &mut St, cancel_value: Option<&cancel::T>, cb: &(&dyn Fn(
     Ok(())
 }
 
-struct Request<'a> {
-    incremental: bool,
-    point_count: i64,
-    initial_triangle_count: usize,
-    triangle_points: &'a [i64],
-    insert_points: &'a [i64],
-    flood: bool,
-    remove_outside: bool,
-    constraint_points: &'a [i64],
-    constraint_winding: Option<&'a [i64]>,
-}
-
 fn run(
     st: &mut St,
     cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool),
     cancel_value: Option<&cancel::T>,
-    req: &Request<'_>,
     previous_constraints: &[i64],
+    incremental: bool,
+    point_count: i64,
+    initial_triangle_count: usize,
+    triangle_points: &[i64],
+    insert_points: &[i64],
+    flood: bool,
+    remove_outside: bool,
+    constraint_points: &[i64],
+    constraint_winding: Option<&[i64]>,
 ) -> Result<T, String> {
-    let point_count = req.point_count;
-    let initial_triangle_count = req.initial_triangle_count;
-    let insert_points = &req.insert_points[..];
-    let triangle_points = &req.triangle_points[..];
-    let incremental = req.incremental;
     if !incremental {
         let mut referenced = scratch::u8_filled(u(point_count), 0);
         for triangle in 0..initial_triangle_count {
@@ -1886,8 +1877,8 @@ fn run(
     let (constraints, constraint_winding) = canonical_constraints(
         point_count,
         st.key_stride,
-        &req.constraint_points,
-        req.constraint_winding,
+        constraint_points,
+        constraint_winding,
     )?;
     let (_removed_constraints, added_constraints) = if incremental {
         constraint_delta(previous_constraints, &constraints)
@@ -1983,7 +1974,7 @@ fn run(
     }
     delaunay_repair(st, cancel_value, cb)?;
     let (triangle_a, triangle_b, triangle_c, output_triangle_count, constraints) =
-        if !req.flood && !req.remove_outside {
+        if !flood && !remove_outside {
             (
                 st.triangle_a.clone(),
                 st.triangle_b.clone(),
@@ -1992,7 +1983,7 @@ fn run(
                 st.constraints.clone(),
             )
         } else {
-            let o = filter_outside(st, cancel_value, cb, req.flood, req.remove_outside)?;
+            let o = filter_outside(st, cancel_value, cb, flood, remove_outside)?;
             (o.triangle_a, o.triangle_b, o.triangle_c, o.count, o.constraints)
         };
     let triangle_points = canonicalize(u(output_triangle_count), &triangle_a, &triangle_b, &triangle_c);
@@ -2134,18 +2125,21 @@ pub fn build(
             };
         }
     }
-    let req = Request {
+    let result = run(
+        &mut st,
+        &cb,
+        cancel_value,
+        &previous_constraints,
         incremental,
         point_count,
         initial_triangle_count,
         triangle_points,
         insert_points,
-        flood: flood_from_hull_boundary,
-        remove_outside: remove_outside_constraint_polygons,
+        flood_from_hull_boundary,
+        remove_outside_constraint_polygons,
         constraint_points,
         constraint_winding,
-    };
-    let result = run(&mut st, &cb, cancel_value, &req, &previous_constraints);
+    );
     if let Some(w) = workspace {
         let output_triangle_count = st.triangle_count;
         let kept_constraints = std::mem::take(&mut st.constraints);
