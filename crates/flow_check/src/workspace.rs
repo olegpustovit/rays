@@ -159,14 +159,13 @@ impl Memory {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpSignature { pub pos:Vec<(Symbol,Ty)>,pub opt:Vec<(Symbol,Ty)>,pub rest:Option<(Symbol,Ty)>,pub kw:Vec<(Symbol,Ty)> }
-pub type op_signature = OpSignature;
 #[derive(Clone)]
 pub struct Prelude { checker: Rc<Checker> }
 pub fn prelude_ops_match(prelude: &Prelude, ops: &[op::Op]) -> bool { op::same_declarations(&prelude.checker.ops, ops) }
 pub const MAX_ITERATIONS:usize=4096;
 pub const BODY_CONTEXT_OPS:&[&str]=&["sop/context_seed","sop/provenance_base","sop/context_frame","sop/context_time"];
-const SPECIAL:&[&str]=&["workspace","graph","defn","defnode","defmacro","let*","ref","for","fold","scan","sum","state","if","with_error","error_rows","values","fn","cond","case","list","concat","str","get","assoc","map","filter","reduce","sort-by","iterate","quote","quasiquote","unquote","unquote-splicing"];
-pub fn special_forms()-> &'static [&'static str] { SPECIAL }
+static SPECIAL: std::sync::LazyLock<Vec<&str>> = std::sync::LazyLock::new(|| crate::registry::FORMS.iter().map(|entry| entry.0).collect());
+pub fn special_forms()-> &'static [&'static str] { &SPECIAL }
 pub fn context_name(ctx:&Context)->String { context::name(*ctx).to_owned() }
 pub fn max_iterations()->usize { MAX_ITERATIONS }
 pub fn value_ops()->Vec<String> { op::all().iter().filter(|o|o.ctx==context::value()).map(|o|o.name.clone()).collect() }
@@ -214,10 +213,11 @@ pub fn group_writer(k:&catalog::Kind,p:&catalog::Parameter)->bool { p.name=="nam
 fn err(code:&str,message:String,span:Option<Span>)->Diagnostic { diagnostic::error(code.to_owned(),message,span,None,None,Vec::new(),Vec::new()) }
 fn add_to(diags: &mut Vec<Diagnostic>, severity: Severity, form: &Syntax, code: &str, message: String) {
     let span = if form.span.start == 0 && form.span.finish == 0 { None } else { Some(form.span.clone()) };
-    let diagnostic = match severity {
+    let mut diagnostic = match severity {
         Severity::ErrorSeverity => err(code, message, span),
         Severity::Warning => diagnostic::warning(span, code.to_owned(), message),
     };
+    if let Some(name) = syntax::head(form) { diagnostic.signature = crate::registry::signature(name); }
     diags.push(diagnostic);
 }
 fn ty_port(t:&Ty)->Option<port_type::PortType>{match t{Ty::Float=>Some(port_type::PortType::Float),Ty::Int=>Some(port_type::PortType::Int),Ty::Bool=>Some(port_type::PortType::Bool),Ty::Vec3=>Some(port_type::PortType::Vec3),Ty::Named(n) if n=="geometry"=>Some(port_type::PortType::Geometry),Ty::Named(n) if n=="image"=>Some(port_type::PortType::Image),Ty::Fn(Some(s))=>Some(port_type::PortType::Fn((**s).clone())),_=>None}}
@@ -315,11 +315,7 @@ fn geometry_accumulator(ty: &Ty) -> bool {
 fn packed_array(ty: &Ty) -> bool {
     flow_syntax::packed_ops::array_width(ty).is_some()
 }
-fn packed_source(ty: &Ty) -> bool {
-    matches!(ty, Ty::Any)
-        || matches!(ty, Ty::Array(element) if **element == Ty::Any)
-        || packed_array(ty)
-}
+
 
 fn bypass_input_id(terms: &TermBuilder, term: TermId) -> Option<TermId> {
     let syntax = terms.syntax();
@@ -1125,7 +1121,6 @@ impl Checker {
      }
  }
 
- fn path_term(&mut self,cx:&Cx,_f:&Syntax,term:TermId,v:Info)->(TermId,Info){let t=self.set_path(term,cx.path);self.mark(cx.path,&v);(t,v)}
  fn binding(&mut self, cx: &Cx, x: &Syntax, id: CheckPath) -> (TermId, Info) {
      let inner = cx.with_path(id);
      let head = match x.node {
@@ -1985,12 +1980,20 @@ impl Checker {
              self.apply_kind(cx, form, &kind, &args)
          }
          Err((code, message)) => {
-             if code == "E_UNKNOWN_KIND" && message.starts_with(&format!("Unknown node {name}.")) {
+             let suggestions = catalog::suggestions(name, &self.catalog);
+             let index = self.diags.len();
+             let result = if code == "E_UNKNOWN_KIND" && message.starts_with(&format!("Unknown node {name}.")) {
                  let suffix = &message[format!("Unknown node {name}.").len()..];
                  self.fail_term(form, &code, &format!("Unknown operator “{name}”.{suffix}"))
              } else {
                  self.fail_term(form, &code, &message)
+             };
+             if let Some(diagnostic) = self.diags.get_mut(index) {
+                 diagnostic.signature = suggestions.first().and_then(|name| crate::registry::signature(name)
+                     .or_else(|| self.catalog.kinds.iter().find(|kind| &kind.qualified == name).map(crate::registry::kind_signature)));
+                 diagnostic.suggest = suggestions;
              }
+             result
          }
      }
  }
@@ -2119,6 +2122,7 @@ impl Checker {
      (arena, roots, forms)
  }
  fn apply_op(&mut self, cx: &Cx, form: &Syntax, (operator, metadata): (&op::Op, op::OpMetadata), arguments: &[Arg], skip: Vec<Vec<usize>>) -> (TermId, Info) {
+     let diagnostic_start = self.diags.len();
      if BODY_CONTEXT_OPS.contains(&operator.name.as_str()) && !cx.in_def {
          self.error(form, "E_NODE_CONTEXT", "Context seed, frame and provenance base are available inside a defnode body.");
      }
@@ -2184,7 +2188,7 @@ impl Checker {
      if positional.len() < operator.signature.pos.len()
          || operator.signature.rest.is_none() && positional.len() > slots.len()
      {
-         self.error(form, "E_ARITY", &format!("{} takes {} positional inputs; got {}.", operator.name, operator.signature.pos.len(), positional.len()));
+         self.error(form, "E_ARITY", &format!("{} takes {} positional inputs; got {}. Expected {}", operator.name, operator.signature.pos.len(), positional.len(), crate::registry::op_signature(operator)));
      }
      let mut named = Vec::new();
      let fixed = if operator.signature.rest.is_some() { operator.signature.pos.len() } else { slots.len() };
@@ -2302,6 +2306,9 @@ impl Checker {
          }
          info.packed.insert(cx.path);
      }
+     for diagnostic in &mut self.diags[diagnostic_start..] {
+         diagnostic.signature = Some(crate::registry::op_signature(operator));
+     }
      (self.make_term(form, result, Draft::Op { op: operator.name.clone(), args: named, skip }), info)
  }
 
@@ -2336,6 +2343,28 @@ impl Checker {
          },
          _ => None,
      };
+     let mut position = 0;
+     for argument in args {
+         let slot = if let Some(key) = &argument.key {
+             operator.signature.kw.iter().find(|(name, _)| name == key)
+         } else {
+             let slot = operator.signature.pos.iter().chain(&operator.signature.opt).nth(position).or(operator.signature.rest.as_ref());
+             position += 1;
+             slot
+         };
+         if let Some((name, want)) = slot {
+             if let Some(value) = text(argument) {
+                 if *want == Ty::Color && rays_math::color::hex(value).is_err() {
+                     error(&argument.form, "E_TYPE", &format!("{} {name} expects a color (#rrggbb or #rrggbbaa); got {value:?}.", operator.name));
+                 }
+                 if let Some((_, choices)) = operator.choices.iter().find(|(key, _)| key == name) {
+                     if !choices.iter().any(|choice| choice == value) {
+                         error(&argument.form, "E_TYPE", &format!("{} {name} expects one of {}; got {value:?}.", operator.name, choices.join(", ")));
+                     }
+                 }
+             }
+         }
+     }
      match operator.name.as_str() {
          "sop/context_seed" => match positional.as_slice() {
              [argument] if text(argument).is_some_and(|value| !value.trim().is_empty()) => (),
@@ -2522,6 +2551,7 @@ impl Checker {
      }
  }
 fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[Arg]) -> (TermId, Info) {
+     let diagnostic_start = self.diags.len();
      let mut position = 0;
      let mut prepared: Vec<Cow<'_, Arg>> = Vec::with_capacity(args.len());
      for arg in args {
@@ -2638,7 +2668,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
                          }
                          (None, None) => {
                              let names = kind.slots.iter().map(|slot| slot.name.clone()).chain(kind.parameters.iter().map(|parameter| parameter.name.clone())).collect::<Vec<_>>();
-                             self.error(&arg.form, "E_UNKNOWN_PARAM", &(format!("{} has no parameter :{}.", short, name) + &catalog::suggestion(name, &names)));
+                             self.error(&arg.form, "E_UNKNOWN_PARAM", &format!("{} has no parameter :{}.{} Parameters: {}. See rays doc {}", short, name, catalog::suggestion(name, &names), names.iter().take(20).map(|name| format!(":{name}")).collect::<Vec<_>>().join(" "), kind.qualified));
                          }
                      }
                  }
@@ -2678,6 +2708,9 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
     value.groups = groups_in.iter().cloned().chain(writes.iter().cloned()).collect();
      value.packed.clear();
      value.approx_sources.clear();
+    for diagnostic in &mut self.diags[diagnostic_start..] {
+        diagnostic.signature = Some(crate::registry::kind_signature(kind));
+    }
     (self.make_term(form, out, Draft::Call { kind: kind.qualified.clone(), ctx: kind.context, args: named }), value)
  }
  fn link_path(&mut self, path: CheckPath, producer: &CheckPath) {

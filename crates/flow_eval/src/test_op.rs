@@ -178,7 +178,7 @@ fn contexts_checks_and_custom_kinds() {
     assert!(reserved.is_some() && ds.is_empty(), "{:?}", ds);
     let (known, ds) = wcheck(&[], &e, "(workspace w (graph g :context value (material/standard)))");
     assert!(known.is_none() && ds.iter().any(|d| d.code == "E_WRONG_CONTEXT"));
-    let mut k = Kind { qualified: "custom/root".into(), context: context::scene(), slots: vec![], parameters: vec![], outputs: vec![], facts: None };
+    let mut k = Kind { qualified: "custom/root".into(), description: "Test node.".into(), context: context::scene(), slots: vec![], parameters: vec![], outputs: vec![], facts: None };
     let c1 = Catalog { version: 1, kinds: vec![k.clone()] };
     let (ws, ds) = wcheck(&[], &c1, "(workspace w (graph g :context scene (root)))");
     assert!(ds.is_empty());

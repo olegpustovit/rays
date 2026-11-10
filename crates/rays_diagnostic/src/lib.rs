@@ -37,6 +37,8 @@ pub struct Diagnostic {
     pub cause: Option<Vec<u8>>,
     pub hints: Vec<String>,
     pub trace: Vec<Trace>,
+    pub signature: Option<String>,
+    pub suggest: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +85,8 @@ pub fn error(
         cause,
         hints,
         trace,
+        signature: None,
+        suggest: Vec::new(),
     }
 }
 
@@ -96,6 +100,8 @@ pub fn warning(span: Option<Span>, code: String, message: String) -> Diagnostic 
         cause: None,
         hints: Vec::new(),
         trace: Vec::new(),
+        signature: None,
+        suggest: Vec::new(),
     }
 }
 

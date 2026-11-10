@@ -1,4 +1,3 @@
-use rays_diagnostic::Span;
 
 pub use crate::arena::{attribute_args, attribute_args_view, equal, equal_node, head, make, make_with, renumber,
     BytesId, Draft, NameId, Node, RangeId, Syntax, SyntaxArena, SyntaxBuilder, SyntaxId, SyntaxRow};

@@ -413,7 +413,7 @@ pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
     let mut kind_slots = slots.clone(); kind_slots.retain(|slot| !keyword_inputs.contains(&slot.name));
     let mut kind_parameters = parameters; kind_parameters.extend(keywords);
     let kind = catalog::Kind {
-        qualified: name.clone(), context: context::sop(), slots: kind_slots, parameters: kind_parameters,
+        qualified: name.clone(), description: hs.opt("description").map(text).transpose()?.unwrap_or_else(|| format!("{} node.", title(short))), context: context::sop(), slots: kind_slots, parameters: kind_parameters,
         outputs: vec![("geo".into(), PortType::Geometry)], facts: hs.opt("facts").map(facts).transpose()?,
     };
     Ok(Defnode {

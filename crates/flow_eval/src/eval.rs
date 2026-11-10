@@ -195,7 +195,7 @@ pub fn card_kind() -> &'static str { CARD_KIND }
 pub fn max_iterations() -> usize { MAX_ITERATIONS }
 
 fn diagnostic(code: &str, message: &str) -> Diagnostic {
-    Diagnostic { code: code.into(), severity: Severity::ErrorSeverity, position: None, message: message.into(), span: None, cause: None, hints: Vec::new(), trace: Vec::new() }
+    Diagnostic { code: code.into(), severity: Severity::ErrorSeverity, position: None, message: message.into(), span: None, cause: None, hints: Vec::new(), trace: Vec::new(), signature: None, suggest: Vec::new() }
 }
 fn error(code: &str, message: &str) -> Diagnostic { diagnostic(code, message) }
 fn errorf(code: &str, message: String) -> Diagnostic { diagnostic(code, &message) }

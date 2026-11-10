@@ -2,7 +2,7 @@
 //! adapt native factories and embedded Lisp declarations to the
 //! context-generic Flow checker/printer descriptor, and check workspaces with the embedded node
 //! library in scope. The library is `crates/flow_sop/nodes/*.rays`, read in place with `include_str!`
-//! and sorted by file name (as `gen/embed_forms.ml`); each form's id range is fixed by its place in
+//! and sorted by file name (as ``); each form's id range is fixed by its place in
 //! the whole library.
 use flow_check::catalog::{self as flow_catalog, Catalog, Kind, Parameter, Slot};
 use flow_check::defnode::{self, Defnode};
@@ -29,6 +29,7 @@ use crate::port;
 #[derive(Clone, Debug)]
 pub struct Descriptor {
     pub qualified: String,
+    pub description: String,
     pub key: String,
     pub operation: String,
     pub label: String,
@@ -54,6 +55,7 @@ pub fn descriptor(factory: &Factory) -> Descriptor {
         .collect();
     Descriptor {
         qualified: format!("sop/{}", edit_graph::factory_key(factory)),
+        description: format!("{} geometry operation.", edit_graph::factory_label(factory)),
         key: edit_graph::factory_key(factory).to_owned(),
         operation: edit_graph::factory_operation(factory).to_owned(),
         label: edit_graph::factory_label(factory).to_owned(),
@@ -72,6 +74,7 @@ fn of_defnode(node: &Defnode) -> Descriptor {
     };
     Descriptor {
         qualified: node.kind.qualified.clone(),
+        description: node.kind.description.clone(),
         key,
         operation: node.operation.clone(),
         label: node.label.clone(),
@@ -818,7 +821,7 @@ fn kind_of_descriptor(entry: &Descriptor, facts: Option<flow_catalog::KernelFact
     parameters.extend(keywords);
     let context = context::of_qualified(&entry.qualified).expect("checked by the caller");
     let outputs = if context == context::sop() { vec![("geo".to_owned(), PortType::Geometry)] } else { Vec::new() };
-    Ok(Kind { qualified: entry.qualified.clone(), context, slots, parameters, outputs, facts })
+    Ok(Kind { qualified: entry.qualified.clone(), description: entry.description.clone(), context, slots, parameters, outputs, facts })
 }
 
 pub fn of_factories(
@@ -987,7 +990,7 @@ mod tests {
         assert!(std::ptr::eq(sources().expect("sources").as_ptr(), library.forms.get().unwrap().as_ptr()));
     }
 
-    /// test_catalog_load.ml: a catalog without native kinds still lists every library node, and a
+    /// : a catalog without native kinds still lists every library node, and a
     /// small draw workspace checks against it.
     #[test]
     fn small_workspace_checks_against_the_library_catalog() {
@@ -1010,6 +1013,7 @@ mod tests {
     fn catalog_rejects_bad_descriptors() {
         let ok = Descriptor {
             qualified: "sop/test_ok".into(),
+            description: "Test geometry operation.".into(),
             key: "test_ok".into(),
             operation: "test_ok".into(),
             label: "Ok".into(),

@@ -46,6 +46,7 @@ pub struct KernelFacts {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Kind {
     pub qualified: String,
+    pub description: String,
     pub context: Context,
     pub slots: Vec<Slot>,
     pub parameters: Vec<Parameter>,
@@ -398,7 +399,8 @@ fn kind(form: &Syntax) -> Result<Kind, Diagnostic> {
         return Err(bad(form, "Kind key differs from its qualified name"));
     }
     parameters.append(&mut keyword_parameters);
-    Ok(Kind { qualified, context, slots, parameters, outputs, facts })
+    let description = match get("description") { Ok(property) => string(&property.one("description")?)?, Err(_) => format!("{} node.", _label) };
+    Ok(Kind { qualified, description, context, slots, parameters, outputs, facts })
 }
 
 fn raw(source: &str, form: &Syntax) -> Result<String, Diagnostic> {
@@ -467,7 +469,7 @@ fn short_name(qualified: &str) -> &str {
 }
 
 
-fn distance(left: &str, right: &str) -> usize {
+pub(crate) fn distance(left: &str, right: &str) -> usize {
     let mut row: Vec<usize> = (0..=right.len()).collect();
     for (i, a) in left.bytes().enumerate() {
         let mut diagonal = row[0]; row[0] = i + 1;
@@ -491,16 +493,17 @@ pub fn suggestion(word: &str, candidates: &[String]) -> String {
     }
     best.map_or_else(String::new, |(_, candidate)| format!(" Did you mean {candidate}?"))
 }
+pub fn suggestions(word: &str, catalog: &Catalog) -> Vec<String> {
+    let mut candidates: Vec<_> = crate::registry::names(catalog).into_iter().filter_map(|name| {
+        let compared = if word.contains('/') { name.as_str() } else { short_name(&name) };
+        let score = distance(word, compared);
+        (score <= 2).then_some((score, name))
+    }).collect();
+    candidates.sort_by(|a,b| (a.0, a.1.contains('/'), &a.1).cmp(&(b.0, b.1.contains('/'), &b.1)));
+    candidates.into_iter().take(3).map(|(_, name)| name).collect()
+}
 fn suggestion_catalog(word: &str, catalog: &Catalog) -> String {
-    let mut best: Option<(usize, &str)> = None;
-    for kind in &catalog.kinds {
-        let candidate = short_name(&kind.qualified);
-        let score = distance(word, candidate);
-        if score <= 2 && best.as_ref().is_none_or(|current| (score, candidate) < (current.0, current.1)) {
-            best = Some((score, candidate));
-        }
-    }
-    best.map_or_else(String::new, |(_, candidate)| format!(" Did you mean {candidate}?"))
+    suggestions(word, catalog).first().map_or_else(String::new, |name| format!(" Did you mean {name}?"))
 }
 
 pub fn parameters_of_fields(fields: &[FieldView]) -> Result<Vec<Parameter>, String> {
@@ -521,12 +524,7 @@ pub fn parameters_of_fields(fields: &[FieldView]) -> Result<Vec<Parameter>, Stri
     Ok(result)
 }
 
-fn known_prefix(catalog: &Catalog, name: &str) -> bool {
-    name == "user" || context::all().iter().any(|context| {
-        let descriptor = context::descriptor(*context);
-        descriptor.name == name || descriptor.catalog_prefix.as_deref() == Some(name)
-    }) || catalog.kinds.iter().any(|kind| kind.qualified.strip_prefix(name).is_some_and(|suffix| suffix.starts_with('/')))
-}
+fn known_prefix(catalog: &Catalog, name: &str) -> bool { crate::registry::known_prefix(catalog, name) }
 
 fn allowed(context: &Context, kind: &Kind) -> bool { kind.context == context::value() || kind.context == *context }
 
@@ -543,7 +541,7 @@ fn resolve_report(catalog: &Catalog, context: &Context, head: &str, report: &mut
         [] => {
             match head.split('/').collect::<Vec<_>>().as_slice() {
                 [prefix, _, ..] if !known_prefix(catalog, prefix) => report("E_NAMESPACE", format!("Unknown namespace {prefix}.")),
-                _ => report("E_UNKNOWN_KIND", format!("Unknown node {head}.{}", suggestion_catalog(short_name(head), catalog))),
+                _ => report("E_UNKNOWN_KIND", format!("Unknown node {head}.{}", suggestion_catalog(head, catalog))),
             }
             None
         }
@@ -566,7 +564,7 @@ fn validate_range(report: &mut dyn FnMut(Severity, &str, &str), parameter: &Para
         (KindView::Integer(range), Some(number)) => {
             if number.fract() == 0.0 {
                 if range.hard_min.is_some_and(|bound| number < bound as f64) || range.hard_max.is_some_and(|bound| number > bound as f64) {
-                    report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} is outside its hard range", parameter.name));
+                    report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} = {} is outside its hard range {:?}..={:?}", parameter.name, number, range.hard_min, range.hard_max));
                 } else if number < range.soft_min as f64 || number > range.soft_max as f64 {
                     report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, param::float_text(number), range.soft_min, range.soft_max));
                 }
@@ -575,7 +573,7 @@ fn validate_range(report: &mut dyn FnMut(Severity, &str, &str), parameter: &Para
         (KindView::Floating(range), Some(number)) => {
             if !number.is_finite() { report(Severity::ErrorSeverity, "E_NONFINITE", &format!(":{} must be finite", parameter.name)); }
             else if range.hard_min.is_some_and(|bound| number < bound) || range.hard_max.is_some_and(|bound| number > bound) {
-                report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} is outside its hard range", parameter.name));
+                report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} = {} is outside its hard range {:?}..={:?}", parameter.name, number, range.hard_min, range.hard_max));
             } else if number < range.soft_min || number > range.soft_max {
                 report(Severity::Warning, "W_SOFT_RANGE", &format!(":{} {} is outside the slider range {}–{}. Allowed, but check it", parameter.name, param::float_text(number), param::float_text(range.soft_min), param::float_text(range.soft_max)));
             }
@@ -649,7 +647,7 @@ mod tests {
 
     #[test]
     fn resolves_and_expands_components() {
-        let kind = Kind { qualified: "sop/box".into(), context: context::sop(), slots: Vec::new(), parameters: Vec::new(), outputs: Vec::new(), facts: None };
+        let kind = Kind { qualified: "sop/box".into(), description: "Test node.".into(), context: context::sop(), slots: Vec::new(), parameters: Vec::new(), outputs: Vec::new(), facts: None };
         let catalog = Catalog { version: 1, kinds: vec![kind] };
         assert_eq!(resolve_kind(&catalog, &context::sop(), "box").map(|kind| kind.qualified), Ok("sop/box".into()));
         assert_eq!(resolve_kind(&catalog, &context::scene(), "box").unwrap_err().0, "E_WRONG_CONTEXT");
@@ -712,10 +710,10 @@ mod test_catalog {
         param_of("mode", "Mode", None, vec![("mode".into(), KindView::Choice(vec!["solid".into(), "wire".into()]), Value::Choice("solid".into()))])
     }
     fn boxk() -> Kind {
-        Kind { qualified: "sop/box".into(), context: context::sop(), slots: vec![], parameters: vec![size(), rows(), mode()], outputs: vec![("geo".into(), PortType::Geometry)], facts: None }
+        Kind { qualified: "sop/box".into(), description: "Test node.".into(), context: context::sop(), slots: vec![], parameters: vec![size(), rows(), mode()], outputs: vec![("geo".into(), PortType::Geometry)], facts: None }
     }
     fn transform() -> Kind {
-        Kind { qualified: "sop/transform".into(), context: context::sop(), slots: vec![Slot { name: "in0".into(), required: true, rest: false, ty: None }], parameters: vec![], outputs: vec![("geo".into(), PortType::Geometry)], facts: None }
+        Kind { qualified: "sop/transform".into(), description: "Test node.".into(), context: context::sop(), slots: vec![Slot { name: "in0".into(), required: true, rest: false, ty: None }], parameters: vec![], outputs: vec![("geo".into(), PortType::Geometry)], facts: None }
     }
     fn catalog() -> Catalog { Catalog { version: 202609, kinds: vec![boxk(), transform()] } }
     fn code(r: &Result<Kind, (String, String)>) -> String { match r { Err((c, _)) => c.clone(), Ok(_) => "ok".into() } }

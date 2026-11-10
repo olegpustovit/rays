@@ -86,7 +86,7 @@ fn vectors_widen_and_check() {
 #[test]
 fn function_ports_instantiate_bodies_and_keep_captures() {
     let field = Parameter { name: "field".into(), label: "Field".into(), fields: vec![], folder: vec![], primary: true, unit: None, ty: Some(PortType::Fn(ty::FnSignature { params: vec![Ty::Float], result: Ty::Float })) };
-    let kind = Kind { qualified: "sop/test_field".into(), context: context::sop(), slots: vec![], parameters: vec![field.clone()], outputs: vec![("geo".into(), PortType::Geometry)], facts: None };
+    let kind = Kind { qualified: "sop/test_field".into(), description: "Test node.".into(), context: context::sop(), slots: vec![], parameters: vec![field.clone()], outputs: vec![("geo".into(), PortType::Geometry)], facts: None };
     let run_with = |signature: &ty::FnSignature, source: &str| {
         let mut parameter = field.clone();
         parameter.ty = Some(PortType::Fn(signature.clone()));
@@ -800,7 +800,7 @@ fn workspace_candidates() {
     let ws = good("(workspace w (defn wave :context value [(x : float)] (sin x))\n    (graph g :context value (let* [candidate (map wave (array/float 4))] 0)))");
     assert!(is_candidate(&ws, &["g", "candidate"]));
     let range = param::FloatRange { soft_min: 0., soft_max: 1., hard_min: None, hard_max: None };
-    let opaque = Kind { qualified: "value/opaque".into(), context: context::value(), slots: vec![], parameters: vec![Parameter { name: "value".into(), label: "Value".into(), ty: Some(PortType::Float), fields: vec![("value".into(), param::KindView::Floating(range), param::Value::Float(0.))], folder: vec![], primary: false, unit: None }], outputs: vec![("out".into(), PortType::Float)], facts: None };
+    let opaque = Kind { qualified: "value/opaque".into(), description: "Test node.".into(), context: context::value(), slots: vec![], parameters: vec![Parameter { name: "value".into(), label: "Value".into(), ty: Some(PortType::Float), fields: vec![("value".into(), param::KindView::Floating(range), param::Value::Float(0.))], folder: vec![], primary: false, unit: None }], outputs: vec![("out".into(), PortType::Float)], facts: None };
     let mut kinds = vec![opaque]; kinds.extend(base_catalog().kinds.clone());
     let c = Catalog { kinds, ..base_catalog().clone() };
     let is = |source: &str| is_candidate(&good_in(&c, source), &["g", "candidate"]);
@@ -837,7 +837,7 @@ fn workspace_precision() {
     assert!(marked("(map (fn [x] (cond (> x 0) [x 0 0] :else [0 0 0])) (array/float 4))"));
     assert!(marked("(map (fn [x] (case x 0 [0 0 0] :else [x 0 0])) (array/float 4))"));
     assert!(flow_check::op::is_display_kind("draw/circles") && flow_check::op::is_display_kind("ui/canvas") && !flow_check::op::is_display_kind("scene/camera"));
-    let kind = Kind { qualified: "value/test_sink".into(), context: context::value(), slots: vec![catalog::Slot { name: "source".into(), required: true, rest: false, ty: Some(Ty::Array(Box::new(Ty::Float))) }], parameters: vec![], outputs: vec![("out".into(), PortType::Float)], facts: None };
+    let kind = Kind { qualified: "value/test_sink".into(), description: "Test node.".into(), context: context::value(), slots: vec![catalog::Slot { name: "source".into(), required: true, rest: false, ty: Some(Ty::Array(Box::new(Ty::Float))) }], parameters: vec![], outputs: vec![("out".into(), PortType::Float)], facts: None };
     let mut kinds = vec![kind]; kinds.extend(base_catalog().kinds.clone());
     let c = Catalog { kinds, ..base_catalog().clone() };
     let checked = |body: &str| run_in(&c, &val(&checks(body)));

@@ -209,7 +209,7 @@ impl Value {
 fn diagnostic(code: &str, message: &str) -> Diagnostic {
     Diagnostic {
         code: code.to_owned(), severity: Severity::ErrorSeverity, position: None,
-        message: message.to_owned(), span: None, cause: None, hints: Vec::new(), trace: Vec::new(),
+        message: message.to_owned(), span: None, cause: None, hints: Vec::new(), trace: Vec::new(), signature: None, suggest: Vec::new(),
     }
 }
 pub fn raise_diagnostic(diagnostic: Diagnostic) -> Result<Value, Diagnostic> { Err(diagnostic) }
@@ -711,6 +711,8 @@ fn cancelled(diagnostic: &Diagnostic) -> bool { diagnostic.code == "cancelled" |
 fn inherit_envelope(original: &Diagnostic, mut mapped: Diagnostic) -> Diagnostic {
     mapped.hints = original.hints.clone();
     mapped.trace = original.trace.clone();
+    mapped.signature = original.signature.clone();
+    mapped.suggest = original.suggest.clone();
     if mapped.span.is_none() { mapped.span = original.span.clone(); }
     if mapped.position.is_none() { mapped.position = original.position; }
     mapped

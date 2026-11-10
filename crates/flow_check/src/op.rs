@@ -37,6 +37,8 @@ pub struct Arithmetic { pub apply: Arc<ArithmeticFn> }
 #[derive(Clone)]
 pub struct Op {
     pub name: String,
+    pub doc: String,
+    pub example: String,
     pub ctx: Context,
     pub signature: Signature,
     pub out: Out,
@@ -89,13 +91,13 @@ static EMPTY_CHECK: LazyLock<Check> = LazyLock::new(|| Arc::new(|_| Ok(())));
 fn delegate_body(f: NodeDelegate) -> Body { Arc::new(f) }
 macro_rules! builtin_delegates {
     ($(($var:ident, $name:literal)),* $(,)?) => {
-        $(fn $var(_: &Frame, node: &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), args: &Args) -> Result<Value, Diagnostic> { node($name, args) })*
+        $(fn $var(_: &Frame, node: &dyn Fn(&str, &Args) -> Result<Value, Diagnostic>, args: &Args) -> Result<Value, Diagnostic> { node($name, args) })*
         static BUILTIN_DELEGATE: &[(&str, NodeDelegate)] = &[$(($name, $var)),*];
     };
 }
 macro_rules! gpu_stage_only {
     ($(($var:ident, $name:literal)),* $(,)?) => {
-        $(fn $var(_: &Frame, _: &(dyn Fn(&str, &Args) -> Result<Value, Diagnostic>), _: &Args) -> Result<Value, Diagnostic> {
+        $(fn $var(_: &Frame, _: &dyn Fn(&str, &Args) -> Result<Value, Diagnostic>, _: &Args) -> Result<Value, Diagnostic> {
             Err(fail("E_GPU_STAGE", concat!($name, " runs only in a fragment stage.")))
         })*
         static GPU_STAGE_ONLY: &[(&str, NodeDelegate)] = &[$(($name, $var)),*];
@@ -124,7 +126,9 @@ gpu_stage_only!(
     (gpu_err_store, "gpu/store"), (gpu_err_store_int, "gpu/store-int"),
 );
 fn mk(name: &str, ctx: Context, signature: Signature, out: Out, body: Body) -> Op {
-    Op { name:name.into(), ctx, signature, out, out_args:None, any_num:false, choices:Vec::new(), shape:Shape::Scalar, live:false, check:EMPTY_CHECK.clone(), body, category:"Math".into(), arithmetic:None, packed_extension:None }
+    let doc = crate::registry::description(name, &signature);
+    let example = crate::registry::example(name, &signature);
+    Op { name:name.into(), doc, example, ctx, signature, out, out_args:None, any_num:false, choices:Vec::new(), shape:Shape::Scalar, live:false, check:EMPTY_CHECK.clone(), body, category:"Math".into(), arithmetic:None, packed_extension:None }
 }
 fn with_defaults(mut op: Op, category: &str) -> Op { op.category=category.into(); op }
 fn output_const(ty: Ty) -> Out { Arc::new(move |_| Ok(ty.clone())) }
