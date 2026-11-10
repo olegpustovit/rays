@@ -582,7 +582,8 @@ int32_t rv_buffer_flush(void *buffer, const void *data, uint64_t length) { retur
 int32_t rv_buffer_invalidate(void *buffer, void *data, uint64_t length) { return staged_read(static_cast<Buffer *>(buffer), 0, length, data); }
 struct rv_binding { uint32_t binding; int32_t kind; };
 struct rv_pipeline_desc { int32_t blend, topology, color_format; uint8_t has_depth; int32_t samples; };
-struct rv_texture_desc { uint32_t width, height, depth, mips, samples; int32_t format; uint8_t storage, attachment; };
+struct rv_texture_desc { uint32_t width, height, depth, mips, samples; int32_t format; uint8_t storage, attachment, volume; };
+static_assert(sizeof(rv_texture_desc) == 28);
 struct rv_blit_desc { uint64_t offset; uint32_t bytes_per_row, texel, mip; int32_t x, y, z; uint32_t width, height, depth; };
 struct rv_sampler_desc { int32_t min, mag, mip, u, v, anisotropy; double lod_min, lod_max; };
 
@@ -748,13 +749,13 @@ int32_t rv_texture_create(void *device, const rv_texture_desc *desc, void **out)
   bool depth = t->format == VK_FORMAT_D32_SFLOAT; t->aspect = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
   VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   if (desc->storage && t->samples == 1) usage |= VK_IMAGE_USAGE_STORAGE_BIT; if (desc->attachment) usage |= depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-  VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO}; ii.imageType = t->depth > 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D; ii.format = t->format;
+  VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO}; ii.imageType = desc->volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D; ii.format = t->format;
   ii.extent = {t->width,t->height,t->depth}; ii.mipLevels = t->mips; ii.arrayLayers = 1; ii.samples = static_cast<VkSampleCountFlagBits>(t->samples);
   ii.tiling = VK_IMAGE_TILING_OPTIMAL; ii.usage = usage; ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   VmaAllocationCreateInfo ai{}; ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
   VkResult r = vmaCreateImage(d->allocator, &ii, &ai, &t->image, &t->allocation, &t->info); if (r != VK_SUCCESS) { delete t; return r; }
   d->held.fetch_add(static_cast<int64_t>(t->info.size), std::memory_order_relaxed);
-  VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO}; vi.image = t->image; vi.viewType = t->depth > 1 ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
+  VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO}; vi.image = t->image; vi.viewType = desc->volume ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
   vi.format = t->format; vi.subresourceRange = {t->aspect,0,t->mips,0,1};
   r = vkCreateImageView(d->device, &vi, nullptr, &t->view);
   if (r != VK_SUCCESS) { d->held.fetch_sub(static_cast<int64_t>(t->info.size), std::memory_order_relaxed); vmaDestroyImage(d->allocator,t->image,t->allocation); delete t; return r; }

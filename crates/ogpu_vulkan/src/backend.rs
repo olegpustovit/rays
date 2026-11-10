@@ -11,7 +11,7 @@ use ogpu_core::{
         DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, Floats,
         GpuTiming, InstanceKind, Receipt, RenderPipelineOptions, ShaderStage, Token, Warm, Winding,
     },
-    caps::{Caps, Limits},
+    caps::Caps,
     error::{self, Error, ErrorKind},
     handle,
     pipeline::{Blend, ColorFormat, DepthFormat, RenderDescriptor},
@@ -50,7 +50,7 @@ fn fail(op: &str, kind: ErrorKind, text: &str) -> Error {
 pub(crate) fn of_vk(op: &str, failure: vk::Error) -> Error {
     match failure.kind {
         vk::ErrorKind::NoAdapter => error::make(op, ErrorKind::NoAdapter, "no discrete Vulkan 1.3 device"),
-        vk::ErrorKind::Unsupported => error::make(op, ErrorKind::Unsupported, "unsupported by the Vulkan bridge"),
+        vk::ErrorKind::Unsupported(message) => error::make(op, ErrorKind::Unsupported, message),
         vk::ErrorKind::DeviceLost => error::make(op, ErrorKind::DeviceLost, "VK_ERROR_DEVICE_LOST"),
         vk::ErrorKind::OutOfDeviceMemory => error::make(op, ErrorKind::Capacity, "VK_ERROR_OUT_OF_DEVICE_MEMORY"),
         vk::ErrorKind::OutOfHostMemory => error::make(op, ErrorKind::Capacity, "VK_ERROR_OUT_OF_HOST_MEMORY"),
@@ -106,18 +106,6 @@ struct GeomRecord {
 /// An argument slice is a (texture, sampler) pair: binding the buffer at its offset binds those at
 /// the slot and the next one, the shape SPIR-V's fragments declare.
 type ArgumentCell = (Option<Rc<TextureEntry>>, Option<Rc<vk::Sampler>>);
-
-fn format_index(format: TextureFormat) -> i32 {
-    match format {
-        TextureFormat::R8Unorm => 0,
-        TextureFormat::Rgba8Unorm => 1,
-        TextureFormat::Bgra8Unorm => 2,
-        TextureFormat::Bgra8UnormSrgb => 3,
-        TextureFormat::Rgba16Float => 4,
-        TextureFormat::Rgba32Float => 5,
-        TextureFormat::Depth32Float => 6,
-    }
-}
 
 fn primitive_index(primitive: Primitive) -> i32 {
     match primitive {
@@ -403,17 +391,16 @@ impl DriverResource for TextureResource {
 
 fn register_texture(dev: &Rc<Dev>, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
     let device = dev.device(TEXTURE_OP)?;
-    let created = device.texture(vk::TextureDescriptor {
-        width: descriptor.width as u32,
-        height: descriptor.height as u32,
-        depth: descriptor.depth.max(1) as u32,
-        mip_levels: descriptor.mip_levels.max(1) as u32,
-        samples: descriptor.sample_count.max(1) as u32,
-        format: format_index(descriptor.format),
-        storage: descriptor.usage.contains(&TextureUsage::StorageBinding),
-        attachment: descriptor.usage.contains(&TextureUsage::RenderAttachment),
-    });
-    let native = created.map_err(|failure| of_vk(TEXTURE_OP, failure))?;
+    let created = device.texture(descriptor);
+    let native = created.map_err(|failure| {
+        if matches!(&failure.kind, vk::ErrorKind::WrongDevice) {
+            return fail(TEXTURE_OP, ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities");
+        }
+        let operation = if descriptor.storage == StorageMode::Memoryless && matches!(&failure.kind, vk::ErrorKind::Unsupported(_)) {
+            "Ogpu_vulkan.create_memoryless_texture"
+        } else { TEXTURE_OP };
+        of_vk(operation, failure)
+    })?;
     live_add(1);
     let id = dev.token();
     dev.textures.borrow_mut().insert(id, Rc::new(TextureEntry { texture: native, descriptor: descriptor.clone() }));
@@ -1714,12 +1701,6 @@ impl DriverDevice for VulkanDevice {
         create_mapped_buffer(&self.dev, &descriptor.descriptor)
     }
     fn create_texture(&self, descriptor: &AdmittedTexture) -> Result<Box<dyn DriverResource>, Error> {
-        if !descriptor.admitted_for(&self.capabilities) {
-            return Err(fail("Ogpu_vulkan.create_texture", ErrorKind::CrossDevice, "descriptor was admitted for different device capabilities"));
-        }
-        if descriptor.storage == StorageMode::Memoryless {
-            return Err(fail("Ogpu_vulkan.create_memoryless_texture", ErrorKind::Unsupported, "this device has no tile memory"));
-        }
         register_texture(&self.dev, descriptor)
     }
     fn create_library(&self, shader: &Shader) -> Result<Box<dyn DriverLibrary>, Error> {
@@ -1813,28 +1794,7 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
         max_invocations: facts.max_invocations as i64,
     });
     let handle = handle::create_device();
-    let capabilities = Caps {
-        limits: Limits {
-            max_buffer_size: facts.max_buffer_bytes as i64,
-            max_texture_dimension_1d: facts.max_texture_dimension_1d as i64,
-            max_texture_dimension_2d: facts.max_texture_dimension_2d as i64,
-            max_texture_dimension_3d: facts.max_texture_dimension_3d as i64,
-            max_texture_dimension_cube: facts.max_texture_dimension_cube as i64,
-            max_texture_array_layers: facts.max_texture_array_layers as i64,
-            max_bind_groups: 4,
-            sample_counts: facts.sample_counts, color_sample_counts: facts.color_sample_counts, depth_sample_counts: facts.depth_sample_counts,
-        },
-        compute_pipeline: true,
-        render_pipeline: true,
-        render_requires_fragment: false,
-        ray_tracing: true,
-        ray_tracing_curves: false,
-        // only after device_create enables rayQuery and accelerationStructure
-        ray_tracing_motion: true,
-        ray_tracing_refit: true,
-        memoryless_attachments: false,
-        unified_memory: false,
-    };
+    let capabilities = facts.capabilities();
     Ok(Box::new(VulkanDevice { dev, handle, capabilities, device_live: device_live.clone() }))
 }
 

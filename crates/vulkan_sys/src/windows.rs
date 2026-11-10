@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 pub enum Error {
     NoDevice,
     MissingFeature,
+    Unsupported(&'static str),
     VulkanResult(i32),
     InvalidInput(&'static str),
     InvalidHandle,
@@ -45,6 +46,33 @@ pub struct DeviceFacts {
     pub api_version: u32,
 }
 
+impl DeviceFacts {
+    pub fn capabilities(self) -> ogpu_core::caps::Caps {
+        ogpu_core::caps::Caps {
+            limits: ogpu_core::caps::Limits {
+                max_buffer_size: self.max_buffer_bytes as i64,
+                max_texture_dimension_1d: self.max_texture_dimension_1d as i64,
+                max_texture_dimension_2d: self.max_texture_dimension_2d as i64,
+                max_texture_dimension_3d: self.max_texture_dimension_3d as i64,
+                max_texture_dimension_cube: self.max_texture_dimension_cube as i64,
+                max_texture_array_layers: self.max_texture_array_layers as i64,
+                max_bind_groups: 4,
+                sample_counts: self.sample_counts, color_sample_counts: self.color_sample_counts, depth_sample_counts: self.depth_sample_counts,
+            },
+            compute_pipeline: true,
+            render_pipeline: true,
+            render_requires_fragment: false,
+            ray_tracing: true,
+            ray_tracing_curves: false,
+            // only after device_create enables rayQuery and accelerationStructure
+            ray_tracing_motion: true,
+            ray_tracing_refit: true,
+            memoryless_attachments: false,
+            unified_memory: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceMemory {
     pub live_bytes: u64,
@@ -58,6 +86,7 @@ pub enum BufferKind { Shared, DeviceLocal }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Binding { pub binding: u32, pub kind: i32 }
 
+/// Metadata for the created native allocation; construction accepts only Core admission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextureDescriptor {
     pub width: u32,
@@ -138,7 +167,8 @@ struct NativeFacts { max_buffer: u64, max_texture_1d: u64, max_texture_2d: u64, 
 struct NativePipelineDescriptor { blend: i32, topology: i32, color_format: i32, has_depth: u8, samples: i32 }
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct NativeTextureDescriptor { width:u32,height:u32,depth:u32,mips:u32,samples:u32,format:i32,storage:u8,attachment:u8 }
+struct NativeTextureDescriptor { width:u32,height:u32,depth:u32,mips:u32,samples:u32,format:i32,storage:u8,attachment:u8,volume:u8 }
+const _: () = assert!(std::mem::size_of::<NativeTextureDescriptor>() == 28);
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct NativeBlit { offset:u64,bytes_per_row:u32,texel:u32,mip:u32,x:i32,y:i32,z:i32,width:u32,height:u32,depth:u32 }
@@ -274,12 +304,33 @@ impl Device {
         let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_shader_create(self.raw(),bytes.as_ptr().cast(),bytes.len() as u64,&mut raw)})?;
         Ok(ShaderModule{raw:nonnull(raw)?,device:self.inner.clone()})
     }
-    pub fn texture(&self,descriptor:TextureDescriptor)->Result<Texture,Error>{
-        let max_dimension=descriptor.width.max(descriptor.height).max(descriptor.depth);
-        let max_mips=32-max_dimension.leading_zeros();
-        if descriptor.width==0||descriptor.height==0||descriptor.depth==0||descriptor.mip_levels==0||descriptor.mip_levels>max_mips||
-            ![1,2,4,8,16,32,64].contains(&descriptor.samples)||!(0..=6).contains(&descriptor.format){return Err(Error::InvalidInput("invalid texture dimensions, mips, samples, or format"));}
-        let d=NativeTextureDescriptor{width:descriptor.width,height:descriptor.height,depth:descriptor.depth,mips:descriptor.mip_levels,samples:descriptor.samples,format:descriptor.format,storage:descriptor.storage as u8,attachment:descriptor.attachment as u8};
+    pub fn texture(&self, admitted: &ogpu_core::validation::AdmittedTexture) -> Result<Texture, Error> {
+        use ogpu_core::types::{StorageMode, Swizzle, TextureFormat, TextureKind, TextureUsage};
+        if !admitted.admitted_for(&self.facts()?.capabilities()) { return Err(Error::WrongDevice); }
+        if admitted.storage == StorageMode::Memoryless {
+            return Err(Error::Unsupported("this device has no tile memory"));
+        }
+        let volume = match admitted.kind {
+            TextureKind::Texture2d | TextureKind::Texture2dMultisample => false,
+            TextureKind::Texture3d => true,
+            _ => return Err(Error::Unsupported("Vulkan texture kind is unavailable")),
+        };
+        if admitted.swizzle != Swizzle::IDENTITY {
+            return Err(Error::Unsupported("Vulkan texture swizzling is unavailable"));
+        }
+        let extent = |value| u32::try_from(value).map_err(|_| Error::InvalidInput("texture extent exceeds Vulkan ABI"));
+        let descriptor = TextureDescriptor {
+            width: extent(admitted.width)?, height: extent(admitted.height)?, depth: extent(admitted.depth)?,
+            mip_levels: extent(admitted.mip_levels)?, samples: extent(admitted.sample_count)?,
+            format: match admitted.format {
+                TextureFormat::R8Unorm => 0, TextureFormat::Rgba8Unorm => 1, TextureFormat::Bgra8Unorm => 2,
+                TextureFormat::Bgra8UnormSrgb => 3, TextureFormat::Rgba16Float => 4,
+                TextureFormat::Rgba32Float => 5, TextureFormat::Depth32Float => 6,
+            },
+            storage: admitted.usage.contains(&TextureUsage::StorageBinding),
+            attachment: admitted.usage.contains(&TextureUsage::RenderAttachment),
+        };
+        let d=NativeTextureDescriptor{width:descriptor.width,height:descriptor.height,depth:descriptor.depth,mips:descriptor.mip_levels,samples:descriptor.samples,format:descriptor.format,storage:descriptor.storage as u8,attachment:descriptor.attachment as u8,volume:volume as u8};
         let mut raw=std::ptr::null_mut();Error::status(unsafe{rv_texture_create(self.raw(),&d,&mut raw)})?;
         let raw=nonnull(raw)?;Ok(Texture{raw,device:self.inner.clone(),descriptor,_owner:Arc::new(TextureOwner{raw})})
     }
@@ -517,7 +568,15 @@ impl Pipeline{
 impl Drop for Pipeline{fn drop(&mut self){unsafe{rv_pipeline_destroy(self.raw.as_ptr())}}}
 
 #[derive(Clone)]
-pub struct Texture{raw:NonNull<c_void>,device:Arc<DeviceInner>,descriptor:TextureDescriptor,_owner:Arc<TextureOwner>}
+pub struct Texture {
+    raw: NonNull<c_void>,
+    // Queue native destruction while the device is still alive; fields drop in declaration order.
+    _owner: Arc<TextureOwner>,
+    device: Arc<DeviceInner>,
+    descriptor: TextureDescriptor,
+}
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<Texture>() == 56);
 struct TextureOwner{raw:NonNull<c_void>}
 impl Texture{
     pub fn descriptor(&self)->TextureDescriptor{self.descriptor}

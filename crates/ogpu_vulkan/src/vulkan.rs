@@ -15,7 +15,7 @@ pub use sys::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
     NoAdapter,
-    Unsupported,
+    Unsupported(&'static str),
     DeviceLost,
     OutOfHostMemory,
     OutOfDeviceMemory,
@@ -40,6 +40,7 @@ fn error(operation: &'static str, error: sys::Error) -> Error {
         sys::Error::VulkanResult(-2) => ErrorKind::OutOfDeviceMemory,
         sys::Error::VulkanResult(-8) => ErrorKind::NoAdapter,
         sys::Error::VulkanResult(code) => ErrorKind::Vulkan(code),
+        sys::Error::Unsupported(message) => ErrorKind::Unsupported(message),
         sys::Error::InvalidInput(message) => ErrorKind::InvalidInput(message),
         sys::Error::InvalidHandle => ErrorKind::InvalidHandle,
         sys::Error::WrongDevice => ErrorKind::WrongDevice,
@@ -56,7 +57,7 @@ impl Device {
     pub fn queue(&self) -> Result<Queue, Error> { self.0.queue().map_err(|failure| error("queue_create", failure)).map(Queue) }
     pub fn buffer(&self, size: u64, kind: BufferKind) -> Result<Buffer, Error> { self.0.buffer(size, kind).map_err(|failure| error("buffer_create", failure)).map(Buffer) }
     pub fn shader(&self, bytes: &[u8]) -> Result<ShaderModule, Error> { self.0.shader(bytes).map_err(|failure| error("shader_create", failure)).map(ShaderModule) }
-    pub fn texture(&self, descriptor: TextureDescriptor) -> Result<Texture, Error> { self.0.texture(descriptor).map_err(|failure| error("texture_create", failure)).map(Texture) }
+    pub fn texture(&self, descriptor: &ogpu_core::validation::AdmittedTexture) -> Result<Texture, Error> { self.0.texture(descriptor).map_err(|failure| error("texture_create", failure)).map(Texture) }
     pub fn zeroed_view(&self, count: usize) -> Result<ZeroedView, Error> { self.0.zeroed_view(count).map_err(|failure| error("zeroed_view", failure)).map(ZeroedView) }
     pub fn sampler(&self, descriptor: SamplerDescriptor) -> Result<Sampler, Error> { self.0.sampler(descriptor).map_err(|failure| error("sampler_create", failure)).map(Sampler) }
     pub fn surface(&self, token: &Token, owner: i64, generation: i64, immediate: bool) -> Result<Surface, Error> {
@@ -229,18 +230,37 @@ mod tests {
     }
 
     #[test]
-    fn safe_texture_constructor_creates_a_texture() {
-        let device = match Device::create(false, false) {
-            Ok(device) => device,
-            Err(error) if error.kind == ErrorKind::NoAdapter => return,
-            Err(error) => panic!("Vulkan device creation failed: {error}"),
-        };
-        let descriptor = TextureDescriptor {
-            width: 1, height: 1, depth: 1, mip_levels: 1, samples: 1,
-            format: 1, storage: false, attachment: true,
-        };
-        let texture = device.texture(descriptor).expect("safe texture creation");
-        assert_eq!(texture.descriptor(), descriptor);
+    fn gpu_texture_constructor_consumes_core_admission() {
+        use ogpu_core::{types::{StorageMode, TextureFormat, TextureKind, TextureUsage}, validation::{admit_texture, TextureProfile}};
+        let device = Device::create(true, true).expect("fatal-validation Vulkan device");
+        let caps = device.facts().unwrap().capabilities();
+        let mut profile = TextureProfile::descriptor_2d(TextureFormat::Rgba8Unorm, 1, 1,
+            StorageMode::Private, vec![TextureUsage::RenderAttachment], None);
+        for (width, height, depth, mips, samples) in [(0,1,1,1,1),(1,1,1,2,1),(1,1,1,1,3)] {
+            let mut invalid = profile.clone();
+            invalid.descriptor.width=width; invalid.descriptor.height=height; invalid.descriptor.depth=depth;
+            invalid.descriptor.mip_levels=mips; invalid.descriptor.sample_count=samples;
+            assert!(admit_texture(&caps, invalid).is_err());
+        }
+        let mut wrong_caps=caps; wrong_caps.limits.max_texture_dimension_3d+=1;
+        let wrong=admit_texture(&wrong_caps, profile.clone()).unwrap();
+        assert!(matches!(device.texture(&wrong),Err(Error {kind:ErrorKind::WrongDevice,..})));
+        let admitted=admit_texture(&caps,profile.clone()).unwrap();
+        let texture=device.texture(&admitted).expect("same-device valid retry");
+        assert_eq!(texture.descriptor(),TextureDescriptor {width:1,height:1,depth:1,mip_levels:1,samples:1,
+            format:1,storage:false,attachment:true});
+        profile.kind=TextureKind::TextureCube;
+        let cube=admit_texture(&caps,profile.clone()).unwrap();
+        assert!(matches!(device.texture(&cube),Err(Error {kind:ErrorKind::Unsupported(_),..})));
+        profile.kind=TextureKind::Texture3d;
+        let volume=admit_texture(&caps,profile).unwrap();
+        device.texture(&volume).expect("one-slice 3D texture preserves admitted kind");
+        let survivor=texture.clone();
+        drop(texture);
+        drop(device);
+        // The last texture clone owns device lifetime through native destruction.
+        drop(survivor);
+        assert_eq!(Device::validation_messages(),0);
     }
 
     #[test]
