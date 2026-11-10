@@ -145,13 +145,14 @@ fn near(a: [u8; 4], b: [u8; 4], tolerance: i32) -> bool { a.iter().zip(b).all(|(
 /// Metal handles live on the process main thread, which libtest never gives a test: this target is
 /// `harness = false` and speaks just enough of libtest's protocol (`--list`, names to filter).
 fn main() {
-    let cases: [(&str, fn()); 6] = [
+    let cases: [(&str, fn()); 7] = [
         ("gpu_scene_golden_and_spot_checks", gpu_scene_golden_and_spot_checks),
         ("gpu_one_draw_per_layer", gpu_one_draw_per_layer),
         ("gpu_warm_frame_allocates_nothing", gpu_warm_frame_allocates_nothing),
         ("gpu_view_scale_and_rotation", gpu_view_scale_and_rotation),
         ("gpu_per_side_borders", gpu_per_side_borders),
         ("gpu_ramp_gradient", gpu_ramp_gradient),
+        ("gpu_retained_layer_writes_only_dirty_ranges", gpu_retained_layer_writes_only_dirty_ranges),
     ];
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--ignored") { return; }
@@ -355,4 +356,58 @@ fn gpu_ramp_gradient() {
         assert!(near(at(&pixels, 0.5, y), RED, 8) && near(at(&pixels, 99.5, y), BLUE, 8), "ends");
     }
     assert_eq!(at(&pixels, 110.0, 10.0), BG, "outside the rect");
+}
+
+fn gpu_retained_layer_writes_only_dirty_ranges() {
+    let Some(device) = open() else { return };
+    let queue = ok(be::create_queue(&device));
+    let mut painter = painter(&device);
+    ok(painter.set_view(1, View { offset: [8.0, 0.0], opacity: 0.5, ..View::IDENTITY }));
+    let (glyph, checker) = atlas_bytes();
+    upload_atlases(&mut painter, &glyph, &checker);
+    let target = target(&device);
+    let external = texture(&device, 4, 4, &[TextureUsage::TextureBinding, TextureUsage::TextureCopyDst]);
+    ok(be::write_texture(&external, None, Origin { x: 0, y: 0, z: 0 }, Extent { width: 4, height: 4, depth: 1 }, 16, &[255; 64]));
+    // A break at instance 14 (not a multiple of 4) puts the image on the external texture.
+    let breaks = [Break { at_instance: 14, texture: Some(&external) }];
+    let size = [W * SCALE, H * SCALE];
+    let mut instances = scene();
+    let count = instances.len() as u64;
+    let plain = |painter: &mut Painter, instances: &[Instance]| {
+        pass(&queue, &target, &mut |encoder| ok(painter.draw(encoder, size, SCALE as f32, instances, &breaks)));
+        ok(be::read_texture(&target, (W * SCALE * 4) as i64))
+    };
+    // (change, expected bytes written): frame 0 fills all three copies, the edit is replayed into the
+    // next two frames' copies, then the layer is quiet again.
+    let frames: [(Option<usize>, u64); 7] = [(None, 3 * count * 64), (None, 0), (Some(3), 64), (None, 64), (None, 64), (None, 0), (Some(7), 64)];
+    for (frame, (change, expected)) in frames.into_iter().enumerate() {
+        if let Some(i) = change { instances[i] = Instance::rect([4.0 + frame as f32, 76.0, 12.0 + frame as f32, 90.0], [frame as u8 * 30, 90, 10, 255]).view(1); }
+        let dirty: Vec<(u32, u32)> = change.map(|i| (i as u32, i as u32 + 1)).into_iter().collect();
+        painter.begin_frame();
+        let mut allocations = 0;
+        pass(&queue, &target, &mut |encoder| {
+            mem_sys::local_reset();
+            ok(painter.draw_retained(encoder, size, SCALE as f32, 0, &instances, &dirty, &breaks));
+            allocations = mem_sys::local_alloc_count();
+        });
+        assert_eq!(painter.retained_bytes(), expected, "frame {frame}: bytes written");
+        if frame >= 2 { assert_eq!(allocations, 0, "frame {frame}: warm retained draw allocates nothing"); }
+        let retained = ok(be::read_texture(&target, (W * SCALE * 4) as i64));
+        painter.begin_frame();
+        assert!(retained == plain(&mut painter, &instances), "frame {frame}: pixels equal plain draw");
+    }
+    // Growth past capacity and a shrink: pixels still equal plain draw.
+    let rows = |n: usize| (0..n).map(|i| Instance::rect([(i % 60) as f32, (i / 60) as f32 * 2.0, (i % 60) as f32 + 1.5, (i / 60) as f32 * 2.0 + 1.0], [(i * 7) as u8, 100, 200, 255])).collect::<Vec<_>>();
+    for (frame, n) in [300, 700, 90].into_iter().enumerate() {
+        let list = rows(n);
+        painter.begin_frame();
+        pass(&queue, &target, &mut |encoder| ok(painter.draw_retained(encoder, size, SCALE as f32, 1, &list, &[], &[])));
+        let retained = ok(be::read_texture(&target, (W * SCALE * 4) as i64));
+        painter.begin_frame();
+        assert!(retained == plain(&mut painter, &list), "layer resize {frame}: pixels equal plain draw");
+    }
+    pass(&queue, &target, &mut |encoder| assert!(painter.draw_retained(encoder, size, SCALE as f32, 0, &instances, &[(0, 99)], &[]).is_err(), "dirty range past the end is refused"));
+    for texture in [&target, &external] { ok(be::destroy_texture(texture)); }
+    drop(painter);
+    finish(device, queue);
 }

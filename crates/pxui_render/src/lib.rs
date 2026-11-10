@@ -153,6 +153,33 @@ pub struct Painter {
     views: [View; MAX_VIEWS],
     views_len: usize,
     draw_calls: u64,
+    layers: Vec<Option<Retained>>,
+    retained_bytes: u64,
+}
+
+/// Highest retained layer index + 1.
+pub const MAX_LAYERS: usize = 64;
+
+/// Persistent instance storage of one layer: `FRAMES` copies of `cap` instances in one host buffer.
+struct Retained {
+    buffer: Buffer,
+    ptr: *mut u8,
+    cap: usize,
+    /// Bytes between copies (256-aligned, so a copy can be bound at an offset).
+    stride: usize,
+    len: usize,
+    /// Per copy: the one `[start, end)` range of instances that differs from the layer's current content.
+    pending: [Option<(u32, u32)>; FRAMES],
+}
+
+fn union(a: Option<(u32, u32)>, b: (u32, u32)) -> Option<(u32, u32)> {
+    if b.0 >= b.1 { return a; }
+    Some(a.map_or(b, |a| (a.0.min(b.0), a.1.max(b.1))))
+}
+
+fn instance_bytes(instances: &[Instance]) -> &[u8] {
+    // SAFETY: Instance is repr(C) plain data with no padding (64 bytes, asserted in pxui::draw).
+    unsafe { std::slice::from_raw_parts(instances.as_ptr().cast::<u8>(), instances.len() * 64) }
 }
 
 fn host_ring(device: &Device, region_size: usize) -> Result<(Buffer, *mut u8), Error> {
@@ -221,7 +248,7 @@ impl Painter {
         Ok(Painter {
             device: device.clone(), pipeline, sampler, mask, color, depth: depth != DepthFormat::NoDepth,
             ring, ring_ptr, region_size, region: 0, cursor: 0, retired: Vec::new(),
-            views: [View::IDENTITY; MAX_VIEWS], views_len: 1, draw_calls: 0,
+            views: [View::IDENTITY; MAX_VIEWS], views_len: 1, draw_calls: 0, layers: Vec::new(), retained_bytes: 0,
         })
     }
 
@@ -246,6 +273,7 @@ impl Painter {
     pub fn begin_frame(&mut self) {
         self.region = (self.region + 1) % FRAMES;
         self.cursor = self.region * self.region_size;
+        self.retained_bytes = 0;
         for (buffer, frames) in &mut self.retired {
             *frames -= 1;
             if *frames == 0 { let _ = backend::destroy_buffer(buffer); }
@@ -255,6 +283,8 @@ impl Painter {
 
     /// Draw calls issued since the painter was made.
     pub fn draw_calls(&self) -> u64 { self.draw_calls }
+    /// Instance bytes [`Painter::draw_retained`] wrote into layer storage since [`Painter::begin_frame`].
+    pub fn retained_bytes(&self) -> u64 { self.retained_bytes }
     pub fn atlas(&self, atlas: AtlasKind) -> &Texture { if atlas == AtlasKind::Mask { &self.mask } else { &self.color } }
 
     /// Reserve `need` bytes in this frame's region, growing the ring (a new allocation) if it is full.
@@ -272,6 +302,30 @@ impl Painter {
         let at = self.cursor;
         self.cursor += need;
         Ok(at)
+    }
+
+    /// Globals at `start`: target size in points, the first-instance offset, then the view table.
+    fn write_header(&self, start: usize, size_px: [u32; 2], scale: f32, first: u32) {
+        let globals = [size_px[0] as f32 / scale, size_px[1] as f32 / scale, f32::from_bits(first), 0.0];
+        self.write(start, &as_bytes::<16>(&globals));
+        for (i, v) in self.views[..self.views_len].iter().enumerate() {
+            let record = [
+                v.offset[0], v.offset[1], v.opacity, v.scale, v.clip[0], v.clip[1], v.clip[2], v.clip[3],
+                v.transform[0], v.transform[1], v.transform[2], v.transform[3], v.pivot[0], v.pivot[1], 0.0, 0.0,
+            ];
+            self.write(start + 16 + i * VIEW_BYTES, &as_bytes::<VIEW_BYTES>(&record));
+        }
+    }
+
+    /// Pipeline, state, the globals at `start` and the fixed textures.
+    fn bind(&self, pass: &RenderEncoder, start: usize) -> Result<(), Error> {
+        backend::set_render_pipeline(pass, &self.pipeline)?;
+        backend::set_cull(pass, Cull::CullNone)?;
+        if self.depth { backend::set_depth_state(pass, None)?; }
+        backend::set_stage_buffer(pass, ShaderStage::Vertex, 1, Some(start as i64), &self.ring)?;
+        backend::set_stage_texture(pass, ShaderStage::Fragment, 2, &self.mask)?;
+        backend::set_stage_sampler(pass, ShaderStage::Fragment, 4, &self.sampler)?;
+        backend::set_stage_texture(pass, ShaderStage::Fragment, 5, &self.color)
     }
 
     fn write(&self, at: usize, bytes: &[u8]) {
@@ -303,28 +357,14 @@ impl Painter {
         let header = align(16 + self.views_len * VIEW_BYTES);
         let need = header + (0..=breaks.len()).map(|k| align(segment(k).0.len() * 64)).sum::<usize>();
         let start = self.reserve(need)?;
-        self.write(start, &as_bytes::<16>(&[size_px[0] as f32 / scale, size_px[1] as f32 / scale]));
-        for (i, v) in self.views[..self.views_len].iter().enumerate() {
-            let record = [
-                v.offset[0], v.offset[1], v.opacity, v.scale, v.clip[0], v.clip[1], v.clip[2], v.clip[3],
-                v.transform[0], v.transform[1], v.transform[2], v.transform[3], v.pivot[0], v.pivot[1], 0.0, 0.0,
-            ];
-            self.write(start + 16 + i * VIEW_BYTES, &as_bytes::<VIEW_BYTES>(&record));
-        }
-        backend::set_render_pipeline(pass, &self.pipeline)?;
-        backend::set_cull(pass, Cull::CullNone)?;
-        if self.depth { backend::set_depth_state(pass, None)?; }
-        backend::set_stage_buffer(pass, ShaderStage::Vertex, 1, Some(start as i64), &self.ring)?;
-        backend::set_stage_texture(pass, ShaderStage::Fragment, 2, &self.mask)?;
-        backend::set_stage_sampler(pass, ShaderStage::Fragment, 4, &self.sampler)?;
-        backend::set_stage_texture(pass, ShaderStage::Fragment, 5, &self.color)?;
+        self.write_header(start, size_px, scale, 0);
+        self.bind(pass, start)?;
         let mut at = start + header;
         let mut bound: Option<*const Texture> = None;
         for k in 0..=breaks.len() {
             let (slice, texture) = segment(k);
             if slice.is_empty() { continue; }
-            // SAFETY: Instance is repr(C) plain data with no padding (64 bytes, asserted above).
-            let bytes = unsafe { std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), slice.len() * 64) };
+            let bytes = instance_bytes(slice);
             self.write(at, bytes);
             let texture = texture.unwrap_or(&self.color);
             if bound != Some(texture as *const Texture) {
@@ -337,6 +377,97 @@ impl Painter {
             at += align(bytes.len());
         }
         backend::flush_host_range(&self.ring, start as i64, at - start)
+    }
+
+    /// Like [`Painter::draw`] for a layer whose instances mostly stay the same between frames. The
+    /// painter keeps `instances` in persistent per-`layer` GPU storage (`layer < MAX_LAYERS`) and writes
+    /// only `dirty` (`[start, end)` instance ranges changed since this layer's previous call). A first use,
+    /// a length change or growth beyond capacity makes everything dirty; an unchanged layer writes nothing.
+    /// Call it once per layer per frame, after [`Painter::begin_frame`]; `dirty` must be truthful, the
+    /// painter does not compare instances.
+    ///
+    /// Frames in flight: storage has `FRAMES` (3) copies and frame `n` writes and draws copy `n % 3`, which
+    /// the GPU finished with at least 3 frames ago. Every copy keeps the bounding range of the dirty ranges
+    /// it missed while another copy was written; its next frame writes that range (ranges the previous 2
+    /// frames dirtied are replayed), so a one-instance edit costs 64 bytes in each of 3 consecutive frames.
+    /// A fresh or grown allocation is not yet in flight: all copies are filled at once and the old buffer is
+    /// retired until its frames finish. Each segment after a [`Break`] gets its own globals record in the
+    /// ring because storage bindings need 256-byte offsets (see [`Painter::retained_bytes`]).
+    // ponytail: one bounding range per copy (scattered edits rewrite the span between them); a range list
+    // per copy if a layer is edited in two far-apart places every frame.
+    pub fn draw_retained(&mut self, pass: &RenderEncoder, size_px: [u32; 2], scale: f32, layer: u32, instances: &[Instance], dirty: &[(u32, u32)], breaks: &[Break]) -> Result<(), Error> {
+        const OP: &str = "Painter.draw_retained";
+        if !(scale > 0.0) || size_px[0] == 0 || size_px[1] == 0 { return Err(invalid(OP, "target size and scale must be positive")); }
+        if layer as usize >= MAX_LAYERS { return Err(invalid(OP, "layer must be below MAX_LAYERS")); }
+        let len = instances.len();
+        let mut previous = 0;
+        for at in breaks.iter().map(|b| b.at_instance as usize) {
+            if at < previous || at > len { return Err(invalid(OP, "breaks must be ascending and within the instances")); }
+            previous = at;
+        }
+        if dirty.iter().any(|d| d.0 > d.1 || d.1 as usize > len) { return Err(invalid(OP, "dirty ranges must be start <= end <= instance count")); }
+        let layer = layer as usize;
+        if self.layers.len() <= layer { self.layers.resize_with(layer + 1, || None); }
+        let fresh = self.layers[layer].as_ref().map_or(true, |s| len > s.cap);
+        let changed = fresh || self.layers[layer].as_ref().is_some_and(|s| s.len != len);
+        let check = |slice: &[Instance], views_len: usize| match slice.iter().find(|i| i.kind > kind::CURVE || i.view as usize >= views_len) {
+            Some(bad) => Err(invalid(OP, if bad.kind > kind::CURVE { "unknown instance kind" } else { "instance names an unset view" })),
+            None => Ok(()),
+        };
+        if changed { check(instances, self.views_len)?; } else { for d in dirty { check(&instances[d.0 as usize..d.1 as usize], self.views_len)?; } }
+        if fresh && len > 0 {
+            let cap = len.max(256).max(self.layers[layer].as_ref().map_or(0, |s| s.cap * 2));
+            let stride = align(cap * 64);
+            let descriptor = BufferDescriptor { label: Some("pxui_render.retained".into()), size: (stride * FRAMES) as i64, usage: vec![BufferUsage::Storage] };
+            let buffer = backend::create_host_buffer(&self.device, descriptor)?;
+            let ptr = backend::host_ptr(&buffer)?.0.as_ptr();
+            if let Some(old) = self.layers[layer].replace(Retained { buffer, ptr, cap, stride, len: 0, pending: [None; FRAMES] }) { self.retired.push((old.buffer, FRAMES)); }
+        }
+        let Some(store) = self.layers[layer].as_mut() else { return Ok(()) };
+        let copy = self.region;
+        if fresh {
+            // New storage is not in flight: fill every copy now.
+            for c in 0..FRAMES {
+                // SAFETY: copy `c` holds `cap >= len` instances at `c * stride` in the live host-mapped buffer.
+                unsafe { std::ptr::copy_nonoverlapping(instances.as_ptr().cast::<u8>(), store.ptr.add(c * store.stride), len * 64) }
+                backend::flush_host_range(&store.buffer, (c * store.stride) as i64, len * 64)?;
+            }
+            self.retained_bytes += (len * 64 * FRAMES) as u64;
+        } else {
+            let all = [(0, len as u32)];
+            for d in if changed { &all[..] } else { dirty } { for p in &mut store.pending { *p = union(*p, *d); } }
+            if let Some((lo, hi)) = store.pending[copy].take() {
+                let (at, n) = (store.stride * copy + lo as usize * 64, (hi - lo) as usize * 64);
+                // SAFETY: `hi <= len <= cap`, so the range lies inside copy `copy`.
+                unsafe { std::ptr::copy_nonoverlapping(instance_bytes(instances)[lo as usize * 64..].as_ptr(), store.ptr.add(at), n) }
+                backend::flush_host_range(&store.buffer, at as i64, n)?;
+                self.retained_bytes += n as u64;
+            }
+        }
+        store.len = len;
+        if len == 0 { return Ok(()); }
+        let header = align(16 + self.views_len * VIEW_BYTES);
+        let mut bound = None;
+        for k in 0..=breaks.len() {
+            let from = if k == 0 { 0 } else { breaks[k - 1].at_instance as usize };
+            let to = breaks.get(k).map_or(len, |b| b.at_instance as usize);
+            if from == to { continue; }
+            let start = self.reserve(header)?;
+            // Bind 4-instance (256-byte) aligned and skip the remainder with the globals' first-instance field.
+            self.write_header(start, size_px, scale, (from % 4) as u32);
+            backend::flush_host_range(&self.ring, start as i64, header)?;
+            self.bind(pass, start)?;
+            let texture = if k == 0 { None } else { breaks[k - 1].texture }.unwrap_or(&self.color);
+            if bound != Some(texture as *const Texture) {
+                backend::set_stage_texture(pass, ShaderStage::Fragment, 3, texture)?;
+                bound = Some(texture);
+            }
+            let store = self.layers[layer].as_ref().expect("layer was just stored");
+            backend::set_stage_buffer(pass, ShaderStage::Vertex, 0, Some((store.stride * copy + from / 4 * 256) as i64), &store.buffer)?;
+            backend::draw(pass, Primitive::TriangleList, 0, 6, Some((to - from) as i64))?;
+            self.draw_calls += 1;
+        }
+        Ok(())
     }
 }
 
@@ -354,5 +485,6 @@ impl Drop for Painter {
         let _ = backend::destroy_texture(&self.color);
         let _ = backend::destroy_buffer(&self.ring);
         for (buffer, _) in &self.retired { let _ = backend::destroy_buffer(buffer); }
+        for store in self.layers.iter().flatten() { let _ = backend::destroy_buffer(&store.buffer); }
     }
 }

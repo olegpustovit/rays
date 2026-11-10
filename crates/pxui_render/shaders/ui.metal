@@ -30,7 +30,7 @@ float2 half2x16(uint w) { return float2(as_type<half2>(w)); }
 vertex VOut ui_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                       device const Inst* inst [[buffer(0)]], device const float4* g [[buffer(1)]]) {
   VOut o;
-  Inst I = inst[iid];
+  Inst I = inst[iid + as_type<uint>(g[0].z)];  // g[0].z: first instance of this draw (retained layers)
   float2 c = CORNERS[vid];
   uint kind = (I.c.x >> 16) & 255u;
   uint flags = I.c.x >> 24;

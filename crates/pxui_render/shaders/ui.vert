@@ -24,7 +24,7 @@ const vec2 CORNERS[6] = vec2[6](vec2(0, 0), vec2(1, 0), vec2(0, 1), vec2(0, 1), 
 vec2 i16x2(uint w) { return vec2(float(int(w << 16) >> 16), float(int(w) >> 16)); }
 
 void main() {
-  Inst I = inst[gl_InstanceIndex];
+  Inst I = inst[gl_InstanceIndex + floatBitsToUint(g[0].z)];  // g[0].z: first instance of this draw (retained layers)
   vec2 c = CORNERS[gl_VertexIndex];
   uint kind = (I.c.x >> 16) & 255u;
   uint flags = I.c.x >> 24;
