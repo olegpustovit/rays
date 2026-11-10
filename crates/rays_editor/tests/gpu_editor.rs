@@ -1,5 +1,5 @@
 #![allow(clippy::all)]
-include!("editor_all.rs");
+include!("support/editor_all.rs");
 
 fn main() {
     run_split(false);
