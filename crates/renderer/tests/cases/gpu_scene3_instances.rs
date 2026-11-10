@@ -468,9 +468,7 @@ impl backend::DriverQueue for Observed<dyn backend::DriverQueue> {
     forward! {
         complete_through(epoch: i64) -> Result<(), E>;
         poll_through(epoch: i64) -> Result<bool, E>;
-        completed_epoch() -> i64;
         gpu_duration(epoch: i64) -> Option<f64>;
-        gpu_timing() -> backend::GpuTiming;
         destroy_queue() -> Result<(), E>;
     }
     fn begin_commands(&self) -> Result<Box<dyn backend::DriverCommands>, E> {

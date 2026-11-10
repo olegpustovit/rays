@@ -9,7 +9,7 @@ use ogpu_core::{
         DriverBatchDraw, DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame,
         DriverIcb, DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue,
         DriverRenderEncoder, DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, Floats,
-        GpuTiming, InstanceKind, Receipt, RenderPipelineOptions, ShaderStage, Token, Warm, Winding,
+        InstanceKind, Receipt, RenderPipelineOptions, ShaderStage, Token, Warm, Winding,
     },
     caps::Caps,
     error::{self, Error, ErrorKind},
@@ -1061,27 +1061,16 @@ fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<Box
     }))
 }
 
-/// Epochs the queue has submitted and seen complete.
+/// The native queue and the last epoch submitted to it.
 struct QueueState {
     queue: RefCell<Option<vk::Queue>>,
-    next_epoch: Cell<i64>,
-    completed: Cell<i64>,
+    submitted: Cell<i64>,
 }
 
 impl QueueState {
-    fn active(&self) -> i64 {
-        self.next_epoch.get() - 1 - self.completed.get()
-    }
     fn native(&self, op: &str) -> Result<Ref<'_, vk::Queue>, Error> {
         Ref::filter_map(self.queue.borrow(), Option::as_ref)
             .or_else(|_| Err(fail(op, ErrorKind::StaleHandle, "queue is destroyed")))
-    }
-    fn bound_epoch(&self, op: &str, epoch: i64) -> Result<i64, Error> {
-        if epoch <= 0 || epoch >= self.next_epoch.get() {
-            Err(fail(op, ErrorKind::InvalidArgument, "epoch was not submitted"))
-        } else {
-            Ok(epoch)
-        }
     }
 }
 
@@ -1101,13 +1090,9 @@ impl Cmds {
     }
 
     fn commit_with(&self, op: &str, submit: &mut dyn FnMut(&mut Option<vk::Commands>) -> Result<u64, vk::Error>) -> Result<Receipt, Error> {
-        if self.queue.active() >= 3 {
-            Err(fail(op, ErrorKind::Capacity, "frames-in-flight capacity reached"))
-        } else {
-            let epoch = submit(&mut self.commands.borrow_mut()).map_err(|failure| of_vk(op, failure))? as i64;
-            self.queue.next_epoch.set(epoch + 1);
-            Ok(Receipt { epoch })
-        }
+        let epoch = submit(&mut self.commands.borrow_mut()).map_err(|failure| of_vk(op, failure))? as i64;
+        self.queue.submitted.set(epoch);
+        Ok(Receipt { epoch })
     }
 }
 
@@ -1540,31 +1525,15 @@ struct NativeQueue {
 
 impl DriverQueue for NativeQueue {
     fn complete_through(&self, epoch: i64) -> Result<(), Error> {
-        let epoch = self.state.bound_epoch(QUEUE_OP, epoch)?;
-        if epoch <= self.state.completed.get() {
-            return Ok(());
-        }
-        self.state.native(QUEUE_OP)?.wait(epoch as u64).map_err(|failure| of_vk(QUEUE_OP, failure))?;
-        self.state.completed.set(epoch);
-        Ok(())
+        self.state.native(QUEUE_OP)?.wait(epoch as u64).map_err(|failure| of_vk(QUEUE_OP, failure))
     }
     fn poll_through(&self, epoch: i64) -> Result<bool, Error> {
-        let epoch = self.state.bound_epoch(QUEUE_OP, epoch)?;
-        if epoch <= self.state.completed.get() {
-            return Ok(true);
-        }
         let queue = self.state.native(QUEUE_OP)?;
         let done = queue.completed().map_err(|failure| of_vk(QUEUE_OP, failure))? as i64;
         if done >= epoch {
             queue.poll();
-            self.state.completed.set(epoch);
-            Ok(true)
-        } else {
-            Ok(false)
         }
-    }
-    fn completed_epoch(&self) -> i64 {
-        self.state.completed.get()
+        Ok(done >= epoch)
     }
     fn begin_commands(&self) -> Result<Box<dyn DriverCommands>, Error> {
         begin_commands(&self.dev, &self.state)
@@ -1572,12 +1541,9 @@ impl DriverQueue for NativeQueue {
     fn gpu_duration(&self, epoch: i64) -> Option<f64> {
         self.state.native(QUEUE_OP).ok().and_then(|queue| queue.duration(epoch as u64))
     }
-    fn gpu_timing(&self) -> GpuTiming {
-        GpuTiming { gpu_seconds: self.state.native(QUEUE_OP).map_or(0., |queue| queue.total_seconds()) }
-    }
     fn destroy_queue(&self) -> Result<(), Error> {
         let completed = self.state.native(QUEUE_OP)?.completed().map_or(-1, |done| done as i64);
-        if self.state.active() > 0 && completed < self.state.next_epoch.get() - 1 {
+        if completed < self.state.submitted.get() {
             Err(fail(QUEUE_OP, ErrorKind::InvalidState, "queue has commands in flight"))
         } else {
             self.dev.queues.set(self.dev.queues.get() - 1);
@@ -1593,7 +1559,7 @@ fn create_queue(dev: &Rc<Dev>) -> Result<Box<dyn DriverQueue>, Error> {
     let native = device.queue().map_err(|failure| of_vk(QUEUE_OP, failure))?;
     live_add(1);
     dev.queues.set(dev.queues.get() + 1);
-    let state = Rc::new(QueueState { queue: RefCell::new(Some(native)), next_epoch: Cell::new(1), completed: Cell::new(0) });
+    let state = Rc::new(QueueState { queue: RefCell::new(Some(native)), submitted: Cell::new(0) });
     Ok(Box::new(NativeQueue { dev: dev.clone(), state }))
 }
 

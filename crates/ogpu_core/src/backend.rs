@@ -244,12 +244,13 @@ pub trait DriverCommands {
 }
 
 pub trait DriverQueue {
+    /// Waits for `epoch`; the core guarantees it was submitted and is not yet complete.
     fn complete_through(&self, epoch: i64) -> Result<(), Error>;
+    /// Whether `epoch` (submitted, not yet complete) has finished, completing it when so.
     fn poll_through(&self, epoch: i64) -> Result<bool, Error>;
-    fn completed_epoch(&self) -> i64;
     fn begin_commands(&self) -> Result<Box<dyn DriverCommands>, Error>;
+    /// The GPU seconds of a just-completed epoch; asked once, when the core completes it.
     fn gpu_duration(&self, epoch: i64) -> Option<f64>;
-    fn gpu_timing(&self) -> GpuTiming;
     fn destroy_queue(&self) -> Result<(), Error>;
 }
 
@@ -359,7 +360,12 @@ pub struct Library(Rc<LibraryInner>);
 struct LibraryInner { raw: RefCell<Option<Box<dyn DriverLibrary>>>, device: Device, dead: Cell<bool>, pipelines: Cell<i64> }
 #[derive(Clone)]
 pub struct Queue(Rc<RefCell<QueueInner>>);
-struct QueueInner { raw: RefCell<Option<Box<dyn DriverQueue>>>, device: Device, dead: bool, completed_epoch: i64, gpu_timing: GpuTiming }
+/// The queue owns the epoch counters, the frames-in-flight cap and the GPU timing ring; a driver
+/// numbers its submissions and waits.
+struct QueueInner { raw: RefCell<Option<Box<dyn DriverQueue>>>, device: Device, dead: bool, submitted: i64, completed_epoch: i64, gpu_timing: GpuTiming, durations: Vec<(i64, f64)> }
+const MAX_FRAMES_IN_FLIGHT: i64 = 3;
+/// The last few completed epochs' GPU durations kept for `gpu_duration`.
+const DURATION_CAPACITY: usize = 16;
 #[derive(Clone)]
 pub struct Surface(Rc<SurfaceInner>);
 struct SurfaceInner { raw: RefCell<Option<Box<dyn DriverSurface>>>, device: Device, dead: Cell<bool>, frames: Cell<i64>, configuration: RefCell<surface::AdmittedConfiguration> }
@@ -689,7 +695,7 @@ pub fn create_queue(device: &Device) -> Result<Queue, Error> {
     live(OP, device)?;
     let raw = device.0.raw().create_queue()?;
     device.0.children.set(device.0.children.get() + 1);
-    let queue = Queue(Rc::new(RefCell::new(QueueInner { raw: RefCell::new(Some(raw)), device: device.clone(), dead: false, completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0.0 } })));
+    let queue = Queue(Rc::new(RefCell::new(QueueInner { raw: RefCell::new(Some(raw)), device: device.clone(), dead: false, submitted: 0, completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0.0 }, durations: Vec::new() })));
     device.0.queues.borrow_mut().push(Rc::downgrade(&queue.0));
     Ok(queue)
 }
@@ -736,19 +742,38 @@ pub fn read_texture_into(texture: &Texture, bytes_per_row: i64, destination: &mu
     let read = read.into_destination(destination)?;
     texture.resource.0.raw().read_texture_into(&read, destination)
 }
-pub fn complete_through(queue: &Queue, epoch: i64) -> Result<(), Error> {
+/// Validates `epoch` against what was submitted; `Ok(true)` when it is already complete.
+fn bound_epoch(operation: &str, queue: &Queue, epoch: i64) -> Result<bool, Error> {
     let q = queue.0.borrow();
-    if q.dead { Err(make_error("Backend.complete_through", ErrorKind::StaleHandle, "queue is destroyed")) }
-    else { q.raw().complete_through(epoch) }
+    if q.dead { Err(make_error(operation, ErrorKind::StaleHandle, "queue is destroyed")) }
+    else if epoch <= 0 || epoch > q.submitted { Err(make_error(operation, ErrorKind::InvalidArgument, "epoch was not submitted")) }
+    else { Ok(epoch <= q.completed_epoch) }
+}
+/// Records the epochs finished through `epoch` and their GPU durations.
+fn completed(queue: &Queue, epoch: i64) {
+    let mut q = queue.0.borrow_mut();
+    let found: Vec<(i64, f64)> = (q.completed_epoch + 1..=epoch).filter_map(|e| q.raw().gpu_duration(e).map(|d| (e, d))).collect();
+    q.completed_epoch = epoch;
+    for (e, d) in found {
+        q.gpu_timing.gpu_seconds += d;
+        q.durations.insert(0, (e, d));
+    }
+    q.durations.truncate(DURATION_CAPACITY);
+}
+pub fn complete_through(queue: &Queue, epoch: i64) -> Result<(), Error> {
+    if bound_epoch("Backend.complete_through", queue, epoch)? { return Err(make_error("Backend.complete_through", ErrorKind::InvalidArgument, "completion epoch is invalid")); }
+    let waited = queue.0.borrow().raw().complete_through(epoch);
+    if waited.is_ok() { completed(queue, epoch); }
+    waited
 }
 pub fn poll_through(queue: &Queue, epoch: i64) -> Result<bool, Error> {
-    let q = queue.0.borrow();
-    if q.dead { Err(make_error("Backend.poll_through", ErrorKind::StaleHandle, "queue is destroyed")) }
-    else { q.raw().poll_through(epoch) }
+    if bound_epoch("Backend.poll_through", queue, epoch)? { return Ok(true); }
+    let done = queue.0.borrow().raw().poll_through(epoch)?;
+    if done { completed(queue, epoch); }
+    Ok(done)
 }
 pub fn completed_epoch(queue: &Queue) -> i64 {
-    let q = queue.0.borrow();
-    if q.dead { q.completed_epoch } else { q.raw().completed_epoch() }
+    queue.0.borrow().completed_epoch
 }
 pub fn status(queue: &Queue, receipt: Receipt) -> Result<Status, Error> {
     if poll_through(queue, receipt.epoch)? { Ok(Status::Completed) } else { Ok(Status::Pending) }
@@ -824,12 +849,8 @@ pub fn destroy_pipeline(pipeline: &Pipeline) -> Result<(), Error> {
 pub fn destroy_queue(queue: &Queue) -> Result<(), Error> {
     let mut q = queue.0.borrow_mut();
     if q.dead { return Ok(()); }
-    let completed_epoch = q.raw().completed_epoch();
-    let gpu_timing = q.raw().gpu_timing();
     q.raw().destroy_queue()?;
     q.dead = true;
-    q.completed_epoch = completed_epoch;
-    q.gpu_timing = gpu_timing;
     q.raw.borrow_mut().take();
     let current = Rc::downgrade(&queue.0);
     q.device.0.queues.borrow_mut().retain(|entry| !Weak::ptr_eq(entry, &current));
@@ -1399,9 +1420,18 @@ pub fn end_blit(encoder: &BlitEncoder) -> Result<(), Error> {
     encoder.0.commands.0.state.set(CommandsState::Recording);
     Ok(())
 }
+/// A queue with `MAX_FRAMES_IN_FLIGHT` uncompleted submissions refuses another.
+fn admit(operation: &str, queue: &Queue) -> Result<(), Error> {
+    let q = queue.0.borrow();
+    if q.dead { Err(make_error(operation, ErrorKind::StaleHandle, "queue is destroyed")) }
+    else if q.submitted - q.completed_epoch >= MAX_FRAMES_IN_FLIGHT { Err(make_error(operation, ErrorKind::Capacity, "frames-in-flight capacity reached")) }
+    else { Ok(()) }
+}
 pub fn commit(commands: &Commands) -> Result<Receipt, Error> {
     recording("Backend.commit", commands)?;
+    admit("Backend.commit", &commands.0.queue)?;
     let receipt = commands.0.raw().commit()?;
+    commands.0.queue.0.borrow_mut().submitted = receipt.epoch;
     commands.0.state.set(CommandsState::Committed);
     commands.0.raw.borrow_mut().take();
     Ok(receipt)
@@ -1427,12 +1457,10 @@ pub fn abandon(commands: &Commands) -> Result<(), Error> {
     }
 }
 pub fn gpu_duration(queue: &Queue, receipt: Receipt) -> Option<f64> {
-    let q = queue.0.borrow();
-    if q.dead { None } else { q.raw().gpu_duration(receipt.epoch) }
+    queue.0.borrow().durations.iter().find(|(e, _)| *e == receipt.epoch).map(|(_, d)| *d)
 }
 pub fn gpu_timing(queue: &Queue) -> GpuTiming {
-    let q = queue.0.borrow();
-    if q.dead { q.gpu_timing } else { q.raw().gpu_timing() }
+    queue.0.borrow().gpu_timing
 }
 pub fn compute_use_accels(encoder: &ComputeEncoder, accels: &[Accel]) -> Result<(), Error> {
     const OP: &str = "Backend.compute_use_accels";
@@ -2041,7 +2069,9 @@ pub fn commit_present(commands: &Commands, source: &Texture, frame: &Frame) -> R
     const OP: &str = "Backend.commit_present";
     recording(OP, commands)?;
     validate_present(OP, &commands.0.queue, source, frame)?;
+    admit(OP, &commands.0.queue)?;
     let receipt = commands.0.raw().commit_present(source.resource.0.token, frame.0.raw.clone())?;
+    commands.0.queue.0.borrow_mut().submitted = receipt.epoch;
     commands.0.state.set(CommandsState::Committed);
     commands.0.raw.borrow_mut().take();
     frame.0.consumed.set(true);
@@ -2126,7 +2156,7 @@ mod ownership_tests {
         let device = device();
         let payload = || Payload { _owner: Rc::new(()), fail: Rc::new(Cell::new(false)) };
         let queue = Queue(Rc::new(RefCell::new(QueueInner {
-            raw: RefCell::new(None), device: device.clone(), dead: false, completed_epoch: 0,
+            raw: RefCell::new(None), device: device.clone(), dead: false, submitted: 0, durations: Vec::new(), completed_epoch: 0,
             gpu_timing: GpuTiming { gpu_seconds: 0. },
         })));
         let commands = Commands(Rc::new(CommandsInner {
@@ -2260,7 +2290,7 @@ mod ownership_tests {
         depth.texture_descriptor = admitted_test_texture(descriptor);
         assert_eq!(read_texture(&depth, 16).unwrap_err().kind, ErrorKind::Unsupported);
         let queue = Queue(Rc::new(RefCell::new(QueueInner { raw: RefCell::new(None), device: device.clone(), dead: false,
-            completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0. } })));
+            submitted: 0, durations: Vec::new(), completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0. } })));
         let commands = Commands(Rc::new(CommandsInner { raw: RefCell::new(None), queue,
             state: Cell::new(CommandsState::Recording), encoder: RefCell::new(None) }));
         let blit = BlitEncoder(Rc::new(BlitInner { raw: RefCell::new(None), commands: commands.clone(), open: Cell::new(false) }));
@@ -2340,7 +2370,7 @@ mod ownership_tests {
     fn rejected_acceleration_build_and_compaction_can_retry() {
         let device=device();
         let queue=Queue(Rc::new(RefCell::new(QueueInner {
-            raw: RefCell::new(None),device:device.clone(),dead:false,completed_epoch:0,gpu_timing:GpuTiming {gpu_seconds:0.},
+            raw: RefCell::new(None),device:device.clone(),dead:false,submitted: 0, durations: Vec::new(), completed_epoch: 0,gpu_timing:GpuTiming {gpu_seconds:0.},
         })));
         let commands=Commands(Rc::new(CommandsInner {
             raw:RefCell::new(None),queue,state:Cell::new(CommandsState::Encoding),encoder:RefCell::new(None),
@@ -2454,7 +2484,7 @@ mod ownership_tests {
     fn terminal_commands_and_encoders_release_callbacks_only_after_success() {
         let device = device();
         let queue = Queue(Rc::new(RefCell::new(QueueInner {
-            raw: RefCell::new(None), device, dead: false, completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0.0 },
+            raw: RefCell::new(None), device, dead: false, submitted: 0, durations: Vec::new(), completed_epoch: 0, gpu_timing: GpuTiming { gpu_seconds: 0.0 },
         })));
         let make_commands = |owner: Rc<()>, fail: Rc<Cell<bool>>| {
             Commands(Rc::new(CommandsInner {

@@ -21,7 +21,7 @@ use ogpu_core::{
         AccelSizes, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame, DriverIcb,
         DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue, DriverRenderEncoder, DriverRenderTarget,
-        DriverResource, DriverSampler, DriverSurface, GpuTiming, InstanceKind, OwnedReadback, Receipt,
+        DriverResource, DriverSampler, DriverSurface, InstanceKind, OwnedReadback, Receipt,
         RenderPipelineOptions, ShaderStage, Token,
     },
     caps::Caps,
@@ -609,30 +609,22 @@ struct MetalQueue {
 impl DriverQueue for MetalQueue {
     fn complete_through(&self, epoch: i64) -> Result<(), Error> {
         let waited = self.queue.wait_through(epoch);
-        surface::complete_presentations_through(&self.active, self.queue.completed_epoch());
+        surface::complete_presentations_through(&self.active, epoch);
         self.dev.commit_completed(waited)
     }
     fn poll_through(&self, epoch: i64) -> Result<bool, Error> {
-        let polled = self.queue.poll_through(epoch);
-        let completed = self.queue.completed_epoch();
-        if epoch > 0 && completed >= epoch {
-            surface::complete_presentations_through(&self.active, completed);
-            self.dev.commit_completed(polled.map(|_| ())).map(|()| true)
+        if self.queue.poll_through(epoch)? {
+            surface::complete_presentations_through(&self.active, epoch);
+            self.dev.commit_completed(Ok(())).map(|()| true)
         } else {
-            polled
+            Ok(false)
         }
-    }
-    fn completed_epoch(&self) -> i64 {
-        self.queue.completed_epoch()
     }
     fn begin_commands(&self) -> Result<Box<dyn DriverCommands>, Error> {
         begin_commands(&self.dev, &self.queue, &self.active)
     }
     fn gpu_duration(&self, epoch: i64) -> Option<f64> {
         self.queue.gpu_duration(epoch)
-    }
-    fn gpu_timing(&self) -> GpuTiming {
-        GpuTiming { gpu_seconds: queue::gpu_timing_for_device(&self.dev.device).duration_seconds }
     }
     fn destroy_queue(&self) -> Result<(), Error> {
         if !self.active.iter().all(|p| p.available()) {

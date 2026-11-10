@@ -92,6 +92,21 @@ fn queue_epochs_and_blit_replay() {
 }
 
 #[test]
+fn core_caps_frames_in_flight_and_times_completed_epochs() {
+    select();
+    let device = backend::create_device(virtual_impl::create_driver().unwrap()).unwrap();
+    let queue = backend::create_queue(&device).unwrap();
+    let submit = || backend::commit(&backend::begin_commands(&queue).unwrap());
+    let receipts: Vec<_> = (0..3).map(|_| submit().unwrap()).collect();
+    assert_eq!(submit().unwrap_err().kind, ErrorKind::Capacity, "a fourth frame in flight");
+    assert!(backend::complete_through(&queue, 9).is_err(), "epoch was never submitted");
+    backend::complete_through(&queue, receipts[1].epoch).unwrap();
+    assert_eq!(backend::completed_epoch(&queue), 2);
+    assert_eq!(backend::gpu_duration(&queue, receipts[0]), None, "the mock reports no GPU time");
+    submit().unwrap();
+}
+
+#[test]
 fn mapped_view_is_a_host_copy_synchronised_by_flush_and_invalidate() {
     select();
     let device = backend::create_device(virtual_impl::create_driver().unwrap()).unwrap();

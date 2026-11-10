@@ -7,7 +7,7 @@ use ogpu_core::{
         Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame, DriverIcb,
         DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue, DriverRenderEncoder,
-        DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, GpuTiming, InstanceKind,
+        DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, InstanceKind,
         OwnedReadback, Receipt, RenderPipelineOptions, ShaderStage, Warm,
     },
     caps,
@@ -372,15 +372,10 @@ fn create_depth_texture(c: &Shared) -> Result<MockDepthTexture, Error> {
 struct MockQueue {
     c: Shared,
     epoch: Rc<Cell<i64>>,
-    completed: Cell<i64>,
 }
 
 impl DriverQueue for MockQueue {
     fn complete_through(&self, e: i64) -> Result<(), Error> {
-        if e <= self.completed.get() || e > self.epoch.get() {
-            return Err(fail("Backend_mock.complete", ErrorKind::InvalidArgument, "epoch is invalid"));
-        }
-        self.completed.set(e);
         add(&self.c, format!("complete:{e}"));
         let injected = std::mem::replace(&mut self.c.borrow_mut().fail_completion, false);
         if injected {
@@ -390,15 +385,8 @@ impl DriverQueue for MockQueue {
         }
     }
     fn poll_through(&self, e: i64) -> Result<bool, Error> {
-        if e <= 0 {
-            Err(fail("Backend_mock.poll", ErrorKind::InvalidArgument, "epoch is invalid"))
-        } else if e <= self.completed.get() {
-            Ok(true)
-        } else {
-            self.complete_through(e).map(|()| true)
-        }
+        self.complete_through(e).map(|()| true)
     }
-    fn completed_epoch(&self) -> i64 { self.completed.get() }
     fn begin_commands(&self) -> Result<Box<dyn DriverCommands>, Error> {
         Ok(Box::new(MockCommands {
             id: token(&self.c),
@@ -408,7 +396,6 @@ impl DriverQueue for MockQueue {
         }))
     }
     fn gpu_duration(&self, _: i64) -> Option<f64> { None }
-    fn gpu_timing(&self) -> GpuTiming { GpuTiming { gpu_seconds: 0.0 } }
     fn destroy_queue(&self) -> Result<(), Error> {
         self.c.borrow_mut().queues -= 1;
         Ok(())
@@ -418,7 +405,7 @@ impl DriverQueue for MockQueue {
 fn create_queue(c: &Shared) -> Result<Box<dyn DriverQueue>, Error> {
     token(c);
     c.borrow_mut().queues += 1;
-    Ok(Box::new(MockQueue { c: c.clone(), epoch: Rc::new(Cell::new(0)), completed: Cell::new(0) }))
+    Ok(Box::new(MockQueue { c: c.clone(), epoch: Rc::new(Cell::new(0)) }))
 }
 
 struct MockCommands {

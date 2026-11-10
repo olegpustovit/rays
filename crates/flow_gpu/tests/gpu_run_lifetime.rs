@@ -81,9 +81,7 @@ impl b::DriverCommands for Faulty<dyn b::DriverCommands> {
 impl b::DriverQueue for Faulty<dyn b::DriverQueue> {
     forward! {
         poll_through(epoch: i64) -> Result<bool, E>;
-        completed_epoch() -> i64;
         gpu_duration(epoch: i64) -> Option<f64>;
-        gpu_timing() -> b::GpuTiming;
         destroy_queue() -> Result<(), E>;
     }
     fn complete_through(&self, epoch: i64) -> Result<(), E> {
