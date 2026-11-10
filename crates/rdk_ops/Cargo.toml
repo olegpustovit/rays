@@ -9,3 +9,6 @@ rdk_core = { path = "../rdk_core" }
 rdk_geom = { path = "../rdk_geom" }
 rays_math = { path = "../rays_math" }
 parallel = { path = "../parallel" }
+
+[lints]
+workspace = true

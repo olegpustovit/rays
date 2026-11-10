@@ -101,7 +101,7 @@ fn compose(params: &ComposeTransformParams) -> Result<mat4::T, error::T> {
         ("scale", params.scale),
         ("shear", params.shear),
         ("pivot", params.pivot),
-        ("pivot_rotation", params.pivot_rotation),
+        ("pivot_rotate", params.pivot_rotation),
     ];
     if let Some((name, _)) = vectors
         .iter()
@@ -1280,7 +1280,7 @@ mod tests {
         assert_eq!(failure_code(distance_from_geometry(&stopped, &source)), "cancelled");
     }
 
-    /// Remaining checks of `test_errors_cancellation_and_parallel` in lib/rdk/test_distance_from_geometry.ml
+    /// Remaining checks of `test_errors_cancellation_and_parallel` in
     /// (the curve as surface reference, and full grid/sphere one/four-domain exactness).
     #[test]
     fn distance_from_geometry_curve_reference_and_domain_exactness() {
@@ -1316,7 +1316,7 @@ mod tests {
         }
         let dense = points_geometry(&row);
         // The source's radius-5 UV sphere: 80 latitude bands, 120 segments,
-        // shared poles and the same triangle order as test_support/uv_sphere.ml.
+        // shared poles and the same triangle order as .
         let (rings, segments) = (80_i64, 120_i64);
         let mut sphere_points = vec![(0.0, 5.0, 0.0)];
         for ring in 1..rings {

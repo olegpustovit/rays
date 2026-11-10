@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(err_code(attribute_ops::blur_points(&cancelled, &g)), "cancelled");
     }
 
-    /// `lib/rdk/test_rdk_misc.ml`: the tuple planes of a float2 and a float4 attribute blur together.
+    /// ``: the tuple planes of a float2 and a float4 attribute blur together.
     #[test]
     fn tuple_attributes_blur_plane_by_plane() {
         let g = add_values(Point, "value", vec![0.0, 10.0, 0.0], &path(3));

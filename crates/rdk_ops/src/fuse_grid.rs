@@ -1108,7 +1108,7 @@ mod tests {
         let _ = topology::point_count;
     }
 
-    /// `check_target_parallel_exact` of lib/rdk/test_fuse.ml: target Fuse and
+    /// `check_target_parallel_exact` of : target Fuse and
     /// attribute/group rules give byte-identical geometry at one and four domains.
     #[test]
     fn target_fuse_and_rules_are_exact_across_domains() {
