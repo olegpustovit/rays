@@ -12,3 +12,6 @@ input = { path = "../input" }
 param = { path = "../param" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }
+
+[lints]
+workspace = true

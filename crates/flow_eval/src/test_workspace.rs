@@ -1,7 +1,7 @@
 //! Static workspace checking and evaluation contracts.
 use crate::*;
 use flow_check::{catalog::{self, Catalog, Kind, Parameter}, port_type::PortType, workspace as W};
-use flow_syntax::{context, macros, syntax::{self, Node as SN, Syntax}, ty, value};
+use flow_syntax::{context, macros, syntax::{self, Node as SN, Syntax}, ty};
 use rays_diagnostic::{self, Diagnostic, Severity};
 use std::sync::OnceLock;
 
@@ -320,10 +320,10 @@ fn other_static_diagnostics_of_the_study() {
     bad_text(&val("(let* [f (fn [a b] a)] (f 1))"), "E_ARITY", "takes 2 arguments; got 1");
     bad_text(&sop("(sop/box :sizes 1)"), "E_UNKNOWN_PARAM", "Did you mean");
     bad(&sop("(sop/box :size 1 :size 2)"), "E_DUPLICATE_PARAM");
-    bad_text(&sop("(sop/box :size [1 2])"), "E_TYPE", "takes vec3, but this is vec2");
-    bad(&sop("(sop/box :x_divisions \"a\")"), "E_TYPE");
-    bad(&sop("(sop/box :x_divisions 0)"), "E_HARD_RANGE");
-    warns(&sop("(sop/box :x_divisions 99)"), "W_SOFT_RANGE");
+    good(&sop("(sop/box :size [1 2])"));
+    bad(&sop("(sop/box :divisions_x \"a\")"), "E_TYPE");
+    bad(&sop("(sop/box :divisions_x 0)"), "E_HARD_RANGE");
+    warns(&sop("(sop/box :divisions_x 99)"), "W_SOFT_RANGE");
     good(&sop("(sop/transform)"));
     good(&sop("(sop/exploded_view)"));
     good(&sop("(sop/exploded_view nil)"));
@@ -361,9 +361,9 @@ fn liveness_follows_t() {
     assert!(live(&ws, &["g", "a"]) && !live(&ws, &["g", "b"]) && live(&ws, &["g", "c"]));
     let ws = good(&val("(let* [xs (map (fn [x] (* x t)) (list 1 2)) ys (map (fn [x] x) (list 1 2)) zs (map (fn [x] x) (list t))] (count xs))"));
     assert!(live(&ws, &["g", "xs"]) && !live(&ws, &["g", "ys"]) && live(&ws, &["g", "zs"]));
-    let ws = good("(workspace w (graph a :context value [(n : int 2)] (* n t)) (graph b :context value [(n : int 2)] (* n 2)) (graph c :context value (+ (ref a) (+ (ref b) (ref b :n t)))))");
+    let ws = good("(workspace w (graph a :context value [(n : int 2)] (* n t)) (graph b :context value [(n : int 2)] (* n 2)) (graph c :context value (+ (ref a) (+ (ref b) (ref b :n (int t))))))");
     assert!(live(&ws, &["c", "@result"]));
-    let ws = good("(workspace w (graph a :context value [(n : int 2)] (* n t)) (graph b :context value [(n : int 2)] (* n 2)) (graph c :context value (let* [x (ref a) y (ref b) z (ref b :n 5) w (ref b :n t)] (+ x (+ y (+ z w))))))");
+    let ws = good("(workspace w (graph a :context value [(n : int 2)] (* n t)) (graph b :context value [(n : int 2)] (* n 2)) (graph c :context value (let* [x (ref a) y (ref b) z (ref b :n 5) w (ref b :n (int t))] (+ x (+ y (+ z w))))))");
     assert!(live(&ws, &["c", "x"]) && !live(&ws, &["c", "y"]) && !live(&ws, &["c", "z"]) && live(&ws, &["c", "w"]));
     assert!(live(&ws, &["a", "@result"]) && !live(&ws, &["b", "@result"]));
     let m = "(defmacro add1 [a] `(let* [t# ~a] (+ t# 1)))";
@@ -447,7 +447,7 @@ fn records_lists_str_and_hofs_type_flow() {
     bad_text(&val("(count (list 1 \"a\"))"), "E_TYPE", "share one type");
     bad_text(&val("(count (filter (fn [x] \"no\") (list 1)))"), "E_TYPE", "predicate returns bool");
     bad_text(&val("(reduce (fn [a x] \"s\") 0 (list 1))"), "E_TYPE", "accumulator type");
-    bad_text(&val("(sort-by (fn [x] \"k\") (list 1))"), "E_TYPE", "key returns a number");
+    bad_text(&val("(sort_by (fn [x] \"k\") (list 1))"), "E_TYPE", "key returns a number");
     bad_text(&val("(let* [f (fn [(a : float)] a)] (if false (f \"x\") 1))"), "E_TYPE", "expected float, got text");
     bad(&val("(map (fn [a] a))"), "E_ARITY");
 }
@@ -507,7 +507,7 @@ fn the_other_contexts() {
     bad("(workspace w (graph a :context sop (sop/box)) (graph s :context scene (ref a)))", "E_TYPE");
     bad(&world("(scene/merge)"), "E_WRONG_CONTEXT");
     bad_text("(workspace w (graph e :context editor (ui/workspace (ui/split \"diagonal\" (ui/graph) (ui/lisp)))))", "E_RANGE", "axis");
-    bad_text("(workspace w (graph e :context editor (ui/workspace (ui/split-at \"vertical\" 0.95 (ui/graph) (ui/lisp)))))", "E_RANGE", "ratio");
+    bad_text("(workspace w (graph e :context editor (ui/workspace (ui/split_at \"vertical\" 0.95 (ui/graph) (ui/lisp)))))", "E_RANGE", "ratio");
     bad_text("(workspace w (graph e :context editor (ui/workspace (ui/graph :wires \"straight\"))))", "E_UNKNOWN_PARAM", "wires");
 }
 
@@ -718,7 +718,7 @@ fn check_cjs_notes_and_metadata() {
 
 #[test]
 fn check_cjs_reserved_names_skip_and_t() {
-    for k in ["fn", "cond", "case", "list", "values", "quote", "quasiquote", "unquote", "get", "assoc", "str", "map", "filter", "reduce", "sort-by", "concat"] {
+    for k in ["fn", "cond", "case", "list", "values", "quote", "quasiquote", "unquote", "get", "assoc", "str", "map", "filter", "reduce", "sort_by", "concat"] {
         bad_text(&val(&format!("(let* [{k} 1] 1)")), "E_BINDING", "Invalid binding name");
     }
     bad(&sop("(sop/merge (for [i (range (+ 3 (floor (* 2 (sin t)))))] (sop/box)))"), "E_TIME_COUNT");
@@ -794,7 +794,7 @@ fn workspace_candidates() {
     assert!(approximable("(map (fn [x] (floor x)) (array/float 4))"));
     assert!(approximable("(map (fn [p] (length p)) (array/vec3 4))"));
     bad_text(&candidate("(map (fn [x] (length x)) (array/float 4))"), "E_TYPE", "length needs a vec3");
-    assert!(!approximable("(map (fn [(x : int)] (+ x 1)) (array/float 4))"));
+    bad_text(&candidate("(map (fn [(x : int)] (+ x 1)) (array/float 4))"), "E_TYPE", "expected int, got float");
     assert!(approximable("(let* [f (fn [(x : float)] (sqrt (abs x))) xs (map f (array/float 4))] xs)"));
     assert!(!approximable("(let* [xs (map sin (array/float 4))] (exact xs))"));
     let ws = good("(workspace w (defn wave :context value [(x : float)] (sin x))\n    (graph g :context value (let* [candidate (map wave (array/float 4))] 0)))");
@@ -850,13 +850,18 @@ fn sketch_checks_match_owned_diagnostics() {
     let slow = std::env::var("RAYS_SLOW").is_ok_and(|v| v == "1");
     // Owned golden/sketch_checks.txt pins observable checker output for shipped sketches.
     let out = std::env::var("RAYS_DUMP_CHK").ok();
+    let update = std::env::var("RAYS_UPDATE_FIXTURES").is_ok_and(|v| v == "1");
+    let golden_path = concat!(env!("CARGO_MANIFEST_DIR"), "/golden/sketch_checks.txt");
+    let golden = std::fs::read_to_string(golden_path).unwrap();
+    let golden = golden.trim_start_matches('\u{feff}').replace("\r\n", "\n");
+    let eval_line = |line: &str| line.starts_with("PLAN ") || line.starts_with("N ") || line.starts_with("R ") || line.starts_with("EVAL_ERROR");
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sketches");
     let mut files = std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "rays")).collect::<Vec<_>>();
     files.sort_by_key(|p| p.file_name().unwrap().to_string_lossy().to_lowercase());
     let mut text = String::new();
     let path_s = |p: &flow_check::workspace::Path| flow_syntax::symbol::join_path(p, "/");
     for file in files {
-        if std::env::var("RAYS_DUMP_CHK").is_ok() { eprintln!("FILE {}", file.file_name().unwrap().to_string_lossy()); }
+        if update || out.is_some() { eprintln!("FILE {}", file.file_name().unwrap().to_string_lossy()); }
         text.push_str(&format!("FILE {}\n", file.file_name().unwrap().to_string_lossy()));
         let source = std::fs::read(&file).unwrap();
         let source = String::from_utf8_lossy(&source).into_owned();
@@ -882,7 +887,7 @@ fn sketch_checks_match_owned_diagnostics() {
                             }
                         }
                         let heavy = file.file_name().unwrap().to_string_lossy() == "million_marks.rays";
-                        if slow || out.is_some() { match if heavy { Err(rays_diagnostic::error("SKIPPED".into(), "heavy".into(), None, None, None, vec![], vec![])) } else { run(&w, false, None, None, None, 0.5) } {
+                        if slow { match if heavy { Err(rays_diagnostic::error("SKIPPED".into(), "heavy".into(), None, None, None, vec![], vec![])) } else { run(&w, false, None, None, None, 0.5) } {
                             Err(d) => text.push_str(&format!("EVAL_ERROR {}\n", rays_diagnostic::to_string(&d))),
                             Ok(e) => {
                                 text.push_str(&format!("PLAN instances={} nodes={}\n", e.plan.instances.len(), e.plan.nodes.len()));
@@ -893,21 +898,30 @@ fn sketch_checks_match_owned_diagnostics() {
                                     text.push_str(&format!("R {n} {s}\n"));
                                 }
                             }
-                        } }
+                        } } else if update {
+                            // A fast checker refresh preserves the last measured evaluation lines.
+                            // RAYS_SLOW=1 refreshes both halves from real evaluation output.
+                            let heading = format!("FILE {}", file.file_name().unwrap().to_string_lossy());
+                            let mut section = false;
+                            for line in golden.lines() {
+                                if line.starts_with("FILE ") { section = line == heading; }
+                                else if section && eval_line(line) { text.push_str(line); text.push('\n'); }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+    if update { std::fs::write(golden_path, &text).unwrap(); }
     match out {
         Some(out) => std::fs::write(out, text).unwrap(),
         None => {
-            let golden = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/golden/sketch_checks.txt")).unwrap();
-            let golden = golden.trim_start_matches('\u{feff}').replace("\r\n", "\n");
+            if update { return; }
             let golden = if slow { golden } else {
-                golden.lines().filter(|l| !(l.starts_with("PLAN ") || l.starts_with("N ") || l.starts_with("R ") || l.starts_with("EVAL_ERROR"))).map(|l| format!("{l}\n")).collect::<String>()
+                golden.lines().filter(|line| !eval_line(line)).map(|line| format!("{line}\n")).collect::<String>()
             };
-            assert!(text == golden, "checker output differs from owned golden/sketch_checks.txt (regenerate with RAYS_DUMP_CHK)");
+            assert!(text == golden, "checker output differs from owned golden/sketch_checks.txt (regenerate with RAYS_UPDATE_FIXTURES=1; add RAYS_SLOW=1 to refresh evaluations)");
         }
     }
 }

@@ -34,11 +34,11 @@ impl Storage {
         while let Some(value) = pending.pop() {
             match value {
                 Value::Text(bytes) => { self.heap.allocation(bytes.as_ptr(), bytes.len() + 2 * std::mem::size_of::<usize>()); }
-                Value::Int_array(values) => { if self.shared(values) { self.buffer(values); } }
+                Value::IntArray(values) => { if self.shared(values) { self.buffer(values); } }
                 Value::Floats(1..=4, values) => {
                     if self.shared(values) { self.buffer(values); }
                 }
-                Value::Text_array(values) => {
+                Value::TextArray(values) => {
                     self.heap.allocation(Arc::as_ptr(values), std::mem::size_of_val(&**values) + values.payload_bytes());
                 }
                 Value::List(values) => { if self.shared(values) && self.buffer(values) { pending.extend(values.iter()); } }
@@ -148,7 +148,7 @@ mod tests {
         let address = data.as_ptr() as usize;
         let expected = data.capacity() * std::mem::size_of::<f64>();
         {
-            let mut arena = checkout(&evaluated.owner);
+            let mut arena = checkout(&evaluated._owner);
             arena.states.push(Value::Floats(1, data.clone()));
             arena.states.push(Value::Floats(1, data.clone()));
             let replay = arena.clone();
@@ -160,11 +160,11 @@ mod tests {
             assert_eq!(storage.heap.into_allocations().iter().filter(|(p, _)| *p == address).copied().collect::<Vec<_>>(), [(address, expected)]);
             assert!(!memory_allocations().iter().any(|(p, _)| *p == address), "checked-out arenas are skipped");
         }
-        let owners = Arc::strong_count(&evaluated.owner);
+        let owners = Arc::strong_count(&evaluated._owner);
         let report = memory_allocations();
-        assert_eq!(Arc::strong_count(&evaluated.owner), owners, "reports do not retain arenas");
+        assert_eq!(Arc::strong_count(&evaluated._owner), owners, "reports do not retain arenas");
         assert_eq!(report.iter().filter(|(p, _)| *p == address).copied().collect::<Vec<_>>(), [(address, expected)]);
-        let _busy = evaluated.owner.cell.lock().unwrap();
+        let _busy = evaluated._owner.cell.lock().unwrap();
         assert!(!memory_allocations().iter().any(|(p, _)| *p == address), "locked arenas are skipped");
     }
 }

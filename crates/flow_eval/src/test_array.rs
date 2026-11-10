@@ -13,7 +13,7 @@ fn check(ctx: &str, body: &str) -> W::Workspace {
 fn g(e: &Eval) -> Value { e.results.iter().find(|(n, _)| n == "g").unwrap().1.clone() }
 fn value(ctx: &str, body: &str) -> Value { g(&run(&check(ctx, body), false, None, None, None, 0.).unwrap_or_else(|d| panic!("{body}: {}", rays_diagnostic::to_string(&d)))) }
 fn at(time: f64, frame: i64, dt: f64) -> input::Frame { let mut f = input::at_time(time); f.frame = frame; f.dt = dt; f }
-fn text_array(v: &[&str]) -> Value { Value::Text_array(Arc::new(v.iter().map(|s| s.as_bytes().to_vec()).collect())) }
+fn text_array(v: &[&str]) -> Value { Value::TextArray(Arc::new(v.iter().map(|s| s.as_bytes().to_vec()).collect())) }
 
 #[test]
 fn packed_arrays_through_the_evaluator() {
@@ -30,7 +30,7 @@ fn packed_arrays_through_the_evaluator() {
     assert_eq!(value("value", "(sum [x (array/float 10000 2)] x)"), Value::Float(20000.));
     assert_eq!(value("value", "(array/count (for [x (array/range 10000)] [x 0 0]))"), Value::Int(10000));
     assert_eq!(value("value", "(array/count (filter (fn [x] (> x 4999)) (array/range 10000)))"), Value::Int(5000));
-    assert_eq!(value("value", "(array/nth (sort-by (fn [x] (- 0 x)) (array/range 10)) 0)"), Value::Float(9.));
+    assert_eq!(value("value", "(array/nth (sort_by (fn [x] (- 0 x)) (array/range 10)) 0)"), Value::Float(9.));
     let w = check("value", "(let* [p (state [prev (array/float 10000)] (map (fn [x] (+ x (frame/dt))) prev))] (array/sum p))");
     let export = || { let s = create_state(); (0..5).map(|frame| g(&run(&w, false, None, Some(&s), Some(&at(frame as f64, frame, 0.125)), frame as f64).unwrap())).collect::<Vec<_>>() };
     assert_eq!(export(), vec![Value::Float(1250.), Value::Float(2500.), Value::Float(3750.), Value::Float(5000.), Value::Float(6250.)]);

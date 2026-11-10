@@ -1,5 +1,5 @@
 use crate::*;
-use crate::test_workspace::{base_catalog as _unused, show_ds};
+use crate::test_workspace::{show_ds};
 use flow_check::{catalog::Catalog, op::{self, Op}, workspace as W};
 use flow_syntax::{context, syntax, ty, value};
 use rays_diagnostic::Diagnostic;

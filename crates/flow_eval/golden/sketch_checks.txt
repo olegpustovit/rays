@@ -1146,17 +1146,17 @@ FILE gpu_sea.rays
 D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
 NONE
 FILE isogrid.rays
-D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean remesh?
+D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean sop/remesh?
 D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
 D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
 NONE
 FILE isogrid_city.rays
-D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean remesh?
+D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean sop/remesh?
 D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
 D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
 NONE
 FILE isogrid_drift.rays
-D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean remesh?
+D E_UNKNOWN_KIND: Unknown operator “sop/mesh”. Did you mean sop/remesh?
 D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
 D E_UNKNOWN_KIND: Unknown operator “sop/with_attr”.
 NONE
@@ -1488,12 +1488,17 @@ L def:palette-color/seed
 L def:palette-color/slot
 L def:scheme-hash/@result
 L def:scheme-hash/@result#0
+L def:scheme-hash/@result#0#0
+L def:scheme-hash/@result#0#0#0
 L def:split-level/@result
 L def:split-level/@result#0
 L def:split-level/@result#0/:i
 L def:split-level/@result#0/@result
-L def:split-level/@result#0/@result#0
-L def:split-level/@result#0/@result#0#1
+L def:split-level/@result#0/@result#1
+L def:split-level/@result#0/@result#1#0
+L def:split-level/@result#0/@result#1#0#0
+L def:split-level/@result#0/@result#1#0#0#1
+L def:split-level/@result#0/@result#1#1
 L def:split-level/@result#1
 L def:split-level/@result#1#0
 L def:split-level/kept
@@ -1685,8 +1690,11 @@ P def:split-level/@result candidate def:split-level/@result
 P def:split-level/@result#0 candidate def:split-level/@result
 P def:split-level/@result#0/:i candidate def:split-level/kept
 P def:split-level/@result#0/@result candidate def:split-level/@result,def:split-level/kept,def:split-level/raw
-P def:split-level/@result#0/@result#0 candidate def:split-level/kept
-P def:split-level/@result#0/@result#0#1 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#0 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#0#0 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#0#0#1 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#1 candidate def:split-level/kept
 P def:split-level/@result#1 candidate def:split-level/kept
 P def:split-level/@result#1#0 candidate def:split-level/kept
 P def:split-level/kept refused 1
@@ -1888,8 +1896,11 @@ L def:split-level/@result
 L def:split-level/@result#0
 L def:split-level/@result#0/:i
 L def:split-level/@result#0/@result
-L def:split-level/@result#0/@result#0
-L def:split-level/@result#0/@result#0#1
+L def:split-level/@result#0/@result#1
+L def:split-level/@result#0/@result#1#0
+L def:split-level/@result#0/@result#1#0#0
+L def:split-level/@result#0/@result#1#0#0#1
+L def:split-level/@result#0/@result#1#1
 L def:split-level/@result#1
 L def:split-level/@result#1#0
 L def:split-level/kept
@@ -2225,8 +2236,11 @@ P def:split-level/@result candidate def:split-level/@result
 P def:split-level/@result#0 candidate def:split-level/@result
 P def:split-level/@result#0/:i candidate def:split-level/kept
 P def:split-level/@result#0/@result candidate def:split-level/@result,def:split-level/kept,def:split-level/raw
-P def:split-level/@result#0/@result#0 candidate def:split-level/kept
-P def:split-level/@result#0/@result#0#1 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#0 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#0#0 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#0#0#1 candidate def:split-level/kept
+P def:split-level/@result#0/@result#1#1 candidate def:split-level/kept
 P def:split-level/@result#1 candidate def:split-level/kept
 P def:split-level/@result#1#0 candidate def:split-level/kept
 P def:split-level/kept refused 1
@@ -2829,7 +2843,7 @@ P garland/size candidate garland/sizes
 P garland/size/@result candidate garland/sizes
 P garland/sizes refused 1
 P garland/total refused 1
-PLAN instances=1 nodes=40
+PLAN instances=1 nodes=43
 N 0 sop/uv_sphere garland/bead/@result
 N 1 sop/uv_sphere garland/bead/@result
 N 2 sop/uv_sphere garland/bead/@result
@@ -2838,38 +2852,41 @@ N 4 sop/uv_sphere garland/bead/@result
 N 5 sop/uv_sphere garland/bead/@result
 N 6 sop/uv_sphere garland/bead/@result
 N 7 sop/uv_sphere garland/bead/@result
-N 8 sop/uv_sphere garland/leaf/@result
-N 9 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 10 sop/uv_sphere garland/leaf/@result
-N 11 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 12 sop/uv_sphere garland/leaf/@result
-N 13 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 14 sop/uv_sphere garland/leaf/@result
-N 15 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 16 sop/uv_sphere garland/leaf/@result
-N 17 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 18 sop/uv_sphere garland/leaf/@result
-N 19 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 20 sop/uv_sphere garland/leaf/@result
-N 21 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 22 sop/uv_sphere garland/leaf/@result
-N 23 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 24 sop/uv_sphere garland/leaf/@result
-N 25 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 26 sop/uv_sphere garland/leaf/@result
-N 27 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 28 sop/uv_sphere garland/leaf/@result
-N 29 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 30 sop/uv_sphere garland/leaf/@result
-N 31 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 32 sop/uv_sphere garland/leaf/@result
-N 33 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 34 sop/uv_sphere garland/leaf/@result
-N 35 sop/transform garland/wreath/def:ring/@result#0#0/@result
-N 36 sop/merge garland/wreath/def:ring/@result
-N 37 sop/uv_sphere garland/heart
-N 38 sop/merge garland/result/input#1
-N 39 sop/merge garland/result
+N 8 sop/uv_sphere garland/bead/@result
+N 9 sop/uv_sphere garland/bead/@result
+N 10 sop/uv_sphere garland/bead/@result
+N 11 sop/uv_sphere garland/leaf/@result
+N 12 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 13 sop/uv_sphere garland/leaf/@result
+N 14 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 15 sop/uv_sphere garland/leaf/@result
+N 16 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 17 sop/uv_sphere garland/leaf/@result
+N 18 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 19 sop/uv_sphere garland/leaf/@result
+N 20 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 21 sop/uv_sphere garland/leaf/@result
+N 22 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 23 sop/uv_sphere garland/leaf/@result
+N 24 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 25 sop/uv_sphere garland/leaf/@result
+N 26 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 27 sop/uv_sphere garland/leaf/@result
+N 28 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 29 sop/uv_sphere garland/leaf/@result
+N 30 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 31 sop/uv_sphere garland/leaf/@result
+N 32 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 33 sop/uv_sphere garland/leaf/@result
+N 34 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 35 sop/uv_sphere garland/leaf/@result
+N 36 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 37 sop/uv_sphere garland/leaf/@result
+N 38 sop/transform garland/wreath/def:ring/@result#0#0/@result
+N 39 sop/merge garland/wreath/def:ring/@result
+N 40 sop/uv_sphere garland/heart
+N 41 sop/merge garland/result/input#1
+N 42 sop/merge garland/result
 R garland geometry
 FILE ws_kit.rays
 W kit graphs=1 defs=1 macros=0 nodes=0

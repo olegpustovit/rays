@@ -35,7 +35,7 @@ fn frame_reads_force_against_the_live_frame() {
     live.pointer = (12., 37.);
     live.buttons = vec![MouseButton::LeftButton];
     live.keys = vec![Key::Space];
-    live.events = vec![Event::Key_pressed(Key::Space), Event::Pointer_pressed(MouseButton::LeftButton, (12., 37.))];
+    live.events = vec![Event::KeyPressed(Key::Space), Event::PointerPressed(MouseButton::LeftButton, (12., 37.))];
     let f = |n: &str, v: Value| (n.into(), v);
     let expected = Value::Record(vec![f("x", Value::Float(12.)), f("y", Value::Float(37.)), f("dt", Value::Float(0.125)), f("i", Value::Int(24)), f("w", Value::Int(800)), f("h", Value::Int(600)), f("mouse", Value::Bool(true)), f("right", Value::Bool(false)), f("key", Value::Bool(true)), f("time", Value::Float(3.))].into());
     assert_eq!(force(&value, &live, None), Ok(expected.clone()));
@@ -60,14 +60,14 @@ fn frame_reads_force_against_the_live_frame() {
     let input_v = result_g(&r#static(&check("(let* [f (frame/input)] (count f.events))"), true, None).unwrap());
     assert_eq!(force(&input_v, &live, None), Ok(Value::Int(2)));
     let input_v = result_g(&r#static(&check("(let* [event (nth (get (frame/input) :events) 0)] (if (equal? event.kind \"dialog-opened\") event.id 0))"), false, None).unwrap());
-    let mut dialog = live.clone(); dialog.events = vec![Event::Dialog_opened(27)];
+    let mut dialog = live.clone(); dialog.events = vec![Event::DialogOpened(27)];
     assert_eq!(force(&input_v, &dialog, None), Ok(Value::Int(27)));
     let snapshot = r#static(&check("(let* [f (frame/input)\n      r {:keys f.keys :buttons f.buttons\n         :key (get (nth f.events 0) :key)\n         :button (get (nth f.events 1) :button)\n         :phase (get (nth f.events 2) :phase)}] 0.0)"), true, None).unwrap();
     let snapshot = recorded(&snapshot, &["g", "r"]);
     let mut live = live;
     live.keys = vec![Key::Space, Key::Unknown(4242)];
     live.buttons = vec![MouseButton::LeftButton, MouseButton::MouseX2];
-    live.events = vec![Event::Key_pressed(Key::Unknown(4242)), Event::Pointer_cancelled(MouseButton::MouseX2), Event::Trackpad_scrolled { delta: (0., -12.), phase: ScrollPhase::Momentum, time: 3.5 }];
+    live.events = vec![Event::KeyPressed(Key::Unknown(4242)), Event::PointerCancelled(MouseButton::MouseX2), Event::TrackpadScrolled { delta: (0., -12.), phase: ScrollPhase::Momentum, time: 3.5 }];
     let t = |s: &str| Value::Text(s.as_bytes().into());
     assert_eq!(force(&snapshot, &live, None), Ok(Value::Record(vec![
         f("keys", Value::List(Arc::new(vec![t("space"), t("unknown:4242")]))),

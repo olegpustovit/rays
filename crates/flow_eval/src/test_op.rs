@@ -9,7 +9,7 @@ use flow_syntax::{context, syntax, ty};
 use std::cell::RefCell;
 
 fn t(s: &str) -> Value { Value::Text(s.as_bytes().into()) }
-fn ia(v: &[i64]) -> Value { Value::Int_array(Arc::new(v.to_vec())) }
+fn ia(v: &[i64]) -> Value { Value::IntArray(Arc::new(v.to_vec())) }
 fn fa(v: &[f64]) -> Value { Value::Floats(1, Arc::new(v.to_vec())) }
 fn na(n: &str, v: Value) -> (Symbol, Value) { (n.into(), v) }
 const MAX_INT: i64 = i64::MAX;
@@ -24,7 +24,7 @@ fn nominal(ty: &Ty) -> Option<Value> {
         "settings" => value::struct_value("settings/config", ty::settings(), vec![].into()),
         "editor" => value::struct_value("ui/workspace", ty::editor(), vec![].into()),
         "material" => value::struct_value("material/standard", ty::material(), vec![].into()),
-        "geometry" => Value::No_geo,
+        "geometry" => Value::NoGeo,
         _ => return None,
     })
 }
@@ -65,7 +65,7 @@ fn check(o: &Op, args: &[(Symbol, Value)]) -> Value {
     if o.name == "error" {
         match (o.body)(&input::at_time(0.), &no_node, args) {
             Ok(_) => panic!("error returned"),
-            Err(d) => { assert!(d.code == "a" && d.message == "a"); return Value::No_geo; }
+            Err(d) => { assert!(d.code == "a" && d.message == "a"); return Value::NoGeo; }
         }
     }
     let made = RefCell::new(0i64);
@@ -148,7 +148,7 @@ fn every_operator_shape_and_arithmetic() {
 
 #[test]
 fn raster_stage_intrinsics_refuse_cpu_values() {
-    for name in ["gpu/fwidth", "gpu/float-bits", "gpu/sample", "gpu/sample-level", "gpu/read", "gpu/texture-size", "gpu/instance-id", "gpu/front-facing", "gpu/depth", "gpu/fragment-x", "gpu/fragment-y", "gpu/trace-triangles", "gpu/trace-any", "gpu/trace-curves", "gpu/trace-curves-any", "gpu/scene-vertex", "gpu/scene-vertex-end", "gpu/scene-instance", "gpu/scene-sphere", "gpu/scene-strand", "gpu/scene-spheres", "gpu/scene-strands", "gpu/group-scan", "gpu/store", "gpu/store-int"] {
+    for name in ["gpu/fwidth", "gpu/float_bits", "gpu/sample", "gpu/sample_level", "gpu/read", "gpu/texture_size", "gpu/instance_id", "gpu/front_facing", "gpu/depth", "gpu/fragment_x", "gpu/fragment_y", "gpu/trace_triangles", "gpu/trace_any", "gpu/trace_curves", "gpu/trace_curves_any", "gpu/scene_vertex", "gpu/scene_vertex_end", "gpu/scene_instance", "gpu/scene_sphere", "gpu/scene_strand", "gpu/scene_spheres", "gpu/scene_strands", "gpu/group_scan", "gpu/store", "gpu/store_int"] {
         let o = find(name, context::value());
         let args = o.signature.pos.iter().map(|(n, ty)| (n.clone(), sample(n, ty))).collect::<Vec<_>>();
         match (o.body)(&input::at_time(0.), &no_node, &args) { Err(d) => assert_eq!(d.code, "E_GPU_STAGE", "{name}"), Ok(_) => panic!("{name}") }
@@ -167,7 +167,7 @@ fn contexts_checks_and_custom_kinds() {
     rejects("ui/graph", vec![na("view", t("invalid"))]);
     rejects("ui/lisp", vec![na("tab", t("invalid"))]);
     rejects("ui/split", vec![na("axis", t("invalid"))]);
-    rejects("ui/split-at", vec![na("ratio", Value::Float(1.))]);
+    rejects("ui/split_at", vec![na("ratio", Value::Float(1.))]);
     rejects("ui/tile", vec![]);
     rejects("ui/switch", vec![na("panel", sample("", &ty::panel())), na("active", Value::Int(1))]);
     (find("ui/graph", context::editor()).check)(&[na("view", Value::Residual(ResidualId(0, 0)))]).unwrap();
@@ -190,7 +190,7 @@ fn contexts_checks_and_custom_kinds() {
     let (ws, ds) = wcheck(&[], &c2, "(workspace w (graph g :context scene (first (map root (list nil)))))");
     assert!(ds.is_empty());
     let evaluated = run0(&ws.unwrap());
-    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![na("child", Value::No_geo)].into()));
+    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![na("child", Value::NoGeo)].into()));
     assert_eq!(evaluated.plan.nodes.len(), 0);
 }
 
@@ -488,7 +488,7 @@ fn whole_array_primitives() {
     assert_eq!(apply("array/grade", &[na("keys", keys.clone()), na("descending", Value::Bool(false))]), ia(&[1, 0, 2]));
     assert_eq!(apply("array/grade", &[na("keys", keys), na("descending", Value::Bool(true))]), ia(&[0, 2, 1]));
     assert_eq!(apply("array/index_of", &[na("keys", ia(&[9007199254740993, 2, 2])), na("queries", ia(&[2, 7, 9007199254740993, 2, 7]))]), ia(&[1, -1, 0, 1, -1]));
-    let ta = |v: &[&[u8]]| Value::Text_array(Arc::new(v.iter().map(|s| s.to_vec()).collect()));
+    let ta = |v: &[&[u8]]| Value::TextArray(Arc::new(v.iter().map(|s| s.to_vec()).collect()));
     assert_eq!(apply("array/index_of", &[na("keys", ta(&[b"\xff\x00", "é".as_bytes(), "é".as_bytes()])), na("queries", ta(&["é".as_bytes(), b"missing", b"\xff\x00"]))]), ia(&[1, -1, 0]));
     assert_eq!(apply("array/compact", &[na("mask", ia(&[1, 0, 1]))]), ia(&[0, 2]));
     assert_eq!(apply("float/next_after", &[na("x", Value::Float(1.)), na("y", Value::Float(2.))]), Value::Float(f64::from_bits(1f64.to_bits() + 1)));
@@ -521,7 +521,7 @@ fn whole_array_primitives() {
         let before = format!("{args:?}");
         let result = apply(name, &args);
         match result {
-            Value::Int_array(mut a) => { if !a.is_empty() { Arc::make_mut(&mut a)[0] = 999; } }
+            Value::IntArray(mut a) => { if !a.is_empty() { Arc::make_mut(&mut a)[0] = 999; } }
             Value::Floats(1, mut a) => { if !a.is_empty() { Arc::make_mut(&mut a)[0] = 999.; } }
             _ => panic!(),
         }

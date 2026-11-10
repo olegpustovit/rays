@@ -2,7 +2,7 @@ use std::sync::Arc;
 use crate::*;
 use crate::test_workspace::{base_catalog, bad_text, good, parse, run_in, run_src, show_ds, errors};
 use flow_check::{op, workspace as W};
-use flow_syntax::{syntax::{self, Syntax}, ty, value};
+use flow_syntax::{syntax::Syntax, ty, value};
 use std::collections::{BTreeSet, HashSet};
 use rays_diagnostic::Diagnostic;
 
@@ -219,7 +219,7 @@ fn function_values() {
     assert!(same(&bound(&value("(let* [z (map (fn [a b c] (+ a (+ b c))) (list 1 2 3) (list 10 20) (list 100 200 300))] 1)"), "z"), &ints(&[111, 222])));
     assert!(same(&bound(&value("(let* [z (filter (fn [x] (> x 1)) (list 1 2 3))] 1)"), "z"), &ints(&[2, 3])));
     let l = |a: i64, b: i64| Value::List(Arc::new(vec![Value::Int(a), Value::Int(b)]));
-    assert!(same(&bound(&value("(let* [z (sort-by (fn [p] (first p)) (list (list 2 0) (list 1 1) (list 2 2) (list 1 3)))] 1)"), "z"), &Value::List(Arc::new(vec![l(1, 1), l(1, 3), l(2, 0), l(2, 2)]))));
+    assert!(same(&bound(&value("(let* [z (sort_by (fn [p] (first p)) (list (list 2 0) (list 1 1) (list 2 2) (list 1 3)))] 1)"), "z"), &Value::List(Arc::new(vec![l(1, 1), l(1, 3), l(2, 0), l(2, 2)]))));
     let src = sop("(let* [z (map (fn [x] (sop/box :size x)) (list))] (sop/merge z))");
     assert!(same(&bound(&src, "z"), &ints(&[])));
     assert_eq!(ty_at(&check(&src), &["g", "z"]), "list:geometry");
@@ -312,7 +312,7 @@ fn cond_case_str_macros_bypass() {
 #[test]
 fn round_trip_of_every_new_construct() {
     let radial = "(defmacro radial [i n body] `(sop/merge (for [~i (range ~n)] (sop/transform ~body :rotate [0 (* (/ ~i ~n) 6.2832) 0]))))";
-    let all = format!("(workspace kitchen\n  ; macros\n  {radial}\n  (defmacro all [& xs] `(sop/merge ~@xs))\n  (defmacro add1 [a] `(let* [t# ~a] (+ t# 1)))\n  (defmacro twice [x] `(+ ~x ~x))\n  (defn ring :context sop [(n : int 8) (make : fn) (opts : {{:scale float :tags (list text)}} {{:scale 1.0 :tags (list \"a\")}})]\n    (sop/transform (sop/merge (map make (range n))) :uniform_scale opts.scale))\n  (graph g :context sop [(seed : int 3)]\n    (let* [; a local function\n           petal (fn [(i : int) [w h]]\n                   (sop/transform (sop/box :size [w h 0.1]) :rotate [0 0 (* i 0.5)]))\n           sizes (map (fn [k] (list (+ 0.1 (* k 0.01)) 0.5)) (range 12))\n           petals (map petal (range 12) sizes)\n           {{:keys [a b]}} {{:a 1 :b (twice 2)}}\n           [x y z] [a b 3]\n           kind (cond (< a 1) \"small\"\n                      (< a 5) \"medium\"\n                      :else \"large\")\n           steps (case seed 1 4 2 8 :else 12)\n           order (sort-by (fn [p] (- 0 (nth p 0))) sizes)\n           kept (filter (fn [p] (> (first p) 0.12)) (concat (take 3 sizes) (drop 9 sizes) (reverse (rest sizes))))\n           total (reduce + 0 (map (fn [p] (last p)) kept))\n           name (str \"floor_\" (add1 steps) \"_\" kind)\n           state (fold [{{:keys [n acc]}} (values :n 0 :acc 1.0)]\n                       [i (range steps)]\n                   (assoc {{:n (+ n 1) :acc (* acc 0.9)}} :acc (get {{:acc (* acc 0.9)}} :acc)))\n           ring2 (radial k 6 (sop/box :size (+ 0.1 (* k 0.01))))\n           faded ^:bypass (sop/subdivide ring2 :iterations 2)\n           shapes (all (sop/merge petals) faded (ring :n 3 :make (fn [i] (sop/box :size 0.05))) (sop/group_bounds (sop/box) :name name))\n           ; unused but checked\n           spare (count (list))]\n      ; the result\n      (sop/transform shapes :uniform_scale (* state.acc (* x (+ y (+ z total)))))))\n  ; trailing\n  )");
+    let all = format!("(workspace kitchen\n  ; macros\n  {radial}\n  (defmacro all [& xs] `(sop/merge ~@xs))\n  (defmacro add1 [a] `(let* [t# ~a] (+ t# 1)))\n  (defmacro twice [x] `(+ ~x ~x))\n  (defn ring :context sop [(n : int 8) (make : fn) (opts : {{:scale float :tags (list text)}} {{:scale 1.0 :tags (list \"a\")}})]\n    (sop/transform (sop/merge (map make (range n))) :uniform_scale opts.scale))\n  (graph g :context sop [(seed : int 3)]\n    (let* [; a local function\n           petal (fn [(i : int) [w h]]\n                   (sop/transform (sop/box :size [w h 0.1]) :rotate [0 0 (* i 0.5)]))\n           sizes (map (fn [k] (list (+ 0.1 (* k 0.01)) 0.5)) (range 12))\n           petals (map petal (range 12) sizes)\n           {{:keys [a b]}} {{:a 1 :b (twice 2)}}\n           [x y z] [a b 3]\n           kind (cond (< a 1) \"small\"\n                      (< a 5) \"medium\"\n                      :else \"large\")\n           steps (case seed 1 4 2 8 :else 12)\n           order (sort_by (fn [p] (- 0 (nth p 0))) sizes)\n           kept (filter (fn [p] (> (first p) 0.12)) (concat (take 3 sizes) (drop 9 sizes) (reverse (rest sizes))))\n           total (reduce + 0 (map (fn [p] (last p)) kept))\n           name (str \"floor_\" (add1 steps) \"_\" kind)\n           state (fold [{{:keys [n acc]}} (values :n 0 :acc 1.0)]\n                       [i (range steps)]\n                   (assoc {{:n (+ n 1) :acc (* acc 0.9)}} :acc (get {{:acc (* acc 0.9)}} :acc)))\n           ring2 (radial k 6 (sop/box :size (+ 0.1 (* k 0.01))))\n           faded ^:bypass (sop/subdivide ring2 :iterations 2)\n           shapes (all (sop/merge petals) faded (ring :n 3 :make (fn [i] (sop/box :size 0.05))) (sop/group_bounds (sop/box) :name name))\n           ; unused but checked\n           spare (count (list))]\n      ; the result\n      (sop/transform shapes :uniform_scale (* state.acc (* x (+ y (+ z total)))))))\n  ; trailing\n  )");
     let printed = flow_syntax::lisp::print(&parse(&all)).unwrap().0;
     assert_eq!(flow_syntax::lisp::print(&parse(&printed)).unwrap().0, printed);
     let ws = check(&printed);
@@ -490,8 +490,8 @@ fn d3_nonfinite_and_panel_checks() {
     }
     static_ws(&check(&ed("(ui/split (str \"hori\" \"zontal\") (ui/graph) (ui/lisp))")));
     err(&ed("(ui/split (str \"dia\" \"gonal\") (ui/graph) (ui/lisp))"), "E_RANGE", "axis");
-    err(&ed("(ui/split-at \"vertical\" (* n 0.5) (ui/graph) (ui/lisp))"), "E_RANGE", "ratio");
-    static_ws(&check(&ed("(ui/split-at \"vertical\" (* n 0.1) (ui/graph) (ui/lisp))")));
+    err(&ed("(ui/split_at \"vertical\" (* n 0.5) (ui/graph) (ui/lisp))"), "E_RANGE", "ratio");
+    static_ws(&check(&ed("(ui/split_at \"vertical\" (* n 0.1) (ui/graph) (ui/lisp))")));
     // settings ranges are the schema's: Editor_document.Contexts checks them when it lowers
     static_ws(&check("(workspace w (graph g :context settings [(f : int 60)] (settings/config :fps f)))"));
 }
@@ -692,22 +692,23 @@ fn equality_and_updates_use_captured_field_tags() {
         let v = result(&static_ws(&check(&value(body))), "g");
         for time in [0., 0.37, 2.] { assert_eq!(force(&v, &input::at_time(time), None), Ok(Value::Bool(want)), "{body}"); }
     }
+    bad_text(&value("(assoc {:n 0} :n 1.7)"), "E_TYPE", "assoc :n is int; got float");
     for body in [
-        "(let* [r {:n (int t)} updated (assoc r :n 1.7)] updated.n)",
-        "(let* [r {:v {:n (int t)} :unused (exp (* t 100000.))} updated (assoc r :v {:n 1.7})] updated.v.n)",
-        "(let* [r {:n (int t)} updated (fold [a r] [x (array/range 2)] (assoc a :n 1.7))] updated.n)",
-        "(let* [r {:n (int t)} xs (scan [a r] [x (range 2)] (assoc a :n 1.7))] (get (nth xs 0) :n))",
-        "(let* [r {:n (int t)} updated (reduce (fn [(a : {:n int}) x] (assoc a :n 1.7)) r (list 0))] updated.n)",
+        "(let* [r {:n (int t)} updated (assoc r :n (round 1.7))] updated.n)",
+        "(let* [r {:v {:n (int t)} :unused (exp (* t 100000.))} updated (assoc r :v {:n (round 1.7)})] updated.v.n)",
+        "(let* [r {:n (int t)} updated (fold [a r] [x (array/range 2)] (assoc a :n (round 1.7)))] updated.n)",
+        "(let* [r {:n (int t)} xs (scan [a r] [x (range 2)] (assoc a :n (round 1.7)))] (get (nth xs 0) :n))",
+        "(let* [r {:n (int t)} updated (reduce (fn [(a : {:n int}) x] (assoc a :n (round 1.7))) r (list 0))] updated.n)",
     ] {
         let v = result(&static_ws(&check(&value(body))), "g");
         for time in [-2.5, 0., 0.37, 2.] { assert_eq!(force(&v, &input::at_time(time), None), Ok(Value::Int(2)), "{body} at {time}"); }
     }
     for body in [
-        "(let* [r {:n (int t)} updated (reduce (fn [a x] (assoc a :n 1.7)) r (list 0))] updated.n)",
-        "(let* [r {:n (int t)} f (fn [a x] (assoc a :n 1.7)) updated (reduce f r (list 0))] updated.n)",
-        "(get (first (map (fn [a] (assoc a :n 1.7)) (list {:n (int t)}))) :n)",
-        "(get (first (filter (fn [a] (= (get (assoc a :n 1.7) :n) 2)) (list {:n 2}))) :n)",
-        "(get (first (sort-by (fn [a] (get (assoc a :n 1.7) :n)) (list {:n 2} {:n (int t)}))) :n)",
+        "(let* [r {:n (int t)} updated (reduce (fn [a x] (assoc a :n (round 1.7))) r (list 0))] updated.n)",
+        "(let* [r {:n (int t)} f (fn [a x] (assoc a :n (round 1.7))) updated (reduce f r (list 0))] updated.n)",
+        "(get (first (map (fn [a] (assoc a :n (round 1.7))) (list {:n (int t)}))) :n)",
+        "(get (first (filter (fn [a] (= (get (assoc a :n (round 1.7)) :n) 2)) (list {:n 2}))) :n)",
+        "(get (first (sort_by (fn [a] (get (assoc a :n (round 1.7)) :n)) (list {:n 2} {:n (int t)}))) :n)",
     ] {
         let v = result(&static_ws(&check(&value(body))), "g");
         for time in [-2.5, 0., 0.37, 2.] {
@@ -726,7 +727,7 @@ fn bypass_nonfinite_and_whole_indices() {
     for source in ["(value/lerp 0 (pow 10 308) 100)", "(* [1 2 3] (* (pow 10 308) 10))"] {
         match static_eval(&check(&format!("(workspace w (graph g :context host {source}))"))) { Err(d) => assert_eq!(d.code, "E_NONFINITE", "{source}"), Ok(_) => panic!("{source} was accepted") }
     }
-    match static_eval(&check("(workspace w (graph g :context value (nth (list 1 2 3 4) 2.5)))")) { Err(d) => assert_eq!(d.code, "E_LIST_RANGE"), Ok(_) => panic!("nth 2.5 read an element") }
+    bad_text(&value("(nth (list 1 2 3 4) 2.5)"), "E_TYPE", "expected int, got float");
 }
 
 // A static packed map of more than 4,096 elements: the host's whole value is taken only when it
@@ -817,7 +818,8 @@ fn arc_data(v: &Value) -> std::sync::Arc<Vec<f64>> { match v { Value::Floats(1..
 #[test]
 fn iterate_widens_scalars_and_coerces_record_fields() {
     assert_eq!(g_value(&value("(iterate 3 0 (fn [n] (+ n 0.25)))")), Value::Float(0.75));
-    assert_eq!(g_value("(workspace w (graph g :context host (iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))))"), Value::Record(vec![("n".into(), Value::Int(0))].into()));
+    bad_text(&value("(iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))"), "E_TYPE", "must return the value type");
+    assert_eq!(g_value("(workspace w (graph g :context host (iterate 3 {:n 0.0} (fn [s] {:n (+ s.n 0.25)}))))"), Value::Record(vec![("n".into(), Value::Float(0.75))].into()));
     let ws = check("(workspace w (graph g :context host [(seed : {:n int :data (array float)} {:n 0 :data (array/float 1)})]
         (iterate 2 seed (fn [s] {:n (int/add s.n 1) :data s.data}))))");
     let data = value::source_value("test/iterate_data", Ty::Array(Box::new(Ty::Float)), vec![].into());
@@ -856,4 +858,34 @@ fn evaluation_is_deterministic_across_runs_and_threads() {
     }).collect();
     for thread in threads { thread.join().unwrap(); }
     assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Float(8.)));
+}
+
+#[test]
+fn authoring_coercions_reach_static_and_live_operator_calls() {
+    let catalog = flow_check::catalog::Catalog { version: 0, kinds: vec![] };
+    let checked = |body: &str| {
+        let source = format!("(workspace authoring (graph g :context host {body}))");
+        let forms = flow_syntax::syntax::parse(&source).unwrap();
+        let (workspace, diagnostics) = W::check(&[], false, false, None, &catalog, &forms);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        workspace.unwrap()
+    };
+    let run_case = |workspace: &W::Workspace, time, label| crate::run(workspace, false, None, None, None, time).unwrap_or_else(|error| panic!("{label} at {time}: {error:?}"));
+    let pair = checked("(noise3 [t 1])");
+    let triple = checked("(noise3 [t 1 0])");
+    for time in [0.0, 0.25, 1.0] {
+        assert_eq!(result(&run_case(&pair, time, "vec2 noise"), "g"), result(&run_case(&triple, time, "vec3 noise"), "g"));
+    }
+    let absolute = checked("(abs (int t))");
+    assert_eq!(result(&run_case(&absolute, -3.25, "integer absolute"), "g"), Value::Int(3));
+    let absolute = checked("(abs -9007199254740993)");
+    assert_eq!(result(&crate::static_eval(&absolute).unwrap(), "g"), Value::Int(9007199254740993));
+    bad_text(&value("(abs [1 2 3])"), "E_TYPE", "abs needs a number");
+    let minimum = checked("(array/min (list 2 3 4))");
+    assert_eq!(result(&run_case(&minimum, 0.25, "minimum packed list"), "g"), Value::Int(2));
+    let packed = checked("(array/nth (list 2 3 4) 1)");
+    assert_eq!(result(&crate::static_eval(&packed).unwrap_or_else(|error| panic!("static packed list: {error:?}")), "g"), Value::Int(3));
+    assert_eq!(result(&run_case(&packed, 1.0, "live packed list"), "g"), Value::Int(3));
+    let dynamic = checked("(array/nth (list t (+ t 1)) 1)");
+    assert_eq!(result(&run_case(&dynamic, 0.25, "dynamic packed list"), "g"), Value::Float(1.25));
 }
