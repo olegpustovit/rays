@@ -75,14 +75,13 @@ fn pictures() {
         "53eee607276c67a0280cb9fcbb59e5ebc81e0f6502a82077c0c2bdc7d7323c8b",
         "4622e6a3ff25f8cc3c389f231513adc2a69e0bf11f4db96d6b072e8db860beb8",
         "6b3831072362e57f0f8b90919a3f922911b46d54d87b1eaed1d45b82d3033a33",
-        // the rounded rect's stroke arcs read libm sin/cos: macOS 27 now rounds them as Windows ucrtbase
-        // does (3260ca08 recorded the one-ulp difference); the old macOS value was 27bae8d4…
-        "b1ebcb4115521cc169ab2565362ae9e6c7e3be89ed47ad0d297a2ef855880e59",
+        // stroked paths (19, 21, 22) and the polyline (24) follow Z6's stroke triangle vertex order (9deaa70d)
+        "8818d6ca8c41ddf418d49d7d02e34f1331a492083ce4aea89b0cc915af813c23",
         "447a8178eb85cb3be6245c4d0ba5e559ef876fb7495596970eaa09f8b9b5fadb",
-        "5de2d001b43fb50d2243d6b231c156f71c35b3bfe2f673e6dc357293d6c1748a",
-        "db2db290db2f7d80a744b3625af71f1706e44b1d4d565f3d6373693427a6dbb8",
+        "cf089aabca2fc59b4556e90ed66ba5b75dcd273bd4425a2b1c1173404b9bac92",
+        "9477535cbdc70565f24764bf56a79d59dff009a18114430db0e12fd5c8c60583",
         "b967bc0170e57ab1d5239e87988c193dc731db361c815ff8edfd089fe9526c53",
-        "382cc67de39df737faadf6e1e2d9927794967f6bfbe995cc1ec36e7d6401f90f",
+        "2e4fe0387832fb887cd208451e9ea48be546c95f17ee99c6e7adcb1456ce2775",
         "bc9a96cc00caf757afb46c0b94ab6e514f8676ad396541d50171b303b82e9c73",
     ];
     assert_eq!(pictures.len(), digests.len());
