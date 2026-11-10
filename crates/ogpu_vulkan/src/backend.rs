@@ -48,7 +48,7 @@ fn fail(op: &str, kind: ErrorKind, text: &str) -> Error {
 /// Every Vulkan failure becomes an Ogpu error here, and nowhere else.
 pub(crate) fn of_vk(op: &str, failure: vk::Error) -> Error {
     match failure.kind {
-        vk::ErrorKind::NoAdapter => error::make(op, ErrorKind::NoAdapter, "no discrete Vulkan 1.3 device"),
+        vk::ErrorKind::NoAdapter => error::make(op, ErrorKind::NoAdapter, "no Vulkan 1.3 device"),
         vk::ErrorKind::Unsupported(message) => error::make(op, ErrorKind::Unsupported, message),
         vk::ErrorKind::DeviceLost => error::make(op, ErrorKind::DeviceLost, "VK_ERROR_DEVICE_LOST"),
         vk::ErrorKind::OutOfDeviceMemory => error::make(op, ErrorKind::Capacity, "VK_ERROR_OUT_OF_DEVICE_MEMORY"),

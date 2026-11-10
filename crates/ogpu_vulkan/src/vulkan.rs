@@ -1,4 +1,4 @@
-//! Safe Vulkan device API over `vulkan_sys` (Windows only).
+//! Safe Vulkan device API over `vulkan_sys` (Windows and Linux).
 #![forbid(unsafe_code)]
 
 use native_layer_token_sys::portable::Token;

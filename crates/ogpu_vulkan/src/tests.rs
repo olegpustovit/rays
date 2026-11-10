@@ -659,7 +659,10 @@ fn gpu_conformance_ray_tracing() {
     let Some(device) = open() else { return };
     let capabilities = be::capabilities(&device);
     let profile = capabilities;
-    require(profile.ray_tracing && profile.ray_tracing_motion && profile.ray_tracing_refit, "this device lacks ray queries");
+    if !(profile.ray_tracing && profile.ray_tracing_motion && profile.ray_tracing_refit) {
+        eprintln!("RAYS_TEST_SKIP: OGPU ray tracing (Vulkan): this device lacks ray queries (CPU drivers such as lavapipe)");
+        return;
+    }
     let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
     let ray_interface = vec![
         compute_binding(0, BindingKind::AccelerationStructure),

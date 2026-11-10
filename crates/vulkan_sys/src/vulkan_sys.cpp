@@ -1,9 +1,13 @@
 #define VK_NO_PROTOTYPES
+#ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #undef interface
+#else
+#define VK_USE_PLATFORM_WAYLAND_KHR
+#endif
 #include "vendor/volk.h"
 #include "vendor/vk_mem_alloc.h"
 #include <algorithm>
@@ -98,7 +102,7 @@ struct Device {
   VkQueue main_queue{}, transfer_queue{};
   uint32_t main_family{}, transfer_family{};
   VkPhysicalDeviceProperties properties{};
-  bool budget{};
+  bool budget{}, swapchain{}, ray_tracing{};
   VkPipelineCache pipeline_cache{};
   std::atomic<int64_t> held{};
   VkSemaphore ticks{};
@@ -222,14 +226,26 @@ int create_device(bool validation, bool fatal, Device **out) {
   VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app.pApplicationName = "rays"; app.pEngineName = "rays"; app.apiVersion = VK_API_VERSION_1_3;
   const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
-  const char *extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME};
+#ifdef _WIN32
+  const char *platform_surface = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#else
+  const char *platform_surface = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
+#endif
+  // Surface extensions are optional: a headless instance (no window system) still creates devices.
+  VkExtensionProperties instance_available[256]; uint32_t instance_count = 256;
+  vkEnumerateInstanceExtensionProperties(nullptr, &instance_count, instance_available);
+  const char *extensions[3]; uint32_t extension_count = 0;
+  if (has_extension(instance_available, instance_count, VK_KHR_SURFACE_EXTENSION_NAME) && has_extension(instance_available, instance_count, platform_surface)) {
+    extensions[extension_count++] = VK_KHR_SURFACE_EXTENSION_NAME; extensions[extension_count++] = platform_surface;
+  }
+  if (validation) extensions[extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
   VkValidationFeatureEnableEXT enables[] = {VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT};
   VkValidationFeaturesEXT features{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
   features.enabledValidationFeatureCount = 1; features.pEnabledValidationFeatures = enables;
   VkInstanceCreateInfo ii{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   ii.pNext = validation ? &features : nullptr; ii.pApplicationInfo = &app;
   ii.enabledLayerCount = validation ? 1 : 0; ii.ppEnabledLayerNames = layers;
-  ii.enabledExtensionCount = validation ? 3 : 2; ii.ppEnabledExtensionNames = extensions;
+  ii.enabledExtensionCount = extension_count; ii.ppEnabledExtensionNames = extensions;
   if (!process_instance) {
     r = vkCreateInstance(&ii, nullptr, &process_instance);
     if (r != VK_SUCCESS) { delete d; return r; }
@@ -245,22 +261,32 @@ int create_device(bool validation, bool fatal, Device **out) {
   }
   VkPhysicalDevice physicals[8]; uint32_t physical_count = 8;
   r = vkEnumeratePhysicalDevices(d->instance, &physical_count, physicals);
-  for (uint32_t i = 0; r >= 0 && i < physical_count; ++i) {
-    VkPhysicalDeviceProperties p; vkGetPhysicalDeviceProperties(physicals[i], &p);
-    if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && p.apiVersion >= VK_API_VERSION_1_3) {
-      d->physical = physicals[i]; d->properties = p; break;
+  // Prefer discrete, then integrated, then virtual, then CPU (lavapipe).
+  const VkPhysicalDeviceType order[] = {VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+      VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU, VK_PHYSICAL_DEVICE_TYPE_CPU};
+  for (VkPhysicalDeviceType want : order) {
+    for (uint32_t i = 0; !d->physical && r >= 0 && i < physical_count; ++i) {
+      VkPhysicalDeviceProperties p; vkGetPhysicalDeviceProperties(physicals[i], &p);
+      if (p.deviceType == want && p.apiVersion >= VK_API_VERSION_1_3) { d->physical = physicals[i]; d->properties = p; }
     }
   }
   int failure = d->physical ? 0 : RV_NO_DEVICE;
   VkExtensionProperties available[512]; uint32_t available_count = 512;
   if (!failure) vkEnumerateDeviceExtensionProperties(d->physical, nullptr, &available_count, available);
-  const char *required[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-      VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+  const char *required[] = {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
+  const char *ray_extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
   const char *enabled[12]; uint32_t enabled_count = 0;
   for (const char *name : required) {
     if (!failure && !has_extension(available, available_count, name)) failure = RV_MISSING;
     enabled[enabled_count++] = name;
   }
+  // Optional features degrade through caps: no swapchain extension = no windows; no ray extensions = no ray tracing.
+  if (!failure && has_extension(available, available_count, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+    enabled[enabled_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME; d->swapchain = true;
+  }
+  d->ray_tracing = !failure;
+  for (const char *name : ray_extensions) d->ray_tracing = d->ray_tracing && has_extension(available, available_count, name);
+  if (d->ray_tracing) for (const char *name : ray_extensions) enabled[enabled_count++] = name;
   if (failure || !has_extension(available, available_count, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) ||
       !has_extension(available, available_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {
     delete d; return failure ? failure : RV_MISSING;
@@ -285,7 +311,7 @@ int create_device(bool validation, bool fatal, Device **out) {
   VkPhysicalDeviceRobustness2FeaturesEXT robustness{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT}; robustness.nullDescriptor = VK_TRUE;
   VkPhysicalDeviceRayQueryFeaturesKHR ray{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR}; ray.pNext = &robustness; ray.rayQuery = VK_TRUE;
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR}; accel.pNext = &ray; accel.accelerationStructure = VK_TRUE;
-  VkPhysicalDeviceVulkan13Features v13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES}; v13.pNext = &accel;
+  VkPhysicalDeviceVulkan13Features v13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES}; v13.pNext = d->ray_tracing ? static_cast<void *>(&accel) : static_cast<void *>(&robustness);
   v13.dynamicRendering = VK_TRUE; v13.synchronization2 = VK_TRUE; v13.maintenance4 = VK_TRUE;
   VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES}; v12.pNext = &v13;
   v12.timelineSemaphore = VK_TRUE; v12.bufferDeviceAddress = VK_TRUE; v12.scalarBlockLayout = VK_TRUE;
@@ -497,14 +523,14 @@ VkResult staged_write(Buffer *b, VkDeviceSize offset, const void *src, VkDeviceS
 }
 
 extern "C" {
-struct rv_facts { uint64_t max_buffer, max_texture_1d, max_texture_2d, max_texture_3d, max_texture_cube, max_array_layers, device_local_bytes; uint32_t sample_counts, color_sample_counts, depth_sample_counts, max_invocations, api_version; };
+struct rv_facts { uint64_t max_buffer, max_texture_1d, max_texture_2d, max_texture_3d, max_texture_cube, max_array_layers, device_local_bytes; uint32_t sample_counts, color_sample_counts, depth_sample_counts, max_invocations, api_version, ray_tracing; };
 int32_t rv_device_create(bool validation, bool fatal, void **out) { return create_device(validation, fatal, reinterpret_cast<Device **>(out)); }
 int32_t rv_validation_messages() { return validation_messages.load(std::memory_order_relaxed); }
 int32_t rv_device_facts(void *handle, rv_facts *out) {
   auto *d = static_cast<Device *>(handle); auto *l = &d->properties.limits; VkPhysicalDeviceMemoryProperties m{}; vkGetPhysicalDeviceMemoryProperties(d->physical, &m);
   uint64_t local = 0; for (uint32_t i = 0; i < m.memoryHeapCount; ++i) if ((m.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) && m.memoryHeaps[i].size > local) local = m.memoryHeaps[i].size;
   VkSampleCountFlags s = l->framebufferColorSampleCounts & l->framebufferDepthSampleCounts;
-  *out = {l->maxStorageBufferRange, l->maxImageDimension1D, l->maxImageDimension2D, l->maxImageDimension3D, l->maxImageDimensionCube, l->maxImageArrayLayers, local, static_cast<uint32_t>(s), static_cast<uint32_t>(l->framebufferColorSampleCounts), static_cast<uint32_t>(l->framebufferDepthSampleCounts), l->maxComputeWorkGroupInvocations, d->properties.apiVersion}; return VK_SUCCESS;
+  *out = {l->maxStorageBufferRange, l->maxImageDimension1D, l->maxImageDimension2D, l->maxImageDimension3D, l->maxImageDimensionCube, l->maxImageArrayLayers, local, static_cast<uint32_t>(s), static_cast<uint32_t>(l->framebufferColorSampleCounts), static_cast<uint32_t>(l->framebufferDepthSampleCounts), l->maxComputeWorkGroupInvocations, d->properties.apiVersion, d->ray_tracing}; return VK_SUCCESS;
 }
 int32_t rv_device_memory(void *handle, uint64_t *held, uint64_t *budget) {
   auto *d = static_cast<Device *>(handle); VmaBudget b[VK_MAX_MEMORY_HEAPS]{}; vmaGetHeapBudgets(d->allocator, b); VkPhysicalDeviceMemoryProperties m{}; vkGetPhysicalDeviceMemoryProperties(d->physical, &m);
@@ -902,11 +928,23 @@ static VkResult rv_swapchain_build(Surface *s) {
   for (uint32_t i=0;i<17;++i) { if (s->acquired[i]) vkDestroySemaphore(d->device,s->acquired[i],nullptr); vkCreateSemaphore(d->device,&si,nullptr,&s->acquired[i]); }
   return VK_SUCCESS;
 }
+#ifndef _WIN32
+// Matches native_layer_token_sys::WaylandLayer: the token's pointer names this pair.
+struct WaylandLayer { wl_display *display; wl_surface *surface; };
+#endif
 int32_t rv_surface_create(void *device, void *hwnd, bool immediate, void **out) {
   auto *d = static_cast<Device *>(device); if (!hwnd) return VK_ERROR_SURFACE_LOST_KHR;
+  if (!d->swapchain) return VK_ERROR_EXTENSION_NOT_PRESENT;
   auto *s = new (std::nothrow) Surface{}; if (!s) return VK_ERROR_OUT_OF_HOST_MEMORY; s->device=d; s->mode=immediate?VK_PRESENT_MODE_IMMEDIATE_KHR:VK_PRESENT_MODE_FIFO_KHR;
+#ifdef _WIN32
   VkWin32SurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR}; si.hinstance=GetModuleHandleW(nullptr); si.hwnd=static_cast<HWND>(hwnd);
-  VkResult r=vkCreateWin32SurfaceKHR(d->instance,&si,nullptr,&s->surface); if(r!=VK_SUCCESS){delete s;return r;}
+  VkResult r=vkCreateWin32SurfaceKHR(d->instance,&si,nullptr,&s->surface);
+#else
+  auto *layer=static_cast<WaylandLayer *>(hwnd);
+  VkWaylandSurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR}; si.display=layer->display; si.surface=layer->surface;
+  VkResult r=vkCreateWaylandSurfaceKHR?vkCreateWaylandSurfaceKHR(d->instance,&si,nullptr,&s->surface):VK_ERROR_EXTENSION_NOT_PRESENT;
+#endif
+  if(r!=VK_SUCCESS){delete s;return r;}
   VkBool32 supported=VK_FALSE; vkGetPhysicalDeviceSurfaceSupportKHR(d->physical,d->main_family,s->surface,&supported);
   r=supported?rv_swapchain_build(s):VK_ERROR_INCOMPATIBLE_DISPLAY_KHR;
   if(r!=VK_SUCCESS){vkDestroySurfaceKHR(d->instance,s->surface,nullptr);delete s;return r;} *out=s;return VK_SUCCESS;

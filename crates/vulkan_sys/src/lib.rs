@@ -1,4 +1,4 @@
-#[cfg(windows)]
-mod windows;
-#[cfg(windows)]
-pub use windows::*;
+#[cfg(any(windows, target_os = "linux"))]
+mod native;
+#[cfg(any(windows, target_os = "linux"))]
+pub use native::*;

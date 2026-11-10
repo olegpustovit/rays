@@ -2,7 +2,7 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn tool(name: &str) -> Option<PathBuf> {
-    let exe = format!("{name}.exe");
+    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
     let mut dirs: Vec<PathBuf> = env::var_os("PATH").map(|p| env::split_paths(&p).collect()).unwrap_or_default();
     for fallback in ["C:/msys64/mingw64/bin", "C:/msys64/ucrt64/bin", "C:/VulkanSDK/Bin"] {
         dirs.push(PathBuf::from(fallback));

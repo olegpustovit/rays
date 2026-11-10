@@ -44,6 +44,7 @@ pub struct DeviceFacts {
     pub max_invocations: u32,
     pub device_local_bytes: u64,
     pub api_version: u32,
+    pub ray_tracing: bool,
 }
 
 impl DeviceFacts {
@@ -62,11 +63,11 @@ impl DeviceFacts {
             compute_pipeline: true,
             render_pipeline: true,
             render_requires_fragment: false,
-            ray_tracing: true,
+            ray_tracing: self.ray_tracing,
             ray_tracing_curves: false,
             // only after device_create enables rayQuery and accelerationStructure
-            ray_tracing_motion: true,
-            ray_tracing_refit: true,
+            ray_tracing_motion: self.ray_tracing,
+            ray_tracing_refit: self.ray_tracing,
             memoryless_attachments: false,
             unified_memory: false,
         }
@@ -161,7 +162,7 @@ pub struct Geometry {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct NativeFacts { max_buffer: u64, max_texture_1d: u64, max_texture_2d: u64, max_texture_3d: u64, max_texture_cube: u64, max_array_layers: u64, device_local_bytes: u64, sample_counts: u32, color_sample_counts: u32, depth_sample_counts: u32, max_invocations: u32, api_version: u32 }
+struct NativeFacts { max_buffer: u64, max_texture_1d: u64, max_texture_2d: u64, max_texture_3d: u64, max_texture_cube: u64, max_array_layers: u64, device_local_bytes: u64, sample_counts: u32, color_sample_counts: u32, depth_sample_counts: u32, max_invocations: u32, api_version: u32, ray_tracing: u32 }
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct NativePipelineDescriptor { blend: i32, topology: i32, color_format: i32, has_depth: u8, samples: i32 }
@@ -283,9 +284,9 @@ impl Device {
     }
     pub fn validation_messages() -> u32 { unsafe { rv_validation_messages().max(0) as u32 } }
     pub fn facts(&self) -> Result<DeviceFacts, Error> {
-        let mut f = NativeFacts { max_buffer:0,max_texture_1d:0,max_texture_2d:0,max_texture_3d:0,max_texture_cube:0,max_array_layers:0,device_local_bytes:0,sample_counts:0,color_sample_counts:0,depth_sample_counts:0,max_invocations:0,api_version:0 };
+        let mut f = NativeFacts { max_buffer:0,max_texture_1d:0,max_texture_2d:0,max_texture_3d:0,max_texture_cube:0,max_array_layers:0,device_local_bytes:0,sample_counts:0,color_sample_counts:0,depth_sample_counts:0,max_invocations:0,api_version:0,ray_tracing:0 };
         Error::status(unsafe { rv_device_facts(self.raw(),&mut f) })?;
-        Ok(DeviceFacts { max_buffer_bytes:f.max_buffer,max_texture_dimension_1d:f.max_texture_1d,max_texture_dimension_2d:f.max_texture_2d,max_texture_dimension_3d:f.max_texture_3d,max_texture_dimension_cube:f.max_texture_cube,max_texture_array_layers:f.max_array_layers,sample_counts:f.sample_counts,color_sample_counts:f.color_sample_counts,depth_sample_counts:f.depth_sample_counts,max_invocations:f.max_invocations,device_local_bytes:f.device_local_bytes,api_version:f.api_version })
+        Ok(DeviceFacts { max_buffer_bytes:f.max_buffer,max_texture_dimension_1d:f.max_texture_1d,max_texture_dimension_2d:f.max_texture_2d,max_texture_dimension_3d:f.max_texture_3d,max_texture_dimension_cube:f.max_texture_cube,max_texture_array_layers:f.max_array_layers,sample_counts:f.sample_counts,color_sample_counts:f.color_sample_counts,depth_sample_counts:f.depth_sample_counts,max_invocations:f.max_invocations,device_local_bytes:f.device_local_bytes,api_version:f.api_version,ray_tracing:f.ray_tracing!=0 })
     }
     pub fn memory(&self) -> Result<DeviceMemory, Error> {
         let (mut held,mut budget)=(0,0); Error::status(unsafe { rv_device_memory(self.raw(),&mut held,&mut budget) })?;

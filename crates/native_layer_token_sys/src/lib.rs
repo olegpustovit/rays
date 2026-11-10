@@ -66,6 +66,14 @@ impl Drop for Inner {
     }
 }
 
+/// What a Linux token's pointer names: the Wayland connection and surface Vulkan presents to.
+/// Both stay owned by the window host, which must keep them alive until the token is invalidated.
+#[repr(C)]
+pub struct WaylandLayer {
+    pub display: *mut c_void,
+    pub surface: *mut c_void,
+}
+
 /// Shared ownership of one opaque native layer handle.
 #[derive(Clone)]
 pub struct Token {
