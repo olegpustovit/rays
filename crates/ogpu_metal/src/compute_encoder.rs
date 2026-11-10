@@ -6,7 +6,7 @@ use crate::{
     device::{fail},
     pipeline::Native,
 };
-use ogpu_core::{backend::{DriverComputeEncoder, DriverPipeline, DriverResource, Token}, error::ErrorKind};
+use ogpu_core::{backend::{DriverAccel, DriverComputeEncoder, DriverPipeline, DriverResource}, error::ErrorKind};
 use std::rc::Rc;
 
 fn size(t: (i64, i64, i64)) -> (usize, usize, usize) {
@@ -57,10 +57,10 @@ impl DriverComputeEncoder for Compute {
         self.encoder.set_texture(index as usize, texture.metal())
     }
 
-    fn set_accel(&self, index: i64, token: Token) -> Result<(), Error> {
+    fn set_accel(&self, index: i64, accel: &dyn DriverAccel) -> Result<(), Error> {
         let c = &self.context;
-        let structure = c.find_accel(token)?;
-        c.keep_accel(&structure)?;
+        let structure = c.find_accel(accel)?;
+        c.keep_accel(structure)?;
         self.encoder.set_acceleration_structure(index as usize, Some(structure.metal()))
     }
 
@@ -75,12 +75,12 @@ impl DriverComputeEncoder for Compute {
         self.encoder.dispatch_threadgroups_indirect(buffer.metal(), offset as u64, size(threadgroup))
     }
 
-    fn compute_use_accels(&self, tokens: &[Token]) -> Result<(), Error> {
+    fn compute_use_accels(&self, accels: &[Rc<dyn DriverAccel>]) -> Result<(), Error> {
         let c = &self.context;
         let mut structures = Vec::new();
-        for token in tokens {
-            let structure = c.find_accel(*token)?;
-            c.keep_accel(&structure)?;
+        for accel in accels {
+            let structure = c.find_accel(&**accel)?;
+            c.keep_accel(structure)?;
             structures.push(structure.metal().clone());
         }
         if structures.is_empty() {

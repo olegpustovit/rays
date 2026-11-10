@@ -238,23 +238,24 @@ fn warm_library(dev: &Rc<Dev>, shader: &Shader) -> Option<ogpu_core::backend::Wa
 }
 
 struct MetalAccel {
-    dev: Rc<Dev>,
     structure: Acceleration,
-    id: i64,
     sizes: AccelSizes,
 }
 
+/// The Metal structure behind a portable one.
+pub(crate) fn metal_accel(accel: &dyn DriverAccel) -> Option<&Acceleration> {
+    accel.as_any().downcast_ref::<MetalAccel>().map(|a| &a.structure)
+}
+
 impl DriverAccel for MetalAccel {
-    fn accel_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn accel_sizes(&self) -> AccelSizes {
         self.sizes
     }
     fn destroy_accel(&self) -> Result<(), Error> {
-        self.dev.t.accels.borrow_mut().remove(&self.id);
-        self.structure.destroy()?;
-        Ok(())
+        self.structure.destroy()
     }
 }
 
@@ -263,20 +264,13 @@ fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<Box
     let resolve_buffer = |resource: &dyn DriverResource| -> Result<Buffer, Error> {
         metal_buffer(resource).cloned().ok_or_else(|| fail(OP, ErrorKind::InvalidArgument, "acceleration buffer graph is incomplete"))
     };
-    let resolve_structure = |token: Token| -> Result<Acceleration, Error> {
-        match dev.t.accels.borrow().get(&token) {
-            Some(s) => Ok(s.clone()),
-            None => Err(fail(OP, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete")),
-        }
+    let resolve_structure = |accel: &dyn DriverAccel| -> Result<Acceleration, Error> {
+        metal_accel(accel).cloned().ok_or_else(|| fail(OP, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete"))
     };
     let structure = acceleration::create(&dev.device, descriptor, &resolve_buffer, &resolve_structure)?;
-    let id = dev.t.token();
-    dev.t.accels.borrow_mut().insert(id, structure.clone());
     let sizes = structure.sizes();
     Ok(Box::new(MetalAccel {
-        dev: dev.clone(),
         structure,
-        id,
         sizes: AccelSizes {
             structure_size: sizes.acceleration_structure_size as i64,
             build_scratch_size: sizes.build_scratch_buffer_size as i64,
@@ -467,34 +461,34 @@ fn accel_encoder(context: &Rc<CommandContext>) -> Result<Box<dyn DriverAccelEnco
 }
 
 impl DriverAccelEncoder for AccelRecorder {
-    fn build(&self, token: Token, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
+    fn build(&self, accel: &dyn DriverAccel, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
         let c = &self.context;
-        let structure = c.find_accel(token)?;
+        let structure = c.find_accel(accel)?;
         let scratch = c.find_buffer(scratch)?;
-        c.keep_accel(&structure)?;
+        c.keep_accel(structure)?;
         c.keep_buffer(scratch)?;
         structure.encode_build(&self.encoder, scratch, scratch_offset)
     }
-    fn compact(&self, src: Token, dst: Token) -> Result<(), Error> {
+    fn compact(&self, src: &dyn DriverAccel, dst: &dyn DriverAccel) -> Result<(), Error> {
         let c = &self.context;
         let (src, dst) = (c.find_accel(src)?, c.find_accel(dst)?);
-        c.keep_accel(&src)?;
-        c.keep_accel(&dst)?;
-        Acceleration::encode_compact(&self.encoder, &src, &dst)
+        c.keep_accel(src)?;
+        c.keep_accel(dst)?;
+        Acceleration::encode_compact(&self.encoder, src, dst)
     }
-    fn write_compacted_size(&self, token: Token, dst: &dyn DriverResource, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
+    fn write_compacted_size(&self, accel: &dyn DriverAccel, dst: &dyn DriverResource, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
         let c = &self.context;
-        let structure = c.find_accel(token)?;
+        let structure = c.find_accel(accel)?;
         let destination = c.find_buffer(dst)?;
-        c.keep_accel(&structure)?;
+        c.keep_accel(structure)?;
         c.keep_buffer(destination)?;
         structure.encode_compacted_size(&self.encoder, destination, output)
     }
-    fn refit(&self, token: Token, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
+    fn refit(&self, accel: &dyn DriverAccel, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
         let c = &self.context;
-        let structure = c.find_accel(token)?;
+        let structure = c.find_accel(accel)?;
         let scratch = c.find_buffer(scratch)?;
-        c.keep_accel(&structure)?;
+        c.keep_accel(structure)?;
         c.keep_buffer(scratch)?;
         let resolve = |resource: &dyn DriverResource| -> Result<Buffer, Error> {
             let b = c.find_buffer(resource)?;

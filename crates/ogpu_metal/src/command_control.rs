@@ -13,7 +13,7 @@ use crate::{
 };
 use crate::native::{DepthStencil, DepthStencilDescriptor};
 use ogpu_core::{
-    backend::{DepthState, DriverResource},
+    backend::{DepthState, DriverAccel, DriverResource},
     error::ErrorKind,
     render_pass::Comparison,
 };
@@ -30,7 +30,6 @@ pub struct IcbEntry {
 
 /// The token tables of one device.
 pub struct Tables {
-    pub accels: RefCell<HashMap<i64, Acceleration>>,
     pub icbs: RefCell<HashMap<i64, Rc<IcbEntry>>>,
     /// Every depth-stencil state, made with the device (`create_depth_states`): eight comparisons
     /// by write or not. Made lazily they would outlive the first owner that drew with them.
@@ -41,7 +40,6 @@ pub struct Tables {
 impl Tables {
     pub fn new() -> Tables {
         Tables {
-            accels: RefCell::new(HashMap::new()),
             icbs: RefCell::new(HashMap::new()),
             depth_states: RefCell::new(Vec::new()),
             next: Cell::new(1),
@@ -142,11 +140,8 @@ impl CommandContext {
         crate::backend::metal_buffer(resource).ok_or_else(|| fail(self.operation, ErrorKind::InvalidArgument, "buffer graph is incomplete"))
     }
 
-    pub fn find_accel(&self, token: i64) -> Result<Acceleration, Error> {
-        match self.tables.accels.borrow().get(&token) {
-            Some(structure) => Ok(structure.clone()),
-            None => Err(fail(self.operation, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete")),
-        }
+    pub fn find_accel<'a>(&self, accel: &'a dyn DriverAccel) -> Result<&'a Acceleration, Error> {
+        crate::backend::metal_accel(accel).ok_or_else(|| fail(self.operation, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete"))
     }
 
     /// The structure and the buffers it holds now (a refit replaces them).

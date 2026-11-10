@@ -98,12 +98,12 @@ pub struct AccelSizes {
 
 #[derive(Clone)]
 pub enum DriverAccelDescriptor {
-    Build { profile:acceleration::AdmittedBuild, buffers:Vec<Rc<dyn DriverResource>>, structures:Vec<Token> },
-    Sized { size:std::num::NonZeroU64, template:Token },
+    Build { profile:acceleration::AdmittedBuild, buffers:Vec<Rc<dyn DriverResource>>, structures:Vec<Rc<dyn DriverAccel>> },
+    Sized { size:std::num::NonZeroU64, template:Rc<dyn DriverAccel> },
 }
 
 pub trait DriverAccel {
-    fn accel_token(&self) -> Token;
+    fn as_any(&self) -> &dyn std::any::Any;
     fn accel_sizes(&self) -> AccelSizes;
     fn destroy_accel(&self) -> Result<(), Error>;
 }
@@ -120,18 +120,18 @@ pub trait DriverComputeEncoder {
     fn set_buffer(&self, index: i64, offset: i64, buffer: &dyn DriverResource) -> Result<(), Error>;
     fn set_bytes(&self, index: i64, admitted: crate::validation::AdmittedBytes, bytes: &[u8]) -> Result<(), Error>;
     fn set_texture(&self, index: i64, texture: &dyn DriverResource) -> Result<(), Error>;
-    fn set_accel(&self, index: i64, accel: Token) -> Result<(), Error>;
+    fn set_accel(&self, index: i64, accel: &dyn DriverAccel) -> Result<(), Error>;
     fn dispatch_threads(&self, threads: (i64, i64, i64), threadgroup: (i64, i64, i64)) -> Result<(), Error>;
     fn dispatch_indirect(&self, arguments: &dyn DriverResource, offset: i64, threadgroup: (i64, i64, i64)) -> Result<(), Error>;
-    fn compute_use_accels(&self, accels: &[Token]) -> Result<(), Error>;
+    fn compute_use_accels(&self, accels: &[Rc<dyn DriverAccel>]) -> Result<(), Error>;
     fn end_compute(&self) -> Result<(), Error>;
 }
 
 pub trait DriverAccelEncoder {
-    fn build(&self, accel: Token, scratch: &dyn DriverResource, offset: i64) -> Result<(), Error>;
-    fn compact(&self, source: Token, destination: Token) -> Result<(), Error>;
-    fn write_compacted_size(&self, accel: Token, destination: &dyn DriverResource, output: crate::validation::AdmittedCompactedSize) -> Result<(), Error>;
-    fn refit(&self, accel: Token, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, offset: i64) -> Result<(), Error>;
+    fn build(&self, accel: &dyn DriverAccel, scratch: &dyn DriverResource, offset: i64) -> Result<(), Error>;
+    fn compact(&self, source: &dyn DriverAccel, destination: &dyn DriverAccel) -> Result<(), Error>;
+    fn write_compacted_size(&self, accel: &dyn DriverAccel, destination: &dyn DriverResource, output: crate::validation::AdmittedCompactedSize) -> Result<(), Error>;
+    fn refit(&self, accel: &dyn DriverAccel, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, offset: i64) -> Result<(), Error>;
     fn end_accel(&self) -> Result<(), Error>;
 }
 
@@ -378,7 +378,7 @@ pub struct Frame(Rc<FrameInner>);
 struct FrameInner { raw: DriverFrame, surface: Surface, consumed: Cell<bool> }
 #[derive(Clone)]
 pub struct Accel(Rc<AccelInner>);
-struct AccelInner { raw: RefCell<Option<Box<dyn DriverAccel>>>, token: Token, sizes: AccelSizes, device: Device, portable: RefCell<Acceleration>, structures: Vec<Accel>, dead: Cell<bool> }
+struct AccelInner { raw: RefCell<Option<Rc<dyn DriverAccel>>>, sizes: AccelSizes, device: Device, portable: RefCell<Acceleration>, structures: Vec<Accel>, dead: Cell<bool> }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandsState { Recording, Encoding, Committed, Abandoned }
 #[derive(Clone)]
@@ -429,6 +429,7 @@ impl SurfaceInner {
     fn raw(&self) -> std::cell::Ref<'_, dyn DriverSurface> { std::cell::Ref::map(self.raw.borrow(), |raw| raw.as_deref().expect("live surface payload")) }
 }
 impl AccelInner {
+    fn shared(&self) -> Rc<dyn DriverAccel> { self.raw.borrow().clone().expect("live acceleration payload") }
     fn raw(&self) -> std::cell::Ref<'_, dyn DriverAccel> { std::cell::Ref::map(self.raw.borrow(), |raw| raw.as_deref().expect("live acceleration payload")) }
 }
 impl CommandsInner {
@@ -1109,7 +1110,7 @@ fn admitted_descriptors(device:&Device, descriptor:&AccelDescriptor, refit:bool)
             let size=crate::validation::admit_acceleration_size("Ogpu.Acceleration.create",
                 u64::try_from(*size).map_err(|_|make_error("Ogpu.Acceleration.create",ErrorKind::InvalidArgument,"structure size must be positive"))?)?;
             Ok((PortableDescriptor::Sized { size,template:acceleration::handle(&template.0.portable.borrow()) },
-                DriverAccelDescriptor::Sized { size,template:template.0.token }))
+                DriverAccelDescriptor::Sized { size,template:template.0.shared() }))
         }
         _ => {
             if refit && matches!(descriptor,AccelDescriptor::TlasOf { .. }) {
@@ -1120,7 +1121,7 @@ fn admitted_descriptors(device:&Device, descriptor:&AccelDescriptor, refit:bool)
                 buffers:buffers.iter().map(|b|b.resource.0.handle.clone()).collect(),
                 structures:structures.iter().map(|a|acceleration::handle(&a.0.portable.borrow())).collect() };
             let driver=DriverAccelDescriptor::Build { profile,buffers:buffers.iter().map(|b|b.resource.0.shared()).collect(),
-                structures:structures.iter().map(|a|a.0.token).collect() };
+                structures:structures.iter().map(|a|a.0.shared()).collect() };
             Ok((portable,driver))
         }
     }
@@ -1178,7 +1179,7 @@ pub fn create_accel(device: &Device, descriptor: AccelDescriptor, refit: bool) -
         Err(error) => { acceleration::destroy(&portable); return Err(error); }
     };
     device.0.children.set(device.0.children.get() + 1);
-    Ok(Accel(Rc::new(AccelInner { token: raw.accel_token(), sizes: raw.accel_sizes(), raw: RefCell::new(Some(raw)), device: device.clone(), portable: RefCell::new(portable), structures, dead: Cell::new(false) })))
+    Ok(Accel(Rc::new(AccelInner { sizes: raw.accel_sizes(), raw: RefCell::new(Some(raw.into())), device: device.clone(), portable: RefCell::new(portable), structures, dead: Cell::new(false) })))
 }
 pub fn destroy_accel(value: &Accel) -> Result<(), Error> {
     if value.0.dead.get() { return Ok(()); }
@@ -1267,7 +1268,7 @@ pub fn set_accel(encoder: &ComputeEncoder, index: i64, accel: &Accel) -> Result<
     check_slot(OP, index)?;
     accel_check(OP, &commands_device(&encoder.0.commands), accel)?;
     if !is_built(accel) { return Err(make_error(OP, ErrorKind::InvalidState, "acceleration structure has no encoded build")); }
-    encoder.0.raw().set_accel(index, accel.0.token)
+    encoder.0.raw().set_accel(index, &*accel.0.raw())
 }
 fn positive3(value: (i64, i64, i64)) -> bool { value.0 > 0 && value.1 > 0 && value.2 > 0 }
 fn threadgroup(operation: &str, encoder: &ComputeEncoder, dimensions: (i64, i64, i64)) -> Result<(), Error> {
@@ -1342,7 +1343,7 @@ pub fn build_accel(encoder: &AccelEncoder, accel: &Accel, scratch: &Buffer, scra
     let offset = scratch_offset.unwrap_or(0);
     check_scratch(OP, &device, scratch, offset)?;
     acceleration::validate_build(&device.0.handle, &accel.0.portable.borrow())?;
-    encoder.0.raw().build(accel.0.token, &*scratch.resource.0.raw(), offset)?;
+    encoder.0.raw().build(&*accel.0.raw(), &*scratch.resource.0.raw(), offset)?;
     acceleration::mark_built(&mut accel.0.portable.borrow_mut());
     Ok(())
 }
@@ -1363,7 +1364,7 @@ pub fn refit_accel(
     check_scratch(OP, &device, scratch, offset)?;
     let (portable,driver)=admitted_descriptors(&device,&descriptor,true)?;
     acceleration::refit(&device.0.handle, &mut accel.0.portable.borrow_mut(), &portable)?;
-    encoder.0.raw().refit(accel.0.token, &driver, &*scratch.resource.0.raw(), offset)
+    encoder.0.raw().refit(&*accel.0.raw(), &driver, &*scratch.resource.0.raw(), offset)
 }
 pub fn compact_accel(encoder: &AccelEncoder, src: &Accel, dst: &Accel) -> Result<(), Error> {
     const OP: &str = "Backend.compact_accel";
@@ -1376,7 +1377,7 @@ pub fn compact_accel(encoder: &AccelEncoder, src: &Accel, dst: &Accel) -> Result
         return Err(make_error(OP, ErrorKind::InvalidState, "compaction source and destination are the same structure"));
     }
     acceleration::validate_compaction(&device.0.handle, &src.0.portable.borrow(), &dst.0.portable.borrow())?;
-    encoder.0.raw().compact(src.0.token, dst.0.token)?;
+    encoder.0.raw().compact(&*src.0.raw(), &*dst.0.raw())?;
     acceleration::mark_compacted(&mut dst.0.portable.borrow_mut());
     Ok(())
 }
@@ -1390,7 +1391,7 @@ pub fn write_compacted_size(encoder: &AccelEncoder, accel: &Accel, dst: &Buffer,
     let output=crate::validation::admit_compacted_size_write(OP,offset,dst.buffer_descriptor.size as u64,crate::validation::CompactedSizeType::Uint64)
         .map_err(|_|make_error(OP,ErrorKind::InvalidArgument,"compacted size destination needs eight aligned bytes"))?;
     acceleration::compacted_size(&device.0.handle, &accel.0.portable.borrow())?;
-    encoder.0.raw().write_compacted_size(accel.0.token, &*dst.resource.0.raw(), output)
+    encoder.0.raw().write_compacted_size(&*accel.0.raw(), &*dst.resource.0.raw(), output)
 }
 pub fn end_accel(encoder: &AccelEncoder) -> Result<(), Error> {
     const OP: &str = "Backend.end_accel";
@@ -1471,13 +1472,13 @@ pub fn compute_use_accels(encoder: &ComputeEncoder, accels: &[Accel]) -> Result<
     const OP: &str = "Backend.compute_use_accels";
     open_compute(OP, encoder)?;
     let device = commands_device(&encoder.0.commands);
-    let mut tokens = Vec::with_capacity(accels.len());
+    let mut shared = Vec::with_capacity(accels.len());
     for accel in accels {
         accel_check(OP, &device, accel)?;
         if !is_built(accel) { return Err(make_error(OP, ErrorKind::InvalidState, "acceleration structure has no encoded build")); }
-        tokens.push(accel.0.token);
+        shared.push(accel.0.shared());
     }
-    if tokens.is_empty() { Ok(()) } else { encoder.0.raw().compute_use_accels(&tokens) }
+    if shared.is_empty() { Ok(()) } else { encoder.0.raw().compute_use_accels(&shared) }
 }
 
 pub fn create_sampler(device: &Device, descriptor: SamplerDescriptor) -> Result<Sampler, Error> {
@@ -2095,6 +2096,11 @@ mod ownership_tests {
             if self.fail.get() { Err(make_error(operation, ErrorKind::InvalidState, "busy")) } else { Ok(()) }
         }
     }
+    impl DriverAccel for Payload {
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn accel_sizes(&self) -> AccelSizes { AccelSizes {structure_size:64,build_scratch_size:64,refit_scratch_size:32} }
+        fn destroy_accel(&self) -> Result<(), Error> { self.terminal("test.destroy") }
+    }
     impl DriverResource for Payload {
         fn token(&self) -> Token { 42 }
         fn as_any(&self) -> &dyn std::any::Any { self }
@@ -2113,10 +2119,10 @@ mod ownership_tests {
         fn end_blit(&self) -> Result<(), Error> { self.terminal("test.end") }
     }
     impl DriverAccelEncoder for Payload {
-        fn build(&self, _: Token, _: &dyn DriverResource, _: i64) -> Result<(), Error> { self.terminal("test.build") }
-        fn compact(&self, _: Token, _: Token) -> Result<(), Error> { self.terminal("test.compact") }
-        fn write_compacted_size(&self, _: Token, _: &dyn DriverResource, _: crate::validation::AdmittedCompactedSize) -> Result<(), Error> { unreachable!() }
-        fn refit(&self, _: Token, _: &DriverAccelDescriptor, _: &dyn DriverResource, _: i64) -> Result<(), Error> { unreachable!() }
+        fn build(&self, _: &dyn DriverAccel, _: &dyn DriverResource, _: i64) -> Result<(), Error> { self.terminal("test.build") }
+        fn compact(&self, _: &dyn DriverAccel, _: &dyn DriverAccel) -> Result<(), Error> { self.terminal("test.compact") }
+        fn write_compacted_size(&self, _: &dyn DriverAccel, _: &dyn DriverResource, _: crate::validation::AdmittedCompactedSize) -> Result<(), Error> { unreachable!() }
+        fn refit(&self, _: &dyn DriverAccel, _: &DriverAccelDescriptor, _: &dyn DriverResource, _: i64) -> Result<(), Error> { unreachable!() }
         fn end_accel(&self) -> Result<(), Error> { self.terminal("test.end") }
     }
     impl DriverCommands for Payload {
@@ -2134,10 +2140,10 @@ mod ownership_tests {
         fn set_buffer(&self, _: i64, _: i64, _: &dyn DriverResource) -> Result<(), Error> { Ok(()) }
         fn set_bytes(&self, _: i64, _: crate::validation::AdmittedBytes, _: &[u8]) -> Result<(), Error> { panic!("invalid bytes reached driver") }
         fn set_texture(&self, _: i64, _: &dyn DriverResource) -> Result<(), Error> { unreachable!() }
-        fn set_accel(&self, _: i64, _: Token) -> Result<(), Error> { unreachable!() }
+        fn set_accel(&self, _: i64, _: &dyn DriverAccel) -> Result<(), Error> { unreachable!() }
         fn dispatch_threads(&self, _: (i64, i64, i64), _: (i64, i64, i64)) -> Result<(), Error> { Ok(()) }
         fn dispatch_indirect(&self, _: &dyn DriverResource, _: i64, _: (i64, i64, i64)) -> Result<(), Error> { panic!("invalid indirect dispatch reached driver") }
-        fn compute_use_accels(&self, _: &[Token]) -> Result<(), Error> { unreachable!() }
+        fn compute_use_accels(&self, _: &[Rc<dyn DriverAccel>]) -> Result<(), Error> { unreachable!() }
         fn end_compute(&self) -> Result<(), Error> { Ok(()) }
     }
 
@@ -2397,11 +2403,11 @@ mod ownership_tests {
         let destination=acceleration::create(&device.0.handle,PortableDescriptor::Sized {
             size:std::num::NonZeroU64::new(64).unwrap(),template:acceleration::handle(&portable),
         }).unwrap();
-        let make=|token,portable| Accel(Rc::new(AccelInner {
-            token,raw:RefCell::new(None),sizes:AccelSizes {structure_size:64,build_scratch_size:64,refit_scratch_size:32},
+        let make=|portable| Accel(Rc::new(AccelInner {
+            raw:RefCell::new(Some(Rc::new(Payload {_owner:Rc::new(()),fail:fail.clone()}))),sizes:AccelSizes {structure_size:64,build_scratch_size:64,refit_scratch_size:32},
             device:device.clone(),portable:RefCell::new(portable),structures:vec![],dead:Cell::new(false),
         }));
-        let source=make(1,portable); let destination=make(2,destination);
+        let source=make(portable); let destination=make(destination);
         assert_eq!(build_accel(&encoder,&source,&scratch,None).unwrap_err().operation,"test.build");
         assert!(!is_built(&source),"rejected driver build marked the structure built");
         fail.set(false); build_accel(&encoder,&source,&scratch,None).unwrap();

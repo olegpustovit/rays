@@ -179,9 +179,6 @@ struct Dev {
     next: Cell<i64>,
     icbs: RefCell<HashMap<i64, Rc<RefCell<Vec<IcbCommand>>>>>,
     frames: RefCell<HashMap<i64, Rc<RefCell<Option<vk::Surface>>>>>,
-    accels: RefCell<HashMap<i64, Rc<vk::AccelerationStructure>>>,
-    accel_resources: RefCell<HashMap<i64, Vec<Box<dyn DriverResource>>>>,
-    accel_geometries: RefCell<HashMap<i64, Vec<GeomRecord>>>,
     queues: Cell<i64>,
     max_invocations: i64,
 }
@@ -196,12 +193,6 @@ impl Dev {
         match self.device.borrow().as_ref() {
             Some(device) => Ok(device.clone()),
             None => Err(fail(op, ErrorKind::StaleHandle, "device is destroyed")),
-        }
-    }
-    fn find_accel(&self, op: &str, id: Token) -> Result<Rc<vk::AccelerationStructure>, Error> {
-        match self.accels.borrow().get(&id) {
-            Some(accel) => Ok(accel.clone()),
-            None => Err(fail(op, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete")),
         }
     }
 }
@@ -886,7 +877,7 @@ fn motion_instance_geometries(
     instances: &BufferEntry,
     offset: i64,
     count: i64,
-    structures: &[Token],
+    structures: &[Rc<dyn DriverAccel>],
     transforms: (&BufferEntry, i64, i64),
 ) -> Result<(Vec<GeomRecord>, Vec<u8>), Error> {
     let records = read_bytes(op, instances, offset, count * 44)?;
@@ -906,7 +897,7 @@ fn motion_instance_geometries(
         if keys < 2 || start < 0 || keys > transform_count || start > transform_count - keys {
             return Err(fail(op, ErrorKind::InvalidArgument, "motion instance transform range is invalid"));
         }
-        let prototype = dev.accel_geometries.borrow().get(&structures[structure as usize]).cloned();
+        let prototype = owned_accel(op, &*structures[structure as usize])?.geometries.borrow().clone();
         let triangle = match prototype {
             None => return Err(fail(op, ErrorKind::InvalidArgument, "motion instance prototype is not a triangle BLAS")),
             Some(geometries) if geometries.len() == 1 => geometries[0].clone(),
@@ -985,7 +976,7 @@ fn build_accel(dev:&Rc<Dev>,op:&str,descriptor:&DriverAccelDescriptor,generated:
                     device.acceleration_tlas(&buffer,0,count32,&children,true).map_err(|failure|of_vk(op,failure))
                 } else {
                     let buffer=instance_source;
-                    let handles=structures.iter().map(|t|dev.find_accel(op,*t)).collect::<Result<Vec<_>,_>>()?;
+                    let handles=structures.iter().map(|a|owned_accel(op,&**a).map(|a|a.native.clone())).collect::<Result<Vec<_>,_>>()?;
                     let refs=handles.iter().map(|h|(**h).clone()).collect::<Vec<_>>();
                     let buffer=buffer.buffer.borrow();
                     device.acceleration_tlas(&buffer,instances.offset,count32,&refs,false).map_err(|failure|of_vk(op,failure))
@@ -993,30 +984,39 @@ fn build_accel(dev:&Rc<Dev>,op:&str,descriptor:&DriverAccelDescriptor,generated:
             }
         },
         DriverAccelDescriptor::Sized { size,template } => {
-            let template=dev.find_accel(op,*template)?;
-            device.acceleration_sized(*size,&template).map_err(|failure|of_vk(op,failure))
+            let template=owned_accel(op,&**template)?;
+            device.acceleration_sized(*size,&template.native).map_err(|failure|of_vk(op,failure))
         }
     }
 }
 
 struct OwnedAccel {
-    dev: Rc<Dev>,
-    id: Token,
+    native: Rc<vk::AccelerationStructure>,
+    /// The BLAS geometries, kept for motion instances that name this structure as a prototype.
+    geometries: RefCell<Option<Vec<GeomRecord>>>,
+    /// Buffers generated for the build (motion proxies), released with the structure.
+    resources: RefCell<Vec<Box<dyn DriverResource>>>,
     sizes: ogpu_core::backend::AccelSizes,
 }
 
+/// The native structure behind a portable one, or the graph-incomplete error.
+fn owned_accel<'a>(op: &str, accel: &'a dyn DriverAccel) -> Result<&'a OwnedAccel, Error> {
+    match accel.as_any().downcast_ref::<OwnedAccel>() {
+        Some(accel) => Ok(accel),
+        None => Err(fail(op, ErrorKind::InvalidArgument, "acceleration structure graph is incomplete")),
+    }
+}
+
 impl DriverAccel for OwnedAccel {
-    fn accel_token(&self) -> Token {
-        self.id
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn accel_sizes(&self) -> ogpu_core::backend::AccelSizes {
         self.sizes
     }
     fn destroy_accel(&self) -> Result<(), Error> {
-        self.dev.accels.borrow_mut().remove(&self.id);
-        self.dev.accel_geometries.borrow_mut().remove(&self.id);
-        let resources = self.dev.accel_resources.borrow_mut().remove(&self.id).unwrap_or_default();
-        destroy_all(resources);
+        self.geometries.borrow_mut().take();
+        destroy_all(self.resources.take());
         live_add(-1);
         Ok(())
     }
@@ -1034,16 +1034,11 @@ fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<Box
         }
     };
     live_add(1);
-    let id = dev.token();
     let sizes = native.sizes();
-    dev.accels.borrow_mut().insert(id, Rc::new(native));
-    dev.accel_resources.borrow_mut().insert(id, generated);
-    if let Some(records) = stored {
-        dev.accel_geometries.borrow_mut().insert(id, records);
-    }
     Ok(Box::new(OwnedAccel {
-        dev: dev.clone(),
-        id,
+        native: Rc::new(native),
+        geometries: RefCell::new(stored),
+        resources: RefCell::new(generated),
         sizes: ogpu_core::backend::AccelSizes {
             structure_size: sizes.structure_bytes as i64,
             build_scratch_size: sizes.build_scratch_bytes as i64,
@@ -1114,9 +1109,9 @@ impl DriverComputeEncoder for ComputePass {
         let entry = texture_entry(QUEUE_OP, texture)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.set_texture(index as u32, &entry.texture))
     }
-    fn set_accel(&self, index: i64, id: Token) -> Result<(), Error> {
-        let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
-        self.cmds.run(QUEUE_OP, &mut |c| c.set_acceleration(index as u32, &accel))
+    fn set_accel(&self, index: i64, accel: &dyn DriverAccel) -> Result<(), Error> {
+        let accel = owned_accel(QUEUE_OP, accel)?;
+        self.cmds.run(QUEUE_OP, &mut |c| c.set_acceleration(index as u32, &accel.native))
     }
     fn dispatch_threads(&self, (x, y, z): (i64, i64, i64), _threadgroup: (i64, i64, i64)) -> Result<(), Error> {
         let (gx, gy, gz) = self.local.get();
@@ -1130,7 +1125,7 @@ impl DriverComputeEncoder for ComputePass {
         let entry = buffer_entry(QUEUE_OP, buffer)?;
         self.cmds.run(QUEUE_OP, &mut |c| c.dispatch_indirect(&entry.buffer.borrow(), offset as u64))
     }
-    fn compute_use_accels(&self, _accels: &[Token]) -> Result<(), Error> {
+    fn compute_use_accels(&self, _accels: &[Rc<dyn DriverAccel>]) -> Result<(), Error> {
         Ok(())
     }
     fn end_compute(&self) -> Result<(), Error> {
@@ -1154,32 +1149,27 @@ struct AccelPass {
 }
 
 impl DriverAccelEncoder for AccelPass {
-    fn build(&self, id: Token, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
-        let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
+    fn build(&self, accel: &dyn DriverAccel, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
+        let accel = owned_accel(QUEUE_OP, accel)?;
         let scratch = buffer_entry(QUEUE_OP, scratch)?;
-        self.cmds.run(QUEUE_OP, &mut |c| c.build_acceleration(&accel, &scratch.buffer.borrow(), scratch_offset as u64))
+        self.cmds.run(QUEUE_OP, &mut |c| c.build_acceleration(&accel.native, &scratch.buffer.borrow(), scratch_offset as u64))
     }
-    fn compact(&self, src: Token, dst: Token) -> Result<(), Error> {
-        let source = self.cmds.dev.find_accel(QUEUE_OP, src)?;
-        let destination = self.cmds.dev.find_accel(QUEUE_OP, dst)?;
-        self.cmds.run(QUEUE_OP, &mut |c| c.compact_acceleration(&source, &destination))?;
+    fn compact(&self, src: &dyn DriverAccel, dst: &dyn DriverAccel) -> Result<(), Error> {
+        let source = owned_accel(QUEUE_OP, src)?;
+        let destination = owned_accel(QUEUE_OP, dst)?;
+        self.cmds.run(QUEUE_OP, &mut |c| c.compact_acceleration(&source.native, &destination.native))?;
         // Motion proxies need the prototype's vertices even after its original BLAS is released.
-        let records = self.cmds.dev.accel_geometries.borrow().get(&src).cloned();
-        let mut geometries = self.cmds.dev.accel_geometries.borrow_mut();
-        if let Some(records) = records {
-            geometries.insert(dst, records);
-        } else {
-            geometries.remove(&dst);
-        }
+        let records = source.geometries.borrow().clone();
+        *destination.geometries.borrow_mut() = records;
         Ok(())
     }
-    fn write_compacted_size(&self, id: Token, dst: &dyn DriverResource, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
-        let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
+    fn write_compacted_size(&self, accel: &dyn DriverAccel, dst: &dyn DriverResource, output: ogpu_core::validation::AdmittedCompactedSize) -> Result<(), Error> {
+        let accel = owned_accel(QUEUE_OP, accel)?;
         let buffer = buffer_entry(QUEUE_OP, dst)?;
-        self.cmds.run(QUEUE_OP, &mut |c| c.write_compacted_size(&accel, &buffer.buffer.borrow(), output))
+        self.cmds.run(QUEUE_OP, &mut |c| c.write_compacted_size(&accel.native, &buffer.buffer.borrow(), output))
     }
-    fn refit(&self, id: Token, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
-        let accel = self.cmds.dev.find_accel(QUEUE_OP, id)?;
+    fn refit(&self, accel: &dyn DriverAccel, descriptor: &DriverAccelDescriptor, scratch: &dyn DriverResource, scratch_offset: i64) -> Result<(), Error> {
+        let accel = owned_accel(QUEUE_OP, accel)?;
         let scratch = buffer_entry(QUEUE_OP, scratch)?;
         let DriverAccelDescriptor::Build { profile,buffers,.. } = descriptor else {
             return Err(fail(QUEUE_OP, ErrorKind::InvalidArgument, "Vulkan refit requires a BLAS descriptor"));
@@ -1193,15 +1183,15 @@ impl DriverAccelEncoder for AccelPass {
             }
         };
         let refit = self.cmds.run(QUEUE_OP, &mut |c| {
-            c.refit_acceleration(&accel, &native_geometries(&records), &scratch.buffer.borrow(), scratch_offset as u64)
+            c.refit_acceleration(&accel.native, &native_geometries(&records), &scratch.buffer.borrow(), scratch_offset as u64)
         });
         if let Err(failure) = refit {
             destroy_all(generated);
             return Err(failure);
         }
-        let old = self.cmds.dev.accel_resources.borrow_mut().insert(id, generated).unwrap_or_default();
+        let old = std::mem::replace(&mut *accel.resources.borrow_mut(), generated);
         destroy_all(old);
-        self.cmds.dev.accel_geometries.borrow_mut().insert(id, records);
+        *accel.geometries.borrow_mut() = Some(records);
         Ok(())
     }
     fn end_accel(&self) -> Result<(), Error> {
@@ -1713,9 +1703,6 @@ impl DriverDevice for VulkanDevice {
         // Natives leaked past their owners go with the device.
         self.dev.icbs.borrow_mut().clear();
         self.dev.frames.borrow_mut().clear();
-        self.dev.accels.borrow_mut().clear();
-        self.dev.accel_geometries.borrow_mut().clear();
-        self.dev.accel_resources.borrow_mut().clear();
         *self.dev.device.borrow_mut() = None;
         handle::destroy_device(&self.handle);
         Ok(())
@@ -1741,9 +1728,6 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
         next: Cell::new(1),
         icbs: RefCell::default(),
         frames: RefCell::default(),
-        accels: RefCell::default(),
-        accel_resources: RefCell::default(),
-        accel_geometries: RefCell::default(),
         queues: Cell::new(0),
         max_invocations: facts.max_invocations as i64,
     });

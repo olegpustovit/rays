@@ -6,7 +6,7 @@ use crate::{
 };
 use crate::native::acceleration as ma;
 use ogpu_core::{
-    backend::{DriverAccelDescriptor, DriverResource, Token},
+    backend::{DriverAccel, DriverAccelDescriptor, DriverResource},
     error::{Error, ErrorKind},
 };
 use std::{
@@ -56,12 +56,12 @@ fn allocate(device: &Device, descriptor: Option<ma::BuildDescriptor>, sizes: ma:
     })))
 }
 
-pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(&dyn DriverResource) -> Result<Buffer, Error>, resolve_structure: &dyn Fn(Token) -> Result<Acceleration, Error>) -> Result<Acceleration, Error> {
+pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolve_buffer: &dyn Fn(&dyn DriverResource) -> Result<Buffer, Error>, resolve_structure: &dyn Fn(&dyn DriverAccel) -> Result<Acceleration, Error>) -> Result<Acceleration, Error> {
     let operation = "Ogpu_metal.Acceleration.create";
     match descriptor {
         DriverAccelDescriptor::Build { profile,buffers,structures } => {
             let buffers=buffers.iter().map(|r|resolve_buffer(&**r)).collect::<Result<Vec<_>,_>>()?;
-            let structures=structures.iter().map(|t|resolve_structure(*t)).collect::<Result<Vec<_>,_>>()?;
+            let structures=structures.iter().map(|a|resolve_structure(&**a)).collect::<Result<Vec<_>,_>>()?;
             let build=ma::BuildDescriptor::create(device.metal(),profile.clone(),
                 buffers.iter().map(|b|b.metal().clone()).collect(),structures.iter().map(|s|s.0.metal.clone()).collect())?;
             match build.sizes() {
@@ -71,7 +71,7 @@ pub(crate) fn create(device: &Device, descriptor: &DriverAccelDescriptor, resolv
             }
         }
         DriverAccelDescriptor::Sized { size, template } => {
-            let template = resolve_structure(*template)?;
+            let template = resolve_structure(&**template)?;
             let sizes = ma::Sizes { acceleration_structure_size: size.get(), ..template.0.sizes };
             allocate(device, None, sizes, *size, template.0.buffers.borrow().clone(), template.0.structures.borrow().clone())
         }
