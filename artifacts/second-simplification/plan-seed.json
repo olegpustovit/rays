@@ -145,7 +145,7 @@
   },
   "Z6": {
     "status": "active",
-    "note": "Native formatting/compatibility removal prepared; exact pre-change regression and runtime/build baselines captured at 29707ae1"
+    "note": "Substantive source installed in working tree; native formatting replaces compatibility logic; baseline at 29707ae1"
   },
   "Z7": {
     "status": "pending",
