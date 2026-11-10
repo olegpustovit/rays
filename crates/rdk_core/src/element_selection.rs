@@ -131,9 +131,9 @@ fn vertex_selected(
             let reverse = edges.expect("edge selection index required");
             let outgoing = reverse.edge_of_vertex[vertex as usize];
             let previous = reverse.previous_vertex[vertex as usize];
-            (outgoing >= 0 && edge_group::mem(outgoing, value))
-                || (previous >= 0
-                    && reverse.edge_of_vertex[previous as usize] >= 0
+            (outgoing != topology_index::NONE && edge_group::mem(outgoing, value))
+                || (previous != topology_index::NONE
+                    && reverse.edge_of_vertex[previous as usize] != topology_index::NONE
                     && edge_group::mem(reverse.edge_of_vertex[previous as usize], value))
         }
     }
@@ -175,7 +175,7 @@ fn primitive_selected(
             let last = topology.primitive_offsets[(primitive + 1) as usize];
             while vertex < last {
                 let edge = reverse.edge_of_vertex[vertex as usize];
-                if edge >= 0 && edge_group::mem(edge, value) {
+                if edge != topology_index::NONE && edge_group::mem(edge, value) {
                     return true;
                 }
                 vertex += 1;

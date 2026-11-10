@@ -383,7 +383,7 @@ pub fn split_point_edge_groups(
         for at in source.edge_offsets[source_edge]..source.edge_offsets[source_edge + 1] {
             let vertex = source.edge_vertices[at as usize];
             let next = source.next_vertex[vertex as usize];
-            if next < 0 {
+            if next == topology_index::NONE {
                 failure = Some("source topology exposed an incomplete edge".to_owned());
             } else {
                 let target_edge = topology_edge_lookup::find(

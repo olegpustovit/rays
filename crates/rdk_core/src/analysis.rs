@@ -146,9 +146,9 @@ pub fn classify_connectivity(
                     let last = topology_view.primitive_offsets[(primitive + 1) as usize];
                     for vertex in first..last {
                         let edge = reverse.edge_of_vertex[vertex as usize];
-                        let is_seam = edge >= 0
+                        let is_seam = edge != topology_index::NONE
                             && seams.map_or(false, |value| edge_group::mem(edge, value));
-                        if edge >= 0 && !is_seam {
+                        if edge != topology_index::NONE && !is_seam {
                             set.union_rank(
                                 reverse.edge_a[edge as usize] as usize,
                                 reverse.edge_b[edge as usize] as usize,
