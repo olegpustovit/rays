@@ -37,7 +37,8 @@ const FRAMES: i64 = 30;
 // Metal residency lists, no layout intent work without intents: basic 858 / 91,365; empty 609 / 36,159;
 // bare 723 / 46,059.
 // Z1: borrowed graph path and title crumbs: basic 855 / 91,347; empty 538 / 34,724; bare 693 / 45,448.
-const BASIC: (u64, u64) = (855, 91_347);
+// Z1: exact quad cache keys, single-field settings reads: basic 805 / 89,381; empty 538 / 34,724; bare 693 / 45,448.
+const BASIC: (u64, u64) = (805, 89_381);
 const EMPTY: (u64, u64) = (538, 34_724);
 const BARE: (u64, u64) = (693, 45_448);
 

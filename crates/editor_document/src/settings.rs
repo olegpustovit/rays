@@ -29,6 +29,11 @@ pub fn fields(settings: &T) -> Vec<FieldView> {
     settings.schema.view(&settings.values).expect("settings are valid by construction")
 }
 
+/// One field's current value, without viewing every field.
+pub fn value(settings: &T, name: &str) -> Option<Value> {
+    settings.schema.index_of(name).and_then(|i| settings.values.get(i)).cloned()
+}
+
 pub fn defaults(settings: &T) -> T {
     make(&settings.schema, settings.schema.default().to_vec())
 }

@@ -204,8 +204,8 @@ pub fn sampled_texture_bytes(texture: &SampledTexture) -> i64 {
 }
 
 pub struct Lowering {
-    quad_cache: side_lru::Table,
-    quad_payload_cache: side_lru::Table,
+    quad_cache: side_lru::Table<QuadKey>,
+    quad_payload_cache: side_lru::Table<PayloadKey>,
     out_slots: Vec<Draw>,
     out_list: Vec<Draw>,
     ui_slots: side_lru::Table,
@@ -214,8 +214,8 @@ pub struct Lowering {
 
 pub fn create() -> Lowering {
     Lowering {
-        quad_cache: side_lru::create(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, Box::new(|_, _| {}), 1024),
-        quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), 256),
+        quad_cache: side_lru::create_exact(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, 1024),
+        quad_payload_cache: side_lru::create_exact(lru::cache("renderer.quad_payload"), true, side_lru::UNBOUNDED_BYTES, 256),
         out_slots: Vec::new(),
         out_list: Vec::new(),
         ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
@@ -294,6 +294,22 @@ fn transform_bits(t_: &Transform) -> [f64; 6] {
     [t_.xx, t_.xy, t_.yx, t_.yy, t_.tx, t_.ty]
 }
 
+/// The quad's geometry as exact bits; the texture's address and the framebuffer complete a draw's key.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PayloadKey {
+    destination: [u64; 4],
+    transform: [u64; 6],
+    clip: (i64, i64, i64, i64),
+    uv: [u64; 4],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct QuadKey {
+    payload: PayloadKey,
+    texture: usize,
+    framebuffer: (i64, i64, i64, i64),
+}
+
 /// Cached quads retain texture owners, so pointer identity cannot be reused while the draw is cached.
 fn quad(
     state_: &mut Lowering,
@@ -305,26 +321,12 @@ fn quad(
     framebuffer: (i64, i64, i64, i64),
 ) -> Draw {
     let (u0, v0, u1, v1) = uv;
-    let quad_key = format!(
-        "{:p}|{}|{}|{:?}|{}|{:?}",
-        Rc::as_ptr(texture),
-        bits(&rect_bits(destination)),
-        bits(&transform_bits(transform)),
-        clip,
-        bits(&[u0, v0, u1, v1]),
-        framebuffer
-    );
-    if let Some(item) = side_lru::find(&mut state_.quad_cache, &TableKey::Str(quad_key.clone())) {
+    let payload_key = PayloadKey { destination: rect_bits(destination).map(f64::to_bits), transform: transform_bits(transform).map(f64::to_bits), clip, uv: [u0, v0, u1, v1].map(f64::to_bits) };
+    let quad_key = QuadKey { payload: payload_key, texture: Rc::as_ptr(texture) as usize, framebuffer };
+    if let Some(item) = side_lru::find(&mut state_.quad_cache, &quad_key) {
         return item.downcast::<SampledDraw>().unwrap_or_else(|_| unreachable!("quad table item"));
     }
-    let payload_key = format!(
-        "{}|{}|{:?}|{}",
-        bits(&rect_bits(destination)),
-        bits(&transform_bits(transform)),
-        clip,
-        bits(&[u0, v0, u1, v1])
-    );
-    let (vertices, indices, key) = match side_lru::find(&mut state_.quad_payload_cache, &TableKey::Str(payload_key.clone())) {
+    let (vertices, indices, key) = match side_lru::find(&mut state_.quad_payload_cache, &payload_key) {
         Some(item) => {
             let cached = item.downcast::<CachedQuadPayload>().unwrap_or_else(|_| unreachable!("quad payload table item"));
             (cached.vertices.clone(), cached.indices.clone(), cached.mesh_key.clone())
@@ -373,7 +375,7 @@ fn quad(
                 indices: new_bytes(indices),
             });
             let result = (payload.vertices.clone(), payload.indices.clone(), key);
-            side_lru::add(&mut state_.quad_payload_cache, 0, TableKey::Str(payload_key), payload);
+            side_lru::add(&mut state_.quad_payload_cache, 0, payload_key, payload);
             result
         }
     };
@@ -393,7 +395,7 @@ fn quad(
     if bytes <= SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY {
         let item: Item = result.clone();
         // Cached draws own their snapshots, including pixels from older image generations.
-        side_lru::add(&mut state_.quad_cache, bytes, TableKey::Str(quad_key), item);
+        side_lru::add(&mut state_.quad_cache, bytes, quad_key, item);
     }
     result
 }

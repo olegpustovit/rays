@@ -54,6 +54,16 @@ pub fn create(owner: lru::Owner, charges: bool, byte_capacity: i64, release: Rel
     create_inner(owner, capacity, release, hash_of, Box::new(|a, b| a == b), false, CacheOptions { charges, byte_capacity, ..CacheOptions::default() })
 }
 
+/// A table over exact keys that need no text: the stack key is hashed and compared in place.
+pub fn create_exact<K: Hash + Eq + 'static>(owner: lru::Owner, charges: bool, byte_capacity: i64, capacity: i64) -> Table<K> {
+    fn hash_of_key<K: Hash>(key: &K) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        hasher.finish()
+    }
+    create_inner(owner, capacity, Box::new(|_, _| {}), hash_of_key::<K>, Box::new(|a, b| a == b), false, CacheOptions { charges, byte_capacity, ..CacheOptions::default() })
+}
+
 pub fn create_identity(owner: lru::Owner, capacity: i64, equal: Equal<Item>, release: Release<Item>) -> Table<Item> {
     // ponytail: comparator-only keys share one bucket (O(n)); supply hashes if these small caches grow.
     // These caches previously had no pressure eviction. Their entries currently charge zero bytes.
