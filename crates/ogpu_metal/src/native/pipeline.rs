@@ -260,9 +260,6 @@ impl RenderEncoder {
     }
     pub fn use_resources(&self, resources: &[RenderResource], usage: &[ResourceUsage], stages: &[RenderStage]) -> Result<(), Error> {
         const OP: &str = "Metal.RenderEncoder.use_resources";
-        if resources.is_empty() || usage.is_empty() || stages.is_empty() {
-            return Err(error(OP, ErrorKind::InvalidArgument, "resources, usage, and stages must be nonempty"));
-        }
         let mut raw_resources = Vec::with_capacity(resources.len());
         for resource in resources {
             let (kind, raw) = match resource {

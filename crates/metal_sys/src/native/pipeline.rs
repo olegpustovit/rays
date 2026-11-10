@@ -27,7 +27,8 @@ pub fn render_encoder_use_resources(
     usage: i32,
     stages: i32,
 ) -> Result<(), Error> {
-    if resources.is_empty() { return Err(Error::InvalidArgument("render resources must not be empty".into())); }
+    ogpu_core::validation::validate_resource_use("Metal.RenderEncoder.use_resources", resources.len(), usage, stages)
+        .map_err(|failure| Error::InvalidArgument(failure.message.into()))?;
     #[cfg(target_vendor = "apple")]
     {
         let resources = resources.iter().map(|(kind, handle)| {

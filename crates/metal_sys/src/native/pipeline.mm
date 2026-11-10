@@ -537,7 +537,7 @@ extern "C" int32_t rays_metal_render_encoder_use_resources(
     size_t count, int32_t raw_usage, int32_t raw_stages,
     const char **message) {
   if (message) *message = nullptr;
-  if (encoder_handle == nullptr || resources == nullptr || count == 0 ||
+  if (encoder_handle == nullptr || resources == nullptr ||
       raw_usage <= 0 || (raw_usage & ~7) != 0 ||
       raw_stages <= 0 || (raw_stages & ~3) != 0)
     return rays_metal_set_error(message, "invalid render resource-use arguments");

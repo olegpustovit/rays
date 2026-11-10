@@ -231,6 +231,10 @@ fn native_function_sampler_pass_and_layer_arguments_are_admitted_in_core() {
     layer.maximum_drawables=1; assert!(surface::admit_layer("test",layer).is_err());
     assert_eq!(validation::admit_acceleration_size("test",0).unwrap_err().kind,ErrorKind::InvalidArgument);
     assert_eq!(validation::admit_acceleration_size("test",u64::MAX).unwrap().get(),u64::MAX);
+    validation::validate_resource_use("test",1,7,3).unwrap();
+    for (count,usage,stages) in [(0,1,1),(1,0,1),(1,1,0),(1,8,1),(1,1,4),(1,-1,1),(1,1,-1)] {
+        assert_eq!(validation::validate_resource_use("test",count,usage,stages).unwrap_err().kind,ErrorKind::InvalidArgument);
+    }
     for index in [-1,31,i64::MAX] {
         assert_eq!(validation::admit_slot("test",index).unwrap_err().kind,ErrorKind::InvalidArgument);
     }

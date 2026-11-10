@@ -534,3 +534,11 @@ pub fn admit_slot(operation: &str, index: i64) -> Result<AdmittedSlot, Error> {
 pub fn admit_acceleration_size(operation: &str, size: u64) -> Result<std::num::NonZeroU64, Error> {
     std::num::NonZeroU64::new(size).ok_or_else(|| invalid(operation,"structure size must be positive"))
 }
+
+pub fn validate_resource_use(operation: &str, count: usize, usage: i32, stages: i32) -> Result<(), Error> {
+    if count == 0 || usage == 0 || stages == 0 {
+        Err(invalid(operation, "resources, usage, and stages must be nonempty"))
+    } else if usage & !7 != 0 || stages & !3 != 0 {
+        Err(invalid(operation, "invalid render resource-use flags"))
+    } else { Ok(()) }
+}

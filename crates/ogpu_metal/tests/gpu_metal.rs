@@ -277,6 +277,17 @@ fn gpu_render_encoder() {
     let commands = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = RenderEncoder::create(&commands, &pass).unwrap_or_else(|failure| die(failure));
     let sampled = make_texture(&device, Texture::descriptor_2d(Format::Rgba8Unorm, 1, 1, StorageMode::Shared, &[TextureUsage::TextureBinding], None)).unwrap_or_else(|failure| die(failure));
+    let resources = [RenderResource::Texture(sampled.clone())];
+    for failure in [
+        encoder.use_resources(&[], &[ResourceUsage::Sample], &[RenderStage::Fragment]).unwrap_err(),
+        encoder.use_resources(&resources, &[], &[RenderStage::Fragment]).unwrap_err(),
+        encoder.use_resources(&resources, &[ResourceUsage::Sample], &[]).unwrap_err(),
+    ] {
+        assert_eq!(failure.kind, ErrorKind::InvalidArgument);
+        assert_eq!(failure.operation, "Metal.RenderEncoder.use_resources");
+        assert_eq!(failure.message, "resources, usage, and stages must be nonempty");
+    }
+    encoder.use_resources(&resources, &[ResourceUsage::Sample], &[RenderStage::Fragment]).unwrap_or_else(|failure| die(failure));
     let viewport = Viewport { x: 0.0, y: 0.0, width: 8.0, height: 8.0, znear: 0.0, zfar: 1.0 };
     set_native_viewport(&encoder,Viewport { x: -2.0, width: 11.0, ..viewport }).unwrap_or_else(|failure| die(failure));
     for invalid in [
