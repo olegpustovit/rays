@@ -309,7 +309,7 @@ fn png_rows() {
 
 fn font() {
     let mut font = font::open_system(14.).unwrap();
-    font::set_hinting(&mut font, font::hinting::Light_hinting).unwrap();
+    font::set_hinting(&mut font, font::Hinting::LightHinting).unwrap();
     let white = (255, 255, 255, 255);
     assert!(font::render(&mut font, None, None, 1, white, b"").unwrap().is_none(), "empty text");
     assert_eq!(match font::render(&mut font, None, None, 1, white, b"\xc0\x80") { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "UTF-8");
@@ -343,7 +343,7 @@ fn font() {
     assert!(width > 0 && height > 0 && (width - 2 * w1).abs() <= 4 && (height - 2 * h1).abs() <= 2, "explicit text");
     let generation = text::generation(&explicit);
     let pixels = text::pixels(&explicit).unwrap();
-    font::set_hinting(&mut font, font::hinting::Mono_hinting).unwrap();
+    font::set_hinting(&mut font, font::Hinting::MonoHinting).unwrap();
     font::destroy(&mut font).unwrap();
     assert!(
         !text::destroyed(&explicit)

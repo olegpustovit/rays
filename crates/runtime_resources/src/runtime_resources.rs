@@ -7,41 +7,41 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicI64, Ordering};
 
-#[allow(non_camel_case_types)]
-pub type error = ogpu_core::error::Error;
+
+pub type Error = ogpu_core::error::Error;
 
 /// A shared immutable byte buffer, compared by physical equality (`Rc::ptr_eq`) in the storage
 /// hand-over between canvases and images. Image and canvas storage is written in place only through
 /// [`unique`], which copies first when a lease or mirror still holds the buffer.
-#[allow(non_camel_case_types)]
-pub type bytes = Rc<Vec<u8>>;
+
+pub type Bytes = Rc<Vec<u8>>;
 
 
 const MAX_INT: i64 = i64::MAX;
 
-pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {
+pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &Error) {
     oerror::pp(formatter, e)
 }
 
-fn err_value(operation: &str, kind: ErrorKind, message: &str) -> error {
+fn err_value(operation: &str, kind: ErrorKind, message: &str) -> Error {
     oerror::make(operation, kind, message)
 }
 
-fn new_bytes(v: Vec<u8>) -> bytes {
+fn new_bytes(v: Vec<u8>) -> Bytes {
     Rc::new(v)
 }
 
-pub fn byte_buffer(operation: &str, length: usize) -> Result<Vec<u8>, error> {
+pub fn byte_buffer(operation: &str, length: usize) -> Result<Vec<u8>, Error> {
     let mut value = Vec::new();
     value.try_reserve_exact(length).map_err(|_| err_value(operation, ErrorKind::Capacity, "pixel storage exceeds available memory"))?;
     Ok(value)
 }
 
-pub fn copy_bytes(operation: &str, source: &[u8]) -> Result<bytes, error> {
+pub fn copy_bytes(operation: &str, source: &[u8]) -> Result<Bytes, Error> {
     Ok(new_bytes(copy_buffer(operation, source)?))
 }
 
-fn copy_buffer(operation: &str, source: &[u8]) -> Result<Vec<u8>, error> {
+fn copy_buffer(operation: &str, source: &[u8]) -> Result<Vec<u8>, Error> {
     let mut value = byte_buffer(operation, source.len())?;
     value.extend_from_slice(source);
     Ok(value)
@@ -49,7 +49,7 @@ fn copy_buffer(operation: &str, source: &[u8]) -> Result<Vec<u8>, error> {
 
 /// The buffer's bytes for writing: written in place when this is the only holder, else copied into
 /// a fresh buffer first.
-fn unique(b: &mut bytes) -> Result<&mut [u8], error> {
+fn unique(b: &mut Bytes) -> Result<&mut [u8], Error> {
     if Rc::get_mut(b).is_none() {
         *b = copy_bytes("Resources.unique", b)?;
     }
@@ -133,7 +133,7 @@ pub fn write_text(filename: &str, text: &str) -> Result<(), String> {
     write_atomic(filename, &|temporary| std::fs::write(temporary, text).map_err(|e| e.to_string()))
 }
 
-fn enter(operation: &str) -> Result<(), error> {
+fn enter(operation: &str) -> Result<(), Error> {
     if !sdl3::thread::is_initial_domain() || !sdl3::thread::is_sdl_main_thread() {
         Err(err_value(operation, ErrorKind::WrongDomain, "resource operation requires the initial SDL domain"))
     } else {
@@ -163,39 +163,39 @@ pub mod image {
     use super::*;
 
     /// A borrowed, generation-validated texture source.
-    #[allow(non_camel_case_types)]
-    pub type gpu_source_fn = Rc<dyn Fn() -> Option<Texture>>;
 
-    #[allow(non_camel_case_types)]
+    pub type GpuSourceFn = Rc<dyn Fn() -> Option<Texture>>;
+
+
     #[derive(Clone)]
-    pub struct gpu_source {
+    pub struct GpuSource {
         texture: Texture,
-        borrow: gpu_source_fn,
+        borrow: GpuSourceFn,
     }
 
-    #[allow(non_camel_case_types)]
-    pub struct image_data {
+
+    pub struct ImageData {
         identity: i64,
         generation: i64,
         width: i64,
         height: i64,
-        rgba: bytes,
-        spare: Option<bytes>,
-        leases: Vec<(bytes, i64)>,
-        gpu: Option<gpu_source>,
+        rgba: Bytes,
+        spare: Option<Bytes>,
+        leases: Vec<(Bytes, i64)>,
+        gpu: Option<GpuSource>,
         readbacks: i64,
         pub(crate) canvas_owner: Option<i64>,
-        canvas_returns: Vec<(bytes, Rc<dyn Fn(&bytes)>)>,
+        canvas_returns: Vec<(Bytes, Rc<dyn Fn(&Bytes)>)>,
         pub(crate) dead: bool,
     }
 
     #[derive(Clone)]
-    pub struct Image(pub(crate) Rc<RefCell<image_data>>);
+    pub struct Image(pub(crate) Rc<RefCell<ImageData>>);
 
-    #[allow(non_camel_case_types)]
-    pub struct lease {
+
+    pub struct Lease {
         owner: Image,
-        bytes: bytes,
+        bytes: Bytes,
         released: bool,
     }
 
@@ -209,13 +209,13 @@ pub mod image {
         x.0.borrow().dead
     }
 
-    fn check(op: &str, x: &Image) -> Result<(), error> {
+    fn check(op: &str, x: &Image) -> Result<(), Error> {
         enter(op)?;
         if x.0.borrow().dead { Err(err_value(op, ErrorKind::Destroyed, "image is destroyed")) } else { Ok(()) }
     }
 
-    pub(crate) fn owned(width: i64, height: i64, rgba: bytes) -> Image {
-        Image(Rc::new(RefCell::new(image_data {
+    pub(crate) fn owned(width: i64, height: i64, rgba: Bytes) -> Image {
+        Image(Rc::new(RefCell::new(ImageData {
             identity: fresh_identity(),
             generation: 1,
             width,
@@ -231,7 +231,7 @@ pub mod image {
         })))
     }
 
-    pub fn create(width: i64, height: i64, rgba: &[u8]) -> Result<Image, error> {
+    pub fn create(width: i64, height: i64, rgba: &[u8]) -> Result<Image, Error> {
         enter("Image.create")?;
             if !valid_storage(width, height, rgba.len()) {
                 Err(err_value("Image.create", ErrorKind::InvalidArgument, "invalid RGBA extent or storage"))
@@ -241,7 +241,7 @@ pub mod image {
     }
 
     /// The decoded buffer becomes the image's storage (one move into the shared buffer).
-    pub fn load_file(path: &str) -> Result<Image, error> {
+    pub fn load_file(path: &str) -> Result<Image, Error> {
         enter("Image.load_file")?;
         match sdl3::image::load_file(path) {
             Err(e) => Err(err_value("Image.load_file", ErrorKind::Decode, &e.to_string())),
@@ -256,14 +256,14 @@ pub mod image {
         }
     }
 
-    pub fn size(x: &Image) -> Result<(i64, i64), error> {
+    pub fn size(x: &Image) -> Result<(i64, i64), Error> {
         check("Image.size", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
         Ok((d.width, d.height))
     }
 
-    fn validate_gpu(operation: &str, width: i64, height: i64, source: &gpu_source_fn) -> Result<Texture, error> {
+    fn validate_gpu(operation: &str, width: i64, height: i64, source: &GpuSourceFn) -> Result<Texture, Error> {
         if width <= 0 || height <= 0 || width.checked_mul(height).and_then(|n| n.checked_mul(4)).is_none() {
             return Err(err_value(operation, ErrorKind::InvalidArgument, "invalid GPU image extent"));
         }
@@ -289,7 +289,7 @@ pub mod image {
         }
     }
 
-    fn gpu_texture(operation: &str, x: &image_data, source: &gpu_source) -> Result<Texture, error> {
+    fn gpu_texture(operation: &str, x: &ImageData, source: &GpuSource) -> Result<Texture, Error> {
         let texture = validate_gpu(operation, x.width, x.height, &source.borrow)?;
         if backend::texture_id(&texture) == backend::texture_id(&source.texture) {
             Ok(texture)
@@ -298,7 +298,7 @@ pub mod image {
         }
     }
 
-    fn gpu_pixels(operation: &str, x: &mut image_data) -> Result<Vec<u8>, error> {
+    fn gpu_pixels(operation: &str, x: &mut ImageData) -> Result<Vec<u8>, Error> {
         match &x.gpu {
             None => copy_buffer(operation, &x.rgba),
             Some(source) => {
@@ -310,18 +310,18 @@ pub mod image {
         }
     }
 
-    pub fn pixels(x: &Image) -> Result<Vec<u8>, error> {
+    pub fn pixels(x: &Image) -> Result<Vec<u8>, Error> {
         check("Image.pixels", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
         gpu_pixels("Image.pixels", d)
     }
 
-    pub(crate) fn leased(x: &image_data, b: &bytes) -> bool {
+    pub(crate) fn leased(x: &ImageData, b: &Bytes) -> bool {
         x.leases.iter().any(|(l, _)| Rc::ptr_eq(l, b))
     }
 
-    fn return_canvas_storage(x: &mut image_data, b: &bytes) -> bool {
+    fn return_canvas_storage(x: &mut ImageData, b: &Bytes) -> bool {
         match x.canvas_returns.iter().position(|(k, _)| Rc::ptr_eq(k, b)) {
             None => false,
             Some(i) => {
@@ -332,16 +332,16 @@ pub mod image {
         }
     }
 
-    pub(crate) fn register_canvas_storage(x: &mut image_data, b: bytes, callback: Rc<dyn Fn(&bytes)>) {
+    pub(crate) fn register_canvas_storage(x: &mut ImageData, b: Bytes, callback: Rc<dyn Fn(&Bytes)>) {
         x.canvas_returns.retain(|(k, _)| !Rc::ptr_eq(k, &b));
         x.canvas_returns.insert(0, (b, callback));
     }
 
-    fn canvas_storage(x: &image_data, b: &bytes) -> bool {
+    fn canvas_storage(x: &ImageData, b: &Bytes) -> bool {
         x.canvas_returns.iter().any(|(k, _)| Rc::ptr_eq(k, b))
     }
 
-    fn writable(x: &mut image_data, length: usize) -> Result<bytes, error> {
+    fn writable(x: &mut ImageData, length: usize) -> Result<Bytes, Error> {
         if x.rgba.len() == length
             && x.canvas_owner.is_none()
             && !canvas_storage(x, &x.rgba)
@@ -364,7 +364,7 @@ pub mod image {
         }
     }
 
-    fn install(x: &mut image_data, b: bytes) {
+    fn install(x: &mut ImageData, b: Bytes) {
         let old_owned = x.canvas_owner.is_none();
         let old = std::mem::replace(&mut x.rgba, b);
         x.canvas_owner = None;
@@ -376,7 +376,7 @@ pub mod image {
     /// The bytes remain stable until the lease is released, including across image destruction.
     /// Mutations use a second bounded buffer rather than changing leased storage; release is
     /// idempotent.
-    pub fn borrow_snapshot(x: &Image) -> Result<(i64, i64, i64, bytes, lease), error> {
+    pub fn borrow_snapshot(x: &Image) -> Result<(i64, i64, i64, Bytes, Lease), Error> {
         check("Image.borrow_snapshot", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -387,10 +387,10 @@ pub mod image {
             let count = d.leases.iter().find(|(k, _)| Rc::ptr_eq(k, &b)).map_or(0, |(_, c)| *c);
             d.leases.retain(|(k, _)| !Rc::ptr_eq(k, &b));
             d.leases.insert(0, (b.clone(), count + 1));
-            Ok((d.width, d.height, d.generation, b.clone(), lease { owner: x.clone(), bytes: b, released: false }))
+            Ok((d.width, d.height, d.generation, b.clone(), Lease { owner: x.clone(), bytes: b, released: false }))
     }
 
-    pub fn release_snapshot(l: &mut lease) {
+    pub fn release_snapshot(l: &mut Lease) {
         if l.released {
             return;
         }
@@ -409,7 +409,7 @@ pub mod image {
         }
     }
 
-    pub fn replace(x: &Image, width: i64, height: i64, rgba: &[u8]) -> Result<(), error> {
+    pub fn replace(x: &Image, width: i64, height: i64, rgba: &[u8]) -> Result<(), Error> {
         check("Image.replace", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -441,11 +441,11 @@ pub mod image {
             Ok(())
     }
 
-    pub fn of_gpu(width: i64, height: i64, source: gpu_source_fn) -> Result<Image, error> {
+    pub fn of_gpu(width: i64, height: i64, source: GpuSourceFn) -> Result<Image, Error> {
         enter("Image.of_gpu")?;
             let texture = validate_gpu("Image.of_gpu", width, height, &source)?;
             let x = owned(width, height, new_bytes(Vec::new()));
-            x.0.borrow_mut().gpu = Some(gpu_source { texture, borrow: source });
+            x.0.borrow_mut().gpu = Some(GpuSource { texture, borrow: source });
             Ok(x)
     }
 
@@ -453,7 +453,7 @@ pub mod image {
     /// readback. Replacement preserves identity and may resize. The callback must return the
     /// published texture until invalidated; substitution or expiration is an error, never a CPU
     /// fallback. Destroying the image does not destroy its source texture.
-    pub fn replace_gpu_source(x: &Image, width: i64, height: i64, source: gpu_source_fn) -> Result<(), error> {
+    pub fn replace_gpu_source(x: &Image, width: i64, height: i64, source: GpuSourceFn) -> Result<(), Error> {
         check("Image.replace_gpu_source", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -462,13 +462,13 @@ pub mod image {
             d.spare = None;
             d.width = width;
             d.height = height;
-            d.gpu = Some(gpu_source { texture, borrow: source });
+            d.gpu = Some(GpuSource { texture, borrow: source });
             d.generation += 1;
             Ok(())
     }
 
     /// Same-shape publication for owners that already manage raw texture lifetime.
-    pub fn replace_gpu(x: &Image, texture: &Texture) -> Result<(), error> {
+    pub fn replace_gpu(x: &Image, texture: &Texture) -> Result<(), Error> {
         let (width, height) = {
             let d = x.0.borrow();
             (d.width, d.height)
@@ -477,7 +477,7 @@ pub mod image {
         replace_gpu_source(x, width, height, Rc::new(move || Some(texture.clone())))
     }
 
-    pub fn gpu_snapshot(x: &Image) -> Result<Option<(i64, i64, i64, Texture)>, error> {
+    pub fn gpu_snapshot(x: &Image) -> Result<Option<(i64, i64, i64, Texture)>, Error> {
         check("Image.gpu_snapshot", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -493,7 +493,7 @@ pub mod image {
     /// Atomically transfer the source's owned pixel storage. On success the source is destroyed
     /// and the target retains its identity. A source with an active private snapshot lease is
     /// rejected without mutation.
-    pub fn replace_owned(target: &Image, source: &Image) -> Result<(), error> {
+    pub fn replace_owned(target: &Image, source: &Image) -> Result<(), Error> {
         enter("Image.replace_owned")?;
             let op = "Image.replace_owned";
             {
@@ -529,14 +529,14 @@ pub mod image {
             Ok(())
     }
 
-    pub fn destroy(x: &Image) -> Result<(), error> {
+    pub fn destroy(x: &Image) -> Result<(), Error> {
         enter("Image.destroy")?;
             let mut d = x.0.borrow_mut();
             if d.dead {
                 return Ok(());
             }
             d.dead = true;
-            let held: Vec<bytes> = d.canvas_returns.iter().map(|(b, _)| b.clone()).collect();
+            let held: Vec<Bytes> = d.canvas_returns.iter().map(|(b, _)| b.clone()).collect();
             for b in held {
                 if !leased(&d, &b) {
                     return_canvas_storage(&mut d, &b);
@@ -549,7 +549,7 @@ pub mod image {
             Ok(())
     }
 
-    pub(crate) fn of_owned_rgba(width: i64, height: i64, rgba: bytes) -> Image {
+    pub(crate) fn of_owned_rgba(width: i64, height: i64, rgba: Bytes) -> Image {
         owned(width, height, rgba)
     }
 
@@ -564,7 +564,7 @@ pub mod image {
         d.rgba.capacity() as i64 + d.spare.as_ref().map_or(0, |b| b.capacity() as i64)
     }
 
-    pub(crate) fn rgba_of(x: &image_data) -> &bytes {
+    pub(crate) fn rgba_of(x: &ImageData) -> &Bytes {
         &x.rgba
     }
 }
@@ -648,14 +648,14 @@ mod png {
 pub mod canvas {
     use super::*;
 
-    #[allow(non_camel_case_types)]
-    pub struct canvas_data {
+
+    pub struct CanvasData {
         identity: i64,
         generation: i64,
         width: i64,
         height: i64,
-        rgba: bytes,
-        spare: Option<bytes>,
+        rgba: Bytes,
+        spare: Option<Bytes>,
         mirror: Option<image::Image>,
         blocked: Option<image::Image>,
         // The GPU frame this canvas last rendered (owned by its execution); CPU pixels are read
@@ -669,7 +669,7 @@ pub mod canvas {
     }
 
     #[derive(Clone)]
-    pub struct Canvas(Rc<RefCell<canvas_data>>);
+    pub struct Canvas(Rc<RefCell<CanvasData>>);
 
     pub fn generation(x: &Canvas) -> i64 {
         x.0.borrow().generation
@@ -678,12 +678,12 @@ pub mod canvas {
         x.0.borrow().dead
     }
 
-    fn check(op: &str, x: &Canvas) -> Result<(), error> {
+    fn check(op: &str, x: &Canvas) -> Result<(), Error> {
         enter(op)?;
         if x.0.borrow().dead { Err(err_value(op, ErrorKind::Destroyed, "canvas is destroyed")) } else { Ok(()) }
     }
 
-    fn storage(operation: &str, width: i64, height: i64) -> Result<bytes, error> {
+    fn storage(operation: &str, width: i64, height: i64) -> Result<Bytes, Error> {
         if width <= 0 || height <= 0 || width > MAX_INT / 4 || height > MAX_INT / (width * 4) {
             Err(err_value(operation, ErrorKind::InvalidArgument, "invalid canvas extent"))
         } else {
@@ -694,8 +694,8 @@ pub mod canvas {
         }
     }
 
-    fn make(width: i64, height: i64, rgba: bytes) -> Canvas {
-        Canvas(Rc::new(RefCell::new(canvas_data {
+    fn make(width: i64, height: i64, rgba: Bytes) -> Canvas {
+        Canvas(Rc::new(RefCell::new(CanvasData {
             identity: fresh_identity(),
             generation: 1,
             width,
@@ -712,14 +712,14 @@ pub mod canvas {
         })))
     }
 
-    pub fn create(width: i64, height: i64) -> Result<Canvas, error> {
+    pub fn create(width: i64, height: i64) -> Result<Canvas, Error> {
         enter("Canvas.create")?;
         Ok(make(width, height, storage("Canvas.create", width, height)?))
     }
 
     /// Adopt a packed RGBA byte buffer without copying it. The caller must not read or mutate
     /// `rgba` after a successful call.
-    pub fn of_rgba_bytes(width: i64, height: i64, rgba: Vec<u8>) -> Result<Canvas, error> {
+    pub fn of_rgba_bytes(width: i64, height: i64, rgba: Vec<u8>) -> Result<Canvas, Error> {
         enter("Canvas.of_rgba_bytes")?;
             let rgba = new_bytes(rgba);
             if !valid_storage(width, height, rgba.len()) {
@@ -729,31 +729,31 @@ pub mod canvas {
             }
     }
 
-    pub fn size(x: &Canvas) -> Result<(i64, i64), error> {
+    pub fn size(x: &Canvas) -> Result<(i64, i64), Error> {
         check("Canvas.size", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
         Ok((d.width, d.height))
     }
 
-    fn valid_mirror(x: &canvas_data, image: &image::Image) -> bool {
+    fn valid_mirror(x: &CanvasData, image: &image::Image) -> bool {
         let i = image.0.borrow();
         !i.dead && i.canvas_owner == Some(x.identity) && Rc::ptr_eq(image::rgba_of(&i), &x.rgba)
     }
 
-    fn accept_returned_storage(x: &mut canvas_data, b: &bytes) {
+    fn accept_returned_storage(x: &mut CanvasData, b: &Bytes) {
         if !x.dead && b.len() == x.rgba.len() && !Rc::ptr_eq(b, &x.rgba) && x.spare.is_none() {
             x.spare = Some(b.clone());
         }
     }
 
-    fn publish_storage(x: &canvas_data, weak: Weak<RefCell<canvas_data>>, image: &image::Image) {
+    fn publish_storage(x: &CanvasData, weak: Weak<RefCell<CanvasData>>, image: &image::Image) {
         let mut i = image.0.borrow_mut();
         i.canvas_owner = Some(x.identity);
         image::register_canvas_storage(
             &mut i,
             x.rgba.clone(),
-            Rc::new(move |b: &bytes| {
+            Rc::new(move |b: &Bytes| {
                 if let Some(c) = weak.upgrade() {
                     accept_returned_storage(&mut c.borrow_mut(), b);
                 }
@@ -761,7 +761,7 @@ pub mod canvas {
         );
     }
 
-    fn detach_mirror(x: &mut canvas_data) {
+    fn detach_mirror(x: &mut CanvasData) {
         if let Some(image) = x.mirror.take() {
             if valid_mirror(x, &image) {
                 image.0.borrow_mut().canvas_owner = None;
@@ -769,7 +769,7 @@ pub mod canvas {
         }
     }
 
-    fn discard_invalid_mirror(x: &mut canvas_data) {
+    fn discard_invalid_mirror(x: &mut CanvasData) {
         if let Some(image) = &x.mirror {
             if !valid_mirror(x, image) {
                 x.mirror = None;
@@ -777,7 +777,7 @@ pub mod canvas {
         }
     }
 
-    fn detach_for_mutation(x: &mut canvas_data) -> Result<(), error> {
+    fn detach_for_mutation(x: &mut CanvasData) -> Result<(), Error> {
         match &x.mirror {
             Some(image) if valid_mirror(x, image) => {
                 let replacement = match x.spare.take() {
@@ -799,7 +799,7 @@ pub mod canvas {
         Ok(())
     }
 
-    fn detach_for_overwrite(x: &mut canvas_data) -> Result<(), error> {
+    fn detach_for_overwrite(x: &mut CanvasData) -> Result<(), Error> {
         match &x.mirror {
             Some(image) if valid_mirror(x, image) => {
                 let replacement = match x.spare.take() {
@@ -820,7 +820,7 @@ pub mod canvas {
         Ok(())
     }
 
-    fn sync_cpu(x: &mut canvas_data) -> Result<(), error> {
+    fn sync_cpu(x: &mut CanvasData) -> Result<(), Error> {
         if !x.cpu_stale {
             return Ok(());
         }
@@ -839,14 +839,14 @@ pub mod canvas {
         }
     }
 
-    fn cpu_mutates(x: &mut canvas_data) -> Result<(), error> {
+    fn cpu_mutates(x: &mut CanvasData) -> Result<(), Error> {
         sync_cpu(x)?;
         x.gpu = None;
         Ok(())
     }
 
     /// `[0xRRGGBBAA]` at (x, y).
-    pub fn set_pixel(x: &Canvas, px: i64, py: i64, color: i32) -> Result<(), error> {
+    pub fn set_pixel(x: &Canvas, px: i64, py: i64, color: i32) -> Result<(), Error> {
         check("Canvas.set_pixel", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -863,7 +863,7 @@ pub mod canvas {
 
     /// Atomically replace `image` with the current canvas pixels while retaining the image
     /// identity. Equal extents reuse the image's owned storage.
-    pub fn snapshot(x: &Canvas) -> Result<(i64, i64, i64, Vec<u8>), error> {
+    pub fn snapshot(x: &Canvas) -> Result<(i64, i64, i64, Vec<u8>), Error> {
         check("Canvas.snapshot", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -871,7 +871,7 @@ pub mod canvas {
             Ok((d.width, d.height, d.generation, copy_buffer("Canvas.snapshot", &d.rgba)?))
     }
 
-    pub fn capture(x: &Canvas) -> Result<image::Image, error> {
+    pub fn capture(x: &Canvas) -> Result<image::Image, Error> {
         check("Canvas.capture", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -889,7 +889,7 @@ pub mod canvas {
             Ok(image)
     }
 
-    pub fn save_png(x: &Canvas, path: &str) -> Result<(), error> {
+    pub fn save_png(x: &Canvas, path: &str) -> Result<(), Error> {
         check("Canvas.save_png", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -914,7 +914,7 @@ pub mod canvas {
     /// Adopts the canvas execution's completed frame texture (borrowed; the execution owns it)
     /// as the authoritative pixels and bumps the generation. CPU readers read it back lazily;
     /// CPU writers forget it.
-    pub fn publish_gpu(x: &Canvas, texture: &Texture) -> Result<(), error> {
+    pub fn publish_gpu(x: &Canvas, texture: &Texture) -> Result<(), Error> {
         check("Canvas.publish_gpu", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -939,7 +939,7 @@ pub mod canvas {
         d.gpu.clone().map(|tx| (d.width, d.height, d.generation, tx))
     }
 
-    pub fn destroy(x: &Canvas) -> Result<(), error> {
+    pub fn destroy(x: &Canvas) -> Result<(), Error> {
         enter("Canvas.destroy")?;
             let mut d = x.0.borrow_mut();
             if d.dead {
@@ -967,7 +967,7 @@ pub mod text {
         generation: i64,
         width: i64,
         height: i64,
-        rgba: bytes,
+        rgba: Bytes,
         dead: bool,
     }
 
@@ -978,7 +978,7 @@ pub mod text {
         x.dead
     }
 
-    fn check(op: &str, x: &Text) -> Result<(), error> {
+    fn check(op: &str, x: &Text) -> Result<(), Error> {
         enter(op)?;
         if x.dead { Err(err_value(op, ErrorKind::Destroyed, "text snapshot is destroyed")) } else { Ok(()) }
     }
@@ -987,17 +987,17 @@ pub mod text {
         Text { generation: fresh_identity(), width, height, rgba: new_bytes(rgba), dead: false }
     }
 
-    pub fn size(x: &Text) -> Result<(i64, i64), error> {
+    pub fn size(x: &Text) -> Result<(i64, i64), Error> {
         check("Text.size", x)?;
         Ok((x.width, x.height))
     }
 
-    pub fn pixels(x: &Text) -> Result<Vec<u8>, error> {
+    pub fn pixels(x: &Text) -> Result<Vec<u8>, Error> {
         check("Text.pixels", x)?;
         copy_buffer("Text.pixels", &x.rgba)
     }
 
-    pub fn destroy(x: &mut Text) -> Result<(), error> {
+    pub fn destroy(x: &mut Text) -> Result<(), Error> {
         enter("Text.destroy")?;
             if !x.dead {
                 x.dead = true;
@@ -1012,13 +1012,13 @@ pub mod text {
 
     /// The owned RGBA storage, borrowed without a copy. Do not mutate or retain it:
     /// `into_image` may later hand it to an image.
-    pub fn borrow_pixels(x: &Text) -> Result<bytes, error> {
+    pub fn borrow_pixels(x: &Text) -> Result<Bytes, Error> {
         check("Text.borrow_pixels", x)?;
         Ok(x.rgba.clone())
     }
 
     /// Consume the text and transfer its owned RGBA storage to an image.
-    pub fn into_image(x: &mut Text) -> Result<image::Image, error> {
+    pub fn into_image(x: &mut Text) -> Result<image::Image, Error> {
         check("Text.into_image", x)?;
         let image = image::of_owned_rgba(x.width, x.height, std::mem::replace(&mut x.rgba, new_bytes(Vec::new())));
         x.dead = true;
@@ -1034,28 +1034,28 @@ pub mod font {
     use super::*;
     use sdl3::ttf::font as ttf_font;
 
-    #[allow(non_camel_case_types)]
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum hinting {
-        Normal_hinting,
-        Light_hinting,
-        Mono_hinting,
-        None_hinting,
-        Light_subpixel_hinting,
+    pub enum Hinting {
+        NormalHinting,
+        LightHinting,
+        MonoHinting,
+        NoneHinting,
+        LightSubpixelHinting,
     }
 
-    #[allow(non_camel_case_types)]
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct glyph_metrics {
+    pub struct GlyphMetrics {
         pub advance: i64,
     }
 
-    #[allow(non_camel_case_types)]
-    pub type alignment = ttf_font::Alignment;
 
-    #[allow(non_camel_case_types)]
+    pub type Alignment = ttf_font::Alignment;
+
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct metrics {
+    pub struct Metrics {
         pub ascent: i64,
     }
 
@@ -1064,26 +1064,26 @@ pub mod font {
         base_size: f64,
         generation: i64,
         density: i64,
-        align: alignment,
+        align: Alignment,
         dead: bool,
     }
 
     static USERS: AtomicI64 = AtomicI64::new(0);
 
-    fn check(op: &str, x: &Font) -> Result<(), error> {
+    fn check(op: &str, x: &Font) -> Result<(), Error> {
         enter(op)?;
         if x.dead { Err(err_value(op, ErrorKind::Destroyed, "font is destroyed")) } else { Ok(()) }
     }
 
-    fn ttf_error(op: &str, e: &sdl3::ttf::Error) -> error {
+    fn ttf_error(op: &str, e: &sdl3::ttf::Error) -> Error {
         err_value(op, ErrorKind::Decode, &e.to_string())
     }
 
-    fn ensure_init(op: &str) -> Result<(), error> {
+    fn ensure_init(op: &str) -> Result<(), Error> {
         if sdl3::ttf::init::initialized().map_err(|e| ttf_error(op, &e))? { Ok(()) } else { sdl3::ttf::init::init().map_err(|e| ttf_error(op, &e)) }
     }
 
-    pub fn open_file(path: &str, size: f64) -> Result<Font, error> {
+    pub fn open_file(path: &str, size: f64) -> Result<Font, Error> {
         enter("Font.open_file")?;
             if !size.is_finite() || size <= 0. {
                 return Err(err_value("Font.open_file", ErrorKind::InvalidArgument, "font size must be finite and positive"));
@@ -1091,10 +1091,10 @@ pub mod font {
             ensure_init("Font.open_file")?;
             let raw = ttf_font::Font::open_file(path, size).map_err(|e| ttf_error("Font.open_file", &e))?;
             USERS.fetch_add(1, Ordering::SeqCst);
-            Ok(Font { raw, base_size: size, generation: 1, density: 1, align: alignment::Left, dead: false })
+            Ok(Font { raw, base_size: size, generation: 1, density: 1, align: Alignment::Left, dead: false })
     }
 
-    pub fn open_system(size: f64) -> Result<Font, error> {
+    pub fn open_system(size: f64) -> Result<Font, Error> {
         enter("Font.open_system")?;
             let path = ttf_font::system_path(None).map_err(|e| ttf_error("Font.open_system", &e))?;
             open_file(&path, size)
@@ -1104,30 +1104,30 @@ pub mod font {
         x.generation += 1;
     }
 
-    fn native_hinting(value: hinting) -> ttf_font::Hinting {
+    fn native_hinting(value: Hinting) -> ttf_font::Hinting {
         match value {
-            hinting::Normal_hinting => ttf_font::Hinting::Normal,
-            hinting::Light_hinting => ttf_font::Hinting::Light,
-            hinting::Mono_hinting => ttf_font::Hinting::Mono,
-            hinting::None_hinting => ttf_font::Hinting::None,
-            hinting::Light_subpixel_hinting => ttf_font::Hinting::LightSubpixel,
+            Hinting::NormalHinting => ttf_font::Hinting::Normal,
+            Hinting::LightHinting => ttf_font::Hinting::Light,
+            Hinting::MonoHinting => ttf_font::Hinting::Mono,
+            Hinting::NoneHinting => ttf_font::Hinting::None,
+            Hinting::LightSubpixelHinting => ttf_font::Hinting::LightSubpixel,
         }
     }
 
-    pub fn set_hinting(x: &mut Font, value: hinting) -> Result<(), error> {
+    pub fn set_hinting(x: &mut Font, value: Hinting) -> Result<(), Error> {
         check("Font.set_hinting", x)?;
             x.raw.set_hinting(native_hinting(value)).map_err(|e| ttf_error("Font.set_hinting", &e))?;
             invalidate(x);
             Ok(())
     }
 
-    fn glyph_metrics_raw(x: &mut Font, glyph: i64) -> Result<glyph_metrics, error> {
+    fn glyph_metrics_raw(x: &mut Font, glyph: i64) -> Result<GlyphMetrics, Error> {
         check("Font.glyph_metrics", x)?;
             let m = x.raw.glyph_metrics(glyph).map_err(|e| ttf_error("Font.glyph_metrics", &e))?;
-            Ok(glyph_metrics { advance: m.advance })
+            Ok(GlyphMetrics { advance: m.advance })
     }
 
-    fn set_density(x: &mut Font, density: i64) -> Result<(), error> {
+    fn set_density(x: &mut Font, density: i64) -> Result<(), Error> {
         if density == x.density {
             return Ok(());
         }
@@ -1136,7 +1136,7 @@ pub mod font {
         Ok(())
     }
 
-    fn set_align(x: &mut Font, align: alignment) -> Result<(), error> {
+    fn set_align(x: &mut Font, align: Alignment) -> Result<(), Error> {
         if align == x.align {
             return Ok(());
         }
@@ -1146,23 +1146,23 @@ pub mod font {
     }
 
     /// Logical-point measurements: density 1, matching `render ~density:1`.
-    pub fn metrics(x: &mut Font) -> Result<metrics, error> {
+    pub fn metrics(x: &mut Font) -> Result<Metrics, Error> {
         check("Font.metrics", x)?;
             set_density(x, 1)?;
             let m = x.raw.metrics().map_err(|e| ttf_error("Font.metrics", &e))?;
-            Ok(metrics { ascent: m.ascent })
+            Ok(Metrics { ascent: m.ascent })
     }
 
     /// `text` must be strict UTF-8; anything else is `Invalid_argument`.
     pub fn render(
         x: &mut Font,
         wrap_width: Option<i64>,
-        align: Option<alignment>,
+        align: Option<Alignment>,
         density: i64,
         color: (i64, i64, i64, i64),
         text: &[u8],
-    ) -> Result<Option<text::Text>, error> {
-        let align = align.unwrap_or(alignment::Left);
+    ) -> Result<Option<text::Text>, Error> {
+        let align = align.unwrap_or(Alignment::Left);
         check("Font.render", x)?;
             if density <= 0 || density > 16 {
                 return Err(err_value("Font.render", ErrorKind::InvalidArgument, "density must be in 1..16"));
@@ -1185,7 +1185,7 @@ pub mod font {
     }
 
     /// Metrics at the backing density a matching `render` rasterizes with.
-    pub fn glyph_metrics_at(x: &mut Font, density: i64, glyph: i64) -> Result<glyph_metrics, error> {
+    pub fn glyph_metrics_at(x: &mut Font, density: i64, glyph: i64) -> Result<GlyphMetrics, Error> {
         check("Font.glyph_metrics_at", x)?;
             if density <= 0 || density > 16 {
                 return Err(err_value("Font.glyph_metrics_at", ErrorKind::InvalidArgument, "density must be in 1..16"));
@@ -1194,7 +1194,7 @@ pub mod font {
             glyph_metrics_raw(x, glyph)
     }
 
-    pub fn destroy(x: &mut Font) -> Result<(), error> {
+    pub fn destroy(x: &mut Font) -> Result<(), Error> {
         enter("Font.destroy")?;
             if x.dead {
                 return Ok(());
@@ -1217,8 +1217,8 @@ pub mod audio {
     use sdl3::mixer::{audio, channels, init, mixer, music};
     use std::cell::Cell;
 
-    #[allow(non_camel_case_types)]
-    struct audio_data {
+
+    struct AudioData {
         mixer: mixer::Mixer,
         channels: channels::Channels,
         music: music::Music,
@@ -1226,30 +1226,30 @@ pub mod audio {
     }
 
     #[derive(Clone)]
-    pub struct Audio(Rc<audio_data>);
+    pub struct Audio(Rc<AudioData>);
 
-    #[allow(non_camel_case_types)]
-    pub struct sample {
+
+    pub struct Sample {
         owner: Audio,
         raw: audio::Audio,
         dead: bool,
     }
 
-    fn mix_error(op: &str, e: &sdl3::mixer::Error) -> error {
+    fn mix_error(op: &str, e: &sdl3::mixer::Error) -> Error {
         err_value(op, ErrorKind::Decode, &e.to_string())
     }
 
-    fn check(op: &str, x: &Audio) -> Result<(), error> {
+    fn check(op: &str, x: &Audio) -> Result<(), Error> {
         enter(op)?;
         if x.0.dead.get() { Err(err_value(op, ErrorKind::Destroyed, "audio owner is destroyed")) } else { Ok(()) }
     }
 
-    fn sample_check(op: &str, x: &sample) -> Result<(), error> {
+    fn sample_check(op: &str, x: &Sample) -> Result<(), Error> {
         check(op, &x.owner)?;
         if x.dead { Err(err_value(op, ErrorKind::Destroyed, "audio sample is destroyed")) } else { Ok(()) }
     }
 
-    fn attach(op: &str, max_channels: i64, mixer: mixer::Mixer) -> Result<Audio, error> {
+    fn attach(op: &str, max_channels: i64, mixer: mixer::Mixer) -> Result<Audio, Error> {
         let channel_bank = match channels::Channels::create(&mixer, max_channels).map_err(|e| mix_error(op, &e)) {
             Ok(c) => c,
             Err(e) => {
@@ -1258,7 +1258,7 @@ pub mod audio {
             }
         };
         match music::Music::create(&mixer).map_err(|e| mix_error(op, &e)) {
-            Ok(music) => Ok(Audio(Rc::new(audio_data { mixer, channels: channel_bank, music, dead: Cell::new(false) }))),
+            Ok(music) => Ok(Audio(Rc::new(AudioData { mixer, channels: channel_bank, music, dead: Cell::new(false) }))),
             Err(e) => {
                 let _ = channel_bank.destroy();
                 let _ = mixer.destroy();
@@ -1268,7 +1268,7 @@ pub mod audio {
     }
 
     /// Mixes to the default playback device.
-    pub fn create_device(max_channels: i64) -> Result<Audio, error> {
+    pub fn create_device(max_channels: i64) -> Result<Audio, Error> {
         let op = "Audio.create_device";
         enter(op)?;
             init::init().map_err(|e| mix_error(op, &e))?;
@@ -1276,18 +1276,18 @@ pub mod audio {
             attach(op, max_channels, mixer)
     }
 
-    pub fn load_sample_bytes(x: &Audio, encoded: &[u8]) -> Result<sample, error> {
+    pub fn load_sample_bytes(x: &Audio, encoded: &[u8]) -> Result<Sample, Error> {
         check("Audio.load_sample_bytes", x)?;
         let d = &x.0;
             let raw = audio::Audio::load_bytes(&d.mixer, encoded).map_err(|e| mix_error("Audio.load_sample_bytes", &e))?;
-            Ok(sample { owner: x.clone(), raw, dead: false })
+            Ok(Sample { owner: x.clone(), raw, dead: false })
     }
 
     fn valid_volume(x: f64) -> bool {
         x.is_finite() && (0. ..=1.).contains(&x)
     }
 
-    pub fn play_sample(x: &Audio, loops: Option<i64>, volume: Option<f64>, sample: &sample) -> Result<i64, error> {
+    pub fn play_sample(x: &Audio, loops: Option<i64>, volume: Option<f64>, sample: &Sample) -> Result<i64, Error> {
         let loops = loops.unwrap_or(0);
         let volume = volume.unwrap_or(1.);
         sample_check("Audio.play_sample", sample)?;
@@ -1300,7 +1300,7 @@ pub mod audio {
             Ok(channel)
     }
 
-    pub fn destroy_sample(x: &mut sample) -> Result<(), error> {
+    pub fn destroy_sample(x: &mut Sample) -> Result<(), Error> {
         enter("Audio.destroy_sample")?;
             if !x.dead {
                 x.raw.destroy().map_err(|e| mix_error("Audio.destroy_sample", &e))?;
@@ -1309,7 +1309,7 @@ pub mod audio {
             Ok(())
     }
 
-    pub fn destroy(x: &Audio) -> Result<(), error> {
+    pub fn destroy(x: &Audio) -> Result<(), Error> {
         enter("Audio.destroy")?;
             if x.0.dead.get() {
                 return Ok(());
@@ -1331,7 +1331,7 @@ pub mod assets {
     use super::*;
 
     pub struct Assets {
-        hooks: Vec<Box<dyn Fn() -> Result<(), error>>>,
+        hooks: Vec<Box<dyn Fn() -> Result<(), Error>>>,
         dead: bool,
     }
 
@@ -1339,7 +1339,7 @@ pub mod assets {
         Assets { hooks: Vec::new(), dead: false }
     }
 
-    pub fn destroy(x: &mut Assets) -> Result<(), error> {
+    pub fn destroy(x: &mut Assets) -> Result<(), Error> {
         enter("Assets.destroy")?;
             if x.dead {
                 return Ok(());

@@ -2,7 +2,7 @@
 use ogpu_core::backend::{self as b, Driver, DriverDevice, DriverResource, Texture};
 use ogpu_core::error::{self, ErrorKind};
 use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
-use runtime_resources::{canvas, image as I, error as Error};
+use runtime_resources::{canvas, image as I, Error as Error};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -94,7 +94,7 @@ fn gpu_image() {
     let second = texture(&descriptor);
     let resized = texture(&TextureDescriptor { width: 17, height: 5, ..descriptor.clone() });
     let source: Rc<RefCell<Option<Texture>>> = Rc::new(RefCell::new(Some(first.clone())));
-    let from = |source: &Rc<RefCell<Option<Texture>>>| -> I::gpu_source_fn {
+    let from = |source: &Rc<RefCell<Option<Texture>>>| -> I::GpuSourceFn {
         let source = source.clone();
         Rc::new(move || source.borrow().clone())
     };
