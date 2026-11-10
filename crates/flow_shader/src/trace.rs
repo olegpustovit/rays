@@ -73,14 +73,14 @@ pub fn remap(f: &dyn Fn(i64) -> i64, instruction: &Instruction) -> Instruction {
     match instruction {
         Binary(op, a, b) => Binary(*op, f(*a), f(*b)),
         Unary(op, a) => Unary(*op, f(*a)),
-        Int_binary(op, a, b) => Int_binary(*op, f(*a), f(*b)),
-        Int_compare(op, a, b) => Int_compare(*op, f(*a), f(*b)),
-        Int_abs(a) => Int_abs(f(*a)),
+        IntBinary(op, a, b) => IntBinary(*op, f(*a), f(*b)),
+        IntCompare(op, a, b) => IntCompare(*op, f(*a), f(*b)),
+        IntAbs(a) => IntAbs(f(*a)),
         Convert(op, a) => Convert(op.clone(), f(*a)),
         Gather(a, i, w, c) => Gather(f(*a), f(*i), *w, *c),
-        Int_gather(a, i) => Int_gather(f(*a), f(*i)),
-        Text_gather(a, i) => Text_gather(f(*a), f(*i)),
-        Text_select(c, a, b) => Text_select(f(*c), f(*a), f(*b)),
+        IntGather(a, i) => IntGather(f(*a), f(*i)),
+        TextGather(a, i) => TextGather(f(*a), f(*i)),
+        TextSelect(c, a, b) => TextSelect(f(*c), f(*a), f(*b)),
         Noise3(a, b, c, seed, octaves, lacunarity, gain) => {
             let live_int = |x: &region::LiveInt| match x {
                 region::LiveInt::Fixed(v) => region::LiveInt::Fixed(*v),
@@ -92,18 +92,18 @@ pub fn remap(f: &dyn Fn(i64) -> i64, instruction: &Instruction) -> Instruction {
             };
             Noise3(f(*a), f(*b), f(*c), *seed, live_int(octaves), live_float(lacunarity), live_float(gain))
         }
-        Rand_at(seed, index) => Rand_at(f(*seed), f(*index)),
+        RandAt(seed, index) => RandAt(f(*seed), f(*index)),
         Fma(a, b, c) => Fma(f(*a), f(*b), f(*c)),
-        Checked_mul(p, a, b) => Checked_mul(*p, f(*a), f(*b)),
-        Checked_fma(p, a, b, c) => Checked_fma(*p, f(*a), f(*b), f(*c)),
+        CheckedMul(p, a, b) => CheckedMul(*p, f(*a), f(*b)),
+        CheckedFma(p, a, b, c) => CheckedFma(*p, f(*a), f(*b), f(*c)),
         Trace(field, r) => Trace(*field, all(r)),
         Stage(stage, r) => Stage(*stage, all(r)),
         Select(c, a, b) => Select(f(*c), f(*a), f(*b)),
-        Int_select(c, a, b) => Int_select(f(*c), f(*a), f(*b)),
-        Loop_begin(l) => Loop_begin(region::Loop { first: f(l.first), last: f(l.last), initial: all(&l.initial), ..l.clone() }),
-        Loop_carry(owner, component, ty) => Loop_carry(f(*owner), *component, ty.clone()),
-        Loop_end(owner, next, stop) => Loop_end(f(*owner), all(next), stop.map(f)),
-        Loop_result(owner, component, ty) => Loop_result(f(*owner), *component, ty.clone()),
+        IntSelect(c, a, b) => IntSelect(f(*c), f(*a), f(*b)),
+        LoopBegin(l) => LoopBegin(region::Loop { first: f(l.first), last: f(l.last), initial: all(&l.initial), ..l.clone() }),
+        LoopCarry(owner, component, ty) => LoopCarry(f(*owner), *component, ty.clone()),
+        LoopEnd(owner, next, stop) => LoopEnd(f(*owner), all(next), stop.map(f)),
+        LoopResult(owner, component, ty) => LoopResult(f(*owner), *component, ty.clone()),
         Guarded(guards, body) => Guarded(guards.iter().map(|(c, yes)| (f(*c), *yes)).collect(), Box::new(remap(f, body))),
         other => other.clone(),
     }
@@ -114,13 +114,13 @@ pub fn remap(f: &dyn Fn(i64) -> i64, instruction: &Instruction) -> Instruction {
 pub fn rebuild(program: &packed::T, mut code: Vec<Instruction>, back: Vec<i64>, map: &[i64]) -> Result<(packed::T, Back), Diagnostic> {
     fn close(i: &Instruction, slot: i64) -> Instruction {
         match i {
-            Instruction::Loop_begin(l) => Instruction::Loop_begin(region::Loop { finish: slot, ..l.clone() }),
+            Instruction::LoopBegin(l) => Instruction::LoopBegin(region::Loop { finish: slot, ..l.clone() }),
             Instruction::Guarded(g, body) => Instruction::Guarded(g.clone(), Box::new(close(body, slot))),
             other => other.clone(),
         }
     }
     for slot in 0..code.len() {
-        if let (_, Instruction::Loop_end(owner, _, _)) = flat(&code[slot]) {
+        if let (_, Instruction::LoopEnd(owner, _, _)) = flat(&code[slot]) {
             let owner = *owner as usize;
             code[owner] = close(&code[owner], slot as i64);
         }
@@ -171,8 +171,8 @@ fn helper(instanced: bool, motion: bool, strands: i64, spheres: bool, occluded: 
                 .collect()
         };
         let reads_host = program.code.iter().any(|i| match flat(i).1 {
-            Instruction::Uniform(..) | Instruction::Array_prepare(..) | Instruction::Frame(_) | Instruction::Int_uniform(_) => true,
-            Instruction::Int_frame(name) => !kernel_layout::scene_fact(name),
+            Instruction::Uniform(..) | Instruction::ArrayPrepare(..) | Instruction::Frame(_) | Instruction::IntUniform(_) => true,
+            Instruction::IntFrame(name) => !kernel_layout::scene_fact(name),
             _ => false,
         });
         if reads_host {
@@ -212,8 +212,8 @@ pub fn expand(instanced: bool, motion: bool, curves: Option<Curves>, spheres: bo
     for (slot, i) in code.iter().enumerate() {
         scope[slot] = stack.last().copied().unwrap_or(-1);
         match flat(i).1 {
-            Instruction::Loop_begin(_) => stack.push(slot as i64),
-            Instruction::Loop_end(..) => {
+            Instruction::LoopBegin(_) => stack.push(slot as i64),
+            Instruction::LoopEnd(..) => {
                 stack.pop();
             }
             _ => {}

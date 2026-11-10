@@ -83,7 +83,7 @@ pub fn integer_inputs_and_frames() {
         let layout = kernel_layout::plan(PlanOptions { fast: true, ..PlanOptions::default() }, &program);
         assert_eq!(layout.input_used, vec![true]);
         for (slot, instruction) in layout.view.code.iter().enumerate() {
-            if let Instruction::Int_frame(_) = instruction {
+            if let Instruction::IntFrame(_) = instruction {
                 assert!(layout.frames[slot] > 0);
             }
         }

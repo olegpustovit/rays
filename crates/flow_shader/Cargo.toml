@@ -27,3 +27,6 @@ rays_math = { path = "../rays_math" }
 [[test]]
 name = "shader"
 harness = false
+
+[lints]
+workspace = true

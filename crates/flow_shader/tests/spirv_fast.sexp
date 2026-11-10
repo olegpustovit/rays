@@ -9,7 +9,7 @@
 (fast_trace_curves 39024 ee020b6a82be541f89abbe65d0d3e567)
 (fast_gather 3592 4cd52d4de54988ccb3d784dad5fad0ee)
 (fast_list_gather 5564 64b4c13bfc56f130714e4505b97099cc)
-(fast_list_float_index 5028 c1404036467669a0a7fd725a800b825e)
+(fast_list_float_index 4284 b34cad6c686e375a0282bae3979d120a)
 (fast_inner_map_sum 3164 667dbb7277bfe281871f1ae74a741211)
 (fast_inner_slice_sum 6660 5cb434618809f2e0c9f676c9ee89e8d1)
 (fast_vec_gather 4600 da25c7def569587842d174802ee0193c)

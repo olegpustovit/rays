@@ -4,7 +4,7 @@
 //!
 //! Id allocation order is part of the output: nested calls are bound to temporaries left to right
 //! whenever more than one operand allocates an id or a constant.
-#![allow(non_snake_case)]
+
 use crate::noise;
 use crate::trace;
 use flow_ir::core_ir::region::{self, Instruction, Loop, Projection, Stage};
@@ -340,12 +340,16 @@ impl Emitter {
 }
 
 fn binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
+    use flow_syntax::packed_ops::{math_prim, Primitive, SpirvMath};
+    match math_prim(&Primitive::Numeric(operation)).spirv {
+        SpirvMath::Float(opcode) => return e.floating(opcode, &[a, b]),
+        SpirvMath::Glsl(opcode) => return e.ext(opcode, &[a, b]),
+        SpirvMath::Compare(opcode) => { let result = e.compare(opcode, a, b); return e.numeric_truth(result); }
+        _ => {}
+    }
     let float = e.float;
     let boolean = e.boolean;
     match operation {
-        Binary::Add => e.floating(129, &[a, b]),
-        Binary::Sub => e.floating(131, &[a, b]),
-        Binary::Mul => e.floating(133, &[a, b]),
         Binary::Div => {
             let z = e.f(0.0);
             let c = e.compare(180, b, z);
@@ -375,19 +379,6 @@ fn binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
             let pow = e.ext(26, &[abs, b]);
             e.select_f(c, zero, pow)
         }
-        Binary::Min => e.ext(37, &[a, b]),
-        Binary::Max => e.ext(40, &[a, b]),
-        Binary::Lt | Binary::Le | Binary::Gt | Binary::Ge | Binary::Eq => {
-            let opcode = match operation {
-                Binary::Lt => 184,
-                Binary::Le => 188,
-                Binary::Gt => 186,
-                Binary::Ge => 190,
-                _ => 180,
-            };
-            let c = e.compare(opcode, a, b);
-            e.numeric_truth(c)
-        }
         Binary::And => {
             let ta = e.truth(a);
             let tb = e.truth(b);
@@ -400,7 +391,6 @@ fn binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
             let c = e.result(boolean, 166, &[ta, tb]);
             e.numeric_truth(c)
         }
-        Binary::Atan2 => e.ext(25, &[a, b]),
         Binary::Hypot => {
             e.fail("Native-safe hypot is not supported by the SPIR-V kernel target.");
             let _ = float;
@@ -411,6 +401,7 @@ fn binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
             let i = e.result(sint, 110, &[b]);
             e.ext(53, &[a, i])
         }
+            _ => unreachable!("custom binary primitive"),
     }
 }
 
@@ -431,44 +422,29 @@ fn reduced_angle(e: &mut Emitter, value: i64) -> i64 {
 }
 
 fn unary(e: &mut Emitter, operation: Unary, value: i64) -> i64 {
+    use flow_syntax::packed_ops::{math_prim, Primitive, SpirvMath};
+    match math_prim(&Primitive::Math(operation)).spirv {
+        SpirvMath::Glsl(opcode) => return e.ext(opcode, &[value]),
+        SpirvMath::ReducedAngle(opcode) => { let angle = reduced_angle(e, value); return e.ext(opcode, &[angle]); }
+        SpirvMath::AbsGlsl(opcode) => { let abs = e.ext(4, &[value]); return e.ext(opcode, &[abs]); }
+        SpirvMath::BoundedGlsl(opcode) => {
+            let minus = e.f(-1.0);
+            let one = e.f(1.0);
+            let clamped = e.ext(43, &[value, minus, one]);
+            let abs = e.ext(4, &[value]);
+            let outside = e.compare(186, abs, one);
+            let nan = e.f(f64::NAN);
+            let result = e.ext(opcode, &[clamped]);
+            return e.select_f(outside, nan, result);
+        }
+        _ => {}
+    }
     match operation {
-        Unary::Sin => {
-            let r = reduced_angle(e, value);
-            e.ext(13, &[r])
-        }
-        Unary::Cos => {
-            let r = reduced_angle(e, value);
-            e.ext(14, &[r])
-        }
-        Unary::Tan => {
-            let r = reduced_angle(e, value);
-            e.ext(15, &[r])
-        }
-        Unary::Abs => e.ext(4, &[value]),
-        Unary::Sqrt => {
-            let a = e.ext(4, &[value]);
-            e.ext(31, &[a])
-        }
-        Unary::Rsqrt => {
-            let a = e.ext(4, &[value]);
-            e.ext(32, &[a])
-        }
         Unary::Not => {
             let z = e.f(0.0);
             let c = e.compare(180, value, z);
             e.numeric_truth(c)
         }
-        Unary::Asin | Unary::Acos => {
-            let minus = e.f(-1.0);
-            let one = e.f(1.0);
-            let clamped = e.ext(43, &[value, minus, one]);
-            let abs = e.ext(4, &[value]);
-            let c = e.compare(186, abs, one);
-            let nan = e.f(f64::NAN);
-            let r = e.ext(if operation == Unary::Asin { 16 } else { 17 }, &[clamped]);
-            e.select_f(c, nan, r)
-        }
-        Unary::Exp => e.ext(27, &[value]),
         Unary::Log => {
             let z = e.f(0.0);
             let positive = e.compare(186, value, z);
@@ -487,6 +463,7 @@ fn unary(e: &mut Emitter, operation: Unary, value: i64) -> i64 {
             let inner = e.select_f(c184, minus, value);
             e.select_f(c186, one, inner)
         }
+        _ => unreachable!("custom unary primitive"),
     }
 }
 
@@ -1601,8 +1578,8 @@ impl StageState {
         let float = e.float;
         match stage {
             Stage::Fwidth => e.result(float, 209, &[operands[0]]),
-            Stage::Float_bits => e.result(float, 124, &[operands[0]]),
-            Stage::Sample(t, c) | Stage::Sample_level(t, c) => {
+            Stage::FloatBits => e.result(float, 124, &[operands[0]]),
+            Stage::Sample(t, c) | Stage::SampleLevel(t, c) => {
                 let tx = self.texture(e, *t);
                 let li = e.result(self.image, 61, &[tx]);
                 let s = self.sampler_of(e, *t);
@@ -1610,7 +1587,7 @@ impl StageState {
                 let combined = e.result(self.sampled, 86, &[li, ls]);
                 let uv = e.result(self.vec2, 80, &[operands[0], operands[1]]);
                 let texel = match stage {
-                    Stage::Sample_level(..) => e.result(self.vec4, 88, &[combined, uv, 2, operands[2]]),
+                    Stage::SampleLevel(..) => e.result(self.vec4, 88, &[combined, uv, 2, operands[2]]),
                     _ => e.result(self.vec4, 87, &[combined, uv]),
                 };
                 e.result(float, 81, &[texel, *c])
@@ -1626,7 +1603,7 @@ impl StageState {
                 let texel = e.result(self.vec4, 95, &[li, at]);
                 e.result(float, 81, &[texel, *c])
             }
-            Stage::Texture_size(t, c) => {
+            Stage::TextureSize(t, c) => {
                 self.sizes = true;
                 let sint = e.sint;
                 let i = self.texture(e, *t);
@@ -1637,7 +1614,7 @@ impl StageState {
                 let extracted = e.result(sint, 81, &[size, *c]);
                 e.result(float, 111, &[extracted])
             }
-            Stage::Group_scan(field) => self.scan(e, operands[0])[*field as usize],
+            Stage::GroupScan(field) => self.scan(e, operands[0])[*field as usize],
             Stage::Store => {
                 let (var, w) = self.buffers.iter().find(|(k, _)| *k == operands[0]).expect("a bound buffer").1;
                 if w {
@@ -1672,22 +1649,22 @@ impl StageState {
     /// instance id (a long, as an Int frame fact), facing (1.0 or 0.0) and FragCoord
     fn builtin(&mut self, e: &mut Emitter, name: &str) -> i64 {
         match name {
-            "gpu/instance-id" => {
+            "gpu/instance_id" => {
                 let uint = e.uint;
                 let b = self.builtin_variable(e, uint, 43);
                 let loaded = e.result(uint, 61, &[b]);
                 self.to_long(e, loaded)
             }
-            "gpu/front-facing" => {
+            "gpu/front_facing" => {
                 let boolean = e.boolean;
                 let b = self.builtin_variable(e, boolean, 17);
                 let loaded = e.result(boolean, 61, &[b]);
                 e.numeric_truth(loaded)
             }
-            "gpu/fragment-x" | "gpu/fragment-y" | "gpu/depth" => {
+            "gpu/fragment_x" | "gpu/fragment_y" | "gpu/depth" => {
                 let c = match name {
-                    "gpu/fragment-x" => 0,
-                    "gpu/fragment-y" => 1,
+                    "gpu/fragment_x" => 0,
+                    "gpu/fragment_y" => 1,
                     _ => 2,
                 };
                 let v4 = self.vector(e, 4);
@@ -1793,7 +1770,7 @@ impl EP {
     }
     fn table_of(&self, prepared: i64) -> i64 {
         match Instruction::unguarded(&self.layout.view.code[prepared as usize]) {
-            Instruction::Array_prepare(u, _) => *u,
+            Instruction::ArrayPrepare(u, _) => *u,
             _ => panic!("a table register"),
         }
     }
@@ -1892,7 +1869,7 @@ impl EP {
         self.e.load_uint(table, at)
     }
     fn scene_count(&mut self, name: &str, wide: bool) -> i64 {
-        let word = if name == "gpu/scene-spheres" { self.layout.scene_spheres } else { self.layout.scene_strand_count };
+        let word = if name == "gpu/scene_spheres" { self.layout.scene_spheres } else { self.layout.scene_strand_count };
         let w = self.e.uniform(word.expect("a scene count word"));
         if wide {
             self.widen_word(w)
@@ -1913,7 +1890,7 @@ impl EP {
     }
     fn trace_stage(&mut self, stage: &Stage, r: &[i64], wide: bool) -> i64 {
         match stage {
-            Stage::Trace_triangles(k) => {
+            Stage::TraceTriangles(k) => {
                 let floats: Vec<i64> = r.iter().map(|x| self.float_of(*x)).collect();
                 let value = query(&mut self.e, &floats, false)[*k as usize];
                 if *k == 4 {
@@ -1924,12 +1901,12 @@ impl EP {
                     value
                 }
             }
-            Stage::Trace_any => {
+            Stage::TraceAny => {
                 let floats: Vec<i64> = r.iter().map(|x| self.float_of(*x)).collect();
                 let v = query(&mut self.e, &floats, true)[0];
                 self.e.numeric_truth(v)
             }
-            Stage::Trace_curves(k) => {
+            Stage::TraceCurves(k) => {
                 let floats: Vec<i64> = r.iter().map(|x| self.float_of(*x)).collect();
                 let value = curves_query(&mut self.e, &floats, false)[*k as usize];
                 if *k == 3 {
@@ -1940,7 +1917,7 @@ impl EP {
                     value
                 }
             }
-            Stage::Trace_curves_any => {
+            Stage::TraceCurvesAny => {
                 let floats: Vec<i64> = r.iter().map(|x| self.float_of(*x)).collect();
                 let v = curves_query(&mut self.e, &floats, true)[0];
                 self.e.numeric_truth(v)
@@ -1968,7 +1945,7 @@ impl EP {
         }
         let stride = if scene.motion { 32 } else { 16 };
         match stage {
-            Stage::Scene_vertex(ending, c) => {
+            Stage::SceneVertex(ending, c) => {
                 let base = match scene.instances {
                     None => index[1],
                     Some(table) => {
@@ -1986,18 +1963,18 @@ impl EP {
                 let at = add(e, t2, uc);
                 e.load(vertices, at)
             }
-            Stage::Scene_instance => {
+            Stage::SceneInstance => {
                 let t = times(e, index[0], stride);
                 let at = add(e, t, index[1]);
                 e.load(scene.instances.expect("an instance table"), at)
             }
-            Stage::Scene_sphere(c) => {
+            Stage::SceneSphere(c) => {
                 let t = times(e, index[0], 4);
                 let uc = e.u(*c);
                 let at = add(e, t, uc);
                 e.load(scene.spheres, at)
             }
-            Stage::Scene_strand(c) => {
+            Stage::SceneStrand(c) => {
                 let t1 = times(e, index[0], 2);
                 let a = add(e, t1, index[1]);
                 let t2 = times(e, a, 4);
@@ -2033,8 +2010,8 @@ impl EP {
         for (k, x) in a.iter().enumerate() {
             out.push(match stage {
                 Stage::Store if k == 0 => self.table_of(*x),
-                Stage::Store | Stage::Group_scan(_) if self.integer(*x) => self.low(*x),
-                Stage::Float_bits => self.low(*x),
+                Stage::Store | Stage::GroupScan(_) if self.integer(*x) => self.low(*x),
+                Stage::FloatBits => self.low(*x),
                 _ => self.float_of(*x),
             });
         }
@@ -2053,7 +2030,7 @@ impl EP {
     fn expression(&mut self, slot: i64, instruction: &Instruction) -> i64 {
         if self.narrow(slot) {
             match instruction {
-                Instruction::Int_const(n) => self.e.u(n & 0xffff_ffff),
+                Instruction::IntConst(n) => self.e.u(n & 0xffff_ffff),
                 Instruction::Raise(_, code, message, _) => {
                     if self.raster.is_some() {
                         return self.e.fail("Explicit errors need a compute status record.");
@@ -2063,14 +2040,14 @@ impl EP {
                     self.e.record_status(t, packed_ops::error_status(code, message) as i64);
                     self.e.u(0)
                 }
-                Instruction::Int_binary(op, a, b) => {
+                Instruction::IntBinary(op, a, b) => {
                     let ib = self.int_of(*b);
                     self.integer_status(*op, ib);
                     let la = self.low(*a);
                     let lb = self.low(*b);
                     narrow_binary(&mut self.e, *op, la, lb)
                 }
-                Instruction::Int_select(condition, yes, no) => {
+                Instruction::IntSelect(condition, yes, no) => {
                     if yes == no {
                         self.low(*yes)
                     } else {
@@ -2081,13 +2058,13 @@ impl EP {
                         self.e.select_u(t, y, n)
                     }
                 }
-                Instruction::Loop_result(loop_, component, _) => self.registers[(loop_ + 1 + component) as usize],
-                Instruction::Stage(Stage::Noise_table(seed), r) => {
+                Instruction::LoopResult(loop_, component, _) => self.registers[(loop_ + 1 + component) as usize],
+                Instruction::Stage(Stage::NoiseTable(seed), r) => {
                     let l = self.low(r[0]);
                     self.noise_table(*seed, l)
                 }
                 Instruction::Stage(stage, r) => self.stage_value(stage, r, false),
-                Instruction::Int_frame(name) => self.frame_word(name),
+                Instruction::IntFrame(name) => self.frame_word(name),
                 _ => panic!("narrow register without an integer form"),
             }
         } else {
@@ -2112,25 +2089,25 @@ impl EP {
                     self.e.f(0.0)
                 }
             }
-            Instruction::Stage(Stage::Noise_table(seed), r) => {
+            Instruction::Stage(Stage::NoiseTable(seed), r) => {
                 let l = self.low(r[0]);
                 let word = self.noise_table(*seed, l);
                 self.widen_word(word)
             }
             Instruction::Stage(stage, r) if !raster => self.stage_value(stage, r, integer),
-            Instruction::Int_frame(name) if kernel_layout::scene_fact(name) => self.scene_count(name, true),
+            Instruction::IntFrame(name) if kernel_layout::scene_fact(name) => self.scene_count(name, true),
             Instruction::Const(value) => {
                 if self.e.long.is_some() && value.is_finite() && value.fract() == 0.0 && value.abs() < if self.e.int32 { 2147483648.0 } else { 9007199254740992.0 } {
                     self.whole[slot as usize] = Some(self.e.l(*value as i64));
                 }
                 self.e.f(*value)
             }
-            Instruction::Input(..) | Instruction::Int_input(_) | Instruction::Gather(..) | Instruction::Int_gather(..) | Instruction::Stage(..) if raster => match instruction {
+            Instruction::Input(..) | Instruction::IntInput(_) | Instruction::Gather(..) | Instruction::IntGather(..) | Instruction::Stage(..) if raster => match instruction {
                 Instruction::Input(k, _, c) => {
                     let st = self.raster.as_mut().unwrap();
                     st.input(&mut self.e, *k, *c)
                 }
-                Instruction::Int_input(_) => {
+                Instruction::IntInput(_) => {
                     let st = self.raster.as_mut().unwrap();
                     st.int_input(&mut self.e)
                 }
@@ -2145,7 +2122,7 @@ impl EP {
                     let st = self.raster.as_mut().unwrap();
                     st.gather(&mut self.e, t, l, *w, *c)
                 }
-                Instruction::Int_gather(p, at) => {
+                Instruction::IntGather(p, at) => {
                     let l = self.low(*at);
                     let t = self.table_of(*p);
                     let st = self.raster.as_mut().unwrap();
@@ -2198,9 +2175,9 @@ impl EP {
                 let fc = self.float_of(*c);
                 self.e.ext(50, &[fa, fb, fc])
             }
-            Instruction::Checked_mul(projection, a, b) | Instruction::Checked_fma(projection, a, b, _) => {
+            Instruction::CheckedMul(projection, a, b) | Instruction::CheckedFma(projection, a, b, _) => {
                 let value = match instruction {
-                    Instruction::Checked_fma(_, _, _, c) => {
+                    Instruction::CheckedFma(_, _, _, c) => {
                         let fa = self.float_of(*a);
                         let fb = self.float_of(*b);
                         let fc = self.float_of(*c);
@@ -2234,50 +2211,50 @@ impl EP {
                     self.e.select_f(t, y, n)
                 }
             }
-            Instruction::Loop_result(loop_, component, _) => {
+            Instruction::LoopResult(loop_, component, _) => {
                 let at = (loop_ + 1 + component) as usize;
                 self.whole[slot as usize] = self.whole[at];
                 self.registers[at]
             }
-            Instruction::Int_const(value) => self.e.l(*value),
-            Instruction::Int_input(input) if self.input_uint32[*input as usize] => {
+            Instruction::IntConst(value) => self.e.l(*value),
+            Instruction::IntInput(input) if self.input_uint32[*input as usize] => {
                 let l = self.e.load_uint(self.inputs[*input as usize], self.index);
                 self.widen_word(l)
             }
-            Instruction::Int_input(input) => {
+            Instruction::IntInput(input) => {
                 let l = self.e.load(self.inputs[*input as usize], self.index);
                 self.to_int(l)
             }
-            Instruction::Int_uniform(input) if self.is_uint32(self.layout.uniforms[*input as usize]) => {
+            Instruction::IntUniform(input) if self.is_uint32(self.layout.uniforms[*input as usize]) => {
                 let w = self.e.uniform(self.layout.uniforms[*input as usize]);
                 self.widen_word(w)
             }
-            Instruction::Int_uniform(input) => {
+            Instruction::IntUniform(input) => {
                 let w = self.e.uniform_float(self.layout.uniforms[*input as usize]);
                 self.to_int(w)
             }
-            Instruction::Int_frame(name) if raster => self.raster_builtin(name),
-            Instruction::Int_frame(_) if self.is_uint32(self.layout.frames[slot as usize]) => {
+            Instruction::IntFrame(name) if raster => self.raster_builtin(name),
+            Instruction::IntFrame(_) if self.is_uint32(self.layout.frames[slot as usize]) => {
                 let w = self.e.uniform(self.layout.frames[slot as usize]);
                 self.widen_word(w)
             }
-            Instruction::Int_frame(_) => {
+            Instruction::IntFrame(_) => {
                 let w = self.e.uniform_float(self.layout.frames[slot as usize]);
                 self.to_int(w)
             }
-            Instruction::Int_binary(op, a, b) => {
+            Instruction::IntBinary(op, a, b) => {
                 let a = self.int_of(*a);
                 let b = self.int_of(*b);
                 self.integer_status(*op, b);
                 integer_binary(&mut self.e, *op, a, b)
             }
-            Instruction::Int_compare(op, a, b) => {
+            Instruction::IntCompare(op, a, b) => {
                 let ia = self.int_of(*a);
                 let ib = self.int_of(*b);
                 let c = self.e.compare(int_compare_opcode(*op), ia, ib);
                 self.e.numeric_truth(c)
             }
-            Instruction::Int_abs(a) => {
+            Instruction::IntAbs(a) => {
                 let value = self.int_of(*a);
                 let z = self.e.l(0);
                 let c = self.e.compare(177, value, z);
@@ -2285,7 +2262,7 @@ impl EP {
                 let abs = self.e.result(long, 126, &[value]);
                 self.e.select_l(c, abs, value)
             }
-            Instruction::Int_select(condition, yes, no) => {
+            Instruction::IntSelect(condition, yes, no) => {
                 if yes == no {
                     self.int_of(*yes)
                 } else {
@@ -2297,11 +2274,11 @@ impl EP {
                 }
             }
             Instruction::Gather(prepared, at, width, component) => self.element(*prepared, *at, *width, *component),
-            Instruction::Int_gather(prepared, at) if self.gather_uint32[self.gather_k(*prepared)] => {
+            Instruction::IntGather(prepared, at) if self.gather_uint32[self.gather_k(*prepared)] => {
                 let w = self.element_word(*prepared, *at, 1, 0);
                 self.widen_word(w)
             }
-            Instruction::Int_gather(prepared, at) => {
+            Instruction::IntGather(prepared, at) => {
                 let f = self.element(*prepared, *at, 1, 0);
                 self.to_int(f)
             }
@@ -2391,7 +2368,7 @@ impl EP {
     /// A loop bound, as Emit's: in 32-bit registers an Int constant past them saturates.
     fn loop_bound(&mut self, slot: i64) -> i64 {
         match Instruction::unguarded(&self.layout.view.code[slot as usize]) {
-            Instruction::Int_const(n) if self.e.int32 && *n != *n as i32 as i64 => self.e.l((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
+            Instruction::IntConst(n) if self.e.int32 && *n != *n as i32 as i64 => self.e.l((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
             _ => self.int_of(slot),
         }
     }
@@ -2617,7 +2594,7 @@ impl Visit for EP {
         if self.e.failure.is_some() || !self.layout.used[slot] {
             return;
         }
-        if !matches!(Instruction::unguarded(instruction), Instruction::Array_prepare(..)) {
+        if !matches!(Instruction::unguarded(instruction), Instruction::ArrayPrepare(..)) {
             self.emit(slot as i64, vec![], instruction);
         }
     }
@@ -2836,8 +2813,8 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
         }
         for (slot, code) in layout.view.code.iter().enumerate() {
             match Instruction::unguarded(code) {
-                Instruction::Int_uniform(u) => uint32_words.push(layout.uniforms[*u as usize]),
-                Instruction::Int_frame(_) if layout.frames[slot] >= 0 => uint32_words.push(layout.frames[slot]),
+                Instruction::IntUniform(u) => uint32_words.push(layout.uniforms[*u as usize]),
+                Instruction::IntFrame(_) if layout.frames[slot] >= 0 => uint32_words.push(layout.frames[slot]),
                 _ => {}
             }
         }
@@ -3138,8 +3115,8 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Output {
     Position,
-    #[allow(non_camel_case_types)]
-    Point_size,
+
+    PointSize,
     Varying(i64, bool),
     Colour,
     Discard,
@@ -3214,7 +3191,7 @@ pub fn stage(s: &StageSpec, program: &packed::T) -> Result<Vec<u8>, Diagnostic> 
     for (k, o) in s.outputs.iter().enumerate() {
         let id = match o {
             Output::Position => st.io(&mut e, 0, 3, 4, None, false),
-            Output::Point_size => st.io(&mut e, 1, 3, 1, None, false),
+            Output::PointSize => st.io(&mut e, 1, 3, 1, None, false),
             Output::Varying(location, flat) => st.io(&mut e, 0, 3, layout.view.outputs[k].len() as i64, Some(*location), *flat),
             Output::Colour => st.io(&mut e, 0, 3, 4, Some(0), false),
             Output::Discard => 0,

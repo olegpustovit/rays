@@ -46,7 +46,7 @@ fn fast_sources() -> Vec<(String, String)> {
         ("fast_trace_curves", r#"(map (fn [i] (let* [h (scene/trace 1 [(float i) 0. 5.] [0. 0. -1.] 0. 100. t)] [h.t (float h.prim) (+ h.u h.normal.y) (if h.hit 1. 0.)])) (array/range 16 :type "int"))"#.into()),
         ("fast_gather", r#"(let* [table (array/float 7 0.25)] (map (fn [i] (+ t (array/nth table (int/mod i 7)))) (array/range 16 :type "int")))"#.into()),
         ("fast_list_gather", "(let* [table (list [1 0 0] [0 1 0] [0 0 1])] (map (fn [(i : int)] (+ (nth table (int/mod i 3)) [t 0. 0.])) (array/range 16 :type int)))".into()),
-        ("fast_list_float_index", "(let* [table (list 0.25 0.5 0.75)] (map (fn [(i : int)] (+ (nth table (float (int/mod i 3))) t)) (array/range 16 :type int)))".into()),
+        ("fast_list_float_index", "(let* [table (list 0.25 0.5 0.75)] (map (fn [(i : int)] (+ (nth table (int (float (int/mod i 3)))) t)) (array/range 16 :type int)))".into()),
         ("fast_inner_map_sum", "(map (fn [(x : int)] (+ (array/sum (map (fn [(j : int)] (+ x j)) (array/range 3 :type int))) (frame/index))) (array/range 16 :type int))".into()),
         ("fast_inner_slice_sum", "(let* [table (array/range 64 :type int)] (map (fn [(x : int)] (+ (array/sum (array/slice table (int/mod x 61) 3)) (frame/index))) (array/range 16 :type int)))".into()),
         ("fast_vec_gather", r#"(let* [table (map (fn [x] [x (+ x 1.) (- x 1.)]) (array/range 7))] (map (fn [i] (+ (array/nth table (int/mod i 7)) [t 0. 0.])) (array/range 16 :type "int")))"#.into()),

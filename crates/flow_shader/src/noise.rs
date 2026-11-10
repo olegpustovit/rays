@@ -81,11 +81,11 @@ pub fn expand(program: &packed::T) -> Result<(packed::T, Back), Diagnostic> {
                 let mut hm = vec![-1i64; helper.code.len()];
                 for (j, i) in helper.code.iter().enumerate() {
                     match trace::flat(i) {
-                        (_, Instruction::Input(k, _, _) | Instruction::Int_input(k)) => hm[j] = operands[*k as usize],
-                        (_, Instruction::Array_prepare(..)) => {}
+                        (_, Instruction::Input(k, _, _) | Instruction::IntInput(k)) => hm[j] = operands[*k as usize],
+                        (_, Instruction::ArrayPrepare(..)) => {}
                         (inner, body) => {
                             let body = match body {
-                                Instruction::Int_gather(_, index) => Instruction::Stage(Stage::Noise_table(*seed), vec![*index]),
+                                Instruction::IntGather(_, index) => Instruction::Stage(Stage::NoiseTable(*seed), vec![*index]),
                                 body => body.clone(),
                             };
                             let mut g = guards.clone();

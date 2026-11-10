@@ -1,5 +1,5 @@
 //! Print MSL kernels and raster instructions in two passes: first count register uses and locations, then inline registers read once. The visitor records the first printer failure and stops.
-#![allow(non_snake_case)]
+
 use rays_math::hash::digest;
 use crate::noise;
 use crate::trace::Back;
@@ -125,11 +125,11 @@ fn stage_intrinsic(stage: &Stage, operands: &[String]) -> String {
     match stage {
         Stage::Fwidth => format!("fwidth({})", operands[0]),
         Stage::Sample(t, c) => format!("texture{t}.sample(sampler{},float2({},{})).{}", t + 1, operands[0], operands[1], xyzw(*c)),
-        Stage::Sample_level(t, c) => {
+        Stage::SampleLevel(t, c) => {
             format!("texture{t}.sample(sampler{},float2({},{}),level({})).{}", t + 1, operands[0], operands[1], operands[2], xyzw(*c))
         }
         Stage::Read(t, c) => format!("texture{t}.read(uint2({},{})).{}", operands[0], operands[1], xyzw(*c)),
-        Stage::Texture_size(t, c) => format!("float(texture{t}.get_{}())", if *c == 0 { "width" } else { "height" }),
+        Stage::TextureSize(t, c) => format!("float(texture{t}.get_{}())", if *c == 0 { "width" } else { "height" }),
         _ => panic!("Emit.stage_intrinsic"),
     }
 }
@@ -145,46 +145,12 @@ fn register(index: i64) -> String {
 
 
 fn binary(operation: Binary, a: &str, b: &str) -> Result<String, Diagnostic> {
-    let infix = |operator: &str| format!("({a}{operator}{b})");
-    Ok(match operation {
-        Binary::Add => infix("+"),
-        Binary::Sub => infix("-"),
-        Binary::Mul => infix("*"),
-        Binary::Div => format!("({b}==0.0f?0.0f:{a}/{b})"),
-        Binary::Mod => format!("({b}==0.0f?0.0f:fmod(fmod({a},{b})+{b},{b}))"),
-        Binary::Pow => format!("pow(fabs({a}),{b})"),
-        Binary::Min => format!("min({a},{b})"),
-        Binary::Max => format!("max({a},{b})"),
-        Binary::Lt => infix("<"),
-        Binary::Le => infix("<="),
-        Binary::Gt => infix(">"),
-        Binary::Ge => infix(">="),
-        Binary::Eq => infix("=="),
-        Binary::And => format!("({a}!=0.0f&&{b}!=0.0f)"),
-        Binary::Or => format!("({a}!=0.0f||{b}!=0.0f)"),
-        Binary::Atan2 => format!("atan2({a},{b})"),
-        Binary::Hypot => return Err(fail_d("Native-safe hypot is not supported by the Metal kernel target.")),
-        Binary::Ldexp => format!("ldexp({a},int({b}))"),
-    })
+    let template = flow_syntax::packed_ops::math_prim(&flow_syntax::packed_ops::Primitive::Numeric(operation)).msl.ok_or_else(|| fail_d("Native-safe hypot is not supported by the Metal kernel target."))?;
+    Ok(flow_syntax::packed_ops::math_source(template, a, b))
 }
 
 fn unary(operation: Unary, a: &str) -> String {
-    match operation {
-        Unary::Sin => format!("sin({a})"),
-        Unary::Cos => format!("cos({a})"),
-        Unary::Sqrt => format!("sqrt(fabs({a}))"),
-        Unary::Abs => format!("fabs({a})"),
-        Unary::Not => format!("({a}==0.0f)"),
-        Unary::Tan => format!("tan({a})"),
-        Unary::Asin | Unary::Acos => format!(
-            "(fabs({a})>1.0f?as_type<float>(0x7fc00000u):{}({a}))",
-            if operation == Unary::Asin { "asin" } else { "acos" }
-        ),
-        Unary::Exp => format!("exp({a})"),
-        Unary::Log => format!("({a}<=0.0f?as_type<float>(0x7fc00000u):log({a}))"),
-        Unary::Rsqrt => format!("rsqrt(fabs({a}))"),
-        Unary::Sign => format!("({a}>0.0f?1.0f:({a}<0.0f?-1.0f:{a}))"),
-    }
+    flow_syntax::packed_ops::math_source(flow_syntax::packed_ops::math_prim(&flow_syntax::packed_ops::Primitive::Math(operation)).msl.expect("unary target spelling"), a, "")
 }
 
 /// The 32-bit lowering of checked arithmetic: the value or zero, or the finite flag.
@@ -530,9 +496,9 @@ impl Gen {
                 && !self.layout.finite_checks[slot]
                 && (match instruction {
                     Instruction::Trace(..) | Instruction::Raise(..) => false,
-                    Instruction::Int_binary(Integer::Idiv | Integer::Imod | Integer::Ishl | Integer::Ishr, _, _) => false,
+                    Instruction::IntBinary(Integer::Idiv | Integer::Imod | Integer::Ishl | Integer::Ishr, _, _) => false,
                     Instruction::Stage(
-                        Stage::Trace_triangles(_) | Stage::Trace_any | Stage::Trace_curves(_) | Stage::Trace_curves_any | Stage::Group_scan(_) | Stage::Store,
+                        Stage::TraceTriangles(_) | Stage::TraceAny | Stage::TraceCurves(_) | Stage::TraceCurvesAny | Stage::GroupScan(_) | Stage::Store,
                         _,
                     ) => false,
                     _ => true,
@@ -667,7 +633,7 @@ impl Gen {
     }
 
     fn scene_count(&self, name: &str) -> String {
-        let word = if name == "gpu/scene-spheres" { self.layout.scene_spheres } else { self.layout.scene_strand_count };
+        let word = if name == "gpu/scene_spheres" { self.layout.scene_spheres } else { self.layout.scene_strand_count };
         format!("uniforms[{}]", word.expect("scene count word"))
     }
 
@@ -678,8 +644,8 @@ impl Gen {
     /// A ray query (Trace): its result is held in locals declared in the scope and stored once a
     /// scope, guard set and ray (registers `r`), where its first field is read.
     fn trace_query(&mut self, guards: &[(i64, bool)], slot: i64, stage: &Stage, r: &[i64]) -> String {
-        let curve = matches!(stage, Stage::Trace_curves(_) | Stage::Trace_curves_any);
-        let any = matches!(stage, Stage::Trace_any | Stage::Trace_curves_any);
+        let curve = matches!(stage, Stage::TraceCurves(_) | Stage::TraceCurvesAny);
+        let any = matches!(stage, Stage::TraceAny | Stage::TraceCurvesAny);
         let (instancing, moving, native) = (self.instancing, self.moving, self.native);
         let key = (self.current().id, guards.to_vec(), curve, any, r.to_vec());
         let name = match self.hits.get(&key) {
@@ -789,13 +755,13 @@ impl Gen {
             }
         };
         match stage {
-            Stage::Trace_any | Stage::Trace_curves_any => format!("({name}?1.0f:0.0f)"),
-            Stage::Trace_triangles(0) | Stage::Trace_curves(0) => format!("{name}_t"),
-            Stage::Trace_triangles(1) | Stage::Trace_curves(1) => format!("{name}_p"),
-            Stage::Trace_triangles(2) => format!("{name}_uv.x"),
-            Stage::Trace_triangles(3) => format!("{name}_uv.y"),
-            Stage::Trace_curves(2) => format!("{name}_u"),
-            Stage::Trace_triangles(4) | Stage::Trace_curves(3) => format!("({name}_h?1.0f:0.0f)"),
+            Stage::TraceAny | Stage::TraceCurvesAny => format!("({name}?1.0f:0.0f)"),
+            Stage::TraceTriangles(0) | Stage::TraceCurves(0) => format!("{name}_t"),
+            Stage::TraceTriangles(1) | Stage::TraceCurves(1) => format!("{name}_p"),
+            Stage::TraceTriangles(2) => format!("{name}_uv.x"),
+            Stage::TraceTriangles(3) => format!("{name}_uv.y"),
+            Stage::TraceCurves(2) => format!("{name}_u"),
+            Stage::TraceTriangles(4) | Stage::TraceCurves(3) => format!("({name}_h?1.0f:0.0f)"),
             _ => {
                 if instancing {
                     format!("{name}_i")
@@ -811,7 +777,7 @@ impl Gen {
     fn scene_read(&mut self, stage: &Stage, r: &[i64]) -> String {
         let (instancing, stride) = (self.instancing, if self.moving { 32 } else { 16 });
         match stage {
-            Stage::Scene_vertex(ending, c) => {
+            Stage::SceneVertex(ending, c) => {
                 let base = if instancing {
                     let i0 = self.low(r[0]);
                     let i1 = self.low(r[1]);
@@ -822,16 +788,16 @@ impl Gen {
                 let i2 = self.low(r[2]);
                 format!("scene_vertices{}[{base}*3u+{i2}].{}", if *ending { "_end" } else { "" }, xyzw(*c))
             }
-            Stage::Scene_instance => {
+            Stage::SceneInstance => {
                 let i0 = self.low(r[0]);
                 let i1 = self.low(r[1]);
                 format!("scene_instances[{i0}*{stride}u+{i1}]")
             }
-            Stage::Scene_sphere(c) => {
+            Stage::SceneSphere(c) => {
                 let i0 = self.low(r[0]);
                 format!("scene_spheres[{i0}].{}", xyzw(*c))
             }
-            Stage::Scene_strand(c) => {
+            Stage::SceneStrand(c) => {
                 let i0 = self.low(r[0]);
                 let i1 = self.low(r[1]);
                 format!("scene_strands[2u*{i0}+{i1}].{}", xyzw(*c))
@@ -845,7 +811,7 @@ impl Gen {
     /// field is read; a store writes a bound buffer's element and is 1.
     fn group_intrinsic(&mut self, guards: &[(i64, bool)], stage: &Stage, r: &[i64]) -> String {
         match stage {
-            Stage::Group_scan(field) => {
+            Stage::GroupScan(field) => {
                 if self.current().id != 0 || !guards.is_empty() {
                     return self.fail("A group scan runs in uniform control flow, outside loops and branches.");
                 }
@@ -865,7 +831,7 @@ impl Gen {
             Stage::Store => {
                 let table = self.code(r[0]).clone();
                 let (u_, ty) = match Instruction::unguarded(&table) {
-                    Instruction::Array_prepare(u_, ty) => (*u_, ty.clone()),
+                    Instruction::ArrayPrepare(u_, ty) => (*u_, ty.clone()),
                     _ => {
                         self.fail("A store names a bound buffer.");
                         return String::new();
@@ -888,23 +854,23 @@ impl Gen {
     fn expression(&mut self, slot: i64, guards: &[(i64, bool)], instruction: &Instruction) -> String {
         if self.narrow(slot) {
             return match instruction {
-                Instruction::Int_const(n) => format!("{}u", n & 0xffff_ffff),
+                Instruction::IntConst(n) => format!("{}u", n & 0xffff_ffff),
                 Instruction::Raise(..) if self.raster.is_some() => self.fail("Explicit errors need a compute status record."),
                 Instruction::Raise(..) => "0u".to_owned(),
-                Instruction::Int_binary(op, a, b) => {
+                Instruction::IntBinary(op, a, b) => {
                     let lb = if matches!(op, Integer::Ishl | Integer::Ishr) && !self.narrow(*b) { self.int_of(*b) } else { self.low(*b) };
                     let la = self.low(*a);
                     narrow_integer(*op, &la, &lb)
                 }
-                Instruction::Int_select(_, yes, no) if yes == no => self.low(*yes),
-                Instruction::Int_select(condition, yes, no) => {
+                Instruction::IntSelect(_, yes, no) if yes == no => self.low(*yes),
+                Instruction::IntSelect(condition, yes, no) => {
                     let n = self.low(*no);
                     let y = self.low(*yes);
                     let c = self.float_of(*condition);
                     format!("({c}!=0.0f?{y}:{n})")
                 }
-                Instruction::Loop_result(loop_, component, _) => self.reg(loop_ + 1 + component),
-                Instruction::Stage(Stage::Noise_table(seed), r) => {
+                Instruction::LoopResult(loop_, component, _) => self.reg(loop_ + 1 + component),
+                Instruction::Stage(Stage::NoiseTable(seed), r) => {
                     let l = self.low(r[0]);
                     format!("uint(table[{}+{l}])", self.table(*seed))
                 }
@@ -915,7 +881,7 @@ impl Gen {
                         self.trace_query(guards, slot, stage, r)
                     }
                 }
-                Instruction::Int_frame(name) => match &self.raster {
+                Instruction::IntFrame(name) => match &self.raster {
                     Some(x) => (x.builtin)(name),
                     None => self.scene_count(name),
                 },
@@ -973,47 +939,47 @@ impl Gen {
                 let (rc, rb, ra) = (self.reg(*c), self.reg(*b), self.reg(*a));
                 format!("fma({ra},{rb},{rc})")
             }
-            Instruction::Checked_mul(projection, a, b) => {
+            Instruction::CheckedMul(projection, a, b) => {
                 let (rb, ra) = (self.reg(*b), self.reg(*a));
                 checked(*projection, &format!("({ra}*{rb})"))
             }
-            Instruction::Checked_fma(projection, a, b, c) => {
+            Instruction::CheckedFma(projection, a, b, c) => {
                 let (rc, rb, ra) = (self.reg(*c), self.reg(*b), self.reg(*a));
                 checked(*projection, &format!("fma({ra},{rb},{rc})"))
             }
             Instruction::Gather(prepared, index, width, component) => self.element(false, *prepared, *index, *width, *component),
-            Instruction::Int_gather(prepared, index) => self.element(true, *prepared, *index, 1, 0),
-            Instruction::Array_prepare(..) => panic!("array_prepare is not printed"),
-            Instruction::Int_const(n) if self.int32 => int_literal(*n),
-            Instruction::Int_const(n) => format!("long({n}L)"),
-            Instruction::Int_input(input) if raster => (self.raster.as_ref().unwrap().int_input)(*input),
-            Instruction::Int_input(input) => self.int_cast(format!("input{input}[i]"), !self.input_uint32[u(*input)]),
-            Instruction::Int_uniform(index) => {
+            Instruction::IntGather(prepared, index) => self.element(true, *prepared, *index, 1, 0),
+            Instruction::ArrayPrepare(..) => panic!("array_prepare is not printed"),
+            Instruction::IntConst(n) if self.int32 => int_literal(*n),
+            Instruction::IntConst(n) => format!("long({n}L)"),
+            Instruction::IntInput(input) if raster => (self.raster.as_ref().unwrap().int_input)(*input),
+            Instruction::IntInput(input) => self.int_cast(format!("input{input}[i]"), !self.input_uint32[u(*input)]),
+            Instruction::IntUniform(index) => {
                 let offset = self.layout.uniforms[u(*index)];
                 self.int_cast(self.uniform_word(offset), !self.uint32_uniforms.contains(&(offset * 4)))
             }
-            Instruction::Int_frame(name) if raster => format!("long({})", (self.raster.as_ref().unwrap().builtin)(name)),
-            Instruction::Int_frame(name) if kernel_layout::scene_fact(name) => format!("{}({})", self.lt(), self.scene_count(name)),
-            Instruction::Int_frame(_) => {
+            Instruction::IntFrame(name) if raster => format!("long({})", (self.raster.as_ref().unwrap().builtin)(name)),
+            Instruction::IntFrame(name) if kernel_layout::scene_fact(name) => format!("{}({})", self.lt(), self.scene_count(name)),
+            Instruction::IntFrame(_) => {
                 let offset = self.layout.frames[u(slot)];
                 self.int_cast(self.uniform_word(offset), !self.uint32_uniforms.contains(&(offset * 4)))
             }
-            Instruction::Int_binary(op, a, b) => {
+            Instruction::IntBinary(op, a, b) => {
                 let ib = self.int_of(*b);
                 let ia = self.int_of(*a);
                 if self.int32 { integer32(*op, &ia, &ib) } else { integer(*op, &ia, &ib) }
             }
-            Instruction::Int_compare(op, a, b) => {
+            Instruction::IntCompare(op, a, b) => {
                 let ib = self.int_of(*b);
                 let ia = self.int_of(*a);
                 comparison(*op, &ia, &ib)
             }
-            Instruction::Int_abs(a) => {
+            Instruction::IntAbs(a) => {
                 let ia = self.int_of(*a);
                 if self.int32 { format!("abs({ia})") } else { format!("as_type<long>(ulong(abs({ia})))") }
             }
-            Instruction::Int_select(_, yes, no) if yes == no => self.int_of(*yes),
-            Instruction::Int_select(condition, yes, no) => {
+            Instruction::IntSelect(_, yes, no) if yes == no => self.int_of(*yes),
+            Instruction::IntSelect(condition, yes, no) => {
                 let n = self.int_of(*no);
                 let y = self.int_of(*yes);
                 let c = self.float_of(*condition);
@@ -1048,7 +1014,7 @@ impl Gen {
                 let x = format!("round({})", self.float_of(*a));
                 self.int_cast(x, true)
             }
-            Instruction::Text_const(_) | Instruction::Text_input(_) | Instruction::Text_uniform(_) | Instruction::Text_gather(..) | Instruction::Text_select(..) => {
+            Instruction::TextConst(_) | Instruction::TextInput(_) | Instruction::TextUniform(_) | Instruction::TextGather(..) | Instruction::TextSelect(..) => {
                 self.fail("Text kernels stay on the CPU.")
             }
             Instruction::Select(_, yes, no) if yes == no => self.reg(*yes),
@@ -1058,7 +1024,7 @@ impl Gen {
                 let c = self.reg(*condition);
                 format!("({c}!=0.0f?{y}:{n})")
             }
-            Instruction::Stage(stage @ (Stage::Trace_triangles(_) | Stage::Trace_any | Stage::Trace_curves(_) | Stage::Trace_curves_any), r) if !raster => {
+            Instruction::Stage(stage @ (Stage::TraceTriangles(_) | Stage::TraceAny | Stage::TraceCurves(_) | Stage::TraceCurvesAny), r) if !raster => {
                 let value = self.trace_query(guards, slot, stage, r);
                 if self.integer_register(slot) {
                     format!("{}({value})", self.lt())
@@ -1066,18 +1032,18 @@ impl Gen {
                     value
                 }
             }
-            Instruction::Stage(Stage::Noise_table(seed), r) => {
+            Instruction::Stage(Stage::NoiseTable(seed), r) => {
                 let l = self.low(r[0]);
                 format!("{}(table[{}+{l}])", self.lt(), self.table(*seed))
             }
             Instruction::Stage(stage, r) if !raster => self.scene_read(stage, r),
-            Instruction::Stage(stage @ (Stage::Group_scan(_) | Stage::Store), r) => format!("long({})", self.group_intrinsic(guards, stage, r)),
-            Instruction::Stage(Stage::Float_bits, r) => format!("as_type<float>({})", self.low(r[0])),
+            Instruction::Stage(stage @ (Stage::GroupScan(_) | Stage::Store), r) => format!("long({})", self.group_intrinsic(guards, stage, r)),
+            Instruction::Stage(Stage::FloatBits, r) => format!("as_type<float>({})", self.low(r[0])),
             Instruction::Stage(stage, r) => {
                 let operands: Vec<String> = r.iter().map(|x| self.float_of(*x)).collect();
                 stage_intrinsic(stage, &operands)
             }
-            Instruction::Loop_result(loop_, component, _) => self.reg(loop_ + 1 + component),
+            Instruction::LoopResult(loop_, component, _) => self.reg(loop_ + 1 + component),
             _ => self.fail("Integer instructions and conversions are not supported by the Metal kernel target."),
         }
     }
@@ -1187,7 +1153,7 @@ impl Visit for Gen {
             return;
         }
         let (guards, ins) = Instruction::guarded(instruction);
-        if matches!(ins, Instruction::Array_prepare(..)) {
+        if matches!(ins, Instruction::ArrayPrepare(..)) {
             return;
         }
         let ci = self.scopes.len() - 1;
@@ -1205,7 +1171,7 @@ impl Visit for Gen {
             ("float", "0.0f")
         };
         let constant = match ins {
-            Instruction::Const(_) | Instruction::Int_const(_) => !self.layout.finite_checks[slot],
+            Instruction::Const(_) | Instruction::IntConst(_) => !self.layout.finite_checks[slot],
             _ => false,
         };
         // a guarded constant is declared with its value: consumers fold it, and an unselected value is never read
@@ -1238,7 +1204,7 @@ impl Visit for Gen {
             Instruction::Raise(_, code, message, _) => {
                 self.scopes[ci].code.push_str(&format!("{indentation}sb|={}u;\n", packed_ops::error_status(code, message)));
             }
-            Instruction::Int_binary(operation, _, b) => {
+            Instruction::IntBinary(operation, _, b) => {
                 let text = if self.narrow(*b) {
                     let l = self.low(*b);
                     integer_status(true, &indentation, *operation, &l)
@@ -1271,7 +1237,7 @@ impl Visit for Gen {
         }
         // a raster stage counts a capped pass from a small constant in 32 bits
         let counter = match (self.raster.is_some(), control.limit, Instruction::unguarded(self.code(control.first))) {
-            (true, Some(limit), Instruction::Int_const(v)) if !self.narrow(h) && v.abs() + limit < (1 << 30) => "int",
+            (true, Some(limit), Instruction::IntConst(v)) if !self.narrow(h) && v.abs() + limit < (1 << 30) => "int",
             _ => ty(self, h),
         };
         let line = format!("  {counter} r{header}=0;\n");
@@ -1346,7 +1312,7 @@ impl Gen {
     /// 4611686018427387903 ... :until ...)` still runs until it stops.
     fn loop_bound(&mut self, r: i64) -> String {
         match Instruction::unguarded(self.code(r)) {
-            Instruction::Int_const(n) if self.int32 && *n != *n as i32 as i64 => int_literal((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
+            Instruction::IntConst(n) if self.int32 && *n != *n as i32 as i64 => int_literal((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
             _ => self.int_of(r),
         }
     }
@@ -1413,8 +1379,8 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
         }
         for (slot, code) in view.code.iter().enumerate() {
             match Instruction::unguarded(code) {
-                Instruction::Int_uniform(un) => uint32_uniforms.push(layout.uniforms[u(*un)] * 4),
-                Instruction::Int_frame(_) if layout.frames[slot] >= 0 => uint32_uniforms.push(layout.frames[slot] * 4),
+                Instruction::IntUniform(un) => uint32_uniforms.push(layout.uniforms[u(*un)] * 4),
+                Instruction::IntFrame(_) if layout.frames[slot] >= 0 => uint32_uniforms.push(layout.frames[slot] * 4),
                 _ => {}
             }
         }

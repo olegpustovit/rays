@@ -35,7 +35,7 @@ fn component(target: &str, ty: &Ty, k: i64) -> String {
 /// The bound buffer behind a gather's array uniform: the placeholders' lengths number them.
 fn slot(program: &packed::T, u: usize) -> i64 {
     match &program.uniforms[u] {
-        Value::Int_array(a) => a.len() as i64 - 1,
+        Value::IntArray(a) => a.len() as i64 - 1,
         Value::Floats(1, a) => a.len() as i64 - 1,
         _ => panic!("Raster.buffer"),
     }
@@ -56,11 +56,11 @@ fn raster_for(stage: &LStage, input: Box<dyn Fn(i64, i64) -> String>, int_input:
         buffer: Box::new(move |u| buffer_name(&program, u)),
         output: Box::new(move |k, c, value| store(&leaves[k as usize], c, value)),
         builtin: Box::new(|name| match name {
-            "gpu/instance-id" => "iid".to_owned(),
-            "gpu/front-facing" => "(front?1.0f:0.0f)".to_owned(),
+            "gpu/instance_id" => "iid".to_owned(),
+            "gpu/front_facing" => "(front?1.0f:0.0f)".to_owned(),
             "gpu/depth" => "in.position.z".to_owned(),
-            "gpu/fragment-x" => "in.position.x".to_owned(),
-            "gpu/fragment-y" => "in.position.y".to_owned(),
+            "gpu/fragment_x" => "in.position.x".to_owned(),
+            "gpu/fragment_y" => "in.position.y".to_owned(),
             name => panic!("Raster: no built-in {name}"),
         }),
     }
@@ -79,7 +79,7 @@ fn textures(stage: &LStage) -> Vec<(i64, bool)> {
         .code
         .iter()
         .filter_map(|i| match Instruction::unguarded(i) {
-            Instruction::Stage(S::Sample(t, _) | S::Sample_level(t, _) | S::Texture_size(t, _), _) => Some((*t, true)),
+            Instruction::Stage(S::Sample(t, _) | S::SampleLevel(t, _) | S::TextureSize(t, _), _) => Some((*t, true)),
             Instruction::Stage(S::Read(t, _), _) => Some((*t, false)),
             _ => None,
         })
@@ -120,7 +120,7 @@ fn texture_locals(arguments: bool, stage: &LStage) -> String {
 /// A built-in argument, only when the stage reads its fact (Frame or Int_frame `name`).
 fn builtin(stage: &LStage, name: &str, argument: &str) -> Vec<String> {
     if stage.program.code.iter().any(|i| match Instruction::unguarded(i) {
-        Instruction::Frame(n) | Instruction::Int_frame(n) => n == name,
+        Instruction::Frame(n) | Instruction::IntFrame(n) => n == name,
         _ => false,
     }) {
         vec![argument.to_owned()]
@@ -213,9 +213,9 @@ pub fn msl(arguments: bool, declarations: &str, vertex: &str, fragment: &str) ->
         extra.join(",\n    ")
     };
     let mut vertex_extra = vec!["uint vid [[vertex_id]]".to_owned()];
-    vertex_extra.extend(builtin(&v, "gpu/instance-id", "uint iid [[instance_id]]"));
+    vertex_extra.extend(builtin(&v, "gpu/instance_id", "uint iid [[instance_id]]"));
     let mut fragment_extra = vec![format!("{out} in [[stage_in]]")];
-    fragment_extra.extend(builtin(&f, "gpu/front-facing", "bool front [[front_facing]]"));
+    fragment_extra.extend(builtin(&f, "gpu/front_facing", "bool front [[front_facing]]"));
     fragment_extra.extend(texture_arguments(arguments, &f));
     let mut text = String::from("#include <metal_stdlib>\nusing namespace metal;\n");
     if arguments {
@@ -242,7 +242,7 @@ fn buffers_of(s: &LStage) -> Vec<(i64, i64, bool)> {
         .iter()
         .enumerate()
         .filter_map(|(u, value)| match value {
-            Value::Int_array(a) => Some((u as i64, a.len() as i64 - 1, true)),
+            Value::IntArray(a) => Some((u as i64, a.len() as i64 - 1, true)),
             Value::Floats(1, a) => Some((u as i64, a.len() as i64 - 1, false)),
             _ => None,
         })
@@ -293,7 +293,7 @@ pub fn spirv(declarations: &str, vertex: &str, fragment: &str) -> Result<(Vec<u8
                     if leaf.path == ["position".to_owned()] {
                         Output::Position
                     } else if leaf.path == ["point-size".to_owned()] {
-                        Output::Point_size
+                        Output::PointSize
                     } else {
                         Output::Varying(locations[k].expect("a varying"), leaf.flat)
                     }
@@ -326,7 +326,7 @@ fn stored(c: &LStage) -> Vec<i64> {
         .iter()
         .filter_map(|i| match crate::trace::flat(i).1 {
             Instruction::Stage(region::Stage::Store, r) => match crate::trace::flat(&c.program.code[r[0] as usize]).1 {
-                Instruction::Array_prepare(u, _) => Some(slot(&c.program, *u as usize)),
+                Instruction::ArrayPrepare(u, _) => Some(slot(&c.program, *u as usize)),
                 _ => None,
             },
             _ => None,
