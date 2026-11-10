@@ -149,7 +149,7 @@
   },
   "Z7": {
     "status": "active",
-    "note": "WIP body slots and residual interning: data/loop/branch/nested-bound guards pass; baseline567 warmed Orrery lower calls retained"
+    "note": "WIP retained body slots and residual interning; focused data/shape/callable/owner tests pass; original suite exposed factory recursion and vector-source refusal"
   },
   "Z8": {
     "status": "done",
@@ -205,7 +205,7 @@
   },
   "G1": {
     "status": "active",
-    "note": "ba056fc5 9a6ddfd1 plus prior stages \u2014 immutable geometry and output proofs; one actual native build/refit size query; Vulkan32/64 write bug repaired"
+    "note": "ba056fc5 9a6ddfd1 98b912ad \u2014 immutable geometry/output/function proofs; private Metal duplicate checks removed; Vulkan32/64 write bug repaired"
   },
   "G2": {
     "status": "done",

@@ -535,7 +535,7 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | pxui_graph | 357 | 354 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | pxui_shell | 112 | 109 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | rays | 325 | 322 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
-| rays_bin | 1 | 1 | 0 | Pending review |
+| rays_bin | 1 | 1 | 0 | Reviewed: native editor owns the source while the caller retains it for located startup diagnostics; borrowed panic text is copied before reporting |
 | rays_diagnostic | 2 | 2 | 0 | Reviewed: both clones preserve the original diagnostic for independent test assertions |
 | rays_editor | 1734 | 1734 | 55 | Pending review |
 | rays_math | 1 | 1 | 0 | Reviewed: only literal clone is retained test input; explicit fallible TextArray copy is intentional |
@@ -550,8 +550,8 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | runtime | 2 | 2 | 0 | Reviewed: two strings copied from borrowed public filters into owned native filter records |
 | runtime_resources | 32 | 32 | 0 | Pending review |
 | scene_command | 22 | 22 | 0 | Pending review |
-| sdl3 | 8 | 8 | 0 | Pending review |
-| sdl3_sys | 1 | 1 | 0 | Pending review |
+| sdl3 | 8 | 8 | 0 | Reviewed: layer tokens/cache, parent window and mixer owners are shared; live-resize callback releases its TLS borrow before reentry; inline tests retain comparison originals |
+| sdl3_sys | 1 | 1 | 0 | Reviewed: native view owns the parent Rc and both view/caller keep layer tokens; SDL image/text buffers are copied before native free and error text before the next SDL call |
 | sop | 428 | 428 | 9 | Pending review |
 | vulkan_sys | 18 | 18 | 0 | Pending review |
 | web_export | 56 | 56 | 4 | Pending review |
@@ -563,3 +563,5 @@ Ownership review now covers the eight small crates marked above, including quali
 Qualification: scoped all-targets check passes (5.30 s wall / 5.22 s Cargo); `cargo t -p rdk_geom -p rdk_ops -p rdk_boolean` passes 407 cases (23.21 / 22.446 s, slowest parallel_exactness_at_scale 1.236 s); `cargo t -p flow_graph -p pxui_graph -p pxui_shell` passes 106 (40.78 / 40.460 s, slowest bench_scope_big 0.918 s); `cargo t -p renderer -p rays` passes 93 (31.02 / 30.477 s, slowest blends_samples_resize 2.069 s). The existing conditional SDL audio subcase is skipped; no audio qualification claimed. All reported commands terminate with exit 0, and diff checks pass. Logs: `/tmp/rays-z10-root-{check,rdk,graph-ui,renderer-rays}.log`.
 
 The editor idle/sea and SOP warm allocation guards are deliberately held until the concurrent Z7 source batch is coherent. They have not run on this stage yet and remain required for full Z10 qualification. No runtime savings claim is made from the clone count.
+
+Additional read-only ownership review covers rays_bin, sdl3 and sdl3_sys (11 fully reviewed small crates total). Qualified Rc/Arc cloning, native image/text copies and retained error strings were included, not only literal calls. No source change or additional platform qualification is implied. Input review found one real unnecessary key-vector copy in gate: take the owned live-frame keys instead of clone-then-clear; this is prepared outside the worktree for the next qualified Z10 batch, so input remains pending. `/tmp/rays-z10-next-reviewed.patch` additionally prepares20 reviewed last-use moves across10 paths in six crates, not applied. The constructor clone candidate at rays_pathtracer.rs527 needs a borrowed upload branch because m is still moved into latest; blindly applying its Clippy suggestion would violate ownership.
