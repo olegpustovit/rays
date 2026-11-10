@@ -266,20 +266,20 @@ fn plan_round(
     let equalize_lengths = params.equalize_lengths;
     let only_original_positions = params.only_original_positions;
     if primitive_budget <= 0 {
-        return Err(fail("Rdk.Poly_reduce: primitive budget must be positive"));
+        return Err(fail("sop/poly_reduce: primitive budget must be positive"));
     }
     if !equalize_lengths.is_finite() || equalize_lengths < 0.0 {
-        return Err(fail("Rdk.Poly_reduce: equalize lengths must be finite and non-negative"));
+        return Err(fail("sop/poly_reduce: equalize lengths must be finite and non-negative"));
     }
     if let Some(angle) = params.max_normal_deviation {
         if !angle.is_finite() || angle < 0.0 || angle > std::f64::consts::PI {
-            return Err(fail("Rdk.Poly_reduce: normal deviation must be finite and in [0, pi]"));
+            return Err(fail("sop/poly_reduce: normal deviation must be finite and in [0, pi]"));
         }
     }
     cancel::check_opt(cancel_ref)?;
     let topology_value = geometry::topology(geometry_value);
     if !topology::all_triangles(topology_value)? {
-        return Err(fail("Rdk.Poly_reduce: the round planner requires triangle polygons"));
+        return Err(fail("sop/poly_reduce: the round planner requires triangle polygons"));
     }
     let topology_view = topology::view::view(topology_value)?;
     let index_value = topology_index::create(cancel_ref, topology_value)?;
@@ -287,14 +287,14 @@ fn plan_round(
     let point_count = geometry::point_count(geometry_value) as usize;
     let primitive_count = geometry::primitive_count(geometry_value) as usize;
     let edge_count = index.edge_a.len();
-    validate_group(group::Owner::Primitive, primitive_count as i64, "Rdk.Poly_reduce: primitive selection", primitive_selection)?;
-    validate_group(group::Owner::Point, point_count as i64, "Rdk.Poly_reduce: hard points", hard_points)?;
-    validate_edge_group(topology_value, edge_count as i64, "Rdk.Poly_reduce: hard edges", hard_edges)?;
+    validate_group(group::Owner::Primitive, primitive_count as i64, "sop/poly_reduce: primitive selection", primitive_selection)?;
+    validate_group(group::Owner::Point, point_count as i64, "sop/poly_reduce: hard points", hard_points)?;
+    validate_edge_group(topology_value, edge_count as i64, "sop/poly_reduce: hard edges", hard_edges)?;
     let positions = packed::float3::view::view(geometry::positions(geometry_value))?;
     support::parallel_for(cancel_ref, (grain / 3).max(1), point_count as i64, &|point| {
         let point = point as usize;
         if !(positions.x[point].is_finite() && positions.y[point].is_finite() && positions.z[point].is_finite()) {
-            return Err(fail(&format!("Rdk.Poly_reduce: point {point} has a non-finite position")));
+            return Err(fail(&format!("sop/poly_reduce: point {point} has a non-finite position")));
         }
         Ok(())
     })?;
@@ -545,7 +545,7 @@ fn unique_edge_name(base: &str, geometry_value: &geometry::T) -> String {
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
-    support::check_positive(grain).map_err(|_| make(Code::InvalidTopology, "Rdk.Poly_reduce.poly_reduce: grain must be positive"))?;
+    support::check_positive(grain).map_err(|_| make(Code::InvalidTopology, "sop/poly_reduce: grain must be positive"))?;
     run_inner(params, grain, geometry_value).map_err(|value| error::guard(value, "poly_reduce", Code::InvalidTopology))
 }
 
@@ -557,26 +557,26 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     let original_topology = geometry::topology(geometry_value);
     match params.target {
         Target::ReduceRatio(ratio) if !ratio.is_finite() || ratio < 0.0 || ratio > 1.0 => {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: ratio must be finite and in [0, 1]"));
+            return Err(fail("sop/poly_reduce: ratio must be finite and in [0, 1]"));
         }
         Target::ReducePrimitiveCount(count) if count < 0 => {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: target primitive count must be non-negative"));
+            return Err(fail("sop/poly_reduce: target primitive count must be non-negative"));
         }
         _ => {}
     }
     if let Some(name) = &params.output_group {
         if (name).trim().is_empty() {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: output group name must not be empty"));
+            return Err(fail("sop/poly_reduce: output group name must not be empty"));
         }
     }
     if let Some(item) = &params.primitives {
         if group::owner(item) != group::Owner::Primitive || group::length(item) != original_primitives {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: selection must be a matching primitive group"));
+            return Err(fail("sop/poly_reduce: selection must be a matching primitive group"));
         }
     }
     if let Some(item) = &params.hard_points {
         if group::owner(item) != group::Owner::Point || group::length(item) != original_points {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: hard points must be a matching point group"));
+            return Err(fail("sop/poly_reduce: hard points must be a matching point group"));
         }
     }
     let original_index = topology_index::create(cancel_ref, original_topology)?;
@@ -584,7 +584,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         if edge_group::topology_data_id(item) != topology::data_id(original_topology)
             || edge_group::length(item) != topology_index::edge_count(&original_index)
         {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: hard edges must belong to the input topology"));
+            return Err(fail("sop/poly_reduce: hard edges must belong to the input topology"));
         }
     }
     let requested_original = match params.target {
@@ -633,7 +633,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             break;
         }
         if round > 128 {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: adaptive reduction exceeded 128 rounds"));
+            return Err(fail("sop/poly_reduce: adaptive reduction exceeded 128 rounds"));
         }
         let primitive_selection = primitive_name
             .as_ref()
@@ -670,7 +670,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             &current,
         )?;
         if geometry::primitive_count(&next) >= count {
-            return Err(fail("Rdk.Poly_reduce.poly_reduce: a planned contraction made no progress"));
+            return Err(fail("sop/poly_reduce: a planned contraction made no progress"));
         }
         current = next;
         round += 1;

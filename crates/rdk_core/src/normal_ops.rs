@@ -33,7 +33,7 @@ struct Faces {
     inverse_length: Vec<f64>,
 }
 
-const OPERATION: &str = "Rdk.Normal_ops.normals";
+const OPERATION: &str = "sop/normals";
 
 fn max_abs3(x: f64, y: f64, z: f64) -> f64 {
     x.abs().max(y.abs()).max(z.abs())
@@ -778,7 +778,7 @@ mod tests {
             cancel::cancel(&token);
             let error = run(&params(Some(token), Some(grain)), &geometry_value).err().unwrap();
             assert_eq!(error::code(&error), Code::InvalidArgument);
-            assert_eq!(error::operation(&error), OPERATION);
+            assert_eq!(error::operation(&error), "sop/normals");
             assert_eq!(error::message(&error), format!("{OPERATION}: grain must be positive"));
         }
 

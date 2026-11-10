@@ -45,7 +45,7 @@ impl Params {
     }
 }
 
-const OPERATION: &str = "Rdk.Poly_fill.poly_fill";
+const OPERATION: &str = "sop/poly_fill";
 
 fn make(code: Code, message: &str) -> error::T {
     error::new("poly_fill", code, message.to_owned())

@@ -39,7 +39,7 @@ pub struct Params {
 }
 
 fn fail(message: String) -> error::T {
-    error::new("Rdk.Fuse_reduce", Code::InvalidParameter, message)
+    error::new("rdk_geom::fuse_reduce", Code::InvalidParameter, message)
 }
 
 fn average_plane(
@@ -114,7 +114,7 @@ fn numeric_reduction(
         Position::Median => sorted_reduction(cancel_value, grain, clusters, source, true),
         Position::Mode => sorted_reduction(cancel_value, grain, clusters, source, false),
         Position::MinimumWeight | Position::MaximumWeight => {
-            Err(fail("Rdk.Fuse_reduce.fuse: weight positions select a point before reduction".to_owned()))
+            Err(fail("rdk_geom::fuse_reduce::apply: weight positions select a point before reduction".to_owned()))
         }
         _ => {
             let mut output = vec![0.0; clusters.count as usize];
@@ -173,7 +173,7 @@ fn numeric_reduction(
                         if position == Position::WeightedAverage {
                             if total == 0.0 {
                                 return Err(fail(format!(
-                                    "Rdk.Fuse_reduce.fuse: position weight sum is zero for cluster {cluster}"
+                                    "rdk_geom::fuse_reduce::apply: position weight sum is zero for cluster {cluster}"
                                 )));
                             }
                             value = weighted / total;
@@ -192,7 +192,7 @@ fn numeric_reduction(
 fn weight_values(name: &str, geometry_value: &geometry::T) -> Result<Vec<f64>, error::T> {
     let Some(found) = geometry::find_attribute(attribute::Owner::Point, name, geometry_value) else {
         return Err(fail(format!(
-            "Rdk.Fuse_reduce.fuse: position weight point attribute {name:?} is missing"
+            "rdk_geom::fuse_reduce::apply: position weight point attribute {name:?} is missing"
         )));
     };
     let values: Vec<f64> = match attribute::view::storage(&found)? {
@@ -200,14 +200,14 @@ fn weight_values(name: &str, geometry_value: &geometry::T) -> Result<Vec<f64>, e
         attribute::Storage::Int(values) => values.iter().map(|&v| v as f64).collect(),
         _ => {
             return Err(fail(format!(
-                "Rdk.Fuse_reduce.fuse: position weight attribute {name:?} must be scalar float or integer"
+                "rdk_geom::fuse_reduce::apply: position weight attribute {name:?} must be scalar float or integer"
             )));
         }
     };
     for (point, value) in values.iter().enumerate() {
         if !value.is_finite() {
             return Err(fail(format!(
-                "Rdk.Fuse_reduce.fuse: position weight attribute {name:?} is non-finite at point {point}"
+                "rdk_geom::fuse_reduce::apply: position weight attribute {name:?} is non-finite at point {point}"
             )));
         }
     }
@@ -240,7 +240,7 @@ fn validate_positions(x: &[f64], y: &[f64], z: &[f64]) -> Result<(), error::T> {
     for point in 0..x.len() {
         if !(x[point].is_finite() && y[point].is_finite() && z[point].is_finite()) {
             return Err(fail(format!(
-                "Rdk.Fuse_reduce.fuse: position reduction is non-finite at output point {point}"
+                "rdk_geom::fuse_reduce::apply: position reduction is non-finite at output point {point}"
             )));
         }
     }
@@ -264,12 +264,12 @@ fn reduce(
         match &params.weight_attribute {
             None => {
                 return Err(fail(
-                    "Rdk.Fuse_reduce.fuse: weighted position reduction requires a weight attribute".to_owned(),
+                    "rdk_geom::fuse_reduce::apply: weighted position reduction requires a weight attribute".to_owned(),
                 ));
             }
             Some(name) if (name).trim().is_empty() => {
                 return Err(fail(
-                    "Rdk.Fuse_reduce.fuse: position weight attribute name must not be empty".to_owned(),
+                    "rdk_geom::fuse_reduce::apply: position weight attribute name must not be empty".to_owned(),
                 ));
             }
             Some(name) => Some(weight_values(name, geometry_value)?),
@@ -449,7 +449,7 @@ mod tests {
         let failure = apply(None, &params(Position::WeightedSum, true, true), &clusters(), &source).err().unwrap();
         assert_eq!(
             error::message(&failure),
-            "Rdk.Fuse_reduce.fuse: weighted position reduction requires a weight attribute"
+            "rdk_geom::fuse_reduce::apply: weighted position reduction requires a weight attribute"
         );
         let mut blank = params(Position::WeightedSum, true, true);
         blank.weight_attribute = Some(" ".to_owned());
@@ -459,7 +459,7 @@ mod tests {
         let failure = apply(None, &missing, &clusters(), &source).err().unwrap();
         assert_eq!(
             error::message(&failure),
-            "Rdk.Fuse_reduce.fuse: position weight point attribute \"nope\" is missing"
+            "rdk_geom::fuse_reduce::apply: position weight point attribute \"nope\" is missing"
         );
         let mut zero = params(Position::WeightedAverage, true, true);
         zero.weight_attribute = Some("w".to_owned());
@@ -488,7 +488,7 @@ mod tests {
         let failure = apply(None, &params(Position::Sum, true, true), &clusters(), &huge).err().unwrap();
         assert_eq!(
             error::message(&failure),
-            "Rdk.Fuse_reduce.fuse: position reduction is non-finite at output point 0"
+            "rdk_geom::fuse_reduce::apply: position reduction is non-finite at output point 0"
         );
         let token = cancel::create();
         cancel::cancel(&token);

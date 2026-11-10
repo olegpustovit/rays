@@ -10,7 +10,7 @@ use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, ra
 use rdk_core::error::Code;
 
 const OPERATION: &str = "materialize_instances";
-const NAME: &str = "Rdk.Instance_copy.materialize_instances";
+const NAME: &str = "rdk_ops::instance_copy::materialize_instances";
 const DEFAULT_GRAIN: i64 = 16_384;
 
 
@@ -485,7 +485,7 @@ mod tests {
                 assert_eq!(error::code(&failure), Code::InvalidParameter);
                 assert_eq!(
                     error::message(&failure),
-                    "Rdk.Instance_copy.materialize_instances: transform 1 must be finite"
+                    "rdk_ops::instance_copy::materialize_instances: transform 1 must be finite"
                 );
             }
             Ok(_) => panic!("expected error"),

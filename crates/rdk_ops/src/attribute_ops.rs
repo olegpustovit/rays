@@ -176,14 +176,14 @@ pub(crate) fn interpolate_attribute(
 ) -> Result<InterpolateAttribute, error::T> {
     let bad = |message: &str| make_error("attribute_interpolate", Code::InvalidArgument, message);
     if (name).trim().is_empty() {
-        return Err(bad("Rdk.Attribute_ops.interpolate_attribute: empty source name"));
+        return Err(bad("sop/attribute_interpolate: empty source name"));
     }
     if name == "P" && owner != attribute::Owner::Point {
-        return Err(bad("Rdk.Attribute_ops.interpolate_attribute: canonical P must be point owned"));
+        return Err(bad("sop/attribute_interpolate: canonical P must be point owned"));
     }
     let target = into.unwrap_or(name);
     if (target).trim().is_empty() {
-        return Err(bad("Rdk.Attribute_ops.interpolate_attribute: empty target name"));
+        return Err(bad("sop/attribute_interpolate: empty target name"));
     }
     Ok(InterpolateAttribute {
         interpolate_owner: owner,

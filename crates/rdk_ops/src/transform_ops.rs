@@ -107,10 +107,10 @@ fn compose(params: &ComposeTransformParams) -> Result<mat4::T, error::T> {
         .iter()
         .find(|(_, value)| !(value.x.is_finite() && value.y.is_finite() && value.z.is_finite()))
     {
-        return Err(fail(format!("Rdk.Transform_ops.compose_transform: non-finite {name}")));
+        return Err(fail(format!("rdk_ops::transform_ops::compose_transform: non-finite {name}")));
     }
     if !params.uniform_scale.is_finite() {
-        return Err(fail("Rdk.Transform_ops.compose_transform: non-finite uniform scale".to_owned()));
+        return Err(fail("rdk_ops::transform_ops::compose_transform: non-finite uniform scale".to_owned()));
     }
     let scale = vec3::scale(params.scale, params.uniform_scale);
     let shear = params.shear;
@@ -152,7 +152,7 @@ fn compose(params: &ComposeTransformParams) -> Result<mat4::T, error::T> {
     match mat4::inverse(&matrix) {
         Some(inverse) => Ok(inverse),
         None => Err(fail(
-            "Rdk.Transform_ops.compose_transform: cannot invert a singular transform".to_owned(),
+            "rdk_ops::transform_ops::compose_transform: cannot invert a singular transform".to_owned(),
         )),
     }
 }
@@ -395,7 +395,7 @@ fn run_distance_from_geometry(
 ) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
-    let operation = "Rdk.Transform_ops.distance_from_geometry";
+    let operation = "sop/distance_from_geometry";
     let distance_attribute = params.distance_attribute.as_deref();
     let mask_attribute = params.mask_attribute.as_deref();
     support::check_positive(grain).map_err(|_| fail(format!("{operation}: grain must be positive")))?;
@@ -596,23 +596,23 @@ fn soft_attribute_weights(
     value: &geometry::T,
 ) -> Result<Vec<f64>, error::T> {
     if (name).trim().is_empty() {
-        return Err(fail("Rdk.Transform_ops.soft_transform: empty distance attribute name".to_owned()));
+        return Err(fail("sop/soft_transform: empty distance attribute name".to_owned()));
     }
     let Some(item) = geometry::find_attribute(attribute::Owner::Point, name, value) else {
         return Err(fail(format!(
-            "Rdk.Transform_ops.soft_transform: missing point distance attribute {}",
+            "sop/soft_transform: missing point distance attribute {}",
             rdk_core::attribute::quote_bytes((name).as_ref())
         )));
     };
     let attribute::Storage::Float(values) = attribute::view::storage(&item)? else {
         return Err(fail(format!(
-            "Rdk.Transform_ops.soft_transform: point distance attribute {} must be float",
+            "sop/soft_transform: point distance attribute {} must be float",
             rdk_core::attribute::quote_bytes((name).as_ref())
         )));
     };
     let count = values.len() as i64;
     if count != geometry::point_count(value) {
-        return Err(fail("Rdk.Transform_ops.soft_transform: distance attribute length mismatch".to_owned()));
+        return Err(fail("sop/soft_transform: distance attribute length mismatch".to_owned()));
     }
     let first_invalid = AtomicI64::new(i64::MAX);
     let weights = map_floats(cancel_value, grain, count, &|point| {
@@ -634,7 +634,7 @@ fn soft_attribute_weights(
         Ok(weights)
     } else {
         Err(fail(format!(
-            "Rdk.Transform_ops.soft_transform: distance attribute {} element {invalid} is non-finite",
+            "sop/soft_transform: distance attribute {} element {invalid} is non-finite",
             rdk_core::attribute::quote_bytes((name).as_ref())
         )))
     }
@@ -658,7 +658,7 @@ fn run_soft_transform(
 ) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
-    let operation = "Rdk.Transform_ops.soft_transform";
+    let operation = "sop/soft_transform";
     let (radius, falloff) = (params.radius, params.falloff);
     support::check_positive(grain).map_err(|_| fail(format!("{operation}: grain must be positive")))?;
     if !radius.is_finite() || radius < 0.0 {
@@ -909,7 +909,7 @@ mod tests {
         assert_eq!(error::code(&singular.unwrap_err()), Code::InvalidTransform);
         let bad = compose_transform(&ComposeTransformParams { shear: v3(f64::NAN, 0.0, 0.0), ..compose_params() })
             .unwrap_err();
-        assert_eq!(error::message(&bad), "Rdk.Transform_ops.compose_transform: non-finite shear");
+        assert_eq!(error::message(&bad), "rdk_ops::transform_ops::compose_transform: non-finite shear");
         assert_eq!(error::operation(&bad), "compose_transform");
     }
 
@@ -1096,7 +1096,7 @@ mod tests {
         let nonfinite = with_float("bad", vec![0.0, 1.0, f64::NAN, 3.0, 4.0], &source);
         let params = soft(attribute_metric("bad"), SoftCubic, 1.0, None, None);
         let Err(failure) = soft_transform(&params, &mat4::identity(), &nonfinite) else { panic!("expected failure") };
-        assert_eq!(error::message(&failure), "Rdk.Transform_ops.soft_transform: distance attribute \"bad\" element 2 is non-finite");
+        assert_eq!(error::message(&failure), "sop/soft_transform: distance attribute \"bad\" element 2 is non-finite");
         let token = Arc::new(cancel::create());
         cancel::cancel(&token);
         let params = SoftTransformParams { cancel: Some(token), ..soft(SoftRadius, SoftCubic, 1.0, seed(), None) };

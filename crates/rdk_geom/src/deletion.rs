@@ -29,7 +29,7 @@ fn make(operation: &str, code: Code, message: String) -> error::T {
 
 // An Error.Fail of the original: guard turns it into the operation's error.
 fn fail(message: &str) -> error::T {
-    make("Rdk.Deletion", Code::Fail, format!("Rdk.Deletion.delete: {message}"))
+    make("rdk_geom::deletion", Code::Fail, format!("rdk_geom::deletion::delete: {message}"))
 }
 
 fn guard(operation: &str, code: Code, result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
@@ -343,7 +343,7 @@ fn members(value: &edge_group::T) -> Vec<i64> {
 }
 
 fn invalid_argument(message: &str) -> error::T {
-    make("Rdk.Deletion", Code::InvalidArgument, message.to_owned())
+    make("rdk_geom::deletion", Code::InvalidArgument, message.to_owned())
 }
 
 pub fn primitive_partitions(
@@ -354,14 +354,14 @@ pub fn primitive_partitions(
     let cancel_value: Option<&cancel::T> = None;
     let grain: Option<i64> = None;
     if piece_count < 0 {
-        return Err(invalid_argument("Rdk.Deletion.primitive_partitions: negative piece count"));
+        return Err(invalid_argument("rdk_geom::deletion::primitive_partitions: negative piece count"));
     }
     let view = topology::view::view(geometry::topology(geometry_value))?;
     let source_points = view.point_count as usize;
     let source_primitives = view.primitive_kinds.len();
     if primitive_pieces.len() != source_primitives {
         return Err(invalid_argument(
-            "Rdk.Deletion.primitive_partitions: primitive assignment length mismatch",
+            "rdk_geom::deletion::primitive_partitions: primitive assignment length mismatch",
         ));
     }
     let pieces = piece_count as usize;
@@ -653,7 +653,7 @@ mod tests {
         assert_eq!(error::code(&failure), Code::InvalidSelection);
         assert_eq!(
             error::message(&failure),
-            "Rdk.Deletion.delete: selection length 3 does not match its primitive owner count 2"
+            "rdk_geom::deletion::delete: selection length 3 does not match its primitive owner count 2"
         );
         let points = group::init(None, group::Owner::Point, "p", 6, &|_| Ok(true)).unwrap();
         let failure = err(delete_primitives(

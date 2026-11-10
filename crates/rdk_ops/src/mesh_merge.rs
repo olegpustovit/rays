@@ -80,7 +80,7 @@ fn empty_points() -> Result<geometry::T, error::T> {
 }
 
 fn mismatch() -> error::T {
-    fail("Rdk.Mesh_merge.merge: attribute schemas must match exactly")
+    fail("sop/merge: attribute schemas must match exactly")
 }
 
 fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -> Result<attribute::T, error::T> {
@@ -159,7 +159,7 @@ fn merge_plain(
     geometries: &[geometry::T],
 ) -> Result<geometry::T, error::T> {
     let grain = grain.unwrap_or(16_384);
-    support::check_positive(grain).map_err(|_| make(Code::InvalidArgument, "Rdk.Mesh_merge.merge: grain must be positive".to_owned()))?;
+    support::check_positive(grain).map_err(|_| make(Code::InvalidArgument, "sop/merge: grain must be positive".to_owned()))?;
     let Some(first) = geometries.first() else {
         return empty_points();
     };
@@ -184,10 +184,10 @@ fn merge_plain(
             && first_attributes.iter().all(|template| find_matching(template, item).is_some())
     };
     if !geometries.iter().all(exact_schema) {
-        return Err(fail("Rdk.Mesh_merge.merge: attribute schemas must match exactly"));
+        return Err(fail("sop/merge: attribute schemas must match exactly"));
     }
     if first_attributes.iter().any(|item| attribute::owner(item) == attribute::Owner::Detail) {
-        return Err(fail("Rdk.Mesh_merge.merge: detail attributes need an explicit merge policy"));
+        return Err(fail("sop/merge: detail attributes need an explicit merge policy"));
     }
     let point_count: i64 = geometries.iter().map(geometry::point_count).sum();
     let vertex_count: i64 = geometries.iter().map(geometry::vertex_count).sum();
@@ -478,7 +478,7 @@ mod tests {
         match run(&params(None, None), &inputs) {
             Err(failure) => {
                 assert_eq!(error::code(&failure), Code::SchemaMismatch);
-                assert_eq!(error::message(&failure), "Rdk.Mesh_merge.merge: attribute schemas must match exactly");
+                assert_eq!(error::message(&failure), "sop/merge: attribute schemas must match exactly");
             }
             Ok(_) => panic!("expected schema mismatch"),
         }

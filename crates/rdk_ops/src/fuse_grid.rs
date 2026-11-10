@@ -34,7 +34,7 @@ fn make(operation: &str, code: Code, message: String) -> error::T {
 }
 
 fn fail(message: &str) -> error::T {
-    make("Rdk.Fuse_grid", Code::InvalidParameter, message.to_owned())
+    make("sop/fuse", Code::InvalidParameter, message.to_owned())
 }
 
 struct ClusterOptions {
@@ -63,19 +63,19 @@ fn fuse_clusters(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     support::check_positive(grain).map_err(|_| make(
-            "Rdk.Fuse_grid",
+            "sop/fuse",
             Code::InvalidArgument,
-            "Rdk.Fuse_grid.fuse: grain must be positive".to_owned(),
+            "sop/fuse: grain must be positive".to_owned(),
         ))?;
     let count = geometry::point_count(geometry_value);
     if let Some(item) = options.selection.as_ref() {
         if group::owner(item) != group::Owner::Point || group::length(item) != count {
-            return Err(fail("Rdk.Fuse_grid.fuse: selection must be a matching point group"));
+            return Err(fail("sop/fuse: selection must be a matching point group"));
         }
     }
     let tolerance = options.tolerance;
     if !tolerance.is_finite() || tolerance < 0.0 {
-        return Err(fail("Rdk.Fuse_grid.fuse: tolerance must be finite and non-negative"));
+        return Err(fail("sop/fuse: tolerance must be finite and non-negative"));
     }
     let exact = tolerance == 0.0;
     let mut point_attributes: Vec<FuseAttributeView> = Vec::new();
@@ -150,7 +150,7 @@ fn fuse_clusters(
         options.selection.as_ref(),
         cluster_metric,
         options.inclusive,
-        "Rdk.Fuse_grid.fuse",
+        "sop/fuse",
         tolerance,
         &compatible,
         geometry_value,
@@ -209,7 +209,7 @@ pub struct Params {
 fn invalid_name(label: &str, name: &Option<String>) -> Option<error::T> {
     match name {
         Some(name) if (name).trim().is_empty() => {
-            Some(fail(&format!("Rdk.Fuse_grid.fuse: {label} name must not be empty")))
+            Some(fail(&format!("sop/fuse: {label} name must not be empty")))
         }
         _ => None,
     }
@@ -348,10 +348,10 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
     let target_geometry = params.target.as_ref().unwrap_or(geometry_value);
     let same = geometry::data_id(geometry_value) == geometry::data_id(target_geometry);
     if params.keep_fused_points && !params.fuse_points {
-        return Err(fail("Rdk.Fuse_grid.fuse: Keep Fused Points requires Fuse Snapped Points"));
+        return Err(fail("sop/fuse: Keep Fused Points requires Fuse Snapped Points"));
     }
     if params.modify_target && !same {
-        return Err(fail("Rdk.Fuse_grid.fuse: Modify Target is unavailable with a second input"));
+        return Err(fail("sop/fuse: Modify Target is unavailable with a second input"));
     }
     let effective_targets: Option<&group::T> = match (&params.target_selection, same) {
         (Some(item), _) => Some(item),
@@ -411,7 +411,7 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
         None
     };
     if same && effective_modify_target && mapped > 0 {
-        return match rdk_geom::point_clusters::of_links(cancel_value, "Rdk.Fuse_grid.fuse", &destinations)? {
+        return match rdk_geom::point_clusters::of_links(cancel_value, "sop/fuse", &destinations)? {
             point_clusters::T::Identity => install_outputs(params, &destinations, &destination_bits, count, geometry_value.clone()),
             point_clusters::T::Clusters(clusters) => {
                 let compact = params.fuse_points && !params.keep_fused_points;

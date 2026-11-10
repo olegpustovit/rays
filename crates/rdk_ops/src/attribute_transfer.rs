@@ -824,17 +824,17 @@ fn spatial(owner: attribute::Owner, params: &SpatialParams) -> Result<geometry::
             Box<dyn Fn() -> Result<packed::float3::T, error::T> + '_>,
         ) = match owner {
             attribute::Owner::Point => (
-                "Rdk.Attribute_ops.transfer_points",
+                "sop/attribute_transfer",
                 Box::new(|| Ok(geometry::positions(source).clone())),
                 Box::new(|| Ok(geometry::positions(target).clone())),
             ),
             attribute::Owner::Primitive => (
-                "Rdk.Attribute_ops.transfer_primitives",
+                "sop/attribute_transfer",
                 Box::new(|| primitive_barycenters(cancel_token, grain, source)),
                 Box::new(|| primitive_barycenters(cancel_token, grain, target)),
             ),
             attribute::Owner::Vertex | attribute::Owner::Detail => {
-                return Err(invalid("Rdk.Attribute_ops.transfer: owner must be point or primitive"))
+                return Err(invalid("sop/attribute_transfer: owner must be point or primitive"))
             }
         };
         spatial_transfer(
@@ -870,7 +870,7 @@ pub(crate) fn transfer_primitives(params: &SpatialParams) -> Result<geometry::T,
 
 pub(crate) fn transfer_detail(params: &DetailParams) -> Result<geometry::T, error::T> {
     let result = (|| {
-        let operation = "Rdk.Attribute_ops.transfer_detail";
+        let operation = "sop/attribute_transfer";
         let attributes = selected_attributes(
             operation,
             attribute::Owner::Detail,
@@ -891,17 +891,17 @@ pub(crate) fn surface_attribute(
 ) -> Result<SurfaceAttribute, error::T> {
     let bad = |message: &str| make_error("surface_attribute", Code::InvalidArgument, message);
     if owner == attribute::Owner::Detail {
-        return Err(bad("Rdk.Attribute_ops.surface_attribute: detail ownership is not spatial"));
+        return Err(bad("sop/attribute_transfer_surface: detail ownership is not spatial"));
     }
     if (name).trim().is_empty() {
-        return Err(bad("Rdk.Attribute_ops.surface_attribute: empty source name"));
+        return Err(bad("sop/attribute_transfer_surface: empty source name"));
     }
     let target_name = into.unwrap_or(name).to_owned();
     if (&target_name).trim().is_empty() {
-        return Err(bad("Rdk.Attribute_ops.surface_attribute: empty target name"));
+        return Err(bad("sop/attribute_transfer_surface: empty target name"));
     }
     if owner == attribute::Owner::Point && name == "P" {
-        return Err(bad("Rdk.Attribute_ops.surface_attribute: canonical P is not an ordinary attribute"));
+        return Err(bad("sop/attribute_transfer_surface: canonical P is not an ordinary attribute"));
     }
     Ok(SurfaceAttribute { source_owner: owner, source_name: name.to_owned(), target_name })
 }
@@ -916,9 +916,9 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
     let (source, target) = (&params.source, &params.target);
     let target_owner = params.target_owner;
     let target_elements = params.target_elements.as_ref();
-    support::check_positive(grain).map_err(|_| invalid("Rdk.Attribute_ops.transfer_surface: grain must be positive"))?;
+    support::check_positive(grain).map_err(|_| invalid("sop/attribute_transfer_surface: grain must be positive"))?;
     cancel::check_opt(cancel_token)?;
-    let operation = "Rdk.Attribute_ops.transfer_surface";
+    let operation = "sop/attribute_transfer_surface";
     let (threshold_squared, maximum_squared) =
         transfer_distance_window(operation, params.blend_width, params.falloff, params.max_distance)?;
     let specifications = &params.attributes;
@@ -1253,7 +1253,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
 pub(crate) fn transfer_vertices(params: &VerticesParams) -> Result<geometry::T, error::T> {
     let result = (|| {
         let attributes = selected_attributes(
-            "Rdk.Attribute_ops.transfer_vertices",
+            "sop/attribute_transfer",
             attribute::Owner::Vertex,
             params.names.as_ref(),
             params.pattern.as_ref(),

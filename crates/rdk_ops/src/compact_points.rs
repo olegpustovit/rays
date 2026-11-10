@@ -13,9 +13,9 @@ fn compact(
     value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     support::check_positive(grain).map_err(|_| make(
-            "Rdk.Compact_points",
+            "sop/compact_points",
             Code::InvalidArgument,
-            "Rdk.Compact_points.compact_points: grain must be positive".to_owned(),
+            "sop/compact_points: grain must be positive".to_owned(),
         ))?;
     cancel::check_opt(cancel_value)?;
     let point_count = geometry::point_count(value) as usize;

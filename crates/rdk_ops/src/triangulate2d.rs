@@ -500,7 +500,7 @@ fn constraint_segments(
                 let first = i64::from(view.primitive_offsets[primitive as usize]);
                 let count = i64::from(view.primitive_offsets[primitive as usize + 1]) - first;
                 if count < 3 || first > projected_vertex_points.len() as i64 - count {
-                    return Err(fail("Rdk.Predicates.polygon_area_sign_packed: invalid polygon range".to_owned()));
+                    return Err(fail("rdk_geom::predicates::polygon_area_sign_packed: invalid polygon range".to_owned()));
                 }
                 Ok(sign_code(predicates::polygon_area_sign_packed(x, y, &projected_vertex_points, first, count)))
             } else {

@@ -47,7 +47,7 @@ fn standard(
         match expected(storage) {
             Some(value) => Ok(Some(value)),
             None => Err(format!(
-                "Rdk.Rays_mesh.to_mesh: {} {} attribute has storage {}",
+                "rdk_rays::rays_mesh::to_mesh: {} {} attribute has storage {}",
                 owner_name(owner),
                 name,
                 attribute::kind_name(&a)
@@ -348,7 +348,7 @@ fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
             let topo = if view.mode == mesh::Mode::Points {
                 topology::empty(point_count).map_err(text)
             } else if view.indices.len() % 3 != 0 {
-                Err("Rdk.Rays_mesh.of_mesh: malformed triangle index count".to_owned())
+                Err("rdk_rays::rays_mesh::of_mesh: malformed triangle index count".to_owned())
             } else {
                 let primitive_count = view.indices.len() / 3;
                 let offsets: Vec<u32> = (0..=primitive_count as u32).map(|i| i * 3).collect();
@@ -367,7 +367,7 @@ fn of_mesh_raw_impl(m: &mesh::Mesh) -> Result<geometry::T, String> {
             }
             geometry::create(positions, topo, Some(attributes), None, None).map_err(text)
         }
-        _ => Err("Rdk.Rays_mesh.of_mesh: expand non-point/non-triangle modes first".to_owned()),
+        _ => Err("rdk_rays::rays_mesh::of_mesh: expand non-point/non-triangle modes first".to_owned()),
     }
 }
 

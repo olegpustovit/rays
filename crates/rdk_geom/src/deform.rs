@@ -12,7 +12,7 @@ pub struct Planes {
 }
 
 fn fail(message: String) -> error::T {
-    error::new("Rdk.Deform", Code::InvalidParameter, message)
+    error::new("rdk_geom::deform", Code::InvalidParameter, message)
 }
 
 #[doc(hidden)]
@@ -26,28 +26,28 @@ pub fn validate_selection(
     match selection {
         element_selection::T::SelectedPoints(item) => {
             if group::owner(item) != group::Owner::Point {
-                Err(fail("Rdk.Deform: point selection must own points".to_owned()))
+                Err(fail("rdk_geom::deform: point selection must own points".to_owned()))
             } else if group::length(item) != topology::point_count(topology_value) {
-                Err(fail("Rdk.Deform: point selection length does not match point count".to_owned()))
+                Err(fail("rdk_geom::deform: point selection length does not match point count".to_owned()))
             } else {
                 Ok(())
             }
         }
         element_selection::T::SelectedVertices(item) => {
             if group::owner(item) != group::Owner::Vertex {
-                Err(fail("Rdk.Deform: vertex selection must own vertices".to_owned()))
+                Err(fail("rdk_geom::deform: vertex selection must own vertices".to_owned()))
             } else if group::length(item) != topology::vertex_count(topology_value) {
-                Err(fail("Rdk.Deform: vertex selection length does not match vertex count".to_owned()))
+                Err(fail("rdk_geom::deform: vertex selection length does not match vertex count".to_owned()))
             } else {
                 Ok(())
             }
         }
         element_selection::T::SelectedPrimitives(item) => {
             if group::owner(item) != group::Owner::Primitive {
-                Err(fail("Rdk.Deform: primitive selection must own primitives".to_owned()))
+                Err(fail("rdk_geom::deform: primitive selection must own primitives".to_owned()))
             } else if group::length(item) != topology::primitive_count(topology_value) {
                 Err(fail(
-                    "Rdk.Deform: primitive selection length does not match primitive count".to_owned(),
+                    "rdk_geom::deform: primitive selection length does not match primitive count".to_owned(),
                 ))
             } else {
                 Ok(())
@@ -55,7 +55,7 @@ pub fn validate_selection(
         }
         element_selection::T::SelectedEdges(item) => {
             if edge_group::topology_data_id(item) != topology::data_id(topology_value) {
-                Err(fail("Rdk.Deform: edge selection belongs to different topology".to_owned()))
+                Err(fail("rdk_geom::deform: edge selection belongs to different topology".to_owned()))
             } else {
                 Ok(())
             }
@@ -70,7 +70,7 @@ pub fn point_selected(
     index: Option<&topology_index::T>,
     point: i64,
 ) -> Result<bool, error::T> {
-    let need_index = || index.ok_or_else(|| fail("Rdk.Deform: selection needs a topology index".to_owned()));
+    let need_index = || index.ok_or_else(|| fail("rdk_geom::deform: selection needs a topology index".to_owned()));
     match selection {
         None => Ok(true),
         Some(element_selection::T::SelectedPoints(item)) => Ok(group::mem(point, item)),
@@ -134,7 +134,7 @@ fn vertex_normals(geometry_value: &geometry::T) -> Result<Option<Planes>, error:
     };
     match attribute::view::storage(&found)? {
         attribute::Storage::Float3(values) => Ok(Some(planes_of(values)?)),
-        _ => Err(fail("Rdk.Deform: vertex N must have float3 storage".to_owned())),
+        _ => Err(fail("rdk_geom::deform: vertex N must have float3 storage".to_owned())),
     }
 }
 
@@ -144,7 +144,7 @@ fn face_vectors(
     geometry_value: &geometry::T,
 ) -> Result<Planes, error::T> {
     let ((x, y, z), _) = face_normals::polygon_area_vector(
-        cancel_value, grain, false, true, None, "Rdk.Deform", geometry_value,
+        cancel_value, grain, false, true, None, "rdk_geom::deform", geometry_value,
     )
     .map_err(|e| fail(error::message(&e).to_owned()))?;
     Ok(Planes { x, y, z })
@@ -215,7 +215,7 @@ pub fn resolve_directions(
     if let Some(found) = geometry::find_attribute(attribute::Owner::Point, "N", geometry_value) {
         return match attribute::view::storage(&found)? {
             attribute::Storage::Float3(values) => planes_of(values),
-            _ => Err(fail("Rdk.Deform: point N must have float3 storage".to_owned())),
+            _ => Err(fail("rdk_geom::deform: point N must have float3 storage".to_owned())),
         };
     }
     match vertex_normals(geometry_value)? {
@@ -278,22 +278,22 @@ mod tests {
         let short = group::init(None, group::Owner::Point, "p", 3, &|_| Ok(true)).unwrap();
         assert_eq!(
             code(validate_selection(t, Some(&element_selection::T::SelectedPoints(short)))),
-            "Rdk.Deform: point selection length does not match point count"
+            "rdk_geom::deform: point selection length does not match point count"
         );
         let wrong_owner = group::init(None, group::Owner::Vertex, "v", 4, &|_| Ok(true)).unwrap();
         assert_eq!(
             code(validate_selection(t, Some(&element_selection::T::SelectedPoints(wrong_owner)))),
-            "Rdk.Deform: point selection must own points"
+            "rdk_geom::deform: point selection must own points"
         );
         let faces = group::init(None, group::Owner::Primitive, "f", 2, &|_| Ok(true)).unwrap();
         assert_eq!(
             code(validate_selection(t, Some(&element_selection::T::SelectedPrimitives(faces)))),
-            "Rdk.Deform: primitive selection length does not match primitive count"
+            "rdk_geom::deform: primitive selection length does not match primitive count"
         );
         let other = edge_group_pairs(geometry::topology(&grid(2, 1, 1.0, true)), "e", &[(0, 1)]);
         assert_eq!(
             code(validate_selection(t, Some(&element_selection::T::SelectedEdges(other)))),
-            "Rdk.Deform: edge selection belongs to different topology"
+            "rdk_geom::deform: edge selection belongs to different topology"
         );
     }
 

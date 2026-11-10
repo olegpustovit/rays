@@ -266,7 +266,7 @@ impl Ctx {
     fn edge_token(&self, side: usize, vertex: usize) -> Result<usize, error::T> {
         let edge = rdk_core::topology_index::widen(self.edge_of_vertex[vertex]);
         if edge < 0 {
-            Err(fail("Rdk.Plane_clip.clip: missing topology edge"))
+            Err(fail("sop/clip: missing topology edge"))
         } else {
             Ok(self.token(side, self.point_count + edge as usize))
         }
@@ -308,7 +308,7 @@ impl Ctx {
             let b = self.edge_b[edge] as usize;
             let denominator = self.raw_distance[b] - self.raw_distance[a];
             if denominator == 0.0 || !denominator.is_finite() {
-                return Err(fail("Rdk.Plane_clip.clip: unstable shared-edge intersection"));
+                return Err(fail("sop/clip: unstable shared-edge intersection"));
             }
             let t = clamp01(-self.raw_distance[a] / denominator);
             Ok((
@@ -368,7 +368,7 @@ impl Ctx {
         } else {
             let denominator = self.raw_distance[current_point] - self.raw_distance[previous_point];
             if denominator == 0.0 || !denominator.is_finite() {
-                return Err(fail("Rdk.Plane_clip.clip: unstable plane intersection"));
+                return Err(fail("sop/clip: unstable plane intersection"));
             }
             let t = clamp01(-self.raw_distance[previous_point] / denominator);
             b.add_corner_unique(
@@ -484,7 +484,7 @@ impl Ctx {
             outside_local += 1;
         }
         if outside_local == count {
-            return Err(fail("Rdk.Plane_clip.clip: disconnected-fragment plan disagreement"));
+            return Err(fail("sop/clip: disconnected-fragment plan disagreement"));
         }
         let scratch_start = b.corner_count();
         let mut chain_starts = vec![0usize; count];
@@ -574,7 +574,7 @@ impl Ctx {
             &endpoint_z
         };
         if float_max(x_span, float_max(y_span, z_span)) == 0.0 {
-            return Err(fail("Rdk.Plane_clip.clip: coincident concave clipping intersections"));
+            return Err(fail("sop/clip: coincident concave clipping intersections"));
         }
         let mut order: Vec<usize> = (0..endpoint_count).collect();
         order.sort_by(|&left, &right| {
@@ -588,7 +588,7 @@ impl Ctx {
             let left = order[pair * 2];
             let right = order[pair * 2 + 1];
             if endpoint_start[left] == endpoint_start[right] {
-                return Err(fail("Rdk.Plane_clip.clip: ambiguous concave clipping intersection order"));
+                return Err(fail("sop/clip: ambiguous concave clipping intersection order"));
             }
             let (end_chain, start_chain) = if endpoint_start[left] {
                 (endpoint_chain[right], endpoint_chain[left])
@@ -596,7 +596,7 @@ impl Ctx {
                 (endpoint_chain[left], endpoint_chain[right])
             };
             if successor[end_chain] >= 0 {
-                return Err(fail("Rdk.Plane_clip.clip: duplicate concave clipping successor"));
+                return Err(fail("sop/clip: duplicate concave clipping successor"));
             }
             successor[end_chain] = start_chain as i64;
         }
@@ -621,11 +621,11 @@ impl Ctx {
                 }
                 current = successor[chain];
                 if current < 0 {
-                    return Err(fail("Rdk.Plane_clip.clip: incomplete concave clipping cycle"));
+                    return Err(fail("sop/clip: incomplete concave clipping cycle"));
                 }
             }
             if current != first_chain as i64 {
-                return Err(fail("Rdk.Plane_clip.clip: intersecting concave clipping cycles"));
+                return Err(fail("sop/clip: intersecting concave clipping cycles"));
             }
             self.finish_fragment(b, segs, component_start, side, crossed, primitive);
         }
@@ -908,7 +908,7 @@ fn fill_fast_plan(
                         at += 1;
                     }
                     if at as i64 != offsets[output + 1] {
-                        return Err(fail("Rdk.Plane_clip.clip: passthrough plan/fill disagreement"));
+                        return Err(fail("sop/clip: passthrough plan/fill disagreement"));
                     }
                     kinds[output - output_base] = 0;
                     primitive_source[output - output_base] = primitive as i64;
@@ -953,7 +953,7 @@ fn fill_fast_plan(
                                 } else {
                                     let denominator = ctx.raw_distance[current_point] - ctx.raw_distance[previous_point];
                                     if denominator == 0.0 || !denominator.is_finite() {
-                                        return Err(fail("Rdk.Plane_clip.clip: unstable plane intersection"));
+                                        return Err(fail("sop/clip: unstable plane intersection"));
                                     }
                                     tokens[at - corner_base] = ctx.edge_token(side, previous)?;
                                     corner_a[at - corner_base] = previous as i64;
@@ -973,7 +973,7 @@ fn fill_fast_plan(
                         previous = current;
                     }
                     if at as i64 != offsets[output + 1] {
-                        return Err(fail("Rdk.Plane_clip.clip: polygon plan/fill disagreement"));
+                        return Err(fail("sop/clip: polygon plan/fill disagreement"));
                     }
                     kinds[output - output_base] = 0;
                     primitive_source[output - output_base] = primitive as i64;
@@ -1083,7 +1083,7 @@ fn trace_caps(
             let c = segs.b[segment];
             if outgoing[a] >= 0 || incoming[c] >= 0 {
                 return Err(fail(
-                    "Rdk.Plane_clip.clip: cap boundary is non-manifold or inconsistently wound",
+                    "sop/clip: cap boundary is non-manifold or inconsistently wound",
                 ));
             }
             outgoing[a] = c as i64;
@@ -1096,16 +1096,16 @@ fn trace_caps(
     for start in 0..geometry_token_count {
         ctx.poll(start, 4095)?;
         if (outgoing[start] >= 0) != (incoming[start] >= 0) {
-            return Err(fail("Rdk.Plane_clip.clip: cap boundary is open or inconsistently wound"));
+            return Err(fail("sop/clip: cap boundary is open or inconsistently wound"));
         } else if outgoing[start] >= 0 && !visited[start] {
             let mut count = 0;
             let mut current = start as i64;
             while current != start as i64 || count == 0 {
                 if current < 0 || (count > 0 && visited[current as usize]) {
-                    return Err(fail("Rdk.Plane_clip.clip: cap boundary does not form simple loops"));
+                    return Err(fail("sop/clip: cap boundary does not form simple loops"));
                 }
                 if count >= scratch.len() {
-                    return Err(fail("Rdk.Plane_clip.clip: cap boundary traversal overflow"));
+                    return Err(fail("sop/clip: cap boundary traversal overflow"));
                 }
                 scratch[count] = current as usize;
                 count += 1;
@@ -1113,13 +1113,13 @@ fn trace_caps(
                 current = outgoing[current as usize];
             }
             if count < 3 {
-                return Err(fail("Rdk.Plane_clip.clip: cap boundary contains fewer than three points"));
+                return Err(fail("sop/clip: cap boundary contains fewer than three points"));
             }
             loops.push(scratch[..count].to_vec());
         }
     }
     if loops.is_empty() {
-        return Err(fail("Rdk.Plane_clip.clip: cap boundary has no loops"));
+        return Err(fail("sop/clip: cap boundary has no loops"));
     }
     let dominant = {
         let (ax, ay, az) = (nx.abs(), ny.abs(), nz.abs());
@@ -1131,7 +1131,7 @@ fn trace_caps(
         cap_coordinate_scale = float_max(cap_coordinate_scale, scale_of(ctx, loop_tokens, anchor)?);
     }
     if cap_coordinate_scale == 0.0 {
-        return Err(fail("Rdk.Plane_clip.clip: cap contours have zero coordinate extent"));
+        return Err(fail("sop/clip: cap contours have zero coordinate extent"));
     }
     let boundary_token_count: usize = loops.iter().map(Vec::len).sum();
     let mut proj = Proj {
@@ -1241,9 +1241,9 @@ fn trace_caps(
                     && proj.segments_intersect(edge_a[candidate], edge_b[candidate], edge_a[edge], edge_b[edge])
                 {
                     return Err(fail(if same_loop {
-                        "Rdk.Plane_clip.clip: cap contour is geometrically self-intersecting"
+                        "sop/clip: cap contour is geometrically self-intersecting"
                     } else {
-                        "Rdk.Plane_clip.clip: cap contours intersect or touch"
+                        "sop/clip: cap contours intersect or touch"
                     }));
                 }
             }
@@ -1257,7 +1257,7 @@ fn trace_caps(
         let loop_anchor = ctx.position_of_geometry_token(loop_tokens[0])?;
         let coordinate_scale = scale_of(ctx, loop_tokens, loop_anchor)?;
         if coordinate_scale == 0.0 {
-            return Err(fail("Rdk.Plane_clip.clip: cap contour has zero coordinate extent"));
+            return Err(fail("sop/clip: cap contour has zero coordinate extent"));
         }
         let mut orientation = 0.0;
         for index in 0..loop_tokens.len() {
@@ -1276,7 +1276,7 @@ fn trace_caps(
                 + ((x0 - x1) * (y0 + y1) * nz);
         }
         if !orientation.is_finite() || orientation.abs() <= 1e-14 {
-            return Err(fail("Rdk.Plane_clip.clip: cap contour has degenerate projected area"));
+            return Err(fail("sop/clip: cap contour has degenerate projected area"));
         }
         loop_orientation[loop_index] = orientation;
     }
@@ -1311,7 +1311,7 @@ fn trace_caps(
         while current >= 0 {
             value += 1;
             if value > loop_count {
-                return Err(fail("Rdk.Plane_clip.clip: cyclic cap contour containment"));
+                return Err(fail("sop/clip: cyclic cap contour containment"));
             }
             current = parent[current as usize];
         }
@@ -1356,9 +1356,9 @@ fn trace_caps(
             let triangles = match &triangulated[outer] {
                 Some(Ok(triangles)) => triangles,
                 Some(Err(message)) => {
-                    return Err(fail(&format!("Rdk.Plane_clip.clip: cap contours: {message}")));
+                    return Err(fail(&format!("sop/clip: cap contours: {message}")));
                 }
-                None => return Err(fail("Rdk.Plane_clip.clip: missing cap contour triangulation plan")),
+                None => return Err(fail("sop/clip: missing cap contour triangulation plan")),
             };
             for triangle in 0..triangles.len() / 3 {
                 let at = triangle * 3;
@@ -1377,7 +1377,7 @@ fn trace_caps(
                     + ((abx * acy - aby * acx) * nz);
                 if !orientation.is_finite() || orientation == 0.0 {
                     return Err(fail(
-                        "Rdk.Plane_clip.clip: cap contour triangulation emitted a degenerate triangle",
+                        "sop/clip: cap contour triangulation emitted a degenerate triangle",
                     ));
                 }
                 let (tb, tc) = if (orientation > 0.0) == want_positive { (tb, tc) } else { (tc, tb) };
@@ -1425,7 +1425,7 @@ pub fn clip(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
 fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let cancel_ref = params.cancel.as_deref();
     let grain = params.grain;
-    support::check_positive(grain).map_err(|_| make("clip", Code::InvalidArgument, "Rdk.Plane_clip.clip: grain must be positive"))?;
+    support::check_positive(grain).map_err(|_| make("clip", Code::InvalidArgument, "sop/clip: grain must be positive"))?;
     cancel::check_opt(cancel_ref)?;
     let (ox, oy, oz) = (params.origin.x, params.origin.y, params.origin.z);
     let (supplied_nx, supplied_ny, supplied_nz) = (params.normal.x, params.normal.y, params.normal.z);
@@ -1436,43 +1436,43 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         && supplied_ny.is_finite()
         && supplied_nz.is_finite())
     {
-        return Err(fail("Rdk.Plane_clip.clip: plane origin and normal must be finite"));
+        return Err(fail("sop/clip: plane origin and normal must be finite"));
     }
     let snapping_tolerance = params.snapping_tolerance;
     if !snapping_tolerance.is_finite() || snapping_tolerance < 0.0 {
-        return Err(fail("Rdk.Plane_clip.clip: snapping tolerance must be finite and non-negative"));
+        return Err(fail("sop/clip: snapping tolerance must be finite and non-negative"));
     }
     if (&params.clip_attribute).trim().is_empty() {
-        return Err(fail("Rdk.Plane_clip.clip: clip attribute must not be empty"));
+        return Err(fail("sop/clip: clip attribute must not be empty"));
     }
     let distance = params.distance;
     if !distance.is_finite() {
-        return Err(fail("Rdk.Plane_clip.clip: plane distance must be finite"));
+        return Err(fail("sop/clip: plane distance must be finite"));
     }
     let keep = params.keep;
     if params.split_connectivity && keep != Keep::All {
-        return Err(fail("Rdk.Plane_clip.clip: split connectivity requires keep=All"));
+        return Err(fail("sop/clip: split connectivity requires keep=All"));
     }
     let mut seen_names: Vec<&str> = Vec::new();
     for name in [&params.cap_group, &params.clipped_group, &params.above_group, &params.below_group] {
         if let Some(name) = name {
             if (name).trim().is_empty() {
-                return Err(fail("Rdk.Plane_clip.clip: output group names must not be empty"));
+                return Err(fail("sop/clip: output group names must not be empty"));
             }
             if seen_names.contains(&name.as_str()) {
-                return Err(fail("Rdk.Plane_clip.clip: output group names must be distinct"));
+                return Err(fail("sop/clip: output group names must be distinct"));
             }
             seen_names.push(name);
         }
     }
     if let Some(name) = &params.clipped_edge_group {
         if (name).trim().is_empty() {
-            return Err(fail("Rdk.Plane_clip.clip: clipped edge group name must not be empty"));
+            return Err(fail("sop/clip: clipped edge group name must not be empty"));
         }
     }
     let normal_scale = float_max(supplied_nx.abs(), float_max(supplied_ny.abs(), supplied_nz.abs()));
     if normal_scale == 0.0 {
-        return Err(fail("Rdk.Plane_clip.clip: plane normal must be non-zero"));
+        return Err(fail("sop/clip: plane normal must be non-zero"));
     }
     let scaled_nx = supplied_nx / normal_scale;
     let scaled_ny = supplied_ny / normal_scale;
@@ -1490,7 +1490,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         match geometry::find_attribute(attribute::Owner::Point, clip_attribute, geometry_value) {
             None => {
                 return Err(fail(&format!(
-                    "Rdk.Plane_clip.clip: point clip attribute \"{clip_attribute}\" does not exist"
+                    "sop/clip: point clip attribute \"{clip_attribute}\" does not exist"
                 )));
             }
             Some(found) => match attribute::view::storage(&found)? {
@@ -1512,7 +1512,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 | attribute::Storage::FloatArray(_)
                 | attribute::Storage::Text(_) => {
                     return Err(fail(&format!(
-                        "Rdk.Plane_clip.clip: point clip attribute \"{clip_attribute}\" must be a scalar or fixed-width numeric tuple"
+                        "sop/clip: point clip attribute \"{clip_attribute}\" must be a scalar or fixed-width numeric tuple"
                     )));
                 }
             },
@@ -1529,19 +1529,19 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 let point = element as usize;
                 let (x, y, z) = (positions.x[point], positions.y[point], positions.z[point]);
                 if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-                    return Err(fail("Rdk.Plane_clip.clip: point positions must be finite"));
+                    return Err(fail("sop/clip: point positions must be finite"));
                 }
                 let cx = clip_x[point];
                 let cy = clip_y.as_ref().map_or(0.0, |values| values[point]);
                 let cz = clip_z.as_ref().map_or(0.0, |values| values[point]);
                 if !(cx.is_finite() && cy.is_finite() && cz.is_finite()) {
                     return Err(fail(&format!(
-                        "Rdk.Plane_clip.clip: point clip attribute \"{clip_attribute}\" must contain finite values"
+                        "sop/clip: point clip attribute \"{clip_attribute}\" must contain finite values"
                     )));
                 }
                 let value = (cx - ox) * nx + (cy - oy) * ny + (cz - oz) * nz - distance;
                 if !value.is_finite() {
-                    return Err(fail("Rdk.Plane_clip.clip: signed plane distance overflowed"));
+                    return Err(fail("sop/clip: signed plane distance overflowed"));
                 }
                 raw_distance[local] = value;
                 classified_distance[local] = if value.abs() <= snapping_tolerance { 0.0 } else { value };
@@ -2066,7 +2066,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let mut edge_groups: Vec<edge_group::T> = Vec::new();
     if !source_edge_groups.is_empty() {
         let Some(target_index) = &target_index else {
-            return Err(fail("Rdk.Plane_clip.clip: missing target edge index"));
+            return Err(fail("sop/clip: missing target edge index"));
         };
         let target_view = topology_index::view::view(target_index);
         let source_edge_of_output_edge = |edge: usize| -> Option<i64> {
@@ -2127,7 +2127,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             };
             geometry::with_edge_group(merged, &output)?
         }
-        (Some(_), None) => return Err(fail("Rdk.Plane_clip.clip: missing target edge index")),
+        (Some(_), None) => return Err(fail("sop/clip: missing target edge index")),
     };
     let primitive_cap = &builder.primitive_cap;
     let primitive_side = &builder.primitive_side;

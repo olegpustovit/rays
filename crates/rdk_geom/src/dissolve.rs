@@ -25,7 +25,7 @@ fn make(operation: &str, code: Code, message: String) -> error::T {
 }
 
 fn fail(message: &str) -> error::T {
-    make("Rdk.Dissolve", Code::InvalidParameter, format!("Rdk.Dissolve.dissolve: {message}"))
+    make("sop/dissolve", Code::InvalidParameter, format!("sop/dissolve: {message}"))
 }
 
 // Error.get / get_ok of the original: a cancellation stays one, any other message gains the prefix.

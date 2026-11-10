@@ -152,7 +152,7 @@ fn direction_planes(
             if (name).trim().is_empty() {
                 return Err(fail(Code::InvalidDirection, "ray direction attribute name must not be empty"));
             }
-            let values = deform::point_vector_attribute("Rdk.Ray.ray", name, source)
+            let values = deform::point_vector_attribute("sop/ray", name, source)
                 .map_err(|e| fail(Code::InvalidDirection, error::message(&e)))?;
             per_query(values)
         }

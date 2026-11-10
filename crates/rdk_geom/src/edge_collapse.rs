@@ -18,7 +18,7 @@ fn make(operation: &str, code: Code, message: String) -> error::T {
 }
 
 fn fail(message: &str) -> error::T {
-    make("Rdk.Edge_collapse", Code::InvalidParameter, message.to_owned())
+    make("sop/edge_collapse", Code::InvalidParameter, message.to_owned())
 }
 
 fn same_ragged_i64(offsets: &[i64], values: &[i64], left: usize, right: usize) -> bool {
@@ -76,9 +76,9 @@ pub fn raw(
     let remove_degenerate_primitives = remove_degenerate_primitives.unwrap_or(true);
     let recompute_point_normals = recompute_point_normals.unwrap_or(true);
     support::check_positive(grain).map_err(|_| make(
-            "Rdk.Edge_collapse",
+            "sop/edge_collapse",
             Code::InvalidArgument,
-            "Rdk.Edge_collapse.edge_collapse: grain must be positive".to_owned(),
+            "sop/edge_collapse: grain must be positive".to_owned(),
         ))?;
     let topology_value = geometry::topology(geometry_value);
     let index_value = topology_index::create(cancel_value, topology_value)?;
@@ -91,11 +91,11 @@ pub fn raw(
     };
     if let Some(item) = edges {
         if edge_group::topology_data_id(item) != topology::data_id(topology_value) {
-            return Err(fail("Rdk.Edge_collapse.edge_collapse: edge selection belongs to a different topology"));
+            return Err(fail("sop/edge_collapse: edge selection belongs to a different topology"));
         }
         if edge_group::length(item) != edge_count as i64 {
             return Err(fail(
-                "Rdk.Edge_collapse.edge_collapse: edge selection length does not match topology edge count",
+                "sop/edge_collapse: edge selection length does not match topology edge count",
             ));
         }
     }
@@ -103,13 +103,13 @@ pub fn raw(
         None => Connectivity::Always,
         Some(name) if (name).trim().is_empty() => {
             return Err(fail(
-                "Rdk.Edge_collapse.edge_collapse: connectivity attribute name must not be empty",
+                "sop/edge_collapse: connectivity attribute name must not be empty",
             ));
         }
         Some(name) => {
             let Some(found) = geometry::find_attribute(attribute::Owner::Point, name, geometry_value) else {
                 return Err(fail(&format!(
-                    "Rdk.Edge_collapse.edge_collapse: point connectivity attribute {name:?} is missing"
+                    "sop/edge_collapse: point connectivity attribute {name:?} is missing"
                 )));
             };
             match attribute::view::storage(&found)? {

@@ -31,13 +31,13 @@ fn polyline_inner(params: &Params, values: &[(f64, f64, f64)]) -> Result<geometr
             "polyline",
             Code::InvalidParameter,
             &format!(
-                "Rdk.Line_geometry.polyline: {} polylines require at least {minimum} points",
+                "rdk_ops::line_geometry::polyline: {} polylines require at least {minimum} points",
                 if params.closed { "closed" } else { "open" }
             ),
         ));
     }
     if values.iter().any(|&(x, y, z)| !(x.is_finite() && y.is_finite() && z.is_finite())) {
-        return Err(make_error("polyline", Code::InvalidParameter, "Rdk.Line_geometry.polyline: positions must be finite"));
+        return Err(make_error("polyline", Code::InvalidParameter, "rdk_ops::line_geometry::polyline: positions must be finite"));
     }
     let cloud = points(values)?;
     let mut builder = topology::builder::create(count as i64, Some(count as i64), Some(1))?;
@@ -83,11 +83,11 @@ mod tests {
         assert_eq!(error::code(&failure), Code::InvalidParameter);
         assert_eq!(
             error::message(&failure),
-            "Rdk.Line_geometry.polyline: closed polylines require at least 3 points"
+            "rdk_ops::line_geometry::polyline: closed polylines require at least 3 points"
         );
         let two_open = polyline(&Params { closed: false }, &values[..2]);
         assert!(two_open.is_ok());
         let nonfinite = polyline(&Params { closed: false }, &[(0.0, 0.0, 0.0), (f64::NAN, 0.0, 0.0)]);
-        assert_eq!(error::message(&nonfinite.err().unwrap()), "Rdk.Line_geometry.polyline: positions must be finite");
+        assert_eq!(error::message(&nonfinite.err().unwrap()), "rdk_ops::line_geometry::polyline: positions must be finite");
     }
 }

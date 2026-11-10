@@ -33,7 +33,7 @@ enum Target {
 }
 
 const OPERATION: &str = "attribute_blur";
-const PREFIX: &str = "Rdk.Attribute_ops.blur_points: ";
+const PREFIX: &str = "sop/attribute_blur: ";
 
 fn invalid(message: &str) -> error::T {
     make_error(OPERATION, Code::InvalidBlur, &format!("{PREFIX}{message}"))
