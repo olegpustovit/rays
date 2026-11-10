@@ -618,4 +618,4 @@ eigenvector.
 
 Use the bounded Cargo commands in [development](../docs/development.md).
 Dated benchmark commands and measurements are preserved in
-[history](../docs/history/specification/performance.md); they are not current gates.
+[history](../docs/history/README.md); they are not current gates.

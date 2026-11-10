@@ -331,7 +331,7 @@ Measure native throughput with a fixed clock, scene, sample count and seed.
 Record hardware, profile, wall time, allocations, readback and owned handle deltas.
 Compare like-for-like serial and parallel output before accepting a speed claim.
 Dated benchmark measurements and removed commands are preserved in
-[history](../docs/history/specification/pathtracer.md).
+[history](../docs/history/README.md).
 
 ## SOP workflow example
 

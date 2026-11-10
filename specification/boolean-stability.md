@@ -11,7 +11,7 @@ Run the native Boolean checks with `cargo t -p rdk_ops boolean`. Record the
 seed, operation, input topology and failing geometry so each issue becomes a
 small deterministic regression. Qualification sweeps use `RAYS_SLOW=1` and
 retain the runner's fixed hard deadlines. Previous campaign commands and
-results are preserved in [history](../docs/history/specification/boolean-stability.md).
+results are preserved in [history](../docs/history/README.md).
 
 ## Current campaign status
 

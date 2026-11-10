@@ -90,4 +90,4 @@ gain, fades, pause/resume, stop, channel ownership and failure paths.
 
 Run `cargo t -p sdl3` and `cargo t -p sdl3_sys`; use native qualification for
 window/lifecycle checks. Historical migrations and sanitizer findings live in
-[history](../docs/history/specification/sdl3.md).
+[history](../docs/history/README.md).

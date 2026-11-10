@@ -52,4 +52,4 @@ shader artifact dependency.
 A new binding needs a concrete consumer, capability check, narrow safe API,
 validation, owned errors, required sys ABI code and success/rejection checks.
 Historical generator migrations and measurements are preserved in
-[history](../docs/history/specification/metal.md).
+[history](../docs/history/README.md).

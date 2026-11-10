@@ -1601,7 +1601,7 @@ disjoint packed writes make one- and multi-domain results byte-identical.
 Record fixed input sizes, seeds, domain counts, profile, median wall time and
 exact result checks. Run bounded focused checks with `cargo t -p rdk_ops FILTER`;
 large campaigns belong to explicit qualification. Dated commands are retained in
-[history](../docs/history/specification/rdk.md).
+[history](../docs/history/README.md).
 
 ### Kernel and generator contracts
 
