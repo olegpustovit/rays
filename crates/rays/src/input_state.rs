@@ -106,19 +106,19 @@ fn remove_button(buttons: &mut Vec<MouseButton>, button: &MouseButton) {
 
 pub(crate) fn apply(state: &mut InputState, event: &Event) {
     match event {
-        Event::Key_pressed(key) => add_key(&mut state.pressed_keys, *key),
-        Event::Key_released(key) => remove_key(&mut state.pressed_keys, key),
-        Event::Pointer_moved((x, y)) => move_to(state, *x, *y),
-        Event::Pointer_pressed(button, (x, y)) => {
+        Event::KeyPressed(key) => add_key(&mut state.pressed_keys, *key),
+        Event::KeyReleased(key) => remove_key(&mut state.pressed_keys, key),
+        Event::PointerMoved((x, y)) => move_to(state, *x, *y),
+        Event::PointerPressed(button, (x, y)) => {
             move_to(state, *x, *y);
             add_button(&mut state.pressed_buttons, *button);
         }
-        Event::Pointer_released(button, (x, y)) => {
+        Event::PointerReleased(button, (x, y)) => {
             move_to(state, *x, *y);
             remove_button(&mut state.pressed_buttons, button);
         }
-        Event::Pointer_cancelled(button) => remove_button(&mut state.pressed_buttons, button),
-        Event::Focus_lost => {
+        Event::PointerCancelled(button) => remove_button(&mut state.pressed_buttons, button),
+        Event::FocusLost => {
             state.pressed_keys.clear();
             state.pressed_buttons.clear();
         }
@@ -139,10 +139,10 @@ pub(crate) fn set_unit(state: &mut InputState, unit: f64) {
 }
 
 pub(crate) fn set_visible(state: &mut InputState, visible: bool) {
-    let _ = ri::push(&mut state.source, Event::Visibility_changed(visible));
+    let _ = ri::push(&mut state.source, Event::VisibilityChanged(visible));
 }
 
-pub struct polled {
+pub struct Polled {
     pub events: Vec<Event>,
     pub window_changed: bool,
     pub visible: bool,
@@ -152,15 +152,15 @@ pub(crate) fn wait(_state: &InputState, timeout_ms: i32) -> bool {
     sdl::wait(timeout_ms).unwrap_or(false)
 }
 
-pub(crate) fn poll(state: &mut InputState) -> Result<polled, String> {
+pub(crate) fn poll(state: &mut InputState) -> Result<Polled, String> {
     state.delta = (0., 0.);
     ri::begin_frame(&mut state.source);
     let pumped = sdl::pump(&mut state.source);
     let native = ri::drain(&mut state.source);
-    let window_changed = native.iter().any(|e| matches!(e, Event::Resized(_) | Event::Pixel_size_changed(_)));
+    let window_changed = native.iter().any(|e| matches!(e, Event::Resized(_) | Event::PixelSizeChanged(_)));
     let mut events = Vec::new();
     for event in native {
-        if matches!(event, Event::Pixel_size_changed(_) | Event::Visibility_changed(_)) {
+        if matches!(event, Event::PixelSizeChanged(_) | Event::VisibilityChanged(_)) {
             continue;
         }
         apply(state, &event);
@@ -169,7 +169,7 @@ pub(crate) fn poll(state: &mut InputState) -> Result<polled, String> {
     if ri::relative(&state.source) {
         state.delta = ri::snapshot(&state.source).mouse_delta;
     }
-    pumped.map(|()| polled { events, window_changed, visible: ri::snapshot(&state.source).visible })
+    pumped.map(|()| Polled { events, window_changed, visible: ri::snapshot(&state.source).visible })
 }
 
 pub(crate) fn mouse(state: &InputState) -> (f64, f64) {

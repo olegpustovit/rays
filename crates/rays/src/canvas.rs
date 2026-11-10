@@ -11,22 +11,22 @@ use runtime_resources::canvas as RCanvas;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-pub struct canvas_data {
+pub struct CanvasData {
     resource: RCanvas::Canvas,
     execution: RefCell<Option<rr::Renderer>>,
     destroyed: Cell<bool>,
-    caches: layer::cache_context,
-    world_caches: world::private::cache_context,
-    native_caches: native_scene_lowering::cache_context,
+    caches: layer::CacheContext,
+    world_caches: world::private::CacheContext,
+    native_caches: native_scene_lowering::CacheContext,
     epoch: Cell<i64>,
     completed: Cell<bool>,
 }
 
 /// A canvas handle: clones share one canvas.
 #[derive(Clone)]
-pub struct Canvas(Rc<canvas_data>);
+pub struct Canvas(Rc<CanvasData>);
 
-fn message(operation: &str, error: &runtime_resources::error) -> String {
+fn message(operation: &str, error: &runtime_resources::Error) -> String {
     format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
@@ -36,7 +36,7 @@ fn renderer_message(operation: &str, error: &ogpu_core::error::Error) -> String 
 
 pub fn create(width: i64, height: i64) -> Result<Canvas, String> {
     match RCanvas::create(width, height) {
-        Ok(resource) => Ok(Canvas(Rc::new(canvas_data {
+        Ok(resource) => Ok(Canvas(Rc::new(CanvasData {
             resource,
             execution: RefCell::new(None),
             destroyed: Cell::new(false),
@@ -84,7 +84,7 @@ fn execution(density: i64, value: &Canvas) -> Result<(), String> {
     Ok(())
 }
 
-fn render_uncached(density: i64, value: &Canvas, scene_: &[scene::node]) -> Result<(), String> {
+fn render_uncached(density: i64, value: &Canvas, scene_: &[scene::Node]) -> Result<(), String> {
     invalidate(value)?;
     if density < 1 {
         return Err("Canvas.render: density must be positive".to_string());
@@ -104,7 +104,7 @@ fn render_uncached(density: i64, value: &Canvas, scene_: &[scene::node]) -> Resu
 /// `density` (default 1) renders the scene at that many canvas pixels a logical point, as a
 /// Retina window does: the scene is `width / density` by `height / density` points. A canvas
 /// keeps the density of its first render.
-pub fn render(density: Option<i64>, value: &Canvas, scene_: &[scene::node]) -> Result<(), String> {
+pub fn render(density: Option<i64>, value: &Canvas, scene_: &[scene::Node]) -> Result<(), String> {
     let density = density.unwrap_or(1);
     let mut result: Result<(), String> = Ok(());
     layer::with_cache_context(&value.0.caches, &mut || {
@@ -188,7 +188,7 @@ pub fn gpu_source(value: &Canvas) -> Result<(i64, i64, Box<dyn Fn() -> Option<Te
 pub mod private {
     use super::*;
 
-    pub type native_stats = rr::Stats;
+    pub type NativeStats = rr::Stats;
 
     pub fn native_stats(value: &Canvas) -> Result<rr::Stats, String> {
         match value.0.execution.borrow().as_ref() {

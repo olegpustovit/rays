@@ -22,58 +22,58 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum clock {
+pub enum Clock {
     Realtime,
     Fixed(f64),
 }
 
-pub type error = oerror::Error;
+pub type Error = oerror::Error;
 
-pub fn error_to_string(e: &error) -> String {
+pub fn error_to_string(e: &Error) -> String {
     oerror::to_string(e)
 }
 
 /// `default_config` enables native resizing.
 #[derive(Clone, Debug, PartialEq)]
-pub struct config {
+pub struct Config {
     pub width: i64,
     pub height: i64,
     pub title: String,
     pub fps: Option<i64>,
     pub domains: Option<i64>,
-    pub clock: clock,
+    pub clock: Clock,
 }
 
-pub fn default_config() -> config {
-    config { width: 800, height: 600, title: "Rays sketch".to_string(), fps: Some(60), domains: None, clock: clock::Realtime }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum dialog {
-    Open_file,
-    Open_files,
-    Save_file,
-    Open_folder,
+pub fn default_config() -> Config {
+    Config { width: 800, height: 600, title: "Rays sketch".to_string(), fps: Some(60), domains: None, clock: Clock::Realtime }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum cursor {
+pub enum Dialog {
+    OpenFile,
+    OpenFiles,
+    SaveFile,
+    OpenFolder,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cursor {
     Default,
-    Horizontal_resize,
-    Vertical_resize,
+    HorizontalResize,
+    VerticalResize,
     Text,
 }
 
-pub type model = Box<dyn Any>;
+pub type Model = Box<dyn Any>;
 
 /// The sketch's callbacks. Updates borrow the stored model mutably; readers borrow it immutably.
-pub struct program {
-    pub init: Box<dyn Fn(&frame::Frame) -> model>,
+pub struct Program {
+    pub init: Box<dyn Fn(&frame::Frame) -> Model>,
     /// `None` keeps the model, including any mutations made by the callback.
-    pub update: Box<dyn Fn(&mut dyn Any, &frame::Frame) -> Option<model>>,
+    pub update: Box<dyn Fn(&mut dyn Any, &frame::Frame) -> Option<Model>>,
     pub view: Box<dyn Fn(&dyn Any, &frame::Frame) -> scene::Scene>,
     /// `None` keeps the model.
-    pub after_present: Option<Box<dyn Fn(&mut dyn Any, &frame::Frame) -> Option<model>>>,
+    pub after_present: Option<Box<dyn Fn(&mut dyn Any, &frame::Frame) -> Option<Model>>>,
     /// `crash_dump model directory` adds the sketch's own files to a crash report.
     pub crash_dump: Option<Box<dyn Fn(&dyn Any, &str)>>,
     /// Runs about every millisecond while an unchanged picture waits for the next frame (input,
@@ -83,32 +83,32 @@ pub struct program {
     pub on_stop: Option<Box<dyn Fn(&dyn Any)>>,
 }
 
-fn startup_error(operation: &str, kind: ErrorKind, message: &str) -> error {
+fn startup_error(operation: &str, kind: ErrorKind, message: &str) -> Error {
     oerror::make(operation, kind, message)
 }
 
-type relative_fn = Rc<dyn Fn(bool) -> Result<(), String>>;
-type cursor_fn = Rc<dyn Fn(cursor) -> Result<(), String>>;
-type background_fn = Rc<dyn Fn((f64, f64, f64)) -> Result<(), String>>;
-type dialog_fn = Rc<dyn Fn(Option<&[(String, Vec<String>)]>, Option<&str>, dialog) -> Result<i64, String>>;
+type RelativeFn = Rc<dyn Fn(bool) -> Result<(), String>>;
+type CursorFn = Rc<dyn Fn(Cursor) -> Result<(), String>>;
+type BackgroundFn = Rc<dyn Fn((f64, f64, f64)) -> Result<(), String>>;
+type DialogFn = Rc<dyn Fn(Option<&[(String, Vec<String>)]>, Option<&str>, Dialog) -> Result<i64, String>>;
 
-struct run_context {
+struct RunContext {
     stopped: Cell<bool>,
     input: RefCell<input_state::InputState>,
     time: RefCell<time::Time>,
-    relative: RefCell<Option<relative_fn>>,
-    cursor: RefCell<Option<cursor_fn>>,
-    background: RefCell<Option<background_fn>>,
-    dialog: RefCell<Option<dialog_fn>>,
+    relative: RefCell<Option<RelativeFn>>,
+    cursor: RefCell<Option<CursorFn>>,
+    background: RefCell<Option<BackgroundFn>>,
+    dialog: RefCell<Option<DialogFn>>,
 }
 
 thread_local! {
-    static ACTIVE_RUN: RefCell<Option<Rc<run_context>>> = const { RefCell::new(None) };
+    static ACTIVE_RUN: RefCell<Option<Rc<RunContext>>> = const { RefCell::new(None) };
     static LAST_PANIC: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
-    static PENDING_FAILURE: RefCell<Option<error>> = const { RefCell::new(None) };
+    static PENDING_FAILURE: RefCell<Option<Error>> = const { RefCell::new(None) };
 }
 
-fn current_run() -> Option<Rc<run_context>> {
+fn current_run() -> Option<Rc<RunContext>> {
     ACTIVE_RUN.with(|r| r.borrow().clone())
 }
 
@@ -131,7 +131,7 @@ pub fn set_relative_mouse(enabled: bool) -> Result<(), String> {
 }
 
 /// Set the active native pointer cursor; an error when no sketch is running.
-pub fn set_cursor(shape: cursor) -> Result<(), String> {
+pub fn set_cursor(shape: Cursor) -> Result<(), String> {
     let set = current_run().and_then(|s| s.cursor.borrow().clone());
     match set {
         None => Err(format!("Sketch.set_cursor: {NO_SKETCH}")),
@@ -156,7 +156,7 @@ pub fn set_window_background(c: color::T) -> Result<(), String> {
 /// cancels, `Input.File_dialog` arrives in a later frame with the same id. `filters` are a label
 /// with the extensions it lists, without dots; an empty list means every file. No more than 8
 /// dialogs can be open; an error when no sketch is running.
-pub fn show_file_dialog(filters: Option<&[(String, Vec<String>)]>, default_location: Option<&str>, kind: dialog) -> Result<i64, String> {
+pub fn show_file_dialog(filters: Option<&[(String, Vec<String>)]>, default_location: Option<&str>, kind: Dialog) -> Result<i64, String> {
     let show = current_run().and_then(|s| s.dialog.borrow().clone());
     match show {
         None => Err(format!("Sketch.show_file_dialog: {NO_SKETCH}")),
@@ -164,7 +164,7 @@ pub fn show_file_dialog(filters: Option<&[(String, Vec<String>)]>, default_locat
     }
 }
 
-fn make_frame(config_: &config, input_: &input_state::InputState, count: i64, time_: f64, dt: f64, events: Vec<Event>) -> frame::Frame {
+fn make_frame(config_: &Config, input_: &input_state::InputState, count: i64, time_: f64, dt: f64, events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(time_);
     input.dt = dt;
     input.frame = count;
@@ -238,23 +238,23 @@ fn button_name(b: &MouseButton) -> &'static str {
 
 fn event_text(e: &Event) -> String {
     match e {
-        Event::Key_pressed(k) => format!("press {}", key_name(k)),
-        Event::Key_released(k) => format!("release {}", key_name(k)),
-        Event::Pointer_moved((x, y)) => format!("move {x:.0},{y:.0}"),
-        Event::Pointer_pressed(b, (x, y)) => format!("down {} {x:.0},{y:.0}", button_name(b)),
-        Event::Pointer_released(b, (x, y)) => format!("up {} {x:.0},{y:.0}", button_name(b)),
-        Event::Pointer_cancelled(b) => format!("cancel {}", button_name(b)),
+        Event::KeyPressed(k) => format!("press {}", key_name(k)),
+        Event::KeyReleased(k) => format!("release {}", key_name(k)),
+        Event::PointerMoved((x, y)) => format!("move {x:.0},{y:.0}"),
+        Event::PointerPressed(b, (x, y)) => format!("down {} {x:.0},{y:.0}", button_name(b)),
+        Event::PointerReleased(b, (x, y)) => format!("up {} {x:.0},{y:.0}", button_name(b)),
+        Event::PointerCancelled(b) => format!("cancel {}", button_name(b)),
         Event::Scrolled((x, y)) => format!("scroll {x:.2},{y:.2}"),
-        Event::Text_input(t) => format!("text {t:?}"),
-        Event::Text_editing { text, .. } => format!("ime {text:?}"),
-        Event::File_dialog { id, result: Ok(paths) } => format!("dialog {id} {}", paths.len()),
-        Event::File_dialog { id, result: Err(message) } => format!("dialog {id} failed {message:?}"),
-        Event::File_dropped(f) => format!("drop {f}"),
+        Event::TextInput(t) => format!("text {t:?}"),
+        Event::TextEditing { text, .. } => format!("ime {text:?}"),
+        Event::FileDialog { id, result: Ok(paths) } => format!("dialog {id} {}", paths.len()),
+        Event::FileDialog { id, result: Err(message) } => format!("dialog {id} failed {message:?}"),
+        Event::FileDropped(f) => format!("drop {f}"),
         Event::Resized((w, h)) => format!("resize {w}x{h}"),
-        Event::File_drag_moved((x, y)) => format!("drag {x:.0},{y:.0}"),
-        Event::File_drag_ended => "drag-end".to_string(),
+        Event::FileDragMoved((x, y)) => format!("drag {x:.0},{y:.0}"),
+        Event::FileDragEnded => "drag-end".to_string(),
         Event::Pinched(scale) => format!("pinch {scale:.3}"),
-        Event::Trackpad_scrolled { delta: (x, y), phase, .. } => {
+        Event::TrackpadScrolled { delta: (x, y), phase, .. } => {
             let phase = match phase {
                 input::ScrollPhase::Touched => "touch",
                 input::ScrollPhase::Moved => "move",
@@ -263,11 +263,11 @@ fn event_text(e: &Event) -> String {
             };
             format!("trackpad {phase} {x:.1},{y:.1}")
         }
-        Event::Dialog_opened(id) => format!("dialog-opened {id}"),
-        Event::Pixel_size_changed((w, h)) => format!("pixel-size {w}x{h}"),
-        Event::Visibility_changed(visible) => format!("visible {visible}"),
-        Event::Focus_lost => "focus-lost".to_string(),
-        Event::Focus_gained => "focus-gained".to_string(),
+        Event::DialogOpened(id) => format!("dialog-opened {id}"),
+        Event::PixelSizeChanged((w, h)) => format!("pixel-size {w}x{h}"),
+        Event::VisibilityChanged(visible) => format!("visible {visible}"),
+        Event::FocusLost => "focus-lost".to_string(),
+        Event::FocusGained => "focus-gained".to_string(),
         Event::Closed => "close".to_string(),
     }
 }
@@ -375,15 +375,15 @@ fn install_panic_hook() {
 }
 
 /// The state a crash report needs, shared with the loop.
-struct crash_state {
+struct CrashState {
     crash_dir: Option<String>,
     title: String,
     recent: RefCell<VecDeque<frame::Frame>>,
-    model: RefCell<Option<model>>,
-    program: Rc<program>,
+    model: RefCell<Option<Model>>,
+    program: Rc<Program>,
 }
 
-fn update_model(stored: &RefCell<Option<model>>, update: &dyn Fn(&mut dyn Any, &frame::Frame) -> Option<model>, facts: &frame::Frame, op: &str) -> Result<(), error> {
+fn update_model(stored: &RefCell<Option<Model>>, update: &dyn Fn(&mut dyn Any, &frame::Frame) -> Option<Model>, facts: &frame::Frame, op: &str) -> Result<(), Error> {
     let next = {
         let mut guard = stored.borrow_mut();
         let model = guard.as_mut().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
@@ -393,7 +393,7 @@ fn update_model(stored: &RefCell<Option<model>>, update: &dyn Fn(&mut dyn Any, &
     Ok(())
 }
 
-fn report_crash(state: &crash_state) {
+fn report_crash(state: &CrashState) {
     let (message, backtrace) = LAST_PANIC.with(|p| p.borrow_mut().take()).unwrap_or_else(|| ("(no panic information)".to_string(), String::new()));
     let frames: Vec<frame::Frame> = state.recent.borrow().iter().filter(|f| f.input.frame > 0).cloned().collect();
     let model_ref = state.model.try_borrow();
@@ -408,24 +408,24 @@ fn report_crash(state: &crash_state) {
 
 // ---- runtime access ----
 
-fn with_runtime_facts(coordinator: &rr::Renderer) -> Result<runtime::presentation_facts, error> {
+fn with_runtime_facts(coordinator: &rr::Renderer) -> Result<runtime::PresentationFacts, Error> {
     let mut out = None;
     native::runtime_of_mut(coordinator, &mut |r| out = Some(runtime::presentation_facts(r)));
     out.unwrap_or_else(|| Err(startup_error("Sketch.run_state", ErrorKind::InvalidState, "no runtime")))
 }
 
-fn run_runtime(coordinator: &rr::Renderer, f: &dyn Fn(&mut runtime::Runtime) -> Result<(), error>) -> Result<(), error> {
+fn run_runtime(coordinator: &rr::Renderer, f: &dyn Fn(&mut runtime::Runtime) -> Result<(), Error>) -> Result<(), Error> {
     let mut out = None;
     native::runtime_of_mut(coordinator, &mut |r| out = Some(f(r)));
     out.unwrap_or_else(|| Err(startup_error("Sketch.run_state", ErrorKind::InvalidState, "no runtime")))
 }
 
 struct Finish {
-    state: Rc<run_context>,
-    previous: Option<Rc<run_context>>,
+    state: Rc<RunContext>,
+    previous: Option<Rc<RunContext>>,
     coordinator: rr::Renderer,
-    caches: layer::cache_context,
-    model: Rc<crash_state>,
+    caches: layer::CacheContext,
+    model: Rc<CrashState>,
     last_scene: Rc<RefCell<Option<scene::Scene>>>,
     done: bool,
 }
@@ -469,13 +469,13 @@ impl Drop for Finish {
 }
 
 fn run_state_internal(
-    config_: &config,
+    config_: &Config,
     max_frames: Option<i64>,
     crash_dir: Option<String>,
     profile: bool,
     high_density: bool,
-    program_: program,
-) -> Result<model, error> {
+    program_: Program,
+) -> Result<Model, Error> {
     let op = "Sketch.run_state";
     let invalid = |m: &str| startup_error(op, ErrorKind::InvalidArgument, m);
     if config_.width <= 0 || config_.height <= 0 {
@@ -493,8 +493,8 @@ fn run_state_internal(
         && domains <= 0 {
             return Err(invalid("domains must be positive"));
         }
-    let vsync = !matches!(config_.clock, clock::Fixed(_));
-    if let clock::Fixed(dt) = config_.clock
+    let vsync = !matches!(config_.clock, Clock::Fixed(_));
+    if let Clock::Fixed(dt) = config_.clock
         && !(dt.is_finite() && dt > 0.) {
             return Err(invalid("fixed dt must be finite and positive"));
         }
@@ -503,7 +503,7 @@ fn run_state_internal(
     let caches = layer::create_cache_context();
     let world_caches = world::private::create_cache_context();
     let native_caches = native_scene_lowering::create_cache_context();
-    let state = Rc::new(run_context {
+    let state = Rc::new(RunContext {
         stopped: Cell::new(false),
         input: RefCell::new(input),
         time: RefCell::new(time_),
@@ -547,7 +547,7 @@ fn run_state_internal(
             rr::capture(&coordinator).map(|bytes| (facts.drawable_width, facts.drawable_height, bytes)).map_err(|e| error_to_string(&e))
         }
     };
-    let save: canvas_runtime::save = Rc::new(move |filename: &str| {
+    let save: canvas_runtime::Save = Rc::new(move |filename: &str| {
         let (width, height, bytes) = capture()?;
         let canvas = runtime_resources::canvas::of_rgba_bytes(width, height, bytes).map_err(|e| error_to_string(&e))?;
         let saved = runtime_resources::canvas::save_png(&canvas, filename).map_err(|e| error_to_string(&e));
@@ -555,7 +555,7 @@ fn run_state_internal(
         saved
     });
 
-    let to_message = |e: error| error_to_string(&e);
+    let to_message = |e: Error| error_to_string(&e);
     {
         let (coordinator, input_state_) = (coordinator.clone(), state.clone());
         *state.relative.borrow_mut() = Some(Rc::new(move |enabled| {
@@ -573,10 +573,10 @@ fn run_state_internal(
         let coordinator = coordinator.clone();
         *state.cursor.borrow_mut() = Some(Rc::new(move |shape| {
             let shape = match shape {
-                cursor::Default => runtime::cursor_shape::Default,
-                cursor::Horizontal_resize => runtime::cursor_shape::Horizontal_resize,
-                cursor::Vertical_resize => runtime::cursor_shape::Vertical_resize,
-                cursor::Text => runtime::cursor_shape::Text,
+                Cursor::Default => runtime::CursorShape::Default,
+                Cursor::HorizontalResize => runtime::CursorShape::HorizontalResize,
+                Cursor::VerticalResize => runtime::CursorShape::VerticalResize,
+                Cursor::Text => runtime::CursorShape::Text,
             };
             run_runtime(&coordinator, &|r| runtime::set_cursor(r, shape)).map_err(to_message)
         }));
@@ -584,19 +584,19 @@ fn run_state_internal(
     {
         let coordinator = coordinator.clone();
         *state.dialog.borrow_mut() = Some(Rc::new(move |filters, default_location, kind| {
-            let filters: Vec<runtime::dialog_filter> = filters
+            let filters: Vec<runtime::DialogFilter> = filters
                 .unwrap_or(&[])
                 .iter()
-                .map(|(name, extensions)| runtime::dialog_filter {
+                .map(|(name, extensions)| runtime::DialogFilter {
                     name: name.clone(),
                     pattern: if extensions.is_empty() { "*".to_string() } else { extensions.join(";") },
                 })
                 .collect();
             let kind = match kind {
-                dialog::Open_file => runtime::dialog_kind::Open_file,
-                dialog::Open_files => runtime::dialog_kind::Open_files,
-                dialog::Save_file => runtime::dialog_kind::Save_file,
-                dialog::Open_folder => runtime::dialog_kind::Open_folder,
+                Dialog::OpenFile => runtime::DialogKind::OpenFile,
+                Dialog::OpenFiles => runtime::DialogKind::OpenFiles,
+                Dialog::SaveFile => runtime::DialogKind::SaveFile,
+                Dialog::OpenFolder => runtime::DialogKind::OpenFolder,
             };
             let mut id = None;
             native::runtime_of_mut(&coordinator, &mut |r| id = Some(runtime::show_dialog(r, Some(&filters), default_location, kind)));
@@ -609,7 +609,7 @@ fn run_state_internal(
     }
 
     // a render failure inside the Scene.render callback is kept for the loop to return
-    let render_failure: Rc<RefCell<Option<error>>> = Rc::new(RefCell::new(None));
+    let render_failure: Rc<RefCell<Option<Error>>> = Rc::new(RefCell::new(None));
     let render_scene: Rc<dyn Fn(&scene::Scene)> = {
         let coordinator = coordinator.clone();
         let render_failure = render_failure.clone();
@@ -617,7 +617,7 @@ fn run_state_internal(
             // ponytail: scan scene metadata each frame; move the focused region into staged scene
             // facts if large retained scenes make this measurable.
             let area = layer::text_regions(scene_).into_iter().find(|r| r.4).map(|(x, y, w, h, _, cursor_)| ((x, y, w, h), cursor_));
-            let outcome = (|| -> Result<(), error> {
+            let outcome = (|| -> Result<(), Error> {
                 run_runtime(&coordinator, &|r| runtime::set_text_input(r, area))?;
                 let facts = with_runtime_facts(&coordinator)?;
                 let from_drawable = facts.drawable_width as f64 / std::cmp::max(1, facts.logical_width) as f64;
@@ -635,22 +635,22 @@ fn run_state_internal(
     };
 
     let program_ = Rc::new(program_);
-    let crash = Rc::new(crash_state {
+    let crash = Rc::new(CrashState {
         crash_dir,
         title: config_.title.clone(),
         recent: RefCell::new(VecDeque::with_capacity(120)),
         model: RefCell::new(None),
         program: program_.clone(),
     });
-    let release_after_failed_init = |caches: &layer::cache_context, coordinator: &rr::Renderer| {
+    let release_after_failed_init = |caches: &layer::CacheContext, coordinator: &rr::Renderer| {
         layer::clear_cache_context(caches);
         let _ = rr::destroy(coordinator);
     };
     // init: a panic here writes a crash report (no frames yet) and leaves nothing running
     struct InitGuard {
-        caches: layer::cache_context,
+        caches: layer::CacheContext,
         coordinator: rr::Renderer,
-        crash: Rc<crash_state>,
+        crash: Rc<CrashState>,
         armed: bool,
     }
     impl Drop for InitGuard {
@@ -665,7 +665,7 @@ fn run_state_internal(
         }
     }
     let mut init_guard = InitGuard { caches: caches.clone(), coordinator: coordinator.clone(), crash: crash.clone(), armed: true };
-    let mut initial: Option<model> = None;
+    let mut initial: Option<Model> = None;
     with_run_caches(&mut || initial = Some((program_.init)(&first)));
     init_guard.armed = false;
     drop(init_guard);
@@ -687,7 +687,7 @@ fn run_state_internal(
         done: false,
     };
     ACTIVE_RUN.with(|r| *r.borrow_mut() = Some(state.clone()));
-    let looped: Result<(), error> = {
+    let looped: Result<(), Error> = {
         let mut result = Ok(());
         let renderer_callback = render_scene.clone();
         layer::with_renderer(renderer_callback, &mut || {
@@ -724,31 +724,31 @@ fn run_state_internal(
 
 #[allow(clippy::too_many_arguments)]
 fn run_loop(
-    config_: &config,
+    config_: &Config,
     limit: Option<i64>,
     profile: bool,
-    state: &Rc<run_context>,
-    crash: &Rc<crash_state>,
-    program_: &Rc<program>,
+    state: &Rc<RunContext>,
+    crash: &Rc<CrashState>,
+    program_: &Rc<Program>,
     coordinator: &rr::Renderer,
-    caches: &layer::cache_context,
-    world_caches: &world::private::cache_context,
+    caches: &layer::CacheContext,
+    world_caches: &world::private::CacheContext,
     last_scene: &Rc<RefCell<Option<scene::Scene>>>,
-    render_failure: &Rc<RefCell<Option<error>>>,
+    render_failure: &Rc<RefCell<Option<Error>>>,
     logical_width: &mut i64,
     logical_height: &mut i64,
-) -> Result<(), error> {
+) -> Result<(), Error> {
     let op = "Sketch.input";
     let mut count = 0_i64;
     let mut shown: Option<scene::Scene> = None;
     let mut quiet = 0_i64;
-    let mut failure: Option<error> = None;
+    let mut failure: Option<Error> = None;
     let stopped_or_done = |count: i64| state.stopped.get() || limit.is_some_and(|l| count >= l);
     while !stopped_or_done(count) {
         if let Some(e) = failure.take() {
             return Err(e);
         }
-        let mut step: Result<(), error> = Ok(());
+        let mut step: Result<(), Error> = Ok(());
         layer::with_cache_context(caches, &mut || {
             world::private::with_cache_context(world_caches, &mut || {
                 step = one_frame(
@@ -783,22 +783,22 @@ fn run_loop(
 
 #[allow(clippy::too_many_arguments)]
 fn one_frame(
-    config_: &config,
+    config_: &Config,
     limit: Option<i64>,
     profile: bool,
-    state: &Rc<run_context>,
-    crash: &Rc<crash_state>,
-    program_: &Rc<program>,
+    state: &Rc<RunContext>,
+    crash: &Rc<CrashState>,
+    program_: &Rc<Program>,
     coordinator: &rr::Renderer,
     last_scene: &Rc<RefCell<Option<scene::Scene>>>,
-    render_failure: &Rc<RefCell<Option<error>>>,
+    render_failure: &Rc<RefCell<Option<Error>>>,
     logical_width: &mut i64,
     logical_height: &mut i64,
     count: &mut i64,
     shown: &mut Option<scene::Scene>,
     quiet: &mut i64,
     op: &str,
-) -> Result<(), error> {
+) -> Result<(), Error> {
     time::update(&mut state.time.borrow_mut());
     let unit = {
         let mut u = 1.;
@@ -826,16 +826,16 @@ fn one_frame(
     }
     *count += 1;
     let dt = match config_.clock {
-        clock::Realtime => time::delta(&state.time.borrow()),
-        clock::Fixed(value) => value,
+        Clock::Realtime => time::delta(&state.time.borrow()),
+        Clock::Fixed(value) => value,
     };
     let base = make_frame(
         config_,
         &state.input.borrow(),
         *count,
         match config_.clock {
-            clock::Realtime => time::now(&state.time.borrow()),
-            clock::Fixed(_) => *count as f64 * dt,
+            Clock::Realtime => time::now(&state.time.borrow()),
+            Clock::Fixed(_) => *count as f64 * dt,
         },
         dt,
         events,
@@ -909,20 +909,30 @@ fn one_frame(
     Ok(())
 }
 
+/// Named lifecycle controls for [`run_state`].
+#[derive(Default)]
+pub struct RunOptions {
+    pub config: Option<Config>,
+    pub max_frames: Option<i64>,
+    pub crash_dir: Option<String>,
+    pub profile: bool,
+}
+
 /// Run a sketch with immutable user state threaded through every frame. Native startup, runtime,
 /// validation and export failures are returned as `error`. `max_frames` keeps one runtime alive
 /// for exactly that many frames unless `quit` is requested first (the process environment is
 /// never read). `after_present` runs after the native frame is rendered, can capture that frame,
 /// and returns the model for the next frame and `on_stop`.
-pub fn run_state(config_: Option<config>, max_frames: Option<i64>, crash_dir: Option<String>, profile: Option<bool>, program_: program) -> Result<model, error> {
+pub fn run_state(options: RunOptions, program_: Program) -> Result<Model, Error> {
+    let RunOptions { config: config_, max_frames, crash_dir, profile } = options;
     let config_ = config_.unwrap_or_else(default_config);
     let domains = config_.domains;
-    let out: RefCell<Option<Result<model, error>>> = RefCell::new(None);
+    let out: RefCell<Option<Result<Model, Error>>> = RefCell::new(None);
     let program_cell = RefCell::new(Some(program_));
     let _ = parallel::run_unit(domains, &|| {
         let program_ = program_cell.borrow_mut().take();
         if let Some(program_) = program_ {
-            *out.borrow_mut() = Some(run_state_internal(&config_, max_frames, crash_dir.clone(), profile.unwrap_or(false), true, program_));
+            *out.borrow_mut() = Some(run_state_internal(&config_, max_frames, crash_dir.clone(), profile, true, program_));
         }
         Ok(())
     });
@@ -932,7 +942,7 @@ pub fn run_state(config_: Option<config>, max_frames: Option<i64>, crash_dir: Op
 
 /// Stateful deterministic PNG-sequence export named `prefix-NNNNNN.png`. Startup and file-write
 /// errors are returned. Captured frames use the renderer's native backing dimensions.
-pub fn export_state(config_: Option<config>, fps: Option<i64>, prefix: Option<String>, directory: &str, frames: i64, program_: program) -> Result<model, error> {
+pub fn export_state(config_: Option<Config>, fps: Option<i64>, prefix: Option<String>, directory: &str, frames: i64, program_: Program) -> Result<Model, Error> {
     let op = "Sketch.export_state";
     let invalid = |m: &str| startup_error(op, ErrorKind::InvalidArgument, m);
     let fps = fps.unwrap_or(60);
@@ -964,10 +974,10 @@ pub fn export_state(config_: Option<config>, fps: Option<i64>, prefix: Option<St
         after_export.as_ref().and_then(|after| after(m, f))
     }));
     let mut config_ = config_.unwrap_or_else(default_config);
-    config_.clock = clock::Fixed(1. / fps as f64);
+    config_.clock = Clock::Fixed(1. / fps as f64);
     config_.fps = None;
     let domains = config_.domains;
-    let out: RefCell<Option<Result<model, error>>> = RefCell::new(None);
+    let out: RefCell<Option<Result<Model, Error>>> = RefCell::new(None);
     let program_cell = RefCell::new(Some(program_));
     let _ = parallel::run_unit(domains, &|| {
         let program_ = program_cell.borrow_mut().take();
@@ -989,7 +999,7 @@ mod tests {
         let mut bytes = Vec::<u8>::with_capacity(8);
         bytes.push(1);
         let identity = bytes.as_ptr();
-        let stored = RefCell::new(Some(Box::new(bytes) as model));
+        let stored = RefCell::new(Some(Box::new(bytes) as Model));
         let facts = frame::Frame { input: input::at_time(0.), pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
         update_model(&stored, &|model, _| { model.downcast_mut::<Vec<u8>>().unwrap().push(2); None }, &facts, "test").unwrap();
         assert_eq!(stored.borrow().as_ref().unwrap().downcast_ref::<Vec<u8>>().unwrap().as_ptr(), identity);
@@ -1007,9 +1017,9 @@ mod tests {
         }));
         assert!(failed.is_err());
         let directory = std::env::temp_dir().join(format!("rays-crash-model-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        let state = crash_state {
+        let state = CrashState {
             crash_dir: Some(directory.to_string_lossy().into_owned()), title: "retained model".into(), recent: RefCell::new(VecDeque::new()), model: stored,
-            program: Rc::new(program {
+            program: Rc::new(Program {
                 init: Box::new(|_| Box::new(())), update: Box::new(|_, _| None), view: Box::new(|_, _| Vec::new()), after_present: None,
                 crash_dump: Some(Box::new(|model, directory| {
                     let bytes = model.downcast_ref::<Vec<u8>>().unwrap();

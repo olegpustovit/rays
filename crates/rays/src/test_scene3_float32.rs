@@ -27,15 +27,15 @@ fn f32_at(bytes: &[u8], offset: usize) -> f32 {
     f32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
 }
 
-pub type made = (mesh::Vec3_buffer, mesh::Vec3_buffer, Arc<Vec<u32>>, Vec<color::T>);
+pub type Made = (mesh::Vec3Buffer, mesh::Vec3Buffer, Arc<Vec<u32>>, Vec<color::T>);
 
-pub fn make(colors: Vec<color::T>) -> made {
-    let vertices = mesh::Vec3_buffer::of_planes(vec![-0.70000001, 0.60000001, 0.10000001], vec![-0.60000001, -0.50000001, 0.80000001], vec![0., 0., 0.]);
-    let normals = mesh::Vec3_buffer::of_planes(vec![0., 0., 0.], vec![0., 0., 0.], vec![1., 1., 1.]);
+pub fn make(colors: Vec<color::T>) -> Made {
+    let vertices = mesh::Vec3Buffer::of_planes(vec![-0.70000001, 0.60000001, 0.10000001], vec![-0.60000001, -0.50000001, 0.80000001], vec![0., 0., 0.]);
+    let normals = mesh::Vec3Buffer::of_planes(vec![0., 0., 0.], vec![0., 0., 0.], vec![1., 1., 1.]);
     (vertices, normals, Arc::new(vec![0, 1, 2]), colors)
 }
 
-pub fn mesh_of(m: made) -> mesh::Mesh {
+pub fn mesh_of(m: Made) -> mesh::Mesh {
     mesh::view::create_packed_shared(None, Some(m.2), Some(m.1), Some(Arc::new(m.3)), None, m.0).expect("mesh")
 }
 
@@ -92,7 +92,7 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         let (vertices, normals, indices, colors) = make(vec![color::white(); 3]);
         let mut x = (*vertices.x).clone();
         x[0] = 1e100;
-        let vertices = mesh::Vec3_buffer::of_planes(x, (*vertices.y).clone(), (*vertices.z).clone());
+        let vertices = mesh::Vec3Buffer::of_planes(x, (*vertices.y).clone(), (*vertices.z).clone());
         let oversized = mesh_of((vertices, normals, indices, colors));
         let scene3 = d3::create(None, None, None, None, vec![d3::mesh(None, None, None, None, None, oversized)]).expect("scene3");
         match layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]) {
@@ -107,14 +107,14 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
 fn with_cull_sets_every_mesh() {
     let plane = mesh::plane(1., 1.).expect("plane");
     let inner = d3::mesh(None, None, None, None, None, plane.clone());
-    let scene3 = d3::create(None, None, None, None, vec![d3::group(vec![inner, d3::mesh(None, None, None, Some(d3::cull::Cull_back), None, plane)])]).expect("scene3");
+    let scene3 = d3::create(None, None, None, None, vec![d3::group(vec![inner, d3::mesh(None, None, None, Some(d3::Cull::CullBack), None, plane)])]).expect("scene3");
     let culls = |s: &d3::Scene3| {
         let mut found = Vec::new();
         d3::walk::iter_batches(&mut |drawing, _| found.push(drawing.cull), s);
         found
     };
-    assert!(culls(&scene3).iter().all(|c| *c == d3::cull::Cull_back));
-    let open = d3::walk::with_cull(d3::cull::Cull_none, &scene3);
+    assert!(culls(&scene3).iter().all(|c| *c == d3::Cull::CullBack));
+    let open = d3::walk::with_cull(d3::Cull::CullNone, &scene3);
     assert_eq!(culls(&open).len(), 2);
-    assert!(culls(&open).iter().all(|c| *c == d3::cull::Cull_none));
+    assert!(culls(&open).iter().all(|c| *c == d3::Cull::CullNone));
 }

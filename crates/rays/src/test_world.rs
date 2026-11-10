@@ -1,4 +1,4 @@
-use crate::world::{self as w, background, emit, entry, layer, shape, sun_mode};
+use crate::world::{self as w, Background, Emit, Entry, Layer, Shape, SunMode};
 use rays_math::vec3;
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ fn same_bits(a: &[f64], b: &[f64]) -> bool {
     a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits())
 }
 
-fn same_baked(a: &w::baked, b: &w::baked) -> bool {
+fn same_baked(a: &w::Baked, b: &w::Baked) -> bool {
     same_bits(&a.camera.pixels, &b.camera.pixels)
         && same_bits(&a.lighting.pixels, &b.lighting.pixels)
         && same_bits(&a.cdf.marginal, &b.cdf.marginal)
@@ -22,20 +22,20 @@ fn same_baked(a: &w::baked, b: &w::baked) -> bool {
         && a.sun == b.sun
 }
 
-fn entry_(l: layer) -> entry {
-    entry { name: "layer".to_string(), layer: l, visible: true }
+fn entry_(l: Layer) -> Entry {
+    Entry { name: "layer".to_string(), layer: l, visible: true }
 }
 
-fn with_layers(layers: Vec<layer>) -> w::World {
+fn with_layers(layers: Vec<Layer>) -> w::World {
     w::World { layers: layers.into_iter().map(entry_).collect(), ..w::default() }
 }
 
-fn dark(v: f64) -> layer {
-    layer::Gradient { zenith: w::rgb(v, v, v), horizon: w::rgb(v, v, v), nadir: w::rgb(v, v, v), sharpness: 1. }
+fn dark(v: f64) -> Layer {
+    Layer::Gradient { zenith: w::rgb(v, v, v), horizon: w::rgb(v, v, v), nadir: w::rgb(v, v, v), sharpness: 1. }
 }
 
-fn scatter(mirror: bool, emit_: emit, seed: i64) -> layer {
-    layer::Scatter {
+fn scatter(mirror: bool, emit_: Emit, seed: i64) -> Layer {
+    Layer::Scatter {
         seed,
         count: 12,
         elevation_min: 0.1,
@@ -49,7 +49,7 @@ fn scatter(mirror: bool, emit_: emit, seed: i64) -> layer {
     }
 }
 
-fn bake(domains: Option<i64>, width: i64, height: i64, world: &w::World) -> w::baked {
+fn bake(domains: Option<i64>, width: i64, height: i64, world: &w::World) -> w::Baked {
     w::bake(domains, None, width, height, world).expect("bake")
 }
 
@@ -64,14 +64,14 @@ fn domains() {
 
 #[test]
 fn seeds() {
-    let make = |seed: i64| bake(Some(1), 64, 32, &with_layers(vec![dark(0.), scatter(false, emit::Dome, seed)]));
+    let make = |seed: i64| bake(Some(1), 64, 32, &with_layers(vec![dark(0.), scatter(false, Emit::Dome, seed)]));
     check("same seed", same_baked(&make(3), &make(3)));
     check("different seed", !same_bits(&make(3).camera.pixels, &make(4).camera.pixels));
 }
 
 /// Red irradiance at unit normal `n` from the baked coefficients, on the real basis `sh9`
 /// documents.
-fn irradiance(baked: &w::baked, n: vec3::T) -> f64 {
+fn irradiance(baked: &w::Baked, n: vec3::T) -> f64 {
     let (x, y, z) = (n.x, n.y, n.z);
     let basis = [
         0.282095,
@@ -90,9 +90,9 @@ fn irradiance(baked: &w::baked, n: vec3::T) -> f64 {
 #[test]
 fn sh9() {
     let world = with_layers(vec![
-        layer::Gradient { zenith: w::rgb(1., 0.9, 0.8), horizon: w::rgb(0.4, 0.4, 0.5), nadir: w::rgb(0.1, 0.1, 0.1), sharpness: 1. },
-        layer::Shape {
-            shape: shape::Circle,
+        Layer::Gradient { zenith: w::rgb(1., 0.9, 0.8), horizon: w::rgb(0.4, 0.4, 0.5), nadir: w::rgb(0.1, 0.1, 0.1), sharpness: 1. },
+        Layer::Shape {
+            shape: Shape::Circle,
             azimuth: 1.,
             elevation: 0.4,
             width: 1.2,
@@ -100,7 +100,7 @@ fn sh9() {
             softness: 0.6,
             color: w::rgb(2., 1., 0.5),
             intensity: 1.,
-            emit: emit::Dome,
+            emit: Emit::Dome,
         },
     ]);
     let baked = bake(None, 128, 64, &world);
@@ -136,10 +136,10 @@ fn sh9() {
 
 #[test]
 fn promoted() {
-    let manual = sun_mode::Manual(1., 0.5);
-    let sun = layer::Sun { angular_radius: 0.05, intensity: 50., tint: w::rgb(1., 1., 0.9) };
-    let rect = layer::Shape {
-        shape: shape::Rect,
+    let manual = SunMode::Manual(1., 0.5);
+    let sun = Layer::Sun { angular_radius: 0.05, intensity: 50., tint: w::rgb(1., 1., 0.9) };
+    let rect = Layer::Shape {
+        shape: Shape::Rect,
         azimuth: -0.8,
         elevation: 0.2,
         width: 0.6,
@@ -147,10 +147,10 @@ fn promoted() {
         softness: 0.1,
         color: w::rgb(0.2, 1., 0.4),
         intensity: 5.,
-        emit: emit::Light,
+        emit: Emit::Light,
     };
-    let circle = layer::Shape {
-        shape: shape::Circle,
+    let circle = Layer::Shape {
+        shape: Shape::Circle,
         azimuth: 2.,
         elevation: 0.,
         width: 0.5,
@@ -158,11 +158,11 @@ fn promoted() {
         softness: 0.1,
         color: w::rgb(1., 1., 1.),
         intensity: 2.,
-        emit: emit::Dome,
+        emit: Emit::Dome,
     };
-    let world = |layers: Vec<layer>| w::World { sun: manual, rotation: 0.3, ..with_layers(layers) };
-    let full = bake(None, 128, 64, &world(vec![dark(0.2), rect.clone(), scatter(true, emit::Light, 5), circle, sun.clone()]));
-    let only = bake(None, 128, 64, &world(vec![rect, scatter(false, emit::Light, 5), sun]));
+    let world = |layers: Vec<Layer>| w::World { sun: manual, rotation: 0.3, ..with_layers(layers) };
+    let full = bake(None, 128, 64, &world(vec![dark(0.2), rect.clone(), scatter(true, Emit::Light, 5), circle, sun.clone()]));
+    let only = bake(None, 128, 64, &world(vec![rect, scatter(false, Emit::Light, 5), sun]));
     let p = full.camera.pixels.len();
     for k in 0..p {
         let cam = full.camera.pixels[k];
@@ -173,12 +173,12 @@ fn promoted() {
     check("some promoted radiance", only.camera.pixels.iter().sum::<f64>() > 0.);
     check("light count", full.lights.len() == 13);
     check("sun extracted", full.sun.is_some());
-    let room = |emit_: emit| {
+    let room = |emit_: Emit| {
         bake(
             None,
             64,
             32,
-            &with_layers(vec![layer::Room {
+            &with_layers(vec![Layer::Room {
                 width: 6.,
                 depth: 8.,
                 height: 3.,
@@ -192,8 +192,8 @@ fn promoted() {
             }]),
         )
     };
-    let lit = room(emit::Light);
-    let dome = room(emit::Dome);
+    let lit = room(Emit::Light);
+    let dome = room(Emit::Dome);
     check("room camera independent of emit", same_bits(&lit.camera.pixels, &dome.camera.pixels));
     check("room dome lighting = camera", same_bits(&dome.lighting.pixels, &dome.camera.pixels));
     check("room panels leave lighting", lit.lighting.pixels.iter().sum::<f64>() < lit.camera.pixels.iter().sum::<f64>());
@@ -204,8 +204,8 @@ fn promoted() {
 fn cdf() {
     let world = with_layers(vec![
         dark(1e-4),
-        layer::Shape {
-            shape: shape::Circle,
+        Layer::Shape {
+            shape: Shape::Circle,
             azimuth: 1.,
             elevation: 0.3,
             width: 0.2,
@@ -213,7 +213,7 @@ fn cdf() {
             softness: 0.,
             color: w::rgb(1., 1., 1.),
             intensity: 100.,
-            emit: emit::Dome,
+            emit: Emit::Dome,
         },
     ]);
     let baked = bake(None, 128, 64, &world);
@@ -255,8 +255,8 @@ fn cdf() {
 /// The linked sun as the bake extracts it: the direction toward the sun (east = +X, up = +Y,
 /// north = -Z), or `None` below the horizon.
 fn linked_sun(latitude: f64, day_of_year: i64, hours: f64) -> Option<vec3::T> {
-    let world = with_layers(vec![dark(0.), layer::Sun { angular_radius: 0.05, intensity: 50., tint: w::rgb(1., 1., 0.9) }]);
-    bake(None, 16, 8, &w::World { sun: sun_mode::Linked, rotation: 0., latitude, day_of_year, time_of_day: hours, ..world })
+    let world = with_layers(vec![dark(0.), Layer::Sun { angular_radius: 0.05, intensity: 50., tint: w::rgb(1., 1., 0.9) }]);
+    bake(None, 16, 8, &w::World { sun: SunMode::Linked, rotation: 0., latitude, day_of_year, time_of_day: hours, ..world })
         .sun
         .map(|s| s.direction)
 }
@@ -303,6 +303,6 @@ fn cached() {
         let a = w::bake_cached(32, 16, &w::default()).expect("bake");
         let b = w::bake_cached(32, 16, &w::World { exposure: 2., ..w::default() }).expect("bake");
         check("exposure-only change hits the cache", Arc::ptr_eq(&a.camera.pixels, &b.camera.pixels) && b.exposure == 2.);
-        let _ = background::Environment;
+        let _ = Background::Environment;
     });
 }

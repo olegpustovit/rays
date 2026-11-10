@@ -20,15 +20,15 @@ fn frame(events: Vec<Event>) -> frame::Frame {
     frame_(Vec::new(), 1., 0., events)
 }
 
-type snap = (vec3::T, vec3::T, vec3::T, camera::projection, f64);
+type Snap = (vec3::T, vec3::T, vec3::T, camera::Projection, f64);
 
-fn snapshot(value: &ec::EasyCamera) -> snap {
+fn snapshot(value: &ec::EasyCamera) -> Snap {
     let c = ec::camera(value).expect("camera");
     (camera::position(&c), camera::target(&c), camera::up(&c), camera::projection(&c), ec::distance(value))
 }
 
 fn drag(button: MouseButton) -> Vec<Event> {
-    vec![Event::Pointer_pressed(button, (20., 20.)), Event::Pointer_moved((35., 27.)), Event::Pointer_released(button, (35., 27.))]
+    vec![Event::PointerPressed(button, (20., 20.)), Event::PointerMoved((35., 27.)), Event::PointerReleased(button, (35., 27.))]
 }
 
 fn update(value: &ec::EasyCamera, f: &frame::Frame) -> ec::EasyCamera {
@@ -42,11 +42,11 @@ fn easy_camera_buttons_modifiers_bounds_reset_cancellation_fly() {
         let plain = update(&initial, &frame(drag(button)));
         for key in [Key::Shift, Key::Ctrl, Key::Alt, Key::Meta] {
             let mixed = vec![
-                Event::Key_pressed(key),
-                Event::Pointer_pressed(button, (20., 20.)),
-                Event::Key_released(key),
-                Event::Pointer_moved((35., 27.)),
-                Event::Pointer_released(button, (35., 27.)),
+                Event::KeyPressed(key),
+                Event::PointerPressed(button, (20., 20.)),
+                Event::KeyReleased(key),
+                Event::PointerMoved((35., 27.)),
+                Event::PointerReleased(button, (35., 27.)),
             ];
             assert!(snapshot(&update(&initial, &frame_(vec![key], 1., 0., mixed))) == snapshot(&plain));
         }
@@ -67,9 +67,9 @@ fn easy_camera_buttons_modifiers_bounds_reset_cancellation_fly() {
         snapshot(&update(
             &bounded,
             &frame(vec![
-                Event::Pointer_pressed(MouseButton::LeftButton, (40., 20.)),
-                Event::Pointer_moved((35., 27.)),
-                Event::Pointer_released(MouseButton::LeftButton, (35., 27.)),
+                Event::PointerPressed(MouseButton::LeftButton, (40., 20.)),
+                Event::PointerMoved((35., 27.)),
+                Event::PointerReleased(MouseButton::LeftButton, (35., 27.)),
             ])
         )) == snapshot(&bounded)
     );
@@ -78,19 +78,19 @@ fn easy_camera_buttons_modifiers_bounds_reset_cancellation_fly() {
     scaled.pixel_scale = (2., 2.);
     assert!(snapshot(&update(&initial, &scaled)) == snapshot(&moved));
     let far = vec![
-        Event::Pointer_pressed(MouseButton::LeftButton, (20., 20.)),
-        Event::Pointer_moved((90., 70.)),
-        Event::Pointer_released(MouseButton::LeftButton, (90., 70.)),
+        Event::PointerPressed(MouseButton::LeftButton, (20., 20.)),
+        Event::PointerMoved((90., 70.)),
+        Event::PointerReleased(MouseButton::LeftButton, (90., 70.)),
     ];
     assert!(snapshot(&update(&bounded, &frame(far.clone()))) == snapshot(&update(&initial, &frame(far))));
-    let reset = update(&moved, &frame_(Vec::new(), 1.2, 0., vec![Event::Pointer_pressed(MouseButton::LeftButton, (20., 20.))]));
+    let reset = update(&moved, &frame_(Vec::new(), 1.2, 0., vec![Event::PointerPressed(MouseButton::LeftButton, (20., 20.))]));
     assert!(snapshot(&reset) == snapshot(&initial));
-    for stop in [Event::Pointer_cancelled(MouseButton::LeftButton), Event::Focus_lost] {
+    for stop in [Event::PointerCancelled(MouseButton::LeftButton), Event::FocusLost] {
         let active = update(
             &initial,
-            &frame(vec![Event::Pointer_pressed(MouseButton::LeftButton, (20., 20.)), Event::Pointer_moved((35., 27.)), stop]),
+            &frame(vec![Event::PointerPressed(MouseButton::LeftButton, (20., 20.)), Event::PointerMoved((35., 27.)), stop]),
         );
-        assert!(snapshot(&update(&active, &frame(vec![Event::Pointer_moved((70., 80.))]))) == snapshot(&active));
+        assert!(snapshot(&update(&active, &frame(vec![Event::PointerMoved((70., 80.))]))) == snapshot(&active));
     }
     let wheel = update(&initial, &frame(vec![Event::Scrolled((0., 1.))]));
     assert!(ec::distance(&wheel) < ec::distance(&initial));

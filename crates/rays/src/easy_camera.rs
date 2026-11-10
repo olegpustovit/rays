@@ -7,13 +7,13 @@ use rays_math::vec3;
 use std::cell::RefCell;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum interaction {
+enum Interaction {
     Orbit,
     Pan,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct settings {
+struct Settings {
     target: vec3::T,
     distance: f64,
     azimuth: f64,
@@ -21,14 +21,14 @@ struct settings {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct motion {
-    interaction: interaction,
+struct Motion {
+    interaction: Interaction,
     dx: f64,
     dy: f64,
 }
 
 #[derive(Clone)]
-struct camera_snapshot {
+struct CameraSnapshot {
     snapshot_target: vec3::T,
     snapshot_distance: f64,
     snapshot_azimuth: f64,
@@ -50,12 +50,12 @@ pub struct EasyCamera {
     far: f64,
     control_area: Option<(i64, i64, i64, i64)>,
     inertia: bool,
-    drag: Option<(MouseButton, interaction, (f64, f64))>,
-    velocity: Option<motion>,
+    drag: Option<(MouseButton, Interaction, (f64, f64))>,
+    velocity: Option<Motion>,
     last_press: Option<(MouseButton, (f64, f64), f64)>,
     pointer: Option<(f64, f64)>,
-    initial: settings,
-    camera_cache: RefCell<Option<camera_snapshot>>,
+    initial: Settings,
+    camera_cache: RefCell<Option<CameraSnapshot>>,
 }
 
 fn validate_distance(distance: f64) -> Result<(), String> {
@@ -115,7 +115,7 @@ pub fn create(
         velocity: None,
         last_press: None,
         pointer: None,
-        initial: settings { target, distance, azimuth, elevation },
+        initial: Settings { target, distance, azimuth, elevation },
         camera_cache: RefCell::new(None),
     })
 }
@@ -146,7 +146,7 @@ pub fn camera(value: &EasyCamera) -> Result<camera::Camera, String> {
     let offset = vec3::scale(vec3::add(horizontal, vec3::scale(up, value.elevation.sin())), value.distance);
     let cam = camera::perspective(Some(value.fov_y), Some(value.near), Some(value.far), vec3::add(value.target, offset), value.target)?;
     let cam = camera::with_up(up, &cam)?;
-    *value.camera_cache.borrow_mut() = Some(camera_snapshot {
+    *value.camera_cache.borrow_mut() = Some(CameraSnapshot {
         snapshot_target: value.target,
         snapshot_distance: value.distance,
         snapshot_azimuth: value.azimuth,
@@ -281,14 +281,14 @@ fn pan_axes(value: &EasyCamera) -> Result<(vec3::T, vec3::T), String> {
     Ok((right, up))
 }
 
-fn apply_delta(frame_: &frame::Frame, value: &EasyCamera, interaction_: interaction, dx: f64, dy: f64) -> Result<EasyCamera, String> {
+fn apply_delta(frame_: &frame::Frame, value: &EasyCamera, interaction_: Interaction, dx: f64, dy: f64) -> Result<EasyCamera, String> {
     match interaction_ {
-        interaction::Orbit => Ok(EasyCamera {
+        Interaction::Orbit => Ok(EasyCamera {
             azimuth: value.azimuth - (dx * ROTATION_SENSITIVITY),
             elevation: clamp_elevation(value.elevation + (dy * ROTATION_SENSITIVITY)),
             ..value.clone()
         }),
-        interaction::Pan => {
+        Interaction::Pan => {
             let (right, up) = pan_axes(value)?;
             let height = std::cmp::max(1, frame_.input.size.1);
             let units_per_pixel = 2. * value.distance * (value.fov_y / 2.).tan() / height as f64;
@@ -298,10 +298,10 @@ fn apply_delta(frame_: &frame::Frame, value: &EasyCamera, interaction_: interact
     }
 }
 
-fn interaction_for_button(button: MouseButton) -> Option<interaction> {
+fn interaction_for_button(button: MouseButton) -> Option<Interaction> {
     match button {
-        MouseButton::LeftButton => Some(interaction::Orbit),
-        MouseButton::MiddleButton | MouseButton::RightButton => Some(interaction::Pan),
+        MouseButton::LeftButton => Some(Interaction::Orbit),
+        MouseButton::MiddleButton | MouseButton::RightButton => Some(Interaction::Pan),
         MouseButton::MouseX1 | MouseButton::MouseX2 => None,
     }
 }
@@ -328,7 +328,7 @@ fn apply_inertia(frame_: &frame::Frame, value: EasyCamera) -> Result<EasyCamera,
             if (m.dx * decay).abs() < 1e-4 && (m.dy * decay).abs() < 1e-4 {
                 Ok(EasyCamera { velocity: None, ..value })
             } else {
-                Ok(EasyCamera { velocity: Some(motion { dx: m.dx * decay, dy: m.dy * decay, ..m }), ..value })
+                Ok(EasyCamera { velocity: Some(Motion { dx: m.dx * decay, dy: m.dy * decay, ..m }), ..value })
             }
         }
         (None, Some(_)) => Ok(EasyCamera { velocity: None, ..value }),
@@ -348,12 +348,12 @@ pub fn update(value: &EasyCamera, frame_: &frame::Frame) -> Result<EasyCamera, S
         .input
         .events
         .iter()
-        .any(|e| matches!(e, Event::Pointer_pressed(..) | Event::Pointer_moved(_) | Event::Pointer_released(..)));
+        .any(|e| matches!(e, Event::PointerPressed(..) | Event::PointerMoved(_) | Event::PointerReleased(..)));
     let mut pointer = if has_pointer { value.pointer.unwrap_or(frame_.input.pointer) } else { frame_.input.pointer };
     let mut value = value.clone();
     for event in &frame_.input.events {
         value = match event {
-            Event::Pointer_pressed(button, point) => {
+            Event::PointerPressed(button, point) => {
                 pointer = *point;
                 if !contains(&value, *point) {
                     value
@@ -372,7 +372,7 @@ pub fn update(value: &EasyCamera, frame_: &frame::Frame) -> Result<EasyCamera, S
                     }
                 }
             }
-            Event::Pointer_moved((x, y)) => {
+            Event::PointerMoved((x, y)) => {
                 let point = (*x, *y);
                 pointer = point;
                 match value.drag {
@@ -381,11 +381,11 @@ pub fn update(value: &EasyCamera, frame_: &frame::Frame) -> Result<EasyCamera, S
                         let dx = x - previous_x;
                         let dy = y - previous_y;
                         let moved = apply_delta(frame_, &value, interaction_, dx, dy)?;
-                        EasyCamera { drag: Some((button, interaction_, point)), velocity: Some(motion { interaction: interaction_, dx, dy }), ..moved }
+                        EasyCamera { drag: Some((button, interaction_, point)), velocity: Some(Motion { interaction: interaction_, dx, dy }), ..moved }
                     }
                 }
             }
-            Event::Pointer_released(button, point) => {
+            Event::PointerReleased(button, point) => {
                 pointer = *point;
                 match value.drag {
                     Some((captured, _, _)) if captured == *button => {
@@ -401,11 +401,11 @@ pub fn update(value: &EasyCamera, frame_: &frame::Frame) -> Result<EasyCamera, S
                 pointer: Some(pointer),
                 ..value
             },
-            Event::Pointer_cancelled(button) => match value.drag {
+            Event::PointerCancelled(button) => match value.drag {
                 Some((captured, _, _)) if captured == *button => EasyCamera { drag: None, velocity: None, ..value },
                 _ => value,
             },
-            Event::Focus_lost => EasyCamera { drag: None, velocity: None, last_press: None, ..value },
+            Event::FocusLost => EasyCamera { drag: None, velocity: None, last_press: None, ..value },
             _ => value,
         };
     }

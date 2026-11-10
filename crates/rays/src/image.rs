@@ -4,7 +4,7 @@ use runtime_resources::image as Resource;
 use std::cell::Cell;
 use std::rc::Rc;
 
-pub struct image_data {
+pub struct ImageData {
     resource: Resource::Image,
     width: Cell<i64>,
     height: Cell<i64>,
@@ -12,19 +12,19 @@ pub struct image_data {
 
 /// Image clones retain the same shared image identity.
 #[derive(Clone)]
-pub struct Image(Rc<image_data>);
+pub struct Image(Rc<ImageData>);
 
 pub fn same(a: &Image, b: &Image) -> bool {
     Rc::ptr_eq(&a.0, &b.0)
 }
 
-pub(crate) fn message(operation: &str, error: &runtime_resources::error) -> String {
+pub(crate) fn message(operation: &str, error: &runtime_resources::Error) -> String {
     format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
 pub fn of_resource(resource: Resource::Image) -> Result<Image, String> {
     let (width, height) = Resource::size(&resource).map_err(|e| message("Image.of_resource", &e))?;
-    Ok(Image(Rc::new(image_data { resource, width: Cell::new(width), height: Cell::new(height) })))
+    Ok(Image(Rc::new(ImageData { resource, width: Cell::new(width), height: Cell::new(height) })))
 }
 
 pub fn load(path: &str) -> Result<Image, String> {
@@ -48,7 +48,7 @@ pub fn create(width: i64, height: i64, color: Option<color::T>) -> Result<Image,
         rgba.extend_from_slice(&pixel);
     }
     match Resource::create(width, height, &rgba) {
-        Ok(resource) => Ok(Image(Rc::new(image_data { resource, width: Cell::new(width), height: Cell::new(height) }))),
+        Ok(resource) => Ok(Image(Rc::new(ImageData { resource, width: Cell::new(width), height: Cell::new(height) }))),
         Err(error) => Err(message("Image.create", &error)),
     }
 }
@@ -57,7 +57,7 @@ pub fn create(width: i64, height: i64, color: Option<color::T>) -> Result<Image,
 pub fn upload_rgba(into: Option<&Image>, width: i64, height: i64, rgba: &[u8]) -> Result<Image, String> {
     match into {
         None => match Resource::create(width, height, rgba) {
-            Ok(resource) => Ok(Image(Rc::new(image_data { resource, width: Cell::new(width), height: Cell::new(height) }))),
+            Ok(resource) => Ok(Image(Rc::new(ImageData { resource, width: Cell::new(width), height: Cell::new(height) }))),
             Err(error) => Err(message("Image.upload_rgba", &error)),
         },
         Some(image) => {

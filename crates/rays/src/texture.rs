@@ -6,45 +6,45 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum filter {
+pub enum Filter {
     Nearest,
     Bilinear,
     Trilinear,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum wrap {
+pub enum Wrap {
     Clamp,
     Repeat,
     Mirror,
 }
 
-pub struct level {
+pub struct Level {
     pub width: i64,
     pub height: i64,
     pub pixels: Vec<color::T>,
 }
 
-pub struct cpu {
+pub struct Cpu {
     pub width: i64,
     pub height: i64,
     pub pixels: Vec<color::T>,
-    pub mipmaps: Vec<level>,
+    pub mipmaps: Vec<Level>,
 }
 
-pub enum backing {
-    Cpu(cpu),
+pub enum Backing {
+    Cpu(Cpu),
     Borrowed(Resource::Image),
 }
 
-pub struct texture_data {
-    backing: backing,
+pub struct TextureData {
+    backing: Backing,
     id: i64,
 }
 
 /// A texture value: clones share one immutable texture.
 #[derive(Clone)]
-pub struct Texture(Rc<texture_data>);
+pub struct Texture(Rc<TextureData>);
 
 static NEXT_ID: AtomicI64 = AtomicI64::new(1);
 
@@ -52,10 +52,10 @@ fn fresh_id() -> i64 {
     NEXT_ID.fetch_add(1, Ordering::SeqCst)
 }
 
-fn cpu_ref(texture: &Texture) -> Option<&cpu> {
+fn cpu_ref(texture: &Texture) -> Option<&Cpu> {
     match &texture.0.backing {
-        backing::Cpu(data) => Some(data),
-        backing::Borrowed(_) => None,
+        Backing::Cpu(data) => Some(data),
+        Backing::Borrowed(_) => None,
     }
 }
 
@@ -63,8 +63,8 @@ fn borrowed_message(operation: &str) -> String {
     format!("{operation}: borrowed GPU texture needs an explicit CPU snapshot")
 }
 
-fn owned(data: cpu) -> Texture {
-    Texture(Rc::new(texture_data { backing: backing::Cpu(data), id: fresh_id() }))
+fn owned(data: Cpu) -> Texture {
+    Texture(Rc::new(TextureData { backing: Backing::Cpu(data), id: fresh_id() }))
 }
 
 /// Zero-copy construction for fresh immutable pixel arrays. The supplied array becomes backing
@@ -80,7 +80,7 @@ pub fn create_owned(width: i64, height: i64, pixels: Vec<color::T>) -> Result<Te
             pixels.len()
         ));
     }
-    Ok(owned(cpu { width, height, pixels, mipmaps: Vec::new() }))
+    Ok(owned(Cpu { width, height, pixels, mipmaps: Vec::new() }))
 }
 
 pub fn init(width: i64, height: i64, make: &dyn Fn(i64, i64) -> color::T) -> Result<Texture, String> {
@@ -88,13 +88,13 @@ pub fn init(width: i64, height: i64, make: &dyn Fn(i64, i64) -> color::T) -> Res
         return Err("Texture.init: dimensions must be positive".to_string());
     }
     let pixels = (0..width * height).map(|index| make(index % width, index / width)).collect();
-    Ok(owned(cpu { width, height, pixels, mipmaps: Vec::new() }))
+    Ok(owned(Cpu { width, height, pixels, mipmaps: Vec::new() }))
 }
 
 pub fn size(texture: &Texture) -> Result<(i64, i64), String> {
     match &texture.0.backing {
-        backing::Cpu(data) => Ok((data.width, data.height)),
-        backing::Borrowed(image) => {
+        Backing::Cpu(data) => Ok((data.width, data.height)),
+        Backing::Borrowed(image) => {
             Resource::size(image).map_err(|e| format!("Texture.size: {}", ogpu_core::error::to_string(&e)))
         }
     }
@@ -104,7 +104,7 @@ pub fn pixels(texture: &Texture) -> Result<Vec<color::T>, String> {
     Ok(cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.pixels"))?.pixels.clone())
 }
 
-fn next_level(source_width: i64, source_height: i64, source: &[color::T]) -> level {
+fn next_level(source_width: i64, source_height: i64, source: &[color::T]) -> Level {
     let width = std::cmp::max(1, (source_width + 1) / 2);
     let height = std::cmp::max(1, (source_height + 1) / 2);
     let pixels = (0..width * height)
@@ -130,12 +130,12 @@ fn next_level(source_width: i64, source_height: i64, source: &[color::T]) -> lev
             color::rgba(rounded(red), rounded(green), rounded(blue), rounded(alpha))
         })
         .collect();
-    level { width, height, pixels }
+    Level { width, height, pixels }
 }
 
 pub fn generate_mipmaps(texture: &Texture) -> Result<Texture, String> {
     let data = cpu_ref(texture).ok_or_else(|| borrowed_message("Texture.generate_mipmaps"))?;
-    let mut mipmaps: Vec<level> = Vec::new();
+    let mut mipmaps: Vec<Level> = Vec::new();
     loop {
         let (width, height, pixels) = match mipmaps.last() {
             Some(l) => (l.width, l.height, &l.pixels[..]),
@@ -147,15 +147,15 @@ pub fn generate_mipmaps(texture: &Texture) -> Result<Texture, String> {
         let next = next_level(width, height, pixels);
         mipmaps.push(next);
     }
-    Ok(owned(cpu { width: data.width, height: data.height, pixels: data.pixels.clone(), mipmaps }))
+    Ok(owned(Cpu { width: data.width, height: data.height, pixels: data.pixels.clone(), mipmaps }))
 }
 
 pub fn subsection(x: i64, y: i64, width: i64, height: i64, texture: &Texture) -> Result<Texture, String> {
     let source = match &texture.0.backing {
-        backing::Borrowed(_) => {
+        Backing::Borrowed(_) => {
             return Err("Texture.subsection: borrowed GPU texture needs an explicit CPU snapshot".to_string());
         }
-        backing::Cpu(data) => data,
+        Backing::Cpu(data) => data,
     };
     if width <= 0 || height <= 0 {
         return Err("Texture.subsection: dimensions must be positive".to_string());
@@ -170,17 +170,17 @@ pub fn subsection(x: i64, y: i64, width: i64, height: i64, texture: &Texture) ->
             source.pixels[((y + target_y) * source.width + x + target_x) as usize]
         })
         .collect();
-    Ok(owned(cpu { width, height, pixels, mipmaps: Vec::new() }))
+    Ok(owned(Cpu { width, height, pixels, mipmaps: Vec::new() }))
 }
 
-fn wrap_coordinate(mode: wrap, value: f64) -> f64 {
+fn wrap_coordinate(mode: Wrap, value: f64) -> f64 {
     match mode {
-        wrap::Clamp => fmax(0., fmin(1., value)),
-        wrap::Repeat => {
+        Wrap::Clamp => fmax(0., fmin(1., value)),
+        Wrap::Repeat => {
             let value = value - value.floor();
             if value < 0. { value + 1. } else { value }
         }
-        wrap::Mirror => {
+        Wrap::Mirror => {
             let value = value - (2. * (value / 2.).floor());
             let value = if value < 0. { value + 2. } else { value };
             if value <= 1. { value } else { 2. - value }
@@ -214,9 +214,9 @@ fn packed_texel(pixels: &[color::T], width: i64, x: i64, y: i64) -> i64 {
 }
 
 fn sample_pixels_packed(
-    filter_: filter,
-    wrap_u: wrap,
-    wrap_v: wrap,
+    filter_: Filter,
+    wrap_u: Wrap,
+    wrap_v: Wrap,
     width: i64,
     height: i64,
     pixels: &[color::T],
@@ -228,8 +228,8 @@ fn sample_pixels_packed(
     let x = u * (width - 1) as f64;
     let y = v * (height - 1) as f64;
     match filter_ {
-        filter::Nearest => packed_texel(pixels, width, int_of_float(x.round()), int_of_float(y.round())),
-        filter::Bilinear | filter::Trilinear => {
+        Filter::Nearest => packed_texel(pixels, width, int_of_float(x.round()), int_of_float(y.round())),
+        Filter::Bilinear | Filter::Trilinear => {
             let x0 = int_of_float(x.floor());
             let y0 = int_of_float(y.floor());
             let x1 = std::cmp::min(width - 1, x0 + 1);
@@ -243,7 +243,7 @@ fn sample_pixels_packed(
     }
 }
 
-fn sample_index_packed(filter_: filter, wrap_u: wrap, wrap_v: wrap, texture: &cpu, index: usize, u: f64, v: f64) -> i64 {
+fn sample_index_packed(filter_: Filter, wrap_u: Wrap, wrap_v: Wrap, texture: &Cpu, index: usize, u: f64, v: f64) -> i64 {
     if index == 0 {
         sample_pixels_packed(filter_, wrap_u, wrap_v, texture.width, texture.height, &texture.pixels, u, v)
     } else {
@@ -253,17 +253,17 @@ fn sample_index_packed(filter_: filter, wrap_u: wrap, wrap_v: wrap, texture: &cp
 }
 
 pub(crate) fn sample_lod_packed(
-    filter_: Option<filter>,
-    wrap_u: Option<wrap>,
-    wrap_v: Option<wrap>,
+    filter_: Option<Filter>,
+    wrap_u: Option<Wrap>,
+    wrap_v: Option<Wrap>,
     texture: &Texture,
     lod: f64,
     u: f64,
     v: f64,
 ) -> Result<i64, String> {
-    let filter_ = filter_.unwrap_or(filter::Bilinear);
-    let wrap_u = wrap_u.unwrap_or(wrap::Clamp);
-    let wrap_v = wrap_v.unwrap_or(wrap::Clamp);
+    let filter_ = filter_.unwrap_or(Filter::Bilinear);
+    let wrap_u = wrap_u.unwrap_or(Wrap::Clamp);
+    let wrap_v = wrap_v.unwrap_or(Wrap::Clamp);
     if !lod.is_finite() {
         return Err("Texture.sample_lod: lod must be finite".to_string());
     }
@@ -271,17 +271,17 @@ pub(crate) fn sample_lod_packed(
     let maximum = texture.mipmaps.len();
     let lod = fmax(0., fmin(maximum as f64, lod));
     Ok(match filter_ {
-        filter::Nearest | filter::Bilinear => {
+        Filter::Nearest | Filter::Bilinear => {
             let index = int_of_float(lod.round()) as usize;
             sample_index_packed(filter_, wrap_u, wrap_v, texture, index, u, v)
         }
-        filter::Trilinear => {
+        Filter::Trilinear => {
             let lower = int_of_float(lod.floor()) as usize;
             let upper = std::cmp::min(maximum, lower + 1);
             let amount = lod - lower as f64;
             blend_packed(
-                sample_index_packed(filter::Bilinear, wrap_u, wrap_v, texture, lower, u, v),
-                sample_index_packed(filter::Bilinear, wrap_u, wrap_v, texture, upper, u, v),
+                sample_index_packed(Filter::Bilinear, wrap_u, wrap_v, texture, lower, u, v),
+                sample_index_packed(Filter::Bilinear, wrap_u, wrap_v, texture, upper, u, v),
                 amount,
             )
         }
@@ -289,9 +289,9 @@ pub(crate) fn sample_lod_packed(
 }
 
 pub(crate) fn sample_lod(
-    filter_: Option<filter>,
-    wrap_u: Option<wrap>,
-    wrap_v: Option<wrap>,
+    filter_: Option<Filter>,
+    wrap_u: Option<Wrap>,
+    wrap_v: Option<Wrap>,
     texture: &Texture,
     lod: f64,
     u: f64,
@@ -309,7 +309,7 @@ pub fn of_image(image: &Resource::Image) -> Result<Texture, String> {
     match Resource::gpu_snapshot(image) {
         Err(error) => Err(format!("Texture.Private.of_image: {}", ogpu_core::error::to_string(&error))),
         Ok(None) => Err("Texture.Private.of_image: resident GPU image required".to_string()),
-        Ok(Some(_)) => Ok(Texture(Rc::new(texture_data { backing: backing::Borrowed(image.clone()), id: fresh_id() }))),
+        Ok(Some(_)) => Ok(Texture(Rc::new(TextureData { backing: Backing::Borrowed(image.clone()), id: fresh_id() }))),
     }
 }
 
@@ -324,8 +324,8 @@ pub mod private {
 
     pub fn image(texture: &Texture) -> Option<Resource::Image> {
         match &texture.0.backing {
-            backing::Cpu(_) => None,
-            backing::Borrowed(image) => Some(image.clone()),
+            Backing::Cpu(_) => None,
+            Backing::Borrowed(image) => Some(image.clone()),
         }
     }
 

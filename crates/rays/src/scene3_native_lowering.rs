@@ -16,7 +16,7 @@ use rays_math::color;
 use rays_math::mat4;
 use rays_math::vec3;
 use renderer::scene_execution as se;
-use se::{AuxiliaryResource, bytes, Draw, GeometryDraw, new_bytes, PipelineFamily, SampledDraw, SampledTexture, TextureLevel};
+use se::{AuxiliaryResource, Bytes, Draw, GeometryDraw, new_bytes, PipelineFamily, SampledDraw, SampledTexture, TextureLevel};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -24,52 +24,52 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub enum error {
-    Unsupported_texture,
-    Too_many_lights,
-    Invalid_mesh,
-    Invalid_viewport,
+pub enum Error {
+    UnsupportedTexture,
+    TooManyLights,
+    InvalidMesh,
+    InvalidViewport,
     Resource(ogpu_core::error::Error),
 }
 
-pub struct resources {
-    pub texture: Box<dyn Fn(&scene3::texture_) -> Result<SampledTexture, error>>,
+pub struct Resources {
+    pub texture: Box<dyn Fn(&scene3::Texture) -> Result<SampledTexture, Error>>,
 }
 
-pub(crate) type prepared = Rc<se::PreparedScene3>;
+pub(crate) type Prepared = Rc<se::PreparedScene3>;
 
-type viewport_t = (i64, i64, i64, i64);
+type ViewportT = (i64, i64, i64, i64);
 
-fn comparison(c: scene3::comparison) -> Comparison {
-    use scene3::comparison as s;
+fn comparison(c: scene3::Comparison) -> Comparison {
+    use scene3::Comparison as s;
     match c {
         s::Never => Comparison::Never,
         s::Less => Comparison::Less,
         s::Equal => Comparison::Equal,
-        s::Less_equal => Comparison::LessEqual,
+        s::LessEqual => Comparison::LessEqual,
         s::Greater => Comparison::Greater,
-        s::Not_equal => Comparison::NotEqual,
-        s::Greater_equal => Comparison::GreaterEqual,
+        s::NotEqual => Comparison::NotEqual,
+        s::GreaterEqual => Comparison::GreaterEqual,
         s::Always => Comparison::Always,
     }
 }
 
-fn blend(b: scene3::blend) -> Blend {
+fn blend(b: scene3::Blend) -> Blend {
     match b {
-        scene3::blend::Replace => Blend::Replace,
-        scene3::blend::Alpha => Blend::Alpha,
-        scene3::blend::Add => Blend::Add,
-        scene3::blend::Multiply => Blend::Multiply,
-        scene3::blend::Screen => Blend::Screen,
-        scene3::blend::Subtract => Blend::Subtract,
+        scene3::Blend::Replace => Blend::Replace,
+        scene3::Blend::Alpha => Blend::Alpha,
+        scene3::Blend::Add => Blend::Add,
+        scene3::Blend::Multiply => Blend::Multiply,
+        scene3::Blend::Screen => Blend::Screen,
+        scene3::Blend::Subtract => Blend::Subtract,
     }
 }
 
-fn cull(c: scene3::cull) -> Cull {
+fn cull(c: scene3::Cull) -> Cull {
     match c {
-        scene3::cull::Cull_none => Cull::CullNone,
-        scene3::cull::Cull_back => Cull::CullBack,
-        scene3::cull::Cull_front => Cull::CullFront,
+        scene3::Cull::CullNone => Cull::CullNone,
+        scene3::Cull::CullBack => Cull::CullBack,
+        scene3::Cull::CullFront => Cull::CullFront,
     }
 }
 
@@ -106,8 +106,8 @@ fn native_clip_projection(projection: &mat4::T) -> mat4::T {
     )
 }
 
-fn view_projection(viewport: viewport_t, cam: &camera::Camera) -> Result<mat4::T, error> {
-    camera::view_projection_matrix(viewport, cam).map_err(|_| error::Invalid_viewport)
+fn view_projection(viewport: ViewportT, cam: &camera::Camera) -> Result<mat4::T, Error> {
+    camera::view_projection_matrix(viewport, cam).map_err(|_| Error::InvalidViewport)
 }
 
 // ---- World lighting (Scene3.with_world, specification/environment.md) ----
@@ -122,37 +122,37 @@ fn pbr_of_material(m: &material::Material) -> (bool, f64, f64) {
     (black(m.diffuse) && black(m.ambient) && black(m.specular), fmin(1., (2. / (m.shininess + 2.)).sqrt()), 0.04)
 }
 
-struct world_ {
-    baked: world::baked,
+struct World {
+    baked: world::Baked,
     auxiliary: Rc<AuxiliaryResource>,
     camera_map: Rc<SampledTexture>,
-    lights: Vec<world::light>,
+    lights: Vec<world::Light>,
 }
 
-struct world_maps {
+struct WorldMaps {
     // keeps the bake (and so the identity its key names) alive
-    _baked: world::baked,
+    _baked: world::Baked,
     specular: SampledTexture,
     camera: SampledTexture,
 }
 
 const WORLD_CAPACITY: i64 = 2;
 
-struct caster {
+struct Caster {
     caster_mesh: mesh::Mesh,
     caster_transform: mat4::T,
     caster_instances: Option<Rc<Vec<mat4::T>>>,
 }
 
-struct packed_mesh {
+struct PackedMesh {
     mesh: mesh::Mesh,
-    source: mesh::view::packed_view,
-    mode: scene3::render_mode,
+    source: mesh::view::PackedView,
+    mode: scene3::RenderMode,
     primitive: Primitive,
     key: se::MeshKey,
-    vertices: bytes,
-    indices: bytes,
-    vertex_attributes: (String, bytes),
+    vertices: Bytes,
+    indices: Bytes,
+    vertex_attributes: (String, Bytes),
     vertex_count: i64,
     index_count: i64,
     /// no vertex color is translucent
@@ -161,13 +161,13 @@ struct packed_mesh {
     gpu_normals: Option<bool>,
 }
 
-struct prepared_cache_entry {
+struct PreparedCacheEntry {
     scene: scene3::Scene3,
-    prepared: prepared,
+    prepared: Prepared,
 }
 
 #[derive(Clone)]
-struct context_data {
+struct ContextData {
     world_maps: Rc<RefCell<IdList>>,
     worlds: Rc<RefCell<IdList>>,
     sun_fits: Rc<RefCell<IdList>>,
@@ -177,21 +177,21 @@ struct context_data {
 }
 
 #[derive(Clone)]
-pub struct cache_context(context_data);
+pub struct CacheContext(ContextData);
 
 thread_local! {
-    static CURRENT: RefCell<Option<cache_context>> = const { RefCell::new(None) };
-    static BACKGROUND: (se::Mesh, (String, bytes)) = (make_background_mesh(), make_background_attributes());
+    static CURRENT: RefCell<Option<CacheContext>> = const { RefCell::new(None) };
+    static BACKGROUND: (se::Mesh, (String, Bytes)) = (make_background_mesh(), make_background_attributes());
     static WHITE: Rc<SampledTexture> = Rc::new(make_world_white());
-    static DEVICE_INDICES: RefCell<Vec<device_indices_entry>> = const { RefCell::new(Vec::new()) };
+    static DEVICE_INDICES: RefCell<Vec<DeviceIndicesEntry>> = const { RefCell::new(Vec::new()) };
 }
 
-struct device_indices_entry {
+struct DeviceIndicesEntry {
     corners: Option<Arc<Vec<u32>>>,
-    mode: scene3::render_mode,
+    mode: scene3::RenderMode,
     count: i64,
     primitive: Primitive,
-    indices: bytes,
+    indices: Bytes,
     index_count: i64,
     key: Rc<String>,
 }
@@ -204,7 +204,7 @@ fn fresh_resource_id() -> i64 {
     NEXT_RESOURCE_ID.fetch_add(1, Ordering::SeqCst)
 }
 
-fn current() -> Option<cache_context> {
+fn current() -> Option<CacheContext> {
     CURRENT.with(|c| c.borrow().clone())
 }
 
@@ -212,15 +212,15 @@ const PREPARED_CACHE_CAPACITY: i64 = 16;
 const PACKED_MESH_CAPACITY: i64 = 16;
 const RETAINED_PAYLOAD_BYTE_CAPACITY: i64 = 256 * 1024 * 1024;
 
-pub(crate) fn create_cache_context() -> cache_context {
-    cache_context(context_data {
+pub(crate) fn create_cache_context() -> CacheContext {
+    CacheContext(ContextData {
         // physically keyed: the bake's specular chain and camera map (a stable address each)
         world_maps: Rc::new(RefCell::new(idlist::create(lru::cache("rays.scene3_world_maps"), WORLD_CAPACITY, Box::new(|a, b| a.downcast_ref::<(usize, usize)>().is_some_and(|x| b.downcast_ref::<(usize, usize)>() == Some(x))), None))),
-        worlds: Rc::new(RefCell::new(idlist::create(lru::cache("rays.scene3_worlds"), WORLD_CAPACITY, Box::new(|a, b| a.downcast_ref::<(world_id, Option<String>)>().is_some_and(|x| b.downcast_ref::<(world_id, Option<String>)>() == Some(x))), None))),
+        worlds: Rc::new(RefCell::new(idlist::create(lru::cache("rays.scene3_worlds"), WORLD_CAPACITY, Box::new(|a, b| a.downcast_ref::<(WorldId, Option<String>)>().is_some_and(|x| b.downcast_ref::<(WorldId, Option<String>)>() == Some(x))), None))),
         sun_fits: Rc::new(RefCell::new(idlist::create(
             lru::cache("rays.scene3_sun"),
             WORLD_CAPACITY,
-            Box::new(|a, b| match (a.downcast_ref::<(caster_list_key, vec3::T)>(), b.downcast_ref::<(caster_list_key, vec3::T)>()) {
+            Box::new(|a, b| match (a.downcast_ref::<(CasterListKey, vec3::T)>(), b.downcast_ref::<(CasterListKey, vec3::T)>()) {
                 (Some(x), Some(y)) => x.1 == y.1 && x.0.0.len() == y.0.0.len() && x.0.0.iter().zip(y.0.0.iter()).all(|(p, q)| same_caster(p, q)),
                 _ => false,
             }),
@@ -238,7 +238,7 @@ pub(crate) fn create_cache_context() -> cache_context {
         packed_meshes: Rc::new(RefCell::new(idlist::create(
             lru::cache("rays.scene3_packed"),
             PACKED_MESH_CAPACITY,
-            Box::new(|a, b| match (a.downcast_ref::<(mesh::Mesh, scene3::render_mode)>(), b.downcast_ref::<(mesh::Mesh, scene3::render_mode)>()) {
+            Box::new(|a, b| match (a.downcast_ref::<(mesh::Mesh, scene3::RenderMode)>(), b.downcast_ref::<(mesh::Mesh, scene3::RenderMode)>()) {
                 (Some(x), Some(y)) => mesh::same(&x.0, &y.0) && x.1 == y.1,
                 _ => false,
             }),
@@ -247,7 +247,7 @@ pub(crate) fn create_cache_context() -> cache_context {
         prepared_cache: Rc::new(RefCell::new(idlist::create(
             lru::cache("rays.scene3_prepared"),
             PREPARED_CACHE_CAPACITY,
-            Box::new(|a, b| match (a.downcast_ref::<(scene3::Scene3, camera::Camera, viewport_t)>(), b.downcast_ref::<(scene3::Scene3, camera::Camera, viewport_t)>()) {
+            Box::new(|a, b| match (a.downcast_ref::<(scene3::Scene3, camera::Camera, ViewportT)>(), b.downcast_ref::<(scene3::Scene3, camera::Camera, ViewportT)>()) {
                 (Some(x), Some(y)) => scene3::same(&x.0, &y.0) && x.1 == y.1 && x.2 == y.2,
                 _ => false,
             }),
@@ -256,7 +256,7 @@ pub(crate) fn create_cache_context() -> cache_context {
     })
 }
 
-struct Restore(Option<cache_context>);
+struct Restore(Option<CacheContext>);
 
 impl Drop for Restore {
     fn drop(&mut self) {
@@ -265,22 +265,22 @@ impl Drop for Restore {
     }
 }
 
-pub(crate) fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
+pub(crate) fn with_cache_context(context: &CacheContext, f: &mut dyn FnMut()) {
     let previous = CURRENT.with(|c| c.borrow_mut().replace(context.clone()));
     let _restore = Restore(previous);
     f()
 }
 
 #[derive(Clone, PartialEq)]
-struct world_id {
+struct WorldId {
     camera_pixels: usize,
     lighting_pixels: usize,
     exposure: u64,
     background: String,
 }
 
-fn world_identity(baked: &world::baked) -> world_id {
-    world_id {
+fn world_identity(baked: &world::Baked) -> WorldId {
+    WorldId {
         camera_pixels: Arc::as_ptr(&baked.camera.pixels) as usize,
         lighting_pixels: Arc::as_ptr(&baked.lighting.pixels) as usize,
         exposure: baked.exposure.to_bits(),
@@ -288,9 +288,9 @@ fn world_identity(baked: &world::baked) -> world_id {
     }
 }
 
-struct caster_list_key(Vec<caster>);
+struct CasterListKey(Vec<Caster>);
 
-fn half_level(m: &world::map) -> TextureLevel {
+fn half_level(m: &world::Map) -> TextureLevel {
     let mut out = vec![0u8; (m.width * m.height * 8) as usize];
     let one = ogpu_core::types::half_of_float(1.) as u16;
     for i in 0..(m.width * m.height) as usize {
@@ -336,17 +336,17 @@ fn make_world_white() -> SampledTexture {
     }
 }
 
-fn maps_of(baked: &world::baked) -> Rc<world_maps> {
+fn maps_of(baked: &world::Baked) -> Rc<WorldMaps> {
     let specular = baked.specular();
-    let cache_key: Item = Rc::new((specular as *const Vec<world::map> as usize, Arc::as_ptr(&baked.camera.pixels) as usize));
+    let cache_key: Item = Rc::new((specular as *const Vec<world::Map> as usize, Arc::as_ptr(&baked.camera.pixels) as usize));
     let cache = current();
     if let Some(context) = &cache
         && let Some(found) = idlist::peek(&mut context.0.world_maps.borrow_mut(), &cache_key)
-            && let Ok(maps) = found.downcast::<world_maps>() {
+            && let Ok(maps) = found.downcast::<WorldMaps>() {
                 return maps;
             }
     let key = format!("world:{}:", fresh_resource_id());
-    let maps = Rc::new(world_maps {
+    let maps = Rc::new(WorldMaps {
         _baked: baked.clone(),
         specular: SampledTexture {
             key: format!("{key}specular"),
@@ -367,17 +367,17 @@ fn maps_of(baked: &world::baked) -> Rc<world_maps> {
     maps
 }
 
-fn casters(scene: &scene3::Scene3) -> Vec<caster> {
+fn casters(scene: &scene3::Scene3) -> Vec<Caster> {
     let mut out = Vec::new();
     scene3::walk::iter_batches(
         &mut |d, transforms| {
-            let triangles = matches!(mesh::mode(&d.mesh), mesh::mode::Triangles | mesh::mode::Triangle_strip | mesh::mode::Triangle_fan);
+            let triangles = matches!(mesh::mode(&d.mesh), mesh::Mode::Triangles | mesh::Mode::TriangleStrip | mesh::Mode::TriangleFan);
             if triangles
-                && d.mode == scene3::render_mode::Faces
-                && (d.blend == scene3::blend::Replace || d.blend == scene3::blend::Alpha)
+                && d.mode == scene3::RenderMode::Faces
+                && (d.blend == scene3::Blend::Replace || d.blend == scene3::Blend::Alpha)
                 && d.depth.write
             {
-                out.push(caster { caster_mesh: d.mesh.clone(), caster_transform: d.transform.clone(), caster_instances: transforms.cloned() });
+                out.push(Caster { caster_mesh: d.mesh.clone(), caster_transform: d.transform.clone(), caster_instances: transforms.cloned() });
             }
         },
         scene,
@@ -385,7 +385,7 @@ fn casters(scene: &scene3::Scene3) -> Vec<caster> {
     out
 }
 
-fn same_caster(a: &caster, b: &caster) -> bool {
+fn same_caster(a: &Caster, b: &Caster) -> bool {
     mesh::same(&a.caster_mesh, &b.caster_mesh)
         && a.caster_transform == b.caster_transform
         && match (&a.caster_instances, &b.caster_instances) {
@@ -399,16 +399,16 @@ fn same_caster(a: &caster, b: &caster) -> bool {
 /// depth-writing Replace or Alpha triangle drawings (the renderer's casters), keyed by their
 /// meshes, transforms and instances plus the sun direction, so a scene rebuilt each frame from
 /// the same parts re-renders nothing.
-fn sun_fit(scene: &scene3::Scene3, sun: &world::sun) -> Result<Option<(mat4::T, String)>, error> {
+fn sun_fit(scene: &scene3::Scene3, sun: &world::Sun) -> Result<Option<(mat4::T, String)>, Error> {
     let list = casters(scene);
     let cache = current();
-    let key: Item = Rc::new((caster_list_key(list), sun.direction));
+    let key: Item = Rc::new((CasterListKey(list), sun.direction));
     if let Some(context) = &cache
         && let Some(found) = idlist::peek(&mut context.0.sun_fits.borrow_mut(), &key)
             && let Ok(fit) = found.downcast::<Option<(mat4::T, String)>>() {
                 return Ok((*fit).clone());
             }
-    let list = &key.downcast_ref::<(caster_list_key, vec3::T)>().expect("sun key").0.0;
+    let list = &key.downcast_ref::<(CasterListKey, vec3::T)>().expect("sun key").0.0;
     let f = vec3::normalize(vec3::neg(sun.direction));
     let side = vec3::normalize(vec3::cross(f, if f.y.abs() < 0.99 { vec3::unit_y() } else { vec3::unit_x() }));
     let up = vec3::cross(side, f);
@@ -423,7 +423,7 @@ fn sun_fit(scene: &scene3::Scene3, sun: &world::sun) -> Result<Option<(mat4::T, 
     };
     for c in list {
         // a device mesh's box is reduced where its positions are, its host copy never made
-        if let Some((a, b)) = mesh::bounds(&c.caster_mesh).map_err(|_| error::Invalid_mesh)? {
+        if let Some((a, b)) = mesh::bounds(&c.caster_mesh).map_err(|_| Error::InvalidMesh)? {
             let mut corners = |m: &mat4::T| {
                 for k in 0..8 {
                     add(mat4::transform_point(
@@ -465,17 +465,17 @@ fn sun_fit(scene: &scene3::Scene3, sun: &world::sun) -> Result<Option<(mat4::T, 
 }
 
 /// Word layout: see `source_scene3_world` in the runtime.
-fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> {
+fn world_of(baked: &world::Baked, sun: Option<(mat4::T, String)>) -> Rc<World> {
     let key: Item = Rc::new((world_identity(baked), sun.as_ref().map(|s| s.1.clone())));
     let cache = current();
     if let Some(context) = &cache
         && let Some(found) = idlist::peek(&mut context.0.worlds.borrow_mut(), &key)
-            && let Ok(world) = found.downcast::<world_>() {
+            && let Ok(world) = found.downcast::<World>() {
                 return world;
             }
     let maps = maps_of(baked);
     let mut b = vec![0u8; 64 * 4];
-    let rgb = |b: &mut Vec<u8>, index: usize, c: &world::rgb, k: f64| {
+    let rgb = |b: &mut Vec<u8>, index: usize, c: &world::Rgb, k: f64| {
         put32(b, index, c.r * k);
         put32(b, index + 1, c.g * k);
         put32(b, index + 2, c.b * k);
@@ -492,7 +492,7 @@ fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> 
         // Irradiance of a small disc: radiance x solid angle ~ pi r^2.
         rgb(&mut b, 32, &s.radiance, std::f64::consts::PI * s.angular_radius * s.angular_radius);
     }
-    if let world::background::Color(c) = &baked.background {
+    if let world::Background::Color(c) = &baked.background {
         put32(&mut b, 35, 1.);
         rgb(&mut b, 36, c, 1.);
     }
@@ -507,14 +507,14 @@ fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> 
         put32(&mut b, 60, se::SUN_MAP_SIZE as f64);
         put32(&mut b, 61, se::SUN_MAP_SIZE as f64);
     }
-    let power = |l: &world::light| {
+    let power = |l: &world::Light| {
         ((0.2126 * l.radiance.r) + (0.7152 * l.radiance.g) + (0.0722 * l.radiance.b)) * vec3::length(l.u) * vec3::length(l.v)
     };
     let id = fresh_resource_id();
     let mut lights = baked.lights.clone();
     lights.sort_by(|a, b| float_compare(power(b), power(a)));
     let camera_map = Rc::new(maps.camera.clone());
-    let w = Rc::new(world_ {
+    let w = Rc::new(World {
         baked: baked.clone(),
         auxiliary: Rc::new(AuxiliaryResource {
             key: format!("world:{id}"),
@@ -538,7 +538,7 @@ const MAX_LIGHTS: usize = 64;
 /// World words 76..78 and the extracted rects after the scene's own lights. ponytail: past 64
 /// lights the lowest-power World rects are dropped (the scene's own lights always stay); a
 /// clustered light list lifts the cap.
-fn world_uniforms(b: &mut Vec<u8>, w: &world_, material: &material::Material) {
+fn world_uniforms(b: &mut Vec<u8>, w: &World, material: &material::Material) {
     let (unlit, roughness, f0) = pbr_of_material(material);
     put32(b, 76, if unlit { 1. } else { 0. });
     put32(b, 77, roughness);
@@ -596,7 +596,7 @@ fn make_background_mesh() -> se::Mesh {
     }
 }
 
-fn make_background_attributes() -> (String, bytes) {
+fn make_background_attributes() -> (String, Bytes) {
     let mut b = vec![0u8; 36];
     for i in 0..3 {
         b[i * 12..i * 12 + 4].copy_from_slice(&(-1i32).to_le_bytes());
@@ -604,7 +604,7 @@ fn make_background_attributes() -> (String, bytes) {
     ("world:background:attributes".to_string(), new_bytes(b))
 }
 
-fn background_uniforms(cam: &camera::Camera, viewport: viewport_t) -> Result<Option<Vec<u8>>, error> {
+fn background_uniforms(cam: &camera::Camera, viewport: ViewportT) -> Result<Option<Vec<u8>>, Error> {
     match mat4::inverse(&native_clip_projection(&view_projection(viewport, cam)?)) {
         None => Ok(None),
         Some(inverse) => {
@@ -620,7 +620,7 @@ fn background_uniforms(cam: &camera::Camera, viewport: viewport_t) -> Result<Opt
     }
 }
 
-fn uniforms_blinn_phong(cam: &camera::Camera, viewport: viewport_t, scene: &scene3::Scene3, d: &scene3::walk::drawing) -> Result<Vec<u8>, error> {
+fn uniforms_blinn_phong(cam: &camera::Camera, viewport: ViewportT, scene: &scene3::Scene3, d: &scene3::walk::Drawing) -> Result<Vec<u8>, Error> {
     let mut b = vec![0u8; 5456];
     let material = &d.material;
     put32(&mut b, 82, 1.);
@@ -646,7 +646,7 @@ fn uniforms_blinn_phong(cam: &camera::Camera, viewport: viewport_t, scene: &scen
     // The native light ABI reserves linear slots; the zero-filled buffer keeps them zero while
     // preserving the shared twenty-word layout.
     put32(&mut b, 73, lights.len() as f64);
-    put32(&mut b, 74, if d.cull == scene3::cull::Cull_none { 1. } else { 0. });
+    put32(&mut b, 74, if d.cull == scene3::Cull::CullNone { 1. } else { 0. });
     put32(&mut b, 75, if scene3::walk::separate_specular(scene) { 1. } else { 0. });
     for (index, l) in lights.iter().enumerate() {
         let o = 84 + (index * 20);
@@ -658,17 +658,17 @@ fn uniforms_blinn_phong(cam: &camera::Camera, viewport: viewport_t, scene: &scen
         put_color(&mut b, o + 4, l.diffuse);
         put32(&mut b, o + 8, l.intensity);
         match &l.kind {
-            light::kind::Directional { direction } => {
+            light::Kind::Directional { direction } => {
                 put32(&mut b, o, 0.);
                 vector(&mut b, *direction);
             }
-            light::kind::Point { position, attenuation } => {
+            light::Kind::Point { position, attenuation } => {
                 put32(&mut b, o, 1.);
                 vector(&mut b, *position);
                 put32(&mut b, o + 9, attenuation.constant);
                 put32(&mut b, o + 11, attenuation.quadratic);
             }
-            light::kind::Spot { position, direction, cutoff, concentration, attenuation } => {
+            light::Kind::Spot { position, direction, cutoff, concentration, attenuation } => {
                 put32(&mut b, o, 2.);
                 vector(&mut b, *position);
                 put32(&mut b, o + 9, direction.x);
@@ -680,7 +680,7 @@ fn uniforms_blinn_phong(cam: &camera::Camera, viewport: viewport_t, scene: &scen
                 put32(&mut b, o + 15, attenuation.constant);
                 put32(&mut b, o + 17, attenuation.quadratic);
             }
-            light::kind::Area { position, direction, width, height, samples, attenuation } => {
+            light::Kind::Area { position, direction, width, height, samples, attenuation } => {
                 put32(&mut b, o, 3.);
                 vector(&mut b, *position);
                 put32(&mut b, o + 9, direction.x);
@@ -697,7 +697,7 @@ fn uniforms_blinn_phong(cam: &camera::Camera, viewport: viewport_t, scene: &scen
     Ok(b)
 }
 
-fn uniforms(w: Option<&world_>, cam: &camera::Camera, viewport: viewport_t, scene: &scene3::Scene3, d: &scene3::walk::drawing) -> Result<Vec<u8>, error> {
+fn uniforms(w: Option<&World>, cam: &camera::Camera, viewport: ViewportT, scene: &scene3::Scene3, d: &scene3::walk::Drawing) -> Result<Vec<u8>, Error> {
     let mut b = uniforms_blinn_phong(cam, viewport, scene, d)?;
     if let Some(w) = w {
         world_uniforms(&mut b, w, &d.material);
@@ -731,15 +731,15 @@ fn instance_frames(parent: &mat4::T, transforms: &Rc<Vec<mat4::T>>) -> Rc<(Vec<m
 }
 
 fn instance_uniforms(
-    w: Option<&world_>,
+    w: Option<&World>,
     cam: &camera::Camera,
-    viewport: viewport_t,
+    viewport: ViewportT,
     scene: &scene3::Scene3,
-    d: &scene3::walk::drawing,
+    d: &scene3::walk::Drawing,
     all: &Rc<Vec<mat4::T>>,
     first: usize,
     count: usize,
-) -> Result<Vec<u8>, error> {
+) -> Result<Vec<u8>, Error> {
     let parent = d.transform.clone();
     let mut drawing = d.clone();
     drawing.transform = mat4::mul(&d.transform, &all[first]);
@@ -792,7 +792,7 @@ fn trim_prepared_cache(list: &mut IdList) {
     let mut bytes_ = 0;
     let mut newest_device: Option<scene3::Scene3> = None;
     idlist::filter(list, &mut |_, value| {
-        let Some(cached) = value.downcast_ref::<prepared_cache_entry>() else {
+        let Some(cached) = value.downcast_ref::<PreparedCacheEntry>() else {
             return false;
         };
         let size = prepared_bytes(&cached.prepared);
@@ -815,7 +815,7 @@ fn trim_prepared_cache(list: &mut IdList) {
     });
 }
 
-fn pack_vertices(allow_missing_normals: bool, view: &mesh::view::packed_view) -> Result<bytes, error> {
+fn pack_vertices(allow_missing_normals: bool, view: &mesh::view::PackedView) -> Result<Bytes, Error> {
     let count = view.vertices.x.len();
     let normals = match &view.normals {
         Some(values) if values.x.len() == count => Some(Some(values)),
@@ -823,7 +823,7 @@ fn pack_vertices(allow_missing_normals: bool, view: &mesh::view::packed_view) ->
         _ => None,
     };
     let Some(normals) = normals else {
-        return Err(error::Invalid_mesh);
+        return Err(Error::InvalidMesh);
     };
     let mut b = vec![0u8; count * 24];
     let mut finite = true;
@@ -848,10 +848,10 @@ fn pack_vertices(allow_missing_normals: bool, view: &mesh::view::packed_view) ->
             }
         }
     }
-    if finite { Ok(new_bytes(b)) } else { Err(error::Invalid_mesh) }
+    if finite { Ok(new_bytes(b)) } else { Err(Error::InvalidMesh) }
 }
 
-fn pack_attributes(count: Option<i64>, view: &mesh::view::packed_view) -> Result<bytes, error> {
+fn pack_attributes(count: Option<i64>, view: &mesh::view::PackedView) -> Result<Bytes, Error> {
     let count = std::cmp::max(count.unwrap_or(0), view.vertices.x.len() as i64) as usize;
     let mut b = vec![0u8; count * 12];
     let mut finite = true;
@@ -872,10 +872,10 @@ fn pack_attributes(count: Option<i64>, view: &mesh::view::packed_view) -> Result
             }
         }
     }
-    if finite { Ok(new_bytes(b)) } else { Err(error::Invalid_mesh) }
+    if finite { Ok(new_bytes(b)) } else { Err(Error::InvalidMesh) }
 }
 
-fn pack_indices(values: &[u32]) -> bytes {
+fn pack_indices(values: &[u32]) -> Bytes {
     let mut b = vec![0u8; values.len() * 4];
     for (i, value) in values.iter().enumerate() {
         b[i * 4..i * 4 + 4].copy_from_slice(&value.to_le_bytes());
@@ -883,10 +883,10 @@ fn pack_indices(values: &[u32]) -> bytes {
     new_bytes(b)
 }
 
-fn triangle_indices(mode: mesh::mode, source: &[u32]) -> Option<Vec<u32>> {
+fn triangle_indices(mode: mesh::Mode, source: &[u32]) -> Option<Vec<u32>> {
     match mode {
-        mesh::mode::Triangles if source.len().is_multiple_of(3) => Some(source.to_vec()),
-        mesh::mode::Triangle_strip if source.len() >= 3 => Some(
+        mesh::Mode::Triangles if source.len().is_multiple_of(3) => Some(source.to_vec()),
+        mesh::Mode::TriangleStrip if source.len() >= 3 => Some(
             (0..(source.len() - 2) * 3)
                 .map(|index| {
                     let triangle = index / 3;
@@ -899,7 +899,7 @@ fn triangle_indices(mode: mesh::mode, source: &[u32]) -> Option<Vec<u32>> {
                 })
                 .collect(),
         ),
-        mesh::mode::Triangle_fan if source.len() >= 3 => Some(
+        mesh::Mode::TriangleFan if source.len() >= 3 => Some(
             (0..(source.len() - 2) * 3)
                 .map(|index| {
                     let triangle = index / 3;
@@ -915,11 +915,11 @@ fn triangle_indices(mode: mesh::mode, source: &[u32]) -> Option<Vec<u32>> {
     }
 }
 
-fn line_indices(mode: mesh::mode, source: &[u32]) -> Option<Vec<u32>> {
+fn line_indices(mode: mesh::Mode, source: &[u32]) -> Option<Vec<u32>> {
     match mode {
-        mesh::mode::Lines if source.len().is_multiple_of(2) => Some(source.to_vec()),
-        mesh::mode::Line_strip if source.len() >= 2 => Some((0..(source.len() - 1) * 2).map(|i| source[(i / 2) + (i % 2)]).collect()),
-        mesh::mode::Line_loop if source.len() >= 2 => Some((0..source.len() * 2).map(|i| source[((i / 2) + (i % 2)) % source.len()]).collect()),
+        mesh::Mode::Lines if source.len().is_multiple_of(2) => Some(source.to_vec()),
+        mesh::Mode::LineStrip if source.len() >= 2 => Some((0..(source.len() - 1) * 2).map(|i| source[(i / 2) + (i % 2)]).collect()),
+        mesh::Mode::LineLoop if source.len() >= 2 => Some((0..source.len() * 2).map(|i| source[((i / 2) + (i % 2)) % source.len()]).collect()),
         _ => None,
     }
 }
@@ -942,11 +942,11 @@ fn unique_triangle_edges(triangles: &[u32]) -> Vec<u32> {
     edges
 }
 
-fn same_planes(a: &mesh::Vec3_buffer, b: &mesh::Vec3_buffer) -> bool {
+fn same_planes(a: &mesh::Vec3Buffer, b: &mesh::Vec3Buffer) -> bool {
     Arc::ptr_eq(&a.x, &b.x) && Arc::ptr_eq(&a.y, &b.y) && Arc::ptr_eq(&a.z, &b.z)
 }
 
-fn same_normals(a: &Option<mesh::Vec3_buffer>, b: &Option<mesh::Vec3_buffer>) -> bool {
+fn same_normals(a: &Option<mesh::Vec3Buffer>, b: &Option<mesh::Vec3Buffer>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(x), Some(y)) => same_planes(x, y),
@@ -954,7 +954,7 @@ fn same_normals(a: &Option<mesh::Vec3_buffer>, b: &Option<mesh::Vec3_buffer>) ->
     }
 }
 
-fn same_geometry(a: &mesh::view::packed_view, b: &mesh::view::packed_view) -> bool {
+fn same_geometry(a: &mesh::view::PackedView, b: &mesh::view::PackedView) -> bool {
     a.mode == b.mode && same_planes(&a.vertices, &b.vertices) && same_normals(&a.normals, &b.normals) && Arc::ptr_eq(&a.indices, &b.indices)
 }
 
@@ -974,11 +974,11 @@ fn same_uvs(a: &Option<Arc<Vec<rays_math::vec2::T>>>, b: &Option<Arc<Vec<rays_ma
     }
 }
 
-fn find_packed(predicate: &dyn Fn(&packed_mesh) -> bool) -> Option<Rc<packed_mesh>> {
+fn find_packed(predicate: &dyn Fn(&PackedMesh) -> bool) -> Option<Rc<PackedMesh>> {
     let context = current()?;
     let mut found = None;
     idlist::iter(&mut context.0.packed_meshes.borrow_mut(), &mut |_, value| {
-        if let Ok(packed) = value.clone().downcast::<packed_mesh>()
+        if let Ok(packed) = value.clone().downcast::<PackedMesh>()
             && predicate(&packed) {
                 found = Some(packed);
             }
@@ -990,14 +990,14 @@ fn find_packed(predicate: &dyn Fn(&packed_mesh) -> bool) -> Option<Rc<packed_mes
 /// array frame after frame while the topology is; a cloud's count) and its plain attribute
 /// record its count, so they are packed once, and the renderer keeps the indices under their own
 /// key, independently of the borrowed vertex stream.
-fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, bool)) -> Result<Rc<packed_mesh>, error> {
+fn packed_of_device(mode: scene3::RenderMode, m: &mesh::Mesh, device: (String, bool)) -> Result<Rc<PackedMesh>, Error> {
     let (key, normals) = device;
     let key = Rc::new(key);
     let source = mesh::view::unread(m);
     let count = mesh::vertex_count(m);
-    let points = mode == scene3::render_mode::Vertices || source.mode == mesh::mode::Points;
+    let points = mode == scene3::RenderMode::Vertices || source.mode == mesh::Mode::Points;
     let plain = source.colors.is_none() && source.tex_coords.is_none();
-    let native: Option<(Primitive, bytes, i64, Rc<String>)> = if let Some(index_count) = mesh::view::device_index_count(m) {
+    let native: Option<(Primitive, Bytes, i64, Rc<String>)> = if let Some(index_count) = mesh::view::device_index_count(m) {
         Some((Primitive::TriangleList, new_bytes(Vec::new()), index_count, key.clone()))
     } else {
         let found = DEVICE_INDICES.with(|list| {
@@ -1017,7 +1017,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
                     Some((Primitive::PointList, (0..count as u32).collect()))
                 } else {
                     triangle_indices(source.mode, &source.indices).map(|indices| {
-                        if mode == scene3::render_mode::Wireframe {
+                        if mode == scene3::RenderMode::Wireframe {
                             (Primitive::LineList, unique_triangle_edges(&indices))
                         } else {
                             (Primitive::TriangleList, indices)
@@ -1030,7 +1030,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
                         let mut list = list.borrow_mut();
                         list.insert(
                             0,
-                            device_indices_entry {
+                            DeviceIndicesEntry {
                                 corners: if points { None } else { Some(source.indices.clone()) },
                                 mode,
                                 count,
@@ -1049,7 +1049,7 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
     };
     let attributes = if plain || mesh::view::device_color_width(m) != 0 { Ok(new_bytes(Vec::new())) } else { pack_attributes(Some(count), &source) };
     match (native, attributes) {
-        (Some((primitive, indices, index_count, indices_key)), Ok(attributes)) if count > 0 && index_count > 0 => Ok(Rc::new(packed_mesh {
+        (Some((primitive, indices, index_count, indices_key)), Ok(attributes)) if count > 0 && index_count > 0 => Ok(Rc::new(PackedMesh {
             mesh: m.clone(),
             source: source.clone(),
             mode,
@@ -1067,20 +1067,20 @@ fn packed_of_device(mode: scene3::render_mode, m: &mesh::Mesh, device: (String, 
                 && source.colors.as_ref().is_none_or(|colors| colors.iter().all(|c| c.a == 255)),
             gpu_normals: Some(normals),
         })),
-        _ => Err(error::Invalid_mesh),
+        _ => Err(Error::InvalidMesh),
     }
 }
 
-fn packed_of_mesh(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed_mesh>, error> {
+fn packed_of_mesh(mode: scene3::RenderMode, m: &mesh::Mesh) -> Result<Rc<PackedMesh>, Error> {
     match mesh::view::device(m) {
-        Some(_) if mesh::view::device_index_count(m).is_some() && mode != scene3::render_mode::Faces => packed_of_host(mode, m),
+        Some(_) if mesh::view::device_index_count(m).is_some() && mode != scene3::RenderMode::Faces => packed_of_host(mode, m),
         Some(device) => packed_of_device(mode, m, device),
         None => packed_of_host(mode, m),
     }
 }
 
-fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed_mesh>, error> {
-    let source = mesh::view::packed_view(m).map_err(|_| error::Invalid_mesh)?;
+fn packed_of_host(mode: scene3::RenderMode, m: &mesh::Mesh) -> Result<Rc<PackedMesh>, Error> {
+    let source = mesh::view::packed_view(m).map_err(|_| Error::InvalidMesh)?;
     let cache = current();
     let exact = cache
         .as_ref()
@@ -1088,7 +1088,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed
             let key: Item = Rc::new((m.clone(), mode));
             idlist::peek(&mut context.0.packed_meshes.borrow_mut(), &key)
         })
-        .and_then(|found| found.downcast::<packed_mesh>().ok())
+        .and_then(|found| found.downcast::<PackedMesh>().ok())
         .filter(|packed| {
             same_geometry(&packed.source, &source)
                 && same_colors(&packed.source.colors, &source.colors)
@@ -1110,23 +1110,23 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed
     let mut view = source.clone();
     // Lit faces need normals; derive them once here (the pack is cached by mesh identity) rather
     // than rejecting procedural meshes without N.
-    if mode == scene3::render_mode::Faces
-        && matches!(view.mode, mesh::mode::Triangles | mesh::mode::Triangle_strip | mesh::mode::Triangle_fan)
+    if mode == scene3::RenderMode::Faces
+        && matches!(view.mode, mesh::Mode::Triangles | mesh::Mode::TriangleStrip | mesh::Mode::TriangleFan)
         && view.normals.is_none()
         && reused.is_none()
     {
-        view = mesh::view::packed_view(&mesh::recalculate_normals(m)).map_err(|_| error::Invalid_mesh)?;
+        view = mesh::view::packed_view(&mesh::recalculate_normals(m)).map_err(|_| Error::InvalidMesh)?;
     }
     let native: Option<(Primitive, Vec<u32>)> = match mode {
-        scene3::render_mode::Vertices => Some((Primitive::PointList, (0..view.vertices.x.len() as u32).collect())),
-        scene3::render_mode::Faces | scene3::render_mode::Wireframe => match view.mode {
-            mesh::mode::Points => Some((Primitive::PointList, view.indices.to_vec())),
-            mesh::mode::Lines | mesh::mode::Line_strip | mesh::mode::Line_loop => {
+        scene3::RenderMode::Vertices => Some((Primitive::PointList, (0..view.vertices.x.len() as u32).collect())),
+        scene3::RenderMode::Faces | scene3::RenderMode::Wireframe => match view.mode {
+            mesh::Mode::Points => Some((Primitive::PointList, view.indices.to_vec())),
+            mesh::Mode::Lines | mesh::Mode::LineStrip | mesh::Mode::LineLoop => {
                 line_indices(view.mode, &view.indices).map(|indices| (Primitive::LineList, indices))
             }
-            mesh::mode::Triangles | mesh::mode::Triangle_strip | mesh::mode::Triangle_fan => {
+            mesh::Mode::Triangles | mesh::Mode::TriangleStrip | mesh::Mode::TriangleFan => {
                 triangle_indices(view.mode, &view.indices).map(|indices| {
-                    if mode == scene3::render_mode::Wireframe {
+                    if mode == scene3::RenderMode::Wireframe {
                         (Primitive::LineList, unique_triangle_edges(&indices))
                     } else {
                         (Primitive::TriangleList, indices)
@@ -1148,7 +1148,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed
                 Some(packed) => (packed.key.clone(), packed.indices.clone()),
                 None => (se::MeshKey::Host(format!("scene3:{id}")), pack_indices(&native_indices)),
             };
-            let packed = Rc::new(packed_mesh {
+            let packed = Rc::new(PackedMesh {
                 mesh: m.clone(),
                 source,
                 mode,
@@ -1168,25 +1168,25 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::Mesh) -> Result<Rc<packed
             }
             Ok(packed)
         }
-        _ => Err(error::Invalid_mesh),
+        _ => Err(Error::InvalidMesh),
     }
 }
 
 /// Lower one `Scene3` view into prepared draws.
-pub(crate) fn prepare(resources: &resources, cam: &camera::Camera, viewport: viewport_t, scene: &scene3::Scene3) -> Result<prepared, error> {
+pub(crate) fn prepare(resources: &Resources, cam: &camera::Camera, viewport: ViewportT, scene: &scene3::Scene3) -> Result<Prepared, Error> {
     let (x, y, width, height) = viewport;
     if width <= 0 || height <= 0 {
-        return Err(error::Invalid_viewport);
+        return Err(Error::InvalidViewport);
     }
     let cache = current();
     let cache_key: Item = Rc::new((scene.clone(), cam.clone(), viewport));
     if let Some(context) = &cache
         && let Some(found) = idlist::peek(&mut context.0.prepared_cache.borrow_mut(), &cache_key)
-            && let Ok(entry) = found.downcast::<prepared_cache_entry>() {
+            && let Ok(entry) = found.downcast::<PreparedCacheEntry>() {
                 return Ok(entry.prepared.clone());
             }
     if scene3::walk::lights(scene).len() > MAX_LIGHTS {
-        return Err(error::Too_many_lights);
+        return Err(Error::TooManyLights);
     }
     let world = match scene3::walk::world(scene) {
         None => None,
@@ -1199,10 +1199,10 @@ pub(crate) fn prepare(resources: &resources, cam: &camera::Camera, viewport: vie
         }
     };
     let mut cacheable = true;
-    let mut failure: Option<error> = None;
+    let mut failure: Option<Error> = None;
     let mut entries: Vec<Draw> = Vec::new();
     if let Some(w) = &world
-        && w.baked.background != world::background::Transparent
+        && w.baked.background != world::Background::Transparent
             && let Some(uniforms) = background_uniforms(cam, viewport)? {
                 let state = se::State {
                     viewport,
@@ -1311,7 +1311,7 @@ pub(crate) fn prepare(resources: &resources, cam: &camera::Camera, viewport: vie
                         // hidden fragments before shading them: a dense mesh otherwise shades
                         // every layer the depth test lets by.
                         let blend_ = match d.blend {
-                            scene3::blend::Alpha if d.texture.is_none() && d.material.diffuse.a == 255 && packed.opaque => Blend::Replace,
+                            scene3::Blend::Alpha if d.texture.is_none() && d.material.diffuse.a == 255 && packed.opaque => Blend::Replace,
                             other => blend(other),
                         };
                         entries.push(Rc::new(SampledDraw {
@@ -1352,8 +1352,8 @@ pub(crate) fn prepare(resources: &resources, cam: &camera::Camera, viewport: vie
                 // instead of failing the whole view.
                 Err(_)
                     if mesh::vertex_count(&d.mesh) == 0
-                        || (mesh::index_count(&d.mesh) < 3 && mesh::mode(&d.mesh) != mesh::mode::Points) => {}
-                Err(_) => failure = Some(error::Invalid_mesh),
+                        || (mesh::index_count(&d.mesh) < 3 && mesh::mode(&d.mesh) != mesh::Mode::Points) => {}
+                Err(_) => failure = Some(Error::InvalidMesh),
             }
         },
         scene,
@@ -1366,14 +1366,14 @@ pub(crate) fn prepare(resources: &resources, cam: &camera::Camera, viewport: vie
             let prepared_ = Rc::new(prepared_);
             if cacheable
                 && let Some(context) = &cache {
-                    let entry = Rc::new(prepared_cache_entry { scene: scene.clone(), prepared: prepared_.clone() });
+                    let entry = Rc::new(PreparedCacheEntry { scene: scene.clone(), prepared: prepared_.clone() });
                     let mut list = context.0.prepared_cache.borrow_mut();
                     idlist::add(&mut list, 0, cache_key, entry);
                     trim_prepared_cache(&mut list);
                 }
             Ok(prepared_)
         }
-        Err(_) => Err(error::Invalid_mesh),
+        Err(_) => Err(Error::InvalidMesh),
     }
 }
 

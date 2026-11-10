@@ -26,11 +26,11 @@ fn ortho(at: vec3::T) -> camera::Camera {
     camera::orthographic(2., at, vec3::zero()).expect("camera")
 }
 
-fn scene_of(nodes: Vec<d3::node>) -> d3::Scene3 {
+fn scene_of(nodes: Vec<d3::Node>) -> d3::Scene3 {
     d3::create(None, None, None, None, nodes).expect("scene3")
 }
 
-fn plain(m: &mesh::Mesh) -> d3::node {
+fn plain(m: &mesh::Mesh) -> d3::Node {
     d3::mesh(None, None, None, None, None, m.clone())
 }
 
@@ -126,7 +126,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
             &texture::init(2, 2, &|x, y| if x == y { color::red() } else { color::rgb(0, 0, 255) }).expect("texture"),
         )
         .expect("mipmaps");
-        let textured = scene_of(vec![d3::mesh(None, Some(d3::textured(Some(texture::filter::Trilinear), texture_)), None, None, None, m.clone())]);
+        let textured = scene_of(vec![d3::mesh(None, Some(d3::textured(Some(texture::Filter::Trilinear), texture_)), None, None, None, m.clone())]);
         let textured_frame = vec![scene::clear(color::black()), scene::view3d(None, &cam, textured.clone())];
         let textured_first = layer::stage_native(16, 16, &textured_frame).expect("stage");
         let textured_second = layer::stage_native(16, 16, &textured_frame).expect("stage");
@@ -149,7 +149,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         let world_z = |depth: f64| ((word(10) * depth) + word(11)) / ((word(14) * depth) + word(15));
         assert!((world_z(0.) - 1.9).abs() <= 1e-5 && (world_z(1.) + 998.).abs() <= 1e-3, "World background inverse did not use native depth endpoints");
         let strip = test_meshes::facing_z(
-            Some(mesh::mode::Triangle_strip),
+            Some(mesh::Mode::TriangleStrip),
             None,
             vec![0, 1, 2, 3],
             &[vec3::zero(), vec3::unit_x(), vec3::unit_y(), vec3::create(1., 1., 0.)],
@@ -181,7 +181,7 @@ fn device_host_copy_made_once() {
     let box_ = Some((vec3::create(-1., 0., 0.), vec3::create(1., 2., 3.)));
     let bounds: Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>> = Rc::new(move || box_);
     let m = mesh::view::create_device(
-        mesh::view::device_args {
+        mesh::view::DeviceArgs {
             indices: Some(Arc::new(vec![0, 1, 2])),
             host: Some(host),
             bounds: Some(bounds),
@@ -211,9 +211,9 @@ fn resident_streams() {
             host_count.set(host_count.get() + 1);
             Ok(test_meshes::box_(1., 1., 1.))
         });
-        let create = |indices: Option<Vec<u32>>, colors: Option<Vec<color::T>>, tex_coords: Option<Vec<vec2::T>>, mode: mesh::mode, index_count: i64, color_width: i64| {
+        let create = |indices: Option<Vec<u32>>, colors: Option<Vec<color::T>>, tex_coords: Option<Vec<vec2::T>>, mode: mesh::Mode, index_count: i64, color_width: i64| {
             mesh::view::create_device(
-                mesh::view::device_args {
+                mesh::view::DeviceArgs {
                     mode: Some(mode),
                     indices: indices.map(Arc::new),
                     colors,
@@ -228,25 +228,25 @@ fn resident_streams() {
                 24,
             )
         };
-        let default_create = || create(None, None, None, mesh::mode::Triangles, 36, 3);
+        let default_create = || create(None, None, None, mesh::Mode::Triangles, 36, 3);
         let m = default_create().expect("device mesh");
         assert!(mesh::index_count(&m) == 36 && mesh::view::triangle_count(&m) == 12);
         assert!(mesh::view::device_index_count(&m) == Some(36) && mesh::view::device_color_width(&m) == 3);
         assert!(mesh::view::unread(&m).indices.is_empty() && made.get() == 0);
         for result in [
-            create(None, None, None, mesh::mode::Triangles, 35, 3),
-            create(None, None, None, mesh::mode::Triangles, 0, 3),
-            create(None, None, None, mesh::mode::Triangles, 36, 2),
-            create(None, None, None, mesh::mode::Points, 36, 3),
-            create(Some(vec![0, 1, 2]), None, None, mesh::mode::Triangles, 36, 3),
-            create(None, Some(vec![color::white(); 24]), None, mesh::mode::Triangles, 36, 3),
-            create(None, None, Some(vec![vec2::zero(); 24]), mesh::mode::Triangles, 36, 3),
+            create(None, None, None, mesh::Mode::Triangles, 35, 3),
+            create(None, None, None, mesh::Mode::Triangles, 0, 3),
+            create(None, None, None, mesh::Mode::Triangles, 36, 2),
+            create(None, None, None, mesh::Mode::Points, 36, 3),
+            create(Some(vec![0, 1, 2]), None, None, mesh::Mode::Triangles, 36, 3),
+            create(None, Some(vec![color::white(); 24]), None, mesh::Mode::Triangles, 36, 3),
+            create(None, None, Some(vec![vec2::zero(); 24]), mesh::Mode::Triangles, 36, 3),
         ] {
             assert!(result.is_err());
         }
-        assert!(!mesh::same(&m, &create(None, None, None, mesh::mode::Triangles, 36, 4).expect("device mesh")));
+        assert!(!mesh::same(&m, &create(None, None, None, mesh::Mode::Triangles, 36, 4).expect("device mesh")));
         let cam = ortho(vec3::create(0., 0., 2.));
-        let stage = |mode: d3::render_mode| {
+        let stage = |mode: d3::RenderMode| {
             let node = d3::mesh(None, None, Some(mode), None, None, m.clone());
             layer::stage_native(16, 16, &[scene::view3d(None, &cam, scene_of(vec![node]))]).expect("stage")
         };
@@ -261,14 +261,14 @@ fn resident_streams() {
         let uniforms = entry.draw.state.transform_uniforms.as_ref().expect("uniforms").to_vec();
         assert_eq!(word32(&uniforms, 81), 3.);
         assert_eq!(made.get(), 0);
-        let _ = stage(d3::render_mode::Wireframe);
+        let _ = stage(d3::RenderMode::Wireframe);
         assert_eq!(made.get(), 1);
-        let _ = stage(d3::render_mode::Vertices);
+        let _ = stage(d3::RenderMode::Vertices);
         let _ = mesh::view::packed_view(&m);
         assert_eq!(made.get(), 1);
         let indices = mesh::view::packed_view(&m).unwrap().indices;
         let legacy = mesh::view::create_device(
-            mesh::view::device_args {
+            mesh::view::DeviceArgs {
                 indices: Some(indices),
                 host: Some(host.clone()),
                 key: "legacy-texture".to_string(),

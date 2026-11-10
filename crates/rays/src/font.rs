@@ -7,20 +7,20 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum render_mode {
+pub enum RenderMode {
     Blended(color::T),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum hinting {
-    Normal_hinting,
-    Light_hinting,
-    Mono_hinting,
-    None_hinting,
+pub enum Hinting {
+    NormalHinting,
+    LightHinting,
+    MonoHinting,
+    NoneHinting,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum alignment {
+pub enum Alignment {
     Left,
     Center,
     Right,
@@ -28,7 +28,7 @@ pub enum alignment {
 
 const TEXT_CACHE_CAPACITY: i64 = 256;
 
-pub struct font_data {
+pub struct FontData {
     resource: RefCell<RFont::Font>,
     generation: Cell<i64>,
     cache: RefCell<Table>,
@@ -36,7 +36,7 @@ pub struct font_data {
 
 /// Open font clones share one font; same tests that owner identity.
 #[derive(Clone)]
-pub struct Font(Rc<font_data>);
+pub struct Font(Rc<FontData>);
 
 pub fn same(a: &Font, b: &Font) -> bool {
     Rc::ptr_eq(&a.0, &b.0)
@@ -60,13 +60,13 @@ fn text_cache() -> Table {
     side_lru::create(lru::cache("rays.font.text"), true, side_lru::UNBOUNDED_BYTES, Box::new(destroy_image_item), TEXT_CACHE_CAPACITY)
 }
 
-fn message(operation: &str, error: &runtime_resources::error) -> String {
+fn message(operation: &str, error: &runtime_resources::Error) -> String {
     format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
-fn make(resource: Result<RFont::Font, runtime_resources::error>) -> Result<Font, String> {
+fn make(resource: Result<RFont::Font, runtime_resources::Error>) -> Result<Font, String> {
     match resource {
-        Ok(resource) => Ok(Font(Rc::new(font_data {
+        Ok(resource) => Ok(Font(Rc::new(FontData {
             resource: RefCell::new(resource),
             generation: Cell::new(1),
             cache: RefCell::new(text_cache()),
@@ -83,20 +83,20 @@ pub fn system(size: Option<i64>) -> Result<Font, String> {
     make(RFont::open_system(size.unwrap_or(16) as f64))
 }
 
-fn rgba(mode: render_mode) -> (i64, i64, i64, i64) {
-    let render_mode::Blended(c) = mode;
+fn rgba(mode: RenderMode) -> (i64, i64, i64, i64) {
+    let RenderMode::Blended(c) = mode;
     (c.r, c.g, c.b, c.a)
 }
 
-fn resource_align(a: alignment) -> RFont::alignment {
+fn resource_align(a: Alignment) -> RFont::Alignment {
     match a {
-        alignment::Left => RFont::alignment::Left,
-        alignment::Center => RFont::alignment::Center,
-        alignment::Right => RFont::alignment::Right,
+        Alignment::Left => RFont::Alignment::Left,
+        Alignment::Center => RFont::Alignment::Center,
+        Alignment::Right => RFont::Alignment::Right,
     }
 }
 
-fn paint(density: i64, wrap: Option<i64>, align: alignment, font: &Font, text: &str, mode: render_mode) -> Result<image::Image, String> {
+fn paint(density: i64, wrap: Option<i64>, align: Alignment, font: &Font, text: &str, mode: RenderMode) -> Result<image::Image, String> {
     let rendered = RFont::render(&mut font.0.resource.borrow_mut(), wrap, Some(resource_align(align)), density, rgba(mode), text.as_bytes());
     match rendered {
         Err(error) => Err(message("Font.render_text", &error)),
@@ -117,13 +117,13 @@ fn image_of_text(text: &mut runtime_resources::text::Text) -> Result<image::Imag
     }
 }
 
-fn key(wrap: Option<i64>, align: alignment, density: i64, size: i64, text: &str, mode: render_mode) -> TableKey {
+fn key(wrap: Option<i64>, align: Alignment, density: i64, size: i64, text: &str, mode: RenderMode) -> TableKey {
     let (r, g, b, a) = rgba(mode);
     TableKey::Str(format!("{density}|{size}|{wrap:?}|{align:?}|{r},{g},{b},{a}|{text}"))
 }
 
-pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<i64>, font: &Font, text: &str, mode: render_mode) -> Result<image::Image, String> {
-    let align = align.unwrap_or(alignment::Left);
+pub fn cached_text(wrap: Option<i64>, align: Option<Alignment>, density: Option<i64>, font: &Font, text: &str, mode: RenderMode) -> Result<image::Image, String> {
+    let align = align.unwrap_or(Alignment::Left);
     let density = density.unwrap_or(1);
     let k = key(wrap, align, density, 0, text, mode);
     if let Some(item) = side_lru::find(&mut font.0.cache.borrow_mut(), &k)
@@ -139,16 +139,16 @@ fn clear_cache(font: &Font) {
     side_lru::clear(&mut font.0.cache.borrow_mut());
 }
 
-fn resource_hinting(h: hinting) -> RFont::hinting {
+fn resource_hinting(h: Hinting) -> RFont::Hinting {
     match h {
-        hinting::Normal_hinting => RFont::hinting::Normal_hinting,
-        hinting::Light_hinting => RFont::hinting::Light_hinting,
-        hinting::Mono_hinting => RFont::hinting::Mono_hinting,
-        hinting::None_hinting => RFont::hinting::None_hinting,
+        Hinting::NormalHinting => RFont::Hinting::NormalHinting,
+        Hinting::LightHinting => RFont::Hinting::LightHinting,
+        Hinting::MonoHinting => RFont::Hinting::MonoHinting,
+        Hinting::NoneHinting => RFont::Hinting::NoneHinting,
     }
 }
 
-pub fn set_hinting(font: &Font, value: hinting) -> Result<(), String> {
+pub fn set_hinting(font: &Font, value: Hinting) -> Result<(), String> {
     let result = RFont::set_hinting(&mut font.0.resource.borrow_mut(), resource_hinting(value));
     match result {
         Ok(()) => {
@@ -176,24 +176,24 @@ pub fn get_ascent(font: &Font) -> Result<i64, String> {
 pub mod raster {
     use super::*;
 
-    struct automatic_entry {
+    struct AutomaticEntry {
         image: image::Image,
         references: Cell<i64>,
         cached: Cell<bool>,
     }
 
-    struct context_data {
+    struct ContextData {
         automatic_cache: RefCell<Table>,
         automatic_fonts: RefCell<Table>,
         automatic_references: Cell<i64>,
     }
 
     #[derive(Clone)]
-    pub struct cache_context(Rc<context_data>);
+    pub struct CacheContext(Rc<ContextData>);
 
-    pub struct automatic {
-        entry: Rc<automatic_entry>,
-        context: Option<cache_context>,
+    pub struct Automatic {
+        entry: Rc<AutomaticEntry>,
+        context: Option<CacheContext>,
         released: Cell<bool>,
     }
 
@@ -201,17 +201,17 @@ pub mod raster {
     const FONT_CAPACITY: i64 = 32;
 
     thread_local! {
-        static CURRENT_CACHE: RefCell<Option<cache_context>> = const { RefCell::new(None) };
+        static CURRENT_CACHE: RefCell<Option<CacheContext>> = const { RefCell::new(None) };
     }
 
-    pub fn create_cache_context() -> cache_context {
-        cache_context(Rc::new(context_data {
+    pub fn create_cache_context() -> CacheContext {
+        CacheContext(Rc::new(ContextData {
             automatic_cache: RefCell::new(side_lru::create(
                 lru::cache("rays.font.text_ctx"),
                 true,
                 side_lru::UNBOUNDED_BYTES,
                 Box::new(|_key, item| {
-                    if let Ok(entry) = item.downcast::<automatic_entry>() {
+                    if let Ok(entry) = item.downcast::<AutomaticEntry>() {
                         entry.cached.set(false);
                         if entry.references.get() == 0 {
                             let _ = image::destroy(&entry.image);
@@ -236,7 +236,7 @@ pub mod raster {
         }))
     }
 
-    struct Restore(Option<cache_context>);
+    struct Restore(Option<CacheContext>);
 
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -245,18 +245,18 @@ pub mod raster {
         }
     }
 
-    pub fn with_cache_context(context: &cache_context, f: &mut dyn FnMut()) {
+    pub fn with_cache_context(context: &CacheContext, f: &mut dyn FnMut()) {
         let previous = CURRENT_CACHE.with(|c| c.borrow_mut().replace(context.clone()));
         let _restore = Restore(previous);
         f()
     }
 
-    pub fn clear_cache_context(context: &cache_context) {
+    pub fn clear_cache_context(context: &CacheContext) {
         side_lru::clear(&mut context.0.automatic_cache.borrow_mut());
         side_lru::clear(&mut context.0.automatic_fonts.borrow_mut());
     }
 
-    fn font(context: &cache_context, size: i64) -> Result<super::Font, String> {
+    fn font(context: &CacheContext, size: i64) -> Result<super::Font, String> {
         let k = TableKey::Int(size);
         if let Some(item) = side_lru::find(&mut context.0.automatic_fonts.borrow_mut(), &k)
             && let Ok(value) = item.downcast::<super::Font>() {
@@ -269,13 +269,13 @@ pub mod raster {
 
     pub(crate) fn borrow_automatic(
         wrap: Option<i64>,
-        align: Option<alignment>,
+        align: Option<Alignment>,
         density: Option<i64>,
         size: i64,
         text: &str,
-        mode: render_mode,
-    ) -> Result<automatic, String> {
-        let align = align.unwrap_or(alignment::Left);
+        mode: RenderMode,
+    ) -> Result<Automatic, String> {
+        let align = align.unwrap_or(Alignment::Left);
         let density = density.unwrap_or(1);
         let k = key(wrap, align, density, size, text, mode);
         let context = CURRENT_CACHE.with(|c| c.borrow().clone());
@@ -283,41 +283,41 @@ pub mod raster {
             let font = system(Some(size))?;
             let painted = paint(density, wrap, align, &font, text, mode);
             destroy(&font);
-            return painted.map(|image| automatic {
-                entry: Rc::new(automatic_entry { image, references: Cell::new(1), cached: Cell::new(false) }),
+            return painted.map(|image| Automatic {
+                entry: Rc::new(AutomaticEntry { image, references: Cell::new(1), cached: Cell::new(false) }),
                 context: None,
                 released: Cell::new(false),
             });
         };
         let found = side_lru::find(&mut context.0.automatic_cache.borrow_mut(), &k);
         if let Some(item) = found
-            && let Ok(entry) = item.downcast::<automatic_entry>() {
+            && let Ok(entry) = item.downcast::<AutomaticEntry>() {
                 entry.references.set(entry.references.get() + 1);
                 side_lru::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &k, true);
                 context.0.automatic_references.set(context.0.automatic_references.get() + 1);
-                return Ok(automatic { entry, context: Some(context), released: Cell::new(false) });
+                return Ok(Automatic { entry, context: Some(context), released: Cell::new(false) });
             }
         let font = font(&context, size)?;
         let image = paint(density, wrap, align, &font, text, mode)?;
         // Borrowed entries remain pinned until their scene is released.
         let can_cache = side_lru::length(&mut context.0.automatic_cache.borrow_mut()) < CAPACITY
             || side_lru::find_first(&mut context.0.automatic_cache.borrow_mut(), &|_, item| {
-                item.downcast_ref::<automatic_entry>().is_some_and(|e| e.references.get() == 0)
+                item.downcast_ref::<AutomaticEntry>().is_some_and(|e| e.references.get() == 0)
             })
             .is_some();
-        let entry = Rc::new(automatic_entry { image: image.clone(), references: Cell::new(1), cached: Cell::new(can_cache) });
+        let entry = Rc::new(AutomaticEntry { image: image.clone(), references: Cell::new(1), cached: Cell::new(can_cache) });
         if can_cache {
             side_lru::add_pinned(&mut context.0.automatic_cache.borrow_mut(), image_bytes(&image), k, entry.clone(), true);
         }
         context.0.automatic_references.set(context.0.automatic_references.get() + 1);
-        Ok(automatic { entry, context: Some(context), released: Cell::new(false) })
+        Ok(Automatic { entry, context: Some(context), released: Cell::new(false) })
     }
 
-    pub(crate) fn automatic_image(handle: &automatic) -> image::Image {
+    pub(crate) fn automatic_image(handle: &Automatic) -> image::Image {
         handle.entry.image.clone()
     }
 
-    pub(crate) fn release_automatic(handle: &automatic) {
+    pub(crate) fn release_automatic(handle: &Automatic) {
         if handle.released.get() {
             return;
         }
@@ -339,10 +339,10 @@ pub mod raster {
     }
 
     // the table is keyed by text: find this entry by scanning for its pointer
-    fn unpin_entry(context: &cache_context, entry: &Rc<automatic_entry>) {
+    fn unpin_entry(context: &CacheContext, entry: &Rc<AutomaticEntry>) {
         let mut keys = Vec::new();
         side_lru::iter(&mut context.0.automatic_cache.borrow_mut(), &mut |key, item| {
-            if let Some(e) = item.downcast_ref::<automatic_entry>()
+            if let Some(e) = item.downcast_ref::<AutomaticEntry>()
                 && std::ptr::eq(e, Rc::as_ptr(entry)) {
                     keys.push(key.clone());
                 }
@@ -369,7 +369,7 @@ pub mod raster {
         font.0.generation.get()
     }
 
-    pub struct glyph {
+    pub struct Glyph {
         pub glyph_width: i64,
         pub glyph_height: i64,
         pub glyph_advance: i64,
@@ -379,7 +379,7 @@ pub mod raster {
     /// Rasterize one code point at `density` exactly as it appears inside a rendered string;
     /// `glyph_advance` is the pen advance in backing pixels and `glyph_alpha` holds one coverage
     /// byte per pixel.
-    pub fn glyph(density: Option<i64>, font: &super::Font, code: i64) -> Result<glyph, String> {
+    pub fn glyph(density: Option<i64>, font: &super::Font, code: i64) -> Result<Glyph, String> {
         let density = density.unwrap_or(1);
         let Some(ch) = u32::try_from(code).ok().and_then(char::from_u32) else {
             return Err("Font.glyph: invalid code point".to_string());
@@ -389,13 +389,13 @@ pub mod raster {
         let rendered = RFont::render(&mut font.0.resource.borrow_mut(), None, None, density, (255, 255, 255, 255), text.as_bytes())
             .map_err(|e| message("Font.glyph", &e))?;
         match rendered {
-            None => Ok(glyph { glyph_width: 0, glyph_height: 0, glyph_advance: metrics.advance, glyph_alpha: Vec::new() }),
+            None => Ok(Glyph { glyph_width: 0, glyph_height: 0, glyph_advance: metrics.advance, glyph_alpha: Vec::new() }),
             Some(mut rendered) => {
                 let size = runtime_resources::text::size(&rendered);
                 let pixels = runtime_resources::text::pixels(&rendered);
                 let _ = runtime_resources::text::destroy(&mut rendered);
                 match (size, pixels) {
-                    (Ok((width, height)), Ok(rgba)) => Ok(glyph {
+                    (Ok((width, height)), Ok(rgba)) => Ok(Glyph {
                         glyph_width: width,
                         glyph_height: height,
                         glyph_advance: metrics.advance,

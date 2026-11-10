@@ -26,9 +26,9 @@ fn check(ok: bool, message: &str) {
 fn sketch_startup_result() {
     let called = Rc::new(Cell::new(false));
     let seen = called.clone();
-    let config = sketch::config { width: 0, ..sketch::default_config() };
-    let program = sketch::program {
-        init: Box::new(|_| Box::new(()) as sketch::model),
+    let config = sketch::Config { width: 0, ..sketch::default_config() };
+    let program = sketch::Program {
+        init: Box::new(|_| Box::new(()) as sketch::Model),
         update: Box::new(|_, _| None),
         view: Box::new(move |_, _| {
             seen.set(true);
@@ -39,7 +39,7 @@ fn sketch_startup_result() {
         idle: None,
         on_stop: None,
     };
-    match sketch::run_state(Some(config), None, None, None, program) {
+    match sketch::run_state(sketch::RunOptions { config: Some(config), ..Default::default() }, program) {
         Err(error) if error.kind == ErrorKind::InvalidArgument => check(!called.get(), "invalid sketch configuration reached user callbacks"),
         Err(error) => panic!("{}", ogpu_core::error::to_string(&error)),
         Ok(_) => panic!("invalid sketch configuration succeeded"),
@@ -76,15 +76,15 @@ fn camera_lens_material_light_projection() {
     // A camera's lens: pinhole by default, focus on the target unless set.
     let cam = camera::perspective(None, None, None, vec3::create(0., 0., 4.), vec3::zero()).expect("camera");
     check(camera::lens(&cam) == camera::pinhole() && camera::focus_distance(&cam) == 4., "Camera default lens");
-    let lens = camera::lens { aperture: 0.25, focus_distance: Some(2.5) };
+    let lens = camera::Lens { aperture: 0.25, focus_distance: Some(2.5) };
     let focused = camera::with_lens(lens, &cam).expect("lens");
     check(
         camera::lens(&focused) == lens
             && camera::focus_distance(&focused) == 2.5
-            && camera::focus_distance(&camera::with_lens(camera::lens { focus_distance: None, ..lens }, &focused).expect("lens")) == 4.,
+            && camera::focus_distance(&camera::with_lens(camera::Lens { focus_distance: None, ..lens }, &focused).expect("lens")) == 4.,
         "Camera.with_lens",
     );
-    check(camera::with_lens(camera::lens { aperture: -1., ..lens }, &cam).is_err(), "Camera.with_lens accepted a negative aperture");
+    check(camera::with_lens(camera::Lens { aperture: -1., ..lens }, &cam).is_err(), "Camera.with_lens accepted a negative aperture");
     let m = material::matte(color::rgb(10, 20, 30));
     check(m.diffuse == color::rgb(10, 20, 30), "Material matte");
     let l = light::spot(None, None, None, vec3::create(1., 2., 3.), vec3::create(0., 0., -1.), 0.5, 4.).expect("spot");
@@ -97,13 +97,13 @@ fn camera_lens_material_light_projection() {
 
 #[test]
 fn frame_facts_scene_lowering_path_texture() {
-    check(sketch::set_cursor(sketch::cursor::Horizontal_resize).is_err(), "cursor without an active sketch");
+    check(sketch::set_cursor(sketch::Cursor::HorizontalResize).is_err(), "cursor without an active sketch");
     let events = vec![
-        Event::Key_pressed(Key::Space),
-        Event::Pointer_pressed(MouseButton::LeftButton, (2., 3.)),
-        Event::Pointer_moved((4., 8.)),
+        Event::KeyPressed(Key::Space),
+        Event::PointerPressed(MouseButton::LeftButton, (2., 3.)),
+        Event::PointerMoved((4., 8.)),
         Event::Scrolled((1., -2.)),
-        Event::Text_editing { text: "ime".to_string(), start: 0, length: 3 },
+        Event::TextEditing { text: "ime".to_string(), start: 0, length: 3 },
         Event::Resized((8, 9)),
         Event::Closed,
     ];
@@ -121,9 +121,9 @@ fn frame_facts_scene_lowering_path_texture() {
         frame::mouse_down(MouseButton::LeftButton, &f)
             && frame::mouse_down(MouseButton::MouseX2, &f)
             && !frame::mouse_down(MouseButton::RightButton, &f)
-            && frame::has_event(&|e| matches!(e, Event::Pointer_moved(_)), &f)
+            && frame::has_event(&|e| matches!(e, Event::PointerMoved(_)), &f)
             && frame::has_event(&|e| matches!(e, Event::Closed), &f)
-            && !frame::has_event(&|e| matches!(e, Event::Focus_lost), &f),
+            && !frame::has_event(&|e| matches!(e, Event::FocusLost), &f),
         "frame facts",
     );
     let s = vec![
@@ -176,7 +176,7 @@ fn scene_staging_order_and_layer_breaks() {
         ];
         let staged = layer::stage_native(16, 12, &scene2_only).expect("stage");
         match staged.layers.as_slice() {
-            [layer::native_layer::Scene2_layer(ir, _)] => check(Rc::ptr_eq(ir, &staged.scene2), "Scene2-only native staging duplicated its render IR"),
+            [layer::NativeLayer::Scene2Layer(ir, _)] => check(Rc::ptr_eq(ir, &staged.scene2), "Scene2-only native staging duplicated its render IR"),
             _ => panic!("Scene2-only native staging split one ordered layer"),
         }
         let split = vec![
@@ -186,7 +186,7 @@ fn scene_staging_order_and_layer_breaks() {
         ];
         let staged_split = layer::stage_native(16, 12, &split).expect("stage");
         match staged_split.layers.as_slice() {
-            [layer::native_layer::Scene2_layer(first, _), layer::native_layer::Scene2_layer(second, _)] => {
+            [layer::NativeLayer::Scene2Layer(first, _), layer::NativeLayer::Scene2Layer(second, _)] => {
                 let (a, b) = (render_ir::commands_readonly(first), render_ir::commands_readonly(second));
                 check(a.len() == 1 && b.len() == 1 && matches!(a[0], render_ir::Command::Geometry(_)) && matches!(b[0], render_ir::Command::Geometry(_)), "Scene2 layer break changed command ordering");
             }

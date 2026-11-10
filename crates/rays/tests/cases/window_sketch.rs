@@ -8,7 +8,7 @@ use rays::canvas;
 use rays::frame;
 use rays::image;
 use rays::material;
-use rays::scene::{self, node};
+use rays::scene::{self, Node};
 use rays::scene3 as d3;
 use rays::sketch;
 use rays_math::{color, vec3};
@@ -33,7 +33,7 @@ fn sphere_mesh() -> rays::mesh::Mesh {
         let (b, d) = (a + 1, a + row);
         indices[(cell * 6) as usize..(cell * 6 + 6) as usize].copy_from_slice(&[a, b, d + 1, a, d + 1, d]);
     }
-    let planes = rays::mesh::Vec3_buffer::of_planes(normals.iter().map(|p| p.x).collect(), normals.iter().map(|p| p.y).collect(), normals.iter().map(|p| p.z).collect());
+    let planes = rays::mesh::Vec3Buffer::of_planes(normals.iter().map(|p| p.x).collect(), normals.iter().map(|p| p.y).collect(), normals.iter().map(|p| p.z).collect());
     rays::mesh::view::create_packed_owned(None, Some(indices), Some(planes.clone()), None, None, planes).expect("sphere")
 }
 
@@ -41,12 +41,12 @@ fn window_sketch_retained_view() {
     if !common::gpu() {
         return;
     }
-    let config = sketch::config {
+    let config = sketch::Config {
         width: 96,
         height: 64,
         title: "retained view".to_string(),
         fps: None,
-        clock: sketch::clock::Fixed(1. / 60.),
+        clock: sketch::Clock::Fixed(1. / 60.),
         ..sketch::default_config()
     };
     let camera_at = |d: f64| camera::perspective(None, None, None, vec3::create(0., 0., d), vec3::zero()).expect("camera");
@@ -79,10 +79,10 @@ fn window_sketch_retained_view() {
     let record = seen.clone();
     let stopped = Rc::new(RefCell::new(false));
     let on_stop_flag = stopped.clone();
-    let program = sketch::program {
-        init: Box::new(|_| Box::new(0_i64) as sketch::model),
-        update: Box::new(|m: &mut dyn Any, _| Some(Box::new(m.downcast_ref::<i64>().copied().unwrap_or(0) + 1) as sketch::model)),
-        view: Box::new(move |_, f: &frame::Frame| -> Vec<node> {
+    let program = sketch::Program {
+        init: Box::new(|_| Box::new(0_i64) as sketch::Model),
+        update: Box::new(|m: &mut dyn Any, _| Some(Box::new(m.downcast_ref::<i64>().copied().unwrap_or(0) + 1) as sketch::Model)),
+        view: Box::new(move |_, f: &frame::Frame| -> Vec<Node> {
             let camera = if f.input.frame > 8 { &near_camera } else { &far_camera };
             // the corner square changes every frame: only the UI layer differs between frames
             vec![
@@ -102,10 +102,11 @@ fn window_sketch_retained_view() {
             *on_stop_flag.borrow_mut() = true;
         })),
     };
-    let model = match sketch::run_state(Some(config), Some(12), None, None, program) {
+    let model = match sketch::run_state(sketch::RunOptions { config: Some(config), max_frames: Some(12), ..Default::default() }, program) {
         Ok(model) => model,
         Err(error) => {
-            println!("skipped: no window ({})", sketch::error_to_string(&error));
+            println!("RAYS_TEST_SKIP: skipped: no window ({})", sketch::error_to_string(&error));
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
             return;
         }
     };

@@ -44,3 +44,6 @@ harness = false
 [[test]]
 name = "window_rays_sketch"
 harness = false
+
+[lints]
+workspace = true

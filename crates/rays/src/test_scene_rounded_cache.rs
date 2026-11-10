@@ -1,6 +1,6 @@
 use crate::camera;
 use crate::mesh;
-use crate::scene::{self, node, layer};
+use crate::scene::{self, Node, layer};
 use crate::scene3 as d3;
 use rays_math::color;
 use rays_math::vec3;
@@ -11,28 +11,28 @@ fn require(condition: bool, message: &str) {
     assert!(condition, "{message}");
 }
 
-fn serialize(scene: &[node]) -> Vec<u8> {
+fn serialize(scene: &[Node]) -> Vec<u8> {
     let ir = layer::to_ir(scene).expect("to_ir");
     render_ir::serialize(&ir)
 }
 
 /// The cached geometry nodes a constructor returned: identity of the immutable arrays is the
 /// identity of their `Rc<Geometry>` (the IR copies them into commands).
-fn geometry_rcs(n: &node) -> Vec<Rc<render_ir::Geometry>> {
+fn geometry_rcs(n: &Node) -> Vec<Rc<render_ir::Geometry>> {
     match n {
-        node::Geometry(g) => vec![g.clone()],
-        node::Group(children) | node::Translate(_, _, children) => children.iter().flat_map(geometry_rcs).collect(),
+        Node::Geometry(g) => vec![g.clone()],
+        Node::Group(children) | Node::Translate(_, _, children) => children.iter().flat_map(geometry_rcs).collect(),
         _ => Vec::new(),
     }
 }
 
-fn first_geometry(n: &node) -> Rc<render_ir::Geometry> {
+fn first_geometry(n: &Node) -> Rc<render_ir::Geometry> {
     // the IR must also stage (the constructor's output is a valid scene)
     let _ = serialize(std::slice::from_ref(n));
     geometry_rcs(n).first().cloned().expect("geometry")
 }
 
-fn require_geometry_reuse(label: &str, make: &dyn Fn() -> node) {
+fn require_geometry_reuse(label: &str, make: &dyn Fn() -> Node) {
     let first = first_geometry(&make());
     let second = first_geometry(&make());
     require(Rc::ptr_eq(&first, &second), &format!("{label} rebuilt tessellated geometry arrays"));
@@ -84,7 +84,7 @@ fn rounded_and_path_caches_are_deterministic_and_bounded() {
         let ellipse_first = primitive();
         let ellipse_second = primitive();
         let same_group = match (&ellipse_first, &ellipse_second) {
-            (node::Group(a), node::Group(b)) => Rc::ptr_eq(a, b) || (a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| matches!((x, y), (node::Geometry(p), node::Geometry(q)) if Rc::ptr_eq(p, q)))),
+            (Node::Group(a), Node::Group(b)) => Rc::ptr_eq(a, b) || (a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| matches!((x, y), (Node::Geometry(p), Node::Geometry(q)) if Rc::ptr_eq(p, q)))),
             _ => false,
         };
         require(same_group, "stable ellipse did not reuse its immutable scene node");

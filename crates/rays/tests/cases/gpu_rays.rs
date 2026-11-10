@@ -21,7 +21,7 @@ fn require(condition: bool, message: &str) {
     assert!(condition, "{message}");
 }
 
-fn render(canvas_: &canvas::Canvas, density: Option<i64>, scene_: &[scene::node]) {
+fn render(canvas_: &canvas::Canvas, density: Option<i64>, scene_: &[scene::Node]) {
     canvas::render(density, canvas_, scene_).unwrap_or_else(|e| fail(&format!("Canvas.render: {e}")));
 }
 
@@ -40,11 +40,11 @@ fn snapshot(canvas_: &canvas::Canvas) -> Vec<u8> {
     pixels
 }
 
-fn mesh_node(material_: material::Material, cull: d3::cull, m: &mesh::Mesh) -> d3::node {
+fn mesh_node(material_: material::Material, cull: d3::Cull, m: &mesh::Mesh) -> d3::Node {
     d3::mesh(Some(material_), None, None, Some(cull), None, m.clone())
 }
 
-fn scene_of(nodes: Vec<d3::node>) -> d3::Scene3 {
+fn scene_of(nodes: Vec<d3::Node>) -> d3::Scene3 {
     d3::create(None, None, None, None, nodes).expect("scene3")
 }
 
@@ -61,8 +61,8 @@ fn gpu_rays_camera_depth() {
         camera::perspective(None, None, None, vec3::create(0., 0., 0.15), vec3::zero()).expect("camera"),
     ];
     for cam in &cameras {
-        let far = d3::translate(vec3::create(0., 0., -0.02), vec![mesh_node(material::unlit(color::red()), d3::cull::Cull_none, &plane)]);
-        let near = mesh_node(material::unlit(color::rgb(0, 255, 0)), d3::cull::Cull_none, &plane);
+        let far = d3::translate(vec3::create(0., 0., -0.02), vec![mesh_node(material::unlit(color::red()), d3::Cull::CullNone, &plane)]);
+        let near = mesh_node(material::unlit(color::rgb(0, 255, 0)), d3::Cull::CullNone, &plane);
         let s = vec![scene::clear(color::black()), scene::view3d(None, cam, scene_of(vec![near, far]))];
         render(&canvas_, None, &s);
         require(rgba(&canvas_, 16, 16) == (0, 255, 0, 255), "camera native near/far clipping or depth order");
@@ -70,7 +70,7 @@ fn gpu_rays_camera_depth() {
         render(&canvas_, None, &s);
         require(snapshot(&canvas_) == first, "camera depth retained replay pixels");
         let transforms = [mat4::identity(), mat4::translation(vec3::create(0., 0., -0.02))];
-        let instances = d3::instances_array(Some(material::unlit(color::rgb(0, 0, 255))), None, Some(d3::cull::Cull_none), None, plane.clone(), &transforms);
+        let instances = d3::instances_array(Some(material::unlit(color::rgb(0, 0, 255))), None, Some(d3::Cull::CullNone), None, plane.clone(), &transforms);
         let s = vec![scene::clear(color::black()), scene::view3d(None, cam, scene_of(vec![instances]))];
         render(&canvas_, None, &s);
         require(rgba(&canvas_, 16, 16) == (0, 0, 255, 255), "camera native instance clipping");
@@ -112,16 +112,16 @@ fn near(tolerance: i64, name: &str, expected: i64, c: color::T) {
 fn uniform(l: f64) -> world::World {
     let c = world::rgb(l, l, l);
     world::World {
-        layers: vec![world::entry {
+        layers: vec![world::Entry {
             name: "furnace".to_string(),
             visible: true,
-            layer: world::layer::Gradient { zenith: c, horizon: c, nadir: c, sharpness: 1. },
+            layer: world::Layer::Gradient { zenith: c, horizon: c, nadir: c, sharpness: 1. },
         }],
         ..world::default()
     }
 }
 
-fn sphere() -> d3::node {
+fn sphere() -> d3::Node {
     d3::mesh(Some(material::matte(color::white())), None, None, None, None, sphere_mesh())
 }
 
@@ -141,7 +141,7 @@ fn sphere_mesh() -> mesh::Mesh {
         let (b, d) = (a + 1, a + row);
         indices[(cell * 6) as usize..(cell * 6 + 6) as usize].copy_from_slice(&[a, b, d + 1, a, d + 1, d]);
     }
-    let planes = |v: &[vec3::T]| mesh::Vec3_buffer::of_planes(v.iter().map(|p| p.x).collect(), v.iter().map(|p| p.y).collect(), v.iter().map(|p| p.z).collect());
+    let planes = |v: &[vec3::T]| mesh::Vec3Buffer::of_planes(v.iter().map(|p| p.x).collect(), v.iter().map(|p| p.y).collect(), v.iter().map(|p| p.z).collect());
     mesh::view::create_packed_owned(None, Some(indices), Some(planes(&normals)), None, None, planes(&normals)).expect("sphere")
 }
 
@@ -155,7 +155,7 @@ fn gpu_rays_world_furnace() {
     let baked = world::bake(Some(1), None, 64, 32, &uniform(radiance)).expect("bake");
     let cam = camera::perspective(None, None, None, vec3::create(0., 0., 4.), vec3::zero()).expect("camera");
     let sphere_node = sphere();
-    let scene_ = |baked: &world::baked| {
+    let scene_ = |baked: &world::Baked| {
         vec![scene::clear(color::black()), scene::view3d(None, &cam, d3::with_world(baked.clone(), &scene_of(vec![sphere_node.clone()])))]
     };
     let canvas_ = canvas::create(64, 64).expect("canvas");
@@ -175,20 +175,20 @@ fn gpu_rays_world_furnace() {
     // Color background paints that radiance; only background changed, so the shared maps stay
     // uploaded. Exposure is stops through the tone map.
     let before = uploaded();
-    let tinted = world::with_background(&baked, world::background::Color(world::rgb(0.1, 0.1, 0.1)), Some(1.));
+    let tinted = world::with_background(&baked, world::Background::Color(world::rgb(0.1, 0.1, 0.1)), Some(1.));
     render(&canvas_, None, &scene_(&tinted));
     let delta = uploaded() - before;
     require(delta < 16384, &format!("background change re-uploaded maps: {delta} bytes"));
     near(1, "color background", tone(0.1, 2.), pixel(1, 1));
     near(3, "exposed sphere", tone(radiance, 2.), pixel(32, 32));
-    let clear = world::with_background(&baked, world::background::Transparent, None);
+    let clear = world::with_background(&baked, world::Background::Transparent, None);
     render(&canvas_, None, &scene_(&clear));
     require(pixel(1, 1) == color::black(), "transparent background keeps the clear");
     let _ = canvas::destroy(&canvas_);
     // Degenerate drawings draw nothing instead of failing the frame: an empty mesh (a cook with
     // no triangles), a zero-length line, a zero circle.
     let canvas_ = canvas::create(32, 32).expect("canvas");
-    let empty = mesh::view::create_owned(Some(mesh::mode::Triangles), Some(Vec::new()), &[]).expect("empty mesh");
+    let empty = mesh::view::create_owned(Some(mesh::Mode::Triangles), Some(Vec::new()), &[]).expect("empty mesh");
     render(
         &canvas_,
         None,
@@ -213,13 +213,13 @@ fn gpu_rays_world_sun_shadow() {
     common::release_keepalive();
     let baseline = live_handles();
     let baked = world::bake(Some(1), None, 64, 32, &uniform(0.2)).expect("bake");
-    let sun = world::sun { direction: vec3::unit_z(), radiance: world::rgb(2000., 2000., 2000.), angular_radius: 0.02 };
+    let sun = world::Sun { direction: vec3::unit_z(), radiance: world::rgb(2000., 2000., 2000.), angular_radius: 0.02 };
     let cam = camera::perspective(None, None, None, vec3::create(0., -4., 5.), vec3::zero()).expect("camera");
     let matte = material::matte(color::white());
     let plane = d3::mesh(Some(matte.clone()), None, None, None, None, mesh::plane(8., 8.).expect("plane"));
     let box_ = d3::mesh(Some(matte), None, None, None, None, box_mesh());
     // Rebuilt around the same meshes, a scene keeps its sun map.
-    let scene_ = |baked: &world::baked| {
+    let scene_ = |baked: &world::Baked| {
         vec![
             scene::clear(color::black()),
             scene::view3d(
@@ -238,7 +238,7 @@ fn gpu_rays_world_sun_shadow() {
     let under = vec3::create(0., 0.2, 0.);
     let beside = vec3::create(2.5, 0., 0.);
     let passes = || stats(&canvas_).sun_shadow_passes;
-    let with_sun = |s: &world::sun| world::with_sun(&baked, Some(s.clone()));
+    let with_sun = |s: &world::Sun| world::with_sun(&baked, Some(s.clone()));
     let lit = scene_(&with_sun(&sun));
     render(&canvas_, None, &lit);
     let (shadowed, open) = (luminance(under), luminance(beside));
@@ -248,7 +248,7 @@ fn gpu_rays_world_sun_shadow() {
     render(&canvas_, None, &lit);
     render(&canvas_, None, &scene_(&with_sun(&sun)));
     require(passes() == first, "identical scene re-rendered the sun map");
-    let tilted = world::sun { direction: vec3::normalize(vec3::create(0.3, 0., 1.)), ..sun.clone() };
+    let tilted = world::Sun { direction: vec3::normalize(vec3::create(0.3, 0., 1.)), ..sun.clone() };
     render(&canvas_, None, &scene_(&with_sun(&tilted)));
     require(passes() == first + 1, "a moved sun kept the old sun map");
     render(&canvas_, None, &scene_(&baked));
@@ -278,7 +278,7 @@ fn box_mesh() -> mesh::Mesh {
         let o = face as i64 * 4;
         indices.extend_from_slice(&[o, o + 1, o + 2, o, o + 2, o + 3]);
     }
-    let planes = |v: &[vec3::T]| mesh::Vec3_buffer::of_planes(v.iter().map(|p| p.x).collect(), v.iter().map(|p| p.y).collect(), v.iter().map(|p| p.z).collect());
+    let planes = |v: &[vec3::T]| mesh::Vec3Buffer::of_planes(v.iter().map(|p| p.x).collect(), v.iter().map(|p| p.y).collect(), v.iter().map(|p| p.z).collect());
     mesh::view::create_packed_owned(None, Some(indices), Some(planes(&normals)), None, None, planes(&positions)).expect("box")
 }
 
@@ -291,8 +291,8 @@ fn gpu_rays_lowering_orbit_uploads() {
     let count = 4096_i64;
     let points: Vec<vec3::T> = (0..count).map(|i| vec3::create(((i % 64) as f64 / 32.) - 1., ((i / 64) as f64 / 32.) - 1., 0.)).collect();
     let indices: Vec<i64> = (0..(count - 2) * 3).map(|i| if i % 3 == 0 { 0 } else { (i / 3) + (i % 3) }).collect();
-    let planes = mesh::Vec3_buffer::of_planes(points.iter().map(|p| p.x).collect(), points.iter().map(|p| p.y).collect(), points.iter().map(|p| p.z).collect());
-    let normals = mesh::Vec3_buffer::of_planes(vec![0.; count as usize], vec![0.; count as usize], vec![1.; count as usize]);
+    let planes = mesh::Vec3Buffer::of_planes(points.iter().map(|p| p.x).collect(), points.iter().map(|p| p.y).collect(), points.iter().map(|p| p.z).collect());
+    let normals = mesh::Vec3Buffer::of_planes(vec![0.; count as usize], vec![0.; count as usize], vec![1.; count as usize]);
     let heavy = mesh::view::create_packed_owned(None, Some(indices), Some(normals), None, None, planes).expect("heavy");
     let world_ = scene_of(vec![d3::mesh(Some(material::unlit(color::red())), None, None, None, None, heavy)]);
     let cam_at = |p: vec3::T| camera::orthographic(2., p, vec3::zero()).expect("camera");
@@ -313,8 +313,8 @@ fn gpu_rays_float32_attribute_stream() {
     let mut done = false;
     layer::with_cache_context(&scene_context, &mut || {
         let colors = vec![color::rgb(255, 0, 0), color::rgb(0, 255, 0), color::rgb(0, 0, 255)];
-        let vertices = mesh::Vec3_buffer::of_planes(vec![-0.70000001, 0.60000001, 0.10000001], vec![-0.60000001, -0.50000001, 0.80000001], vec![0., 0., 0.]);
-        let normals = mesh::Vec3_buffer::of_planes(vec![0., 0., 0.], vec![0., 0., 0.], vec![1., 1., 1.]);
+        let vertices = mesh::Vec3Buffer::of_planes(vec![-0.70000001, 0.60000001, 0.10000001], vec![-0.60000001, -0.50000001, 0.80000001], vec![0., 0., 0.]);
+        let normals = mesh::Vec3Buffer::of_planes(vec![0., 0., 0.], vec![0., 0., 0.], vec![1., 1., 1.]);
         let indices = Arc::new(vec![0u32, 1, 2]);
         let make = |colors: Vec<color::T>| {
             mesh::view::create_packed_shared(None, Some(indices.clone()), Some(normals.clone()), Some(Arc::new(colors)), None, vertices.clone()).expect("mesh")
@@ -399,7 +399,7 @@ fn gpu_rays_primitives() {
         }
         b.publish().expect("publish")
     };
-    let wrap = |nodes: Vec<scene::node>| {
+    let wrap = |nodes: Vec<scene::Node>| {
         vec![scene::clip((7, 9), 43, 37, vec![scene::translate(27, 23, vec![scene::rotate(0.37, vec![scene::scale(1.7, 0.8, nodes)])])])]
     };
     for count in [63, 64, 65] {
@@ -408,7 +408,7 @@ fn gpu_rays_primitives() {
         render(&canvas_, None, &frame);
         let expected = px(&canvas_);
         require(expected.iter().any(|p| *p != color::black()), "packed circles drew nothing");
-        let single: Vec<scene::node> = (0..count)
+        let single: Vec<scene::Node> = (0..count)
             .map(|i| {
                 let mut one = ui_batch::Builder::with_capacity(1);
                 one.circle(8. + ((i % 19) as f64 * 2.), 8. + ((i % 13) as f64 * 2.), 3., Some(rgba(color::rgba(40, 120, 180, 70))), None, 0.).expect("circle");

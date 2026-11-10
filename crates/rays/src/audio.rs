@@ -5,7 +5,7 @@ pub struct Audio {
     audio: Resource::Audio,
 }
 
-fn message(operation: &str, error: &runtime_resources::error) -> String {
+fn message(operation: &str, error: &runtime_resources::Error) -> String {
     format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
@@ -25,7 +25,7 @@ pub mod sample {
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum waveform {
+    pub enum Waveform {
         Sine,
         Square,
         Saw,
@@ -33,7 +33,7 @@ pub mod sample {
     }
 
     pub struct Sample {
-        resource: Resource::sample,
+        resource: Resource::Sample,
         destroyed: bool,
         volume: f64,
     }
@@ -57,7 +57,7 @@ pub mod sample {
     }
 
     /// The 16-bit mono WAV file of a synthesized tone.
-    pub(crate) fn wav(volume: f64, waveform: waveform, frequency: f64, duration: f64) -> Result<Vec<u8>, String> {
+    pub(crate) fn wav(volume: f64, waveform: Waveform, frequency: f64, duration: f64) -> Result<Vec<u8>, String> {
         let sample_rate = 48000_i64;
         if frequency <= 0. || duration <= 0. {
             return Err("Audio.Sample.synth: invalid frequency or duration".to_string());
@@ -80,16 +80,16 @@ pub mod sample {
         for i in 0..frames {
             let phase = frequency * i as f64 / sample_rate as f64;
             let x = match waveform {
-                waveform::Sine => (2. * pi * phase).sin(),
-                waveform::Square => {
+                Waveform::Sine => (2. * pi * phase).sin(),
+                Waveform::Square => {
                     if (2. * pi * phase).sin() >= 0. {
                         1.
                     } else {
                         -1.
                     }
                 }
-                waveform::Saw => 2. * (phase - (phase + 0.5).floor()),
-                waveform::Triangle => (2. * (2. * (phase - (phase + 0.5).floor())).abs()) - 1.,
+                Waveform::Saw => 2. * (phase - (phase + 0.5).floor()),
+                Waveform::Triangle => (2. * (2. * (phase - (phase + 0.5).floor())).abs()) - 1.,
             };
             let scaled = (-1.0_f64).max(1.0_f64.min(volume * x));
             p16(&mut bytes, (44 + i * 2) as usize, ((scaled * 32767.) as i64) & 0xffff);
@@ -97,7 +97,7 @@ pub mod sample {
         Ok(bytes)
     }
 
-    pub fn synth(audio: &super::Audio, volume: Option<f64>, waveform: waveform, frequency: f64, duration: f64) -> Result<Sample, String> {
+    pub fn synth(audio: &super::Audio, volume: Option<f64>, waveform: Waveform, frequency: f64, duration: f64) -> Result<Sample, String> {
         let bytes = wav(volume.unwrap_or(1.), waveform, frequency, duration)?;
         match Resource::load_sample_bytes(&audio.audio, &bytes) {
             Ok(resource) => Ok(Sample { resource, destroyed: false, volume: 1. }),

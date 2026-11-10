@@ -8,27 +8,27 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum mode {
+pub enum Mode {
     Points,
     Lines,
-    Line_strip,
-    Line_loop,
+    LineStrip,
+    LineLoop,
     Triangles,
-    Triangle_strip,
-    Triangle_fan,
+    TriangleStrip,
+    TriangleFan,
 }
 
 /// Packed coordinate planes.
 #[derive(Clone, Debug, Default)]
-pub struct Vec3_buffer {
+pub struct Vec3Buffer {
     pub x: Arc<Vec<f64>>,
     pub y: Arc<Vec<f64>>,
     pub z: Arc<Vec<f64>>,
 }
 
-pub type vec3_view = Vec3_buffer;
+pub type Vec3View = Vec3Buffer;
 
-impl Vec3_buffer {
+impl Vec3Buffer {
     pub fn length(&self) -> i64 {
         self.x.len() as i64
     }
@@ -37,16 +37,16 @@ impl Vec3_buffer {
         vec3::create(self.x[index], self.y[index], self.z[index])
     }
 
-    pub(crate) fn of_array(values: &[vec3::T]) -> Vec3_buffer {
-        Vec3_buffer {
+    pub(crate) fn of_array(values: &[vec3::T]) -> Vec3Buffer {
+        Vec3Buffer {
             x: Arc::new(values.iter().map(|v| v.x).collect()),
             y: Arc::new(values.iter().map(|v| v.y).collect()),
             z: Arc::new(values.iter().map(|v| v.z).collect()),
         }
     }
 
-    pub fn of_planes(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> Vec3_buffer {
-        Vec3_buffer { x: Arc::new(x), y: Arc::new(y), z: Arc::new(z) }
+    pub fn of_planes(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>) -> Vec3Buffer {
+        Vec3Buffer { x: Arc::new(x), y: Arc::new(y), z: Arc::new(z) }
     }
 
     #[cfg(test)]
@@ -54,13 +54,13 @@ impl Vec3_buffer {
         (0..self.x.len()).map(|i| self.get(i)).collect()
     }
 
-    fn same(&self, other: &Vec3_buffer) -> bool {
+    fn same(&self, other: &Vec3Buffer) -> bool {
         Arc::ptr_eq(&self.x, &other.x) && Arc::ptr_eq(&self.y, &other.y) && Arc::ptr_eq(&self.z, &other.z)
     }
 }
 
 /// Positions (and normals) a device holds.
-pub struct device {
+pub struct Device {
     pub key: String,
     pub count: i64,
     pub device_normals: bool,
@@ -78,13 +78,13 @@ pub struct device {
 
 #[derive(Clone)]
 pub struct Mesh {
-    mode: mode,
-    vertices: Vec3_buffer,
+    mode: Mode,
+    vertices: Vec3Buffer,
     indices: Arc<Vec<u32>>,
-    normals: Option<Vec3_buffer>,
+    normals: Option<Vec3Buffer>,
     colors: Option<Arc<Vec<color::T>>>,
     tex_coords: Option<Arc<Vec<vec2::T>>>,
-    device: Option<Rc<device>>,
+    device: Option<Rc<Device>>,
 }
 
 fn same_colors(a: &Option<Arc<Vec<color::T>>>, b: &Option<Arc<Vec<color::T>>>) -> bool {
@@ -177,7 +177,7 @@ fn narrow_indices(indices: Vec<i64>) -> Result<Vec<u32>, String> {
 }
 
 pub(crate) fn create_owned_full(
-    mode_: Option<mode>,
+    mode_: Option<Mode>,
     indices: Option<Vec<i64>>,
     normals: Option<Vec<vec3::T>>,
     colors: Option<Vec<color::T>>,
@@ -204,10 +204,10 @@ pub(crate) fn create_owned_full(
     let colors = colors?;
     let tex_coords = tex_coords?;
     Ok(Mesh {
-        mode: mode_.unwrap_or(mode::Triangles),
-        vertices: Vec3_buffer::of_array(vertices),
+        mode: mode_.unwrap_or(Mode::Triangles),
+        vertices: Vec3Buffer::of_array(vertices),
         indices: Arc::new(indices),
-        normals: normals.map(|n| Vec3_buffer::of_array(&n)),
+        normals: normals.map(|n| Vec3Buffer::of_array(&n)),
         colors,
         tex_coords,
         device: None,
@@ -215,12 +215,12 @@ pub(crate) fn create_owned_full(
 }
 
 pub(crate) fn create_packed_owned(
-    mode_: Option<mode>,
+    mode_: Option<Mode>,
     indices: Option<Vec<i64>>,
-    normals: Option<Vec3_buffer>,
+    normals: Option<Vec3Buffer>,
     colors: Option<Vec<color::T>>,
     tex_coords: Option<Vec<vec2::T>>,
-    vertices: Vec3_buffer,
+    vertices: Vec3Buffer,
 ) -> Result<Mesh, String> {
     let colors = colors.map(Arc::new);
     let tex_coords = tex_coords.map(Arc::new);
@@ -231,12 +231,12 @@ pub(crate) fn create_packed_owned(
 /// Zero-copy construction from already-published immutable packed storage: the arrays are
 /// retained and may be shared with another immutable value.
 pub(crate) fn create_packed_arcs(
-    mode_: Option<mode>,
+    mode_: Option<Mode>,
     indices: Option<Arc<Vec<u32>>>,
-    normals: Option<Vec3_buffer>,
+    normals: Option<Vec3Buffer>,
     colors: Option<Arc<Vec<color::T>>>,
     tex_coords: Option<Arc<Vec<vec2::T>>>,
-    vertices: Vec3_buffer,
+    vertices: Vec3Buffer,
 ) -> Result<Mesh, String> {
     let vertex_count = vertices.length();
     let indices: Arc<Vec<u32>> = match indices {
@@ -263,7 +263,7 @@ pub(crate) fn create_packed_arcs(
     colors_checked?;
     uv_checked?;
     Ok(Mesh {
-        mode: mode_.unwrap_or(mode::Triangles),
+        mode: mode_.unwrap_or(Mode::Triangles),
         vertices,
         indices,
         normals,
@@ -273,7 +273,7 @@ pub(crate) fn create_packed_arcs(
     })
 }
 
-pub fn mode(mesh: &Mesh) -> mode {
+pub fn mode(mesh: &Mesh) -> Mode {
     mesh.mode
 }
 
@@ -362,13 +362,13 @@ fn recalculate_host_normals(mesh: &Mesh) -> Mesh {
     let count = values.len() as i64;
     let at = |i: i64| values[i as usize] as usize;
     match mesh.mode {
-        mode::Triangles => {
+        Mode::Triangles => {
             for face in 0..count / 3 {
                 let offset = face * 3;
                 add_triangle(at(offset), at(offset + 1), at(offset + 2));
             }
         }
-        mode::Triangle_strip => {
+        Mode::TriangleStrip => {
             for face in 0..(count - 2).max(0) {
                 if face & 1 == 0 {
                     add_triangle(at(face), at(face + 1), at(face + 2));
@@ -377,12 +377,12 @@ fn recalculate_host_normals(mesh: &Mesh) -> Mesh {
                 }
             }
         }
-        mode::Triangle_fan => {
+        Mode::TriangleFan => {
             for face in 0..(count - 2).max(0) {
                 add_triangle(at(0), at(face + 1), at(face + 2));
             }
         }
-        mode::Points | mode::Lines | mode::Line_strip | mode::Line_loop => {}
+        Mode::Points | Mode::Lines | Mode::LineStrip | Mode::LineLoop => {}
     }
     // ponytail: normal generation is serial; use shared disjoint ranges if normalization becomes measurable.
     let (mut ox, mut oy, mut oz) = (Vec::with_capacity(vertex_count), Vec::with_capacity(vertex_count), Vec::with_capacity(vertex_count));
@@ -394,7 +394,7 @@ fn recalculate_host_normals(mesh: &Mesh) -> Mesh {
         oy.push(n.y);
         oz.push(n.z);
     }
-    Mesh { normals: Some(Vec3_buffer::of_planes(ox, oy, oz)), ..mesh.clone() }
+    Mesh { normals: Some(Vec3Buffer::of_planes(ox, oy, oz)), ..mesh.clone() }
 }
 
 fn positive(name: &str, value: f64) -> Result<(), String> {
@@ -426,8 +426,8 @@ static DEVICE_CHECKED: Mutex<Option<(Arc<Vec<u32>>, i64)>> = Mutex::new(None);
 pub mod view {
     use super::*;
 
-    pub struct view {
-        pub mode: mode,
+    pub struct View {
+        pub mode: Mode,
         pub vertices: Vec<vec3::T>,
         pub normals: Option<Vec<vec3::T>>,
         pub colors: Option<Arc<Vec<color::T>>>,
@@ -435,9 +435,9 @@ pub mod view {
     }
 
     #[cfg(test)]
-    pub(crate) fn view(mesh: &Mesh) -> Result<view, String> {
+    pub(crate) fn view(mesh: &Mesh) -> Result<View, String> {
         let mesh = readable(mesh)?;
-        Ok(view {
+        Ok(View {
             mode: mesh.mode,
             vertices: mesh.vertices.to_array(),
             normals: mesh.normals.as_ref().map(|n| n.to_array()),
@@ -447,19 +447,19 @@ pub mod view {
     }
 
     #[derive(Clone)]
-    pub struct packed_view {
-        pub mode: mode,
-        pub vertices: vec3_view,
+    pub struct PackedView {
+        pub mode: Mode,
+        pub vertices: Vec3View,
         pub indices: Arc<Vec<u32>>,
-        pub normals: Option<vec3_view>,
+        pub normals: Option<Vec3View>,
         pub colors: Option<Arc<Vec<color::T>>>,
         pub tex_coords: Option<Arc<Vec<vec2::T>>>,
     }
 
     /// The mesh's own arrays: a device mesh's indices, colours and texture coordinates with no
     /// vertices, its host copy never made.
-    pub fn unread(mesh: &Mesh) -> packed_view {
-        packed_view {
+    pub fn unread(mesh: &Mesh) -> PackedView {
+        PackedView {
             mode: mesh.mode,
             vertices: mesh.vertices.clone(),
             indices: mesh.indices.clone(),
@@ -469,22 +469,22 @@ pub mod view {
         }
     }
 
-    pub fn packed_view(mesh: &Mesh) -> Result<packed_view, String> {
+    pub fn packed_view(mesh: &Mesh) -> Result<PackedView, String> {
         Ok(unread(&readable(mesh)?))
     }
 
     /// Ownership-transfer construction for sibling-library generators.
-    pub fn create_owned(mode_: Option<mode>, indices: Option<Vec<i64>>, vertices: &[vec3::T]) -> Result<Mesh, String> {
+    pub fn create_owned(mode_: Option<Mode>, indices: Option<Vec<i64>>, vertices: &[vec3::T]) -> Result<Mesh, String> {
         create_owned_full(mode_, indices, None, None, None, vertices)
     }
 
     pub fn create_packed_owned(
-        mode_: Option<mode>,
+        mode_: Option<Mode>,
         indices: Option<Vec<i64>>,
-        normals: Option<vec3_view>,
+        normals: Option<Vec3View>,
         colors: Option<Vec<color::T>>,
         tex_coords: Option<Vec<vec2::T>>,
-        vertices: vec3_view,
+        vertices: Vec3View,
     ) -> Result<Mesh, String> {
         super::create_packed_owned(mode_, indices, normals, colors, tex_coords, vertices)
     }
@@ -492,20 +492,20 @@ pub mod view {
     /// Zero-copy construction from already-published immutable packed storage. The returned mesh
     /// retains the supplied arrays and may share them with another immutable value.
     pub fn create_packed_shared(
-        mode_: Option<mode>,
+        mode_: Option<Mode>,
         indices: Option<Arc<Vec<u32>>>,
-        normals: Option<vec3_view>,
+        normals: Option<Vec3View>,
         colors: Option<Arc<Vec<color::T>>>,
         tex_coords: Option<Arc<Vec<vec2::T>>>,
-        vertices: vec3_view,
+        vertices: Vec3View,
     ) -> Result<Mesh, String> {
         super::create_packed_arcs(mode_, indices, normals, colors, tex_coords, vertices)
     }
 
     /// create_device options use the declared defaults for omitted values.
     #[derive(Default)]
-    pub struct device_args {
-        pub mode: Option<mode>,
+    pub struct DeviceArgs {
+        pub mode: Option<Mode>,
         pub indices: Option<Arc<Vec<u32>>>,
         pub colors: Option<Vec<color::T>>,
         pub tex_coords: Option<Vec<vec2::T>>,
@@ -522,8 +522,8 @@ pub mod view {
     /// A mesh of `count` vertices whose packed float3 positions (and, with `normals`, normals) a
     /// device holds, registered under `key`; colours, texture coordinates and indices stay host
     /// arrays unless their device metadata is supplied.
-    pub fn create_device(args: device_args, count: i64) -> Result<Mesh, String> {
-        let device_args {
+    pub fn create_device(args: DeviceArgs, count: i64) -> Result<Mesh, String> {
+        let DeviceArgs {
             mode: mode_,
             indices,
             colors,
@@ -540,7 +540,7 @@ pub mod view {
         if key.is_empty() || count <= 0 {
             return Err("Mesh.create_device: a device mesh has vertices".to_string());
         }
-        let mode_ = mode_.unwrap_or(mode::Triangles);
+        let mode_ = mode_.unwrap_or(Mode::Triangles);
         // a frame's device mesh has the last one's indices: the same cloud identity, the same
         // topology's corners, so neither is made or checked again
         let indices: Arc<Vec<u32>> = match indices {
@@ -576,7 +576,7 @@ pub mod view {
             }
         };
         let bad_indices = match device_index_count {
-            Some(n) => n <= 0 || n > u32::MAX as i64 || n % 3 != 0 || mode_ != mode::Triangles || !indices.is_empty(),
+            Some(n) => n <= 0 || n > u32::MAX as i64 || n % 3 != 0 || mode_ != Mode::Triangles || !indices.is_empty(),
             None => false,
         };
         if bad_indices || ![0, 3, 4].contains(&device_color_width) || (device_color_width != 0 && (colors.is_some() || tex_coords.is_some())) {
@@ -591,12 +591,12 @@ pub mod view {
         let tex_coords = tex_coords?;
         Ok(Mesh {
             mode: mode_,
-            vertices: Vec3_buffer::default(),
+            vertices: Vec3Buffer::default(),
             indices,
             normals: None,
             colors,
             tex_coords,
-            device: Some(Rc::new(device {
+            device: Some(Rc::new(Device {
                 key,
                 count,
                 device_normals: normals,
@@ -634,9 +634,9 @@ pub mod view {
     #[cfg(test)]
     pub(crate) fn triangle_count(mesh: &Mesh) -> i64 {
         match mesh.mode {
-            mode::Triangles => index_count(mesh) / 3,
-            mode::Triangle_strip | mode::Triangle_fan => (mesh.indices.len() as i64 - 2).max(0),
-            mode::Points | mode::Lines | mode::Line_strip | mode::Line_loop => 0,
+            Mode::Triangles => index_count(mesh) / 3,
+            Mode::TriangleStrip | Mode::TriangleFan => (mesh.indices.len() as i64 - 2).max(0),
+            Mode::Points | Mode::Lines | Mode::LineStrip | Mode::LineLoop => 0,
         }
     }
 }

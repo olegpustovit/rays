@@ -3,13 +3,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub(crate) type save = Rc<dyn Fn(&str) -> Result<(), String>>;
+pub(crate) type Save = Rc<dyn Fn(&str) -> Result<(), String>>;
 
 thread_local! {
-    static CURRENT: RefCell<Option<save>> = const { RefCell::new(None) };
+    static CURRENT: RefCell<Option<Save>> = const { RefCell::new(None) };
 }
 
-struct Restore(Option<save>);
+struct Restore(Option<Save>);
 
 impl Drop for Restore {
     fn drop(&mut self) {
@@ -18,7 +18,7 @@ impl Drop for Restore {
     }
 }
 
-pub(crate) fn with_save(save: save, f: &mut dyn FnMut()) {
+pub(crate) fn with_save(save: Save, f: &mut dyn FnMut()) {
     let previous = CURRENT.with(|c| c.borrow_mut().replace(save));
     let _guard = Restore(previous);
     f()

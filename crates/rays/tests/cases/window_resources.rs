@@ -47,7 +47,7 @@ fn window_resources_scene_parity() {
         require(first.scene3.len() == 1, "View3d native staging");
         require(first.clear == (0., 0., 0., 1.), "native clear staging");
         match first.layers.as_slice() {
-            [layer::native_layer::Scene2_layer(..), layer::native_layer::Scene3_layer(_), layer::native_layer::Scene2_layer(..)] => {}
+            [layer::NativeLayer::Scene2Layer(..), layer::NativeLayer::Scene3Layer(_), layer::NativeLayer::Scene2Layer(..)] => {}
             _ => fail(&format!("Scene2/View3d/overlay layer ordering")),
         }
         match render_ir::commands_readonly(&first_ir) {
@@ -108,12 +108,13 @@ fn window_resources_images_canvas() {
         require(image::get_size(&captured) == Ok((3, 2)), "Canvas capture");
         if std::env::var("SDL_AUDIODRIVER").is_ok_and(|v| v == "dummy") {
             let audio_ = audio::init().expect("audio");
-            let mut sample = audio::sample::synth(&audio_, None, audio::sample::waveform::Sine, 440., 0.2).expect("synth");
+            let mut sample = audio::sample::synth(&audio_, None, audio::sample::Waveform::Sine, 440., 0.2).expect("synth");
             require(audio::sample::play(&audio_, None, None, &sample).is_ok(), "sample playing");
             audio::sample::destroy(&mut sample);
             audio::shutdown(&audio_).expect("shutdown");
         } else {
-            println!("skipped audio: SDL_AUDIODRIVER is not dummy");
+            println!("RAYS_TEST_SKIP: skipped audio: SDL_AUDIODRIVER is not dummy");
+            assert!(std::env::var("RAYS_ALLOW_SKIP").as_deref() == Ok("1"), "missing required GPU/display/audio support; RAYS_ALLOW_SKIP=1 explicitly permits skipping");
         }
         for _ in 0..100_000 {
             require(image::identity(&img) > 0, "stable image identity");
@@ -124,7 +125,7 @@ fn window_resources_images_canvas() {
     });
 }
 
-fn automatic_stage(s: &[scene::node]) -> (i64, RImage::Image) {
+fn automatic_stage(s: &[scene::Node]) -> (i64, RImage::Image) {
     let (_, resources) = layer::stage(64, 32, s).expect("stage");
     match resources.as_slice() {
         [(identity, res::Image(image))] => (*identity, image.clone()),
@@ -160,7 +161,7 @@ fn window_resources_automatic_text_cache() {
         let staged = |density: i64| -> (std::rc::Rc<render_ir::RenderIr>, (i64, i64)) {
             let st = layer::stage_native_render_checked(Some(density), 64, 32, &retina).map_err(|_| "stage").expect("stage");
             match st.layers.as_slice() {
-                [layer::native_layer::Scene2_layer(ir, resources)] if resources.len() == 1 => (ir.clone(), RImage::size(&image_resource(&resources[0])).expect("size")),
+                [layer::NativeLayer::Scene2Layer(ir, resources)] if resources.len() == 1 => (ir.clone(), RImage::size(&image_resource(&resources[0])).expect("size")),
                 _ => fail(&format!("density text resource")),
             }
         };
@@ -186,7 +187,7 @@ fn window_resources_automatic_text_cache() {
         require(entries == 256 && fonts == 1 && references == 0, "automatic LRU capacity");
         // If all 256 cached entries are pinned, the next value is transient rather than
         // invalidating an image still borrowed by an active scene.
-        let scenes: Vec<Vec<scene::node>> = (0..257).map(|i| vec![scene::text((0, 0), None, Some(16), &format!("pinned-{i:03}"))]).collect();
+        let scenes: Vec<Vec<scene::Node>> = (0..257).map(|i| vec![scene::text((0, 0), None, Some(16), &format!("pinned-{i:03}"))]).collect();
         let images: Vec<RImage::Image> = scenes.iter().map(|s| automatic_stage(s).1).collect();
         let (entries, fonts, references) = font::raster::automatic_counts();
         require(entries == 256 && fonts == 1 && references == 257, "pinned cache overflow policy");
@@ -200,7 +201,7 @@ fn window_resources_automatic_text_cache() {
         // An explicit font owns its cached text: releasing scenes leaves it alone and destroying
         // the font destroys it.
         let font_ = font::system(Some(15)).expect("font");
-        let cached = font::cached_text(None, None, None, &font_, "explicit lifetime", font::render_mode::Blended(color::white())).expect("text");
+        let cached = font::cached_text(None, None, None, &font_, "explicit lifetime", font::RenderMode::Blended(color::white())).expect("text");
         let image = image::resource(&cached);
         let other = vec![scene::text((0, 0), None, Some(15), "explicit lifetime")];
         automatic_stage(&other);
@@ -230,12 +231,12 @@ fn window_resources_display_list_images() {
         require(staged_resources.is_empty(), "root display list was copied during scene staging");
         let direct = layer::stage_native(32, 32, std::slice::from_ref(&node)).expect("stage");
         match (direct.layers.as_slice(), &direct.retained) {
-            ([layer::native_layer::Scene2_segment(retained, r)], Some((identity, 3))) if r.is_empty() && identity == "scene2-segment:41" && Arc::ptr_eq(retained, &segment) => {}
+            ([layer::NativeLayer::Scene2Segment(retained, r)], Some((identity, 3))) if r.is_empty() && identity == "scene2-segment:41" && Arc::ptr_eq(retained, &segment) => {}
             _ => fail(&format!("root display list did not retain direct native identity")),
         }
         let transformed = layer::stage_native(32, 32, &[scene::translate(5, 7, vec![node])]).expect("stage");
         match (transformed.layers.as_slice(), &transformed.retained) {
-            ([layer::native_layer::Scene2_layer(ir, r)], Some((identity, 1))) if r.is_empty() && identity.starts_with("scene-stage:") => {
+            ([layer::NativeLayer::Scene2Layer(ir, r)], Some((identity, 1))) if r.is_empty() && identity.starts_with("scene-stage:") => {
                 match render_ir::commands_readonly(ir) {
                     [Command::PushTransform(_), Command::Geometry(g), Command::PopTransform] if *g == rectangle => {}
                     _ => fail(&format!("transformed display-list command order drift")),
@@ -255,7 +256,7 @@ fn window_resources_display_list_images() {
         let first_layered = layer::stage_native_render(32, 32, &layered(8)).expect("stage");
         let changed_layered = layer::stage_native_render(32, 32, &layered(9)).expect("stage");
         match (first_layered.layers.as_slice(), changed_layered.layers.as_slice()) {
-            ([layer::native_layer::Scene2_layer(stable, _), layer::native_layer::Scene2_layer(first_dynamic, _)], [layer::native_layer::Scene2_layer(reused, _), layer::native_layer::Scene2_layer(changed_dynamic, _)])
+            ([layer::NativeLayer::Scene2Layer(stable, _), layer::NativeLayer::Scene2Layer(first_dynamic, _)], [layer::NativeLayer::Scene2Layer(reused, _), layer::NativeLayer::Scene2Layer(changed_dynamic, _)])
                 if std::rc::Rc::ptr_eq(stable, reused) && !std::rc::Rc::ptr_eq(first_dynamic, changed_dynamic) => {}
             _ => fail(&format!("changed layer invalidated unrelated retained Scene2 IR")),
         }
@@ -287,7 +288,7 @@ fn window_resources_display_list_images() {
         let image_node = scene::display_list(Some(vec![(7, img.clone())]), image_segment.clone()).expect("display list");
         let first = layer::stage_native(32, 32, std::slice::from_ref(&image_node)).expect("stage");
         match first.layers.as_slice() {
-            [layer::native_layer::Scene2_segment(retained, resources)]
+            [layer::NativeLayer::Scene2Segment(retained, resources)]
                 if Arc::ptr_eq(retained, &image_segment) && resources.len() == 1 && resources[0].0 == 7 && RImage::identity(&image_resource(&resources[0])) == image::identity(&img) => {}
             _ => fail(&format!("display-list image binding lost managed identity")),
         }

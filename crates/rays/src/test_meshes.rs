@@ -5,16 +5,16 @@ use crate::mesh;
 use rays_math::color;
 use rays_math::vec3;
 
-fn planes(values: &[vec3::T]) -> mesh::Vec3_buffer {
-    mesh::Vec3_buffer::of_planes(values.iter().map(|p| p.x).collect(), values.iter().map(|p| p.y).collect(), values.iter().map(|p| p.z).collect())
+fn planes(values: &[vec3::T]) -> mesh::Vec3Buffer {
+    mesh::Vec3Buffer::of_planes(values.iter().map(|p| p.x).collect(), values.iter().map(|p| p.y).collect(), values.iter().map(|p| p.z).collect())
 }
 
-pub fn packed(mode: Option<mesh::mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, normals: &[vec3::T], positions: &[vec3::T]) -> mesh::Mesh {
+pub fn packed(mode: Option<mesh::Mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, normals: &[vec3::T], positions: &[vec3::T]) -> mesh::Mesh {
     mesh::view::create_packed_owned(mode, Some(indices), Some(planes(normals)), colors, None, planes(positions)).expect("packed mesh")
 }
 
 /// Every vertex faces +Z.
-pub fn facing_z(mode: Option<mesh::mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, positions: &[vec3::T]) -> mesh::Mesh {
+pub fn facing_z(mode: Option<mesh::Mode>, colors: Option<Vec<color::T>>, indices: Vec<i64>, positions: &[vec3::T]) -> mesh::Mesh {
     let normals: Vec<vec3::T> = positions.iter().map(|_| vec3::unit_z()).collect();
     packed(mode, colors, indices, &normals, positions)
 }
