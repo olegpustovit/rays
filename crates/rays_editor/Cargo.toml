@@ -46,7 +46,7 @@ runtime_resources = { path = "../runtime_resources" }
 mem_sys = { path = "../mem_sys" }
 scene_command = { path = "../scene_command" }
 
-# Window smoke + merged offscreen `gpu_editor` suite (B3); harness = false, rays/tests/common/window.rs.
+# Window smoke + merged editor suite (B3), split: `gpu_editor` (device cases, serialized) and `editor` (pure, parallel); harness = false, rays/tests/common/window.rs.
 
 [target.'cfg(windows)'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
@@ -56,6 +56,11 @@ ogpu_metal = { path = "../ogpu_metal" }
 
 [[test]]
 name = "window_editor_smoke"
+harness = false
+
+[[test]]
+name = "editor"
+path = "tests/editor.rs"
 harness = false
 
 [[test]]
