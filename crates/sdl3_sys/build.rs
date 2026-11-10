@@ -190,7 +190,9 @@ fn main() {
 
     emit_link_flags(&run_pkg_config("sdl3", "SDL3", "--libs"));
     for (key, pkg, lib) in [("sdl3_image", "sdl3-image", "SDL3_image"), ("sdl3_ttf", "sdl3-ttf", "SDL3_ttf"), ("sdl3_mixer", "sdl3-mixer", "SDL3_mixer")] {
-        satellite(&root, &out, &lock, key, pkg, lib);
+        if env::var_os(format!("CARGO_FEATURE_{}", key.trim_start_matches("sdl3_").to_uppercase())).is_some() {
+            satellite(&root, &out, &lock, key, pkg, lib);
+        }
     }
     if target == "macos" {
         println!("cargo:rustc-link-lib=objc");
