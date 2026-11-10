@@ -520,7 +520,7 @@ on objects, strings and lists.
 | `int(x)` | Number conversion, truncate toward zero, checked float-to-int conversion; Int result. Thus `int(-2.7) = -2`. |
 | `floor(x)`, `ceil(x)` | Number conversion, floor/ceiling, checked float-to-int conversion; Int result. |
 | `round(x)` | Number conversion, nearest integer with an exact halfway case away from zero, then checked float-to-int conversion. `round(-2.5) = -3`. |
-| Coercion to Int / `Value.int_of` | Number conversion, `floor(x + 0.5)` in binary64, then checked float-to-int conversion. This includes the rounding of the addition. Coercing `-2.5` gives `-2`. Bool-to-Int coercion directly gives 0 or 1. |
+| Coercion to Int / `Value.int_of` | Float inputs fail with `E_TYPE`; there is no implicit rounding. Int stays exact; Bool converts directly to 0 or 1. Use explicit numeric conversion when a Float must become an Int. |
 | `float(x)` | Number conversion; Float result, including an Int value rounded to binary64. |
 | Ordinary `+`, `-`, `*`, `mod`, `min`, `max` | Convert both scalars to doubles, apply the operation, reject a non-finite result, then return Int only when both actual operands are Int. That Int result uses `floor(result + 0.5)` and the checked conversion. It is not exact integer arithmetic. |
 | Ordinary `/` | Convert operands to doubles. If the divisor equals either signed zero, result is positive zero; otherwise divide. Reject a non-finite result and return Float. |
@@ -790,7 +790,7 @@ the existing static export metadata path.
 
 `coerce(wanted,value)` uses a statically supplied checker type. It is a
 conversion rather than general validation: Any leaves the value unchanged;
-Float to Int uses the coercion rounding above; Bool to Int gives 0/1;
+Float to Int is rejected (`E_TYPE`); Bool to Int gives 0/1;
 Int/Bool to Float uses numeric conversion; Int/Float to Bool uses `truthy`.
 Int/Float broadcasts to Vec2/3/4; Bool does not broadcast in this leaf.
 List coercion recursively converts each element into fresh list storage.
@@ -1141,7 +1141,7 @@ radius and color are present from the first contract, not only uniform styles.
 
 The core preserves all existing draw operators. `draw/background` is a filled
 canvas rectangle; `draw/merge` appends its inputs in order. `draw/translate`
-uses the existing integer coordinate conversion, while rotation is radians
+uses the existing integer coordinate conversion, while rotate is radians
 and scale is scalar or two components of a Vec3. Text/image positions also
 use their existing integer conversion. Point geometry and packed
 rect/circle/line positions retain fractional coordinates. Default ink is white, default circle radius is 1,

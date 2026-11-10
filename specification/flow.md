@@ -135,7 +135,7 @@ parameter is coerced by `Port_type.coerce`, then normalised to the field's hard 
 | From → to | Rule |
 |---|---|
 | Int → Float | IEEE double conversion |
-| Float → Int | finite values round half up (`floor (x + 0.5)`) and saturate the machine int range; a non-finite value is `E_TYPE` |
+| Float → Int | rejected (`E_TYPE`); use explicit `int`, `floor`, `ceil` or `round` conversion |
 | Float or Int → Bool | nonzero is `true` |
 | Bool → Float or Int | `true` is 1 |
 | Float, Int or Bool → Vec3 | broadcast to all three components |
@@ -777,9 +777,8 @@ supported.
 | `ref` | Evaluate a named graph with default inputs overridden by the supplied values. |
 
 Variadic geometry and panel slots splice a list argument one level; other slots keep it as one
-list value. An Int widens when used as a Float. A Float used where an Int is required rounds
-half away from zero; `int` truncates toward zero, while `floor`, `ceil` and `round` are explicit
-conversions. `range` produces Int indices; `linspace` produces Float values including both
+list value. An Int widens when used as a Float. A Float used where an Int is required is `E_TYPE`; `int` truncates toward
+zero, while `floor`, `ceil` and `round` are explicit conversions. `range` produces Int indices; `linspace` produces Float values including both
 endpoints.
 
 The static pass checks every definition and both branches, independent of iteration counts.
