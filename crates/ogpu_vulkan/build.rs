@@ -23,9 +23,9 @@ fn wayland_probe() {
         return;
     }
     cc::Build::new().file("tests/wayland_probe.c").cargo_metadata(false).warnings(true).compile("wayland_probe");
-    // Only the test binaries need the shim and libwayland-client; the library stays headless.
-    println!("cargo:rustc-link-arg-tests={}/libwayland_probe.a", env::var("OUT_DIR").unwrap());
-    println!("cargo:rustc-link-arg-tests=-lwayland-client");
+    // Link args are not propagated downstream, so only this package's own test binary gets the shim and libwayland-client.
+    println!("cargo:rustc-link-arg={}/libwayland_probe.a", env::var("OUT_DIR").unwrap());
+    println!("cargo:rustc-link-arg=-lwayland-client");
     println!("cargo:rustc-cfg=wayland_probe");
 }
 
