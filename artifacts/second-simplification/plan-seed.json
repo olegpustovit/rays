@@ -161,7 +161,7 @@
   },
   "Z10": {
     "status": "active",
-    "note": "cebc8739 3720b91b 0c1835b5 \u2014 formatter and33 redundant copies removed; committed census11538;12 crates fully reviewed"
+    "note": "cebc8739 3720b91b 0c1835b5 348cb071 182b36b5 2de49edb c451ff02 \u201437 redundant calls removed; immutable shape snapshots shared; committed census11535;18 crates fully reviewed"
   },
   "R1": {
     "status": "done",

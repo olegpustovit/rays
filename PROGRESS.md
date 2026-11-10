@@ -497,7 +497,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Second simplification Z10 — clone review
 
-This is the active second plan's Z10 ledger; the completed port plan above is unchanged. Baseline source: `ba056fc5910945e6b198be5bcbbf69dd6fab5557` (2026-11-10). Counts are literal `.clone()` occurrences in committed `crates/*/src/**/*.rs`, including inline tests, comments and strings; integration tests, examples and build scripts are excluded. They inventory review scope, not redundant operations. Baseline total: **11,571 across 50 crates**; current committed census at `0c1835b5`: **11,538**, exactly 33 fewer across nine crates. Reproduce with `git grep -o -F '.clone()' ba056fc5 -- crates`, grouping only those source paths. The artifact's original estimate was 11,707; this different-time count proves no runtime savings.
+This is the active second plan's Z10 ledger; the completed port plan above is unchanged. Baseline source: `ba056fc5910945e6b198be5bcbbf69dd6fab5557` (2026-11-10). Counts are literal `.clone()` occurrences in committed `crates/*/src/**/*.rs`, including inline tests, comments and strings; integration tests, examples and build scripts are excluded. They inventory review scope, not redundant operations. Baseline total: **11,571 across 50 crates**; current committed census at `c451ff02`: **11,535**, exactly 36 fewer across 12 crates. Reproduce with `git grep -o -F '.clone()' ba056fc5 -- crates`, grouping only those source paths. The artifact's original estimate was 11,707; this different-time count proves no runtime savings.
 
 The exact command `cargo clippy --workspace --lib --message-format=json -- -W clippy::redundant_clone` initially exits 101 in 5.301 s at the existing default-denied `mem::Report::to_string` wrapper, before emitting any redundant-clone diagnostics. Commit `cebc8739` removes that wrapper; standard ToString delegates to the same Display implementation. All callers were traced. Existing `cargo t -p mem owner_bytes_drive_report_and_formatting` passes: 2.50 s wall / 2.135 s runner / 0.022 s case.
 
@@ -506,7 +506,7 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | Crate | Baseline clones | Current clones | Clippy candidates (baseline) | Ownership review |
 |---|---:|---:|---:|---|
 | cfmt | 0 | 0 | 0 | Reviewed: no Clone/clone sites |
-| editor_core | 47 | 47 | 0 | Pending review |
+| editor_core | 47 | 45 | 0 | Reviewed: c451ff02 borrows pending leader prefix and exact sequence; settings Syntax shares its arena, owned panel/command results and independent test/path cleanup copies remain |
 | editor_document | 642 | 642 | 4 | Pending review |
 | flow_check | 538 | 538 | 9 | Pending review |
 | flow_eval | 646 | 646 | 1 | Pending review |
@@ -519,11 +519,11 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | flow_sop_catalog | 147 | 147 | 0 | Pending review |
 | flow_syntax | 141 | 141 | 0 | Pending review |
 | flow_web | 71 | 71 | 0 | Pending review |
-| input | 26 | 26 | 0 | Pending review |
-| lru | 52 | 52 | 0 | Pending review |
-| mem | 61 | 61 | 0 | Pending review |
+| input | 26 | 25 | 0 | Reviewed: blocked keys moved from owned frame in2de49edb; public borrowed frame still needs an owned filtered result; remaining clones retain independent test originals |
+| lru | 52 | 51 | 0 | Reviewed: owned insertion key moved in348cb071; remaining shared keys/values, callback snapshots and independent cache copies retain their owners;19 existing cases pass |
+| mem | 61 | 61 | 0 | Reviewed: shared account/callback owners and root/evictor snapshots release the global lock before callbacks; published walk ledger retains the current map while deltas are compared; public error/status returns own their values |
 | mem_sys | 0 | 0 | 0 | Reviewed: no Clone/clone sites (including Windows helper) |
-| metal_sys | 3 | 3 | 0 | Pending review |
+| metal_sys | 3 | 3 | 0 | Reviewed: mapped pointer/readback retain their buffer; admitted acceleration descriptor retains the actual device for safe binding |
 | native_layer_token_sys | 3 | 3 | 0 | Reviewed: shared Arc token; all three explicit clones exercise final-owner/concurrent-release tests |
 | ogpu_core | 113 | 113 | 0 | Pending review |
 | ogpu_metal | 137 | 137 | 1 | Pending review |
@@ -534,7 +534,7 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | pxui | 100 | 100 | 0 | Pending review |
 | pxui_graph | 357 | 354 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | pxui_shell | 112 | 109 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
-| rays | 325 | 322 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
+| rays | 325 | 323 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | rays_bin | 1 | 1 | 0 | Reviewed: native editor owns the source while the caller retains it for located startup diagnostics; borrowed panic text is copied before reporting |
 | rays_diagnostic | 2 | 2 | 0 | Reviewed: both clones preserve the original diagnostic for independent test assertions |
 | rays_editor | 1734 | 1734 | 55 | Pending review |
@@ -549,7 +549,7 @@ The second exact Clippy run exits 101 in 7.915 s at the existing approximate-PI 
 | renderer | 289 | 286 | 3 | Clippy sites moved in 3720b91b; broader ownership review pending |
 | runtime | 2 | 2 | 0 | Reviewed: two strings copied from borrowed public filters into owned native filter records |
 | runtime_resources | 32 | 32 | 0 | Pending review |
-| scene_command | 22 | 22 | 0 | Pending review |
+| scene_command | 22 | 22 | 0 | Reviewed:182b36b5 removes implicit shape deep-copy from Command::clone; published bytes/batches/validation share existing Arc owners; explicit copy and owned Geometry/Glyph snapshots remain |
 | sdl3 | 8 | 8 | 0 | Reviewed: layer tokens/cache, parent window and mixer owners are shared; live-resize callback releases its TLS borrow before reentry; inline tests retain comparison originals |
 | sdl3_sys | 1 | 1 | 0 | Reviewed: native view owns the parent Rc and both view/caller keep layer tokens; SDL image/text buffers are copied before native free and error text before the next SDL call |
 | sop | 428 | 428 | 9 | Pending review |
@@ -567,3 +567,9 @@ The editor idle/sea and SOP warm allocation guards are deliberately held until t
 Additional read-only ownership review covers rays_bin, sdl3 and sdl3_sys (11 fully reviewed small crates total). Qualified Rc/Arc cloning, native image/text copies and retained error strings were included, not only literal calls. No source change or additional platform qualification is implied. Input review found one real unnecessary key-vector copy in gate: take the owned live-frame keys instead of clone-then-clear; this is prepared outside the worktree for the next qualified Z10 batch, so input remains pending. `/tmp/rays-z10-next-reviewed.patch` additionally prepares20 reviewed last-use moves across10 paths in five crates, not applied. The constructor clone candidate at rays_pathtracer.rs527 needs a borrowed upload branch because m is still moved into latest; blindly applying its Clippy suggestion would violate ownership.
 
 **Second cleanup source** `0c1835b5794b52cbd2880481f65d4e9c164c790c`: MockCommands::run iterates the existing recorded operations through a shared borrow, deleting one full-Vec clone (1insertion/2deletions, one owned path). Both commit and commit_present use that shared function; execute_transfer touches only resource/state storage and cannot reenter/mutate the command list. Its row copy remains necessary for level0 source/destination aliasing. Full Core/Mock/Metal conformance65/65 exits0 in9.77s wall/9.124s runner, including queue_epochs_and_blit_replay, discard/error retry, texture bytes and handle/lifetime checks; slowest library0.329s. Exact log `/tmp/rays-g1-depth-conformance.log`, frozen source hash `/tmp/rays-z10-mock-manifest.json`; root independently verifies exact one-path committed bytes. This combined GPU batch also qualifies G1depth; no isolated Mock timing or native Z0 improvement is claimed. Mock full ownership review makes12 reviewed crates. Current50-row census independently reproduces11,538; pending Z7 work is excluded.
+
+**Third cleanup source** `348cb071d61f55557b45f2d88da0eecdbee72e87`: CacheState::insert saves the Copy hash then moves its owned Key into the entry (one file,3insertions/2deletions). Every Cache::add, Cache::copy and Memo::insert insertion uses this function. No API, branch or capacity changes. `cargo t -p lru` exits0,19/19,2.34s wall/1.919s runner/0.551s sum, slowest order_hits_copy_replace_take_remove_and_drop_oldest0.033s. Existing collisions, update/replacement, independent-copy/release, eviction and callback reentry cases remain unchanged. Log `/tmp/rays-z10-lru-owned-key.log`; root independently verifies committed SHA256 and exact one-path manifest. Additional read-only review of mem and metal_sys brings the completed ownership review to15 crates. The committed census at348cb071 is11,537; pending source/test changes are excluded. Native Z0 and Z7 paired timings remain required; later Z7 before/after swaps keep this LRU source fixed in both variants.
+
+**Fourth/fifth cleanup sources** `182b36b59ecc309d9e6b835bdd27ef0950e0d5ba` (fourpaths,9insertions/13deletions) and `2de49edbbdaadfe241d700bce86ac0e5d022193d` (onepath,1insertion/2deletions). RenderIr command cloning and Rays Scene commands reuse existing immutable Table::clone; explicit Table::copy and malformed-copy validation remain unchanged. The extended existing storage/COW regression fails before at its new pointer assertion (2.02s wall/1.433s runner/.029s case), then passes (2.71s/.025s case); the extended Rays shape-layout case passes including100,000 instances (9.30s including6.69s compile/.055s case). Input gate takes the already-owned key vector instead of cloning then clearing; all existing blocked/held/released-key behavior checks remain. Stable `cargo t -p input -p scene_command -p rays -p renderer` exits0,127/127,27.40s wall/27.057s runner/24.589s sum, slowest window_runtime_render2.387s. Includes native gpu_rays_primitives pixels0.50s and unchanged copied-malformed shape tests. Root verifies both exact committed manifests; log `/tmp/rays-z10-owned-shape-consumers.log`. All50 committed clone cells independently reproduce11,537 at2de49edb.35 redundant calls and two implicit full shape-buffer copies have been removed; this census also includes necessary sharing/test clones. Full ownership review now covers17 crates; input/scene_command are closed locally, broader Rays review and native editor Z0/SOP guards remain open. EditorCore review finds two more borrowed leader strings; its single-path patch is installed/frozen but not yet qualified.
+
+**Sixth cleanup source** `c451ff02b576768dc51f272bb12d1db3170ddba5`: onepath,3insertions/4deletions. Router::step borrows its pending leader prefix and compares the newly typed sequence directly with the borrowed Trigger; it stops allocating two temporary Strings. All callers route through this shared function; event order, modifier/scope priority, exact-match-before-prefix and state changes are unchanged. `cargo t -p editor_core` exits0,11/11,2.36s wall/1.817s runner/0.534s sum, slowest settings_int_above_2_62_decodes_as_int0.112s; its three routing cases exercise leader/chord/focus/held-key/Tab behavior and borrowed-frame ownership. Log `/tmp/rays-z10-editor-borrowed-leaders.log`; committed exactpath/SHA256 verified. Full review now covers18 crates. The current50-cell census atc451ff02 is11,535 (36 fewer across12 crates);37 unnecessary explicit calls and two implicit whole-shape copies have been removed. Necessary sharing/test clones explain why literal-count delta differs. Pending G1/Z7 source is excluded.
