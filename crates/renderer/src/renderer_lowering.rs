@@ -204,8 +204,8 @@ pub fn sampled_texture_bytes(texture: &SampledTexture) -> i64 {
 }
 
 pub struct Lowering {
-    quad_cache: side_lru::Table<QuadKey>,
-    quad_payload_cache: side_lru::Table<PayloadKey>,
+    quad_cache: side_lru::Table,
+    quad_payload_cache: side_lru::Table,
     out_slots: Vec<Draw>,
     out_list: Vec<Draw>,
     ui_slots: side_lru::Table,
@@ -214,8 +214,8 @@ pub struct Lowering {
 
 pub fn create() -> Lowering {
     Lowering {
-        quad_cache: side_lru::create_exact(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, 1024),
-        quad_payload_cache: side_lru::create_exact(lru::cache("renderer.quad_payload"), true, side_lru::UNBOUNDED_BYTES, 256),
+        quad_cache: side_lru::create(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, Box::new(|_, _| {}), 1024),
+        quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), 256),
         out_slots: Vec::new(),
         out_list: Vec::new(),
         ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
@@ -294,20 +294,16 @@ fn transform_bits(t_: &Transform) -> [f64; 6] {
     [t_.xx, t_.xy, t_.yx, t_.yy, t_.tx, t_.ty]
 }
 
-/// The quad's geometry as exact bits; the texture's address and the framebuffer complete a draw's key.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct PayloadKey {
-    destination: [u64; 4],
-    transform: [u64; 6],
-    clip: (i64, i64, i64, i64),
-    uv: [u64; 4],
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct QuadKey {
-    payload: PayloadKey,
-    texture: usize,
-    framebuffer: (i64, i64, i64, i64),
+/// A quad's bits as two independent 64-bit hashes: a table key without text.
+fn wide(words: &[u64]) -> TableKey {
+    use std::hash::{Hash, Hasher};
+    let hash = |seed: u64| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        seed.hash(&mut hasher);
+        words.hash(&mut hasher);
+        hasher.finish()
+    };
+    TableKey::Wide(hash(0x9e37_79b9_7f4a_7c15), hash(0xc2b2_ae3d_27d4_eb4f))
 }
 
 /// Cached quads retain texture owners, so pointer identity cannot be reused while the draw is cached.
@@ -321,8 +317,19 @@ fn quad(
     framebuffer: (i64, i64, i64, i64),
 ) -> Draw {
     let (u0, v0, u1, v1) = uv;
-    let payload_key = PayloadKey { destination: rect_bits(destination).map(f64::to_bits), transform: transform_bits(transform).map(f64::to_bits), clip, uv: [u0, v0, u1, v1].map(f64::to_bits) };
-    let quad_key = QuadKey { payload: payload_key, texture: Rc::as_ptr(texture) as usize, framebuffer };
+    // exact bits on the stack: the payload key, then the texture and framebuffer complete a draw's
+    let mut words = [0u64; 24];
+    let geometry = rect_bits(destination).into_iter().chain(transform_bits(transform)).map(f64::to_bits)
+        .chain([clip.0, clip.1, clip.2, clip.3].map(|v| v as u64)).chain([u0, v0, u1, v1].map(f64::to_bits));
+    for (slot, word) in words.iter_mut().zip(geometry) {
+        *slot = word;
+    }
+    let payload_key = wide(&words);
+    words[18] = Rc::as_ptr(texture) as usize as u64;
+    for (slot, v) in words[19..].iter_mut().zip([framebuffer.0, framebuffer.1, framebuffer.2, framebuffer.3]) {
+        *slot = v as u64;
+    }
+    let quad_key = wide(&words);
     if let Some(item) = side_lru::find(&mut state_.quad_cache, &quad_key) {
         return item.downcast::<SampledDraw>().unwrap_or_else(|_| unreachable!("quad table item"));
     }

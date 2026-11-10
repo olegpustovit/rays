@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 pub enum TableKey {
     Str(String),
     Int(i64),
+    /// two independent 64-bit hashes of a key that needs no text (a quad's bits)
+    Wide(u64, u64),
 }
 
 pub const UNBOUNDED_BYTES: i64 = i64::MAX;
@@ -52,16 +54,6 @@ fn same_id(stored: &LruKey, probe: &(dyn Any + Send + Sync)) -> bool {
 
 pub fn create(owner: lru::Owner, charges: bool, byte_capacity: i64, release: Release, capacity: i64) -> Table {
     create_inner(owner, capacity, release, hash_of, Box::new(|a, b| a == b), false, CacheOptions { charges, byte_capacity, ..CacheOptions::default() })
-}
-
-/// A table over exact keys that need no text: the stack key is hashed and compared in place.
-pub fn create_exact<K: Hash + Eq + 'static>(owner: lru::Owner, charges: bool, byte_capacity: i64, capacity: i64) -> Table<K> {
-    fn hash_of_key<K: Hash>(key: &K) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        key.hash(&mut hasher);
-        hasher.finish()
-    }
-    create_inner(owner, capacity, Box::new(|_, _| {}), hash_of_key::<K>, Box::new(|a, b| a == b), false, CacheOptions { charges, byte_capacity, ..CacheOptions::default() })
 }
 
 pub fn create_identity(owner: lru::Owner, capacity: i64, equal: Equal<Item>, release: Release<Item>) -> Table<Item> {

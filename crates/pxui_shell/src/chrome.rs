@@ -85,8 +85,12 @@ impl std::fmt::Display for PathKey<'_> {
 }
 
 /// a title's path is its parts joined by " / "; a bare slash ("fixed dt 1/60") is part of a word
-fn crumbs(sub: &str) -> impl Iterator<Item = &str> {
-    sub.split(" / ").map(str::trim)
+fn crumbs(sub: &str) -> std::iter::Map<std::str::Split<'_, &'static str>, fn(&str) -> &str> {
+    sub.split(" / ").map(str::trim as fn(&str) -> &str)
+}
+
+fn numbered((i, part): (usize, &str)) -> (i64, &str) {
+    (i as i64, part)
 }
 
 /// A path too long for its room loses its head, not its subject: "… / sop". The parts shown are
@@ -97,8 +101,8 @@ struct Fit {
 }
 
 impl Fit {
-    fn parts<'a>(&self, sub: &'a str) -> impl Iterator<Item = (i64, &'a str)> {
-        self.dots.then_some((-1i64, "\u{2026}")).into_iter().chain(crumbs(sub).enumerate().skip(self.from).map(|(i, p)| (i as i64, p)))
+    fn parts<'a>(&self, sub: &'a str) -> std::iter::Chain<std::option::IntoIter<(i64, &'a str)>, std::iter::Map<std::iter::Skip<std::iter::Enumerate<std::iter::Map<std::str::Split<'a, &'static str>, fn(&str) -> &str>>>, fn((usize, &str)) -> (i64, &str)>> {
+        self.dots.then_some((-1i64, "\u{2026}")).into_iter().chain(crumbs(sub).enumerate().skip(self.from).map(numbered as fn((usize, &str)) -> (i64, &str)))
     }
 
     fn len(&self, sub: &str) -> usize {
