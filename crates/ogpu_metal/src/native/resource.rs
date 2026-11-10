@@ -670,11 +670,11 @@ impl ComputeEncoder {
         metal_sys::native::set_compute_bytes(&self.0.raw, admitted, bytes, index as u64).map_err(|failure| sys_error("Metal.Compute_encoder.set_bytes", failure))
     }
     pub fn dispatch_threads(&self, threads: (usize, usize, usize), threadgroup: (usize, usize, usize)) -> Result<(), Error> {
-        let make_size = |(width, height, depth)| metal_sys::registry::record::Mtl_size_int { width, height, depth };
+        let make_size = |(width, height, depth)| metal_sys::registry::record::MtlSizeInt { width, height, depth };
         metal_sys::registry::compute_encoder_dispatch(&self.0.raw, make_size(threads), make_size(threadgroup)).map_err(|failure| sys_error("Metal.Compute_encoder.dispatch_threads", failure))
     }
     pub fn dispatch_threadgroups_indirect(&self, arguments: &Buffer, offset: u64, threadgroup: (usize, usize, usize)) -> Result<(), Error> {
-        let size = metal_sys::registry::record::Mtl_size_int { width: threadgroup.0, height: threadgroup.1, depth: threadgroup.2 };
+        let size = metal_sys::registry::record::MtlSizeInt { width: threadgroup.0, height: threadgroup.1, depth: threadgroup.2 };
         metal_sys::registry::compute_encoder_dispatch_indirect(&self.0.raw, arguments.raw(), offset, size).map_err(|failure| sys_error("Metal.Compute_encoder.dispatch_threadgroups_indirect", failure))?;
         self.0.command_buffer.retain_buffer(arguments);
         Ok(())

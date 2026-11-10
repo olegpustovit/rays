@@ -19,3 +19,6 @@ native_layer_token_sys = { path = "../native_layer_token_sys" }
 [[test]]
 name = "gpu_all"
 harness = false
+
+[lints]
+workspace = true

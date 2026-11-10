@@ -245,7 +245,7 @@ impl RenderEncoder {
             u64::try_from(scissor.width).map_err(|_| error(OP, ErrorKind::InvalidArgument, "scissor exceeds native bounds"))?,
             u64::try_from(scissor.height).map_err(|_| error(OP, ErrorKind::InvalidArgument, "scissor exceeds native bounds"))?,
         );
-        let record = metal_sys::registry::record::Mtl_scissor_rect { x, y, width, height };
+        let record = metal_sys::registry::record::MtlScissorRect { x, y, width, height };
         metal_sys::registry::render_encoder_set_scissor(&self.0.raw, record).map_err(|failure| sys_error(OP, failure))
     }
     pub fn set_cull_mode(&self, mode: CullMode) -> Result<(), Error> {
